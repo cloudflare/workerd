@@ -1,0 +1,29 @@
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -88,7 +88,12 @@
+ 
+ 
+ static HEADER_VALUE_MAP: [bool; 256] = byte_map!(
+-    b'\t' | b' '..=0x7e | 0x80..=0xFF
++    // workerd: relaxed to match KJ's HTTP parser (kj/compat/http.c++ consumeLine), which
++    // accepts any octet in a header value except NUL, CR, and LF (CR and LF stay structural
++    // line terminators, so message framing is unaffected). The other C0 control bytes and DEL
++    // are opaque octets that KJ both emits and accepts; workerd's Rust HTTP path (hyper) must
++    // round-trip them byte-for-byte for parity with kj-http.
++    0x01..=0x09 | 0x0B..=0x0C | 0x0E..=0xFF
+ );
+ 
+ 
+@@ -1207,6 +1212,12 @@
+                     2
+                 } else if b == b'\n' {
+                     1
++                } else if is_header_value_token(b) {
++                    // workerd: the SIMD matchers only advance over the RFC's visible bytes;
++                    // octets that HEADER_VALUE_MAP additionally allows (see above) stop them
++                    // early and land here. Consume the byte and resume scanning so the map
++                    // stays the single source of truth for what a value may contain.
++                    continue 'value_lines;
+                 } else {
+                     handle_invalid_char!(bytes, b, HeaderValue);
+                 };

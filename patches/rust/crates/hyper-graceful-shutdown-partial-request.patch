@@ -1,0 +1,13 @@
+--- a/src/proto/h1/conn.rs
++++ b/src/proto/h1/conn.rs
+@@ -884,7 +884,9 @@
+ 
+     #[cfg(feature = "server")]
+     pub(crate) fn disable_keep_alive(&mut self) {
+-        if self.state.is_idle() {
++        // workerd: bytes of a request that hasn't finished parsing mean the connection isn't idle;
++        // closing it would drop that request. Let it finish, then close (as kj's HttpServer does).
++        if self.state.is_idle() && self.io.read_buf().is_empty() {
+             trace!("disable_keep_alive; closing idle connection");
+             self.state.close();
+         } else {
