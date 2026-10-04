@@ -967,12 +967,16 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
     });
   })
       .then(js, [self = JSG_THIS](jsg::Lock& js) mutable {
-    // Destroy the connection stream to close the connection.
-    { auto _ = kj::mv(self->connectionData); }
+    // Destroy the connection stream to close the connection. The destruction is deferred by an
+    // event loop turn: a read may have just taken the peer's bytes synchronously, before the
+    // completion of the write that delivered them has propagated back to the peer. Destroying the
+    // stream right away would cancel that write, even though its bytes were delivered.
+    auto connection = kj::mv(self->connectionData);
     self->connectionData = kj::none;
 
-    self->resolveFulfiller(js, kj::none);
-    return js.resolvedPromise();
+    return IoContext::current().awaitIo(js,
+        kj::evalLater([connection = kj::mv(connection)]() mutable { connection = kj::none; }),
+        [self = kj::mv(self)](jsg::Lock& js) mutable { self->resolveFulfiller(js, kj::none); });
   }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value err) mutable {
     self->errorHandler(js, kj::mv(err));
   });

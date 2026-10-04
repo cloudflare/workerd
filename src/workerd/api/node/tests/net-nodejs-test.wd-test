@@ -7,7 +7,11 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "net-nodejs-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "url_standard"],
+        # A net.Server's events are emitted from the connect handlers' requests. The test awaits
+        # them, so its continuations must run in the test's own request rather than in a handler's
+        # request, which may finish (dropping any timers the test sets) before the test is done.
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "url_standard",
+                              "handle_cross_request_promise_resolution"],
         bindings = [
           (name = "SIDECAR_HOSTNAME", fromEnvironment = "SIDECAR_HOSTNAME"),
           (name = "SERVER_PORT", fromEnvironment = "SERVER_PORT"),
