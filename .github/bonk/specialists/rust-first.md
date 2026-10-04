@@ -8,7 +8,7 @@ paths:
   - src/**/ffi.h
   - src/**/bridge.h
   - src/**/cxx-bridge.h
-  - src/workerd/server/cli-main.*
+  - src/workerd/server/factory/bootstrap.*
   - src/workerd/server/config-compiler.*
   - src/workerd/util/setup-async-io.*
 budget: 4m

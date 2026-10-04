@@ -100,8 +100,6 @@ RawSockaddr encodeSockaddr(const SocketAddress &addr) {
       }
     }
 #endif
-    case AddressKind::Loopback:
-      KJ_FAIL_REQUIRE("a loopback: address has no struct sockaddr");
     default:
       KJ_FAIL_REQUIRE("unsupported socket address kind", static_cast<int>(addr.kind));
   }
@@ -186,10 +184,8 @@ void copyOut(const RawSockaddr &raw, struct sockaddr *addr, kj::uint *length) {
   *length = raw.length;
 }
 
-// restrictPeers(): KJ's decision for a typed address. A loopback address is not a network peer
-// (loopback.rs) and has no sockaddr for the filter to judge; it is always allowed.
+// restrictPeers(): KJ's decision for a typed address.
 bool allowed(const PeerFilter &filter, const SocketAddress &addr) {
-  if (addr.kind == AddressKind::Loopback) return true;
   auto raw = encodeSockaddr(addr);
   return filter.allows(raw.get(), raw.length);
 }
@@ -227,11 +223,9 @@ kj::Own<kj::PeerIdentity> peerIdentity(const PeerStream &peer, kj::Arc<PeerFilte
 
 // KJ's connect loop (NetworkAddressImpl::connect, kj/async-io-unix.c++): the targets in order,
 // skipping the ones the filter disallows, the last failure reported if none connects. A free
-// coroutine owning copies of everything it needs (`address` is its own handle to the parsed
-// address), so the kj::NetworkAddress that started it may be destroyed while it is pending.
-kj::Promise<PeerStream> connectAny(::rust::Box<TokioAddress> address,
-    ::rust::Vec<SocketAddress> targets,
-    kj::Arc<PeerFilter> filter) {
+// coroutine owning copies of everything it needs, so the kj::NetworkAddress that started it may
+// be destroyed while it is pending.
+kj::Promise<PeerStream> connectAny(::rust::Vec<SocketAddress> targets, kj::Arc<PeerFilter> filter) {
   kj::Maybe<kj::Exception> lastError;
   for (auto &target: targets) {
     if (!allowed(*filter, target)) {
@@ -239,7 +233,7 @@ kj::Promise<PeerStream> connectAny(::rust::Box<TokioAddress> address,
       continue;
     }
     auto outcome =
-        co_await connect_target(*address, SocketAddress(target))
+        co_await connect_target(SocketAddress(target))
             .then(
                 [](::rust::Box<TokioStream> stream)
                     -> kj::OneOf<::rust::Box<TokioStream>, kj::Exception> {
@@ -371,14 +365,14 @@ void TokioConnectionReceiver::getsockname(struct sockaddr *addr, kj::uint *lengt
 // TokioNetworkAddress
 
 kj::Promise<kj::Own<kj::AsyncIoStream>> TokioNetworkAddress::connect() {
-  return connectAny(address_clone(*inner), address_targets(*inner), filter.addRef())
+  return connectAny(address_targets(*inner), filter.addRef())
       .then([](PeerStream connected) -> kj::Own<kj::AsyncIoStream> {
     return kj::heap<TokioAsyncIoStream>(kj::mv(connected.stream));
   });
 }
 
 kj::Promise<kj::AuthenticatedStream> TokioNetworkAddress::connectAuthenticated() {
-  return connectAny(address_clone(*inner), address_targets(*inner), filter.addRef())
+  return connectAny(address_targets(*inner), filter.addRef())
       .then([identityFilter = filter.addRef()](
                 PeerStream connected) mutable -> kj::AuthenticatedStream {
     kj::AuthenticatedStream result;
@@ -489,7 +483,7 @@ kj::Promise<kj::Own<kj::NetworkAddress>> TokioNetwork::parseAddress(
   return started(
       network_parse_address(::rust::Slice<const uint8_t>(
                                 reinterpret_cast<const uint8_t *>(addr.begin()), addr.size()),
-          static_cast<uint16_t>(portHint), *loopback)
+          static_cast<uint16_t>(portHint))
           .then([filter = filter.addRef()](
                     ::rust::Box<TokioAddress> address) mutable -> kj::Own<kj::NetworkAddress> {
     return kj::heap<TokioNetworkAddress>(kj::mv(address), kj::mv(filter));
@@ -559,11 +553,11 @@ kj::Promise<kj::Own<kj::AsyncIoStream>> TokioLowLevelAsyncIoProvider::wrapConnec
 
 kj::Own<kj::ConnectionReceiver> TokioLowLevelAsyncIoProvider::wrapListenSocketFd(
     Fd fd, NetworkFilter &filter, kj::uint flags) {
-  // KJ's interface lends the filter by reference for the receiver's lifetime. workerd's only
-  // call (inherited listen sockets, server/cli-main.c++) uses the two-argument overload, whose
-  // filter is KJ's static allow-all; that one is recognised by identity and given an owned
-  // allow-all filter. Anything else would need a borrowed reference to outlive its owner by
-  // contract alone, which this backend does not do.
+  // KJ's interface lends the filter by reference for the receiver's lifetime. workerd's server
+  // wraps its inherited listen sockets in Rust (server/listen), so the callers left are KJ's own
+  // two-argument overload, whose filter is KJ's static allow-all; that one is recognised by
+  // identity and given an owned allow-all filter. Anything else would need a borrowed reference
+  // to outlive its owner by contract alone, which this backend does not do.
   if (&filter != &NetworkFilter::getAllAllowed()) {
     closeTransferredFd(fd, flags);
     KJ_UNIMPLEMENTED("wrapListenSocketFd with a caller-owned NetworkFilter is not implemented by "
@@ -577,8 +571,8 @@ kj::Own<kj::ConnectionReceiver> TokioLowLevelAsyncIoProvider::wrapListenSocketFd
 // =======================================================================================
 // TokioAsyncIoProvider
 
-// Both pipes are socket pairs: kj's in-memory pipes make a small write wait for a reader, and
-// workerd's loopback transport expects real sockets from the provider (see async-io.h).
+// Both pipes are socket pairs: kj's in-memory pipes make a small write wait for a reader (see
+// async-io.h).
 kj::OneWayPipe TokioAsyncIoProvider::newOneWayPipe() {
   auto pair = new_socket_pair();
   return kj::OneWayPipe{kj::heap<TokioAsyncIoStream>(kj::mv(pair.first)),
@@ -610,10 +604,6 @@ TokioAsyncIoContext::TokioAsyncIoContext()
 
 TokioAsyncIoContext setupTokioAsyncIo() {
   return TokioAsyncIoContext();
-}
-
-kj::Promise<void> onSignal(int signum) {
-  return started(wait_for_signal(signum));
 }
 
 // =======================================================================================

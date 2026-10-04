@@ -46,12 +46,21 @@ impl InheritedSocket {
         Ok(())
     }
 
-    /// A duplicate for the server to own (kj's `wrapListenSocketFd` with `TAKE_OWNERSHIP`), as
-    /// the raw descriptor that interface takes.
-    pub fn duplicate_for_server(&self) -> io::Result<i64> {
-        use std::os::fd::IntoRawFd;
-        Ok(i64::from(self.0.try_clone()?.into_raw_fd()))
+    /// A duplicate for the server to own.
+    pub fn duplicate_for_server(&self) -> io::Result<socket2::Socket> {
+        Ok(socket2::Socket::from(self.0.try_clone()?))
     }
+}
+
+/// `--control-fd`: a duplicate of the descriptor, as a file the server writes its events to. The
+/// inherited descriptor stays open, as `--socket-fd`'s does.
+pub fn control_file(fd: u32) -> io::Result<std::fs::File> {
+    use std::os::fd::BorrowedFd;
+
+    let raw = i32::try_from(fd).map_err(|_| io::Error::from_raw_os_error(libc::EBADF))?;
+    // SAFETY: borrowed for the duplication only, which fails with EBADF if `raw` is not open.
+    let inherited = unsafe { BorrowedFd::borrow_raw(raw) };
+    inherited.try_clone_to_owned().map(std::fs::File::from)
 }
 
 /// Whether the socket is listening, or `None` where the OS cannot say (macOS has no

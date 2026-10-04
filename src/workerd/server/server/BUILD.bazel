@@ -1,0 +1,58 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# The Rust server. Everything that needs the isolate is behind the C++ worker factory
+# (//src/workerd/server/factory), reached through the cxx bridge in bridge.rs.
+wd_rust_crate(
+    name = "workerd-server",
+    cxx_bridge_deps = [
+        "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
+        "//src/workerd/server/factory:bootstrap-hdrs",
+        "//src/workerd/server/factory:worker-factory-hdrs",
+    ],
+    cxx_bridge_hdrs = [],
+    cxx_bridge_src = "bridge.rs",
+    # The factory's C++ includes the bridge header.
+    cxx_bridge_visibility = ["//src/workerd/server/factory:__pkg__"],
+    link_deps = [
+        # The command line's bootstrap, called from entry.rs.
+        "//src/workerd/server/factory:bootstrap",
+        "//src/workerd/server/factory:worker-factory",
+    ],
+    proc_macro_deps = [
+        "@crates_vendor//:async-trait",
+    ],
+    # The tests link C++ that reaches kj::setupAsyncIo(), the binary's tokio-backed one.
+    test_deps = [
+        "//src/workerd/util:setup-async-io",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/cxx/kj-hyper",
+        "//src/rust/cxx/kj-rs-io",
+        "//src/rust/cxx/kj-rs-tokio",
+        "//src/rust/kj",
+        "//src/rust/worker",
+        "//src/workerd/server:compiled-bindings_capnp_rust",
+        "//src/workerd/server:workerd_capnp_rust",
+        "@crates_vendor//:base64",
+        "@crates_vendor//:capnp",
+        "@crates_vendor//:data-encoding",
+        "@crates_vendor//:futures",
+        "@crates_vendor//:glob",
+        "@crates_vendor//:hashlink",
+        "@crates_vendor//:http",
+        "@crates_vendor//:httpdate",
+        "@crates_vendor//:ipnet",
+        "@crates_vendor//:percent-encoding",
+        "@crates_vendor//:rand",
+        "@crates_vendor//:rustls",
+        "@crates_vendor//:serde_json",
+        "@crates_vendor//:socket2",
+        "@crates_vendor//:tokio",
+        "@crates_vendor//:tracing",
+        "@crates_vendor//:url",
+    ] + select({
+        "@platforms//os:windows": ["@crates_vendor//:windows-sys"],
+        "//conditions:default": [],
+    }),
+)

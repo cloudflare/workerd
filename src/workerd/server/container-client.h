@@ -239,7 +239,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   ChannelTokenHandler& channelTokenHandler;
 
   // Opaque implementation struct holding egress mappings. Defined in container-client.c++ to
-  // avoid pulling heavy types (kj::OneOf, kj::CidrRange, kj::Vector) into server.c++ which
+  // avoid pulling heavy types (kj::OneOf, kj::CidrRange, kj::Vector) into the factory, which
   // includes this header.
   struct EgressState;
   kj::Own<EgressState> egressState;

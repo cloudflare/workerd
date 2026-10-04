@@ -714,7 +714,7 @@ if (isolate.isUsingNewModuleRegistry()) {
 The isolate-level bit is set at isolate construction from
 `isNewModuleRegistryEnabled(flags)` (`io/features.h`), which returns false for
 Python workers regardless of the `new_module_registry` flag. All other
-flag-check sites (`server.c++` registry creation, `worker.c++` compile paths and
+flag-check sites (`worker-factory.c++` registry creation, `worker.c++` compile paths and
 the nodejs_compat_v2 process/buffer warm-up, and the api-level require paths)
 route through the same function, so a worker can never be split across the two
 registries. Note that `Cloudflare.compatibilityFlags.new_module_registry` as

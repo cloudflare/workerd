@@ -164,25 +164,16 @@ class TokioDatagramPort final: public kj::DatagramPort {
 
 // The tokio-backed kj::Network. The address grammar is KJ's SocketAddress::parse for everything
 // workerd's configs use (net.rs, "Address grammar"). restrictPeers() returns a network sharing
-// this one's filter chain and loopback namespace, so derived networks, addresses and receivers
+// this one's filter chain, so derived networks, addresses and receivers
 // remain valid regardless of the order the networks are destroyed in.
 class TokioNetwork final: public kj::Network {
  public:
   // Allow-everything root network (matches KJ's root networks).
-  TokioNetwork(): filter(kj::arc<PeerFilter>()), loopback(new_loopback_registry()) {}
+  TokioNetwork(): filter(kj::arc<PeerFilter>()) {}
   TokioNetwork(TokioNetwork &parent,
       kj::ArrayPtr<const kj::StringPtr> allow,
       kj::ArrayPtr<const kj::StringPtr> deny)
-      : filter(kj::arc<PeerFilter>(allow, deny, parent.filter.addRef())),
-        loopback(loopback_registry_clone(*parent.loopback)) {}
-
-  // Makes parseAddress() accept "loopback:<name>" addresses -- connections serviced within this
-  // process (loopback.rs) -- on this network and every network derived from it by
-  // restrictPeers(). For `workerd test`, which uses them to exercise the network stack end to
-  // end without an external socket; production configs use direct service bindings instead.
-  void enableLoopback() {
-    loopback_registry_enable(*loopback);
-  }
+      : filter(kj::arc<PeerFilter>(allow, deny, parent.filter.addRef())) {}
 
   kj::Promise<kj::Own<kj::NetworkAddress>> parseAddress(
       kj::StringPtr addr, kj::uint portHint) override;
@@ -192,7 +183,6 @@ class TokioNetwork final: public kj::Network {
 
  private:
   kj::Arc<PeerFilter> filter;
-  ::rust::Box<LoopbackRegistry> loopback;
 };
 
 // The tokio-backed kj::LowLevelAsyncIoProvider. Each wrap*Fd hands the raw handle -- a Unix fd
@@ -293,15 +283,6 @@ struct TokioAsyncIoContext {
 // Sets up the current thread with a tokio-driven KJ event loop plus tokio-backed I/O providers:
 // the kj::setupAsyncIo() equivalent for the tokio loop. One per thread.
 TokioAsyncIoContext setupTokioAsyncIo();
-
-// Resolves when the process receives signal `signum`: the tokio-loop replacement for
-// kj::UnixEventPort::onSignal() (workerd's SIGTERM graceful drain). Must be awaited on the
-// thread owning the TokioEventPort. The handler is installed before this returns (the promise
-// is started eagerly, per the operation-start policy above); unlike UnixEventPort, KJ does not
-// block/capture the signal beforehand, so a signal delivered before the *call* takes its default
-// disposition (see signal.rs). On Windows, SIGTERM/SIGINT are mapped to the ctrl_break/ctrl_c
-// console control events; the promise rejects for other signums.
-kj::Promise<void> onSignal(int signum);
 
 // Watches files for changes: kj-rs-io's watcher (watcher.rs, Rust over the `notify` crate --
 // inotify on Linux, FSEvents on macOS, ReadDirectoryChangesW on Windows) behind a C++ interface.

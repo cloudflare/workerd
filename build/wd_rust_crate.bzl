@@ -77,6 +77,7 @@ def wd_rust_crate(
         cxx_bridge_tags = [],
         cxx_bridge_local_defines = [],
         cxx_bridge_features = [],
+        cxx_bridge_visibility = [],
         testonly = False,
         visibility = None):
     """Define rust crate.
@@ -104,6 +105,8 @@ def wd_rust_crate(
         cxx_bridge_deps: either a flat dependency list applied to every bridge source, or a dict of
             bridge source => dependency list.
         cxx_bridge_hdrs: headers the bridges include!(); defaults to every .h file in the package.
+        cxx_bridge_visibility: visibility of the generated <bridge>@cxx libraries, for C++ in
+            another package that includes a bridge's header (it must also link the crate).
         testonly: True for a crate that only tests depend on (a test harness, the Rust half of a
             C++ test). Like other test code, it is not held to //build/rust:lints.
     """
@@ -144,8 +147,9 @@ def wd_rust_crate(
             hdrs = hdrs,
             include_prefix = include_prefix,
             strip_include_prefix = "",
-            # Not applying visibility here – if you import the cxxbridge header, you will likely
-            # also need the rust library itself to avoid linker errors.
+            # Private by default: a C++ library that includes the bridge header also needs the
+            # crate itself at link time.
+            visibility = cxx_bridge_visibility,
             deps = cxx_bridge_deps.get(bridge_src, []) + [
                 "//src/rust/cxx/kj-rs",
                 "//src/rust/cxx:cxx",

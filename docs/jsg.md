@@ -345,25 +345,23 @@ int main() {
 
 ### Real-World Reference: workerd Initialization
 
-For a production example, see how workerd initializes V8 in `src/workerd/server/cli-main.c++`:
+For a production example, see how workerd initializes V8 in `src/workerd/server/factory/bootstrap.c++`:
 
 ```cpp
-// From cli-main.c++ serveImpl()
-auto platform = jsg::defaultPlatform(0);
-WorkerdPlatform v8Platform(*platform);
-jsg::V8System v8System(v8Platform,
-    KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; },
-    platform.get());
+// From bootstrap.c++ (Bootstrap)
+platform = jsg::defaultPlatform(0);
+v8Platform = kj::heap<WorkerdPlatform>(*platform);
+v8System = kj::heap<jsg::V8System>(*v8Platform,
+    KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; }, platform.get());
 ```
 
-And how isolates are created in `src/workerd/server/server.c++`:
+And how isolates are created in `src/workerd/server/factory/worker-factory.c++`:
 
 ```cpp
-// From server.c++ when creating a worker
-auto isolateGroup = v8::IsolateGroup::GetDefault();
-auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
-    limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver),
-    *memoryCacheProvider, pythonConfig);
+// From worker-factory.c++ when compiling a worker
+auto api = kj::heap<WorkerdApi>(factory.v8System, featureFlags, extensions,
+    limitEnforcer->getCreateParams(), v8::IsolateGroup::GetDefault(), kj::mv(jsgobserver),
+    *factory.memoryCacheProvider, options.pythonConfig, kj::mv(listeners));
 ```
 
 ---

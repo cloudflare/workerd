@@ -2,3 +2,5 @@ allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
 max-fn-params-bools = 2
+# Proper nouns beyond clippy's default list, so doc comments need not backtick them.
+doc-valid-idents = ["SQLite", "WebSockets", ".."]
