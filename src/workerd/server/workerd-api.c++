@@ -476,7 +476,7 @@ Worker::Script::Module WorkerdApi::readModuleConf(config::Worker::Module::Reader
 
           if (output.success) {
             return Worker::Script::EsModule{
-              .body = ::kj::from<Rust>(output.code), .ownBody = kj::mv(output.code)};
+              .body = output.code.as<Kj>(), .ownBody = kj::mv(output.code)};
           }
 
           auto description = kj::str("Error transpiling ", conf.getName(), " : ", output.error);

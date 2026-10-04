@@ -10,6 +10,133 @@
 
 namespace kj_rs {
 
+namespace {
+struct ValueCategory {};
+
+template <typename T>
+int asImpl(ValueCategory*, T&) {
+  return 1;
+}
+template <typename T>
+int asImpl(ValueCategory*, const T&) {
+  return 2;
+}
+template <typename T>
+int asImpl(ValueCategory*, T&&) {
+  return 3;
+}
+template <typename T>
+int asImpl(ValueCategory*, const T&&) {
+  return 4;
+}
+
+template <typename T>
+void checkAsValueCategory(T& value) {
+  const T& constValue = value;
+  KJ_EXPECT(value.template as<ValueCategory>() == 1);
+  KJ_EXPECT(constValue.template as<ValueCategory>() == 2);
+  KJ_EXPECT(kj::mv(value).template as<ValueCategory>() == 3);
+  KJ_EXPECT(kj::mv(constValue).template as<ValueCategory>() == 4);
+}
+}  // namespace
+
+KJ_TEST("Rust as methods preserve constness and value category") {
+  ::rust::String string("value");
+  ::rust::Str str(string);
+  ::rust::Vec<int> vec{1, 2};
+  ::rust::Slice<int> slice(vec.data(), vec.size());
+  checkAsValueCategory(string);
+  checkAsValueCategory(str);
+  checkAsValueCategory(vec);
+  checkAsValueCategory(slice);
+}
+
+KJ_TEST("Rust as<Kj> views share storage and preserve element constness") {
+  ::rust::Vec<int> vec{1, 2, 3};
+  const auto& constVec = vec;
+  auto view = constVec.as<Kj>();
+  static_assert(kj::isSameType<decltype(view), kj::ArrayPtr<const int>>());
+  KJ_EXPECT(view.begin() == vec.data());
+  KJ_EXPECT(view.size() == vec.size());
+  vec[0] = 4;
+  KJ_EXPECT(view[0] == 4);
+
+  const ::rust::Slice<int> slice(vec.data(), vec.size());
+  auto sliceView = slice.as<Kj>();
+  static_assert(kj::isSameType<decltype(sliceView), kj::ArrayPtr<int>>());
+  sliceView[1] = 5;
+  KJ_EXPECT(vec[1] == 5);
+
+  auto constSliceView = ::rust::Slice<const int>(vec.data(), vec.size()).as<Kj>();
+  static_assert(kj::isSameType<decltype(constSliceView), kj::ArrayPtr<const int>>());
+  KJ_EXPECT(constSliceView.begin() == vec.data());
+}
+
+KJ_TEST("Rust as<KjCopy> arrays own independent storage") {
+  ::rust::Vec<int> vec{1, 2, 3};
+  auto copy = vec.as<KjCopy>();
+  static_assert(kj::isSameType<decltype(copy), kj::Array<int>>());
+  KJ_EXPECT(copy.asPtr() == vec.as<Kj>());
+  KJ_EXPECT(copy.begin() != vec.data());
+  vec[0] = 4;
+  KJ_EXPECT(copy[0] == 1);
+
+  auto sliceCopy = ::rust::Slice<const int>(vec.data(), vec.size()).as<KjCopy>();
+  static_assert(kj::isSameType<decltype(sliceCopy), kj::Array<int>>());
+  vec[1] = 5;
+  KJ_EXPECT(sliceCopy[0] == 4);
+  KJ_EXPECT(sliceCopy[1] == 2);
+
+  auto temporaryCopy = ::rust::Vec<int>{6, 7}.as<KjCopy>();
+  KJ_EXPECT(temporaryCopy[0] == 6);
+  KJ_EXPECT(temporaryCopy[1] == 7);
+  KJ_EXPECT(::rust::Vec<int>().as<KjCopy>().size() == 0);
+  KJ_EXPECT(::rust::Slice<const int>().as<KjCopy>().size() == 0);
+}
+
+KJ_TEST("Rust string views and copies preserve UTF-8 and embedded NULs") {
+  const ::rust::String string("a\0🚀", 6);
+  const ::rust::Str str(string);
+  auto view = string.as<Kj>();
+  auto strView = str.as<Kj>();
+  static_assert(kj::isSameType<decltype(view), kj::ArrayPtr<const char>>());
+  KJ_EXPECT(view.begin() == string.data());
+  KJ_EXPECT(strView.begin() == str.data());
+  KJ_EXPECT(view.size() == 6);
+  KJ_EXPECT(view == strView);
+
+  auto copy = string.as<KjCopy>();
+  auto strCopy = str.as<KjCopy>();
+  static_assert(kj::isSameType<decltype(copy), kj::String>());
+  KJ_EXPECT(copy.asArray() == view);
+  KJ_EXPECT(strCopy.asArray() == view);
+  KJ_EXPECT(copy.begin() != string.data());
+  KJ_EXPECT(copy.cStr()[copy.size()] == '\0');
+  KJ_EXPECT(::rust::String().as<KjCopy>().size() == 0);
+  KJ_EXPECT(::rust::Str().as<KjCopy>().size() == 0);
+}
+
+KJ_TEST("Rust string collections copy to owned KJ strings") {
+  ::rust::Str strs[] = {"first", "second"};
+  const ::rust::Slice<::rust::Str> slice(strs, 2);
+  auto copy = slice.as<KjCopy>();
+  auto constCopy = ::rust::Slice<const ::rust::Str>(strs, 2).as<KjCopy>();
+  static_assert(kj::isSameType<decltype(copy), kj::Array<kj::String>>());
+  KJ_EXPECT(copy[0] == "first");
+  KJ_EXPECT(constCopy[1] == "second");
+
+  ::rust::Vec<::rust::String> vec;
+  vec.emplace_back("third");
+  vec.emplace_back("fourth");
+  auto vecCopy = vec.as<KjCopy>();
+  auto sliceCopy = ::rust::Slice<const ::rust::String>(vec.data(), vec.size()).as<KjCopy>();
+  static_assert(kj::isSameType<decltype(sliceCopy), kj::Array<kj::String>>());
+  vec[0] = ::rust::String("changed");
+  KJ_EXPECT(vecCopy[0] == "third");
+  KJ_EXPECT(sliceCopy[0] == "third");
+  KJ_EXPECT(sliceCopy[1] == "fourth");
+}
+
 KJ_TEST("rust::String with kj::str") {
   // Create a rust::String
   ::rust::String rustStr("Hello, World!");

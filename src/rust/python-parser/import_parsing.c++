@@ -19,7 +19,7 @@ kj::Array<kj::String> parseImports(kj::ArrayPtr<kj::StringPtr> cpp_modules) {
   }
   ::rust::Slice<::rust::Str const> rust_slice(rust_modules.begin(), rust_modules.size());
   auto rust_result = get_imports(rust_slice);
-  return kj::from<RustCopy>(rust_result);
+  return rust_result.as<KjCopy>();
 }
 
 namespace workerd::api {

@@ -21,7 +21,7 @@ using AsyncIoStream = kj::AsyncIoStream;
 
 inline kj::Promise<void> async_output_stream_write(
     AsyncOutputStream& stream, ::rust::Slice<const kj::byte> buffer) {
-  return stream.write(kj::from<kj_rs::Rust>(buffer));
+  return stream.write(buffer.as<kj_rs::Kj>());
 }
 
 inline kj::Promise<void> async_output_stream_when_write_disconnected(AsyncOutputStream& stream) {
@@ -111,7 +111,7 @@ inline kj::Maybe<::rust::Slice<const kj::byte>> get_header_by_id(
 // set will not be found (returns none, matching get_header/get_header_by_id).
 inline kj::Maybe<::rust::Slice<const kj::byte>> get_header_by_name(
     const HttpHeaders& headers, ::rust::Str requestedName) {
-  auto requested = kj::ArrayPtr<const char>(requestedName.data(), requestedName.size());
+  auto requested = requestedName.as<kj_rs::Kj>();
   auto lower = [](char c) { return c >= 'A' && c <= 'Z' ? c + ('a' - 'A') : c; };
   kj::Maybe<kj::StringPtr> result;
   headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
@@ -165,7 +165,7 @@ inline kj::Promise<void> request(HttpService& service,
     const HttpHeaders& headers,
     AsyncInputStream& request_body,
     HttpServiceResponse& response) {
-  auto strUrl = kj::str(kj::from<kj_rs::Rust>(url).asChars());
+  auto strUrl = kj::str(url.as<kj_rs::Kj>().asChars());
   co_await service.request(method, strUrl, headers, request_body, response);
 }
 

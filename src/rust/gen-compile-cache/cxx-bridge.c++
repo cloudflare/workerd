@@ -34,19 +34,10 @@ struct State {
   CompileCacheIsolate isolate;
 
   explicit State(::rust::Slice<const ::rust::String> v8Flags)
-      : flagStorage(copyFlags(v8Flags)),
+      : flagStorage(v8Flags.as<KjCopy>()),
         flags(KJ_MAP(f, flagStorage) -> kj::StringPtr { return f; }),
         system(flags),
         isolate(system, kj::heap<jsg::IsolateObserver>(), params) {}
-
- private:
-  static kj::Array<kj::String> copyFlags(::rust::Slice<const ::rust::String> v8Flags) {
-    auto builder = kj::heapArrayBuilder<kj::String>(v8Flags.size());
-    for (const auto& f: v8Flags) {
-      builder.add(kj::str(f));
-    }
-    return builder.finish();
-  }
 };
 
 // V8 can only be initialized once per process; created on first use with that call's flags.
@@ -102,8 +93,8 @@ v8::ScriptCompiler::CachedData* compileAsModule(jsg::Lock& js,
     return JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
         isolateLock.newContext<CompilerCacheContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
       return js.tryCatch([&]() {
-        auto resourceName = jsg::newExternalOneByteString(js, jsg::copyToArc(kj::from<Rust>(path)));
-        auto contentStr = jsg::newExternalOneByteString(js, jsg::copyToArc(kj::from<Rust>(source)));
+        auto resourceName = jsg::newExternalOneByteString(js, jsg::copyToArc(path.as<Kj>()));
+        auto contentStr = jsg::newExternalOneByteString(js, jsg::copyToArc(source.as<Kj>()));
 
         auto codeCache = asFunction
             ? compileAsFunction(js, resourceName, contentStr, compileOptions)
