@@ -254,11 +254,18 @@ fn listener(
             )?
         }
         (Ok(socket::Which::Tcp(tcp)), BoundSocket::Stream(listener)) => {
-            // A TCP socket's TLS options let its connect() handler accept a startTls() upgrade.
             let tls = if tcp.has_tls_options() {
-                Some(TcpTls::StartTls(tls(
-                    tcp.get_tls_options().map_err(capnp_error)?,
-                )?))
+                let config = tls(tcp.get_tls_options().map_err(capnp_error)?)?;
+                Some(match tcp.get_tls_mode() {
+                    Ok(socket::TcpTlsMode::Implicit) => TcpTls::Implicit(config),
+                    Ok(socket::TcpTlsMode::StartTls) => TcpTls::StartTls(config),
+                    Err(capnp::NotInSchema(_)) => {
+                        return Err(kj::failed!(
+                            "Encountered unknown tlsMode in \"{name}\". Was the config compiled \
+                             with a newer version of the schema?"
+                        ));
+                    }
+                })
             } else {
                 None
             };
