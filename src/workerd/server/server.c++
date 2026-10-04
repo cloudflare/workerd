@@ -6939,12 +6939,13 @@ class Server::TcpListener final: public kj::Refcounted {
       auto tlsStarter = kj::heap<kj::TlsStarterCallback>();
       kj::HttpConnectSettings settings{.useTls = false, .tlsStarter = kj::none};
 
-      // A socket configured with a keypair serves the tunnel in plaintext but stands ready to
+      // A socket configured for STARTTLS serves the tunnel in plaintext but stands ready to
       // upgrade it, so that a worker speaking a protocol which negotiates TLS in-band can accept
       // the upgrade when the protocol calls for it. The stream is handed over pausable so that the
-      // handshake can be slotted in between reads. Without a keypair there is no way to upgrade,
-      // and the settings carry no starter slot at all: an empty slot would tell the service that
-      // its peer is waiting to be told about an upgrade, which a raw TCP client is not.
+      // handshake can be slotted in between reads. Without a STARTTLS context there is no way to
+      // upgrade, and the settings carry no starter slot at all: an empty slot would tell the
+      // service that its peer is waiting to be told about an upgrade, which a raw TCP client is
+      // not.
       kj::Own<kj::AsyncIoStream> conn = kj::mv(stream.stream);
       KJ_IF_SOME(tls, tlsContext) {
         kj::Rc<kj::PausableReadAsyncIoStream> pausable(
@@ -7926,6 +7927,7 @@ kj::Maybe<Server::SocketTypeConfig> Server::parseSocketType(
       SocketTypeConfig result;
       if (tcp.hasTlsOptions()) {
         result.tls = makeTlsContext(tcp.getTlsOptions());
+        result.tcpTlsMode = tcp.getTlsMode();
       }
       return kj::mv(result);
     }
@@ -8073,10 +8075,10 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
     if (maybeSocketConfig == kj::none) continue;
     auto& socketConfig = KJ_ASSERT_NONNULL(maybeSocketConfig);
 
+    // A STARTTLS socket hands its TLS context to the TCP listener, which offers the upgrade to the
+    // connect() handler. Any other socket with a TLS context terminates TLS on accept.
     kj::Maybe<kj::Own<kj::TlsContext>> tcpTlsContext;
-    if (sock.which() == config::Socket::TCP) {
-      // TODO: Does this force socket to be startTls? Should be configurable whether this is used
-      // for startTls or always using TLS.
+    if (socketConfig.tcpTlsMode == config::Socket::TcpTlsMode::START_TLS) {
       tcpTlsContext = kj::mv(socketConfig.tls);
     } else KJ_IF_SOME(t, socketConfig.tls) {
       listener = t->wrapPort(kj::mv(listener)).attach(kj::mv(t));

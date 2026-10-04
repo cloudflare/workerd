@@ -148,6 +148,9 @@ struct Socket {
     }
     tcp :group {
       tlsOptions @6 :TlsOptions;
+
+      tlsMode @9 :TcpTlsMode = implicit;
+      # How `tlsOptions` is applied to accepted connections. Ignored if `tlsOptions` is not set.
     }
 
     udp :group {
@@ -178,6 +181,17 @@ struct Socket {
 
   # TODO(someday): Support mapping different hostnames to different services? Or should that be
   #   done strictly via JavaScript?
+
+  enum TcpTlsMode {
+    implicit @0;
+    # Perform the TLS handshake as soon as a connection is accepted. The `connect()` handler sees
+    # only the decrypted stream, and its socket does not support `startTls()`.
+
+    startTls @1;
+    # Accept connections in plaintext. The `connect()` handler's socket has secureTransport set to
+    # "starttls" and the handler performs the TLS handshake as the server by calling `startTls()` at
+    # the point in its protocol where the upgrade belongs.
+  }
 }
 
 # ========================================================================================

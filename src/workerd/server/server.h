@@ -381,6 +381,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
     uint defaultPort = 0;
     config::HttpOptions::Reader httpOptions;
     kj::Maybe<kj::Own<kj::TlsContext>> tls;
+    config::Socket::TcpTlsMode tcpTlsMode = config::Socket::TcpTlsMode::IMPLICIT;
     kj::StringPtr physicalProtocol;
   };
   kj::Maybe<SocketTypeConfig> parseSocketType(config::Socket::Reader sock, kj::StringPtr name);
