@@ -73,8 +73,9 @@ const unitTests :Workerd.Config = (
     (name = "tcp", address = "*:8081", tcp = (), service = "connect-handler-test"),
     (name = "tcp", address = "*:8082", tcp = (), service = (name = "connect-handler-test-proxy", entrypoint = "ConnectProxy")),
     (name = "tcp", address = "*:8083", tcp = (), service = (name = "connect-handler-test-endpoint", entrypoint = "ConnectEndpoint")),
-    # A keypair here is what lets the handler on the other end of this socket accept a startTls()
-    # upgrade; the matching certificate is the one the `internet` service trusts above.
+    # A keypair with tlsMode = startTls is what lets the handler on the other end of this socket
+    # accept a startTls() upgrade; the matching certificate is the one the `internet` service
+    # trusts above.
     (name = "tcp", address = "*:8084", tcp = (
       tlsOptions = (
         keypair = (
@@ -82,6 +83,7 @@ const unitTests :Workerd.Config = (
           certificateChain = embed "connect-handler-server.pem",
         ),
       ),
+      tlsMode = startTls,
     ), service = "connect-handler-starttls-test")
   ]
 );
