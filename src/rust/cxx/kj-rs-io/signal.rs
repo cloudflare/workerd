@@ -18,8 +18,8 @@
 //! Tokio's signal registry is process-global. Its broadcast may run on another runtime's
 //! thread on Unix (any other tokio runtime in the process with the signal driver enabled), or
 //! on the OS-created console-control thread on Windows. The bridged future's cloned waker owns
-//! a kj-rs `ArcWaker`, whose cross-thread fulfiller schedules the next poll on the owning KJ
-//! loop. Signal streams can therefore be awaited directly here. The test "onSignal is delivered
+//! a kj-rs `FutureWakerCell`, which hands a foreign-thread wake to its loop's cross-thread wake
+//! sink, and the sink schedules the next poll on the owning KJ loop. Signal streams can therefore be awaited directly here. The test "onSignal is delivered
 //! even when another runtime's thread consumes the signal" in tests/async-io-test.c++ exercises
 //! delivery with another runtime parked on a different thread.
 //!

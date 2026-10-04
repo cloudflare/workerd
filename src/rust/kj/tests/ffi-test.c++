@@ -48,10 +48,11 @@ class MockHttpService: public kj::HttpService {
 
 class TestConnectResponse: public kj::HttpService::ConnectResponse {
  public:
-  void accept(uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers) override {
+  void accept(
+      kj::uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers) override {
     KJ_UNIMPLEMENTED("not exercised by test");
   }
-  kj::Own<kj::AsyncOutputStream> reject(uint statusCode,
+  kj::Own<kj::AsyncOutputStream> reject(kj::uint statusCode,
       kj::StringPtr statusText,
       const kj::HttpHeaders& headers,
       kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
