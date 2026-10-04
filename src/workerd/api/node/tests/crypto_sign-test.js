@@ -352,6 +352,63 @@ export const optionsKeySignVerify = {
     tamperedPss[0] ^= 0xff;
     strictEqual(verify('sha256', data, pssVerifyOpts, tamperedPss), false);
 
+    // RSA padding and saltLength apply on the streaming Sign/Verify paths as
+    // well: a streamed PSS signature verifies only with matching options.
+    const pssSigner = createSign('sha256');
+    pssSigner.update(data);
+    const pssStreamSig = pssSigner.sign({
+      key: rsaPrivate,
+      padding: constants.RSA_PKCS1_PSS_PADDING,
+      saltLength: 32,
+    });
+    const pssVerifier = createVerify('sha256');
+    pssVerifier.update(data);
+    strictEqual(
+      pssVerifier.verify(
+        {
+          key: rsaPublic,
+          padding: constants.RSA_PKCS1_PSS_PADDING,
+          saltLength: 32,
+        },
+        pssStreamSig
+      ),
+      true
+    );
+    const pssVerifierMismatch = createVerify('sha256');
+    pssVerifierMismatch.update(data);
+    strictEqual(
+      pssVerifierMismatch.verify(
+        {
+          key: rsaPublic,
+          padding: constants.RSA_PKCS1_PSS_PADDING,
+          saltLength: 64,
+        },
+        pssStreamSig
+      ),
+      false
+    );
+    const pssVerifierDefault = createVerify('sha256');
+    pssVerifierDefault.update(data);
+    strictEqual(
+      pssVerifierDefault.verify({ key: rsaPublic }, pssStreamSig),
+      false
+    );
+
+    // The one-shot and streaming RSA paths agree with each other in both
+    // directions: a streamed PSS signature verifies one-shot and a one-shot
+    // signature verifies through the streaming verifier.
+    strictEqual(verify('sha256', data, pssVerifyOpts, pssStreamSig), true);
+    strictEqual(
+      verify('sha256', data, { key: rsaPublic }, pssStreamSig),
+      false
+    );
+    const crossVerifier = createVerify('sha256');
+    crossVerifier.update(data);
+    strictEqual(crossVerifier.verify(pssVerifyOpts, pssSig), true);
+    const crossVerifierDefault = createVerify('sha256');
+    crossVerifierDefault.update(data);
+    strictEqual(crossVerifierDefault.verify({ key: rsaPublic }, pssSig), false);
+
     // Streaming Sign/Verify objects accept the same wrapped form.
     const signer = createSign('sha256');
     signer.update(data);
@@ -481,7 +538,8 @@ export const optionsKeySignVerify = {
       message: /Invalid key object type public, expected private/,
     });
     throws(() => sign('sha256', data, { key: createSecretKey(data) }), {
-      message: /must be of type/,
+      code: 'ERR_INVALID_ARG_TYPE',
+      message: /"options" argument must be an instance of.*'secret'\)/,
     });
 
     // Plain-string keys and invalid options.key values keep their existing
