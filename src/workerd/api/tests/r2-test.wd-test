@@ -30,8 +30,5 @@ const tailWorker :Workerd.Worker = (
   modules = [
     (name = "worker", esModule = embed "r2-instrumentation-test.js")
   ],
-  bindings = [
-    (name = "R2_TRACE_TRANSPORT", text = "http"),
-  ],
   compatibilityFlags = ["experimental", "nodejs_compat"],
 );

@@ -458,8 +458,6 @@ wd_test(
     src = "r2-jsrpc-test.wd-test",
     args = ["--experimental"],
     data = [
-        "instrumentation-tail-worker.js",
-        "r2-instrumentation-test.js",
         "r2-jsrpc-passthrough.capnp",
         "r2-test.js",
     ],

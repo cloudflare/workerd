@@ -12,7 +12,7 @@ import {
 export default testTailHandler;
 
 export const test = {
-  async test(_ctrl, env) {
+  async test() {
     // Wait for all the tailStream executions to finish
     await Promise.allSettled(invocationPromises);
 
@@ -1178,25 +1178,8 @@ export const test = {
       },
     ];
 
-    // The JSRPC transport also records a jsRpcSession span per call and does not set
-    // cloudflare.r2.response.success, so only the HTTP transport is compared exactly.
-    const projectSharedTags = (span) =>
-      Object.fromEntries(
-        Object.entries(span).filter(
-          ([name]) => name !== 'cloudflare.r2.response.success'
-        )
-      );
-
     // The expected spans come from the default test and deletePerKeyErrorParityTests, which run
     // before the other test exports. Spans from those later exports are not checked.
-    const sharedReceived = received
-      .filter((span) => span['cloudflare.binding.type'] === 'r2')
-      .map(projectSharedTags)
-      .slice(0, expected.length);
-    assert.deepStrictEqual(sharedReceived, expected.map(projectSharedTags));
-
-    if (env.R2_TRACE_TRANSPORT === 'http') {
-      assert.deepStrictEqual(received.slice(0, expected.length), expected);
-    }
+    assert.deepStrictEqual(received.slice(0, expected.length), expected);
   },
 };
