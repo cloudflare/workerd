@@ -1788,8 +1788,7 @@ fn write_kj_maybe(out: &mut OutFile, key: NamedImplKey) {
     );
 }
 
-// Writes assertions to make sure the internal Own is valid and writes fucntions to support
-// necessary refcounted behavior
+// Writes assertions for Rust's pointee-then-owner representation of an ordinary-object Rc.
 fn write_kj_rc(out: &mut OutFile, key: NamedImplKey) {
     let ident = key.rust;
     let resolve = out.types.resolve(ident);
@@ -1798,7 +1797,11 @@ fn write_kj_rc(out: &mut OutFile, key: NamedImplKey) {
     out.include.utility = true;
     out.include.kj_rs = true;
 
-    // Rust mirrors the two-pointer `kj::Rc` layout: refcount control object, then pointee.
+    writeln!(
+        out,
+        "static_assert(!::kj::isPointerType<{}>(), \"KJ pointer types stored inline in kj::Rc are not supported in workerd-cxx\");",
+        inner,
+    );
     writeln!(
         out,
         "static_assert(sizeof(::kj::Rc<{}>) == 2 * sizeof(void *), \"unexpected kj::Rc layout\");",
@@ -1812,8 +1815,7 @@ fn write_kj_rc(out: &mut OutFile, key: NamedImplKey) {
     write_kj_maybe_niche_assert(out, &format!("::kj::Rc<{}>", inner));
 }
 
-// Writes assertions to make sure Rust's raw `KjArc` representation matches KJ's two-pointer
-// control-object plus pointee layout.
+// Writes assertions for Rust's pointee-then-owner representation of an ordinary-object Arc.
 fn write_kj_arc(out: &mut OutFile, key: NamedImplKey) {
     let ident = key.rust;
     let resolve = out.types.resolve(ident);
@@ -1822,6 +1824,11 @@ fn write_kj_arc(out: &mut OutFile, key: NamedImplKey) {
     out.include.utility = true;
     out.include.kj_rs = true;
 
+    writeln!(
+        out,
+        "static_assert(!::kj::isPointerType<{}>(), \"KJ pointer types stored inline in kj::Arc are not supported in workerd-cxx\");",
+        inner,
+    );
     writeln!(
         out,
         "static_assert(sizeof(::kj::Arc<{}>) == 2 * sizeof(void *), \"unexpected kj::Arc layout\");",

@@ -85,7 +85,7 @@ unsafe impl<T: crate::OwnTarget> HasNiche for crate::repr::KjOwn<T> {
 }
 
 // `kj::MaybeTraits<kj::Rc<T>>` defines `kj::none` as `rc.get() == nullptr`, i.e. the pointee
-// pointer (second word) is null. A default-constructed `kj::Rc` is all-null, so `NONE`'s zeroed
+// pointer (first word) is null. A default-constructed `kj::Rc` is all-null, so `NONE`'s zeroed
 // bytes are exactly what `initNone` produces.
 // Safety: the KJ bridge representation and ownership invariants satisfy this operation.
 unsafe impl<T> HasNiche for crate::repr::KjRc<T> {

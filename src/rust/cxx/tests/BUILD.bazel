@@ -11,6 +11,7 @@ wd_rust_test(
     deps = [
         ":cxx_test_suite",
         "//src/rust/cxx",
+        "//src/rust/cxx/kj-rs",
     ],
 )
 
