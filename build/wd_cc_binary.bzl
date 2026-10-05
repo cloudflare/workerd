@@ -20,6 +20,8 @@ def wd_cc_binary(
         visibility = visibility,
         # Tag with cpu:4 since this target depends on linkopts_tool.
         tags = tags + ["cpu:4"],
+        # Use dedicated high-CPU runner if available
+        exec_properties = {"runner": "high-cpu"},
         deps = deps + ["//build/deps:linkopts_tool"],
         **kwargs
     )

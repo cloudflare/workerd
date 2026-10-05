@@ -137,6 +137,8 @@ def wd_rust_binary(
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
         }) + target_compatible_with,
+        # Use dedicated high-CPU runner if available
+        exec_properties = {"runner": "high-cpu"},
         **binary_kwargs
     )
 
