@@ -2747,7 +2747,7 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
   void maybeSetJsRpcInfo(IoContext& ctx, const kj::ConstString& methodNameForTrace) override {}
 
   // Calls on a returned stub or pipeline are covered by the session's top-level claim. They need
-  // no @retryable check even when that claim admitted a duplicate: the sender replays only the
+  // no retryable() check even when that claim admitted a duplicate: the sender replays only the
   // top-level call, and calling through its pending result commits the attempt so it is never
   // replayed. A call made here therefore runs for the first time, even in a duplicate session.
   void maybeClaimRetryToken(
@@ -3360,8 +3360,8 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       JSG_REQUIRE(claim == IsRetryableHandler::NO ||
               isRetryableMethod(js, targetInfo, params) == IsRetryableHandler::YES,
           Error,
-          "After calling a @retryable method, a Durable Object RPC session can only call "
-          "@retryable methods.");
+          "After calling a method marked with retryable(), a Durable Object RPC session can only "
+          "call methods marked with retryable().");
       return;
     }
     auto retryable = isRetryableMethod(js, targetInfo, params);
@@ -3374,7 +3374,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
     }
   }
 
-  // YES if the call invokes a method decorated with @retryable and DURABLE_OBJECT_RETRIES_USERLAND
+  // YES if the call invokes a method marked with retryable() and DURABLE_OBJECT_RETRIES_USERLAND
   // is enabled. This runs before the claim, so it must run no user code.
   IsRetryableHandler isRetryableMethod(
       jsg::Lock& js, const TargetInfo& targetInfo, rpc::JsRpcTarget::CallParams::Reader params) {

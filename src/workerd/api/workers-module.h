@@ -90,10 +90,10 @@ class EntrypointsModule: public jsg::Object {
   // process.
   void abortIsolate(jsg::Lock& js, jsg::Optional<kj::String> reason);
 
-  // A standard method decorator that marks `value` as safe to execute more than once when the
-  // runtime retries a Durable Object call. It returns `value` itself, so the marker is on the
-  // function that is installed unless a later decorator replaces it.
-  jsg::JsValue retryable(jsg::Lock& js, jsg::JsValue value, jsg::JsObject context);
+  // Marks each function in `methods` as safe to execute more than once when the runtime retries a
+  // Durable Object call. The marker is on the function object itself, so it applies wherever that
+  // function is found as a handler or method, and not to a function that wraps or replaces it.
+  void retryable(jsg::Lock& js, jsg::Arguments<jsg::Value> methods);
 
   jsg::JsSymbol getRestoreSymbol(jsg::Lock& js);
 

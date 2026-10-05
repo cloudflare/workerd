@@ -903,34 +903,46 @@ KJ_TEST("a rejected JSRPC claim runs neither getter nor method, and stays reject
   session.wait(fixture.getWaitScope());
 }
 
-// workerd does not transform decorator syntax, so the script calls the decorator the way a
-// bundler's standard-decorator output does.
 constexpr kj::StringPtr RETRYABLE_JSRPC_ACTOR_SOURCE = R"JS(
   import { DurableObject } from "cloudflare:workers";
   import { retryable } from "cloudflare:durable-objects";
   globalThis.events = "";
-  const context = (name) => ({ kind: "method", name, static: false, private: false,
-        addInitializer() {} });
   class Base extends DurableObject {
+    static {
+      retryable(this.prototype.overridden, this.prototype.inherited);
+    }
     inherited() {}
     overridden() {}
   }
-  retryable(Base.prototype.inherited, context("inherited"));
-  retryable(Base.prototype.overridden, context("overridden"));
   class Actor extends Base {
     constructor(ctx, env) {
       super(ctx, env);
       this.ownRetryable = this.retryableMethod;
     }
+    static {
+      retryable(this.prototype.retryableMethod);
+    }
     retryableMethod() {}
     plainMethod() {}
     overridden() {}
+    static {
+      retryable(this.prototype.wrapped);
+    }
+    wrapped() {}
+    markedAfterClass() {}
+    rejectedMark() {}
     get retryableFromGetter() {
       globalThis.events += "getter;";
       return this.retryableMethod;
     }
   }
-  retryable(Actor.prototype.retryableMethod, context("retryableMethod"));
+  retryable(Actor.prototype.markedAfterClass);
+  try {
+    retryable(Actor.prototype.rejectedMark, null);
+  } catch {}
+  const wrapped = Actor.prototype.wrapped;
+  Actor.prototype.wrapped = function(...args) { return wrapped.apply(this, args); };
+  Actor.prototype.bound = Actor.prototype.retryableMethod.bind(null);
   export default Actor;
 )JS"_kj;
 
@@ -992,19 +1004,26 @@ struct RetryableClaimTest {
 constexpr auto USERLAND_GATE = "durable-object-retries-userland"_kj;
 using CallOutcome = RetryableClaimTest::CallOutcome;
 
-KJ_TEST("JSRPC claims as retryable only for a @retryable method found without user code") {
+KJ_TEST("JSRPC claims as retryable only for a retryable() method found without user code") {
   RetryableClaimTest test(RETRYABLE_JSRPC_ACTOR_SOURCE, kj::arr(USERLAND_GATE));
 
   KJ_EXPECT(
       test.claimForMethod("retryableMethod", CallOutcome::SUCCEEDS) == IsRetryableHandler::YES);
   KJ_EXPECT(test.claimForMethod("inherited", CallOutcome::SUCCEEDS) == IsRetryableHandler::YES);
+  KJ_EXPECT(
+      test.claimForMethod("markedAfterClass", CallOutcome::SUCCEEDS) == IsRetryableHandler::YES);
   KJ_EXPECT(test.claimFor(CallOutcome::SUCCEEDS, [](auto& request) {
     request.initMethodPath(1).set(0, "retryableMethod");
   }) == IsRetryableHandler::YES);
 
   KJ_EXPECT(test.claimForMethod("plainMethod", CallOutcome::SUCCEEDS) == IsRetryableHandler::NO);
-  // An undecorated override masks the decorated base method.
+  // A retryable() call that throws marks none of its arguments.
+  KJ_EXPECT(test.claimForMethod("rejectedMark", CallOutcome::SUCCEEDS) == IsRetryableHandler::NO);
+  // An unmarked override masks the marked base method.
   KJ_EXPECT(test.claimForMethod("overridden", CallOutcome::SUCCEEDS) == IsRetryableHandler::NO);
+  // The mark is on the function, so a wrapper or bound copy installed in its place is unmarked.
+  KJ_EXPECT(test.claimForMethod("wrapped", CallOutcome::SUCCEEDS) == IsRetryableHandler::NO);
+  KJ_EXPECT(test.claimForMethod("bound", CallOutcome::SUCCEEDS) == IsRetryableHandler::NO);
   // Own properties cannot be called over RPC.
   KJ_EXPECT(test.claimForMethod("ownRetryable", CallOutcome::FAILS) == IsRetryableHandler::NO);
   KJ_EXPECT(test.claimFor(CallOutcome::FAILS, [](auto& request) {
@@ -1023,7 +1042,7 @@ KJ_TEST("JSRPC claims as retryable only for a @retryable method found without us
   KJ_EXPECT(getJsEvents(test.fixture).contains("getter;"));
 }
 
-KJ_TEST("JSRPC claims a @retryable method as not retryable when the userland gate is disabled") {
+KJ_TEST("JSRPC claims a retryable() method as not retryable when the userland gate is disabled") {
   RetryableClaimTest test(RETRYABLE_JSRPC_ACTOR_SOURCE, nullptr);
 
   KJ_EXPECT(
@@ -1039,9 +1058,7 @@ KJ_TEST("JSRPC treats a method shadowing an Object.prototype getter as not retry
     class Actor extends DurableObject {
       shadowing() {}
     }
-    retryable(Actor.prototype.shadowing,
-        { kind: "method", name: "shadowing", static: false, private: false,
-        addInitializer() {} });
+    retryable(Actor.prototype.shadowing);
     Object.defineProperty(Object.prototype, "shadowing", {
       get() { globalThis.events += "getter;"; },
       configurable: true,
@@ -1055,7 +1072,7 @@ KJ_TEST("JSRPC treats a method shadowing an Object.prototype getter as not retry
   KJ_EXPECT(getJsEvents(test.fixture).contains("getter;"));
 }
 
-KJ_TEST("JSRPC treats a @retryable method also on Object.prototype as not retryable") {
+KJ_TEST("JSRPC treats a retryable() method also on Object.prototype as not retryable") {
   // The method lookup rejects a method that is the same value as Object.prototype's property.
   RetryableClaimTest test(R"JS(
     import { DurableObject } from "cloudflare:workers";
@@ -1063,9 +1080,7 @@ KJ_TEST("JSRPC treats a @retryable method also on Object.prototype as not retrya
     class Actor extends DurableObject {
       shared() {}
     }
-    retryable(Actor.prototype.shared,
-        { kind: "method", name: "shared", static: false, private: false,
-        addInitializer() {} });
+    retryable(Actor.prototype.shared);
     Object.prototype.shared = Actor.prototype.shared;
     export default Actor;
   )JS"_kj,
@@ -1074,18 +1089,13 @@ KJ_TEST("JSRPC treats a @retryable method also on Object.prototype as not retrya
   KJ_EXPECT(test.claimForMethod("shared", CallOutcome::FAILS) == IsRetryableHandler::NO);
 }
 
-KJ_TEST("JSRPC claims only a plain object's own @retryable method as retryable") {
+KJ_TEST("JSRPC claims only a plain object's own retryable() method as retryable") {
   // tryGetProperty() does not look up a plain object's prototype chain.
   RetryableClaimTest test(R"JS(
     import { retryable } from "cloudflare:durable-objects";
-    const marked = (name) => {
-      const method = function() {};
-      retryable(method, { kind: "method", name, static: false, private: false,
-        addInitializer() {} });
-      return method;
-    };
-    const handler = Object.create({ inherited: marked("inherited") });
-    handler.own = marked("own");
+    const handler = Object.create({ inherited() {} });
+    handler.own = function() {};
+    retryable(Object.getPrototypeOf(handler).inherited, handler.own);
     export default handler;
   )JS"_kj,
       kj::arr(USERLAND_GATE), RetryableClaimTest::Target::PLAIN_OBJECT);
@@ -1103,9 +1113,7 @@ KJ_TEST("JSRPC treats a method reached through a Proxy prototype as not retryabl
     class Base extends DurableObject {
       inherited() {}
     }
-    retryable(Base.prototype.inherited,
-        { kind: "method", name: "inherited", static: false, private: false,
-        addInitializer() {} });
+    retryable(Base.prototype.inherited);
     class Actor extends Base {}
     Object.setPrototypeOf(Actor.prototype, new Proxy(Base.prototype, {
       getOwnPropertyDescriptor(target, key) {
@@ -1121,7 +1129,7 @@ KJ_TEST("JSRPC treats a method reached through a Proxy prototype as not retryabl
   KJ_EXPECT(!test.observer->jsEventsAtClaim.contains("trap;"), test.observer->jsEventsAtClaim);
 }
 
-KJ_TEST("after a retryable JSRPC claim, the session can only call @retryable methods") {
+KJ_TEST("after a retryable JSRPC claim, the session can only call retryable() methods") {
   RetryableClaimTest test(RETRYABLE_JSRPC_ACTOR_SOURCE, kj::arr(USERLAND_GATE));
   auto entrypoint = test.fixture.makeWorkerEntrypoint();
   auto [cap, session] = startSession(*entrypoint);
@@ -1130,7 +1138,7 @@ KJ_TEST("after a retryable JSRPC claim, the session can only call @retryable met
   call(cap, "inherited", test.fixture.getWaitScope());
   auto e = expectCallFailure(cap, "plainMethod", test.fixture.getWaitScope());
 
-  KJ_EXPECT(e.getDescription().contains("can only call @retryable methods"), e);
+  KJ_EXPECT(e.getDescription().contains("can only call methods marked with retryable()"), e);
   KJ_EXPECT(test.observer->claimCount == 1);
 
   cap = nullptr;

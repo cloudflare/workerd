@@ -30,7 +30,7 @@ WD_STRONG_BOOL(CountSubrequest);
 // Whether an outgoing actor call's payload can be sent again unchanged, e.g. a fetch with a
 // rewindable body or an RPC call whose arguments hold no externals.
 WD_STRONG_BOOL(ActorCallPayloadReplayable);
-// Whether the handler or method an actor request is about to run was decorated with @retryable,
+// Whether the handler or method an actor request is about to run was marked with retryable(),
 // with DURABLE_OBJECT_RETRIES_USERLAND enabled. See RequestObserver::claimRetryTokenBeforeUserCode().
 WD_STRONG_BOOL(IsRetryableHandler);
 
