@@ -3,6 +3,7 @@ load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 wd_rust_crate(
     name = "cxx-integration-test",
+    testonly = True,
     cxx_bridge_deps = [
         "@capnp-cpp//src/kj",
     ],

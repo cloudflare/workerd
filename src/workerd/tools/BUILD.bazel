@@ -1,6 +1,6 @@
 load("@bazel_skylib//rules:run_binary.bzl", "run_binary")
-load("@rules_rust//rust:defs.bzl", "rust_binary")
 load("//:build/cc_ast_dump.bzl", "cc_ast_dump")
+load("//:build/wd_rust_binary.bzl", "wd_rust_binary")
 
 # ========================================================================================
 # Parameter Name Extractor
@@ -39,7 +39,7 @@ cc_ast_dump(
     ],
 )
 
-rust_binary(
+wd_rust_binary(
     name = "param_extractor_bin",
     srcs = ["param-extractor.rs"],
     tags = ["no-downstream"],
@@ -47,6 +47,7 @@ rust_binary(
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
+    test = False,
     deps = [
         "@crates_vendor//:anyhow",
         "@crates_vendor//:clang-ast",

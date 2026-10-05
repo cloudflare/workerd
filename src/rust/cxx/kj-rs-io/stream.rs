@@ -381,8 +381,7 @@ impl Inner {
     /// Never resolves: KJ parity, not a gap (see the unix arm's docs).
     #[cfg(windows)]
     async fn when_write_disconnected(&self) -> Result<()> {
-        // `pending()` infers the Result<()> return type, so there is no unreachable tail
-        // (crate-level deny(clippy::unreachable)).
+        // `pending()` infers the Result<()> return type, so there is no unreachable tail.
         std::future::pending().await
     }
 }
@@ -518,7 +517,7 @@ impl TokioStream {
             use std::os::windows::io::AsRawSocket;
             // A live SOCKET fits in i64 (Windows handles fit in 32 bits); the bridge carries
             // its bits verbatim.
-            #[allow(clippy::cast_possible_wrap)]
+            #[allow(clippy::cast_possible_wrap, reason = "a live SOCKET fits in an i64")]
             (self.inner.socket.as_borrowed_socket().as_raw_socket() as i64)
         }
     }

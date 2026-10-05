@@ -9,34 +9,10 @@
 //! reaches (via `setRunnable(true)` / the port's `TimerImpl::SleepHooks`) to hand the thread
 //! back whenever a tokio task has queued KJ work.
 
-// Safety & panic enforcement walls. Test code exempted.
-//
-// `unsafe` is quarantined into a single named FFI island: the crate root denies `unsafe_code`, so
-// the entire event-port business logic (`TokioPort`, the `wait`/`poll`/`wake` machinery) is
-// *compiler-proven* to contain no hand-written unsafe. The one island that opts back in
-// via `#![allow(unsafe_code)]` is `ffi.rs`: the `#[cxx::bridge]` wire.
-#![deny(unsafe_op_in_unsafe_fn)]
-#![deny(unsafe_code)]
-#![deny(clippy::undocumented_unsafe_blocks)]
-#![deny(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    clippy::todo,
-    clippy::unimplemented
-)]
-#![cfg_attr(
-    test,
-    allow(
-        clippy::unwrap_used,
-        clippy::expect_used,
-        clippy::panic,
-        clippy::unreachable,
-        clippy::todo,
-        clippy::unimplemented
-    )
-)]
+// `unsafe` is quarantined into a single named FFI island: `ffi.rs`, the `#[cxx::bridge]` wire, is
+// the one module that opts in via `#![allow(unsafe_code)]`, so the entire event-port business
+// logic (`TokioPort`, the `wait`/`poll`/`wake` machinery) is *compiler-proven* to contain no
+// hand-written unsafe.
 
 pub use port::TokioPort;
 pub use port::current_handle;

@@ -77,6 +77,7 @@ def wd_rust_crate(
         cxx_bridge_tags = [],
         cxx_bridge_local_defines = [],
         cxx_bridge_features = [],
+        testonly = False,
         visibility = None):
     """Define rust crate.
 
@@ -103,6 +104,8 @@ def wd_rust_crate(
         cxx_bridge_deps: either a flat dependency list applied to every bridge source, or a dict of
             bridge source => dependency list.
         cxx_bridge_hdrs: headers the bridges include!(); defaults to every .h file in the package.
+        testonly: True for a crate that only tests depend on (a test harness, the Rust half of a
+            C++ test). Like other test code, it is not held to //build/rust:lints.
     """
     if srcs == None:
         srcs = native.glob(["**/*.rs"])
@@ -171,6 +174,8 @@ def wd_rust_crate(
         data = data,
         proc_macro_deps = proc_macro_deps,
         crate_features = crate_features,
+        lint_config = None if testonly else "@workerd//build/rust:lints",
+        testonly = testonly,
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
@@ -195,6 +200,7 @@ def wd_rust_crate(
             name = name + "@expand",
             deps = [":" + name],
             tags = ["manual", "off-by-default"],
+            testonly = testonly,
         )
 
     if len(test_proc_macro_deps) > 0:

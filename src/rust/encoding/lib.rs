@@ -2,10 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Production code must not panic; test code is exempt via clippy.toml allow-*-in-tests.
-#![deny(clippy::expect_used, clippy::panic, clippy::unreachable)]
-#![deny(clippy::todo, clippy::unimplemented)]
-
 //! WHATWG Encoding Standard legacy decoders via `encoding_rs`.
 //!
 //! Exposes a streaming decoder to C++ via CXX bridge. All legacy encodings
@@ -17,6 +13,7 @@
 //! the pointer and length returned in `DecodeResult`.
 
 #[cxx::bridge(namespace = "workerd::rust::encoding")]
+#[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {
     /// Legacy encoding types supported by the Rust decoder.
     /// Shared between C++ and Rust.

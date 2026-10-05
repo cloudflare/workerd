@@ -1093,7 +1093,10 @@ pub fn datagram_port(datagram: &TokioDatagram) -> Result<u16> {
         .port())
 }
 
-#[expect(clippy::unnecessary_box_returns)]
+#[expect(
+    clippy::unnecessary_box_returns,
+    reason = "cxx takes an opaque Rust type boxed"
+)]
 pub fn address_clone(addr: &TokioAddress) -> Box<TokioAddress> {
     Box::new(TokioAddress {
         spec: addr.spec.clone(),
@@ -1113,7 +1116,10 @@ pub fn listener_accept(
 
 /// Another handle to the same listener, for an accept loop to own (the C++ receiver may be
 /// destroyed while its `accept()` is pending; the loop's share keeps the sockets alive).
-#[expect(clippy::unnecessary_box_returns)]
+#[expect(
+    clippy::unnecessary_box_returns,
+    reason = "cxx takes an opaque Rust type boxed"
+)]
 pub fn listener_clone(listener: &TokioListener) -> Box<TokioListener> {
     Box::new(TokioListener {
         shared: Arc::clone(&listener.shared),

@@ -2,6 +2,10 @@ load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_proc_mac
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_test.bzl", "wd_rust_test")
 
+# The crates derived from upstream cxx (the runtime, the bridge parser and generators, and their
+# tests) keep upstream's lint levels rather than //build/rust:lints, so they stay comparable with
+# upstream. The KJ crates beside them (kj-rs*) are first-party and take the repository's.
+
 rust_library(
     name = "cxx",
     srcs = glob(

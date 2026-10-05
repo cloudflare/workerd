@@ -23,6 +23,7 @@ impl InheritedSocket {
 
 /// Whether the socket is listening, or `None` where the provider cannot say (the server finds out
 /// at the first `accept()`). `Error::NotSocket` if `fd` is not a socket, closed handles included.
+#[expect(clippy::expect_used, reason = "the size of an i32 fits an i32")]
 fn is_listener(fd: u32) -> Result<Option<bool>, Error> {
     use windows_sys::Win32::Networking::WinSock as winsock;
 

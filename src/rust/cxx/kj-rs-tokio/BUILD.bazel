@@ -31,6 +31,7 @@ rust_library(
         ":bridge",
         ":kj-rs-tokio-lib",
     ],
+    lint_config = "//build/rust:lints",
     target_compatible_with = select({
         "@//build/config:no_build": ["@platforms//:incompatible"],
         "//conditions:default": [],

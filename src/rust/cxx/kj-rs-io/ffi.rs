@@ -1,5 +1,5 @@
 //! The FFI island of kj-rs-io: the `#[cxx::bridge]` plus every hand-written `unsafe` in the
-//! crate, in one file (file-top `#![allow(unsafe_code)]`; the crate root denies it).
+//! crate, in one file (file-top `#![allow(unsafe_code)]`; no other module has it).
 //!
 //! Two kinds of raw thing cross the bridge and are converted into typed Rust here, at the entry
 //! point that receives them, before any other module sees them:
@@ -25,7 +25,10 @@
 //! `Arc`-shared state and its operations own a share (lib.rs, "Ownership of in-flight
 //! operations"), so the bridge declarations below carry no lifetime on the object parameters --
 //! the `impl Future + use<..>` return types prove it.
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "the crate's FFI island: the cxx bridge and every hand-written `unsafe`"
+)]
 
 use core::future::Future;
 use core::mem::MaybeUninit;
@@ -79,9 +82,18 @@ use crate::watcher::file_watcher_watch;
 use crate::watcher::new_file_watcher;
 
 #[cxx::bridge(namespace = "kj_rs_io")]
-#[expect(clippy::allow_attributes)]
-#[allow(clippy::missing_safety_doc)]
-#[allow(clippy::unnecessary_box_returns)]
+#[expect(
+    clippy::allow_attributes,
+    reason = "the lints allowed below do not fire on every target, where `expect` would be unfulfilled"
+)]
+#[allow(
+    clippy::missing_safety_doc,
+    reason = "the unsafe functions declared here document their contracts where they are defined"
+)]
+#[allow(
+    clippy::unnecessary_box_returns,
+    reason = "cxx takes an opaque Rust type boxed"
+)]
 mod bridge {
     /// The family of a [`SocketAddress`], and which of its fields are meaningful.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -290,12 +302,18 @@ pub fn network_parse_address(
     async move { parse_address(&addr, port_hint, &loopback).await }
 }
 
-#[expect(clippy::unnecessary_box_returns)]
+#[expect(
+    clippy::unnecessary_box_returns,
+    reason = "cxx takes an opaque Rust type boxed"
+)]
 pub fn new_loopback_registry() -> Box<LoopbackRegistry> {
     Box::new(LoopbackRegistry::new())
 }
 
-#[expect(clippy::unnecessary_box_returns)]
+#[expect(
+    clippy::unnecessary_box_returns,
+    reason = "cxx takes an opaque Rust type boxed"
+)]
 pub fn loopback_registry_clone(registry: &LoopbackRegistry) -> Box<LoopbackRegistry> {
     Box::new(registry.clone_handle())
 }
@@ -352,7 +370,10 @@ unsafe fn own_socket_from_raw(handle: i64) -> Result<socket2::Socket> {
         return Err(invalid_handle(handle));
     }
     // The bridge carries the SOCKET's bits verbatim.
-    #[allow(clippy::cast_sign_loss)]
+    #[allow(
+        clippy::cast_sign_loss,
+        reason = "the bridge carries the SOCKET's bits verbatim"
+    )]
     let raw = handle as RawSocket;
     // Safety: per this function's contract `handle` is an open SOCKET owned by us from now on.
     let owned = unsafe { OwnedSocket::from_raw_socket(raw) };
@@ -479,7 +500,10 @@ unsafe fn prepare_socket(handle: i64, flags: u32) -> Result<socket2::Socket> {
     if handle < 0 {
         return Err(invalid_handle(handle));
     }
-    #[allow(clippy::cast_sign_loss)]
+    #[allow(
+        clippy::cast_sign_loss,
+        reason = "the bridge carries the SOCKET's bits verbatim"
+    )]
     let raw = handle as RawSocket;
     let socket = if flags & TAKE_OWNERSHIP == 0 {
         // Safety: forwarded from this function's contract (open for the duration of the call).

@@ -5,8 +5,11 @@
 //! `kj_rs_tokio::TokioEventPort` drives (see `tokio-event-port.h`) -- and [`EnteredRuntime`], the
 //! one hand-written `unsafe` in the crate (a lifetime extension on tokio's `EnterGuard`).
 //! Everything else -- `lib.rs` and the entire event-port business logic in `port.rs` -- is
-//! wholly-safe, compiler-proven unsafe-free under the crate-root `#![deny(unsafe_code)]`.
-#![allow(unsafe_code)]
+//! wholly-safe, compiler-proven unsafe-free: no other module allows `unsafe_code`.
+#![allow(
+    unsafe_code,
+    reason = "the crate's FFI island: the cxx bridge and the one hand-written `unsafe`"
+)]
 
 use std::mem::ManuallyDrop;
 use std::ops::Deref;
@@ -103,8 +106,14 @@ impl Drop for EnteredRuntime {
 // unnecessary_box_returns: returning the opaque `TokioPort` to C++ boxed is the cxx idiom. The
 // lint's firing is platform-dependent (it has a size threshold and `TokioPort`'s size differs by
 // target), so `#[expect]` would be unfulfilled on some targets.
-#[expect(clippy::allow_attributes)]
-#[allow(clippy::unnecessary_box_returns)]
+#[expect(
+    clippy::allow_attributes,
+    reason = "`unnecessary_box_returns` does not fire on every target, where `expect` would be unfulfilled"
+)]
+#[allow(
+    clippy::unnecessary_box_returns,
+    reason = "cxx takes the opaque `TokioPort` boxed"
+)]
 mod bridge {
     // None of these are `Result`: they cannot fail in a way C++ could handle. The panics that CAN
     // occur -- a second port on one thread (`TokioPort::new`), a nested `block_on` from a task

@@ -1,3 +1,8 @@
+#![allow(
+    unsafe_code,
+    reason = "converts between `Waker` and the C++ waker through raw pointers"
+)]
+
 use std::task::RawWaker;
 use std::task::RawWakerVTable;
 use std::task::Waker;

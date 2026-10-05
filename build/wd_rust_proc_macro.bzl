@@ -30,6 +30,7 @@ def wd_rust_proc_macro(
         deps = deps,
         visibility = visibility,
         data = data,
+        lint_config = "@workerd//build/rust:lints",
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],

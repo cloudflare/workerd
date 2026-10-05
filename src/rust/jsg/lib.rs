@@ -42,6 +42,7 @@ pub use wrappable::ToJS;
 pub use wrappable::Traced;
 
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
+#[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {
     extern "Rust" {
         type Realm;
@@ -49,7 +50,10 @@ mod ffi {
         /// Create a fully-initialized Realm with feature flags.
         /// `feature_flags_data` is canonical (single-segment, no segment table) Cap'n Proto
         /// bytes produced by `capnp::canonicalize()` on the C++ side.
-        #[expect(clippy::unnecessary_box_returns)]
+        #[expect(
+            clippy::unnecessary_box_returns,
+            reason = "cxx takes an opaque Rust type boxed"
+        )]
         unsafe fn realm_create(isolate: *mut Isolate, feature_flags_data: &[u8]) -> Box<Realm>;
     }
 
@@ -209,6 +213,10 @@ impl Error {
     /// This always builds the exception from `self.message` verbatim: it does
     /// not check `is_internal` / redact anything. Prefer `Lock::throw_exception()`,
     /// which does perform that check before falling back to this method.
+    #[expect(
+        unsafe_code,
+        reason = "creates the V8 exception object through the FFI"
+    )]
     pub fn to_local<'a>(&self, isolate: v8::IsolatePtr) -> v8::Local<'a, v8::Value> {
         let message = self.message.as_bytes();
         // Strings longer than i32::MAX bytes are truncated to satisfy V8's
@@ -511,7 +519,10 @@ impl Number {
     ///
     /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isInteger)
     #[inline]
-    #[expect(clippy::float_cmp)] // Exact comparison is correct here - we want trunc(x) == x
+    #[expect(
+        clippy::float_cmp,
+        reason = "exact comparison is intended: an integer equals its own truncation"
+    )]
     pub fn is_integer(&self) -> bool {
         self.value.is_finite() && self.value.trunc() == self.value
     }
@@ -592,6 +603,10 @@ pub struct Lock {
     isolate: v8::IsolatePtr,
 }
 
+#[expect(
+    unsafe_code,
+    reason = "`Lock` holds the raw isolate pointer and calls V8 through the FFI"
+)]
 impl Lock {
     /// # Safety
     /// The caller must ensure that `args` is a valid pointer to `FunctionCallbackInfo`.
@@ -714,6 +729,10 @@ impl Lock {
         unsafe { v8::ffi::isolate_throw_error(self.isolate().as_ffi(), message) }
     }
 
+    #[expect(
+        clippy::unimplemented,
+        reason = "`await_io` is not implemented for Rust resources yet"
+    )]
     pub fn await_io<F, C, I, R>(self, _fut: F, _callback: C) -> Result<R>
     where
         F: Future<Output = I>,
@@ -830,14 +849,20 @@ impl_constant_value_from_lossless!(i8, i16, i32, u8, u16, u32, f32, f64);
 // i64/u64 can lose precision in f64 (52-bit mantissa), but JavaScript numbers are
 // always f64 so this is inherent to the language boundary.
 impl From<i64> for ConstantValue {
-    #[expect(clippy::cast_precision_loss)]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a JavaScript number is an f64, so the loss is inherent to the boundary"
+    )]
     fn from(v: i64) -> Self {
         Self::Number(v as f64)
     }
 }
 
 impl From<u64> for ConstantValue {
-    #[expect(clippy::cast_precision_loss)]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a JavaScript number is an f64, so the loss is inherent to the boundary"
+    )]
     fn from(v: u64) -> Self {
         Self::Number(v as f64)
     }
@@ -933,6 +958,7 @@ impl Realm {
     }
 }
 
+#[expect(unsafe_code, reason = "asks V8 whether the isolate is locked")]
 impl Drop for Realm {
     fn drop(&mut self) {
         debug_assert!(
@@ -943,7 +969,11 @@ impl Drop for Realm {
     }
 }
 
-#[expect(clippy::unnecessary_box_returns)]
+#[expect(
+    clippy::unnecessary_box_returns,
+    reason = "cxx takes an opaque Rust type boxed"
+)]
+#[expect(unsafe_code, reason = "wraps the isolate pointer C++ passes in")]
 unsafe fn realm_create(isolate: *mut v8::ffi::Isolate, feature_flags_data: &[u8]) -> Box<Realm> {
     let feature_flags = FeatureFlags::from_bytes(feature_flags_data);
     // SAFETY: isolate pointer is valid (guaranteed by C++ caller).
