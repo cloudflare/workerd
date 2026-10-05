@@ -11,6 +11,7 @@
 // before any assertion runs.
 
 import { strictEqual, deepStrictEqual, rejects } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
 
 // A patched controller error() must not stop a pull rejection from
 // erroring the stream.
@@ -282,6 +283,68 @@ export const thenGetterFiresOncePerByteRead = {
       for (const result of results) {
         strictEqual(Object.getPrototypeOf(result), Object.prototype, name);
       }
+    }
+  },
+};
+
+// When a BYOB read's `then` lookup runs relative to the pull it triggers
+// (ledger #34). Answered from the queue, the spec fills the read, pulls
+// (HandleQueueDrain, CallPullIfNeeded) and only then runs its chunk steps,
+// so the pull comes first. Answered by an enqueue(), the spec fulfills the
+// read first and pulls at the end of the enqueue(). TypeScript follows the
+// spec in both. C++ settles the read's promise a microtask later, after the
+// enqueue()'s pull, and makes no pull for a read answered from the queue.
+export const byobReadThenLookupFollowsItsPull = {
+  async test() {
+    const log = [];
+    let controller;
+    const rs = new ReadableStream(
+      {
+        type: 'bytes',
+        start(c) {
+          controller = c;
+        },
+        pull() {
+          log.push('pull');
+        },
+      },
+      { highWaterMark: 8 }
+    );
+    const reader = rs.getReader({ mode: 'byob' });
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+    // Logs pulls and `then` lookups from op() until the read it returns
+    // settles.
+    const observe = async (op) => {
+      await tick();
+      log.length = 0;
+      Object.defineProperty(Object.prototype, 'then', {
+        get() {
+          if (Object.hasOwn(this, 'done')) log.push('then');
+          return undefined;
+        },
+        configurable: true,
+      });
+      try {
+        await op();
+      } finally {
+        delete Object.prototype.then;
+      }
+      return [...log];
+    };
+    controller.enqueue(new Uint8Array([1, 2, 3, 4]));
+    const fromQueue = await observe(() => reader.read(new Uint8Array(4)));
+    const pending = reader.read(new Uint8Array(4));
+    const fromEnqueue = await observe(() => {
+      controller.enqueue(new Uint8Array([5]));
+      return pending;
+    });
+    strictEqual('then' in {}, false, 'interceptor must be removed');
+    if (usingTsImpl) {
+      deepStrictEqual(fromQueue, ['pull', 'then']);
+      deepStrictEqual(fromEnqueue, ['then', 'pull']);
+    } else {
+      deepStrictEqual(fromQueue, ['then']);
+      deepStrictEqual(fromEnqueue, ['pull', 'then']);
     }
   },
 };

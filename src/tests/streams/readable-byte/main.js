@@ -249,4 +249,5 @@ export {
   speciesNotConsultedByInternalCopies,
   nativeSourceIgnoresPollutedMembers,
   thenGetterFiresOncePerByteRead,
+  byobReadThenLookupFollowsItsPull,
 } from 'pollution';

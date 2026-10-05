@@ -1246,12 +1246,24 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
       ReadableStreamReadResult<ArrayBufferView>
     >;
     const controller = getReadableStreamController(stream);
+    // Set while readBYOB() runs: a result it hands over then is one answered
+    // from the queue, and the spec (PullInto, HandleQueueDrain) pulls before
+    // it runs the chunk steps, so it is held until after the pull below. A
+    // later result (an enqueue(), a respond(), a close) settles at once, as
+    // the spec fulfills the read before that call pulls.
+    let submitting = true;
+    let answeredFromQueue:
+      ReadableStreamReadResult<ArrayBufferView> | undefined;
     const resolve = (result: ReadableStreamReadResult<ArrayBufferView>) => {
       // Drain-then-close (spec HandleQueueDrain): a BYOB fill that consumed
       // the last queued bytes with close requested must transition the
       // stream — without this, the NEXT read(view) would pend forever (BYOB
       // descriptors are not auto-committed at the sentinel).
       if (controller !== undefined) controllerMaybeCloseStream(controller);
+      if (submitting) {
+        answeredFromQueue = result;
+        return;
+      }
       withResolvers.resolve(toUserReadResult(result));
     };
     const descriptor: PullIntoDescriptor = {
@@ -1271,7 +1283,11 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
       reader: this,
     };
     consumer.readBYOB(descriptor);
+    submitting = false;
     if (controller !== undefined) controllerPullIfNeeded(controller);
+    if (answeredFromQueue !== undefined) {
+      withResolvers.resolve(toUserReadResult(answeredFromQueue));
+    }
     return withResolvers.promise as unknown as Promise<
       ReadableStreamReadResult<T>
     >;
