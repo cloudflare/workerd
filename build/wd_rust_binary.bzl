@@ -1,6 +1,7 @@
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
 load("@workerd//:build/wd_rust_crate.bzl", "rust_cxx_bridge", "rust_cxx_include_prefix")
+load("@workerd//:build/wd_rust_test.bzl", "split_rust_test_srcs")
 
 def _coverage_runtime_objects_impl(ctx):
     # Bazel's LLVM coverage collector (collect_cc_coverage.sh) runs `llvm-cov export` over exactly
@@ -51,6 +52,7 @@ def wd_rust_binary(
         cxx_bridge_src = None,
         cxx_bridge_deps = [],
         cxx_bridge_hdrs = None,
+        target_compatible_with = [],
         test_size = "small"):
     """Define rust binary.
 
@@ -72,9 +74,11 @@ def wd_rust_binary(
         test: whether to define a <name>_test target for the binary's own tests.
         tags: rule tags
         cxx_bridge_hdrs: headers the bridge include!()s; defaults to every .h file in the package.
+        target_compatible_with: additional platform constraints for the binary and its test.
     """
     if srcs == None:
         srcs = native.glob(["**/*.rs"])
+    srcs, test_srcs = split_rust_test_srcs(srcs)
     crate_name = name.replace("-", "_")
 
     if cxx_bridge_src:
@@ -126,12 +130,13 @@ def wd_rust_binary(
         data = data,
         experimental_use_cc_common_link = 1,
         proc_macro_deps = proc_macro_deps,
+        lint_config = "@workerd//build/rust:lints",
         # linkopts_tool links with full optimization, so it is given more CPUs.
         tags = tags + ["cpu:4" if tool else "cpu:2"],
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
-        }),
+        }) + target_compatible_with,
         **binary_kwargs
     )
 
@@ -154,6 +159,7 @@ def wd_rust_binary(
 
     rust_test(
         name = name + "_test",
+        compile_data = test_srcs,
         crate = ":" + name,
         env = {
             "RUST_BACKTRACE": "1",
@@ -165,7 +171,7 @@ def wd_rust_binary(
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
-        }),
+        }) + target_compatible_with,
         experimental_use_cc_common_link = 1,
         link_deps = ["//build/deps:linkopts_default", "@@//deps:rust_runtime"],
         size = test_size,

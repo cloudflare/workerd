@@ -2,10 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Production code must not panic; test code is exempt via clippy.toml allow-*-in-tests.
-#![deny(clippy::expect_used, clippy::panic, clippy::unreachable)]
-#![deny(clippy::todo, clippy::unimplemented)]
-
 //! WHATWG Encoding Standard legacy decoders via `encoding_rs`.
 //!
 //! Exposes a streaming decoder to C++ via CXX bridge. All legacy encodings
@@ -17,6 +13,7 @@
 //! the pointer and length returned in `DecodeResult`.
 
 #[cxx::bridge(namespace = "workerd::rust::encoding")]
+#[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {
     /// Legacy encoding types supported by the Rust decoder.
     /// Shared between C++ and Rust.
@@ -220,23 +217,5 @@ pub fn reset(state: &mut Decoder) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn known_encoding_constructs_a_decoder() {
-        assert!(new_decoder(ffi::Encoding::Windows1252).is_ok());
-    }
-
-    #[test]
-    fn unknown_encoding_returns_error_instead_of_panicking() {
-        // Simulate discriminant drift / a corrupt value from C++: an out-of-range
-        // `Encoding` (the shared cxx enum is a `#[repr(u16)]` open value). This must
-        // surface as a clean error rather than aborting the process.
-        let bad = ffi::Encoding { repr: u16::MAX };
-        match new_decoder(bad) {
-            Ok(_) => panic!("out-of-range discriminant should error"),
-            Err(err) => assert!(err.description().contains("unknown encoding discriminant")),
-        }
-    }
-}
+#[path = "lib-test.rs"]
+mod tests;

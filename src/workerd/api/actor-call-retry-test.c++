@@ -384,5 +384,33 @@ KJ_TEST("actor calls do not retry when retry requests are disabled") {
   KJ_EXPECT(observer->outcomes.size() == 0);
 }
 
+KJ_TEST("actor call failure handling requires retries to be enabled") {
+  // Callers take the non-retry path when retries are disabled, so reaching here is a caller bug.
+  auto check = [](ActorRetryGateEnabled enforcementEnabled,
+                   ActorCallPayloadReplayable payloadReplayable) {
+    TestTimerChannel timer;
+    auto observer = kj::refcounted<RecordingObserver>();
+    auto state = kj::rc<ActorCallRetryState>(timer, *observer,
+        ActorCallRetryState::Config{
+          .callType = ActorRetryCallType::JSRPC,
+          .enforcementEnabled = enforcementEnabled,
+          .payloadReplayable = payloadReplayable,
+        },
+        ActorRetryPolicy::systemDefault(), timer.nowForLimitTimeout());
+
+    startAttempt(*state);
+    KJ_EXPECT(!state->isRetryEnabled());
+    KJ_EXPECT_THROW_MESSAGE(
+        "retriesEnabled", handleFailure(*state, makeDisconnect("disconnected"_kj)));
+    KJ_EXPECT_THROW_MESSAGE(
+        "retriesEnabled", state->handleCommittedAttemptFailure(makeDisconnect("disconnected"_kj)));
+    KJ_EXPECT(observer->retryCallTypes.size() == 0);
+    KJ_EXPECT(observer->outcomes.size() == 0);
+  };
+
+  check(ActorRetryGateEnabled::NO, ActorCallPayloadReplayable::YES);
+  check(ActorRetryGateEnabled::YES, ActorCallPayloadReplayable::NO);
+}
+
 }  // namespace
 }  // namespace workerd::api

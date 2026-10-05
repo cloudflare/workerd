@@ -2,6 +2,11 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![allow(
+    unsafe_code,
+    reason = "resources are shared with the C++ `Wrappable` through raw pointers"
+)]
+
 use std::any::TypeId;
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -357,7 +362,10 @@ impl<R: Resource> Default for Weak<R> {
 /// **Ownership**: The `Rc` is consumed. The JS wrapper keeps the `Wrappable`
 /// alive via `CppgcShim`. When the JS object is garbage collected and all Rust
 /// `Rc`s are dropped, the resource is destroyed.
-#[expect(clippy::needless_pass_by_value)]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "the `Rc` is consumed: the JS wrapper takes over the reference"
+)]
 pub fn wrap<'a, R: Resource + 'static>(
     lock: &mut Lock,
     resource: Rc<R>,

@@ -43,6 +43,41 @@ inline workerd::EventOutcome fromImpl(kj_rs::Rust*, workerd::rust::worker::Event
   }
 }
 
+// Converts a C++ EventOutcome to the bridge's shared EventOutcome enum.
+inline EventOutcome toRustOutcome(workerd::EventOutcome outcome) {
+  switch (outcome) {
+    case workerd::EventOutcome::UNKNOWN:
+      return EventOutcome::Unknown;
+    case workerd::EventOutcome::OK:
+      return EventOutcome::Ok;
+    case workerd::EventOutcome::EXCEPTION:
+      return EventOutcome::Exception;
+    case workerd::EventOutcome::EXCEEDED_CPU:
+      return EventOutcome::ExceededCpu;
+    case workerd::EventOutcome::KILL_SWITCH:
+      return EventOutcome::KillSwitch;
+    case workerd::EventOutcome::DAEMON_DOWN:
+      return EventOutcome::DaemonDown;
+    case workerd::EventOutcome::SCRIPT_NOT_FOUND:
+      return EventOutcome::ScriptNotFound;
+    case workerd::EventOutcome::CANCELED:
+      return EventOutcome::Canceled;
+    case workerd::EventOutcome::EXCEEDED_MEMORY:
+      return EventOutcome::ExceededMemory;
+    case workerd::EventOutcome::LOAD_SHED:
+      return EventOutcome::LoadShed;
+    case workerd::EventOutcome::RESPONSE_STREAM_DISCONNECTED:
+      return EventOutcome::ResponseStreamDisconnected;
+    case workerd::EventOutcome::INTERNAL_ERROR:
+      return EventOutcome::InternalError;
+    case workerd::EventOutcome::EXCEEDED_WALL_TIME:
+      return EventOutcome::ExceededWallTime;
+    case workerd::EventOutcome::ABORTED:
+      return EventOutcome::Aborted;
+  }
+  KJ_UNREACHABLE;
+}
+
 inline workerd::WorkerInterface::ScheduledResult fromImpl(
     kj_rs::Rust*, workerd::rust::worker::ScheduledResult result) {
   return workerd::WorkerInterface::ScheduledResult{
@@ -107,6 +142,11 @@ class RustWorkerInterface final: public workerd::WorkerInterface {
     co_return kj::from<kj_rs::Rust>(co_await impl->run_alarm(scheduledTime, retryCount));
   }
 
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    auto stored = co_await impl->abandon_alarm(scheduledTime);
+    co_return stored.map([](int64_t nanos) { return kj_rs::repr::fromNanos(nanos); });
+  }
+
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     co_return kj::from<kj_rs::Rust>(co_await impl->custom_event(kj::mv(event)));
   }
@@ -122,6 +162,13 @@ class RustWorkerInterface final: public workerd::WorkerInterface {
 inline kj::Own<workerd::WorkerInterface> fromImpl(
     kj_rs::Rust*, ::rust::Box<RustWorkerInterface::Impl> impl) {
   return kj::heap<RustWorkerInterface>(kj::mv(impl));
+}
+
+// Wraps a worker that is still starting in the Rust `PromisedInterface`, the counterpart of
+// `newPromisedWorkerInterface`. Every event waits for `start`, then runs on the worker it
+// resolves to.
+inline kj::Own<workerd::WorkerInterface> newPromisedInterface(WorkerPromise start) {
+  return kj::from<kj_rs::Rust>(new_promised_interface(kj::heap<WorkerPromise>(kj::mv(start))));
 }
 
 }  // namespace workerd::rust::worker
