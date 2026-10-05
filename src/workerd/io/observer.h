@@ -50,6 +50,19 @@ enum class ActorRetryOutcome : uint8_t {
   OTHER,
 };
 
+// Temporary retry diagnostics: why an actor retry loop that started a retry ended as
+// UNABLE_TO_RETRY.
+enum class ActorRetryStopReason : uint8_t {
+  DELIVERED_DISCONNECT,
+  // Pipeline use committed the call to an attempt before that attempt's retry decision.
+  PIPELINE_COMMITTED_IN_FLIGHT,
+  // Pipeline use committed the call while it waited to retry.
+  PIPELINE_COMMITTED_IN_BACKOFF,
+  NON_DISCONNECT_FAILED,
+  NON_DISCONNECT_OVERLOADED,
+  NON_DISCONNECT_UNIMPLEMENTED,
+};
+
 class WorkerInterface;
 class LimitEnforcer;
 class TimerChannel;
@@ -208,6 +221,12 @@ class RequestObserver: public kj::Refcounted {
   // least one retry attempt.
   virtual void recordActorRetryOutcome(
       ActorRetryCallType callType, ActorRetryOutcome outcome, kj::Duration retryAddedLatency) {}
+
+  // Temporary retry diagnostics. Each is recorded at most once per logical call.
+  //
+  // Why a retry loop recorded as UNABLE_TO_RETRY by recordActorRetryOutcome() stopped.
+  virtual void recordActorRetryStopReason(
+      ActorRetryCallType callType, ActorRetryStopReason reason) {}
 
   // Fired after actor construction and immediately before user code handles the request, so an
   // observer can claim the request's retry-token nonce and throw to reject it. For fetch, that is

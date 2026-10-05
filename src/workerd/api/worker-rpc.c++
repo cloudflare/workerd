@@ -557,7 +557,8 @@ class JsRpcCallRetryState final: public kj::Refcounted {
   }
 
   kj::Exception handleCommittedFailure(kj::Exception exception) {
-    auto result = getRetryState().handleCommittedAttemptFailure(kj::mv(exception));
+    auto result = getRetryState().handleCommittedAttemptFailure(
+        kj::mv(exception), ActorRetryStopReason::PIPELINE_COMMITTED_IN_FLIGHT);
     pipelineRevoker->reject(result.clone());
     return result;
   }
@@ -1074,7 +1075,8 @@ JsRpcCallAttemptPromise handleFailedJsRpcCallAttempt(
     state->finishBackoffWait();
     if (state->isCommitted()) {
       auto exception = state->getRetryState().handleCommittedAttemptFailure(
-          state->getRetryState().getOriginalDisconnect());
+          state->getRetryState().getOriginalDisconnect(),
+          ActorRetryStopReason::PIPELINE_COMMITTED_IN_BACKOFF);
       return finishFailedJsRpcCall(js, *state, kj::mv(exception));
     }
 
