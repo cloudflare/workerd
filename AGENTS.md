@@ -52,6 +52,7 @@ Subdirectory `AGENTS.md` files provide component-specific context (key classes, 
 
 - **`.wd-test` tests**: Cap'n Proto config files that define a `Workerd.Config` with embedded JS/TS modules. Bazel macro: `wd_test()`. See format details below.
 - **C++ tests**: KJ-based unit tests (`.c++` files). Bazel macro: `kj_test()`.
+- **Rust unit tests**: `<module>-test.rs` beside the module under test, never inline; run by the crate's test target (`<name>_test` for a crate defined with a `wd_rust_*` macro; otherwise see the package's `BUILD.bazel`). See `src/rust/AGENTS.md` §UNIT TEST FILES.
 - **Node.js compatibility tests**: `just node-test <test_name>`
 - **Web Platform Tests**: `just wpt-test <test_name>`
 - **Benchmarks**: `just bench <path>` (e.g., `just bench mimetype`)

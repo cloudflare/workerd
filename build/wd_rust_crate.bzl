@@ -1,7 +1,7 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_unpretty")
 load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
-load("//:build/wd_rust_test.bzl", "wd_rust_test")
+load("//:build/wd_rust_test.bzl", "split_rust_test_srcs", "wd_rust_test")
 
 def rust_cxx_bridge(
         name,
@@ -83,7 +83,8 @@ def wd_rust_crate(
     Args:
         name: crate name.
         srcs: crate sources; defaults to every .rs file in the package. Name them explicitly when
-            the package also holds other crates or C++.
+            the package also holds other crates or C++. The *-test.rs files among them are the
+            crate's unit tests and are compiled only into <name>_test; see split_rust_test_srcs.
         crate_root: the crate's root module, if not lib.rs or <name>.rs.
         cxx_bridge_src: (optional) .rs source file with cxx ffi bridge definition. The rule will
             generation additional<name>@cxx c++ library with cxx bindings if this is set.
@@ -105,6 +106,7 @@ def wd_rust_crate(
     """
     if srcs == None:
         srcs = native.glob(["**/*.rs"])
+    srcs, test_srcs = split_rust_test_srcs(srcs)
     crate_name = name.replace("-", "_")
 
     if cxx_bridge_src:
@@ -178,6 +180,7 @@ def wd_rust_crate(
 
     wd_rust_test(
         name = name + "_test",
+        compile_data = test_srcs,
         crate = ":" + name,
         env = test_env,
         size = test_size,

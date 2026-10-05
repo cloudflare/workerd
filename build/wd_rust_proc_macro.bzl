@@ -1,4 +1,5 @@
 load("@rules_rust//rust:defs.bzl", "rust_proc_macro", "rust_test")
+load("//:build/wd_rust_test.bzl", "split_rust_test_srcs")
 
 def wd_rust_proc_macro(
         name,
@@ -19,7 +20,7 @@ def wd_rust_proc_macro(
         test_deps: test-only dependencies.
         visibility: crate visibility.
     """
-    srcs = native.glob(["**/*.rs"])
+    srcs, test_srcs = split_rust_test_srcs(native.glob(["**/*.rs"]))
     crate_name = name.replace("-", "_")
 
     rust_proc_macro(
@@ -37,6 +38,7 @@ def wd_rust_proc_macro(
 
     rust_test(
         name = name + "_test",
+        compile_data = test_srcs,
         crate = ":" + name,
         env = {
             "RUST_BACKTRACE": "1",
