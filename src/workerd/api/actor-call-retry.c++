@@ -70,6 +70,10 @@ kj::OneOf<ActorCallRetryState::Attempt, kj::Exception> ActorCallRetryState::star
 }
 
 kj::Exception ActorCallRetryState::retryTimeoutExpired() {
+  if (!recordedOutcome && retryAttemptsStarted == 0) {
+    observer->recordActorRetryCandidate(
+        config.callType, ActorRetryCandidate::FIRST_FAILURE_BUDGET_SPENT);
+  }
   recordOutcome(ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
   return KJ_ASSERT_NONNULL(originalDisconnect).clone();
 }
@@ -81,6 +85,14 @@ kj::OneOf<kj::Duration, kj::Exception> ActorCallRetryState::handleAttemptFailure
   maybeStartRetryLatencyTimer(exception);
   KJ_IF_SOME(claimRejection, handleClaimRejection(exception)) {
     return kj::mv(claimRejection);
+  }
+  KJ_IF_SOME(candidate, config.probeCandidate) {
+    if (exception.getType() == kj::Exception::Type::DISCONNECTED &&
+        exception.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none) {
+      auto recorded = candidate;
+      config.probeCandidate = kj::none;
+      observer->recordActorRetryCandidate(config.callType, recorded);
+    }
   }
 
   return checkCanRetry(kj::mv(exception));

@@ -79,6 +79,9 @@ class ActorCallRetryState final: public kj::Refcounted {
     ActorRetryCallType callType;
     ActorRetryGateEnabled enforcementEnabled;
     ActorCallPayloadReplayable payloadReplayable;
+    // The target's ActorRetryCandidate, recorded and cleared at the first disconnect before
+    // commitment that is not marked delivered.
+    kj::Maybe<ActorRetryCandidate> probeCandidate = kj::none;
   };
 
   class Attempt {

@@ -59,22 +59,29 @@ class RecordingObserver final: public RequestObserver {
     exhaustedElapsed.add(elapsed);
   }
 
+  void recordActorRetryCandidate(ActorRetryCallType, ActorRetryCandidate candidate) override {
+    candidates.add(candidate);
+  }
+
   kj::Vector<ActorRetryCallType> retryCallTypes;
   kj::Vector<ActorRetryCallType> outcomeCallTypes;
   kj::Vector<ActorRetryOutcome> outcomes;
   kj::Vector<ActorRetryStopReason> stopReasons;
   kj::Vector<kj::Duration> exhaustedElapsed;
+  kj::Vector<ActorRetryCandidate> candidates;
 };
 
 // A retry state with every gate enabled and a replayable payload.
 kj::Rc<ActorCallRetryState> newRetryState(TestTimerChannel& timer,
     RecordingObserver& observer,
-    ActorRetryPolicy policy = ActorRetryPolicy::systemDefault()) {
+    ActorRetryPolicy policy = ActorRetryPolicy::systemDefault(),
+    kj::Maybe<ActorRetryCandidate> probeCandidate = kj::none) {
   return kj::rc<ActorCallRetryState>(timer, observer,
       ActorCallRetryState::Config{
         .callType = ActorRetryCallType::JSRPC,
         .enforcementEnabled = ActorRetryGateEnabled::YES,
         .payloadReplayable = ActorCallPayloadReplayable::YES,
+        .probeCandidate = probeCandidate,
       },
       policy, timer.nowForLimitTimeout());
 }
@@ -270,6 +277,7 @@ KJ_TEST("actor retries report retry budget exhaustion when budget expires during
   KJ_EXPECT(failure.getDescription().contains("original disconnect"));
   KJ_ASSERT(observer->outcomes.size() == 1);
   KJ_EXPECT(observer->outcomes[0] == ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
+  KJ_EXPECT(observer->candidates.size() == 0);
 }
 
 KJ_TEST("actor retries report retry budget exhaustion when the next attempt cannot start") {
@@ -359,6 +367,12 @@ KJ_TEST("actor retries return the original disconnect when the deadline expires 
   KJ_EXPECT(failure.getDescription().contains("original disconnect"));
   KJ_EXPECT(observer->retryCallTypes.size() == 0);
   KJ_EXPECT(observer->outcomes.size() == 0);
+  KJ_ASSERT(observer->candidates.size() == 1);
+  KJ_EXPECT(observer->candidates[0] == ActorRetryCandidate::FIRST_FAILURE_BUDGET_SPENT);
+
+  // The deadline expiring again must not count the call twice.
+  KJ_EXPECT(state->startAttempt().is<kj::Exception>());
+  KJ_EXPECT(observer->candidates.size() == 1);
 }
 
 KJ_TEST("actor calls do not retry a failure after the deadline") {
@@ -377,6 +391,8 @@ KJ_TEST("actor calls do not retry a failure after the deadline") {
   KJ_EXPECT(finalFailure.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none);
   KJ_EXPECT(observer->retryCallTypes.size() == 0);
   KJ_EXPECT(observer->outcomes.size() == 0);
+  KJ_ASSERT(observer->candidates.size() == 1);
+  KJ_EXPECT(observer->candidates[0] == ActorRetryCandidate::FIRST_FAILURE_BUDGET_SPENT);
 }
 
 KJ_TEST("actor calls do not retry when retry requests are disabled") {
@@ -493,6 +509,47 @@ KJ_TEST("attempt exhaustion reports time since the call started") {
   KJ_EXPECT(observer->outcomes[0] == ActorRetryOutcome::ATTEMPTS_EXHAUSTED);
   KJ_ASSERT(observer->exhaustedElapsed.size() == 1);
   KJ_EXPECT(observer->exhaustedElapsed[0] == 1500 * kj::MILLISECONDS);
+}
+
+KJ_TEST("a target's probe candidate is reported at its first uncommitted disconnect") {
+  TestTimerChannel timer;
+  auto observer = kj::refcounted<RecordingObserver>();
+  auto state = newRetryState(
+      timer, *observer, ActorRetryPolicy::systemDefault(), ActorRetryCandidate::REPLICA_PRIMARY);
+
+  startAttempt(*state);
+  KJ_EXPECT(handleFailure(*state, makeDisconnect("first"_kj)).is<kj::Duration>());
+  startAttempt(*state);
+  KJ_EXPECT(handleFailure(*state, makeDisconnect("second"_kj)).is<kj::Duration>());
+  state->recordRecovered();
+
+  KJ_ASSERT(observer->candidates.size() == 1);
+  KJ_EXPECT(observer->candidates[0] == ActorRetryCandidate::REPLICA_PRIMARY);
+}
+
+KJ_TEST("a target's probe candidate ignores non-disconnect, delivered, and committed failures") {
+  TestTimerChannel timer;
+  auto observer = kj::refcounted<RecordingObserver>();
+  auto failed = newRetryState(
+      timer, *observer, ActorRetryPolicy::systemDefault(), ActorRetryCandidate::REPLICA_PRIMARY);
+  startAttempt(*failed);
+  KJ_EXPECT(handleFailure(*failed, KJ_EXCEPTION(FAILED, "failed")).is<kj::Exception>());
+
+  auto delivered = newRetryState(
+      timer, *observer, ActorRetryPolicy::systemDefault(), ActorRetryCandidate::REPLICA_PRIMARY);
+  startAttempt(*delivered);
+  auto deliveredDisconnect = makeDisconnect("delivered"_kj);
+  deliveredDisconnect.setDetail(
+      jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  KJ_EXPECT(handleFailure(*delivered, kj::mv(deliveredDisconnect)).is<kj::Exception>());
+
+  auto committed = newRetryState(
+      timer, *observer, ActorRetryPolicy::systemDefault(), ActorRetryCandidate::REPLICA_PRIMARY);
+  startAttempt(*committed);
+  committed->handleCommittedAttemptFailure(
+      makeDisconnect("committed"_kj), ActorRetryStopReason::PIPELINE_COMMITTED_IN_FLIGHT);
+
+  KJ_EXPECT(observer->candidates.size() == 0);
 }
 
 }  // namespace
