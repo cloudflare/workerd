@@ -97,6 +97,14 @@ jsg::Promise<CachePurgeResult> CacheContext::purge(jsg::Lock& js,
   JSG_FAIL_REQUIRE(Error, "Cache purge is not available in this context.");
 }
 
+jsg::Promise<CachePurgeResult> CacheContext::invalidate(jsg::Lock& js,
+    CachePurgeOptions options,
+    const jsg::TypeHandler<CachePurgeOptions>& optionsHandler,
+    const jsg::TypeHandler<CachePurgeResult>& resultHandler,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler) {
+  JSG_FAIL_REQUIRE(Error, "Cache invalidation is not available in this context.");
+}
+
 jsg::Ref<Tracing> ExecutionContext::getTracing(jsg::Lock& js) {
   // A new Tracing handle is allocated on first access only - `JSG_LAZY_INSTANCE_PROPERTY`
   // uses V8's SetLazyDataProperty, which caches the getter result on the instance after the

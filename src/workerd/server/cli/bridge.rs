@@ -4,8 +4,10 @@
 //! Each command is one call into C++ carrying its parsed options as plain structs. C++ calls back
 //! into [`Process`] for `--watch`.
 
-// The bridge macro expands to `unsafe` FFI declarations; the crate root denies unsafe code.
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "holds a cxx bridge, which expands to unsafe FFI glue"
+)]
 
 pub use crate::process::Process;
 pub use crate::process::wait_for_changes;

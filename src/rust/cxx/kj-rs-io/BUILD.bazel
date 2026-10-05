@@ -48,13 +48,17 @@ wd_cc_library(
 
 rust_library(
     name = "kj-rs-io",
-    srcs = glob(["*.rs"]),
+    srcs = glob(
+        ["*.rs"],
+        exclude = ["*-test.rs"],
+    ),
     compile_data = glob(["*.h"]),
     edition = "2024",
     link_deps = [
         ":bridge",
         ":kj-rs-io-lib",
     ],
+    lint_config = "//build/rust:lints",
     target_compatible_with = select({
         "@//build/config:no_build": ["@platforms//:incompatible"],
         "//conditions:default": [],
@@ -78,6 +82,7 @@ rust_library(
 
 wd_rust_test(
     name = "kj-rs-io_test",
+    compile_data = glob(["*-test.rs"]),
     crate = "kj-rs-io",
     edition = "2024",
     deps = ["@crates_vendor//:static_assertions"],

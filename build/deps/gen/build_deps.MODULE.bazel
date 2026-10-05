@@ -14,7 +14,7 @@ bazel_dep(name = "apple_support", version = "2.9.1")
 bazel_dep(name = "aspect_rules_esbuild", version = "0.27.1")
 
 # aspect_rules_js
-bazel_dep(name = "aspect_rules_js", version = "3.4.1")
+bazel_dep(name = "aspect_rules_js", version = "3.5.0")
 
 # aspect_rules_ts
 bazel_dep(name = "aspect_rules_ts", version = "3.10.1")
@@ -67,7 +67,7 @@ use_repo(http, "clang_tidy_linux_arm64")
 git_repository(
     name = "llvm_runtimes",
     build_file = "@workerd//:build/BUILD.llvm-runtimes",
-    commit = "ca7933e47d3a3451d81e72ac174dcb5aa28b59d1",
+    commit = "85ac560262434c9ccfc0c183ec22d4138ed647fb",
     remote = "https://github.com/llvm/llvm-project.git",
     sparse_checkout_patterns = [
         "cmake",

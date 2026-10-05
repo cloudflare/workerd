@@ -1,7 +1,7 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_unpretty")
 load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
-load("//:build/wd_rust_test.bzl", "wd_rust_test")
+load("//:build/wd_rust_test.bzl", "split_rust_test_srcs", "wd_rust_test")
 
 def rust_cxx_bridge(
         name,
@@ -77,13 +77,15 @@ def wd_rust_crate(
         cxx_bridge_tags = [],
         cxx_bridge_local_defines = [],
         cxx_bridge_features = [],
+        testonly = False,
         visibility = None):
     """Define rust crate.
 
     Args:
         name: crate name.
         srcs: crate sources; defaults to every .rs file in the package. Name them explicitly when
-            the package also holds other crates or C++.
+            the package also holds other crates or C++. The *-test.rs files among them are the
+            crate's unit tests and are compiled only into <name>_test; see split_rust_test_srcs.
         crate_root: the crate's root module, if not lib.rs or <name>.rs.
         cxx_bridge_src: (optional) .rs source file with cxx ffi bridge definition. The rule will
             generation additional<name>@cxx c++ library with cxx bindings if this is set.
@@ -102,9 +104,12 @@ def wd_rust_crate(
         cxx_bridge_deps: either a flat dependency list applied to every bridge source, or a dict of
             bridge source => dependency list.
         cxx_bridge_hdrs: headers the bridges include!(); defaults to every .h file in the package.
+        testonly: True for a crate that only tests depend on (a test harness, the Rust half of a
+            C++ test). Like other test code, it is not held to //build/rust:lints.
     """
     if srcs == None:
         srcs = native.glob(["**/*.rs"])
+    srcs, test_srcs = split_rust_test_srcs(srcs)
     crate_name = name.replace("-", "_")
 
     if cxx_bridge_src:
@@ -169,6 +174,8 @@ def wd_rust_crate(
         data = data,
         proc_macro_deps = proc_macro_deps,
         crate_features = crate_features,
+        lint_config = None if testonly else "@workerd//build/rust:lints",
+        testonly = testonly,
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
@@ -178,6 +185,7 @@ def wd_rust_crate(
 
     wd_rust_test(
         name = name + "_test",
+        compile_data = test_srcs,
         crate = ":" + name,
         env = test_env,
         size = test_size,
@@ -192,6 +200,7 @@ def wd_rust_crate(
             name = name + "@expand",
             deps = [":" + name],
             tags = ["manual", "off-by-default"],
+            testonly = testonly,
         )
 
     if len(test_proc_macro_deps) > 0:

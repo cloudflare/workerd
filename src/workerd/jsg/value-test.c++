@@ -1037,6 +1037,14 @@ KJ_TEST("Sequence Values") {
 // ========================================================================================
 
 struct NonCoercibleContext: public ContextGlobalObject {
+  struct NonCoercibleStruct {
+    NonCoercible<kj::String> string;
+    NonCoercible<bool> boolean;
+    NonCoercible<double> number;
+
+    JSG_STRUCT(string, boolean, number);
+  };
+
   template <CoercibleType T>
   bool test(NonCoercible<T>) {
     return true;
@@ -1063,6 +1071,26 @@ struct NonCoercibleContext: public ContextGlobalObject {
     return true;
   }
 
+  NonCoercible<kj::String> returnString() {
+    return {.value = kj::str("string")};
+  }
+
+  NonCoercible<bool> returnBoolean() {
+    return {.value = true};
+  }
+
+  NonCoercible<double> returnNumber() {
+    return {.value = 123};
+  }
+
+  NonCoercibleStruct returnStruct() {
+    return {
+      .string = {.value = kj::str("struct")},
+      .boolean = {.value = false},
+      .number = {.value = 456},
+    };
+  }
+
   JSG_RESOURCE_TYPE(NonCoercibleContext) {
     JSG_METHOD_NAMED(testString, template test<kj::String>);
     JSG_METHOD_NAMED(testStringCoerced, template testCoerced<kj::String>);
@@ -1077,9 +1105,14 @@ struct NonCoercibleContext: public ContextGlobalObject {
     JSG_METHOD(testMaybeString);
     JSG_METHOD(testMaybeStringCoerced);
     JSG_METHOD(testOneOf);
+    JSG_METHOD(returnString);
+    JSG_METHOD(returnBoolean);
+    JSG_METHOD(returnNumber);
+    JSG_METHOD(returnStruct);
   }
 };
-JSG_DECLARE_ISOLATE_TYPE(NonCoercibleIsolate, NonCoercibleContext);
+JSG_DECLARE_ISOLATE_TYPE(
+    NonCoercibleIsolate, NonCoercibleContext, NonCoercibleContext::NonCoercibleStruct);
 
 KJ_TEST("NonCoercible Values") {
   Evaluator<NonCoercibleContext, NonCoercibleIsolate> e(v8System);
@@ -1144,6 +1177,12 @@ KJ_TEST("NonCoercible Values") {
   e.expectEval("testOneOf(new String(''))", "throws",
       "TypeError: Failed to execute 'testOneOf' on 'NonCoercibleContext': parameter 1 is"
       " not of type 'boolean or string'.");
+
+  e.expectEval("returnString()", "string", "string");
+  e.expectEval("returnBoolean()", "boolean", "true");
+  e.expectEval("returnNumber()", "number", "123");
+  e.expectEval("JSON.stringify(returnStruct())", "string",
+      "{\"string\":\"struct\",\"boolean\":false,\"number\":456}");
 }
 
 // ========================================================================================

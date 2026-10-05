@@ -8,7 +8,6 @@
 // Two modules allow `unsafe`: bridge.rs, whose `cxx::bridge` macro expands to FFI declarations,
 // and socket_fd.rs, where a descriptor number from the command line becomes an owned descriptor.
 // Everything else is safe code over std, socket2 and the bridge.
-#![deny(unsafe_code)]
 
 mod args;
 mod bridge;

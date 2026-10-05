@@ -15,10 +15,10 @@ archive_override(
     patches = [
         "//:patches/boringssl/0001-Expose-libdecrepit-so-NodeJS-can-use-it-for-ncrypto.patch",
     ],
-    sha256 = "37ea781c65a67c6d5f41d4b69bc853dd8b735378be2f962025a33d1f6d142495",
-    strip_prefix = "google-boringssl-030986a",
+    sha256 = "55827fd521a666a60293d06dc0410524d5eff8eb7cda23fdb6e2b1d56a5d4a20",
+    strip_prefix = "google-boringssl-866a4b0",
     type = "tgz",
-    url = "https://api.github.com/repos/google/boringssl/tarball/0.20260813.0",
+    url = "https://api.github.com/repos/google/boringssl/tarball/0.20260929.0",
 )
 
 # brotli
@@ -38,7 +38,7 @@ use_repo(http, "capnp-cpp")
 git_repository(
     name = "com_googlesource_chromium_icu",
     build_file = "@v8//:bazel/BUILD.icu",
-    commit = "8cc91d9b6ab9991802fd208ee03a69714fd0251c",
+    commit = "6ebb40c594776cc2c21ea14df85a2a89a328b364",
     patch_cmds = [
         "find source -name BUILD.bazel | xargs rm",
     ],
@@ -127,10 +127,10 @@ archive_override(
         "//:patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch",
         "//:patches/perfetto/0002-disable-info-level-logging-re2.patch",
     ],
-    sha256 = "5b0312f61b4e3d4d29b0962593af0589bd4d2399c6797400e61e9ea4f31f7fb5",
-    strip_prefix = "google-perfetto-f00e0f6",
+    sha256 = "4fcc98fe4754269a70e297f6caba429420039c89a1c6cb561dffb4057de63abb",
+    strip_prefix = "google-perfetto-9e9bdaf",
     type = "tgz",
-    url = "https://api.github.com/repos/google/perfetto/tarball/v58.3",
+    url = "https://api.github.com/repos/google/perfetto/tarball/v58.2",
 )
 
 # simdutf

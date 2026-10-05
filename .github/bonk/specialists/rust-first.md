@@ -43,7 +43,8 @@ What to look for in added code:
 - **Project conventions** that are easy to miss: namespace `workerd::rust::<crate>` (or the
   component's namespace for crates beside C++), `&Lock` first after any `self` receiver, no `get_` prefixes, FFI function
   groups kept in matching order across `v8.rs`/`ffi.h`/`ffi.c++`, `#[expect]` rather than
-  `#[allow]` for lints.
+  `#[allow]` for lints, unit tests in a sibling `<module>-test.rs` rather than an inline
+  `mod tests { ... }` (`src/rust/AGENTS.md`, UNIT TEST FILES).
 
 Boundaries:
 - Do not make correctness claims; those belong to the correctness specialist.

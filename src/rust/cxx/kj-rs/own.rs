@@ -1,5 +1,10 @@
 //! The `workerd-cxx` module containing the [`Own<T>`] type, which is bindings to the `kj::Own<T>` C++ type
 
+#![allow(
+    unsafe_code,
+    reason = "`KjOwn` mirrors `kj::Own<T>` and runs its C++ disposer"
+)]
+
 use std::fmt;
 use std::marker::PhantomData;
 

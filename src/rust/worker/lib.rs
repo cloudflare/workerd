@@ -19,6 +19,7 @@ pub mod exception;
 pub mod ffi;
 pub mod kill_switch;
 pub mod ok;
+pub mod promised;
 
 use std::time::SystemTime;
 
@@ -40,6 +41,7 @@ pub use crate::cxx_worker::CxxWorkerInterface;
 pub use crate::ffi::Wrapper;
 pub use crate::ffi::bridge::CustomEvent;
 pub use crate::ffi::bridge::WorkerInterface;
+pub use crate::promised::PromisedInterface;
 
 pub type Result<T> = std::result::Result<T, KjError>;
 
@@ -72,6 +74,16 @@ pub trait Interface: kj::http::Service {
         retry_count: u32,
     ) -> Result<AlarmResult>;
 
+    /// Called when the alarm manager has given up retrying an alarm after too many counted
+    /// failures. The actor should clear its alarm state so `getAlarm()` reflects the deletion.
+    /// Returns the actor's stored alarm time if it differs from `scheduled_time` (the user set a
+    /// new alarm), or `None` if the alarm was cleared or no alarm was stored.
+    ///
+    /// The default does nothing, so implementors that do not host actors need not override it.
+    async fn abandon_alarm(&mut self, _scheduled_time: &SystemTime) -> Result<Option<SystemTime>> {
+        Ok(None)
+    }
+
     /// Run the test handler. The returned promise resolves to true or false to indicate that the test
     /// passed or failed. In the case of a failure, information should have already been written to
     /// stderr and to the devtools; there is no need for the caller to write anything further. (If the
@@ -93,7 +105,12 @@ pub trait Interface: kj::http::Service {
     /// immediately; if its callbacks have not run yet, they will not run at all. So, a `CustomEvent`
     /// implementation can hold references to objects it doesn't own as long as the returned promise
     /// will be canceled before those objects go away.
-    async fn custom_event(&mut self, event: KjOwn<CustomEvent>) -> Result<CustomEventResult>;
+    ///
+    /// The default answers the event with [`not_supported`], which is what a C++
+    /// `WorkerInterface` does when it returns `event->notSupported()`.
+    async fn custom_event(&mut self, event: KjOwn<CustomEvent>) -> Result<CustomEventResult> {
+        not_supported(event).await
+    }
 
     /// Convert `self` into the structure suitable for passing to C++ through FFI layer
     /// To obtain `workerd::WorkerInterface` on C++ side finish wrapping with `fromRust()`
@@ -104,6 +121,23 @@ pub trait Interface: kj::http::Service {
     {
         Box::new(ffi::Wrapper::new(Box::new(self)))
     }
+
+    /// Converts `self` into a C++ `WorkerInterface`.
+    fn into_kj(self) -> KjOwn<WorkerInterface>
+    where
+        Self: Sized + 'static,
+    {
+        ffi::bridge::wrapper_into_kj(Interface::into_ffi(self))
+    }
+}
+
+/// Answers `event` on behalf of a target that does not support it.
+///
+/// Calls `CustomEvent::notSupported()`, which each event type implements (typically by raising
+/// an error), and keeps `event` alive until the result is ready.
+pub async fn not_supported(event: KjOwn<CustomEvent>) -> Result<CustomEventResult> {
+    let result = ffi::bridge::custom_event_not_supported(event).await?;
+    Ok(result.into())
 }
 
 /// Result of a scheduled event.
@@ -129,39 +163,5 @@ pub struct CustomEventResult {
 }
 
 #[cfg(test)]
-mod tests {
-    use kj::http::HeaderId;
-
-    #[expect(dead_code, reason = "HeaderOverrideProxy exists as compilation test.")]
-    struct HeaderOverrideProxy(Box<dyn crate::Interface>);
-
-    #[async_trait::async_trait(?Send)]
-    impl kj::http::Service for HeaderOverrideProxy {
-        async fn request<'a>(
-            &'a mut self,
-            method: kj::http::Method,
-            url: &'a [u8],
-            headers: kj::http::HeadersRef<'a>,
-            request_body: std::pin::Pin<&'a mut kj::io::AsyncInputStream>,
-            response: kj::http::ServiceResponse<'a>,
-        ) -> kj::Result<()> {
-            let mut headers = headers.clone_shallow();
-            headers.set(HeaderId::HOST, "example.com");
-            self.0
-                .request(method, url, headers.as_ref(), request_body, response)
-                .await?;
-            Ok(())
-        }
-
-        async fn connect<'a>(
-            &'a mut self,
-            _host: &'a [u8],
-            _headers: kj::http::HeadersRef<'a>,
-            _connection: std::pin::Pin<&'a mut kj::io::AsyncIoStream>,
-            _response: kj::http::ConnectResponse<'a>,
-            _settings: kj::http::ConnectSettings<'a>,
-        ) -> kj::Result<()> {
-            todo!()
-        }
-    }
-}
+#[path = "lib-test.rs"]
+mod tests;
