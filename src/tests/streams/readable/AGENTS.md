@@ -27,7 +27,7 @@ behavioral gaps; the reentrancy family is mostly parity at finite hwm.
 | 10 | queue total-size math | integer-ish: saturates (maxSafeInt shape -2,-1,1,0), fractional sizes truncate to 0; DEFECT: reading a fractional-size chunk spins the isolate | full double-precision per spec (all four WPT shapes) | `queue-math.js` (3 tests) |
 | 11 | tee cancel composite | source cancel gets ONLY the pair-completing branch's reason; first branch's cancel promise fulfills immediately | AggregateError of every branch's reason, in the order they cancelled (identity; intentional divergence from spec's array — tee is N consumers on one queue, the last to leave cancels the source); LONE branch cancel promise PENDS until the other cancels (spec) — never await a lone branch cancel | `teeCancelReasonComposite`, `teeCancelReverseOrder` |
 | 12 | from(string) | iterates per code unit ['h','i'] | single chunk ['hi'] (spec: throws — both diverge from spec) | `fromString` |
-| 13 | async-iterator prototype | exposes constructor + next/return | next/return only | `iteratorPrototypeShape` |
+| 13 | async-iterator prototype | exposes constructor + next/return; class string 'ReadableStreamAsyncIterator' (writable) | next/return only; class string 'ReadableStream AsyncIterator' (non-writable; WebIDL) | `iteratorPrototypeShape` |
 | 14 | read() inside size() | in-flight chunk fed DIRECTLY to the reentrant read | chunk queued; the NEXT enqueue bypasses the queue into the reentrant read (spec) — deliveries swapped | `readInsideSize` |
 | 15 | adopted body stream lock after consumption | released | kept locked | `bodyIdentityAndLockCoupling` |
 | 16 | when a read waiting on enqueue()/close() looks up `then` on its result (once per read in both) | after the call has returned | inside the call, as it resolves the read (spec; Node agrees) | `thenGetterTimingForWaitingRead` |
@@ -38,7 +38,9 @@ behavioral gaps; the reentrancy family is mostly parity at finite hwm.
 | 21 | body consumption of a TransformStream readable that delivers more than its declared `expectedLength` | returns everything (consumption ignores the declaration) | rejects with RangeError 'stream delivered more bytes than its declared expectedLength' and cancels the readable with it, which errors the writable (the declaration is the exact-total contract the byte and native sources already enforce) | `transformExpectedLengthOverflow` |
 | 22 | async-iterator next() interleavings where WebIDL clears the ongoing promise | every call strictly serialized: a next() from a continuation registered on an earlier next() still waits for the queued ones, and one queued behind return() reports done; after a next() rejects, later ones reject with the same error | spec: that next() reads ahead of the queued one (n2 'c', n3 'b') and ahead of a queued return() (reads data; the return still cancels); after a next() rejects, the iterator is finished and later ones report done (this last shape is among the WPT async-iterator.any C++ expectedFailures; the read-ahead shapes are derived from the WebIDL algorithm) | `nextFromEarlierContinuationReadsAhead`, `nextFromEarlierContinuationBeatsReturn`, `nextAfterRejectedNextIsDone` |
 | 23 | when a promise returned by start() starts the stream | adopts it: the first pull runs before the first marker chained on it | spec (Node agrees): a new promise is resolved with it, so the pull runs after the second marker, whether it was fulfilled on return or later | `startPromiseSettledInNewPromise` |
-| 24 | then-getter fires on the result of an async-iterator `next()` made while another is still pending (the TypeScript first `next()` is always one) | once | twice: the `next()` settles by adopting the promise of the step it waited for (WebIDL; Node agrees) | `thenGetterPerIteratorNext` |
+| 24 | then-getter fires on the result of an async-iterator `next()` made while another is still pending | once | twice: the `next()` settles by adopting the promise of the step it waited for (WebIDL; Node agrees) | `thenGetterPerIteratorNext` |
+| 25 | async-iterator `next()`/`return()` called with a `this` that is not a stream's iterator | throws TypeError synchronously | returns a promise rejected with TypeError (WebIDL) | `iteratorMethodsRejectForeignThis` |
+| 26 | then-getter fires on the result of an async-iterator `return()` on a finished iterator | once (Node agrees) | twice: the return steps resolve with a result object of their own, and `return()` resolves the caller's promise with another (WebIDL) | `thenGetterPerIteratorReturn` |
 
 Parity worth noting (probed, pinned): pull serialization (never
 re-entered); pull/async-start rejection identity; error-undefined
@@ -51,7 +53,9 @@ hook; tee error propagation identity to both branches, tee pull-per-read
 shape, tee backpressure following the slowest branch (a push source
 stalls both branches on an idle one; the spec's per-branch queues would
 not), tee after partial read; the tee-reentrancy crash regressions;
-from() cancel plumbing identity through return(); async-iterator
+from() cancel plumbing identity through return(); the first
+async-iterator next() pulling synchronously, and a next() from the
+pull() it runs reading right behind it; async-iterator
 protocol interleavings (return/next no-await; the WebIDL
 ongoing-promise shapes are #22); chunks held BY REFERENCE
 (mutation visible, identity) + detach-while-queued observed; and the
@@ -97,7 +101,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `tee.js` | migrated edge cases + error propagation + cancel composite (#11) + pull-per-read + slowest-branch backpressure |
 | `tee-reentrancy.js` | the three C++ push-loop crash regressions (from api/streams/streams-test.js) |
 | `from.js` | 11 migrated + fromString (#12) + return validation messages |
-| `async-iteration.js` | 7 migrated + no-await interleavings + proto shape (#13) + ongoing-promise interleavings (#22) |
+| `async-iteration.js` | 7 migrated + no-await interleavings + proto shape and class string (#13) + foreign `this` (#25) + first next() pulls synchronously, next() from that pull() (parity) + ongoing-promise interleavings (#22) |
 | `reentrancy.js` | enqueue/close/cancel-in-size (parity) + read-in-size (#14; guard the size() or C++ captures every later chunk) |
 | `buffer-lifecycle.js` | chunk by reference, detach observed |
 | `integration-body.js` | readAll family, normalization (incl. detached and out-of-bounds views, DataViews included, SharedArrayBuffer-backed views, resizable-extent pinning), clone, cancel-then-consume, SELF round-trips |
@@ -105,7 +109,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `integration-body-memory.js` | body consumption copies bytes out as they arrive: chunk buffers are collectible mid-consumption (WeakRef + gc()), ~2.5 MiB of pseudo-random chunk sizes assembles exactly as bytes and as text, one chunk wider than a 1 MiB collection block assembles exactly, a declared-length byte body is exact |
 | `integration-locked-disturbed.js` | disturbed rejected, locked accepted, body identity + lock coupling (#15) |
 | `gc.js` | pending read + async iteration survive gc(); a controller held with its stream collected (ledger #19); both tee branches collected while the controller is held: enqueue() drops without retaining (WeakRef-checked, backlog included), desiredSize at the high-water mark, close() then enqueue() as ever, and pull() stops (ledger #20); one branch cancelled and the other collected, observed in the gc()'s own job (before finalization callbacks): the controller's queries drop the consumer themselves |
-| `then-interceptors.js` | one then-getter fire per read, on an ordinary result object, whether the read is answered from the queue, waits for enqueue() or close(), or finds the stream closed (a tee branch's too), and when it fires for a waiting read (ledger #16); none for a pipe's reads; per async-iterator next() (ledger #24); a then getter that cancels tee branches while a read result settles (during enqueue() and close(), one branch or two of three): the other branches' pending reads still resolve and their backlog still counts toward desiredSize |
+| `then-interceptors.js` | one then-getter fire per read, on an ordinary result object, whether the read is answered from the queue, waits for enqueue() or close(), or finds the stream closed (a tee branch's too), and when it fires for a waiting read (ledger #16); none for a pipe's reads; per async-iterator next() (ledger #24) and return() (ledger #26); a then getter that cancels tee branches while a read result settles (during enqueue() and close(), one branch or two of three): the other branches' pending reads still resolve and their backlog still counts toward desiredSize |
 | `legacy-constructors.js` | the unflagged cell (see flags table) |
 | `draining-reader.js` | TS only (C++ cell asserts the global's absence): a queued backlog plus the close sentinel swept in ONE batched read; value chunks pass through UNTOUCHED (object identity); pull-driven yields per read with EOF as a separate empty batch; expectedLength undefined; error/cancel propagation; lock exclusivity and release |
 | `data-volumes.js` | value-stream volume axes: 4096-chunk counts, a 1 MiB single string chunk, 8 MiB aggregate (128 × 64 KiB), and 1 MiB through tee on both branches — every chunk index-encoded |
