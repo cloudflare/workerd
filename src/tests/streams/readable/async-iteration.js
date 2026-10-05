@@ -334,6 +334,45 @@ export const firstNextPullsSynchronously = {
   },
 };
 
+// Parity: a pull() run by the first next() that itself calls next() finds
+// no ongoing promise (WebIDL sets it only once the steps return), so its
+// read queues right behind the outer one. The outer next() then becomes
+// the ongoing promise, and a next() after it waits for the outer alone,
+// reading after the reentrant one.
+export const nextFromPullReadsBehindOuter = {
+  async test() {
+    const log = [];
+    let n = 0;
+    let it;
+    let inner;
+    const rs = new ReadableStream(
+      {
+        pull(controller) {
+          inner ??= it.next();
+          controller.enqueue(++n);
+        },
+      },
+      { highWaterMark: 0 }
+    );
+    await scheduler.wait(0);
+    it = rs.values();
+    const outer = it.next();
+    ok(inner instanceof Promise);
+    const third = it.next();
+    const results = [
+      ['outer', outer],
+      ['inner', inner],
+      ['third', third],
+    ];
+    for (const [name, promise] of results) {
+      promise.then(({ value }) => log.push(`${name}=${value}`));
+    }
+    await Promise.all(results.map(([, promise]) => promise));
+    deepStrictEqual(log, ['outer=1', 'inner=2', 'third=3']);
+    await it.return();
+  },
+};
+
 // Ledger #22: n1; a continuation on n1 calls next() (n3); then n2. Per
 // spec, n3 reads before n2: n2 gets 'c', n3 gets 'b'. C++ keeps call
 // order.

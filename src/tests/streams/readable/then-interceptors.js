@@ -410,3 +410,32 @@ export const thenGetterPerIteratorNext = {
     }
   },
 };
+
+// An async-iterator return() looks `then` up once on a live iterator,
+// whose return steps settle with undefined. On a finished iterator the
+// return steps resolve with a result object of their own before return()
+// builds the caller's, so TS looks it up twice (WebIDL); C++ and Node look
+// it up once (ledger #26).
+export const thenGetterPerIteratorReturn = {
+  async test() {
+    {
+      const { rs } = pushSource();
+      const it = rs.values();
+      const fired = await resultThenLookups(async () => [await it.return('v')]);
+      strictEqual(fired, 1);
+    }
+    {
+      const { rs, controller } = pushSource();
+      controller.close();
+      const it = rs.values();
+      strictEqual((await it.next()).done, true);
+      let result;
+      const fired = await resultThenLookups(async () => {
+        result = await it.return('v');
+        return [result];
+      });
+      deepStrictEqual(result, { value: 'v', done: true });
+      strictEqual(fired, usingTsImpl ? 2 : 1);
+    }
+  },
+};
