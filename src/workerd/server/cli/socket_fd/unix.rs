@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 //! `--socket-fd` on unix: the inherited descriptor is kept open (no close-on-exec, so a `--watch`
 //! re-exec passes it on under the same number) and the server gets a duplicate to own.
 

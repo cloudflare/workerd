@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use alloc::vec::Vec;
 use core::ffi::c_char;
 use core::mem;

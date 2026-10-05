@@ -2,6 +2,8 @@ load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("@rules_rust//rust:defs.bzl", "rust_library")
 load("//src/rust/cxx/tools/bazel:rust_cxx_bridge.bzl", "rust_cxx_bridge")
 
+package(default_testonly = True)
+
 rust_library(
     name = "tests",
     srcs = glob(["*.rs"]),

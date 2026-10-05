@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! `loopback:<name>` addresses: connections serviced within the process, for `workerd test`.
 //!
 //! A loopback address names a queue. `connect()` makes a socket pair ([`socket_pair`]), queues

@@ -1,0 +1,12 @@
+load("@rules_rust//rust:defs.bzl", "rust_library")
+
+rust_library(
+    name = "libloading",
+    srcs = glob(["src/**/*.rs"]),
+    crate_features = ["std"],
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+    deps = ["@crates_vendor//:cfg-if"],
+)

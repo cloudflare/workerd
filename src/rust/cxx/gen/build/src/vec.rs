@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::path::Path;
 
 use crate::intern::InternedString;

@@ -1,0 +1,3 @@
+test_exempt_production.rs: error[explicit_unsafe_policy]: module `crate` must explicitly declare an unsafe-code policy
+test_exempt_production.rs: error[explicit_unsafe_policy]: module `nested` must explicitly declare an unsafe-code policy
+test_exempt_production.rs: error[explicit_unsafe_policy]: module `production` must explicitly declare an unsafe-code policy

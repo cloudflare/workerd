@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::error::Error as StdError;
@@ -11,6 +13,8 @@ use crate::alloc::string::ToString;
 
 // Representation for kj::Exception* and functions to manipulated it,
 pub mod repr {
+    #![allow(unsafe_code)]
+
     use core::ffi::c_char;
 
     /// Opaque representation of kj::Exception.
@@ -655,8 +659,12 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::std_instead_of_core, reason = "core::io is unstable")]
     fn test_std_error_into_kj_exception_io_error() {
+        #![allow(
+            clippy::std_instead_of_core,
+            reason = "test exercises the std::io error type"
+        )]
+
         // Test converting a std::io::Error to kj::Exception
         let kind = std::io::ErrorKind::NotFound;
         let error = std::io::Error::new(kind, "file not found");

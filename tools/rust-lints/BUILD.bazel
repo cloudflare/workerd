@@ -1,0 +1,41 @@
+load("@rules_python//python:defs.bzl", "py_binary")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_shared_library")
+load("//build/tools/rust_lint:fixture.bzl", "dylint_loader_tests", "explicit_unsafe_tests")
+
+package(default_visibility = ["//build/tools/rust_lint:__pkg__"])
+
+py_binary(
+    name = "fixture_runner",
+    srcs = ["tests/runner.py"],
+    main = "tests/runner.py",
+    tags = ["manual"],
+)
+
+rust_binary(
+    name = "driver",
+    srcs = ["driver.rs"],
+    rustc_flags = ["-Cprefer-dynamic"],
+    tags = ["manual"],
+    deps = ["@dylint//:driver"],
+)
+
+rust_shared_library(
+    name = "workerd_lints",
+    srcs = [
+        "explicit_unsafe_policy.rs",
+        "lib.rs",
+    ],
+    crate_root = "lib.rs",
+    rustc_flags = ["-Cprefer-dynamic"],
+    tags = ["manual"],
+)
+
+explicit_unsafe_tests(
+    name = "explicit_unsafe_policy_test",
+    directory = "tests/explicit_unsafe",
+)
+
+dylint_loader_tests(
+    name = "loader_test",
+    source = "tests/explicit_unsafe/allowed_unsafe.rs",
+)

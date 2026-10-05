@@ -146,6 +146,12 @@ bench path:
 clippy package="...":
   bazel build {{ if package =~ '^//' { package } else { "//src/rust/" + package } }} --config=lint
 
+# Run only the custom compiler plugins, without Clippy or rustfmt.
+# example: just rust-lint memory-cache
+# example: just rust-lint //src/workerd/server:workerd-cli
+rust-lint package="...":
+  bazel build {{ if package =~ '^//' { package } else { "//src/rust/" + package } }} --config=dylint
+
 # example: just clang-tidy //src/rust/jsg:ffi
 clang-tidy target="//...":
   bazel build {{target}} --config=clang-tidy

@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use syntax::Api;
 use syntax::namespace::Namespace;
 

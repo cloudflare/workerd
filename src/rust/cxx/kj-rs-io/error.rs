@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! Error mapping: `std::io::Error` -> `kj::Exception`, preserving KJ's exception-type taxonomy.
 //!
 //! kj-http and capnp RPC change behavior based on `kj::Exception::Type` (e.g. `DISCONNECTED`
@@ -124,6 +126,8 @@ fn win32_exception_type(code: i32) -> KjExceptionType {
 // reports both as `i32`, so they are widened to one type here.
 #[cfg(windows)]
 pub mod win32 {
+    #![deny(unsafe_code)]
+
     use windows_sys::Win32::Foundation as foundation;
     use windows_sys::Win32::Networking::WinSock as winsock;
 

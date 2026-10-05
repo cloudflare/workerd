@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 // This file contains boilerplate which must occur once per crate, rather than once per type.
 
 use std::pin::Pin;
@@ -24,6 +26,8 @@ impl FuturePollStatus {
 
 // These types are shared with C++ code.
 pub mod repr {
+    #![allow(unsafe_code)]
+
     use std::ffi::c_void;
     use std::pin::Pin;
     use std::task::Context;

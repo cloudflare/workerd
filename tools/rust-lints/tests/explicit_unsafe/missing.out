@@ -1,0 +1,12 @@
+included_missing.rs: error[explicit_unsafe_policy]: module `included_missing` must explicitly declare an unsafe-code policy
+missing.rs: error[explicit_unsafe_policy]: module `crate` must explicitly declare an unsafe-code policy
+missing.rs: error[explicit_unsafe_policy]: module `different_lint` must explicitly declare an unsafe-code policy
+missing.rs: error[explicit_unsafe_policy]: module `expectation` must explicitly declare an unsafe-code policy
+missing.rs: error[explicit_unsafe_policy]: module `ffi` must explicitly declare an unsafe-code policy
+missing.rs: error[explicit_unsafe_policy]: module `function_policy` must explicitly declare an unsafe-code policy
+missing.rs: error[explicit_unsafe_policy]: module `inactive_policy` must explicitly declare an unsafe-code policy
+missing.rs: error[explicit_unsafe_policy]: module `inline` must explicitly declare an unsafe-code policy
+missing.rs: error[explicit_unsafe_policy]: module `nested` must explicitly declare an unsafe-code policy
+missing.rs: error[explicit_unsafe_policy]: module `warning` must explicitly declare an unsafe-code policy
+missing.rs: error[explicit_unsafe_policy]: module `warnings` must explicitly declare an unsafe-code policy
+outer.rs: error[explicit_unsafe_policy]: module `external` must explicitly declare an unsafe-code policy

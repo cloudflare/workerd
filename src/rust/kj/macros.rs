@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![deny(unsafe_code)]
+
 //! Macros for building [`cxx::KjError`] values, mirroring the C++ `KJ_EXCEPTION`/`KJ_FAIL_REQUIRE`/
 //! `KJ_UNIMPLEMENTED` macros defined in `kj/debug.h`.
 //!

@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 #[cfg(test)]
 #[path = "test.rs"]
 mod test;

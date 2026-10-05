@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use awaiter::OptionWaker;
 pub use awaiter::PromiseAwaiter;
 use awaiter::WakerRef;
@@ -27,6 +29,8 @@ pub mod refcount;
 mod waker;
 
 pub mod repr {
+    #![deny(unsafe_code)]
+
     pub use crate::future::repr::*;
     pub use crate::maybe::repr::*;
     pub use crate::own::repr::*;
@@ -40,6 +44,11 @@ pub trait JsgStruct {}
 
 #[cxx::bridge(namespace = "kj_rs")]
 mod ffi {
+    #![allow(unsafe_code)]
+    #![expect(
+        clippy::allow_attributes,
+        reason = "CXX emits an outer unsafe-code policy"
+    )]
 
     /// Representation of a `GuardedRustPromiseAwaiter` in C++. The size of the blob should match.
     #[derive(Debug)]

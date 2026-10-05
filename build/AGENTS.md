@@ -112,6 +112,26 @@ To run a filtered check everywhere during development:
 bazel build --config=clang-tidy-unsafe-continuation-capture //src/...
 ```
 
+## RUST LINTS
+
+- `--config=lint` enables Clippy, custom Dylint checks, and rustfmt on the pinned
+  nightly Rust graph. Production builds and standalone `--config=clippy` remain
+  stable; `--config=dylint` selects only the custom driver/aspect.
+- The custom collection lives in `tools/rust-lints/`; its provider-driven aspect
+  is `build/tools/rust_lint/rust_lint.bzl`. It publishes
+  `workerd_rust_lint_checks`, independently of Clippy's output group.
+- `explicit_unsafe_policy` requires local allow/deny/forbid declarations in active
+  authored production modules. Generated/external source, test-only roots, and
+  test-gated module trees are exempt. Wrapped Rust tests still check production
+  source. Mark test helper libraries `testonly`, not with lint path filters.
+- Driver/library bootstrap targets are excluded to avoid cycles. Linux x86_64
+  host/target is currently required; unsupported requests fail explicitly.
+- On Rust/rules_rust/Dylint upgrades, run the diagnostic, loader, and adapter
+  fixtures. Preserve the rules_rust patch separating compiler-private sysroot
+  inputs from native stdlib link archives; rustc's allocator must not enter
+  tcmalloc-linked C++ binaries. See `tools/rust-lints/README.md` and the adapter
+  README.
+
 ## DEPENDENCY MANAGEMENT
 
 Lives in `deps/`. Uses jsonc manifests + codegen:

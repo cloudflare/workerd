@@ -83,6 +83,8 @@ use crate::watcher::new_file_watcher;
 #[allow(clippy::missing_safety_doc)]
 #[allow(clippy::unnecessary_box_returns)]
 mod bridge {
+    #![allow(unsafe_code)]
+
     /// The family of a [`SocketAddress`], and which of its fields are meaningful.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
     enum AddressKind {

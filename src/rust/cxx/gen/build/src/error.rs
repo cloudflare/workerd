@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::error::Error as StdError;
 use std::ffi::OsString;
 use std::fmt::Display;

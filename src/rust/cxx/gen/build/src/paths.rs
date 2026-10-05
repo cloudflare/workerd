@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::ffi::OsStr;
 use std::path::Component;
 use std::path::Path;

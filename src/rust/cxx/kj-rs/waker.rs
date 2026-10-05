@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use std::task::RawWaker;
 use std::task::RawWakerVTable;
 use std::task::Waker;

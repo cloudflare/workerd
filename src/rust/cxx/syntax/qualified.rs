@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use syn::Ident;
 use syn::LitStr;
 use syn::Token;

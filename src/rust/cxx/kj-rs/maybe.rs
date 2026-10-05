@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use std::mem::MaybeUninit;
 use std::pin::Pin;
 
@@ -256,6 +258,8 @@ unsafe impl<T> MaybeItem for &[T] {
 }
 
 pub(crate) mod repr {
+    #![allow(unsafe_code)]
+
     use std::fmt::Debug;
     use std::mem::MaybeUninit;
 

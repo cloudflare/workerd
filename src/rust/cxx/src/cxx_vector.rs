@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 //! Less used details of `CxxVector` are exposed in this module. `CxxVector`
 //! itself is exposed at the crate root.
 

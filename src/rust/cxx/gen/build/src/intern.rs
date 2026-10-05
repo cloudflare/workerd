@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::PoisonError;

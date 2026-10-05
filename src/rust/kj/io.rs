@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::pin::Pin;
 
 use kj_rs::KjOwn;
@@ -7,6 +9,12 @@ use crate::Result;
 
 #[cxx::bridge(namespace = "kj::rust")]
 pub mod ffi {
+    #![allow(unsafe_code)]
+    #![expect(
+        clippy::allow_attributes,
+        reason = "CXX emits an outer unsafe-code policy"
+    )]
+
     unsafe extern "C++" {
         include!("workerd/rust/kj/ffi.h");
 

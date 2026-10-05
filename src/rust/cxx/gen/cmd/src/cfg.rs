@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::collections::BTreeMap as Map;
 use std::collections::BTreeSet as Set;
 use std::fmt::Debug;

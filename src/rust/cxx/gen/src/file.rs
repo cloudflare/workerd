@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use syn::Attribute;
 use syn::Ident;
 use syn::Item;

@@ -1,0 +1,3 @@
+external_missing.rs: error[explicit_unsafe_policy]: module `external` must explicitly declare an unsafe-code policy
+included_missing.rs: error[explicit_unsafe_policy]: module `included_missing` must explicitly declare an unsafe-code policy
+staged_missing.rs: error[explicit_unsafe_policy]: module `inline` must explicitly declare an unsafe-code policy

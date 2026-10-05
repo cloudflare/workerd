@@ -1,3 +1,4 @@
+#![deny(unsafe_code)]
 // Functionality that is shared between the cxx_build::bridge entry point and
 // the cxxbridge CLI command.
 

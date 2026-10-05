@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::BufRead;

@@ -2,6 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+// Module registration passes Rust callbacks to the C++ isolate.
+#![allow(unsafe_code)]
+
 use std::pin::Pin;
 
 pub use ffi::ModuleType;

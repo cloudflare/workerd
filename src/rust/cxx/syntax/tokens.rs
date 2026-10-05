@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use proc_macro2::Ident;
 use proc_macro2::Span;
 use proc_macro2::TokenStream;

@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! Tokio-backed `kj::Network` / `kj::NetworkAddress` / `kj::ConnectionReceiver` backends.
 //!
 //! # Address grammar: KJ's, for what workerd uses
@@ -137,7 +139,7 @@ impl From<SocketAddr> for SocketAddress {
 fn ip_socket_addr(addr: &SocketAddress) -> Result<SocketAddr> {
     match addr.kind {
         AddressKind::Ipv4 => {
-            let octets: [u8; 4] = addr.ip[..4].try_into().map_or([0; 4], |octets| octets);
+            let octets: [u8; 4] = addr.ip[..4].try_into().unwrap_or([0; 4]);
             Ok(SocketAddr::V4(std::net::SocketAddrV4::new(
                 octets.into(),
                 addr.port,

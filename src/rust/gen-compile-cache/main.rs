@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -59,6 +61,12 @@ fn main() {
 
 #[cxx::bridge(namespace = "workerd::rust::gen_compile_cache")]
 mod ffi {
+    #![allow(unsafe_code)]
+    #![expect(
+        clippy::allow_attributes,
+        reason = "CXX emits an outer unsafe-code policy"
+    )]
+
     unsafe extern "C++" {
         include!("workerd/rust/gen-compile-cache/cxx-bridge.h");
 

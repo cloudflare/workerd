@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use std::ops::Deref;
 use std::ops::DerefMut;
 

@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! The command line, as clap definitions.
 //!
 //! Every option handler applied in argument order under `kj::MainBuilder`; here options are parsed

@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use crate::Api;
 use crate::Struct;
 use crate::Type;

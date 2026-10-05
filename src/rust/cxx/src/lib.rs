@@ -363,6 +363,7 @@
 //! <tr><td><sup><i>tbd</i></sup></td><td>std::unordered_map&lt;K, V&gt;</td></tr>
 //! </table>
 
+#![deny(unsafe_code)]
 #![no_std]
 #![doc(html_root_url = "https://docs.rs/cxx/1.0.151")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -470,6 +471,8 @@ pub type Vector<T> = CxxVector<T>;
 // Not public API.
 #[doc(hidden)]
 pub mod private {
+    #![deny(unsafe_code)]
+
     pub use core::concat;
     pub use core::module_path;
 
@@ -501,6 +504,8 @@ pub mod private {
 }
 
 mod actually_private {
+    #![deny(unsafe_code)]
+
     pub trait Private {}
 }
 

@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 use core::hash::BuildHasher as _;
 use core::hash::Hash;
 

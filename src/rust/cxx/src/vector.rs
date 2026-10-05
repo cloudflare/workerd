@@ -1,3 +1,5 @@
+#![deny(unsafe_code)]
+
 //! Less used details of `CxxVector`.
 //!
 //! `CxxVector` itself is exposed at the crate root.

@@ -2,6 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![forbid(unsafe_code)]
+
 //! Code generation for `#[jsg_resource]` on structs and impl blocks.
 //!
 //! - On a **struct**: emits `jsg::Type`, `jsg::ToJS`, `jsg::FromJS`,
