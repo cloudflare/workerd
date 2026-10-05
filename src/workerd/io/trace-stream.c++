@@ -1143,7 +1143,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::sendRpc
     }
   });
 
-  auto req = dispatcher.tailStreamSessionRequest();
+  auto req = dispatcher.tailStreamSessionRequest(capnp::MessageSize{0, 0});
   auto sent = req.send();
 
   rpc::TailStreamTarget::Client cap = sent.getTopLevel();
