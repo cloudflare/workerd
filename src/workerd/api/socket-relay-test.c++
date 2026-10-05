@@ -4,6 +4,7 @@
 
 #include "socket-relay.h"
 
+#include <kj/sticky-flag.h>
 #include <kj/test.h>
 
 namespace workerd::api {
@@ -35,11 +36,33 @@ void expectEof(kj::AsyncInputStream& in, kj::WaitScope& waitScope) {
   KJ_EXPECT(in.tryRead(&c, 1, 1).wait(waitScope) == 0);
 }
 
+// Passes writes through to `inner`, leaving reads to the subclass.
+class WriteThrough: public kj::AsyncIoStream {
+ public:
+  explicit WriteThrough(kj::Own<kj::AsyncIoStream> inner): inner(kj::mv(inner)) {}
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    return inner->write(buffer);
+  }
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    return inner->write(pieces);
+  }
+  kj::Promise<void> whenWriteDisconnected() override {
+    return inner->whenWriteDisconnected();
+  }
+  void shutdownWrite() override {
+    inner->shutdownWrite();
+  }
+
+ protected:
+  kj::Own<kj::AsyncIoStream> inner;
+};
+
 // Passes reads on a few event-loop turns after they complete, the way a stack of stream adapters
 // between a transport and its reader does.
-class DelayedReads final: public kj::AsyncIoStream {
+class DelayedReads final: public WriteThrough {
  public:
-  explicit DelayedReads(kj::Own<kj::AsyncIoStream> inner): inner(kj::mv(inner)) {}
+  using WriteThrough::WriteThrough;
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     size_t amount = co_await inner->tryRead(buffer, minBytes, maxBytes);
@@ -48,58 +71,28 @@ class DelayedReads final: public kj::AsyncIoStream {
     }
     co_return amount;
   }
-  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
-    return inner->write(buffer);
-  }
-  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
-    return inner->write(pieces);
-  }
-  kj::Promise<void> whenWriteDisconnected() override {
-    return inner->whenWriteDisconnected();
-  }
-  void shutdownWrite() override {
-    inner->shutdownWrite();
-  }
-
- private:
-  kj::Own<kj::AsyncIoStream> inner;
 };
 
 // Fails its reads when the test says so, and otherwise never completes them.
-class FailingReads final: public kj::AsyncIoStream {
+class FailingReads final: public WriteThrough {
  public:
-  explicit FailingReads(kj::Own<kj::AsyncIoStream> inner): inner(kj::mv(inner)) {}
+  using WriteThrough::WriteThrough;
 
   void fail(kj::Exception e) {
-    failure->reject(kj::mv(e));
+    failed.reject(kj::mv(e));
   }
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
-    return failed.addBranch().then([]() -> size_t { KJ_UNREACHABLE; });
-  }
-  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
-    return inner->write(buffer);
-  }
-  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
-    return inner->write(pieces);
-  }
-  kj::Promise<void> whenWriteDisconnected() override {
-    return inner->whenWriteDisconnected();
-  }
-  void shutdownWrite() override {
-    inner->shutdownWrite();
+    return failed.whenSignaled().then([]() -> size_t { KJ_UNREACHABLE; });
   }
 
  private:
-  kj::Own<kj::AsyncIoStream> inner;
-  kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
-  kj::Own<kj::PromiseFulfiller<void>> failure = kj::mv(paf.fulfiller);
-  kj::ForkedPromise<void> failed = paf.promise.fork();
+  kj::StickyFlag failed;
 };
 
 // What the test observes of an upgrade request the relay was handed.
 struct UpgradeRequest {
-  kj::PromiseFulfillerPair<void> asked = kj::newPromiseAndFulfiller<void>();
+  kj::StickyFlag asked;
   bool answered = false;
   kj::Maybe<kj::Exception> failure;
 };
@@ -109,7 +102,7 @@ class FakeInboundTlsUpgrade final: public InboundTlsUpgrade {
   explicit FakeInboundTlsUpgrade(UpgradeRequest& request): request(request) {}
 
   kj::Promise<void> whenRequested() override {
-    return kj::mv(request.asked.promise);
+    return request.asked.whenSignaled();
   }
   void answer(kj::Maybe<kj::Exception> failure) override {
     KJ_EXPECT(!request.answered);
@@ -196,7 +189,7 @@ KJ_TEST("relayStreams() upgrades the other end between the bytes sent before and
   // The far side asks for the upgrade as soon as the bytes before it have left its transport, the
   // way a Socket does after flushing its writable. Those bytes are still on their way to the other
   // end, and the other end is not reading yet.
-  auto asked = writeString(*a.far, "STARTTLS").then([&]() { request.asked.fulfiller->fulfill(); });
+  auto asked = writeString(*a.far, "STARTTLS").then([&]() { request.asked.signal(); });
   asked.wait(waitScope);
   KJ_EXPECT(!relay.poll(waitScope));
   KJ_EXPECT(upgrade.calls == 0);
@@ -246,7 +239,7 @@ KJ_TEST("relayStreams() fails, and fails the request, when the other end cannot 
 
   // The far side of `b` asks, which upgrades `a`. That end cannot be upgraded here, so the request
   // fails, and so does the relay.
-  request.asked.fulfiller->fulfill();
+  request.asked.signal();
   KJ_EXPECT_THROW_MESSAGE("does not support startTls()", relay.wait(waitScope));
   KJ_EXPECT(request.answered);
   KJ_EXPECT(
@@ -266,7 +259,7 @@ KJ_TEST("relayStreams() fails, and fails the request, when the upgrade fails") {
       RelayEnd{.stream = kj::mv(b.relayed), .startTls = upgrade.starter()})
                    .eagerlyEvaluate(nullptr);
 
-  request.asked.fulfiller->fulfill();
+  request.asked.signal();
   KJ_EXPECT(!relay.poll(waitScope));
   KJ_ASSERT(upgrade.calls == 1);
   KJ_ASSERT_NONNULL(upgrade.fulfiller)->reject(KJ_EXCEPTION(FAILED, "handshake failed"));
@@ -291,7 +284,7 @@ KJ_TEST("relayStreams() answers an upgrade request with its own failure if it fa
       RelayEnd{.stream = kj::mv(failingB), .startTls = upgrade.starter()})
                    .eagerlyEvaluate(nullptr);
 
-  request.asked.fulfiller->fulfill();
+  request.asked.signal();
   KJ_EXPECT(!relay.poll(waitScope));
   KJ_ASSERT(upgrade.calls == 1);
 
@@ -316,7 +309,7 @@ KJ_TEST("relayStreams() fails an upgrade request that is still under way when it
       RelayEnd{.stream = kj::mv(b.relayed), .startTls = upgrade.starter()})
                    .eagerlyEvaluate(nullptr);
 
-  request.asked.fulfiller->fulfill();
+  request.asked.signal();
   KJ_EXPECT(!relay.poll(waitScope));
   KJ_ASSERT(upgrade.calls == 1);
 
@@ -345,7 +338,7 @@ KJ_TEST("relayStreams() carries on when the far side goes away without asking to
       RelayEnd{.stream = kj::mv(b.relayed), .startTls = upgrade.starter()})
                    .eagerlyEvaluate(nullptr);
 
-  request.asked.fulfiller->reject(KJ_EXCEPTION(DISCONNECTED, "peer went away"));
+  request.asked.reject(KJ_EXCEPTION(DISCONNECTED, "peer went away"));
   KJ_EXPECT(!relay.poll(waitScope));
 
   auto written = writeString(*a.far, "data");
