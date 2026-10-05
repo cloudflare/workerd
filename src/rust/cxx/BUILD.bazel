@@ -4,7 +4,10 @@ load("//:build/wd_rust_test.bzl", "wd_rust_test")
 
 rust_library(
     name = "cxx",
-    srcs = glob(["src/**/*.rs"]),
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = ["src/**/*-test.rs"],
+    ),
     edition = "2024",
     link_deps = [
         ":core",
@@ -26,6 +29,7 @@ rust_library(
 
 wd_rust_test(
     name = "cxx_tests",
+    compile_data = glob(["src/**/*-test.rs"]),
     crate = ":cxx",
 )
 
@@ -53,7 +57,10 @@ rust_library(
 
 rust_library(
     name = "gen",
-    srcs = glob(["gen/src/*.rs"]),
+    srcs = glob(
+        ["gen/src/*.rs"],
+        exclude = ["gen/src/*-test.rs"],
+    ),
     compile_data = ["include/cxx.h"],
     crate_root = "gen/src/mod.rs",
     edition = "2024",
@@ -72,7 +79,10 @@ rust_library(
 
 rust_binary(
     name = "cxxbridge",
-    srcs = glob(["gen/cmd/src/*.rs"]),
+    srcs = glob(
+        ["gen/cmd/src/*.rs"],
+        exclude = ["gen/cmd/src/*-test.rs"],
+    ),
     compile_data = ["include/cxx.h"],
     edition = "2024",
     experimental_use_cc_common_link = 1,
@@ -128,7 +138,10 @@ rust_proc_macro(
 
 rust_library(
     name = "cxx-build",
-    srcs = glob(["gen/build/src/*.rs"]),
+    srcs = glob(
+        ["gen/build/src/*.rs"],
+        exclude = ["gen/build/src/*-test.rs"],
+    ),
     compile_data = [
         "include/cxx.h",
     ],

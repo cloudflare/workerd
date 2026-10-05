@@ -21,7 +21,10 @@ wd_cc_library(
 
 rust_library(
     name = "kj-rs-tokio",
-    srcs = glob(["*.rs"]),
+    srcs = glob(
+        ["*.rs"],
+        exclude = ["*-test.rs"],
+    ),
     compile_data = glob(["*.h"]),
     edition = "2024",
     link_deps = [
@@ -41,6 +44,7 @@ rust_library(
 
 wd_rust_test(
     name = "kj-rs-tokio_test",
+    compile_data = glob(["*-test.rs"]),
     crate = "kj-rs-tokio",
     edition = "2024",
 )
