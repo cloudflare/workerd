@@ -74,14 +74,14 @@ jsg::Promise<jsg::Value> restoreCurrentEntrypoint(jsg::Lock& js,
     KJ_SWITCH_ONEOF(result) {
       KJ_CASE_ONEOF(fetcher, jsg::Ref<Fetcher>) {
         auto baseChannel = fetcher->getSubrequestChannel(ioctx);
-        auto channel = factory.makeRestoredSubrequestChannel(
-            kj::addRef(*selfTokenFactory), kj::mv(restoreParams), kj::mv(baseChannel), persistent);
+        auto channel = factory.makeRestoredSubrequestChannel(selfTokenFactory.clone().toOwn(),
+            kj::mv(restoreParams), kj::mv(baseChannel), persistent);
         auto restored = js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
         return jsg::Value(js.v8Isolate, fetcherHandler.wrap(js, kj::mv(restored)));
       }
       KJ_CASE_ONEOF(stub, jsg::Ref<JsRpcStub>) {
         auto channel = factory.makeRestoredRpcChannel(
-            kj::addRef(*selfTokenFactory), kj::mv(restoreParams), persistent);
+            selfTokenFactory.clone().toOwn(), kj::mv(restoreParams), persistent);
         auto client = stub->getClient();
         stub->dispose();
         auto restored = js.alloc<JsRpcStub>(

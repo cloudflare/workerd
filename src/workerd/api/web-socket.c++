@@ -179,7 +179,7 @@ kj::Promise<DeferredProxy<void>> WebSocket::couple(
   return impl->couple(js, kj::mv(other), request);
 }
 
-void WebSocket::internalAccept(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) {
+void WebSocket::internalAccept(jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs) {
   impl->internalAccept(js, kj::mv(cs));
 }
 
@@ -696,7 +696,7 @@ void LegacyWebSocketAdapter::accept(
 }
 
 void LegacyWebSocketAdapter::internalAccept(
-    jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) {
+    jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs) {
   auto& native = *farNative;
   auto nativeWs = kj::mv(KJ_ASSERT_NONNULL(native.state.tryGet<AwaitingAcceptanceOrCoupling>()).ws);
   native.state.init<Accepted>(kj::mv(nativeWs), native, IoContext::current());
@@ -777,7 +777,7 @@ LegacyWebSocketAdapter::Accepted::~Accepted() noexcept(false) {
 static constexpr size_t WEBSOCKET_MAX_MESSAGE_SIZE = 32u << 20;
 
 void LegacyWebSocketAdapter::startReadLoop(
-    jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) {
+    jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs) {
   size_t maxMessageSize = WEBSOCKET_MAX_MESSAGE_SIZE;
   if (FeatureFlags::get(js).getIncreaseWebsocketMessageSize()) {
     maxMessageSize = 128u << 20;
@@ -1371,7 +1371,7 @@ kj::Array<kj::StringPtr> LegacyWebSocketAdapter::getHibernatableTags() {
 }
 
 kj::Promise<kj::Maybe<kj::Exception>> LegacyWebSocketAdapter::readLoop(
-    kj::Maybe<kj::Own<InputGate::CriticalSection>> cs, size_t maxMessageSize) {
+    kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs, size_t maxMessageSize) {
   try {
     auto& context = IoContext::current();
     // `farNative` is an IoOwn, which can only be dereferenced while an IoContext is current, and
@@ -1476,7 +1476,7 @@ kj::Promise<kj::Maybe<kj::Exception>> LegacyWebSocketAdapter::readLoop(
         }
 
         return true;
-      }, mapAddRef(cs));
+      }, cs.clone());
 
       if (!result) co_return kj::none;
     }

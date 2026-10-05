@@ -3199,7 +3199,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       kj::Maybe<Worker::VersionInfo> versionInfo,
       Frankenvalue props,
       kj::Maybe<kj::String> wrapperModule,
-      kj::Maybe<kj::Own<BaseTracer>> tracer,
+      kj::Maybe<kj::Rc<BaseTracer>> tracer,
       bool isDynamicDispatch)
       : JsRpcTargetBase(ioCtx, CantOutliveIncomingRequest()),
         ioCtx(ioCtx),
@@ -3311,7 +3311,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   kj::Maybe<Worker::VersionInfo> versionInfo;
   Frankenvalue props;
   kj::Maybe<kj::String> wrapperModule;
-  kj::Maybe<kj::Own<BaseTracer>> tracer;
+  kj::Maybe<kj::Rc<BaseTracer>> tracer;
   bool isDynamicDispatch;
 
   bool isReservedName(kj::StringPtr name) override {
@@ -3422,7 +3422,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
 
   EntrypointJsRpcTarget target(ioctx, kj::addRef(incomingRequest->getMetrics()), entrypointName,
       kj::mv(versionInfo), kj::mv(props), kj::mv(wrapperModule),
-      mapAddRef(incomingRequest->getWorkerTracer()), isDynamicDispatch);
+      incomingRequest->getWorkerTracer().clone(), isDynamicDispatch);
   capnp::RevocableServer<rpc::JsRpcTarget> revocableTarget(target);
 
   KJ_DEFER({

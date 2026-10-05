@@ -889,11 +889,11 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
           // flush to complete. While it is unlikely to be GC'd while we are waiting because
           // the user code *likely* is holding a active reference to it at this point, we
           // don't want to take any chances. This prevents a possible UAF.
-          JSG_VISITABLE_LAMBDA((self = JSG_THIS, domain = kj::heapString(KJ_ASSERT_NONNULL(domain)),
-                                   tlsOptions = kj::mv(tlsOptions),
-                                   openedResolver = openedPrPair.resolver.addRef(js),
-                                   remoteAddress = mapCopyString(remoteAddress),
-                                   localAddress = mapCopyString(localAddress)),
+          JSG_VISITABLE_LAMBDA(
+              (self = JSG_THIS, domain = kj::heapString(KJ_ASSERT_NONNULL(domain)),
+                  tlsOptions = kj::mv(tlsOptions),
+                  openedResolver = openedPrPair.resolver.addRef(js),
+                  remoteAddress = remoteAddress.clone(), localAddress = localAddress.clone()),
               (self, openedResolver), (jsg::Lock & js) mutable {
                 auto& context = IoContext::current();
 
@@ -972,10 +972,9 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   // The existing tlsStarter gets consumed and we won't need it again. Pass in an empty tlsStarter
   // to `setupSocket`.
   auto newTlsStarter = kj::heap<kj::TlsStarterCallback>();
-  return setupSocket(js, kj::newPromisedStream(kj::mv(secureStreamPromise)),
-      mapCopyString(remoteAddress), mapCopyString(localAddress), kj::mv(options),
-      kj::mv(newTlsStarter), SecureTransportKind::ON, protocol, kj::mv(domain), isDefaultFetchPort,
-      kj::mv(openedPrPair));
+  return setupSocket(js, kj::newPromisedStream(kj::mv(secureStreamPromise)), remoteAddress.clone(),
+      localAddress.clone(), kj::mv(options), kj::mv(newTlsStarter), SecureTransportKind::ON,
+      protocol, kj::mv(domain), isDefaultFetchPort, kj::mv(openedPrPair));
 }
 
 void Socket::handleProxyStatus(
@@ -1022,8 +1021,8 @@ void Socket::handleProxyStatus(
       // authority that the peer targeted.
       self->openedResolver.resolve(js,
           SocketInfo{
-            .remoteAddress = mapCopyString(self->remoteAddress),
-            .localAddress = mapCopyString(self->localAddress),
+            .remoteAddress = self->remoteAddress.clone(),
+            .localAddress = self->localAddress.clone(),
           });
     }
   };
@@ -1054,8 +1053,8 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
       // authority that the peer targeted.
       self->openedResolver.resolve(js,
           SocketInfo{
-            .remoteAddress = mapCopyString(self->remoteAddress),
-            .localAddress = mapCopyString(self->localAddress),
+            .remoteAddress = self->remoteAddress.clone(),
+            .localAddress = self->localAddress.clone(),
           });
     }
   };
@@ -1179,7 +1178,7 @@ void Socket::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // Serialize the socket metadata, referencing the stream externals
   // The call to write is synchronous, so capturing this is safe.
   externalHandler->write(
-      [this, remoteAddr = kj::str(remoteAddress), localAddr = mapCopyString(localAddress),
+      [this, remoteAddr = kj::str(remoteAddress), localAddr = localAddress.clone(),
           transport = toRpcSecureTransport(secureTransport),
           allowHalfOpen = getAllowHalfOpen(options)](
           rpc::JsValue::External::Builder builder) mutable {
@@ -1312,7 +1311,7 @@ jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
   openedPrPair.resolver.resolve(js,
       SocketInfo{
         .remoteAddress = kj::str(remoteAddr),
-        .localAddress = mapCopyString(localAddr),
+        .localAddress = localAddr.clone(),
       });
 
   // Set up disconnection detection now. This part is pure kj and safe under the deserialize scope;

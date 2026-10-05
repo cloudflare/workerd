@@ -1388,11 +1388,11 @@ R2Bucket::HttpMetadata R2Bucket::HttpMetadata::fromRequestHeaders(jsg::Lock& js,
 
 R2Bucket::HttpMetadata R2Bucket::HttpMetadata::clone() const {
   return {
-    .contentType = mapCopyString(contentType),
-    .contentLanguage = mapCopyString(contentLanguage),
-    .contentDisposition = mapCopyString(contentDisposition),
-    .contentEncoding = mapCopyString(contentEncoding),
-    .cacheControl = mapCopyString(cacheControl),
+    .contentType = contentType.clone(),
+    .contentLanguage = contentLanguage.clone(),
+    .contentDisposition = contentDisposition.clone(),
+    .contentEncoding = contentEncoding.clone(),
+    .cacheControl = cacheControl.clone(),
     .cacheExpiry = cacheExpiry,
   };
 }
@@ -1473,7 +1473,7 @@ jsg::Promise<jsg::Ref<Blob>> R2Bucket::GetResult::blob(jsg::Lock& js) {
     // Note: `self` (jsg::Ref) is captured to prevent GC from collecting this object while
     // the promise continuation is pending. Without it, the bare `this` pointer dangles.
     kj::String contentType =
-        mapCopyString(KJ_REQUIRE_NONNULL(self->httpMetadata).contentType).orDefault(nullptr);
+        KJ_REQUIRE_NONNULL(self->httpMetadata).contentType.clone().orDefault(nullptr);
     return js.alloc<Blob>(js, jsg::JsBufferSource(buffer.getHandle(js)), kj::mv(contentType));
   });
 }

@@ -311,7 +311,7 @@ class WebSocket: public EventTarget {
   // Same as accept(), but websockets that are created with `new WebSocket()` in JS cannot call
   // accept(). Instead, we only permit the C++ constructor to call this "internal" version of accept()
   // so that the websocket can start processing messages once the connection has been established.
-  void internalAccept(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs);
+  void internalAccept(jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs);
 
   void send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> message);
   void close(jsg::Lock& js, jsg::Optional<int> code, jsg::Optional<jsg::USVString> reason);
@@ -505,7 +505,7 @@ class WebSocketAdapter {
 
   // Like `accept()` but called by C++ rather than JS — used by the URL-ctor success
   // continuation.
-  virtual void internalAccept(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) = 0;
+  virtual void internalAccept(jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs) = 0;
 
   // State predicates.
   virtual bool isAccepted() = 0;
@@ -614,7 +614,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   void initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket> packedWsPromise) override;
   kj::Promise<DeferredProxy<void>> couple(
       jsg::Lock& js, kj::Own<kj::WebSocket> other, RequestObserver& request) override;
-  void internalAccept(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) override;
+  void internalAccept(jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs) override;
 
   bool isAccepted() override;
   bool isReleased() override;
@@ -830,7 +830,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   // Defers to readLoop; broken out separately so that both `accept(opts)` and
   // `internalAccept` (the URL-ctor success continuation) can launch the loop with shared
   // setup logic.
-  void startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs);
+  void startReadLoop(jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs);
 
   // Returns the number of pending auto-responses that should be sent before the next
   // outgoing message, advancing the queued counter. Called each time a `GatedMessage` is
@@ -852,7 +852,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
       kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> pumpCompletion);
 
   kj::Promise<kj::Maybe<kj::Exception>> readLoop(
-      kj::Maybe<kj::Own<InputGate::CriticalSection>> cs, size_t maxMessageSize);
+      kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs, size_t maxMessageSize);
 
   void reportError(jsg::Lock& js, kj::Exception&& e);
   void reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> err);

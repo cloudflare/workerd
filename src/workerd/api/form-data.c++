@@ -8,7 +8,6 @@
 
 #include <workerd/io/io-util.h>
 #include <workerd/util/mimetype.h>
-#include <workerd/util/own-util.h>
 
 #include <kj/compat/http.h>
 #include <kj/parse/char.h>
