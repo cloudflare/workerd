@@ -456,14 +456,15 @@ class D1DatabaseSession {
 
   async _queryOrThrow(
     request: QueryRequest,
-    span: Span
+    span: Span,
+    errorPrefix: 'D1_ERROR' | 'D1_EXEC_ERROR' = 'D1_ERROR'
   ): Promise<D1RowsColumns[]> {
     try {
       return await this._query(request);
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
+      const message = Error.isError(e) ? e.message : String(e);
       span.setAttribute('error.type', message);
-      throw new Error(`D1_ERROR: ${message}`, { cause: e });
+      throw new Error(`${errorPrefix}: ${message}`, { cause: e });
     }
   }
 
@@ -523,15 +524,11 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
       const lines = query.trim().split('\n');
       let execResults: D1UpstreamResponse[] | D1UpstreamResponse;
       if (d1BindingJsrpc) {
-        try {
-          execResults = await this._query({
-            queries: lines.map((sql) => ({ sql })),
-          });
-        } catch (e: unknown) {
-          const message = Error.isError(e) ? e.message : String(e);
-          span.setAttribute('error.type', message);
-          throw new Error(`D1_EXEC_ERROR: ${message}`, { cause: e });
-        }
+        execResults = await this._queryOrThrow(
+          { queries: lines.map((sql) => ({ sql })) },
+          span,
+          'D1_EXEC_ERROR'
+        );
       } else {
         execResults = await this._send('/execute', lines, [], 'NONE', span);
       }
