@@ -14,7 +14,7 @@ bazel_dep(name = "apple_support", version = "2.9.1")
 bazel_dep(name = "aspect_rules_esbuild", version = "0.27.1")
 
 # aspect_rules_js
-bazel_dep(name = "aspect_rules_js", version = "3.5.0")
+bazel_dep(name = "aspect_rules_js", version = "3.5.1")
 
 # aspect_rules_ts
 bazel_dep(name = "aspect_rules_ts", version = "3.10.1")
@@ -95,13 +95,13 @@ bazel_dep(name = "rules_foreign_cc", version = "0.16.0")
 bazel_dep(name = "rules_multirun", version = "0.14.0")
 
 # rules_nodejs
-bazel_dep(name = "rules_nodejs", version = "6.7.5")
+bazel_dep(name = "rules_nodejs", version = "6.7.6")
 
 # rules_oci
 bazel_dep(name = "rules_oci", version = "2.3.0")
 
 # rules_python
-bazel_dep(name = "rules_python", version = "2.3.4")
+bazel_dep(name = "rules_python", version = "2.4.0")
 
 # rules_rust
 bazel_dep(name = "rules_rust", version = "0.74.0")
@@ -140,10 +140,10 @@ use_repo(http, "rust_nightly_src")
 http.archive(
     name = "wasm_tools_linux_arm64",
     build_file_content = "exports_files([\"wasm-tools\"])",
-    sha256 = "9e1644f3841f2b783dd8af82de054667388e46689806fba4909ed45f3182800f",
-    strip_prefix = "wasm-tools-1.259.0-aarch64-linux",
+    sha256 = "6f19389a69e21c7dbd2a4e7ae72f807dc999988b48782c706c4102bad3e44487",
+    strip_prefix = "wasm-tools-1.261.0-aarch64-linux",
     type = "tgz",
-    url = "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.259.0/wasm-tools-1.259.0-aarch64-linux.tar.gz",
+    url = "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.261.0/wasm-tools-1.261.0-aarch64-linux.tar.gz",
 )
 use_repo(http, "wasm_tools_linux_arm64")
 
@@ -151,10 +151,10 @@ use_repo(http, "wasm_tools_linux_arm64")
 http.archive(
     name = "wasm_tools_linux_x64",
     build_file_content = "exports_files([\"wasm-tools\"])",
-    sha256 = "3e9b374b4c7715b771b69bf0d65a337990ed4546ec5e97e01c0ff587dfc52160",
-    strip_prefix = "wasm-tools-1.259.0-x86_64-linux",
+    sha256 = "ad62b2176037e93e1348cb65d6212d128ca9f097b63d155569f25215818ff7b1",
+    strip_prefix = "wasm-tools-1.261.0-x86_64-linux",
     type = "tgz",
-    url = "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.259.0/wasm-tools-1.259.0-x86_64-linux.tar.gz",
+    url = "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.261.0/wasm-tools-1.261.0-x86_64-linux.tar.gz",
 )
 use_repo(http, "wasm_tools_linux_x64")
 
@@ -162,10 +162,10 @@ use_repo(http, "wasm_tools_linux_x64")
 http.archive(
     name = "wasm_tools_macos_arm64",
     build_file_content = "exports_files([\"wasm-tools\"])",
-    sha256 = "b662d939220b2c49ea9f1d81a19776e47d72bb5ba580f08107c7dc865e1f8c66",
-    strip_prefix = "wasm-tools-1.259.0-aarch64-macos",
+    sha256 = "94c4fc9baeada6e793f0d4adeca537633b5d93e9dc6bf718be2f478f4afe0296",
+    strip_prefix = "wasm-tools-1.261.0-aarch64-macos",
     type = "tgz",
-    url = "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.259.0/wasm-tools-1.259.0-aarch64-macos.tar.gz",
+    url = "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.261.0/wasm-tools-1.261.0-aarch64-macos.tar.gz",
 )
 use_repo(http, "wasm_tools_macos_arm64")
 
@@ -173,10 +173,10 @@ use_repo(http, "wasm_tools_macos_arm64")
 http.archive(
     name = "wasm_tools_macos_x64",
     build_file_content = "exports_files([\"wasm-tools\"])",
-    sha256 = "7ffdbb9f00207bd16e0612931c63ac1012255a0c805241b339dfe0cf39356a25",
-    strip_prefix = "wasm-tools-1.259.0-x86_64-macos",
+    sha256 = "354a84ffeede30ba11f29bc72de76875a977cf43bf1c5bdc3e91e2313e8a854b",
+    strip_prefix = "wasm-tools-1.261.0-x86_64-macos",
     type = "tgz",
-    url = "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.259.0/wasm-tools-1.259.0-x86_64-macos.tar.gz",
+    url = "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.261.0/wasm-tools-1.261.0-x86_64-macos.tar.gz",
 )
 use_repo(http, "wasm_tools_macos_x64")
 
@@ -184,9 +184,9 @@ use_repo(http, "wasm_tools_macos_x64")
 http.archive(
     name = "wasm_tools_windows_x64",
     build_file_content = "exports_files([\"wasm-tools.exe\"])",
-    sha256 = "3c669d3706a5db7611a11afc422124df53a2c67294575e21f28c9b3deb95fa08",
-    strip_prefix = "wasm-tools-1.259.0-x86_64-windows/",
+    sha256 = "250c6ee7d8073865a5cb42e1077f4246c72516af9b09d41d8a2734985ae673fd",
+    strip_prefix = "wasm-tools-1.261.0-x86_64-windows/",
     type = "zip",
-    url = "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.259.0/wasm-tools-1.259.0-x86_64-windows.zip",
+    url = "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.261.0/wasm-tools-1.261.0-x86_64-windows.zip",
 )
 use_repo(http, "wasm_tools_windows_x64")
