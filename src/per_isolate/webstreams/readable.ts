@@ -824,17 +824,21 @@ function pipeReadBuffered<R>(
   );
 }
 
-// The default-read core, shared by ReadableStreamDefaultReader.read() and
-// the async-iterator read path. Internal callers MUST use this rather than
-// the public read() — reader prototypes end up user-reachable, so internal
-// dispatch through them would be interceptable.
+// The default-read steps (spec ReadableStreamDefaultReaderRead and the
+// controller's PullSteps) with a promise as the read request. The promise
+// settles in the call that answers the read: here, or inside the enqueue(),
+// close() or delivery that fulfills it, after the read's completion steps
+// (so reader.closed resolves first, as in spec ReadableStreamClose).
+// `present` turns the backend's result into the one the promise settles
+// with: as is for internal readers, a plain copy for the user's.
 //
 // BACKEND-BLIND: this function programs against StreamConsumer and must
 // never branch on the backend. (The autoAllocate check below is the ONE
 // sanctioned queued-byte-specific check — see the marker.)
-function defaultReaderReadInternal<R>(
+function defaultReaderReadSteps<R>(
   reader: object,
-  stream: ReadableStream<R>
+  stream: ReadableStream<R>,
+  present: (result: ReadableStreamReadResult<R>) => ReadableStreamReadResult<R>
 ): Promise<ReadableStreamReadResult<R>> {
   if (isReadableStreamPendingClosure(stream)) {
     return PromiseReject(pendingClosureError()) as Promise<
@@ -843,59 +847,99 @@ function defaultReaderReadInternal<R>(
   }
   setReadableStreamDisturbed(stream);
   const state = getReadableStreamGetState(stream);
-  if (state === 'closed')
-    return PromiseResolve(createReadResult(undefined, true)) as Promise<
-      ReadableStreamReadResult<R>
-    >;
-  if (state === 'errored')
+  if (state === 'errored') {
     return PromiseReject(getReadableStreamStoredError(stream)) as Promise<
       ReadableStreamReadResult<R>
     >;
+  }
   const consumer = getReadableStreamConsumer(stream);
-  if (consumer === undefined) {
-    // The consumer was detached (cancelled/tee'd-away) — nothing to read.
-    return PromiseResolve(createReadResult(undefined, true)) as Promise<
-      ReadableStreamReadResult<R>
-    >;
+  if (state === 'closed' || consumer === undefined) {
+    // Closed, or the consumer was detached (cancelled/tee'd-away).
+    return PromiseResolve(present(createReadResult(undefined, true)));
   }
   const controller = getReadableStreamController(stream);
 
   // --- Synchronous fast path (spec PullSteps step 3) ---
   // When data is immediately available the spec dequeues, performs the
   // drain-then-close check, and fulfills the read request all in one
-  // synchronous call. An async/await on an already-resolved promise
-  // would insert a microtask gap between the dequeue and the close,
-  // causing reader.closed to resolve one tick too late. tryReadSync
-  // returns the result directly (no promise wrapping) so the close
-  // check runs in the same synchronous call. This includes byte streams
-  // with autoAllocateChunkSize: queued bytes are handed over as the head
-  // chunk, uncopied; only an empty queue allocates.
+  // synchronous call, so reader.closed resolves in the same call. This
+  // includes byte streams with autoAllocateChunkSize: queued bytes are
+  // handed over as the head chunk, uncopied; only an empty queue allocates.
   const syncResult = readBufferedSync<R>(reader, stream, consumer, controller);
   if (syncResult !== undefined) {
-    return PromiseResolve(syncResult);
-  }
-  let useAsyncPath = false;
-  if (controller !== undefined && isByteStreamController(controller)) {
-    const autoAllocateChunkSize = getByteControllerAutoAllocateChunkSize(
-      controller as ReadableByteStreamController
-    );
-    if (autoAllocateChunkSize !== undefined) {
-      useAsyncPath = true;
-    }
+    return PromiseResolve(present(syncResult));
   }
 
-  // --- Async fallback ---
-  // Data is not immediately available (pending reads queued, or native
-  // source); with autoAllocateChunkSize the read waits on an allocated
-  // pull-into descriptor (spec PullSteps step 4). Handle completion
-  // asynchronously.
-  return defaultReaderReadInternalAsync<R>(
-    reader,
-    stream,
-    consumer,
-    controller,
-    useAsyncPath
-  );
+  // --- The read waits ---
+  // On the consumer (spec PullSteps step 4), or with autoAllocateChunkSize
+  // on an allocated pull-into descriptor (step 4 of the byte controller's
+  // PullSteps). Either settles the request from the call that answers it.
+  const pending = PromiseWithResolvers() as PromiseWithResolversType<
+    ReadableStreamReadResult<R>
+  >;
+  const resolve = (result: ReadableStreamReadResult<unknown>): void => {
+    readCompletionSteps(stream, controller, result);
+    pending.resolve(present(result as ReadableStreamReadResult<R>));
+  };
+  const autoAllocateChunkSize =
+    controller !== undefined && isByteStreamController(controller)
+      ? getByteControllerAutoAllocateChunkSize(
+          controller as ReadableByteStreamController
+        )
+      : undefined;
+  if (autoAllocateChunkSize !== undefined) {
+    // QUEUED-BYTE-SPECIFIC (sanctioned exception to backend-blindness):
+    // autoAllocateChunkSize exists only on the queued byte controller —
+    // native sources are forbidden from declaring it (they allocate their
+    // own buffers for default reads), so a native stream correctly falls
+    // through to the plain submitRead() below.
+    readViaAutoAllocateDescriptor(
+      consumer as unknown as ByteStreamConsumerType,
+      autoAllocateChunkSize,
+      reader,
+      {
+        promise: pending.promise as unknown as Promise<
+          ReadableStreamReadResult<ArrayBufferView>
+        >,
+        resolve: resolve as (value: unknown) => void,
+        reject: pending.reject,
+      }
+    );
+  } else {
+    consumer.submitRead({ resolve, reject: pending.reject, reader });
+  }
+  // A read request is a pull trigger (spec PullSteps ordering: the pull's
+  // synchronous side-effects run before the read result is delivered).
+  if (controller !== undefined) controllerPullIfNeeded(controller);
+  return pending.promise;
+}
+
+// The default read for internal readers (the async iterator, pipes). They
+// MUST use this rather than the public read() — reader prototypes end up
+// user-reachable, so internal dispatch through them would be
+// interceptable. The result is the backend's own (createReadResult), which
+// never reaches user code, so settling it looks up no `then`.
+function defaultReaderReadInternal<R>(
+  reader: object,
+  stream: ReadableStream<R>
+): Promise<ReadableStreamReadResult<R>> {
+  return defaultReaderReadSteps<R>(reader, stream, internalReadResult);
+}
+
+// ReadableStreamDefaultReader.read(): the user's promise settles with a
+// plain { value, done }, and resolving it is the read's one `then` lookup,
+// at the spec's moment.
+function defaultReaderRead<R>(
+  reader: object,
+  stream: ReadableStream<R>
+): Promise<ReadableStreamReadResult<R>> {
+  return defaultReaderReadSteps<R>(reader, stream, toUserReadResult);
+}
+
+function internalReadResult<T>(
+  result: ReadableStreamReadResult<T>
+): ReadableStreamReadResult<T> {
+  return result;
 }
 
 // Submit a default-style read through the BYOB machinery via a synthetic
@@ -934,42 +978,6 @@ function readViaAutoAllocateDescriptor(
   return consumer.readBYOB(descriptor);
 }
 
-// Async continuation of defaultReaderReadInternal for cases where
-// the data is not synchronously available.
-async function defaultReaderReadInternalAsync<R>(
-  reader: object,
-  stream: ReadableStream<R>,
-  consumer: StreamConsumerType<R>,
-  controller: ReadableStreamDefaultControllerType | undefined,
-  isByteAutoAllocate: boolean
-): Promise<ReadableStreamReadResult<R>> {
-  let promise: Promise<ReadableStreamReadResult<unknown>>;
-  if (isByteAutoAllocate) {
-    // QUEUED-BYTE-SPECIFIC (sanctioned exception to backend-blindness):
-    // autoAllocateChunkSize exists only on the queued byte controller —
-    // native sources are forbidden from declaring it (they allocate their
-    // own buffers for default reads), so a native stream correctly falls
-    // through to the plain consumer.read() below.
-    const autoAllocateChunkSize = getByteControllerAutoAllocateChunkSize(
-      controller as ReadableByteStreamController
-    );
-    promise = readViaAutoAllocateDescriptor(
-      consumer as unknown as ByteStreamConsumerType,
-      autoAllocateChunkSize as number,
-      reader
-    );
-  } else {
-    promise = consumer.read(reader);
-  }
-
-  // A read request is a pull trigger (spec PullSteps ordering: the pull's
-  // synchronous side-effects run before the read result is delivered).
-  if (controller !== undefined) controllerPullIfNeeded(controller);
-  const result = (await promise) as ReadableStreamReadResult<R>;
-  readCompletionSteps(stream, controller, result);
-  return result;
-}
-
 // What a default read does once it has its result, before handing it over.
 function readCompletionSteps<R>(
   stream: ReadableStream<R>,
@@ -991,79 +999,6 @@ function readCompletionSteps<R>(
     // branches close independently of the controller's primary stream).
     readableStreamClose(stream);
   }
-}
-
-// ReadableStreamDefaultReader.read(): the default-read steps with the
-// user's promise as the read request (spec ReadableStreamDefaultReaderRead).
-// The promise settles with a plain { value, done } in the call that answers
-// the read: here, or inside the enqueue(), close() or delivery that
-// fulfills it, after the read's completion steps (so reader.closed
-// resolves first, as in spec ReadableStreamClose). Resolving it is the
-// read's one `then` lookup, at the spec's moment. Internal readers use
-// defaultReaderReadInternal, whose results never reach user code.
-//
-// BACKEND-BLIND, like defaultReaderReadInternal (same autoAllocate
-// exception).
-function defaultReaderRead<R>(
-  reader: object,
-  stream: ReadableStream<R>
-): Promise<ReadableStreamReadResult<R>> {
-  if (isReadableStreamPendingClosure(stream)) {
-    return PromiseReject(pendingClosureError()) as Promise<
-      ReadableStreamReadResult<R>
-    >;
-  }
-  setReadableStreamDisturbed(stream);
-  const state = getReadableStreamGetState(stream);
-  if (state === 'errored') {
-    return PromiseReject(getReadableStreamStoredError(stream)) as Promise<
-      ReadableStreamReadResult<R>
-    >;
-  }
-  const consumer = getReadableStreamConsumer(stream);
-  if (state === 'closed' || consumer === undefined) {
-    // Closed, or the consumer was detached (cancelled/tee'd-away).
-    return PromiseResolve(userReadResult<R>(undefined, true));
-  }
-  const controller = getReadableStreamController(stream);
-  // Spec PullSteps step 3, as in defaultReaderReadInternal.
-  const syncResult = readBufferedSync<R>(reader, stream, consumer, controller);
-  if (syncResult !== undefined) {
-    return PromiseResolve(toUserReadResult(syncResult));
-  }
-  const user = PromiseWithResolvers() as PromiseWithResolversType<
-    ReadableStreamReadResult<R>
-  >;
-  const resolve = (result: ReadableStreamReadResult<unknown>): void => {
-    readCompletionSteps(stream, controller, result);
-    user.resolve(toUserReadResult(result as ReadableStreamReadResult<R>));
-  };
-  const autoAllocateChunkSize =
-    controller !== undefined && isByteStreamController(controller)
-      ? getByteControllerAutoAllocateChunkSize(
-          controller as ReadableByteStreamController
-        )
-      : undefined;
-  if (autoAllocateChunkSize !== undefined) {
-    // QUEUED-BYTE-SPECIFIC: see defaultReaderReadInternalAsync.
-    readViaAutoAllocateDescriptor(
-      consumer as unknown as ByteStreamConsumerType,
-      autoAllocateChunkSize,
-      reader,
-      {
-        promise: user.promise as unknown as Promise<
-          ReadableStreamReadResult<ArrayBufferView>
-        >,
-        resolve: resolve as (value: unknown) => void,
-        reject: user.reject,
-      }
-    );
-  } else {
-    consumer.submitRead({ resolve, reject: user.reject, reader });
-  }
-  // A read request is a pull trigger (spec PullSteps ordering).
-  if (controller !== undefined) controllerPullIfNeeded(controller);
-  return user.promise;
 }
 
 // The user's read result: a plain object (Object.prototype), unlike the
@@ -2945,7 +2880,7 @@ async function drainingReaderReadInternal<R>(
     // Nothing buffered — wait for one chunk through the normal pending-read
     // machinery (FIFO with everything else), then sweep the rest.
     //
-    // QUEUED-BYTE-SPECIFIC (sanctioned, mirrors defaultReaderReadInternal):
+    // QUEUED-BYTE-SPECIFIC (sanctioned, mirrors defaultReaderReadSteps):
     // with autoAllocateChunkSize set, the wait-read goes through the BYOB
     // machinery so the source's pull observes a byobRequest over the
     // auto-allocated buffer — the body and pipe pumps drive
