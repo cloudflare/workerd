@@ -56,6 +56,44 @@ export const testLegacyQuerySuccess = {
   },
 };
 
+export const testLegacyQueryFailureThrows = {
+  async test(_ctr, env) {
+    const db = env.d1;
+    // Each operation sends one RPC query that gets the legacy failure envelope.
+    // query() throws the returned RPC error like a thrown RPC error.
+    await useLegacyResponse(env);
+    await assert.rejects(
+      () => db.query({ queries: [{ sql: 'INVALID SQL' }] }),
+      (error) => {
+        assertBackendError(error);
+        return true;
+      }
+    );
+
+    for (const operation of [
+      () => db.prepare('INVALID SQL').all(),
+      () => db.batch([db.prepare('INVALID SQL')]),
+    ]) {
+      await useLegacyResponse(env);
+      await assert.rejects(operation, (error) => {
+        assert.equal(error.message, `D1_ERROR: ${syntaxErrorMessage}`);
+        assertBackendError(error.cause);
+        return true;
+      });
+    }
+
+    await useLegacyResponse(env);
+    await assert.rejects(
+      () => db.exec('INVALID SQL'),
+      (error) => {
+        assert.equal(error.message, `D1_EXEC_ERROR: ${syntaxErrorMessage}`);
+        assertBackendError(error.cause);
+        return true;
+      }
+    );
+  },
+};
+
 export const testThrownErrorsPropagate = {
   async test(_ctr, env) {
     const db = env.d1;
@@ -95,6 +133,13 @@ export const testExecPreservesErrorContract = {
     );
   },
 };
+
+async function useLegacyResponse(env) {
+  const response = await env.d1MockFetcher.fetch(
+    'http://d1-api-test/commitTokens/legacyResponse'
+  );
+  assert.equal(response.status, 200);
+}
 
 function assertBackendError(error) {
   assert.ok(error instanceof Error);

@@ -147,7 +147,15 @@ export default {
     this.commitTokensReceived.push(params.bookmark ?? null);
 
     const stub = env.db.get(env.db.idFromName('test'));
-    const response = await stub.query(params);
+    let response;
+    try {
+      response = await stub.query(params);
+    } catch (error) {
+      if (legacyResponse) {
+        return { success: false, error };
+      }
+      throw error;
+    }
     if (params.bookmark) {
       response.bookmark = this.nextCommitToken();
     }

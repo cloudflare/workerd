@@ -33,9 +33,6 @@ type DirectQuerySuccess = {
   bookmark?: D1SessionBookmark;
 };
 
-type DirectQueryResponse =
-  DirectQuerySuccess | { success: false; error: Error };
-
 type QuerySql = {
   sql: string;
   params?: unknown[];
@@ -118,7 +115,6 @@ type D1RawOptions = {
 type D1UpstreamFailure = {
   results?: never;
   error: string;
-  cause?: Error;
   success: false;
   meta?: never;
 };
@@ -208,9 +204,8 @@ class D1Database extends wrappedBinding.WrappedBinding {
    * format so callers can inspect result metadata and manage session bookmarks
    * directly.
    *
-   * Successful responses contain `results` and an optional `bookmark`. Returned
-   * failures contain `success: false` and `error`; thrown RPC errors propagate
-   * without binding-level wrapping.
+   * Successful responses contain `results` and an optional `bookmark`. Errors
+   * are thrown without binding-level wrapping.
    * Legacy RpcResponse support is temporary (CFSQL-1814) and will be removed
    * once the D1 eyeball entrypoint returns direct successes and throws errors.
    *
@@ -222,7 +217,7 @@ class D1Database extends wrappedBinding.WrappedBinding {
    * });
    * ```
    */
-  async query(request: QueryRequest): Promise<DirectQueryResponse> {
+  async query(request: QueryRequest): Promise<DirectQuerySuccess> {
     if (!d1BindingJsrpc) {
       const message =
         'D1Database.query() requires the d1_binding_jsrpc compatibility flag. Enable d1_binding_jsrpc before calling query().';
@@ -463,46 +458,20 @@ class D1DatabaseSession {
     request: QueryRequest,
     span: Span
   ): Promise<D1RowsColumns[]> {
-    let results: Array<D1RowsColumns | D1UpstreamFailure>;
     try {
-      results = await this._query(request);
+      return await this._query(request);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       span.setAttribute('error.type', message);
       throw new Error(`D1_ERROR: ${message}`, { cause: e });
     }
-    for (const result of results) {
-      if (!result.success) {
-        span.setAttribute('error.type', result.error);
-        throw new Error(`D1_ERROR: ${result.error}`, { cause: result.cause });
-      }
-    }
-    // The loop above rejects every failure result; TypeScript cannot narrow the
-    // array itself after checking each element. It's fine to cast here to avoid
-    // the allocation of a new array.
-    return results as D1RowsColumns[];
   }
 
-  async _query(
-    request: QueryRequest
-  ): Promise<Array<D1RowsColumns | D1UpstreamFailure>> {
+  async _query(request: QueryRequest): Promise<D1RowsColumns[]> {
     const queryParams: QueryRequest = this.bookmarkOrConstraint
       ? { ...request, bookmark: this.bookmarkOrConstraint }
       : request;
     const response = await fetcherQuery(this.fetcher, queryParams);
-
-    // TODO(CFSQL-1814): Remove returned-failure handling once the D1 eyeball
-    // entrypoint throws errors instead of returning them.
-    if ('success' in response) {
-      return [
-        {
-          success: false,
-          error: response.error.message,
-          cause: response.error,
-        },
-      ];
-    }
-
     if (response.bookmark) {
       this._updateBookmark(response.bookmark);
     }
@@ -571,22 +540,18 @@ class D1DatabaseSessionAlwaysPrimary extends D1DatabaseSession {
       let duration = 0;
       const metas: D1Meta[] = [];
       for (const [i, res] of results.entries()) {
+        // Only the fetch path returns failures; JSRPC failures are thrown above.
         if (!res.success) {
           const message = res.error || 'Something went wrong';
-          if (!d1BindingJsrpc) {
-            // Keep the old behavior even if the line number is always going to be 1
-            // because the DO is only returning the first error only.
-            const lineNumber = i + 1;
-            const line = lines[lineNumber - 1];
-            const legacyMessage = `Error in line ${lineNumber}: ${line}: ${message}`;
-            span.setAttribute('error.type', `Error in line ${lineNumber}`);
-            throw new Error(`D1_EXEC_ERROR: ${legacyMessage}`, {
-              cause: new Error(legacyMessage),
-            });
-          }
-
-          span.setAttribute('error.type', message);
-          throw new Error(`D1_EXEC_ERROR: ${message}`, { cause: res.cause });
+          // Keep the old behavior even if the line number is always going to be 1
+          // because the DO is only returning the first error only.
+          const lineNumber = i + 1;
+          const line = lines[lineNumber - 1];
+          const legacyMessage = `Error in line ${lineNumber}: ${line}: ${message}`;
+          span.setAttribute('error.type', `Error in line ${lineNumber}`);
+          throw new Error(`D1_EXEC_ERROR: ${legacyMessage}`, {
+            cause: new Error(legacyMessage),
+          });
         }
 
         duration += res.meta.duration;
@@ -899,17 +864,21 @@ class D1PreparedStatement {
 }
 
 /**
- * Normalize legacy and direct D1 RPC success payloads into a single shape.
- * Returned failures and thrown RPC errors propagate unchanged.
+ * Normalize legacy and direct D1 RPC responses into a single shape.
+ * Legacy returned failures are thrown as their RPC error, matching how thrown
+ * RPC errors propagate.
  * TODO(CFSQL-1814): Remove legacy response support once the D1 eyeball
  * entrypoint returns direct successes and throws errors.
  */
 async function fetcherQuery(
   fetcher: Fetcher,
   request: QueryRequest
-): Promise<DirectQueryResponse> {
+): Promise<DirectQuerySuccess> {
   const response = await fetcher.query(request);
-  if ('success' in response && response.success) {
+  if ('success' in response) {
+    if (!response.success) {
+      throw response.error;
+    }
     const { queryResults, bookmark } = response.results;
     const normalizedResponse: DirectQuerySuccess = { results: queryResults };
     if (bookmark !== undefined) {
