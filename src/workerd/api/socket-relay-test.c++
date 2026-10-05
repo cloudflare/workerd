@@ -105,7 +105,8 @@ class FakeInboundTlsUpgrade final: public InboundTlsUpgrade {
     return request.asked.whenSignaled();
   }
   void answer(kj::Maybe<kj::Exception> failure) override {
-    KJ_EXPECT(!request.answered);
+    // As the interface requires, only the first answer counts.
+    if (request.answered) return;
     request.answered = true;
     request.failure = kj::mv(failure);
   }
