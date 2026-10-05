@@ -1470,11 +1470,13 @@ class TraceContextParent {
   SpanParent userSpan;
 };
 
-// TraceContext to keep track of user tracing/existing tracing better
+// Owns the local span builders for an operation.
 class TraceContext {
  public:
   TraceContext(): span(nullptr), userSpan(nullptr) {}
-  TraceContext(SpanBuilder span, SpanBuilder userSpan)
+
+  // Construct through TraceContextParent::newChild() to keep local span creation in one place.
+  TraceContext(kj::Badge<TraceContextParent>, SpanBuilder span, SpanBuilder userSpan)
       : span(kj::mv(span)),
         userSpan(kj::mv(userSpan)) {}
   TraceContext(TraceContext&& other) = default;
@@ -1517,7 +1519,7 @@ inline TraceContext TraceContextParent::newChild(kj::ConstString operationName) 
   // the original into the user child.
   auto internalChild = internalSpan.newChild(operationName.clone());
   auto userChild = userSpan.newChild(kj::mv(operationName));
-  return TraceContext(kj::mv(internalChild), kj::mv(userChild));
+  return TraceContext(kj::Badge<TraceContextParent>(), kj::mv(internalChild), kj::mv(userChild));
 }
 
 // RAII object that measures the time duration over its lifetime. It tags this duration onto a

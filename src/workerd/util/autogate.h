@@ -69,9 +69,6 @@ namespace workerd::util {
 #define WORKERD_AUTOGATES(V)                                                                       \
   V(TEST_WORKERD)                                                                                  \
   V(V8_FAST_API)                                                                                   \
-  /* Enables support for the streaming tail worker. Note that this is currently also guarded behind\
-    an experimental compat flag. */                                                                \
-  V(STREAMING_TAIL_WORKER)                                                                         \
   /* Enable refactor used to consolidate the different tail worker stream implementations. */      \
   V(TAIL_STREAM_REFACTOR)                                                                          \
   /* Enable fast TextEncoder implementation using simdutf */                                       \
@@ -86,36 +83,14 @@ namespace workerd::util {
   V(HIBERNATABLE_WEBSOCKET_REFACTOR)                                                               \
   /* When enabled, turns on per-isolate TypeScript/JavaScript bootstrap */                         \
   V(PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)                                                              \
-  /* Gate for the Durable Object fetch-retries feature, scoped to DO `fetch()`. Enables            \
-    observe-only retry-token claim machinery. */                                                   \
-  V(DURABLE_OBJECT_RETRIES_FETCH)                                                                  \
-  /* Enables Durable Object fetch retry requests. Enabled senders require receiver-side claim     \
-     enforcement on each request. The observe-only DURABLE_OBJECT_RETRIES_FETCH gate is a         \
-     prerequisite. */                                                                              \
-  V(DURABLE_OBJECT_RETRIES_FETCH_RETRY_REQUESTS)                                                   \
   /* Extends observe-only retry-token claiming to Durable Object JSRPC calls: senders attach       \
-     tokens and receivers claim them. Requires DURABLE_OBJECT_RETRIES_FETCH. */                    \
+     tokens and receivers claim them. */                                                           \
   V(DURABLE_OBJECT_RETRIES_JSRPC)                                                                  \
-  /* Enables Durable Object JSRPC retry requests. Requires both fetch retry gates and the JSRPC   \
-     observe gate. */                                                                               \
+  /* Enables Durable Object JSRPC retry requests. Requires the DURABLE_OBJECT_RETRIES_JSRPC        \
+     observe gate. */                                                                              \
   V(DURABLE_OBJECT_RETRIES_JSRPC_RETRY_REQUESTS)                                                   \
   /* Enables user-configured Durable Object retry policy and @retryable dispatch behavior. */      \
   V(DURABLE_OBJECT_RETRIES_USERLAND)                                                               \
-  /* When enabled, the native `node-internal:url` module is provided by the Rust                   \
-     implementation (api::node UrlUtil ported to src/rust/api) instead of the                      \
-     C++ implementation. The C++ implementation is retained for rollback.*/                        \
-  V(NODEJS_URL_RUST)                                                                               \
-  /* When enabled, Node.js-style exceptions (api::node createNodeException /                       \
-     createUVException) are created by the Rust implementation                                     \
-     (src/rust/node-exceptions) instead of the C++ implementation. The C++                         \
-     implementation is retained for rollback.*/                                                    \
-  V(NODEJS_EXCEPTIONS_RUST)                                                                        \
-  /* Reuse HTTP/1.1 tunnels opened by Container.getTcpPort().fetch(). */                           \
-  V(CONTAINER_TUNNEL_REUSE)                                                                        \
-  /* Allow a Socket to be transferred over JS RPC. When disabled, serializing a Socket fails as    \
-     though the type were not serializable at all, and an incoming transferred Socket is           \
-     rejected. */                                                                                  \
-  V(SOCKET_RPC_TRANSFER)                                                                           \
   /* Materialize stream and socket externals of an incoming RPC value BEFORE the V8 value graph    \
      is deserialized (RpcDeserializerExternalHandler::prepare()), with deserialize() claiming the  \
      prebuilt objects. V8's deserializer forbids JS execution during the graph read, so this is    \
@@ -131,8 +106,6 @@ namespace workerd::util {
      CompressionStream, crypto crc32, kj-gzip/http (fetch and WebSocket compression), and V8's     \
      compression utils. Chromium zlib remains the default. */                                      \
   V(COMPRESSION_RS)                                                                                \
-  /* Enables per-call JSRPC tracing, trace-context propagation, and related Fetcher spans. */      \
-  V(JSRPC_TRACING)                                                                                 \
   /* Enable the JS-observable synchronous tryReadSync/tryWriteSync fast paths: the stream          \
      controllers' read/write paths (reader.read() / writer.write() promises settle without an      \
      event-loop round trip) and readAll()'s read loop. The C++ pump loops stay ungated: pumpTo()   \

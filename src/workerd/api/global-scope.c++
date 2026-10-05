@@ -31,6 +31,7 @@
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
@@ -94,6 +95,14 @@ jsg::Promise<CachePurgeResult> CacheContext::purge(jsg::Lock& js,
     const jsg::TypeHandler<CachePurgeResult>& resultHandler,
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler) {
   JSG_FAIL_REQUIRE(Error, "Cache purge is not available in this context.");
+}
+
+jsg::Promise<CachePurgeResult> CacheContext::invalidate(jsg::Lock& js,
+    CachePurgeOptions options,
+    const jsg::TypeHandler<CachePurgeOptions>& optionsHandler,
+    const jsg::TypeHandler<CachePurgeResult>& resultHandler,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler) {
+  JSG_FAIL_REQUIRE(Error, "Cache invalidation is not available in this context.");
 }
 
 jsg::Ref<Tracing> ExecutionContext::getTracing(jsg::Lock& js) {
@@ -199,6 +208,18 @@ ExportedHandler ExportedHandler::clone(jsg::Lock& js) {
     .ctx{getCtx()},
     .missingSuperclass = missingSuperclass,
   };
+}
+
+IsRetryableHandler ExportedHandler::isFetchRetryable(jsg::Lock& js) {
+  if (!util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
+    return IsRetryableHandler::NO;
+  }
+  KJ_IF_SOME(f, fetch) {
+    KJ_IF_SOME(handle, f.tryGetHandle(js.v8Isolate)) {
+      return IsRetryableHandler(jsg::JsObject(handle).hasPrivate(js, RETRYABLE_METHOD_PRIVATE_KEY));
+    }
+  }
+  return IsRetryableHandler::NO;
 }
 
 ServiceWorkerGlobalScope::ServiceWorkerGlobalScope()

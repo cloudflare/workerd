@@ -11,10 +11,10 @@ Use V8's standard v8_flag mechanism so the define, sources, and
 Perfetto dependency are controlled together.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index a6220048a4aa37bc48653c50817577844bb2263a..4aa69d93dcc9b3e0dd61ce59f9ea25d8a3ecf8c4 100644
+index 5eaff6ae55890819ee33f82b5896dcfbfaa8d3d4..c75adb604ede34589eaee4cc108133c75044823d 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -198,6 +198,8 @@ v8_flag(
+@@ -202,6 +202,8 @@ v8_flag(
      default = True,
  )
  
@@ -23,7 +23,7 @@ index a6220048a4aa37bc48653c50817577844bb2263a..4aa69d93dcc9b3e0dd61ce59f9ea25d8
  # Default setting for v8_enable_maglev
  selects.config_setting_group(
      name = "maglev_by_default",
-@@ -553,6 +555,7 @@ v8_config(
+@@ -556,6 +558,7 @@ v8_config(
          "v8_enable_vtunejit": "ENABLE_VTUNE_JIT_INTERFACE",
          "v8_enable_undefined_double": "V8_ENABLE_UNDEFINED_DOUBLE",
          "v8_use_host_cpu_arm_features": "V8_USE_HOST_CPU_ARM_FEATURES",
@@ -31,7 +31,7 @@ index a6220048a4aa37bc48653c50817577844bb2263a..4aa69d93dcc9b3e0dd61ce59f9ea25d8
          "v8_use_zlib": "V8_USE_ZLIB",
      },
      defines = [
-@@ -1076,16 +1079,22 @@ filegroup(
+@@ -1084,16 +1087,22 @@ filegroup(
          "src/libplatform/task-queue.cc",
          "src/libplatform/task-queue.h",
          "src/libplatform/tracing/recorder.h",
@@ -60,7 +60,7 @@ index a6220048a4aa37bc48653c50817577844bb2263a..4aa69d93dcc9b3e0dd61ce59f9ea25d8
  )
  
  filegroup(
-@@ -2731,7 +2740,6 @@ filegroup(
+@@ -2741,7 +2750,6 @@ filegroup(
          "src/tracing/perfetto-sdk.h",
          "src/tracing/trace-event.cc",
          "src/tracing/trace-event.h",
@@ -68,7 +68,7 @@ index a6220048a4aa37bc48653c50817577844bb2263a..4aa69d93dcc9b3e0dd61ce59f9ea25d8
          "src/tracing/trace-id.h",
          "src/tracing/traced-value.cc",
          "src/tracing/traced-value.h",
-@@ -2795,6 +2803,22 @@ filegroup(
+@@ -2805,6 +2813,22 @@ filegroup(
          ":v8_bigint",
          ":v8_heap_base_files",
      ] + select({
@@ -91,7 +91,7 @@ index a6220048a4aa37bc48653c50817577844bb2263a..4aa69d93dcc9b3e0dd61ce59f9ea25d8
          "@v8//bazel/config:v8_target_ia32": [
              "src/baseline/ia32/baseline-assembler-ia32-inl.h",
              "src/baseline/ia32/baseline-compiler-ia32-inl.h",
-@@ -4740,7 +4764,10 @@ v8_library(
+@@ -4945,7 +4969,10 @@ v8_library(
          "@simdutf",
          "@zlib",
          "@zlib//:compression_utils_portable",

@@ -3,6 +3,8 @@ load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/wd_test.bzl", "wd_test")
 
+exports_files(["starttls-server.pem"])
+
 # Compile all ts test sources in one project. This is needed to work around https://github.com/aspect-build/rules_ts/issues/664 –
 # rules_ts transpiles all .ts files for each ts_project where the files are present based on the
 # tsconfig "include": ["**/*.ts"] directive, which is an issue on Windows where Bazel does not have
@@ -36,6 +38,11 @@ wd_test(
     src = "wasm-memory-discard-test.wd-test",
     args = ["--experimental"],
     data = ["wasm-memory-discard-disabled-test.js"],
+)
+
+wd_test(
+    src = "retryable-test.wd-test",
+    data = ["retryable-test.js"],
 )
 
 wd_test(
@@ -258,6 +265,14 @@ wd_test(
     data = [
         "self-logger-test.js",
     ],
+)
+
+# console.* must survive arguments whose formatting throws, including when the formatter's own
+# fallback throws again; the exception has to stop at the console decorator's C++ boundary or it
+# aborts the process.
+wd_test(
+    src = "console-format-throw-test.wd-test",
+    data = ["console-format-throw-test.js"],
 )
 
 # Tests for WO-1390: structured errorInfo on TraceLog entries from console.*(Error, ...).
@@ -483,6 +498,14 @@ wd_test(
 )
 
 wd_test(
+    # Repeated constructor failures log symbolized stacks in debug builds.
+    size = "large",
+    src = "actor-fetch-rejection-test.wd-test",
+    compat_date = "2025-12-02",
+    data = ["actor-fetch-rejection-test.js"],
+)
+
+wd_test(
     src = "als-only-test.wd-test",
     args = ["--experimental"],
     data = ["als-only-test.js"],
@@ -525,6 +548,11 @@ wd_test(
     src = "crypto-extras-test.wd-test",
     args = ["--experimental"],
     data = ["crypto-extras-test.js"],
+)
+
+wd_test(
+    src = "crypto-modern-algorithms-test.wd-test",
+    data = ["crypto-modern-algorithms-test.js"],
 )
 
 wd_test(

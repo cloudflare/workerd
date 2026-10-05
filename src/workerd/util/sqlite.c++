@@ -876,6 +876,17 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(StaticRegulator re
       auto prepareResult =
           sqlite3_prepare_v3(db, sqlCode.begin(), sqlCode.size(), prepFlags, &result, &tail);
 
+      // Errors during preparation can happen (like SQLITE_ERROR) before any Query/QueryEvent exists
+      // so report them here or they'll never produce an event
+      if (prepareResult != SQLITE_OK) {
+        int extendedErrorCode = sqlite3_extended_errcode(db);
+        /* TODO: A follow-up for separating planning and execution latency */
+        sqliteObserver.reportQueryEvent(
+            kj::heapString(sqlCode.slice(0, kj::min(RA_MAX_METRICS_QUERY_SIZE, sqlCode.size()))), 0,
+            0, /* Reports queryLatency to be 0 explicitly */ 0 * kj::NANOSECONDS, 0, prepareResult,
+            extendedErrorCode, !regulator->shouldAddQueryStats(), kj::none);
+      }
+
       // If we had an auth error specifically, check if we recorded a better error message during
       // the authorizer callback.
       if (prepareResult == SQLITE_AUTH) {

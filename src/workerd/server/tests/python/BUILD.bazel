@@ -101,6 +101,9 @@ js_binary(
 
 py_wd_test(
     "sockets",
+    data = [
+        "//src/workerd/api/tests:starttls-server.pem",
+    ],
     # sidecar and python_snapshot_test currently cannot be used together
     make_snapshot = False,
     sidecar = ":socket-server",
