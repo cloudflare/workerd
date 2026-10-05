@@ -1,6 +1,7 @@
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
 load("@workerd//:build/wd_rust_crate.bzl", "rust_cxx_bridge", "rust_cxx_include_prefix")
+load("@workerd//:build/wd_rust_test.bzl", "split_rust_test_srcs")
 
 def _coverage_runtime_objects_impl(ctx):
     # Bazel's LLVM coverage collector (collect_cc_coverage.sh) runs `llvm-cov export` over exactly
@@ -75,6 +76,7 @@ def wd_rust_binary(
     """
     if srcs == None:
         srcs = native.glob(["**/*.rs"])
+    srcs, test_srcs = split_rust_test_srcs(srcs)
     crate_name = name.replace("-", "_")
 
     if cxx_bridge_src:
@@ -154,6 +156,7 @@ def wd_rust_binary(
 
     rust_test(
         name = name + "_test",
+        compile_data = test_srcs,
         crate = ":" + name,
         env = {
             "RUST_BACKTRACE": "1",

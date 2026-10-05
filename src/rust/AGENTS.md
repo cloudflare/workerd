@@ -38,13 +38,30 @@ _Snapshot — the set drifts as crates come and go; `bazel query //src/rust/...`
 - **`#[jsg_resource(custom_trace)]`**: suppresses the auto-generated `Traced` impl so the user can write their own; `GarbageCollected` (`memory_name`), `jsg::Type`, `jsg::ToJS`, and `jsg::FromJS` are still generated
 - **Formatting**: `rustfmt.toml` — `group_imports = "StdExternalCrate"`, `imports_granularity = "Item"` (one `use` per import)
 - **Linting**: `just clippy <crate>` for a crate here, `just clippy <label>` for one elsewhere — pedantic+nursery; `allow-unwrap-in-tests`
-- **Tests**: inline `#[cfg(test)]` modules; JSG tests use `jsg_test::Harness::run_in_context()`. Always run the full `src/rust/...` test suite (`bazel test //src/rust/...`) rather than targeting a single crate — changes in shared crates like `jsg` or `jsg-macros` can break downstream consumers
+- **Tests**: a module's unit tests live beside it in `<module>-test.rs` (`dns.rs` → `dns-test.rs`, `lib.rs` → `lib-test.rs`), never in an inline `mod tests { ... }`, so a diff shows production changes and test changes as separate files. See UNIT TEST FILES below. JSG tests use `jsg_test::Harness::run_in_context()`. Always run the full `src/rust/...` test suite (`bazel test //src/rust/...`) rather than targeting a single crate — changes in shared crates like `jsg` or `jsg-macros` can break downstream consumers
 - **FFI pointers**: functions receiving raw pointers must be `unsafe fn` (see `jsg/README.md`)
 - **Parameter ordering**: `&Lock` / `&mut Lock` must always be the first parameter in any function that takes a lock (matching the C++ convention where `jsg::Lock&` is always first). This applies to free functions, trait methods, and associated functions (excluding `&self`/`&mut self` receivers which come before `lock`).
 - **Method naming**: do not use `get_` prefixes on methods — e.g. `buf.backing_store()` not `buf.get_backing_store()`. Static constructors belong on the marker struct (`impl ArrayBuffer { fn new(...) }`) not on `impl Local<'_, ArrayBuffer>`.
 - **FFI naming**: instance methods on an existing handle use a `local_<type>_<method>` prefix (e.g. `local_array_buffer_byte_length`). Static constructors that create a new value do **not** use the `local_` prefix — name them `<type>_<method>` (e.g. `array_buffer_new_with_mode`, `array_buffer_maybe_new`, `backing_store_new_resizable`).
 - **FFI groups**: `v8.rs` `mod ffi`, `ffi.h`, and `ffi.c++` all use matching comment groups (e.g. `// Local<T>`, `// Local<Array>`, `// Local<TypedArray>`, `// Local<ArrayBuffer>`, `// Local<ArrayBufferView>`, `// Local<SharedArrayBuffer>`, `// BackingStore`, `// Unwrappers`, `// Global<T>`, `// FunctionCallbackInfo`). When adding new FFI functions, place them in the correct group in **all three files**. Do not scatter related functions across groups.
 - **Feature flags**: `Lock::feature_flags()` returns a capnp `compatibility_flags::Reader` for the current worker. Use `lock.feature_flags().get_node_js_compat()`. Flags are parsed once and stored in the `Realm` at construction; C++ passes canonical capnp bytes to `realm_create()`. Schema: `src/workerd/io/compatibility-date.capnp`, generated Rust bindings: `compatibility_date_capnp` crate.
+
+## UNIT TEST FILES
+
+This applies to every Rust crate in the repository, wherever it lives. The module under test declares its tests as the last item in the file:
+
+```rust
+#[cfg(test)]
+#[path = "dns-test.rs"]
+mod tests;
+```
+
+`dns-test.rs` sits in the same directory and holds what would otherwise be the body of `mod tests { ... }`. It is an ordinary child module: `use super::*;` reaches the private items of the module under test, and a module-wide lint attribute is an inner attribute (`#![expect(...)]`) at the top of the file. The `#[path]` is required because a hyphen cannot appear in a module name.
+
+- One test file per source file, and the module is always named `tests`.
+- Production files contain no `#[test]` functions and no inline `#[cfg(test)]` modules. A helper that only tests use belongs in the test file.
+- `wd_rust_crate`, `wd_rust_binary` and `wd_rust_proc_macro` take the `*-test.rs` files out of the crate's `srcs` and compile them only into its `<name>_test` target (`split_rust_test_srcs` in `build/wd_rust_test.bzl`). A crate defined with `rust_library` directly does the same by hand: `exclude = ["*-test.rs"]` in the library's `srcs` glob, and `compile_data = glob(["*-test.rs"])` on its `wd_rust_test` (a `rust_test` built from a `crate` rejects `srcs`). An unconditional `mod` declaration of a test file therefore fails the production build.
+- Crates that are test code throughout are exempt: a test-support crate in a `tests/` directory (e.g. `cxx/kj-rs/tests/`), and a `wd_rust_test` built from its own `srcs` (e.g. `tsan/`).
 
 ## CXX BRIDGE: ASYNC AND ERROR HANDLING
 
