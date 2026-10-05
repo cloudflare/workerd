@@ -460,24 +460,20 @@ class D1DatabaseSession {
     errorPrefix: 'D1_ERROR' | 'D1_EXEC_ERROR' = 'D1_ERROR'
   ): Promise<D1RowsColumns[]> {
     try {
-      return await this._query(request);
+      const queryParams: QueryRequest = this.bookmarkOrConstraint
+        ? { ...request, bookmark: this.bookmarkOrConstraint }
+        : request;
+      const response = await fetcherQuery(this.fetcher, queryParams);
+      if (response.bookmark) {
+        this._updateBookmark(response.bookmark);
+      }
+
+      return response.results.map(mapQueryResult);
     } catch (e: unknown) {
       const message = Error.isError(e) ? e.message : String(e);
       span.setAttribute('error.type', message);
       throw new Error(`${errorPrefix}: ${message}`, { cause: e });
     }
-  }
-
-  async _query(request: QueryRequest): Promise<D1RowsColumns[]> {
-    const queryParams: QueryRequest = this.bookmarkOrConstraint
-      ? { ...request, bookmark: this.bookmarkOrConstraint }
-      : request;
-    const response = await fetcherQuery(this.fetcher, queryParams);
-    if (response.bookmark) {
-      this._updateBookmark(response.bookmark);
-    }
-
-    return response.results.map(mapQueryResult);
   }
 }
 
