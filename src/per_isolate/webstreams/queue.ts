@@ -264,10 +264,11 @@ export interface StreamConsumer<V> {
   // Submit a default read. Per-reader FIFO; reader identity enables
   // selective rejection on lock release.
   read(reader: object): Promise<ReadableStreamReadResult<V>>;
-  // Submit a default read as a read request (spec): the consumer settles it
-  // by calling its resolve or reject, synchronously when the read can be
-  // answered now, otherwise from the call that answers it (an enqueue, a
-  // close, a delivery). read() is this with a promise's resolvers.
+  // Submit a default read as a read request (spec) that tryReadSync, called
+  // just before, could not answer: the consumer does not look for buffered
+  // data again. It settles the request by calling its resolve or reject
+  // from the call that answers it (an enqueue, a close, a delivery), or at
+  // once if it has already ended (the native conduit, closed or errored).
   submitRead(request: PendingRead<V>): void;
   // Attempt a synchronous read. Returns the result directly when data (or
   // the close sentinel) is immediately available at the cursor, or
@@ -887,16 +888,14 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
       PromiseWithResolvers() as PromiseWithResolversType<
         ReadableStreamReadResult<V>
       >;
-    this.#pendingReads.push({ resolve, reject, reader });
+    this.submitRead({ resolve, reject, reader });
     return promise;
   }
 
+  // The caller has just tried tryReadSync (see the StreamConsumer
+  // contract), and nothing can have reached this cursor since: the request
+  // waits for the enqueue or close that answers it (notify()).
   submitRead(request: PendingRead<V>): void {
-    const sync = this.tryReadSync(request.reader);
-    if (sync !== undefined) {
-      request.resolve(sync);
-      return;
-    }
     this.#pendingReads.push(request);
   }
 
