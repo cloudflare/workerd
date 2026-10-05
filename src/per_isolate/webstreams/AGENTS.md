@@ -135,8 +135,9 @@ on it errors the detached stream. Suites:
   `Object.prototype`. Copies of internal bytes use `cloneArrayBuffer`
   (spec CloneArrayBuffer), never the species-consulting `slice`.
   Suite guard: each suite's `pollution.js`.
-- The backends settle reads with null-prototype results
-  (`createReadResult` in queue.ts), so internal reads run no user code.
+- The backends settle reads with results whose prototype chain has no
+  `Object.prototype` (`createReadResult` in queue.ts), so internal reads
+  run no user code.
   A user's read settles the promise the user holds, inside the call that
   answers it, with a plain `{ value, done }` (`userReadResult`), after the
   read's completion steps: one `then` lookup per read, at the spec's

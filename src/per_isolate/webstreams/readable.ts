@@ -1067,7 +1067,7 @@ function defaultReaderRead<R>(
 }
 
 // The user's read result: a plain object (Object.prototype), unlike the
-// null-prototype results the backends settle internal reads with.
+// results the backends settle internal reads with (createReadResult).
 function userReadResult<T>(value: T, done: false): { value: T; done: false };
 function userReadResult<T>(
   value: T | undefined,

@@ -186,8 +186,8 @@ path, and the same pollution breaks the user's own code in every engine:
 - `Object.prototype.then` intercepting a promise resolved with a plain
   object, notably the user's read promise, which the spec resolves with a
   `{ value, done }` result. Internal reads are not exposed: the backends
-  settle them with null-prototype results (`createReadResult` in
-  `webstreams/queue.ts`).
+  settle them with results whose prototype chain has no `Object.prototype`
+  (`createReadResult` in `webstreams/queue.ts`).
 
 Internal-only records should still be null-prototype
 (`{ __proto__: null, ... }`) wherever nothing requires the

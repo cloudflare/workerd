@@ -75,6 +75,7 @@ const {
   FinalizationRegistryPrototypeUnregister,
   MathMin,
   ObjectCreate,
+  ObjectFreeze,
   ObjectSetPrototypeOf,
   PromisePrototypeThen,
   PromiseResolve,
@@ -93,12 +94,27 @@ const { RingBuffer } = require('webstreams/ring-buffer') as {
 };
 
 // The read results the backends settle their read promises with. Their
-// prototype is null, so resolving a promise with one finds no `then` for a
-// patched Object.prototype to supply: settling an internal read runs no user
-// code. Built as a literal, then detached from Object.prototype: a
-// { __proto__: null } literal would get dictionary-mode properties. A user's
-// read promise settles with a plain copy instead (the reader layer's
+// prototype chain is ReadResult.prototype, then null, so resolving a promise
+// with one finds no `then` for a patched Object.prototype to supply:
+// settling an internal read runs no user code. Instances of a class keep
+// fast-mode properties (a { __proto__: null } literal would get
+// dictionary-mode ones), and the prototype is detached once, here, rather
+// than per result. It is frozen and has no `constructor`, so a result that
+// did reach user code could not be used to give every result a `then`. A
+// user's read promise settles with a plain copy instead (the reader layer's
 // userReadResult), the one `then` lookup the spec makes per read.
+class ReadResult<T> {
+  value: T;
+  done: boolean;
+  constructor(value: T, done: boolean) {
+    this.value = value;
+    this.done = done;
+  }
+}
+ObjectSetPrototypeOf(ReadResult.prototype, null);
+delete (ReadResult.prototype as { constructor?: unknown }).constructor;
+ObjectFreeze(ReadResult.prototype);
+
 export function createReadResult<T>(
   value: T,
   done: false
@@ -111,9 +127,7 @@ export function createReadResult<T>(
   value: T | undefined,
   done: boolean
 ): { value: T | undefined; done: boolean } {
-  const result = { value, done };
-  ObjectSetPrototypeOf(result, null);
-  return result;
+  return new ReadResult(value, done);
 }
 
 // Spec CloneArrayBuffer: a fresh %ArrayBuffer% holding the given bytes.
