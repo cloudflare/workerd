@@ -26,25 +26,8 @@ const unitTests :Workerd.Config = (
         compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
                                "streams_enable_constructors", "r2_list_honor_include",
                                "r2_binding_jsrpc"],
-        streamingTails = ["tail"],
       )
     ),
     ( name = "r2-test", worker = Passthrough.passthroughWorker ),
-    ( name = "tail", worker = .tailWorker ),
   ],
-  extensions = [(
-    modules = [
-      (name = "test:instrumentation-tail", esModule = embed "instrumentation-tail-worker.js"),
-    ],
-  )],
-);
-
-const tailWorker :Workerd.Worker = (
-  modules = [
-    (name = "worker", esModule = embed "r2-instrumentation-test.js"),
-  ],
-  bindings = [
-    (name = "R2_TRACE_TRANSPORT", text = "jsrpc"),
-  ],
-  compatibilityFlags = ["experimental", "nodejs_compat"],
 );
