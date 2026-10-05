@@ -77,31 +77,26 @@ class UpgradeForward {
   // behalf, and answers the request with the outcome.
   kj::Promise<void> run();
 
-  // Answers the request with `failure` if it has been made and not yet answered. For when the
-  // relay ends while the upgrade is under way: the requester would otherwise hear only that the
-  // relay went away, not why.
+  // Answers the request with `failure` if it has been made. Has no effect if it has already been
+  // answered. For when the relay ends while the upgrade is under way: the requester would
+  // otherwise hear only that the relay went away, not why.
   void abandon(const kj::Exception& failure) {
-    if (awaitingAnswer) answer(failure.clone());
+    if (requested) request.answer(failure.clone());
   }
 
  private:
   InboundTlsUpgrade& request;
   RelayDirection& direction;
   kj::Maybe<kj::Function<kj::Promise<void>()>>& startTls;
-  bool awaitingAnswer = false;
-
-  void answer(kj::Maybe<kj::Exception> failure) {
-    awaitingAnswer = false;
-    request.answer(kj::mv(failure));
-  }
+  bool requested = false;
 };
 
 kj::Promise<void> UpgradeForward::run() {
   // A far side that goes away without asking leaves nothing to forward.
-  bool requested = co_await request.whenRequested().then(
+  bool asked = co_await request.whenRequested().then(
       []() { return true; }, [](kj::Exception&&) { return false; });
-  if (!requested) co_return;
-  awaitingAnswer = true;
+  if (!asked) co_return;
+  requested = true;
 
   // The far side asks only once every byte it sent before asking has been consumed from its
   // transport, so those bytes have already been read by `direction`. The continuations that hand
@@ -116,10 +111,10 @@ kj::Promise<void> UpgradeForward::run() {
     co_await direction.changeTransport(kj::mv(start));
   }
   KJ_CATCH(e) {
-    answer(e.clone());
+    request.answer(e.clone());
     kj::throwFatalException(kj::mv(e));
   }
-  answer(kj::none);
+  request.answer(kj::none);
 }
 
 }  // namespace

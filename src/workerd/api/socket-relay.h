@@ -22,7 +22,8 @@ class InboundTlsUpgrade {
   virtual kj::Promise<void> whenRequested() = 0;
 
   // Answers the far side's request: the upgrade happened on its behalf if `failure` is none, and
-  // did not otherwise, in which case the far side sees `failure`.
+  // did not otherwise, in which case the far side sees `failure`. Only the first answer counts;
+  // later ones are ignored.
   virtual void answer(kj::Maybe<kj::Exception> failure) = 0;
 };
 

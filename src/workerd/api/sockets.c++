@@ -22,6 +22,7 @@
 
 #include <capnp/compat/byte-stream.h>
 #include <kj/async-queue.h>
+#include <kj/sticky-flag.h>
 
 namespace workerd::api {
 
@@ -577,50 +578,41 @@ class TlsRendezvous: public kj::Refcounted, public InboundTlsUpgrade {
   // Records that `side` called startTls(). The result resolves once the other side has called it
   // too, and rejects if the other side is abandoned first.
   kj::Promise<void> upgrade(Side side) {
-    halfFor(side).arrived->fulfill();
-    return halfFor(otherSide(side)).arrivedPromise.addBranch();
+    arrivedFor(side).signal();
+    return arrivedFor(otherSide(side)).whenSignaled();
   }
 
   // Records that `side` can no longer call startTls(), for the reason `reason` gives, so that the
-  // other side stops waiting for it. Harmless if that side already upgraded, since fulfillers
-  // ignore a second resolution.
+  // other side stops waiting for it. Harmless if that side already upgraded, since a StickyFlag
+  // ignores a second settlement.
   void abandon(Side side, kj::Exception reason) {
-    halfFor(side).arrived->reject(kj::mv(reason));
+    arrivedFor(side).reject(kj::mv(reason));
   }
 
   kj::Promise<void> whenRequested() override {
-    return peer.arrivedPromise.addBranch();
+    return peerArrived.whenSignaled();
   }
 
   // Settles the handler's side on its behalf, which is what the peer's startTls() is waiting for.
   void answer(kj::Maybe<kj::Exception> failure) override {
     KJ_IF_SOME(e, failure) {
-      handler.arrived->reject(kj::mv(e));
+      handlerArrived.reject(kj::mv(e));
     } else {
-      handler.arrived->fulfill();
+      handlerArrived.signal();
     }
   }
 
  private:
-  struct Half {
-    kj::Own<kj::PromiseFulfiller<void>> arrived;
-    kj::ForkedPromise<void> arrivedPromise;
-  };
-
-  Half peer = makeHalf();
-  Half handler = makeHalf();
-
-  static Half makeHalf() {
-    auto paf = kj::newPromiseAndFulfiller<void>();
-    return Half{.arrived = kj::mv(paf.fulfiller), .arrivedPromise = kj::mv(paf.promise).fork()};
-  }
+  // Settled once each side has called startTls(), or can no longer call it.
+  kj::StickyFlag peerArrived;
+  kj::StickyFlag handlerArrived;
 
   static Side otherSide(Side side) {
     return side == Side::PEER ? Side::HANDLER : Side::PEER;
   }
 
-  Half& halfFor(Side side) {
-    return side == Side::PEER ? peer : handler;
+  kj::StickyFlag& arrivedFor(Side side) {
+    return side == Side::PEER ? peerArrived : handlerArrived;
   }
 };
 

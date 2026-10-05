@@ -235,6 +235,10 @@ class Socket: public jsg::Object {
   // both sockets' `closed` settle with it. A connect() handler that relays its socket should await
   // it: the handler's socket is closed when the handler returns.
   //
+  // Each direction ends independently, whatever either socket's allowHalfOpen says: when one
+  // connection reaches EOF, the relay shuts down the other's write side and keeps relaying the
+  // opposite direction until it ends too.
+  //
   // When the peer of a connect() handler's socket calls startTls(), the relay upgrades the other
   // socket in its place and passes the outcome back. See relayStreams() for the ordering this
   // guarantees.
