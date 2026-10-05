@@ -55,22 +55,5 @@ pub fn register_nodejs_modules(mut registry: Pin<&mut ffi::ModuleRegistry>) {
 }
 
 #[cfg(test)]
-mod tests {
-    use jsg_test::Harness;
-
-    use super::*;
-
-    #[test]
-    fn test_wrap_resource_equality() {
-        let harness = Harness::new();
-        harness.run_in_context(|lock, _ctx| {
-            let dns_util = DnsUtil::new();
-
-            let lhs = dns_util.clone().to_js(lock);
-            let rhs = dns_util.to_js(lock);
-
-            assert_eq!(lhs, rhs);
-            Ok(())
-        });
-    }
-}
+#[path = "lib-test.rs"]
+mod tests;
