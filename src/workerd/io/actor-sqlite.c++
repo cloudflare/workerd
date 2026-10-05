@@ -465,7 +465,7 @@ void ActorSqlite::scheduleLaterAlarm(kj::Maybe<kj::Date> newAlarmTime, SpanParen
   }).fork();
 
   commitTasks.add(alarmLaterInFlight.addBranch()
-          .then([this]() {
+                      .then([this]() {
     alarmLaterIsInFlight = false;
     KJ_IF_SOME(nextTime, kj::mv(pendingLaterAlarmTime)) {
       if (!willFireEarlier(metadata.getAlarm(), nextTime)) {
