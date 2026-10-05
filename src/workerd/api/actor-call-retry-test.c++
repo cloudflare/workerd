@@ -55,10 +55,15 @@ class RecordingObserver final: public RequestObserver {
     stopReasons.add(reason);
   }
 
+  void recordActorRetryAttemptsExhausted(ActorRetryCallType, kj::Duration elapsed) override {
+    exhaustedElapsed.add(elapsed);
+  }
+
   kj::Vector<ActorRetryCallType> retryCallTypes;
   kj::Vector<ActorRetryCallType> outcomeCallTypes;
   kj::Vector<ActorRetryOutcome> outcomes;
   kj::Vector<ActorRetryStopReason> stopReasons;
+  kj::Vector<kj::Duration> exhaustedElapsed;
 };
 
 // A retry state with every gate enabled and a replayable payload.
@@ -471,6 +476,23 @@ KJ_TEST("unable-to-retry before any retry reports no stop reason") {
   KJ_EXPECT(handleFailure(*state, KJ_EXCEPTION(FAILED, "failed")).is<kj::Exception>());
   KJ_EXPECT(observer->outcomes.size() == 0);
   KJ_EXPECT(observer->stopReasons.size() == 0);
+}
+
+KJ_TEST("attempt exhaustion reports time since the call started") {
+  TestTimerChannel timer;
+  auto observer = kj::refcounted<RecordingObserver>();
+  auto state = newRetryState(timer, *observer);
+
+  for (uint attempt = 0; attempt < 5; ++attempt) {
+    startAttempt(*state);
+    timer.advance(300 * kj::MILLISECONDS);
+    handleFailure(*state, makeDisconnect("disconnected"_kj));
+  }
+
+  KJ_ASSERT(observer->outcomes.size() == 1);
+  KJ_EXPECT(observer->outcomes[0] == ActorRetryOutcome::ATTEMPTS_EXHAUSTED);
+  KJ_ASSERT(observer->exhaustedElapsed.size() == 1);
+  KJ_EXPECT(observer->exhaustedElapsed[0] == 1500 * kj::MILLISECONDS);
 }
 
 }  // namespace

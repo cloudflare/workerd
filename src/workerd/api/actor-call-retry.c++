@@ -128,7 +128,10 @@ kj::OneOf<kj::Duration, kj::Exception> ActorCallRetryState::checkCanRetry(kj::Ex
     originalDisconnect = exception.clone();
   }
   if (attemptCount >= policy.maxAttempts()) {
-    recordOutcome(ActorRetryOutcome::ATTEMPTS_EXHAUSTED);
+    if (recordOutcome(ActorRetryOutcome::ATTEMPTS_EXHAUSTED)) {
+      observer->recordActorRetryAttemptsExhausted(
+          config.callType, timer.nowForLimitTimeout() - callStart);
+    }
     return KJ_ASSERT_NONNULL(originalDisconnect).clone();
   }
 

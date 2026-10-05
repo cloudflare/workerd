@@ -227,6 +227,9 @@ class RequestObserver: public kj::Refcounted {
   // Why a retry loop recorded as UNABLE_TO_RETRY by recordActorRetryOutcome() stopped.
   virtual void recordActorRetryStopReason(
       ActorRetryCallType callType, ActorRetryStopReason reason) {}
+  // Time from the start of a call recorded as ATTEMPTS_EXHAUSTED until it was exhausted.
+  virtual void recordActorRetryAttemptsExhausted(
+      ActorRetryCallType callType, kj::Duration elapsed) {}
 
   // Fired after actor construction and immediately before user code handles the request, so an
   // observer can claim the request's retry-token nonce and throw to reject it. For fetch, that is
