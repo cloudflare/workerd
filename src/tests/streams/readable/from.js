@@ -5,8 +5,8 @@
 // ReadableStream.from(): iterable/async-iterable adoption and cancel
 // plumbing through the iterator protocol. Migrated from streams-test.js;
 // then the iterator protocol's observable steps (WebIDL async_sequence and
-// ECMA-262's async-from-sync iterator), the string and ArrayBufferView
-// divergences, and the exact rejection messages.
+// ECMA-262's async-from-sync iterator), the sync path's schedule, the string
+// and ArrayBufferView divergences, and the exact rejection messages.
 
 import { strictEqual, deepStrictEqual, rejects, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -470,8 +470,9 @@ export const fromCancelReturnLookup = {
 
       await from({ next, return: null }).cancel('why');
 
-      // C++ lets a throwing return getter escape as an uncaught exception
-      // (ledger #28).
+      // A throwing return getter rejects the cancel. On C++ the getter's
+      // error also escapes into the I/O context and fails the request,
+      // which no JS handler prevents (ledger #28 DEFECT; unpinnable).
       if (!usingTsImpl) continue;
       const getterError = new Error('getter');
       strictEqual(
@@ -516,7 +517,8 @@ export const fromArrayBufferViewIsOneChunk = {
 };
 
 // DIVERGENCE (ledger #28): the async-from-sync iterator's steps. TS follows
-// the spec: an async iterator's final result has only `done` read; a sync
+// the spec's operation order (its schedule is ledger #29): an async
+// iterator's final result has only `done` read; a sync
 // iterator whose value rejects while not done is closed through return();
 // the value of a sync iterator's final result, and of its return() result,
 // is resolved, so a rejection rejects the read or the cancel; a `next` that
@@ -638,5 +640,95 @@ export const fromIteratorProtocolEdges = {
         strictEqual((await reader.read()).done, true);
       }
     }
+  },
+};
+
+// Counts the microtask ticks from start() until its promise settles.
+async function ticksToSettle(start) {
+  let settled = false;
+  start().then(
+    () => (settled = true),
+    () => (settled = true)
+  );
+  let ticks = 0;
+  while (!settled) {
+    await null;
+    ticks++;
+  }
+  return ticks;
+}
+
+// DIVERGENCE (ledger #29): when a sync iterable's reads and cancels settle,
+// measured against an async iterator whose next()/return() returns an
+// already-settled promise. The spec lands both on the same tick; when
+// next()/return() throws, it settles the sync one two ticks after the async
+// one. TS reacts to the async-from-sync continuation directly: a sync read
+// or cancel settles two ticks before the async one, and a throwing one in
+// the same tick. C++: one tick before, and the same tick.
+export const fromSyncIterableSettlesEarly = {
+  async test() {
+    const asyncOf = (iterator) =>
+      ReadableStream.from({
+        [Symbol.asyncIterator]() {
+          return iterator;
+        },
+      });
+    const syncOf = (iterator) =>
+      ReadableStream.from({
+        [Symbol.iterator]() {
+          return iterator;
+        },
+      });
+    const error = new Error('boom');
+    const thrower = () => {
+      throw error;
+    };
+    const lead = async (asyncStart, syncStart) =>
+      (await ticksToSettle(asyncStart)) - (await ticksToSettle(syncStart));
+
+    const readLead = await lead(
+      () =>
+        asyncOf({
+          next: () => Promise.resolve({ value: 1, done: false }),
+        })
+          .getReader()
+          .read(),
+      () =>
+        syncOf({ next: () => ({ value: 1, done: false }) })
+          .getReader()
+          .read()
+    );
+    const cancelLead = await lead(
+      () =>
+        asyncOf({
+          next() {},
+          return: () => Promise.resolve({ done: true }),
+        }).cancel('why'),
+      () => syncOf({ next() {}, return: () => ({ done: true }) }).cancel('why')
+    );
+    const throwingReadLead = await lead(
+      () => asyncOf({ next: thrower }).getReader().read(),
+      () => syncOf({ next: thrower }).getReader().read()
+    );
+    const throwingCancelLead = await lead(
+      () => asyncOf({ next() {}, return: thrower }).cancel('why'),
+      () => syncOf({ next() {}, return: thrower }).cancel('why')
+    );
+    deepStrictEqual(
+      { readLead, cancelLead, throwingReadLead, throwingCancelLead },
+      usingTsImpl
+        ? {
+            readLead: 2,
+            cancelLead: 2,
+            throwingReadLead: 0,
+            throwingCancelLead: 0,
+          }
+        : {
+            readLead: 1,
+            cancelLead: 1,
+            throwingReadLead: 0,
+            throwingCancelLead: 0,
+          }
+    );
   },
 };

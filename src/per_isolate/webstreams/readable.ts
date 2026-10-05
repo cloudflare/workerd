@@ -3539,6 +3539,17 @@ function pipeToInternal<R>(
 // user's methods are read exactly when the spec reads them: @@asyncIterator
 // and @@iterator through GetMethod (a Get; no `in` checks), `next` once when
 // the iterator is opened, `return` at each cancel.
+//
+// INTENTIONAL SPEC DIVERGENCE (readable ledger #29): for a sync iterable, the
+// operations run in spec order but not on the spec's schedule. The spec
+// reacts to "a promise resolved with" the async-from-sync wrapper's
+// next()/return() promise; here the wrapper's continuation is reacted to
+// directly. A read or cancel thus settles two microtasks earlier than the
+// spec has it, and one whose sync next()/return() throws settles in the same
+// tick as an async iterator's, where the spec has it two microtasks later.
+// Nothing looks up `then` on the wrapper's promise. Matching the spec would
+// cost two microtasks and a Promise.prototype.then lookup per chunk on the
+// from(array) path.
 
 const kFromStrategy = ObjectFreeze({ __proto__: null, highWaterMark: 0 });
 
@@ -3671,7 +3682,8 @@ function closeAsyncIterator(iterator: object, reason: unknown): Promise<void> {
 // WebIDL "close an async iterator" on the async-from-sync wrapper of the
 // user's sync iterator: the wrapper's return() calls the sync return() with
 // the reason, checks for an object, and resolves its `value` (after reading
-// `done`); the wrapper's own result is always an object.
+// `done`); the wrapper's own result is always an object. As for next(), the
+// continuation is reacted to directly (ledger #29).
 function closeSyncIterator(iterator: object, reason: unknown): Promise<void> {
   let result: unknown;
   try {
@@ -3753,7 +3765,8 @@ function readableStreamFromIterable<R>(
     source = {
       __proto__: null,
       // The async-from-sync wrapper's next(), then "get the next value" on
-      // its result, which is always an object: nothing more to check.
+      // its result, which is always an object: nothing more to check. The
+      // continuation is reacted to directly (ledger #29; see above).
       pull(controller: ReadableStreamDefaultControllerType): Promise<void> {
         let result: object;
         try {

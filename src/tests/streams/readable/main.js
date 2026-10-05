@@ -127,6 +127,7 @@ export {
   fromCancelReturnLookup,
   fromArrayBufferViewIsOneChunk,
   fromIteratorProtocolEdges,
+  fromSyncIterableSettlesEarly,
 } from 'from';
 
 export {
