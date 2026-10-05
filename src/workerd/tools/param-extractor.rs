@@ -134,6 +134,10 @@ fn traverse_disambiguous(
         .collect()
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "a build tool reports malformed input by aborting with a message"
+)]
 fn traverse_function_like(
     node: ClangNode,
     fully_qualified_parent_name: &[String],

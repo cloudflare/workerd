@@ -2,6 +2,11 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![allow(
+    unsafe_code,
+    reason = "holds a cxx bridge, which expands to unsafe FFI glue"
+)]
+
 use std::pin::Pin;
 use std::time::SystemTime;
 
@@ -85,13 +90,6 @@ impl Interface for Worker {
         _retry_count: u32,
     ) -> crate::Result<AlarmResult> {
         Err(Self::not_implemented("run_alarm"))
-    }
-
-    async fn custom_event(
-        &mut self,
-        _event: crate::KjOwn<crate::CustomEvent>,
-    ) -> crate::Result<crate::CustomEventResult> {
-        Err(Self::not_implemented("custom_event"))
     }
 }
 

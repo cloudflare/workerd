@@ -60,6 +60,18 @@ class TestDOSql extends DurableObject {
   }
 }
 
+class TestDOSnapshot extends DurableObject {
+  async test() {
+    const snapshot = await this.ctx.storage.snapshot();
+    expectTypeOf<DurableObjectSnapshot>(snapshot);
+    expectTypeOf<Promise<DurableObjectSnapshot>>(
+      this.ctx.storage.snapshot({ bookmark: "bookmark" })
+    );
+    expectTypeOf<Promise<string>>(this.ctx.storage.onNextSessionRestore(snapshot));
+    expectTypeOf<Promise<string>>(this.ctx.storage.onNextSessionRestore("bookmark"));
+  }
+}
+
 // Regression test for https://github.com/cloudflare/workerd/issues/6551
 // DurableObjectNamespace.jurisdiction accepts undefined or no argument.
 declare const ns: DurableObjectNamespace;

@@ -170,6 +170,10 @@ impl<T> Nullable<T> {
     ///
     /// [`Some`]: Nullable::Some
     #[track_caller]
+    #[expect(
+        clippy::panic,
+        reason = "panicking on a missing value is this method's contract, as with `Option`"
+    )]
     pub fn unwrap(self) -> T {
         match self {
             Self::Some(v) => v,
@@ -191,6 +195,10 @@ impl<T> Nullable<T> {
     ///
     /// [`Some`]: Nullable::Some
     #[track_caller]
+    #[expect(
+        clippy::panic,
+        reason = "panicking on a missing value is this method's contract, as with `Option`"
+    )]
     pub fn expect(self, msg: &str) -> T {
         match self {
             Self::Some(v) => v,

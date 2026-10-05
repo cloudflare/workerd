@@ -1,3 +1,8 @@
+#![allow(
+    unsafe_code,
+    reason = "holds a cxx bridge, which expands to unsafe FFI glue"
+)]
+
 use std::pin::Pin;
 
 use kj_rs::KjOwn;

@@ -2004,14 +2004,16 @@ void handleLog(jsg::Lock& js,
 
 template <jsg::ContextDataSlot slot, LogLevel level>
 void consoleDecorator(const v8::FunctionCallbackInfo<v8::Value>& info) {
-  auto& js = jsg::Lock::from(info.GetIsolate());
-  js.withinHandleScope([&] {
-    auto original_method_value = jsg::getContextDataSlot(js.v8Context(), slot).As<v8::Value>();
-    KJ_ASSERT(!original_method_value.IsEmpty() && original_method_value->IsFunction(),
-        "console original method slot was not initialized");
-    auto original_function = original_method_value.As<v8::Function>();
-    auto& isolate = Worker::Isolate::from(js);
-    handleLog(js, isolate.getLoggingOptions(), level, original_function, info);
+  jsg::liftKj(info, [&]() {
+    auto& js = jsg::Lock::from(info.GetIsolate());
+    js.withinHandleScope([&] {
+      auto original_method_value = jsg::getContextDataSlot(js.v8Context(), slot).As<v8::Value>();
+      KJ_ASSERT(!original_method_value.IsEmpty() && original_method_value->IsFunction(),
+          "console original method slot was not initialized");
+      auto original_function = original_method_value.As<v8::Function>();
+      auto& isolate = Worker::Isolate::from(js);
+      handleLog(js, isolate.getLoggingOptions(), level, original_function, info);
+    });
   });
 }
 

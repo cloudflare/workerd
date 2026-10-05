@@ -6,8 +6,10 @@ import { RpcTarget, WorkerEntrypoint } from 'cloudflare:workers';
 
 const restartBodies = new Map();
 const subscribeOptions = new Map();
+let lastCreateBatchOptions = null;
 
 const THROW_ID = 'throw';
+const BATCH_ERROR_ID = 'batch-error';
 const MISSING_DELETE_ID = 'missing-delete';
 
 class SubscriptionMock extends RpcTarget {
@@ -41,7 +43,34 @@ export default class WorkflowsMock extends WorkerEntrypoint {
   }
 
   async createBatch(options) {
-    return options.map((val) => ({ id: val.id }));
+    lastCreateBatchOptions = options;
+
+    if (Array.isArray(options)) {
+      return options.map((val) => ({ id: val.id }));
+    }
+
+    const instances =
+      options.instances ??
+      Array.from({ length: options.count }, (_, index) => ({
+        id: `generated-${index}`,
+      }));
+    const created = [];
+    const errors = [];
+
+    for (const [index, instance] of instances.entries()) {
+      if (instance.id === BATCH_ERROR_ID) {
+        errors.push({
+          index,
+          id: instance.id,
+          code: 10405,
+          message: 'Provided instance ID already exists',
+        });
+      } else {
+        created.push({ id: instance.id });
+      }
+    }
+
+    return { created, errors };
   }
 
   async deleteBatch(options) {
@@ -102,6 +131,8 @@ export default class WorkflowsMock extends WorkerEntrypoint {
         return Response.json({ result: restartBodies.get(data.id) ?? null });
       case '/last-subscribe':
         return Response.json({ result: subscribeOptions.get(data.id) ?? null });
+      case '/last-create-batch':
+        return Response.json({ result: lastCreateBatchOptions });
       default:
         throw new Error(
           `unexpected HTTP request to the workflows mock: ${pathname}`

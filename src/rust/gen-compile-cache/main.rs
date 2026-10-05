@@ -33,6 +33,10 @@ enum Kind {
     Function,
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "a build tool reports a failure by aborting with a message"
+)]
 fn main() {
     let args = Args::parse();
 
@@ -58,6 +62,7 @@ fn main() {
 }
 
 #[cxx::bridge(namespace = "workerd::rust::gen_compile_cache")]
+#[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {
     unsafe extern "C++" {
         include!("workerd/rust/gen-compile-cache/cxx-bridge.h");

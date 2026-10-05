@@ -9,6 +9,8 @@
 //! [`OwnOrMut`] for mutable-only wrappers so the type system does not represent an impossible shared
 //! borrow state.
 
+#![allow(unsafe_code, reason = "declares an `unsafe fn`, `OwnOrRef::as_mut`")]
+
 use std::ops::Deref;
 use std::pin::Pin;
 
