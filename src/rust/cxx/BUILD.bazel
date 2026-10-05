@@ -77,6 +77,12 @@ rust_library(
     ],
 )
 
+wd_rust_test(
+    name = "gen_test",
+    compile_data = glob(["gen/src/*-test.rs"]),
+    crate = ":gen",
+)
+
 rust_binary(
     name = "cxxbridge",
     srcs = glob(
@@ -100,6 +106,12 @@ rust_binary(
         "@crates_vendor//:quote",
         "@crates_vendor//:syn",
     ],
+)
+
+wd_rust_test(
+    name = "cxxbridge_test",
+    compile_data = glob(["gen/cmd/src/*-test.rs"]),
+    crate = ":cxxbridge",
 )
 
 wd_cc_library(
@@ -160,6 +172,12 @@ rust_library(
         "@crates_vendor//:scratch",
         "@crates_vendor//:syn",
     ],
+)
+
+wd_rust_test(
+    name = "cxx-build_test",
+    compile_data = glob(["gen/build/src/*-test.rs"]),
+    crate = ":cxx-build",
 )
 
 rust_library(
