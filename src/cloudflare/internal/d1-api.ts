@@ -899,8 +899,8 @@ function mapQueryResult(queryResult: QuerySqlResult): D1RowsColumns {
       };
     default: {
       data.kind satisfies never;
-      const message = `Unsupported D1 query result kind: ${String(data.kind)}`;
-      throw new Error(`D1_ERROR: ${message}`);
+      // _queryOrThrow() adds the public D1 error prefix.
+      throw new Error(`Unsupported D1 query result kind: ${String(data.kind)}`);
     }
   }
 }
