@@ -74,7 +74,7 @@ export const testThrownErrorsPropagate = {
       () => db.batch([db.prepare('INVALID SQL')]),
     ]) {
       await assert.rejects(operation, (error) => {
-        assert.equal(error.message, `D1_ERROR: Error: ${syntaxErrorMessage}`);
+        assert.equal(error.message, `D1_ERROR: ${syntaxErrorMessage}`);
         assertBackendError(error.cause);
         return true;
       });

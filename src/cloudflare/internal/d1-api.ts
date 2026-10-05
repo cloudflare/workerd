@@ -467,7 +467,7 @@ class D1DatabaseSession {
     try {
       results = await this._query(request);
     } catch (e: unknown) {
-      const message = String(e);
+      const message = e instanceof Error ? e.message : String(e);
       span.setAttribute('error.type', message);
       throw new Error(`D1_ERROR: ${message}`, { cause: e });
     }
