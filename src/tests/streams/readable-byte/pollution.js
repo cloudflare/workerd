@@ -4,12 +4,14 @@
 
 // Prototype pollution the byte-stream machinery must not observe: a
 // patched byte controller error(), a patched BYOB reader read(), an
-// ArrayBuffer species constructor, and Object.prototype members on a native
-// body's C++ source. The C++ implementation reads none of these; the
-// TypeScript one must not either. Every mutation is undone before any
-// assertion runs.
+// ArrayBuffer species constructor, Object.prototype members on a native
+// body's C++ source, and an Object.prototype.then getter beyond the one
+// lookup the user's read promise makes. The C++ implementation reads none
+// of these; the TypeScript one must not either. Every mutation is undone
+// before any assertion runs.
 
 import { strictEqual, deepStrictEqual, rejects } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
 
 // A patched controller error() must not stop a pull rejection from
 // erroring the stream.
@@ -173,5 +175,176 @@ export const nativeSourceIgnoresPollutedMembers = {
     strictEqual('type' in {}, false, 'pollution must be removed');
     strictEqual(result.done, false);
     strictEqual(new TextDecoder().decode(result.value), 'hello');
+  },
+};
+
+// Resolving the promise a byte stream's read returns looks `then` up on its
+// result once: default reads (waiting, or through autoAllocateChunkSize),
+// BYOB reads answered from the queue or waiting (readAtLeast too, and at
+// close), and reads of a native body. Every result is an ordinary object.
+export const thenGetterFiresOncePerByteRead = {
+  async test() {
+    const byteSource = (extra = {}) => {
+      let controller;
+      const rs = new ReadableStream({
+        type: 'bytes',
+        ...extra,
+        start(c) {
+          controller = c;
+        },
+      });
+      return { rs, controller };
+    };
+    const cases = {
+      defaultWaitsForEnqueue() {
+        const { rs, controller } = byteSource();
+        const reader = rs.getReader();
+        return async () => {
+          const read = reader.read();
+          controller.enqueue(new Uint8Array([1]));
+          return [await read];
+        };
+      },
+      defaultAutoAllocate() {
+        const { rs, controller } = byteSource({ autoAllocateChunkSize: 8 });
+        const reader = rs.getReader();
+        return async () => {
+          const read = reader.read();
+          controller.byobRequest.view[0] = 1;
+          controller.byobRequest.respond(1);
+          return [await read];
+        };
+      },
+      byobQueued() {
+        const { rs, controller } = byteSource();
+        controller.enqueue(new Uint8Array([1]));
+        const reader = rs.getReader({ mode: 'byob' });
+        return async () => [await reader.read(new Uint8Array(4))];
+      },
+      byobWaitsForEnqueue() {
+        const { rs, controller } = byteSource();
+        const reader = rs.getReader({ mode: 'byob' });
+        return async () => {
+          const read = reader.read(new Uint8Array(4));
+          controller.enqueue(new Uint8Array([1]));
+          return [await read];
+        };
+      },
+      readAtLeastAcrossEnqueues() {
+        const { rs, controller } = byteSource();
+        const reader = rs.getReader({ mode: 'byob' });
+        return async () => {
+          const read = reader.readAtLeast(2, new Uint8Array(4));
+          controller.enqueue(new Uint8Array([1]));
+          controller.enqueue(new Uint8Array([2]));
+          return [await read];
+        };
+      },
+      byobWaitsForClose() {
+        const { rs, controller } = byteSource();
+        const reader = rs.getReader({ mode: 'byob' });
+        return async () => {
+          const read = reader.read(new Uint8Array(4));
+          controller.close();
+          controller.byobRequest?.respond(0);
+          return [await read];
+        };
+      },
+      nativeBody() {
+        const reader = new Response('abc').body.getReader();
+        return async () => [await reader.read(), await reader.read()];
+      },
+      nativeBodyByob() {
+        const reader = new Response('abc').body.getReader({ mode: 'byob' });
+        return async () => [await reader.read(new Uint8Array(8))];
+      },
+    };
+    const perRead = { nativeBody: 2 };
+    for (const [name, setup] of Object.entries(cases)) {
+      const op = setup();
+      let fired = 0;
+      let results;
+      Object.defineProperty(Object.prototype, 'then', {
+        get() {
+          if (Object.hasOwn(this, 'done')) {
+            fired++;
+          }
+          return undefined;
+        },
+        configurable: true,
+      });
+      try {
+        results = await op();
+      } finally {
+        delete Object.prototype.then;
+      }
+      strictEqual('then' in {}, false, 'interceptor must be removed');
+      strictEqual(fired, perRead[name] ?? 1, `${name}: ${fired}`);
+      for (const result of results) {
+        strictEqual(Object.getPrototypeOf(result), Object.prototype, name);
+      }
+    }
+  },
+};
+
+// When a BYOB read's `then` lookup runs relative to the pull it triggers
+// (ledger #34). Answered from the queue, the spec fills the read, pulls
+// (HandleQueueDrain, CallPullIfNeeded) and only then runs its chunk steps,
+// so the pull comes first. Answered by an enqueue(), the spec fulfills the
+// read first and pulls at the end of the enqueue(). TypeScript follows the
+// spec in both. C++ settles the read's promise a microtask later, after the
+// enqueue()'s pull, and makes no pull for a read answered from the queue.
+export const byobReadThenLookupFollowsItsPull = {
+  async test() {
+    const log = [];
+    let controller;
+    const rs = new ReadableStream(
+      {
+        type: 'bytes',
+        start(c) {
+          controller = c;
+        },
+        pull() {
+          log.push('pull');
+        },
+      },
+      { highWaterMark: 8 }
+    );
+    const reader = rs.getReader({ mode: 'byob' });
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+    // Logs pulls and `then` lookups from op() until the read it returns
+    // settles.
+    const observe = async (op) => {
+      await tick();
+      log.length = 0;
+      Object.defineProperty(Object.prototype, 'then', {
+        get() {
+          if (Object.hasOwn(this, 'done')) log.push('then');
+          return undefined;
+        },
+        configurable: true,
+      });
+      try {
+        await op();
+      } finally {
+        delete Object.prototype.then;
+      }
+      return [...log];
+    };
+    controller.enqueue(new Uint8Array([1, 2, 3, 4]));
+    const fromQueue = await observe(() => reader.read(new Uint8Array(4)));
+    const pending = reader.read(new Uint8Array(4));
+    const fromEnqueue = await observe(() => {
+      controller.enqueue(new Uint8Array([5]));
+      return pending;
+    });
+    strictEqual('then' in {}, false, 'interceptor must be removed');
+    if (usingTsImpl) {
+      deepStrictEqual(fromQueue, ['pull', 'then']);
+      deepStrictEqual(fromEnqueue, ['then', 'pull']);
+    } else {
+      deepStrictEqual(fromQueue, ['then']);
+      deepStrictEqual(fromEnqueue, ['pull', 'then']);
+    }
   },
 };

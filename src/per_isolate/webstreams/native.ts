@@ -111,6 +111,7 @@ import type {
   ByteStreamConsumer as ByteStreamConsumerType,
   PendingRead,
   PullIntoDescriptor,
+  createReadResult as createReadResultType,
 } from './queue';
 import type {
   PromiseWithResolvers as PromiseWithResolversType,
@@ -151,6 +152,9 @@ const { isArrayBufferView, isUint8Array, markPromiseHandled } = utils;
 
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
+};
+const { createReadResult } = require('webstreams/queue') as {
+  createReadResult: typeof createReadResultType;
 };
 
 // ---------------------------------------------------------------------------
@@ -533,30 +537,29 @@ class NativePullConduit implements ByteStreamConsumerType {
   }
 
   read(reader: object): Promise<ReadableStreamReadResult<Uint8Array>> {
-    if (this.#status === 'errored') {
-      return PromiseReject(this.#storedError) as Promise<
+    const { promise, resolve, reject } =
+      PromiseWithResolvers() as PromiseWithResolversType<
         ReadableStreamReadResult<Uint8Array>
       >;
-    }
-    if (this.#status === 'closed') {
-      return PromiseResolve({ done: true, value: undefined }) as Promise<
-        ReadableStreamReadResult<Uint8Array>
-      >;
-    }
-    const withResolvers = PromiseWithResolvers() as PromiseWithResolversType<
-      ReadableStreamReadResult<Uint8Array>
-    >;
-    this.#requests.push({
-      kind: 'default',
-      read: {
-        resolve: withResolvers.resolve,
-        reject: withResolvers.reject,
-        reader,
-      },
-    } satisfies NativeDefaultRequest);
     // The pull prompt arrives via controllerPullIfNeeded from the reader
     // layer (spec PullSteps ordering), not here.
-    return withResolvers.promise;
+    this.submitRead({ resolve, reject, reader });
+    return promise;
+  }
+
+  submitRead(request: PendingRead<Uint8Array>): void {
+    if (this.#status === 'errored') {
+      request.reject(this.#storedError);
+      return;
+    }
+    if (this.#status === 'closed') {
+      request.resolve(createReadResult(undefined, true));
+      return;
+    }
+    this.#requests.push({
+      kind: 'default',
+      read: request,
+    } satisfies NativeDefaultRequest);
   }
 
   drain(_maxSize?: number): { chunks: Uint8Array[]; done: boolean } {
@@ -616,9 +619,9 @@ class NativePullConduit implements ByteStreamConsumerType {
     for (let i = 0; i < requests.length; i++) {
       const request = requests.get(i) as NativeRequest;
       if (request.kind === 'default') {
-        request.read.resolve({ done: true, value: undefined });
+        request.read.resolve(createReadResult(undefined, true));
       } else {
-        request.desc.resolve({ done: true, value: undefined });
+        request.desc.resolve(createReadResult(undefined, true));
       }
     }
   }
@@ -629,7 +632,7 @@ class NativePullConduit implements ByteStreamConsumerType {
 
   fulfillFirstPendingRead(value: Uint8Array): void {
     const pending = this.#requests.shift() as NativeDefaultRequest;
-    pending.read.resolve({ value, done: false });
+    pending.read.resolve(createReadResult(value, false));
   }
 
   cancelStream(
@@ -661,10 +664,12 @@ class NativePullConduit implements ByteStreamConsumerType {
     if (this.#status === 'closed') {
       // Closed-stream BYOB semantics: hand the (transferred) buffer back
       // via a zero-length view, done: true.
-      desc.resolve({
-        done: true,
-        value: new desc.viewCtor(desc.buffer, desc.byteOffset, 0),
-      });
+      desc.resolve(
+        createReadResult(
+          new desc.viewCtor(desc.buffer, desc.byteOffset, 0),
+          true
+        )
+      );
       return desc.promise;
     }
     this.#requests.push({
@@ -927,7 +932,7 @@ class NativePullConduit implements ByteStreamConsumerType {
       this.#accountDelivery(TypedArrayPrototypeGetByteLength(view) as number);
       this.#requests.shift();
       this.#deliveredThisPull = true;
-      head.read.resolve({ done: false, value: view });
+      head.read.resolve(createReadResult(view, false));
       return;
     }
     // Head is a BYOB read: the source must use the byobRequest instead.
@@ -991,7 +996,7 @@ class NativePullConduit implements ByteStreamConsumerType {
       filled / desc.elementSize
     );
     if (filled >= desc.minimumFill) {
-      desc.resolve({ done: false, value });
+      desc.resolve(createReadResult(value, false));
       return;
     }
     // MIN-READ CONTRACT: the respond is the source's COMPLETE answer for
@@ -1017,13 +1022,15 @@ class NativePullConduit implements ByteStreamConsumerType {
       );
       this.#status = 'errored';
       this.#storedError = error;
+      // The stream errors before its reads reject (spec
+      // ReadableStreamError: reader.closed first).
+      this.#hooks.errorStream(error);
       desc.reject(error);
       this.errorAllReads(error);
-      this.#hooks.errorStream(error);
       return;
     }
     this.#status = 'closed';
-    desc.resolve({ done: false, value });
+    desc.resolve(createReadResult(value, false));
     this.#settleRemainingAsEof();
     this.#hooks.closeStream();
   }
@@ -1061,13 +1068,15 @@ class NativePullConduit implements ByteStreamConsumerType {
     for (let i = 0; i < requests.length; i++) {
       const request = requests.get(i) as NativeRequest;
       if (request.kind === 'default') {
-        request.read.resolve({ done: true, value: undefined });
+        request.read.resolve(createReadResult(undefined, true));
       } else {
         const desc = request.desc;
-        desc.resolve({
-          done: true,
-          value: new desc.viewCtor(desc.buffer, desc.byteOffset, 0),
-        });
+        desc.resolve(
+          createReadResult(
+            new desc.viewCtor(desc.buffer, desc.byteOffset, 0),
+            true
+          )
+        );
       }
     }
   }
@@ -1113,19 +1122,21 @@ class NativePullConduit implements ByteStreamConsumerType {
         );
         this.#status = 'errored';
         this.#storedError = error;
-        this.errorAllReads(error);
         this.#hooks.errorStream(error);
+        this.errorAllReads(error);
         return;
       }
       this.#requests.shift();
-      desc.resolve({
-        done: false,
-        value: new desc.viewCtor(
-          desc.buffer,
-          desc.byteOffset,
-          desc.bytesFilled / desc.elementSize
-        ),
-      });
+      desc.resolve(
+        createReadResult(
+          new desc.viewCtor(
+            desc.buffer,
+            desc.byteOffset,
+            desc.bytesFilled / desc.elementSize
+          ),
+          false
+        )
+      );
     }
 
     this.#settleRemainingAsEof();
@@ -1136,8 +1147,8 @@ class NativePullConduit implements ByteStreamConsumerType {
     if (this.#status !== 'active') return; // late settle tolerated
     this.#status = 'errored';
     this.#storedError = reason;
-    this.errorAllReads(reason);
     this.#hooks.errorStream(reason);
+    this.errorAllReads(reason);
   }
 
   // Spec PromiseCall over the extracted cancel method; resolved if the

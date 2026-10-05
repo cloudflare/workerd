@@ -104,10 +104,10 @@ interface DecompressionStream {
   under TS; C++ leaves it untouched — `writer.closed` stays pending (#13).
 - **Reads:** a second concurrent default read rejects under C++ ("single
   pending read request") and parks under TS (#14); the thenable check runs
-  once per read under C++, twice under TS (#15). Under TS the first check
-  runs inside the write delivering the chunk; a reader cancel from there
-  stops the delivery and fails that write with the cancel reason (the
-  writable errors per #13), where C++ has already settled the write.
+  once per read (#15). Under TS it runs inside the write delivering the
+  chunk; a reader cancel from there stops the delivery and fails that
+  write with the cancel reason (the writable errors per #13), where C++
+  has already settled the write.
 - **tee():** both branches observe identical bytes; the single-branch
   cancel promise carries the identity suite's ledger #13 semantics (C++
   immediate, TS shared composite).
@@ -161,7 +161,7 @@ pedantic branches shifting anything the suite pins.
 | 12 | Canceling reader's parked read | rejects with the cancel reason | resolves done (WHATWG) | `cancelSettlesPendingRead` |
 | 13 | `readable.cancel()` → writable side | untouched; `writer.closed` stays pending | errored; closed rejects with the reason | `cancelReadableWritableAftermath` |
 | 14 | Second concurrent default read | TypeError "single pending read request" | parked, served in order | `secondConcurrentRead` |
-| 15 | Thenable check per read resolution | once | twice | `thenInterceptionDuringReadResolution` |
+| 15 | Thenable check per read resolution | once | same | `thenInterceptionDuringReadResolution` |
 | 16 | Default-read piece of a large buffered output | internal-stream read buffer (4 KiB; 16 KiB under `updated-auto-allocate-chunk-size`) | 64 KiB | `largeOutputDeliveredInBoundedPieces` |
 | 17 | Output produced before a trailing-junk error, reads waiting | reads reject | each waiting read gets a piece, later reads error | `trailingJunkAfterLargeOutput` |
 
