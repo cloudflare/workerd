@@ -1,7 +1,3 @@
-// Production code must not panic; test code is exempt via clippy.toml allow-*-in-tests.
-#![deny(clippy::expect_used, clippy::panic, clippy::unreachable)]
-#![deny(clippy::todo, clippy::unimplemented)]
-
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -15,6 +11,7 @@ use swc_common::errors::Level;
 use crate::ffi::Output;
 
 #[cxx::bridge(namespace = "workerd::rust::transpiler")]
+#[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {
     #[derive(Debug)]
     struct Output {

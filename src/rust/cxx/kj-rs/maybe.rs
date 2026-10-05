@@ -1,3 +1,5 @@
+#![allow(unsafe_code, reason = "`KjMaybe` mirrors the layout of `kj::Maybe<T>`")]
+
 use std::mem::MaybeUninit;
 use std::pin::Pin;
 

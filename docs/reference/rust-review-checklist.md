@@ -30,6 +30,12 @@ Unsafe code is concentrated at FFI boundaries. Review every `unsafe` block and `
 - **Always** verify that `unsafe impl Send` / `unsafe impl Sync` are justified with a comment
   explaining why the type is safe to share across threads. `jsg::Ref<T>` is explicitly not `Send`
   (uses `Rc` + `UnsafeCell` internally) — flag any attempt to send it across threads.
+- **Always** verify that an `allow` or `expect` of `unsafe_code` covers no more than it needs. The
+  build denies `unsafe_code` in first-party crates (`//build/rust:lints`); the crates derived from
+  upstream cxx in `src/rust/cxx` keep upstream's lint levels. The exception belongs at the top of
+  the module file that needs it, or on the item when that file is the crate root. One at the top of
+  a crate root opts the whole crate out: flag it. Prefer a single `ffi.rs` per crate holding the
+  bridge and every hand-written `unsafe`.
 
 #### Common unsafe patterns in this codebase:
 
@@ -49,8 +55,10 @@ Unsafe code is concentrated at FFI boundaries. Review every `unsafe` block and `
   `ExceptionType` variant (e.g., `TypeError`, `RangeError`). Domain errors should implement
   `From<DomainError> for jsg::Error` for ergonomic `?` usage.
 - **Never** use `panic!` for expected errors. Panics across FFI are undefined behavior. Use
-  `Result` and propagate errors through the CXX bridge. `unwrap()` / `expect()` are acceptable in
-  tests (clippy is configured with `allow-unwrap-in-tests = true`).
+  `Result` and propagate errors through the CXX bridge. The build denies `unwrap()`, `expect()`,
+  `panic!`, `todo!` and `unimplemented!` in production code. `unreachable!` is allowed: a panic is
+  for what cannot happen. Verify that an `#[expect]` of one of these lints guards a real invariant
+  and not an error a caller could meet. Test code is exempt from these lints.
 - **Error type changes are generally not breaking** — same policy as the C++ side. Changing the
   JS exception type (e.g., from generic error to `TypeError`) is not normally a breaking change
   unless it removes properties that user code could depend on (e.g., `DOMException` has `code`
@@ -86,6 +94,9 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   Rust changes.
 - **`#[expect(clippy::...)]` over `#[allow(clippy::...)]`** — `expect` is stricter: it warns if
   the suppressed lint no longer fires, preventing stale suppressions from accumulating.
+- **Every `allow` and `expect` states a `reason`** in production code (the build denies
+  `clippy::allow_attributes_without_reason`). Verify that the reason is true and specific to the
+  code it sits on.
 - **Import formatting**: one `use` per import line, grouped as std / external / crate (enforced
   by `rustfmt.toml`). Run `just format` to auto-fix.
 

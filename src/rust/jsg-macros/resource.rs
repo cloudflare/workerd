@@ -533,6 +533,7 @@ fn derive_js_name(rust_name: &str) -> String {
 
 /// Find the group for `key` in `groups`, or append a new empty one and return it.
 /// Preserves insertion order so that property registration matches source-code order.
+#[expect(clippy::expect_used, reason = "the entry was pushed on the line above")]
 fn prop_groups_find_or_insert(
     groups: &mut PropGroups,
     key: (String, PropertyKind),

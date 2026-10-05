@@ -137,8 +137,14 @@ const _: () = {
 // Opaque cxx types must cross the bridge boxed. The lint's firing is platform-dependent (it has
 // a size threshold and `TokioPort`'s size differs by target), so `#[expect]` would be unfulfilled
 // on some targets.
-#[expect(clippy::allow_attributes)]
-#[allow(clippy::unnecessary_box_returns)]
+#[expect(
+    clippy::allow_attributes,
+    reason = "`unnecessary_box_returns` does not fire on every target, where `expect` would be unfulfilled"
+)]
+#[allow(
+    clippy::unnecessary_box_returns,
+    reason = "cxx takes the opaque `TokioPort` boxed"
+)]
 pub fn new_tokio_port() -> Box<TokioPort> {
     Box::new(TokioPort::new())
 }

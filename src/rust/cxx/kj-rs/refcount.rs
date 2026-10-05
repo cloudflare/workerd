@@ -1,5 +1,10 @@
 //! Module for both [`KjRc`] and [`KjArc`], since they're nearly identical types
 
+#![allow(
+    unsafe_code,
+    reason = "`KjRc` and `KjArc` mirror `kj::Rc<T>` and `kj::Arc<T>`"
+)]
+
 use static_assertions::assert_eq_align;
 use static_assertions::assert_eq_size;
 

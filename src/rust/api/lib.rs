@@ -2,10 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Production code must not panic; test code is exempt via clippy.toml allow-*-in-tests.
-#![deny(clippy::expect_used, clippy::panic, clippy::unreachable)]
-#![deny(clippy::todo, clippy::unimplemented)]
-
 use std::pin::Pin;
 
 use jsg::ToJS;
@@ -17,6 +13,7 @@ pub mod dns;
 pub mod url;
 
 #[cxx::bridge(namespace = "workerd::rust::api")]
+#[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {
     #[namespace = "workerd::rust::jsg"]
     unsafe extern "C++" {
@@ -29,6 +26,10 @@ mod ffi {
     }
 }
 
+#[expect(
+    unsafe_code,
+    reason = "builds a `Lock` from the isolate pointer C++ hands to each module callback"
+)]
 pub fn register_nodejs_modules(mut registry: Pin<&mut ffi::ModuleRegistry>) {
     jsg::modules::add_builtin(
         registry.as_mut(),

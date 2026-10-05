@@ -1,6 +1,37 @@
+load("@rules_rust//rust:defs.bzl", "rust_lint_config")
 load(":sanitizer_toolchain.bzl", "sanitizer_rust_toolchain")
 
 exports_files(["build_std.sh"])
+
+# Lint levels for every first-party crate, applied by the wd_rust_* macros: `unsafe` is confined
+# to the modules that ask for it, and whatever can fail returns a `Result` rather than panicking.
+# `unreachable!` is deliberately absent from the panic lints: a panic is the right tool for
+# asserting what cannot happen.
+#
+# Test targets and testonly crates are not held to these. Test code may panic and may be unsafe,
+# and the code under test is still checked where its library is built.
+#
+# These are defaults in rustc's sense, so a lint attribute in the source takes precedence. A
+# module that needs `unsafe` (a cxx bridge, an FFI shim) says `#![allow(unsafe_code, reason = ..)]`
+# at the top of its file. A crate root does not, since there the attribute covers the whole crate.
+# Every such exception, to these lints or any other, states its reason.
+rust_lint_config(
+    name = "lints",
+    clippy = {
+        "allow_attributes_without_reason": "deny",
+        "expect_used": "deny",
+        "panic": "deny",
+        "todo": "deny",
+        "undocumented_unsafe_blocks": "deny",
+        "unimplemented": "deny",
+        "unwrap_used": "deny",
+    },
+    rustc = {
+        "unsafe_code": "deny",
+        "unsafe_op_in_unsafe_fn": "deny",
+    },
+    visibility = ["//visibility:public"],
+)
 
 # One toolchain per sanitizer and supported host. `--config=asan` and `--config=tsan` /
 # `--config=tsan-macos` (.bazelrc) list all of a sanitizer's toolchains in --extra_toolchains;

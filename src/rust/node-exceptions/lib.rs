@@ -13,6 +13,7 @@ use jsg::v8::ToLocalValue;
 use kj_rs::KjMaybe;
 
 #[cxx::bridge(namespace = "workerd::rust::node_exceptions")]
+#[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {
     /// Most Node.js exceptions are represented as either Error, TypeError, or
     /// RangeError. This is a cxx *extern* enum: the C++ `api::node::JsErrorType`
@@ -290,6 +291,10 @@ fn create_uv_exception_impl<'a>(
 
 /// # Safety
 /// `isolate` must be a valid pointer to a locked `v8::Isolate`.
+#[expect(
+    unsafe_code,
+    reason = "builds a `Lock` from the isolate pointer C++ passes in"
+)]
 unsafe fn create_node_exception(
     isolate: *mut ffi::Isolate,
     code: ffi::NodeExceptionCode,
@@ -306,6 +311,10 @@ unsafe fn create_node_exception(
 
 /// # Safety
 /// `isolate` must be a valid pointer to a locked `v8::Isolate`.
+#[expect(
+    unsafe_code,
+    reason = "builds a `Lock` from the isolate pointer C++ passes in"
+)]
 unsafe fn create_uv_exception(
     isolate: *mut ffi::Isolate,
     errorno: i32,

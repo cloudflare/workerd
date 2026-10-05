@@ -11,6 +11,7 @@
 use kj_rs::KjMaybe;
 
 #[cxx::bridge(namespace = "workerd::rust::memory_cache")]
+#[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum ReadKind {

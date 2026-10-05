@@ -47,6 +47,10 @@ impl FeatureFlags {
     ///
     /// Panics if the stored message has an invalid capnp root (should never happen
     /// when constructed via `from_bytes`).
+    #[expect(
+        clippy::expect_used,
+        reason = "the bytes come from C++'s `capnp::canonicalize`, so the root is valid"
+    )]
     pub fn reader(&self) -> compatibility_flags::Reader<'_> {
         self.message
             .get_root::<compatibility_flags::Reader<'_>>()

@@ -5,8 +5,10 @@
 //! a `--watch` re-exec passes it on under the same number), and gives the server a duplicate to
 //! own. This is the one place a number from the command line becomes an owned descriptor.
 
-// The platform module turns a descriptor number into an owned handle; `unsafe` is confined to it.
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "the platform module turns a descriptor number into an owned handle"
+)]
 
 use std::fmt;
 use std::io;

@@ -2,6 +2,11 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#![allow(
+    unsafe_code,
+    reason = "holds a cxx bridge, which expands to unsafe FFI glue"
+)]
+
 use std::pin::Pin;
 
 use kj::http::ConnectSettings;

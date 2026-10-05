@@ -8,6 +8,11 @@
 //! Lets Rust code delegate to (decorate) a C++ worker. This is the reverse of `RustWorkerInterface`
 //! (bridge.h), which exposes a Rust `worker::Interface` to C++.
 
+#![allow(
+    unsafe_code,
+    reason = "awaits the C++ `WorkerInterface` through the bridge's unsafe async functions"
+)]
+
 use std::pin::Pin;
 use std::time::SystemTime;
 
