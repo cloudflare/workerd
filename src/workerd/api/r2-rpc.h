@@ -76,14 +76,6 @@ jsg::Promise<Result> callR2RpcMethod(jsg::Lock& js,
 //   to maintain ownership.
 class R2Error: public jsg::Object {
  public:
-  struct SerializableR2Error {
-    uint code;
-    kj::String message;
-    kj::String action;
-
-    JSG_STRUCT(code, message, action);
-  };
-
   R2Error(uint v4Code, kj::String message): v4Code(v4Code), message(kj::mv(message)) {}
 
   constexpr kj::StringPtr getName() const {
@@ -114,16 +106,6 @@ class R2Error: public jsg::Object {
     JSG_TS_ROOT();
   }
 
-  void serialize(jsg::Lock& js,
-      jsg::Serializer& serializer,
-      const jsg::TypeHandler<SerializableR2Error>& payloadHandler);
-  static jsg::Ref<R2Error> deserialize(jsg::Lock& js,
-      rpc::SerializationTag tag,
-      jsg::Deserializer& deserializer,
-      const jsg::TypeHandler<SerializableR2Error>& payloadHandler);
-
-  JSG_SERIALIZABLE(rpc::SerializationTag::R2_ERROR);
-
  private:
   uint v4Code;
   kj::String message;
@@ -138,11 +120,9 @@ class R2Error: public jsg::Object {
 
 using R2PutValue =
     kj::OneOf<JsReadableStream, kj::Array<kj::byte>, jsg::NonCoercible<kj::String>, jsg::Ref<Blob>>;
-using SerializablePutValue =
-    kj::OneOf<JsReadableStream, kj::Array<kj::byte>, kj::String, jsg::Ref<Blob>>;
 
 struct PreparedR2RpcBody {
-  SerializablePutValue value;
+  R2PutValue value;
   double size;
 };
 

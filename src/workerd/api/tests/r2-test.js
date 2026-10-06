@@ -1448,7 +1448,7 @@ export class ObservedR2Binding extends WorkerEntrypoint {
       requestKey,
       options
     );
-    return { key: upload.key, uploadId: upload.uploadId };
+    return upload.uploadId;
   }
 
   uploadPart(requestKey, uploadId, partNumber, value, options, valueSize) {

@@ -34,6 +34,14 @@ export class ObservedR2Binding extends PassthroughR2Binding {
     return super.get(requestKey, options);
   }
 
+  async createMultipartUpload(requestKey, options) {
+    // The R2GW returns the upload ID as a bare string; an object must not be stringified into one.
+    if (requestKey === 'upload-handle-as-upload-id') {
+      return { key: requestKey, uploadId: 'upload-handle-id' };
+    }
+    return super.createMultipartUpload(requestKey, options);
+  }
+
   async checksums() {
     return (await this.env.REAL_BUCKET.head('multipleChecksums')).checksums;
   }
@@ -177,5 +185,10 @@ export const nativeR2ResultTests = {
       'rpc-multipart-abort-platform'
     );
     await aborted.abort();
+
+    await assert.rejects(
+      () => env.BUCKET.createMultipartUpload('upload-handle-as-upload-id'),
+      { message: /^internal error; reference = \S+$/ }
+    );
   },
 };

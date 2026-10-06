@@ -330,25 +330,6 @@ kj::String buildEtagsString(kj::ArrayPtr<R2Bucket::Etag> etagArray) {
   }, ", ");
 }
 
-R2Bucket::SerializableConditional makeSerializableConditional(
-    R2Bucket::UnwrappedConditional& conditional) {
-  R2Bucket::SerializableConditional rpcConditional{
-    .secondsGranularity = conditional.secondsGranularity};
-  KJ_IF_SOME(etags, conditional.etagMatches) {
-    rpcConditional.etagMatches = buildEtagsString(etags);
-  }
-  KJ_IF_SOME(etags, conditional.etagDoesNotMatch) {
-    rpcConditional.etagDoesNotMatch = buildEtagsString(etags);
-  }
-  KJ_IF_SOME(date, conditional.uploadedBefore) {
-    rpcConditional.uploadedBefore = date;
-  }
-  KJ_IF_SOME(date, conditional.uploadedAfter) {
-    rpcConditional.uploadedAfter = date;
-  }
-  return rpcConditional;
-}
-
 template <typename Builder, typename Options>
 void initOnlyIf(TraceContext& traceContext, jsg::Lock& js, Builder& builder, Options& o) {
   KJ_IF_SOME(i, o.onlyIf) {
@@ -778,9 +759,12 @@ R2Bucket::getRpc(jsg::Lock& js,
     KJ_IF_SOME(o, options) {
       SerializableGetOptions normalized;
 
-      KJ_IF_SOME(i, o.onlyIf) {
+      KJ_IF_SOME(condition, o.onlyIf) {
+        // Parsed only for validation, so callers get the same errors as the non-RPC path (e.g.
+        // quoted or malformed ETags, invalid dates). The parsed result is intentionally unused:
+        // the original onlyIf value is forwarded below and the R2GW does its own parsing.
         UnwrappedConditional conditional = [&] {
-          KJ_SWITCH_ONEOF(i) {
+          KJ_SWITCH_ONEOF(condition) {
             KJ_CASE_ONEOF(value, Conditional) {
               return UnwrappedConditional(value);
             }
@@ -791,11 +775,9 @@ R2Bucket::getRpc(jsg::Lock& js,
           KJ_UNREACHABLE;
         }();
 
-        auto rpcConditional = makeSerializableConditional(conditional);
-
-        KJ_SWITCH_ONEOF(i) {
+        KJ_SWITCH_ONEOF(condition) {
           KJ_CASE_ONEOF(conditional, Conditional) {
-            normalized.onlyIf = kj::mv(rpcConditional);
+            normalized.onlyIf = kj::mv(conditional);
           }
           KJ_CASE_ONEOF(headers, jsg::Ref<Headers>) {
             normalized.onlyIf = kj::mv(headers);
@@ -907,10 +889,8 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::putRpc(jsg::Lo
     kj::Maybe<R2PutValue> value,
     jsg::Optional<PutOptions> options,
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
-    const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String,
-        kj::Maybe<SerializablePutValue>,
-        jsg::Optional<SerializablePutOptions>,
-        double)>>& putFnHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(
+        kj::String, kj::Maybe<R2PutValue>, jsg::Optional<PutOptions>, double)>>& putFnHandler,
     const jsg::TypeHandler<jsg::Promise<kj::Maybe<HeadBackendResult>>>& putResultHandler) {
   return js.evalNow([&] {
     auto cancelReader = kj::defer([&] {
@@ -926,10 +906,11 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::putRpc(jsg::Lo
       }
     });
 
+    // Checksums are validated here so callers get the same errors as the non-RPC path, then
+    // forwarded unchanged; the R2GW decodes hex strings and buffers itself.
     bool hashAlreadySpecified = false;
-    const auto prepareChecksum =
-        [&](auto checksum, kj::StringPtr algorithm, size_t byteLength,
-            size_t hexLength) -> jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> {
+    const auto validateChecksum = [&](auto checksum, kj::StringPtr algorithm, size_t byteLength,
+                                      size_t hexLength) -> decltype(checksum) {
       KJ_IF_SOME(c, checksum) {
         JSG_REQUIRE(
             !hashAlreadySpecified, TypeError, "You cannot specify multiple hashing algorithms.");
@@ -939,7 +920,6 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::putRpc(jsg::Lo
             auto bytes = buffer.getHandle(js);
             JSG_REQUIRE(bytes.size() == byteLength, TypeError, algorithm, " is ", byteLength,
                 " bytes, not ", bytes.size());
-            return kj::heapArray<byte>(bytes.asArrayPtr());
           }
           KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
             JSG_REQUIRE(text.value.size() == hexLength, TypeError, algorithm, " is ", hexLength,
@@ -947,17 +927,19 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::putRpc(jsg::Lo
             auto decoded = kj::decodeHex(text.value);
             JSG_REQUIRE(!decoded.hadErrors, TypeError, "Provided ", algorithm,
                 " wasn't a valid hex string");
-            return kj::heapArray<byte>(decoded);
           }
         }
       }
-      return kj::none;
+      return kj::mv(checksum);
     };
 
-    jsg::Optional<SerializablePutOptions> rpcOptions;
+    jsg::Optional<PutOptions> rpcOptions;
     KJ_IF_SOME(o, options) {
-      jsg::Optional<kj::OneOf<SerializableConditional, jsg::Ref<Headers>>> onlyIf;
+      jsg::Optional<kj::OneOf<Conditional, jsg::Ref<Headers>>> onlyIf;
       KJ_IF_SOME(condition, o.onlyIf) {
+        // Parsed only for validation, so callers get the same errors as the non-RPC path (e.g.
+        // quoted or malformed ETags, invalid dates). The parsed result is intentionally unused:
+        // the original onlyIf value is forwarded below and the R2GW does its own parsing.
         UnwrappedConditional conditional = [&] {
           KJ_SWITCH_ONEOF(condition) {
             KJ_CASE_ONEOF(value, Conditional) {
@@ -970,11 +952,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::putRpc(jsg::Lo
           KJ_UNREACHABLE;
         }();
 
-        auto rpcConditional = makeSerializableConditional(conditional);
-
         KJ_SWITCH_ONEOF(condition) {
           KJ_CASE_ONEOF(conditional, Conditional) {
-            onlyIf = kj::mv(rpcConditional);
+            onlyIf = kj::mv(conditional);
           }
           KJ_CASE_ONEOF(headers, jsg::Ref<Headers>) {
             onlyIf = kj::mv(headers);
@@ -991,15 +971,15 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::putRpc(jsg::Lo
         ssecKey = kj::mv(key);
       }
 
-      rpcOptions = SerializablePutOptions{
+      rpcOptions = PutOptions{
         .onlyIf = kj::mv(onlyIf),
         .httpMetadata = kj::mv(httpMetadata),
         .customMetadata = kj::mv(o.customMetadata),
-        .md5 = prepareChecksum(kj::mv(o.md5), "MD5"_kj, 16, 32),
-        .sha1 = prepareChecksum(kj::mv(o.sha1), "SHA-1"_kj, 20, 40),
-        .sha256 = prepareChecksum(kj::mv(o.sha256), "SHA-256"_kj, 32, 64),
-        .sha384 = prepareChecksum(kj::mv(o.sha384), "SHA-384"_kj, 48, 96),
-        .sha512 = prepareChecksum(kj::mv(o.sha512), "SHA-512"_kj, 64, 128),
+        .md5 = validateChecksum(kj::mv(o.md5), "MD5"_kj, 16, 32),
+        .sha1 = validateChecksum(kj::mv(o.sha1), "SHA-1"_kj, 20, 40),
+        .sha256 = validateChecksum(kj::mv(o.sha256), "SHA-256"_kj, 32, 64),
+        .sha384 = validateChecksum(kj::mv(o.sha384), "SHA-384"_kj, 48, 96),
+        .sha512 = validateChecksum(kj::mv(o.sha512), "SHA-512"_kj, 64, 128),
         .storageClass = kj::mv(o.storageClass),
         .ssecKey = kj::mv(ssecKey),
       };
@@ -1008,7 +988,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::putRpc(jsg::Lo
     auto rpcMethod = getRpcMethod(js, "put"_kj);
     auto wrappedMethod = rpcPropHandler.wrap(js, kj::mv(rpcMethod));
     auto putFn = KJ_ASSERT_NONNULL(putFnHandler.tryUnwrap(js, wrappedMethod));
-    kj::Maybe<SerializablePutValue> rpcValue;
+    kj::Maybe<R2PutValue> rpcValue;
     double valueSize = 0;
     KJ_IF_SOME(v, value) {
       auto prepared = prepareR2RpcBody(js, v);
@@ -1036,7 +1016,7 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUploadRpc(jsg
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
     const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, jsg::Optional<MultipartOptions>)>>&
         createFnHandler,
-    const jsg::TypeHandler<jsg::Promise<MultipartUploadBackendResult>>& uploadResultHandler) {
+    const jsg::TypeHandler<jsg::Promise<jsg::NonCoercible<kj::String>>>& uploadIdHandler) {
   return js.evalNow([&] {
     R2MultipartUpload::Metadata metadata;
     KJ_IF_SOME(o, options) {
@@ -1061,26 +1041,17 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUploadRpc(jsg
       }
     }
 
-    auto uploadPromise = callR2RpcMethod<MultipartUploadBackendResult>(js,
+    // The R2GW returns only the upload ID; the key, bucket, and metadata are already known here.
+    // NonCoercible so a non-string reply is rejected as malformed rather than stringified.
+    auto uploadPromise = callR2RpcMethod<jsg::NonCoercible<kj::String>>(js,
         getRpcMethod(js, "createMultipartUpload"_kj), rpcPropHandler, createFnHandler,
-        uploadResultHandler, kj::str(key), kj::mv(options));
+        uploadIdHandler, kj::str(key), kj::mv(options));
 
     return uploadPromise.then(js,
         [bucket = JSG_THIS, key = kj::mv(key), metadata = kj::mv(metadata)](
-            jsg::Lock& js, MultipartUploadBackendResult backend) mutable {
-      kj::String uploadId;
-      KJ_SWITCH_ONEOF(backend) {
-        KJ_CASE_ONEOF(id, kj::String) {
-          uploadId = kj::mv(id);
-        }
-        KJ_CASE_ONEOF(handle, SerializableMultipartUploadHandle) {
-          KJ_ASSERT(handle.key == key,
-              "Malformed R2 createMultipartUpload RPC result: handle key did not match request.");
-          uploadId = kj::mv(handle.uploadId);
-        }
-      }
+            jsg::Lock& js, jsg::NonCoercible<kj::String> uploadId) mutable {
       return js.alloc<R2MultipartUpload>(
-          kj::mv(key), kj::mv(uploadId), kj::mv(bucket), kj::mv(metadata));
+          kj::mv(key), kj::mv(uploadId.value), kj::mv(bucket), kj::mv(metadata));
     });
   });
 }
@@ -1625,32 +1596,31 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
 jsg::Promise<R2Bucket::ListResult> R2Bucket::listRpc(jsg::Lock& js,
     jsg::Optional<ListOptions> options,
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
-    const jsg::TypeHandler<jsg::Function<jsg::Value(jsg::Optional<SerializableListOptions>)>>&
-        listFnHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(jsg::Optional<ListOptions>)>>& listFnHandler,
     const jsg::TypeHandler<jsg::Promise<ListBackendResult>>& listResultHandler,
     CompatibilityFlags::Reader flags) {
   return js.evalNow([&] {
     const bool honorsIncludes = flags.getR2ListHonorIncludeFields();
-    jsg::Optional<SerializableListOptions> rpcOptions;
+    jsg::Optional<ListOptions> rpcOptions;
     if (options != kj::none || !honorsIncludes) {
-      SerializableListOptions normalized;
-      kj::Vector<kj::String> includes;
+      ListOptions normalized;
+      kj::Vector<jsg::NonCoercible<kj::String>> includes;
 
       KJ_IF_SOME(o, options) {
         KJ_IF_SOME(limit, o.limit) {
           normalized.limit = limit;
         }
         KJ_IF_SOME(prefix, o.prefix) {
-          normalized.prefix = kj::mv(prefix.value);
+          normalized.prefix = kj::mv(prefix);
         }
         KJ_IF_SOME(cursor, o.cursor) {
-          normalized.cursor = kj::mv(cursor.value);
+          normalized.cursor = kj::mv(cursor);
         }
         KJ_IF_SOME(delimiter, o.delimiter) {
-          normalized.delimiter = kj::mv(delimiter.value);
+          normalized.delimiter = kj::mv(delimiter);
         }
         KJ_IF_SOME(startAfter, o.startAfter) {
-          normalized.startAfter = kj::mv(startAfter.value);
+          normalized.startAfter = kj::mv(startAfter);
         }
         KJ_IF_SOME(requestedIncludes, o.include) {
           for (auto& requested: requestedIncludes) {

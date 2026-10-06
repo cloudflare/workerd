@@ -84,7 +84,7 @@ PreparedR2RpcBody prepareR2RpcBody(jsg::Lock& js, R2PutValue& value) {
         return {.value = makeR2RpcMemoryStream(js, bytes, kj::heap(kj::mv(text.value))),
           .size = static_cast<double>(size)};
       }
-      return {.value = kj::mv(text.value), .size = static_cast<double>(size)};
+      return {.value = kj::mv(text), .size = static_cast<double>(size)};
     }
     KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
       auto size = blob->getSize();
@@ -113,33 +113,6 @@ jsg::JsValue R2Error::getStack(jsg::Lock& js) {
   return jsg::JsObject(KJ_ASSERT_NONNULL(errorForStack).Get(js.v8Isolate)).get(js, "stack"_kj);
 }
 
-void R2Error::serialize(jsg::Lock& js,
-    jsg::Serializer& serializer,
-    const jsg::TypeHandler<SerializableR2Error>& payloadHandler) {
-  requireR2RpcSerializer(serializer);
-  serializer.write(js,
-      jsg::JsValue(payloadHandler.wrap(js,
-          SerializableR2Error{
-            .code = v4Code,
-            .message = kj::str(message),
-            .action = kj::str(KJ_REQUIRE_NONNULL(action)),
-          })));
-}
-
-jsg::Ref<R2Error> R2Error::deserialize(jsg::Lock& js,
-    rpc::SerializationTag tag,
-    jsg::Deserializer& deserializer,
-    const jsg::TypeHandler<SerializableR2Error>& payloadHandler) {
-  requireR2RpcDeserializer(deserializer);
-  auto payload = KJ_ASSERT_NONNULL(payloadHandler.tryUnwrap(js, deserializer.readValue(js)),
-      "Deserialization failed: invalid R2 error payload");
-  auto result = js.alloc<R2Error>(payload.code, kj::mv(payload.message));
-  result->action = kj::mv(payload.action);
-  result->errorForStack = v8::Global<v8::Object>(
-      js.v8Isolate, v8::Exception::Error(v8::String::Empty(js.v8Isolate)).As<v8::Object>());
-  return result;
-}
-
 kj::Maybe<uint> R2Result::v4ErrorCode() {
   KJ_IF_SOME(e, toThrow) {
     return e->v4Code;
@@ -157,9 +130,9 @@ kj::Maybe<kj::String> R2Result::getR2ErrorMessage() {
 void R2Result::throwIfError(
     kj::StringPtr action, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   KJ_IF_SOME(e, toThrow) {
-    // Keep the existing generic error behavior for HTTP-backed bindings. R2Error is serializable so
-    // an already-structured error can cross JSRPC, but changing this throw path would be a public
-    // compatibility change.
+    // Keep the existing generic error behavior for R2 bindings. Changing this throw path to
+    // throw a structured R2Error would be a public compatibility change, and R2Error would also
+    // need to be made serializable so it can cross JSRPC.
 #if 0
     auto isolate = IoContext::current().getCurrentLock().getIsolate();
     (*e)->action = kj::str(action);

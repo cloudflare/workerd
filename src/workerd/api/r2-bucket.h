@@ -250,58 +250,6 @@ class R2Bucket: public jsg::Object {
     JSG_STRUCT_TS_OVERRIDE(R2PutOptions);
   };
 
-  // Serializable* types: the intermediate representation exchanged with the R2 gateway worker
-  // (R2GW) over JSRPC. They mirror the shape of the parameters the R2GW expects and the values
-  // it returns, and exist only so those values can be serialized across the JSRPC boundary.
-  //
-  // These are NOT customer-facing types and must never be returned to user code. The public
-  // counterparts (Conditional, GetOptions, HeadResult, GetResult, ListResult, ...) validate
-  // input with NonCoercible strings and expose methods / lazy accessors, none of which can be
-  // wrapped back to JavaScript or serialized. Public inputs are normalized into a Serializable*
-  // type before calling the R2GW, and Serializable* results are converted back into the public
-  // types before being handed to the caller. For the same reason these carry no TS overrides.
-  struct SerializableConditional {
-    jsg::Optional<kj::String> etagMatches;
-    jsg::Optional<kj::String> etagDoesNotMatch;
-    jsg::Optional<kj::Date> uploadedBefore;
-    jsg::Optional<kj::Date> uploadedAfter;
-    jsg::Optional<bool> secondsGranularity;
-
-    JSG_STRUCT(etagMatches, etagDoesNotMatch, uploadedBefore, uploadedAfter, secondsGranularity);
-  };
-
-  struct SerializablePutOptions {
-    jsg::Optional<kj::OneOf<SerializableConditional, jsg::Ref<Headers>>> onlyIf;
-    jsg::Optional<kj::OneOf<HttpMetadata, jsg::Ref<Headers>>> httpMetadata;
-    jsg::Optional<jsg::Dict<kj::String>> customMetadata;
-    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> md5;
-    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> sha1;
-    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> sha256;
-    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> sha384;
-    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> sha512;
-    jsg::Optional<kj::String> storageClass;
-    jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> ssecKey;
-
-    JSG_STRUCT(onlyIf,
-        httpMetadata,
-        customMetadata,
-        md5,
-        sha1,
-        sha256,
-        sha384,
-        sha512,
-        storageClass,
-        ssecKey);
-  };
-
-  struct SerializableGetOptions {
-    jsg::Optional<kj::OneOf<SerializableConditional, jsg::Ref<Headers>>> onlyIf;
-    jsg::Optional<kj::OneOf<jsg::Dict<double>, jsg::Ref<Headers>>> range;
-    jsg::Optional<kj::String> ssecKey;
-
-    JSG_STRUCT(onlyIf, range, ssecKey);
-  };
-
   struct MultipartOptions {
     jsg::Optional<kj::OneOf<HttpMetadata, jsg::Ref<Headers>>> httpMetadata;
     jsg::Optional<jsg::Dict<kj::String>> customMetadata;
@@ -310,6 +258,29 @@ class R2Bucket: public jsg::Object {
 
     JSG_STRUCT(httpMetadata, customMetadata, storageClass, ssecKey);
     JSG_STRUCT_TS_OVERRIDE(R2MultipartOptions);
+  };
+
+  // Serializable* types: values exchanged with the R2 gateway worker (R2GW) over JSRPC where the
+  // public type cannot be used directly. Most RPC inputs (PutOptions, ListOptions, Conditional)
+  // are sent as their public types; SerializableGetOptions exists only because of `range` (see
+  // below).
+  //
+  // The R2GW returns results as plain objects. Only a JSG_STRUCT can be unwrapped from a plain
+  // object, so the resource types (Checksums, HeadResult, GetResult) cannot receive them; the
+  // Serializable* result structs receive them instead and are converted into the public types
+  // before being handed to the caller.
+  //
+  // These are NOT customer-facing types and must never be returned to user code, so they carry
+  // no TS overrides.
+
+  struct SerializableGetOptions {
+    jsg::Optional<kj::OneOf<Conditional, jsg::Ref<Headers>>> onlyIf;
+    // Uses Dict<double> rather than Range because the fast_jsg_struct compat flag sets absent Range fields
+    // to undefined.
+    jsg::Optional<kj::OneOf<jsg::Dict<double>, jsg::Ref<Headers>>> range;
+    jsg::Optional<kj::String> ssecKey;
+
+    JSG_STRUCT(onlyIf, range, ssecKey);
   };
 
   // Object metadata as returned by the R2GW. HeadResult / Checksums are built from these.
@@ -356,26 +327,6 @@ class R2Bucket: public jsg::Object {
         ssecKeyMd5);
   };
 
-  struct SerializableListOptions {
-    jsg::Optional<int> limit;
-    jsg::Optional<kj::String> prefix;
-    jsg::Optional<kj::String> cursor;
-    jsg::Optional<kj::String> delimiter;
-    jsg::Optional<kj::String> startAfter;
-    kj::Array<kj::String> include;
-
-    JSG_STRUCT(limit, prefix, cursor, delimiter, startAfter, include);
-  };
-
-  struct SerializableListResult {
-    kj::Array<SerializableHeadResult> objects;
-    bool truncated;
-    kj::Maybe<kj::String> cursor;
-    kj::Maybe<kj::Array<kj::String>> delimitedPrefixes;
-
-    JSG_STRUCT(objects, truncated, cursor, delimitedPrefixes);
-  };
-
   struct SerializableGetResult {
     kj::String kind;
     SerializableHeadResult object;
@@ -383,15 +334,6 @@ class R2Bucket: public jsg::Object {
 
     JSG_STRUCT(kind, object, body);
   };
-
-  struct SerializableMultipartUploadHandle {
-    kj::String key;
-    kj::String uploadId;
-
-    JSG_STRUCT(key, uploadId);
-  };
-
-  using MultipartUploadBackendResult = kj::OneOf<kj::String, SerializableMultipartUploadHandle>;
 
   class HeadResult: public jsg::Object {
    public:
@@ -721,10 +663,8 @@ class R2Bucket: public jsg::Object {
       kj::Maybe<R2PutValue> value,
       jsg::Optional<PutOptions> options,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
-      const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String,
-          kj::Maybe<SerializablePutValue>,
-          jsg::Optional<SerializablePutOptions>,
-          double)>>& putFnHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(
+          kj::String, kj::Maybe<R2PutValue>, jsg::Optional<PutOptions>, double)>>& putFnHandler,
       const jsg::TypeHandler<jsg::Promise<kj::Maybe<HeadBackendResult>>>& putResultHandler);
   jsg::Promise<jsg::Ref<R2MultipartUpload>> createMultipartUploadRpc(jsg::Lock& js,
       kj::String key,
@@ -732,12 +672,11 @@ class R2Bucket: public jsg::Object {
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
       const jsg::TypeHandler<
           jsg::Function<jsg::Value(kj::String, jsg::Optional<MultipartOptions>)>>& createFnHandler,
-      const jsg::TypeHandler<jsg::Promise<MultipartUploadBackendResult>>& uploadResultHandler);
+      const jsg::TypeHandler<jsg::Promise<jsg::NonCoercible<kj::String>>>& uploadIdHandler);
   jsg::Promise<ListResult> listRpc(jsg::Lock& js,
       jsg::Optional<ListOptions> options,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
-      const jsg::TypeHandler<jsg::Function<jsg::Value(jsg::Optional<SerializableListOptions>)>>&
-          listFnHandler,
+      const jsg::TypeHandler<jsg::Function<jsg::Value(jsg::Optional<ListOptions>)>>& listFnHandler,
       const jsg::TypeHandler<jsg::Promise<ListBackendResult>>& listResultHandler,
       CompatibilityFlags::Reader flags);
   jsg::Promise<ListResult> list(jsg::Lock& js,
