@@ -2,9 +2,17 @@
  * Evaluation context for targeting rules.
  * Keys are attribute names (e.g. "userId", "country"), values are the attribute values.
  */
+export type FlagshipEvaluationContextValue =
+  | string
+  | number
+  | boolean
+  | null
+  | FlagshipEvaluationContextValue[]
+  | { [key: string]: FlagshipEvaluationContextValue };
+
 export type FlagshipEvaluationContext = Record<
   string,
-  string | number | boolean
+  FlagshipEvaluationContextValue
 >;
 
 export interface FlagshipEvaluationDetails<T> {
