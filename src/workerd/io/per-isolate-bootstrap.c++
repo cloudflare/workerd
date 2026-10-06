@@ -204,26 +204,31 @@ static void AddAbortAlgorithm(const v8::FunctionCallbackInfo<v8::Value>& args) {
 static const v8::CFunction fast_mark_promise_handled_ =
     v8::CFunction::Make(MarkPromiseHandledFastApi);
 
+v8::Local<v8::Value> makeMethod(jsg::Lock& js,
+    v8::FunctionCallback callback,
+    v8::SideEffectType sideEffect,
+    const v8::CFunction* c_function = nullptr) {
+  jsg::isolateRegisterExternalReference(js.v8Isolate, reinterpret_cast<intptr_t>(callback));
+  if (c_function != nullptr) {
+    jsg::isolateRegisterExternalReference(js.v8Isolate, reinterpret_cast<intptr_t>(c_function));
+  }
+  return jsg::check(v8::FunctionTemplate::New(js.v8Isolate, callback, v8::Local<v8::Value>(),
+      v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow, sideEffect, c_function)
+                        ->GetFunction(js.v8Context()));
+}
+
 v8::Local<v8::Value> getFastMethodNoSideEffect(
     jsg::Lock& js, v8::FunctionCallback callback, const v8::CFunction* c_function) {
-  return jsg::check(v8::FunctionTemplate::New(js.v8Isolate, callback, v8::Local<v8::Value>(),
-      v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow,
-      v8::SideEffectType::kHasNoSideEffect, c_function)
-                        ->GetFunction(js.v8Context()));
+  return makeMethod(js, callback, v8::SideEffectType::kHasNoSideEffect, c_function);
 }
 
 v8::Local<v8::Value> getFastMethod(
     jsg::Lock& js, v8::FunctionCallback callback, const v8::CFunction* c_function) {
-  return jsg::check(v8::FunctionTemplate::New(js.v8Isolate, callback, v8::Local<v8::Value>(),
-      v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow,
-      v8::SideEffectType::kHasSideEffect, c_function)
-                        ->GetFunction(js.v8Context()));
+  return makeMethod(js, callback, v8::SideEffectType::kHasSideEffect, c_function);
 }
 
 v8::Local<v8::Value> getMethod(jsg::Lock& js, v8::FunctionCallback callback) {
-  return jsg::check(v8::FunctionTemplate::New(js.v8Isolate, callback, v8::Local<v8::Value>(),
-      v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow)
-                        ->GetFunction(js.v8Context()));
+  return makeMethod(js, callback, v8::SideEffectType::kHasSideEffect);
 }
 
 // Creates an object with methods for performing fast type checks on JS values.
@@ -515,6 +520,7 @@ void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
 
   // Create the require() function. No v8::External needed — the callback
   // reads state from the context embedder slot.
+  jsg::isolateRegisterExternalReference(js.v8Isolate, reinterpret_cast<intptr_t>(&requireCallback));
   state->requireFn =
       jsg::JsFunction(jsg::check(v8::Function::New(context, requireCallback))).addRef(js);
 
