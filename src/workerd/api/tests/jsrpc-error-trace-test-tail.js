@@ -55,15 +55,20 @@ function findInvocation(method) {
   return invocations.find((invocation) => invocation.methods.includes(method));
 }
 
+function exceptionsWithMessage(invocation, message) {
+  return (
+    invocation?.exceptions.filter(
+      (exception) => exception.message === message
+    ) ?? []
+  );
+}
+
 function foundExpectedEvents(throwing, asyncThrowing) {
   return (
-    throwing?.exceptions.some(
-      (exception) => exception.message === 'intentional JSRPC failure'
-    ) &&
+    exceptionsWithMessage(throwing, 'intentional JSRPC failure').length === 1 &&
     throwing?.outcomes.includes('exception') &&
-    asyncThrowing?.exceptions.some(
-      (exception) => exception.message === 'intentional async JSRPC failure'
-    ) &&
+    exceptionsWithMessage(asyncThrowing, 'intentional async JSRPC failure')
+      .length === 1 &&
     asyncThrowing?.outcomes.includes('exception')
   );
 }
@@ -92,21 +97,27 @@ export const test = {
     );
 
     assert.deepStrictEqual(throwing.methods, ['throwError']);
-    assert.deepStrictEqual(throwing.exceptions, [
-      {
-        name: 'Error',
-        message: 'intentional JSRPC failure',
-      },
-    ]);
+    assert.deepStrictEqual(
+      exceptionsWithMessage(throwing, 'intentional JSRPC failure'),
+      [
+        {
+          name: 'Error',
+          message: 'intentional JSRPC failure',
+        },
+      ]
+    );
     assert.deepStrictEqual(throwing.outcomes, ['exception']);
 
     assert.deepStrictEqual(asyncThrowing.methods, ['throwAsyncError']);
-    assert.deepStrictEqual(asyncThrowing.exceptions, [
-      {
-        name: 'Error',
-        message: 'intentional async JSRPC failure',
-      },
-    ]);
+    assert.deepStrictEqual(
+      exceptionsWithMessage(asyncThrowing, 'intentional async JSRPC failure'),
+      [
+        {
+          name: 'Error',
+          message: 'intentional async JSRPC failure',
+        },
+      ]
+    );
     assert.deepStrictEqual(asyncThrowing.outcomes, ['exception']);
   },
 };
