@@ -9,6 +9,12 @@
 //
 // Canceling a pending read diverges: C++ rejects with a re-created Error
 // carrying the cancel reason, while TypeScript resolves the read done.
+//
+// The order in which a startTls() detach settles things diverges: TypeScript
+// rejects the pending writes inside the detach, before the old socket's
+// closed promise resolves; C++ resolves closed first and rejects the writes
+// an event-loop turn later, once the canceled write's I/O reports back
+// (detachRejectsPendingWrites).
 
 import { connect } from 'cloudflare:sockets';
 import { strictEqual, ok, rejects, deepStrictEqual } from 'node:assert';
@@ -372,7 +378,9 @@ function startTlsIgnoringUpgrade(socket) {
 // detach: one in flight (8 MiB to a server that never reads) and two
 // queued. The detach closes the writable, leaves it locked, and rejects
 // all three with the same disconnect error; none of them completes on
-// the connection the upgrade takes over.
+// the connection the upgrade takes over. The order of the write
+// rejections relative to the old socket's closed promise diverges (see
+// the file header).
 export const detachRejectsPendingWrites = {
   async test(ctrl, env) {
     const socket = connect(
@@ -383,6 +391,8 @@ export const detachRejectsPendingWrites = {
     );
     await socket.opened;
     const tls = startTlsIgnoringUpgrade(socket);
+    const order = [];
+    socket.closed.then(() => order.push('closed'));
     const writer = socket.writable.getWriter();
     const writes = [
       writer.write(new Uint8Array(8 * 1024 * 1024)),
@@ -392,10 +402,13 @@ export const detachRejectsPendingWrites = {
     writer.releaseLock();
     const reasons = await Promise.race([
       Promise.all(
-        writes.map((p) =>
+        writes.map((p, i) =>
           p.then(
             () => 'fulfilled',
-            (e) => e
+            (e) => {
+              order.push(`write${i}`);
+              return e;
+            }
           )
         )
       ),
@@ -409,6 +422,12 @@ export const detachRejectsPendingWrites = {
     strictEqual(reasons[1], reasons[0]);
     strictEqual(reasons[2], reasons[0]);
     await socket.closed;
+    deepStrictEqual(
+      order,
+      usingTsImpl
+        ? ['write0', 'write1', 'write2', 'closed']
+        : ['closed', 'write0', 'write1', 'write2']
+    );
     strictEqual(socket.writable.locked, true);
     if (usingTsImpl) {
       await socket.writable[kIsClosedPromise].promise;

@@ -28,9 +28,19 @@ service allowing `private`. The suite's `.wd-test` files take no
 
 ## Coverage
 
-`cancelReadableSettlesSocket` pins one implementation divergence: canceling
-a pending read rejects with a re-created `Error` carrying the cancel reason
-under C++, while TypeScript resolves the read done.
+Two implementation divergences are pinned:
+
+1. `cancelReadableSettlesSocket`: canceling a pending read rejects with a
+   re-created `Error` carrying the cancel reason under C++, while
+   TypeScript resolves the read done.
+2. `detachRejectsPendingWrites`: at a `startTls()` detach, TypeScript
+   rejects the pending writes inside the detach, so their rejections
+   settle before the old socket's `closed` resolves; C++ resolves
+   `closed` in the same callback and rejects the writes at least one
+   event-loop turn later, once its canceled write's I/O reports back
+   (`awaitIoLegacy`, then `drain()`). Neither order is specified
+   (`startTls` and flush are workerd extensions); the TypeScript one
+   reports the failed writes before the upgrade.
 
 | Test | Shape |
 | --- | --- |
