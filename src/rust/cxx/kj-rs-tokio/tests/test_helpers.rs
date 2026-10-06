@@ -156,18 +156,23 @@ pub fn spawn_yield_loop_task() {
 }
 
 /// Spawns a task that re-enters `promise.wait()` on the loop thread (via the C++ helper
-/// `nestedWait`), which nests `block_on` inside the port's `block_on`. The resulting panic must
+/// `nestedWait`): a `wait()` inside the loop's `wait()`, which KJ refuses. The refusal must
 /// surface to the task as a catchable `kj::Exception` (an `Err` here), never an abort, and the
-/// outer loop must keep working. Resolves `Ok` if the task observed the error.
+/// outer loop must keep working. Resolves `Ok` if the task observed KJ's refusal.
 pub async fn nested_wait_from_task() -> Result<()> {
-    let observed_error = kj_rs_tokio::spawn(async { crate::ffi::nested_wait().is_err() })
-        .await
-        .map_err(Error::other)?;
+    let observed_error = kj_rs_tokio::spawn(async {
+        crate::ffi::nested_wait().is_err_and(|error| {
+            let refusal = "wait() is not allowed from within event callbacks";
+            error.to_string().contains(refusal)
+        })
+    })
+    .await
+    .map_err(Error::other)?;
     if observed_error {
         Ok(())
     } else {
         Err(Error::other(
-            "nested wait() inside a spawned task unexpectedly succeeded",
+            "nested wait() inside a spawned task was not refused by KJ",
         ))
     }
 }
@@ -212,6 +217,16 @@ pub async fn task_awaits_kj_timer(delay_ms: u64, timer_ms: u64) -> Result<()> {
     })
     .await
     .map_err(Error::other)
+}
+
+// =======================================================================================
+// kj_rs_tokio::Runtime with C++ on its loop (see the C++ test that calls this)
+
+/// See the bridge doc on `runtime_context_waits_after_block_on` (lib.rs).
+pub fn runtime_context_waits_after_block_on() {
+    let mut runtime = kj_rs_tokio::Runtime::new().expect("Runtime::new");
+    runtime.block_on(async {}).expect("block_on");
+    crate::ffi::wait_for_timer(runtime.context(), 1).expect("wait after block_on");
 }
 
 // =======================================================================================

@@ -34,8 +34,9 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
 - `syntax/`, `gen/`, and `macro/` — bridge parser and code generators
 - `kj-rs/` — KJ promises/futures, exceptions, ownership, refcounting, dates, and `Maybe`
 - `kj-rs-tokio/` — `TokioEventPort`: a `kj::EventPort` backed by a per-thread tokio
-  `current_thread` runtime, plus `setupTokioAsyncIo()` (no I/O providers) and
-  `kj_rs_tokio::spawn()`
+  `current_thread` runtime, plus `setupTokioAsyncIo()` (no I/O providers),
+  `kj_rs_tokio::spawn()`, and `kj_rs_tokio::Runtime` (the same loop owned by a Rust `main`;
+  its `block_on` polls the future as a task and blocks in `promise.wait()` until it completes)
 - `kj-rs-io/` — tokio-backed `kj::AsyncIoStream` / `kj::Network` / `kj::LowLevelAsyncIoProvider`
   (the I/O providers for the tokio loop, `kj_rs_io::setupTokioAsyncIo()`), `loopback:` addresses
   (in-process connections for `workerd test`), the `--watch` file watcher (Rust over `notify`),

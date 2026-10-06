@@ -189,16 +189,21 @@ fn port_text_is_decimal_or_a_service_name() {
             "{too_large}"
         );
     }
-    let _port = kj_rs_tokio::TokioPort::new();
+    // Not decimal, so a service name for getaddrinfo, which this port-less thread refuses.
     for service in [
         "127.0.0.1:http",
         "127.0.0.1:0x50",
         "127.0.0.1:-1",
         "127.0.0.1:",
     ] {
+        let Some(Err(err)) = parse_once(service.as_bytes(), 0) else {
+            panic!("{service}: expected the getaddrinfo lookup to be refused at once")
+        };
         assert!(
-            parse_once(service.as_bytes(), 0).is_none(),
-            "{service}: not decimal, so a service name for getaddrinfo"
+            KjError::from(err)
+                .description()
+                .contains("no TokioEventPort"),
+            "{service}"
         );
     }
 }
