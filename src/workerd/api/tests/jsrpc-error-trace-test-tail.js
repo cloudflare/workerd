@@ -51,48 +51,62 @@ export default {
   },
 };
 
-function foundExpectedEvents(invocation) {
+function findInvocation(method) {
+  return invocations.find((invocation) => invocation.methods.includes(method));
+}
+
+function foundExpectedEvents(throwing, asyncThrowing) {
   return (
-    invocation?.exceptions.some(
+    throwing?.exceptions.some(
       (exception) => exception.message === 'intentional JSRPC failure'
     ) &&
-    invocation?.exceptions.some(
+    throwing?.outcomes.includes('exception') &&
+    asyncThrowing?.exceptions.some(
       (exception) => exception.message === 'intentional async JSRPC failure'
     ) &&
-    invocation?.outcomes.includes('exception')
+    asyncThrowing?.outcomes.includes('exception')
   );
 }
 
 export const test = {
   async test() {
     const deadline = Date.now() + 5000;
-    let invocation = invocations[0];
+    let throwing = findInvocation('throwError');
+    let asyncThrowing = findInvocation('throwAsyncError');
 
-    while (!foundExpectedEvents(invocation) && Date.now() < deadline) {
+    while (
+      !foundExpectedEvents(throwing, asyncThrowing) &&
+      Date.now() < deadline
+    ) {
       await scheduler.wait(10);
-      invocation = invocations[0];
+      throwing = findInvocation('throwError');
+      asyncThrowing = findInvocation('throwAsyncError');
     }
 
-    assert.ok(invocation, 'Could not find ThrowingService JSRPC invocation');
+    assert.ok(throwing, 'Could not find throwError JSRPC invocation');
+    assert.ok(asyncThrowing, 'Could not find throwAsyncError JSRPC invocation');
     assert.strictEqual(
       invocations.length,
-      1,
-      'Expected exactly one callee invocation'
+      2,
+      'Expected exactly two callee invocations'
     );
-    assert.deepStrictEqual(invocation.methods, [
-      'throwError',
-      'throwAsyncError',
-    ]);
-    assert.deepStrictEqual(invocation.exceptions, [
+
+    assert.deepStrictEqual(throwing.methods, ['throwError']);
+    assert.deepStrictEqual(throwing.exceptions, [
       {
         name: 'Error',
         message: 'intentional JSRPC failure',
       },
+    ]);
+    assert.deepStrictEqual(throwing.outcomes, ['exception']);
+
+    assert.deepStrictEqual(asyncThrowing.methods, ['throwAsyncError']);
+    assert.deepStrictEqual(asyncThrowing.exceptions, [
       {
         name: 'Error',
         message: 'intentional async JSRPC failure',
       },
     ]);
-    assert.deepStrictEqual(invocation.outcomes, ['exception']);
+    assert.deepStrictEqual(asyncThrowing.outcomes, ['exception']);
   },
 };
