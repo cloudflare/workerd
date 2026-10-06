@@ -19,6 +19,7 @@ export {
   readyFulfillTiming,
   nonCallableSizeThrows,
   globalScopePipe,
+  strategyMembersReadOnce,
 } from 'construction';
 
 export {

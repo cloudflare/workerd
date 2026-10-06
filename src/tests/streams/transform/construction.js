@@ -6,7 +6,7 @@
 // general.any.js and strategies.any.js, whose C++ expectedFailures here
 // narrow to error TYPES (both implementations do validate).
 
-import { throws } from 'node:assert';
+import { deepStrictEqual, strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 // DIVERGENCE: transformer.readableType / writableType must be undefined;
@@ -73,6 +73,43 @@ export const hwmInfinityRejected = {
             'The value cannot be converted because it is not an integer.',
         });
       }
+    }
+  },
+};
+
+// A strategy dictionary whose members count their reads.
+function countingStrategy(highWaterMark) {
+  const reads = { highWaterMark: 0, size: 0 };
+  const strategy = {
+    get highWaterMark() {
+      reads.highWaterMark++;
+      return highWaterMark;
+    },
+    get size() {
+      reads.size++;
+      return undefined;
+    },
+  };
+  return { reads, strategy };
+}
+
+// Both strategy dictionaries' members are each read once, as WebIDL
+// dictionary conversion does (parity). An empty transformer and one with
+// a transform() hook cover the TS implementation's elided and standard
+// construction paths.
+export const strategyMembersReadOnce = {
+  test() {
+    for (const transformer of [{}, { transform() {} }]) {
+      const writable = countingStrategy(2);
+      const readable = countingStrategy(3);
+      const ts = new TransformStream(
+        transformer,
+        writable.strategy,
+        readable.strategy
+      );
+      deepStrictEqual(writable.reads, { highWaterMark: 1, size: 1 });
+      deepStrictEqual(readable.reads, { highWaterMark: 1, size: 1 });
+      strictEqual(ts.writable.getWriter().desiredSize, 2);
     }
   },
 };

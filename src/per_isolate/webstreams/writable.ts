@@ -865,9 +865,11 @@ class WritableStream<W = unknown> {
       const callSize = uncurryThis(sizeFn);
       sizeAlgorithm = (chunk: W) => callSize(undefined, chunk);
     }
+    // Read once, as WebIDL dictionary conversion reads each member once.
+    const rawHWM = strategy.highWaterMark;
     let highWaterMark = 1;
-    if (strategy.highWaterMark !== undefined) {
-      highWaterMark = +strategy.highWaterMark;
+    if (rawHWM !== undefined) {
+      highWaterMark = +rawHWM;
       if (NumberIsNaN(highWaterMark) || highWaterMark < 0) {
         throw new RangeError('Invalid highWaterMark');
       }
