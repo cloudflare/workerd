@@ -183,10 +183,13 @@ const textEncoderInstance = new TextEncoder();
 // Chunk validation and copy
 //
 // Returns a COPIED Uint8Array for byte inputs, a TextEncoder result for
-// strings, or undefined for zero-length inputs (write no-op). Throws
-// TypeError for anything else. Never detaches the input buffer.
+// strings, or undefined for zero-length inputs (write no-op). An undefined
+// chunk (`write()`, `write(undefined)`) is a no-op too, as in C++, where
+// the internal controller's chunk argument is optional. Throws TypeError
+// for anything else. Never detaches the input buffer.
 
 function validateAndCopyChunk(chunk: unknown): Uint8Array | undefined {
+  if (chunk === undefined) return undefined;
   if (typeof chunk === 'string') {
     if (chunk.length === 0) return undefined;
     return TextEncoderEncode(textEncoderInstance, chunk);
