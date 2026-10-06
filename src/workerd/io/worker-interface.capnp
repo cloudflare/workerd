@@ -562,9 +562,6 @@ enum SerializationTag {
 
   r2ObjectBody @21;
   # R2 object metadata with a transferred body stream.
-
-  r2Error @22;
-  # A structured error produced by an R2 operation.
 }
 
 enum StreamEncoding {
