@@ -73,7 +73,7 @@ export const test = {
         'cloudflare.r2.request.size': 7n,
         'cloudflare.r2.response.success': true,
         'cloudflare.r2.response.etag': 'objectEtag',
-        'cloudflare.r2.response.size': 123,
+        'cloudflare.r2.response.size': 7,
         'cloudflare.r2.response.uploaded': '2024-08-27T14:00:57.918Z',
         'cloudflare.r2.response.storage_class': 'Standard',
         'cloudflare.r2.response.custom_metadata': true,
