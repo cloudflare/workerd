@@ -888,8 +888,8 @@ KJ_TEST("a thrown JSRPC method reports its request failure exactly once") {
 
 KJ_TEST("a late JSRPC rejection after session cancellation is not reported") {
   auto observer = kj::refcounted<RetryClaimObserver>();
-  TestFixture fixture(observedActorParams(
-      *observer, LATE_REJECTION_ACTOR_SOURCE, "jsrpc-late-rejection-test"_kj));
+  TestFixture fixture(
+      observedActorParams(*observer, LATE_REJECTION_ACTOR_SOURCE, "jsrpc-late-rejection-test"_kj));
 
   {
     auto entrypoint = fixture.makeWorkerEntrypoint();

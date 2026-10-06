@@ -2317,10 +2317,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
         js.throwException(kj::mv(error));
       })));
 
-      result = result.attach(
-          kj::defer([liveness = kj::mv(liveness)]() mutable {
-            liveness->exceptionObserver = kj::none;
-          }));
+      result = result.attach(kj::defer(
+          [liveness = kj::mv(liveness)]() mutable { liveness->exceptionObserver = kj::none; }));
 
       if (ctx.hasOutputGate()) {
         // Note: If `ctx` is destroyed, the entire call to `callImpl()` will be canceled
@@ -3195,8 +3193,8 @@ kj::Exception DeliveredJsRpcExceptionObserver::record(
   markJsRpcExceptionAsDelivered(ioctx, exception);
 
   KJ_IF_SOME(m, metrics) {
-    KJ_IF_SOME(reportingError,
-        kj::runCatchingExceptions([&]() { m->reportFailure(exception); })) {
+    KJ_IF_SOME(
+        reportingError, kj::runCatchingExceptions([&]() { m->reportFailure(exception); })) {
       KJ_LOG(ERROR, "failed to report delivered JSRPC exception", reportingError);
     }
   }
@@ -3300,7 +3298,8 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       kj::Maybe<kj::String> wrapperModule,
       kj::Maybe<kj::Rc<BaseTracer>> tracer,
       bool isDynamicDispatch)
-      : JsRpcTargetBase(ioCtx, CantOutliveIncomingRequest(),
+      : JsRpcTargetBase(
+            ioCtx, CantOutliveIncomingRequest(),
             kj::rc<DeliveredJsRpcExceptionObserver>(kj::addRef(*metrics), mapAddRef(tracer),
                 ioCtx.getInvocationSpanContext().clone())),
         ioCtx(ioCtx),
