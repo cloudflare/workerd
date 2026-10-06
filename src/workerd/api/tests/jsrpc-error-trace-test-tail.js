@@ -96,16 +96,23 @@ export const test = {
     );
 
     assert.deepStrictEqual(throwing.methods, ['throwError']);
-    assert.deepStrictEqual(throwing.exceptions, [
-      {
-        name: 'Error',
-        message: 'intentional JSRPC failure',
-      },
-      {
-        name: 'Error',
-        message: HUNG_REQUEST_MESSAGE,
-      },
-    ]);
+    const intentionalFailure = {
+      name: 'Error',
+      message: 'intentional JSRPC failure',
+    };
+    // Invocation cleanup may also emit its cancellation exception, depending on scheduling.
+    const expectedThrowingExceptions = [
+      intentionalFailure,
+      ...(throwing.exceptions.length === 1
+        ? []
+        : [
+            {
+              name: 'Error',
+              message: HUNG_REQUEST_MESSAGE,
+            },
+          ]),
+    ];
+    assert.deepStrictEqual(throwing.exceptions, expectedThrowingExceptions);
     assert.deepStrictEqual(throwing.outcomes, ['exception']);
 
     assert.deepStrictEqual(asyncThrowing.methods, ['throwAsyncError']);
