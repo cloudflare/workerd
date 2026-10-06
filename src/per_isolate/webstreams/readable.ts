@@ -249,10 +249,6 @@ let detachReadableStream: <R>(
   stream: ReadableStream<R>,
   ignoreDisturbed: boolean
 ) => ReadableStream<R>;
-let readableStreamReaderGenericCancel: (
-  reader: object,
-  reason?: unknown
-) => Promise<void>;
 let readableStreamReaderGenericRelease: (reader: object) => void;
 let readableStreamDefaultReaderRead: <R>(
   reader: ReadableStreamDefaultReaderType<R>,
@@ -585,7 +581,7 @@ function iteratorReturnSteps(
   }
 
   if (!s.preventCancel) {
-    const result = readableStreamReaderGenericCancel(s.reader, value);
+    const result = cancelReadableStreamGenericReader(s.reader, value);
     readableStreamReaderGenericRelease(s.reader);
     return result as Promise<undefined>;
   }
@@ -774,10 +770,6 @@ class ReadableStreamReaderBase<R> {
       }
       setReadableStreamReader(stream, undefined);
       base.#stream = undefined;
-    };
-
-    readableStreamReaderGenericCancel = (reader: object, reason?: unknown) => {
-      return cancelReadableStreamGenericReader(reader, reason);
     };
 
     getReaderStream = <R>(reader: object) => {
@@ -1570,8 +1562,12 @@ class ReadableStreamDefaultController<
       }
     };
 
-    // Default controllers have no byobRequest to invalidate; the byte
-    // controller's static block wraps this with the real implementation.
+    // Nothing to do for either queued controller. A default controller has
+    // no byobRequest; the byte controller keeps its own (spec: releaseLock
+    // does not invalidate the byobRequest; the head pull-into descriptor
+    // stays with readerType 'none', and a later respond() enqueues its
+    // bytes for the next reader). The native arm, chained at the bottom of
+    // this module, drops the native controller's cached byobRequest.
     controllerOnReaderRelease = (_controller) => {};
   }
 
@@ -2202,18 +2198,6 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       // A request over `from`'s head would outlive it.
       if (controller.#releasedHead === undefined) {
         controller.#invalidateByobRequest();
-      }
-    };
-
-    const prevOnReaderRelease = controllerOnReaderRelease;
-    controllerOnReaderRelease = (controller) => {
-      if (#queue in controller) {
-        // Spec: releaseLock does NOT invalidate the byobRequest. The head
-        // pull-into descriptor stays in pendingPullIntos with readerType
-        // set to 'none'; a future respond() will enqueue the data into the
-        // queue for the next reader instead of resolving a read promise.
-      } else {
-        prevOnReaderRelease(controller);
       }
     };
 
