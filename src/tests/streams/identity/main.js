@@ -25,6 +25,7 @@ export {
   fixedLengthCoercionDivergence,
   fixedLengthLengthsAboveMaxSafeInteger,
   userStrategySizeNeverInvoked,
+  strategyArgumentDictionaryConversion,
 } from 'construction';
 
 export {

@@ -232,6 +232,16 @@ const kEmptyStrategy = ObjectFreeze({
   __proto__: null,
 }) as QueuingStrategy<unknown>;
 
+// WebIDL dictionary conversion of a constructor's strategy argument, as in
+// C++: undefined and null mean no strategy; any other non-object throws.
+function toStrategyDictionary(value: unknown): QueuingStrategy<unknown> {
+  if (value === undefined || value === null) return kEmptyStrategy;
+  if (typeof value !== 'object' && typeof value !== 'function') {
+    throw new TypeError('The queuing strategy must be an object.');
+  }
+  return value as QueuingStrategy<unknown>;
+}
+
 // A write accepted by the writable, snapshotted in its size() callback (see
 // sizeAndSnapshot). Entries are tagged with an own `ok` data property rather
 // than discriminated with an `in` check so that a polluted Object.prototype
@@ -564,8 +574,7 @@ class IdentityTransformStream {
       expectedLength = internalExpectedLength;
       writableStrategy = internalWritableStrategy;
     } else {
-      writableStrategy = writableStrategyOrInternal as
-        QueuingStrategy<unknown> | undefined;
+      writableStrategy = toStrategyDictionary(writableStrategyOrInternal);
     }
     writableStrategy ??= kEmptyStrategy;
 
@@ -866,14 +875,12 @@ class FixedLengthStream extends IdentityTransformStream {
           'that fits in a uint64.'
       );
     }
+    writableStrategy = toStrategyDictionary(writableStrategy);
     //
     // Cap highWaterMark at expectedLength, matching C++ behavior
     // (identity-transform-stream.c++ FixedLengthStream::constructor): buffering more than the
     // total expected output is pointless.
-    if (
-      writableStrategy !== undefined &&
-      writableStrategy.highWaterMark !== undefined
-    ) {
+    if (writableStrategy.highWaterMark !== undefined) {
       // Derive the cap from the COERCED length, not the raw input: BigInt
       // conversion normalizes a -0.0 input to 0n, so Number(bigLen) is
       // always +0-or-positive and a negative zero cannot leak through the

@@ -164,3 +164,23 @@ export const userStrategySizeNeverInvoked = {
     strictEqual(calls, 0);
   },
 };
+
+// The strategy argument converts as a WebIDL dictionary: undefined and
+// null mean no strategy, and any other non-object throws a TypeError (the
+// message differs per implementation).
+export const strategyArgumentDictionaryConversion = {
+  test() {
+    for (const strategy of [undefined, null]) {
+      for (const stream of [
+        new IdentityTransformStream(strategy),
+        new FixedLengthStream(5, strategy),
+      ]) {
+        strictEqual(stream.writable.getWriter().desiredSize, 1);
+      }
+    }
+    for (const strategy of [5, 'x', true, 3n, Symbol('s')]) {
+      throws(() => new IdentityTransformStream(strategy), TypeError);
+      throws(() => new FixedLengthStream(5, strategy), TypeError);
+    }
+  },
+};
