@@ -28,6 +28,7 @@ export { encoderCoercesChunksToString } from 'encode-coercion';
 
 export {
   decoderAcceptsBufferSources,
+  decoderSharedArrayBufferChunks,
   decoderDetachedBufferIsNoop,
   decoderRejectsNonBufferSource,
   encoderSymbolChunkErrorsStream,
