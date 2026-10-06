@@ -303,8 +303,10 @@ class TransformStream<I = unknown, O = unknown> {
         // Spec step 5.2: throw stream.[[readable]].[[storedError]], not
         // the caught exception.  When size() calls controller.error(e1)
         // then throws e2, the storedError is e1 — the first error wins.
-        const storedError = readableInternals.getStoredError(stream.#readable);
-        throw storedError !== undefined ? storedError : e;
+        // When size() closed the readable first (readable.cancel(),
+        // terminate()), the readable has no stored error and this throws
+        // undefined, as the spec and Node do.
+        throw readableInternals.getStoredError(stream.#readable);
       }
       // Mirror the readable side's backpressure state.
       const desiredSize = readableControllerDesiredSizeGet(readableController);

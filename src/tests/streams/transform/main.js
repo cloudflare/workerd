@@ -77,6 +77,7 @@ export {
   readInsideSize,
   writerCloseInsideSize,
   writableAbortInsideSize,
+  enqueueThrowsReadableStoredError,
 } from 'reentrancy';
 
 export { transformRoundtrip } from 'roundtrip';
