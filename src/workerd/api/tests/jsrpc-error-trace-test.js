@@ -6,13 +6,19 @@ import { strictEqual } from 'node:assert';
 import { WorkerEntrypoint } from 'cloudflare:workers';
 
 export class ThrowingService extends WorkerEntrypoint {
-  async throwError() {
+  throwError() {
     console.log('callee throwError called');
     throw new Error('intentional JSRPC failure');
   }
 
-  async neverResolves() {
+  async throwAsyncError() {
+    await scheduler.wait(1);
+    throw new Error('intentional async JSRPC failure');
+  }
+
+  async neverResolves(onStarted) {
     console.log('callee neverResolves called');
+    await onStarted();
     return new Promise(() => {});
   }
 }
@@ -26,8 +32,26 @@ export default {
       strictEqual(error.message, 'intentional JSRPC failure');
     }
 
-    const pending = env.ThrowingService.neverResolves();
+    try {
+      await env.ThrowingService.throwAsyncError();
+      throw new Error('Expected throwAsyncError() to reject');
+    } catch (error) {
+      strictEqual(error.message, 'intentional async JSRPC failure');
+    }
+
+    try {
+      await env.ThrowingService.neverResolves(new TextEncoder());
+      throw new Error('Expected argument serialization to reject');
+    } catch (error) {
+      strictEqual(error.name, 'DataCloneError');
+    }
+
+    let startedResolve;
+    const started = new Promise((resolve) => {
+      startedResolve = resolve;
+    });
+    const pending = env.ThrowingService.neverResolves(() => startedResolve());
     pending.catch(() => {});
-    await scheduler.wait(500);
+    await started;
   },
 };

@@ -2002,8 +2002,28 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
     Func makeBuilder,
     rpc::JsValue::ExternalPusher::Client externalPusher);
 
-static kj::Exception recordDeliveredJsRpcException(
-    jsg::Lock& js, IoContext& ioctx, jsg::Value& error);
+class DeliveredJsRpcExceptionObserver: public kj::Refcounted {
+ public:
+  virtual kj::Exception record(jsg::Lock& js, IoContext& ioctx, jsg::Value& error) = 0;
+};
+
+static void markJsRpcExceptionAsDelivered(IoContext& ioctx, kj::Exception& exception);
+
+class NoopDeliveredJsRpcExceptionObserver final: public DeliveredJsRpcExceptionObserver {
+ public:
+  kj::Exception record(jsg::Lock& js, IoContext& ioctx, jsg::Value& error) override {
+    auto exception = js.exceptionToKj(error.addRef(js));
+    markJsRpcExceptionAsDelivered(ioctx, exception);
+    return exception;
+  }
+};
+
+struct JsRpcCallLiveness final: public kj::Refcounted {
+  explicit JsRpcCallLiveness(kj::Rc<DeliveredJsRpcExceptionObserver> exceptionObserver)
+      : exceptionObserver(kj::mv(exceptionObserver)) {}
+
+  kj::Maybe<kj::Rc<DeliveredJsRpcExceptionObserver>> exceptionObserver;
+};
 
 // Callee-side implementation of JsRpcTarget.
 //
@@ -2018,17 +2038,22 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   // Constructor used by TransientJsRpcTarget, which does not own the context. It needs to use
   // makeReentryCallback() to guard against the possibility that the IoContext is canceled before
   // or during a call.
-  JsRpcTargetBase(IoContext& ctx, MayOutliveIncomingRequest)
+  JsRpcTargetBase(IoContext& ctx,
+      MayOutliveIncomingRequest,
+      kj::Rc<DeliveredJsRpcExceptionObserver> exceptionObserver)
       : durableObjectId(getCurrentDurableObjectId()),
         enterIsolateAndCall(ctx.makeReentryCallback<IoContext::TOP_UP>(
             [this](Worker::Lock& lock, IoContext& ctx, CallContext callContext) {
               return callImpl(lock, ctx, callContext);
             })),
-        externalPusher(ctx.getExternalPusher()) {}
+        externalPusher(ctx.getExternalPusher()),
+        exceptionObserver(kj::mv(exceptionObserver)) {}
 
   // Constructor use by EntrypointJsRpcTarget, which is revoked and destroyed before the IoContext
   // can possibly be canceled. It can just use ctx.run().
-  JsRpcTargetBase(IoContext& ctx, CantOutliveIncomingRequest)
+  JsRpcTargetBase(IoContext& ctx,
+      CantOutliveIncomingRequest,
+      kj::Rc<DeliveredJsRpcExceptionObserver> exceptionObserver)
       : durableObjectId(getCurrentDurableObjectId()),
         enterIsolateAndCall([this, &ctx](CallContext callContext) {
           // Note: No need to topUpActor() since this is the start of a top-level request, so the
@@ -2037,7 +2062,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
             return callImpl(lock, ctx, callContext);
           });
         }),
-        externalPusher(ctx.getExternalPusher()) {}
+        externalPusher(ctx.getExternalPusher()),
+        exceptionObserver(kj::mv(exceptionObserver)) {}
 
   struct EnvCtx {
     v8::Local<v8::Value> env;
@@ -2112,6 +2138,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
   kj::Function<kj::Promise<void>(CallContext callContext)> enterIsolateAndCall;
 
   kj::Rc<ExternalPusherImpl> externalPusher;
+  kj::Rc<DeliveredJsRpcExceptionObserver> exceptionObserver;
 
   // Returns true if the given name cannot be used as a method on this type.
   virtual bool isReservedName(kj::StringPtr name) = 0;
@@ -2209,6 +2236,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       // canceled, but it's easier and safer to just grab a refcount on the call context object
       // itself, which fully protects us. So... do that.
       auto ownCallContext = capnp::CallContextHook::from(callContext).addRef();
+      auto liveness = kj::rc<JsRpcCallLiveness>(exceptionObserver.addRef());
 
       auto result = ctx.awaitJs(js,
           js.toPromise(invocationResult.returnValue)
@@ -2266,11 +2294,17 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
         // stubs.
       }),
                   ctx.addFunctor(
-                      [callPipelineFulfillerRef, durableObjectId = getCurrentDurableObjectId()](
-                          jsg::Lock& js, IoContext& ctx, jsg::Value&& error) {
+                      [callPipelineFulfillerRef, durableObjectId = getCurrentDurableObjectId(),
+                          liveness = liveness.addRef()](
+                          jsg::Lock& js, IoContext& ctx, jsg::Value&& error) mutable {
         maybeAddDurableObjectId(
             js, error, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
-        auto exception = recordDeliveredJsRpcException(js, ctx, error);
+        auto exception = [&]() {
+          KJ_IF_SOME(observer, liveness->exceptionObserver) {
+            return observer->record(js, ctx, error);
+          }
+          return js.exceptionToKj(error.addRef(js));
+        }();
         // If we set up a `callPipeline` early, we have to make sure it propagates the error.
         // (Otherwise we get a PromiseFulfiller error instead, which is pretty useless...)
         KJ_IF_SOME(cpf, callPipelineFulfillerRef) {
@@ -2278,6 +2312,10 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
         }
         js.throwException(kj::mv(error));
       })));
+
+      result = result.attach(kj::defer([liveness = kj::mv(liveness)]() mutable {
+        liveness->exceptionObserver = kj::none;
+      }));
 
       if (ctx.hasOutputGate()) {
         // Note: If `ctx` is destroyed, the entire call to `callImpl()` will be canceled
@@ -2325,7 +2363,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
           auto recordException = [this, &js, &ctx](jsg::Value& error) {
             maybeAddDurableObjectId(
                 js, error, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
-            recordDeliveredJsRpcException(js, ctx, error);
+            exceptionObserver->record(js, ctx, error);
           };
           InvocationResult invocationResult;
           KJ_IF_SOME(envCtx, targetInfo.envCtx) {
@@ -2663,7 +2701,8 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
       jsg::JsObject object,
       AllowInstanceProperties allowInstanceProperties,
       kj::Maybe<TraceContextParent> originatingCall)
-      : JsRpcTargetBase(ioCtx, MayOutliveIncomingRequest()),
+      : JsRpcTargetBase(ioCtx, MayOutliveIncomingRequest(),
+            kj::rc<NoopDeliveredJsRpcExceptionObserver>()),
         originatingCall(ownOriginatingCall(ioCtx, kj::mv(originatingCall))),
         handles(ioCtx.addObjectReverse(kj::heap<Handles>(js, object))),
         allowInstanceProperties(allowInstanceProperties.toBool()) {
@@ -2684,7 +2723,8 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
       kj::Maybe<jsg::V8Ref<v8::Function>> dispose,
       kj::Vector<kj::Own<void>> stubDisposers,
       AllowInstanceProperties allowInstanceProperties = AllowInstanceProperties::NO)
-      : JsRpcTargetBase(ioCtx, MayOutliveIncomingRequest()),
+      : JsRpcTargetBase(ioCtx, MayOutliveIncomingRequest(),
+            kj::rc<NoopDeliveredJsRpcExceptionObserver>()),
         handles(ioCtx.addObjectReverse(kj::heap<Handles>(js, object))),
         disposeFulfiller(addDisposeTask(js, ioCtx, object, kj::mv(dispose), kj::mv(stubDisposers))),
         allowInstanceProperties(allowInstanceProperties.toBool()) {}
@@ -3143,16 +3183,42 @@ static void markJsRpcExceptionAsDelivered(IoContext& ioctx, kj::Exception& excep
   }
 }
 
-static kj::Exception recordDeliveredJsRpcException(
-    jsg::Lock& js, IoContext& ioctx, jsg::Value& error) {
-  jsg::JsValue jsError(error.getHandle(js));
-  auto exception = js.exceptionToKj(error.addRef(js));
-  markJsRpcExceptionAsDelivered(ioctx, exception);
-  ioctx.getMetrics().reportFailure(exception);
-  ioctx.logUncaughtException(
-      UncaughtExceptionSource::REQUEST_HANDLER, jsError, jsg::JsMessage::create(js, jsError));
-  return exception;
-}
+class EntrypointDeliveredJsRpcExceptionObserver final: public DeliveredJsRpcExceptionObserver {
+ public:
+  EntrypointDeliveredJsRpcExceptionObserver(kj::Own<RequestObserver> metrics,
+      kj::Maybe<kj::Own<BaseTracer>> tracer,
+      tracing::InvocationSpanContext invocationContext)
+      : metrics(kj::mv(metrics)),
+        tracer(kj::mv(tracer)),
+        invocationContext(kj::mv(invocationContext)) {}
+
+  kj::Exception record(jsg::Lock& js, IoContext& ioctx, jsg::Value& error) override {
+    jsg::JsValue jsError(error.getHandle(js));
+    auto exception = js.exceptionToKj(error.addRef(js));
+    markJsRpcExceptionAsDelivered(ioctx, exception);
+
+    KJ_IF_SOME(reportingError,
+        kj::runCatchingExceptions([&]() { metrics->reportFailure(exception); })) {
+      KJ_LOG(ERROR, "failed to report delivered JSRPC exception", reportingError);
+    }
+
+    KJ_IF_SOME(t, tracer) {
+      JSG_TRY(js) {
+        auto errorInfo = ioctx.getCurrentLock().getErrorInfoForTrace(jsError);
+        t->addException(invocationContext, ioctx.now(), kj::mv(errorInfo.name),
+            kj::mv(errorInfo.message), kj::mv(errorInfo.stack));
+      }
+      JSG_CATCH(reportingError KJ_UNUSED) {}
+    }
+
+    return exception;
+  }
+
+ private:
+  kj::Own<RequestObserver> metrics;
+  kj::Maybe<kj::Own<BaseTracer>> tracer;
+  tracing::InvocationSpanContext invocationContext;
+};
 
 namespace {
 
@@ -3241,7 +3307,9 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       kj::Maybe<kj::String> wrapperModule,
       kj::Maybe<kj::Rc<BaseTracer>> tracer,
       bool isDynamicDispatch)
-      : JsRpcTargetBase(ioCtx, CantOutliveIncomingRequest()),
+      : JsRpcTargetBase(ioCtx, CantOutliveIncomingRequest(),
+            kj::rc<EntrypointDeliveredJsRpcExceptionObserver>(kj::addRef(*metrics),
+                mapAddRef(tracer), ioCtx.getInvocationSpanContext().clone())),
         ioCtx(ioCtx),
         metrics(kj::mv(metrics)),
         // Most of the time we don't really have to clone this but it's hard to fully prove, so
