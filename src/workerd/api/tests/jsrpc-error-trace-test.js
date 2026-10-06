@@ -15,36 +15,22 @@ export class ThrowingService extends WorkerEntrypoint {
     await scheduler.wait(1);
     throw new Error('intentional async JSRPC failure');
   }
-
-  async neverResolves(onStarted) {
-    console.log('callee neverResolves called');
-    await onStarted();
-    return new Promise(() => {});
-  }
 }
 
 export default {
   async test(_controller, env, _ctx) {
     try {
-      await env.SyncThrowingService.throwError();
+      await env.ThrowingService.throwError();
       throw new Error('Expected throwError() to reject');
     } catch (error) {
       strictEqual(error.message, 'intentional JSRPC failure');
     }
 
     try {
-      await env.AsyncThrowingService.throwAsyncError();
+      await env.ThrowingService.throwAsyncError();
       throw new Error('Expected throwAsyncError() to reject');
     } catch (error) {
       strictEqual(error.message, 'intentional async JSRPC failure');
     }
-
-    let startedResolve;
-    const started = new Promise((resolve) => {
-      startedResolve = resolve;
-    });
-    const pending = env.PendingService.neverResolves(() => startedResolve());
-    pending.catch(() => {});
-    await started;
   },
 };

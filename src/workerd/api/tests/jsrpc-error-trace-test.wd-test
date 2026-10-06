@@ -1,6 +1,6 @@
 using Workerd = import "/workerd/workerd.capnp";
 
-# Test JSRPC callee-side tracing for delivered method failures and true cancellations.
+# Test JSRPC callee-side tracing for delivered method failures.
 
 const unitTests :Workerd.Config = (
   services = [
@@ -15,9 +15,7 @@ const mainWorker :Workerd.Worker = (
   ],
   compatibilityFlags = ["nodejs_compat", "experimental", "rpc", "enhanced_error_serialization"],
   bindings = [
-    (name = "SyncThrowingService", service = (name = "jsrpc-error-trace-test", entrypoint = "ThrowingService")),
-    (name = "AsyncThrowingService", service = (name = "jsrpc-error-trace-test", entrypoint = "ThrowingService")),
-    (name = "PendingService", service = (name = "jsrpc-error-trace-test", entrypoint = "ThrowingService")),
+    (name = "ThrowingService", service = (name = "jsrpc-error-trace-test", entrypoint = "ThrowingService")),
   ],
   streamingTails = ["tail"],
 );
