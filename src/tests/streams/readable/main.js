@@ -157,6 +157,9 @@ export {
 export {
   enqueueInsideSize,
   closeInsideSize,
+  closeInsideSizeWithQueuedChunk,
+  closeInsideSizeTeeDrainedBranch,
+  closeInsideSizeTeeBranchesBehind,
   cancelInsideSize,
   readInsideSize,
 } from 'reentrancy';

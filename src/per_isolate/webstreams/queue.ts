@@ -536,31 +536,35 @@ class StreamQueue<T, V = T> {
     // has no state guard, so we accept the enqueue unconditionally.
     if (this.#state === 'closed') {
       // Reentrant close() from inside size() already pushed the sentinel.
-      // The spec's close just sets closeRequested — the chunk is still
-      // readable. Insert the entry BEFORE the sentinel so cursors drain
-      // through it before reaching the close marker.
+      // The chunk is readable by every consumer or by none, so tee
+      // branches always see the same chunks:
+      //   - A cursor at the sentinel has drained, and its stream closed
+      //     with the close() (spec: a close() on an empty queue closes the
+      //     stream, and the chunk is never read; with a tee, a drained
+      //     branch means the tee has read the source's queue empty). The
+      //     chunk is dropped.
+      //   - Otherwise every cursor is behind the sentinel. The spec's
+      //     close() only requested the close and the chunk is still
+      //     readable: insert it BEFORE the sentinel, so each cursor drains
+      //     through it before reaching the close marker.
+      // Inserting with a cursor at the sentinel would leave that cursor on
+      // the chunk, for good: its closed stream never reads it, so the
+      // cursor never reaches the sentinel and the source never ends.
+      this.#prune();
+      if (this.#noConsumers) return;
       const entries = this.#entries;
-      // Sentinel position BEFORE insertion — cursors at or past this
-      // point already resolved {done: true} and must not be touched.
       const sentinelPos = this.#headOffset + entries.length - 1;
+      const cursors = this.#cursors;
+      for (let i = 0; i < cursors.length; i++) {
+        if ((cursors[i] as QueueCursor<T, V>).position >= sentinelPos) return;
+      }
       const sentinel = entries.pop() as QueueSlot<T>;
       entries.push(entry);
       entries.push(sentinel);
-      // Only update cursors that haven't yet reached the sentinel.
-      // A cursor at sentinelPos already drained and resolved done —
-      // inflating its remainingSize or notifying it would corrupt
-      // desiredSize and break the drain-then-close terminality guarantee.
-      this.#prune();
-      const cursors = this.#cursors;
-      const behind: QueueCursor<T, V>[] = [];
       for (let i = 0; i < cursors.length; i++) {
-        const cursor = cursors[i] as QueueCursor<T, V>;
-        if (cursor.position < sentinelPos) {
-          cursor.addToTotalSize(entry.size);
-          ArrayPrototypePush(behind, cursor);
-        }
+        (cursors[i] as QueueCursor<T, V>).addToTotalSize(entry.size);
       }
-      if (notify) this.#notifyEach(behind);
+      if (notify) this.#notifyAll();
     } else {
       this.#entries.push(entry);
       if (this.#state === 'readable') {
