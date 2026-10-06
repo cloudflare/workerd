@@ -3199,6 +3199,7 @@ kj::Exception DeliveredJsRpcExceptionObserver::record(
   }
 
   KJ_IF_SOME(t, tracer) {
+    // Trace extraction is best-effort; preserve the delivered exception if it fails.
     JSG_TRY(js) {
       auto errorInfo = ioctx.getCurrentLock().getErrorInfoForTrace(jsError);
       t->addException(KJ_ASSERT_NONNULL(invocationContext), ioctx.now(), kj::mv(errorInfo.name),
