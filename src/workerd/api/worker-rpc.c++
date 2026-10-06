@@ -16,6 +16,7 @@
 #include <workerd/util/strong-bool.h>
 
 #include <capnp/membrane.h>
+#include <kj/convert.h>
 
 namespace workerd::api {
 
@@ -1335,7 +1336,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       kj::Maybe<kj::Rc<JsRpcCallRetryState>> callRetryState;
       KJ_IF_SOME(retryState, retrySetup.state) {
         if (retryState->isRetryEnabled()) {
-          auto ownedName = name.map([](const kj::String& value) { return kj::str(value); });
+          auto ownedName = name.as<kj::Copy>();
           callRetryState = kj::rc<JsRpcCallRetryState>(parent.addRef(), kj::mv(ownedName),
               operation, kj::mv(callPlan), retryState.addRef(),
               kj::mv(KJ_ASSERT_NONNULL(retrySetup.replayMemoryTracker)), kj::mv(dispatch.pipeline),
@@ -2062,8 +2063,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
     // Try to execute the requested method.
     co_return co_await enterIsolateAndCall(callContext).catch_([this](kj::Exception&& e) {
-      maybeAddDurableObjectId(
-          e, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
+      maybeAddDurableObjectId(e, durableObjectId.as<kj::View>());
       if (jsg::isTunneledException(e.getDescription())) {
         // Annotate exceptions in RPC worker calls as remote exceptions.
         auto description = jsg::stripRemoteExceptionPrefix(e.getDescription());
@@ -2265,8 +2265,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
                   ctx.addFunctor(
                       [callPipelineFulfillerRef, durableObjectId = getCurrentDurableObjectId()](
                           jsg::Lock& js, jsg::Value&& error) {
-        maybeAddDurableObjectId(
-            js, error, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
+        maybeAddDurableObjectId(js, error, durableObjectId.as<kj::View>());
         // If we set up a `callPipeline` early, we have to make sure it propagates the error.
         // (Otherwise we get a PromiseFulfiller error instead, which is pretty useless...)
         KJ_IF_SOME(cpf, callPipelineFulfillerRef) {
@@ -3206,7 +3205,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
         metrics(kj::mv(metrics)),
         // Most of the time we don't really have to clone this but it's hard to fully prove, so
         // let's be safe.
-        entrypointName(entrypointName.map([](kj::StringPtr s) { return kj::str(s); })),
+        entrypointName(entrypointName.as<kj::Copy>()),
         versionInfo(kj::mv(versionInfo)),
         props(kj::mv(props)),
         wrapperModule(kj::mv(wrapperModule)),

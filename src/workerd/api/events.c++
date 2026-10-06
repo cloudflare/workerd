@@ -3,6 +3,8 @@
 #include "blob.h"
 #include "messagechannel.h"
 
+#include <kj/convert.h>
+
 namespace workerd::api {
 
 namespace {
@@ -98,7 +100,7 @@ kj::OneOf<jsg::JsValue, jsg::Ref<Blob>> MessageEvent::getData(jsg::Lock& js) {
 }
 
 kj::Maybe<kj::StringPtr> MessageEvent::getOrigin() {
-  return maybeOrigin.map([](kj::String& origin) -> kj::StringPtr { return origin; });
+  return maybeOrigin.as<kj::View>();
 }
 
 kj::StringPtr MessageEvent::getLastEventId() {

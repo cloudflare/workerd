@@ -9,6 +9,7 @@
 #include <workerd/util/thread-scopes.h>
 
 #include <capnp/message.h>  // for capnp::clone()
+#include <kj/convert.h>
 
 namespace workerd {
 
@@ -435,17 +436,17 @@ void WorkerTracer::setEventInfoInternal(const tracing::InvocationSpanContext& co
     // WorkerTracer is created, but the actual onset event is the best time to send it.
     auto workerInfo = tracing::Onset::WorkerInfo{
       .executionModel = trace->executionModel,
-      .scriptName = mapCopyString(trace->scriptName),
+      .scriptName = trace->scriptName.as<kj::Copy>(),
       .scriptVersion =
           trace->scriptVersion.map([](auto& scriptVersion) -> kj::Own<ScriptVersion::Reader> {
       return capnp::clone(*scriptVersion);
     }),
       .preview = trace->preview.map([](auto& preview) { return preview.clone(); }),
-      .dispatchNamespace = mapCopyString(trace->dispatchNamespace),
-      .scriptId = mapCopyString(trace->scriptId),
+      .dispatchNamespace = trace->dispatchNamespace.as<kj::Copy>(),
+      .scriptId = trace->scriptId.as<kj::Copy>(),
       .scriptTags = KJ_MAP(tag, trace->scriptTags) { return kj::str(tag); },
-      .entrypoint = mapCopyString(trace->entrypoint),
-      .durableObjectId = mapCopyString(trace->durableObjectId),
+      .entrypoint = trace->entrypoint.as<kj::Copy>(),
+      .durableObjectId = trace->durableObjectId.as<kj::Copy>(),
     };
 
     // Onset needs special handling for spanId: The top-level spanId is zero unless a trigger

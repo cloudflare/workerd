@@ -27,6 +27,7 @@
 #include <workerd/util/weak-refs.h>
 
 #include <kj/compat/http.h>
+#include <kj/convert.h>
 #include <kj/mutex.h>
 
 namespace v8 {
@@ -1182,9 +1183,9 @@ struct Worker_VersionInfo {
   Worker_VersionInfo clone() const {
     return {
       .id = kj::str(id),
-      .cohort = cohort.map([](const kj::String& s) { return kj::str(s); }),
-      .key = key.map([](const kj::String& s) { return kj::str(s); }),
-      .versionOverride = versionOverride.map([](const kj::String& s) { return kj::str(s); }),
+      .cohort = cohort.as<kj::Copy>(),
+      .key = key.as<kj::Copy>(),
+      .versionOverride = versionOverride.as<kj::Copy>(),
     };
   }
 

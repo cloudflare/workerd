@@ -7,6 +7,7 @@
 #include <workerd/util/account-limits.h>
 #include <workerd/util/sqlite-metering.h>
 
+#include <kj/convert.h>
 #include <kj/filesystem.h>
 #include <kj/function.h>
 #include <kj/list.h>
@@ -443,7 +444,7 @@ class SqliteDatabase {
       kj::Maybe<const kj::Exception&> exception);
 
   kj::Maybe<kj::StringPtr> getErrorContext() {
-    return errorContext.map([](kj::String& s) -> kj::StringPtr { return s; });
+    return errorContext.as<kj::View>();
   }
 
   enum Multi { SINGLE, MULTI };

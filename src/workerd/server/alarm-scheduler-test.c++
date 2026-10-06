@@ -5,6 +5,7 @@
 #include "alarm-scheduler.h"
 
 #include <kj/async-io.h>
+#include <kj/convert.h>
 #include <kj/test.h>
 #include <kj/timer.h>
 
@@ -213,7 +214,7 @@ KJ_TEST("AlarmScheduler restores the persisted actor_name onto the ActorKey when
   kj::Maybe<kj::String> observedName;
   bool fired = false;
   auto getActor = [&](const ActorKey& actor) -> kj::Own<WorkerInterface> {
-    observedName = actor.name.map([](kj::StringPtr n) { return kj::str(n); });
+    observedName = actor.name.as<kj::Copy>();
     return kj::heap<AlarmStubWorkerInterface>([&fired]() { fired = true; });
   };
 

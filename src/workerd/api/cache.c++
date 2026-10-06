@@ -7,8 +7,8 @@
 #include "util.h"
 
 #include <workerd/io/io-context.h>
-#include <workerd/util/own-util.h>
 
+#include <kj/convert.h>
 #include <kj/encoding.h>
 
 namespace workerd::api {
@@ -597,7 +597,7 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
   };
   if (enableCompatFlags) {
     metadata.featureFlagsForFl =
-        mapCopyString(context.getWorker().getIsolate().getFeatureFlagsForFl());
+        context.getWorker().getIsolate().getFeatureFlagsForFl().as<kj::Copy>();
   }
   auto httpClient =
       cacheName.map([&](kj::String& n) {

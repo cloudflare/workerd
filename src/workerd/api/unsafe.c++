@@ -6,6 +6,8 @@
 #include <workerd/jsg/script.h>
 #include <workerd/util/autogate.h>
 
+#include <kj/convert.h>
+
 #include <span>
 
 namespace workerd::api {
@@ -19,7 +21,7 @@ static constexpr auto ASYNC_FN_ARG_CLOSE = ") {"_kjc;
 static constexpr auto ASYNC_FN_SUFFIX = "}"_kjc;
 
 inline kj::StringPtr getName(jsg::Optional<kj::String>& name, kj::StringPtr def) {
-  return name.map([](kj::String& str) { return str.asPtr(); }).orDefault(def);
+  return name.as<kj::View>().orDefault(def);
 }
 
 IoChannelFactory::EvictWebSocketMode parseEvictWebSocketMode(

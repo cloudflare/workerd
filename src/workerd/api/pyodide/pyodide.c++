@@ -18,6 +18,7 @@
 #include <kj/array.h>
 #include <kj/common.h>
 #include <kj/compat/gzip.h>
+#include <kj/convert.h>
 #include <kj/debug.h>
 #include <kj/encoding.h>
 #include <kj/string.h>
@@ -214,8 +215,7 @@ PyodideMetadataReader::State::State(const State& other)
       isTracingFlag(other.isTracingFlag),
       snapshotToDisk(other.snapshotToDisk),
       createBaselineSnapshot(other.createBaselineSnapshot),
-      memorySnapshot(other.memorySnapshot.map(
-          [](auto& snapshot) { return kj::heapArray<kj::byte>(snapshot); })) {}
+      memorySnapshot(other.memorySnapshot.as<kj::Copy>()) {}
 
 kj::Own<PyodideMetadataReader::State> PyodideMetadataReader::State::clone() {
   return kj::heap<PyodideMetadataReader::State>(*this);

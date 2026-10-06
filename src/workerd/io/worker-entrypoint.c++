@@ -22,14 +22,11 @@
 
 #include <capnp/message.h>
 #include <kj/compat/http.h>
+#include <kj/convert.h>
 
 namespace workerd {
 
 namespace {
-
-kj::Maybe<kj::StringPtr> asPtr(kj::Maybe<kj::String>& value) {
-  return value.map([](kj::String& text) -> kj::StringPtr { return text; });
-}
 
 // Wrapper around a Worker that handles receiving a new event from the outside. In particular,
 // this handles:
@@ -518,7 +515,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
 
           // Getting the handler finishes actor construction, so the claim sees a constructed actor
           // but still precedes the choice and invocation of the fetch handler.
-          auto handler = lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo),
+          auto handler = lock.getExportedHandler(entrypointName.as<kj::View>(), kj::mv(versionInfo),
               kj::mv(props), context.getActor(), isDynamicDispatch);
           auto retryable = IsRetryableHandler::NO;
           KJ_IF_SOME(h, handler) {
@@ -794,7 +791,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
     return lock.getGlobalScope().connect(kj::mv(host), kj::mv(clientAddress), headers, connection,
         response, lock,
-        lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props),
+        lock.getExportedHandler(entrypointName.as<kj::View>(), kj::mv(versionInfo), kj::mv(props),
             context.getActor(), isDynamicDispatch));
   })
           .then([&context, workerTracer]() {
@@ -938,7 +935,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
 
     lock.getGlobalScope().startScheduled(scheduledTime, cron, lock,
         lock.getExportedHandler(
-            asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor()));
+            entrypointName.as<kj::View>(), kj::mv(versionInfo), kj::mv(props), context.getActor()));
   }));
 
   static auto constexpr waitForFinished = [](kj::Own<IoContext::IncomingRequest> request)
@@ -1023,8 +1020,8 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
             timeout = 15 * kj::MINUTES;
           }
 
-          auto handler = lock.getExportedHandler(
-              asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor());
+          auto handler = lock.getExportedHandler(entrypointName.as<kj::View>(), kj::mv(versionInfo),
+              kj::mv(props), context.getActor());
           return lock.getGlobalScope().runAlarm(scheduledTime, timeout, retryCount, lock, handler);
         });
 
@@ -1117,8 +1114,8 @@ kj::Promise<bool> WorkerEntrypoint::test() {
 
     return context.awaitJs(lock,
         lock.getGlobalScope().test(lock,
-            lock.getExportedHandler(
-                asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor())));
+            lock.getExportedHandler(entrypointName.as<kj::View>(), kj::mv(versionInfo),
+                kj::mv(props), context.getActor())));
   }));
 
   static auto constexpr waitForFinished =
@@ -1154,7 +1151,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> WorkerEntrypoint::customEvent(
   KJ_TRY {
     return wrapWithCanceler(
         event
-            ->run(kj::mv(incomingRequest), asPtr(entrypointName), kj::mv(versionInfo),
+            ->run(kj::mv(incomingRequest), entrypointName.as<kj::View>(), kj::mv(versionInfo),
                 kj::mv(props), waitUntilTasks, isDynamicDispatch)
             .attach(kj::mv(event)));
   }

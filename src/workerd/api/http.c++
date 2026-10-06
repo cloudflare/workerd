@@ -23,13 +23,13 @@
 #include <workerd/util/entropy.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
-#include <workerd/util/own-util.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/strings.h>
 #include <workerd/util/thread-scopes.h>
 
 #include <capnp/compat/http-over-capnp.capnp.h>
 #include <kj/compat/url.h>
+#include <kj/convert.h>
 #include <kj/encoding.h>
 #include <kj/memory.h>
 #include <kj/parse/char.h>
@@ -800,8 +800,7 @@ void Request::serialize(jsg::Lock& js,
 
     .cf = cf.getRef(js),
 
-    .cache = getCacheModeName(cacheMode).map(
-        [](kj::StringPtr name) -> kj::String { return kj::str(name); }),
+    .cache = getCacheModeName(cacheMode).as<kj::Copy>(),
 
     // .mode is unimplemented
     // .credentials is unimplemented
@@ -1223,7 +1222,7 @@ jsg::Ref<Response> Response::clone(jsg::Lock& js) {
   auto urlListClone = KJ_MAP(url, urlList) { return kj::str(url); };
 
   return js.alloc<Response>(js, statusCode,
-      mapCopyString(statusText),
+      statusText.as<kj::Copy>(),
       kj::mv(headersClone), kj::mv(cfClone), kj::mv(bodyClone), kj::mv(urlListClone));
 }
 
@@ -1362,7 +1361,7 @@ void Response::serialize(jsg::Lock& js,
       jsg::JsValue(initDictHandler.wrap(js,
           InitializerDict{
             .status = statusCode == 200 ? jsg::Optional<int>() : statusCode,
-            .statusText = statusText.map([](auto& txt) { return kj::str(txt); }),
+            .statusText = statusText.as<kj::Copy>(),
             .headers = headers.addRef(),
             .cf = cf.getRef(js),
 
@@ -2566,7 +2565,7 @@ static jsg::Promise<void> throwOnError(
 static jsg::Promise<Fetcher::GetResult> parseResponse(
     jsg::Lock& js, jsg::Ref<Response> response, jsg::Optional<kj::String> type) {
   auto typeName =
-      type.map([](const kj::String& s) -> kj::StringPtr { return s; }).orDefault("text");
+      type.as<kj::View>().orDefault("text");
   if (typeName == "stream") {
     KJ_IF_SOME(body, response->getBody(js)) {
       return js.resolvedPromise(Fetcher::GetResult(kj::mv(body)));

@@ -9,6 +9,7 @@
 #include <capnp/message.h>
 #include <capnp/schema.h>
 #include <kj/compat/http.h>
+#include <kj/convert.h>
 #include <kj/debug.h>
 #include <kj/encoding.h>
 #include <kj/time.h>
@@ -89,7 +90,7 @@ void SpanStatus::copyTo(rpc::SpanStatus::Builder builder) const {
 }
 
 SpanStatus SpanStatus::clone() const {
-  return SpanStatus(code, message.map([](const kj::ConstString& value) { return value.clone(); }));
+  return SpanStatus(code, message.as<kj::Copy>());
 }
 
 size_t SpanStatus::size() const {
@@ -625,7 +626,7 @@ kj::String EmailEventInfo::toString() const {
 namespace {
 kj::Vector<TraceEventInfo::TraceItem> getTraceItemsFromTraces(
     kj::ArrayPtr<const kj::Own<Trace>> traces) {
-  return KJ_MAP(t, traces) { return TraceEventInfo::TraceItem(mapCopyString(t->scriptName)); };
+  return KJ_MAP(t, traces) { return TraceEventInfo::TraceItem(t->scriptName.as<kj::Copy>()); };
 }
 
 kj::Vector<TraceEventInfo::TraceItem> getTraceItemsFromReader(
@@ -689,7 +690,7 @@ void TraceEventInfo::TraceItem::copyTo(
 }
 
 TraceEventInfo::TraceItem TraceEventInfo::TraceItem::clone() const {
-  return TraceItem(mapCopyString(scriptName));
+  return TraceItem(scriptName.as<kj::Copy>());
 }
 
 DiagnosticChannelEvent::DiagnosticChannelEvent(
@@ -847,8 +848,7 @@ void ErrorInfo::copyTo(rpc::Trace::ErrorInfo::Builder builder) const {
 }
 
 ErrorInfo ErrorInfo::clone() const {
-  return ErrorInfo(
-      kj::str(name), kj::str(message), stack.map([](const kj::String& s) { return kj::str(s); }));
+  return ErrorInfo(kj::str(name), kj::str(message), stack.as<kj::Copy>());
 }
 
 LogErrorInfo cloneLogErrorInfo(const LogErrorInfo& src) {
@@ -986,7 +986,7 @@ Exception Exception::clone() const {
     }
   }
   return Exception(
-      timestamp, kj::str(name), kj::str(message), mapCopyString(stack), kj::mv(clonedCode));
+      timestamp, kj::str(name), kj::str(message), stack.as<kj::Copy>(), kj::mv(clonedCode));
 }
 }  // namespace tracing
 
@@ -1680,15 +1680,15 @@ void Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
 Onset::WorkerInfo Onset::WorkerInfo::clone() const {
   return WorkerInfo{
     .executionModel = executionModel,
-    .scriptName = mapCopyString(scriptName),
+    .scriptName = scriptName.as<kj::Copy>(),
     .scriptVersion = scriptVersion.map([](auto& version) { return capnp::clone(*version); }),
     .preview = preview.map([](auto& preview) { return preview.clone(); }),
-    .dispatchNamespace = mapCopyString(dispatchNamespace),
-    .scriptId = mapCopyString(scriptId),
+    .dispatchNamespace = dispatchNamespace.as<kj::Copy>(),
+    .scriptId = scriptId.as<kj::Copy>(),
     .scriptTags =
         scriptTags.map([](auto& tags) { return KJ_MAP(tag, tags) { return kj::str(tag); }; }),
-    .entrypoint = mapCopyString(entrypoint),
-    .durableObjectId = mapCopyString(durableObjectId),
+    .entrypoint = entrypoint.as<kj::Copy>(),
+    .durableObjectId = durableObjectId.as<kj::Copy>(),
   };
 }
 

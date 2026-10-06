@@ -25,6 +25,7 @@
 #include <kj/async.h>
 #include <kj/cidr.h>
 #include <kj/compat/http.h>
+#include <kj/convert.h>
 #include <kj/debug.h>
 #include <kj/encoding.h>
 #include <kj/exception.h>
@@ -1506,8 +1507,7 @@ class EgressHttpService final: public kj::HttpService {
       bool isTls = (protocol == EgressProtocol::HTTPS);
       auto innerService = kj::heap<InnerEgressService>(
           [&client = containerClient, addr = kj::str(destAddr),
-              hostname = requestHostname.map([](auto& value) { return kj::str(value); }),
-              defaultPort,
+              hostname = requestHostname.as<kj::Copy>(), defaultPort,
               protocol]() mutable -> kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> {
         return client.findEgressMapping(addr, defaultPort,
             hostname.map([](auto& value) {
@@ -2516,8 +2516,7 @@ kj::Promise<void> ContainerClient::start(StartContext context) {
   }
 
   kj::String snapshotImageRef;
-  kj::Maybe<kj::StringPtr> effectiveImage =
-      imageName.map([](kj::String& image) -> kj::StringPtr { return image; });
+  kj::Maybe<kj::StringPtr> effectiveImage = imageName.as<kj::View>();
   auto source = params.getSource();
   switch (source.which()) {
     case rpc::Container::StartParams::Source::IMAGE:
