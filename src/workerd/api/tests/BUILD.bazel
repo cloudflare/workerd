@@ -771,6 +771,16 @@ wd_test(
 )
 
 wd_test(
+    src = "js-rpc-rejected-pipeline-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "js-rpc-rejected-pipeline-test.js",
+        "js-rpc-rejected-pipeline-test-callee.js",
+        "js-rpc-rejected-pipeline-test-tail.js",
+    ],
+)
+
+wd_test(
     src = "js-rpc-params-transfer-ownership-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-params-transfer-ownership-test.js"],
