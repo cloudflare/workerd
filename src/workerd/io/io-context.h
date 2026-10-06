@@ -114,7 +114,8 @@ class IoContext_IncomingRequest final {
       kj::Maybe<kj::Own<BaseTracer>> workerTracer,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
       kj::Maybe<kj::Own<AccessInfo>> accessInfo = kj::none,
-      kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory = kj::none);
+      kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory = kj::none,
+      kj::Maybe<kj::String> clientAddress = kj::none);
   KJ_DISALLOW_COPY_AND_MOVE(IoContext_IncomingRequest);
   ~IoContext_IncomingRequest() noexcept(false);
 
@@ -203,6 +204,12 @@ class IoContext_IncomingRequest final {
     return accessInfo.map([](kj::Own<AccessInfo>& p) -> AccessInfo& { return *p; });
   }
 
+  // The "address:port" of the client on whose behalf this event is being delivered, if the
+  // embedder reported one.
+  kj::Maybe<kj::StringPtr> getClientAddress() {
+    return clientAddress.map([](kj::String& s) -> kj::StringPtr { return s; });
+  }
+
   // The invocation span context is a unique identifier for a specific
   // worker invocation.
   tracing::InvocationSpanContext& getInvocationSpanContext();
@@ -214,6 +221,7 @@ class IoContext_IncomingRequest final {
   kj::Rc<IoChannelFactory> ioChannelFactory;
   kj::Maybe<kj::Own<AccessInfo>> accessInfo;
   kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory;
+  kj::Maybe<kj::String> clientAddress;
 
   // Root user trace span for this request. Populated during delivered() via
   // BaseTracer::makeUserRequestSpan(); otherwise a null SpanParent. The tracer it references

@@ -21,9 +21,11 @@ const unitTests :Workerd.Config = (
     ( name = "internet", network = ( allow = ["private"] ) ),
   ],
   # Port 0 so that the concurrent test variants never collide; the worker
-  # learns the bound ports as its declared inbound listeners.
+  # learns the bound ports as its declared inbound listeners. The UDP listener
+  # is declared with protocol "udp", so it must not claim a TCP port.
   sockets = [
     (name = "tcp-a", address = "127.0.0.1:0", tcp = (), service = "net-server-nodejs-test"),
     (name = "tcp-b", address = "127.0.0.1:0", tcp = (), service = "net-server-nodejs-test"),
+    (name = "udp", address = "127.0.0.1:0", udp = (), service = "net-server-nodejs-test"),
   ],
 );
