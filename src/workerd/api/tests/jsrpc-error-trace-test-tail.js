@@ -55,7 +55,7 @@ function findInvocation(method) {
   return invocations.find((invocation) => invocation.methods.includes(method));
 }
 
-function foundExpectedEvents(throwing, asyncThrowing, canceled) {
+function foundExpectedEvents(throwing, asyncThrowing, pending) {
   return (
     throwing?.exceptions.some(
       (exception) => exception.message === 'intentional JSRPC failure'
@@ -65,7 +65,7 @@ function foundExpectedEvents(throwing, asyncThrowing, canceled) {
       (exception) => exception.message === 'intentional async JSRPC failure'
     ) &&
     asyncThrowing?.outcomes.includes('exception') &&
-    canceled?.outcomes.includes('canceled')
+    pending?.outcomes.includes('ok')
   );
 }
 
@@ -74,21 +74,21 @@ export const test = {
     const deadline = Date.now() + 5000;
     let throwing = findInvocation('throwError');
     let asyncThrowing = findInvocation('throwAsyncError');
-    let canceled = findInvocation('neverResolves');
+    let pending = findInvocation('neverResolves');
 
     while (
-      !foundExpectedEvents(throwing, asyncThrowing, canceled) &&
+      !foundExpectedEvents(throwing, asyncThrowing, pending) &&
       Date.now() < deadline
     ) {
       await scheduler.wait(10);
       throwing = findInvocation('throwError');
       asyncThrowing = findInvocation('throwAsyncError');
-      canceled = findInvocation('neverResolves');
+      pending = findInvocation('neverResolves');
     }
 
     assert.ok(throwing, 'Could not find throwError JSRPC invocation');
     assert.ok(asyncThrowing, 'Could not find throwAsyncError JSRPC invocation');
-    assert.ok(canceled, 'Could not find neverResolves JSRPC invocation');
+    assert.ok(pending, 'Could not find neverResolves JSRPC invocation');
 
     assert.deepStrictEqual(throwing.methods, ['throwError']);
     assert.deepStrictEqual(throwing.exceptions, [
@@ -108,9 +108,9 @@ export const test = {
     ]);
     assert.deepStrictEqual(asyncThrowing.outcomes, ['exception']);
 
-    assert.deepStrictEqual(canceled.methods, ['neverResolves']);
-    assert.deepStrictEqual(canceled.logs, [['callee neverResolves called']]);
-    assert.deepStrictEqual(canceled.exceptions, []);
-    assert.deepStrictEqual(canceled.outcomes, ['canceled']);
+    assert.deepStrictEqual(pending.methods, ['neverResolves']);
+    assert.deepStrictEqual(pending.logs, [['callee neverResolves called']]);
+    assert.deepStrictEqual(pending.exceptions, []);
+    assert.deepStrictEqual(pending.outcomes, ['ok']);
   },
 };
