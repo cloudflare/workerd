@@ -1637,6 +1637,29 @@ KJ_TEST("JsWritableStream create TS arm: closure waitable rejection skips the si
   KJ_EXPECT(!state.aborted);
 }
 
+KJ_TEST("The cpp_exports table has a null prototype and is frozen") {
+  // getCppExport() reads the table with an ordinary property get, so a name missing from
+  // it must not resolve through Object.prototype, where user code can put a function.
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    KJ_EXPECT(exportsObj.getPrototype(js).isNull());
+
+    auto objectPrototype = KJ_ASSERT_NONNULL(js.obj().getPrototype(js).tryCast<jsg::JsObject>());
+    auto planted = exportsObj.get(js, "WritableStream"_kj);
+    objectPrototype.set(js, "plantedCppExport"_kj, planted);
+    KJ_EXPECT_THROW(FAILED, webstreams::getCppExport(js, "plantedCppExport"_kj));
+    objectPrototype.delete_(js, "plantedCppExport"_kj);
+
+    // Frozen: a new property does not stick.
+    js.tryCatch([&] { exportsObj.set(js, "addedCppExport"_kj, planted); }, [](jsg::Value) {});
+    KJ_EXPECT(!exportsObj.has(js, "addedCppExport"_kj, jsg::JsObject::HasOption::OWN));
+  });
+}
+
 KJ_TEST("JsWritableStream serialize of a TypeScript-backed stream requires an RPC serializer") {
   auto fixture = makeTsStreamsFixture();
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
