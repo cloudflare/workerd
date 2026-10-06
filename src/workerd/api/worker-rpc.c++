@@ -3193,8 +3193,7 @@ kj::Exception DeliveredJsRpcExceptionObserver::record(
   markJsRpcExceptionAsDelivered(ioctx, exception);
 
   KJ_IF_SOME(m, metrics) {
-    KJ_IF_SOME(
-        reportingError, kj::runCatchingExceptions([&]() { m->reportFailure(exception); })) {
+    KJ_IF_SOME(reportingError, kj::runCatchingExceptions([&]() { m->reportFailure(exception); })) {
       KJ_LOG(ERROR, "failed to report delivered JSRPC exception", reportingError);
     }
   }
@@ -3298,10 +3297,10 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       kj::Maybe<kj::String> wrapperModule,
       kj::Maybe<kj::Rc<BaseTracer>> tracer,
       bool isDynamicDispatch)
-      : JsRpcTargetBase(
-            ioCtx, CantOutliveIncomingRequest(),
-            kj::rc<DeliveredJsRpcExceptionObserver>(kj::addRef(*metrics), mapAddRef(tracer),
-                ioCtx.getInvocationSpanContext().clone())),
+      : JsRpcTargetBase(ioCtx,
+            CantOutliveIncomingRequest(),
+            kj::rc<DeliveredJsRpcExceptionObserver>(
+                kj::addRef(*metrics), mapAddRef(tracer), ioCtx.getInvocationSpanContext().clone())),
         ioCtx(ioCtx),
         metrics(kj::mv(metrics)),
         // Most of the time we don't really have to clone this but it's hard to fully prove, so
