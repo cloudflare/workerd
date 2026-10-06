@@ -787,7 +787,12 @@ class RetryClaimObserver final: public RequestObserver {
     }
   }
 
+  void reportFailure(const kj::Exception&, FailureSource) override {
+    ++failureCount;
+  }
+
   uint claimCount = 0;
+  uint failureCount = 0;
   IsRetryableHandler retryableAtClaim = IsRetryableHandler::NO;
   kj::String jsEventsAtClaim;
   kj::Maybe<kj::Exception> rejection;
@@ -837,6 +842,7 @@ KJ_TEST("a JSRPC session without calls does not claim") {
   session.wait(fixture.getWaitScope());
 
   KJ_EXPECT(observer->claimCount == 0);
+  KJ_EXPECT(observer->failureCount == 0);
 }
 
 KJ_TEST("calls on a stub returned by the top-level JSRPC call do not claim") {

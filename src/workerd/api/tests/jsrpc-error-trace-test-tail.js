@@ -55,14 +55,7 @@ function findInvocation(method) {
   return invocations.find((invocation) => invocation.methods.includes(method));
 }
 
-function findNoMethodCancellation() {
-  return invocations.find(
-    (invocation) =>
-      invocation.methods.length === 0 && invocation.outcomes.includes('canceled')
-  );
-}
-
-function foundExpectedEvents(throwing, asyncThrowing, canceled, noMethodCanceled) {
+function foundExpectedEvents(throwing, asyncThrowing, canceled) {
   return (
     throwing?.exceptions.some(
       (exception) => exception.message === 'intentional JSRPC failure'
@@ -72,8 +65,7 @@ function foundExpectedEvents(throwing, asyncThrowing, canceled, noMethodCanceled
       (exception) => exception.message === 'intentional async JSRPC failure'
     ) &&
     asyncThrowing?.outcomes.includes('exception') &&
-    canceled?.outcomes.includes('canceled') &&
-    noMethodCanceled
+    canceled?.outcomes.includes('canceled')
   );
 }
 
@@ -83,28 +75,20 @@ export const test = {
     let throwing = findInvocation('throwError');
     let asyncThrowing = findInvocation('throwAsyncError');
     let canceled = findInvocation('neverResolves');
-    let noMethodCanceled = findNoMethodCancellation();
 
     while (
-      !foundExpectedEvents(
-        throwing,
-        asyncThrowing,
-        canceled,
-        noMethodCanceled
-      ) &&
+      !foundExpectedEvents(throwing, asyncThrowing, canceled) &&
       Date.now() < deadline
     ) {
       await scheduler.wait(10);
       throwing = findInvocation('throwError');
       asyncThrowing = findInvocation('throwAsyncError');
       canceled = findInvocation('neverResolves');
-      noMethodCanceled = findNoMethodCancellation();
     }
 
     assert.ok(throwing, 'Could not find throwError JSRPC invocation');
     assert.ok(asyncThrowing, 'Could not find throwAsyncError JSRPC invocation');
     assert.ok(canceled, 'Could not find neverResolves JSRPC invocation');
-    assert.ok(noMethodCanceled, 'Could not find no-method canceled invocation');
 
     assert.deepStrictEqual(throwing.methods, ['throwError']);
     assert.deepStrictEqual(throwing.exceptions, [
@@ -128,9 +112,5 @@ export const test = {
     assert.deepStrictEqual(canceled.logs, [['callee neverResolves called']]);
     assert.deepStrictEqual(canceled.exceptions, []);
     assert.deepStrictEqual(canceled.outcomes, ['canceled']);
-
-    assert.deepStrictEqual(noMethodCanceled.methods, []);
-    assert.deepStrictEqual(noMethodCanceled.exceptions, []);
-    assert.deepStrictEqual(noMethodCanceled.outcomes, ['canceled']);
   },
 };

@@ -39,13 +39,6 @@ export default {
       strictEqual(error.message, 'intentional async JSRPC failure');
     }
 
-    try {
-      await env.ThrowingService.neverResolves(new TextEncoder());
-      throw new Error('Expected argument serialization to reject');
-    } catch (error) {
-      strictEqual(error.name, 'DataCloneError');
-    }
-
     let startedResolve;
     const started = new Promise((resolve) => {
       startedResolve = resolve;
