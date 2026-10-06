@@ -101,6 +101,8 @@ export {
   teeCancelReverseOrder,
   teePullPerRead,
   teeBackpressureFollowsSlowestBranch,
+  teeCancelAfterSiblingDrainedToClose,
+  teeCancelSettlesWhenErroredBranchLeavesAfterClose,
 } from 'tee';
 
 export {

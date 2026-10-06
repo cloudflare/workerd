@@ -25,7 +25,7 @@ behavioral gaps; the reentrancy family is mostly parity at finite hwm.
 | 8 | size() errors stream then throws/returns Infinity | enqueue swallows | enqueue rethrows / RangeError (spec) | `sizeErrorsStreamThenThrows`/`...ReturnsInfinity` |
 | 9 | invalid size() return (NaN/-1) | enqueue returns normally, stream errored (ds null); DEFECT: subsequent read() spins the isolate synchronously (unpinnable) | enqueue throws RangeError 'Invalid chunk size', reads reject same (spec) | `invalidSizeReturnValue` |
 | 10 | queue total-size math | integer-ish: saturates (maxSafeInt shape -2,-1,1,0), fractional sizes truncate to 0; DEFECT: reading a fractional-size chunk spins the isolate | full double-precision per spec (all four WPT shapes), a total rounded below 0 clamped to 0 at each dequeue (a branch's own total for a tee branch), a residue above 0 kept | `queue-math.js` (6 tests) |
-| 11 | tee cancel composite | source cancel gets ONLY the pair-completing branch's reason; first branch's cancel promise fulfills immediately | AggregateError of every branch's reason, in the order they cancelled (identity; intentional divergence from spec's array — tee is N consumers on one queue, the last to leave cancels the source); LONE branch cancel promise PENDS until the other cancels (spec) — never await a lone branch cancel | `teeCancelReasonComposite`, `teeCancelReverseOrder` |
+| 11 | tee cancel composite | source cancel gets ONLY the pair-completing branch's reason; first branch's cancel promise fulfills immediately | AggregateError of every branch's reason, in the order they cancelled (identity; intentional divergence from spec's array — tee is N consumers on one queue, the last to leave cancels the source); LONE branch cancel promise PENDS until the other cancels or the source ends (closes with every other branch drained to the close, or errors; spec) — never await a lone branch cancel on an open source | `teeCancelReasonComposite`, `teeCancelReverseOrder` |
 | 12 | from(string) | iterates per code unit ['h','i'] | single chunk ['hi'] (spec: throws — both diverge from spec) | `fromString` |
 | 13 | async-iterator prototype | exposes constructor + next/return; class string 'ReadableStreamAsyncIterator' (writable) | next/return only; class string 'ReadableStream AsyncIterator' (non-writable; WebIDL) | `iteratorPrototypeShape` |
 | 14 | read() inside size() | in-flight chunk fed DIRECTLY to the reentrant read | chunk queued; the NEXT enqueue bypasses the queue into the reentrant read (spec) — deliveries swapped | `readInsideSize` |
@@ -53,7 +53,8 @@ desiredSize lifecycle (1 → 0 close, null error, 0 cancel) and
 enqueue-skips-queue-with-pending-read; cancel-with-pending-pull; cancel
 reason identity + once; locked-stream cancel rejects without running the
 hook; tee error propagation identity to both branches, tee pull-per-read
-shape, tee backpressure following the slowest branch (a push source
+shape, a branch cancel settling once the others have drained to a
+requested close (no source cancel), tee backpressure following the slowest branch (a push source
 stalls both branches on an idle one; the spec's per-branch queues would
 not), tee after partial read; the tee-reentrancy crash regressions;
 from() cancel plumbing identity through return(), and its iterator
@@ -106,7 +107,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `cancel.js` | reason identity, locked-cancel, hook rejection identity, queue discard |
 | `bad-strategies.js` | ledger #8, #9, size-not-function |
 | `queue-math.js` | ledger #10 (WPT float shapes; a negative residue clamped at dequeue, also per tee branch, and a positive one kept, both spec and Node parity; cpp bounded observables only) |
-| `tee.js` | migrated edge cases + error propagation + cancel composite (#11) + pull-per-read + slowest-branch backpressure |
+| `tee.js` | migrated edge cases + error propagation + cancel composite (#11) + pull-per-read + slowest-branch backpressure + a branch leaving after the close, cancelled or errored through the interop hook (TS only), while the others have drained: a parked cancel settles with undefined and the source is not cancelled (parity) |
 | `tee-reentrancy.js` | the three C++ push-loop crash regressions (from api/streams/streams-test.js) |
 | `from.js` | 11 migrated + fromString (#12) + return validation messages + iterator protocol (next read once, done before value, gets not `has`, objects only, return() lookup; parity) + ArrayBufferView as one chunk (#27) + async-from-sync edges (#28) + sync-path schedule (#29) |
 | `async-iteration.js` | 7 migrated + no-await interleavings + proto shape and class string (#13) + foreign `this` (#25) + first next() pulls synchronously, next() from that pull() (parity) + ongoing-promise interleavings (#22) |
