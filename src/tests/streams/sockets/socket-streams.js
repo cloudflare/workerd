@@ -98,6 +98,34 @@ export const degenerateViewsWithHighWaterMark = {
   },
 };
 
+// With a highWaterMark a string counts the UTF-8 bytes written for it:
+// 2-, 3- and 4-byte sequences, and 3 for each lone surrogate (sent as
+// U+FFFD) (parity).
+export const stringSizesWithHighWaterMark = {
+  async test(ctrl, env) {
+    const socket = connect(echoAddress(env), { highWaterMark: 1024 });
+    const writer = socket.writable.getWriter();
+    const strings = [
+      'hello',
+      'h\u00e9llo',
+      '\u20acuro',
+      'a\u{1f600}b',
+      'a\ud800b',
+      '\udc00',
+    ];
+    let expected = '';
+    for (const str of strings) {
+      const write = writer.write(str);
+      strictEqual(writer.desiredSize, 1024 - enc.encode(str).byteLength, str);
+      await write;
+      expected += str.toWellFormed();
+    }
+    await writer.close();
+    strictEqual(dec.decode(await drainToBytes(socket.readable)), expected);
+    await socket.close();
+  },
+};
+
 // The greet server ends after one message: the readable delivers it
 // and reaches done; the socket's closed promise settles.
 export const greetReadsToEof = {

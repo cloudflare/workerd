@@ -201,6 +201,19 @@ static void AddAbortAlgorithm(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// The exact UTF-8 byte length of a string as TextEncoder encodes it: a lone
+// surrogate counts the 3 bytes of U+FFFD. V8 computes it with simdutf. A plain
+// method rather than a fast-API call, because V8 flattens the string first,
+// which can allocate.
+static void Utf8Length(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    auto str = JSG_REQUIRE_NONNULL(
+        jsg::JsValue(args[0]).tryCast<jsg::JsString>(), TypeError, "utf8Length() expects a string");
+    return js.num(static_cast<double>(str.utf8Length(js)));
+  });
+}
+
 static const v8::CFunction fast_mark_promise_handled_ =
     v8::CFunction::Make(MarkPromiseHandledFastApi);
 
@@ -251,6 +264,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "createDigestContext",
     "createFileSystemWriteContext",
     "addAbortAlgorithm",
+    "utf8Length",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -264,6 +278,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateDigestContext),
     getMethod(js, CreateFileSystemWriteContext),
     getMethod(js, AddAbortAlgorithm),
+    getMethod(js, Utf8Length),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());
