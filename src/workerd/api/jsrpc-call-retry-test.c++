@@ -68,6 +68,7 @@ struct RetryTestState {
   kj::Vector<CountSubrequest> countSubrequests;
   kj::Vector<ActorRetryOutcome> outcomes;
   kj::Vector<ActorCallTargetRetryable> observedTargetRetryability;
+  kj::Vector<ActorRetryCandidate> candidates;
   uint acceptedRetries = 0;
   uint observedRetries = 0;
   uint observedAttempts = 0;
@@ -304,7 +305,8 @@ class RetryObserver final: public RequestObserver {
 
   kj::Maybe<kj::Own<OutgoingActorCallObserver>> observeOutgoingActorRpcCall(
       ActorCallPayloadReplayable payloadReplayable,
-      ActorCallTargetRetryable targetRetryable) override {
+      ActorCallTargetRetryable targetRetryable,
+      kj::Maybe<ActorRetryCandidate>) override {
     KJ_EXPECT(payloadReplayable == state.expectedPayload);
     state.observedTargetRetryability.add(targetRetryable);
     ++state.observedAttempts;
@@ -321,6 +323,12 @@ class RetryObserver final: public RequestObserver {
     KJ_EXPECT(callType == ActorRetryCallType::JSRPC);
     state.outcomes.add(outcome);
     state.replayMemoryBytesAtOutcome = state.replayMemoryBytes;
+  }
+
+  void recordActorRetryCandidate(
+      ActorRetryCallType callType, ActorRetryCandidate candidate) override {
+    KJ_EXPECT(callType == ActorRetryCallType::JSRPC);
+    state.candidates.add(candidate);
   }
 
   kj::Own<void> trackActorCallReplayMemory(size_t bytes) override {
@@ -1794,6 +1802,8 @@ KJ_TEST("replica actor RPC retries a request-level disconnect on its primary cha
   KJ_ASSERT(state.outcomes.size() == 1);
   KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RECOVERED);
   KJ_EXPECT(state.replayMemoryBytes == 0);
+  KJ_ASSERT(state.candidates.size() == 1);
+  KJ_EXPECT(state.candidates[0] == ActorRetryCandidate::REPLICA_PRIMARY);
 }
 
 KJ_TEST("replica actor RPC exhausts default attempts on a broken primary channel") {

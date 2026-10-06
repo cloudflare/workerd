@@ -23,8 +23,9 @@ class RecordingRequestObserver final: public RequestObserver {
  public:
   RecordingRequestObserver(kj::Vector<RetryEligibility>& calls): calls(calls) {}
 
-  void setNextSubrequestRetryEligibility(
-      SubrequestBodyRewindable bodyRewindable, ActorCallTargetRetryable targetRetryable) override {
+  void setNextSubrequestRetryEligibility(SubrequestBodyRewindable bodyRewindable,
+      ActorCallTargetRetryable targetRetryable,
+      kj::Maybe<ActorRetryCandidate>) override {
     calls.add(RetryEligibility{bodyRewindable.toBool(), targetRetryable});
   }
 

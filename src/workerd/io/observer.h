@@ -50,6 +50,33 @@ enum class ActorRetryOutcome : uint8_t {
   OTHER,
 };
 
+// Temporary retry diagnostics: why an actor retry loop that started a retry ended as
+// UNABLE_TO_RETRY.
+enum class ActorRetryStopReason : uint8_t {
+  DELIVERED_DISCONNECT,
+  // Pipeline use committed the call to an attempt before that attempt's retry decision.
+  PIPELINE_COMMITTED_IN_FLIGHT,
+  // Pipeline use committed the call while it waited to retry.
+  PIPELINE_COMMITTED_IN_BACKOFF,
+  NON_DISCONNECT_FAILED,
+  NON_DISCONNECT_OVERLOADED,
+  NON_DISCONNECT_UNIMPLEMENTED,
+};
+
+// Temporary retry diagnostics: logical actor calls that a proposed retry change could affect.
+enum class ActorRetryCandidate : uint8_t {
+  // A proven-not-delivered, otherwise retryable disconnect from a global actor in a multi-replica
+  // namespace, whose stubs don't retry.
+  UNSUPPORTED_MULTI_REPLICA,
+  // As UNSUPPORTED_MULTI_REPLICA, but from a colo-local actor.
+  UNSUPPORTED_COLO_LOCAL,
+  // A disconnect before commitment, not marked delivered, on a replica's stub for its primary,
+  // which retries over its original channel.
+  REPLICA_PRIMARY,
+  // An otherwise retryable first failure that left too little of the retry timeout to retry.
+  FIRST_FAILURE_BUDGET_SPENT,
+};
+
 class WorkerInterface;
 class LimitEnforcer;
 class TimerChannel;
@@ -95,6 +122,10 @@ class OutgoingActorCallObserver {
   virtual void recordFailureAwaitingRetryDecision(kj::Exception& e) {
     recordFailure(e);
   }
+
+  // Temporary retry diagnostics: the attempt waited for the caller's output gate, which has now
+  // cleared. A retry timeout would run from here.
+  virtual void markOutputGateCleared() {}
 };
 
 // Observes a specific request to a specific worker. Also observes outgoing subrequests.
@@ -177,16 +208,21 @@ class RequestObserver: public kj::Refcounted {
   // target supports runtime retries. Consumed when the subrequest client for that call is
   // constructed. The set->consume window is synchronous, so the values correspond to the next
   // call. No-op in the base observer; edgeworker overrides it to feed retry classification.
-  virtual void setNextSubrequestRetryEligibility(
-      SubrequestBodyRewindable bodyRewindable, ActorCallTargetRetryable targetRetryable) {}
+  // `probeCandidate` is the target's ActorRetryCandidate, for temporary retry diagnostics.
+  virtual void setNextSubrequestRetryEligibility(SubrequestBodyRewindable bodyRewindable,
+      ActorCallTargetRetryable targetRetryable,
+      kj::Maybe<ActorRetryCandidate> probeCandidate) {}
 
   // Observes one `JsRpcTarget.call()` attempt on a Durable Object stub. The session carrying the
   // call is not observed through wrapActorSubrequestClient(); its lifetime ends with capability
   // teardown rather than with the call's result, so it says nothing about call latency or outcome.
   // `payloadReplayable` is the call's serialized-argument classification; `targetRetryable` is
-  // whether the stub's factory can retry at all.
+  // whether the stub's factory can retry at all; `probeCandidate` is as for
+  // setNextSubrequestRetryEligibility().
   virtual kj::Maybe<kj::Own<OutgoingActorCallObserver>> observeOutgoingActorRpcCall(
-      ActorCallPayloadReplayable payloadReplayable, ActorCallTargetRetryable targetRetryable) {
+      ActorCallPayloadReplayable payloadReplayable,
+      ActorCallTargetRetryable targetRetryable,
+      kj::Maybe<ActorRetryCandidate> probeCandidate) {
     return kj::none;
   }
 
@@ -208,6 +244,18 @@ class RequestObserver: public kj::Refcounted {
   // least one retry attempt.
   virtual void recordActorRetryOutcome(
       ActorRetryCallType callType, ActorRetryOutcome outcome, kj::Duration retryAddedLatency) {}
+
+  // Temporary retry diagnostics. Each is recorded at most once per logical call.
+  //
+  // Why a retry loop recorded as UNABLE_TO_RETRY by recordActorRetryOutcome() stopped.
+  virtual void recordActorRetryStopReason(
+      ActorRetryCallType callType, ActorRetryStopReason reason) {}
+  // Time from the start of a call recorded as ATTEMPTS_EXHAUSTED until it was exhausted.
+  virtual void recordActorRetryAttemptsExhausted(
+      ActorRetryCallType callType, kj::Duration elapsed) {}
+  // A call that counts toward `candidate`. A call may count toward more than one candidate.
+  virtual void recordActorRetryCandidate(
+      ActorRetryCallType callType, ActorRetryCandidate candidate) {}
 
   // Fired after actor construction and immediately before user code handles the request, so an
   // observer can claim the request's retry-token nonce and throw to reject it. For fetch, that is
