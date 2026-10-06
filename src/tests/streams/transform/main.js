@@ -51,6 +51,7 @@ export {
   asyncErrorDuringFlush,
   errorInTransformFlush,
   errorNoopAfterTransformThrow,
+  enqueueAfterCloseRequestedLeavesWritable,
 } from 'error-propagation';
 
 export {

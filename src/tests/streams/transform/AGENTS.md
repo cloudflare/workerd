@@ -80,7 +80,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `api-surface.js` | transform globals; controller not constructable; bare ctor is standard pass-through, not ITS |
 | `construction.js` | ledger #5, #6, #9 |
 | `transformer-algorithms.js` | ledger #17; start/transform/flush ordering, async hooks, chunk-type freedom; hook shape + prototype-chain (parity) |
-| `error-propagation.js` | sync/async start/transform/flush error fan-out across writes/close/readable (#1); controller.error() rejects reads; error() no-op after hook throw (parity, identity) |
+| `error-propagation.js` | sync/async start/transform/flush error fan-out across writes/close/readable (#1); controller.error() rejects reads; error() no-op after hook throw (parity, identity); enqueue() once flush() has settled throws TypeError and leaves the writable's close untouched (parity) |
 | `backpressure.js` | writable desiredSize through the transform; dual strategies; default readable hwm 0; latch + racy release (#8); a parked write released by a read transforms even when a same-turn enqueue re-asserts backpressure (parity at hwm 0; #14 at hwm 1) or rejects when the turn also errors the controller (#15) |
 | `cancel-matrix.js` | cancel-hook reason/identity/once (parity) + fan-out, sync (parity) and async (#3) |
 | `cancel-outcomes.js` | readable.cancel() outcome with a same-turn abort, terminate(), size() error or close, hooks and zero-hook path (#16); a write reaching the sink after a same-turn cancel cleared the algorithms (#19) |

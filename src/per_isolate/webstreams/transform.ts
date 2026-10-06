@@ -285,13 +285,12 @@ class TransformStream<I = unknown, O = unknown> {
         throw new TypeError('TransformStream is not fully initialized');
       }
       // Spec TransformStreamDefaultControllerEnqueue step 4:
-      // if ReadableStreamDefaultControllerCanCloseOrEnqueue is false,
-      // throw a TypeError.  This pre-check must happen BEFORE we attempt
-      // the enqueue, so that enqueue-after-error throws TypeError (not
-      // the storedError).  The readable controller's own enqueue() does
-      // the same check internally; the pre-check here ensures the
-      // try/catch below only catches size()-originated errors.
-      if (readableInternals.getState(stream.#readable) !== 'readable') {
+      // if ReadableStreamDefaultControllerCanCloseOrEnqueue is false
+      // (close requested, or the readable no longer readable), throw a
+      // TypeError.  The readable controller's own enqueue() makes the
+      // same check, but its TypeError would land in the catch below,
+      // which treats every error as size()'s and errors the writable.
+      if (!readableInternals.canCloseOrEnqueue(readableController)) {
         throw new TypeError(
           'Cannot enqueue a chunk into a stream that is closed or has been errored'
         );
