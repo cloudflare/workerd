@@ -276,7 +276,8 @@ export const fromReturnValidationMessages = {
 };
 
 // The iterator's `next` is read once, when from() opens the iterator, and
-// called without arguments on every pull.
+// called without arguments on every pull. With a high-water mark of 0,
+// nothing calls it before the first read, at from() or once started.
 export const fromReadsNextOnce = {
   async test() {
     for (const kind of ['async', 'sync']) {
@@ -300,6 +301,9 @@ export const fromReadsNextOnce = {
         },
       });
       strictEqual(nextReads, 1, kind);
+      deepStrictEqual(argCounts, [], kind);
+      await scheduler.wait(0);
+      deepStrictEqual(argCounts, [], kind);
       deepStrictEqual(await drainToArray(rs), [0, 1, 2], kind);
       strictEqual(nextReads, 1, kind);
       deepStrictEqual(argCounts, [0, 0, 0, 0], kind);
