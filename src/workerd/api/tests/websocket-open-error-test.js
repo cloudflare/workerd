@@ -2,28 +2,19 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Regression test: once a client WebSocket's 'open' listener throws, the native kj::WebSocket
-// must not be released while the read loop can still use it.
+// A throwing client WebSocket 'open' listener closes the incoming side while the read loop
+// may still be running. Releasing the native connection must stop that loop safely, and
+// cleanup must not depend on the peer disconnecting TCP.
 //
-// internalAccept() starts the read loop and then dispatches 'open'. If an 'open' listener
-// throws, the error path sets `closedIncoming = true` even though the read loop is still
-// running. The whenAborted() task treats `closedIncoming && !isPumping` as proof that the read
-// loop is done with the socket and destroys it. The read loop holds a raw reference to that
-// socket.
+// The abort test holds a Durable Object's input gate while the peer replies and then resets
+// TCP during an outgoing write. The read loop waits in IoContext::run() while the native
+// connection is released; when the gate opens, it must discard the reply without touching
+// the released socket.
 //
-// The test builds the following sequence inside a Durable Object:
-//
-// 1. The 'open' listener queues a small and a large message, which sets `isPumping`, so the
-//    error path's reportError() does not release the socket right away. It then closes the
-//    input gate with blockConcurrencyWhile() and throws.
-// 2. The server reads the small message, stops reading, and replies. The read loop's
-//    receive() completes, and the read loop waits in IoContext::run() for the input gate.
-// 3. The server resets the connection while the large message is still being written. The
-//    pump fails (`isPumping` becomes false), the network side drops its end of the
-//    connection, and whenAborted() fires. The abort task destroys the native socket.
-// 4. The input gate opens. The read loop delivers the message and calls receive() on the
-//    destroyed socket. Without a fix, ASAN reports heap-use-after-free in
-//    LegacyWebSocketAdapter::readLoop().
+// The Close and silent-peer tests let outgoing writes finish and leave TCP open at the peer.
+// They check that workerd releases the connection without waiting for a peer disconnect or
+// context teardown. With a silent peer, the read loop's receive() is still pending when the
+// connection is released, so the release must cancel it.
 
 import assert from 'node:assert';
 
@@ -73,6 +64,54 @@ export class OpenErrorClient {
     return Response.json({ events, readyState: ws.readyState });
   }
 }
+
+async function expectReleaseWhilePeerKeepsTcpOpen(env, path, closeSent) {
+  const origin = `${env.SIDECAR_HOSTNAME}:${env.OPEN_ERROR_SERVER_PORT}`;
+  const id = crypto.randomUUID();
+  const ws = new WebSocket(`ws://${origin}${path}?id=${id}`);
+  const events = [];
+  const closed = new Promise((resolve) => {
+    ws.addEventListener('open', () => {
+      events.push('open');
+      // The pump is still active when the listener throws, so the error path cannot release
+      // the native socket until the pump finishes.
+      ws.send('ping');
+      throw new Error('expected error thrown from open listener');
+    });
+    ws.addEventListener('message', () => {
+      events.push('message');
+    });
+    ws.addEventListener('error', () => {
+      events.push('error');
+    });
+    ws.addEventListener('close', (event) => {
+      events.push(`close:${event.code}`);
+      resolve();
+    });
+  });
+
+  await closed;
+  // The JS close event alone does not prove release. Keep this context alive until the
+  // sidecar observes workerd initiating TCP shutdown.
+  const response = await fetch(`http://${origin}/closed?id=${id}`);
+  const result = await response.json();
+  assert.strictEqual(response.status, 200, JSON.stringify(result));
+  assert.deepStrictEqual(result, { closed: true, closeSent });
+  assert.strictEqual(ws.readyState, WebSocket.CLOSED);
+  assert.deepStrictEqual(events, ['open', 'error', 'close:1006']);
+}
+
+export const openListenerThrowsThenPeerCloses = {
+  async test(controller, env) {
+    await expectReleaseWhilePeerKeepsTcpOpen(env, '/peer-close', true);
+  },
+};
+
+export const openListenerThrowsThenPeerIsSilent = {
+  async test(controller, env) {
+    await expectReleaseWhilePeerKeepsTcpOpen(env, '/peer-silent', false);
+  },
+};
 
 export const openListenerThrowsThenPeerAborts = {
   async test(controller, env) {

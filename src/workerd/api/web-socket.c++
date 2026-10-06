@@ -1522,24 +1522,27 @@ void LegacyWebSocketAdapter::reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue>
         js.alloc<ErrorEvent>(
             ErrorEvent::ErrorEventInit{.message = kj::mv(msg), .error = kj::mv(err)}),
         EventTarget::effectiveExceptionPolicy(js, EventTarget::DispatchExceptionPolicy::REPORT));
+  }
 
-    // After an error we don't allow further send()s. If the receive loop has also ended then we
-    // can destroy the connection. Note that we don't set closedOutgoing = true because that flag
-    // is specifically to indicate that `close()` has been called, and it causes `send()` to throw
-    // an exception complaining specifically that `close()` was called, which would be
-    // inappropriate in this case.
-    auto& native = *farNative;
-    native.outgoingAborted = true;
-    if (native.closedIncoming && !native.isPumping) {
-      KJ_IF_SOME(pending, native.state.tryGet<AwaitingConnection>()) {
-        // Nothing worth canceling if we're reporting an error from the connection establishment
-        // continuations.
-        pending.canceler.release();
-      }
-
-      // We're no longer pumping so let's make sure we release the native connection here.
-      native.state.init<Released>();
+  // After an error we don't allow further send()s. If the receive loop has also ended then we
+  // can destroy the connection. Note that we don't set closedOutgoing = true because that flag
+  // is specifically to indicate that `close()` has been called, and it causes `send()` to throw
+  // an exception complaining specifically that `close()` was called, which would be
+  // inappropriate in this case.
+  //
+  // This runs on every call, not just the first: the outgoing pump may have finished since the
+  // error was first reported. Releasing Accepted also cancels any pending receive().
+  auto& native = *farNative;
+  native.outgoingAborted = true;
+  if (native.closedIncoming && !native.isPumping) {
+    KJ_IF_SOME(pending, native.state.tryGet<AwaitingConnection>()) {
+      // Nothing worth canceling if we're reporting an error from the connection establishment
+      // continuations.
+      pending.canceler.release();
     }
+
+    // We're no longer pumping so let's make sure we release the native connection here.
+    native.state.init<Released>();
   }
 }
 
