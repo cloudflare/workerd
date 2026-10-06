@@ -55,6 +55,10 @@ function findInvocation(method) {
   return invocations.find((invocation) => invocation.methods.includes(method));
 }
 
+function invocationsFor(method) {
+  return invocations.filter((invocation) => invocation.methods.includes(method));
+}
+
 function foundExpectedEvents(throwing, asyncThrowing, pending) {
   return (
     throwing?.exceptions.some(
@@ -89,6 +93,10 @@ export const test = {
     assert.ok(throwing, 'Could not find throwError JSRPC invocation');
     assert.ok(asyncThrowing, 'Could not find throwAsyncError JSRPC invocation');
     assert.ok(pending, 'Could not find neverResolves JSRPC invocation');
+    assert.strictEqual(invocations.length, 3, 'Expected exactly three callee invocations');
+    assert.strictEqual(invocationsFor('throwError').length, 1);
+    assert.strictEqual(invocationsFor('throwAsyncError').length, 1);
+    assert.strictEqual(invocationsFor('neverResolves').length, 1);
 
     assert.deepStrictEqual(throwing.methods, ['throwError']);
     assert.deepStrictEqual(throwing.exceptions, [

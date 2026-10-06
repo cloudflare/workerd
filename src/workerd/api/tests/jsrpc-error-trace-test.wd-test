@@ -15,7 +15,9 @@ const mainWorker :Workerd.Worker = (
   ],
   compatibilityFlags = ["nodejs_compat", "experimental", "rpc", "enhanced_error_serialization"],
   bindings = [
-    (name = "ThrowingService", service = (name = "jsrpc-error-trace-test", entrypoint = "ThrowingService")),
+    (name = "SyncThrowingService", service = (name = "jsrpc-error-trace-test", entrypoint = "ThrowingService")),
+    (name = "AsyncThrowingService", service = (name = "jsrpc-error-trace-test", entrypoint = "ThrowingService")),
+    (name = "PendingService", service = (name = "jsrpc-error-trace-test", entrypoint = "ThrowingService")),
   ],
   streamingTails = ["tail"],
 );

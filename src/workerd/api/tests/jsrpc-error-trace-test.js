@@ -26,14 +26,14 @@ export class ThrowingService extends WorkerEntrypoint {
 export default {
   async test(_controller, env, _ctx) {
     try {
-      await env.ThrowingService.throwError();
+      await env.SyncThrowingService.throwError();
       throw new Error('Expected throwError() to reject');
     } catch (error) {
       strictEqual(error.message, 'intentional JSRPC failure');
     }
 
     try {
-      await env.ThrowingService.throwAsyncError();
+      await env.AsyncThrowingService.throwAsyncError();
       throw new Error('Expected throwAsyncError() to reject');
     } catch (error) {
       strictEqual(error.message, 'intentional async JSRPC failure');
@@ -43,7 +43,7 @@ export default {
     const started = new Promise((resolve) => {
       startedResolve = resolve;
     });
-    const pending = env.ThrowingService.neverResolves(() => startedResolve());
+    const pending = env.PendingService.neverResolves(() => startedResolve());
     pending.catch(() => {});
     await started;
   },
