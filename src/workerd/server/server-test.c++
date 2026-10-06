@@ -7828,6 +7828,7 @@ KJ_TEST("Server: structured logging with console methods") {
   });
 }
 
+#ifdef WORKERD_USE_TRANSPILER
 KJ_TEST("Server: transpiled typescript") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2025-08-01",
@@ -7872,6 +7873,7 @@ KJ_TEST("Server: transpiled typescript failure") {
 service hello: Uncaught TypeError: Main module must be an ES module.
 )");
 }
+#endif  // defined(WORKERD_USE_TRANSPILER)
 
 #endif  // __linux__
 
