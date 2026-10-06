@@ -670,7 +670,8 @@ WritableStreamNativeSink::WritableStreamNativeSink(IoContext& ioContext,
     kj::Own<WritableStreamSink> sink,
     kj::Maybe<kj::Own<ByteStreamObserver>> observer,
     kj::Maybe<jsg::Promise<void>> maybeClosureWaitable)
-    : state(Active{.sink = ioContext.addObject(kj::mv(sink))}),
+    : state(Active{.sink = ioContext.addObject(kj::mv(sink)),
+        .canceler = ioContext.addObject(kj::heap<kj::Canceler>())}),
       observer(kj::mv(observer)),
       maybeClosureWaitable(kj::mv(maybeClosureWaitable)) {}
 
@@ -732,9 +733,10 @@ jsg::Promise<void> WritableStreamNativeSink::write(
       // observable while an output lock is pending, exactly like the legacy internal
       // controller, which stores an output lock with every queued write event and awaits
       // it before touching the sink. The sink reference taken here stays valid for the
-      // whole wait+write window: writeInFlight defers any abort()/detach() release to the
-      // write's settlement, and pipeFrom() refuses to move the sink while it is set. The
-      // write's I/O runs outside the isolate lock; the copied bytes ride the promise.
+      // whole wait+write window: writeInFlight defers any abort() release to the write's
+      // settlement, detach() cancels the wrapped wait+write before it releases the sink,
+      // and pipeFrom() refuses to move the sink while it is set. The write's I/O runs
+      // outside the isolate lock; the copied bytes ride the promise.
       kj::Promise<void> promise = nullptr;
       KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
         promise = lock.then([&sink = *active.sink, data = kj::mv(data)]() mutable {
@@ -743,6 +745,7 @@ jsg::Promise<void> WritableStreamNativeSink::write(
       } else {
         promise = active.sink->write(data.asPtr()).attach(kj::mv(data));
       }
+      promise = active.canceler->wrap(kj::mv(promise));
       return ioContext
           .awaitIo(js, kj::mv(promise), [self = JSG_THIS, len](jsg::Lock& js) mutable {
         self->writeInFlight = false;
@@ -851,20 +854,23 @@ jsg::Promise<void> WritableStreamNativeSink::abort(
   return js.resolvedPromise();
 }
 
-void WritableStreamNativeSink::detach(jsg::Lock& js) {
-  if (writeInFlight) {
-    // releaseLock() does not wait for pending writes, so a write can genuinely be in
-    // flight when detach is called. Defer the sink release to the write's settlement
-    // (same mechanism as abort). Queued-but-not-yet-dispatched writes that arrive after
-    // detach resolve successfully against the released sink (silent data drop); this
-    // matches the legacy controller's detach behavior.
-    pendingAbort = true;
-  } else {
-    state = kj::none;
+jsg::JsValue WritableStreamNativeSink::detach(jsg::Lock& js) {
+  // The legacy controller's detach destroys its Writable, whose canceler rejects the
+  // in-flight write with this exception; the write's rejection then rejects every queued
+  // write with the same JS error.
+  auto exception = KJ_EXCEPTION(DISCONNECTED, "operation canceled");
+  KJ_IF_SOME(active, state) {
+    // releaseLock() does not wait for pending writes, so a write can genuinely be in flight
+    // here. Cancel its I/O: the connection now belongs to the takeover. The write hook's
+    // promise rejects later, when the stream is already closed and ignores it.
+    active.canceler->cancel(exception);
   }
+  state = kj::none;
+  pendingAbort = false;
   // The stream is permanently locked after detach, so close() can never be dispatched
   // again; drop the closure waitable's promise ref eagerly.
   maybeClosureWaitable = kj::none;
+  return jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js));
 }
 
 jsg::Promise<void> WritableStreamNativeSink::pipeFrom(

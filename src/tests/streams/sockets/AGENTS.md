@@ -9,13 +9,18 @@ starttls-*); this suite owns the STREAMS interaction only.
 
 ## Infrastructure
 
-A node sidecar (echo-server.js) runs two TCP servers, their ports
+A node sidecar (echo-server.js) runs three TCP servers, their ports
 delivered through `fromEnvironment` bindings (`STREAMS_ECHO_PORT`,
-`STREAMS_GREET_PORT`, plus `SIDECAR_HOSTNAME`):
+`STREAMS_GREET_PORT`, `STREAMS_STALL_PORT`, plus `SIDECAR_HOSTNAME`):
 
 - **echo**: echoes every byte; on client half-close, flushes and ends
   (the client's readable reaches EOF after the full echo).
 - **greet**: writes one fixed message and ends immediately.
+- **stall**: accepts and never reads, so a large write stays in flight.
+
+`startTls()` detaches a socket's streams. The suite's network has no TLS
+starter, so the upgraded socket then fails to open (logged as an
+uncaught rejection); the detach itself has already happened.
 
 Both cells need `experimental` (Socket) and an `internet` network
 service allowing `private`. The suite's `.wd-test` files take no
@@ -43,4 +48,6 @@ under C++, while TypeScript resolves the read done.
 | `pipeBehindUnawaitedWrite` | header write not awaited, writer released, Response body piped in: echo is header then body; both endpoints unlocked after the pipe |
 | `pipeBehindWriteBeforeStart` | the same within connect()'s turn, with the header still queued before the writable starts |
 | `cancelReadableSettlesSocket` | reader.cancel settles a pending peer read (C++ rejects; TS resolves done), then socket.close()/closed settle |
+| `detachRejectsPendingWrites` | writes pending at startTls()'s detach (one in flight to the stall server, two queued) all reject with the same `Network connection lost.` error; the writable stays locked and (TS, via the interop closed-promise) is closed |
+| `detachClosesIdleWritable` | startTls() with nothing pending: the writable is locked and (TS) closed at the detach |
 | `largeEchoVolume` | 256 KiB continuous pattern, concurrent producer/consumer, byte-exact |

@@ -1086,6 +1086,49 @@ KJ_TEST("JsWritableStream detach TS arm neutralizes and enforces preconditions")
   KJ_EXPECT(!state.aborted);
 }
 
+KJ_TEST("JsWritableStream detach TS arm cancels an in-flight write and rejects pending writes") {
+  auto fixture = makeTsStreamsFixture();
+  kj::Vector<kj::byte> written;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> gate;
+  // Observed by continuations that run after the runInIoContext body has returned.
+  kj::Vector<kj::String> outcomes;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // Two writes through a released writer: the first reaches the gated sink and stays in
+    // flight, the second is queued behind it.
+    auto stream =
+        JsWritableStream::create(js, env.context, kj::heap<GatedSink>(written, gate), kj::none);
+    for (const auto& chunk: {"a"_kjb, "b"_kjb}) {
+      stream.writeForTest(js, jsg::JsValue(jsg::JsUint8Array::create(js, chunk)))
+          .then(js, [&outcomes](jsg::Lock& js) { outcomes.add(kj::str("fulfilled")); },
+              [&outcomes](jsg::Lock& js, jsg::Value error) {
+        outcomes.add(kj::str(jsg::JsValue(error.getHandle(js))));
+      }).markAsHandled(js);
+    }
+
+    // A KJ roundtrip drains the microtask queue, so by the continuation the first write is
+    // in flight. The detach cancels its I/O (the gate's promise is dropped) and rejects
+    // both writes with the disconnect error; a second roundtrip lets the rejections land.
+    auto sequence = env.context
+                        .awaitIo(js, kj::Promise<void>(kj::READY_NOW),
+                            [&written, &gate, stream = kj::mv(stream)](jsg::Lock& js) mutable {
+      KJ_EXPECT(written.asPtr() == "a"_kjb);
+      KJ_EXPECT(KJ_ASSERT_NONNULL(gate)->isWaiting());
+      stream.detach(js);
+      KJ_EXPECT(!KJ_ASSERT_NONNULL(gate)->isWaiting());
+    }).then(js, [](jsg::Lock& js) {
+      return IoContext::current().awaitIo(js, kj::Promise<void>(kj::READY_NOW));
+    });
+    return env.context.awaitJs(js, kj::mv(sequence));
+  });
+  KJ_EXPECT(written.asPtr() == "a"_kjb);
+  KJ_ASSERT(outcomes.size() == 2, outcomes.size());
+  for (auto& outcome: outcomes) {
+    KJ_EXPECT(outcome == "Error: Network connection lost.", outcome);
+  }
+}
+
 KJ_TEST("JsWritableStream detach TS arm: closed and errored streams throw") {
   auto fixture = makeTsStreamsFixture();
   SinkState state;

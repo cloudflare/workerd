@@ -374,12 +374,15 @@ class WritableStreamNativeSink final: public jsg::Object {
 
   // The C++ half of JsWritableStream::detach()'s TS arm, called by the TypeScript
   // detachWritableStream just before it drops its reference to this object: releases the
-  // owned sink WITHOUT ending or aborting it -- the underlying connection is being taken
-  // over by other code (e.g. Socket startTls / takeConnectionStream) -- matching the
-  // legacy controller's detach, which drops its sink outright. Without this, the
-  // controller's stored hook algorithms (which close over this object) would keep the
-  // taken-over connection's sink alive until the stream is GC'd.
-  void detach(jsg::Lock& js);
+  // owned sink at once, WITHOUT ending or aborting it -- the underlying connection is being
+  // taken over by other code (e.g. Socket startTls / takeConnectionStream) -- and cancels a
+  // write whose I/O is in flight, so nothing else writes to the taken-over connection. This
+  // matches the legacy controller's detach, whose Writable (sink and canceler) is destroyed
+  // outright. Without the release, the controller's stored hook algorithms (which close
+  // over this object) would keep the sink alive until the stream is GC'd. Returns the
+  // DISCONNECTED error the legacy detach rejects pending writes with ("Network connection
+  // lost."); detachWritableStream rejects the stream's in-flight and queued writes with it.
+  jsg::JsValue detach(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(WritableStreamNativeSink) {
     JSG_PRIVATE_SYMBOL(kNativeSink);
@@ -399,6 +402,9 @@ class WritableStreamNativeSink final: public jsg::Object {
  private:
   struct Active {
     IoOwn<WritableStreamSink> sink;
+    // Wraps a write's I/O so that detach() can cancel it. Declared after `sink`, so it is
+    // destroyed first: the wrapped write references the sink.
+    IoOwn<kj::Canceler> canceler;
   };
 
   // Ends the sink and releases it (the post-waitable phase of close()).
@@ -418,8 +424,8 @@ class WritableStreamNativeSink final: public jsg::Object {
 
   // True while a write's I/O is outstanding (including while parked on the actor output
   // gate). The TS machinery serializes sink operations, so a write or close arriving
-  // meanwhile is a contract violation, and abort() and detach() defer the sink's release
-  // to the write's settlement. pipeFrom() extraction bypasses the sink-hook serialization
+  // meanwhile is a contract violation, abort() defers the sink's release to the write's
+  // settlement, and detach() cancels the write before releasing it. pipeFrom() extraction bypasses the sink-hook serialization
   // (the TS pipe dispatch routes destinations with a write queued or in flight to the JS
   // pump, but the sink's preconditions must not depend on that gate), and the in-flight
   // write references the sink, so moving it into a pump would be a use-after-free.

@@ -357,6 +357,85 @@ export const cancelReadableSettlesSocket = {
   },
 };
 
+// startTls() detaches the socket's streams once the writable's flush
+// settles. (A plain workerd network has no TLS starter, so the upgraded
+// socket fails to open, but only after the detach.)
+function startTlsIgnoringUpgrade(socket) {
+  const tls = socket.startTls();
+  tls.opened.catch(() => {});
+  tls.closed.catch(() => {});
+  return tls;
+}
+
+// DETACH WITH WRITES PENDING: writes made after startTls() through a
+// writer released before the flush settles are still pending at the
+// detach: one in flight (8 MiB to a server that never reads) and two
+// queued. The detach closes the writable, leaves it locked, and rejects
+// all three with the same disconnect error; none of them completes on
+// the connection the upgrade takes over.
+export const detachRejectsPendingWrites = {
+  async test(ctrl, env) {
+    const socket = connect(
+      `${env.SIDECAR_HOSTNAME}:${env.STREAMS_STALL_PORT}`,
+      {
+        secureTransport: 'starttls',
+      }
+    );
+    await socket.opened;
+    const tls = startTlsIgnoringUpgrade(socket);
+    const writer = socket.writable.getWriter();
+    const writes = [
+      writer.write(new Uint8Array(8 * 1024 * 1024)),
+      writer.write(enc.encode('a')),
+      writer.write(enc.encode('b')),
+    ];
+    writer.releaseLock();
+    const reasons = await Promise.race([
+      Promise.all(
+        writes.map((p) =>
+          p.then(
+            () => 'fulfilled',
+            (e) => e
+          )
+        )
+      ),
+      scheduler.wait(10_000).then(() => 'unsettled'),
+    ]);
+    ok(Array.isArray(reasons), 'pending writes settle');
+    for (const reason of reasons) {
+      ok(reason instanceof Error, String(reason));
+      strictEqual(reason.message, 'Network connection lost.');
+    }
+    strictEqual(reasons[1], reasons[0]);
+    strictEqual(reasons[2], reasons[0]);
+    await socket.closed;
+    strictEqual(socket.writable.locked, true);
+    if (usingTsImpl) {
+      await socket.writable[kIsClosedPromise].promise;
+    }
+    await tls.close();
+  },
+};
+
+// DETACH WITH NOTHING PENDING: the writable is closed and locked.
+export const detachClosesIdleWritable = {
+  async test(ctrl, env) {
+    const socket = connect(echoAddress(env), { secureTransport: 'starttls' });
+    await socket.opened;
+    const tls = startTlsIgnoringUpgrade(socket);
+    await socket.closed;
+    strictEqual(socket.writable.locked, true);
+    if (usingTsImpl) {
+      const closed = await Promise.race([
+        socket.writable[kIsClosedPromise].promise.then(() => 'closed'),
+        scheduler.wait(100).then(() => 'pending'),
+      ]);
+      strictEqual(closed, 'closed');
+    }
+    await tls.close();
+  },
+};
+
 // VOLUME: 256 KiB patterned bytes through the echo, concurrent
 // producer/consumer, byte-exact.
 export const largeEchoVolume = {
