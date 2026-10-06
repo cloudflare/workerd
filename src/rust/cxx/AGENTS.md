@@ -50,6 +50,9 @@ Bazel module, Cargo workspace, toolchain configuration, or external `workerd-cxx
 - Follow the parent `src/rust/AGENTS.md` and repository `AGENTS.md`.
 - Prefer KJ C++ types over STL types unless required by the cxx ABI.
 - Preserve cancellation when converting between KJ promises and Rust futures.
+- An async bridge function that borrows its arguments is written `async fn f(x: &T)` in either
+  direction, safe and with elided lifetimes; the bridge binds the future to the borrows. Do not
+  add `unsafe`, explicit lifetimes, or a wrapper function for them (see `src/rust/AGENTS.md`).
 - Every unsafe Rust block needs a `// Safety:` explanation.
 - `KjOwn<T>` requires `T: kj_rs::OwnTarget`, generated per bridge for every declared type held in
   a `KjOwn` (see `kj-rs/README.md`). A type that is only aliased into a bridge gets no

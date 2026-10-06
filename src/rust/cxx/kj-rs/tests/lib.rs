@@ -69,6 +69,8 @@ pub mod ffi {
 
         async fn new_errored_promise_void();
         async fn new_ready_promise_i32(value: i32) -> i32;
+        /// Reads `value` when the promise is polled; the future borrows it.
+        async fn new_ready_promise_i32_ref(value: &i32) -> i32;
         async fn new_ready_promise_shared_type() -> Shared;
 
         // Cancellation testing helpers.
@@ -323,7 +325,10 @@ pub mod ffi {
         async fn new_ready_future_i32(value: i32) -> Result<i32>;
         async fn new_pass_through_feature_shared() -> Shared;
 
-        async unsafe fn work_before_poll<'a>(target: &'a mut u64) -> Result<()>;
+        async fn work_before_poll(target: &mut u64) -> Result<()>;
+        /// Awaits `new_ready_promise_i32_ref` on a borrowed value: a borrowed argument crossing
+        /// both directions of the bridge.
+        async fn pass_through_borrowed(value: &i32) -> Result<i32>;
 
         // Cancellation test helpers.
         async fn new_future_awaiting_cancellable_promise() -> Result<()>;
@@ -339,8 +344,30 @@ pub mod ffi {
     // these are used to check compilation only
     extern "Rust" {
 
-        async unsafe fn lifetime_arg_void<'a>(buf: &'a [u8]);
-        async unsafe fn lifetime_arg_result<'a>(buf: &'a [u8]) -> Result<()>;
+        async fn lifetime_arg_void(buf: &[u8]);
+        async fn lifetime_arg_result<'a>(buf: &'a [u8], tail: &'a [u8]) -> Result<()>;
+    }
+
+    // Every spelling of a borrowing async method the bridge accepts. The `unsafe fn ... <'a>`
+    // forms are how such methods were declared before lifetimes could be elided; they keep
+    // compiling unchanged.
+    extern "Rust" {
+        type Borrower;
+
+        #[expect(clippy::unnecessary_box_returns)]
+        fn new_borrower(value: u64) -> Box<Borrower>;
+
+        /// One named lifetime on `self` only.
+        async unsafe fn named_lifetime_self<'a>(self: &'a Borrower, delta: u64) -> Result<u64>;
+        /// One named lifetime shared by `self` and an argument.
+        async unsafe fn named_lifetime_self_and_arg<'a>(
+            self: &'a Borrower,
+            text: &'a str,
+        ) -> Result<u64>;
+        /// A typed receiver and an argument, both elided.
+        async fn elided_self(self: &Borrower, text: &str) -> Result<u64>;
+        /// The `&self` shorthand, elided, on an infallible future.
+        async fn elided_self_shorthand(&self, delta: u64) -> u64;
     }
 
     struct StructWithMaybe {
@@ -349,7 +376,7 @@ pub mod ffi {
     }
 
     extern "Rust" {
-        async unsafe fn pass_struct_with_maybe(x: StructWithMaybe) -> Result<()>;
+        async fn pass_struct_with_maybe(x: StructWithMaybe) -> Result<()>;
     }
 }
 
@@ -383,10 +410,43 @@ pub fn take_second_base(own: KjOwn<ffi::SecondBase>) {
     std::mem::drop(own);
 }
 
-pub async fn lifetime_arg_void<'a>(_buf: &'a [u8]) {}
+pub async fn lifetime_arg_void(_buf: &[u8]) {}
 
-pub async fn lifetime_arg_result<'a>(_buf: &'a [u8]) -> Result<()> {
+pub async fn lifetime_arg_result(buf: &[u8], tail: &[u8]) -> Result<()> {
+    assert_eq!(buf.len(), tail.len());
     Ok(())
+}
+
+pub struct Borrower {
+    value: u64,
+}
+
+pub fn new_borrower(value: u64) -> Box<Borrower> {
+    Box::new(Borrower { value })
+}
+
+impl Borrower {
+    pub async fn named_lifetime_self(&self, delta: u64) -> Result<u64> {
+        Ok(self.value + delta)
+    }
+
+    pub async fn named_lifetime_self_and_arg(&self, text: &str) -> Result<u64> {
+        Ok(self.value + text.len() as u64)
+    }
+
+    pub async fn elided_self(&self, text: &str) -> Result<u64> {
+        Ok(self.value + text.len() as u64)
+    }
+
+    pub async fn elided_self_shorthand(&self, delta: u64) -> u64 {
+        self.value + delta
+    }
+}
+
+pub async fn pass_through_borrowed(value: &i32) -> Result<i32> {
+    ffi::new_ready_promise_i32_ref(value)
+        .await
+        .map_err(std::io::Error::other)
 }
 
 /// # Panics
@@ -419,6 +479,7 @@ mod tests {
         // These promises can't be driven by the Rust side, so just check that they compile.
         drop(ffi::new_ready_promise_void());
         drop(ffi::new_ready_promise_i32(42));
+        drop(ffi::new_ready_promise_i32_ref(&42));
         drop(ffi::new_ready_promise_shared_type());
     }
 }

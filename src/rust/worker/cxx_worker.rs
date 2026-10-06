@@ -8,11 +8,6 @@
 //! Lets Rust code delegate to (decorate) a C++ worker. This is the reverse of `RustWorkerInterface`
 //! (bridge.h), which exposes a Rust `worker::Interface` to C++.
 
-#![allow(
-    unsafe_code,
-    reason = "awaits the C++ `WorkerInterface` through the bridge's unsafe async functions"
-)]
-
 use std::pin::Pin;
 use std::time::SystemTime;
 
@@ -58,17 +53,14 @@ impl Service for CxxWorkerInterface {
         request_body: Pin<&'a mut AsyncInputStream>,
         response: ServiceResponse<'a>,
     ) -> Result<()> {
-        // SAFETY: the returned future borrows self.inner and the arguments for its duration.
-        unsafe {
-            bridge::worker_request(
-                self.inner.as_mut(),
-                method,
-                url,
-                headers.as_ffi(),
-                request_body,
-                response.into_ffi(),
-            )
-        }
+        bridge::worker_request(
+            self.inner.as_mut(),
+            method,
+            url,
+            headers.as_ffi(),
+            request_body,
+            response.into_ffi(),
+        )
         .await?;
         Ok(())
     }
@@ -81,17 +73,14 @@ impl Service for CxxWorkerInterface {
         response: ConnectResponse<'a>,
         settings: ConnectSettings<'a>,
     ) -> Result<()> {
-        // SAFETY: the returned future borrows self.inner and the arguments for its duration.
-        unsafe {
-            bridge::worker_connect(
-                self.inner.as_mut(),
-                host,
-                headers.as_ffi(),
-                connection,
-                response.into_ffi(),
-                settings,
-            )
-        }
+        bridge::worker_connect(
+            self.inner.as_mut(),
+            host,
+            headers.as_ffi(),
+            connection,
+            response.into_ffi(),
+            settings,
+        )
         .await?;
         Ok(())
     }
@@ -100,8 +89,7 @@ impl Service for CxxWorkerInterface {
 #[async_trait::async_trait(?Send)]
 impl Interface for CxxWorkerInterface {
     async fn prewarm(&mut self, url: &str) -> Result<()> {
-        // SAFETY: the returned future borrows self.inner for its duration.
-        unsafe { bridge::worker_prewarm(self.inner.as_mut(), url.as_bytes()) }.await?;
+        bridge::worker_prewarm(self.inner.as_mut(), url.as_bytes()).await?;
         Ok(())
     }
 
@@ -111,10 +99,8 @@ impl Interface for CxxWorkerInterface {
         cron: &str,
     ) -> Result<ScheduledResult> {
         let nanos = KjDate::from(*scheduled_time).nanoseconds();
-        // SAFETY: the returned future borrows self.inner for its duration.
         let result =
-            unsafe { bridge::worker_run_scheduled(self.inner.as_mut(), nanos, cron.as_bytes()) }
-                .await?;
+            bridge::worker_run_scheduled(self.inner.as_mut(), nanos, cron.as_bytes()).await?;
         Ok(result.into())
     }
 
@@ -124,28 +110,23 @@ impl Interface for CxxWorkerInterface {
         retry_count: u32,
     ) -> Result<AlarmResult> {
         let nanos = KjDate::from(*scheduled_time).nanoseconds();
-        // SAFETY: the returned future borrows self.inner for its duration.
-        let result =
-            unsafe { bridge::worker_run_alarm(self.inner.as_mut(), nanos, retry_count) }.await?;
+        let result = bridge::worker_run_alarm(self.inner.as_mut(), nanos, retry_count).await?;
         Ok(result.into())
     }
 
     async fn abandon_alarm(&mut self, scheduled_time: &SystemTime) -> Result<Option<SystemTime>> {
         let nanos = KjDate::from(*scheduled_time).nanoseconds();
-        // SAFETY: the returned future borrows self.inner for its duration.
-        let stored = unsafe { bridge::worker_abandon_alarm(self.inner.as_mut(), nanos) }.await?;
+        let stored = bridge::worker_abandon_alarm(self.inner.as_mut(), nanos).await?;
         Ok(Option::from(stored).map(|nanos: i64| KjDate::from(nanos).into()))
     }
 
     async fn custom_event(&mut self, event: KjOwn<CustomEvent>) -> Result<CustomEventResult> {
-        // SAFETY: the returned future borrows self.inner for its duration; event is moved in.
-        let result = unsafe { bridge::worker_custom_event(self.inner.as_mut(), event) }.await?;
+        let result = bridge::worker_custom_event(self.inner.as_mut(), event).await?;
         Ok(result.into())
     }
 
     async fn test(&mut self) -> Result<bool> {
-        // SAFETY: the returned future borrows self.inner for its duration.
-        Ok(unsafe { bridge::worker_test(self.inner.as_mut()) }.await?)
+        Ok(bridge::worker_test(self.inner.as_mut()).await?)
     }
 }
 
