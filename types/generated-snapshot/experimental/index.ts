@@ -13402,25 +13402,24 @@ export interface BrowserRunBaseOptions {
    */
   cacheTTL?: number;
 }
-/**
- * Backend selection, mixed into the options of the quick actions that support it.
- * Deliberately not part of `BrowserRunBaseOptions`: `scrape`, `links` and `snapshot`
- * reject an alternate backend, so they must not accept the field.
- */
+/** Backend selection for quick actions. */
 export interface BrowserRunAlternateBackendOptions {
   /** Render with an alternate browser backend instead of the default one. */
   browser?: "kitesurf";
 }
 /** Common options shared by all quick actions. Exactly one of `url` or `html` must be provided.*/
-export type BrowserRunCommonOptions =
-  | (BrowserRunBaseOptions & {
-      /** URL to navigate to, e.g. `"https://example.com"`. */
-      url: string;
-    })
-  | (BrowserRunBaseOptions & {
-      /** Set the HTML content of the page directly. */
-      html: string;
-    });
+export type BrowserRunCommonOptions = BrowserRunBaseOptions &
+  BrowserRunAlternateBackendOptions &
+  (
+    | {
+        /** URL to navigate to, e.g. `"https://example.com"`. */
+        url: string;
+      }
+    | {
+        /** Set the HTML content of the page directly. */
+        html: string;
+      }
+  );
 export type BrowserRunPuppeteerScreenshotOptions = {
   /** @default "png" */
   type?: "png" | "jpeg" | "webp";
@@ -13447,7 +13446,7 @@ export type BrowserRunScreenshotOptions = BrowserRunCommonOptions & {
   scrollPage?: boolean;
   /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
   screenshotOptions?: BrowserRunPuppeteerScreenshotOptions;
-} & BrowserRunAlternateBackendOptions;
+};
 export type BrowserRunPDFOptions = BrowserRunCommonOptions & {
   /** @see https://pptr.dev/api/puppeteer.pdfoptions */
   pdfOptions?: {
@@ -13494,7 +13493,7 @@ export type BrowserRunPDFOptions = BrowserRunCommonOptions & {
     /** @default 30000 */
     timeout?: number;
   };
-} & BrowserRunAlternateBackendOptions;
+};
 export type BrowserRunScrapeOptions = BrowserRunCommonOptions & {
   /** CSS selectors to scrape. At least one element is required. */
   elements: Array<{
@@ -13530,7 +13529,7 @@ export type BrowserRunAccessibilityTreeOptions = BrowserRunCommonOptions & {
    * HTTP 200; a malformed selector is an error.
    */
   root?: string;
-} & BrowserRunAlternateBackendOptions;
+};
 export interface BrowserRunJsonBaseOptions {
   /** Custom AI models to try in order. Max 3. Falls back to next on error. */
   custom_ai?: Array<{
@@ -13545,7 +13544,6 @@ export interface BrowserRunJsonBaseOptions {
  * At least one of `prompt` or `response_format` must be provided.
  */
 export type BrowserRunJsonOptions = BrowserRunCommonOptions &
-  BrowserRunAlternateBackendOptions &
   BrowserRunJsonBaseOptions &
   (
     | {
@@ -13561,10 +13559,8 @@ export type BrowserRunJsonOptions = BrowserRunCommonOptions &
         response_format: AiTextGenerationResponseFormat;
       }
   );
-export type BrowserRunContentOptions = BrowserRunCommonOptions &
-  BrowserRunAlternateBackendOptions;
-export type BrowserRunMarkdownOptions = BrowserRunCommonOptions &
-  BrowserRunAlternateBackendOptions;
+export type BrowserRunContentOptions = BrowserRunCommonOptions;
+export type BrowserRunMarkdownOptions = BrowserRunCommonOptions;
 export type BrowserRunRedirectHop = {
   /** URL that returned the redirect. */
   url: string;
