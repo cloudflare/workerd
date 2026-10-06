@@ -6,7 +6,9 @@
 // read runs the thenable check — a patched Object.prototype.then getter
 // fires once per read. Under TypeScript it fires inside the write that
 // produced the chunk, while it is still moving the rest of its output into
-// the readable, so the getter can tear the pair down mid-write. A second concurrent default read
+// the readable, so the getter can tear the pair down mid-write (or
+// mid-close); the write or close then settles as a spec transform's would
+// had it enqueued all its output as one chunk. A second concurrent default read
 // diverges: the C++ internal readable supports a single pending read
 // (TypeError), TypeScript parks and serves in order.
 
@@ -59,12 +61,13 @@ export const cancelFromReadResultThenGetterDuringWrite = {
     // A 1 MiB member: under TypeScript the write moves its output into the
     // readable as sixteen 64 KiB pieces, and the getter fires on the first
     // of them, with fifteen still to go. The cancel from there tears the
-    // pair down mid-write: the write rejects with the cancel reason (never
-    // with an error from enqueuing into the cancelled readable), the read
-    // whose result fired the getter still gets its piece, the readable
-    // closes and the writable errors with the reason (#13). Under C++ the
-    // read resolves from the C++ side once the write has settled: the
-    // write resolves, and the cancel leaves the writable untouched (#13).
+    // pair down mid-write: the rest of the output is dropped, the write
+    // resolves (never rejecting with an error from enqueuing into the
+    // cancelled readable), the read whose result fired the getter still
+    // gets its piece, the readable closes and the writable errors with the
+    // reason (#13). Under C++ the read resolves from the C++ side once the
+    // write has settled: the write resolves, and the cancel leaves the
+    // writable untouched (#13).
     const compressed = await pump(new CompressionStream('gzip'), [
       new Uint8Array(1024 * 1024),
     ]);
@@ -94,12 +97,11 @@ export const cancelFromReadResultThenGetterDuringWrite = {
     ok(firstResult.value.byteLength > 0);
     await reader.closed;
     strictEqual((await reader.read()).done, true);
+    strictEqual(writeOutcome, 'resolved');
     if (usingTsImpl) {
-      strictEqual(writeOutcome, reason);
       await rejects(writer.closed, (e) => e === reason);
       await rejects(writer.write(enc.encode('x')), (e) => e === reason);
     } else {
-      strictEqual(writeOutcome, 'resolved');
       let state = 'pending';
       writer.closed.then(
         () => (state = 'resolved'),
@@ -109,6 +111,82 @@ export const cancelFromReadResultThenGetterDuringWrite = {
       await macrotask();
       strictEqual(state, 'pending');
     }
+  },
+};
+
+// A pending read answered by close()'s flush tail, whose result's `then`
+// getter cancels the reader: the cancelled readable is already closed, so
+// the close succeeds, as a spec flush does, and so do writer.closed and the
+// cancel, in both implementations.
+export const cancelFromReadResultThenGetterDuringClose = {
+  async test() {
+    const cs = new CompressionStream('gzip');
+    const writer = cs.writable.getWriter();
+    const reader = cs.readable.getReader();
+    const header = reader.read();
+    await writer.write(enc.encode('hello'));
+    strictEqual((await header).done, false);
+    const tail = reader.read();
+    const reason = new Error('cancelled from then');
+    let cancelled;
+    let closeOutcome;
+    await withThenInterceptor(
+      () => {
+        cancelled ??= reader.cancel(reason);
+      },
+      async () => {
+        closeOutcome = await writer.close().then(
+          () => 'resolved',
+          (e) => e
+        );
+      }
+    );
+    ok(cancelled !== undefined, 'the getter fired');
+    strictEqual(closeOutcome, 'resolved');
+    strictEqual((await tail).done, false);
+    await cancelled;
+    await writer.closed;
+    await reader.closed;
+    strictEqual((await reader.read()).done, true);
+  },
+};
+
+// TypeScript only (the C++ streams have no Node.js interop hook): a read
+// result's `then` getter that errors the pair through the hook during
+// close()'s flush rejects the close with that error, as the spec's flush
+// does when the readable has errored.
+export const interopErrorFromReadResultThenGetterDuringClose = {
+  async test() {
+    if (!usingTsImpl) return;
+    const kErrorFn = Symbol.for('nodejs.webstream.controllerErrorFunction');
+    const cs = new CompressionStream('gzip');
+    const writer = cs.writable.getWriter();
+    const reader = cs.readable.getReader();
+    const header = reader.read();
+    await writer.write(enc.encode('hello'));
+    strictEqual((await header).done, false);
+    const tail = reader.read();
+    const error = new Error('errored from then');
+    let errored = false;
+    let closeOutcome;
+    await withThenInterceptor(
+      () => {
+        if (errored) return;
+        errored = true;
+        cs.readable[kErrorFn](error);
+      },
+      async () => {
+        closeOutcome = await writer.close().then(
+          () => 'resolved',
+          (e) => e
+        );
+      }
+    );
+    ok(errored, 'the getter fired');
+    strictEqual(closeOutcome, error);
+    strictEqual((await tail).done, false);
+    await rejects(writer.closed, (e) => e === error);
+    await rejects(reader.closed, (e) => e === error);
   },
 };
 

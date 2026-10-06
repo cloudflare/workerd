@@ -65,6 +65,14 @@ interface DecompressionStream {
   large. Output produced before a trailing-junk error goes to the waiting
   reads first under TypeScript (one piece each; WPT
   decompression-extra-input); C++ rejects the waiting read (#17).
+- **Teardown from a read's `then` getter:** under TypeScript resolving a
+  read runs inside the write or close that queues the output, so a getter
+  that cancels the reader there leaves the rest of the output undelivered.
+  The write or close still settles as a spec transform's or flush's would
+  had it enqueued everything as one chunk: the write resolves (the
+  writable then errors per #13), and the close resolves along with
+  `writer.closed` and the cancel, as under C++. A readable errored
+  meanwhile (the interop hook) rejects the close with its error.
 - **Snapshot at write:** the codec consumes a copy taken synchronously
   inside write() (C++ adapter copy; TS strategy-size-callback snapshot).
   Post-write mutation/resize/detach cannot change what compresses; an
@@ -182,7 +190,7 @@ pedantic branches shifting anything the suite pins.
 | `byob.js` | BYOB reader fills a 2-byte destination with the gzip magic |
 | `backpressure.js` | eager write settlement without reads; desiredSize accounting (#8) |
 | `propagation.js` | abort rejects pending read (reason per #9), errors both sides; cancel settles parked read (#12); write-after-abort (#10); non-Error reasons (#11); writes after a queued close reject (message per impl) without disturbing the close or output; cancel→writable aftermath (#13) |
-| `reentrancy.js` | thenable-check counts (#15); a reader cancel from a read result's `then` getter while the write is still delivering (TS: the write rejects with the reason, the writable errors per #13; C++: the write resolves, the writable is untouched per #13); second concurrent read (#14); close from a read continuation with round-trip integrity; sibling tee cancel from a continuation |
+| `reentrancy.js` | thenable-check counts (#15); a reader cancel from a read result's `then` getter while the write is still delivering (the write resolves in both; TS drops the rest of the output and the writable errors per #13; C++ leaves the writable untouched per #13); the same cancel during `close()`'s flush (close, `writer.closed` and the cancel resolve in both); TS only: the interop hook erroring the pair from that getter rejects the close with the error; second concurrent read (#14); close from a read continuation with round-trip integrity; sibling tee cancel from a continuation |
 | `tee.js` | branches byte-identical; single-branch cancel (identity ledger #13 semantics) with survivor draining |
 | `draining-reader.js` | TS only (C++ asserts absence): expectedLength undefined; a closed stream's backlog swept in ONE read with done — a small one, and a 1 MiB one as its sixteen 64 KiB pieces; lock/release |
 | `delivery-shape.js` | a 4 MiB single-write output read in bounded pieces (#16), byte-exact; BYOB views filled to their size; two pending reads take consecutive pieces (C++: #14); tee branches get bounded pieces; trailing junk after a large output with two reads waiting (#17) |
