@@ -725,10 +725,6 @@ jsg::Promise<void> WritableStreamNativeSink::write(
         }
       }
 
-      KJ_IF_SOME(o, observer) {
-        o->onChunkEnqueued(len);
-      }
-      writeInFlight = true;
       // Durable Object output gate: the write's bytes must not become externally
       // observable while an output lock is pending, exactly like the legacy internal
       // controller, which stores an output lock with every queued write event and awaits
@@ -737,15 +733,25 @@ jsg::Promise<void> WritableStreamNativeSink::write(
       // settlement, detach() cancels the wrapped wait+write before it releases the sink,
       // and pipeFrom() refuses to move the sink while it is set. The write's I/O runs
       // outside the isolate lock; the copied bytes ride the promise.
+      //
+      // Dereferencing the IoOwns throws when called from another request: the write is
+      // started before it is marked in flight (and counted by the observer), so a write
+      // that never started leaves no flag behind.
+      auto& sink = *active.sink;
+      auto& canceler = *active.canceler;
       kj::Promise<void> promise = nullptr;
       KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
-        promise = lock.then([&sink = *active.sink, data = kj::mv(data)]() mutable {
+        promise = lock.then([&sink, data = kj::mv(data)]() mutable {
           return sink.write(data.asPtr()).attach(kj::mv(data));
         });
       } else {
-        promise = active.sink->write(data.asPtr()).attach(kj::mv(data));
+        promise = sink.write(data.asPtr()).attach(kj::mv(data));
       }
-      promise = active.canceler->wrap(kj::mv(promise));
+      promise = canceler.wrap(kj::mv(promise));
+      KJ_IF_SOME(o, observer) {
+        o->onChunkEnqueued(len);
+      }
+      writeInFlight = true;
       return ioContext
           .awaitIo(js, kj::mv(promise), [self = JSG_THIS, len](jsg::Lock& js) mutable {
         self->writeInFlight = false;
