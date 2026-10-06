@@ -6,6 +6,7 @@
 
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-writable-stream.h>
+#include <workerd/api/socket-relay.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
@@ -91,6 +92,12 @@ struct SocketInfo {
 };
 
 using AnySocketAddress = kj::OneOf<SocketAddress, kj::String>;
+
+struct ProxyToOptions {
+  // Aborting the signal fails the relay and tears down both connections.
+  jsg::Optional<jsg::Ref<AbortSignal>> signal;
+  JSG_STRUCT(signal);
+};
 
 struct SocketOptions {
   jsg::Optional<kj::String> secureTransport;
@@ -221,13 +228,26 @@ class Socket: public jsg::Object {
   // closing.
   jsg::Promise<void> close(jsg::Lock& js);
 
-  // Relays this socket to the other one in both directions. Equivalent to:
-  //   Promise.all([a.readable.pipeTo(b.writable), b.readable.pipeTo(a.writable)])
-  // The result resolves once both directions have finished and rejects as soon as either fails.
-  // A connect() handler that relays its socket should await it: the handler's socket is closed
-  // when the handler returns.
+  // Relays this socket to the other one in both directions, until both directions have ended.
+  // Once both sockets are open and have flushed what was written to them, their connections are
+  // taken over by the relay, as with startTls(), and their readable and writable become unusable.
+  // The result resolves once both directions have finished and rejects as soon as either fails;
+  // both sockets' `closed` settle with it. A connect() handler that relays its socket should await
+  // it: the handler's socket is closed when the handler returns.
+  //
+  // Each direction ends independently, whatever either socket's allowHalfOpen says: when one
+  // connection reaches EOF, the relay shuts down the other's write side and keeps relaying the
+  // opposite direction until it ends too.
+  //
+  // When the peer of a connect() handler's socket calls startTls(), the relay upgrades the other
+  // socket in its place and passes the outcome back. See relayStreams() for the ordering this
+  // guarantees.
   jsg::Promise<void> proxyTo(
-      jsg::Lock& js, jsg::Ref<Socket> sock, jsg::Optional<PipeToOptions> options);
+      jsg::Lock& js, jsg::Ref<Socket> other, jsg::Optional<ProxyToOptions> options);
+
+  // Lets proxyTo() answer upgrade requests from the far side of this socket's connection, instead
+  // of this socket's own startTls() doing so. See InternalTlsRendezvous.
+  void setInboundTlsUpgrade(kj::Own<InboundTlsUpgrade> upgrade);
 
   // Flushes write buffers then performs a TLS handshake on the current Socket connection.
   // The current `Socket` instance is closed and its readable/writable instances are also closed.
@@ -322,6 +342,9 @@ class Socket: public jsg::Object {
     // tlsStarter must be declared after connectionStream so that it is destroyed first, since it
     // holds a reference that keeps the connection alive.
     kj::Own<kj::TlsStarterCallback> tlsStarter;
+    // Upgrade requests from the far side of the connection that a relay may answer instead of
+    // `tlsStarter`. See setInboundTlsUpgrade().
+    kj::Maybe<kj::Own<InboundTlsUpgrade>> inboundTlsUpgrade;
     ConnectionData(kj::Own<kj::TlsStarterCallback> tlsStarter,
         kj::OneOf<kj::Rc<kj::AsyncIoStream>, kj::Rc<DatagramChannel>> connectionStream,
         kj::Promise<void> disconnectTask)
@@ -370,6 +393,16 @@ class Socket: public jsg::Object {
       rpc::JsValue::External::Reader socketExternal,
       rpc::JsValue::External::Reader readableExternal,
       rpc::JsValue::External::Reader writableExternal);
+
+  // Checks that proxyTo() can take this socket's connection over.
+  void requireRelayable(jsg::Lock& js);
+  // Resolves once the connection is open and everything written to the socket has been flushed.
+  jsg::Promise<void> whenReadyToRelay(jsg::Lock& js);
+  // Takes the connection over for proxyTo(), leaving the socket unusable.
+  RelayEnd takeRelayEnd(jsg::Lock& js);
+  // The part of proxyTo() that follows both sockets being ready.
+  jsg::Promise<void> runRelay(
+      jsg::Lock& js, jsg::Ref<Socket> other, kj::Maybe<jsg::Ref<AbortSignal>> signal);
 
   kj::Promise<kj::Own<kj::AsyncIoStream>> processConnection();
   jsg::Promise<void> maybeCloseWriteSide(jsg::Lock& js);
@@ -502,7 +535,22 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
 // side hands its stream to a fresh Socket at that point. Thus each side's startTls() completes only
 // once the other side has called startTls() too - the same rule that applies for a real handshake
 // - and fails if the other side can no longer call it: its socket closes or the handler returns.
-kj::Own<kj::TlsStarterCallback> setupInternalTlsRendezvous(kj::TlsStarterCallback& peerStarter);
+//
+// The handler can also leave the upgrade to a relay: see InternalTlsRendezvous::peerRequests.
+struct InternalTlsRendezvous {
+  // The connect() handler's own startTls().
+  kj::Own<kj::TlsStarterCallback> handlerStarter;
+
+  // The peer's startTls(), as a request that Socket::proxyTo() can answer in the handler's place
+  // by upgrading the socket it relays to. Settles the same side as `handlerStarter` does, so only
+  // one of the two is ever used.
+  kj::Own<InboundTlsUpgrade> peerRequests;
+
+  // To be held for as long as the connect() handler runs. Dropping it reports that the handler
+  // has finished, and so will not start TLS, even if its socket outlives it.
+  kj::Own<void> handlerRun;
+};
+InternalTlsRendezvous setupInternalTlsRendezvous(kj::TlsStarterCallback& peerStarter);
 
 // Materializes a socket received over RPC from its three external-table entries (socket
 // metadata, then the readable and writable stream halves, in Socket::serialize()'s order),
@@ -569,7 +617,7 @@ kj::Own<jsg::modules::ModuleBundle> getInternalSocketModuleBundle(auto featureFl
 
 #define EW_SOCKETS_ISOLATE_TYPES                                                                   \
   api::Socket, api::SocketOptions, api::SocketAddress, api::TlsOptions, api::SocketsModule,        \
-      api::SocketInfo, api::SocketsModule::InboundListener, api::Datagram
+      api::SocketInfo, api::SocketsModule::InboundListener, api::Datagram, api::ProxyToOptions
 
 // The list of sockets.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

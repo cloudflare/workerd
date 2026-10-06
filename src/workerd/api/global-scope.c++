@@ -268,6 +268,8 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // Support startTls if the transport that delivered this CONNECT offered a tlsStarter slot.
     auto tlsStarter = kj::heap<kj::TlsStarterCallback>();
     auto secureTransport = SecureTransportKind::OFF;
+    kj::Maybe<kj::Own<InboundTlsUpgrade>> inboundTlsUpgrade;
+    kj::Maybe<kj::Own<void>> tlsHandlerRun;
     KJ_IF_SOME(starter, settings.tlsStarter) {
       if (starter != kj::none) {
         // The transport can run a real handshake on this connection -- a TCP listener holding a
@@ -280,7 +282,10 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
       } else {
         // The slot is here but empty: the peer is another Socket on one of our internal
         // transports, waiting to hear when we upgrade and to tell us when it does.
-        tlsStarter = setupInternalTlsRendezvous(starter);
+        auto rendezvous = setupInternalTlsRendezvous(starter);
+        tlsStarter = kj::mv(rendezvous.handlerStarter);
+        inboundTlsUpgrade = kj::mv(rendezvous.peerRequests);
+        tlsHandlerRun = kj::mv(rendezvous.handlerRun);
         secureTransport = SecureTransportKind::STARTTLS;
       }
     }
@@ -301,10 +306,14 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     // handleProxyStatus() is required to indicate that the socket was opened properly. Since the
     // connection is already open at this point, exception handling is not required.
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
+    KJ_IF_SOME(upgrade, inboundTlsUpgrade) {
+      jsSocket->setInboundTlsUpgrade(kj::mv(upgrade));
+    }
 
     kj::Maybe<SpanBuilder> span = ioContext.makeTraceSpan("connect_handler"_kjc);
     auto promise = handler(js, kj::mv(jsSocket), eh.env.addRef(js), eh.getCtx());
-    return ioContext.awaitJs(js, kj::mv(promise)).attach(kj::mv(span), kj::mv(deferredNeuter));
+    return ioContext.awaitJs(js, kj::mv(promise))
+        .attach(kj::mv(span), kj::mv(deferredNeuter), kj::mv(tlsHandlerRun));
   }
   lock.logWarningOnce("Received a connect event but we lack a handler. "
                       "Did you remember to export a connect() function?");
