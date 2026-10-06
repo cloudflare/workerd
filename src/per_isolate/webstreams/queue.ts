@@ -735,8 +735,9 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   #byteOffset: number; // partial consumption of the entry at #position
   #pendingReads: RingBufferType<PendingRead<V>> = new RingBuffer();
   // Running total mirroring the spec's [[queueTotalSize]]. Incremented on
-  // enqueue, decremented on consume. Must use +=/-= (not recomputation) to
-  // preserve IEEE 754 double-precision drift that WPTs verify.
+  // enqueue, decremented on consume. Must use +=/-= (not recomputation):
+  // the spec's double arithmetic leaves residues that WPTs verify. A
+  // whole-entry consume clamps a negative total to 0 (advancePastEntry).
   #queueTotalSize: number = 0;
 
   constructor(
@@ -787,11 +788,8 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   }
 
   // Spec [[queueTotalSize]]: running total of unconsumed entry sizes.
-  // Uses += / -= to match IEEE 754 drift that WPTs verify.
   get remainingSize(): number {
-    // Clamp to 0 per spec (ResetQueue, EnqueueValueWithSize clamping).
-    const total = this.#queueTotalSize;
-    return total < 0 ? 0 : total;
+    return this.#queueTotalSize;
   }
 
   // Called by StreamQueue.enqueue() to increment the running total.
@@ -814,6 +812,10 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
       // running total — bytes before #byteOffset were already debited
       // (by setConsumed or via initialTotalSize at cursor construction).
       this.#queueTotalSize -= slot.size - this.#byteOffset;
+      // Spec DequeueValue: a total that rounding has taken below 0 becomes
+      // 0, so the residue does not carry into later enqueues. (Byte sizes
+      // are integers and never leave one.)
+      if (this.#queueTotalSize < 0) this.#queueTotalSize = 0;
     }
     this.#position++;
     this.#byteOffset = 0;

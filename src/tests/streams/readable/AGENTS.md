@@ -24,7 +24,7 @@ behavioral gaps; the reentrancy family is mostly parity at finite hwm.
 | 7 | reader.closed after releaseLock | SAME promise object, settled state kept | REPLACED with TypeError 'This reader has been released' (spec) | `closedReplacedOnReleaseAfterClose`/`...Error` |
 | 8 | size() errors stream then throws/returns Infinity | enqueue swallows | enqueue rethrows / RangeError (spec) | `sizeErrorsStreamThenThrows`/`...ReturnsInfinity` |
 | 9 | invalid size() return (NaN/-1) | enqueue returns normally, stream errored (ds null); DEFECT: subsequent read() spins the isolate synchronously (unpinnable) | enqueue throws RangeError 'Invalid chunk size', reads reject same (spec) | `invalidSizeReturnValue` |
-| 10 | queue total-size math | integer-ish: saturates (maxSafeInt shape -2,-1,1,0), fractional sizes truncate to 0; DEFECT: reading a fractional-size chunk spins the isolate | full double-precision per spec (all four WPT shapes) | `queue-math.js` (3 tests) |
+| 10 | queue total-size math | integer-ish: saturates (maxSafeInt shape -2,-1,1,0), fractional sizes truncate to 0; DEFECT: reading a fractional-size chunk spins the isolate | full double-precision per spec (all four WPT shapes), a total rounded below 0 clamped to 0 at each dequeue (a branch's own total for a tee branch), a residue above 0 kept | `queue-math.js` (6 tests) |
 | 11 | tee cancel composite | source cancel gets ONLY the pair-completing branch's reason; first branch's cancel promise fulfills immediately | AggregateError of every branch's reason, in the order they cancelled (identity; intentional divergence from spec's array — tee is N consumers on one queue, the last to leave cancels the source); LONE branch cancel promise PENDS until the other cancels (spec) — never await a lone branch cancel | `teeCancelReasonComposite`, `teeCancelReverseOrder` |
 | 12 | from(string) | iterates per code unit ['h','i'] | single chunk ['hi'] (spec: throws — both diverge from spec) | `fromString` |
 | 13 | async-iterator prototype | exposes constructor + next/return; class string 'ReadableStreamAsyncIterator' (writable) | next/return only; class string 'ReadableStream AsyncIterator' (non-writable; WebIDL) | `iteratorPrototypeShape` |
@@ -105,7 +105,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `reader.js` | read ordering, releaseLock, closed replacement (#7), undefined error, reader.cancel, reader swap |
 | `cancel.js` | reason identity, locked-cancel, hook rejection identity, queue discard |
 | `bad-strategies.js` | ledger #8, #9, size-not-function |
-| `queue-math.js` | ledger #10 (WPT float shapes; cpp bounded observables only) |
+| `queue-math.js` | ledger #10 (WPT float shapes; a negative residue clamped at dequeue, also per tee branch, and a positive one kept, both spec and Node parity; cpp bounded observables only) |
 | `tee.js` | migrated edge cases + error propagation + cancel composite (#11) + pull-per-read + slowest-branch backpressure |
 | `tee-reentrancy.js` | the three C++ push-loop crash regressions (from api/streams/streams-test.js) |
 | `from.js` | 11 migrated + fromString (#12) + return validation messages + iterator protocol (next read once, done before value, gets not `has`, objects only, return() lookup; parity) + ArrayBufferView as one chunk (#27) + async-from-sync edges (#28) + sync-path schedule (#29) |
