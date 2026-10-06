@@ -1019,12 +1019,17 @@ class WritableStreamDefaultController<
       controller.#errorIfNeeded(reason);
     };
 
+    // [[AbortSteps]]: the algorithms are cleared after the abort algorithm
+    // returns, so a write made from inside sink.abort() still consults
+    // size() (WritableStreamDefaultWriterWrite step 4) before it rejects.
     controllerAbortSteps = (controller, reason) => {
       const abortAlgorithm = controller.#abortAlgorithm;
+      const result =
+        abortAlgorithm === undefined
+          ? (PromiseResolve() as Promise<void>)
+          : abortAlgorithm(reason);
       controller.#clearAlgorithms();
-      return abortAlgorithm === undefined
-        ? (PromiseResolve() as Promise<void>)
-        : abortAlgorithm(reason);
+      return result;
     };
 
     controllerClose = (controller) => {
@@ -1267,12 +1272,15 @@ class WritableStreamDefaultController<
     // Dequeue the close marker; the queue must then be empty.
     this.#queue.shift();
     this.#queueTotalSize = 0;
+    // As in [[AbortSteps]], the algorithms are cleared after the close
+    // algorithm returns: a write made from inside sink.close() consults
+    // size() before it rejects.
     const closeAlgorithm = this.#closeAlgorithm;
-    this.#clearAlgorithms();
     const promise =
       closeAlgorithm === undefined
         ? (PromiseResolve() as Promise<void>)
         : closeAlgorithm();
+    this.#clearAlgorithms();
     PromisePrototypeThen(
       promise,
       () => {

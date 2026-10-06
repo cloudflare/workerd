@@ -107,6 +107,8 @@ export {
   controllerErrorInsideWriteHook,
   sizeNotCalledForDoomedWrite,
   sizeReceiverAndArity,
+  sizeConsultedForWriteInsideSinkClose,
+  sizeConsultedForWriteInsideSinkAbort,
 } from 'reentrancy';
 
 export { thenGetterDoesNotFireOnWriterPromises } from 'then-interceptors';
