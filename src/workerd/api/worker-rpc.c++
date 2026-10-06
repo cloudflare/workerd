@@ -2002,6 +2002,9 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
     Func makeBuilder,
     rpc::JsValue::ExternalPusher::Client externalPusher);
 
+static kj::Exception recordDeliveredJsRpcException(
+    jsg::Lock& js, IoContext& ioctx, jsg::Value& error);
+
 // Callee-side implementation of JsRpcTarget.
 //
 // Most of the implementation is in this base class. There are subclasses specializing for the case
@@ -2264,13 +2267,14 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       }),
                   ctx.addFunctor(
                       [callPipelineFulfillerRef, durableObjectId = getCurrentDurableObjectId()](
-                          jsg::Lock& js, jsg::Value&& error) {
+                          jsg::Lock& js, IoContext& ctx, jsg::Value&& error) {
         maybeAddDurableObjectId(
             js, error, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
+        auto exception = recordDeliveredJsRpcException(js, ctx, error);
         // If we set up a `callPipeline` early, we have to make sure it propagates the error.
         // (Otherwise we get a PromiseFulfiller error instead, which is pretty useless...)
         KJ_IF_SOME(cpf, callPipelineFulfillerRef) {
-          cpf.reject(js.exceptionToKj(error.addRef(js)));
+          cpf.reject(exception.clone());
         }
         js.throwException(kj::mv(error));
       })));
@@ -2318,13 +2322,18 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
           // Record this call's span on any stubs/callbacks passed as arguments, so that if the
           // callee invokes them, the follow-up jsRpcCall nests under this call's span (mirrors the
           // return-value handling in callImpl). Only recorded when traced.
+          auto recordException = [this, &js, &ctx](jsg::Value& error) {
+            maybeAddDurableObjectId(
+                js, error, durableObjectId.map([](const kj::String& id) { return id.asPtr(); }));
+            recordDeliveredJsRpcException(js, ctx, error);
+          };
           InvocationResult invocationResult;
           KJ_IF_SOME(envCtx, targetInfo.envCtx) {
             invocationResult = invokeFnInsertingEnvCtx(js, methodNameForTrace, fn, thisArg, args,
-                envCtx.env, envCtx.ctx, jsRpcCallSpan.getSpanParentsIfObserved());
+                envCtx.env, envCtx.ctx, jsRpcCallSpan.getSpanParentsIfObserved(), recordException);
           } else {
-            invocationResult =
-                invokeFn(js, fn, thisArg, args, jsRpcCallSpan.getSpanParentsIfObserved());
+            invocationResult = invokeFn(
+                js, fn, thisArg, args, jsRpcCallSpan.getSpanParentsIfObserved(), recordException);
           }
 
           // We have a function, so let's call it and serialize the result for RPC.
@@ -2504,7 +2513,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       v8::Local<v8::Function> fn,
       v8::Local<v8::Object> thisArg,
       kj::Maybe<rpc::JsValue::Reader> args,
-      kj::Maybe<TraceContextParent> originatingCall) {
+      kj::Maybe<TraceContextParent> originatingCall,
+      kj::FunctionParam<void(jsg::Value&)> recordException) {
     // We received arguments from the client, deserialize them back to JS.
     KJ_IF_SOME(a, args) {
       auto [value, disposalGroup] =
@@ -2518,16 +2528,29 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
         arguments[i] = args.get(js, i);
       }
 
-      InvocationResult result{
-        .returnValue =
-            jsg::check(fn->Call(js.v8Context(), thisArg, arguments.size(), arguments.data())),
-      };
+      InvocationResult result;
+      JSG_TRY(js) {
+        result.returnValue =
+            jsg::check(fn->Call(js.v8Context(), thisArg, arguments.size(), arguments.data()));
+      }
+      JSG_CATCH(error) {
+        recordException(error);
+        js.throwException(kj::mv(error));
+      }
       if (!disposalGroup->empty()) {
         result.paramDisposalGroup = kj::mv(disposalGroup);
       }
       return result;
     } else {
-      return {.returnValue = jsg::check(fn->Call(js.v8Context(), thisArg, 0, nullptr))};
+      InvocationResult result;
+      JSG_TRY(js) {
+        result.returnValue = jsg::check(fn->Call(js.v8Context(), thisArg, 0, nullptr));
+      }
+      JSG_CATCH(error) {
+        recordException(error);
+        js.throwException(kj::mv(error));
+      }
+      return result;
     }
   };
 
@@ -2540,7 +2563,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       kj::Maybe<rpc::JsValue::Reader> args,
       v8::Local<v8::Value> env,
       jsg::JsObject ctx,
-      kj::Maybe<TraceContextParent> originatingCall) {
+      kj::Maybe<TraceContextParent> originatingCall,
+      kj::FunctionParam<void(jsg::Value&)> recordException) {
     // Determine the function arity (how many parameters it was declared to accept) by reading the
     // `.length` attribute.
     auto arity = js.withinHandleScope([&]() {
@@ -2617,11 +2641,16 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       }
     }
 
-    return {
-      .returnValue =
-          jsg::check(fn->Call(js.v8Context(), thisArg, arguments.size(), arguments.data())),
-      .paramDisposalGroup = kj::mv(paramDisposalGroup),
-    };
+    InvocationResult result{.paramDisposalGroup = kj::mv(paramDisposalGroup)};
+    JSG_TRY(js) {
+      result.returnValue =
+          jsg::check(fn->Call(js.v8Context(), thisArg, arguments.size(), arguments.data()));
+    }
+    JSG_CATCH(error) {
+      recordException(error);
+      js.throwException(kj::mv(error));
+    }
+    return result;
   };
 };
 
@@ -3112,6 +3141,17 @@ static void markJsRpcExceptionAsDelivered(IoContext& ioctx, kj::Exception& excep
     exception.releaseDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID);
     exception.setDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
   }
+}
+
+static kj::Exception recordDeliveredJsRpcException(
+    jsg::Lock& js, IoContext& ioctx, jsg::Value& error) {
+  jsg::JsValue jsError(error.getHandle(js));
+  auto exception = js.exceptionToKj(error.addRef(js));
+  markJsRpcExceptionAsDelivered(ioctx, exception);
+  ioctx.getMetrics().reportFailure(exception);
+  ioctx.logUncaughtException(
+      UncaughtExceptionSource::REQUEST_HANDLER, jsError, jsg::JsMessage::create(js, jsError));
+  return exception;
 }
 
 namespace {
