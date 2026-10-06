@@ -28,6 +28,7 @@ rust_cxx_bridge(
     include_prefix = "kj-rs-tokio-test",
     deps = [
         "//src/rust/cxx/kj-rs",
+        "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
     ],
 )
 

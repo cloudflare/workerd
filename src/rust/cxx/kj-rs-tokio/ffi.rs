@@ -2,10 +2,11 @@
 //!
 //! This is the crate's single dedicated FFI-island file (file-top `#![allow(unsafe_code)]`). It
 //! holds the `#[cxx::bridge] mod bridge` -- the C++ <-> Rust wire the C++
-//! `kj_rs_tokio::TokioEventPort` drives (see `tokio-event-port.h`) -- and [`EnteredRuntime`], the
-//! one hand-written `unsafe` in the crate (a lifetime extension on tokio's `EnterGuard`).
-//! Everything else -- `lib.rs` and the entire event-port business logic in `port.rs` -- is
-//! wholly-safe, compiler-proven unsafe-free: no other module allows `unsafe_code`.
+//! `kj_rs_tokio::TokioEventPort` drives (see `tokio-event-port.h`), and the C++ context the Rust
+//! [`Runtime`](crate::Runtime) owns -- and [`EnteredRuntime`], the one hand-written `unsafe` in
+//! the crate (a lifetime extension on tokio's `EnterGuard`). Everything else -- `lib.rs`, the
+//! event-port business logic in `port.rs`, `runtime.rs` -- is wholly-safe, compiler-proven
+//! unsafe-free: no other module allows `unsafe_code`.
 #![allow(
     unsafe_code,
     reason = "the crate's FFI island: the cxx bridge and the one hand-written `unsafe`"
@@ -14,11 +15,15 @@
 use std::mem::ManuallyDrop;
 use std::ops::Deref;
 
+pub use bridge::TokioAsyncIoContext;
+pub use bridge::new_tokio_async_io_context;
 use tokio::runtime::EnterGuard;
 use tokio::runtime::Runtime;
 
 use crate::port::TokioPort;
 use crate::port::new_tokio_port;
+use crate::runtime::BlockOnTask;
+use crate::runtime::block_on_task_join;
 
 struct TokioContextSentinel;
 
@@ -116,8 +121,8 @@ impl Drop for EnteredRuntime {
 )]
 mod bridge {
     // None of these are `Result`: they cannot fail in a way C++ could handle. The panics that CAN
-    // occur -- a second port on one thread (`TokioPort::new`), a nested `block_on` from a task
-    // that re-entered `promise.wait()` (`wait_*`/`poll`), the LocalSet slot being gone -- are
+    // occur -- a second port on one thread (`TokioPort::new`), a `block_on` nested inside another
+    // tokio runtime's (`wait_*`/`poll`), the LocalSet slot being gone -- are
     // caller-contract violations, and the in-tree cxx fork converts every panic escaping an
     // `extern "Rust"` fn into a `kj::Exception` thrown at the C++ call site.
     extern "Rust" {
@@ -151,5 +156,28 @@ mod bridge {
         /// `TimerImpl::SleepHooks` (a sooner timer was armed while sleeping). Unblocks a
         /// concurrent `wait_*` without setting the wake latch; a no-op outside `wait_*`.
         fn notify_kj_service(&self);
+    }
+
+    extern "Rust" {
+        /// What [`Runtime::block_on`](crate::Runtime::block_on) has the loop wait for; `blockOn`
+        /// waits on `block_on_task_join`, which resolves when the task block_on spawned has ended.
+        type BlockOnTask;
+        async fn block_on_task_join(task: Box<BlockOnTask>);
+    }
+
+    unsafe extern "C++" {
+        include!("kj-rs-tokio/tokio-event-port.h");
+
+        /// The C++ context: the port, its `kj::EventLoop` and `kj::Timer`, and the
+        /// `kj::WaitScope` (see tokio-event-port.h).
+        type TokioAsyncIoContext;
+
+        #[cxx_name = "newTokioAsyncIoContext"]
+        fn new_tokio_async_io_context() -> Result<KjOwn<TokioAsyncIoContext>>;
+
+        /// `Result`: the wait runs KJ events, and a `kj::Exception` thrown by one that nothing
+        /// caught comes out of it.
+        #[cxx_name = "blockOn"]
+        fn block_on(self: Pin<&mut TokioAsyncIoContext>, task: Box<BlockOnTask>) -> Result<()>;
     }
 }
