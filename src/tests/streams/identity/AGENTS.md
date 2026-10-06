@@ -53,12 +53,13 @@ Interface notes:
   `IdentityTransformStream.prototype`.
 - Instances are branded via `Symbol.toStringTag` (under `set_tostring_tag`):
   `[object IdentityTransformStream]` / `[object FixedLengthStream]`.
-- The queuing strategy is consulted for `highWaterMark` **only**. A
-  user-supplied `size` member is never invoked and never affects
-  accounting in either implementation (C++ reads `highWaterMark` alone;
-  TypeScript installs its own internal size callback).
-  The strategy argument converts as a WebIDL dictionary: `undefined` and
-  `null` mean none, any other non-object throws `TypeError`.
+- The queuing strategy is consulted for `highWaterMark` **only**, read and
+  converted once. A user-supplied `size` member is never invoked and never
+  affects accounting in either implementation (C++ reads `highWaterMark`
+  alone; TypeScript installs its own internal size callback). The strategy
+  argument converts as a WebIDL dictionary: `undefined` and `null` mean
+  none, any other non-object throws `TypeError`. How `highWaterMark`
+  converts diverges (ledger #24).
 
 ## Core semantics
 
@@ -118,7 +119,8 @@ readable's queue, before any read occurs.)
 - `abort()` is not `close()`: aborting with undelivered bytes is not an
   underwrite error.
 - The effective `highWaterMark` is capped at `expectedLength` (bigint
-  lengths included); a smaller explicit `highWaterMark` is kept.
+  lengths included); a smaller explicit `highWaterMark` is kept. The cap
+  applies to the converted number.
 - The coerced `expectedLength` is observable through that cap:
   `min(expectedLength, highWaterMark)` is the writer's initial
   `desiredSize`.
@@ -261,13 +263,14 @@ pattern; a change to either side fails its cell.
 | 21 | Reads after an abort that cleared a parked write | reject `Error` "Network connection lost.": cancelling the parked sink write puts the transform into its disconnection error before the abort reason arrives | reject with the original abort reason, as after any abort | `abortParkedWriteErrorsReadable` |
 | 22 | BYOB read with several writes already made | answered with at most one write's bytes (a read with a minimum stops once it is met); the next write waits for another read | fills its view with everything already written, across writes, up to a close — past a read's minimum too; each write settles once a read has its last byte | `byobReadSpansQueuedWrites`, `byobReadSpanningBoundaries`; readAtLeast over 1-byte writes in the r2-patterns suite (its ledger #5) |
 | 23 | Write settlement and BYOB reads across tee branches | a write settles once one branch has read it (the sibling's copy uncounted); a branch's reads are capped at the sizes the first-reading branch requested | a write settles once the slowest branch has read it, or once a branch is starved (pending read, nothing left to take) — never once the writable is erroring, when it rejects instead; each branch's reads are sized independently and span writes | `teeCreatesNoDemand`, `singleBranchReadDrivesWriter`, `writerDesiredSizeAcrossTee`, `abortBeforeStarvedReadRejectsInFlightWrite`, `tee-byob.js` |
+| 24 | `highWaterMark` conversion | to a uint64: non-finite (`'abc'`, NaN, ±Infinity) and negative values throw `TypeError`; fractions truncate (`1.5`→1); a bigint converts (`3n`→3); `desiredSize` narrows to a 32-bit int (`2**32 + 5` reads 5) | the WHATWG writable conversion, the same for ITS and FLS: NaN and negative values throw `RangeError`; Infinity and fractions are kept (FLS caps the converted number at its length); a bigint throws `TypeError` | `highWaterMarkConversionDivergence` |
 
 ## Assertion catalogue
 
 | Module | Asserts |
 | --- | --- |
 | `api-surface.js` | toStringTag branding; `FixedLengthStream` subclassing; `readable`/`writable` are `ReadableStream`/`WritableStream` instances, stable, enumerable prototype accessors (placement per ledger #5); constructor source text (native code under C++, not under TS); accessor brand checks |
-| `construction.js` | valid lengths (0, 5, −0.0, `MAX_SAFE_INTEGER`, bigints, with strategy); coerced length observable via HWM cap; invalid lengths throw (types per ledger #1–3); inheritance (ledger #4); a user-supplied strategy `size` is never invoked (ITS and FLS, with and without explicit HWM); the strategy argument converts as a WebIDL dictionary (undefined/null mean none, other non-objects throw `TypeError`) |
+| `construction.js` | valid lengths (0, 5, −0.0, `MAX_SAFE_INTEGER`, bigints, with strategy); coerced length observable via HWM cap; invalid lengths throw (types per ledger #1–3); inheritance (ledger #4); a user-supplied strategy `size` is never invoked (ITS and FLS, with and without explicit HWM); the strategy argument converts as a WebIDL dictionary (undefined/null mean none, other non-objects throw `TypeError`); `highWaterMark` read and converted once by both classes (numeric strings, booleans, null, `valueOf`), its conversion per ledger #24 |
 | `chunk-types.js` | accepted: `Uint8Array`, `ArrayBuffer`, `DataView` subrange, string→UTF-8, subarray offsets; rejected: numbers, plain objects (`TypeError`; per-write — the stream survives, ledger #6); an invalid chunk queued behind valid writes surfaces its error in FIFO order — earlier writes still deliver and later traffic still flows in both implementations |
 | `zero-length-writes.js` | empty view / buffer / string are non-closing no-ops; so is an undefined chunk (`write(undefined)`, `write()`; ITS, FLS, with a byte highWaterMark) |
 | `copy-semantics.js` | delivered chunk never aliases the source; source mutation after delivery is invisible; source is not detached |

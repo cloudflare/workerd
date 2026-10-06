@@ -26,6 +26,8 @@ export {
   fixedLengthLengthsAboveMaxSafeInteger,
   userStrategySizeNeverInvoked,
   strategyArgumentDictionaryConversion,
+  highWaterMarkReadAndConvertedOnce,
+  highWaterMarkConversionDivergence,
 } from 'construction';
 
 export {

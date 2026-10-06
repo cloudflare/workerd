@@ -15,6 +15,12 @@
 //   strings; TypeScript rejects both.
 // - Range: C++ rejects lengths above 2^53-1; TypeScript accepts the full
 //   uint64 range.
+//
+// The highWaterMark conversion diverges too (both classes): C++ converts
+// to a uint64 (TypeError for non-finite or negative values, fractions
+// truncate, a bigint converts) and narrows desiredSize to a 32-bit int;
+// TypeScript applies the WHATWG writable conversion (RangeError for NaN or
+// negative values, Infinity and fractions kept, TypeError for a bigint).
 
 import { deepStrictEqual, ok, strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -181,6 +187,92 @@ export const strategyArgumentDictionaryConversion = {
     for (const strategy of [5, 'x', true, 3n, Symbol('s')]) {
       throws(() => new IdentityTransformStream(strategy), TypeError);
       throws(() => new FixedLengthStream(5, strategy), TypeError);
+    }
+  },
+};
+
+function desiredSizeOrError(make) {
+  try {
+    return make().writable.getWriter().desiredSize;
+  } catch (e) {
+    return e.constructor.name;
+  }
+}
+
+// highWaterMark is read once and converted once (ToNumber), by both
+// classes. FixedLengthStream caps the converted number at its length.
+export const highWaterMarkReadAndConvertedOnce = {
+  test() {
+    for (const [make, capped] of [
+      [(strategy) => new IdentityTransformStream(strategy), Infinity],
+      [(strategy) => new FixedLengthStream(5, strategy), 5],
+      [(strategy) => new FixedLengthStream(1e6, strategy), 1e6],
+    ]) {
+      let reads = 0;
+      let conversions = 0;
+      const strategy = {
+        get highWaterMark() {
+          reads++;
+          return {
+            valueOf() {
+              conversions++;
+              return 4;
+            },
+          };
+        },
+      };
+      strictEqual(
+        desiredSizeOrError(() => make(strategy)),
+        4
+      );
+      strictEqual(reads, 1);
+      strictEqual(conversions, 1);
+      for (const [highWaterMark, expected] of [
+        ['3', 3],
+        [true, 1],
+        [null, 0],
+        [8, Math.min(8, capped)],
+      ]) {
+        strictEqual(
+          desiredSizeOrError(() => make({ highWaterMark })),
+          expected,
+          String(highWaterMark)
+        );
+      }
+    }
+  },
+};
+
+// The conversion itself diverges (ledger #24): TypeScript applies the
+// WHATWG writable conversion (NaN or negative is a RangeError; Infinity
+// and fractions are kept; a bigint is a TypeError), the same for both
+// classes; C++ converts to a uint64 (TypeError for non-finite or negative
+// values; fractions truncate; a bigint converts) and narrows desiredSize
+// to a 32-bit int.
+export const highWaterMarkConversionDivergence = {
+  test() {
+    // [highWaterMark, TS ITS, TS FLS(5), C++ ITS, C++ FLS(5)]
+    const cases = [
+      ['abc', 'RangeError', 'RangeError', 'TypeError', 'TypeError'],
+      [NaN, 'RangeError', 'RangeError', 'TypeError', 'TypeError'],
+      [-1, 'RangeError', 'RangeError', 'TypeError', 'TypeError'],
+      [-Infinity, 'RangeError', 'RangeError', 'TypeError', 'TypeError'],
+      [Infinity, Infinity, 5, 'TypeError', 'TypeError'],
+      [1.5, 1.5, 1.5, 1, 1],
+      [3n, 'TypeError', 'TypeError', 3, 3],
+      [2 ** 32 + 5, 2 ** 32 + 5, 5, 5, 5],
+    ];
+    for (const [highWaterMark, tsIts, tsFls, cppIts, cppFls] of cases) {
+      deepStrictEqual(
+        [
+          desiredSizeOrError(
+            () => new IdentityTransformStream({ highWaterMark })
+          ),
+          desiredSizeOrError(() => new FixedLengthStream(5, { highWaterMark })),
+        ],
+        usingTsImpl ? [tsIts, tsFls] : [cppIts, cppFls],
+        String(highWaterMark)
+      );
     }
   },
 };
