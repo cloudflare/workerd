@@ -56,6 +56,7 @@ declare class Span {
   readonly isTraced: boolean;
 
   // Returns an immutable, serializable identity that remains usable after the span ends.
+  // A no-op span returns an all-zero, invalid context which must not be propagated.
   spanContext(): TracingSpanContext;
 
   // Sets a single attribute on the span.

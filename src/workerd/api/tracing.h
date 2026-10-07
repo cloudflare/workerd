@@ -57,7 +57,8 @@ struct TracingSpanStatus {
 struct TracingSpanContext {
   kj::String traceId;
   kj::String spanId;
-  uint traceFlags;
+  // W3C trace-flags are a single byte; OpenTelemetry represents them as a JS number.
+  uint8_t traceFlags;
 
   JSG_STRUCT(traceId, spanId, traceFlags);
 };

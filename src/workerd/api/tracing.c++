@@ -51,7 +51,7 @@ kj::LiteralStringConst spanWarningTypeName(SpanWarningType type) {
 TracingSpanContext toTracingSpanContext(kj::Maybe<tracing::SpanContext> context) {
   KJ_IF_SOME(value, context) {
     KJ_IF_SOME(spanId, value.getSpanId()) {
-      uint traceFlags = 0;
+      uint8_t traceFlags = 0;
       KJ_IF_SOME(flags, value.getTraceFlags()) {
         traceFlags = flags;
       }
