@@ -762,6 +762,15 @@ wd_test(
 )
 
 wd_test(
+    src = "rpc-stub-gc-foreign-span-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "rpc-stub-gc-foreign-span-tail.js",
+        "rpc-stub-gc-foreign-span-test.js",
+    ],
+)
+
+wd_test(
     src = "js-rpc-params-transfer-ownership-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-params-transfer-ownership-test.js"],

@@ -320,8 +320,13 @@ HeapTracer::HeapTracer(v8::Isolate* isolate)
     }
   }, this, v8::GCType::kGCTypeMarkSweepCompact);
 
+  // V8 calls this from inside the garbage collector, in frames built without exception support, and
+  // detaching can run arbitrary destructors. An exception escaping it would unwind through V8
+  // without running V8's own scope destructors, leaving the isolate broken (for example, unable to
+  // run JavaScript again). As with ~CppgcShim(), noexcept makes such an exception fatal instead, and
+  // the crash report names the throw site so the thrower can be fixed.
   isolate->AddGCEpilogueCallback(
-      [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) {
+      [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) noexcept {
     auto& self = *static_cast<HeapTracer*>(data);
     for (Wrappable* wrappable: self.detachLater) {
       wrappable->detachWrapper(true);
