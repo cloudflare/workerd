@@ -683,6 +683,8 @@ kj_test(
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
+        "@capnp-cpp//src/kj/compat:kj-brotli",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
     ],
 )
 
@@ -691,6 +693,8 @@ kj_test(
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
+        "@capnp-cpp//src/kj/compat:kj-brotli",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
     ],
 )
 

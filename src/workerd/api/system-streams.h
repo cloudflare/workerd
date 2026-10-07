@@ -11,8 +11,11 @@
 #include <workerd/api/streams/common.h>  // for StreamEncoding, ...
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/io-context.h>
+#include <workerd/util/strong-bool.h>
 
 namespace workerd::api {
+
+WD_STRONG_BOOL(FlushCompressionAfterWrite);
 
 // A ReadableStreamSource which automatically decodes its underlying stream. It does so lazily -- if
 // one of the `tryRead()` overloads is never called, then a `pumpTo()` to a WritableStreamSink
@@ -31,7 +34,8 @@ kj::Own<ReadableStreamSource> newSystemStream(kj::Own<kj::AsyncInputStream> inne
 // NOTE: As with the other overload of newSystemStream(), `inner` must be wholly owned.
 kj::Own<WritableStreamSink> newSystemStream(kj::Own<kj::AsyncOutputStream> inner,
     StreamEncoding encoding,
-    IoContext& context = IoContext::current());
+    IoContext& context = IoContext::current(),
+    FlushCompressionAfterWrite flushAfterWrite = FlushCompressionAfterWrite::NO);
 
 struct SystemMultiStream {
   kj::Own<ReadableStreamSource> readable;
