@@ -3,7 +3,6 @@
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/setup.h>
-#include <workerd/util/own-util.h>
 
 namespace workerd {
 

@@ -29,6 +29,10 @@ class BaseTracer: public kj::Refcounted {
     selfRef->invalidate();
   };
 
+  kj::Rc<BaseTracer> clone() {
+    return addRefToThis();
+  }
+
   // Weak reference to this tracer, used by user-tracing SpanSubmitter implementations so
   // abandoned user promises cannot pin tracer lifetime.
   using WeakRef = workerd::WeakRef<BaseTracer>;

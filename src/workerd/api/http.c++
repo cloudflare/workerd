@@ -23,7 +23,6 @@
 #include <workerd/util/entropy.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
-#include <workerd/util/own-util.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/strings.h>
 #include <workerd/util/thread-scopes.h>
@@ -1223,7 +1222,7 @@ jsg::Ref<Response> Response::clone(jsg::Lock& js) {
   auto urlListClone = KJ_MAP(url, urlList) { return kj::str(url); };
 
   return js.alloc<Response>(js, statusCode,
-      mapCopyString(statusText),
+      statusText.clone(),
       kj::mv(headersClone), kj::mv(cfClone), kj::mv(bodyClone), kj::mv(urlListClone));
 }
 

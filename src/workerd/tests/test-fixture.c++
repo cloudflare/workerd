@@ -513,7 +513,7 @@ kj::Own<IoContext::IncomingRequest> TestFixture::newIncomingRequest(IoContext& c
 }
 
 kj::Own<IoContext::IncomingRequest> TestFixture::newUndeliveredIncomingRequest(
-    IoContext& context, kj::Maybe<kj::Own<BaseTracer>> workerTracer) {
+    IoContext& context, kj::Maybe<kj::Rc<BaseTracer>> workerTracer) {
   kj::Rc<IoChannelFactory> channelFactory;
   KJ_IF_SOME(factory, ioChannelFactory) {
     channelFactory = factory(*timerChannel);

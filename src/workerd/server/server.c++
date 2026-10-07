@@ -667,7 +667,7 @@ class Server::ActorNamespace final {
         // We use a dedicated `ActorSelfTokenFactory` rather than an `ActorChannelImpl` so that we
         // don't hold a reference back to the `ActorContainer`, which would create a cycle
         // preventing actor eviction.
-        metadata.restoredSelfTokenFactory = kj::refcounted<ActorSelfTokenFactory>(
+        metadata.restoredSelfTokenFactory = kj::rc<ActorSelfTokenFactory>(
             ns, Worker::Actor::cloneId(KJ_ASSERT_NONNULL(classAndId.tryGet<ClassAndId>()).id));
       } else {
         // We're a facet. The only way we could have been called by anyone other than our direct
@@ -3122,7 +3122,7 @@ void Server::InspectorServiceIsolateRegistrar::registerIsolate(
 namespace {
 class RequestObserverWithTracer final: public RequestObserver, public WorkerInterface {
  public:
-  RequestObserverWithTracer(kj::Maybe<kj::Own<WorkerTracer>> tracer, kj::TaskSet& waitUntilTasks)
+  RequestObserverWithTracer(kj::Maybe<kj::Rc<WorkerTracer>> tracer, kj::TaskSet& waitUntilTasks)
       : tracer(kj::mv(tracer)) {}
 
   ~RequestObserverWithTracer() noexcept(false) {
@@ -3255,7 +3255,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   }
 
  private:
-  kj::Maybe<kj::Own<WorkerTracer>> tracer;
+  kj::Maybe<kj::Rc<WorkerTracer>> tracer;
   kj::Maybe<WorkerInterface&> inner;
   EventOutcome outcome = EventOutcome::OK;
 };
@@ -3809,7 +3809,7 @@ class Server::WorkerService final: public Service,
     // Same logic as in EntrypointService::startRequest().
     if (!isDynamic) {
       metadata.restoredSelfTokenFactory =
-          kj::refcounted<StaticServiceSelfTokenFactory>(kj::addRef(*this), kj::none);
+          kj::rc<StaticServiceSelfTokenFactory>(kj::addRef(*this), kj::none);
     }
 
     return startRequest(kj::mv(metadata), kj::none, {}, kj::none, false);
@@ -4037,7 +4037,7 @@ class Server::WorkerService final: public Service,
       }
     }
 
-    kj::Maybe<kj::Own<WorkerTracer>> workerTracer = kj::none;
+    kj::Maybe<kj::Rc<WorkerTracer>> workerTracer = kj::none;
 
     if (!bufferedTailWorkers.empty() || !streamingTailWorkers.empty()) {
       // Setting up buffered tail workers support, but only if we actually have tail workers
@@ -4059,9 +4059,9 @@ class Server::WorkerService final: public Service,
           streamingTailWorkers.releaseAsArray(), waitUntilTasks);
       auto trace = kj::refcounted<Trace>(kj::none /* stableId */, kj::none /* scriptName */,
           kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, kj::none /* scriptId */,
-          nullptr /* scriptTags */, mapCopyString(entrypointName), executionModel,
+          nullptr /* scriptTags */, entrypointName.clone(), executionModel,
           kj::mv(durableObjectId));
-      kj::Own<WorkerTracer> tracer = kj::refcounted<WorkerTracer>(
+      kj::Rc<WorkerTracer> tracer = kj::rc<WorkerTracer>(
           kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::mv(tailStreamWriter));
 
       // When the tracer is complete, deliver traces to any buffered tail workers. We end up
@@ -4093,7 +4093,7 @@ class Server::WorkerService final: public Service,
       });
     }
     kj::Own<RequestObserver> observer =
-        kj::refcounted<RequestObserverWithTracer>(mapAddRef(workerTracer), waitUntilTasks);
+        kj::refcounted<RequestObserverWithTracer>(workerTracer.clone(), waitUntilTasks);
 
     kj::Maybe<tracing::InvocationSpanContext> triggerContext;
     KJ_IF_SOME(ctx, metadata.userSpanParent.toSpanContext()) {
@@ -4112,9 +4112,8 @@ class Server::WorkerService final: public Service,
         kj::mv(workerTracer),  // workerTracer
         kj::mv(metadata.cfBlobJson),
         kj::none,  // versionInfo
-        kj::mv(triggerContext),
-        false,  // isDynamicDispatch
-        kj::mv(accessInfo), kj::mv(metadata.restoredSelfTokenFactory), metadata.fromPersistentStub,
+        kj::mv(triggerContext), IsDynamicDispatch::NO, kj::mv(accessInfo),
+        kj::mv(metadata.restoredSelfTokenFactory), metadata.fromPersistentStub,
         kj::mv(metadata.clientAddress));
   }
 
@@ -4203,7 +4202,7 @@ class Server::WorkerService final: public Service,
         // would potentially allow a malicious caller to read and manipulate the parameters to our
         // own `[restore]()` method.
         metadata.restoredSelfTokenFactory =
-            kj::refcounted<StaticServiceSelfTokenFactory>(kj::addRef(*worker), kj::addRef(*this));
+            kj::rc<StaticServiceSelfTokenFactory>(kj::addRef(*worker), kj::addRef(*this));
       }
 
       return worker->startRequest(kj::mv(metadata), entrypoint, kj::mv(props), kj::none, isTracer);
@@ -4768,7 +4767,7 @@ class Server::WorkerService final: public Service,
   kj::Promise<void> onLimitsExceeded() override {
     return kj::NEVER_DONE;
   }
-  void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) override {}
+  void setCpuLimitNearlyExceededCallback(kj::Function<void()> cb) override {}
   void requireLimitsNotExceeded() override {}
   void reportMetrics(RequestObserver& requestMetrics) override {}
   kj::Duration consumeTimeElapsedForPeriodicLogging() override {
@@ -5524,6 +5523,9 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted, private kj::TaskSet:
         // clang-format off
         .globalOutbound{
           .designator = kj::mv(source.globalOutbound)
+              .map([](kj::Rc<IoChannelFactory::SubrequestChannel>&& channel) {
+                return channel.toOwn();
+              })
               .orDefault([]() { return kj::refcounted<NullGlobalOutboundChannel>(); }),
           .errorContext = kj::str("Worker's globalOutbound"),
         },
@@ -5936,7 +5938,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       maybeFallbackService = kj::str(moduleFallback);
     }
 
-    using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
+    using workerd::api::pyodide::ArtifactBundler;
 
     KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
       newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(
@@ -6042,7 +6044,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     }
   }
 
-  using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
+  using workerd::api::pyodide::ArtifactBundler;
   auto artifactBundler = ArtifactBundler::makeDisabledBundler();
 
   auto script = isolate->newScript(name, def.source, IsolateObserver::StartType::COLD,
@@ -6841,7 +6843,7 @@ class Server::HttpListener final: public kj::Refcounted {
         kj::HttpService::Response& response) override {
       TRACE_EVENT("workerd", "Connection:request()");
       IoChannelFactory::SubrequestMetadata metadata;
-      metadata.cfBlobJson = mapCopyString(cfBlobJson);
+      metadata.cfBlobJson = cfBlobJson.clone();
 
       Response* wrappedResponse = &response;
       kj::Own<ResponseWrapper> ownResponse;
@@ -6877,7 +6879,7 @@ class Server::HttpListener final: public kj::Refcounted {
       }
 
       IoChannelFactory::SubrequestMetadata metadata;
-      metadata.cfBlobJson = mapCopyString(cfBlobJson);
+      metadata.cfBlobJson = cfBlobJson.clone();
 
       auto worker = parent.service->startRequest(kj::mv(metadata));
       co_return co_await worker->connect(host, headers, connection, response, kj::mv(settings));

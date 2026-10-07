@@ -4,8 +4,6 @@
 
 #include "urlpattern.h"
 
-#include <workerd/util/own-util.h>
-
 #include <kj/vector.h>
 
 namespace workerd::api {
@@ -127,15 +125,15 @@ kj::StringPtr URLPattern::getHash() {
 
 URLPattern::URLPatternInit::operator jsg::UrlPattern::Init() {
   return {
-    .protocol = mapCopyString(this->protocol),
-    .username = mapCopyString(this->username),
-    .password = mapCopyString(this->password),
-    .hostname = mapCopyString(this->hostname),
-    .port = mapCopyString(this->port),
-    .pathname = mapCopyString(this->pathname),
-    .search = mapCopyString(this->search),
-    .hash = mapCopyString(this->hash),
-    .baseUrl = mapCopyString(this->baseURL),
+    .protocol = this->protocol.clone(),
+    .username = this->username.clone(),
+    .password = this->password.clone(),
+    .hostname = this->hostname.clone(),
+    .port = this->port.clone(),
+    .pathname = this->pathname.clone(),
+    .search = this->search.clone(),
+    .hash = this->hash.clone(),
+    .baseUrl = this->baseURL.clone(),
   };
 }
 
@@ -241,15 +239,15 @@ kj::Maybe<URLPattern::URLPatternResult> URLPattern::exec(
       JSG_REQUIRE(
           maybeBase == kj::none, TypeError, "A baseURL is not allowed when input is an object.");
       inputs.add(URLPattern::URLPatternInit{
-        .protocol = mapCopyString(i.protocol),
-        .username = mapCopyString(i.username),
-        .password = mapCopyString(i.password),
-        .hostname = mapCopyString(i.hostname),
-        .port = mapCopyString(i.port),
-        .pathname = mapCopyString(i.pathname),
-        .search = mapCopyString(i.search),
-        .hash = mapCopyString(i.hash),
-        .baseURL = mapCopyString(i.baseURL),
+        .protocol = i.protocol.clone(),
+        .username = i.username.clone(),
+        .password = i.password.clone(),
+        .hostname = i.hostname.clone(),
+        .port = i.port.clone(),
+        .pathname = i.pathname.clone(),
+        .search = i.search.clone(),
+        .hash = i.hash.clone(),
+        .baseURL = i.baseURL.clone(),
       });
 
       jsg::UrlPattern::Init init = {

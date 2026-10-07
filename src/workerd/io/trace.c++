@@ -625,7 +625,7 @@ kj::String EmailEventInfo::toString() const {
 namespace {
 kj::Vector<TraceEventInfo::TraceItem> getTraceItemsFromTraces(
     kj::ArrayPtr<const kj::Own<Trace>> traces) {
-  return KJ_MAP(t, traces) { return TraceEventInfo::TraceItem(mapCopyString(t->scriptName)); };
+  return KJ_MAP(t, traces) { return TraceEventInfo::TraceItem(t->scriptName.clone()); };
 }
 
 kj::Vector<TraceEventInfo::TraceItem> getTraceItemsFromReader(
@@ -689,7 +689,7 @@ void TraceEventInfo::TraceItem::copyTo(
 }
 
 TraceEventInfo::TraceItem TraceEventInfo::TraceItem::clone() const {
-  return TraceItem(mapCopyString(scriptName));
+  return TraceItem(scriptName.clone());
 }
 
 DiagnosticChannelEvent::DiagnosticChannelEvent(
@@ -985,8 +985,7 @@ Exception Exception::clone() const {
       }
     }
   }
-  return Exception(
-      timestamp, kj::str(name), kj::str(message), mapCopyString(stack), kj::mv(clonedCode));
+  return Exception(timestamp, kj::str(name), kj::str(message), stack.clone(), kj::mv(clonedCode));
 }
 }  // namespace tracing
 
@@ -1680,15 +1679,15 @@ void Onset::copyTo(rpc::Trace::Onset::Builder builder) const {
 Onset::WorkerInfo Onset::WorkerInfo::clone() const {
   return WorkerInfo{
     .executionModel = executionModel,
-    .scriptName = mapCopyString(scriptName),
+    .scriptName = scriptName.clone(),
     .scriptVersion = scriptVersion.map([](auto& version) { return capnp::clone(*version); }),
     .preview = preview.map([](auto& preview) { return preview.clone(); }),
-    .dispatchNamespace = mapCopyString(dispatchNamespace),
-    .scriptId = mapCopyString(scriptId),
+    .dispatchNamespace = dispatchNamespace.clone(),
+    .scriptId = scriptId.clone(),
     .scriptTags =
         scriptTags.map([](auto& tags) { return KJ_MAP(tag, tags) { return kj::str(tag); }; }),
-    .entrypoint = mapCopyString(entrypoint),
-    .durableObjectId = mapCopyString(durableObjectId),
+    .entrypoint = entrypoint.clone(),
+    .durableObjectId = durableObjectId.clone(),
   };
 }
 

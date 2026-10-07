@@ -75,8 +75,8 @@ KJ_TEST("trace onset synchronizes an idle actor's clock before reading it") {
   auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
       kj::Array<kj::String>(), kj::none, ExecutionModel::DURABLE_OBJECT);
   auto traceRef = kj::addRef(*trace);
-  kj::Own<BaseTracer> tracer = kj::refcounted<WorkerTracer>(
-      kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::none);
+  kj::Rc<BaseTracer> tracer =
+      kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::none);
   auto request = fixture.newUndeliveredIncomingRequest(*context, kj::mv(tracer));
 
   KJ_EXPECT(request->now() == kj::UNIX_EPOCH);
@@ -85,6 +85,28 @@ KJ_TEST("trace onset synchronizes an idle actor's clock before reading it") {
 
   request->delivered();
   fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("cloning an incoming request tracer keeps it alive until the clone is dropped") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+      kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
+  auto tracer =
+      kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::none);
+  auto complete = tracer->onComplete();
+  auto request = fixture.newUndeliveredIncomingRequest(*context, kj::mv(tracer));
+  KJ_ASSERT_NONNULL(request->getWorkerTracer()).setEventInfo(*request, tracing::CustomEventInfo());
+  request->delivered();
+
+  auto clone = request->getWorkerTracer().clone();
+  KJ_ASSERT_NONNULL(clone);
+  fixture.drainAndDestroy(kj::mv(request));
+  KJ_EXPECT(!complete.poll(fixture.getWaitScope()));
+
+  clone = kj::none;
+  KJ_ASSERT(complete.poll(fixture.getWaitScope()));
+  complete.wait(fixture.getWaitScope());
 }
 
 KJ_TEST("final request cancels context tasks before it stops being current") {

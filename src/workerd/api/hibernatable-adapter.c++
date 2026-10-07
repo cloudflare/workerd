@@ -86,7 +86,7 @@ kj::Promise<DeferredProxy<void>> HibernatableWebSocketAdapter::couple(
 }
 
 void HibernatableWebSocketAdapter::internalAccept(
-    jsg::Lock&, kj::Maybe<kj::Own<InputGate::CriticalSection>>) {
+    jsg::Lock&, kj::Maybe<kj::Rc<InputGate::CriticalSection>>) {
   unimplemented();
 }
 

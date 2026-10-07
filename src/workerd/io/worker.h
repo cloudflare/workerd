@@ -254,7 +254,7 @@ class Worker::Script: public kj::AtomicRefcounted {
     return python;
   }
   inline kj::Maybe<kj::Arc<DynamicEnvBuilder>> getDynamicEnvBuilder() const {
-    return mapAddRef(dynamicEnvBuilder);
+    return dynamicEnvBuilder.clone();
   }
 
   void installVirtualFileSystemOnContext(v8::Local<v8::Context> context) const;

@@ -189,6 +189,10 @@ class InputGate::CriticalSection: private InputGate, public kj::Refcounted {
   CriticalSection(InputGate& parent);
   ~CriticalSection() noexcept(false);
 
+  kj::Rc<CriticalSection> clone() {
+    return addRefToThis();
+  }
+
   // Wait for a nested lock in order to continue this CriticalSection.
   //
   // The first call to wait() begins the CriticalSection. After that wait completes, until the
