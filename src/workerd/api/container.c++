@@ -273,7 +273,18 @@ void ExecProcess::sendKill(int signo) {
   auto& ioContext = IoContext::current();
   auto req = handle->killRequest(capnp::MessageSize{4, 0});
   req.setSigno(signo);
-  ioContext.addTask(req.sendIgnoringResult());
+  ioContext.addTask(req.sendIgnoringResult().catch_([](kj::Exception&& e) -> kj::Promise<void> {
+    // The process may exit before the signal reaches it, in which case the container runtime
+    // rejects the call. That race is expected and kill() gives the app no way to observe the
+    // result, so drop that failure rather than letting addTask() report it as an internal error.
+    // TODO(CloudChamber): Treat kill() on an exited process as success in the container runtime,
+    // then remove this catch_() call.
+    if (e.getDescription().contains("process has already exited"_kj)) {
+      KJ_LOG(INFO, "container process already exited before kill", e);
+      return kj::READY_NOW;
+    }
+    return kj::mv(e);
+  }));
 }
 
 void ExecProcess::resize(jsg::Lock& js, int cols, int rows) {
