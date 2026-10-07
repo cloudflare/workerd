@@ -448,7 +448,7 @@ class IsolateBase {
   void setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext);
 
   // Serializes the isolate into the SnapshotArtifact passed at isolate creation.
-  void createSnapshotBlob();
+  void createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle);
 
   // Enumerates every resource type's constructor-template slots (memoizedConstructor and
   // contextConstructor, empty or not) for startup-snapshot handling, in a fixed compile-time

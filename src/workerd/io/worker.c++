@@ -2157,9 +2157,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
     currentSpan = maybeMakeSpan("lw:new_context"_kjc);
 
+    jsg::JsContext<api::ServiceWorkerGlobalScope>* jsContext = nullptr;
     // Create a stack-allocated handle scope.
     lock.withinHandleScope([&] {
-      jsg::JsContext<api::ServiceWorkerGlobalScope>* jsContext;
       bool freshContext = false;
 
       KJ_IF_SOME(c, script->impl->moduleContext) {
@@ -2377,7 +2377,11 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
     if (auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
         isolateBase.isPreparingSnapshot()) {
-      isolateBase.createSnapshotBlob();
+      auto contextGlobal = jsContext->extractContextGlobalForSnapshot();
+      (*jsContext)->clear();
+      const_cast<Script&>(*script).impl->moduleContext = kj::none;
+      impl->context = kj::none;
+      isolateBase.createSnapshotBlob(kj::mv(contextGlobal));
     }
   });
 }
