@@ -142,6 +142,7 @@ wd_cc_library(
         "//src/rust/jsg-test:__pkg__",
     ],
     deps = [
+        ":code-cache",
         ":exception",
         ":exception_metadata_capnp",
         ":macro-meta",
@@ -154,6 +155,19 @@ wd_cc_library(
         "//src/workerd/util:autogate",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
+        "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
+    ],
+)
+
+wd_cc_library(
+    name = "code-cache",
+    srcs = ["code-cache.c++"],
+    hdrs = ["code-cache.h"],
+    implementation_deps = ["@ssl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":observer",
         "@capnp-cpp//src/kj",
         "@workerd-v8//:v8",
     ],
@@ -343,6 +357,7 @@ wd_cc_library(
     ["*-test.c++"],
     exclude = [
         # defined below
+        "code-cache-test.c++",
         "compile-cache-test.c++",
         "macro-meta-test.c++",
         "resource-test.c++",
@@ -382,6 +397,15 @@ kj_test(
     deps = [
         ":compile-cache-fixture",
         ":jsg",
+    ],
+)
+
+kj_test(
+    src = "code-cache-test.c++",
+    local_defines = ["JSG_IMPLEMENTATION"],
+    deps = [
+        ":jsg",
+        ":script",
     ],
 )
 

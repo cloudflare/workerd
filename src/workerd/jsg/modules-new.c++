@@ -6,6 +6,7 @@
 
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
 
 #include <simdutf.h>
@@ -222,6 +223,19 @@ class EsModule final: public Module {
     v8::ScriptOrigin origin(js.str(id().getHref()), resourceLineOffset, resourceColumnOffset,
         resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, true);
 
+    // Bundle modules use the isolate's code cache if there is one, else the slot below.
+    kj::Maybe<IsolateCodeCache&> maybeCodeCache;
+    if (type() == Type::BUNDLE) {
+      maybeCodeCache = IsolateBase::from(js.v8Isolate).tryGetCodeCache();
+    }
+    const auto& prepared = getPreparedSource(maybeCodeCache != kj::none);
+    KJ_IF_SOME(codeCache, maybeCodeCache) {
+      KJ_IF_SOME(key, prepared.codeCacheKey) {
+        return codeCache.compileModule(
+            js.v8Isolate, key, newExternalString(js, prepared.encoded.repr), origin, observer);
+      }
+    }
+
     auto options = v8::ScriptCompiler::CompileOptions::kNoCompileOptions;
     bool cacheWasRejected = false;
 
@@ -256,31 +270,7 @@ class EsModule final: public Module {
         }
       }
 
-      // Encode the UTF-8 source into a V8-compatible external representation,
-      // once, shared across all isolates compiling this module. See
-      // EncodedSource for the tiering. kj::Lazy handles cross-thread once-init.
-      const auto& encoded = encodedSource.get([this](kj::SpaceFor<EncodedSource>& space) {
-        KJ_SWITCH_ONEOF(source) {
-          KJ_CASE_ONEOF(borrowed, kj::ArrayPtr<const char>) {
-            return space.construct(encodeSource(kj::mv(borrowed)));
-          }
-          KJ_CASE_ONEOF(encoded, StaticExternalStringSource) {
-            KJ_SWITCH_ONEOF(encoded) {
-              KJ_CASE_ONEOF(oneByte, kj::ArrayPtr<const char>) {
-                return space.construct(EncodedSource{.repr = kj::mv(oneByte)});
-              }
-              KJ_CASE_ONEOF(twoByte, kj::ArrayPtr<const uint16_t>) {
-                return space.construct(EncodedSource{.repr = kj::mv(twoByte)});
-              }
-            }
-          }
-          KJ_CASE_ONEOF(owned, kj::Arc<OwnedAscii>) {
-            return space.construct(encodeSource(kj::mv(owned)));
-          }
-        }
-        KJ_UNREACHABLE;
-      });
-      auto contentStr = newExternalString(js, encoded.repr);
+      auto contentStr = newExternalString(js, prepared.encoded.repr);
 
       // Note that the Source takes ownership of the CachedData pointer that we pass in.
       // (but not the actual buffer it holds). Do not use data after this point.
@@ -377,15 +367,63 @@ class EsModule final: public Module {
     return actuallyEvaluate(js, module, observer);
   }
 
+  // The source as handed to V8, and the key of its code cache if it has one.
+  struct PreparedSource {
+    EncodedSource encoded;
+    kj::Maybe<CodeCacheKey> codeCacheKey;
+  };
+
+  // Encodes the UTF-8 source into a V8-compatible external representation,
+  // once, shared across all isolates compiling this module. See EncodedSource
+  // for the tiering. kj::Lazy handles cross-thread once-init.
+  //
+  // The code cache key is computed from the UTF-8 bytes, which the encoding may
+  // consume, so it is computed here too, if `withCodeCacheKey` is set for the
+  // first compile. Within a process, the isolates sharing a registry either all
+  // have a code cache or all lack one, so the first compile speaks for all.
+  const PreparedSource& getPreparedSource(bool withCodeCacheKey) const {
+    return preparedSource.get([this, withCodeCacheKey](kj::SpaceFor<PreparedSource>& space) {
+      auto keyFor = [&](kj::ArrayPtr<const char> utf8) -> kj::Maybe<CodeCacheKey> {
+        if (!withCodeCacheKey) return kj::none;
+        return CodeCacheKey::compute(CodeCacheKey::Unit::NEW_REGISTRY_ESM, utf8);
+      };
+      KJ_SWITCH_ONEOF(source) {
+        KJ_CASE_ONEOF(borrowed, kj::ArrayPtr<const char>) {
+          auto key = keyFor(borrowed);
+          return space.construct(
+              PreparedSource{.encoded = encodeSource(kj::mv(borrowed)), .codeCacheKey = key});
+        }
+        KJ_CASE_ONEOF(encoded, StaticExternalStringSource) {
+          // Pre-encoded builtin source, which never uses the code cache.
+          KJ_SWITCH_ONEOF(encoded) {
+            KJ_CASE_ONEOF(oneByte, kj::ArrayPtr<const char>) {
+              return space.construct(PreparedSource{.encoded = {.repr = kj::mv(oneByte)}});
+            }
+            KJ_CASE_ONEOF(twoByte, kj::ArrayPtr<const uint16_t>) {
+              return space.construct(PreparedSource{.encoded = {.repr = kj::mv(twoByte)}});
+            }
+          }
+        }
+        KJ_CASE_ONEOF(owned, kj::Arc<OwnedAscii>) {
+          auto key = keyFor(owned->asPtr());
+          return space.construct(
+              PreparedSource{.encoded = encodeSource(kj::mv(owned)), .codeCacheKey = key});
+        }
+      }
+      KJ_UNREACHABLE;
+    });
+  }
+
   // The UTF-8 source text, either borrowed from process-lifetime storage or
   // held through shared ownership. The encoding initializer moves this into
   // EncodedSource; its only reader is the initializer itself.
   mutable UnencodedSource source;
 
   // The source encoded into a V8-compatible external-string representation
-  // (see EncodedSource). Computed on first compile and shared across isolates;
-  // each V8 string retains an Arc to owned backing storage.
-  kj::Lazy<EncodedSource> encodedSource;
+  // (see EncodedSource), with its code cache key. Computed on first compile and
+  // shared across isolates; each V8 string retains an Arc to owned backing
+  // storage.
+  kj::Lazy<PreparedSource> preparedSource;
 
   // The cachedData holds the cached compilation data for this module, if any. It is
   // generated on-demand the first time the module is compiled, if possible.

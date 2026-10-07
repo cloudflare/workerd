@@ -1,6 +1,7 @@
 #include "script.h"
 
 #include <workerd/jsg/jsvalue.h>
+#include <workerd/jsg/setup.h>
 
 namespace workerd::jsg {
 
@@ -20,6 +21,18 @@ NonModuleScript NonModuleScript::compile(jsg::Lock& js, kj::StringPtr code, kj::
   v8::ScriptOrigin origin(js.str(name));
   v8::ScriptCompiler::Source source(js.str(code), origin);
   return NonModuleScript(js, check(v8::ScriptCompiler::CompileUnboundScript(isolate, &source)));
+}
+
+NonModuleScript NonModuleScript::compileWorkerScript(
+    jsg::Lock& js, kj::StringPtr code, kj::StringPtr name) {
+  KJ_IF_SOME(codeCache, IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
+    auto key = CodeCacheKey::compute(CodeCacheKey::Unit::CLASSIC_SCRIPT, code);
+    v8::ScriptOrigin origin(js.str(name));
+    return NonModuleScript(js,
+        check(codeCache.compileScript(js.v8Isolate, key, js.str(code), origin,
+            IsolateBase::from(js.v8Isolate).getObserver())));
+  }
+  return compile(js, code, name);
 }
 
 }  // namespace workerd::jsg
