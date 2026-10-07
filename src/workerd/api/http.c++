@@ -1470,6 +1470,89 @@ namespace {
 // Fetch spec requires (suggests?) 20: https://fetch.spec.whatwg.org/#http-redirect-fetch
 constexpr auto MAX_REDIRECT_COUNT = 20;
 
+// Setup spans stay on the native stack so that they finish before fetch returns its JS promise.
+// Keep the fetch span as the propagated parent of the outgoing request.
+class FetchSetupTrace {
+ public:
+  void start(TraceContext& traceContext) {
+    setup = traceContext.getInternalSpanParent().newOptionalChild("fetch_setup"_kjc);
+    startPhase("fetch_get_client"_kjc);
+  }
+
+  void startPhase(kj::ConstString name) {
+    phase.end();
+    phase = setup.newChild(kj::mv(name));
+  }
+
+  void end() {
+    phase.end();
+    setup.end();
+  }
+
+ private:
+  SpanBuilder setup{nullptr};
+  SpanBuilder phase{nullptr};
+};
+
+struct PreparedFetchRequest {
+  kj::HttpHeaders headers;
+  kj::String url;
+};
+
+PreparedFetchRequest prepareFetchRequest(Request& request,
+    kj::ArrayPtr<const kj::Url> urlList,
+    kj::Maybe<TraceContext>& traceContext) {
+  auto& ioContext = IoContext::current();
+  kj::HttpHeaders headers(ioContext.getHeaderTable());
+  request.shallowCopyHeadersTo(headers);
+
+  auto headerIds = ioContext.getHeaderIds();
+  switch (request.getCacheMode()) {
+    case Request::CacheMode::RELOAD:
+      KJ_FALLTHROUGH;
+    case Request::CacheMode::NOSTORE:
+      KJ_FALLTHROUGH;
+    case Request::CacheMode::NOCACHE:
+      if (headers.get(headerIds.cacheControl) == kj::none) {
+        headers.setPtr(headerIds.cacheControl, "no-cache");
+      }
+      if (headers.get(headerIds.pragma) == kj::none) {
+        headers.setPtr(headerIds.pragma, "no-cache");
+      }
+      KJ_FALLTHROUGH;
+    case Request::CacheMode::NONE:
+      break;
+    default:
+      KJ_UNREACHABLE;
+  }
+
+  KJ_IF_SOME(ctx, traceContext) {
+    ctx.setTag("network.protocol.name"_kjc, "http"_kjc);
+    ctx.setTag("network.protocol.version"_kjc, "HTTP/1.1"_kjc);
+    ctx.setTag("http.request.method"_kjc, kj::str(request.getMethodEnum()));
+    ctx.setTag("url.full"_kjc, request.getUrl());
+
+    KJ_IF_SOME(userAgent, headers.get(headerIds.userAgent)) {
+      ctx.setTag("user_agent.original"_kjc, userAgent);
+    }
+    KJ_IF_SOME(contentType, headers.get(headerIds.contentType)) {
+      ctx.setTag("http.request.header.content-type"_kjc, contentType);
+    }
+    KJ_IF_SOME(contentLength, headers.get(headerIds.contentLength)) {
+      ctx.setTag("http.request.header.content-length"_kjc, contentLength);
+    }
+    KJ_IF_SOME(accept, headers.get(headerIds.accept)) {
+      ctx.setTag("http.request.header.accept"_kjc, accept);
+    }
+    KJ_IF_SOME(acceptEncoding, headers.get(headerIds.acceptEncoding)) {
+      ctx.setTag("http.request.header.accept-encoding"_kjc, acceptEncoding);
+    }
+  }
+
+  auto url = uriEncodeControlChars(urlList.back().toString(kj::Url::HTTP_PROXY_REQUEST).asBytes());
+  return {kj::mv(headers), kj::mv(url)};
+}
+
 struct ActorFetchFailure {
   kj::Exception exception;
 };
@@ -1650,6 +1733,54 @@ jsg::Promise<jsg::Ref<Response>> retryActorFetch(jsg::Lock& js,
   });
 }
 
+struct WebSocketFetchState {
+  jsg::Ref<Fetcher> fetcher;
+  jsg::Ref<Request> request;
+  kj::Vector<kj::Url> urlList;
+  kj::Own<kj::HttpClient> client;
+  kj::Maybe<jsg::Ref<AbortSignal>> signal;
+  kj::Maybe<kj::Rc<ActorCallRetryState>> retryState;
+  kj::Maybe<kj::TimePoint> callStart;
+};
+
+jsg::Promise<jsg::Ref<Response>> awaitWebSocketFetchResponse(jsg::Lock& js,
+    WebSocketFetchState state,
+    kj::Promise<kj::HttpClient::WebSocketResponse> responsePromise) {
+  auto& ioContext = IoContext::current();
+  KJ_IF_SOME(retryState, state.retryState) {
+    if (retryState->isRetryEnabled()) {
+      auto resultPromise = captureActorFetchAttempt(js, state.signal,
+          retryState->enforceRetryTimeout(kj::mv(responsePromise)), retryState.addRef());
+      return ioContext.awaitIo(js, kj::mv(resultPromise),
+          [state = kj::mv(state)](jsg::Lock& js,
+              ActorFetchAttemptResult<kj::HttpClient::WebSocketResponse>&& result) mutable
+          -> jsg::Promise<jsg::Ref<Response>> {
+        KJ_SWITCH_ONEOF(result) {
+          KJ_CASE_ONEOF(response, kj::HttpClient::WebSocketResponse) {
+            KJ_ASSERT_NONNULL(state.retryState)->recordRecovered();
+            return handleWebSocketFetchResponse(js, kj::mv(state.fetcher), kj::mv(state.request),
+                kj::mv(state.urlList), kj::mv(state.client), kj::mv(state.signal),
+                kj::mv(response), state.callStart);
+          }
+          KJ_CASE_ONEOF(failure, ActorFetchFailure) {
+            return retryActorFetch(js, kj::mv(state.fetcher), kj::mv(state.request),
+                kj::mv(state.urlList), kj::mv(KJ_ASSERT_NONNULL(state.retryState)),
+                kj::mv(failure.exception));
+          }
+        }
+        KJ_UNREACHABLE;
+      });
+    }
+  }
+  responsePromise = AbortSignal::maybeCancelWrap(js, state.signal, kj::mv(responsePromise));
+  return ioContext.awaitIo(js, kj::mv(responsePromise),
+      [state = kj::mv(state)](jsg::Lock& js, kj::HttpClient::WebSocketResponse&& response) mutable {
+    return handleWebSocketFetchResponse(js, kj::mv(state.fetcher), kj::mv(state.request),
+        kj::mv(state.urlList), kj::mv(state.client), kj::mv(state.signal), kj::mv(response),
+        state.callStart);
+  });
+}
+
 // `callStart` is set when a redirect continues an earlier call. A new call starts now, after any
 // output-gate wait.
 jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLock(jsg::Lock& js,
@@ -1706,76 +1837,33 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
 
   // Get client and trace context (if needed) in one clean call.
   auto cfBlobJson = jsRequest->serializeCfBlobJson(js);
+  FetchSetupTrace setupTrace;
   kj::Maybe<Fetcher::ClientWithTracing> maybeClientWithTracing;
   KJ_IF_SOME(attempt, actorCallAttempt) {
     maybeClientWithTracing = fetcher->getClientForActorCallAttempt(
-        ioContext, kj::mv(cfBlobJson), "fetch"_kjc, kj::mv(attempt));
+        ioContext, kj::mv(cfBlobJson), "fetch"_kjc, kj::mv(attempt),
+        [&setupTrace](TraceContext& traceContext) -> kj::Maybe<SpanParent> {
+      setupTrace.start(traceContext);
+      return traceContext.getUserSpanParent();
+    });
   } else {
-    maybeClientWithTracing =
-        fetcher->getClientWithTracing(ioContext, kj::mv(cfBlobJson), "fetch"_kjc);
+    maybeClientWithTracing = fetcher->getClientWithTracing(ioContext, kj::mv(cfBlobJson),
+        "fetch"_kjc, [&setupTrace](TraceContext& traceContext) -> kj::Maybe<SpanParent> {
+      setupTrace.start(traceContext);
+      return kj::none;
+    });
   }
   auto clientWithTracing = kj::mv(KJ_ASSERT_NONNULL(maybeClientWithTracing));
   auto traceContext = kj::mv(clientWithTracing.traceContext);
+  // Finish setup before the local fetch span unwinds on a synchronous failure.
+  KJ_DEFER(setupTrace.end());
+  setupTrace.startPhase("fetch_prepare_request"_kjc);
 
   // TODO(cleanup): Don't convert to HttpClient. Use the HttpService interface instead. This
   //   requires a significant rewrite of the code below. It'll probably get simpler, though?
   kj::Own<kj::HttpClient> client = asHttpClient(kj::mv(clientWithTracing.client));
 
-  kj::HttpHeaders headers(ioContext.getHeaderTable());
-  jsRequest->shallowCopyHeadersTo(headers);
-
-  // If the jsRequest has a CacheMode, we need to handle that here.
-  // Currently, the only cache mode we support is undefined and no-store, no-cache, and reload
-  auto headerIds = ioContext.getHeaderIds();
-  const auto cacheMode = jsRequest->getCacheMode();
-  switch (cacheMode) {
-    case Request::CacheMode::RELOAD:
-      KJ_FALLTHROUGH;
-    case Request::CacheMode::NOSTORE:
-      KJ_FALLTHROUGH;
-    case Request::CacheMode::NOCACHE:
-      if (headers.get(headerIds.cacheControl) == kj::none) {
-        headers.setPtr(headerIds.cacheControl, "no-cache");
-      }
-      if (headers.get(headerIds.pragma) == kj::none) {
-        headers.setPtr(headerIds.pragma, "no-cache");
-      }
-      KJ_FALLTHROUGH;
-    case Request::CacheMode::NONE:
-      break;
-    default:
-      KJ_UNREACHABLE;
-  }
-
-  KJ_IF_SOME(ctx, traceContext) {
-    ctx.setTag("network.protocol.name"_kjc, "http"_kjc);
-    ctx.setTag("network.protocol.version"_kjc, "HTTP/1.1"_kjc);
-    ctx.setTag("http.request.method"_kjc, kj::str(jsRequest->getMethodEnum()));
-    ctx.setTag("url.full"_kjc, jsRequest->getUrl());
-
-    KJ_IF_SOME(userAgent, headers.get(headerIds.userAgent)) {
-      ctx.setTag("user_agent.original"_kjc, userAgent);
-    }
-
-    KJ_IF_SOME(contentType, headers.get(headerIds.contentType)) {
-      ctx.setTag("http.request.header.content-type"_kjc, contentType);
-    }
-
-    KJ_IF_SOME(contentLength, headers.get(headerIds.contentLength)) {
-      ctx.setTag("http.request.header.content-length"_kjc, contentLength);
-    }
-
-    KJ_IF_SOME(accept, headers.get(headerIds.accept)) {
-      ctx.setTag("http.request.header.accept"_kjc, accept);
-    }
-
-    KJ_IF_SOME(acceptEncoding, headers.get(headerIds.acceptEncoding)) {
-      ctx.setTag("http.request.header.accept-encoding"_kjc, acceptEncoding);
-    }
-  }
-
-  kj::String url =
-      uriEncodeControlChars(urlList.back().toString(kj::Url::HTTP_PROXY_REQUEST).asBytes());
+  auto [headers, url] = prepareFetchRequest(*jsRequest, urlList.asPtr(), traceContext);
 
   if (headers.isWebSocket()) {
     if (!FeatureFlags::get(js).getWebSocketCompression()) {
@@ -1783,40 +1871,15 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
       // subrequest.
       headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
     }
+    setupTrace.startPhase("fetch_dispatch"_kjc);
     auto webSocketResponse = client->openWebSocket(url, headers);
-    KJ_IF_SOME(state, retryState) {
-      if (state->isRetryEnabled()) {
-        auto resultPromise = captureActorFetchAttempt(
-            js, signal, state->enforceRetryTimeout(kj::mv(webSocketResponse)), state.addRef());
-        return ioContext.awaitIo(js, kj::mv(resultPromise),
-              [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest),
-                  urlList = kj::mv(urlList), client = kj::mv(client), signal = kj::mv(signal),
-                  retryState = kj::mv(retryState), callStart](jsg::Lock& js,
-                  ActorFetchAttemptResult<kj::HttpClient::WebSocketResponse>&& result) mutable
-              -> jsg::Promise<jsg::Ref<Response>> {
-            KJ_SWITCH_ONEOF(result) {
-              KJ_CASE_ONEOF(response, kj::HttpClient::WebSocketResponse) {
-              KJ_ASSERT_NONNULL(retryState)->recordRecovered();
-              return handleWebSocketFetchResponse(js, kj::mv(fetcher), kj::mv(jsRequest),
-                  kj::mv(urlList), kj::mv(client), kj::mv(signal), kj::mv(response), callStart);
-            }
-            KJ_CASE_ONEOF(failure, ActorFetchFailure) {
-              return retryActorFetch(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
-                  kj::mv(KJ_ASSERT_NONNULL(retryState)), kj::mv(failure.exception));
-            }
-            }
-            KJ_UNREACHABLE;
-          });
-      }
-    }
-    webSocketResponse = AbortSignal::maybeCancelWrap(js, signal, kj::mv(webSocketResponse));
-    return ioContext.awaitIo(js, kj::mv(webSocketResponse),
-        [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
-            client = kj::mv(client), signal = kj::mv(signal), callStart](
-            jsg::Lock& js, kj::HttpClient::WebSocketResponse&& response) mutable {
-      return handleWebSocketFetchResponse(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
-          kj::mv(client), kj::mv(signal), kj::mv(response), callStart);
-    });
+    setupTrace.startPhase("fetch_promise_setup"_kjc);
+    webSocketResponse = webSocketResponse.attach(kj::mv(traceContext));
+    return awaitWebSocketFetchResponse(js,
+        {.fetcher = kj::mv(fetcher), .request = kj::mv(jsRequest), .urlList = kj::mv(urlList),
+          .client = kj::mv(client), .signal = kj::mv(signal), .retryState = kj::mv(retryState),
+          .callStart = callStart},
+        kj::mv(webSocketResponse));
   } else {
     kj::Maybe<kj::HttpClient::Request> nativeRequest;
     KJ_IF_SOME(jsBody, jsRequest->getBody(js)) {
@@ -1842,7 +1905,9 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
         headers.setPtr(kj::HttpHeaderId::CONTENT_LENGTH, "0"_kj);
       }
 
+      setupTrace.startPhase("fetch_dispatch"_kjc);
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, maybeLength);
+      setupTrace.startPhase("fetch_promise_setup"_kjc);
       auto& nr = KJ_ASSERT_NONNULL(nativeRequest);
       auto stream = newSystemStream(kj::mv(nr.body), StreamEncoding::IDENTITY);
 
@@ -1872,7 +1937,9 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
               ioContext.waitForDeferredProxy(jsBody.pumpTo(js, kj::mv(stream), EndStream::YES))),
           jsBody.addRef(js)));
     } else {
+      setupTrace.startPhase("fetch_dispatch"_kjc);
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, static_cast<uint64_t>(0));
+      setupTrace.startPhase("fetch_promise_setup"_kjc);
     }
     auto responsePromise =
         kj::mv(KJ_ASSERT_NONNULL(nativeRequest).response)
@@ -2753,6 +2820,13 @@ Fetcher::ClientWithTracing Fetcher::getClientWithTracing(IoContext& ioContext,
     kj::Maybe<kj::String> cfStr,
     kj::ConstString operationName) {
   return buildClient(ioContext, kj::mv(cfStr), kj::mv(operationName));
+}
+
+Fetcher::ClientWithTracing Fetcher::getClientWithTracing(IoContext& ioContext,
+    kj::Maybe<kj::String> cfStr,
+    kj::ConstString operationName,
+    MakeUserSpanParent makeUserSpanParent) {
+  return buildClient(ioContext, kj::mv(cfStr), kj::mv(operationName), kj::mv(makeUserSpanParent));
 }
 
 Fetcher::ClientWithTracing Fetcher::getClientForActorCallAttempt(IoContext& ioContext,
