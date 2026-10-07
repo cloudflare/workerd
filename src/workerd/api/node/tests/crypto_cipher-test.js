@@ -676,3 +676,23 @@ export const testUnimplemented = {
     strictEqual(typeof createDecipher, 'function');
   },
 };
+
+export const stringUpdateWithoutEncoding = {
+  test() {
+    const key = Buffer.alloc(32);
+    const iv = Buffer.alloc(16);
+
+    const cipher = createCipheriv('aes-256-cbc', key, iv);
+    const decipher = createDecipheriv('aes-256-cbc', key, iv);
+
+    const encrypted = Buffer.concat([
+      cipher.update('Hello World'),
+      cipher.final(),
+    ]);
+
+    let decrypted = '';
+    decrypted += decipher.update(encrypted, undefined, 'utf8');
+    decrypted += decipher.final('utf8');
+    strictEqual(decrypted, 'Hello World');
+  },
+};
