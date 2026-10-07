@@ -7,11 +7,13 @@ load("//:build/wd_test.bzl", "wd_test")
 digest_suite_srcs = glob(["*.js"]) + ["digest-modules.capnp"]
 
 wd_test(
+    size = "large",
     src = "digest-cpp.wd-test",
     data = digest_suite_srcs,
 )
 
 wd_test(
+    size = "large",
     src = "digest-ts.wd-test",
     args = ["--experimental"],
     data = digest_suite_srcs,
@@ -20,6 +22,7 @@ wd_test(
 # The main C++ cell plus the dateless opt-in pedantic_wpt flag, enforcing
 # that pedantic mode changes nothing on this suite's surface.
 wd_test(
+    size = "large",
     src = "digest-cpp-pedantic.wd-test",
     data = digest_suite_srcs,
 )
@@ -28,6 +31,7 @@ wd_test(
 # @all-compat-flags variant is disabled: at the 2999-12-31 date the flags
 # the cell deliberately omits would all turn on.
 wd_test(
+    size = "large",
     src = "digest-cpp-legacy.wd-test",
     data = digest_suite_srcs,
     generate_all_compat_flags_variant = False,

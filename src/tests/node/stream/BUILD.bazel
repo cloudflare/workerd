@@ -8,11 +8,13 @@ load("//:build/wd_test.bzl", "wd_test")
 stream_suite_srcs = glob(["*.js"]) + ["stream-modules.capnp"]
 
 wd_test(
+    size = "large",
     src = "stream-cpp.wd-test",
     data = stream_suite_srcs,
 )
 
 wd_test(
+    size = "large",
     src = "stream-ts.wd-test",
     args = ["--experimental"],
     data = stream_suite_srcs,
@@ -21,6 +23,7 @@ wd_test(
 # The main C++ cell plus the dateless opt-in pedantic_wpt flag, enforcing
 # that pedantic mode changes nothing on this suite's surface.
 wd_test(
+    size = "large",
     src = "stream-cpp-pedantic.wd-test",
     data = stream_suite_srcs,
 )
@@ -30,6 +33,7 @@ wd_test(
 # constructor flags this config deliberately omits would turn on,
 # contradicting its purpose of asserting the pre-flag behaviors.
 wd_test(
+    size = "large",
     src = "stream-cpp-legacy.wd-test",
     data = stream_suite_srcs,
     generate_all_compat_flags_variant = False,
