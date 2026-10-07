@@ -57,7 +57,7 @@
     {
       "name": "dragonbox",
       "type": "github_tarball",
-      "build_file_content": "cc_library(name = 'dragonbox', hdrs = glob(['include/dragonbox/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/dragonbox/src')",
+      "build_file_content": "load(\"@rules_cc//cc:cc_library.bzl\", \"cc_library\")\ncc_library(name = 'dragonbox', hdrs = glob(['include/dragonbox/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/dragonbox/src')",
       "owner": "jk-jeon",
       "repo": "dragonbox",
       "freeze_commit": "beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44"
@@ -71,8 +71,7 @@
       "repo": "fast_float",
       "branch": "main",
       "freeze_commit": "34164f547b7df3f5d794ff67e9f885c36819ebfc",
-      "build_file_content": "cc_library(name = 'fast_float', hdrs = glob(['include/fast_float/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/fast_float/src')",
-      "use_module_bazel_from_bcr": "8.0.2"
+      "build_file_content": "load(\"@rules_cc//cc:cc_library.bzl\", \"cc_library\")\ncc_library(name = 'fast_float', hdrs = glob(['include/fast_float/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/fast_float/src')"
     },
     // We want to avoid version skew with v8, so we use identical versions.
     {
@@ -92,8 +91,7 @@
       "use_bazel_dep": true,
       "owner": "google",
       "repo": "highway",
-      "freeze_commit": "2607d3b5b0113992fe84d3848859eae13b3b52c1",
-      "use_module_bazel_from_bcr": "1.3.0"
+      "freeze_commit": "2607d3b5b0113992fe84d3848859eae13b3b52c1"
     },
     {
       "name": "nbytes",
@@ -117,7 +115,8 @@
       "freeze_version": "v58.2",
       "patches": [
         "//:patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch",
-        "//:patches/perfetto/0002-disable-info-level-logging-re2.patch"
+        "//:patches/perfetto/0002-disable-info-level-logging-re2.patch",
+        "//:patches/perfetto/0003-Load-rules-removed-from-Bazel-9-builtins.patch"
       ]
     },
     {

@@ -66,6 +66,7 @@ PATCHES = [
     "0041-Disable-preserve_most-on-Windows-x64-before-Clang-22.patch",
     "0042-cppgc-Sweep-cppgc-eagerly-with-non-incremental-GC.patch",
     "0043-Allow-V8-release-archives-without-metagen-Clang-head.patch",
+    "0044-Load-cc_library-in-BUILD.icu.patch",
 ]
 
 http_archive(
@@ -79,7 +80,7 @@ http_archive(
 
 git_repository(
     name = "llvm-libc",
-    build_file_content = "cc_library(name = 'llvm-libc', hdrs = glob(['**/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/llvm-libc/src')",
+    build_file_content = "load('@rules_cc//cc:cc_library.bzl', 'cc_library')\ncc_library(name = 'llvm-libc', hdrs = glob(['**/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/llvm-libc/src')",
     commit = "fe440a8abe663d6878686f147ef6b1a02075ae15",
     remote = "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libc.git",
 )

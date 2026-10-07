@@ -26,9 +26,6 @@
       "name": "platforms",
       "type": "bazel_dep"
     },
-    // While the build should succeed with the default toolchain configuration from rules_cc,
-    // apple_support is more tailored to macOS and allows us to cross-compile easily. Note that this
-    // needs to be pulled in before rules_cc for this toolchain to actually be used.
     {
       "name": "apple_support",
       "type": "bazel_dep"
