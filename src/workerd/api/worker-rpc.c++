@@ -2006,7 +2006,7 @@ class DeliveredJsRpcExceptionObserver final: public kj::Refcounted {
  public:
   DeliveredJsRpcExceptionObserver() = default;
   DeliveredJsRpcExceptionObserver(kj::Own<RequestObserver> metrics,
-      kj::Maybe<kj::Own<BaseTracer>> tracer,
+      kj::Maybe<kj::Rc<BaseTracer>> tracer,
       tracing::InvocationSpanContext invocationContext)
       : metrics(kj::mv(metrics)),
         tracer(kj::mv(tracer)),
@@ -2016,7 +2016,7 @@ class DeliveredJsRpcExceptionObserver final: public kj::Refcounted {
 
  private:
   kj::Maybe<kj::Own<RequestObserver>> metrics;
-  kj::Maybe<kj::Own<BaseTracer>> tracer;
+  kj::Maybe<kj::Rc<BaseTracer>> tracer;
   kj::Maybe<tracing::InvocationSpanContext> invocationContext;
 };
 
@@ -3300,8 +3300,9 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       bool isDynamicDispatch)
       : JsRpcTargetBase(ioCtx,
             CantOutliveIncomingRequest(),
-            kj::rc<DeliveredJsRpcExceptionObserver>(
-                kj::addRef(*metrics), mapAddRef(tracer), ioCtx.getInvocationSpanContext().clone())),
+            kj::rc<DeliveredJsRpcExceptionObserver>(kj::addRef(*metrics),
+                tracer.map([](auto& t) { return t.clone(); }),
+                ioCtx.getInvocationSpanContext().clone())),
         ioCtx(ioCtx),
         metrics(kj::mv(metrics)),
         // Most of the time we don't really have to clone this but it's hard to fully prove, so
