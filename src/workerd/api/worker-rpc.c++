@@ -3301,7 +3301,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       : JsRpcTargetBase(ioCtx,
             CantOutliveIncomingRequest(),
             kj::rc<DeliveredJsRpcExceptionObserver>(kj::addRef(*metrics),
-                tracer.map([](auto& t) { return t.clone(); }),
+                tracer.map([](kj::Rc<BaseTracer>& t) { return t.clone(); }),
                 ioCtx.getInvocationSpanContext().clone())),
         ioCtx(ioCtx),
         metrics(kj::mv(metrics)),
