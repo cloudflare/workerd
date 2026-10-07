@@ -25,19 +25,7 @@ namespace {
 
 static thread_local bool inCppgcShimDestructor = false;
 
-// Runs `func`, which detaches and possibly destroys Wrappables, from inside V8's garbage collector.
-// V8 is built without exception support, so no exception may propagate out of here: unwinding
-// through V8's frames skips its scope destructors and leaves the isolate broken (for example,
-// unable to run JavaScript again), and an exception leaving the noexcept ~CppgcShim() terminates
-// the process. Wrappable destructors can run arbitrary code, so log and drop the exception instead.
-template <typename Func>
-void runInsideGc(Func&& func) {
-  KJ_IF_SOME(exception, kj::runCatchingExceptions(kj::fwd<Func>(func))) {
-    KJ_LOG(ERROR, "exception while releasing objects during garbage collection", exception);
-  }
-}
-
-};  // namespace
+};
 
 bool HeapTracer::isInCppgcDestructor() {
   return inCppgcShimDestructor;
@@ -128,7 +116,7 @@ class Wrappable::CppgcShim final: public v8::Object::Wrappable {
         KJ_DASSERT(active.wrappable->strongWrapper.IsEmpty());
         // Can't go through detachWrapper(): on the major-GC path cppgc already cleared the
         // Wrappable's `weakShim`, so it can no longer find us. Hand it the shim directly.
-        runInsideGc([&]() { active.wrappable->detachFromShim(*this, false); });
+        active.wrappable->detachFromShim(*this, false);
       }
       KJ_CASE_ONEOF(freelisted, Freelisted) {
         KJ_DASSERT(&KJ_ASSERT_NONNULL(*freelisted.prev) == this);
@@ -309,13 +297,6 @@ void HeapTracer::ResetRoot(const v8::TracedReference<v8::Value>& handle) {
   // if the wrappable has strong references, which means that its outgoing references need to be
   // upgraded to strong).
   detachLater.add(&wrappable);
-}
-
-void HeapTracer::detachCollectedWrappers() {
-  for (Wrappable* wrappable: detachLater) {
-    runInsideGc([&]() { wrappable->detachWrapper(true); });
-  }
-  detachLater.clear();
 }
 
 void HeapTracer::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
