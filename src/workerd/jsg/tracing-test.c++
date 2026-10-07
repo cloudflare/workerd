@@ -299,5 +299,29 @@ KJ_TEST("TracedReference usage does not lead to crashes") {
       "number", "123");
 }
 
+KJ_TEST("allocating short-lived wrappers eventually triggers a major GC") {
+  // Every wrapper takes entries in V8's CppHeap pointer table, which only a major GC frees. A
+  // loop of wrappers that die young only triggers minor GCs by itself, so a major GC has to come
+  // from the wrappers' cppgc allocations being reported to V8. If they are not, the table fills
+  // and the process aborts with "ExternalEntityTable::AllocateEntry: allocation failed".
+  uint majorGcCount = 0;
+  Evaluator<TraceTestContext, TraceTestIsolate> e(v8System);
+
+  // A fresh isolate starts with a large global allocation limit. A full GC sets it from the live
+  // heap, which is nearly empty, so the loop below crosses it quickly.
+  e.expectEval("gc()", "undefined", "undefined");
+
+  e.getIsolate().runInLockScope([&](TraceTestIsolate::Lock& lock) {
+    lock.v8Isolate->AddGCEpilogueCallback(
+        [](v8::Isolate*, v8::GCType, v8::GCCallbackFlags, void* data) {
+      ++*static_cast<uint*>(data);
+    }, &majorGcCount, v8::kGCTypeMarkSweepCompact);
+  });
+
+  e.expectEval("(() => { for (let i = 0; i < 1000000; ++i) new NumberBox(i); })()", "undefined",
+      "undefined");
+  KJ_EXPECT(majorGcCount > 0);
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test

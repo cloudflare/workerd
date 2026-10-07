@@ -511,15 +511,34 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
   KJ_REQUIRE(!hasWrapper());
   KJ_REQUIRE(strongWrapper.IsEmpty());
 
-  // No garbage collection may run for the duration of this function. Between creating the
+  // Set up internal fields for a newly-allocated object.
+  KJ_REQUIRE(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
+  // Internal field 0 holds a marker identifying this as a workerd API object; see
+  // isWorkerdApiObject(). The marker's address is a small integer type-tagged by slot index.
+  auto tagAddress = const_cast<uint16_t*>(&WORKERD_WRAPPABLE_TAG);
+  object->SetAlignedPointerInInternalField(WRAPPABLE_TAG_FIELD_INDEX, tagAddress,
+      static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX));
+
+  // The C++ object is reached only through the CppgcShim, stored in V8's CppHeap pointer table
+  // with a per-type tag. There is deliberately no second pointer to the object in an internal
+  // field: a single tagged handle means dispatch and GC lifetime are always driven by the same
+  // pointer. The shim carries the same tag so it lands in the matching freelist bucket.
+  auto* shim = tracer.allocateShim(*this, tag);
+
+  // No garbage collection may run from here to the end of this function. Between creating the
   // TracedReference below and linking `object` to its CppgcShim, the traced node exists but
   // nothing in the cppgc object graph reaches it, so a major GC's ResetDeadNodes() would free the
   // node -- zapping it with kTracedHandleFullGCResetZapValue -- while `object` itself stays
   // alive. Marking cannot save the node either: constructing a TracedReference is an initializing
   // store, which V8 deliberately does not black-allocate.
   //
-  // The window is reachable because allocateShim() allocates on the cppgc heap, and cppgc reports
-  // its allocations to V8, which collects once the old-generation allocation limit is reached.
+  // Both cppgc allocations above (allocateShim(), and the slot wrapper V8 allocates for
+  // SetAlignedPointerInInternalField()) must stay outside this scope. cppgc reports allocations
+  // to V8 only when GC is allowed, and nothing reports them when the scope closes. If they were
+  // inside it, a loop creating short-lived API objects would never trigger a major GC. Every
+  // wrapper also takes two entries in V8's CppHeap pointer table, and only a major GC frees
+  // them, so the table would fill and the process would abort with "ExternalEntityTable::
+  // AllocateEntry: allocation failed".
   cppgc::subtle::NoGarbageCollectionScope noGcScope(isolate->GetCppHeap()->GetHeapHandle());
 
   // The C++ Wrappable object must hold a TracedReference to its own JavaScript wrapper, while
@@ -551,19 +570,6 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
   // that a recreated wrapper would no longer be equivalent.
   this->isolate = isolate;
 
-  // Set up internal fields for a newly-allocated object.
-  KJ_REQUIRE(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
-  // Internal field 0 holds a marker identifying this as a workerd API object; see
-  // isWorkerdApiObject(). The marker's address is a small integer type-tagged by slot index.
-  auto tagAddress = const_cast<uint16_t*>(&WORKERD_WRAPPABLE_TAG);
-  object->SetAlignedPointerInInternalField(WRAPPABLE_TAG_FIELD_INDEX, tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX));
-
-  // The C++ object is reached only through the CppgcShim, stored in V8's CppHeap pointer table
-  // with a per-type tag. There is deliberately no second pointer to the object in an internal
-  // field: a single tagged handle means dispatch and GC lifetime are always driven by the same
-  // pointer. The shim carries the same tag so it lands in the matching freelist bucket.
-  auto* shim = tracer.allocateShim(*this, tag);
   shim->wrapper.emplace(isolate, object, v8::TracedReference<v8::Object>::IsDroppable());
   v8::Object::Wrap(isolate, object, shim, tag);
 
