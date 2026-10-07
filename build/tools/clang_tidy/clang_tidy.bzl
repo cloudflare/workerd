@@ -149,7 +149,7 @@ def _clang_tidy_aspect_impl(target, ctx):
         args.add("--config-file=" + clang_tidy_config.path)
 
         # Disable checks that are path-filtered and not enabled for this file
-        real_path = src.path.removeprefix(src.owner.workspace_root + "/")
+        real_path = src.path.removeprefix(src.owner.repo_root + "/")
         disabled_checks = _get_disabled_checks_for_file(real_path)
 
         # Parse clang_tidy_args to separate --checks from other args.
