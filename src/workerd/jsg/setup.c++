@@ -555,6 +555,20 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   // lock, after CreateBlob().
   applyDeferredActions();
 
+  // 1b. Settle the FinalizationRegistry cleanups that destroying the graph leaves behind.
+  // CreateBlob() runs a full GC of its own before serializing: every registry whose targets die
+  // in that GC lands on the heap's dirty list with a cleanup task posted to the foreground task
+  // runner, and the startup serializer then rejects the isolate
+  // (StartupSerializer::CheckNoDirtyFinalizationRegistries).
+  {
+    v8::HandleScope scope(ptr);
+    ptr->LowMemoryNotification();
+    while (pumpMsgLoop()) {
+      ptr->PerformMicrotaskCheckpoint();
+    }
+    ptr->ClearKeptObjects();
+  }
+
   // 2. Reset isolate level handles.
   opaqueTemplate.Reset();
   workerEnvObj.Reset();
