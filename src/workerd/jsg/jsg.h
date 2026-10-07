@@ -2156,6 +2156,13 @@ class JsContext {
   }
   v8::Local<v8::Context> getHandle(Lock& js) const;
 
+  // Moves out the underlying Global<Context> handle so snapshot preparation can reset it
+  // ahead of CreateBlob. Leaves this JsContext with an empty handle, so this is only valid
+  // in PREPARE_SNAPSHOT mode, where the context is never used again.
+  v8::Global<v8::Context> extractContextGlobalForSnapshot() {
+    return kj::mv(handle);
+  }
+
  private:
   v8::Global<v8::Context> handle;
   Ref<T> object;
