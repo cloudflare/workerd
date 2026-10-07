@@ -1,0 +1,27 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "rpc-stub-gc-foreign-span-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "rpc-stub-gc-foreign-span-test.js" )
+        ],
+        bindings = [
+          ( name = "SELF", service = "rpc-stub-gc-foreign-span-test" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "rpc"],
+        streamingTails = ["tail"],
+      ),
+    ),
+    ( name = "tail",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "rpc-stub-gc-foreign-span-tail.js" )
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      ),
+    ),
+  ],
+  v8Flags = [ "--expose-gc" ],
+);

@@ -322,11 +322,7 @@ HeapTracer::HeapTracer(v8::Isolate* isolate)
 
   isolate->AddGCEpilogueCallback(
       [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) {
-    auto& self = *static_cast<HeapTracer*>(data);
-    for (Wrappable* wrappable: self.detachLater) {
-      wrappable->detachWrapper(true);
-    }
-    self.detachLater.clear();
+    static_cast<HeapTracer*>(data)->detachCollectedWrappers();
   }, this, v8::GCType::kGCTypeAll);
 }
 

@@ -488,6 +488,10 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   }
   void clearWrappers();
 
+  // Called from the GC epilogue to detach the Wrappables whose wrappers ResetRoot() reported as
+  // collected during this GC pass.
+  void detachCollectedWrappers();
+
   void addToFreelist(Wrappable::CppgcShim& shim);
   Wrappable::CppgcShim* allocateShim(Wrappable& wrappable, v8::CppHeapPointerTag tag);
   void clearFreelistedShims();
