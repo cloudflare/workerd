@@ -448,7 +448,10 @@ class IsolateBase {
   void setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext);
 
   // Serializes the isolate into the SnapshotArtifact passed at isolate creation.
-  void createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle);
+  // `extraTemplateHandles` carries template handles drained from embedder-side caches that this
+  // class cannot enumerate itself.
+  void createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
+      kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles);
 
   // Enumerates every resource type's constructor-template slots (memoizedConstructor and
   // contextConstructor, empty or not) for startup-snapshot handling, in a fixed compile-time

@@ -528,7 +528,8 @@ void IsolateBase::setSnapshotDefaultContext(v8::Local<v8::Context> defaultContex
   KJ_ASSERT_NONNULL(snapshotCreator)->SetDefaultContext(defaultContext);
 }
 
-void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle) {
+void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
+    kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles) {
   KJ_REQUIRE(isPreparingSnapshot());
   auto& artifact = mutableSnapshotArtifact();
   KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
@@ -548,6 +549,12 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   opaqueTemplate.Reset();
   workerEnvObj.Reset();
   workerExportsObj.Reset();
+
+  // 2b. Reset template handles drained from embedder-side caches (e.g. Rust JSG resource
+  // templates such as node-internal:dns).
+  for (auto& h: extraTemplateHandles) {
+    h.Reset();
+  }
 
   // 3. Reset resource-type constructor templates: the memoized and context slot per
   // JSG_RESOURCE type, owned by the TypeWrapper machinery.
