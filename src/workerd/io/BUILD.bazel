@@ -676,6 +676,14 @@ kj_test(
 )
 
 kj_test(
+    src = "worker-code-cache-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "per-isolate-compile-cache-test.c++",
     # Downstream users may set their own flags, which breaks this test.
     tags = ["no-downstream"],
