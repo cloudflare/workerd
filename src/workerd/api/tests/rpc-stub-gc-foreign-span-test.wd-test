@@ -10,7 +10,14 @@ const unitTests :Workerd.Config = (
         bindings = [
           ( name = "SELF", service = "rpc-stub-gc-foreign-span-test" ),
         ],
-        compatibilityFlags = ["nodejs_compat", "rpc"],
+        # The test calls an AsyncLocalStorage snapshot from a different request to put that
+        # request's async context frame in place. Newer compat dates forbid this, but workers on
+        # older ones can still do it, so pin the old behavior for the @all-compat-flags variant.
+        compatibilityFlags = [
+          "nodejs_compat",
+          "rpc",
+          "do_not_bind_asynclocalstorage_snapshot_to-request",
+        ],
         streamingTails = ["tail"],
       ),
     ),
