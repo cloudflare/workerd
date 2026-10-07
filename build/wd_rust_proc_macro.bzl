@@ -52,7 +52,7 @@ def wd_rust_proc_macro(
         # Tag with cpu:2 since this target depends on linkopts_default.
         tags = test_tags + ["no-coverage", "cpu:2"],
         deps = test_deps,
-        link_deps = ["@@//deps:rust_runtime", "//build/deps:linkopts_default"],
+        link_deps = ["@@//deps:rust_runtime", "@workerd//build/deps:linkopts_default"],
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
