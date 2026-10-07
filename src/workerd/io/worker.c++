@@ -1407,6 +1407,17 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
   });
 }
 
+namespace {
+
+// Closes the isolate's code cache production window without producing anything.
+void discardDeferredCodeCaches(jsg::Lock& js) {
+  KJ_IF_SOME(codeCache, jsg::IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
+    codeCache.discardDeferred();
+  }
+}
+
+}  // namespace
+
 Worker::Script::Script(kj::Own<const Isolate> isolateParam,
     kj::StringPtr id,
     const Script::Source& source,
@@ -1456,7 +1467,14 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       } else {
         // Else block to avoid dangling else clang warning.
       }
+      discardDeferredCodeCaches(lock);
     });
+
+    // Code caches for the code compiled here are produced once the Worker constructor has run
+    // the top level, which compiles the functions that run there.
+    KJ_IF_SOME(codeCache, jsg::IsolateBase::from(lock.v8Isolate).tryGetCodeCache()) {
+      codeCache.deferProduction();
+    }
 
     lock.withinHandleScope([&] {
       if (isolate->impl->inspector != kj::none || errorReporter != kj::none) {
@@ -1553,8 +1571,8 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   // add it to the rollover bank, though.
                   auto limitScope =
                       isolate->getLimitEnforcer().enterStartupJs(lock, limitErrorOrTime);
-                  impl->unboundScriptOrMainModule =
-                      jsg::NonModuleScript::compile(lock, script.mainScript, script.mainScriptName);
+                  impl->unboundScriptOrMainModule = jsg::NonModuleScript::compileWorkerScript(
+                      lock, script.mainScript, script.mainScriptName);
                 }
               }
 
@@ -1674,6 +1692,10 @@ Worker::Script::~Script() noexcept(false) {
       recordedLock.disposeContext(kj::mv(c));
     }
     impl = nullptr;
+    // A Worker closes the code cache production window that the constructor opened. If no
+    // Worker ran this script, close it here, so that the elections it holds do not keep other
+    // isolates from producing those caches.
+    discardDeferredCodeCaches(*recordedLock.lock);
   });
 }
 
@@ -2134,6 +2156,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       } else {
         // Else block to avoid dangling else clang warning.
       }
+      discardDeferredCodeCaches(lock);
     });
 
     auto maybeMakeSpan = [&](auto operationName) -> SpanBuilder {
@@ -2198,6 +2221,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         // Script failed to parse. Act as if the script was empty -- i.e. do nothing.
         impl->permanentException =
             script->impl->permanentException.map([](auto& e) { return e.clone(); });
+        discardDeferredCodeCaches(lock);
         return;
       }
 
@@ -2343,6 +2367,17 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               impl->permanentException, currentSpan, script->getDynamicEnvBuilder() != kj::none);
         }
       });
+
+      // Produce the code caches for the code compiled while starting this worker, now that its
+      // top level has run. This is not charged to the startup limits.
+      KJ_IF_SOME(codeCache, jsg::IsolateBase::from(lock.v8Isolate).tryGetCodeCache()) {
+        if (impl->permanentException == kj::none) {
+          codeCache.produceDeferred(
+              lock.v8Isolate, jsg::IsolateBase::from(lock.v8Isolate).getObserver());
+        } else {
+          codeCache.discardDeferred();
+        }
+      }
 
       // Reset this back to its default after startup execution
       // Leaving it on comes at the expense of collecting stack traces for all thrown exceptions
