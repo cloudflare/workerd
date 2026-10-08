@@ -11,6 +11,7 @@
 //!
 //! [`hdr`] is a port of the core of `HdrHistogram_c`, the C library Node.js builds on.
 
+mod cbor;
 pub mod hdr;
 mod histogram;
 mod stats;
@@ -43,4 +44,7 @@ pub enum Error {
     /// A supposedly earlier snapshot holds values that the histogram does not.
     #[error("other contains values that are not in the histogram")]
     NotEarlier,
+    /// The input to `Histogram::import()` is not valid export data.
+    #[error("Invalid histogram export data")]
+    InvalidExportData,
 }
