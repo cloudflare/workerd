@@ -148,6 +148,35 @@ class IoContext::TimeoutManagerImpl::TimeoutState {
   kj::Maybe<kj::Promise<void>> maybePromise;
 };
 
+namespace {
+
+// Creates the context's tracker if the isolate has async tracing enabled and the embedder adds at
+// least one sink.
+kj::Maybe<kj::Arc<AsyncTracker>> makeAsyncTracker(
+    const Worker& worker, kj::Maybe<Worker::Actor&> actor) {
+  auto& isolate = worker.getIsolate();
+  KJ_IF_SOME(traceIsolate, isolate.getAsyncTraceIsolate()) {
+    kj::Maybe<kj::String> actorId = actor.map([](Worker::Actor& a) -> kj::String {
+      KJ_SWITCH_ONEOF(a.getId()) {
+        KJ_CASE_ONEOF(id, kj::Own<ActorIdFactory::ActorId>) {
+          return id->toString();
+        }
+        KJ_CASE_ONEOF(name, kj::String) {
+          return kj::str(name);
+        }
+      }
+      KJ_UNREACHABLE;
+    });
+    auto actorIdPtr = actorId.map([](kj::String& id) -> kj::StringPtr { return id; });
+    AsyncTraceSinks sinks;
+    isolate.getMetrics().addAsyncTraceSinks(sinks, isolate.getId(), actorIdPtr);
+    return AsyncTracker::tryCreate(traceIsolate, kj::mv(sinks), isolate.getId(), actorIdPtr);
+  }
+  return kj::none;
+}
+
+}  // namespace
+
 IoContext::IoContext(ThreadContext& thread,
     kj::Own<const Worker> workerParam,
     kj::Maybe<Worker::Actor&> actorParam,
@@ -156,6 +185,7 @@ IoContext::IoContext(ThreadContext& thread,
       worker(kj::mv(workerParam)),
       actor(actorParam),
       limitEnforcer(kj::mv(limitEnforcerParam)),
+      asyncTracker(makeAsyncTracker(*worker, actor)),
       id(nextId()),
       threadId(getThreadId()),
       deleteQueue(kj::arc<DeleteQueue>()),
@@ -265,6 +295,11 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
   deliveredLocation = location;
   metrics->delivered();
 
+  KJ_IF_SOME(tracker, context->tryGetAsyncTracker()) {
+    // The delivering function (e.g. WorkerEntrypoint::request) names the event type.
+    asyncTraceResource = tracker.create(AsyncKind::REQUEST, location.function);
+  }
+
   // Create the root user trace span once per request. Stale references to the span (e.g. from
   // AsyncContextFrame storage via IoOwn, which for actors can outlive this request via the
   // IoContext's delete queue) are safe: user-tracing SpanSubmitters hold only a
@@ -311,6 +346,8 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
     // Request was never added to context->incomingRequests in the first place.
     return;
   }
+
+  asyncTraceResource.settle(AsyncOutcome::OK);
 
   bool hadUndrainedWaitUntilTasks = !waitedForWaitUntil && !context->waitUntilTasks.isEmpty();
   kj::Maybe<kj::Exception> cancellationException;
@@ -1440,7 +1477,13 @@ void IoContext::runImpl(Runnable& runnable,
 
   getIoChannelFactory().getTimer().syncTime();
 
+  // Spans the lock wait, the JavaScript, and the microtask drain. Without a better-known cause
+  // (set by whatever resumed JavaScript), the turn is attributed to the current request.
+  AsyncTracker::TurnScope turnScope(tryGetAsyncTracker(),
+      incomingRequests.empty() ? 0 : incomingRequests.front().getAsyncTraceId());
+
   runInContextScope(lockType, kj::mv(inputLock), [&](Worker::Lock& workerLock) {
+    turnScope.locked();
     kj::Own<void> event;
     if (!exceptional) {
       workerLock.requireNoPermanentException();

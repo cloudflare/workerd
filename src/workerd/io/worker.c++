@@ -10,6 +10,7 @@
 #include <workerd/api/sockets.h>
 #include <workerd/api/streams/common.h>  // for api::StreamEncoding
 #include <workerd/io/actor-sqlite.h>
+#include <workerd/io/async-trace.h>
 #include <workerd/io/cdp.capnp.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
@@ -1167,6 +1168,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       userTraceAsyncContextKey(kj::arc<jsg::AsyncContextFrame::StorageKey>()) {
   api->setIsolateObserver(*metrics);
   metrics->createdWithUuid(getUuid());
+  if (metrics->getAsyncTraceConfig() != kj::none) {
+    asyncTraceIsolate = kj::heap<AsyncTraceIsolate>();
+  }
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     auto lock = api->lock(stackScope);

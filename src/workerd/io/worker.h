@@ -66,6 +66,7 @@ class VirtualFileSystem;
 
 class ThreadContext;
 class IoContext;
+class AsyncTraceIsolate;
 class InputGate;
 class OutputGate;
 
@@ -384,6 +385,14 @@ class Worker::Isolate: public kj::AtomicRefcounted {
     return id;
   }
 
+  // Set if the IsolateObserver enabled async tracing for this isolate (getAsyncTraceConfig()).
+  kj::Maybe<const AsyncTraceIsolate&> getAsyncTraceIsolate() const {
+    return asyncTraceIsolate.map(
+        [](const kj::Own<AsyncTraceIsolate>& isolate) -> const AsyncTraceIsolate& {
+      return *isolate;
+    });
+  }
+
   // Parses the given code to create a new script object and returns it.
   //
   // Note that the `source` is fully consumed before this method returns, so the underlying buffers
@@ -540,6 +549,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   TeardownFinishedGuard<IsolateObserver&> teardownGuard{*metrics};
 
   kj::String id;
+  kj::Maybe<kj::Own<AsyncTraceIsolate>> asyncTraceIsolate;
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
   kj::MutexGuarded<kj::Maybe<kj::Function<void(void)>>> cpuLimitNearlyExceededCallback;
   kj::Own<Api> api;
