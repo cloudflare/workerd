@@ -51,3 +51,7 @@ pub enum Error {
     #[error("Invalid histogram export data")]
     InvalidExportData,
 }
+
+#[cfg(test)]
+#[path = "lib-test.rs"]
+mod tests;
