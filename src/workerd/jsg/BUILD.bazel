@@ -21,6 +21,7 @@ wd_cc_library(
         ":iterator",
         ":jsg-core",
         ":memory-tracker",
+        ":sandbox",
         ":url",
         "//src/workerd/util",
         "//src/workerd/util:sentry",
@@ -207,6 +208,17 @@ wd_cc_library(
 wd_cc_library(
     name = "meta",
     hdrs = ["meta.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
+    ],
+)
+
+wd_cc_library(
+    name = "sandbox",
+    srcs = ["sandbox.c++"],
+    hdrs = ["sandbox.h"],
     visibility = ["//visibility:public"],
     deps = [
         "@capnp-cpp//src/kj",

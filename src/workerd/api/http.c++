@@ -128,7 +128,7 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       auto boundary = kj::encodeHex(boundaryBuffer);
       auto contentType = MimeType::formDataWithBoundary(boundary);
       return ExtractedBody(
-          js, JsReadableStream(js, formData->serialize(boundary)), kj::mv(contentType));
+          js, JsReadableStream(js, formData->serialize(js, boundary)), kj::mv(contentType));
     }
     KJ_CASE_ONEOF(searchParams, jsg::Ref<URLSearchParams>) {
       return ExtractedBody(js, JsReadableStream(js, kj::mv(searchParams)),
