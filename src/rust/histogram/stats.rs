@@ -17,6 +17,7 @@
     reason = "fused operations would round differently from Node.js"
 )]
 
+use std::f64::consts::PI;
 use std::f64::consts::SQRT_2;
 
 use crate::Histogram;
@@ -117,28 +118,184 @@ fn beta_continued_fraction(a: f64, b: f64, x: f64) -> f64 {
     h
 }
 
-/// The regularized incomplete beta function `I_x(a, b)`: the probability that a Beta(a, b)
-/// random variable is at most `x`.
-///
-/// Node.js's QRDE adds asymptotic approximations for very concentrated shapes; the functions
-/// here never request them, so only the exact path is ported.
-fn regularized_incomplete_beta(a: f64, b: f64, x: f64) -> f64 {
-    if x <= 0.0 {
-        return 0.0;
-    }
-    if x >= 1.0 {
-        return 1.0;
-    }
-    let sum = a + b;
-    let log_normalization = libm::lgamma(sum) - libm::lgamma(a) - libm::lgamma(b);
-    let front = (log_normalization + a * x.ln() + b * (1.0 - x).ln()).exp();
-    let symmetry_point = (a + 1.0) / (sum + 2.0);
+/// The shape of a beta distribution and the values derived from it that `I_x(a, b)` needs:
+/// `BetaParameters` in Node.js.
+#[derive(Debug, Clone, Copy)]
+pub struct BetaParameters {
+    pub a: f64,
+    pub b: f64,
+    log_normalization: f64,
+    pub mean: f64,
+    pub standard_deviation: f64,
+    skewness: f64,
+    excess_kurtosis: f64,
+    log_scale: f64,
+    pub symmetry_point: f64,
+    use_asymptotic_front: bool,
+    pub use_asymptotic_cdf: bool,
+}
 
-    // The symmetry relation keeps the continued fraction in the region where it converges best.
-    if x < symmetry_point {
-        return front * beta_continued_fraction(a, b, x) / a;
+fn stirling_correction(x: f64) -> f64 {
+    let inverse = 1.0 / x;
+    let inverse_squared = inverse * inverse;
+    inverse
+        * (1.0 / 12.0
+            + inverse_squared
+                * (-1.0 / 360.0
+                    + inverse_squared
+                        * (1.0 / 1260.0
+                            + inverse_squared * (-1.0 / 1680.0 + inverse_squared / 1188.0))))
+}
+
+impl BetaParameters {
+    /// With `approximate_large_shapes`, very concentrated shapes use a Stirling approximation of
+    /// the normalization and an Edgeworth expansion of the CDF, which are more accurate there
+    /// than the continued fraction. Only QRDE asks for them.
+    pub fn new(a: f64, b: f64, approximate_large_shapes: bool) -> Self {
+        let sum = a + b;
+        let mean = a / sum;
+        let use_asymptotic_front = approximate_large_shapes && a >= 8.0 && b >= 8.0;
+        // The continued fraction needs progressively more iterations as both shapes grow. At this
+        // concentration the Edgeworth error is smaller than the continued-fraction truncation
+        // error.
+        let use_asymptotic_cdf = approximate_large_shapes && a * b / sum >= 25_000.0;
+        let variance = mean * (1.0 - mean) / (sum + 1.0);
+        let skewness = 2.0 * (b - a) * (sum + 1.0).sqrt() / ((sum + 2.0) * (a * b).sqrt());
+        let excess_kurtosis = 6.0 * ((a - b) * (a - b) * (sum + 1.0) - a * b * (sum + 2.0))
+            / (a * b * (sum + 2.0) * (sum + 3.0));
+        Self {
+            a,
+            b,
+            log_normalization: if use_asymptotic_front {
+                0.0
+            } else {
+                libm::lgamma(sum) - libm::lgamma(a) - libm::lgamma(b)
+            },
+            mean,
+            standard_deviation: variance.sqrt(),
+            skewness,
+            excess_kurtosis,
+            log_scale: if use_asymptotic_front {
+                0.5 * (sum * mean * (1.0 - mean) / (2.0 * PI)).ln() + stirling_correction(sum)
+                    - stirling_correction(a)
+                    - stirling_correction(b)
+            } else {
+                0.0
+            },
+            symmetry_point: (a + 1.0) / (sum + 2.0),
+            use_asymptotic_front,
+            use_asymptotic_cdf,
+        }
     }
-    1.0 - front * beta_continued_fraction(b, a, 1.0 - x) / b
+
+    /// The parameters of Beta(b, a), whose CDF at 1 - x is the survival function at x.
+    pub fn reflect(&self) -> Self {
+        Self {
+            a: self.b,
+            b: self.a,
+            mean: 1.0 - self.mean,
+            skewness: -self.skewness,
+            symmetry_point: 1.0 - self.symmetry_point,
+            ..*self
+        }
+    }
+
+    /// `x^a (1 - x)^b / B(a, b)`.
+    fn front(&self, x: f64) -> f64 {
+        if x <= 0.0 || x >= 1.0 {
+            return 0.0;
+        }
+        let log_front = if self.use_asymptotic_front {
+            self.a * ((x - self.mean) / self.mean).ln_1p()
+                + self.b * ((self.mean - x) / (1.0 - self.mean)).ln_1p()
+                + self.log_scale
+        } else {
+            self.log_normalization + self.a * x.ln() + self.b * (1.0 - x).ln()
+        };
+        log_front.exp()
+    }
+
+    /// The CDF from an Edgeworth expansion around the normal approximation, and the front.
+    #[expect(clippy::similar_names, reason = "the names follow Node.js")]
+    fn asymptotic_cdf(&self, x: f64) -> (f64, f64) {
+        let z = (x - self.mean) / self.standard_deviation;
+        let normal_cdf = 0.5 * libm::erfc(-z / SQRT_2);
+        if z.abs() >= 8.0 {
+            return (normal_cdf, 0.0);
+        }
+
+        let z2 = z * z;
+        let z3 = z2 * z;
+        let normal_pdf = (-0.5 * z2).exp() / (2.0 * PI).sqrt();
+        let z4 = z2 * z2;
+        let z6 = z3 * z3;
+        let density_correction = 1.0
+            + self.skewness / 6.0 * (z3 - 3.0 * z)
+            + self.excess_kurtosis / 24.0 * (z4 - 6.0 * z2 + 3.0)
+            + self.skewness * self.skewness / 72.0 * (z6 - 15.0 * z4 + 45.0 * z2 - 15.0);
+        let front =
+            x * (1.0 - x) * normal_pdf / self.standard_deviation * std_max(0.0, density_correction);
+        let correction = self.skewness / 6.0 * (1.0 - z2)
+            - self.excess_kurtosis / 24.0 * (z3 - 3.0 * z)
+            - self.skewness * self.skewness / 72.0 * (z3 * z2 - 10.0 * z3 + 15.0 * z);
+        (
+            std_clamp(normal_cdf + normal_pdf * correction, 0.0, 1.0),
+            front,
+        )
+    }
+
+    /// The regularized incomplete beta function `I_x(a, b)`, the probability that a Beta(a, b)
+    /// random variable is at most `x`, and the front at `x` (0 outside (0, 1)).
+    pub fn cdf_and_front(&self, x: f64) -> (f64, f64) {
+        if x <= 0.0 {
+            return (0.0, 0.0);
+        }
+        if x >= 1.0 {
+            return (1.0, 0.0);
+        }
+        if self.use_asymptotic_cdf {
+            return self.asymptotic_cdf(x);
+        }
+        let front = self.front(x);
+        // The symmetry relation keeps the continued fraction in the region where it converges
+        // best.
+        let cdf = if x < self.symmetry_point {
+            front * beta_continued_fraction(self.a, self.b, x) / self.a
+        } else {
+            1.0 - front * beta_continued_fraction(self.b, self.a, 1.0 - x) / self.b
+        };
+        (cdf, front)
+    }
+
+    pub fn cdf(&self, x: f64) -> f64 {
+        self.cdf_and_front(x).0
+    }
+}
+
+/// `std::clamp()`: unlike `f64::clamp()`, never panics, and returns `v` when it is NaN.
+pub fn std_clamp(v: f64, lo: f64, hi: f64) -> f64 {
+    if v < lo {
+        lo
+    } else if hi < v {
+        hi
+    } else {
+        v
+    }
+}
+
+/// `std::max()`: returns `a` unless `a < b`.
+pub fn std_max(a: f64, b: f64) -> f64 {
+    if a < b { b } else { a }
+}
+
+/// `std::min()`: returns `a` unless `b < a`.
+pub fn std_min(a: f64, b: f64) -> f64 {
+    if b < a { b } else { a }
+}
+
+/// The regularized incomplete beta function `I_x(a, b)`, computed exactly.
+fn regularized_incomplete_beta(a: f64, b: f64, x: f64) -> f64 {
+    BetaParameters::new(a, b, false).cdf(x)
 }
 
 /// The standard normal CDF: P(Z <= x).

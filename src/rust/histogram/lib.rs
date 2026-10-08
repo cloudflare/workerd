@@ -14,10 +14,13 @@
 mod cbor;
 pub mod hdr;
 mod histogram;
+mod qrde;
 mod stats;
 
 pub use histogram::Histogram;
 pub use histogram::Options;
+pub use qrde::Dequantization;
+pub use qrde::Qrde;
 pub use stats::MannWhitneyTest;
 pub use stats::MeanCi;
 pub use stats::PercentileCi;
