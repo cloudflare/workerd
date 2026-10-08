@@ -296,7 +296,7 @@ class Bootstrap {
     KJ_IF_SOME(compatDate, benchOptions.compat_date) {
       options.testCompatibilityDateOverride = kj::str(compatDate);
     }
-    options.tailWorkers = false;
+    options.tailWorkers = benchOptions.trace;
   }
 };
 

@@ -100,7 +100,7 @@ impl Factory {
         ffi::factory_experimental(&self.inner)
     }
 
-    /// Whether requests get tail workers: not under `workerd bench`.
+    /// Whether requests get tail workers: not under `workerd bench`, unless given `--trace`.
     #[must_use]
     pub fn tail_workers(&self) -> bool {
         ffi::factory_tail_workers(&self.inner)

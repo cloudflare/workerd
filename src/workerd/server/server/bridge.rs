@@ -208,12 +208,13 @@ pub mod ffi {
     }
 
     /// The options of `bench` the C++ driver applies: bench mode, which they turn on, logging,
-    /// autogates, the compatibility date every worker gets.
+    /// autogates, the compatibility date every worker gets, whether requests get tail workers.
     #[namespace = "workerd::server::cli"]
     struct BenchOptions {
         no_verbose: bool,
         all_autogates: bool,
         compat_date: KjMaybe<String>,
+        trace: bool,
     }
 
     /// What the binary was built from, as `workerd bench`'s report records it.
@@ -301,7 +302,7 @@ pub mod ffi {
         fn factory_config<'a>(factory: &'a WorkerFactory) -> &'a [u8];
         fn factory_experimental(factory: &WorkerFactory) -> bool;
         /// Whether requests get tail workers (`WorkerFactory::Options::tailWorkers`): not under
-        /// `workerd bench`.
+        /// `workerd bench`, unless given `--trace`.
         fn factory_tail_workers(factory: &WorkerFactory) -> bool;
         /// Registers the server as the resolver of channel tokens and debug-port requests.
         /// Tokens cannot be decoded before this.

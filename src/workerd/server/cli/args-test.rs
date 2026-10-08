@@ -175,6 +175,7 @@ fn bench_invocation() {
         "--quick",
         "--format=json",
         "--output=out.json",
+        "--trace",
         "svc/case",
     ])
     .command
@@ -185,6 +186,7 @@ fn bench_invocation() {
     assert!(bench.quick);
     assert_eq!(bench.format, BenchFormat::Json);
     assert_eq!(bench.output.as_deref(), Some("out.json"));
+    assert!(bench.trace);
     assert_eq!(
         bench.filter.map(|f| f.case_pattern),
         Some(Some("case".into()))

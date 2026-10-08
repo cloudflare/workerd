@@ -54,6 +54,8 @@ pub struct Options {
     pub json: bool,
     /// `--output`: where to write the report; stdout if none.
     pub output: Option<String>,
+    /// `--trace`: run tail workers, which add their cost to every request.
+    pub trace: bool,
 }
 
 impl Options {
@@ -63,6 +65,7 @@ impl Options {
             no_verbose: self.no_verbose,
             all_autogates: self.all_autogates,
             compat_date: self.compat_date.clone().into(),
+            trace: self.trace,
         }
     }
 

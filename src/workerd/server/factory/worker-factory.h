@@ -112,10 +112,10 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
     bool experimental = false;
     // When set, every worker uses this compatibility date and none may specify its own.
     kj::Maybe<kj::String> testCompatibilityDateOverride;
-    // Whether requests get tail workers. `workerd bench` turns them off: benchmarked code often
-    // makes a subrequest on every call (e.g. `env.SELF.fetch()`), and tail workers would add
-    // their cost to each. The server still looks a config worker's tails up, so that their
-    // config errors are reported, but does not link them.
+    // Whether requests get tail workers. `workerd bench` turns them off unless given `--trace`:
+    // benchmarked code often makes a subrequest on every call (e.g. `env.SELF.fetch()`), and tail
+    // workers would add their cost to each. The server still looks a config worker's tails up, so
+    // that their config errors are reported, but does not link them.
     bool tailWorkers = true;
     Worker::LoggingOptions loggingOptions;
     api::pyodide::PythonConfig pythonConfig;
