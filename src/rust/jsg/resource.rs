@@ -483,6 +483,17 @@ impl Resources {
                 .into()
         }
     }
+
+    /// Drains every cached resource-template handle, transferring ownership of the raw
+    /// persistent-handle words (bit-identical to C++ `v8::Global<v8::FunctionTemplate>`) to
+    /// the caller. Used by the `PREPARE_SNAPSHOT` pipeline, which disposes each handle before
+    /// `CreateBlob`; the cache is left empty and templates are recreated lazily on demand.
+    pub fn take_template_handles(&mut self) -> Vec<usize> {
+        self.templates
+            .drain()
+            .map(|(_, global)| global.into_raw_handle_for_snapshot())
+            .collect()
+    }
 }
 
 /// Rust types exposed to JavaScript as resource types.

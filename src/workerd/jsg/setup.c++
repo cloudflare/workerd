@@ -354,6 +354,10 @@ bool HeapTracer::TryResetRoot(const v8::TracedReference<v8::Value>& handle) {
 }
 
 namespace {
+// Capacity reserved upfront for the external_references array so that the
+// `.begin()` pointer handed to V8 stays stable as references are appended (no reallocation).
+constexpr size_t kExternalReferencesCapacity = 16384;
+
 std::unique_ptr<v8::CppHeap> newCppHeap(V8PlatformWrapper* system) {
   return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     v8::CppHeapCreateParams heapParams{{}};
@@ -369,11 +373,17 @@ std::unique_ptr<v8::CppHeap> newCppHeap(V8PlatformWrapper* system) {
 // IsolateBase, so the observer has to be found some other way during that window.
 thread_local IsolateObserver* initializingIsolateObserver = nullptr;
 
-static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params,
+struct IsolateWithSnapshotCreator {
+  v8::Isolate* isolate;
+  kj::Maybe<kj::Own<v8::SnapshotCreator>> maybeSnapshotCreator;
+};
+
+IsolateWithSnapshotCreator newIsolateWithSnapshotCreator(v8::Isolate::CreateParams&& params,
     v8::CppHeap* cppHeap,
     v8::IsolateGroup group,
-    IsolateObserver& observer) {
-  return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> v8::Isolate* {
+    IsolateObserver& observer,
+    kj::Maybe<SnapshotConfig>& snapshotConfig) {
+  return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> IsolateWithSnapshotCreator {
     // We currently don't attempt to support incremental marking or sweeping. We probably could
     // support them, but it will take some careful investigation and testing. It's not clear if
     // this would be a win anyway, since Worker heaps are relatively small and therefore doing a
@@ -406,7 +416,32 @@ static v8::Isolate* newIsolate(v8::Isolate::CreateParams&& params,
     auto* previousInitializingIsolateObserver = initializingIsolateObserver;
     initializingIsolateObserver = &observer;
     KJ_DEFER(initializingIsolateObserver = previousInitializingIsolateObserver);
-    return v8::Isolate::New(group, params);
+
+    KJ_IF_SOME(c, snapshotConfig) {
+      KJ_SWITCH_ONEOF(c) {
+        KJ_CASE_ONEOF(mutableSnapshot, MutableSnapshot) {
+          auto& artifact = *mutableSnapshot.artifact;
+          KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
+
+          // Zero-fill provides the 0 terminator V8 expects.
+          artifact.externalReferences = kj::heapArray<intptr_t>(kExternalReferencesCapacity);
+          artifact.externalReferences.asPtr().fill(0);
+          params.external_references = artifact.externalReferences.begin();
+
+          auto creator = kj::heap<v8::SnapshotCreator>(params);
+          v8::Isolate* isolate = creator->GetIsolate();
+          return IsolateWithSnapshotCreator{isolate, kj::mv(creator)};
+        }
+        KJ_CASE_ONEOF(finalizedSnapshot, FinalizedSnapshot) {
+          const SnapshotArtifact& artifact = *finalizedSnapshot.artifact;
+          KJ_REQUIRE(artifact.blob.data != nullptr, "snapshot artifact holds no blob");
+          params.snapshot_blob = &artifact.blob;
+          params.external_references = artifact.externalReferences.begin();
+        }
+      }
+    }
+
+    return IsolateWithSnapshotCreator{v8::Isolate::New(group, params), kj::none};
   });
 }
 }  // namespace
@@ -422,10 +457,18 @@ IsolateBase::IsolateBase(V8System& system,
     v8::Isolate::CreateParams&& createParams,
     kj::Own<IsolateObserver> observer,
     kj::Own<ExternalStringAllocator> externalStringAllocator,
-    v8::IsolateGroup group)
+    v8::IsolateGroup group,
+    kj::Maybe<SnapshotConfig> snapshotConf)
     : v8System(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(system.platformWrapper.get()))),
-      ptr(newIsolate(kj::mv(createParams), cppHeap.release(), group, *observer)),
+      snapshotCreator(kj::none),
+      ptr([&]() {
+        auto [isolate, maybeCreator] = newIsolateWithSnapshotCreator(
+            kj::mv(createParams), cppHeap.release(), group, *observer, snapshotConf);
+        snapshotCreator = kj::mv(maybeCreator);
+        return isolate;
+      }()),
+      snapshotConfig(kj::mv(snapshotConf)),
       externalMemoryTarget(kj::arc<ExternalMemoryTarget>(ptr)),
       envAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
       exportsAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
@@ -490,6 +533,70 @@ IsolateBase::IsolateBase(V8System& system,
   });
 }
 
+void IsolateBase::setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext) {
+  KJ_REQUIRE(isPreparingSnapshot());
+  KJ_ASSERT_NONNULL(snapshotCreator)->SetDefaultContext(defaultContext);
+}
+
+void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
+    kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles) {
+  KJ_REQUIRE(isPreparingSnapshot());
+  auto& artifact = mutableSnapshotArtifact();
+  KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
+
+  // We need to reset all C++ handles that point to JavaScript objects before creating
+  // the snapshot blob, because V8 does not know how to serialize them.
+
+  // 1. Destroy every live Wrappable.
+  heapTracer.destroyLiveWrappableInstances();
+
+  // Destructors under the isolate lock release their handles synchronously; drain the
+  // deferred-destruction queue regardless, as it would otherwise be applied only by the next
+  // lock, after CreateBlob().
+  applyDeferredActions();
+
+  // 1b. Settle the FinalizationRegistry cleanups that destroying the graph leaves behind.
+  // CreateBlob() runs a full GC of its own before serializing: every registry whose targets die
+  // in that GC lands on the heap's dirty list with a cleanup task posted to the foreground task
+  // runner, and the startup serializer then rejects the isolate
+  // (StartupSerializer::CheckNoDirtyFinalizationRegistries).
+  {
+    v8::HandleScope scope(ptr);
+    ptr->LowMemoryNotification();
+    while (pumpMsgLoop()) {
+      ptr->PerformMicrotaskCheckpoint();
+    }
+    ptr->ClearKeptObjects();
+  }
+
+  // 2. Reset isolate level handles.
+  opaqueTemplate.Reset();
+  workerEnvObj.Reset();
+  workerExportsObj.Reset();
+
+  // 2b. Reset template handles drained from embedder-side caches (e.g. Rust JSG resource
+  // templates such as node-internal:dns).
+  for (auto& h: extraTemplateHandles) {
+    h.Reset();
+  }
+
+  // 3. Reset resource-type constructor templates: the memoized and context slot per
+  // JSG_RESOURCE type, owned by the TypeWrapper machinery.
+  iterateResourceTypeTemplates([&](v8::Global<v8::FunctionTemplate>& h) { h.Reset(); });
+
+  // 4. Reset struct-type handles: dictionary template + field-name handles per JSG_STRUCT.
+  visitStructTypeHandles([](v8::Global<v8::Name>& h) { h.Reset(); },
+      [](v8::Global<v8::DictionaryTemplate>& h) { h.Reset(); });
+
+  // 5. Reset the Global holding the default context, extracted from the script's module
+  // context. The SnapshotCreator keeps its own handle on the default context until CreateBlob()
+  // consumes it.
+  defaultContextHandle.Reset();
+
+  artifact.blob = KJ_ASSERT_NONNULL(snapshotCreator)
+                      ->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
+}
+
 IsolateBase::~IsolateBase() noexcept(false) {
   // Ensure objects that outlive the isolate won't attempt to modify external memory
   // on the now-destroyed isolate.
@@ -498,7 +605,16 @@ IsolateBase::~IsolateBase() noexcept(false) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     // Terminate the v8::platform's task queue associated with this isolate
     v8System.shutdownIsolate(ptr);
-    ptr->Dispose();
+    // When preparing a snapshot the v8::SnapshotCreator owns the isolate and keeps it "entered" by
+    // the current thread; v8::Isolate::Dispose() refuses to run on an entered isolate. Destroy the
+    // SnapshotCreator first — its destructor exits and disposes the isolate — and skip
+    // ptr->Dispose() in that case.
+    if (isPreparingSnapshot()) {
+      // Destroying the SnapshotCreator exits and disposes its isolate.
+      snapshotCreator = kj::none;
+    } else {
+      ptr->Dispose();
+    }
     ptr = nullptr;
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();
