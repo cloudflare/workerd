@@ -11,6 +11,7 @@ import {
 import { env, withEnv } from 'cloudflare:workers';
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { inspect } from 'node:util';
 
 // The env is populated at the top level scope.
 strictEqual(env.FOO, 'BAR');
@@ -42,6 +43,16 @@ export const importableEnv = {
     deepStrictEqual(env, argEnv);
 
     deepStrictEqual(Object.keys(env).sort(), ['CACHE', 'FOO', 'RPC']);
+
+    // console.log()/util.inspect() must not render the importable `env` proxy as an empty
+    // object -- it's a real Proxy, but util.inspect avoids invoking Proxy traps, so it needs a
+    // `util.inspect.custom` implementation to show anything useful.
+    const inspected = inspect(env);
+    notStrictEqual(inspected, '{}');
+    ok(
+      inspected.includes('FOO'),
+      `inspect(env) should mention FOO, got: ${inspected}`
+    );
 
     // It is populated inside a request
     strictEqual(env.FOO, 'BAR');
