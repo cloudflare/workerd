@@ -18,6 +18,7 @@
 
 #include <workerd/api/memory-cache.h>
 #include <workerd/api/pyodide/pyodide.h>
+#include <workerd/io/async-trace.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/worker.h>
@@ -113,6 +114,9 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
     kj::Maybe<kj::String> testCompatibilityDateOverride;
     Worker::LoggingOptions loggingOptions;
     api::pyodide::PythonConfig pythonConfig;
+    // When set, async activity in every worker is traced to this file (--async-trace), which must
+    // outlive the factory.
+    kj::Maybe<const AsyncTraceWriter&> asyncTraceWriter;
   };
 
   // `config` is the encoded config message; the factory owns it for the run and reads it with an

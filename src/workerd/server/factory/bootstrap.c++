@@ -6,6 +6,7 @@
 
 #include "worker-factory.h"
 
+#include <workerd/io/async-trace.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/release-version.embed.h>
@@ -133,6 +134,9 @@ class Bootstrap {
       KJ_UNIMPLEMENTED("perfetto tracing is not supported by this build", kj::str(path));
 #endif
     }
+    KJ_IF_SOME(path, serveOrTest.async_trace_path) {
+      asyncTraceWriter = AsyncTraceWriter::open(kj::str(path), RELEASE_VERSION);
+    }
     TRACE_EVENT("workerd", "Bootstrap()");
 
     // The process is set up for this config and these options: autogates, the test modes, and V8
@@ -180,6 +184,9 @@ class Bootstrap {
   kj::Maybe<PerfettoSession> perfettoSession;
 #endif
 
+  // Set by --async-trace. The factory's isolates write to it, so it outlives them.
+  kj::Maybe<kj::Own<AsyncTraceWriter>> asyncTraceWriter;
+
   kj::Own<v8::Platform> platform;
   kj::Own<WorkerdPlatform> v8Platform;
   kj::Own<jsg::V8System> v8System;
@@ -190,6 +197,9 @@ class Bootstrap {
 
   void applyServeOrTestOptions(
       WorkerFactory::Options& options, const ServeOrTestOptions& serveOrTest) {
+    KJ_IF_SOME(writer, asyncTraceWriter) {
+      options.asyncTraceWriter = *writer;
+    }
     options.experimental = serveOrTest.experimental;
     auto& python = options.pythonConfig;
     KJ_IF_SOME(path, serveOrTest.pyodide_package_disk_cache_dir) {

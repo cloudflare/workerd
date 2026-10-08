@@ -322,6 +322,34 @@ class NullIsolateLimitEnforcer final: public IsolateLimitEnforcer {
   TrackedWasmInstanceList trackedWasmInstances;
 };
 
+// Enables async tracing for an isolate and writes each of its contexts to the --async-trace file.
+class AsyncTraceIsolateObserver final: public IsolateObserver {
+ public:
+  explicit AsyncTraceIsolateObserver(const AsyncTraceWriter& writer): writer(writer) {}
+
+  kj::Maybe<AsyncTraceConfig> getAsyncTraceConfig() const override {
+    return AsyncTraceConfig{};
+  }
+
+  void addAsyncTraceSinks(AsyncTraceSinks& sinks,
+      kj::StringPtr worker,
+      kj::Maybe<kj::StringPtr> actorId) const override {
+    sinks.addNdjson(writer);
+  }
+
+ private:
+  const AsyncTraceWriter& writer;
+};
+
+// The observer of each isolate: an AsyncTraceIsolateObserver under --async-trace, otherwise the
+// default one, which changes nothing.
+kj::Own<IsolateObserver> newIsolateObserver(const WorkerFactory::Options& options) {
+  KJ_IF_SOME(writer, options.asyncTraceWriter) {
+    return kj::atomicRefcounted<AsyncTraceIsolateObserver>(writer);
+  }
+  return kj::atomicRefcounted<IsolateObserver>();
+}
+
 class NullLimitEnforcer final: public LimitEnforcer, public kj::Refcounted {
  public:
   kj::Own<void> enterJs(jsg::Lock& lock, IoContext& context) override {
@@ -1541,9 +1569,8 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
         workerSource.variant.is<WorkerSource::ScriptSource>() && !usingNewModuleRegistry
         ? Worker::ConsoleMode::INSPECTOR_ONLY
         : options.loggingOptions.consoleMode;
-    return kj::atomicRefcounted<Worker::Isolate>(kj::mv(api),
-        kj::atomicRefcounted<IsolateObserver>(), isolateName, kj::mv(limitEnforcer), policy,
-        kj::mv(isolateLoggingOptions));
+    return kj::atomicRefcounted<Worker::Isolate>(kj::mv(api), newIsolateObserver(options),
+        isolateName, kj::mv(limitEnforcer), policy, kj::mv(isolateLoggingOptions));
   };
 
   // Behind the STARTUP_SNAPSHOT autogate, a throwaway zygote Worker evaluates the top-level code

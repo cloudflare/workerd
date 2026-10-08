@@ -1,0 +1,21 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+# Runs a worker with --async-trace, then checks the trace with a second worker.
+sh_test(
+    name = "async-trace-test",
+    size = "medium",
+    srcs = ["async-trace-test.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "$(location scenario.wd-test)",
+        "$(location check.wd-test)",
+    ],
+    data = [
+        "check.js",
+        "check.wd-test",
+        "scenario.js",
+        "scenario.wd-test",
+        "//src/workerd/server:workerd",
+    ],
+    tags = ["no-qemu"],
+)
