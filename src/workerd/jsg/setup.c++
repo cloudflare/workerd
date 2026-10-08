@@ -569,7 +569,9 @@ void IsolateBase::rejectSnapshotWithUnrestorableWrappers(
     // Wrappable& only sees the base class.
     if (wrappable.jsgTryGetObject() == nullptr) {
       // Not a resource type: name it by its JavaScript constructor so the leftover is findable.
-      kj::String name = kj::str(typeName(typeid(wrappable)));
+      // typeName() strips up to the last ':', which leaves only the tail of a template such as
+      // OpaqueWrappable<kj::Own<T, std::nullptr_t>, false>.
+      kj::String name = fullyQualifiedTypeName(typeid(wrappable));
       KJ_IF_SOME(handle, wrappable.tryGetHandle(ptr)) {
         if (handle->IsObject()) {
           name = kj::str(name, "(", handle.As<v8::Object>()->GetConstructorName(), ")");
