@@ -19,6 +19,7 @@ Macro-driven C++/V8 binding layer: declares C++ types as JS-visible resources/st
 | `modules.h`      | Legacy `ModuleRegistry`: ESM/CJS module resolution, evaluation, top-level await handling                                    |
 | `modules-new.h`  | New module registry (`jsg::modules::ModuleRegistry`): URL-based specifiers, shareable across isolate replicas, gated by the `new_module_registry` compat flag via `workerd::isNewModuleRegistryEnabled()`. Full reference: `docs/reference/detail/new-module-registry.md` |
 | `setup.h`        | `V8System`, `IsolateBase`, `JsgConfig`; process-level V8 init; `JSG_DECLARE_ISOLATE_TYPE`                                   |
+| `sandbox.{h,c++}` | Cage-relative byte views for ArrayBuffer-backed native objects                                                                     |
 | `function.h`     | `jsg::Function<Sig>` wrapping C++ callables ↔ JS functions                                                                 |
 | `memory.h`       | `MemoryTracker`, `JSG_MEMORY_INFO` macro; heap snapshot support                                                             |
 | `rtti.capnp`     | Cap'n Proto schema for type introspection; consumed by `types/` for TS generation                                           |
