@@ -1,0 +1,14 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [(
+    name = "exported-handler-proxy-test",
+    worker = (
+      modules = [(name = "worker", esModule = embed "exported-handler-proxy-test.js")],
+      bindings = [(
+        name = "STRICT",
+        service = (name = "exported-handler-proxy-test", entrypoint = "Strict"),
+      )],
+    ),
+  )],
+);

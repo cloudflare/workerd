@@ -462,6 +462,10 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   kj::Promise<bool> test() override {
     co_return co_await observe(KJ_ASSERT_NONNULL(inner).test());
   }
+  kj::Promise<void> bench(
+      bench::BenchParams::Reader params, bench::BenchReport::Group::Builder report) override {
+    co_return co_await observe(KJ_ASSERT_NONNULL(inner).bench(params, report));
+  }
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     auto result = co_await observe(KJ_ASSERT_NONNULL(inner).customEvent(kj::mv(event)));
     if (outcome == EventOutcome::OK) outcome = result.outcome;
@@ -1021,6 +1025,10 @@ class AccessHeaderExtractor final: public WorkerInterface {
   }
   kj::Promise<bool> test() override {
     co_return co_await getInner().test();
+  }
+  kj::Promise<void> bench(
+      bench::BenchParams::Reader params, bench::BenchReport::Group::Builder report) override {
+    co_await getInner().bench(params, report);
   }
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     co_return co_await getInner().customEvent(kj::mv(event));
