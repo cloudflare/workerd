@@ -1175,6 +1175,17 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
       kj::mv(channels), kj::mv(tails), kj::none);
 }
 
+kj::Promise<::rust::Vec<uint64_t>> worker_bench(
+    kj::Own<WorkerInterface> worker, ::rust::Slice<const uint64_t> params) {
+  capnp::FlatArrayMessageReader paramsMessage(asWords(kj::from<Rust>(params)));
+  capnp::MallocMessageBuilder groupMessage;
+  co_await worker->bench(paramsMessage.getRoot<bench::BenchParams>(),
+      groupMessage.initRoot<bench::BenchReport::Group>());
+  auto words = capnp::messageToFlatArray(groupMessage);
+  co_return kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size())
+      .as<kj_rs::RustCopy>();
+}
+
 // =======================================================================================
 // Compiling a worker
 

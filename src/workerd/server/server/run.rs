@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! `workerd serve` and `workerd test`: bind the sockets, build the service graph, listen, and
-//! either wait for the drain signal or run the tests.
+//! `workerd serve`, `workerd test` and `workerd bench`: bind the sockets, build the service
+//! graph, listen, and either wait for the drain signal or run the tests or benchmarks.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -24,7 +24,9 @@ use workerd_capnp::service;
 use workerd_capnp::socket;
 
 use crate::Result;
+use crate::bench;
 use crate::bindings::Designator;
+use crate::bindings::len_u32;
 use crate::bridge::ffi;
 use crate::channels::Channel;
 use crate::config::Factory;
@@ -374,8 +376,77 @@ pub async fn run(
     Ok(ffi::factory_shutdown_containers(server.factory().raw()).await?)
 }
 
-/// `workerd test`: runs the `test()` handler of every entrypoint matching the patterns (globs
-/// as the `glob` crate reads them, matched against the whole name).
+/// The entrypoints `workerd test` or `workerd bench` runs a handler of: the channel of each,
+/// and its name ("service" or "service:entrypoint").
+type Targets = Vec<(Rc<dyn Channel>, String)>;
+
+/// Starts the server for `workerd test` or `workerd bench`, and selects the entrypoints that
+/// match the patterns (globs as the `glob` crate reads them, matched against the whole name) and
+/// export `handler`. `None` for a config `report` refuses, whose handlers do not run.
+async fn start_local(
+    factory: Rc<Factory>,
+    options: RunOptions,
+    report: Reporter,
+    (service_pattern, entrypoint_pattern): (&str, &str),
+    handler: &str,
+) -> Result<Option<(Running, Targets)>> {
+    let glob = |pattern: &str| {
+        glob::Pattern::new(pattern).map_err(|e| kj::failed!("{handler} filter \"{pattern}\": {e}"))
+    };
+    let (services, entrypoints) = (glob(service_pattern)?, glob(entrypoint_pattern)?);
+    let Some(running) = start(factory, options, report, true).await? else {
+        return Ok(None);
+    };
+
+    let mut targets = Vec::new();
+    for (name, service) in running.server.services() {
+        if !services.matches(name) {
+            continue;
+        }
+        let Some(worker) = service.as_worker() else {
+            continue;
+        };
+        if worker.has_handler(None, handler) && entrypoints.matches("default") {
+            targets.push((service.channel(), name.to_owned()));
+        }
+        for entrypoint in worker.entrypoint_names() {
+            if entrypoints.matches(entrypoint)
+                && worker.has_handler(Some(entrypoint), handler)
+                && let Some(channel) = worker.entrypoint(Some(entrypoint), None, false)
+            {
+                targets.push((channel, format!("{name}:{entrypoint}")));
+            }
+        }
+    }
+    Ok(Some((running, targets)))
+}
+
+impl Running {
+    /// Runs `handlers` while the listeners serve; a listener failing meanwhile is fatal, as in
+    /// `run()`.
+    ///
+    /// `handlers` runs as a task of the KJ loop: each handler starts in the turn after the one
+    /// before it returned, ahead of the events that one left queued (its tail workers'
+    /// deliveries), where this future would resume only once the loop is idle. The task should
+    /// hold the channels, not the server, whose drop clears the tasks.
+    async fn alongside<T: 'static>(
+        &mut self,
+        handlers: impl Future<Output = Result<T>> + 'static,
+    ) -> Result<T> {
+        let handlers = self.server.factory().spawn(handlers);
+        let serving = std::pin::pin!(serve_listeners(&mut self.listeners));
+        match futures::future::select(handlers, serving).await {
+            Either::Left((result, _)) => result,
+            Either::Right((result, handlers)) => {
+                result?;
+                handlers.await
+            }
+        }
+    }
+}
+
+/// `workerd test`: runs the `test()` handler of every entrypoint matching the patterns (see
+/// `start_local`).
 ///
 /// The sockets listen meanwhile (tests can configure them). True if every test passed and there
 /// was at least one; `None` for a config `report` refuses, whose tests do not run.
@@ -386,15 +457,9 @@ pub async fn test(
     service_pattern: &str,
     entrypoint_pattern: &str,
 ) -> Result<Option<bool>> {
-    let glob = |pattern: &str| {
-        glob::Pattern::new(pattern).map_err(|e| kj::failed!("test filter \"{pattern}\": {e}"))
-    };
-    let (services, entrypoints) = (glob(service_pattern)?, glob(entrypoint_pattern)?);
-    let Some(Running {
-        server,
-        mut listeners,
-        drain: _drain,
-    }) = start(factory, options, report, true).await?
+    let patterns = (service_pattern, entrypoint_pattern);
+    let Some((mut running, cases)) =
+        start_local(factory, options, report, patterns, "test").await?
     else {
         return Ok(None);
     };
@@ -413,54 +478,59 @@ pub async fn test(
         Ok::<bool, crate::Error>(result)
     };
 
-    let mut cases = Vec::new();
-    for (name, service) in server.services() {
-        if !services.matches(name) {
-            continue;
-        }
-        let Some(worker) = service.as_worker() else {
-            continue;
-        };
-        if worker.has_handler(None, "test") && entrypoints.matches("default") {
-            cases.push((service.channel(), name.to_owned()));
-        }
-        for entrypoint in worker.entrypoint_names() {
-            if entrypoints.matches(entrypoint)
-                && worker.has_handler(Some(entrypoint), "test")
-                && let Some(channel) = worker.entrypoint(Some(entrypoint), None, false)
-            {
-                cases.push((channel, format!("{name}:{entrypoint}")));
+    let (passed, failed) = running
+        .alongside(async move {
+            let (mut passed, mut failed) = (0u32, 0u32);
+            for (channel, name) in cases {
+                if run_one(channel, name).await? {
+                    passed += 1;
+                } else {
+                    failed += 1;
+                }
             }
-        }
-    }
-    // The tests run as a task of the KJ loop: a test starts in the turn after the one before it
-    // returned, ahead of the events that one left queued (its tail workers' deliveries), where
-    // this future would resume only once the loop is idle. The task holds the channels, not the
-    // server, whose drop clears the tasks.
-    let tests = server.factory().spawn(async move {
-        let (mut passed, mut failed) = (0u32, 0u32);
-        for (channel, name) in cases {
-            if run_one(channel, name).await? {
-                passed += 1;
-            } else {
-                failed += 1;
-            }
-        }
-        Ok::<_, crate::Error>((passed, failed))
-    });
-
-    // A listener failing while the tests run is fatal, as in `run()`.
-    let serving = std::pin::pin!(serve_listeners(&mut listeners));
-    let (passed, failed) = match futures::future::select(tests, serving).await {
-        Either::Left((result, _)) => result?,
-        Either::Right((result, tests)) => {
-            result?;
-            tests.await?
-        }
-    };
+            Ok((passed, failed))
+        })
+        .await?;
 
     if passed + failed == 0 {
         tracing::error!("No tests found!");
     }
     Ok(Some(passed > 0 && failed == 0))
+}
+
+/// `workerd bench`: runs the `bench()` handler of every entrypoint matching the patterns (see
+/// `start_local`), as `test()` runs `test()` handlers.
+///
+/// The handlers get `params`, an encoded `BenchParams` message (bench.capnp). Returns the
+/// report, with a group for each handler; `None` for a config `report` refuses, whose handlers
+/// do not run.
+pub async fn bench(
+    factory: Rc<Factory>,
+    options: RunOptions,
+    report: Reporter,
+    service_pattern: &str,
+    entrypoint_pattern: &str,
+    params: Vec<u64>,
+) -> Result<Option<bench::Report>> {
+    let patterns = (service_pattern, entrypoint_pattern);
+    let Some((mut running, targets)) =
+        start_local(factory, options, report, patterns, "bench").await?
+    else {
+        return Ok(None);
+    };
+    if targets.is_empty() {
+        tracing::error!("No benchmarks found!");
+        return Ok(Some(bench::Report::new(0)));
+    }
+
+    let results = running
+        .alongside(async move {
+            let mut results = bench::Report::new(len_u32(&targets));
+            for (channel, name) in targets {
+                results.run_group(&*channel, &name, &params).await?;
+            }
+            Ok(results)
+        })
+        .await?;
+    Ok(Some(results))
 }

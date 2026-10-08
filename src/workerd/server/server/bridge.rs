@@ -147,6 +147,13 @@ pub mod ffi {
         message: String,
     }
 
+    /// The in-process server's `workerd bench`: whether it passed, and its encoded
+    /// `BenchReport` (bench.capnp) in words.
+    struct BenchOutcome {
+        passed: bool,
+        report: Vec<u64>,
+    }
+
     /// Where an actor keeps its data.
     struct ActorStorageSpec {
         /// Durable: keep state across requests. Ephemeral: no storage at all.
@@ -334,6 +341,11 @@ pub mod ffi {
             inner: KjOwn<WorkerInterface>,
             keep: Box<KeepAlive>,
         ) -> KjOwn<WorkerInterface>;
+        /// Runs the `bench()` handler of the request `worker` with `params`, an encoded
+        /// `BenchParams` message (bench.capnp) in words. Returns the `BenchReport.Group` the
+        /// handler filled in, encoded, without its name. The failures of the handler's code are
+        /// in the group; an error means the handler could not be run at all.
+        async fn worker_bench(worker: KjOwn<WorkerInterface>, params: &[u64]) -> Result<Vec<u64>>;
         /// Constructs an actor of `class_name` whose storage lives in `storage`. `hooks` is the
         /// actor's way back to the server; `hibernation_manager` is the evicted predecessor's,
         /// whose WebSockets the actor adopts. `container` gives the actor its container's Docker
@@ -607,8 +619,9 @@ pub mod ffi {
 
         /// The server run inside a test process (in_process.rs), on a factory the test built.
         /// `run` is `workerd serve` until `drain`, with `--debug-port` if `debug_port` is not
-        /// empty; `test` is `workerd test`. `next_report` is the next config error or warning.
-        /// `connect` and `accept` are the two ends of a `loopback:` name.
+        /// empty; `test` is `workerd test`; `bench` is `workerd bench` with `params`, an encoded
+        /// `BenchParams` message. `next_report` is the next config error or warning. `connect`
+        /// and `accept` are the two ends of a `loopback:` name.
         type InProcessServer;
         fn new_in_process_server(factory: KjOwn<WorkerFactory>) -> Box<InProcessServer>;
         async unsafe fn run<'a>(self: &'a InProcessServer, debug_port: &'a str) -> Result<()>;
@@ -617,6 +630,12 @@ pub mod ffi {
             service_pattern: &'a str,
             entrypoint_pattern: &'a str,
         ) -> Result<bool>;
+        async unsafe fn bench<'a>(
+            self: &'a InProcessServer,
+            service_pattern: &'a str,
+            entrypoint_pattern: &'a str,
+            params: &'a [u64],
+        ) -> Result<BenchOutcome>;
         fn drain(self: &InProcessServer);
         async unsafe fn next_report<'a>(self: &'a InProcessServer) -> ConfigReport;
         fn connect(self: &InProcessServer, name: &str) -> Result<KjOwn<AsyncIoStream>>;
