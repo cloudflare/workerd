@@ -41,6 +41,8 @@ Subdirectory `AGENTS.md` files provide component-specific context (key classes, 
 - `just build-asan` - Build with AddressSanitizer
 - `just test-asan` - Run tests with AddressSanitizer
 - `just new-test <target>` - Scaffold a new test (e.g., `just new-test //src/workerd/api/tests:my-test`)
+- `just new-bench <target>` - Scaffold a new JavaScript benchmark (`wd_bench()`)
+- `just wd-bench <target> [args]` - Run a `wd_bench()` target in an optimized build (e.g., `just wd-bench //src/workerd/api/tests:text-encoder-bench@`)
 - `just new-wpt-test <name>` - Scaffold a new WPT test
 - `just lint` or `just eslint` - Run ESLint on TypeScript sources
 - `just coverage <path>` - Generate code coverage report (Linux only, defaults to `//...`)
@@ -55,7 +57,7 @@ Subdirectory `AGENTS.md` files provide component-specific context (key classes, 
 - **Rust unit tests**: `<module>-test.rs` beside the module under test, never inline; run by the crate's test target (`<name>_test` for a crate defined with a `wd_rust_*` macro; otherwise see the package's `BUILD.bazel`). See `src/rust/AGENTS.md` §UNIT TEST FILES.
 - **Node.js compatibility tests**: `just node-test <test_name>`
 - **Web Platform Tests**: `just wpt-test <test_name>`
-- **Benchmarks**: `just bench <path>` (e.g., `just bench mimetype`)
+- **Benchmarks**: `just bench <path>` (e.g., `just bench mimetype`) for C++ (`wd_cc_benchmark()`); `wd_bench()` for JavaScript via `workerd bench`, whose `@smoke` tests run in CI. See `docs/benchmarking.md`.
 
 ### Running a Single Test
 
@@ -196,6 +198,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Durable Object storage | `src/workerd/io/actor-cache.{h,c++}` + `actor-sqlite.{h,c++}` | LRU cache over RPC / SQLite-backed                                                                           |
 | Streams implementation | `src/workerd/api/streams/`                                    | Has 842-line README; dual internal/standard impl                                                             |
 | Bazel build rules      | `build/`                                                      | Custom `wd_*` macros; `wd_test.bzl` generates 3 test variants                                                |
+| JS benchmarks          | `src/workerd/api/bench.{h,c++}`, `build/wd_bench.bzl`         | `bench` handler; runner is in `BenchController`; report schema `io/bench.capnp`; driver `Server::bench()`   |
 | TypeScript types       | `types/`                                                      | Extracted from C++ RTTI + hand-written `defines/*.d.ts`; see `types/AGENTS.md` for detailed typings guidance |
 | V8 patches             | `patches/v8/`                                                 | 33 patches; see `docs/v8-updates.md`                                                                         |
 
