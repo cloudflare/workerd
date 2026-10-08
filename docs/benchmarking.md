@@ -64,8 +64,9 @@ command line's case `filter` and whether `--quick` was given.
 
 ## Running
 
-Define benchmarks in a config like a `.wd-test` file (conventionally named `.wd-bench`) and add
-them to a `BUILD.bazel` file:
+`just new-bench //path/to:name-bench` scaffolds a benchmark. Otherwise, define benchmarks in a
+config like a `.wd-test` file (conventionally named `.wd-bench`) and add them to a `BUILD.bazel`
+file:
 
 ```python
 load("//:build/wd_bench.bzl", "wd_bench")

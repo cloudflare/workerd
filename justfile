@@ -120,6 +120,10 @@ new-wpt-test test_name:
 new-test test_name:
   ./tools/unix/new-test.sh {{test_name}}
 
+# e.g. just new-bench //src/workerd/api/tests:url-bench
+new-bench bench_name:
+  ./tools/unix/new-bench.sh {{bench_name}}
+
 format *files:
   {{ if files == "" { "python3 tools/cross/format.py" } else { "python3 tools/cross/format.py files -- " + files } }}
 
