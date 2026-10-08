@@ -168,6 +168,12 @@ class Worker: public kj::AtomicRefcounted {
   ~Worker() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(Worker);
 
+  // Serializes the isolate into its jsg::SnapshotArtifact. Only for a Worker built in a zygote
+  // isolate whose capture was deferred (Worker::Isolate::deferSnapshotCapture()); the
+  // constructor captures immediately otherwise. The Worker cannot run JavaScript afterwards, and
+  // must have no requests in flight.
+  void captureSnapshot(jsg::Lock& lock) const;
+
   inline const Script& getScript() const {
     return *script;
   }
@@ -375,6 +381,11 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   inline IsolateObserver& getMetrics() {
     return *metrics;
   }
+
+  // For an isolate created as a snapshot zygote: the next Worker built in it serves requests
+  // before its capture, which the embedder triggers with Worker::captureSnapshot().
+  void deferSnapshotCapture() const;
+  bool isSnapshotCaptureDeferred() const;
 
   inline const IsolateObserver& getMetrics() const {
     return *metrics;

@@ -551,6 +551,7 @@ struct Worker::Impl {
 // noted.
 struct Worker::Isolate::Impl {
   IsolateObserver& metrics;
+  mutable std::atomic<bool> snapshotCaptureDeferred = false;
   kj::Own<InspectorClient> inspectorClient;
   kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>> inspector;
   InspectorPolicy inspectorPolicy;
@@ -2493,7 +2494,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                     // Record the namespace so a restored isolate can skip evaluation entirely.
                     context->SetEmbedderDataV2(
                         jsg::SNAPSHOT_MAIN_MODULE_NAMESPACE_SLOT, v8::Local<v8::Object>(ns));
-                    break;
+                    // A zygote that serves requests before its capture needs the handlers; the
+                    // capture drops them again (captureSnapshot()).
+                    if (!script->isolate->isSnapshotCaptureDeferred()) break;
                   }
                   impl->env = lock.v8Ref(bindingsScope.As<v8::Value>());
                   impl->ctxExports = lock.v8Ref(ctxExports.As<v8::Value>());
@@ -2580,39 +2583,71 @@ Worker::Worker(kj::Own<const Script> scriptParam,
     });
 
     if (auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
-        isolateBase.isPreparingSnapshot()) {
-      // In a handle scope of its own: the one above held the bindings and ctx.exports objects
-      // as stack roots, and createSnapshotBlob() collects garbage to tell wrappers only the
-      // zygote's setup reached from wrappers the worker retained.
-      lock.withinHandleScope([&] {
-        // The Rust realm caches its resource templates in v8::Globals, which CreateBlob refuses;
-        // they go into the blob instead, and a restored realm adopts them on first use.
-        // const_cast OK because guarded by `lock`.
-        ::workerd::rust::jsg::realm_prepare_snapshot(
-            const_cast<::workerd::rust::jsg::Realm&>(*script->isolate->impl->realm));
-        // A service worker's Script holds the compiled script and its globals as v8::Globals,
-        // which CreateBlob refuses. The zygote's Script is never used again: the restored
-        // isolate's own Script starts out as ScriptFromSnapshot (the global object already
-        // carries the globals' values).
-        auto& scriptImpl = *const_cast<Script&>(*script).impl;
-        if (scriptImpl.unboundScriptOrMainModule.is<jsg::NonModuleScript>()) {
-          scriptImpl.unboundScriptOrMainModule = Script::Impl::ScriptFromSnapshot{};
-        }
-        scriptImpl.globals = nullptr;
-        // The bootstrap's C++ state holds V8 handles; park it in the heap so CreateBlob can run
-        // and a restored isolate can pick it up (per-isolate-bootstrap.h). Same for the global
-        // scope's event listeners, which clear() below removes, and its cached `process` /
-        // `Buffer` values.
-        stashPerIsolateBootstrapForSnapshot(lock, jsContext->getHandle(lock));
-        stashGlobalEventHandlersForSnapshot(lock, jsContext->getHandle(lock), **jsContext);
-        stashLazyNodeGlobalsForSnapshot(lock, jsContext->getHandle(lock), **jsContext);
-        auto contextGlobal = jsContext->extractContextGlobalForSnapshot();
-        (*jsContext)->clear();
-        const_cast<Script&>(*script).impl->moduleContext = kj::none;
-        impl->context = kj::none;
-        isolateBase.createSnapshotBlob(kj::mv(contextGlobal), {});
-      });
+        isolateBase.isPreparingSnapshot() && !script->isolate->isSnapshotCaptureDeferred()) {
+      captureSnapshot(lock);
     }
+  });
+}
+
+void Worker::Isolate::deferSnapshotCapture() const {
+  impl->snapshotCaptureDeferred.store(true, std::memory_order_relaxed);
+}
+
+bool Worker::Isolate::isSnapshotCaptureDeferred() const {
+  return impl->snapshotCaptureDeferred.load(std::memory_order_relaxed);
+}
+
+void Worker::captureSnapshot(jsg::Lock& lock) const {
+  auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
+  KJ_REQUIRE(isolateBase.isPreparingSnapshot(), "not a snapshot zygote");
+  {
+    // A deferred zygote served requests: drop the Worker-level handles its handlers hold, which
+    // CreateBlob() would refuse as live v8::Globals. The namespace was recorded at startup.
+    // const_cast OK because guarded by `lock`.
+    auto& mutableImpl = const_cast<Impl&>(*impl);
+    mutableImpl.namedHandlers.clear();
+    mutableImpl.actorClasses.clear();
+    mutableImpl.statelessClasses.clear();
+    mutableImpl.workflowClasses.clear();
+    mutableImpl.env = kj::none;
+    mutableImpl.ctxExports = kj::none;
+  }
+  // In a handle scope of its own: the one above held the bindings and ctx.exports objects
+  // as stack roots, and createSnapshotBlob() collects garbage to tell wrappers only the
+  // zygote's setup reached from wrappers the worker retained.
+  lock.withinHandleScope([&] {
+    // const_cast OK because guarded by `lock`.
+    auto& mutableImpl = const_cast<Impl&>(*impl);
+    auto& scriptImpl = *const_cast<Script&>(*script).impl;
+    jsg::JsContext<api::ServiceWorkerGlobalScope>* jsContext = [&]() {
+      KJ_IF_SOME(c, mutableImpl.context) return &c;
+      return &KJ_ASSERT_NONNULL(scriptImpl.moduleContext);
+    }();
+    // The Rust realm caches its resource templates in v8::Globals, which CreateBlob refuses;
+    // they go into the blob instead, and a restored realm adopts them on first use.
+    // const_cast OK because guarded by `lock`.
+    ::workerd::rust::jsg::realm_prepare_snapshot(
+        const_cast<::workerd::rust::jsg::Realm&>(*script->isolate->impl->realm));
+    // A service worker's Script holds the compiled script and its globals as v8::Globals,
+    // which CreateBlob refuses. The zygote's Script is never used again: the restored
+    // isolate's own Script starts out as ScriptFromSnapshot (the global object already
+    // carries the globals' values).
+    if (scriptImpl.unboundScriptOrMainModule.is<jsg::NonModuleScript>()) {
+      scriptImpl.unboundScriptOrMainModule = Script::Impl::ScriptFromSnapshot{};
+    }
+    scriptImpl.globals = nullptr;
+    // The bootstrap's C++ state holds V8 handles; park it in the heap so CreateBlob can run
+    // and a restored isolate can pick it up (per-isolate-bootstrap.h). Same for the global
+    // scope's event listeners, which clear() below removes, and its cached `process` /
+    // `Buffer` values.
+    stashPerIsolateBootstrapForSnapshot(lock, jsContext->getHandle(lock));
+    stashGlobalEventHandlersForSnapshot(lock, jsContext->getHandle(lock), **jsContext);
+    stashLazyNodeGlobalsForSnapshot(lock, jsContext->getHandle(lock), **jsContext);
+    auto contextGlobal = jsContext->extractContextGlobalForSnapshot();
+    (*jsContext)->clear();
+    scriptImpl.moduleContext = kj::none;
+    mutableImpl.context = kj::none;
+    isolateBase.createSnapshotBlob(kj::mv(contextGlobal), {});
   });
 }
 
