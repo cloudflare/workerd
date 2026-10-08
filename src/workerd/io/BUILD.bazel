@@ -299,6 +299,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":async-trace",
         ":trace_capnp",
         ":worker-interface_capnp",
         "//src/workerd/util:strong-bool",

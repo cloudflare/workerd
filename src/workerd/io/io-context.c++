@@ -1416,7 +1416,7 @@ SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
 
 TraceContext IoContext::makeUserTraceSpan(kj::ConstString operationName) {
   TraceContextParent parents(getCurrentTraceSpan(), getCurrentUserTraceSpan());
-  return parents.newChild(kj::mv(operationName));
+  return parents.newChild(kj::mv(operationName), tryGetAsyncTracker());
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {

@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/io/async-trace.h>
 #include <workerd/io/outcome.capnp.h>
 #include <workerd/io/trace.capnp.h>
 #include <workerd/io/worker-interface.capnp.h>
@@ -1480,7 +1481,15 @@ class TraceContextParent {
     return internalSpan.isObserved() || userSpan.isObserved();
   }
 
+  // The child's async trace operation, if any, is recorded by the tracker of the innermost turn on
+  // this thread (AsyncTracker::inTurn()). Prefer the overload taking the tracker when the owning
+  // context is known.
   [[nodiscard]] TraceContext newChild(kj::ConstString operationName);
+
+  // Like newChild(operationName), but the operation is recorded by `asyncTracker`, the tracker of
+  // the context that owns the spans (none if that context is not traced).
+  [[nodiscard]] TraceContext newChild(
+      kj::ConstString operationName, kj::Maybe<const AsyncTracker&> asyncTracker);
 
  private:
   SpanParent internalSpan;
@@ -1488,17 +1497,46 @@ class TraceContextParent {
 };
 
 // Owns the local span builders for an operation.
+//
+// When created for a context with async tracing (see async-trace.h), it also owns an OPERATION
+// resource, whether or not the spans are observed. (TraceContextParent::newChild() describes how
+// the context's tracker is found.) The resource settles when the TraceContext is destroyed or
+// overwritten. The next awaitIo() in the same turn adopts it (reports under it) unless
+// detachAsync() was called.
 class TraceContext {
  public:
   TraceContext(): span(nullptr), userSpan(nullptr) {}
 
   // Construct through TraceContextParent::newChild() to keep local span creation in one place.
-  TraceContext(kj::Badge<TraceContextParent>, SpanBuilder span, SpanBuilder userSpan)
+  TraceContext(kj::Badge<TraceContextParent>,
+      SpanBuilder span,
+      SpanBuilder userSpan,
+      AsyncResource asyncTraceResource)
       : span(kj::mv(span)),
-        userSpan(kj::mv(userSpan)) {}
+        userSpan(kj::mv(userSpan)),
+        asyncTraceResource(kj::mv(asyncTraceResource)) {}
   TraceContext(TraceContext&& other) = default;
-  TraceContext& operator=(TraceContext&& other) = default;
+  TraceContext& operator=(TraceContext&& other) {
+    if (this != &other) {
+      asyncTraceResource.settle(AsyncOutcome::OK);
+      span = kj::mv(other.span);
+      userSpan = kj::mv(other.userSpan);
+      asyncTraceResource = kj::mv(other.asyncTraceResource);
+    }
+    return *this;
+  }
+  ~TraceContext() noexcept(false) {
+    asyncTraceResource.settle(AsyncOutcome::OK);
+  }
   KJ_DISALLOW_COPY(TraceContext);
+
+  // Takes the operation out of consideration for adoption by awaitIo(). Call it when this
+  // TraceContext outlives the current call without being attached to the promise passed to the
+  // next awaitIo() (stored in a client, a task, or a promise awaited some other way); otherwise an
+  // unrelated awaitIo() later in the turn could adopt it.
+  void detachAsync() {
+    asyncTraceResource.markBound();
+  }
 
   // Set a tag on both the internal span and user span.
   void setTag(kj::ConstString key, SpanBuilder::TagInitValue value);
@@ -1529,14 +1567,25 @@ class TraceContext {
  private:
   SpanBuilder span;
   SpanBuilder userSpan;
+  AsyncResource asyncTraceResource;
 };
 
 inline TraceContext TraceContextParent::newChild(kj::ConstString operationName) {
+  return newChild(kj::mv(operationName), AsyncTracker::inTurn());
+}
+
+inline TraceContext TraceContextParent::newChild(
+    kj::ConstString operationName, kj::Maybe<const AsyncTracker&> asyncTracker) {
+  AsyncResource asyncTraceResource;
+  KJ_IF_SOME(tracker, asyncTracker) {
+    asyncTraceResource = tracker.create(AsyncKind::OPERATION, operationName);
+  }
   // newChild() consumes its operationName argument, so clone it for the internal child and move
   // the original into the user child.
   auto internalChild = internalSpan.newChild(operationName.clone());
   auto userChild = userSpan.newChild(kj::mv(operationName));
-  return TraceContext(kj::Badge<TraceContextParent>(), kj::mv(internalChild), kj::mv(userChild));
+  return TraceContext(kj::Badge<TraceContextParent>(), kj::mv(internalChild), kj::mv(userChild),
+      kj::mv(asyncTraceResource));
 }
 
 // RAII object that measures the time duration over its lifetime. It tags this duration onto a
