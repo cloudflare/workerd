@@ -531,6 +531,21 @@ KJ_TEST("a span that ended synchronously is not adopted") {
   expectComplete(events);
 }
 
+KJ_TEST("spans attached with attachSpans() are not adopted") {
+  auto events = traceInContext([](const TestFixture::Environment& env) {
+    auto traceContext = env.context.makeUserTraceSpan("durable_object_storage_get"_kjc);
+    env.context.attachSpans(env.js, env.js.resolvedPromise(), kj::mv(traceContext));
+    return roundTrip(env, kj::evalLater([]() {}));
+  });
+  expectInOrder(events,
+      {
+        "init durable_object_storage_get#1 trigger=request exec=request"_kj,
+        "init awaitIo#1 trigger=request exec=request"_kj,
+        "turn cause=awaitIo#1"_kj,
+      });
+  expectComplete(events);
+}
+
 KJ_TEST("adopting with several eligible spans takes the latest and is counted") {
   auto events = traceInContext([](const TestFixture::Environment& env) {
     auto first = env.context.makeUserTraceSpan("first"_kjc);

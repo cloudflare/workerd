@@ -1165,6 +1165,9 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
         kj::mv(ret), getHeaderIds().contentEncoding, metrics);
   }
 
+  // The span lives as long as the client, not just until the caller's next awaitIo(), which may
+  // await something else.
+  tracing.detachAsync();
   if (tracing.isObserved()) {
     auto ioOwnedSpan = addObject(kj::heap(kj::mv(tracing)));
     ret = ret.attach(kj::mv(ioOwnedSpan));
