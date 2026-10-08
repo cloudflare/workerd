@@ -373,3 +373,12 @@ _wd_test = rule(
         "_platforms_os_windows": attr.label(default = "@platforms//os:windows"),
     },
 )
+
+def wd_cli_test(**kwargs):
+    """Defines a test that runs workerd with the given `args`, as wd_test()'s variants do.
+
+    The first argument is usually `$(location //src/workerd/server:workerd_cross)`, which must also
+    be in `data`. `-dTEST_TMPDIR=<dir>` is appended to the arguments. For macros outside this
+    file, such as wd_bench().
+    """
+    _wd_test(**kwargs)

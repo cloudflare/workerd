@@ -1,6 +1,7 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//:build/wd_bench.bzl", "wd_bench")
 load("//:build/wd_test.bzl", "wd_test")
 
 exports_files(["starttls-server.pem"])
@@ -1485,4 +1486,9 @@ sh_test(
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
+)
+
+wd_bench(
+    src = "text-encoder-bench.wd-bench",
+    data = ["text-encoder-bench.js"],
 )
