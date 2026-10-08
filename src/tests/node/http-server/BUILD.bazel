@@ -33,6 +33,7 @@ wd_test(
 # constructor flag this config deliberately omits would turn on,
 # contradicting its purpose of asserting the pre-flag behavior.
 wd_test(
+    size = http_server_size,
     src = "http-server-cpp-legacy.wd-test",
     data = http_server_suite_srcs,
     generate_all_compat_flags_variant = False,
