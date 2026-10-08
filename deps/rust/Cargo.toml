@@ -45,6 +45,8 @@ flate2 = "1"
 libz-rs-sys = { version = "0.6", default-features = false, features = ["std", "rust-allocator"] }
 futures = "0"
 libc = "0"
+# erfc() and lgamma() for histogram statistics; the std equivalents are unstable.
+libm = "0"
 lol_html_c_api = { git = "https://github.com/cloudflare/lol-html" }
 hashlink = "0"
 # kj-rs-io: `fs` for fcntl (KJ's fd flags), `signal` for ignoring SIGPIPE once per process like
