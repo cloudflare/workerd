@@ -19,6 +19,7 @@ thread_local uint allowV8BackgroundThreadScopeCount = 0;
 
 bool multiTenantProcess = false;
 bool predictableMode = false;
+bool benchMode = false;
 bool gcStressMode = false;
 
 // This variable is read in signal handlers, so use atomic stores and compiler barriers as
@@ -54,6 +55,14 @@ bool isPredictableModeForTest() {
 
 void setPredictableModeForTest() {
   predictableMode = true;
+}
+
+bool isBenchMode() {
+  return benchMode;
+}
+
+void setBenchMode() {
+  benchMode = true;
 }
 
 bool isGcStressModeForTest() {
