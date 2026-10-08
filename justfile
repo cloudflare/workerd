@@ -141,6 +141,11 @@ update-rust package="":
 bench path:
   bazel run //src/workerd/tests:bench-{{path}} --config=benchmark
 
+# example: just wd-bench //src/workerd/api/tests:text-encoder-bench@ '*/encode ascii*'
+# Runs a wd_bench() target in an optimized build; arguments after the target go to `workerd bench`.
+wd-bench target *args:
+  bazel run {{target}} --config=benchmark -- {{args}}
+
 # example: just clippy dns
 # example: just clippy //src/workerd/server:workerd-cli
 clippy package="...":
