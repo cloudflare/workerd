@@ -248,6 +248,12 @@ export class ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE extends NodeError {
   }
 }
 
+export class ERR_CRYPTO_INVALID_SCRYPT_PARAMS extends NodeRangeError {
+  constructor() {
+    super('ERR_CRYPTO_INVALID_SCRYPT_PARAMS', 'Invalid scrypt params');
+  }
+}
+
 export class ERR_INVALID_ARG_TYPE_RANGE extends NodeRangeError {
   constructor(name: string, expected: string | string[], actual: unknown) {
     const msg = createInvalidArgType(name, expected);

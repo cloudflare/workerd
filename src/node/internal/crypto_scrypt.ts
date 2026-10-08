@@ -39,7 +39,10 @@ import { kMaxLength } from 'node-internal:internal_buffer';
 
 import { getArrayBufferOrView } from 'node-internal:crypto_util';
 
-import { ERR_INVALID_ARG_VALUE } from 'node-internal:internal_errors';
+import {
+  ERR_CRYPTO_INVALID_SCRYPT_PARAMS,
+  ERR_INVALID_ARG_VALUE,
+} from 'node-internal:internal_errors';
 
 export interface ValidatedScryptOptions {
   password: ArrayLike;
@@ -145,6 +148,41 @@ function validateParameters(
   };
 }
 
+// OpenSSL's EVP_PBE_scrypt enforces 128 * r * (N + p + 2) <= maxmem; BoringSSL
+// does not, so mirror the check here to match Node.js behaviour. Run alongside
+// the native call (sync inside scryptSync, inside the Promise body for scrypt)
+// so the failure surfaces the same way Node's C++ ScryptJob errors do, rather
+// than as a synchronous throw from the validator. Uses BigInt because
+// validateUint32 allows values up to 2**32 - 1, whose product would overflow a
+// JS Number's safe integer range.
+function checkScryptMemory(
+  N: number,
+  r: number,
+  p: number,
+  maxmem: number
+): void {
+  if (128n * BigInt(r) * (BigInt(N) + BigInt(p) + 2n) > BigInt(maxmem)) {
+    throw new ERR_CRYPTO_INVALID_SCRYPT_PARAMS();
+  }
+}
+
+// The native cryptoImpl.getScrypt throws a generic Error('Scrypt failed') with
+// no .code on invalid scrypt params; rewrap that exact error to carry Node's
+// standard ERR_CRYPTO_INVALID_SCRYPT_PARAMS code. Any other error (including
+// errors that already have a code, or errors with a different message) is
+// returned unchanged so unrelated failures and the already-coded error from
+// checkScryptMemory aren't suppressed.
+function normaliseScryptError(err: unknown): Error {
+  if (
+    err instanceof Error &&
+    err.message === 'Scrypt failed' &&
+    (err as { code?: unknown }).code === undefined
+  ) {
+    return new ERR_CRYPTO_INVALID_SCRYPT_PARAMS();
+  }
+  return err as Error;
+}
+
 type Callback = (err: Error | null, derivedKey?: Buffer) => void;
 type OptionsOrCallback = ScryptOptions | Callback;
 
@@ -175,9 +213,10 @@ export function scrypt(
 
   new Promise<ArrayBuffer>((res, rej) => {
     try {
+      checkScryptMemory(N, r, p, maxmem);
       res(cryptoImpl.getScrypt(password, salt, N, r, p, maxmem, keylen));
     } catch (err) {
-      rej(err as Error);
+      rej(normaliseScryptError(err));
     }
   }).then(
     (val: ArrayBuffer) => {
@@ -206,7 +245,12 @@ export function scryptSync(
     options
   ));
 
-  return Buffer.from(
-    cryptoImpl.getScrypt(password, salt, N, r, p, maxmem, keylen)
-  );
+  try {
+    checkScryptMemory(N, r, p, maxmem);
+    return Buffer.from(
+      cryptoImpl.getScrypt(password, salt, N, r, p, maxmem, keylen)
+    );
+  } catch (err) {
+    throw normaliseScryptError(err);
+  }
 }
