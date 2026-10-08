@@ -80,7 +80,7 @@ kj::OneOf<jsg::Ref<File>, kj::String> blobToFile(jsg::Lock& js,
     // The file is created with the same data as the blob (essentially as just
     // a view of the same blob) to avoid copying the data.
     return js.alloc<File>(
-        blob.addRef(), blob->getData(), kj::mv(fn), kj::str(blob->getType()), dateNow());
+        blob.addRef(), blob->getData(js), kj::mv(fn), kj::str(blob->getType()), dateNow());
   };
 
   KJ_SWITCH_ONEOF(value) {
@@ -308,7 +308,7 @@ void FormData::parse(jsg::Lock& js,
       MimeType::FORM_DATA.toString(), ", ", MimeType::FORM_URLENCODED.toString());
 }
 
-kj::Array<kj::byte> FormData::serialize(kj::ArrayPtr<const char> boundary) {
+kj::Array<kj::byte> FormData::serialize(jsg::Lock& js, kj::ArrayPtr<const char> boundary) {
   // Boundary string requirement per RFC7578
   JSG_REQUIRE(boundary.size() > 0 && boundary.size() <= 70, TypeError,
       "Length of multipart/form-data boundary string must be in the range [1, 70].");
@@ -339,7 +339,7 @@ kj::Array<kj::byte> FormData::serialize(kj::ArrayPtr<const char> boundary) {
           builder.addAll(type);
         }
         builder.addAll("\r\n\r\n"_kj);
-        builder.addAll(file->getData().asChars());
+        builder.addAll(file->getData(js).asChars());
       }
     }
     builder.addAll("\r\n"_kj);

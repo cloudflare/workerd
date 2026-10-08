@@ -2868,7 +2868,7 @@ jsg::Promise<void> FileSystemWriteContextHandle::write(jsg::Lock& js,
     return js.tryCatch([&] {
       KJ_SWITCH_ONEOF(data) {
         KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-          KJ_SWITCH_ONEOF(inner->write(js, position, blob->getData())) {
+          KJ_SWITCH_ONEOF(inner->write(js, position, blob->getData(js))) {
             KJ_CASE_ONEOF(written, uint32_t) {
               position += written;
             }
@@ -2918,7 +2918,7 @@ jsg::Promise<void> FileSystemWriteContextHandle::write(jsg::Lock& js,
               KJ_IF_SOME(data, maybeData) {
                 KJ_SWITCH_ONEOF(data) {
                   KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-                    KJ_SWITCH_ONEOF(inner->write(js, offset, blob->getData())) {
+                    KJ_SWITCH_ONEOF(inner->write(js, offset, blob->getData(js))) {
                       KJ_CASE_ONEOF(written, uint32_t) {
                         position = offset + written;
                         return js.resolvedPromise();

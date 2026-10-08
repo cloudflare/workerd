@@ -55,7 +55,7 @@ class JsReadableStream final {
     kj::ArrayPtr<const kj::byte> view;
 
     explicit Buffer(kj::Array<const kj::byte> data);
-    explicit Buffer(jsg::Ref<Blob> data);
+    Buffer(jsg::Lock& js, jsg::Ref<Blob> data);
   };
 
   struct Impl {
