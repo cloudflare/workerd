@@ -736,17 +736,11 @@ fn explicit_cause_replaces_the_default() {
     let timer = f.create(Kind::Timer, "setTimeout");
     f.tracker.turn_end();
 
+    // The default was never entered, so it reports nothing.
     let events = f.events();
     assert_eq!(init_of(&events, timer).0, bridge);
-    assert_eq!(
-        events[..3],
-        [
-            Event::Before { ctx, id: request },
-            Event::After { ctx, id: request },
-            Event::Before { ctx, id: bridge },
-        ]
-    );
-    assert!(matches!(&events[5], Event::Turn { turn, .. } if turn.cause == bridge));
+    assert_eq!(events[0], Event::Before { ctx, id: bridge });
+    assert!(matches!(&events[3], Event::Turn { turn, .. } if turn.cause == bridge));
     assert_eq!(f.tracker.stats().unbalanced, 0);
 
     // A second explicit cause is still rejected.
@@ -763,6 +757,7 @@ fn unknown_default_cause() {
     let mut f = Fixture::new();
     f.tracker.turn_begin(4242);
     assert_eq!(f.tracker.turn_cause(), 4242);
+    f.create(Kind::Timer, "enters the default");
     f.tracker.turn_end();
     assert_eq!(f.tracker.stats().unknown, 1);
     assert_eq!(f.tracker.stats().unbalanced, 0);
@@ -786,4 +781,108 @@ fn foreign_thread_drops_are_reported() {
             },
         }]
     );
+}
+
+#[test]
+fn adopted_operation_outlives_its_creator() {
+    // The binding's span ends (settling the operation) before the bridge's continuation runs.
+    let mut f = Fixture::new();
+    let ctx = f.ctx();
+    f.tracker.turn_begin(0);
+    let op = f.create(Kind::Operation, "kv_get");
+    assert_eq!(f.tracker.adopt_operation(), op);
+    f.tracker.turn_end();
+    let _ = f.events();
+
+    f.tracker.settle(op, Outcome::Ok);
+    f.tracker.destroy(op); // The creator's handle.
+    f.tracker.turn_begin(0);
+    f.tracker.set_turn_cause(op); // The bridge's handle.
+    f.tracker.turn_end();
+    f.tracker.destroy(op);
+
+    let events = f.events();
+    assert_eq!(
+        events[0],
+        Event::Settle {
+            ctx,
+            id: op,
+            outcome: Outcome::Ok
+        }
+    );
+    assert_eq!(events[1], Event::Before { ctx, id: op });
+    assert_eq!(events[2], Event::After { ctx, id: op });
+    assert_eq!(events.len(), 4, "{events:?}");
+    assert_eq!(f.tracker.stats().unknown, 0);
+
+    // Both handles are gone.
+    f.tracker.destroy(op);
+    assert_eq!(f.tracker.stats().unknown, 1);
+}
+
+#[test]
+fn unsettled_adopted_operation_is_destroyed_once_by_its_last_holder() {
+    let mut f = Fixture::new();
+    let ctx = f.ctx();
+    f.tracker.turn_begin(0);
+    let op = f.create(Kind::Operation, "kv_get");
+    assert_eq!(f.tracker.adopt_operation(), op);
+    f.tracker.turn_end();
+    let _ = f.events();
+
+    f.tracker.destroy(op);
+    assert!(f.events().is_empty());
+    f.tracker.destroy(op);
+    assert_eq!(f.events(), vec![Event::Destroy { ctx, id: op }]);
+    assert_eq!(f.tracker.stats().unknown, 0);
+}
+
+#[test]
+fn unused_default_cause_reports_only_the_turn() {
+    let mut f = Fixture::new();
+    let request = f.create(Kind::Request, "fetch");
+    let _ = f.events();
+    f.tracker.turn_begin(request);
+    assert_eq!(f.tracker.current(), request);
+    f.tracker.turn_end();
+    let events = f.events();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert!(matches!(&events[0], Event::Turn { turn, .. } if turn.cause == request));
+}
+
+#[test]
+fn explicit_cause_after_the_default_was_entered_closes_it() {
+    let mut f = Fixture::new();
+    let ctx = f.ctx();
+    let request = f.create(Kind::Request, "fetch");
+    let bridge = f.create(Kind::KjToJs, "bridge");
+    let _ = f.events();
+    f.tracker.turn_begin(request);
+    let timer = f.create(Kind::Timer, "setTimeout");
+    f.tracker.set_turn_cause(bridge);
+    f.tracker.turn_end();
+    let events = f.events();
+    assert_eq!(events[0], Event::Before { ctx, id: request });
+    assert_eq!(init_of(&events, timer).1, request);
+    assert_eq!(events[2], Event::After { ctx, id: request });
+    assert_eq!(events[3], Event::Before { ctx, id: bridge });
+    assert_eq!(events[4], Event::After { ctx, id: bridge });
+    assert_eq!(f.tracker.stats().unbalanced, 0);
+}
+
+#[test]
+fn nested_turn_enters_the_outer_default_first() {
+    let mut f = Fixture::new();
+    let ctx = f.ctx();
+    let request = f.create(Kind::Request, "fetch");
+    let _ = f.events();
+    f.tracker.turn_begin(request);
+    f.tracker.turn_begin(0);
+    f.tracker.turn_end();
+    f.tracker.turn_end();
+    let events = f.events();
+    assert_eq!(events[0], Event::Before { ctx, id: request });
+    assert!(matches!(&events[1], Event::Turn { turn, .. } if turn.cause == 0));
+    assert_eq!(events[2], Event::After { ctx, id: request });
+    assert_eq!(f.tracker.stats().unbalanced, 0);
 }
