@@ -10,6 +10,7 @@
 #include <workerd/api/deferred-proxy.h>
 #include <workerd/io/access-info.h>
 #include <workerd/io/actor-id.h>
+#include <workerd/io/async-trace.h>
 #include <workerd/io/external-pusher.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/io-gate.h>
@@ -207,6 +208,12 @@ class IoContext_IncomingRequest final {
   // worker invocation.
   tracing::InvocationSpanContext& getInvocationSpanContext();
 
+  // The async trace REQUEST resource for this request, created by delivered(); 0 if the context
+  // is not traced.
+  AsyncId getAsyncTraceId() const {
+    return asyncTraceResource.getId();
+  }
+
  private:
   kj::Own<IoContext> context;
   kj::Own<RequestObserver> metrics;
@@ -230,6 +237,8 @@ class IoContext_IncomingRequest final {
   kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
 
   bool wasDelivered = false;
+
+  AsyncResource asyncTraceResource;
 
   kj::UnwindDetector unwindDetector;
 
@@ -306,6 +315,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   kj::Maybe<Worker::Actor&> getActor() {
     return actor;
+  }
+
+  // The context's async tracker, if async tracing is enabled for it (see async-trace.h). Every
+  // instrumentation site checks this first, so keep it cheap.
+  kj::Maybe<const AsyncTracker&> tryGetAsyncTracker() const {
+    return asyncTracker.get();
   }
 
   // Gets the actor, throwing if there isn't one.
@@ -1179,6 +1194,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Own<const Worker> worker;
   kj::Maybe<Worker::Actor&> actor;
   kj::Own<LimitEnforcer> limitEnforcer;
+
+  // Declared before the task sets and owned objects so it is destroyed after them: async resources
+  // they hold report their destruction before the tracker closes.
+  OwnedAsyncTracker asyncTracker;
 
   // List of active IncomingRequests, ordered from most-recently-started to least-recently-started.
   kj::List<IncomingRequest, &IncomingRequest::link> incomingRequests;
