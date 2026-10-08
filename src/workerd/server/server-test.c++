@@ -5819,12 +5819,6 @@ KJ_TEST("Server: bench command") {
     }
     KJ_EXPECT(!cases[6].hasWallNs());
 
-    // The async case does almost nothing beyond awaiting a resolved promise.
-    bool asyncAtFloor = false;
-    for (auto flag: cases[1].getFlags()) {
-      asyncAtFloor = asyncAtFloor || flag == bench::BenchReport::Case::Flag::AT_FLOOR;
-    }
-    KJ_EXPECT(asyncAtFloor);
     KJ_EXPECT(kj::StringPtr(cases[7].getError()).startsWith("Error: boom"));
   }
 

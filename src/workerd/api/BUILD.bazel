@@ -594,6 +594,7 @@ wd_cc_library(
         "streams/pendingabort-gc-uaf-test.c++",
         "actor-state-test.c++",
         "alarm-retry-test.c++",
+        "bench-test.c++",
         "basics-test.c++",
         "crypto/aes-test.c++",
         "crypto/impl-test.c++",
