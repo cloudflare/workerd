@@ -11,6 +11,7 @@ def wd_test(
         generate_all_autogates_variant = True,
         generate_all_compat_flags_variant = True,
         generate_gc_stress_variant = True,
+        generate_startup_snapshot_variant = True,
         predictable = True,
         compat_date = "",
         _configurable_data = [],
@@ -28,6 +29,7 @@ def wd_test(
      generate_all_autogates_variant: If True (default), generate @all-autogates variants.
      generate_all_compat_flags_variant: If True (default), generate @all-compat-flags variants.
      generate_gc_stress_variant: If True (default), generate @gc-stress variant.
+     generate_startup_snapshot_variant: If True (default), generate @startup-snapshot variant.
      predictable: If True (default), pass `--predictable` to workerd.
      compat_date: If specified, use this compat date for the default variant instead of 2000-01-01.
         Does not affect the @all-compat-flags variant which always uses 2999-12-31.
@@ -37,6 +39,9 @@ def wd_test(
      - name@all-compat-flags (if generate_all_compat_flags_variant): newest compat date (2999-12-31)
      - name@all-autogates (if generate_all_autogates_variant): all autogates + oldest compat date
      - name@gc-stress (if generate_gc_stress_variant): forced GC at every continuation
+     - name@startup-snapshot (if generate_startup_snapshot_variant): every eligible isolate created
+       from a snapshot (the STARTUP_SNAPSHOT autogate) + oldest compat date. Off by default; run
+       with --config=startup-snapshot.
     """
 
     # Add workerd binary to "data" dependencies.
@@ -118,6 +123,21 @@ def wd_test(
             args = base_args + default_compat_args + ["--all-autogates"],
             python_snapshot_test = python_snapshot_test,
             **kwargs
+        )
+
+    # Startup snapshot variant: STARTUP_SNAPSHOT is left out of @all-autogates, because far more
+    # code fails under it. Tagged off-by-default; --config=startup-snapshot runs these.
+    if generate_startup_snapshot_variant:
+        snapshot_kwargs = dict(kwargs)
+        snapshot_tags = snapshot_kwargs.pop("tags", []) + ["startup-snapshot", "off-by-default"]
+        _wd_test(
+            src = src,
+            name = name + "@startup-snapshot",
+            data = data,
+            args = base_args + default_compat_args + ["--startup-snapshot"],
+            python_snapshot_test = python_snapshot_test,
+            tags = snapshot_tags,
+            **snapshot_kwargs
         )
 
     # GC stress variant: forced full GC at every awaitIo continuation.

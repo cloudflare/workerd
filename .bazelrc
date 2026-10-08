@@ -5,6 +5,9 @@ build --build_tag_filters=-off-by-default,-requires-container-engine
 build --nosandbox_default_allow_network
 test --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine
 test:asan --test_tag_filters=-off-by-default,-no-asan,-requires-fuzzilli,-requires-container-engine
+# Only the @startup-snapshot variants (build/wd_test.bzl), which are off by default.
+build:startup-snapshot --build_tag_filters=startup-snapshot
+test:startup-snapshot --test_tag_filters=startup-snapshot,-requires-fuzzilli,-requires-container-engine
 # exclude enormous tests by default
 build --test_size_filters=-enormous
 # Run Python tests without snapshots while snapshot artifacts are being regenerated.

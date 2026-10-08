@@ -77,6 +77,7 @@ pub mod ffi {
         predictable: bool,
         gc_stress: bool,
         all_autogates: bool,
+        startup_snapshot: bool,
         compat_date: KjMaybe<String>,
         service_pattern: KjMaybe<String>,
         entrypoint_pattern: KjMaybe<String>,

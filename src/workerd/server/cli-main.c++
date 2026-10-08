@@ -230,6 +230,10 @@ class CliMain {
     if (options.all_autogates) {
       util::Autogate::initAllAutogates();
     }
+    if (options.startup_snapshot) {
+      KJ_REQUIRE(!options.all_autogates, "--startup-snapshot does not combine with --all-autogates");
+      util::Autogate::initAutogateNamesForTest({"startup-snapshot"_kj});
+    }
 
     KJ_IF_SOME(compatDate, options.compat_date) {
       server->setTestCompatibilityDateOverride(kj::str(compatDate));
