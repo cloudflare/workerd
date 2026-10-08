@@ -455,6 +455,9 @@ let setDefaultControllerExpectedLength: <R>(
   controller: ReadableStreamDefaultController<R>,
   length: bigint | undefined
 ) => void;
+let defaultControllerCanCloseOrEnqueue: <R>(
+  controller: ReadableStreamDefaultController<R>
+) => boolean;
 
 let setReadableStreamPendingClosure: <R>(stream: ReadableStream<R>) => void;
 let isReadableStreamPendingClosure: <R>(stream: ReadableStream<R>) => boolean;
@@ -1513,6 +1516,9 @@ class ReadableStreamDefaultController<
     setDefaultControllerExpectedLength = (controller, length) => {
       controller.#expectedLength = length;
     };
+
+    defaultControllerCanCloseOrEnqueue = (controller) =>
+      controller.#canCloseOrEnqueue();
 
     controllerCancelSteps = (controller, reason) => {
       if (#queue in controller) {
@@ -5334,6 +5340,12 @@ module.exports = {
     getStoredError: <R>(stream: ReadableStream<R>) =>
       getReadableStreamStoredError(stream),
     normalizeExpectedLength,
+    // ReadableStreamDefaultControllerCanCloseOrEnqueue, for the
+    // TransformStream controller's enqueue pre-check.
+    canCloseOrEnqueue: <R>(controller: object) =>
+      defaultControllerCanCloseOrEnqueue(
+        controller as ReadableStreamDefaultController<R>
+      ),
     // The identity streams' delivery (see identity.ts): a batched enqueue
     // with one notification, and the queue's consumption notification.
     enqueueBytesBatch: (controller: object, chunks: ArrayBufferView[]) =>
