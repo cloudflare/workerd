@@ -63,6 +63,10 @@ class AsyncTraceWriter {
   // Whether an I/O error has disabled the writer. Later events are dropped.
   bool failed() const;
 
+  // Writes buffered events to the file. Sinks flush at the end of each outermost turn; call this
+  // before exiting without running destructors.
+  void flush() const;
+
  private:
   ::rust::Box<rust::async_trace::Writer> impl;
   friend class AsyncTracker;

@@ -51,6 +51,10 @@ bool AsyncTraceWriter::failed() const {
   return impl->failed();
 }
 
+void AsyncTraceWriter::flush() const {
+  impl->flush();
+}
+
 // =======================================================================================
 // AsyncTraceSinks
 
