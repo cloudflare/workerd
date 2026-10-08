@@ -378,7 +378,8 @@ KJ_TEST("NDJSON sink writes the event log") {
 }
 
 KJ_TEST("opening an NDJSON writer at a bad path throws") {
-  KJ_EXPECT_THROW_MESSAGE("No such file or directory",
+  // The OS's wording differs by platform; the message names the path on all of them.
+  KJ_EXPECT_THROW_MESSAGE("/nonexistent-dir/x/y.ndjson",
       AsyncTraceWriter::open("/nonexistent-dir/x/y.ndjson"_kj, "v"_kj));
 }
 

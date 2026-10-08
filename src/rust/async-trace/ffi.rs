@@ -60,6 +60,8 @@ mod bridge {
         /// Creates (or truncates) `path` and writes the header. Fails if `path` is not UTF-8.
         fn open_ndjson_writer(path: &[u8], producer_version: &[u8]) -> Result<Box<Writer>>;
         fn failed(self: &Writer) -> bool;
+        /// Flushes buffered lines to the file.
+        fn flush(self: &Writer);
 
         fn add_ndjson_sink(self: &mut Tracker, writer: &Writer);
         fn add_cpp_sink(self: &mut Tracker, listener: KjOwn<AsyncTraceListener>);
@@ -279,13 +281,18 @@ fn new_tracker(isolate: &Isolate, worker: &[u8], actor: &[u8]) -> Box<Tracker> {
 
 fn open_ndjson_writer(path: &[u8], producer_version: &[u8]) -> io::Result<Box<Writer>> {
     let path = std::str::from_utf8(path).map_err(io::Error::other)?;
-    let writer = NdjsonWriter::create(path, "workerd", &lossy(producer_version))?;
+    let writer = NdjsonWriter::create(path, "workerd", &lossy(producer_version))
+        .map_err(|error| io::Error::new(error.kind(), format!("{path}: {error}")))?;
     Ok(Box::new(Writer(Arc::new(writer))))
 }
 
 impl Writer {
     fn failed(&self) -> bool {
         self.0.failed()
+    }
+
+    fn flush(&self) {
+        self.0.flush();
     }
 }
 
