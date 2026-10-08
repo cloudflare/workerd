@@ -359,6 +359,11 @@ const jsg::TypeHandler<api::QueueExportedHandler>& WorkerdApi::getQueueTypeHandl
   return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<api::QueueExportedHandler>();
 }
 
+const jsg::TypeHandler<api::BenchExportedHandler>& WorkerdApi::getBenchTypeHandler(
+    jsg::Lock& lock) const {
+  return kj::downcast<JsgWorkerdIsolate::Lock>(lock).getTypeHandler<api::BenchExportedHandler>();
+}
+
 jsg::JsObject WorkerdApi::wrapExecutionContext(
     jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const {
   return jsg::JsObject(

@@ -3235,6 +3235,17 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
     }
   }
 
+  kj::Promise<void> bench(
+      bench::BenchParams::Reader params, bench::BenchReport::Group::Builder report) override {
+    try {
+      co_await KJ_ASSERT_NONNULL(inner).bench(params, report);
+    } catch (...) {
+      auto exception = kj::getCaughtExceptionAsKj();
+      reportFailure(exception);
+      kj::throwFatalException(kj::mv(exception));
+    }
+  }
+
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     try {
       WorkerInterface::CustomEvent::Result result =
@@ -3934,6 +3945,11 @@ class Server::WorkerService final: public Service,
 
     kj::Promise<bool> test() override {
       co_return co_await getOrCreateInner()->test();
+    }
+
+    kj::Promise<void> bench(
+        bench::BenchParams::Reader params, bench::BenchReport::Group::Builder report) override {
+      co_await getOrCreateInner()->bench(params, report);
     }
 
     kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {

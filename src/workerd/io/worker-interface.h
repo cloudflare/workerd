@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <workerd/io/bench.capnp.h>
 #include <workerd/io/outcome.capnp.h>
 #include <workerd/io/trace.h>
 #include <workerd/io/worker-interface.capnp.h>
@@ -137,6 +138,15 @@ class WorkerInterface: public kj::HttpService {
     return nullptr;
   }
   // TODO(someday): Produce a structured test report?
+
+  // Run the bench handler with `params`, and write its results to `report`, which the caller owns
+  // and must keep alive until the promise settles. Failures in user code are recorded in the
+  // report; a rejected promise means the handler couldn't be run at all. Only `workerd bench`
+  // calls this.
+  virtual kj::Promise<void> bench(
+      bench::BenchParams::Reader params, bench::BenchReport::Group::Builder report) {
+    return KJ_EXCEPTION(UNIMPLEMENTED, "this service doesn't support bench()");
+  }
 
   // These two constants are shared by multiple systems that invoke alarms (the production
   // implementation, and the preview implementation), whose code live in completely different

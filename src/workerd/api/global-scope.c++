@@ -867,6 +867,33 @@ jsg::Promise<void> ServiceWorkerGlobalScope::test(
   return testHandler(lock, js.alloc<TestController>(), eh.env.addRef(lock), eh.getCtx());
 }
 
+jsg::Promise<BenchGroupResult> ServiceWorkerGlobalScope::bench(Worker::Lock& lock,
+    kj::Maybe<ExportedHandler&> exportedHandler,
+    bench::BenchParams::Reader params) {
+  ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
+      "Benchmarks are not currently supported with Service Workers syntax.");
+  jsg::Lock& js = lock;
+  auto& typeHandler = lock.getWorker().getIsolate().getApi().getBenchTypeHandler(lock);
+  auto handlers = JSG_REQUIRE_NONNULL(typeHandler.tryUnwrap(js, eh.self.getHandle(js)), Error,
+      "Entrypoint does not export a bench() function.");
+  auto benchHandler = JSG_REQUIRE_NONNULL(
+      kj::mv(handlers.bench), Error, "Entrypoint does not export a bench() function.");
+  auto controller = js.alloc<BenchController>(params);
+  return js
+      .tryCatch(
+          [&] { return benchHandler(lock, controller.addRef(), eh.env.addRef(lock), eh.getCtx()); },
+          [&](jsg::Value exception) { return js.rejectedPromise<void>(kj::mv(exception)); })
+      .then(js,
+          IoContext::current().addFunctor(
+              [controller = controller.addRef()](
+                  jsg::Lock& js) mutable { return controller->runCases(js); }),
+          [](jsg::Lock& js, jsg::Value exception) {
+    return js.resolvedPromise(BenchGroupResult{
+      .error = describeBenchException(js, exception),
+    });
+  });
+}
+
 // This promise is used to set the timeout for hibernatable websocket events. It's expected to be
 // dropped in most cases, as long as the hibernatable websocket event promise completes before it.
 kj::Promise<void> ServiceWorkerGlobalScope::eventTimeoutPromise(uint32_t timeoutMs) {

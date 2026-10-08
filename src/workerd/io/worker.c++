@@ -528,6 +528,11 @@ jsg::Optional<jsg::Ref<api::CacheContext>> Worker::Api::getCtxCacheProperty(jsg:
   return kj::none;
 }
 
+const jsg::TypeHandler<api::BenchExportedHandler>& Worker::Api::getBenchTypeHandler(
+    jsg::Lock& lock) const {
+  KJ_UNIMPLEMENTED("bench handlers are only supported under `workerd bench`");
+}
+
 struct Worker::Impl {
   kj::Maybe<jsg::JsContext<api::ServiceWorkerGlobalScope>> context;
 

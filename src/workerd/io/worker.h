@@ -50,6 +50,7 @@ class ServiceWorkerGlobalScope;
 struct ExportedHandler;
 struct CryptoAlgorithm;
 struct QueueExportedHandler;
+struct BenchExportedHandler;
 class WebSocket;
 class WebSocketRequestResponsePair;
 class CacheContext;
@@ -667,6 +668,9 @@ class Worker::Api {
       jsg::Lock& lock) const = 0;
   virtual const jsg::TypeHandler<api::QueueExportedHandler>& getQueueTypeHandler(
       jsg::Lock& lock) const = 0;
+  // Only `workerd bench` delivers the bench event, so the default implementation throws.
+  virtual const jsg::TypeHandler<api::BenchExportedHandler>& getBenchTypeHandler(
+      jsg::Lock& lock) const;
 
   // Look up crypto algorithms by case-insensitive name. This can be used to extend the set of
   // WebCrypto algorithms supported.
