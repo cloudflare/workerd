@@ -1,6 +1,6 @@
 //! The FFI between the Rust entry point and the C++ side: the config compiler (config-compiler.h)
-//! and what the driver (bootstrap.h) knows about the build. The `serve` and `test` commands go
-//! through the server crate's bridge instead (`workerd_server::entry`).
+//! and what the driver (bootstrap.h) knows about the build. The `serve`, `test` and `bench`
+//! commands go through the server crate's bridge instead (`workerd_server::entry`).
 //!
 //! C++ calls back into [`Process`] to register the files a config depends on for `--watch`.
 

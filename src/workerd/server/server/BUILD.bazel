@@ -47,6 +47,7 @@ wd_rust_crate(
         "@crates_vendor//:percent-encoding",
         "@crates_vendor//:rand",
         "@crates_vendor//:rustls",
+        "@crates_vendor//:serde",
         "@crates_vendor//:serde_json",
         "@crates_vendor//:socket2",
         "@crates_vendor//:tokio",

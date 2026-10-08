@@ -177,8 +177,9 @@ pub mod ffi {
     // =====================================================================================
     // The command line (bootstrap.h): the options the C++ driver applies, and the driver itself.
 
-    /// The options of `serve` and `test` the C++ driver applies: to the process (perfetto, the
-    /// async trace file), or to the worker factory (async tracing, experimental, Python).
+    /// The options of `serve`, `test` and `bench` the C++ driver applies: to the process
+    /// (perfetto, the async trace file), or to the worker factory (async tracing, experimental,
+    /// Python).
     #[namespace = "workerd::server::cli"]
     struct ServeOrTestOptions {
         perfetto_trace_path: KjMaybe<String>,
@@ -204,6 +205,25 @@ pub mod ffi {
         gc_stress: bool,
         all_autogates: bool,
         compat_date: KjMaybe<String>,
+    }
+
+    /// The options of `bench` the C++ driver applies: bench mode, which they turn on, logging,
+    /// autogates, the compatibility date every worker gets.
+    #[namespace = "workerd::server::cli"]
+    struct BenchOptions {
+        no_verbose: bool,
+        all_autogates: bool,
+        compat_date: KjMaybe<String>,
+    }
+
+    /// What the binary was built from, as `workerd bench`'s report records it.
+    #[namespace = "workerd::server::cli"]
+    struct BuildInfo {
+        /// The release date of the workerd source.
+        workerd_version: String,
+        /// "release", "debug", or "sanitizer".
+        build_mode: String,
+        v8_version: String,
     }
 
     #[namespace = "kj_rs_tokio"]
@@ -235,8 +255,8 @@ pub mod ffi {
         /// and returns the worker factory over the config, which owns it all: dropping the
         /// factory tears the rest down after it, in reverse, flushing the perfetto trace.
         /// `config` is an encoded message (segment table, then segments) in 8-byte words.
-        /// `test` is the `test` command's options, absent for `serve`. An error means the
-        /// process failed to start.
+        /// `test` and `bench` are the options of those commands, at most one of them given. An
+        /// error means the process failed to start.
         ///
         /// The factory dies before the Runtime (the timer and the loop must outlive everything
         /// on them).
@@ -245,7 +265,10 @@ pub mod ffi {
             config: Vec<u64>,
             options: &ServeOrTestOptions,
             test: KjMaybe<&TestOptions>,
+            bench: KjMaybe<&BenchOptions>,
         ) -> Result<KjOwn<WorkerFactory>>;
+
+        fn build_info() -> Result<BuildInfo>;
 
         /// Ends the process with `code` at once, without running destructors (what
         /// `kj::ProcessContext::exit()` does when `KJ_CLEAN_SHUTDOWN` is not set). Does not return.
