@@ -8,6 +8,7 @@
 
 #include <workerd/api/memory-cache.h>
 #include <workerd/api/pyodide/pyodide.h>
+#include <workerd/io/bench.capnp.h>
 #include <workerd/io/worker.h>
 #include <workerd/server/workerd.capnp.h>
 
@@ -110,6 +111,18 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   // The returned promise resolves true if at least one test ran and no tests failed.
   kj::Promise<bool> test(jsg::V8System& v8System,
       config::Config::Reader conf,
+      kj::StringPtr servicePattern = "*"_kj,
+      kj::StringPtr entrypointPattern = "*"_kj);
+
+  // Runs the exported bench handlers of the entrypoints that match the patterns, as test() runs
+  // test handlers, with `params`. Adds a group to `report` for each handler; the caller owns
+  // `report` and fills in its environment.
+  //
+  // The returned promise resolves true if at least one handler ran and nothing failed.
+  kj::Promise<bool> bench(jsg::V8System& v8System,
+      config::Config::Reader conf,
+      bench::BenchParams::Reader params,
+      bench::BenchReport::Builder report,
       kj::StringPtr servicePattern = "*"_kj,
       kj::StringPtr entrypointPattern = "*"_kj);
 
@@ -379,6 +392,13 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       kj::ForkedPromise<void>& forkedDrainWhen);
 
   kj::Promise<void> bindSockets(config::Config::Reader config);
+
+  // State of a test() or bench() run that must outlive the services.
+  struct LocalRun;
+
+  // Starts the services for test() or bench().
+  kj::Promise<kj::Own<LocalRun>> startLocalRun(
+      jsg::V8System& v8System, config::Config::Reader config);
 
   kj::Promise<void> listenOnSockets(config::Config::Reader config,
       kj::HttpHeaderTable::Builder& headerTableBuilder,

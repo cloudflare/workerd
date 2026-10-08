@@ -8246,13 +8246,18 @@ kj::Promise<void> Server::listenOnSockets(config::Config::Reader config,
 }
 
 // =======================================================================================
-// Server::test()
+// Server::test() and Server::bench()
 
-kj::Promise<bool> Server::test(jsg::V8System& v8System,
-    config::Config::Reader config,
-    kj::StringPtr servicePattern,
-    kj::StringPtr entrypointPattern) {
+struct Server::LocalRun {
+  kj::HttpHeaderTable::Builder headerTableBuilder;
+  kj::Own<kj::HttpHeaderTable> headerTable;
+  kj::ForkedPromise<void> forkedDrainWhen = kj::Promise<void>(kj::NEVER_DONE).fork();
+  kj::Promise<void> fatalPromise = nullptr;
+  kj::Promise<void> listenPromise = nullptr;
+};
 
+kj::Promise<kj::Own<Server::LocalRun>> Server::startLocalRun(
+    jsg::V8System& v8System, config::Config::Reader config) {
   if (config.hasLogging()) {
     auto logging = config.getLogging();
     loggingOptions.structuredLogging = StructuredLogging(logging.getStructuredLogging());
@@ -8266,29 +8271,37 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
     loggingOptions.structuredLogging = StructuredLogging(config.getStructuredLogging());
   }
 
-  kj::HttpHeaderTable::Builder headerTableBuilder;
-  globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);
+  auto run = kj::heap<LocalRun>();
+  globalContext = kj::heap<GlobalContext>(*this, v8System, run->headerTableBuilder);
   invalidConfigServiceSingleton = kj::rc<InvalidConfigService>();
 
   auto [fatalPromise, fatalFulfiller] = kj::newPromiseAndFulfiller<void>();
+  run->fatalPromise = kj::mv(fatalPromise);
   this->fatalFulfiller = kj::mv(fatalFulfiller);
 
-  auto forkedDrainWhen = kj::Promise<void>(kj::NEVER_DONE).fork();
-
   co_await bindSockets(config);
-  co_await startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
+  co_await startServices(v8System, config, run->headerTableBuilder, run->forkedDrainWhen);
 
   // Tests usually do not configure sockets, but they can, especially loopback sockets. Arrange
   // to wait on them. Crash if listening fails.
-  auto listenPromise =
-      listenOnSockets(config, headerTableBuilder, forkedDrainWhen,
+  run->listenPromise =
+      listenOnSockets(config, run->headerTableBuilder, run->forkedDrainWhen,
           /* forTest = */ true)
           .eagerlyEvaluate([](kj::Exception&& e) noexcept { kj::throwFatalException(kj::mv(e)); });
 
-  auto ownHeaderTable = headerTableBuilder.build();
+  run->headerTable = run->headerTableBuilder.build();
 
   // TODO(someday): If the inspector is enabled, pause and wait for an inspector connection before
   //   proceeding?
+
+  co_return kj::mv(run);
+}
+
+kj::Promise<bool> Server::test(jsg::V8System& v8System,
+    config::Config::Reader config,
+    kj::StringPtr servicePattern,
+    kj::StringPtr entrypointPattern) {
+  auto run = co_await startLocalRun(v8System, config);
 
   kj::GlobFilter serviceGlob(servicePattern);
   kj::GlobFilter entrypointGlob(entrypointPattern);
@@ -8343,6 +8356,99 @@ kj::Promise<bool> Server::test(jsg::V8System& v8System,
   }
 
   co_return passCount > 0 && failCount == 0;
+}
+
+kj::Promise<bool> Server::bench(jsg::V8System& v8System,
+    config::Config::Reader config,
+    bench::BenchParams::Reader params,
+    bench::BenchReport::Builder report,
+    kj::StringPtr servicePattern,
+    kj::StringPtr entrypointPattern) {
+  auto run = co_await startLocalRun(v8System, config);
+
+  kj::GlobFilter serviceGlob(servicePattern);
+  kj::GlobFilter entrypointGlob(entrypointPattern);
+
+  // Collect the handlers first, since the report's list of groups is sized up front.
+  struct Target {
+    kj::String name;
+    kj::Maybe<kj::Rc<Service>> ownEntrypoint;
+    Service& service;
+  };
+  kj::Vector<Target> targets;
+  for (auto& service: services) {
+    if (serviceGlob.matches(service.key)) {
+      if (service.value->hasHandler("bench"_kj) && entrypointGlob.matches("default"_kj)) {
+        targets.add(Target{.name = kj::str(service.key), .service = *service.value});
+      }
+
+      KJ_IF_SOME(worker, kj::tryDowncast<WorkerService>(*service.value)) {
+        for (auto& name: worker.getEntrypointNames()) {
+          if (entrypointGlob.matches(name)) {
+            kj::Rc<Service> ep = KJ_ASSERT_NONNULL(worker.getEntrypoint(name, /*props=*/{}));
+            if (ep->hasHandler("bench"_kj)) {
+              auto& entrypoint = *ep;
+              targets.add(Target{
+                .name = kj::str(service.key, ':', name),
+                .ownEntrypoint = kj::mv(ep),
+                .service = entrypoint,
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (targets.empty()) {
+    KJ_LOG(ERROR, "No benchmarks found!");
+    co_return false;
+  }
+
+  bool failed = false;
+  auto groups = report.initGroups(targets.size());
+  for (auto i: kj::indices(targets)) {
+    auto& target = targets[i];
+    auto group = groups[i];
+    group.setName(target.name);
+
+    // As in test(), progress is logged at DBG level, which is always printed.
+    KJ_LOG(DBG, kj::str("[ BENCH ] "_kj, target.name));
+    auto start = monotonicClock.now();
+    try {
+      auto req = target.service.startRequest({});
+      co_await req->bench(params, group);
+    } catch (...) {
+      group.setError(kj::getCaughtExceptionAsKj().getDescription());
+    }
+    auto duration = monotonicClock.now() - start;
+
+    bool groupFailed = group.hasError();
+    for (auto c: group.getCases()) {
+      auto name = kj::str(target.name, '/', c.getName());
+      switch (c.getStatus()) {
+        case bench::BenchReport::Case::Status::OK:
+          break;
+        case bench::BenchReport::Case::Status::SKIPPED:
+          KJ_LOG(DBG, kj::str("[ SKIP ] "_kj, name));
+          break;
+        case bench::BenchReport::Case::Status::FAILED:
+          KJ_LOG(DBG, kj::str("[ FAIL ] "_kj, name, ": "_kj, c.getError()));
+          groupFailed = true;
+          break;
+      }
+    }
+
+    if (group.hasError()) {
+      KJ_LOG(DBG, kj::str("[ FAIL ] "_kj, target.name, ": "_kj, group.getError()));
+    } else {
+      KJ_LOG(DBG,
+          kj::str(groupFailed ? "[ FAIL ] "_kj : "[ DONE ] "_kj, target.name, " (", duration, ")"));
+    }
+    failed = failed || groupFailed;
+  }
+
+  co_return !failed;
 }
 
 }  // namespace workerd::server

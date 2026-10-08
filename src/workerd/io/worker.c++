@@ -2894,6 +2894,11 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
           jsg::JsValue proto = ctor.get(js, "prototype");
           collectMethodsFromPrototypeChain(proto, seenNames);
         });
+        if (isBenchMode()) {
+          // `workerd bench` runs only plain objects' bench() handlers. A class's methods are RPC
+          // methods, so one named `bench` isn't a handler.
+          seenNames.eraseMatch("bench"_kj);
+        }
 
         errorReporter.addEntrypoint(entrypointName, KJ_MAP(n, seenNames) { return kj::mv(n); });
       }
@@ -2908,6 +2913,10 @@ void Worker::Lock::validateHandlers(ValidationErrorReporter& errorReporter) {
             jsg::JsValue proto = ctor.get(js, "prototype");
             collectMethodsFromPrototypeChain(proto, seenNames);
           });
+          if (isBenchMode()) {
+            // As for WorkerEntrypoint classes, a method named `bench` isn't a handler.
+            seenNames.eraseMatch("bench"_kj);
+          }
 
           errorReporter.addWorkflowClass(entrypointName, KJ_MAP(n, seenNames) { return kj::mv(n); });
         } else {
