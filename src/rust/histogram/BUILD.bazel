@@ -4,6 +4,7 @@ wd_rust_crate(
     name = "histogram",
     visibility = ["//visibility:public"],
     deps = [
+        "@crates_vendor//:libm",
         "@crates_vendor//:thiserror",
     ],
 )
