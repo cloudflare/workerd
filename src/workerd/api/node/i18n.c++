@@ -8,7 +8,7 @@
 #include "simdutf.h"
 
 #include <workerd/jsg/exception.h>
-#include <workerd/rust/i18n/lib.rs.h>
+#include <workerd/rust/i18n/ffi.rs.h>
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/util/autogate.h>
 
