@@ -85,6 +85,9 @@ export {
   queueMathNearMaxSafeInteger,
   queueMathNearZeroClamped,
   queueMathNearZeroEndsZero,
+  queueMathResidueClampedAtDequeue,
+  queueMathPositiveResidueKept,
+  queueMathResidueClampedPerTeeBranch,
 } from 'queue-math';
 
 export {
