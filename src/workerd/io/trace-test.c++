@@ -890,5 +890,138 @@ KJ_TEST("SpanContext::toTraceparent is none for zero ids") {
   KJ_EXPECT(zeroSpan.toTraceparent() == kj::none);
 }
 
+KJ_TEST("a non-recording parent passes its span context to every descendant") {
+  kj::Maybe<TraceFlags> flagValues[] = {kj::none, TraceFlags(0x00), TraceFlags(0x81)};
+  for (auto flags: flagValues) {
+    auto parent = SpanParent::fromSpanContext(SpanContext(TraceId(1, 2), SpanId(3), flags));
+    auto childSpan = parent.newChild("child"_kjc);
+    KJ_EXPECT(!childSpan.isObserved());
+    KJ_EXPECT(KJ_ASSERT_NONNULL(SpanParent(childSpan).toSpanContext()).getSpanId() == SpanId(3));
+
+    auto operation = TraceContextParent(nullptr, kj::mv(parent)).newChild("operation"_kjc);
+    for (auto depth: kj::zeroTo(3)) {
+      KJ_EXPECT(!operation.isObserved(), depth);
+      KJ_EXPECT(operation.getSpanParentsIfObserved() == kj::none);
+      operation.setTag("tag"_kjc, "value"_kj);
+
+      auto outgoingParent = operation.getUserSpanParent();
+      KJ_EXPECT(!outgoingParent.isObserved());
+      KJ_EXPECT(outgoingParent.getSpanId() == SpanId::nullId);
+      auto context = KJ_ASSERT_NONNULL(outgoingParent.toSpanContext());
+      KJ_EXPECT(context.getTraceId() == TraceId(1, 2));
+      KJ_EXPECT(context.getSpanId() == SpanId(3));
+      KJ_EXPECT(context.getTraceFlags() == flags);
+
+      operation = operation.getSpanParents().newChild("nested"_kjc);
+    }
+  }
+}
+
+// Counts every call that would open, time, or close a span.
+class CountingNonRecordingSpanObserver final: public SpanObserver {
+ public:
+  kj::Rc<SpanObserver> newChild() override {
+    return addRefToThis();
+  }
+  void onOpen(kj::ConstString, kj::Date) override {
+    ++calls;
+  }
+  void onClose(kj::Date, Span::TagMap&&, kj::Vector<Span::Log>&&) override {
+    ++calls;
+  }
+  kj::Date getTime() override {
+    ++calls;
+    return kj::UNIX_EPOCH;
+  }
+  bool isRecording() override {
+    return false;
+  }
+
+  uint calls = 0;
+};
+
+KJ_TEST("a span under a non-recording observer is never opened") {
+  auto observer = kj::rc<CountingNonRecordingSpanObserver>();
+  auto span = SpanParent(observer.addRef()).newChild("operation"_kjc);
+  KJ_EXPECT(!span.isObserved());
+  span.setTag("tag"_kjc, "value"_kj);
+  span.newChild("nested"_kjc).end();
+  span.end();
+  KJ_EXPECT(observer->calls == 0);
+}
+
+class TestRecordingSpanObserver final: public SpanObserver {
+ public:
+  explicit TestRecordingSpanObserver(uint64_t id): id(id) {}
+
+  kj::Rc<SpanObserver> newChild() override {
+    return kj::rc<TestRecordingSpanObserver>(id + 1);
+  }
+  void onOpen(kj::ConstString, kj::Date) override {}
+  void onClose(kj::Date, Span::TagMap&&, kj::Vector<Span::Log>&&) override {}
+  kj::Date getTime() override {
+    return kj::UNIX_EPOCH;
+  }
+  kj::Maybe<SpanContext> toSpanContext() override {
+    return SpanContext(TraceId(1, 2), SpanId(id), TraceFlags(0x01));
+  }
+  SpanId getSpanId() override {
+    return SpanId(id);
+  }
+
+ private:
+  uint64_t id;
+};
+
+KJ_TEST("TraceContext propagates the local user span when recorded") {
+  auto parent = SpanParent(kj::rc<TestRecordingSpanObserver>(10));
+  auto operation = TraceContextParent(nullptr, parent.addRef()).newChild("operation"_kjc);
+  KJ_EXPECT(operation.isObserved());
+  auto outgoingParent = operation.getUserSpanParent();
+  KJ_EXPECT(outgoingParent.isObserved());
+  KJ_EXPECT(outgoingParent.getSpanId() == SpanId(11));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(outgoingParent.toSpanContext()).getSpanId() == SpanId(11));
+  KJ_EXPECT(parent.getSpanId() == SpanId(10));
+
+  // Follow-up work can retain the local span's identity after its recording ends.
+  auto retainedParents = KJ_ASSERT_NONNULL(operation.getSpanParentsIfObserved());
+  operation = TraceContext();
+  auto next = retainedParents.newChild("follow-up"_kjc);
+  KJ_EXPECT(next.isObserved());
+  KJ_EXPECT(next.getUserSpanParent().getSpanId() == SpanId(12));
+}
+
+KJ_TEST("internal recording does not replace a non-recording user parent") {
+  auto parents = TraceContextParent(SpanParent(kj::rc<TestRecordingSpanObserver>(1)),
+      SpanParent::fromSpanContext(SpanContext(TraceId(4, 5), SpanId(6), TraceFlags(0x81))));
+  auto operation = parents.newChild("operation"_kjc);
+  KJ_EXPECT(operation.isObserved());
+  KJ_EXPECT(operation.getInternalSpanParent().getSpanId() == SpanId(2));
+  KJ_EXPECT(!operation.getUserSpanParent().isObserved());
+
+  auto retainedParents = KJ_ASSERT_NONNULL(operation.getSpanParentsIfObserved());
+  operation = TraceContext();
+  auto next = retainedParents.newChild("follow-up"_kjc);
+  KJ_EXPECT(next.getInternalSpanParent().getSpanId() == SpanId(3));
+  KJ_EXPECT(!next.getUserSpanParent().isObserved());
+  auto context = KJ_ASSERT_NONNULL(next.getUserSpanParent().toSpanContext());
+  KJ_EXPECT(context.getTraceId() == TraceId(4, 5));
+  KJ_EXPECT(context.getSpanId() == SpanId(6));
+  KJ_EXPECT(context.getTraceFlags() == TraceFlags(0x81));
+}
+
+KJ_TEST("a missing user parent stays absent with or without internal recording") {
+  for (bool recordInternal: {false, true}) {
+    SpanParent internal(nullptr);
+    if (recordInternal) internal = SpanParent(kj::rc<TestRecordingSpanObserver>(1));
+    auto operation = TraceContextParent(kj::mv(internal), nullptr).newChild("operation"_kjc);
+    KJ_EXPECT(operation.isObserved() == recordInternal);
+    KJ_EXPECT((operation.getSpanParentsIfObserved() != kj::none) == recordInternal);
+    KJ_EXPECT(operation.getUserSpanParent().toSpanContext() == kj::none);
+    auto next = operation.getSpanParents().newChild("follow-up"_kjc);
+    KJ_EXPECT(next.getUserSpanParent().toSpanContext() == kj::none);
+  }
+}
+
 }  // namespace
 }  // namespace workerd::tracing

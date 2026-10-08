@@ -1193,10 +1193,8 @@ class SpanParent {
   [[nodiscard]] SpanBuilder newChild(
       kj::ConstString operationName, kj::Maybe<kj::Date> startTime = kj::none);
 
-  // Useful to skip unnecessary code when not observed.
-  bool isObserved() {
-    return observer != nullptr;
-  }
+  // Non-recording parents can carry a span context without being observed.
+  bool isObserved();
 
   // Get the underlying SpanObserver representing the parent span.
   //
@@ -1259,10 +1257,9 @@ class SpanBuilder {
   // is invoked.
   void end();
 
-  // Useful to skip unnecessary code when not observed.
-  bool isObserved() {
-    return observer != nullptr;
-  }
+  // Useful to skip unnecessary code when not observed. Non-recording spans carry a span context
+  // without being observed.
+  bool isObserved();
 
   // Get the underlying SpanObserver representing the span.
   //
@@ -1318,7 +1315,7 @@ class SpanBuilder {
 
  private:
   kj::Rc<SpanObserver> observer;
-  // The under-construction span, or null if the span has ended.
+  // The under-construction span, or null if the span has ended or the observer doesn't record.
   kj::Maybe<Span> span;
 
   friend class SpanParent;
@@ -1386,27 +1383,44 @@ class SpanObserver: public kj::Refcounted {
   virtual tracing::SpanId getSpanId() {
     return tracing::SpanId::nullId;
   }
+
+  // Whether spans using this observer are recorded.
+  virtual bool isRecording() {
+    return true;
+  }
 };
 
 // A non-recording SpanObserver that carries a pre-serialized SpanContext for propagation.
-// Used to create a SpanParent from stored identity when no live observer exists
-// (e.g. rehydrating trace context after hibernation).
+// Used to create a SpanParent from stored identity when no live observer exists (e.g. rehydrating
+// trace context after hibernation, or an untraced request's triggering span). Its children are
+// itself, so work nested under it passes the same SpanContext on without recording anything.
 class NonRecordingSpanObserver final: public SpanObserver {
  public:
   explicit NonRecordingSpanObserver(tracing::SpanContext context): context(kj::mv(context)) {}
 
   kj::Rc<SpanObserver> newChild() override {
-    return {};
+    return addRefToThis();
   }
   void onOpen(kj::ConstString, kj::Date) override {}
   void onClose(kj::Date, Span::TagMap&&, kj::Vector<Span::Log>&&) override {}
   kj::Maybe<tracing::SpanContext> toSpanContext() override {
     return tracing::SpanContext::clone(context);
   }
+  bool isRecording() override {
+    return false;
+  }
 
  private:
   tracing::SpanContext context;
 };
+
+inline bool SpanParent::isObserved() {
+  return observer != nullptr && observer->isRecording();
+}
+
+inline bool SpanBuilder::isObserved() {
+  return observer != nullptr && observer->isRecording();
+}
 
 inline kj::Maybe<tracing::SpanContext> SpanParent::toSpanContext() {
   if (observer != nullptr) return observer->toSpanContext();
@@ -1457,7 +1471,7 @@ class TraceContextParent {
     return TraceContextParent(internalSpan.addRef(), userSpan.addRef());
   }
 
-  // Useful to skip unnecessary work (e.g. creating child spans) when not observed.
+  // Whether either parent supports recording. Non-recording parents can still carry a span context.
   bool isObserved() {
     return internalSpan.isObserved() || userSpan.isObserved();
   }
