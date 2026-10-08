@@ -31,6 +31,12 @@ struct Writer;
 
 class AsyncTracker;
 
+namespace _ {  // private
+// The tracker of the innermost open AsyncTracker::TurnScope on this thread, or null if that turn
+// is not traced (or there is none).
+extern thread_local const AsyncTracker* trackerInTurn;
+}  // namespace _
+
 // Per-isolate state: resource ID allocation and stack deduplication. Owned by Worker::Isolate when
 // the isolate has async tracing enabled. Thread-safe.
 class AsyncTraceIsolate {
@@ -115,6 +121,9 @@ class AsyncResource {
   // when the turn ends (after the microtask drain).
   void enterAsTurnCause() const;
 
+  // Takes the resource out of consideration for AsyncTracker::adoptOrCreate().
+  void markBound() const;
+
   // Releases the resource early, as the destructor would. The handle becomes inert.
   void release();
 
@@ -161,6 +170,15 @@ class AsyncTracker final: public kj::AtomicRefcounted {
   // Takes `id` out of consideration for adoptOperation().
   void markBound(AsyncId id) const;
 
+  // The tracker of the innermost turn on this thread (see TurnScope), if that turn is traced.
+  // Lets code that cannot reach the IoContext, such as TraceContextParent::newChild(), find the
+  // tracker. One thread-local read when tracing is off.
+  static kj::Maybe<const AsyncTracker&> inTurn() {
+    const AsyncTracker* tracker = _::trackerInTurn;
+    if (tracker == nullptr) return kj::none;
+    return *tracker;
+  }
+
   // Ends tracking: reports the context's stats and destroys the sinks. Later calls do nothing.
   // Must be called on the tracker's thread; OwnedAsyncTracker does so.
   void close() const;
@@ -170,13 +188,19 @@ class AsyncTracker final: public kj::AtomicRefcounted {
   // request) is the turn's cause unless a resource calls enterAsTurnCause().
   class TurnScope {
    public:
+    // Always records the turn's tracker (null if untraced) for inTurn(), so a nested untraced
+    // context's operations are not attributed to an enclosing traced one.
     explicit TurnScope(kj::Maybe<const AsyncTracker&> tracker, AsyncId defaultCause = 0)
-        : tracker(tracker) {
+        : tracker(tracker),
+          previousInTurn(_::trackerInTurn) {
+      _::trackerInTurn = nullptr;
       KJ_IF_SOME(t, tracker) {
+        _::trackerInTurn = &t;
         t.turnBegin(defaultCause);
       }
     }
     ~TurnScope() noexcept(false) {
+      _::trackerInTurn = previousInTurn;
       KJ_IF_SOME(t, tracker) {
         t.turnEnd();
       }
@@ -192,6 +216,7 @@ class AsyncTracker final: public kj::AtomicRefcounted {
 
    private:
     kj::Maybe<const AsyncTracker&> tracker;
+    const AsyncTracker* previousInTurn;
   };
 
   // Attributes a callback to `resource` for the scope's lifetime (`before`/`after`). Use for
@@ -291,6 +316,10 @@ inline void AsyncResource::annotate(kj::StringPtr key, kj::StringPtr value) cons
 
 inline void AsyncResource::enterAsTurnCause() const {
   if (tracker != nullptr) tracker->setTurnCause(id);
+}
+
+inline void AsyncResource::markBound() const {
+  if (tracker != nullptr) tracker->markBound(id);
 }
 
 inline void AsyncResource::release() {

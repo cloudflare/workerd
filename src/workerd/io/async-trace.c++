@@ -8,6 +8,10 @@
 
 namespace workerd {
 
+namespace _ {
+thread_local const AsyncTracker* trackerInTurn = nullptr;
+}  // namespace _
+
 namespace {
 
 // The address of a thread-local identifies the current thread cheaply.

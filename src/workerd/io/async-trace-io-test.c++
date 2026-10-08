@@ -237,12 +237,18 @@ class LabelingListener final: public AsyncTraceListener {
   void onDestroy(uint64_t ctx, AsyncId id, uint64_t atNs) override {
     events.add(kj::str("destroy ", labelOf(id)));
   }
+  void onAnnotate(uint64_t ctx,
+      AsyncId id,
+      kj::ArrayPtr<const char> key,
+      kj::ArrayPtr<const char> value) override {
+    events.add(kj::str("annotate ", labelOf(id), " ", key, "=", value));
+  }
   void onTurn(uint64_t ctx, const AsyncTurn& turn) override {
     events.add(kj::str("turn cause=", labelOf(turn.cause)));
   }
   void onContextEnd(uint64_t ctx, uint64_t atNs, const AsyncContextStats& s) override {
     events.add(kj::str("context_end unknown=", s.unknown, " unbalanced=", s.unbalanced,
-        " foreign=", s.foreignThread));
+        " ambiguous=", s.ambiguousBindings, " foreign=", s.foreignThread));
   }
 
  private:
@@ -316,7 +322,8 @@ uint count(kj::ArrayPtr<const kj::String> events, kj::StringPtr event) {
 }
 
 void expectComplete(kj::ArrayPtr<const kj::String> events) {
-  KJ_EXPECT(count(events, "context_end unknown=0 unbalanced=0 foreign=0"_kj) == 1, joined(events));
+  KJ_EXPECT(count(events, "context_end unknown=0 unbalanced=0 ambiguous=0 foreign=0"_kj) == 1,
+      joined(events));
 }
 
 KJ_TEST("code after an await on a timer is triggered by that timer") {
@@ -431,6 +438,124 @@ KJ_TEST("a rejected awaitIo settles with an error") {
         "destroy scheduler.wait#1"_kj,
       });
   expectInOrder(events, {"settle awaitIo#1 (not ok)"_kj, "turn cause=awaitIo#1"_kj});
+  expectComplete(events);
+}
+
+// Runs `callback` in a request's IoContext and returns the trace events.
+kj::Array<kj::String> traceInContext(
+    kj::Function<kj::Promise<void>(const TestFixture::Environment&)> callback) {
+  kj::Vector<kj::String> events;
+  {
+    TestFixture fixture({
+      .useRealTimers = true,
+      .isolateObserver = kj::atomicRefcounted<LabelingObserver>(events),
+    });
+    fixture.runInIoContext([&](const TestFixture::Environment& env) { return callback(env); });
+  }
+  return events.releaseAsArray();
+}
+
+// Awaits `promise` from JavaScript (awaitIo) and back (awaitJs), as a binding call does.
+kj::Promise<void> roundTrip(const TestFixture::Environment& env, kj::Promise<void> promise) {
+  return env.context.awaitJs(env.js, env.context.awaitIo(env.js, kj::mv(promise)));
+}
+
+KJ_TEST("a context's span is recorded by its tracker, whatever turn is innermost") {
+  auto events = traceInContext([](const TestFixture::Environment& env) {
+    TraceContext traceContext;
+    {
+      // Another (untraced) context's turn, as when a context delivers to another synchronously.
+      AsyncTracker::TurnScope other(kj::none);
+      KJ_EXPECT(AsyncTracker::inTurn() == kj::none);
+      traceContext = env.context.makeUserTraceSpan("kv_get"_kjc);
+    }
+    return roundTrip(env, kj::evalLater([]() {}).attach(kj::mv(traceContext)));
+  });
+  expectInOrder(events,
+      {
+        "init kv_get#1 trigger=request exec=request"_kj,
+        "turn cause=kv_get#1"_kj,
+      });
+  expectComplete(events);
+}
+
+KJ_TEST("awaitIo adopts the span's operation") {
+  auto events = traceInContext([](const TestFixture::Environment& env) {
+    auto traceContext = env.context.makeUserTraceSpan("kv_get"_kjc);
+    traceContext.setTag("db.key"_kjc, "k"_kjc);
+    return roundTrip(env, kj::evalLater([]() {}).attach(kj::mv(traceContext)));
+  });
+  expectInOrder(events,
+      {
+        "init kv_get#1 trigger=request exec=request"_kj,
+        "annotate kv_get#1 db.key=k"_kj,
+        // The span ends with the KJ promise, before JavaScript resumes.
+        "settle kv_get#1"_kj,
+        "before kv_get#1"_kj,
+        "after kv_get#1"_kj,
+        "turn cause=kv_get#1"_kj,
+      });
+  KJ_EXPECT(count(events, "init awaitIo#1 trigger=request exec=request"_kj) == 0, joined(events));
+  expectComplete(events);
+}
+
+KJ_TEST("a detached span is not adopted") {
+  auto events = traceInContext([](const TestFixture::Environment& env) {
+    auto traceContext = env.context.makeUserTraceSpan("kv_get"_kjc);
+    traceContext.detachAsync();
+    return roundTrip(env, kj::evalLater([]() {}).attach(kj::mv(traceContext)));
+  });
+  expectInOrder(events,
+      {
+        "init kv_get#1 trigger=request exec=request"_kj,
+        "init awaitIo#1 trigger=request exec=request"_kj,
+        "settle kv_get#1"_kj,
+        "settle awaitIo#1"_kj,
+        "turn cause=awaitIo#1"_kj,
+      });
+  expectComplete(events);
+}
+
+KJ_TEST("a span that ended synchronously is not adopted") {
+  auto events = traceInContext([](const TestFixture::Environment& env) {
+    { auto phase = env.context.makeUserTraceSpan("fetch_setup"_kjc); }
+    return roundTrip(env, kj::evalLater([]() {}));
+  });
+  expectInOrder(events,
+      {
+        "init fetch_setup#1 trigger=request exec=request"_kj,
+        "settle fetch_setup#1"_kj,
+        "init awaitIo#1 trigger=request exec=request"_kj,
+        "turn cause=awaitIo#1"_kj,
+      });
+  expectComplete(events);
+}
+
+KJ_TEST("adopting with several eligible spans takes the latest and is counted") {
+  auto events = traceInContext([](const TestFixture::Environment& env) {
+    auto first = env.context.makeUserTraceSpan("first"_kjc);
+    auto second = env.context.makeUserTraceSpan("second"_kjc);
+    return roundTrip(env, kj::evalLater([]() {}).attach(kj::mv(first), kj::mv(second)));
+  });
+  expectInOrder(events, {"before second#1"_kj, "turn cause=second#1"_kj});
+  KJ_EXPECT(count(events, "context_end unknown=0 unbalanced=0 ambiguous=1 foreign=0"_kj) == 1,
+      joined(events));
+}
+
+KJ_TEST("overwriting a span settles its operation") {
+  auto events = traceInContext([](const TestFixture::Environment& env) {
+    auto traceContext = env.context.makeUserTraceSpan("first"_kjc);
+    traceContext = env.context.makeUserTraceSpan("second"_kjc);
+    return roundTrip(env, kj::evalLater([]() {}).attach(kj::mv(traceContext)));
+  });
+  expectInOrder(events,
+      {
+        "init first#1 trigger=request exec=request"_kj,
+        "init second#1 trigger=request exec=request"_kj,
+        "settle first#1"_kj,
+        "turn cause=second#1"_kj,
+      });
+  KJ_EXPECT(count(events, "destroy first#1"_kj) == 0, joined(events));
   expectComplete(events);
 }
 

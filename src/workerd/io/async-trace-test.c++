@@ -252,6 +252,22 @@ KJ_TEST("a bridge adopts a pending operation from the same turn") {
       kj::str("turn cause=", id, " locked=false"), kj::str("destroy ", other));
 }
 
+KJ_TEST("inTurn() is the tracker of the innermost turn") {
+  Fixture f;
+  KJ_EXPECT(AsyncTracker::inTurn() == kj::none);
+  {
+    AsyncTracker::TurnScope outer(f.tracker(), 0);
+    KJ_EXPECT(&KJ_ASSERT_NONNULL(AsyncTracker::inTurn()) == &f.tracker());
+    {
+      // A nested untraced turn (another context) hides the outer tracker.
+      AsyncTracker::TurnScope inner(kj::none, 0);
+      KJ_EXPECT(AsyncTracker::inTurn() == kj::none);
+    }
+    KJ_EXPECT(&KJ_ASSERT_NONNULL(AsyncTracker::inTurn()) == &f.tracker());
+  }
+  KJ_EXPECT(AsyncTracker::inTurn() == kj::none);
+}
+
 KJ_TEST("closing reports stats and makes later events no-ops") {
   AsyncTraceIsolate isolate;
   kj::Vector<kj::String> events;
