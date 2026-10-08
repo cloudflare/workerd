@@ -104,7 +104,7 @@ independent of pull algorithm.
 
 ### Tee Behavior
 
-Non-standard optimization: branches hold `kj::Rc<Entry>` shared references instead
+Non-standard optimization: branches hold `jsg::Ref<Entry>` shared references instead
 of copying data. Backpressure to trunk based on branch with most unconsumed data.
 
 ```
@@ -348,15 +348,19 @@ jsg::Ref<ReadableStream> ReadableStreamJsController::addRef() {
 }
 ```
 
-### Pattern: `Rc<Entry>` for Shared Queue Data
+### Pattern: Traced References for Queue Data
 
 - **When**: Queue entries shared across teed stream consumers
-- **Why**: Prevents use-after-free when one branch consumes before another
-- **How**: `kj::Rc<Entry>` reference counting; `entry->clone(js)` per consumer
+- **Why**: Keeps shared chunks alive across branches while allowing cycles through queued
+  chunks and pending read promises to be collected.
+- **How**: Consumers visit their `jsg::Ref<Entry>` and `jsg::Ref<ReadRequest>` fields during GC.
+  Moving a reference out of a queue makes it strong, rooting its JavaScript fields while
+  resolution, cancellation, or buffer conversion can allocate or invoke callbacks.
 
 ```cpp
-class Entry: public kj::Refcounted {
-    kj::Rc<Entry> clone(jsg::Lock& js);
+class Entry: public jsg::Wrappable {
+    jsg::Ref<Entry> clone(jsg::Lock& js);
+    void jsgVisitForGc(jsg::GcVisitor& visitor) override;
 };
 ```
 

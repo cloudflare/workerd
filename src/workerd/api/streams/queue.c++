@@ -18,10 +18,12 @@ namespace workerd::api {
 #pragma region ValueQueue::ReadRequest
 
 void ValueQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
+  auto self = JSG_THIS;
   resolver.resolve(js, ReadResult{.done = true});
 }
 
 void ValueQueue::ReadRequest::resolve(jsg::Lock& js, jsg::JsRef<jsg::JsValue> value) {
+  auto self = JSG_THIS;
   resolver.resolve(js,
       ReadResult{
         .value = kj::mv(value),
@@ -30,6 +32,7 @@ void ValueQueue::ReadRequest::resolve(jsg::Lock& js, jsg::JsRef<jsg::JsValue> va
 }
 
 void ValueQueue::ReadRequest::reject(jsg::Lock& js, jsg::JsValue value) {
+  auto self = JSG_THIS;
   resolver.reject(js, value);
 }
 
@@ -49,7 +52,7 @@ size_t ValueQueue::Entry::getSize() const {
   return size;
 }
 
-void ValueQueue::Entry::visitForGc(jsg::GcVisitor& visitor) {
+void ValueQueue::Entry::jsgVisitForGc(jsg::GcVisitor& visitor) {
   visitor.visit(value);
 }
 
@@ -57,8 +60,8 @@ void ValueQueue::Entry::visitForGc(jsg::GcVisitor& visitor) {
 
 #pragma region ValueQueue::QueueEntry
 
-kj::Rc<ValueQueue::Entry> ValueQueue::Entry::clone(jsg::Lock& js) {
-  return addRefToThis();
+jsg::Ref<ValueQueue::Entry> ValueQueue::Entry::clone(jsg::Lock& js) {
+  return JSG_THIS;
 }
 
 ValueQueue::QueueEntry ValueQueue::QueueEntry::clone(jsg::Lock& js) {
@@ -93,11 +96,11 @@ void ValueQueue::Consumer::error(jsg::Lock& js, jsg::JsValue reason) {
   impl.error(js, reason);
 };
 
-void ValueQueue::Consumer::read(jsg::Lock& js, kj::Own<ReadRequest> request) {
+void ValueQueue::Consumer::read(jsg::Lock& js, jsg::Ref<ReadRequest> request) {
   impl.read(js, kj::mv(request));
 }
 
-void ValueQueue::Consumer::push(jsg::Lock& js, kj::Rc<Entry> entry) {
+void ValueQueue::Consumer::push(jsg::Lock& js, jsg::Ref<Entry> entry) {
   impl.push(js, kj::mv(entry));
 }
 
@@ -303,8 +306,7 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
   // The flag remains set (was set at the start) and will be cleared by the promise callbacks.
   auto prp = js.newPromiseAndResolver<ReadResult>();
 
-  ReadRequest request{.resolver = kj::mv(prp.resolver)};
-  ready.readRequests.push_back(kj::heap<ReadRequest>(kj::mv(request)));
+  ready.readRequests.push_back(js.alloc<ReadRequest>(kj::mv(prp.resolver)));
 
   KJ_IF_SOME(listener, impl.stateListener) {
     consume(kj::mv(listener))->onConsumerWantsData(js);
@@ -371,7 +373,7 @@ void ValueQueue::maybeUpdateBackpressure() {
   impl->maybeUpdateBackpressure();
 }
 
-void ValueQueue::push(jsg::Lock& js, kj::Rc<Entry> entry) {
+void ValueQueue::push(jsg::Lock& js, jsg::Ref<Entry> entry) {
   impl->push(js, kj::mv(entry));
 }
 
@@ -382,7 +384,7 @@ size_t ValueQueue::size() const {
 void ValueQueue::handlePush(jsg::Lock& js,
     ConsumerImpl::Ready& state,
     kj::Weak<ConsumerImpl> consumer,
-    kj::Rc<Entry> entry) {
+    jsg::Ref<Entry> entry) {
   // If there are no pending reads, just add the entry to the buffer and return, adjusting
   // the size of the queue in the process.
   if (state.readRequests.empty()) {
@@ -402,7 +404,7 @@ void ValueQueue::handleRead(jsg::Lock& js,
     ConsumerImpl::Ready& state,
     kj::Weak<ConsumerImpl> consumer,
     kj::Weak<QueueImpl>,
-    kj::Own<ReadRequest> request) {
+    jsg::Ref<ReadRequest> request) {
   // If there are no pending read requests and there is data in the buffer,
   // we will try to fulfill the read request immediately.
   if (state.queueTotalSize > 0 && state.buffer.empty()) {
@@ -513,6 +515,7 @@ ByteQueue::ReadRequest::~ReadRequest() noexcept(false) {
 }
 
 void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
+  auto self = JSG_THIS;
   auto handle = pullInto.view.getHandle(js);
   // If there's been at least some data written, we need to respond
   // but not set done to true since that's what the streams spec
@@ -527,6 +530,7 @@ void ByteQueue::ReadRequest::resolveAsDone(jsg::Lock& js) {
 }
 
 void ByteQueue::ReadRequest::resolve(jsg::Lock& js) {
+  auto self = JSG_THIS;
   auto handle = pullInto.view.getHandle(js);
   auto view = handle.slice(js, 0, pullInto.filled);
   resolver.resolve(js,
@@ -538,13 +542,14 @@ void ByteQueue::ReadRequest::resolve(jsg::Lock& js) {
 }
 
 void ByteQueue::ReadRequest::reject(jsg::Lock& js, jsg::JsValue value) {
+  auto self = JSG_THIS;
   resolver.reject(js, value);
   maybeInvalidateByobRequest(byobReadRequest);
 }
 
 kj::Own<ByteQueue::ByobRequest> ByteQueue::ReadRequest::makeByobReadRequest(
     kj::Weak<ConsumerImpl> consumer, kj::Weak<QueueImpl> queue) {
-  auto req = kj::heap<ByobRequest>(addWeakToThis(), kj::mv(consumer), kj::mv(queue));
+  auto req = kj::heap<ByobRequest>(kj::PtrTarget::addWeakToThis(), kj::mv(consumer), kj::mv(queue));
   byobReadRequest = req->addWeakRef();
   return kj::mv(req);
 }
@@ -559,6 +564,7 @@ ByteQueue::Entry::Entry(jsg::Lock& js, jsg::JsBufferSource store)
       offset(store.getOffset()) {}
 
 kj::ArrayPtr<kj::byte> ByteQueue::Entry::toArrayPtr(jsg::Lock& js) {
+  auto self = JSG_THIS;
   auto handle = store.getHandle(js);
   // Size and offset should not have changed since construction.
   // This is purely defensive. The handle.asArrayPtr below is safe
@@ -575,11 +581,13 @@ size_t ByteQueue::Entry::getSize() const {
   return size;
 }
 
-kj::Rc<ByteQueue::Entry> ByteQueue::Entry::clone(jsg::Lock& js) {
-  return addRefToThis();
+jsg::Ref<ByteQueue::Entry> ByteQueue::Entry::clone(jsg::Lock& js) {
+  return JSG_THIS;
 }
 
-void ByteQueue::Entry::visitForGc(jsg::GcVisitor& visitor) {}
+void ByteQueue::Entry::jsgVisitForGc(jsg::GcVisitor& visitor) {
+  visitor.visit(store);
+}
 
 #pragma endregion ByteQueue::Entry
 
@@ -619,11 +627,11 @@ void ByteQueue::Consumer::error(jsg::Lock& js, jsg::JsValue reason) {
   impl.error(js, reason);
 }
 
-void ByteQueue::Consumer::read(jsg::Lock& js, kj::Own<ReadRequest> request) {
+void ByteQueue::Consumer::read(jsg::Lock& js, jsg::Ref<ReadRequest> request) {
   impl.read(js, kj::mv(request));
 }
 
-void ByteQueue::Consumer::push(jsg::Lock& js, kj::Rc<Entry> entry) {
+void ByteQueue::Consumer::push(jsg::Lock& js, jsg::Ref<Entry> entry) {
   impl.push(js, kj::mv(entry));
 }
 
@@ -797,7 +805,7 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
       .atLeast = 1,
       .type = ReadRequest::Type::DEFAULT,
     };
-    auto request = kj::heap<ReadRequest>(kj::mv(prp.resolver), kj::mv(pullInto));
+    auto request = js.alloc<ReadRequest>(kj::mv(prp.resolver), kj::mv(pullInto));
     ready.readRequests.push_back(kj::mv(request));
 
     KJ_IF_SOME(listener, impl.stateListener) {
@@ -893,7 +901,7 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
     // Allocate the entry into which we will be copying the provided data for the
     // other consumers of the queue.
     KJ_IF_SOME(store, jsg::JsUint8Array::tryCreate(js, amount)) {
-      auto entry = kj::rc<Entry>(js, jsg::JsBufferSource(store));
+      auto entry = js.alloc<Entry>(js, jsg::JsBufferSource(store));
 
       auto start = sourcePtr.slice(req.pullInto.filled);
 
@@ -944,7 +952,7 @@ bool ByteQueue::ByobRequest::respond(jsg::Lock& js, size_t amount) {
       auto start = sourcePtr.slice(amount - unaligned);
 
       KJ_IF_SOME(store, jsg::JsUint8Array::tryCreate(js, unaligned)) {
-        auto excess = kj::rc<Entry>(js, jsg::JsBufferSource(store));
+        auto excess = js.alloc<Entry>(js, jsg::JsBufferSource(store));
         excess->toArrayPtr(js).write(start.first(unaligned));
         consume(kj::mv(liveConsumer))->push(js, kj::mv(excess));
       } else {
@@ -1077,7 +1085,7 @@ void ByteQueue::maybeUpdateBackpressure() {
   impl->maybeUpdateBackpressure();
 }
 
-void ByteQueue::push(jsg::Lock& js, kj::Rc<Entry> entry) {
+void ByteQueue::push(jsg::Lock& js, jsg::Ref<Entry> entry) {
   impl->push(js, kj::mv(entry));
 }
 
@@ -1088,7 +1096,7 @@ size_t ByteQueue::size() const {
 void ByteQueue::handlePush(jsg::Lock& js,
     ConsumerImpl::Ready& state,
     kj::Weak<ConsumerImpl> consumer,
-    kj::Rc<Entry> newEntry) {
+    jsg::Ref<Entry> newEntry) {
   const auto bufferData = [&](size_t offset) {
     state.queueTotalSize += newEntry->getSize() - offset;
     state.buffer.emplace_back(QueueEntry{
@@ -1248,7 +1256,7 @@ void ByteQueue::handleRead(jsg::Lock& js,
     ConsumerImpl::Ready& state,
     kj::Weak<ConsumerImpl> consumer,
     kj::Weak<QueueImpl> queue,
-    kj::Own<ReadRequest> request) {
+    jsg::Ref<ReadRequest> request) {
   const auto pendingRead = [&]() {
     bool isByob = request->pullInto.type == ReadRequest::Type::BYOB;
     state.readRequests.push_back(kj::mv(request));
