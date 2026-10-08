@@ -59,6 +59,10 @@ class SqliteKv: private SqliteDatabase::ResetListener {
 
   struct WriteOptions {
     bool allowUnconfirmed = false;
+
+    // Groups all statements of one top-level KV operation under a single id. Left null by callers;
+    // minted by the operation and threaded into any statements/sub-operations it spawns.
+    kj::Maybe<SqliteQueryId> queryId = kj::none;
   };
 
   // Store a value into the table.
@@ -220,9 +224,19 @@ class SqliteKv: private SqliteDatabase::ResetListener {
   // Delete all externals associated with `key`, if the _cf_EXTERNALS table exists. No-op if the
   // table has never been created. Called automatically from put() and delete_(). Always runs
   // with `allowUnconfirmed = true` since the paired KV write decides confirmation semantics.
-  void clearExternalsIfPresent(KeyPtr key);
+  void clearExternalsIfPresent(KeyPtr key, SqliteQueryId queryId);
 
   void beforeSqliteReset() override;
+
+  // Returns `queryId` if set, otherwise mints a fresh one. Used so every statement of a single
+  // top-level KV operation shares one grouping id, while recursive operations (e.g. multi-put)
+  // reuse the id minted by the outer operation.
+  SqliteQueryId resolveQueryId(kj::Maybe<SqliteQueryId> queryId) {
+    KJ_IF_SOME(id, queryId) {
+      return id;
+    }
+    return db.generateQueryId();
+  }
 
   // Helper function that rolls back a multi-put statement and swallows any exceptions that may
   // occur during the rollback.
@@ -300,7 +314,8 @@ bool SqliteKv::get(KeyPtr key, Func&& callback) {
   if (!tableCreated) return false;
   auto& stmts = KJ_UNWRAP_OR(state.tryGet<Initialized>(), return false);
 
-  auto query = stmts.stmtGet.run(key);
+  auto query = stmts.stmtGet.run(
+      SqliteDatabase::Statement::StatementOptions{.queryId = db.generateQueryId()}, key);
 
   if (query.isDone()) {
     return false;
@@ -320,18 +335,24 @@ template <typename ArrayOfKeyValuePair>
 void SqliteKv::put(ArrayOfKeyValuePair& pairs, WriteOptions options) {
   // TODO(cleanup): This code is very similar to DurableObjectStorage::transactionSync.  Perhaps the
   // general structure can be shared somehow?
+  // Mint one id for the whole multi-put so every statement it issues (savepoint, each put, and
+  // release) shares it.
+  options.queryId = resolveQueryId(options.queryId);
   auto& stmts = ensureInitialized(options.allowUnconfirmed);
-  stmts.stmtMultiPutSavepoint.run({.allowUnconfirmed = options.allowUnconfirmed});
+  stmts.stmtMultiPutSavepoint.run(
+      {.allowUnconfirmed = options.allowUnconfirmed, .queryId = options.queryId});
 
   {
     // If any of the puts throw an exception, rollback the transaction and re-throw the exception
     // from the put that failed.
     KJ_ON_SCOPE_FAILURE(rollbackMultiPut(stmts, options));
     for (const auto& pair: pairs) {
-      put(pair.key, pair.value, {.allowUnconfirmed = options.allowUnconfirmed});
+      put(pair.key, pair.value,
+          {.allowUnconfirmed = options.allowUnconfirmed, .queryId = options.queryId});
     }
   }
-  stmts.stmtMultiPutRelease.run({.allowUnconfirmed = options.allowUnconfirmed});
+  stmts.stmtMultiPutRelease.run(
+      {.allowUnconfirmed = options.allowUnconfirmed, .queryId = options.queryId});
 }
 
 }  // namespace workerd
