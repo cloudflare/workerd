@@ -343,12 +343,22 @@ struct Row {
     message: Option<String>,
 }
 
-/// Appends `group` to `out`: its name and error, then a table of its cases, the columns padded
-/// to line up.
+/// Appends `group` to `out`: its name, error and the overhead subtracted from its cases, then a
+/// table of its cases, the columns padded to line up.
 fn format_group(out: &mut String, group: bench_report::group::Reader<'_>) -> Result<()> {
     let _ = writeln!(out, "\n{}", text(group.get_name())?);
     if group.has_error() {
         let _ = writeln!(out, "  FAILED: {}", first_line(&text(group.get_error())?));
+    }
+    if group.has_overhead() {
+        let overhead = group.get_overhead().map_err(capnp_error)?;
+        let _ = writeln!(
+            out,
+            "  overhead per call, subtracted: {}, {} async; blackBox() {}",
+            format_duration(overhead.get_sync_ns()),
+            format_duration(overhead.get_async_ns()),
+            format_duration(overhead.get_black_box_ns())
+        );
     }
     let mut rows = Vec::new();
     for case in group.get_cases().map_err(capnp_error)? {
@@ -426,6 +436,7 @@ fn statistics_row(name: String, case: bench_report::case::Reader<'_>) -> Result<
     for flag in case.get_flags().map_err(capnp_error)? {
         notes.push(match flag.map_err(|e| capnp_error(e.into()))? {
             Flag::HighVariance => "high variance: try more samples or a longer minTime",
+            Flag::AtFloor => "at measurement floor: pass results through b.blackBox()",
         });
     }
     Ok(Row {

@@ -35,7 +35,7 @@ fn text_has_the_environment_then_a_table_for_each_group() {
     let mut groups = report.init_groups(2);
     let mut group = groups.reborrow().get(0);
     group.set_name("main:encoding");
-    let mut cases = group.init_cases(4);
+    let mut cases = group.reborrow().init_cases(4);
 
     let mut case = cases.reborrow().get(0);
     case.set_name("encode small");
@@ -53,7 +53,9 @@ fn text_has_the_environment_then_a_table_for_each_group() {
     case.set_iterations_per_sample(1);
     case.reborrow().init_wall_ns().set_median(2e6);
     case.reborrow().init_cpu_ns();
-    case.init_flags(1).set(0, Flag::HighVariance);
+    let mut flags = case.init_flags(2);
+    flags.set(0, Flag::HighVariance);
+    flags.set(1, Flag::AtFloor);
 
     let mut case = cases.reborrow().get(2);
     case.set_name("broken");
@@ -63,6 +65,11 @@ fn text_has_the_environment_then_a_table_for_each_group() {
     let mut case = cases.get(3);
     case.set_name("later");
     case.set_status(Status::Skipped);
+
+    let mut overhead = group.init_overhead();
+    overhead.set_sync_ns(5.5);
+    overhead.set_async_ns(250.0);
+    overhead.set_black_box_ns(2.0);
 
     let mut group = groups.get(1);
     group.set_name("main:empty");
@@ -76,10 +83,12 @@ workerd 2026-10-08, debug build, V8 14.0.0, compat date 2026-01-01
 WARNING: This is a debug build.
 
 main:encoding
+  overhead per call, subtracted: 5.50 ns, 250 ns async; blackBox() 2.00 ns
   case          median   95% CI             mean     cpu median  samples
   encode small  12.3 ns  12.2 ns - 12.5 ns  12.4 ns  12.3 ns     3 x 1024
   noisy         2.00 ms  0.00 ns - 0.00 ns  0.00 ns  0.00 ns     0 x 1     \
-(high variance: try more samples or a longer minTime)
+(high variance: try more samples or a longer minTime; at measurement floor: pass results through \
+b.blackBox())
   broken        FAILED: Error: boom
   later         skipped
 

@@ -71,6 +71,28 @@ struct BenchReport {
     # Set if `bench()` itself failed.
 
     cases @2 :List(Case);
+
+    overhead @3 :Overhead;
+    # The runner's own cost per call, which has been subtracted from the cases' samples.
+  }
+
+  struct Overhead {
+    # The runner's cost per call, measured once per thread by timing empty cases the same way as
+    # user cases, in the same units as `Case.wallNs` and `Case.cpuNs`. `workerd bench` runs every
+    # group on one thread, so all groups in a report share one measurement.
+
+    syncNs @0 :Float64;
+    syncCpuNs @1 :Float64;
+    # An empty function. Subtracted from cases whose function returns a value other than a promise.
+
+    asyncNs @2 :Float64;
+    asyncCpuNs @3 :Float64;
+    # A function that returns a resolved promise. Subtracted from cases whose function returns a
+    # promise.
+
+    blackBoxNs @4 :Float64;
+    # A call of `blackBox()`, including the call overhead. Not subtracted, since cases call it a
+    # varying number of times.
   }
 
   struct Case {
@@ -97,6 +119,11 @@ struct BenchReport {
     enum Flag {
       highVariance @0;
       # The coefficient of variation of the wall time exceeds 10%.
+
+      atFloor @1;
+      # The median wall time before subtracting the overhead is less than twice the overhead, so
+      # the result is mostly the runner's own cost. V8 may have optimized away the work; pass
+      # results through `blackBox()`.
     }
   }
 
