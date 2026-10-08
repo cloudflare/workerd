@@ -828,7 +828,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       jsg::Arguments<jsg::Value> args);
   void clearTimeout(jsg::Lock& js, kj::Maybe<jsg::JsNumber> timeoutId);
 
-  TimeoutId::NumberType setTimeoutInternal(jsg::Function<void()> function, double msDelay);
+  // `asyncTraceName` names the timer's async trace resource (see IoContext::setTimeoutImpl()).
+  TimeoutId::NumberType setTimeoutInternal(
+      jsg::Function<void()> function, double msDelay, kj::StringPtr asyncTraceName);
 
   TimeoutId::NumberType setInterval(jsg::Lock& js,
       jsg::Function<void(jsg::Arguments<jsg::Value>)> function,

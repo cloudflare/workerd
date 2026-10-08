@@ -687,7 +687,7 @@ jsg::Ref<AbortSignal> AbortSignal::timeout(jsg::Lock& js, double delay) {
     signal->triggerAbort(js,
         JSG_KJ_EXCEPTION(
             DISCONNECTED, DOMTimeoutError, "The operation was aborted due to timeout"));
-  }, delay);
+  }, delay, "AbortSignal.timeout"_kj);
 
   return kj::mv(signal);
 }
@@ -1378,7 +1378,7 @@ kj::Promise<void> Scheduler::wait(
   auto timeoutId = global.setTimeoutInternal(
       [fulfiller = IoContext::current().addObject(kj::mv(paf.fulfiller))](jsg::Lock& lock) mutable {
     fulfiller->fulfill();
-  }, delay);
+  }, delay, "scheduler.wait"_kj);
 
   auto promise = kj::mv(paf.promise);
 

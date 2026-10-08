@@ -1069,9 +1069,23 @@ jsg::JsString ServiceWorkerGlobalScope::atob(jsg::Lock& js, kj::String data) {
 }
 
 void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, jsg::Function<void()> task) {
+  // Nests inside the turn that runs it, rather than causing a turn.
+  AsyncResource asyncTraceResource;
+  KJ_IF_SOME(context, IoContext::tryCurrent()) {
+    KJ_IF_SOME(tracker, context.tryGetAsyncTracker()) {
+      asyncTraceResource = tracker.create(AsyncKind::MICROTASK, "queueMicrotask"_kj);
+    }
+  }
+
   auto fn = js.wrapSimpleFunction(js.v8Context(),
-      JSG_VISITABLE_LAMBDA((this, fn = kj::mv(task)), (fn),
+      JSG_VISITABLE_LAMBDA(
+          (this, fn = kj::mv(task), asyncTraceResource = kj::mv(asyncTraceResource)), (fn),
           (jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& args) {
+            // Released after the callback rather than when the closure is collected, to keep
+            // tracker calls out of GC.
+            KJ_DEFER(asyncTraceResource.release());
+            asyncTraceResource.settle(AsyncOutcome::OK);
+            AsyncTracker::CallbackScope asyncTraceScope(asyncTraceResource);
             js.tryCatch([&] {
               // The function won't be called with any arguments, so we can
               // safely ignore anything passed in to args.
@@ -1117,9 +1131,9 @@ jsg::JsValue ServiceWorkerGlobalScope::structuredClone(
 }
 
 TimeoutId::NumberType ServiceWorkerGlobalScope::setTimeoutInternal(
-    jsg::Function<void()> function, double msDelay) {
+    jsg::Function<void()> function, double msDelay, kj::StringPtr asyncTraceName) {
   auto timeoutId = IoContext::current().setTimeoutImpl(timeoutIdGenerator,
-      /* repeat */ false, kj::mv(function), msDelay);
+      /* repeat */ false, kj::mv(function), msDelay, asyncTraceName);
   return timeoutId.toNumber();
 }
 
@@ -1378,7 +1392,8 @@ jsg::Ref<Immediate> ServiceWorkerGlobalScope::setImmediate(jsg::Lock& js,
     function(js, kj::mv(args));
   };
   auto timeoutId = context.setTimeoutImpl(timeoutIdGenerator,
-      /* repeat */ false, [function = kj::mv(fn)](jsg::Lock& js) mutable { function(js); }, 0);
+      /* repeat */ false, [function = kj::mv(fn)](jsg::Lock& js) mutable { function(js); }, 0,
+      "setImmediate"_kj);
   return js.alloc<Immediate>(context, timeoutId);
 }
 
