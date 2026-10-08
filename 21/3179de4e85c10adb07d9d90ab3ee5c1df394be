@@ -1,0 +1,19 @@
+src/workerd/api/sql.h
+  s_7d03d8f3981d9e::t_68ac2eaa0a375c 260-261,263-265
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "213179de4e85c10adb07d9d90ab3ee5c1df394be",
+  "prompts": {},
+  "sessions": {
+    "s_7d03d8f3981d9e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ee98466faffejVSpgrbYDs0Ut0",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "frostzt <aidenfrostbite@gmail.com>"
+    }
+  }
+}
