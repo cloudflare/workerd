@@ -13,9 +13,14 @@
 
 pub mod hdr;
 mod histogram;
+mod stats;
 
 pub use histogram::Histogram;
 pub use histogram::Options;
+pub use stats::MannWhitneyTest;
+pub use stats::MeanCi;
+pub use stats::PercentileCi;
+pub use stats::WelchTest;
 
 /// Errors from creating, combining, or querying histograms.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
