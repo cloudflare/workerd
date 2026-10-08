@@ -205,5 +205,234 @@ KJ_TEST("an actor's context is reported with its ID") {
   KJ_EXPECT(events[0].endsWith(" actor=my-actor"), events[0]);
 }
 
+// Labels resources by name ("setTimeout#2"; the request is "request"), so expected sequences can
+// be written without knowing IDs.
+class LabelingListener final: public AsyncTraceListener {
+ public:
+  explicit LabelingListener(kj::Vector<kj::String>& events): events(events) {}
+
+  void onInit(uint64_t ctx, const AsyncInitEvent& e) override {
+    kj::String label;
+    if (e.kind == AsyncKind::REQUEST) {
+      label = kj::str("request");
+    } else {
+      auto name = kj::str(e.name);
+      auto& count = counts.findOrCreate(
+          name, [&]() -> decltype(counts)::Entry { return {kj::str(name), 0}; });
+      label = kj::str(name, "#", ++count);
+    }
+    events.add(
+        kj::str("init ", label, " trigger=", labelOf(e.trigger), " exec=", labelOf(e.execution)));
+    labels.insert(e.id, kj::mv(label));
+  }
+  void onSettle(uint64_t ctx, AsyncId id, AsyncOutcome outcome, uint64_t atNs) override {
+    events.add(kj::str("settle ", labelOf(id), outcome == AsyncOutcome::OK ? "" : " (not ok)"));
+  }
+  void onBefore(uint64_t ctx, AsyncId id, uint64_t atNs) override {
+    events.add(kj::str("before ", labelOf(id)));
+  }
+  void onAfter(uint64_t ctx, AsyncId id, uint64_t atNs) override {
+    events.add(kj::str("after ", labelOf(id)));
+  }
+  void onDestroy(uint64_t ctx, AsyncId id, uint64_t atNs) override {
+    events.add(kj::str("destroy ", labelOf(id)));
+  }
+  void onTurn(uint64_t ctx, const AsyncTurn& turn) override {
+    events.add(kj::str("turn cause=", labelOf(turn.cause)));
+  }
+  void onContextEnd(uint64_t ctx, uint64_t atNs, const AsyncContextStats& s) override {
+    events.add(kj::str("context_end unknown=", s.unknown, " unbalanced=", s.unbalanced,
+        " foreign=", s.foreignThread));
+  }
+
+ private:
+  kj::Vector<kj::String>& events;
+  kj::HashMap<AsyncId, kj::String> labels;
+  kj::HashMap<kj::String, uint> counts;
+
+  kj::String labelOf(AsyncId id) {
+    if (id == 0) return kj::str("-");
+    KJ_IF_SOME(label, labels.find(id)) {
+      return kj::str(label);
+    }
+    return kj::str("?", id);
+  }
+};
+
+class LabelingObserver final: public IsolateObserver {
+ public:
+  explicit LabelingObserver(kj::Vector<kj::String>& events): events(events) {}
+
+  kj::Maybe<AsyncTraceConfig> getAsyncTraceConfig() const override {
+    return AsyncTraceConfig{};
+  }
+  void addAsyncTraceSinks(AsyncTraceSinks& sinks,
+      kj::StringPtr worker,
+      kj::Maybe<kj::StringPtr> actorId) const override {
+    sinks.add(kj::heap<LabelingListener>(events));
+  }
+
+ private:
+  kj::Vector<kj::String>& events;
+};
+
+// Runs `fetch` as the module's fetch handler and returns the trace events.
+kj::Array<kj::String> traceFetch(kj::StringPtr fetch) {
+  kj::Vector<kj::String> events;
+  auto source = kj::str("export default { async fetch(request) {\n", fetch, "\n} };");
+  {
+    TestFixture fixture({
+      .mainModuleSource = source.asPtr(),
+      .useRealTimers = true,
+      .isolateObserver = kj::atomicRefcounted<LabelingObserver>(events),
+    });
+    auto response = fixture.runRequest(kj::HttpMethod::GET, "http://www.example.com"_kj, ""_kj);
+    KJ_EXPECT(response.statusCode == 200, response.body);
+    KJ_EXPECT(response.body == "ok", response.body);
+  }
+  return events.releaseAsArray();
+}
+
+// Expects `expected` to appear in `events` in order, not necessarily adjacent.
+void expectInOrder(
+    kj::ArrayPtr<const kj::String> events, std::initializer_list<kj::StringPtr> expected) {
+  size_t next = 0;
+  for (auto& e: expected) {
+    while (next < events.size() && events[next] != e) ++next;
+    if (next == events.size()) {
+      KJ_FAIL_EXPECT("missing or out of order", e, joined(events));
+      return;
+    }
+    ++next;
+  }
+}
+
+uint count(kj::ArrayPtr<const kj::String> events, kj::StringPtr event) {
+  uint n = 0;
+  for (auto& e: events) {
+    if (e == event) ++n;
+  }
+  return n;
+}
+
+void expectComplete(kj::ArrayPtr<const kj::String> events) {
+  KJ_EXPECT(count(events, "context_end unknown=0 unbalanced=0 foreign=0"_kj) == 1, joined(events));
+}
+
+KJ_TEST("code after an await on a timer is triggered by that timer") {
+  auto events = traceFetch(R"(
+    await new Promise(resolve => setTimeout(resolve, 1));
+    await new Promise(resolve => setTimeout(resolve, 1));
+    return new Response("ok");
+  )"_kj);
+  expectInOrder(events,
+      {
+        "init setTimeout#1 trigger=request exec=request"_kj,
+        "settle setTimeout#1"_kj,
+        "before setTimeout#1"_kj,
+        "init setTimeout#2 trigger=setTimeout#1 exec=setTimeout#1"_kj,
+        "after setTimeout#1"_kj,
+        "turn cause=setTimeout#1"_kj,
+        "settle setTimeout#2"_kj,
+        "turn cause=setTimeout#2"_kj,
+      });
+  // The handler's returned promise is awaited from C++.
+  expectInOrder(events, {"init awaitJs#1 trigger=request exec=request"_kj, "settle awaitJs#1"_kj});
+  expectComplete(events);
+}
+
+KJ_TEST("cleared timers and intervals are destroyed; each firing is a turn") {
+  auto events = traceFetch(R"(
+    clearTimeout(setTimeout(() => {}, 1000000));
+    let n = 0;
+    await new Promise(resolve => {
+      const interval = setInterval(() => {
+        if (++n == 3) {
+          clearInterval(interval);
+          resolve();
+        }
+      }, 1);
+    });
+    return new Response("ok");
+  )"_kj);
+  expectInOrder(events,
+      {
+        "init setTimeout#1 trigger=request exec=request"_kj,
+        "destroy setTimeout#1"_kj,
+        "init setInterval#1 trigger=request exec=request"_kj,
+        "turn cause=setInterval#1"_kj,
+        "turn cause=setInterval#1"_kj,
+        "destroy setInterval#1"_kj,
+        "turn cause=setInterval#1"_kj,
+      });
+  KJ_EXPECT(count(events, "turn cause=setInterval#1"_kj) == 3, joined(events));
+  KJ_EXPECT(count(events, "settle setInterval#1"_kj) == 0, joined(events));
+  KJ_EXPECT(count(events, "settle setTimeout#1"_kj) == 0, joined(events));
+  expectComplete(events);
+}
+
+KJ_TEST("microtasks nest inside the turn that runs them") {
+  auto events = traceFetch(R"(
+    await new Promise(resolve => queueMicrotask(resolve));
+    queueMicrotask(() => {});
+    return new Response("ok");
+  )"_kj);
+  expectInOrder(events,
+      {
+        "before request"_kj,
+        "init queueMicrotask#1 trigger=request exec=request"_kj,
+        "settle queueMicrotask#1"_kj,
+        "before queueMicrotask#1"_kj,
+        "after queueMicrotask#1"_kj,
+        // The code after `await` is a separate promise reaction, not inside the microtask.
+        "init queueMicrotask#2 trigger=request exec=request"_kj,
+        "before queueMicrotask#2"_kj,
+        "after queueMicrotask#2"_kj,
+        "after request"_kj,
+        "turn cause=request"_kj,
+      });
+  expectComplete(events);
+}
+
+KJ_TEST("code after awaiting I/O is triggered by the awaitIo bridge") {
+  auto events = traceFetch(R"(
+    await scheduler.wait(1);
+    setTimeout(() => {}, 0);
+    return new Response("ok");
+  )"_kj);
+  expectInOrder(events,
+      {
+        "init scheduler.wait#1 trigger=request exec=request"_kj,
+        "init awaitIo#1 trigger=request exec=request"_kj,
+        "turn cause=request"_kj,
+        "settle scheduler.wait#1"_kj,
+        "turn cause=scheduler.wait#1"_kj,
+        "settle awaitIo#1"_kj,
+        "before awaitIo#1"_kj,
+        "init setTimeout#1 trigger=awaitIo#1 exec=awaitIo#1"_kj,
+        "after awaitIo#1"_kj,
+        "turn cause=awaitIo#1"_kj,
+      });
+  expectComplete(events);
+}
+
+KJ_TEST("a rejected awaitIo settles with an error") {
+  auto events = traceFetch(R"(
+    const controller = new AbortController();
+    const wait = scheduler.wait(1000000, {signal: controller.signal});
+    controller.abort();
+    try { await wait; } catch {}
+    return new Response("ok");
+  )"_kj);
+  expectInOrder(events,
+      {
+        "init scheduler.wait#1 trigger=request exec=request"_kj,
+        "init awaitIo#1 trigger=request exec=request"_kj,
+        "destroy scheduler.wait#1"_kj,
+      });
+  expectInOrder(events, {"settle awaitIo#1 (not ok)"_kj, "turn cause=awaitIo#1"_kj});
+  expectComplete(events);
+}
+
 }  // namespace
 }  // namespace workerd

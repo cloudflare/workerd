@@ -63,6 +63,9 @@ class IoContext::TimeoutManagerImpl final: public TimeoutManager {
         "TimeoutId Generator mismatch - using a generator from wrong ServiceWorkerGlobalScope");
 
     auto [id, it] = addState(generator, kj::mv(params));
+    KJ_IF_SOME(tracker, context.tryGetAsyncTracker()) {
+      startAsyncTrace(tracker, it);
+    }
     setTimeoutImpl(context, it);
     return id;
   }
@@ -95,6 +98,8 @@ class IoContext::TimeoutManagerImpl final: public TimeoutManager {
   IdAndIterator addState(TimeoutId::Generator& generator, TimeoutParameters params);
 
   void setTimeoutImpl(IoContext& context, Iterator it);
+
+  void startAsyncTrace(const AsyncTracker& tracker, Iterator it);
 
   // A pair of a Date and a numeric ID, used as entry in timeoutTimes set, below.
   struct TimeoutTime {
@@ -144,6 +149,10 @@ class IoContext::TimeoutManagerImpl::TimeoutState {
 
   bool isCanceled = false;
   bool isRunning = false;
+
+  // Settles when a one-shot timer fires; an interval stays unsettled until cleared. Each firing
+  // causes a turn. Declared before `maybePromise`, so it is released after the timer's promise.
+  AsyncResource asyncTraceResource;
 
   kj::Maybe<kj::Promise<void>> maybePromise;
 };
@@ -898,6 +907,9 @@ void IoContext::TimeoutManagerImpl::TimeoutState::cancel() {
     maybePromise = kj::none;
   }
 
+  // Reports `destroy` now, unless the timer already fired (and settled).
+  asyncTraceResource.release();
+
   ++manager.timeoutsFinished;
 }
 
@@ -924,6 +936,12 @@ auto IoContext::TimeoutManagerImpl::addState(
   return {id, it};
 }
 
+void IoContext::TimeoutManagerImpl::startAsyncTrace(const AsyncTracker& tracker, Iterator it) {
+  auto& state = it->second;
+  state.asyncTraceResource = tracker.create(AsyncKind::TIMER, state.params.asyncTraceName);
+  state.asyncTraceResource.annotate("delayMs"_kj, kj::str(state.params.msDelay));
+}
+
 void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator it) {
   auto& state = it->second;
 
@@ -943,6 +961,10 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
   //   the timer, so we don't want to addTask() it, which awaitIo() does implicitly.
   auto promise =
       paf.promise.then([this, &context, it, cs = context.getCriticalSection()]() mutable {
+    auto& firing = it->second;
+    if (!firing.params.repeat) {
+      firing.asyncTraceResource.settle(AsyncOutcome::OK);
+    }
     return context.run([this, it](Worker::Lock& lock, IoContext& context) mutable {
       auto& state = it->second;
 
@@ -974,6 +996,8 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
         // Because Promise has an underspecified move ctor, we need to explicitly nullify the Maybe
         // to indicate that we've consumed the promise.
         state.maybePromise = kj::none;
+
+        state.asyncTraceResource.enterAsTurnCause();
 
         // The user's callback might throw, but we need to at least attempt to reschedule interval
         // callbacks even if they throw. This deferred action takes care of that. Note that we don't
@@ -1067,8 +1091,11 @@ void IoContext::TimeoutManagerImpl::clearTimeout(IoContext& context, TimeoutId t
   timeout->second.cancel();
 }
 
-TimeoutId IoContext::setTimeoutImpl(
-    TimeoutId::Generator& generator, bool repeat, jsg::Function<void()> function, double msDelay) {
+TimeoutId IoContext::setTimeoutImpl(TimeoutId::Generator& generator,
+    bool repeat,
+    jsg::Function<void()> function,
+    double msDelay,
+    kj::Maybe<kj::StringPtr> asyncTraceName) {
   static constexpr int64_t max = 3153600000000;  // Milliseconds in 100 years
   // Clamp the range on timers to [0, 3153600000000] (inclusive). The specs
   // do not indicate a clear maximum range for setTimeout/setInterval so the
@@ -1077,6 +1104,7 @@ TimeoutId IoContext::setTimeoutImpl(
       : msDelay >= static_cast<double>(max)           ? max
                                                       : static_cast<int64_t>(msDelay);
   auto params = TimeoutManager::TimeoutParameters(repeat, delay, kj::mv(function));
+  params.asyncTraceName = asyncTraceName.orDefault(repeat ? "setInterval"_kj : "setTimeout"_kj);
   return timeoutManager->setTimeout(*this, generator, kj::mv(params));
 }
 

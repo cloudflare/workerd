@@ -895,8 +895,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // Used to implement setTimeout(). We don't expose the timer directly because the
   // promises it returns need to live in this I/O context, anyway.
-  TimeoutId setTimeoutImpl(
-      TimeoutId::Generator& generator, bool repeat, jsg::Function<void()> function, double msDelay);
+  //
+  // `asyncTraceName` names the timer's async trace resource; by default "setTimeout" or
+  // "setInterval".
+  TimeoutId setTimeoutImpl(TimeoutId::Generator& generator,
+      bool repeat,
+      jsg::Function<void()> function,
+      double msDelay,
+      kj::Maybe<kj::StringPtr> asyncTraceName = kj::none);
 
   // Used to implement clearTimeout(). We don't expose the timer directly because the
   // promises it returns need to live in this I/O context, anyway.
@@ -1345,6 +1351,21 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   jsg::PromiseForResult<Func, T, true> awaitIoImpl(
       jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs, Func&& func);
 
+  // Async trace resources for the awaitIo() and awaitJs() bridges. Inert if the context is not
+  // traced.
+  AsyncResource makeAwaitIoResource() const {
+    KJ_IF_SOME(tracker, tryGetAsyncTracker()) {
+      return tracker.adoptOrCreate(AsyncKind::KJ_TO_JS, "awaitIo"_kj);
+    }
+    return {};
+  }
+  AsyncResource makeAwaitJsResource() const {
+    KJ_IF_SOME(tracker, tryGetAsyncTracker()) {
+      return tracker.create(AsyncKind::JS_TO_KJ, "awaitJs"_kj);
+    }
+    return {};
+  }
+
   // The IncomingRequest that is currently considered "current". This is always the
   // latest-starting request that hasn't yet completed.
   //
@@ -1382,6 +1403,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <typename Result>
   friend Result throwOrReturnResult(
       jsg::Lock& js, IoContext::ExceptionOr<Result>&& exceptionOrResult);
+  template <typename T>
+  friend AsyncOutcome asyncOutcomeOf(const IoContext::ExceptionOr<T>& exceptionOrT);
 
   template <TopUpFlag topUp, typename Func>
   auto makeReentryCallbackImpl(Func func, kj::Own<void> attachment);
@@ -1532,6 +1555,15 @@ kj::Promise<IoContext::ExceptionOr<T>> promiseForExceptionOrT(kj::Promise<T> pro
   }
 };
 
+template <typename T>
+AsyncOutcome asyncOutcomeOf(const IoContext::ExceptionOr<T>& exceptionOrT) {
+  if constexpr (jsg::isVoid<T>()) {
+    return exceptionOrT == kj::none ? AsyncOutcome::OK : AsyncOutcome::ERROR;
+  } else {
+    return exceptionOrT.template is<kj::Exception>() ? AsyncOutcome::ERROR : AsyncOutcome::OK;
+  }
+}
+
 template <typename Result>
 Result throwOrReturnResult(jsg::Lock& js, IoContext::ExceptionOr<Result>&& exceptionOrResult) {
   if constexpr (jsg::isVoid<Result>()) {
@@ -1582,13 +1614,19 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
   // it's important in that case that `promiseExceptionOrT` will be destroyed before `func`.
   auto [jsPromise, resolver] = js.newPromiseAndResolver<ExceptionOr<Result>>();
 
+  // Settled when the KJ promise completes; causes the turn that resumes JavaScript.
+  AsyncResource asyncTraceResource = makeAwaitIoResource();
+
   addTask(promiseExceptionOrT.then(
       [this, resolver = kj::mv(resolver), ilOrCs = kj::mv(ilOrCs),
           maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js),
+          asyncTraceResource = kj::mv(asyncTraceResource),
           // Reminder: It's important that `func` gets attached to the promise before the whole
           // thing is passed to `addTask()`, so that it's impossible for `func` to be destroyed
           // before the inner promise.
           func = kj::fwd<Func>(func)](ExceptionOr<T>&& exceptionOrT) mutable {
+    asyncTraceResource.settle(asyncOutcomeOf<T>(exceptionOrT));
+
     struct FuncResultPair {
       // It's important that `exceptionOrT` is destroyed before `Func`. Lambda captures are
       // destroyed in unspecified order, so we wrap them in a struct to make it explicit.
@@ -1599,7 +1637,9 @@ jsg::PromiseForResult<Func, T, true> IoContext::awaitIoImpl(
     return run(
         [resolver = kj::mv(resolver),
             funcResultPair = FuncResultPair{kj::fwd<Func>(func), kj::mv(exceptionOrT)},
-            maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
+            maybeAsyncContext = kj::mv(maybeAsyncContext),
+            asyncTraceResource = kj::mv(asyncTraceResource)](Worker::Lock& lock) mutable {
+      asyncTraceResource.enterAsTurnCause();
       jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
       jsg::Lock& js = lock;
 
@@ -1678,6 +1718,8 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
   struct RefcountedFulfiller: public kj::Refcounted {
     kj::Own<kj::PromiseFulfiller<RemoveIoOwn<T>>> fulfiller;
     kj::Own<const AtomicWeakRef<Worker::Isolate>> maybeIsolate;
+    // Settled when the JavaScript promise settles.
+    AsyncResource asyncTraceResource;
     bool isDone = false;
 
     RefcountedFulfiller(kj::Own<const AtomicWeakRef<Worker::Isolate>> maybeIsolate,
@@ -1712,6 +1754,7 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
   };
   auto& isolate = Worker::Isolate::from(js);
   auto fulfiller = kj::refcounted<RefcountedFulfiller>(isolate.getWeakRef(), kj::mv(paf.fulfiller));
+  fulfiller->asyncTraceResource = makeAwaitJsResource();
 
   auto errorHandler = [fulfiller = addObject(kj::addRef(*fulfiller))](
                           jsg::Lock& js, jsg::Value jsExceptionRef) mutable {
@@ -1735,12 +1778,14 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
 
     fulfiller->fulfiller->reject(jsg::createTunneledException(isolate, jsException));
     fulfiller->isDone = true;
+    fulfiller->asyncTraceResource.settle(AsyncOutcome::ERROR);
   };
 
   if constexpr (jsg::isVoid<T>()) {
     jsPromise.then(js, [fulfiller = addObject(kj::mv(fulfiller))](jsg::Lock&) mutable {
       fulfiller->fulfiller->fulfill();
       fulfiller->isDone = true;
+      fulfiller->asyncTraceResource.settle(AsyncOutcome::OK);
     }, kj::mv(errorHandler));
   } else {
     jsPromise.then(js, [fulfiller = addObject(kj::mv(fulfiller))](jsg::Lock&, T&& result) mutable {
@@ -1750,6 +1795,7 @@ kj::_::ReducePromises<RemoveIoOwn<T>> IoContext::awaitJs(jsg::Lock& js, jsg::Pro
         fulfiller->fulfiller->fulfill(kj::mv(result));
       }
       fulfiller->isDone = true;
+      fulfiller->asyncTraceResource.settle(AsyncOutcome::OK);
     }, kj::mv(errorHandler));
   }
 
