@@ -1,5 +1,5 @@
 //! The FFI island of kj-rs-io: the `#[cxx::bridge]` plus every hand-written `unsafe` in the
-//! crate, in one file (file-top `#![allow(unsafe_code)]`; the crate root denies it).
+//! crate, in one file (file-top `#![allow(unsafe_code)]`; no other module has it).
 //!
 //! Two kinds of raw thing cross the bridge and are converted into typed Rust here, at the entry
 //! point that receives them, before any other module sees them:
@@ -25,7 +25,10 @@
 //! `Arc`-shared state and its operations own a share (lib.rs, "Ownership of in-flight
 //! operations"), so the bridge declarations below carry no lifetime on the object parameters --
 //! the `impl Future + use<..>` return types prove it.
-#![allow(unsafe_code)]
+#![allow(
+    unsafe_code,
+    reason = "the crate's FFI island: the cxx bridge and every hand-written `unsafe`"
+)]
 
 use core::future::Future;
 use core::mem::MaybeUninit;
@@ -42,6 +45,7 @@ pub use bridge::kj_pieces_count;
 use crate::error::KjIoError;
 use crate::error::Result;
 use crate::error::op;
+use crate::loopback::LoopbackRegistry;
 use crate::net::TokioAddress;
 use crate::net::TokioDatagram;
 use crate::net::TokioListener;
@@ -78,9 +82,18 @@ use crate::watcher::file_watcher_watch;
 use crate::watcher::new_file_watcher;
 
 #[cxx::bridge(namespace = "kj_rs_io")]
-#[expect(clippy::allow_attributes)]
-#[allow(clippy::missing_safety_doc)]
-#[allow(clippy::unnecessary_box_returns)]
+#[expect(
+    clippy::allow_attributes,
+    reason = "the lints allowed below do not fire on every target, where `expect` would be unfulfilled"
+)]
+#[allow(
+    clippy::missing_safety_doc,
+    reason = "the unsafe functions declared here document their contracts where they are defined"
+)]
+#[allow(
+    clippy::unnecessary_box_returns,
+    reason = "cxx takes an opaque Rust type boxed"
+)]
 mod bridge {
     /// The family of a [`SocketAddress`], and which of its fields are meaningful.
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -95,6 +108,9 @@ mod bridge {
         UnixAbstract,
         /// No fields: `accept(2)` on a unix socket reports this for an unbound peer.
         UnixUnnamed,
+        /// `name`: a `loopback:` name (loopback.rs). Not a socket address: it has no `struct
+        /// sockaddr` form and is not subject to `restrictPeers()`.
+        Loopback,
     }
 
     /// One socket address, typed. This is the only form an address takes on the bridge: Rust
@@ -147,6 +163,7 @@ mod bridge {
         type TokioListener;
         type TokioAddress;
         type TokioDatagram;
+        type LoopbackRegistry;
 
         // --- kj::AsyncIoStream (stream.rs). `buf` is the caller's, uninitialized storage
         // allowed, valid until the promise settles (KJ's contract): hence `unsafe`.
@@ -172,11 +189,23 @@ mod bridge {
 
         // --- kj::Network / kj::NetworkAddress (net.rs). Peer filtering is the C++ adapter's:
         // `address_targets` lists what connect() would try, in order, for it to filter and
-        // connect one at a time; `listener_accept` reports the peer for it to judge.
-        async fn network_parse_address(addr: &[u8], port_hint: u16) -> Result<Box<TokioAddress>>;
+        // connect one at a time; `listener_accept` reports the peer for it to judge. Every
+        // kj::Network holds a LoopbackRegistry (loopback.rs), the namespace `loopback:`
+        // addresses resolve in once enabled; restrictPeers() children share their parent's.
+        fn new_loopback_registry() -> Box<LoopbackRegistry>;
+        fn loopback_registry_clone(registry: &LoopbackRegistry) -> Box<LoopbackRegistry>;
+        fn loopback_registry_enable(registry: &LoopbackRegistry);
+        async fn network_parse_address(
+            addr: &[u8],
+            port_hint: u16,
+            loopback: &LoopbackRegistry,
+        ) -> Result<Box<TokioAddress>>;
         fn network_address_from(addr: &SocketAddress) -> Result<Box<TokioAddress>>;
         fn address_targets(addr: &TokioAddress) -> Result<Vec<SocketAddress>>;
-        async fn connect_target(target: SocketAddress) -> Result<Box<TokioStream>>;
+        async fn connect_target(
+            addr: &TokioAddress,
+            target: SocketAddress,
+        ) -> Result<Box<TokioStream>>;
         fn address_listen(addr: &TokioAddress) -> Result<Box<TokioListener>>;
         fn address_bind_datagram(addr: &TokioAddress) -> Result<Box<TokioDatagram>>;
         fn address_clone(addr: &TokioAddress) -> Box<TokioAddress>;
@@ -266,9 +295,31 @@ pub unsafe fn stream_try_read(
 pub fn network_parse_address(
     addr: &[u8],
     port_hint: u16,
+    loopback: &LoopbackRegistry,
 ) -> impl Future<Output = Result<Box<TokioAddress>>> + use<> {
     let addr = addr.to_vec();
-    async move { parse_address(&addr, port_hint).await }
+    let loopback = loopback.clone_handle();
+    async move { parse_address(&addr, port_hint, &loopback).await }
+}
+
+#[expect(
+    clippy::unnecessary_box_returns,
+    reason = "cxx takes an opaque Rust type boxed"
+)]
+pub fn new_loopback_registry() -> Box<LoopbackRegistry> {
+    Box::new(LoopbackRegistry::new())
+}
+
+#[expect(
+    clippy::unnecessary_box_returns,
+    reason = "cxx takes an opaque Rust type boxed"
+)]
+pub fn loopback_registry_clone(registry: &LoopbackRegistry) -> Box<LoopbackRegistry> {
+    Box::new(registry.clone_handle())
+}
+
+pub fn loopback_registry_enable(registry: &LoopbackRegistry) {
+    registry.enable();
 }
 
 // ======================================================================================
@@ -319,7 +370,10 @@ unsafe fn own_socket_from_raw(handle: i64) -> Result<socket2::Socket> {
         return Err(invalid_handle(handle));
     }
     // The bridge carries the SOCKET's bits verbatim.
-    #[allow(clippy::cast_sign_loss)]
+    #[allow(
+        clippy::cast_sign_loss,
+        reason = "the bridge carries the SOCKET's bits verbatim"
+    )]
     let raw = handle as RawSocket;
     // Safety: per this function's contract `handle` is an open SOCKET owned by us from now on.
     let owned = unsafe { OwnedSocket::from_raw_socket(raw) };
@@ -446,7 +500,10 @@ unsafe fn prepare_socket(handle: i64, flags: u32) -> Result<socket2::Socket> {
     if handle < 0 {
         return Err(invalid_handle(handle));
     }
-    #[allow(clippy::cast_sign_loss)]
+    #[allow(
+        clippy::cast_sign_loss,
+        reason = "the bridge carries the SOCKET's bits verbatim"
+    )]
     let raw = handle as RawSocket;
     let socket = if flags & TAKE_OWNERSHIP == 0 {
         // Safety: forwarded from this function's contract (open for the duration of the call).
@@ -527,118 +584,5 @@ pub fn new_socket_pair() -> Result<bridge::SocketPair> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[cfg(unix)]
-    #[test]
-    fn own_fd_from_raw_rejects_negative_fds() {
-        // -1 is OwnedFd's niche: turning it into an OwnedFd would be library UB, so the
-        // conversion point must refuse it, as an error (the crate's no-panic policy).
-        // Safety: rejected before constructing anything.
-        assert!(unsafe { own_fd_from_raw(-1) }.is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn prepare_socket_rejects_negative_handles() {
-        // Safety: rejected before constructing anything.
-        assert!(unsafe { prepare_socket(-1, TAKE_OWNERSHIP) }.is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn prepare_socket_rejects_handles_that_do_not_fit_an_fd() {
-        // Safety: rejected before constructing anything.
-        assert!(unsafe { prepare_socket(i64::from(i32::MAX) + 1, TAKE_OWNERSHIP) }.is_err());
-    }
-
-    /// The happy path of the conversion point: an fd released by std becomes a socket2 socket
-    /// that owns it (closes it on drop) and is fully usable.
-    #[cfg(unix)]
-    #[test]
-    fn prepare_socket_takes_ownership_of_a_live_socket() {
-        use std::os::fd::AsRawFd;
-        use std::os::fd::IntoRawFd;
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let raw = listener.into_raw_fd();
-        // Safety: `into_raw_fd` transferred ownership of an open socket to us.
-        let socket = unsafe { prepare_socket(i64::from(raw), TAKE_OWNERSHIP) }.unwrap();
-        assert_eq!(socket.as_raw_fd(), raw);
-        assert_eq!(
-            socket.local_addr().unwrap().as_socket().unwrap().port(),
-            port
-        );
-        // `socket` is the sole owner: dropping it closes the fd (socket2::Socket's drop glue).
-    }
-
-    /// `uninit_slice` must not touch the pointer for a zero-length request (KJ callers may pass
-    /// a null or dangling pointer with `maxBytes == 0`), and must cover exactly `len` bytes
-    /// otherwise.
-    #[test]
-    fn uninit_slice_respects_length() {
-        // Safety: a null pointer with len 0 is never dereferenced by contract.
-        let empty = unsafe { uninit_slice(std::ptr::null_mut(), 0) };
-        assert!(empty.is_empty());
-        let mut storage = [MaybeUninit::<u8>::uninit(); 8];
-        // Safety: `storage` is live and exclusively ours for the slice's lifetime.
-        let view = unsafe { uninit_slice(storage.as_mut_ptr().cast::<u8>(), 5) };
-        assert_eq!(view.len(), 5);
-        view[0].write(7);
-        // Safety: element 0 was just initialized above.
-        assert_eq!(unsafe { storage[0].assume_init() }, 7);
-    }
-
-    /// KJ's flag semantics: without `TAKE_OWNERSHIP` the caller's fd is untouched except for
-    /// `O_NONBLOCK` (shared through the dup) and Rust works on a `CLOEXEC` duplicate; with it
-    /// the fd itself is owned and gains `CLOEXEC`.
-    #[cfg(unix)]
-    #[test]
-    fn prepare_fd_applies_kj_flags() {
-        use std::os::fd::AsRawFd;
-        use std::os::fd::IntoRawFd;
-        fn fd_flags(fd: i32) -> (i32, i32) {
-            // Safety: F_GETFD/F_GETFL only read flags of a live descriptor.
-            unsafe {
-                (
-                    libc::fcntl(fd, libc::F_GETFD),
-                    libc::fcntl(fd, libc::F_GETFL),
-                )
-            }
-        }
-        let (a, _b) = std::os::unix::net::UnixStream::pair().unwrap();
-        let raw = a.as_raw_fd();
-        // Borrowed: a distinct, CLOEXEC dup; the original is now non-blocking too (shared
-        // open file description) but still open.
-        // Safety: `a` keeps `raw` open for the call.
-        let dup = unsafe { prepare_fd(raw, 0) }.unwrap();
-        assert_ne!(dup.as_raw_fd(), raw);
-        assert_ne!(fd_flags(dup.as_raw_fd()).0 & libc::FD_CLOEXEC, 0);
-        assert_ne!(fd_flags(dup.as_raw_fd()).1 & libc::O_NONBLOCK, 0);
-        assert_ne!(
-            fd_flags(raw).1 & libc::O_NONBLOCK,
-            0,
-            "O_NONBLOCK is per open file"
-        );
-        drop(dup);
-        assert!(fd_flags(raw).0 >= 0, "the caller's fd is still open");
-
-        // Owned, nothing declared: same fd, CLOEXEC added.
-        let (c, d) = std::os::unix::net::UnixStream::pair().unwrap();
-        let raw_c = c.into_raw_fd();
-        // Safety: `into_raw_fd` transferred ownership.
-        let owned = unsafe { prepare_fd(raw_c, TAKE_OWNERSHIP) }.unwrap();
-        assert_eq!(owned.as_raw_fd(), raw_c);
-        assert_ne!(fd_flags(raw_c).0 & libc::FD_CLOEXEC, 0);
-        assert_ne!(fd_flags(raw_c).1 & libc::O_NONBLOCK, 0);
-        drop(owned);
-        // Observed through the peer, not by probing the released number (another thread could
-        // reuse it): the pair's other end reads EOF once the owned end is closed.
-        assert_eq!(
-            std::io::Read::read(&mut &d, &mut [0u8; 1]).unwrap(),
-            0,
-            "owned: closed on drop"
-        );
-    }
-}
+#[path = "ffi-test.rs"]
+mod tests;

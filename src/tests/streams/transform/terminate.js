@@ -69,12 +69,14 @@ export const errorAfterTerminateWithQueuedChunk = {
   },
 };
 
-// DIVERGENCE: terminate() immediately after readable.cancel() (the WPT
-// general.any seed). Both sides fulfill the cancel promise and let
-// terminate() return without throwing, but the writable's fate differs:
-// C++ keeps the CANCEL reason — closed/write reject with the very reason
-// object; TypeScript lets the terminate win — closed/write reject with
-// the terminate TypeError.
+// DIVERGENCE: terminate() immediately after readable.cancel(), before the
+// stream has started (the WPT general.any seed). Both sides fulfill the
+// cancel promise (the writable is still erroring when it settles; once
+// started it rejects: cancelThenTerminateAfterStart) and let terminate()
+// return without throwing, but the writable's fate differs: C++ keeps the
+// CANCEL reason — closed/write reject with the very reason object;
+// TypeScript lets the terminate win — closed/write reject with the
+// terminate TypeError (spec).
 export const terminateAfterReadableCancel = {
   async test() {
     const reason = new Error('cancel-reason');

@@ -5,6 +5,7 @@ pub use date::KjDate;
 pub use future::FuturePollStatus;
 pub use future::map_err;
 pub use maybe::repr::KjMaybe;
+pub use own::OwnTarget;
 pub use own::repr::KjOwn;
 pub use promise::KjPromise;
 pub use promise::KjPromiseNodeImpl;
@@ -38,6 +39,7 @@ pub type Error = std::io::Error;
 pub trait JsgStruct {}
 
 #[cxx::bridge(namespace = "kj_rs")]
+#[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {
 
     /// Representation of a `GuardedRustPromiseAwaiter` in C++. The size of the blob should match.

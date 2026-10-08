@@ -4,11 +4,8 @@
 
 //! Utilities for creating Node.js-style exceptions.
 //!
-//! This is a Rust port of the C++ `workerd::api::node` exception helpers
-//! (`src/workerd/api/node/exceptions.{h,c++}`). It is gated behind the
-//! `NODEJS_EXCEPTIONS_RUST` autogate; when the gate is off the C++
-//! implementation is used instead. The two implementations are intended to be
-//! behaviorally identical.
+//! This implements the C++ `workerd::api::node` exception helpers
+//! (`src/workerd/api/node/exceptions.{h,c++}`), which delegate to it.
 
 use jsg::Lock;
 use jsg::v8;
@@ -16,6 +13,7 @@ use jsg::v8::ToLocalValue;
 use kj_rs::KjMaybe;
 
 #[cxx::bridge(namespace = "workerd::rust::node_exceptions")]
+#[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {
     /// Most Node.js exceptions are represented as either Error, TypeError, or
     /// RangeError. This is a cxx *extern* enum: the C++ `api::node::JsErrorType`
@@ -106,7 +104,7 @@ mod ffi {
 // ======================================================================================
 // Node.js exceptions
 
-/// Creates a JS error object of the given type. Mirrors C++ `createJsError`.
+/// Creates a JS error object of the given type.
 ///
 /// `message` is raw UTF-8 bytes: exception messages may embed arbitrary,
 /// potentially non-UTF-8 byte strings (e.g. filesystem paths), which V8
@@ -131,8 +129,7 @@ fn bytes_to_value<'a>(lock: &mut Lock, data: &[u8]) -> v8::Local<'a, v8::Value> 
     v8::String::new_from_utf8(lock, data).unwrap(lock).into()
 }
 
-/// Returns the default message for a Node.js exception code. Mirrors C++
-/// `getMessage`.
+/// Returns the default message for a Node.js exception code.
 fn node_default_message(code: ffi::NodeExceptionCode) -> &'static str {
     match code {
         ffi::NodeExceptionCode::ErrFsCpEexist => "File already exists",
@@ -144,8 +141,8 @@ fn node_default_message(code: ffi::NodeExceptionCode) -> &'static str {
     }
 }
 
-/// Returns the string "code" value for a Node.js exception code. Mirrors C++
-/// `getCode` (the stringified enumerator name).
+/// Returns the string "code" value for a Node.js exception code: the
+/// stringified C++ `NodeExceptionCode` enumerator name.
 fn node_code_name(code: ffi::NodeExceptionCode) -> &'static str {
     match code {
         ffi::NodeExceptionCode::ErrFsCpEexist => "ERR_FS_CP_EEXIST",
@@ -157,7 +154,7 @@ fn node_code_name(code: ffi::NodeExceptionCode) -> &'static str {
     }
 }
 
-/// Mirrors C++ `createNodeException`.
+/// Implements C++ `createNodeException`.
 fn create_node_exception_impl<'a>(
     lock: &mut Lock,
     code: ffi::NodeExceptionCode,
@@ -214,7 +211,7 @@ uv_errno_map! {
     EIO => "input/output error",
 }
 
-/// Returns the error name for an errno value. Mirrors C++ `uv_err_name`.
+/// Returns the error name for an errno value.
 fn uv_err_name(errorno: i32) -> &'static str {
     for &(code, name, _) in UV_ERRNO_MAP {
         if code == errorno {
@@ -224,8 +221,7 @@ fn uv_err_name(errorno: i32) -> &'static str {
     "UNKNOWN"
 }
 
-/// Returns the default message for an errno value, matching the C++ default
-/// message lookup in `createUVException`.
+/// Returns the default message for an errno value.
 fn uv_default_message(errorno: i32) -> String {
     for &(code, _, message) in UV_ERRNO_MAP {
         if code == errorno {
@@ -235,7 +231,7 @@ fn uv_default_message(errorno: i32) -> String {
     format!("unknown error: {errorno}")
 }
 
-/// Mirrors C++ `createUVException`.
+/// Implements C++ `createUVException`.
 fn create_uv_exception_impl<'a>(
     lock: &mut Lock,
     errorno: i32,
@@ -295,6 +291,10 @@ fn create_uv_exception_impl<'a>(
 
 /// # Safety
 /// `isolate` must be a valid pointer to a locked `v8::Isolate`.
+#[expect(
+    unsafe_code,
+    reason = "builds a `Lock` from the isolate pointer C++ passes in"
+)]
 unsafe fn create_node_exception(
     isolate: *mut ffi::Isolate,
     code: ffi::NodeExceptionCode,
@@ -311,6 +311,10 @@ unsafe fn create_node_exception(
 
 /// # Safety
 /// `isolate` must be a valid pointer to a locked `v8::Isolate`.
+#[expect(
+    unsafe_code,
+    reason = "builds a `Lock` from the isolate pointer C++ passes in"
+)]
 unsafe fn create_uv_exception(
     isolate: *mut ffi::Isolate,
     errorno: i32,
@@ -335,153 +339,5 @@ unsafe fn create_uv_exception(
 }
 
 #[cfg(test)]
-mod tests {
-    use jsg::FromJS;
-    use jsg_test::Harness;
-
-    use super::*;
-
-    fn get_string(lock: &mut Lock, obj: &v8::Local<v8::Object>, key: &str) -> Option<String> {
-        obj.get(lock, key)
-            .and_then(|value| String::from_js(lock, value).ok())
-    }
-
-    #[test]
-    fn node_exception_uses_default_message_and_code() {
-        let harness = Harness::new();
-        harness.run_in_context(|lock, _ctx| {
-            let err = create_node_exception_impl(
-                lock,
-                ffi::NodeExceptionCode::ErrFsEisdir,
-                ffi::JsErrorType::Error,
-                None,
-            );
-            let value: v8::Local<v8::Value> = err.clone().into();
-            assert!(value.is_native_error());
-            assert_eq!(
-                get_string(lock, &err, "message").as_deref(),
-                Some("Expected a file but found a directory")
-            );
-            assert_eq!(
-                get_string(lock, &err, "code").as_deref(),
-                Some("ERR_FS_EISDIR")
-            );
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn node_exception_uses_explicit_message() {
-        let harness = Harness::new();
-        harness.run_in_context(|lock, _ctx| {
-            let err = create_node_exception_impl(
-                lock,
-                ffi::NodeExceptionCode::ErrFsCpEexist,
-                ffi::JsErrorType::TypeError,
-                Some(b"custom message".as_slice()),
-            );
-            assert_eq!(
-                get_string(lock, &err, "message").as_deref(),
-                Some("custom message")
-            );
-            assert_eq!(
-                get_string(lock, &err, "code").as_deref(),
-                Some("ERR_FS_CP_EEXIST")
-            );
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn uv_exception_formats_default_message_with_path() {
-        let harness = Harness::new();
-        harness.run_in_context(|lock, _ctx| {
-            let err = create_uv_exception_impl(
-                lock,
-                -libc::ENOENT,
-                "open",
-                None,
-                Some(b"/tmp/missing".as_slice()),
-                None,
-            );
-            assert_eq!(
-                get_string(lock, &err, "message").as_deref(),
-                Some("no such file or directory, open '/tmp/missing'")
-            );
-            assert_eq!(get_string(lock, &err, "code").as_deref(), Some("ENOENT"));
-            assert_eq!(get_string(lock, &err, "syscall").as_deref(), Some("open"));
-            assert_eq!(
-                get_string(lock, &err, "path").as_deref(),
-                Some("/tmp/missing")
-            );
-            assert_eq!(get_string(lock, &err, "dest"), None);
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn uv_exception_uses_explicit_message_and_dest() {
-        let harness = Harness::new();
-        harness.run_in_context(|lock, _ctx| {
-            let err = create_uv_exception_impl(
-                lock,
-                -libc::EEXIST,
-                "link",
-                Some(b"File already exists".as_slice()),
-                Some(b"/a".as_slice()),
-                Some(b"/b".as_slice()),
-            );
-            assert_eq!(
-                get_string(lock, &err, "message").as_deref(),
-                Some("File already exists")
-            );
-            assert_eq!(get_string(lock, &err, "code").as_deref(), Some("EEXIST"));
-            assert_eq!(get_string(lock, &err, "syscall").as_deref(), Some("link"));
-            assert_eq!(get_string(lock, &err, "path").as_deref(), Some("/a"));
-            assert_eq!(get_string(lock, &err, "dest").as_deref(), Some("/b"));
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn uv_exception_unknown_errno() {
-        let harness = Harness::new();
-        harness.run_in_context(|lock, _ctx| {
-            let err = create_uv_exception_impl(lock, 12345, "stat", None, None, None);
-            assert_eq!(
-                get_string(lock, &err, "message").as_deref(),
-                Some("unknown error: 12345")
-            );
-            assert_eq!(get_string(lock, &err, "code").as_deref(), Some("UNKNOWN"));
-            Ok(())
-        });
-    }
-
-    // A non-UTF-8 path (valid on POSIX filesystems) must not throw; V8 renders
-    // the invalid bytes lossily as U+FFFD in both the message and the `path`
-    // property. Regression test for the rust::Str UTF-8-validation hazard: the
-    // arbitrary byte arguments are passed as &[u8], never through a Rust &str.
-    #[test]
-    fn uv_exception_non_utf8_path_is_lossy_not_a_panic() {
-        let harness = Harness::new();
-        harness.run_in_context(|lock, _ctx| {
-            // 0x80 is a lone continuation byte — invalid UTF-8.
-            let bad_path: &[u8] = b"/tmp/\x80bad";
-            let err =
-                create_uv_exception_impl(lock, -libc::ENOENT, "open", None, Some(bad_path), None);
-
-            // U+FFFD (the Unicode replacement character) stands in for 0x80.
-            let expected_path = "/tmp/\u{FFFD}bad";
-            assert_eq!(
-                get_string(lock, &err, "path").as_deref(),
-                Some(expected_path)
-            );
-            assert_eq!(
-                get_string(lock, &err, "message").as_deref(),
-                Some(format!("no such file or directory, open '{expected_path}'").as_str())
-            );
-            assert_eq!(get_string(lock, &err, "code").as_deref(), Some("ENOENT"));
-            Ok(())
-        });
-    }
-}
+#[path = "lib-test.rs"]
+mod tests;

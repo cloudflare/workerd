@@ -29,6 +29,7 @@
 #include <kj/compat/http.h>
 #include <kj/function.h>
 #include <kj/mutex.h>
+#include <kj/sticky-flag.h>
 
 #include <concepts>
 
@@ -110,10 +111,10 @@ class IoContext_IncomingRequest final {
   IoContext_IncomingRequest(kj::Own<IoContext> context,
       kj::Rc<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
-      kj::Maybe<kj::Own<BaseTracer>> workerTracer,
+      kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
       kj::Maybe<kj::Own<AccessInfo>> accessInfo = kj::none,
-      kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory = kj::none);
+      kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory = kj::none);
   KJ_DISALLOW_COPY_AND_MOVE(IoContext_IncomingRequest);
   ~IoContext_IncomingRequest() noexcept(false);
 
@@ -187,7 +188,7 @@ class IoContext_IncomingRequest final {
   }
 
   kj::Maybe<BaseTracer&> getWorkerTracer() {
-    return workerTracer;
+    return workerTracer.map([](kj::Rc<BaseTracer>& tracer) -> BaseTracer& { return *tracer; });
   }
 
   // Returns a new reference to the root user trace span for this incoming request, or
@@ -209,10 +210,10 @@ class IoContext_IncomingRequest final {
  private:
   kj::Own<IoContext> context;
   kj::Own<RequestObserver> metrics;
-  kj::Maybe<kj::Own<BaseTracer>> workerTracer;
+  kj::Maybe<kj::Rc<BaseTracer>> workerTracer;
   kj::Rc<IoChannelFactory> ioChannelFactory;
   kj::Maybe<kj::Own<AccessInfo>> accessInfo;
-  kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory;
+  kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory;
 
   // Root user trace span for this request. Populated during delivered() via
   // BaseTracer::makeUserRequestSpan(); otherwise a null SpanParent. The tracer it references
@@ -341,7 +342,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   InputGate::Lock getInputLock();
 
   // Get the current CriticalSection, if there is one, or returns null if not.
-  kj::Maybe<kj::Own<InputGate::CriticalSection>> getCriticalSection();
+  kj::Maybe<kj::Rc<InputGate::CriticalSection>> getCriticalSection();
 
   // Runs `callback` within its own critical section, returning its final result. If `callback`
   // throws, the input lock will break, resetting the actor.
@@ -423,7 +424,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // aborted, e.g. because its CPU time expired. This should be joined with any promises for
   // incoming tasks.
   kj::Promise<void> onAbort() {
-    return abortPromise.addBranch();
+    return abortFlag.whenSignaled();
   }
 
   // If this IoContext has been aborted already, return the abort reason.
@@ -488,7 +489,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // `criticalSection` is null, then this just forwards to the other run() (with null inputLock).
   template <typename Func>
   auto run(Func&& func,
-      kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection) KJ_WARN_UNUSED_RESULT {
+      kj::Maybe<kj::Rc<InputGate::CriticalSection>> criticalSection) KJ_WARN_UNUSED_RESULT {
     if constexpr (runFuncAcceptsIoContext<Func>) {
       return runSingle([this, func = kj::fwd<Func>(func)](Worker::Lock& lock) mutable {
         return func(lock, *this);
@@ -545,7 +546,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Returns null if this is a dynamic worker or facet that was not itself created by ctx.restore()
   // in the parent worker and therefore cannot use ctx.restore() itself, because the runtime does
   // not know how to recreate it.
-  kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> getSelfTokenFactory();
+  kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> getSelfTokenFactory();
 
   // Check if a current request is available. Used to provide better diagnostics when this is
   // unexpectedly absent when reporting a user span.
@@ -849,8 +850,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // into a regular `Promise<T>`, including registering pending events as needed.
   template <typename T>
   kj::Promise<T> waitForDeferredProxy(kj::Promise<api::DeferredProxy<T>>&& promise) {
-    return promise.then([this](api::DeferredProxy<T> deferredProxy) {
-      return deferredProxy.proxyTask.attach(registerPendingEvent());
+    return promise.then([self = addWeakToThis()](api::DeferredProxy<T> deferredProxy) {
+      return deferredProxy.proxyTask.attach(self.assertLive().registerPendingEvent());
     });
   }
 
@@ -1207,8 +1208,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Arc<ReverseIoOwnValidity> reverseIoOwnValidity;
 
   kj::Maybe<kj::Exception> abortException;
-  kj::Own<kj::PromiseFulfiller<void>> abortFulfiller;
-  kj::ForkedPromise<void> abortPromise = nullptr;
+  kj::StickyFlag abortFlag;
 
   class PendingEvent;
 
@@ -1292,7 +1292,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   template <typename Func>
   kj::PromiseForResult<Func, Worker::Lock&> runSingle(
-      Func&& func, kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection);
+      Func&& func, kj::Maybe<kj::Rc<InputGate::CriticalSection>> criticalSection);
 
   // Internal implementation of blockConcurrencyWhile(), always invoked with a single-arg callback.
   template <typename Func>
@@ -1387,12 +1387,13 @@ kj::Promise<T> IoContext::lockOutputWhile(kj::Promise<T> promise) {
 
 template <typename Func>
 kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
-    Func&& func, kj::Maybe<kj::Own<InputGate::CriticalSection>> criticalSection) {
+    Func&& func, kj::Maybe<kj::Rc<InputGate::CriticalSection>> criticalSection) {
   KJ_IF_SOME(cs, criticalSection) {
     return cs.get()
         ->wait(getCurrentTraceSpan())
-        .then([this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
-      return runSingle(kj::fwd<Func>(func), kj::mv(inputLock));
+        .then([self = addWeakToThis(), func = kj::fwd<Func>(func)](
+                  InputGate::Lock&& inputLock) mutable {
+      return self.assertLive().runSingle(kj::fwd<Func>(func), kj::mv(inputLock));
     });
   } else {
     return runSingle(kj::fwd<Func>(func));
@@ -1413,8 +1414,9 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
     if (inputLock == kj::none) {
       return a.getInputGate()
           .wait(getCurrentTraceSpan())
-          .then([this, func = kj::fwd<Func>(func)](InputGate::Lock&& inputLock) mutable {
-        return runSingle(kj::fwd<Func>(func), kj::mv(inputLock));
+          .then([self = addWeakToThis(), func = kj::fwd<Func>(func)](
+                    InputGate::Lock&& inputLock) mutable {
+        return self.assertLive().runSingle(kj::fwd<Func>(func), kj::mv(inputLock));
       });
     }
 
@@ -1423,10 +1425,11 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
     asyncLockPromise = worker->takeAsyncLock(getMetrics());
   }
 
-  return asyncLockPromise.then([this, inputLock = kj::mv(inputLock), func = kj::fwd<Func>(func)](
-                                   Worker::AsyncLock lock) mutable {
+  return asyncLockPromise.then([self = addWeakToThis(), inputLock = kj::mv(inputLock),
+                                   func = kj::fwd<Func>(func)](Worker::AsyncLock lock) mutable {
+    auto& context = self.assertLive();
     // Re-check if context was aborted while we waited for the lock.
-    KJ_IF_SOME(ex, abortException) {
+    KJ_IF_SOME(ex, context.abortException) {
       kj::throwFatalException(ex.clone());
     }
 
@@ -1443,7 +1446,7 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
       };
 
       RunnableImpl runnable(kj::fwd<Func>(func));
-      runImpl(runnable, lock, kj::mv(inputLock), Runnable::Exceptional(false));
+      context.runImpl(runnable, lock, kj::mv(inputLock), Runnable::Exceptional(false));
     } else {
       struct RunnableImpl: public Runnable {
         Func func;
@@ -1456,7 +1459,7 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
       };
 
       RunnableImpl runnable{kj::fwd<Func>(func)};
-      runImpl(runnable, lock, kj::mv(inputLock), Runnable::Exceptional(false));
+      context.runImpl(runnable, lock, kj::mv(inputLock), Runnable::Exceptional(false));
       KJ_IF_SOME(r, runnable.result) {
         return kj::mv(r);
       } else {
@@ -1897,18 +1900,19 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhileImpl(
                     maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)](
                     InputGate::Lock inputLock) mutable {
     return run(
-        [this, callback = kj::mv(callback), maybeAsyncContext = kj::mv(maybeAsyncContext)](
-            Worker::Lock& lock) mutable {
+        [self = addWeakToThis(), callback = kj::mv(callback),
+            maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {
       jsg::AsyncContextFrame::Scope scope(lock, maybeAsyncContext);
       auto cb = kj::mv(callback);
 
       // Remember that this can throw synchronously, and it's important that we catch such throws
       // and call cs->failed().
       auto promise = cb(lock);
+      auto& context = self.assertLive();
 
       // Arrange to time out if the critical section runs more than 30 seconds, so that objects
       // won't be hung forever if they have a critical section that deadlocks.
-      auto timeout = afterLimitTimeout(30 * kj::SECONDS).then([]() -> T {
+      auto timeout = context.afterLimitTimeout(30 * kj::SECONDS).then([]() -> T {
         auto e = JSG_KJ_EXCEPTION(OVERLOADED, Error,
             "A call to blockConcurrencyWhile() in a Durable Object waited for "
             "too long. The call was canceled and the Durable Object was reset.");
@@ -1916,7 +1920,7 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhileImpl(
         kj::throwFatalException(kj::mv(e));
       });
 
-      return awaitJs(lock, kj::mv(promise)).exclusiveJoin(kj::mv(timeout));
+      return context.awaitJs(lock, kj::mv(promise)).exclusiveJoin(kj::mv(timeout));
     },
         kj::mv(inputLock));
   })

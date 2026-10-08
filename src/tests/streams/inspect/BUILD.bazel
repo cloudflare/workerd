@@ -7,11 +7,13 @@ load("//:build/wd_test.bzl", "wd_test")
 inspect_suite_srcs = glob(["*.js"]) + ["inspect-modules.capnp"]
 
 wd_test(
+    size = "large",
     src = "inspect-cpp.wd-test",
     data = inspect_suite_srcs,
 )
 
 wd_test(
+    size = "large",
     src = "inspect-ts.wd-test",
     args = ["--experimental"],
     data = inspect_suite_srcs,

@@ -8,13 +8,13 @@ git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "g
 bazel_dep(name = "abseil-cpp", version = "20260817.0")
 
 # apple_support
-bazel_dep(name = "apple_support", version = "2.8.4")
+bazel_dep(name = "apple_support", version = "2.9.1")
 
 # aspect_rules_esbuild
 bazel_dep(name = "aspect_rules_esbuild", version = "0.27.1")
 
 # aspect_rules_js
-bazel_dep(name = "aspect_rules_js", version = "3.4.1")
+bazel_dep(name = "aspect_rules_js", version = "3.5.0")
 
 # aspect_rules_ts
 bazel_dep(name = "aspect_rules_ts", version = "3.10.1")
@@ -67,7 +67,7 @@ use_repo(http, "clang_tidy_linux_arm64")
 git_repository(
     name = "llvm_runtimes",
     build_file = "@workerd//:build/BUILD.llvm-runtimes",
-    commit = "ca7933e47d3a3451d81e72ac174dcb5aa28b59d1",
+    commit = "85ac560262434c9ccfc0c183ec22d4138ed647fb",
     remote = "https://github.com/llvm/llvm-project.git",
     sparse_checkout_patterns = [
         "cmake",
@@ -101,10 +101,17 @@ bazel_dep(name = "rules_nodejs", version = "6.7.5")
 bazel_dep(name = "rules_oci", version = "2.3.0")
 
 # rules_python
-bazel_dep(name = "rules_python", version = "2.3.3")
+bazel_dep(name = "rules_python", version = "2.3.4")
 
 # rules_rust
 bazel_dep(name = "rules_rust", version = "0.74.0")
+single_version_override(
+    module_name = "rules_rust",
+    patch_strip = 1,
+    patches = [
+        "//:patches/rules_rust/0001-Propagate-coverage-info-through-link_deps.patch",
+    ],
+)
 
 # rules_shell
 bazel_dep(name = "rules_shell", version = "0.8.0")

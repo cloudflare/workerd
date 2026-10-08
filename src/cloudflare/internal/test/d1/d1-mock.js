@@ -46,34 +46,29 @@ export class D1MockDO extends DurableObject {
   }
 
   async query(params) {
-    const results = params.queries.map((query) => {
-      try {
-        return this.runQuery(query, 'ROWS_AND_COLUMNS');
-      } catch (e) {
-        // Reproduce the production behavior by catching any error and returning a V4Failure
-        return {
-          success: false,
-          error: String(e instanceof Error ? e.message : e),
-        };
-      }
-    });
-    const failure = results.find((result) => !result.success);
-    if (failure) {
-      return { success: false, error: new Error(failure.error) };
-    }
-
     return {
-      success: true,
-      results: {
-        queryResults: results.map((result) => ({
-          meta: result.meta,
-          data: {
-            kind: 'raw',
-            columns: result.results.columns,
-            rows: result.results.rows,
-          },
-        })),
-      },
+      results: params.queries.map((query, queryIndex) => {
+        try {
+          const result = this.runQuery(query, 'ROWS_AND_COLUMNS');
+          return {
+            meta: result.meta,
+            data: {
+              kind: 'raw',
+              columns: result.results.columns,
+              rows: result.results.rows,
+            },
+          };
+        } catch (cause) {
+          // Keep the SQL error as the cause. Add metadata for the RPC tests.
+          // The tests check that both fields reach the caller.
+          // This metadata is test data, not the D1 error contract.
+          const message =
+            cause instanceof Error ? cause.message : String(cause);
+          const error = new Error(message, { cause });
+          error.metadata = { code: 'D1_TEST_ERROR', queryIndex };
+          throw error;
+        }
+      }),
     };
   }
 
@@ -144,34 +139,34 @@ export default {
   commitTokensReceived: [],
   commitTokensReturned: [],
   nextTokenExpected: null,
+  nextResponseLegacy: false,
 
   async query(params, env) {
+    const legacyResponse = this.nextResponseLegacy;
+    this.nextResponseLegacy = false;
     this.commitTokensReceived.push(params.bookmark ?? null);
 
+    const stub = env.db.get(env.db.idFromName('test'));
+    let response;
     try {
-      const stub = env.db.get(env.db.idFromName('test'));
-      const queryResult = await stub.query(params);
-      if (!queryResult.success) {
-        return queryResult;
+      response = await stub.query(params);
+    } catch (error) {
+      if (legacyResponse) {
+        return { success: false, error };
       }
-
-      const results = {
-        queryResults: queryResult.results.queryResults,
-      };
-      if (params.bookmark) {
-        results.bookmark = this.nextCommitToken();
-      }
-
-      return {
-        success: true,
-        results,
-      };
-    } catch (err) {
-      return {
-        success: false,
-        error: err instanceof Error ? err : new Error(String(err)),
-      };
+      throw error;
     }
+    if (params.bookmark) {
+      response.bookmark = this.nextCommitToken();
+    }
+    if (legacyResponse) {
+      const results = { queryResults: response.results };
+      if (response.bookmark !== undefined) {
+        results.bookmark = response.bookmark;
+      }
+      return { success: true, results };
+    }
+    return response;
   },
 
   async fetch(request, env, ctx) {
@@ -245,11 +240,17 @@ export default {
         this.nextTokenExpected = new URL(request.url).searchParams.get('t');
         return respondTokens();
 
+      case '/commitTokens/legacyResponse':
+        // Only the next RPC query uses the legacy response envelope.
+        this.nextResponseLegacy = true;
+        return respondTokens();
+
       case '/commitTokens/reset':
         this.commitTokensReceived = [];
         this.commitTokensReturned = [];
         this.commitTokenNum = 0;
         this.nextTokenExpected = null;
+        this.nextResponseLegacy = false;
         return respondTokens();
 
       default:

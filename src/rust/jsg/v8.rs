@@ -29,6 +29,11 @@
 //! drop, `wrappable_remove_strong_ref()` handles GC cleanup via `maybeDeferDestruction()`,
 //! then the `WrappableRc` drop decrements the `kj::Rc` refcount.
 
+#![allow(
+    unsafe_code,
+    reason = "wraps raw V8 handles and the FFI that operates on them"
+)]
+
 use std::any::TypeId;
 use std::cell::UnsafeCell;
 use std::fmt::Display;
@@ -45,7 +50,10 @@ use crate::Lock;
 use crate::Nullable;
 use crate::Number;
 use crate::Resource;
-#[expect(clippy::missing_safety_doc)]
+#[expect(
+    clippy::missing_safety_doc,
+    reason = "bridge declarations of raw V8 FFI functions; their contracts are V8's own"
+)]
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
 pub mod ffi {
     #[derive(Debug)]
@@ -1003,6 +1011,7 @@ impl BackingStore {
     /// `ptr` must be a non-zero value returned by one of the
     /// `local_*_get_backing_store` FFI functions, and the caller must transfer
     /// unique ownership to this `BackingStore`.
+    #[expect(clippy::expect_used, reason = "the caller guarantees a non-zero `ptr`")]
     unsafe fn from_raw(ptr: usize) -> Self {
         Self {
             ptr: NonZeroUsize::new(ptr).expect("backing_store pointer must be non-null"),
@@ -2451,6 +2460,10 @@ impl<'a, T> MaybeLocal<'a, T> {
     /// # Panics
     ///
     /// Panics if the `MaybeLocal` is empty.
+    #[expect(
+        clippy::expect_used,
+        reason = "panicking on an empty handle is this method's contract, as with `Option::unwrap`"
+    )]
     pub fn unwrap(self, lock: &mut crate::Lock) -> Local<'a, T> {
         self.into_option(lock).expect("MaybeLocal is empty")
     }
@@ -3267,7 +3280,10 @@ impl ffi::TraitObjectPtr {
     ///
     /// # Safety
     /// The original object must still be alive for lifetime `'a`.
-    #[expect(clippy::needless_lifetimes)]
+    #[expect(
+        clippy::needless_lifetimes,
+        reason = "the safety contract refers to the lifetime by name"
+    )]
     unsafe fn as_gc_ref<'a>(&'a self) -> &'a dyn GarbageCollected {
         // SAFETY: transmuting [data, vtable] back into a fat pointer.
         unsafe {

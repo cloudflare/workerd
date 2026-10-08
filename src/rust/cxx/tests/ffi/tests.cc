@@ -319,10 +319,25 @@ c_roundtrip_shared_with_multiple_kj_owns(SharedWithMultipleKjOwns shared) {
   return shared;
 }
 
+template <typename Target, typename Counter> struct ProjectionOwner {
+  Counter drop_count;
+  mutable Target target;
+
+  ProjectionOwner(size_t n, Counter drop_count)
+      : drop_count(kj::mv(drop_count)), target(n) {}
+  ~ProjectionOwner() { drop_count->set(drop_count->get() + 1); }
+};
+
 kj::Rc<RcC> c_return_kj_rc(size_t n) { return kj::rc<RcC>(n); }
 
 kj::Rc<NonRefcountedRcC> c_return_non_refcounted_kj_rc(size_t n) {
   return kj::rc<NonRefcountedRcC>(n);
+}
+
+kj::Rc<NonRefcountedRcC> c_return_projected_kj_rc(size_t n, kj::Rc<RcC> drop_count) {
+  using Owner = ProjectionOwner<NonRefcountedRcC, kj::Rc<RcC>>;
+  return kj::rc<Owner>(n, kj::mv(drop_count)).project(
+      [](Owner &owner) -> NonRefcountedRcC & { return owner.target; });
 }
 
 size_t c_take_non_refcounted_kj_rc_by_ref(const kj::Rc<NonRefcountedRcC> &rc) {
@@ -384,6 +399,12 @@ kj::Arc<ArcC> c_return_kj_arc(size_t n) { return kj::arc<ArcC>(n); }
 
 kj::Arc<NonAtomicArcC> c_return_non_atomic_kj_arc(size_t n) {
   return kj::arc<NonAtomicArcC>(n);
+}
+
+kj::Arc<NonAtomicArcC> c_return_projected_kj_arc(size_t n, kj::Arc<ArcC> drop_count) {
+  using Owner = ProjectionOwner<NonAtomicArcC, kj::Arc<ArcC>>;
+  return kj::arc<Owner>(n, kj::mv(drop_count)).project(
+      [](const Owner &owner) -> NonAtomicArcC & { return owner.target; });
 }
 
 size_t c_take_non_atomic_kj_arc_by_ref(const kj::Arc<NonAtomicArcC> &arc) {

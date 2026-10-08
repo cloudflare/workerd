@@ -154,6 +154,7 @@ fn test_kj_rc_in_shared_struct() {
     assert!(header.contains("::kj::Rc<::Thing> first;"));
     assert!(header.contains("::kj::Rc<::Thing> second;"));
     assert!(header.contains("kj-rs/kj-rs.h"));
+    assert!(implementation.contains("static_assert(!::kj::isPointerType<::Thing>()"));
     let expected = "::rust::ManuallyDrop<::Holder> holder$(::std::move(holder));";
     assert!(implementation.contains(expected));
 }
@@ -172,6 +173,7 @@ fn test_kj_arc_in_shared_struct() {
     assert!(
         implementation.contains("static_assert(sizeof(::kj::Arc<::Thing>) == 2 * sizeof(void *)")
     );
+    assert!(implementation.contains("static_assert(!::kj::isPointerType<::Thing>()"));
     assert!(!implementation.contains("is_base_of<::kj::AtomicRefcounted"));
     assert!(!implementation.contains("cxxbridge1$kj_rs$arc$"));
     let expected = "::rust::ManuallyDrop<::Holder> holder$(::std::move(holder));";

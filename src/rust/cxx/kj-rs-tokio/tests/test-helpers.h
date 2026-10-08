@@ -1,5 +1,7 @@
 #pragma once
 
+#include "kj-rs-tokio/tokio-event-port.h"
+
 #include <kj/async.h>
 
 namespace kj_rs_tokio_test {
@@ -15,13 +17,16 @@ kj::Promise<void> kjTimerDelay(uint64_t ms);
 kj::Promise<void> kjNeverPromise();
 
 // Re-enters promise.wait() on the test's current WaitScope (installed by the C++ test). From a
-// spawned task this nests block_on inside the port's block_on; the failure must surface as a
-// kj::Exception (which the bridge turns into a Rust Err), never an abort.
+// spawned task this is a wait() inside the loop's wait(), which KJ refuses; the failure must
+// surface as a kj::Exception (which the bridge turns into a Rust Err), never an abort.
 void nestedWait();
 
 // Fulfills the kj::PromiseFulfiller<int> the current C++ test installed (setTestFulfiller).
 // Called from a spawned tokio task while the loop is parked: arms a KJ event by a means other than
 // a bridged waker.
 void fulfillTestFulfiller(int32_t value);
+
+// Blocks in promise.wait() on `context`'s WaitScope until a timer of `ms` on its kj::Timer fires.
+void waitForTimer(kj_rs_tokio::TokioAsyncIoContext &context, uint64_t ms);
 
 }  // namespace kj_rs_tokio_test

@@ -47,5 +47,31 @@ KJ_TEST("JS queued before abort() does not run after it") {
   fixture.drainAndDestroy(kj::mv(request));
 }
 
+KJ_TEST("abort notifies current and future observers") {
+  TestFixture fixture;
+  auto request = fixture.newIncomingRequest();
+  auto& context = request->getContext();
+  auto& waitScope = fixture.getWaitScope();
+
+  auto canceled = context.onAbort();
+  canceled = nullptr;
+  auto first = context.onAbort();
+  auto second = context.onAbort();
+
+  context.abort(KJ_EXCEPTION(FAILED, "first abort reason"));
+  context.abort(KJ_EXCEPTION(FAILED, "ignored abort reason"));
+
+  KJ_EXPECT_THROW_MESSAGE("first abort reason", first.wait(waitScope));
+  KJ_EXPECT_THROW_MESSAGE("first abort reason", second.wait(waitScope));
+  KJ_EXPECT_THROW_MESSAGE("first abort reason", context.onAbort().wait(waitScope));
+  KJ_IF_SOME(reason, context.getAbortReason()) {
+    KJ_EXPECT(reason.getDescription().contains("first abort reason"_kj));
+  } else {
+    KJ_FAIL_ASSERT("abort reason was not retained");
+  }
+
+  fixture.drainAndDestroy(kj::mv(request));
+}
+
 }  // namespace
 }  // namespace workerd

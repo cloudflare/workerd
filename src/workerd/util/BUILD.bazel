@@ -282,13 +282,6 @@ wd_cc_library(
 )
 
 wd_cc_library(
-    name = "own-util",
-    hdrs = ["own-util.h"],
-    visibility = ["//visibility:public"],
-    deps = ["@capnp-cpp//src/kj"],
-)
-
-wd_cc_library(
     name = "sentry",
     srcs = ["sentry.c++"],
     hdrs = ["sentry.h"],

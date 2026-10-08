@@ -3269,6 +3269,16 @@ export const testImageOverride = {
   },
 };
 
+export const testImageAlias = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testImageAlias')
+    );
+    const stub = env.MY_CONTAINER.get(id);
+    await stub.testImageAlias();
+  },
+};
+
 export const testInstanceTypeValidation = {
   async test(_ctrl, env) {
     const id = env.MY_CONTAINER.idFromName(

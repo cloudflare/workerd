@@ -26,6 +26,9 @@ expectTypeOf(cache).toEqualTypeOf<CacheContext>();
 expectTypeOf(cache.purge).toEqualTypeOf<
   (options: CachePurgeOptions) => Promise<CachePurgeResult>
 >();
+expectTypeOf(cache.invalidate).toEqualTypeOf<
+  (options: CachePurgeOptions) => Promise<CachePurgeResult>
+>();
 
 type TestType = {
   fieldString: string;
@@ -159,6 +162,8 @@ class TestEntrypoint extends WorkerEntrypoint<Env, Props> {
     counter: RpcStub<TestCounter>,
     _map: Map<RpcStub<TestCounter>, RpcStub<TestCounter>>,
     _set: Set<RpcStub<TestCounter>>,
+    _readonlyMap: ReadonlyMap<RpcStub<TestCounter>, RpcStub<TestCounter>>,
+    _readonlySet: ReadonlySet<RpcStub<TestCounter>>,
     _array: Array<RpcStub<TestCounter>>,
     _readonlyArray: ReadonlyArray<RpcStub<TestCounter>>,
     _object: { a: { b: RpcStub<TestCounter> } }
@@ -216,6 +221,8 @@ class TestEntrypoint extends WorkerEntrypoint<Env, Props> {
       RegExp: /abc/,
       Map: new Map([['a', 1]]),
       Set: new Set(['a']),
+      ReadonlyMap: new Map([['a', 1]]) as ReadonlyMap<string, number>,
+      ReadonlySet: new Set(['a']) as ReadonlySet<string>,
       Array: [1, 2, 3],
       ReadonlyArray: [4, 5, 6] as const,
       Object: { a: { b: 1 } },
@@ -231,6 +238,10 @@ class TestEntrypoint extends WorkerEntrypoint<Env, Props> {
     return {
       Map: new Map([[new TestCounter(), new TestCounter()]]),
       Set: new Set([new TestCounter()]),
+      ReadonlyMap: new Map([
+        [new TestCounter(), new TestCounter()],
+      ]) as ReadonlyMap<TestCounter, TestCounter>,
+      ReadonlySet: new Set([new TestCounter()]) as ReadonlySet<TestCounter>,
       Array: [new TestCounter()],
       ReadonlyArray: [new TestCounter()] as const,
       Object: { a: { b: new TestCounter() } },
@@ -441,6 +452,17 @@ interface Env {
   // @ts-expect-error `TestEntrypoint` is a `WorkerEntrypoint`, not a `DurableObject`
   __INVALID_OBJECT_2: DurableObjectNamespace<TestEntrypoint>;
 }
+
+type TestWorkflowParams = {foo: string};
+
+export class TestWorkflowEntrypoint extends CloudflareWorkersModule.WorkflowEntrypoint<
+  Env,
+  TestWorkflowParams
+> {}
+
+expectTypeOf<
+  LoopbackForExport<typeof TestWorkflowEntrypoint>
+>().toEqualTypeOf<Workflow<TestWorkflowParams>>();
 
 export default <ExportedHandler<Env>>{
   async fetch(_request, env, _ctx) {
@@ -691,6 +713,12 @@ export default <ExportedHandler<Env>>{
         Map<RpcStub<TestCounter>, RpcStub<TestCounter>>
       >();
       expectTypeOf(ecs.Set).toEqualTypeOf<Set<RpcStub<TestCounter>>>();
+      expectTypeOf(ecs.ReadonlyMap).toEqualTypeOf<
+        ReadonlyMap<RpcStub<TestCounter>, RpcStub<TestCounter>>
+      >();
+      expectTypeOf(ecs.ReadonlySet).toEqualTypeOf<
+        ReadonlySet<RpcStub<TestCounter>>
+      >();
       expectTypeOf(ecs.Array).toEqualTypeOf<Array<RpcStub<TestCounter>>>();
       expectTypeOf(ecs.ReadonlyArray).toEqualTypeOf<
         ReadonlyArray<RpcStub<TestCounter>>
@@ -730,6 +758,8 @@ export default <ExportedHandler<Env>>{
           counter: TestCounter,
           map: Map<TestCounter, TestCounter>,
           set: Set<TestCounter>,
+          readonlyMap: ReadonlyMap<TestCounter, TestCounter>,
+          readonlySet: ReadonlySet<TestCounter>,
           array: Array<TestCounter>,
           readonlyArray: ReadonlyArray<TestCounter>,
           object: { a: { b: TestCounter } }
@@ -1318,9 +1348,42 @@ expectTypeOf(withoutSchedule.schedule).toEqualTypeOf<
   WorkflowCronSchedule | undefined
 >();
 
-declare const workflow: Workflow;
+declare const workflow: Workflow<WorkflowPayload>;
 declare const workflowInstance: WorkflowInstance;
 expectTypeOf(workflowInstance.delete()).toEqualTypeOf<Promise<void>>();
+expectTypeOf(
+  workflow.createBatch({
+    count: 2,
+    params: {foo: 'bar'},
+    retention: {successRetention: '1 day'},
+    locationHint: 'weur',
+  })
+).toEqualTypeOf<Promise<WorkflowBatchCreateResult>>();
+expectTypeOf(
+  workflow.createBatch({instances: [{id: 'one', params: {foo: 'bar'}}]})
+).toEqualTypeOf<Promise<WorkflowBatchCreateResult>>();
+expectTypeOf(
+  workflow.createBatch([{id: 'one', params: {foo: 'bar'}}])
+).toEqualTypeOf<Promise<WorkflowInstance[]>>();
+expectTypeOf<WorkflowBatchCreateResult['created'][number]>().toEqualTypeOf<
+  WorkflowInstance
+>();
+expectTypeOf<WorkflowBatchCreateResult['errors'][number]>().toEqualTypeOf<{
+  index: number;
+  id?: string;
+  code: number;
+  message: string;
+}>();
+
+// @ts-expect-error count and instances are mutually exclusive
+workflow.createBatch({count: 1, instances: []});
+
+// @ts-expect-error batch params must match the Workflow generic
+workflow.createBatch({count: 1, params: {foo: 1}});
+
+// @ts-expect-error per-instance params must match the Workflow generic
+workflow.createBatch({instances: [{id: 'one', params: {foo: 1}}]});
+
 expectTypeOf(workflow.deleteBatch(['one', 'two'])).toEqualTypeOf<
   Promise<WorkflowBatchDeleteResult>
 >();

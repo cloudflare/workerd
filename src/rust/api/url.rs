@@ -32,7 +32,7 @@ impl From<UrlError> for jsg::Error {
 ///
 /// # Errors
 /// `UrlError::ParseFailed` if the placeholder URL fails to parse (should never
-/// happen in practice — it mirrors the `JSG_REQUIRE` in the C++ implementation).
+/// happen in practice).
 fn get_hostname(domain: &str) -> Result<Option<String>, UrlError> {
     if domain.is_empty() {
         return Ok(None);
@@ -105,19 +105,17 @@ impl UrlUtil {
 
         if !auth {
             // Clearing both the username and the password removes the userinfo
-            // section entirely, matching the C++ implementation which assigns
-            // empty strings to both fields. The setters can refuse on URLs that
-            // cannot have credentials, in which case there is nothing to clear.
+            // section entirely. The setters can refuse on URLs that cannot have
+            // credentials, in which case there is nothing to clear.
             let _ = out.set_username(Some(""));
             let _ = out.set_password(Some(""));
         }
 
         if unicode && out.has_hostname() {
-            // The C++ implementation assigns the IDNA Unicode form directly to
-            // the host field, bypassing the host parser which would otherwise
-            // re-encode it back to ASCII/punycode for special schemes. The Rust
-            // binding only exposes parser-backed setters, so we instead splice
-            // the Unicode hostname into the serialized href.
+            // The IDNA Unicode form must bypass the host parser, which would
+            // otherwise re-encode it back to ASCII/punycode for special schemes.
+            // The Rust binding only exposes parser-backed setters, so we instead
+            // splice the Unicode hostname into the serialized href.
             //
             // `host_end` reliably marks the end of the (ASCII/punycode) host in
             // the href, but `host_start` from `components()` points at the `@`
@@ -149,9 +147,7 @@ impl UrlUtil {
         Ok(out.href().to_owned())
     }
 
-    // We return an empty string if the input is not a valid IP address. This
-    // mirrors `workerd::rust::net::canonicalize_ip`, reimplemented here to avoid
-    // a cross-crate FFI dependency now that the caller is itself Rust.
+    // We return an empty string if the input is not a valid IP address.
     #[jsg_method(name = "canonicalizeIp")]
     pub fn canonicalize_ip(&self, input: String) -> String {
         IpAddr::from_str(&input).map_or(String::new(), |ip| ip.to_string())
@@ -159,160 +155,5 @@ impl UrlUtil {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_domain_to_ascii() {
-        let util = UrlUtil {};
-        assert_eq!(util.domain_to_ascii(String::new()).unwrap(), "");
-        assert_eq!(
-            util.domain_to_ascii("español.com".to_owned()).unwrap(),
-            "xn--espaol-zwa.com"
-        );
-        assert_eq!(
-            util.domain_to_ascii("理容ナカムラ.com".to_owned()).unwrap(),
-            "xn--lck1c3crb1723bpq4a.com"
-        );
-    }
-
-    #[test]
-    fn test_domain_to_unicode() {
-        let util = UrlUtil {};
-        assert_eq!(util.domain_to_unicode(String::new()).unwrap(), "");
-        assert_eq!(
-            util.domain_to_unicode("xn--espaol-zwa.com".to_owned())
-                .unwrap(),
-            "español.com"
-        );
-        assert_eq!(
-            util.domain_to_unicode("xn--lck1c3crb1723bpq4a.com".to_owned())
-                .unwrap(),
-            "理容ナカムラ.com"
-        );
-    }
-
-    #[test]
-    fn test_to_ascii() {
-        let util = UrlUtil {};
-        assert_eq!(
-            util.to_ascii("meßagefactory.ca".to_owned()),
-            "xn--meagefactory-m9a.ca"
-        );
-    }
-
-    #[test]
-    fn test_format_strips_components() {
-        let util = UrlUtil {};
-        let href = "http://user:pass@example.com/a?b=c#d".to_owned();
-
-        // Everything kept.
-        assert_eq!(
-            util.format(href.clone(), true, false, true, true).unwrap(),
-            "http://user:pass@example.com/a?b=c#d"
-        );
-        // Drop hash.
-        assert_eq!(
-            util.format(href.clone(), false, false, true, true).unwrap(),
-            "http://user:pass@example.com/a?b=c"
-        );
-        // Drop search.
-        assert_eq!(
-            util.format(href.clone(), true, false, false, true).unwrap(),
-            "http://user:pass@example.com/a#d"
-        );
-        // Drop auth.
-        assert_eq!(
-            util.format(href, true, false, true, false).unwrap(),
-            "http://example.com/a?b=c#d"
-        );
-    }
-
-    #[test]
-    fn test_format_unicode() {
-        let util = UrlUtil {};
-        // Unicode hostname must survive serialization for a special (http) scheme.
-        assert_eq!(
-            util.format(
-                "http://user:pass@xn--lck1c3crb1723bpq4a.com/a?a=b#c".to_owned(),
-                true,
-                true,
-                true,
-                true
-            )
-            .unwrap(),
-            "http://user:pass@理容ナカムラ.com/a?a=b#c"
-        );
-        // Port is preserved when splicing the unicode hostname.
-        assert_eq!(
-            util.format(
-                "http://user:pass@xn--0zwm56d.com:8080/path".to_owned(),
-                true,
-                true,
-                true,
-                true
-            )
-            .unwrap(),
-            "http://user:pass@测试.com:8080/path"
-        );
-    }
-
-    #[test]
-    fn test_format_unicode_ipv6() {
-        let util = UrlUtil {};
-        // IPv6 literals are bracketed in the href but `hostname()` strips the
-        // brackets. The unicode splice must preserve the brackets (and the
-        // trailing port) rather than corrupting the address.
-        assert_eq!(
-            util.format(
-                "http://[2001:db8::1]:8080/path".to_owned(),
-                true,
-                true,
-                true,
-                true
-            )
-            .unwrap(),
-            "http://[2001:db8::1]:8080/path"
-        );
-        // IPv6 with credentials (so `host_start` from components points at `@`).
-        assert_eq!(
-            util.format(
-                "http://user:pass@[::1]/path".to_owned(),
-                true,
-                true,
-                true,
-                true
-            )
-            .unwrap(),
-            "http://user:pass@[::1]/path"
-        );
-    }
-
-    #[test]
-    fn test_format_invalid() {
-        let util = UrlUtil {};
-        assert!(
-            util.format("not a url".to_owned(), true, false, true, true)
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn test_canonicalize_ip() {
-        let util = UrlUtil {};
-        // Already-canonical IPv4 is returned unchanged.
-        assert_eq!(
-            util.canonicalize_ip("192.168.1.1".to_owned()),
-            "192.168.1.1"
-        );
-        // IPv6 is canonicalized (zero-compressed / lower-cased).
-        assert_eq!(
-            util.canonicalize_ip("2001:0DB8:0000:0000:0000:0000:0000:0001".to_owned()),
-            "2001:db8::1"
-        );
-        // Invalid input (including leading-zero IPv4 octets, which Rust's
-        // IpAddr parser rejects) yields an empty string.
-        assert_eq!(util.canonicalize_ip("192.168.000.001".to_owned()), "");
-        assert_eq!(util.canonicalize_ip("not-an-ip".to_owned()), "");
-    }
-}
+#[path = "url-test.rs"]
+mod tests;

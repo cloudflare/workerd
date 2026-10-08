@@ -5,9 +5,9 @@
 extern "C" {
 
 // The `rc` / `arc` inputs point to Rust `kj_rs::repr::KjRc<T>` / `KjArc<T>` values, which mirror
-// `kj::Rc<T>` / `kj::Arc<T>` as two raw pointers: first the refcount control object, then the `T*`
-// pointee. The helpers below only inspect or mutate the control pointer/refcount; they do not
-// dereference the `T*` pointee.
+// `kj::Rc<T>` / `kj::Arc<T>` for ordinary objects as two raw pointers: first the `T*` pointee,
+// then the refcount owner. The helpers below only inspect or mutate the owner's refcount; they
+// do not dereference the pointee. KJ pointer types, which are stored inline, are not supported.
 
 // Returns whether the input `kj::Rc<T>` has more than one outstanding reference.
 bool cxxbridge$kjrs$rc$is_shared(const void* rc);

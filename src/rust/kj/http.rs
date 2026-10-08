@@ -1,3 +1,8 @@
+#![allow(
+    unsafe_code,
+    reason = "holds a cxx bridge and wraps the C++ objects behind it"
+)]
+
 use std::marker::PhantomData;
 use std::pin::Pin;
 
@@ -12,7 +17,10 @@ use crate::io::AsyncInputStream;
 use crate::io::AsyncIoStream;
 
 #[cxx::bridge(namespace = "kj::rust")]
-#[expect(clippy::missing_safety_doc)]
+#[expect(
+    clippy::missing_safety_doc,
+    reason = "bridge declarations of raw KJ FFI functions; their contracts are KJ's own"
+)]
 pub mod ffi {
     unsafe extern "C++" {
         include!("workerd/rust/kj/ffi.h");
@@ -199,6 +207,8 @@ pub mod ffi {
     }
 
     impl Box<DynHttpService> {}
+    impl KjOwn<ConnectResponse> {}
+    impl KjOwn<HttpService> {}
 }
 
 assert_eq_size!(ffi::HttpConnectSettings, [u8; 16]);

@@ -1,3 +1,8 @@
+#![allow(
+    unsafe_code,
+    reason = "holds a cxx bridge, which expands to unsafe FFI glue"
+)]
+
 use std::pin::Pin;
 
 use kj_rs::KjOwn;
@@ -23,6 +28,12 @@ pub mod ffi {
             this_: Pin<&mut AsyncOutputStream>,
         ) -> Result<()>;
     }
+
+    // Dropping a `KjOwn` of these is generated here, where they are declared; the bridges that
+    // alias them cannot provide it.
+    impl KjOwn<AsyncInputStream> {}
+    impl KjOwn<AsyncIoStream> {}
+    impl KjOwn<AsyncOutputStream> {}
 }
 
 pub type AsyncInputStream = ffi::AsyncInputStream;

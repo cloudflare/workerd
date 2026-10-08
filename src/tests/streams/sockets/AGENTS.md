@@ -30,6 +30,7 @@ under C++, while TypeScript resolves the read done.
 | Test | Shape |
 | --- | --- |
 | `echoRoundTrip` | write ×2, half-close via writer.close(), drain echo to EOF |
+| `degenerateViewsWithHighWaterMark` | byte-counting writable (`highWaterMark`): detached/out-of-bounds typed-array and DataView views count and send nothing; the stream keeps writing |
 | `greetReadsToEof` | server-initiated EOF: greeting then done, tail read `{done: true, value: undefined}` |
 | `echoByobReads` | BYOB reader with recycled views over the socket readable, byte-exact |
 | `echoReadAtLeast` | readAtLeast accumulates across TCP fragmentation |
@@ -37,6 +38,7 @@ under C++, while TypeScript resolves the read done.
 | `pipeJsSourceToSocketWritable` | JS ReadableStream → socket writable, echo drained concurrently |
 | `pipeSocketThroughJsTransform` | socket → JS TransformStream → JS sink |
 | `pipeSocketToSocket` | greet socket's readable piped into the echo socket's writable |
+| `pipeSocketToSocketClosesSource` | the same native-to-native pipe leaves the source locked and (TS, via the interop closed-promise) closed at the start |
 | `pipeBehindUnawaitedWrite` | header write not awaited, writer released, Response body piped in: echo is header then body; both endpoints unlocked after the pipe |
 | `pipeBehindWriteBeforeStart` | the same within connect()'s turn, with the header still queued before the writable starts |
 | `cancelReadableSettlesSocket` | reader.cancel settles a pending peer read (C++ rejects; TS resolves done), then socket.close()/closed settle |

@@ -18,11 +18,13 @@ import type {
   UnderlyingDefaultSource,
   UnderlyingSource,
   WritableStream as WritableStreamType,
+  WritableStreamDefaultWriter as WritableStreamDefaultWriterType,
 } from './types';
 import type {
   ByteQueueEntry,
   ByteStreamConsumer as ByteStreamConsumerType,
   ByteStreamCursor as ByteStreamCursorType,
+  ErrorStreamCallback,
   PullIntoDescriptor,
   QueueCursor as QueueCursorType,
   StreamConsumer as StreamConsumerType,
@@ -40,7 +42,7 @@ const {
   ArrayBuffer,
   ArrayBufferPrototypeByteLengthGet,
   ArrayBufferPrototypeDetachedGet,
-  ArrayBufferPrototypeTransfer,
+  ArrayBufferPrototypeTransferToFixedLength,
   ArrayPrototypePush,
   AsyncIteratorPrototype,
   BigInt,
@@ -48,8 +50,6 @@ const {
   DataViewPrototypeGetBuffer,
   DataViewPrototypeGetByteLength,
   DataViewPrototypeGetByteOffset,
-  EventTargetAddEventListener,
-  EventTargetRemoveEventListener,
   JSONParse,
   MathMax,
   MathMin,
@@ -100,6 +100,7 @@ const {
   QueueCursor,
   ByteStreamCursor,
   CLOSE_SENTINEL,
+  cloneArrayBuffer,
   createReadResult,
 } = require('webstreams/queue');
 
@@ -108,6 +109,10 @@ const {
   kExtractNativeSink,
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
+
+import type { ViewExtentHelpers } from './view-extent';
+const { viewByteExtent } =
+  require('webstreams/view-extent') as ViewExtentHelpers;
 
 // The native backend (see the fence conventions in native.ts and
 // queue.ts). The cast restores the real shape the untyped loader erases,
@@ -227,7 +232,7 @@ let readableStreamCancel: <R>(
 let readableStreamPipeThroughTo: <R>(
   source: ReadableStream<R>,
   destination: WritableStreamType<R>,
-  options?: StreamPipeOptions
+  options: ConvertedPipeOptions
 ) => Promise<void>;
 let readableStreamPipeTo: <R>(
   source: ReadableStream<R>,
@@ -253,6 +258,26 @@ let readableStreamDefaultReaderRead: <R>(
   reader: ReadableStreamDefaultReaderType<R>,
   readRequest: ReadableStreamAsyncIteratorReadRequest<R>
 ) => void;
+
+// Closes a stream whose data has moved to another stream (extraction,
+// native detach, tee of a native stream or of a branch) and drops its
+// controller, so it neither reaches nor retains the moved source. Legacy
+// C++ leaves the same streams locked, disturbed and closed.
+let closeReadableStreamHusk: <R>(stream: ReadableStream<R>) => void;
+
+// Errors a queued tee branch alone (see [kControllerErrorFunction]).
+let readableStreamErrorBranch: <R>(
+  stream: ReadableStream<R>,
+  reason: unknown
+) => void;
+
+// A tee branch's byte cursor errors its branch alone.
+const errorTeeBranchFromCursor: ErrorStreamCallback = (e, owner) => {
+  if (owner !== undefined) {
+    readableStreamErrorBranch(owner as ReadableStream<unknown>, e);
+  }
+};
+
 let isReadableStream: (value: unknown) => boolean;
 let isByteStreamController: (value: unknown) => boolean;
 
@@ -357,17 +382,31 @@ let controllerOnReaderRelease: (
     | NativeReadableStreamControllerType
 ) => void;
 // A consumer of the controller's queue leaves it — cancelled, or errored
-// through the Node.js interop hook. Only the last one to leave cancels the
-// underlying source, with the reasons of every consumer that left (see
-// makeCompositeCancelReason); the others receive a promise that settles
-// with that cancel, or with undefined once the source has closed or errored
-// on its own (spec ReadableStreamTee's shared cancel promise). A native
-// controller has one consumer, so the leaving is its cancel.
+// alone before close is requested (controllerConsumerErrored). Only the last
+// one to leave cancels the underlying source, with the reasons of every
+// consumer that left (see makeCompositeCancelReason); the others receive a
+// promise that settles with that cancel, or with undefined once the source
+// has closed or errored on its own (spec ReadableStreamTee's shared cancel
+// promise). A native controller has one consumer, so the leaving is its
+// cancel.
 let controllerConsumerLeaving: (
   controller:
     | ReadableStreamDefaultControllerType
     | ReadableByteStreamControllerType
     | NativeReadableStreamControllerType,
+  reason: unknown,
+  isLastConsumer: boolean
+) => Promise<void>;
+// A consumer of a QUEUED controller's queue errors alone (see
+// readableStreamErrorBranch). Before close is requested it leaves as a
+// cancelled one does (controllerConsumerLeaving). Once close has been
+// requested the source has nothing more to produce, and an errored branch is
+// no cancel (the spec errors that branch's controller and never forwards it
+// to the source): it leaves without a reason, and if it was the last
+// consumer the source ends as when every consumer has drained.
+let controllerConsumerErrored: (
+  controller:
+    ReadableStreamDefaultControllerType | ReadableByteStreamControllerType,
   reason: unknown,
   isLastConsumer: boolean
 ) => Promise<void>;
@@ -408,6 +447,14 @@ let getControllerExpectedLength: (
     | ReadableByteStreamControllerType
     | NativeReadableStreamControllerType
 ) => bigint | undefined;
+let byteControllerEnqueueBatch: (
+  controller: ReadableByteStreamController,
+  chunks: ArrayBufferView[]
+) => void;
+let byteControllerSetConsumptionHook: (
+  controller: ReadableByteStreamController,
+  hook: (() => void) | undefined
+) => void;
 let setDefaultControllerExpectedLength: <R>(
   controller: ReadableStreamDefaultController<R>,
   length: bigint | undefined
@@ -449,7 +496,8 @@ let resolveGenericReaderPromise: (reader: object) => void;
 let rejectGenericReaderPromise: (reader: object, reason?: unknown) => void;
 interface ReadableStreamIteratorState<R> {
   done: boolean;
-  current?: Promise<IteratorResult<R>> | undefined;
+  // The ongoing promise: a next() result, or a return()'s steps.
+  current?: Promise<IteratorResult<R> | undefined> | undefined;
 }
 
 class ReadableStreamAsyncIteratorReadRequest<R> {
@@ -468,14 +516,14 @@ class ReadableStreamAsyncIteratorReadRequest<R> {
 
   chunk(chunk: R) {
     this.#state.current = undefined;
-    this.#promise.resolve(createReadResult(chunk, false));
+    this.#promise.resolve(userReadResult(chunk, false));
   }
 
   close() {
     this.#state.current = undefined;
     this.#state.done = true;
     readableStreamReaderGenericRelease(this.#reader);
-    this.#promise.resolve(createReadResult(undefined, true));
+    this.#promise.resolve(userReadResult(undefined, true));
   }
 
   error(error: unknown) {
@@ -494,7 +542,6 @@ interface IteratorInternalState {
   reader: ReadableStreamDefaultReaderType;
   preventCancel: boolean;
   state: ReadableStreamIteratorState<unknown>;
-  started: boolean;
 }
 
 const iteratorStateMap = new SafeWeakMap() as WeakMap<
@@ -502,20 +549,14 @@ const iteratorStateMap = new SafeWeakMap() as WeakMap<
   IteratorInternalState
 >;
 
-function getIteratorState(iter: object): IteratorInternalState {
-  const s = iteratorStateMap.get(iter);
-  if (s === undefined) {
-    throw new TypeError('Illegal invocation');
-  }
-  return s;
-}
-
 function iteratorNextSteps(s: IteratorInternalState) {
   if (s.state.done) {
-    return PromiseResolve(createReadResult(undefined, true));
+    return PromiseResolve(userReadResult(undefined, true));
   }
   if (!isReaderBoundToStream(s.reader)) {
-    throw new TypeError('The reader is not bound to a ReadableStream');
+    return PromiseReject(
+      new TypeError('The reader is not bound to a ReadableStream')
+    );
   }
   const promise = PromiseWithResolvers();
   readableStreamDefaultReaderRead(
@@ -525,34 +566,44 @@ function iteratorNextSteps(s: IteratorInternalState) {
   return promise.promise;
 }
 
-async function iteratorReturnSteps(s: IteratorInternalState, value: unknown) {
+// WebIDL's returnSteps: an already-finished iterator resolves with its own
+// result object; otherwise the stream's return algorithm runs, whose
+// promise settles with undefined. return() builds the caller's result.
+function iteratorReturnSteps(
+  s: IteratorInternalState,
+  value: unknown
+): Promise<IteratorResult<unknown> | undefined> {
   if (s.state.done) {
-    return createReadResult(value, true);
+    return PromiseResolve(userReadResult(value, true));
   }
   s.state.done = true;
 
   if (!isReaderBoundToStream(s.reader)) {
-    throw new TypeError('The reader is not bound to a ReadableStream');
+    return PromiseReject(
+      new TypeError('The reader is not bound to a ReadableStream')
+    );
   }
 
   if (!s.preventCancel) {
     const result = readableStreamReaderGenericCancel(s.reader, value);
     readableStreamReaderGenericRelease(s.reader);
-    await result;
-    return createReadResult(value, true);
+    return result as Promise<undefined>;
   }
 
   readableStreamReaderGenericRelease(s.reader);
-  return createReadResult(value, true);
+  return PromiseResolve(undefined);
 }
 
+// WebIDL: next() and return() called on anything but one of these
+// iterators return a rejected promise rather than throwing, and a call with
+// no ongoing promise runs its steps at once, so the first next() reads (and
+// pulls) synchronously.
 const ReadableStreamAsyncIteratorPrototype = ObjectSetPrototypeOf(
   {
     next(this: object) {
-      const s = getIteratorState(this);
-      if (!s.started) {
-        s.state.current = PromiseResolve();
-        s.started = true;
+      const s = iteratorStateMap.get(this);
+      if (s === undefined) {
+        return PromiseReject(new TypeError('Illegal invocation'));
       }
       s.state.current =
         s.state.current !== undefined
@@ -566,8 +617,10 @@ const ReadableStreamAsyncIteratorPrototype = ObjectSetPrototypeOf(
     },
 
     return(this: object, error: unknown) {
-      const s = getIteratorState(this);
-      s.started = true;
+      const s = iteratorStateMap.get(this);
+      if (s === undefined) {
+        return PromiseReject(new TypeError('Illegal invocation'));
+      }
       s.state.current =
         s.state.current !== undefined
           ? PromisePrototypeThen(
@@ -576,7 +629,11 @@ const ReadableStreamAsyncIteratorPrototype = ObjectSetPrototypeOf(
               () => iteratorReturnSteps(s, error)
             )
           : iteratorReturnSteps(s, error);
-      return s.state.current;
+      // Unlike next(), the caller gets a separate promise chained on the
+      // ongoing one.
+      return PromisePrototypeThen(s.state.current, () =>
+        userReadResult(error, true)
+      );
     },
 
     [SymbolAsyncIterator](this: object) {
@@ -585,6 +642,13 @@ const ReadableStreamAsyncIteratorPrototype = ObjectSetPrototypeOf(
   },
   AsyncIteratorPrototype
 );
+ObjectDefineProperty(ReadableStreamAsyncIteratorPrototype, SymbolToStringTag, {
+  __proto__: null,
+  value: 'ReadableStream AsyncIterator',
+  writable: false,
+  enumerable: false,
+  configurable: true,
+});
 // ---- end async iterator prototype ------------------------------------------
 
 class ReadableStreamReaderBase<R> {
@@ -759,7 +823,7 @@ function readBufferedSync<R>(
 }
 
 // The pipe's synchronous read: the next buffered chunk, taken whole as a
-// drain takes it (no autoAllocateChunkSize copy). Only for a readable
+// default read takes it. Only for a readable
 // stream; the pump's shutdown checks establish that. Undefined when the
 // read would wait or fail; defaultReaderReadInternal handles those.
 function pipeReadBuffered<R>(
@@ -777,17 +841,21 @@ function pipeReadBuffered<R>(
   );
 }
 
-// The default-read core, shared by ReadableStreamDefaultReader.read() and
-// the async-iterator read path. Internal callers MUST use this rather than
-// the public read() — reader prototypes end up user-reachable, so internal
-// dispatch through them would be interceptable.
+// The default-read steps (spec ReadableStreamDefaultReaderRead and the
+// controller's PullSteps) with a promise as the read request. The promise
+// settles in the call that answers the read: here, or inside the enqueue(),
+// close() or delivery that fulfills it, after the read's completion steps
+// (so reader.closed resolves first, as in spec ReadableStreamClose).
+// `present` turns the backend's result into the one the promise settles
+// with: as is for internal readers, a plain copy for the user's.
 //
 // BACKEND-BLIND: this function programs against StreamConsumer and must
 // never branch on the backend. (The autoAllocate check below is the ONE
 // sanctioned queued-byte-specific check — see the marker.)
-function defaultReaderReadInternal<R>(
+function defaultReaderReadSteps<R>(
   reader: object,
-  stream: ReadableStream<R>
+  stream: ReadableStream<R>,
+  present: (result: ReadableStreamReadResult<R>) => ReadableStreamReadResult<R>
 ): Promise<ReadableStreamReadResult<R>> {
   if (isReadableStreamPendingClosure(stream)) {
     return PromiseReject(pendingClosureError()) as Promise<
@@ -796,82 +864,118 @@ function defaultReaderReadInternal<R>(
   }
   setReadableStreamDisturbed(stream);
   const state = getReadableStreamGetState(stream);
-  if (state === 'closed')
-    return PromiseResolve(createReadResult(undefined, true)) as Promise<
-      ReadableStreamReadResult<R>
-    >;
-  if (state === 'errored')
+  if (state === 'errored') {
     return PromiseReject(getReadableStreamStoredError(stream)) as Promise<
       ReadableStreamReadResult<R>
     >;
+  }
   const consumer = getReadableStreamConsumer(stream);
-  if (consumer === undefined) {
-    // The consumer was detached (cancelled/tee'd-away) — nothing to read.
-    return PromiseResolve(createReadResult(undefined, true)) as Promise<
-      ReadableStreamReadResult<R>
-    >;
+  if (state === 'closed' || consumer === undefined) {
+    // Closed, or the consumer was detached (cancelled/tee'd-away).
+    return PromiseResolve(present(createReadResult(undefined, true)));
   }
   const controller = getReadableStreamController(stream);
 
-  // --- Synchronous fast path (spec PullSteps) ---
+  // --- Synchronous fast path (spec PullSteps step 3) ---
   // When data is immediately available the spec dequeues, performs the
   // drain-then-close check, and fulfills the read request all in one
-  // synchronous call. An async/await on an already-resolved promise
-  // would insert a microtask gap between the dequeue and the close,
-  // causing reader.closed to resolve one tick too late. tryReadSync
-  // returns the result directly (no promise wrapping) so the close
-  // check runs in the same synchronous call.
-  //
-  // The autoAllocateChunkSize path is always async (BYOB machinery),
-  // so it skips this fast path.
-  let useAsyncPath = false;
-  if (controller !== undefined && isByteStreamController(controller)) {
-    const autoAllocateChunkSize = getByteControllerAutoAllocateChunkSize(
-      controller as ReadableByteStreamController
-    );
-    if (autoAllocateChunkSize !== undefined) {
-      useAsyncPath = true;
-    }
-  }
-  if (!useAsyncPath) {
-    const syncResult = readBufferedSync<R>(
-      reader,
-      stream,
-      consumer,
-      controller
-    );
-    if (syncResult !== undefined) {
-      return PromiseResolve(syncResult);
-    }
+  // synchronous call, so reader.closed resolves in the same call. This
+  // includes byte streams with autoAllocateChunkSize: queued bytes are
+  // handed over as the head chunk, uncopied; only an empty queue allocates.
+  const syncResult = readBufferedSync<R>(reader, stream, consumer, controller);
+  if (syncResult !== undefined) {
+    return PromiseResolve(present(syncResult));
   }
 
-  // --- Async fallback ---
-  // Data is not immediately available (pending reads queued, or native
-  // source, or autoAllocateChunkSize BYOB path). Fall through to the
-  // promise-based read and handle completion asynchronously.
-  return defaultReaderReadInternalAsync<R>(
-    reader,
-    stream,
-    consumer,
-    controller,
-    useAsyncPath
-  );
+  // --- The read waits ---
+  // On the consumer (spec PullSteps step 4), or with autoAllocateChunkSize
+  // on an allocated pull-into descriptor (step 4 of the byte controller's
+  // PullSteps). Either settles the request from the call that answers it.
+  const pending = PromiseWithResolvers() as PromiseWithResolversType<
+    ReadableStreamReadResult<R>
+  >;
+  const resolve = (result: ReadableStreamReadResult<unknown>): void => {
+    readCompletionSteps(stream, controller, result);
+    pending.resolve(present(result as ReadableStreamReadResult<R>));
+  };
+  const autoAllocateChunkSize =
+    controller !== undefined && isByteStreamController(controller)
+      ? getByteControllerAutoAllocateChunkSize(
+          controller as ReadableByteStreamController
+        )
+      : undefined;
+  if (autoAllocateChunkSize !== undefined) {
+    // QUEUED-BYTE-SPECIFIC (sanctioned exception to backend-blindness):
+    // autoAllocateChunkSize exists only on the queued byte controller —
+    // native sources are forbidden from declaring it (they allocate their
+    // own buffers for default reads), so a native stream correctly falls
+    // through to the plain submitRead() below.
+    readViaAutoAllocateDescriptor(
+      consumer as unknown as ByteStreamConsumerType,
+      autoAllocateChunkSize,
+      reader,
+      {
+        promise: pending.promise as unknown as Promise<
+          ReadableStreamReadResult<ArrayBufferView>
+        >,
+        resolve: resolve as (value: unknown) => void,
+        reject: pending.reject,
+      }
+    );
+  } else {
+    consumer.submitRead({ resolve, reject: pending.reject, reader });
+  }
+  // A read request is a pull trigger (spec PullSteps ordering: the pull's
+  // synchronous side-effects run before the read result is delivered).
+  if (controller !== undefined) controllerPullIfNeeded(controller);
+  return pending.promise;
+}
+
+// The default read for internal readers (the async iterator, pipes). They
+// MUST use this rather than the public read() — reader prototypes end up
+// user-reachable, so internal dispatch through them would be
+// interceptable. The result is the backend's own (createReadResult), which
+// never reaches user code, so settling it looks up no `then`.
+function defaultReaderReadInternal<R>(
+  reader: object,
+  stream: ReadableStream<R>
+): Promise<ReadableStreamReadResult<R>> {
+  return defaultReaderReadSteps<R>(reader, stream, internalReadResult);
+}
+
+// ReadableStreamDefaultReader.read(): the user's promise settles with a
+// plain { value, done }, and resolving it is the read's one `then` lookup,
+// at the spec's moment.
+function defaultReaderRead<R>(
+  reader: object,
+  stream: ReadableStream<R>
+): Promise<ReadableStreamReadResult<R>> {
+  return defaultReaderReadSteps<R>(reader, stream, toUserReadResult);
+}
+
+function internalReadResult<T>(
+  result: ReadableStreamReadResult<T>
+): ReadableStreamReadResult<T> {
+  return result;
 }
 
 // Submit a default-style read through the BYOB machinery via a synthetic
 // auto-allocate pull-into descriptor (spec ReadableByteStreamController
-// PullSteps step 3, [[autoAllocateChunkSize]] present): the source's pull
+// PullSteps step 4, [[autoAllocateChunkSize]] present): the source's pull
 // then observes a byobRequest over the auto-allocated buffer. Shared by
-// the default reader's read path and the draining reader's
-// empty-fallback wait-read (the body/pipe pump).
+// the default reader's read paths and the draining reader's
+// empty-fallback wait-read (the body/pipe pump). The descriptor settles
+// through `withResolvers`, whose promise is the one returned.
 function readViaAutoAllocateDescriptor(
   consumer: ByteStreamConsumerType,
   autoAllocateChunkSize: number,
-  reader: object
-): Promise<ReadableStreamReadResult<ArrayBufferView>> {
-  const withResolvers = PromiseWithResolvers() as PromiseWithResolversType<
+  reader: object,
+  withResolvers: PromiseWithResolversType<
     ReadableStreamReadResult<ArrayBufferView>
-  >;
+  > = PromiseWithResolvers() as PromiseWithResolversType<
+    ReadableStreamReadResult<ArrayBufferView>
+  >
+): Promise<ReadableStreamReadResult<ArrayBufferView>> {
   const descriptor: PullIntoDescriptor = {
     buffer: new ArrayBuffer(autoAllocateChunkSize),
     bufferByteLength: autoAllocateChunkSize,
@@ -891,38 +995,16 @@ function readViaAutoAllocateDescriptor(
   return consumer.readBYOB(descriptor);
 }
 
-// Async continuation of defaultReaderReadInternal for cases where
-// the data is not synchronously available.
-async function defaultReaderReadInternalAsync<R>(
-  reader: object,
+// What a default read does once it has its result, before handing it over.
+function readCompletionSteps<R>(
   stream: ReadableStream<R>,
-  consumer: StreamConsumerType<R>,
-  controller: ReadableStreamDefaultControllerType | undefined,
-  isByteAutoAllocate: boolean
-): Promise<ReadableStreamReadResult<R>> {
-  let promise: Promise<ReadableStreamReadResult<unknown>>;
-  if (isByteAutoAllocate) {
-    // QUEUED-BYTE-SPECIFIC (sanctioned exception to backend-blindness):
-    // autoAllocateChunkSize exists only on the queued byte controller —
-    // native sources are forbidden from declaring it (they allocate their
-    // own buffers for default reads), so a native stream correctly falls
-    // through to the plain consumer.read() below.
-    const autoAllocateChunkSize = getByteControllerAutoAllocateChunkSize(
-      controller as ReadableByteStreamController
-    );
-    promise = readViaAutoAllocateDescriptor(
-      consumer as unknown as ByteStreamConsumerType,
-      autoAllocateChunkSize as number,
-      reader
-    );
-  } else {
-    promise = consumer.read(reader);
-  }
-
-  // A read request is a pull trigger (spec PullSteps ordering: the pull's
-  // synchronous side-effects run before the read result is delivered).
-  if (controller !== undefined) controllerPullIfNeeded(controller);
-  const result = (await promise) as ReadableStreamReadResult<R>;
+  controller:
+    | ReadableStreamDefaultControllerType
+    | ReadableByteStreamControllerType
+    | NativeReadableStreamControllerType
+    | undefined,
+  result: ReadableStreamReadResult<unknown>
+): void {
   // Drain-then-close (spec HandleQueueDrain): if this read consumed the
   // last data with close requested, the controller's primary stream
   // transitions now — checked on every read completion, not just done
@@ -934,7 +1016,29 @@ async function defaultReaderReadInternalAsync<R>(
     // branches close independently of the controller's primary stream).
     readableStreamClose(stream);
   }
-  return result;
+}
+
+// The user's read result: a plain object (Object.prototype), unlike the
+// results the backends settle internal reads with (createReadResult).
+function userReadResult<T>(value: T, done: false): { value: T; done: false };
+function userReadResult<T>(
+  value: T | undefined,
+  done: true
+): { value: T | undefined; done: true };
+function userReadResult<T>(
+  value: T | undefined,
+  done: boolean
+): ReadableStreamReadResult<T> {
+  return { value, done } as ReadableStreamReadResult<T>;
+}
+
+function toUserReadResult<T>(
+  result: ReadableStreamReadResult<T>
+): ReadableStreamReadResult<T> {
+  return {
+    value: result.value,
+    done: result.done,
+  } as ReadableStreamReadResult<T>;
 }
 
 class ReadableStreamDefaultReader<
@@ -1011,7 +1115,7 @@ class ReadableStreamDefaultReader<
           new TypeError('This reader has been released')
         ) as Promise<ReadableStreamReadResult<R>>;
       }
-      return defaultReaderReadInternal<R>(this, stream);
+      return defaultReaderRead<R>(this, stream);
     } catch (e) {
       return PromiseReject(e) as Promise<ReadableStreamReadResult<R>>;
     }
@@ -1088,9 +1192,12 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
   }
 
   // The read body; readAtLeast() must not dispatch through the
-  // user-patchable prototype's read(). Not returned from an async read():
-  // that would add two microtasks to every result.
-  async #read<T extends ArrayBufferView>(
+  // user-patchable prototype's read(). Throws synchronously for what the
+  // spec rejects before the read is submitted (both callers turn a throw
+  // into a rejection). Otherwise returns the promise the descriptor settles:
+  // with a plain { value, done } in the call that answers the read, after
+  // the drain-then-close check, as in defaultReaderRead.
+  #read<T extends ArrayBufferView>(
     view: T,
     options: ReadableStreamBYOBReaderReadOptions
   ): Promise<ReadableStreamReadResult<T>> {
@@ -1098,7 +1205,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     if (!isArrayBufferView(view)) {
       throw new TypeError('view must be an ArrayBufferView');
     }
-    const info = getViewInfo(view);
+    const info = getUnsharedViewInfo(view, 'view');
     if (info.byteLength === 0) {
       throw new TypeError('view must have a non-zero byteLength');
     }
@@ -1140,21 +1247,12 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
       throw getReadableStreamStoredError(stream);
     }
     // Transfer the buffer regardless of state (spec step).
-    const transferred = ArrayBufferPrototypeTransfer(info.buffer);
+    const transferred = ArrayBufferPrototypeTransferToFixedLength(info.buffer);
     if (getReadableStreamGetState(stream) === 'closed') {
-      // The stream may be closed with no consumer remaining (e.g. after
-      // cancel clears it). Without a consumer, no pull-into can be
-      // registered. Return { value: undefined, done: true } — matching
-      // browser behavior and the C++ implementation.
-      const consumer = getReadableStreamConsumer(stream);
-      if (consumer === undefined) {
-        return createReadResult(undefined as unknown as T, true);
-      }
-      // Normal close with a live consumer: return a zero-length view over
-      // the transferred buffer (spec ReadableByteStreamControllerPullInto
-      // step 2 "closed" branch).
+      // Closed or cancelled alike: a zero-length view over the transferred
+      // buffer (spec ReadableByteStreamControllerPullInto "closed" branch).
       const emptyView = new info.viewCtor(transferred, info.byteOffset, 0);
-      return createReadResult(emptyView as T, true);
+      return PromiseResolve(userReadResult(emptyView as T, true));
     }
     // BACKEND-BLIND: the byte-consumer interface covers both backends; the
     // cast is justified by the byte-capable reader gate in the constructor.
@@ -1164,6 +1262,27 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     const withResolvers = PromiseWithResolvers() as PromiseWithResolversType<
       ReadableStreamReadResult<ArrayBufferView>
     >;
+    const controller = getReadableStreamController(stream);
+    // Set while readBYOB() runs: a result it hands over then is one answered
+    // from the queue, and the spec (PullInto, HandleQueueDrain) pulls before
+    // it runs the chunk steps, so it is held until after the pull below. A
+    // later result (an enqueue(), a respond(), a close) settles at once, as
+    // the spec fulfills the read before that call pulls.
+    let submitting = true;
+    let answeredFromQueue:
+      ReadableStreamReadResult<ArrayBufferView> | undefined;
+    const resolve = (result: ReadableStreamReadResult<ArrayBufferView>) => {
+      // Drain-then-close (spec HandleQueueDrain): a BYOB fill that consumed
+      // the last queued bytes with close requested must transition the
+      // stream — without this, the NEXT read(view) would pend forever (BYOB
+      // descriptors are not auto-committed at the sentinel).
+      if (controller !== undefined) controllerMaybeCloseStream(controller);
+      if (submitting) {
+        answeredFromQueue = result;
+        return;
+      }
+      withResolvers.resolve(toUserReadResult(result));
+    };
     const descriptor: PullIntoDescriptor = {
       buffer: transferred,
       bufferByteLength: ArrayBufferPrototypeByteLengthGet(transferred),
@@ -1176,20 +1295,19 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
       readerType: 'byob',
       settledAtEndOfData: false,
       promise: withResolvers.promise,
-      resolve: withResolvers.resolve,
+      resolve,
       reject: withResolvers.reject,
       reader: this,
     };
-    const promise = consumer.readBYOB(descriptor);
-    const controller = getReadableStreamController(stream);
+    consumer.readBYOB(descriptor);
+    submitting = false;
     if (controller !== undefined) controllerPullIfNeeded(controller);
-    const result = await promise;
-    // Drain-then-close (spec HandleQueueDrain): a BYOB fill that consumed
-    // the last queued bytes with close requested must transition the
-    // stream — without this, the NEXT read(view) would pend forever (BYOB
-    // descriptors are not auto-committed at the sentinel).
-    if (controller !== undefined) controllerMaybeCloseStream(controller);
-    return result as unknown as ReadableStreamReadResult<T>;
+    if (answeredFromQueue !== undefined) {
+      withResolvers.resolve(toUserReadResult(answeredFromQueue));
+    }
+    return withResolvers.promise as unknown as Promise<
+      ReadableStreamReadResult<T>
+    >;
   }
 
   readAtLeast<T extends ArrayBufferView>(
@@ -1291,16 +1409,29 @@ function getViewInfo(view: ArrayBufferView): ViewInfo {
   };
 }
 
+// getViewInfo() for the byte-stream trust boundaries, which reject
+// SharedArrayBuffer-backed views (WebIDL ArrayBufferView without
+// [AllowShared]).
+function getUnsharedViewInfo(view: ArrayBufferView, what: string): ViewInfo {
+  const info = getViewInfo(view);
+  if (isSharedArrayBuffer(info.buffer)) {
+    throw new TypeError(`${what} must not be backed by a SharedArrayBuffer`);
+  }
+  return info;
+}
+
 // Validate and normalize a user-provided chunk for a byte stream at the
 // enqueue()/respondWithNewView() trust boundary: snapshot metadata, reject
 // zero-length views and zero-length (or detached — detached buffers report
 // byteLength 0) buffers, and transfer the backing buffer. The returned
 // triple references the TRANSFERRED buffer; the caller's view is detached.
+// All byte-stream transfers are to fixed length (spec
+// TransferArrayBuffer), so a source cannot shrink a buffer we hold.
 function validateAndTransferView(view: ArrayBufferView): ByteQueueEntry {
   if (!isArrayBufferView(view)) {
     throw new TypeError('chunk must be an ArrayBufferView');
   }
-  const info = getViewInfo(view);
+  const info = getUnsharedViewInfo(view, 'chunk');
   if (info.byteLength === 0) {
     throw new TypeError('chunk must have a non-zero byteLength');
   }
@@ -1310,7 +1441,7 @@ function validateAndTransferView(view: ArrayBufferView): ByteQueueEntry {
     );
   }
   return {
-    buffer: ArrayBufferPrototypeTransfer(info.buffer),
+    buffer: ArrayBufferPrototypeTransferToFixedLength(info.buffer),
     byteOffset: info.byteOffset,
     byteLength: info.byteLength,
   };
@@ -1409,6 +1540,16 @@ class ReadableStreamDefaultController<
     controllerConsumerLeaving = (controller, reason, isLastConsumer) => {
       if (#queue in controller) {
         return (controller as ReadableStreamDefaultController).#consumerLeaving(
+          reason,
+          isLastConsumer
+        );
+      }
+      return PromiseResolve() as Promise<void>;
+    };
+
+    controllerConsumerErrored = (controller, reason, isLastConsumer) => {
+      if (#queue in controller) {
+        return (controller as ReadableStreamDefaultController).#consumerErrored(
           reason,
           isLastConsumer
         );
@@ -1516,7 +1657,7 @@ class ReadableStreamDefaultController<
         ? undefined
         : uncurryThis(startFn)(underlyingSource, this);
     PromisePrototypeThen(
-      PromiseResolve(startResult),
+      writableInternals.promiseResolvedWith(startResult),
       () => {
         this.#started = true;
         this.#callPullIfNeeded();
@@ -1623,13 +1764,15 @@ class ReadableStreamDefaultController<
     // cursors' weak owner refs — no strong retention of branches. The
     // primary stream is handled explicitly: a tee'd-away parent has no
     // cursor. readableStreamError is state-guarded, so overlap is fine.
+    // Every stream errors before its pending reads reject: reader.closed
+    // rejects first (spec ReadableStreamError).
     const owners = this.#queue.getLiveOwners();
-    this.#queue.error(reason); // rejects pending reads, drops buffered data
-    this.#clearAlgorithms();
     for (let i = 0; i < owners.length; i++) {
       readableStreamError(owners[i] as ReadableStream<R>, reason);
     }
     readableStreamError(this.#stream, reason);
+    this.#queue.error(reason); // rejects pending reads, drops buffered data
+    this.#clearAlgorithms();
     // The source settled on its own: consumers that had left are owed
     // undefined (spec ReadableStreamTee step 14.c.ii).
     this.#pendingCancel?.resolve();
@@ -1709,6 +1852,21 @@ class ReadableStreamDefaultController<
     this.#pendingCancel ??=
       PromiseWithResolvers() as PromiseWithResolversType<void>;
     return this.#pendingCancel.promise;
+  }
+
+  // A consumer errors alone; see controllerConsumerErrored. Decided before
+  // the cursor's removal, as #consumerLeaving is.
+  #consumerErrored(reason: unknown, isLastConsumer: boolean): Promise<void> {
+    if (!this.#closeRequested) {
+      return this.#consumerLeaving(reason, isLastConsumer);
+    }
+    if (isLastConsumer) {
+      // As in #maybeCloseStream once every consumer has drained.
+      this.#done = true;
+      this.#clearAlgorithms();
+      this.#pendingCancel?.resolve();
+    }
+    return PromiseResolve() as Promise<void>;
   }
 
   #shouldCallPull(): boolean {
@@ -1800,9 +1958,12 @@ let byteControllerRespondWithNewView: (
 let getByteControllerAutoAllocateChunkSize: (
   controller: ReadableByteStreamController
 ) => number | undefined;
-// tee() and detach replace the cursor a cached byobRequest was minted for.
-let byteControllerInvalidateByobRequest: (
-  controller: ReadableByteStreamController
+// tee() and detach are about to replace the cursor `from`; `wasSole` when
+// it was the queue's only cursor.
+let byteControllerOnFork: (
+  controller: ReadableByteStreamController,
+  from: ByteStreamCursorType,
+  wasSole: boolean
 ) => void;
 
 let assertIsReadableStreamBYOBRequest: (
@@ -1879,7 +2040,7 @@ class ReadableStreamBYOBRequest implements ReadableStreamBYOBRequestType {
       throw new TypeError('view must be an ArrayBufferView');
     }
     // Spec step 2: detached buffers are TypeError, not RangeError.
-    const info = getViewInfo(view);
+    const info = getUnsharedViewInfo(view, 'view');
     if (ArrayBufferPrototypeDetachedGet(info.buffer)) {
       throw new TypeError("The view's buffer has been detached");
     }
@@ -1914,10 +2075,34 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   #departedReasons: unknown[] = [];
   #pendingCancel: PromiseWithResolversType<void> | undefined;
   #byobRequest: ReadableStreamBYOBRequest | null = null;
+  // A released reader's head pull-into, taken over from the sole cursor at
+  // tee()/detach so that a byobRequest held across the fork keeps working
+  // (spec: the controller's head, untouched by the fork). The forked
+  // cursors hold copies of its filled bytes (adoptReleasedBytes). While it
+  // is set, byobRequest is over it, and respond() enqueues its bytes, old
+  // and new, for every cursor, dropping their copies. enqueue(), error(),
+  // cancel and a closed-state respond(0) discard it.
+  #releasedHead: PullIntoDescriptor | undefined;
 
   static {
     isByteStreamController = (value: unknown) => {
       return isActualObject(value) && #queue in value;
+    };
+
+    // Enqueues several chunks, in order, notifying the consumers once after
+    // the last, so a pending BYOB read on any cursor fills across all of
+    // them before it is answered (a per-chunk notify would answer it with
+    // the first). Only for internal sources (the identity streams); each
+    // chunk is validated and accounted as by enqueue().
+    byteControllerEnqueueBatch = (controller, chunks) => {
+      const last = chunks.length - 1;
+      for (let i = 0; i <= last; i++) {
+        controller.#enqueueChunk(chunks[i] as ArrayBufferView, i === last);
+      }
+    };
+
+    byteControllerSetConsumptionHook = (controller, hook) => {
+      controller.#queue.setConsumptionHook(hook);
     };
 
     assertIsReadableByteStreamController = function (
@@ -1966,6 +2151,14 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       return prevConsumerLeaving(controller, reason, isLastConsumer);
     };
 
+    const prevConsumerErrored = controllerConsumerErrored;
+    controllerConsumerErrored = (controller, reason, isLastConsumer) => {
+      if (#queue in controller) {
+        return controller.#consumerErrored(reason, isLastConsumer);
+      }
+      return prevConsumerErrored(controller, reason, isLastConsumer);
+    };
+
     const prevControllerStream = controllerStream;
     controllerStream = (controller) => {
       if (#queue in controller) {
@@ -1995,8 +2188,21 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       return controller.#autoAllocateChunkSize;
     };
 
-    byteControllerInvalidateByobRequest = (controller) => {
-      controller.#invalidateByobRequest();
+    byteControllerOnFork = (controller, from, wasSole) => {
+      // Fork needs an unlocked stream, so a head here is a released one.
+      const head = from.headPullInto;
+      if (
+        wasSole &&
+        head !== undefined &&
+        controller.#releasedHead === undefined
+      ) {
+        controller.#releasedHead = head;
+        return;
+      }
+      // A request over `from`'s head would outlive it.
+      if (controller.#releasedHead === undefined) {
+        controller.#invalidateByobRequest();
+      }
     };
 
     const prevOnReaderRelease = controllerOnReaderRelease;
@@ -2093,6 +2299,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       // default controller's hook does.
       this.#clearAlgorithms();
       this.#invalidateByobRequest();
+      this.#releasedHead = undefined;
     }) as StreamQueueType<ByteQueueEntry, Uint8Array>;
     const cursor = new ByteStreamCursor(this.#queue, stream);
     this.#queue.anchorCursor(cursor);
@@ -2110,7 +2317,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
         ? undefined
         : uncurryThis(startFn)(underlyingSource, this);
     PromisePrototypeThen(
-      PromiseResolve(startResult),
+      writableInternals.promiseResolvedWith(startResult),
       () => {
         this.#started = true;
         this.#callPullIfNeeded();
@@ -2136,6 +2343,22 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   get byobRequest(): ReadableStreamBYOBRequestType | null {
     assertIsReadableByteStreamController(this);
     if (this.#byobRequest === null) {
+      const released = this.#releasedHead;
+      if (released !== undefined) {
+        const request = new ReadableStreamBYOBRequest(kPrivateSymbol);
+        initializeByobRequest(
+          request,
+          this,
+          new Uint8Array(
+            released.buffer,
+            released.byteOffset + released.bytesFilled,
+            released.byteLength - released.bytesFilled
+          ),
+          released.minimumFill - released.bytesFilled
+        );
+        this.#byobRequest = request;
+        return request;
+      }
       // Zero-copy is only unambiguous with exactly one consumer, and only
       // when it has a head pull-into descriptor (from a BYOB read, or
       // auto-allocated for a default read when autoAllocateChunkSize is
@@ -2164,6 +2387,13 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
   enqueue(chunk: ArrayBufferView): void {
     assertIsReadableByteStreamController(this);
+    this.#enqueueChunk(chunk, true);
+  }
+
+  // enqueue()'s steps. With `notify` false the chunk is queued without
+  // notifying the consumers (byteControllerEnqueueBatch notifies with its
+  // last chunk).
+  #enqueueChunk(chunk: ArrayBufferView, notify: boolean): void {
     if (!this.#canCloseOrEnqueue()) {
       throw new TypeError(
         'Cannot enqueue a chunk into a stream that is closed or closing'
@@ -2181,6 +2411,18 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     // Per spec, enqueue invalidates the outstanding byobRequest (a fresh
     // one over the updated remainder is minted on next access).
     this.#invalidateByobRequest();
+    const released = this.#releasedHead;
+    if (released !== undefined) {
+      // Spec steps 8.4-8.5 for the controller's released head: its buffer
+      // is transferred, and the cursors' copies of its bytes go ahead of
+      // the chunk below.
+      this.#releasedHead = undefined;
+      if (!released.settledAtEndOfData) {
+        released.buffer = ArrayBufferPrototypeTransferToFixedLength(
+          released.buffer
+        );
+      }
+    }
     const drainCursor = this.#queue.singleCursor as
       ByteStreamCursorType | undefined;
     if (drainCursor !== undefined) {
@@ -2188,11 +2430,10 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       if (head !== undefined) {
         // Spec step 8.4: transfer the head descriptor's buffer so that
         // old captured views are detached.
-        head.buffer = ArrayBufferPrototypeTransfer(head.buffer);
+        head.buffer = ArrayBufferPrototypeTransferToFixedLength(head.buffer);
       }
-      // Spec step 8.5: if the head pending pull-into has readerType 'none'
-      // (leftover from releaseLock), drain it before adding the new chunk.
-      drainCursor.drainNoneDescriptors();
+      // Spec step 8.5: a released head's bytes go ahead of the chunk.
+      drainCursor.flushReleasedHead();
       // Spec step 9.3: if the head descriptor is an auto-allocate
       // (readerType 'default'), discard it and fulfill the pending default
       // read directly from the enqueued chunk. The auto-allocate buffer is
@@ -2214,10 +2455,10 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
         (cursor as unknown as ByteStreamCursorType).flushReleasedHead();
       });
     }
-    this.#queue.enqueue({ value: entry, size: entry.byteLength });
+    this.#queue.enqueue({ value: entry, size: entry.byteLength }, notify);
     // The cursors' notify() (run by queue.enqueue) services pending
     // pull-intos and default reads alike.
-    this.#callPullIfNeeded();
+    if (notify) this.#callPullIfNeeded();
   }
 
   close(): void {
@@ -2229,13 +2470,18 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     }
     // Spec: closing with a fractional-element partial fill in a head
     // descriptor is a TypeError that also errors the stream — the bytes to
-    // complete the element can never arrive. Checked across ALL live
-    // cursors: tee branches each track their own partial fills through the
-    // enqueue-path min-read machinery.
+    // complete the element can never arrive. Only a cursor whose fractional
+    // fill errors the whole stream counts: the source's own, or its
+    // successor after a detach, which inherits its callback. A tee branch's
+    // errors that branch alone (the spec closes each branch through its own
+    // controller), which its cursor does itself when the close reaches it,
+    // so this close() succeeds and the sibling keeps every byte.
     const hasFractionalFill = this.#queue.someLiveCursor((cursor) => {
-      const head: PullIntoDescriptor | undefined = (
-        cursor as unknown as ByteStreamCursorType
-      ).headPullInto;
+      const byteCursor = cursor as unknown as ByteStreamCursorType;
+      if (byteCursor.errorStreamCallback === errorTeeBranchFromCursor) {
+        return false;
+      }
+      const head: PullIntoDescriptor | undefined = byteCursor.headPullInto;
       return head !== undefined && head.bytesFilled % head.elementSize !== 0;
     });
     if (hasFractionalFill) {
@@ -2275,14 +2521,16 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     if (this.#done) return;
     this.#done = true;
     this.#invalidateByobRequest();
-    // Branch propagation — see the default controller's error() for why.
+    this.#releasedHead = undefined;
+    // Branch propagation and ordering — see the default controller's
+    // #error().
     const owners = this.#queue.getLiveOwners();
-    this.#queue.error(reason);
-    this.#clearAlgorithms();
     for (let i = 0; i < owners.length; i++) {
       readableStreamError(owners[i] as ReadableStream<Uint8Array>, reason);
     }
     readableStreamError(this.#stream, reason);
+    this.#queue.error(reason);
+    this.#clearAlgorithms();
     this.#pendingCancel?.resolve();
   }
 
@@ -2296,9 +2544,13 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     ) {
       throw new TypeError('bytesWritten must be a non-negative integer');
     }
-    const cursor = this.#queue.singleCursor as ByteStreamCursorType | undefined;
-    const head = cursor === undefined ? undefined : cursor.headPullInto;
-    if (cursor === undefined || head === undefined) {
+    const released = this.#releasedHead;
+    const cursor =
+      released === undefined
+        ? (this.#queue.singleCursor as ByteStreamCursorType | undefined)
+        : undefined;
+    const head = released ?? cursor?.headPullInto;
+    if (head === undefined) {
       throw new TypeError('No pending BYOB request');
     }
     const state = getReadableStreamGetState(this.#stream);
@@ -2326,10 +2578,12 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     // the reader's result (see PullIntoDescriptor.settledAtEndOfData), so
     // it is left alone: the commit below has nothing left to resolve.
     if (!head.settledAtEndOfData) {
-      head.buffer = ArrayBufferPrototypeTransfer(head.buffer);
+      head.buffer = ArrayBufferPrototypeTransferToFixedLength(head.buffer);
     }
     this.#invalidateByobRequest();
-    if (state === 'closed') {
+    if (cursor === undefined) {
+      this.#respondToReleasedHead(bytesWritten, state);
+    } else if (state === 'closed') {
       // respond(0)-while-closed: commit all pending descriptors with
       // { done: true, value: filled-so-far view }.
       cursor.commitPullIntosOnClose();
@@ -2368,9 +2622,13 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
   // byobRequest.respondWithNewView(view).
   #respondWithNewView(view: ArrayBufferView): void {
-    const cursor = this.#queue.singleCursor as ByteStreamCursorType | undefined;
-    const head = cursor === undefined ? undefined : cursor.headPullInto;
-    if (cursor === undefined || head === undefined) {
+    const released = this.#releasedHead;
+    const cursor =
+      released === undefined
+        ? (this.#queue.singleCursor as ByteStreamCursorType | undefined)
+        : undefined;
+    const head = released ?? cursor?.headPullInto;
+    if (head === undefined) {
       throw new TypeError('No pending BYOB request');
     }
     const info = getViewInfo(view);
@@ -2409,10 +2667,12 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     // owns the delivered buffer, so the replacement view's buffer is not
     // adopted in its place.
     if (!head.settledAtEndOfData) {
-      head.buffer = ArrayBufferPrototypeTransfer(info.buffer);
+      head.buffer = ArrayBufferPrototypeTransferToFixedLength(info.buffer);
     }
     this.#invalidateByobRequest();
-    if (state === 'closed') {
+    if (cursor === undefined) {
+      this.#respondToReleasedHead(info.byteLength, state);
+    } else if (state === 'closed') {
       cursor.commitPullIntosOnClose();
     } else {
       // EXPECTED-LENGTH CONTRACT: counts toward the total like respond().
@@ -2422,6 +2682,34 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       this.#maybeCloseStream();
       this.#callPullIfNeeded();
     }
+  }
+
+  // respond()/respondWithNewView() on #releasedHead, validated, its buffer
+  // re-transferred and the request invalidated (spec RespondInReadableState
+  // step 3, EnqueueDetachedPullIntoToQueue; closed: RespondInClosedState,
+  // which drops it).
+  #respondToReleasedHead(
+    bytesWritten: number,
+    state: 'readable' | 'closed' | 'errored'
+  ): void {
+    const head = this.#releasedHead as PullIntoDescriptor;
+    this.#releasedHead = undefined;
+    if (state === 'closed') return;
+    this.#accountDelivery(bytesWritten);
+    const filled = head.bytesFilled + bytesWritten;
+    this.#queue.forEachLiveCursor((cursor) => {
+      (cursor as unknown as ByteStreamCursorType).dropReleasedHead();
+    });
+    this.#queue.enqueue({
+      value: {
+        buffer: cloneArrayBuffer(head.buffer, head.byteOffset, filled),
+        byteOffset: 0,
+        byteLength: filled,
+      },
+      size: filled,
+    });
+    this.#maybeCloseStream();
+    this.#callPullIfNeeded();
   }
 
   #invalidateByobRequest(): void {
@@ -2485,6 +2773,20 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     return this.#pendingCancel.promise;
   }
 
+  // As the default controller's: see there.
+  #consumerErrored(reason: unknown, isLastConsumer: boolean): Promise<void> {
+    if (!this.#closeRequested) {
+      return this.#consumerLeaving(reason, isLastConsumer);
+    }
+    if (isLastConsumer) {
+      this.#done = true;
+      this.#invalidateByobRequest();
+      this.#clearAlgorithms();
+      this.#pendingCancel?.resolve();
+    }
+    return PromiseResolve() as Promise<void>;
+  }
+
   #shouldCallPull(): boolean {
     if (!this.#started) return false;
     if (!this.#canCloseOrEnqueue()) return false;
@@ -2523,6 +2825,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       readableStreamClose(this.#stream);
     }
     this.#invalidateByobRequest();
+    this.#releasedHead = undefined;
     const cancelAlgorithm = this.#cancelAlgorithm;
     this.#clearAlgorithms();
     this.#cancelPromise =
@@ -2610,7 +2913,7 @@ async function drainingReaderReadInternal<R>(
     // Nothing buffered — wait for one chunk through the normal pending-read
     // machinery (FIFO with everything else), then sweep the rest.
     //
-    // QUEUED-BYTE-SPECIFIC (sanctioned, mirrors defaultReaderReadInternal):
+    // QUEUED-BYTE-SPECIFIC (sanctioned, mirrors defaultReaderReadSteps):
     // with autoAllocateChunkSize set, the wait-read goes through the BYOB
     // machinery so the source's pull observes a byobRequest over the
     // auto-allocated buffer — the body and pipe pumps drive
@@ -2740,6 +3043,55 @@ class ReadableStreamDrainingReader<R> {
   }
 }
 
+// StreamPipeOptions after WebIDL conversion: plain data, no getters.
+interface ConvertedPipeOptions {
+  readonly preventAbort: boolean;
+  readonly preventCancel: boolean;
+  readonly preventClose: boolean;
+  readonly signal: AbortSignal | undefined;
+}
+
+// WebIDL conversion of StreamPipeOptions. The pipe methods run it before
+// their locked checks, so a getter cannot change a lock after it is checked.
+// Members are read once each in spec order (WPT
+// piping/throwing-options.any.js).
+function convertPipeOptions(options: unknown): ConvertedPipeOptions {
+  // WebIDL: null and undefined become {}.
+  if (options == null) options = kEmptyDictionary;
+  if (!isActualObject(options)) {
+    throw new TypeError('Pipe options must be an object');
+  }
+  const dict = options as StreamPipeOptions;
+  const preventAbort = !!dict.preventAbort;
+  const preventCancel = !!dict.preventCancel;
+  const preventClose = !!dict.preventClose;
+  const signal = dict.signal;
+  if (signal !== undefined) {
+    // Brand check. Under the modern JSG layout the captured `aborted` getter
+    // throws for non-AbortSignal receivers; under the instance-property
+    // layout (old compat dates) the capture is a plain read that cannot
+    // brand-check, so additionally require the boolean a genuine signal's
+    // own data property carries. (A forged {aborted: boolean} slips through
+    // under old dates only; the native fast path's C++ unwrap rejects it.)
+    let aborted: unknown;
+    try {
+      aborted = AbortSignalAbortedGet(signal);
+    } catch {
+      throw new TypeError('options.signal must be an AbortSignal');
+    }
+    if (typeof aborted !== 'boolean') {
+      throw new TypeError('options.signal must be an AbortSignal');
+    }
+  }
+  return {
+    __proto__: null,
+    preventAbort,
+    preventCancel,
+    preventClose,
+    signal,
+  } as ConvertedPipeOptions;
+}
+
 // The pipe (spec ReadableStreamPipeTo). Internal operations only on both
 // ends — locks are held for the duration. Chunks are read only while the
 // destination desires them: the pump moves buffered chunks until
@@ -2754,50 +3106,35 @@ class ReadableStreamDrainingReader<R> {
 function pipeToInternal<R>(
   source: ReadableStream<R>,
   destination: WritableStreamType<R>,
-  options: StreamPipeOptions = kEmptyDictionary as StreamPipeOptions
+  options: ConvertedPipeOptions
 ): Promise<void> {
-  // Spec-mandated read order (§4.9.1): preventAbort, preventCancel,
-  // preventClose, signal. WPT piping/throwing-options.any.js verifies
-  // that getter side-effects occur in exactly this sequence.
-  const preventAbort = !!options.preventAbort;
-  const preventCancel = !!options.preventCancel;
-  const preventClose = !!options.preventClose;
-  const signal = options.signal;
-  if (signal !== undefined) {
-    // Brand check. Under the modern JSG layout the captured `aborted` getter
-    // throws for non-AbortSignal receivers; under the instance-property
-    // layout (old compat dates) the capture is a plain read that cannot
-    // brand-check, so additionally require the boolean a genuine signal's
-    // own data property carries.
-    let aborted: unknown;
-    try {
-      aborted = AbortSignalAbortedGet(signal);
-    } catch {
-      throw new TypeError('options.signal must be an AbortSignal');
-    }
-    if (typeof aborted !== 'boolean') {
-      throw new TypeError('options.signal must be an AbortSignal');
-    }
-  }
+  const { preventAbort, preventCancel, preventClose, signal } = options;
 
-  // Lock both ends.
+  // Lock both ends. The callers have checked both locks; release the reader
+  // if the writer still cannot be acquired.
   const reader = new ReadableStreamDefaultReader<R>(source);
-  const writer = writableInternals.acquireWriter(destination);
+  let writer: WritableStreamDefaultWriterType<R>;
+  try {
+    writer = writableInternals.acquireWriter(destination);
+  } catch (e) {
+    // The catch here is purely defensive. The acquireWriter
+    // should not actually throw.
+    readableStreamReaderGenericRelease(reader);
+    throw e;
+  }
   setReadableStreamDisturbed(source);
 
   const { promise, resolve, reject } =
     PromiseWithResolvers() as PromiseWithResolversType<void>;
 
   let shuttingDown = false;
-  let abortAlgorithm: (() => void) | undefined;
+  let abortRegistration: AbortAlgorithmHandle | undefined;
 
   const finalize = (error?: { reason: unknown }): void => {
     writableInternals.setReadyHook(destination, undefined);
     writableInternals.writerRelease(writer);
     readableStreamReaderGenericRelease(reader);
-    if (signal !== undefined && abortAlgorithm !== undefined) {
-      EventTargetRemoveEventListener(signal, 'abort', abortAlgorithm);
-    }
+    abortRegistration?.remove();
     if (error !== undefined) {
       reject(error.reason);
     } else {
@@ -2994,8 +3331,10 @@ function pipeToInternal<R>(
     );
   };
 
+  // Spec: an abort algorithm, not an 'abort' listener, so a synthetic event
+  // cannot abort the pipe and a user listener cannot prevent it.
   if (signal !== undefined) {
-    abortAlgorithm = () => {
+    const abortAlgorithm = (): void => {
       const abortReason = AbortSignalReasonGet(signal);
       const actions: (() => Promise<unknown>)[] = [];
       if (!preventAbort) {
@@ -3024,7 +3363,7 @@ function pipeToInternal<R>(
     if (AbortSignalAbortedGet(signal)) {
       abortAlgorithm();
     } else {
-      EventTargetAddEventListener(signal, 'abort', abortAlgorithm);
+      abortRegistration = utils.addAbortAlgorithm(signal, abortAlgorithm);
     }
   }
 
@@ -3193,6 +3532,269 @@ function pipeToInternal<R>(
   return promise;
 }
 
+// ---------------------------------------------------------------------------
+// ReadableStream.from(): spec ReadableStreamFromIterable over WebIDL's
+// async_sequence<any> (conversion, "open", "get the next value", "close"),
+// with ECMA-262's CreateAsyncFromSyncIterator for a sync iterable. The
+// user's methods are read exactly when the spec reads them: @@asyncIterator
+// and @@iterator through GetMethod (a Get; no `in` checks), `next` once when
+// the iterator is opened, `return` at each cancel.
+//
+// INTENTIONAL SPEC DIVERGENCE (readable ledger #29): for a sync iterable, the
+// operations run in spec order but not on the spec's schedule. The spec
+// reacts to "a promise resolved with" the async-from-sync wrapper's
+// next()/return() promise; here the wrapper's continuation is reacted to
+// directly. A read or cancel thus settles two microtasks earlier than the
+// spec has it, and one whose sync next()/return() throws settles in the same
+// tick as an async iterator's, where the spec has it two microtasks later.
+// Nothing looks up `then` on the wrapper's promise. Matching the spec would
+// cost two microtasks and a Promise.prototype.then lookup per chunk on the
+// from(array) path.
+
+const kFromStrategy = ObjectFreeze({ __proto__: null, highWaterMark: 0 });
+
+type IteratorMethod = (this: unknown, ...args: unknown[]) => unknown;
+
+// Spec GetMethod: undefined and null both mean "absent".
+function getIteratorMethod(
+  value: object,
+  key: PropertyKey,
+  message: string
+): IteratorMethod | undefined {
+  const method = (value as Record<PropertyKey, unknown>)[key];
+  if (method == null) return undefined;
+  if (typeof method !== 'function') throw new TypeError(message);
+  return method as IteratorMethod;
+}
+
+// Spec GetIteratorFromMethod: the iterator must be an object, and its
+// `next` is read once, here. A `next` that is not callable fails each pull
+// (Call), not the open.
+type BoundNext = ((iterator: object) => unknown) | undefined;
+function openIterator(
+  iterable: object,
+  method: IteratorMethod
+): { iterator: object; next: BoundNext } {
+  const iterator: unknown = uncurryThis(method)(iterable);
+  if (!isObjectLike(iterator)) {
+    throw new TypeError('The iterator method must return an object');
+  }
+  const next = (iterator as { next?: unknown }).next;
+  return {
+    iterator: iterator as object,
+    next:
+      typeof next === 'function'
+        ? (uncurryThis(next as IteratorMethod) as BoundNext)
+        : undefined,
+  };
+}
+
+// Spec IteratorNext without a value: the result must be an object.
+function iteratorNext(iterator: object, next: BoundNext): object {
+  if (next === undefined) {
+    throw new TypeError('The iterator next method is not a function');
+  }
+  const result = next(iterator);
+  if (!isObjectLike(result)) {
+    throw new TypeError('The result of next() must be an object');
+  }
+  return result as object;
+}
+
+// Spec IteratorClose with a throw completion: return() runs, and anything
+// thrown while reading or calling it is dropped in favor of the original
+// error.
+function closeSyncIteratorAfterError(iterator: object): void {
+  try {
+    const returnMethod = getIteratorMethod(
+      iterator,
+      'return',
+      'Iterator return() is not a function'
+    );
+    if (returnMethod !== undefined) uncurryThis(returnMethod)(iterator);
+  } catch {
+    // The original error wins.
+  }
+}
+
+// The %AsyncFromSyncIteratorPrototype% continuation: `done` is read before
+// `value`, and the value is awaited through PromiseResolve. With
+// closeOnRejection (next(), not return()), a value that cannot be resolved
+// or that rejects while `done` is false closes the sync iterator.
+function asyncFromSyncContinuation(
+  iterator: object,
+  result: object,
+  closeOnRejection: boolean,
+  onFulfilled: (value: unknown, done: boolean) => void
+): Promise<void> {
+  let done: boolean;
+  let valueWrapper: Promise<unknown>;
+  try {
+    done = !!(result as { done?: unknown }).done;
+    const value = (result as { value?: unknown }).value;
+    try {
+      valueWrapper = PromiseResolve(value) as Promise<unknown>;
+    } catch (e) {
+      if (!done && closeOnRejection) closeSyncIteratorAfterError(iterator);
+      throw e;
+    }
+  } catch (e) {
+    return PromiseReject(e) as Promise<void>;
+  }
+  return PromisePrototypeThen(
+    valueWrapper,
+    (value: unknown) => onFulfilled(value, done),
+    done || !closeOnRejection
+      ? undefined
+      : (e: unknown) => {
+          closeSyncIteratorAfterError(iterator);
+          throw e;
+        }
+  ) as Promise<void>;
+}
+
+// WebIDL "close an async iterator" on the user's async iterator.
+function closeAsyncIterator(iterator: object, reason: unknown): Promise<void> {
+  let returnResult: unknown;
+  try {
+    const returnMethod = getIteratorMethod(
+      iterator,
+      'return',
+      'Iterator return() is not a function'
+    );
+    if (returnMethod === undefined) {
+      return PromiseResolve(undefined) as Promise<void>;
+    }
+    returnResult = uncurryThis(returnMethod)(iterator, reason);
+  } catch (e) {
+    return PromiseReject(e) as Promise<void>;
+  }
+  return PromisePrototypeThen(
+    writableInternals.promiseResolvedWith(returnResult),
+    (iterResult: unknown) => {
+      if (!isObjectLike(iterResult)) {
+        throw new TypeError('The return method must return an object');
+      }
+    }
+  ) as Promise<void>;
+}
+
+// WebIDL "close an async iterator" on the async-from-sync wrapper of the
+// user's sync iterator: the wrapper's return() calls the sync return() with
+// the reason, checks for an object, and resolves its `value` (after reading
+// `done`); the wrapper's own result is always an object. As for next(), the
+// continuation is reacted to directly (ledger #29).
+function closeSyncIterator(iterator: object, reason: unknown): Promise<void> {
+  let result: unknown;
+  try {
+    const returnMethod = getIteratorMethod(
+      iterator,
+      'return',
+      'Iterator return() is not a function'
+    );
+    if (returnMethod === undefined) {
+      return PromiseResolve(undefined) as Promise<void>;
+    }
+    result = uncurryThis(returnMethod)(iterator, reason);
+    if (!isObjectLike(result)) {
+      throw new TypeError('The return method must return an object');
+    }
+  } catch (e) {
+    return PromiseReject(e) as Promise<void>;
+  }
+  return asyncFromSyncContinuation(iterator, result as object, false, () => {});
+}
+
+function readableStreamFromIterable<R>(
+  asyncIterable: unknown
+): ReadableStream<R> {
+  // WebIDL async_sequence conversion.
+  if (!isObjectLike(asyncIterable)) {
+    throw new TypeError('The argument must be sync or async iterable');
+  }
+  const iterable = asyncIterable as object;
+  const asyncMethod = getIteratorMethod(
+    iterable,
+    SymbolAsyncIterator,
+    'The @@asyncIterator method is not a function'
+  );
+  let source: UnderlyingDefaultSource<R>;
+  if (asyncMethod !== undefined) {
+    const { iterator, next } = openIterator(iterable, asyncMethod);
+    source = {
+      __proto__: null,
+      // WebIDL "get the next value".
+      pull(controller: ReadableStreamDefaultControllerType): Promise<void> {
+        let nextResult: object;
+        try {
+          nextResult = iteratorNext(iterator, next);
+        } catch (e) {
+          return PromiseReject(e) as Promise<void>;
+        }
+        return PromisePrototypeThen(
+          writableInternals.promiseResolvedWith(nextResult),
+          (iterResult: unknown) => {
+            if (!isObjectLike(iterResult)) {
+              throw new TypeError('The result of next() must be an object');
+            }
+            if ((iterResult as { done?: unknown }).done) {
+              defaultControllerClose(controller);
+            } else {
+              defaultControllerEnqueue(
+                controller,
+                (iterResult as { value?: unknown }).value
+              );
+            }
+          }
+        ) as Promise<void>;
+      },
+      cancel(reason: unknown): Promise<void> {
+        return closeAsyncIterator(iterator, reason);
+      },
+    } as UnderlyingDefaultSource<R>;
+  } else {
+    const syncMethod = getIteratorMethod(
+      iterable,
+      SymbolIterator,
+      'The @@iterator method is not a function'
+    );
+    if (syncMethod === undefined) {
+      throw new TypeError('The argument must be sync or async iterable');
+    }
+    const { iterator, next } = openIterator(iterable, syncMethod);
+    source = {
+      __proto__: null,
+      // The async-from-sync wrapper's next(), then "get the next value" on
+      // its result, which is always an object: nothing more to check. The
+      // continuation is reacted to directly (ledger #29; see above).
+      pull(controller: ReadableStreamDefaultControllerType): Promise<void> {
+        let result: object;
+        try {
+          result = iteratorNext(iterator, next);
+        } catch (e) {
+          return PromiseReject(e) as Promise<void>;
+        }
+        return asyncFromSyncContinuation(
+          iterator,
+          result,
+          true,
+          (value: unknown, done: boolean) => {
+            if (done) {
+              defaultControllerClose(controller);
+            } else {
+              defaultControllerEnqueue(controller, value);
+            }
+          }
+        );
+      },
+      cancel(reason: unknown): Promise<void> {
+        return closeSyncIterator(iterator, reason);
+      },
+    } as UnderlyingDefaultSource<R>;
+  }
+  return new ReadableStream<R>(source, kFromStrategy as QueuingStrategy<R>);
+}
+
 let assertIsReadableStream: <W>(self: ReadableStream<W>) => void;
 
 class ReadableStream<R> {
@@ -3212,8 +3814,9 @@ class ReadableStream<R> {
   // during controller setup, removed on cancel/tee. A queued stream that
   // has been teed (the source's own stream, or a branch teed again) keeps
   // none: its former consumer's place in the queue went to the two
-  // branches, and it is left a permanently locked, inert shell (see
-  // readableStreamTee).
+  // branches, and it is left permanently locked. The source's own stream
+  // still closes and errors with the source; a branch teed again is closed
+  // at the tee (see readableStreamTee).
   #consumer?: StreamConsumerType<R> | undefined;
   #disturbed: boolean = false;
   #state: 'readable' | 'closed' | 'errored' = 'readable';
@@ -3258,6 +3861,12 @@ class ReadableStream<R> {
 
     setReadableStreamInteropErrorHook = (stream, hook) => {
       stream.#interopErrorHook = hook;
+    };
+
+    closeReadableStreamHusk = (stream) => {
+      stream.#controller = undefined;
+      stream.#consumer = undefined;
+      readableStreamClose(stream);
     };
 
     isReadableStreamPendingClosure = <R>(stream: ReadableStream<R>) => {
@@ -3358,7 +3967,7 @@ class ReadableStream<R> {
     readableStreamPipeThroughTo = <R>(
       source: ReadableStream<R>,
       destination: WritableStreamType<R>,
-      options?: StreamPipeOptions
+      options: ConvertedPipeOptions
     ) => {
       // The pending-closure gate (see #pendingClosure). The prototype
       // pipeThrough reaches pipeToInternal through here WITHOUT passing
@@ -3387,9 +3996,20 @@ class ReadableStream<R> {
     readableStreamPipeTo = <R>(
       source: ReadableStream<R>,
       destination: WritableStreamType<R>,
-      options: StreamPipeOptions = kEmptyDictionary as StreamPipeOptions
+      options: unknown = kEmptyDictionary
     ): Promise<void> => {
       try {
+        // WebIDL argument conversion first: the destination brand check,
+        // then the options, all before the locked checks and before the
+        // fast path below permanently consumes both endpoints. Both paths
+        // receive the converted values and never re-read the user's object.
+        if (!writableInternals.isWritableStream(destination)) {
+          throw new TypeError(
+            "Failed to execute 'pipeTo': destination is not a WritableStream"
+          );
+        }
+        const converted = convertPipeOptions(options);
+        const { preventAbort, preventCancel, preventClose } = converted;
         if (isReadableStreamLocked(source)) {
           throw new TypeError('Cannot pipe a stream that is locked');
         }
@@ -3399,47 +4019,6 @@ class ReadableStream<R> {
         if (source.#pendingClosure) {
           throw pendingClosureError();
         }
-        // WebIDL: null coerces to {} for optional dictionaries.
-        if (options === null) options = kEmptyDictionary as StreamPipeOptions;
-        if (!isActualObject(options)) {
-          throw new TypeError('Pipe options must be an object');
-        }
-        // Convert the options ONCE, before any extraction: the fast path
-        // below permanently consumes both endpoints, so validation (and
-        // the user-observable getter side effects, in the spec-mandated
-        // §4.9.1 order) must happen while both streams are still
-        // untouched. Both paths below receive the converted values as
-        // plain data properties; neither re-reads the user's options
-        // object.
-        const preventAbort = !!options.preventAbort;
-        const preventCancel = !!options.preventCancel;
-        const preventClose = !!options.preventClose;
-        const signal = options.signal;
-        if (signal !== undefined) {
-          // Brand check (same check and error text as the JS pump). Under
-          // the modern JSG layout the captured `aborted` getter throws for
-          // non-AbortSignal receivers; under the instance-property layout
-          // (old compat dates) the capture is a plain read that cannot
-          // brand-check, so additionally require the boolean a genuine
-          // signal's own data property carries. (A deliberately forged
-          // {aborted: boolean} object can slip through under old dates
-          // only; the fast path's C++ typed unwrap still rejects it.)
-          let aborted: unknown;
-          try {
-            aborted = AbortSignalAbortedGet(signal);
-          } catch {
-            throw new TypeError('options.signal must be an AbortSignal');
-          }
-          if (typeof aborted !== 'boolean') {
-            throw new TypeError('options.signal must be an AbortSignal');
-          }
-        }
-        const converted = {
-          preventAbort,
-          preventCancel,
-          preventClose,
-          signal,
-        } as StreamPipeOptions;
 
         // PIPE DISPATCH: if both source and dest are native-backed, take
         // the fast path -- extract both and let the sink's pipeFrom hook
@@ -3466,16 +4045,16 @@ class ReadableStream<R> {
         // TODO(streams-ts): revisit extending the fast path to the
         // prevent* options (e.g. reversible extraction) so those pipes can
         // also run entirely at the C++ layer.
-        // Brand-check the destination before probing for native markers so
-        // a Proxy's getOwnPropertyDescriptor trap cannot observe the symbol.
+        // The destination is brand-checked above, so a Proxy's
+        // getOwnPropertyDescriptor trap cannot observe the symbol.
         const sourceExtractor = ObjectGetOwnPropertyDescriptor(
           source,
           kExtractNativeSource
         )?.value as ((this: ReadableStream<R>) => object) | undefined;
-        const sinkExtractor = writableInternals.isWritableStream(destination)
-          ? (ObjectGetOwnPropertyDescriptor(destination, kExtractNativeSink)
-              ?.value as ((this: object) => object) | undefined)
-          : undefined;
+        const sinkExtractor = ObjectGetOwnPropertyDescriptor(
+          destination,
+          kExtractNativeSink
+        )?.value as ((this: object) => object) | undefined;
         if (
           sourceExtractor !== undefined &&
           sinkExtractor !== undefined &&
@@ -3503,7 +4082,7 @@ class ReadableStream<R> {
             unknown
           >;
           const pipeFrom = nativeSink.pipeFrom as
-            | ((source: object, opts: StreamPipeOptions) => Promise<void>)
+            | ((source: object, opts: ConvertedPipeOptions) => Promise<void>)
             | undefined;
           if (pipeFrom === undefined) {
             throw new TypeError(
@@ -3518,6 +4097,37 @@ class ReadableStream<R> {
       }
     };
 
+    readableStreamErrorBranch = <R>(
+      stream: ReadableStream<R>,
+      reason: unknown
+    ) => {
+      if (stream.#state !== 'readable') return;
+      const controller = stream.#controller;
+      if (controller === undefined) return;
+      // QUEUED INVARIANT: a tee branch of a queued stream — its consumer is
+      // necessarily a QueueCursor (tee precedent); sanctioned cast.
+      const cursor = stream.#consumer as QueueCursorType<R, R> | undefined;
+      if (cursor === undefined) return;
+      stream.#consumer = undefined;
+      // The stream errors before its pending reads reject (spec
+      // ReadableStreamError).
+      readableStreamError(stream, reason);
+      cursor.errorAllReads(reason);
+      // Decided BEFORE the cursor's removal, for the reasons given at
+      // #consumerLeaving (as in QueueCursor.cancelStream). The controller is
+      // queued: its branch's consumer is a QueueCursor (above).
+      markPromiseHandled(
+        controllerConsumerErrored(
+          controller as
+            | ReadableStreamDefaultControllerType
+            | ReadableByteStreamControllerType,
+          reason,
+          cursor.queue.cursorCount === 1
+        )
+      );
+      cursor.queue.removeCursor(cursor);
+    };
+
     // BACKEND-DISPATCH: tee is one of the five sanctioned dispatch points
     // (native-stream-integration.md §10). The native branch runs first:
     // the source's tee hook produces a PAIR of new native source objects
@@ -3525,8 +4135,8 @@ class ReadableStream<R> {
     // ReadableStream via ordinary construction. Branches are fully
     // independent — no shared consumer and no composite-cancel wiring
     // (deliberate divergence from the queued model below: branch cancels
-    // go to each branch's OWN source). The parent becomes the same inert
-    // locked shell as in the queued model.
+    // go to each branch's OWN source). The parent is left locked and
+    // closed (closeReadableStreamHusk).
     readableStreamTee = <R>(stream: ReadableStream<R>) => {
       // The locked precondition lives HERE (not in the prototype method) so that every
       // entry point shares it -- the method after its brand assert, and the C++
@@ -3541,14 +4151,15 @@ class ReadableStream<R> {
       if (isNativeController(controller)) {
         if (stream.#state !== 'readable') {
           // Closed/errored native parents produce two branches in the
-          // same state, mirroring the queued behavior below — without
-          // touching the (closed) source.
+          // same state and are locked, mirroring the queued behavior
+          // below — without touching the (closed) source.
           const b1 = new ReadableStream<R>(kPrivateSymbol as never);
           const b2 = new ReadableStream<R>(kPrivateSymbol as never);
           b1.#state = stream.#state;
           b2.#state = stream.#state;
           b1.#storedError = stream.#storedError;
           b2.#storedError = stream.#storedError;
+          acquireReadableStreamDefaultReader(stream);
           return [b1, b2] as [ReadableStream<R>, ReadableStream<R>];
         }
         // Sources from the tee hook are full native sources; ordinary
@@ -3560,10 +4171,10 @@ class ReadableStream<R> {
         const branch2 = new ReadableStream<R>(
           sources[1] as UnderlyingSource<R>
         );
-        stream.#consumer = undefined;
         if (!isReadableStreamLocked(stream)) {
           acquireReadableStreamDefaultReader(stream);
         }
+        closeReadableStreamHusk(stream);
         return [branch1, branch2] as [ReadableStream<R>, ReadableStream<R>];
       }
       const state = stream.#state;
@@ -3601,6 +4212,7 @@ class ReadableStream<R> {
         // all-cursors-gone hook mid-tee, dropping the buffered entries and
         // releasing the source.
         const totalSize = cursor.remainingSize;
+        const wasSole = queue.singleCursor === cursor;
         branch1.#consumer = isBytes
           ? new ByteStreamCursor(
               queue,
@@ -3637,8 +4249,14 @@ class ReadableStream<R> {
           const to2 = branch2.#consumer as unknown as ByteStreamCursorType;
           to1.adoptReleasedBytes(from);
           to2.adoptReleasedBytes(from);
-          byteControllerInvalidateByobRequest(
-            controller as ReadableByteStreamController
+          // A branch shares the controller with its siblings, so a
+          // fractional fill at close errors it alone.
+          to1.errorStreamCallback = errorTeeBranchFromCursor;
+          to2.errorStreamCallback = errorTeeBranchFromCursor;
+          byteControllerOnFork(
+            controller as ReadableByteStreamController,
+            from,
+            wasSole
           );
         }
         queue.removeCursor(cursor);
@@ -3656,11 +4274,14 @@ class ReadableStream<R> {
       // consumers to the same queue.
 
       // Per spec, tee() locks the original permanently. Acquire a real
-      // reader (never exposed, so it can never be released) — the original
-      // becomes an inert locked shell that retains only enough state to
-      // report locked === true.
+      // reader (never exposed, so it can never be released).
       if (!isReadableStreamLocked(stream)) {
         acquireReadableStreamDefaultReader(stream);
+      }
+      // A teed branch (not the source's own stream) consumes nothing now,
+      // and no source event would ever reach it: close it.
+      if (controller !== undefined && controllerStream(controller) !== stream) {
+        closeReadableStreamHusk(stream);
       }
 
       return [branch1, branch2] as [ReadableStream<R>, ReadableStream<R>];
@@ -3692,10 +4313,10 @@ class ReadableStream<R> {
 
       // Neutralize the original: no consumer, disturbed, permanently locked
       // via an internal reader (never exposed, never released) -- the same
-      // pattern extraction and tee use. Any tee-branch relationships now
-      // belong to the detached stream, so the husk's hooks are cleared: its
-      // transitions must not fire the tee wiring, and a (force-)cancel of
-      // the husk must not relay to a tee parent.
+      // pattern extraction and tee use. A native husk is disturbed, locked
+      // and closed instead (closeReadableStreamHusk drops its consumer); a
+      // queued one stays the controller's stream, closing and erroring with
+      // the source.
       const neutralize = (): void => {
         stream.#consumer = undefined;
         stream.#disturbed = true;
@@ -3725,7 +4346,11 @@ class ReadableStream<R> {
         // the source, so residual accounting -- including any stashed
         // bytes -- stays exact.
         const source = nativeControllerExtractSource(controller);
-        neutralize();
+        stream.#disturbed = true;
+        if (!isReadableStreamLocked(stream)) {
+          acquireReadableStreamDefaultReader(stream);
+        }
+        closeReadableStreamHusk(stream);
         const detached = new ReadableStream<R>(source as UnderlyingSource<R>);
         detached.#pendingClosure = stream.#pendingClosure;
         return detached;
@@ -3748,6 +4373,7 @@ class ReadableStream<R> {
         const isBytes =
           controller !== undefined && isByteStreamController(controller);
         const totalSize = cursor.remainingSize;
+        const wasSole = queue.singleCursor === cursor;
         // ORDER MATTERS: attach the shell's cursor BEFORE removing the
         // original -- removing the sole cursor first would fire the
         // all-cursors-gone hook mid-detach, dropping the buffered entries
@@ -3771,8 +4397,11 @@ class ReadableStream<R> {
           const from = cursor as unknown as ByteStreamCursorType;
           const to = shell.#consumer as unknown as ByteStreamCursorType;
           to.adoptReleasedBytes(from);
-          byteControllerInvalidateByobRequest(
-            controller as ReadableByteStreamController
+          to.errorStreamCallback = from.errorStreamCallback;
+          byteControllerOnFork(
+            controller as ReadableByteStreamController,
+            from,
+            wasSole
           );
         }
         queue.removeCursor(cursor);
@@ -3946,13 +4575,13 @@ class ReadableStream<R> {
       if (!isNativeController(controller)) {
         throw new TypeError('This stream is not backed by a native source');
       }
-      // Atomic: validate -> extract -> lock+disturb. No TOCTOU gap.
+      // Atomic: validate -> extract -> lock+disturb+close. No TOCTOU gap.
       const source = nativeControllerExtractSource(controller);
-      this.#consumer = undefined;
       this.#disturbed = true;
       // Permanent lock via an internal reader (never exposed, never
       // released) — same pattern as tee's parent locking.
       acquireReadableStreamDefaultReader(this);
+      closeReadableStreamHusk(this);
       return source;
     };
   }
@@ -4145,13 +4774,10 @@ class ReadableStream<R> {
     options: StreamPipeOptions = kEmptyDictionary as StreamPipeOptions
   ): ReadableStreamType<T> {
     assertIsReadableStream(this);
-    if (isReadableStreamLocked(this)) {
-      throw new TypeError('Cannot pipe a stream that is locked');
-    }
-    // WebIDL dictionary conversion: alphabetical member order means
-    // "readable" is read (and brand-checked) BEFORE "writable".  The
-    // WPT pipe-through.any.js tests verify that a bad readable stops
-    // the writable getter from ever being called.
+    // WebIDL argument conversion precedes the locked checks, so no user
+    // code runs between those checks and pipeToInternal taking the locks.
+    // Dictionary members are read in alphabetical order: "readable" is read
+    // and brand-checked before "writable" (WPT pipe-through.any.js).
     const readable = transform.readable;
     if (!isReadableStream(readable)) {
       throw new TypeError(
@@ -4159,15 +4785,19 @@ class ReadableStream<R> {
       );
     }
     const writable = transform.writable;
-    if (writable.locked) {
+    if (!writableInternals.isWritableStream(writable)) {
+      throw new TypeError(
+        "Failed to execute 'pipeThrough': writable is not a WritableStream"
+      );
+    }
+    const converted = convertPipeOptions(options);
+    if (isReadableStreamLocked(this)) {
+      throw new TypeError('Cannot pipe a stream that is locked');
+    }
+    if (writableInternals.isWritableStreamLocked(writable)) {
       throw new TypeError('Cannot pipe to a locked writable stream');
     }
-    // WebIDL: null coerces to {} for optional dictionaries.
-    if (options === null) options = kEmptyDictionary as StreamPipeOptions;
-    if (!isActualObject(options)) {
-      throw new TypeError('Pipe options must be an object');
-    }
-    const promise = readableStreamPipeThroughTo(this, writable, options);
+    const promise = readableStreamPipeThroughTo(this, writable, converted);
     markPromiseHandled(promise);
     return readable;
   }
@@ -4196,133 +4826,28 @@ class ReadableStream<R> {
   }
 
   static from<R>(
-    iterable: Iterable<R> | AsyncIterable<R> | R
+    asyncIterable: Iterable<R> | AsyncIterable<R> | R
   ): ReadableStream<R> {
-    // We are intentionally a bit more lax in what we accept here.
-    // The spec says AsyncIterable. We allow Iterable as well. If
-    // a String or ArrayBufferView is passed, we will treat it as
-    // a single chunk, rather than an iterable of chunks.
-    if (typeof iterable === 'string' || isArrayBufferView(iterable)) {
-      // INTENTIONAL SPEC DIVERGENCE: The spec treats strings as
-      // iterables and iterates them code-point-by-code-point. We
-      // deliberately treat strings (and ArrayBufferViews) as single
-      // chunks instead — iterating a string through a stream one
-      // code point at a time is both surprising to users and has
-      // terrible performance. This causes the WPT test
-      // "ReadableStream.from accepts a string" to fail.
-      // The ArrayBufferView case avoids traversing the patchable
-      // %ArrayIteratorPrototype%.
-      const chunk = iterable as unknown as R;
-      return new ReadableStream<R>({
-        pull(controller: ReadableStreamDefaultControllerType) {
-          defaultControllerEnqueue(controller, chunk);
-          defaultControllerClose(controller);
-        },
-      });
-    }
-
-    // It can't be an iterable if it's not an actual object.
-    if (isActualObject(iterable)) {
-      // Check @@asyncIterator first, but only if the value is non-null.
-      // Per spec, a null/undefined @@asyncIterator is ignored and we
-      // fall through to @@iterator (WPT: "from ignores a null @@asyncIterator").
-      const asyncMethod =
-        SymbolAsyncIterator in iterable
-          ? (iterable as AsyncIterable<R>)[primordials.SymbolAsyncIterator]
-          : undefined;
-      if (asyncMethod != null) {
-        const asyncIterator: AsyncIterator<R> =
-          uncurryThis(asyncMethod)(iterable);
-        if (!isObjectLike(asyncIterator)) {
-          throw new TypeError('The iterator method must return an object');
-        }
-        // HWM 0: the iterator's next() must only be called in response
-        // to a consumer read(), never eagerly (WPT: "calls next() after
-        // first read()").
-        return new ReadableStream<R>(
-          {
-            async pull(controller: ReadableStreamDefaultControllerType) {
-              // If the pull method throws, the stream will error.
-              const next = await asyncIterator.next();
-              if (!isObjectLike(next)) {
-                throw new TypeError('The result of next() must be an object');
-              }
-              if (next.done) {
-                return defaultControllerClose(controller);
-              }
-              defaultControllerEnqueue(controller, next.value);
-            },
-            async cancel(reason?: unknown) {
-              const returnMethod = asyncIterator.return;
-              // Per spec, iterators without a return() method cancel
-              // silently. But if return exists and is not callable,
-              // cancel must reject with TypeError.
-              if (returnMethod === undefined) return;
-              if (typeof returnMethod !== 'function') {
-                throw new TypeError('Iterator return() is not a function');
-              }
-              const ret = await uncurryThis(returnMethod)(
-                asyncIterator,
-                reason
-              );
-              if (!isObjectLike(ret)) {
-                throw new TypeError('The return method must return an object');
-              }
-            },
+    // INTENTIONAL SPEC DIVERGENCE: a string or an ArrayBufferView is one
+    // chunk. The spec rejects a string primitive (it is not an object),
+    // and iterates a typed array element by element and rejects a
+    // DataView; C++ iterates both strings and typed arrays (readable
+    // ledger #12 and #27). This fails the WPT case "ReadableStream.from
+    // throws on invalid iterables; specifically a string".
+    if (typeof asyncIterable === 'string' || isArrayBufferView(asyncIterable)) {
+      const chunk = asyncIterable as unknown as R;
+      return new ReadableStream<R>(
+        {
+          __proto__: null,
+          pull(controller: ReadableStreamDefaultControllerType) {
+            defaultControllerEnqueue(controller, chunk);
+            defaultControllerClose(controller);
           },
-          { highWaterMark: 0 }
-        );
-      }
-
-      if (SymbolIterator in iterable) {
-        const method = (iterable as Iterable<R>)[primordials.SymbolIterator];
-        const syncIterator: Iterator<R> = uncurryThis(method)(iterable);
-        if (!isObjectLike(syncIterator)) {
-          throw new TypeError('The iterator method must return an object');
-        }
-        // HWM 0: same rationale as the async path above — next() must
-        // be deferred until a consumer read() arrives.
-        return new ReadableStream<R>(
-          {
-            // The spec uses GetIterator(asyncIterable, async) which
-            // wraps the sync iterator in an async-from-sync wrapper.
-            // That wrapper awaits each value via PromiseResolve, so
-            // e.g. an iterable of promises yields the resolved values,
-            // not the Promise objects.
-            async pull(controller: ReadableStreamDefaultControllerType) {
-              // If the pull method throws, the stream will error.
-              const next = syncIterator.next();
-              if (!isObjectLike(next)) {
-                throw new TypeError('The result of next() must be an object');
-              }
-              // Await the value: the async-from-sync iterator wrapper
-              // resolves each value through PromiseResolve, which
-              // awaits thenables (including Promises).
-              const value = await next.value;
-              if (next.done) {
-                defaultControllerClose(controller);
-                return;
-              }
-              defaultControllerEnqueue(controller, value as R);
-            },
-            async cancel(reason?: unknown) {
-              const returnMethod = syncIterator.return;
-              if (returnMethod === undefined) return;
-              if (typeof returnMethod !== 'function') {
-                throw new TypeError('Iterator return() is not a function');
-              }
-              const ret = uncurryThis(returnMethod)(syncIterator, reason);
-              if (!isObjectLike(ret)) {
-                throw new TypeError('The return method must return an object');
-              }
-            },
-          },
-          { highWaterMark: 0 }
-        );
-      }
+        } as UnderlyingDefaultSource<R>,
+        kFromStrategy as QueuingStrategy<R>
+      );
     }
-
-    throw new TypeError('The argument must be sync or async iterable');
+    return readableStreamFromIterable<R>(asyncIterable);
   }
 
   values(
@@ -4344,7 +4869,6 @@ class ReadableStream<R> {
       reader,
       preventCancel: !!preventCancel,
       state: { done: false, current: undefined },
-      started: false,
     });
     return iter;
   }
@@ -4377,10 +4901,10 @@ class ReadableStream<R> {
   // controller, so it errors alone: its pending reads reject and it leaves
   // the queue as a cancelled branch would — the source is cancelled once
   // no consumer remains, with the reason of every consumer that left
-  // (controllerConsumerLeaving). A branch that has itself been teed
-  // consumes nothing and stays what tee() left it: a permanently locked,
-  // inert shell (the queued tee model's deliberate divergence from the
-  // spec's per-branch controllers).
+  // (controllerConsumerLeaving) — unless the source has already requested
+  // close, which no cancel follows (controllerConsumerErrored). A branch
+  // that has itself been teed was closed by tee() (closeReadableStreamHusk),
+  // so the hook does nothing to it.
   [kControllerErrorFunction](reason: unknown): void {
     assertIsReadableStream(this);
     if (this.#state !== 'readable') return;
@@ -4403,23 +4927,7 @@ class ReadableStream<R> {
       if (hook !== undefined) hook(reason);
       return;
     }
-    // QUEUED INVARIANT: a tee branch of a queued stream — its consumer is
-    // necessarily a QueueCursor (tee precedent); sanctioned cast.
-    const cursor = this.#consumer as QueueCursorType<R, R> | undefined;
-    if (cursor === undefined) return;
-    this.#consumer = undefined;
-    cursor.errorAllReads(reason);
-    readableStreamError(this, reason);
-    // Decided BEFORE the cursor's removal, for the reasons given at
-    // #consumerLeaving (as in QueueCursor.cancelStream).
-    markPromiseHandled(
-      controllerConsumerLeaving(
-        controller,
-        reason,
-        cursor.queue.cursorCount === 1
-      )
-    );
-    cursor.queue.removeCursor(cursor);
+    readableStreamErrorBranch(this, reason);
   }
 }
 
@@ -4583,27 +5091,16 @@ async function collectChunks<R>(
       // Drained chunks are untrusted values: any BufferSource contributes
       // its bytes, with the extent pinned at drain time; anything else
       // fails with the same TypeError the C++ bridge pump uses. Detached
-      // inputs are skipped with the other empties.
+      // or out-of-bounds inputs are skipped with the other empties (see
+      // view-extent.ts).
       let buffer: ArrayBufferLike;
       let byteOffset: number;
       let byteLength: number;
       if (isArrayBufferView(chunk)) {
-        // Probe detachment through the buffer before getViewInfo: a
-        // detached DataView's byteLength getter throws (typed arrays and
-        // raw buffers just report 0). A SharedArrayBuffer cannot be
-        // detached, and the probe rejects it as a receiver.
-        buffer =
-          TypedArrayPrototypeGetSymbolToStringTag(chunk) !== undefined
-            ? TypedArrayPrototypeGetBuffer(chunk)
-            : DataViewPrototypeGetBuffer(chunk as DataView);
-        if (
-          !isSharedArrayBuffer(buffer) &&
-          ArrayBufferPrototypeDetachedGet(buffer)
-        )
-          continue;
-        const info = getViewInfo(chunk);
-        byteOffset = info.byteOffset;
-        byteLength = info.byteLength;
+        const extent = viewByteExtent(chunk);
+        buffer = extent.buffer;
+        byteOffset = extent.byteOffset;
+        byteLength = extent.byteLength;
       } else if (isArrayBuffer(chunk)) {
         buffer = chunk;
         byteOffset = 0;
@@ -4846,6 +5343,18 @@ module.exports = {
     getStoredError: <R>(stream: ReadableStream<R>) =>
       getReadableStreamStoredError(stream),
     normalizeExpectedLength,
+    // The identity streams' delivery (see identity.ts): a batched enqueue
+    // with one notification, and the queue's consumption notification.
+    enqueueBytesBatch: (controller: object, chunks: ArrayBufferView[]) =>
+      byteControllerEnqueueBatch(
+        controller as ReadableByteStreamController,
+        chunks
+      ),
+    setConsumptionHook: (controller: object, hook: (() => void) | undefined) =>
+      byteControllerSetConsumptionHook(
+        controller as ReadableByteStreamController,
+        hook
+      ),
     setControllerExpectedLength: <R>(
       controller: object,
       length: bigint | undefined

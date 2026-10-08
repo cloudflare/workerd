@@ -63,13 +63,13 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Own<RequestObserver> metrics,
       kj::TaskSet& waitUntilTasks,
       bool tunnelExceptions,
-      kj::Maybe<kj::Own<BaseTracer>> workerTracer,
+      kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
       kj::Maybe<kj::String> cfBlobJson,
       kj::Maybe<Worker::VersionInfo> versionInfo,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
-      bool isDynamicDispatch,
+      IsDynamicDispatch isDynamicDispatch,
       kj::Maybe<kj::Own<AccessInfo>> accessInfo,
-      kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
+      kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
       Persistent fromPersistentStub,
       kj::Maybe<kj::String> clientAddress);
 
@@ -92,6 +92,7 @@ class WorkerEntrypoint final: public WorkerInterface {
 
  private:
   class ResponseSentTracker;
+  class ConnectResponseSentTracker;
 
   // Members initialized at startup.
 
@@ -121,10 +122,10 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::Own<void> ioContextDependency,
       kj::Rc<IoChannelFactory> ioChannelFactory,
       kj::Own<RequestObserver> metrics,
-      kj::Maybe<kj::Own<BaseTracer>> workerTracer,
+      kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
       kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
       kj::Maybe<kj::Own<AccessInfo>> accessInfo,
-      kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
+      kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory);
 
   kj::Promise<void> requestImpl(kj::HttpMethod method,
       kj::StringPtr url,
@@ -152,7 +153,7 @@ class WorkerEntrypoint final: public WorkerInterface {
       kj::TaskSet& waitUntilTasks,
       kj::Maybe<kj::Canceler&> canceler,
       bool tunnelExceptions,
-      bool isDynamicDispatch,
+      IsDynamicDispatch isDynamicDispatch,
       kj::Maybe<kj::String> entrypointName,
       Frankenvalue props,
       kj::Maybe<kj::String> cfBlobJson,
@@ -197,6 +198,34 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
   bool sent = false;
 };
 
+// Like ResponseSentTracker, for the response to a CONNECT request.
+class WorkerEntrypoint::ConnectResponseSentTracker final: public kj::HttpService::ConnectResponse {
+ public:
+  ConnectResponseSentTracker(kj::HttpService::ConnectResponse& inner): inner(inner) {}
+  KJ_DISALLOW_COPY_AND_MOVE(ConnectResponseSentTracker);
+
+  bool isSent() const {
+    return sent;
+  }
+
+  void accept(uint statusCode, kj::StringPtr statusText, const kj::HttpHeaders& headers) override {
+    sent = true;
+    inner.accept(statusCode, statusText, headers);
+  }
+
+  kj::Own<kj::AsyncOutputStream> reject(uint statusCode,
+      kj::StringPtr statusText,
+      const kj::HttpHeaders& headers,
+      kj::Maybe<uint64_t> expectedBodySize = kj::none) override {
+    sent = true;
+    return inner.reject(statusCode, statusText, headers, expectedBodySize);
+  }
+
+ private:
+  kj::HttpService::ConnectResponse& inner;
+  bool sent = false;
+};
+
 kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContext,
     kj::Own<const Worker> worker,
     kj::Maybe<kj::String> entrypointName,
@@ -208,13 +237,13 @@ kj::Own<WorkerInterface> WorkerEntrypoint::construct(ThreadContext& threadContex
     kj::Own<RequestObserver> metrics,
     kj::TaskSet& waitUntilTasks,
     bool tunnelExceptions,
-    kj::Maybe<kj::Own<BaseTracer>> workerTracer,
+    kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
     kj::Maybe<kj::String> cfBlobJson,
     kj::Maybe<Worker::VersionInfo> versionInfo,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
-    bool isDynamicDispatch,
+    IsDynamicDispatch isDynamicDispatch,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
-    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
+    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
     Persistent fromPersistentStub,
     kj::Maybe<kj::String> clientAddress) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::construct()");
@@ -252,7 +281,7 @@ WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
     kj::TaskSet& waitUntilTasks,
     kj::Maybe<kj::Canceler&> canceler,
     bool tunnelExceptions,
-    bool isDynamicDispatch,
+    IsDynamicDispatch isDynamicDispatch,
     kj::Maybe<kj::String> entrypointName,
     Frankenvalue props,
     kj::Maybe<kj::String> cfBlobJson,
@@ -262,7 +291,7 @@ WorkerEntrypoint::WorkerEntrypoint(kj::Badge<WorkerEntrypoint> badge,
       waitUntilTasks(waitUntilTasks),
       canceler(canceler),
       tunnelExceptions(tunnelExceptions),
-      isDynamicDispatch(isDynamicDispatch),
+      isDynamicDispatch(isDynamicDispatch.toBool()),
       entrypointName(kj::mv(entrypointName)),
       props(kj::mv(props)),
       cfBlobJson(kj::mv(cfBlobJson)),
@@ -275,10 +304,10 @@ void WorkerEntrypoint::init(kj::Own<const Worker> worker,
     kj::Own<void> ioContextDependency,
     kj::Rc<IoChannelFactory> ioChannelFactory,
     kj::Own<RequestObserver> metrics,
-    kj::Maybe<kj::Own<BaseTracer>> workerTracer,
+    kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
-    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
+    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory) {
   TRACE_EVENT("workerd", "WorkerEntrypoint::init()");
   // We need to construct the IoContext -- unless this is an actor and it already has a
   // IoContext, in which case we reuse it.
@@ -370,6 +399,13 @@ kj::Exception exceptionToPropagate(bool isInternalException, kj::Exception&& exc
   }
 }
 
+// True for a retry-claim or predecessor rejection, which the runtime raises before the fetch
+// handler runs. The sender classifies it by its details, so it must propagate unchanged.
+bool isActorDispatchRejection(const kj::Exception& exception) {
+  return exception.getDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID) != kj::none ||
+      exception.getDetail(jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID) != kj::none;
+}
+
 kj::Promise<void> WorkerEntrypoint::request(kj::HttpMethod method,
     kj::StringPtr url,
     const kj::HttpHeaders& headers,
@@ -405,9 +441,6 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
     workerTracer = t;
   }
 
-  // Claim before delivered() constructs an actor. This introduces no asynchronous boundary, so
-  // capability pipelining remains unchanged.
-  incomingRequest->getMetrics().claimRetryTokenBeforeUserCode();
   incomingRequest->delivered();
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
@@ -461,7 +494,8 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
       KJ_TRY {
         api::DeferredProxy<void> deferredProxy = co_await context.run(
             [this, method, url, &headers, &requestBody, &wrappedResponse = *wrappedResponse,
-                entrypointName = entrypointName.clone()](
+                entrypointName = entrypointName.clone(),
+                metrics = kj::addRef(incomingRequest->getMetrics())](
                 Worker::Lock& lock, IoContext& context) mutable {
           TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(&context));
           TRACE_EVENT(
@@ -482,11 +516,17 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
                     ->getSignal());
           }
 
+          // Getting the handler finishes actor construction, so the claim sees a constructed actor
+          // but still precedes the choice and invocation of the fetch handler.
+          auto handler = lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo),
+              kj::mv(props), context.getActor(), isDynamicDispatch);
+          auto retryable = IsRetryableHandler::NO;
+          KJ_IF_SOME(h, handler) {
+            retryable = h->isFetchRetryable(lock);
+          }
+          metrics->claimRetryTokenBeforeUserCode(retryable);
           return lock.getGlobalScope().request(method, url, headers, requestBody, wrappedResponse,
-              cfBlobJson, lock,
-              lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props),
-                  context.getActor(), isDynamicDispatch),
-              kj::mv(signal));
+              cfBlobJson, lock, handler, kj::mv(signal));
         });
 
         // Record the proxy task and the tracer return time on the success path.
@@ -506,10 +546,14 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         TRACE_EVENT(
             "workerd", "WorkerEntrypoint::request() catch", PERFETTO_FLOW_FROM_POINTER(this));
         // Log JS exceptions to the JS console, if inspector is attached. This also has the effect
-        // of logging internal errors to syslog.
+        // of logging internal errors to syslog. A dispatch rejection is a runtime decision rather
+        // than an uncaught exception, so it is not logged.
         loggedExceptionEarlier = true;
-        context.logUncaughtExceptionAsync(
-            UncaughtExceptionSource::REQUEST_HANDLER, exception.clone());
+        bool dispatchRejected = isActorDispatchRejection(exception);
+        if (!dispatchRejected) {
+          context.logUncaughtExceptionAsync(
+              UncaughtExceptionSource::REQUEST_HANDLER, exception.clone());
+        }
 
         // Record a failure if cancellation interrupts either wait. Otherwise the WorkerInterface
         // wrapper reports it. An output-gate failure takes precedence over the handler failure.
@@ -524,12 +568,15 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
 
         // Do not allow the exception to escape the isolate without waiting for the output gate to
         // open. Note that in the success path, this is taken care of in `FetchEvent::respondWith()`.
-        // If the gate is broken, that exception propagates and replaces the original.
+        // If the gate is broken, that exception propagates and replaces the original, unless the
+        // original is a dispatch rejection.
         KJ_TRY {
           co_await context.waitForOutputLocks();
         }
         KJ_CATCH(e) {
-          outputGateException.emplace(kj::mv(e));
+          if (!dispatchRejected) {
+            outputGateException.emplace(kj::mv(e));
+          }
         }
         TRACE_EVENT("workerd", "WorkerEntrypoint::request() after output lock wait",
             PERFETTO_TERMINATING_FLOW_FROM_POINTER(this));
@@ -623,14 +670,11 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
       // caller-side actor-call classifier knows this failure must not be retried as a fresh
       // delivery. Only DISCONNECTED failures participate in the delivery-position metric, so other
       // exception types need no annotation. Preserve not-delivered only for a predecessor rejection,
-      // which occurs before user code despite crossing this entrypoint. Set before
-      // exceptionToPropagate() so the detail survives the internal-exception description rewrite
-      // and serializes back across the RPC boundary.
+      // which occurs before the fetch handler runs, though possibly after the actor constructor.
+      // Set before exceptionToPropagate() so the detail survives the internal-exception description
+      // rewrite and serializes back across the RPC boundary.
       if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
-        bool predecessorRejected =
-            exception.getDetail(jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID) != kj::none &&
-            exception.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none;
-        if (!predecessorRejected) {
+        if (!jsg::isActorPredecessorRejection(exception)) {
           exception.releaseDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID);
           exception.setDetail(
               jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
@@ -737,12 +781,13 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
   incomingRequest->delivered();
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
+  auto wrappedResponse = kj::heap<ConnectResponseSentTracker>(response);
 
   return wrapWithCanceler(
       context
-          .run([this, &headers, &connection, &response, entrypointName = entrypointName.clone(),
-                   versionInfo = kj::mv(versionInfo), host = kj::str(host),
-                   clientAddress = kj::mv(clientAddress)](
+          .run([this, &headers, &connection, &response = *wrappedResponse,
+                   entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
+                   host = kj::str(host), clientAddress = kj::mv(clientAddress)](
                    Worker::Lock& lock, IoContext& context) mutable {
     jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
     jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
@@ -774,8 +819,8 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     // The request has been canceled, but allow it to continue executing in the background.
     incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
   }))
-          .catch_([this, isActor, &response, metrics = kj::mv(metricsForCatch), workerTracer](
-                      kj::Exception&& exception) mutable -> kj::Promise<void> {
+          .catch_([this, isActor, &response = *wrappedResponse, metrics = kj::mv(metricsForCatch),
+                      workerTracer](kj::Exception&& exception) mutable -> kj::Promise<void> {
     markExceptionAsDelivered(exception);
 
     // Don't return errors to end user.
@@ -816,6 +861,10 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       // an exception.
       metrics->reportFailure(exception);
 
+      // Once the tunnel is answered, there is no status left to replace with an error, and ending
+      // it is all that remains.
+      if (response.isSent()) return kj::READY_NOW;
+
       KJ_TRY {
         kj::HttpHeaders headers(threadContext.getHeaderTable());
         if (exception.getType() == kj::Exception::Type::OVERLOADED) {
@@ -838,7 +887,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
       return kj::READY_NOW;
     }
-  }));
+  })).attach(kj::mv(wrappedResponse));
 }
 
 kj::Promise<void> WorkerEntrypoint::prewarm(kj::StringPtr url) {
@@ -1128,13 +1177,13 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::Own<RequestObserver> metrics,
     kj::TaskSet& waitUntilTasks,
     bool tunnelExceptions,
-    kj::Maybe<kj::Own<BaseTracer>> workerTracer,
+    kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
     kj::Maybe<kj::String> cfBlobJson,
     kj::Maybe<Worker::VersionInfo> versionInfo,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
-    bool isDynamicDispatch,
+    IsDynamicDispatch isDynamicDispatch,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
-    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
+    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory,
     Persistent fromPersistentStub,
     kj::Maybe<kj::String> clientAddress) {
   return WorkerEntrypoint::construct(threadContext, kj::mv(worker), kj::mv(entrypointName),

@@ -51,5 +51,5 @@ tests plus the divergence ledger. Read that file first.
 ## Running
 
 ```
-bazel test //src/tests/node/... --nocache_test_results
+bazel test //src/tests/node/...
 ```

@@ -52,6 +52,7 @@ Subdirectory `AGENTS.md` files provide component-specific context (key classes, 
 
 - **`.wd-test` tests**: Cap'n Proto config files that define a `Workerd.Config` with embedded JS/TS modules. Bazel macro: `wd_test()`. See format details below.
 - **C++ tests**: KJ-based unit tests (`.c++` files). Bazel macro: `kj_test()`.
+- **Rust unit tests**: `<module>-test.rs` beside the module under test, never inline; run by the crate's test target (`<name>_test` for a crate defined with a `wd_rust_*` macro; otherwise see the package's `BUILD.bazel`). See `src/rust/AGENTS.md` §UNIT TEST FILES.
 - **Node.js compatibility tests**: `just node-test <test_name>`
 - **Web Platform Tests**: `just wpt-test <test_name>`
 - **Benchmarks**: `just bench <path>` (e.g., `just bench mimetype`)
@@ -245,6 +246,10 @@ KJ library provides several constructs that should be preferred to improve the s
 - `kj::ArrayPtr<T>` should be used instead of `T*`
 - `kj::Ptr<T>` should be used instead of `T&` when it is bound by T's lifetime
 
+Declare data owners before views into that data (members, lambda captures, locals), so views are
+constructed after and destroyed before the memory they reference. When an owner can be released
+while the object lives on, clear the view at the same time.
+
 ### Error Handling
 
 - `KJ_IF_SOME` for unwrapping `kj::Maybe` (1400+ uses across the codebase)
@@ -296,6 +301,10 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 - Review additions to the standard API surface exposed to Workers, including
   those introduced by V8 updates. Record the compatibility decision in the
   commit message: use a compatibility flag or explicitly accept the risk.
+- For a V8 update, identify every newly default-enabled standard API and
+  record its disposition. If the update disables all such APIs and the audit
+  finds no others, stating both facts in the commit message satisfies this
+  requirement.
 - Autogates support gradual rollout and fast rollback, but do not preserve
   existing Workers' API surface. Compatibility failures may be invisible to
   runtime metrics or reported late by customers, so a quiet rollout alone

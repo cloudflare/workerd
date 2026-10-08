@@ -308,7 +308,7 @@ KJ_TEST("check put multiple wraps operations in a transaction and rollback on er
   putKVs.add(ActorCache::KeyValuePair{kj::str("foo3"), kj::heapArray("bar3"_kj.asBytes())});
 
   // Now create a key that's too large. Should fail with  string or blob too big: SQLITE_TOOBIG
-  auto tooLongKey = kj::heapString(4 * 1024 * 1024 + 1);
+  auto tooLongKey = kj::heapString(SqliteDatabase::MAX_ROW_LENGTH + 1);
   tooLongKey.asArray().fill('a');
   // Add it to our KV array
   putKVs.add(ActorCache::KeyValuePair{kj::str(tooLongKey), kj::heapArray("bar"_kj.asBytes())});

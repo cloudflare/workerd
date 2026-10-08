@@ -8,6 +8,11 @@
 //! Lets Rust code delegate to (decorate) a C++ worker. This is the reverse of `RustWorkerInterface`
 //! (bridge.h), which exposes a Rust `worker::Interface` to C++.
 
+#![allow(
+    unsafe_code,
+    reason = "awaits the C++ `WorkerInterface` through the bridge's unsafe async functions"
+)]
+
 use std::pin::Pin;
 use std::time::SystemTime;
 
@@ -123,6 +128,13 @@ impl Interface for CxxWorkerInterface {
         let result =
             unsafe { bridge::worker_run_alarm(self.inner.as_mut(), nanos, retry_count) }.await?;
         Ok(result.into())
+    }
+
+    async fn abandon_alarm(&mut self, scheduled_time: &SystemTime) -> Result<Option<SystemTime>> {
+        let nanos = KjDate::from(*scheduled_time).nanoseconds();
+        // SAFETY: the returned future borrows self.inner for its duration.
+        let stored = unsafe { bridge::worker_abandon_alarm(self.inner.as_mut(), nanos) }.await?;
+        Ok(Option::from(stored).map(|nanos: i64| KjDate::from(nanos).into()))
     }
 
     async fn custom_event(&mut self, event: KjOwn<CustomEvent>) -> Result<CustomEventResult> {

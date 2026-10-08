@@ -21,13 +21,17 @@ wd_cc_library(
 
 rust_library(
     name = "kj-rs-tokio",
-    srcs = glob(["*.rs"]),
+    srcs = glob(
+        ["*.rs"],
+        exclude = ["*-test.rs"],
+    ),
     compile_data = glob(["*.h"]),
     edition = "2024",
     link_deps = [
         ":bridge",
         ":kj-rs-tokio-lib",
     ],
+    lint_config = "//build/rust:lints",
     target_compatible_with = select({
         "@//build/config:no_build": ["@platforms//:incompatible"],
         "//conditions:default": [],
@@ -35,12 +39,14 @@ rust_library(
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/cxx",
+        "//src/rust/cxx/kj-rs",
         "@crates_vendor//:tokio",
     ],
 )
 
 wd_rust_test(
     name = "kj-rs-tokio_test",
+    compile_data = glob(["*-test.rs"]),
     crate = "kj-rs-tokio",
     edition = "2024",
 )
@@ -61,5 +67,6 @@ rust_cxx_bridge(
         # forbids.
         "@capnp-cpp//src/kj:kj-async-core",
         "//src/rust/cxx:core",
+        "//src/rust/cxx/kj-rs",
     ],
 )

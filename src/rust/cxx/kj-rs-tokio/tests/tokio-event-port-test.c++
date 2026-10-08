@@ -433,6 +433,10 @@ void fulfillTestFulfiller(int32_t value) {
   KJ_ASSERT_NONNULL(testFulfiller, "setTestFulfiller() not called")->fulfill(kj::cp(value));
 }
 
+void waitForTimer(kj_rs_tokio::TokioAsyncIoContext &context, uint64_t ms) {
+  context.getTimer().afterDelay(ms * kj::MILLISECONDS).wait(context.getWaitScope());
+}
+
 namespace {
 
 KJ_TEST("context destruction with a spawned task HOLDING a KJ timer promise is clean") {
@@ -678,9 +682,9 @@ KJ_TEST("a spawned task re-entering promise.wait() gets a kj::Exception, not an 
   setTestWaitScope(&ws);
   KJ_DEFER(setTestWaitScope(nullptr));
 
-  // Documented in tokio-event-port.h: nesting block_on inside block_on is rejected by tokio;
-  // the panic must reach the task as a catchable exception (an Err across the bridge), and the
-  // outer loop must stay healthy.
+  // Documented in tokio-event-port.h: the loop is already inside a wait(), so KJ refuses the
+  // nested one; that must reach the task as a catchable exception (an Err across the bridge),
+  // and the outer loop must stay healthy.
   nested_wait_from_task().wait(ws);
   KJ_EXPECT(kj::evalLater([]() { return 3; }).wait(ws) == 3);
 }
@@ -782,6 +786,15 @@ KJ_TEST("a detached spawned task (JoinHandle dropped) still runs to completion")
     io.getTimer().afterDelay(2 * kj::MILLISECONDS).wait(ws);
   }
   KJ_EXPECT(completed_task_count() == before + 1);
+}
+
+// =======================================================================================
+// kj_rs_tokio::Runtime: the same loop, owned by Rust (runtime.rs; its unit tests are in
+// runtime-test.rs). This test needs C++ on that loop. Its body is Rust (test_helpers.rs); a failed
+// assertion there is a panic, which reaches the KJ_TEST as a kj::Exception.
+
+KJ_TEST("promise.wait() on a Runtime's context sleeps after a block_on") {
+  runtime_context_waits_after_block_on();
 }
 
 }  // namespace

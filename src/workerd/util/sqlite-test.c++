@@ -106,6 +106,52 @@ void checkSql(SqliteDatabase& db) {
   }
 }
 
+class MockSqliteObserver: public SqliteObserver {
+ public:
+  struct Event {
+    kj::Maybe<kj::String> queryStatement;
+    uint64_t queryRowsRead;
+    uint64_t queryRowsWritten;
+    kj::Duration queryLatency;
+    uint64_t dbWalBytesWritten;
+    int queryError;
+    int extendedErrorCode;
+    bool isInternalQuery;
+    kj::Maybe<kj::String> queryErrorDescription;
+  };
+
+  uint64_t rowsRead = 0;
+  uint64_t rowsWritten = 0;
+  kj::Vector<Event> events;
+
+  void addQueryStats(uint64_t read, uint64_t written) override {
+    rowsRead += read;
+    rowsWritten += written;
+  }
+
+  void reportQueryEvent(kj::Maybe<kj::String> queryStatement,
+      uint64_t queryRowsRead,
+      uint64_t queryRowsWritten,
+      kj::Duration queryLatency,
+      uint64_t dbWalBytesWritten,
+      int queryError,
+      int extendedErrorCode,
+      bool isInternalQuery,
+      kj::Maybe<kj::String> queryErrorDescription) override {
+    events.add(Event{
+      .queryStatement = kj::mv(queryStatement),
+      .queryRowsRead = queryRowsRead,
+      .queryRowsWritten = queryRowsWritten,
+      .queryLatency = queryLatency,
+      .dbWalBytesWritten = dbWalBytesWritten,
+      .queryError = queryError,
+      .extendedErrorCode = extendedErrorCode,
+      .isInternalQuery = isInternalQuery,
+      .queryErrorDescription = kj::mv(queryErrorDescription),
+    });
+  }
+};
+
 class DefaultRegulatorForTest: public SqliteDatabase::Regulator {
  public:
   bool isAllowedName(kj::StringPtr name) const override {
@@ -856,17 +902,6 @@ KJ_TEST("reset database") {
 }
 
 KJ_TEST("SQLite observer addQueryStats") {
-  class TestSqliteObserver: public SqliteObserver {
-   public:
-    void addQueryStats(uint64_t read, uint64_t written) override {
-      rowsRead += read;
-      rowsWritten += written;
-    }
-
-    uint64_t rowsRead = 0;
-    uint64_t rowsWritten = 0;
-  };
-
   class TestQueryStatsRegulator: public SqliteDatabase::Regulator {
    public:
     bool shouldAddQueryStats() const override {
@@ -876,7 +911,7 @@ KJ_TEST("SQLite observer addQueryStats") {
 
   TempDirOnDisk dir;
   SqliteDatabase::Vfs vfs(*dir);
-  TestSqliteObserver sqliteObserver = TestSqliteObserver();
+  MockSqliteObserver sqliteObserver = MockSqliteObserver();
   static TestQueryStatsRegulator regulator;
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
       /*sqliteMaxMemoryBytes=*/kj::maxValue, /*sqliteMaxMemoryPerProcessBytes=*/kj::maxValue,
@@ -948,29 +983,9 @@ KJ_TEST("SQLite observer addQueryStats") {
 }
 
 KJ_TEST("SQLite observer reportQueryEvent") {
-  class TestSqliteObserver: public SqliteObserver {
-   public:
-    int capturedEvents = 0;
-
-    void reportQueryEvent(kj::Maybe<kj::String> queryStatement,
-        uint64_t queryRowsRead,
-        uint64_t queryRowsWritten,
-        kj::Duration,
-        uint64_t dbWalBytesWritten,
-        int queryError,
-        int extendedErrorCode,
-        bool isInternalQuery,
-        kj::Maybe<kj::String> queryErrorDescription) override {
-      KJ_IF_SOME(err, queryErrorDescription) {
-        KJ_ASSERT(err.contains("query canceled because reset()"));
-      }
-      capturedEvents++;
-    }
-  };
-
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
-  TestSqliteObserver sqliteObserver;
+  MockSqliteObserver sqliteObserver;
   SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
       /*sqliteMaxMemoryBytes=*/kj::maxValue, /*sqliteMaxMemoryPerProcessBytes=*/kj::maxValue,
       sqliteObserver);
@@ -996,7 +1011,7 @@ KJ_TEST("SQLite observer reportQueryEvent") {
   }
   {
     // Expect 4 events so far: PRAGMA, CREATE, INSERT, SELECT.
-    KJ_ASSERT(sqliteObserver.capturedEvents == 4);
+    KJ_ASSERT(sqliteObserver.events.size() == 4);
 
     // SELECT #2 (canceled due to reset later)
     auto stmt = db.prepare("SELECT * FROM people");
@@ -1013,11 +1028,38 @@ KJ_TEST("SQLite observer reportQueryEvent") {
     KJ_EXPECT_THROW_MESSAGE("query canceled because reset()", query.getInt(0));
 
     // 1 more event: PRAGMA
-    KJ_ASSERT(sqliteObserver.capturedEvents == 5);
+    KJ_ASSERT(sqliteObserver.events.size() == 5);
   }
 
   // Cancelled SELECT #2 emiited with an errorDesc after query goes out of scope
-  KJ_ASSERT(sqliteObserver.capturedEvents == 6);
+  KJ_ASSERT(sqliteObserver.events.size() == 6);
+
+  // Assert that the test failed because of reset
+  auto& err = KJ_ASSERT_NONNULL(sqliteObserver.events[5].queryErrorDescription);
+  KJ_EXPECT(err.contains("query canceled because reset()"), err);
+}
+
+KJ_TEST("SQLite observer reportQueryEvent covers prepare failures") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  MockSqliteObserver sqliteObserver;
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/kj::maxValue, /*sqliteMaxMemoryPerProcessBytes=*/kj::maxValue,
+      sqliteObserver);
+
+  KJ_EXPECT_THROW_MESSAGE("no such table: table_does_not_exist: SQLITE_ERROR",
+      db.run("SELECT * FROM table_does_not_exist"));
+
+  KJ_ASSERT(sqliteObserver.events.size() == 1);
+
+  auto& event = sqliteObserver.events[0];
+  auto& queryStmt = KJ_ASSERT_NONNULL(event.queryStatement);
+
+  KJ_EXPECT(event.queryError == SQLITE_ERROR, event.queryError);
+  KJ_EXPECT(queryStmt.contains("table_does_not_exist"), queryStmt);
+  KJ_EXPECT(event.queryErrorDescription == kj::none, event.queryErrorDescription);
+  KJ_EXPECT(event.queryRowsRead == 0, event.queryRowsRead);
+  KJ_EXPECT(event.queryRowsWritten == 0, event.queryRowsWritten);
 }
 
 KJ_TEST("SQLite failed statement reset") {
@@ -1091,6 +1133,35 @@ KJ_TEST("SQLite extended error codes in messages") {
     // The message should NOT have a parenthesized extended code like "(SQLITE_ERROR_...)".
     KJ_EXPECT(!desc.contains("(SQLITE_ERROR_"), desc);
   }
+}
+
+KJ_TEST("SQLite error context is appended to internal errors only") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  db.setErrorContext(kj::str("actorId = abc123"));
+
+  db.run("CREATE TABLE things (id INTEGER PRIMARY KEY)");
+  db.run("INSERT INTO things VALUES (1)");
+
+  // Failures while preparing and while stepping both carry the context.
+  KJ_EXPECT_THROW_MESSAGE("no such table: nonexistent: SQLITE_ERROR; actorId = abc123",
+      db.run("SELECT * FROM nonexistent"));
+  KJ_EXPECT_THROW_MESSAGE(
+      "SQLITE_CONSTRAINT_PRIMARYKEY); actorId = abc123", db.run("INSERT INTO things VALUES (1)"));
+
+  // Errors reported by the regulator do not.
+  class ReportingRegulator: public SqliteDatabase::Regulator {
+   public:
+    void onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const override {
+      kj::throwFatalException(KJ_EXCEPTION(FAILED, "reported", message));
+    }
+  };
+  static ReportingRegulator regulator;
+  auto exception = KJ_ASSERT_NONNULL(kj::runCatchingExceptions(
+      [&]() { db.run({.regulator = regulator}, "SELECT * FROM nonexistent"); }));
+  KJ_EXPECT(exception.getDescription().contains("no such table: nonexistent"), exception);
+  KJ_EXPECT(!exception.getDescription().contains("abc123"), exception);
 }
 
 class MockRollbackCallback {
@@ -1510,6 +1581,7 @@ class ErrorInjectableFile final: public kj::File, public kj::AtomicRefcounted {
 // kj::Directory that serves ErrorInjectableFiles to SQLite.
 class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRefcounted {
  public:
+  kj::Maybe<kj::Exception> error;
   kj::Maybe<kj::Own<ErrorInjectableFile>> dbFile;
   kj::Maybe<kj::Own<ErrorInjectableFile>> walFile;
   kj::Maybe<kj::Own<ErrorInjectableFile>> journalFile;
@@ -1538,6 +1610,9 @@ class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRef
   // implements kj::Directory
 
   kj::Maybe<kj::Own<const kj::ReadableFile>> tryOpenFile(kj::PathPtr path) const override {
+    KJ_IF_SOME(e, error) {
+      kj::throwFatalException(e.clone());
+    }
     return getSlot(path).map([](kj::Own<ErrorInjectableFile>& file) { return file->clone(); });
   }
 
@@ -1636,6 +1711,17 @@ KJ_TEST("SQLite open errors are tagged for DO Sentry") {
   expectDoSentryDisposition(exception);
 }
 
+KJ_TEST("SQLite open preserves directory VFS exceptions") {
+  auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
+  dir->error = KJ_EXCEPTION(FAILED, "test-directory-vfs-error");
+  SqliteDatabase::Vfs vfs(*dir);
+  auto exception = KJ_ASSERT_NONNULL(
+      kj::runCatchingExceptions([&]() { SqliteDatabase(vfs, kj::Path({"db"}), kj::none); }));
+  KJ_EXPECT(exception.getDescription() == "test-directory-vfs-error", exception);
+  auto disposition = KJ_ASSERT_NONNULL(exception.getDetail(SENTRY_TAG_DETAIL_ID));
+  KJ_EXPECT(disposition.asChars() == "SENTRY_DO"_kj, exception);
+}
+
 KJ_TEST("SQLite memory metering enforces SQLITE_NOMEM when limit is exceeded") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
@@ -1689,10 +1775,11 @@ KJ_TEST("SQLite memory metering tracks allocations correctly") {
       "memory should decrease when running `PRAGMA shrink_memory`");
 }
 
-KJ_TEST("I/O exceptions pass through SQLite") {
+KJ_TEST("I/O exceptions pass through SQLite with the error context") {
   auto dir = kj::atomicRefcounted<ErrorInjectableDirectory>();
   SqliteDatabase::Vfs vfs(*dir);
   SqliteDatabase db(vfs, kj::Path({"db"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  db.setErrorContext(kj::str("actorId = abc123"));
 
   db.run({.regulator = SqliteDatabase::TRUSTED}, kj::str(R"(
     CREATE TABLE IF NOT EXISTS things (
@@ -1703,7 +1790,9 @@ KJ_TEST("I/O exceptions pass through SQLite") {
   )"));
 
   // Now arrange for an error on write().
-  KJ_ASSERT_NONNULL(dir->dbFile)->error = KJ_EXCEPTION(FAILED, "test-vfs-error");
+  auto vfsError = KJ_EXCEPTION(FAILED, "test-vfs-error");
+  vfsError.setDetail(SENTRY_TAG_DETAIL_ID, kj::heapArray("NOSENTRY"_kj.asBytes()));
+  KJ_ASSERT_NONNULL(dir->dbFile)->error = kj::mv(vfsError);
 
   // It should pass through.
   auto exception = KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() {
@@ -1711,8 +1800,16 @@ KJ_TEST("I/O exceptions pass through SQLite") {
     INSERT INTO things(value) VALUES (456);
   )"));
   }));
-  KJ_EXPECT(exception.getDescription() == "test-vfs-error", exception);
-  expectDoSentryDisposition(exception);
+  KJ_EXPECT(exception.getDescription() == "test-vfs-error; actorId = abc123", exception);
+  auto disposition = KJ_ASSERT_NONNULL(exception.getDetail(SENTRY_TAG_DETAIL_ID));
+  KJ_EXPECT(disposition.asChars() == "NOSENTRY"_kj, exception);
+
+  // Application-visible exceptions pass through unchanged.
+  KJ_ASSERT_NONNULL(dir->dbFile)->error = KJ_EXCEPTION(FAILED, "jsg.Error: test-vfs-error");
+  auto tunneled = KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() {
+    db.run({.regulator = SqliteDatabase::TRUSTED}, "INSERT INTO things(value) VALUES (789)");
+  }));
+  KJ_EXPECT(tunneled.getDescription() == "jsg.Error: test-vfs-error", tunneled);
 }
 
 void testCriticalError(const char* expectedErrorMessage,

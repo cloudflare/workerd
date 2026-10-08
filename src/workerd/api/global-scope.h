@@ -19,6 +19,7 @@
 
 #include <workerd/io/features.h>
 #include <workerd/io/io-timers.h>
+#include <workerd/io/observer.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
 
@@ -205,7 +206,7 @@ class TestController: public jsg::Object {
   JSG_RESOURCE_TYPE(TestController) {}
 };
 
-// Structured types for the cache purge API (ctx.cache.purge()).
+// Structured types for the cache purge APIs (ctx.cache.purge() and ctx.cache.invalidate()).
 // These match the coreless-purge-ingest WorkersCachePurgeEntrypoint types.
 // NOTE: TypeScript stubs for CachePurgeError, CachePurgeResult, CachePurgeOptions, and
 // CacheContext are manually maintained in src/cloudflare/internal/workers.d.ts. If you change
@@ -242,8 +243,22 @@ class CacheContext: public jsg::Object {
       const jsg::TypeHandler<CachePurgeResult>& resultHandler,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler);
 
+  // Mark cached content matching `options` as stale without deleting it. Accepts the same options
+  // as purge(). The next matching request is revalidated: the Worker receives a conditional
+  // request built from the stored validators (e.g. `If-None-Match` from the cached `ETag`). If
+  // the Worker responds with `304 Not Modified`, the stored body is kept and served; a full
+  // response replaces the cached one.
+  //
+  // The default implementation throws without an overriding IoContext.
+  virtual jsg::Promise<CachePurgeResult> invalidate(jsg::Lock& js,
+      CachePurgeOptions options,
+      const jsg::TypeHandler<CachePurgeOptions>& optionsHandler,
+      const jsg::TypeHandler<CachePurgeResult>& resultHandler,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler);
+
   JSG_RESOURCE_TYPE(CacheContext) {
     JSG_METHOD(purge);
+    JSG_METHOD(invalidate);
   }
 };
 
@@ -565,7 +580,7 @@ struct ExportedHandler {
     type ExportedHandlerConnectHandler<Env = unknown, Props = unknown> = (socket: Socket, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
     type ExportedHandlerTailHandler<Env = unknown, Props = unknown> = (events: TraceItem[], env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
     type ExportedHandlerTraceHandler<Env = unknown, Props = unknown> = (traces: TraceItem[], env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
-    type ExportedHandlerTailStreamHandler<Env = unknown, Props = unknown> = (event : TailStream.TailEvent<TailStream.Onset>, env: Env, ctx: ExecutionContext<Props>) => TailStream.TailEventHandlerType | Promise<TailStream.TailEventHandlerType>;
+    type ExportedHandlerTailStreamHandler<Env = unknown, Props = unknown> = (event : TailStream.TailEvent<TailStream.Onset>, env: Env, ctx: ExecutionContext<Props>) => TailStream.TailEventHandlerType | undefined | Promise<TailStream.TailEventHandlerType | undefined>;
     type ExportedHandlerScheduledHandler<Env = unknown, Props = unknown> = (controller: ScheduledController, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
     type ExportedHandlerQueueHandler<Env = unknown, Message = unknown, Props = unknown> = (batch: MessageBatch<Message>, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
     type ExportedHandlerTestHandler<Env = unknown, Props = unknown> = (controller: TestController, env: Env, ctx: ExecutionContext<Props>) => void | Promise<void>;
@@ -610,7 +625,14 @@ struct ExportedHandler {
   }
 
   ExportedHandler clone(jsg::Lock& js);
+
+  // YES if `fetch` was decorated with @retryable and DURABLE_OBJECT_RETRIES_USERLAND is enabled.
+  IsRetryableHandler isFetchRetryable(jsg::Lock& js);
 };
+
+// V8 private key set on functions decorated with `@retryable` from "cloudflare:durable-objects".
+// Reading it runs no user code, so a claim can check it before the handler or method runs.
+inline constexpr auto RETRYABLE_METHOD_PRIVATE_KEY = "cloudflare:durable-objects:retryable"_kjc;
 
 // An approximation of Node.js setImmediate `Immediate` object.
 // This is used only when the `nodejs_compat_v2` compatibility flag is enabled.

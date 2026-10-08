@@ -8,11 +8,13 @@ load("//:build/wd_test.bzl", "wd_test")
 cache_suite_srcs = glob(["*.js"]) + ["cache-modules.capnp"]
 
 wd_test(
+    size = "large",
     src = "cache-cpp.wd-test",
     data = cache_suite_srcs,
 )
 
 wd_test(
+    size = "large",
     src = "cache-ts.wd-test",
     args = ["--experimental"],
     data = cache_suite_srcs,
@@ -23,6 +25,7 @@ wd_test(
 # allowing the modern path selected by transformstream_enable_standard_constructor
 # and duplicating the main C++ cell.
 wd_test(
+    size = "large",
     src = "cache-cpp-legacy.wd-test",
     data = cache_suite_srcs,
     generate_all_compat_flags_variant = False,

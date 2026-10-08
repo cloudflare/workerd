@@ -9,7 +9,6 @@
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
 #include <workerd/tests/test-fixture.h>
-#include <workerd/util/autogate.h>
 
 #include <kj/async.h>
 #include <kj/test.h>
@@ -76,8 +75,8 @@ KJ_TEST("trace onset synchronizes an idle actor's clock before reading it") {
   auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
       kj::Array<kj::String>(), kj::none, ExecutionModel::DURABLE_OBJECT);
   auto traceRef = kj::addRef(*trace);
-  kj::Own<BaseTracer> tracer = kj::refcounted<WorkerTracer>(
-      kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::none);
+  kj::Rc<BaseTracer> tracer =
+      kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::none);
   auto request = fixture.newUndeliveredIncomingRequest(*context, kj::mv(tracer));
 
   KJ_EXPECT(request->now() == kj::UNIX_EPOCH);
@@ -88,11 +87,32 @@ KJ_TEST("trace onset synchronizes an idle actor's clock before reading it") {
   fixture.drainAndDestroy(kj::mv(request));
 }
 
-KJ_TEST("final context task cleanup follows the JSRPC tracing gate") {
+KJ_TEST("cloning an incoming request tracer keeps it alive until the clone is dropped") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+      kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
+  auto tracer =
+      kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::none);
+  auto complete = tracer->onComplete();
+  auto request = fixture.newUndeliveredIncomingRequest(*context, kj::mv(tracer));
+  KJ_ASSERT_NONNULL(request->getWorkerTracer()).setEventInfo(*request, tracing::CustomEventInfo());
+  request->delivered();
+
+  auto clone = request->getWorkerTracer().clone();
+  KJ_ASSERT_NONNULL(clone);
+  fixture.drainAndDestroy(kj::mv(request));
+  KJ_EXPECT(!complete.poll(fixture.getWaitScope()));
+
+  clone = kj::none;
+  KJ_ASSERT(complete.poll(fixture.getWaitScope()));
+  complete.wait(fixture.getWaitScope());
+}
+
+KJ_TEST("final request cancels context tasks before it stops being current") {
   TestFixture fixture;
   auto request = fixture.newIncomingRequest();
   auto& context = request->getContext();
-  auto gateEnabled = util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING);
 
   bool taskWasCanceledWhileRequestWasCurrent = false;
   context.addTask(kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() {
@@ -101,13 +121,11 @@ KJ_TEST("final context task cleanup follows the JSRPC tracing gate") {
 
   fixture.drainAndDestroy(kj::mv(request));
 
-  KJ_EXPECT(taskWasCanceledWhileRequestWasCurrent == gateEnabled);
+  KJ_EXPECT(taskWasCanceledWhileRequestWasCurrent);
 }
 
 KJ_TEST(
     "request owning the final IoContext reference cancels reentry before it stops being current") {
-  if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) return;
-
   TestFixture fixture;
   auto request = fixture.newIncomingRequest();
   auto& context = request->getContext();
@@ -134,8 +152,6 @@ KJ_TEST(
 }
 
 KJ_TEST("request owning the final IoContext reference preserves its abort reason") {
-  if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) return;
-
   TestFixture fixture;
   auto request = fixture.newIncomingRequest();
   auto& context = request->getContext();
@@ -157,8 +173,6 @@ KJ_TEST("request owning the final IoContext reference preserves its abort reason
 }
 
 KJ_TEST("final request cancels wait-until tasks before it stops being current") {
-  if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) return;
-
   TestFixture fixture;
   auto request = fixture.newIncomingRequest();
   auto& context = request->getContext();
@@ -175,8 +189,6 @@ KJ_TEST("final request cancels wait-until tasks before it stops being current") 
 }
 
 KJ_TEST("final request completes cleanup after cancellation throws") {
-  if (!util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING)) return;
-
   class ThrowOnDestruction: private kj::UnwindDetector {
    public:
     ~ThrowOnDestruction() noexcept(false) {

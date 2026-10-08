@@ -429,9 +429,9 @@ class Container: public jsg::Object {
   class TcpPortWorkerInterface;
   class TcpPortOutgoingFactory;
 
-  // Per-TCP-port state for the tunnel-reuse optimization. Populated lazily by getTcpPort() when
-  // the container-tunnel-reuse autogate is enabled. Held via IoOwn because it holds KJ I/O objects
-  // (Cap'n Proto capabilities, kj streams) that must remain tied to the Durable Object's IoContext.
+  // Per-TCP-port state for the tunnel-reuse optimization. Populated lazily by getTcpPort(). Held
+  // via IoOwn because it holds KJ I/O objects (Cap'n Proto capabilities, kj streams) that must
+  // remain tied to the Durable Object's IoContext.
   class TcpPortState;
   kj::Maybe<IoOwn<kj::HashMap<int, kj::Rc<TcpPortState>>>> tcpPortStates;
 

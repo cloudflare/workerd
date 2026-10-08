@@ -1,4 +1,5 @@
 load("@rules_rust//rust:defs.bzl", "rust_proc_macro", "rust_test")
+load("//:build/wd_rust_test.bzl", "split_rust_test_srcs")
 
 def wd_rust_proc_macro(
         name,
@@ -19,7 +20,7 @@ def wd_rust_proc_macro(
         test_deps: test-only dependencies.
         visibility: crate visibility.
     """
-    srcs = native.glob(["**/*.rs"])
+    srcs, test_srcs = split_rust_test_srcs(native.glob(["**/*.rs"]))
     crate_name = name.replace("-", "_")
 
     rust_proc_macro(
@@ -29,6 +30,7 @@ def wd_rust_proc_macro(
         deps = deps,
         visibility = visibility,
         data = data,
+        lint_config = "@workerd//build/rust:lints",
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
@@ -37,6 +39,7 @@ def wd_rust_proc_macro(
 
     rust_test(
         name = name + "_test",
+        compile_data = test_srcs,
         crate = ":" + name,
         env = {
             "RUST_BACKTRACE": "1",
@@ -46,10 +49,10 @@ def wd_rust_proc_macro(
             "RUST_TEST_THREADS": "1",
         } | test_env,
         experimental_use_cc_common_link = 1,
-        # Tag with cpu:4 since this target depends on linkopts_default.
-        tags = test_tags + ["no-coverage", "cpu:4"],
+        # Tag with cpu:2 since this target depends on linkopts_default.
+        tags = test_tags + ["no-coverage", "cpu:2"],
         deps = test_deps,
-        link_deps = ["@@//deps:rust_runtime", "//build/deps:linkopts_default"],
+        link_deps = ["@@//deps:rust_runtime", "@workerd//build/deps:linkopts_default"],
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],

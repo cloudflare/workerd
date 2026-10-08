@@ -617,9 +617,6 @@ kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::run(
     bool isDynamicDispatch) {
   auto& context = incomingRequest->getContext();
 
-  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
-    t.setEventInfo(*incomingRequest, tracing::ConnectEventInfo());
-  }
   incomingRequest->delivered();
 
   auto outcome = EventOutcome::OK;
@@ -892,11 +889,11 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
           // flush to complete. While it is unlikely to be GC'd while we are waiting because
           // the user code *likely* is holding a active reference to it at this point, we
           // don't want to take any chances. This prevents a possible UAF.
-          JSG_VISITABLE_LAMBDA((self = JSG_THIS, domain = kj::heapString(KJ_ASSERT_NONNULL(domain)),
-                                   tlsOptions = kj::mv(tlsOptions),
-                                   openedResolver = openedPrPair.resolver.addRef(js),
-                                   remoteAddress = mapCopyString(remoteAddress),
-                                   localAddress = mapCopyString(localAddress)),
+          JSG_VISITABLE_LAMBDA(
+              (self = JSG_THIS, domain = kj::heapString(KJ_ASSERT_NONNULL(domain)),
+                  tlsOptions = kj::mv(tlsOptions),
+                  openedResolver = openedPrPair.resolver.addRef(js),
+                  remoteAddress = remoteAddress.clone(), localAddress = localAddress.clone()),
               (self, openedResolver), (jsg::Lock & js) mutable {
                 auto& context = IoContext::current();
 
@@ -917,7 +914,8 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
                 } else {
                 }  // Needed to avoid compiler error/warning
 
-                // All non-secure sockets should have `connectionData` with a `tlsStarter`.
+                // All non-secure sockets should have `connectionData`, which will have a
+                // `tlsStarter` if startTls is supported.
                 // Though since it's inside an IoOwn, if the request's IoContext has ended
                 // then `connectionData` will be null. This can happen if the flush operation is taking
                 // a particularly long time (EW-8538), so we throw a JSG error if that's the case.
@@ -925,6 +923,17 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
                     "The connection was closed before startTls completed.");
 
                 auto& tlsStarter = connData->tlsStarter;
+
+                // The tlsStarter is an output parameter, filled in by whichever layer actually
+                // handled the CONNECT request. That layer leaves it empty when it has no way to
+                // perform a TLS handshake on the connection. There is nothing we can do about it at
+                // this point, so surface it to the application instead of failing an internal
+                // assert.
+                if (*tlsStarter == kj::none) {
+                openedResolver.reject(
+                    js, js.error("startTls() is not supported on this connection."));
+                JSG_FAIL_REQUIRE(Error, "startTls() is not supported on this connection.");
+                }
 
                 // Fork the starter promise because we need to create two separate things waiting
                 // on it below. The first is resolving the openedResolver with a JS promise that
@@ -963,10 +972,9 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   // The existing tlsStarter gets consumed and we won't need it again. Pass in an empty tlsStarter
   // to `setupSocket`.
   auto newTlsStarter = kj::heap<kj::TlsStarterCallback>();
-  return setupSocket(js, kj::newPromisedStream(kj::mv(secureStreamPromise)),
-      mapCopyString(remoteAddress), mapCopyString(localAddress), kj::mv(options),
-      kj::mv(newTlsStarter), SecureTransportKind::ON, protocol, kj::mv(domain), isDefaultFetchPort,
-      kj::mv(openedPrPair));
+  return setupSocket(js, kj::newPromisedStream(kj::mv(secureStreamPromise)), remoteAddress.clone(),
+      localAddress.clone(), kj::mv(options), kj::mv(newTlsStarter), SecureTransportKind::ON,
+      protocol, kj::mv(domain), isDefaultFetchPort, kj::mv(openedPrPair));
 }
 
 void Socket::handleProxyStatus(
@@ -1013,8 +1021,8 @@ void Socket::handleProxyStatus(
       // authority that the peer targeted.
       self->openedResolver.resolve(js,
           SocketInfo{
-            .remoteAddress = mapCopyString(self->remoteAddress),
-            .localAddress = mapCopyString(self->localAddress),
+            .remoteAddress = self->remoteAddress.clone(),
+            .localAddress = self->localAddress.clone(),
           });
     }
   };
@@ -1045,8 +1053,8 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
       // authority that the peer targeted.
       self->openedResolver.resolve(js,
           SocketInfo{
-            .remoteAddress = mapCopyString(self->remoteAddress),
-            .localAddress = mapCopyString(self->localAddress),
+            .remoteAddress = self->remoteAddress.clone(),
+            .localAddress = self->localAddress.clone(),
           });
     }
   };
@@ -1140,11 +1148,6 @@ jsg::Promise<void> Socket::maybeCloseWriteSide(jsg::Lock& js) {
 }
 
 void Socket::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
-  // With the gate off, fail the way a type that was never serializable does (see
-  // jsg::Serializer::throwDataCloneErrorForObject).
-  JSG_REQUIRE(util::Autogate::isEnabled(util::AutogateKey::SOCKET_RPC_TRANSFER), DOMDataCloneError,
-      "Could not serialize object of type \"Socket\". This type does not support serialization.");
-
   auto& handler = JSG_REQUIRE_NONNULL(
       serializer.getExternalHandler(), DOMDataCloneError, "Socket can only be serialized for RPC.");
   auto externalHandler = dynamic_cast<RpcSerializerExternalHandler*>(&handler);
@@ -1175,7 +1178,7 @@ void Socket::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // Serialize the socket metadata, referencing the stream externals
   // The call to write is synchronous, so capturing this is safe.
   externalHandler->write(
-      [this, remoteAddr = kj::str(remoteAddress), localAddr = mapCopyString(localAddress),
+      [this, remoteAddr = kj::str(remoteAddress), localAddr = localAddress.clone(),
           transport = toRpcSecureTransport(secureTransport),
           allowHalfOpen = getAllowHalfOpen(options)](
           rpc::JsValue::External::Builder builder) mutable {
@@ -1199,13 +1202,6 @@ jsg::Ref<Socket> Socket::deserialize(jsg::Lock& js,
     rpc::SerializationTag tag,
     jsg::Deserializer& deserializer,
     const jsg::TypeHandler<jsg::Ref<Socket>>& socketHandler) {
-  // Only a peer with the gate on can produce this tag. Reject rather than accept it, so that
-  // turning the gate off is a complete kill switch. (The same gate check keeps
-  // RpcDeserializerExternalHandler::prepare() from hydrating socket externals, so the claim
-  // below stays empty and this rejection is reached.)
-  JSG_REQUIRE(util::Autogate::isEnabled(util::AutogateKey::SOCKET_RPC_TRANSFER), DOMDataCloneError,
-      "Transferring a Socket over RPC is not supported.");
-
   auto& handler = JSG_REQUIRE_NONNULL(deserializer.getExternalHandler(), DOMDataCloneError,
       "Socket can only be deserialized from RPC.");
   auto externalHandler = dynamic_cast<RpcDeserializerExternalHandler*>(&handler);
@@ -1315,7 +1311,7 @@ jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
   openedPrPair.resolver.resolve(js,
       SocketInfo{
         .remoteAddress = kj::str(remoteAddr),
-        .localAddress = mapCopyString(localAddr),
+        .localAddress = localAddr.clone(),
       });
 
   // Set up disconnection detection now. This part is pure kj and safe under the deserialize scope;

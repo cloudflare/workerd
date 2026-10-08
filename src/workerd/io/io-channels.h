@@ -88,6 +88,14 @@ class TimerChannel {
   virtual kj::TimePoint nowForLimitTimeout() {
     return kj::systemPreciseMonotonicClock().now();
   }
+
+  // Returns a promise that resolves at an absolute deadline on the same clock as
+  // nowForLimitTimeout().
+  virtual kj::Promise<void> atLimitTimeout(kj::TimePoint deadline) {
+    auto now = nowForLimitTimeout();
+    if (deadline <= now) return kj::READY_NOW;
+    return afterLimitTimeout(deadline - now);
+  }
 };
 
 class WorkerStubChannel;
@@ -171,7 +179,7 @@ class IoChannelFactory: public virtual kj::Refcounted {
     // (contexts which aren't inherently tokenizeable), then `restoredSelfTokenFactory` is
     // appropriate to pass down to the IoContext as the `selfTokenFactory`, for use by the
     // implementation of `ctx.restore()`, so that it can determine its own base token.
-    kj::Maybe<kj::Own<SelfTokenFactory>> restoredSelfTokenFactory;
+    kj::Maybe<kj::Rc<SelfTokenFactory>> restoredSelfTokenFactory;
 
     // Present when the caller classified this as a retry-eligible actor request and selected its
     // logical-call token.
@@ -580,7 +588,7 @@ struct DynamicWorkerSource {
   Frankenvalue env;
 
   // Where should global fetch() (and connect()) be sent?
-  kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> globalOutbound;
+  kj::Maybe<kj::Rc<IoChannelFactory::SubrequestChannel>> globalOutbound;
 
   // Tail workers that should receive tail events for invocations of the dynamic worker.
   kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tails;
@@ -607,7 +615,7 @@ struct DynamicWorkerSource {
       .compatibilityFlags = compatibilityFlags,
       .limits = limits.map([](auto& limits) { return limits.clone(); }),
       .env = env.clone(),
-      .globalOutbound = mapAddRef(globalOutbound),
+      .globalOutbound = globalOutbound.clone(),
       .tails = KJ_MAP(t, tails) { return kj::addRef(*t); },
       .streamingTails = KJ_MAP(t, streamingTails) { return kj::addRef(*t); },
       .ownContent = kj::mv(newOwnContent),

@@ -31,6 +31,7 @@
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/util.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/thread-scopes.h>
@@ -94,6 +95,14 @@ jsg::Promise<CachePurgeResult> CacheContext::purge(jsg::Lock& js,
     const jsg::TypeHandler<CachePurgeResult>& resultHandler,
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler) {
   JSG_FAIL_REQUIRE(Error, "Cache purge is not available in this context.");
+}
+
+jsg::Promise<CachePurgeResult> CacheContext::invalidate(jsg::Lock& js,
+    CachePurgeOptions options,
+    const jsg::TypeHandler<CachePurgeOptions>& optionsHandler,
+    const jsg::TypeHandler<CachePurgeResult>& resultHandler,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler) {
+  JSG_FAIL_REQUIRE(Error, "Cache invalidation is not available in this context.");
 }
 
 jsg::Ref<Tracing> ExecutionContext::getTracing(jsg::Lock& js) {
@@ -176,29 +185,41 @@ void ExecutionContext::abort(jsg::Lock& js, jsg::Optional<jsg::Value> reason) {
 
 namespace {
 template <typename T>
-jsg::LenientOptional<T> mapAddRef(jsg::Lock& js, jsg::LenientOptional<T>& function) {
+jsg::LenientOptional<T> cloneFunction(jsg::Lock& js, jsg::LenientOptional<T>& function) {
   return function.map([&](T& a) { return a.addRef(js); });
 }
 }  // namespace
 
 ExportedHandler ExportedHandler::clone(jsg::Lock& js) {
   return ExportedHandler{
-    .fetch{mapAddRef(js, fetch)},
-    .connect{mapAddRef(js, connect)},
-    .tail{mapAddRef(js, tail)},
-    .trace{mapAddRef(js, trace)},
-    .tailStream{mapAddRef(js, tailStream)},
-    .scheduled{mapAddRef(js, scheduled)},
-    .alarm{mapAddRef(js, alarm)},
-    .test{mapAddRef(js, test)},
-    .webSocketMessage{mapAddRef(js, webSocketMessage)},
-    .webSocketClose{mapAddRef(js, webSocketClose)},
-    .webSocketError{mapAddRef(js, webSocketError)},
+    .fetch{cloneFunction(js, fetch)},
+    .connect{cloneFunction(js, connect)},
+    .tail{cloneFunction(js, tail)},
+    .trace{cloneFunction(js, trace)},
+    .tailStream{cloneFunction(js, tailStream)},
+    .scheduled{cloneFunction(js, scheduled)},
+    .alarm{cloneFunction(js, alarm)},
+    .test{cloneFunction(js, test)},
+    .webSocketMessage{cloneFunction(js, webSocketMessage)},
+    .webSocketClose{cloneFunction(js, webSocketClose)},
+    .webSocketError{cloneFunction(js, webSocketError)},
     .self{js.v8Isolate, self.getHandle(js.v8Isolate)},
     .env{env.addRef(js)},
     .ctx{getCtx()},
     .missingSuperclass = missingSuperclass,
   };
+}
+
+IsRetryableHandler ExportedHandler::isFetchRetryable(jsg::Lock& js) {
+  if (!util::Autogate::isEnabled(util::AutogateKey::DURABLE_OBJECT_RETRIES_USERLAND)) {
+    return IsRetryableHandler::NO;
+  }
+  KJ_IF_SOME(f, fetch) {
+    KJ_IF_SOME(handle, f.tryGetHandle(js.v8Isolate)) {
+      return IsRetryableHandler(jsg::JsObject(handle).hasPrivate(js, RETRYABLE_METHOD_PRIVATE_KEY));
+    }
+  }
+  return IsRetryableHandler::NO;
 }
 
 ServiceWorkerGlobalScope::ServiceWorkerGlobalScope()
@@ -456,7 +477,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
     }
 
     auto client = ioContext.getHttpClient(
-        IoContext::NEXT_CLIENT_CHANNEL, false, mapCopyString(cfBlobJson), "fetch_default"_kjc);
+        IoContext::NEXT_CLIENT_CHANNEL, false, cfBlobJson.clone(), "fetch_default"_kjc);
     auto adapter = kj::newHttpService(*client);
     auto promise = adapter->request(method, url, headers, requestBody, response);
     // Default handling doesn't rely on the IoContext at all so we can return it as a
@@ -1306,8 +1327,8 @@ jsg::Ref<StorageManager> Navigator::getStorage(jsg::Lock& js) {
 bool Navigator::sendBeacon(jsg::Lock& js, kj::String url, jsg::Optional<Body::Initializer> body) {
   KJ_IF_SOME(context, IoContext::tryCurrent()) {
     auto v8Context = js.v8Context();
-    auto& global =
-        jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(v8Context, v8Context->Global());
+    auto& global = jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
+        js.v8Isolate, v8Context, v8Context->Global(), jsg::kNonResourceWrappableTagRange);
     auto promise = global.fetch(js, kj::mv(url),
         Request::InitializerDict{
           .method = kj::str("POST"),

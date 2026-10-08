@@ -182,7 +182,7 @@ DynamicWorkerSource WorkerLoader::toDynamicWorkerSource(jsg::Lock& js,
         " bytes.");
   }
 
-  kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> globalOutbound;
+  kj::Maybe<kj::Rc<IoChannelFactory::SubrequestChannel>> globalOutbound;
   KJ_IF_SOME(maybeOut, code.globalOutbound) {
     KJ_IF_SOME(out, maybeOut) {
       auto channel = out->getSubrequestChannel(ioctx);

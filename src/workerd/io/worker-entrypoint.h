@@ -8,6 +8,7 @@
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-channels.h>
 #include <workerd/io/worker.h>
+#include <workerd/util/strong-bool.h>
 
 namespace workerd {
 
@@ -17,6 +18,8 @@ class RequestObserver;
 class ThreadContext;
 class WorkerInterface;
 class BaseTracer;
+
+WD_STRONG_BOOL(IsDynamicDispatch);
 
 namespace tracing {
 class InvocationSpanContext;
@@ -41,7 +44,7 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     kj::Own<RequestObserver> metrics,
     kj::TaskSet& waitUntilTasks,
     bool tunnelExceptions,
-    kj::Maybe<kj::Own<BaseTracer>> workerTracer,
+    kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
     kj::Maybe<kj::String> cfBlobJson,
     kj::Maybe<Worker::VersionInfo> versionInfo,
     // The trigger invocation span may be propagated from other request. If it is provided,
@@ -49,11 +52,11 @@ kj::Own<WorkerInterface> newWorkerEntrypoint(ThreadContext& threadContext,
     // subtask of another request. If it is kj::none, then this invocation is a top-level
     // invocation.
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan = kj::none,
-    bool isDynamicDispatch = false,
+    IsDynamicDispatch isDynamicDispatch = IsDynamicDispatch::NO,
     // Per-request Cloudflare Access info. Supplied by the embedding application; standalone
     // workerd passes kj::none, which causes `ctx.access` to be `undefined` in JS.
     kj::Maybe<kj::Own<AccessInfo>> accessInfo = kj::none,
-    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory = kj::none,
+    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory = kj::none,
     // `Persistent::YES` if this request was started on a channel reconstructed from a stored
     // ("persistent") stub. The entrypoint re-verifies that the target worker still has the
     // `allow_irrevocable_stub_storage` compat flag enabled and rejects the request otherwise.

@@ -2,10 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Production code must not panic; test code is exempt via clippy.toml allow-*-in-tests.
-#![deny(clippy::expect_used, clippy::panic, clippy::unreachable)]
-#![deny(clippy::todo, clippy::unimplemented)]
-
 use std::pin::Pin;
 
 use jsg::ToJS;
@@ -17,6 +13,7 @@ pub mod dns;
 pub mod url;
 
 #[cxx::bridge(namespace = "workerd::rust::api")]
+#[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {
     #[namespace = "workerd::rust::jsg"]
     unsafe extern "C++" {
@@ -26,18 +23,16 @@ mod ffi {
     }
     extern "Rust" {
         pub fn register_nodejs_modules(registry: Pin<&mut ModuleRegistry>);
-
-        // The Rust implementation of `node-internal:url`. Registered separately
-        // because it is gated by the C++ `NODEJS_URL_RUST` autogate; when the
-        // gate is off the C++ `UrlUtil` registers that module instead (see
-        // node.h). Kept as its own entry point to avoid a boolean parameter.
-        pub fn register_nodejs_url_module(registry: Pin<&mut ModuleRegistry>);
     }
 }
 
-pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
+#[expect(
+    unsafe_code,
+    reason = "builds a `Lock` from the isolate pointer C++ hands to each module callback"
+)]
+pub fn register_nodejs_modules(mut registry: Pin<&mut ffi::ModuleRegistry>) {
     jsg::modules::add_builtin(
-        registry,
+        registry.as_mut(),
         "node-internal:dns",
         // SAFETY: isolate is valid and locked — called from C++ module registration.
         |isolate| unsafe {
@@ -47,9 +42,6 @@ pub fn register_nodejs_modules(registry: Pin<&mut ffi::ModuleRegistry>) {
         },
         jsg::modules::ModuleType::Internal,
     );
-}
-
-pub fn register_nodejs_url_module(registry: Pin<&mut ffi::ModuleRegistry>) {
     jsg::modules::add_builtin(
         registry,
         "node-internal:url",
@@ -64,22 +56,5 @@ pub fn register_nodejs_url_module(registry: Pin<&mut ffi::ModuleRegistry>) {
 }
 
 #[cfg(test)]
-mod tests {
-    use jsg_test::Harness;
-
-    use super::*;
-
-    #[test]
-    fn test_wrap_resource_equality() {
-        let harness = Harness::new();
-        harness.run_in_context(|lock, _ctx| {
-            let dns_util = DnsUtil::new();
-
-            let lhs = dns_util.clone().to_js(lock);
-            let rhs = dns_util.to_js(lock);
-
-            assert_eq!(lhs, rhs);
-            Ok(())
-        });
-    }
-}
+#[path = "lib-test.rs"]
+mod tests;

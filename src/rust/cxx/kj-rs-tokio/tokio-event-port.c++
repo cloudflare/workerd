@@ -1,5 +1,7 @@
 #include "kj-rs-tokio/tokio-event-port.h"
 
+#include "kj-rs-tokio/ffi.rs.h"
+
 #include <kj/debug.h>
 
 #include <cstdlib>
@@ -83,27 +85,24 @@ void TokioEventPort::updateNextTimerEvent(kj::Maybe<kj::TimePoint> time) {
 
 bool TokioEventPort::wait() {
   assertOwnerThread();
-  bool woken;
   // Bound the sleep by the next KJ timer deadline, if any, and remember which deadline that was
   // so updateNextTimerEvent() can spot a sooner one armed during the park. `timeoutToNextEvent()`
   // rounds up, so we always sleep until just *after* the timer is due.
   plannedNextEvent = timerImpl.nextEvent();
   KJ_DEFER(plannedNextEvent = kj::none);
   // While parked, be the timer's sleep hooks: tokio tasks arming KJ timers mid-park get live
-  // time from now() and re-plan the sleep if their deadline is sooner. advanceTo() below clears
-  // the hooks (KJ's contract for setSleeping()).
+  // time from now() and re-plan the sleep if their deadline is sooner. The advanceTo() deferred
+  // below clears the hooks (KJ's contract for setSleeping()).
   timerImpl.setSleeping(*this);
-  KJ_IF_SOME(timeoutNs, timerImpl.timeoutToNextEvent(clock.now(), kj::NANOSECONDS, kj::maxValue)) {
-    woken = rustPort->wait_timeout_ns(timeoutNs);
-  } else {
-    woken = rustPort->wait_forever();
-  }
-
   // Load-bearing: TimerImpl only fires timer events from advanceTo(). Forgetting this after a
-  // wait means every kj::Timer promise silently never resolves. (This also clears the sleep
-  // hooks installed above.)
-  timerImpl.advanceTo(clock.now());
-  return woken;
+  // wait means every kj::Timer promise silently never resolves. Deferred so a wait that throws
+  // also clears the sleep hooks.
+  KJ_DEFER(timerImpl.advanceTo(clock.now()));
+  KJ_IF_SOME(timeoutNs, timerImpl.timeoutToNextEvent(clock.now(), kj::NANOSECONDS, kj::maxValue)) {
+    return rustPort->wait_timeout_ns(timeoutNs);
+  } else {
+    return rustPort->wait_forever();
+  }
 }
 
 bool TokioEventPort::poll() {
@@ -126,10 +125,16 @@ TokioAsyncIoContext::~TokioAsyncIoContext() noexcept(false) {
   }
 }
 
+void TokioAsyncIoContext::blockOn(::rust::Box<BlockOnTask> task) {
+  block_on_task_join(kj::mv(task)).wait(*waitScope);
+}
+
 TokioAsyncIoContext setupTokioAsyncIo() {
-  auto port = kj::heap<TokioEventPort>();
-  auto waitScope = kj::heap<kj::WaitScope>(port->getLoop());
-  return TokioAsyncIoContext(kj::mv(port), kj::mv(waitScope));
+  return TokioAsyncIoContext();
+}
+
+kj::Own<TokioAsyncIoContext> newTokioAsyncIoContext() {
+  return kj::heap<TokioAsyncIoContext>();
 }
 
 }  // namespace kj_rs_tokio

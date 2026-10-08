@@ -123,7 +123,7 @@ of the file that asserts it.
 ## Running
 
 ```
-bazel test //src/tests/streams/... --nocache_test_results
+bazel test //src/tests/streams/...
 ```
 
 Targets per suite: `<name>-cpp@`, `<name>-ts@`, each with `@all-compat-flags`

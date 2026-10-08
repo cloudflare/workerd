@@ -137,6 +137,9 @@ class Serializer final: v8::ValueSerializer::Delegate {
     // The serialized data.
     kj::Array<kj::byte> data;
 
+    // The allocated size of the buffer containing `data`.
+    size_t dataCapacity;
+
     // All instances of SharedArrayBuffer seen during serialization. Pass these along to the
     // deserializer to achieve actual sharing of buffers.
     kj::Array<std::shared_ptr<v8::BackingStore>> sharedArrayBuffers;
@@ -205,6 +208,7 @@ class Serializer final: v8::ValueSerializer::Delegate {
 
   v8::Maybe<uint32_t> GetSharedArrayBufferId(
       v8::Isolate* isolate, v8::Local<v8::SharedArrayBuffer> sab) override;
+  void* ReallocateBufferMemory(void* oldBuffer, size_t size, size_t* actualSize) override;
 
   kj::Maybe<ExternalHandler&> externalHandler;
 
@@ -216,6 +220,7 @@ class Serializer final: v8::ValueSerializer::Delegate {
   kj::Vector<std::shared_ptr<v8::BackingStore>> sharedBackingStores;
   kj::Vector<std::shared_ptr<v8::BackingStore>> backingStores;
   bool released = false;
+  size_t dataCapacity = 0;
   bool treatClassInstancesAsPlainObjects;
   bool treatErrorsAsHostObjects = false;
 
@@ -256,6 +261,10 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
     // ExternalHandler, if any. Typically this would be allocated on the stack just before the
     // Deserializer.
     kj::Maybe<ExternalHandler&> externalHandler;
+
+    // Label header-error diagnostics with the runtime call site (defaults to "unknown").
+    // Use a fixed label, never user-controlled data: it appears in logs and the internal exception.
+    kj::Maybe<kj::StringPtr> diagnosticContext;
   };
 
   explicit Deserializer(Lock& js,
@@ -298,6 +307,7 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
 
  private:
   void init(Lock& js,
+      kj::ArrayPtr<const kj::byte> data,
       kj::Maybe<kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>> transferredArrayBuffers = kj::none,
       kj::Maybe<Options> maybeOptions = kj::none);
 

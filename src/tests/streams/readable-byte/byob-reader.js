@@ -7,7 +7,7 @@
 // partial-respond alignment. Migrated from
 // streams-byob-edge-cases-test.js (all parity).
 
-import { strictEqual, ok } from 'node:assert';
+import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 // Helper to create a byte stream that responds with data
@@ -267,6 +267,52 @@ export const byobAutoAllocateSizes = {
 
       reader.releaseLock();
     }
+  },
+};
+
+// A default read with autoAllocateChunkSize set takes queued bytes as the
+// head chunk, uncopied (spec PullSteps); only an empty queue allocates a
+// buffer for the source's byobRequest. The read settles before closed
+// when it drains the queue (parity). DIVERGENCE (ledger #31): C++ copies
+// every queued chunk into one autoAllocateChunkSize buffer.
+export const autoAllocateDefaultReadTakesQueuedChunk = {
+  async test() {
+    let controller;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      autoAllocateChunkSize: 64,
+      start(c) {
+        controller = c;
+      },
+    });
+    controller.enqueue(new Uint8Array([1, 2, 3]));
+    controller.enqueue(new Uint8Array([4, 5]));
+    const reader = rs.getReader();
+    const r1 = (await reader.read()).value;
+    if (usingTsImpl) {
+      deepStrictEqual([...r1], [1, 2, 3]);
+      strictEqual(r1.buffer.byteLength, 3);
+      const r2 = (await reader.read()).value;
+      deepStrictEqual([...r2], [4, 5]);
+      strictEqual(r2.buffer.byteLength, 2);
+    } else {
+      deepStrictEqual([...r1], [1, 2, 3, 4, 5]);
+      strictEqual(r1.buffer.byteLength, 64);
+    }
+
+    const waiting = reader.read();
+    await scheduler.wait(5);
+    strictEqual(controller.byobRequest.view.byteLength, 64);
+    controller.enqueue(new Uint8Array([6]));
+    deepStrictEqual([...(await waiting).value], [6]);
+
+    controller.enqueue(new Uint8Array([7]));
+    controller.close();
+    const order = [];
+    const last = reader.read().then(() => order.push('read'));
+    const closed = reader.closed.then(() => order.push('closed'));
+    await Promise.all([last, closed]);
+    deepStrictEqual(order, ['read', 'closed']);
   },
 };
 
@@ -545,6 +591,100 @@ export const partialViewThenDefaultRead = {
           second.value.buffer.byteLength === 16384
       );
       strictEqual(second.value.byteOffset, 0);
+    }
+  },
+};
+
+// DIVERGENCE (ledger #28): read(view) with a multi-byte view on a native
+// body. C++ resolves Uint8Array views of whatever bytes arrive, partial
+// elements included. TypeScript resolves views of the read's own type
+// holding whole elements, carries a partial element into the next read,
+// and errors the stream with a TypeError if one is left at EOF — as a JS
+// byte source's close() mid-element does (spec).
+export const nativeByobMultiByteViews = {
+  async test(ctrl, env) {
+    const aligned = new Response(new Uint8Array([1, 2, 3, 4])).body.getReader({
+      mode: 'byob',
+    });
+    const first = await aligned.read(new Uint16Array(4));
+    strictEqual(first.done, false);
+    ok(first.value instanceof (usingTsImpl ? Uint16Array : Uint8Array));
+    strictEqual(first.value.byteLength, 4);
+    const end = await aligned.read(new Uint16Array(4));
+    strictEqual(end.done, true);
+
+    // Server chunks: foo, bar, b, a, z (9 bytes).
+    const response = await env.SELF.fetch('http://test/chunked');
+    const reader = response.body.getReader({ mode: 'byob' });
+    let text = '';
+    let error;
+    for (;;) {
+      let result;
+      try {
+        result = await reader.read(new Uint16Array(10));
+      } catch (e) {
+        error = e;
+        break;
+      }
+      if (result.done) break;
+      ok(result.value instanceof (usingTsImpl ? Uint16Array : Uint8Array));
+      text += new TextDecoder().decode(result.value);
+    }
+    if (usingTsImpl) {
+      strictEqual(text, 'foobarba');
+      ok(error instanceof TypeError);
+      strictEqual(
+        error.message,
+        'Insufficient bytes to fill elements in the given view'
+      );
+      // The stream is errored, not merely the one read.
+      await rejects(reader.read(new Uint16Array(2)), (e) => e === error);
+      await rejects(reader.closed, (e) => e === error);
+    } else {
+      strictEqual(text, 'foobarbaz');
+      strictEqual(error, undefined);
+      strictEqual((await reader.read(new Uint16Array(2))).done, true);
+      await reader.closed;
+    }
+
+    // A partial element already in the stash when the next read arrives: the
+    // Uint32 read takes 4 of the body's 7 bytes, then the Uint16 read is
+    // served from the 3 left over, delivering 2 and carrying 1 to EOF.
+    const odd = new Response(
+      new Uint8Array([1, 2, 3, 4, 5, 6, 7])
+    ).body.getReader({ mode: 'byob' });
+    const word = await odd.read(new Uint32Array(2));
+    strictEqual(word.done, false);
+    if (usingTsImpl) {
+      ok(word.value instanceof Uint32Array);
+      deepStrictEqual(
+        [...new Uint8Array(word.value.buffer, word.value.byteOffset, 4)],
+        [1, 2, 3, 4]
+      );
+      strictEqual(word.value.byteLength, 4);
+      const half = await odd.read(new Uint16Array(4));
+      strictEqual(half.done, false);
+      ok(half.value instanceof Uint16Array);
+      deepStrictEqual(
+        [...new Uint8Array(half.value.buffer, half.value.byteOffset, 2)],
+        [5, 6]
+      );
+      strictEqual(half.value.byteLength, 2);
+      let oddError;
+      await rejects(odd.read(new Uint16Array(4)), (e) => {
+        oddError = e;
+        return (
+          e instanceof TypeError &&
+          e.message === 'Insufficient bytes to fill elements in the given view'
+        );
+      });
+      await rejects(odd.read(new Uint16Array(2)), (e) => e === oddError);
+      await rejects(odd.closed, (e) => e === oddError);
+    } else {
+      ok(word.value instanceof Uint8Array);
+      deepStrictEqual([...word.value], [1, 2, 3, 4, 5, 6, 7]);
+      strictEqual((await odd.read(new Uint16Array(4))).done, true);
+      await odd.closed;
     }
   },
 };

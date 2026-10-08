@@ -2,9 +2,16 @@ load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_proc_mac
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_test.bzl", "wd_rust_test")
 
+# The crates derived from upstream cxx (the runtime, the bridge parser and generators, and their
+# tests) keep upstream's lint levels rather than //build/rust:lints, so they stay comparable with
+# upstream. The KJ crates beside them (kj-rs*) are first-party and take the repository's.
+
 rust_library(
     name = "cxx",
-    srcs = glob(["src/**/*.rs"]),
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = ["src/**/*-test.rs"],
+    ),
     edition = "2024",
     link_deps = [
         ":core",
@@ -26,6 +33,7 @@ rust_library(
 
 wd_rust_test(
     name = "cxx_tests",
+    compile_data = glob(["src/**/*-test.rs"]),
     crate = ":cxx",
 )
 
@@ -53,7 +61,10 @@ rust_library(
 
 rust_library(
     name = "gen",
-    srcs = glob(["gen/src/*.rs"]),
+    srcs = glob(
+        ["gen/src/*.rs"],
+        exclude = ["gen/src/*-test.rs"],
+    ),
     compile_data = ["include/cxx.h"],
     crate_root = "gen/src/mod.rs",
     edition = "2024",
@@ -70,9 +81,18 @@ rust_library(
     ],
 )
 
+wd_rust_test(
+    name = "gen_test",
+    compile_data = glob(["gen/src/*-test.rs"]),
+    crate = ":gen",
+)
+
 rust_binary(
     name = "cxxbridge",
-    srcs = glob(["gen/cmd/src/*.rs"]),
+    srcs = glob(
+        ["gen/cmd/src/*.rs"],
+        exclude = ["gen/cmd/src/*-test.rs"],
+    ),
     compile_data = ["include/cxx.h"],
     edition = "2024",
     experimental_use_cc_common_link = 1,
@@ -90,6 +110,12 @@ rust_binary(
         "@crates_vendor//:quote",
         "@crates_vendor//:syn",
     ],
+)
+
+wd_rust_test(
+    name = "cxxbridge_test",
+    compile_data = glob(["gen/cmd/src/*-test.rs"]),
+    crate = ":cxxbridge",
 )
 
 wd_cc_library(
@@ -128,7 +154,10 @@ rust_proc_macro(
 
 rust_library(
     name = "cxx-build",
-    srcs = glob(["gen/build/src/*.rs"]),
+    srcs = glob(
+        ["gen/build/src/*.rs"],
+        exclude = ["gen/build/src/*-test.rs"],
+    ),
     compile_data = [
         "include/cxx.h",
     ],
@@ -147,6 +176,12 @@ rust_library(
         "@crates_vendor//:scratch",
         "@crates_vendor//:syn",
     ],
+)
+
+wd_rust_test(
+    name = "cxx-build_test",
+    compile_data = glob(["gen/build/src/*-test.rs"]),
+    crate = ":cxx-build",
 )
 
 rust_library(

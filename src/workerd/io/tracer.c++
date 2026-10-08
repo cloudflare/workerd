@@ -275,6 +275,19 @@ void WorkerTracer::addSpanClose(tracing::SpanEndData&& span, kj::Maybe<kj::Date>
   tailStreamWriter->report(spanComponentContext, tracing::SpanClose(), span.endTime, 0);
 }
 
+void WorkerTracer::addSpanUpdate(tracing::SpanId spanId, tracing::SpanUpdate&& update) {
+  if (pipelineLogLevel == PipelineLogLevel::NONE) {
+    return;
+  }
+
+  auto& tailStreamWriter = KJ_UNWRAP_OR_RETURN(maybeTailStreamWriter);
+  auto& topLevelContext = KJ_ASSERT_NONNULL(topLevelInvocationSpanContext);
+  auto context = tracing::InvocationSpanContext(topLevelContext.getTraceId(),
+      topLevelContext.getInvocationId(), spanId, topLevelContext.getTraceFlags());
+  auto size = update.size();
+  tailStreamWriter->report(context, kj::mv(update), getTime(), size);
+}
+
 void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
     kj::Date timestamp,
     kj::String name,
@@ -376,12 +389,17 @@ void WorkerTracer::setEventInfo(
   // IoContext is available at this time, capture weakRef.
   KJ_ASSERT(weakIoContext == kj::none, "tracer can only be used for a single event");
   weakIoContext = incomingRequest.getContext().getWeakRef();
-  setEventInfoInternal(
-      incomingRequest.getInvocationSpanContext(), incomingRequest.nowForTraceOnset(), kj::mv(info));
+  auto& context = incomingRequest.getInvocationSpanContext();
+  setEventInfoInternal(context,
+      context.getParent().map(
+          [](const tracing::InvocationSpanContext& p) { return p.getSpanId(); }),
+      incomingRequest.nowForTraceOnset(), kj::mv(info));
 }
 
-void WorkerTracer::setEventInfoInternal(
-    const tracing::InvocationSpanContext& context, kj::Date timestamp, tracing::EventInfo&& info) {
+void WorkerTracer::setEventInfoInternal(const tracing::InvocationSpanContext& context,
+    kj::Maybe<tracing::SpanId> parentSpanId,
+    kj::Date timestamp,
+    tracing::EventInfo&& info) {
   KJ_ASSERT(trace->eventInfo == kj::none, "tracer can only be used for a single event");
 
   // TODO(someday): For now, we're using logLevel == none as a hint to avoid doing anything
@@ -417,30 +435,27 @@ void WorkerTracer::setEventInfoInternal(
     // WorkerTracer is created, but the actual onset event is the best time to send it.
     auto workerInfo = tracing::Onset::WorkerInfo{
       .executionModel = trace->executionModel,
-      .scriptName = mapCopyString(trace->scriptName),
+      .scriptName = trace->scriptName.clone(),
       .scriptVersion =
           trace->scriptVersion.map([](auto& scriptVersion) -> kj::Own<ScriptVersion::Reader> {
       return capnp::clone(*scriptVersion);
     }),
       .preview = trace->preview.map([](auto& preview) { return preview.clone(); }),
-      .dispatchNamespace = mapCopyString(trace->dispatchNamespace),
-      .scriptId = mapCopyString(trace->scriptId),
+      .dispatchNamespace = trace->dispatchNamespace.clone(),
+      .scriptId = trace->scriptId.clone(),
       .scriptTags = KJ_MAP(tag, trace->scriptTags) { return kj::str(tag); },
-      .entrypoint = mapCopyString(trace->entrypoint),
-      .durableObjectId = mapCopyString(trace->durableObjectId),
+      .entrypoint = trace->entrypoint.clone(),
+      .durableObjectId = trace->durableObjectId.clone(),
     };
 
-    tracing::SpanId parentSpanId = tracing::SpanId::nullId;
-    KJ_IF_SOME(trigger, context.getParent()) {
-      parentSpanId = trigger.getSpanId();
-    }
     // Onset needs special handling for spanId: The top-level spanId is zero unless a trigger
     // context is available. The inner spanId is taken from the invocation
     // span context, that span is being "opened" with the onset event. All other tail events have it
     // as its parent span ID, except for recursive SpanOpens (which have the parent span instead)
     // and Attribute/SpanClose events (which have the spanId opened in the corresponding SpanOpen).
-    auto onsetContext = tracing::InvocationSpanContext(
-        context.getTraceId(), context.getInvocationId(), parentSpanId, context.getTraceFlags());
+    auto onsetContext =
+        tracing::InvocationSpanContext(context.getTraceId(), context.getInvocationId(),
+            parentSpanId.orDefault(tracing::SpanId::nullId), context.getTraceFlags());
 
     // Not applying size accounting for Onset since it is sent separately
     writer->report(onsetContext,
@@ -696,6 +711,18 @@ void UserSpanObserver::onClose(
   (void)logs;
   if (wasAccepted) {
     submitter->submitSpanClose(spanId, startTime, endTime, kj::mv(tags));
+  }
+}
+
+void UserSpanObserver::onUpdateName(kj::ConstString operationName) {
+  if (wasAccepted) {
+    submitter->submitSpanUpdate(spanId, tracing::SpanUpdate(kj::mv(operationName)));
+  }
+}
+
+void UserSpanObserver::onUpdateStatus(tracing::SpanStatus&& status) {
+  if (wasAccepted) {
+    submitter->submitSpanUpdate(spanId, tracing::SpanUpdate(kj::mv(status)));
   }
 }
 

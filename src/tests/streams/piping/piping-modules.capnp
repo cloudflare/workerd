@@ -8,6 +8,7 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "which-impl", esModule = embed "which-impl.js"),
   (name = "pipe-matrix", esModule = embed "pipe-matrix.js"),
   (name = "api-surface", esModule = embed "api-surface.js"),
+  (name = "abort-signal", esModule = embed "abort-signal.js"),
   (name = "error-propagation", esModule = embed "error-propagation.js"),
   (name = "close-propagation", esModule = embed "close-propagation.js"),
   (name = "flow-control", esModule = embed "flow-control.js"),

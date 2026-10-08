@@ -9,8 +9,8 @@
 // byob.js), but one user hook IS reached from inside read processing in
 // both implementations: read results are ordinary objects, so resolving a
 // read promise runs the spec's thenable check against them, and a patched
-// Object.prototype.then getter executes mid-delivery — C++ consults it once
-// per read, TypeScript twice. Whatever such a getter does must not be able
+// Object.prototype.then getter executes mid-delivery, once per read.
+// Whatever such a getter does must not be able
 // to corrupt the stream.
 //
 // The parked-second-read case additionally pins a reader-model divergence
@@ -54,7 +54,7 @@ export const thenInterceptionDuringReadResolution = {
         const r = await readPromise;
         strictEqual(r.done, false);
         deepStrictEqual([...r.value], [97, 98]);
-        strictEqual(fired, usingTsImpl ? 2 : 1);
+        strictEqual(fired, 1);
 
         // BYOB read consults it the same number of times.
         const before = fired;
@@ -65,7 +65,7 @@ export const thenInterceptionDuringReadResolution = {
         await w2.write(new Uint8Array([99, 100]));
         const r2 = await rp2;
         deepStrictEqual([...r2.value], [99, 100]);
-        strictEqual(fired - before, usingTsImpl ? 2 : 1);
+        strictEqual(fired - before, 1);
       }
     );
   },
@@ -100,6 +100,47 @@ export const closeWriterFromThenInterceptorDuringRead = {
       }
     );
     ok(fired >= 1, 'the interceptor must have fired');
+  },
+};
+
+export const abortWriterFromThenInterceptorDuringRead = {
+  async test() {
+    // The interceptor aborts the writer while a BYOB read is being answered
+    // with the bytes of the write in flight. Under TypeScript that read is
+    // answered from inside the write itself, so the write must reject with
+    // the abort reason rather than settle as read.
+    const its = new IdentityTransformStream();
+    const writer = its.writable.getWriter();
+    const reader = its.readable.getReader({ mode: 'byob' });
+    const reason = new Error('abort from interceptor');
+    let fired = 0;
+    let abortPromise;
+    let writePromise;
+    await withThenInterceptor(
+      () => {
+        if (++fired === 1) {
+          abortPromise = writer.abort(reason);
+        }
+      },
+      async () => {
+        const readPromise = reader.read(new Uint8Array(4));
+        await Promise.resolve();
+        writePromise = writer.write(new Uint8Array([7, 8]));
+        const writeOutcome = writePromise.then(
+          () => 'fulfilled',
+          (err) => err
+        );
+        const r = await readPromise.catch((err) => err);
+        const outcome = await writeOutcome;
+        await abortPromise;
+        ok(fired >= 1, 'the interceptor must have fired');
+        if (usingTsImpl) {
+          strictEqual(r.done, false);
+          deepStrictEqual([...r.value], [7, 8]);
+          strictEqual(outcome, reason);
+        }
+      }
+    );
   },
 };
 

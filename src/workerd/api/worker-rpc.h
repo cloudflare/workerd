@@ -164,16 +164,22 @@ class JsRpcCallPlan {
 
   JsRpcCallPlan(kj::Own<capnp::MallocMessageBuilder> message,
       kj::Array<const byte> serializedData,
+      size_t serializedDataCapacity,
       RpcSerializerExternalHandler::Replayability serializerReplayability);
 
-  // True only for method calls whose arguments are absent or contain no externals and no
-  // serializer-handled ineligible values. Property reads are not replayable.
+  // True only for property reads and method calls whose arguments are absent or contain no
+  // externals and no serializer-handled ineligible values.
   bool getReplayable() const {
     return replayable;
   }
 
-  size_t getReplayMemoryBytes() const {
-    return serializedData.size();
+  size_t getReplayReservationBytes() {
+    size_t result = serializedDataCapacity;
+    for (const auto& segment: message->getSegmentsForOutput()) {
+      result += kj::max(segment.size(), static_cast<size_t>(METADATA_SEGMENT_WORDS)) *
+          sizeof(capnp::word);
+    }
+    return result;
   }
 
   void copyTo(rpc::JsRpcTarget::CallParams::Builder builder);
@@ -185,6 +191,7 @@ class JsRpcCallPlan {
 
   kj::Own<capnp::MallocMessageBuilder> message;
   kj::Array<const byte> serializedData;
+  size_t serializedDataCapacity;
   bool replayable;
 };
 
@@ -302,6 +309,10 @@ class JsRpcClientProvider: public jsg::Object {
     // The per-call span may be opened while resolving a root Fetcher so its user span can be
     // propagated as the callee invocation's parent before the session client is constructed.
     kj::Maybe<TraceContext> callSpan;
+
+    // Present for retry attempts whose underlying JSRPC session must be canceled at the retry
+    // timeout, even if capabilities derived from its result pipeline remain reachable.
+    kj::Maybe<kj::Rc<kj::Canceler>> attemptCanceler;
   };
 
   // Append this provider's property path, if any, without resolving the destination client.
@@ -318,6 +329,21 @@ class JsRpcClientProvider: public jsg::Object {
     return getActorTargetRetryability().orDefault(ActorCallTargetRetryable::NO).toBool();
   }
 
+  // Temporary retry diagnostics: the ActorRetryCandidate this provider's target counts toward.
+  virtual kj::Maybe<ActorRetryCandidate> getActorRetryProbeCandidate() {
+    return kj::none;
+  }
+
+  virtual void onActorCallRetry() {
+    KJ_FAIL_REQUIRE("actor call retry requested from an unsupported RPC target");
+  }
+
+  // The retry policy configured on the binding this provider dispatches through, if any. None means
+  // the runtime's default applies. Only called on providers that support actor call retries.
+  virtual kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() {
+    return kj::none;
+  }
+
   // Get a capnp client that can be used to dispatch one call.
   virtual ClientForOneCall getClientForOneCall(
       jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) = 0;
@@ -328,24 +354,34 @@ class JsRpcClientProvider: public jsg::Object {
 };
 
 class JsRpcProperty;
+class JsRpcCallRetryState;
+class JsRpcCallAttemptObserver;
 
 class JsRpcReplayMemoryTracker final: public kj::Refcounted {
  public:
-  explicit JsRpcReplayMemoryTracker(kj::Own<void> trackedMemory)
-      : trackedMemory(kj::mv(trackedMemory)) {}
+  JsRpcReplayMemoryTracker(kj::Own<void> trackedMemory, kj::Maybe<kj::Own<void>> reservation)
+      : trackedMemory(kj::mv(trackedMemory)),
+        reservation(kj::mv(reservation)) {}
 
   void release() {
     trackedMemory = kj::Own<void>();
+    reservation = kj::none;
   }
 
  private:
+  // From RequestObserver::trackActorCallReplayMemory().
   kj::Own<void> trackedMemory;
+  // From LimitEnforcer::tryReserveActorCallReplayMemory(), if it granted one.
+  kj::Maybe<kj::Own<void>> reservation;
 };
 
 // Represents the promise returned by calling an RPC method. We don't use a regular Promise object,
 // but rather our own custom thenable, so that we can support pipelining on it.
 class JsRpcPromise: public JsRpcClientProvider {
  public:
+  using PendingPipeline =
+      kj::OneOf<IoOwn<rpc::JsRpcTarget::CallResults::Pipeline>, IoOwn<JsRpcCallRetryState>>;
+
   // A weak reference to this JsRpcPromise. Unlike the usual WeakRef pattern, though, this ref is
   // allocated before the promise itself is actually created, and filled in later. This is needed
   // to solve cyclic initialization challenges in `callImpl()`.
@@ -363,13 +399,15 @@ class JsRpcPromise: public JsRpcClientProvider {
 
   JsRpcPromise(jsg::JsRef<jsg::JsPromise> inner,
       kj::Own<WeakRef> weakRef,
-      IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline,
+      PendingPipeline pipeline,
       kj::Maybe<TraceContextParent> originatingCall,
       kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability,
-      kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker);
+      kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker,
+      kj::Maybe<IoOwn<JsRpcCallAttemptObserver>> attemptObserver);
   ~JsRpcPromise() noexcept(false);
 
   void resolve(jsg::Lock& js, jsg::JsValue result);
+  void setOriginatingCall(kj::Maybe<TraceContextParent> value);
   void dispose(jsg::Lock& js);
 
   ClientForOneCall getClientForOneCall(
@@ -423,9 +461,10 @@ class JsRpcPromise: public JsRpcClientProvider {
   kj::Maybe<IoOwn<TraceContextParent>> originatingCall;
   kj::Maybe<ActorCallTargetRetryable> actorTargetRetryability;
   kj::Maybe<IoOwn<JsRpcReplayMemoryTracker>> replayMemoryTracker;
+  kj::Maybe<IoOwn<JsRpcCallAttemptObserver>> attemptObserver;
 
   struct Pending {
-    IoOwn<rpc::JsRpcTarget::CallResults::Pipeline> pipeline;
+    PendingPipeline pipeline;
   };
   struct Resolved {
     jsg::Value result;
@@ -471,6 +510,15 @@ class JsRpcProperty: public JsRpcClientProvider {
   void appendPath(kj::Vector<kj::StringPtr>& path) override;
   kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() override {
     return parent->getActorTargetRetryability();
+  }
+  kj::Maybe<ActorRetryCandidate> getActorRetryProbeCandidate() override {
+    return parent->getActorRetryProbeCandidate();
+  }
+  void onActorCallRetry() override {
+    parent->onActorCallRetry();
+  }
+  kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() override {
+    return parent->getUserDefinedRetryPolicy();
   }
   ClientForOneCall getClientForOneCall(
       jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) override;
@@ -688,6 +736,11 @@ class RpcStubDisposalGroup {
   friend class JsRpcStub;
 };
 
+// Returns a retry-claim rejection as a disconnect that keeps its detail, and any other exception
+// unchanged. Calls pipelined on a rejected call can fail before the sender processes its retry
+// decision, and a disconnect keeps them from surfacing the rejection as an application error.
+kj::Exception disconnectRetryClaimRejection(kj::Exception e);
+
 // `jsRpcSession` returns a capability that provides the client a way to call remote methods
 // over RPC. We drain the IncomingRequest after the capability is used to run the relevant JS.
 class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
@@ -757,7 +810,7 @@ class JsRpcSessionCustomEvent final: public WorkerInterface::CustomEvent {
   }
 
   void failed(const kj::Exception& e) override {
-    capFulfiller->reject(e.clone());
+    capFulfiller->reject(disconnectRetryClaimRejection(e.clone()));
   }
 
   // Event ID for jsRpcSession.

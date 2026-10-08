@@ -16,6 +16,7 @@ using import "/workerd/io/outcome.capnp".EventOutcome;
 using import "/workerd/io/script-version.capnp".ScriptVersion;
 using import "/workerd/io/trace.capnp".TagValue;
 using import "/workerd/io/trace.capnp".UserSpanData;
+using import "/workerd/io/trace.capnp".SpanStatus;
 using import "/workerd/io/frankenvalue.capnp".Frankenvalue;
 
 # A 128-bit trace ID used to identify traces.
@@ -312,6 +313,14 @@ struct Trace @0x8e8d911203762d34 {
     outcome @0 :EventOutcome;
   }
 
+  struct SpanUpdate {
+    # Updates mutable span properties over the span's lifetime.
+    info :union {
+      name @0 :Text;
+      status @1 :SpanStatus;
+    }
+  }
+
   struct Onset {
     # The Onset and Outcome event types are special forms of SpanOpen and
     # SpanClose that explicitly mark the start and end of the root span.
@@ -356,8 +365,8 @@ struct Trace @0x8e8d911203762d34 {
     # A streaming tail worker receives a series of Tail Events. Tail events always occur within an
     # InvocationSpanContext. The first TailEvent delivered to a streaming tail session is always an
     # Onset. The final TailEvent delivered is always an Outcome. Between those can be any number of
-    # SpanOpen, SpanClose, and Mark events. Every SpanOpen *must* be associated with a SpanClose
-    # unless the stream was abruptly terminated.
+    # SpanOpen, SpanUpdate, SpanClose, and Mark events. Every SpanOpen *must* be associated with a
+    # SpanClose unless the stream was abruptly terminated.
     # Inherited spanContext for this event.
     spanContext @0: SpanContext;
     # invocation id of the currently invoked worker stage.
@@ -378,6 +387,7 @@ struct Trace @0x8e8d911203762d34 {
       exception @11 :Exception;
       log @12 :Log;
       streamDiagnostics @13 :StreamDiagnosticsEvent;
+      spanUpdate @14 :SpanUpdate;
     }
   }
 }
@@ -541,6 +551,8 @@ enum SerializationTag {
   # A "wrapped binding": an application-level object (e.g. a D1Database) implemented in TypeScript
   # inside the runtime that wraps a single inner service stub. Serializes as the inner stub's
   # payload (per `serviceStub`) followed by the wrapper module name. See api/wrapped-binding.{h,c++}.
+  durableObjectSnapshot @18;
+  # A Durable Object storage snapshot handle transferred over RPC.
 }
 
 enum StreamEncoding {
@@ -572,6 +584,10 @@ struct JsValue {
   # (We could also call these "capabilities", but that word is pretty overloaded already.)
 
   struct External {
+    struct DurableObjectSnapshot {
+      capability @0 :Capability;
+    }
+
     enum SecureTransport {
       # Security transport mode for a transferred Socket. Mirrors api::SecureTransportKind.
       off @0;
@@ -670,6 +686,9 @@ struct JsValue {
         # runtime auto-closes the write side once the read side reaches EOF, so this must be carried
         # across transfer to preserve the origin socket's half-open semantics.
       }
+
+      durableObjectSnapshot @22 :DurableObjectSnapshot;
+      # Opaque capability for a Durable Object storage snapshot.
 
       # TODO(soon): WebSocket, Request, Response
     }

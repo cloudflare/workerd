@@ -46,6 +46,11 @@ WD_STRONG_BOOL(JitCodeEventTracking);
 // V8 to consume all available cores with background work. So, please specify a thread pool size.
 kj::Own<v8::Platform> defaultPlatform(uint backgroundThreadCount);
 
+// Returns a fresh v8::IsolateGroup if this V8 build supports more than one group (pointer
+// compression with multiple cages), otherwise the default group. Giving each isolate its own
+// group exercises the multi-group code paths when the V8 build has them.
+v8::IsolateGroup newIsolateGroup();
+
 // In order to use any part of the JSG API, you must first construct a V8System. You can only
 // construct one of these per process. This performs process-wide initialization of the V8
 // library.
@@ -707,8 +712,9 @@ class Isolate: public IsolateBase {
   // most 4Gbytes of V8 heap in all.  Groups can be created with
   // v8::IsolateGroup::Create().  (If using V8 pointer compression, this
   // requires the enable_pointer_compression_multiple_cages build flag for V8.)
-  // Pass v8::IsolateGroup::Default() as the group to put all isolates in the
-  // same group.
+  // Pass v8::IsolateGroup::GetDefault() as the group to put all isolates in the
+  // same group, or jsg::newIsolateGroup() to get a fresh group when the build
+  // supports it.
   template <typename MetaConfiguration>
   explicit Isolate(V8System& system,
       v8::IsolateGroup group,
@@ -754,7 +760,7 @@ class Isolate: public IsolateBase {
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {})
       : Isolate(system,
-            v8::IsolateGroup::GetDefault(),
+            newIsolateGroup(),
             nullptr,
             kj::mv(observer),
             defaultExternalStringAllocator(),
@@ -881,7 +887,7 @@ class Isolate: public IsolateBase {
         }
 
         auto de = alloc<DOMException>(kj::mv(message), kj::mv(name));
-        de.attachWrapper(v8Isolate, obj);
+        de.attachWrapper(v8Isolate, obj, TypeWrapper::template wrappableTag<DOMException>());
 
         return kj::mv(de);
       });
@@ -1031,22 +1037,22 @@ class Isolate: public IsolateBase {
 
     virtual kj::Maybe<Object&> getInstance(
         v8::Local<v8::Object> obj, const std::type_info& type) override {
-      auto instance = v8::Local<v8::Object>(obj)->FindInstanceInPrototypeChain(
-          jsgIsolate.getWrapperByContext(*this)->getDynamicTypeInfo(v8Isolate, type).tmpl);
+      auto info = jsgIsolate.getWrapperByContext(*this)->getDynamicTypeInfo(v8Isolate, type);
+      auto instance = v8::Local<v8::Object>(obj)->FindInstanceInPrototypeChain(info.tmpl);
       if (instance.IsEmpty()) {
         return kj::none;
       } else {
-        // Finding `type`'s template in the prototype chain says nothing about
-        // what the internal field points at (sandbox corruption defense in
-        // depth), so this establishes only that the pointer is *some*
-        // `Wrappable`. The caller, which knows the type statically, is
-        // responsible for the rest -- see JsObject::tryUnwrapAs().
-        auto& wrappable = *reinterpret_cast<Wrappable*>(
-            instance->GetAlignedPointerFromInternalField(Wrappable::WRAPPED_OBJECT_FIELD_INDEX,
-                static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPED_OBJECT_FIELD_INDEX)));
-        Object* object = wrappable.jsgTryGetObject();
+        // Tag-check the wrapper against the requested type's range. The prototype-chain check above
+        // already accepts exactly the genuine wrappers of `type` (or a subclass), whose tags all lie
+        // in the range, so a tag outside it means a wrapper whose CppHeap handle disagrees with its
+        // prototype chain -- an internal invariant violation, which aborts.
+        Wrappable* wrappable =
+            Wrappable::unwrapFromShimInRangeOrAbort(v8Isolate, instance, info.tagRange);
+        // Even after checking the tags we use the vtable check to confirm the type
+        // matches our expectations, as a second, independent check.
+        Object* object = wrappable->jsgTryGetObject();
         if (object == nullptr) {
-          reportWrapperTypeMismatch(type, typeid(wrappable));
+          reportWrapperTypeMismatch(type, typeid(*wrappable));
         }
         return *object;
       }
@@ -1129,15 +1135,13 @@ template <typename T>
 kj::Maybe<Ref<T>> WeakRef<T>::tryAddRef(Lock&) const {
   KJ_IF_SOME(i, impl) {
     if (!i.anchor->isAlive()) return kj::none;
-    // After a major GC, V8's ResetDeadNodes zaps a dead droppable TracedReference without
-    // calling ResetRoot(). The CppgcShim destructor that would release the object (running
-    // ~Wrappable(), which invalidates the anchor) can be deferred past the end of the GC
-    // cycle, so the anchor still reports isAlive() while the TracedReference dangles.
-    // Promoting a Ref in that state would call addStrongRef(), which copies the dangling
-    // reference via TracedReference::Get() — a use-after-free. Detect it instead: a wrapper
-    // that exists but was not traced in the last completed major GC cycle is dead.
+    // A major GC may have collected the target's wrapper while the ~CppgcShim that would
+    // release the target Wrappable (running ~Wrappable(), which invalidates the anchor) is
+    // still deferred, so the anchor keeps reporting isAlive(). Promoting a Ref in that state
+    // would call addStrongRef() on a doomed Wrappable. cppgc tells us directly: it cleared the
+    // Wrappable's weak reference to its shim during the collecting GC's atomic pause.
     auto& target = static_cast<Wrappable&>(i.target);
-    if (!target.wasTracedInLastGc()) {
+    if (target.isCondemned()) {
       // The object is condemned: its wrapper died in a completed major GC, which also means
       // no strong refs exist (they would have rooted the wrapper) and no live wrappable
       // holds a traced ref to it (that would have marked it) — anything still referencing

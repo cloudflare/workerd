@@ -104,10 +104,10 @@ interface DecompressionStream {
   under TS; C++ leaves it untouched — `writer.closed` stays pending (#13).
 - **Reads:** a second concurrent default read rejects under C++ ("single
   pending read request") and parks under TS (#14); the thenable check runs
-  once per read under C++, twice under TS (#15). Under TS the first check
-  runs inside the write delivering the chunk; a reader cancel from there
-  stops the delivery and fails that write with the cancel reason (the
-  writable errors per #13), where C++ has already settled the write.
+  once per read (#15). Under TS it runs inside the write delivering the
+  chunk; a reader cancel from there stops the delivery and fails that
+  write with the cancel reason (the writable errors per #13), where C++
+  has already settled the write.
 - **tee():** both branches observe identical bytes; the single-branch
   cancel promise carries the identity suite's ledger #13 semantics (C++
   immediate, TS shared composite).
@@ -161,7 +161,7 @@ pedantic branches shifting anything the suite pins.
 | 12 | Canceling reader's parked read | rejects with the cancel reason | resolves done (WHATWG) | `cancelSettlesPendingRead` |
 | 13 | `readable.cancel()` → writable side | untouched; `writer.closed` stays pending | errored; closed rejects with the reason | `cancelReadableWritableAftermath` |
 | 14 | Second concurrent default read | TypeError "single pending read request" | parked, served in order | `secondConcurrentRead` |
-| 15 | Thenable check per read resolution | once | twice | `thenInterceptionDuringReadResolution` |
+| 15 | Thenable check per read resolution | once | same | `thenInterceptionDuringReadResolution` |
 | 16 | Default-read piece of a large buffered output | internal-stream read buffer (4 KiB; 16 KiB under `updated-auto-allocate-chunk-size`) | 64 KiB | `largeOutputDeliveredInBoundedPieces` |
 | 17 | Output produced before a trailing-junk error, reads waiting | reads reject | each waiting read gets a piece, later reads error | `trailingJunkAfterLargeOutput` |
 
@@ -178,7 +178,7 @@ pedantic branches shifting anything the suite pins.
 | `corrupt-input.js` | write-time rejection with "Decompression failed."; both-sides error; iteration rejection; bad magic bytes |
 | `strict-checks.js` | trailing-data write rejection; close-with-no-data rejection; truncated-member close rejection |
 | `chunk-types.js` | BufferSource acceptance incl. offsets; string (#1), SAB (#2), invalid-chunk message+aftermath (#3, #4) |
-| `buffer-lifecycle.js` | snapshot-at-write: post-write mutation/detach/shrink invisible; already-detached no-op; lying metadata getters never consulted |
+| `buffer-lifecycle.js` | snapshot-at-write: post-write mutation/detach/shrink invisible; already-detached no-op; detached/out-of-bounds typed-array and DataView views are no-ops; lying metadata getters never consulted |
 | `byob.js` | BYOB reader fills a 2-byte destination with the gzip magic |
 | `backpressure.js` | eager write settlement without reads; desiredSize accounting (#8) |
 | `propagation.js` | abort rejects pending read (reason per #9), errors both sides; cancel settles parked read (#12); write-after-abort (#10); non-Error reasons (#11); writes after a queued close reject (message per impl) without disturbing the close or output; cancel→writable aftermath (#13) |

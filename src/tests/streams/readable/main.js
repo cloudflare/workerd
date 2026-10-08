@@ -41,6 +41,7 @@ export {
   pullThrowSecondCall,
   syncStartThrow,
   asyncStartRejectionErrorsStream,
+  startPromiseSettledInNewPromise,
   cancelWithPendingPull,
 } from 'source-algorithms';
 
@@ -84,6 +85,9 @@ export {
   queueMathNearMaxSafeInteger,
   queueMathNearZeroClamped,
   queueMathNearZeroEndsZero,
+  queueMathResidueClampedAtDequeue,
+  queueMathPositiveResidueKept,
+  queueMathResidueClampedPerTeeBranch,
 } from 'queue-math';
 
 export {
@@ -96,6 +100,7 @@ export {
   teeCancelReasonComposite,
   teeCancelReverseOrder,
   teePullPerRead,
+  teeBackpressureFollowsSlowestBranch,
 } from 'tee';
 
 export {
@@ -118,6 +123,14 @@ export {
   readableStreamFromCancelResolvesWhenReturnMissing,
   fromString,
   fromReturnValidationMessages,
+  fromReadsNextOnce,
+  fromSyncResultReadsDoneBeforeValue,
+  fromIteratorLookupsAreGets,
+  fromAcceptsObjectsOnly,
+  fromCancelReturnLookup,
+  fromArrayBufferViewIsOneChunk,
+  fromIteratorProtocolEdges,
+  fromSyncIterableSettlesEarly,
 } from 'from';
 
 export {
@@ -131,6 +144,12 @@ export {
   returnThenNextNoAwait,
   nextThenReturnNoAwait,
   iteratorPrototypeShape,
+  iteratorMethodsRejectForeignThis,
+  firstNextPullsSynchronously,
+  nextFromPullReadsBehindOuter,
+  nextFromEarlierContinuationReadsAhead,
+  nextFromEarlierContinuationBeatsReturn,
+  nextAfterRejectedNextIsDone,
 } from 'async-iteration';
 
 export {
@@ -198,6 +217,11 @@ export {
 
 export {
   thenGetterFireCountOnRead,
+  thenGetterFiresOncePerRead,
+  thenGetterTimingForWaitingRead,
+  thenGetterNotConsultedByPipeReads,
+  thenGetterPerIteratorNext,
+  thenGetterPerIteratorReturn,
   thenGetterCancelsBranchDuringEnqueue,
   thenGetterCancelsBranchDuringEnqueueBacklog,
   thenGetterCancelsBranchDuringClose,
@@ -232,5 +256,6 @@ export {
   replacedNumberKeepsBody,
   patchedControllerErrorStillErrors,
   omittedDictionariesReadNothing,
+  fromBuildsNoDictionariesFromObjectPrototype,
   asyncIteratorShape,
 } from 'pollution';

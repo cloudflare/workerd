@@ -3,7 +3,6 @@
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/ser.h>
 #include <workerd/jsg/setup.h>
-#include <workerd/util/own-util.h>
 
 namespace workerd {
 
@@ -239,6 +238,7 @@ jsg::JsValue Frankenvalue::toJsImpl(jsg::Lock& js, kj::ArrayPtr<kj::Own<CapTable
           jsg::Deserializer deser(js, v8Serialized.data, kj::none, kj::none,
               jsg::Deserializer::Options{
                 .externalHandler = capTableReader,
+                .diagnosticContext = "binding or entrypoint props"_kj,
               });
           return deser.readValue(js);
         }

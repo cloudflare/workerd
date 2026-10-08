@@ -1,8 +1,5 @@
-// Production code must not panic; test code is exempt via clippy.toml allow-*-in-tests.
-#![deny(clippy::expect_used, clippy::panic, clippy::unreachable)]
-#![deny(clippy::todo, clippy::unimplemented)]
-
 #[cxx::bridge(namespace = "workerd::rust::cxx_integration")]
+#[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {
     extern "Rust" {
         fn trigger_panic(msg: &str);

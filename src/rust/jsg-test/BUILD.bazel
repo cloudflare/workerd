@@ -29,6 +29,7 @@ wd_cc_library(
 
 wd_rust_crate(
     name = "jsg-test",
+    testonly = True,
     cxx_bridge_deps = [
         "//src/workerd/jsg:jsg-core",
         ":ffi-hdrs",

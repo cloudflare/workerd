@@ -28,6 +28,7 @@
 #include <workerd/api/queue.h>
 #include <workerd/api/r2.h>
 #include <workerd/api/scheduled.h>
+#include <workerd/api/snapshot.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/sql.h>
 #include <workerd/api/streams.h>
@@ -66,6 +67,7 @@
   F("hyperdrive", EW_HYPERDRIVE_ISOLATE_TYPES)                                                     \
   F("unsafe", EW_UNSAFE_ISOLATE_TYPES)                                                             \
   F("memory-cache", EW_MEMORY_CACHE_ISOLATE_TYPES)                                                 \
+  F("snapshot", EW_SNAPSHOT_ISOLATE_TYPES)                                                         \
   F("pyodide", EW_PYODIDE_ISOLATE_TYPES)                                                           \
   F("kv", EW_KV_ISOLATE_TYPES)                                                                     \
   F("queue", EW_QUEUE_ISOLATE_TYPES)                                                               \

@@ -1,5 +1,39 @@
+load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
 load("@workerd//:build/wd_rust_crate.bzl", "rust_cxx_bridge", "rust_cxx_include_prefix")
+load("@workerd//:build/wd_rust_test.bzl", "split_rust_test_srcs")
+
+def _coverage_runtime_objects_impl(ctx):
+    # Bazel's LLVM coverage collector (collect_cc_coverage.sh) runs `llvm-cov export` over exactly
+    # the binaries named in the *runtime_objects_list.txt files among a test's coverage metadata.
+    # cc_binary writes that file for its executable; rust_binary does not, so a Rust binary that a
+    # test spawns (workerd, under every wd_test) would write its .profraw for nothing: no line linked
+    # into it, C++ or Rust, would reach the report. This rule writes the file, in Bazel's format (the
+    # executable's exec path), and the binary picks it up as coverage metadata through `link_deps`. The
+    # path is computed rather than taken from the binary, which cannot be a dependency of its own
+    # dependency; it is the same computation Bazel makes for the binary's output.
+    #
+    # The collector also needs GENERATE_LLVM_LCOV and the LLVM tools' paths in the test's
+    # environment, which cc tests get from the C++ toolchain and other tests get from the coverage
+    # config in .bazelrc.
+    prefix = ctx.bin_dir.path
+    if ctx.label.workspace_root:
+        prefix += "/" + ctx.label.workspace_root
+    exec_path = "{}/{}/{}".format(prefix, ctx.label.package, ctx.attr.binary_name)
+    out = ctx.actions.declare_file(ctx.attr.binary_name + "runtime_objects_list.txt")
+    ctx.actions.write(out, exec_path + "\n")
+    return [
+        # Lets rust_binary accept this target in `link_deps`; there is nothing to link.
+        CcInfo(),
+        coverage_common.instrumented_files_info(ctx, metadata_files = [out]),
+    ]
+
+_coverage_runtime_objects = rule(
+    implementation = _coverage_runtime_objects_impl,
+    attrs = {
+        "binary_name": attr.string(mandatory = True),
+    },
+)
 
 def wd_rust_binary(
         name,
@@ -18,6 +52,7 @@ def wd_rust_binary(
         cxx_bridge_src = None,
         cxx_bridge_deps = [],
         cxx_bridge_hdrs = None,
+        target_compatible_with = [],
         test_size = "small"):
     """Define rust binary.
 
@@ -39,9 +74,11 @@ def wd_rust_binary(
         test: whether to define a <name>_test target for the binary's own tests.
         tags: rule tags
         cxx_bridge_hdrs: headers the bridge include!()s; defaults to every .h file in the package.
+        target_compatible_with: additional platform constraints for the binary and its test.
     """
     if srcs == None:
         srcs = native.glob(["**/*.rs"])
+    srcs, test_srcs = split_rust_test_srcs(srcs)
     crate_name = name.replace("-", "_")
 
     if cxx_bridge_src:
@@ -71,6 +108,14 @@ def wd_rust_binary(
     if malloc != None:
         binary_kwargs["malloc"] = malloc
 
+    # Coverage from tests that run this binary; see _coverage_runtime_objects_impl.
+    _coverage_runtime_objects(
+        name = name + ".coverage_objects",
+        binary_name = name,
+        visibility = ["//visibility:private"],
+    )
+    link_deps = link_deps + [name + ".coverage_objects"]
+
     rust_binary(
         name = name,
         crate_name = crate_name,
@@ -85,12 +130,15 @@ def wd_rust_binary(
         data = data,
         experimental_use_cc_common_link = 1,
         proc_macro_deps = proc_macro_deps,
+        lint_config = "@workerd//build/rust:lints",
         # linkopts_tool links with full optimization, so it is given more CPUs.
-        tags = tags + ["cpu:8" if tool else "cpu:4"],
+        tags = tags + ["cpu:4" if tool else "cpu:2"],
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
-        }),
+        }) + target_compatible_with,
+        # Use dedicated high-CPU runner if available
+        exec_properties = {"runner": "high-cpu"},
         **binary_kwargs
     )
 
@@ -113,6 +161,7 @@ def wd_rust_binary(
 
     rust_test(
         name = name + "_test",
+        compile_data = test_srcs,
         crate = ":" + name,
         env = {
             "RUST_BACKTRACE": "1",
@@ -124,10 +173,10 @@ def wd_rust_binary(
         target_compatible_with = select({
             "@//build/config:no_build": ["@platforms//:incompatible"],
             "//conditions:default": [],
-        }),
+        }) + target_compatible_with,
         experimental_use_cc_common_link = 1,
         link_deps = ["//build/deps:linkopts_default", "@@//deps:rust_runtime"],
         size = test_size,
-        # Tag with cpu:4 since this target depends on linkopts_default.
-        tags = ["no-coverage", "cpu:4"],
+        # Tag with cpu:2 since this target depends on linkopts_default.
+        tags = ["no-coverage", "cpu:2"],
     )

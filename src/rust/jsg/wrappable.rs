@@ -2,7 +2,11 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#![allow(clippy::allow_attributes)]
+#![allow(unsafe_code, reason = "converts values through the V8 FFI")]
+#![allow(
+    clippy::allow_attributes,
+    reason = "`impl_integer_from_js!` uses `allow`, since its cast lints fire for only some integer types"
+)]
 
 //! Traits for converting between Rust and JavaScript values.
 //!
@@ -481,7 +485,7 @@ macro_rules! impl_integer_from_js {
             impl FromJS for $type {
                 type ResultType = Self;
 
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "wrapping conversion is intended, matching TypedArray element assignment")]
                 fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
                     // SAFETY: The isolate is locked and value is a valid V8 local handle.
                     let num = unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) }?;

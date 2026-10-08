@@ -9,10 +9,13 @@
 //! [`OwnOrMut`] for mutable-only wrappers so the type system does not represent an impossible shared
 //! borrow state.
 
+#![allow(unsafe_code, reason = "declares an `unsafe fn`, `OwnOrRef::as_mut`")]
+
 use std::ops::Deref;
 use std::pin::Pin;
 
 use kj_rs::KjOwn;
+use kj_rs::OwnTarget;
 
 /// Wrapper for C++ objects.
 ///
@@ -34,7 +37,7 @@ use kj_rs::KjOwn;
 ///
 /// The same wrapper can then expose shared methods through `AsRef` / `Deref`, and mutable methods
 /// through `as_mut()` when the caller knows the value is not in the `Ref` state.
-pub enum OwnOrRef<'a, T> {
+pub enum OwnOrRef<'a, T: OwnTarget> {
     Own(KjOwn<T>),
     Ref(&'a T),
     MutRef(Pin<&'a mut T>),
@@ -50,12 +53,12 @@ pub enum OwnOrRef<'a, T> {
 ///
 /// Instances of this type are not usually exposed directly. Instead, wrapper structs store an
 /// `OwnOrMut<T>` internally and expose methods that operate on the underlying mutable C++ object.
-pub enum OwnOrMut<'a, T> {
+pub enum OwnOrMut<'a, T: OwnTarget> {
     Own(KjOwn<T>),
     MutRef(Pin<&'a mut T>),
 }
 
-impl<T> AsRef<T> for OwnOrRef<'_, T> {
+impl<T: OwnTarget> AsRef<T> for OwnOrRef<'_, T> {
     fn as_ref(&self) -> &T {
         match self {
             OwnOrRef::Own(own) => own.as_ref(),
@@ -65,7 +68,7 @@ impl<T> AsRef<T> for OwnOrRef<'_, T> {
     }
 }
 
-impl<T> OwnOrRef<'_, T> {
+impl<T: OwnTarget> OwnOrRef<'_, T> {
     /// Obtain mut reference to the underlying object.
     ///
     /// # Safety
@@ -82,7 +85,7 @@ impl<T> OwnOrRef<'_, T> {
     }
 }
 
-impl<T> AsRef<T> for OwnOrMut<'_, T> {
+impl<T: OwnTarget> AsRef<T> for OwnOrMut<'_, T> {
     fn as_ref(&self) -> &T {
         match self {
             OwnOrMut::Own(own) => own.as_ref(),
@@ -91,7 +94,7 @@ impl<T> AsRef<T> for OwnOrMut<'_, T> {
     }
 }
 
-impl<T> OwnOrMut<'_, T> {
+impl<T: OwnTarget> OwnOrMut<'_, T> {
     /// Obtain a mutable reference to the underlying object.
     pub fn as_mut(&mut self) -> Pin<&mut T> {
         match self {
@@ -101,7 +104,7 @@ impl<T> OwnOrMut<'_, T> {
     }
 }
 
-impl<T> Deref for OwnOrRef<'_, T> {
+impl<T: OwnTarget> Deref for OwnOrRef<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -109,7 +112,7 @@ impl<T> Deref for OwnOrRef<'_, T> {
     }
 }
 
-impl<T> Deref for OwnOrMut<'_, T> {
+impl<T: OwnTarget> Deref for OwnOrMut<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -117,31 +120,31 @@ impl<T> Deref for OwnOrMut<'_, T> {
     }
 }
 
-impl<'a, T> From<&'a T> for OwnOrRef<'a, T> {
+impl<'a, T: OwnTarget> From<&'a T> for OwnOrRef<'a, T> {
     fn from(value: &'a T) -> Self {
         Self::Ref(value)
     }
 }
 
-impl<T> From<KjOwn<T>> for OwnOrRef<'_, T> {
+impl<T: OwnTarget> From<KjOwn<T>> for OwnOrRef<'_, T> {
     fn from(value: KjOwn<T>) -> Self {
         Self::Own(value)
     }
 }
 
-impl<'a, T> From<Pin<&'a mut T>> for OwnOrRef<'a, T> {
+impl<'a, T: OwnTarget> From<Pin<&'a mut T>> for OwnOrRef<'a, T> {
     fn from(value: Pin<&'a mut T>) -> Self {
         Self::MutRef(value)
     }
 }
 
-impl<T> From<KjOwn<T>> for OwnOrMut<'_, T> {
+impl<T: OwnTarget> From<KjOwn<T>> for OwnOrMut<'_, T> {
     fn from(value: KjOwn<T>) -> Self {
         Self::Own(value)
     }
 }
 
-impl<'a, T> From<Pin<&'a mut T>> for OwnOrMut<'a, T> {
+impl<'a, T: OwnTarget> From<Pin<&'a mut T>> for OwnOrMut<'a, T> {
     fn from(value: Pin<&'a mut T>) -> Self {
         Self::MutRef(value)
     }

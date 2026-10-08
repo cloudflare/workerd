@@ -10,8 +10,9 @@ normative artifact.**
 
 The readAtLeast tail rows all follow the C++ tail contract: a close
 below the minimum folds the available bytes into a done=false result
-and a follow-up read resolves done. The one remaining divergence is the
-tee byobRequest model (row 2, accepted).
+and a follow-up read resolves done. The remaining divergences are the
+tee byobRequest model (row 2, accepted) and how much an identity-stream
+readAtLeast takes once its minimum is met (row 5, intentional).
 
 | # | Pattern | C++ | TypeScript | Pinned in |
 | --- | --- | --- | --- | --- |
@@ -19,11 +20,10 @@ tee byobRequest model (row 2, accepted).
 | 2 | tee pulls and `c.byobRequest` | tee pulls carry a byobRequest (atLeast/freshness asserted when present) | tee-driven pulls present a NULL byobRequest — ACCEPTED DIVERGENCE: sources must be null-tolerant (check `c.byobRequest`, enqueue() as the fallback); with that supported pattern the tee shapes are PARITY, tail included | `byobReadAtLeastTee`, `byobReadAtLeastTeeComplex1/2/3` (all four demonstrate the supported dual-path source) |
 | 3 | identity-stream readAtLeast tail | trailing below-min remainder delivered done=false, then 0-length done (the tail contract) | same | `identityTransformStreamReadAtLeast`, tee complex variants (r3 done flag) |
 | 4 | chained identity→byte-stream readAtLeast consumption (the R2 body pump shape) | full 5000-byte body in 102-byte minimums | same | `partiallyFilledByobAtLeast` |
+| 5 | identity-stream readAtLeast over queued writes smaller than the minimum | stops at the minimum: `readAtLeast(2, 4 bytes)` over 1-byte writes takes 2 | takes the minimum, then everything already written, up to the view (identity ledger #22): the same read takes all 4 | `identityTransformReadAtLeast`, `fixedLengthStreamReadAtLeast` |
 
 Parity worth noting: manual `byobRequest.atLeast` handling on a DIRECT
 byob reader (`byobReadAtLeastManual` — byobRequest is synthesized for
-direct reads under both), FixedLengthStream readAtLeast
-(`fixedLengthStreamReadAtLeast`), plain identity readAtLeast
-(`identityTransformReadAtLeast`), Request clone BYOB consumption
+direct reads under both), Request clone BYOB consumption
 (`requestCloneByob`), TextDecoderStream over a Request body
 (`textDecoderStreamRequest`).

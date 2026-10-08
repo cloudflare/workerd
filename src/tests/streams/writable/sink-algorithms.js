@@ -541,3 +541,38 @@ export const sinkHooksNotCalledAfterStartThrow = {
     strictEqual(closeCalled, false);
   },
 };
+
+// DIVERGENCE (ledger #14): the controller settles a new promise with
+// start()'s result, so a returned promise starts the stream later than
+// adopting it would: a write queued during start reaches the sink after the
+// second marker chained on it (spec; Node agrees). C++ adopts the promise
+// and writes before the first marker.
+export const startPromiseSettledInNewPromise = {
+  async test() {
+    const expected = usingTsImpl ? '1,2,write,3,4' : 'write,1,2,3,4';
+    // start() returning a fulfilled promise, and one fulfilled later.
+    for (const pending of [false, true]) {
+      const log = [];
+      const { promise, resolve } = Promise.withResolvers();
+      if (!pending) resolve();
+      const ws = new WritableStream({
+        start: () => promise,
+        write() {
+          log.push('write');
+        },
+      });
+      const write = ws.getWriter().write('x');
+      let p = promise;
+      for (let i = 1; i <= 4; i++) {
+        p = p.then(() => log.push(i));
+      }
+      if (pending) {
+        await null;
+        resolve();
+      }
+      await write;
+      await scheduler.wait(1);
+      strictEqual(log.join(','), expected, `pending: ${pending}`);
+    }
+  },
+};

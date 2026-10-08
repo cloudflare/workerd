@@ -10,8 +10,6 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
-#include <workerd/util/autogate.h>
-#include <workerd/util/own-util.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/uncaught-exception-source.h>
@@ -166,10 +164,6 @@ IoContext::IoContext(ThreadContext& thread,
       waitUntilTasks(*this),
       tasks(*this),
       deleteQueueSignalTask(startDeleteQueueSignalTask(this)) {
-  kj::PromiseFulfillerPair<void> paf = kj::newPromiseAndFulfiller<void>();
-  abortFulfiller = kj::mv(paf.fulfiller);
-  abortPromise = paf.promise.fork();
-
   // Arrange to complain if execution resource limits (CPU/memory) are exceeded.
   auto makeLimitsPromise = [this]() {
     auto promise = limitEnforcer->onLimitsExceeded();
@@ -221,10 +215,10 @@ IoContext::IoContext(ThreadContext& thread,
 IoContext::IncomingRequest::IoContext_IncomingRequest(kj::Own<IoContext> contextParam,
     kj::Rc<IoChannelFactory> ioChannelFactoryParam,
     kj::Own<RequestObserver> metricsParam,
-    kj::Maybe<kj::Own<BaseTracer>> workerTracer,
+    kj::Maybe<kj::Rc<BaseTracer>> workerTracer,
     kj::Maybe<tracing::InvocationSpanContext> maybeTriggerInvocationSpan,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo,
-    kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> selfTokenFactory)
+    kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory)
     : context(kj::mv(contextParam)),
       metrics(kj::mv(metricsParam)),
       workerTracer(kj::mv(workerTracer)),
@@ -321,7 +315,7 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   bool hadUndrainedWaitUntilTasks = !waitedForWaitUntil && !context->waitUntilTasks.isEmpty();
   kj::Maybe<kj::Exception> cancellationException;
 
-  if (util::Autogate::isEnabled(util::AutogateKey::JSRPC_TRACING) && !context->isShared()) {
+  if (!context->isShared()) {
     // Reentry callbacks may have spans attached to their pending promises. Cancel them while the
     // request is still current so those spans close before the request outcome is reported.
     while (!context->canceler.isEmpty()) {
@@ -414,10 +408,9 @@ InputGate::Lock IoContext::getInputLock() {
       .addRef(getCurrentTraceSpan());
 }
 
-kj::Maybe<kj::Own<InputGate::CriticalSection>> IoContext::getCriticalSection() {
+kj::Maybe<kj::Rc<InputGate::CriticalSection>> IoContext::getCriticalSection() {
   KJ_IF_SOME(l, currentInputLock) {
-    return l.getCriticalSection().map(
-        [](InputGate::CriticalSection& cs) { return kj::addRef(cs); });
+    return l.getCriticalSection().clone();
   } else {
     return kj::none;
   }
@@ -537,7 +530,7 @@ void IoContext::abort(kj::Exception&& e) {
     // or unintentional async work
     a.shutdownActorCache(e.clone());
   }
-  abortFulfiller->reject(kj::mv(e));
+  abortFlag.reject(kj::mv(e));
 }
 
 void IoContext::abortIsolate(kj::StringPtr reason) {
@@ -587,8 +580,16 @@ void IoContext::addTask(kj::Promise<void> promise) {
 }
 
 void IoContext::addWaitUntil(kj::Promise<void> promise) {
-  // The empty check comes first: getMetrics() requires a current IncomingRequest, so consulting
-  // it before checking would turn the recoverable no-request case into a fatal one. See addTask().
+  kj::Own<Worker::Actor::WaitUntilTaskHandle> handle;
+  KJ_IF_SOME(a, actor) {
+    KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { handle = a.addedWaitUntilTask(); })) {
+      KJ_LOG(ERROR, "Actor::addedWaitUntilTask() threw an exception", e);
+    }
+  }
+  if (handle.get() != nullptr) {
+    promise = promise.attach(kj::mv(handle));
+  }
+
   if (incomingRequests.empty()) {
     DEBUG_FATAL_RELEASE_LOG(WARNING, "Adding task to IoContext with no current IncomingRequest",
         lastDeliveredLocation, kj::getStackTrace());
@@ -722,7 +723,7 @@ kj::Promise<WorkerInterface::ScheduledResult> IoContext::IncomingRequest::finish
                      .then([this]() { return context->waitUntilStatus(); })
                      .exclusiveJoin(kj::mv(timeoutPromise))
                      .exclusiveJoin(context->onAbort().then([] {
-    // abortFulfiller should only ever be rejected instead of being fulfilled, return an
+    // The abort flag should only ever be rejected instead of being fulfilled, return an
     // internalError outcome if it does happen
     return EventOutcome::INTERNAL_ERROR;
   }, [](kj::Exception&& e) {
@@ -1199,7 +1200,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,
     .cfBlobJson = kj::mv(cfBlobJson),
     .parentSpan = tracing.getInternalSpanParent(),
     .userSpanParent = kj::mv(propagatedUserSpanParent),
-    .featureFlagsForFl = mapCopyString(worker->getIsolate().getFeatureFlagsForFl()),
+    .featureFlagsForFl = worker->getIsolate().getFeatureFlagsForFl().clone(),
   };
 
   auto client = channelFactory.startSubrequest(channel, kj::mv(metadata));
@@ -1306,13 +1307,17 @@ SpanParent IoContext::getCurrentTraceSpan() {
         auto handle = value.getHandle(lock);
         jsg::Lock& js = lock;
         auto& spanParent = jsg::unwrapOpaqueRef<IoOwn<SpanParent>>(js.v8Isolate, handle);
-        return spanParent->addRef();
+        // The frame may have been captured by a different request (e.g. via
+        // AsyncLocalStorage.snapshot()), whose span this request can't use.
+        KJ_IF_SOME(span, spanParent.tryGet()) {
+          return span.addRef();
+        }
       }
     }
   }
 
-  // If async context is unavailable (unset, or JS lock is not held), fall back to heuristic of
-  // using the trace info from the most recent active request.
+  // If async context is unavailable (unset, from another request, or JS lock is not held), fall
+  // back to heuristic of using the trace info from the most recent active request.
   return getMetrics().getSpan();
 }
 
@@ -1329,7 +1334,11 @@ SpanParent IoContext::getCurrentUserTraceSpan() {
         jsg::Lock& js = lock;
         auto& asyncContext =
             jsg::unwrapOpaqueRef<IoOwn<UserTraceAsyncContext>>(js.v8Isolate, handle);
-        return asyncContext->getSpan();
+        // As in getCurrentTraceSpan(), the frame may belong to a different request, in which case
+        // fall back to this request's root span.
+        KJ_IF_SOME(context, asyncContext.tryGet()) {
+          return context.getSpan();
+        }
       }
     }
   }
@@ -1341,9 +1350,8 @@ SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
 }
 
 TraceContext IoContext::makeUserTraceSpan(kj::ConstString operationName) {
-  auto span = makeTraceSpan(operationName.clone());
-  auto userSpan = getCurrentUserTraceSpan().newChild(kj::mv(operationName));
-  return TraceContext(kj::mv(span), kj::mv(userSpan));
+  TraceContextParent parents(getCurrentTraceSpan(), getCurrentUserTraceSpan());
+  return parents.newChild(kj::mv(operationName));
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {
@@ -1646,7 +1654,7 @@ jsg::JsObject IoContext::getEntrypointHandler(jsg::Lock& js) {
   return KJ_REQUIRE_NONNULL(entrypointHandler, "entrypoint handler has not been set").getHandle(js);
 }
 
-kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> IoContext::getSelfTokenFactory() {
+kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> IoContext::getSelfTokenFactory() {
   // Scan all IncomingRequests and return the first self-token factory we find. Scanning them all,
   // rather that just using the "current" IncomingRequest, avoids unpredictable behavior in the
   // presence of concurrent requests where some requests came in through a path that doesn't have a
@@ -1654,7 +1662,7 @@ kj::Maybe<kj::Own<IoChannelFactory::SelfTokenFactory>> IoContext::getSelfTokenFa
   // either always use ctx.restore() or never use it for a particular dynamic worker or facet.
   for (auto& req: incomingRequests) {
     KJ_IF_SOME(s, req.selfTokenFactory) {
-      return kj::addRef(*s);
+      return s.clone();
     }
   }
   return kj::none;
