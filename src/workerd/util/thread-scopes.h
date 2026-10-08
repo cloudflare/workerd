@@ -78,6 +78,9 @@ void setPredictableModeForTest();
 bool isBenchMode();
 void setBenchMode();
 
+// Clears bench mode, so that a test that sets it doesn't affect later tests in the same process.
+void unsetBenchModeForTest();
+
 // When enabled, forces a full V8 garbage collection at key points where the KJ event loop
 // re-enters JavaScript (e.g., awaitIo continuations). This helps detect KJ async objects that
 // are reachable from the JS heap without proper IoOwn wrapping — such objects would violate

@@ -300,6 +300,9 @@ pub mod ffi {
         /// both read. Owned by the factory for the run; every reader into it stays valid.
         fn factory_config<'a>(factory: &'a WorkerFactory) -> &'a [u8];
         fn factory_experimental(factory: &WorkerFactory) -> bool;
+        /// Whether requests get tail workers (`WorkerFactory::Options::tailWorkers`): not under
+        /// `workerd bench`.
+        fn factory_tail_workers(factory: &WorkerFactory) -> bool;
         /// Registers the server as the resolver of channel tokens and debug-port requests.
         /// Tokens cannot be decoded before this.
         fn factory_set_server(factory: &WorkerFactory, server: Box<ServerHandle>);

@@ -404,6 +404,9 @@ class Server {
   void allowExperimental() {
     options->experimental = true;
   }
+  void disableTailWorkers() {
+    options->tailWorkers = false;
+  }
   void enableDebugPort(kj::String addr) {
     debugPort = kj::str("loopback:", addr);
   }
@@ -4385,6 +4388,146 @@ KJ_TEST("Server: tail workers") {
   )"_blockquote);
 }
 
+KJ_TEST("Server: tail workers turned off") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-11-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(req, env, ctx) {
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ],
+          tails = ["tail"],
+          streamingTails = ["tail"],
+        )
+      ),
+      ( name = "tail",
+        worker = (
+          compatibilityDate = "2024-11-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async tail(req, env, ctx) {
+                `    await fetch("http://tail");
+                `  },
+                `  tailStream(event, env, ctx) {
+                `    ctx.waitUntil(fetch("http://tail"));
+                `    return {};
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.server.disableTailWorkers();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+  conn.recvHttp200("OK");
+
+  // Give a tail worker, which runs after the response, time to run.
+  test.wait(1);
+  KJ_EXPECT(!test.server.accept("tail").poll(test.ws), "a tail worker ran");
+}
+
+KJ_TEST("Server: tail workers turned off for a dynamic worker") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-01-01",
+          compatibilityFlags = ["enable_ctx_exports", "experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import {WorkerEntrypoint} from "cloudflare:workers";
+                `export class Tail extends WorkerEntrypoint {
+                `  async tail(events) {
+                `    await fetch("http://tail");
+                `  }
+                `}
+                `export default {
+                `  async fetch(req, env, ctx) {
+                `    let worker = env.LOADER.get("dynamic", () => ({
+                `      compatibilityDate: "2025-01-01",
+                `      mainModule: "main.js",
+                `      modules: {
+                `        "main.js": "export default { fetch() { return new Response('OK'); } }",
+                `      },
+                `      tails: [ctx.exports.Tail({})],
+                `    }));
+                `    return worker.getEntrypoint().fetch(req);
+                `  }
+                `}
+            )
+          ],
+          bindings = [( name = "LOADER", workerLoader = () )],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.server.disableTailWorkers();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+  conn.recvHttp200("OK");
+
+  // Give a tail worker, which runs after the response, time to run.
+  test.wait(1);
+  KJ_EXPECT(!test.server.accept("tail").poll(test.ws), "a tail worker ran");
+}
+
+KJ_TEST("Server: tail workers turned off are still looked up") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-11-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  fetch(req, env, ctx) { return new Response("OK"); }
+                `}
+            )
+          ],
+          tails = ["missing"],
+        )
+      ),
+    ]
+  ))"_kj);
+
+  test.server.disableTailWorkers();
+  test.expectErrors(R"(
+    Worker "hello"'s tails refers to a service "missing", but no such service is defined.
+  )"_blockquote);
+}
+
 // =======================================================================================
 // Test HttpOptions on receive
 
@@ -5786,6 +5929,7 @@ KJ_TEST("Server: cache name is passed through to service") {
 
 KJ_TEST("Server: bench command") {
   setBenchMode();
+  KJ_DEFER(unsetBenchModeForTest());
 
   // With no warmup and a fixed batch, each case's function is called exactly batch * samples
   // times, which the "verify" case checks.

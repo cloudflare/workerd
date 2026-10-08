@@ -254,6 +254,10 @@ bool factory_experimental(const WorkerFactory& factory) {
   return factory.getImpl().options->experimental;
 }
 
+bool factory_tail_workers(const WorkerFactory& factory) {
+  return factory.getImpl().options->tailWorkers;
+}
+
 Worker::Actor::Id normalizeActorId(Worker::Actor::Id id) {
   KJ_IF_SOME(doId, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
     KJ_IF_SOME(name, doId->getName()) {
@@ -1535,6 +1539,10 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
     auto fetched = co_await (*KJ_ASSERT_NONNULL(dynamicSource))();
     co_await fetched.ensureAllResolved();
     auto& dynamic = impl->dynamicSource.emplace(kj::mv(fetched));
+    if (!options.tailWorkers) {
+      dynamic.tails = nullptr;
+      dynamic.streamingTails = nullptr;
+    }
     indexDynamicChannels(*impl, dynamic);
     featureFlags = dynamic.compatibilityFlags;
     source = kj::mv(dynamic.source);
