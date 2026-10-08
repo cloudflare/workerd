@@ -692,7 +692,7 @@ kj::Maybe<kj::Array<kj::byte>> CryptoKey::snapshotRecipe(jsg::Lock& js) {
   if (jwk.oth != kj::none) return kj::none;
   auto jwkObj = js.obj();
   jwkObj.set(js, "kty", js.str(jwk.kty));
-  for (auto name: kj::ArrayPtr(JWK_STRING_FIELDS).slice(1)) {
+  for (const auto& name: kj::ArrayPtr(JWK_STRING_FIELDS).slice(1)) {
     putOptional(js, jwkObj, name, jwkStringField(jwk, name));
   }
   KJ_IF_SOME(ext, jwk.ext) jwkObj.set(js, "ext", js.boolean(ext));
@@ -714,7 +714,7 @@ jsg::Ref<CryptoKey> CryptoKey::restoreFromSnapshot(
       KJ_ASSERT_NONNULL(jsg::JsValue::fromJson(js, recipe.asChars()).tryCast<jsg::JsObject>());
   auto jwkObj = KJ_ASSERT_NONNULL(obj.get(js, "jwk").tryCast<jsg::JsObject>());
   SubtleCrypto::JsonWebKey jwk{.kty = KJ_ASSERT_NONNULL(getOptionalString(js, jwkObj, "kty"))};
-  for (auto name: kj::ArrayPtr(JWK_STRING_FIELDS).slice(1)) {
+  for (const auto& name: kj::ArrayPtr(JWK_STRING_FIELDS).slice(1)) {
     jwkStringField(jwk, name) = getOptionalString(js, jwkObj, name);
   }
   auto ext = jwkObj.get(js, "ext");
