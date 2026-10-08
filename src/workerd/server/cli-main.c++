@@ -10,6 +10,7 @@
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/release-version.embed.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/server/bench-report.h>
 #include <workerd/server/cli/bridge.rs.h>
 #include <workerd/server/json-logger.h>
 #include <workerd/server/v8-platform-impl.h>
@@ -20,6 +21,7 @@
 #include <kj-rs-io/async-io.h>
 #include <kj-rs/kj-rs.h>
 
+#include <capnp/compat/json.h>
 #include <capnp/message.h>
 #include <capnp/serialize.h>
 #include <kj/filesystem.h>
@@ -264,6 +266,72 @@ class CliMain {
     });
   }
 
+  void bench(const BenchOptions& options) {
+    setBenchMode();
+    if (!options.no_verbose) {
+      // As for tests, so that uncaught exceptions are displayed.
+      kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
+    }
+    if (options.all_autogates) {
+      util::Autogate::initAllAutogates();
+    }
+    KJ_IF_SOME(compatDate, options.compat_date) {
+      server->setTestCompatibilityDateOverride(kj::str(compatDate));
+    }
+
+    // Benchmarks may use loopback sockets, as tests do.
+    kj::downcast<kj_rs_io::TokioNetwork>(io.provider->getNetwork()).enableLoopback();
+
+    auto servicePattern = kj::str("*");
+    KJ_IF_SOME(pattern, options.service_pattern) {
+      servicePattern = kj::str(pattern);
+    }
+    auto entrypointPattern = kj::str("*");
+    KJ_IF_SOME(pattern, options.entrypoint_pattern) {
+      entrypointPattern = kj::str(pattern);
+    }
+
+    auto message = kj::heap<capnp::MallocMessageBuilder>();
+    auto params = message->getOrphanage().newOrphan<bench::BenchParams>();
+    KJ_IF_SOME(pattern, options.case_pattern) {
+      params.get().setCaseFilter(kj::str(pattern));
+    }
+    params.get().setQuick(options.quick);
+
+    auto report = message->initRoot<bench::BenchReport>();
+    auto environment = report.initEnvironment();
+    environment.setWorkerdVersion(RELEASE_VERSION);
+    KJ_IF_SOME(compatDate, options.compat_date) {
+      environment.setCompatDate(kj::str(compatDate));
+    }
+    environment.setAllAutogates(options.all_autogates);
+    fillBenchEnvironment(environment);
+
+    auto json = options.json;
+    kj::Maybe<kj::String> output;
+    KJ_IF_SOME(path, options.output) {
+      output = kj::str(path);
+    }
+
+    serveImpl([&](jsg::V8System& v8System) {
+      return server
+          ->bench(v8System, config, params.getReader(), report, servicePattern, entrypointPattern)
+          .then([this, report, json, &output](bool result) -> kj::Promise<void> {
+        writeBenchReport(report.asReader(), json, output);
+        if (!result) {
+          context.error("Benchmarks failed!");
+        }
+
+        if (!process->is_watching()) {
+          return kj::READY_NOW;
+        } else {
+          // Pause forever waiting for watcher.
+          return kj::NEVER_DONE;
+        }
+      });
+    });
+  }
+
  private:
   StructuredLoggingProcessContext& context;
   ::rust::Box<Process> process;
@@ -286,6 +354,28 @@ class CliMain {
 
   // Set by the Server's error callback under --watch, where errors don't exit.
   bool hadErrors = false;
+
+  void writeBenchReport(
+      bench::BenchReport::Reader report, bool json, kj::Maybe<kj::StringPtr> output) {
+    kj::String text;
+    if (json) {
+      capnp::JsonCodec codec;
+      codec.setPrettyPrint(true);
+      text = kj::str(codec.encode(report), '\n');
+    } else {
+      text = formatBenchReport(report);
+    }
+
+    KJ_IF_SOME(path, output) {
+      auto file = fs->getRoot().replaceFile(fs->getCurrentPath().eval(path),
+          kj::WriteMode::CREATE | kj::WriteMode::MODIFY | kj::WriteMode::CREATE_PARENT);
+      file->get().writeAll(text);
+      file->commit();
+    } else {
+      fwrite(text.begin(), 1, text.size(), stdout);
+      fflush(stdout);
+    }
+  }
 
   kj::Maybe<kj::Own<const kj::Directory>> openWritableDirectory(kj::StringPtr pathStr) {
     return fs->getRoot().tryOpenSubdir(fs->getCurrentPath().eval(pathStr), kj::WriteMode::MODIFY);
@@ -397,6 +487,18 @@ int32_t run_serve(const CommonOptions& common,
     main.applyServeOptions(serve);
     main.loadConfig(kj::mv(config));
     main.serve();
+  });
+}
+
+int32_t run_bench(const CommonOptions& common,
+    ::rust::Vec<uint64_t> config,
+    const ServeOrTestOptions& serveOrTest,
+    const BenchOptions& bench,
+    ::rust::Box<Process> process) {
+  return run(common, kj::mv(process), [&](CliMain& main) {
+    main.applyServeOrTestOptions(serveOrTest);
+    main.loadConfig(kj::mv(config));
+    main.bench(bench);
   });
 }
 

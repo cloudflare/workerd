@@ -8,6 +8,7 @@
 use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
+use clap::ValueEnum;
 
 use crate::bridge::ffi;
 
@@ -121,6 +122,22 @@ pub enum Command {
         test: TestArgs,
     },
 
+    /// run benchmarks
+    #[command(
+        long_about = "Runs benchmarks based on a config.",
+        after_long_help = BENCH_HELP,
+    )]
+    Bench {
+        #[command(flatten)]
+        config: ConfigFileArgs,
+
+        #[command(flatten)]
+        serve_or_test: ServeOrTestArgs,
+
+        #[command(flatten)]
+        bench: BenchArgs,
+    },
+
     /// outputs the package lock file used by Pyodide
     #[command(long_about = "Outputs the package lock file used by Pyodide.")]
     PyodideLock,
@@ -167,6 +184,25 @@ under different entrypoint names:
         ...
       }
     }
+";
+
+const BENCH_HELP: &str = "\
+Runs benchmarks for services defined in <config-file>. <filter>, if given, has the format of the \
+`test` command's, optionally followed by /<case-pattern>, a glob pattern matching case names:
+    <service-pattern>[/<case-pattern>]
+    <service-pattern>:<entrypoint-pattern>[/<case-pattern>]
+    <const-name>:<service-pattern>:<entrypoint-pattern>[/<case-pattern>]
+
+Benchmarks are defined by exporting a function called `bench`, which registers cases. Each case \
+is timed after `bench` returns:
+    export default {
+      bench(b, env, ctx) {
+        const encoder = new TextEncoder();
+        b.run('encode', () => b.blackBox(encoder.encode('hello')));
+        b.run('fetch', async () => { await env.SERVICE.fetch('http://x/'); }, { minTime: '2s' });
+      }
+    }
+Results are written to stdout as a table, or as JSON with --format=json.
 ";
 
 #[derive(Args, Debug)]
@@ -317,6 +353,50 @@ pub struct TestArgs {
 
 /// `<filter>`: `<service-pattern>`, `<service-pattern>:<entrypoint-pattern>`, or
 /// `<const-name>:<service-pattern>:<entrypoint-pattern>`.
+#[derive(Args, Debug)]
+pub struct BenchArgs {
+    /// Disable INFO-level logging, which otherwise shows uncaught exceptions.
+    #[arg(long)]
+    pub no_verbose: bool,
+
+    /// Enable all autogates.
+    #[arg(long)]
+    pub all_autogates: bool,
+
+    /// Set the compatibility date for all workers, as for `test`.
+    #[arg(long, value_name = "date")]
+    pub compat_date: Option<String>,
+
+    /// Use short time budgets, to check that benchmarks run rather than to measure them.
+    #[arg(long)]
+    pub quick: bool,
+
+    /// The format of the results.
+    #[arg(long, value_enum, default_value_t = BenchFormat::Text)]
+    pub format: BenchFormat,
+
+    /// Write the results to <path> instead of stdout.
+    #[arg(long, value_name = "path")]
+    pub output: Option<String>,
+
+    #[arg(value_name = "filter", value_parser = parse_bench_filter)]
+    pub filter: Option<BenchFilter>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum BenchFormat {
+    /// A table for people.
+    Text,
+    /// The full report, including raw samples.
+    Json,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BenchFilter {
+    pub test: TestFilter,
+    pub case_pattern: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TestFilter {
     pub const_name: Option<String>,
@@ -372,6 +452,19 @@ fn parse_test_filter(param: &str) -> Result<TestFilter, &'static str> {
         },
         _ => return Err("Too many colons."),
     })
+}
+
+fn parse_bench_filter(param: &str) -> Result<BenchFilter, &'static str> {
+    let (rest, case_pattern) = match param.split_once('/') {
+        Some((rest, case_pattern)) => (rest, Some(case_pattern.to_owned())),
+        None => (param, None),
+    };
+    let test = if rest.is_empty() {
+        TestFilter::default()
+    } else {
+        parse_test_filter(rest)?
+    };
+    Ok(BenchFilter { test, case_pattern })
 }
 
 fn parse_control_fd(param: &str) -> Result<u32, &'static str> {
@@ -443,6 +536,23 @@ impl ffi::TestOptions {
             compat_date: args.compat_date.into(),
             service_pattern: filter.service_pattern.into(),
             entrypoint_pattern: filter.entrypoint_pattern.into(),
+        }
+    }
+}
+
+impl ffi::BenchOptions {
+    /// The options for a bench run, with the patterns from `filter`.
+    pub fn new(args: BenchArgs, filter: BenchFilter) -> Self {
+        Self {
+            no_verbose: args.no_verbose,
+            all_autogates: args.all_autogates,
+            compat_date: args.compat_date.into(),
+            quick: args.quick,
+            json: args.format == BenchFormat::Json,
+            output: args.output.into(),
+            service_pattern: filter.test.service_pattern.into(),
+            entrypoint_pattern: filter.test.entrypoint_pattern.into(),
+            case_pattern: filter.case_pattern.into(),
         }
     }
 }

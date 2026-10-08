@@ -178,6 +178,24 @@ fn run_command(
                 process,
             )
         }
+        args::Command::Bench {
+            config,
+            serve_or_test,
+            mut bench,
+        } => {
+            check_serve_or_test::<T>(&serve_or_test);
+            let filter = bench.filter.take().unwrap_or_default();
+            let watcher = watcher::<T>(&serve_or_test, executable.as_ref());
+            let process = Box::new(Process::new(executable, watcher, Vec::new()));
+            let config = load_config::<T>(config, filter.test.const_name.clone(), &process);
+            ffi::run_bench(
+                &common,
+                config.into_words(),
+                &serve_or_test.into(),
+                &ffi::BenchOptions::new(bench, filter),
+                process,
+            )
+        }
         args::Command::PyodideLock => {
             println!("{}", ffi::pyodide_lock()?);
             Ok(0)
@@ -452,6 +470,7 @@ impl args::Main {
             args::Command::Compile { .. } => "compile",
             args::Command::Fuzzilli { .. } => "fuzzilli",
             args::Command::Test { .. } => "test",
+            args::Command::Bench { .. } => "bench",
             args::Command::PyodideLock => "pyodide-lock",
             args::Command::MakePyodideBaselineSnapshot { .. } => "make-pyodide-baseline-snapshot",
         }

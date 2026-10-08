@@ -128,6 +128,64 @@ fn test_filters() {
 }
 
 #[test]
+fn bench_filters() {
+    let filter = |param| parse_bench_filter(param);
+    assert_eq!(
+        filter("svc:ep/encode*"),
+        Ok(BenchFilter {
+            test: TestFilter {
+                service_pattern: Some("svc".into()),
+                entrypoint_pattern: Some("ep".into()),
+                ..TestFilter::default()
+            },
+            case_pattern: Some("encode*".into()),
+        })
+    );
+    assert_eq!(
+        filter("/a/b"),
+        Ok(BenchFilter {
+            case_pattern: Some("a/b".into()),
+            ..BenchFilter::default()
+        })
+    );
+    assert_eq!(
+        filter("svc"),
+        Ok(BenchFilter {
+            test: TestFilter {
+                service_pattern: Some("svc".into()),
+                ..TestFilter::default()
+            },
+            case_pattern: None,
+        })
+    );
+    assert_eq!(filter("a:b:c:d/x"), Err("Too many colons."));
+}
+
+#[test]
+fn bench_invocation() {
+    let Command::Bench { config, bench, .. } = parse(&[
+        "bench",
+        "foo.wd-test",
+        "--quick",
+        "--format=json",
+        "--output=out.json",
+        "svc/case",
+    ])
+    .command
+    else {
+        panic!("expected bench")
+    };
+    assert_eq!(config.config_file, "foo.wd-test");
+    assert!(bench.quick);
+    assert_eq!(bench.format, BenchFormat::Json);
+    assert_eq!(bench.output.as_deref(), Some("out.json"));
+    assert_eq!(
+        bench.filter.map(|f| f.case_pattern),
+        Some(Some("case".into()))
+    );
+}
+
+#[test]
 fn bad_values_are_usage_errors() {
     for args in [
         &["serve", "c.capnp", "--socket-addr=noequals"][..],
