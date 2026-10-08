@@ -55,5 +55,24 @@ KJ_TEST("AsyncContextFrame::Scope retains its prior frame") {
   });
 }
 
+KJ_TEST("AsyncContextFrame collects a cycle through its stored value") {
+  Evaluator<AsyncContextTestContext, AsyncContextTestIsolate> evaluator(v8System);
+  evaluator.run([&](auto& js) {
+    auto key = kj::arc<AsyncContextFrame::StorageKey>();
+    kj::Maybe<WeakRef<AsyncContextFrame>> weakFrame;
+    {
+      v8::HandleScope handleScope(js.v8Isolate);
+      auto value = v8::Object::New(js.v8Isolate);
+      auto frame = AsyncContextFrame::create(js,
+          AsyncContextFrame::StorageEntry(key.addRef(), js.v8Ref(value.template As<v8::Value>())));
+      check(value->Set(js.v8Context(), v8Str(js.v8Isolate, "frame"_kj), frame->getJSWrapper(js)));
+      weakFrame = frame.getWeakRef(js);
+    }
+    collectGarbage(js);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(weakFrame).tryAddRef(js) == kj::none,
+        "async context storage kept its own frame alive");
+  });
+}
+
 }  // namespace
 }  // namespace workerd::jsg::test

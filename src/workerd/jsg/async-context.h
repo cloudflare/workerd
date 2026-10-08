@@ -61,6 +61,8 @@ namespace workerd::jsg {
 //
 // AsyncContextFrame::StorageScope is created on stack to create a new frame and set
 // a stored value in the storage context before entering it.
+// Stored values are traced through the frame, so values that capture their own async context
+// do not become permanent roots. Native scopes retain frames with Ref<AsyncContextFrame>.
 //
 // AsyncContextFrame::Scope is created on the stack to temporarily enter an existing
 // frame.
