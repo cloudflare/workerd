@@ -950,7 +950,7 @@ class Worker::Actor final: public kj::Refcounted {
       // WARNING: The object passed here MUST be directly from IoChannelFactory::getActorClass(),
       //   as the FacetManager implementation is allowed to assume it can downcast to whatever
       //   type the IoChannelFactory produces.
-      kj::Own<IoChannelFactory::ActorClassChannel> actorClass;
+      kj::Rc<IoChannelFactory::ActorClassChannel> actorClass;
 
       // ctx.id for the child object.
       Worker::Actor::Id id;
@@ -966,7 +966,7 @@ class Worker::Actor final: public kj::Refcounted {
     virtual uint getDepth() const = 0;
 
     // These methods are C++ equivalents of the JavaScript ctx.facets API.
-    virtual kj::Own<IoChannelFactory::ActorChannel> getFacet(
+    virtual kj::Rc<IoChannelFactory::ActorChannel> getFacet(
         kj::StringPtr name, kj::Function<kj::Promise<StartInfo>()> getStartInfo) = 0;
     virtual void abortFacet(kj::StringPtr name, kj::Exception reason) = 0;
     virtual void deleteFacet(kj::StringPtr name) = 0;

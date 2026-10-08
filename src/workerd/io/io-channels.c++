@@ -38,32 +38,32 @@ kj::Promise<kj::Array<byte>> IoChannelFactory::TokenizableChannel::getToken(
   KJ_UNREACHABLE;
 }
 
-kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::subrequestChannelFromToken(
+kj::Rc<IoChannelFactory::SubrequestChannel> IoChannelFactory::subrequestChannelFromToken(
     ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) {
   JSG_FAIL_REQUIRE(DOMDataCloneError, "This Worker is not able to deserialize ServiceStubs.");
 }
 
-kj::Own<IoChannelFactory::ActorClassChannel> IoChannelFactory::actorClassFromToken(
+kj::Rc<IoChannelFactory::ActorClassChannel> IoChannelFactory::actorClassFromToken(
     ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) {
   JSG_FAIL_REQUIRE(
       DOMDataCloneError, "This Worker is not able to deserialize Durable Object class stubs.");
 }
 
-kj::Own<IoChannelFactory::RpcChannel> IoChannelFactory::rpcChannelFromToken(
+kj::Rc<IoChannelFactory::RpcChannel> IoChannelFactory::rpcChannelFromToken(
     ChannelTokenUsage usage, kj::ArrayPtr<const byte> token) {
   JSG_FAIL_REQUIRE(DOMDataCloneError, "This Worker is not able to deserialize RpcStubs.");
 }
 
-kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::
-    makeRestoredSubrequestChannelResolved(kj::Own<SelfTokenFactory> selfTokenFactory,
-        Frankenvalue restoreParams,
-        kj::Own<SubrequestChannel> inner,
-        Persistent persistent) {
+kj::Rc<IoChannelFactory::SubrequestChannel> IoChannelFactory::makeRestoredSubrequestChannelResolved(
+    kj::Rc<SelfTokenFactory> selfTokenFactory,
+    Frankenvalue restoreParams,
+    kj::Rc<SubrequestChannel> inner,
+    Persistent persistent) {
   KJ_UNIMPLEMENTED("This runtime doesn't support persistent ServiceStubs.");
 }
 
-kj::Own<IoChannelFactory::RpcChannel> IoChannelFactory::makeRestoredRpcChannelResolved(
-    kj::Own<SelfTokenFactory> selfTokenFactory, Frankenvalue restoreParams, Persistent persistent) {
+kj::Rc<IoChannelFactory::RpcChannel> IoChannelFactory::makeRestoredRpcChannelResolved(
+    kj::Rc<SelfTokenFactory> selfTokenFactory, Frankenvalue restoreParams, Persistent persistent) {
   KJ_UNIMPLEMENTED("This runtime doesn't support persistent RpcStubs.");
 }
 
@@ -72,7 +72,7 @@ namespace {
 template <typename ChannelType>
 class PromisedTokenizableChannel: public ChannelType {
  public:
-  PromisedTokenizableChannel(kj::Promise<kj::Own<ChannelType>> promise)
+  PromisedTokenizableChannel(kj::Promise<kj::Rc<ChannelType>> promise)
       : readyPromise(waitForResolution(kj::mv(promise)).fork()) {}
 
   void requireAllowsTransfer() override {
@@ -101,32 +101,33 @@ class PromisedTokenizableChannel: public ChannelType {
     }
   }
 
-  kj::OneOf<kj::Own<IoChannelFactory::TokenizableChannel>,
-      kj::Promise<kj::Own<IoChannelFactory::TokenizableChannel>>>
+  kj::OneOf<kj::Rc<IoChannelFactory::TokenizableChannel>,
+      kj::Promise<kj::Rc<IoChannelFactory::TokenizableChannel>>>
   getResolved() override {
     KJ_IF_SOME(channel, inner) {
-      return kj::addRef<IoChannelFactory::TokenizableChannel>(*channel);
+      return kj::Rc<IoChannelFactory::TokenizableChannel>(channel.addRef());
     } else {
       return readyPromise.addBranch().then([self = this->addWeakToThis()]() mutable {
         auto& channel = self.assertLive();
-        return kj::addRef<IoChannelFactory::TokenizableChannel>(*KJ_ASSERT_NONNULL(channel.inner));
+        return kj::Rc<IoChannelFactory::TokenizableChannel>(
+            KJ_ASSERT_NONNULL(channel.inner).addRef());
       });
     }
   }
 
  protected:
-  kj::Maybe<kj::Own<ChannelType>> inner;
+  kj::Maybe<kj::Rc<ChannelType>> inner;
   kj::ForkedPromise<void> readyPromise;
 
-  kj::Promise<void> waitForResolution(kj::Promise<kj::Own<ChannelType>> promise) {
-    kj::Own<IoChannelFactory::TokenizableChannel> resolution = co_await promise;
+  kj::Promise<void> waitForResolution(kj::Promise<kj::Rc<ChannelType>> promise) {
+    auto resolution = co_await promise;
 
     KJ_SWITCH_ONEOF(resolution->getResolved()) {
-      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::TokenizableChannel>) {
-        inner = channel.template downcast<ChannelType>();
+      KJ_CASE_ONEOF(channel, kj::Rc<IoChannelFactory::TokenizableChannel>) {
+        inner = kj::mv(channel).template downcast<ChannelType>();
         co_return;
       }
-      KJ_CASE_ONEOF(deeperPromise, kj::Promise<kj::Own<IoChannelFactory::TokenizableChannel>>) {
+      KJ_CASE_ONEOF(deeperPromise, kj::Promise<kj::Rc<IoChannelFactory::TokenizableChannel>>) {
         // Promise resolved to another promise, wait for it too.
         //
         // Note that a promise returned by `getResolved()` will always itself resolve to a
@@ -186,13 +187,13 @@ kj::OneOf<kj::Own<Frankenvalue::CapTableEntry>, kj::Promise<kj::Own<Frankenvalue
 resolveCap(kj::Own<Frankenvalue::CapTableEntry> cap) {
   KJ_IF_SOME(typed, kj::tryDowncast<IoChannelFactory::TokenizableChannel>(*cap)) {
     KJ_SWITCH_ONEOF(typed.getResolved()) {
-      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::TokenizableChannel>) {
-        return kj::implicitCast<kj::Own<Frankenvalue::CapTableEntry>>(kj::mv(channel));
+      KJ_CASE_ONEOF(channel, kj::Rc<IoChannelFactory::TokenizableChannel>) {
+        return kj::implicitCast<kj::Own<Frankenvalue::CapTableEntry>>(channel.toOwn());
       }
-      KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::TokenizableChannel>>) {
+      KJ_CASE_ONEOF(promise, kj::Promise<kj::Rc<IoChannelFactory::TokenizableChannel>>) {
         return promise
-            .then([](kj::Own<IoChannelFactory::TokenizableChannel> channel) {
-          return kj::implicitCast<kj::Own<Frankenvalue::CapTableEntry>>(kj::mv(channel));
+            .then([](kj::Rc<IoChannelFactory::TokenizableChannel> channel) {
+          return kj::implicitCast<kj::Own<Frankenvalue::CapTableEntry>>(channel.toOwn());
         }).attach(kj::mv(cap));
       }
     }
@@ -205,13 +206,13 @@ resolveCap(kj::Own<Frankenvalue::CapTableEntry> cap) {
 
 }  // namespace
 
-kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::getSubrequestChannel(uint channel,
+kj::Rc<IoChannelFactory::SubrequestChannel> IoChannelFactory::getSubrequestChannel(uint channel,
     kj::Maybe<Frankenvalue> props,
     kj::Maybe<VersionRequest> versionRequest,
     Persistent persistent) {
   KJ_IF_SOME(p, props) {
     KJ_IF_SOME(promise, p.resolveCaps(resolveCap)) {
-      return kj::refcounted<PromisedSubrequestChannel>(
+      return kj::rc<PromisedSubrequestChannel>(
           promise.then([self = addRefToThis(), channel, props = kj::mv(p),
                            versionRequest = kj::mv(versionRequest), persistent]() mutable {
         return self->getSubrequestChannelResolved(
@@ -222,11 +223,11 @@ kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::getSubrequestChan
   return getSubrequestChannelResolved(channel, kj::mv(props), kj::mv(versionRequest), persistent);
 }
 
-kj::Own<IoChannelFactory::ActorClassChannel> IoChannelFactory::getActorClass(
+kj::Rc<IoChannelFactory::ActorClassChannel> IoChannelFactory::getActorClass(
     uint channel, kj::Maybe<Frankenvalue> props, Persistent persistent) {
   KJ_IF_SOME(p, props) {
     KJ_IF_SOME(promise, p.resolveCaps(resolveCap)) {
-      return kj::refcounted<PromisedActorClassChannel>(
+      return kj::rc<PromisedActorClassChannel>(
           promise.then([self = addRefToThis(), channel, props = kj::mv(p), persistent]() mutable {
         return self->getActorClassResolved(channel, kj::mv(props), persistent);
       }));
@@ -235,17 +236,17 @@ kj::Own<IoChannelFactory::ActorClassChannel> IoChannelFactory::getActorClass(
   return getActorClassResolved(channel, kj::mv(props), persistent);
 }
 
-kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::makeRestoredSubrequestChannel(
-    kj::Own<SelfTokenFactory> selfTokenFactory,
+kj::Rc<IoChannelFactory::SubrequestChannel> IoChannelFactory::makeRestoredSubrequestChannel(
+    kj::Rc<SelfTokenFactory> selfTokenFactory,
     Frankenvalue restoreParams,
-    kj::Own<SubrequestChannel> inner,
+    kj::Rc<SubrequestChannel> inner,
     Persistent persistent) {
   // Note that `inner` doesn't need to be resolved since it's only used to forward requests.
   // So, the only thing we might have to wait for is `restoreParams`. Which is good as otherwise
   // this method would get a lot more complicated!
 
   KJ_IF_SOME(promise, restoreParams.resolveCaps(resolveCap)) {
-    return kj::refcounted<PromisedSubrequestChannel>(promise.then(
+    return kj::rc<PromisedSubrequestChannel>(promise.then(
         [self = addRefToThis(), selfTokenFactory = kj::mv(selfTokenFactory),
             restoreParams = kj::mv(restoreParams), inner = kj::mv(inner), persistent]() mutable {
       return self->makeRestoredSubrequestChannelResolved(
@@ -257,10 +258,10 @@ kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::makeRestoredSubre
       kj::mv(selfTokenFactory), kj::mv(restoreParams), kj::mv(inner), persistent);
 }
 
-kj::Own<IoChannelFactory::RpcChannel> IoChannelFactory::makeRestoredRpcChannel(
-    kj::Own<SelfTokenFactory> selfTokenFactory, Frankenvalue restoreParams, Persistent persistent) {
+kj::Rc<IoChannelFactory::RpcChannel> IoChannelFactory::makeRestoredRpcChannel(
+    kj::Rc<SelfTokenFactory> selfTokenFactory, Frankenvalue restoreParams, Persistent persistent) {
   KJ_IF_SOME(promise, restoreParams.resolveCaps(resolveCap)) {
-    return kj::refcounted<PromisedRpcChannel>(
+    return kj::rc<PromisedRpcChannel>(
         promise.then([self = addRefToThis(), selfTokenFactory = kj::mv(selfTokenFactory),
                          restoreParams = kj::mv(restoreParams), persistent]() mutable {
       return self->makeRestoredRpcChannelResolved(
@@ -272,10 +273,10 @@ kj::Own<IoChannelFactory::RpcChannel> IoChannelFactory::makeRestoredRpcChannel(
       kj::mv(selfTokenFactory), kj::mv(restoreParams), persistent);
 }
 
-kj::Own<IoChannelFactory::SubrequestChannel> WorkerStubChannel::getEntrypoint(
+kj::Rc<IoChannelFactory::SubrequestChannel> WorkerStubChannel::getEntrypoint(
     kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) {
   KJ_IF_SOME(promise, props.resolveCaps(resolveCap)) {
-    return kj::refcounted<PromisedSubrequestChannel>(
+    return kj::rc<PromisedSubrequestChannel>(
         promise.then([self = addRefToThis(), name = kj::mv(name), props = kj::mv(props),
                          limits = kj::mv(limits)]() mutable {
       return self->getEntrypointResolved(kj::mv(name), kj::mv(props), kj::mv(limits));
@@ -285,10 +286,10 @@ kj::Own<IoChannelFactory::SubrequestChannel> WorkerStubChannel::getEntrypoint(
   }
 }
 
-kj::Own<IoChannelFactory::ActorClassChannel> WorkerStubChannel::getActorClass(
+kj::Rc<IoChannelFactory::ActorClassChannel> WorkerStubChannel::getActorClass(
     kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) {
   KJ_IF_SOME(promise, props.resolveCaps(resolveCap)) {
-    return kj::refcounted<PromisedActorClassChannel>(
+    return kj::rc<PromisedActorClassChannel>(
         promise.then([self = addRefToThis(), name = kj::mv(name), props = kj::mv(props),
                          limits = kj::mv(limits)]() mutable {
       return self->getActorClassResolved(kj::mv(name), kj::mv(props), kj::mv(limits));
@@ -298,25 +299,25 @@ kj::Own<IoChannelFactory::ActorClassChannel> WorkerStubChannel::getActorClass(
   }
 }
 
-kj::Own<IoChannelFactory::SubrequestChannel> IoChannelFactory::subrequestChannelFromToken(
+kj::Rc<IoChannelFactory::SubrequestChannel> IoChannelFactory::subrequestChannelFromToken(
     ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token) {
-  return kj::refcounted<PromisedSubrequestChannel>(
+  return kj::rc<PromisedSubrequestChannel>(
       token.then([self = addRefToThis(), usage](kj::Array<byte> token) mutable {
     return self->subrequestChannelFromToken(usage, token.asPtr());
   }));
 }
 
-kj::Own<IoChannelFactory::ActorClassChannel> IoChannelFactory::actorClassFromToken(
+kj::Rc<IoChannelFactory::ActorClassChannel> IoChannelFactory::actorClassFromToken(
     ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token) {
-  return kj::refcounted<PromisedActorClassChannel>(
+  return kj::rc<PromisedActorClassChannel>(
       token.then([self = addRefToThis(), usage](kj::Array<byte> token) mutable {
     return self->actorClassFromToken(usage, token.asPtr());
   }));
 }
 
-kj::Own<IoChannelFactory::RpcChannel> IoChannelFactory::rpcChannelFromToken(
+kj::Rc<IoChannelFactory::RpcChannel> IoChannelFactory::rpcChannelFromToken(
     ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token) {
-  return kj::refcounted<PromisedRpcChannel>(
+  return kj::rc<PromisedRpcChannel>(
       token.then([self = addRefToThis(), usage](kj::Array<byte> token) mutable {
     return self->rpcChannelFromToken(usage, token.asPtr());
   }));
@@ -331,12 +332,12 @@ kj::Promise<void> DynamicWorkerSource::ensureAllResolved() {
 
   auto resolveChannelSlot = [&](auto& slot) {
     KJ_SWITCH_ONEOF(slot->getResolved()) {
-      KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::TokenizableChannel>) {
-        slot = channel.template downcast<IoChannelFactory::SubrequestChannel>();
+      KJ_CASE_ONEOF(channel, kj::Rc<IoChannelFactory::TokenizableChannel>) {
+        slot = kj::mv(channel).template downcast<IoChannelFactory::SubrequestChannel>();
       }
-      KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::TokenizableChannel>>) {
-        promises.add(promise.then([&slot](kj::Own<IoChannelFactory::TokenizableChannel> channel) {
-          slot = channel.downcast<IoChannelFactory::SubrequestChannel>();
+      KJ_CASE_ONEOF(promise, kj::Promise<kj::Rc<IoChannelFactory::TokenizableChannel>>) {
+        promises.add(promise.then([&slot](kj::Rc<IoChannelFactory::TokenizableChannel> channel) {
+          slot = kj::mv(channel).template downcast<IoChannelFactory::SubrequestChannel>();
         }));
       }
     }
@@ -360,10 +361,10 @@ kj::Promise<void> DynamicWorkerSource::ensureAllResolved() {
 
 kj::Promise<void> Worker::Actor::FacetManager::StartInfo::ensureAllResolved() {
   KJ_SWITCH_ONEOF(actorClass->getResolved()) {
-    KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::TokenizableChannel>) {
+    KJ_CASE_ONEOF(channel, kj::Rc<IoChannelFactory::TokenizableChannel>) {
       actorClass = channel.downcast<IoChannelFactory::ActorClassChannel>();
     }
-    KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::TokenizableChannel>>) {
+    KJ_CASE_ONEOF(promise, kj::Promise<kj::Rc<IoChannelFactory::TokenizableChannel>>) {
       actorClass = (co_await promise).downcast<IoChannelFactory::ActorClassChannel>();
     }
   }
@@ -387,23 +388,21 @@ kj::Own<Frankenvalue::CapTableEntry> IoChannelCapTableEntry::threadSafeClone() c
 }
 
 template <>
-kj::Own<IoChannelFactory::SubrequestChannel> newPromisedChannel<
-    IoChannelFactory::SubrequestChannel>(
-    kj::Promise<kj::Own<IoChannelFactory::SubrequestChannel>> promise) {
-  return kj::refcounted<PromisedSubrequestChannel>(kj::mv(promise));
+kj::Rc<IoChannelFactory::SubrequestChannel> newPromisedChannel<IoChannelFactory::SubrequestChannel>(
+    kj::Promise<kj::Rc<IoChannelFactory::SubrequestChannel>> promise) {
+  return kj::rc<PromisedSubrequestChannel>(kj::mv(promise));
 }
 
 template <>
-kj::Own<IoChannelFactory::ActorClassChannel> newPromisedChannel<
-    IoChannelFactory::ActorClassChannel>(
-    kj::Promise<kj::Own<IoChannelFactory::ActorClassChannel>> promise) {
-  return kj::refcounted<PromisedActorClassChannel>(kj::mv(promise));
+kj::Rc<IoChannelFactory::ActorClassChannel> newPromisedChannel<IoChannelFactory::ActorClassChannel>(
+    kj::Promise<kj::Rc<IoChannelFactory::ActorClassChannel>> promise) {
+  return kj::rc<PromisedActorClassChannel>(kj::mv(promise));
 }
 
 template <>
-kj::Own<IoChannelFactory::RpcChannel> newPromisedChannel<IoChannelFactory::RpcChannel>(
-    kj::Promise<kj::Own<IoChannelFactory::RpcChannel>> promise) {
-  return kj::refcounted<PromisedRpcChannel>(kj::mv(promise));
+kj::Rc<IoChannelFactory::RpcChannel> newPromisedChannel<IoChannelFactory::RpcChannel>(
+    kj::Promise<kj::Rc<IoChannelFactory::RpcChannel>> promise) {
+  return kj::rc<PromisedRpcChannel>(kj::mv(promise));
 }
 
 }  // namespace workerd

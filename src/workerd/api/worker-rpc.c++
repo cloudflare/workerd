@@ -1738,9 +1738,9 @@ rpc::JsRpcTarget::Client JsRpcStub::getClient() {
   }
 }
 
-kj::Maybe<kj::Own<IoChannelFactory::RpcChannel>> JsRpcStub::getRpcChannel(IoContext& ioctx) {
+kj::Maybe<kj::Rc<IoChannelFactory::RpcChannel>> JsRpcStub::getRpcChannel(IoContext& ioctx) {
   KJ_IF_SOME(c, rpcChannel) {
-    return kj::addRef(*c);
+    return c->addRef();
   } else KJ_IF_SOME(c, channelNumber) {
     return ioctx.getIoChannelFactory().getRpcChannel(c);
   } else {
@@ -1830,7 +1830,7 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       auto channel = JSG_REQUIRE_NONNULL(getRpcChannel(ioctx), DOMDataCloneError,
           "RpcStub cannot be serialized in this context because it is not a persistent stub.");
       channel->requireAllowsTransfer();
-      serializer.writeRawUint32(frankenvalueHandler.add(kj::mv(channel)));
+      serializer.writeRawUint32(frankenvalueHandler.add(channel.toOwn()));
       return;
     } else KJ_IF_SOME(externalHandler, kj::tryDowncast<RpcSerializerExternalHandler>(handler)) {
       // Confirm that the destination can be opened before serialization can consume this stub.
@@ -1945,7 +1945,7 @@ jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
           "serialized RpcStub had invalid cap table index");
 
       KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::RpcChannel>(cap)) {
-        return js.alloc<JsRpcStub>(IoContext::current().addObject(kj::addRef(channel)), kj::none);
+        return js.alloc<JsRpcStub>(IoContext::current().addObject(channel.addRef()), kj::none);
       } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
         // NOTE: In this case we are quite possibly not in any I/O context! This case happens
         //   when a JsRpcStub is in the `env` object (e.g. of a Dynamic Worker) and refers to a
@@ -1964,7 +1964,7 @@ jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
       auto externalMemory = js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_STUB);
 
       auto& ioctx = IoContext::current();
-      kj::Maybe<kj::Own<IoChannelFactory::RpcChannel>> channel;
+      kj::Maybe<kj::Rc<IoChannelFactory::RpcChannel>> channel;
       if (rpcTarget.isDelayedChannelToken()) {
         auto promise = ioctx.getExternalPusher()->unwrapDelayedChannelToken(
             rpcTarget.getDelayedChannelToken());

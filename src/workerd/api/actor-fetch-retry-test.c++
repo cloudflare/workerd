@@ -641,7 +641,7 @@ struct ActorIoChannelFactory final: public TestFixture::DummyIoChannelFactory {
         locationHints(locationHints),
         cohorts(cohorts) {}
 
-  kj::Own<ActorChannel> getGlobalActor(uint,
+  kj::Rc<ActorChannel> getGlobalActor(uint,
       const ActorIdFactory::ActorId&,
       kj::Maybe<kj::String> locationHint,
       ActorGetMode,
@@ -659,7 +659,7 @@ struct ActorIoChannelFactory final: public TestFixture::DummyIoChannelFactory {
         cohorts.add(kj::mv(cohort));
       }
     }
-    return kj::refcounted<RecordingActorChannel>(capturedMetadata);
+    return kj::rc<RecordingActorChannel>(capturedMetadata);
   }
 
   kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata>& capturedMetadata;
@@ -1364,7 +1364,7 @@ KJ_TEST("replica actor fetch retries a request-level disconnect on its primary c
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = env.js.alloc<Fetcher>(
         env.context.addObject<Fetcher::OutgoingFactory>(kj::heap<ReplicaActorOutgoingFactory>(
-            kj::refcounted<ReplayActorChannel>(state), kj::str("actor-id"))),
+            kj::rc<ReplayActorChannel>(state), kj::str("actor-id"))),
         Fetcher::RequiresHostAndProtocol::YES);
     auto promise = fetcher->fetch(env.js, kj::str("http://example.com"), kj::none);
     return env.context.awaitJs(env.js, kj::mv(promise)).ignoreResult().attach(kj::mv(fetcher));

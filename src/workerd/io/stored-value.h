@@ -54,7 +54,7 @@ class StoredExternalHandler {
   SqliteKv& sqliteKv;
 
   struct PendingWrite {
-    kj::Vector<kj::Own<IoChannelFactory::TokenizableChannel>> channels;
+    kj::Vector<kj::Rc<IoChannelFactory::TokenizableChannel>> channels;
     kj::Promise<void> writePromise = nullptr;
   };
 
@@ -78,7 +78,7 @@ class StoredExternalHandler {
   kj::Maybe<SyncNestedTransaction&> currentSyncTxn;
 
   void fulfillIfEmpty();
-  kj::Maybe<kj::Array<kj::Own<IoChannelFactory::TokenizableChannel>>> findPendingWriteForRead(
+  kj::Maybe<kj::Array<kj::Rc<IoChannelFactory::TokenizableChannel>>> findPendingWriteForRead(
       kj::StringPtr key);
   void cancelAllPendingWrites();
   bool needsTombstone(kj::StringPtr key);
@@ -128,7 +128,7 @@ class StoredExternalHandler::Serializer final: public jsg::Serializer::ExternalH
   // TODO(cleanup): Once rolled out, we should switch to always store tokens using the externals
   //   mechanism. We can remove the second parameter here at that time, and instead have
   //   writeChannel() make the call directly.
-  void writeChannel(kj::Own<IoChannelFactory::TokenizableChannel> channel,
+  void writeChannel(kj::Rc<IoChannelFactory::TokenizableChannel> channel,
       kj::Promise<kj::Array<byte>> tokenPromise);
 
  private:
@@ -137,7 +137,7 @@ class StoredExternalHandler::Serializer final: public jsg::Serializer::ExternalH
   struct State {
     StoredExternalHandler& handler;
 
-    kj::Vector<kj::Own<IoChannelFactory::TokenizableChannel>> channels;
+    kj::Vector<kj::Rc<IoChannelFactory::TokenizableChannel>> channels;
     kj::Vector<kj::Promise<kj::Array<byte>>> tokenPromises;
 
     explicit State(StoredExternalHandler& handler): handler(handler) {}
@@ -155,9 +155,9 @@ class StoredExternalHandler::Deserializer final: public jsg::Deserializer::Exter
   explicit Deserializer(kj::StringPtr key): key(key) {}
 
   // Read an external. Externals are expected to be read in the same order they were written.
-  kj::Own<IoChannelFactory::SubrequestChannel> readSubrequestChannel(IoChannelFactory& factory);
-  kj::Own<IoChannelFactory::ActorClassChannel> readActorClassChannel(IoChannelFactory& factory);
-  kj::Own<IoChannelFactory::RpcChannel> readRpcChannel(IoChannelFactory& factory);
+  kj::Rc<IoChannelFactory::SubrequestChannel> readSubrequestChannel(IoChannelFactory& factory);
+  kj::Rc<IoChannelFactory::ActorClassChannel> readActorClassChannel(IoChannelFactory& factory);
+  kj::Rc<IoChannelFactory::RpcChannel> readRpcChannel(IoChannelFactory& factory);
 
   // Throw if we haven't read all channels.
   void assertDone();
@@ -174,7 +174,7 @@ class StoredExternalHandler::Deserializer final: public jsg::Deserializer::Exter
     //
     // If there is no active PendingWrite, we hold an array of tokens instead, read directly from
     // storage.
-    kj::OneOf<kj::Array<kj::Own<IoChannelFactory::TokenizableChannel>>, kj::Array<kj::Array<byte>>>
+    kj::OneOf<kj::Array<kj::Rc<IoChannelFactory::TokenizableChannel>>, kj::Array<kj::Array<byte>>>
         externals;
 
     // Index of next external to be read.
@@ -188,7 +188,7 @@ class StoredExternalHandler::Deserializer final: public jsg::Deserializer::Exter
 
   State& getState();
 
-  kj::OneOf<kj::Own<IoChannelFactory::TokenizableChannel>, kj::ArrayPtr<const byte>>
+  kj::OneOf<kj::Rc<IoChannelFactory::TokenizableChannel>, kj::ArrayPtr<const byte>>
   readChannelImpl();
 };
 

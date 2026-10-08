@@ -29,19 +29,17 @@ class ChannelTokenHandler {
   // also make abstractions a little messier in server.c++.)
   class Resolver {
    public:
-    virtual kj::Own<IoChannelFactory::SubrequestChannel> resolveEntrypoint(
-        kj::StringPtr serviceName,
+    virtual kj::Rc<IoChannelFactory::SubrequestChannel> resolveEntrypoint(kj::StringPtr serviceName,
         kj::Maybe<kj::StringPtr> entrypoint,
         Frankenvalue props,
         Persistent persistent) = 0;
 
-    virtual kj::Own<IoChannelFactory::ActorClassChannel> resolveActorClass(
-        kj::StringPtr serviceName,
+    virtual kj::Rc<IoChannelFactory::ActorClassChannel> resolveActorClass(kj::StringPtr serviceName,
         kj::Maybe<kj::StringPtr> entrypoint,
         Frankenvalue props,
         Persistent persistent) = 0;
 
-    virtual kj::Own<IoChannelFactory::ActorChannel> resolveActor(kj::StringPtr namespaceKey,
+    virtual kj::Rc<IoChannelFactory::ActorChannel> resolveActor(kj::StringPtr namespaceKey,
         kj::ArrayPtr<const byte> id,
         kj::Maybe<kj::StringPtr> name,
         Persistent persistent) = 0;
@@ -90,34 +88,34 @@ class ChannelTokenHandler {
   kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> encodeRestoredChannelToken(
       IoChannelFactory::ChannelTokenUsage usage,
       ChannelToken::Type type,
-      kj::Own<IoChannelFactory::SubrequestChannel> vendor,
+      kj::Rc<IoChannelFactory::SubrequestChannel> vendor,
       Frankenvalue restoreArg,
       Persistent persistent);
   kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> encodeRestoredChannelToken(
       IoChannelFactory::ChannelTokenUsage usage,
       ChannelToken::Type type,
-      kj::Own<ServerSelfTokenFactory> vendor,
+      kj::Rc<ServerSelfTokenFactory> vendor,
       Frankenvalue restoreArg,
       Persistent persistent);
 
   // Implements the respective methods of IoChannelFactory. `persistent` is the
   // `allow_irrevocable_stub_storage` flag of the worker invoking `ctx.restore()`.
-  kj::Own<IoChannelFactory::SubrequestChannel> makeRestoredSubrequestChannel(
-      kj::Own<IoChannelFactory::SelfTokenFactory> selfTokenFactory,
+  kj::Rc<IoChannelFactory::SubrequestChannel> makeRestoredSubrequestChannel(
+      kj::Rc<IoChannelFactory::SelfTokenFactory> selfTokenFactory,
       Frankenvalue restoreParams,
-      kj::Own<IoChannelFactory::SubrequestChannel> inner,
+      kj::Rc<IoChannelFactory::SubrequestChannel> inner,
       Persistent persistent);
-  kj::Own<IoChannelFactory::RpcChannel> makeRestoredRpcChannel(
-      kj::Own<IoChannelFactory::SelfTokenFactory> selfTokenFactory,
+  kj::Rc<IoChannelFactory::RpcChannel> makeRestoredRpcChannel(
+      kj::Rc<IoChannelFactory::SelfTokenFactory> selfTokenFactory,
       Frankenvalue restoreParams,
       Persistent persistent);
 
   // Helpers to implement `IoChannelFactory::{subrequestChannel,actorClass}FromToken()`.
-  kj::Own<IoChannelFactory::SubrequestChannel> decodeSubrequestChannelToken(
+  kj::Rc<IoChannelFactory::SubrequestChannel> decodeSubrequestChannelToken(
       IoChannelFactory::ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
-  kj::Own<IoChannelFactory::ActorClassChannel> decodeActorClassChannelToken(
+  kj::Rc<IoChannelFactory::ActorClassChannel> decodeActorClassChannelToken(
       IoChannelFactory::ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
-  kj::Own<IoChannelFactory::RpcChannel> decodeRpcChannelToken(
+  kj::Rc<IoChannelFactory::RpcChannel> decodeRpcChannelToken(
       IoChannelFactory::ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
 
  private:
@@ -163,19 +161,19 @@ class ChannelTokenHandler {
   kj::Array<byte> serializeTokenImpl(
       IoChannelFactory::ChannelTokenUsage usage, capnp::MessageBuilder& message);
 
-  // Implementation that dynamically returns either SubrequestChannel or ActorClassChannel, which
-  // both happen to inherit CapTableEntry. The caller will immediately downcast to the right type.
-  kj::Own<Frankenvalue::CapTableEntry> decodeChannelTokenImpl(ChannelToken::Type type,
+  // Implementation that dynamically returns a SubrequestChannel, ActorClassChannel, or RpcChannel,
+  // which all inherit TokenizableChannel. The caller will immediately downcast to the right type.
+  kj::Rc<IoChannelFactory::TokenizableChannel> decodeChannelTokenImpl(ChannelToken::Type type,
       IoChannelFactory::ChannelTokenUsage usage,
       kj::ArrayPtr<const byte> token);
-  kj::Own<Frankenvalue::CapTableEntry> decodeChannelTokenImpl(ChannelToken::Type type,
+  kj::Rc<IoChannelFactory::TokenizableChannel> decodeChannelTokenImpl(ChannelToken::Type type,
       IoChannelFactory::ChannelTokenUsage usage,
       ChannelToken::Reader reader);
 
   Frankenvalue decodeFrankenvalue(
       IoChannelFactory::ChannelTokenUsage usage, rpc::Frankenvalue::Reader reader);
 
-  // Shared implementation of the `kj::Own<SubrequestChannel>` and `kj::Own<ServerSelfTokenFactory>`
+  // Shared implementation of the `kj::Rc<SubrequestChannel>` and `kj::Rc<ServerSelfTokenFactory>`
   // overloads of `encodeRestoredChannelToken()`. `vendorTokenMaybeSync` is the (possibly async)
   // vendor token; `keepVendorAlive` keeps the object that produced it alive while we await.
   kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> encodeRestoredChannelTokenImpl(

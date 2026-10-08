@@ -179,7 +179,7 @@ void StoredExternalHandler::fulfillIfEmpty() {
 
 // If there is a pending write for the given key, return its live channel objects. This is used
 // when the app tries to read the key back before it is finished writing.
-kj::Maybe<kj::Array<kj::Own<IoChannelFactory::TokenizableChannel>>> StoredExternalHandler::
+kj::Maybe<kj::Array<kj::Rc<IoChannelFactory::TokenizableChannel>>> StoredExternalHandler::
     findPendingWriteForRead(kj::StringPtr key) {
   // Loop up the sync transaction stack to find a matching key.
   decltype(pendingWrites)* nextMap = &pendingWrites;
@@ -188,12 +188,12 @@ kj::Maybe<kj::Array<kj::Own<IoChannelFactory::TokenizableChannel>>> StoredExtern
     KJ_IF_SOME(pending, nextMap->find(key)) {
       KJ_SWITCH_ONEOF(pending) {
         KJ_CASE_ONEOF(write, PendingWrite) {
-          return KJ_MAP(channel, write.channels) { return kj::addRef(*channel); };
+          return KJ_MAP(channel, write.channels) { return channel.addRef(); };
         }
         KJ_CASE_ONEOF(_, Tombstone) {
           // In the current transaction, this key has been overwritten with something that has
           // no channels.
-          return kj::Array<kj::Own<IoChannelFactory::TokenizableChannel>>();
+          return kj::Array<kj::Rc<IoChannelFactory::TokenizableChannel>>();
         }
       }
     }
@@ -286,7 +286,7 @@ StoredExternalHandler::Serializer::~Serializer() noexcept(false) {
 }
 
 void StoredExternalHandler::Serializer::writeChannel(
-    kj::Own<IoChannelFactory::TokenizableChannel> channel,
+    kj::Rc<IoChannelFactory::TokenizableChannel> channel,
     kj::Promise<kj::Array<byte>> tokenPromise) {
   State& state = getState();
   state.channels.add(kj::mv(channel));
@@ -301,12 +301,12 @@ StoredExternalHandler::Serializer::State& StoredExternalHandler::Serializer::get
   }
 }
 
-kj::Own<IoChannelFactory::SubrequestChannel> StoredExternalHandler::Deserializer::
+kj::Rc<IoChannelFactory::SubrequestChannel> StoredExternalHandler::Deserializer::
     readSubrequestChannel(IoChannelFactory& factory) {
   KJ_SWITCH_ONEOF(readChannelImpl()) {
-    KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::TokenizableChannel>) {
-      return kj::addRef(
-          KJ_REQUIRE_NONNULL(kj::tryDowncast<IoChannelFactory::SubrequestChannel>(*channel)));
+    KJ_CASE_ONEOF(channel, kj::Rc<IoChannelFactory::TokenizableChannel>) {
+      return KJ_REQUIRE_NONNULL(kj::tryDowncast<IoChannelFactory::SubrequestChannel>(*channel))
+          .addRef();
     }
     KJ_CASE_ONEOF(token, kj::ArrayPtr<const byte>) {
       return factory.subrequestChannelFromToken(
@@ -316,13 +316,13 @@ kj::Own<IoChannelFactory::SubrequestChannel> StoredExternalHandler::Deserializer
   KJ_UNREACHABLE;
 }
 
-kj::Own<IoChannelFactory::ActorClassChannel> StoredExternalHandler::Deserializer::
+kj::Rc<IoChannelFactory::ActorClassChannel> StoredExternalHandler::Deserializer::
     readActorClassChannel(IoChannelFactory& factory) {
   KJ_SWITCH_ONEOF(readChannelImpl()) {
-    KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::TokenizableChannel>) {
-      return kj::addRef(
-          KJ_REQUIRE_NONNULL(kj::tryDowncast<IoChannelFactory::ActorClassChannel>(*channel),
-              "serialized value doesn't match external type"));
+    KJ_CASE_ONEOF(channel, kj::Rc<IoChannelFactory::TokenizableChannel>) {
+      return KJ_REQUIRE_NONNULL(kj::tryDowncast<IoChannelFactory::ActorClassChannel>(*channel),
+          "serialized value doesn't match external type")
+          .addRef();
     }
     KJ_CASE_ONEOF(token, kj::ArrayPtr<const byte>) {
       return factory.actorClassFromToken(IoChannelFactory::ChannelTokenUsage::STORAGE, token);
@@ -331,12 +331,13 @@ kj::Own<IoChannelFactory::ActorClassChannel> StoredExternalHandler::Deserializer
   KJ_UNREACHABLE;
 }
 
-kj::Own<IoChannelFactory::RpcChannel> StoredExternalHandler::Deserializer::readRpcChannel(
+kj::Rc<IoChannelFactory::RpcChannel> StoredExternalHandler::Deserializer::readRpcChannel(
     IoChannelFactory& factory) {
   KJ_SWITCH_ONEOF(readChannelImpl()) {
-    KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::TokenizableChannel>) {
-      return kj::addRef(KJ_REQUIRE_NONNULL(kj::tryDowncast<IoChannelFactory::RpcChannel>(*channel),
-          "serialized value doesn't match external type"));
+    KJ_CASE_ONEOF(channel, kj::Rc<IoChannelFactory::TokenizableChannel>) {
+      return KJ_REQUIRE_NONNULL(kj::tryDowncast<IoChannelFactory::RpcChannel>(*channel),
+          "serialized value doesn't match external type")
+          .addRef();
     }
     KJ_CASE_ONEOF(token, kj::ArrayPtr<const byte>) {
       return factory.rpcChannelFromToken(IoChannelFactory::ChannelTokenUsage::STORAGE, token);
@@ -364,15 +365,15 @@ StoredExternalHandler::Deserializer::State& StoredExternalHandler::Deserializer:
   }
 }
 
-kj::OneOf<kj::Own<IoChannelFactory::TokenizableChannel>, kj::ArrayPtr<const byte>>
+kj::OneOf<kj::Rc<IoChannelFactory::TokenizableChannel>, kj::ArrayPtr<const byte>>
 StoredExternalHandler::Deserializer::readChannelImpl() {
   auto& state = getState();
   uint idx = state.index++;
 
   KJ_SWITCH_ONEOF(state.externals) {
-    KJ_CASE_ONEOF(channels, kj::Array<kj::Own<IoChannelFactory::TokenizableChannel>>) {
+    KJ_CASE_ONEOF(channels, kj::Array<kj::Rc<IoChannelFactory::TokenizableChannel>>) {
       KJ_REQUIRE(idx < channels.size(), "serialized value doesn't match pending externals?");
-      return kj::addRef(*channels[idx]);
+      return channels[idx].addRef();
     }
     KJ_CASE_ONEOF(tokens, kj::Array<kj::Array<byte>>) {
       KJ_REQUIRE(idx < tokens.size(), "serialized value doesn't match stored externals?");
@@ -385,7 +386,7 @@ StoredExternalHandler::Deserializer::readChannelImpl() {
 void StoredExternalHandler::Deserializer::assertDone() {
   KJ_IF_SOME(s, state) {
     KJ_SWITCH_ONEOF(s.externals) {
-      KJ_CASE_ONEOF(channels, kj::Array<kj::Own<IoChannelFactory::TokenizableChannel>>) {
+      KJ_CASE_ONEOF(channels, kj::Array<kj::Rc<IoChannelFactory::TokenizableChannel>>) {
         KJ_REQUIRE(s.index == channels.size());
       }
       KJ_CASE_ONEOF(tokens, kj::Array<kj::Array<byte>>) {

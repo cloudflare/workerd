@@ -1851,7 +1851,7 @@ jsg::Ref<Fetcher> makeReplicaFetcher(const TestFixture::Environment& env,
     uint failing) {
   return env.js.alloc<Fetcher>(
       env.context.addObject<Fetcher::OutgoingFactory>(kj::heap<ReplicaActorOutgoingFactory>(
-          kj::refcounted<ReplicaPrimaryChannel>(receiver, state, failing), kj::str("primary"))),
+          kj::rc<ReplicaPrimaryChannel>(receiver, state, failing), kj::str("primary"))),
       Fetcher::RequiresHostAndProtocol::YES);
 }
 
