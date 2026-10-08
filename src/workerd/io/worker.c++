@@ -18,6 +18,7 @@
 #include <workerd/io/tracer.h>
 #include <workerd/io/validation.h>
 #include <workerd/io/wasm-instantiate-shim.embed.h>
+#include <workerd/io/worker-source-stats.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/async-context.h>
 #include <workerd/jsg/inspector.h>
@@ -1159,7 +1160,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       traceAsyncContextKey(kj::arc<jsg::AsyncContextFrame::StorageKey>()),
       userTraceAsyncContextKey(kj::arc<jsg::AsyncContextFrame::StorageKey>()) {
   api->setIsolateObserver(*metrics);
-  metrics->created();
+  metrics->createdWithUuid(getUuid());
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     auto lock = api->lock(stackScope);
@@ -1437,6 +1438,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       "a module registry instance must be passed to Worker::Script if and only if the worker's "
       "compatibility flags enable the new module registry");
 
+  isolate->metrics->scriptSourceLoaded(computeScriptSourceStats(source));
   auto parseMetrics = isolate->metrics->parse(startType);
   // TODO(perf): It could make sense to take an async lock when constructing a script if we
   //   co-locate multiple scripts in the same isolate. As of this writing, we do not, except in
@@ -1619,9 +1621,8 @@ kj::Own<const Worker::Isolate::WeakIsolateRef> Worker::Isolate::getWeakRef() con
 }
 
 kj::StringPtr Worker::Isolate::getUuid() const {
-  // As of this writing, getUuid() is only used by actors, for metrics. We don't want to bother
-  // generating it if not used. The call site does not have nor want an isolate lock, so we use a
-  // kj::Lazy to make initialization thread-safe.
+  // The creation observer requests the UUID for every isolate. Other metrics callers can access
+  // it without an isolate lock; kj::Lazy makes initialization and access thread-safe.
   return impl->uuid.get(
       [](kj::SpaceFor<kj::String>& space) { return space.construct(randomUUID(kj::none)); });
 }

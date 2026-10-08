@@ -163,6 +163,16 @@ struct InternalExceptionObserver {
 
 WD_STRONG_BOOL(IsCodeLike);
 
+// A destination for the samples of one of V8's internal histograms, for one isolate.
+class V8HistogramSink {
+ public:
+  virtual ~V8HistogramSink() noexcept(false) = default;
+
+  // Called with every sample V8 records. V8 may call this from one of its background threads
+  // (Wasm compilation), so implementations must be thread-safe.
+  virtual void addSample(int sample) = 0;
+};
+
 struct IsolateObserver: public CompilationObserver,
                         public InternalExceptionObserver,
                         public ResolveObserver {
@@ -174,6 +184,26 @@ struct IsolateObserver: public CompilationObserver,
   virtual void onDynamicEval(
       v8::Local<v8::Context> context, v8::Local<v8::Value> source, IsCodeLike isCodeLike) {
     // Default is to do nothing.
+  }
+
+  // V8 keeps histograms of its own work: compile and deserialize times, optimization time, GC
+  // phases, code cache outcomes, and more; V8's counters-definitions.h lists them by name. V8
+  // records into a histogram only once the embedder has supplied a sink for it. Until then the
+  // code paths feeding it skip the clock reads and sample bookkeeping. V8 still checks whether
+  // the histogram is enabled on each use and retries this callback while it has no sink, so a
+  // disabled histogram incurs the observer lookup and name lookup on every use.
+  //
+  // Called the first time V8 uses the named histogram in this isolate. Return a sink to enable
+  // it, or none to leave it off. V8 asks again the next time it uses a histogram that was left
+  // off, so the decision should be cheap. `min`, `max`, and `buckets` are V8's own bucket layout;
+  // for histograms that record an enumeration, `max` is the number of values. The sink must stay
+  // alive through disposal of the isolate. Outside isolate initialization, observer lookup
+  // relies on V8 using the current isolate's counters when an isolate is entered on this thread;
+  // a background thread with no current isolate leaves the histogram off. Both this method and
+  // the sink are called from inside V8 and must not throw.
+  virtual kj::Maybe<V8HistogramSink&> tryCreateV8HistogramSink(
+      kj::StringPtr name, int min, int max, size_t buckets) {
+    return kj::none;
   }
 };
 
