@@ -25,7 +25,7 @@ behavioral gaps; the reentrancy family is mostly parity at finite hwm.
 | 8 | size() errors stream then throws/returns Infinity | enqueue swallows | enqueue rethrows / RangeError (spec) | `sizeErrorsStreamThenThrows`/`...ReturnsInfinity` |
 | 9 | invalid size() return (NaN/-1) | enqueue returns normally, stream errored (ds null); DEFECT: subsequent read() spins the isolate synchronously (unpinnable) | enqueue throws RangeError 'Invalid chunk size', reads reject same (spec) | `invalidSizeReturnValue` |
 | 10 | queue total-size math | integer-ish: saturates (maxSafeInt shape -2,-1,1,0), fractional sizes truncate to 0; DEFECT: reading a fractional-size chunk spins the isolate | full double-precision per spec (all four WPT shapes), a total rounded below 0 clamped to 0 at each dequeue (a branch's own total for a tee branch), a residue above 0 kept | `queue-math.js` (6 tests) |
-| 11 | tee cancel composite | source cancel gets ONLY the pair-completing branch's reason; first branch's cancel promise fulfills immediately | AggregateError of every branch's reason, in the order they cancelled (identity; intentional divergence from spec's array — tee is N consumers on one queue, the last to leave cancels the source); LONE branch cancel promise PENDS until the other cancels (spec) — never await a lone branch cancel | `teeCancelReasonComposite`, `teeCancelReverseOrder` |
+| 11 | tee cancel composite | source cancel gets ONLY the pair-completing branch's reason; first branch's cancel promise fulfills immediately | AggregateError of every branch's reason, in the order they cancelled (identity; intentional divergence from spec's array — tee is N consumers on one queue, the last to leave cancels the source); LONE branch cancel promise PENDS until the other cancels or the source ends (closes with every other branch drained to the close, or errors; spec) — never await a lone branch cancel on an open source | `teeCancelReasonComposite`, `teeCancelReverseOrder` |
 | 12 | from(string) | iterates per code unit ['h','i'] | single chunk ['hi'] (spec: throws — both diverge from spec) | `fromString` |
 | 13 | async-iterator prototype | exposes constructor + next/return; class string 'ReadableStreamAsyncIterator' (writable) | next/return only; class string 'ReadableStream AsyncIterator' (non-writable; WebIDL) | `iteratorPrototypeShape` |
 | 14 | read() inside size() | in-flight chunk fed DIRECTLY to the reentrant read | chunk queued; the NEXT enqueue bypasses the queue into the reentrant read (spec) — deliveries swapped | `readInsideSize` |
@@ -44,6 +44,7 @@ behavioral gaps; the reentrancy family is mostly parity at finite hwm.
 | 27 | from(ArrayBufferView) | a typed array iterates element by element (`Uint8Array [1,2,3]` gives 1, 2, 3); a DataView is rejected (spec) | one chunk, the view itself, as for a string (#12) | `fromArrayBufferViewIsOneChunk` |
 | 28 | from() iterator protocol edges | reads `value` of an async iterator's final result; a sync iterator whose value rejects (not done) is left open; the `value` of a sync return() result is not resolved; a non-callable `next` ends the stream; DEFECT: a throwing `return` getter's error escapes into the I/O context as an uncaught exception and fails the request, whether or not the cancel's promise is handled (unpinnable) | spec (WebIDL async_sequence + ECMA-262 async-from-sync): only `done` of the final result; the sync iterator is closed through return(); the return() result's value is resolved (a rejection rejects the cancel); the read rejects with TypeError; the cancel rejects | `fromIteratorProtocolEdges`, `fromCancelReturnLookup` |
 | 29 | when a sync iterable's from() reads and cancels settle, relative to an async iterator whose next()/return() returns a settled promise | one tick earlier; a throwing next()/return() in the same tick | two ticks earlier, and a throwing one in the same tick: the async-from-sync continuation is reacted to directly, not through "a promise resolved with" it (the spec lands both on the same tick, and a throwing sync one two ticks later); intentional, sparing two microtasks and a Promise.prototype.then lookup per chunk | `fromSyncIterableSettlesEarly` |
+| 30 | close() inside size() while chunks are still to be read (no tee: a chunk queued; tee: every branch behind the close) | the in-flight chunk is dropped (the transform suite's ledger #10 shows the same through writer.close()) | the close is only requested and the chunk is still readable: every branch reads it (spec without a tee; Node agrees there). With a tee the chunk reaches every branch or none: one already drained to the close drops it for all (parity, `closeInsideSizeTeeDrainedBranch`) | `closeInsideSizeWithQueuedChunk`, `closeInsideSizeTeeBranchesBehind` |
 
 Parity worth noting (probed, pinned): pull serialization (never
 re-entered); pull/async-start rejection identity; error-undefined
@@ -53,7 +54,8 @@ desiredSize lifecycle (1 → 0 close, null error, 0 cancel) and
 enqueue-skips-queue-with-pending-read; cancel-with-pending-pull; cancel
 reason identity + once; locked-stream cancel rejects without running the
 hook; tee error propagation identity to both branches, tee pull-per-read
-shape, tee backpressure following the slowest branch (a push source
+shape, a branch cancel settling once the others have drained to a
+requested close (no source cancel), tee backpressure following the slowest branch (a push source
 stalls both branches on an idle one; the spec's per-branch queues would
 not), tee after partial read; the tee-reentrancy crash regressions;
 from() cancel plumbing identity through return(), and its iterator
@@ -106,11 +108,11 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `cancel.js` | reason identity, locked-cancel, hook rejection identity, queue discard |
 | `bad-strategies.js` | ledger #8, #9, size-not-function |
 | `queue-math.js` | ledger #10 (WPT float shapes; a negative residue clamped at dequeue, also per tee branch, and a positive one kept, both spec and Node parity; cpp bounded observables only) |
-| `tee.js` | migrated edge cases + error propagation + cancel composite (#11) + pull-per-read + slowest-branch backpressure |
+| `tee.js` | migrated edge cases + error propagation + cancel composite (#11) + pull-per-read + slowest-branch backpressure + a branch leaving after the close, cancelled or errored through the interop hook (TS only), while the others have drained: a parked cancel settles with undefined and the source is not cancelled (parity) |
 | `tee-reentrancy.js` | the three C++ push-loop crash regressions (from api/streams/streams-test.js) |
 | `from.js` | 11 migrated + fromString (#12) + return validation messages + iterator protocol (next read once, done before value, gets not `has`, objects only, return() lookup; parity) + ArrayBufferView as one chunk (#27) + async-from-sync edges (#28) + sync-path schedule (#29) |
 | `async-iteration.js` | 7 migrated + no-await interleavings + proto shape and class string (#13) + foreign `this` (#25) + first next() pulls synchronously, next() from that pull() (parity) + ongoing-promise interleavings (#22) |
-| `reentrancy.js` | enqueue/close/cancel-in-size (parity) + read-in-size (#14; guard the size() or C++ captures every later chunk) |
+| `reentrancy.js` | enqueue/close/cancel-in-size (parity) + read-in-size (#14; guard the size() or C++ captures every later chunk) + close-in-size with chunks still to read (#30) and on a tee with a drained branch (the chunk dropped for every branch, the other branch's cancel settling; parity) |
 | `buffer-lifecycle.js` | chunk by reference, detach observed |
 | `integration-body.js` | readAll family, normalization (incl. detached and out-of-bounds views, DataViews included, SharedArrayBuffer-backed views, resizable-extent pinning), clone, cancel-then-consume, SELF round-trips |
 | `integration-body-failures.js` | consumer-side failures cancel the source with the error (every consumer; the cancel's rejection replaces it; nothing to cancel once the closing batch is in), leave the stream locked and stop pulls; TransformStream `expectedLength` overflow (#21) and exact delivery |

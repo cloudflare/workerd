@@ -101,6 +101,8 @@ export {
   teeCancelReverseOrder,
   teePullPerRead,
   teeBackpressureFollowsSlowestBranch,
+  teeCancelAfterSiblingDrainedToClose,
+  teeCancelSettlesWhenErroredBranchLeavesAfterClose,
 } from 'tee';
 
 export {
@@ -155,6 +157,9 @@ export {
 export {
   enqueueInsideSize,
   closeInsideSize,
+  closeInsideSizeWithQueuedChunk,
+  closeInsideSizeTeeDrainedBranch,
+  closeInsideSizeTeeBranchesBehind,
   cancelInsideSize,
   readInsideSize,
 } from 'reentrancy';

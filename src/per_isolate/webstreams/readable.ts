@@ -3946,6 +3946,10 @@ class ReadableStream<R> {
       if (consumer !== undefined) {
         cancelPromise = consumer.cancelStream(reason, decideSourceCancel);
         stream.#consumer = undefined;
+        // With close requested, the consumers that remain may all have
+        // drained: the source has then ended, and this cancel, parked for
+        // the source's end, settles.
+        if (controller !== undefined) controllerMaybeCloseStream(controller);
       }
       // Per spec the returned promise fulfills with undefined.
       return PromisePrototypeThen(
@@ -4126,6 +4130,9 @@ class ReadableStream<R> {
         )
       );
       cursor.queue.removeCursor(cursor);
+      // As after a cancel (readableStreamCancel): the consumers that remain
+      // may all have drained.
+      controllerMaybeCloseStream(controller);
     };
 
     // BACKEND-DISPATCH: tee is one of the five sanctioned dispatch points
