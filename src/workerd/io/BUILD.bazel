@@ -463,6 +463,8 @@ wd_capnp_library(
 
 wd_capnp_library(src = "actor-storage.capnp")
 
+wd_capnp_library(src = "bench.capnp")
+
 wd_capnp_library(src = "outcome.capnp")
 
 wd_capnp_library(src = "script-version.capnp")
