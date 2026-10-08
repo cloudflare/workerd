@@ -1,0 +1,41 @@
+build/deps/gen/deps.MODULE.bazel
+  s_7d03d8f3981d9e::t_1e70dc46dac00f 54,66-68,92-93
+build/wd_rust_binary.bzl
+  s_7d03d8f3981d9e::t_9bf1e341227dbc 20-21
+build/wd_rust_proc_macro.bzl
+  s_7d03d8f3981d9e::t_8fc4610e5c8ebf 55
+src/per_isolate/webstreams/queue.ts
+  s_7d03d8f3981d9e::t_761ca0ee2d7ecd 539-541,543-544,549-555,557-561,563,738-739,790,792-794
+src/per_isolate/webstreams/readable.ts
+  s_7d03d8f3981d9e::t_de603bee89fdcd 4566,4568-4638,4640-4689,4691-4692
+src/tests/streams/readable/AGENTS.md
+  s_7d03d8f3981d9e::t_ec54ba033f7ec4 27-28,53,56,100-101,103,105,116
+src/workerd/api/sql.h
+  s_7d03d8f3981d9e::t_68ac2eaa0a375c 260-261,263-265
+src/workerd/io/io-context.c++
+  s_7d03d8f3981d9e::t_018eb3c1311e2b 1310,1315-1316,1333
+src/workerd/io/maximum-compatibility-date.txt
+  s_7d03d8f3981d9e::t_4e2fb508a40e60 1
+src/workerd/io/release-version.txt
+  s_7d03d8f3981d9e::t_b443dffd83b5b3 1
+types/generated-snapshot/index.d.ts
+  s_7d03d8f3981d9e::t_4a86774117ee6b 486-488
+types/generated-snapshot/index.ts
+  s_7d03d8f3981d9e::t_8a44a0b2b50222 488-490
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2f302c70ea62e9ebdd885c0d4fe2b63080fd629b",
+  "prompts": {},
+  "sessions": {
+    "s_7d03d8f3981d9e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ee98466faffejVSpgrbYDs0Ut0",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "frostzt <aidenfrostbite@gmail.com>"
+    }
+  }
+}
