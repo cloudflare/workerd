@@ -8,6 +8,7 @@
 
 #include <workerd/api/memory-cache.h>
 #include <workerd/api/pyodide/pyodide.h>
+#include <workerd/io/async-trace.h>
 #include <workerd/io/worker.h>
 #include <workerd/server/workerd.capnp.h>
 
@@ -65,6 +66,11 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   }
   void enableInspector(kj::String addr) {
     inspectorOverride = kj::mv(addr);
+  }
+  // Traces async activity in every worker to `writer` (--async-trace), which must outlive the
+  // Server.
+  void enableAsyncTrace(const AsyncTraceWriter& writer) {
+    asyncTraceWriter = writer;
   }
   void enableControl(uint fd) {
     controlOverride = kj::heap<kj::FdOutputStream>(fd);
@@ -192,6 +198,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   kj::HashMap<kj::String, kj::String> externalOverrides;
 
   kj::Maybe<kj::String> inspectorOverride;
+  kj::Maybe<const AsyncTraceWriter&> asyncTraceWriter;
   kj::Maybe<kj::Own<InspectorServiceIsolateRegistrar>> inspectorIsolateRegistrar;
   kj::Maybe<kj::Own<kj::FdOutputStream>> controlOverride;
   kj::Maybe<kj::String> debugPortOverride;

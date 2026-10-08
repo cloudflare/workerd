@@ -56,6 +56,7 @@ pub mod ffi {
         inspector_addr: KjMaybe<String>,
         perfetto_trace_path: KjMaybe<String>,
         perfetto_trace_categories: KjMaybe<String>,
+        async_trace_path: KjMaybe<String>,
         experimental: bool,
         pyodide_package_disk_cache_dir: KjMaybe<String>,
         pyodide_bundle_disk_cache_dir: KjMaybe<String>,

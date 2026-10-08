@@ -6,6 +6,7 @@
 
 #include "server.h"
 
+#include <workerd/io/async-trace.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/release-version.embed.h>
@@ -160,6 +161,11 @@ class CliMain {
       KJ_UNIMPLEMENTED("perfetto tracing is not supported by this build", kj::str(path));
 #endif
     }
+    KJ_IF_SOME(path, options.async_trace_path) {
+      auto& writer =
+          asyncTraceWriter.emplace(AsyncTraceWriter::open(kj::str(path), RELEASE_VERSION));
+      server->enableAsyncTrace(*writer);
+    }
     if (options.experimental) {
       server->allowExperimental();
     }
@@ -282,6 +288,9 @@ class CliMain {
   kj::Maybe<kj::String> perfettoTraceCategories;
 #endif
 
+  // Set by --async-trace. Declared before `server`, which refers to it.
+  kj::Maybe<kj::Own<AsyncTraceWriter>> asyncTraceWriter;
+
   kj::Own<Server> server;
 
   // Set by the Server's error callback under --watch, where errors don't exit.
@@ -324,6 +333,11 @@ class CliMain {
       maybePerfettoSession = kj::none;
     }
 #endif
+
+    KJ_IF_SOME(writer, asyncTraceWriter) {
+      // context.exit() doesn't run destructors. Contexts still open are not reported as ended.
+      writer->flush();
+    }
 
     if (getenv("KJ_CLEAN_SHUTDOWN") == nullptr) {
       context.exit();

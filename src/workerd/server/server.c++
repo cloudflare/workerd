@@ -5895,6 +5895,29 @@ kj::Promise<kj::Rc<Server::Service>> Server::makeWorker(kj::StringPtr name,
   co_return co_await makeWorkerImpl(name, kj::mv(def), extensions, errorReporter);
 }
 
+namespace {
+
+// Enables async tracing for an isolate and writes each of its contexts to the --async-trace file.
+class AsyncTraceIsolateObserver final: public IsolateObserver {
+ public:
+  explicit AsyncTraceIsolateObserver(const AsyncTraceWriter& writer): writer(writer) {}
+
+  kj::Maybe<AsyncTraceConfig> getAsyncTraceConfig() const override {
+    return AsyncTraceConfig{};
+  }
+
+  void addAsyncTraceSinks(AsyncTraceSinks& sinks,
+      kj::StringPtr worker,
+      kj::Maybe<kj::StringPtr> actorId) const override {
+    sinks.addNdjson(writer);
+  }
+
+ private:
+  const AsyncTraceWriter& writer;
+};
+
+}  // namespace
+
 kj::Own<Worker::Isolate> Server::makeWorkerIsolate(kj::StringPtr name,
     kj::StringPtr inboundListenersKey,
     const WorkerDef& def,
@@ -5902,7 +5925,12 @@ kj::Own<Worker::Isolate> Server::makeWorkerIsolate(kj::StringPtr name,
     Worker::Isolate::InspectorPolicy inspectorPolicy,
     kj::Maybe<jsg::SnapshotConfig> snapshotConfig) {
   auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
-  auto observer = kj::atomicRefcounted<IsolateObserver>();
+  kj::Own<IsolateObserver> observer;
+  KJ_IF_SOME(writer, asyncTraceWriter) {
+    observer = kj::atomicRefcounted<AsyncTraceIsolateObserver>(writer);
+  } else {
+    observer = kj::atomicRefcounted<IsolateObserver>();
+  }
   auto limitEnforcer = kj::refcounted<NullIsolateLimitEnforcer>();
   auto isolateGroup = v8::IsolateGroup::GetDefault();
 

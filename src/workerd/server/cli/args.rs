@@ -221,6 +221,11 @@ pub struct ServeOrTestArgs {
     )]
     pub perfetto_trace: Option<Override>,
 
+    /// Write an async activity trace to <path>: one JSON object per line, recording requests,
+    /// turns, timers, I/O and binding operations, and what caused what. The file is overwritten.
+    #[arg(long, value_name = "path")]
+    pub async_trace: Option<String>,
+
     /// Watch configuration files (and server binary) and reload if they change. Useful for
     /// development, but not recommended in production.
     #[arg(short, long)]
@@ -406,6 +411,7 @@ impl From<ServeOrTestArgs> for ffi::ServeOrTestOptions {
             inspector_addr: args.inspector_addr.into(),
             perfetto_trace_path: perfetto_trace_path.into(),
             perfetto_trace_categories: perfetto_trace_categories.into(),
+            async_trace_path: args.async_trace.into(),
             experimental: args.experimental,
             pyodide_package_disk_cache_dir: args.pyodide_package_disk_cache_dir.into(),
             pyodide_bundle_disk_cache_dir: args.pyodide_bundle_disk_cache_dir.into(),
