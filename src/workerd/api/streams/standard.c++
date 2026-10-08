@@ -1160,7 +1160,7 @@ void ReadableImpl<Self>::doCancel(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsVal
 }
 
 template <typename Self>
-void ReadableImpl<Self>::enqueue(jsg::Lock& js, kj::Rc<Entry> entry, jsg::Ref<Self> self) {
+void ReadableImpl<Self>::enqueue(jsg::Lock& js, jsg::Ref<Entry> entry, jsg::Ref<Self> self) {
   JSG_REQUIRE(canCloseOrEnqueue(), TypeError, "This ReadableStream is closed.");
   KJ_DEFER(pullIfNeeded(js, kj::mv(self)));
   auto& queue = state.template getUnsafe<Queue>();
@@ -1889,10 +1889,7 @@ struct ValueReadable final: public kj::PtrTarget,
       auto prp = js.newPromiseAndResolver<ReadResult>();
       reading = true;
       KJ_DEFER(reading = false);
-      s.consumer->read(js,
-          kj::heap<ValueQueue::ReadRequest>({
-            .resolver = kj::mv(prp.resolver),
-          }));
+      s.consumer->read(js, js.alloc<ValueQueue::ReadRequest>(kj::mv(prp.resolver)));
       // reading is reset by KJ_DEFER above.
       if (pendingCancel) {
         // If we were canceled while reading, we need to drop our state now.
@@ -2107,7 +2104,7 @@ struct ByteReadable final: public kj::PtrTarget,
         auto atLeast = kj::max(elementSize, byob.atLeast.orDefault(1));
         atLeast = kj::max(1, atLeast - (atLeast % elementSize));
         s.consumer->read(js,
-            kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
+            js.alloc<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
                 ByteQueue::ReadRequest::PullInto{
                   .view = view.addRef(js),
                   .elementSize = elementSize,
@@ -2122,7 +2119,7 @@ struct ByteReadable final: public kj::PtrTarget,
           // Ensure that the handle is created here so that the size of the buffer
           // is accounted for in the isolate memory tracking.
           s.consumer->read(js,
-              kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
+              js.alloc<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
                   ByteQueue::ReadRequest::PullInto{
                     .view = jsg::JsArrayBufferView(store).addRef(js),
                     .elementSize = 1,
@@ -2139,7 +2136,7 @@ struct ByteReadable final: public kj::PtrTarget,
         constexpr size_t kDefaultReadSize = 16384;  // 16KB default buffer
         KJ_IF_SOME(store, jsg::JsUint8Array::tryCreate(js, kDefaultReadSize)) {
           s.consumer->read(js,
-              kj::heap<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
+              js.alloc<ByteQueue::ReadRequest>(kj::mv(prp.resolver),
                   ByteQueue::ReadRequest::PullInto{
                     .view = jsg::JsArrayBufferView(store).addRef(js),
                     .elementSize = 1,
@@ -2369,7 +2366,7 @@ void ReadableStreamDefaultController::enqueue(jsg::Lock& js, jsg::Optional<jsg::
   // throwing (e.g. by calling transformController.error()), in which case
   // `errored` is still false but the impl state has transitioned to Errored.
   if (!errored && impl.canCloseOrEnqueue()) {
-    impl.enqueue(js, kj::rc<ValueQueue::Entry>(value.addRef(js), size), kj::mv(self));
+    impl.enqueue(js, js.alloc<ValueQueue::Entry>(value.addRef(js), size), kj::mv(self));
   }
 }
 
@@ -2484,7 +2481,7 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
 
         view = view.detachAndTake(js).slice(js, 0, bytesWritten);
 
-        auto entry = kj::rc<ByteQueue::Entry>(js, jsg::JsBufferSource(view));
+        auto entry = js.alloc<ByteQueue::Entry>(js, jsg::JsBufferSource(view));
         controller.impl.enqueue(js, kj::mv(entry), controller.getSelf());
       } else {
         JSG_REQUIRE(bytesWritten > 0, TypeError,
@@ -2549,7 +2546,7 @@ void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::JsBufferS
         // While this particular request may be invalidated, there are still
         // other branches we can push the data to. Let's do so.
         view = view.detachAndTake(js);
-        auto entry = kj::rc<ByteQueue::Entry>(js, view);
+        auto entry = js.alloc<ByteQueue::Entry>(js, view);
         controller.impl.enqueue(js, kj::mv(entry), controller.getSelf());
       } else {
         JSG_REQUIRE(view.size() > 0, TypeError,
@@ -2659,7 +2656,7 @@ void ReadableByteStreamController::enqueue(jsg::Lock& js, jsg::JsBufferSource ch
     byobRequest->invalidate(js);
   }
 
-  impl.enqueue(js, kj::rc<ByteQueue::Entry>(js, chunk.detachAndTake(js)), kj::mv(self));
+  impl.enqueue(js, js.alloc<ByteQueue::Entry>(js, chunk.detachAndTake(js)), kj::mv(self));
 }
 
 void ReadableByteStreamController::error(jsg::Lock& js, jsg::JsValue reason) {
