@@ -40,7 +40,8 @@ namespace workerd::util {
 //
 // Testing autogated code paths:
 //
-// 1. There is an automatic `@all-autogates` test variant that enables all gates.
+// 1. There is an automatic `@all-autogates` test variant that enables all gates, except those
+//    with a test variant of their own (hasOwnTestVariant()).
 // 2. In a C++ test file, you can enable specific gates by calling
 //    Autogate::initAutogateNamesForTest() in the test's main() function.
 //    You can disable using Autogate::deinitAutogate() in the test teardown.
@@ -125,7 +126,8 @@ namespace workerd::util {
      the origin learns of the loss only when its next write fails. */                              \
   V(JSRPC_READABLE_CANCEL_PROPAGATION)                                                             \
   /* Enables the V8 startup-snapshot pipeline: a throwaway zygote Worker is built to produce a     \
-     startup snapshot, and the real Worker's isolate is then created from it. */                   \
+     startup snapshot, and the real Worker's isolate is then created from it. Tested by the        \
+     @startup-snapshot variant rather than @all-autogates (see hasOwnTestVariant()). */            \
   V(STARTUP_SNAPSHOT)
 // clang-format on
 // --------------------------------------------------------------------------------------
@@ -195,8 +197,15 @@ class Autogate {
   // Type-safe overload: takes enum values directly, avoiding silent typo bugs.
   static void initAutogateForTest(std::initializer_list<AutogateKey> keys);
 
-  // Initializes all autogates to true. Used for testing with the --all-autogates flag.
+  // Initializes all autogates to true, except those with a test variant of their own. Used for
+  // testing with the --all-autogates flag.
   static void initAllAutogates();
+
+  // Whether `key` is tested by a variant of its own instead of @all-autogates, because far more
+  // code fails under it: STARTUP_SNAPSHOT (@startup-snapshot, `workerd test --startup-snapshot`).
+  static bool hasOwnTestVariant(AutogateKey key) {
+    return key == AutogateKey::STARTUP_SNAPSHOT;
+  }
 
   // Destroys an initialized global Autogate instance. Used only for testing.
   static void deinitAutogate();
