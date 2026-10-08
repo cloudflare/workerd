@@ -65,6 +65,10 @@ void setBenchMode() {
   benchMode = true;
 }
 
+void unsetBenchModeForTest() {
+  benchMode = false;
+}
+
 bool isGcStressModeForTest() {
   // Also honor the WORKERD_GC_STRESS environment variable so that gc-stress mode can be enabled
   // in binaries that don't have a --gc-stress CLI flag (e.g., edgeworker's prod subcommand).

@@ -5676,6 +5676,7 @@ KJ_TEST("Server: cache name is passed through to service") {
 
 KJ_TEST("Server: bench command") {
   setBenchMode();
+  KJ_DEFER(unsetBenchModeForTest());
 
   // With no warmup and a fixed batch, each case's function is called exactly batch * samples
   // times, which the "verify" case checks.

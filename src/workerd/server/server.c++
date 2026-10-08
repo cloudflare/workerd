@@ -43,6 +43,7 @@
 #include <workerd/util/ring-buffer.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/strings.h>
+#include <workerd/util/thread-scopes.h>
 #include <workerd/util/use-perfetto-categories.h>
 #include <workerd/util/uuid.h>
 #include <workerd/util/websocket-error-handler.h>
@@ -4045,7 +4046,10 @@ class Server::WorkerService final: public Service,
     // need to trace the test event, although this is useful to test that span tracing works, so
     // we are not implementing a (more complex) mechanism to disable tracing for all test() events
     // here.
-    if (entrypointName.orDefault("") != "test"_kj) {
+    //
+    // Under `workerd bench`, no request gets tracers: benchmarked code often makes subrequests on
+    // every call (e.g. `env.SELF.fetch()`), and tail workers would add their cost to each.
+    if (entrypointName.orDefault("") != "test"_kj && !isBenchMode()) {
       for (auto& service: channels.tails) {
         addWorkerIfNotRecursiveTracer(bufferedTailWorkers, *service);
       }
