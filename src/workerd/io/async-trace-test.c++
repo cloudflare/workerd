@@ -198,8 +198,8 @@ KJ_TEST("turns: default cause, explicit cause, callback scopes") {
     turn.locked();
     KJ_EXPECT(f.tracker().current() == r);
   }
-  KJ_EXPECT_EVENTS(
-      f, kj::str("before ", r), kj::str("after ", r), kj::str("turn cause=", r, " locked=true"));
+  // Nothing in the turn used the default cause, so only the turn reports it.
+  KJ_EXPECT_EVENTS(f, kj::str("turn cause=", r, " locked=true"));
 
   AsyncResource microtask;
   {
@@ -214,7 +214,7 @@ KJ_TEST("turns: default cause, explicit cause, callback scopes") {
     KJ_EXPECT(f.tracker().current() == b);
   }
   auto m = microtask.getId();
-  KJ_EXPECT_EVENTS(f, kj::str("before ", r), kj::str("after ", r), kj::str("before ", b),
+  KJ_EXPECT_EVENTS(f, kj::str("before ", b),
       kj::str("init ", m, " kind=4 name=queueMicrotask trigger=", b, " exec=", b),
       kj::str("before ", m), kj::str("after ", m), kj::str("after ", b),
       kj::str("turn cause=", b, " locked=false"));

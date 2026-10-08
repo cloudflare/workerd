@@ -44,6 +44,9 @@ pub struct Turn {
 /// What the tracker keeps for a live resource.
 struct Resource {
     settled: bool,
+    /// Handles still held. Creation makes one; adoption by a bridge adds one. The resource is
+    /// forgotten when the last is released.
+    holders: u32,
 }
 
 /// A callback scope on the execution stack.
@@ -61,6 +64,9 @@ struct OpenTurn {
     /// Whether `cause` was set by `set_turn_cause`, rather than being the default from
     /// `turn_begin`.
     explicit_cause: bool,
+    /// The default cause's scope has not been entered yet. It is entered (reporting `before`)
+    /// only when something in the turn is attributed to it; see [`Tracker::turn_begin`].
+    default_pending: bool,
     /// Length of the scope stack when the turn began. Scopes above it belong to this turn.
     base: usize,
 }
@@ -165,6 +171,12 @@ impl Tracker {
     /// The resource whose callback is running (`executionAsyncId`), or `0`.
     #[must_use]
     pub fn current(&self) -> AsyncId {
+        if let Some(turn) = self.turns.last()
+            && turn.default_pending
+        {
+            // Nothing has been entered in this turn yet.
+            return turn.cause;
+        }
         self.scopes.last().map_or(0, |scope| scope.id)
     }
 
@@ -196,8 +208,15 @@ impl Tracker {
         } else {
             trigger
         };
+        self.enter_pending_default();
         let execution = self.current();
-        self.resources.insert(id, Resource { settled: false });
+        self.resources.insert(
+            id,
+            Resource {
+                settled: false,
+                holders: 1,
+            },
+        );
         self.stats.created += 1;
         if kind == Kind::Operation
             && let Some(turn) = self.turns.last()
@@ -242,14 +261,22 @@ impl Tracker {
         }
     }
 
-    /// The caller no longer holds `id`, because it was canceled or its handle was dropped. The
-    /// tracker forgets it, and reports `destroy` if it never settled.
+    /// The caller no longer holds `id`, because it was canceled or its handle was dropped. When
+    /// the last handle is released, the tracker forgets the resource, and reports `destroy` if it
+    /// never settled.
     pub fn destroy(&mut self, id: AsyncId) {
         if self.closed || id == 0 {
             return;
         }
-        let Some(resource) = self.resources.remove(&id) else {
+        let Some(resource) = self.resources.get_mut(&id) else {
             self.stats.unknown += 1;
+            return;
+        };
+        if resource.holders > 1 {
+            resource.holders -= 1;
+            return;
+        }
+        let Some(resource) = self.resources.remove(&id) else {
             return;
         };
         self.unpend(id);
@@ -279,6 +306,7 @@ impl Tracker {
         if self.closed || id == 0 {
             return;
         }
+        self.enter_pending_default();
         // An unknown ID is still pushed, so the matching exit stays balanced.
         let reported = self.resources.contains_key(&id);
         if !reported {
@@ -323,12 +351,15 @@ impl Tracker {
     /// A turn starts: JavaScript is about to be entered from the event loop. Turns nest.
     ///
     /// `default_cause` (`0` for none) is the cause to assume unless [`Tracker::set_turn_cause`]
-    /// names a better one, typically the context's current request. Its scope is entered as if
-    /// set by `set_turn_cause`.
+    /// names a better one, typically the context's current request. Its scope is entered lazily:
+    /// only when the turn creates a resource, enters a callback scope, or starts a nested turn
+    /// before any explicit cause is set. So a turn whose cause is set immediately (a bridge
+    /// resuming JavaScript) reports no `before`/`after` for the default.
     pub fn turn_begin(&mut self, default_cause: AsyncId) {
         if self.closed {
             return;
         }
+        self.enter_pending_default();
         let seq = self.next_turn_seq;
         self.next_turn_seq += 1;
         self.turns.push(OpenTurn {
@@ -337,9 +368,9 @@ impl Tracker {
             locked: None,
             cause: default_cause,
             explicit_cause: false,
+            default_pending: default_cause != 0,
             base: self.scopes.len(),
         });
-        self.enter(default_cause);
     }
 
     /// The current turn holds its locks; JavaScript can run.
@@ -373,9 +404,13 @@ impl Tracker {
             return;
         }
         let default_cause = turn.cause;
+        let default_entered = !turn.default_pending;
         turn.cause = id;
         turn.explicit_cause = true;
-        self.exit(default_cause);
+        turn.default_pending = false;
+        if default_entered {
+            self.exit(default_cause);
+        }
         self.enter(id);
     }
 
@@ -427,6 +462,10 @@ impl Tracker {
     /// Eligible operations were created in the current turn and are neither settled nor bound.
     /// The most recently created wins; if several were eligible the binding is counted as
     /// ambiguous.
+    ///
+    /// The bridge becomes a second holder of the operation: it stays known until both the bridge
+    /// and the operation's creator release it (see [`Tracker::destroy`]). A binding's span
+    /// typically ends before its bridge's continuation runs.
     pub fn adopt_operation(&mut self) -> AsyncId {
         if self.closed {
             return 0;
@@ -452,7 +491,11 @@ impl Tracker {
         if ambiguous {
             self.stats.ambiguous_bindings += 1;
         }
-        self.pending_ops.remove(chosen).0
+        let id = self.pending_ops.remove(chosen).0;
+        if let Some(resource) = self.resources.get_mut(&id) {
+            resource.holders += 1;
+        }
+        id
     }
 
     /// Takes `id` out of consideration for [`Tracker::adopt_operation`]: a bridge was bound to it
@@ -516,6 +559,19 @@ impl Tracker {
         self.turns = Vec::new();
         self.pending_ops = Vec::new();
         self.sinks = Vec::new();
+    }
+
+    /// Enters the innermost turn's default cause, if it is still pending.
+    fn enter_pending_default(&mut self) {
+        let Some(turn) = self.turns.last_mut() else {
+            return;
+        };
+        if !turn.default_pending {
+            return;
+        }
+        turn.default_pending = false;
+        let id = turn.cause;
+        self.enter(id);
     }
 
     fn unpend(&mut self, id: AsyncId) {

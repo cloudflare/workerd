@@ -128,7 +128,6 @@ KJ_TEST("a request's turns are attributed to its REQUEST resource") {
   auto expected =
       kj::strArray(kj::arr(kj::str("context_begin"),
                        kj::str("init ", requestId, " kind=0 name=newIncomingRequest", " trigger=0"),
-                       kj::str("before ", requestId), kj::str("after ", requestId),
                        kj::str("turn cause=", requestId), kj::str("settle ", requestId),
                        kj::str("context_end created=1 unknown=0 unbalanced=0 foreign=0"),
                        kj::str("listener destroyed")),
