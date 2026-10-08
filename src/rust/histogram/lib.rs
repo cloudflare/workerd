@@ -12,6 +12,7 @@
 //! [`hdr`] is a port of the core of `HdrHistogram_c`, the C library Node.js builds on.
 
 mod cbor;
+pub mod ffi;
 pub mod hdr;
 mod histogram;
 mod qrde;
