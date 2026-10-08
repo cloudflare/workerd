@@ -59,49 +59,6 @@ void AsyncTraceSinks::addNdjson(const AsyncTraceWriter& writer) {
 }
 
 // =======================================================================================
-// AsyncResource
-
-AsyncResource::AsyncResource(AsyncResource&& other) noexcept
-    : tracker(kj::mv(other.tracker)),
-      id(other.id) {
-  other.id = 0;
-}
-
-AsyncResource& AsyncResource::operator=(AsyncResource&& other) noexcept(false) {
-  if (this != &other) {
-    release();
-    tracker = kj::mv(other.tracker);
-    id = other.id;
-    other.id = 0;
-  }
-  return *this;
-}
-
-AsyncResource::~AsyncResource() noexcept(false) {
-  release();
-}
-
-void AsyncResource::settle(AsyncOutcome outcome) {
-  if (tracker != nullptr) tracker->settle(id, outcome);
-}
-
-void AsyncResource::annotate(kj::StringPtr key, kj::StringPtr value) {
-  if (tracker != nullptr) tracker->annotate(id, key, value);
-}
-
-void AsyncResource::enterAsTurnCause() {
-  if (tracker != nullptr) tracker->setTurnCause(id);
-}
-
-void AsyncResource::release() {
-  if (tracker != nullptr) {
-    tracker->destroy(id);
-    tracker = nullptr;
-    id = 0;
-  }
-}
-
-// =======================================================================================
 // AsyncTracker
 
 kj::Maybe<kj::Arc<AsyncTracker>> AsyncTracker::tryCreate(const AsyncTraceIsolate& isolate,
@@ -145,9 +102,11 @@ AsyncId AsyncTracker::current() const {
   return impl->current();
 }
 
-AsyncId AsyncTracker::adoptOperation() const {
-  if (!onOwnerThread()) return 0;
-  return impl->adopt_operation();
+AsyncResource AsyncTracker::adoptOrCreate(AsyncKind kind, kj::StringPtr name) const {
+  if (!onOwnerThread()) return {};
+  AsyncId id = impl->adopt_operation();
+  if (id == 0) return create(kind, name);
+  return AsyncResource(addRefToThis(), id);
 }
 
 void AsyncTracker::markBound(AsyncId id) const {
