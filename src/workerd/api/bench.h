@@ -23,9 +23,21 @@ struct BenchCaseResult {
   bench::BenchReport::Case::Status status = bench::BenchReport::Case::Status::OK;
   kj::Maybe<kj::String> error;
   uint64_t iterationsPerSample = 0;
-  // Wall and thread CPU time per call, one value per sampled batch.
+  // Wall and thread CPU time per call, one value per sampled batch, including the runner's
+  // overhead.
   kj::Array<double> wallNs;
   kj::Array<double> cpuNs;
+  // Whether the function returned a promise, which selects the overhead to subtract.
+  bool async = false;
+};
+
+// The runner's own cost per call; see `BenchReport.Overhead`.
+struct BenchOverhead {
+  double syncNs;
+  double syncCpuNs;
+  double asyncNs;
+  double asyncCpuNs;
+  double blackBoxNs;
 };
 
 // Results of one `bench()` handler.
@@ -33,13 +45,15 @@ struct BenchGroupResult {
   // Set if `bench()` itself failed.
   kj::Maybe<kj::String> error;
   kj::Array<BenchCaseResult> cases;
+  // Set once overhead has been measured.
+  kj::Maybe<BenchOverhead> overhead;
 };
 
 // The exception's stack if it has one, or else its string conversion.
 kj::String describeBenchException(jsg::Lock& js, const jsg::Value& exception);
 
-// Writes `result` to `report`, computing summary statistics of the samples. Doesn't set the
-// group's name, which the caller knows.
+// Writes `result` to `report`, computing summary statistics of the samples after subtracting the
+// overhead. Doesn't set the group's name, which the caller knows.
 void fillBenchReport(const BenchGroupResult& result, bench::BenchReport::Group::Builder report);
 
 // A duration: a number of milliseconds, or a string with a unit, as in "500ms" or "2s".
@@ -113,6 +127,10 @@ class BenchController final: public jsg::Object {
   struct Case {
     kj::String name;
     jsg::V8Ref<v8::Function> fn;
+    // `this` for calls of `fn`; undefined if none.
+    kj::Maybe<jsg::V8Ref<v8::Value>> receiver;
+    // Whether `fn` gets an argument when there is no `setup`, in which case it is undefined.
+    bool passArgument = false;
     kj::Maybe<jsg::Function<jsg::Value()>> setup;
     kj::Maybe<jsg::Function<jsg::Value(jsg::Value)>> teardown;
     bool skip;
@@ -121,6 +139,11 @@ class BenchController final: public jsg::Object {
     uint32_t samples;
     // 0 calibrates.
     uint64_t batch;
+    // A case that measures overhead, which the case filter doesn't apply to.
+    bool internal = false;
+    // Whether `fn` returns a promise, once it has been called. Every call must agree, since the
+    // overhead subtracted from the samples depends on it.
+    kj::Maybe<bool> returnsPromise;
   };
 
   struct CaseRun;
@@ -136,9 +159,14 @@ class BenchController final: public jsg::Object {
   kj::Vector<Case> cases;
   // Set once the cases start running; registering a case after that is an error.
   bool running = false;
+  kj::Maybe<BenchOverhead> overhead;
 
+  // Measures the overhead, unless this process has already, by running internal cases.
+  jsg::Promise<void> measureOverhead(jsg::Lock& js);
+
+  // Runs cases[index] through cases[end - 1].
   jsg::Promise<BenchGroupResult> runCasesFrom(
-      jsg::Lock& js, size_t index, kj::Vector<BenchCaseResult> results);
+      jsg::Lock& js, size_t index, size_t end, kj::Vector<BenchCaseResult> results);
   jsg::Promise<BenchCaseResult> runCase(jsg::Lock& js, size_t index);
   jsg::Promise<BenchCaseResult> step(jsg::Lock& js, kj::Own<CaseRun> run);
   jsg::Promise<BatchTiming> runBatch(jsg::Lock& js, size_t index, uint64_t calls);

@@ -10,6 +10,7 @@
 
 #include <kj/glob-filter.h>
 
+#include <algorithm>
 #include <cmath>
 
 #if _WIN32
@@ -47,6 +48,19 @@ constexpr double CONFIDENCE = 0.95;
 // A case is flagged as high-variance when the coefficient of variation of its wall time per call
 // exceeds this.
 constexpr double HIGH_VARIANCE_CV = 0.1;
+
+// A case is flagged as at the measurement floor when its median wall time before subtracting the
+// overhead is less than this multiple of the overhead.
+constexpr double AT_FLOOR_FACTOR = 2;
+
+// Budgets for the cases that measure overhead, which are capped further under --quick.
+constexpr uint64_t OVERHEAD_MIN_TIME_NS = 200'000'000;
+constexpr uint64_t OVERHEAD_WARMUP_NS = 50'000'000;
+constexpr uint32_t OVERHEAD_SAMPLES = 20;
+
+// The overhead is measured once per thread. `workerd bench` runs every group on the same thread,
+// so all groups in a run share one measurement.
+thread_local kj::Maybe<BenchOverhead> measuredOverhead;
 
 int64_t monotonicNs() {
   return (kj::systemPreciseMonotonicClock().now() - kj::origin<kj::TimePoint>()) / kj::NANOSECONDS;
@@ -116,6 +130,14 @@ uint64_t parseCount(double value, uint64_t max, kj::StringPtr what) {
   return static_cast<uint64_t>(value);
 }
 
+double median(kj::ArrayPtr<const double> samples) {
+  KJ_ASSERT(samples.size() > 0);
+  auto sorted = kj::heapArray(samples);
+  std::sort(sorted.begin(), sorted.end());
+  auto middle = sorted.size() / 2;
+  return sorted.size() % 2 == 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
 // A promise for `value`, awaiting it if it is a promise.
 jsg::Promise<jsg::Value> settle(jsg::Lock& js, jsg::Value value) {
   if (value.getHandle(js)->IsPromise()) {
@@ -175,6 +197,14 @@ void fillBenchReport(const BenchGroupResult& result, bench::BenchReport::Group::
   KJ_IF_SOME(error, result.error) {
     report.setError(error);
   }
+  KJ_IF_SOME(o, result.overhead) {
+    auto overhead = report.initOverhead();
+    overhead.setSyncNs(o.syncNs);
+    overhead.setSyncCpuNs(o.syncCpuNs);
+    overhead.setAsyncNs(o.asyncNs);
+    overhead.setAsyncCpuNs(o.asyncCpuNs);
+    overhead.setBlackBoxNs(o.blackBoxNs);
+  }
   auto cases = report.initCases(result.cases.size());
   for (auto i: kj::indices(result.cases)) {
     auto& from = result.cases[i];
@@ -188,10 +218,32 @@ void fillBenchReport(const BenchGroupResult& result, bench::BenchReport::Group::
       continue;
     }
     to.setIterationsPerSample(from.iterationsPerSample);
-    auto wall = fillMetric(from.wallNs, to.initWallNs());
-    fillMetric(from.cpuNs, to.initCpuNs());
-    if (wall.mean > 0 && wall.stddev / wall.mean > HIGH_VARIANCE_CV) {
-      to.initFlags(1).set(0, bench::BenchReport::Case::Flag::HIGH_VARIANCE);
+
+    double wallOverhead = 0, cpuOverhead = 0;
+    KJ_IF_SOME(o, result.overhead) {
+      wallOverhead = from.async ? o.asyncNs : o.syncNs;
+      cpuOverhead = from.async ? o.asyncCpuNs : o.syncCpuNs;
+    }
+    auto subtract = [](kj::ArrayPtr<const double> samples, double overhead) {
+      return KJ_MAP(sample, samples) { return kj::max(sample - overhead, 0.0); };
+    };
+    auto wall = fillMetric(subtract(from.wallNs, wallOverhead), to.initWallNs());
+    fillMetric(subtract(from.cpuNs, cpuOverhead), to.initCpuNs());
+
+    using Flag = bench::BenchReport::Case::Flag;
+    kj::Vector<Flag> flags;
+    if (wallOverhead > 0 && median(from.wallNs) < AT_FLOOR_FACTOR * wallOverhead) {
+      flags.add(Flag::AT_FLOOR);
+    } else if (wall.mean > 0 && wall.stddev / wall.mean > HIGH_VARIANCE_CV) {
+      // At the floor, what's left after subtracting the overhead is mostly noise, so its variance
+      // means nothing.
+      flags.add(Flag::HIGH_VARIANCE);
+    }
+    if (!flags.empty()) {
+      auto list = to.initFlags(flags.size());
+      for (auto i: kj::indices(flags)) {
+        list.set(i, flags[i]);
+      }
     }
   }
 }
@@ -292,24 +344,92 @@ jsg::Promise<BenchGroupResult> BenchController::runCases(jsg::Lock& js) {
       .error = kj::str("bench() did not register any cases."),
     });
   }
-  return runCasesFrom(js, 0, {});
+  return measureOverhead(js).then(
+      js, IoContext::current().addFunctor([self = JSG_THIS](jsg::Lock& js) mutable {
+    return self->runCasesFrom(js, 0, self->cases.size(), {});
+  }));
+}
+
+jsg::Promise<void> BenchController::measureOverhead(jsg::Lock& js) {
+  KJ_IF_SOME(o, measuredOverhead) {
+    overhead = o;
+    return js.resolvedPromise();
+  }
+
+  // The internal cases go after the user's, and are removed once they have run.
+  auto begin = cases.size();
+  auto addCase = [&](kj::StringPtr name, v8::Local<v8::Function> fn,
+                     kj::Maybe<v8::Local<v8::Value>> receiver = kj::none) {
+    cases.add(Case{
+      .name = kj::str(name),
+      .fn = js.v8Ref(fn),
+      .receiver = receiver.map([&](v8::Local<v8::Value> r) { return js.v8Ref(r); }),
+      .passArgument = receiver != kj::none,
+      .skip = false,
+      .minTimeNs = quick ? QUICK_MIN_TIME_NS : OVERHEAD_MIN_TIME_NS,
+      .warmupNs = quick ? QUICK_WARMUP_NS : OVERHEAD_WARMUP_NS,
+      .samples = quick ? QUICK_SAMPLES : OVERHEAD_SAMPLES,
+      .batch = 0,
+      .internal = true,
+    });
+  };
+  auto context = js.v8Context();
+  addCase("(empty)"_kj,
+      jsg::check(v8::Function::New(context, [](const v8::FunctionCallbackInfo<v8::Value>&) {})));
+  addCase("(empty async)"_kj,
+      jsg::check(v8::Function::New(context, [](const v8::FunctionCallbackInfo<v8::Value>& info) {
+    auto isolate = info.GetIsolate();
+    auto context = isolate->GetCurrentContext();
+    auto resolver = jsg::check(v8::Promise::Resolver::New(context));
+    jsg::check(resolver->Resolve(context, v8::Undefined(isolate)));
+    info.GetReturnValue().Set(resolver->GetPromise());
+  })));
+  // `blackBox(undefined)`, called as a method of this controller.
+  auto controller = KJ_ASSERT_NONNULL(JSG_THIS.tryGetHandle(js));
+  auto blackBox = jsg::JsObject(controller).get(js, "blackBox"_kj);
+  KJ_ASSERT(blackBox.isFunction());
+  addCase("(blackBox)"_kj, v8::Local<v8::Value>(blackBox).As<v8::Function>(),
+      v8::Local<v8::Value>(controller));
+
+  return runCasesFrom(js, begin, cases.size(), {})
+      .then(js,
+          IoContext::current().addFunctor(
+              [self = JSG_THIS, begin](jsg::Lock& js, BenchGroupResult result) mutable {
+    self->cases.truncate(begin);
+    for (auto& c: result.cases) {
+      JSG_REQUIRE(c.status == bench::BenchReport::Case::Status::OK, Error,
+          "Measuring the runner's overhead failed: ", c.error.orDefault(kj::str()));
+    }
+    KJ_ASSERT(result.cases.size() == 3);
+    KJ_ASSERT(!result.cases[0].async && result.cases[1].async);
+    BenchOverhead o{
+      .syncNs = median(result.cases[0].wallNs),
+      .syncCpuNs = median(result.cases[0].cpuNs),
+      .asyncNs = median(result.cases[1].wallNs),
+      .asyncCpuNs = median(result.cases[1].cpuNs),
+      .blackBoxNs = median(result.cases[2].wallNs),
+    };
+    measuredOverhead = o;
+    self->overhead = o;
+  }));
 }
 
 jsg::Promise<BenchGroupResult> BenchController::runCasesFrom(
-    jsg::Lock& js, size_t index, kj::Vector<BenchCaseResult> results) {
+    jsg::Lock& js, size_t index, size_t end, kj::Vector<BenchCaseResult> results) {
   kj::GlobFilter filter(caseFilter == ""_kj ? "*"_kj : caseFilter.asPtr());
-  while (index < cases.size() && !filter.matches(cases[index].name)) {
+  while (index < end && !cases[index].internal && !filter.matches(cases[index].name)) {
     ++index;
   }
-  if (index == cases.size()) {
-    return js.resolvedPromise(BenchGroupResult{.cases = results.releaseAsArray()});
+  if (index == end) {
+    return js.resolvedPromise(
+        BenchGroupResult{.cases = results.releaseAsArray(), .overhead = overhead});
   }
 
   return runCase(js, index).then(js,
-      IoContext::current().addFunctor([self = JSG_THIS, index, results = kj::mv(results)](
+      IoContext::current().addFunctor([self = JSG_THIS, index, end, results = kj::mv(results)](
                                           jsg::Lock& js, BenchCaseResult result) mutable {
     results.add(kj::mv(result));
-    return self->runCasesFrom(js, index + 1, kj::mv(results));
+    return self->runCasesFrom(js, index + 1, end, kj::mv(results));
   }));
 }
 
@@ -398,6 +518,7 @@ jsg::Promise<BenchCaseResult> BenchController::step(jsg::Lock& js, kj::Own<CaseR
               .iterationsPerSample = run->calls,
               .wallNs = run->wallNs.releaseAsArray(),
               .cpuNs = run->cpuNs.releaseAsArray(),
+              .async = c.returnsPromise.orDefault(false),
             });
           }
           break;
@@ -441,15 +562,26 @@ jsg::Promise<BenchController::BatchTiming> BenchController::callBatch(
   auto isolate = js.v8Isolate;
   auto context = js.v8Context();
   auto fn = c.fn.getHandle(js);
-  auto receiver = js.v8Undefined();
+  v8::Local<v8::Value> receiver = js.v8Undefined();
+  KJ_IF_SOME(r, c.receiver) {
+    receiver = r.getHandle(js);
+  }
   v8::Local<v8::Value> argument = state.getHandle(js);
-  int argumentCount = c.setup == kj::none ? 0 : 1;
+  int argumentCount = c.setup != kj::none || c.passArgument ? 1 : 0;
 
   while (remaining > 0) {
     v8::HandleScope scope(isolate);
     --remaining;
     auto result = jsg::check(fn->Call(context, receiver, argumentCount, &argument));
-    if (result->IsPromise()) {
+    bool isPromise = result->IsPromise();
+    KJ_IF_SOME(expected, c.returnsPromise) {
+      JSG_REQUIRE(isPromise == expected, Error,
+          "The function returned a promise from some calls but not from others. It must either "
+          "always or never return a promise.");
+    } else {
+      c.returnsPromise = isPromise;
+    }
+    if (isPromise) {
       // Await the result before the next call; the batch's time includes the wait.
       return js.toPromise(result).then(js,
           IoContext::current().addFunctor([self = JSG_THIS, index, state = kj::mv(state), remaining,
@@ -463,7 +595,7 @@ jsg::Promise<BenchController::BatchTiming> BenchController::callBatch(
 
 void BenchController::visitForGc(jsg::GcVisitor& visitor) {
   for (auto& c: cases) {
-    visitor.visit(c.fn, c.setup, c.teardown);
+    visitor.visit(c.fn, c.receiver, c.setup, c.teardown);
   }
 }
 

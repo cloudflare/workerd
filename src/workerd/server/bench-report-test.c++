@@ -52,7 +52,14 @@ KJ_TEST("formatBenchReport renders environment, cases, and failures") {
   cases[1].setIterationsPerSample(1);
   cases[1].initWallNs().setMedian(2e6);
   cases[1].initCpuNs();
-  cases[1].initFlags(1).set(0, Case::Flag::HIGH_VARIANCE);
+  auto flags = cases[1].initFlags(2);
+  flags.set(0, Case::Flag::HIGH_VARIANCE);
+  flags.set(1, Case::Flag::AT_FLOOR);
+
+  auto overhead = group.initOverhead();
+  overhead.setSyncNs(5.5);
+  overhead.setAsyncNs(250);
+  overhead.setBlackBoxNs(2);
 
   cases[2].setName("broken");
   cases[2].setStatus(Case::Status::FAILED);
@@ -72,10 +79,12 @@ KJ_TEST("formatBenchReport renders environment, cases, and failures") {
           "WARNING: This is a debug build.\n"
           "\n"
           "main:encoding\n"
+          "  overhead per call, subtracted: 5.50 ns, 250 ns async; blackBox() 2.00 ns\n"
           "  case          median   95% CI             mean     cpu median  samples\n"
           "  encode small  12.3 ns  12.2 ns - 12.5 ns  12.4 ns  12.3 ns     3 x 1024\n"
           "  noisy         2.00 ms  0.00 ns - 0.00 ns  0.00 ns  0.00 ns     0 x 1     "
-          "(high variance: try more samples or a longer minTime)\n"
+          "(high variance: try more samples or a longer minTime; at measurement floor: pass "
+          "results through b.blackBox())\n"
           "  broken        FAILED: Error: boom\n"
           "  later         skipped\n"
           "\n"

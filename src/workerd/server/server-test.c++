@@ -5721,6 +5721,11 @@ KJ_TEST("Server: bench command") {
                 `        calls.asyncTeardown++;
                 `      },
                 `    });
+                `    let mixedCalls = 0;
+                `    b.run("mixed", () => (mixedCalls++ === 0 ? Promise.resolve() : undefined), {
+                `      ...fixed,
+                `      batch: 1,
+                `    });
                 `    b.run("skipped", () => { throw new Error("ran"); }, {skip: true});
                 `    b.run("throws", () => { throw new Error("boom"); }, fixed);
                 `    b.run("late", () => { b.run("x", () => {}); }, fixed);
@@ -5769,6 +5774,7 @@ KJ_TEST("Server: bench command") {
     capnp::MallocMessageBuilder reportMessage;
     auto report = reportMessage.initRoot<bench::BenchReport>();
     KJ_EXPECT_LOG(DBG, "[ BENCH ] hello");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello/mixed: Error: The function returned a promise from some");
     KJ_EXPECT_LOG(DBG, "[ SKIP ] hello/skipped");
     KJ_EXPECT_LOG(DBG, "[ FAIL ] hello/throws: Error: boom");
     KJ_EXPECT_LOG(DBG, "[ FAIL ] hello/late: Error: BenchController.run() must be called by");
@@ -5782,13 +5788,18 @@ KJ_TEST("Server: bench command") {
     KJ_ASSERT(groups.size() == 1);
     KJ_EXPECT(groups[0].getName() == "hello");
     KJ_EXPECT(!groups[0].hasError());
+    KJ_ASSERT(groups[0].hasOverhead());
+    auto overhead = groups[0].getOverhead();
+    KJ_EXPECT(overhead.getSyncNs() > 0);
+    KJ_EXPECT(overhead.getAsyncNs() > 0);
+    KJ_EXPECT(overhead.getBlackBoxNs() > 0);
     auto cases = groups[0].getCases();
-    KJ_ASSERT(cases.size() == 9);
+    KJ_ASSERT(cases.size() == 10);
 
     using Status = bench::BenchReport::Case::Status;
-    kj::StringPtr names[] = {"sync", "async", "state", "bare teardown", "async teardown", "skipped",
-      "throws", "late", "verify"};
-    Status statuses[] = {Status::OK, Status::OK, Status::OK, Status::OK, Status::OK,
+    kj::StringPtr names[] = {"sync", "async", "state", "bare teardown", "async teardown", "mixed",
+      "skipped", "throws", "late", "verify"};
+    Status statuses[] = {Status::OK, Status::OK, Status::OK, Status::OK, Status::OK, Status::FAILED,
       Status::SKIPPED, Status::FAILED, Status::FAILED, Status::OK};
     for (auto i: kj::indices(names)) {
       KJ_EXPECT(cases[i].getName() == names[i]);
@@ -5806,8 +5817,15 @@ KJ_TEST("Server: bench command") {
       KJ_EXPECT(wall.getMedianLow() <= wall.getMedian());
       KJ_EXPECT(wall.getMedian() <= wall.getMedianHigh());
     }
-    KJ_EXPECT(!cases[5].hasWallNs());
-    KJ_EXPECT(kj::StringPtr(cases[6].getError()).startsWith("Error: boom"));
+    KJ_EXPECT(!cases[6].hasWallNs());
+
+    // The async case does almost nothing beyond awaiting a resolved promise.
+    bool asyncAtFloor = false;
+    for (auto flag: cases[1].getFlags()) {
+      asyncAtFloor = asyncAtFloor || flag == bench::BenchReport::Case::Flag::AT_FLOOR;
+    }
+    KJ_EXPECT(asyncAtFloor);
+    KJ_EXPECT(kj::StringPtr(cases[7].getError()).startsWith("Error: boom"));
   }
 
   {

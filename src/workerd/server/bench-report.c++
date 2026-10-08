@@ -219,6 +219,13 @@ kj::String formatBenchReport(bench::BenchReport::Reader report) {
     if (group.hasError()) {
       appendLine(out, kj::str("  FAILED: ", firstLine(group.getError())));
     }
+    if (group.hasOverhead()) {
+      auto overhead = group.getOverhead();
+      appendLine(out,
+          kj::str("  overhead per call, subtracted: ", formatBenchDuration(overhead.getSyncNs()),
+              ", ", formatBenchDuration(overhead.getAsyncNs()), " async; blackBox() ",
+              formatBenchDuration(overhead.getBlackBoxNs())));
+    }
 
     // Each row has either all columns, or a name and a message.
     struct Row {
@@ -239,13 +246,20 @@ kj::String formatBenchReport(bench::BenchReport::Reader report) {
           cells.add(formatBenchDuration(wall.getMean()));
           cells.add(formatBenchDuration(c.getCpuNs().getMedian()));
           cells.add(kj::str(wall.getSamples().size(), " x ", c.getIterationsPerSample()));
-          kj::Maybe<kj::String> message;
+          kj::Vector<kj::String> notes;
           for (auto flag: c.getFlags()) {
             switch (flag) {
               case Case::Flag::HIGH_VARIANCE:
-                message = kj::str("(high variance: try more samples or a longer minTime)");
+                notes.add(kj::str("high variance: try more samples or a longer minTime"));
+                break;
+              case Case::Flag::AT_FLOOR:
+                notes.add(kj::str("at measurement floor: pass results through b.blackBox()"));
                 break;
             }
+          }
+          kj::Maybe<kj::String> message;
+          if (!notes.empty()) {
+            message = kj::str("(", kj::strArray(notes, "; "), ")");
           }
           rows.add(Row{.cells = cells.finish(), .message = kj::mv(message)});
           break;
