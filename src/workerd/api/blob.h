@@ -8,6 +8,7 @@
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/sandbox.h>
 #include <workerd/jsg/ser.h>
 
 namespace workerd::api {
@@ -20,9 +21,11 @@ class Blob: public jsg::Object {
   // Creates an empty Blob
   Blob(kj::String type);
   Blob(jsg::Lock& js, jsg::JsBufferSource data, kj::String type);
-  Blob(jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data, kj::String type);
+  Blob(jsg::Lock& js, jsg::Ref<Blob> parent, kj::ArrayPtr<const byte> data, kj::String type);
 
-  kj::ArrayPtr<const byte> getData() const KJ_LIFETIMEBOUND;
+  // Decodes the byte view relative to the current isolate's backing-store cage. The lock also
+  // keeps the source sandbox accessible while callers use the bytes.
+  kj::ArrayPtr<const byte> getData(jsg::Lock& js) const KJ_LIFETIMEBOUND;
 
   // ---------------------------------------------------------------------------
   // JS API
@@ -104,7 +107,7 @@ class Blob: public jsg::Object {
   struct Empty {};
 
   kj::OneOf<Empty, jsg::JsRef<jsg::JsBufferSource>, jsg::Ref<Blob>> ownData;
-  kj::ArrayPtr<const byte> data;
+  jsg::SandboxedBytes data;
   kj::String type;
 
   void visitForGc(jsg::GcVisitor& visitor) {
@@ -133,7 +136,8 @@ class File: public Blob {
       kj::String name,
       kj::String type,
       double lastModified);
-  File(jsg::Ref<Blob> parent,
+  File(jsg::Lock& js,
+      jsg::Ref<Blob> parent,
       kj::ArrayPtr<const byte> data,
       kj::String name,
       kj::String type,

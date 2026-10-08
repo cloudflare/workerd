@@ -555,6 +555,21 @@ Supported template params: `v8::ArrayBuffer`, `v8::Uint8Array`, `v8::Int8Array`,
 `v8::Int32Array`, `v8::Float32Array`, `v8::Float64Array`, `v8::BigInt64Array`,
 `v8::BigUint64Array`, `v8::DataView`.
 
+## Sandbox Byte Views
+
+`sandbox.h` provides `SandboxedBytes`, a non-owning byte view used by Blob. With
+V8's sandbox enabled, it stores a 32-bit offset relative to the JS cage base plus
+4 GiB, and a 32-bit length. Backing-store allocations must fit in that second
+4 GiB cage, with sandbox guard regions disabled. Construction aborts if the range
+cannot be encoded. Decoding uses the current isolate's base without a range check.
+A corrupted offset can only address that isolate group's second cage.
+
+The length bounds overrun distance but does not enforce allocation or cage
+boundaries. Embedders relying on this representation for isolation must protect
+neighboring regions, for example with MPK. Callers must retain the backing owner
+and hold the source isolate lock while accessing bytes. Empty views decode to
+null. Builds without the sandbox store an ordinary pointer.
+
 ## Observer Hooks
 
 | Observer                    | Method                            | When Called                               |
