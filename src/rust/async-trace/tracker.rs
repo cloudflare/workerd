@@ -58,6 +58,9 @@ struct OpenTurn {
     start: Nanos,
     locked: Option<Nanos>,
     cause: AsyncId,
+    /// Whether `cause` was set by `set_turn_cause`, rather than being the default from
+    /// `turn_begin`.
+    explicit_cause: bool,
     /// Length of the scope stack when the turn began. Scopes above it belong to this turn.
     base: usize,
 }
@@ -318,7 +321,11 @@ impl Tracker {
     }
 
     /// A turn starts: JavaScript is about to be entered from the event loop. Turns nest.
-    pub fn turn_begin(&mut self) {
+    ///
+    /// `default_cause` (`0` for none) is the cause to assume unless [`Tracker::set_turn_cause`]
+    /// names a better one, typically the context's current request. Its scope is entered as if
+    /// set by `set_turn_cause`.
+    pub fn turn_begin(&mut self, default_cause: AsyncId) {
         if self.closed {
             return;
         }
@@ -328,9 +335,11 @@ impl Tracker {
             seq,
             start: self.clock.now(),
             locked: None,
-            cause: 0,
+            cause: default_cause,
+            explicit_cause: false,
             base: self.scopes.len(),
         });
+        self.enter(default_cause);
     }
 
     /// The current turn holds its locks; JavaScript can run.
@@ -348,7 +357,8 @@ impl Tracker {
 
     /// `id` started the current turn. It becomes the turn's cause (the default trigger of
     /// everything created in the turn) and its callback scope stays open until the turn ends,
-    /// so it covers the microtask drain.
+    /// so it covers the microtask drain. It replaces the default cause from
+    /// [`Tracker::turn_begin`], whose scope is closed.
     pub fn set_turn_cause(&mut self, id: AsyncId) {
         if self.closed || id == 0 {
             return;
@@ -357,12 +367,15 @@ impl Tracker {
             self.stats.unbalanced += 1;
             return;
         };
-        if turn.cause != 0 {
+        if turn.explicit_cause {
             // One cause per turn. A second is a caller bug; keep the first.
             self.stats.unbalanced += 1;
             return;
         }
+        let default_cause = turn.cause;
         turn.cause = id;
+        turn.explicit_cause = true;
+        self.exit(default_cause);
         self.enter(id);
     }
 
@@ -446,6 +459,12 @@ impl Tracker {
     /// explicitly, or it will never be awaited through a bridge.
     pub fn mark_bound(&mut self, id: AsyncId) {
         self.unpend(id);
+    }
+
+    /// Adds `count` events that the C++ wrapper dropped because they came from a thread other
+    /// than the context's.
+    pub const fn count_foreign_thread(&mut self, count: u64) {
+        self.stats.foreign_thread = self.stats.foreign_thread.saturating_add(count);
     }
 
     /// Starts collecting a creation stack, innermost frame first.
