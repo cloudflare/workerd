@@ -111,7 +111,7 @@ fn every_event_type() {
     tracker.add_sink(Box::new(NdjsonSink::new(writer(&buf))));
 
     let request = tracker.create(Kind::Request, "fetch", 0, None);
-    tracker.turn_begin();
+    tracker.turn_begin(0);
     tracker.turn_locked();
     tracker.set_turn_cause(request);
     tracker.begin_stack();
@@ -147,7 +147,7 @@ fn every_event_type() {
                    "trigger": 0, "exec": 0, "at": 42}),
             json!({"e": "destroy", "ctx": ctx, "id": timer, "at": 42}),
             json!({"e": "ctx_end", "ctx": ctx, "at": 42, "created": 3, "dropped": 0,
-                   "unknown": 0, "unbalanced": 0, "ambiguousBindings": 0}),
+                   "unknown": 0, "unbalanced": 0, "ambiguousBindings": 0, "foreignThread": 0}),
         ]
     );
 }
@@ -162,7 +162,7 @@ fn optional_fields_are_omitted_or_null() {
         Box::new(FixedClock(1)),
     );
     tracker.add_sink(Box::new(NdjsonSink::new(writer(&buf))));
-    tracker.turn_begin();
+    tracker.turn_begin(0);
     tracker.turn_end();
     let lines = buf.lines();
     assert_eq!(lines[1]["actor"], Value::Null);
@@ -181,7 +181,7 @@ fn sink_buffers_until_turn_end() {
         Box::new(FixedClock(1)),
     );
     tracker.add_sink(Box::new(NdjsonSink::new(writer(&buf))));
-    tracker.turn_begin();
+    tracker.turn_begin(0);
     tracker.create(Kind::Timer, "setTimeout", 0, None);
     assert_eq!(buf.lines().len(), 1); // Header only.
     tracker.turn_end();
@@ -199,7 +199,7 @@ fn sink_writes_out_early_when_its_buffer_is_large() {
         Box::new(FixedClock(1)),
     );
     tracker.add_sink(Box::new(NdjsonSink::new(writer(&buf))));
-    tracker.turn_begin();
+    tracker.turn_begin(0);
     let name = "x".repeat(1024);
     for _ in 0..80 {
         tracker.create(Kind::Timer, &name, 0, None);
@@ -217,8 +217,8 @@ fn contexts_sharing_a_writer_produce_whole_lines() {
     let mut b = Tracker::new(isolate, "b", None, Box::new(FixedClock(1)));
     a.add_sink(Box::new(NdjsonSink::new(Arc::clone(&writer))));
     b.add_sink(Box::new(NdjsonSink::new(Arc::clone(&writer))));
-    a.turn_begin();
-    b.turn_begin();
+    a.turn_begin(0);
+    b.turn_begin(0);
     a.create(Kind::Timer, "a", 0, None);
     b.create(Kind::Timer, "b", 0, None);
     b.turn_end();

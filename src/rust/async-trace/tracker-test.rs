@@ -131,7 +131,7 @@ fn explicit_trigger_wins() {
     let mut f = Fixture::new();
     let request = f.create(Kind::Request, "fetch");
     let other = f.create(Kind::Other, "x");
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     f.tracker.set_turn_cause(request);
     let id = f.tracker.create(Kind::Timer, "setTimeout", other, None);
     let events = f.events();
@@ -146,7 +146,7 @@ fn turn_cause_is_the_default_trigger_across_awaits() {
     let request = f.create(Kind::Request, "fetch");
 
     // Turn 1: the handler runs and starts kv_get, whose bridge adopts it.
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     f.tracker.set_turn_cause(request);
     let kv = f.create(Kind::Operation, "kv_get");
     assert_eq!(f.tracker.adopt_operation(), kv);
@@ -157,7 +157,7 @@ fn turn_cause_is_the_default_trigger_across_awaits() {
 
     // Turn 2: the bridge resumes JS. The code after `await` runs in the microtask drain, with no
     // scope of its own, and starts a second operation.
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     f.tracker.set_turn_cause(kv);
     let cache = f.create(Kind::Operation, "cache_match");
     f.tracker.turn_end();
@@ -177,7 +177,7 @@ fn turn_reports_cause_scope_and_timing() {
     let _ = f.events();
 
     f.clock.set(100);
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     f.clock.set(150);
     f.tracker.turn_locked();
     f.clock.set(160);
@@ -211,7 +211,7 @@ fn turn_reports_cause_scope_and_timing() {
 fn turn_without_cause() {
     let mut f = Fixture::new();
     let ctx = f.ctx();
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     let id = f.create(Kind::Microtask, "queueMicrotask");
     f.tracker.turn_end();
     let events = f.events();
@@ -225,8 +225,8 @@ fn turn_without_cause() {
 #[test]
 fn flush_happens_after_outermost_turn_only() {
     let mut f = Fixture::new();
-    f.tracker.turn_begin();
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
+    f.tracker.turn_begin(0);
     f.tracker.turn_end();
     assert!(!f.sink.events().contains(&Event::Flush));
     f.tracker.turn_end();
@@ -238,9 +238,9 @@ fn nested_turn_has_its_own_cause() {
     let mut f = Fixture::new();
     let outer = f.create(Kind::Timer, "outer");
     let inner = f.create(Kind::Timer, "inner");
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     f.tracker.set_turn_cause(outer);
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     f.tracker.set_turn_cause(inner);
     assert_eq!(f.tracker.turn_cause(), inner);
     f.tracker.turn_end();
@@ -255,7 +255,7 @@ fn second_turn_cause_is_rejected() {
     let mut f = Fixture::new();
     let a = f.create(Kind::Timer, "a");
     let b = f.create(Kind::Timer, "b");
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     f.tracker.set_turn_cause(a);
     f.tracker.set_turn_cause(b);
     assert_eq!(f.tracker.turn_cause(), a);
@@ -349,7 +349,7 @@ fn id_zero_is_ignored_silently() {
     f.tracker.enter(0);
     f.tracker.exit(0);
     f.tracker.mark_bound(0);
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     f.tracker.set_turn_cause(0);
     f.tracker.turn_end();
     assert_eq!(*f.tracker.stats(), ContextStats::default());
@@ -452,7 +452,7 @@ fn exit_does_not_cross_into_an_enclosing_turn() {
     let mut f = Fixture::new();
     let outer = f.create(Kind::Timer, "outer");
     f.tracker.enter(outer);
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     f.tracker.exit(outer);
     assert_eq!(f.tracker.current(), outer);
     assert_eq!(f.tracker.stats().unbalanced, 1);
@@ -469,7 +469,7 @@ fn turn_end_closes_scopes_left_open() {
     let cause = f.create(Kind::KjToJs, "bridge");
     let leaked = f.create(Kind::Microtask, "queueMicrotask");
     let _ = f.events();
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     f.tracker.set_turn_cause(cause);
     f.tracker.enter(leaked);
     f.tracker.turn_end();
@@ -484,7 +484,7 @@ fn turn_end_closes_scopes_left_open() {
 fn adopt_with_no_operation() {
     let mut f = Fixture::new();
     assert_eq!(f.tracker.adopt_operation(), 0);
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     assert_eq!(f.tracker.adopt_operation(), 0);
     f.create(Kind::Timer, "not an operation");
     assert_eq!(f.tracker.adopt_operation(), 0);
@@ -494,7 +494,7 @@ fn adopt_with_no_operation() {
 #[test]
 fn adopt_takes_each_operation_once() {
     let mut f = Fixture::new();
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     let op = f.create(Kind::Operation, "kv_get");
     assert_eq!(f.tracker.adopt_operation(), op);
     assert_eq!(f.tracker.adopt_operation(), 0);
@@ -506,7 +506,7 @@ fn adopt_takes_each_operation_once() {
 fn adopt_ignores_settled_operations() {
     // A synchronous phase, or a binding that answered from cache without going async.
     let mut f = Fixture::new();
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     let phase = f.create(Kind::Operation, "fetch_prepare_request");
     f.tracker.settle(phase, Outcome::Ok);
     assert_eq!(f.tracker.adopt_operation(), 0);
@@ -516,7 +516,7 @@ fn adopt_ignores_settled_operations() {
 #[test]
 fn adopt_ignores_destroyed_operations() {
     let mut f = Fixture::new();
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     let op = f.create(Kind::Operation, "kv_get");
     f.tracker.destroy(op);
     assert_eq!(f.tracker.adopt_operation(), 0);
@@ -526,10 +526,10 @@ fn adopt_ignores_destroyed_operations() {
 #[test]
 fn adopt_ignores_operations_from_earlier_turns() {
     let mut f = Fixture::new();
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     f.create(Kind::Operation, "stashed");
     f.tracker.turn_end();
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     assert_eq!(f.tracker.adopt_operation(), 0);
     f.tracker.turn_end();
 }
@@ -538,7 +538,7 @@ fn adopt_ignores_operations_from_earlier_turns() {
 fn adopt_ignores_operations_created_outside_turns() {
     let mut f = Fixture::new();
     f.create(Kind::Operation, "outside");
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     assert_eq!(f.tracker.adopt_operation(), 0);
     f.tracker.turn_end();
 }
@@ -546,9 +546,9 @@ fn adopt_ignores_operations_created_outside_turns() {
 #[test]
 fn adopt_only_sees_the_innermost_turn() {
     let mut f = Fixture::new();
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     let outer = f.create(Kind::Operation, "outer");
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     assert_eq!(f.tracker.adopt_operation(), 0);
     f.tracker.turn_end();
     assert_eq!(f.tracker.adopt_operation(), outer);
@@ -558,7 +558,7 @@ fn adopt_only_sees_the_innermost_turn() {
 #[test]
 fn ambiguous_adoption_takes_the_latest_and_is_counted() {
     let mut f = Fixture::new();
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     let first = f.create(Kind::Operation, "a");
     let second = f.create(Kind::Operation, "b");
     assert_eq!(f.tracker.adopt_operation(), second);
@@ -572,7 +572,7 @@ fn ambiguous_adoption_takes_the_latest_and_is_counted() {
 #[test]
 fn mark_bound_removes_a_candidate() {
     let mut f = Fixture::new();
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     let first = f.create(Kind::Operation, "a");
     let second = f.create(Kind::Operation, "b");
     f.tracker.mark_bound(second);
@@ -650,7 +650,7 @@ fn close_reports_stats_then_ignores_everything() {
     let ctx = f.ctx();
     let id = f.create(Kind::Timer, "a");
     f.tracker.settle(77, Outcome::Ok);
-    f.tracker.turn_begin();
+    f.tracker.turn_begin(0);
     let _ = f.sink.take();
 
     f.tracker.close();
@@ -700,4 +700,90 @@ fn every_sink_sees_every_event() {
     let _ = second.take();
     f.create(Kind::Timer, "a");
     assert_eq!(f.events(), second.take());
+}
+
+#[test]
+fn default_cause_applies_when_nothing_better_is_known() {
+    let mut f = Fixture::new();
+    let ctx = f.ctx();
+    let request = f.create(Kind::Request, "fetch");
+    let _ = f.events();
+    f.tracker.turn_begin(request);
+    assert_eq!(f.tracker.current(), request);
+    assert_eq!(f.tracker.turn_cause(), request);
+    let timer = f.create(Kind::Timer, "setTimeout");
+    f.tracker.turn_end();
+
+    let events = f.events();
+    assert_eq!(init_of(&events, timer).0, request);
+    assert_eq!(init_of(&events, timer).1, request);
+    assert_eq!(events[0], Event::Before { ctx, id: request });
+    assert_eq!(events[2], Event::After { ctx, id: request });
+    assert!(matches!(&events[3], Event::Turn { turn, .. } if turn.cause == request));
+    assert_eq!(f.tracker.stats().unbalanced, 0);
+}
+
+#[test]
+fn explicit_cause_replaces_the_default() {
+    let mut f = Fixture::new();
+    let ctx = f.ctx();
+    let request = f.create(Kind::Request, "fetch");
+    let bridge = f.create(Kind::KjToJs, "bridge");
+    let _ = f.events();
+    f.tracker.turn_begin(request);
+    f.tracker.set_turn_cause(bridge);
+    assert_eq!(f.tracker.current(), bridge);
+    let timer = f.create(Kind::Timer, "setTimeout");
+    f.tracker.turn_end();
+
+    let events = f.events();
+    assert_eq!(init_of(&events, timer).0, bridge);
+    assert_eq!(
+        events[..3],
+        [
+            Event::Before { ctx, id: request },
+            Event::After { ctx, id: request },
+            Event::Before { ctx, id: bridge },
+        ]
+    );
+    assert!(matches!(&events[5], Event::Turn { turn, .. } if turn.cause == bridge));
+    assert_eq!(f.tracker.stats().unbalanced, 0);
+
+    // A second explicit cause is still rejected.
+    f.tracker.turn_begin(request);
+    f.tracker.set_turn_cause(bridge);
+    f.tracker.set_turn_cause(timer);
+    assert_eq!(f.tracker.turn_cause(), bridge);
+    assert_eq!(f.tracker.stats().unbalanced, 1);
+    f.tracker.turn_end();
+}
+
+#[test]
+fn unknown_default_cause() {
+    let mut f = Fixture::new();
+    f.tracker.turn_begin(4242);
+    assert_eq!(f.tracker.turn_cause(), 4242);
+    f.tracker.turn_end();
+    assert_eq!(f.tracker.stats().unknown, 1);
+    assert_eq!(f.tracker.stats().unbalanced, 0);
+}
+
+#[test]
+fn foreign_thread_drops_are_reported() {
+    let mut f = Fixture::new();
+    let ctx = f.ctx();
+    f.tracker.count_foreign_thread(2);
+    f.tracker.count_foreign_thread(u64::MAX);
+    let _ = f.sink.take();
+    f.tracker.close();
+    assert_eq!(
+        f.events(),
+        vec![Event::ContextEnd {
+            ctx,
+            stats: ContextStats {
+                foreign_thread: u64::MAX,
+                ..ContextStats::default()
+            },
+        }]
+    );
 }

@@ -9,18 +9,18 @@ use crate::RecordingSink;
 #[test]
 fn trackers_share_the_isolate() {
     let isolate = new_isolate();
-    let mut a = new_tracker(&isolate, "a", "");
-    let mut b = new_tracker(&isolate, "b", "");
-    let x = a.create_ffi(3, "x", 0, 0);
-    let y = b.create_ffi(3, "y", 0, 0);
+    let mut a = new_tracker(&isolate, b"a", b"");
+    let mut b = new_tracker(&isolate, b"b", b"");
+    let x = a.create_ffi(3, b"x", 0, 0);
+    let y = b.create_ffi(3, b"y", 0, 0);
     assert!(y > x);
 }
 
 #[test]
 fn empty_actor_means_none() {
     let isolate = new_isolate();
-    for (actor, expected) in [("", None), ("id", Some("id".to_owned()))] {
-        let mut tracker = new_tracker(&isolate, "w", actor);
+    for (actor, expected) in [(&b""[..], None), (&b"id"[..], Some("id".to_owned()))] {
+        let mut tracker = new_tracker(&isolate, b"w", actor);
         let sink = RecordingSink::new();
         tracker.add_sink(Box::new(sink.clone()));
         assert!(matches!(
@@ -33,17 +33,17 @@ fn empty_actor_means_none() {
 #[test]
 fn create_and_settle_translate_their_arguments() {
     let isolate = new_isolate();
-    let mut tracker = new_tracker(&isolate, "w", "");
+    let mut tracker = new_tracker(&isolate, b"w", b"");
     let sink = RecordingSink::new();
     tracker.add_sink(Box::new(sink.clone()));
     let _ = sink.take();
 
     tracker.begin_stack();
-    tracker.push_frame("f", "s.js", 1, 2, 3);
+    tracker.push_frame_ffi(b"f", b"s.js", 1, 2, 3);
     let stack = tracker.end_stack_ffi();
     assert_ne!(stack, 0);
-    let id = tracker.create_ffi(5, "kv_get", 0, stack);
-    let unstacked = tracker.create_ffi(200, "other", id, 0);
+    let id = tracker.create_ffi(5, b"kv_get", 0, stack);
+    let unstacked = tracker.create_ffi(200, b"other", id, 0);
     tracker.settle_ffi(id, 2);
 
     let events = sink.take();
@@ -69,7 +69,7 @@ fn create_and_settle_translate_their_arguments() {
 #[test]
 fn empty_stack_is_zero() {
     let isolate = new_isolate();
-    let mut tracker = new_tracker(&isolate, "w", "");
+    let mut tracker = new_tracker(&isolate, b"w", b"");
     tracker.begin_stack();
     assert_eq!(tracker.end_stack_ffi(), 0);
 }
@@ -79,11 +79,11 @@ fn ndjson_writer_round_trip() {
     let dir = std::env::var("TEST_TMPDIR").map_or_else(|_| std::env::temp_dir(), Into::into);
     let path = dir.join("async-trace-ffi-test.ndjson");
     let path = path.to_str().unwrap();
-    let writer = open_ndjson_writer(path, "0.0.0-test").unwrap();
+    let writer = open_ndjson_writer(path.as_bytes(), b"0.0.0-test").unwrap();
     let isolate = new_isolate();
-    let mut tracker = new_tracker(&isolate, "w", "");
+    let mut tracker = new_tracker(&isolate, b"w", b"");
     tracker.add_ndjson_sink(&writer);
-    tracker.create_ffi(0, "fetch", 0, 0);
+    tracker.create_ffi(0, b"fetch", 0, 0);
     tracker.close();
     assert!(!writer.failed());
 
@@ -100,5 +100,27 @@ fn ndjson_writer_round_trip() {
 
 #[test]
 fn open_ndjson_writer_reports_errors() {
-    assert!(open_ndjson_writer("/nonexistent-dir/x/y.ndjson", "1").is_err());
+    assert!(open_ndjson_writer(b"/nonexistent-dir/x/y.ndjson", b"1").is_err());
+}
+
+#[test]
+fn invalid_utf8_is_replaced_not_rejected() {
+    let isolate = new_isolate();
+    let mut tracker = new_tracker(&isolate, b"w\xff", b"");
+    let sink = RecordingSink::new();
+    tracker.add_sink(Box::new(sink.clone()));
+    let id = tracker.create_ffi(5, b"kv\xfe", 0, 0);
+    tracker.annotate_ffi(id, b"k\xff", b"v\xff");
+    let events = sink.take();
+    assert!(matches!(&events[0], Event::ContextBegin { worker, .. } if worker == "w\u{fffd}"));
+    assert!(matches!(&events[1], Event::Init { name, .. } if name == "kv\u{fffd}"));
+    assert!(matches!(
+        &events[2],
+        Event::Annotate { key, value, .. } if key == "k\u{fffd}" && value == "v\u{fffd}"
+    ));
+}
+
+#[test]
+fn writer_path_must_be_utf8() {
+    assert!(open_ndjson_writer(b"/tmp/\xff.ndjson", b"1").is_err());
 }
