@@ -44,8 +44,13 @@ const {
   uncurryThis,
 } = primordials;
 
-const { isArrayBuffer, isArrayBufferView, isPromise, markPromiseHandled } =
-  utils;
+const {
+  isArrayBuffer,
+  isArrayBufferView,
+  isPromise,
+  markPromiseHandled,
+  utf8Length,
+} = utils;
 
 // The native backend (see the fence conventions in native.ts). The cast
 // restores the real shape.
@@ -1842,10 +1847,8 @@ function writableStreamFlush<W>(stream: WritableStream<W>): Promise<void> {
 // writer.desiredSize / writer.ready on e.g. socket writables). Sizing runs
 // BEFORE the sink's own chunk validation, so unknown chunk types count as 1
 // here and produce the byte-types error at the sink instead of a strategy
-// RangeError. Strings count their UTF-16 length -- an approximation of the
-// UTF-8 byte count the sink will actually write (exact within 3x; computing
-// the true UTF-8 length per chunk is not worth the cost for a backpressure
-// heuristic).
+// RangeError. Strings count the UTF-8 bytes the sink writes for them, as the
+// legacy controller does.
 function byteSizeOf(chunk: unknown): number {
   if (isArrayBufferView(chunk)) {
     // A detached or out-of-bounds view counts 0 (see view-extent.ts).
@@ -1855,9 +1858,7 @@ function byteSizeOf(chunk: unknown): number {
     return ArrayBufferPrototypeByteLengthGet(chunk);
   }
   if (typeof chunk === 'string') {
-    // .length on a string primitive is an own property read (String exotic
-    // object); it never consults the patchable prototype chain.
-    return chunk.length;
+    return utf8Length(chunk);
   }
   // Unknown chunk type (including SharedArrayBuffer, whose byteLength getter
   // is not captured): count 1 and let the sink's validation produce the

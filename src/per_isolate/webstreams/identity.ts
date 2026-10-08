@@ -96,7 +96,6 @@ import type { ViewExtentHelpers } from './view-extent';
 const {
   ArrayBuffer,
   ArrayPrototypePush,
-  ArrayBufferPrototypeByteLengthGet,
   BigInt,
   Number,
   ObjectDefineProperties,
@@ -132,7 +131,7 @@ const {
   WritableStreamDefaultController,
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
-const { viewByteExtent, viewByteLength } =
+const { viewByteExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
@@ -218,45 +217,6 @@ function validateAndCopyChunk(chunk: unknown): Uint8Array | undefined {
   throw new TypeError(
     'IdentityTransformStream: chunk must be a BufferSource or string'
   );
-}
-
-// Compute the byte size of a chunk for WritableStream queue tracking.
-// Used by the always-installed size callback (sizeAndSnapshot in the
-// constructor) when an explicit highWaterMark selects byte accounting,
-// feeding queueTotalSize which drives desiredSize and
-// writer.ready — purely advisory backpressure signaling. It does NOT
-// affect data correctness, the FLS byte budget (#remaining uses actual
-// byte lengths from the copied chunk), or Content-Length.
-//
-// Our WritableStreamDefaultController dequeues AFTER the write algorithm
-// completes (writable.ts #processWrite), so in-flight bytes stay counted
-// in queueTotalSize — matching the C++ model where all pipeline bytes
-// (in-flight + queued) are tracked until fully consumed.
-//
-// For strings, uses str.length * 3 as a conservative upper-bound
-// estimate (max UTF-8 bytes per UTF-16 code unit) to avoid a redundant
-// TextEncoder.encode — the actual encode happens once in
-// validateAndCopyChunk. The overcount is relatively harmless: since this
-// only affects backpressure, overestimating just means the writable side
-// signals backpressure slightly earlier than strictly necessary.
-function byteSize(chunk: unknown): number {
-  if (typeof chunk === 'string') {
-    return (chunk as string).length * 3;
-  }
-  if (isArrayBuffer(chunk)) {
-    return ArrayBufferPrototypeByteLengthGet(chunk as ArrayBuffer);
-  }
-  if (isSharedArrayBuffer(chunk)) {
-    // SharedArrayBuffer.prototype.byteLength getter is separate from
-    // ArrayBuffer's; use Uint8Array wrapper for the uncommon SAB case.
-    return TypedArrayPrototypeGetByteLength(
-      new Uint8Array(chunk as unknown as ArrayBuffer)
-    ) as number;
-  }
-  // byteSize runs only on chunks validateAndCopyChunk has already
-  // accepted (sizeAndSnapshot validates before sizing), so anything that
-  // is not a string or (Shared)ArrayBuffer is an ArrayBufferView.
-  return viewByteLength(chunk as ArrayBufferView);
 }
 
 let assertIsIdentityTransformStream: (self: IdentityTransformStream) => void;
@@ -664,9 +624,19 @@ class IdentityTransformStream {
       }
       try {
         const copied = validateAndCopyChunk(chunk);
-        // Size is computed before the push: if it ever threw, nothing
-        // would have been queued and the FIFO could not desync.
-        const size = explicitHighWaterMark !== undefined ? byteSize(chunk) : 1;
+        // With byte accounting, a write counts the bytes it copied: a
+        // string's UTF-8 encoding, a buffer's or view's extent at write
+        // time. This only signals backpressure (desiredSize, ready); the
+        // FixedLengthStream budget counts delivered bytes on its own.
+        // In-flight bytes stay counted until the write completes, since
+        // the writable dequeues after the sink settles, as the C++
+        // controller counts every byte until it is consumed.
+        const size =
+          explicitHighWaterMark === undefined
+            ? 1
+            : copied === undefined
+              ? 0
+              : (TypedArrayPrototypeGetByteLength(copied) as number);
         this.#snapshots.push({
           __proto__: null,
           ok: true,
