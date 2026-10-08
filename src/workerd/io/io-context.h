@@ -630,12 +630,22 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Attach the objects to the promise by creating a continuation that holds them.
   // This ensures the attachments stay alive until the promise resolves.
   // This should ONLY be used with TraceContext or SpanBuilder objects.
+  //
+  // Attached TraceContexts are detached from async trace adoption (TraceContext::detachAsync()):
+  // `promise` is typically already the result of the awaitIo() that should adopt them, or is
+  // already resolved, and a later awaitIo() must not.
   template <typename T, typename... Attachments>
   jsg::Promise<T> attachSpans(jsg::Lock& js, jsg::Promise<T> promise, Attachments&&... attachments)
     requires(... &&
         (kj::isSameType<Attachments, SpanBuilder>() || kj::isSameType<Attachments, TraceContext>()))
   {
+    (detachAsyncTrace(attachments), ...);
     return attachSpansInternalOnly(js, kj::mv(promise), kj::fwd<Attachments>(attachments)...);
+  }
+
+  static void detachAsyncTrace(SpanBuilder&) {}
+  static void detachAsyncTrace(TraceContext& traceContext) {
+    traceContext.detachAsync();
   }
 
   // public for tests

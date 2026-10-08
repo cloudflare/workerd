@@ -341,6 +341,10 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
       traceContext.setTag("cache.request.payload.size"_kjc, static_cast<int64_t>(length));
     }
 
+    // The span is awaited after the output locks and inside a continuation, so neither the
+    // output-lock awaitIo() below nor an unrelated one later in this turn may adopt it.
+    traceContext.detachAsync();
+
     // Wait for output locks, trying to avoid returning to the KJ event loop in the common case
     // where no waits are needed.
     jsg::Promise<IoOwn<kj::AsyncInputStream>> startStreamPromise = nullptr;
