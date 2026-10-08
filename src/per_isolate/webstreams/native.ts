@@ -679,21 +679,6 @@ class NativePullConduit implements ByteStreamConsumerType {
     return desc.promise;
   }
 
-  get hasPendingPullInto(): boolean {
-    const requests = this.#requests;
-    for (let i = 0; i < requests.length; i++) {
-      if ((requests.get(i) as NativeRequest).kind === 'byob') return true;
-    }
-    return false;
-  }
-
-  get hasPartiallyFulfilledRead(): boolean {
-    const head = this.#requests.peek();
-    return (
-      head !== undefined && head.kind === 'byob' && head.desc.bytesFilled > 0
-    );
-  }
-
   get headPullInto(): PullIntoDescriptor | undefined {
     const head = this.#requests.peek();
     return head !== undefined && head.kind === 'byob' ? head.desc : undefined;

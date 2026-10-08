@@ -309,8 +309,6 @@ export interface ByteStreamConsumer extends StreamConsumer<Uint8Array> {
   readBYOB(
     desc: PullIntoDescriptor
   ): Promise<ReadableStreamReadResult<ArrayBufferView>>;
-  readonly hasPendingPullInto: boolean;
-  readonly hasPartiallyFulfilledRead: boolean;
   readonly headPullInto: PullIntoDescriptor | undefined;
   readonly pendingPullIntoView: Uint8Array | undefined;
   respondBYOB(bytesWritten: number): void;
@@ -1052,10 +1050,6 @@ class ByteStreamCursor
   // stream directly); it receives the cursor's owner, held weakly here.
   #errorStreamCallback: ErrorStreamCallback | undefined;
 
-  get hasPendingPullInto(): boolean {
-    return this.#pendingPullIntos.length > 0;
-  }
-
   override get hasPendingRead(): boolean {
     if (super.hasPendingRead) return true;
     // Descriptors with readerType 'none' are leftovers from releaseLock or
@@ -1068,11 +1062,6 @@ class ByteStreamCursor
       }
     }
     return false;
-  }
-
-  get hasPartiallyFulfilledRead(): boolean {
-    const head = this.#pendingPullIntos.peek();
-    return head !== undefined && head.bytesFilled > 0;
   }
 
   // The head pull-into descriptor, for the controller's respond() /
