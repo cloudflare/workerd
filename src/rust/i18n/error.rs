@@ -33,6 +33,11 @@ pub enum TranscodeError {
     Utf8LengthMismatch,
     #[error("Unable to transcode buffer")]
     UnableToTranscode,
+    // These two match `i18n::Converter` in `i18n.c++`.
+    #[error("Failed to initialize converter")]
+    ConverterOpenFailed,
+    #[error("Setting ICU substitute characters failed")]
+    SetSubstituteCharsFailed,
     #[error("Invalid encoding passed to transcode")]
     InvalidEncoding,
     #[error("Failed to allocate memory for Uint8Array")]

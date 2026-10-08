@@ -7,15 +7,14 @@
 //! `transcode()`. Selected at runtime by the `NODEJS_I18N_RUST` autogate; when
 //! the gate is off, the C++ implementation is used instead. The two paths are
 //! byte-for-byte and error-message identical: [`dispatch`] ports the C++
-//! dispatch/sizing/truncation logic to Rust, while [`codecs`] reimplements, in
-//! safe Rust, the ICU conversions and simdutf primitives the C++ path calls.
+//! dispatch/sizing/truncation logic to Rust, and [`ffi`] calls the same ICU
+//! and simdutf functions the C++ path does.
 //! `src/workerd/api/node/i18n-test.c++` checks the two paths against each
 //! other.
 
 use jsg::Lock;
 use jsg::v8;
 
-mod codecs;
 mod dispatch;
 mod error;
 mod ffi;
