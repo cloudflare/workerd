@@ -220,6 +220,38 @@ KJ_TEST("turns: default cause, explicit cause, callback scopes") {
       kj::str("turn cause=", b, " locked=false"));
 }
 
+KJ_TEST("a bridge adopts a pending operation from the same turn") {
+  Fixture f;
+  AsyncResource op;
+  AsyncResource bridge;
+  AsyncResource unrelated;
+  {
+    AsyncTracker::TurnScope turn(f.tracker(), 0);
+    op = f.tracker().create(AsyncKind::OPERATION, "kv_get"_kj);
+    bridge = f.tracker().adoptOrCreate(AsyncKind::KJ_TO_JS, "awaitIo"_kj);
+    // Nothing left to adopt: a new bridge resource.
+    unrelated = f.tracker().adoptOrCreate(AsyncKind::KJ_TO_JS, "awaitIo"_kj);
+  }
+  KJ_EXPECT(bridge.getId() == op.getId());
+  KJ_EXPECT(unrelated.getId() != op.getId());
+  auto id = op.getId();
+  auto other = unrelated.getId();
+  f.takeEvents();
+
+  // The span ends first; the bridge still reports under the operation.
+  op.settle(AsyncOutcome::OK);
+  op.release();
+  bridge.settle(AsyncOutcome::OK);
+  {
+    AsyncTracker::TurnScope turn(f.tracker(), 0);
+    bridge.enterAsTurnCause();
+  }
+  bridge.release();
+  unrelated.release();
+  KJ_EXPECT_EVENTS(f, kj::str("settle ", id, " 0"), kj::str("before ", id), kj::str("after ", id),
+      kj::str("turn cause=", id, " locked=false"), kj::str("destroy ", other));
+}
+
 KJ_TEST("closing reports stats and makes later events no-ops") {
   AsyncTraceIsolate isolate;
   kj::Vector<kj::String> events;

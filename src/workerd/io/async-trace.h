@@ -103,15 +103,17 @@ class AsyncResource {
     return id;
   }
 
+  // The reporting methods are const: they change the tracker's record, not the handle.
+
   // The work behind the resource finished. Only the first settle is reported.
-  void settle(AsyncOutcome outcome);
+  void settle(AsyncOutcome outcome) const;
 
   // `key` and `value` need not be valid UTF-8; invalid sequences are replaced.
-  void annotate(kj::StringPtr key, kj::StringPtr value);
+  void annotate(kj::StringPtr key, kj::StringPtr value) const;
 
   // Makes this resource the cause of the current turn. Its `before` is reported now and its `after`
   // when the turn ends (after the microtask drain).
-  void enterAsTurnCause();
+  void enterAsTurnCause() const;
 
   // Releases the resource early, as the destructor would. The handle becomes inert.
   void release();
@@ -151,9 +153,10 @@ class AsyncTracker final: public kj::AtomicRefcounted {
   // The resource whose callback is running (`executionAsyncId`), or 0.
   AsyncId current() const;
 
-  // Called by a KJ-to-JS bridge. Returns the binding operation that the bridge should report
-  // under, instead of creating its own resource, or 0. See Tracker::adopt_operation in Rust.
-  AsyncId adoptOperation() const;
+  // Called by a KJ-to-JS bridge. Returns a handle to the binding operation that the bridge should
+  // report under (see Tracker::adopt_operation in Rust), or else a new resource of `kind`. An
+  // adopted operation stays known until both its creator and the bridge release it.
+  AsyncResource adoptOrCreate(AsyncKind kind, kj::StringPtr name) const;
 
   // Takes `id` out of consideration for adoptOperation().
   void markBound(AsyncId id) const;
@@ -254,5 +257,48 @@ class OwnedAsyncTracker {
  private:
   kj::Arc<AsyncTracker> tracker;
 };
+
+// =======================================================================================
+// AsyncResource inline implementation. Inline so that an inert handle costs one null check.
+
+inline AsyncResource::AsyncResource(AsyncResource&& other) noexcept
+    : tracker(kj::mv(other.tracker)),
+      id(other.id) {
+  other.id = 0;
+}
+
+inline AsyncResource& AsyncResource::operator=(AsyncResource&& other) noexcept(false) {
+  if (this != &other) {
+    release();
+    tracker = kj::mv(other.tracker);
+    id = other.id;
+    other.id = 0;
+  }
+  return *this;
+}
+
+inline AsyncResource::~AsyncResource() noexcept(false) {
+  release();
+}
+
+inline void AsyncResource::settle(AsyncOutcome outcome) const {
+  if (tracker != nullptr) tracker->settle(id, outcome);
+}
+
+inline void AsyncResource::annotate(kj::StringPtr key, kj::StringPtr value) const {
+  if (tracker != nullptr) tracker->annotate(id, key, value);
+}
+
+inline void AsyncResource::enterAsTurnCause() const {
+  if (tracker != nullptr) tracker->setTurnCause(id);
+}
+
+inline void AsyncResource::release() {
+  if (tracker != nullptr) {
+    tracker->destroy(id);
+    tracker = nullptr;
+    id = 0;
+  }
+}
 
 }  // namespace workerd
