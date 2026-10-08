@@ -92,7 +92,7 @@ Arguments after the target go to `workerd bench`, which can also be run directly
 
 ```
 workerd bench config.wd-bench [filter] [--format=text|json] [--output=path] [--quick]
-    [--compat-date=date] [--all-autogates]
+    [--compat-date=date] [--all-autogates] [--trace]
 ```
 
 `--compat-date` requires the workers in the config to omit `compatibilityDate`.
@@ -123,7 +123,7 @@ report records the build mode, CPU, and frequency governor, and warns about a de
 build or a governor other than "performance". Use `--config=benchmark` (as `just wd-bench` does).
 
 Tail workers don't run under `workerd bench`, since they would add their cost to every
-subrequest.
+subrequest. `--trace` runs them, to measure that cost.
 
 ## Classes
 

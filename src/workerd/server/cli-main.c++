@@ -278,6 +278,9 @@ class CliMain {
     KJ_IF_SOME(compatDate, options.compat_date) {
       server->setTestCompatibilityDateOverride(kj::str(compatDate));
     }
+    if (options.trace) {
+      server->setBenchTailWorkers();
+    }
 
     // Benchmarks may use loopback sockets, as tests do.
     kj::downcast<kj_rs_io::TokioNetwork>(io.provider->getNetwork()).enableLoopback();

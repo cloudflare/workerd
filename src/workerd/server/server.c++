@@ -4046,10 +4046,7 @@ class Server::WorkerService final: public Service,
     // need to trace the test event, although this is useful to test that span tracing works, so
     // we are not implementing a (more complex) mechanism to disable tracing for all test() events
     // here.
-    //
-    // Under `workerd bench`, no request gets tracers: benchmarked code often makes subrequests on
-    // every call (e.g. `env.SELF.fetch()`), and tail workers would add their cost to each.
-    if (entrypointName.orDefault("") != "test"_kj && !isBenchMode()) {
+    if (entrypointName.orDefault("") != "test"_kj) {
       for (auto& service: channels.tails) {
         addWorkerIfNotRecursiveTracer(bufferedTailWorkers, *service);
       }
@@ -6418,6 +6415,14 @@ kj::Promise<kj::Rc<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr 
     result.tails = KJ_MAP(tail, def.tails) { return kj::mv(tail).lookup(*this); };
 
     result.streamingTails = KJ_MAP(tail, def.streamingTails) { return kj::mv(tail).lookup(*this); };
+
+    if (isBenchMode() && !benchTailWorkers) {
+      // Under `workerd bench`, tail workers don't run unless asked for: benchmarked code often
+      // makes subrequests on every call (e.g. `env.SELF.fetch()`), and tail workers would add
+      // their cost to each. They are looked up anyway, so config errors are still reported.
+      result.tails = nullptr;
+      result.streamingTails = nullptr;
+    }
 
     result.workerLoaders = KJ_MAP(il, def.workerLoaderChannels) {
       KJ_IF_SOME(id, il.id) {

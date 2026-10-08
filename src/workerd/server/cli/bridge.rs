@@ -91,6 +91,7 @@ pub mod ffi {
         json: bool,
         /// Where to write the report; stdout if none.
         output: KjMaybe<String>,
+        trace: bool,
         service_pattern: KjMaybe<String>,
         entrypoint_pattern: KjMaybe<String>,
         case_pattern: KjMaybe<String>,

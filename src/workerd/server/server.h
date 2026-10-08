@@ -114,6 +114,11 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       kj::StringPtr servicePattern = "*"_kj,
       kj::StringPtr entrypointPattern = "*"_kj);
 
+  // Under `workerd bench`, run tail workers, which are otherwise skipped.
+  void setBenchTailWorkers() {
+    benchTailWorkers = true;
+  }
+
   // Runs the exported bench handlers of the entrypoints that match the patterns, as test() runs
   // test handlers, with `params`. Adds a group to `report` for each handler; the caller owns
   // `report` and fills in its environment.
@@ -396,6 +401,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   // State of a test() or bench() run that must outlive the services.
   struct LocalRun;
 
+  bool benchTailWorkers = false;
   // Starts the services for test() or bench().
   kj::Promise<kj::Own<LocalRun>> startLocalRun(
       jsg::V8System& v8System, config::Config::Reader config);
