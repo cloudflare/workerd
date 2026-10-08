@@ -28,7 +28,8 @@ Dual implementation behind unified API:
 
 Controller pattern: `ReadableStream` → `ReadableStreamController` → impl-specific controller.
 4 pipe loop variants (kj↔kj, kj↔JS, JS↔kj, JS↔JS) selected by stream type combination.
-Tee uses `kj::Rc<Entry>` shared refs (non-standard optimization, avoids data copies).
+Tee uses GC-traced `jsg::Ref<Entry>` shared refs (non-standard optimization, avoids data copies).
+Pending reads also use `jsg::Ref`: moves out of a queue root the JavaScript fields for processing.
 
 Key deps: `util/state-machine.h` (stream state FSM), `util/weak-refs.h`, `util/ring-buffer.h`.
 

@@ -217,7 +217,7 @@ class QueueImpl final {
   // If the entry type is byteOriented and has not been fully consumed by pending consume
   // operations, then any left over data will be pushed into the consumer's buffer.
   // Asserts if the queue is closed or errored.
-  void push(jsg::Lock& js, kj::Rc<Entry> entry, kj::Weak<ConsumerImpl> skipConsumer = nullptr) {
+  void push(jsg::Lock& js, jsg::Ref<Entry> entry, kj::Weak<ConsumerImpl> skipConsumer = nullptr) {
     state.requireActiveUnsafe("The queue is closed or errored.");
 
     allConsumers.forEach([&](auto& consumer) {
@@ -413,7 +413,7 @@ class ConsumerImpl final: public kj::PtrTarget {
     }
   }
 
-  void push(jsg::Lock& js, kj::Rc<Entry> entry) WD_CONSUME {
+  void push(jsg::Lock& js, jsg::Ref<Entry> entry) WD_CONSUME {
     // If the consumer is already closed or errored, then we do nothing here.
     // This can happen during iteration over consumers in QueueImpl::push() when
     // resolving a read request on one consumer triggers JavaScript code that
@@ -431,7 +431,7 @@ class ConsumerImpl final: public kj::PtrTarget {
     }
   }
 
-  void read(jsg::Lock& js, kj::Own<ReadRequest> request) {
+  void read(jsg::Lock& js, jsg::Ref<ReadRequest> request) {
     if (state.template is<Closed>()) {
       return request->resolveAsDone(js);
     }
@@ -538,12 +538,14 @@ class ConsumerImpl final: public kj::PtrTarget {
     KJ_IF_SOME(errored, state.tryGetErrorUnsafe()) {
       visitor.visit(errored.reason);
     }
-    // There's no reason to GC visit the promise resolver or buffer in Ready state and it is
-    // potentially problematic if we do. Since the read requests are queued, if we
-    // GC visit it once, remove it from the queue, and GC happens to kick in before
-    // we access the resolver, then v8 could determine that the resolver or buffered
-    // entries are no longer reachable via tracing and free them before we can
-    // actually try to access the held resolver.
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
+      visitor.visitAll(ready.readRequests);
+      for (auto& item: ready.buffer) {
+        KJ_IF_SOME(entry, item.template tryGet<QueueEntry>()) {
+          visitor.visit(entry.entry);
+        }
+      }
+    }
   }
 
   inline kj::StringPtr jsgGetMemoryName() const;
@@ -564,10 +566,9 @@ class ConsumerImpl final: public kj::PtrTarget {
   struct Ready {
     static constexpr kj::StringPtr NAME KJ_UNUSED = "ready"_kj;
     workerd::RingBuffer<kj::OneOf<QueueEntry, Close>, 16> buffer;
-    // We use kj::Own<ReadRequest> because ByobRequest holds a reference to its associated
-    // ReadRequest. Using RingBuffer directly would invalidate those references when the buffer
-    // grows. By heap-allocating each ReadRequest, we ensure reference stability.
-    workerd::RingBuffer<kj::Own<ReadRequest>, 8> readRequests;
+    // The requests have stable addresses for ByobRequest's weak references. Moving a Ref out
+    // of the queue roots its resolver and buffer while callbacks or GC run during fulfillment.
+    workerd::RingBuffer<jsg::Ref<ReadRequest>, 8> readRequests;
     size_t queueTotalSize = 0;
     // True if there is a pending draining read operation. Draining reads are mutually
     // exclusive with regular reads - read() will reject if this is true, and drainingRead()
@@ -610,8 +611,8 @@ class ConsumerImpl final: public kj::PtrTarget {
   // which does V8 allocations). Without this, GC could collect the ReadableStream that
   // owns this ConsumerImpl (through the ownership gap: QueueImpl only holds weak refs),
   // destroying the readRequests ring buffer while we're iterating it.
-  static kj::Vector<kj::Own<ReadRequest>> extractPendingReads(Ready& ready) {
-    kj::Vector<kj::Own<ReadRequest>> result(ready.readRequests.size());
+  static kj::Vector<jsg::Ref<ReadRequest>> extractPendingReads(Ready& ready) {
+    kj::Vector<jsg::Ref<ReadRequest>> result(ready.readRequests.size());
     while (!ready.readRequests.empty()) {
       result.add(kj::mv(ready.readRequests.front()));
       ready.readRequests.pop_front();
@@ -722,49 +723,19 @@ class ValueQueue final {
     JSG_MEMORY_INFO(ValueQueue::State) {}
   };
 
-  struct ReadRequest {
-    jsg::Promise<ReadResult>::Resolver resolver;
-
-    void resolveAsDone(jsg::Lock& js);
-    void resolve(jsg::Lock& js, jsg::JsRef<jsg::JsValue> value);
-    void reject(jsg::Lock& js, jsg::JsValue value);
-
-    JSG_MEMORY_INFO(ValueQueue::ReadRequest) {
-      tracker.trackField("resolver", resolver);
-    }
-  };
+  struct ReadRequest;
 
   // A value queue entry consists of an arbitrary JavaScript value and a size that is
   // calculated by the size algorithm function provided in the stream constructor.
-  class Entry: public kj::Refcounted {
-   public:
-    explicit Entry(jsg::JsRef<jsg::JsValue> value, size_t size);
-    KJ_DISALLOW_COPY_AND_MOVE(Entry);
-
-    jsg::JsRef<jsg::JsValue> getValue(jsg::Lock& js);
-
-    size_t getSize() const;
-
-    void visitForGc(jsg::GcVisitor& visitor);
-
-    kj::Rc<Entry> clone(jsg::Lock& js);
-
-    JSG_MEMORY_INFO(ValueQueue::Entry) {
-      tracker.trackField("value", value);
-    }
-
-   private:
-    jsg::JsRef<jsg::JsValue> value;
-    size_t size;
-  };
+  class Entry;
 
   struct QueueEntry {
-    kj::Rc<Entry> entry;
+    jsg::Ref<Entry> entry;
     QueueEntry clone(jsg::Lock& js);
 
-    JSG_MEMORY_INFO(ValueQueue::QueueEntry) {
-      tracker.trackFieldWithSize("entry", entry->getSize());
-    }
+    inline kj::StringPtr jsgGetMemoryName() const;
+    inline size_t jsgGetMemorySelfSize() const;
+    inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
   };
 
   class Consumer final {
@@ -785,7 +756,7 @@ class ValueQueue final {
 
     void error(jsg::Lock& js, jsg::JsValue reason);
 
-    void read(jsg::Lock& js, kj::Own<ReadRequest> request);
+    void read(jsg::Lock& js, jsg::Ref<ReadRequest> request);
 
     // Draining read for optimized pipe-to operations. Drains all currently buffered
     // data, pumps the controller for synchronously available data, and converts
@@ -796,7 +767,7 @@ class ValueQueue final {
     // The maxRead parameter is a soft limit - see ReadableStreamController::drainingRead.
     jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js, size_t maxRead = kj::maxValue);
 
-    void push(jsg::Lock& js, kj::Rc<Entry> entry);
+    void push(jsg::Lock& js, jsg::Ref<Entry> entry);
 
     void reset();
 
@@ -831,7 +802,7 @@ class ValueQueue final {
 
   void maybeUpdateBackpressure();
 
-  void push(jsg::Lock& js, kj::Rc<Entry> entry);
+  void push(jsg::Lock& js, jsg::Ref<Entry> entry);
 
   size_t size() const;
 
@@ -853,16 +824,58 @@ class ValueQueue final {
   static void handlePush(jsg::Lock& js,
       ConsumerImpl::Ready& state,
       kj::Weak<ConsumerImpl> consumer,
-      kj::Rc<Entry> entry);
+      jsg::Ref<Entry> entry);
   static void handleRead(jsg::Lock& js,
       ConsumerImpl::Ready& state,
       kj::Weak<ConsumerImpl> consumer,
       kj::Weak<QueueImpl> queue,
-      kj::Own<ReadRequest> request);
+      jsg::Ref<ReadRequest> request);
   static bool handleMaybeClose(
       jsg::Lock& js, ConsumerImpl::Ready& state, kj::Weak<ConsumerImpl> consumer);
 
   friend ConsumerImpl;
+};
+
+struct ValueQueue::ReadRequest: public jsg::Wrappable {
+  explicit ReadRequest(jsg::Promise<ReadResult>::Resolver resolver): resolver(kj::mv(resolver)) {}
+
+  jsg::Promise<ReadResult>::Resolver resolver;
+
+  void jsgVisitForGc(jsg::GcVisitor& visitor) override {
+    visitor.visit(resolver);
+  }
+
+  // Completion may allocate before reading the resolver. Keep a strong self reference even
+  // when the caller borrows a request that is still in a traced queue.
+  void resolveAsDone(jsg::Lock& js);
+  void resolve(jsg::Lock& js, jsg::JsRef<jsg::JsValue> value);
+  void reject(jsg::Lock& js, jsg::JsValue value);
+
+  JSG_MEMORY_INFO(ValueQueue::ReadRequest) {
+    tracker.trackField("resolver", resolver);
+  }
+};
+
+class ValueQueue::Entry: public jsg::Wrappable {
+ public:
+  explicit Entry(jsg::JsRef<jsg::JsValue> value, size_t size);
+  KJ_DISALLOW_COPY_AND_MOVE(Entry);
+
+  jsg::JsRef<jsg::JsValue> getValue(jsg::Lock& js);
+
+  size_t getSize() const;
+
+  void jsgVisitForGc(jsg::GcVisitor& visitor) override;
+
+  jsg::Ref<Entry> clone(jsg::Lock& js);
+
+  JSG_MEMORY_INFO(ValueQueue::Entry) {
+    tracker.trackField("value", value);
+  }
+
+ private:
+  jsg::JsRef<jsg::JsValue> value;
+  size_t size;
 };
 
 // ============================================================================
@@ -875,41 +888,7 @@ class ByteQueue final {
 
   class ByobRequest;
 
-  struct ReadRequest final: public kj::PtrTarget {
-    enum class Type { DEFAULT, BYOB };
-    jsg::Promise<ReadResult>::Resolver resolver;
-    // The reference here should be cleared when the ByobRequest is invalidated,
-    // which happens either when respond(), respondWithNewView(), or invalidate()
-    // is called, or when the ByobRequest is destroyed, whichever comes first.
-    kj::Weak<ByobRequest> byobReadRequest;
-
-    struct PullInto {
-      jsg::JsRef<jsg::JsArrayBufferView> view;
-      size_t elementSize;
-      size_t originalOffset;
-      size_t filled = 0;
-      size_t atLeast = 1;
-      Type type = Type::DEFAULT;
-
-      JSG_MEMORY_INFO(ByteQueue::ReadRequest::PullInto) {
-        tracker.trackField("view", view);
-      }
-    } pullInto;
-
-    ReadRequest(jsg::Promise<ReadResult>::Resolver resolver, PullInto pullInto);
-    ~ReadRequest() noexcept(false);
-    void resolveAsDone(jsg::Lock& js);
-    void resolve(jsg::Lock& js);
-    void reject(jsg::Lock& js, jsg::JsValue value);
-
-    kj::Own<ByobRequest> makeByobReadRequest(
-        kj::Weak<ConsumerImpl> consumer, kj::Weak<QueueImpl> queue);
-
-    JSG_MEMORY_INFO(ByteQueue::ReadRequest) {
-      tracker.trackField("resolver", resolver);
-      tracker.trackField("pullInto", pullInto);
-    }
-  };
+  struct ReadRequest;
 
   // The ByobRequest is essentially a handle to the ByteQueue::ReadRequest that can be given to a
   // ReadableStreamBYOBRequest object to fulfill the request using the BYOB API pattern.
@@ -983,43 +962,17 @@ class ByteQueue final {
 
   // A byte queue entry consists of a jsg::JsBufferSource containing a non-zero-length
   // sequence of bytes. The size is determined by the number of bytes in the entry.
-  class Entry: public kj::Refcounted {
-   public:
-    explicit Entry(jsg::Lock& js, jsg::JsBufferSource store);
-
-    kj::ArrayPtr<kj::byte> toArrayPtr(jsg::Lock& js);
-
-    size_t getSize() const;
-
-    void visitForGc(jsg::GcVisitor& visitor);
-
-    kj::Rc<Entry> clone(jsg::Lock& js);
-
-    JSG_MEMORY_INFO(ByteQueue::Entry) {
-      tracker.trackField("store", store);
-    }
-
-   private:
-    // Intentionally not visited by visitForGc: Entry is not reachable from JS;
-    jsg::JsRef<jsg::JsBufferSource> store;  // NOLINT(jsg-visit-for-gc)
-
-    // We can safely cache the size of the entry because the store is either
-    // created by us or detached from JS. It cannot change size after the
-    // entry is created. We will assert that as such in toArrayPtr().
-    // We cache the offset also for assertion.
-    size_t size;
-    size_t offset;
-  };
+  class Entry;
 
   struct QueueEntry {
-    kj::Rc<Entry> entry;
+    jsg::Ref<Entry> entry;
     size_t offset;
 
     QueueEntry clone(jsg::Lock& js);
 
-    JSG_MEMORY_INFO(ByteQueue::QueueEntry) {
-      tracker.trackFieldWithSize("entry", entry->getSize());
-    }
+    inline kj::StringPtr jsgGetMemoryName() const;
+    inline size_t jsgGetMemorySelfSize() const;
+    inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
   };
 
   class Consumer {
@@ -1040,7 +993,7 @@ class ByteQueue final {
 
     void error(jsg::Lock& js, jsg::JsValue reason);
 
-    void read(jsg::Lock& js, kj::Own<ReadRequest> request);
+    void read(jsg::Lock& js, jsg::Ref<ReadRequest> request);
 
     // Draining read for optimized pipe-to operations. Drains all currently buffered
     // data and pumps the controller for synchronously available data.
@@ -1050,7 +1003,7 @@ class ByteQueue final {
     // The maxRead parameter is a soft limit - see ReadableStreamController::drainingRead.
     jsg::Promise<DrainingReadResult> drainingRead(jsg::Lock& js, size_t maxRead = kj::maxValue);
 
-    void push(jsg::Lock& js, kj::Rc<Entry> entry);
+    void push(jsg::Lock& js, jsg::Ref<Entry> entry);
 
     void reset();
 
@@ -1082,7 +1035,7 @@ class ByteQueue final {
 
   void maybeUpdateBackpressure();
 
-  void push(jsg::Lock& js, kj::Rc<Entry> entry);
+  void push(jsg::Lock& js, jsg::Ref<Entry> entry);
 
   size_t size() const;
 
@@ -1114,12 +1067,12 @@ class ByteQueue final {
   static void handlePush(jsg::Lock& js,
       ConsumerImpl::Ready& state,
       kj::Weak<ConsumerImpl> consumer,
-      kj::Rc<Entry> entry);
+      jsg::Ref<Entry> entry);
   static void handleRead(jsg::Lock& js,
       ConsumerImpl::Ready& state,
       kj::Weak<ConsumerImpl> consumer,
       kj::Weak<QueueImpl> queue,
-      kj::Own<ReadRequest> request);
+      jsg::Ref<ReadRequest> request);
   static bool handleMaybeClose(
       jsg::Lock& js, ConsumerImpl::Ready& state, kj::Weak<ConsumerImpl> consumer);
 
@@ -1127,9 +1080,99 @@ class ByteQueue final {
   friend class Consumer;
 };
 
+struct ByteQueue::ReadRequest final: public jsg::Wrappable, public kj::PtrTarget {
+  enum class Type { DEFAULT, BYOB };
+  jsg::Promise<ReadResult>::Resolver resolver;
+  // The reference here should be cleared when the ByobRequest is invalidated,
+  // which happens either when respond(), respondWithNewView(), or invalidate()
+  // is called, or when the ByobRequest is destroyed, whichever comes first.
+  kj::Weak<ByobRequest> byobReadRequest;
+
+  struct PullInto {
+    jsg::JsRef<jsg::JsArrayBufferView> view;
+    size_t elementSize;
+    size_t originalOffset;
+    size_t filled = 0;
+    size_t atLeast = 1;
+    Type type = Type::DEFAULT;
+
+    JSG_MEMORY_INFO(ByteQueue::ReadRequest::PullInto) {
+      tracker.trackField("view", view);
+    }
+  } pullInto;
+
+  ReadRequest(jsg::Promise<ReadResult>::Resolver resolver, PullInto pullInto);
+  ~ReadRequest() noexcept(false);
+  void jsgVisitForGc(jsg::GcVisitor& visitor) override {
+    visitor.visit(resolver, pullInto.view);
+  }
+  void resolveAsDone(jsg::Lock& js);
+  void resolve(jsg::Lock& js);
+  void reject(jsg::Lock& js, jsg::JsValue value);
+
+  kj::Own<ByobRequest> makeByobReadRequest(
+      kj::Weak<ConsumerImpl> consumer, kj::Weak<QueueImpl> queue);
+
+  JSG_MEMORY_INFO(ByteQueue::ReadRequest) {
+    tracker.trackField("resolver", resolver);
+    tracker.trackField("pullInto", pullInto);
+  }
+};
+
+class ByteQueue::Entry: public jsg::Wrappable {
+ public:
+  explicit Entry(jsg::Lock& js, jsg::JsBufferSource store);
+
+  kj::ArrayPtr<kj::byte> toArrayPtr(jsg::Lock& js);
+
+  size_t getSize() const;
+
+  void jsgVisitForGc(jsg::GcVisitor& visitor) override;
+
+  jsg::Ref<Entry> clone(jsg::Lock& js);
+
+  JSG_MEMORY_INFO(ByteQueue::Entry) {
+    tracker.trackField("store", store);
+  }
+
+ private:
+  jsg::JsRef<jsg::JsBufferSource> store;
+
+  // We can safely cache the size of the entry because the store is either
+  // created by us or detached from JS. It cannot change size after the
+  // entry is created. We will assert that as such in toArrayPtr().
+  // We cache the offset also for assertion.
+  size_t size;
+  size_t offset;
+};
+
 template <typename Self>
 kj::StringPtr QueueImpl<Self>::jsgGetMemoryName() const {
   return "QueueImpl"_kjc;
+}
+
+inline kj::StringPtr ValueQueue::QueueEntry::jsgGetMemoryName() const {
+  return "ValueQueue::QueueEntry"_kjc;
+}
+
+inline size_t ValueQueue::QueueEntry::jsgGetMemorySelfSize() const {
+  return sizeof(*this);
+}
+
+inline void ValueQueue::QueueEntry::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("entry", entry);
+}
+
+inline kj::StringPtr ByteQueue::QueueEntry::jsgGetMemoryName() const {
+  return "ByteQueue::QueueEntry"_kjc;
+}
+
+inline size_t ByteQueue::QueueEntry::jsgGetMemorySelfSize() const {
+  return sizeof(*this);
+}
+
+inline void ByteQueue::QueueEntry::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
+  tracker.trackField("entry", entry);
 }
 
 template <typename Self>
