@@ -309,6 +309,17 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "async-trace",
+    srcs = ["async-trace.c++"],
+    hdrs = ["async-trace.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/async-trace",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
     name = "observer",
     srcs = ["observer.c++"],
     hdrs = ["observer.h"],
@@ -494,6 +505,11 @@ kj_test(
     deps = [
         ":io-gate",
     ],
+)
+
+kj_test(
+    src = "async-trace-test.c++",
+    deps = [":async-trace"],
 )
 
 kj_test(
