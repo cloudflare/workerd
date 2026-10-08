@@ -27,10 +27,11 @@ namespace rust_i18n = ::workerd::rust::i18n;
 // Maps the C++ Encoding to the Rust bridge enum, following the kj-rs
 // convert.h idiom (see `NODEJS_EXCEPTIONS_RUST`'s equivalent in
 // exceptions.c++), so callers use `kj::from<rust_i18n::Encoding>(value)`. It
-// is `static` (rather than in an anonymous namespace) because Clang's ADL
-// does not consider unnamed-namespace functions, and ADL is how
-// `kj::from<Target>` locates this overload. The switch has no `default:` arm
-// so that enum drift between the two `Encoding` types is a compile error.
+// is `static` (rather than in an anonymous namespace) because ADL is how
+// `kj::from<Target>` locates this overload, and ADL does not search an
+// unnamed namespace nested inside the argument type's namespace. The switch
+// has no `default:` arm so that enum drift between the two `Encoding` types is
+// a compile error.
 //
 // `BASE64`, `BASE64URL`, and `HEX` are not transcodable (see
 // `i18n::canBeTranscoded`); rejecting them here, for both `fromEncoding` and

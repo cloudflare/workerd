@@ -143,7 +143,7 @@ impl<'a> Transcoder<'a> {
                 // return for an empty source, handled above.
                 let units = ffi::convert_latin1_to_utf16(source, dest)
                     .ok_or(TranscodeError::DestinationSizeMismatch)?;
-                Ok(units * 2)
+                Ok(units * size_of::<u16>())
             }
             Conversion::FromUtf16 { to } => {
                 ffi::from_uchars(to, source, dest).ok_or(TranscodeError::UnableToTranscode)
@@ -262,7 +262,7 @@ impl<'a> Transcoder<'a> {
             source,
             conversion: Conversion::Utf16FromUtf8(utf8),
             // Cannot overflow: at most `ISOLATE_LIMIT` code units.
-            dest_len: expected_utf16_length * 2,
+            dest_len: expected_utf16_length * size_of::<u16>(),
         })
     }
 

@@ -5991,7 +5991,6 @@ export const isUtf8Test = {
   },
 };
 
-// Adapted from test/parallel/test-icu-transcode.js
 export const transcodeDoesNotExposeUninitializedMemoryTest = {
   test(ctrl, env, ctx) {
     const result = transcode(Buffer.from('☕'), 'utf8', 'ascii');
@@ -6011,6 +6010,7 @@ export const transcodeDoesNotExposeUninitializedMemoryTest = {
   },
 };
 
+// Adapted from test/parallel/test-icu-transcode.js
 export const transcodeTest = {
   test(ctrl, env, ctx) {
     const orig = Buffer.from('těst ☕', 'utf8');

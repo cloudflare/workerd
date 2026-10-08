@@ -224,6 +224,7 @@ impl Drop for Converter {
 /// Converts `source` from `from`'s encoding to `to`'s via ICU's
 /// `ucnv_convertEx`, as `TranscodeDefault` in `i18n.c++` does. Returns the
 /// number of bytes written to `target`, or `None` if ICU reports failure.
+#[must_use]
 pub fn convert_ex(
     to: &Converter,
     from: &Converter,
@@ -268,6 +269,7 @@ pub fn convert_ex(
 /// `ucnv_fromUChars`, as `TranscodeFromUTF16` in `i18n.c++` does. A trailing
 /// odd byte is ignored. Returns the number of bytes written to `target`, or
 /// `None` if ICU reports failure.
+#[must_use]
 pub fn from_uchars(to: &Converter, source: &[u8], target: &mut [u8]) -> Option<usize> {
     let src_length = i32::try_from(source.len() / size_of::<u16>()).ok()?;
     let dest_capacity = i32::try_from(target.len()).ok()?;
@@ -318,8 +320,9 @@ pub fn from_uchars(to: &Converter, source: &[u8], target: &mut [u8]) -> Option<u
 /// via `simdutf::convert_latin1_to_utf16`, as `TranscodeLatin1ToUTF16` in
 /// `i18n.c++` does. Returns the number of UTF-16 code units written, or `None`
 /// if `target` cannot hold two bytes per source byte.
+#[must_use]
 pub fn convert_latin1_to_utf16(source: &[u8], target: &mut [u8]) -> Option<usize> {
-    if target.len() / 2 < source.len() {
+    if target.len() / size_of::<u16>() < source.len() {
         return None;
     }
     // SAFETY: every Latin-1 byte widens to exactly one code unit, and `target`
