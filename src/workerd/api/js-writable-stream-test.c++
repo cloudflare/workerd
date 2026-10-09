@@ -877,6 +877,51 @@ KJ_TEST("WritableStreamNativeSink write fast path failure rejects and releases t
   });
 }
 
+// Calls `op` twice from a request other than the one that created the object it uses,
+// recording each outcome: a synchronous throw, or the promise's settlement.
+template <typename Op>
+kj::Promise<void> recordCrossRequestOutcomes(
+    const TestFixture::Environment& env, kj::Vector<kj::String>& outcomes, Op op) {
+  auto& js = env.js;
+  for (int i = 0; i < 2; i++) {
+    js.tryCatch([&] {
+      op(js)
+          .then(js, [&outcomes](jsg::Lock& js) { outcomes.add(kj::str("resolved")); },
+              [&outcomes](jsg::Lock& js, jsg::Value e) {
+        outcomes.add(kj::str("rejected: ", jsg::JsValue(e.getHandle(js))));
+      }).markAsHandled(js);
+    }, [&](jsg::Value e) { outcomes.add(kj::str("threw: ", jsg::JsValue(e.getHandle(js)))); });
+  }
+  return env.context.awaitJs(js, env.context.awaitIo(js, kj::Promise<void>(kj::READY_NOW)));
+}
+
+KJ_TEST("WritableStreamNativeSink write from another request leaves no write in flight") {
+  // The sink's IoOwn belongs to the request that created it; dereferencing it from
+  // another request throws. A write that fails that way never started, so a second write
+  // must fail the same way rather than report a write still in flight.
+  TestFixture testFixture;
+  SinkState state;
+  kj::Maybe<jsg::Ref<WritableStreamNativeSink>> held;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) {
+    held =
+        env.js.alloc<WritableStreamNativeSink>(env.context, state.makeSink(), kj::none, kj::none);
+  });
+  kj::Vector<kj::String> outcomes;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto sink = KJ_ASSERT_NONNULL(held).addRef();
+    return recordCrossRequestOutcomes(env, outcomes, [sink = kj::mv(sink)](jsg::Lock& js) mutable {
+      return sink->write(js, jsg::JsValue(jsg::JsUint8Array::create(js, "hi"_kjb)));
+    });
+  });
+  KJ_ASSERT(outcomes.size() == 2, outcomes);
+  for (auto& outcome: outcomes) {
+    KJ_EXPECT(outcome.find("already in flight"_kj) == kj::none, outcomes);
+  }
+  KJ_EXPECT(outcomes[0].find("different request"_kj) != kj::none, outcomes);
+  KJ_EXPECT(state.written.size() == 0);
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) { held = kj::none; });
+}
+
 KJ_TEST("JsWritableStream create under the flag produces a TypeScript-backed stream") {
   auto fixture = makeTsStreamsFixture();
   SinkState state;
@@ -1590,6 +1635,29 @@ KJ_TEST("JsWritableStream create TS arm: closure waitable rejection skips the si
   });
   KJ_EXPECT(!state.ended);
   KJ_EXPECT(!state.aborted);
+}
+
+KJ_TEST("The cpp_exports table has a null prototype and is frozen") {
+  // getCppExport() reads the table with an ordinary property get, so a name missing from
+  // it must not resolve through Object.prototype, where user code can put a function.
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    KJ_EXPECT(exportsObj.getPrototype(js).isNull());
+
+    auto objectPrototype = KJ_ASSERT_NONNULL(js.obj().getPrototype(js).tryCast<jsg::JsObject>());
+    auto planted = exportsObj.get(js, "WritableStream"_kj);
+    objectPrototype.set(js, "plantedCppExport"_kj, planted);
+    KJ_EXPECT_THROW(FAILED, webstreams::getCppExport(js, "plantedCppExport"_kj));
+    objectPrototype.delete_(js, "plantedCppExport"_kj);
+
+    // Frozen: a new property does not stick.
+    js.tryCatch([&] { exportsObj.set(js, "addedCppExport"_kj, planted); }, [](jsg::Value) {});
+    KJ_EXPECT(!exportsObj.has(js, "addedCppExport"_kj, jsg::JsObject::HasOption::OWN));
+  });
 }
 
 KJ_TEST("JsWritableStream serialize of a TypeScript-backed stream requires an RPC serializer") {
