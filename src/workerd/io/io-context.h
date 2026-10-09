@@ -133,6 +133,9 @@ class IoContext_IncomingRequest final {
   //
   // If delivered() is never called, then drain() need not be called.
   void delivered(kj::SourceLocation = kj::SourceLocation());
+  // As delivered(), naming the event type (e.g. "fetch", "alarm") for async tracing. Without it,
+  // the request's async trace resource is named after the delivering function.
+  void delivered(kj::StringPtr eventType, kj::SourceLocation location = kj::SourceLocation());
 
   // Continues running the request in the background until it is "done", scheduling the work into
   // `waitUntilTasks` and keeping `self` alive until work is finished.

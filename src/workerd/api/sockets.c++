@@ -620,7 +620,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::run(
     bool isDynamicDispatch) {
   auto& context = incomingRequest->getContext();
 
-  incomingRequest->delivered();
+  incomingRequest->delivered("udp_connect"_kj);
 
   auto outcome = EventOutcome::OK;
   KJ_TRY {

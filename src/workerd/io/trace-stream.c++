@@ -1099,7 +1099,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::run(
     kj::TaskSet& waitUntilTasks,
     bool isDynamicDispatch) {
   IoContext& ioContext = incomingRequest->getContext();
-  incomingRequest->delivered();
+  incomingRequest->delivered("tail_stream"_kj);
 
   auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
   capFulfiller->fulfill(kj::refcounted<TailStreamTarget>(ioContext, kj::mv(entrypointName),
