@@ -28,7 +28,14 @@ class RecordingListener final: public AsyncTraceListener {
   }
   void onInit(uint64_t ctx, const AsyncInitEvent& e) override {
     events.add(kj::str("init ", e.id, " kind=", static_cast<uint>(e.kind), " name=", e.name,
-        " trigger=", e.trigger, " exec=", e.execution));
+        " trigger=", e.trigger, " exec=", e.execution,
+        e.stack == 0 ? kj::str() : kj::str(" stack=", e.stack)));
+  }
+  void onStack(uint64_t isolate, uint32_t id, kj::ArrayPtr<const AsyncStackFrame> frames) override {
+    auto lines = KJ_MAP(f, frames) {
+      return kj::str(f.function, " ", f.script, "#", f.scriptId, ":", f.line, ":", f.column);
+    };
+    events.add(kj::str("stack ", id, ": ", kj::strArray(lines, " | ")));
   }
   void onSettle(uint64_t ctx, AsyncId id, AsyncOutcome outcome, uint64_t atNs) override {
     events.add(kj::str("settle ", id, " ", static_cast<uint>(outcome)));
@@ -266,6 +273,70 @@ KJ_TEST("inTurn() is the tracker of the innermost turn") {
     KJ_EXPECT(&KJ_ASSERT_NONNULL(AsyncTracker::inTurn()) == &f.tracker());
   }
   KJ_EXPECT(AsyncTracker::inTurn() == kj::none);
+}
+
+// Reports a fixed two-frame stack, counting captures.
+class FakeStackCapturer final: public AsyncStackCapturer {
+ public:
+  explicit FakeStackCapturer(uint& captures): captures(captures) {}
+
+  void capture(AsyncStackBuilder& builder) const override {
+    ++captures;
+    builder.addFrame("inner"_kj.asArray(), "worker.js"_kj.asArray(), 7, 3, 5);
+    builder.addFrame(""_kj.asArray(), "worker.js"_kj.asArray(), 7, 10, 1);
+  }
+
+ private:
+  uint& captures;
+};
+
+KJ_TEST("creation stacks are captured, deduplicated, and reported once per tracker") {
+  uint captures = 0;
+  AsyncTraceIsolate isolate(kj::arc<FakeStackCapturer>(captures));
+  kj::Vector<kj::String> events;
+  auto makeTracker = [&]() {
+    AsyncTraceSinks sinks;
+    sinks.add(kj::heap<RecordingListener>(events));
+    return KJ_ASSERT_NONNULL(
+        AsyncTracker::tryCreate(isolate, kj::mv(sinks), "worker"_kj, kj::none));
+  };
+  auto takeEvents = [&]() {
+    auto result = events.releaseAsArray();
+    events = kj::Vector<kj::String>();
+    return result;
+  };
+
+  auto first = makeTracker();
+  auto keep = first.addRef();
+  auto owned = kj::heap<OwnedAsyncTracker>(kj::mv(first));
+  auto a = keep->create(AsyncKind::TIMER, "setTimeout"_kj);
+  auto b = keep->create(AsyncKind::TIMER, "setTimeout"_kj);
+  auto sameStack = kj::str("stack 1: inner worker.js#7:3:5 |  worker.js#7:10:1");
+  {
+    auto actual = takeEvents();
+    kj::String expected[] = {kj::str("context_begin"), kj::str(sameStack),
+      kj::str("init ", a.getId(), " kind=3 name=setTimeout trigger=0 exec=0 stack=1"),
+      kj::str("init ", b.getId(), " kind=3 name=setTimeout trigger=0 exec=0 stack=1")};
+    KJ_EXPECT(joined(actual) == joined(expected), joined(actual));
+  }
+  KJ_EXPECT(captures == 2);
+
+  // Another tracker on the same isolate shares the stack's ID, and reports it to its own sinks.
+  auto second = makeTracker();
+  auto c = second->create(AsyncKind::MICROTASK, "queueMicrotask"_kj);
+  {
+    auto actual = takeEvents();
+    kj::String expected[] = {kj::str("context_begin"), kj::str(sameStack),
+      kj::str("init ", c.getId(), " kind=4 name=queueMicrotask trigger=0 exec=0 stack=1")};
+    KJ_EXPECT(joined(actual) == joined(expected), joined(actual));
+  }
+  KJ_EXPECT(captures == 3);
+
+  // A closed tracker records nothing, so it doesn't capture.
+  owned = nullptr;
+  auto late = keep->create(AsyncKind::TIMER, "setTimeout"_kj);
+  KJ_EXPECT(late.getId() == 0);
+  KJ_EXPECT(captures == 3);
 }
 
 KJ_TEST("closing reports stats and makes later events no-ops") {

@@ -31,7 +31,19 @@ const void* currentThread() {
 // =======================================================================================
 // AsyncTraceIsolate
 
-AsyncTraceIsolate::AsyncTraceIsolate(): impl(rust::async_trace::new_isolate()) {}
+void AsyncStackBuilder::addFrame(kj::ArrayPtr<const char> function,
+    kj::ArrayPtr<const char> script,
+    int32_t scriptId,
+    uint32_t line,
+    uint32_t column) {
+  tracker.push_frame(::rust::Slice<const uint8_t>(function.asBytes().begin(), function.size()),
+      ::rust::Slice<const uint8_t>(script.asBytes().begin(), script.size()), scriptId, line,
+      column);
+}
+
+AsyncTraceIsolate::AsyncTraceIsolate(kj::Maybe<kj::Arc<const AsyncStackCapturer>> stackCapturer)
+    : impl(rust::async_trace::new_isolate()),
+      stackCapturer(kj::mv(stackCapturer)) {}
 AsyncTraceIsolate::~AsyncTraceIsolate() noexcept(false) {}
 
 // =======================================================================================
@@ -83,11 +95,15 @@ kj::Maybe<kj::Arc<AsyncTracker>> AsyncTracker::tryCreate(const AsyncTraceIsolate
   for (auto writer: sinks.writers) {
     impl->add_ndjson_sink(*writer->impl);
   }
-  return kj::arc<AsyncTracker>(kj::mv(impl));
+  return kj::arc<AsyncTracker>(kj::mv(impl),
+      isolate.stackCapturer.map(
+          [](const kj::Arc<const AsyncStackCapturer>& c) { return c.addRef(); }));
 }
 
-AsyncTracker::AsyncTracker(::rust::Box<rust::async_trace::Tracker> impl)
+AsyncTracker::AsyncTracker(::rust::Box<rust::async_trace::Tracker> impl,
+    kj::Maybe<kj::Arc<const AsyncStackCapturer>> stackCapturer)
     : impl(kj::mv(impl)),
+      stackCapturer(kj::mv(stackCapturer)),
       ownerThread(currentThread()) {}
 
 AsyncTracker::~AsyncTracker() noexcept(false) {}
@@ -100,7 +116,17 @@ bool AsyncTracker::onOwnerThread() const {
 
 AsyncResource AsyncTracker::create(AsyncKind kind, kj::StringPtr name, AsyncId trigger) const {
   if (!onOwnerThread()) return {};
-  AsyncId id = impl->create(static_cast<uint8_t>(kind), toRust(name), trigger, 0);
+  uint32_t stack = 0;
+  KJ_IF_SOME(capturer, stackCapturer) {
+    // Capturing is the expensive part; skip it for a resource that would be dropped.
+    if (impl->accepts_resources()) {
+      impl->begin_stack();
+      AsyncStackBuilder builder(*impl);
+      capturer->capture(builder);
+      stack = impl->end_stack();
+    }
+  }
+  AsyncId id = impl->create(static_cast<uint8_t>(kind), toRust(name), trigger, stack);
   if (id == 0) return {};
   return AsyncResource(addRefToThis(), id);
 }

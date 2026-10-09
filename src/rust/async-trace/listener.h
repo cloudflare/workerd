@@ -15,6 +15,8 @@
 #include <kj/common.h>
 #include <kj/debug.h>
 #include <kj/exception.h>
+#include <kj/string.h>
+#include <kj/vector.h>
 
 #include <cstdint>
 
@@ -64,6 +66,16 @@ struct AsyncTurn {
   uint64_t endNs;
 };
 
+// One frame of a creation stack. Strings are not NUL-terminated.
+struct AsyncStackFrame {
+  kj::ArrayPtr<const char> function;
+  kj::ArrayPtr<const char> script;
+  int32_t scriptId;
+  // 1-based, as V8 reports them.
+  uint32_t line;
+  uint32_t column;
+};
+
 // See `ContextStats` in lib.rs. All zero means the trace is complete.
 struct AsyncContextStats {
   uint64_t created;
@@ -93,6 +105,9 @@ class AsyncTraceListener {
   virtual void onAnnotate(
       uint64_t ctx, AsyncId id, kj::ArrayPtr<const char> key, kj::ArrayPtr<const char> value) {}
   virtual void onTurn(uint64_t ctx, const AsyncTurn& turn) {}
+  // Creation stack `id` of `isolate`, innermost frame first. Reported to a listener before the
+  // first onInit() that refers to it, once per listener.
+  virtual void onStack(uint64_t isolate, uint32_t id, kj::ArrayPtr<const AsyncStackFrame> frames) {}
   virtual void onContextEnd(uint64_t ctx, uint64_t atNs, const AsyncContextStats& stats) {}
 };
 
@@ -157,6 +172,56 @@ inline void listener_destroy(AsyncTraceListener& listener, uint64_t ctx, uint64_
 inline void listener_annotate(
     AsyncTraceListener& listener, uint64_t ctx, uint64_t id, ::rust::Str key, ::rust::Str value) {
   callListener([&]() { listener.onAnnotate(ctx, id, fromRust(key), fromRust(value)); });
+}
+
+// A stack arrives frame by frame (see `listener_stack_begin` in ffi.rs), buffered here until
+// listener_stack_end(). Listeners are called on their tracker's thread, and the calls for one
+// stack are never interleaved with another's.
+struct PendingStackFrame {
+  kj::String function;
+  kj::String script;
+  int32_t scriptId;
+  uint32_t line;
+  uint32_t column;
+};
+
+inline kj::Vector<PendingStackFrame>& pendingStack() {
+  static thread_local kj::Vector<PendingStackFrame> frames;
+  return frames;
+}
+
+inline void listener_stack_begin(AsyncTraceListener& listener) {
+  pendingStack().clear();
+}
+
+inline void listener_stack_frame(AsyncTraceListener& listener,
+    ::rust::Str function,
+    ::rust::Str script,
+    int32_t scriptId,
+    uint32_t line,
+    uint32_t column) {
+  pendingStack().add(PendingStackFrame{
+    .function = kj::heapString(function.data(), function.size()),
+    .script = kj::heapString(script.data(), script.size()),
+    .scriptId = scriptId,
+    .line = line,
+    .column = column,
+  });
+}
+
+inline void listener_stack_end(AsyncTraceListener& listener, uint64_t isolate, uint32_t id) {
+  auto& pending = pendingStack();
+  auto frames = KJ_MAP(f, pending) {
+    return AsyncStackFrame{
+      .function = f.function.asArray(),
+      .script = f.script.asArray(),
+      .scriptId = f.scriptId,
+      .line = f.line,
+      .column = f.column,
+    };
+  };
+  callListener([&]() { listener.onStack(isolate, id, frames); });
+  pending.clear();
 }
 
 // `locked` is meaningful only if `hasLocked`.
