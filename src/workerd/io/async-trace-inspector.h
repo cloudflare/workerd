@@ -10,7 +10,7 @@
 //
 // - Creating a resource schedules a task (asyncTaskScheduled), capturing the current JavaScript
 //   stack as the async parent of its callbacks. JS_TO_KJ resources are skipped: they never run a
-//   callback.
+//   callback. So are JS_PROMISE resources: V8 tracks promises itself.
 // - Each callback runs as the task (asyncTaskStarted/asyncTaskFinished).
 // - Destroying an unsettled resource cancels its task.
 //

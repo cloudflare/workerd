@@ -203,6 +203,7 @@ class Bootstrap {
     KJ_IF_SOME(frames, serveOrTest.async_trace_stacks) {
       options.asyncTraceStackDepth = frames;
     }
+    options.asyncTracePromises = serveOrTest.async_trace_promises;
     options.experimental = serveOrTest.experimental;
     auto& python = options.pythonConfig;
     KJ_IF_SOME(path, serveOrTest.pyodide_package_disk_cache_dir) {

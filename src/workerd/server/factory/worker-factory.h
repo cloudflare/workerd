@@ -120,6 +120,8 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
     // Records up to this many frames of each async resource's creation stack
     // (--async-trace-stacks), for every async trace output.
     uint32_t asyncTraceStackDepth = 0;
+    // Traces JavaScript promises too (--async-trace-promises), for every async trace output.
+    bool asyncTracePromises = false;
   };
 
   // `config` is the encoded config message; the factory owns it for the run and reads it with an

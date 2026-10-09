@@ -68,6 +68,7 @@ class ThreadContext;
 class IoContext;
 class AsyncTraceIsolate;
 class AsyncTraceListener;
+class AsyncTracePromiseHook;
 class InputGate;
 class OutputGate;
 
@@ -387,6 +388,12 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   }
 
   // Set if the IsolateObserver enabled async tracing for this isolate (getAsyncTraceConfig()).
+  // The promise hook's state, if async tracing of promises is enabled (AsyncTraceConfig::promises).
+  kj::Maybe<const AsyncTracePromiseHook&> tryGetAsyncTracePromiseHook() const {
+    return asyncTracePromiseHook.map(
+        [](const kj::Own<AsyncTracePromiseHook>& h) -> const AsyncTracePromiseHook& { return *h; });
+  }
+
   kj::Maybe<const AsyncTraceIsolate&> getAsyncTraceIsolate() const {
     return asyncTraceIsolate.map(
         [](const kj::Own<AsyncTraceIsolate>& isolate) -> const AsyncTraceIsolate& {
@@ -557,6 +564,7 @@ class Worker::Isolate: public kj::AtomicRefcounted {
 
   kj::String id;
   kj::Maybe<kj::Own<AsyncTraceIsolate>> asyncTraceIsolate;
+  kj::Maybe<kj::Own<AsyncTracePromiseHook>> asyncTracePromiseHook;
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
   kj::MutexGuarded<kj::Maybe<kj::Function<void(void)>>> cpuLimitNearlyExceededCallback;
   kj::Own<Api> api;

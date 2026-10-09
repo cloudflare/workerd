@@ -23,7 +23,10 @@ class InspectorSink final: public AsyncTraceListener {
   }
 
   void onInit(uint64_t ctx, const AsyncInitEvent& event) override {
-    if (event.kind == AsyncKind::JS_TO_KJ || !isCurrent()) return;
+    // V8 already tracks promises' async stacks itself.
+    if (event.kind == AsyncKind::JS_TO_KJ || event.kind == AsyncKind::JS_PROMISE || !isCurrent()) {
+      return;
+    }
     // An interval runs its callback repeatedly; every other resource runs it at most once (or,
     // for a request, without a JavaScript stack worth keeping), and V8 forgets a non-recurring
     // task once it finishes.
