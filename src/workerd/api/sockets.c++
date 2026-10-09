@@ -500,6 +500,117 @@ kj::Promise<void> pumpDatagramsToRpc(
   }
 }
 
+// Joins up the two ends of a startTls() upgrade on a tunnel where neither end can perform a TLS
+// handshake because the tunnel is one of our internal transports. See
+// setupInternalTlsRendezvous(), which is the only thing that creates one of these.
+class TlsRendezvous: public kj::Refcounted {
+ public:
+  enum class Side {
+    // The socket held by the worker that opened the tunnel by calling connect().
+    PEER,
+    // The socket handed to the connect() handler on the receiving end of that call.
+    HANDLER,
+  };
+
+  // One side's participation in the rendezvous, shaped the way kj::TlsStarterCallback wants it.
+  // Calling it is that side's startTls(); destroying it without having called it reports that the
+  // side is gone and no upgrade is coming.
+  class Claim {
+   public:
+    Claim(kj::Own<TlsRendezvous> rendezvous, Side side)
+        : rendezvous(kj::mv(rendezvous)),
+          side(side) {}
+    KJ_DISALLOW_COPY(Claim);
+    Claim(Claim&& other) = default;
+    Claim& operator=(Claim&& other) = default;
+    ~Claim() noexcept(false) {
+      // A moved-from Claim holds a null Own and no longer speaks for its side.
+      if (rendezvous.get() != nullptr) {
+        rendezvous->abandon(side);
+      }
+    }
+
+    kj::Promise<void> operator()(kj::StringPtr expectedServerHostname) {
+      // There is no handshake here to point at a hostname: the certificate check that the name
+      // exists for belongs to whatever real connection lies beyond the worker at either end.
+      return rendezvous->upgrade(side);
+    }
+
+   private:
+    kj::Own<TlsRendezvous> rendezvous;
+    Side side;
+  };
+
+  // Records that `side` called startTls(). The result resolves once the other side has called it
+  // too, and rejects if the other side is abandoned first.
+  kj::Promise<void> upgrade(Side side) {
+    halfFor(side).arrived->fulfill();
+    return halfFor(otherSide(side)).arrivedPromise.addBranch();
+  }
+
+  // Records that `side`'s socket went away without ever calling startTls(), so that the other side
+  // stops waiting for it. Harmless if that side already upgraded, since fulfillers ignore a second
+  // resolution.
+  void abandon(Side side) {
+    halfFor(side).arrived->reject(KJ_EXCEPTION(
+        DISCONNECTED, "jsg.Error: The peer disconnected before agreeing to start TLS."));
+  }
+
+ private:
+  struct Half {
+    kj::Own<kj::PromiseFulfiller<void>> arrived;
+    kj::ForkedPromise<void> arrivedPromise;
+  };
+
+  Half peer = makeHalf();
+  Half handler = makeHalf();
+
+  static Half makeHalf() {
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    return Half{.arrived = kj::mv(paf.fulfiller), .arrivedPromise = kj::mv(paf.promise).fork()};
+  }
+
+  static Side otherSide(Side side) {
+    return side == Side::PEER ? Side::HANDLER : Side::PEER;
+  }
+
+  Half& halfFor(Side side) {
+    return side == Side::PEER ? peer : handler;
+  }
+};
+
+// Behaves like Promise.all([first, second]): resolves once both have resolved, and rejects with
+// the first rejection as soon as it happens, without waiting for the other promise to settle.
+jsg::Promise<void> whenBothResolved(
+    jsg::Lock& js, jsg::Promise<void> first, jsg::Promise<void> second) {
+  struct Countdown: public kj::Refcounted {
+    uint pending = 2;
+  };
+  auto countdown = kj::refcounted<Countdown>();
+  auto paf = js.newPromiseAndResolver<void>();
+
+  auto settle = [&](jsg::Promise<void>& promise) {
+    promise.then(js,
+        JSG_VISITABLE_LAMBDA(
+            (resolver = paf.resolver.addRef(js), countdown = kj::addRef(*countdown)), (resolver),
+            (jsg::Lock& js) {
+              if (--countdown->pending == 0) {
+              resolver.resolve(js);
+              }
+            }),
+        JSG_VISITABLE_LAMBDA(
+            (resolver = paf.resolver.addRef(js)), (resolver), (jsg::Lock& js, jsg::Value error) {
+              // Rejecting an already-settled promise is a no-op, so only the first rejection
+              // counts.
+              resolver.reject(js, error.getHandle(js));
+            }));
+  };
+  settle(first);
+  settle(second);
+
+  return kj::mv(paf.promise);
+}
+
 }  // namespace
 
 // Forward declarations
@@ -690,6 +801,20 @@ tracing::EventInfo UdpConnectCustomEvent::getEventInfo() const {
   return tracing::ConnectEventInfo();
 }
 
+kj::Own<kj::TlsStarterCallback> setupInternalTlsRendezvous(kj::TlsStarterCallback& peerStarter) {
+  auto rendezvous = kj::refcounted<TlsRendezvous>();
+
+  kj::Function<kj::Promise<void>(kj::StringPtr)> peerClaim =
+      TlsRendezvous::Claim(kj::addRef(*rendezvous), TlsRendezvous::Side::PEER);
+  peerStarter = kj::mv(peerClaim);
+
+  kj::Function<kj::Promise<void>(kj::StringPtr)> handlerClaim =
+      TlsRendezvous::Claim(kj::mv(rendezvous), TlsRendezvous::Side::HANDLER);
+  auto handlerStarter = kj::heap<kj::TlsStarterCallback>();
+  *handlerStarter = kj::mv(handlerClaim);
+  return handlerStarter;
+}
+
 jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher,
     AnySocketAddress address,
@@ -779,7 +904,12 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     httpConnectSettings.useTls = secureTransport == SecureTransportKind::ON;
   }
   kj::Own<kj::TlsStarterCallback> tlsStarter = kj::heap<kj::TlsStarterCallback>();
-  httpConnectSettings.tlsStarter = tlsStarter;
+  if (secureTransport == SecureTransportKind::STARTTLS) {
+    // Offer the slot only on a socket that can actually act on it: startTls() insists on
+    // 'starttls'. Whoever serves the CONNECT reads the slot's presence as a promise that this
+    // socket is prepared to upgrade, and may wait to be told that it has.
+    httpConnectSettings.tlsStarter = tlsStarter;
+  }
 
   KJ_IF_SOME(promise, ioContext.waitForOutputLocksIfNecessary()) {
     // Wrap the real WorkerInterface in a promised interface that defers connect
@@ -837,15 +967,38 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
     });
   })
       .then(js, [self = JSG_THIS](jsg::Lock& js) mutable {
-    // Destroy the connection stream to close the connection.
-    { auto _ = kj::mv(self->connectionData); }
+    // Destroy the connection stream to close the connection. The destruction is deferred by an
+    // event loop turn: a read may have just taken the peer's bytes synchronously, before the
+    // completion of the write that delivered them has propagated back to the peer. Destroying the
+    // stream right away would cancel that write, even though its bytes were delivered.
+    auto connection = kj::mv(self->connectionData);
     self->connectionData = kj::none;
 
-    self->resolveFulfiller(js, kj::none);
-    return js.resolvedPromise();
+    return IoContext::current().awaitIo(js,
+        kj::evalLater([connection = kj::mv(connection)]() mutable { connection = kj::none; }),
+        [self = kj::mv(self)](jsg::Lock& js) mutable { self->resolveFulfiller(js, kj::none); });
   }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value err) mutable {
     self->errorHandler(js, kj::mv(err));
   });
+}
+
+jsg::Promise<void> Socket::proxyTo(
+    jsg::Lock& js, jsg::Ref<Socket> sock, jsg::Optional<PipeToOptions> options) {
+  jsg::Optional<PipeToOptions> optionsCopy = kj::none;
+  KJ_IF_SOME(o, options) {
+    optionsCopy = PipeToOptions{
+      .preventAbort = o.preventAbort,
+      .preventCancel = o.preventCancel,
+      .preventClose = o.preventClose,
+      .signal = kj::none,
+    };
+    KJ_IF_SOME(s, o.signal) {
+      KJ_ASSERT_NONNULL(optionsCopy).signal = s.addRef();
+    }
+  }
+  auto fromThem = sock->readable.pipeTo(js, writable, kj::mv(options).orDefault({}));
+  auto toThem = readable.pipeTo(js, sock->writable, kj::mv(optionsCopy).orDefault({}));
+  return whenBothResolved(js, kj::mv(fromThem), kj::mv(toThem));
 }
 
 jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOptions) {
@@ -853,6 +1006,9 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
       secureTransport != SecureTransportKind::ON, TypeError, "Cannot startTls on a TLS socket.");
   JSG_REQUIRE(connectionData != kj::none, TypeError,
       "The connection was closed before startTls could be started.");
+  // TODO(cleanup): Error message is misleading when startTls() is used in the connect handler as
+  // its socket is passed in and no starttls option can be set there - provide more descriptive
+  // error message.
   auto invalidOptKindMsg =
       "The `secureTransport` socket option must be set to 'starttls' for startTls to be used.";
   JSG_REQUIRE(secureTransport == SecureTransportKind::STARTTLS, TypeError, invalidOptKindMsg);

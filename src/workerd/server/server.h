@@ -325,8 +325,10 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       kj::StringPtr physicalProtocol,
       kj::Own<HttpRewriter> rewriter);
 
-  kj::Promise<void> listenTcp(
-      kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::String authority);
+  kj::Promise<void> listenTcp(kj::Own<kj::ConnectionReceiver> listener,
+      kj::Own<Service> service,
+      kj::String authority,
+      kj::Maybe<kj::Own<kj::TlsContext>> tlsContext);
 
   kj::Promise<void> listenUdp(kj::Own<kj::DatagramPort> port,
       kj::Own<Service> service,
@@ -391,6 +393,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
     uint defaultPort = 0;
     config::HttpOptions::Reader httpOptions;
     kj::Maybe<kj::Own<kj::TlsContext>> tls;
+    config::Socket::TcpTlsMode tcpTlsMode = config::Socket::TcpTlsMode::IMPLICIT;
     kj::StringPtr physicalProtocol;
   };
   kj::Maybe<SocketTypeConfig> parseSocketType(config::Socket::Reader sock, kj::StringPtr name);

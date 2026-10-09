@@ -243,6 +243,7 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     const kj::HttpHeaders& headers,
     kj::AsyncIoStream& connection,
     kj::HttpService::ConnectResponse& response,
+    kj::HttpConnectSettings settings,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler) {
   ExportedHandler& eh = JSG_REQUIRE_NONNULL(exportedHandler, Error,
@@ -264,20 +265,39 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     auto& ioContext = IoContext::current();
     jsg::Lock& js = lock;
 
-    // TLS support is not implemented so far. Note that setupSocket() expects the domain parameter
-    // to be set to the expected host name using startTLS, so that it can be provided to the TLS
-    // callback, so we'd need to change that or figure out a way to get the host domain.
-    auto nullTlsStarter = kj::heap<kj::TlsStarterCallback>();
+    // Support startTls if the transport that delivered this CONNECT offered a tlsStarter slot.
+    auto tlsStarter = kj::heap<kj::TlsStarterCallback>();
+    auto secureTransport = SecureTransportKind::OFF;
+    KJ_IF_SOME(starter, settings.tlsStarter) {
+      if (starter != kj::none) {
+        // The transport can run a real handshake on this connection -- a TCP listener holding a
+        // server-side TLS context, for instance. Take its callback over; only the application
+        // knows the point in the protocol where the upgrade belongs.
+        *tlsStarter = kj::mv(KJ_ASSERT_NONNULL(starter));
+        // The callback is ours now, so leave nothing behind for the peer to invoke.
+        starter = kj::none;
+        secureTransport = SecureTransportKind::STARTTLS;
+      } else {
+        // The slot is here but empty: the peer is another Socket on one of our internal
+        // transports, waiting to hear when we upgrade and to tell us when it does.
+        tlsStarter = setupInternalTlsRendezvous(starter);
+        secureTransport = SecureTransportKind::STARTTLS;
+      }
+    }
+
     // We set isDefaultFetchPort to false here – sockets.c++ sets it for ports 443 and 8080 to
     // provide a more descriptive error message for HTTP, but this is not relevant on the TCP server
     // side.
     // The handler is the server side of this connection: the peer half-closing means it has
     // finished sending, not that the reply is over, so the write side stays open until the handler
     // closes it or returns.
+    // The handler is also the server side of any TLS upgrade, so there is no peer name to verify:
+    // both starters set up above ignore the hostname they are given. `host` is passed as the
+    // domain only because startTls() and proxyTo() refuse to upgrade a socket that has none.
     jsg::Ref<Socket> jsSocket =
-        setupSocket(js, ownConnection.addRef().toOwn(), kj::mv(clientAddress), kj::mv(host),
-            SocketOptions{.allowHalfOpen = true}, kj::mv(nullTlsStarter), SecureTransportKind::OFF,
-            SocketProtocol::TCP, kj::none, false, kj::none);
+        setupSocket(js, ownConnection.addRef().toOwn(), kj::mv(clientAddress), kj::str(host),
+            SocketOptions{.allowHalfOpen = true}, kj::mv(tlsStarter), secureTransport,
+            SocketProtocol::TCP, kj::str(host) /* domain */, false, kj::none);
     // handleProxyStatus() is required to indicate that the socket was opened properly. Since the
     // connection is already open at this point, exception handling is not required.
     jsSocket->handleProxyStatus(js, kj::Promise<kj::Maybe<kj::Exception>>(kj::none));
