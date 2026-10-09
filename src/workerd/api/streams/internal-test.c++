@@ -12,6 +12,7 @@
 #include <workerd/jsg/jsg-test.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/tests/test-fixture.h>
+#include <workerd/util/autogate.h>
 
 #include <openssl/rand.h>
 
@@ -1339,6 +1340,62 @@ KJ_TEST("internal pipe force-cancel drops pending read before destroying source"
     read.fulfiller->fulfill(1);
 
     return env.context.awaitJs(env.js, kj::mv(pipe)).then([&] { KJ_ASSERT(pipeRejected); });
+  });
+}
+
+// Produces `length` zero bytes, as fast as the caller will read them.
+class ZeroFillSource final: public ReadableStreamSource {
+ public:
+  explicit ZeroFillSource(size_t length): length(length) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    auto amount = kj::min(maxBytes, length);
+    memset(buffer, 0, amount);
+    length -= amount;
+    return amount;
+  }
+
+ private:
+  size_t length;
+};
+
+KJ_TEST("deeply nested tee() chains do not overflow the stack") {
+  static constexpr size_t teeDepth = 200 * 1024 / sizeof(void*);
+  TestFixture testFixture;
+  testFixture.runInIoContext([](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto s = js.alloc<ReadableStream>(env.context, kj::heap<ZeroFillSource>(10 * 1024 * 1024));
+    auto readableStreams = s->tee(js);
+    for (size_t i = 0; i < teeDepth; i++) {
+      readableStreams = readableStreams[0]->tee(js);
+    }
+  });
+}
+
+KJ_TEST("default reader read() auto-allocates a chunk-sized buffer") {
+  static constexpr size_t streamLength = 10 * 1024;
+  TestFixture testFixture;
+
+  testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+    auto stream = js.alloc<ReadableStream>(env.context, kj::heap<ZeroFillSource>(streamLength));
+    auto reader = stream->getReader(js, {});
+    KJ_REQUIRE(reader.is<jsg::Ref<ReadableStreamDefaultReader>>());
+    auto& defaultReader = reader.get<jsg::Ref<ReadableStreamDefaultReader>>();
+
+    return env.context.awaitJs(js, defaultReader->read(js).then(js,
+            JSG_VISITABLE_LAMBDA((reader = defaultReader.addRef(), stream = stream.addRef()),
+                (reader, stream), (jsg::Lock& js, ReadResult readResult) {
+      KJ_ASSERT(!readResult.done);
+      auto& value = KJ_REQUIRE_NONNULL(readResult.value);
+      auto u8 = KJ_ASSERT_NONNULL(value.getHandle(js).tryCast<jsg::JsUint8Array>());
+      if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE)) {
+        // The 16KB chunk holds the entire 10KB stream.
+        KJ_ASSERT(u8.size() == streamLength);
+      } else {
+        KJ_ASSERT(u8.size() == 4 * 1024);
+      }
+    })));
   });
 }
 
