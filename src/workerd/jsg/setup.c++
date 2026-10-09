@@ -428,8 +428,11 @@ IsolateWithSnapshotCreator newIsolateWithSnapshotCreator(v8::Isolate::CreatePara
           artifact.externalReferences.asPtr().fill(0);
           params.external_references = artifact.externalReferences.begin();
 
-          auto creator = kj::heap<v8::SnapshotCreator>(params);
-          v8::Isolate* isolate = creator->GetIsolate();
+          // The SnapshotCreator(params) constructor always allocates in the default group, so
+          // allocate the isolate in `group` ourselves. The creator does not take ownership;
+          // ~IsolateBase() disposes the isolate.
+          v8::Isolate* isolate = v8::Isolate::Allocate(group);
+          auto creator = kj::heap<v8::SnapshotCreator>(isolate, params);
           return IsolateWithSnapshotCreator{isolate, kj::mv(creator)};
         }
         KJ_CASE_ONEOF(finalizedSnapshot, FinalizedSnapshot) {
@@ -605,16 +608,11 @@ IsolateBase::~IsolateBase() noexcept(false) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     // Terminate the v8::platform's task queue associated with this isolate
     v8System.shutdownIsolate(ptr);
-    // When preparing a snapshot the v8::SnapshotCreator owns the isolate and keeps it "entered" by
-    // the current thread; v8::Isolate::Dispose() refuses to run on an entered isolate. Destroy the
-    // SnapshotCreator first — its destructor exits and disposes the isolate — and skip
-    // ptr->Dispose() in that case.
-    if (isPreparingSnapshot()) {
-      // Destroying the SnapshotCreator exits and disposes its isolate.
-      snapshotCreator = kj::none;
-    } else {
-      ptr->Dispose();
-    }
+    // When preparing a snapshot the v8::SnapshotCreator keeps the isolate "entered" by the current
+    // thread, and v8::Isolate::Dispose() refuses to run on an entered isolate. Destroying the
+    // SnapshotCreator exits the isolate; it does not dispose it, since we allocated the isolate.
+    snapshotCreator = kj::none;
+    ptr->Dispose();
     ptr = nullptr;
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();
