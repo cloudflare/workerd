@@ -204,10 +204,7 @@ class AsyncTracker final: public kj::AtomicRefcounted {
       }
     }
     ~TurnScope() noexcept(false) {
-      _::trackerInTurn = previousInTurn;
-      KJ_IF_SOME(t, tracker) {
-        t.turnEnd();
-      }
+      end();
     }
     KJ_DISALLOW_COPY_AND_MOVE(TurnScope);
 
@@ -218,9 +215,22 @@ class AsyncTracker final: public kj::AtomicRefcounted {
       }
     }
 
+    // Ends the turn early, as the destructor would. Call it before releasing the isolate lock:
+    // ending the turn closes its cause's callback scope, and sinks such as the inspector's must
+    // see that while the lock is held.
+    void end() {
+      if (ended) return;
+      ended = true;
+      _::trackerInTurn = previousInTurn;
+      KJ_IF_SOME(t, tracker) {
+        t.turnEnd();
+      }
+    }
+
    private:
     kj::Maybe<const AsyncTracker&> tracker;
     const AsyncTracker* previousInTurn;
+    bool ended = false;
   };
 
   // Attributes a callback to `resource` for the scope's lifetime (`before`/`after`). Use for
