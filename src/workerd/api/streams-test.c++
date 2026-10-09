@@ -201,6 +201,166 @@ KJ_TEST("ReadableStream pumpTo pending write cancellation regression") {
   KJ_ASSERT(events[2] == "sink was destroyed");
 }
 
+struct NoopSink final: public WritableStreamSink {
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> onWrite;
+
+  void signalWrite() {
+    KJ_IF_SOME(f, onWrite) {
+      f->fulfill();
+      onWrite = kj::none;
+    }
+  }
+  kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
+    signalWrite();
+    return kj::READY_NOW;
+  }
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+    signalWrite();
+    return kj::READY_NOW;
+  }
+  kj::Promise<void> end() override {
+    return kj::READY_NOW;
+  }
+  void abort(kj::Exception reason) override {}
+};
+
+kj::Own<TestFixture> makeJsStreamsFixture(capnp::MallocMessageBuilder& flagsBuilder) {
+  auto featureFlags = flagsBuilder.initRoot<CompatibilityFlags>();
+  featureFlags.setStreamsJavaScriptControllers(true);
+  return kj::heap<TestFixture>(TestFixture::SetupParams{.featureFlags = featureFlags.asReader()});
+}
+
+KJ_TEST("ReadableStream pumpTo cancels the source when the pump is dropped mid-stream") {
+  // When the consumer of a pump goes away (e.g. the client disconnects and the HTTP layer drops
+  // the response-body pump) while the source is idle, the source's cancel algorithm must run so
+  // that it stops producing data.
+  capnp::MallocMessageBuilder flagsBuilder;
+  auto fixture = makeJsStreamsFixture(flagsBuilder);
+
+  uint cancelCount = 0;
+  bool reasonWasUndefined = false;
+  auto firstWrite = kj::newPromiseAndFulfiller<void>();
+  kj::Maybe<kj::Promise<DeferredProxy<void>>> pump;
+
+  auto request = fixture->newIncomingRequest();
+  fixture->enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto stream = ReadableStream::constructor(js,
+        UnderlyingSource{
+          .start =
+              [](jsg::Lock& js, auto controller) {
+      auto& c = KJ_REQUIRE_NONNULL(
+          controller.template tryGet<jsg::Ref<ReadableStreamDefaultController>>());
+      // One chunk so the pump makes progress; the stream stays open afterwards.
+      c->enqueue(js, jsg::JsValue(v8::ArrayBuffer::New(js.v8Isolate, 10)));
+      return js.resolvedPromise();
+    },
+          // Never enqueues, so after the first chunk the pump's read stays pending.
+          .pull = [](jsg::Lock& js, auto controller) { return js.resolvedPromise(); },
+          .cancel = [&](jsg::Lock& js, jsg::JsValue reason) -> jsg::Promise<void> {
+      ++cancelCount;
+      reasonWasUndefined = reason.isUndefined();
+      return js.resolvedPromise();
+    },
+        },
+        kj::none);
+
+    auto sink = kj::heap<NoopSink>();
+    sink->onWrite = kj::mv(firstWrite.fulfiller);
+    pump = stream->pumpTo(js, kj::mv(sink), true);
+  });
+
+  firstWrite.promise.wait(fixture->getWaitScope());
+  KJ_ASSERT(cancelCount == 0);
+
+  // Drop the pump while it is suspended waiting for more data.
+  pump = kj::none;
+
+  fixture->drainAndDestroy(kj::mv(request));
+  KJ_ASSERT(cancelCount == 1);
+  KJ_ASSERT(reasonWasUndefined);
+}
+
+KJ_TEST("ReadableStream pumpTo does not cancel the source after the pump completes") {
+  capnp::MallocMessageBuilder flagsBuilder;
+  auto fixture = makeJsStreamsFixture(flagsBuilder);
+
+  uint cancelCount = 0;
+  kj::Maybe<kj::Promise<DeferredProxy<void>>> pump;
+
+  auto request = fixture->newIncomingRequest();
+  fixture->enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto stream = ReadableStream::constructor(js,
+        UnderlyingSource{
+          .start =
+              [](jsg::Lock& js, auto controller) {
+      auto& c = KJ_REQUIRE_NONNULL(
+          controller.template tryGet<jsg::Ref<ReadableStreamDefaultController>>());
+      c->enqueue(js, jsg::JsValue(v8::ArrayBuffer::New(js.v8Isolate, 10)));
+      c->close(js);
+      return js.resolvedPromise();
+    },
+          .cancel = [&](jsg::Lock& js, jsg::JsValue) -> jsg::Promise<void> {
+      ++cancelCount;
+      return js.resolvedPromise();
+    },
+        },
+        kj::none);
+    pump = stream->pumpTo(js, kj::heap<NoopSink>(), true);
+  });
+
+  KJ_ASSERT_NONNULL(pump).wait(fixture->getWaitScope());
+  pump = kj::none;
+
+  fixture->drainAndDestroy(kj::mv(request));
+  KJ_ASSERT(cancelCount == 0);
+}
+
+KJ_TEST("ReadableStream pumpTo dropped during IoContext teardown does not cancel") {
+  // A pump can be owned by the IoContext's own task sets, in which case it is dropped while the
+  // IoContext is being destroyed. There is nothing left to run the cancel algorithm in, so the
+  // drop must be a safe no-op.
+  capnp::MallocMessageBuilder flagsBuilder;
+  auto fixture = makeJsStreamsFixture(flagsBuilder);
+
+  uint cancelCount = 0;
+  auto firstWrite = kj::newPromiseAndFulfiller<void>();
+
+  auto request = fixture->newIncomingRequest();
+  fixture->enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto stream = ReadableStream::constructor(js,
+        UnderlyingSource{
+          .start =
+              [](jsg::Lock& js, auto controller) {
+      auto& c = KJ_REQUIRE_NONNULL(
+          controller.template tryGet<jsg::Ref<ReadableStreamDefaultController>>());
+      c->enqueue(js, jsg::JsValue(v8::ArrayBuffer::New(js.v8Isolate, 10)));
+      return js.resolvedPromise();
+    },
+          .pull = [](jsg::Lock& js, auto controller) { return js.resolvedPromise(); },
+          .cancel = [&](jsg::Lock& js, jsg::JsValue) -> jsg::Promise<void> {
+      ++cancelCount;
+      return js.resolvedPromise();
+    },
+        },
+        kj::none);
+
+    auto sink = kj::heap<NoopSink>();
+    sink->onWrite = kj::mv(firstWrite.fulfiller);
+    env.context.addTask(stream->pumpTo(js, kj::mv(sink), true).then([](DeferredProxy<void> p) {
+      return kj::mv(p.proxyTask);
+    }));
+  });
+
+  firstWrite.promise.wait(fixture->getWaitScope());
+
+  // Destroying the request destroys the IoContext, and with it the task that owns the pump.
+  fixture->drainAndDestroy(kj::mv(request));
+  KJ_ASSERT(cancelCount == 0);
+}
+
 }  // namespace
 }  // namespace workerd::api
 
