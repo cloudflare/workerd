@@ -16,6 +16,7 @@ use crate::Frame;
 use crate::InitEvent;
 use crate::IsolateId;
 use crate::Kind;
+use crate::Link;
 use crate::Nanos;
 use crate::Outcome;
 use crate::Sink;
@@ -67,6 +68,11 @@ pub enum Event {
     Turn {
         ctx: ContextId,
         turn: Turn,
+    },
+    Link {
+        ctx: ContextId,
+        id: AsyncId,
+        from: Link,
     },
     Stack {
         isolate: IsolateId,
@@ -150,6 +156,14 @@ impl Sink for RecordingSink {
 
     fn destroy(&mut self, ctx: ContextId, id: AsyncId, _at: Nanos) {
         self.push(Event::Destroy { ctx, id });
+    }
+
+    fn link(&mut self, ctx: ContextId, id: AsyncId, from: &Link) {
+        self.push(Event::Link {
+            ctx,
+            id,
+            from: *from,
+        });
     }
 
     fn annotate(&mut self, ctx: ContextId, id: AsyncId, key: &str, value: &str) {

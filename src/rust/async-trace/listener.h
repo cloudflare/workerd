@@ -106,6 +106,9 @@ class AsyncTraceListener {
   virtual void onAnnotate(
       uint64_t ctx, AsyncId id, kj::ArrayPtr<const char> key, kj::ArrayPtr<const char> value) {}
   virtual void onTurn(uint64_t ctx, const AsyncTurn& turn) {}
+  // Resource `id` was caused by resource `fromId` of context `fromCtx` in isolate `fromIsolate`.
+  virtual void onLink(
+      uint64_t ctx, uint64_t id, uint64_t fromIsolate, uint64_t fromCtx, uint64_t fromId) {}
   // Creation stack `id` of `isolate`, innermost frame first. Reported to a listener before the
   // first onInit() that refers to it, once per listener.
   virtual void onStack(uint64_t isolate, uint32_t id, kj::ArrayPtr<const AsyncStackFrame> frames) {}
@@ -173,6 +176,15 @@ inline void listener_destroy(AsyncTraceListener& listener, uint64_t ctx, uint64_
 inline void listener_annotate(
     AsyncTraceListener& listener, uint64_t ctx, uint64_t id, ::rust::Str key, ::rust::Str value) {
   callListener([&]() { listener.onAnnotate(ctx, id, fromRust(key), fromRust(value)); });
+}
+
+inline void listener_link(AsyncTraceListener& listener,
+    uint64_t ctx,
+    uint64_t id,
+    uint64_t fromIsolate,
+    uint64_t fromCtx,
+    uint64_t fromId) {
+  callListener([&]() { listener.onLink(ctx, id, fromIsolate, fromCtx, fromId); });
 }
 
 // A stack arrives frame by frame (see `listener_stack_begin` in ffi.rs), buffered here until

@@ -17,8 +17,10 @@ use crate::ContextInfo;
 use crate::ContextStats;
 use crate::Frame;
 use crate::InitEvent;
+use crate::IsolateId;
 use crate::IsolateState;
 use crate::Kind;
+use crate::Link;
 use crate::Nanos;
 use crate::Outcome;
 use crate::Sink;
@@ -98,6 +100,8 @@ pub struct Tracker {
     /// removed when the operation is adopted, explicitly bound, settled or destroyed, or when its
     /// turn ends.
     pending_ops: Vec<(AsyncId, u64)>,
+    /// The latest operation created in a turn, with that turn's sequence number, bound or not.
+    last_op: Option<(AsyncId, u64)>,
     /// Stacks already reported to this tracker's sinks.
     reported_stacks: HashSet<StackId>,
     /// Frames collected between `begin_stack` and `end_stack`.
@@ -131,6 +135,7 @@ impl Tracker {
             turns: Vec::new(),
             next_turn_seq: 1,
             pending_ops: Vec::new(),
+            last_op: None,
             reported_stacks: HashSet::new(),
             building_stack: Vec::new(),
             stats: ContextStats::default(),
@@ -179,6 +184,45 @@ impl Tracker {
             return turn.cause;
         }
         self.scopes.last().map_or(0, |scope| scope.id)
+    }
+
+    /// The ID of this context's isolate.
+    #[must_use]
+    pub fn isolate_id(&self) -> IsolateId {
+        self.isolate.id()
+    }
+
+    /// What caused something that the current turn did synchronously in another context, such as
+    /// delivering a request to it: the latest operation created in the turn if it is still live
+    /// (typically the binding call that delivered the request, whether or not a bridge adopted
+    /// it), else the running resource. `0` outside a turn.
+    #[must_use]
+    pub fn link_source(&self) -> AsyncId {
+        let Some(turn) = self.turns.last() else {
+            return 0;
+        };
+        if let Some((id, seq)) = self.last_op
+            && seq == turn.seq
+            && self.resources.contains_key(&id)
+        {
+            return id;
+        }
+        self.current()
+    }
+
+    /// Reports that resource `id` was caused by `from`, a resource of another context (see
+    /// [`Tracker::link_source`]). For example, a request delivered by another context's `fetch`.
+    pub fn link(&mut self, id: AsyncId, from: Link) {
+        if self.closed || id == 0 || from.id == 0 {
+            return;
+        }
+        if !self.resources.contains_key(&id) {
+            self.stats.unknown += 1;
+            return;
+        }
+        for sink in &mut self.sinks {
+            sink.link(self.ctx, id, &from);
+        }
     }
 
     /// The cause of the innermost open turn, or `0`.
@@ -247,6 +291,7 @@ impl Tracker {
             && let Some(turn) = self.turns.last()
         {
             self.pending_ops.push((id, turn.seq));
+            self.last_op = Some((id, turn.seq));
         }
         if let Some(stack) = stack {
             self.report_stack(stack);
