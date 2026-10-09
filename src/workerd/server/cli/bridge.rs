@@ -58,6 +58,7 @@ pub mod ffi {
         perfetto_trace_categories: KjMaybe<String>,
         async_trace_path: KjMaybe<String>,
         async_trace_stacks: KjMaybe<u32>,
+        async_trace_promises: bool,
         experimental: bool,
         pyodide_package_disk_cache_dir: KjMaybe<String>,
         pyodide_bundle_disk_cache_dir: KjMaybe<String>,

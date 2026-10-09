@@ -12,6 +12,7 @@
 #include <workerd/io/actor-sqlite.h>
 #include <workerd/io/async-trace-inspector.h>
 #include <workerd/io/async-trace-perfetto.h>
+#include <workerd/io/async-trace-promises.h>
 #include <workerd/io/async-trace-stacks.h>
 #include <workerd/io/async-trace.h>
 #include <workerd/io/cdp.capnp.h>
@@ -1211,6 +1212,17 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     KJ_DASSERT(lock->v8Isolate->GetData(jsg::SET_DATA_ISOLATE) == nullptr);
     lock->v8Isolate->SetData(jsg::SET_DATA_ISOLATE, this);
 
+    // Never in multi-tenant processes: the hook slows down every promise in the isolate.
+    KJ_IF_SOME(config, asyncTraceConfig) {
+      if (config.promises && asyncTraceIsolate != kj::none) {
+        if (isMultiTenantProcess()) {
+          KJ_LOG(ERROR, "ignoring AsyncTraceConfig::promises in a multi-tenant process");
+        } else {
+          asyncTracePromiseHook = AsyncTracePromiseHook::install(lock->v8Isolate);
+        }
+      }
+    }
+
     for (auto& m: kConsoleMethods) {
       jsg::isolateRegisterExternalReference(
           lock->v8Isolate, reinterpret_cast<intptr_t>(m.callback));
@@ -1700,6 +1712,8 @@ Worker::Isolate::~Isolate() noexcept(false) {
     auto inspector = kj::mv(impl->inspector);
     auto dropTraceAsyncContextKey = kj::mv(traceAsyncContextKey);
     auto dropUserTraceAsyncContextKey = kj::mv(userTraceAsyncContextKey);
+    // Holds a v8::Global.
+    auto dropPromiseHook = kj::mv(asyncTracePromiseHook);
     // The Rust Realm must be dropped under lock since Realm::drop() accesses V8 globals
     // and calls drop functions that may interact with V8.
     auto dropRealm = kj::mv(impl->realm);

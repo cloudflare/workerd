@@ -28,6 +28,9 @@ struct AsyncTraceConfig {
   // Record up to this many frames of each resource's creation stack; 0 records none. Each capture
   // walks the JavaScript stack, so this costs time per resource created.
   uint32_t stackDepth = 0;
+  // Track JavaScript promises too (async-trace-promises.h). Installing V8's promise hook slows down
+  // every promise operation in the isolate, permanently, so this is for local development only.
+  bool promises = false;
 };
 
 // Whether an outgoing subrequest's request body can be rewound (e.g. a buffered or null body), and

@@ -232,6 +232,11 @@ pub struct ServeOrTestArgs {
     #[arg(long, value_name = "frames", value_parser = clap::value_parser!(u32).range(1..=64))]
     pub async_trace_stacks: Option<u32>,
 
+    /// Also trace JavaScript promises, in every async trace output. Installs V8's promise hook,
+    /// which slows down every promise operation.
+    #[arg(long)]
+    pub async_trace_promises: bool,
+
     /// Watch configuration files (and server binary) and reload if they change. Useful for
     /// development, but not recommended in production.
     #[arg(short, long)]
@@ -419,6 +424,7 @@ impl From<ServeOrTestArgs> for ffi::ServeOrTestOptions {
             perfetto_trace_categories: perfetto_trace_categories.into(),
             async_trace_path: args.async_trace.into(),
             async_trace_stacks: args.async_trace_stacks.into(),
+            async_trace_promises: args.async_trace_promises,
             experimental: args.experimental,
             pyodide_package_disk_cache_dir: args.pyodide_package_disk_cache_dir.into(),
             pyodide_bundle_disk_cache_dir: args.pyodide_bundle_disk_cache_dir.into(),

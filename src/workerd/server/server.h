@@ -77,6 +77,10 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   void enableAsyncTraceStacks(uint32_t frames) {
     asyncTraceStackDepth = frames;
   }
+  // Traces JavaScript promises too (--async-trace-promises), for every async trace output.
+  void enableAsyncTracePromises() {
+    asyncTracePromises = true;
+  }
   void enableControl(uint fd) {
     controlOverride = kj::heap<kj::FdOutputStream>(fd);
   }
@@ -205,6 +209,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   kj::Maybe<kj::String> inspectorOverride;
   kj::Maybe<const AsyncTraceWriter&> asyncTraceWriter;
   uint32_t asyncTraceStackDepth = 0;
+  bool asyncTracePromises = false;
   kj::Maybe<kj::Own<InspectorServiceIsolateRegistrar>> inspectorIsolateRegistrar;
   kj::Maybe<kj::Own<kj::FdOutputStream>> controlOverride;
   kj::Maybe<kj::String> debugPortOverride;

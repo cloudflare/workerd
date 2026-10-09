@@ -169,6 +169,9 @@ class CliMain {
     KJ_IF_SOME(frames, options.async_trace_stacks) {
       server->enableAsyncTraceStacks(frames);
     }
+    if (options.async_trace_promises) {
+      server->enableAsyncTracePromises();
+    }
     if (options.experimental) {
       server->allowExperimental();
     }

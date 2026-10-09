@@ -2,7 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Checks the --async-trace output of scenario.js.
+// Checks the --async-trace output of scenario.js: trace.ndjson (with --async-trace-stacks) and
+// trace-promises.ndjson (with --async-trace-promises).
 
 import assert from 'node:assert';
 
@@ -53,115 +54,197 @@ function find(resources, predicate, what) {
   return found[0];
 }
 
-export default {
-  async test(ctrl, env) {
-    const response = await env.TRACE_DIR.fetch('http://trace-dir/trace.ndjson');
-    assert.strictEqual(response.status, 200);
-    const events = parse(await response.text());
+async function load(env, name) {
+  const response = await env.TRACE_DIR.fetch(`http://trace-dir/${name}`);
+  assert.strictEqual(response.status, 200, name);
+  return parse(await response.text());
+}
 
+// Checks what holds for any trace of the scenario: the header, each context's framing and stats,
+// balanced callback scopes, time order, and the resources of the core (non-promise) tier.
+function checkCore(events, { withStacks }) {
+  {
     const [header] = events;
     assert.strictEqual(header.e, 'header');
     assert.strictEqual(header.v, 1);
     assert.strictEqual(header.producer, 'workerd');
+  }
+  const indexed = index(events);
+  const { contexts, resources, stacks } = indexed;
+  assert.strictEqual(contexts.size, 2, 'the test and its subrequest');
 
-    const { contexts, resources, stacks } = index(events);
-    assert.strictEqual(contexts.size, 2, 'the test and its subrequest');
-
-    for (const [ctx, list] of contexts) {
-      assert.strictEqual(list[0].e, 'ctx', `context ${ctx} starts with ctx`);
-      const end = list[list.length - 1];
-      assert.strictEqual(end.e, 'ctx_end', `context ${ctx} ends with ctx_end`);
-      for (const stat of [
-        'dropped',
-        'unknown',
-        'unbalanced',
-        'ambiguousBindings',
-        'foreignThread',
-      ]) {
-        assert.strictEqual(end[stat], 0, `context ${ctx}: ${stat}`);
-      }
-
-      // Callback scopes balance, and times within a context never go backwards.
-      const open = [];
-      let last = 0;
-      for (const event of list) {
-        if (event.e === 'before') open.push(event.id);
-        if (event.e === 'after') assert.strictEqual(open.pop(), event.id);
-        const at = event.at ?? event.end;
-        if (at !== undefined) {
-          assert(
-            at >= last,
-            `context ${ctx}: time order at ${JSON.stringify(event)}`
-          );
-          last = at;
-        }
-      }
-      assert.strictEqual(open.length, 0, `context ${ctx}: no scope left open`);
+  for (const [ctx, list] of contexts) {
+    assert.strictEqual(list[0].e, 'ctx', `context ${ctx} starts with ctx`);
+    const end = list[list.length - 1];
+    assert.strictEqual(end.e, 'ctx_end', `context ${ctx} ends with ctx_end`);
+    for (const stat of [
+      'dropped',
+      'unknown',
+      'unbalanced',
+      'ambiguousBindings',
+      'foreignThread',
+    ]) {
+      assert.strictEqual(end[stat], 0, `context ${ctx}: ${stat}`);
     }
 
-    const turnCauses = new Set(
-      events.filter((e) => e.e === 'turn').map((e) => e.cause)
-    );
-    const byKind = (kind, name) => (r) => r.kind === kind && r.name === name;
+    // Callback scopes balance, and times within a context never go backwards.
+    const open = [];
+    let last = 0;
+    for (const event of list) {
+      if (event.e === 'before') open.push(event.id);
+      if (event.e === 'after') assert.strictEqual(open.pop(), event.id);
+      const at = event.at ?? event.end;
+      if (at !== undefined) {
+        assert(
+          at >= last,
+          `context ${ctx}: time order at ${JSON.stringify(event)}`
+        );
+        last = at;
+      }
+    }
+    assert.strictEqual(open.length, 0, `context ${ctx}: no scope left open`);
+  }
 
-    // The test handler: setTimeout, then a fetch created in the timer's turn.
-    const test = find(resources, byKind('request', 'test'), 'test request');
-    const timer = find(resources, byKind('timer', 'setTimeout'), 'setTimeout');
-    assert.strictEqual(timer.trigger, test.id);
-    assert(turnCauses.has(timer.id), 'the timer causes a turn');
-    const fetch = find(
-      resources,
-      byKind('operation', 'fetch'),
-      'fetch operation'
-    );
-    assert.strictEqual(
-      fetch.trigger,
-      timer.id,
-      'fetch is triggered by the timer'
-    );
-    const microtask = find(
-      resources,
-      byKind('microtask', 'queueMicrotask'),
-      'microtask'
-    );
-    assert.strictEqual(microtask.trigger, timer.id);
+  const turnCauses = new Set(
+    events.filter((e) => e.e === 'turn').map((e) => e.cause)
+  );
+  const byKind = (kind, name) => (r) => r.kind === kind && r.name === name;
 
-    // Creation stacks point at the code that created each resource.
+  // The test handler: setTimeout, then a fetch created in the timer's turn.
+  const test = find(resources, byKind('request', 'test'), 'test request');
+  const timer = find(resources, byKind('timer', 'setTimeout'), 'setTimeout');
+  assert.strictEqual(timer.trigger, test.id);
+  assert(turnCauses.has(timer.id), 'the timer causes a turn');
+  const fetch = find(
+    resources,
+    byKind('operation', 'fetch'),
+    'fetch operation'
+  );
+  assert.strictEqual(
+    fetch.trigger,
+    timer.id,
+    'fetch is triggered by the timer'
+  );
+  const microtask = find(
+    resources,
+    byKind('microtask', 'queueMicrotask'),
+    'microtask'
+  );
+  assert.strictEqual(microtask.trigger, timer.id);
+
+  // Creation stacks point at the code that created each resource.
+  if (withStacks) {
     for (const resource of [timer, microtask, fetch]) {
       assert(stackFunctions(stacks, resource).includes('test'), resource.name);
     }
+  }
 
-    // The fetch's response resumes JavaScript under the fetch operation (adopted by awaitIo), and
-    // reading the body is triggered by it.
-    assert(turnCauses.has(fetch.id), 'the fetch operation causes a turn');
-    const bridges = [...resources.values()].filter(
-      (r) => r.ctx === test.ctx && r.kind === 'kj_to_js'
-    );
-    assert(
-      bridges.some((r) => r.trigger === fetch.id),
-      'reading the body is triggered by the fetch'
-    );
+  // The fetch's response resumes JavaScript under the fetch operation (adopted by awaitIo), and
+  // reading the body is triggered by it.
+  assert(turnCauses.has(fetch.id), 'the fetch operation causes a turn');
+  const bridges = [...resources.values()].filter(
+    (r) => r.ctx === test.ctx && r.kind === 'kj_to_js'
+  );
+  assert(
+    bridges.some((r) => r.trigger === fetch.id),
+    'reading the body is triggered by the fetch'
+  );
 
-    // The subrequest: scheduler.wait, bridged back to JavaScript by awaitIo.
-    const wait = find(
-      resources,
-      byKind('timer', 'scheduler.wait'),
-      'scheduler.wait'
-    );
-    assert.notStrictEqual(wait.ctx, test.ctx);
-    const waitBridge = [...resources.values()].find(
-      (r) => r.ctx === wait.ctx && r.kind === 'kj_to_js'
-    );
-    assert(waitBridge, 'scheduler.wait is awaited through awaitIo');
-    assert.strictEqual(
-      waitBridge.trigger,
-      wait.trigger,
-      'both created by the handler'
-    );
-    assert(turnCauses.has(waitBridge.id), 'the bridge resumes the handler');
+  // The subrequest: scheduler.wait, bridged back to JavaScript by awaitIo.
+  const wait = find(
+    resources,
+    byKind('timer', 'scheduler.wait'),
+    'scheduler.wait'
+  );
+  assert.notStrictEqual(wait.ctx, test.ctx);
+  const waitBridge = [...resources.values()].find(
+    (r) => r.ctx === wait.ctx && r.kind === 'kj_to_js'
+  );
+  assert(waitBridge, 'scheduler.wait is awaited through awaitIo');
+  assert.strictEqual(
+    waitBridge.trigger,
+    wait.trigger,
+    'both created by the handler'
+  );
+  assert(turnCauses.has(waitBridge.id), 'the bridge resumes the handler');
+  if (withStacks) {
     assert(
       stackFunctions(stacks, wait).includes('fetch'),
       'scheduler.wait stack'
     );
+  }
+  return { ...indexed, test, timer, microtask };
+}
+
+// With --async-trace-promises: the code after `await new Promise((r) => setTimeout(r, 1))` runs as
+// a promise reaction, linked to the awaited promise, which the timer's callback settles.
+function checkPromises({ contexts, resources, test, timer, microtask }) {
+  const promises = [...resources.values()].filter(
+    (r) => r.kind === 'js_promise'
+  );
+  assert(promises.length > 0, 'promises are traced');
+  for (const promise of promises) {
+    assert(
+      resources.has(promise.trigger),
+      `promise ${promise.id} has a known trigger`
+    );
+  }
+
+  const reaction = resources.get(microtask.exec);
+  assert.strictEqual(
+    reaction?.kind,
+    'js_promise',
+    'the continuation runs as a reaction'
+  );
+  const awaited = resources.get(reaction.trigger);
+  assert.strictEqual(
+    awaited?.kind,
+    'js_promise',
+    'the reaction derives from a promise'
+  );
+  assert.strictEqual(
+    awaited.trigger,
+    test.id,
+    'the handler created the awaited promise'
+  );
+
+  const list = contexts.get(test.ctx);
+  const index = (predicate, what) => {
+    const i = list.findIndex(predicate);
+    assert(i >= 0, what);
+    return i;
+  };
+  const timerBefore = index(
+    (e) => e.e === 'before' && e.id === timer.id,
+    'timer runs'
+  );
+  const timerAfter = index(
+    (e) => e.e === 'after' && e.id === timer.id,
+    'timer finishes'
+  );
+  const settled = index(
+    (e) => e.e === 'settle' && e.id === awaited.id,
+    'awaited settles'
+  );
+  assert(
+    timerBefore < settled && settled < timerAfter,
+    'the timer settles the awaited promise'
+  );
+}
+
+export default {
+  async test(ctrl, env) {
+    const core = checkCore(await load(env, 'trace.ndjson'), {
+      withStacks: true,
+    });
+    assert(
+      ![...core.resources.values()].some((r) => r.kind === 'js_promise'),
+      'promises are traced only with --async-trace-promises'
+    );
+
+    const withPromises = checkCore(await load(env, 'trace-promises.ndjson'), {
+      withStacks: false,
+    });
+    checkPromises(withPromises);
   },
 };

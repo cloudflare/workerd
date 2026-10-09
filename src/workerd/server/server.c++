@@ -5897,16 +5897,19 @@ kj::Promise<kj::Rc<Server::Service>> Server::makeWorker(kj::StringPtr name,
 
 namespace {
 
-// Enables async tracing for an isolate (--async-trace, --async-trace-stacks) and writes each of
-// its contexts to the --async-trace file, if there is one.
+// Enables async tracing for an isolate (--async-trace, --async-trace-stacks,
+// --async-trace-promises) and writes each of its contexts to the --async-trace file, if there is
+// one.
 class AsyncTraceIsolateObserver final: public IsolateObserver {
  public:
-  AsyncTraceIsolateObserver(kj::Maybe<const AsyncTraceWriter&> writer, uint32_t stackDepth)
+  AsyncTraceIsolateObserver(
+      kj::Maybe<const AsyncTraceWriter&> writer, uint32_t stackDepth, bool promises)
       : writer(writer),
-        stackDepth(stackDepth) {}
+        stackDepth(stackDepth),
+        promises(promises) {}
 
   kj::Maybe<AsyncTraceConfig> getAsyncTraceConfig() const override {
-    return AsyncTraceConfig{.stackDepth = stackDepth};
+    return AsyncTraceConfig{.stackDepth = stackDepth, .promises = promises};
   }
 
   void addAsyncTraceSinks(AsyncTraceSinks& sinks,
@@ -5920,6 +5923,7 @@ class AsyncTraceIsolateObserver final: public IsolateObserver {
  private:
   kj::Maybe<const AsyncTraceWriter&> writer;
   uint32_t stackDepth;
+  bool promises;
 };
 
 }  // namespace
@@ -5932,9 +5936,9 @@ kj::Own<Worker::Isolate> Server::makeWorkerIsolate(kj::StringPtr name,
     kj::Maybe<jsg::SnapshotConfig> snapshotConfig) {
   auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
   kj::Own<IsolateObserver> observer;
-  if (asyncTraceWriter != kj::none || asyncTraceStackDepth > 0) {
-    observer =
-        kj::atomicRefcounted<AsyncTraceIsolateObserver>(asyncTraceWriter, asyncTraceStackDepth);
+  if (asyncTraceWriter != kj::none || asyncTraceStackDepth > 0 || asyncTracePromises) {
+    observer = kj::atomicRefcounted<AsyncTraceIsolateObserver>(
+        asyncTraceWriter, asyncTraceStackDepth, asyncTracePromises);
   } else {
     observer = kj::atomicRefcounted<IsolateObserver>();
   }
