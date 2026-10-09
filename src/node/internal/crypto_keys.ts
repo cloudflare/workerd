@@ -429,28 +429,78 @@ export function createSecretKey(
   return KeyObject.from(cryptoImpl.createSecretKey(key)) as SecretKeyObject;
 }
 
+export type NormalizedKeyInput =
+  | {
+      // Raw key material or a non-wrapper value: a string, Buffer,
+      // ArrayBuffer, ArrayBufferView, KeyObject, CryptoKey, or a
+      // non-object input.
+      kind: 'material';
+      key: unknown;
+    }
+  | {
+      // An options object: options.key was captured exactly once;
+      // remaining fields are read from options on demand.
+      kind: 'wrapper';
+      key: unknown;
+      options: CreateAsymmetricKeyOptions;
+    };
+
+export function normalizeKeyInput(key: unknown): NormalizedKeyInput {
+  // Raw key material is classified before wrapper detection so that a
+  // Buffer, ArrayBuffer, or view carrying an unrelated `key` property is
+  // still material rather than an options object.
+  if (
+    key !== null &&
+    typeof key === 'object' &&
+    !isKeyObject(key) &&
+    !(key instanceof CryptoKey) &&
+    !isStringOrBuffer(key) &&
+    !isAnyArrayBuffer(key) &&
+    !isArrayBufferView(key)
+  ) {
+    const options = key as CreateAsymmetricKeyOptions;
+    return { kind: 'wrapper', key: options.key, options };
+  }
+  return { kind: 'material', key };
+}
+
 export function prepareAsymmetricKey(
-  key: CreateAsymmetricKeyOptions | null | undefined,
+  input: NormalizedKeyInput,
   ctx: (typeof KeyContext)[keyof typeof KeyContext]
 ): InnerCreateAsymmetricKeyOptions {
-  // Safety check... key should not be undefined or null here.
-  if (key == null) {
+  // A null or undefined top-level input keeps the 'key' argument error;
+  // a missing options.key is reported as 'options.key' below.
+  if (input.kind === 'material' && input.key == null) {
     throw new ERR_INVALID_ARG_TYPE(
       'key',
       ['ArrayBuffer', 'Buffer', 'TypedArray', 'DataView', 'string', 'object'],
-      key
+      input.key
     );
   }
 
   let normalized: CreateAsymmetricKeyOptions;
   if (
-    isStringOrBuffer(key) ||
-    isAnyArrayBuffer(key) ||
-    isArrayBufferView(key)
+    input.kind === 'material' &&
+    (isStringOrBuffer(input.key) ||
+      isAnyArrayBuffer(input.key) ||
+      isArrayBufferView(input.key))
   ) {
-    normalized = { key, format: 'pem' } as CreateAsymmetricKeyOptions;
+    normalized = {
+      key: input.key,
+      format: 'pem',
+    } as CreateAsymmetricKeyOptions;
+  } else if (input.kind === 'wrapper') {
+    // The key member was captured once during normalization; read the
+    // remaining fields from the original options object.
+    normalized = {
+      key: input.key,
+      encoding: input.options.encoding,
+      format: input.options.format,
+      type: input.options.type,
+      passphrase: input.options.passphrase,
+    } as CreateAsymmetricKeyOptions;
   } else {
-    normalized = key;
+    normalized = input.key as CreateAsymmetricKeyOptions;
   }
 
   const {
@@ -501,7 +551,7 @@ export function prepareAsymmetricKey(
     throw new ERR_INVALID_ARG_TYPE(
       'key',
       ['ArrayBuffer', 'Buffer', 'TypedArray', 'DataView', 'string', 'object'],
-      key
+      input.kind === 'wrapper' ? input.options : input.key
     );
   }
 
@@ -525,11 +575,14 @@ export function createPrivateKey(
 export function createPrivateKey(
   key: CreateAsymmetricKeyOptions | KeyData
 ): PrivateKeyObject {
+  return createPrivateKeyInternal(normalizeKeyInput(key));
+}
+
+export function createPrivateKeyInternal(
+  input: NormalizedKeyInput
+): PrivateKeyObject {
   const cryptoKey = cryptoImpl.createPrivateKey(
-    prepareAsymmetricKey(
-      key as CreateAsymmetricKeyOptions,
-      KeyContext.kCreatePrivate
-    )
+    prepareAsymmetricKey(input, KeyContext.kCreatePrivate)
   );
   return KeyObject.from(cryptoKey) as PrivateKeyObject;
 }
@@ -548,41 +601,47 @@ export function createPublicKey(
   // Passing a KeyObject or a CryptoKey allows deriving the public key
   // from an existing private key.
 
-  if (isKeyObject(key)) {
-    if (key.type !== 'private') {
-      throw new ERR_INVALID_ARG_TYPE('key', 'PrivateKeyObject', key);
+  const input = normalizeKeyInput(key);
+  if (input.kind === 'material') {
+    if (isKeyObject(input.key)) {
+      if (input.key.type !== 'private') {
+        throw new ERR_INVALID_ARG_TYPE('key', 'PrivateKeyObject', input.key);
+      }
+      return KeyObject.from(
+        cryptoImpl.createPublicKey({
+          key: input.key[kHandle],
+          // The following are ignored when key is a CryptoKey.
+          format: 'pem',
+          type: undefined,
+          passphrase: undefined,
+        })
+      ) as PublicKeyObject;
     }
-    return KeyObject.from(
-      cryptoImpl.createPublicKey({
-        key: key[kHandle],
-        // The following are ignored when key is a CryptoKey.
-        format: 'pem',
-        type: undefined,
-        passphrase: undefined,
-      })
-    ) as PublicKeyObject;
+
+    if (input.key instanceof CryptoKey) {
+      if (input.key.type !== 'private') {
+        throw new ERR_INVALID_ARG_TYPE('key', 'PrivateKeyObject', input.key);
+      }
+      return KeyObject.from(
+        cryptoImpl.createPublicKey({
+          key: input.key,
+          // The following are ignored when key is a CryptoKey.
+          format: 'pem',
+          type: undefined,
+          passphrase: undefined,
+        })
+      ) as PublicKeyObject;
+    }
   }
 
-  if (key instanceof CryptoKey) {
-    if (key.type !== 'private') {
-      throw new ERR_INVALID_ARG_TYPE('key', 'PrivateKeyObject', key);
-    }
-    return KeyObject.from(
-      cryptoImpl.createPublicKey({
-        key,
-        // The following are ignored when key is a CryptoKey.
-        format: 'pem',
-        type: undefined,
-        passphrase: undefined,
-      })
-    ) as PublicKeyObject;
-  }
+  return createPublicKeyInternal(input);
+}
 
+export function createPublicKeyInternal(
+  input: NormalizedKeyInput
+): PublicKeyObject {
   const cryptoKey = cryptoImpl.createPublicKey(
-    prepareAsymmetricKey(
-      key as CreateAsymmetricKeyOptions,
-      KeyContext.kCreatePublic
-    )
+    prepareAsymmetricKey(input, KeyContext.kCreatePublic)
   );
   return KeyObject.from(cryptoKey) as PublicKeyObject;
 }
