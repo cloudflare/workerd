@@ -655,7 +655,7 @@ struct RequestInitializerDict {
   // body initializer must be Optional<Maybe<Body::Initializer>>.
   jsg::Optional<kj::Maybe<Body::Initializer>> body;
 
-  // follow, error, manual (default follow)
+  // follow, manual (default follow)
   jsg::Optional<kj::String> redirect;
 
   jsg::Optional<kj::Maybe<jsg::Ref<Fetcher>>> fetcher;
@@ -731,6 +731,7 @@ struct RequestInitializerDict {
         JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
           headers?: HeadersInit;
           body?: BodyInit | null;
+          redirect?: "follow" | "manual";
           cache?: 'no-store' | 'no-cache' | 'reload';
           cf?: Cf;
           encodeResponseBody?: "automatic" | "manual";
@@ -740,6 +741,7 @@ struct RequestInitializerDict {
         JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
           headers?: HeadersInit;
           body?: BodyInit | null;
+          redirect?: "follow" | "manual";
           cache?: 'no-store' | 'no-cache';
           cf?: Cf;
           encodeResponseBody?: "automatic" | "manual";
@@ -748,6 +750,7 @@ struct RequestInitializerDict {
         JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
           headers?: HeadersInit;
           body?: BodyInit | null;
+          redirect?: "follow" | "manual";
           cache?: 'no-store';
           cf?: Cf;
           encodeResponseBody?: "automatic" | "manual";
@@ -757,6 +760,7 @@ struct RequestInitializerDict {
       JSG_TS_OVERRIDE(RequestInit<Cf = CfProperties> {
         headers?: HeadersInit;
         body?: BodyInit | null;
+        redirect?: "follow" | "manual";
         cache?: never;
         cf?: Cf;
         encodeResponseBody?: "automatic" | "manual";
