@@ -4,6 +4,7 @@
 #include "async-context.h"
 
 #include "jsg.h"
+#include "setup.h"
 
 #include <workerd/jsg/memory.h>
 
@@ -24,7 +25,8 @@ inline void maybeSetV8ContinuationContext(
 }
 }  // namespace
 
-AsyncContextFrame::AsyncContextFrame(Lock& js, StorageEntry storageEntry) {
+AsyncContextFrame::AsyncContextFrame(Lock& js, StorageEntry storageEntry)
+    : isolateBase(IsolateBase::from(js.v8Isolate)) {
   KJ_IF_SOME(frame, current(js)) {
     // Propagate the storage context of the current frame (if any).
     // If current(js) returns nullptr, we assume we're in the root
@@ -191,7 +193,16 @@ v8::Local<v8::Object> AsyncContextFrame::getJSWrapper(Lock& js) {
 }
 
 void AsyncContextFrame::jsgVisitForGc(GcVisitor& visitor) {
-  // tracing will make the members weak and will allow
-  // them to be gc'd, which is not what we want.
+  // Tracing makes the stored values weak, reachable only through the frame, and a minor GC can
+  // then collect the value of a frame that is in use (als-gc-test). So they stay strong, which
+  // keeps a value that refers back to its own frame (a store holding AsyncLocalStorage.snapshot())
+  // alive for good. While a startup snapshot collects garbage before its capture, no request runs
+  // and the isolate is not used afterwards, so trace them then: the snapshot must not carry such
+  // cycles.
+  if (isolateBase.isCollectingForSnapshot()) {
+    for (auto& entry: storage) {
+      visitor.visit(entry.value);
+    }
+  }
 }
 }  // namespace workerd::jsg
