@@ -322,30 +322,37 @@ class NullIsolateLimitEnforcer final: public IsolateLimitEnforcer {
   TrackedWasmInstanceList trackedWasmInstances;
 };
 
-// Enables async tracing for an isolate and writes each of its contexts to the --async-trace file.
+// Enables async tracing for an isolate (--async-trace, --async-trace-stacks) and writes each of
+// its contexts to the --async-trace file, if there is one.
 class AsyncTraceIsolateObserver final: public IsolateObserver {
  public:
-  explicit AsyncTraceIsolateObserver(const AsyncTraceWriter& writer): writer(writer) {}
+  AsyncTraceIsolateObserver(kj::Maybe<const AsyncTraceWriter&> writer, uint32_t stackDepth)
+      : writer(writer),
+        stackDepth(stackDepth) {}
 
   kj::Maybe<AsyncTraceConfig> getAsyncTraceConfig() const override {
-    return AsyncTraceConfig{};
+    return AsyncTraceConfig{.stackDepth = stackDepth};
   }
 
   void addAsyncTraceSinks(AsyncTraceSinks& sinks,
       kj::StringPtr worker,
       kj::Maybe<kj::StringPtr> actorId) const override {
-    sinks.addNdjson(writer);
+    KJ_IF_SOME(w, writer) {
+      sinks.addNdjson(w);
+    }
   }
 
  private:
-  const AsyncTraceWriter& writer;
+  kj::Maybe<const AsyncTraceWriter&> writer;
+  uint32_t stackDepth;
 };
 
-// The observer of each isolate: an AsyncTraceIsolateObserver under --async-trace, otherwise the
-// default one, which changes nothing.
+// The observer of each isolate: an AsyncTraceIsolateObserver if any async trace option is set,
+// otherwise the default one, which changes nothing.
 kj::Own<IsolateObserver> newIsolateObserver(const WorkerFactory::Options& options) {
-  KJ_IF_SOME(writer, options.asyncTraceWriter) {
-    return kj::atomicRefcounted<AsyncTraceIsolateObserver>(writer);
+  if (options.asyncTraceWriter != kj::none || options.asyncTraceStackDepth > 0) {
+    return kj::atomicRefcounted<AsyncTraceIsolateObserver>(
+        options.asyncTraceWriter, options.asyncTraceStackDepth);
   }
   return kj::atomicRefcounted<IsolateObserver>();
 }

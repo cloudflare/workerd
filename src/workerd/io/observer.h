@@ -22,9 +22,13 @@ class IoContext;
 class AsyncTraceSinks;
 
 // How an isolate supports async tracing (see async-trace.h). Returned by
-// IsolateObserver::getAsyncTraceConfig().
-// It has no options yet: returning any config enables turn, request and resource tracking.
-struct AsyncTraceConfig {};
+// IsolateObserver::getAsyncTraceConfig(). Returning any config enables turn, request and resource
+// tracking.
+struct AsyncTraceConfig {
+  // Record up to this many frames of each resource's creation stack; 0 records none. Each capture
+  // walks the JavaScript stack, so this costs time per resource created.
+  uint32_t stackDepth = 0;
+};
 
 // Whether an outgoing subrequest's request body can be rewound (e.g. a buffered or null body), and
 // so the request could be re-sent. See RequestObserver::setNextSubrequestRetryEligibility().

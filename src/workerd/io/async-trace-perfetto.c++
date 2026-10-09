@@ -6,6 +6,9 @@
 
 #include <workerd/util/use-perfetto-categories.h>
 
+#include <kj/map.h>
+#include <kj/vector.h>
+
 #include <string>
 
 namespace workerd {
@@ -95,19 +98,40 @@ class PerfettoSink final: public AsyncTraceListener {
     desc.set_name(toStd(event.name));
     traces::TrackEvent::SetTrackDescriptor(track, desc);
 
+    auto args = [&](perfetto::EventContext ctx) {
+      ctx.AddDebugAnnotation("kind", kindName(event.kind));
+      ctx.AddDebugAnnotation("id", event.id);
+      ctx.AddDebugAnnotation("trigger", event.trigger);
+      ctx.AddDebugAnnotation("exec", event.execution);
+      if (event.stack != 0) {
+        KJ_IF_SOME(text, stacks.find(event.stack)) {
+          ctx.AddDebugAnnotation("stack", std::string(text.cStr(), text.size()));
+        }
+      }
+    };
     if (event.execution != 0) {
       auto flow = mix(isolate, event.id, CREATE_FLOW);
       TRACE_EVENT_INSTANT("workerd.async", "create", resourceTrack(event.execution),
           perfetto::Flow::ProcessScoped(flow));
       TRACE_EVENT_BEGIN("workerd.async",
           perfetto::DynamicString(event.name.begin(), event.name.size()), track,
-          perfetto::TerminatingFlow::ProcessScoped(flow), "kind", kindName(event.kind), "id",
-          event.id, "trigger", event.trigger, "exec", event.execution);
+          perfetto::TerminatingFlow::ProcessScoped(flow), args);
     } else {
       TRACE_EVENT_BEGIN("workerd.async",
-          perfetto::DynamicString(event.name.begin(), event.name.size()), track, "kind",
-          kindName(event.kind), "id", event.id, "trigger", event.trigger, "exec", event.execution);
+          perfetto::DynamicString(event.name.begin(), event.name.size()), track, args);
     }
+  }
+
+  void onStack(
+      uint64_t isolateId, uint32_t id, kj::ArrayPtr<const AsyncStackFrame> frames) override {
+    // One line per frame, innermost first, as in a JavaScript stack trace. Bounded by the number
+    // of distinct creation sites the context uses.
+    kj::Vector<kj::String> lines(frames.size());
+    for (auto& frame: frames) {
+      auto function = frame.function.size() == 0 ? "<anonymous>"_kj.asArray() : frame.function;
+      lines.add(kj::str(function, " (", frame.script, ":", frame.line, ":", frame.column, ")"));
+    }
+    stacks.upsert(id, kj::strArray(lines, "\n"));
   }
 
   void onSettle(uint64_t ctx, AsyncId id, AsyncOutcome outcome, uint64_t atNs) override {
@@ -175,6 +199,8 @@ class PerfettoSink final: public AsyncTraceListener {
   // uuid depends on its parent's).
   uint64_t contextId = 0;
   bool contextOpen = false;
+  // Formatted creation stacks by ID, as reported by onStack().
+  kj::HashMap<uint32_t, kj::String> stacks;
 
   perfetto::Track contextTrack() const {
     return perfetto::Track(contextId);

@@ -200,6 +200,9 @@ class Bootstrap {
     KJ_IF_SOME(writer, asyncTraceWriter) {
       options.asyncTraceWriter = *writer;
     }
+    KJ_IF_SOME(frames, serveOrTest.async_trace_stacks) {
+      options.asyncTraceStackDepth = frames;
+    }
     options.experimental = serveOrTest.experimental;
     auto& python = options.pythonConfig;
     KJ_IF_SOME(path, serveOrTest.pyodide_package_disk_cache_dir) {

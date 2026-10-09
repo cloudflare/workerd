@@ -227,6 +227,12 @@ pub struct ServeOrTestArgs {
     #[arg(long, value_name = "path")]
     pub async_trace: Option<String>,
 
+    /// Record up to <frames> frames of the JavaScript stack that created each async resource, in
+    /// the --async-trace file and in the workerd.async category of --perfetto-trace. Slows down
+    /// every resource creation.
+    #[arg(long, value_name = "frames", value_parser = clap::value_parser!(u32).range(1..=64))]
+    pub async_trace_stacks: Option<u32>,
+
     /// Watch configuration files (and server binary) and reload if they change. Useful for
     /// development, but not recommended in production.
     #[arg(short, long)]
@@ -405,6 +411,7 @@ impl From<&ServeOrTestArgs> for server::ServeOrTestOptions {
             perfetto_trace_path: perfetto_trace_path.into(),
             perfetto_trace_categories: perfetto_trace_categories.into(),
             async_trace_path: args.async_trace.clone().into(),
+            async_trace_stacks: args.async_trace_stacks.into(),
             experimental: args.experimental,
             pyodide_package_disk_cache_dir: args.pyodide_package_disk_cache_dir.clone().into(),
             pyodide_bundle_disk_cache_dir: args.pyodide_bundle_disk_cache_dir.clone().into(),

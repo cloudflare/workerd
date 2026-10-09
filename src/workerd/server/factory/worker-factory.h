@@ -117,6 +117,9 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
     // When set, async activity in every worker is traced to this file (--async-trace), which must
     // outlive the factory.
     kj::Maybe<const AsyncTraceWriter&> asyncTraceWriter;
+    // Records up to this many frames of each async resource's creation stack
+    // (--async-trace-stacks), for every async trace output.
+    uint32_t asyncTraceStackDepth = 0;
   };
 
   // `config` is the encoded config message; the factory owns it for the run and reads it with an

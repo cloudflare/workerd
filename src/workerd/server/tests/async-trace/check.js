@@ -14,16 +14,37 @@ function parse(text) {
     .map((line) => JSON.parse(line));
 }
 
-// Groups events by context. Resource IDs are per isolate, so one map serves all contexts here.
+// Groups events by context. Resource and stack IDs are per isolate, and there is one isolate here,
+// so one map of each serves all contexts.
 function index(events) {
   const contexts = new Map();
   const resources = new Map();
+  const stacks = new Map();
   for (const event of events.slice(1)) {
+    if (event.e === 'stack') {
+      stacks.set(event.id, event.frames);
+      continue;
+    }
     if (!contexts.has(event.ctx)) contexts.set(event.ctx, []);
     contexts.get(event.ctx).push(event);
-    if (event.e === 'init') resources.set(event.id, event);
+    if (event.e === 'init') {
+      // A stack is written before the first event that refers to it.
+      if (event.stack !== undefined) {
+        assert(
+          stacks.has(event.stack),
+          `stack ${event.stack} precedes ${JSON.stringify(event)}`
+        );
+      }
+      resources.set(event.id, event);
+    }
   }
-  return { contexts, resources };
+  return { contexts, resources, stacks };
+}
+
+// The function names in a resource's creation stack (run with --async-trace-stacks).
+function stackFunctions(stacks, resource) {
+  assert(resource.stack !== undefined, `${resource.name} has a creation stack`);
+  return stacks.get(resource.stack).map((frame) => frame.fn);
 }
 
 function find(resources, predicate, what) {
@@ -43,7 +64,7 @@ export default {
     assert.strictEqual(header.v, 1);
     assert.strictEqual(header.producer, 'workerd');
 
-    const { contexts, resources } = index(events);
+    const { contexts, resources, stacks } = index(events);
     assert.strictEqual(contexts.size, 2, 'the test and its subrequest');
 
     for (const [ctx, list] of contexts) {
@@ -105,6 +126,11 @@ export default {
     );
     assert.strictEqual(microtask.trigger, timer.id);
 
+    // Creation stacks point at the code that created each resource.
+    for (const resource of [timer, microtask, fetch]) {
+      assert(stackFunctions(stacks, resource).includes('test'), resource.name);
+    }
+
     // The fetch's response resumes JavaScript under the fetch operation (adopted by awaitIo), and
     // reading the body is triggered by it.
     assert(turnCauses.has(fetch.id), 'the fetch operation causes a turn');
@@ -133,5 +159,9 @@ export default {
       'both created by the handler'
     );
     assert(turnCauses.has(waitBridge.id), 'the bridge resumes the handler');
+    assert(
+      stackFunctions(stacks, wait).includes('fetch'),
+      'scheduler.wait stack'
+    );
   },
 };
