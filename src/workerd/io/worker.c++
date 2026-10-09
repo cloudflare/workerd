@@ -10,6 +10,7 @@
 #include <workerd/api/sockets.h>
 #include <workerd/api/streams/common.h>  // for api::StreamEncoding
 #include <workerd/io/actor-sqlite.h>
+#include <workerd/io/async-trace-perfetto.h>
 #include <workerd/io/async-trace.h>
 #include <workerd/io/cdp.capnp.h>
 #include <workerd/io/compatibility-date.h>
@@ -1168,7 +1169,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       userTraceAsyncContextKey(kj::arc<jsg::AsyncContextFrame::StorageKey>()) {
   api->setIsolateObserver(*metrics);
   metrics->createdWithUuid(getUuid());
-  if (metrics->getAsyncTraceConfig() != kj::none) {
+  // A Perfetto session recording "workerd.async" also needs the isolate's state. Only sessions
+  // already running when the isolate is created see its contexts.
+  if (metrics->getAsyncTraceConfig() != kj::none || isAsyncTracePerfettoEnabled()) {
     asyncTraceIsolate = kj::heap<AsyncTraceIsolate>();
   }
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).

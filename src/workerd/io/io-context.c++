@@ -5,6 +5,7 @@
 #include "io-context.h"
 
 #include <workerd/io/access-info.h>
+#include <workerd/io/async-trace-perfetto.h>
 #include <workerd/io/io-gate.h>
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
@@ -159,8 +160,8 @@ class IoContext::TimeoutManagerImpl::TimeoutState {
 
 namespace {
 
-// Creates the context's tracker if the isolate has async tracing enabled and the embedder adds at
-// least one sink.
+// Creates the context's tracker if the isolate has async tracing enabled and there is at least one
+// sink: the embedder's, or Perfetto's if it is recording "workerd.async".
 kj::Maybe<kj::Arc<AsyncTracker>> makeAsyncTracker(
     const Worker& worker, kj::Maybe<Worker::Actor&> actor) {
   auto& isolate = worker.getIsolate();
@@ -179,6 +180,9 @@ kj::Maybe<kj::Arc<AsyncTracker>> makeAsyncTracker(
     auto actorIdPtr = actorId.map([](kj::String& id) -> kj::StringPtr { return id; });
     AsyncTraceSinks sinks;
     isolate.getMetrics().addAsyncTraceSinks(sinks, isolate.getId(), actorIdPtr);
+    if (isAsyncTracePerfettoEnabled()) {
+      sinks.add(newAsyncTracePerfettoSink(isolate.getId(), actorIdPtr));
+    }
     return AsyncTracker::tryCreate(traceIsolate, kj::mv(sinks), isolate.getId(), actorIdPtr);
   }
   return kj::none;

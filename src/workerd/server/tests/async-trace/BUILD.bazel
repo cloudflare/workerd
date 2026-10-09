@@ -19,3 +19,24 @@ sh_test(
     ],
     tags = ["no-qemu"],
 )
+
+# Runs the same worker under --perfetto-trace, with and without the workerd.async category.
+sh_test(
+    name = "async-trace-perfetto-test",
+    size = "medium",
+    srcs = ["async-trace-perfetto-test.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "$(location scenario.wd-test)",
+    ],
+    data = [
+        "scenario.js",
+        "scenario.wd-test",
+        "//src/workerd/server:workerd",
+    ],
+    tags = ["no-qemu"],
+    target_compatible_with = select({
+        "//src/workerd/util:really_use_perfetto": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)
