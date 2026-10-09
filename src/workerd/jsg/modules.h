@@ -177,15 +177,15 @@ class ModuleRegistry {
         v8::Local<v8::Module> module,
         kj::Maybe<SyntheticModuleInfo> maybeSynthetic = kj::none);
 
-    // The ESM constructors below only read `compileCache` during the call.
-
     // Compiles a bundle (user) module from UTF-8 source. The source is copied into the V8 heap,
-    // so it only needs to outlive this call.
+    // so it only needs to outlive this call. The isolate's code cache is used if it has one (see
+    // IsolateBase::setCodeCacheStore()).
     ModuleInfo(jsg::Lock& js,
         kj::StringPtr name,
         kj::ArrayPtr<const char> content,
-        kj::ArrayPtr<const kj::byte> compileCache,
         const CompilationObserver& observer);
+
+    // The builtin ESM constructors below only read `compileCache` during the call.
 
     // Compiles a builtin module whose source V8 references without copying.
     ModuleInfo(jsg::Lock& js,

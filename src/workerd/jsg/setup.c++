@@ -641,6 +641,12 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     // may call into the heap tracer.
     KJ_DEFER(heapTracer.destroy());
 
+    // Release the code caches still waiting to be produced, whose v8::Globals must be destroyed
+    // under lock.
+    KJ_IF_SOME(c, codeCache) {
+      c.discardDeferred();
+    }
+
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(opaqueTemplate.Reset());
     KJ_DEFER(workerEnvObj.Reset());
