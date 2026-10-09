@@ -171,7 +171,9 @@ process, have no link.
 With `--async-trace-stacks=<n>`, each resource records the JavaScript stack that created it.
 Stacks are deduplicated per isolate. A `stack` event defines each one before its first use, and
 `init` refers to it by ID. Resources created while no JavaScript is running have no stack.
-Promises never record one, because there are too many.
+Promises never record one, because there are too many. An isolate keeps every distinct stack for
+its lifetime, up to 10,000 stacks or about 16 MiB; once it reaches either limit, resources created
+at new sites have no stack.
 
 ### Promises
 
