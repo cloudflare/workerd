@@ -98,6 +98,7 @@ const {
   ArrayPrototypePush,
   BigInt,
   Number,
+  NumberIsNaN,
   ObjectDefineProperties,
   ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
@@ -183,10 +184,13 @@ const textEncoderInstance = new TextEncoder();
 // Chunk validation and copy
 //
 // Returns a COPIED Uint8Array for byte inputs, a TextEncoder result for
-// strings, or undefined for zero-length inputs (write no-op). Throws
-// TypeError for anything else. Never detaches the input buffer.
+// strings, or undefined for zero-length inputs (write no-op). An undefined
+// chunk (`write()`, `write(undefined)`) is a no-op too, as in C++, where
+// the internal controller's chunk argument is optional. Throws TypeError
+// for anything else. Never detaches the input buffer.
 
 function validateAndCopyChunk(chunk: unknown): Uint8Array | undefined {
+  if (chunk === undefined) return undefined;
   if (typeof chunk === 'string') {
     if (chunk.length === 0) return undefined;
     return TextEncoderEncode(textEncoderInstance, chunk);
@@ -228,6 +232,28 @@ const kPrivateSymbol: symbol = Symbol('private');
 const kEmptyStrategy = ObjectFreeze({
   __proto__: null,
 }) as QueuingStrategy<unknown>;
+
+// The writable's WHATWG high-water-mark conversion (ToNumber; NaN or a
+// negative number is a RangeError), for FixedLengthStream, which caps the
+// converted number at its length before IdentityTransformStream hands it
+// on. Converting a number again there has no side effects.
+function convertHighWaterMark(value: unknown): number {
+  const highWaterMark = +(value as number);
+  if (NumberIsNaN(highWaterMark) || highWaterMark < 0) {
+    throw new RangeError('Invalid highWaterMark');
+  }
+  return highWaterMark;
+}
+
+// WebIDL dictionary conversion of a constructor's strategy argument, as in
+// C++: undefined and null mean no strategy; any other non-object throws.
+function toStrategyDictionary(value: unknown): QueuingStrategy<unknown> {
+  if (value === undefined || value === null) return kEmptyStrategy;
+  if (typeof value !== 'object' && typeof value !== 'function') {
+    throw new TypeError('The queuing strategy must be an object.');
+  }
+  return value as QueuingStrategy<unknown>;
+}
 
 // A write accepted by the writable, snapshotted in its size() callback (see
 // sizeAndSnapshot). Entries are tagged with an own `ok` data property rather
@@ -561,8 +587,7 @@ class IdentityTransformStream {
       expectedLength = internalExpectedLength;
       writableStrategy = internalWritableStrategy;
     } else {
-      writableStrategy = writableStrategyOrInternal as
-        QueuingStrategy<unknown> | undefined;
+      writableStrategy = toStrategyDictionary(writableStrategyOrInternal);
     }
     writableStrategy ??= kEmptyStrategy;
 
@@ -863,24 +888,26 @@ class FixedLengthStream extends IdentityTransformStream {
           'that fits in a uint64.'
       );
     }
+    writableStrategy = toStrategyDictionary(writableStrategy);
     //
     // Cap highWaterMark at expectedLength, matching C++ behavior
     // (identity-transform-stream.c++ FixedLengthStream::constructor): buffering more than the
-    // total expected output is pointless.
-    if (
-      writableStrategy !== undefined &&
-      writableStrategy.highWaterMark !== undefined
-    ) {
+    // total expected output is pointless. The member is read and converted
+    // once, as IdentityTransformStream's is, and the cap applies to the
+    // converted number.
+    const hwm: unknown = writableStrategy.highWaterMark;
+    if (hwm !== undefined) {
       // Derive the cap from the COERCED length, not the raw input: BigInt
       // conversion normalizes a -0.0 input to 0n, so Number(bigLen) is
       // always +0-or-positive and a negative zero cannot leak through the
       // min() below into the highWaterMark (and from there into the
       // writer's desiredSize).
       const numExpected = Number(bigLen);
-      const hwm = writableStrategy.highWaterMark;
+      const converted = convertHighWaterMark(hwm);
       writableStrategy = {
-        highWaterMark: hwm < numExpected ? hwm : numExpected,
-      };
+        __proto__: null,
+        highWaterMark: converted < numExpected ? converted : numExpected,
+      } as QueuingStrategy<unknown>;
     }
     super(kPrivateSymbol, expectedLength, writableStrategy);
   }
