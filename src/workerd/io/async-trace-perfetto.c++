@@ -104,6 +104,7 @@ class PerfettoSink final: public AsyncTraceListener {
       ctx.AddDebugAnnotation("id", event.id);
       ctx.AddDebugAnnotation("trigger", event.trigger);
       ctx.AddDebugAnnotation("exec", event.execution);
+      if (event.parent != 0) ctx.AddDebugAnnotation("parent", event.parent);
       if (event.stack != 0) {
         KJ_IF_SOME(text, stacks.find(event.stack)) {
           ctx.AddDebugAnnotation("stack", std::string(text.cStr(), text.size()));

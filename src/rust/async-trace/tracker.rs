@@ -240,14 +240,27 @@ impl Tracker {
         trigger: AsyncId,
         stack: Option<StackId>,
     ) -> AsyncId {
-        self.create_with_holders(kind, name, trigger, stack, 1)
+        self.create_with_holders(kind, name, trigger, stack, 1, 0)
+    }
+
+    /// Like [`Tracker::create`], for a resource that is part of operation `parent` (see
+    /// [`InitEvent::parent`]).
+    pub fn create_child(
+        &mut self,
+        kind: Kind,
+        name: &str,
+        trigger: AsyncId,
+        stack: Option<StackId>,
+        parent: AsyncId,
+    ) -> AsyncId {
+        self.create_with_holders(kind, name, trigger, stack, 1, parent)
     }
 
     /// Like [`Tracker::create`], for a resource that nothing will release, such as a JavaScript
     /// promise: the tracker forgets it when it settles (with no `destroy`), or when the tracker
     /// closes. Its callbacks still report `before`/`after` if it settles during one.
     pub fn create_unowned(&mut self, kind: Kind, name: &str, trigger: AsyncId) -> AsyncId {
-        self.create_with_holders(kind, name, trigger, None, 0)
+        self.create_with_holders(kind, name, trigger, None, 0, 0)
     }
 
     /// Whether `id` is a live resource of this tracker.
@@ -263,6 +276,7 @@ impl Tracker {
         trigger: AsyncId,
         stack: Option<StackId>,
         holders: u32,
+        parent: AsyncId,
     ) -> AsyncId {
         if self.closed {
             return 0;
@@ -304,6 +318,7 @@ impl Tracker {
             name,
             at: self.clock.now(),
             stack,
+            parent,
         };
         for sink in &mut self.sinks {
             sink.init(self.ctx, &event);

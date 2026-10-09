@@ -56,6 +56,8 @@ struct AsyncInitEvent {
   uint64_t atNs;
   // 0 = no creation stack.
   uint32_t stack;
+  // The operation this one is part of, or 0. See `InitEvent::parent` in lib.rs.
+  uint64_t parent;
 };
 
 struct AsyncTurn {
@@ -143,7 +145,8 @@ inline void listener_init(AsyncTraceListener& listener,
     uint8_t kind,
     ::rust::Str name,
     uint64_t at,
-    uint32_t stack) {
+    uint32_t stack,
+    uint64_t parent) {
   AsyncInitEvent event{
     .id = id,
     .trigger = trigger,
@@ -152,6 +155,7 @@ inline void listener_init(AsyncTraceListener& listener,
     .name = fromRust(name),
     .atNs = at,
     .stack = stack,
+    .parent = parent,
   };
   callListener([&]() { listener.onInit(ctx, event); });
 }

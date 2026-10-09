@@ -985,3 +985,23 @@ fn link_reports_the_other_contexts_resource() {
     );
     assert_eq!(f.tracker.stats().unknown, 1);
 }
+
+#[test]
+fn a_child_operation_names_its_parent() {
+    let mut f = Fixture::new();
+    let outer = f.create(Kind::Operation, "fetch");
+    let inner = f
+        .tracker
+        .create_child(Kind::Operation, "fetch_attempt", 0, None, outer);
+    let events = f.events();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::Init { id, parent, .. } if *id == outer && *parent == 0))
+    );
+    assert!(
+        events.iter().any(
+            |e| matches!(e, Event::Init { id, parent, .. } if *id == inner && *parent == outer)
+        )
+    );
+}

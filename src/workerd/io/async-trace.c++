@@ -115,6 +115,15 @@ bool AsyncTracker::onOwnerThread() const {
 }
 
 AsyncResource AsyncTracker::create(AsyncKind kind, kj::StringPtr name, AsyncId trigger) const {
+  return createImpl(kind, name, trigger, 0);
+}
+
+AsyncResource AsyncTracker::createChild(AsyncKind kind, kj::StringPtr name, AsyncId parent) const {
+  return createImpl(kind, name, 0, parent);
+}
+
+AsyncResource AsyncTracker::createImpl(
+    AsyncKind kind, kj::StringPtr name, AsyncId trigger, AsyncId parent) const {
   if (!onOwnerThread()) return {};
   uint32_t stack = 0;
   KJ_IF_SOME(capturer, stackCapturer) {
@@ -126,7 +135,7 @@ AsyncResource AsyncTracker::create(AsyncKind kind, kj::StringPtr name, AsyncId t
       stack = impl->end_stack();
     }
   }
-  AsyncId id = impl->create(static_cast<uint8_t>(kind), toRust(name), trigger, stack);
+  AsyncId id = impl->create(static_cast<uint8_t>(kind), toRust(name), trigger, stack, parent);
   if (id == 0) return {};
   return AsyncResource(addRefToThis(), id);
 }

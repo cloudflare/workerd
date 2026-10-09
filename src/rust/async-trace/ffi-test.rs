@@ -11,8 +11,8 @@ fn trackers_share_the_isolate() {
     let isolate = new_isolate();
     let mut a = new_tracker(&isolate, b"a", b"");
     let mut b = new_tracker(&isolate, b"b", b"");
-    let x = a.create_ffi(3, b"x", 0, 0);
-    let y = b.create_ffi(3, b"y", 0, 0);
+    let x = a.create_ffi(3, b"x", 0, 0, 0);
+    let y = b.create_ffi(3, b"y", 0, 0, 0);
     assert!(y > x);
 }
 
@@ -42,8 +42,8 @@ fn create_and_settle_translate_their_arguments() {
     tracker.push_frame_ffi(b"f", b"s.js", 1, 2, 3);
     let stack = tracker.end_stack_ffi();
     assert_ne!(stack, 0);
-    let id = tracker.create_ffi(5, b"kv_get", 0, stack);
-    let unstacked = tracker.create_ffi(200, b"other", id, 0);
+    let id = tracker.create_ffi(5, b"kv_get", 0, stack, 0);
+    let unstacked = tracker.create_ffi(200, b"other", id, 0, 0);
     tracker.settle_ffi(id, 2);
 
     let events = sink.take();
@@ -83,7 +83,7 @@ fn ndjson_writer_round_trip() {
     let isolate = new_isolate();
     let mut tracker = new_tracker(&isolate, b"w", b"");
     tracker.add_ndjson_sink(&writer);
-    tracker.create_ffi(0, b"fetch", 0, 0);
+    tracker.create_ffi(0, b"fetch", 0, 0, 0);
     tracker.close();
     assert!(!writer.failed());
 
@@ -109,7 +109,7 @@ fn invalid_utf8_is_replaced_not_rejected() {
     let mut tracker = new_tracker(&isolate, b"w\xff", b"");
     let sink = RecordingSink::new();
     tracker.add_sink(Box::new(sink.clone()));
-    let id = tracker.create_ffi(5, b"kv\xfe", 0, 0);
+    let id = tracker.create_ffi(5, b"kv\xfe", 0, 0, 0);
     tracker.annotate_ffi(id, b"k\xff", b"v\xff");
     let events = sink.take();
     assert!(matches!(&events[0], Event::ContextBegin { worker, .. } if worker == "w\u{fffd}"));

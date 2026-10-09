@@ -195,6 +195,10 @@ class AsyncTracker final: public kj::AtomicRefcounted {
   // be valid UTF-8.
   AsyncResource create(AsyncKind kind, kj::StringPtr name, AsyncId trigger = 0) const;
 
+  // Like create(), for a resource that is part of operation `parent`, such as a binding call made
+  // within another's span. `parent` is structural, unlike the trigger; it may have settled.
+  AsyncResource createChild(AsyncKind kind, kj::StringPtr name, AsyncId parent) const;
+
   // The resource whose callback is running (`executionAsyncId`), or 0.
   AsyncId current() const;
 
@@ -324,6 +328,8 @@ class AsyncTracker final: public kj::AtomicRefcounted {
 
   // Returns true on the owning thread; otherwise counts the call and returns false.
   bool onOwnerThread() const;
+  AsyncResource createImpl(
+      AsyncKind kind, kj::StringPtr name, AsyncId trigger, AsyncId parent) const;
 
   void settle(AsyncId id, AsyncOutcome outcome) const;
   void annotate(AsyncId id, kj::StringPtr key, kj::StringPtr value) const;

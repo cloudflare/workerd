@@ -71,7 +71,14 @@ mod bridge {
         fn add_cpp_sink(self: &mut Tracker, listener: KjOwn<AsyncTraceListener>);
 
         #[cxx_name = "create"]
-        fn create_ffi(self: &mut Tracker, kind: u8, name: &[u8], trigger: u64, stack: u32) -> u64;
+        fn create_ffi(
+            self: &mut Tracker,
+            kind: u8,
+            name: &[u8],
+            trigger: u64,
+            stack: u32,
+            parent: u64,
+        ) -> u64;
         #[cxx_name = "create_unowned"]
         fn create_unowned_ffi(self: &mut Tracker, kind: u8, name: &[u8], trigger: u64) -> u64;
         fn knows(self: &Tracker, id: u64) -> bool;
@@ -135,6 +142,7 @@ mod bridge {
             name: &str,
             at: u64,
             stack: u32,
+            parent: u64,
         );
         fn listener_settle(
             listener: Pin<&mut AsyncTraceListener>,
@@ -233,6 +241,7 @@ impl Sink for CppSink {
             event.name,
             event.at,
             event.stack.unwrap_or(0),
+            event.parent,
         );
     }
 
@@ -360,9 +369,9 @@ impl Tracker {
         self.add_sink(Box::new(CppSink { listener }));
     }
 
-    fn create_ffi(&mut self, kind: u8, name: &[u8], trigger: u64, stack: u32) -> u64 {
+    fn create_ffi(&mut self, kind: u8, name: &[u8], trigger: u64, stack: u32, parent: u64) -> u64 {
         let stack = if stack == 0 { None } else { Some(stack) };
-        self.create(Kind::from_u8(kind), &lossy(name), trigger, stack)
+        self.create_child(Kind::from_u8(kind), &lossy(name), trigger, stack, parent)
     }
 
     fn create_unowned_ffi(&mut self, kind: u8, name: &[u8], trigger: u64) -> u64 {
