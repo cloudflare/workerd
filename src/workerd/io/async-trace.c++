@@ -67,6 +67,10 @@ void AsyncTraceWriter::flush() const {
   impl->flush();
 }
 
+void AsyncTraceWriter::finish() const {
+  impl->finish();
+}
+
 // =======================================================================================
 // AsyncTraceSinks
 

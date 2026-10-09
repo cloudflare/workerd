@@ -292,3 +292,33 @@ fn create_writes_a_file() {
 fn create_fails_for_a_bad_path() {
     assert!(NdjsonWriter::create("/nonexistent-dir/x/y.ndjson", "test", "1").is_err());
 }
+
+#[test]
+fn finish_lists_the_contexts_that_did_not_end() {
+    let buf = SharedBuf::default();
+    let writer = writer(&buf);
+    let info = ContextInfo {
+        isolate: 1,
+        worker: "w",
+        actor: None,
+        at: 0,
+    };
+    let mut ended = NdjsonSink::new(Arc::clone(&writer));
+    let mut open = NdjsonSink::new(Arc::clone(&writer));
+    ended.context_begin(1, &info);
+    open.context_begin(2, &info);
+    ended.context_end(1, 5, &ContextStats::default());
+    open.flush();
+    writer.finish(9);
+    // Dropped: the output has ended.
+    open.context_end(2, 10, &ContextStats::default());
+    drop(open);
+
+    let lines = buf.lines();
+    let last = lines.last().unwrap();
+    assert_eq!(last["e"], "exit");
+    assert_eq!(last["at"], 9);
+    assert_eq!(last["open"], serde_json::json!([2]));
+    assert_eq!(lines.iter().filter(|l| l["e"] == "ctx_end").count(), 1);
+    assert!(!writer.failed());
+}

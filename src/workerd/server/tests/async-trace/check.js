@@ -26,6 +26,7 @@ function index(events) {
       stacks.set(event.id, event.frames);
       continue;
     }
+    if (event.e === 'exit') continue;
     if (!contexts.has(event.ctx)) contexts.set(event.ctx, []);
     contexts.get(event.ctx).push(event);
     if (event.e === 'init') {
@@ -68,6 +69,14 @@ function checkCore(events, { withStacks }) {
     assert.strictEqual(header.e, 'header');
     assert.strictEqual(header.v, 1);
     assert.strictEqual(header.producer, 'workerd');
+  }
+  {
+    // workerd exits without closing contexts, so the trace ends with `exit`, listing those still
+    // open: none, here.
+    const exits = events.filter((e) => e.e === 'exit');
+    assert.strictEqual(exits.length, 1, 'one exit line');
+    assert.strictEqual(events[events.length - 1], exits[0], 'exit is last');
+    assert.deepStrictEqual(exits[0].open, [], 'every context ended');
   }
   const indexed = index(events);
   const { contexts, resources, stacks } = indexed;

@@ -340,12 +340,17 @@ class CliMain {
     }
 #endif
 
+    bool cleanShutdown = getenv("KJ_CLEAN_SHUTDOWN") != nullptr;
     KJ_IF_SOME(writer, asyncTraceWriter) {
-      // context.exit() doesn't run destructors. Contexts still open are not reported as ended.
-      writer->flush();
+      if (cleanShutdown) {
+        writer->flush();
+      } else {
+        // context.exit() doesn't run destructors, so contexts still open never end; say so.
+        writer->finish();
+      }
     }
 
-    if (getenv("KJ_CLEAN_SHUTDOWN") == nullptr) {
+    if (!cleanShutdown) {
       context.exit();
     }
 

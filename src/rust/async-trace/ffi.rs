@@ -23,6 +23,7 @@ use std::sync::Arc;
 use kj_rs::KjOwn;
 
 use crate::AsyncId;
+use crate::Clock;
 use crate::ContextId;
 use crate::ContextInfo;
 use crate::ContextStats;
@@ -66,6 +67,8 @@ mod bridge {
         fn failed(self: &Writer) -> bool;
         /// Flushes buffered lines to the file.
         fn flush(self: &Writer);
+        /// Writes the `exit` line (contexts not ended) and flushes; later lines are dropped.
+        fn finish(self: &Writer);
 
         fn add_ndjson_sink(self: &mut Tracker, writer: &Writer);
         fn add_cpp_sink(self: &mut Tracker, listener: KjOwn<AsyncTraceListener>);
@@ -357,6 +360,10 @@ impl Writer {
 
     fn flush(&self) {
         self.0.flush();
+    }
+
+    fn finish(&self) {
+        self.0.finish(MonotonicClock.now());
     }
 }
 

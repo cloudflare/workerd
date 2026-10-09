@@ -11,6 +11,7 @@
 //! Many trackers share one [`NdjsonWriter`]. Each [`NdjsonSink`] buffers its own lines and hands
 //! them to the writer whole, so lines from different contexts never interleave mid-line.
 
+use std::collections::BTreeSet;
 use std::fs::File;
 use std::io;
 use std::io::BufWriter;
@@ -130,6 +131,8 @@ enum Line<'a> {
         id: StackId,
         frames: &'a [Frame],
     },
+    /// The process is exiting without closing the contexts in `open`; they get no `ctx_end`.
+    Exit { at: Nanos, open: Vec<ContextId> },
     CtxEnd {
         ctx: ContextId,
         at: Nanos,
@@ -161,6 +164,8 @@ fn write_line(buf: &mut Vec<u8>, line: &Line<'_>) -> bool {
 pub struct NdjsonWriter {
     out: Mutex<Option<Box<dyn Write + Send>>>,
     failed: AtomicBool,
+    /// Contexts whose `ctx` line has been produced but not their `ctx_end`.
+    open: Mutex<BTreeSet<ContextId>>,
 }
 
 impl NdjsonWriter {
@@ -185,6 +190,7 @@ impl NdjsonWriter {
         Ok(Self {
             out: Mutex::new(Some(out)),
             failed: AtomicBool::new(false),
+            open: Mutex::new(BTreeSet::new()),
         })
     }
 
@@ -212,6 +218,35 @@ impl NdjsonWriter {
     /// Flushes buffered output to the underlying file.
     pub fn flush(&self) {
         self.with_out(Write::flush);
+    }
+
+    /// Ends the output before the process exits without closing its contexts: writes an `exit`
+    /// line listing the contexts that have not ended, and flushes. Later lines are dropped.
+    pub fn finish(&self, at: Nanos) {
+        let open: Vec<ContextId> = self
+            .open
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .copied()
+            .collect();
+        let mut line = Vec::new();
+        write_line(&mut line, &Line::Exit { at, open });
+        let mut guard = self.out.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(mut out) = guard.take()
+            && out.write_all(&line).and_then(|()| out.flush()).is_err()
+        {
+            self.failed.store(true, Ordering::Relaxed);
+        }
+    }
+
+    fn set_open(&self, ctx: ContextId, open: bool) {
+        let mut contexts = self.open.lock().unwrap_or_else(PoisonError::into_inner);
+        if open {
+            contexts.insert(ctx);
+        } else {
+            contexts.remove(&ctx);
+        }
     }
 
     fn with_out(&self, f: impl FnOnce(&mut Box<dyn Write + Send>) -> io::Result<()>) {
@@ -265,6 +300,7 @@ impl NdjsonSink {
 
 impl Sink for NdjsonSink {
     fn context_begin(&mut self, ctx: ContextId, info: &ContextInfo<'_>) {
+        self.writer.set_open(ctx, true);
         self.push(&Line::Ctx {
             ctx,
             iso: info.isolate,
@@ -360,6 +396,7 @@ impl Sink for NdjsonSink {
         });
         self.write_out();
         self.writer.flush();
+        self.writer.set_open(ctx, false);
     }
 
     fn flush(&mut self) {
