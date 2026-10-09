@@ -7,11 +7,13 @@ load("//:build/wd_test.bzl", "wd_test")
 formdata_suite_srcs = glob(["*.js"]) + ["formdata-modules.capnp"]
 
 wd_test(
+    size = "large",
     src = "formdata-cpp.wd-test",
     data = formdata_suite_srcs,
 )
 
 wd_test(
+    size = "large",
     src = "formdata-ts.wd-test",
     args = ["--experimental"],
     data = formdata_suite_srcs,

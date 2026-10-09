@@ -632,31 +632,33 @@ export async function initPython(): Promise<PythonInitResult> {
 
   const mainModule = await getMainModule();
 
-  // In order to get the entrypoint classes exported by the worker, we use a Python module
-  // to introspect the user's main module. So we are effectively using Python to analyse the
-  // classes exported by the user worker here. The class names are then exported from here and
-  // used to create the equivalent JS classes via makeEntrypointClass.
-  const introspectionMod = await getIntrospectionMod();
-  pythonEntrypointClasses =
-    introspectionMod.collect_entrypoint_classes(mainModule);
-  handleDefaultClass(handlers, pythonEntrypointClasses.workerEntrypoints);
+  await enterJaegerSpan('python_introspection_and_handlers', async () => {
+    // In order to get the entrypoint classes exported by the worker, we use a Python module
+    // to introspect the user's main module. So we are effectively using Python to analyse the
+    // classes exported by the user worker here. The class names are then exported from here and
+    // used to create the equivalent JS classes via makeEntrypointClass.
+    const introspectionMod = await getIntrospectionMod();
+    pythonEntrypointClasses =
+      introspectionMod.collect_entrypoint_classes(mainModule);
+    handleDefaultClass(handlers, pythonEntrypointClasses.workerEntrypoints);
 
-  if (LEGACY_GLOBAL_HANDLERS) {
-    // We add all handlers when running in workerd, so that we can handle the case where the
-    // handler is not defined in our own code and throw a more helpful error. See
-    // undefined-handler.wd-test.
-    const addAllHandlers = IS_WORKERD && !handlers['default'];
-    for (const handlerName of SUPPORTED_HANDLER_NAMES) {
-      const pyHandlerName = 'on_' + handlerName;
-      if (addAllHandlers || typeof mainModule[pyHandlerName] === 'function') {
-        handlers[handlerName] = makeHandler(pyHandlerName);
+    if (LEGACY_GLOBAL_HANDLERS) {
+      // We add all handlers when running in workerd, so that we can handle the case where the
+      // handler is not defined in our own code and throw a more helpful error. See
+      // undefined-handler.wd-test.
+      const addAllHandlers = IS_WORKERD && !handlers['default'];
+      for (const handlerName of SUPPORTED_HANDLER_NAMES) {
+        const pyHandlerName = 'on_' + handlerName;
+        if (addAllHandlers || typeof mainModule[pyHandlerName] === 'function') {
+          handlers[handlerName] = makeHandler(pyHandlerName);
+        }
+      }
+
+      if (typeof mainModule.test === 'function') {
+        handlers.test = makeHandler('test');
       }
     }
-
-    if (typeof mainModule.test === 'function') {
-      handlers.test = makeHandler('test');
-    }
-  }
+  });
 
   // Collect a dedicated snapshot at the very end.
   const pyodide = await getPyodide();

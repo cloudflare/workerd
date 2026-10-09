@@ -85,6 +85,9 @@ export {
   queueMathNearMaxSafeInteger,
   queueMathNearZeroClamped,
   queueMathNearZeroEndsZero,
+  queueMathResidueClampedAtDequeue,
+  queueMathPositiveResidueKept,
+  queueMathResidueClampedPerTeeBranch,
 } from 'queue-math';
 
 export {
@@ -98,6 +101,8 @@ export {
   teeCancelReverseOrder,
   teePullPerRead,
   teeBackpressureFollowsSlowestBranch,
+  teeCancelAfterSiblingDrainedToClose,
+  teeCancelSettlesWhenErroredBranchLeavesAfterClose,
 } from 'tee';
 
 export {
@@ -120,6 +125,14 @@ export {
   readableStreamFromCancelResolvesWhenReturnMissing,
   fromString,
   fromReturnValidationMessages,
+  fromReadsNextOnce,
+  fromSyncResultReadsDoneBeforeValue,
+  fromIteratorLookupsAreGets,
+  fromAcceptsObjectsOnly,
+  fromCancelReturnLookup,
+  fromArrayBufferViewIsOneChunk,
+  fromIteratorProtocolEdges,
+  fromSyncIterableSettlesEarly,
 } from 'from';
 
 export {
@@ -144,6 +157,9 @@ export {
 export {
   enqueueInsideSize,
   closeInsideSize,
+  closeInsideSizeWithQueuedChunk,
+  closeInsideSizeTeeDrainedBranch,
+  closeInsideSizeTeeBranchesBehind,
   cancelInsideSize,
   readInsideSize,
 } from 'reentrancy';
@@ -245,5 +261,6 @@ export {
   replacedNumberKeepsBody,
   patchedControllerErrorStillErrors,
   omittedDictionariesReadNothing,
+  fromBuildsNoDictionariesFromObjectPrototype,
   asyncIteratorShape,
 } from 'pollution';

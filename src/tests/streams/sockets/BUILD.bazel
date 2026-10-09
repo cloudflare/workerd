@@ -3,8 +3,8 @@ load("//:build/wd_test.bzl", "wd_test")
 
 # The sockets streams suite runs the same test modules under two
 # configs: sockets-cpp against the C++ implementation, sockets-ts
-# against the TypeScript implementation. A sidecar provides the echo
-# and greet TCP servers.
+# against the TypeScript implementation. A sidecar provides the echo,
+# greet and stall TCP servers.
 
 js_binary(
     name = "echo-server",
@@ -14,6 +14,7 @@ js_binary(
 sockets_suite_srcs = glob(["*.js"]) + ["sockets-modules.capnp"]
 
 wd_test(
+    size = "large",
     src = "sockets-cpp.wd-test",
     args = ["--experimental"],
     data = sockets_suite_srcs,
@@ -21,10 +22,12 @@ wd_test(
     sidecar_port_bindings = [
         "STREAMS_ECHO_PORT",
         "STREAMS_GREET_PORT",
+        "STREAMS_STALL_PORT",
     ],
 )
 
 wd_test(
+    size = "large",
     src = "sockets-ts.wd-test",
     args = ["--experimental"],
     data = sockets_suite_srcs,
@@ -32,5 +35,6 @@ wd_test(
     sidecar_port_bindings = [
         "STREAMS_ECHO_PORT",
         "STREAMS_GREET_PORT",
+        "STREAMS_STALL_PORT",
     ],
 )

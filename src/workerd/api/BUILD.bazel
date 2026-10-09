@@ -196,7 +196,6 @@ wd_cc_library(
     hdrs = ["cf-property.h"],
     implementation_deps = [
         "//src/workerd/io:features",
-        "//src/workerd/util:own-util",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -562,7 +561,6 @@ wd_cc_library(
     deps = [
         ":url",
         "//src/workerd/jsg",
-        "//src/workerd/util:own-util",
         "@capnp-cpp//src/kj",
     ],
 )

@@ -72,8 +72,8 @@ fn current_local_set() -> Option<Rc<LocalSet>> {
 /// which KJ reports to the port through `EventPort::setRunnable(true)`, or moves the next KJ
 /// timer deadline, which KJ reports through the `TimerImpl::SleepHooks` the port installs while
 /// sleeping; either way the port ends the park. The one thing a task must not do is re-enter
-/// `promise.wait()` / `waitScope.poll()` on this thread: that nests `block_on` inside
-/// `block_on`, which tokio rejects (the panic surfaces as a `kj::Exception`).
+/// `promise.wait()` / `waitScope.poll()` on this thread: the loop is already inside a `wait()`,
+/// and KJ refuses the nested one with a `kj::Exception`.
 ///
 /// # Panics
 ///

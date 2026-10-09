@@ -201,29 +201,47 @@ static void AddAbortAlgorithm(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// The exact UTF-8 byte length of a string as TextEncoder encodes it: a lone
+// surrogate counts the 3 bytes of U+FFFD. V8 computes it with simdutf. A plain
+// method rather than a fast-API call, because V8 flattens the string first,
+// which can allocate.
+static void Utf8Length(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    auto str = JSG_REQUIRE_NONNULL(
+        jsg::JsValue(args[0]).tryCast<jsg::JsString>(), TypeError, "utf8Length() expects a string");
+    return js.num(static_cast<double>(str.utf8Length(js)));
+  });
+}
+
 static const v8::CFunction fast_mark_promise_handled_ =
     v8::CFunction::Make(MarkPromiseHandledFastApi);
 
+v8::Local<v8::Value> makeMethod(jsg::Lock& js,
+    v8::FunctionCallback callback,
+    v8::SideEffectType sideEffect,
+    const v8::CFunction* c_function = nullptr) {
+  jsg::isolateRegisterExternalReference(js.v8Isolate, reinterpret_cast<intptr_t>(callback));
+  if (c_function != nullptr) {
+    jsg::isolateRegisterExternalReference(js.v8Isolate, reinterpret_cast<intptr_t>(c_function));
+  }
+  return jsg::check(v8::FunctionTemplate::New(js.v8Isolate, callback, v8::Local<v8::Value>(),
+      v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow, sideEffect, c_function)
+                        ->GetFunction(js.v8Context()));
+}
+
 v8::Local<v8::Value> getFastMethodNoSideEffect(
     jsg::Lock& js, v8::FunctionCallback callback, const v8::CFunction* c_function) {
-  return jsg::check(v8::FunctionTemplate::New(js.v8Isolate, callback, v8::Local<v8::Value>(),
-      v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow,
-      v8::SideEffectType::kHasNoSideEffect, c_function)
-                        ->GetFunction(js.v8Context()));
+  return makeMethod(js, callback, v8::SideEffectType::kHasNoSideEffect, c_function);
 }
 
 v8::Local<v8::Value> getFastMethod(
     jsg::Lock& js, v8::FunctionCallback callback, const v8::CFunction* c_function) {
-  return jsg::check(v8::FunctionTemplate::New(js.v8Isolate, callback, v8::Local<v8::Value>(),
-      v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow,
-      v8::SideEffectType::kHasSideEffect, c_function)
-                        ->GetFunction(js.v8Context()));
+  return makeMethod(js, callback, v8::SideEffectType::kHasSideEffect, c_function);
 }
 
 v8::Local<v8::Value> getMethod(jsg::Lock& js, v8::FunctionCallback callback) {
-  return jsg::check(v8::FunctionTemplate::New(js.v8Isolate, callback, v8::Local<v8::Value>(),
-      v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow)
-                        ->GetFunction(js.v8Context()));
+  return makeMethod(js, callback, v8::SideEffectType::kHasSideEffect);
 }
 
 // Creates an object with methods for performing fast type checks on JS values.
@@ -246,6 +264,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "createDigestContext",
     "createFileSystemWriteContext",
     "addAbortAlgorithm",
+    "utf8Length",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -259,6 +278,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateDigestContext),
     getMethod(js, CreateFileSystemWriteContext),
     getMethod(js, AddAbortAlgorithm),
+    getMethod(js, Utf8Length),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());
@@ -515,6 +535,7 @@ void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
 
   // Create the require() function. No v8::External needed — the callback
   // reads state from the context embedder slot.
+  jsg::isolateRegisterExternalReference(js.v8Isolate, reinterpret_cast<intptr_t>(&requireCallback));
   state->requireFn =
       jsg::JsFunction(jsg::check(v8::Function::New(context, requireCallback))).addRef(js);
 

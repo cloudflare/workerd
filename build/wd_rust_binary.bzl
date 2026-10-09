@@ -17,8 +17,8 @@ def _coverage_runtime_objects_impl(ctx):
     # environment, which cc tests get from the C++ toolchain and other tests get from the coverage
     # config in .bazelrc.
     prefix = ctx.bin_dir.path
-    if ctx.label.workspace_root:
-        prefix += "/" + ctx.label.workspace_root
+    if ctx.label.repo_root:
+        prefix += "/" + ctx.label.repo_root
     exec_path = "{}/{}/{}".format(prefix, ctx.label.package, ctx.attr.binary_name)
     out = ctx.actions.declare_file(ctx.attr.binary_name + "runtime_objects_list.txt")
     ctx.actions.write(out, exec_path + "\n")

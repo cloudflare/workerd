@@ -435,17 +435,17 @@ void WorkerTracer::setEventInfoInternal(const tracing::InvocationSpanContext& co
     // WorkerTracer is created, but the actual onset event is the best time to send it.
     auto workerInfo = tracing::Onset::WorkerInfo{
       .executionModel = trace->executionModel,
-      .scriptName = mapCopyString(trace->scriptName),
+      .scriptName = trace->scriptName.clone(),
       .scriptVersion =
           trace->scriptVersion.map([](auto& scriptVersion) -> kj::Own<ScriptVersion::Reader> {
       return capnp::clone(*scriptVersion);
     }),
       .preview = trace->preview.map([](auto& preview) { return preview.clone(); }),
-      .dispatchNamespace = mapCopyString(trace->dispatchNamespace),
-      .scriptId = mapCopyString(trace->scriptId),
+      .dispatchNamespace = trace->dispatchNamespace.clone(),
+      .scriptId = trace->scriptId.clone(),
       .scriptTags = KJ_MAP(tag, trace->scriptTags) { return kj::str(tag); },
-      .entrypoint = mapCopyString(trace->entrypoint),
-      .durableObjectId = mapCopyString(trace->durableObjectId),
+      .entrypoint = trace->entrypoint.clone(),
+      .durableObjectId = trace->durableObjectId.clone(),
     };
 
     // Onset needs special handling for spanId: The top-level spanId is zero unless a trigger

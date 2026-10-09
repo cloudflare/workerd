@@ -25,10 +25,11 @@ A node sidecar (`http-servers.js`) runs one HTTP server, routed by path,
 whose port arrives through the `HTTP_SERVER_PORT` binding (plus
 `SIDECAR_HOSTNAME`): body echo (`/echo`) and summary (`/sink`), fixed
 replies (`/pong`, `/asd`), chunked (`/chunked`) and large (`/large`)
-bodies, bodiless statuses (`/status/CODE`), a compressed body (`/gzip`), a
-connection dropped mid-body (`/error-mid-body`), a response held open whose
-close the sidecar records (`/never-ends?id=` + `/stats?id=`), and delayed
-headers or body (`/slow-headers`, `/slow-body`). A second, raw TCP server
+bodies, acknowledged chunked delivery (`/chunked-controlled?id=` +
+`/chunked-ack?id=&index=`), bodiless statuses (`/status/CODE`), a compressed
+body (`/gzip`), a connection dropped mid-body (`/error-mid-body`), a response
+held open whose close the sidecar records (`/never-ends?id=` + `/stats?id=`),
+and delayed headers or body (`/slow-headers`, `/slow-body`). A second, raw TCP server
 (`HTTP_RAW_PORT`) writes hand-crafted replies, segment by segment 20 ms
 apart and with `Connection: close` (the runtime would otherwise pipeline
 the next request onto the connection): a body short of its Content-Length

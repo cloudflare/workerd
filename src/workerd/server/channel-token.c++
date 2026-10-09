@@ -380,7 +380,7 @@ class ChannelTokenHandler::RestoredSubrequestChannel final
   kj::Own<WorkerInterface> startRequest(IoChannelFactory::SubrequestMetadata metadata) override {
     // Set this channel's token factory as `restoredSelfTokenFactory` so that if the target is a
     // dynamic worker or facet, it can still use `ctx.restore()` by wrapping this channel's token.
-    metadata.restoredSelfTokenFactory = kj::refcounted<SelfTokenFactory>(kj::addRef(*this));
+    metadata.restoredSelfTokenFactory = kj::rc<SelfTokenFactory>(kj::addRef(*this));
 
     // Note: We do NOT want to modify `metadata.fromPersistentStub` here. Our own `persistent` flag
     // indicates whether the Worker whose `[restore]()` method was called allows persistence. The

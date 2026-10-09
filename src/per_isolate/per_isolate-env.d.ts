@@ -100,6 +100,10 @@ declare const utils: {
     signal: AbortSignal,
     algorithm: () => void
   ): AbortAlgorithmHandle;
+  // The exact UTF-8 byte length of a string as TextEncoder encodes it (a lone
+  // surrogate counts the 3 bytes of U+FFFD), without encoding it. Throws a
+  // TypeError for a non-string.
+  utf8Length(str: string): number;
 };
 
 // An abort algorithm registration. Obtained only from

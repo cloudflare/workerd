@@ -309,8 +309,6 @@ export interface ByteStreamConsumer extends StreamConsumer<Uint8Array> {
   readBYOB(
     desc: PullIntoDescriptor
   ): Promise<ReadableStreamReadResult<ArrayBufferView>>;
-  readonly hasPendingPullInto: boolean;
-  readonly hasPartiallyFulfilledRead: boolean;
   readonly headPullInto: PullIntoDescriptor | undefined;
   readonly pendingPullIntoView: Uint8Array | undefined;
   respondBYOB(bytesWritten: number): void;
@@ -536,31 +534,35 @@ class StreamQueue<T, V = T> {
     // has no state guard, so we accept the enqueue unconditionally.
     if (this.#state === 'closed') {
       // Reentrant close() from inside size() already pushed the sentinel.
-      // The spec's close just sets closeRequested — the chunk is still
-      // readable. Insert the entry BEFORE the sentinel so cursors drain
-      // through it before reaching the close marker.
+      // The chunk is readable by every consumer or by none, so tee
+      // branches always see the same chunks:
+      //   - A cursor at the sentinel has drained, and its stream closed
+      //     with the close() (spec: a close() on an empty queue closes the
+      //     stream, and the chunk is never read; with a tee, a drained
+      //     branch means the tee has read the source's queue empty). The
+      //     chunk is dropped.
+      //   - Otherwise every cursor is behind the sentinel. The spec's
+      //     close() only requested the close and the chunk is still
+      //     readable: insert it BEFORE the sentinel, so each cursor drains
+      //     through it before reaching the close marker.
+      // Inserting with a cursor at the sentinel would leave that cursor on
+      // the chunk, for good: its closed stream never reads it, so the
+      // cursor never reaches the sentinel and the source never ends.
+      this.#prune();
+      if (this.#noConsumers) return;
       const entries = this.#entries;
-      // Sentinel position BEFORE insertion — cursors at or past this
-      // point already resolved {done: true} and must not be touched.
       const sentinelPos = this.#headOffset + entries.length - 1;
+      const cursors = this.#cursors;
+      for (let i = 0; i < cursors.length; i++) {
+        if ((cursors[i] as QueueCursor<T, V>).position >= sentinelPos) return;
+      }
       const sentinel = entries.pop() as QueueSlot<T>;
       entries.push(entry);
       entries.push(sentinel);
-      // Only update cursors that haven't yet reached the sentinel.
-      // A cursor at sentinelPos already drained and resolved done —
-      // inflating its remainingSize or notifying it would corrupt
-      // desiredSize and break the drain-then-close terminality guarantee.
-      this.#prune();
-      const cursors = this.#cursors;
-      const behind: QueueCursor<T, V>[] = [];
       for (let i = 0; i < cursors.length; i++) {
-        const cursor = cursors[i] as QueueCursor<T, V>;
-        if (cursor.position < sentinelPos) {
-          cursor.addToTotalSize(entry.size);
-          ArrayPrototypePush(behind, cursor);
-        }
+        (cursors[i] as QueueCursor<T, V>).addToTotalSize(entry.size);
       }
-      if (notify) this.#notifyEach(behind);
+      if (notify) this.#notifyAll();
     } else {
       this.#entries.push(entry);
       if (this.#state === 'readable') {
@@ -735,8 +737,9 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   #byteOffset: number; // partial consumption of the entry at #position
   #pendingReads: RingBufferType<PendingRead<V>> = new RingBuffer();
   // Running total mirroring the spec's [[queueTotalSize]]. Incremented on
-  // enqueue, decremented on consume. Must use +=/-= (not recomputation) to
-  // preserve IEEE 754 double-precision drift that WPTs verify.
+  // enqueue, decremented on consume. Must use +=/-= (not recomputation):
+  // the spec's double arithmetic leaves residues that WPTs verify. A
+  // whole-entry consume clamps a negative total to 0 (advancePastEntry).
   #queueTotalSize: number = 0;
 
   constructor(
@@ -787,11 +790,8 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   }
 
   // Spec [[queueTotalSize]]: running total of unconsumed entry sizes.
-  // Uses += / -= to match IEEE 754 drift that WPTs verify.
   get remainingSize(): number {
-    // Clamp to 0 per spec (ResetQueue, EnqueueValueWithSize clamping).
-    const total = this.#queueTotalSize;
-    return total < 0 ? 0 : total;
+    return this.#queueTotalSize;
   }
 
   // Called by StreamQueue.enqueue() to increment the running total.
@@ -814,6 +814,10 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
       // running total — bytes before #byteOffset were already debited
       // (by setConsumed or via initialTotalSize at cursor construction).
       this.#queueTotalSize -= slot.size - this.#byteOffset;
+      // Spec DequeueValue: a total that rounding has taken below 0 becomes
+      // 0, so the residue does not carry into later enqueues. (Byte sizes
+      // are integers and never leave one.)
+      if (this.#queueTotalSize < 0) this.#queueTotalSize = 0;
     }
     this.#position++;
     this.#byteOffset = 0;
@@ -1046,10 +1050,6 @@ class ByteStreamCursor
   // stream directly); it receives the cursor's owner, held weakly here.
   #errorStreamCallback: ErrorStreamCallback | undefined;
 
-  get hasPendingPullInto(): boolean {
-    return this.#pendingPullIntos.length > 0;
-  }
-
   override get hasPendingRead(): boolean {
     if (super.hasPendingRead) return true;
     // Descriptors with readerType 'none' are leftovers from releaseLock or
@@ -1062,11 +1062,6 @@ class ByteStreamCursor
       }
     }
     return false;
-  }
-
-  get hasPartiallyFulfilledRead(): boolean {
-    const head = this.#pendingPullIntos.peek();
-    return head !== undefined && head.bytesFilled > 0;
   }
 
   // The head pull-into descriptor, for the controller's respond() /

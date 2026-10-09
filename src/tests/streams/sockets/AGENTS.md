@@ -9,13 +9,18 @@ starttls-*); this suite owns the STREAMS interaction only.
 
 ## Infrastructure
 
-A node sidecar (echo-server.js) runs two TCP servers, their ports
+A node sidecar (echo-server.js) runs three TCP servers, their ports
 delivered through `fromEnvironment` bindings (`STREAMS_ECHO_PORT`,
-`STREAMS_GREET_PORT`, plus `SIDECAR_HOSTNAME`):
+`STREAMS_GREET_PORT`, `STREAMS_STALL_PORT`, plus `SIDECAR_HOSTNAME`):
 
 - **echo**: echoes every byte; on client half-close, flushes and ends
   (the client's readable reaches EOF after the full echo).
 - **greet**: writes one fixed message and ends immediately.
+- **stall**: accepts and never reads, so a large write stays in flight.
+
+`startTls()` detaches a socket's streams. The suite's network has no TLS
+starter, so the upgraded socket then fails to open (logged as an
+uncaught rejection); the detach itself has already happened.
 
 Both cells need `experimental` (Socket) and an `internet` network
 service allowing `private`. The suite's `.wd-test` files take no
@@ -23,14 +28,25 @@ service allowing `private`. The suite's `.wd-test` files take no
 
 ## Coverage
 
-`cancelReadableSettlesSocket` pins one implementation divergence: canceling
-a pending read rejects with a re-created `Error` carrying the cancel reason
-under C++, while TypeScript resolves the read done.
+Two implementation divergences are pinned:
+
+1. `cancelReadableSettlesSocket`: canceling a pending read rejects with a
+   re-created `Error` carrying the cancel reason under C++, while
+   TypeScript resolves the read done.
+2. `detachRejectsPendingWrites`: at a `startTls()` detach, TypeScript
+   rejects the pending writes inside the detach, so their rejections
+   settle before the old socket's `closed` resolves; C++ resolves
+   `closed` in the same callback and rejects the writes at least one
+   event-loop turn later, once its canceled write's I/O reports back
+   (`awaitIoLegacy`, then `drain()`). Neither order is specified
+   (`startTls` and flush are workerd extensions); the TypeScript one
+   reports the failed writes before the upgrade.
 
 | Test | Shape |
 | --- | --- |
 | `echoRoundTrip` | write ×2, half-close via writer.close(), drain echo to EOF |
 | `degenerateViewsWithHighWaterMark` | byte-counting writable (`highWaterMark`): detached/out-of-bounds typed-array and DataView views count and send nothing; the stream keeps writing |
+| `stringSizesWithHighWaterMark` | byte-counting writable: a string counts its UTF-8 bytes (multi-byte sequences; 3 per lone surrogate, sent as U+FFFD) |
 | `greetReadsToEof` | server-initiated EOF: greeting then done, tail read `{done: true, value: undefined}` |
 | `echoByobReads` | BYOB reader with recycled views over the socket readable, byte-exact |
 | `echoReadAtLeast` | readAtLeast accumulates across TCP fragmentation |
@@ -42,4 +58,6 @@ under C++, while TypeScript resolves the read done.
 | `pipeBehindUnawaitedWrite` | header write not awaited, writer released, Response body piped in: echo is header then body; both endpoints unlocked after the pipe |
 | `pipeBehindWriteBeforeStart` | the same within connect()'s turn, with the header still queued before the writable starts |
 | `cancelReadableSettlesSocket` | reader.cancel settles a pending peer read (C++ rejects; TS resolves done), then socket.close()/closed settle |
+| `detachRejectsPendingWrites` | writes pending at startTls()'s detach (one in flight to the stall server, two queued) all reject with the same `Network connection lost.` error; the writable stays locked and (TS, via the interop closed-promise) is closed |
+| `detachClosesIdleWritable` | startTls() with nothing pending: the writable is locked and (TS) closed at the detach |
 | `largeEchoVolume` | 256 KiB continuous pattern, concurrent producer/consumer, byte-exact |

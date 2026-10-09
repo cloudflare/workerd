@@ -4945,6 +4945,7 @@ export interface Tracing {
 }
 export declare abstract class Span {
   get isTraced(): boolean;
+  spanContext(): TracingSpanContext;
   setAttribute(key: string, value: boolean | number | string): this;
   setAttributes(
     attributes: Record<string, boolean | number | string | undefined>,
@@ -4979,6 +4980,11 @@ export type TracingSpanStatusCode = "unset" | "ok" | "error";
 export interface TracingSpanStatus {
   code: TracingSpanStatusCode;
   message?: string;
+}
+export interface TracingSpanContext {
+  traceId: string;
+  spanId: string;
+  traceFlags: number;
 }
 /**
  * Represents the identity of a user authenticated via Cloudflare Access.
@@ -15590,9 +15596,18 @@ export declare type EmailExportedHandler<Env = unknown, Props = unknown> = (
  * Evaluation context for targeting rules.
  * Keys are attribute names (e.g. "userId", "country"), values are the attribute values.
  */
+export type FlagshipEvaluationContextValue =
+  | string
+  | number
+  | boolean
+  | null
+  | FlagshipEvaluationContextValue[]
+  | {
+      [key: string]: FlagshipEvaluationContextValue;
+    };
 export type FlagshipEvaluationContext = Record<
   string,
-  string | number | boolean
+  FlagshipEvaluationContextValue
 >;
 export interface FlagshipEvaluationDetails<T> {
   flagKey: string;
@@ -15602,6 +15617,13 @@ export interface FlagshipEvaluationDetails<T> {
   errorCode?: string | undefined;
   errorMessage?: string | undefined;
 }
+export type FlagshipWidenedValue<T> = T extends boolean
+  ? boolean
+  : T extends string
+    ? string
+    : T extends number
+      ? number
+      : T;
 export interface FlagshipEvaluationError extends Error {}
 /**
  * Feature flags binding for evaluating feature flags from a Cloudflare Workers script.
@@ -15628,12 +15650,39 @@ export declare abstract class Flagship {
    * @param flagKey The key of the flag to evaluate.
    * @param defaultValue Optional default value returned when evaluation fails.
    * @param context Optional evaluation context for targeting rules.
+   * @deprecated Use getValue() instead.
    */
   get(
     flagKey: string,
     defaultValue?: unknown,
     context?: FlagshipEvaluationContext,
   ): Promise<unknown>;
+  /**
+   * Get a flag value, inferring its expected type from the default value.
+   * @param flagKey The key of the flag to evaluate.
+   * @param defaultValue Default value returned when evaluation fails or the flag type does not match.
+   * @param context Optional evaluation context for targeting rules.
+   */
+  getValue<
+    T extends boolean | string | number | Record<string, unknown> | unknown[],
+  >(
+    flagKey: string,
+    defaultValue: T,
+    context?: FlagshipEvaluationContext,
+  ): Promise<FlagshipWidenedValue<T>>;
+  /**
+   * Get a flag value with full evaluation details, inferring its expected type from the default value.
+   * @param flagKey The key of the flag to evaluate.
+   * @param defaultValue Default value returned when evaluation fails or the flag type does not match.
+   * @param context Optional evaluation context for targeting rules.
+   */
+  getDetails<
+    T extends boolean | string | number | Record<string, unknown> | unknown[],
+  >(
+    flagKey: string,
+    defaultValue: T,
+    context?: FlagshipEvaluationContext,
+  ): Promise<FlagshipEvaluationDetails<FlagshipWidenedValue<T>>>;
   /**
    * Get a boolean flag value.
    * @param flagKey The key of the flag to evaluate.

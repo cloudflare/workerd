@@ -7,11 +7,13 @@ load("//:build/wd_test.bzl", "wd_test")
 writable_suite_srcs = glob(["*.js"]) + ["writable-modules.capnp"]
 
 wd_test(
+    size = "large",
     src = "writable-cpp.wd-test",
     data = writable_suite_srcs,
 )
 
 wd_test(
+    size = "large",
     src = "writable-ts.wd-test",
     args = ["--experimental"],
     data = writable_suite_srcs,
@@ -21,6 +23,7 @@ wd_test(
 # modules pin its deltas (sink.type validation, abort signal reason,
 # desiredSize while erroring) via the pedanticWpt branch in which-impl.
 wd_test(
+    size = "large",
     src = "writable-cpp-pedantic.wd-test",
     data = writable_suite_srcs,
 )
@@ -29,12 +32,14 @@ wd_test(
 # @all-compat-flags variants are disabled: at the 2999-12-31 date the
 # flags the cells deliberately omit would all turn on.
 wd_test(
+    size = "large",
     src = "writable-cpp-legacy.wd-test",
     data = writable_suite_srcs,
     generate_all_compat_flags_variant = False,
 )
 
 wd_test(
+    size = "large",
     src = "writable-cpp-legacy-writer.wd-test",
     data = writable_suite_srcs,
     generate_all_compat_flags_variant = False,

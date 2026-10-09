@@ -25,6 +25,9 @@ export {
   fixedLengthCoercionDivergence,
   fixedLengthLengthsAboveMaxSafeInteger,
   userStrategySizeNeverInvoked,
+  strategyArgumentDictionaryConversion,
+  highWaterMarkReadAndConvertedOnce,
+  highWaterMarkConversionDivergence,
 } from 'construction';
 
 export {
@@ -42,6 +45,7 @@ export {
   zeroLengthUint8ArrayIsNoop,
   zeroLengthArrayBufferIsNoop,
   zeroLengthStringIsNoop,
+  undefinedChunkIsNoop,
 } from 'zero-length-writes';
 
 export { writeCopiesData } from 'copy-semantics';

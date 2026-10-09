@@ -320,8 +320,13 @@ HeapTracer::HeapTracer(v8::Isolate* isolate)
     }
   }, this, v8::GCType::kGCTypeMarkSweepCompact);
 
+  // V8 calls this from inside the garbage collector, in frames built without exception support, and
+  // detaching can run arbitrary destructors. An exception escaping it would unwind through V8
+  // without running V8's own scope destructors, leaving the isolate broken (for example, unable to
+  // run JavaScript again). As with ~CppgcShim(), noexcept makes such an exception fatal instead, and
+  // the crash report names the throw site so the thrower can be fixed.
   isolate->AddGCEpilogueCallback(
-      [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) {
+      [](v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags, void* data) noexcept {
     auto& self = *static_cast<HeapTracer*>(data);
     for (Wrappable* wrappable: self.detachLater) {
       wrappable->detachWrapper(true);
@@ -349,6 +354,10 @@ bool HeapTracer::TryResetRoot(const v8::TracedReference<v8::Value>& handle) {
 }
 
 namespace {
+// Capacity reserved upfront for the external_references array so that the
+// `.begin()` pointer handed to V8 stays stable as references are appended (no reallocation).
+constexpr size_t kExternalReferencesCapacity = 16384;
+
 std::unique_ptr<v8::CppHeap> newCppHeap(V8PlatformWrapper* system) {
   return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     v8::CppHeapCreateParams heapParams{{}};
@@ -357,9 +366,24 @@ std::unique_ptr<v8::CppHeap> newCppHeap(V8PlatformWrapper* system) {
     return v8::CppHeap::Create(system, heapParams);
   });
 }
-static v8::Isolate* newIsolate(
-    v8::Isolate::CreateParams&& params, v8::CppHeap* cppHeap, v8::IsolateGroup group) {
-  return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> v8::Isolate* {
+
+// The observer of the isolate that v8::Isolate::New() is creating on this thread, for
+// IsolateBase::createV8Histogram(). V8 creates its first histograms while deserializing the
+// startup snapshot inside v8::Isolate::New(), before the isolate carries a pointer to its
+// IsolateBase, so the observer has to be found some other way during that window.
+thread_local IsolateObserver* initializingIsolateObserver = nullptr;
+
+struct IsolateWithSnapshotCreator {
+  v8::Isolate* isolate;
+  kj::Maybe<kj::Own<v8::SnapshotCreator>> maybeSnapshotCreator;
+};
+
+IsolateWithSnapshotCreator newIsolateWithSnapshotCreator(v8::Isolate::CreateParams&& params,
+    v8::CppHeap* cppHeap,
+    v8::IsolateGroup group,
+    IsolateObserver& observer,
+    kj::Maybe<SnapshotConfig>& snapshotConfig) {
+  return jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) -> IsolateWithSnapshotCreator {
     // We currently don't attempt to support incremental marking or sweeping. We probably could
     // support them, but it will take some careful investigation and testing. It's not clear if
     // this would be a win anyway, since Worker heaps are relatively small and therefore doing a
@@ -384,7 +408,40 @@ static v8::Isolate* newIsolate(
           v8::ArrayBuffer::Allocator::NewDefaultAllocator());
 #endif
     }
-    return v8::Isolate::New(group, params);
+    // Installed through the params rather than after creation so that the histograms V8 records
+    // while creating the isolate (snapshot deserialization) are captured too.
+    params.create_histogram_callback = &IsolateBase::createV8Histogram;
+    params.add_histogram_sample_callback = &IsolateBase::addV8HistogramSample;
+
+    auto* previousInitializingIsolateObserver = initializingIsolateObserver;
+    initializingIsolateObserver = &observer;
+    KJ_DEFER(initializingIsolateObserver = previousInitializingIsolateObserver);
+
+    KJ_IF_SOME(c, snapshotConfig) {
+      KJ_SWITCH_ONEOF(c) {
+        KJ_CASE_ONEOF(mutableSnapshot, MutableSnapshot) {
+          auto& artifact = *mutableSnapshot.artifact;
+          KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
+
+          // Zero-fill provides the 0 terminator V8 expects.
+          artifact.externalReferences = kj::heapArray<intptr_t>(kExternalReferencesCapacity);
+          artifact.externalReferences.asPtr().fill(0);
+          params.external_references = artifact.externalReferences.begin();
+
+          auto creator = kj::heap<v8::SnapshotCreator>(params);
+          v8::Isolate* isolate = creator->GetIsolate();
+          return IsolateWithSnapshotCreator{isolate, kj::mv(creator)};
+        }
+        KJ_CASE_ONEOF(finalizedSnapshot, FinalizedSnapshot) {
+          const SnapshotArtifact& artifact = *finalizedSnapshot.artifact;
+          KJ_REQUIRE(artifact.blob.data != nullptr, "snapshot artifact holds no blob");
+          params.snapshot_blob = &artifact.blob;
+          params.external_references = artifact.externalReferences.begin();
+        }
+      }
+    }
+
+    return IsolateWithSnapshotCreator{v8::Isolate::New(group, params), kj::none};
   });
 }
 }  // namespace
@@ -400,10 +457,18 @@ IsolateBase::IsolateBase(V8System& system,
     v8::Isolate::CreateParams&& createParams,
     kj::Own<IsolateObserver> observer,
     kj::Own<ExternalStringAllocator> externalStringAllocator,
-    v8::IsolateGroup group)
+    v8::IsolateGroup group,
+    kj::Maybe<SnapshotConfig> snapshotConf)
     : v8System(system),
       cppHeap(newCppHeap(const_cast<V8PlatformWrapper*>(system.platformWrapper.get()))),
-      ptr(newIsolate(kj::mv(createParams), cppHeap.release(), group)),
+      snapshotCreator(kj::none),
+      ptr([&]() {
+        auto [isolate, maybeCreator] = newIsolateWithSnapshotCreator(
+            kj::mv(createParams), cppHeap.release(), group, *observer, snapshotConf);
+        snapshotCreator = kj::mv(maybeCreator);
+        return isolate;
+      }()),
+      snapshotConfig(kj::mv(snapshotConf)),
       externalMemoryTarget(kj::arc<ExternalMemoryTarget>(ptr)),
       envAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
       exportsAsyncContextKey(kj::arc<AsyncContextFrame::StorageKey>()),
@@ -468,6 +533,70 @@ IsolateBase::IsolateBase(V8System& system,
   });
 }
 
+void IsolateBase::setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext) {
+  KJ_REQUIRE(isPreparingSnapshot());
+  KJ_ASSERT_NONNULL(snapshotCreator)->SetDefaultContext(defaultContext);
+}
+
+void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
+    kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles) {
+  KJ_REQUIRE(isPreparingSnapshot());
+  auto& artifact = mutableSnapshotArtifact();
+  KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
+
+  // We need to reset all C++ handles that point to JavaScript objects before creating
+  // the snapshot blob, because V8 does not know how to serialize them.
+
+  // 1. Destroy every live Wrappable.
+  heapTracer.destroyLiveWrappableInstances();
+
+  // Destructors under the isolate lock release their handles synchronously; drain the
+  // deferred-destruction queue regardless, as it would otherwise be applied only by the next
+  // lock, after CreateBlob().
+  applyDeferredActions();
+
+  // 1b. Settle the FinalizationRegistry cleanups that destroying the graph leaves behind.
+  // CreateBlob() runs a full GC of its own before serializing: every registry whose targets die
+  // in that GC lands on the heap's dirty list with a cleanup task posted to the foreground task
+  // runner, and the startup serializer then rejects the isolate
+  // (StartupSerializer::CheckNoDirtyFinalizationRegistries).
+  {
+    v8::HandleScope scope(ptr);
+    ptr->LowMemoryNotification();
+    while (pumpMsgLoop()) {
+      ptr->PerformMicrotaskCheckpoint();
+    }
+    ptr->ClearKeptObjects();
+  }
+
+  // 2. Reset isolate level handles.
+  opaqueTemplate.Reset();
+  workerEnvObj.Reset();
+  workerExportsObj.Reset();
+
+  // 2b. Reset template handles drained from embedder-side caches (e.g. Rust JSG resource
+  // templates such as node-internal:dns).
+  for (auto& h: extraTemplateHandles) {
+    h.Reset();
+  }
+
+  // 3. Reset resource-type constructor templates: the memoized and context slot per
+  // JSG_RESOURCE type, owned by the TypeWrapper machinery.
+  iterateResourceTypeTemplates([&](v8::Global<v8::FunctionTemplate>& h) { h.Reset(); });
+
+  // 4. Reset struct-type handles: dictionary template + field-name handles per JSG_STRUCT.
+  visitStructTypeHandles([](v8::Global<v8::Name>& h) { h.Reset(); },
+      [](v8::Global<v8::DictionaryTemplate>& h) { h.Reset(); });
+
+  // 5. Reset the Global holding the default context, extracted from the script's module
+  // context. The SnapshotCreator keeps its own handle on the default context until CreateBlob()
+  // consumes it.
+  defaultContextHandle.Reset();
+
+  artifact.blob = KJ_ASSERT_NONNULL(snapshotCreator)
+                      ->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
+}
+
 IsolateBase::~IsolateBase() noexcept(false) {
   // Ensure objects that outlive the isolate won't attempt to modify external memory
   // on the now-destroyed isolate.
@@ -476,7 +605,16 @@ IsolateBase::~IsolateBase() noexcept(false) {
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
     // Terminate the v8::platform's task queue associated with this isolate
     v8System.shutdownIsolate(ptr);
-    ptr->Dispose();
+    // When preparing a snapshot the v8::SnapshotCreator owns the isolate and keeps it "entered" by
+    // the current thread; v8::Isolate::Dispose() refuses to run on an entered isolate. Destroy the
+    // SnapshotCreator first — its destructor exits and disposes the isolate — and skip
+    // ptr->Dispose() in that case.
+    if (isPreparingSnapshot()) {
+      // Destroying the SnapshotCreator exits and disposes its isolate.
+      snapshotCreator = kj::none;
+    } else {
+      ptr->Dispose();
+    }
     ptr = nullptr;
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();
@@ -620,6 +758,8 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
 
   switch (event->type) {
     case v8::JitCodeEvent::CODE_ADDED: {
+      self->recordCodeAdded(event->code_type, event->code_len);
+
       // Usually CODE_ADDED comes after CODE_END_LINE_INFO_RECORDING, but sometimes it doesn't,
       // particularly in the case of Wasm where it appears no line info is provided.
       auto& info = codeMap.findOrCreate(
@@ -702,6 +842,60 @@ void IsolateBase::jitCodeEvent(const v8::JitCodeEvent* event) noexcept {
       break;
     }
   }
+}
+
+void IsolateBase::recordCodeAdded(v8::JitCodeEvent::CodeType type, size_t size) {
+  switch (type) {
+    case v8::JitCodeEvent::BYTE_CODE:
+      codeStatistics.bytecodeCount.fetch_add(1, std::memory_order_relaxed);
+      codeStatistics.bytecodeBytes.fetch_add(size, std::memory_order_relaxed);
+      break;
+    case v8::JitCodeEvent::JIT_CODE:
+      codeStatistics.jitCodeCount.fetch_add(1, std::memory_order_relaxed);
+      codeStatistics.jitCodeBytes.fetch_add(size, std::memory_order_relaxed);
+      break;
+    case v8::JitCodeEvent::WASM_CODE:
+      codeStatistics.wasmCodeCount.fetch_add(1, std::memory_order_relaxed);
+      codeStatistics.wasmCodeBytes.fetch_add(size, std::memory_order_relaxed);
+      break;
+  }
+}
+
+IsolateBase::CodeStatistics IsolateBase::getCodeStatistics() const {
+  return {
+    .bytecodeCount = codeStatistics.bytecodeCount.load(std::memory_order_relaxed),
+    .bytecodeBytes = codeStatistics.bytecodeBytes.load(std::memory_order_relaxed),
+    .jitCodeCount = codeStatistics.jitCodeCount.load(std::memory_order_relaxed),
+    .jitCodeBytes = codeStatistics.jitCodeBytes.load(std::memory_order_relaxed),
+    .wasmCodeCount = codeStatistics.wasmCodeCount.load(std::memory_order_relaxed),
+    .wasmCodeBytes = codeStatistics.wasmCodeBytes.load(std::memory_order_relaxed),
+  };
+}
+
+void* IsolateBase::createV8Histogram(const char* name, int min, int max, size_t buckets) noexcept {
+  // V8 creates histograms lazily, on first use, from whatever thread that happens on, and passes
+  // no isolate. While v8::Isolate::New() runs, initializingIsolateObserver names the observer.
+  // Afterwards we rely on V8 using the current isolate's counters on an entered thread. A sink
+  // belongs to that isolate's observer and must outlive its disposal. On a V8 background thread
+  // neither applies; returning null leaves the histogram off until it is next used on the
+  // isolate's own thread, when V8 asks again.
+  IsolateObserver* observer = initializingIsolateObserver;
+  if (observer == nullptr) {
+    v8::Isolate* isolate = v8::Isolate::TryGetCurrent();
+    if (isolate == nullptr) return nullptr;
+    auto* base = static_cast<IsolateBase*>(isolate->GetData(SET_DATA_ISOLATE_BASE));
+    // IsolateBase has not been attached yet in the window after Isolate::New() returns.
+    if (base == nullptr) return nullptr;
+    observer = base->observer.get();
+  }
+  KJ_IF_SOME(sink, observer->tryCreateV8HistogramSink(name, min, max, buckets)) {
+    return &sink;
+  }
+  return nullptr;
+}
+
+void IsolateBase::addV8HistogramSample(void* histogram, int sample) noexcept {
+  static_cast<V8HistogramSink*>(histogram)->addSample(sample);
 }
 
 void* getJsCageBase() {

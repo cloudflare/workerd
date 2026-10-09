@@ -329,10 +329,10 @@ kj::Promise<void> DynamicWorkerSource::ensureAllResolved() {
     promises.add(kj::mv(promise));
   }
 
-  auto resolveChannelSlot = [&](kj::Own<IoChannelFactory::SubrequestChannel>& slot) {
+  auto resolveChannelSlot = [&](auto& slot) {
     KJ_SWITCH_ONEOF(slot->getResolved()) {
       KJ_CASE_ONEOF(channel, kj::Own<IoChannelFactory::TokenizableChannel>) {
-        slot = channel.downcast<IoChannelFactory::SubrequestChannel>();
+        slot = channel.template downcast<IoChannelFactory::SubrequestChannel>();
       }
       KJ_CASE_ONEOF(promise, kj::Promise<kj::Own<IoChannelFactory::TokenizableChannel>>) {
         promises.add(promise.then([&slot](kj::Own<IoChannelFactory::TokenizableChannel> channel) {

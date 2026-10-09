@@ -42,12 +42,13 @@ the abort reason).
 | 6b | concurrent aborts | a fresh promise per abort() call | the same promise for both (spec); both fulfill undefined | `concurrentAbortPromiseIdentity` |
 | 7 | startedness (see above) | sync write→abort: sink runs, write fulfills; a same-turn mutation/detach/resize of the chunk's buffer after write() is NOT observed by the sink | write still queued: rejected with abort reason; the buffer change IS observed | `writableStreamAbortWhileWriting`, `writableStreamAbortWriteClosePending`, `writableStreamPromisesResolvedInOrder`, `writableStreamCloseThrowRejectsPromises`, `abortRejectsOutstandingWriteWithReason`, buffer-lifecycle.js (`chunkMutationVisibility`, `detachAfterWriteTiming`, `resizableGrowAfterWrite`, `resizableShrinkOutOfBounds`) |
 | 8 | close hook racing an immediate abort | close hook runs; close+abort reject with its error | close still queued: hook never runs, close rejects with abort reason, abort fulfills | `writableStreamCloseThrowRejectsPromises` |
-| 9 | queue totals | size() → uint64 (fractions truncate; NaN/negative/±Infinity → TypeError, also for a write after close(), which with an earlier write queued rejects the close too); desiredSize narrowed through `int` (wraps past 2^31) | double arithmetic per spec; invalid size → RangeError "Invalid chunk size", checked only on enqueue: a write after close() rejects alone and the close completes | `floatingPointQueueTotals`, `fractionalSizeTruncation`, `invalidSizeReturnRejects`, `invalidSizeAfterCloseRejectsOnlyTheWrite` |
+| 9 | queue totals | size() → uint64 (fractions truncate; NaN/negative/±Infinity → TypeError, also for a write after close(), which with an earlier write queued rejects the close too); desiredSize narrowed through `int` (wraps past 2^31) | double arithmetic per spec; invalid size → RangeError "Invalid chunk size", checked only on enqueue: a write after close() rejects alone and the close completes | `floatingPointQueueTotals`, `writableFloatQueueTotal`, `fractionalSizeTruncation`, `invalidSizeReturnRejects`, `invalidSizeAfterCloseRejectsOnlyTheWrite` |
 | 10 | signal.reason for reasonless abort() | undefined (pedantic_wpt: AbortError DOMException) | AbortError DOMException (spec) | `abortSignalReason` |
 | 11 | desiredSize while erroring | queue accounting value (pedantic_wpt: null) | null (spec) | `desiredSizeWhileErroring` |
 | 12 | non-callable size / released-writer messages | jsg dictionary / "This WritableStream writer has been released." | TS validator / "This writer has been released" | `nonCallableSizeThrows`, `releaseLockInsideSize` |
 | 13 | releaseLock() with writes still queued | cancels them: queued writes reject with the released-writer error and their chunks are dropped (a C++ deviation — the source of its WPT piping/flow-control release-then-pipe expectedFailures) | spec: release rejects only ready/closed; queued writes stay in [[writeRequests]] and drain on the sink's schedule (a new writer can relock and they still complete — WPT flow-control pins that; behind a never-settling in-flight write they wait forever on backpressure) | `cancelWriteOnReleaseLock` |
 | 14 | when a promise returned by start() starts the stream | adopts it: a write queued during start reaches the sink before the first marker chained on it | spec (Node agrees): a new promise is resolved with it, so the write reaches the sink after the second marker, whether it was fulfilled on return or later | `startPromiseSettledInNewPromise` |
+| 15 | a write from inside sink.close() whose size() throws | rejects with size()'s error | TypeError (closing): the close in flight is checked before the erroring state (spec; Node agrees); the close completes either way | `sizeConsultedForWriteInsideSinkClose` |
 
 Parity worth noting (probed, pinned): the whole in-flight abort matrix —
 abort-before-start reason identity on ready/closed, errored-state reason
@@ -68,7 +69,9 @@ ArrayBuffer is an acceptable chunk (byteLength 0); a coercing
 `{valueOf}` highWaterMark is accepted via ToNumber; the user size() runs
 with an undefined receiver and one argument; reentrant `writer.write()`
 from size() enqueues the inner chunk first; size() is never consulted
-for doomed writes (the TS sinks' `willAcceptWrite` invariant); a patched
+for doomed writes (the TS sinks' `willAcceptWrite` invariant), but is
+for a write made from inside sink.close() or sink.abort(), which then
+rejects (closing / the abort reason); a patched
 `Object.prototype.then` getter never fires while settling writer
 promises (they resolve with undefined).
 
@@ -96,7 +99,7 @@ promises (they resolve with undefined).
 | `abort-semantics.js` | migrated abort lifecycle: reason propagation, signal event, persistent errored state, in-flight sequencing, outstanding-write startedness, terminal-state interactions (#7) |
 | `abort-matrix.js` | probed parity matrix (see above), including controller-error races and sink-hook suppression + signal reason (#10) + concurrent-abort identity (#6b) |
 | `backpressure.js` | desiredSize accounting/recovery; ready replaced at capacity; WPT floating-point scenarios and invalid sizes, incl. after close() (#9); erroring desiredSize (#11) |
-| `reentrancy.js` | size()-reentrant write ordering; releaseLock inside size (#12; flag-gated, cf. legacy-writer); controller.error inside write hook; doomed-write size skip; size receiver/arity |
+| `reentrancy.js` | size()-reentrant write ordering; releaseLock inside size (#12; flag-gated, cf. legacy-writer); controller.error inside write hook; doomed-write size skip; size receiver/arity; size() consulted for a write from inside sink.close() (#15) and sink.abort() |
 | `then-interceptors.js` | then-getter never fires on writer promise settlement |
 | `gc.js` | pending write survives gc() with all user refs dropped (--expose-gc) |
 | `legacy-ctor-gate.js` | fully-unflagged: ctor Error + absent controller global |

@@ -118,6 +118,13 @@ on it errors the detached stream. Suites:
 `src/tests/node/stream/finished-and-abort.js`,
 `src/tests/streams/sockets/socket-streams.js`.
 
+A native-backed writable detached by the bridge (`detachWritableStream`:
+socket upgrades) closes at once and stays locked, as the legacy one
+does. Writes still pending from a released writer reject with the
+native sink's disconnect error ("Network connection lost."), and the
+sink cancels the one in flight, so nothing reaches the taken-over
+connection.
+
 ## KEY RULES
 
 - The reader layer must stay backend-blind; backend divergence is

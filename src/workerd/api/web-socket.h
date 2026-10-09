@@ -311,7 +311,7 @@ class WebSocket: public EventTarget {
   // Same as accept(), but websockets that are created with `new WebSocket()` in JS cannot call
   // accept(). Instead, we only permit the C++ constructor to call this "internal" version of accept()
   // so that the websocket can start processing messages once the connection has been established.
-  void internalAccept(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs);
+  void internalAccept(jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs);
 
   void send(jsg::Lock& js, kj::OneOf<kj::Array<byte>, kj::String> message);
   void close(jsg::Lock& js, jsg::Optional<int> code, jsg::Optional<jsg::USVString> reason);
@@ -505,7 +505,7 @@ class WebSocketAdapter {
 
   // Like `accept()` but called by C++ rather than JS — used by the URL-ctor success
   // continuation.
-  virtual void internalAccept(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) = 0;
+  virtual void internalAccept(jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs) = 0;
 
   // State predicates.
   virtual bool isAccepted() = 0;
@@ -614,7 +614,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   void initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket> packedWsPromise) override;
   kj::Promise<DeferredProxy<void>> couple(
       jsg::Lock& js, kj::Own<kj::WebSocket> other, RequestObserver& request) override;
-  void internalAccept(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) override;
+  void internalAccept(jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs) override;
 
   bool isAccepted() override;
   bool isReleased() override;
@@ -697,10 +697,13 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
       explicit WrappedWebSocket(Hibernatable ws);
       explicit WrappedWebSocket(kj::Own<kj::WebSocket> ws);
 
+      // For synchronous use only. Asynchronous operations must go through Accepted::wrapIo(),
+      // which gives them their own reference to the socket.
       kj::WebSocket* operator->();
-      kj::WebSocket& operator*();
 
-      kj::Maybe<kj::Own<kj::WebSocket>&> getIfNotHibernatable();
+      // Returns a new strong reference to the underlying socket.
+      kj::Rc<kj::WebSocket> addRef();
+
       kj::Maybe<Hibernatable&> getIfHibernatable();
       kj::Array<kj::StringPtr> getHibernatableTags();
 
@@ -713,20 +716,36 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
       bool isAwaitingError();
 
      private:
-      kj::OneOf<kj::Own<kj::WebSocket>, Hibernatable> inner;
+      kj::OneOf<kj::Rc<kj::WebSocket>, Hibernatable> inner;
     };
 
     WrappedWebSocket ws;
 
     bool isHibernatable();
 
+    // Starts an asynchronous operation on the socket. `func` receives its own strong reference to
+    // the socket and must keep it for as long as it uses the socket, e.g. by taking it as a
+    // coroutine parameter or attaching it to the returned promise. The socket therefore stays
+    // alive while the operation runs, even if this Accepted state is destroyed. The operation is
+    // canceled when the state is destroyed, so that leaving the state stops all I/O promptly.
+    template <typename Func>
+    auto wrapIo(Func&& func) {
+      return canceler.wrap(func(ws.addRef()));
+    }
+
+    // Receives the next message via wrapIo(). Must not be called on a hibernatable websocket.
+    kj::Promise<kj::WebSocket::Message> receive(size_t maxMessageSize);
+
     kj::Promise<void> createAbortTask(Native& native, IoContext& context);
     // Listens for ws->whenAborted() and possibly triggers a proactive shutdown.
+    // Unlike other asynchronous operations, this uses `ws` directly rather than via wrapIo(). That
+    // is safe only because it is declared after `ws`, and so is destroyed first.
     kj::Promise<void> whenAbortedTask = nullptr;
 
     kj::Maybe<kj::Own<ActorObserver>> actorMetrics;
 
-    // Wraps the pump loop so that we can cancel it when leaving the Accepted state.
+   private:
+    // Cancels the operations started with wrapIo() when leaving the Accepted state.
     kj::Canceler canceler;
   };
 
@@ -811,7 +830,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   // Defers to readLoop; broken out separately so that both `accept(opts)` and
   // `internalAccept` (the URL-ctor success continuation) can launch the loop with shared
   // setup logic.
-  void startReadLoop(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs);
+  void startReadLoop(jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs);
 
   // Returns the number of pending auto-responses that should be sent before the next
   // outgoing message, advancing the queued counter. Called each time a `GatedMessage` is
@@ -820,20 +839,20 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   size_t getPendingAutoResponseCount();
 
   // Drains queued outgoing messages (and any auto-responses) onto the wire. Runs without
-  // an isolate lock on the IoContext's thread; cancellation propagates through
-  // `Accepted::canceler` when the active state is torn down. The function is `static`
+  // an isolate lock on the IoContext's thread. Started via `Accepted::wrapIo()`, which supplies
+  // `ws` and cancels the pump when the active state is torn down. The function is `static`
   // (taking `outgoingMessages`/`autoResponse`/`observer`/`native` by reference) to make
   // it explicit that the pump must not touch JSG-owned state without the isolate lock.
   static kj::Promise<void> pump(IoContext& context,
       OutgoingMessagesMap& outgoingMessages,
-      kj::WebSocket& ws,
+      kj::Rc<kj::WebSocket> ws,
       Native& native,
       AutoResponse& autoResponse,
       kj::Maybe<kj::Own<WebSocketObserver>>& observer,
       kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> pumpCompletion);
 
   kj::Promise<kj::Maybe<kj::Exception>> readLoop(
-      kj::Maybe<kj::Own<InputGate::CriticalSection>> cs, size_t maxMessageSize);
+      kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs, size_t maxMessageSize);
 
   void reportError(jsg::Lock& js, kj::Exception&& e);
   void reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue> err);

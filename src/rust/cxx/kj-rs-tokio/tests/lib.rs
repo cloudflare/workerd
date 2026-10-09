@@ -8,6 +8,7 @@ mod test_helpers;
 use test_helpers::completed_task_count;
 use test_helpers::has_loop_runtime_handle;
 use test_helpers::nested_wait_from_task;
+use test_helpers::runtime_context_waits_after_block_on;
 use test_helpers::spawn_detached_completing_task;
 use test_helpers::spawn_panicking_task;
 use test_helpers::spawn_pending_task;
@@ -96,6 +97,17 @@ mod ffi {
         fn wake_stashed_waker();
         /// How many times `stash_waker_future`'s future has been polled.
         fn stashed_future_poll_count() -> u64;
+
+        /// On a `kj_rs_tokio::Runtime`, after a `block_on`: C++ blocks in `promise.wait()` on the
+        /// context's WaitScope until a KJ timer fires (`waitForTimer`). Panics on failure.
+        fn runtime_context_waits_after_block_on();
+    }
+
+    #[namespace = "kj_rs_tokio"]
+    unsafe extern "C++" {
+        include!("kj-rs-tokio/tokio-event-port.h");
+
+        type TokioAsyncIoContext = kj_rs_tokio::TokioAsyncIoContext;
     }
 
     unsafe extern "C++" {
@@ -114,5 +126,8 @@ mod ffi {
         /// Fulfills the kj::PromiseFulfiller the C++ test installed with `setTestFulfiller`.
         #[cxx_name = "fulfillTestFulfiller"]
         fn fulfill_test_fulfiller(value: i32) -> Result<()>;
+        /// `context.getTimer().afterDelay(ms).wait(context.getWaitScope())`.
+        #[cxx_name = "waitForTimer"]
+        fn wait_for_timer(context: Pin<&mut TokioAsyncIoContext>, ms: u64) -> Result<()>;
     }
 }

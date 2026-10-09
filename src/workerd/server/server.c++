@@ -32,9 +32,11 @@
 #include <workerd/io/worker-fs.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/io/worker.h>
+#include <workerd/jsg/snapshot.h>
 #include <workerd/server/actor-id-impl.h>
 #include <workerd/server/facet-tree-index.h>
 #include <workerd/server/fallback-service.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/exception.h>
 #include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
@@ -667,7 +669,7 @@ class Server::ActorNamespace final {
         // We use a dedicated `ActorSelfTokenFactory` rather than an `ActorChannelImpl` so that we
         // don't hold a reference back to the `ActorContainer`, which would create a cycle
         // preventing actor eviction.
-        metadata.restoredSelfTokenFactory = kj::refcounted<ActorSelfTokenFactory>(
+        metadata.restoredSelfTokenFactory = kj::rc<ActorSelfTokenFactory>(
             ns, Worker::Actor::cloneId(KJ_ASSERT_NONNULL(classAndId.tryGet<ClassAndId>()).id));
       } else {
         // We're a facet. The only way we could have been called by anyone other than our direct
@@ -3122,7 +3124,7 @@ void Server::InspectorServiceIsolateRegistrar::registerIsolate(
 namespace {
 class RequestObserverWithTracer final: public RequestObserver, public WorkerInterface {
  public:
-  RequestObserverWithTracer(kj::Maybe<kj::Own<WorkerTracer>> tracer, kj::TaskSet& waitUntilTasks)
+  RequestObserverWithTracer(kj::Maybe<kj::Rc<WorkerTracer>> tracer, kj::TaskSet& waitUntilTasks)
       : tracer(kj::mv(tracer)) {}
 
   ~RequestObserverWithTracer() noexcept(false) {
@@ -3255,7 +3257,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   }
 
  private:
-  kj::Maybe<kj::Own<WorkerTracer>> tracer;
+  kj::Maybe<kj::Rc<WorkerTracer>> tracer;
   kj::Maybe<WorkerInterface&> inner;
   EventOutcome outcome = EventOutcome::OK;
 };
@@ -3809,7 +3811,7 @@ class Server::WorkerService final: public Service,
     // Same logic as in EntrypointService::startRequest().
     if (!isDynamic) {
       metadata.restoredSelfTokenFactory =
-          kj::refcounted<StaticServiceSelfTokenFactory>(kj::addRef(*this), kj::none);
+          kj::rc<StaticServiceSelfTokenFactory>(kj::addRef(*this), kj::none);
     }
 
     return startRequest(kj::mv(metadata), kj::none, {}, kj::none, false);
@@ -4037,7 +4039,7 @@ class Server::WorkerService final: public Service,
       }
     }
 
-    kj::Maybe<kj::Own<WorkerTracer>> workerTracer = kj::none;
+    kj::Maybe<kj::Rc<WorkerTracer>> workerTracer = kj::none;
 
     if (!bufferedTailWorkers.empty() || !streamingTailWorkers.empty()) {
       // Setting up buffered tail workers support, but only if we actually have tail workers
@@ -4059,9 +4061,9 @@ class Server::WorkerService final: public Service,
           streamingTailWorkers.releaseAsArray(), waitUntilTasks);
       auto trace = kj::refcounted<Trace>(kj::none /* stableId */, kj::none /* scriptName */,
           kj::none /* scriptVersion */, kj::none /* dispatchNamespace */, kj::none /* scriptId */,
-          nullptr /* scriptTags */, mapCopyString(entrypointName), executionModel,
+          nullptr /* scriptTags */, entrypointName.clone(), executionModel,
           kj::mv(durableObjectId));
-      kj::Own<WorkerTracer> tracer = kj::refcounted<WorkerTracer>(
+      kj::Rc<WorkerTracer> tracer = kj::rc<WorkerTracer>(
           kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::mv(tailStreamWriter));
 
       // When the tracer is complete, deliver traces to any buffered tail workers. We end up
@@ -4093,7 +4095,7 @@ class Server::WorkerService final: public Service,
       });
     }
     kj::Own<RequestObserver> observer =
-        kj::refcounted<RequestObserverWithTracer>(mapAddRef(workerTracer), waitUntilTasks);
+        kj::refcounted<RequestObserverWithTracer>(workerTracer.clone(), waitUntilTasks);
 
     kj::Maybe<tracing::InvocationSpanContext> triggerContext;
     KJ_IF_SOME(ctx, metadata.userSpanParent.toSpanContext()) {
@@ -4112,9 +4114,8 @@ class Server::WorkerService final: public Service,
         kj::mv(workerTracer),  // workerTracer
         kj::mv(metadata.cfBlobJson),
         kj::none,  // versionInfo
-        kj::mv(triggerContext),
-        false,  // isDynamicDispatch
-        kj::mv(accessInfo), kj::mv(metadata.restoredSelfTokenFactory), metadata.fromPersistentStub,
+        kj::mv(triggerContext), IsDynamicDispatch::NO, kj::mv(accessInfo),
+        kj::mv(metadata.restoredSelfTokenFactory), metadata.fromPersistentStub,
         kj::mv(metadata.clientAddress));
   }
 
@@ -4203,7 +4204,7 @@ class Server::WorkerService final: public Service,
         // would potentially allow a malicious caller to read and manipulate the parameters to our
         // own `[restore]()` method.
         metadata.restoredSelfTokenFactory =
-            kj::refcounted<StaticServiceSelfTokenFactory>(kj::addRef(*worker), kj::addRef(*this));
+            kj::rc<StaticServiceSelfTokenFactory>(kj::addRef(*worker), kj::addRef(*this));
       }
 
       return worker->startRequest(kj::mv(metadata), entrypoint, kj::mv(props), kj::none, isTracer);
@@ -4768,7 +4769,7 @@ class Server::WorkerService final: public Service,
   kj::Promise<void> onLimitsExceeded() override {
     return kj::NEVER_DONE;
   }
-  void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) override {}
+  void setCpuLimitNearlyExceededCallback(kj::Function<void()> cb) override {}
   void requireLimitsNotExceeded() override {}
   void reportMetrics(RequestObserver& requestMetrics) override {}
   kj::Duration consumeTimeElapsedForPeriodicLogging() override {
@@ -5524,6 +5525,9 @@ class Server::WorkerLoaderNamespace: public kj::Refcounted, private kj::TaskSet:
         // clang-format off
         .globalOutbound{
           .designator = kj::mv(source.globalOutbound)
+              .map([](kj::Rc<IoChannelFactory::SubrequestChannel>&& channel) {
+                return channel.toOwn();
+              })
               .orDefault([]() { return kj::refcounted<NullGlobalOutboundChannel>(); }),
           .errorContext = kj::str("Worker's globalOutbound"),
         },
@@ -5894,16 +5898,114 @@ kj::Promise<kj::Own<Server::Service>> Server::makeWorker(kj::StringPtr name,
   co_return co_await makeWorkerImpl(name, kj::mv(def), extensions, errorReporter);
 }
 
+kj::Own<Worker::Isolate> Server::makeWorkerIsolate(kj::StringPtr name,
+    kj::StringPtr inboundListenersKey,
+    const WorkerDef& def,
+    capnp::List<config::Extension>::Reader extensions,
+    Worker::Isolate::InspectorPolicy inspectorPolicy,
+    kj::Maybe<jsg::SnapshotConfig> snapshotConfig) {
+  auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
+  auto observer = kj::atomicRefcounted<IsolateObserver>();
+  auto limitEnforcer = kj::refcounted<NullIsolateLimitEnforcer>();
+  auto isolateGroup = v8::IsolateGroup::GetDefault();
+
+  kj::Array<Worker::Api::InboundListener> listeners;
+  KJ_IF_SOME(l, inboundListeners.find(inboundListenersKey)) {
+    listeners = KJ_MAP(listener, l) {
+      return Worker::Api::InboundListener{
+        .protocol = kj::str(listener.protocol),
+        .address = kj::str(listener.address),
+        .port = listener.port,
+      };
+    };
+  }
+
+  auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
+      limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver), *memoryCacheProvider,
+      pythonConfig, kj::mv(listeners), kj::mv(snapshotConfig));
+
+  Worker::LoggingOptions isolateLoggingOptions = loggingOptions;
+  isolateLoggingOptions.consoleMode = def.source.variant.is<WorkerSource::ScriptSource>() &&
+          !isNewModuleRegistryEnabled(def.featureFlags)
+      ? Worker::ConsoleMode::INSPECTOR_ONLY
+      : loggingOptions.consoleMode;
+
+  return kj::atomicRefcounted<Worker::Isolate>(kj::mv(api), kj::mv(observer), name,
+      kj::mv(limitEnforcer), inspectorPolicy, kj::mv(isolateLoggingOptions));
+}
+
+namespace {
+
+bool hasWasmModules(const WorkerSource& source) {
+  KJ_IF_SOME(modules, source.variant.tryGet<WorkerSource::ModulesSource>()) {
+    for (auto& module: modules.modules) {
+      if (module.content.is<WorkerSource::WasmModule>()) return true;
+    }
+  }
+  return false;
+}
+
+bool supportsStartupSnapshot(CompatibilityFlags::Reader featureFlags, const WorkerSource& source) {
+  return !featureFlags.getPythonWorkers() && !featureFlags.getNewModuleRegistry() &&
+      !source.variant.is<WorkerSource::ScriptSource>() && !hasWasmModules(source);
+}
+
+}  // namespace
+
+kj::Maybe<kj::Own<jsg::SnapshotArtifact>> Server::makeSnapshot(
+    kj::StringPtr name, WorkerDef& def, capnp::List<config::Extension>::Reader extensions) {
+  // Build a throwaway zygote Worker in PREPARE_SNAPSHOT mode just to extract a V8 startup
+  // snapshot; the caller then builds the real Worker in START_FROM_SNAPSHOT mode using it.
+  KJ_REQUIRE(
+      supportsStartupSnapshot(def.featureFlags, def.source), "snapshot PoC: unsupported Worker");
+
+  // The zygote reports into a reporter of its own: its failures must never surface as the
+  // Worker's.
+  DynamicErrorReporter zygoteErrors;
+
+  auto snapshotArtifact = kj::atomicRefcounted<jsg::SnapshotArtifact>();
+  auto zygoteName = kj::str(name, "-snapshot");
+  auto zygoteIsolate = makeWorkerIsolate(zygoteName, name, def, extensions,
+      Worker::Isolate::InspectorPolicy::DISALLOW,
+      jsg::SnapshotConfig(jsg::MutableSnapshot{.artifact = kj::mv(snapshotArtifact)}));
+
+  auto zygoteWorkerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(def.source));
+  auto zygoteArtifactBundler = workerd::api::pyodide::ArtifactBundler::makeDisabledBundler();
+
+  auto zygoteScript = zygoteIsolate->newScript(name, def.source, IsolateObserver::StartType::COLD,
+      SpanParent(nullptr), kj::mv(zygoteWorkerFs), false, zygoteErrors,
+      kj::mv(zygoteArtifactBundler));
+
+  // Same as for a regular worker, except we ignore ctxExports: pinning it would create a
+  // v8::Global that outlives the zygote isolate and breaks snapshot creation.
+  auto zygoteCompileBindings =
+      [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
+          v8::Local<v8::Object> /*ctxExports*/) { def.compileBindings(lock, api, target); };
+
+  auto zygoteWorker =
+      kj::atomicRefcounted<Worker>(kj::mv(zygoteScript), kj::atomicRefcounted<WorkerObserver>(),
+          kj::mv(zygoteCompileBindings), IsolateObserver::StartType::COLD, SpanParent(nullptr),
+          Worker::Lock::TakeSynchronously(kj::none), zygoteErrors);
+
+  if (!zygoteErrors.errors.empty()) {
+    auto errors = kj::strArray(zygoteErrors.errors, "\n");
+    KJ_LOG(INFO, "startup snapshot skipped: the zygote Worker failed to start", name, errors);
+    return kj::none;
+  }
+
+  kj::Own<jsg::SnapshotArtifact> extractedArtifact;
+  zygoteIsolate->runInLockScope(Worker::Lock::TakeSynchronously(kj::none), [&](jsg::Lock& lock) {
+    extractedArtifact = jsg::IsolateBase::from(lock.v8Isolate).extractSnapshotArtifact();
+  });
+  return kj::mv(extractedArtifact);
+}
+
 kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr name,
     WorkerDef def,
     capnp::List<config::Extension>::Reader extensions,
     ErrorReporter& errorReporter) {
   // Load Python artifacts if this is a Python worker.
   co_await preloadPython(name, def, errorReporter);
-
-  auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
-  auto observer = kj::atomicRefcounted<IsolateObserver>();
-  auto limitEnforcer = kj::refcounted<NullIsolateLimitEnforcer>();
 
   // Create the FsMap that will be used to map known file system
   // roots to configurable locations.
@@ -5936,7 +6038,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
       maybeFallbackService = kj::str(moduleFallback);
     }
 
-    using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
+    using workerd::api::pyodide::ArtifactBundler;
 
     KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
       newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(
@@ -5962,33 +6064,23 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     }
   }
 
-  auto isolateGroup = jsg::newIsolateGroup();
-  kj::Array<Worker::Api::InboundListener> listeners;
-  KJ_IF_SOME(l, inboundListeners.find(name)) {
-    listeners = KJ_MAP(listener, l) {
-      return Worker::Api::InboundListener{
-        .protocol = kj::str(listener.protocol),
-        .address = kj::str(listener.address),
-        .port = listener.port,
-      };
-    };
+  const bool snapshotEnabled = util::Autogate::isEnabled(util::AutogateKey::STARTUP_SNAPSHOT) &&
+      supportsStartupSnapshot(def.featureFlags, def.source);
+  kj::Maybe<jsg::SnapshotConfig> snapshotConfig;
+  if (snapshotEnabled) {
+    KJ_IF_SOME(snapshotArtifact, makeSnapshot(name, def, extensions)) {
+      // TODO(soon): use snapshot artefact.
+      (void)snapshotArtifact;
+    }
   }
-  auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
-      limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver), *memoryCacheProvider,
-      pythonConfig, kj::mv(listeners));
 
   auto inspectorPolicy = Worker::Isolate::InspectorPolicy::DISALLOW;
   if (inspectorOverride != kj::none) {
     // For workerd, if the inspector is enabled, it is always fully trusted.
     inspectorPolicy = Worker::Isolate::InspectorPolicy::ALLOW_FULLY_TRUSTED;
   }
-  Worker::LoggingOptions isolateLoggingOptions = loggingOptions;
-  isolateLoggingOptions.consoleMode =
-      def.source.variant.is<WorkerSource::ScriptSource>() && !usingNewModuleRegistry
-      ? Worker::ConsoleMode::INSPECTOR_ONLY
-      : loggingOptions.consoleMode;
-  auto isolate = kj::atomicRefcounted<Worker::Isolate>(kj::mv(api), kj::mv(observer), name,
-      kj::mv(limitEnforcer), inspectorPolicy, kj::mv(isolateLoggingOptions));
+  auto isolate =
+      makeWorkerIsolate(name, name, def, extensions, inspectorPolicy, kj::mv(snapshotConfig));
 
   // If we are using the inspector, we need to register the Worker::Isolate
   // with the inspector service.
@@ -6042,7 +6134,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
     }
   }
 
-  using ArtifactBundler = workerd::api::pyodide::ArtifactBundler;
+  using workerd::api::pyodide::ArtifactBundler;
   auto artifactBundler = ArtifactBundler::makeDisabledBundler();
 
   auto script = isolate->newScript(name, def.source, IsolateObserver::StartType::COLD,
@@ -6841,7 +6933,7 @@ class Server::HttpListener final: public kj::Refcounted {
         kj::HttpService::Response& response) override {
       TRACE_EVENT("workerd", "Connection:request()");
       IoChannelFactory::SubrequestMetadata metadata;
-      metadata.cfBlobJson = mapCopyString(cfBlobJson);
+      metadata.cfBlobJson = cfBlobJson.clone();
 
       Response* wrappedResponse = &response;
       kj::Own<ResponseWrapper> ownResponse;
@@ -6877,7 +6969,7 @@ class Server::HttpListener final: public kj::Refcounted {
       }
 
       IoChannelFactory::SubrequestMetadata metadata;
-      metadata.cfBlobJson = mapCopyString(cfBlobJson);
+      metadata.cfBlobJson = cfBlobJson.clone();
 
       auto worker = parent.service->startRequest(kj::mv(metadata));
       co_return co_await worker->connect(host, headers, connection, response, kj::mv(settings));
