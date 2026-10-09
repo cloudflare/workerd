@@ -524,6 +524,7 @@ handle without settling reports `destroy`. Timers (`io-context.c++`) and `queueM
 | `//src/workerd/io:async-trace-test@`                            | The C++ facade.                                                                           |
 | `//src/workerd/io:async-trace-io-test@`                         | Instrumentation in `IoContext`: turns, timers, bridges, spans, adoption, named I/O.       |
 | `//src/workerd/server/tests/async-trace:async-trace-test`       | End to end: runs `scenario.js` with `--async-trace` and checks the trace with `check.js`. |
+| `//src/workerd/server/tests/async-trace:async-trace-shutdown-test` | How the trace ends when a Durable Object context is still open at shutdown, with and without `KJ_CLEAN_SHUTDOWN`. |
 | `//src/workerd/server/tests/async-trace:async-trace-perfetto-test` | The Perfetto output.                                                                   |
 | `//src/workerd/server/tests/inspector:inspector-test`           | DevTools async stacks across timers and microtasks.                                       |
 
