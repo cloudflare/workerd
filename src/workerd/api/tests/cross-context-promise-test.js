@@ -6,16 +6,23 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { inspect } from 'util';
 import { mock } from 'node:test';
 
-// Returns a probe function that is bound to the calling request's IoContext: invoking it
-// succeeds in that context and throws "Cannot perform I/O on behalf of a different request"
-// from any other. Several tests below use this to prove which IoContext a cross-request
-// promise continuation runs in. An accepted WebSocket has the property we need because its
-// native state is owned by the request that created it; its peer is never accepted, so sent
-// probe messages just buffer.
+// Reading readyState checks the WebSocket's request-owned native state without
+// starting read loops or queuing writes. The probe throws when called from a
+// different IoContext.
 function newIoContextProbe() {
   const pair = new WebSocketPair();
-  pair[0].accept();
-  return () => pair[0].send('probe');
+  return () => strictEqual(pair[0].readyState, WebSocket.OPEN);
+}
+
+function isHungRequest(error) {
+  // GC can discover that the promise cannot settle before idle detection runs.
+  return (
+    error.message === 'Promise will never complete.' ||
+    error.message ===
+      "The Workers runtime canceled this request because it detected that your Worker's code " +
+        'had hung and would never generate a response. Refer to: ' +
+        'https://developers.cloudflare.com/workers/observability/errors/'
+  );
 }
 
 export const crossContextResolveWorks = {
@@ -100,25 +107,14 @@ export const unhandledRejectionWorks = {
 
 export const expiredContextWorks = {
   async test(_, env) {
-    // We're going to send two simultaneous requests to the same endpoint.
-    const results = await Promise.allSettled([
+    // The creating request must be canceled before the resolver is called.
+    await rejects(
       env.subrequest.fetch('http://example.org/expired'),
-      env.subrequest.fetch('http://example.org/expired'),
-    ]);
-    strictEqual(results[0].status, 'rejected');
-    strictEqual(results[1].status, 'fulfilled');
-    strictEqual(
-      results[0].reason.message,
-      "The Workers runtime canceled this request because it detected that your Worker's code " +
-        'had hung and would never generate a response. Refer to: ' +
-        'https://developers.cloudflare.com/workers/observability/errors/'
+      isHungRequest
     );
-    strictEqual(results[1].value.status, 200);
-    strictEqual(await results[1].value.text(), 'ok');
-    // Wait a tick for things to settle out before checking the global.
-    // We're just making sure here that the promise in the first request
-    // was canceled correctly.
-    await scheduler.wait(100);
+    const response = await env.subrequest.fetch('http://example.org/expired');
+    strictEqual(response.status, 200);
+    strictEqual(await response.text(), 'ok');
     strictEqual(globalThis.expiredRan, undefined);
   },
 };
@@ -141,13 +137,12 @@ export const asyncIterWorks = {
 
 export const cyclicAwaitsWorks = {
   async test(_, env) {
-    // We're going to send two simultaneous requests to the same endpoint.
-    const results = await Promise.allSettled([
+    globalThis.cyclicHelperCompleted = false;
+    await rejects(
       env.subrequest.fetch('http://example.org/cyclic'),
-      env.subrequest.fetch('http://example.org/cyclic'),
-    ]);
-    strictEqual(results[0].status, 'rejected');
-    strictEqual(results[1].status, 'fulfilled');
+      isHungRequest
+    );
+    strictEqual(globalThis.cyclicHelperCompleted, true);
   },
 };
 
@@ -403,10 +398,7 @@ async function expiredContext(req, env, ctx) {
     return new Response('ok');
   }
 
-  // This is our second request. Here, all we do is resolve the promise.
-  // Let's wait a bit to make sure the other request has had time to
-  // be canceled and destroyed.
-  await scheduler.wait(100);
+  // The caller has already observed cancellation of the creating request.
   globalThis.expired.resolve();
   globalThis.expired = undefined;
   return new Response('ok');
@@ -458,18 +450,22 @@ async function asyncIterator(req, env, ctx) {
 
 async function cyclicPromise(req, env, ctx) {
   if (globalThis.cyclic === undefined) {
-    setupWaiter(ctx);
     const { promise, resolve } = Promise.withResolvers();
     globalThis.cyclic = { promise, resolve };
     const probe = newIoContextProbe();
     probe();
+    // Pending subrequest I/O keeps this context alive until the cycle is installed.
+    const response = await env.subrequest.fetch('http://example.org/cyclic');
+    strictEqual(response.status, 200);
+    strictEqual(await response.text(), 'ok');
+    globalThis.cyclicHelperCompleted = true;
     await promise;
     throw new Error('should never get here');
   }
 
   async function foo() {
     await globalThis.cyclic.promise;
-    throw new Error('shnould never get here');
+    throw new Error('should never get here');
   }
 
   // The first request will hang because the promise is resolved
