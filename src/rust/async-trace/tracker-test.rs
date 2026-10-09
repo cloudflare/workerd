@@ -898,3 +898,24 @@ fn accepts_resources_until_full_or_closed() {
     f.tracker.close();
     assert!(!f.tracker.accepts_resources());
 }
+
+#[test]
+fn unowned_resources_are_forgotten_when_settled() {
+    let mut f = Fixture::new();
+    let ctx = f.ctx();
+    f.tracker.turn_begin(0);
+    let promise = f.tracker.create_unowned(Kind::JsPromise, "Promise", 0);
+    assert!(f.tracker.knows(promise));
+    // A reaction promise settles during its own callback; the callback still reports `after`.
+    f.tracker.enter(promise);
+    f.tracker.settle(promise, Outcome::Ok);
+    assert!(!f.tracker.knows(promise));
+    f.tracker.exit(promise);
+    f.tracker.turn_end();
+    let events = f.events();
+    assert!(events.contains(&Event::Before { ctx, id: promise }));
+    assert!(events.contains(&Event::After { ctx, id: promise }));
+    assert!(!events.iter().any(|e| matches!(e, Event::Destroy { .. })));
+    assert_eq!(f.tracker.stats().unknown, 0);
+    assert_eq!(f.tracker.stats().unbalanced, 0);
+}
