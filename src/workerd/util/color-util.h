@@ -23,7 +23,7 @@ enum class ColorMode {
 // we'll only write color codes if the output file is a TTY.
 // TODO(someday): adopt more of Node.js's checks:
 //  https://github.com/nodejs/node/blob/ac2a68c/lib/internal/tty.js#L106
-static ColorMode permitsColor() {
+inline ColorMode permitsColor() {
   const char* forceColorValue = getenv("FORCE_COLOR");
   if (forceColorValue != nullptr) {
     auto f = kj::StringPtr(forceColorValue);
