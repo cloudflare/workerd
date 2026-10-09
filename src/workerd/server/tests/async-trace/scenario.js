@@ -6,6 +6,19 @@
 
 export default {
   async fetch(request) {
+    if (new URL(request.url).pathname === '/message') {
+      // A message sent by env.QUEUE, which delivers it as a request.
+      await request.arrayBuffer();
+      return Response.json({
+        metadata: {
+          metrics: {
+            backlogCount: 0,
+            backlogBytes: 0,
+            oldestMessageTimestamp: 0,
+          },
+        },
+      });
+    }
     await scheduler.wait(1);
     // Read after the wait, so that the wait's bridge is this context's first.
     if ((await request.text()) !== 'ping') {
@@ -44,5 +57,8 @@ export default {
     if (read.value?.byteLength !== 3) {
       throw new Error('unexpected read');
     }
+
+    // A queue send: the binding's span is lent to the awaitIo that waits for it.
+    await env.QUEUE.send({ hello: 'world' });
   },
 };

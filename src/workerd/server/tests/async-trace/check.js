@@ -80,7 +80,11 @@ function checkCore(events, { withStacks }) {
   }
   const indexed = index(events);
   const { contexts, resources, stacks } = indexed;
-  assert.strictEqual(contexts.size, 2, 'the test and its subrequest');
+  assert.strictEqual(
+    contexts.size,
+    3,
+    'the test, its subrequest, and its queue message'
+  );
 
   for (const [ctx, list] of contexts) {
     assert.strictEqual(list[0].e, 'ctx', `context ${ctx} starts with ctx`);
@@ -175,14 +179,29 @@ function checkCore(events, { withStacks }) {
     'scheduler.wait'
   );
   assert.notStrictEqual(wait.ctx, test.ctx);
-  const subrequest = find(resources, byKind('request', 'fetch'), 'subrequest');
-  assert.strictEqual(
-    subrequest.ctx,
-    wait.ctx,
-    'the subrequest is a fetch event'
+  const subrequest = find(
+    resources,
+    (r) => byKind('request', 'fetch')(r) && r.ctx === wait.ctx,
+    'subrequest'
   );
 
-  // The service binding delivers the subrequest synchronously, so it links to the caller's fetch.
+  // The queue send's span is lent to the awaitIo waiting for it, so the send resumes the handler.
+  const queueSend = find(
+    resources,
+    byKind('operation', 'queue_send'),
+    'queue_send'
+  );
+  assert.strictEqual(queueSend.ctx, test.ctx);
+  assert(turnCauses.has(queueSend.id), 'the queue send resumes the handler');
+  const message = find(
+    resources,
+    (r) =>
+      byKind('request', 'fetch')(r) && r.ctx !== wait.ctx && r.ctx !== test.ctx,
+    'queue message'
+  );
+
+  // The service binding delivers the subrequest synchronously, so it links to the caller's fetch;
+  // likewise the queue message, to the queue send.
   const callerIso = events.find((e) => e.e === 'ctx' && e.ctx === test.ctx).iso;
   const links = events
     .filter((e) => e.e === 'link')
@@ -200,6 +219,13 @@ function checkCore(events, { withStacks }) {
       fromIso: callerIso,
       fromCtx: test.ctx,
       fromId: fetch.id,
+    },
+    {
+      ctx: message.ctx,
+      id: message.id,
+      fromIso: callerIso,
+      fromCtx: test.ctx,
+      fromId: queueSend.id,
     },
   ]);
   const waitBridge = [...resources.values()].find(

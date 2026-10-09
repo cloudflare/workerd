@@ -6,7 +6,10 @@ const unitTests :Workerd.Config = (
     worker = (
       modules = [(name = "worker", esModule = embed "scenario.js")],
       compatibilityDate = "2024-01-01",
-      bindings = [(name = "SELF", service = "scenario")],
+      bindings = [
+        (name = "SELF", service = "scenario"),
+        (name = "QUEUE", queue = "scenario"),
+      ],
     ),
   )],
 );
