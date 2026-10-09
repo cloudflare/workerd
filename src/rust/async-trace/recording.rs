@@ -41,6 +41,7 @@ pub enum Event {
         kind: Kind,
         name: String,
         stack: Option<StackId>,
+        parent: AsyncId,
     },
     Settle {
         ctx: ContextId,
@@ -139,6 +140,7 @@ impl Sink for RecordingSink {
             kind: event.kind,
             name: event.name.to_owned(),
             stack: event.stack,
+            parent: event.parent,
         });
     }
 

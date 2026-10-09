@@ -1465,15 +1465,18 @@ class TraceContext;
 // under these". Doesn't own SpanBuilders, unlike TraceContext.
 class TraceContextParent {
  public:
-  TraceContextParent(SpanParent internalSpan, SpanParent userSpan)
+  // `asyncTraceParent` is the async trace operation of the TraceContext these spans belong to, if
+  // any; operations of child spans record it as their parent.
+  TraceContextParent(SpanParent internalSpan, SpanParent userSpan, AsyncId asyncTraceParent = 0)
       : internalSpan(kj::mv(internalSpan)),
-        userSpan(kj::mv(userSpan)) {}
+        userSpan(kj::mv(userSpan)),
+        asyncTraceParent(asyncTraceParent) {}
   TraceContextParent(TraceContextParent&& other) = default;
   TraceContextParent& operator=(TraceContextParent&& other) = default;
   KJ_DISALLOW_COPY(TraceContextParent);
 
   TraceContextParent addRef() {
-    return TraceContextParent(internalSpan.addRef(), userSpan.addRef());
+    return TraceContextParent(internalSpan.addRef(), userSpan.addRef(), asyncTraceParent);
   }
 
   // Useful to skip unnecessary work (e.g. creating child spans) when not observed.
@@ -1494,6 +1497,7 @@ class TraceContextParent {
  private:
   SpanParent internalSpan;
   SpanParent userSpan;
+  AsyncId asyncTraceParent;
 };
 
 // Owns the local span builders for an operation.
@@ -1552,7 +1556,7 @@ class TraceContext {
   }
 
   TraceContextParent getSpanParents() {
-    return TraceContextParent(SpanParent(span), SpanParent(userSpan));
+    return TraceContextParent(SpanParent(span), SpanParent(userSpan), asyncTraceResource.getId());
   }
 
   // Like getSpanParents(), but returns kj::none when neither span is observed. Use this when the
@@ -1578,7 +1582,7 @@ inline TraceContext TraceContextParent::newChild(
     kj::ConstString operationName, kj::Maybe<const AsyncTracker&> asyncTracker) {
   AsyncResource asyncTraceResource;
   KJ_IF_SOME(tracker, asyncTracker) {
-    asyncTraceResource = tracker.create(AsyncKind::OPERATION, operationName);
+    asyncTraceResource = tracker.createChild(AsyncKind::OPERATION, operationName, asyncTraceParent);
   }
   // newChild() consumes its operationName argument, so clone it for the internal child and move
   // the original into the user child.

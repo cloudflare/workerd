@@ -221,8 +221,8 @@ class LabelingListener final: public AsyncTraceListener {
           name, [&]() -> decltype(counts)::Entry { return {kj::str(name), 0}; });
       label = kj::str(name, "#", ++count);
     }
-    events.add(
-        kj::str("init ", label, " trigger=", labelOf(e.trigger), " exec=", labelOf(e.execution)));
+    events.add(kj::str("init ", label, " trigger=", labelOf(e.trigger), " exec=",
+        labelOf(e.execution), e.parent == 0 ? kj::str() : kj::str(" parent=", labelOf(e.parent))));
     labels.insert(e.id, kj::mv(label));
   }
   void onSettle(uint64_t ctx, AsyncId id, AsyncOutcome outcome, uint64_t atNs) override {
@@ -639,6 +639,22 @@ KJ_TEST("a named bridge neither adopts a span's operation nor competes for it") 
   KJ_EXPECT(count(events, "turn cause=kv_get#1"_kj) == 1, joined(events));
   KJ_EXPECT(count(events, "init awaitIo#1 trigger=request exec=request"_kj) == 0, joined(events));
   // expectComplete() also checks that the adoption was not ambiguous.
+  expectComplete(events);
+}
+
+KJ_TEST("a child span's operation names the span's operation as its parent") {
+  auto events = traceInContext([](const TestFixture::Environment& env) {
+    auto outer = env.context.makeUserTraceSpan("outer"_kjc);
+    outer.detachAsync();
+    auto inner = outer.getSpanParents().newChild("inner"_kjc);
+    return roundTrip(env, kj::evalLater([]() {}).attach(kj::mv(inner), kj::mv(outer)));
+  });
+  expectInOrder(events,
+      {
+        "init outer#1 trigger=request exec=request"_kj,
+        "init inner#1 trigger=request exec=request parent=outer#1"_kj,
+        "turn cause=inner#1"_kj,
+      });
   expectComplete(events);
 }
 

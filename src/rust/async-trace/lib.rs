@@ -130,6 +130,9 @@ pub struct InitEvent<'a> {
     pub name: &'a str,
     pub at: Nanos,
     pub stack: Option<StackId>,
+    /// The operation this one is part of (a binding call made within another's span), or `0`.
+    /// Structural, unlike `trigger`; it may have settled already.
+    pub parent: AsyncId,
 }
 
 /// Describes the `IoContext` a tracker belongs to.

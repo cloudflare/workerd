@@ -39,6 +39,14 @@ use crate::StackId;
 use crate::Turn;
 use crate::epoch_unix_ms;
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+const fn is_zero(id: &AsyncId) -> bool {
+    *id == 0
+}
+
 /// The format's major version, written in the header as `v`.
 pub const FORMAT_VERSION: u32 = 1;
 
@@ -72,6 +80,8 @@ enum Line<'a> {
         at: Nanos,
         #[serde(skip_serializing_if = "Option::is_none")]
         stack: Option<StackId>,
+        #[serde(skip_serializing_if = "is_zero")]
+        parent: AsyncId,
     },
     Settle {
         ctx: ContextId,
@@ -274,6 +284,7 @@ impl Sink for NdjsonSink {
             exec: event.execution,
             at: event.at,
             stack: event.stack,
+            parent: event.parent,
         });
     }
 
