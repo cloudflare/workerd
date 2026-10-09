@@ -166,6 +166,36 @@ KJ_TEST("eval() is blocked") {
   // synthesized source matches the known empty-body, no-parameter pattern).
   e.expectEval("typeof new Function()", "string", "function");
 
+  // An empty string body synthesizes the same V8 source as no arguments.
+  // On V8 >= 15.6, the callback cannot distinguish this from the no-argument case, so
+  // it is allowed. On V8 <= 15.5, isCodeLike distinguishes Function-constructor calls
+  // with string arguments (isCodeLike = false) from no-argument calls (isCodeLike =
+  // true), so the isCodeLike guard blocks it.
+#if V8_MINOR_VERSION >= 6
+  e.expectEval("typeof new Function('')", "string", "function");
+#else
+  e.expectEval("new Function('')", "throws",
+      "EvalError: Code generation from strings disallowed for this context");
+#endif
+
+  // An object argument: on V8 >= 15.6, V8 presents the raw object to the callback
+  // before calling toString(), so it fails the IsString() check and is blocked. On
+  // V8 <= 15.5, V8 stringifies first, producing the empty-function source, but
+  // isCodeLike is false for string arguments, so the isCodeLike guard blocks it.
+  e.expectEval("new Function({ toString() { return ''; } })", "throws",
+      "EvalError: Code generation from strings disallowed for this context");
+
+  // eval() of the exact empty-function source: on V8 >= 15.6, the callback cannot
+  // distinguish this from the Function constructor, so the source-string match allows
+  // it. On V8 <= 15.5, isCodeLike is false for eval(), so the isCodeLike guard blocks
+  // it. The compiled result is only an empty function either way.
+#if V8_MINOR_VERSION >= 6
+  e.expectEval("typeof eval('(function anonymous(\\n) {\\n\\n})')", "string", "function");
+#else
+  e.expectEval("eval('(function anonymous(\\n) {\\n\\n})')", "throws",
+      "EvalError: Code generation from strings disallowed for this context");
+#endif
+
   // new Function() with params and an undefined body is blocked (the body becomes
   // the string "undefined" via ToString, producing a non-empty source).
   e.expectEval("new Function('a', 'b', undefined)", "throws",

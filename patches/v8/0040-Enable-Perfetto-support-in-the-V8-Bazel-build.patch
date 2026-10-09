@@ -11,7 +11,7 @@ Use V8's standard v8_flag mechanism so the define, sources, and
 Perfetto dependency are controlled together.
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 5eaff6ae55890819ee33f82b5896dcfbfaa8d3d4..c75adb604ede34589eaee4cc108133c75044823d 100644
+index d4dc5621b1000a61e2f9b24cb64f90befd3f2e28..74bc831191fc833939bc4429b093b7e2ce5404a6 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
 @@ -202,6 +202,8 @@ v8_flag(
@@ -31,7 +31,7 @@ index 5eaff6ae55890819ee33f82b5896dcfbfaa8d3d4..c75adb604ede34589eaee4cc108133c7
          "v8_use_zlib": "V8_USE_ZLIB",
      },
      defines = [
-@@ -1084,16 +1087,22 @@ filegroup(
+@@ -1086,16 +1089,22 @@ filegroup(
          "src/libplatform/task-queue.cc",
          "src/libplatform/task-queue.h",
          "src/libplatform/tracing/recorder.h",
@@ -60,7 +60,7 @@ index 5eaff6ae55890819ee33f82b5896dcfbfaa8d3d4..c75adb604ede34589eaee4cc108133c7
  )
  
  filegroup(
-@@ -2741,7 +2750,6 @@ filegroup(
+@@ -2746,7 +2755,6 @@ filegroup(
          "src/tracing/perfetto-sdk.h",
          "src/tracing/trace-event.cc",
          "src/tracing/trace-event.h",
@@ -68,7 +68,7 @@ index 5eaff6ae55890819ee33f82b5896dcfbfaa8d3d4..c75adb604ede34589eaee4cc108133c7
          "src/tracing/trace-id.h",
          "src/tracing/traced-value.cc",
          "src/tracing/traced-value.h",
-@@ -2805,6 +2813,22 @@ filegroup(
+@@ -2810,6 +2818,22 @@ filegroup(
          ":v8_bigint",
          ":v8_heap_base_files",
      ] + select({
@@ -91,7 +91,7 @@ index 5eaff6ae55890819ee33f82b5896dcfbfaa8d3d4..c75adb604ede34589eaee4cc108133c7
          "@v8//bazel/config:v8_target_ia32": [
              "src/baseline/ia32/baseline-assembler-ia32-inl.h",
              "src/baseline/ia32/baseline-compiler-ia32-inl.h",
-@@ -4945,7 +4969,10 @@ v8_library(
+@@ -4950,7 +4974,10 @@ v8_library(
          "@simdutf",
          "@zlib",
          "@zlib//:compression_utils_portable",

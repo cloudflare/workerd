@@ -686,34 +686,57 @@ v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
   //
   // V8 synthesizes the full source string before calling this callback (see
   // CreateDynamicFunction in v8/src/builtins/builtins-function.cc). When called with
-  // no arguments (argc == 0), isCodeLike is true and the source is the exact string
-  // below — which contains no user-provided code.
+  // no arguments (argc == 0), the source is the exact V8-constructed string below,
+  // which contains no user-provided code. Compiling it produces only an empty function.
   //
-  // Security notes:
-  //   - isCodeLike is false on the eval() path, so this check cannot be reached via
-  //     eval(). An attacker cannot use eval("<evil> {\n\n}") to bypass this.
-  //   - isCodeLike is also false when any arguments are plain strings (not CodeLike
-  //     objects), so new Function('a', 'b', undefined) cannot reach this check either.
+  // Note that `new Function('')` also produces this exact source, so it is allowed too.
+  // On V8 15.6, `eval()` of this exact string would also match, since the callback
+  // can no longer distinguish Function-constructor calls from eval() (see below).
+  //
+  // The version bridge:
+  //   - V8 <= 15.5: `new Function()` sets isCodeLike = true; `eval()` and string-
+  //     argument calls set isCodeLike = false. We guard on isCodeLike to prevent
+  //     `eval('(function anonymous(\\n) {\\n\\n})')` from matching.
+  //   - V8 >= 15.6: `new Function()` with no arguments sets isCodeLike = false (the
+  //     same as eval), so isCodeLike no longer distinguishes the two paths. We rely on
+  //     the exact string match alone. The `eval()` path can reach this check, but can
+  //     only compile the fixed empty function.
+  //
+  // Additional security notes:
   //   - The exact string match ensures no user content (parameters or body) is present.
-  //   - We intentionally only match the no-parameter, no-body case. Calls like
-  //     new Function('a', 'b') are always blocked since the last argument becomes the
-  //     body via ToString(), producing a non-matching source string.
+  //   - Calls like new Function('a', 'b') or new Function('a', 'b', undefined) are
+  //     always blocked, since the last argument becomes the body via ToString(),
+  //     producing a non-matching source string.
+  //   - On V8 >= 15.6, V8 also calls this callback with each object argument before
+  //     converting it to a string. Such a source is neither undefined nor a string, so
+  //     it falls through to the evalAllowed check below.
   //
   // NOTE: This pattern is tied to V8's CreateDynamicFunction format in
-  // builtins-function.cc:46-71 and must be reviewed during V8 updates. If the format
+  // builtins-function.cc and must be reviewed during V8 updates. If the format
   // changes, the setup-test and worker-test will fail, signaling that this constant
   // needs updating.
   static constexpr auto kEmptyFunctionSource = "(function anonymous(\n) {\n\n})"_kj;
+#if V8_MINOR_VERSION >= 6
+  // V8 15.6+: isCodeLike is false for no-argument Function constructor calls, so we
+  // cannot use it as a guard. Match only on the source string.
+  if (source->IsString() && kj::str(source.As<v8::String>()) == kEmptyFunctionSource) {
+    return {.codegen_allowed = true, .modified_source = {}};
+  }
+#else
+  // V8 <= 15.5: isCodeLike is true for Function constructor calls and false for eval().
+  // We require isCodeLike to prevent eval() of the exact empty-function source from
+  // being silently allowed.
   if (isCodeLike && source->IsString() &&
       kj::str(source.As<v8::String>()) == kEmptyFunctionSource) {
     return {.codegen_allowed = true, .modified_source = {}};
   }
+#endif
 
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
   auto& base = IsolateBase::from(isolate);
   if (base.evalAllowed) {
     // If eval is allowed, notify the observer so that it can take any action necessary.
-    // Once possible action is logging the source to be evaluated for auditing purposes.
+    // One possible action is logging the source to be evaluated for auditing purposes.
     // TODO(cleanup): Consider making it so that `onDynamicEval()` returns true or false
     // depending on whether eval should be allowed or not.
     base.observer->onDynamicEval(context, source, isCodeLike ? IsCodeLike::YES : IsCodeLike::NO);
