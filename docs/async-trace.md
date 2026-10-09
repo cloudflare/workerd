@@ -291,7 +291,7 @@ appear in time order.
 | `turn`     | `ctx`, `cause`, `start`, optional `locked`, `end`                                         | A turn ended. `start` is when it was requested, `locked` when the isolate lock was held and JavaScript could run, `end` when it finished. `locked - start` is time spent waiting for the lock. |
 | `link`     | `ctx`, `id`, `fromIso`, `fromCtx`, `fromId`                                               | Request `id` was delivered synchronously by resource `fromId` of context `fromCtx` (isolate `fromIso`).                                                                           |
 | `ctx_end`  | `ctx`, `at`, `created`, `dropped`, `unknown`, `unbalanced`, `ambiguousBindings`, `unusedOperationNames`, `foreignThread` | The context ended, with its statistics (see [Completeness](#completeness)).                                                                                              |
-| `exit`     | `at`, `open`                                                                              | Last line when workerd exits: the contexts in `open` never ended and have no `ctx_end`. Absent with `KJ_CLEAN_SHUTDOWN`, where every context ends normally. |
+| `exit`     | `at`, `open`                                                                              | Last line when workerd exits: the contexts in `open` never ended and have no `ctx_end`. |
 
 Sinks buffer events and write them to the file at the end of each outermost turn and when a
 context ends. If workerd is killed by a signal, recent events may be missing, and there is no

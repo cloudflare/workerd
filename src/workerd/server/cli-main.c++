@@ -340,22 +340,21 @@ class CliMain {
     }
 #endif
 
-    bool cleanShutdown = getenv("KJ_CLEAN_SHUTDOWN") != nullptr;
-    KJ_IF_SOME(writer, asyncTraceWriter) {
-      if (cleanShutdown) {
-        writer->flush();
-      } else {
-        // context.exit() doesn't run destructors, so contexts still open never end; say so.
+    if (getenv("KJ_CLEAN_SHUTDOWN") == nullptr) {
+      // context.exit() doesn't run destructors, so contexts still open never end; say so.
+      KJ_IF_SOME(writer, asyncTraceWriter) {
         writer->finish();
       }
-    }
-
-    if (!cleanShutdown) {
       context.exit();
     }
 
     // Server maintains a reference to the v8 platform. Clean up before destroying the platform.
     server = nullptr;
+
+    // Destroying the server ended the contexts it held, so the exit line comes after their ends.
+    KJ_IF_SOME(writer, asyncTraceWriter) {
+      writer->finish();
+    }
   }
 };
 
