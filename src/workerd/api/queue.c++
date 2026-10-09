@@ -694,7 +694,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> QueueCustomEvent::run(
   // 1. Do all necessary setup work. This starts right below this comment.
   // 2. Call into the worker's queue event handler.
   // 3. Wait on the necessary portions of the worker's code to complete.
-  incomingRequest->delivered();
+  incomingRequest->delivered("queue"_kj);
   auto& context = incomingRequest->getContext();
 
   // This vestigial type used to hold more than just this bool.

@@ -293,6 +293,10 @@ tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanCon
 // that sets waitedForWaitUntil). So, we can now safely add the request to
 // context->incomingRequests, which implies taking responsibility for draining on the way out.
 void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
+  delivered(location.function, location);
+}
+
+void IoContext::IncomingRequest::delivered(kj::StringPtr eventType, kj::SourceLocation location) {
   KJ_REQUIRE(!wasDelivered, "delivered() can only be called once");
   if (!context->incomingRequests.empty()) {
     // There is already an IncomingRequest running in this context, and we're going to make it no
@@ -313,8 +317,7 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
   metrics->delivered();
 
   KJ_IF_SOME(tracker, context->tryGetAsyncTracker()) {
-    // The delivering function (e.g. WorkerEntrypoint::request) names the event type.
-    asyncTraceResource = tracker.create(AsyncKind::REQUEST, location.function);
+    asyncTraceResource = tracker.create(AsyncKind::REQUEST, eventType);
   }
 
   // Create the root user trace span once per request. Stale references to the span (e.g. from

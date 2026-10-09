@@ -166,6 +166,12 @@ function checkCore(events, { withStacks }) {
     'scheduler.wait'
   );
   assert.notStrictEqual(wait.ctx, test.ctx);
+  const subrequest = find(resources, byKind('request', 'fetch'), 'subrequest');
+  assert.strictEqual(
+    subrequest.ctx,
+    wait.ctx,
+    'the subrequest is a fetch event'
+  );
   const waitBridge = [...resources.values()].find(
     (r) => r.ctx === wait.ctx && r.kind === 'kj_to_js'
   );

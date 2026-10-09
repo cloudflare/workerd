@@ -441,7 +441,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
     workerTracer = t;
   }
 
-  incomingRequest->delivered();
+  incomingRequest->delivered("fetch"_kj);
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
   auto metricsForProxyTask = kj::addRef(incomingRequest->getMetrics());
@@ -745,7 +745,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
   auto featureFlags = context.getWorker().getIsolate().getApi().getFeatureFlags();
 
   if (featureFlags.getConnectPassThrough()) {
-    incomingRequest->delivered();
+    incomingRequest->delivered("connect"_kj);
 
     KJ_DEFER({
       // Since we called incomingRequest->delivered, we are obliged to call `drain()`.
@@ -778,7 +778,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     t.setEventInfo(*incomingRequest, tracing::ConnectEventInfo());
     workerTracer = t;
   }
-  incomingRequest->delivered();
+  incomingRequest->delivered("connect"_kj);
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
   auto wrappedResponse = kj::heap<ConnectResponseSentTracker>(response);
@@ -925,7 +925,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
     t.setEventInfo(*incomingRequest, tracing::ScheduledEventInfo(eventTime, kj::str(cron)));
   }
 
-  incomingRequest->delivered();
+  incomingRequest->delivered("scheduled"_kj);
 
   // Scheduled handlers run entirely in waitUntil() tasks.
   context.addWaitUntil(context.run([scheduledTime, cron, entrypointName = entrypointName.clone(),
@@ -985,7 +985,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
     t.setEventInfo(*incomingRequest, tracing::AlarmEventInfo(scheduledTime));
   }
 
-  incomingRequest->delivered();
+  incomingRequest->delivered("alarm"_kj);
 
   auto scheduleAlarmResult = co_await kj::evalNow([&]() {
     return actor.scheduleAlarm(scheduledTime);
@@ -1105,7 +1105,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
     t.setEventInfo(*incomingRequest, tracing::CustomEventInfo());
   }
 
-  incomingRequest->delivered();
+  incomingRequest->delivered("test"_kj);
 
   context.addWaitUntil(
       context.run([entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),

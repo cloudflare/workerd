@@ -3452,7 +3452,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     bool isDynamicDispatch) {
   IoContext& ioctx = incomingRequest->getContext();
 
-  incomingRequest->delivered();
+  incomingRequest->delivered("jsrpc"_kj);
 
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client

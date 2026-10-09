@@ -698,7 +698,7 @@ void sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest> incomingReq
     bool isDynamicDispatch,
     kj::TaskSet& waitUntilTasks) {
   // Mark the request as delivered because we're about to run some JS.
-  incomingRequest->delivered();
+  incomingRequest->delivered("trace"_kj);
 
   auto& context = incomingRequest->getContext();
   auto& metrics = incomingRequest->getMetrics();
