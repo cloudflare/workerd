@@ -21,6 +21,12 @@ pub type StackId = u32;
 
 static NEXT_ISOLATE: AtomicU64 = AtomicU64::new(1);
 
+/// Default cap on the distinct stacks an isolate keeps.
+pub const DEFAULT_MAX_STACKS: usize = 10_000;
+
+/// Default cap on the approximate memory, in bytes, of the stacks an isolate keeps.
+pub const DEFAULT_MAX_STACK_BYTES: usize = 16 << 20;
+
 /// One stack frame, innermost first within a stack.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,6 +48,16 @@ type FrameKey = (i32, u32, u32);
 struct Stacks {
     ids: HashMap<Box<[FrameKey]>, StackId>,
     frames: Vec<Arc<[Frame]>>,
+    /// Approximate memory held by `ids` and `frames`; see [`stack_bytes`].
+    bytes: usize,
+}
+
+/// Approximately what keeping `frames` costs: each frame, its key and its strings.
+fn stack_bytes(frames: &[Frame]) -> usize {
+    frames
+        .iter()
+        .map(|f| size_of::<Frame>() + size_of::<FrameKey>() + f.function.len() + f.script.len())
+        .sum()
 }
 
 /// Per-isolate state. Shared by the isolate's trackers through an `Arc`.
@@ -49,6 +65,8 @@ pub struct IsolateState {
     id: IsolateId,
     next_async_id: AtomicU64,
     stacks: Mutex<Stacks>,
+    max_stacks: usize,
+    max_stack_bytes: usize,
 }
 
 impl IsolateState {
@@ -58,7 +76,17 @@ impl IsolateState {
             id: NEXT_ISOLATE.fetch_add(1, Ordering::Relaxed),
             next_async_id: AtomicU64::new(1),
             stacks: Mutex::new(Stacks::default()),
+            max_stacks: DEFAULT_MAX_STACKS,
+            max_stack_bytes: DEFAULT_MAX_STACK_BYTES,
         }
+    }
+
+    /// Caps the stacks the isolate keeps, by count and by approximate memory. Stacks already kept
+    /// still get their IDs; [`IsolateState::intern_stack`] returns `None` for a new one that
+    /// would exceed either cap.
+    pub const fn set_stack_limits(&mut self, max_stacks: usize, max_bytes: usize) {
+        self.max_stacks = max_stacks;
+        self.max_stack_bytes = max_bytes;
     }
 
     #[must_use]
@@ -72,7 +100,8 @@ impl IsolateState {
     }
 
     /// Returns the ID for `frames`, registering them on first sight. Returns `None` for an empty
-    /// stack.
+    /// stack, or for a new one when the isolate keeps as many stacks as its limits allow (see
+    /// [`IsolateState::set_stack_limits`]). Kept stacks live as long as the isolate.
     pub fn intern_stack(&self, frames: Vec<Frame>) -> Option<StackId> {
         if frames.is_empty() {
             return None;
@@ -85,10 +114,15 @@ impl IsolateState {
         if let Some(&id) = stacks.ids.get(&key) {
             return Some(id);
         }
+        let bytes = stacks.bytes.saturating_add(stack_bytes(&frames));
+        if stacks.frames.len() >= self.max_stacks || bytes > self.max_stack_bytes {
+            return None;
+        }
         // IDs start at 1, so frames[id - 1] holds stack `id`.
         let id = StackId::try_from(stacks.frames.len() + 1).ok()?;
         stacks.frames.push(frames.into());
         stacks.ids.insert(key, id);
+        stacks.bytes = bytes;
         drop(stacks);
         Some(id)
     }

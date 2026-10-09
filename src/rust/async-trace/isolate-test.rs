@@ -73,3 +73,31 @@ fn stack_lookup() {
     assert!(isolate.stack(0).is_none());
     assert!(isolate.stack(id + 1).is_none());
 }
+
+#[test]
+fn new_stacks_beyond_the_count_cap_get_no_id() {
+    let mut isolate = IsolateState::new();
+    isolate.set_stack_limits(2, usize::MAX);
+    let a = isolate.intern_stack(vec![frame("f", 1)]).unwrap();
+    let b = isolate.intern_stack(vec![frame("f", 2)]).unwrap();
+    assert_eq!(isolate.intern_stack(vec![frame("f", 3)]), None);
+    // Stacks already kept still resolve.
+    assert_eq!(isolate.intern_stack(vec![frame("f", 1)]), Some(a));
+    assert_eq!(isolate.intern_stack(vec![frame("f", 2)]), Some(b));
+}
+
+#[test]
+fn new_stacks_beyond_the_byte_cap_get_no_id() {
+    let one = stack_bytes(&[frame("f", 1)]);
+    let mut isolate = IsolateState::new();
+    isolate.set_stack_limits(usize::MAX, one * 2);
+    let a = isolate.intern_stack(vec![frame("f", 1)]).unwrap();
+    // Would take the total past the cap, even though a smaller stack still fits.
+    assert_eq!(
+        isolate.intern_stack(vec![frame("f", 2), frame("g", 3)]),
+        None
+    );
+    assert!(isolate.intern_stack(vec![frame("f", 4)]).is_some());
+    assert_eq!(isolate.intern_stack(vec![frame("f", 5)]), None);
+    assert_eq!(isolate.intern_stack(vec![frame("f", 1)]), Some(a));
+}
