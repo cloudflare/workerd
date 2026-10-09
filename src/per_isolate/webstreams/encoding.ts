@@ -33,7 +33,7 @@ const {
   uncurryThis,
 } = primordials;
 
-const { isArrayBuffer, isArrayBufferView } = utils;
+const { isArrayBuffer, isArrayBufferView, isSharedArrayBuffer } = utils;
 
 const {
   TransformStream,
@@ -193,7 +193,14 @@ class TextDecoderStream {
     this.#transform = new TransformStream({
       __proto__: null,
       transform(chunk: unknown, controller: object) {
-        if (!isArrayBufferView(chunk) && !isArrayBuffer(chunk)) {
+        // The writable accepts an AllowSharedBufferSource (Encoding
+        // Standard), so a bare SharedArrayBuffer decodes like an
+        // ArrayBuffer.
+        if (
+          !isArrayBufferView(chunk) &&
+          !isArrayBuffer(chunk) &&
+          !isSharedArrayBuffer(chunk)
+        ) {
           throw new TypeError(
             'TextDecoderStream: chunk must be a BufferSource'
           );
