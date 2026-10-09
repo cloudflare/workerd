@@ -5907,7 +5907,7 @@ kj::Own<Worker::Isolate> Server::makeWorkerIsolate(kj::StringPtr name,
   auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
   auto observer = kj::atomicRefcounted<IsolateObserver>();
   auto limitEnforcer = kj::refcounted<NullIsolateLimitEnforcer>();
-  auto isolateGroup = v8::IsolateGroup::GetDefault();
+  auto isolateGroup = jsg::newIsolateGroup();
 
   kj::Array<Worker::Api::InboundListener> listeners;
   KJ_IF_SOME(l, inboundListeners.find(inboundListenersKey)) {
