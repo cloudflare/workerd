@@ -31,6 +31,7 @@ use crate::Frame;
 use crate::InitEvent;
 use crate::IsolateId;
 use crate::Kind;
+use crate::Link;
 use crate::Nanos;
 use crate::Outcome;
 use crate::Sink;
@@ -106,6 +107,13 @@ enum Line<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         locked: Option<Nanos>,
         end: Nanos,
+    },
+    Link {
+        ctx: ContextId,
+        id: AsyncId,
+        from_iso: IsolateId,
+        from_ctx: ContextId,
+        from_id: AsyncId,
     },
     Stack {
         iso: IsolateId,
@@ -296,6 +304,16 @@ impl Sink for NdjsonSink {
             id,
             k: key,
             v: value,
+        });
+    }
+
+    fn link(&mut self, ctx: ContextId, id: AsyncId, from: &Link) {
+        self.push(&Line::Link {
+            ctx,
+            id,
+            from_iso: from.isolate,
+            from_ctx: from.ctx,
+            from_id: from.id,
         });
     }
 

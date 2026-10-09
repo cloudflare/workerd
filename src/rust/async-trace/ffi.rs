@@ -31,6 +31,7 @@ use crate::InitEvent;
 use crate::IsolateId;
 use crate::IsolateState;
 use crate::Kind;
+use crate::Link;
 use crate::MonotonicClock;
 use crate::Nanos;
 use crate::NdjsonSink;
@@ -82,6 +83,11 @@ mod bridge {
         fn enter(self: &mut Tracker, id: u64);
         fn exit(self: &mut Tracker, id: u64);
         fn current(self: &Tracker) -> u64;
+        fn context_id(self: &Tracker) -> u64;
+        fn isolate_id(self: &Tracker) -> u64;
+        fn link_source(self: &Tracker) -> u64;
+        #[cxx_name = "link"]
+        fn link_ffi(self: &mut Tracker, id: u64, from_isolate: u64, from_ctx: u64, from_id: u64);
 
         fn turn_begin(self: &mut Tracker, default_cause: u64);
         fn turn_locked(self: &mut Tracker);
@@ -155,6 +161,14 @@ mod bridge {
             has_locked: bool,
             locked: u64,
             end: u64,
+        );
+        fn listener_link(
+            listener: Pin<&mut AsyncTraceListener>,
+            ctx: u64,
+            id: u64,
+            from_isolate: u64,
+            from_ctx: u64,
+            from_id: u64,
         );
         /// A stack is passed as `listener_stack_begin`, a `listener_stack_frame` per frame
         /// (innermost first), then `listener_stack_end`, which calls the listener.
@@ -254,6 +268,10 @@ impl Sink for CppSink {
         );
     }
 
+    fn link(&mut self, ctx: ContextId, id: AsyncId, from: &Link) {
+        bridge::listener_link(self.listener(), ctx, id, from.isolate, from.ctx, from.id);
+    }
+
     fn stack(&mut self, isolate: IsolateId, id: StackId, frames: &[Frame]) {
         bridge::listener_stack_begin(self.listener());
         for frame in frames {
@@ -349,6 +367,17 @@ impl Tracker {
 
     fn create_unowned_ffi(&mut self, kind: u8, name: &[u8], trigger: u64) -> u64 {
         self.create_unowned(Kind::from_u8(kind), &lossy(name), trigger)
+    }
+
+    fn link_ffi(&mut self, id: u64, from_isolate: u64, from_ctx: u64, from_id: u64) {
+        self.link(
+            id,
+            Link {
+                isolate: from_isolate,
+                ctx: from_ctx,
+                id: from_id,
+            },
+        );
     }
 
     fn annotate_ffi(&mut self, id: u64, key: &[u8], value: &[u8]) {

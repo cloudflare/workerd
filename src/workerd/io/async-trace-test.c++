@@ -55,6 +55,10 @@ class RecordingListener final: public AsyncTraceListener {
       kj::ArrayPtr<const char> value) override {
     events.add(kj::str("annotate ", id, " ", key, "=", value));
   }
+  void onLink(
+      uint64_t ctx, uint64_t id, uint64_t fromIsolate, uint64_t fromCtx, uint64_t fromId) override {
+    events.add(kj::str("link ", id, " from=", fromId));
+  }
   void onTurn(uint64_t ctx, const AsyncTurn& turn) override {
     events.add(kj::str("turn cause=", turn.cause, " locked=", turn.lockedNs != kj::none));
   }
@@ -337,6 +341,29 @@ KJ_TEST("creation stacks are captured, deduplicated, and reported once per track
   auto late = keep->create(AsyncKind::TIMER, "setTimeout"_kj);
   KJ_EXPECT(late.getId() == 0);
   KJ_EXPECT(captures == 3);
+}
+
+KJ_TEST("a resource created during another context's turn links to it") {
+  Fixture caller;
+  Fixture callee;
+  auto request = callee.tracker().create(AsyncKind::REQUEST, "fetch"_kj);
+  callee.takeEvents();
+
+  // Outside any turn: nothing to link to.
+  callee.tracker().linkFromCallerTurn(request.getId());
+  KJ_EXPECT(callee.takeEvents().size() == 0);
+
+  {
+    AsyncTracker::TurnScope turn(caller.tracker());
+    auto timer = caller.tracker().create(AsyncKind::TIMER, "setTimeout"_kj);
+    auto fetch = caller.tracker().create(AsyncKind::OPERATION, "fetch"_kj);
+    callee.tracker().linkFromCallerTurn(request.getId());
+    KJ_EXPECT_EVENTS(callee, kj::str("link ", request.getId(), " from=", fetch.getId()));
+
+    // A context's own turn is not a caller.
+    caller.tracker().linkFromCallerTurn(timer.getId());
+    KJ_EXPECT(!joined(caller.takeEvents()).contains("link"_kj));
+  }
 }
 
 KJ_TEST("closing reports stats and makes later events no-ops") {

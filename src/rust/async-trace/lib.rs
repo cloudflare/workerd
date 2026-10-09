@@ -161,6 +161,15 @@ pub struct ContextStats {
     pub foreign_thread: u64,
 }
 
+/// The resource of another context that caused a resource (see [`Tracker::link`]). IDs are per
+/// isolate, so the isolate is part of the reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Link {
+    pub isolate: IsolateId,
+    pub ctx: ContextId,
+    pub id: AsyncId,
+}
+
 /// Receives a tracker's events. Every method but [`Sink::init`] defaults to doing nothing, so a
 /// sink implements only what it consumes.
 #[expect(
@@ -176,6 +185,8 @@ pub trait Sink {
     fn destroy(&mut self, ctx: ContextId, id: AsyncId, at: Nanos) {}
     fn annotate(&mut self, ctx: ContextId, id: AsyncId, key: &str, value: &str) {}
     fn turn(&mut self, ctx: ContextId, turn: &Turn) {}
+    /// Resource `id` was caused by `from`, a resource of another context.
+    fn link(&mut self, ctx: ContextId, id: AsyncId, from: &Link) {}
     /// Called the first time this tracker reports a resource with stack `id`.
     fn stack(&mut self, isolate: IsolateId, id: StackId, frames: &[Frame]) {}
     fn context_end(&mut self, ctx: ContextId, at: Nanos, stats: &ContextStats) {}

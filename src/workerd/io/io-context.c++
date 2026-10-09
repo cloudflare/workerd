@@ -318,6 +318,9 @@ void IoContext::IncomingRequest::delivered(kj::StringPtr eventType, kj::SourceLo
 
   KJ_IF_SOME(tracker, context->tryGetAsyncTracker()) {
     asyncTraceResource = tracker.create(AsyncKind::REQUEST, eventType);
+    // Delivered synchronously from another context's turn (e.g. a service binding fetch), the
+    // request records what caused it there.
+    tracker.linkFromCallerTurn(asyncTraceResource.getId());
   }
 
   // Create the root user trace span once per request. Stale references to the span (e.g. from

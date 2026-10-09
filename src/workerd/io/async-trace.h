@@ -210,6 +210,11 @@ class AsyncTracker final: public kj::AtomicRefcounted {
   // (IoContext::AwaitIoOperation).
   void countUnusedOperationName() const;
 
+  // If this is called during another context's turn, that is, synchronously from it, reports that
+  // resource `id` (typically a request this context received) was caused by that context's latest
+  // operation in the turn, or else its running resource. Does nothing otherwise.
+  void linkFromCallerTurn(AsyncId id) const;
+
   // For the promise hook (async-trace-promises.h). A promise has no handle: the tracker forgets it
   // when it settles, or when the tracker closes. createPromise() returns 0 if it was not recorded.
   // `parent` is the promise it derives from, or 0 for the turn's cause. Promises never record a

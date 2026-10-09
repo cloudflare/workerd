@@ -154,6 +154,17 @@ bool AsyncTracker::knows(AsyncId id) const {
   return impl->knows(id);
 }
 
+void AsyncTracker::linkFromCallerTurn(AsyncId id) const {
+  if (id == 0 || !onOwnerThread()) return;
+  KJ_IF_SOME(caller, inTurn()) {
+    // Trackers in a turn on this thread are on their owner thread.
+    if (&caller == this) return;
+    AsyncId from = caller.impl->link_source();
+    if (from == 0) return;
+    impl->link(id, caller.impl->isolate_id(), caller.impl->context_id(), from);
+  }
+}
+
 void AsyncTracker::markBound(AsyncId id) const {
   if (!onOwnerThread()) return;
   impl->mark_bound(id);

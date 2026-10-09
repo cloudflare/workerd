@@ -31,6 +31,7 @@ constexpr uint64_t CONTEXT_TRACK = 0x6374785f74726b31ull;
 constexpr uint64_t RESOURCE_TRACK = 0x7265735f74726b31ull;
 constexpr uint64_t CREATE_FLOW = 0x6372655f666c6f31ull;
 constexpr uint64_t SETTLE_FLOW = 0x73746c5f666c6f31ull;
+constexpr uint64_t LINK_FLOW = 0x6c6e6b5f666c6f31ull;
 
 const char* kindName(AsyncKind kind) {
   switch (kind) {
@@ -120,6 +121,17 @@ class PerfettoSink final: public AsyncTraceListener {
       TRACE_EVENT_BEGIN("workerd.async",
           perfetto::DynamicString(event.name.begin(), event.name.size()), track, args);
     }
+  }
+
+  void onLink(
+      uint64_t ctx, uint64_t id, uint64_t fromIsolate, uint64_t fromCtx, uint64_t fromId) override {
+    // Track IDs are derived from IDs alone, so the other context's tracks can be named here.
+    perfetto::Track fromContext(mix(fromCtx, fromIsolate, CONTEXT_TRACK));
+    perfetto::Track from(mix(fromIsolate, fromId, RESOURCE_TRACK), fromContext);
+    auto flow = mix(mix(fromIsolate, fromId, LINK_FLOW), mix(isolate, id, LINK_FLOW), LINK_FLOW);
+    TRACE_EVENT_INSTANT("workerd.async", "deliver", from, perfetto::Flow::ProcessScoped(flow));
+    TRACE_EVENT_INSTANT("workerd.async", "delivered", resourceTrack(id),
+        perfetto::TerminatingFlow::ProcessScoped(flow), "from_ctx", fromCtx, "from_id", fromId);
   }
 
   void onStack(

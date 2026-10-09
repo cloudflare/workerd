@@ -939,3 +939,49 @@ fn unowned_resources_are_forgotten_when_settled() {
     assert_eq!(f.tracker.stats().unknown, 0);
     assert_eq!(f.tracker.stats().unbalanced, 0);
 }
+
+#[test]
+fn link_source_is_the_turns_latest_operation_or_the_running_resource() {
+    let mut f = Fixture::new();
+    assert_eq!(f.tracker.link_source(), 0, "outside a turn");
+    let timer = f.create(Kind::Timer, "setTimeout");
+    f.tracker.turn_begin(0);
+    let op = f.create(Kind::Operation, "fetch");
+    // A bound (e.g. detached) operation still identifies the call.
+    f.tracker.mark_bound(op);
+    assert_eq!(f.tracker.link_source(), op);
+    f.tracker.turn_end();
+    // An operation from an earlier turn doesn't count; the running resource does.
+    f.tracker.turn_begin(timer);
+    assert_eq!(f.tracker.link_source(), timer);
+    f.tracker.turn_end();
+}
+
+#[test]
+fn link_reports_the_other_contexts_resource() {
+    let mut f = Fixture::new();
+    let ctx = f.ctx();
+    let request = f.create(Kind::Request, "fetch");
+    let from = Link {
+        isolate: 7,
+        ctx: 3,
+        id: 42,
+    };
+    f.tracker.link(request, from);
+    f.tracker.link(request, Link { id: 0, ..from });
+    f.tracker.link(request + 1000, from);
+    let events = f.events();
+    let links: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::Link { .. }))
+        .collect();
+    assert_eq!(
+        links,
+        vec![&Event::Link {
+            ctx,
+            id: request,
+            from
+        }]
+    );
+    assert_eq!(f.tracker.stats().unknown, 1);
+}

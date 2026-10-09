@@ -172,6 +172,27 @@ function checkCore(events, { withStacks }) {
     wait.ctx,
     'the subrequest is a fetch event'
   );
+
+  // The service binding delivers the subrequest synchronously, so it links to the caller's fetch.
+  const callerIso = events.find((e) => e.e === 'ctx' && e.ctx === test.ctx).iso;
+  const links = events
+    .filter((e) => e.e === 'link')
+    .map(({ ctx, id, fromIso, fromCtx, fromId }) => ({
+      ctx,
+      id,
+      fromIso,
+      fromCtx,
+      fromId,
+    }));
+  assert.deepStrictEqual(links, [
+    {
+      ctx: subrequest.ctx,
+      id: subrequest.id,
+      fromIso: callerIso,
+      fromCtx: test.ctx,
+      fromId: fetch.id,
+    },
+  ]);
   const waitBridge = [...resources.values()].find(
     (r) => r.ctx === wait.ctx && r.kind === 'kj_to_js'
   );
