@@ -1,0 +1,46 @@
+src/workerd/io/access-info.h
+  s_0e56c3301e5173::t_f79c6c2d6533f8 40,46-50
+src/workerd/server/server-test.c++
+  s_0e56c3301e5173::t_16cbc662566c91 7020-7024,7026-7041,7044-7047,7049-7051,7056-7066,7069
+  s_0e56c3301e5173::t_2d1a3fd02ab45b 7042-7043,7052,7054-7055,7067-7068,7070-7088
+  s_0e56c3301e5173::t_74f1838f90def9 7019,7025,7048,7053
+src/workerd/server/workerd.capnp
+  s_0e56c3301e5173::t_0bc62dc598b63c 961
+  s_0e56c3301e5173::t_be2981312d1031 742
+  s_0e56c3301e5173::t_cbc0b344c0d5c3 743-749
+src/workerd/server/server.c++
+  s_0e56c3301e5173::t_4e14d9fbf1bdaf 3481-3482,3498-3499
+  s_0e56c3301e5173::t_7ad06afc956070 5505
+  s_0e56c3301e5173::t_793b103a419e8e 5908-5909
+  s_0e56c3301e5173::t_60281e2f2fb518 6394
+  s_0e56c3301e5173::t_98dd4e293a135b 87,122-152,157-205
+  s_0e56c3301e5173::t_0f21b871791bf5 3729
+  s_0e56c3301e5173::t_d5e6e2f280c15b 153-156
+  s_0e56c3301e5173::t_8312af84b052a9 67,69,71-76,84-85
+  s_0e56c3301e5173::t_53827ce097701d 17
+  s_0e56c3301e5173::t_2bc395cb5d4f71 3713-3728,3730-3737,3743-3744,3868
+  s_0e56c3301e5173::t_01781a8438c7a1 63-66,68,70,77-83,86
+  s_0e56c3301e5173::t_5cb4b75b58b041 4115
+  s_0e56c3301e5173::t_529d4a4437783e 89-121
+  s_0e56c3301e5173::t_0c105f1d0c5bcf 4974-4977
+  s_0e56c3301e5173::t_61c31b58f4a181 5506-5515
+  s_0e56c3301e5173::t_659aaa6d19f98b 88
+src/workerd/api/global-scope.c++
+  s_0e56c3301e5173::t_3af0ab8781cbfa 121-122,140-150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "aea6dbabff5504bd49c0ae4888c6b284e02f0491",
+  "prompts": {},
+  "sessions": {
+    "s_0e56c3301e5173": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_09dbefc92ffel4Y7irj65GOs7y",
+        "model": "unknown"
+      },
+      "human_author": null
+    }
+  }
+}

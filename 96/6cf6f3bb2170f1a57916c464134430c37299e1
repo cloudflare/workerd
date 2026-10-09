@@ -1,0 +1,31 @@
+ci/v8_nightly_shared.py
+  s_44a7ef64d78a80::t_482ad832e98a3e 153-159,179-182,188-191
+  s_44a7ef64d78a80::t_77d32b38178299 47
+  s_44a7ef64d78a80::t_d39c143a969ff0 196-203
+ci/v8_nightly.py
+  s_44a7ef64d78a80::t_482ad832e98a3e 18-37,41-46,56,58,61-64,99,102
+  s_44a7ef64d78a80::t_77d32b38178299 54,57,59,65-66
+  s_44a7ef64d78a80::t_b39088d5efb941 50-53,77-79,83
+  s_44a7ef64d78a80::t_61b1e803525b73 17
+  s_44a7ef64d78a80::t_ef251238903362 55
+  s_44a7ef64d78a80::t_189f6d5cdb3690 60
+  s_44a7ef64d78a80::t_2604815108a541 67-68
+  s_44a7ef64d78a80::t_6f7cfc0220f106 98
+  s_44a7ef64d78a80::t_7b9a307fceac13 101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "966cf6f3bb2170f1a57916c464134430c37299e1",
+  "prompts": {},
+  "sessions": {
+    "s_44a7ef64d78a80": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04f1169ccffemF6Mw8qIhIdPtb",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cormick Holland <cormick@cloudflare.com>"
+    }
+  }
+}

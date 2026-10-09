@@ -1,0 +1,19 @@
+src/workerd/api/http.c++
+  s_ea3b91cafb67a9::t_04ddf0e16f4ab3 1573-1577
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "37b698082bfa9a93c086db68f7c5e72b602f69ab",
+  "prompts": {},
+  "sessions": {
+    "s_ea3b91cafb67a9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe6b74983ffe3TTRPQnP5WRUxK",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

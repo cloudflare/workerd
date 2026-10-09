@@ -1,0 +1,21 @@
+src/cloudflare/durable-objects.ts
+  s_b716b0d48442fc::t_0bce19af53c09e 7-40
+src/workerd/api/tests/retryable-test.js
+  s_b716b0d48442fc::t_d8b067b429caa1 6-7,38-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "253846713c427cf4c32b81cb8c9052e20fc842a9",
+  "prompts": {},
+  "sessions": {
+    "s_b716b0d48442fc": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f27481c64ffejF0PRmNbz1lsxV",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

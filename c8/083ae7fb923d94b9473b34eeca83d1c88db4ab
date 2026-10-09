@@ -1,0 +1,49 @@
+.github/workflows/_bazel.yml
+  s_dadaf0660bfcbe::t_80002539602e47 136
+build/fixtures/rust_io_link_check.sh
+  s_dadaf0660bfcbe::t_214271fd97b392 5,16,72,75
+build/kj_test.bzl
+  s_dadaf0660bfcbe::t_25aadd035ac7a6 22-24
+build/rust_io_graph_check.sh
+  s_dadaf0660bfcbe::t_e4b6eca113f9d6 2-3,19,24,29
+justfile
+  s_dadaf0660bfcbe::t_a297fe03cf8591 85
+src/rust/cxx/kj-rs-io/BUILD.bazel
+  s_dadaf0660bfcbe::t_1573b3e241404d 95
+src/rust/cxx/kj-rs-io/lib.rs
+  s_dadaf0660bfcbe::t_1cd416c90eef2f 49-50
+src/workerd/server/AGENTS.md
+  s_dadaf0660bfcbe::t_98cba8f70b31bd 32-37,40,46
+src/workerd/server/BUILD.bazel
+  s_dadaf0660bfcbe::t_05d4adaa05dd6c 88-89,95-101,108
+src/workerd/server/cli-io-backend.c++
+  s_dadaf0660bfcbe::t_91ba1f8d01e112 5-6,27-31,65,70
+src/workerd/server/cli-io-backend.h
+  s_dadaf0660bfcbe::t_3f6e99528c8548 7-9,18-21,24,33,41,44-46
+src/workerd/server/workerd.c++
+  s_dadaf0660bfcbe::t_2cd7a59cc7a5dc 946,1252-1253
+src/workerd/util/AGENTS.md
+  s_dadaf0660bfcbe::t_a1a791e4f97fdb 47-50
+src/workerd/util/BUILD.bazel
+  s_dadaf0660bfcbe::t_c628c5fa68ad06 534-539,542,544-552,555-557,560
+src/workerd/util/setup-async-io-test.c++
+  s_dadaf0660bfcbe::t_87527137323d3a 6-9,24,27-28,33,37,41
+src/workerd/util/setup-async-io.c++
+  s_dadaf0660bfcbe::t_06c603f41eb91f 5-7,9-11,19-20,22-27,53,56,59,62,65,68,99,103,107,116,123,137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c8083ae7fb923d94b9473b34eeca83d1c88db4ab",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,49 @@
+src/workerd/jsg/exception.h
+  s_9496b046a1a364::t_2635f6d330fd1b 162-164
+  s_9496b046a1a364::t_f20302a4060b39 165-167
+  s_9496b046a1a364::t_a046726bfa7402 168
+src/workerd/server/alarm-scheduler-test.c++
+  s_9496b046a1a364::t_aba1f34e79dc99 263-264
+  s_9496b046a1a364::t_2635f6d330fd1b 46-56,60-66,95-96,234-262
+  s_9496b046a1a364::t_0dbf9c34b56a27 265-267
+  s_9496b046a1a364::t_487f3fd5b40437 268-270
+src/workerd/server/alarm-scheduler.h
+  s_9496b046a1a364::t_2635f6d330fd1b 121
+src/workerd/api/actor-state.c++
+  s_9496b046a1a364::t_2635f6d330fd1b 1189-1190
+  s_9496b046a1a364::t_007d9b884be51e 1191
+  s_9496b046a1a364::t_f411ec3311f9ad 1192
+types/generated-snapshot/index.ts
+  s_9496b046a1a364::t_65f51c2f001d43 16217
+  s_9496b046a1a364::t_a52feed773e6da 16218
+src/workerd/server/alarm-scheduler.c++
+  s_9496b046a1a364::t_2635f6d330fd1b 184-185,231-232,266,296-299
+src/workerd/api/global-scope.c++
+  s_9496b046a1a364::t_5fe9aa38546a18 594-604,694,700-705,738,785,787
+  s_9496b046a1a364::t_2635f6d330fd1b 583-593,784
+types/generated-snapshot/index.d.ts
+  s_9496b046a1a364::t_420f91911dbcd4 16259
+  s_9496b046a1a364::t_ad8d11bfee76bf 16260
+types/generated-snapshot/experimental/index.d.ts
+  s_9496b046a1a364::t_47f250b9d60114 16549
+  s_9496b046a1a364::t_29022cddb49d30 16550
+types/generated-snapshot/experimental/index.ts
+  s_9496b046a1a364::t_34034ac2bf619d 16507
+  s_9496b046a1a364::t_12881eab1ea97b 16508
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6e9d36941edd99117900ff7bd9b57e8914795dce",
+  "prompts": {},
+  "sessions": {
+    "s_9496b046a1a364": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0046a268affe2zLQ3xwXN6au9J",
+        "model": "@cf/moonshotai/kimi-k2.6"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

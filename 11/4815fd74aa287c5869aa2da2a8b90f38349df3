@@ -1,0 +1,25 @@
+build/kj_test.bzl
+  s_ad98b07a2ebbe9::t_14789fc2aa4a73 22-25
+build/wd_cc_benchmark.bzl
+  s_ad98b07a2ebbe9::t_deee75ba01a33f 25-26
+src/rust/cxx/kj-rs-io/BUILD.bazel
+  s_ad98b07a2ebbe9::t_728e65f13b6a21 49-73
+src/workerd/util/BUILD.bazel
+  s_ad98b07a2ebbe9::t_3054fe05be3c6a 517-521,526-527,533,539-540,544
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "114815fd74aa287c5869aa2da2a8b90f38349df3",
+  "prompts": {},
+  "sessions": {
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

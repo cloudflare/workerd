@@ -1,0 +1,21 @@
+build/deps/deps.jsonc
+  s_b5100e8818a1d4::t_fb965561a9771c 39-41
+build/deps/gen/deps.MODULE.bazel
+  s_b5100e8818a1d4::t_31fc0d7f4f5242 30-31,33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b31fd5e38ae32a8b744fa75630b25d65427225e2",
+  "prompts": {},
+  "sessions": {
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

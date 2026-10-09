@@ -1,0 +1,145 @@
+BUILD.bazel
+  s_b5100e8818a1d4::t_c4db03b2c8384a 134-142
+build/deps/rust.MODULE.bazel
+  s_b5100e8818a1d4::t_d6bea6a062c4cd 56-83
+deps/rust/BUILD.bazel
+  s_b5100e8818a1d4::t_0c3552a8673e61 12-22
+deps/rust/Cargo.lock
+  s_b5100e8818a1d4::t_1c09d3d7281041 89-94,107-112,159-167,336-345,373-388,399-400,402,404,417-425,492-503,513,526-530,537,540-543,548,556,626,648,858-946,949,951,963,965,976,978,990,992,996,998,1000,1011,1013,1017,1019,1094-1142,1178,1180,1247,1313-1318,1459,1461,1570-1583,1661-1742,1755-1772,1785-1807,1898-1910,1935-1950,1982,2008-2013,2203,2209,2415,2417,2451,2465-2474,2516-2521,2577-2582,2623-2641,2693-2701,2708,2717-2725,2735-2798,2801,2803,2878-2883,2886,2888,2897,2899,2908,2910,2914,2917-2922
+deps/rust/Cargo.toml
+  s_b5100e8818a1d4::t_29f90079a96ef4 35-37,44-48,50-57,62-63,66-84,88,91-94,96-98,102
+patches/rust/hyper-public-header-case-map.patch
+  s_b5100e8818a1d4::t_e7fc733f60ea62 1-44
+src/rust/cxx/kj-hyper/BUILD.bazel
+  s_b5100e8818a1d4::t_13903f8c8fc218 1-118
+src/rust/cxx/kj-hyper/client.rs
+  s_b5100e8818a1d4::t_c711cced793e5c 1-1954
+src/rust/cxx/kj-hyper/ffi.rs
+  s_b5100e8818a1d4::t_ee9b5608e2dd62 1-1198
+src/rust/cxx/kj-hyper/hyper-server-ffi.c++
+  s_b5100e8818a1d4::t_7c8199d6f7934f 1-519
+src/rust/cxx/kj-hyper/hyper-server-ffi.h
+  s_b5100e8818a1d4::t_3a6fc1ec4967a6 1-66
+src/rust/cxx/kj-hyper/lib.rs
+  s_b5100e8818a1d4::t_987a81f799a447 1-77
+src/rust/cxx/kj-hyper/server.rs
+  s_b5100e8818a1d4::t_2a5a4b0e233149 1-1936
+src/rust/cxx/kj-hyper/translate.rs
+  s_b5100e8818a1d4::t_d8b067e5c711c1 1-950
+src/rust/cxx/kj-hyper/ws-pipe-ffi.h
+  s_b5100e8818a1d4::t_8b935b617e9989 1-136
+src/rust/cxx/kj-hyper/ws.rs
+  s_b5100e8818a1d4::t_c2e6f71e32adaa 1-1017
+src/rust/cxx/kj-hyper/ws_pipe.rs
+  s_b5100e8818a1d4::t_cd16881f9335d8 1-835
+src/rust/cxx/kj-rs-http/BUILD.bazel
+  s_b5100e8818a1d4::t_7f53063460da9b 1-5,7-23,25-52,54-68,70-74,78-98,100-103,106-115
+src/rust/cxx/kj-rs-http/codec.rs
+  s_b5100e8818a1d4::t_f695c0559ceed8 1-749
+src/rust/cxx/kj-rs-http/ffi.h
+  s_b5100e8818a1d4::t_99b9542b5bb006 15,23-31,41-59,67-79,172-227,242-246,261-263
+src/rust/cxx/kj-rs-http/http.rs
+  s_b5100e8818a1d4::t_aaa965342910db 1-24,27-29,32,109-112,121-127,132-135,140-142,144-246,312,314-327,329-337,340-348,351,353,357,362-363
+src/workerd/api/BUILD.bazel
+  s_b5100e8818a1d4::t_c11ec4d47b5f54 420
+src/workerd/io/BUILD.bazel
+  s_b5100e8818a1d4::t_6b287cbf8b3b21 282
+src/workerd/server/BUILD.bazel
+  s_b5100e8818a1d4::t_eb3d4ce52948dc 79-82,115,167-194,205-208,306,312-315,321-328,368-372,380,388-392,403-407,411-413,417-422,470-475,535
+src/workerd/server/container-client.c++
+  s_b5100e8818a1d4::t_938545f53bd7fe 28-31,102-105,645,697-704,708,719,730-745,755,1991-1992,1998
+src/workerd/server/tls-network.c++
+  s_b5100e8818a1d4::t_5498aa5e7aa270 1-613
+src/workerd/tests/BUILD.bazel
+  s_b5100e8818a1d4::t_44d4f840ffbebc 73
+src/workerd/util/kj-http-tokio.c++
+  s_b5100e8818a1d4::t_a43abf48bcd39c 1-1889
+src/rust/cxx/kj-hyper/hyper-http.h
+  s_b5100e8818a1d4::t_28633c7f24c9fa 1-400
+src/rust/cxx/kj-rs-tokio/port.rs
+  s_b5100e8818a1d4::t_caf1a26f3b0adb 324-331
+build/rust_io_backend.bzl
+  s_b5100e8818a1d4::t_f96c31b7f6791f 18-26,45-50
+patches/rust/http-kj-lenient-header-values.patch
+  s_b5100e8818a1d4::t_7691775af1da2f 1-17
+patches/rust/httparse-kj-lenient-header-values.patch
+  s_b5100e8818a1d4::t_215d9c1b4fbb7e 1-29
+src/rust/cxx/kj-hyper/client_tls.rs
+  s_b5100e8818a1d4::t_e2a04dbfb60666 1-205
+src/rust/cxx/kj-hyper/peer-filter.c++
+  s_b5100e8818a1d4::t_adbde6682e6e58 1-53
+src/rust/cxx/kj-hyper/peer-filter.h
+  s_b5100e8818a1d4::t_fe9e1ea830fd9f 1-69
+src/rust/cxx/kj-hyper/stall.rs
+  s_b5100e8818a1d4::t_83a08b49d59304 1-338
+src/rust/cxx/kj-hyper/tests/BUILD.bazel
+  s_b5100e8818a1d4::t_7d7f5fc4f663a7 1-107
+src/rust/cxx/kj-hyper/tests/hyper-client-test.c++
+  s_b5100e8818a1d4::t_6c6946911a8ee1 1-1055
+src/rust/cxx/kj-hyper/tests/hyper-server-test.c++
+  s_b5100e8818a1d4::t_ec015fedf957c1 1-1633
+src/rust/cxx/kj-hyper/tests/hyper-tls-test.c++
+  s_b5100e8818a1d4::t_94e9359d2a7a69 1-681
+src/rust/cxx/kj-hyper/tests/test-harness.h
+  s_b5100e8818a1d4::t_f64a2056d42711 1-216
+src/rust/cxx/kj-hyper/tls.rs
+  s_b5100e8818a1d4::t_4aa0853927bbe5 1-632
+src/rust/cxx/kj-hyper/upgraded_io.rs
+  s_b5100e8818a1d4::t_acb5f8d85928d3 1-366
+src/rust/cxx/kj-hyper/ws_ext.rs
+  s_b5100e8818a1d4::t_30cc27d76c3683 1-359
+src/rust/cxx/kj-rs-http/ffi.c++
+  s_b5100e8818a1d4::t_c913bde17ecbfc 7,19-22,30,37-52
+src/rust/cxx/kj-rs-http/headers.rs
+  s_b5100e8818a1d4::t_797794309605dc 1-174
+src/rust/cxx/kj-rs-http/io.rs
+  s_b5100e8818a1d4::t_c4ac45b539dd5a 1-62
+src/rust/cxx/kj-rs-http/lib.rs
+  s_b5100e8818a1d4::t_8f5d78c039d4e6 6-42,46-54
+src/rust/cxx/kj-rs-http/own.rs
+  s_b5100e8818a1d4::t_39381342b5bb9d 3-4
+src/rust/cxx/kj-rs-http/service.rs
+  s_b5100e8818a1d4::t_05a29032ebc8cc 1-204
+src/rust/cxx/kj-rs-http/streams.rs
+  s_b5100e8818a1d4::t_76cb77e40396a4 1-8,15,17-18,20-33,35-37
+src/rust/cxx/kj-rs-http/tests/BUILD.bazel
+  s_b5100e8818a1d4::t_03ca15130ca787 1-2,4-16,18-21,25-31,33-38,43-46,48-52
+src/rust/cxx/kj-rs-http/tests/ffi-test.c++
+  s_b5100e8818a1d4::t_ee79a900b4735c 5-6,219-220
+src/rust/cxx/kj-rs-http/tests/lib.rs
+  s_b5100e8818a1d4::t_bcebf796e6f6db 10-12,16,20-22,25-26,28-30,34-44,71-86
+src/rust/cxx/third-party/BUILD.bazel
+  s_b5100e8818a1d4::t_222a18366930bd 13-23
+src/rust/worker/BUILD
+  s_b5100e8818a1d4::t_bcc6b99e8fd01a 10,36
+src/rust/worker/ffi.h
+  s_b5100e8818a1d4::t_abd71e2469faa2 8-10
+src/workerd/server/pyodide.c++
+  s_b5100e8818a1d4::t_bf620026c58393 6-7,76,78-81
+src/workerd/server/server-test.c++
+  s_b5100e8818a1d4::t_f70c43db9e6ed1 12-13,330-354,376,423-430,468-471,1236-1239,2123-2127,2143,2146,2169,2253-2256,2274,2277,2313,3719-3722,3767,3769-3771,3789,3814-3817,3854,3870,3873-3874,3889,3898,3919,4195-4198,5272-5275,5497-5499,5527-5528,5530-5531,5545,5571,5589-5590,5592-5593,5607
+src/workerd/server/server.c++
+  s_b5100e8818a1d4::t_7032929a3bb957 10,1738-1745,6336-6339,6797-6805,6959-6962,7066
+src/workerd/server/server.h
+  s_b5100e8818a1d4::t_49d0932e07cb43 228-231,345
+src/workerd/server/tls-network.h
+  s_b5100e8818a1d4::t_ec8928cbd838ec 1-48
+src/workerd/util/BUILD.bazel
+  s_b5100e8818a1d4::t_5c6887f26e990e 93,175,279,353,479-509
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c2181e8bf4c767b33af20af2445e00cd0b25cd5d",
+  "prompts": {},
+  "sessions": {
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

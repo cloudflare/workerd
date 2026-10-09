@@ -1,0 +1,59 @@
+src/cloudflare/internal/test/tracing/tracing-helpers-instrumentation-test.js
+  s_e7288cea4fb70f::t_47a7a77f162e69 64-67,177,194-203,225,257-266,293,296-313
+src/cloudflare/internal/test/tracing/tracing-helpers-test.js
+  s_5bc3054a3863a2::t_3792d1300cff47 228-229,251,334-340
+src/cloudflare/internal/tracing.d.ts
+  s_5bc3054a3863a2::t_37b724059c3705 11-12
+src/workerd/api/tracing.c++
+  s_5bc3054a3863a2::t_416344578308c4 38-39,41-43,47,50,62,66-68,74-76,118-120,279,282,285
+src/workerd/api/tracing.h
+  s_5bc3054a3863a2::t_56e94f0c400571 110-111
+src/workerd/io/trace-stream.c++
+  s_5bc3054a3863a2::t_34b49be384f24c 163-169,171-177,179-185
+src/workerd/io/trace-test.c++
+  s_e7288cea4fb70f::t_be725c84770a91 534,539,541,546,551,557-558,563,565-567,572-573,578-582,587-588,590-595,603-604,609,611
+src/workerd/io/trace.c++
+  s_5bc3054a3863a2::t_48dd3d62d4e83d 1850-1874,1947,1950,1953,2053-2054,2057-2058,2061-2062,2082-2083,2085-2086,2088-2089,2110,2113-2117,2120,2123-2127,2130,2133-2137,2153-2166,2169,2171-2177,2183,2185-2191
+src/workerd/io/trace.capnp
+  s_5bc3054a3863a2::t_648dd960ade68b 15-35,44-49
+src/workerd/io/trace.h
+  s_5bc3054a3863a2::t_93db4e3a935e6d 724-727,741-743,1263-1265
+src/workerd/io/tracer.c++
+  s_5bc3054a3863a2::t_96ae40e699561b 32-33,35-37,41-42,44
+types/defines/trace.d.ts
+  s_5bc3054a3863a2::t_abe020b8d44999 188-196
+types/generated-snapshot/experimental/index.d.ts
+  s_e7288cea4fb70f::t_c7ca5ce99a5c3a 17226,17228,17230
+types/generated-snapshot/experimental/index.ts
+  s_e7288cea4fb70f::t_d80874108705aa 17154,17156,17158
+types/generated-snapshot/index.d.ts
+  s_e7288cea4fb70f::t_6d3be0316bbbbb 16949,16951,16953
+types/generated-snapshot/index.ts
+  s_e7288cea4fb70f::t_e22b4cc40d3498 16877,16879,16881
+types/test/types/rpc.ts
+  s_5bc3054a3863a2::t_efb4eea44d953f 94-105
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8641eb93e3f2de67383e080713ffdfb7d63cdb53",
+  "prompts": {},
+  "sessions": {
+    "s_5bc3054a3863a2": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f4e0e341fffet4NlPZgiRSHUrY",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Morrell <jmorrell@cloudflare.com>"
+    },
+    "s_e7288cea4fb70f": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f4ddca8b5ffe93a94het1DDDX6",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Morrell <jmorrell@cloudflare.com>"
+    }
+  }
+}

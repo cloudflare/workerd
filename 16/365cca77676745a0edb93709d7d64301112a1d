@@ -1,0 +1,22 @@
+ci/v8_update.py
+  s_03acf2309a4ac3::t_1be9c0f1389c0e 4,160-163,215-227,229-230,235,237-240
+ci/v8_nightly_shared.py
+  s_03acf2309a4ac3::t_1be9c0f1389c0e 143-146,150-151,161-166,169-174,177-181,184-190
+  s_03acf2309a4ac3::t_5ec91937fe16b2 149,152
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "16365cca77676745a0edb93709d7d64301112a1d",
+  "prompts": {},
+  "sessions": {
+    "s_03acf2309a4ac3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_075d7c3a5ffeUU1f0YdOY4tEVX",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Cormick Holland <cormick@cloudflare.com>"
+    }
+  }
+}

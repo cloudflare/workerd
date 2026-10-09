@@ -1,0 +1,19 @@
+src/workerd/api/fetch-body-rewindable-test.c++
+  s_c1a7662859f799::t_1127c8db2af3f8 144-147,309-328
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6324ca42a37fba31157eb9617fac2be5b595456e",
+  "prompts": {},
+  "sessions": {
+    "s_c1a7662859f799": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_037f52e35ffehXUiJ6v9H8O9VK",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

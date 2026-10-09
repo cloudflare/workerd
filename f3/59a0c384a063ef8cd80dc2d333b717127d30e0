@@ -1,0 +1,33 @@
+src/workerd/io/io-context.c++
+  s_b5100e8818a1d4::t_149b05704b79ba 1719,1721-1811,1813-1831
+src/workerd/io/io-own.c++
+  s_b5100e8818a1d4::t_c342e6e144f434 18-54,103,106-111,114-124
+src/workerd/io/io-own.h
+  s_b5100e8818a1d4::t_34ee2722236132 131
+src/workerd/io/incoming-request-test.c++
+  s_811ab3884c847c::t_7449f6b56f05ec 151-189
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f359a0c384a063ef8cd80dc2d333b717127d30e0",
+  "prompts": {},
+  "sessions": {
+    "s_811ab3884c847c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a10b107dbc9e0e5ae",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    },
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

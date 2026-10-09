@@ -1,0 +1,25 @@
+src/workerd/api/global-scope.c++
+  s_f8650c47fba012::t_56afbaf01e1814 678,687,700,724,779,783,794
+src/workerd/api/trace.c++
+  s_f8650c47fba012::t_b7357f411b37c8 705,729,735,741
+src/workerd/api/worker-rpc.c++
+  s_f8650c47fba012::t_3b6d22737670f8 3079,3091,3100-3101,3191-3193,3195,3227-3232,3282
+src/workerd/io/trace-stream.c++
+  s_f8650c47fba012::t_bd9828742ff39e 1123-1124,1127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3a9af0a0c90dc2289d22782978c7d0cfac808c81",
+  "prompts": {},
+  "sessions": {
+    "s_f8650c47fba012": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f5eb7f831ffe9VV0nKD4guBC3X",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Felix Hanau <felix@cloudflare.com>"
+    }
+  }
+}

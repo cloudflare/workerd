@@ -1,0 +1,41 @@
+src/workerd/api/js-writable-stream.h
+  s_8896da9a87a6e3::t_27866fa2a60d34 148-153
+src/workerd/api/js-writable-stream.c++
+  s_8896da9a87a6e3::t_a3c4528ea5c72d 188-199
+src/workerd/api/sockets.c++
+  s_8896da9a87a6e3::t_cd03b6e847ecd2 982-983
+  s_8896da9a87a6e3::t_9ae5c8f60aab9f 980-981,984-986,988-994
+  s_8896da9a87a6e3::t_547ee89c7b0cba 839,841
+  s_8896da9a87a6e3::t_182cca1cbcb5ab 908,915,924-926
+src/workerd/api/js-readable-stream.h
+  s_8896da9a87a6e3::t_f16f84acb3e439 226-231
+src/workerd/api/streams/readable.c++
+  s_17ea49de39358e::t_9e801d624fc15a 680,757
+  s_17ea49de39358e::t_6da2e1716361a0 758-759
+src/workerd/api/js-readable-stream.c++
+  s_8896da9a87a6e3::t_8ef3a427ecc16b 1048-1059
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0bff67db7339af6a3b7c3a3b9c7b51b1ebed302a",
+  "prompts": {},
+  "sessions": {
+    "s_17ea49de39358e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_073ddd5c0ffeznqJdf646gs4Le",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "adriangracia <agracia@cloudflare.com>"
+    },
+    "s_8896da9a87a6e3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0706f4108ffeaQniwkIu2fBW02",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": null
+    }
+  }
+}

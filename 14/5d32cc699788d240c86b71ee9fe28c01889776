@@ -1,0 +1,19 @@
+docs/v8-updates.md
+  s_a683b7aa626404::t_8aca1c288bd840 89-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "145d32cc699788d240c86b71ee9fe28c01889776",
+  "prompts": {},
+  "sessions": {
+    "s_a683b7aa626404": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_054f4263cffeW5Ul9eoDGA4UIr",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Cormick Holland <cormick@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,52 @@
+src/workerd/server/workerd.c++
+  s_dadaf0660bfcbe::t_91440e732cd1d2 346,1158
+src/rust/cxx/AGENTS.md
+  s_dadaf0660bfcbe::t_e2a35719d9ef70 40-42
+src/rust/cxx/kj-rs-io/ffi.rs
+  s_dadaf0660bfcbe::t_8a0396e820fb2d 45,99-101,154,180-190,193-196,286,289-304
+src/rust/cxx/kj-rs-io/loopback.rs
+  s_dadaf0660bfcbe::t_2401d77ece5e38 1-47,49-85,95-96,98-99,103-112,114,116-121,127-152
+src/rust/cxx/kj-rs-io/net.rs
+  s_dadaf0660bfcbe::t_32956918e12c13 21-22,80-81,106-112,451,453,455-456,543-551,553,557,563,568-573,576,578,581,601-605,763-764,770,773-782,784-792,905,907-908,911-912,915-916,922,924,929-930,932-933,935-937,939-946,962,965,971-972,974-975,977,982-983,985,992-999,1029-1033,1174-1176,1197-1205,1242-1249,1254-1280,1282-1295,1531,1709
+src/rust/cxx/kj-rs-io/tests/async-io-test.c++
+  s_dadaf0660bfcbe::t_4d33a884ac4b7c 868-934
+src/rust/cxx/kj-rs-io/async-io.c++
+  s_dadaf0660bfcbe::t_6cd2e36467770b 103-104,189-190,192,230-234,242,374,381,492
+src/rust/cxx/kj-rs-io/async-io.h
+  s_dadaf0660bfcbe::t_ea2cceedf37171 167-168,172,176-185,195
+src/rust/cxx/kj-rs-io/lib.rs
+  s_dadaf0660bfcbe::t_9ee504cd3c14d3 63-64,73-74,83-84,142,200
+  s_dadaf0660bfcbe::t_8d9bc4e2bfbe27 138
+.bazelrc
+  s_dadaf0660bfcbe::t_9d5652c51ef3bd 225
+BUILD.bazel
+  s_dadaf0660bfcbe::t_f968e569391948 31-36
+src/rust/AGENTS.md
+  s_dadaf0660bfcbe::t_a40fcb275d4e33 5-7,34,41,96
+build/rust_lint.bazelrc
+  s_dadaf0660bfcbe::t_854ea20002470b 27,33
+build/wd_rust_binary.bzl
+  s_dadaf0660bfcbe::t_3cc0d672ca7181 2,6-7,13-15,20,26-28,35-39,41,43-44,48-50,56,68-73,80-83,88-89,94,97-113
+build/wd_rust_crate.bzl
+  s_dadaf0660bfcbe::t_eea5055432a71d 49-59,62-63,76,85-87,104,106-107,130,132-134,158-161,176
+justfile
+  s_dadaf0660bfcbe::t_6a47b3a8d7c88d 145,147
+src/rust/cxx/kj-rs-io/error.rs
+  s_dadaf0660bfcbe::t_d5ae8e4bbfd912 213-222,225
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "028667404349cf215b954875a81cb281b36727ae",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

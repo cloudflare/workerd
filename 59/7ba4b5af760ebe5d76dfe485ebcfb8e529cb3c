@@ -1,0 +1,21 @@
+src/workerd/api/sockets.c++
+  s_e6d5dcbb5c956b::t_d0d6cfb6196ce5 33-34
+  s_e6d5dcbb5c956b::t_b44ad3013e3111 51-55,59-64
+  s_e6d5dcbb5c956b::t_0c4fbde506e192 106-125,129-134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "597ba4b5af760ebe5d76dfe485ebcfb8e529cb3c",
+  "prompts": {},
+  "sessions": {
+    "s_e6d5dcbb5c956b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_04be23f3affe0QExKcwUHt9BfF",
+        "model": "claude-opus-5"
+      },
+      "human_author": "adriangracia <agracia@cloudflare.com>"
+    }
+  }
+}

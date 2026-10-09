@@ -1,0 +1,31 @@
+src/workerd/api/node/zlib-util.c++
+  20750ae75c64d811 540-546
+src/workerd/api/node/tests/BUILD.bazel
+  20750ae75c64d811 226-230
+src/workerd/api/node/zlib-util.h
+  20750ae75c64d811 450-458
+src/workerd/api/node/tests/zlib-leak-nodejs-test.wd-test
+  20750ae75c64d811 1-15
+src/workerd/api/node/tests/zlib-leak-nodejs-test.js
+  20750ae75c64d811 1-113
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "a148b2ee4b638c928cee918e38657c402711ff2c",
+  "prompts": {
+    "20750ae75c64d811": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_2011d920affe2wX40vF6Iaoylh",
+        "model": "anthropic/claude-opus-4-7"
+      },
+      "human_author": "Guy Bedford",
+      "messages": [],
+      "total_additions": 150,
+      "total_deletions": 0,
+      "accepted_lines": 150,
+      "overriden_lines": 0
+    }
+  }
+}

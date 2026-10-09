@@ -1,0 +1,19 @@
+src/workerd/api/BUILD.bazel
+  s_e6ef9db3485b14::t_fc82fba7863ea0 12,67,799-805
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "81359550be86b7aeb0fd0af01fe60cf85bff20d5",
+  "prompts": {},
+  "sessions": {
+    "s_e6ef9db3485b14": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f940fb7bdffeOOke2jjtQ9MxFI",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

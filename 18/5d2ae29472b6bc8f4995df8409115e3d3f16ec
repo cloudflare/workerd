@@ -1,0 +1,24 @@
+types/defines/images.d.ts
+  s_66767b9e401d0e::t_40ea3d0668e17a 14-21,23-27
+  s_66767b9e401d0e::t_f858adcca064e0 22
+  s_66767b9e401d0e::t_3b089c35acbca7 250
+  s_66767b9e401d0e::t_6df069841e664a 28-30
+  s_66767b9e401d0e::t_1cc59a45a611d4 248-249
+  s_66767b9e401d0e::t_cba00c70476017 251-253
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "185d2ae29472b6bc8f4995df8409115e3d3f16ec",
+  "prompts": {},
+  "sessions": {
+    "s_66767b9e401d0e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0dcbb83c4ffeQ8K1jA4PhRRlgt",
+        "model": "@cf/moonshotai/kimi-k2.6"
+      },
+      "human_author": "Diretnan Domnan <diretnan@cloudflare.com>"
+    }
+  }
+}

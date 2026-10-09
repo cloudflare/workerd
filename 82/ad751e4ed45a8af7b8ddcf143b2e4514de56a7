@@ -1,0 +1,19 @@
+src/workerd/api/actor.h
+  s_e6ef9db3485b14::t_6452df8763ba98 103
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "82ad751e4ed45a8af7b8ddcf143b2e4514de56a7",
+  "prompts": {},
+  "sessions": {
+    "s_e6ef9db3485b14": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f940fb7bdffeOOke2jjtQ9MxFI",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

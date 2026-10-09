@@ -1,0 +1,32 @@
+src/workerd/api/tests/js-rpc-params-transfer-ownership-test.js
+  s_6ba2030b43c23b::t_e1709475aa9d28 1-70
+src/workerd/api/http.h
+  s_6ba2030b43c23b::t_46234e9f05e956 339,433
+src/workerd/api/tests/BUILD.bazel
+  s_6ba2030b43c23b::t_fb76a0ced03882 656-660
+  s_6ba2030b43c23b::t_13b888a1138329 655
+src/workerd/api/worker-rpc.c++
+  s_6ba2030b43c23b::t_278b75a5c451b5 206-212,233-234,236-237,418,477-478,480-483,584-587,590-610,612-613,615-616,619-620,623,626,629,638-641,658-670,674-688,712-716,1002,2071-2074
+src/workerd/api/worker-rpc.h
+  s_6ba2030b43c23b::t_fa954154a119b2 296-303,305,342,434-438,550
+src/workerd/api/tests/js-rpc-params-transfer-ownership-test.wd-test
+  s_6ba2030b43c23b::t_90224e7333e353 1-26
+src/workerd/api/http.c++
+  s_6ba2030b43c23b::t_f7a16f47ea876b 2318
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a848c9746a518030b1f1d03e6d55e93cc5924164",
+  "prompts": {},
+  "sessions": {
+    "s_6ba2030b43c23b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f7fdd34c1ffeJ4joNLMehWneBI",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

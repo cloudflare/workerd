@@ -1,0 +1,51 @@
+src/cloudflare/internal/test/workflows/workflows-api-rpc-test.js
+  s_b554ffcd7ba695::t_7b132026f19a89 51,84
+src/cloudflare/internal/test/workflows/workflows-api-test.js
+  s_b554ffcd7ba695::t_0123e18350f970 56-61,90
+types/generated-snapshot/index.d.ts
+  s_b554ffcd7ba695::t_b45759d964984c 16616-16618
+  s_1660f46e5b4ae3::t_e98d06926cb7a4 16615
+src/cloudflare/internal/workflows-api.ts
+  s_b554ffcd7ba695::t_a89071ae5fde05 123-124
+  s_b554ffcd7ba695::t_072f39956d8c2a 125-127
+  s_b554ffcd7ba695::t_3ca8713b7f3fd2 128
+src/cloudflare/internal/test/workflows/workflows-mock.js
+  s_b554ffcd7ba695::t_3f9c33a8a26248 64
+types/test/types/workflows.ts
+  s_b554ffcd7ba695::t_e888026a312a56 10-13,21
+  s_b554ffcd7ba695::t_14b938581e6318 9
+types/generated-snapshot/index.ts
+  s_b554ffcd7ba695::t_5ed0def5f365fc 16574
+  s_b554ffcd7ba695::t_1ccff0f768bb20 16575-16577
+types/defines/workflows.d.ts
+  s_b554ffcd7ba695::t_5118f2517888d5 171
+  s_b554ffcd7ba695::t_797861c9f1d8da 172-175
+types/generated-snapshot/experimental/index.d.ts
+  s_b554ffcd7ba695::t_833193e6398ef6 17264-17267
+types/generated-snapshot/experimental/index.ts
+  s_b554ffcd7ba695::t_c24a0cedd781de 17223-17226
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9fdf9ea882831612baa8e8aa9866c92c6d74eb69",
+  "prompts": {},
+  "sessions": {
+    "s_1660f46e5b4ae3": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f8963-9f96-790d-97c9-11dc9aeb98a8",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "vaish <vaishnav@cloudflare.com>"
+    },
+    "s_b554ffcd7ba695": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f74df-f5c8-71b4-88d3-30b0c9e17ab0",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    }
+  }
+}

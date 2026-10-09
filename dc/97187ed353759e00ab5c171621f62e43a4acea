@@ -1,0 +1,32 @@
+types/defines/workflows.d.ts
+  s_98a259550c0665::t_acd20013f27cc0 153-156
+  s_98a259550c0665::t_9e58634df98d53 152
+types/generated-snapshot/experimental/index.d.ts
+  s_98a259550c0665::t_7c603cc7eadddd 17245-17247
+  s_98a259550c0665::t_3a85208928a2ae 17244
+types/generated-snapshot/index.ts
+  s_98a259550c0665::t_9e0e0db33bcf9c 16556-16558
+  s_98a259550c0665::t_016bfae205a4ee 16555
+types/generated-snapshot/index.d.ts
+  s_98a259550c0665::t_781bcbbbb1a4e8 16597-16599
+  s_98a259550c0665::t_a6947110855a96 16596
+types/generated-snapshot/experimental/index.ts
+  s_98a259550c0665::t_89b94fb5c638bb 17204-17206
+  s_98a259550c0665::t_183f332fe80882 17203
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dc97187ed353759e00ab5c171621f62e43a4acea",
+  "prompts": {},
+  "sessions": {
+    "s_98a259550c0665": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f671f-e536-7ecc-8fad-e740d54fa0bb",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "vaish <vaishnav@cloudflare.com>"
+    }
+  }
+}

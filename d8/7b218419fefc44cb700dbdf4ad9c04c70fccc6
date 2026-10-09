@@ -1,0 +1,45 @@
+src/workerd/api/BUILD.bazel
+  s_b5100e8818a1d4::t_e594285c2a7615 345-346
+src/workerd/api/memory-cache-test.c++
+  s_89480457629ab1::t_ff2d5f9a9657c2 1-4,16-19,27-29,31,38-40,43,49,56-58,61,63,68,71-72,76,79-80,82-83,85-87,89-90,98,101-102,107-115,117-118,124,127-128,132-135,144,147-148,153-156,162,165-166,168,171,176-181,183-203,205-209
+src/workerd/api/memory-cache.c++
+  s_89480457629ab1::t_296023b6fe4e27 5,8-11,14,16,18-20,22-25,28-30,33-35,38-43,46-52,54-55,57-59,61-63,66-68,70-71,74-86,88-89,91-93,95-97,99,102-106,108-110,112-133,136-144,146-151,155-168,171-178,182-186,189-194,196-198,200-211,215-245,247-250,254-255,258-265,270,274,295-324,344,348,358,382,391
+src/workerd/api/memory-cache.h
+  s_b5100e8818a1d4::t_53be73d4b6630f 31-39,41,55-69,72,74-75,79-81,85-99,102-107,110,113-122,152-156,162-163,167,170-171
+src/workerd/server/server.c++
+  s_34563ff5d76343::t_34104cc5439101 240
+src/workerd/tests/test-fixture.c++
+  s_34563ff5d76343::t_9ffa163d152c16 350
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d87b218419fefc44cb700dbdf4ad9c04c70fccc6",
+  "prompts": {},
+  "sessions": {
+    "s_34563ff5d76343": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a18174745c99a244c",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_89480457629ab1": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f684ffc8cffeuT5b4R1u8X9eHl",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

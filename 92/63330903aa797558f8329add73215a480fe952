@@ -1,0 +1,39 @@
+src/cloudflare/internal/test/tracing/tracing-helpers-instrumentation-test.js
+  s_71f927552456d7::t_c69177faa0514c 132-135
+src/cloudflare/internal/test/tracing/tracing-helpers-test.js
+  s_71f927552456d7::t_fa6cc27431e825 10-24,44-50,52-58,100-103,353,360-368,377,380-381
+src/workerd/api/tests/jsrpc-pipelined-trace-test.js
+  s_71f927552456d7::t_7855b2912fa0fa 16-21,27,33,43
+src/workerd/api/tracing.c++
+  s_71f927552456d7::t_423718fe00a0e1 533-544,625-642
+src/workerd/api/worker-rpc.c++
+  s_71f927552456d7::t_59a36f53db7baf 1575-1576
+src/workerd/io/io-context.c++
+  s_71f927552456d7::t_eff13d61d475cb 1269-1283,1308-1317,1319
+src/workerd/io/io-context.h
+  s_71f927552456d7::t_ad489af3b25d01 60-92,101-102,105-106,123-129,134
+types/generated-snapshot/experimental/index.d.ts
+  s_71f927552456d7::t_72a4a0ef5840ad 4853
+types/generated-snapshot/experimental/index.ts
+  s_71f927552456d7::t_b1f0e28071579a 4862
+types/generated-snapshot/index.d.ts
+  s_71f927552456d7::t_98da57847c67a5 4576
+types/generated-snapshot/index.ts
+  s_71f927552456d7::t_14c98d4ece8e55 4585
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9263330903aa797558f8329add73215a480fe952",
+  "prompts": {},
+  "sessions": {
+    "s_71f927552456d7": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f79104ccfffeV2UePEtE1lzRIZ",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Morrell <jmorrell@cloudflare.com>"
+    }
+  }
+}

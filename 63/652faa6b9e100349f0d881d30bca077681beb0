@@ -1,0 +1,74 @@
+src/workerd/server/server-test.c++
+  s_1e53911e7fcf94::t_5a740f96a0d9cc 2484
+  s_1e53911e7fcf94::t_f5106b373670bb 2485-2576
+src/workerd/server/workerd.capnp
+  s_e6ef9db3485b14::t_587c86f20a51c3 516-523
+src/workerd/api/actor.h
+  s_e6ef9db3485b14::t_dd433a805dfac0 190-191,195-196,200-201,205-206,333-334,353-354,363-364,371-373,397-398
+src/workerd/api/http.c++
+  s_1e53911e7fcf94::t_4567c93cdcee18 1487-1489
+  s_1e53911e7fcf94::t_e2a1c49d9bbc66 2941
+  s_1e53911e7fcf94::t_a87d1e13695046 2943
+  s_1e53911e7fcf94::t_d915395fafff48 1490-1515,1546-1547,1553-1554,1562-1563,1568-1569,1582-1584,1600-1601,1614,1640-1642,1659,1671-1673,1795-1797,1806-1813,1822,1825,1895-1897,1906-1913,1922-1923,1926,1931,1936-1937,1940-1960,1963-1966,1969-1980,1982-1983,1990-1991,2007,2011,2014-2019,2021-2024,2032-2034,2047-2048,2170-2171,2175-2176,2228,2231-2232,2290,2294-2304,2308-2313,2317,2326-2327,2330-2353,2935-2940,2942
+  s_1e53911e7fcf94::t_407560a6e23212 1484-1486
+src/workerd/util/autogate.h
+  s_e6ef9db3485b14::t_0389a1e3a6f93f 96-97
+src/workerd/api/actor-fetch-retry-test.c++
+  s_e6ef9db3485b14::t_da6f9b6c3abb82 201-205,228,266-270,277-279,323,364-366,380-383,405,418-427,432-436,451-454,456,458-461,465-466,495-504,1087,1103-1129,1202-1206,1211-1236,1240-1243,1247-1266,1271-1315,1344-1350,1352,1354-1358,1449-1453,1455-1457
+  s_0128c8fe1f4cf7::t_7752f51ae2f036 1353
+  s_e6ef9db3485b14::t_2e2b64342050d2 1351
+src/workerd/server/server.c++
+  s_d1378779c66928::t_51672a025e1ebc 4829-4842,4875-4878
+src/workerd/io/io-channels.h
+  s_e6ef9db3485b14::t_f018c429f91916 91-98
+src/workerd/server/workerd-api.h
+  s_35a771cc63dbee::t_8a776ecb60bc7a 7
+src/workerd/api/actor-call-retry-test.c++
+  s_e6ef9db3485b14::t_5ec4d101cd83c2 70-71
+src/workerd/api/actor-call-retry.c++
+  s_e6ef9db3485b14::t_43784e92c1730f 25-30,33-38,126
+src/workerd/api/actor-call-retry.h
+  s_e6ef9db3485b14::t_a248a32a295d6f 78-81,107-109
+src/workerd/api/actor.c++
+  s_e6ef9db3485b14::t_056a833284c3d8 302-303
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "63652faa6b9e100349f0d881d30bca077681beb0",
+  "prompts": {},
+  "sessions": {
+    "s_1e53911e7fcf94": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f5b2867c7ffezdqHlya2kQfmcv",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_35a771cc63dbee": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f56bea14bffegtmL3eerMnjhsQ",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_d1378779c66928": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f56abb8c8ffeKHajwBjBbvS1nX",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_e6ef9db3485b14": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f940fb7bdffeOOke2jjtQ9MxFI",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

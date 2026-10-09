@@ -1,0 +1,25 @@
+src/workerd/api/jsrpc-call-plan-test.c++
+  s_456e7d153a4287::t_9f7f07bb01d093 186-187
+src/workerd/api/worker-rpc.c++
+  s_456e7d153a4287::t_2c0e131c51ddbc 769-770
+src/workerd/jsg/ser.c++
+  s_456e7d153a4287::t_d04fa2d53a5ea6 175-176
+src/workerd/jsg/ser.h
+  s_456e7d153a4287::t_9d899ad7df63be 211
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9ae136fa0b9c7ecb8557f0405cb6ae34366f5643",
+  "prompts": {},
+  "sessions": {
+    "s_456e7d153a4287": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f35f99b25ffeGabkV5xa7y9Nco",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

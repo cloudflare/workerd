@@ -1,0 +1,42 @@
+src/cloudflare/internal/test/workflows/workflows-api-rpc-test.js
+  s_b554ffcd7ba695::t_eac373140d1010 36-45,66
+  s_b554ffcd7ba695::t_fd3451521a4f79 35
+types/test/types/workflows.ts
+  s_b554ffcd7ba695::t_88679bfeb1f649 1-16
+types/defines/workflows.d.ts
+  s_b554ffcd7ba695::t_caaa4dae8cae16 37-44,47-55
+  s_b554ffcd7ba695::t_88e2fb0adccf04 56
+src/cloudflare/internal/test/workflows/workflows-api-test.js
+  s_b554ffcd7ba695::t_d06209888407d8 56-64,68
+src/cloudflare/internal/test/workflows/workflows-mock.js
+  s_b554ffcd7ba695::t_775c290e65cd5d 26-32,56-60,100-101
+  s_b554ffcd7ba695::t_63f1a4a1a67fd0 102-103
+src/cloudflare/internal/workflows-api.ts
+  s_b554ffcd7ba695::t_7807923a194542 27-29,197-206
+  s_b554ffcd7ba695::t_98802c5dc5fa44 15-19
+  s_b554ffcd7ba695::t_4a07a08a7851fb 207
+types/generated-snapshot/experimental/index.d.ts
+  s_b554ffcd7ba695::t_ea4adbee2fa546 17143-17149,17151-17161
+types/generated-snapshot/experimental/index.ts
+  s_b554ffcd7ba695::t_48d93903385334 17102-17108,17110-17120
+types/generated-snapshot/index.d.ts
+  s_b554ffcd7ba695::t_0f511d4cfc5a35 16495-16501,16503-16513
+types/generated-snapshot/index.ts
+  s_b554ffcd7ba695::t_4d532c982e7002 16454-16460,16462-16472
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "be1887255cc6ec4f6a2b9829f4eb40b12e62a579",
+  "prompts": {},
+  "sessions": {
+    "s_b554ffcd7ba695": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019f74df-f5c8-71b4-88d3-30b0c9e17ab0",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "vaish <vaishnav@cloudflare.com>"
+    }
+  }
+}

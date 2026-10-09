@@ -1,0 +1,27 @@
+src/workerd/util/AGENTS.md
+  s_9ba3d8a42a37b3::t_e37d911e30c4bf 41
+src/workerd/util/sqlite-test.c++
+  s_9ba3d8a42a37b3::t_4b61c31d3ded04 1819-1821
+  s_9ba3d8a42a37b3::t_31c848465c0435 1817-1818
+  s_9ba3d8a42a37b3::t_1c3b55e93625fb 1826
+  s_9ba3d8a42a37b3::t_f1b9bcd5653e6e 1827-1828,1836
+src/workerd/util/sqlite.c++
+  s_9ba3d8a42a37b3::t_41c1b590847fb6 1307-1309
+  s_9ba3d8a42a37b3::t_8db99f164c20aa 542-547,1299-1303
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2b00d2d55739a6a1bee2baea1e33f4dd9fc3aead",
+  "prompts": {},
+  "sessions": {
+    "s_9ba3d8a42a37b3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_099ff4091ffezSNBST9KDYtay2",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Josh Howard <jhoward@cloudflare.com>"
+    }
+  }
+}
