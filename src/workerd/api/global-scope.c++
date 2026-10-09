@@ -662,6 +662,7 @@ AlarmExceptionInfo inspectAlarmException(const kj::Exception& exception, IoConte
 kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj::Date scheduledTime,
     kj::Duration timeout,
     uint32_t retryCount,
+    IoContext_IncomingRequest& incomingRequest,
     Worker::Lock& lock,
     kj::Maybe<ExportedHandler&> exportedHandler) {
 
@@ -695,7 +696,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
       auto& alarm = KJ_ASSERT_NONNULL(handler.alarm);
 
       return context
-          .run([exportedHandler, timeout, retryCount, scheduledTime, &alarm,
+          .run([exportedHandler, timeout, retryCount, scheduledTime, &alarm, &incomingRequest,
                    maybeAsyncContext = jsg::AsyncContextFrame::currentRef(lock)](Worker::Lock& lock,
                    IoContext& context) mutable -> kj::Promise<WorkerInterface::AlarmResult> {
         jsg::AsyncContextFrame::Scope asyncScope(lock, maybeAsyncContext);
@@ -704,7 +705,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
         // first timeout will be canceled.
         jsg::Lock& js = lock;
         auto timeoutPromise = context.afterLimitTimeout(timeout).then(
-            [&context]() -> kj::Promise<WorkerInterface::AlarmResult> {
+            [&context, &incomingRequest]() -> kj::Promise<WorkerInterface::AlarmResult> {
           // We don't want to delete the alarm since we have not successfully completed the alarm
           // execution.
           auto& actor = KJ_ASSERT_NONNULL(context.getActor());
@@ -717,7 +718,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
               "broken.dropped; worker_do_not_log; jsg.Error: Alarm exceeded its allowed execution time");
           e.setDetail(jsg::EXCEPTION_IS_USER_ERROR, kj::heapArray<kj::byte>(0));
           e.setDetail(WALL_TIME_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
-          context.getMetrics().reportFailure(e);
+          incomingRequest.getMetrics().reportFailure(e);
 
           // We don't want the handler to keep running after timeout.
           context.abort(kj::mv(e));
@@ -735,13 +736,13 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           return WorkerInterface::AlarmResult{.retry = false, .outcome = EventOutcome::OK};
         }).exclusiveJoin(kj::mv(timeoutPromise));
       })
-          .catch_([&context, deferredDelete = kj::mv(armResult.deferredDelete)](
+          .catch_([&context, &incomingRequest, deferredDelete = kj::mv(armResult.deferredDelete)](
                       kj::Exception&& e) mutable {
         auto& actor = KJ_ASSERT_NONNULL(context.getActor());
         auto& persistent = KJ_ASSERT_NONNULL(actor.getPersistent());
         persistent.cancelDeferredAlarmDeletion();
 
-        context.getMetrics().reportFailure(e);
+        incomingRequest.getMetrics().reportFailure(e);
 
         auto description = kj::str(e.getDescription());  // because e is moved before this is used
         auto log = !jsg::isTunneledException(description) && !jsg::isDoNotLogException(description);
@@ -749,7 +750,8 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
         auto alarmException = inspectAlarmException(e, context);
 
         // This will include the error in inspector/tracers and log to syslog if internal.
-        context.logUncaughtExceptionAsync(UncaughtExceptionSource::ALARM_HANDLER, kj::mv(e));
+        context.logUncaughtExceptionAsync(
+            UncaughtExceptionSource::ALARM_HANDLER, kj::mv(e), incomingRequest);
 
         auto limitsExceeded = context.getLimitEnforcer().getLimitsExceeded();
         EventOutcome outcome = EventOutcome::ABORTED;
@@ -795,11 +797,11 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
           .outcome = outcome,
           .errorDescription = kj::str(description)};
       })
-          .then([&context](WorkerInterface::AlarmResult result)
+          .then([&context, &incomingRequest](WorkerInterface::AlarmResult result)
                     -> kj::Promise<WorkerInterface::AlarmResult> {
         return context.waitForOutputLocks().then([result = kj::mv(result)]() mutable {
           return kj::mv(result);
-        }, [&context](kj::Exception&& e) {
+        }, [&context, &incomingRequest](kj::Exception&& e) {
           auto& actor = KJ_ASSERT_NONNULL(context.getActor());
           kj::String actorId;
           KJ_SWITCH_ONEOF(actor.getId()) {
@@ -810,7 +812,7 @@ kj::Promise<WorkerInterface::AlarmResult> ServiceWorkerGlobalScope::runAlarm(kj:
               actorId = kj::str(s);
             }
           }
-          context.getMetrics().reportFailure(e);
+          incomingRequest.getMetrics().reportFailure(e);
           auto isUserGeneratedError = isAlarmFailureUserError(
               e.getDescription(), e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none);
           auto shouldRetryCountsAgainstLimits = alarmRetryCountsAgainstLimit({

@@ -263,6 +263,7 @@ tracing::ErrorInfo getErrorInfoForTrace(jsg::Lock& js,
 void addExceptionToTrace(jsg::Lock& js,
     IoContext& ioContext,
     BaseTracer& tracer,
+    kj::Maybe<IoContext::IncomingRequest&> incomingRequest,
     UncaughtExceptionSource source,
     const jsg::JsValue& exception,
     const jsg::TypeHandler<Worker::Api::ErrorInterface>& errorTypeHandler) {
@@ -281,8 +282,18 @@ void addExceptionToTrace(jsg::Lock& js,
   auto timestamp = ioContext.now();
   auto errorInfo = getErrorInfoForTrace(js, exception, errorTypeHandler);
 
-  tracer.addException(ioContext.getInvocationSpanContext(), timestamp, kj::mv(errorInfo.name),
-      kj::mv(errorInfo.message), kj::mv(errorInfo.stack));
+  tracing::InvocationSpanContext spanContext = [&]() {
+    KJ_IF_SOME(request, incomingRequest) {
+      // The exception belongs to the request as a whole rather than to whichever user span is
+      // active in the current async context, so report it under the request's root user span.
+      auto userSpan = request.getRootUserTraceSpan();
+      return request.getInvocationSpanContextForUserSpan(userSpan);
+    }
+    return ioContext.getInvocationSpanContext();
+  }();
+
+  tracer.addException(spanContext, timestamp, kj::mv(errorInfo.name), kj::mv(errorInfo.message),
+      kj::mv(errorInfo.stack));
 }
 
 void reportStartupError(kj::StringPtr id,
@@ -1228,8 +1239,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
         // Only add exception to trace when running within an I/O context with a tracer.
         KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
           KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
-            addExceptionToTrace(js, ioContext, tracer, UncaughtExceptionSource::REQUEST_HANDLER,
-                error, api->getErrorInterfaceTypeHandler(js));
+            addExceptionToTrace(js, ioContext, tracer, kj::none,
+                UncaughtExceptionSource::REQUEST_HANDLER, error,
+                api->getErrorInterfaceTypeHandler(js));
           }
         }
 
@@ -2680,13 +2692,21 @@ void Worker::Lock::logUncaughtException(kj::StringPtr description) {
   KJ_LOG(INFO, "uncaught exception", description);
 }
 
-void Worker::Lock::logUncaughtException(
-    UncaughtExceptionSource source, const jsg::JsValue& exception, const jsg::JsMessage& message) {
+void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
+    const jsg::JsValue& exception,
+    const jsg::JsMessage& message,
+    kj::Maybe<IoContext_IncomingRequest&> incomingRequest) {
   // Only add exception to trace when running within an I/O context with a tracer.
   KJ_IF_SOME(ioContext, IoContext::tryCurrent()) {
-    KJ_IF_SOME(tracer, ioContext.getWorkerTracer()) {
+    kj::Maybe<BaseTracer&> maybeTracer;
+    KJ_IF_SOME(request, incomingRequest) {
+      maybeTracer = request.getWorkerTracer();
+    } else {
+      maybeTracer = ioContext.getWorkerTracer();
+    }
+    KJ_IF_SOME(tracer, maybeTracer) {
       JSG_WITHIN_CONTEXT_SCOPE(*this, getContext(), [&](jsg::Lock& js) {
-        addExceptionToTrace(impl->inner, ioContext, tracer, source, exception,
+        addExceptionToTrace(impl->inner, ioContext, tracer, incomingRequest, source, exception,
             worker.getIsolate().getApi().getErrorInterfaceTypeHandler(*this));
       });
     }
@@ -2716,14 +2736,16 @@ void Worker::Lock::logUncaughtException(
   }
 }
 
-void Worker::Lock::logUncaughtException(UncaughtExceptionSource source, kj::Exception&& exception) {
+void Worker::Lock::logUncaughtException(UncaughtExceptionSource source,
+    kj::Exception&& exception,
+    kj::Maybe<IoContext_IncomingRequest&> incomingRequest) {
   jsg::Lock& js = *this;
   try {
     auto jsError = js.exceptionToJsValue(kj::mv(exception),
         {
           .trusted = true,
         });
-    logUncaughtException(source, jsError.getHandle(js));
+    logUncaughtException(source, jsError.getHandle(js), jsg::JsMessage(), incomingRequest);
   } catch (const jsg::JsExceptionThrown&) {
     // An exception occurred while trying to convert the exception to a JS value.
     // With exceptionToJs, this should only happen if the isolate is terminating
@@ -2733,7 +2755,7 @@ void Worker::Lock::logUncaughtException(UncaughtExceptionSource source, kj::Exce
     // if it throws again, we'll give up and propagate that exception to the
     // caller.
     auto jsError = js.exceptionToJsValue(exception.clone(), {.ignoreDetail = true});
-    logUncaughtException(source, jsError.getHandle(js));
+    logUncaughtException(source, jsError.getHandle(js), jsg::JsMessage(), incomingRequest);
   }
 }
 

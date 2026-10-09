@@ -283,6 +283,11 @@ wd_test(
 )
 
 wd_test(
+    src = "actor-exception-attribution-tail-test.wd-test",
+    data = ["actor-exception-attribution-tail-test.js"],
+)
+
+wd_test(
     src = "tail-cf-gc-test.wd-test",
     data = ["tail-cf-gc-test.js"],
 )

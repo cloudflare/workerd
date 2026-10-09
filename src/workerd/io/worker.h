@@ -66,6 +66,7 @@ class VirtualFileSystem;
 
 class ThreadContext;
 class IoContext;
+class IoContext_IncomingRequest;
 class InputGate;
 class OutputGate;
 
@@ -756,13 +757,19 @@ class Worker::Lock {
   // optimization. This value will be passed along to the trace handler, if there is one, rather
   // than querying the property from the exception itself. This is also useful in the case that
   // the exception itself is not the original and the stack is missing.
+  //
+  // The exception is added to the trace of `incomingRequest`, or of the IoContext's current
+  // incoming request if none is given.
   void logUncaughtException(UncaughtExceptionSource source,
       const jsg::JsValue& exception,
-      const jsg::JsMessage& message = jsg::JsMessage());
+      const jsg::JsMessage& message = jsg::JsMessage(),
+      kj::Maybe<IoContext_IncomingRequest&> incomingRequest = kj::none);
 
   // Version that takes a kj::Exception. If it has a serialized JS error attached as a detail, that
   // error may be extracted and used.
-  void logUncaughtException(UncaughtExceptionSource source, kj::Exception&& exception);
+  void logUncaughtException(UncaughtExceptionSource source,
+      kj::Exception&& exception,
+      kj::Maybe<IoContext_IncomingRequest&> incomingRequest = kj::none);
 
   void reportPromiseRejectEvent(v8::PromiseRejectMessage& message);
 
