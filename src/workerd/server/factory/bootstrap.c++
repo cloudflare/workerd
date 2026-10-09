@@ -155,6 +155,14 @@ class Bootstrap {
         KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; }, platform.get());
   }
 
+  // Ends the --async-trace file. The factory is destroyed first, ending every context, so the exit
+  // line follows their ends.
+  ~Bootstrap() noexcept(false) {
+    KJ_IF_SOME(writer, asyncTraceWriter) {
+      writer->finish();
+    }
+  }
+
   KJ_DISALLOW_COPY_AND_MOVE(Bootstrap);
 
   // A factory over `configWords`, which it owns for its run.
