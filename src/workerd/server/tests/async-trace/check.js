@@ -82,6 +82,7 @@ function checkCore(events, { withStacks }) {
       'unknown',
       'unbalanced',
       'ambiguousBindings',
+      'unusedOperationNames',
       'foreignThread',
     ]) {
       assert.strictEqual(end[stat], 0, `context ${ctx}: ${stat}`);
@@ -149,6 +150,14 @@ function checkCore(events, { withStacks }) {
     bridges.some((r) => r.trigger === fetch.id),
     'reading the body is triggered by the fetch'
   );
+
+  // An internal stream's I/O is named: the read and the write are operations, each resuming the
+  // handler.
+  for (const name of ['stream_read', 'stream_write']) {
+    const operation = find(resources, byKind('operation', name), name);
+    assert.strictEqual(operation.ctx, test.ctx, name);
+    assert(turnCauses.has(operation.id), `${name} resumes the handler`);
+  }
 
   // The subrequest: scheduler.wait, bridged back to JavaScript by awaitIo.
   const wait = find(

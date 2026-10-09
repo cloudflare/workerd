@@ -90,6 +90,7 @@ mod bridge {
 
         fn adopt_operation(self: &mut Tracker) -> u64;
         fn mark_bound(self: &mut Tracker, id: u64);
+        fn count_unused_operation_name(self: &mut Tracker);
         fn count_foreign_thread(self: &mut Tracker, count: u64);
 
         fn accepts_resources(self: &Tracker) -> bool;
@@ -177,6 +178,7 @@ mod bridge {
             unknown: u64,
             unbalanced: u64,
             ambiguous_bindings: u64,
+            unused_operation_names: u64,
             foreign_thread: u64,
         );
     }
@@ -277,6 +279,7 @@ impl Sink for CppSink {
             stats.unknown,
             stats.unbalanced,
             stats.ambiguous_bindings,
+            stats.unused_operation_names,
             stats.foreign_thread,
         );
     }

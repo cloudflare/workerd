@@ -187,7 +187,8 @@ class PerfettoSink final: public AsyncTraceListener {
   void onContextEnd(uint64_t ctx, uint64_t atNs, const AsyncContextStats& stats) override {
     TRACE_EVENT_INSTANT("workerd.async", "ctx_end", contextTrack(), "created", stats.created,
         "dropped", stats.dropped, "unknown", stats.unknown, "unbalanced", stats.unbalanced,
-        "ambiguousBindings", stats.ambiguousBindings, "foreignThread", stats.foreignThread);
+        "ambiguousBindings", stats.ambiguousBindings, "unusedOperationNames",
+        stats.unusedOperationNames, "foreignThread", stats.foreignThread);
     traces::TrackEvent::EraseTrackDescriptor(contextTrack());
     contextOpen = false;
   }

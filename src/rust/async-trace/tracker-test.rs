@@ -764,6 +764,26 @@ fn unknown_default_cause() {
 }
 
 #[test]
+fn unused_operation_names_are_reported() {
+    let mut f = Fixture::new();
+    let ctx = f.ctx();
+    f.tracker.count_unused_operation_name();
+    f.tracker.count_unused_operation_name();
+    let _ = f.sink.take();
+    f.tracker.close();
+    assert_eq!(
+        f.events(),
+        vec![Event::ContextEnd {
+            ctx,
+            stats: ContextStats {
+                unused_operation_names: 2,
+                ..ContextStats::default()
+            },
+        }]
+    );
+}
+
+#[test]
 fn foreign_thread_drops_are_reported() {
     let mut f = Fixture::new();
     let ctx = f.ctx();

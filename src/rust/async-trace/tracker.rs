@@ -532,6 +532,11 @@ impl Tracker {
         self.unpend(id);
     }
 
+    /// Counts a name for a bridge's operation that no bridge took.
+    pub const fn count_unused_operation_name(&mut self) {
+        self.stats.unused_operation_names = self.stats.unused_operation_names.saturating_add(1);
+    }
+
     /// Adds `count` events that the C++ wrapper dropped because they came from a thread other
     /// than the context's.
     pub const fn count_foreign_thread(&mut self, count: u64) {

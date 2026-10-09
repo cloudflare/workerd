@@ -248,7 +248,8 @@ class LabelingListener final: public AsyncTraceListener {
   }
   void onContextEnd(uint64_t ctx, uint64_t atNs, const AsyncContextStats& s) override {
     events.add(kj::str("context_end unknown=", s.unknown, " unbalanced=", s.unbalanced,
-        " ambiguous=", s.ambiguousBindings, " foreign=", s.foreignThread));
+        " ambiguous=", s.ambiguousBindings, " unused=", s.unusedOperationNames,
+        " foreign=", s.foreignThread));
   }
 
  private:
@@ -322,7 +323,8 @@ uint count(kj::ArrayPtr<const kj::String> events, kj::StringPtr event) {
 }
 
 void expectComplete(kj::ArrayPtr<const kj::String> events) {
-  KJ_EXPECT(count(events, "context_end unknown=0 unbalanced=0 ambiguous=0 foreign=0"_kj) == 1,
+  KJ_EXPECT(
+      count(events, "context_end unknown=0 unbalanced=0 ambiguous=0 unused=0 foreign=0"_kj) == 1,
       joined(events));
 }
 
@@ -553,7 +555,8 @@ KJ_TEST("adopting with several eligible spans takes the latest and is counted") 
     return roundTrip(env, kj::evalLater([]() {}).attach(kj::mv(first), kj::mv(second)));
   });
   expectInOrder(events, {"before second#1"_kj, "turn cause=second#1"_kj});
-  KJ_EXPECT(count(events, "context_end unknown=0 unbalanced=0 ambiguous=1 foreign=0"_kj) == 1,
+  KJ_EXPECT(
+      count(events, "context_end unknown=0 unbalanced=0 ambiguous=1 unused=0 foreign=0"_kj) == 1,
       joined(events));
 }
 
@@ -571,6 +574,71 @@ KJ_TEST("overwriting a span settles its operation") {
         "turn cause=second#1"_kj,
       });
   KJ_EXPECT(count(events, "destroy first#1"_kj) == 0, joined(events));
+  expectComplete(events);
+}
+
+KJ_TEST("AwaitIoOperation names the first bridge in its scope as an operation") {
+  auto events = traceInContext([](const TestFixture::Environment& env) {
+    IoContext::AwaitIoOperation operation(env.context, "stream_read"_kj);
+    auto named = env.context.awaitIo(env.js, kj::evalLater([]() {}));
+    auto plain = env.context.awaitIo(env.js, kj::evalLater([]() {}));
+    return kj::joinPromises(kj::arr(
+        env.context.awaitJs(env.js, kj::mv(named)), env.context.awaitJs(env.js, kj::mv(plain))));
+  });
+  expectInOrder(events,
+      {
+        "init stream_read#1 trigger=request exec=request"_kj,
+        "init awaitIo#1 trigger=request exec=request"_kj,
+        "settle stream_read#1"_kj,
+        "before stream_read#1"_kj,
+        "after stream_read#1"_kj,
+        "turn cause=stream_read#1"_kj,
+      });
+  expectComplete(events);
+}
+
+KJ_TEST("an AwaitIoOperation name that no bridge takes is counted") {
+  auto events = traceInContext([](const TestFixture::Environment& env) {
+    { IoContext::AwaitIoOperation operation(env.context, "stream_read"_kj); }
+    return kj::Promise<void>(kj::READY_NOW);
+  });
+  KJ_EXPECT(
+      count(events, "context_end unknown=0 unbalanced=0 ambiguous=0 unused=1 foreign=0"_kj) == 1,
+      joined(events));
+}
+
+KJ_TEST("an AwaitIoOperation scope left by an exception is not counted") {
+  auto events = traceInContext([](const TestFixture::Environment& env) {
+    KJ_EXPECT_THROW_MESSAGE("before awaitIo", {
+      IoContext::AwaitIoOperation operation(env.context, "stream_read"_kj);
+      KJ_FAIL_REQUIRE("before awaitIo");
+    });
+    return kj::Promise<void>(kj::READY_NOW);
+  });
+  expectComplete(events);
+}
+
+KJ_TEST("a named bridge neither adopts a span's operation nor competes for it") {
+  auto events = traceInContext([](const TestFixture::Environment& env) {
+    auto traceContext = env.context.makeUserTraceSpan("kv_get"_kjc);
+    auto named = [&]() {
+      IoContext::AwaitIoOperation operation(env.context, "stream_read"_kj);
+      return env.context.awaitIo(env.js, kj::evalLater([]() {}));
+    }();
+    auto adopting =
+        env.context.awaitIo(env.js, kj::evalLater([]() {}).attach(kj::mv(traceContext)));
+    return kj::joinPromises(kj::arr(
+        env.context.awaitJs(env.js, kj::mv(named)), env.context.awaitJs(env.js, kj::mv(adopting))));
+  });
+  expectInOrder(events,
+      {
+        "init kv_get#1 trigger=request exec=request"_kj,
+        "init stream_read#1 trigger=request exec=request"_kj,
+      });
+  KJ_EXPECT(count(events, "turn cause=stream_read#1"_kj) == 1, joined(events));
+  KJ_EXPECT(count(events, "turn cause=kv_get#1"_kj) == 1, joined(events));
+  KJ_EXPECT(count(events, "init awaitIo#1 trigger=request exec=request"_kj) == 0, joined(events));
+  // expectComplete() also checks that the adoption was not ambiguous.
   expectComplete(events);
 }
 

@@ -17,5 +17,17 @@ export default {
     if ((await response.text()) !== 'hello') {
       throw new Error('unexpected response');
     }
+
+    // An internal (KJ-backed) stream: its read and write are binding operations.
+    const { readable, writable } = new IdentityTransformStream();
+    const writer = writable.getWriter();
+    const reader = readable.getReader();
+    const [read] = await Promise.all([
+      reader.read(),
+      writer.write(new Uint8Array([1, 2, 3])),
+    ]);
+    if (read.value?.byteLength !== 3) {
+      throw new Error('unexpected read');
+    }
   },
 };

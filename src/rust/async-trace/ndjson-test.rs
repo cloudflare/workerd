@@ -147,7 +147,8 @@ fn every_event_type() {
                    "trigger": 0, "exec": 0, "at": 42}),
             json!({"e": "destroy", "ctx": ctx, "id": timer, "at": 42}),
             json!({"e": "ctx_end", "ctx": ctx, "at": 42, "created": 3, "dropped": 0,
-                   "unknown": 0, "unbalanced": 0, "ambiguousBindings": 0, "foreignThread": 0}),
+                   "unknown": 0, "unbalanced": 0, "ambiguousBindings": 0, "unusedOperationNames": 0,
+                   "foreignThread": 0}),
         ]
     );
 }
