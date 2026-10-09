@@ -663,6 +663,14 @@ kj_test(
 )
 
 kj_test(
+    src = "blob-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "js-readable-stream-test.c++",
     deps = [
         "//src/workerd/io",

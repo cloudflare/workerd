@@ -570,7 +570,8 @@ JsReadableStream::Buffer::Buffer(kj::Array<const kj::byte> data)
 // kj event loop, where the isolate's MPK-protected sandbox pages are unreadable, so take a
 // kj-heap copy.  It is shared by every stream derived from this Buffer -- rewinds and tee
 // branches alike.
-JsReadableStream::Buffer::Buffer(jsg::Ref<Blob> data): Buffer(kj::heapArray(data->getData())) {}
+JsReadableStream::Buffer::Buffer(jsg::Lock& js, jsg::Ref<Blob> data)
+    : Buffer(kj::heapArray(data->getData(js))) {}
 
 namespace {
 
@@ -630,7 +631,7 @@ JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::JsRef<jsg::JsBufferSource
     : JsReadableStream(js, view.getHandle(js).copy()) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::Ref<Blob> blob)
-    : impl(bufferBackedImpl(js, kj::rc<Buffer>(kj::mv(blob)))) {}
+    : impl(bufferBackedImpl(js, kj::rc<Buffer>(js, kj::mv(blob)))) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::Ref<api::URLSearchParams> urlSearchParams)
     : JsReadableStream(js, urlSearchParams->toString()) {}
