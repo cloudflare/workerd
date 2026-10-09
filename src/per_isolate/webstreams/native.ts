@@ -178,8 +178,10 @@ const kNativeSource: symbol = utils.getApiSymbol('kNativeSource');
 //   - pipeFrom(source, options): the native+native pipe fast path,
 //     called by the pipe dispatch when both ends are native-backed.
 //   - detach(): called by detachWritableStream just before it drops its
-//     reference, releasing the C++ sink immediately when the underlying
-//     connection is taken over (e.g. Socket startTls).
+//     reference, releasing the C++ sink immediately (and cancelling a
+//     write in flight) when the underlying connection is taken over
+//     (e.g. Socket startTls). Returns the error the stream's pending
+//     writes reject with.
 const kNativeSink: symbol = utils.getApiSymbol('kNativeSink');
 
 // Extraction marker for native-backed WritableStream instances. Mirrors

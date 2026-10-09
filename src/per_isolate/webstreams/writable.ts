@@ -258,7 +258,12 @@ let controllerGetDesiredSize: <W>(
   controller: WritableStreamDefaultController<W>
 ) => number;
 let controllerErrorSteps: <W>(
-  controller: WritableStreamDefaultController<W>
+  controller: WritableStreamDefaultController<W>,
+  reason: unknown
+) => void;
+let controllerDetachSteps: <W>(
+  controller: WritableStreamDefaultController<W>,
+  reason: unknown
 ) => void;
 // The controller's error() for internal callers, which must not dispatch
 // through the user-patchable prototype method.
@@ -467,6 +472,12 @@ class WritableStream<W = unknown> {
     //   closed or closing -> TypeError "This WritableStream is closed."
     //   errored (and its 'erroring' precursor, which the legacy
     //   implementation does not distinguish) -> throw the stored error
+    // Otherwise the stream closes at once, as the legacy one does, and is
+    // left locked. The stream is unlocked here, but writes made through a
+    // writer released before the detach may still be pending: the one in
+    // flight and the queued ones reject with the native sink's disconnect
+    // error ("Network connection lost.", as in the legacy implementation)
+    // and never reach the sink.
     detachWritableStream = <W>(stream: WritableStream<W>): void => {
       assertIsWritableStream(stream);
       if (isWritableStreamLocked(stream)) {
@@ -487,14 +498,36 @@ class WritableStream<W = unknown> {
       // GC'd (the legacy controller's detach drops its sink immediately);
       // and extraction must never hand out a sink whose connection has been
       // taken over. The hook drops the owned sink without ending or
-      // aborting it -- the takeover owns the connection now.
+      // aborting it -- the takeover owns the connection now -- cancels an
+      // in-flight write's I/O, and returns the error to reject the pending
+      // writes with.
+      let reason: unknown;
       const nativeSink = stream.#nativeSink;
       if (nativeSink !== undefined) {
-        const detachFn = (nativeSink as { detach: (this: object) => void })
+        const detachFn = (nativeSink as { detach: (this: object) => unknown })
           .detach;
-        uncurryThis(detachFn)(nativeSink);
+        reason = uncurryThis(detachFn)(nativeSink);
         stream.#nativeSink = undefined;
+      } else {
+        reason = new TypeError('This WritableStream has been detached.');
       }
+      const controller = stream.#controller;
+      if (controller !== undefined) {
+        controllerDetachSteps(controller, reason);
+      }
+      const inFlight = stream.#inFlightWriteRequest;
+      if (inFlight !== undefined) {
+        stream.#inFlightWriteRequest = undefined;
+        inFlight.reject(reason);
+      }
+      const writeRequests = stream.#writeRequests;
+      stream.#writeRequests = new RingBuffer();
+      for (let i = 0; i < writeRequests.length; i++) {
+        (writeRequests.get(i) as PromiseWithResolversType<void>).reject(reason);
+      }
+      stream.#state = 'closed';
+      settleClosedPromise(stream);
+      stream.#interopErrorHook = undefined;
       // Permanently lock via an internal writer (never exposed, never
       // released), leaving the stream unusable for further writes.
       new WritableStreamDefaultWriter<W>(stream);
@@ -657,11 +690,11 @@ class WritableStream<W = unknown> {
       stream.#state = 'errored';
       settleClosedPromise(stream);
       stream.#interopErrorHook = undefined;
+      const storedError = stream.#storedError;
       const controller = stream.#controller;
       if (controller !== undefined) {
-        controllerErrorSteps(controller); // reset the controller queue
+        controllerErrorSteps(controller, storedError); // reset the controller queue
       }
-      const storedError = stream.#storedError;
       const writeRequests = stream.#writeRequests;
       stream.#writeRequests = new RingBuffer();
       for (let i = 0; i < writeRequests.length; i++) {
@@ -1002,22 +1035,32 @@ class WritableStreamDefaultController<
       AbortControllerAbort(controller.#abortController, reason);
     };
 
+    // Drops the queue, rejecting any queued flush requests with `reason`:
+    // the writes ahead of them can no longer complete.
     controllerErrorSteps = <W>(
-      controller: WritableStreamDefaultController<W>
+      controller: WritableStreamDefaultController<W>,
+      reason: unknown
     ) => {
       const queue = controller.#queue;
       controller.#queue = new RingBuffer();
       controller.#queueTotalSize = 0;
-      // Reject any queued flush requests: the writes ahead of them can no
-      // longer complete. The stored error is already set — the erroring
-      // machinery assigns it before invoking the error steps.
-      const error = getWritableStreamStoredError(controller.#stream);
       for (let i = 0; i < queue.length; i++) {
         const entry = queue.get(i) as QueuedWrite<W>;
         if (entry.value === kFlushMarker) {
-          (entry.flushRequest as PromiseWithResolversType<void>).reject(error);
+          (entry.flushRequest as PromiseWithResolversType<void>).reject(reason);
         }
       }
+    };
+
+    // detachWritableStream's controller half: nothing reaches the sink
+    // again. The algorithms are cleared, releasing the sink, and the queue
+    // is dropped as by the error steps, with the detach's reason.
+    controllerDetachSteps = <W>(
+      controller: WritableStreamDefaultController<W>,
+      reason: unknown
+    ) => {
+      controller.#clearAlgorithms();
+      controllerErrorSteps(controller, reason);
     };
 
     controllerErrorIfNeeded = (controller, reason) => {
@@ -1305,9 +1348,14 @@ class WritableStreamDefaultController<
       writeAlgorithm === undefined
         ? (PromiseResolve() as Promise<void>)
         : writeAlgorithm(chunk);
+    // A detach (detachWritableStream) closes the stream with this write in
+    // flight, and has already rejected its request and dropped the queue:
+    // the sink's settlement is then ignored. Nothing else closes a stream
+    // while a write is in flight.
     PromisePrototypeThen(
       promise,
       () => {
+        if (getWritableStreamState(stream) === 'closed') return;
         this.#completeInFlightWrite(() => {
           writableStreamFinishInFlightWrite(stream);
         });
@@ -1317,6 +1365,7 @@ class WritableStreamDefaultController<
         writableStreamCallReadyHook(stream);
       },
       (e: unknown) => {
+        if (getWritableStreamState(stream) === 'closed') return;
         // Workerd-internal non-fatal rejection (identity-stream invalid
         // chunks): reject THIS write's request but keep the stream
         // writable and continue with the queue — the fulfillment

@@ -20,6 +20,8 @@ export {
   pipeBehindUnawaitedWrite,
   pipeBehindWriteBeforeStart,
   cancelReadableSettlesSocket,
+  detachRejectsPendingWrites,
+  detachClosesIdleWritable,
   largeEchoVolume,
   closeWithPipeCloseInFlight,
 } from 'socket-streams';
