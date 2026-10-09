@@ -165,6 +165,7 @@ generate-types:
   rm -rf types/generated-snapshot
   mkdir -p types/generated-snapshot
   cp -r bazel-bin/types/definitions/. types/generated-snapshot/
+  chmod -R u+w types/generated-snapshot
 
 update-reported-node-version:
   python3 tools/update_node_version.py src/workerd/api/node/node-version.h
