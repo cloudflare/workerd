@@ -1,0 +1,17 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Default and named Cache API operations retain their span when forwarded to a service.
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "cache-span-parent-test", worker = (
+      modules = [(name = "worker", esModule = embed "cache-span-parent-test.js")],
+      compatibilityFlags = ["nodejs_compat", "experimental"],
+      cacheApiOutbound = (name = "cache-span-parent-test", entrypoint = "Backend"),
+      streamingTails = ["tail"],
+    )),
+    (name = "tail", worker = (
+      modules = [(name = "worker", esModule = embed "cache-span-parent-test-tail.js")],
+      compatibilityFlags = ["nodejs_compat", "experimental"],
+    )),
+  ],
+);
