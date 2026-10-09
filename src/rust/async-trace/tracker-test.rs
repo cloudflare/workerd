@@ -886,3 +886,15 @@ fn nested_turn_enters_the_outer_default_first() {
     assert_eq!(events[2], Event::After { ctx, id: request });
     assert_eq!(f.tracker.stats().unbalanced, 0);
 }
+
+#[test]
+fn accepts_resources_until_full_or_closed() {
+    let mut f = Fixture::new();
+    f.tracker.set_max_live(1);
+    assert!(f.tracker.accepts_resources());
+    f.create(Kind::Timer, "fills the tracker");
+    assert!(!f.tracker.accepts_resources());
+    let mut f = Fixture::new();
+    f.tracker.close();
+    assert!(!f.tracker.accepts_resources());
+}

@@ -26,7 +26,9 @@ use crate::AsyncId;
 use crate::ContextId;
 use crate::ContextInfo;
 use crate::ContextStats;
+use crate::Frame;
 use crate::InitEvent;
+use crate::IsolateId;
 use crate::IsolateState;
 use crate::Kind;
 use crate::MonotonicClock;
@@ -35,6 +37,7 @@ use crate::NdjsonSink;
 use crate::NdjsonWriter;
 use crate::Outcome;
 use crate::Sink;
+use crate::StackId;
 use crate::Tracker;
 use crate::Turn;
 
@@ -86,6 +89,7 @@ mod bridge {
         fn mark_bound(self: &mut Tracker, id: u64);
         fn count_foreign_thread(self: &mut Tracker, count: u64);
 
+        fn accepts_resources(self: &Tracker) -> bool;
         fn begin_stack(self: &mut Tracker);
         #[cxx_name = "push_frame"]
         fn push_frame_ffi(
@@ -148,6 +152,18 @@ mod bridge {
             locked: u64,
             end: u64,
         );
+        /// A stack is passed as `listener_stack_begin`, a `listener_stack_frame` per frame
+        /// (innermost first), then `listener_stack_end`, which calls the listener.
+        fn listener_stack_begin(listener: Pin<&mut AsyncTraceListener>);
+        fn listener_stack_frame(
+            listener: Pin<&mut AsyncTraceListener>,
+            function: &str,
+            script: &str,
+            script_id: i32,
+            line: u32,
+            column: u32,
+        );
+        fn listener_stack_end(listener: Pin<&mut AsyncTraceListener>, isolate: u64, id: u32);
         #[expect(clippy::too_many_arguments, reason = "mirrors ContextStats's fields")]
         fn listener_context_end(
             listener: Pin<&mut AsyncTraceListener>,
@@ -231,6 +247,21 @@ impl Sink for CppSink {
             turn.locked.unwrap_or(0),
             turn.end,
         );
+    }
+
+    fn stack(&mut self, isolate: IsolateId, id: StackId, frames: &[Frame]) {
+        bridge::listener_stack_begin(self.listener());
+        for frame in frames {
+            bridge::listener_stack_frame(
+                self.listener(),
+                &frame.function,
+                &frame.script,
+                frame.script_id,
+                frame.line,
+                frame.column,
+            );
+        }
+        bridge::listener_stack_end(self.listener(), isolate, id);
     }
 
     fn context_end(&mut self, ctx: ContextId, at: Nanos, stats: &ContextStats) {

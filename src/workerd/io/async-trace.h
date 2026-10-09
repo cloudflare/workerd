@@ -37,16 +37,46 @@ namespace _ {  // private
 extern thread_local const AsyncTracker* trackerInTurn;
 }  // namespace _
 
+// Receives the frames of a creation stack, innermost first. See AsyncStackCapturer.
+class AsyncStackBuilder {
+ public:
+  // Strings need not be valid UTF-8 or NUL-terminated. `line` and `column` are 1-based.
+  void addFrame(kj::ArrayPtr<const char> function,
+      kj::ArrayPtr<const char> script,
+      int32_t scriptId,
+      uint32_t line,
+      uint32_t column);
+
+ private:
+  explicit AsyncStackBuilder(rust::async_trace::Tracker& tracker): tracker(tracker) {}
+  rust::async_trace::Tracker& tracker;
+  friend class AsyncTracker;
+};
+
+// Captures the current JavaScript stack when a resource is created. Implemented by the isolate's
+// owner, which can reach V8 (this layer can't). Called on the isolate's thread, possibly while no
+// JavaScript is running.
+class AsyncStackCapturer: public kj::AtomicRefcounted {
+ public:
+  virtual ~AsyncStackCapturer() noexcept(false) = default;
+
+  // Adds the current stack's frames, or none if the isolate isn't running JavaScript on this
+  // thread.
+  virtual void capture(AsyncStackBuilder& builder) const = 0;
+};
+
 // Per-isolate state: resource ID allocation and stack deduplication. Owned by Worker::Isolate when
 // the isolate has async tracing enabled. Thread-safe.
 class AsyncTraceIsolate {
  public:
-  AsyncTraceIsolate();
+  // With a `stackCapturer`, resources created in this isolate record their creation stacks.
+  explicit AsyncTraceIsolate(kj::Maybe<kj::Arc<const AsyncStackCapturer>> stackCapturer = kj::none);
   ~AsyncTraceIsolate() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(AsyncTraceIsolate);
 
  private:
   ::rust::Box<rust::async_trace::Isolate> impl;
+  kj::Maybe<kj::Arc<const AsyncStackCapturer>> stackCapturer;
   friend class AsyncTracker;
 };
 
@@ -155,12 +185,14 @@ class AsyncTracker final: public kj::AtomicRefcounted {
       kj::Maybe<kj::StringPtr> actor);
 
   // Use tryCreate().
-  AsyncTracker(::rust::Box<rust::async_trace::Tracker> impl);
+  AsyncTracker(::rust::Box<rust::async_trace::Tracker> impl,
+      kj::Maybe<kj::Arc<const AsyncStackCapturer>> stackCapturer);
   ~AsyncTracker() noexcept(false);
 
-  // Records a new resource. A `trigger` of 0 means the current turn's cause. Returns an inert
-  // handle if the resource was not recorded (tracker closed, live-resource cap reached, or called
-  // from another thread). `name` need not be valid UTF-8.
+  // Records a new resource, with its creation stack if the isolate captures stacks. A `trigger` of
+  // 0 means the current turn's cause. Returns an inert handle if the resource was not recorded
+  // (tracker closed, live-resource cap reached, or called from another thread). `name` need not
+  // be valid UTF-8.
   AsyncResource create(AsyncKind kind, kj::StringPtr name, AsyncId trigger = 0) const;
 
   // The resource whose callback is running (`executionAsyncId`), or 0.
@@ -260,6 +292,7 @@ class AsyncTracker final: public kj::AtomicRefcounted {
 
  private:
   mutable ::rust::Box<rust::async_trace::Tracker> impl;
+  kj::Maybe<kj::Arc<const AsyncStackCapturer>> stackCapturer;
   const void* ownerThread;
   mutable std::atomic<uint64_t> foreignThreadCalls{0};
 

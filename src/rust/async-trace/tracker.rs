@@ -510,6 +510,14 @@ impl Tracker {
         self.stats.foreign_thread = self.stats.foreign_thread.saturating_add(count);
     }
 
+    /// Whether [`Tracker::create`] would record a resource now (the tracker is open and below its
+    /// live-resource cap). Lets callers skip expensive work, such as capturing a stack, for a
+    /// resource that would be dropped.
+    #[must_use]
+    pub fn accepts_resources(&self) -> bool {
+        !self.closed && self.resources.len() < self.max_live
+    }
+
     /// Starts collecting a creation stack, innermost frame first.
     pub fn begin_stack(&mut self) {
         self.building_stack.clear();
