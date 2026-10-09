@@ -9,6 +9,7 @@
 // including garbage-collecting those objects.
 
 #include <workerd/jsg/wrappable-tag.h>
+#include <workerd/util/strong-bool.h>
 
 #include <cppgc/persistent.h>
 #include <v8-context.h>
@@ -46,16 +47,17 @@ class Visitor;
 
 namespace workerd::jsg {
 
+WD_STRONG_BOOL(IsContextGlobal);
+
 // The ContextPointerSlot enum defines the embedder slots we use in v8::Context for
 // storing pointers to various important objects.
 enum class ContextPointerSlot : int {
   // Pointer slot 0 is special and should never be used by us.
   RESERVED = 0,
-  GLOBAL_WRAPPER = 1,
-  MODULE_REGISTRY = 2,
-  EXTENDED_CONTEXT_WRAPPER = 3,
-  VIRTUAL_FILE_SYSTEM = 4,
-  BOOTSTRAP_STATE = 5,
+  MODULE_REGISTRY = 1,
+  EXTENDED_CONTEXT_WRAPPER = 2,
+  VIRTUAL_FILE_SYSTEM = 3,
+  BOOTSTRAP_STATE = 4,
   // Keep the MAX_POINTER_SLOT as the last entry and always set to
   // to the highest value of the other entries. We use this to
   // ensure that the highest used index is always initialized in
@@ -292,10 +294,22 @@ class Wrappable: public kj::Refcounted {
   // in V8's CppHeap pointer table (via Object::Wrap) and range-checked at unwrap time to reject
   // type-confused handles. Resource types pass their own tag (TypeWrapper::wrappableTag<T>());
   // non-resource wrappables (functions, opaque wrappers) pass kNonResourceWrappableTag.
+  //
+  // If `isContextGlobal` is IsContextGlobal::YES, `object` must be a context's JSGlobalProxy
+  // (context->Global()) and `tag` must be kContextGlobalWrappableTag; the cppgc wrappable is then
+  // set via v8::Object::WrapGlobal() on both the proxy and its hidden prototype (the
+  // JSGlobalObject).
   void attachWrapper(v8::Isolate* isolate,
       v8::Local<v8::Object> object,
       bool needsGcTracing,
-      v8::CppHeapPointerTag tag);
+      v8::CppHeapPointerTag tag,
+      IsContextGlobal isContextGlobal = IsContextGlobal::NO);
+
+  // If `object` is a live context global (the JSGlobalProxy or its hidden JSGlobalObject) that
+  // was attached via attachWrapper(..., IsContextGlobal::YES), returns the attached Wrappable.
+  // Returns kj::none for any other object.
+  static kj::Maybe<Wrappable&> tryUnwrapGlobalReceiver(
+      v8::Isolate* isolate, v8::Local<v8::Object> object);
 
   // Attach an empty, null-prototype object as the wrapper.
   v8::Local<v8::Object> attachOpaqueWrapper(v8::Local<v8::Context> context, bool needsGcTracing);
@@ -661,17 +675,15 @@ T& extractInternalPointer(v8::Isolate* isolate,
     const v8::Local<v8::Context>& context,
     const v8::Local<v8::Object>& object,
     v8::CppHeapPointerTagRange tagRange) {
-  // Due to bugs in V8, we can't use internal fields on the global object:
-  //   https://groups.google.com/d/msg/v8-users/RET5b3KOa5E/3EvpRBzwAQAJ
-  //
-  // So, when wrapping a global object, we store the pointer in the "embedder data" of the context
-  // instead of the internal fields of the object. The global is a per-context singleton and is
-  // not reached through the tagged CppHeap-pointer path, so the tag range does not apply to it.
-
   if constexpr (isContext) {
-    // V8 docs say EmbedderData slot 0 is special, so we use slot 1. (See comments in newContext().)
-    return KJ_ASSERT_NONNULL(
-        getAlignedPointerFromEmbedderData<T>(context, ContextPointerSlot::GLOBAL_WRAPPER));
+    // Context globals all carry kContextGlobalWrappableTag rather than a per-type tag, so
+    // `tagRange` does not apply to them; downcastWrappable() checks the type instead.
+    KJ_IF_SOME(w, Wrappable::tryUnwrapGlobalReceiver(isolate, object)) {
+      return downcastWrappable<T>(w);
+    }
+    // Fall back to the current context's global for the Fast API and instance properties callbacks.
+    return downcastWrappable<T>(
+        KJ_ASSERT_NONNULL(Wrappable::tryUnwrapGlobalReceiver(isolate, context->Global())));
   } else {
     // A tag outside the range for the type this dispatch site expects is an invariant violation
     // (an object whose CppHeap handle names an unrelated type), so this aborts
