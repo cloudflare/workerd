@@ -67,6 +67,7 @@ class VirtualFileSystem;
 class ThreadContext;
 class IoContext;
 class AsyncTraceIsolate;
+class AsyncTraceListener;
 class InputGate;
 class OutputGate;
 
@@ -505,6 +506,12 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // module to connect its own in-process CDP session, independent of any DevTools session.
   // Returns kj::none when no inspector exists.
   kj::Maybe<v8_inspector::V8Inspector&> tryGetV8Inspector() const;
+
+  // An async trace sink reporting to the isolate's inspector (async-trace-inspector.h), or
+  // kj::none if there is no inspector or no DevTools session is connected. A context's sinks are
+  // chosen when it is created, so a context created before a session connects is not reported to
+  // it; one created while a session is connected keeps reporting after the session disconnects.
+  kj::Maybe<kj::Own<AsyncTraceListener>> newAsyncTraceInspectorSink() const;
 
   // Get the process stdio prefixed setting from logging options
   inline kj::StringPtr getStdoutPrefix() const {
