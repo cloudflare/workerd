@@ -45,7 +45,8 @@ pub struct Turn {
 struct Resource {
     settled: bool,
     /// Handles still held. Creation makes one; adoption by a bridge adds one. The resource is
-    /// forgotten when the last is released.
+    /// forgotten when the last is released. `0` for a resource made by
+    /// [`Tracker::create_unowned`], which is forgotten when it settles instead.
     holders: u32,
 }
 
@@ -195,6 +196,30 @@ impl Tracker {
         trigger: AsyncId,
         stack: Option<StackId>,
     ) -> AsyncId {
+        self.create_with_holders(kind, name, trigger, stack, 1)
+    }
+
+    /// Like [`Tracker::create`], for a resource that nothing will release, such as a JavaScript
+    /// promise: the tracker forgets it when it settles (with no `destroy`), or when the tracker
+    /// closes. Its callbacks still report `before`/`after` if it settles during one.
+    pub fn create_unowned(&mut self, kind: Kind, name: &str, trigger: AsyncId) -> AsyncId {
+        self.create_with_holders(kind, name, trigger, None, 0)
+    }
+
+    /// Whether `id` is a live resource of this tracker.
+    #[must_use]
+    pub fn knows(&self, id: AsyncId) -> bool {
+        self.resources.contains_key(&id)
+    }
+
+    fn create_with_holders(
+        &mut self,
+        kind: Kind,
+        name: &str,
+        trigger: AsyncId,
+        stack: Option<StackId>,
+        holders: u32,
+    ) -> AsyncId {
         if self.closed {
             return 0;
         }
@@ -214,7 +239,7 @@ impl Tracker {
             id,
             Resource {
                 settled: false,
-                holders: 1,
+                holders,
             },
         );
         self.stats.created += 1;
@@ -254,6 +279,9 @@ impl Tracker {
             return;
         }
         resource.settled = true;
+        if resource.holders == 0 {
+            self.resources.remove(&id);
+        }
         self.unpend(id);
         let at = self.clock.now();
         for sink in &mut self.sinks {

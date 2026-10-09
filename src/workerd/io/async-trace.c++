@@ -143,6 +143,17 @@ AsyncResource AsyncTracker::adoptOrCreate(AsyncKind kind, kj::StringPtr name) co
   return AsyncResource(addRefToThis(), id);
 }
 
+AsyncId AsyncTracker::createPromise(AsyncId parent) const {
+  if (!onOwnerThread()) return 0;
+  return impl->create_unowned(
+      static_cast<uint8_t>(AsyncKind::JS_PROMISE), toRust("Promise"_kj), parent);
+}
+
+bool AsyncTracker::knows(AsyncId id) const {
+  if (!onOwnerThread()) return false;
+  return impl->knows(id);
+}
+
 void AsyncTracker::markBound(AsyncId id) const {
   if (!onOwnerThread()) return;
   impl->mark_bound(id);

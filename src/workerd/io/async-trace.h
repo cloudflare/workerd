@@ -206,6 +206,23 @@ class AsyncTracker final: public kj::AtomicRefcounted {
   // Takes `id` out of consideration for adoptOperation().
   void markBound(AsyncId id) const;
 
+  // For the promise hook (async-trace-promises.h). A promise has no handle: the tracker forgets it
+  // when it settles, or when the tracker closes. createPromise() returns 0 if it was not recorded.
+  // `parent` is the promise it derives from, or 0 for the turn's cause. Promises never record a
+  // creation stack; there are too many.
+  AsyncId createPromise(AsyncId parent) const;
+  // Whether `id` is a live resource of this tracker (a promise from another context isn't).
+  bool knows(AsyncId id) const;
+  void enterPromise(AsyncId id) const {
+    enter(id);
+  }
+  void exitPromise(AsyncId id) const {
+    exit(id);
+  }
+  void settlePromise(AsyncId id, AsyncOutcome outcome) const {
+    settle(id, outcome);
+  }
+
   // The tracker of the innermost turn on this thread (see TurnScope), if that turn is traced.
   // Lets code that cannot reach the IoContext, such as TraceContextParent::newChild(), find the
   // tracker. One thread-local read when tracing is off.

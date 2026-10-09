@@ -71,6 +71,9 @@ mod bridge {
 
         #[cxx_name = "create"]
         fn create_ffi(self: &mut Tracker, kind: u8, name: &[u8], trigger: u64, stack: u32) -> u64;
+        #[cxx_name = "create_unowned"]
+        fn create_unowned_ffi(self: &mut Tracker, kind: u8, name: &[u8], trigger: u64) -> u64;
+        fn knows(self: &Tracker, id: u64) -> bool;
         #[cxx_name = "settle"]
         fn settle_ffi(self: &mut Tracker, id: u64, outcome: u8);
         fn destroy(self: &mut Tracker, id: u64);
@@ -339,6 +342,10 @@ impl Tracker {
     fn create_ffi(&mut self, kind: u8, name: &[u8], trigger: u64, stack: u32) -> u64 {
         let stack = if stack == 0 { None } else { Some(stack) };
         self.create(Kind::from_u8(kind), &lossy(name), trigger, stack)
+    }
+
+    fn create_unowned_ffi(&mut self, kind: u8, name: &[u8], trigger: u64) -> u64 {
+        self.create_unowned(Kind::from_u8(kind), &lossy(name), trigger)
     }
 
     fn annotate_ffi(&mut self, id: u64, key: &[u8], value: &[u8]) {
