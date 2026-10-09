@@ -50,7 +50,7 @@ cc_test(
         ":bridge",
         ":tests",
         "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
-        "//src/rust/cxx/third-party:runtime",
+        "@@//deps:rust_runtime",
         "@capnp-cpp//src/kj:kj-test",
     ],
 )
