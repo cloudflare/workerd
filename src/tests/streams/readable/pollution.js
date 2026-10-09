@@ -64,6 +64,27 @@ export const replacedNumberKeepsBody = {
   },
 };
 
+// A patched Object.prototype.then must not intercept text()'s internal
+// steps (WPT fetch/api/response/response-stream-with-broken-then.any.js).
+// The result is a string, so the user's promise performs no then lookup.
+export const patchedObjectThenKeepsText = {
+  async test() {
+    let calls = 0;
+    Object.prototype.then = function (resolve) {
+      calls++;
+      resolve(8.2);
+    };
+    let text;
+    try {
+      text = await new Response(helloBody()).text();
+    } finally {
+      delete Object.prototype.then;
+    }
+    strictEqual(text, 'hello');
+    strictEqual(calls, 0);
+  },
+};
+
 // A patched controller error() must not stop a pull rejection from
 // erroring the stream.
 export const patchedControllerErrorStillErrors = {

@@ -173,6 +173,7 @@ export {
   readAllTextRequestSmall,
   readAllTextRequestBig,
   readAllTextResponseSmall,
+  readAllTextKeepsEmbeddedNul,
   readAllTextResponseBig,
   readAllTextFailedPull,
   readAllTextFailedStart,
@@ -259,6 +260,7 @@ export { structuredCloneReadable } from 'transfer';
 export {
   patchedArrayIteratorKeepsBody,
   replacedNumberKeepsBody,
+  patchedObjectThenKeepsText,
   patchedControllerErrorStillErrors,
   omittedDictionariesReadNothing,
   fromBuildsNoDictionariesFromObjectPrototype,

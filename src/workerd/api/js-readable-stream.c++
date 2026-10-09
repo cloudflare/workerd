@@ -132,7 +132,11 @@ jsg::Promise<kj::String> getReadableStreamText(jsg::Lock& js, jsg::JsObject obj,
   jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_PROMISE(result));
   return js.toPromise(promise).then(js, [](jsg::Lock& js, jsg::Value ref) {
     auto value = jsg::JsValue(ref.getHandle(js));
-    return value.toString(js);
+    // JsString::toString() is sized by the string's UTF-8 length, so embedded NULs survive;
+    // JsValue::toString() stringifies through a NUL-terminated buffer and would truncate.
+    // If it throws, it manifests as an internal error. That's intended.
+    auto str = KJ_REQUIRE_NONNULL(value.tryCast<jsg::JsString>());
+    return str.toString(js);
   });
 }
 
