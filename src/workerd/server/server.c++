@@ -4977,24 +4977,6 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
 
     case config::Worker::Binding::DURABLE_OBJECT_NAMESPACE: {
       auto actorBinding = binding.getDurableObjectNamespace();
-      kj::Maybe<api::UserDefinedRetryPolicy> userDefinedRetryPolicy;
-      if (actorBinding.hasRetryPolicy()) {
-        auto retryPolicy = actorBinding.getRetryPolicy();
-        auto retryTimeout = retryPolicy.getTimeoutMs() * kj::MILLISECONDS;
-        if (retryPolicy.getMaxAttempts() > api::UserDefinedRetryPolicy::MAX_CONFIGURABLE_ATTEMPTS ||
-            retryTimeout < api::UserDefinedRetryPolicy::MIN_CONFIGURABLE_TIMEOUT ||
-            retryTimeout > api::UserDefinedRetryPolicy::MAX_CONFIGURABLE_TIMEOUT) {
-          errorReporter.addError(kj::str(errorContext,
-              " has a Durable Object retry policy outside "
-              "the system limits."));
-          return kj::none;
-        }
-        userDefinedRetryPolicy = api::UserDefinedRetryPolicy{
-          .maxAttempts = retryPolicy.getMaxAttempts(),
-          .timeout = retryTimeout,
-        };
-      }
-
       const Server::ActorConfig* actorConfig;
       if (actorBinding.hasServiceName()) {
         auto& svcMap = KJ_UNWRAP_OR(actorConfigs.find(actorBinding.getServiceName()), {
@@ -5029,7 +5011,7 @@ static kj::Maybe<WorkerdApi::Global> createBinding(kj::StringPtr workerName,
           return makeGlobal(Global::DurableActorNamespace{
             .actorChannel = channel,
             .uniqueKey = durable.uniqueKey,
-            .userDefinedRetryPolicy = userDefinedRetryPolicy,
+            .userDefinedRetryPolicy = durable.retryPolicy,
           });
         }
         KJ_CASE_ONEOF(_, Server::Ephemeral) {
@@ -6217,6 +6199,7 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
               .actorChannel = nextActorChannel++,
               .uniqueKey = durable.uniqueKey,
               .classChannel = actorClassChannel,
+              .userDefinedRetryPolicy = durable.retryPolicy,
             };
           }
           KJ_CASE_ONEOF(ephemeral, Ephemeral) {
@@ -7590,6 +7573,25 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
     }
   }
 
+  auto readRetryPolicy = [&](kj::StringPtr serviceName,
+                             config::Worker::DurableObjectNamespace::Reader ns)
+      -> kj::Maybe<api::UserDefinedRetryPolicy> {
+    if (!ns.hasRetryPolicy()) return kj::none;
+    auto retryPolicy = ns.getRetryPolicy();
+    auto timeout = retryPolicy.getTimeoutMs() * kj::MILLISECONDS;
+    if (retryPolicy.getMaxAttempts() > api::UserDefinedRetryPolicy::MAX_CONFIGURABLE_ATTEMPTS ||
+        timeout < api::UserDefinedRetryPolicy::MIN_CONFIGURABLE_TIMEOUT ||
+        timeout > api::UserDefinedRetryPolicy::MAX_CONFIGURABLE_TIMEOUT) {
+      reportConfigError(kj::str("Durable Object namespace \"", ns.getClassName(),
+          "\" in service \"", serviceName, "\" has a retry policy outside the system limits."));
+      return kj::none;
+    }
+    return api::UserDefinedRetryPolicy{
+      .maxAttempts = retryPolicy.getMaxAttempts(),
+      .timeout = timeout,
+    };
+  };
+
   kj::HashSet<kj::String> workflowNamespaceKeys;
   for (auto serviceConf: config.getServices()) {
     kj::StringPtr name = serviceConf.getName();
@@ -7606,7 +7608,8 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
                 Durable{.uniqueKey = kj::str(ns.getUniqueKey()),
                   .isEvictable = !ns.getPreventEviction(),
                   .enableSql = ns.getEnableSql(),
-                  .containerOptions = ns.hasContainer() ? kj::Maybe(ns.getContainer()) : kj::none});
+                  .containerOptions = ns.hasContainer() ? kj::Maybe(ns.getContainer()) : kj::none,
+                  .retryPolicy = readRetryPolicy(name, ns)});
             continue;
           case config::Worker::DurableObjectNamespace::EPHEMERAL_LOCAL:
             if (!experimental) {
@@ -7614,6 +7617,11 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
                   "Ephemeral objects (Durable Object namespaces with type 'ephemeralLocal') are an "
                   "experimental feature which may change or go away in the future. You must run "
                   "workerd with `--experimental` to use this feature."));
+            }
+            if (ns.hasRetryPolicy()) {
+              reportConfigError(kj::str("Durable Object namespace \"", ns.getClassName(),
+                  "\" in service \"", name,
+                  "\" is ephemeral, and ephemeral namespaces do not support a retry policy."));
             }
             serviceActorConfigs.insert(kj::str(ns.getClassName()),
                 Ephemeral{.isEvictable = !ns.getPreventEviction(), .enableSql = ns.getEnableSql()});

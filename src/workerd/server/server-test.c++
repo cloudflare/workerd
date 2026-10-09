@@ -2713,32 +2713,37 @@ KJ_TEST("Server: rejects Durable Object retry policy values outside the system l
         esModule = `export default { fetch() { return new Response("ok"); } }
       )
     ],
-    bindings = [
-      ( name = "attempts",
-        durableObjectNamespace = (
-          className = "MyActorClass",
-          retryPolicy = (maxAttempts = 11),
-        )
-      ),
-      ( name = "shortTimeout",
-        durableObjectNamespace = (
-          className = "MyActorClass",
-          retryPolicy = (timeoutMs = 499),
-        )
-      ),
-      ( name = "longTimeout",
-        durableObjectNamespace = (
-          className = "MyActorClass",
-          retryPolicy = (timeoutMs = 60001),
-        )
-      ),
+    durableObjectNamespaces = [
+      ( className = "Attempts", uniqueKey = "attempts", retryPolicy = (maxAttempts = 11) ),
+      ( className = "ShortTimeout", uniqueKey = "short", retryPolicy = (timeoutMs = 499) ),
+      ( className = "LongTimeout", uniqueKey = "long", retryPolicy = (timeoutMs = 60001) ),
     ],
+    durableObjectStorage = (inMemory = void),
   ))"_kj));
 
   test.expectErrors(R"(
-    service hello: Worker "hello"'s binding "attempts" has a Durable Object retry policy outside the system limits.
-    service hello: Worker "hello"'s binding "shortTimeout" has a Durable Object retry policy outside the system limits.
-    service hello: Worker "hello"'s binding "longTimeout" has a Durable Object retry policy outside the system limits.
+    Durable Object namespace "Attempts" in service "hello" has a retry policy outside the system limits.
+    Durable Object namespace "ShortTimeout" in service "hello" has a retry policy outside the system limits.
+    Durable Object namespace "LongTimeout" in service "hello" has a retry policy outside the system limits.
+  )"_blockquote);
+}
+
+KJ_TEST("Server: rejects a retry policy on an ephemeral Durable Object namespace") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-10-01",
+    modules = [
+      ( name = "worker",
+        esModule = `export default { fetch() { return new Response("ok"); } }
+      )
+    ],
+    durableObjectNamespaces = [
+      ( className = "MyActorClass", ephemeralLocal = void, retryPolicy = (maxAttempts = 1) ),
+    ],
+  ))"_kj));
+
+  test.server.allowExperimental();
+  test.expectErrors(R"(
+    Durable Object namespace "MyActorClass" in service "hello" is ephemeral, and ephemeral namespaces do not support a retry policy.
   )"_blockquote);
 }
 
