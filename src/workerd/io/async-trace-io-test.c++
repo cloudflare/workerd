@@ -658,5 +658,48 @@ KJ_TEST("a child span's operation names the span's operation as its parent") {
   expectComplete(events);
 }
 
+// A subrequest client whose span is parked on it, as for a queue send.
+kj::Own<WorkerInterface> parkedSpanClient(
+    const TestFixture::Environment& env, SpanAwaitedNext spanAwaitedNext) {
+  return env.context.getSubrequestNoChecks(
+      [](TraceContext&, IoChannelFactory&) { return newPromisedWorkerInterface(kj::NEVER_DONE); },
+      IoContext::SubrequestOptions{
+        .inHouse = true,
+        .wrapMetrics = false,
+        .operationName = kj::ConstString("queue_send"_kjc),
+        .spanAwaitedNext = spanAwaitedNext,
+      },
+      CountSubrequest::NO);
+}
+
+KJ_TEST("a subrequest awaited next lends its span's operation to the awaitIo") {
+  auto events = traceInContext([](const TestFixture::Environment& env) {
+    auto client = parkedSpanClient(env, SpanAwaitedNext::YES);
+    return roundTrip(env, kj::evalLater([]() {}).attach(kj::mv(client)));
+  });
+  expectInOrder(events,
+      {
+        "init queue_send#1 trigger=request exec=request"_kj,
+        "settle queue_send#1"_kj,
+        "turn cause=queue_send#1"_kj,
+      });
+  KJ_EXPECT(count(events, "init awaitIo#1 trigger=request exec=request"_kj) == 0, joined(events));
+  expectComplete(events);
+}
+
+KJ_TEST("a subrequest client's span is otherwise detached") {
+  auto events = traceInContext([](const TestFixture::Environment& env) {
+    auto client = parkedSpanClient(env, SpanAwaitedNext::NO);
+    return roundTrip(env, kj::evalLater([]() {}).attach(kj::mv(client)));
+  });
+  expectInOrder(events,
+      {
+        "init queue_send#1 trigger=request exec=request"_kj,
+        "init awaitIo#1 trigger=request exec=request"_kj,
+        "turn cause=awaitIo#1"_kj,
+      });
+  expectComplete(events);
+}
+
 }  // namespace
 }  // namespace workerd

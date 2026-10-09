@@ -269,7 +269,8 @@ jsg::Promise<WorkerQueue::SendResponse> WorkerQueue::send(jsg::Lock& js,
     serialized = serializeV8(js, body);
   }
 
-  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_send"_kjc);
+  auto client = context.getHttpClient(
+      subrequestChannel, true, kj::none, "queue_send"_kjc, SpanAwaitedNext::YES);
   const auto& headerIds = context.getHeaderIds();
   const auto exposeErrorCodes = workerd::FeatureFlags::get(js).getQueueExposeErrorCodes();
 
@@ -311,7 +312,8 @@ jsg::Promise<WorkerQueue::Metrics> WorkerQueue::metrics(
 
   auto headers = kj::HttpHeaders(context.getHeaderTable());
 
-  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_metrics"_kjc);
+  auto client = context.getHttpClient(
+      subrequestChannel, true, kj::none, "queue_metrics"_kjc, SpanAwaitedNext::YES);
   auto req = client->request(
       kj::HttpMethod::GET, "https://fake-host/metrics"_kjc, headers, static_cast<uint64_t>(0));
   const auto& headerIds = context.getHeaderIds();
@@ -400,7 +402,8 @@ jsg::Promise<WorkerQueue::SendBatchResponse> WorkerQueue::sendBatch(jsg::Lock& j
   kj::String body(bodyBuilder.releaseAsArray());
   KJ_DASSERT(jsg::JsValue::fromJson(js, body).isObject());
 
-  auto client = context.getHttpClient(subrequestChannel, true, kj::none, "queue_send"_kjc);
+  auto client = context.getHttpClient(
+      subrequestChannel, true, kj::none, "queue_send"_kjc, SpanAwaitedNext::YES);
 
   auto headers = kj::HttpHeaders(context.getHeaderTable());
   headers.addPtr("CF-Queue-Batch-Count"_kj, kj::str(messageCount));

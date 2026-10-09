@@ -54,6 +54,9 @@ constexpr uint MAX_BLOCK_CONCURRENCY_WHILE_DEPTH = 64;
 
 // This wishes it were IoContext::Runnable::Exceptional.
 WD_STRONG_BOOL(IoContext_Runnable_Exceptional);
+// Whether the caller awaits a subrequest with its next awaitIo(), so that the subrequest span's
+// async trace operation may be adopted by it. See SubrequestOptions::spanAwaitedNext.
+WD_STRONG_BOOL(SpanAwaitedNext);
 
 [[noreturn]] void throwExceededMemoryLimit(bool isActor);
 
@@ -1034,6 +1037,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
     // The tracing context to use for the subrequest if tracing is enabled.
     kj::Maybe<TraceContext&> existingTraceContext;
+
+    // The span made for `operationName` is parked on the returned client, which may outlive the
+    // call, so its async trace operation is normally detached (not adopted by an awaitIo()). When
+    // YES, the caller's next awaitIo() in the turn awaits this subrequest, and adopts the
+    // operation.
+    SpanAwaitedNext spanAwaitedNext = SpanAwaitedNext::NO;
   };
 
   // Wraps a WorkerInterface factory with subrequest accounting: tracing, optional metrics wrapping,
@@ -1076,7 +1085,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Own<WorkerInterface> getSubrequestChannel(uint channel,
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
-      kj::ConstString operationName);
+      kj::ConstString operationName,
+      SpanAwaitedNext spanAwaitedNext = SpanAwaitedNext::NO);
 
   // Get WorkerInterface objects to use for subrequests.
   //
@@ -1116,7 +1126,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   kj::Own<kj::HttpClient> getHttpClient(uint channel,
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
-      kj::ConstString operationName);
+      kj::ConstString operationName,
+      SpanAwaitedNext spanAwaitedNext = SpanAwaitedNext::NO);
 
   kj::Own<kj::HttpClient> getHttpClient(
       uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, TraceContext& traceContext);
