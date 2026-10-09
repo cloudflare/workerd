@@ -223,6 +223,8 @@ pub struct ServeOrTestArgs {
 
     /// Write an async activity trace to <path>: one JSON object per line, recording requests,
     /// turns, timers, I/O and binding operations, and what caused what. The file is overwritten.
+    /// It includes request details such as URLs and storage keys (and, with
+    /// --async-trace-stacks, source locations), so treat it like a log.
     #[arg(long, value_name = "path")]
     pub async_trace: Option<String>,
 
