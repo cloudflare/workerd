@@ -99,7 +99,7 @@ class Body: public jsg::Object {
   bool getBodyUsed(jsg::Lock& js);
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> arrayBuffer(jsg::Lock& js);
   jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> bytes(jsg::Lock& js);
-  jsg::Promise<kj::String> text(jsg::Lock& js);
+  jsg::Promise<jsg::JsRef<jsg::JsString>> text(jsg::Lock& js);
   jsg::Promise<jsg::Ref<FormData>> formData(jsg::Lock& js);
   jsg::Promise<jsg::Value> json(jsg::Lock& js);
   jsg::Promise<jsg::Ref<Blob>> blob(jsg::Lock& js);
@@ -383,8 +383,10 @@ class Fetcher: public JsRpcClientProvider {
       kj::OneOf<jsg::Ref<Request>, kj::String> requestOrUrl,
       jsg::Optional<kj::OneOf<RequestInitializerDict, jsg::Ref<Request>>> requestInit);
 
-  using GetResult =
-      kj::OneOf<JsReadableStream, jsg::JsRef<jsg::JsArrayBuffer>, kj::String, jsg::Value>;
+  using GetResult = kj::OneOf<JsReadableStream,
+      jsg::JsRef<jsg::JsArrayBuffer>,
+      jsg::JsRef<jsg::JsString>,
+      jsg::Value>;
 
   jsg::Promise<GetResult> get(jsg::Lock& js, kj::String url, jsg::Optional<kj::String> type);
 

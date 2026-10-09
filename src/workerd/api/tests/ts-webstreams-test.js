@@ -211,6 +211,73 @@ export const bufferBackedEmptyBody = {
   },
 };
 
+// The decoded text produced by the TS streams must reach JavaScript intact, including
+// embedded NUL characters (which a C-string conversion would truncate).
+const kNulTexts = ['a\0b', 'ab\0', '\0ab', '\0', 'a\0\0b\0c'];
+
+export const bodyTextPreservesNul = {
+  async test() {
+    for (const text of kNulTexts) {
+      strictEqual(await new Response(text).text(), text);
+      strictEqual(
+        await new Request('http://example.org/', {
+          method: 'POST',
+          body: text,
+        }).text(),
+        text
+      );
+      strictEqual(await new Response(new Blob([text]).stream()).text(), text);
+
+      // A JS-sourced stream split into one-byte chunks exercises the multi-chunk decode.
+      const bytes = new TextEncoder().encode(text);
+      const rs = new ReadableStream({
+        start(c) {
+          for (const byte of bytes) c.enqueue(new Uint8Array([byte]));
+          c.close();
+        },
+      });
+      strictEqual(await new Response(rs).text(), text);
+    }
+  },
+};
+
+// A raw NUL is never valid JSON, so json() must see it and reject. Truncating at the NUL
+// would instead make the trailing-garbage case parse successfully.
+export const bodyJsonSeesNul = {
+  async test() {
+    const bodies = ['["a"]\0junk', '["a\0b"]'];
+    for (const body of bodies) {
+      await rejects(new Response(body).json(), SyntaxError);
+      await rejects(
+        new Request('http://example.org/', { method: 'POST', body }).json(),
+        SyntaxError
+      );
+    }
+    await rejects(new Response('["a\0b"]').json(), /Bad control character/);
+  },
+};
+
+export const nativeBackedBodyTextPreservesNul = {
+  async test(ctrl, env) {
+    for (const text of kNulTexts) {
+      const response = await env.SELF.fetch('http://example.org/echo', {
+        method: 'POST',
+        body: text,
+      });
+      strictEqual(await response.text(), text);
+    }
+  },
+};
+
+export const bodyFormDataPreservesNul = {
+  async test() {
+    const formData = await new Response('a=x\0y', {
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    }).formData();
+    strictEqual(formData.get('a'), 'x\0y');
+  },
+};
+
 // ======================================================================================
 // Iterable/AsyncIterable bodies (the fetch_iterable_type_support BodyInit extension) go
 // through JsReadableStream::from(), which under the flag constructs a TypeScript stream

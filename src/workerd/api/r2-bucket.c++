@@ -1436,11 +1436,12 @@ jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> R2Bucket::GetResult::bytes(jsg::Lock
   });
 }
 
-jsg::Promise<kj::String> R2Bucket::GetResult::text(jsg::Lock& js) {
+jsg::Promise<jsg::JsRef<jsg::JsString>> R2Bucket::GetResult::text(jsg::Lock& js) {
   // Copy-pasted from http.c++
   return js.evalNow([&] {
-    // Check for a disturbed body before emitting the non-text warning below. (body.text()
-    // performs the same check with the same error message; this one just runs first.)
+    // Check for a disturbed body before emitting the non-text warning below.
+    // (body.textAsJsString() performs the same check with the same error message; this one just
+    // runs first.)
     JSG_REQUIRE(!body.isDisturbed(js), TypeError,
         "Body has already been used. "
         "It can only be used once. Use tee() first if you need to read it twice.");
@@ -1456,13 +1457,15 @@ jsg::Promise<kj::String> R2Bucket::GetResult::text(jsg::Lock& js) {
       }
     }
 
-    return body.text(js, context.getLimitEnforcer().getBufferingLimit());
+    return body.textAsJsString(js, context.getLimitEnforcer().getBufferingLimit());
   });
 }
 
 jsg::Promise<jsg::Value> R2Bucket::GetResult::json(jsg::Lock& js) {
   // Copy-pasted from http.c++
-  return text(js).then(js, [](jsg::Lock& js, kj::String text) { return js.parseJson(text); });
+  return text(js).then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsString> text) {
+    return js.parseJson(text.getHandle(js));
+  });
 }
 
 jsg::Promise<jsg::Ref<Blob>> R2Bucket::GetResult::blob(jsg::Lock& js) {

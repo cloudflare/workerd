@@ -211,16 +211,17 @@ jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> Body::bytes(jsg::Lock& js) {
   return js.evalNow([&] { return bodyStream.bytes(js, bufferingLimit()); });
 }
 
-jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
+jsg::Promise<jsg::JsRef<jsg::JsString>> Body::text(jsg::Lock& js) {
   // A null body yields an empty string without consulting the IoContext.
   // See https://fetch.spec.whatwg.org/#concept-body-consume-body
   if (bodyStream.isNull()) {
-    return bodyStream.text(js, 0);
+    return bodyStream.textAsJsString(js, 0);
   }
 
   return js.evalNow([&] {
-    // Check for a disturbed body before emitting the non-text warning below. (bodyStream.text()
-    // performs the same check with the same error message; this one just runs first.)
+    // Check for a disturbed body before emitting the non-text warning below.
+    // (bodyStream.textAsJsString() performs the same check with the same error message; this one
+    // just runs first.)
     JSG_REQUIRE(!bodyStream.isDisturbed(js), TypeError,
         "Body has already been used. "
         "It can only be used once. Use tee() first if you need to read it twice.");
@@ -235,7 +236,7 @@ jsg::Promise<kj::String> Body::text(jsg::Lock& js) {
       }
     }
 
-    return bodyStream.text(js, context.getLimitEnforcer().getBufferingLimit());
+    return bodyStream.textAsJsString(js, context.getLimitEnforcer().getBufferingLimit());
   });
 }
 
@@ -273,7 +274,9 @@ jsg::Promise<jsg::Ref<FormData>> Body::formData(jsg::Lock& js) {
 }
 
 jsg::Promise<jsg::Value> Body::json(jsg::Lock& js) {
-  return text(js).then(js, [](jsg::Lock& js, kj::String text) { return js.parseJson(text); });
+  return text(js).then(js, [](jsg::Lock& js, jsg::JsRef<jsg::JsString> text) {
+    return js.parseJson(text.getHandle(js));
+  });
 }
 
 jsg::Promise<jsg::Ref<Blob>> Body::blob(jsg::Lock& js) {
