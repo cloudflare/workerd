@@ -35,7 +35,7 @@ the abort reason).
 | --- | --- | --- | --- | --- |
 | 1 | invalid highWaterMark at ctor | TypeError (jsg uint64 conversion messages) | RangeError "Invalid highWaterMark" (spec) | `highWaterMarkValidated` |
 | 2 | sink.type validation | ignored (pedantic_wpt: RangeError) | RangeError "Invalid underlying sink type" (spec) | `sinkTypeValidation` |
-| 3 | argument conversion order | sink dictionary first (sink.write, hwm, size) | strategy first (size, hwm ×2, sink.write; spec) | `argumentConversionOrder` |
+| 3 | argument conversion order | sink dictionary first (sink.write, hwm, size) | strategy first (size, hwm, sink.write); strategy-before-sink is spec, but WebIDL reads hwm before size | `argumentConversionOrder` |
 | 4 | ready at construction (no backpressure) | pending after a microtask, fulfills on a later turn | fulfilled within a microtask (spec) | `readyFulfillTiming` |
 | 5 | sync start() throw | captured; stream errored, writes reject | escapes the constructor (spec) | `newWritableStreamStartError` |
 | 6 | abort() on an errored stream | rejects with the stored error | fulfills with undefined (spec) | `newWritableStreamAbortError` |
@@ -91,7 +91,7 @@ promises (they resolve with undefined).
 | Module | Asserts |
 | --- | --- |
 | `api-surface.js` | writable globals exist; controller not constructable; bare ctor works (full IDL shape is WPT's) |
-| `construction.js` | ledger #1–#5, #12; fractional and ToNumber-coerced hwm accepted |
+| `construction.js` | ledger #1–#5, #12; fractional and ToNumber-coerced hwm accepted; strategy members read once each (parity) |
 | `sink-algorithms.js` | ledger #14; which sink hooks run with what arguments/controller; sync+async hook errors surface on writer promises (#5, #6); size() consulted per write; hook getters read once; second-write rejection fan-out; hooks silent after start throw |
 | `write-semantics.js` | chunk identity (subarrays, any JS value via Object.is); multiple pending writes; settlement ordering incl. under abort (#7); queued-write fate at releaseLock (#13) |
 | `buffer-lifecycle.js` | chunks never copied/validated: already-detached AB accepted (byteLength 0); post-write() mutation, detach, resizable grow, and shrink-out-of-bounds all observed per the startedness model (#7); size() runs inside write() so queue totals are immune to later detach |
