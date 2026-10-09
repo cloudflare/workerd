@@ -1,21 +1,24 @@
-src/workerd/io/worker-entrypoint-test.c++
-  s_313a31aedf23dd::t_eab9c703456a91 284
-  s_313a31aedf23dd::t_bf55f050cf06c7 281-283
 src/workerd/io/observer.h
-  s_ba99c3d31db716::t_fcabc72d1e4cc0 146-148
-src/workerd/io/worker-entrypoint.c++
-  s_b716b0d48442fc::t_cc19d7a5bad9ed 402-404
+  s_32b17a769cc550::t_9e79380db99d5d 33
+src/workerd/api/worker-rpc.c++
+  s_32b17a769cc550::t_8a27aa5c5e3422 2750,3363-3364,3377
+types/defines/durable-objects.d.ts
+  s_ba99c3d31db716::t_5054c1e826a5d3 3-4,7-20,24,26-28
+types/test/types/durable-objects.ts
+  s_ba99c3d31db716::t_504fd9368df72f 10-13,23,27-29
+src/workerd/util/autogate.h
+  s_ba99c3d31db716::t_ae9c47e2f34948 92
 ---
 {
   "schema_version": "authorship/3.0.0",
   "git_ai_version": "1.6.10",
-  "base_commit_sha": "b831f8983992fbbef4fcbb4ba2e84b41d70a52fc",
+  "base_commit_sha": "76436d77a58ed4ccad31cc2f8423085fa28836bd",
   "prompts": {},
   "sessions": {
-    "s_b716b0d48442fc": {
+    "s_32b17a769cc550": {
       "agent_id": {
         "tool": "opencode",
-        "id": "ses_f27481c64ffejF0PRmNbz1lsxV",
+        "id": "ses_ef49fe257ffe5FcrLx8m4M06rm",
         "model": "claude-opus-5-5"
       },
       "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
