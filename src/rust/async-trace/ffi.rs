@@ -157,6 +157,7 @@ mod bridge {
         fn listener_before(listener: Pin<&mut AsyncTraceListener>, ctx: u64, id: u64, at: u64);
         fn listener_after(listener: Pin<&mut AsyncTraceListener>, ctx: u64, id: u64, at: u64);
         fn listener_destroy(listener: Pin<&mut AsyncTraceListener>, ctx: u64, id: u64, at: u64);
+        fn listener_release(listener: Pin<&mut AsyncTraceListener>, ctx: u64, id: u64);
         fn listener_annotate(
             listener: Pin<&mut AsyncTraceListener>,
             ctx: u64,
@@ -262,6 +263,10 @@ impl Sink for CppSink {
 
     fn destroy(&mut self, ctx: ContextId, id: AsyncId, at: Nanos) {
         bridge::listener_destroy(self.listener(), ctx, id, at);
+    }
+
+    fn release(&mut self, ctx: ContextId, id: AsyncId) {
+        bridge::listener_release(self.listener(), ctx, id);
     }
 
     fn annotate(&mut self, ctx: ContextId, id: AsyncId, key: &str, value: &str) {

@@ -49,6 +49,9 @@ class RecordingListener final: public AsyncTraceListener {
   void onDestroy(uint64_t ctx, AsyncId id, uint64_t atNs) override {
     events.add(kj::str("destroy ", id));
   }
+  void onRelease(uint64_t ctx, AsyncId id) override {
+    events.add(kj::str("release ", id));
+  }
   void onAnnotate(uint64_t ctx,
       AsyncId id,
       kj::ArrayPtr<const char> key,
@@ -165,7 +168,8 @@ KJ_TEST("resource lifecycle") {
   bridge.settle(AsyncOutcome::CANCELED);
   auto timerId = timer.getId();
   auto bridgeId = bridge.getId();
-  // Dropping a settled resource reports nothing; dropping an unsettled one reports destroy.
+  // Dropping a settled resource reports only its release; dropping an unsettled one reports
+  // destroy first.
   { auto dropped = kj::mv(bridge); }
   timer.release();
   KJ_EXPECT(timer.getId() == 0);
@@ -173,7 +177,8 @@ KJ_TEST("resource lifecycle") {
   KJ_EXPECT_EVENTS(f, kj::str("init ", timerId, " kind=3 name=setTimeout trigger=0 exec=0"),
       kj::str("init ", bridgeId, " kind=1 name=bridge trigger=", timerId, " exec=0"),
       kj::str("annotate ", bridgeId, " url=https://example.com/"),
-      kj::str("settle ", bridgeId, " 2"), kj::str("destroy ", timerId));
+      kj::str("settle ", bridgeId, " 2"), kj::str("release ", bridgeId),
+      kj::str("destroy ", timerId), kj::str("release ", timerId));
 }
 
 KJ_TEST("moving a resource transfers it") {
@@ -193,7 +198,7 @@ KJ_TEST("moving a resource transfers it") {
   // Assigning over a live resource releases it first.
   moved = kj::mv(b);
   KJ_EXPECT(moved.getId() == bId);
-  KJ_EXPECT_EVENTS(f, kj::str("destroy ", aId));
+  KJ_EXPECT_EVENTS(f, kj::str("destroy ", aId), kj::str("release ", aId));
 }
 
 KJ_TEST("turns: default cause, explicit cause, callback scopes") {
@@ -260,7 +265,8 @@ KJ_TEST("a bridge adopts a pending operation from the same turn") {
   bridge.release();
   unrelated.release();
   KJ_EXPECT_EVENTS(f, kj::str("settle ", id, " 0"), kj::str("before ", id), kj::str("after ", id),
-      kj::str("turn cause=", id, " locked=false"), kj::str("destroy ", other));
+      kj::str("turn cause=", id, " locked=false"), kj::str("release ", id),
+      kj::str("destroy ", other), kj::str("release ", other));
 }
 
 KJ_TEST("inTurn() is the tracker of the innermost turn") {
@@ -469,9 +475,10 @@ KJ_TEST("calls from another thread are dropped and counted") {
   resource.release();
   f.closeTracker();
   auto events = f.takeEvents();
-  KJ_EXPECT(events.size() == 3, joined(events));
+  // destroy, release, context_end, listener destroyed.
+  KJ_EXPECT(events.size() == 4, joined(events));
   KJ_EXPECT(
-      events[1] == "context_end created=1 dropped=0 unknown=0 unbalanced=0 ambiguous=0 foreign=3");
+      events[2] == "context_end created=1 dropped=0 unknown=0 unbalanced=0 ambiguous=0 foreign=3");
 }
 
 KJ_TEST("a throwing listener does not stop other sinks") {

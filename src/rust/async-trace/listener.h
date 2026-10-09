@@ -105,6 +105,10 @@ class AsyncTraceListener {
   virtual void onBefore(uint64_t ctx, AsyncId id, uint64_t atNs) {}
   virtual void onAfter(uint64_t ctx, AsyncId id, uint64_t atNs) {}
   virtual void onDestroy(uint64_t ctx, AsyncId id, uint64_t atNs) {}
+  // The tracker has forgotten `id`: no more events will come for it. Called after its settle or
+  // destroy, whichever is last, including for a resource that settled without a callback. Not
+  // called for resources still live when the context ends.
+  virtual void onRelease(uint64_t ctx, AsyncId id) {}
   // `key` and `value` are not NUL-terminated.
   virtual void onAnnotate(
       uint64_t ctx, AsyncId id, kj::ArrayPtr<const char> key, kj::ArrayPtr<const char> value) {}
@@ -178,6 +182,10 @@ inline void listener_after(AsyncTraceListener& listener, uint64_t ctx, uint64_t 
 
 inline void listener_destroy(AsyncTraceListener& listener, uint64_t ctx, uint64_t id, uint64_t at) {
   callListener([&]() { listener.onDestroy(ctx, id, at); });
+}
+
+inline void listener_release(AsyncTraceListener& listener, uint64_t ctx, uint64_t id) {
+  callListener([&]() { listener.onRelease(ctx, id); });
 }
 
 inline void listener_annotate(

@@ -186,6 +186,11 @@ pub trait Sink {
     fn before(&mut self, ctx: ContextId, id: AsyncId, at: Nanos) {}
     fn after(&mut self, ctx: ContextId, id: AsyncId, at: Nanos) {}
     fn destroy(&mut self, ctx: ContextId, id: AsyncId, at: Nanos) {}
+    /// The tracker has forgotten `id`; no more events will come for it. Reported after its
+    /// `settle` or `destroy`, whichever is last, so a sink can drop per-resource state even for a
+    /// resource that settled without running a callback. Not reported for resources still live
+    /// when the tracker closes (see [`Sink::context_end`]).
+    fn release(&mut self, ctx: ContextId, id: AsyncId) {}
     fn annotate(&mut self, ctx: ContextId, id: AsyncId, key: &str, value: &str) {}
     fn turn(&mut self, ctx: ContextId, turn: &Turn) {}
     /// Resource `id` was caused by `from`, a resource of another context.

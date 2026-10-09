@@ -61,10 +61,13 @@ class InspectorSink final: public AsyncTraceListener {
   }
 
   void onDestroy(uint64_t ctx, AsyncId id, uint64_t atNs) override {
-    if (scheduled.find(id) != kj::none && isCurrent()) {
-      inspector.asyncTaskCanceled(task(id));
-      scheduled.erase(id);
-    }
+    cancel(id);
+  }
+
+  // A resource can settle and be released without running a callback (a detached span's
+  // operation, say), and an actor's context lives on, so forget its task here.
+  void onRelease(uint64_t ctx, AsyncId id) override {
+    cancel(id);
   }
 
   void onContextEnd(uint64_t ctx, uint64_t atNs, const AsyncContextStats& stats) override {
@@ -89,6 +92,13 @@ class InspectorSink final: public AsyncTraceListener {
 
   bool isCurrent() const {
     return v8::Isolate::TryGetCurrent() == isolate && v8::Locker::IsLocked(isolate);
+  }
+
+  // Tells V8 the task will not run, if the isolate is current, and forgets it either way.
+  void cancel(AsyncId id) {
+    if (scheduled.find(id) == kj::none) return;
+    if (isCurrent()) inspector.asyncTaskCanceled(task(id));
+    scheduled.erase(id);
   }
 
   // Finishes the innermost started callback. Only an unbalanced scope (counted by the tracker) can

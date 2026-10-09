@@ -339,13 +339,19 @@ impl Tracker {
             return;
         }
         resource.settled = true;
-        if resource.holders == 0 {
+        let forget = resource.holders == 0;
+        if forget {
             self.resources.remove(&id);
         }
         self.unpend(id);
         let at = self.clock.now();
         for sink in &mut self.sinks {
             sink.settle(self.ctx, id, outcome, at);
+        }
+        if forget {
+            for sink in &mut self.sinks {
+                sink.release(self.ctx, id);
+            }
         }
     }
 
@@ -373,6 +379,9 @@ impl Tracker {
             for sink in &mut self.sinks {
                 sink.destroy(self.ctx, id, at);
             }
+        }
+        for sink in &mut self.sinks {
+            sink.release(self.ctx, id);
         }
     }
 

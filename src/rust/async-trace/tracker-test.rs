@@ -303,7 +303,15 @@ fn destroy_reports_only_unsettled_resources() {
 
     f.tracker.destroy(canceled);
     f.tracker.destroy(finished);
-    assert_eq!(f.events(), vec![Event::Destroy { ctx, id: canceled }]);
+    // Both are released; only the unsettled one is destroyed.
+    assert_eq!(
+        f.events(),
+        vec![
+            Event::Destroy { ctx, id: canceled },
+            Event::Release { ctx, id: canceled },
+            Event::Release { ctx, id: finished },
+        ]
+    );
 
     // Both are forgotten.
     f.tracker.annotate(canceled, "k", "v");
@@ -442,6 +450,7 @@ fn exit_after_destroy_still_reports_after() {
         vec![
             Event::Before { ctx, id },
             Event::Destroy { ctx, id },
+            Event::Release { ctx, id },
             Event::After { ctx, id },
         ]
     );
@@ -832,7 +841,9 @@ fn adopted_operation_outlives_its_creator() {
     );
     assert_eq!(events[1], Event::Before { ctx, id: op });
     assert_eq!(events[2], Event::After { ctx, id: op });
-    assert_eq!(events.len(), 4, "{events:?}");
+    // The last holder's release comes after the turn.
+    assert_eq!(events[4], Event::Release { ctx, id: op });
+    assert_eq!(events.len(), 5, "{events:?}");
     assert_eq!(f.tracker.stats().unknown, 0);
 
     // Both handles are gone.
@@ -853,7 +864,13 @@ fn unsettled_adopted_operation_is_destroyed_once_by_its_last_holder() {
     f.tracker.destroy(op);
     assert!(f.events().is_empty());
     f.tracker.destroy(op);
-    assert_eq!(f.events(), vec![Event::Destroy { ctx, id: op }]);
+    assert_eq!(
+        f.events(),
+        vec![
+            Event::Destroy { ctx, id: op },
+            Event::Release { ctx, id: op }
+        ]
+    );
     assert_eq!(f.tracker.stats().unknown, 0);
 }
 
@@ -1003,5 +1020,51 @@ fn a_child_operation_names_its_parent() {
         events.iter().any(
             |e| matches!(e, Event::Init { id, parent, .. } if *id == inner && *parent == outer)
         )
+    );
+}
+
+#[test]
+fn a_resource_settled_without_a_callback_is_still_released() {
+    // For example, a detached span's operation: it settles, no bridge runs it, and its handle is
+    // then dropped. Sinks that keep per-resource state rely on the release.
+    let mut f = Fixture::new();
+    let ctx = f.ctx();
+    f.tracker.turn_begin(0);
+    let op = f.create(Kind::Operation, "r2_put");
+    f.tracker.mark_bound(op);
+    f.tracker.turn_end();
+    let _ = f.events();
+    f.tracker.settle(op, Outcome::Ok);
+    f.tracker.destroy(op);
+    assert_eq!(
+        f.events(),
+        vec![
+            Event::Settle {
+                ctx,
+                id: op,
+                outcome: Outcome::Ok
+            },
+            Event::Release { ctx, id: op },
+        ]
+    );
+}
+
+#[test]
+fn an_unowned_resource_is_released_when_it_settles() {
+    let mut f = Fixture::new();
+    let ctx = f.ctx();
+    let promise = f.tracker.create_unowned(Kind::JsPromise, "Promise", 0);
+    let _ = f.events();
+    f.tracker.settle(promise, Outcome::Ok);
+    assert_eq!(
+        f.events(),
+        vec![
+            Event::Settle {
+                ctx,
+                id: promise,
+                outcome: Outcome::Ok
+            },
+            Event::Release { ctx, id: promise },
+        ]
     );
 }
