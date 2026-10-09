@@ -55,6 +55,45 @@ export const existenceTest = {
   },
 };
 
+// The bootstrap's globals are own properties of globalThis. The C++ classes they replace
+// must not be installed anywhere on the global's prototype chain, where deleting the own
+// property would expose them.
+export const noLegacyGlobalsOnPrototypeChain = {
+  test() {
+    const names = [
+      'ReadableStream',
+      'ReadableStreamDefaultReader',
+      'ReadableStreamBYOBReader',
+      'ReadableStreamDefaultController',
+      'ReadableByteStreamController',
+      'ReadableStreamBYOBRequest',
+      'ByteLengthQueuingStrategy',
+      'CountQueuingStrategy',
+      'WritableStream',
+      'WritableStreamDefaultWriter',
+      'WritableStreamDefaultController',
+      'TransformStream',
+      'TransformStreamDefaultController',
+      'IdentityTransformStream',
+      'FixedLengthStream',
+      'TextEncoderStream',
+      'TextDecoderStream',
+      'CompressionStream',
+      'DecompressionStream',
+    ];
+    for (const name of names) {
+      ok(Object.hasOwn(globalThis, name), `${name} is an own global`);
+      for (
+        let proto = Object.getPrototypeOf(globalThis);
+        proto !== null;
+        proto = Object.getPrototypeOf(proto)
+      ) {
+        ok(!Object.hasOwn(proto, name), `${name} is on the global prototype`);
+      }
+    }
+  },
+};
+
 // ======================================================================================
 // C++-created streams (JsReadableStream::create()) are backed by the TypeScript
 // implementation under the typescript_implemented_streams flag: the C++ side wraps its
