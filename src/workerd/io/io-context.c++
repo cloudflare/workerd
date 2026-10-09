@@ -1180,9 +1180,16 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
   }
 
   // The span lives as long as the client, not just until the caller's next awaitIo(), which may
-  // await something else.
-  tracing.detachAsync();
-  if (tracing.isObserved()) {
+  // await something else; unless the caller says that awaitIo() awaits this subrequest.
+  bool keepForAsyncTrace = false;
+  if (options.spanAwaitedNext == SpanAwaitedNext::NO) {
+    tracing.detachAsync();
+  } else {
+    // Unobserved spans are dropped here, which would settle the operation before awaitIo() can
+    // adopt it; keep it with the client, as an observed span would be.
+    keepForAsyncTrace = tryGetAsyncTracker() != kj::none;
+  }
+  if (tracing.isObserved() || keepForAsyncTrace) {
     auto ioOwnedSpan = addObject(kj::heap(kj::mv(tracing)));
     ret = ret.attach(kj::mv(ioOwnedSpan));
   }
@@ -1206,8 +1213,11 @@ kj::Own<WorkerInterface> IoContext::getSubrequest(
   return getSubrequestNoChecks(kj::mv(func), kj::mv(options), CountSubrequest::YES);
 }
 
-kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
-    uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName) {
+kj::Own<WorkerInterface> IoContext::getSubrequestChannel(uint channel,
+    bool isInHouse,
+    kj::Maybe<kj::String> cfBlobJson,
+    kj::ConstString operationName,
+    SpanAwaitedNext spanAwaitedNext) {
   return getSubrequest(
       [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
     return getSubrequestChannelImpl(
@@ -1217,6 +1227,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
         .inHouse = isInHouse,
         .wrapMetrics = !isInHouse,
         .operationName = kj::mv(operationName),
+        .spanAwaitedNext = spanAwaitedNext,
       });
 }
 
@@ -1290,10 +1301,13 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,
   return client;
 }
 
-kj::Own<kj::HttpClient> IoContext::getHttpClient(
-    uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName) {
-  return asHttpClient(
-      getSubrequestChannel(channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName)));
+kj::Own<kj::HttpClient> IoContext::getHttpClient(uint channel,
+    bool isInHouse,
+    kj::Maybe<kj::String> cfBlobJson,
+    kj::ConstString operationName,
+    SpanAwaitedNext spanAwaitedNext) {
+  return asHttpClient(getSubrequestChannel(
+      channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName), spanAwaitedNext));
 }
 
 kj::Own<kj::HttpClient> IoContext::getHttpClient(
