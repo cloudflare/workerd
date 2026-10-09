@@ -105,6 +105,7 @@ export {
   cancelFromReadResultThenGetterDuringWrite,
   cancelFromReadResultThenGetterDuringClose,
   interopErrorFromReadResultThenGetterDuringClose,
+  interopErrorFromReadResultThenGetterDuringWrite,
   secondConcurrentRead,
   writeFromReadContinuation,
   cancelSiblingFromReadContinuation,

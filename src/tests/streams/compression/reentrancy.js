@@ -190,6 +190,42 @@ export const interopErrorFromReadResultThenGetterDuringClose = {
   },
 };
 
+// TypeScript only: the interop hook erroring the pair from a read result's
+// `then` getter while a write is delivering still lets that in-flight write
+// resolve, as a spec transform's does (only the flush checks the readable's
+// state); both sides then expose the hook's error.
+export const interopErrorFromReadResultThenGetterDuringWrite = {
+  async test() {
+    if (!usingTsImpl) return;
+    const kErrorFn = Symbol.for('nodejs.webstream.controllerErrorFunction');
+    const cs = new CompressionStream('gzip');
+    const writer = cs.writable.getWriter();
+    const reader = cs.readable.getReader();
+    const first = reader.read();
+    const error = new Error('errored from then');
+    let errored = false;
+    let writeOutcome;
+    await withThenInterceptor(
+      () => {
+        if (errored) return;
+        errored = true;
+        cs.readable[kErrorFn](error);
+      },
+      async () => {
+        writeOutcome = await writer.write(enc.encode('hello')).then(
+          () => 'resolved',
+          (e) => e
+        );
+      }
+    );
+    ok(errored, 'the getter fired');
+    strictEqual(writeOutcome, 'resolved');
+    strictEqual((await first).done, false);
+    await rejects(writer.closed, (e) => e === error);
+    await rejects(reader.closed, (e) => e === error);
+  },
+};
+
 export const secondConcurrentRead = {
   async test() {
     const cs = new CompressionStream('gzip');
