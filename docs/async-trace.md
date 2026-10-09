@@ -9,8 +9,8 @@ and which caller delivered a subrequest to a service binding.
 The model follows Node.js's [`async_hooks`](https://nodejs.org/api/async_hooks.html): activity
 is a set of _resources_ with lifecycle events and causal edges between them. Async tracing is a
 diagnostics tool for people running workerd, mainly in local development. Workers can't see or
-use it. It is separate from Workers' tracing and observability features (`trace.h`, tail workers,
-user spans), but reuses their span names.
+use it. It is separate from Workers' span tracing (`trace.h`, tail workers, user spans), but builds
+on its spans; see [Compared with span tracing](#compared-with-span-tracing).
 
 ## Quick start
 
@@ -183,6 +183,83 @@ when they settle and never get `destroy`.
 
 With promises traced, the trace shows the chain from one `await` to the next inside a turn.
 Without them, it shows only what started each turn.
+
+## Compared with span tracing
+
+Span tracing records which operations a request performed and how long each took. Async tracing
+records how the request's JavaScript ran over time, and which event caused each part of it to run.
+
+### Purpose and audience
+
+Spans (`trace.h`, `SpanBuilder`, `TraceContext`, user spans) are a product observability feature.
+They run in production, including in multi-tenant processes, and reach customers through tail
+workers and the tracing export path. Span names and tags are part of what customers depend on.
+
+Async tracing is for whoever runs workerd. Workers can't see it, nothing reaches customers, and
+it is off unless configured. Its format is versioned for tools, not offered as a product API.
+
+### What each one models
+
+Spans form a tree of intervals. Each binding call gets a start, an end and tags, nested under the
+request or under another span through span-context propagation. From spans you learn that a
+request made a `kv_get` that took 40 ms, inside some outer span.
+
+Async tracing forms a causal graph of resources and turns. It records when JavaScript ran
+(`before`/`after`), which completion started each turn, what created each resource (`trigger`,
+`exec`), and how long each turn waited for the isolate lock. From it you learn that the `kv_get`
+completed, that its completion caused a turn that waited 1 ms for the lock and ran for 2 ms, and
+that the turn started a `setTimeout` whose firing caused the next turn. Spans can't say what
+resumed the handler or what scheduled a callback.
+
+### Coverage
+
+Spans exist only where runtime code creates them, mostly binding calls and subrequests. Async
+tracing also covers timers, `queueMicrotask`, every `awaitIo()` and `awaitJs()` bridge, stream
+and socket I/O, the turns themselves, and optionally every promise. It can also record the
+JavaScript stack that created each resource.
+
+### Causality
+
+A span's parent means "this happened within that operation", and comes from whichever span is
+current when the call is made. An async trace `trigger` means "this was caused by that event".
+Async tracing keeps the structural relationship too, as the separate `parent` field.
+
+### Timing
+
+In production, user-facing spans use the runtime's Spectre-safe clock, which doesn't advance while
+JavaScript runs, so they can't show how CPU time and waiting divide up within a request. Async
+tracing uses a real monotonic clock with nanosecond resolution, which is acceptable for a local
+tool.
+
+### How they connect
+
+Async tracing builds on spans rather than replacing them:
+
+- Every `TraceContext` created for a traced context also creates an `operation` resource, named
+  after the span, with the span's tags as annotations. This happens even when no tracer observes
+  the span, which is the usual case in local workerd. `IoContext::makeUserTraceSpan()` records the
+  operation with its own context's tracker. A child span made with
+  `TraceContextParent::newChild()`, which cannot reach the context, uses the tracker of the
+  innermost turn on the thread.
+- The `awaitIo()` bridge that waits for the call adopts that operation, so the turn it resumes is
+  attributed to `kv_get` rather than to a generic bridge.
+- Span parents provide `parent` edges.
+
+None of this changes the spans themselves: their names, tags and lifetimes are the same with or
+without async tracing.
+
+### Outputs and cost
+
+Spans go to the tracer, and from there to tail workers and trace export. They are designed to be
+on in production. Async tracing goes to the NDJSON file, Perfetto and the inspector. When it is
+off, it costs a null check per instrumentation point, and its expensive tiers (creation stacks and
+the promise hook) are opt-in. The promise hook is never installed in a multi-tenant process.
+
+### Which to use
+
+Use spans to see which calls a request made and how long each took, in production and visible
+to customers. Use async tracing to see why a request was slow, what it was waiting on, and what
+made each piece of JavaScript run, while debugging locally.
 
 ## Outputs
 
