@@ -161,7 +161,8 @@ class IoContext::TimeoutManagerImpl::TimeoutState {
 namespace {
 
 // Creates the context's tracker if the isolate has async tracing enabled and there is at least one
-// sink: the embedder's, or Perfetto's if it is recording "workerd.async".
+// sink: the embedder's, Perfetto's if it is recording "workerd.async", or the inspector's if a
+// DevTools session is connected to the isolate.
 kj::Maybe<kj::Arc<AsyncTracker>> makeAsyncTracker(
     const Worker& worker, kj::Maybe<Worker::Actor&> actor) {
   auto& isolate = worker.getIsolate();
@@ -182,6 +183,9 @@ kj::Maybe<kj::Arc<AsyncTracker>> makeAsyncTracker(
     isolate.getMetrics().addAsyncTraceSinks(sinks, isolate.getId(), actorIdPtr);
     if (isAsyncTracePerfettoEnabled()) {
       sinks.add(newAsyncTracePerfettoSink(isolate.getId(), actorIdPtr));
+    }
+    KJ_IF_SOME(sink, isolate.newAsyncTraceInspectorSink()) {
+      sinks.add(kj::mv(sink));
     }
     return AsyncTracker::tryCreate(traceIsolate, kj::mv(sinks), isolate.getId(), actorIdPtr);
   }

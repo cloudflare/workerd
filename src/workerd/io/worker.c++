@@ -10,6 +10,7 @@
 #include <workerd/api/sockets.h>
 #include <workerd/api/streams/common.h>  // for api::StreamEncoding
 #include <workerd/io/actor-sqlite.h>
+#include <workerd/io/async-trace-inspector.h>
 #include <workerd/io/async-trace-perfetto.h>
 #include <workerd/io/async-trace.h>
 #include <workerd/io/cdp.capnp.h>
@@ -458,11 +459,19 @@ class Worker::InspectorClient: public v8_inspector::V8InspectorClient {
     // previous channel should have invalidated `lockedState->channel`.
     KJ_REQUIRE(lockedState->channel == kj::none);
     lockedState->channel = channel;
+    sessionConnected.store(true, std::memory_order_relaxed);
   }
 
   void resetChannel() {
     auto lockedState = state.lockExclusive();
     lockedState->channel = kj::none;
+    sessionConnected.store(false, std::memory_order_relaxed);
+  }
+
+  // Whether a DevTools session is connected. Callable from any thread without taking `state`'s
+  // lock, which runMessageLoopOnPause() holds for as long as the debugger is paused.
+  bool hasSession() const {
+    return sessionConnected.load(std::memory_order_relaxed);
   }
 
   // This method is called by v8 when a breakpoint or debugger statement is hit. This method
@@ -510,6 +519,9 @@ class Worker::InspectorClient: public v8_inspector::V8InspectorClient {
     kj::Maybe<InspectorTimerInfo> inspectorTimerInfo;
   };
   kj::MutexGuarded<State> state;
+
+  // Mirrors `state.channel != kj::none`; see hasSession().
+  std::atomic_bool sessionConnected = false;
 };
 
 static thread_local const Worker::Api* currentApi = nullptr;
@@ -555,6 +567,8 @@ struct Worker::Isolate::Impl {
   IsolateObserver& metrics;
   kj::Own<InspectorClient> inspectorClient;
   kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>> inspector;
+  // The isolate `inspector` belongs to.
+  v8::Isolate* v8Isolate;
   InspectorPolicy inspectorPolicy;
   kj::Maybe<kj::Own<v8::CpuProfiler>> profiler;
   ActorCache::SharedLru actorCacheLru;
@@ -732,6 +746,7 @@ struct Worker::Isolate::Impl {
     kj::Own<InspectorClient> inspectorClient;
     kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>> inspector;
     ::rust::Box<::workerd::rust::jsg::Realm> realm;
+    v8::Isolate* v8Isolate;
   };
 
   static IsolateState initIsolate(
@@ -740,8 +755,10 @@ struct Worker::Isolate::Impl {
     // Default constructor of ::rust::Box is deleted, so we use a Maybe to delay initialization.
     kj::Maybe<::rust::Box<::workerd::rust::jsg::Realm>> realm;
     kj::Maybe<std::unique_ptr<v8_inspector::V8Inspector>> inspector;
+    v8::Isolate* v8Isolate = nullptr;
     jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
       auto lock = api.lock(stackScope);
+      v8Isolate = lock->v8Isolate;
       auto featureFlags = api.getFeatureFlags();
       auto featureFlagsWords = capnp::canonicalize(featureFlags);
       realm = ::workerd::rust::jsg::realm_create(
@@ -772,7 +789,8 @@ struct Worker::Isolate::Impl {
         inspector = v8_inspector::V8Inspector::create(lock->v8Isolate, inspectorClient.get());
       }
     });
-    return {kj::mv(inspectorClient), kj::mv(inspector), kj::mv(KJ_REQUIRE_NONNULL(realm))};
+    return {
+      kj::mv(inspectorClient), kj::mv(inspector), kj::mv(KJ_REQUIRE_NONNULL(realm)), v8Isolate};
   }
 
   Impl(IsolateObserver& metrics,
@@ -782,6 +800,7 @@ struct Worker::Isolate::Impl {
       : metrics(metrics),
         inspectorClient(kj::mv(state.inspectorClient)),
         inspector(kj::mv(state.inspector)),
+        v8Isolate(state.v8Isolate),
         inspectorPolicy(inspectorPolicy),
         actorCacheLru(limitEnforcer.getActorCacheLruOptions()),
         realm(kj::mv(state.realm)) {}
@@ -1169,9 +1188,10 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
       userTraceAsyncContextKey(kj::arc<jsg::AsyncContextFrame::StorageKey>()) {
   api->setIsolateObserver(*metrics);
   metrics->createdWithUuid(getUuid());
-  // A Perfetto session recording "workerd.async" also needs the isolate's state. Only sessions
-  // already running when the isolate is created see its contexts.
-  if (metrics->getAsyncTraceConfig() != kj::none || isAsyncTracePerfettoEnabled()) {
+  // A Perfetto session recording "workerd.async" also needs the isolate's state (only sessions
+  // already running when the isolate is created see its contexts), and so does an inspector.
+  if (metrics->getAsyncTraceConfig() != kj::none || isAsyncTracePerfettoEnabled() ||
+      impl->inspector != kj::none) {
     asyncTraceIsolate = kj::heap<AsyncTraceIsolate>();
   }
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
@@ -4699,6 +4719,15 @@ void Worker::Isolate::completedRequest() const {
 
 bool Worker::Isolate::isInspectorEnabled() const {
   return impl->inspector != kj::none;
+}
+
+kj::Maybe<kj::Own<AsyncTraceListener>> Worker::Isolate::newAsyncTraceInspectorSink() const {
+  KJ_IF_SOME(i, impl->inspector) {
+    if (impl->inspectorClient->hasSession()) {
+      return workerd::newAsyncTraceInspectorSink(*i, impl->v8Isolate);
+    }
+  }
+  return kj::none;
 }
 
 kj::Maybe<v8_inspector::V8Inspector&> Worker::Isolate::tryGetV8Inspector() const {
