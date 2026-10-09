@@ -159,6 +159,11 @@ void AsyncTracker::markBound(AsyncId id) const {
   impl->mark_bound(id);
 }
 
+void AsyncTracker::countUnusedOperationName() const {
+  if (!onOwnerThread()) return;
+  impl->count_unused_operation_name();
+}
+
 void AsyncTracker::close() const {
   if (!onOwnerThread()) return;
   impl->count_foreign_thread(foreignThreadCalls.exchange(0, std::memory_order_relaxed));

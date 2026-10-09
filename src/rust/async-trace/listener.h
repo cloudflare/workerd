@@ -83,6 +83,7 @@ struct AsyncContextStats {
   uint64_t unknown;
   uint64_t unbalanced;
   uint64_t ambiguousBindings;
+  uint64_t unusedOperationNames;
   uint64_t foreignThread;
 };
 
@@ -249,6 +250,7 @@ inline void listener_context_end(AsyncTraceListener& listener,
     uint64_t unknown,
     uint64_t unbalanced,
     uint64_t ambiguousBindings,
+    uint64_t unusedOperationNames,
     uint64_t foreignThread) {
   AsyncContextStats stats{
     .created = created,
@@ -256,6 +258,7 @@ inline void listener_context_end(AsyncTraceListener& listener,
     .unknown = unknown,
     .unbalanced = unbalanced,
     .ambiguousBindings = ambiguousBindings,
+    .unusedOperationNames = unusedOperationNames,
     .foreignThread = foreignThread,
   };
   callListener([&]() { listener.onContextEnd(ctx, at, stats); });

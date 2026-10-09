@@ -120,6 +120,7 @@ enum Line<'a> {
         unknown: u64,
         unbalanced: u64,
         ambiguous_bindings: u64,
+        unused_operation_names: u64,
         foreign_thread: u64,
     },
 }
@@ -325,6 +326,7 @@ impl Sink for NdjsonSink {
             unknown: stats.unknown,
             unbalanced: stats.unbalanced,
             ambiguous_bindings: stats.ambiguous_bindings,
+            unused_operation_names: stats.unused_operation_names,
             foreign_thread: stats.foreign_thread,
         });
         self.write_out();

@@ -880,6 +880,35 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     });
   }
 
+  // Names the awaitIo() bridge created while it is alive as a binding operation: an OPERATION
+  // resource called `name` (a string literal), instead of a generic `awaitIo` bridge, which no
+  // other bridge adopts. For I/O that has no trace span, such as stream reads and socket connects.
+  // Wrap exactly one awaitIo() call; the first bridge created in the scope takes the name. A scope
+  // that ends normally without any bridge taking the name is counted in the context's stats
+  // (`unusedOperationNames`). Does nothing if the context is not traced.
+  class AwaitIoOperation {
+   public:
+    AwaitIoOperation(const IoContext& context, kj::StringPtr name)
+        : context(context),
+          previous(context.awaitIoOperationName) {
+      context.awaitIoOperationName = name;
+    }
+    ~AwaitIoOperation() noexcept(false) {
+      if (context.awaitIoOperationName != kj::none && !unwindDetector.isUnwinding()) {
+        KJ_IF_SOME(tracker, context.tryGetAsyncTracker()) {
+          tracker.countUnusedOperationName();
+        }
+      }
+      context.awaitIoOperationName = previous;
+    }
+    KJ_DISALLOW_COPY_AND_MOVE(AwaitIoOperation);
+
+   private:
+    const IoContext& context;
+    kj::Maybe<kj::StringPtr> previous;
+    kj::UnwindDetector unwindDetector;
+  };
+
   // Like awaitIo(), but handles the specific case of Promise<DeferredProxy>. This is special
   // because the convention is that the outer promise is NOT treated as a pending I/O event; it
   // may actually be waiting for something to happen in JavaScript land. Once the outer promise
@@ -1365,10 +1394,19 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // traced.
   AsyncResource makeAwaitIoResource() const {
     KJ_IF_SOME(tracker, tryGetAsyncTracker()) {
+      KJ_IF_SOME(name, awaitIoOperationName) {
+        awaitIoOperationName = kj::none;
+        auto resource = tracker.create(AsyncKind::OPERATION, name);
+        resource.markBound();
+        return resource;
+      }
       return tracker.adoptOrCreate(AsyncKind::KJ_TO_JS, "awaitIo"_kj);
     }
     return {};
   }
+
+  // Set by AwaitIoOperation.
+  mutable kj::Maybe<kj::StringPtr> awaitIoOperationName;
   AsyncResource makeAwaitJsResource() const {
     KJ_IF_SOME(tracker, tryGetAsyncTracker()) {
       return tracker.create(AsyncKind::JS_TO_KJ, "awaitJs"_kj);

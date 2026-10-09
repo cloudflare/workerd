@@ -206,6 +206,10 @@ class AsyncTracker final: public kj::AtomicRefcounted {
   // Takes `id` out of consideration for adoptOperation().
   void markBound(AsyncId id) const;
 
+  // Reports, in the context's stats, a name for a bridge's operation that no bridge took
+  // (IoContext::AwaitIoOperation).
+  void countUnusedOperationName() const;
+
   // For the promise hook (async-trace-promises.h). A promise has no handle: the tracker forgets it
   // when it settles, or when the tracker closes. createPromise() returns 0 if it was not recorded.
   // `parent` is the promise it derives from, or 0 for the turn's cause. Promises never record a

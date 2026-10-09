@@ -155,6 +155,8 @@ pub struct ContextStats {
     pub unbalanced: u64,
     /// Bridges that adopted an operation while more than one was eligible.
     pub ambiguous_bindings: u64,
+    /// Names for a bridge's operation (C++ `IoContext::AwaitIoOperation`) that no bridge took.
+    pub unused_operation_names: u64,
     /// Events dropped because they arrived on a thread other than the context's.
     pub foreign_thread: u64,
 }
