@@ -674,6 +674,15 @@ void JsRpcPromise::resolve(jsg::Lock& js, jsg::JsValue result) {
   }
 }
 
+void JsRpcPromise::reject(kj::Exception exception) {
+  if (state.is<Pending>()) {
+    state = Rejected{
+      .exception = kj::mv(exception),
+      .ctxCheck = IoContext::current().addObject(*this),
+    };
+  }
+}
+
 void JsRpcPromise::setOriginatingCall(kj::Maybe<TraceContextParent> value) {
   originatingCall = ownOriginatingCall(kj::mv(value));
 }
@@ -759,6 +768,15 @@ JsRpcClientProvider::ClientForOneCall JsRpcPromise::getClientForOneCall(
           JSG_FAIL_REQUIRE(TypeError, "Can't pipeline on RPC that did not return an object.");
         }
       }),
+        .callSpanParents = kj::mv(callSpanParents),
+      };
+    }
+    KJ_CASE_ONEOF(rejected, Rejected) {
+      // Dereference `ctxCheck` just to verify we're running in the correct context. (If not,
+      // this will throw.)
+      *rejected.ctxCheck;
+      return {
+        .client = rejected.exception.clone(),
         .callSpanParents = kj::mv(callSpanParents),
       };
     }
@@ -1392,6 +1410,29 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
         return jsg::Value(js.v8Isolate, jsResult);
       };
 
+      auto rejectResult = [weakRef = kj::atomicAddRef(*weakRef)](
+                              jsg::Lock& js, jsg::Value error) -> jsg::Value {
+        if (weakRef->ref != kj::none) {
+          // exceptionToKj() can run application code, such as getters on Error.prototype. That
+          // code can throw, or let GC destroy the promise, so look the promise up again after.
+          auto exception = [&]() -> kj::Exception {
+            JSG_TRY(js) {
+              return js.exceptionToKj(jsg::JsValue(error.getHandle(js)));
+            }
+            JSG_CATCH(_) {
+              // Only pipelined operations report this error. The caller still receives `error`,
+              // which is rethrown below.
+              return JSG_KJ_EXCEPTION(
+                  FAILED, Error, "The RPC call failed with an error that could not be serialized.");
+            }
+          }();
+          KJ_IF_SOME(r, weakRef->ref) {
+            r.reject(kj::mv(exception));
+          }
+        }
+        js.throwException(kj::mv(error));
+      };
+
       auto jsPromise = [&]() -> jsg::Promise<jsg::Value> {
         KJ_IF_SOME(retryState, callRetryState) {
           return awaitJsRpcCallAttempt(
@@ -1426,7 +1467,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
           }
         }
         return promise;
-      }();
+      }().catch_(js, kj::mv(rejectResult));
 
       auto pendingPipeline =
           [&]() -> kj::OneOf<rpc::JsRpcTarget::CallResults::Pipeline, kj::Rc<JsRpcCallRetryState>> {
