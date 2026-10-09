@@ -375,7 +375,8 @@ function startTlsIgnoringUpgrade(socket) {
 
 // DETACH WITH WRITES PENDING: writes made after startTls() through a
 // writer released before the flush settles are still pending at the
-// detach: one in flight (8 MiB to a server that never reads) and two
+// detach: one in flight (32 MiB to a server that never reads, well past
+// the loopback socket buffers even on hosts with a raised tcp_wmem) and two
 // queued. The detach closes the writable, leaves it locked, and rejects
 // all three with the same disconnect error; none of them completes on
 // the connection the upgrade takes over. The order of the write
@@ -395,7 +396,7 @@ export const detachRejectsPendingWrites = {
     socket.closed.then(() => order.push('closed'));
     const writer = socket.writable.getWriter();
     const writes = [
-      writer.write(new Uint8Array(8 * 1024 * 1024)),
+      writer.write(new Uint8Array(32 * 1024 * 1024)),
       writer.write(enc.encode('a')),
       writer.write(enc.encode('b')),
     ];

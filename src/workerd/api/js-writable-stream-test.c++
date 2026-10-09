@@ -1106,10 +1106,17 @@ KJ_TEST("JsWritableStream detach TS arm cancels an in-flight write and rejects p
         outcomes.add(kj::str(jsg::JsValue(error.getHandle(js))));
       }).markAsHandled(js);
     }
+    // A flush queued behind them is dropped with the controller's queue.
+    stream.forceFlush(js)
+        .then(js, [&outcomes](jsg::Lock& js) { outcomes.add(kj::str("flush fulfilled")); },
+            [&outcomes](jsg::Lock& js, jsg::Value error) {
+      outcomes.add(kj::str(jsg::JsValue(error.getHandle(js))));
+    }).markAsHandled(js);
 
     // A KJ roundtrip drains the microtask queue, so by the continuation the first write is
     // in flight. The detach cancels its I/O (the gate's promise is dropped) and rejects
-    // both writes with the disconnect error; a second roundtrip lets the rejections land.
+    // both writes and the queued flush with the disconnect error; a second roundtrip lets
+    // the rejections land.
     auto sequence = env.context
                         .awaitIo(js, kj::Promise<void>(kj::READY_NOW),
                             [&written, &gate, stream = kj::mv(stream)](jsg::Lock& js) mutable {
@@ -1123,7 +1130,7 @@ KJ_TEST("JsWritableStream detach TS arm cancels an in-flight write and rejects p
     return env.context.awaitJs(js, kj::mv(sequence));
   });
   KJ_EXPECT(written.asPtr() == "a"_kjb);
-  KJ_ASSERT(outcomes.size() == 2, outcomes.size());
+  KJ_ASSERT(outcomes.size() == 3, outcomes.size());
   for (auto& outcome: outcomes) {
     KJ_EXPECT(outcome == "Error: Network connection lost.", outcome);
   }

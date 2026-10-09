@@ -258,14 +258,15 @@ let controllerGetDesiredSize: <W>(
   controller: WritableStreamDefaultController<W>
 ) => number;
 let controllerErrorSteps: <W>(
-  controller: WritableStreamDefaultController<W>
+  controller: WritableStreamDefaultController<W>,
+  reason: unknown
 ) => void;
-// The controller's error() for internal callers, which must not dispatch
-// through the user-patchable prototype method.
 let controllerDetachSteps: <W>(
   controller: WritableStreamDefaultController<W>,
   reason: unknown
 ) => void;
+// The controller's error() for internal callers, which must not dispatch
+// through the user-patchable prototype method.
 let controllerErrorIfNeeded: <W>(
   controller: WritableStreamDefaultController<W>,
   reason: unknown
@@ -689,11 +690,11 @@ class WritableStream<W = unknown> {
       stream.#state = 'errored';
       settleClosedPromise(stream);
       stream.#interopErrorHook = undefined;
+      const storedError = stream.#storedError;
       const controller = stream.#controller;
       if (controller !== undefined) {
-        controllerErrorSteps(controller); // reset the controller queue
+        controllerErrorSteps(controller, storedError); // reset the controller queue
       }
-      const storedError = stream.#storedError;
       const writeRequests = stream.#writeRequests;
       stream.#writeRequests = new RingBuffer();
       for (let i = 0; i < writeRequests.length; i++) {
@@ -1034,32 +1035,12 @@ class WritableStreamDefaultController<
       AbortControllerAbort(controller.#abortController, reason);
     };
 
+    // Drops the queue, rejecting any queued flush requests with `reason`:
+    // the writes ahead of them can no longer complete.
     controllerErrorSteps = <W>(
-      controller: WritableStreamDefaultController<W>
-    ) => {
-      const queue = controller.#queue;
-      controller.#queue = new RingBuffer();
-      controller.#queueTotalSize = 0;
-      // Reject any queued flush requests: the writes ahead of them can no
-      // longer complete. The stored error is already set — the erroring
-      // machinery assigns it before invoking the error steps.
-      const error = getWritableStreamStoredError(controller.#stream);
-      for (let i = 0; i < queue.length; i++) {
-        const entry = queue.get(i) as QueuedWrite<W>;
-        if (entry.value === kFlushMarker) {
-          (entry.flushRequest as PromiseWithResolversType<void>).reject(error);
-        }
-      }
-    };
-
-    // detachWritableStream's controller half: nothing reaches the sink
-    // again. The queue is dropped (a queued flush rejects with the
-    // detach's reason) and the algorithms are cleared, releasing the sink.
-    controllerDetachSteps = <W>(
       controller: WritableStreamDefaultController<W>,
       reason: unknown
     ) => {
-      controller.#clearAlgorithms();
       const queue = controller.#queue;
       controller.#queue = new RingBuffer();
       controller.#queueTotalSize = 0;
@@ -1069,6 +1050,17 @@ class WritableStreamDefaultController<
           (entry.flushRequest as PromiseWithResolversType<void>).reject(reason);
         }
       }
+    };
+
+    // detachWritableStream's controller half: nothing reaches the sink
+    // again. The algorithms are cleared, releasing the sink, and the queue
+    // is dropped as by the error steps, with the detach's reason.
+    controllerDetachSteps = <W>(
+      controller: WritableStreamDefaultController<W>,
+      reason: unknown
+    ) => {
+      controller.#clearAlgorithms();
+      controllerErrorSteps(controller, reason);
     };
 
     controllerErrorIfNeeded = (controller, reason) => {
