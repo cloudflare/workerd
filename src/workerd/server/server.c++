@@ -5897,23 +5897,29 @@ kj::Promise<kj::Rc<Server::Service>> Server::makeWorker(kj::StringPtr name,
 
 namespace {
 
-// Enables async tracing for an isolate and writes each of its contexts to the --async-trace file.
+// Enables async tracing for an isolate (--async-trace, --async-trace-stacks) and writes each of
+// its contexts to the --async-trace file, if there is one.
 class AsyncTraceIsolateObserver final: public IsolateObserver {
  public:
-  explicit AsyncTraceIsolateObserver(const AsyncTraceWriter& writer): writer(writer) {}
+  AsyncTraceIsolateObserver(kj::Maybe<const AsyncTraceWriter&> writer, uint32_t stackDepth)
+      : writer(writer),
+        stackDepth(stackDepth) {}
 
   kj::Maybe<AsyncTraceConfig> getAsyncTraceConfig() const override {
-    return AsyncTraceConfig{};
+    return AsyncTraceConfig{.stackDepth = stackDepth};
   }
 
   void addAsyncTraceSinks(AsyncTraceSinks& sinks,
       kj::StringPtr worker,
       kj::Maybe<kj::StringPtr> actorId) const override {
-    sinks.addNdjson(writer);
+    KJ_IF_SOME(w, writer) {
+      sinks.addNdjson(w);
+    }
   }
 
  private:
-  const AsyncTraceWriter& writer;
+  kj::Maybe<const AsyncTraceWriter&> writer;
+  uint32_t stackDepth;
 };
 
 }  // namespace
@@ -5926,8 +5932,9 @@ kj::Own<Worker::Isolate> Server::makeWorkerIsolate(kj::StringPtr name,
     kj::Maybe<jsg::SnapshotConfig> snapshotConfig) {
   auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
   kj::Own<IsolateObserver> observer;
-  KJ_IF_SOME(writer, asyncTraceWriter) {
-    observer = kj::atomicRefcounted<AsyncTraceIsolateObserver>(writer);
+  if (asyncTraceWriter != kj::none || asyncTraceStackDepth > 0) {
+    observer =
+        kj::atomicRefcounted<AsyncTraceIsolateObserver>(asyncTraceWriter, asyncTraceStackDepth);
   } else {
     observer = kj::atomicRefcounted<IsolateObserver>();
   }

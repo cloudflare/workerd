@@ -166,6 +166,9 @@ class CliMain {
           asyncTraceWriter.emplace(AsyncTraceWriter::open(kj::str(path), RELEASE_VERSION));
       server->enableAsyncTrace(*writer);
     }
+    KJ_IF_SOME(frames, options.async_trace_stacks) {
+      server->enableAsyncTraceStacks(frames);
+    }
     if (options.experimental) {
       server->allowExperimental();
     }

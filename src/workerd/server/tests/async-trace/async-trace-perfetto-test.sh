@@ -9,12 +9,15 @@ SCENARIO=$2
 
 ON=$TEST_TMPDIR/on.pftrace
 OFF=$TEST_TMPDIR/off.pftrace
-"$WORKERD_BINARY" test "$SCENARIO" "--perfetto-trace=$ON=workerd,workerd.async"
+"$WORKERD_BINARY" test "$SCENARIO" "--perfetto-trace=$ON=workerd,workerd.async" \
+  --async-trace-stacks=8
 "$WORKERD_BINARY" test "$SCENARIO" "--perfetto-trace=$OFF=workerd"
 
 # Perfetto interns names, so each appears in the file as plain bytes. Decoding the structure needs
 # trace_processor, which isn't available here.
-NAMES=("scenario ctx" "setTimeout" "scheduler.wait" "queueMicrotask" "awaitIo" "turn" "ctx_end")
+# "test (worker:" is a creation stack frame, from --async-trace-stacks.
+NAMES=("scenario ctx" "setTimeout" "scheduler.wait" "queueMicrotask" "awaitIo" "turn" "ctx_end"
+  "test (worker:")
 STATUS=0
 for name in "${NAMES[@]}"; do
   if ! grep -q -a -F "$name" "$ON"; then

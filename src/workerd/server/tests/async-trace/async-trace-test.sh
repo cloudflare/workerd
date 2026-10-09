@@ -9,5 +9,6 @@ WORKERD_BINARY=$1
 SCENARIO=$2
 CHECK=$3
 
-"$WORKERD_BINARY" test "$SCENARIO" --async-trace="$TEST_TMPDIR/trace.ndjson"
+"$WORKERD_BINARY" test "$SCENARIO" --async-trace="$TEST_TMPDIR/trace.ndjson" \
+  --async-trace-stacks=8
 "$WORKERD_BINARY" test "$CHECK" -dtrace-dir="$TEST_TMPDIR"

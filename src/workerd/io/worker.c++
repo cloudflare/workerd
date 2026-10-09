@@ -12,6 +12,7 @@
 #include <workerd/io/actor-sqlite.h>
 #include <workerd/io/async-trace-inspector.h>
 #include <workerd/io/async-trace-perfetto.h>
+#include <workerd/io/async-trace-stacks.h>
 #include <workerd/io/async-trace.h>
 #include <workerd/io/cdp.capnp.h>
 #include <workerd/io/compatibility-date.h>
@@ -1190,9 +1191,16 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
   metrics->createdWithUuid(getUuid());
   // A Perfetto session recording "workerd.async" also needs the isolate's state (only sessions
   // already running when the isolate is created see its contexts), and so does an inspector.
-  if (metrics->getAsyncTraceConfig() != kj::none || isAsyncTracePerfettoEnabled() ||
+  auto asyncTraceConfig = metrics->getAsyncTraceConfig();
+  if (asyncTraceConfig != kj::none || isAsyncTracePerfettoEnabled() ||
       impl->inspector != kj::none) {
-    asyncTraceIsolate = kj::heap<AsyncTraceIsolate>();
+    kj::Maybe<kj::Arc<const AsyncStackCapturer>> stackCapturer;
+    KJ_IF_SOME(config, asyncTraceConfig) {
+      if (config.stackDepth > 0) {
+        stackCapturer = newAsyncStackCapturer(impl->v8Isolate, config.stackDepth);
+      }
+    }
+    asyncTraceIsolate = kj::heap<AsyncTraceIsolate>(kj::mv(stackCapturer));
   }
   // We just created our isolate, so we don't need to use Isolate::Impl::Lock (nor an async lock).
   jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
