@@ -425,6 +425,11 @@ class IsolateBase {
     return false;
   }
 
+  // True while createSnapshotBlob() collects garbage before its capture.
+  bool isCollectingForSnapshot() const {
+    return collectingForSnapshot;
+  }
+
   bool isStartingFromSnapshot() const {
     KJ_IF_SOME(c, snapshotConfig) {
       return c.is<FinalizedSnapshot>();
@@ -637,6 +642,7 @@ class IsolateBase {
   //    to serialize a startup snapshot.
   //  * FinalizedSnapshot: an isolate initialized from a previously-produced snapshot blob.
   kj::Maybe<SnapshotConfig> snapshotConfig;
+  bool collectingForSnapshot = false;
   // When true, evalAllowed is true and switching it to false is a no-op.
   bool alwaysAllowEval = false;
   bool evalAllowed = false;

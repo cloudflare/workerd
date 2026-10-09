@@ -781,7 +781,10 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
     v8::HandleScope scope(ptr);
     auto defaultContext = defaultContextHandle.Get(ptr);
     // A full GC first, so that only wrappers the worker actually retained are considered, both
-    // for re-creation payloads and for the rejection check.
+    // for re-creation payloads and for the rejection check. These collections also trace async
+    // context values (see AsyncContextFrame::jsgVisitForGc()).
+    collectingForSnapshot = true;
+    KJ_DEFER(collectingForSnapshot = false);
     ptr->LowMemoryNotification();
     // The collection can leave FinalizationRegistries with dead cells to clean up, and their
     // callbacks can drop objects the worker retained. Their cleanup task is queued on the
