@@ -60,6 +60,10 @@ pub enum Event {
         ctx: ContextId,
         id: AsyncId,
     },
+    Release {
+        ctx: ContextId,
+        id: AsyncId,
+    },
     Annotate {
         ctx: ContextId,
         id: AsyncId,
@@ -158,6 +162,10 @@ impl Sink for RecordingSink {
 
     fn destroy(&mut self, ctx: ContextId, id: AsyncId, _at: Nanos) {
         self.push(Event::Destroy { ctx, id });
+    }
+
+    fn release(&mut self, ctx: ContextId, id: AsyncId) {
+        self.push(Event::Release { ctx, id });
     }
 
     fn link(&mut self, ctx: ContextId, id: AsyncId, from: &Link) {
