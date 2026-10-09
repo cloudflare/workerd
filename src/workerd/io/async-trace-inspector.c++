@@ -7,6 +7,7 @@
 #include <v8-inspector.h>
 #include <v8-locker.h>
 
+#include <kj/map.h>
 #include <kj/vector.h>
 
 namespace workerd {
@@ -34,10 +35,13 @@ class InspectorSink final: public AsyncTraceListener {
     inspector.asyncTaskScheduled(
         v8_inspector::StringView(event.name.asBytes().begin(), event.name.size()), task(event.id),
         recurring);
+    scheduled.upsert(event.id, recurring);
   }
 
   void onBefore(uint64_t ctx, AsyncId id, uint64_t atNs) override {
-    if (isCurrent()) {
+    // A task V8 was never told about would start with an empty async parent, hiding the async
+    // stack of whatever V8 task (such as a promise reaction) is running.
+    if (isCurrent() && scheduled.find(id) != kj::none) {
       inspector.asyncTaskStarted(task(id));
       started.add(id);
     } else {
@@ -47,8 +51,7 @@ class InspectorSink final: public AsyncTraceListener {
 
   void onAfter(uint64_t ctx, AsyncId id, uint64_t atNs) override {
     // The tracker can discard scopes nested inside `id` without reporting them (it counts them as
-    // unbalanced); finish those too, so V8's stack of current tasks stays balanced. Finishing is
-    // done even if the isolate is not current: an unmatched start would corrupt V8's stack.
+    // unbalanced); finish those too, so V8's stack of current tasks stays balanced.
     for (size_t i = started.size(); i > 0; --i) {
       if (started[i - 1] == id) {
         while (started.size() >= i) finishLast();
@@ -58,18 +61,25 @@ class InspectorSink final: public AsyncTraceListener {
   }
 
   void onDestroy(uint64_t ctx, AsyncId id, uint64_t atNs) override {
-    if (isCurrent()) inspector.asyncTaskCanceled(task(id));
+    if (scheduled.find(id) != kj::none && isCurrent()) {
+      inspector.asyncTaskCanceled(task(id));
+      scheduled.erase(id);
+    }
   }
 
   void onContextEnd(uint64_t ctx, uint64_t atNs, const AsyncContextStats& stats) override {
     finishAll();
+    scheduled.clear();
   }
 
  private:
   v8_inspector::V8Inspector& inspector;
   v8::Isolate* isolate;
-  // Callbacks begun and not yet finished, innermost last. 0 = begun while the isolate was not
-  // current, so not reported to V8.
+  // Tasks reported to V8 with asyncTaskScheduled() that V8 still knows, with whether each recurs.
+  // V8 forgets a non-recurring task once it finishes.
+  kj::HashMap<AsyncId, bool> scheduled;
+  // Callbacks begun and not yet finished, innermost last. 0 = not reported to V8 (the isolate was
+  // not current, or the task was never scheduled).
   kj::Vector<AsyncId> started;
 
   // V8 keys its own (promise) tasks with odd values, so ours are even.
@@ -81,10 +91,18 @@ class InspectorSink final: public AsyncTraceListener {
     return v8::Isolate::TryGetCurrent() == isolate && v8::Locker::IsLocked(isolate);
   }
 
+  // Finishes the innermost started callback. Only an unbalanced scope (counted by the tracker) can
+  // leave a started task to be finished without the isolate current, as when the context closes
+  // from ~IoContext, where another thread may hold the isolate's lock. V8 is not called then: an
+  // unfinished task in V8's stack is better than a data race with V8.
   void finishLast() {
     AsyncId id = started.back();
     started.removeLast();
-    if (id != 0) inspector.asyncTaskFinished(task(id));
+    if (id == 0) return;
+    if (isCurrent()) inspector.asyncTaskFinished(task(id));
+    KJ_IF_SOME(recurring, scheduled.find(id)) {
+      if (!recurring) scheduled.erase(id);
+    }
   }
 
   void finishAll() {

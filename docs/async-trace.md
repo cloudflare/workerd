@@ -381,7 +381,16 @@ task captures the current stack, and each callback runs as the task. DevTools th
 traces that continue across `setTimeout`, `queueMicrotask`, I/O and binding calls. V8 does this
 only while a DevTools session has asked for async stacks (`Debugger.setAsyncCallStackDepth`).
 `js_to_kj` resources are not reported, because they never run a callback. Neither are promises,
-which V8 tracks itself.
+which V8 tracks itself, nor resources created while the isolate is not locked, such as requests.
+The callbacks of a resource that was not reported do not run as tasks, so they don't hide the async
+stack of a V8 task they run inside.
+
+Whether a context reports to the inspector is decided when the context is created, so tracking
+costs nothing while no DevTools session is connected. A context created before DevTools connects
+is not reported: a Durable Object that was already running shows only promise async stacks (which
+V8 tracks itself) until its context is replaced. A context created while DevTools was connected
+keeps reporting after it disconnects. Only DevTools sessions count; a `node:inspector` session
+does not.
 
 ## Completeness
 
