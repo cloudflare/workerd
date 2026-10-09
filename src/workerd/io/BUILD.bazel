@@ -64,6 +64,7 @@ wd_cc_library(
         "worker-fs.h",
     ] + ["//src/workerd/api:hdrs"],
     implementation_deps = [
+        ":async-trace-perfetto",
         "//src/per_isolate",
         "//src/rust/jsg",
         "//src/workerd/api:compression",
@@ -319,6 +320,17 @@ wd_cc_library(
     deps = [
         "//src/rust/async-trace",
         "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
+    name = "async-trace-perfetto",
+    srcs = ["async-trace-perfetto.c++"],
+    hdrs = ["async-trace-perfetto.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":async-trace",
+        "//src/workerd/util:perfetto",
     ],
 )
 
