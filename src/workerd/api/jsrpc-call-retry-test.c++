@@ -659,8 +659,8 @@ KJ_TEST("successful actor RPC keeps its first-attempt result pipeline alive") {
   KJ_EXPECT(state.replayMemoryBytes == 0);
 }
 
-// A @retryable method's duplicate session relies on this: a retry replays only the top-level call,
-// so a call on its result runs once even when the method runs twice.
+// A retryable() method's duplicate session relies on this: a retry replays only the top-level
+// call, so a call on its result runs once even when the method runs twice.
 KJ_TEST("calls on an actor RPC result are never retry-eligible") {
   auto io = kj::setupAsyncIo();
   capnp::MallocMessageBuilder flagsMessage;

@@ -89,7 +89,7 @@ namespace workerd::util {
   /* Enables Durable Object JSRPC retry requests. Requires the DURABLE_OBJECT_RETRIES_JSRPC        \
      observe gate. */                                                                              \
   V(DURABLE_OBJECT_RETRIES_JSRPC_RETRY_REQUESTS)                                                   \
-  /* Enables user-configured Durable Object retry policy and @retryable dispatch behavior. */      \
+  /* Enables user-configured Durable Object retry policy and retryable() dispatch behavior. */     \
   V(DURABLE_OBJECT_RETRIES_USERLAND)                                                               \
   /* Materialize stream and socket externals of an incoming RPC value BEFORE the V8 value graph    \
      is deserialized (RpcDeserializerExternalHandler::prepare()), with deserialize() claiming the  \
