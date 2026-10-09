@@ -1512,13 +1512,17 @@ void IoContext::runImpl(Runnable& runnable,
 
   getIoChannelFactory().getTimer().syncTime();
 
-  // Spans the lock wait, the JavaScript, and the microtask drain. Without a better-known cause
-  // (set by whatever resumed JavaScript), the turn is attributed to the current request.
+  // Spans the lock wait, the JavaScript, and the microtask drain, and ends before the lock is
+  // released. Without a better-known cause (set by whatever resumed JavaScript), the turn is
+  // attributed to the current request.
   AsyncTracker::TurnScope turnScope(tryGetAsyncTracker(),
       incomingRequests.empty() ? 0 : incomingRequests.front().getAsyncTraceId());
 
   runInContextScope(lockType, kj::mv(inputLock), [&](Worker::Lock& workerLock) {
     turnScope.locked();
+    // Declared before the microtask drain's KJ_DEFER below, so it runs after it, still under the
+    // lock.
+    KJ_DEFER(turnScope.end());
     kj::Own<void> event;
     if (!exceptional) {
       workerLock.requireNoPermanentException();
