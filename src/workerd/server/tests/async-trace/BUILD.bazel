@@ -20,6 +20,24 @@ sh_test(
     tags = ["no-qemu"],
 )
 
+# Checks how the trace ends when a context is still open at shutdown, with and without
+# KJ_CLEAN_SHUTDOWN.
+sh_test(
+    name = "async-trace-shutdown-test",
+    size = "medium",
+    srcs = ["async-trace-shutdown-test.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "$(location shutdown.wd-test)",
+    ],
+    data = [
+        "shutdown.js",
+        "shutdown.wd-test",
+        "//src/workerd/server:workerd",
+    ],
+    tags = ["no-qemu"],
+)
+
 # Runs the same worker under --perfetto-trace, with and without the workerd.async category.
 sh_test(
     name = "async-trace-perfetto-test",
