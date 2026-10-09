@@ -343,6 +343,69 @@ KJ_TEST("creation stacks are captured, deduplicated, and reported once per track
   KJ_EXPECT(captures == 3);
 }
 
+// Reports an `outer` frame on its first capture and a `nested` frame after that, so that a test
+// can tell the stacks of nested captures apart.
+class SequenceStackCapturer final: public AsyncStackCapturer {
+ public:
+  void capture(AsyncStackBuilder& builder) const override {
+    if (captures++ == 0) {
+      builder.addFrame("outer"_kj.asArray(), "outer.js"_kj.asArray(), 7, 3, 5);
+    } else {
+      builder.addFrame("nested"_kj.asArray(), "nested.js"_kj.asArray(), 8, 3, 5);
+    }
+  }
+
+ private:
+  mutable uint captures = 0;
+};
+
+// Creates a resource in another tracker before recording the stack it was given. With stack
+// capture on, the other tracker reports its own stacks in the middle of this callback.
+class NestingStackListener final: public AsyncTraceListener {
+ public:
+  NestingStackListener(kj::Vector<kj::String>& events, kj::Maybe<kj::Arc<AsyncTracker>>& other)
+      : events(events),
+        other(other) {}
+
+  void onInit(uint64_t ctx, const AsyncInitEvent& e) override {}
+  void onStack(uint64_t isolate, uint32_t id, kj::ArrayPtr<const AsyncStackFrame> frames) override {
+    KJ_IF_SOME(tracker, other) {
+      tracker->create(AsyncKind::TIMER, "nested"_kj);
+    }
+    auto lines = KJ_MAP(f, frames) {
+      return kj::str(f.function, " ", f.script, "#", f.scriptId, ":", f.line, ":", f.column);
+    };
+    events.add(kj::str("stack ", id, ": ", kj::strArray(lines, " | ")));
+  }
+
+ private:
+  kj::Vector<kj::String>& events;
+  kj::Maybe<kj::Arc<AsyncTracker>>& other;
+};
+
+KJ_TEST("a stack stays valid while its listener causes another tracker to report one") {
+  AsyncTraceIsolate isolate(kj::arc<SequenceStackCapturer>());
+  kj::Vector<kj::String> outerEvents;
+  kj::Vector<kj::String> innerEvents;
+
+  AsyncTraceSinks innerSinks;
+  innerSinks.add(kj::heap<RecordingListener>(innerEvents));
+  kj::Maybe<kj::Arc<AsyncTracker>> inner =
+      AsyncTracker::tryCreate(isolate, kj::mv(innerSinks), "inner"_kj, kj::none);
+  OwnedAsyncTracker ownedInner(KJ_ASSERT_NONNULL(inner).addRef());
+
+  AsyncTraceSinks outerSinks;
+  outerSinks.add(kj::heap<NestingStackListener>(outerEvents, inner));
+  OwnedAsyncTracker outer(
+      AsyncTracker::tryCreate(isolate, kj::mv(outerSinks), "outer"_kj, kj::none));
+
+  auto timer = KJ_ASSERT_NONNULL(outer.get()).create(AsyncKind::TIMER, "setTimeout"_kj);
+  // The outer listener reads its frames after the nested report, and still sees its own.
+  KJ_EXPECT(joined(outerEvents) == "stack 1: outer outer.js#7:3:5", joined(outerEvents));
+  KJ_EXPECT(joined(innerEvents).contains("stack 2: nested nested.js#8:3:5"), joined(innerEvents));
+  KJ_EXPECT(!joined(innerEvents).contains("outer"), joined(innerEvents));
+}
+
 KJ_TEST("a resource created during another context's turn links to it") {
   Fixture caller;
   Fixture callee;

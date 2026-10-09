@@ -93,7 +93,8 @@ struct AsyncContextStats {
 // trace epoch.
 //
 // A listener is called only on the tracker's thread, and is destroyed there when the tracker
-// closes. Exceptions thrown by a listener are logged and otherwise ignored.
+// closes. Exceptions thrown by a listener are logged and otherwise ignored. A listener must not
+// call back into the tracker that is calling it (for example, by creating a resource in it).
 class AsyncTraceListener {
  public:
   virtual ~AsyncTraceListener() noexcept(false) = default;
@@ -112,7 +113,9 @@ class AsyncTraceListener {
   virtual void onLink(
       uint64_t ctx, uint64_t id, uint64_t fromIsolate, uint64_t fromCtx, uint64_t fromId) {}
   // Creation stack `id` of `isolate`, innermost frame first. Reported to a listener before the
-  // first onInit() that refers to it, once per listener.
+  // first onInit() that refers to it, once per listener. A stack that cannot be buffered for
+  // delivery (allocation failure) is not reported at all, so onInit() may refer to an ID that
+  // onStack() never reported.
   virtual void onStack(uint64_t isolate, uint32_t id, kj::ArrayPtr<const AsyncStackFrame> frames) {}
   virtual void onContextEnd(uint64_t ctx, uint64_t atNs, const AsyncContextStats& stats) {}
 };
@@ -202,13 +205,21 @@ struct PendingStackFrame {
   uint32_t column;
 };
 
-inline kj::Vector<PendingStackFrame>& pendingStack() {
-  static thread_local kj::Vector<PendingStackFrame> frames;
-  return frames;
+struct PendingStack {
+  kj::Vector<PendingStackFrame> frames;
+  // A frame could not be buffered, so the stack is not delivered.
+  bool broken = false;
+};
+
+inline PendingStack& pendingStack() {
+  static thread_local PendingStack stack;
+  return stack;
 }
 
 inline void listener_stack_begin(AsyncTraceListener& listener) {
-  pendingStack().clear();
+  auto& pending = pendingStack();
+  pending.frames.clear();
+  pending.broken = false;
 }
 
 inline void listener_stack_frame(AsyncTraceListener& listener,
@@ -217,28 +228,40 @@ inline void listener_stack_frame(AsyncTraceListener& listener,
     int32_t scriptId,
     uint32_t line,
     uint32_t column) {
-  pendingStack().add(PendingStackFrame{
-    .function = kj::heapString(function.data(), function.size()),
-    .script = kj::heapString(script.data(), script.size()),
-    .scriptId = scriptId,
-    .line = line,
-    .column = column,
-  });
+  auto& pending = pendingStack();
+  if (pending.broken) return;
+  // Buffering allocates, and an exception must not reach the bridge.
+  KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+    pending.frames.add(PendingStackFrame{
+      .function = kj::heapString(function.data(), function.size()),
+      .script = kj::heapString(script.data(), script.size()),
+      .scriptId = scriptId,
+      .line = line,
+      .column = column,
+    });
+  })) {
+    KJ_LOG(ERROR, "async trace stack dropped", exception);
+    pending.broken = true;
+  }
 }
 
 inline void listener_stack_end(AsyncTraceListener& listener, uint64_t isolate, uint32_t id) {
-  auto& pending = pendingStack();
-  auto frames = KJ_MAP(f, pending) {
-    return AsyncStackFrame{
-      .function = f.function.asArray(),
-      .script = f.script.asArray(),
-      .scriptId = f.scriptId,
-      .line = f.line,
-      .column = f.column,
+  // Taken out of the shared buffer, so a listener that causes another stack to be reported on this
+  // thread cannot clear the frames it is reading.
+  auto pending = kj::mv(pendingStack());
+  if (pending.broken) return;
+  callListener([&]() {
+    auto frames = KJ_MAP(f, pending.frames) {
+      return AsyncStackFrame{
+        .function = f.function.asArray(),
+        .script = f.script.asArray(),
+        .scriptId = f.scriptId,
+        .line = f.line,
+        .column = f.column,
+      };
     };
-  };
-  callListener([&]() { listener.onStack(isolate, id, frames); });
-  pending.clear();
+    listener.onStack(isolate, id, frames);
+  });
 }
 
 // `locked` is meaningful only if `hasLocked`.
