@@ -5,15 +5,30 @@
 // Traced by async-trace-test.sh; check.js asserts on the resulting trace.
 
 export default {
-  async fetch() {
+  async fetch(request) {
     await scheduler.wait(1);
+    // Read after the wait, so that the wait's bridge is this context's first.
+    if ((await request.text()) !== 'ping') {
+      throw new Error('unexpected request body');
+    }
     return new Response('hello');
   },
 
   async test(ctrl, env) {
     await new Promise((resolve) => setTimeout(resolve, 1));
     queueMicrotask(() => {});
-    const response = await env.SELF.fetch('http://scenario/');
+    // A JavaScript-backed request body: its pump must not take over the fetch operation.
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('ping'));
+        controller.close();
+      },
+    });
+    const response = await env.SELF.fetch('http://scenario/', {
+      method: 'POST',
+      body,
+      duplex: 'half',
+    });
     if ((await response.text()) !== 'hello') {
       throw new Error('unexpected response');
     }
