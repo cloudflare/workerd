@@ -1490,7 +1490,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
   auto startLength = source.tryGetLength(StreamEncoding::IDENTITY);
   auto read = source.tryRead(scratch.begin(), 1, scratch.size());
   pullInFlight = true;
-  inFlightReadStartLength = startLength;
+  inFlightReadStartLength = kj::mv(startLength);
   return ioContext
       .awaitIo(js, kj::mv(read),
           [self = JSG_THIS, controller = controller.addRef(js), signal = kj::mv(signal)](
@@ -1623,7 +1623,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
   auto startLength = source.tryGetLength(StreamEncoding::IDENTITY);
   auto read = source.tryRead(scratch.begin(), minBytes, maxBytes);
   pullInFlight = true;
-  inFlightReadStartLength = startLength;
+  inFlightReadStartLength = kj::mv(startLength);
   return ioContext
       .awaitIo(js, kj::mv(read),
           [self = JSG_THIS, controller = controller.addRef(js),

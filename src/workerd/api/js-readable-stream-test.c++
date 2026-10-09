@@ -804,10 +804,10 @@ KJ_TEST("ReadableStreamNativeSource pull from another request leaves no pull in 
     testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
       auto& js = env.js;
       auto source = held[byob].addRef();
-      auto controller = byob
-          ? makeMockController(js, state,
-                makeMockByobRequest(js, state, jsg::JsUint8Array::create(js, size_t(64)), 1))
-          : makeMockController(js, state, js.null());
+      auto controller = byob ? makeMockController(js, state,
+                                   makeMockByobRequest(js, state,
+                                       jsg::JsUint8Array::create(js, static_cast<size_t>(64)), 1))
+                             : makeMockController(js, state, js.null());
       return recordCrossRequestOutcomes(env, outcomes,
           [&, source = kj::mv(source), controller = controller.addRef(js)](jsg::Lock& js) mutable {
         return source->pull(js, controller.getHandle(js), freshSignal(js));
