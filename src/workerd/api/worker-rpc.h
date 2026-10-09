@@ -638,7 +638,7 @@ class JsRpcStub: public JsRpcClientProvider {
   rpc::JsRpcTarget::Client getClient();
 
   // If the stub is backed by a persistable RpcChannel, return it.
-  kj::Maybe<kj::Own<IoChannelFactory::RpcChannel>> getRpcChannel(IoContext& ioctx);
+  kj::Maybe<kj::Rc<IoChannelFactory::RpcChannel>> getRpcChannel(IoContext& ioctx);
 
   ClientForOneCall getClientForOneCall(
       jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) override;

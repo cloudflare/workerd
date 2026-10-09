@@ -67,8 +67,8 @@ jsg::Ref<api::Fetcher> wrapBootstrapAsFetcher(jsg::Lock& js,
     IoContext& context,
     rpc::WorkerdBootstrap::Client bootstrap,
     kj::Own<DebugPortConnectionState> connectionState) {
-  kj::Own<IoChannelFactory::SubrequestChannel> subrequestChannel =
-      kj::refcounted<WorkerdBootstrapSubrequestChannel>(kj::mv(bootstrap),
+  kj::Rc<IoChannelFactory::SubrequestChannel> subrequestChannel =
+      kj::rc<WorkerdBootstrapSubrequestChannel>(kj::mv(bootstrap),
           context.getHttpOverCapnpFactory(), context.getByteStreamFactory(),
           kj::mv(connectionState));
   return js.alloc<api::Fetcher>(
