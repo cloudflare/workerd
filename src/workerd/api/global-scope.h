@@ -962,14 +962,23 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(ScheduledEvent);
     JSG_NESTED_TYPE(MessageEvent);
     JSG_NESTED_TYPE(CloseEvent);
-    JSG_NESTED_TYPE(ReadableStreamDefaultReader);
-    JSG_NESTED_TYPE(ReadableStreamBYOBReader);
-    JSG_NESTED_TYPE(ReadableStream);
-    JSG_NESTED_TYPE(WritableStream);
-    JSG_NESTED_TYPE(WritableStreamDefaultWriter);
-    JSG_NESTED_TYPE(TransformStream);
-    JSG_NESTED_TYPE(ByteLengthQueuingStrategy);
-    JSG_NESTED_TYPE(CountQueuingStrategy);
+    // Under typescript_implemented_streams, the per-isolate bootstrap (src/per_isolate/main.ts)
+    // installs the TypeScript implementations of every Web Streams global, so the C++ classes
+    // are not exposed here. Type generation forces the flag off (see
+    // clearImplementationOnlyFlags() in api/rtti.c++), so the generated declarations still come
+    // from these C++ classes.
+    // TODO(soon): Since the goal is to remove the C++ implementation, we will eventually need
+    // to replace the type generation with a fixed type definition.
+    if (!flags.getTypeScriptImplementedStreams()) {
+      JSG_NESTED_TYPE(ReadableStreamDefaultReader);
+      JSG_NESTED_TYPE(ReadableStreamBYOBReader);
+      JSG_NESTED_TYPE(ReadableStream);
+      JSG_NESTED_TYPE(WritableStream);
+      JSG_NESTED_TYPE(WritableStreamDefaultWriter);
+      JSG_NESTED_TYPE(TransformStream);
+      JSG_NESTED_TYPE(ByteLengthQueuingStrategy);
+      JSG_NESTED_TYPE(CountQueuingStrategy);
+    }
     JSG_NESTED_TYPE(ErrorEvent);
 
     if (flags.getExposeGlobalMessageChannel()) {
@@ -987,7 +996,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
     JSG_NESTED_TYPE(EventSource);
 
-    if (flags.getStreamsJavaScriptControllers()) {
+    // The bootstrap installs the TypeScript controllers regardless of streams_enable_constructors.
+    if (flags.getStreamsJavaScriptControllers() && !flags.getTypeScriptImplementedStreams()) {
       JSG_NESTED_TYPE(ReadableStreamBYOBRequest);
       JSG_NESTED_TYPE(ReadableStreamDefaultController);
       JSG_NESTED_TYPE(ReadableByteStreamController);
@@ -1003,10 +1013,12 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_METHOD(clearImmediate);
     }
 
-    JSG_NESTED_TYPE(CompressionStream);
-    JSG_NESTED_TYPE(DecompressionStream);
-    JSG_NESTED_TYPE(TextEncoderStream);
-    JSG_NESTED_TYPE(TextDecoderStream);
+    if (!flags.getTypeScriptImplementedStreams()) {
+      JSG_NESTED_TYPE(CompressionStream);
+      JSG_NESTED_TYPE(DecompressionStream);
+      JSG_NESTED_TYPE(TextEncoderStream);
+      JSG_NESTED_TYPE(TextDecoderStream);
+    }
 
     JSG_NESTED_TYPE(Headers);
     JSG_NESTED_TYPE(Body);
@@ -1053,8 +1065,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(Cache);
 
     // Off-spec extensions.
-    JSG_NESTED_TYPE(FixedLengthStream);
-    JSG_NESTED_TYPE(IdentityTransformStream);
+    if (!flags.getTypeScriptImplementedStreams()) {
+      JSG_NESTED_TYPE(FixedLengthStream);
+      JSG_NESTED_TYPE(IdentityTransformStream);
+    }
     JSG_NESTED_TYPE(HTMLRewriter);
     if (flags.getWorkerdExperimental()) {
       JSG_NESTED_TYPE(Datagram);
