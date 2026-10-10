@@ -475,6 +475,10 @@ wd_capnp_library(
 kj_test(
     size = "large",
     src = "server-test.c++",
+    local_defines = select({
+        ":set_use_transpiler": ["WORKERD_USE_TRANSPILER"],
+        "//conditions:default": [],
+    }),
     deps = [
         ":server",
         "//src/workerd/util:test-util",
