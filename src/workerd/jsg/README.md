@@ -513,7 +513,7 @@ Both may take additional `TypeHandler<T>&` trailing parameters.
 | 1    | `MODULE_REGISTRY`          | Pointer to module registry        |
 | 2    | `EXTENDED_CONTEXT_WRAPPER` | Extended type wrapper for context |
 | 3    | `VIRTUAL_FILE_SYSTEM`      | Virtual file system               |
-| 4    | `RUST_REALM`               | Rust realm pointer                |
+| 4    | `BOOTSTRAP_STATE`          | Pointer to bootstrap state        |
 
 ## Wrappable Lifecycle
 
