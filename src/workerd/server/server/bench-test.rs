@@ -98,6 +98,69 @@ main:empty
     );
 }
 
+fn options_with_compat_date(compat_date: Option<&str>) -> Options {
+    Options {
+        no_verbose: false,
+        all_autogates: false,
+        compat_date: compat_date.map(str::to_owned),
+        quick: false,
+        case_pattern: None,
+        json: false,
+        output: None,
+        trace: false,
+    }
+}
+
+fn is_date(date: &str) -> bool {
+    let bytes = date.as_bytes();
+    bytes.len() == 10
+        && bytes.iter().enumerate().all(|(index, byte)| match index {
+            4 | 7 => *byte == b'-',
+            _ => byte.is_ascii_digit(),
+        })
+}
+
+#[test]
+fn compat_date_overrides_every_worker_and_latest_is_a_date() {
+    let dates = options_with_compat_date(Some("2024-01-01"))
+        .compat_dates()
+        .unwrap();
+    assert_eq!(dates.compat_date.as_deref(), Some("2024-01-01"));
+    assert_eq!(dates.default_compat_date, None);
+
+    let dates = options_with_compat_date(Some("latest"))
+        .compat_dates()
+        .unwrap();
+    let latest = dates.compat_date.unwrap();
+    assert!(is_date(&latest), "{latest}");
+    assert_eq!(dates.default_compat_date, None);
+}
+
+#[test]
+fn without_compat_date_workers_default_to_the_newest_date() {
+    let dates = options_with_compat_date(None).compat_dates().unwrap();
+    assert_eq!(dates.compat_date, None);
+    let default = dates.default_compat_date.unwrap();
+    assert!(is_date(&default), "{default}");
+}
+
+#[test]
+fn text_shows_the_default_compat_date() {
+    let mut message = TypedBuilder::<bench_report::Owned>::new_default();
+    let mut environment = message.init_root().init_environment();
+    environment.set_build_mode("release");
+    environment.set_v8_version("14.0.0");
+    environment.set_default_compat_date("2026-10-08");
+
+    let text = format_text(message.get_root_as_reader().unwrap()).unwrap();
+    assert_eq!(
+        text,
+        "Results compare runs on this machine and build; they don't predict production latency.
+release build, V8 14.0.0, default compat date 2026-10-08
+"
+    );
+}
+
 #[test]
 fn json_is_capnp_json_with_null_pointers_left_out() {
     let mut message = TypedBuilder::<bench_report::Owned>::new_default();

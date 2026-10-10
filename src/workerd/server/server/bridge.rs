@@ -208,12 +208,15 @@ pub mod ffi {
     }
 
     /// The options of `bench` the C++ driver applies: bench mode, which they turn on, logging,
-    /// autogates, the compatibility date every worker gets, whether requests get tail workers.
+    /// autogates, the compatibility dates workers get, whether requests get tail workers.
     #[namespace = "workerd::server::cli"]
     struct BenchOptions {
         no_verbose: bool,
         all_autogates: bool,
+        /// Every worker's date; none may specify its own.
         compat_date: KjMaybe<String>,
+        /// The date of workers that don't specify one.
+        default_compat_date: KjMaybe<String>,
         trace: bool,
     }
 
@@ -270,6 +273,10 @@ pub mod ffi {
         ) -> Result<KjOwn<WorkerFactory>>;
 
         fn build_info() -> Result<BuildInfo>;
+
+        /// The newest compatibility date a worker may specify: today's, or the build's maximum
+        /// if that is earlier. `workerd bench`'s `--compat-date=latest`, and its default.
+        fn newest_compat_date() -> Result<String>;
 
         /// Ends the process with `code` at once, without running destructors (what
         /// `kj::ProcessContext::exit()` does when `KJ_CLEAN_SHUTDOWN` is not set). Does not return.

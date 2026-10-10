@@ -85,9 +85,17 @@ pub fn bench(
     patterns: (String, String),
     watch: Option<Watch>,
 ) -> Result<i32> {
-    let process = bench.process();
+    let dates = bench.compat_dates()?;
+    let process = bench.process(&dates);
     let command = move |factory, structured| {
-        server_bench(factory, run_options, patterns, bench, watch, structured)
+        server_bench(
+            factory,
+            run_options,
+            patterns,
+            (bench, dates),
+            watch,
+            structured,
+        )
     };
     run(verbose, config, options, None, Some(process), command)
 }
@@ -295,12 +303,13 @@ async fn server_test(
 }
 
 /// `workerd bench`: runs the benchmarks of `factory`'s config and writes the report, as `bench`
-/// asks. Under `--watch`, waits for a change afterwards instead of returning.
+/// asks, with the workers' compatibility dates `dates`. Under `--watch`, waits for a change
+/// afterwards instead of returning.
 async fn server_bench(
     factory: KjOwn<ffi::WorkerFactory>,
     options: RunOptions,
     (service_pattern, entrypoint_pattern): (String, String),
-    bench: bench::Options,
+    (bench, dates): (bench::Options, bench::CompatDates),
     mut watch: Option<Watch>,
     structured: bool,
 ) -> Result<()> {
@@ -316,7 +325,7 @@ async fn server_bench(
     })
     .await?;
     if let Some(mut results) = results {
-        results.set_environment(&bench)?;
+        results.set_environment(&bench, &dates)?;
         results.write(&bench)?;
         if !results.passed() {
             error(structured, "Benchmarks failed!");

@@ -54,7 +54,11 @@ struct BenchReport {
     # The CPU frequency governor, if known (Linux).
 
     compatDate @5 :Text;
-    # The `--compat-date` override, if any.
+    # The `--compat-date` override, if any, with `latest` resolved to a date.
+
+    defaultCompatDate @8 :Text;
+    # Without `--compat-date`, the compat date of workers that don't specify `compatibilityDate`:
+    # the newest that this build supports.
 
     allAutogates @6 :Bool;
     warnings @7 :List(Text);

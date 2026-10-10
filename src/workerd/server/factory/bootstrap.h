@@ -47,6 +47,7 @@ kj::Own<WorkerFactory> bootstrap(kj_rs_tokio::TokioAsyncIoContext& loop,
     kj::Maybe<const TestOptions&> test,
     kj::Maybe<const BenchOptions&> bench);
 BuildInfo build_info();
+::rust::String newest_compat_date();
 [[noreturn]] void cli_exit(int32_t code);
 void kj_log(uint8_t severity, ::rust::Str file, uint32_t line, ::rust::Str message);
 void json_log_to_stderr(uint8_t severity, ::rust::Str file, uint32_t line, ::rust::Str message);

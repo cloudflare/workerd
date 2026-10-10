@@ -26,12 +26,14 @@ def wd_bench(
         wd_test().
      args: Additional arguments to pass to `workerd bench`.
      lint: If True (default), lint the JavaScript and TypeScript in `data`.
-     compat_date: If specified, the compat date for the default variant instead of 2000-01-01.
+     compat_date: If specified, the compat date for the default variant instead of `latest`, the
+        newest that the build supports.
      generate_all_compat_flags_variant: If True (default), generate @all-compat-flags variants.
      generate_all_autogates_variant: If True (default), generate @all-autogates variants.
      tags: Tags for all targets.
 
-    For each variant (`name@`, `name@all-compat-flags`, `name@all-autogates`), this generates:
+    The variants are `name@` (`compat_date`), `name@all-compat-flags` (2999-12-31), and
+    `name@all-autogates` (`compat_date` with all autogates). For each variant, this generates:
      - <variant>: a target for `bazel run`, which measures the benchmarks and prints the results.
        Arguments after `--` are passed to `workerd bench`, e.g. a filter or `--format=json`. It is
        tagged `workerd-benchmark`.
@@ -67,7 +69,9 @@ def wd_bench(
                 ],
             )
 
-    default_compat_args = ["--compat-date={}".format(compat_date or "2000-01-01")]
+    # Benchmarks usually measure current behavior, so unlike wd_test(), the default variant uses
+    # the newest compat date that the build supports rather than the oldest.
+    default_compat_args = ["--compat-date={}".format(compat_date or "latest")]
     variants = [("@", default_compat_args)]
     if generate_all_compat_flags_variant:
         variants.append(("@all-compat-flags", ["--compat-date=2999-12-31"]))

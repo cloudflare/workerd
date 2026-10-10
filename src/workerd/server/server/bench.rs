@@ -44,7 +44,8 @@ pub struct Options {
     pub no_verbose: bool,
     /// `--all-autogates`.
     pub all_autogates: bool,
-    /// `--compat-date`: the compatibility date of every worker.
+    /// `--compat-date`: the compatibility date of every worker; `latest` is the newest that this
+    /// build supports.
     pub compat_date: Option<String>,
     /// `--quick`: short budgets, to check that the benchmarks run rather than to measure them.
     pub quick: bool,
@@ -58,13 +59,43 @@ pub struct Options {
     pub trace: bool,
 }
 
+/// The compatibility dates of a run's workers, resolved once, so that the workers and the report
+/// agree.
+pub(crate) struct CompatDates {
+    /// `--compat-date`, with `latest` resolved: every worker's date.
+    compat_date: Option<String>,
+    /// Without `--compat-date`, the date of workers that don't specify one.
+    default_compat_date: Option<String>,
+}
+
 impl Options {
-    /// The options the C++ bootstrap applies.
-    pub(crate) fn process(&self) -> ffi::BenchOptions {
+    /// The workers' compatibility dates: `--compat-date`'s; or else, for workers that don't
+    /// specify one, a default, since benchmarks usually measure current behavior. `latest` and the
+    /// default are the newest date this build supports.
+    pub(crate) fn compat_dates(&self) -> Result<CompatDates> {
+        Ok(match self.compat_date.as_deref() {
+            Some("latest") => CompatDates {
+                compat_date: Some(ffi::newest_compat_date()?),
+                default_compat_date: None,
+            },
+            Some(date) => CompatDates {
+                compat_date: Some(date.to_owned()),
+                default_compat_date: None,
+            },
+            None => CompatDates {
+                compat_date: None,
+                default_compat_date: Some(ffi::newest_compat_date()?),
+            },
+        })
+    }
+
+    /// The options the C++ bootstrap applies, with the workers' compatibility dates.
+    pub(crate) fn process(&self, dates: &CompatDates) -> ffi::BenchOptions {
         ffi::BenchOptions {
             no_verbose: self.no_verbose,
             all_autogates: self.all_autogates,
-            compat_date: self.compat_date.clone().into(),
+            compat_date: dates.compat_date.clone().into(),
+            default_compat_date: dates.default_compat_date.clone().into(),
             trace: self.trace,
         }
     }
@@ -159,9 +190,10 @@ impl Report {
         Ok(())
     }
 
-    /// Records where the report was measured: the build and the machine, with `options`'
-    /// compatibility date and autogates, and warnings for what makes the results unreliable.
-    pub(crate) fn set_environment(&mut self, options: &Options) -> Result<()> {
+    /// Records where the report was measured: the build and the machine, with the workers'
+    /// compatibility dates and `options`' autogates, and warnings for what makes the results
+    /// unreliable.
+    pub(crate) fn set_environment(&mut self, options: &Options, dates: &CompatDates) -> Result<()> {
         let build = ffi::build_info()?;
         let cpu_model = cpu_model();
         let governor = governor();
@@ -191,8 +223,11 @@ impl Report {
         if let Some(governor) = &governor {
             environment.set_governor(governor);
         }
-        if let Some(date) = &options.compat_date {
+        if let Some(date) = &dates.compat_date {
             environment.set_compat_date(date);
+        }
+        if let Some(date) = &dates.default_compat_date {
+            environment.set_default_compat_date(date);
         }
         environment.set_all_autogates(options.all_autogates);
         let mut list = environment.init_warnings(len_u32(&warnings));
@@ -321,6 +356,12 @@ fn format_text(report: bench_report::Reader<'_>) -> Result<String> {
         parts.push(format!(
             "compat date {}",
             text(environment.get_compat_date())?
+        ));
+    }
+    if environment.has_default_compat_date() {
+        parts.push(format!(
+            "default compat date {}",
+            text(environment.get_default_compat_date())?
         ));
     }
     if environment.get_all_autogates() {
