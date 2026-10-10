@@ -49,3 +49,42 @@ export let wasmModuleSource = {
     }
   },
 };
+
+// This worker compiles without wasm_esm_integration_builtins, so the module passed to the
+// dynamic worker was compiled without the builtins. The child enables the flag, so it must
+// recompile from the wire bytes rather than share the parent's compiled code.
+import source jsStringWasm from './js-string.wasm';
+export let wasmModuleSourceBuiltinsMismatch = {
+  async test(ctrl, env, ctx) {
+    await assert.rejects(WebAssembly.instantiate(jsStringWasm, {}), {
+      name: 'TypeError',
+    });
+
+    for (let extraFlags of [[], ['new_module_registry']]) {
+      let worker = env.loader.get(`wasmBuiltinsMismatch-${extraFlags}`, () => {
+        return {
+          compatibilityDate: '2025-01-01',
+          compatibilityFlags: ['wasm_esm_integration_builtins', ...extraFlags],
+          allowExperimental: extraFlags.length > 0,
+          mainModule: 'main.js',
+          modules: {
+            'main.js': `
+              import {WorkerEntrypoint} from "cloudflare:workers";
+              import source wasm from './js-string.wasm';
+
+              export default class extends WorkerEntrypoint {
+                async constantLength() {
+                  const instance = await WebAssembly.instantiate(wasm, {});
+                  return instance.exports.constantLength();
+                }
+              }
+            `,
+            'js-string.wasm': jsStringWasm,
+          },
+        };
+      });
+
+      assert.strictEqual(await worker.getEntrypoint().constantLength(), 11);
+    }
+  },
+};

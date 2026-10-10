@@ -75,6 +75,19 @@ jsg::ModuleRegistry::ModuleInfo addCapnpModule(
 }
 }  // namespace modules::capnp
 
+// The compiled code of a Wasm module provided by another isolate, if that isolate compiled it
+// with the same compile options this one would use.
+inline kj::Maybe<v8::CompiledWasmModule> sharedCompiledWasmModule(
+    const Worker::Script::WasmModule& content, const CompatibilityFlags::Reader& featureFlags) {
+  KJ_IF_SOME(compiled, content.compiledModule) {
+    if (content.compiledWithEsmIntegrationBuiltins ==
+        featureFlags.getWasmEsmIntegrationBuiltins()) {
+      return compiled;
+    }
+  }
+  return kj::none;
+}
+
 // Creates an instance of the (new) ModuleRegistry. This method provides the
 // initialization logic that is agnostic to the Worker::Api implementation,
 // but accepts a callback parameter to handle the Worker::Api-specific details.
@@ -172,7 +185,8 @@ kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           // (see the ESM comment above for the ownership details). If the module was
           // already compiled in another isolate, the compiled code is passed along to
           // avoid recompilation.
-          bundleBuilder.addWasmModule(def.name, content.body, content.compiledModule);
+          bundleBuilder.addWasmModule(
+              def.name, content.body, sharedCompiledWasmModule(content, featureFlags));
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
@@ -337,7 +351,7 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
     }
     KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
       v8::Local<v8::WasmModuleObject> wasmModule;
-      KJ_IF_SOME(compiled, content.compiledModule) {
+      KJ_IF_SOME(compiled, sharedCompiledWasmModule(content, featureFlags)) {
         // The module was already compiled in another isolate; share the compiled code rather
         // than recompiling the wire bytes.
         auto metrics = observer.onWasmCompilationFromCacheStart(js.v8Isolate);
