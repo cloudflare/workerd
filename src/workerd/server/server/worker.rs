@@ -698,6 +698,11 @@ impl WorkerService {
         if self.channels.borrow().is_some() {
             return Err(kj::failed!("already called link()"));
         }
+        let server = channels.server.upgrade();
+        let exporter = server
+            .as_ref()
+            .and_then(|server| server.otlp_exporter(self.service_name.as_deref()));
+        ffi::worker_set_otlp_exporter(&self.worker, exporter.into());
         *self.channels.borrow_mut() = Some(Rc::new(channels));
         for namespace in self.namespaces.borrow().values() {
             if !namespace.is_linked() {

@@ -1067,6 +1067,7 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
   // it none.
   kj::Vector<kj::Own<WorkerInterface>> bufferedTailWorkers;
   kj::Vector<kj::Own<WorkerInterface>> streamingTailWorkers;
+  kj::Maybe<OtlpSpanExporter&> otlpExporter;
   if (entrypointName.orDefault("") != "test"_kj) {
     for (size_t i = 0; i < tails->len(); i++) {
       (tails->is_streaming(i) ? streamingTailWorkers : bufferedTailWorkers).add(tails->take(i));
@@ -1075,10 +1076,12 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
       for (auto& tail: dynamic.tails) bufferedTailWorkers.add(tail->startRequest({}));
       for (auto& tail: dynamic.streamingTails) streamingTailWorkers.add(tail->startRequest({}));
     }
+    otlpExporter = worker.otlpExporter.map(
+        [](kj::Own<OtlpSpanExporter>& exporter) -> OtlpSpanExporter& { return *exporter; });
   }
 
   kj::Maybe<kj::Rc<WorkerTracer>> workerTracer;
-  if (!bufferedTailWorkers.empty() || !streamingTailWorkers.empty()) {
+  if (!bufferedTailWorkers.empty() || !streamingTailWorkers.empty() || otlpExporter != kj::none) {
     auto executionModel =
         actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
     kj::Maybe<kj::String> durableObjectId;
@@ -1120,6 +1123,31 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
           kj::mv(traceId), traceFlags));
     });
     workerTracer = kj::mv(tracer);
+  }
+
+  // The invocation's span, under which its user spans are exported, takes the invocation's ids.
+  KJ_IF_SOME(exporter, otlpExporter) {
+    OtlpServiceInfo service{
+      .serviceName = worker.isDynamic ? "workerd"_kj : worker.name.asPtr(),
+      .entrypoint = entrypointName,
+    };
+    KJ_ASSERT_NONNULL(workerTracer)
+        ->setStartInvocationSpanFunc(
+            [&entropySource = threadContext.getEntropySource(), exporter = kj::addRef(exporter),
+                serviceName = kj::str(service.serviceName), resource = makeOtlpResource(service),
+                identityTags = makeOtlpIdentityTags(service)](
+                const tracing::InvocationSpanContext& invocation) mutable {
+      auto parent = invocation.getParent().map(
+          [](const tracing::InvocationSpanContext& p) { return p.getSpanId(); });
+      return startExportedUserSpan(entropySource, kj::addRef(*exporter),
+          tracing::SpanContext(invocation.getTraceId(), parent, invocation.getTraceFlags()),
+          OtlpSpanSubmitter::Options{
+            .serviceName = serviceName,
+            .resource = resource,
+            .defaultTags = identityTags,
+          },
+          "invocation"_kjc, invocation.getSpanId());
+    });
   }
 
   kj::Own<RequestObserver> observer =
@@ -1764,6 +1792,12 @@ void worker_set_ctx_exports(const CompiledWorker& worker, ::rust::Slice<const ui
   });
 }
 
+void worker_set_otlp_exporter(
+    const CompiledWorker& worker, kj::Maybe<const OtlpExporter&> exporter) {
+  worker.getImpl().otlpExporter =
+      exporter.map([](const OtlpExporter& e) { return otlp_exporter_add_ref(e); });
+}
+
 void worker_unlink(const CompiledWorker& worker) {
   auto& impl = worker.getImpl();
   impl.waitUntilTasks.clear();
@@ -1774,6 +1808,7 @@ void worker_unlink(const CompiledWorker& worker) {
     dynamic.tails = nullptr;
     dynamic.streamingTails = nullptr;
   }
+  impl.otlpExporter = kj::none;
 }
 
 }  // namespace workerd::server

@@ -4749,6 +4749,118 @@ KJ_TEST("Server: tail workers turned off are still looked up") {
 }
 
 // =======================================================================================
+// Test OTLP export through configured services
+
+KJ_TEST("Server: OTLP collector must exist") {
+  TestServer test(R"((tracing = (otlp = "missing")))"_kj);
+  test.expectErrors(R"(
+    tracing.otlp refers to a service "missing", but no such service is defined.
+  )"_blockquote);
+}
+
+KJ_TEST("Server: OTLP exports dynamic workers and excludes every collector entrypoint") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-01-01",
+          modules = [(name = "main.js", esModule =
+            `export default {
+            `  async fetch(req, env) {
+            `    const worker = env.LOADER.get("dynamic", () => ({
+            `      compatibilityDate: "2025-01-01",
+            `      mainModule: "main.js",
+            `      modules: {
+            `        "main.js": "export default { async fetch(req, env, ctx) { return ctx.tracing.enterSpan('dynamic-operation', async () => new Response('OK')); } }",
+            `      },
+            `    }));
+            `    return worker.getEntrypoint().fetch(req);
+            `  }
+            `}
+          )],
+          bindings = [(name = "LOADER", workerLoader = ())],
+        )
+      ),
+      ( name = "collector",
+        worker = (
+          compatibilityDate = "2025-01-01",
+          modules = [(name = "main.js", esModule =
+            `import {WorkerEntrypoint} from "cloudflare:workers";
+            `let count = 0;
+            `let dynamic = false;
+            `export class Sink extends WorkerEntrypoint {
+            `  async fetch(req) {
+            `    if (new URL(req.url).pathname !== "/v1/traces" ||
+            `        req.headers.get("content-type") !== "application/x-protobuf") {
+            `      throw new Error("invalid OTLP request");
+            `    }
+            `    dynamic ||= (await req.text()).includes("dynamic-operation");
+            `    if (++count > 2) throw new Error("collector was traced recursively");
+            `    return new Response(null, {status: 204});
+            `  }
+            `}
+            `export default {
+            `  fetch() { return new Response(count + ":" + dynamic); }
+            `}
+          )],
+        )
+      ),
+    ],
+    tracing = (otlp = (name = "collector", entrypoint = "Sink")),
+    sockets = [
+      (name = "main", address = "test-addr", service = "hello"),
+      (name = "stats", address = "stats-addr", service = "collector"),
+    ],
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "OK");
+  test.wait(1);
+
+  auto stats = test.connect("stats-addr");
+  stats.httpGet200("/", "2:true");
+  test.wait(1);
+  stats.httpGet200("/", "2:true");
+}
+
+KJ_TEST("Server: OTLP shutdown cancels an unanswered collector request") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-01-01",
+          modules = [(name = "main.js", esModule =
+            `export default { fetch() { return new Response("OK"); } }
+          )],
+        )
+      ),
+      (name = "collector", external = (address = "collector-addr")),
+    ],
+    tracing = (otlp = "collector"),
+    sockets = [(name = "main", address = "test-addr", service = "hello")],
+  ))"_kj);
+
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "OK");
+  auto pending = test.server.accept("collector-addr");
+  KJ_ASSERT(pending.poll(test.ws), "no export reached the collector");
+  auto collector = pending.wait(test.ws);
+  auto input = kj::newHttpInputStream(*collector, kj::HttpHeaderTable::getBuiltinTable());
+  auto request = input->readRequest().wait(test.ws);
+  KJ_EXPECT(request.method == kj::HttpMethod::POST);
+  KJ_EXPECT(request.url == "/v1/traces"_kj);
+  KJ_EXPECT(request.body->readAllBytes().wait(test.ws).size() > 0);
+
+  // Close while the collector is still waiting to respond. The fixture checks that cancellation
+  // releases every service and its factory, without logging an export error.
+  test.runTask = kj::none;
+  test.server.close().wait(test.ws);
+}
+
+// =======================================================================================
 // Test HttpOptions on receive
 
 KJ_TEST("Server: serve proxy requests") {

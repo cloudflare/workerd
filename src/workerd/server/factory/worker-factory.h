@@ -20,6 +20,7 @@
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/async-trace.h>
 #include <workerd/io/io-channels.h>
+#include <workerd/io/otlp-span-submitter.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/worker.h>
 #include <workerd/rust/kj/ffi.h>
@@ -181,6 +182,26 @@ kj::Promise<void> factory_settle_tasks(const WorkerFactory& factory);
 uint64_t factory_timer_now(const WorkerFactory& factory);
 kj::Promise<void> factory_sleep(const WorkerFactory& factory, uint64_t nanos);
 
+// The server's owner of the shared span exporter. Destroying this handle unlinks the collector
+// even when spans still hold exporter references.
+class OtlpExporter final {
+ public:
+  class Impl;
+  explicit OtlpExporter(kj::Own<Impl> impl);
+  ~OtlpExporter() noexcept(false);
+  KJ_DISALLOW_COPY_AND_MOVE(OtlpExporter);
+
+  Impl& getImpl() const;
+
+ private:
+  mutable kj::Own<Impl> impl;
+};
+
+kj::Own<OtlpExporter> factory_new_otlp_exporter(
+    const WorkerFactory& factory, ::rust::Box<SubrequestChannel> collector);
+kj::Own<OtlpSpanExporter> otlp_exporter_add_ref(const OtlpExporter& exporter);
+void otlp_exporter_unlink(const OtlpExporter& exporter);
+
 kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& factory,
     const WorkerSpec& spec,
     kj::Maybe<uint32_t> configService,
@@ -204,6 +225,8 @@ class CompiledWorker final {
 
 WorkerInfo worker_info(const CompiledWorker& worker);
 void worker_set_ctx_exports(const CompiledWorker& worker, ::rust::Slice<const uint64_t> globals);
+void worker_set_otlp_exporter(
+    const CompiledWorker& worker, kj::Maybe<const OtlpExporter&> exporter);
 void worker_unlink(const CompiledWorker& worker);
 kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
     kj::Maybe<::rust::Str> entrypoint,

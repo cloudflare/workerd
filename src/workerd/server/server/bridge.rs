@@ -335,6 +335,16 @@ pub mod ffi {
         /// The header table every `kj::HttpHeaders` handed to a worker is built against.
         fn factory_header_table<'a>(factory: &'a WorkerFactory) -> &'a HttpHeaderTable;
 
+        /// The server's owner of its shared OTLP exporter. Dropping it cancels outstanding
+        /// exports and releases the collector, even if spans still hold exporter references.
+        type OtlpExporter;
+        fn factory_new_otlp_exporter(
+            factory: &WorkerFactory,
+            collector: Box<SubrequestChannel>,
+        ) -> Result<KjOwn<OtlpExporter>>;
+        /// Disables export before the server starts tearing down its workers.
+        fn otlp_exporter_unlink(exporter: &OtlpExporter);
+
         /// Compiles a worker: its script, bindings and exports. Any config error is reported in
         /// the returned info rather than thrown; a worker with errors still exists so that the
         /// server can keep reporting the config's other errors.
@@ -356,10 +366,14 @@ pub mod ffi {
         /// Compiles `ctx.exports` from an encoded `Globals` message. Called once, after the
         /// server has numbered the worker's loopback channels.
         fn worker_set_ctx_exports(worker: &CompiledWorker, globals: &[u64]) -> Result<()>;
+        /// Installs the exporter for this worker's invocation spans; none disables export.
+        /// The server selects eligible workers when it links their services.
+        fn worker_set_otlp_exporter(worker: &CompiledWorker, exporter: KjMaybe<&OtlpExporter>);
         /// Cancels the worker's requests still in flight (background work past the response: a
         /// `waitUntil()`, a tail worker's event), each of which holds the worker and its I/O
         /// channels; and drops a dynamic worker's env channel tables and tails, which may refer
-        /// back to the worker that loaded it. Called when the server unlinks the worker.
+        /// back to the worker that loaded it. Releases the worker's OTLP exporter reference too.
+        /// Called when the server unlinks the worker.
         fn worker_unlink(worker: &CompiledWorker);
         /// Starts a request on the worker. `channels` is the worker's I/O channel table for this
         /// request; `tails` receive the request's trace once it completes (the server passes none

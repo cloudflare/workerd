@@ -39,6 +39,7 @@ wd_cc_library(
         "async-trace-stacks.c++",
         "features.c++",
         "hibernation-manager.c++",
+        "invocation-span.c++",
         "io-channels.c++",
         "io-context.c++",
         "io-own.c++",
@@ -57,6 +58,7 @@ wd_cc_library(
         "async-trace-promises.h",
         "async-trace-stacks.h",
         "hibernation-manager.h",
+        "invocation-span.h",
         "io-channels.h",
         "io-context.h",
         "io-own.h",
@@ -428,6 +430,23 @@ wd_cc_library(
 )
 
 wd_cc_library(
+    name = "otlp-span-submitter",
+    srcs = ["otlp-span-submitter.c++"],
+    hdrs = ["otlp-span-submitter.h"],
+    implementation_deps = [
+        "//src/workerd/util:thread-scopes",
+        "//src/workerd/util:uuid",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":io",
+        "//src/rust/otlp",
+        "//src/workerd/util:strong-bool",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
+wd_cc_library(
     name = "worker-interface",
     srcs = ["worker-interface.c++"],
     hdrs = ["worker-interface.h"],
@@ -626,8 +645,17 @@ kj_test(
 )
 
 kj_test(
+    src = "invocation-span-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/util:thread-scopes",
+    ],
+)
+
+kj_test(
     src = "trace-test.c++",
     deps = [
+        ":io",
         ":trace",
         "//src/workerd/util:thread-scopes",
     ],
