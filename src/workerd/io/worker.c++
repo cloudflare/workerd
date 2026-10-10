@@ -1215,6 +1215,9 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     if (features.getFastJsgStruct()) {
       lock->setUsingFastJsgStruct();
     }
+    if (features.getWasmEsmIntegrationBuiltins()) {
+      lock->setWasmEsmIntegrationBuiltinsEnabled();
+    }
 
     if (impl->inspector != kj::none || ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO)) {
       lock->setLoggerCallback([this](jsg::Lock& js, kj::StringPtr message) {

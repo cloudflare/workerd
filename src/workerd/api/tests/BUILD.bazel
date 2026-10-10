@@ -1,7 +1,13 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//:build/wasm_tools_parse.bzl", "wasm_tools_parse")
 load("//:build/wd_test.bzl", "wd_test")
+
+wasm_tools_parse(
+    name = "js-string-builtins.wasm",
+    src = "js-string-builtins.wat",
+)
 
 exports_files(["starttls-server.pem"])
 
@@ -1123,8 +1129,17 @@ wd_test(
     data = [
         "new-module-registry-test.js",
         "test.wasm",
+        ":js-string-builtins.wasm",
     ],
     lint = False,
+)
+
+wd_test(
+    src = "wasm-js-string-builtins-test.wd-test",
+    data = [
+        "wasm-js-string-builtins-test.js",
+        ":js-string-builtins.wasm",
+    ],
 )
 
 wd_test(

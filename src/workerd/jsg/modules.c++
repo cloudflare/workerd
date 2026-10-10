@@ -488,8 +488,13 @@ v8::Local<v8::WasmModuleObject> compileWasmModule(
   // destroy the observer after compilation finishes to indicate the end of the process.
   auto compilationObserver = observer.onWasmCompilationStart(js.v8Isolate, code.size());
 
+  v8::WasmModuleObject::CompileOptions options;
+  if (js.isWasmEsmIntegrationBuiltinsEnabled()) {
+    options.builtins = v8::WasmModuleObject::CompileOptions::Builtins::kJsString;
+    options.imported_string_constants_module = "wasm:js/string-constants";
+  }
   return jsg::check(v8::WasmModuleObject::Compile(
-      js.v8Isolate, std::span<const uint8_t>(code.begin(), code.size())));
+      js.v8Isolate, std::span<const uint8_t>(code.begin(), code.size()), options));
 }
 
 // ======================================================================================
