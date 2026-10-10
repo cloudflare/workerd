@@ -1,3 +1,7 @@
+# The patches in this directory apply to the Rust standard library's sources, for the
+# sanitizer-instrumented std build/rust builds. Registry crates are ordinary Cargo dependencies
+# (deps/rust/Cargo.toml); patches to them live in crates/<crate>/, applied through
+# crate.annotation() in build/deps/rust.MODULE.bazel.
 filegroup(
     name = "patches",
     srcs = glob(["*.patch"]),
