@@ -9,6 +9,12 @@ on:
         default: false
         type: boolean
 
+# The "Check for open PR and commit changes" step uses gh + git push,
+# both via GITHUB_TOKEN. R2 uploads use their own R2_* secrets.
+permissions:
+  contents: write
+  pull-requests: read
+
 jobs:
   build:
     runs-on: ubuntu-22.04
