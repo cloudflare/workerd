@@ -13,6 +13,7 @@ mod args;
 mod bridge;
 mod config;
 mod process;
+mod project;
 mod socket_fd;
 mod watch;
 
@@ -29,6 +30,7 @@ use crate::bridge::ffi;
 use crate::config::Config;
 use crate::process::Executable;
 use crate::process::Process;
+use crate::project::Project;
 use crate::socket_fd::InheritedSocket;
 use crate::watch::Watcher;
 
@@ -98,6 +100,10 @@ fn run_compiled(
     )
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one match arm per subcommand, each a straight line from options to the C++ driver"
+)]
 fn run_command(
     program_name: &str,
     args: args::Main,
@@ -114,14 +120,28 @@ fn run_command(
         args::Command::Serve {
             config,
             const_name,
-            serve_or_test,
+            project,
+            mut serve_or_test,
             serve,
         } => {
             check_serve_or_test::<T>(&serve_or_test);
             let watcher = watcher::<T>(&serve_or_test, executable.as_ref());
             let (serve, inherited_sockets) = serve_options::<T>(serve);
             let process = Box::new(Process::new(executable, watcher, inherited_sockets));
-            let config = load_config::<T>(config, const_name.const_name, &process);
+            let config = if project::is_wrangler_config(&config.config_file) {
+                let Some(config) = load_project::<T>(
+                    &ProjectSource::Wrangler(config.config_file),
+                    &project,
+                    &mut serve_or_test,
+                    &process,
+                    true,
+                ) else {
+                    return Ok(0);
+                };
+                config
+            } else {
+                load_config::<T>(config, const_name.const_name, &process)
+            };
             ffi::run_serve(
                 &common,
                 config.into_words(),
@@ -129,6 +149,66 @@ fn run_command(
                 &serve,
                 process,
             )
+        }
+        args::Command::Run {
+            file,
+            project,
+            mut serve_or_test,
+            serve,
+        } => {
+            check_serve_or_test::<T>(&serve_or_test);
+            let watcher = watcher::<T>(&serve_or_test, executable.as_ref());
+            let (serve, inherited_sockets) = serve_options::<T>(serve);
+            let process = Box::new(Process::new(executable, watcher, inherited_sockets));
+            let source = if project::is_wrangler_config(&file) {
+                ProjectSource::Wrangler(file)
+            } else if project::is_source_file(&file) {
+                ProjectSource::File(file)
+            } else {
+                usage_error::<T>(format!(
+                    "{file}: expected a .js, .mjs, .cjs, .ts or .py file, or a Wrangler config."
+                ));
+            };
+            let Some(config) =
+                load_project::<T>(&source, &project, &mut serve_or_test, &process, true)
+            else {
+                return Ok(0);
+            };
+            ffi::run_serve(
+                &common,
+                config.into_words(),
+                &serve_or_test.into(),
+                &serve,
+                process,
+            )
+        }
+        args::Command::Check {
+            config,
+            const_name,
+            project,
+            mut serve_or_test,
+        } => {
+            check_serve_or_test::<T>(&serve_or_test);
+            let watcher = watcher::<T>(&serve_or_test, executable.as_ref());
+            let process = Box::new(Process::new(executable, watcher, Vec::new()));
+            let source = if project::is_wrangler_config(&config.config_file) {
+                Some(ProjectSource::Wrangler(config.config_file.clone()))
+            } else if project::is_source_file(&config.config_file) {
+                Some(ProjectSource::File(config.config_file.clone()))
+            } else {
+                None
+            };
+            let config = if let Some(source) = source {
+                let Some(config) =
+                    load_project::<T>(&source, &project, &mut serve_or_test, &process, false)
+                else {
+                    return Ok(0);
+                };
+                config
+            } else {
+                load_config::<T>(config, const_name.const_name, &process)
+            };
+            ffi::run_check(&common, config.into_words(), &serve_or_test.into(), process)
         }
         args::Command::Compile {
             config,
@@ -187,6 +267,124 @@ fn run_command(
             output_directory,
         } => run_baseline_snapshot(&common, &python_version, output_directory, executable),
     }
+}
+
+/// What a synthesized config is built from.
+enum ProjectSource {
+    /// A single source file (`workerd run app.js`).
+    File(String),
+    /// A Wrangler config (`wrangler.json` / `wrangler.jsonc`).
+    Wrangler(String),
+}
+
+/// The config synthesized from a project, after printing its warnings and registering its files
+/// with the watcher. With `--print-config` the config is printed as a schema file instead and
+/// `None` is returned. `announce` prints where the Worker will be served.
+fn load_project<T: CommandFactory>(
+    source: &ProjectSource,
+    args: &args::ProjectArgs,
+    serve_or_test: &mut args::ServeOrTestArgs,
+    process: &Process,
+    announce: bool,
+) -> Option<Config> {
+    let overrides = args.clone().into();
+    let default_date = default_compatibility_date();
+    let result = match source {
+        ProjectSource::File(file) => Project::from_source_file(file, &default_date, &overrides),
+        ProjectSource::Wrangler(file) => {
+            Project::from_wrangler_config(file, &default_date, &overrides)
+        }
+    };
+    let project = result.unwrap_or_else(|error| usage_error::<T>(error));
+    for warning in &project.warnings {
+        eprintln!("warning: {warning}");
+    }
+    if args.print_config {
+        print!("{}", project.to_capnp_text());
+        return None;
+    }
+    if project.needs_experimental() && !serve_or_test.experimental {
+        eprintln!("note: TypeScript type stripping is experimental; enabling --experimental.");
+        serve_or_test.experimental = true;
+    }
+    for path in project.watched_files() {
+        if let Err(error) = process.watch_file(path_bytes(path)) {
+            usage_error::<T>(format!(
+                "--watch: {}: {}",
+                path.display(),
+                error.description()
+            ));
+        }
+    }
+    if announce {
+        let what = match source {
+            ProjectSource::File(file) => file.clone(),
+            ProjectSource::Wrangler(_) => project.name.clone(),
+        };
+        eprintln!(
+            "Serving {what} on http://localhost:{} ({} module{}, compatibility date {})",
+            project.port,
+            project.modules.len(),
+            if project.modules.len() == 1 { "" } else { "s" },
+            project.compatibility_date
+        );
+        if let Some(dir) = &project.persist {
+            eprintln!("Durable Object storage: {}", dir.display());
+        }
+    }
+    Some(
+        project
+            .to_config()
+            .unwrap_or_else(|error| usage_error::<T>(error)),
+    )
+}
+
+#[cfg(unix)]
+fn path_bytes(path: &std::path::Path) -> &[u8] {
+    use std::os::unix::ffi::OsStrExt;
+    path.as_os_str().as_bytes()
+}
+
+#[cfg(windows)]
+fn path_bytes(path: &std::path::Path) -> &[u8] {
+    path.to_str().map_or(&[], str::as_bytes)
+}
+
+/// The compatibility date a project gets when it does not name one: this release's date, which
+/// is the newest date the binary supports. A development build whose version is not a date gets
+/// today's date.
+fn default_compatibility_date() -> String {
+    let version = release_version();
+    let is_date = version.len() == 10
+        && version.bytes().enumerate().all(|(i, b)| {
+            if i == 4 || i == 7 {
+                b == b'-'
+            } else {
+                b.is_ascii_digit()
+            }
+        });
+    if is_date {
+        return version.to_owned();
+    }
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let (y, m, d) = civil_from_days(i64::try_from(secs / 86_400).unwrap_or(0));
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Days since 1970-01-01 to a proleptic Gregorian date (Howard Hinnant's algorithm).
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = u32::try_from(doy - (153 * mp + 2) / 5 + 1).unwrap_or(1);
+    let m = u32::try_from(if mp < 10 { mp + 3 } else { mp - 9 }).unwrap_or(1);
+    (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
 /// `workerd compile`: the config, encoded, either on its own (`--config-only`) or appended to a
@@ -449,6 +647,8 @@ impl args::Main {
     const fn command_name(&self) -> &'static str {
         match self.command {
             args::Command::Serve { .. } => "serve",
+            args::Command::Run { .. } => "run",
+            args::Command::Check { .. } => "check",
             args::Command::Compile { .. } => "compile",
             args::Command::Fuzzilli { .. } => "fuzzilli",
             args::Command::Test { .. } => "test",

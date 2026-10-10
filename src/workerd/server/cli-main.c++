@@ -114,7 +114,11 @@ class CliMain {
             entropySource,
             Worker::LoggingOptions(Worker::ConsoleMode::STDOUT),
             [&](kj::String error) {
-              if (!process->is_watching()) {
+              if (checkMode) {
+                // `workerd check` collects every error and reports the count at the end.
+                configErrors.add(kj::str(error));
+                context.error(error);
+              } else if (!process->is_watching()) {
                 // TODO(someday): Don't just fail on the first error, keep going in order to report
                 //   additional errors. The tricky part is we don't currently have any signal of when
                 //   the server has completely finished loading, and also we probably don't want to
@@ -215,6 +219,29 @@ class CliMain {
     });
   }
 
+  void enableCheckMode() {
+    checkMode = true;
+  }
+
+  // `workerd check`: start every service without binding sockets, then report how many config
+  // errors the Server's error callback saw. Exits 1 if there were any.
+  void check() {
+    serveImpl([&](jsg::V8System& v8System) {
+      return server->check(v8System, config).then([this]() {
+        auto errorCount = configErrors.size();
+        if (errorCount > 0) {
+          context.exitError(
+              kj::str(errorCount, " config error", errorCount == 1 ? "" : "s", " found."));
+        }
+        auto serviceCount = config.getServices().size();
+        auto socketCount = config.getSockets().size();
+        auto summary = kj::str("Config OK: ", serviceCount, " service", serviceCount == 1 ? "" : "s",
+            ", ", socketCount, " socket", socketCount == 1 ? "" : "s", ".\n");
+        fputs(summary.cStr(), stderr);
+      });
+    });
+  }
+
   void test(const TestOptions& options) {
     if (!options.no_verbose) {
       // Always turn on info logging when running tests so that uncaught exceptions are displayed.
@@ -286,6 +313,10 @@ class CliMain {
 
   // Set by the Server's error callback under --watch, where errors don't exit.
   bool hadErrors = false;
+
+  // `workerd check`: errors are collected rather than exiting on the first.
+  bool checkMode = false;
+  kj::Vector<kj::String> configErrors;
 
   kj::Maybe<kj::Own<const kj::Directory>> openWritableDirectory(kj::StringPtr pathStr) {
     return fs->getRoot().tryOpenSubdir(fs->getCurrentPath().eval(pathStr), kj::WriteMode::MODIFY);
@@ -409,6 +440,18 @@ int32_t run_test(const CommonOptions& common,
     main.applyServeOrTestOptions(serveOrTest);
     main.loadConfig(kj::mv(config));
     main.test(test);
+  });
+}
+
+int32_t run_check(const CommonOptions& common,
+    ::rust::Vec<uint64_t> config,
+    const ServeOrTestOptions& serveOrTest,
+    ::rust::Box<Process> process) {
+  return run(common, kj::mv(process), [&](CliMain& main) {
+    main.enableCheckMode();
+    main.applyServeOrTestOptions(serveOrTest);
+    main.loadConfig(kj::mv(config));
+    main.check();
   });
 }
 

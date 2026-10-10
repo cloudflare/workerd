@@ -49,6 +49,7 @@ fn serve_options() {
         const_name,
         serve_or_test,
         serve,
+        ..
     } = parse(&[
         "serve",
         "--binary",
@@ -163,4 +164,44 @@ fn compiled_binary_has_no_config_arguments() {
     let main = CompiledMain::try_parse_from(["workerd", "-s", "http=*:8080"]).unwrap();
     assert_eq!(main.serve.socket_addr_overrides.len(), 1);
     assert!(CompiledMain::try_parse_from(["workerd", "config.capnp"]).is_err());
+}
+
+#[test]
+fn run_invocation() {
+    let Command::Run {
+        file,
+        project,
+        serve_or_test,
+        ..
+    } = parse(&[
+        "run",
+        "app.ts",
+        "--port=9000",
+        "--compat-flag=foo",
+        "--compat-flag=bar",
+        "--persist",
+        "--watch",
+    ])
+    .command
+    else {
+        panic!("expected run")
+    };
+    assert_eq!(file, "app.ts");
+    assert_eq!(project.port, Some(9000));
+    assert_eq!(project.compatibility_flags, ["foo", "bar"]);
+    assert_eq!(project.persist.as_deref(), Some(".workerd-state"));
+    assert!(!project.print_config);
+    assert!(serve_or_test.watch);
+}
+
+#[test]
+fn check_invocation() {
+    let Command::Check {
+        config, project, ..
+    } = parse(&["check", "wrangler.jsonc", "--print-config"]).command
+    else {
+        panic!("expected check")
+    };
+    assert_eq!(config.config_file, "wrangler.jsonc");
+    assert!(project.print_config);
 }

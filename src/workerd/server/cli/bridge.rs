@@ -123,6 +123,14 @@ pub mod ffi {
             test: &TestOptions,
             process: Box<Process>,
         ) -> Result<i32>;
+        /// `workerd check`: starts every service in `config` without binding any socket, reports
+        /// every config error, and exits 1 if there were any.
+        fn run_check(
+            common: &CommonOptions,
+            config: Vec<u64>,
+            serve_or_test: &ServeOrTestOptions,
+            process: Box<Process>,
+        ) -> Result<i32>;
     }
 
     extern "Rust" {

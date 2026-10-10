@@ -6489,12 +6489,61 @@ void Server::taskFailed(kj::Exception&& exception) {
   fatalFulfiller->reject(kj::mv(exception));
 }
 
+namespace {
+
+size_t editDistance(kj::StringPtr a, kj::StringPtr b) {
+  // Levenshtein distance, case-insensitive.
+  auto lower = [](char c) -> char { return (c >= 'A' && c <= 'Z') ? c - 'A' + 'a' : c; };
+  auto prev = kj::heapArray<size_t>(b.size() + 1);
+  auto cur = kj::heapArray<size_t>(b.size() + 1);
+  for (size_t j = 0; j <= b.size(); j++) prev[j] = j;
+  for (size_t i = 1; i <= a.size(); i++) {
+    cur[0] = i;
+    for (size_t j = 1; j <= b.size(); j++) {
+      size_t cost = lower(a[i - 1]) == lower(b[j - 1]) ? 0 : 1;
+      cur[j] = kj::min(kj::min(prev[j] + 1, cur[j - 1] + 1), prev[j - 1] + cost);
+    }
+    for (size_t j = 0; j <= b.size(); j++) prev[j] = cur[j];
+  }
+  return prev[b.size()];
+}
+
+// A hint for an error about a name that does not exist: ` Did you mean "x"?` naming the closest
+// candidate, or empty when nothing is close enough to be worth suggesting.
+kj::String didYouMean(kj::StringPtr name, kj::ArrayPtr<const kj::StringPtr> candidates) {
+  kj::Maybe<kj::StringPtr> best;
+  size_t bestDistance = kj::maxValue;
+  size_t threshold = kj::max(size_t(2), name.size() / 3);
+  for (auto candidate: candidates) {
+    if (candidate == name) continue;
+    size_t distance = editDistance(name, candidate);
+    if (distance <= threshold && distance < bestDistance) {
+      bestDistance = distance;
+      best = candidate;
+    }
+  }
+  KJ_IF_SOME(b, best) {
+    return kj::str(" Did you mean \"", b, "\"?");
+  }
+  return kj::String();
+}
+
+}  // namespace
+
+kj::Vector<kj::StringPtr> Server::serviceNames() {
+  kj::Vector<kj::StringPtr> names(services.size());
+  for (auto& entry: services) {
+    names.add(entry.key);
+  }
+  return names;
+}
+
 kj::Rc<Server::Service> Server::lookupService(
     config::ServiceDesignator::Reader designator, kj::String errorContext) {
   kj::StringPtr targetName = designator.getName();
   Service* service = KJ_UNWRAP_OR(services.find(targetName), {
     reportConfigError(kj::str(errorContext, " refers to a service \"", targetName,
-        "\", but no such service is defined."));
+        "\", but no such service is defined.", didYouMean(targetName, serviceNames())));
     return invalidConfigServiceSingleton.addRef();
   }).get();
 
@@ -6553,7 +6602,7 @@ kj::Rc<Server::ActorClass> Server::lookupActorClass(
   kj::StringPtr targetName = designator.getName();
   Service* service = KJ_UNWRAP_OR(services.find(targetName), {
     reportConfigError(kj::str(errorContext, " refers to a service \"", targetName,
-        "\", but no such service is defined."));
+        "\", but no such service is defined.", didYouMean(targetName, serviceNames())));
     return invalidConfigActorClassSingleton.addRef();
   }).get();
 
@@ -7495,6 +7544,49 @@ kj::Promise<void> Server::run(
       }
     }
   }
+}
+
+kj::Promise<void> Server::check(jsg::V8System& v8System, config::Config::Reader config) {
+  TRACE_EVENT("workerd", "Server.check");
+
+  if (config.hasLogging()) {
+    auto logging = config.getLogging();
+    loggingOptions.structuredLogging = StructuredLogging(logging.getStructuredLogging());
+    if (logging.hasStdoutPrefix()) {
+      loggingOptions.stdoutPrefix = kj::ConstString(kj::str(logging.getStdoutPrefix()));
+    }
+    if (logging.hasStderrPrefix()) {
+      loggingOptions.stderrPrefix = kj::ConstString(kj::str(logging.getStderrPrefix()));
+    }
+  } else {
+    loggingOptions.structuredLogging = StructuredLogging(config.getStructuredLogging());
+  }
+
+  kj::HttpHeaderTable::Builder headerTableBuilder;
+  globalContext = kj::heap<GlobalContext>(*this, v8System, headerTableBuilder);
+  invalidConfigServiceSingleton = kj::rc<InvalidConfigService>();
+  invalidConfigActorClassSingleton = kj::rc<InvalidConfigActorClass>();
+
+  auto [fatalPromise, fatalFulfiller] = kj::newPromiseAndFulfiller<void>();
+  this->fatalFulfiller = kj::mv(fatalFulfiller);
+
+  auto forkedDrainWhen = kj::Promise<void>(kj::NEVER_DONE).fork();
+
+  // No bindSockets(): nothing is bound, so a check never conflicts with a running server.
+  co_await startServices(v8System, config, headerTableBuilder, forkedDrainWhen);
+
+  // listenOnSockets() would resolve each socket's service; do the same without listening.
+  for (auto sock: config.getSockets()) {
+    kj::StringPtr name = sock.getName();
+    if (!sock.hasAddress() && socketOverrides.find(name) == kj::none) {
+      reportConfigError(kj::str("Socket \"", name,
+          "\" has no address in the config, so must be specified on the "
+          "command line with `--socket-addr`."));
+    }
+    lookupService(sock.getService(), kj::str("Socket \"", name, "\""));
+  }
+
+  auto ownHeaderTable = headerTableBuilder.build();
 }
 
 // Configure and start the inspector socket, returning the port the socket started on.

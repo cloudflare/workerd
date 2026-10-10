@@ -52,7 +52,9 @@ pub enum Command {
     /// run the server
     #[command(
         long_about = "Serve requests based on a config.",
-        after_long_help = "Serves requests based on the configuration specified in <config-file>."
+        after_long_help = "Serves requests based on the configuration specified in <config-file>: \
+            a Cap'n Proto schema file, an encoded config (--binary), or a Wrangler config \
+            (wrangler.json / wrangler.jsonc), from which a config is synthesized."
     )]
     Serve {
         #[command(flatten)]
@@ -62,10 +64,58 @@ pub enum Command {
         const_name: ConstNameArg,
 
         #[command(flatten)]
+        project: ProjectArgs,
+
+        #[command(flatten)]
         serve_or_test: ServeOrTestArgs,
 
         #[command(flatten)]
         serve: ServeArgs,
+    },
+
+    /// run a single source file as a Worker, no config needed
+    #[command(
+        long_about = "Runs one JavaScript, TypeScript or Python file as a Worker, with no config \
+            file.",
+        after_long_help = RUN_HELP,
+    )]
+    Run {
+        /// The Worker's entry module: a .js, .mjs, .cjs, .ts or .py file. Files beside it are
+        /// available to relative imports.
+        #[arg(value_name = "file")]
+        file: String,
+
+        #[command(flatten)]
+        project: ProjectArgs,
+
+        #[command(flatten)]
+        serve_or_test: ServeOrTestArgs,
+
+        #[command(flatten)]
+        serve: ServeArgs,
+    },
+
+    /// check a config and report every problem, without serving
+    #[command(
+        long_about = "Loads a config and reports every problem with it, without serving.",
+        after_long_help = "Accepts the same config files as `serve`: a Cap'n Proto schema file, \
+            an encoded config (--binary), a Wrangler config (wrangler.json / wrangler.jsonc) or a \
+            single source file as for `run`. \
+            Every service is constructed and every Worker compiled, so errors in a Worker's top \
+            level are reported too. Exits with status 1 if any error was found."
+    )]
+    Check {
+        #[command(flatten)]
+        config: ConfigFileArgs,
+
+        #[command(flatten)]
+        const_name: ConstNameArg,
+
+        #[command(flatten)]
+        project: ProjectArgs,
+
+        #[command(flatten)]
+        serve_or_test: ServeOrTestArgs,
     },
 
     /// create a self-contained binary
@@ -135,6 +185,21 @@ pub enum Command {
     },
 }
 
+const RUN_HELP: &str = "\
+Serves <file> as a Worker on http://localhost:8080 (see --port). The file is the Worker's entry \
+module; every .js, .mjs, .cjs, .ts, .json, .wasm, .txt and .html file in the same directory tree \
+is available to relative imports (node_modules is skipped: bundle dependencies first). The Worker \
+gets the newest compatibility date this workerd release supports and nodejs_compat. Example:
+    export default {
+      async fetch(request, env) {
+        return new Response('Hello from workerd');
+      }
+    }
+A .ts entry module enables TypeScript type stripping (experimental). A .py entry module runs as a \
+Python Worker. --print-config prints the synthesized config as a schema file, which can be saved \
+next to the code and served with `workerd serve`.
+";
+
 const TEST_HELP: &str = "\
 Runs tests for services defined in <config-file>. <filter>, if given, specifies exactly which \
 tests to run. It has one of the following formats:
@@ -184,6 +249,62 @@ pub struct ConfigFileArgs {
 
     #[arg(value_name = "config-file")]
     pub config_file: String,
+}
+
+/// Options for a config synthesized from a project: `run`, or `serve` / `check` of a Wrangler
+/// config. Ignored for a schema-file config.
+#[derive(Args, Debug, Default, Clone, PartialEq, Eq)]
+pub struct ProjectArgs {
+    /// Listen on <port> (default: 8080 for `run`; a Wrangler config's dev.port, or 8787).
+    #[arg(long, value_name = "port", help_heading = "Project options")]
+    pub port: Option<u16>,
+
+    /// The Worker's compatibility date (default: the Wrangler config's, or this workerd release's
+    /// date).
+    #[arg(
+        long = "compat-date",
+        value_name = "date",
+        help_heading = "Project options"
+    )]
+    pub compatibility_date: Option<String>,
+
+    /// Add a compatibility flag. May be repeated.
+    #[arg(
+        long = "compat-flag",
+        value_name = "flag",
+        help_heading = "Project options"
+    )]
+    pub compatibility_flags: Vec<String>,
+
+    /// Persist Durable Object storage to <dir> (default: .workerd-state) instead of memory.
+    #[arg(
+        long,
+        value_name = "dir",
+        num_args = 0..=1,
+        default_missing_value = ".workerd-state",
+        help_heading = "Project options"
+    )]
+    pub persist: Option<String>,
+
+    /// The Worker's name (default: the Wrangler config's `name`, or the file's stem).
+    #[arg(long, value_name = "name", help_heading = "Project options")]
+    pub name: Option<String>,
+
+    /// Print the synthesized config as a Cap'n Proto schema file and exit, instead of running it.
+    #[arg(long, help_heading = "Project options")]
+    pub print_config: bool,
+}
+
+impl From<ProjectArgs> for crate::project::Overrides {
+    fn from(args: ProjectArgs) -> Self {
+        Self {
+            name: args.name,
+            port: args.port,
+            compatibility_date: args.compatibility_date,
+            compatibility_flags: args.compatibility_flags,
+            persist: args.persist.map(std::path::PathBuf::from),
+        }
+    }
 }
 
 #[derive(Args, Debug)]

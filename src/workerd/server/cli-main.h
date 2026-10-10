@@ -35,5 +35,9 @@ int32_t run_test(const CommonOptions& common,
     const ServeOrTestOptions& serveOrTest,
     const TestOptions& test,
     ::rust::Box<Process> process);
+int32_t run_check(const CommonOptions& common,
+    ::rust::Vec<uint64_t> config,
+    const ServeOrTestOptions& serveOrTest,
+    ::rust::Box<Process> process);
 
 }  // namespace workerd::server::cli

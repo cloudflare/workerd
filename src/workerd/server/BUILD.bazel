@@ -95,6 +95,7 @@ wd_rust_crate(
         "//src/rust/cxx/kj-rs-io",
         "@crates_vendor//:capnp",
         "@crates_vendor//:clap",
+        "@crates_vendor//:serde_json",
         "@crates_vendor//:tokio",
     ] + select({
         "@platforms//os:windows": ["@crates_vendor//:windows-sys"],

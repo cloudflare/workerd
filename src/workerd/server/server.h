@@ -113,6 +113,11 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
       kj::StringPtr servicePattern = "*"_kj,
       kj::StringPtr entrypointPattern = "*"_kj);
 
+  // Starts every service in the config, compiling every Worker, without binding or listening on
+  // any socket, so that every config error is reported through the error callback. The sockets'
+  // service references are checked too. Backs `workerd check`.
+  kj::Promise<void> check(jsg::V8System& v8System, config::Config::Reader conf);
+
   struct Durable {
     kj::String uniqueKey;
     bool isEvictable;
@@ -252,6 +257,9 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   // This causes them to disconnect any connections that do not have a
   // request in flight.
   kj::Promise<void> handleDrain(kj::Promise<void> drainWhen);
+
+  // The names of every service defined so far, for "did you mean" hints in config errors.
+  kj::Vector<kj::StringPtr> serviceNames();
 
   kj::Own<kj::TlsContext> makeTlsContext(config::TlsOptions::Reader conf);
   kj::Promise<kj::Own<kj::NetworkAddress>> makeTlsNetworkAddress(config::TlsOptions::Reader conf,

@@ -1,0 +1,14 @@
+{
+  // A Worker with a Durable Object, exactly as wrangler would deploy it.
+  "name": "counter",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": { "GREETING": "Counter service", "LIMITS": { "max": 100 } },
+  "durable_objects": {
+    "bindings": [{ "name": "COUNTER", "class_name": "Counter" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Counter"] }],
+  "kv_namespaces": [{ "binding": "CACHE", "id": "0000" }],
+  "services": [{ "binding": "SELF", "service": "counter" }],
+}

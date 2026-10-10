@@ -162,6 +162,42 @@ To serve your config, do:
 
 For more details about command-line usage, use `workerd --help`.
 
+#### Running a file or a Wrangler project without a config
+
+A single source file can be served with no config file at all:
+
+```
+workerd run app.js            # http://localhost:8080, newest compatibility date, nodejs_compat
+workerd run app.ts            # TypeScript, with type stripping (experimental)
+workerd run app.js --watch    # reload when the file or its imports change
+```
+
+The file is the Worker's entry module, and every `.js`, `.mjs`, `.cjs`, `.ts`, `.json`, `.wasm`,
+`.txt` and `.html` file in the same directory tree is available to relative imports
+(`node_modules` is skipped, so bundle dependencies first).
+
+A project with a `wrangler.json` / `wrangler.jsonc` can be served the same way:
+
+```
+workerd serve wrangler.jsonc
+```
+
+`main`, `compatibility_date`, `compatibility_flags`, `vars`, `durable_objects` (with
+`migrations`), `services` and `dev.port` are honoured. Durable Objects are backed by SQLite and
+persisted under `.workerd-state` next to the config (`--persist <dir>` chooses another place).
+Bindings that need Cloudflare services (KV, R2, D1, Queues, ...) are reported and skipped.
+
+`--print-config` prints the config `workerd` synthesized, as a schema file with `embed`s of your
+project files. Save it and serve it with `workerd serve` when you outgrow what the shortcut
+offers.
+
+To validate a config without serving it, which reports every problem rather than stopping at the
+first and never binds a port, do:
+
+```
+workerd check my-config.capnp     # or wrangler.jsonc, or app.js
+```
+
 Prebuilt binaries are distributed via `npm`. Run `npx workerd ...` to use these. If you're running a prebuilt binary, you'll need to make sure your system has the right dependencies installed:
 
 * On Linux:
