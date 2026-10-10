@@ -26,6 +26,9 @@ _Snapshot — the set drifts as crates come and go; `bazel query //src/rust/...`
 | `transpiler/`           | TS type stripping via SWC (`ts_strip()`, `StripOnly` mode)                                                                                                                                                                    |
 | `python-parser/`        | Python import extraction via `ruff_python_parser`; **namespace: `edgeworker::rust::`**                                                                                                                                        |
 | `gen-compile-cache/`    | Binary crate — V8 bytecode cache generator; calls C++ `compile()` via CXX                                                                                                                                                     |
+| `perfetto/`             | Crate `perfetto`: Perfetto trace point macros (`trace_event!` etc.) writing into the C++-owned session; no-op unless built with Rust Perfetto (see PERFETTO TRACING)                                                          |
+| `perfetto/sdk/`         | `rust_library` targets for the Perfetto Rust SDK built from the `@perfetto` archive; only `perfetto/` may depend on them                                                                                                      |
+| `perfetto/test/`        | Non-production crate; its test checks Rust and C++ events share one session with matching flow/track/counter IDs, in every build configuration                                                                                |
 
 ## CONVENTIONS
 
@@ -69,6 +72,20 @@ mod tests;
 - Production files contain no `#[test]` functions and no inline `#[cfg(test)]` modules. A helper that only tests use belongs in the test file.
 - `wd_rust_crate`, `wd_rust_binary` and `wd_rust_proc_macro` take the `*-test.rs` files out of the crate's `srcs` and compile them only into its `<name>_test` target (`split_rust_test_srcs` in `build/wd_rust_test.bzl`). A crate defined with `rust_library` directly does the same by hand: `exclude = ["*-test.rs"]` in the library's `srcs` glob, and `compile_data = glob(["*-test.rs"])` on its `wd_rust_test` (a `rust_test` built from a `crate` rejects `srcs`). An unconditional `mod` declaration of a test file therefore fails the production build.
 - Crates that are test code throughout are exempt: a test-support crate in a `tests/` directory (e.g. `cxx/kj-rs/tests/`), and a `wd_rust_test` built from its own `srcs` (e.g. `tsan/`).
+
+## PERFETTO TRACING
+
+Rust trace points use the `perfetto` crate (`//src/rust/perfetto`); the crate docs in `lib.rs` cover the macro API and its C++ equivalents.
+
+- **Backend**: the Perfetto Rust SDK, built from `@perfetto//contrib/rust-sdk` by `perfetto/sdk/` and linked against `@perfetto//:libperfetto_c_over_client` (added by `patches/perfetto/0004-*.patch`). That library layers Perfetto's C ABI over the C++ client library, so Rust, C++ and V8 events share one `perfetto::Tracing` instance and one session. Don't depend on upstream `:libperfetto_c`: it bundles a second copy of the client.
+- **Build flag**: the backend is compiled in (crate feature `perfetto`) only under `//src/workerd/util:really_use_rust_perfetto` = `really_use_perfetto` && `--//src/workerd/util:use_rust_perfetto`. The flag defaults to off and workerd's `.bazelrc` turns it on in `build:perfetto`, because embedders don't read that file and may have no C ABI or SDK targets in their `@perfetto`. Keep every reference to those targets inside a `select()` on `really_use_rust_perfetto`; the `perfetto/sdk/` targets are incompatible otherwise.
+- **Both configurations must build**: callers compile against either `enabled.rs` or `disabled.rs`. The public types (`Flow`, `Track`, `EventContext`, `ScopedEvent`, …) are shared, and static assertions pin their auto traits. `disabled.rs` type-checks closures behind a constant `false` and never runs them. When changing the crate, lint and test both ways: `just clippy perfetto`, then the same with `--//src/workerd/util:use_rust_perfetto=False`. For tests, also try `--config=no-perfetto`.
+- **Categories**: listed in `define_categories!` in `lib.rs`, which generates both `CATEGORIES` and the SDK's category table in the same order, so indices match. Macros resolve category names at compile time, so a typo is a compile error. A name shared with a C++ category (currently `workerd`) is enabled for both languages by the same trace config.
+- **Registration**: C++ owns Perfetto initialization. `PerfettoSession::registerWorkerdTracks()` (`src/workerd/util/perfetto-tracing.c++`) calls `workerd::rust::perfetto::register_track_events()` under `WORKERD_USE_RUST_PERFETTO`; that runs `TrackEvent::init()` (the C ABI's `PerfettoTeInit`) and registers the categories. Until then every Rust category reads as disabled.
+- **IDs**: `Flow::from_ref`/`from_ptr`, `Track::from_ref`/`from_ptr` and `trace_counter!` compute IDs the same way as C++ `PERFETTO_FLOW_FROM_POINTER`, `PERFETTO_TRACK_FROM_POINTER` and `perfetto::CounterTrack(name)`, all relative to the process track UUID.
+- **Cost**: a disabled trace point costs one atomic load. An enabled one takes a process-wide mutex in the SDK's generated `emit()` (it guards a `static mut` category table because `TrackEventCategory::emit` takes `&mut self`) and allocates the event's extras. Fixing that means patching the SDK.
+- **Crate dependencies**: the SDK needs `bitflags`, `thiserror` and `paste`. `paste` is archived upstream, so `perfetto/sdk/` aliases the drop-in `pastey` to `paste`. Embedders that splice `deps/rust/Cargo.toml` into their own crate repository must repin when it changes.
+- **Async**: `trace_event!` is scope-based on the thread track; don't hold it across `.await`. Use `trace_event_begin!`/`trace_event_end!` on a `Track` instead.
 
 ## CXX BRIDGE: ASYNC AND ERROR HANDLING
 

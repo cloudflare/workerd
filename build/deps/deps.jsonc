@@ -116,7 +116,8 @@
       "patches": [
         "//:patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch",
         "//:patches/perfetto/0002-disable-info-level-logging-re2.patch",
-        "//:patches/perfetto/0003-Load-rules-removed-from-Bazel-9-builtins.patch"
+        "//:patches/perfetto/0003-Load-rules-removed-from-Bazel-9-builtins.patch",
+        "//:patches/perfetto/0004-Add-C-ABI-library-over-client-and-expose-Rust-SDK-sources.patch"
       ]
     },
     {

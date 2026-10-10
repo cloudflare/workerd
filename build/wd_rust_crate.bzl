@@ -78,6 +78,7 @@ def wd_rust_crate(
         cxx_bridge_local_defines = [],
         cxx_bridge_features = [],
         testonly = False,
+        crate_features = [],
         visibility = None):
     """Define rust crate.
 
@@ -106,6 +107,7 @@ def wd_rust_crate(
         cxx_bridge_hdrs: headers the bridges include!(); defaults to every .h file in the package.
         testonly: True for a crate that only tests depend on (a test harness, the Rust half of a
             C++ test). Like other test code, it is not held to //build/rust:lints.
+        crate_features: cargo-style features to enable for the crate and its test; may be a select().
     """
     if srcs == None:
         srcs = native.glob(["**/*.rs"])
@@ -157,8 +159,6 @@ def wd_rust_crate(
 
     for bridge_src in cxx_bridge_srcs:
         link_deps = link_deps + [bridge_src + "@cxx"]
-
-    crate_features = []
 
     library_kwargs = {}
     if crate_root != None:
