@@ -77,6 +77,11 @@ wd_bench(
 )
 ```
 
+Unlike `wd_test()`, the default variant `name@` uses the newest compat date that the build
+supports (`--compat-date=latest`) rather than the oldest, since benchmarks usually measure current
+behavior; `compat_date` sets another. `name@all-compat-flags` uses 2999-12-31, and
+`name@all-autogates` uses the default variant's date with all autogates enabled.
+
 For each compat variant (`name@`, `name@all-compat-flags`, `name@all-autogates`), this defines a
 target for `bazel run` and an `@smoke` test (`name@smoke`, `name@all-compat-flags@smoke`, ...)
 that runs each case briefly, so CI checks that benchmarks keep working. CI doesn't run the
@@ -93,10 +98,13 @@ Arguments after the target go to `workerd bench`, which can also be run directly
 
 ```
 workerd bench config.wd-bench [filter] [--format=text|json] [--output=path] [--quick]
-    [--compat-date=date] [--all-autogates] [--trace]
+    [--compat-date=date|latest] [--all-autogates] [--trace]
 ```
 
 `--compat-date` requires the workers in the config to omit `compatibilityDate`.
+`--compat-date=latest` is the newest date that the build supports: today's date, or the build's
+maximum compatibility date if that's earlier. Without `--compat-date`, workers that omit
+`compatibilityDate` get that date, so that benchmarks measure current behavior.
 
 The filter has `workerd test`'s format, optionally followed by `/<case-glob>`: for example
 `main:encoding/encode*`. `--quick` caps the budgets, to check that cases run rather than to

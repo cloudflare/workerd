@@ -5790,6 +5790,10 @@ kj::Promise<kj::Rc<Server::Service>> Server::makeWorker(kj::StringPtr name,
     compileCompatibilityFlags(conf.getCompatibilityDate(), conf.getCompatibilityFlags(),
         featureFlags, errorReporter, experimental, CompatibilityDateValidation::CODE_VERSION,
         nullptr, isPythonMainModule(conf));
+  } else KJ_IF_SOME(defaultDate, defaultCompatibilityDate) {
+    compileCompatibilityFlags(defaultDate, conf.getCompatibilityFlags(), featureFlags,
+        errorReporter, experimental, CompatibilityDateValidation::CODE_VERSION, nullptr,
+        isPythonMainModule(conf));
   } else {
     errorReporter.addError(kj::str("Worker must specify compatibilityDate."));
   }

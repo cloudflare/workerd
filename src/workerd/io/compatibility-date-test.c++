@@ -69,6 +69,16 @@ KJ_TEST("compatibility date parsing") {
   expectNoParse("202-05-07");
 }
 
+KJ_TEST("newest compatibility date") {
+  auto newest = newestCompatDateStr();
+  KJ_EXPECT(normalizeCompatDate(newest) != kj::none, newest);
+  auto today = currentDateStr();
+  kj::StringPtr maximum = MAXIMUM_COMPATIBILITY_DATE;
+  // Dates in this format compare like their strings.
+  kj::StringPtr expected = today.asPtr() < maximum ? today.asPtr() : maximum;
+  KJ_EXPECT(newest == expected, newest, today, maximum);
+}
+
 KJ_TEST("compatibility flag parsing") {
   auto expectCompileCompatibilityFlags =
       [](kj::StringPtr compatDate, kj::ArrayPtr<const kj::StringPtr> featureFlags,

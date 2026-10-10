@@ -93,5 +93,21 @@ KJ_TEST("formatBenchReport renders environment, cases, and failures") {
       text);
 }
 
+KJ_TEST("formatBenchReport shows the default compat date") {
+  capnp::MallocMessageBuilder message;
+  auto report = message.initRoot<bench::BenchReport>();
+  auto environment = report.initEnvironment();
+  environment.setBuildMode("release");
+  environment.setV8Version("14.0.0");
+  environment.setDefaultCompatDate("2026-10-08");
+
+  auto text = formatBenchReport(report);
+  KJ_EXPECT(text ==
+          "Results compare runs on this machine and build; they don't predict production "
+          "latency.\n"
+          "release build, V8 14.0.0, default compat date 2026-10-08\n",
+      text);
+}
+
 }  // namespace
 }  // namespace workerd::server

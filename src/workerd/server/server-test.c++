@@ -1238,6 +1238,46 @@ KJ_TEST("Server: compatibility dates are required") {
   )"_blockquote);
 }
 
+KJ_TEST("Server: a default compatibility date applies only to workers that omit one") {
+  auto navigatorChecker = [](kj::StringPtr compatProperties) {
+    return singleWorker(kj::str("(", compatProperties, R"(
+      modules = [
+        ( name = "main.js",
+          esModule =
+              `export default {
+              `  async fetch(request) {
+              `    return new Response(!!self.navigator);
+              `  }
+              `}
+        )
+      ]
+    ))"_kj));
+  };
+
+  // global_navigator is enabled on 2022-03-21.
+  {
+    TestServer test(navigatorChecker(""));
+    test.server.setDefaultCompatibilityDate(kj::str("2020-01-01"));
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/", "false");
+  }
+  {
+    TestServer test(navigatorChecker(""));
+    test.server.setDefaultCompatibilityDate(kj::str("2022-08-17"));
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/", "true");
+  }
+  {
+    TestServer test(navigatorChecker("compatibilityDate = \"2020-01-01\","));
+    test.server.setDefaultCompatibilityDate(kj::str("2022-08-17"));
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/", "false");
+  }
+}
+
 KJ_TEST("Server: naming a flag the compatibility date already enables only warns") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",

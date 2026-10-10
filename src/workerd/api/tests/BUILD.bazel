@@ -2,7 +2,7 @@ load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/wd_bench.bzl", "wd_bench")
-load("//:build/wd_test.bzl", "wd_test")
+load("//:build/wd_test.bzl", "wd_cli_test", "wd_test")
 
 exports_files(["starttls-server.pem"])
 
@@ -1491,4 +1491,22 @@ sh_test(
 wd_bench(
     src = "text-encoder-bench.wd-bench",
     data = ["text-encoder-bench.js"],
+)
+
+# wd_bench() always passes --compat-date, so this runs `workerd bench` without it, to check that
+# workers that omit compatibilityDate get the newest date.
+wd_cli_test(
+    name = "bench-default-compat-date-test",
+    src = "bench-default-compat-date-test.wd-bench",
+    args = [
+        "$(location //src/workerd/server:workerd_cross)",
+        "bench",
+        "$(location bench-default-compat-date-test.wd-bench)",
+        "--quick",
+    ],
+    data = [
+        "bench-default-compat-date-test.js",
+        "bench-default-compat-date-test.wd-bench",
+        "//src/workerd/server:workerd_cross",
+    ],
 )

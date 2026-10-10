@@ -275,8 +275,22 @@ class CliMain {
     if (options.all_autogates) {
       util::Autogate::initAllAutogates();
     }
+    // `--compat-date=latest` overrides every worker's date with the newest that this build
+    // supports. Without `--compat-date`, that date is the default for workers that don't specify
+    // one, so that benchmarks measure current behavior.
+    kj::Maybe<kj::String> compatDateOverride;
+    kj::Maybe<kj::String> defaultCompatDate;
     KJ_IF_SOME(compatDate, options.compat_date) {
-      server->setTestCompatibilityDateOverride(kj::str(compatDate));
+      auto date = kj::str(compatDate);
+      if (date == "latest"_kj) {
+        date = newestCompatDateStr();
+      }
+      server->setTestCompatibilityDateOverride(kj::str(date));
+      compatDateOverride = kj::mv(date);
+    } else {
+      auto date = newestCompatDateStr();
+      server->setDefaultCompatibilityDate(kj::str(date));
+      defaultCompatDate = kj::mv(date);
     }
     if (options.trace) {
       server->setBenchTailWorkers();
@@ -304,8 +318,11 @@ class CliMain {
     auto report = message->initRoot<bench::BenchReport>();
     auto environment = report.initEnvironment();
     environment.setWorkerdVersion(RELEASE_VERSION);
-    KJ_IF_SOME(compatDate, options.compat_date) {
-      environment.setCompatDate(kj::str(compatDate));
+    KJ_IF_SOME(date, compatDateOverride) {
+      environment.setCompatDate(date);
+    }
+    KJ_IF_SOME(date, defaultCompatDate) {
+      environment.setDefaultCompatDate(date);
     }
     environment.setAllAutogates(options.all_autogates);
     fillBenchEnvironment(environment);

@@ -367,7 +367,9 @@ pub struct BenchArgs {
     #[arg(long)]
     pub all_autogates: bool,
 
-    /// Set the compatibility date for all workers, as for `test`.
+    /// Set the compatibility date for all workers, as for `test`. 'latest' is the newest date that
+    /// this build supports. Without this, workers that don't specify compatibilityDate get that
+    /// date.
     #[arg(long, value_name = "date")]
     pub compat_date: Option<String>,
 

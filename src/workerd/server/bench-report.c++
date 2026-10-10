@@ -200,6 +200,9 @@ kj::String formatBenchReport(bench::BenchReport::Reader report) {
     if (environment.hasCompatDate()) {
       parts.add(kj::str("compat date ", environment.getCompatDate()));
     }
+    if (environment.hasDefaultCompatDate()) {
+      parts.add(kj::str("default compat date ", environment.getDefaultCompatDate()));
+    }
     if (environment.getAllAutogates()) {
       parts.add(kj::str("all autogates"));
     }
