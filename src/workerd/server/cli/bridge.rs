@@ -82,6 +82,21 @@ pub mod ffi {
         entrypoint_pattern: KjMaybe<String>,
     }
 
+    struct BenchOptions {
+        no_verbose: bool,
+        all_autogates: bool,
+        compat_date: KjMaybe<String>,
+        quick: bool,
+        /// Write the report as JSON rather than as a table.
+        json: bool,
+        /// Where to write the report; stdout if none.
+        output: KjMaybe<String>,
+        trace: bool,
+        service_pattern: KjMaybe<String>,
+        entrypoint_pattern: KjMaybe<String>,
+        case_pattern: KjMaybe<String>,
+    }
+
     unsafe extern "C++" {
         include!("workerd/server/cli-main.h");
         include!("workerd/server/config-compiler.h");
@@ -121,6 +136,14 @@ pub mod ffi {
             config: Vec<u64>,
             serve_or_test: &ServeOrTestOptions,
             test: &TestOptions,
+            process: Box<Process>,
+        ) -> Result<i32>;
+
+        fn run_bench(
+            common: &CommonOptions,
+            config: Vec<u64>,
+            serve_or_test: &ServeOrTestOptions,
+            bench: &BenchOptions,
             process: Box<Process>,
         ) -> Result<i32>;
     }

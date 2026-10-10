@@ -8,6 +8,7 @@
 #include <workerd/jsg/setup.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/capnp-mock.h>
+#include <workerd/util/thread-scopes.h>
 
 #include <capnp/compat/http-over-capnp.h>
 #include <capnp/rpc-twoparty.h>
@@ -1235,6 +1236,46 @@ KJ_TEST("Server: compatibility dates are required") {
   test.expectErrors(R"(
     service hello: Worker must specify compatibilityDate.
   )"_blockquote);
+}
+
+KJ_TEST("Server: a default compatibility date applies only to workers that omit one") {
+  auto navigatorChecker = [](kj::StringPtr compatProperties) {
+    return singleWorker(kj::str("(", compatProperties, R"(
+      modules = [
+        ( name = "main.js",
+          esModule =
+              `export default {
+              `  async fetch(request) {
+              `    return new Response(!!self.navigator);
+              `  }
+              `}
+        )
+      ]
+    ))"_kj));
+  };
+
+  // global_navigator is enabled on 2022-03-21.
+  {
+    TestServer test(navigatorChecker(""));
+    test.server.setDefaultCompatibilityDate(kj::str("2020-01-01"));
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/", "false");
+  }
+  {
+    TestServer test(navigatorChecker(""));
+    test.server.setDefaultCompatibilityDate(kj::str("2022-08-17"));
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/", "true");
+  }
+  {
+    TestServer test(navigatorChecker("compatibilityDate = \"2020-01-01\","));
+    test.server.setDefaultCompatibilityDate(kj::str("2022-08-17"));
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/", "false");
+  }
 }
 
 KJ_TEST("Server: naming a flag the compatibility date already enables only warns") {
@@ -5667,6 +5708,197 @@ KJ_TEST("Server: cache name is passed through to service") {
     KJ_EXPECT_LOG(INFO, "other test");
     KJ_EXPECT_LOG(DBG, "[ PASS ] another");
     KJ_EXPECT(!test.server.test(v8System, *test.config, "*", "*").wait(test.ws));
+  }
+}
+
+// =======================================================================================
+// Test the bench command
+
+KJ_TEST("Server: bench command") {
+  setBenchMode();
+  KJ_DEFER(unsetBenchModeForTest());
+
+  // With no warmup and a fixed batch, each case's function is called exactly batch * samples
+  // times, which the "verify" case checks.
+  kj::StringPtr config = R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import {WorkerEntrypoint, WorkflowEntrypoint} from "cloudflare:workers";
+                `let calls = {sync: 0, async: 0, setup: 0, teardown: 0, state: 0, bareTeardown: 0,
+                `    asyncTeardown: 0, overlaps: 0};
+                `export default {
+                `  fetch() { return new Response("ok"); },
+                `  bench(b, env, ctx) {
+                `    if (b.options.quick || b.options.filter !== undefined) {
+                `      throw new Error("unexpected options");
+                `    }
+                `    const fixed = {warmup: 0, batch: 3, samples: 4};
+                `    b.run("sync", () => { calls.sync++; return b.blackBox(1); }, fixed);
+                `    b.run("async", async () => { calls.async++; }, {...fixed, warmup: "0ms"});
+                `    b.run("state", (s) => { if (s.n === 7) calls.state++; }, {
+                `      ...fixed,
+                `      setup() { calls.setup++; return Promise.resolve({n: 7}); },
+                `      teardown(s) { if (s.n === 7) calls.teardown++; },
+                `    });
+                `    b.run("bare teardown", () => {}, {
+                `      ...fixed,
+                `      teardown(s) { if (s === undefined) calls.bareTeardown++; },
+                `    });
+                `    // The teardown's subrequest takes several turns of the event loop, so a batch
+                `    // that started before it finished would see tearingDown set.
+                `    let tearingDown = false;
+                `    b.run("async teardown", () => { if (tearingDown) calls.overlaps++; }, {
+                `      ...fixed,
+                `      async teardown() {
+                `        tearingDown = true;
+                `        await (await env.SELF.fetch("http://x/")).text();
+                `        tearingDown = false;
+                `        calls.asyncTeardown++;
+                `      },
+                `    });
+                `    let mixedCalls = 0;
+                `    b.run("mixed", () => (mixedCalls++ === 0 ? Promise.resolve() : undefined), {
+                `      ...fixed,
+                `      batch: 1,
+                `    });
+                `    b.run("skipped", () => { throw new Error("ran"); }, {skip: true});
+                `    b.run("throws", () => { throw new Error("boom"); }, fixed);
+                `    b.run("late", () => { b.run("x", () => {}); }, fixed);
+                `    b.run("verify", () => {
+                `      const expected = {sync: 12, async: 12, setup: 4, teardown: 4, state: 12,
+                `          bareTeardown: 4, asyncTeardown: 4, overlaps: 0};
+                `      if (JSON.stringify(calls) !== JSON.stringify(expected)) {
+                `        throw new Error("wrong call counts: " + JSON.stringify(calls));
+                `      }
+                `    }, {warmup: 0, batch: 1, samples: 1});
+                `  }
+                `}
+                `export let broken = {
+                `  bench(b) { throw new TypeError("not today"); }
+                `}
+                `export let empty = {
+                `  bench(b) {}
+                `}
+                `export let notBench = {
+                `  async fetch(req, env, ctx) { return new Response("ok"); }
+                `}
+                `// Classes' `bench` methods are RPC methods, not handlers.
+                `export class Rpc extends WorkerEntrypoint {
+                `  bench(x) { throw new Error("ran as a handler"); }
+                `}
+                `export class Flow extends WorkflowEntrypoint {
+                `  bench(x) { throw new Error("ran as a handler"); }
+                `}
+            )
+          ],
+          bindings = [( name = "SELF", service = "hello" )]
+        )
+      ),
+    ]
+  ))"_kj;
+
+  auto makeParams = [](capnp::MallocMessageBuilder& message, kj::StringPtr caseFilter) {
+    auto params = message.initRoot<bench::BenchParams>();
+    params.setCaseFilter(caseFilter);
+    return params.asReader();
+  };
+
+  {
+    TestServer test(config);
+    capnp::MallocMessageBuilder paramsMessage;
+    capnp::MallocMessageBuilder reportMessage;
+    auto report = reportMessage.initRoot<bench::BenchReport>();
+    KJ_EXPECT_LOG(DBG, "[ BENCH ] hello");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello/mixed: Error: The function returned a promise from some");
+    KJ_EXPECT_LOG(DBG, "[ SKIP ] hello/skipped");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello/throws: Error: boom");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello/late: Error: BenchController.run() must be called by");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello (");
+    KJ_EXPECT(!test.server
+                   .bench(v8System, *test.config, makeParams(paramsMessage, ""), report, "hello",
+                       "default")
+                   .wait(test.ws));
+
+    auto groups = report.getGroups();
+    KJ_ASSERT(groups.size() == 1);
+    KJ_EXPECT(groups[0].getName() == "hello");
+    KJ_EXPECT(!groups[0].hasError());
+    KJ_ASSERT(groups[0].hasOverhead());
+    auto overhead = groups[0].getOverhead();
+    KJ_EXPECT(overhead.getSyncNs() > 0);
+    KJ_EXPECT(overhead.getAsyncNs() > 0);
+    KJ_EXPECT(overhead.getBlackBoxNs() > 0);
+    auto cases = groups[0].getCases();
+    KJ_ASSERT(cases.size() == 10);
+
+    using Status = bench::BenchReport::Case::Status;
+    kj::StringPtr names[] = {"sync", "async", "state", "bare teardown", "async teardown", "mixed",
+      "skipped", "throws", "late", "verify"};
+    Status statuses[] = {Status::OK, Status::OK, Status::OK, Status::OK, Status::OK, Status::FAILED,
+      Status::SKIPPED, Status::FAILED, Status::FAILED, Status::OK};
+    for (auto i: kj::indices(names)) {
+      KJ_EXPECT(cases[i].getName() == names[i]);
+      KJ_EXPECT(cases[i].getStatus() == statuses[i], names[i], cases[i].getError());
+    }
+
+    for (auto i: kj::zeroTo(3)) {
+      auto c = cases[i];
+      KJ_EXPECT(c.getIterationsPerSample() == 3);
+      KJ_EXPECT(c.getWallNs().getSamples().size() == 4);
+      KJ_EXPECT(c.getCpuNs().getSamples().size() == 4);
+      auto wall = c.getWallNs();
+      KJ_EXPECT(wall.getMin() > 0);
+      KJ_EXPECT(wall.getMin() <= wall.getMedian() && wall.getMedian() <= wall.getMax());
+      KJ_EXPECT(wall.getMedianLow() <= wall.getMedian());
+      KJ_EXPECT(wall.getMedian() <= wall.getMedianHigh());
+    }
+    KJ_EXPECT(!cases[6].hasWallNs());
+
+    KJ_EXPECT(kj::StringPtr(cases[7].getError()).startsWith("Error: boom"));
+  }
+
+  {
+    // Handlers that fail or register nothing, and a case filter.
+    TestServer test(config);
+    capnp::MallocMessageBuilder paramsMessage;
+    capnp::MallocMessageBuilder reportMessage;
+    auto report = reportMessage.initRoot<bench::BenchReport>();
+    KJ_EXPECT_LOG(DBG, "[ BENCH ] hello:broken");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello:broken: TypeError: not today");
+    KJ_EXPECT_LOG(DBG, "[ BENCH ] hello:empty");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello:empty: bench() did not register any cases.");
+    KJ_EXPECT(!test.server
+                   .bench(v8System, *test.config, makeParams(paramsMessage, "nothing"), report,
+                       "hello", "*")
+                   .wait(test.ws));
+
+    // The default entrypoint's options check fails because a filter is set. The Rpc and Flow
+    // classes' `bench` methods aren't handlers, so they have no groups.
+    kj::HashMap<kj::StringPtr, kj::StringPtr> errors;
+    for (auto group: report.getGroups()) {
+      KJ_EXPECT(group.getCases().size() == 0, group.getName());
+      errors.insert(group.getName(), group.getError());
+    }
+    KJ_EXPECT(errors.size() == 3);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(errors.find("hello"_kj)).startsWith("Error: unexpected options"));
+  }
+
+  {
+    TestServer test(config);
+    capnp::MallocMessageBuilder paramsMessage;
+    capnp::MallocMessageBuilder reportMessage;
+    auto report = reportMessage.initRoot<bench::BenchReport>();
+    KJ_EXPECT_LOG(ERROR, "No benchmarks found!");
+    KJ_EXPECT(!test.server
+                   .bench(v8System, *test.config, makeParams(paramsMessage, ""), report, "hello",
+                       "notBench")
+                   .wait(test.ws));
+    KJ_EXPECT(report.getGroups().size() == 0);
   }
 }
 

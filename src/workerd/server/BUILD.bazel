@@ -112,6 +112,7 @@ wd_cc_library(
     srcs = ["cli-main.c++"],
     linkstatic = CC_LIBRARY_LINKSTATIC,
     deps = [
+        ":bench-report",
         ":cli/bridge.rs@cxx",
         ":json-logger",
         ":server",
@@ -124,6 +125,7 @@ wd_cc_library(
         "//src/workerd/util:perfetto",
         # :cli-main exists only for the workerd binary, so it links the binary's kj::setupAsyncIo().
         "//src/workerd/util:setup-async-io",
+        "@capnp-cpp//src/capnp/compat:json",
         "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj:kj-async-io",
     ],
@@ -378,6 +380,23 @@ wd_capnp_library(
     deps = [
         "//src/workerd/io:frankenvalue_capnp",
     ],
+)
+
+wd_cc_library(
+    name = "bench-report",
+    srcs = ["bench-report.c++"],
+    hdrs = ["bench-report.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/io:bench_capnp",
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+kj_test(
+    src = "bench-report-test.c++",
+    deps = [":bench-report"],
 )
 
 wd_cc_library(

@@ -1,0 +1,12 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# The worker omits compatibilityDate, and the test runs `workerd bench` without --compat-date, so
+# the worker gets the newest date that the build supports.
+const unitTests :Workerd.Config = (
+  services = [(
+    name = "bench-default-compat-date-test",
+    worker = (
+      modules = [(name = "worker", esModule = embed "bench-default-compat-date-test.js")],
+    ),
+  )],
+);

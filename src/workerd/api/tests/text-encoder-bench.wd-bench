@@ -1,0 +1,10 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [(
+    name = "text-encoder-bench",
+    worker = (
+      modules = [(name = "worker", esModule = embed "text-encoder-bench.js")],
+    ),
+  )],
+);

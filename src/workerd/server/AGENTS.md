@@ -2,7 +2,7 @@
 
 ## OVERVIEW
 
-Binary + orchestration layer. `:workerd` is a Rust binary: the `:workerd-cli` crate (`cli/`) parses the command line (clap), produces the encoded config (schema files via `config-compiler.c++`), handles `--watch` and `compile`, and runs each serving subcommand (`serve`, `compile`, `test`, `fuzzilli`, `pyodide-lock`, `make-pyodide-baseline-snapshot`) through a `run_*` function in cli-main.c++. `Server` (server.c++, ~6K lines) is the god object: parses `workerd.capnp` config, constructs all service types as nested inner classes, wires sockets/bindings/actors, runs the event loop.
+Binary + orchestration layer. `:workerd` is a Rust binary: the `:workerd-cli` crate (`cli/`) parses the command line (clap), produces the encoded config (schema files via `config-compiler.c++`), handles `--watch` and `compile`, and runs each serving subcommand (`serve`, `compile`, `test`, `bench`, `fuzzilli`, `pyodide-lock`, `make-pyodide-baseline-snapshot`) through a `run_*` function in cli-main.c++. `Server` (server.c++, ~6K lines) is the god object: parses `workerd.capnp` config, constructs all service types as nested inner classes, wires sockets/bindings/actors, runs the event loop.
 
 ## KEY FILES
 

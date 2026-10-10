@@ -120,6 +120,10 @@ new-wpt-test test_name:
 new-test test_name:
   ./tools/unix/new-test.sh {{test_name}}
 
+# e.g. just new-bench //src/workerd/api/tests:url-bench
+new-bench bench_name:
+  ./tools/unix/new-bench.sh {{bench_name}}
+
 format *files:
   {{ if files == "" { "python3 tools/cross/format.py" } else { "python3 tools/cross/format.py files -- " + files } }}
 
@@ -141,6 +145,11 @@ update-rust package="":
 bench path:
   bazel run //src/workerd/tests:bench-{{path}} --config=benchmark
 
+# example: just wd-bench //src/workerd/api/tests:text-encoder-bench@ '*/encode ascii*'
+# Runs a wd_bench() target in an optimized build; arguments after the target go to `workerd bench`.
+wd-bench target *args:
+  bazel run {{target}} --config=benchmark -- {{args}}
+
 # example: just clippy dns
 # example: just clippy //src/workerd/server:workerd-cli
 clippy package="...":
@@ -156,6 +165,7 @@ generate-types:
   rm -rf types/generated-snapshot
   mkdir -p types/generated-snapshot
   cp -r bazel-bin/types/definitions/. types/generated-snapshot/
+  chmod -R u+w types/generated-snapshot
 
 update-reported-node-version:
   python3 tools/update_node_version.py src/workerd/api/node/node-version.h

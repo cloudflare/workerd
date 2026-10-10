@@ -88,6 +88,8 @@ class WorkerEntrypoint final: public WorkerInterface {
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
   kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override;
   kj::Promise<bool> test() override;
+  kj::Promise<void> bench(
+      bench::BenchParams::Reader params, bench::BenchReport::Group::Builder report) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
 
  private:
@@ -1093,6 +1095,39 @@ kj::Promise<kj::Maybe<kj::Date>> WorkerEntrypoint::abandonAlarm(kj::Date schedul
   auto& persistent = KJ_REQUIRE_NONNULL(
       actor.getPersistent(), "abandonAlarm() requires actor with persistent storage");
   return persistent.abandonAlarm(scheduledTime);
+}
+
+kj::Promise<void> WorkerEntrypoint::bench(
+    bench::BenchParams::Reader params, bench::BenchReport::Group::Builder report) {
+  TRACE_EVENT("workerd", "WorkerEntrypoint::bench()");
+  auto incomingRequest =
+      kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest, "bench() can only be called once"));
+  this->incomingRequest = kj::none;
+  auto& context = incomingRequest->getContext();
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    t.setEventInfo(*incomingRequest, tracing::CustomEventInfo());
+  }
+
+  incomingRequest->delivered();
+  // Background work that the cases leave behind may continue; it isn't waited for.
+  KJ_DEFER(incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest)));
+
+  // Unlike test(), this awaits the handler directly rather than through finishScheduled(), since
+  // the report needs the handler's result.
+  auto result = co_await context.run(
+      [params, entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
+          props = kj::mv(props)](Worker::Lock& lock, IoContext& context) mutable {
+    TRACE_EVENT("workerd", "WorkerEntrypoint::bench() run");
+    jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+    jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
+
+    return context.awaitJs(lock,
+        lock.getGlobalScope().bench(lock,
+            lock.getExportedHandler(
+                asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor()),
+            params));
+  });
+  api::fillBenchReport(result, report);
 }
 
 kj::Promise<bool> WorkerEntrypoint::test() {

@@ -18,6 +18,7 @@ struct CommonOptions;
 struct ServeOrTestOptions;
 struct ServeOptions;
 struct TestOptions;
+struct BenchOptions;
 struct Process;
 
 ::rust::Slice<const uint8_t> release_version();
@@ -34,6 +35,11 @@ int32_t run_test(const CommonOptions& common,
     ::rust::Vec<uint64_t> config,
     const ServeOrTestOptions& serveOrTest,
     const TestOptions& test,
+    ::rust::Box<Process> process);
+int32_t run_bench(const CommonOptions& common,
+    ::rust::Vec<uint64_t> config,
+    const ServeOrTestOptions& serveOrTest,
+    const BenchOptions& bench,
     ::rust::Box<Process> process);
 
 }  // namespace workerd::server::cli
