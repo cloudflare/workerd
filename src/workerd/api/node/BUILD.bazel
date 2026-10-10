@@ -91,6 +91,7 @@ wd_cc_library(
         "sqlite.h",
     ],
     implementation_deps = [
+        "//src/rust/i18n",
         "@nbytes",
         "@simdutf",
     ],
@@ -102,6 +103,18 @@ wd_cc_library(
         "//src/workerd/io:compatibility-date_capnp",
         "//src/workerd/jsg",
         ":exceptions",
+    ],
+)
+
+kj_test(
+    # Runs every corpus input through both implementations for all 16 encoding
+    # pairs; the Windows CI runners need more than the default 15s.
+    size = "large",
+    src = "i18n-test.c++",
+    deps = [
+        ":node-core",
+        "//src/workerd/jsg",
+        "//src/workerd/util:autogate",
     ],
 )
 

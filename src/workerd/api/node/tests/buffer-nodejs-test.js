@@ -5991,6 +5991,25 @@ export const isUtf8Test = {
   },
 };
 
+export const transcodeDoesNotExposeUninitializedMemoryTest = {
+  test(ctrl, env, ctx) {
+    const result = transcode(Buffer.from('☕'), 'utf8', 'ascii');
+    deepStrictEqual(result, Buffer.from('?'));
+
+    const backingStore = new Uint8Array(result.buffer);
+    const visibleStart = result.byteOffset;
+    const visibleEnd = visibleStart + result.byteLength;
+    deepStrictEqual(
+      backingStore.slice(0, visibleStart),
+      new Uint8Array(visibleStart)
+    );
+    deepStrictEqual(
+      backingStore.slice(visibleEnd),
+      new Uint8Array(backingStore.length - visibleEnd)
+    );
+  },
+};
+
 // Adapted from test/parallel/test-icu-transcode.js
 export const transcodeTest = {
   test(ctrl, env, ctx) {
@@ -6145,6 +6164,59 @@ export const transcodeFromUTF16OddByteInputTest = {
     throws(() => transcode(oddInput, 'utf16le', 'utf8'));
     throws(() => transcode(oddInput, 'utf16le', 'latin1'));
     throws(() => transcode(oddInput, 'utf16le', 'ascii'));
+  },
+};
+
+// Pins down the substitution behaviour of the ICU-backed pairs, which the
+// C++ and Rust implementations must agree on. workerd's ICU data aliases
+// 'us-ascii' and 'iso8859-1' to windows-1252, so for these pairs (unlike
+// Node.js, and unlike 'latin1' -> 'utf16le') both encodings are windows-1252.
+export const transcodeSubstitutionTest = {
+  test() {
+    const bytes = (buf) => [...buf];
+    // windows-1252 decoding, and identity pairs passing high bytes through.
+    deepStrictEqual(
+      bytes(transcode(Buffer.from([0x80, 0x81, 0xe9]), 'latin1', 'utf8')),
+      [0xe2, 0x82, 0xac, 0xc2, 0x81, 0xc3, 0xa9]
+    );
+    deepStrictEqual(
+      bytes(transcode(Buffer.from([0x61, 0x80, 0xff]), 'ascii', 'ascii')),
+      [0x61, 0x80, 0xff]
+    );
+    // windows-1252 encoding: unmappable characters become '?', but
+    // unmappable default-ignorable code points are dropped.
+    deepStrictEqual(
+      bytes(transcode(Buffer.from('€\u0080☕a\u200bb'), 'utf8', 'latin1')),
+      [0x80, 0x3f, 0x3f, 0x61, 0x62]
+    );
+    // One U+FFFD per maximal subpart of ill-formed UTF-8.
+    deepStrictEqual(
+      bytes(transcode(Buffer.from([0xf4, 0x90, 0x80, 0x80]), 'utf8', 'ascii')),
+      [0x3f, 0x3f, 0x3f, 0x3f]
+    );
+    // Unpaired surrogates; a trailing odd byte, which absorbs a lead
+    // surrogate before it.
+    deepStrictEqual(
+      bytes(
+        transcode(Buffer.from([0x00, 0xd8, 0x41, 0x00]), 'utf16le', 'ascii')
+      ),
+      [0x3f, 0x41]
+    );
+    deepStrictEqual(
+      bytes(
+        transcode(
+          Buffer.from([0x41, 0x00, 0x00, 0xd8, 0x42]),
+          'utf16le',
+          'utf16le'
+        )
+      ),
+      [0x41, 0x00, 0xfd, 0xff]
+    );
+    // The destination is sized for the worst case, and JavaScript can see it.
+    strictEqual(
+      transcode(Buffer.from([0x61]), 'latin1', 'utf8').buffer.byteLength,
+      3
+    );
   },
 };
 

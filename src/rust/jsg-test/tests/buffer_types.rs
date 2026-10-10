@@ -63,6 +63,79 @@ fn array_buffer_new_zeroed_is_zeroed() {
 }
 
 #[test]
+fn array_buffer_new_zeroed_with_fills_before_js_sees_it() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let (buf, result) = v8::ArrayBuffer::new_zeroed_with(lock, 4, |bytes| {
+            assert_eq!(bytes, &[0, 0, 0, 0], "must be zeroed before fill runs");
+            bytes[1..3].copy_from_slice(&[10, 20]);
+            "done"
+        })
+        .unwrap();
+        assert_eq!(result, "done");
+        assert_eq!(buf.as_slice(), &[0, 10, 20, 0]);
+
+        // The written bytes are visible to JavaScript and the rest stay zero.
+        ctx.set_global("buf", buf.into());
+        let contents: String = ctx.eval(lock, "new Uint8Array(buf).join(',')").unwrap();
+        assert_eq!(contents, "0,10,20,0");
+
+        Ok(())
+    });
+}
+
+#[test]
+fn array_buffer_new_zeroed_with_empty() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let (buf, len) = v8::ArrayBuffer::new_zeroed_with(lock, 0, |bytes| bytes.len()).unwrap();
+        assert_eq!(len, 0);
+        assert!(buf.is_empty());
+        Ok(())
+    });
+}
+
+#[test]
+fn array_buffer_new_zeroed_with_allocation_failure_skips_fill() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let mut called = false;
+        let result = v8::ArrayBuffer::new_zeroed_with(lock, usize::MAX, |_| called = true);
+        assert!(result.is_none());
+        assert!(!called);
+        Ok(())
+    });
+}
+
+#[test]
+fn uint8_array_from_buffer_views_a_range() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let buf = v8::ArrayBuffer::new(lock, &[1, 2, 3, 4]);
+        let view = v8::Uint8Array::from_buffer(lock, &buf, 1, 2).unwrap();
+        assert_eq!(view.as_slice(), &[2, 3]);
+        let whole = v8::Uint8Array::from_buffer(lock, &buf, 0, 4).unwrap();
+        assert_eq!(whole.as_slice(), &[1, 2, 3, 4]);
+        let empty_at_end = v8::Uint8Array::from_buffer(lock, &buf, 4, 0).unwrap();
+        assert!(empty_at_end.is_empty());
+        Ok(())
+    });
+}
+
+#[test]
+fn uint8_array_from_buffer_out_of_bounds_is_an_error() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let buf = v8::ArrayBuffer::new(lock, &[1, 2, 3, 4]);
+        assert!(v8::Uint8Array::from_buffer(lock, &buf, 0, 5).is_err());
+        assert!(v8::Uint8Array::from_buffer(lock, &buf, 5, 0).is_err());
+        assert!(v8::Uint8Array::from_buffer(lock, &buf, 3, 2).is_err());
+        assert!(v8::Uint8Array::from_buffer(lock, &buf, 1, usize::MAX).is_err());
+        Ok(())
+    });
+}
+
+#[test]
 fn array_buffer_is_empty() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
