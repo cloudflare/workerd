@@ -8,6 +8,7 @@
 
 #include <workerd/jsg/exception.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/entropy.h>
 #include <workerd/util/sentry.h>
 
 #include <kj/debug.h>
@@ -831,13 +832,23 @@ void SqliteDatabase::applyChange(const StateChange& change) {
   }
 }
 
+SqliteQueryId SqliteDatabase::generateQueryId() {
+  SqliteQueryId id = 0;
+  // We wanna avoid zero as 0 can be used as an unset value
+  while (id == 0) {
+    getEntropy(kj::asBytes(id));
+  }
+  return id;
+}
+
 // Set up the regulator that will be used for authorizer callbacks while preparing this
 // statement.
 SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(StaticRegulator regulator,
     kj::StringPtr sqlCode,
     uint prepFlags,
     Multi multi,
-    kj::Maybe<kj::Vector<Statement>&> prelude) {
+    kj::Maybe<kj::Vector<Statement>&> prelude,
+    kj::Maybe<SqliteQueryId> queryId) {
   sqlite3* db = &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
 
   ParseContext parseContext;
@@ -884,7 +895,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(StaticRegulator re
         sqliteObserver.reportQueryEvent(
             kj::heapString(sqlCode.slice(0, kj::min(RA_MAX_METRICS_QUERY_SIZE, sqlCode.size()))), 0,
             0, /* Reports queryLatency to be 0 explicitly */ 0 * kj::NANOSECONDS, 0, prepareResult,
-            extendedErrorCode, !regulator->shouldAddQueryStats(), kj::none);
+            extendedErrorCode, !regulator->shouldAddQueryStats(), kj::none, queryId);
       }
 
       // If we had an auth error specifically, check if we recorded a better error message during
@@ -964,7 +975,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(StaticRegulator re
             // Report queryEvent for this statement
             sqliteObserver.reportQueryEvent(kj::mv(queryStatement), rowsRead, rowsWritten,
                 queryLatency, dbWalBytesWritten, err, extendedCode,
-                regulator->shouldAddQueryStats(), kj::mv(queryErrorDescription));
+                regulator->shouldAddQueryStats(), kj::mv(queryErrorDescription), queryId);
 
             if (err == SQLITE_DONE) {
               // good
@@ -1501,9 +1512,10 @@ SqliteDatabase::Statement SqliteDatabase::prepare(
       *this, regulator, prepareSql(regulator, sqlCode, SQLITE_PREPARE_PERSISTENT, SINGLE));
 }
 
-SqliteDatabase::StatementAndEffect& SqliteDatabase::Statement::prepareForExecution() {
+SqliteDatabase::StatementAndEffect& SqliteDatabase::Statement::prepareForExecution(
+    kj::Maybe<SqliteQueryId> queryId) {
   for (auto& stmt: prelude) {
-    stmt.run();
+    stmt.run(StatementOptions{.queryId = queryId});
   }
 
   KJ_IF_SOME(sqlCode, stmt.tryGet<kj::String>()) {
@@ -1518,7 +1530,8 @@ SqliteDatabase::StatementAndEffect& SqliteDatabase::Statement::prepareForExecuti
 
     // We use the MULTI flag here in case this Statement was created by prepareMulti(). If multiple
     // statements are parsed, they'll be added to our `prelude`, and also executed immediately.
-    stmt = db.prepareSql(regulator, sqlCodeToPrepare, SQLITE_PREPARE_PERSISTENT, MULTI, prelude);
+    stmt = db.prepareSql(
+        regulator, sqlCodeToPrepare, SQLITE_PREPARE_PERSISTENT, MULTI, prelude, queryId);
   }
 
   return KJ_ASSERT_NONNULL(stmt.tryGet<StatementAndEffect>());
@@ -1545,10 +1558,11 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
     kj::ArrayPtr<const ValuePtr> bindings)
     : ResetListener(db),
       regulator(options.regulator),
-      maybeStatement(statement.prepareForExecution()),
+      maybeStatement(statement.prepareForExecution(options.queryId)),
       queryEvent(this->db.sqliteObserver) {
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
   KJ_ON_SCOPE_FAILURE(destroy());
+  queryEvent.setQueryId(options.queryId);
   init(bindings);
 }
 
@@ -1558,11 +1572,12 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
     kj::ArrayPtr<const ValuePtr> bindings)
     : ResetListener(db),
       regulator(options.regulator),
-      ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
+      ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI, kj::none, options.queryId)),
       maybeStatement(ownStatement),
       queryEvent(this->db.sqliteObserver) {
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
   KJ_ON_SCOPE_FAILURE(destroy());
+  queryEvent.setQueryId(options.queryId);
   init(bindings);
 }
 

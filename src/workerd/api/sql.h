@@ -257,9 +257,12 @@ class SqlStorage::Cursor final: public jsg::Object {
     State(SqliteDatabase& db,
         SqliteDatabase::StaticRegulator regulator,
         kj::StringPtr sqlCode,
-        kj::Array<BindingValue> bindings);
+        kj::Array<BindingValue> bindings,
+        kj::Maybe<SqliteQueryId> queryId);
 
-    State(kj::Rc<CachedStatement> cachedStatement, kj::Array<BindingValue> bindings);
+    State(kj::Rc<CachedStatement> cachedStatement,
+        kj::Array<BindingValue> bindings,
+        kj::Maybe<SqliteQueryId> queryId);
   };
 
   // Nulled out when query is done or canceled.

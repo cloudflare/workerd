@@ -95,37 +95,43 @@ kj::Own<SqliteKv::ListCursor> SqliteKv::list(
   if (!tableCreated) return kj::heap<ListCursor>(nullptr);
   auto& stmts = KJ_UNWRAP_OR(state.tryGet<Initialized>(), return kj::heap<ListCursor>(nullptr));
 
+  // Mint one id for this list so every statement it runs shares it.
+  SqliteDatabase::Statement::StatementOptions runOptions{.queryId = db.generateQueryId()};
+
   if (order == Order::FORWARD) {
     KJ_IF_SOME(e, end) {
       KJ_IF_SOME(l, limit) {
-        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListEndLimit, begin, e,
-            static_cast<int64_t>(l));
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListEndLimit,
+            runOptions, begin, e, static_cast<int64_t>(l));
       } else {
-        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListEnd, begin, e);
+        return kj::heap<ListCursor>(
+            kj::Badge<SqliteKv>(), *this, stmts.stmtListEnd, runOptions, begin, e);
       }
     } else {
       KJ_IF_SOME(l, limit) {
-        return kj::heap<ListCursor>(
-            kj::Badge<SqliteKv>(), *this, stmts.stmtListLimit, begin, static_cast<int64_t>(l));
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListLimit, runOptions,
+            begin, static_cast<int64_t>(l));
       } else {
-        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtList, begin);
+        return kj::heap<ListCursor>(
+            kj::Badge<SqliteKv>(), *this, stmts.stmtList, runOptions, begin);
       }
     }
   } else {
     KJ_IF_SOME(e, end) {
       KJ_IF_SOME(l, limit) {
         return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListEndLimitReverse,
-            begin, e, static_cast<int64_t>(l));
+            runOptions, begin, e, static_cast<int64_t>(l));
       } else {
         return kj::heap<ListCursor>(
-            kj::Badge<SqliteKv>(), *this, stmts.stmtListEndReverse, begin, e);
+            kj::Badge<SqliteKv>(), *this, stmts.stmtListEndReverse, runOptions, begin, e);
       }
     } else {
       KJ_IF_SOME(l, limit) {
-        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListLimitReverse, begin,
-            static_cast<int64_t>(l));
+        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListLimitReverse,
+            runOptions, begin, static_cast<int64_t>(l));
       } else {
-        return kj::heap<ListCursor>(kj::Badge<SqliteKv>(), *this, stmts.stmtListReverse, begin);
+        return kj::heap<ListCursor>(
+            kj::Badge<SqliteKv>(), *this, stmts.stmtListReverse, runOptions, begin);
       }
     }
   }
@@ -151,9 +157,10 @@ void SqliteKv::put(KeyPtr key, ValuePtr value) {
 }
 
 void SqliteKv::put(KeyPtr key, ValuePtr value, WriteOptions options) {
+  auto queryId = resolveQueryId(options.queryId);
   ensureInitialized(options.allowUnconfirmed)
-      .stmtPut.run({.allowUnconfirmed = options.allowUnconfirmed}, key, value);
-  clearExternalsIfPresent(key);
+      .stmtPut.run({.allowUnconfirmed = options.allowUnconfirmed, .queryId = queryId}, key, value);
+  clearExternalsIfPresent(key, queryId);
 }
 
 bool SqliteKv::delete_(KeyPtr key) {
@@ -161,18 +168,20 @@ bool SqliteKv::delete_(KeyPtr key) {
 }
 
 bool SqliteKv::delete_(KeyPtr key, WriteOptions options) {
+  auto queryId = resolveQueryId(options.queryId);
   bool result;
   {
     auto query = ensureInitialized(options.allowUnconfirmed)
-                     .stmtDelete.run({.allowUnconfirmed = options.allowUnconfirmed}, key);
+                     .stmtDelete.run(
+                         {.allowUnconfirmed = options.allowUnconfirmed, .queryId = queryId}, key);
     result = query.changeCount() > 0;
   }
 
-  clearExternalsIfPresent(key);
+  clearExternalsIfPresent(key, queryId);
   return result;
 }
 
-void SqliteKv::clearExternalsIfPresent(KeyPtr key) {
+void SqliteKv::clearExternalsIfPresent(KeyPtr key, SqliteQueryId queryId) {
   // If the externals table hasn't been created yet, there's nothing to clear. We deliberately
   // avoid creating it here -- it should only be created when externals are actually being
   // written.
@@ -184,14 +193,19 @@ void SqliteKv::clearExternalsIfPresent(KeyPtr key) {
 
   // Externals writes are always paired with a regular KV write, and that paired write decides
   // whether the operation is allowed to be unconfirmed. So we always pass allowUnconfirmed here.
-  stmts.stmtDeleteExternals.run({.allowUnconfirmed = true}, key);
+  stmts.stmtDeleteExternals.run({.allowUnconfirmed = true, .queryId = queryId}, key);
 }
 
 uint SqliteKv::deleteAll() {
   // TODO(perf): Consider introducing a compatibility flag that causes deleteAll() to always return
   //   1. Apps almost certainly don't care about the return value but historically we returned the
   //   count of keys deleted, so now we're stuck counting the table size for no good reason.
-  uint count = tableCreated ? ensureInitialized(false).stmtCountKeys.run().getInt(0) : 0;
+  uint count = tableCreated
+      ? ensureInitialized(false)
+            .stmtCountKeys
+            .run(SqliteDatabase::Statement::StatementOptions{.queryId = db.generateQueryId()})
+            .getInt(0)
+      : 0;
   db.reset();
   return count;
 }
@@ -233,7 +247,8 @@ kj::Array<kj::Array<byte>> SqliteKv::getExternals(kj::StringPtr key) {
   if (!externalsTableCreated) return nullptr;
   auto& stmts = KJ_UNWRAP_OR(externalsState.tryGet<ExternalsInitialized>(), return nullptr);
 
-  auto query = stmts.stmtGetExternals.run(key);
+  auto query = stmts.stmtGetExternals.run(
+      SqliteDatabase::Statement::StatementOptions{.queryId = db.generateQueryId()}, key);
 
   kj::Vector<kj::Array<byte>> result;
   while (!query.isDone()) {
@@ -249,12 +264,15 @@ void SqliteKv::putExternals(kj::StringPtr key, kj::Array<kj::Array<byte>> tokens
   // Externals writes are always paired with a regular KV write, and that paired write decides
   // whether the operation is allowed to be unconfirmed. So we always pass allowUnconfirmed here.
 
+  // Group every statement of this putExternals under one id.
+  auto queryId = db.generateQueryId();
+
   // Replace any existing tokens for this key with the new set.
-  stmts.stmtDeleteExternals.run({.allowUnconfirmed = true}, key);
+  stmts.stmtDeleteExternals.run({.allowUnconfirmed = true, .queryId = queryId}, key);
 
   for (auto i: kj::indices(tokens)) {
-    stmts.stmtPutExternal.run(
-        {.allowUnconfirmed = true}, key, static_cast<int64_t>(i), tokens[i].asPtr());
+    stmts.stmtPutExternal.run({.allowUnconfirmed = true, .queryId = queryId}, key,
+        static_cast<int64_t>(i), tokens[i].asPtr());
   }
 }
 
@@ -267,13 +285,14 @@ void SqliteKv::beforeSqliteReset() {
 void SqliteKv::rollbackMultiPut(Initialized& stmts, WriteOptions options) {
   KJ_IF_SOME(e, kj::runCatchingExceptions([&]() {
     // This should be rare, so we don't prepare a statement for it.
-    stmts.db.run(
-        {.regulator = Initialized::regulator, .allowUnconfirmed = options.allowUnconfirmed},
+    stmts.db.run({.regulator = Initialized::regulator,
+                   .allowUnconfirmed = options.allowUnconfirmed,
+                   .queryId = options.queryId},
         kj::str("ROLLBACK TO _cf_put_multiple_savepoint"));
-    stmts.stmtMultiPutRelease.run({.allowUnconfirmed = options.allowUnconfirmed});
+    stmts.stmtMultiPutRelease.run(
+        {.allowUnconfirmed = options.allowUnconfirmed, .queryId = options.queryId});
   })) {
     KJ_LOG(WARNING, "silencing exception encountered while rolling back multi-put", e);
   }
 }
-
 }  // namespace workerd
