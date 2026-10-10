@@ -608,6 +608,9 @@ kj::Maybe<CompressionError> ZstdEncoderContext::initialize(uint64_t pledgedSrcSi
     KJ_IF_SOME(err, zstdCheckError(result, error_, "ERR_ZSTD_COMPRESSION_FAILED"_kj)) {
       return kj::mv(err);
     }
+    // Start counting, so that work() can enforce the pledge even when zstd replaces it.
+    pledgedSrcSize_ = pledgedSrcSize;
+    consumedSrcSize_ = uint64_t(0);
   }
 
   return kj::none;
@@ -617,10 +620,26 @@ void ZstdEncoderContext::work() {
   JSG_REQUIRE(mode == ZlibMode::ZSTD_ENCODE, Error, "Mode should be ZSTD_ENCODE"_kj);
   JSG_REQUIRE(cctx_.get() != nullptr, Error, "Zstd context should not be null"_kj);
 
+  size_t inputPos = input_.pos;
   lastResult = ZSTD_compressStream2(cctx_.get(), &output_, &input_, flush_);
+  KJ_IF_SOME(consumed, consumedSrcSize_) {
+    consumed += input_.pos - inputPos;
+  }
 
   if (ZSTD_isError(lastResult)) {
     error_ = ZSTD_getErrorCode(lastResult);
+  } else if (lastResult == 0 && flush_ == ZSTD_e_end) {
+    // The frame is complete. If a size was pledged, compare it with what the frame actually
+    // consumed, since zstd may have replaced the pledge (see consumedSrcSize_ in the header).
+    // A frame that spanned several calls was already checked by zstd, which then fails in
+    // the branch above, so this only adds the check zstd skipped.
+    KJ_IF_SOME(consumed, consumedSrcSize_) {
+      if (consumed != pledgedSrcSize_) {
+        error_ = ZSTD_error_srcSize_wrong;
+      }
+    }
+    // Check once per frame. resetStream() starts the count again for the next one.
+    consumedSrcSize_ = kj::none;
   }
 }
 
@@ -629,6 +648,16 @@ kj::Maybe<CompressionError> ZstdEncoderContext::resetStream() {
     size_t result = ZSTD_CCtx_reset(cctx_.get(), ZSTD_reset_session_only);
     KJ_IF_SOME(err, zstdCheckError(result, error_, "ERR_ZSTD_COMPRESSION_FAILED"_kj)) {
       return kj::mv(err);
+    }
+
+    // A session reset also sets the pledged size back to unknown, so pledge it again for the
+    // next frame and restart the count that enforces it.
+    if (pledgedSrcSize_ != ZSTD_CONTENTSIZE_UNKNOWN) {
+      result = ZSTD_CCtx_setPledgedSrcSize(cctx_.get(), pledgedSrcSize_);
+      KJ_IF_SOME(err, zstdCheckError(result, error_, "ERR_ZSTD_COMPRESSION_FAILED"_kj)) {
+        return kj::mv(err);
+      }
+      consumedSrcSize_ = uint64_t(0);
     }
   }
   return kj::none;
