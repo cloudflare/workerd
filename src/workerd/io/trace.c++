@@ -2090,6 +2090,33 @@ void SpanBuilder::recordException(kj::Maybe<tracing::Exception::Code> code,
 }
 
 void TraceContext::setTag(kj::ConstString key, SpanBuilder::TagInitValue value) {
+  if (asyncTraceResource.getId() != 0) {
+    kj::String text;
+    KJ_SWITCH_ONEOF(value) {
+      KJ_CASE_ONEOF(s, kj::StringPtr) {
+        text = kj::str(s);
+      }
+      KJ_CASE_ONEOF(s, kj::String) {
+        text = kj::str(s);
+      }
+      KJ_CASE_ONEOF(s, kj::LiteralStringConst) {
+        text = kj::str(s);
+      }
+      KJ_CASE_ONEOF(s, kj::ConstString) {
+        text = kj::str(s);
+      }
+      KJ_CASE_ONEOF(b, bool) {
+        text = kj::str(b);
+      }
+      KJ_CASE_ONEOF(d, double) {
+        text = kj::str(d);
+      }
+      KJ_CASE_ONEOF(i, int64_t) {
+        text = kj::str(i);
+      }
+    }
+    asyncTraceResource.annotate(key, text);
+  }
   if (!isObserved()) {
     return;
   }

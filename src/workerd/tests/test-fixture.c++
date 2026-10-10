@@ -368,7 +368,7 @@ TestFixture::TestFixture(SetupParams&& params)
           defaultPythonConfig)),
       heapLimitFlag(kj::atomicRefcounted<HeapLimitFlag>()),
       workerIsolate(kj::atomicRefcounted<Worker::Isolate>(kj::mv(api),
-          kj::atomicRefcounted<IsolateObserver>(),
+          kj::mv(params.isolateObserver).orDefault(kj::atomicRefcounted<IsolateObserver>()),
           scriptId,
           kj::rc<MockIsolateLimitEnforcer>(kj::atomicAddRef(*heapLimitFlag)).toOwn(),
           Worker::Isolate::InspectorPolicy::DISALLOW)),

@@ -19,6 +19,19 @@
 namespace workerd {
 
 class IoContext;
+class AsyncTraceSinks;
+
+// How an isolate supports async tracing (see async-trace.h). Returned by
+// IsolateObserver::getAsyncTraceConfig(). Returning any config enables turn, request and resource
+// tracking.
+struct AsyncTraceConfig {
+  // Record up to this many frames of each resource's creation stack; 0 records none. Each capture
+  // walks the JavaScript stack, so this costs time per resource created.
+  uint32_t stackDepth = 0;
+  // Track JavaScript promises too (async-trace-promises.h). Installing V8's promise hook slows down
+  // every promise operation in the isolate, permanently, so this is for local development only.
+  bool promises = false;
+};
 
 // Whether an outgoing subrequest's request body can be rewound (e.g. a buffered or null body), and
 // so the request could be re-sent. See RequestObserver::setNextSubrequestRetryEligibility().
@@ -334,6 +347,19 @@ class IsolateObserver: public kj::AtomicRefcounted {
   virtual void teardownStarted() {}
   virtual void teardownLockAcquired() {}
   virtual void teardownFinished() {}
+
+  // Called once, when the Worker::Isolate is created. Returning none (the default) disables async
+  // tracing for the isolate entirely: addAsyncTraceSinks() is never called, and instrumentation
+  // costs one null check per site.
+  virtual kj::Maybe<AsyncTraceConfig> getAsyncTraceConfig() const {
+    return kj::none;
+  }
+
+  // Called once per IoContext, when it is created, if getAsyncTraceConfig() returned a config.
+  // The context is traced only if at least one sink is added. `worker` names the isolate, and
+  // `actorId` is set for an actor's context.
+  virtual void addAsyncTraceSinks(
+      AsyncTraceSinks& sinks, kj::StringPtr worker, kj::Maybe<kj::StringPtr> actorId) const {}
 
   // Describes why a worker was started.
   enum class StartType : uint8_t {

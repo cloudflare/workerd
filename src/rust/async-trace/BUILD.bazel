@@ -1,0 +1,11 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_rust_crate(
+    name = "async-trace",
+    cxx_bridge_src = "ffi.rs",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@crates_vendor//:serde",
+        "@crates_vendor//:serde_json",
+    ],
+)

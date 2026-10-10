@@ -2194,6 +2194,9 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       }
       return ctx.makeUserTraceSpan("jsRpcCall"_kjc);
     }();
+    // Its lifetime is the dispatch promise, which is not awaited from JavaScript; the method's own
+    // awaits must not adopt it.
+    jsRpcCallSpan.detachAsync();
     jsRpcCallSpan.setTag("jsrpc.method"_kjc, methodNameForTrace.asPtr());
     jsRpcCallSpan.setTag("jsrpc.target_kind"_kjc, getTargetKind());
     jsRpcCallSpan.setTag("jsrpc.operation"_kjc,
@@ -3449,7 +3452,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     bool isDynamicDispatch) {
   IoContext& ioctx = incomingRequest->getContext();
 
-  incomingRequest->delivered();
+  incomingRequest->delivered("jsrpc"_kj);
 
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client

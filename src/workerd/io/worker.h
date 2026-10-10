@@ -66,6 +66,9 @@ class VirtualFileSystem;
 
 class ThreadContext;
 class IoContext;
+class AsyncTraceIsolate;
+class AsyncTraceListener;
+class AsyncTracePromiseHook;
 class InputGate;
 class OutputGate;
 
@@ -384,6 +387,20 @@ class Worker::Isolate: public kj::AtomicRefcounted {
     return id;
   }
 
+  // Set if the IsolateObserver enabled async tracing for this isolate (getAsyncTraceConfig()).
+  // The promise hook's state, if async tracing of promises is enabled (AsyncTraceConfig::promises).
+  kj::Maybe<const AsyncTracePromiseHook&> tryGetAsyncTracePromiseHook() const {
+    return asyncTracePromiseHook.map(
+        [](const kj::Own<AsyncTracePromiseHook>& h) -> const AsyncTracePromiseHook& { return *h; });
+  }
+
+  kj::Maybe<const AsyncTraceIsolate&> getAsyncTraceIsolate() const {
+    return asyncTraceIsolate.map(
+        [](const kj::Own<AsyncTraceIsolate>& isolate) -> const AsyncTraceIsolate& {
+      return *isolate;
+    });
+  }
+
   // Parses the given code to create a new script object and returns it.
   //
   // Note that the `source` is fully consumed before this method returns, so the underlying buffers
@@ -497,6 +514,12 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // Returns kj::none when no inspector exists.
   kj::Maybe<v8_inspector::V8Inspector&> tryGetV8Inspector() const;
 
+  // An async trace sink reporting to the isolate's inspector (async-trace-inspector.h), or
+  // kj::none if there is no inspector or no DevTools session is connected. A context's sinks are
+  // chosen when it is created, so a context created before a session connects is not reported to
+  // it; one created while a session is connected keeps reporting after the session disconnects.
+  kj::Maybe<kj::Own<AsyncTraceListener>> newAsyncTraceInspectorSink() const;
+
   // Get the process stdio prefixed setting from logging options
   inline kj::StringPtr getStdoutPrefix() const {
     return loggingOptions.stdoutPrefix;
@@ -540,6 +563,8 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   TeardownFinishedGuard<IsolateObserver&> teardownGuard{*metrics};
 
   kj::String id;
+  kj::Maybe<kj::Own<AsyncTraceIsolate>> asyncTraceIsolate;
+  kj::Maybe<kj::Own<AsyncTracePromiseHook>> asyncTracePromiseHook;
   kj::Own<IsolateLimitEnforcer> limitEnforcer;
   kj::MutexGuarded<kj::Maybe<kj::Function<void(void)>>> cpuLimitNearlyExceededCallback;
   kj::Own<Api> api;

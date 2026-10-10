@@ -8,6 +8,7 @@
 
 #include <workerd/api/memory-cache.h>
 #include <workerd/api/pyodide/pyodide.h>
+#include <workerd/io/async-trace.h>
 #include <workerd/io/worker.h>
 #include <workerd/server/workerd.capnp.h>
 
@@ -65,6 +66,20 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   }
   void enableInspector(kj::String addr) {
     inspectorOverride = kj::mv(addr);
+  }
+  // Traces async activity in every worker to `writer` (--async-trace), which must outlive the
+  // Server.
+  void enableAsyncTrace(const AsyncTraceWriter& writer) {
+    asyncTraceWriter = writer;
+  }
+  // Records up to `frames` frames of each async resource's creation stack (--async-trace-stacks),
+  // for every async trace output.
+  void enableAsyncTraceStacks(uint32_t frames) {
+    asyncTraceStackDepth = frames;
+  }
+  // Traces JavaScript promises too (--async-trace-promises), for every async trace output.
+  void enableAsyncTracePromises() {
+    asyncTracePromises = true;
   }
   void enableControl(uint fd) {
     controlOverride = kj::heap<kj::FdOutputStream>(fd);
@@ -192,6 +207,9 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   kj::HashMap<kj::String, kj::String> externalOverrides;
 
   kj::Maybe<kj::String> inspectorOverride;
+  kj::Maybe<const AsyncTraceWriter&> asyncTraceWriter;
+  uint32_t asyncTraceStackDepth = 0;
+  bool asyncTracePromises = false;
   kj::Maybe<kj::Own<InspectorServiceIsolateRegistrar>> inspectorIsolateRegistrar;
   kj::Maybe<kj::Own<kj::FdOutputStream>> controlOverride;
   kj::Maybe<kj::String> debugPortOverride;

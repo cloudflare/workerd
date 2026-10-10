@@ -5895,6 +5895,39 @@ kj::Promise<kj::Rc<Server::Service>> Server::makeWorker(kj::StringPtr name,
   co_return co_await makeWorkerImpl(name, kj::mv(def), extensions, errorReporter);
 }
 
+namespace {
+
+// Enables async tracing for an isolate (--async-trace, --async-trace-stacks,
+// --async-trace-promises) and writes each of its contexts to the --async-trace file, if there is
+// one.
+class AsyncTraceIsolateObserver final: public IsolateObserver {
+ public:
+  AsyncTraceIsolateObserver(
+      kj::Maybe<const AsyncTraceWriter&> writer, uint32_t stackDepth, bool promises)
+      : writer(writer),
+        stackDepth(stackDepth),
+        promises(promises) {}
+
+  kj::Maybe<AsyncTraceConfig> getAsyncTraceConfig() const override {
+    return AsyncTraceConfig{.stackDepth = stackDepth, .promises = promises};
+  }
+
+  void addAsyncTraceSinks(AsyncTraceSinks& sinks,
+      kj::StringPtr worker,
+      kj::Maybe<kj::StringPtr> actorId) const override {
+    KJ_IF_SOME(w, writer) {
+      sinks.addNdjson(w);
+    }
+  }
+
+ private:
+  kj::Maybe<const AsyncTraceWriter&> writer;
+  uint32_t stackDepth;
+  bool promises;
+};
+
+}  // namespace
+
 kj::Own<Worker::Isolate> Server::makeWorkerIsolate(kj::StringPtr name,
     kj::StringPtr inboundListenersKey,
     const WorkerDef& def,
@@ -5902,7 +5935,13 @@ kj::Own<Worker::Isolate> Server::makeWorkerIsolate(kj::StringPtr name,
     Worker::Isolate::InspectorPolicy inspectorPolicy,
     kj::Maybe<jsg::SnapshotConfig> snapshotConfig) {
   auto jsgobserver = kj::atomicRefcounted<JsgIsolateObserver>();
-  auto observer = kj::atomicRefcounted<IsolateObserver>();
+  kj::Own<IsolateObserver> observer;
+  if (asyncTraceWriter != kj::none || asyncTraceStackDepth > 0 || asyncTracePromises) {
+    observer = kj::atomicRefcounted<AsyncTraceIsolateObserver>(
+        asyncTraceWriter, asyncTraceStackDepth, asyncTracePromises);
+  } else {
+    observer = kj::atomicRefcounted<IsolateObserver>();
+  }
   auto limitEnforcer = kj::refcounted<NullIsolateLimitEnforcer>();
   auto isolateGroup = jsg::newIsolateGroup();
 

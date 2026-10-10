@@ -24,8 +24,36 @@ async function pbkdf2Derive(password) {
   return Buffer.from(keyBuffer).toString('base64');
 }
 
+// Each pauses in a callback, so the inspector test can check the async stack DevTools sees. The
+// function names are asserted on.
+function scheduleTimer() {
+  return new Promise((resolve) => {
+    setTimeout(function timerCallback() {
+      debugger;
+      resolve();
+    }, 1);
+  });
+}
+
+function scheduleMicrotask() {
+  return new Promise((resolve) => {
+    queueMicrotask(function microtaskCallback() {
+      debugger;
+      resolve();
+    });
+  });
+}
+
 export default {
   async fetch(request, env, ctx) {
+    if (request.url.includes('/asyncStack/timer')) {
+      await scheduleTimer();
+      return new Response('ok');
+    }
+    if (request.url.includes('/asyncStack/microtask')) {
+      await scheduleMicrotask();
+      return new Response('ok');
+    }
     if (request.url.includes('/pbkdf2Derive')) {
       return new Response(await pbkdf2Derive('hello!'));
     }

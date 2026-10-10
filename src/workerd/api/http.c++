@@ -2441,6 +2441,11 @@ JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(
     clientWithTracing =
         buildClient(ioContext, kj::none, "jsRpcSession"_kjc, kj::mv(makeUserSpanParent));
   }
+  KJ_IF_SOME(sessionSpan, clientWithTracing.traceContext) {
+    // The session span covers the session task, not any one awaitIo(); the jsRpcCall span is the
+    // one the call's awaitIo() should adopt.
+    sessionSpan.detachAsync();
+  }
   auto callSpanParents =
       clientWithTracing.traceContext.map([](TraceContext& tc) { return tc.getSpanParents(); });
   auto worker = kj::mv(clientWithTracing.client);

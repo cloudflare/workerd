@@ -1,0 +1,60 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+# Runs a worker with --async-trace, then checks the trace with a second worker.
+sh_test(
+    name = "async-trace-test",
+    size = "medium",
+    srcs = ["async-trace-test.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "$(location scenario.wd-test)",
+        "$(location check.wd-test)",
+    ],
+    data = [
+        "check.js",
+        "check.wd-test",
+        "scenario.js",
+        "scenario.wd-test",
+        "//src/workerd/server:workerd",
+    ],
+    tags = ["no-qemu"],
+)
+
+# Checks how the trace ends when a context is still open at shutdown, with and without
+# KJ_CLEAN_SHUTDOWN.
+sh_test(
+    name = "async-trace-shutdown-test",
+    size = "medium",
+    srcs = ["async-trace-shutdown-test.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "$(location shutdown.wd-test)",
+    ],
+    data = [
+        "shutdown.js",
+        "shutdown.wd-test",
+        "//src/workerd/server:workerd",
+    ],
+    tags = ["no-qemu"],
+)
+
+# Runs the same worker under --perfetto-trace, with and without the workerd.async category.
+sh_test(
+    name = "async-trace-perfetto-test",
+    size = "medium",
+    srcs = ["async-trace-perfetto-test.sh"],
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "$(location scenario.wd-test)",
+    ],
+    data = [
+        "scenario.js",
+        "scenario.wd-test",
+        "//src/workerd/server:workerd",
+    ],
+    tags = ["no-qemu"],
+    target_compatible_with = select({
+        "//src/workerd/util:really_use_perfetto": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+)

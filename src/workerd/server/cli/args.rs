@@ -221,6 +221,24 @@ pub struct ServeOrTestArgs {
     )]
     pub perfetto_trace: Option<Override>,
 
+    /// Write an async activity trace to <path>: one JSON object per line, recording requests,
+    /// turns, timers, I/O and binding operations, and what caused what. The file is overwritten.
+    /// It includes request details such as URLs and storage keys (and, with
+    /// --async-trace-stacks, source locations), so treat it like a log.
+    #[arg(long, value_name = "path")]
+    pub async_trace: Option<String>,
+
+    /// Record up to <frames> frames of the JavaScript stack that created each async resource, in
+    /// the --async-trace file and in the workerd.async category of --perfetto-trace. Slows down
+    /// every resource creation.
+    #[arg(long, value_name = "frames", value_parser = clap::value_parser!(u32).range(1..=64))]
+    pub async_trace_stacks: Option<u32>,
+
+    /// Also trace JavaScript promises, in every async trace output. Installs V8's promise hook,
+    /// which slows down every promise operation.
+    #[arg(long)]
+    pub async_trace_promises: bool,
+
     /// Watch configuration files (and server binary) and reload if they change. Useful for
     /// development, but not recommended in production.
     #[arg(short, long)]
@@ -406,6 +424,9 @@ impl From<ServeOrTestArgs> for ffi::ServeOrTestOptions {
             inspector_addr: args.inspector_addr.into(),
             perfetto_trace_path: perfetto_trace_path.into(),
             perfetto_trace_categories: perfetto_trace_categories.into(),
+            async_trace_path: args.async_trace.into(),
+            async_trace_stacks: args.async_trace_stacks.into(),
+            async_trace_promises: args.async_trace_promises,
             experimental: args.experimental,
             pyodide_package_disk_cache_dir: args.pyodide_package_disk_cache_dir.into(),
             pyodide_bundle_disk_cache_dir: args.pyodide_bundle_disk_cache_dir.into(),

@@ -33,6 +33,9 @@ wd_cc_library(
     # IoContext -> Worker -> ServiceWorkerGlobalScope -> (various api targets) dependency chain.
     # TODO(cleanup): Fix this.
     srcs = [
+        "async-trace-inspector.c++",
+        "async-trace-promises.c++",
+        "async-trace-stacks.c++",
         "features.c++",
         "hibernation-manager.c++",
         "io-channels.c++",
@@ -49,6 +52,9 @@ wd_cc_library(
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
         "access-info.h",
+        "async-trace-inspector.h",
+        "async-trace-promises.h",
+        "async-trace-stacks.h",
         "hibernation-manager.h",
         "io-channels.h",
         "io-context.h",
@@ -63,6 +69,7 @@ wd_cc_library(
         "worker-fs.h",
     ] + ["//src/workerd/api:hdrs"],
     implementation_deps = [
+        ":async-trace-perfetto",
         "//src/per_isolate",
         "//src/rust/jsg",
         "//src/workerd/api:compression",
@@ -86,6 +93,7 @@ wd_cc_library(
         ":actor-id",
         ":actor-storage_capnp",
         ":async-lock-scheduler",
+        ":async-trace",
         ":cdp_capnp",
         ":compatibility-date",
         ":container_capnp",
@@ -298,6 +306,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":async-trace",
         ":trace_capnp",
         ":worker-interface_capnp",
         "//src/workerd/util:strong-bool",
@@ -305,6 +314,28 @@ wd_cc_library(
         "@capnp-cpp//src/capnp:capnpc",
         "@capnp-cpp//src/kj/compat:kj-http",
         "@ssl",
+    ],
+)
+
+wd_cc_library(
+    name = "async-trace",
+    srcs = ["async-trace.c++"],
+    hdrs = ["async-trace.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/async-trace",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
+    name = "async-trace-perfetto",
+    srcs = ["async-trace-perfetto.c++"],
+    hdrs = ["async-trace-perfetto.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":async-trace",
+        "//src/workerd/util:perfetto",
     ],
 )
 
@@ -497,6 +528,11 @@ kj_test(
 )
 
 kj_test(
+    src = "async-trace-test.c++",
+    deps = [":async-trace"],
+)
+
+kj_test(
     src = "worker-source-test.c++",
     deps = [
         ":worker-source",
@@ -620,6 +656,14 @@ kj_test(
     src = "bundle-fs-test.c++",
     deps = [
         ":bundle-fs",
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "async-trace-io-test.c++",
+    deps = [
         ":io",
         "//src/workerd/tests:test-fixture",
     ],
