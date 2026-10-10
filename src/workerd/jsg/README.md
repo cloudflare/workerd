@@ -195,6 +195,24 @@ brand, not a secret. Not represented in RTTI/generated types.
 
 ### Error Handling
 
+Exceptions thrown by the runtime itself, such as `JSG_REQUIRE`, `JSG_FAIL_REQUIRE`, `KJ_REQUIRE`
+and other native KJ exceptions, are treated as internal errors when their tunneled message contains
+`; `, the delimiter KJ uses before diagnostic fields. JavaScript sees
+`internal error; reference = ...` instead, and the full message stays in native logs. One
+`internal error; reference = ` fragment is allowed anywhere in the message, but any `; ` before or
+after it is rejected. Transport and assertion prefixes are removed before this check. The same
+check applies to `jsg::throwTypeError()`.
+
+Errors written by application code are never affected. When a JavaScript value becomes a
+`kj::Exception`, for example a JS `Error` thrown by a Durable Object, service binding or JS-RPC
+callee, `markMessageFromJs()` records its message in the `EXCEPTION_MESSAGE_FROM_JS` detail. The
+reason passed to `state.abort()` is recorded the same way. Details survive cloning,
+`setDescription()` and Cap'n Proto RPC, so the exemption holds across isolates and processes. It
+only applies while the message still equals the recorded text. If runtime code appends its own
+fields to a user error's message, the check applies again. `tunneledErrorType(const kj::Exception&)`
+performs the check; the overload that takes only a description string does not, and is meant for
+classification such as logging.
+
 | Macro                                      | Description                                   |
 | ------------------------------------------ | --------------------------------------------- |
 | `JSG_REQUIRE(cond, type, msg...)`          | Throw JS error if condition false             |

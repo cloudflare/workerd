@@ -10,11 +10,11 @@ namespace workerd {
 
 kj::Exception JsgifyWebSocketErrors::handleWebSocketProtocolError(
     kj::WebSocket::ProtocolError protocolError) {
-  kj::Exception baseExc =
-      kj::WebSocketErrorHandler::handleWebSocketProtocolError(kj::mv(protocolError));
-  auto newDescription = kj::str(JSG_EXCEPTION(Error), ": ", baseExc.getDescription());
-  return kj::Exception(
-      baseExc.getType(), baseExc.getFile(), baseExc.getLine(), kj::mv(newDescription));
+  // The status code and description are meant to be public. Format them ourselves, because the
+  // default description separates them with "; ", which marks internal details that JSG hides.
+  return kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
+      kj::str(JSG_EXCEPTION(Error), ": WebSocket protocol error (", protocolError.statusCode,
+          "): ", protocolError.description));
 }
 
 }  // namespace workerd

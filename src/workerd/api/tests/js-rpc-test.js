@@ -256,6 +256,10 @@ export class MyService extends WorkerEntrypoint {
     throw err;
   }
 
+  throwWithMessage(message) {
+    throw new Error(message);
+  }
+
   async neverReturn() {
     await new Promise((resolve) => {});
   }
@@ -596,6 +600,20 @@ export class MyActor extends DurableObject {
 
   async throwingMethod() {
     throw new Error('ACTOR METHOD THREW');
+  }
+
+  async throwWithMessage(message) {
+    throw new Error(message);
+  }
+
+  abortWithReason(reason) {
+    this.ctx.abort(reason);
+  }
+
+  async failCriticalSectionWithMessage(message) {
+    await this.ctx.blockConcurrencyWhile(() => {
+      throw new Error(message);
+    });
   }
 
   async doCallbackBlockingConcurrency() {
@@ -1938,6 +1956,31 @@ export let testDurableObjectExceptionProperties = {
       assert.strictEqual(e.remote, true);
       assert.strictEqual(e.durableObjectId, undefined);
     }
+  },
+};
+
+// The runtime hides its own error messages from JavaScript when they contain "; ", which marks
+// internal diagnostic fields. Messages written by the application must never be affected.
+export let userErrorMessagesWithDelimiters = {
+  async test(controller, env, ctx) {
+    const message = 'public; ownerId = not a secret';
+    const expected = { name: 'Error', message };
+
+    await assert.rejects(env.MyService.throwWithMessage(message), expected);
+
+    let actor = env.MyActor.get(env.MyActor.newUniqueId());
+    await assert.rejects(actor.throwWithMessage(message), expected);
+
+    actor = env.MyActor.get(env.MyActor.newUniqueId());
+    await assert.rejects(actor.abortWithReason(message), expected);
+    await assert.rejects(actor.increment(1), expected);
+
+    actor = env.MyActor.get(env.MyActor.newUniqueId());
+    await assert.rejects(
+      actor.failCriticalSectionWithMessage(message),
+      expected
+    );
+    await assert.rejects(actor.increment(1), expected);
   },
 };
 

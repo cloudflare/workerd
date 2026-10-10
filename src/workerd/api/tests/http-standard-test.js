@@ -19,6 +19,8 @@ export default {
       strictEqual(resp.type, 'error');
       strictEqual(resp.status, 0);
       return resp;
+    } else if (req.url.endsWith('/throw-with-message')) {
+      throw new Error(req.headers.get('X-Message'));
     }
   },
 
@@ -64,6 +66,20 @@ export const error = {
     const errorRespRpc = await env.SERVICE.foo(null);
     strictEqual(errorRespRpc.type, 'error');
     strictEqual(errorRespRpc.ok, false);
+  },
+};
+
+// The runtime hides its own error messages from JavaScript when they contain "; ", which marks
+// internal diagnostic fields. An error thrown by the service's own code must never be affected.
+export const userErrorWithDelimiter = {
+  async test(_, env) {
+    const message = 'public; ownerId = not a secret';
+    await rejects(
+      env.SERVICE.fetch('http://example/throw-with-message', {
+        headers: { 'X-Message': message },
+      }),
+      { name: 'Error', message }
+    );
   },
 };
 
