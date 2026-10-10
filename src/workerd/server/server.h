@@ -6,6 +6,7 @@
 
 #include "channel-token.h"
 
+#include <workerd/api/actor-call-retry.h>
 #include <workerd/api/memory-cache.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/worker.h>
@@ -124,6 +125,7 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
     // makes the normal Durable Object init/link paths skip them.
     bool isWorkflow = false;
     kj::Maybe<config::Worker::DurableObjectNamespace::ContainerOptions::Reader> containerOptions;
+    kj::Maybe<api::UserDefinedRetryPolicy> retryPolicy;
   };
   struct Ephemeral {
     bool isEvictable;

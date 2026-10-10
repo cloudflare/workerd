@@ -213,6 +213,7 @@ class WorkerdApi final: public Worker::Api {
       uint actorChannel;
       kj::StringPtr uniqueKey;
       uint classChannel;
+      kj::Maybe<api::UserDefinedRetryPolicy> userDefinedRetryPolicy;
 
       LoopbackDurableActorNamespace clone() const {
         return *this;
