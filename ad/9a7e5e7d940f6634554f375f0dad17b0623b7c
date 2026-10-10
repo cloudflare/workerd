@@ -1,0 +1,21 @@
+src/workerd/util/sqlite-test.c++
+  s_3a52dd75bc4068::t_d0a739c3fd9ab5 109-154,914,988,1014,1031,1035-1039,1045,1053-1062
+src/workerd/util/sqlite.c++
+  s_3a52dd75bc4068::t_ad86b6e2256176 876,880-890
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ad9a7e5e7d940f6634554f375f0dad17b0623b7c",
+  "prompts": {},
+  "sessions": {
+    "s_3a52dd75bc4068": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f0a2d2893ffexZQP4A4dHHEhAb",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "frostzt <aidenfrostbite@gmail.com>"
+    }
+  }
+}
