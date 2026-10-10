@@ -1315,6 +1315,7 @@ wd_test(
     data = [
         "test.wasm",
         "worker-loader-wasm-test.js",
+        ":js-string-builtins.wasm",
     ],
     # The test uses `import source` syntax, which eslint's parser does not yet support.
     lint = False,
