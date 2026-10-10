@@ -760,6 +760,8 @@ class Worker::Lock {
       const jsg::JsValue& exception,
       const jsg::JsMessage& message = jsg::JsMessage());
 
+  tracing::ErrorInfo getErrorInfoForTrace(const jsg::JsValue& exception);
+
   // Version that takes a kj::Exception. If it has a serialized JS error attached as a detail, that
   // error may be extracted and used.
   void logUncaughtException(UncaughtExceptionSource source, kj::Exception&& exception);

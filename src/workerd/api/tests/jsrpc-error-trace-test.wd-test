@@ -1,0 +1,28 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Test JSRPC callee-side tracing for delivered method failures.
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "jsrpc-error-trace-test", worker = .mainWorker),
+    (name = "tail", worker = .tailWorker),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "jsrpc-error-trace-test.js")
+  ],
+  compatibilityFlags = ["nodejs_compat", "experimental", "rpc", "enhanced_error_serialization"],
+  bindings = [
+    (name = "ThrowingService", service = (name = "jsrpc-error-trace-test", entrypoint = "ThrowingService")),
+  ],
+  streamingTails = ["tail"],
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "jsrpc-error-trace-test-tail.js")
+  ],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+);

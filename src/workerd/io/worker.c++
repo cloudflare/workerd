@@ -2714,6 +2714,12 @@ void Worker::Lock::logUncaughtException(
   }
 }
 
+tracing::ErrorInfo Worker::Lock::getErrorInfoForTrace(const jsg::JsValue& exception) {
+  jsg::Lock& js = *this;
+  return workerd::getErrorInfoForTrace(
+      js, exception, worker.getIsolate().getApi().getErrorInterfaceTypeHandler(js));
+}
+
 void Worker::Lock::logUncaughtException(UncaughtExceptionSource source, kj::Exception&& exception) {
   jsg::Lock& js = *this;
   try {
