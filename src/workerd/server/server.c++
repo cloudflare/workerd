@@ -23,9 +23,11 @@
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/container.capnp.h>
 #include <workerd/io/features.h>
+#include <workerd/io/invocation-span.h>
 #include <workerd/io/io-context.h>
 #include <workerd/io/legacy-hibernation-manager.h>
 #include <workerd/io/limit-enforcer.h>
+#include <workerd/io/otlp-span-submitter.h>
 #include <workerd/io/request-tracker.h>
 #include <workerd/io/trace-stream.h>
 #include <workerd/io/worker-entrypoint.h>
@@ -350,6 +352,54 @@ class Server::ActorClass: public IoChannelFactory::ActorClassChannel {
   }
 };
 
+// Posts the spans of every traced worker to the service the config's `tracing.otlp` designates.
+// Submitters share it and may be destroyed later than the services, so it runs the POSTs in its
+// own task set rather than a service's.
+class Server::OtlpExporter final: public OtlpSpanExporter, private kj::TaskSet::ErrorHandler {
+ public:
+  OtlpExporter(kj::Own<Service> collector, const kj::HttpHeaderTable& headerTable)
+      : collector(kj::mv(collector)),
+        headerTable(headerTable) {}
+
+  // The collector's own invocations are not traced: their spans would be exported to itself.
+  bool isCollector(Service& service) {
+    KJ_IF_SOME(c, collector) return c->service() == &service;
+    return false;
+  }
+
+  // Drops the reference to the collector, like Service::unlink(). Later exports are discarded.
+  void unlink() {
+    tasks.clear();
+    collector = kj::none;
+  }
+
+  void exportSpans(kj::Array<const kj::byte> request, uint spanCount) override {
+    auto& c = KJ_UNWRAP_OR_RETURN(collector);
+    // evalNow() so that a collector that cannot start a request is reported like a failed POST.
+    tasks.add(
+        kj::evalNow([&]() { return post(c->startRequest({}), headerTable, kj::mv(request)); }));
+  }
+
+ private:
+  kj::Maybe<kj::Own<Service>> collector;
+  const kj::HttpHeaderTable& headerTable;
+  kj::TaskSet tasks{*this};
+
+  static kj::Promise<void> post(kj::Own<WorkerInterface> worker,
+      const kj::HttpHeaderTable& headerTable,
+      kj::Array<const kj::byte> request) {
+    auto client = kj::newHttpClient(*worker);
+    // A service takes an absolute URL; an external server sends its path and makes the host the
+    // Host header.
+    co_await postOtlpTraces(
+        *client, "http://localhost/v1/traces"_kj, kj::HttpHeaders(headerTable), kj::mv(request));
+  }
+
+  void taskFailed(kj::Exception&& exception) override {
+    KJ_LOG(ERROR, "error exporting spans to the OTLP collector", exception);
+  }
+};
+
 Server::~Server() noexcept {
   // This destructor is explicitly `noexcept` because if one of the `unlink()`s throws then we'd
   // have a hard time avoiding a segfault later... and we're shutting down the server anyway so
@@ -365,6 +415,7 @@ Server::~Server() noexcept {
   for (auto& service: services) {
     service.value->unlink();
   }
+  KJ_IF_SOME(exporter, otlpExporter) exporter->unlink();
 
   // Verify that unlinking actually eliminated cycles. Otherwise we have a memory leak -- and
   // potentially use-after-free if we allow the `Server` to be destroyed while services still
@@ -3487,6 +3538,8 @@ class Server::WorkerService final: public Service,
     kj::Maybe<const kj::Directory&> actorStorage;
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tails;
     kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTails;
+    // Where this worker's spans are exported, if the config's `tracing.otlp` applies to it.
+    kj::Maybe<kj::Own<OtlpExporter>> otlp;
     kj::Array<kj::Rc<WorkerLoaderNamespace>> workerLoaders;
     kj::Maybe<kj::Network&> workerdDebugPortNetwork;
     kj::Maybe<Server&> workerdDebugPortServer;
@@ -4028,6 +4081,7 @@ class Server::WorkerService final: public Service,
     // need to trace the test event, although this is useful to test that span tracing works, so
     // we are not implementing a (more complex) mechanism to disable tracing for all test() events
     // here.
+    kj::Maybe<OtlpExporter&> otlpExporter;
     if (entrypointName.orDefault("") != "test"_kj) {
       for (auto& service: channels.tails) {
         addWorkerIfNotRecursiveTracer(bufferedTailWorkers, *service);
@@ -4035,13 +4089,15 @@ class Server::WorkerService final: public Service,
       for (auto& service: channels.streamingTails) {
         addWorkerIfNotRecursiveTracer(streamingTailWorkers, *service);
       }
+      otlpExporter =
+          channels.otlp.map([](kj::Own<OtlpExporter>& e) -> OtlpExporter& { return *e; });
     }
 
     kj::Maybe<kj::Own<WorkerTracer>> workerTracer = kj::none;
 
-    if (!bufferedTailWorkers.empty() || !streamingTailWorkers.empty()) {
+    if (!bufferedTailWorkers.empty() || !streamingTailWorkers.empty() || otlpExporter != kj::none) {
       // Setting up buffered tail workers support, but only if we actually have tail workers
-      // configured.
+      // configured, or spans to export.
       auto executionModel =
           actor == kj::none ? ExecutionModel::STATELESS : ExecutionModel::DURABLE_OBJECT;
       kj::Maybe<kj::String> durableObjectId = kj::none;
@@ -4090,6 +4146,31 @@ class Server::WorkerService final: public Service,
         return SpanParent(kj::rc<UserSpanObserver>(
             kj::refcounted<SequentialSpanSubmitter>(w.getWeakRef(), entropySource), kj::mv(traceId),
             traceFlags));
+      });
+    }
+
+    // The invocation's span, under which its user spans are exported, takes the invocation's ids.
+    KJ_IF_SOME(exporter, otlpExporter) {
+      OtlpServiceInfo service{
+        .serviceName = serviceName.orDefault("workerd"_kj),
+        .entrypoint = entrypointName,
+      };
+      KJ_ASSERT_NONNULL(workerTracer)
+          ->setStartInvocationSpanFunc(
+              [&entropySource = threadContext.getEntropySource(), exporter = kj::addRef(exporter),
+                  serviceName = kj::str(service.serviceName), resource = makeOtlpResource(service),
+                  identityTags = makeOtlpIdentityTags(service)](
+                  const tracing::InvocationSpanContext& invocation) mutable {
+        auto parent = invocation.getParent().map(
+            [](const tracing::InvocationSpanContext& p) { return p.getSpanId(); });
+        return startExportedUserSpan(entropySource, kj::addRef(*exporter),
+            tracing::SpanContext(invocation.getTraceId(), parent, invocation.getTraceFlags()),
+            OtlpSpanSubmitter::Options{
+              .serviceName = serviceName,
+              .resource = resource,
+              .defaultTags = identityTags,
+            },
+            "invocation"_kjc, invocation.getSpanId());
       });
     }
     kj::Own<RequestObserver> observer =
@@ -6310,6 +6391,10 @@ kj::Promise<kj::Own<Server::WorkerService>> Server::makeWorkerImpl(kj::StringPtr
 
     result.streamingTails = KJ_MAP(tail, def.streamingTails) { return kj::mv(tail).lookup(*this); };
 
+    KJ_IF_SOME(exporter, otlpExporter) {
+      if (!exporter->isCollector(workerService)) result.otlp = kj::addRef(*exporter);
+    }
+
     result.workerLoaders = KJ_MAP(il, def.workerLoaderChannels) {
       KJ_IF_SOME(id, il.id) {
         return workerLoaderNamespaces
@@ -6774,6 +6859,17 @@ class Server::HttpListener final: public kj::Refcounted {
 
   kj::Maybe<capnp::TwoPartyServer> capnpServer;
 
+  // The span the runtime opens for a request as it starts handling it, when spans are exported
+  // (see TracingOptions.otlp). It starts the trace: the listener has no trace context to continue.
+  SpanBuilder startRuntimeSpan() {
+    auto& exporter = *KJ_UNWRAP_OR(owner.otlpExporter, return nullptr);
+    if (exporter.isCollector(*service)) return nullptr;
+    return startExportedUserSpan(owner.entropySource, kj::addRef(exporter),
+        tracing::SpanContext(tracing::TraceId::fromEntropy(owner.entropySource), kj::none,
+            tracing::TraceFlags(0x01)),
+        OtlpSpanSubmitter::Options{.serviceName = "workers-runtime"_kj}, "http_request"_kjc);
+  }
+
   kj::Promise<void> acceptCapnpConnection(kj::AsyncIoStream& conn) {
     KJ_IF_SOME(s, capnpServer) {
       return s.accept(conn);
@@ -6842,6 +6938,8 @@ class Server::HttpListener final: public kj::Refcounted {
       TRACE_EVENT("workerd", "Connection:request()");
       IoChannelFactory::SubrequestMetadata metadata;
       metadata.cfBlobJson = mapCopyString(cfBlobJson);
+      auto runtimeSpan = parent.startRuntimeSpan();
+      metadata.userSpanParent = runtimeSpan;
 
       Response* wrappedResponse = &response;
       kj::Own<ResponseWrapper> ownResponse;
@@ -6878,6 +6976,8 @@ class Server::HttpListener final: public kj::Refcounted {
 
       IoChannelFactory::SubrequestMetadata metadata;
       metadata.cfBlobJson = mapCopyString(cfBlobJson);
+      auto runtimeSpan = parent.startRuntimeSpan();
+      metadata.userSpanParent = runtimeSpan;
 
       auto worker = parent.service->startRequest(kj::mv(metadata));
       co_return co_await worker->connect(host, headers, connection, response, kj::mv(settings));
@@ -7817,6 +7917,12 @@ kj::Promise<void> Server::startServices(jsg::V8System& v8System,
       appWorker.initWorkflowActorNamespace(actorConfig, kj::mv(actorClass), bindingWorker,
           engineWorker.selfTokensArePersistent(), actorNamespacesByUniqueKey, network);
     }
+  }
+
+  if (config.getTracing().hasOtlp()) {
+    otlpExporter = kj::refcounted<OtlpExporter>(
+        lookupService(config.getTracing().getOtlp(), kj::str("tracing.otlp")),
+        globalContext->headerTable);
   }
 
   // Third pass: Cross-link services.

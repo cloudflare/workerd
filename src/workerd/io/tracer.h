@@ -108,6 +108,14 @@ class BaseTracer: public kj::Refcounted {
   // reference the tracer. This can only be set once.
   void setMakeUserRequestSpanFunc(MakeUserRequestSpanFunc func);
 
+  // Has the tracer record the invocation's own span, opened by `func` when the event is set, and
+  // makes it the root that makeUserRequestSpan() returns. `func` is given the invocation's span
+  // context, whose ids the span takes. The tracer names and tags the span from the invocation's
+  // events (see invocation-span.h), including those the worker reports for its active span, and
+  // ends it with the outcome.
+  using StartInvocationSpanFunc = kj::Function<SpanBuilder(const tracing::InvocationSpanContext&)>;
+  void setStartInvocationSpanFunc(StartInvocationSpanFunc func);
+
   virtual void setJsRpcInfo(const tracing::InvocationSpanContext& context,
       kj::Date timestamp,
       const kj::ConstString& methodName) = 0;
@@ -127,6 +135,25 @@ class BaseTracer: public kj::Refcounted {
 
   // Function to create the root span for the new tracing format.
   kj::Maybe<MakeUserRequestSpanFunc> makeUserRequestSpanFunc;
+
+  // For implementations: record on invocationSpan, when the tracer records it, what the invocation
+  // reports about itself. startInvocationSpan() opens it from setEventInfo() and names it after
+  // `info`; the update, attribute and exception are those the worker reports for its active span,
+  // which at the top level is the invocation's.
+  void startInvocationSpan(
+      IoContext::IncomingRequest& incomingRequest, const tracing::EventInfo& info);
+  void updateInvocationSpan(const tracing::SpanUpdate& update);
+  void setInvocationSpanAttribute(
+      const kj::ConstString& key, const tracing::Attribute::Value& value);
+  void recordInvocationSpanException(const kj::Maybe<tracing::Exception::Code>& code,
+      kj::StringPtr name,
+      kj::StringPtr message,
+      kj::Maybe<kj::StringPtr> stack);
+  void endInvocationSpan(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime);
+
+  // See setStartInvocationSpanFunc(). Null unless the tracer records the invocation's span.
+  kj::Maybe<StartInvocationSpanFunc> startInvocationSpanFunc;
+  SpanBuilder invocationSpan = nullptr;
 
   // Time to be reported for the outcome event time. This will be set before the outcome is
   // dispatched.
@@ -283,13 +310,17 @@ class UserSpanObserver final: public SpanObserver {
         spanId(tracing::SpanId::nullId),
         parentSpanId(tracing::SpanId::nullId),
         traceId(nullptr) {}
-  // constructor for top-level observer with trace ID and optional trace flags
+  // constructor for top-level observer with trace ID and optional trace flags. `spanId` is set
+  // when the top-level span is itself recorded by the submitter, as an exported invocation span is
+  // (see startExportedUserSpan()); `parentSpanId` is then its caller's span, if any.
   UserSpanObserver(kj::Own<SpanSubmitter> submitter,
       tracing::TraceId traceId,
-      kj::Maybe<tracing::TraceFlags> traceFlags = kj::none)
+      kj::Maybe<tracing::TraceFlags> traceFlags = kj::none,
+      tracing::SpanId spanId = tracing::SpanId::nullId,
+      tracing::SpanId parentSpanId = tracing::SpanId::nullId)
       : submitter(kj::mv(submitter)),
-        spanId(tracing::SpanId::nullId),
-        parentSpanId(tracing::SpanId::nullId),
+        spanId(spanId),
+        parentSpanId(parentSpanId),
         traceId(kj::mv(traceId)),
         traceFlags(traceFlags) {}
   // constructor for subsequent observers attached to a span. `fromUserCode` is true for

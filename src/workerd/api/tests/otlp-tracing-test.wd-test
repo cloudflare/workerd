@@ -1,0 +1,28 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "traced", worker = .tracedWorker),
+    (name = "collector", worker = .collectorWorker),
+  ],
+  tracing = (otlp = "collector"),
+);
+
+const tracedWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "otlp-tracing-test.js")
+  ],
+  compatibilityFlags = ["nodejs_compat"],
+  bindings = [
+    (name = "SELF", service = "traced"),
+    (name = "COLLECTOR", service = "collector"),
+  ],
+);
+
+# Stands in for an OpenTelemetry collector: it decodes the requests POSTed to /v1/traces and
+# hands what it has received to the test.
+const collectorWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "otlp-tracing-test-collector.js")
+  ],
+);

@@ -1,0 +1,16 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_rust_crate(
+    name = "otlp",
+    cxx_bridge_src = "bridge.rs",
+    link_deps = [
+        # ada-url is built with its `bundled` feature disabled (see //deps/rust:Cargo.toml), so the
+        # C++ ada library comes from workerd's existing @ada-url.
+        "@ada-url",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@crates_vendor//:ada-url",
+        "@crates_vendor//:prost",
+    ],
+)

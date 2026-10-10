@@ -213,6 +213,10 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
 
   kj::HashMap<kj::String, kj::Own<Service>> services;
 
+  class OtlpExporter;
+  // Set when the config's `tracing.otlp` names a collector.
+  kj::Maybe<kj::Own<OtlpExporter>> otlpExporter;
+
   class ActorNamespace;
   kj::HashMap<kj::StringPtr, ActorNamespace*> actorNamespacesByUniqueKey;
 

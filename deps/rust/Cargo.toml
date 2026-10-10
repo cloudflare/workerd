@@ -51,6 +51,9 @@ hashlink = "0"
 # kj::UnixEventPort does.
 nix = { version = "0", features = ["fs", "signal"] }
 pico-args = "0"
+# The OTLP span exporter (src/rust/otlp) encodes its requests with prost. Its messages are written
+# out as structs, so neither prost-build nor protoc is involved.
+prost = "0.14"
 ruff_python_ast = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1" }
 ruff_python_parser = { git = "https://github.com/astral-sh/ruff", tag = "0.12.1" }
 # param_extractor depends on unbounded_depth feature

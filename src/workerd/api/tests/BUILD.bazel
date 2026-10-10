@@ -283,6 +283,14 @@ wd_test(
 )
 
 wd_test(
+    src = "otlp-tracing-test.wd-test",
+    data = [
+        "otlp-tracing-test.js",
+        "otlp-tracing-test-collector.js",
+    ],
+)
+
+wd_test(
     src = "tail-cf-gc-test.wd-test",
     data = ["tail-cf-gc-test.js"],
 )
