@@ -6,7 +6,7 @@ const config :Workerd.Config = (
     ( name = "main", worker = .worker ),
   ],
   sockets = [
-    ( name = "udp", address = "*:0", udp = (idleTimeoutMs = 200), service = "main" ),
+    ( name = "udp", address = "127.0.0.1:0", udp = (idleTimeoutMs = 200), service = "main" ),
   ]
 );
 

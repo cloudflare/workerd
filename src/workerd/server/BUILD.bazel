@@ -64,7 +64,8 @@ wd_cc_embed(
     is_text = True,
 )
 
-# The workerd binary. Its entry point is :workerd-cli; :cli-main is the C++ that drives the Server.
+# The workerd binary: the command line (:workerd-cli) over the Rust server
+# (//src/workerd/server/server) and the C++ worker factory (//src/workerd/server/factory).
 wd_rust_binary(
     name = "workerd",
     srcs = ["workerd.rs"],
@@ -76,69 +77,35 @@ wd_rust_binary(
 )
 
 # The command line (clap), config sources, --watch, and the compiled-binary format. Runs each
-# command through :cli-main.
+# command through the server crate's `entry` module: the loop, the C++ bootstrap
+# (//src/workerd/server/factory:bootstrap), the Rust server.
 wd_rust_crate(
     name = "workerd-cli",
     srcs = glob(["cli/**/*.rs"]),
     crate_root = "cli/lib.rs",
-    cxx_bridge_hdrs = [
-        "cli-main.h",
-        "config-compiler.h",
-    ],
+    cxx_bridge_deps = ["//src/workerd/server/factory:bootstrap-hdrs"],
+    cxx_bridge_hdrs = ["config-compiler.h"],
     cxx_bridge_src = "cli/bridge.rs",
-    link_deps = [
-        ":cli-main",
-        ":config-compiler",
-    ],
+    link_deps = [":config-compiler"],
     deps = [
         ":workerd_capnp_rust",
         "//src/rust/cxx/kj-rs-io",
+        "//src/workerd/server/server:workerd-server",
         "@crates_vendor//:capnp",
         "@crates_vendor//:clap",
+        "@crates_vendor//:socket2",
         "@crates_vendor//:tokio",
     ] + select({
-        "@platforms//os:windows": ["@crates_vendor//:windows-sys"],
-        "//conditions:default": [
+        "@platforms//os:windows": [
             "@crates_vendor//:libc",
-            "@crates_vendor//:socket2",
+            "@crates_vendor//:windows-sys",
         ],
+        "//conditions:default": ["@crates_vendor//:libc"],
     }),
 )
 
-# The C++ side of :workerd-cli that runs the server: sets up V8 and the Server and waits on the
-# event loop.
-wd_cc_library(
-    name = "cli-main",
-    srcs = ["cli-main.c++"],
-    linkstatic = CC_LIBRARY_LINKSTATIC,
-    deps = [
-        ":cli/bridge.rs@cxx",
-        ":json-logger",
-        ":server",
-        ":v8-platform-impl",
-        ":workerd_capnp",
-        "//src/pyodide:pyodide_extra_capnp",
-        "//src/rust/cxx/kj-rs",
-        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
-        "//src/workerd/util:autogate",
-        "//src/workerd/util:perfetto",
-        # :cli-main exists only for the workerd binary, so it links the binary's kj::setupAsyncIo().
-        "//src/workerd/util:setup-async-io",
-        "@capnp-cpp//src/kj:kj-async-core",
-        "@capnp-cpp//src/kj:kj-async-io",
-    ],
-    # The C++ root of the workerd binary is linked eagerly, as a cc_binary's own sources would be.
-    # Bazel places it ahead of everything it depends on, and from an eager object the linker
-    # resolves the rest of the C++ in that order. Left lazy, the Rust side's references would reach
-    # it only after every library had been registered, and the linker would then find the C++ by a
-    # depth-first walk of symbol references. That walk decides which copy of a template the binary
-    # keeps when two libraries carry different ones: V8 is built without exceptions, and its copy
-    # of libc++'s std::regex parser aborts where workerd's throws.
-    alwayslink = True,
-)
-
 # Compiles a config written as a Cap'n Proto schema file (capnp::SchemaParser over :schema-file)
-# into an encoded message, for :workerd-cli.
+# into an encoded message, for the command line (:workerd-cli).
 wd_cc_library(
     name = "config-compiler",
     srcs = ["config-compiler.c++"],
@@ -289,6 +256,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":actor-id-impl",
+        ":compiled-bindings_capnp",
         ":fallback-service",
         ":pyodide",
         ":workerd-debug-port-client",
@@ -320,6 +288,7 @@ wd_cc_library(
     name = "channel-token",
     srcs = ["channel-token.c++"],
     hdrs = ["channel-token.h"],
+    visibility = [":__subpackages__"],
     deps = [
         ":channel-token_capnp",
         "//src/workerd/io",
@@ -327,49 +296,12 @@ wd_cc_library(
     ],
 )
 
-# Calls kj::setupAsyncIo() (Server::run's own loop) but does not supply it: the BINARY picks the I/O backend by linking
-# //src/workerd/util:setup-async-io (the tokio backend; kj_test and wd_cc_benchmark do this for
-# every test binary) or @capnp-cpp//src/kj:kj-async (kj's own event loop). A binary that links
-# neither fails to link with an undefined kj::setupAsyncIo -- by design, never a silent choice.
-wd_cc_library(
-    name = "server",
-    srcs = [
-        "server.c++",
-    ],
-    hdrs = [
-        "server.h",
-    ],
-    deps = [
-        ":actor-id-impl",
-        ":alarm-scheduler",
-        ":channel-token",
-        ":channel-token_capnp",
-        ":container-client",
-        ":facet-tree-index",
-        ":fallback-service",
-        ":workerd-api",
-        ":workerd_capnp",
-        "//src/cloudflare",
-        "//src/node",
-        "//src/pyodide:pyodide_static",
-        "//src/workerd/api:memory-cache",
-        "//src/workerd/api:pyodide",
-        "//src/workerd/io",
-        "//src/workerd/io:bundle-fs",
-        "//src/workerd/io:worker-entrypoint",
-        "//src/workerd/jsg",
-        "//src/workerd/util:autogate",
-        "//src/workerd/util:perfetto",
-        "//src/workerd/util:websocket-error-handler",
-        "@capnp-cpp//src/capnp:capnp-rpc",
-        "@capnp-cpp//src/kj:kj-async-core",
-        "@capnp-cpp//src/kj:kj-async-io",
-        "@capnp-cpp//src/kj/compat:kj-gzip",
-        "@capnp-cpp//src/kj/compat:kj-tls",
-    ],
-)
-
 wd_capnp_library(src = "docker-api.capnp")
+
+wd_capnp_library(
+    src = "compiled-bindings.capnp",
+    deps = [":workerd_capnp"],
+)
 
 wd_capnp_library(src = "log-schema.capnp")
 
@@ -414,7 +346,11 @@ wd_cc_library(
     ],
 )
 
-# Calls kj::setupAsyncIo() but does not supply it; see :server.
+# Calls kj::setupAsyncIo() (its own thread's loop) but does not supply it: the BINARY picks the I/O
+# backend by linking //src/workerd/util:setup-async-io (the tokio backend; kj_test and
+# wd_cc_benchmark do this for every test binary) or @capnp-cpp//src/kj:kj-async (kj's own event
+# loop). A binary that links neither fails to link with an undefined kj::setupAsyncIo -- by design,
+# never a silent choice.
 wd_cc_library(
     name = "fallback-service",
     srcs = [
@@ -440,6 +376,7 @@ wd_cc_library(
     hdrs = [
         "v8-platform-impl.h",
     ],
+    visibility = [":__subpackages__"],
     deps = [
         "//src/workerd/io",
         "//src/workerd/jsg",
@@ -466,7 +403,7 @@ wd_capnp_library(
     # Limit visibility to avoid accidental usage – there should be no need to use this outside of
     # test-fixture and the workerd binary.
     visibility = [
-        ":__pkg__",
+        ":__subpackages__",
         "//src/workerd/api:__pkg__",
         "//src/workerd/tests:__pkg__",
     ],
@@ -476,7 +413,9 @@ kj_test(
     size = "large",
     src = "server-test.c++",
     deps = [
-        ":server",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "//src/workerd/server/factory:worker-factory",
+        "//src/workerd/server/server:workerd-server",
         "//src/workerd/util:test-util",
     ],
 )
@@ -484,7 +423,7 @@ kj_test(
 kj_test(
     src = "channel-token-test.c++",
     deps = [
-        ":server",
+        ":channel-token",
     ],
 )
 

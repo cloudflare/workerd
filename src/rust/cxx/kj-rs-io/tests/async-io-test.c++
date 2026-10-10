@@ -750,68 +750,6 @@ KJ_TEST("restrictPeers filters accepted peers (disallowed peers are dropped, "
   kj::byte buffer[1];
   KJ_EXPECT(client->tryRead(buffer, 1, 1).wait(ws) == 0);
 }
-
-KJ_TEST("onSignal is delivered even when another runtime's thread consumes the signal") {
-  // Tokio's process-global signal registry broadcasts from whichever runtime consumes the
-  // signal's wake byte. A second parked runtime (any other tokio runtime in the process with the
-  // signal driver enabled) can therefore wake this loop's signal future from another thread.
-  // ArcWaker must deliver that wake through its cross-thread fulfiller so this loop observes
-  // the signal.
-  auto io = setupTokioAsyncIo();
-  auto &ws = io.getWaitScope();
-
-  // A second, idle tokio-ported KJ loop parked on another thread for the duration of the test.
-  // The shutdown promise must be created ON that thread's loop (kj promises are single-loop
-  // objects); only its CrossThreadPromiseFulfiller half comes back to this thread.
-  kj::MutexGuarded<kj::Maybe<kj::Own<const kj::CrossThreadPromiseFulfiller<void>>>> shutdown;
-  kj::Thread otherLoop([&shutdown]() {
-    auto io2 = setupTokioAsyncIo();
-    auto paf = kj::newPromiseAndCrossThreadFulfiller<void>();
-    *shutdown.lockExclusive() = kj::mv(paf.fulfiller);
-    paf.promise.wait(io2.getWaitScope());
-  });
-  auto fulfillShutdown = [&]() {
-    KJ_IF_SOME(fulfiller, *shutdown.lockExclusive()) {
-      fulfiller->fulfill();
-    }
-  };
-  KJ_DEFER(fulfillShutdown());
-  // Wait until the other loop is up and parked (and the shutdown fulfiller exists) before
-  // raising any signals, so its runtime genuinely participates in the wake-byte race.
-  shutdown.when([](auto &maybe) { return maybe != kj::none; }, [](auto &) {});
-
-  // Several rounds, giving each runtime chances to win the wake-byte race. Bounded so a lost
-  // wake fails with a diagnosis instead of eating the binary's bazel timeout.
-  for (int i = 0; i < 5; i++) {
-    auto promise = kj_rs_io::onSignal(SIGUSR2);
-    // The handler was installed inside onSignal(); the poll only proves the promise is pending.
-    KJ_EXPECT(!promise.poll(ws));
-    KJ_SYSCALL(kill(getpid(), SIGUSR2));
-    promise
-        .exclusiveJoin(io.getTimer().afterDelay(20 * kj::SECONDS).then([]() {
-      KJ_FAIL_ASSERT("onSignal wake was lost (cross-thread waker regression)");
-    })).wait(ws);
-  }
-}
-
-KJ_TEST("onSignal resolves when the process receives the signal") {
-  auto io = setupTokioAsyncIo();
-  auto &ws = io.getWaitScope();
-
-  auto promise = kj_rs_io::onSignal(SIGUSR2);
-  // The handler was installed inside onSignal() (operation-start policy); a signal raised right
-  // after the call is caught. The poll only proves the promise is pending.
-  KJ_EXPECT(!promise.poll(ws));
-
-  KJ_SYSCALL(kill(getpid(), SIGUSR2));
-  promise.wait(ws);
-
-  // A second watcher works too (the process-global registration is reusable).
-  auto again = kj_rs_io::onSignal(SIGUSR2);
-  KJ_EXPECT(!again.poll(ws));
-  KJ_SYSCALL(kill(getpid(), SIGUSR2));
-  again.wait(ws);
-}
 #endif
 
 // =======================================================================================
@@ -863,73 +801,6 @@ KJ_TEST("restrictPeers: a child network (and its addresses) outlive the parent n
   auto blocked = kj::runCatchingExceptions([&]() { addr->connect().wait(ws); });
   KJ_EXPECT(blocked != kj::none);
   KJ_EXPECT(KJ_ASSERT_NONNULL(blocked).getDescription().contains("restrictPeers"));
-}
-
-KJ_TEST("loopback: addresses connect within the process once enabled") {
-  auto io = setupTokioAsyncIo();
-  auto &ws = io.getWaitScope();
-  auto &network = io.getNetwork();
-
-  // Off by default: "loopback:svc" is then a host "loopback" with service "svc".
-  KJ_EXPECT_THROW_MESSAGE("getaddrinfo()", network.parseAddress("loopback:svc").wait(ws));
-
-  kj::downcast<kj_rs_io::TokioNetwork>(network).enableLoopback();
-  auto addr = network.parseAddress("loopback:svc").wait(ws);
-  KJ_EXPECT(addr->toString() == "loopback:svc");
-  auto receiver = addr->listen();
-  KJ_EXPECT(receiver->getPort() == 0);
-
-  // A restrictPeers() child shares the namespace, and the filter does not judge loopback
-  // connections: this restriction would block any real address.
-  auto restricted = network.restrictPeers({"1.2.3.4/32"_kj}, {});
-  auto clientPromise = restricted->parseAddress("loopback:svc").wait(ws)->connect();
-  auto server = receiver->accept().wait(ws);
-  auto client = clientPromise.wait(ws);
-
-  // Real sockets underneath: bytes flow both ways.
-  client->write("ping"_kjb).wait(ws);
-  kj::byte buffer[4];
-  KJ_EXPECT(server->tryRead(buffer, 4, 4).wait(ws) == 4);
-  KJ_EXPECT(kj::ArrayPtr<kj::byte>(buffer, 4) == "ping"_kjb);
-  server->write("pong"_kjb).wait(ws);
-  KJ_EXPECT(client->tryRead(buffer, 4, 4).wait(ws) == 4);
-  KJ_EXPECT(kj::ArrayPtr<kj::byte>(buffer, 4) == "pong"_kjb);
-
-  // Connections made before anyone accepts are queued, and different names are separate.
-  auto other = network.parseAddress("loopback:other").wait(ws);
-  auto queued = addr->connect().wait(ws);
-  auto otherReceiver = other->listen();
-  auto otherAccept = otherReceiver->accept();
-  KJ_EXPECT(!otherAccept.poll(ws));
-  auto accepted = receiver->accept().wait(ws);
-  queued->write("!"_kjb).wait(ws);
-  KJ_EXPECT(accepted->tryRead(buffer, 1, 1).wait(ws) == 1);
-  KJ_EXPECT(!otherAccept.poll(ws));
-}
-
-KJ_TEST("loopback: a name belongs to the loop that first parsed it") {
-  auto io = setupTokioAsyncIo();
-  auto &ws = io.getWaitScope();
-  kj::downcast<kj_rs_io::TokioNetwork>(io.getNetwork()).enableLoopback();
-  auto addr = io.getNetwork().parseAddress("loopback:owned").wait(ws);
-  auto receiver = addr->listen();
-
-  // A clone of the address carried to another loop thread cannot connect: the queued end would
-  // be a socket of that loop, unusable by the receiver here.
-  kj::Maybe<kj::Exception> failure;
-  {
-    auto other = addr->clone();
-    kj::Thread thread([&]() noexcept {
-      auto otherIo = setupTokioAsyncIo();
-      failure = kj::runCatchingExceptions([&]() { other->connect().wait(otherIo.getWaitScope()); });
-    });
-  }
-  KJ_EXPECT(KJ_ASSERT_NONNULL(failure).getDescription().contains("different TokioEventPort"),
-      KJ_ASSERT_NONNULL(failure).getDescription());
-
-  // Nothing was queued: an accept here still waits.
-  auto acceptPromise = receiver->accept();
-  KJ_EXPECT(!acceptPromise.poll(ws));
 }
 
 KJ_TEST("dropping a just-started connect() then tearing down the context is clean") {
@@ -1064,57 +935,6 @@ KJ_TEST("getSockaddr builds a connectable IPv6 address from a raw sockaddr_in6")
   client->write("v6"_kjb).wait(ws);
   kj::byte buf[2];
   KJ_EXPECT(server->tryRead(buf, 2, 2).wait(ws) == 2);
-}
-
-KJ_TEST("multiple concurrent onSignal for the same signum all fire") {
-  // tokio broadcasts a signal to every live stream for that signum, so two concurrent
-  // onSignal(SIGUSR2) must both resolve on a single delivery.
-  auto io = setupTokioAsyncIo();
-  auto &ws = io.getWaitScope();
-  auto a = kj_rs_io::onSignal(SIGUSR2);
-  auto b = kj_rs_io::onSignal(SIGUSR2);
-  KJ_EXPECT(!a.poll(ws));  // both handlers installed before we raise
-  KJ_EXPECT(!b.poll(ws));
-  KJ_SYSCALL(kill(getpid(), SIGUSR2));
-  a.wait(ws);
-  b.wait(ws);
-}
-
-KJ_TEST("onSignal isolates different signums") {
-  auto io = setupTokioAsyncIo();
-  auto &ws = io.getWaitScope();
-  auto usr1 = kj_rs_io::onSignal(SIGUSR1);
-  auto usr2 = kj_rs_io::onSignal(SIGUSR2);
-  KJ_EXPECT(!usr1.poll(ws));
-  KJ_EXPECT(!usr2.poll(ws));
-  KJ_SYSCALL(kill(getpid(), SIGUSR2));
-  usr2.wait(ws);
-  // Only SIGUSR2 was raised; the SIGUSR1 watcher stays pending.
-  KJ_EXPECT(!usr1.poll(ws));
-}
-
-KJ_TEST("dropping a pending onSignal does not break later watches") {
-  // Cancel a registered-but-unfired signal watch, then confirm a fresh watch still delivers --
-  // the dropped tokio signal stream must not disturb the process-global registration. ASAN-
-  // relevant (the drop cancels the stream).
-  auto io = setupTokioAsyncIo();
-  auto &ws = io.getWaitScope();
-  {
-    auto dropped = kj_rs_io::onSignal(SIGUSR2);
-    KJ_EXPECT(!dropped.poll(ws));
-  }
-  auto again = kj_rs_io::onSignal(SIGUSR2);
-  KJ_EXPECT(!again.poll(ws));
-  KJ_SYSCALL(kill(getpid(), SIGUSR2));
-  again.wait(ws);
-}
-
-KJ_TEST("onSignal for an unwatchable signum errors instead of aborting") {
-  // SIGKILL/SIGSTOP cannot have handlers; tokio's signal() rejects them, which must surface as a
-  // catchable kj::Exception (a rejected promise), never a crash. No signal is raised.
-  auto io = setupTokioAsyncIo();
-  auto &ws = io.getWaitScope();
-  KJ_EXPECT_THROW_MESSAGE("signal", kj_rs_io::onSignal(SIGKILL).wait(ws));
 }
 #endif  // !_WIN32
 
@@ -1490,7 +1310,7 @@ KJ_TEST("getSockaddr keeps a zero-initialized sockaddr_un usable and prints it l
 KJ_TEST("provider pipes are socket pairs: a write completes before anyone reads") {
   // kj's own provider hands out real pipes/socketpairs, and callers rely on their kernel
   // buffering: a small write completes without a reader waiting (an in-memory kj pipe would
-  // leave it pending). workerd's loopback transport also asks the provider for real sockets.
+  // leave it pending).
   // Both pipe kinds are socket pairs here (async-io.c++ newOneWayPipe explains).
   auto io = setupTokioAsyncIo();
   auto &ws = io.getWaitScope();

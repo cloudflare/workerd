@@ -45,7 +45,6 @@ pub use bridge::kj_pieces_count;
 use crate::error::KjIoError;
 use crate::error::Result;
 use crate::error::op;
-use crate::loopback::LoopbackRegistry;
 use crate::net::TokioAddress;
 use crate::net::TokioDatagram;
 use crate::net::TokioListener;
@@ -65,7 +64,6 @@ use crate::net::listener_port;
 use crate::net::network_address_from;
 use crate::net::parse_address;
 use crate::net::socket_pair;
-use crate::signal::wait_for_signal;
 use crate::stream::TokioStream;
 use crate::stream::stream_abort_read;
 use crate::stream::stream_local_addr;
@@ -108,9 +106,6 @@ mod bridge {
         UnixAbstract,
         /// No fields: `accept(2)` on a unix socket reports this for an unbound peer.
         UnixUnnamed,
-        /// `name`: a `loopback:` name (loopback.rs). Not a socket address: it has no `struct
-        /// sockaddr` form and is not subject to `restrictPeers()`.
-        Loopback,
     }
 
     /// One socket address, typed. This is the only form an address takes on the bridge: Rust
@@ -163,7 +158,6 @@ mod bridge {
         type TokioListener;
         type TokioAddress;
         type TokioDatagram;
-        type LoopbackRegistry;
 
         // --- kj::AsyncIoStream (stream.rs). `buf` is the caller's, uninitialized storage
         // allowed, valid until the promise settles (KJ's contract): hence `unsafe`.
@@ -189,23 +183,11 @@ mod bridge {
 
         // --- kj::Network / kj::NetworkAddress (net.rs). Peer filtering is the C++ adapter's:
         // `address_targets` lists what connect() would try, in order, for it to filter and
-        // connect one at a time; `listener_accept` reports the peer for it to judge. Every
-        // kj::Network holds a LoopbackRegistry (loopback.rs), the namespace `loopback:`
-        // addresses resolve in once enabled; restrictPeers() children share their parent's.
-        fn new_loopback_registry() -> Box<LoopbackRegistry>;
-        fn loopback_registry_clone(registry: &LoopbackRegistry) -> Box<LoopbackRegistry>;
-        fn loopback_registry_enable(registry: &LoopbackRegistry);
-        async fn network_parse_address(
-            addr: &[u8],
-            port_hint: u16,
-            loopback: &LoopbackRegistry,
-        ) -> Result<Box<TokioAddress>>;
+        // connect one at a time; `listener_accept` reports the peer for it to judge.
+        async fn network_parse_address(addr: &[u8], port_hint: u16) -> Result<Box<TokioAddress>>;
         fn network_address_from(addr: &SocketAddress) -> Result<Box<TokioAddress>>;
         fn address_targets(addr: &TokioAddress) -> Result<Vec<SocketAddress>>;
-        async fn connect_target(
-            addr: &TokioAddress,
-            target: SocketAddress,
-        ) -> Result<Box<TokioStream>>;
+        async fn connect_target(target: SocketAddress) -> Result<Box<TokioStream>>;
         fn address_listen(addr: &TokioAddress) -> Result<Box<TokioListener>>;
         fn address_bind_datagram(addr: &TokioAddress) -> Result<Box<TokioDatagram>>;
         fn address_clone(addr: &TokioAddress) -> Box<TokioAddress>;
@@ -231,7 +213,6 @@ mod bridge {
         unsafe fn wrap_listen_fd(handle: i64, flags: u32) -> Result<Box<TokioListener>>;
 
         fn ignore_sigpipe_once() -> Result<()>;
-        async fn wait_for_signal(signum: i32) -> Result<()>;
 
         // --- The --watch file watcher (watcher.rs). `path` is `kj::Path::toNativeString`
         // output: arbitrary bytes on unix, UTF-8 on Windows.
@@ -295,31 +276,9 @@ pub unsafe fn stream_try_read(
 pub fn network_parse_address(
     addr: &[u8],
     port_hint: u16,
-    loopback: &LoopbackRegistry,
 ) -> impl Future<Output = Result<Box<TokioAddress>>> + use<> {
     let addr = addr.to_vec();
-    let loopback = loopback.clone_handle();
-    async move { parse_address(&addr, port_hint, &loopback).await }
-}
-
-#[expect(
-    clippy::unnecessary_box_returns,
-    reason = "cxx takes an opaque Rust type boxed"
-)]
-pub fn new_loopback_registry() -> Box<LoopbackRegistry> {
-    Box::new(LoopbackRegistry::new())
-}
-
-#[expect(
-    clippy::unnecessary_box_returns,
-    reason = "cxx takes an opaque Rust type boxed"
-)]
-pub fn loopback_registry_clone(registry: &LoopbackRegistry) -> Box<LoopbackRegistry> {
-    Box::new(registry.clone_handle())
-}
-
-pub fn loopback_registry_enable(registry: &LoopbackRegistry) {
-    registry.enable();
+    async move { parse_address(&addr, port_hint).await }
 }
 
 // ======================================================================================

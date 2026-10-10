@@ -569,21 +569,16 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
 WD_STRONG_BOOL(IsInternalBinding);
 
 static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
-    const WorkerdApi::Global& global,
+    Global::Reader global,
     CompatibilityFlags::Reader featureFlags,
-    uint32_t ownerId,
     api::MemoryCacheProvider& memoryCacheProvider,
     IsInternalBinding isInternal) {
   TRACE_EVENT("workerd", "WorkerdApi::createBindingValue()");
-  using Global = WorkerdApi::Global;
   auto context = lock.v8Context();
-
-  v8::Local<v8::Value> value;
 
   // When new binding types are created. If their value resolves to be a string
   // or a JSON stringified/stringifiable value, then it should be added to
-  // process.env here as well, just like with Global::Json and kj::String
-  // entries.
+  // process.env here as well, just like with `json` and `text` entries.
   //
   // It is important to understand the process.env is fundamentally different
   // from the existing bag of bindings. The keys and values on process.env are
@@ -594,191 +589,200 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
   // as long as the observable behavior remains the same we can do so without
   // Yet Another Compat Flag.
 
-  KJ_SWITCH_ONEOF(global.value) {
-    KJ_CASE_ONEOF(json, Global::Json) {
-      value = jsg::check(v8::JSON::Parse(context, lock.str(json.text)));
-    }
+  switch (global.which()) {
+    case Global::JSON:
+      return jsg::check(v8::JSON::Parse(context, lock.str(global.getJson())));
 
-    KJ_CASE_ONEOF(pipeline, Global::Fetcher) {
-      value = lock.wrap(context,
-          lock.alloc<api::Fetcher>(pipeline.channel,
-              pipeline.requiresHost ? api::Fetcher::RequiresHostAndProtocol::YES
-                                    : api::Fetcher::RequiresHostAndProtocol::NO,
-              pipeline.isInHouse, api::RpcCompatGateBypassed(isInternal.toBool())));
-    }
+    case Global::FETCHER:
+      return lock.wrap(context,
+          lock.alloc<api::Fetcher>(global.getFetcher(), api::Fetcher::RequiresHostAndProtocol::YES,
+              /*isInHouse=*/false, api::RpcCompatGateBypassed(isInternal.toBool())));
 
-    KJ_CASE_ONEOF(loopback, Global::LoopbackServiceStub) {
-      value = lock.wrap(context, lock.alloc<api::LoopbackServiceStub>(loopback.channel));
-    }
+    case Global::LOOPBACK_SERVICE_STUB:
+      return lock.wrap(
+          context, lock.alloc<api::LoopbackServiceStub>(global.getLoopbackServiceStub()));
 
-    KJ_CASE_ONEOF(ns, Global::KvNamespace) {
-      value = lock.wrap(context,
-          lock.alloc<api::KvNamespace>(kj::str(ns.bindingName),
-              kj::Array<api::KvNamespace::AdditionalHeader>{}, ns.subrequestChannel));
-    }
+    case Global::KV_NAMESPACE:
+      return lock.wrap(context,
+          lock.alloc<api::KvNamespace>(kj::str(global.getName()),
+              kj::Array<api::KvNamespace::AdditionalHeader>{}, global.getKvNamespace()));
 
-    KJ_CASE_ONEOF(r2, Global::R2Bucket) {
-      value = lock.wrap(context,
+    case Global::R2_BUCKET: {
+      auto r2 = global.getR2Bucket();
+      return lock.wrap(context,
           lock.alloc<api::public_beta::R2Bucket>(
-              featureFlags, r2.subrequestChannel, kj::str(r2.bucket), kj::str(r2.bindingName)));
+              featureFlags, r2.getChannel(), kj::str(r2.getBucket()), kj::str(global.getName())));
     }
 
-    KJ_CASE_ONEOF(ns, Global::QueueBinding) {
-      value = lock.wrap(context, lock.alloc<api::WorkerQueue>(ns.subrequestChannel));
-    }
+    case Global::QUEUE:
+      return lock.wrap(context, lock.alloc<api::WorkerQueue>(global.getQueue()));
 
-    KJ_CASE_ONEOF(key, Global::CryptoKey) {
+    case Global::CRYPTO_KEY: {
+      auto key = global.getCryptoKey();
       api::SubtleCrypto::ImportKeyData keyData;
-      KJ_SWITCH_ONEOF(key.keyData) {
-        KJ_CASE_ONEOF(data, kj::Array<byte>) {
-          auto u8 = jsg::JsBufferSource(jsg::JsUint8Array::create(lock, data));
-          keyData = u8.addRef(lock);
-        }
-        KJ_CASE_ONEOF(json, Global::Json) {
-          v8::Local<v8::String> str = lock.wrap(context, kj::mv(json.text));
-          v8::Local<v8::Value> obj = jsg::check(v8::JSON::Parse(context, str));
-          keyData = lock.unwrap<api::SubtleCrypto::ImportKeyData>(context, obj);
-        }
+      auto data = key.getKeyData();
+      if (data.isJson()) {
+        v8::Local<v8::String> str = lock.wrap(context, kj::str(data.getJson()));
+        v8::Local<v8::Value> obj = jsg::check(v8::JSON::Parse(context, str));
+        keyData = lock.unwrap<api::SubtleCrypto::ImportKeyData>(context, obj);
+      } else {
+        auto u8 = jsg::JsBufferSource(jsg::JsUint8Array::create(lock, data.getBytes()));
+        keyData = u8.addRef(lock);
       }
 
-      v8::Local<v8::String> algoStr = lock.wrap(context, kj::mv(key.algorithm.text));
+      v8::Local<v8::String> algoStr = lock.wrap(context, kj::str(key.getAlgorithm()));
       v8::Local<v8::Value> algo = jsg::check(v8::JSON::Parse(context, algoStr));
       auto importKeyAlgo =
           lock.unwrap<kj::OneOf<kj::String, api::SubtleCrypto::ImportKeyAlgorithm>>(context, algo);
+      auto usages = KJ_MAP(usage, key.getUsages()) { return kj::str(usage); };
 
-      jsg::Ref<api::CryptoKey> importedKey =
-          api::SubtleCrypto::importKeySync(lock, key.format, kj::mv(keyData),
-              api::interpretAlgorithmParam(kj::mv(importKeyAlgo)), key.extractable, key.usages);
-
-      value = lock.wrap(context, kj::mv(importedKey));
+      return lock.wrap(context,
+          api::SubtleCrypto::importKeySync(lock, key.getFormat(), kj::mv(keyData),
+              api::interpretAlgorithmParam(kj::mv(importKeyAlgo)), key.getExtractable(), usages));
     }
 
-    KJ_CASE_ONEOF(cache, Global::MemoryCache) {
-      value = lock.wrap(context,
-          lock.alloc<api::MemoryCache>(memoryCacheProvider.getUse(cache.cacheId,
+    case Global::MEMORY_CACHE: {
+      auto cache = global.getMemoryCache();
+      // A cache without an id is not shared.
+      kj::Maybe<kj::StringPtr> cacheId;
+      if (cache.getCacheId().size() > 0) cacheId = cache.getCacheId();
+      return lock.wrap(context,
+          lock.alloc<api::MemoryCache>(memoryCacheProvider.getUse(cacheId,
               {
-                .maxKeys = cache.maxKeys,
-                .maxValueSize = cache.maxValueSize,
-                .maxTotalValueSize = cache.maxTotalValueSize,
+                .maxKeys = cache.getMaxKeys(),
+                .maxValueSize = cache.getMaxValueSize(),
+                .maxTotalValueSize = cache.getMaxTotalValueSize(),
               })));
     }
 
-    KJ_CASE_ONEOF(ns, Global::EphemeralActorNamespace) {
-      value = lock.wrap(context, lock.alloc<api::ColoLocalActorNamespace>(ns.actorChannel));
-    }
-    KJ_CASE_ONEOF(ns, Global::LoopbackEphemeralActorNamespace) {
-      value = lock.wrap(context,
-          lock.alloc<api::LoopbackColoLocalActorNamespace>(
-              ns.actorChannel, lock.alloc<api::LoopbackDurableObjectClass>(ns.classChannel)));
+    case Global::EPHEMERAL_ACTOR_NAMESPACE:
+      return lock.wrap(
+          context, lock.alloc<api::ColoLocalActorNamespace>(global.getEphemeralActorNamespace()));
+
+    case Global::LOOPBACK_EPHEMERAL_ACTOR_NAMESPACE: {
+      auto ns = global.getLoopbackEphemeralActorNamespace();
+      return lock.wrap(context,
+          lock.alloc<api::LoopbackColoLocalActorNamespace>(ns.getActorChannel(),
+              lock.alloc<api::LoopbackDurableObjectClass>(ns.getClassChannel())));
     }
 
-    KJ_CASE_ONEOF(ns, Global::DurableActorNamespace) {
-      value = lock.wrap(context,
-          lock.alloc<api::DurableObjectNamespace>(ns.actorChannel,
-              kj::heap<ActorIdFactoryImpl>(ns.uniqueKey), api::ActorCallRetriesAllowed::YES,
-              Persistent::NO, ns.userDefinedRetryPolicy));
+    case Global::DURABLE_ACTOR_NAMESPACE: {
+      auto ns = global.getDurableActorNamespace();
+      kj::Maybe<api::UserDefinedRetryPolicy> retryPolicy;
+      if (ns.hasRetryPolicy()) {
+        auto policy = ns.getRetryPolicy();
+        retryPolicy = api::UserDefinedRetryPolicy{
+          .maxAttempts = policy.getMaxAttempts(),
+          .timeout = policy.getTimeoutMs() * kj::MILLISECONDS,
+        };
+      }
+      return lock.wrap(context,
+          lock.alloc<api::DurableObjectNamespace>(ns.getActorChannel(),
+              kj::heap<ActorIdFactoryImpl>(ns.getUniqueKey()), api::ActorCallRetriesAllowed::YES,
+              Persistent::NO, retryPolicy));
     }
-    KJ_CASE_ONEOF(ns, Global::LoopbackDurableActorNamespace) {
-      value = lock.wrap(context,
-          lock.alloc<api::LoopbackDurableObjectNamespace>(ns.actorChannel,
-              kj::heap<ActorIdFactoryImpl>(ns.uniqueKey), api::ActorCallRetriesAllowed::YES,
-              lock.alloc<api::LoopbackDurableObjectClass>(ns.classChannel), featureFlags,
+
+    case Global::LOOPBACK_DURABLE_ACTOR_NAMESPACE: {
+      auto ns = global.getLoopbackDurableActorNamespace();
+      return lock.wrap(context,
+          lock.alloc<api::LoopbackDurableObjectNamespace>(ns.getActorChannel(),
+              kj::heap<ActorIdFactoryImpl>(ns.getUniqueKey()), api::ActorCallRetriesAllowed::YES,
+              lock.alloc<api::LoopbackDurableObjectClass>(ns.getClassChannel()), featureFlags,
               /*userDefinedRetryPolicy=*/kj::none));
     }
 
-    KJ_CASE_ONEOF(ae, Global::AnalyticsEngine) {
+    case Global::ANALYTICS_ENGINE: {
+      auto ae = global.getAnalyticsEngine();
       // Use subrequestChannel as logfwdrChannel
-      value = lock.wrap(context,
+      return lock.wrap(context,
           lock.alloc<api::AnalyticsEngine>(
-              ae.subrequestChannel, kj::str(ae.dataset), ae.version, ownerId));
+              ae.getChannel(), kj::str(ae.getDataset()), /*version=*/0, /*ownerId=*/1));
     }
 
-    KJ_CASE_ONEOF(text, kj::String) {
-      value = lock.wrap(context, kj::mv(text));
-    }
+    case Global::TEXT:
+      return lock.wrap(context, kj::str(global.getText()));
 
-    KJ_CASE_ONEOF(data, kj::Array<byte>) {
-      value = lock.wrap(context, kj::heapArray(data.asPtr()));
-    }
+    case Global::DATA:
+      return lock.wrap(context, kj::heapArray<byte>(global.getData()));
 
-    KJ_CASE_ONEOF(wrapped, Global::Wrapped) {
+    case Global::WRAPPED: {
+      auto wrapped = global.getWrapped();
+      auto innerBindings = wrapped.getInnerBindings();
       // wrapped bindings can be produced by internal modules only
-      KJ_IF_SOME(moduleNs, lock.resolveInternalModule(wrapped.moduleName)) {
+      KJ_IF_SOME(moduleNs, lock.resolveInternalModule(wrapped.getModuleName())) {
         // build env object with inner bindings
         auto env = v8::Object::New(lock.v8Isolate);
-        for (const auto& innerBinding: wrapped.innerBindings) {
-          lock.v8Set(env, innerBinding.name,
-              createBindingValue(lock, innerBinding, featureFlags, ownerId, memoryCacheProvider,
-                  IsInternalBinding::YES));
+        for (auto innerBinding: innerBindings) {
+          lock.v8Set(env, innerBinding.getName(),
+              createBindingValue(
+                  lock, innerBinding, featureFlags, memoryCacheProvider, IsInternalBinding::YES));
         }
 
         // obtain exported function to call
-        auto fn = lock.v8Get(moduleNs, wrapped.entrypoint);
-        KJ_ASSERT(fn->IsFunction(), "Entrypoint is not a function", wrapped.entrypoint);
+        auto fn = lock.v8Get(moduleNs, wrapped.getEntrypoint());
+        KJ_ASSERT(fn->IsFunction(), "Entrypoint is not a function", wrapped.getEntrypoint());
 
         // invoke the function, its result will be binding value
         v8::Local<v8::Value> arg = env.As<v8::Value>();
-        value = jsg::check(v8::Function::Cast(*fn)->Call(context, context->Global(), 1, &arg));
-        if (wrapped.entrypoint == "default"_kj && wrapped.innerBindings.size() == 1 &&
-            wrapped.innerBindings[0].name == api::WRAPPED_BINDING_INNER_NAME &&
-            wrapped.innerBindings[0].value.is<Global::Fetcher>()) {
+        auto value = jsg::check(v8::Function::Cast(*fn)->Call(context, context->Global(), 1, &arg));
+        if (wrapped.getEntrypoint() == "default"_kj && innerBindings.size() == 1 &&
+            innerBindings[0].getName() == api::WRAPPED_BINDING_INNER_NAME &&
+            innerBindings[0].isFetcher()) {
           KJ_IF_SOME(binding,
               lock.getTypeHandler<jsg::Ref<api::WrappedBinding>>().tryUnwrap(lock, value)) {
-            binding->setWrapperModule(kj::str(wrapped.moduleName));
+            binding->setWrapperModule(kj::str(wrapped.getModuleName()));
           }
         }
+        return value;
       } else {
-        KJ_FAIL_REQUIRE(
-            "wrapped binding module can't be resolved (internal modules only)", wrapped.moduleName);
+        KJ_FAIL_REQUIRE("wrapped binding module can't be resolved (internal modules only)",
+            wrapped.getModuleName());
       }
     }
-    KJ_CASE_ONEOF(hyperdrive, Global::Hyperdrive) {
-      value = lock.wrap(context,
-          lock.alloc<api::Hyperdrive>(hyperdrive.subrequestChannel, kj::str(hyperdrive.database),
-              kj::str(hyperdrive.user), kj::str(hyperdrive.password), kj::str(hyperdrive.scheme)));
-    }
-    KJ_CASE_ONEOF(unsafe, Global::UnsafeEval) {
-      value = lock.wrap(context, lock.alloc<api::UnsafeEval>());
+
+    case Global::HYPERDRIVE: {
+      auto hyperdrive = global.getHyperdrive();
+      return lock.wrap(context,
+          lock.alloc<api::Hyperdrive>(hyperdrive.getChannel(), kj::str(hyperdrive.getDatabase()),
+              kj::str(hyperdrive.getUser()), kj::str(hyperdrive.getPassword()),
+              kj::str(hyperdrive.getScheme())));
     }
 
-    KJ_CASE_ONEOF(actorClass, Global::ActorClass) {
-      value = lock.wrap(context, lock.alloc<api::DurableObjectClass>(actorClass.channel));
-    }
+    case Global::UNSAFE_EVAL:
+      return lock.wrap(context, lock.alloc<api::UnsafeEval>());
 
-    KJ_CASE_ONEOF(actorClass, Global::LoopbackActorClass) {
-      value = lock.wrap(context, lock.alloc<api::LoopbackDurableObjectClass>(actorClass.channel));
-    }
+    case Global::ACTOR_CLASS:
+      return lock.wrap(context, lock.alloc<api::DurableObjectClass>(global.getActorClass()));
 
-    KJ_CASE_ONEOF(workerLoader, Global::WorkerLoader) {
-      value = lock.wrap(context,
+    case Global::LOOPBACK_ACTOR_CLASS:
+      return lock.wrap(
+          context, lock.alloc<api::LoopbackDurableObjectClass>(global.getLoopbackActorClass()));
+
+    case Global::WORKER_LOADER:
+      return lock.wrap(context,
           lock.alloc<api::WorkerLoader>(
-              workerLoader.channel, CompatibilityDateValidation::CODE_VERSION));
-    }
+              global.getWorkerLoader(), CompatibilityDateValidation::CODE_VERSION));
 
-    KJ_CASE_ONEOF(_, Global::WorkerdDebugPort) {
-      value = lock.wrap(context, lock.alloc<WorkerdDebugPortConnector>());
-    }
+    case Global::WORKERD_DEBUG_PORT:
+      return lock.wrap(context, lock.alloc<WorkerdDebugPortConnector>());
   }
-
-  return value;
+  KJ_FAIL_REQUIRE("unknown Global type", global.which());
 }
 
-void WorkerdApi::compileGlobals(jsg::Lock& lockParam,
-    kj::ArrayPtr<const Global> globals,
-    v8::Local<v8::Object> target,
-    uint32_t ownerId) const {
+void WorkerdApi::compileGlobals(
+    jsg::Lock& lockParam, capnp::List<Global>::Reader globals, v8::Local<v8::Object> target) const {
   TRACE_EVENT("workerd", "WorkerdApi::compileGlobals()");
   auto& lock = kj::downcast<JsgWorkerdIsolate::Lock>(lockParam);
   lockParam.withinHandleScope([&] {
     auto& featureFlags = *impl->features;
 
-    for (auto& global: globals) {
+    for (auto global: globals) {
       lockParam.withinHandleScope([&] {
         // Don't use String's usual TypeHandler here because we want to intern the string.
         auto value = createBindingValue(
-            lock, global, featureFlags, ownerId, impl->memoryCacheProvider, IsInternalBinding::NO);
+            lock, global, featureFlags, impl->memoryCacheProvider, IsInternalBinding::NO);
         KJ_ASSERT(!value.IsEmpty(), "global did not produce v8::Value");
-        lockParam.v8Set(target, global.name, value);
+        lockParam.v8Set(target, global.getName(), value);
       });
     }
   });
@@ -790,83 +794,6 @@ void WorkerdApi::setModuleFallbackCallback(kj::Function<ModuleFallbackCallback>&
 }
 
 // =======================================================================================
-
-WorkerdApi::Global WorkerdApi::Global::clone() const {
-  Global result;
-  result.name = kj::str(name);
-
-  KJ_SWITCH_ONEOF(value) {
-    KJ_CASE_ONEOF(json, Global::Json) {
-      result.value = json.clone();
-    }
-    KJ_CASE_ONEOF(fetcher, Global::Fetcher) {
-      result.value = fetcher.clone();
-    }
-    KJ_CASE_ONEOF(loopback, Global::LoopbackServiceStub) {
-      result.value = loopback.clone();
-    }
-    KJ_CASE_ONEOF(kvNamespace, Global::KvNamespace) {
-      result.value = kvNamespace.clone();
-    }
-    KJ_CASE_ONEOF(r2Bucket, Global::R2Bucket) {
-      result.value = r2Bucket.clone();
-    }
-    KJ_CASE_ONEOF(queueBinding, Global::QueueBinding) {
-      result.value = queueBinding.clone();
-    }
-    KJ_CASE_ONEOF(key, Global::CryptoKey) {
-      result.value = key.clone();
-    }
-    KJ_CASE_ONEOF(cache, Global::MemoryCache) {
-      result.value = cache.clone();
-    }
-    KJ_CASE_ONEOF(ns, Global::EphemeralActorNamespace) {
-      result.value = ns.clone();
-    }
-    KJ_CASE_ONEOF(ns, Global::LoopbackEphemeralActorNamespace) {
-      result.value = ns.clone();
-    }
-    KJ_CASE_ONEOF(ns, Global::DurableActorNamespace) {
-      result.value = ns.clone();
-    }
-    KJ_CASE_ONEOF(ns, Global::LoopbackDurableActorNamespace) {
-      result.value = ns.clone();
-    }
-    KJ_CASE_ONEOF(ae, Global::AnalyticsEngine) {
-      result.value = ae.clone();
-    }
-    KJ_CASE_ONEOF(text, kj::String) {
-      result.value = kj::str(text);
-    }
-    KJ_CASE_ONEOF(data, kj::Array<byte>) {
-      result.value = kj::heapArray(data.asPtr());
-    }
-    KJ_CASE_ONEOF(wrapped, Global::Wrapped) {
-      result.value = wrapped.clone();
-    }
-    KJ_CASE_ONEOF(hyperdrive, Global::Hyperdrive) {
-      result.value = hyperdrive.clone();
-    }
-    KJ_CASE_ONEOF(unsafe, Global::UnsafeEval) {
-      result.value = Global::UnsafeEval{};
-    }
-
-    KJ_CASE_ONEOF(actorClass, Global::ActorClass) {
-      result.value = actorClass.clone();
-    }
-    KJ_CASE_ONEOF(actorClass, Global::LoopbackActorClass) {
-      result.value = actorClass.clone();
-    }
-    KJ_CASE_ONEOF(workerLoader, Global::WorkerLoader) {
-      result.value = workerLoader.clone();
-    }
-    KJ_CASE_ONEOF(workerdDebugPort, Global::WorkerdDebugPort) {
-      result.value = workerdDebugPort.clone();
-    }
-  }
-
-  return result;
-}
 
 const WorkerdApi& WorkerdApi::from(const Worker::Api& api) {
   return kj::downcast<const WorkerdApi>(api);

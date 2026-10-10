@@ -8,6 +8,7 @@
 use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
+use workerd_server::bridge::ffi as server;
 
 use crate::bridge::ffi;
 
@@ -380,39 +381,31 @@ fn parse_control_fd(param: &str) -> Result<u32, &'static str> {
         .map_err(|_| "Output value must be a file descriptor (non-negative integer).")
 }
 
-impl From<Override> for ffi::Override {
-    fn from(Override { name, value }: Override) -> Self {
-        Self { name, value }
-    }
+/// `<name>=<value>` options as a map, last value per name winning.
+pub fn override_map(overrides: Vec<Override>) -> std::collections::HashMap<String, String> {
+    overrides
+        .into_iter()
+        .map(|Override { name, value }| (name, value))
+        .collect()
 }
 
-impl From<ServeOrTestArgs> for ffi::ServeOrTestOptions {
-    fn from(args: ServeOrTestArgs) -> Self {
+impl From<&ServeOrTestArgs> for server::ServeOrTestOptions {
+    fn from(args: &ServeOrTestArgs) -> Self {
         let (perfetto_trace_path, perfetto_trace_categories) = args
             .perfetto_trace
+            .clone()
             .map(|Override { name, value }| (name, value))
             .unzip();
         Self {
-            directory_overrides: args
-                .directory_overrides
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-            external_overrides: args
-                .external_overrides
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-            inspector_addr: args.inspector_addr.into(),
             perfetto_trace_path: perfetto_trace_path.into(),
             perfetto_trace_categories: perfetto_trace_categories.into(),
             experimental: args.experimental,
-            pyodide_package_disk_cache_dir: args.pyodide_package_disk_cache_dir.into(),
-            pyodide_bundle_disk_cache_dir: args.pyodide_bundle_disk_cache_dir.into(),
+            pyodide_package_disk_cache_dir: args.pyodide_package_disk_cache_dir.clone().into(),
+            pyodide_bundle_disk_cache_dir: args.pyodide_bundle_disk_cache_dir.clone().into(),
             python_save_snapshot: args.python_save_snapshot,
             python_save_baseline_snapshot: args.python_save_baseline_snapshot,
-            python_load_snapshot: args.python_load_snapshot.into(),
-            python_snapshot_dir: args.python_snapshot_dir.into(),
+            python_load_snapshot: args.python_load_snapshot.clone().into(),
+            python_snapshot_dir: args.python_snapshot_dir.clone().into(),
         }
     }
 }
@@ -432,17 +425,14 @@ pub fn socket_overridden_twice(serve: &ServeArgs) -> Option<&str> {
         })
 }
 
-impl ffi::TestOptions {
-    /// The options for a test run, with the service and entrypoint patterns from `filter`.
-    pub fn new(args: TestArgs, filter: TestFilter) -> Self {
+impl From<&TestArgs> for server::TestOptions {
+    fn from(args: &TestArgs) -> Self {
         Self {
             no_verbose: args.no_verbose,
             predictable: args.predictable,
             gc_stress: args.gc_stress,
             all_autogates: args.all_autogates,
-            compat_date: args.compat_date.into(),
-            service_pattern: filter.service_pattern.into(),
-            entrypoint_pattern: filter.entrypoint_pattern.into(),
+            compat_date: args.compat_date.clone().into(),
         }
     }
 }

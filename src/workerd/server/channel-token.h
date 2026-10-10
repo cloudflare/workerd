@@ -13,20 +13,20 @@ namespace workerd::server {
 
 // Helper class to encode channel tokens for workerd.
 //
-// This is an internal implementation helper for `Server` (in `server.h`), separated out into its
-// own module solely for unit testing purposes. Nobody except `Server` should use this interface
-// directly.
+// This is an internal implementation helper for `WorkerFactory` (in `factory/worker-factory.h`),
+// separated out into its own module solely for unit testing purposes. Nobody except
+// `WorkerFactory` should use this interface directly.
 //
 // Note that all `Frankenvalue`s here are expected to contain cap tables holding live instances
 // of `SubrequestChannel`, `ActorClassChannel`, and `RpcChannel`.
 class ChannelTokenHandler {
  public:
-  // Callbacks implemented by `Server` (in `server.h`) to resolve entrypoint designators to live
+  // Callbacks implemented by `WorkerFactory` to resolve entrypoint designators to live
   // objects.
   //
   // (In theory, we could have a decodeChannelToken() method that returns the service name,
   // entrypoint name, and props as a struct, but this would require extra string copies and would
-  // also make abstractions a little messier in server.c++.)
+  // also make abstractions a little messier in the factory.)
   class Resolver {
    public:
     virtual kj::Rc<IoChannelFactory::SubrequestChannel> resolveEntrypoint(kj::StringPtr serviceName,
@@ -48,7 +48,7 @@ class ChannelTokenHandler {
   // workerd's implementation of `IoChannelFactory::SelfTokenFactory`. Produces the encoded
   // "vendor" token to embed in a restored channel token (i.e. the token referring to the
   // entrypoint whose `[restore]()` method must be called). Concrete implementations live in
-  // `server.c++` (one for static workers, one for actors).
+  // `factory/worker-factory.c++` (one for static workers, one for actors).
   class ServerSelfTokenFactory: public IoChannelFactory::SelfTokenFactory {
    public:
     // Get the token referring to "self", to be embedded as the vendor of a restored token.

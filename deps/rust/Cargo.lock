@@ -526,21 +526,26 @@ dependencies = [
  "clang-ast",
  "clap",
  "codespan-reporting",
+ "data-encoding",
  "dns-lookup",
  "encoding_rs",
  "flate2",
  "foldhash",
  "futures",
+ "glob",
  "hashlink",
  "http",
  "http-body",
+ "httpdate",
  "hyper",
  "hyper-util",
+ "ipnet",
  "libc",
  "libz-rs-sys",
  "lol_html_c_api",
  "nix",
  "notify",
+ "percent-encoding",
  "pico-args",
  "proc-macro2",
  "quote",
@@ -565,6 +570,7 @@ dependencies = [
  "tokio-rustls",
  "tower-service",
  "tracing",
+ "url",
  "windows-sys 0.61.2",
  "x509-cert",
 ]
@@ -866,6 +872,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glob"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
+
+[[package]]
 name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1134,6 +1146,12 @@ checksum = "c033f80b2c113cdf91ab7a33faa9cbc014726dcad99880c8609af2a370edf37d"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "ipnet"
+version = "2.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "791930b43c0d5973160d90a8f3894509f2b273430f5c5c73b668636d0287c5c0"
 
 [[package]]
 name = "is-macro"

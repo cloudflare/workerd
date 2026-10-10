@@ -63,20 +63,30 @@ export class WorkerdServerHarness {
     console.log('[HARNESS] Starting workerd with args:', args);
     this.#child = spawn(this.#workerdBinary, args, options);
 
-    // Create a promise for every named listen port we were told in our constructor to expect. Parse
-    // messages from our control FD and resolve the promises as we see ports come online.
-    //
-    // TODO(perf): Registering a separate callback for every named port isn't very efficient --
-    // we'll parse JSON N times -- but we typically don't have many named ports, and I don't want to
-    // spend forever on this code.
+    // Create a promise for every named listen port we were told in our constructor to expect, and
+    // resolve them as the control FD reports ports coming online. The control FD carries one JSON
+    // object per line; a read may return several lines at once or a partial one, so the stream is
+    // split on newlines before parsing.
+    const listeners = new Set();
+    let buffered = '';
+    this.#child.stdio[CONTROL_FD].on('data', (data) => {
+      buffered += data;
+      const lines = buffered.split('\n');
+      buffered = lines.pop();
+      for (const line of lines) {
+        if (line.length === 0) continue;
+        const parsed = JSON.parse(line);
+        console.log('[HARNESS] Control message:', parsed);
+        for (const listener of listeners) listener(parsed);
+      }
+    });
+
     this.#listenPorts = new Map();
     for (const listenPort of this.#listenPortNames) {
       this.#listenPorts.set(
         listenPort,
         new Promise((resolve, reject) => {
-          this.#child.stdio[CONTROL_FD].on('data', (data) => {
-            const parsed = JSON.parse(data);
-            console.log('[HARNESS] Control message:', parsed);
+          listeners.add((parsed) => {
             if (parsed.event === 'listen' && parsed.socket === listenPort) {
               resolve(parsed.port);
             }
@@ -88,9 +98,7 @@ export class WorkerdServerHarness {
 
     // Do the same as the above for the inspector port.
     this.#listenInspectorPort = new Promise((resolve, reject) => {
-      this.#child.stdio[CONTROL_FD].on('data', (data) => {
-        const parsed = JSON.parse(data);
-        console.log('[HARNESS] Inspector message:', parsed);
+      listeners.add((parsed) => {
         if (parsed.event === 'listen-inspector') {
           resolve(parsed.port);
         }

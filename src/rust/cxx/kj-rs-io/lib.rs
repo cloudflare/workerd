@@ -32,9 +32,9 @@
 //! This is ordinary tokio code. tokio registers a resource with the runtime *entered* on the
 //! calling thread, and kj-rs-tokio makes a `TokioEventPort` thread a tokio runtime thread for its
 //! whole life (port.rs, `EnteredRuntime`), so `TcpStream::connect`, `UnixListener::bind_addr`,
-//! `AsyncFd::with_interest`, `signal()`, `spawn_blocking` and friends register with the loop's
+//! `AsyncFd::with_interest`, `spawn_blocking` and friends register with the loop's
 //! driver as they are. Two checks are added, both cheap (two thread-local reads):
-//! [`ensure_loop_thread`] before every *registration* (connect, listen, wrap, resolve, signals,
+//! [`ensure_loop_thread`] before every *registration* (connect, listen, wrap, resolve,
 //! the hangup watch), so a call on a thread without a port, or under another runtime entered
 //! over the port's, fails with a `kj::Exception` instead of tokio's "no reactor running" panic
 //! (a process abort at the bridge); and [`ensure_owner_loop`] at the point an operation is about
@@ -58,10 +58,8 @@
 //! workerd uses them: `restrictPeers` (KJ's own policy), `connectAuthenticated` /
 //! `acceptAuthenticated` identities, unix peer credentials, `whenWriteDisconnected` (at one
 //! extra descriptor per stream; stream.rs), `getSockaddr`, `wrapListenSocketFd` with KJ's fd
-//! flags, `onSignal`, `getaddrinfo` with KJ's hints and service names, `unix:` and
+//! flags, `getaddrinfo` with KJ's hints and service names, `unix:` and
 //! `unix-abstract:` addresses, `SO_REUSEADDR`, `TCP_NODELAY`, the accept retry set, SIGPIPE.
-//! Added for workerd, with no KJ counterpart: `loopback:` addresses (loopback.rs), which
-//! `workerd test` uses to exercise the network stack end to end inside one process.
 //!
 //! # Objects
 //!
@@ -70,8 +68,8 @@
 //!     ├── kj_rs_tokio::TokioAsyncIoContext   the loop's tokio runtime (kj-rs-tokio)
 //!     ├── TokioLowLevelAsyncIoProvider       wrap*Fd(): an owned fd/SOCKET as i64 -> Rust owns it
 //!     └── TokioAsyncIoProvider
-//!             └── TokioNetwork               kj::Arc<PeerFilter> + Box<LoopbackRegistry>,
-//!                     │                          both shared down the restrictPeers chain:
+//!             └── TokioNetwork               kj::Arc<PeerFilter>, shared down the
+//!                     │                          restrictPeers chain:
 //!                     ├── TokioNetworkAddress    Box<TokioAddress> + filter share
 //!                     │       ├── TokioConnectionReceiver  Box<TokioListener> + filter share
 //!                     │       └── TokioDatagramPort        Box<TokioDatagram> + filter share
@@ -80,8 +78,7 @@
 //! TokioStream    (stream.rs)   Arc<Inner>: the socket, plus a lazily dup'd hangup watch
 //! TokioListener  (net.rs)      Arc<..>: one listening socket per resolved address
 //! TokioDatagram  (net.rs)      Arc<..>: one datagram socket
-//! TokioAddress   (net.rs)      the parsed address: SocketAddr list, a unix name, or a loopback
-//!                              queue (loopback.rs; `loopback:` addresses, workerd test only)
+//! TokioAddress   (net.rs)      the parsed address: SocketAddr list or a unix name
 //! TokioFileWatcher (watcher.rs) Arc<..>: notify watcher + metadata stamps; workerd's --watch
 //!                              (server/cli/watch.rs) uses it from Rust, FileWatcher (async-io.h)
 //!                              wraps it for C++
@@ -114,15 +111,16 @@ compile_error!("kj-rs-io supports Unix and Windows targets only");
 
 pub use error::exception_type;
 pub use net::TokioAddress;
+pub use net::TokioListener;
+pub use net::wrap_listener;
+pub use stream::Socket;
 pub use stream::TokioStream;
 pub use stream::when_write_disconnected;
 pub use watcher::TokioFileWatcher;
 
 mod error;
 mod ffi;
-mod loopback;
 mod net;
-mod signal;
 mod stream;
 mod watcher;
 
@@ -178,7 +176,6 @@ const _: () = {
     send_sync::<TokioAddress>();
     send_sync::<net::TokioDatagram>();
     send_sync::<net::TokioListener>();
-    send_sync::<loopback::LoopbackRegistry>();
     send_sync::<watcher::TokioFileWatcher>();
 };
 

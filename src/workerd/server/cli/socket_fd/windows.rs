@@ -16,9 +16,38 @@ impl InheritedSocket {
         Ok(Self(fd))
     }
 
-    pub fn duplicate_for_server(&self) -> io::Result<i64> {
-        Ok(i64::from(self.0))
+    pub fn duplicate_for_server(&self) -> io::Result<socket2::Socket> {
+        use std::os::windows::io::FromRawSocket;
+        use std::os::windows::io::IntoRawSocket;
+        use std::os::windows::io::OwnedSocket;
+
+        // SAFETY: the handle was checked to be a socket; it is released again below, so this
+        // process keeps it as inherited.
+        let owned = unsafe { OwnedSocket::from_raw_socket(self.0.into()) };
+        let duplicate = owned.try_clone();
+        let _ = owned.into_raw_socket();
+        Ok(socket2::Socket::from(duplicate?))
     }
+}
+
+/// `--control-fd`: a duplicate of the C runtime descriptor's handle (a parent passes extra
+/// descriptors through the C runtime's handle table, as Node.js does), as a file the server writes
+/// its events to. The inherited descriptor stays open, as on Unix.
+pub fn control_file(fd: u32) -> io::Result<std::fs::File> {
+    use std::os::windows::io::BorrowedHandle;
+    use std::os::windows::io::RawHandle;
+
+    let not_open = || io::Error::new(io::ErrorKind::InvalidInput, "File descriptor is not open.");
+    let raw = i32::try_from(fd).map_err(|_| not_open())?;
+    // SAFETY: the C runtime checks the descriptor itself, returning -1 for one that is not open,
+    // or -2 for a standard stream with no handle.
+    let handle = unsafe { libc::get_osfhandle(raw) };
+    if handle == -1 || handle == -2 {
+        return Err(not_open());
+    }
+    // SAFETY: borrowed for the duplication only; the C runtime keeps owning the handle.
+    let inherited = unsafe { BorrowedHandle::borrow_raw(handle as RawHandle) };
+    inherited.try_clone_to_owned().map(std::fs::File::from)
 }
 
 /// Whether the socket is listening, or `None` where the provider cannot say (the server finds out

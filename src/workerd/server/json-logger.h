@@ -11,6 +11,10 @@
 
 namespace workerd::server {
 
+// A log line as JSON (a `LogEntry` of log-schema.capnp), without the newline that ends it.
+kj::String buildJsonLogMessage(
+    kj::LogSeverity severity, const char* file, int line, int contextDepth, kj::StringPtr text);
+
 class JsonLogger: public kj::ExceptionCallback {
  public:
   void logMessage(kj::LogSeverity severity,
