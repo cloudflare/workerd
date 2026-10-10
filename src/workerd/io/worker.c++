@@ -4684,8 +4684,52 @@ kj::Own<const Worker::Script> Worker::Isolate::newScript(kj::StringPtr scriptId,
       kj::mv(maybeNewModuleRegistry));
 }
 
-void Worker::Isolate::completedRequest() const {
+// tcmalloc's entry point for returning free pages to the OS. Weak, so a build without tcmalloc
+// links and simply skips the release.
+extern "C" void MallocExtension_Internal_ReleaseMemoryToSystem(size_t bytes) __attribute__((weak));
+
+namespace {
+// How long an isolate must stay idle before it collects its garbage, from WORKERD_IDLE_GC_SECONDS.
+kj::Maybe<kj::Duration> idleCollectionDelay() {
+  static const kj::Maybe<kj::Duration> delay = []() -> kj::Maybe<kj::Duration> {
+    const char* value = getenv("WORKERD_IDLE_GC_SECONDS");
+    if (value == nullptr) return kj::none;
+    KJ_IF_SOME(seconds, kj::StringPtr(value).tryParseAs<uint>()) {
+      if (seconds > 0) return seconds * kj::SECONDS;
+    }
+    return kj::none;
+  }();
+  return delay;
+}
+}  // namespace
+
+void Worker::Isolate::completedRequest(kj::Timer& timer) const {
   limitEnforcer->completedRequest(id);
+  KJ_IF_SOME(delay, idleCollectionDelay()) {
+    // V8 starts a major collection only when the JavaScript heap grows, but every request also
+    // leaves runtime objects outside that heap, held by small wrappers only such a collection
+    // frees. An isolate whose heap stays small would keep them for as long as it lives.
+    //
+    // Only the wait is owned by the isolate, so the next completed request cancels it. The
+    // collection itself runs as a separate task holding its own reference: a collection can finish
+    // requests or release the isolate's last reference, and either would otherwise destroy the
+    // promise that is running it.
+    idleCollection = timer.afterDelay(delay)
+                         .then([this]() {
+      takeAsyncLockWithoutRequest(nullptr)
+          .then([self = kj::atomicAddRef(*this)](AsyncLock asyncLock) {
+        jsg::runInV8Stack([&](jsg::V8StackScope& stackScope) {
+          Impl::Lock lock(*self, asyncLock, stackScope);
+          lock.lock->v8Isolate->LowMemoryNotification();
+        });
+        if (MallocExtension_Internal_ReleaseMemoryToSystem != nullptr) {
+          MallocExtension_Internal_ReleaseMemoryToSystem(SIZE_MAX);
+        }
+      }).detach([](kj::Exception&& exception) {
+        KJ_LOG(WARNING, "idle isolate collection failed", exception);
+      });
+    }).eagerlyEvaluate(nullptr);
+  }
 }
 
 bool Worker::Isolate::isInspectorEnabled() const {

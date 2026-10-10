@@ -472,8 +472,9 @@ class Worker::Isolate: public kj::AtomicRefcounted {
     return featureFlagsForFl;
   }
 
-  // Called after each completed request. Does not require a lock.
-  void completedRequest() const;
+  // Called after each completed request. Does not require a lock. When idle collection is
+  // enabled, starts (or restarts) the wait after which an idle isolate collects its garbage.
+  void completedRequest(kj::Timer& timer) const;
 
   // See Worker::takeAsyncLock().
   kj::Promise<AsyncLock> takeAsyncLockWithoutRequest(SpanParent parentSpan) const;
@@ -580,6 +581,10 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   size_t nextRequestId = 0;
   kj::Arc<jsg::AsyncContextFrame::StorageKey> traceAsyncContextKey;
   kj::Arc<jsg::AsyncContextFrame::StorageKey> userTraceAsyncContextKey;
+
+  // The pending idle collection, replaced (and so cancelled) by each completed request. Declared
+  // last so it is destroyed before anything it uses.
+  mutable kj::Maybe<kj::Promise<void>> idleCollection;
 
   friend class Worker;
 };

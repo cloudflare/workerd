@@ -369,7 +369,7 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   KJ_IF_SOME(a, context->actor) {
     a.getMetrics().endRequest();
   }
-  context->worker->getIsolate().completedRequest();
+  context->worker->getIsolate().completedRequest(context->getUnsafeTimer());
   metrics->jsDone();
 
   if (context->isShared()) {
