@@ -1,0 +1,101 @@
+build/deps/rust.MODULE.bazel
+  s_dadaf0660bfcbe::t_c9b7bb04643cfb 61-99
+deps/rust/BUILD.bazel
+  s_dadaf0660bfcbe::t_60200f0cdce30e 14-21
+deps/rust/Cargo.lock
+  s_dadaf0660bfcbe::t_2991291c659317 89-94,117-122,327-336,364-385,459-481,520,535-538,547,550-552,557,565-566,569,670-675,845-856,865,924-997,1165-1213,1447-1452,1522,1633-1638,1658-1669,1679-1689,1701-1709,1739-1752,1830-1902,1924-1932,1951-1973,2090-2099,2140-2149,2173-2178,2608-2623,2665-2670,2723,2726-2731,2782-2790,2797-2805,2851-2859,2875-2883,2890,2902-2917,2925-2932,2935-2940,2947-2952,2959-2964,2971-2976,2983-2988,2995-3000,3007-3012,3019-3024,3031-3036,3052-3062,3127-3132
+deps/rust/Cargo.toml
+  s_dadaf0660bfcbe::t_f2bac9a53f72f9 35-37,50-55,63-66,69-74,79,84-85
+patches/rust/BUILD.bazel
+  s_dadaf0660bfcbe::t_5948d0b013e29a 1-4
+patches/rust/crates/http/kj-lenient-header-values.patch
+  s_dadaf0660bfcbe::t_fbaea328f101f6 1-17
+patches/rust/crates/httparse/kj-lenient-header-values.patch
+  s_dadaf0660bfcbe::t_b14eed7cb3ccc8 1-29
+patches/rust/crates/hyper/client-lazy-response-body.patch
+  s_dadaf0660bfcbe::t_a30cf660d49a66 1-16
+patches/rust/crates/hyper/graceful-shutdown-partial-request.patch
+  s_dadaf0660bfcbe::t_79d65003916a24 1-13
+patches/rust/crates/hyper/parse-error-explanation.patch
+  s_dadaf0660bfcbe::t_ea5fbb9af98271 1-54
+patches/rust/crates/hyper/public-header-case-map.patch
+  s_dadaf0660bfcbe::t_3f61e82180f491 1-43
+src/rust/AGENTS.md
+  s_dadaf0660bfcbe::t_83d7f281c7883b 23
+src/rust/cxx/AGENTS.md
+  s_dadaf0660bfcbe::t_61ecee63ef3b63 40-44,109-122
+src/rust/cxx/kj-hyper/BUILD.bazel
+  s_dadaf0660bfcbe::t_b0866fe2bf8bbf 1-93
+src/rust/cxx/kj-hyper/body-test.rs
+  s_dadaf0660bfcbe::t_2006bb1f1576de 1-42
+src/rust/cxx/kj-hyper/body.rs
+  s_dadaf0660bfcbe::t_eb4f5911ffb588 1-500
+src/rust/cxx/kj-hyper/client-test.rs
+  s_dadaf0660bfcbe::t_40d101cfe4553a 1-116
+src/rust/cxx/kj-hyper/client.rs
+  s_dadaf0660bfcbe::t_4bf3bd5f8d2b85 1-879
+src/rust/cxx/kj-hyper/ffi.rs
+  s_dadaf0660bfcbe::t_cbbeb0b8657c6f 1-429
+src/rust/cxx/kj-hyper/handshake-test.rs
+  s_dadaf0660bfcbe::t_3c4f9faa6c124d 1-18
+src/rust/cxx/kj-hyper/handshake.rs
+  s_dadaf0660bfcbe::t_98de4079415086 1-43
+src/rust/cxx/kj-hyper/io-test.rs
+  s_dadaf0660bfcbe::t_22c049c6984abb 1-159
+src/rust/cxx/kj-hyper/io.rs
+  s_dadaf0660bfcbe::t_1affafd3d1e52f 1-407
+src/rust/cxx/kj-hyper/kj-hyper.c++
+  s_dadaf0660bfcbe::t_9e3c429e252c64 1-463
+src/rust/cxx/kj-hyper/kj-hyper.h
+  s_dadaf0660bfcbe::t_7b3db04008ba19 1-78
+src/rust/cxx/kj-hyper/lib.rs
+  s_dadaf0660bfcbe::t_88bd5bd8801521 1-81
+src/rust/cxx/kj-hyper/server-test.rs
+  s_dadaf0660bfcbe::t_7e94cf5e189b78 1-286
+src/rust/cxx/kj-hyper/server.rs
+  s_dadaf0660bfcbe::t_e90fcd7fcd7cf8 1-781
+src/rust/cxx/kj-hyper/starttls.rs
+  s_dadaf0660bfcbe::t_ddcfa1e2a6ee98 1-253
+src/rust/cxx/kj-hyper/tests/BUILD.bazel
+  s_dadaf0660bfcbe::t_d0d68d41fe8d43 1-60
+src/rust/cxx/kj-hyper/tests/harness.rs
+  s_dadaf0660bfcbe::t_fae29c1a092d26 1-427
+src/rust/cxx/kj-hyper/tests/kj-hyper-test.c++
+  s_dadaf0660bfcbe::t_3ba43993d050d1 1-1355
+src/rust/cxx/kj-hyper/tests/lib.rs
+  s_dadaf0660bfcbe::t_e41c81d4d17283 1-120
+src/rust/cxx/kj-hyper/tests/test-helpers.h
+  s_dadaf0660bfcbe::t_eaae432ef70131 1-17
+src/rust/cxx/kj-hyper/tls-test.rs
+  s_dadaf0660bfcbe::t_af9f3b8522154e 1-682
+src/rust/cxx/kj-hyper/tls.rs
+  s_dadaf0660bfcbe::t_68d8f0053fdaa1 1-525
+src/rust/cxx/kj-rs-io/error.rs
+  s_dadaf0660bfcbe::t_02eaabb114b3b6 51-53
+src/rust/cxx/kj-rs-io/lib.rs
+  s_dadaf0660bfcbe::t_991dc52bb1b9af 115,118
+src/rust/cxx/kj-rs-io/stream.rs
+  s_dadaf0660bfcbe::t_0c441316a83bb1 367,378-418
+src/rust/kj/ffi.h
+  s_dadaf0660bfcbe::t_bd0b325b6c7400 31-39,47-50,151,161-165
+src/rust/kj/http.rs
+  s_dadaf0660bfcbe::t_9c4234c5d57b80 107,142-143,153-157,220,228-235,391-399
+src/rust/kj/io.rs
+  s_dadaf0660bfcbe::t_d8824d0aa20cfb 30-37,50-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1a44543d0ce71b892e8be9f7b452d6097341e099",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
