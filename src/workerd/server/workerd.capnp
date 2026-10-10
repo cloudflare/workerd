@@ -97,6 +97,9 @@ struct Config {
 
   cluster @7 :ClusterConfig;
   # Set when this instance should join a cluster. Requires `--experimental`.
+
+  tracing @8 :TracingOptions;
+  # Where the spans of Worker invocations are exported.
 }
 
 struct ClusterConfig {
@@ -315,6 +318,27 @@ struct ClusterConfig {
   # `stopTimeoutMs` is not divided. A divisor of 0, or one that rounds a time down to 0 (above
   # 1000), fails the config. Bucket requests that stall past the shortened bounds fence the
   # instance, so leave this at 1 outside tests.
+}
+
+struct TracingOptions {
+  otlp @0 :ServiceDesignator;
+  # Export spans to an OpenTelemetry collector. Every Worker invocation produces a trace: a span
+  # for the invocation itself, one for each subrequest and binding operation it performs, and any
+  # the Worker opens with `ctx.tracing.enterSpan()`. They are POSTed to `/v1/traces` on this
+  # service in the OTLP/HTTP protobuf encoding, so the service is typically an `ExternalServer`
+  # pointing at a collector's OTLP/HTTP port. For example, to see traces in a local Jaeger:
+  #
+  #     services = [
+  #       ...,
+  #       (name = "jaeger", external = (address = "localhost:4318", http = ())),
+  #     ],
+  #     tracing = (otlp = "jaeger"),
+  #
+  # Use `HttpOptions.injectRequestHeaders` to send credentials along. The `service.name` resource
+  # attribute is the name of the Worker's service. A request arriving on a socket starts its trace
+  # with an `http_request` span of the `workers-runtime` service, under which the invocation's span
+  # sits. Invocations of the designated service itself are not traced. While this is set, spans are
+  # not delivered to streaming tail workers.
 }
 
 struct LoggingOptions {
