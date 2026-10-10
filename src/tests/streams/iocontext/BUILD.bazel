@@ -7,11 +7,13 @@ load("//:build/wd_test.bzl", "wd_test")
 iocontext_suite_srcs = glob(["*.js"]) + ["iocontext-modules.capnp"]
 
 wd_test(
+    size = "large",
     src = "iocontext-cpp.wd-test",
     data = iocontext_suite_srcs,
 )
 
 wd_test(
+    size = "large",
     src = "iocontext-ts.wd-test",
     args = ["--experimental"],
     data = iocontext_suite_srcs,

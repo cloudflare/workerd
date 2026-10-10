@@ -31,6 +31,7 @@ wd_test(
 # @all-compat-flags variant is disabled: at the 2999-12-31 date the flags
 # the cell deliberately omits would all turn on.
 wd_test(
+    size = "large",
     src = "compression-cpp-legacy.wd-test",
     data = compression_suite_srcs,
     generate_all_compat_flags_variant = False,

@@ -199,9 +199,12 @@ function createCodecPair(
   // defaultReaderRead in readable.ts), and a getter there can cancel the
   // reader or error the pair through the Node.js interop hook — so a drain
   // checks this between pieces rather than enqueue into a stream that
-  // would throw.
+  // would throw, and leaves the rest of the output undelivered.
   let finished = false;
   let finishReason: unknown;
+  // Whether the pair finished by erroring the readable (a codec failure,
+  // an abort, the interop hook) rather than by its reader's cancel.
+  let readableErrored = false;
 
   // The teardown every path that ends the pair shares: queued writes are
   // discarded by the erroring writable without sink steps, so their
@@ -221,6 +224,7 @@ function createCodecPair(
   // exception.
   const failBoth = (reason: unknown): void => {
     finish(reason);
+    readableErrored = true;
     byteControllerError(readableController, reason);
   };
 
@@ -316,10 +320,14 @@ function createCodecPair(
         }
         // Writes never wait for reads (legacy-parity settlement): the
         // output moves into the readable's queue, which buffers it without
-        // bound. A pair torn down during the drain fails the write with
-        // the teardown's reason, as it does a write queued behind it.
+        // bound. A pair torn down during the drain (from user code run by
+        // an enqueue) leaves the rest of the output undelivered, and the
+        // write still succeeds: the spec's transform enqueues its output,
+        // and how it splits it is implementation-defined, so this is a
+        // transform that enqueued it as one chunk before the teardown.
+        // The teardown has errored the writable, which rejects the writes
+        // queued behind this one.
         drainStage();
-        if (finished) throw finishReason;
       },
       close: (): void => {
         // Z_FINISH plus the strict-mode end checks; a throw rejects the
@@ -332,12 +340,18 @@ function createCodecPair(
         }
         // Deliver the flush tail, then close: queued bytes are served to
         // later reads before the close lands (queued byte-stream
-        // semantics). A pair torn down during the drain fails the close
-        // with the teardown's reason instead. When a BYOB read's view is
-        // left holding a partial element, close() errors the readable and
-        // throws, and the throw rejects writer.close() in turn.
+        // semantics). A pair torn down during the drain ends it as in
+        // write above, and then follows the spec's flush: a readable
+        // errored meanwhile rejects the close with its error; one its
+        // reader cancelled is already closed, and the close succeeds.
+        // When a BYOB read's view is left holding a partial element,
+        // close() errors the readable and throws, and the throw rejects
+        // writer.close() in turn.
         drainStage();
-        if (finished) throw finishReason;
+        if (finished) {
+          if (readableErrored) throw finishReason;
+          return;
+        }
         byteControllerClose(readableController);
       },
       abort: (reason: unknown): void => {

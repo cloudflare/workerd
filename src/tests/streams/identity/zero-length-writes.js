@@ -3,7 +3,8 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // Zero-length writes are no-ops: they resolve without delivering a chunk and
-// without closing the stream.
+// without closing the stream. So is a write of undefined (or with no
+// argument), in both implementations.
 
 import { strictEqual, deepStrictEqual } from 'node:assert';
 
@@ -51,5 +52,29 @@ export const zeroLengthStringIsNoop = {
     strictEqual(new TextDecoder().decode(value), 'x');
     await writePromise;
     await writer.close();
+  },
+};
+
+export const undefinedChunkIsNoop = {
+  async test() {
+    for (const [stream, desiredSize] of [
+      [new IdentityTransformStream(), 1],
+      [new FixedLengthStream(1), 1],
+      [new IdentityTransformStream({ highWaterMark: 4 }), 4],
+    ]) {
+      const writer = stream.writable.getWriter();
+      const reader = stream.readable.getReader();
+      await writer.write(undefined);
+      await writer.write();
+      // A no-op counts nothing against the highWaterMark.
+      strictEqual(writer.desiredSize, desiredSize);
+      const writePromise = writer.write(new Uint8Array([7]));
+      const { value, done } = await reader.read();
+      strictEqual(done, false);
+      deepStrictEqual([...value], [7]);
+      await writePromise;
+      await writer.close();
+      strictEqual((await reader.read()).done, true);
+    }
   },
 };

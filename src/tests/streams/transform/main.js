@@ -26,6 +26,7 @@ export {
   readableWritableTypeValidation,
   highWaterMarkValidated,
   hwmInfinityRejected,
+  strategyMembersReadOnce,
 } from 'construction';
 
 export {
@@ -51,6 +52,7 @@ export {
   asyncErrorDuringFlush,
   errorInTransformFlush,
   errorNoopAfterTransformThrow,
+  enqueueAfterCloseRequestedLeavesWritable,
 } from 'error-propagation';
 
 export {
@@ -76,6 +78,7 @@ export {
   readInsideSize,
   writerCloseInsideSize,
   writableAbortInsideSize,
+  enqueueThrowsReadableStoredError,
 } from 'reentrancy';
 
 export { transformRoundtrip } from 'roundtrip';

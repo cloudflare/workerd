@@ -201,17 +201,17 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   kj::Own<GlobalContext> globalContext;
 
   class Service;
-  kj::Own<Service> invalidConfigServiceSingleton;
+  kj::Rc<Service> invalidConfigServiceSingleton;
 
   class ActorClass;
-  kj::Own<ActorClass> invalidConfigActorClassSingleton;
+  kj::Rc<ActorClass> invalidConfigActorClassSingleton;
 
   // Information about all known actor namespaces. Maps serviceName -> className -> config.
   // This needs to be populated in advance of constructing any services, in order to be able to
   // correctly construct dependent services.
   kj::HashMap<kj::String, kj::HashMap<kj::String, ActorConfig>> actorConfigs;
 
-  kj::HashMap<kj::String, kj::Own<Service>> services;
+  kj::HashMap<kj::String, kj::Rc<Service>> services;
 
   class ActorNamespace;
   kj::HashMap<kj::StringPtr, ActorNamespace*> actorNamespacesByUniqueKey;
@@ -261,18 +261,18 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
 
   class HttpRewriter;
 
-  kj::Own<Service> makeInvalidConfigService();
-  kj::Own<Service> makeExternalService(kj::StringPtr name,
+  kj::Rc<Service> makeInvalidConfigService();
+  kj::Rc<Service> makeExternalService(kj::StringPtr name,
       config::ExternalServer::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
-  kj::Own<Service> makeNetworkService(config::Network::Reader conf);
-  kj::Own<Service> makeDiskDirectoryService(kj::StringPtr name,
+  kj::Rc<Service> makeNetworkService(config::Network::Reader conf);
+  kj::Rc<Service> makeDiskDirectoryService(kj::StringPtr name,
       config::DiskDirectory::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder);
-  kj::Promise<kj::Own<Service>> makeWorker(kj::StringPtr name,
+  kj::Promise<kj::Rc<Service>> makeWorker(kj::StringPtr name,
       config::Worker::Reader conf,
       capnp::List<config::Extension>::Reader extensions);
-  kj::Promise<kj::Own<Service>> makeService(config::Service::Reader conf,
+  kj::Promise<kj::Rc<Service>> makeService(config::Service::Reader conf,
       kj::HttpHeaderTable::Builder& headerTableBuilder,
       capnp::List<config::Extension>::Reader extensions);
 
@@ -286,25 +286,25 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   // Can only be called in the link stage.
   //
   // May return a new object or may return a fake-own around a long-lived object.
-  kj::Own<Service> lookupService(
+  kj::Rc<Service> lookupService(
       config::ServiceDesignator::Reader designator, kj::String errorContext);
 
   // Like lookupService() but looks up an actor class (especially for use as a facet class).
   // Returns none on a config error.
-  kj::Own<ActorClass> lookupActorClass(
+  kj::Rc<ActorClass> lookupActorClass(
       config::ServiceDesignator::Reader designator, kj::String errorContext);
 
   // Pretty similar to lookupService() and lookupActorClass(), but these callbacks are called by
   // the `ChannelTokenHandler` when decoding tokens.
-  kj::Own<IoChannelFactory::SubrequestChannel> resolveEntrypoint(kj::StringPtr serviceName,
+  kj::Rc<IoChannelFactory::SubrequestChannel> resolveEntrypoint(kj::StringPtr serviceName,
       kj::Maybe<kj::StringPtr> entrypoint,
       Frankenvalue props,
       Persistent persistent) override;
-  kj::Own<IoChannelFactory::ActorClassChannel> resolveActorClass(kj::StringPtr serviceName,
+  kj::Rc<IoChannelFactory::ActorClassChannel> resolveActorClass(kj::StringPtr serviceName,
       kj::Maybe<kj::StringPtr> entrypoint,
       Frankenvalue props,
       Persistent persistent) override;
-  kj::Own<IoChannelFactory::ActorChannel> resolveActor(kj::StringPtr namespaceKey,
+  kj::Rc<IoChannelFactory::ActorChannel> resolveActor(kj::StringPtr namespaceKey,
       kj::ArrayPtr<const byte> id,
       kj::Maybe<kj::StringPtr> name,
       Persistent persistent) override;
@@ -321,15 +321,15 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
           callback);
 
   kj::Promise<void> listenHttp(kj::Own<kj::ConnectionReceiver> listener,
-      kj::Own<Service> service,
+      kj::Rc<Service> service,
       kj::StringPtr physicalProtocol,
       kj::Own<HttpRewriter> rewriter);
 
   kj::Promise<void> listenTcp(
-      kj::Own<kj::ConnectionReceiver> listener, kj::Own<Service> service, kj::String authority);
+      kj::Own<kj::ConnectionReceiver> listener, kj::Rc<Service> service, kj::String authority);
 
   kj::Promise<void> listenUdp(kj::Own<kj::DatagramPort> port,
-      kj::Own<Service> service,
+      kj::Rc<Service> service,
       kj::StringPtr addrStr,
       kj::Duration idleTimeout,
       size_t maxPendingBytes);
@@ -356,10 +356,22 @@ class Server final: private kj::TaskSet::ErrorHandler, private ChannelTokenHandl
   struct ConfigErrorReporter;
   struct DynamicErrorReporter;
   struct WorkerDef;
-  kj::Promise<kj::Own<WorkerService>> makeWorkerImpl(kj::StringPtr name,
+  kj::Promise<kj::Rc<WorkerService>> makeWorkerImpl(kj::StringPtr name,
       WorkerDef def,
       capnp::List<config::Extension>::Reader extensions,
       ErrorReporter& errorReporter);
+
+  kj::Own<Worker::Isolate> makeWorkerIsolate(kj::StringPtr name,
+      kj::StringPtr inboundListenersKey,
+      const WorkerDef& def,
+      capnp::List<config::Extension>::Reader extensions,
+      Worker::Isolate::InspectorPolicy inspectorPolicy,
+      kj::Maybe<jsg::SnapshotConfig> snapshotConfig);
+
+  // Creates a throwaway zygote Worker in PREPARE_SNAPSHOT mode and returns the filled snapshot
+  // artifact, or kj::none when the zygote failed to start.
+  kj::Maybe<kj::Own<jsg::SnapshotArtifact>> makeSnapshot(
+      kj::StringPtr name, WorkerDef& def, capnp::List<config::Extension>::Reader extensions);
 
   kj::Promise<void> startServices(jsg::V8System& v8System,
       config::Config::Reader config,

@@ -19,6 +19,7 @@ export {
   readyFulfillTiming,
   nonCallableSizeThrows,
   globalScopePipe,
+  strategyMembersReadOnce,
 } from 'construction';
 
 export {
@@ -107,6 +108,8 @@ export {
   controllerErrorInsideWriteHook,
   sizeNotCalledForDoomedWrite,
   sizeReceiverAndArity,
+  sizeConsultedForWriteInsideSinkClose,
+  sizeConsultedForWriteInsideSinkAbort,
 } from 'reentrancy';
 
 export { thenGetterDoesNotFireOnWriterPromises } from 'then-interceptors';

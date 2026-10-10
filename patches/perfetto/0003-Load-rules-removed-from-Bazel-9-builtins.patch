@@ -1,0 +1,117 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Wed, 7 Oct 2026 12:00:00 -0400
+Subject: Load rules removed from Bazel 9 builtins
+
+diff --git a/bazel/proto_gen.bzl b/bazel/proto_gen.bzl
+index 74f91ca..1764cb2 100644
+--- a/bazel/proto_gen.bzl
++++ b/bazel/proto_gen.bzl
+@@ -15,6 +15,8 @@
+ # This file defines the proto_gen() rule that is used for generating protos
+ # with custom plugins (ipc and protozero).
+ 
++load("@protobuf//bazel/common:proto_info.bzl", "ProtoInfo")
++
+ def _proto_gen_impl(ctx):
+     proto_src = [
+         f
+diff --git a/bazel/rules.bzl b/bazel/rules.bzl
+index 2e11ef2..2f0d58b 100644
+--- a/bazel/rules.bzl
++++ b/bazel/rules.bzl
+@@ -14,6 +14,14 @@
+ 
+ load("@perfetto//bazel:proto_gen.bzl", "proto_descriptor_gen", "proto_gen")
+ load("@perfetto_cfg//:perfetto_cfg.bzl", "PERFETTO_CONFIG")
++load("@protobuf//bazel:cc_proto_library.bzl", "cc_proto_library")
++load("@protobuf//bazel:java_lite_proto_library.bzl", "java_lite_proto_library")
++load("@protobuf//bazel:java_proto_library.bzl", "java_proto_library")
++load("@protobuf//bazel:proto_library.bzl", "proto_library")
++load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
++load("@rules_cc//cc:cc_library.bzl", "cc_library")
++load("@rules_python//python:py_binary.bzl", "py_binary")
++load("@rules_python//python:py_library.bzl", "py_library")
+ 
+ # +----------------------------------------------------------------------------+
+ # | Base C++ rules.                                                            |
+@@ -38,7 +46,7 @@ def default_cc_args():
+ 
+ def perfetto_build_config_cc_library(**kwargs):
+     if not _rule_override("cc_library", **kwargs):
+-        native.cc_library(**kwargs)
++        cc_library(**kwargs)
+ 
+ def perfetto_filegroup(**kwargs):
+     if not _rule_override("filegroup", **kwargs):
+@@ -51,20 +59,20 @@ def perfetto_genrule(**kwargs):
+ def perfetto_cc_library(**kwargs):
+     args = _merge_dicts(default_cc_args(), kwargs)
+     if not _rule_override("cc_library", **args):
+-        native.cc_library(**args)
++        cc_library(**args)
+ 
+ def perfetto_cc_binary(**kwargs):
+     args = _merge_dicts(default_cc_args(), kwargs)
+     if not _rule_override("cc_binary", **args):
+-        native.cc_binary(**args)
++        cc_binary(**args)
+ 
+ def perfetto_py_binary(**kwargs):
+     if not _rule_override("py_binary", **kwargs):
+-        native.py_binary(**kwargs)
++        py_binary(**kwargs)
+ 
+ def perfetto_py_library(**kwargs):
+     if not _rule_override("py_library", **kwargs):
+-        native.py_library(**kwargs)
++        py_library(**kwargs)
+ 
+ # +----------------------------------------------------------------------------+
+ # | Proto-related rules                                                        |
+@@ -72,19 +80,19 @@ def perfetto_py_library(**kwargs):
+ 
+ def perfetto_proto_library(**kwargs):
+     if not _rule_override("proto_library", **kwargs):
+-        native.proto_library(**kwargs)
++        proto_library(**kwargs)
+ 
+ def perfetto_cc_proto_library(**kwargs):
+     if not _rule_override("cc_proto_library", **kwargs):
+-        native.cc_proto_library(**kwargs)
++        cc_proto_library(**kwargs)
+ 
+ def perfetto_java_proto_library(**kwargs):
+     if not _rule_override("java_proto_library", **kwargs):
+-        native.java_proto_library(**kwargs)
++        java_proto_library(**kwargs)
+ 
+ def perfetto_java_lite_proto_library(**kwargs):
+     if not _rule_override("java_lite_proto_library", **kwargs):
+-        native.java_lite_proto_library(**kwargs)
++        java_lite_proto_library(**kwargs)
+ 
+ # Unlike the other rules, this is an noop by default because Bazel does not
+ # support Go proto libraries.
+@@ -148,18 +156,18 @@ def _perfetto_android_jni_library(
+     # exclude them from being build when invoke `bazel build :all`,
+     # since these targets won't be able to compile anyway, see
+     # https://bazel.build/docs/android-ndk#cclibrary-android.
+-    native.cc_library(
++    cc_library(
+         name = input_cc_library_name,
+         target_compatible_with = ["@platforms//os:android"],
+         **input_cc_library_kwargs
+     )
+-    native.cc_binary(
++    cc_binary(
+         name = binary_target_name,
+         linkshared = True,
+         deps = [input_cc_library_name],
+         target_compatible_with = ["@platforms//os:android"],
+     )
+-    native.cc_library(
++    cc_library(
+         name = name,
+         srcs = [binary_target_name],
+         target_compatible_with = ["@platforms//os:android"],

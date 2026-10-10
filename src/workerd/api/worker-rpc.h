@@ -407,6 +407,7 @@ class JsRpcPromise: public JsRpcClientProvider {
   ~JsRpcPromise() noexcept(false);
 
   void resolve(jsg::Lock& js, jsg::JsValue result);
+  void reject(kj::Exception exception);
   void setOriginatingCall(kj::Maybe<TraceContextParent> value);
   void dispose(jsg::Lock& js);
 
@@ -475,12 +476,17 @@ class JsRpcPromise: public JsRpcClientProvider {
     //   be held from KJ I/O objects, but this is a JSG object).
     IoPtr<JsRpcPromise> ctxCheck;
   };
+  // A rejected call must drop its pipeline: holding it would keep the call's answer, and so the
+  // callee's session, open. Pipelining on a rejected promise fails with `exception` instead.
+  struct Rejected {
+    // Converted before the application's handlers receive the JS error, so pipelined operations
+    // report the error the call rejected with even if a handler later mutates that object.
+    kj::Exception exception;
+    IoPtr<JsRpcPromise> ctxCheck;  // Like `Resolved::ctxCheck`.
+  };
   struct Disposed {};
 
-  // Note we don't have a "rejected" state because it works fine to just leave the state as
-  // "Pending" -- calls to `pipeline` will rethrow the same exception, and holding the pipeline
-  // open won't actually hold anything open on the server.
-  kj::OneOf<Pending, Resolved, Disposed> state;
+  kj::OneOf<Pending, Resolved, Rejected, Disposed> state;
 
   void visitForGc(jsg::GcVisitor& visitor) {
     visitor.visit(inner);
@@ -489,6 +495,7 @@ class JsRpcPromise: public JsRpcClientProvider {
       KJ_CASE_ONEOF(resolved, Resolved) {
         visitor.visit(resolved.result);
       }
+      KJ_CASE_ONEOF(rejected, Rejected) {}
       KJ_CASE_ONEOF(disposed, Disposed) {}
     }
   }
@@ -631,7 +638,7 @@ class JsRpcStub: public JsRpcClientProvider {
   rpc::JsRpcTarget::Client getClient();
 
   // If the stub is backed by a persistable RpcChannel, return it.
-  kj::Maybe<kj::Own<IoChannelFactory::RpcChannel>> getRpcChannel(IoContext& ioctx);
+  kj::Maybe<kj::Rc<IoChannelFactory::RpcChannel>> getRpcChannel(IoContext& ioctx);
 
   ClientForOneCall getClientForOneCall(
       jsg::Lock& js, kj::Maybe<ActorCallRetryState::Attempt> actorCallAttempt) override;

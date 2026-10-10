@@ -1193,6 +1193,10 @@ class SpanParent {
   [[nodiscard]] SpanBuilder newChild(
       kj::ConstString operationName, kj::Maybe<kj::Date> startTime = kj::none);
 
+  // Start an optional diagnostic span family only if the backend supports it. Acceptance of the
+  // root includes its children, which use normal newChild(). Rejection must not allocate span IDs.
+  [[nodiscard]] SpanBuilder newOptionalChild(kj::ConstString operationName);
+
   // Useful to skip unnecessary code when not observed.
   bool isObserved() {
     return observer != nullptr;
@@ -1338,6 +1342,14 @@ class SpanObserver: public kj::Refcounted {
   // Note that children can be created long after a span has completed.
   [[nodiscard]] virtual kj::Rc<SpanObserver> newChild() = 0;
 
+  // Backends may require registration of runtime span names. Opt into a diagnostic span family
+  // by overriding this method and returning its root observer; its descendants use newChild().
+  // Default rejection lets new runtime diagnostics ship before older backends support them,
+  // without changing the IDs of existing spans or emitting unknown operation names.
+  [[nodiscard]] virtual kj::Rc<SpanObserver> newOptionalChild(kj::ConstString operationName) {
+    return {};
+  }
+
   // Allocate a child for a span initiated directly by user JavaScript (via
   // `ctx.tracing.enterSpan`). Allows implementations to apply different policies than for
   // runtime-issued spans (notably, edgeworker bypasses its operation-name allowlist here).
@@ -1432,6 +1444,12 @@ inline SpanBuilder SpanParent::newChild(
     kj::ConstString operationName, kj::Maybe<kj::Date> startTime) {
   if (observer == nullptr) return nullptr;
   return SpanBuilder(observer->newChild(), kj::mv(operationName), startTime);
+}
+
+inline SpanBuilder SpanParent::newOptionalChild(kj::ConstString operationName) {
+  if (observer == nullptr) return nullptr;
+  auto childObserver = observer->newOptionalChild(operationName.clone());
+  return SpanBuilder(kj::mv(childObserver), kj::mv(operationName));
 }
 
 inline SpanBuilder SpanBuilder::newChild(

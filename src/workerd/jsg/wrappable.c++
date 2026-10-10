@@ -63,6 +63,32 @@ void HeapTracer::clearWrappers() {
   clearFreelistedShims();
 }
 
+void HeapTracer::destroyLiveWrappableInstances() {
+  v8::HandleScope scope(isolate);
+  while (!wrappers.empty()) {
+    auto& wrappable = wrappers.front();
+    // Empty Local if the wrapper is already detached.
+    auto handle = wrappable.tryGetHandle(isolate).orDefault({});
+    bool isContextGlobal = Wrappable::tryUnwrapGlobalReceiver(isolate, handle) != kj::none;
+    auto own = wrappable.detachWrapper(true);
+    if (own.get() == nullptr) {
+      KJ_DASSERT(wrappable.isCondemned());
+      wrappers.remove(wrappable);
+      continue;
+    }
+    // Detach the JS object from its CppgcShim: the serialized object must not point at C++. A
+    // context global's hidden JSGlobalObject points at the shim too, so clear both.
+    if (!handle.IsEmpty()) {
+      if (isContextGlobal) {
+        v8::Object::WrapGlobal(isolate, handle, nullptr,
+            static_cast<v8::CppHeapPointerTag>(kContextGlobalWrappableTag));
+      } else {
+        v8::Object::Wrap<Wrappable::WRAPPABLE_TAG>(isolate, handle, nullptr);
+      }
+    }
+  }
+}
+
 using JSGWrappable = workerd::jsg::Wrappable;
 
 // V8's GC integrates with cppgc, aka "oilpan", a garbage collector for C++ objects. We want to
@@ -505,21 +531,41 @@ void Wrappable::traceFromV8(cppgc::Visitor& cppgcVisitor) {
 void Wrappable::attachWrapper(v8::Isolate* isolate,
     v8::Local<v8::Object> object,
     bool needsGcTracing,
-    v8::CppHeapPointerTag tag) {
+    v8::CppHeapPointerTag tag,
+    IsContextGlobal isContextGlobal) {
   auto& tracer = HeapTracer::getTracer(isolate);
 
   KJ_REQUIRE(!hasWrapper());
   KJ_REQUIRE(strongWrapper.IsEmpty());
 
-  // No garbage collection may run for the duration of this function. Between creating the
+  // Set up internal fields for a newly-allocated object.
+  KJ_REQUIRE(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
+  // Internal field 0 holds a marker identifying this as a workerd API object; see
+  // isWorkerdApiObject(). The marker's address is a small integer type-tagged by slot index.
+  auto tagAddress = const_cast<uint16_t*>(&WORKERD_WRAPPABLE_TAG);
+  object->SetAlignedPointerInInternalField(WRAPPABLE_TAG_FIELD_INDEX, tagAddress,
+      static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX));
+
+  // The C++ object is reached only through the CppgcShim, stored in V8's CppHeap pointer table
+  // with a per-type tag. There is deliberately no second pointer to the object in an internal
+  // field: a single tagged handle means dispatch and GC lifetime are always driven by the same
+  // pointer. The shim carries the same tag so it lands in the matching freelist bucket.
+  auto* shim = tracer.allocateShim(*this, tag);
+
+  // No garbage collection may run from here to the end of this function. Between creating the
   // TracedReference below and linking `object` to its CppgcShim, the traced node exists but
   // nothing in the cppgc object graph reaches it, so a major GC's ResetDeadNodes() would free the
   // node -- zapping it with kTracedHandleFullGCResetZapValue -- while `object` itself stays
   // alive. Marking cannot save the node either: constructing a TracedReference is an initializing
   // store, which V8 deliberately does not black-allocate.
   //
-  // The window is reachable because allocateShim() allocates on the cppgc heap, and cppgc reports
-  // its allocations to V8, which collects once the old-generation allocation limit is reached.
+  // Both cppgc allocations above (allocateShim(), and the slot wrapper V8 allocates for
+  // SetAlignedPointerInInternalField()) must stay outside this scope. cppgc reports allocations
+  // to V8 only when GC is allowed, and nothing reports them when the scope closes. If they were
+  // inside it, a loop creating short-lived API objects would never trigger a major GC. Every
+  // wrapper also takes two entries in V8's CppHeap pointer table, and only a major GC frees
+  // them, so the table would fill and the process would abort with "ExternalEntityTable::
+  // AllocateEntry: allocation failed".
   cppgc::subtle::NoGarbageCollectionScope noGcScope(isolate->GetCppHeap()->GetHeapHandle());
 
   // The C++ Wrappable object must hold a TracedReference to its own JavaScript wrapper, while
@@ -551,21 +597,18 @@ void Wrappable::attachWrapper(v8::Isolate* isolate,
   // that a recreated wrapper would no longer be equivalent.
   this->isolate = isolate;
 
-  // Set up internal fields for a newly-allocated object.
-  KJ_REQUIRE(object->InternalFieldCount() == Wrappable::INTERNAL_FIELD_COUNT);
-  // Internal field 0 holds a marker identifying this as a workerd API object; see
-  // isWorkerdApiObject(). The marker's address is a small integer type-tagged by slot index.
-  auto tagAddress = const_cast<uint16_t*>(&WORKERD_WRAPPABLE_TAG);
-  object->SetAlignedPointerInInternalField(WRAPPABLE_TAG_FIELD_INDEX, tagAddress,
-      static_cast<v8::EmbedderDataTypeTag>(WRAPPABLE_TAG_FIELD_INDEX));
-
-  // The C++ object is reached only through the CppgcShim, stored in V8's CppHeap pointer table
-  // with a per-type tag. There is deliberately no second pointer to the object in an internal
-  // field: a single tagged handle means dispatch and GC lifetime are always driven by the same
-  // pointer. The shim carries the same tag so it lands in the matching freelist bucket.
-  auto* shim = tracer.allocateShim(*this, tag);
   shim->wrapper.emplace(isolate, object, v8::TracedReference<v8::Object>::IsDroppable());
-  v8::Object::Wrap(isolate, object, shim, tag);
+  KJ_DASSERT(bool(isContextGlobal) == (static_cast<uint16_t>(tag) == kContextGlobalWrappableTag));
+  if (isContextGlobal) {
+    // Sets the CppHeapPointer on both the JSGlobalProxy (`object`) and its hidden prototype
+    // (the JSGlobalObject), so unwrapping works whichever of the two V8 hands us as a
+    // receiver. CHECK-fails inside V8 if `object` is not a JSGlobalProxy.
+    v8::Object::WrapGlobal(isolate, object, shim, tag);
+    KJ_DASSERT(
+        v8::Object::CheckGlobalWrappable(isolate, object, v8::CppHeapPointerTagRange(tag, tag)));
+  } else {
+    v8::Object::Wrap(isolate, object, shim, tag);
+  }
 
   // Add to the list of Wrappables to force-clean at isolate shutdown. Done after the shim
   // exists, so this Wrappable is never briefly linked-but-wrapperless, which is the state
@@ -599,6 +642,26 @@ v8::Local<v8::Object> Wrappable::attachOpaqueWrapper(
   attachWrapper(isolate, object, needsGcTracing,
       static_cast<v8::CppHeapPointerTag>(kNonResourceWrappableTag));
   return object;
+}
+
+kj::Maybe<Wrappable&> Wrappable::tryUnwrapGlobalReceiver(
+    v8::Isolate* isolate, v8::Local<v8::Object> object) {
+  // In V8 fast API calls the nominal Local<Object> receiver may actually hold undefined.
+  if (object.IsEmpty() || !object.As<v8::Value>()->IsObject()) return kj::none;
+
+  // Unwrap with the full JSG range and check the tag ourselves; see unwrapFromShimInRangeOrAbort()
+  // for why a narrow range can't be passed to Object::Unwrap.
+  auto* shim = static_cast<CppgcShim*>(
+      v8::Object::Unwrap<v8::Object::Wrappable>(isolate, object, kJsgWrappableTagRange));
+  if (shim == nullptr || static_cast<uint16_t>(shim->tag) != kContextGlobalWrappableTag) {
+    return kj::none;
+  }
+  // Not shim->resolve(): the shim's wrapper is the JSGlobalProxy, but `object` may be the hidden
+  // JSGlobalObject, which shares the same shim.
+  KJ_IF_SOME(active, shim->state.tryGet<CppgcShim::Active>()) {
+    return *active.wrappable;
+  }
+  return kj::none;
 }
 
 kj::Maybe<Wrappable&> Wrappable::tryUnwrapOpaque(

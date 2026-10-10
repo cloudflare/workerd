@@ -4,15 +4,10 @@
 
 // Writer-side backpressure signaling: desiredSize and ready. Identity
 // streams count backpressure in BYTES (not chunks), including bytes still in
-// flight, and recover as reads consume them.
-//
-// String chunk accounting deliberately diverges between implementations and
-// is asserted per implementation below: C++ counts the exact encoded UTF-8
-// byte length; TypeScript uses a conservative length*3 upper-bound estimate
-// (the maximum UTF-8 bytes per UTF-16 code unit). Both feed only
-// backpressure signaling, where overcounting is harmless.
+// flight, and recover as reads consume them. A string counts its UTF-8
+// bytes.
 
-import { strictEqual, notStrictEqual } from 'node:assert';
+import { strictEqual, notStrictEqual, deepStrictEqual } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 export const queuedWritesAndCloseBufferUntilRead = {
@@ -184,28 +179,48 @@ export const partialByobReadKeepsWriteCounted = {
   },
 };
 
+// A string counts the UTF-8 bytes written for it: 2-, 3- and 4-byte
+// sequences, and 3 for each lone surrogate (written as U+FFFD), on an
+// IdentityTransformStream and a FixedLengthStream alike (parity). The
+// accounting reverses fully once the chunk is read and the write has
+// settled.
 export const stringWriteDesiredSizeAccounting = {
   async test() {
-    const { readable, writable } = new IdentityTransformStream({
-      highWaterMark: 100,
-    });
-    const writer = writable.getWriter();
-    const reader = readable.getReader();
+    const strings = [
+      'hello',
+      'h\u00e9llo',
+      '\u20acuro',
+      'a\u{1f600}b',
+      'a\ud800b',
+      '\udc00',
+    ];
+    for (const str of strings) {
+      const bytes = new TextEncoder().encode(str);
+      const { readable, writable } = new IdentityTransformStream({
+        highWaterMark: 100,
+      });
+      const writer = writable.getWriter();
+      const reader = readable.getReader();
+      const w = writer.write(str);
+      strictEqual(writer.desiredSize, 100 - bytes.byteLength, str);
+      deepStrictEqual((await reader.read()).value, bytes, str);
+      await w;
+      strictEqual(writer.desiredSize, 100, str);
+      await writer.close();
+    }
 
-    strictEqual(writer.desiredSize, 100);
+    // Backpressure only once the bytes reach the high-water mark: 6 of 16.
+    const its = new IdentityTransformStream({ highWaterMark: 16 });
+    const itsWriter = its.writable.getWriter();
+    itsWriter.write('abcdef');
+    strictEqual(itsWriter.desiredSize, 10);
 
-    // "hello" is 5 code units, all ASCII: 5 actual UTF-8 bytes.
-    // C++ counts the exact 5; TypeScript estimates 5 * 3 = 15.
-    const w = writer.write('hello');
-    strictEqual(writer.desiredSize, usingTsImpl ? 85 : 95);
-
-    // Either way, the accounting reverses fully once the chunk is read and
-    // the write has settled.
-    await reader.read();
-    await w;
-    strictEqual(writer.desiredSize, 100);
-
-    await writer.close();
+    // A FixedLengthStream caps its high-water mark at its length: 5 bytes
+    // of 5.
+    const fls = new FixedLengthStream(5, { highWaterMark: 100 });
+    const flsWriter = fls.writable.getWriter();
+    flsWriter.write('h\u00e9ll');
+    strictEqual(flsWriter.desiredSize, 0);
   },
 };
 

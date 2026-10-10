@@ -1307,13 +1307,17 @@ SpanParent IoContext::getCurrentTraceSpan() {
         auto handle = value.getHandle(lock);
         jsg::Lock& js = lock;
         auto& spanParent = jsg::unwrapOpaqueRef<IoOwn<SpanParent>>(js.v8Isolate, handle);
-        return spanParent->addRef();
+        // The frame may have been captured by a different request (e.g. via
+        // AsyncLocalStorage.snapshot()), whose span this request can't use.
+        KJ_IF_SOME(span, spanParent.tryGet()) {
+          return span.addRef();
+        }
       }
     }
   }
 
-  // If async context is unavailable (unset, or JS lock is not held), fall back to heuristic of
-  // using the trace info from the most recent active request.
+  // If async context is unavailable (unset, from another request, or JS lock is not held), fall
+  // back to heuristic of using the trace info from the most recent active request.
   return getMetrics().getSpan();
 }
 
@@ -1330,7 +1334,11 @@ SpanParent IoContext::getCurrentUserTraceSpan() {
         jsg::Lock& js = lock;
         auto& asyncContext =
             jsg::unwrapOpaqueRef<IoOwn<UserTraceAsyncContext>>(js.v8Isolate, handle);
-        return asyncContext->getSpan();
+        // As in getCurrentTraceSpan(), the frame may belong to a different request, in which case
+        // fall back to this request's root span.
+        KJ_IF_SOME(context, asyncContext.tryGet()) {
+          return context.getSpan();
+        }
       }
     }
   }

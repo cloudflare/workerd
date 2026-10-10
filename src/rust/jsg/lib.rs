@@ -55,12 +55,21 @@ mod ffi {
             reason = "cxx takes an opaque Rust type boxed"
         )]
         unsafe fn realm_create(isolate: *mut Isolate, feature_flags_data: &[u8]) -> Box<Realm>;
+
+        /// Drains the Realm's cached resource-template handles for the `PREPARE_SNAPSHOT`
+        /// pipeline. Each returned handle is a `v8::Global<v8::FunctionTemplate>`, recovered on
+        /// the C++ side with `global_from_ffi`; ownership transfers to the caller, which must
+        /// dispose the handle before `CreateBlob`. The cache is left empty (templates are
+        /// recreated lazily; `START_FROM_SNAPSHOT` isolates start empty anyway).
+        fn realm_take_resource_templates(realm: &mut Realm) -> Vec<Global>;
     }
 
     unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");
+        include!("workerd/rust/jsg/v8.rs.h");
 
         type Isolate = crate::v8::ffi::Isolate;
+        type Global = crate::v8::ffi::Global;
 
         // Realm
         pub unsafe fn realm_from_isolate(isolate: *mut Isolate) -> *mut Realm;
@@ -978,6 +987,12 @@ unsafe fn realm_create(isolate: *mut v8::ffi::Isolate, feature_flags_data: &[u8]
     let feature_flags = FeatureFlags::from_bytes(feature_flags_data);
     // SAFETY: isolate pointer is valid (guaranteed by C++ caller).
     unsafe { Box::new(Realm::new(v8::IsolatePtr::from_ffi(isolate), feature_flags)) }
+}
+
+/// See the bridge declaration: drains the cached resource-template persistent handles for
+/// the `PREPARE_SNAPSHOT` pipeline.
+fn realm_take_resource_templates(realm: &mut Realm) -> Vec<v8::ffi::Global> {
+    realm.resources.take_template_handles()
 }
 
 /// Executes `f`, catching any panic and converting it to a JS internal error.

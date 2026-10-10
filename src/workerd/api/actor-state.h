@@ -204,7 +204,7 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   DurableObjectStorage(jsg::Lock& js,
       IoPtr<ActorCacheInterface> cache,
       bool enableSql,
-      kj::Own<IoChannelFactory::ActorChannel> primaryActorChannel,
+      kj::Rc<IoChannelFactory::ActorChannel> primaryActorChannel,
       kj::Own<ActorIdFactory::ActorId> primaryActorId);
 
   ActorCacheInterface& getActorCacheInterface() {

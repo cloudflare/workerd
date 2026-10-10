@@ -25,6 +25,9 @@ export {
   fixedLengthCoercionDivergence,
   fixedLengthLengthsAboveMaxSafeInteger,
   userStrategySizeNeverInvoked,
+  strategyArgumentDictionaryConversion,
+  highWaterMarkReadAndConvertedOnce,
+  highWaterMarkConversionDivergence,
 } from 'construction';
 
 export {
@@ -32,6 +35,7 @@ export {
   acceptsArrayBuffer,
   acceptsDataViewSubrange,
   acceptsStringAsUtf8,
+  stringWithNulDivergence,
   respectsViewOffsets,
   rejectsNumberChunk,
   invalidChunkAfterQueuedValidWrites,
@@ -42,6 +46,7 @@ export {
   zeroLengthUint8ArrayIsNoop,
   zeroLengthArrayBufferIsNoop,
   zeroLengthStringIsNoop,
+  undefinedChunkIsNoop,
 } from 'zero-length-writes';
 
 export { writeCopiesData } from 'copy-semantics';

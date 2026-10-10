@@ -1385,6 +1385,23 @@ export let crossContextSharingDoesntWork = {
       }
     );
 
+    // The same holds after the call rejects: pipelining from another request reports the
+    // cross-request error, not the error the call rejected with.
+    globalRpcPromise = env.MyServiceLocal.throwingMethod();
+    await assert.rejects(globalRpcPromise, { message: 'METHOD THREW' });
+    await assert.rejects(
+      () => env.MyServiceLocal.tryUseGlobalRpcPromisePipeline(),
+      {
+        name: 'Error',
+        message:
+          'Cannot perform I/O on behalf of a different request. I/O objects (such as streams, ' +
+          'request/response bodies, and others) created in the context of one request handler ' +
+          "cannot be accessed from a different request's handler. This is a limitation of " +
+          'Cloudflare Workers which allows us to improve overall performance. ' +
+          '(I/O type: JsRpcPromise)',
+      }
+    );
+
     // Now let's try accessing a JsRpcProperty, where the property is NOT a direct property of a
     // top-level service binding. This works even less than a JsRpcPromise, since there's no inner
     // JS promise, it tries to create one on-demand, which fails because the parent object is

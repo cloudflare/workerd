@@ -4018,15 +4018,7 @@ export type SqlStorageValue = ArrayBuffer | string | number | null;
 export declare abstract class SqlStorageCursor<
   T extends Record<string, SqlStorageValue>,
 > {
-  next():
-    | {
-        done?: false;
-        value: T;
-      }
-    | {
-        done: true;
-        value?: never;
-      };
+  next(): IteratorResult<T, undefined>;
   toArray(): T[];
   one(): T;
   raw<U extends SqlStorageValue[]>(): IterableIterator<U>;
@@ -4945,6 +4937,7 @@ export interface Tracing {
 }
 export declare abstract class Span {
   get isTraced(): boolean;
+  spanContext(): TracingSpanContext;
   setAttribute(key: string, value: boolean | number | string): this;
   setAttributes(
     attributes: Record<string, boolean | number | string | undefined>,
@@ -4979,6 +4972,11 @@ export type TracingSpanStatusCode = "unset" | "ok" | "error";
 export interface TracingSpanStatus {
   code: TracingSpanStatusCode;
   message?: string;
+}
+export interface TracingSpanContext {
+  traceId: string;
+  spanId: string;
+  traceFlags: number;
 }
 /**
  * Represents the identity of a user authenticated via Cloudflare Access.

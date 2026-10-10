@@ -468,7 +468,9 @@ void ActorSqlite::scheduleLaterAlarm(kj::Maybe<kj::Date> newAlarmTime, SpanParen
                       .then([this]() {
     alarmLaterIsInFlight = false;
     KJ_IF_SOME(nextTime, kj::mv(pendingLaterAlarmTime)) {
-      scheduleLaterAlarm(nextTime, nullptr);
+      if (!willFireEarlier(metadata.getAlarm(), nextTime)) {
+        scheduleLaterAlarm(nextTime, nullptr);
+      }
     }
   }).catch_([](kj::Exception&& e) {
     // Move-later alarm failures are non-fatal; catch here to prevent taskFailed() from

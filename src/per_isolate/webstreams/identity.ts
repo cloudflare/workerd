@@ -96,9 +96,9 @@ import type { ViewExtentHelpers } from './view-extent';
 const {
   ArrayBuffer,
   ArrayPrototypePush,
-  ArrayBufferPrototypeByteLengthGet,
   BigInt,
   Number,
+  NumberIsNaN,
   ObjectDefineProperties,
   ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
@@ -132,7 +132,7 @@ const {
   WritableStreamDefaultController,
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
-const { viewByteExtent, viewByteLength } =
+const { viewByteExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
@@ -184,10 +184,13 @@ const textEncoderInstance = new TextEncoder();
 // Chunk validation and copy
 //
 // Returns a COPIED Uint8Array for byte inputs, a TextEncoder result for
-// strings, or undefined for zero-length inputs (write no-op). Throws
-// TypeError for anything else. Never detaches the input buffer.
+// strings, or undefined for zero-length inputs (write no-op). An undefined
+// chunk (`write()`, `write(undefined)`) is a no-op too, as in C++, where
+// the internal controller's chunk argument is optional. Throws TypeError
+// for anything else. Never detaches the input buffer.
 
 function validateAndCopyChunk(chunk: unknown): Uint8Array | undefined {
+  if (chunk === undefined) return undefined;
   if (typeof chunk === 'string') {
     if (chunk.length === 0) return undefined;
     return TextEncoderEncode(textEncoderInstance, chunk);
@@ -220,45 +223,6 @@ function validateAndCopyChunk(chunk: unknown): Uint8Array | undefined {
   );
 }
 
-// Compute the byte size of a chunk for WritableStream queue tracking.
-// Used by the always-installed size callback (sizeAndSnapshot in the
-// constructor) when an explicit highWaterMark selects byte accounting,
-// feeding queueTotalSize which drives desiredSize and
-// writer.ready — purely advisory backpressure signaling. It does NOT
-// affect data correctness, the FLS byte budget (#remaining uses actual
-// byte lengths from the copied chunk), or Content-Length.
-//
-// Our WritableStreamDefaultController dequeues AFTER the write algorithm
-// completes (writable.ts #processWrite), so in-flight bytes stay counted
-// in queueTotalSize — matching the C++ model where all pipeline bytes
-// (in-flight + queued) are tracked until fully consumed.
-//
-// For strings, uses str.length * 3 as a conservative upper-bound
-// estimate (max UTF-8 bytes per UTF-16 code unit) to avoid a redundant
-// TextEncoder.encode — the actual encode happens once in
-// validateAndCopyChunk. The overcount is relatively harmless: since this
-// only affects backpressure, overestimating just means the writable side
-// signals backpressure slightly earlier than strictly necessary.
-function byteSize(chunk: unknown): number {
-  if (typeof chunk === 'string') {
-    return (chunk as string).length * 3;
-  }
-  if (isArrayBuffer(chunk)) {
-    return ArrayBufferPrototypeByteLengthGet(chunk as ArrayBuffer);
-  }
-  if (isSharedArrayBuffer(chunk)) {
-    // SharedArrayBuffer.prototype.byteLength getter is separate from
-    // ArrayBuffer's; use Uint8Array wrapper for the uncommon SAB case.
-    return TypedArrayPrototypeGetByteLength(
-      new Uint8Array(chunk as unknown as ArrayBuffer)
-    ) as number;
-  }
-  // byteSize runs only on chunks validateAndCopyChunk has already
-  // accepted (sizeAndSnapshot validates before sizing), so anything that
-  // is not a string or (Shared)ArrayBuffer is an ArrayBufferView.
-  return viewByteLength(chunk as ArrayBufferView);
-}
-
 let assertIsIdentityTransformStream: (self: IdentityTransformStream) => void;
 
 // ---------------------------------------------------------------------------
@@ -268,6 +232,28 @@ const kPrivateSymbol: symbol = Symbol('private');
 const kEmptyStrategy = ObjectFreeze({
   __proto__: null,
 }) as QueuingStrategy<unknown>;
+
+// The writable's WHATWG high-water-mark conversion (ToNumber; NaN or a
+// negative number is a RangeError), for FixedLengthStream, which caps the
+// converted number at its length before IdentityTransformStream hands it
+// on. Converting a number again there has no side effects.
+function convertHighWaterMark(value: unknown): number {
+  const highWaterMark = +(value as number);
+  if (NumberIsNaN(highWaterMark) || highWaterMark < 0) {
+    throw new RangeError('Invalid highWaterMark');
+  }
+  return highWaterMark;
+}
+
+// WebIDL dictionary conversion of a constructor's strategy argument, as in
+// C++: undefined and null mean no strategy; any other non-object throws.
+function toStrategyDictionary(value: unknown): QueuingStrategy<unknown> {
+  if (value === undefined || value === null) return kEmptyStrategy;
+  if (typeof value !== 'object' && typeof value !== 'function') {
+    throw new TypeError('The queuing strategy must be an object.');
+  }
+  return value as QueuingStrategy<unknown>;
+}
 
 // A write accepted by the writable, snapshotted in its size() callback (see
 // sizeAndSnapshot). Entries are tagged with an own `ok` data property rather
@@ -601,8 +587,7 @@ class IdentityTransformStream {
       expectedLength = internalExpectedLength;
       writableStrategy = internalWritableStrategy;
     } else {
-      writableStrategy = writableStrategyOrInternal as
-        QueuingStrategy<unknown> | undefined;
+      writableStrategy = toStrategyDictionary(writableStrategyOrInternal);
     }
     writableStrategy ??= kEmptyStrategy;
 
@@ -664,9 +649,19 @@ class IdentityTransformStream {
       }
       try {
         const copied = validateAndCopyChunk(chunk);
-        // Size is computed before the push: if it ever threw, nothing
-        // would have been queued and the FIFO could not desync.
-        const size = explicitHighWaterMark !== undefined ? byteSize(chunk) : 1;
+        // With byte accounting, a write counts the bytes it copied: a
+        // string's UTF-8 encoding, a buffer's or view's extent at write
+        // time. This only signals backpressure (desiredSize, ready); the
+        // FixedLengthStream budget counts delivered bytes on its own.
+        // In-flight bytes stay counted until the write completes, since
+        // the writable dequeues after the sink settles, as the C++
+        // controller counts every byte until it is consumed.
+        const size =
+          explicitHighWaterMark === undefined
+            ? 1
+            : copied === undefined
+              ? 0
+              : (TypedArrayPrototypeGetByteLength(copied) as number);
         this.#snapshots.push({
           __proto__: null,
           ok: true,
@@ -893,24 +888,26 @@ class FixedLengthStream extends IdentityTransformStream {
           'that fits in a uint64.'
       );
     }
+    writableStrategy = toStrategyDictionary(writableStrategy);
     //
     // Cap highWaterMark at expectedLength, matching C++ behavior
     // (identity-transform-stream.c++ FixedLengthStream::constructor): buffering more than the
-    // total expected output is pointless.
-    if (
-      writableStrategy !== undefined &&
-      writableStrategy.highWaterMark !== undefined
-    ) {
+    // total expected output is pointless. The member is read and converted
+    // once, as IdentityTransformStream's is, and the cap applies to the
+    // converted number.
+    const hwm: unknown = writableStrategy.highWaterMark;
+    if (hwm !== undefined) {
       // Derive the cap from the COERCED length, not the raw input: BigInt
       // conversion normalizes a -0.0 input to 0n, so Number(bigLen) is
       // always +0-or-positive and a negative zero cannot leak through the
       // min() below into the highWaterMark (and from there into the
       // writer's desiredSize).
       const numExpected = Number(bigLen);
-      const hwm = writableStrategy.highWaterMark;
+      const converted = convertHighWaterMark(hwm);
       writableStrategy = {
-        highWaterMark: hwm < numExpected ? hwm : numExpected,
-      };
+        __proto__: null,
+        highWaterMark: converted < numExpected ? converted : numExpected,
+      } as QueuingStrategy<unknown>;
     }
     super(kPrivateSymbol, expectedLength, writableStrategy);
   }

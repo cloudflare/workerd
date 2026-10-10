@@ -154,7 +154,7 @@ jsg::Ref<KvNamespace> KvNamespace::deserialize(
 
   KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(cap)) {
     // Decoding dynamic ctx.props: the cap is a live subrequest channel.
-    return js.alloc<KvNamespace>(IoContext::current().addObject(kj::addRef(channel)));
+    return js.alloc<KvNamespace>(IoContext::current().addObject(channel.addRef()));
   } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
     // Decoding dynamic isolate env: the cap is a numbered I/O channel.
     return js.alloc<KvNamespace>(kj::String(), kj::Array<AdditionalHeader>(),
@@ -748,7 +748,7 @@ jsg::Ref<JsRpcPromise> KvNamespace::deleteBulk(const v8::FunctionCallbackInfo<v8
         return js.alloc<Fetcher>(channel, Fetcher::RequiresHostAndProtocol::NO, true);
       }
       KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
-        return js.alloc<Fetcher>(IoContext::current().addObject(kj::addRef(*channel)),
+        return js.alloc<Fetcher>(IoContext::current().addObject(channel->addRef()),
             Fetcher::RequiresHostAndProtocol::NO, true);
       }
     }

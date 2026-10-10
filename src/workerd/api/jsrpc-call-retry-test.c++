@@ -38,7 +38,7 @@ enum class Replacement {
 constexpr kj::StringPtr DISCONNECT_JS_MESSAGE = "Error: Network connection lost."_kj;
 
 constexpr kj::StringPtr RECEIVER_SOURCE = R"JS(
-  import { RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
+  import { DurableObject, RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
 
   class Child extends RpcTarget {
     async child() {
@@ -60,6 +60,13 @@ constexpr kj::StringPtr RECEIVER_SOURCE = R"JS(
       return new Child();
     }
     get value() { return 42; }
+  }
+
+  export class FailingReceiver extends DurableObject {
+    async pendingFailure() {
+      await scheduler.wait(1);
+      throw new Error("boom");
+    }
   }
 )JS"_kj;
 
@@ -659,8 +666,8 @@ KJ_TEST("successful actor RPC keeps its first-attempt result pipeline alive") {
   KJ_EXPECT(state.replayMemoryBytes == 0);
 }
 
-// A @retryable method's duplicate session relies on this: a retry replays only the top-level call,
-// so a call on its result runs once even when the method runs twice.
+// A retryable() method's duplicate session relies on this: a retry replays only the top-level
+// call, so a call on its result runs once even when the method runs twice.
 KJ_TEST("calls on an actor RPC result are never retry-eligible") {
   auto io = kj::setupAsyncIo();
   capnp::MallocMessageBuilder flagsMessage;
@@ -1145,6 +1152,82 @@ KJ_TEST("rejected actor RPC promise does not retain its request observer") {
   });
 
   KJ_EXPECT(state.activeRequestObservers == 0);
+}
+
+// Fulfills `done` once the receiver's request has finished. Actor requests are never aborted as
+// hung, so a pinned session keeps this request, and its observer, alive.
+class ReceiverRequestObserver final: public RequestObserver {
+ public:
+  explicit ReceiverRequestObserver(kj::Own<kj::PromiseFulfiller<void>> done): done(kj::mv(done)) {}
+  ~ReceiverRequestObserver() noexcept(false) {
+    done->fulfill();
+  }
+
+ private:
+  kj::Own<kj::PromiseFulfiller<void>> done;
+};
+
+// Pipelining on the call commits its attempt, so the retry state keeps the original pipeline.
+// Both promises stay referenced while the test waits for the receiver's request to finish.
+KJ_TEST("rejected actor RPC promise releases its committed result pipeline") {
+  auto io = kj::setupAsyncIo();
+  capnp::MallocMessageBuilder flagsMessage;
+  RetryTestState state;
+  PausingTimerChannel timer;
+  HoldingTimerChannel receiverTimer;
+  auto receiverDone = kj::newPromiseAndFulfiller<void>();
+  auto receiverParams = makeReceiverParams(io.waitScope, receiverTimer);
+  receiverParams.actorId = Worker::Actor::Id(kj::str("failing-receiver"));
+  receiverParams.actorClassName = "FailingReceiver"_kj;
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> receiverDoneFulfiller =
+      kj::mv(receiverDone.fulfiller);
+  receiverParams.requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
+      [&receiverDoneFulfiller]() -> kj::Own<RequestObserver> {
+    KJ_IF_SOME(fulfiller, receiverDoneFulfiller) {
+      auto observer = kj::refcounted<ReceiverRequestObserver>(kj::mv(fulfiller));
+      receiverDoneFulfiller = kj::none;
+      return observer;
+    }
+    KJ_FAIL_REQUIRE("receiver handled more than one request");
+  });
+  TestFixture receiver(kj::mv(receiverParams));
+  TestFixture sender(makeSenderParams(io.waitScope, makeRetryFlags(flagsMessage), timer, state));
+  auto receiverWaiting = receiverTimer.onWaitStarted();
+
+  sender.runInIoContext([&](const TestFixture::Environment& env) {
+    auto fetcher = makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 0);
+    auto function = getRpcFunction(env.js, *fetcher, "pendingFailure"_kj);
+    auto parentValue = function.call(env.js, env.js.undefined());
+    auto parentObject = KJ_REQUIRE_NONNULL(parentValue.tryCast<jsg::JsObject>());
+    auto parent = KJ_REQUIRE_NONNULL(parentObject.tryUnwrapAs<JsRpcPromise>(env.js));
+    auto childValue = callChild(env.js, *parent);
+    auto childObject = KJ_REQUIRE_NONNULL(childValue.tryCast<jsg::JsObject>());
+    auto child = KJ_REQUIRE_NONNULL(childObject.tryUnwrapAs<JsRpcPromise>(env.js));
+
+    auto expectRejection = [&](jsg::JsValue value) {
+      return env.context.awaitJs(
+          env.js, env.js.toPromise(value).then(env.js, [](jsg::Lock&, jsg::Value) {
+        KJ_FAIL_ASSERT("rejected actor RPC unexpectedly succeeded");
+      }, [](jsg::Lock& js, jsg::Value error) {
+        auto message = jsg::JsValue(error.getHandle(js)).toString(js);
+        KJ_EXPECT(message == "Error: boom"_kj, message);
+      }));
+    };
+    auto parentRejected = expectRejection(parentValue);
+    auto childRejected = expectRejection(childValue);
+    auto failReceiver =
+        kj::mv(receiverWaiting).then([&receiverTimer]() { receiverTimer.release(); });
+    auto settled = kj::joinPromisesFailFast(
+        kj::arr(kj::mv(parentRejected), kj::mv(childRejected), kj::mv(failReceiver)));
+    auto ended =
+        io.provider->getTimer().timeoutAfter(10 * kj::SECONDS, kj::mv(receiverDone.promise));
+    return settled.then([ended = kj::mv(ended)]() mutable {
+      return kj::mv(ended);
+    }).attach(kj::mv(parent), kj::mv(child), kj::mv(fetcher));
+  });
+
+  KJ_EXPECT(state.committedAttempts == 1);
+  KJ_EXPECT(state.replayMemoryBytes == 0);
 }
 
 KJ_TEST("actor RPC retry failures preserve the asynchronous caller stack") {
@@ -1768,7 +1851,7 @@ jsg::Ref<Fetcher> makeReplicaFetcher(const TestFixture::Environment& env,
     uint failing) {
   return env.js.alloc<Fetcher>(
       env.context.addObject<Fetcher::OutgoingFactory>(kj::heap<ReplicaActorOutgoingFactory>(
-          kj::refcounted<ReplicaPrimaryChannel>(receiver, state, failing), kj::str("primary"))),
+          kj::rc<ReplicaPrimaryChannel>(receiver, state, failing), kj::str("primary"))),
       Fetcher::RequiresHostAndProtocol::YES);
 }
 

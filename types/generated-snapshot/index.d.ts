@@ -483,9 +483,9 @@ declare const scheduler: Scheduler;
 declare const performance: Performance;
 declare const Cloudflare: Cloudflare;
 declare const origin: string;
-declare const Buffer: any;
-declare const process: any;
-declare const global: ServiceWorkerGlobalScope;
+declare var Buffer: any;
+declare var process: any;
+declare var global: ServiceWorkerGlobalScope;
 declare function setImmediate(
   $function: (...param0: any[]) => void,
   ...args: any[]
@@ -3863,15 +3863,7 @@ type SqlStorageValue = ArrayBuffer | string | number | null;
 declare abstract class SqlStorageCursor<
   T extends Record<string, SqlStorageValue>,
 > {
-  next():
-    | {
-        done?: false;
-        value: T;
-      }
-    | {
-        done: true;
-        value?: never;
-      };
+  next(): IteratorResult<T, undefined>;
   toArray(): T[];
   one(): T;
   raw<U extends SqlStorageValue[]>(): IterableIterator<U>;
@@ -4588,6 +4580,7 @@ interface Tracing {
 }
 declare abstract class Span {
   get isTraced(): boolean;
+  spanContext(): TracingSpanContext;
   setAttribute(key: string, value: boolean | number | string): this;
   setAttributes(
     attributes: Record<string, boolean | number | string | undefined>,
@@ -4622,6 +4615,11 @@ type TracingSpanStatusCode = "unset" | "ok" | "error";
 interface TracingSpanStatus {
   code: TracingSpanStatusCode;
   message?: string;
+}
+interface TracingSpanContext {
+  traceId: string;
+  spanId: string;
+  traceFlags: number;
 }
 /**
  * Represents the identity of a user authenticated via Cloudflare Access.
@@ -15080,26 +15078,32 @@ declare abstract class D1PreparedStatement {
 interface Disposable {}
 declare module "cloudflare:durable-objects" {
   /**
-   * Marks a Durable Object method as safe to run more than once. The runtime may then retry calls
-   * to it after a disconnect that might have happened after the method started. It does not
+   * Marks Durable Object methods as safe to run more than once. The runtime may then retry calls
+   * to them after a disconnect that might have happened after the method started. It does not
    * enable retries or change how many are made.
+   *
+   * Mark methods on the class prototype, for example from a static block:
+   *
+   * ```ts
+   * class Counter extends DurableObject {
+   *   static {
+   *     retryable(this.prototype.reset);
+   *   }
+   *   async reset() {}
+   * }
+   * ```
+   *
+   * The mark is on the function itself. A subclass inherits it, but an override, a bound copy, or
+   * a wrapper is not marked unless it is also passed to `retryable()`.
    *
    * Each attempt creates its own return value, so if the method returns an `RpcTarget`, its
    * `[Symbol.dispose]()` may run once per attempt.
    *
-   * Only public instance methods can be decorated. When composing decorators, apply `@retryable`
-   * outermost (first in source order) so it marks the method that is finally installed.
-   * Otherwise `@retryable` has no effect, and constructing the object logs a warning.
-   * Requires standard (not `experimentalDecorators`) decorators and a bundler that transforms
-   * them, such as Wrangler.
+   * @throws TypeError if an argument is not a function.
    */
-  export function retryable<This, Args extends unknown[], Return>(
-    value: (this: This, ...args: Args) => Return,
-    context: ClassMethodDecoratorContext<
-      This,
-      (this: This, ...args: Args) => Return
-    >,
-  ): (this: This, ...args: Args) => Return;
+  export function retryable(
+    ...methods: ((...args: never[]) => unknown)[]
+  ): void;
 }
 /**
  * The returned data after sending an email

@@ -325,13 +325,13 @@ struct TestFixture {
     kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) override {
       KJ_FAIL_ASSERT("no subrequests");
     }
-    kj::Own<SubrequestChannel> getSubrequestChannelResolved(uint channel,
+    kj::Rc<SubrequestChannel> getSubrequestChannelResolved(uint channel,
         kj::Maybe<Frankenvalue> props,
         kj::Maybe<VersionRequest> versionRequest,
         Persistent persistent) override {
       KJ_FAIL_ASSERT("no subrequests");
     }
-    kj::Own<ActorClassChannel> getActorClassResolved(
+    kj::Rc<ActorClassChannel> getActorClassResolved(
         uint channel, kj::Maybe<Frankenvalue> props, Persistent persistent) override {
       KJ_FAIL_ASSERT("no actor classes");
     }
@@ -347,7 +347,7 @@ struct TestFixture {
         uint channel, kj::FunctionParam<void(capnp::AnyPointer::Builder)> buildMessage) override {
       KJ_FAIL_ASSERT("no log channels");
     }
-    kj::Own<ActorChannel> getGlobalActor(uint channel,
+    kj::Rc<ActorChannel> getGlobalActor(uint channel,
         const ActorIdFactory::ActorId& id,
         kj::Maybe<kj::String> locationHint,
         ActorGetMode mode,
@@ -358,7 +358,7 @@ struct TestFixture {
         Persistent persistent) override {
       KJ_FAIL_REQUIRE("no actor channels");
     }
-    kj::Own<ActorChannel> getColoLocalActor(
+    kj::Rc<ActorChannel> getColoLocalActor(
         uint channel, kj::StringPtr id, SpanParent parentSpan) override {
       KJ_FAIL_REQUIRE("no actor channels");
     }

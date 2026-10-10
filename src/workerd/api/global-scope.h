@@ -626,11 +626,11 @@ struct ExportedHandler {
 
   ExportedHandler clone(jsg::Lock& js);
 
-  // YES if `fetch` was decorated with @retryable and DURABLE_OBJECT_RETRIES_USERLAND is enabled.
+  // YES if `fetch` was marked with retryable() and DURABLE_OBJECT_RETRIES_USERLAND is enabled.
   IsRetryableHandler isFetchRetryable(jsg::Lock& js);
 };
 
-// V8 private key set on functions decorated with `@retryable` from "cloudflare:durable-objects".
+// V8 private key set on functions marked with retryable() from "cloudflare:durable-objects".
 // Reading it runs no user code, so a claim can check it before the handler or method runs.
 inline constexpr auto RETRYABLE_METHOD_PRIVATE_KEY = "cloudflare:durable-objects:retryable"_kjc;
 

@@ -118,6 +118,13 @@ on it errors the detached stream. Suites:
 `src/tests/node/stream/finished-and-abort.js`,
 `src/tests/streams/sockets/socket-streams.js`.
 
+A native-backed writable detached by the bridge (`detachWritableStream`:
+socket upgrades) closes at once and stays locked, as the legacy one
+does. Writes still pending from a released writer reject with the
+native sink's disconnect error ("Network connection lost."), and the
+sink cancels the one in flight, so nothing reaches the taken-over
+connection.
+
 ## KEY RULES
 
 - The reader layer must stay backend-blind; backend divergence is
@@ -158,6 +165,10 @@ on it errors the detached stream. Suites:
   argument — the source checks `signal.aborted` before delivery and stashes
   bytes for redelivery if aborted (race buffering lives source-side; the JS
   conduit is uniformly bufferless).
+- The `webstreams/cpp_exports` table, which the C++ bridge reads with an
+  ordinary property get (`getCppExport`), is frozen and has a null
+  prototype, so a name missing from it cannot resolve through
+  `Object.prototype`. Keep both when adding exports.
 - `nativeStreamInternals` (markers, extraction symbols, conduit
   construction) is module-private, consumed only by readable.ts/writable.ts
   and the C++ bridge via the API-symbol registry. The C++ mocks in

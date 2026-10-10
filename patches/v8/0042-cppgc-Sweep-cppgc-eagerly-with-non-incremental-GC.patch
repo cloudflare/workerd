@@ -10,7 +10,7 @@ the setting and does cppgc sweeping and calling of
 cppgc finalizers in the atomic GC pause.
 
 diff --git a/src/heap/cppgc-js/cpp-heap.cc b/src/heap/cppgc-js/cpp-heap.cc
-index 120bcce5a11b636bba9559eb5a79b6b74c176145..676d3667c81f09c3b92fdabda705fd72b714d0f9 100644
+index c1de0c1c279f09a9e6c5da2cb5d64b431ee8b03a..852c3e11eaa1697c454c960618fe8dc3a2008e73 100644
 --- a/src/heap/cppgc-js/cpp-heap.cc
 +++ b/src/heap/cppgc-js/cpp-heap.cc
 @@ -760,6 +760,19 @@ CppHeap::SweepingType CppHeap::SelectSweepingType() const {

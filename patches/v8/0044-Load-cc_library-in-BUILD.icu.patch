@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Felix Hanau <felix@cloudflare.com>
+Date: Wed, 7 Oct 2026 12:00:00 -0400
+Subject: Load cc_library in BUILD.icu
+
+Bazel 9 no longer provides cc_library as a builtin.
+
+diff --git a/bazel/BUILD.icu b/bazel/BUILD.icu
+--- a/bazel/BUILD.icu
++++ b/bazel/BUILD.icu
+@@ -1,6 +1,8 @@
+ # Copyright 2021 the V8 project authors. All rights reserved.
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
++load("@rules_cc//cc:cc_library.bzl", "cc_library")
++
+ exports_files(["common/icudtl.dat"])
+ 
+ filegroup(

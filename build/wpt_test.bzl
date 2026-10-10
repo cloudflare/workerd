@@ -125,12 +125,18 @@ def wpt_module(name):
         visibility = ["//visibility:public"],
     )
 
-WPTModuleInfo = provider(fields = ["base"])
+WPTModuleInfo = provider(fields = {
+    "base": "The directory File for the module.",
+    "path": "The module's path within the WPT tree (e.g. fetch/api). Test URLs are rooted here.",
+})
 
 def _wpt_module_impl(ctx):
     return [
         DefaultInfo(files = depset(ctx.files.srcs)),
-        WPTModuleInfo(base = ctx.attr.dir.files.to_list()[0]),
+        WPTModuleInfo(
+            base = ctx.attr.dir.files.to_list()[0],
+            path = ctx.attr.dir.label.name,
+        ),
     ]
 
 _wpt_module = rule(
@@ -165,6 +171,7 @@ def _wpt_js_test_gen_impl(ctx):
             cases = generate_external_cases(base, test_files),
             all_test_files = generate_external_file_list(base, test_files),
             test_name = ctx.attr.test_name,
+            wpt_path = ctx.attr.wpt_directory[WPTModuleInfo].path,
         ),
     )
 
@@ -194,7 +201,7 @@ import {{ createRunner }} from 'harness/harness';
 import config from '{test_config}';
 
 const allTestFiles = {all_test_files};
-const {{ run, printResults }} = createRunner(config, '{test_name}', allTestFiles);
+const {{ run, printResults }} = createRunner(config, '{test_name}', '{wpt_path}', allTestFiles);
 
 {cases}
 

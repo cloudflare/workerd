@@ -20,9 +20,9 @@ def wd_cc_embed(name, src, base_name = "", is_text = None, **kwargs):
     embed_name = normalize_embed_name(embed_filename)
 
     # construct a usable workspace root, e.g. external/workerd/
-    workspace_root = native.package_relative_label(src).workspace_root
-    if (workspace_root != ""):
-        workspace_root += "/"
+    repo_root = native.package_relative_label(src).repo_root
+    if (repo_root != ""):
+        repo_root += "/"
 
     # Heuristically determine if file is intended to be used as text or binary.
     if is_text == None:
@@ -87,8 +87,8 @@ extern size_t {embed_name}_size;
                 "/std:clatest",
                 "-Wno-c23-extensions",
                 "-Wno-unused-command-line-argument",
-                "/clang:--embed-dir=" + workspace_root + embed_package,
-                "/clang:--embed-dir=$(GENDIR)/" + workspace_root + embed_package,
+                "/clang:--embed-dir=" + repo_root + embed_package,
+                "/clang:--embed-dir=$(GENDIR)/" + repo_root + embed_package,
             ],
             "//conditions:default": [
                 # no need to have debug info for the embed
@@ -102,8 +102,8 @@ extern size_t {embed_name}_size;
                 # output directory to support both pre-existing and generated files.
                 # To support using the macro with external repositories, we also add the file's
                 # workspace root.
-                "--embed-dir=" + workspace_root + embed_package,
-                "--embed-dir=$(GENDIR)/" + workspace_root + embed_package,
+                "--embed-dir=" + repo_root + embed_package,
+                "--embed-dir=$(GENDIR)/" + repo_root + embed_package,
             ],
         }),
         deps = [

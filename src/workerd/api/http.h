@@ -289,7 +289,7 @@ class Fetcher: public JsRpcClientProvider {
 
     // Get a `SubrequestChannel` representing this Fetcher. This is used especially when the
     // Fetcher is being passed to another isolate.
-    virtual kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() {
+    virtual kj::Rc<IoChannelFactory::SubrequestChannel> getSubrequestChannel() {
       // TODO(soon): Update all implementations and remove this default implementation.
       KJ_UNIMPLEMENTED("this Fetcher doesn't yet implement getSubrequestChannel()");
     }
@@ -308,7 +308,7 @@ class Fetcher: public JsRpcClientProvider {
     virtual OutgoingFactory::Result newSingleUseClient(
         IoContext& context, kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) = 0;
 
-    virtual kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& context) {
+    virtual kj::Rc<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& context) {
       // TODO(soon): Update all implementations and remove this default implementation.
       KJ_UNIMPLEMENTED("this Fetcher doesn't yet implement getSubrequestChannel()");
     }
@@ -348,6 +348,11 @@ class Fetcher: public JsRpcClientProvider {
   [[nodiscard]] ClientWithTracing getClientWithTracing(
       IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
 
+  [[nodiscard]] ClientWithTracing getClientWithTracing(IoContext& ioContext,
+      kj::Maybe<kj::String> cfStr,
+      kj::ConstString operationName,
+      MakeUserSpanParent makeUserSpanParent);
+
   [[nodiscard]] ClientWithTracing getClientForActorCallAttempt(IoContext& ioContext,
       kj::Maybe<kj::String> cfStr,
       kj::ConstString operationName,
@@ -365,7 +370,7 @@ class Fetcher: public JsRpcClientProvider {
   void onActorCallRetry() override;
 
   // Get a SubrequestChannel representing this Fetcher.
-  kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);
+  kj::Rc<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);
 
   // Wraps kj::Url::parse to take into account whether the Fetcher requires a host to be
   // specified on URLs, Fetcher-specific URL decoding options, and error handling.

@@ -74,14 +74,14 @@ jsg::Promise<jsg::Value> restoreCurrentEntrypoint(jsg::Lock& js,
     KJ_SWITCH_ONEOF(result) {
       KJ_CASE_ONEOF(fetcher, jsg::Ref<Fetcher>) {
         auto baseChannel = fetcher->getSubrequestChannel(ioctx);
-        auto channel = factory.makeRestoredSubrequestChannel(selfTokenFactory.clone().toOwn(),
-            kj::mv(restoreParams), kj::mv(baseChannel), persistent);
+        auto channel = factory.makeRestoredSubrequestChannel(
+            selfTokenFactory.clone(), kj::mv(restoreParams), kj::mv(baseChannel), persistent);
         auto restored = js.alloc<Fetcher>(ioctx.addObject(kj::mv(channel)));
         return jsg::Value(js.v8Isolate, fetcherHandler.wrap(js, kj::mv(restored)));
       }
       KJ_CASE_ONEOF(stub, jsg::Ref<JsRpcStub>) {
         auto channel = factory.makeRestoredRpcChannel(
-            selfTokenFactory.clone().toOwn(), kj::mv(restoreParams), persistent);
+            selfTokenFactory.clone(), kj::mv(restoreParams), persistent);
         auto client = stub->getClient();
         stub->dispose();
         auto restored = js.alloc<JsRpcStub>(
@@ -151,7 +151,7 @@ class RestoredRpcSubrequestChannel final: public IoChannelFactory::SubrequestCha
 // longer held. Some channel implementations are tied to the IoContext where [restore]() ran.
 class LifetimeExtendedSubrequestChannel final: public IoChannelFactory::SubrequestChannel {
  public:
-  LifetimeExtendedSubrequestChannel(kj::Own<IoChannelFactory::SubrequestChannel> inner,
+  LifetimeExtendedSubrequestChannel(kj::Rc<IoChannelFactory::SubrequestChannel> inner,
       kj::Own<kj::PromiseFulfiller<void>> doneFulfiller)
       : inner(kj::mv(inner)),
         doneFulfiller(kj::mv(doneFulfiller)) {}
@@ -176,7 +176,7 @@ class LifetimeExtendedSubrequestChannel final: public IoChannelFactory::Subreque
   }
 
  private:
-  kj::Own<IoChannelFactory::SubrequestChannel> inner;
+  kj::Rc<IoChannelFactory::SubrequestChannel> inner;
   kj::Own<kj::PromiseFulfiller<void>> doneFulfiller;
 };
 
@@ -189,7 +189,7 @@ class LifetimeExtendedSubrequestChannel final: public IoChannelFactory::Subreque
 class RestoredServiceEventDispatcher final: public rpc::EventDispatcher::Server {
  public:
   RestoredServiceEventDispatcher(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
-      kj::Own<IoChannelFactory::SubrequestChannel> service,
+      kj::Rc<IoChannelFactory::SubrequestChannel> service,
       kj::Maybe<kj::String> cfBlobJson,
       Persistent fromPersistentStub,
       kj::Rc<RestoreParamsHandler> paramsHandler)
@@ -229,7 +229,7 @@ class RestoredServiceEventDispatcher final: public rpc::EventDispatcher::Server 
 
  private:
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
-  kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> service;
+  kj::Maybe<kj::Rc<IoChannelFactory::SubrequestChannel>> service;
   kj::Maybe<kj::String> cfBlobJson;
   Persistent fromPersistentStub;
   kj::Rc<RestoreParamsHandler> paramsHandler;
@@ -257,7 +257,7 @@ class RestoredServiceEventDispatcher final: public rpc::EventDispatcher::Server 
 class RestoredServiceBootstrap final: public rpc::WorkerdBootstrap::Server {
  public:
   RestoredServiceBootstrap(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
-      kj::Own<IoChannelFactory::SubrequestChannel> service,
+      kj::Rc<IoChannelFactory::SubrequestChannel> service,
       kj::Promise<void> eventTask,
       kj::Rc<RestoreParamsHandler> paramsHandler)
       : httpOverCapnpFactory(httpOverCapnpFactory),
@@ -273,7 +273,7 @@ class RestoredServiceBootstrap final: public rpc::WorkerdBootstrap::Server {
     }
     context.initResults(capnp::MessageSize{4, 1})
         .setDispatcher(kj::heap<RestoredServiceEventDispatcher>(httpOverCapnpFactory,
-            kj::addRef(*service), kj::mv(cfBlobJson), Persistent(params.getFromPersistentStub()),
+            service.addRef(), kj::mv(cfBlobJson), Persistent(params.getFromPersistentStub()),
             paramsHandler.addRef()));
     return kj::READY_NOW;
   }
@@ -281,7 +281,7 @@ class RestoredServiceBootstrap final: public rpc::WorkerdBootstrap::Server {
  private:
   capnp::HttpOverCapnpFactory& httpOverCapnpFactory;
   kj::Promise<void> eventTask;
-  kj::Own<IoChannelFactory::SubrequestChannel> service;
+  kj::Rc<IoChannelFactory::SubrequestChannel> service;
   kj::Rc<RestoreParamsHandler> paramsHandler;
 };
 
@@ -349,7 +349,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::run
     auto [donePromise, doneFulfiller] = kj::newPromiseAndFulfiller<void>();
 
     channelFulfiller->fulfill(
-        kj::refcounted<LifetimeExtendedSubrequestChannel>(kj::mv(channel), kj::mv(doneFulfiller)));
+        kj::rc<LifetimeExtendedSubrequestChannel>(kj::mv(channel), kj::mv(doneFulfiller)));
 
     // Keep the restore event's IoContext alive as long as the restored service channel exists.
     co_await donePromise.exclusiveJoin(ioctx.onAbort());
@@ -376,7 +376,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::sen
   frankenvalueHandler.toCapnp(restoreParams, req.initParams());
   auto sent = req.send();
 
-  channelFulfiller->fulfill(kj::refcounted<RestoredRpcSubrequestChannel>(
+  channelFulfiller->fulfill(kj::rc<RestoredRpcSubrequestChannel>(
       httpOverCapnpFactory, byteStreamFactory, frankenvalueHandler, sent.getService()));
 
   co_await sent;

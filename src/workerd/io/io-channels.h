@@ -256,6 +256,11 @@ class IoChannelFactory: public virtual kj::Refcounted {
       return kj::addRef(*this);
     }
 
+    // Returns a new strong reference to this channel, typed as the static type of the receiver.
+    auto addRef(this auto& self) {
+      return self.addRefToThis();
+    }
+
     // Throws a JSG error if an object backed by this channel should not be serialized and passed
     // to other workers. The default implementation throws a generic error, but subclasses may
     // specialize with better errror messages -- or override to just return in order to permit the
@@ -296,9 +301,9 @@ class IoChannelFactory: public virtual kj::Refcounted {
     // in every use case would be painful, so it is taken care of in this layer.
     //
     // Default implementation returns self.
-    virtual kj::OneOf<kj::Own<TokenizableChannel>, kj::Promise<kj::Own<TokenizableChannel>>>
+    virtual kj::OneOf<kj::Rc<TokenizableChannel>, kj::Promise<kj::Rc<TokenizableChannel>>>
     getResolved() {
-      return kj::addRef(*this);
+      return addRefToThis();
     }
   };
 
@@ -348,14 +353,14 @@ class IoChannelFactory: public virtual kj::Refcounted {
   // for the resolutions if necessary, and replacing the caps with the resolutions).
   //
   // TODO(cleanup): Consider getting rid of `startSubrequest()` in favor of this.
-  kj::Own<SubrequestChannel> getSubrequestChannel(uint channel,
+  kj::Rc<SubrequestChannel> getSubrequestChannel(uint channel,
       kj::Maybe<Frankenvalue> props = kj::none,
       kj::Maybe<VersionRequest> versionRequest = kj::none,
       Persistent persistent = Persistent::NO);
 
   // Underlying implementation of getSubrequestChannel(). The implementation can assume that `props`
   // contains strictly resolved channels.
-  virtual kj::Own<SubrequestChannel> getSubrequestChannelResolved(uint channel,
+  virtual kj::Rc<SubrequestChannel> getSubrequestChannelResolved(uint channel,
       kj::Maybe<Frankenvalue> props,
       kj::Maybe<VersionRequest> versionRequest,
       Persistent persistent) = 0;
@@ -375,7 +380,7 @@ class IoChannelFactory: public virtual kj::Refcounted {
   // storage. This is `Persistent::YES` only when the namespace is a `ctx.exports` self-binding of a
   // worker that has `allow_irrevocable_stub_storage` enabled; regular env bindings pass
   // `Persistent::NO`.
-  virtual kj::Own<ActorChannel> getGlobalActor(uint channel,
+  virtual kj::Rc<ActorChannel> getGlobalActor(uint channel,
       const ActorIdFactory::ActorId& id,
       kj::Maybe<kj::String> locationHint,
       ActorGetMode mode,
@@ -386,7 +391,7 @@ class IoChannelFactory: public virtual kj::Refcounted {
       Persistent persistent = Persistent::NO) = 0;
 
   // Get an actor stub from the given namespace for the actor with the given name.
-  virtual kj::Own<ActorChannel> getColoLocalActor(
+  virtual kj::Rc<ActorChannel> getColoLocalActor(
       uint channel, kj::StringPtr id, SpanParent parentSpan) = 0;
 
   // ActorClassChannel is a reference to an actor class in another worker. This class acts as a
@@ -410,13 +415,13 @@ class IoChannelFactory: public virtual kj::Refcounted {
   // The non-virtual method dispatches to getActorClassResolved(), but only after resolving
   // all channels embedded in `props` (that is, calling `getResolved()` on all of them, waiting
   // for the resolutions if necessary, and replacing the caps with the resolutions).
-  kj::Own<ActorClassChannel> getActorClass(uint channel,
+  kj::Rc<ActorClassChannel> getActorClass(uint channel,
       kj::Maybe<Frankenvalue> props = kj::none,
       Persistent persistent = Persistent::NO);
 
   // Underlying implementation of getActorClass(). The implementation can assume that `props`
   // contains strictly resolved channels.
-  virtual kj::Own<ActorClassChannel> getActorClassResolved(
+  virtual kj::Rc<ActorClassChannel> getActorClassResolved(
       uint channel, kj::Maybe<Frankenvalue> props, Persistent persistent) = 0;
 
   // RpcChannel points at a persistent RpcTarget implemented by some other worker. "Persistent"
@@ -436,7 +441,7 @@ class IoChannelFactory: public virtual kj::Refcounted {
     virtual Session restore() = 0;
   };
 
-  virtual kj::Own<RpcChannel> getRpcChannel(uint channel) {
+  virtual kj::Rc<RpcChannel> getRpcChannel(uint channel) {
     KJ_UNIMPLEMENTED("This runtime doesn't support RPC channels.");
   }
 
@@ -485,20 +490,20 @@ class IoChannelFactory: public virtual kj::Refcounted {
 
   // Converts a token created with {SubrequestChannel,ActorClassChannel}::getToken() back into a
   // live channel. Default implementations throw.
-  virtual kj::Own<SubrequestChannel> subrequestChannelFromToken(
+  virtual kj::Rc<SubrequestChannel> subrequestChannelFromToken(
       ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
-  virtual kj::Own<ActorClassChannel> actorClassFromToken(
+  virtual kj::Rc<ActorClassChannel> actorClassFromToken(
       ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
-  virtual kj::Own<RpcChannel> rpcChannelFromToken(
+  virtual kj::Rc<RpcChannel> rpcChannelFromToken(
       ChannelTokenUsage usage, kj::ArrayPtr<const byte> token);
 
   // Overloads which accept a promise. Any attempts to use the channel will have to wait for the
   // token to arrive first, but this should be transparent.
-  kj::Own<SubrequestChannel> subrequestChannelFromToken(
+  kj::Rc<SubrequestChannel> subrequestChannelFromToken(
       ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token);
-  kj::Own<ActorClassChannel> actorClassFromToken(
+  kj::Rc<ActorClassChannel> actorClassFromToken(
       ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token);
-  kj::Own<RpcChannel> rpcChannelFromToken(
+  kj::Rc<RpcChannel> rpcChannelFromToken(
       ChannelTokenUsage usage, kj::Promise<kj::Array<byte>> token);
 
   // Create a SubrequestChannel or RpcChannel representing the value returned by the
@@ -517,27 +522,23 @@ class IoChannelFactory: public virtual kj::Refcounted {
   // `persistent` is the `allow_irrevocable_stub_storage` flag of the worker invoking
   // `ctx.restore()`. It is ANDed with the vendor (self-token) bit to determine whether the
   // resulting restored stub may be stored.
-  kj::Own<SubrequestChannel> makeRestoredSubrequestChannel(
-      kj::Own<SelfTokenFactory> selfTokenFactory,
+  kj::Rc<SubrequestChannel> makeRestoredSubrequestChannel(kj::Rc<SelfTokenFactory> selfTokenFactory,
       Frankenvalue restoreParams,
-      kj::Own<SubrequestChannel> inner,
+      kj::Rc<SubrequestChannel> inner,
       Persistent persistent);
-  kj::Own<RpcChannel> makeRestoredRpcChannel(kj::Own<SelfTokenFactory> selfTokenFactory,
-      Frankenvalue restoreParams,
-      Persistent persistent);
+  kj::Rc<RpcChannel> makeRestoredRpcChannel(
+      kj::Rc<SelfTokenFactory> selfTokenFactory, Frankenvalue restoreParams, Persistent persistent);
 
   // Similar to how `getSubrequestChannel()` is implemented in terms of
   // `getSubrequestChannelResolved()`, these also have "resolved" versions. The non-virtual
   // version first resolves all capabilities in `restoreParams`, then forwards.
-  virtual kj::Own<SubrequestChannel> makeRestoredSubrequestChannelResolved(
-      kj::Own<SelfTokenFactory> selfTokenFactory,
+  virtual kj::Rc<SubrequestChannel> makeRestoredSubrequestChannelResolved(
+      kj::Rc<SelfTokenFactory> selfTokenFactory,
       Frankenvalue restoreParams,
-      kj::Own<SubrequestChannel> inner,
+      kj::Rc<SubrequestChannel> inner,
       Persistent persistent);
-  virtual kj::Own<RpcChannel> makeRestoredRpcChannelResolved(
-      kj::Own<SelfTokenFactory> selfTokenFactory,
-      Frankenvalue restoreParams,
-      Persistent persistent);
+  virtual kj::Rc<RpcChannel> makeRestoredRpcChannelResolved(
+      kj::Rc<SelfTokenFactory> selfTokenFactory, Frankenvalue restoreParams, Persistent persistent);
 };
 
 // ResourceLimits provides a means to control the resource allocation for a worker stage via a
@@ -561,16 +562,16 @@ class WorkerStubChannel: public kj::Refcounted {
  public:
   // As with IoChannelFactory::getSubrequestChannel(), the non-virtual method waits for `props` to
   // resolve first, then calls the virtual method.
-  kj::Own<IoChannelFactory::SubrequestChannel> getEntrypoint(
+  kj::Rc<IoChannelFactory::SubrequestChannel> getEntrypoint(
       kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits);
-  virtual kj::Own<IoChannelFactory::SubrequestChannel> getEntrypointResolved(
+  virtual kj::Rc<IoChannelFactory::SubrequestChannel> getEntrypointResolved(
       kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) = 0;
 
   // As with IoChannelFactory::getActorClass(), the non-virtual method waits for `props` to
   // resolve first, then calls the virtual method.
-  kj::Own<IoChannelFactory::ActorClassChannel> getActorClass(
+  kj::Rc<IoChannelFactory::ActorClassChannel> getActorClass(
       kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits);
-  virtual kj::Own<IoChannelFactory::ActorClassChannel> getActorClassResolved(
+  virtual kj::Rc<IoChannelFactory::ActorClassChannel> getActorClassResolved(
       kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) = 0;
 
   // TODO(someday): Allow caller to enumerate entrypoints?
@@ -591,8 +592,8 @@ struct DynamicWorkerSource {
   kj::Maybe<kj::Rc<IoChannelFactory::SubrequestChannel>> globalOutbound;
 
   // Tail workers that should receive tail events for invocations of the dynamic worker.
-  kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tails;
-  kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTails;
+  kj::Array<kj::Rc<IoChannelFactory::SubrequestChannel>> tails;
+  kj::Array<kj::Rc<IoChannelFactory::SubrequestChannel>> streamingTails;
 
   // Owns any data structures pointed into by the other members. (E.g. `source` contains a lot of
   // `StringPtr`s; `ownContent` owns the backing buffer for them.)
@@ -616,8 +617,8 @@ struct DynamicWorkerSource {
       .limits = limits.map([](auto& limits) { return limits.clone(); }),
       .env = env.clone(),
       .globalOutbound = globalOutbound.clone(),
-      .tails = KJ_MAP(t, tails) { return kj::addRef(*t); },
-      .streamingTails = KJ_MAP(t, streamingTails) { return kj::addRef(*t); },
+      .tails = KJ_MAP(t, tails) { return t.addRef(); },
+      .streamingTails = KJ_MAP(t, streamingTails) { return t.addRef(); },
       .ownContent = kj::mv(newOwnContent),
       .ownContentIsRpcResponse = ownContentIsRpcResponse,
     };
@@ -659,23 +660,21 @@ class IoChannelCapTableEntry final: public Frankenvalue::CapTableEntry {
 
 // Construct a channel based on a promise for a future channel. These channels' `getResolved()`
 // methods will resolve to the underlying channel. `BaseChannelType` must be either
-// `SubrequestChannel` or `ActorClassChannel`.
+// `SubrequestChannel`, `ActorClassChannel`, or `RpcChannel`.
 template <typename BaseChannelType>
-kj::Own<BaseChannelType> newPromisedChannel(kj::Promise<kj::Own<BaseChannelType>> promise);
+kj::Rc<BaseChannelType> newPromisedChannel(kj::Promise<kj::Rc<BaseChannelType>> promise);
 
 template <>
-kj::Own<IoChannelFactory::SubrequestChannel> newPromisedChannel<
-    IoChannelFactory::SubrequestChannel>(
-    kj::Promise<kj::Own<IoChannelFactory::SubrequestChannel>> promise);
+kj::Rc<IoChannelFactory::SubrequestChannel> newPromisedChannel<IoChannelFactory::SubrequestChannel>(
+    kj::Promise<kj::Rc<IoChannelFactory::SubrequestChannel>> promise);
 
 template <>
-kj::Own<IoChannelFactory::ActorClassChannel> newPromisedChannel<
-    IoChannelFactory::ActorClassChannel>(
-    kj::Promise<kj::Own<IoChannelFactory::ActorClassChannel>> promise);
+kj::Rc<IoChannelFactory::ActorClassChannel> newPromisedChannel<IoChannelFactory::ActorClassChannel>(
+    kj::Promise<kj::Rc<IoChannelFactory::ActorClassChannel>> promise);
 
 template <>
-kj::Own<IoChannelFactory::RpcChannel> newPromisedChannel<IoChannelFactory::RpcChannel>(
-    kj::Promise<kj::Own<IoChannelFactory::RpcChannel>> promise);
+kj::Rc<IoChannelFactory::RpcChannel> newPromisedChannel<IoChannelFactory::RpcChannel>(
+    kj::Promise<kj::Rc<IoChannelFactory::RpcChannel>> promise);
 
 // Creates caller-owned metadata for the first attempt of a retry-eligible actor invocation.
 IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(
