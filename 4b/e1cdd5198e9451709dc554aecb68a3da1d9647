@@ -1,11 +1,12 @@
 patches/rust/crates/hyper-public-header-case-map.patch
   s_dadaf0660bfcbe::t_2a60c9d4f80935 1-43
+  s_dadaf0660bfcbe::t_42974e9a8bb3c2 1-43
 src/rust/cxx/AGENTS.md
-  s_dadaf0660bfcbe::t_8892d599d8d796 40-44,111-217
+  s_dadaf0660bfcbe::t_8892d599d8d796 40-44,111-217,111,113-114,203-208
   s_dadaf0660bfcbe::t_a7b2c9295ce898 218
   s_dadaf0660bfcbe::t_161f49c2c937ac 46-50,52
 src/rust/cxx/kj-hyper/io.rs
-  s_dadaf0660bfcbe::t_aade71740f2e9f 1-384
+  s_dadaf0660bfcbe::t_aade71740f2e9f 1-384,1-5,6-9,10-19,20-25,26,27-39,42-50,52-60,64-84,86-95,97-101,103-126,128-131,133-146,148-152,154-155,157-175,179-184,186-198,202-248,252-263,265-274,276-279,281-283,285-300,304-306,309-312,313,315-321,326-340,343-354,356-365,367-370,372-375,377-384
 deps/rust/Cargo.lock
   s_b63afcce9fec5b::t_9a8565bf145b22 89-94,117-122,327-336,364-385,459-481,520,537-538,540-541,552,555-557,562,570-571,575,676-681,851-862,871,936-1009,1183-1231,1465-1470,1540,1651-1656,1676-1687,1697-1707,1719-1727,1757-1770,1848-1920,1942-1950,1969-1991,2108-2117,2158-2167,2191-2196,2626-2641,2683-2688,2741,2744-2749,2800-2808,2815-2823,2869-2877,2893-2901,2908,2920-2935,2943-2950,2953-2958,2965-2970,2977-2982,2989-2994,3001-3006,3013-3018,3025-3030,3037-3042,3049-3054,3070-3080,3145-3150
   s_dadaf0660bfcbe::t_e8b4e551f492b7 529,535,539,542,548,573,874-879,1150-1155
@@ -14,7 +15,7 @@ src/rust/cxx/kj-hyper/tests/test-helpers.h
 patches/rust/BUILD.bazel
   s_dadaf0660bfcbe::t_bb0968a8a78c0d 1-3
 src/rust/cxx/kj-hyper/tls.rs
-  s_dadaf0660bfcbe::t_90560f00ac452a 1-387
+  s_dadaf0660bfcbe::t_90560f00ac452a 1-387,1-8,9,10,11-21,22,23-24,25,26,27-28,29-56,58-64,66-80,82-84,86-101,103-108,111-117,119-120,123-166,168-181,188-204,206-284,286-295,297-309,311-328,331-345,350-367,369-380,382-387
 src/rust/AGENTS.md
   s_dadaf0660bfcbe::t_054ce6e9a2511b 23
   s_dadaf0660bfcbe::t_e9e53f22320547 7,25,51
@@ -22,66 +23,71 @@ deps/rust/BUILD.bazel
   s_dadaf0660bfcbe::t_da760c7d7e4c55 14-21
 patches/rust/crates/hyper-client-lazy-response-body.patch
   s_dadaf0660bfcbe::t_6ca0b43c880d36 1-16
+  s_dadaf0660bfcbe::t_ee0cbce7063cf1 1-16
 patches/rust/crates/http-kj-lenient-header-values.patch
   s_dadaf0660bfcbe::t_575df52a7332d6 1-17
+  s_dadaf0660bfcbe::t_dfe706d7f4de44 1-17
 src/rust/kj/io.rs
   s_dadaf0660bfcbe::t_53919e0914013f 30-37,50-66
 src/rust/cxx/kj-hyper/server.rs
-  s_dadaf0660bfcbe::t_4914b7b4af3198 1-726
+  s_dadaf0660bfcbe::t_4914b7b4af3198 1-726,1-5,9,14-16,17-19,20,21-31,32,33,34,35-49,50-55,56-57,58-61,62-64,65-71,73-114,116-122,124-151,154,157-162,163-176,179-185,187-189,190-194,196-201,203-213,215-224,226-227,228-229,231-247,248-249,254-262,264-267,269-281,283,286-297,302-306,308-309,311,313-319,321-325,327-343,345-354,356-363,366-382,384-391,393-404,405,406-409,411,413-414,416-422,423,425-427,429-445,447-452,455-463,465-474,476-504,506-512,519-531,533-550,552-579,581-586,588-598,600-615,619-656,658-677,679-690,693-700,707-716,718-726
   s_dadaf0660bfcbe::t_ed5f10ae3f9f1a 727
 src/rust/cxx/kj-hyper/BUILD.bazel
-  s_dadaf0660bfcbe::t_1b1a4fd2e3b169 1-92
+  s_dadaf0660bfcbe::t_1b1a4fd2e3b169 1-92,1-90,91-92
 src/rust/cxx/kj-hyper/ffi.rs
-  s_dadaf0660bfcbe::t_7aed1ec728e6a6 1-400
+  s_dadaf0660bfcbe::t_7aed1ec728e6a6 1-400,1-14,15-18,19-28,29-42,43-45,46-50,51-83,84-124,125-293,295-348,350-364,366-375,377-388,390-398,400
 src/rust/kj/http.rs
   s_dadaf0660bfcbe::t_49f0776a2277fd 107,142-143,153-157,220,228-235,391-399
 src/rust/cxx/kj-hyper/kj-hyper.c++
-  s_dadaf0660bfcbe::t_5bf37ca092e08d 1-411
+  s_dadaf0660bfcbe::t_5bf37ca092e08d 1-411,1-7,8-410,411
 src/rust/cxx/kj-hyper/client.rs
-  s_dadaf0660bfcbe::t_9f5b452dcd159b 1-855
+  s_dadaf0660bfcbe::t_9f5b452dcd159b 1-855,1-8,9,10,11-13,14-24,25,26-32,33-36,37-45,46,47-50,51,52-54,55,56,57,59-61,63-67,69-70,73-145,147,149,151-161,163-173,176-185,187-195,197-199,201-203,205-218,220-239,241-247,249-261,263-264,266-279,282-284,287-294,297,299-314,316-317,319-351,353-375,377-396,398-412,415-453,458-468,470-495,497-509,511,514-552,554,556-560,562-565,568,570-575,577-579,581-582,584-590,594-603,606-620,622-625,631-648,650-656,658-675,677-684,686-697,699-709,711,713-730,732-736,738-742,744-752,754-758,760-801,803-804,807-816,818-833,841-844,847-855
 src/rust/cxx/kj-hyper/body.rs
-  s_dadaf0660bfcbe::t_404cce0bb9ef8f 1-474
+  s_dadaf0660bfcbe::t_404cce0bb9ef8f 1-474,1,2-4,5,6-19,20-23,24,25,26-48,50-51,53-99,101-115,117-148,150-220,223-226,228-338,340-343,345-350,352-359,361-435,437-463,469-474
 deps/rust/Cargo.toml
   s_dadaf0660bfcbe::t_68e43ab0269de9 35-37,50-51,62-65,73-76,79-84,89,94-95
   s_dadaf0660bfcbe::t_d7a1a4cd77f306 52-61
 src/rust/kj/ffi.h
   s_dadaf0660bfcbe::t_25699a4c9c63e1 31-39,47-50,151,161-165
 src/rust/cxx/kj-hyper/handshake.rs
-  s_dadaf0660bfcbe::t_32bb1eed7ea55b 1-38
+  s_dadaf0660bfcbe::t_32bb1eed7ea55b 1-38,1-3,7-8,9-19,21-27,29-38
 src/rust/cxx/kj-hyper/tests/lib.rs
   s_dadaf0660bfcbe::t_263cc9644c2b34 1-120
 src/rust/cxx/kj-hyper/tests/BUILD.bazel
   s_dadaf0660bfcbe::t_269c7a3f288758 1-60
 src/rust/cxx/kj-hyper/starttls.rs
-  s_dadaf0660bfcbe::t_0c4507e725e4fc 1-245
+  s_dadaf0660bfcbe::t_0c4507e725e4fc 1-245,1-10,11,12-25,26-27,28,30-43,45-53,54-67,70-80,82-105,107-130,132-166,169-173,175-188,190-193,197-206,208-210,212-214,216-229,231-241,243-245
 patches/rust/crates/hyper-graceful-shutdown-partial-request.patch
   s_dadaf0660bfcbe::t_9b65790d535853 1-13
+  s_dadaf0660bfcbe::t_4db252d8e63e53 1-13
 src/rust/cxx/kj-hyper/kj-hyper.h
-  s_dadaf0660bfcbe::t_ac50a041e7dfa1 1-72
+  s_dadaf0660bfcbe::t_ac50a041e7dfa1 1-72,1-30,31-38,39-72
 build/deps/rust.MODULE.bazel
-  s_dadaf0660bfcbe::t_142701010609b3 61-99
+  s_dadaf0660bfcbe::t_142701010609b3 61-99,61-70,72-75,77-93,98-99
 patches/rust/crates/httparse-kj-lenient-header-values.patch
   s_dadaf0660bfcbe::t_f7ad2ebddd7b54 1-29
+  s_dadaf0660bfcbe::t_c0333c182aadd9 1-29
 src/rust/cxx/kj-hyper/tests/kj-hyper-test.c++
-  s_dadaf0660bfcbe::t_8bb42226154d93 1-15,21-964,965-967,974-975,977-1007,1008-1330
+  s_dadaf0660bfcbe::t_8bb42226154d93 1-15,21-964,21-37,38-198,199-964,965-967,974-975,977-1007,1008-1330
 src/rust/cxx/kj-hyper/tests/harness.rs
   s_dadaf0660bfcbe::t_4a62ae6562625a 1-427
 src/rust/cxx/kj-hyper/lib.rs
-  s_dadaf0660bfcbe::t_645fc589db95bd 1-39
+  s_dadaf0660bfcbe::t_645fc589db95bd 1-39,1-3,6,11-17,20-29,30,31-38
 patches/rust/crates/hyper-parse-error-explanation.patch
   s_dadaf0660bfcbe::t_f5597a5c3cf966 1-54
+  s_dadaf0660bfcbe::t_40bcae342a2c29 1-54
 src/rust/cxx/kj-hyper/body-test.rs
-  s_dadaf0660bfcbe::t_84a72b2938ff70 1-38
+  s_dadaf0660bfcbe::t_84a72b2938ff70 1-38,1-4,6-9,11-19,21-23,25-30,32-34,36-38
 src/rust/cxx/kj-hyper/client-test.rs
-  s_dadaf0660bfcbe::t_e51dd627dd70f7 1-111
+  s_dadaf0660bfcbe::t_e51dd627dd70f7 1-111,1-2,3-5,11-28,31-32,35-77,79,81-108,110-111
 src/rust/cxx/kj-hyper/handshake-test.rs
   s_dadaf0660bfcbe::t_cfa0979c9eb3f2 1-18
 src/rust/cxx/kj-hyper/io-test.rs
-  s_dadaf0660bfcbe::t_a6ef3f8cd6a5b4 1-152
+  s_dadaf0660bfcbe::t_a6ef3f8cd6a5b4 1-152,1,2-6,9,11-19,22-39,41-49,51-53,55-57,59-64,66-73,76-94,96-105,107-110,112-114,116-120,122-124,126-149,152
 src/rust/cxx/kj-hyper/server-test.rs
-  s_dadaf0660bfcbe::t_8dce7eedd18987 1-264
+  s_dadaf0660bfcbe::t_8dce7eedd18987 1-264,1-4,5-6,7,13-32,34-40,42-55,57-60,65-70,72-79,81-83,85-205,207-209,211-244,246-248,250-264
 src/rust/cxx/kj-hyper/tls-test.rs
-  s_dadaf0660bfcbe::t_397ecbd78bcaee 1-489
+  s_dadaf0660bfcbe::t_397ecbd78bcaee 1-489,1,2-67,72-114,116-159,162-237,239-248,251-257,263-266,271-274,276-352,354-357,359-405,408-436,439-443,445-457,459,461-478,480,482-489
 src/rust/cxx/kj-rs-io/error.rs
   s_dadaf0660bfcbe::t_760679acdb1298 51-53
   s_dadaf0660bfcbe::t_c9b4fa46b3d8a9 231-237
@@ -133,7 +139,7 @@ src/rust/cxx/kj-rs-io/ffi.rs
 src/workerd/server/json-logger.h
   s_dadaf0660bfcbe::t_01ec6f7939a949 14-17
 src/workerd/server/server/BUILD.bazel
-  s_dadaf0660bfcbe::t_2c4667946c560a 1-55
+  s_dadaf0660bfcbe::t_2c4667946c560a 1-55,1-53,55
 src/workerd/server/factory/BUILD.bazel
   s_dadaf0660bfcbe::t_8c7272931cb2d5 1-114
 src/workerd/server/server/services/network-test.rs
@@ -184,7 +190,7 @@ src/workerd/server/server/config-test.rs
   s_dadaf0660bfcbe::t_a2bfd5ff6ea699 5-281
   s_9ba0d93b05f5d0::t_bddc29189d03ff 1
 src/workerd/server/server/listen/udp.rs
-  s_dadaf0660bfcbe::t_c9a6975d3ff587 1-217
+  s_dadaf0660bfcbe::t_c9a6975d3ff587 1-217,1-27,30-31,32-158,160,163,165-217
 src/workerd/server/server/loader.rs
   s_dadaf0660bfcbe::t_fc04bca459c518 1-338
 src/workerd/server/factory/worker-factory-rpc.c++
@@ -256,7 +262,7 @@ src/rust/cxx/kj-rs-io/net-test.rs
 src/workerd/server/container-client.h
   s_dadaf0660bfcbe::t_49b97e1f8eb63c 242
 src/workerd/server/server/listen/mod.rs
-  s_dadaf0660bfcbe::t_ff8be069baf3b6 1-659
+  s_dadaf0660bfcbe::t_ff8be069baf3b6 1-659,1-558,560-659
   s_dadaf0660bfcbe::t_08114c1ba1638a 660-661
 src/workerd/server/factory/worker-factory-actor.c++
   s_dadaf0660bfcbe::t_b6cf8e537b8c49 1-504
