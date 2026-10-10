@@ -75,13 +75,6 @@ jsg::ModuleRegistry::ModuleInfo addCapnpModule(
 }
 }  // namespace modules::capnp
 
-// Creates an instance of the (new) ModuleRegistry. This method provides the
-// initialization logic that is agnostic to the Worker::Api implementation,
-// but accepts a callback parameter to handle the Worker::Api-specific details.
-//
-// Note: this is a big template but it will only be called from two places in
-// the codebase, one for workerd and one for the internal project. It depends
-// on the TypeWrapper specific to each project.
 // The compiled code of a Wasm module provided by another isolate, if that isolate compiled it
 // with the same compile options this one would use.
 inline kj::Maybe<v8::CompiledWasmModule> sharedCompiledWasmModule(
@@ -95,6 +88,13 @@ inline kj::Maybe<v8::CompiledWasmModule> sharedCompiledWasmModule(
   return kj::none;
 }
 
+// Creates an instance of the (new) ModuleRegistry. This method provides the
+// initialization logic that is agnostic to the Worker::Api implementation,
+// but accepts a callback parameter to handle the Worker::Api-specific details.
+//
+// Note: this is a big template but it will only be called from two places in
+// the codebase, one for workerd and one for the internal project. It depends
+// on the TypeWrapper specific to each project.
 template <typename TypeWrapper>
 kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
     kj::Maybe<const Worker::Script::ModulesSource&> maybeSource,

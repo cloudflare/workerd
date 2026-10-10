@@ -1314,6 +1314,7 @@ wd_test(
     args = ["--experimental"],
     data = [
         "test.wasm",
+        "worker-loader-wasm-builtins-test.js",
         "worker-loader-wasm-test.js",
         ":js-string-builtins.wasm",
     ],

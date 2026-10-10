@@ -15,5 +15,17 @@ const unitTests :Workerd.Config = (
         ],
       )
     ),
+    ( name = "worker-loader-wasm-builtins-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "worker-loader-wasm-builtins-test.js"),
+          (name = "js-string.wasm", wasm = embed "js-string-builtins.wasm"),
+        ],
+        compatibilityFlags = ["nodejs_compat", "experimental", "wasm_esm_integration_builtins"],
+        bindings = [
+          (name = "loader", workerLoader = ()),
+        ],
+      )
+    ),
   ],
 );
