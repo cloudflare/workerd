@@ -5,6 +5,8 @@
 #include "r2-rpc.h"
 
 #include <workerd/api/r2-api.capnp.h>
+#include <workerd/api/streams/common.h>
+#include <workerd/api/streams/readable.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/api/util.h>
 #include <workerd/util/http-util.h>
@@ -15,6 +17,88 @@
 #include <kj/compat/http.h>
 
 namespace workerd::api {
+
+namespace {
+
+constexpr size_t R2_RPC_INLINE_BODY_LIMIT = 16u << 20;
+// V8's UTF-16 string serialization can use twice the UTF-8 byte count. Keep strings within
+// the same inline budget as binary values, leaving room for the other RPC arguments.
+constexpr size_t R2_RPC_INLINE_STRING_LIMIT = R2_RPC_INLINE_BODY_LIMIT / 2;
+
+JsReadableStream makeR2RpcMemoryStream(
+    jsg::Lock& js, kj::ArrayPtr<const byte> bytes, kj::Maybe<kj::Own<void>> backing = kj::none) {
+  return JsReadableStream::create(
+      js, IoContext::current(), newMemorySource(bytes, kj::mv(backing)));
+}
+
+}  // namespace
+
+jsg::Promise<jsg::Value> normalizeR2RpcPromise(jsg::Lock& js, jsg::Value rpcPromise) {
+  auto paf = js.newPromiseAndResolver<jsg::Value>();
+  paf.resolver.resolve(js, kj::mv(rpcPromise));
+  return kj::mv(paf.promise);
+}
+
+void requireR2RpcSerializer(jsg::Serializer& serializer) {
+  auto& handler = JSG_REQUIRE_NONNULL(serializer.getExternalHandler(), DOMDataCloneError,
+      "R2 resources can only be serialized for RPC.");
+  JSG_REQUIRE(dynamic_cast<RpcSerializerExternalHandler*>(&handler) != nullptr, DOMDataCloneError,
+      "R2 resources can only be serialized for RPC.");
+}
+
+void requireR2RpcDeserializer(jsg::Deserializer& deserializer) {
+  auto& handler = JSG_REQUIRE_NONNULL(deserializer.getExternalHandler(), DOMDataCloneError,
+      "R2 resources can only be deserialized for RPC.");
+  JSG_REQUIRE(dynamic_cast<RpcDeserializerExternalHandler*>(&handler) != nullptr, DOMDataCloneError,
+      "R2 resources can only be deserialized for RPC.");
+}
+
+PreparedR2RpcBody prepareR2RpcBody(jsg::Lock& js, R2PutValue& value) {
+  KJ_SWITCH_ONEOF(value) {
+    KJ_CASE_ONEOF(stream, JsReadableStream) {
+      auto size = stream.tryGetLength(js, StreamEncoding::IDENTITY);
+
+      JSG_REQUIRE(size != kj::none, TypeError,
+          "Provided readable stream must have a known length (request/response body or readable "
+          "half of FixedLengthStream)");
+      auto exactSize = KJ_ASSERT_NONNULL(size);
+      JSG_REQUIRE(exactSize <= 9007199254740991ull, RangeError,
+          "Provided readable stream is too large to represent its length exactly");
+      return {.value = kj::mv(stream), .size = static_cast<double>(exactSize)};
+    }
+    KJ_CASE_ONEOF(data, kj::Array<byte>) {
+      auto size = data.size();
+      if (size > R2_RPC_INLINE_BODY_LIMIT) {
+        // Type-wrapper arrays may alias V8 memory, which cannot be pumped without the isolate lock.
+        auto owned = kj::heapArray<byte>(data.asPtr());
+        auto view = owned.asPtr();
+        return {.value = makeR2RpcMemoryStream(js, view, kj::heap(kj::mv(owned))),
+          .size = static_cast<double>(size)};
+      }
+      return {.value = kj::mv(data), .size = static_cast<double>(size)};
+    }
+    KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
+      auto size = text.value.size();
+      if (size > R2_RPC_INLINE_STRING_LIMIT) {
+        auto bytes = text.value.asBytes();
+        return {.value = makeR2RpcMemoryStream(js, bytes, kj::heap(kj::mv(text.value))),
+          .size = static_cast<double>(size)};
+      }
+      return {.value = kj::mv(text), .size = static_cast<double>(size)};
+    }
+    KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
+      auto size = blob->getSize();
+      if (size > R2_RPC_INLINE_BODY_LIMIT) {
+        // Blob bytes are V8-backed, so newMemorySource() must copy them into native memory.
+        return {
+          .value = makeR2RpcMemoryStream(js, blob->getData()), .size = static_cast<double>(size)};
+      }
+      return {.value = kj::mv(blob), .size = static_cast<double>(size)};
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 static kj::Own<R2Error> toError(uint statusCode, kj::StringPtr responseBody) {
   capnp::JsonCodec json;
   json.handleByAnnotation<public_beta::R2ErrorResponse>();
@@ -46,10 +130,9 @@ kj::Maybe<kj::String> R2Result::getR2ErrorMessage() {
 void R2Result::throwIfError(
     kj::StringPtr action, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   KJ_IF_SOME(e, toThrow) {
-    // TODO(soon): Once jsg::JsPromise exists, switch to using that to tunnel out the exception. As
-    // it stands today, unfortunately, all we can send back to the user is a message. R2Error isn't
-    // a registered type in the runtime. When reenabling, make sure to update overrides/r2.d.ts to
-    // reenable the type
+    // Keep the existing generic error behavior for R2 bindings. Changing this throw path to
+    // throw a structured R2Error would be a public compatibility change, and R2Error would also
+    // need to be made serializable so it can cross JSRPC.
 #if 0
     auto isolate = IoContext::current().getCurrentLock().getIsolate();
     (*e)->action = kj::str(action);

@@ -1,0 +1,41 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Run the same body-length checks against one mock gateway using two callers: HTTP and JSRPC.
+# The JSRPC caller also has a plain service binding to separate RPC behavior from R2 parsing.
+# Only the body-length tests are exported here, keeping this matrix separate from other tests.
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "http", worker = (
+      modules = .testModules,
+      bindings = [
+        (name = "BUCKET", r2Bucket = (name = "gateway", entrypoint = "R2BodyLengthEntrypoint")),
+        (name = "R2_BODY_LENGTH_TRANSPORT", text = "http"),
+      ],
+      compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+    )),
+    (name = "jsrpc", worker = (
+      modules = .testModules,
+      bindings = [
+        (name = "BUCKET", r2Bucket = (name = "gateway", entrypoint = "R2BodyLengthEntrypoint")),
+        (name = "SERVICE", service = (name = "gateway", entrypoint = "R2BodyLengthEntrypoint")),
+        (name = "R2_BODY_LENGTH_TRANSPORT", text = "jsrpc"),
+      ],
+      compatibilityFlags = ["experimental", "nodejs_compat", "streams_enable_constructors",
+                            "r2_binding_jsrpc", "rpc", "fetcher_no_get_put_delete"],
+    )),
+    (name = "gateway", worker = .gatewayWorker),
+  ],
+);
+
+const gatewayWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = "export { R2BodyLengthEntrypoint } from './r2-test.js';"),
+    (name = "r2-test.js", esModule = embed "r2-test.js"),
+  ],
+  compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+);
+
+const testModules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = "export { r2BodyLengthTests } from './r2-test.js';"),
+  (name = "r2-test.js", esModule = embed "r2-test.js"),
+];
