@@ -1,0 +1,38 @@
+src/workerd/api/tests/BUILD.bazel
+  s_6d10161a223e34::t_c86a4e3a275cad 500-505
+src/workerd/api/tests/actor-block-concurrency-timer-test.js
+  s_6d10161a223e34::t_077ca23cf508a6 1-29
+src/workerd/io/io-context-timer-test.c++
+  s_6d10161a223e34::t_6b869d96dccf01 1-315
+src/workerd/api/tests/actor-block-concurrency-timer-test.wd-test
+  s_6d10161a223e34::t_1870787c608805 1-25
+src/workerd/io/io-context.c++
+  s_6d10161a223e34::t_5697bf65241f9e 80,86,88,116-122,125-130,135-136,138-143,145-146,919,924-925,979-981,989-990,998-1000,1004-1006,1021-1027
+  s_a9be76ce334ae6::t_f981cdadfb800f 1030-1043,1045,1090-1091
+src/workerd/io/BUILD.bazel
+  s_6d10161a223e34::t_e967ee529a737a 695-703
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5c3669793b248f617497eb25bfe2d8378b3170e3",
+  "prompts": {},
+  "sessions": {
+    "s_6d10161a223e34": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a12bfd-d44a-7910-9649-a38d9f58d679",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_a9be76ce334ae6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f8efe586-442a-4c9e-bc69-af4ca9abddad",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
