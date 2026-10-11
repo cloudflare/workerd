@@ -313,6 +313,25 @@ KJ_TEST("InputGate critical section lock outlives critical section") {
   KJ_EXPECT(waiter.wait(ws).isFor(gate));
 }
 
+KJ_TEST("InputGate active critical section skips completed sections") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+  InputGate gate;
+  auto rootLock = gate.wait(nullptr).wait(ws);
+  auto outer = rootLock.startCriticalSection();
+  { auto drop = kj::mv(rootLock); }
+  auto outerLock = outer->wait(nullptr).wait(ws);
+  auto inner = outerLock.startCriticalSection();
+  { auto drop = kj::mv(outerLock); }
+  auto innerLock = inner->wait(nullptr).wait(ws);
+  KJ_EXPECT(&KJ_ASSERT_NONNULL(inner->getActive()) == inner.get());
+
+  { auto parentLock = inner->succeeded(); }
+  KJ_EXPECT(&KJ_ASSERT_NONNULL(inner->getActive()) == outer.get());
+  { auto parentLock = outer->succeeded(); }
+  KJ_EXPECT(inner->getActive() == kj::none);
+}
+
 KJ_TEST("InputGate broken") {
   kj::EventLoop loop;
   kj::WaitScope ws(loop);

@@ -47,6 +47,7 @@ I/O lifecycle, per-request context, worker/isolate management, actor storage, co
 - `ActorCacheOps` methods return `kj::OneOf<Result, kj::Promise<Result>>` — sync when cached, async otherwise
 - `OutputGate::lockWhile(promise)` blocks outgoing responses until the promise resolves
 - `InputGate::CriticalSection` must succeed or permanently breaks the gate
+- Timer callbacks serialize per input gate; a completed critical section's timers join its parent's through InputGate's parent chain (`TimeoutManagerImpl`)
 - Observer classes (`RequestObserver`, `IsolateObserver`, etc.) have no-op defaults; all methods optional
 - Module registry selection: **always** use `isNewModuleRegistryEnabled(flags)` (`features.h`), never read `getNewModuleRegistry()` directly — Python workers ignore the flag and must not end up split across the two registries
 

@@ -83,7 +83,6 @@ class TimeoutManager {
       IoContext& context, TimeoutId::Generator& generator, TimeoutParameters params) = 0;
   virtual void clearTimeout(IoContext& context, TimeoutId id) = 0;
   virtual size_t getTimeoutCount() const = 0;
-  virtual kj::Maybe<kj::Date> getNextTimeout() const = 0;
   virtual void cancelAll() = 0;
 };
 

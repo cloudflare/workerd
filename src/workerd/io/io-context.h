@@ -1230,7 +1230,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // that clears the timer slot via clearTimeoutImpl) still need a live timeoutManager. C++ destroys
   // members in reverse declaration order, so declaring timeoutManager first ensures it is destroyed
   // last among these three.
-  kj::Own<TimeoutManager> timeoutManager;
+  kj::Own<TimeoutManagerImpl> timeoutManager;
+  // Preserve clock monotonicity when returning to a scope with older pending deadlines.
+  kj::Maybe<kj::Date> lastObservedTime;
 
   kj::TaskSet waitUntilTasks;
   EventOutcome waitUntilStatusValue = EventOutcome::OK;

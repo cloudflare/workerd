@@ -215,6 +215,10 @@ class InputGate::CriticalSection: private InputGate, public kj::Refcounted {
     return depth;
   }
 
+  // Returns this section if it has not completed, otherwise the nearest enclosing section that
+  // has not, or none if events are delivered at the actor's root gate again.
+  kj::Maybe<CriticalSection&> getActive() KJ_LIFETIMEBOUND;
+
  private:
   enum State {
     // wait() hasn't been called.

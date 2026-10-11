@@ -20,6 +20,7 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":io-gate",
         "//src/workerd/jsg",
         "@capnp-cpp//src/capnp/compat:http-over-capnp",
     ],
@@ -690,5 +691,14 @@ kj_test(
     deps = [
         ":io",
         "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "io-context-timer-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
