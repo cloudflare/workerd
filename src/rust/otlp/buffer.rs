@@ -164,9 +164,7 @@ impl SpanBuffer {
     /// Closes a span with the attributes it ended up with. Returns a batch when one is due.
     pub fn close(&mut self, span_id: u64, end: i64, attributes: Attributes) -> Option<Batch> {
         let span = self.open.remove(&span_id)?;
-        if !self.write(span_id, span, end, attributes) {
-            return None;
-        }
+        self.write(span_id, span, end, attributes);
         let due = self.root_closed
             || self.closed.len() >= MAX_BATCH_SPANS
             || self.closed_bytes >= MAX_BATCH_BYTES;
@@ -190,19 +188,10 @@ impl SpanBuffer {
         self.take_batch()
     }
 
-    /// Adds a closed span to the batch in its OTLP form; false when the span is not reported.
-    fn write(
-        &mut self,
-        span_id: u64,
-        span: OpenSpan,
-        end: i64,
-        mut attributes: Attributes,
-    ) -> bool {
+    /// Adds a closed span to the batch in its OTLP form.
+    fn write(&mut self, span_id: u64, span: OpenSpan, end: i64, mut attributes: Attributes) {
         let is_root = span_id == self.options.root_span_id;
         rules::add_url_attributes(&mut attributes, self.options.redact_query_string);
-        if rules::is_internal_binding_fetch(&span.name, &attributes) {
-            return false;
-        }
         attributes.set_defaults(&self.default_attributes);
         attributes.set(
             "cloudflare.invocation.sequence.number",
@@ -244,7 +233,6 @@ impl SpanBuffer {
         if is_root {
             self.root_closed = true;
         }
-        true
     }
 
     fn take_batch(&mut self) -> Option<Batch> {
@@ -541,7 +529,7 @@ mod tests {
     fn kind_status_and_url_rules_apply_at_close() {
         let mut buffer = buffer();
         assert!(buffer.open(ROOT, 0, "scheduled".to_owned(), T0));
-        for (id, name) in [(1, "fetch"), (2, "fetch"), (3, "queue_send"), (6, "fetch")] {
+        for (id, name) in [(1, "fetch"), (3, "queue_send"), (6, "fetch")] {
             assert!(buffer.open(id, ROOT, name.to_owned(), T0));
         }
 
@@ -556,12 +544,6 @@ mod tests {
                 ),
                 ("http.response.status_code", Value::Int(404)),
             ]),
-        );
-        // A fetch to a binding's internal host is not reported.
-        buffer.close(
-            2,
-            T0,
-            attributes(&[("url.full", string("https://d1/query"))]),
         );
         buffer.close(3, T0, Attributes::default());
         // A 2xx is left unset, and an end before the start is moved to the start.
@@ -605,13 +587,12 @@ mod tests {
 
         let queue_send = named(&request, "queue_send");
         assert_eq!(queue_send.kind(), SpanKind::Producer);
-        // The span that was not reported took a sequence number at open.
         assert_eq!(
             attribute(
                 &queue_send.attributes,
                 "cloudflare.invocation.sequence.number"
             ),
-            Some(&Value::Int(4))
+            Some(&Value::Int(3))
         );
 
         let ipv6 = &spans(&request)[2];
