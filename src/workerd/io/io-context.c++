@@ -83,6 +83,7 @@ class IoContext::TimeoutManagerImpl final: public TimeoutManager {
 
   void cancelAll() override {
     timerTask = nullptr;
+    armedTimeout = kj::none;
     timeouts.clear();
     timeoutTimes.clear();
   }
@@ -113,8 +114,11 @@ class IoContext::TimeoutManagerImpl final: public TimeoutManager {
 
   // Tracks registered timeouts sorted by the next time the timeout is expected to fire.
   //
-  // The associated fulfiller should be fulfilled when the time has been reached AND all previous
-  // timeouts have completed.
+  // The associated fulfiller is fulfilled when the time has been reached and every earlier
+  // timeout has fired. A fired timeout stays in the map until its callback completes, which keeps
+  // `getNextTimeout()` from moving past it. Its callback may still be waiting for the input gate,
+  // e.g. while a `blockConcurrencyWhile()` callback holds it, so later timeouts keep firing: the
+  // critical section's own timeouts must be able to run for it to finish.
   kj::TreeMap<TimeoutTime, kj::Own<kj::PromiseFulfiller<void>>> timeoutTimes;
   uint timeoutTimesTiebreakerCounter = 0;
 
@@ -122,12 +126,18 @@ class IoContext::TimeoutManagerImpl final: public TimeoutManager {
   uint timeoutsFinished = 0;
   Map timeouts;
 
-  // Promise that is waiting for the closest timeout, and will fulfill its fulfiller. We only ever
-  // actually wait on the next timeout in `timeoutTasks`, so that we can't fulfill timer callbacks
-  // out-of-order. This task gets replaced each time the lead timeout changes.
+  // Promise that is waiting for the earliest timeout that has not fired, and will fulfill its
+  // fulfiller. We only ever wait on that one timeout, so that we can't fire timeouts out-of-order.
+  // This task gets replaced each time that timeout changes.
   kj::Promise<void> timerTask = nullptr;
+  // The timeout `timerTask` waits for.
+  kj::Maybe<TimeoutTime> armedTimeout;
 
-  // Must be called any time timeoutTimes.begin() changes.
+  // The entry of the earliest timeout that has not fired, if any.
+  kj::Maybe<kj::TreeMap<TimeoutTime, kj::Own<kj::PromiseFulfiller<void>>>::Entry&> firstUnfired()
+      KJ_LIFETIMEBOUND;
+
+  // Must be called any time the earliest timeout that has not fired changes.
   void resetTimerTask(TimerChannel& timerChannel);
 };
 
@@ -906,6 +916,11 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
   //   the timer, so we don't want to addTask() it, which awaitIo() does implicitly.
   auto promise =
       paf.promise.then([this, &context, it, cs = context.getCriticalSection()]() mutable {
+    // Wait for the next timeout now rather than when this callback completes: the callback may
+    // wait on the input gate for a critical section that needs a later timeout to finish.
+    if (context.abortException == kj::none) {
+      resetTimerTask(context.getIoChannelFactory().getTimer());
+    }
     return context.run([this, it](Worker::Lock& lock, IoContext& context) mutable {
       auto& state = it->second;
 
@@ -978,13 +993,15 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
     // there's no way the events can run anyway (and we'll cause trouble if `cancelAll()` is being
     // called in ~IoContext_IncomingRequest).
     if (context.selfRef->isValid() && context.abortException == kj::none) {
-      bool isNext = timeoutTimes.begin()->key == timeoutTimesKey;
+      bool isArmed = armedTimeout == timeoutTimesKey;
       timeoutTimes.erase(timeoutTimesKey);
-      if (isNext) resetTimerTask(context.getIoChannelFactory().getTimer());
+      if (isArmed) resetTimerTask(context.getIoChannelFactory().getTimer());
     }
   });
 
-  if (timeoutTimes.begin()->key == timeoutTimesKey) {
+  if (armedTimeout.map([&](const TimeoutTime& armed) {
+    return timeoutTimesKey < armed;
+  }).orDefault(true)) {
     resetTimerTask(context.getIoChannelFactory().getTimer());
   }
   promise = promise.attach(kj::mv(deferredTimeoutTimeRemoval));
@@ -1001,21 +1018,34 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
   state.maybePromise = promise.eagerlyEvaluate(nullptr);
 }
 
+kj::Maybe<kj::TreeMap<IoContext::TimeoutManagerImpl::TimeoutTime,
+    kj::Own<kj::PromiseFulfiller<void>>>::Entry&>
+IoContext::TimeoutManagerImpl::firstUnfired() {
+  // A fulfiller stops waiting once its timeout fires (or once its promise is dropped, just before
+  // the entry is erased).
+  for (auto& entry: timeoutTimes) {
+    if (entry.value->isWaiting()) return entry;
+  }
+  return kj::none;
+}
+
 void IoContext::TimeoutManagerImpl::resetTimerTask(TimerChannel& timerChannel) {
-  if (timeoutTimes.size() == 0) {
-    // Not waiting for any timer, clear the existing timer task.
-    timerTask = nullptr;
-  } else {
-    // Wait for the first timer.
-    auto& entry = *timeoutTimes.begin();
+  KJ_IF_SOME(entry, firstUnfired()) {
+    // Wait for the earliest timeout that has not fired.
+    armedTimeout = entry.key;
     timerTask = timerChannel.atTime(entry.key.when)
                     .then([this, key = entry.key]() {
-      auto& newEntry = *timeoutTimes.begin();
+      auto& newEntry = KJ_ASSERT_NONNULL(firstUnfired());
       KJ_ASSERT(newEntry.key == key,
-          "front of timeoutTimes changed without calling resetTimerTask(), we probably missed "
+          "earliest timeout changed without calling resetTimerTask(), we probably missed "
           "a timeout!");
+      armedTimeout = kj::none;
       newEntry.value->fulfill();
     }).eagerlyEvaluate([](kj::Exception&& e) { KJ_LOG(ERROR, e); });
+  } else {
+    // Not waiting for any timer, clear the existing timer task.
+    armedTimeout = kj::none;
+    timerTask = nullptr;
   }
 }
 
