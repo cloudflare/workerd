@@ -83,6 +83,16 @@ pub fn add_url_attributes(attributes: &mut Attributes, redact_query_string: bool
 /// Whether a `fetch` span targets the placeholder host of a binding that is implemented with an
 /// internal fetch (AI, D1, Workflows, Images, Vectorize). Those are an implementation detail of
 /// the binding and are not reported. Reads `server.address`, so `add_url_attributes` goes first.
+///
+/// Ported as is from the Workers Observability tail worker's `CloudflareSpanProcessor`. Matching
+/// by host also drops a user's own fetch to one of these hosts, and the dropped span's id has
+/// already gone out as the subrequest's parent, so spans the binding's backend exports are
+/// orphaned.
+///
+/// TODO(cleanup): Remove once every binding talks to its backend over JSRPC. Workflows already
+/// do, so `workflow-binding.local` no longer occurs in workerd. Images and AI do for some methods.
+/// `fake.host` comes from Browser Rendering's `@cloudflare/puppeteer`, which ships in the user's
+/// bundle rather than in workerd.
 pub fn is_internal_binding_fetch(name: &str, attributes: &Attributes) -> bool {
     const INTERNAL_HOSTS: [&str; 6] = [
         "workers-binding.ai",
