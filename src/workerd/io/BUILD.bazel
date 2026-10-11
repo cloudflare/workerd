@@ -692,3 +692,12 @@ kj_test(
         "//src/workerd/tests:test-fixture",
     ],
 )
+
+kj_test(
+    src = "io-context-timer-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+        "@capnp-cpp//src/kj:kj-async-io",
+    ],
+)
