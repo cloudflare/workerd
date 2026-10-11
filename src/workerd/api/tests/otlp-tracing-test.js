@@ -16,6 +16,9 @@ export default {
     if (url.pathname === '/leaf') {
       return new Response('leaf');
     }
+    if (url.pathname === '/throw') {
+      throw new Error('handler failed');
+    }
     await ctx.tracing.enterSpan('my-span', async (span) => {
       span.setAttribute('answer', 42);
       span.setAttribute('ratio', 0.5);
@@ -108,5 +111,31 @@ export const test = {
     assert.strictEqual(leaf.spans[0].traceId, root.traceId);
     assert.strictEqual(leaf.spans[0].parentSpanId, fetch.spanId);
     assert.strictEqual(leaf.spans[0].status, undefined);
+
+    // An uncaught exception is recorded on the root, and its message is the error status's.
+    await assert.rejects(env.SELF.fetch('http://traced/throw'));
+    const [, , thrown] = await collected(env, 3);
+    assert.deepStrictEqual(
+      thrown.spans.map((span) => span.name),
+      ['GET']
+    );
+    const [thrownRoot] = thrown.spans;
+    assert.strictEqual(
+      thrownRoot.attributes['cloudflare.outcome'],
+      'exception'
+    );
+    assert.strictEqual(thrownRoot.attributes['error.type'], 'exception');
+    assert.deepStrictEqual(thrownRoot.status, {
+      code: STATUS_CODE_ERROR,
+      message: 'handler failed',
+    });
+    assert.deepStrictEqual(
+      thrownRoot.events.map((event) => event.name),
+      ['exception']
+    );
+    const { attributes } = thrownRoot.events[0];
+    assert.strictEqual(attributes['exception.type'], 'Error');
+    assert.strictEqual(attributes['exception.message'], 'handler failed');
+    assert.match(attributes['exception.stacktrace'], /at Object\.fetch/);
   },
 };
