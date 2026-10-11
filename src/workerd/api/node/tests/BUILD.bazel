@@ -279,6 +279,12 @@ wd_test(
 )
 
 wd_test(
+    src = "zlib-overlapping-buffers-test.wd-test",
+    args = ["--experimental"],
+    data = ["zlib-overlapping-buffers-test.js"],
+)
+
+wd_test(
     src = "zlib-allocator-mismatch-test.wd-test",
     args = ["--experimental"],
     data = ["zlib-allocator-mismatch-test.js"],
