@@ -149,6 +149,13 @@ class BaseTracer: public kj::Refcounted {
       kj::StringPtr name,
       kj::StringPtr message,
       kj::Maybe<kj::StringPtr> stack);
+  // Records an exception reported at the invocation level (an uncaught exception, for example),
+  // unless `context` names a user span other than the invocation's: such an exception belongs to
+  // that span.
+  void recordInvocationLevelException(const tracing::InvocationSpanContext& context,
+      kj::StringPtr name,
+      kj::StringPtr message,
+      kj::Maybe<kj::StringPtr> stack);
   void endInvocationSpan(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime);
 
   // See setStartInvocationSpanFunc(). Null unless the tracer records the invocation's span.

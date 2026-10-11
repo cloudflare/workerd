@@ -295,6 +295,11 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
     kj::String name,
     kj::String message,
     kj::Maybe<kj::String> stack) {
+  kj::Maybe<kj::StringPtr> stackPtr;
+  KJ_IF_SOME(s, stack) {
+    stackPtr = s;
+  }
+  recordInvocationLevelException(context, name, message, stackPtr);
   // TODO(someday): For now, we're using logLevel == none as a hint to avoid doing anything
   //   expensive while tracing.  We may eventually want separate configuration for exceptions vs.
   //   logs.
@@ -307,10 +312,6 @@ void WorkerTracer::addException(const tracing::InvocationSpanContext& context,
     messageSize += s.size();
   }
   KJ_IF_SOME(writer, maybeTailStreamWriter) {
-    kj::Maybe<kj::StringPtr> stackPtr;
-    KJ_IF_SOME(s, stack) {
-      stackPtr = s;
-    }
     reportExceptionToTailStream(*writer, context, timestamp, kj::none, name, message, stackPtr);
   }
 
@@ -724,6 +725,14 @@ void BaseTracer::recordInvocationSpanException(const kj::Maybe<tracing::Exceptio
   }
   invocationSpan.recordException(kj::mv(codeCopy), kj::str(name), kj::str(message),
       stack.map([](kj::StringPtr s) { return kj::str(s); }));
+}
+
+void BaseTracer::recordInvocationLevelException(const tracing::InvocationSpanContext& context,
+    kj::StringPtr name,
+    kj::StringPtr message,
+    kj::Maybe<kj::StringPtr> stack) {
+  if (context.getSpanId() != SpanParent(invocationSpan).getSpanId()) return;
+  recordInvocationSpanException(kj::none, name, message, stack);
 }
 
 void BaseTracer::endInvocationSpan(

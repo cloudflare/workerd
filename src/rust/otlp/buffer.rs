@@ -281,14 +281,16 @@ fn resolve_status(
     {
         return (status, None);
     }
+    let error_type = rules::derived_error_type(attributes, is_root);
     if let Some(message) = last_exception_message {
+        // The exception describes the error; error.type, when derivable, still classifies it.
         let status = proto::Status {
             message,
             code: error,
         };
-        return (Some(status), None);
+        return (Some(status), error_type);
     }
-    let Some(error_type) = rules::derived_error_type(attributes, is_root) else {
+    let Some(error_type) = error_type else {
         return (status, None);
     };
     let status = proto::Status {
@@ -656,7 +658,10 @@ mod tests {
         let root = named(&request, "GET");
         assert_eq!(status_code(root), StatusCode::Error);
         assert_eq!(root.status.as_ref().unwrap().message, "boom");
-        assert_eq!(attribute(&root.attributes, "error.type"), None);
+        assert_eq!(
+            attribute(&root.attributes, "error.type"),
+            Some(&string("500"))
+        );
         assert_eq!(
             attribute(&root.events[0].attributes, "exception.stacktrace"),
             Some(&string("at fetch"))
