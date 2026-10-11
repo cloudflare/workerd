@@ -258,6 +258,7 @@ void runTracedFetches(kj::Rc<FetchSpanRecords> records) {
             method: "POST", body: request.body, duplex: "half"
           });
           await fetch("http://example.com/websocket", {headers: {Upgrade: "websocket"}});
+          await fetch("http://d1/query");
           return new Response("OK");
         }
       };
@@ -273,7 +274,7 @@ void runTracedFetches(kj::Rc<FetchSpanRecords> records) {
   });
   auto result = fixture.runRequest(kj::HttpMethod::POST, "http://worker/"_kj, "body"_kj);
   KJ_EXPECT(result.statusCode == 200);
-  KJ_EXPECT(records->checkedRequests == 4);
+  KJ_EXPECT(records->checkedRequests == 5);
 }
 
 KJ_TEST("fetch setup phases finish before I/O and preserve the outgoing trace parent") {
@@ -285,7 +286,7 @@ KJ_TEST("fetch setup phases finish before I/O and preserve the outgoing trace pa
 KJ_TEST("fetch setup does not emit unsupported spans or consume existing span IDs") {
   auto records = kj::rc<FetchSpanRecords>();
   runTracedFetches(records.addRef());
-  KJ_ASSERT(records->fetchIndices.size() == 4);
+  KJ_ASSERT(records->fetchIndices.size() == 5);
   for (uint i = 1; i < records->fetchIndices.size(); ++i) {
     KJ_EXPECT(records->fetchIndices[i] == records->fetchIndices[i - 1] + 1,
         "unsupported setup spans must not allocate child observers");
