@@ -1145,6 +1145,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // Returns both an internal and a user tracing span, this ensures that all user spans are
   // available in internal tracing.
   [[nodiscard]] TraceContext makeUserTraceSpan(kj::ConstString operationName);
+  // Like makeUserTraceSpan(), but opens only the internal span; the current user span is the
+  // user span parent of whatever runs under it.
+  [[nodiscard]] TraceContext makeTraceSpanWithoutUserSpan(kj::ConstString operationName);
 
   // Gets a CapabilityServerSet representing the capnp capabilities hosted by this request or
   // actor context. This allows us to implement the CapnpCapability::unwrap() method on

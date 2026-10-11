@@ -1464,6 +1464,9 @@ class TraceContextParent {
   }
 
   [[nodiscard]] TraceContext newChild(kj::ConstString operationName);
+  // Like newChild(), but opens only the internal span: the user span parent passes through, so
+  // work done under the result nests directly under the current user span.
+  [[nodiscard]] TraceContext newChildWithoutUserSpan(kj::ConstString operationName);
 
  private:
   SpanParent internalSpan;
@@ -1479,6 +1482,10 @@ class TraceContext {
   TraceContext(kj::Badge<TraceContextParent>, SpanBuilder span, SpanBuilder userSpan)
       : span(kj::mv(span)),
         userSpan(kj::mv(userSpan)) {}
+  TraceContext(kj::Badge<TraceContextParent>, SpanBuilder span, SpanParent userSpanParent)
+      : span(kj::mv(span)),
+        userSpan(nullptr),
+        userSpanParent(kj::mv(userSpanParent)) {}
   TraceContext(TraceContext&& other) = default;
   TraceContext& operator=(TraceContext&& other) = default;
   KJ_DISALLOW_COPY(TraceContext);
@@ -1486,18 +1493,22 @@ class TraceContext {
   // Set a tag on both the internal span and user span.
   void setTag(kj::ConstString key, SpanBuilder::TagInitValue value);
   bool isObserved() {
-    return span.isObserved() || userSpan.isObserved();
+    return span.isObserved() || userSpan.isObserved() ||
+        userSpanParent.map([](SpanParent& p) { return p.isObserved(); }).orDefault(false);
   }
   SpanParent getInternalSpanParent() {
     return SpanParent(span);
   }
 
   SpanParent getUserSpanParent() {
+    KJ_IF_SOME(parent, userSpanParent) {
+      return parent.addRef();
+    }
     return SpanParent(userSpan);
   }
 
   TraceContextParent getSpanParents() {
-    return TraceContextParent(SpanParent(span), SpanParent(userSpan));
+    return TraceContextParent(SpanParent(span), getUserSpanParent());
   }
 
   // Like getSpanParents(), but returns kj::none when neither span is observed. Use this when the
@@ -1512,6 +1523,8 @@ class TraceContext {
  private:
   SpanBuilder span;
   SpanBuilder userSpan;
+  // Set instead of `userSpan` by TraceContextParent::newChildWithoutUserSpan().
+  kj::Maybe<SpanParent> userSpanParent;
 };
 
 inline TraceContext TraceContextParent::newChild(kj::ConstString operationName) {
@@ -1520,6 +1533,11 @@ inline TraceContext TraceContextParent::newChild(kj::ConstString operationName) 
   auto internalChild = internalSpan.newChild(operationName.clone());
   auto userChild = userSpan.newChild(kj::mv(operationName));
   return TraceContext(kj::Badge<TraceContextParent>(), kj::mv(internalChild), kj::mv(userChild));
+}
+
+inline TraceContext TraceContextParent::newChildWithoutUserSpan(kj::ConstString operationName) {
+  return TraceContext(kj::Badge<TraceContextParent>(), internalSpan.newChild(kj::mv(operationName)),
+      userSpan.addRef());
 }
 
 // RAII object that measures the time duration over its lifetime. It tags this duration onto a

@@ -1471,6 +1471,31 @@ namespace {
 // Fetch spec requires (suggests?) 20: https://fetch.spec.whatwg.org/#http-redirect-fetch
 constexpr auto MAX_REDIRECT_COUNT = 20;
 
+// Whether a fetch goes to the placeholder host of a binding that is implemented with an internal
+// fetch (AI, D1, Workflows, Browser Rendering, Images, Vectorize). Such a fetch is an
+// implementation detail of the binding: it opens no user span, so the binding's own span (e.g.
+// `d1_run`) is the subrequest's user span parent. The hosts are the Workers Observability tail
+// worker's, which used to drop these spans when they ended.
+//
+// TODO(cleanup): Remove once every binding talks to its backend over JSRPC. Workflows already
+// do, so `workflow-binding.local` no longer occurs in workerd. Images and AI do for some methods.
+// `fake.host` comes from Browser Rendering's `@cloudflare/puppeteer`, which ships in the user's
+// bundle rather than in workerd. Matching by host also omits the span of a user's own fetch to
+// one of these hosts.
+bool isInternalBindingFetch(const kj::Url& url) {
+  constexpr kj::StringPtr INTERNAL_HOSTS[] = {"workers-binding.ai"_kj, "d1"_kj,
+    "workflow-binding.local"_kj, "fake.host"_kj, "js.images.cloudflare.com"_kj,
+    "vector-search"_kj};
+  kj::ArrayPtr<const char> host = url.host;
+  KJ_IF_SOME(colon, url.host.findFirst(':')) {
+    host = host.first(colon);
+  }
+  for (auto internalHost: INTERNAL_HOSTS) {
+    if (host == internalHost.asArray()) return true;
+  }
+  return false;
+}
+
 struct ActorFetchFailure {
   kj::Exception exception;
 };
@@ -1706,8 +1731,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
     maybeClientWithTracing = fetcher->getClientForActorCallAttempt(
         ioContext, kj::mv(cfBlobJson), "fetch"_kjc, kj::mv(attempt));
   } else {
-    maybeClientWithTracing =
-        fetcher->getClientWithTracing(ioContext, kj::mv(cfBlobJson), "fetch"_kjc);
+    maybeClientWithTracing = fetcher->getClientWithTracing(ioContext, kj::mv(cfBlobJson),
+        "fetch"_kjc, OmitUserSpan(isInternalBindingFetch(urlList.back())));
   }
   auto clientWithTracing = kj::mv(KJ_ASSERT_NONNULL(maybeClientWithTracing));
   auto traceContext = kj::mv(clientWithTracing.traceContext);
@@ -2746,8 +2771,9 @@ kj::Own<WorkerInterface> Fetcher::getClient(
 
 Fetcher::ClientWithTracing Fetcher::getClientWithTracing(IoContext& ioContext,
     kj::Maybe<kj::String> cfStr,
-    kj::ConstString operationName) {
-  return buildClient(ioContext, kj::mv(cfStr), kj::mv(operationName));
+    kj::ConstString operationName,
+    OmitUserSpan omitUserSpan) {
+  return buildClient(ioContext, kj::mv(cfStr), kj::mv(operationName), omitUserSpan);
 }
 
 Fetcher::ClientWithTracing Fetcher::getClientForActorCallAttempt(IoContext& ioContext,
@@ -2786,13 +2812,15 @@ Fetcher::ClientWithTracing Fetcher::getClientForActorCallAttempt(IoContext& ioCo
 }
 
 Fetcher::ClientWithTracing Fetcher::wrapWithInnerSpan(
-    OutgoingFactory::Result result, kj::ConstString operationName) {
+    OutgoingFactory::Result result, kj::ConstString operationName, OmitUserSpan omitUserSpan) {
   KJ_IF_SOME(parents, result.spanParents) {
     // Factories populate `spanParents` unconditionally. Only build the inner span when tracing is
     // actually observed; otherwise returning a (non-recording) TraceContext would still force the
     // fetch hot path to eagerly evaluate span tags (method, URL, etc.) that end up discarded.
     if (parents.isObserved()) {
-      return ClientWithTracing{kj::mv(result.client), parents.newChild(kj::mv(operationName))};
+      return ClientWithTracing{kj::mv(result.client),
+        omitUserSpan ? parents.newChildWithoutUserSpan(kj::mv(operationName))
+                     : parents.newChild(kj::mv(operationName))};
     }
   }
   return ClientWithTracing{kj::mv(result.client), kj::none};
@@ -2800,15 +2828,20 @@ Fetcher::ClientWithTracing Fetcher::wrapWithInnerSpan(
 
 Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
     kj::Maybe<kj::String> cfStr,
-    kj::ConstString operationName) {
+    kj::ConstString operationName,
+    OmitUserSpan omitUserSpan) {
+  auto makeTraceContext = [&]() {
+    return omitUserSpan ? ioContext.makeTraceSpanWithoutUserSpan(kj::mv(operationName))
+                        : ioContext.makeUserTraceSpan(kj::mv(operationName));
+  };
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
-      auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
+      auto traceContext = makeTraceContext();
       auto client = ioContext.getSubrequestChannel(channel, isInHouse, kj::mv(cfStr), traceContext);
       return ClientWithTracing{kj::mv(client), kj::mv(traceContext)};
     }
     KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
-      auto traceContext = ioContext.makeUserTraceSpan(kj::mv(operationName));
+      auto traceContext = makeTraceContext();
       auto client = ioContext.getSubrequest(
           [&](TraceContext& tracing, IoChannelFactory& ioChannelFactory) {
         return channel->startRequest({.cfBlobJson = kj::mv(cfStr),
@@ -2827,12 +2860,12 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
       // tree shows `outerSpan -> operationName`.
       auto result = outgoingFactory->newSingleUseClient(kj::mv(cfStr),
           [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
-      return wrapWithInnerSpan(kj::mv(result), kj::mv(operationName));
+      return wrapWithInnerSpan(kj::mv(result), kj::mv(operationName), omitUserSpan);
     }
     KJ_CASE_ONEOF(outgoingFactory, kj::Own<CrossContextOutgoingFactory>) {
       auto result = outgoingFactory->newSingleUseClient(ioContext, kj::mv(cfStr),
           [](TraceContext&) -> kj::Maybe<SpanParent> { return kj::none; });
-      return wrapWithInnerSpan(kj::mv(result), kj::mv(operationName));
+      return wrapWithInnerSpan(kj::mv(result), kj::mv(operationName), omitUserSpan);
     }
   }
   KJ_UNREACHABLE;
