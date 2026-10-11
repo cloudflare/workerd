@@ -32,6 +32,7 @@ namespace workerd::api {
 // For fetchers a `cloudflare-internal:` wrapper module keeps private. An ungated wildcard makes
 // every otherwise-missing property resolve to an RPC method, which user code can observe.
 WD_STRONG_BOOL(RpcCompatGateBypassed);
+WD_STRONG_BOOL(OmitUserSpan);
 
 // Base class for Request and Response. In JavaScript, this class is a mixin, meaning no one will
 // be instantiating objects of this type -- it exists solely to house body-related functionality
@@ -338,13 +339,18 @@ class Fetcher: public JsRpcClientProvider {
 
   // Get client and optionally create trace context, all in one call.
   //
-  [[nodiscard]] ClientWithTracing getClientWithTracing(
-      IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
+  // With `omitUserSpan`, the operation gets only an internal span, and the subrequest's user span
+  // parent is the current user span.
+  [[nodiscard]] ClientWithTracing getClientWithTracing(IoContext& ioContext,
+      kj::Maybe<kj::String> cfStr,
+      kj::ConstString operationName,
+      OmitUserSpan omitUserSpan = OmitUserSpan::NO);
 
   [[nodiscard]] ClientWithTracing getClientWithTracing(IoContext& ioContext,
       kj::Maybe<kj::String> cfStr,
       kj::ConstString operationName,
-      MakeUserSpanParent makeUserSpanParent);
+      MakeUserSpanParent makeUserSpanParent,
+      OmitUserSpan omitUserSpan = OmitUserSpan::NO);
 
   [[nodiscard]] ClientWithTracing getClientForActorCallAttempt(IoContext& ioContext,
       kj::Maybe<kj::String> cfStr,
@@ -571,18 +577,22 @@ class Fetcher: public JsRpcClientProvider {
       jsg::Deserializer& deserializer,
       RpcCompatGateBypassed rpcCompatGateBypassed);
 
-  [[nodiscard]] ClientWithTracing buildClient(
-      IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
   [[nodiscard]] ClientWithTracing buildClient(IoContext& ioContext,
       kj::Maybe<kj::String> cfStr,
       kj::ConstString operationName,
-      MakeUserSpanParent makeUserSpanParent);
+      OmitUserSpan omitUserSpan = OmitUserSpan::NO);
+  [[nodiscard]] ClientWithTracing buildClient(IoContext& ioContext,
+      kj::Maybe<kj::String> cfStr,
+      kj::ConstString operationName,
+      MakeUserSpanParent makeUserSpanParent,
+      OmitUserSpan omitUserSpan = OmitUserSpan::NO);
 
   // Wraps an OutgoingFactory result, nesting an inner operation span under the factory's outer
   // dispatch span when it created one. Factories that create no dispatch span
   // (result.spanParents == kj::none) yield no inner span and no trace context.
-  [[nodiscard]] static ClientWithTracing wrapWithInnerSpan(
-      OutgoingFactory::Result result, kj::ConstString operationName);
+  [[nodiscard]] static ClientWithTracing wrapWithInnerSpan(OutgoingFactory::Result result,
+      kj::ConstString operationName,
+      OmitUserSpan omitUserSpan = OmitUserSpan::NO);
 
   kj::OneOf<uint,
       IoOwn<IoChannelFactory::SubrequestChannel>,
