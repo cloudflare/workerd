@@ -3108,6 +3108,8 @@ class Lock {
   void setRequireReturnsDefaultExportEnabled();
   void setThrowOnUnrecognizedImportAssertion();
   bool getThrowOnUnrecognizedImportAssertion() const;
+  void setWasmEsmIntegrationBuiltinsEnabled();
+  bool isWasmEsmIntegrationBuiltinsEnabled() const;
   void setToStringTag();
   void setImmutablePrototype();
   void setSpecCompliantPropertyAttributes();
