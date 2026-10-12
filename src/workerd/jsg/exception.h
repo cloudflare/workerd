@@ -188,18 +188,16 @@ constexpr kj::Exception::DetailTypeId EXCEPTION_DURABLE_OBJECT_ABORT = 0x2900166
 constexpr kj::Exception::DetailTypeId EXCEPTION_DURABLE_OBJECT_ABORT_NO_RETRY =
     0xff8bb5686c6156deull;
 
-// Set on a DISCONNECTED actor-call failure for an attempt that definitely did not enter user code.
-// Such failures are safe to retry; the caller decides whether to reuse the logical call's token
-// based on earlier attempts. Set by edgeworker's pre-delivery routing and getActor failure paths,
-// and by sandbox-side rejections before user code; read by the caller-side actor-call classifier.
-// The payload is a zero-length array (marker only).
+// Set on an actor-call failure for an attempt that definitely did not enter user code. Such
+// failures are safe to retry if they are retryable (see isRetryable()); the caller decides whether
+// to reuse the logical call's token based on earlier attempts. Set by edgeworker's pre-delivery
+// routing and getActor failure paths, and by sandbox-side rejections before user code; read by the
+// caller-side actor-call classifier. The payload is a zero-length array (marker only).
 constexpr kj::Exception::DetailTypeId REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID =
     0x1a07d0b6559baea6ull;
 
 inline void markActorRequestNotDelivered(kj::Exception& exception) {
-  if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
-    exception.setDetail(REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
-  }
+  exception.setDetail(REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
 }
 
 // Set on a failure that is known to have occurred AFTER the call reached the actor (user code may
