@@ -666,19 +666,15 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
 
     if (isActor) {
       // Reaching this catch means the request reached the actor (we are past
-      // `delivered()` in Stage 1), so user code may have run. Annotate DISCONNECTED failures so the
-      // caller-side actor-call classifier knows this failure must not be retried as a fresh
-      // delivery. Only DISCONNECTED failures participate in the delivery-position metric, so other
-      // exception types need no annotation. Preserve not-delivered only for a predecessor rejection,
-      // which occurs before the fetch handler runs, though possibly after the actor constructor.
-      // Set before exceptionToPropagate() so the detail survives the internal-exception description
-      // rewrite and serializes back across the RPC boundary.
-      if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
-        if (!jsg::isActorPredecessorRejection(exception)) {
-          exception.releaseDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID);
-          exception.setDetail(
-              jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
-        }
+      // `delivered()` in Stage 1), so user code may have run. Annotate every failure, whatever its
+      // type, so the caller-side actor-call classifier knows it must not be retried, even if it is
+      // retryable. Preserve not-delivered only for a predecessor rejection, which occurs before the
+      // fetch handler runs, though possibly after the actor constructor. Set before
+      // exceptionToPropagate() so the detail survives the internal-exception description rewrite
+      // and serializes back across the RPC boundary.
+      if (!jsg::isActorPredecessorRejection(exception)) {
+        exception.releaseDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID);
+        exception.setDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
       }
       // TODO(cleanup): We'd really like to tunnel exceptions any time a worker is calling another
       // worker, not just for actors (and W2W below), but getting that right will require cleaning
@@ -845,18 +841,15 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     if (isActor || tunnelExceptions) {
       if (isActor) {
         // Reaching this catch means the request reached the actor (we are past
-        // `delivered()` above), so user code may have run. Annotate DISCONNECTED failures so the
-        // caller-side actor-call classifier knows this failure must not be retried as a fresh
-        // delivery. Only DISCONNECTED failures participate in the delivery-position metric, so other
-        // exception types need no annotation. Preserve not-delivered only for a predecessor
-        // rejection, as fetch does. Set before exceptionToPropagate() so it survives the
-        // internal-exception description rewrite; the detail serializes back across the RPC boundary.
-        if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
-          if (!jsg::isActorPredecessorRejection(exception)) {
-            exception.releaseDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID);
-            exception.setDetail(
-                jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
-          }
+        // `delivered()` above), so user code may have run. Annotate every failure, whatever its
+        // type, so the caller-side actor-call classifier knows it must not be retried, even if it is
+        // retryable. Preserve not-delivered only for a predecessor rejection, as fetch does. Set
+        // before exceptionToPropagate() so it survives the internal-exception description rewrite;
+        // the detail serializes back across the RPC boundary.
+        if (!jsg::isActorPredecessorRejection(exception)) {
+          exception.releaseDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID);
+          exception.setDetail(
+              jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
         }
       }
       // We want to tunnel exceptions from actors back to the caller.
