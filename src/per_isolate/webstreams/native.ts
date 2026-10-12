@@ -1127,7 +1127,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     this.#byobRequestCache = null;
     const cancelAlgorithm = this.#cancelAlgorithm;
     if (cancelAlgorithm === undefined) {
-      return PromiseResolve() as Promise<void>;
+      return PromiseResolve();
     }
     return cancelAlgorithm(reason);
   }
@@ -1277,11 +1277,9 @@ function createNativeReadableStreamParts(
       signal: AbortSignal
     ) => {
       try {
-        return PromiseResolve(
-          callPull(source, controller, signal)
-        ) as Promise<void>;
+        return PromiseResolve(callPull(source, controller, signal));
       } catch (e) {
-        return PromiseReject(e) as Promise<void>;
+        return PromiseReject(e);
       }
     };
   }
@@ -1290,9 +1288,9 @@ function createNativeReadableStreamParts(
     const callCancel = uncurryThis(cancelFn);
     cancelAlgorithm = (reason: unknown) => {
       try {
-        return PromiseResolve(callCancel(source, reason)) as Promise<void>;
+        return PromiseResolve(callCancel(source, reason));
       } catch (e) {
-        return PromiseReject(e) as Promise<void>;
+        return PromiseReject(e);
       }
     };
   }

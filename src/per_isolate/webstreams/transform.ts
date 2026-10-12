@@ -115,11 +115,9 @@ function makeTransformerAlgorithms<I, O>(
     // the spec.
     transform = (chunk: I) => {
       try {
-        return PromiseResolve(
-          callTransform(transformer, chunk, controller)
-        ) as Promise<void>;
+        return PromiseResolve(callTransform(transformer, chunk, controller));
       } catch (e) {
-        return PromiseReject(e) as Promise<void>;
+        return PromiseReject(e);
       }
     };
   }
@@ -130,7 +128,7 @@ function makeTransformerAlgorithms<I, O>(
       try {
         return promiseResolvedWith(callFlush(transformer, controller));
       } catch (e) {
-        return PromiseReject(e) as Promise<void>;
+        return PromiseReject(e);
       }
     };
   }
@@ -141,7 +139,7 @@ function makeTransformerAlgorithms<I, O>(
       try {
         return promiseResolvedWith(callCancel(transformer, reason));
       } catch (e) {
-        return PromiseReject(e) as Promise<void>;
+        return PromiseReject(e);
       }
     };
   }
@@ -354,9 +352,7 @@ class TransformStream<I = unknown, O = unknown> {
     this.#finishPromise = promise;
     const flushAlgorithm = this.#flushAlgorithm;
     const flushResult =
-      flushAlgorithm !== undefined
-        ? flushAlgorithm()
-        : (PromiseResolve() as Promise<void>);
+      flushAlgorithm !== undefined ? flushAlgorithm() : PromiseResolve();
     this.#clearAlgorithms();
     markPromiseHandled(
       PromisePrototypeThen(
@@ -396,7 +392,7 @@ class TransformStream<I = unknown, O = unknown> {
     const cancelResult =
       cancelAlgorithm !== undefined
         ? cancelAlgorithm(reason)
-        : (PromiseResolve() as Promise<void>);
+        : PromiseResolve();
     this.#clearAlgorithms();
     markPromiseHandled(
       PromisePrototypeThen(
@@ -432,7 +428,7 @@ class TransformStream<I = unknown, O = unknown> {
     const cancelResult =
       cancelAlgorithm !== undefined
         ? cancelAlgorithm(reason)
-        : (PromiseResolve() as Promise<void>);
+        : PromiseResolve();
     this.#clearAlgorithms();
     markPromiseHandled(
       PromisePrototypeThen(
@@ -628,9 +624,9 @@ class TransformStream<I = unknown, O = unknown> {
         ((chunk: I) => {
           try {
             transformStreamEnqueue(this, chunk as unknown as O);
-            return PromiseResolve() as Promise<void>;
+            return PromiseResolve();
           } catch (e) {
-            return PromiseReject(e) as Promise<void>;
+            return PromiseReject(e);
           }
         });
       this.#flushAlgorithm = algorithms.flush;
