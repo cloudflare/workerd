@@ -405,9 +405,14 @@ class Module {
       ContentType contentType = ContentType::NONE);
 
   // Creates a new ESM module that shares ownership of the given code.
-  // This is generally used to construct ESM modules from a worker bundle.
-  static kj::Own<Module> newEsm(
-      Url id, Type type, kj::Arc<OwnedAscii> code, Flags flags = Flags::NONE);
+  // This is generally used to construct ESM modules from a worker bundle. A
+  // module with a `codeCacheKey` uses the code cache of an isolate that has one
+  // (see IsolateBase::setCodeCacheStore()).
+  static kj::Own<Module> newEsm(Url id,
+      Type type,
+      kj::Arc<OwnedAscii> code,
+      Flags flags = Flags::NONE,
+      kj::Maybe<CodeCacheKey> codeCacheKey = kj::none);
 
   // Creates a new ESM module that does not take ownership of the given code.
   // The backing data must have static process lifetime. This is used to
@@ -576,10 +581,12 @@ class ModuleBundle {
         kj::ArrayPtr<const char> code,
         Module::Flags flags = Module::Flags::ESM) KJ_LIFETIMEBOUND;
 
-    // Adds source with shared ownership of its backing storage.
+    // Adds source with shared ownership of its backing storage. See
+    // ModuleRegistry::Builder::newCodeCacheKey() for `codeCacheKey`.
     BundleBuilder& addEsmModule(kj::StringPtr name,
         kj::Arc<OwnedAscii> code,
-        Module::Flags flags = Module::Flags::ESM) KJ_LIFETIMEBOUND;
+        Module::Flags flags = Module::Flags::ESM,
+        kj::Maybe<CodeCacheKey> codeCacheKey = kj::none) KJ_LIFETIMEBOUND;
 
     BundleBuilder& addWasmModule(kj::StringPtr name,
         kj::ArrayPtr<const kj::byte> data,
@@ -714,6 +721,9 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
       // ResolveContext::Type::BUNDLE context and is always the last bundle
       // checked. The fallback service should only be used for local dev.
       ALLOW_FALLBACK = 1 << 0,
+      // When set, newCodeCacheKey() computes code cache keys for bundle ES
+      // modules. Set it if the registry serves isolates with a code cache store.
+      CODE_CACHE_KEYS = 1 << 1,
     };
     Builder(const jsg::Url& bundleBase, Options options = Options::NONE);
     KJ_DISALLOW_COPY_AND_MOVE(Builder);
@@ -728,6 +738,13 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
       return *schemaLoader;
     }
 
+    // Returns the code cache key of a bundle ES module whose UTF-8 source is
+    // `code`, if the registry is built with CODE_CACHE_KEYS, and adds it to
+    // getBundleCodeCacheKeys(). Pass the key to BundleBuilder::addEsmModule().
+    // Computing it here keeps the hash out of the isolates' startup, which only
+    // look it up (see jsg::IsolateCodeCache::prepare()).
+    kj::Maybe<CodeCacheKey> newCodeCacheKey(kj::ArrayPtr<const char> code);
+
    private:
     bool allowsFallback() const;
 
@@ -737,6 +754,7 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
     kj::FixedArray<kj::Vector<kj::Own<ModuleBundle>>, ModuleRegistry::kBundleCount> bundles_;
     kj::Maybe<EvalCallback> maybeEvalCallback = kj::none;
     kj::Own<capnp::SchemaLoader> schemaLoader;
+    kj::Vector<CodeCacheKey> codeCacheKeys;
     friend class ModuleRegistry;
   };
 
@@ -791,6 +809,12 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
     return Module::Evaluator(*this);
   }
 
+  // The keys returned by Builder::newCodeCacheKey(), so that an isolate can look
+  // them up before it compiles the modules.
+  kj::ArrayPtr<const CodeCacheKey> getBundleCodeCacheKeys() const {
+    return codeCacheKeys;
+  }
+
  private:
   struct Impl {
     // One slot for each of ModuleBundle::Type, within each slot is
@@ -809,6 +833,7 @@ class ModuleRegistry final: public kj::AtomicRefcounted, public ModuleRegistryBa
   // nothing).
   mutable kj::Maybe<EvalCallback> maybeEvalCallback = kj::none;
   kj::Own<capnp::SchemaLoader> schemaLoader;
+  const kj::Array<const CodeCacheKey> codeCacheKeys;
 
   struct ModuleRef {
     const Module& module;

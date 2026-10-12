@@ -160,6 +160,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":observer",
+        "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/kj",
         "@workerd-v8//:v8",
     ],

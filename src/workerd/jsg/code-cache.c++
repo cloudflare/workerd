@@ -35,6 +35,44 @@ kj::uint CodeCacheKey::hashCode() const {
 
 IsolateCodeCache::IsolateCodeCache(kj::Own<const CodeCacheStore> store): store(kj::mv(store)) {}
 
+void IsolateCodeCache::prepare(CodeCacheKey::Unit unit, kj::ArrayPtr<const char> utf8Source) {
+  auto key = CodeCacheKey::compute(unit, utf8Source);
+  prepare(key);
+  preparedSources.upsert(utf8Source.begin(), {.size = utf8Source.size(), .key = key});
+}
+
+void IsolateCodeCache::prepare(const CodeCacheKey& key) {
+  KJ_REQUIRE(deferring, "code cache lookups are prepared only inside a production window");
+  // Identical sources share a lookup and at most one producer election.
+  preparedLookups.findOrCreate(key, [&]() -> decltype(preparedLookups)::Entry {
+    return {key, store->lookup(key, MayElect::YES)};
+  });
+}
+
+CodeCacheKey IsolateCodeCache::keyFor(
+    CodeCacheKey::Unit unit, kj::ArrayPtr<const char> utf8Source) {
+  KJ_IF_SOME(prepared, preparedSources.find(utf8Source.begin())) {
+    if (prepared.size == utf8Source.size() && prepared.key.unit == unit) return prepared.key;
+  }
+  return CodeCacheKey::compute(unit, utf8Source);
+}
+
+void IsolateCodeCache::forgetPreparedSources() {
+  preparedSources.clear();
+}
+
+CodeCacheStore::LookupResult IsolateCodeCache::takeLookup(const CodeCacheKey& key) {
+  KJ_IF_SOME(prepared, preparedLookups.find(key)) {
+    // Keep the result for other modules with identical source. Only the first compile takes
+    // the producer; later compiles reuse the hit or compile from source without another lookup.
+    return {
+      .hit = prepared.hit.map([](auto& bytes) { return bytes.addRef(); }),
+      .producer = kj::mv(prepared.producer),
+    };
+  }
+  return store->lookup(key, MayElect(deferring));
+}
+
 v8::MaybeLocal<v8::Module> IsolateCodeCache::compileModule(v8::Isolate* isolate,
     const CodeCacheKey& key,
     v8::Local<v8::String> source,
@@ -66,7 +104,7 @@ v8::MaybeLocal<T> IsolateCodeCache::compile(v8::Isolate* isolate,
     Compile&& compileWithOptions) {
   // `lookup.hit` owns the cached bytes, which V8 reads without taking ownership, so it must
   // outlive `compileSource`.
-  auto lookup = store->lookup(key);
+  auto lookup = takeLookup(key);
   auto producer = kj::mv(lookup.producer);
 
   // Ownership of the CachedData object (but not of its buffer) passes to `compileSource`.
@@ -78,9 +116,8 @@ v8::MaybeLocal<T> IsolateCodeCache::compile(v8::Isolate* isolate,
     auto check = candidate->CompatibilityCheck(isolate);
     if (check == v8::ScriptCompiler::CachedData::kSuccess) {
       cachedData = candidate.release();
-      observer.onCompileCacheFound(isolate);
     } else {
-      producer = store->reject(key, *bytes, check);
+      producer = store->reject(key, *bytes, check, MayElect(deferring));
       observer.onCompileCacheRejected(isolate);
     }
   }
@@ -94,35 +131,38 @@ v8::MaybeLocal<T> IsolateCodeCache::compile(v8::Isolate* isolate,
     return {};
   }
 
-  if (cachedData != nullptr && compileSource.GetCachedData()->rejected) {
-    // V8 refused the data while deserializing it and compiled from source instead.
-    producer = store->reject(key, *KJ_ASSERT_NONNULL(lookup.hit), kj::none);
-    observer.onCompileCacheRejected(isolate);
+  if (cachedData != nullptr) {
+    if (compileSource.GetCachedData()->rejected) {
+      // V8 refused the data while deserializing it and compiled from source instead.
+      producer = store->reject(key, *KJ_ASSERT_NONNULL(lookup.hit), kj::none, MayElect(deferring));
+      observer.onCompileCacheRejected(isolate);
+    } else {
+      observer.onCompileCacheFound(isolate);
+    }
   }
 
   KJ_IF_SOME(p, producer) {
-    Compiled compiled = v8::Global<T>(isolate, result);
-    if (deferring) {
-      pending.add(Pending{.producer = kj::mv(p), .compiled = kj::mv(compiled)});
-    } else {
-      produce(isolate, *p, compiled, observer);
-    }
+    // Only a compile inside the production window is elected.
+    KJ_ASSERT(deferring);
+    pending.add(Pending{.producer = kj::mv(p), .compiled = v8::Global<T>(isolate, result)});
   }
   return result;
 }
 
 void IsolateCodeCache::deferProduction() {
+  // The window is per isolate, but each script opens its own, so a second window would mean a
+  // second script, whose code would be produced or discarded with the first one's.
+  KJ_ASSERT(!deferring, "code cache production window is already open");
   deferring = true;
 }
 
 void IsolateCodeCache::produceDeferred(v8::Isolate* isolate, const CompilationObserver& observer) {
-  deferring = false;
+  closeWindow();
   auto entries = kj::mv(pending);
   for (auto& entry: entries) {
     KJ_IF_SOME(module, entry.compiled.tryGet<v8::Global<v8::Module>>()) {
       v8::HandleScope scope(isolate);
-      // An errored module's code is complete, but it is not worth keeping: the code that failed
-      // will fail again.
+      // An errored module's code is complete, but the cache policy does not retain it.
       if (module.Get(isolate)->GetStatus() == v8::Module::kErrored) continue;
     }
     produce(isolate, *entry.producer, entry.compiled, observer);
@@ -130,8 +170,14 @@ void IsolateCodeCache::produceDeferred(v8::Isolate* isolate, const CompilationOb
 }
 
 void IsolateCodeCache::discardDeferred() {
-  deferring = false;
+  closeWindow();
   pending.clear();
+}
+
+void IsolateCodeCache::closeWindow() {
+  deferring = false;
+  forgetPreparedSources();
+  preparedLookups.clear();
 }
 
 void IsolateCodeCache::produce(v8::Isolate* isolate,

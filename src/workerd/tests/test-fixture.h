@@ -145,6 +145,10 @@ struct TestFixture {
   // Constructs the same WorkerEntrypoint wrapper used in production.
   kj::Own<WorkerInterface> makeWorkerEntrypoint();
 
+  // Whether the calling thread is inside the startup CPU limit scope (enterStartupJs() or
+  // enterStartupPython()) of a fixture's isolate.
+  static bool isInStartupLimitScope();
+
   // Create a new IoContext, owned by the caller. Use this when you need an IoContext that
   // outlives a single IncomingRequest, e.g. to model an actor receiving multiple requests.
   kj::Own<IoContext> newIoContext();

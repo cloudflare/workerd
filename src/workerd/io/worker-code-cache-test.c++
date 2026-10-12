@@ -26,23 +26,29 @@ class CountingStore final: public CodeCacheStore {
   struct State {
     kj::HashMap<CodeCacheKey, kj::Arc<Bytes>> entries;
     kj::HashSet<CodeCacheKey> claimed;
+    uint lookups = 0;
+    // Lookups made inside the isolate's startup CPU limit, which the validator never pays.
+    uint lookupsInStartupLimit = 0;
     uint inserts = 0;
   };
   kj::MutexGuarded<State> state;
 
-  LookupResult lookup(const CodeCacheKey& key) const override {
+  LookupResult lookup(const CodeCacheKey& key, jsg::MayElect mayElect) const override {
     auto lock = state.lockExclusive();
+    ++lock->lookups;
+    if (TestFixture::isInStartupLimitScope()) ++lock->lookupsInStartupLimit;
     KJ_IF_SOME(bytes, lock->entries.find(key)) {
       return {.hit = bytes.addRef()};
     }
-    if (lock->claimed.contains(key)) return {};
+    if (!mayElect || lock->claimed.contains(key)) return {};
     lock->claimed.insert(key);
     return {.producer = kj::heap<CountingProducer>(*this, key)};
   }
 
   kj::Maybe<kj::Own<Producer>> reject(const CodeCacheKey& key,
       const Bytes& rejected,
-      kj::Maybe<v8::ScriptCompiler::CachedData::CompatibilityCheckResult> reason) const override {
+      kj::Maybe<v8::ScriptCompiler::CachedData::CompatibilityCheckResult> reason,
+      jsg::MayElect mayElect) const override {
     KJ_FAIL_ASSERT("unexpected reject", reason);
   }
 
@@ -71,6 +77,8 @@ class CountingStore final: public CodeCacheStore {
 
 constexpr kj::StringPtr MAIN_MODULE =
     "export default { fetch() { return new Response('hi'); } };"_kj;
+constexpr kj::StringPtr MAIN_SCRIPT =
+    "addEventListener('fetch', (event) => event.respondWith(new Response('hi')));"_kj;
 
 // Owns an isolate, taken from a TestFixture, whose later scripts use `store`.
 struct IsolateWithStore {
@@ -91,11 +99,22 @@ struct IsolateWithStore {
       .name = "main"_kj,
       .content = Worker::Script::EsModule{.body = MAIN_MODULE},
     };
-    Worker::Script::Source source(Worker::Script::ModulesSource{
+    return newScript(Worker::Script::Source(Worker::Script::ModulesSource{
       .mainModule = "main"_kj,
       .modules = kj::mv(modules),
       .isPython = false,
-    });
+    }));
+  }
+
+  // A script in service-worker syntax.
+  kj::Own<const Worker::Script> newClassicScript() {
+    return newScript(Worker::Script::Source(Worker::Script::ScriptSource{
+      .mainScript = MAIN_SCRIPT,
+      .mainScriptName = "worker.js"_kj,
+    }));
+  }
+
+  kj::Own<const Worker::Script> newScript(const Worker::Script::Source& source) {
     return isolate->newScript("code-cache-script"_kj, source, IsolateObserver::StartType::COLD,
         SpanParent(nullptr), newWorkerFileSystem(kj::heap<FsMap>(), getTmpDirectoryImpl()));
   }
@@ -114,6 +133,12 @@ struct IsolateWithStore {
   uint insertCount() {
     return store->state.lockShared()->inserts;
   }
+  uint lookupCount() {
+    return store->state.lockShared()->lookups;
+  }
+  uint lookupsInStartupLimit() {
+    return store->state.lockShared()->lookupsInStartupLimit;
+  }
 };
 
 KJ_TEST("A Worker produces the caches of its script's modules after running the top level") {
@@ -127,6 +152,58 @@ KJ_TEST("A Worker produces the caches of its script's modules after running the 
   auto worker = env.newWorker(*script);
   KJ_EXPECT(env.claimCount() == 0);
   KJ_EXPECT(env.insertCount() == 1);
+
+  // The module was looked up once, before the startup CPU limit applied.
+  KJ_EXPECT(env.lookupCount() == 1);
+  KJ_EXPECT(env.lookupsInStartupLimit() == 0);
+
+  // The next script consumes the cache.
+  worker = nullptr;
+  script = nullptr;
+  script = env.newScript();
+  KJ_EXPECT(env.lookupCount() == 2);
+  KJ_EXPECT(env.lookupsInStartupLimit() == 0);
+  KJ_EXPECT(env.claimCount() == 0);
+}
+
+KJ_TEST("Identical bundle modules share a lookup outside the startup CPU limit") {
+  IsolateWithStore env;
+  Worker::Script::Source source(Worker::Script::ModulesSource{
+    .mainModule = "main"_kj,
+    .modules = kj::arr(
+        Worker::Script::Module{
+          .name = "main"_kj,
+          .content = Worker::Script::EsModule{.body = MAIN_MODULE},
+        },
+        Worker::Script::Module{
+          .name = "other"_kj,
+          .content = Worker::Script::EsModule{.body = MAIN_MODULE},
+        }),
+    .isPython = false,
+  });
+
+  for (auto i: kj::zeroTo(2)) {
+    auto script = env.newScript(source);
+    auto worker = env.newWorker(*script);
+    KJ_EXPECT(env.lookupCount() == i + 1);
+    KJ_EXPECT(env.lookupsInStartupLimit() == 0);
+    KJ_EXPECT(env.insertCount() == 1);
+    KJ_EXPECT(env.claimCount() == 0);
+  }
+}
+
+KJ_TEST("A Worker produces the cache of its service-worker script after running the top level") {
+  IsolateWithStore env;
+
+  auto script = env.newClassicScript();
+  KJ_EXPECT(env.claimCount() == 1);
+  KJ_EXPECT(env.insertCount() == 0);
+
+  auto worker = env.newWorker(*script);
+  KJ_EXPECT(env.claimCount() == 0);
+  KJ_EXPECT(env.insertCount() == 1);
+  KJ_EXPECT(env.lookupCount() == 1);
+  KJ_EXPECT(env.lookupsInStartupLimit() == 0);
 }
 
 KJ_TEST("A script that no Worker runs releases its elections when it is destroyed") {
