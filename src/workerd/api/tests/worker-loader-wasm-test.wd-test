@@ -7,8 +7,21 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "worker-loader-wasm-test.js"),
           (name = "math.wasm", wasm = embed "test.wasm"),
+          (name = "js-string.wasm", wasm = embed "js-string-builtins.wasm"),
         ],
         compatibilityFlags = ["nodejs_compat", "experimental"],
+        bindings = [
+          (name = "loader", workerLoader = ()),
+        ],
+      )
+    ),
+    ( name = "worker-loader-wasm-builtins-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "worker-loader-wasm-builtins-test.js"),
+          (name = "js-string.wasm", wasm = embed "js-string-builtins.wasm"),
+        ],
+        compatibilityFlags = ["nodejs_compat", "experimental", "wasm_esm_integration_builtins"],
         bindings = [
           (name = "loader", workerLoader = ()),
         ],
