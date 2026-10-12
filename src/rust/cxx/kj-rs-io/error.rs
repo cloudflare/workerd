@@ -228,6 +228,13 @@ impl From<KjIoError> for KjError {
     }
 }
 
+/// The failure itself, for a Rust caller that speaks `std::io`.
+impl From<KjIoError> for std::io::Error {
+    fn from(error: KjIoError) -> Self {
+        error.inner
+    }
+}
+
 impl IntoKjException for KjIoError {
     fn into_kj_exception(self, file: &str, line: u32) -> KjException {
         KjError::from(self).into_kj_exception(file, line)

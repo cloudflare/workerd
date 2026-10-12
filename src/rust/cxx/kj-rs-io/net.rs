@@ -42,6 +42,14 @@
 //! at parse time and in `getSockaddr`; that only changes the moment the same error surfaces
 //! and is not reproduced.)
 //!
+//! # Rust callers
+//!
+//! workerd's Rust server uses the same addresses without the C++ adapter and without a filter:
+//! [`TokioAddress::parse_str`], then `listen` and [`TokioListener::accept`], `connect_first` or
+//! `bind_udp`; [`wrap_listener`] for an inherited socket. It gets tokio's own sockets back
+//! ([`Socket`], `UdpSocket`) and serves them itself. A `loopback:` address has no socket, so
+//! these fail on one.
+//!
 //! # Runtime and ownership
 //!
 //! Every bridged operation here starts with [`ensure_loop_thread`] (lib.rs, "The tokio
@@ -490,6 +498,24 @@ impl TokioAddress {
         Self::lookup_host(addr_part, None, port).await
     }
 
+    /// [`Self::parse`] for a Rust caller, which has no loopback registry.
+    pub async fn parse_str(text: &str, port_hint: u16) -> Result<Self> {
+        Self::parse(text.as_bytes(), port_hint, &LoopbackRegistry::new()).await
+    }
+
+    /// `connect()` for a Rust caller, which filters nothing: the first of [`Self::targets`] that
+    /// accepts, else the last failure.
+    pub async fn connect_first(&self) -> Result<Socket> {
+        let mut last = KjIoError::other("connect()", "no addresses to connect to");
+        for target in self.targets()? {
+            match connect_socket(target).await {
+                Ok(socket) => return Ok(socket),
+                Err(e) => last = e,
+            }
+        }
+        Err(last)
+    }
+
     /// `SocketAddress::lookupHost`: `getaddrinfo` with KJ's hints on the loop runtime's
     /// blocking pool (KJ uses a detached thread per lookup). With a `service` the results carry
     /// getaddrinfo's ports; without one, `port` is patched in. Host `"*"` becomes a wildcard
@@ -558,7 +584,7 @@ impl TokioAddress {
         }
     }
 
-    fn listen(&self) -> Result<Box<TokioListener>> {
+    pub fn listen(&self) -> Result<Box<TokioListener>> {
         ensure_loop_thread()?;
         let backend = match &self.spec {
             Spec::Ip { addrs, wildcard } => {
@@ -582,6 +608,17 @@ impl TokioAddress {
     }
 
     fn bind_datagram(&self) -> Result<Box<TokioDatagram>> {
+        Ok(Box::new(TokioDatagram {
+            shared: Arc::new(DatagramShared {
+                socket: self.bind_udp()?,
+                owner: crate::current_loop_runtime_id()?,
+            }),
+        }))
+    }
+
+    /// The datagram socket itself, bound KJ style (`SO_REUSEADDR`; a wildcard is one dual-stack
+    /// socket), for a Rust caller to read and write.
+    pub fn bind_udp(&self) -> Result<UdpSocket> {
         ensure_loop_thread()?;
         let (addr, wildcard) = match &self.spec {
             Spec::Ip { addrs, wildcard } => (
@@ -622,13 +659,7 @@ impl TokioAddress {
         }
         socket.bind(&addr.into()).map_err(op("bind()"))?;
         socket.set_nonblocking(true).map_err(op("fcntl()"))?;
-        let socket = UdpSocket::from_std(socket.into()).map_err(op("bindDatagramPort()"))?;
-        Ok(Box::new(TokioDatagram {
-            shared: Arc::new(DatagramShared {
-                socket,
-                owner: crate::current_loop_runtime_id()?,
-            }),
-        }))
+        UdpSocket::from_std(socket.into()).map_err(op("bindDatagramPort()"))
     }
 
     /// `kj::NetworkAddress::toString`, byte for byte like KJ's: `"ip:port"`, `"[v6]:port"`,
@@ -657,6 +688,11 @@ impl TokioAddress {
 /// unconditional `TCP_NODELAY` on outbound TCP sockets (a hard failure in KJ's
 /// `SocketAddress::socket()`, and here).
 async fn connect_to(target: SocketAddress) -> Result<Box<TokioStream>> {
+    Ok(Box::new(TokioStream::new(connect_socket(target).await?)?))
+}
+
+/// [`connect_to`]'s socket, unwrapped.
+async fn connect_socket(target: SocketAddress) -> Result<Socket> {
     ensure_loop_thread()?;
     let socket = match target.kind {
         AddressKind::Ipv4 | AddressKind::Ipv6 => {
@@ -684,7 +720,7 @@ async fn connect_to(target: SocketAddress) -> Result<Box<TokioStream>> {
             ));
         }
     };
-    Ok(Box::new(TokioStream::new(socket)?))
+    Ok(socket)
 }
 
 // ======================================================================================
@@ -758,10 +794,11 @@ fn bind_tcp(addr: SocketAddr, wildcard: bool) -> Result<ListenerInner> {
     Ok(ListenerInner::Tcp(listener))
 }
 
-/// A `kj::ConnectionReceiver` backend: one or more listening sockets (several when the address
-/// resolved to several -- KJ's aggregate receiver), accepted from in round-robin order of
-/// readiness; or a loopback queue. A handle to `Arc`-shared state; each `accept()` future owns a
-/// share.
+/// A `kj::ConnectionReceiver` backend.
+///
+/// One or more listening sockets (several when the address resolved to several -- KJ's
+/// aggregate receiver), accepted from in round-robin order of readiness; or a loopback queue. A
+/// handle to `Arc`-shared state; each `accept()` future owns a share.
 pub struct TokioListener {
     shared: Arc<ListenerShared>,
 }
@@ -922,17 +959,33 @@ impl ListenerBackend {
 }
 
 impl ListenerShared {
-    /// One accepted connection: KJ's transient errors are retried here; whether the peer is
-    /// allowed is the adapter's decision (module docs, "Where filtering happens").
+    /// One accepted connection: whether the peer is allowed is the adapter's decision (module
+    /// docs, "Where filtering happens").
     async fn accept(&self) -> Result<PeerStream> {
+        if let ListenerBackend::Loopback(queue) = &self.backend {
+            crate::ensure_owner_loop(self.owner)?;
+            return Ok(PeerStream {
+                stream: queue.accept().await?,
+                peer: SocketAddress::loopback(queue.name()),
+            });
+        }
+        let (socket, peer) = self.accept_socket().await?;
+        Ok(PeerStream {
+            stream: Box::new(TokioStream::new(socket)?),
+            peer,
+        })
+    }
+
+    /// One accepted socket and its peer; KJ's transient errors are retried here.
+    async fn accept_socket(&self) -> Result<(Socket, SocketAddress)> {
         crate::ensure_owner_loop(self.owner)?;
         let (inners, next) = match &self.backend {
             ListenerBackend::Sockets { inners, next } => (inners, next),
-            ListenerBackend::Loopback(queue) => {
-                return Ok(PeerStream {
-                    stream: queue.accept().await?,
-                    peer: SocketAddress::loopback(queue.name()),
-                });
+            ListenerBackend::Loopback(_) => {
+                return Err(KjIoError::other(
+                    "accept()",
+                    "a loopback: listener has no socket",
+                ));
             }
         };
         loop {
@@ -950,10 +1003,7 @@ impl ListenerShared {
             {
                 return Err(op("setsockopt(TCP_NODELAY)")(e));
             }
-            return Ok(PeerStream {
-                stream: Box::new(TokioStream::new(socket)?),
-                peer,
-            });
+            return Ok((socket, peer));
         }
     }
 }
@@ -968,9 +1018,16 @@ impl TokioListener {
         })
     }
 
+    /// The next connection and, of a TCP one, its peer: for a Rust caller, which serves the
+    /// tokio socket itself.
+    pub async fn accept(&self) -> Result<(Socket, Option<SocketAddr>)> {
+        let (socket, peer) = self.shared.accept_socket().await?;
+        Ok((socket, ip_socket_addr(&peer).ok()))
+    }
+
     /// `kj::ConnectionReceiver::getPort`: the first socket's, like KJ's aggregate receiver; 0 for
     /// a loopback receiver, as for KJ's non-IP receivers.
-    fn port(&self) -> Result<u16> {
+    pub fn port(&self) -> Result<u16> {
         match &self.shared.backend {
             ListenerBackend::Sockets { inners, .. } => inners[0].port(),
             ListenerBackend::Loopback(_) => Ok(0),
