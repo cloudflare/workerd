@@ -49,6 +49,16 @@ libz-rs-sys = { version = "0.6", default-features = false, features = ["std", "r
 futures = "0"
 http = "1"
 http-body = "1"
+# The server's disk service: `Last-Modified` dates, and URL paths, parsed and percent-decoded.
+httpdate = "1"
+percent-encoding = "2"
+url = "2"
+# The server's CryptoKey bindings: hex key material.
+data-encoding = "2"
+# `workerd test`: the service and entrypoint filters.
+glob = "0"
+# The server's `network` services: the `allow` / `deny` CIDR ranges.
+ipnet = "2"
 hyper = { version = "1", default-features = false, features = ["client", "http1", "server"] }
 # The pooled HTTP/1.1 client (kj-hyper/client.rs) is hyper-util's legacy client over a connector
 # kj-hyper supplies; tower-service is the trait that connector implements.

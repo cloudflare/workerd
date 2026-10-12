@@ -9,6 +9,7 @@
 #include <workerd/io/worker-fs.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/snapshot.h>
+#include <workerd/server/compiled-bindings.capnp.h>
 #include <workerd/server/workerd.capnp.h>
 
 namespace workerd {
@@ -320,6 +321,11 @@ class WorkerdApi final: public Worker::Api {
       kj::ArrayPtr<const Global> globals,
       v8::Local<v8::Object> target,
       uint32_t ownerId) const;
+
+  // Sets each of `globals`, a worker's bindings as the server interpreted them, on `target`.
+  void compileGlobals(jsg::Lock& lock,
+      capnp::List<server::Global>::Reader globals,
+      v8::Local<v8::Object> target) const;
 
   // Part of the original module registry API.
   static kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileModule(jsg::Lock& js,
