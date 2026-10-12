@@ -1,0 +1,53 @@
+name: Blob SDK TCP port investigation
+on:
+  workflow_dispatch:
+
+# CI-only diagnostic workflow; do not merge into the Blob PR.
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  sdk-ports:
+    runs-on: ubuntu-22.04-16core
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: diagnostics
+      - uses: actions/checkout@v7
+        with:
+          repository: cloudflare/workers-sdk
+          ref: 9f87de8cd6e8ff5afedb5430acd8776cb239844e
+          path: sdk
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 10.33.0
+          package_json_file: sdk/package.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: sdk/pnpm-lock.yaml
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-X64-binary
+          path: /tmp
+          run-id: 38265224189
+          github-token: ${{ github.token }}
+      - run: chmod +x /tmp/workerd
+      - run: pnpm install --frozen-lockfile
+        working-directory: sdk
+      - name: Prepare controlled collision and fifty unchanged fixture runs
+        run: python3 diagnostics/.github/scripts/blob-sdk-port-investigation.py
+      - name: Run focused SDK diagnostics without retries
+        run: pnpm test:ci --filter miniflare -- test/tcp-port-investigation.spec.ts --retry=0 --reporter=default --reporter=json --outputFile=../../tcp-port-investigation.json
+        working-directory: sdk
+        env:
+          MINIFLARE_WORKERD_PATH: /tmp/workerd
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: sdk-tcp-port-investigation
+          path: |
+            sdk/tcp-port-investigation.json
+            sdk/packages/miniflare/test/tcp-port-investigation.spec.ts
