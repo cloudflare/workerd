@@ -177,6 +177,14 @@ struct MockLimitEnforcer final: public LimitEnforcer {
   kj::Maybe<TestFixture::ActorCallReplayMemoryReserver>& actorCallReplayMemoryReserver;
 };
 
+// The number of startup limit scopes that the calling thread is in.
+thread_local uint startupLimitScopeDepth = 0;
+
+kj::Own<void> enterStartupLimitScope() {
+  ++startupLimitScopeDepth;
+  return kj::heap(kj::defer([]() { --startupLimitScopeDepth; }));
+}
+
 struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
   v8::Isolate::CreateParams getCreateParams() override {
     return {};
@@ -192,11 +200,11 @@ struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
   }
   kj::Own<void> enterStartupJs(
       jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-    return {};
+    return enterStartupLimitScope();
   }
   kj::Own<void> enterStartupPython(
       jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-    return {};
+    return enterStartupLimitScope();
   }
   kj::Own<void> enterDynamicImportJs(
       jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
@@ -574,6 +582,10 @@ kj::Own<WorkerInterface> TestFixture::makeWorkerEntrypoint() {
       kj::mv(actorRef), kj::heap<MockLimitEnforcer>(kj::none, actorCallReplayMemoryReserver),
       kj::Own<void>(), kj::mv(channelFactory), kj::mv(observer), waitUntilTasks, false, kj::none,
       kj::none, kj::none);
+}
+
+bool TestFixture::isInStartupLimitScope() {
+  return startupLimitScopeDepth > 0;
 }
 
 }  // namespace workerd

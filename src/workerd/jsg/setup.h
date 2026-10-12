@@ -166,11 +166,12 @@ class IsolateBase {
   }
 
   // Makes worker bundle modules and scripts compiled in this isolate use code caches from
-  // `store`. Must be called before any of them is compiled.
+  // `store`. Must be called once, before any of them is compiled.
   void setCodeCacheStore(kj::Own<const CodeCacheStore> store) {
+    KJ_REQUIRE(codeCache == kj::none, "code cache store already set");
     codeCache.emplace(kj::mv(store));
   }
-  kj::Maybe<IsolateCodeCache&> tryGetCodeCache() {
+  kj::Maybe<IsolateCodeCache&> tryGetCodeCache() KJ_LIFETIMEBOUND {
     return codeCache;
   }
 

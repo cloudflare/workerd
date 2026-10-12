@@ -1499,6 +1499,43 @@ void discardDeferredCodeCaches(jsg::Lock& js) {
   }
 }
 
+// Makes the isolate's code cache forget the addresses of the sources given to
+// prepareCodeCaches(), which are only guaranteed to be alive while the Script is constructed.
+void forgetPreparedCodeCacheSources(jsg::Lock& js) {
+  KJ_IF_SOME(codeCache, jsg::IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
+    codeCache.forgetPreparedSources();
+  }
+}
+
+// Hashes the worker code that a Script and its Worker compile from `source` and looks it up in the
+// code cache store, so that neither is charged to the startup CPU limit, which the validator
+// (which has no store) never pays.
+void prepareCodeCaches(jsg::IsolateCodeCache& codeCache,
+    const Worker::Script::Source& source,
+    kj::Maybe<const jsg::modules::ModuleRegistry&> newModuleRegistry) {
+  using Unit = jsg::CodeCacheKey::Unit;
+  KJ_SWITCH_ONEOF(source.variant) {
+    KJ_CASE_ONEOF(script, Worker::Script::ScriptSource) {
+      codeCache.prepare(Unit::CLASSIC_SCRIPT, script.mainScript);
+    }
+    KJ_CASE_ONEOF(modulesSource, Worker::Script::ModulesSource) {
+      KJ_IF_SOME(registry, newModuleRegistry) {
+        // The registry compiles modules when they are first imported, so this looks up every
+        // bundle module, imported at startup or not.
+        for (auto& key: registry.getBundleCodeCacheKeys()) {
+          codeCache.prepare(key);
+        }
+      } else {
+        for (auto& module: modulesSource.modules) {
+          KJ_IF_SOME(esModule, module.content.tryGet<Worker::Script::EsModule>()) {
+            codeCache.prepare(Unit::LEGACY_REGISTRY_ESM, esModule.body);
+          }
+        }
+      }
+    }
+  }
+}
+
 }  // namespace
 
 Worker::Script::Script(kj::Own<const Isolate> isolateParam,
@@ -1558,7 +1595,10 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
     // the top level, which compiles the functions that run there.
     KJ_IF_SOME(codeCache, jsg::IsolateBase::from(lock.v8Isolate).tryGetCodeCache()) {
       codeCache.deferProduction();
+      prepareCodeCaches(codeCache, source, impl->tryGetNewModuleRegistry());
     }
+    // `source` is only guaranteed to be alive until this constructor returns.
+    KJ_DEFER(forgetPreparedCodeCacheSources(lock));
 
     lock.withinHandleScope([&] {
       if (isolate->impl->inspector != kj::none || errorReporter != kj::none) {

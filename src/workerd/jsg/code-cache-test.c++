@@ -42,7 +42,7 @@ class FakeStore final: public CodeCacheStore {
 
   kj::MutexGuarded<State> state;
 
-  LookupResult lookup(const CodeCacheKey& key) const override {
+  LookupResult lookup(const CodeCacheKey& key, MayElect mayElect) const override {
     auto lock = state.lockExclusive();
     ++lock->lookups;
     auto slot = slotFor(*lock, key);
@@ -50,18 +50,21 @@ class FakeStore final: public CodeCacheStore {
       ++lock->hits;
       return {.hit = bytes.addRef()};
     }
+    if (!mayElect) return {};
     return {.producer = tryClaim(*lock, slot)};
   }
 
   kj::Maybe<kj::Own<Producer>> reject(const CodeCacheKey& key,
       const Bytes& rejected,
-      kj::Maybe<CompatibilityCheckResult> reason) const override {
+      kj::Maybe<CompatibilityCheckResult> reason,
+      MayElect mayElect) const override {
     auto lock = state.lockExclusive();
     lock->rejects.add(reason);
     auto slot = slotFor(*lock, key);
     KJ_IF_SOME(bytes, lock->entries.find(slot)) {
       if (bytes.get() == &rejected) lock->entries.erase(slot);
     }
+    if (!mayElect) return kj::none;
     return tryClaim(*lock, slot);
   }
 
@@ -153,15 +156,22 @@ void withIsolate(kj::Own<const CodeCacheStore> store,
   });
 }
 
+// Compiles `code` as a legacy-registry bundle module.
+v8::Local<v8::Module> compileLegacyModule(jsg::Lock& js,
+    kj::StringPtr code,
+    const CompilationObserver& observer,
+    kj::StringPtr name = "main"_kj) {
+  auto modules = ModuleRegistryImpl<CodeCacheIsolate_TypeWrapper>::from(js);
+  auto path = kj::Path::parse(name);
+  modules->add(path, ModuleRegistry::ModuleInfo(js, name, code, observer));
+  return KJ_REQUIRE_NONNULL(modules->resolve(js, path)).module.getHandle(js);
+}
+
 // Compiles and evaluates `code` as a legacy-registry bundle module and returns the string value
 // of its `value` export, or of the exception it threw.
 kj::String evalLegacyModule(
     jsg::Lock& js, kj::StringPtr code, const CompilationObserver& observer) {
-  auto modules = ModuleRegistryImpl<CodeCacheIsolate_TypeWrapper>::from(js);
-  auto path = kj::Path::parse("main");
-  modules->add(path, ModuleRegistry::ModuleInfo(js, "main", code, observer));
-  auto& info = KJ_REQUIRE_NONNULL(modules->resolve(js, path));
-  auto module = info.module.getHandle(js);
+  auto module = compileLegacyModule(js, code, observer);
   v8::TryCatch catcher(js.v8Isolate);
   try {
     instantiateModule(js, module);
@@ -232,13 +242,45 @@ KJ_TEST("A cache produced after evaluation includes the functions that ran") {
 
   withIsolate(kj::atomicAddRef(*deferredStore), observer, Defer::YES,
       [&](jsg::Lock& js) { KJ_EXPECT(evalLegacyModule(js, LAZY_MODULE, observer) == "6"); });
-  // Without a production window, the cache is produced right after compilation.
-  withIsolate(kj::atomicAddRef(*immediateStore), observer, Defer::NO,
-      [&](jsg::Lock& js) { KJ_EXPECT(evalLegacyModule(js, LAZY_MODULE, observer) == "6"); });
+  // A window closed right after compilation produces the cache before anything ran.
+  withIsolate(kj::atomicAddRef(*immediateStore), observer, Defer::NO, [&](jsg::Lock& js) {
+    auto& codeCache = KJ_ASSERT_NONNULL(IsolateBase::from(js.v8Isolate).tryGetCodeCache());
+    codeCache.deferProduction();
+    compileLegacyModule(js, LAZY_MODULE, observer);
+    codeCache.produceDeferred(js.v8Isolate, observer);
+  });
 
   auto deferredSize = deferredStore->state.lockShared()->insertedSizes[0];
   auto immediateSize = immediateStore->state.lockShared()->insertedSizes[0];
   KJ_EXPECT(deferredSize > immediateSize, deferredSize, immediateSize);
+}
+
+KJ_TEST("Outside a production window, a miss is compiled from source and not cached") {
+  auto store = newStore();
+  CountingObserver observer;
+
+  // As when a module is first imported during a request.
+  withIsolate(kj::atomicAddRef(*store), observer, Defer::NO, [&](jsg::Lock& js) {
+    KJ_EXPECT(evalLegacyModule(js, LAZY_MODULE, observer) == "6");
+    KJ_EXPECT(store->claimCount() == 0);
+  });
+  {
+    auto lock = store->state.lockShared();
+    KJ_EXPECT(lock->lookups == 1);
+    KJ_EXPECT(lock->inserts == 0);
+  }
+  KJ_EXPECT(observer.generated == 0);
+
+  // A cache produced inside a window is still consumed outside one.
+  withIsolate(kj::atomicAddRef(*store), observer, Defer::YES,
+      [&](jsg::Lock& js) { KJ_EXPECT(evalLegacyModule(js, LAZY_MODULE, observer) == "6"); });
+  withIsolate(kj::atomicAddRef(*store), observer, Defer::NO,
+      [&](jsg::Lock& js) { KJ_EXPECT(evalLegacyModule(js, LAZY_MODULE, observer) == "6"); });
+  auto lock = store->state.lockShared();
+  KJ_EXPECT(lock->lookups == 3);
+  KJ_EXPECT(lock->hits == 1);
+  KJ_EXPECT(lock->inserts == 1);
+  KJ_EXPECT(observer.found == 1);
 }
 
 KJ_TEST("Modules of the same length but different content do not share a cache") {
@@ -320,7 +362,8 @@ KJ_TEST("A cache made for source of another length is rejected during compilatio
   auto lock = store->state.lockShared();
   KJ_ASSERT(lock->rejects.size() == 1);
   KJ_EXPECT(lock->rejects[0] == kj::none);
-  KJ_EXPECT(observer.found == 1);
+  // The cache passed the compatibility check but V8 refused it, so it was not found.
+  KJ_EXPECT(observer.found == 0);
   KJ_EXPECT(observer.rejected == 1);
 }
 
@@ -339,6 +382,27 @@ KJ_TEST("A module whose evaluation fails is not cached") {
   KJ_EXPECT(lock->lookups == 2);
   KJ_EXPECT(lock->inserts == 0);
   KJ_EXPECT(lock->claimed.size() == 0);
+}
+
+KJ_TEST("A cache rejected outside startup is not replaced by the requesting isolate") {
+  auto store = newStore();
+  CountingObserver observer;
+  store->state.lockExclusive()->singleSlot = true;
+
+  withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+    KJ_EXPECT(evalLegacyModule(js, "export const value = 'a';"_kj, observer) == "a");
+  });
+  withIsolate(kj::atomicAddRef(*store), observer, Defer::NO, [&](jsg::Lock& js) {
+    KJ_EXPECT(evalLegacyModule(js, "export const value = 'bb';"_kj, observer) == "bb");
+  });
+
+  auto lock = store->state.lockShared();
+  KJ_EXPECT(lock->inserts == 1);
+  KJ_EXPECT(lock->entries.size() == 0);
+  KJ_EXPECT(lock->claimed.size() == 0);
+  KJ_EXPECT(lock->rejects.size() == 1);
+  KJ_EXPECT(observer.found == 0);
+  KJ_EXPECT(observer.rejected == 1);
 }
 
 KJ_TEST("Discarding or tearing down a production window releases its elections") {
@@ -372,25 +436,96 @@ KJ_TEST("New registry: isolates with separate registries share the store") {
   CountingObserver observer;
   const auto base = "file:///"_url;
 
-  auto evalWithFreshRegistry = [&]() {
+  auto evalWithFreshRegistry = [&](modules::ModuleRegistry::Builder::Options options) {
     withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+      constexpr auto code = "export default 'abc';"_kj;
+      modules::ModuleRegistry::Builder builder(base, options);
       modules::ModuleBundle::BundleBuilder bundleBuilder(base);
-      bundleBuilder.addEsmModule("main", jsg::copyToArc("export default 'abc';"_kj));
-      auto registry = modules::ModuleRegistry::Builder(base).add(bundleBuilder.finish()).finish();
+      bundleBuilder.addEsmModule(
+          "main", jsg::copyToArc(code), modules::Module::Flags::ESM, builder.newCodeCacheKey(code));
+      auto registry = builder.add(bundleBuilder.finish()).finish();
       auto attached = registry->attachToIsolate(js, observer);
       KJ_EXPECT(modules::ModuleRegistry::resolve(js, "main").toString(js) == "abc");
     }, UseNewModuleRegistry::YES);
   };
 
-  evalWithFreshRegistry();
-  evalWithFreshRegistry();
+  using Options = modules::ModuleRegistry::Builder::Options;
+  evalWithFreshRegistry(Options::CODE_CACHE_KEYS);
+  evalWithFreshRegistry(Options::CODE_CACHE_KEYS);
+  // A registry built without code cache keys does not use the store.
+  evalWithFreshRegistry(Options::NONE);
 
   auto lock = store->state.lockShared();
   KJ_EXPECT(lock->lookups == 2);
   KJ_EXPECT(lock->hits == 1);
   KJ_EXPECT(lock->inserts == 1);
   KJ_EXPECT(observer.found == 1);
-  KJ_EXPECT(observer.generated == 1);
+  KJ_EXPECT(observer.generated == 2);
+}
+
+KJ_TEST("New registry: a registry lists the keys of its bundle modules") {
+  const auto base = "file:///"_url;
+  constexpr auto code = "export default 'abc';"_kj;
+
+  modules::ModuleRegistry::Builder builder(
+      base, modules::ModuleRegistry::Builder::Options::CODE_CACHE_KEYS);
+  auto key = KJ_ASSERT_NONNULL(builder.newCodeCacheKey(code));
+  KJ_EXPECT(key == CodeCacheKey::compute(CodeCacheKey::Unit::NEW_REGISTRY_ESM, code));
+  auto registry = builder.finish();
+  KJ_ASSERT(registry->getBundleCodeCacheKeys().size() == 1);
+  KJ_EXPECT(registry->getBundleCodeCacheKeys()[0] == key);
+
+  modules::ModuleRegistry::Builder withoutKeys(base);
+  KJ_EXPECT(withoutKeys.newCodeCacheKey(code) == kj::none);
+  KJ_EXPECT(withoutKeys.finish()->getBundleCodeCacheKeys().size() == 0);
+}
+
+KJ_TEST("A prepared lookup serves the compile, and an unused one is released") {
+  auto store = newStore();
+  CountingObserver observer;
+  constexpr auto unused = "export const value = 'unused';"_kj;
+
+  for (auto i: kj::zeroTo(2)) {
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+      auto& codeCache = KJ_ASSERT_NONNULL(IsolateBase::from(js.v8Isolate).tryGetCodeCache());
+      codeCache.prepare(CodeCacheKey::Unit::LEGACY_REGISTRY_ESM, LAZY_MODULE);
+      // A source that occurs twice is looked up once.
+      codeCache.prepare(CodeCacheKey::Unit::LEGACY_REGISTRY_ESM, LAZY_MODULE);
+      codeCache.prepare(CodeCacheKey::Unit::LEGACY_REGISTRY_ESM, unused);
+      KJ_EXPECT(store->state.lockShared()->lookups == 2 * i + 2);
+      KJ_EXPECT(store->claimCount() == (i == 0 ? 2 : 1));
+
+      // The compile uses the prepared key and lookup.
+      KJ_EXPECT(evalLegacyModule(js, LAZY_MODULE, observer) == "6");
+      // A second module with the same source shares the lookup, but cannot take another election.
+      compileLegacyModule(js, LAZY_MODULE, observer, "other"_kj);
+      KJ_EXPECT(store->state.lockShared()->lookups == 2 * i + 2);
+    });
+    // The unused source's election ended with the window.
+    KJ_EXPECT(store->claimCount() == 0);
+  }
+
+  auto lock = store->state.lockShared();
+  KJ_EXPECT(lock->hits == 1);
+  KJ_EXPECT(lock->inserts == 1);
+  KJ_EXPECT(observer.found == 2);
+}
+
+KJ_TEST("Lookups are prepared only inside a production window") {
+  withIsolate(newStore(), CountingObserver(), Defer::NO, [&](jsg::Lock& js) {
+    auto& codeCache = KJ_ASSERT_NONNULL(IsolateBase::from(js.v8Isolate).tryGetCodeCache());
+    KJ_EXPECT_THROW_MESSAGE("inside a production window",
+        codeCache.prepare(CodeCacheKey::Unit::LEGACY_REGISTRY_ESM, LAZY_MODULE));
+  });
+}
+
+KJ_TEST("An isolate has one production window and one store") {
+  withIsolate(newStore(), CountingObserver(), Defer::YES, [&](jsg::Lock& js) {
+    auto& base = IsolateBase::from(js.v8Isolate);
+    KJ_EXPECT_THROW_MESSAGE(
+        "already open", KJ_ASSERT_NONNULL(base.tryGetCodeCache()).deferProduction());
+    KJ_EXPECT_THROW_MESSAGE("already set", base.setCodeCacheStore(newStore()));
+  });
 }
 
 KJ_TEST("Service-worker scripts: a second isolate consumes the cache") {
