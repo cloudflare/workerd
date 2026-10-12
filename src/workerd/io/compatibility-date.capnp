@@ -1686,4 +1686,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # key encapsulation helpers, getPublicKey(), SubtleCrypto.supports(), and AKP JWK support. It is
   # explicitly gated because the draft is still changing and workerd does not implement the full
   # proposal. The API may change as the draft evolves.
+
+  r2BindingsJsrpc @192 :Bool
+      $compatEnableFlag("r2_binding_jsrpc")
+      $experimental;
+  # When enabled, R2 bindings dispatch to the R2 gateway worker over JSRPC
+  # instead of synthesising an HTTP request and calling `fetch`. Without this
+  # flag, R2 bindings continue to use the HTTP transport.
 }

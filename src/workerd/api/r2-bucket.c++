@@ -10,6 +10,7 @@
 
 #include <workerd/api/http.h>
 #include <workerd/api/r2-api.capnp.h>
+#include <workerd/api/streams/identity-transform-stream.h>
 #include <workerd/api/streams/readable.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-channels.h>
@@ -67,9 +68,44 @@ kj::Own<kj::HttpClient> R2Bucket::getHttpClient(IoContext& context, TraceContext
   KJ_UNREACHABLE;
 }
 
+TraceContext R2Bucket::makeR2TraceContext(kj::LiteralStringConst spanName,
+    kj::LiteralStringConst operation,
+    kj::Maybe<kj::StringPtr> key) {
+  TraceContext traceContext = IoContext::current().makeUserTraceSpan(spanName);
+  traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
+  KJ_IF_SOME(name, bindingName()) {
+    traceContext.setTag("cloudflare.binding.name"_kjc, name);
+  }
+  traceContext.setTag("cloudflare.r2.operation"_kjc, operation);
+  KJ_IF_SOME(name, bucketName()) {
+    traceContext.setTag("cloudflare.r2.bucket"_kjc, name);
+  }
+  KJ_IF_SOME(value, key) {
+    traceContext.setTag("cloudflare.r2.request.key"_kjc, value);
+  }
+  return traceContext;
+}
+
 static bool isWholeNumber(double x) {
   double intpart;
   return modf(x, &intpart) == 0;
+}
+
+static jsg::Optional<kj::Array<kj::byte>> copyBytes(
+    const jsg::Optional<kj::Array<kj::byte>>& bytes) {
+  return bytes.map([](const kj::Array<kj::byte>& value) { return kj::heapArray<kj::byte>(value); });
+}
+
+static jsg::Dict<kj::String> copyStringDict(const jsg::Dict<kj::String>& dict) {
+  return {
+    .fields =
+        KJ_MAP(field, dict.fields) {
+    return jsg::Dict<kj::String>::Field{
+      .name = kj::str(field.name),
+      .value = kj::str(field.value),
+    };
+  },
+  };
 }
 
 // TODO(perf): Would be nice to expose the v8 internals for parsing a date/stringifying it as
@@ -230,6 +266,30 @@ static kj::Maybe<jsg::Ref<T>> parseObjectMetadata(jsg::Lock& js,
 
 namespace {
 
+class R2GetBodyStream final: public ReadableStreamSource {
+ public:
+  R2GetBodyStream(kj::Own<ReadableStreamSource> inner, kj::Promise<void> pump)
+      : inner(kj::mv(inner)),
+        pump(kj::mv(pump).catch_([](kj::Exception&&) {}).eagerlyEvaluate(nullptr)) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return inner->tryRead(buffer, minBytes, maxBytes);
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    return inner->tryGetLength(encoding);
+  }
+
+  void cancel(kj::Exception reason) override {
+    pump = nullptr;
+    inner->cancel(kj::mv(reason));
+  }
+
+ private:
+  kj::Own<ReadableStreamSource> inner;
+  kj::Promise<void> pump;
+};
+
 void addEtagsToBuilder(
     capnp::List<R2Etag>::Builder etagListBuilder, kj::ArrayPtr<R2Bucket::Etag> etagArray) {
   R2Bucket::Etag* currentEtag = etagArray.begin();
@@ -317,6 +377,7 @@ void initOnlyIf(TraceContext& traceContext, jsg::Lock& js, Builder& builder, Opt
   }
 }
 
+// Validates and performs string conversion on the SSE-C key.
 kj::Maybe<kj::String> buildSsecKey(
     kj::Maybe<kj::OneOf<kj::Array<byte>, kj::String>> maybeRawSsecKey) {
   KJ_IF_SOME(rawSsecKey, maybeRawSsecKey) {
@@ -336,6 +397,27 @@ kj::Maybe<kj::String> buildSsecKey(
   return kj::none;
 }
 
+static R2Bucket::HttpMetadata normalizeHttpMetadata(
+    jsg::Lock& js, kj::OneOf<R2Bucket::HttpMetadata, jsg::Ref<Headers>> metadata) {
+  KJ_SWITCH_ONEOF(metadata) {
+    KJ_CASE_ONEOF(value, R2Bucket::HttpMetadata) {
+      return kj::mv(value);
+    }
+    KJ_CASE_ONEOF(headers, jsg::Ref<Headers>) {
+      return R2Bucket::HttpMetadata::fromRequestHeaders(js, *headers);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+/*****************************
+ *
+ * Helper functions to set various tags on traceContext.
+ * - addR2ResponseSpanTags
+ * - addHeadResultSpanTags
+ * - addListResultSpanTags
+ *
+ ******************************/
 static void addR2ResponseSpanTags(TraceContext& traceContext, R2Result& r2Result) {
   traceContext.setTag("cloudflare.r2.response.success"_kjc, r2Result.success());
   KJ_IF_SOME(e, r2Result.getR2ErrorMessage()) {
@@ -397,6 +479,17 @@ void addHeadResultSpanTags(
   KJ_IF_SOME(_, headResult.getCustomMetadata()) {
     traceContext.setTag("cloudflare.r2.response.custom_metadata"_kjc, true);
   }
+}
+
+static void addListResultSpanTags(TraceContext& traceContext, const R2Bucket::ListResult& result) {
+  KJ_IF_SOME(cursor, result.cursor) {
+    traceContext.setTag("cloudflare.r2.response.cursor"_kjc, cursor.asPtr());
+  }
+  traceContext.setTag(
+      "cloudflare.r2.response.returned_objects"_kjc, static_cast<int64_t>(result.objects.size()));
+  traceContext.setTag("cloudflare.r2.response.delimited_prefixes"_kjc,
+      static_cast<int64_t>(result.delimitedPrefixes.size()));
+  traceContext.setTag("cloudflare.r2.response.truncated"_kjc, result.truncated);
 }
 
 template <typename Builder, typename Options>
@@ -467,17 +560,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
     CompatibilityFlags::Reader flags) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    TraceContext traceContext = context.makeUserTraceSpan("r2_head"_kjc);
-
-    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
-    KJ_IF_SOME(b, this->bindingName()) {
-      traceContext.setTag("cloudflare.binding.name"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.operation"_kjc, "HeadObject"_kjc);
-    KJ_IF_SOME(b, this->bucketName()) {
-      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
+    TraceContext traceContext = makeR2TraceContext("r2_head"_kjc, "HeadObject"_kjc, key.asPtr());
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -506,6 +589,469 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
         addHeadResultSpanTags(js, traceContext, *r.get());
       }
       return result;
+    });
+  });
+}
+
+// Retrieves the RPC method with name methodName.
+jsg::Ref<JsRpcProperty> R2Bucket::getRpcMethod(jsg::Lock& js, kj::StringPtr methodName) {
+  auto fetcher = [&]() -> jsg::Ref<Fetcher> {
+    KJ_SWITCH_ONEOF(clientChannel) {
+      KJ_CASE_ONEOF(channel, uint) {
+        return js.alloc<Fetcher>(
+            channel, Fetcher::RequiresHostAndProtocol::NO, true /* isInHouse */);
+      }
+      KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
+        return js.alloc<Fetcher>(IoContext::current().addObject(kj::addRef(*channel)),
+            Fetcher::RequiresHostAndProtocol::NO, true /* isInHouse */);
+      }
+    }
+    KJ_UNREACHABLE;
+  }();
+
+  // getRpcMethodInternal skips the `rpc` compatibility gate, which matters because R2 bindings must
+  // keep working on compat dates older than that flag. The lookup is lazy and never fails for a
+  // real method name -- whether the entrypoint actually implements it is only discovered when the
+  // call reaches the far side.
+  return KJ_ASSERT_NONNULL(fetcher->getRpcMethodInternal(js, kj::str(methodName)));
+}
+
+// Validates HeadResult shape from JSRPC call.
+jsg::Ref<R2Bucket::HeadResult> headResultFromSerializable(
+    jsg::Lock& js, R2Bucket::SerializableHeadResult rpc, MissingMetadataPolicy policy) {
+  KJ_ASSERT(std::isfinite(rpc.size) && rpc.size >= 0 && isWholeNumber(rpc.size),
+      "Malformed R2 RPC result: size must be a non-negative integer.");
+  KJ_IF_SOME(range, rpc.range) {
+    KJ_IF_SOME(offset, range.offset) {
+      KJ_ASSERT(std::isfinite(offset) && offset >= 0 && isWholeNumber(offset),
+          "Malformed R2 RPC result: range offset must be a non-negative integer.");
+    }
+    KJ_IF_SOME(length, range.length) {
+      KJ_ASSERT(std::isfinite(length) && length >= 0 && isWholeNumber(length),
+          "Malformed R2 RPC result: range length must be a non-negative integer.");
+    }
+    KJ_IF_SOME(suffix, range.suffix) {
+      KJ_ASSERT(range.offset == kj::none && range.length == kj::none,
+          "Malformed R2 RPC result: range suffix is incompatible with offset or length.");
+      KJ_ASSERT(std::isfinite(suffix) && suffix >= 0 && isWholeNumber(suffix),
+          "Malformed R2 RPC result: range suffix must be a non-negative integer.");
+    }
+  }
+
+  jsg::Optional<R2Bucket::HttpMetadata> httpMetadata;
+  jsg::Optional<jsg::Dict<kj::String>> customMetadata;
+  switch (policy) {
+    case MissingMetadataPolicy::EMPTY:
+      httpMetadata = kj::mv(rpc.httpMetadata).orDefault(R2Bucket::HttpMetadata{});
+      customMetadata = kj::mv(rpc.customMetadata).orDefault(jsg::Dict<kj::String>{});
+      break;
+    case MissingMetadataPolicy::ABSENT:
+      KJ_IF_SOME(metadata, rpc.httpMetadata) {
+        httpMetadata = kj::mv(metadata);
+      }
+      KJ_IF_SOME(metadata, rpc.customMetadata) {
+        customMetadata = kj::mv(metadata);
+      }
+      break;
+  }
+
+  return js.alloc<R2Bucket::HeadResult>(kj::mv(rpc.key), kj::mv(rpc.version), rpc.size,
+      kj::mv(rpc.etag),
+      js.alloc<R2Bucket::Checksums>(kj::mv(rpc.checksums.md5), kj::mv(rpc.checksums.sha1),
+          kj::mv(rpc.checksums.sha256), kj::mv(rpc.checksums.sha384), kj::mv(rpc.checksums.sha512)),
+      rpc.uploaded, kj::mv(httpMetadata), kj::mv(customMetadata), kj::mv(rpc.range),
+      kj::mv(rpc.storageClass), kj::mv(rpc.ssecKeyMd5));
+}
+
+static uint64_t getResultBodyLength(R2Bucket::HeadResult& object) {
+  // Retrieve body length from range/size metadata to avoid depending on the stream to report it.
+  auto bodyLength = object.getSize();
+  KJ_IF_SOME(range, object.getRange()) {
+    bodyLength = range.length.orDefault(bodyLength);
+  }
+  KJ_ASSERT(bodyLength <= 9007199254740991ull,
+      "Malformed R2 get RPC result: body length must be a safe integer.");
+  return static_cast<uint64_t>(bodyLength);
+}
+
+static jsg::Ref<R2Bucket::GetResult> getResultFromSerializable(
+    jsg::Lock& js, R2Bucket::SerializableGetResult rpc) {
+  KJ_ASSERT(rpc.kind == "body", "Malformed R2 get RPC result: expected a body result.");
+  auto body = KJ_ASSERT_NONNULL(
+      kj::mv(rpc.body), "Malformed R2 get RPC result: body result did not have a body.");
+  auto cancelReader = kj::defer(
+      [&] { body.forceCancel(js, js.error("Malformed R2 get RPC result.")).markAsHandled(js); });
+  auto object = headResultFromSerializable(js, kj::mv(rpc.object), MissingMetadataPolicy::EMPTY);
+
+  auto& context = IoContext::current();
+  auto pipe = newIdentityPipe(getResultBodyLength(*object));
+  auto pump = context.waitForDeferredProxy(body.pumpTo(js, kj::mv(pipe.out), EndStream::YES));
+  body = JsReadableStream::create(
+      js, context, kj::heap<R2GetBodyStream>(kj::mv(pipe.in), kj::mv(pump)));
+  cancelReader.cancel();
+
+  auto customMetadata = object->getCustomMetadata();
+  return js.alloc<R2Bucket::GetResult>(kj::str(object->getName()), kj::str(object->getVersion()),
+      object->getSize(), kj::str(object->getEtag()), object->getChecksums(), object->getUploaded(),
+      object->getHttpMetadata(), kj::mv(customMetadata), object->getRange(),
+      kj::str(object->getStorageClass()), mapCopyString(object->getSSECKeyMd5()), kj::mv(body));
+}
+
+jsg::Ref<R2Bucket::HeadResult> headResultFromBackend(
+    jsg::Lock& js, R2Bucket::HeadBackendResult result, MissingMetadataPolicy policy) {
+  KJ_SWITCH_ONEOF(result) {
+    KJ_CASE_ONEOF(native, jsg::Ref<R2Bucket::HeadResult>) {
+      if (dynamic_cast<R2Bucket::GetResult*>(native.get()) != nullptr) {
+        auto body = static_cast<R2Bucket::GetResult*>(native.get())->getBody(js);
+        body.forceCancel(js, js.error("Malformed R2 RPC result: expected object metadata."))
+            .markAsHandled(js);
+        KJ_FAIL_ASSERT(
+            "Malformed R2 RPC result: expected object metadata, received an object body.");
+      }
+      if (policy == MissingMetadataPolicy::EMPTY) {
+        bool hasHttpMetadata = native->getHttpMetadata() != kj::none;
+        bool hasCustomMetadata = native->getCustomMetadata() != kj::none;
+        KJ_ASSERT(hasHttpMetadata,
+            "Malformed R2 RPC result: object metadata did not include HTTP metadata.");
+        KJ_ASSERT(hasCustomMetadata,
+            "Malformed R2 RPC result: object metadata did not include custom metadata.");
+      }
+      return kj::mv(native);
+    }
+    KJ_CASE_ONEOF(rpc, R2Bucket::SerializableHeadResult) {
+      return headResultFromSerializable(js, kj::mv(rpc), policy);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::headRpc(jsg::Lock& js,
+    kj::String key,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String)>>& headFnHandler,
+    const jsg::TypeHandler<jsg::Promise<kj::Maybe<HeadBackendResult>>>& headResultHandler) {
+  return js.evalNow([&] {
+    return callR2RpcMethod<kj::Maybe<HeadBackendResult>>(js, getRpcMethod(js, "head"_kj),
+        rpcPropHandler, headFnHandler, headResultHandler, kj::mv(key))
+        .then(js,
+            [](jsg::Lock& js,
+                kj::Maybe<HeadBackendResult> parsed) -> kj::Maybe<jsg::Ref<HeadResult>> {
+      // A missing object is null, not an error: the gateway maps the 404 that
+      // R2Result::objectNotFound() used to represent onto a null return.
+      KJ_IF_SOME(backend, parsed) {
+        return headResultFromBackend(js, kj::mv(backend));
+      }
+      return kj::none;
+    });
+  });
+}
+
+jsg::Promise<kj::OneOf<kj::Maybe<jsg::Ref<R2Bucket::GetResult>>, jsg::Ref<R2Bucket::HeadResult>>>
+R2Bucket::getRpc(jsg::Lock& js,
+    kj::String key,
+    jsg::Optional<GetOptions> options,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<
+        jsg::Function<jsg::Value(kj::String, jsg::Optional<SerializableGetOptions>)>>& getFnHandler,
+    const jsg::TypeHandler<jsg::Promise<kj::Maybe<GetBackendResult>>>& getResultHandler) {
+  return js.evalNow([&] {
+    jsg::Optional<SerializableGetOptions> rpcOptions;
+    KJ_IF_SOME(o, options) {
+      SerializableGetOptions normalized;
+
+      KJ_IF_SOME(condition, o.onlyIf) {
+        // Parsed only for validation, so callers get the same errors as the non-RPC path (e.g.
+        // quoted or malformed ETags, invalid dates). The parsed result is intentionally unused:
+        // the original onlyIf value is forwarded below and the R2GW does its own parsing.
+        UnwrappedConditional conditional = [&] {
+          KJ_SWITCH_ONEOF(condition) {
+            KJ_CASE_ONEOF(value, Conditional) {
+              return UnwrappedConditional(value);
+            }
+            KJ_CASE_ONEOF(headers, jsg::Ref<Headers>) {
+              return UnwrappedConditional(js, *headers);
+            }
+          }
+          KJ_UNREACHABLE;
+        }();
+
+        KJ_SWITCH_ONEOF(condition) {
+          KJ_CASE_ONEOF(conditional, Conditional) {
+            normalized.onlyIf = kj::mv(conditional);
+          }
+          KJ_CASE_ONEOF(headers, jsg::Ref<Headers>) {
+            normalized.onlyIf = kj::mv(headers);
+          }
+        }
+      }
+
+      KJ_IF_SOME(range, o.range) {
+        KJ_SWITCH_ONEOF(range) {
+          KJ_CASE_ONEOF(value, Range) {
+            kj::Vector<jsg::Dict<double>::Field> fields;
+            KJ_IF_SOME(offset, value.offset) {
+              JSG_REQUIRE(offset >= 0, RangeError, "Invalid range. Starting offset (", offset,
+                  ") must be greater than or equal to 0.");
+              JSG_REQUIRE(isWholeNumber(offset), RangeError, "Invalid range. Starting offset (",
+                  offset, ") must be an integer, not floating point.");
+              fields.add(jsg::Dict<double>::Field{.name = kj::str("offset"), .value = offset});
+            }
+            KJ_IF_SOME(length, value.length) {
+              JSG_REQUIRE(length >= 0, RangeError, "Invalid range. Length (", length,
+                  ") must be greater than or equal to 0.");
+              JSG_REQUIRE(isWholeNumber(length), RangeError, "Invalid range. Length (", length,
+                  ") must be an integer, not floating point.");
+              fields.add(jsg::Dict<double>::Field{.name = kj::str("length"), .value = length});
+            }
+            KJ_IF_SOME(suffix, value.suffix) {
+              JSG_REQUIRE(
+                  value.offset == kj::none, TypeError, "Suffix is incompatible with offset.");
+              JSG_REQUIRE(
+                  value.length == kj::none, TypeError, "Suffix is incompatible with length.");
+              JSG_REQUIRE(suffix >= 0, RangeError, "Invalid suffix. Suffix (", suffix,
+                  ") must be greater than or equal to 0.");
+              JSG_REQUIRE(isWholeNumber(suffix), RangeError, "Invalid range. Suffix (", suffix,
+                  ") must be an integer, not floating point.");
+              fields.add(jsg::Dict<double>::Field{.name = kj::str("suffix"), .value = suffix});
+            }
+            normalized.range = jsg::Dict<double>{.fields = fields.releaseAsArray()};
+          }
+          KJ_CASE_ONEOF(headers, jsg::Ref<Headers>) {
+            if (headers->getCommon(js, capnp::CommonHeaderName::RANGE) != kj::none) {
+              normalized.range = kj::mv(headers);
+            }
+          }
+        }
+      }
+
+      KJ_IF_SOME(ssecKey, buildSsecKey(kj::mv(o.ssecKey))) {
+        normalized.ssecKey = kj::mv(ssecKey);
+      }
+      rpcOptions = kj::mv(normalized);
+    }
+
+    return callR2RpcMethod<kj::Maybe<GetBackendResult>>(js, getRpcMethod(js, "get"_kj),
+        rpcPropHandler, getFnHandler, getResultHandler, kj::mv(key), kj::mv(rpcOptions))
+        .then(js,
+            [](jsg::Lock& js, kj::Maybe<GetBackendResult> parsed)
+                -> kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> {
+      KJ_IF_SOME(backend, parsed) {
+        KJ_SWITCH_ONEOF(backend) {
+          KJ_CASE_ONEOF(native, jsg::Ref<GetResult>) {
+            return kj::Maybe<jsg::Ref<GetResult>>(kj::mv(native));
+          }
+          KJ_CASE_ONEOF(native, jsg::Ref<HeadResult>) {
+            return headResultFromBackend(
+                js, HeadBackendResult(kj::mv(native)), MissingMetadataPolicy::EMPTY);
+          }
+          KJ_CASE_ONEOF(rpc, SerializableGetResult) {
+            if (rpc.kind == "metadata") {
+              KJ_IF_SOME(body, rpc.body) {
+                body.forceCancel(
+                    js, js.error("Malformed R2 get RPC result: metadata result had a body."));
+                KJ_FAIL_ASSERT("Malformed R2 get RPC result: metadata result had a body.");
+              }
+              return headResultFromSerializable(
+                  js, kj::mv(rpc.object), MissingMetadataPolicy::EMPTY);
+            }
+            if (rpc.kind == "body") {
+              return kj::Maybe<jsg::Ref<GetResult>>(getResultFromSerializable(js, kj::mv(rpc)));
+            }
+
+            KJ_IF_SOME(body, rpc.body) {
+              body.forceCancel(js, js.error("Malformed R2 get RPC result: unknown result kind."));
+            }
+            KJ_FAIL_ASSERT("Malformed R2 get RPC result: unknown result kind ", rpc.kind, ".");
+          }
+        }
+      }
+      return kj::Maybe<jsg::Ref<GetResult>>(kj::none);
+    });
+  });
+}
+
+jsg::Promise<void> R2Bucket::deleteRpc(jsg::Lock& js,
+    kj::OneOf<kj::String, kj::Array<kj::String>> keys,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(kj::OneOf<kj::String, kj::Array<kj::String>>)>>&
+        deleteFnHandler,
+    const jsg::TypeHandler<jsg::Promise<void>>& deleteResultHandler) {
+  return js.evalNow([&] {
+    // The result is discarded, matching delete_: a missing key is success, and per-key failures in
+    // a batch delete are reported in a body the binding has never read.
+    return callR2RpcMethod<void>(js, getRpcMethod(js, "delete"_kj), rpcPropHandler, deleteFnHandler,
+        deleteResultHandler, kj::mv(keys));
+  });
+}
+
+jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::putRpc(jsg::Lock& js,
+    kj::String key,
+    kj::Maybe<R2PutValue> value,
+    jsg::Optional<PutOptions> options,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(
+        kj::String, kj::Maybe<R2PutValue>, jsg::Optional<PutOptions>, double)>>& putFnHandler,
+    const jsg::TypeHandler<jsg::Promise<kj::Maybe<HeadBackendResult>>>& putResultHandler) {
+  return js.evalNow([&] {
+    auto cancelReader = kj::defer([&] {
+      KJ_IF_SOME(v, value) {
+        KJ_SWITCH_ONEOF(v) {
+          KJ_CASE_ONEOF(stream, JsReadableStream) {
+            stream.cancel(js,
+                js.error(
+                    "Stream cancelled because the associated put operation encountered an error."));
+          }
+          KJ_CASE_ONEOF_DEFAULT {}
+        }
+      }
+    });
+
+    // Checksums are validated here so callers get the same errors as the non-RPC path, then
+    // forwarded unchanged; the R2GW decodes hex strings and buffers itself.
+    bool hashAlreadySpecified = false;
+    const auto validateChecksum = [&](auto checksum, kj::StringPtr algorithm, size_t byteLength,
+                                      size_t hexLength) -> decltype(checksum) {
+      KJ_IF_SOME(c, checksum) {
+        JSG_REQUIRE(
+            !hashAlreadySpecified, TypeError, "You cannot specify multiple hashing algorithms.");
+        hashAlreadySpecified = true;
+        KJ_SWITCH_ONEOF(c) {
+          KJ_CASE_ONEOF(buffer, jsg::JsRef<jsg::JsBufferSource>) {
+            auto bytes = buffer.getHandle(js);
+            JSG_REQUIRE(bytes.size() == byteLength, TypeError, algorithm, " is ", byteLength,
+                " bytes, not ", bytes.size());
+          }
+          KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
+            JSG_REQUIRE(text.value.size() == hexLength, TypeError, algorithm, " is ", hexLength,
+                " hex characters, not ", text.value.size());
+            auto decoded = kj::decodeHex(text.value);
+            JSG_REQUIRE(!decoded.hadErrors, TypeError, "Provided ", algorithm,
+                " wasn't a valid hex string");
+          }
+        }
+      }
+      return kj::mv(checksum);
+    };
+
+    jsg::Optional<PutOptions> rpcOptions;
+    KJ_IF_SOME(o, options) {
+      jsg::Optional<kj::OneOf<Conditional, jsg::Ref<Headers>>> onlyIf;
+      KJ_IF_SOME(condition, o.onlyIf) {
+        // Parsed only for validation, so callers get the same errors as the non-RPC path (e.g.
+        // quoted or malformed ETags, invalid dates). The parsed result is intentionally unused:
+        // the original onlyIf value is forwarded below and the R2GW does its own parsing.
+        UnwrappedConditional conditional = [&] {
+          KJ_SWITCH_ONEOF(condition) {
+            KJ_CASE_ONEOF(value, Conditional) {
+              return UnwrappedConditional(value);
+            }
+            KJ_CASE_ONEOF(headers, jsg::Ref<Headers>) {
+              return UnwrappedConditional(js, *headers);
+            }
+          }
+          KJ_UNREACHABLE;
+        }();
+
+        KJ_SWITCH_ONEOF(condition) {
+          KJ_CASE_ONEOF(conditional, Conditional) {
+            onlyIf = kj::mv(conditional);
+          }
+          KJ_CASE_ONEOF(headers, jsg::Ref<Headers>) {
+            onlyIf = kj::mv(headers);
+          }
+        }
+      }
+
+      jsg::Optional<kj::OneOf<HttpMetadata, jsg::Ref<Headers>>> httpMetadata;
+      KJ_IF_SOME(metadata, o.httpMetadata) {
+        httpMetadata = normalizeHttpMetadata(js, kj::mv(metadata));
+      }
+      jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> ssecKey;
+      KJ_IF_SOME(key, buildSsecKey(kj::mv(o.ssecKey))) {
+        ssecKey = kj::mv(key);
+      }
+
+      rpcOptions = PutOptions{
+        .onlyIf = kj::mv(onlyIf),
+        .httpMetadata = kj::mv(httpMetadata),
+        .customMetadata = kj::mv(o.customMetadata),
+        .md5 = validateChecksum(kj::mv(o.md5), "MD5"_kj, 16, 32),
+        .sha1 = validateChecksum(kj::mv(o.sha1), "SHA-1"_kj, 20, 40),
+        .sha256 = validateChecksum(kj::mv(o.sha256), "SHA-256"_kj, 32, 64),
+        .sha384 = validateChecksum(kj::mv(o.sha384), "SHA-384"_kj, 48, 96),
+        .sha512 = validateChecksum(kj::mv(o.sha512), "SHA-512"_kj, 64, 128),
+        .storageClass = kj::mv(o.storageClass),
+        .ssecKey = kj::mv(ssecKey),
+      };
+    }
+
+    auto rpcMethod = getRpcMethod(js, "put"_kj);
+    auto wrappedMethod = rpcPropHandler.wrap(js, kj::mv(rpcMethod));
+    auto putFn = KJ_ASSERT_NONNULL(putFnHandler.tryUnwrap(js, wrappedMethod));
+    kj::Maybe<R2PutValue> rpcValue;
+    double valueSize = 0;
+    KJ_IF_SOME(v, value) {
+      auto prepared = prepareR2RpcBody(js, v);
+      rpcValue = kj::mv(prepared.value);
+      valueSize = prepared.size;
+    }
+    cancelReader.cancel();
+
+    auto rpcPromise = putFn(js, kj::mv(key), kj::mv(rpcValue), kj::mv(rpcOptions), valueSize);
+    auto promise =
+        unwrapR2RpcPromise<kj::Maybe<HeadBackendResult>>(js, kj::mv(rpcPromise), putResultHandler);
+    return promise.then(js,
+        [](jsg::Lock& js, kj::Maybe<HeadBackendResult> parsed) -> kj::Maybe<jsg::Ref<HeadResult>> {
+      KJ_IF_SOME(backend, parsed) {
+        return headResultFromBackend(js, kj::mv(backend));
+      }
+      return kj::none;
+    });
+  });
+}
+
+jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUploadRpc(jsg::Lock& js,
+    kj::String key,
+    jsg::Optional<MultipartOptions> options,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, jsg::Optional<MultipartOptions>)>>&
+        createFnHandler,
+    const jsg::TypeHandler<jsg::Promise<jsg::NonCoercible<kj::String>>>& uploadIdHandler) {
+  return js.evalNow([&] {
+    R2MultipartUpload::Metadata metadata;
+    KJ_IF_SOME(o, options) {
+      KJ_IF_SOME(metadata, o.httpMetadata) {
+        auto normalized = normalizeHttpMetadata(js, kj::mv(metadata));
+        o.httpMetadata = kj::mv(normalized);
+      }
+      KJ_IF_SOME(ssecKey, buildSsecKey(kj::mv(o.ssecKey))) {
+        o.ssecKey = kj::mv(ssecKey);
+      }
+    }
+
+    KJ_IF_SOME(o, options) {
+      KJ_IF_SOME(httpMetadata, o.httpMetadata) {
+        metadata.httpMetadata = httpMetadata.get<HttpMetadata>().clone();
+      }
+      KJ_IF_SOME(customMetadata, o.customMetadata) {
+        metadata.customMetadata.fields = KJ_MAP(field, customMetadata.fields) {
+          return jsg::Dict<kj::String>::Field{
+            .name = kj::str(field.name), .value = kj::str(field.value)};
+        };
+      }
+    }
+
+    // The R2GW returns only the upload ID; the key, bucket, and metadata are already known here.
+    // NonCoercible so a non-string reply is rejected as malformed rather than stringified.
+    auto uploadPromise = callR2RpcMethod<jsg::NonCoercible<kj::String>>(js,
+        getRpcMethod(js, "createMultipartUpload"_kj), rpcPropHandler, createFnHandler,
+        uploadIdHandler, kj::str(key), kj::mv(options));
+
+    return uploadPromise.then(js,
+        [bucket = JSG_THIS, key = kj::mv(key), metadata = kj::mv(metadata)](
+            jsg::Lock& js, jsg::NonCoercible<kj::String> uploadId) mutable {
+      return js.alloc<R2MultipartUpload>(
+          kj::mv(key), kj::mv(uploadId.value), kj::mv(bucket), kj::mv(metadata));
     });
   });
 }
@@ -541,6 +1087,7 @@ jsg::Ref<R2Bucket> R2Bucket::deserialize(
   }
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////
 jsg::Promise<kj::OneOf<kj::Maybe<jsg::Ref<R2Bucket::GetResult>>, jsg::Ref<R2Bucket::HeadResult>>>
 R2Bucket::get(jsg::Lock& js,
     kj::String key,
@@ -549,17 +1096,7 @@ R2Bucket::get(jsg::Lock& js,
     CompatibilityFlags::Reader flags) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    TraceContext traceContext = context.makeUserTraceSpan("r2_get"_kjc);
-
-    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
-    KJ_IF_SOME(b, this->bindingName()) {
-      traceContext.setTag("cloudflare.binding.name"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.operation"_kjc, "GetObject"_kjc);
-    KJ_IF_SOME(b, this->bucketName()) {
-      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
+    TraceContext traceContext = makeR2TraceContext("r2_get"_kjc, "GetObject"_kjc, key.asPtr());
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -636,17 +1173,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
     });
 
     auto& context = IoContext::current();
-    TraceContext traceContext = context.makeUserTraceSpan("r2_put"_kjc);
-
-    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
-    KJ_IF_SOME(b, this->bindingName()) {
-      traceContext.setTag("cloudflare.binding.name"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.operation"_kjc, "PutObject"_kjc);
-    KJ_IF_SOME(b, this->bucketName()) {
-      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
+    TraceContext traceContext = makeR2TraceContext("r2_put"_kjc, "PutObject"_kjc, key.asPtr());
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -905,17 +1432,8 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    TraceContext traceContext = context.makeUserTraceSpan("r2_createMultipartUpload"_kjc);
-
-    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
-    KJ_IF_SOME(b, this->bindingName()) {
-      traceContext.setTag("cloudflare.binding.name"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.operation"_kjc, "CreateMultipartUpload"_kjc);
-    KJ_IF_SOME(b, this->bucketName()) {
-      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
+    TraceContext traceContext = makeR2TraceContext(
+        "r2_createMultipartUpload"_kjc, "CreateMultipartUpload"_kjc, key.asPtr());
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -1030,17 +1548,7 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-
-    TraceContext traceContext = context.makeUserTraceSpan("r2_delete"_kjc);
-
-    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
-    KJ_IF_SOME(b, this->bindingName()) {
-      traceContext.setTag("cloudflare.binding.name"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.operation"_kjc, "DeleteObject"_kjc);
-    KJ_IF_SOME(b, this->bucketName()) {
-      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
-    }
+    TraceContext traceContext = makeR2TraceContext("r2_delete"_kjc, "DeleteObject"_kjc);
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -1085,22 +1593,79 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
   });
 }
 
+jsg::Promise<R2Bucket::ListResult> R2Bucket::listRpc(jsg::Lock& js,
+    jsg::Optional<ListOptions> options,
+    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
+    const jsg::TypeHandler<jsg::Function<jsg::Value(jsg::Optional<ListOptions>)>>& listFnHandler,
+    const jsg::TypeHandler<jsg::Promise<ListBackendResult>>& listResultHandler,
+    CompatibilityFlags::Reader flags) {
+  return js.evalNow([&] {
+    const bool honorsIncludes = flags.getR2ListHonorIncludeFields();
+    jsg::Optional<ListOptions> rpcOptions;
+    if (options != kj::none || !honorsIncludes) {
+      ListOptions normalized;
+      kj::Vector<jsg::NonCoercible<kj::String>> includes;
+
+      KJ_IF_SOME(o, options) {
+        KJ_IF_SOME(limit, o.limit) {
+          normalized.limit = limit;
+        }
+        KJ_IF_SOME(prefix, o.prefix) {
+          normalized.prefix = kj::mv(prefix);
+        }
+        KJ_IF_SOME(cursor, o.cursor) {
+          normalized.cursor = kj::mv(cursor);
+        }
+        KJ_IF_SOME(delimiter, o.delimiter) {
+          normalized.delimiter = kj::mv(delimiter);
+        }
+        KJ_IF_SOME(startAfter, o.startAfter) {
+          normalized.startAfter = kj::mv(startAfter);
+        }
+        KJ_IF_SOME(requestedIncludes, o.include) {
+          for (auto& requested: requestedIncludes) {
+            JSG_REQUIRE(requested.value == "httpMetadata" || requested.value == "customMetadata",
+                RangeError, "Unsupported include value ", requested.value);
+            if (honorsIncludes) {
+              includes.add(kj::mv(requested.value));
+            }
+          }
+        }
+      }
+
+      if (!honorsIncludes) {
+        includes.add(kj::str("httpMetadata"));
+        includes.add(kj::str("customMetadata"));
+      }
+      normalized.include = includes.releaseAsArray();
+      rpcOptions = kj::mv(normalized);
+    }
+
+    return callR2RpcMethod<ListBackendResult>(js, getRpcMethod(js, "list"_kj), rpcPropHandler,
+        listFnHandler, listResultHandler, kj::mv(rpcOptions))
+        .then(js, [](jsg::Lock& js, ListBackendResult backend) -> ListResult {
+      ListResult result;
+      result.objects = KJ_MAP(object, backend.objects) {
+        return headResultFromBackend(js, kj::mv(object), MissingMetadataPolicy::ABSENT);
+      };
+      result.truncated = backend.truncated;
+      KJ_IF_SOME(cursor, backend.cursor) {
+        result.cursor = kj::mv(cursor);
+      }
+      result.delimitedPrefixes =
+          kj::mv(backend.delimitedPrefixes).orDefault(kj::heapArray<kj::String>(0));
+      return kj::mv(result);
+    });
+  });
+}
+
 jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
     jsg::Optional<ListOptions> options,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
     CompatibilityFlags::Reader flags) {
   return js.evalNow([&] {
     auto& context = IoContext::current();
-    TraceContext traceContext = context.makeUserTraceSpan("r2_list"_kjc);
-
-    traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
-    KJ_IF_SOME(b, this->bindingName()) {
-      traceContext.setTag("cloudflare.binding.name"_kjc, b);
-    }
-    traceContext.setTag("cloudflare.r2.operation"_kjc, "ListObjects"_kjc);
-    KJ_IF_SOME(b, this->bucketName()) {
-      traceContext.setTag("cloudflare.r2.bucket"_kjc, b);
-    }
+    TraceContext traceContext = makeR2TraceContext("r2_list"_kjc, "ListObjects"_kjc);
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -1219,19 +1784,13 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
       result.truncated = responseBuilder.getTruncated();
       if (responseBuilder.hasCursor()) {
         result.cursor = kj::str(responseBuilder.getCursor());
-        traceContext.setTag(
-            "cloudflare.r2.response.cursor"_kjc, KJ_ASSERT_NONNULL(result.cursor).asPtr());
       }
       if (responseBuilder.hasDelimitedPrefixes()) {
         result.delimitedPrefixes =
           KJ_MAP(e, responseBuilder.getDelimitedPrefixes()) { return kj::str(e); };
       }
 
-      traceContext.setTag("cloudflare.r2.response.returned_objects"_kjc,
-          static_cast<int64_t>(result.objects.size()));
-      traceContext.setTag("cloudflare.r2.response.delimited_prefixes"_kjc,
-          static_cast<int64_t>(result.delimitedPrefixes.size()));
-      traceContext.setTag("cloudflare.r2.response.truncated"_kjc, result.truncated);
+      addListResultSpanTags(traceContext, result);
       return kj::mv(result);
     });
   });
@@ -1424,6 +1983,7 @@ void R2Bucket::HeadResult::writeHttpMetadata(jsg::Lock& js, Headers& headers) {
 
 jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> R2Bucket::GetResult::arrayBuffer(jsg::Lock& js) {
   return js.evalNow([&] {
+    ensureBodyLength(js);
     auto& context = IoContext::current();
     return body.arrayBuffer(js, context.getLimitEnforcer().getBufferingLimit());
   });
@@ -1431,6 +1991,7 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> R2Bucket::GetResult::arrayBuffer(js
 
 jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> R2Bucket::GetResult::bytes(jsg::Lock& js) {
   return js.evalNow([&] {
+    ensureBodyLength(js);
     auto& context = IoContext::current();
     return body.bytes(js, context.getLimitEnforcer().getBufferingLimit());
   });
@@ -1439,6 +2000,7 @@ jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> R2Bucket::GetResult::bytes(jsg::Lock
 jsg::Promise<kj::String> R2Bucket::GetResult::text(jsg::Lock& js) {
   // Copy-pasted from http.c++
   return js.evalNow([&] {
+    ensureBodyLength(js);
     // Check for a disturbed body before emitting the non-text warning below. (body.text()
     // performs the same check with the same error message; this one just runs first.)
     JSG_REQUIRE(!body.isDisturbed(js), TypeError,
@@ -1476,6 +2038,133 @@ jsg::Promise<jsg::Ref<Blob>> R2Bucket::GetResult::blob(jsg::Lock& js) {
         KJ_REQUIRE_NONNULL(self->httpMetadata).contentType.clone().orDefault(nullptr);
     return js.alloc<Blob>(js, jsg::JsBufferSource(buffer.getHandle(js)), kj::mv(contentType));
   });
+}
+
+R2Bucket::SerializableChecksums R2Bucket::Checksums::toSerializable() const {
+  return {
+    .md5 = copyBytes(md5),
+    .sha1 = copyBytes(sha1),
+    .sha256 = copyBytes(sha256),
+    .sha384 = copyBytes(sha384),
+    .sha512 = copyBytes(sha512),
+  };
+}
+
+void R2Bucket::Checksums::serialize(jsg::Lock& js,
+    jsg::Serializer& serializer,
+    const jsg::TypeHandler<SerializableChecksums>& checksumsHandler) {
+  requireR2RpcSerializer(serializer);
+  serializer.write(js, jsg::JsValue(checksumsHandler.wrap(js, toSerializable())));
+}
+
+jsg::Ref<R2Bucket::Checksums> R2Bucket::Checksums::deserialize(jsg::Lock& js,
+    rpc::SerializationTag tag,
+    jsg::Deserializer& deserializer,
+    const jsg::TypeHandler<SerializableChecksums>& checksumsHandler) {
+  requireR2RpcDeserializer(deserializer);
+  auto checksums = KJ_ASSERT_NONNULL(checksumsHandler.tryUnwrap(js, deserializer.readValue(js)),
+      "Deserialization failed: invalid R2 checksums payload");
+  return js.alloc<Checksums>(kj::mv(checksums.md5), kj::mv(checksums.sha1),
+      kj::mv(checksums.sha256), kj::mv(checksums.sha384), kj::mv(checksums.sha512));
+}
+
+R2Bucket::SerializableHeadResult R2Bucket::HeadResult::toSerializable() const {
+  kj::Maybe<HttpMetadata> rpcHttpMetadata;
+  KJ_IF_SOME(metadata, httpMetadata) {
+    rpcHttpMetadata = metadata.clone();
+  }
+
+  kj::Maybe<jsg::Dict<kj::String>> rpcCustomMetadata;
+  KJ_IF_SOME(metadata, customMetadata) {
+    rpcCustomMetadata = copyStringDict(metadata);
+  }
+
+  kj::Maybe<Range> rpcRange;
+  KJ_IF_SOME(value, range) {
+    rpcRange = Range{
+      .offset = value.offset,
+      .length = value.length,
+      .suffix = value.suffix,
+    };
+  }
+
+  return {
+    .key = kj::str(name),
+    .version = kj::str(version),
+    .size = size,
+    .etag = kj::str(etag),
+    .uploaded = uploaded,
+    .storageClass = kj::str(storageClass),
+    .checksums = checksums->toSerializable(),
+    .httpMetadata = kj::mv(rpcHttpMetadata),
+    .customMetadata = kj::mv(rpcCustomMetadata),
+    .range = kj::mv(rpcRange),
+    .ssecKeyMd5 = mapCopyString(ssecKeyMd5),
+  };
+}
+
+void R2Bucket::HeadResult::serialize(jsg::Lock& js,
+    jsg::Serializer& serializer,
+    const jsg::TypeHandler<SerializableHeadResult>& headResultHandler) {
+  requireR2RpcSerializer(serializer);
+  serializer.write(js, jsg::JsValue(headResultHandler.wrap(js, toSerializable())));
+}
+
+jsg::Ref<R2Bucket::HeadResult> R2Bucket::HeadResult::deserialize(jsg::Lock& js,
+    rpc::SerializationTag tag,
+    jsg::Deserializer& deserializer,
+    const jsg::TypeHandler<SerializableHeadResult>& headResultHandler) {
+  requireR2RpcDeserializer(deserializer);
+  auto headResult = KJ_ASSERT_NONNULL(headResultHandler.tryUnwrap(js, deserializer.readValue(js)),
+      "Deserialization failed: invalid R2 object payload");
+  return headResultFromSerializable(js, kj::mv(headResult), MissingMetadataPolicy::ABSENT);
+}
+
+void R2Bucket::GetResult::ensureBodyLength(jsg::Lock& js) {
+  KJ_IF_SOME(length, expectedBodyLength) {
+    auto& context = IoContext::current();
+    auto pipe = newIdentityPipe(length);
+    auto pump = context.waitForDeferredProxy(body.pumpTo(js, kj::mv(pipe.out), EndStream::YES));
+    body = JsReadableStream::create(
+        js, context, kj::heap<R2GetBodyStream>(kj::mv(pipe.in), kj::mv(pump)));
+    expectedBodyLength = kj::none;
+  }
+}
+
+void R2Bucket::GetResult::serialize(jsg::Lock& js,
+    jsg::Serializer& serializer,
+    const jsg::TypeHandler<SerializableGetResult>& getResultHandler) {
+  requireR2RpcSerializer(serializer);
+  ensureBodyLength(js);
+  serializer.write(js,
+      jsg::JsValue(getResultHandler.wrap(js,
+          SerializableGetResult{
+            .kind = kj::str("body"),
+            .object = toSerializable(),
+            .body = body.addRef(js),
+          })));
+}
+
+jsg::Ref<R2Bucket::GetResult> R2Bucket::GetResult::deserialize(jsg::Lock& js,
+    rpc::SerializationTag tag,
+    jsg::Deserializer& deserializer,
+    const jsg::TypeHandler<SerializableGetResult>& getResultHandler) {
+  requireR2RpcDeserializer(deserializer);
+  auto getResult = KJ_ASSERT_NONNULL(getResultHandler.tryUnwrap(js, deserializer.readValue(js)),
+      "Deserialization failed: invalid R2 object body payload");
+  KJ_ASSERT(getResult.kind == "body",
+      "Deserialization failed: R2 object body payload has an invalid kind");
+  KJ_ASSERT(getResult.body != kj::none,
+      "Deserialization failed: R2 object body payload is missing its body");
+  auto object =
+      headResultFromSerializable(js, kj::mv(getResult.object), MissingMetadataPolicy::EMPTY);
+  auto bodyLength = getResultBodyLength(*object);
+  auto customMetadata = object->getCustomMetadata();
+  return js.alloc<GetResult>(kj::str(object->getName()), kj::str(object->getVersion()),
+      object->getSize(), kj::str(object->getEtag()), object->getChecksums(), object->getUploaded(),
+      object->getHttpMetadata(), kj::mv(customMetadata), object->getRange(),
+      kj::str(object->getStorageClass()), mapCopyString(object->getSSECKeyMd5()),
+      KJ_ASSERT_NONNULL(kj::mv(getResult.body)), bodyLength);
 }
 
 R2Bucket::StringChecksums R2Bucket::Checksums::toJSON() {
