@@ -1,9 +1,9 @@
 'use strict';
 
-// The byte extent of an ArrayBufferView, read through captured getters, for
-// code that consumes caller-supplied views (the internal transform pairs'
-// write paths, the digest stream, byte-counting strategies, body
-// collection).
+// The byte extent of an ArrayBufferView, read through captured getters, and
+// copies of such extents, for code that consumes caller-supplied views (the
+// internal transform pairs' write paths, the native conduit's enqueue, the
+// digest stream, byte-counting strategies, body collection).
 //
 // A view whose buffer has been detached, or that a resizable buffer has
 // shrunk out from under, has no bytes: the typed-array getters report
@@ -21,6 +21,8 @@ const {
   TypedArrayPrototypeGetByteLength,
   TypedArrayPrototypeGetByteOffset,
   TypedArrayPrototypeGetSymbolToStringTag,
+  TypedArrayPrototypeSet,
+  Uint8Array,
 } = primordials;
 
 interface ViewExtent {
@@ -67,9 +69,28 @@ function viewByteExtent(view: ArrayBufferView): ViewExtent {
   return { __proto__: null, buffer, byteOffset, byteLength } as ViewExtent;
 }
 
+// Copies byteLength bytes of buffer, from byteOffset, into a new Uint8Array.
+// An empty extent never touches buffer: a detached view's extent is empty,
+// and constructing a view over a detached buffer throws.
+function copyExtent(
+  buffer: ArrayBufferLike,
+  byteOffset: number,
+  byteLength: number
+): Uint8Array {
+  const copy = new Uint8Array(byteLength);
+  if (byteLength > 0) {
+    TypedArrayPrototypeSet(
+      copy,
+      new Uint8Array(buffer, byteOffset, byteLength)
+    );
+  }
+  return copy;
+}
+
 export type ViewExtentHelpers = {
   viewByteLength: typeof viewByteLength;
   viewByteExtent: typeof viewByteExtent;
+  copyExtent: typeof copyExtent;
 };
 
-module.exports = { viewByteLength, viewByteExtent };
+module.exports = { viewByteLength, viewByteExtent, copyExtent };

@@ -95,7 +95,6 @@ import type { CommonHelpers } from './common';
 import type { ViewExtentHelpers } from './view-extent';
 
 const {
-  ArrayBuffer,
   ArrayPrototypePush,
   BigInt,
   Number,
@@ -134,7 +133,7 @@ const {
 } = require('webstreams/writable');
 const { isActualObject, kNullProtoObject, kEnumerable, toStringTagProperty } =
   require('webstreams/common') as CommonHelpers;
-const { viewByteExtent } =
+const { copyExtent, viewByteExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
@@ -184,27 +183,21 @@ function validateAndCopyChunk(chunk: unknown): Uint8Array | undefined {
     return TextEncoderEncode(textEncoderInstance, chunk);
   }
   if (isArrayBuffer(chunk) || isSharedArrayBuffer(chunk)) {
-    // Wrap in Uint8Array for a uniform code path — Uint8Array accepts
-    // both ArrayBuffer and SharedArrayBuffer, and its byteLength getter
-    // works on both (unlike ArrayBuffer.prototype.byteLength, which
-    // throws on SAB receivers).
-    const src = new Uint8Array(chunk as ArrayBuffer);
-    const byteLength = TypedArrayPrototypeGetByteLength(src) as number;
+    // Read the length through a Uint8Array: its byteLength getter works on
+    // both ArrayBuffer and SharedArrayBuffer (ArrayBuffer.prototype.byteLength
+    // throws on SAB receivers). Constructing it throws for a detached
+    // ArrayBuffer.
+    const byteLength = TypedArrayPrototypeGetByteLength(
+      new Uint8Array(chunk as ArrayBuffer)
+    ) as number;
     if (byteLength === 0) return undefined;
-    const copy = new Uint8Array(new ArrayBuffer(byteLength));
-    TypedArrayPrototypeSet(copy, src);
-    return copy;
+    return copyExtent(chunk, 0, byteLength);
   }
   if (isArrayBufferView(chunk)) {
     // A detached or out-of-bounds view is empty (see view-extent.ts).
     const { buffer, byteOffset, byteLength } = viewByteExtent(chunk);
     if (byteLength === 0) return undefined;
-    const copy = new Uint8Array(new ArrayBuffer(byteLength));
-    TypedArrayPrototypeSet(
-      copy,
-      new Uint8Array(buffer as ArrayBuffer, byteOffset, byteLength)
-    );
-    return copy;
+    return copyExtent(buffer, byteOffset, byteLength);
   }
   throw new TypeError(
     'IdentityTransformStream: chunk must be a BufferSource or string'

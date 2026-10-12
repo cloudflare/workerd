@@ -122,6 +122,7 @@ import type {
   RingBufferConstructor,
 } from './ring-buffer';
 import type { CommonHelpers } from './common';
+import type { ViewExtentHelpers } from './view-extent';
 
 const {
   AbortController,
@@ -129,9 +130,6 @@ const {
   AbortControllerSignalGet,
   AbortSignalAbortedGet,
   BigInt,
-  DataViewPrototypeGetBuffer,
-  DataViewPrototypeGetByteLength,
-  DataViewPrototypeGetByteOffset,
   NumberIsNaN,
   ObjectGetOwnPropertyDescriptor,
   ObjectGetPrototypeOf,
@@ -142,9 +140,7 @@ const {
   PromisePrototypeThen,
   RangeError,
   TypeError,
-  TypedArrayPrototypeGetBuffer,
   TypedArrayPrototypeGetByteLength,
-  TypedArrayPrototypeGetByteOffset,
   Uint8Array,
   uncurryThis,
 } = primordials;
@@ -152,6 +148,8 @@ const {
 const { isArrayBufferView, isUint8Array, markPromiseHandled } = utils;
 
 const { isActualObject } = require('webstreams/common') as CommonHelpers;
+const { viewByteExtent } =
+  require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
 };
@@ -895,22 +893,7 @@ class NativePullConduit implements ByteStreamConsumerType {
       if (isUint8Array(chunk)) {
         view = chunk as Uint8Array;
       } else {
-        const isDataView = utils.isDataView(chunk);
-        const buffer = (
-          isDataView
-            ? DataViewPrototypeGetBuffer(chunk)
-            : TypedArrayPrototypeGetBuffer(chunk)
-        ) as ArrayBuffer;
-        const byteOffset = (
-          isDataView
-            ? DataViewPrototypeGetByteOffset(chunk)
-            : TypedArrayPrototypeGetByteOffset(chunk)
-        ) as number;
-        const byteLength = (
-          isDataView
-            ? DataViewPrototypeGetByteLength(chunk)
-            : TypedArrayPrototypeGetByteLength(chunk)
-        ) as number;
+        const { buffer, byteOffset, byteLength } = viewByteExtent(chunk);
         view = new Uint8Array(buffer, byteOffset, byteLength);
       }
       // EXPECTED-LENGTH CONTRACT: overflow check before commit.
