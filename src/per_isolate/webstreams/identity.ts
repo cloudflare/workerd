@@ -101,7 +101,6 @@ const {
   Number,
   NumberIsNaN,
   ObjectDefineProperties,
-  ObjectGetOwnPropertyDescriptor,
   PromisePrototypeThen,
   PromiseResolve,
   PromiseWithResolvers,
@@ -116,6 +115,7 @@ const {
   TypedArrayPrototypeGetByteOffset,
   TypedArrayPrototypeSet,
   Uint8Array,
+  getProtoGetter,
   uncurryThis,
 } = primordials;
 
@@ -152,25 +152,15 @@ const byteControllerClose = uncurryThis(
 const byteControllerError = uncurryThis(
   ReadableByteStreamController.prototype.error
 ) as (controller: object, reason: unknown) => void;
-function captureGetter(proto: object, name: string): (self: object) => unknown {
-  const desc = ObjectGetOwnPropertyDescriptor(proto, name);
-  if (desc === undefined || desc.get === undefined) {
-    throw new TypeError(`Expected accessor property '${name}' on prototype`);
-  }
-  return uncurryThis(desc.get) as (self: object) => unknown;
-}
-const byteControllerByobRequestGet = captureGetter(
-  ReadableByteStreamController.prototype,
-  'byobRequest'
-) as (controller: object) => object | null;
-const byobRequestViewGet = captureGetter(
-  ReadableStreamBYOBRequest.prototype,
-  'view'
-) as (request: object) => Uint8Array | null;
-const byteControllerDesiredSizeGet = captureGetter(
-  ReadableByteStreamController.prototype,
-  'desiredSize'
-) as (controller: object) => number | null;
+const byteControllerByobRequestGet = getProtoGetter<
+  (controller: object) => object | null
+>(ReadableByteStreamController.prototype, 'byobRequest');
+const byobRequestViewGet = getProtoGetter<
+  (request: object) => Uint8Array | null
+>(ReadableStreamBYOBRequest.prototype, 'view');
+const byteControllerDesiredSizeGet = getProtoGetter<
+  (controller: object) => number | null
+>(ReadableByteStreamController.prototype, 'desiredSize');
 const byobRequestRespond = uncurryThis(
   ReadableStreamBYOBRequest.prototype.respond
 ) as (request: object, bytesWritten: number) => void;

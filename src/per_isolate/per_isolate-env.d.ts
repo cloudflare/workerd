@@ -68,6 +68,10 @@ declare const primordials: {
     ? (thisArg: ThisParameterType<T>, ...args: Parameters<T>) => ReturnType<T>
     : (...args: any[]) => any;
 
+  // Uncurries the getter of `proto`'s own accessor `name`, typed as T; throws
+  // if there is none.
+  readonly getProtoGetter: <T>(proto: object, name: string | symbol) => T;
+
   // Everything else is loosely typed — add specific entries as needed.
   readonly [key: string]: any;
 };

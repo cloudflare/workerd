@@ -19,7 +19,6 @@ import type { CommonHelpers } from './common';
 
 const {
   ObjectDefineProperties,
-  ObjectGetOwnPropertyDescriptor,
   StringPrototypeCharCodeAt,
   StringPrototypeSlice,
   SymbolToStringTag,
@@ -31,6 +30,7 @@ const {
   TextEncoderEncode,
   TextDecoderDecode,
   TypeError,
+  getProtoGetter,
   uncurryThis,
 } = primordials;
 
@@ -49,15 +49,6 @@ const transformControllerEnqueue = uncurryThis(
 
 // Capture TransformStream.prototype accessors at bootstrap time so
 // internal reads do not go through the (user-patchable) prototype chain.
-// Uses the same validation guard pattern as getProtoGetter in primordials.ts.
-function getProtoGetter<T>(proto: object, name: string): T {
-  const desc = ObjectGetOwnPropertyDescriptor(proto, name);
-  if (desc === undefined || desc.get === undefined) {
-    throw new TypeError(`Expected accessor property '${name}' on prototype`);
-  }
-  return uncurryThis(desc.get) as T;
-}
-
 const transformStreamReadableGet = getProtoGetter<
   (stream: object) => ReadableStreamType<unknown>
 >(TransformStream.prototype, 'readable');

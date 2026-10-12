@@ -24,7 +24,6 @@ import type { CommonHelpers } from './common';
 
 const {
   ObjectDefineProperties,
-  ObjectGetOwnPropertyDescriptor,
   PromiseResolve,
   PromiseReject,
   PromiseWithResolvers,
@@ -33,6 +32,7 @@ const {
   Symbol,
   SymbolToStringTag,
   TypeError,
+  getProtoGetter,
   uncurryThis,
 } = primordials;
 
@@ -73,18 +73,9 @@ const readableControllerClose = uncurryThis(
 const readableControllerError = uncurryThis(
   ReadableStreamDefaultController.prototype.error
 ) as (controller: object, reason: unknown) => void;
-const readableControllerDesiredSizeGet = (() => {
-  const desc = ObjectGetOwnPropertyDescriptor(
-    ReadableStreamDefaultController.prototype,
-    'desiredSize'
-  );
-  if (desc === undefined || desc.get === undefined) {
-    throw new TypeError(
-      "Expected accessor property 'desiredSize' on prototype"
-    );
-  }
-  return uncurryThis(desc.get);
-})() as (controller: object) => number | null;
+const readableControllerDesiredSizeGet = getProtoGetter<
+  (controller: object) => number | null
+>(ReadableStreamDefaultController.prototype, 'desiredSize');
 const writableControllerError = uncurryThis(
   WritableStreamDefaultController.prototype.error
 ) as (controller: object, reason: unknown) => void;
