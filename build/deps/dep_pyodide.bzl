@@ -40,6 +40,7 @@ filegroup(
 # Individual wheels, so they can be embedded into the Pyodide bundle one data module at a time.
 exports_files(glob(["*"], exclude = ["BUILD.bazel"]))
 """)
+    return rctx.repo_metadata()
 
 _stdlib_wheels_repo = repository_rule(
     implementation = _stdlib_wheels_repo_impl,

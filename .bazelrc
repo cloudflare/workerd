@@ -37,10 +37,25 @@ import %workspace%/build/tools/clang_tidy/clang_tidy.bazelrc
 # Continue building locally when remote cache entries fail to materialize
 build --incompatible_remote_local_fallback_for_remote_cache
 
+# Require custom module extensions to return metadata
+common --incompatible_require_repo_extension_metadata=root
+
 # Use -isystem for cc_library includes attribute – this prevents warnings for misbehaving external
 # code. Applies to both Linux and macOS via the shared `:unix` config (see the
 # `build:linux --config=unix` / `build:macos --config=unix` lines below).
 build:unix --features=external_include_paths --host_features=external_include_paths
+
+# Enable skip_virtual_includes feature to avoid creating redundant symlinks – safe as long as
+# sandboxing is enabled so we can use this on non-Windows systems
+build:unix --features=skip_virtual_includes --host_features=skip_virtual_includes
+
+# Enable Bazel include scanning. This parses all C++ source files to detect which headers it
+# actually includes so that the file will only be recompiled when one of those headers changes, not
+# when any header that the source files's target depends on changes. This generally results in
+# better caching/significantly fewer files needing to be recompiled when headers change.
+# This can be brittle when include paths are configured based on preprocessor macros, but should be
+# fine otherwise.
+build --cc_include_scanning
 
 # Forward compatibility with future Bazel versions:
 # Disable deprecated cfg = "host" Bazel rule setting. Blocked on perfetto.
