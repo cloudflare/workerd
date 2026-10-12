@@ -78,6 +78,9 @@ struct TestFixture {
     // If set, used as the jsg::IsolateObserver for the worker's isolate instead of a no-op one.
     // Lets tests observe compilation hooks (e.g. onCompileCacheFound / onCompileCacheRejected).
     kj::Maybe<kj::Own<JsgIsolateObserver>> jsgIsolateObserver;
+    // If set, passed to the Script. The feature flags must enable the new module registry,
+    // and the registry must contain the fixture's main module, named "main".
+    kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> newModuleRegistry;
   };
 
   TestFixture(SetupParams&& params = {.useRealTimers = false});
