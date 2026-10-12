@@ -38,7 +38,8 @@ IsolateCodeCache::IsolateCodeCache(kj::Own<const CodeCacheStore> store): store(k
 void IsolateCodeCache::prepare(CodeCacheKey::Unit unit, kj::ArrayPtr<const char> utf8Source) {
   auto key = CodeCacheKey::compute(unit, utf8Source);
   prepare(key);
-  preparedSources.upsert(utf8Source.begin(), {.size = utf8Source.size(), .key = key});
+  preparedSources.upsert(
+      static_cast<const void*>(utf8Source.begin()), {.size = utf8Source.size(), .key = key});
 }
 
 void IsolateCodeCache::prepare(const CodeCacheKey& key) {
@@ -51,7 +52,7 @@ void IsolateCodeCache::prepare(const CodeCacheKey& key) {
 
 CodeCacheKey IsolateCodeCache::keyFor(
     CodeCacheKey::Unit unit, kj::ArrayPtr<const char> utf8Source) {
-  KJ_IF_SOME(prepared, preparedSources.find(utf8Source.begin())) {
+  KJ_IF_SOME(prepared, preparedSources.find(static_cast<const void*>(utf8Source.begin()))) {
     if (prepared.size == utf8Source.size() && prepared.key.unit == unit) return prepared.key;
   }
   return CodeCacheKey::compute(unit, utf8Source);
