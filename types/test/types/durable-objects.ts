@@ -27,3 +27,13 @@ expectTypeOf<RetryableDurableObject['reset']>().toEqualTypeOf<
 
 // @ts-expect-error retryable() accepts only functions.
 retryable('reset');
+
+declare const ns: DurableObjectNamespace;
+expectTypeOf(
+  ns.get(ns.idFromName('a'), { retry: { maxRetries: 2, timeoutMs: 1000 } })
+).toEqualTypeOf<DurableObjectStub>();
+expectTypeOf(
+  ns.getByName('a', { retry: { maxRetries: 0 } })
+).toEqualTypeOf<DurableObjectStub>();
+// @ts-expect-error retry fields are numbers.
+ns.get(ns.idFromName('a'), { retry: { maxRetries: '2' } });

@@ -185,9 +185,6 @@ fn durable_object_namespaces() {
         let mut designator = remote.init_durable_object_namespace();
         designator.set_class_name("Remote");
         designator.set_service_name("other");
-        let mut policy = designator.init_retry_policy();
-        policy.set_max_attempts(3);
-        policy.set_timeout_ms(5000);
     });
     let compiled = compile(&message, &actor_configs, false);
     assert_eq!(compiled.errors, Vec::<String>::new());
@@ -198,7 +195,7 @@ fn durable_object_namespaces() {
                  \"key-1\"))",
             "(name = \"CACHE\", ephemeralActorNamespace = 1)",
             "(name = \"REMOTE\", durableActorNamespace = (actorChannel = 2, uniqueKey = \
-                 \"key-2\", retryPolicy = (maxAttempts = 3, timeoutMs = 5000)))",
+                 \"key-2\"))",
         ]
     );
     assert_eq!(
