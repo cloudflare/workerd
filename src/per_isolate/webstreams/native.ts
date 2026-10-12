@@ -121,6 +121,7 @@ import type {
   RingBuffer as RingBufferType,
   RingBufferConstructor,
 } from './ring-buffer';
+import type { CommonHelpers } from './common';
 
 const {
   AbortController,
@@ -150,6 +151,7 @@ const {
 
 const { isArrayBufferView, isUint8Array, markPromiseHandled } = utils;
 
+const { isActualObject } = require('webstreams/common') as CommonHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
 };
@@ -212,10 +214,6 @@ function isNativeUnderlyingSink(sink: object): boolean {
 // symbol comes from the runtime's API-symbol registry, unreachable from
 // user code.
 const kExtractNativeSource: symbol = utils.getApiSymbol('kExtractNativeSource');
-
-function isActualObject(value: unknown): value is object {
-  return value != null && typeof value === 'object';
-}
 
 // Returns true if `source` is native-marked; false for ordinary (queued)
 // sources. Throws on a malformed marker — by the time the marker key is

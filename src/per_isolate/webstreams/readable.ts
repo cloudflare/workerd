@@ -110,6 +110,9 @@ const {
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
 
+import type { CommonHelpers } from './common';
+const { isActualObject } = require('webstreams/common') as CommonHelpers;
+
 import type { ViewExtentHelpers } from './view-extent';
 const { viewByteExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
@@ -186,10 +189,6 @@ const kPrivateSymbol = Symbol('private');
 // What an omitted (or null) dictionary argument stands for. Null-prototype:
 // WebIDL reads nothing for an omitted dictionary, so neither may we.
 const kEmptyDictionary: object = ObjectFreeze({ __proto__: null });
-
-function isActualObject(value: unknown) {
-  return value != null && typeof value === 'object';
-}
 
 // The spec's "Type(x) is Object", which INCLUDES callables -- used for the iterator
 // protocol's object checks in from() (GetIterator/IteratorNext accept function-valued

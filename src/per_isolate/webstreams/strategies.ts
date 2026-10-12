@@ -2,11 +2,11 @@
 
 // ByteLengthQueuingStrategy and CountQueuingStrategy (WHATWG Streams §7).
 
+import type { CommonHelpers } from './common';
+
 const { ObjectDefineProperties, SymbolToStringTag, TypeError } = primordials;
 
-function isActualObject(value: unknown): boolean {
-  return value != null && typeof value === 'object';
-}
+const { isActualObject } = require('webstreams/common') as CommonHelpers;
 
 // Per spec, the size function is the SAME function object for every
 // strategy instance in the realm, and its name is 'size' (method shorthand

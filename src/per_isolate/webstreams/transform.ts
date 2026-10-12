@@ -20,6 +20,7 @@ import type {
   TransformStreamDefaultController as TransformStreamDefaultControllerType,
   WritableStream as WritableStreamType,
 } from './types';
+import type { CommonHelpers } from './common';
 
 const {
   ObjectDefineProperties,
@@ -38,15 +39,13 @@ const {
 
 const { markPromiseHandled } = utils;
 
+const { isActualObject } = require('webstreams/common') as CommonHelpers;
+
 const kPrivateSymbol: symbol = Symbol('private');
 
 // What an omitted dictionary argument stands for. Null-prototype: WebIDL
 // reads nothing for an omitted dictionary, so neither may we.
 const kEmptyDictionary: object = ObjectFreeze({ __proto__: null });
-
-function isActualObject(value: unknown): boolean {
-  return value != null && typeof value === 'object';
-}
 
 function assertPrivateSymbol(symbol: symbol): void {
   if (symbol !== kPrivateSymbol) {

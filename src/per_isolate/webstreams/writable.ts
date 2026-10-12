@@ -60,6 +60,9 @@ const { nativeStreamInternals } = require('webstreams/native') as {
 };
 const { kExtractNativeSink, isNativeUnderlyingSink } = nativeStreamInternals;
 
+import type { CommonHelpers } from './common';
+const { isActualObject } = require('webstreams/common') as CommonHelpers;
+
 import type { ViewExtentHelpers } from './view-extent';
 const { viewByteLength } =
   require('webstreams/view-extent') as ViewExtentHelpers;
@@ -81,10 +84,6 @@ const kCloseMarker: symbol = Symbol('close');
 // legacy WritableStreamInternalController's Flush write-event. Never
 // user-visible.
 const kFlushMarker: symbol = Symbol('flush');
-
-function isActualObject(value: unknown): value is object {
-  return value != null && typeof value === 'object';
-}
 
 // A sink write() rejection wrapped in this marker rejects the WRITE
 // REQUEST but leaves the stream writable — the workerd-internal contract

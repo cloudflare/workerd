@@ -91,6 +91,7 @@ import type {
   RingBuffer as RingBufferType,
   RingBufferConstructor,
 } from './ring-buffer';
+import type { CommonHelpers } from './common';
 import type { ViewExtentHelpers } from './view-extent';
 
 const {
@@ -132,6 +133,7 @@ const {
   WritableStreamDefaultController,
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
+const { isActualObject } = require('webstreams/common') as CommonHelpers;
 const { viewByteExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
@@ -141,10 +143,6 @@ const { RingBuffer } = require('webstreams/ring-buffer') as {
 const writableControllerError = uncurryThis(
   WritableStreamDefaultController.prototype.error
 ) as (controller: object, reason: unknown) => void;
-
-function isActualObject(value: unknown) {
-  return value != null && typeof value === 'object';
-}
 
 // --- Bootstrap captures (byte controller methods + TextEncoder) ----------
 

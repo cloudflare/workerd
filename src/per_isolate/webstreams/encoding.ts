@@ -15,6 +15,7 @@ import type {
   ReadableStream as ReadableStreamType,
   WritableStream as WritableStreamType,
 } from './types';
+import type { CommonHelpers } from './common';
 
 const {
   ObjectDefineProperties,
@@ -39,10 +40,7 @@ const {
   TransformStream,
   TransformStreamDefaultController,
 } = require('webstreams/transform');
-
-function isActualObject(value: unknown) {
-  return value != null && typeof value === 'object';
-}
+const { isActualObject } = require('webstreams/common') as CommonHelpers;
 
 const transformControllerEnqueue = uncurryThis(
   TransformStreamDefaultController.prototype.enqueue

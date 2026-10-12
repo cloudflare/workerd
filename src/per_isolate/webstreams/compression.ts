@@ -37,6 +37,7 @@ import type {
   RingBuffer as RingBufferType,
   RingBufferConstructor,
 } from './ring-buffer';
+import type { CommonHelpers } from './common';
 import type { ViewExtentHelpers } from './view-extent';
 
 const {
@@ -68,6 +69,7 @@ const {
   WritableStreamDefaultController,
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
+const { isActualObject } = require('webstreams/common') as CommonHelpers;
 const { viewByteExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
@@ -114,10 +116,6 @@ const newCodec = utils.newCompressionCodec as (
   mode: 'compress' | 'decompress',
   format: string
 ) => CodecHandle;
-
-function isActualObject(value: unknown): boolean {
-  return value != null && typeof value === 'object';
-}
 
 // True for BufferSource chunks the codec accepts: ArrayBuffers and views,
 // excluding anything SharedArrayBuffer-backed. The Compression Streams
