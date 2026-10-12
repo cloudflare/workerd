@@ -541,11 +541,13 @@ class TransformStream<I = unknown, O = unknown> {
       startFn === undefined &&
       transformFn === undefined;
 
+    let controller: TransformStreamDefaultController<I, O> | undefined;
+    let sinkWrite: (chunk: I) => Promise<void>;
     if (isElided) {
       // ---- ELIDED PATH ----
       // No controller and no algorithm wrappers.
 
-      const sinkWrite = async (chunk: I): Promise<void> => {
+      sinkWrite = async (chunk: I): Promise<void> => {
         if (this.#backpressure) {
           await this.#backpressureChange.promise;
           const state = writableInternals.getState(this.#writable);
@@ -566,57 +568,10 @@ class TransformStream<I = unknown, O = unknown> {
         // size() then settles the write as on the standard path.
         transformStreamEnqueue(this, chunk as unknown as O);
       };
-      this.#writable = new WritableStream(
-        {
-          __proto__: null,
-          start: (c: object) => {
-            this.#writableController = c;
-            return startPromise;
-          },
-          write: sinkWrite,
-          close: () => this.#sinkClose(),
-          abort: (reason: unknown) => this.#sinkAbort(reason),
-        },
-        writableStrategy
-      );
-
-      const sourcePull = (): Promise<void> => {
-        this.#setBackpressure(false);
-        return this.#backpressureChange.promise;
-      };
-
-      // Read once, as WebIDL dictionary conversion reads each member once.
-      const rawReadableHWM = readableStrategy.highWaterMark;
-      const readableHWM = rawReadableHWM === undefined ? 0 : rawReadableHWM;
-      this.#readable = new ReadableStream(
-        {
-          __proto__: null,
-          start: (c: object) => {
-            this.#readableController = c;
-            return startPromise;
-          },
-          pull: sourcePull,
-          cancel: (reason: unknown) => this.#sourceCancel(reason),
-        },
-        {
-          __proto__: null,
-          highWaterMark: readableHWM,
-          size: readableStrategy.size,
-        }
-      );
-      if (expectedLength !== undefined) {
-        readableInternals.setControllerExpectedLength(
-          this.#readableController as object,
-          expectedLength
-        );
-      }
-      startHolder.resolve();
     } else {
       // ---- STANDARD PATH (transformer has algorithms) ----
 
-      const controller = new TransformStreamDefaultController<I, O>(
-        kPrivateSymbol
-      );
+      controller = new TransformStreamDefaultController<I, O>(kPrivateSymbol);
       transformStreamDefaultControllerInit(controller, this);
       this.#controller = controller;
 
@@ -642,7 +597,7 @@ class TransformStream<I = unknown, O = unknown> {
       this.#flushAlgorithm = algorithms.flush;
       this.#cancelAlgorithm = algorithms.cancel;
 
-      const sinkWrite = async (chunk: I): Promise<void> => {
+      sinkWrite = async (chunk: I): Promise<void> => {
         if (this.#backpressure) {
           await this.#backpressureChange.promise;
           const state = writableInternals.getState(this.#writable);
@@ -679,51 +634,57 @@ class TransformStream<I = unknown, O = unknown> {
           }
         ) as Promise<void>;
       };
-      this.#writable = new WritableStream(
-        {
-          __proto__: null,
-          start: (c: object) => {
-            this.#writableController = c;
-            return startPromise;
-          },
-          write: sinkWrite,
-          close: () => this.#sinkClose(),
-          abort: (reason: unknown) => this.#sinkAbort(reason),
-        },
-        writableStrategy
-      );
+    }
 
-      const sourcePull = (): Promise<void> => {
-        this.#setBackpressure(false);
-        return this.#backpressureChange.promise;
-      };
-      // Read once, as WebIDL dictionary conversion reads each member once.
-      const rawReadableHWM = readableStrategy.highWaterMark;
-      const readableHWM = rawReadableHWM === undefined ? 0 : rawReadableHWM;
-      this.#readable = new ReadableStream(
-        {
-          __proto__: null,
-          start: (c: object) => {
-            this.#readableController = c;
-            return startPromise;
-          },
-          pull: sourcePull,
-          cancel: (reason: unknown) => this.#sourceCancel(reason),
+    // --- The inner streams (both paths) ---
+    this.#writable = new WritableStream(
+      {
+        __proto__: null,
+        start: (c: object) => {
+          this.#writableController = c;
+          return startPromise;
         },
-        {
-          __proto__: null,
-          highWaterMark: readableHWM,
-          size: readableStrategy.size,
-        }
-      );
-      if (expectedLength !== undefined) {
-        readableInternals.setControllerExpectedLength(
-          this.#readableController as object,
-          expectedLength
-        );
+        write: sinkWrite,
+        close: () => this.#sinkClose(),
+        abort: (reason: unknown) => this.#sinkAbort(reason),
+      },
+      writableStrategy
+    );
+
+    const sourcePull = (): Promise<void> => {
+      this.#setBackpressure(false);
+      return this.#backpressureChange.promise;
+    };
+    // Read once, as WebIDL dictionary conversion reads each member once.
+    const rawReadableHWM = readableStrategy.highWaterMark;
+    const readableHWM = rawReadableHWM === undefined ? 0 : rawReadableHWM;
+    this.#readable = new ReadableStream(
+      {
+        __proto__: null,
+        start: (c: object) => {
+          this.#readableController = c;
+          return startPromise;
+        },
+        pull: sourcePull,
+        cancel: (reason: unknown) => this.#sourceCancel(reason),
+      },
+      {
+        __proto__: null,
+        highWaterMark: readableHWM,
+        size: readableStrategy.size,
       }
+    );
+    if (expectedLength !== undefined) {
+      readableInternals.setControllerExpectedLength(
+        this.#readableController as object,
+        expectedLength
+      );
+    }
 
-      // --- Start the transformer ---
+    // --- Start the transformer (the elided path has none to start) ---
+    if (controller === undefined) {
+      startHolder.resolve();
+    } else {
       const startResult: unknown =
         startFn === undefined
           ? undefined
