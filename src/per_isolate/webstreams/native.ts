@@ -74,9 +74,9 @@
 //     running (the reader was released mid-pull); both branches must then
 //     deliver the bytes that read produces, ahead of anything later.
 //   - expectedLength (non-standard extension, optional): the TOTAL bytes
-//     the source promises to produce — a non-negative bigint or integer
-//     number that fits in a uint64 (normalized to bigint), read once at
-//     construction.
+//     the source promises to produce, a uint64 (the C++ source answers a
+//     bigint), read once at construction and converted to a bigint by
+//     normalizeExpectedLength (common.ts).
 //     undefined = unknown (C++ uses chunked encoding). The conduit
 //     enforces the exact-total contract: overflow at delivery and
 //     underflow at source-initiated close (including min-read
@@ -147,7 +147,8 @@ const {
 
 const { isArrayBufferView, isUint8Array, markPromiseHandled } = utils;
 
-const { isActualObject } = require('webstreams/common') as CommonHelpers;
+const { isActualObject, normalizeExpectedLength } =
+  require('webstreams/common') as CommonHelpers;
 const { viewByteExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
@@ -239,40 +240,6 @@ function isNativeUnderlyingSource(source: object): boolean {
 export interface NativeStreamHooks {
   closeStream: () => void;
   errorStream: (reason: unknown) => void;
-}
-
-// Maximum expectedLength: uint64 max. The value is destined for the C++
-// bridge (Content-Length is carried as uint64_t through the C++/KJ HTTP
-// layer), so larger totals are not representable. Mirrors the
-// FixedLengthStream constructor validation in identity.ts.
-const MAX_UINT64 = 0xffff_ffff_ffff_ffffn;
-
-// Normalizes the non-standard `expectedLength` extension property: the
-// TOTAL number of bytes the source promises to produce over its
-// lifetime (undefined = unknown; C++ then uses chunked encoding).
-// Accepts a bigint or integer number in [0, 2^64) — totals can exceed
-// MAX_SAFE_INTEGER but must fit in a uint64. Shape violations (wrong
-// type) are TypeErrors; value violations (non-integer, negative,
-// > uint64 max) are RangeErrors, matching FixedLengthStream
-// (identity.ts). A near-duplicate (pending consolidation; no uint64
-// cap yet) lives in readable.ts for the queued byte controller.
-function normalizeExpectedLength(value: unknown): bigint | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== 'bigint' && typeof value !== 'number') {
-    throw new TypeError(
-      'expectedLength must be a non-negative bigint or integer'
-    );
-  }
-  // BigInt() conversion rejects NaN, ±Infinity, and fractions
-  // (RangeError) naturally. The typeof gate above is what prevents
-  // BigInt() string/object coercion (e.g. '5' → 5n) from sneaking in.
-  const normalized = typeof value === 'bigint' ? value : BigInt(value);
-  if (normalized < 0n || normalized > MAX_UINT64) {
-    throw new RangeError(
-      'expectedLength must be a non-negative integer that fits in a uint64'
-    );
-  }
-  return normalized;
 }
 
 // ---------------------------------------------------------------------------

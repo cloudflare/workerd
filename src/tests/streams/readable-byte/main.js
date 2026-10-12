@@ -235,6 +235,7 @@ export {
 
 export {
   drainingReaderSweepsByteBacklog,
+  drainingReaderByteExpectedLengthPassThrough,
   drainingReaderDrivesBytePull,
   drainingReaderByteErrorPropagation,
   drainingReaderByteCancelReachesSource,

@@ -240,9 +240,9 @@ pattern; a change to either side fails its cell.
 
 | # | Area | C++ | TypeScript | Pinned in |
 | --- | --- | --- | --- | --- |
-| 1 | FLS invalid-length error type | `TypeError` for every invalid length | `RangeError` (range/non-integer, including `-0.5` and `Infinity`), `TypeError` (wrong type) | `fixedLengthInvalidLengths` |
-| 2 | FLS length coercion | truncates non-integers (`0.5`→0, `2.9`→2); converts numeric strings (`'10'`→10), `null` (→0), booleans (`true`→1) and objects (`valueOf`, run once) through ToNumber | rejects all of them | `fixedLengthCoercionDivergence` |
-| 3 | FLS length range | rejects > 2^53−1 (`TypeError`), after reading the strategy | accepts full uint64 | `fixedLengthLengthsAboveMaxSafeInteger` |
+| 1 | (no divergence) FLS invalid lengths: every one is a `TypeError` (missing, negative, `-0.5`, NaN, `Infinity`, a bigint outside the uint64 range, a value that does not convert to a number) | same | same | `fixedLengthInvalidLengths` (parity) |
+| 2 | (no divergence) FLS length coercion, as any `uint64_t` converts: non-integers truncate (`0.5`→0, `2.9`→2); numeric strings (`'10'`→10), `null` (→0), booleans (`true`→1) and objects (`valueOf`, run once) convert through ToNumber | same | same | `fixedLengthLengthCoercion` (parity) |
+| 3 | (no divergence) FLS length range: above 2^53−1 is a `TypeError` ("FixedLengthStream requires an integer expected length less than 2^53."), raised after the strategy has been read | same | same | `fixedLengthLengthsAboveMaxSafeInteger` (parity) |
 | 4 | `TransformStream` inheritance | `its instanceof TransformStream` is true | false (deliberate) | `identityBrandChecks` |
 | 5 | Accessor placement | inherited from `TransformStream.prototype` | own on `IdentityTransformStream.prototype` | `propertyPlacement` |
 | 6 | Invalid chunk aftermath | stream unaffected, remains usable | same — the sink signals the rejection through the non-fatal write-rejection channel; the write rejects, the stream survives (the per-write contract of the internal transforms) | `rejectsNumberChunk` |
@@ -271,7 +271,7 @@ pattern; a change to either side fails its cell.
 | Module | Asserts |
 | --- | --- |
 | `api-surface.js` | toStringTag branding; `FixedLengthStream` subclassing; `readable`/`writable` are `ReadableStream`/`WritableStream` instances, stable, enumerable prototype accessors (placement per ledger #5); constructor source text (native code under C++, not under TS); accessor brand checks |
-| `construction.js` | valid lengths (0, 5, −0.0, `MAX_SAFE_INTEGER`, bigints, with strategy); coerced length observable via HWM cap; invalid lengths throw (types per ledger #1–3); inheritance (ledger #4); a user-supplied strategy `size` is never invoked (ITS and FLS, with and without explicit HWM); the strategy argument converts as a WebIDL dictionary (undefined/null mean none, other non-objects throw `TypeError`); `highWaterMark` read and converted once by both classes (numeric strings, booleans, null, `valueOf`), its conversion per ledger #24 |
+| `construction.js` | valid lengths (0, 5, −0.0, `MAX_SAFE_INTEGER`, bigints, with strategy); coerced length observable via HWM cap; invalid, coerced and above-2^53−1 lengths, the same in both (ledger #1–3); inheritance (ledger #4); a user-supplied strategy `size` is never invoked (ITS and FLS, with and without explicit HWM); the strategy argument converts as a WebIDL dictionary (undefined/null mean none, other non-objects throw `TypeError`); `highWaterMark` read and converted once by both classes (numeric strings, booleans, null, `valueOf`), its conversion per ledger #24 |
 | `chunk-types.js` | accepted: `Uint8Array`, `ArrayBuffer`, `DataView` subrange, string→UTF-8 (a NUL truncates under C++, ledger #25), subarray offsets; rejected: numbers, plain objects (`TypeError`; per-write — the stream survives, ledger #6); an invalid chunk queued behind valid writes surfaces its error in FIFO order — earlier writes still deliver and later traffic still flows in both implementations |
 | `zero-length-writes.js` | empty view / buffer / string are non-closing no-ops; so is an undefined chunk (`write(undefined)`, `write()`; ITS, FLS, with a byte highWaterMark) |
 | `copy-semantics.js` | delivered chunk never aliases the source; source mutation after delivery is invisible; source is not detached |

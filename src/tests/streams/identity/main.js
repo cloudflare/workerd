@@ -22,7 +22,7 @@ export {
   identityBrandChecks,
   fixedLengthValidLengths,
   fixedLengthInvalidLengths,
-  fixedLengthCoercionDivergence,
+  fixedLengthLengthCoercion,
   fixedLengthLengthsAboveMaxSafeInteger,
   userStrategySizeNeverInvoked,
   strategyArgumentDictionaryConversion,

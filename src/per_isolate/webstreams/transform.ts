@@ -38,8 +38,13 @@ const {
 
 const { markPromiseHandled } = utils;
 
-const { isActualObject, kNullProtoObject, kEnumerable, toStringTagProperty } =
-  require('webstreams/common') as CommonHelpers;
+const {
+  isActualObject,
+  kNullProtoObject,
+  kEnumerable,
+  normalizeExpectedLength,
+  toStringTagProperty,
+} = require('webstreams/common') as CommonHelpers;
 
 const kPrivateSymbol: symbol = Symbol('private');
 
@@ -487,7 +492,7 @@ class TransformStream<I = unknown, O = unknown> {
     // will produce (undefined = unknown). Advertised through the
     // readable's controller so the C++ bridge derives a Content-Length
     // for bodies built from this transform; not enforced here.
-    const expectedLength = readableInternals.normalizeExpectedLength(
+    const expectedLength = normalizeExpectedLength(
       (transformer as { expectedLength?: unknown }).expectedLength
     );
     const flushFn = transformer.flush;
