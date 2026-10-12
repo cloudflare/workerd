@@ -84,9 +84,17 @@ constexpr kj::StringPtr MAIN_SCRIPT =
 struct CountingObserver final: public JsgIsolateObserver {
   mutable uint found = 0;
   mutable uint generated = 0;
+  mutable uint bundleCompilationDepth = 0;
+
+  kj::Own<void> onEsmCompilationStart(v8::Isolate*, kj::StringPtr, Option option) const override {
+    if (option != Option::BUNDLE) return {};
+    ++bundleCompilationDepth;
+    return kj::heap(kj::defer([this]() { --bundleCompilationDepth; }));
+  }
 
   void onCompileCacheFound(v8::Isolate*) const override {
-    ++found;
+    // Bootstrap scripts use the same observer; count only worker bundle hits here.
+    if (bundleCompilationDepth > 0) ++found;
   }
   void onCompileCacheGenerated(v8::Isolate*) const override {
     ++generated;
