@@ -26,7 +26,7 @@ NonModuleScript NonModuleScript::compile(jsg::Lock& js, kj::StringPtr code, kj::
 NonModuleScript NonModuleScript::compileWorkerScript(
     jsg::Lock& js, kj::StringPtr code, kj::StringPtr name) {
   KJ_IF_SOME(codeCache, IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
-    auto key = CodeCacheKey::compute(CodeCacheKey::Unit::CLASSIC_SCRIPT, code);
+    auto key = codeCache.keyFor(CodeCacheKey::Unit::CLASSIC_SCRIPT, code);
     v8::ScriptOrigin origin(js.str(name));
     return NonModuleScript(js,
         check(codeCache.compileScript(js.v8Isolate, key, js.str(code), origin,

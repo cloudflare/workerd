@@ -426,10 +426,11 @@ v8::MaybeLocal<v8::Module> compileBundleModule(jsg::Lock& js,
     const CompilationObserver& observer) {
   auto contentStr = jsg::v8Str(js.v8Isolate, content);
   KJ_IF_SOME(codeCache, IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
-    auto key = CodeCacheKey::compute(CodeCacheKey::Unit::LEGACY_REGISTRY_ESM, content);
+    auto key = codeCache.keyFor(CodeCacheKey::Unit::LEGACY_REGISTRY_ESM, content);
     return codeCache.compileModule(js.v8Isolate, key, contentStr, origin, observer);
   }
-  return compileWithStaticCache(js, contentStr, origin, nullptr);
+  v8::ScriptCompiler::Source source(contentStr, origin);
+  return v8::ScriptCompiler::CompileModule(js.v8Isolate, &source);
 }
 
 v8::Local<v8::Module> createSyntheticModule(
