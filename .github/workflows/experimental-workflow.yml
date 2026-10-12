@@ -1,20 +1,76 @@
-name: Experimental Workflow
+name: Blob cage focused verification
 on:
   workflow_dispatch:
 
-# You can modify this workflow in order to verify your changes to Github Actions on a branch.
-# DO NOT MERGE THESE CHANGES TO MAIN
-# This workflow exists to work around a limitation in Github Actions. You can only use 
-# workflow_dispatch on files that exist in main. However, once the file exists, you can dispatch to
-# your branch and make sure changes work.
-
+# CI-only branch: the parent commit is the PR head. Do not merge this workflow change.
 permissions:
-  contents: none
+  contents: read
+  actions: write
 
 jobs:
-  experiment:
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Hello World
-        shell: bash
-        run: echo Hello World
+  focused-asan:
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ubuntu-22.04-16core
+      os_name: linux
+      arch_name: X64
+      suffix: -asan-focused
+      extra_bazel_args: '--config=ci-test --config=ci-linux-asan --runs_per_test=5 --flaky_test_attempts=1'
+      build_target: >-
+        //src/workerd/api:blob-test@
+        //src/workerd/api:blob-test@all-autogates
+        //src/workerd/api:js-readable-stream-test@
+        //src/workerd/api:js-readable-stream-test@all-autogates
+        //src/workerd/api/tests:blob-test@
+        //src/workerd/api/tests:blob-test@all-compat-flags
+        //src/workerd/api/tests:blob-test@all-autogates
+        //src/workerd/api/tests:form-data-test@
+        //src/workerd/api/tests:form-data-test@all-compat-flags
+        //src/workerd/api/tests:form-data-test@all-autogates
+        //src/workerd/api/tests:r2-test@
+        //src/workerd/api/tests:r2-test@all-compat-flags
+        //src/workerd/api/tests:r2-test@all-autogates
+        //src/workerd/api/tests:connect-neuter-test@
+        //src/workerd/api/tests:connect-neuter-test@all-compat-flags
+        //src/workerd/api/tests:connect-neuter-test@all-autogates
+        //src/workerd/server/tests:server-harness-test
+        //src/workerd/server/tests/udp-connect:udp-connect-test
+      test_target: >-
+        //src/workerd/api:blob-test@
+        //src/workerd/api:blob-test@all-autogates
+        //src/workerd/api:js-readable-stream-test@
+        //src/workerd/api:js-readable-stream-test@all-autogates
+        //src/workerd/api/tests:blob-test@
+        //src/workerd/api/tests:blob-test@all-compat-flags
+        //src/workerd/api/tests:blob-test@all-autogates
+        //src/workerd/api/tests:form-data-test@
+        //src/workerd/api/tests:form-data-test@all-compat-flags
+        //src/workerd/api/tests:form-data-test@all-autogates
+        //src/workerd/api/tests:r2-test@
+        //src/workerd/api/tests:r2-test@all-compat-flags
+        //src/workerd/api/tests:r2-test@all-autogates
+        //src/workerd/api/tests:connect-neuter-test@
+        //src/workerd/api/tests:connect-neuter-test@all-compat-flags
+        //src/workerd/api/tests:connect-neuter-test@all-autogates
+        //src/workerd/server/tests:server-harness-test
+        //src/workerd/server/tests/udp-connect:udp-connect-test
+      upload_test_logs: true
+    secrets: inherit
+
+  focused-coverage:
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ubuntu-22.04-16core
+      os_name: linux
+      arch_name: X64
+      suffix: -coverage-focused
+      extra_bazel_args: '--config=ci-linux-common --config=ci-limit-storage --config=coverage --test_env=CI=true --config=wpt-test --runs_per_test=5 --flaky_test_attempts=1'
+      build_target: >-
+        //src/workerd/server/tests:server-harness-test
+        //src/workerd/server/tests/udp-connect:udp-connect-test
+      test_target: >-
+        //src/workerd/server/tests:server-harness-test
+        //src/workerd/server/tests/udp-connect:udp-connect-test
+      run_coverage: true
+      upload_test_logs: true
+    secrets: inherit
