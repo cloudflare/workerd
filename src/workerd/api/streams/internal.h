@@ -108,6 +108,7 @@ class ReadableStreamInternalController: public ReadableStreamController, public 
   jsg::Promise<kj::String> readAllText(jsg::Lock& js, uint64_t limit) override;
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override;
+  kj::Maybe<uint64_t> tryGetLength(kj::ArrayPtr<const StreamEncoding> encodings) override;
 
   kj::Promise<DeferredProxy<void>> pumpTo(
       jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) override;

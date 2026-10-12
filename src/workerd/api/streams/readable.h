@@ -453,6 +453,7 @@ public:
   jsg::Ref<ReadableStream> detach(jsg::Lock& js, bool ignoreDisturbed=false);
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding);
+  kj::Maybe<uint64_t> tryGetLength(kj::ArrayPtr<const StreamEncoding> encodings);
 
   // A potentially optimized version of pipe that sends this stream's data to the given
   // sink. The entire stream is consumed. The ReadableStream will be left locked and
