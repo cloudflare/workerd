@@ -161,6 +161,26 @@ bool isExceptionFromInputGateBroken(kj::StringPtr description);
 
 constexpr kj::Exception::DetailTypeId EXCEPTION_IS_USER_ERROR = 0x82aff7d637c30e47ull;
 
+// Marks a failure as transient, so the operation is worth retrying. isRetryable() already treats
+// every DISCONNECTED failure as transient, so the marker only changes retries for other types. It
+// says nothing about whether a retry is safe: for actor calls, delivery markers such as
+// REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID decide that. Unrelated to `retryable()` in
+// `cloudflare:durable-objects`, which marks a method as safe to run more than once. The payload
+// is a zero-length array (marker only).
+constexpr kj::Exception::DetailTypeId EXCEPTION_IS_TRANSIENT = 0xb9e1d0c9dba8b3bbull;
+
+inline void markTransient(kj::Exception& exception) {
+  exception.setDetail(EXCEPTION_IS_TRANSIENT, kj::heapArray<kj::byte>(0));
+}
+
+// Whether the operation that failed with `exception` is worth retrying. DISCONNECTED exceptions are
+// retryable by convention; EXCEPTION_IS_TRANSIENT extends that to other types. JavaScript sees
+// these errors with `retryable` set to true.
+inline bool isRetryable(const kj::Exception& exception) {
+  return exception.getType() == kj::Exception::Type::DISCONNECTED ||
+      exception.getDetail(EXCEPTION_IS_TRANSIENT) != kj::none;
+}
+
 // Set when a Durable Object execution was terminated by a call to state.abort().
 constexpr kj::Exception::DetailTypeId EXCEPTION_DURABLE_OBJECT_ABORT = 0x2900166d61b404a7ull;
 

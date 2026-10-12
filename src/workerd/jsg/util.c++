@@ -224,9 +224,13 @@ DecodedException decodeTunneledException(
       setRemoteError(isolate, result.handle);
     }
 
-    if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
+    // A transient OVERLOADED failure gets both properties. Converting the error back to a
+    // kj::Exception keeps OVERLOADED and drops the transient marker, so it is not retried after
+    // passing through JavaScript, which avoids adding load to an overloaded service.
+    if (isRetryable(exception)) {
       setRetryableError(isolate, result.handle);
-    } else if (exception.getType() == kj::Exception::Type::OVERLOADED) {
+    }
+    if (exception.getType() == kj::Exception::Type::OVERLOADED) {
       setOverloadedError(isolate, result.handle);
     }
 
