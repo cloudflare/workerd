@@ -520,7 +520,7 @@ class JsRpcCallRetryState final: public kj::Refcounted {
       observer->markPipelineCommitted();
     }
     KJ_IF_SOME(fulfiller, backoffCommitFulfiller) {
-      setBrokenPipeline(KJ_ASSERT_NONNULL(retryState)->getOriginalDisconnect());
+      setBrokenPipeline(KJ_ASSERT_NONNULL(retryState)->getOriginalFailure());
       fulfiller->fulfill();
       backoffCommitFulfiller = kj::none;
     }
@@ -1109,7 +1109,7 @@ JsRpcCallAttemptPromise handleFailedJsRpcCallAttempt(
     state->finishBackoffWait();
     if (state->isCommitted()) {
       auto exception = state->getRetryState().handleCommittedAttemptFailure(
-          state->getRetryState().getOriginalDisconnect(),
+          state->getRetryState().getOriginalFailure(),
           ActorRetryStopReason::PIPELINE_COMMITTED_IN_BACKOFF);
       return finishFailedJsRpcCall(js, *state, kj::mv(exception));
     }
