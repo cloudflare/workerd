@@ -27,10 +27,10 @@ bazel_dep(name = "brotli", version = "1.2.0.bcr.3")
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
-    sha256 = "6d1ab3e79be93f5388473d2e2b9b475d60fde9db20626d2d5c13ea5b8b499bde",
-    strip_prefix = "capnproto-capnproto-e866bdb/c++",
+    sha256 = "9ee3c9c1d193e784d7413b5399caf77110e1ed3d8423adb42e64759e7734842b",
+    strip_prefix = "capnproto-capnproto-35e6067/c++",
     type = "tgz",
-    url = "https://github.com/capnproto/capnproto/tarball/e866bdbaa3078a4bda9e4287d2d4a773c0986902",
+    url = "https://github.com/capnproto/capnproto/tarball/35e606794552c0a318d41d54488b64f2c5eaf03e",
 )
 use_repo(http, "capnp-cpp")
 
@@ -158,4 +158,4 @@ git_override(
 )
 
 # zstd
-bazel_dep(name = "zstd", version = "1.5.7.bcr.2")
+bazel_dep(name = "zstd", version = "1.5.7.bcr.3")
