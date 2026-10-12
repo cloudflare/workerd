@@ -1,20 +1,64 @@
-name: Experimental Workflow
+name: Code cache focused verification
 on:
   workflow_dispatch:
 
-# You can modify this workflow in order to verify your changes to Github Actions on a branch.
-# DO NOT MERGE THESE CHANGES TO MAIN
-# This workflow exists to work around a limitation in Github Actions. You can only use 
-# workflow_dispatch on files that exist in main. However, once the file exists, you can dispatch to
-# your branch and make sure changes work.
-
+# CI-only branch; its parent is the PR head. Do not merge this workflow change.
 permissions:
-  contents: none
+  contents: read
+  actions: write
 
 jobs:
-  experiment:
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Hello World
-        shell: bash
-        run: echo Hello World
+  focused-asan:
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ubuntu-22.04-16core
+      os_name: linux
+      arch_name: X64
+      suffix: -focused-asan
+      extra_bazel_args: '--config=ci-test --config=ci-linux-asan --runs_per_test=5 --flaky_test_attempts=1'
+      build_target: >-
+        //src/workerd/jsg:code-cache-test@
+        //src/workerd/jsg:code-cache-test@all-autogates
+        //src/workerd/io:worker-code-cache-test@
+        //src/workerd/io:worker-code-cache-test@all-autogates
+      test_target: >-
+        //src/workerd/jsg:code-cache-test@
+        //src/workerd/jsg:code-cache-test@all-autogates
+        //src/workerd/io:worker-code-cache-test@
+        //src/workerd/io:worker-code-cache-test@all-autogates
+      upload_test_logs: true
+    secrets: inherit
+
+  focused-coverage:
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ubuntu-22.04-16core
+      os_name: linux
+      arch_name: X64
+      suffix: -focused-coverage
+      extra_bazel_args: '--config=ci-linux-common --config=ci-limit-storage --config=coverage --test_env=CI=true --config=wpt-test --test_tag_filters= --runs_per_test=5 --flaky_test_attempts=1'
+      build_target: >-
+        //src/workerd/jsg:code-cache-test@
+        //src/workerd/jsg:code-cache-test@all-autogates
+        //src/workerd/io:worker-code-cache-test@
+        //src/workerd/io:worker-code-cache-test@all-autogates
+      test_target: >-
+        //src/workerd/jsg:code-cache-test@
+        //src/workerd/jsg:code-cache-test@all-autogates
+        //src/workerd/io:worker-code-cache-test@
+        //src/workerd/io:worker-code-cache-test@all-autogates
+      upload_test_logs: true
+      run_coverage: true
+    secrets: inherit
+  benchmark:
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ubuntu-22.04-16core
+      os_name: linux
+      arch_name: X64
+      suffix: -code-cache-benchmark
+      extra_bazel_args: '--config=ci-test --config=ci-linux --test_output=all --flaky_test_attempts=1'
+      build_target: //src/workerd/jsg:code-cache-benchmark-test@
+      test_target: //src/workerd/jsg:code-cache-benchmark-test@
+      upload_test_logs: true
+    secrets: inherit
