@@ -40,7 +40,8 @@ const {
   TransformStream,
   TransformStreamDefaultController,
 } = require('webstreams/transform');
-const { isActualObject } = require('webstreams/common') as CommonHelpers;
+const { isActualObject, kEnumerable, toStringTagProperty } =
+  require('webstreams/common') as CommonHelpers;
 
 const transformControllerEnqueue = uncurryThis(
   TransformStreamDefaultController.prototype.enqueue
@@ -252,20 +253,12 @@ class TextDecoderStream {
   }
 }
 
-const kEnumerable = { __proto__: null, enumerable: true };
-
 ObjectDefineProperties(TextEncoderStream.prototype, {
   __proto__: null,
   encoding: kEnumerable,
   readable: kEnumerable,
   writable: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'TextEncoderStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('TextEncoderStream'),
 });
 
 ObjectDefineProperties(TextDecoderStream.prototype, {
@@ -275,13 +268,7 @@ ObjectDefineProperties(TextDecoderStream.prototype, {
   ignoreBOM: kEnumerable,
   readable: kEnumerable,
   writable: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'TextDecoderStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('TextDecoderStream'),
 });
 
 module.exports = {

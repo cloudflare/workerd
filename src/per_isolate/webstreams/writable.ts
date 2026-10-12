@@ -61,7 +61,8 @@ const { nativeStreamInternals } = require('webstreams/native') as {
 const { kExtractNativeSink, isNativeUnderlyingSink } = nativeStreamInternals;
 
 import type { CommonHelpers } from './common';
-const { isActualObject } = require('webstreams/common') as CommonHelpers;
+const { isActualObject, kNullProtoObject, kEnumerable, toStringTagProperty } =
+  require('webstreams/common') as CommonHelpers;
 
 import type { ViewExtentHelpers } from './view-extent';
 const { viewByteLength } =
@@ -73,9 +74,6 @@ const { RingBuffer } = require('webstreams/ring-buffer') as {
 
 const kPrivateSymbol: symbol = Symbol('private');
 
-// What an omitted dictionary argument stands for. Null-prototype: WebIDL
-// reads nothing for an omitted dictionary, so neither may we.
-const kEmptyDictionary: object = ObjectFreeze({ __proto__: null });
 // Marker for a queued close request in the controller's FIFO.
 const kCloseMarker: symbol = Symbol('close');
 // Marker for a queued flush request in the controller's FIFO. flush() is a
@@ -840,8 +838,8 @@ class WritableStream<W = unknown> {
   }
 
   constructor(
-    underlyingSink: UnderlyingSink<W> = kEmptyDictionary as UnderlyingSink<W>,
-    strategy: QueuingStrategy<W> = kEmptyDictionary as QueuingStrategy<W>
+    underlyingSink: UnderlyingSink<W> = kNullProtoObject as UnderlyingSink<W>,
+    strategy: QueuingStrategy<W> = kNullProtoObject as QueuingStrategy<W>
   ) {
     // The C++-recognition brand (see kWritableStreamBrand). Stamped first
     // so every instance carries it regardless of construction path.
@@ -1766,8 +1764,6 @@ function writerCloseWithErrorPropagation<W>(
   return writerCloseInternal(writer);
 }
 
-const kEnumerable = { __proto__: null, enumerable: true };
-
 ObjectDefineProperties(WritableStream, {
   __proto__: null,
   length: { __proto__: null, value: 0 },
@@ -1782,13 +1778,7 @@ ObjectDefineProperties(WritableStream.prototype, {
   abort: kEnumerable,
   close: kEnumerable,
   getWriter: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'WritableStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('WritableStream'),
 });
 ObjectDefineProperties(WritableStreamDefaultWriter.prototype, {
   __proto__: null,
@@ -1799,25 +1789,13 @@ ObjectDefineProperties(WritableStreamDefaultWriter.prototype, {
   close: kEnumerable,
   write: kEnumerable,
   releaseLock: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'WritableStreamDefaultWriter',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('WritableStreamDefaultWriter'),
 });
 ObjectDefineProperties(WritableStreamDefaultController.prototype, {
   __proto__: null,
   signal: kEnumerable,
   error: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'WritableStreamDefaultController',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('WritableStreamDefaultController'),
 });
 
 // ---------------------------------------------------------------------------

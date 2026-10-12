@@ -137,7 +137,7 @@ connection.
   plus that internal entry.
 - Every dictionary the implementation builds itself — the sources, sinks,
   strategies and transformers of the internal pairs, and the stand-in for
-  an omitted argument (`kEmptyDictionary`) — is null-prototype, so a
+  an omitted argument (`kNullProtoObject`) — is null-prototype, so a
   polluted `Object.prototype` cannot supply members. Members of the C++
   native source are read with `declaresMember`, which stops before
   `Object.prototype`. Copies of internal bytes use `cloneArrayBuffer`

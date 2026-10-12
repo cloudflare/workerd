@@ -111,7 +111,8 @@ const {
 } = require('webstreams/writable');
 
 import type { CommonHelpers } from './common';
-const { isActualObject } = require('webstreams/common') as CommonHelpers;
+const { isActualObject, kNullProtoObject, kEnumerable, toStringTagProperty } =
+  require('webstreams/common') as CommonHelpers;
 
 import type { ViewExtentHelpers } from './view-extent';
 const { viewByteExtent } =
@@ -185,10 +186,6 @@ function makeCompositeCancelReason(reasons: unknown[]): AggregateError {
 }
 
 const kPrivateSymbol = Symbol('private');
-
-// What an omitted (or null) dictionary argument stands for. Null-prototype:
-// WebIDL reads nothing for an omitted dictionary, so neither may we.
-const kEmptyDictionary: object = ObjectFreeze({ __proto__: null });
 
 // The spec's "Type(x) is Object", which INCLUDES callables -- used for the iterator
 // protocol's object checks in from() (GetIterator/IteratorNext accept function-valued
@@ -640,13 +637,11 @@ const ReadableStreamAsyncIteratorPrototype = ObjectSetPrototypeOf(
   },
   AsyncIteratorPrototype
 );
-ObjectDefineProperty(ReadableStreamAsyncIteratorPrototype, SymbolToStringTag, {
-  __proto__: null,
-  value: 'ReadableStream AsyncIterator',
-  writable: false,
-  enumerable: false,
-  configurable: true,
-});
+ObjectDefineProperty(
+  ReadableStreamAsyncIteratorPrototype,
+  SymbolToStringTag,
+  toStringTagProperty('ReadableStream AsyncIterator')
+);
 // ---- end async iterator prototype ------------------------------------------
 
 class ReadableStreamReaderBase<R> {
@@ -1174,7 +1169,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
 
   read<T extends ArrayBufferView>(
     view: T,
-    options: ReadableStreamBYOBReaderReadOptions = kEmptyDictionary as ReadableStreamBYOBReaderReadOptions
+    options: ReadableStreamBYOBReaderReadOptions = kNullProtoObject as ReadableStreamBYOBReaderReadOptions
   ): Promise<ReadableStreamReadResult<T>> {
     try {
       return this.#read(view, options);
@@ -3010,7 +3005,7 @@ class ReadableStreamDrainingReader<R> {
   // strategy size units — bytes for byte streams). Always makes progress:
   // waits for at least one chunk when nothing is buffered.
   async read(
-    options: { maxSize?: number } = kEmptyDictionary
+    options: { maxSize?: number } = kNullProtoObject
   ): Promise<DrainingReadResult<R>> {
     const stream = getReaderStream<R>(this);
     if (stream === undefined) {
@@ -3046,7 +3041,7 @@ interface ConvertedPipeOptions {
 // piping/throwing-options.any.js).
 function convertPipeOptions(options: unknown): ConvertedPipeOptions {
   // WebIDL: null and undefined become {}.
-  if (options == null) options = kEmptyDictionary;
+  if (options == null) options = kNullProtoObject;
   if (!isActualObject(options)) {
     throw new TypeError('Pipe options must be an object');
   }
@@ -3989,7 +3984,7 @@ class ReadableStream<R> {
     readableStreamPipeTo = <R>(
       source: ReadableStream<R>,
       destination: WritableStreamType<R>,
-      options: unknown = kEmptyDictionary
+      options: unknown = kNullProtoObject
     ): Promise<void> => {
       try {
         // WebIDL argument conversion first: the destination brand check,
@@ -4583,8 +4578,8 @@ class ReadableStream<R> {
   }
 
   constructor(
-    underlyingSource: UnderlyingSource<R> = kEmptyDictionary as UnderlyingSource<R>,
-    strategy: QueuingStrategy<R> = kEmptyDictionary as QueuingStrategy<R>
+    underlyingSource: UnderlyingSource<R> = kNullProtoObject as UnderlyingSource<R>,
+    strategy: QueuingStrategy<R> = kNullProtoObject as QueuingStrategy<R>
   ) {
     // The C++-recognition brand (see kReadableStreamBrand). Stamped before
     // the early returns below so every instance carries it: internal
@@ -4741,7 +4736,7 @@ class ReadableStream<R> {
   }
 
   getReader(
-    options: { mode?: 'byob' } | null = kEmptyDictionary
+    options: { mode?: 'byob' } | null = kNullProtoObject
   ): ReadableStreamReaderType<R> {
     assertIsReadableStream(this);
     // WebIDL dictionary conversion: null and undefined become {},
@@ -4767,7 +4762,7 @@ class ReadableStream<R> {
     transform: TransformStreamType<R, T>,
     // WebIDL: optional dictionary — null/undefined both become {}.
     // The default keeps Function.length at 1 (IDL harness check).
-    options: StreamPipeOptions = kEmptyDictionary as StreamPipeOptions
+    options: StreamPipeOptions = kNullProtoObject as StreamPipeOptions
   ): ReadableStreamType<T> {
     assertIsReadableStream(this);
     // WebIDL argument conversion precedes the locked checks, so no user
@@ -4802,7 +4797,7 @@ class ReadableStream<R> {
     destination: WritableStream<R>,
     // WebIDL: optional dictionary — null/undefined both become {}.
     // The default keeps Function.length at 1 (IDL harness check).
-    options: StreamPipeOptions = kEmptyDictionary as StreamPipeOptions
+    options: StreamPipeOptions = kNullProtoObject as StreamPipeOptions
   ): Promise<void> {
     try {
       assertIsReadableStream(this);
@@ -4847,7 +4842,7 @@ class ReadableStream<R> {
   }
 
   values(
-    options: { preventCancel?: boolean } = kEmptyDictionary
+    options: { preventCancel?: boolean } = kNullProtoObject
   ): AsyncIterableIterator<R> {
     assertIsReadableStream(this);
     if (!isActualObject(options)) {
@@ -5158,21 +5153,13 @@ async function consumeReadableStreamAsJSON<R>(
   return JSONParse(await consumeReadableStreamAsText(stream, limit));
 }
 
-const kEnumerable = { __proto__: null, enumerable: true };
-
 ObjectDefineProperties(ReadableStreamDefaultReader.prototype, {
   __proto__: null,
   closed: kEnumerable,
   cancel: kEnumerable,
   read: kEnumerable,
   releaseLock: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'ReadableStreamDefaultReader',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('ReadableStreamDefaultReader'),
 });
 ObjectDefineProperties(ReadableStreamBYOBReader.prototype, {
   __proto__: null,
@@ -5180,13 +5167,7 @@ ObjectDefineProperties(ReadableStreamBYOBReader.prototype, {
   cancel: kEnumerable,
   read: kEnumerable,
   releaseLock: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'ReadableStreamBYOBReader',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('ReadableStreamBYOBReader'),
 });
 ObjectDefineProperties(ReadableStream, {
   __proto__: null,
@@ -5209,13 +5190,7 @@ ObjectDefineProperties(ReadableStream.prototype, {
     enumerable: false,
     configurable: true,
   },
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'ReadableStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('ReadableStream'),
 });
 ObjectDefineProperties(ReadableStreamDefaultController, {
   __proto__: null,
@@ -5235,13 +5210,7 @@ ObjectDefineProperties(ReadableStreamDefaultController.prototype, {
   enqueue: kEnumerable,
   error: kEnumerable,
   desiredSize: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'ReadableStreamDefaultController',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('ReadableStreamDefaultController'),
 });
 
 // Captured controller operations for INTERNAL stream production (from() and
@@ -5262,26 +5231,14 @@ ObjectDefineProperties(ReadableByteStreamController.prototype, {
   error: kEnumerable,
   byobRequest: kEnumerable,
   desiredSize: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'ReadableByteStreamController',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('ReadableByteStreamController'),
 });
 ObjectDefineProperties(ReadableStreamBYOBRequest.prototype, {
   __proto__: null,
   respond: kEnumerable,
   respondWithNewView: kEnumerable,
   view: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'ReadableStreamBYOBRequest',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('ReadableStreamBYOBRequest'),
 });
 ObjectDefineProperties(ReadableStreamDefaultController.prototype.enqueue, {
   __proto__: null,

@@ -101,7 +101,6 @@ const {
   Number,
   NumberIsNaN,
   ObjectDefineProperties,
-  ObjectFreeze,
   ObjectGetOwnPropertyDescriptor,
   PromisePrototypeThen,
   PromiseResolve,
@@ -133,7 +132,8 @@ const {
   WritableStreamDefaultController,
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
-const { isActualObject } = require('webstreams/common') as CommonHelpers;
+const { isActualObject, kNullProtoObject, kEnumerable, toStringTagProperty } =
+  require('webstreams/common') as CommonHelpers;
 const { viewByteExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
@@ -227,10 +227,6 @@ let assertIsIdentityTransformStream: (self: IdentityTransformStream) => void;
 
 const kPrivateSymbol: symbol = Symbol('private');
 
-const kEmptyStrategy = ObjectFreeze({
-  __proto__: null,
-}) as QueuingStrategy<unknown>;
-
 // The writable's WHATWG high-water-mark conversion (ToNumber; NaN or a
 // negative number is a RangeError), for FixedLengthStream, which caps the
 // converted number at its length before IdentityTransformStream hands it
@@ -246,7 +242,7 @@ function convertHighWaterMark(value: unknown): number {
 // WebIDL dictionary conversion of a constructor's strategy argument, as in
 // C++: undefined and null mean no strategy; any other non-object throws.
 function toStrategyDictionary(value: unknown): QueuingStrategy<unknown> {
-  if (value === undefined || value === null) return kEmptyStrategy;
+  if (value === undefined || value === null) return kNullProtoObject;
   if (typeof value !== 'object' && typeof value !== 'function') {
     throw new TypeError('The queuing strategy must be an object.');
   }
@@ -587,7 +583,7 @@ class IdentityTransformStream {
     } else {
       writableStrategy = toStrategyDictionary(writableStrategyOrInternal);
     }
-    writableStrategy ??= kEmptyStrategy;
+    writableStrategy ??= kNullProtoObject;
 
     // Initialize byte budget for FixedLengthStream enforcement.
     // Stored as bigint to cover the full uint64_t range without
@@ -911,30 +907,16 @@ class FixedLengthStream extends IdentityTransformStream {
   }
 }
 
-const kEnumerable = { __proto__: null, enumerable: true };
-
 ObjectDefineProperties(IdentityTransformStream.prototype, {
   __proto__: null,
   readable: kEnumerable,
   writable: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'IdentityTransformStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('IdentityTransformStream'),
 });
 
 ObjectDefineProperties(FixedLengthStream.prototype, {
   __proto__: null,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'FixedLengthStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('FixedLengthStream'),
 });
 
 module.exports = {

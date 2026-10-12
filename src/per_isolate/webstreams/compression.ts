@@ -69,7 +69,8 @@ const {
   WritableStreamDefaultController,
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
-const { isActualObject } = require('webstreams/common') as CommonHelpers;
+const { isActualObject, kEnumerable, toStringTagProperty } =
+  require('webstreams/common') as CommonHelpers;
 const { viewByteExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
@@ -455,32 +456,18 @@ class DecompressionStream {
   }
 }
 
-const kEnumerable = { __proto__: null, enumerable: true };
-
 ObjectDefineProperties(CompressionStream.prototype, {
   __proto__: null,
   readable: kEnumerable,
   writable: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'CompressionStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('CompressionStream'),
 });
 
 ObjectDefineProperties(DecompressionStream.prototype, {
   __proto__: null,
   readable: kEnumerable,
   writable: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'DecompressionStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('DecompressionStream'),
 });
 
 module.exports = {

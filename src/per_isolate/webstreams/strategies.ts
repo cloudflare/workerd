@@ -6,7 +6,8 @@ import type { CommonHelpers } from './common';
 
 const { ObjectDefineProperties, SymbolToStringTag, TypeError } = primordials;
 
-const { isActualObject } = require('webstreams/common') as CommonHelpers;
+const { isActualObject, kEnumerable, toStringTagProperty } =
+  require('webstreams/common') as CommonHelpers;
 
 // Per spec, the size function is the SAME function object for every
 // strategy instance in the realm, and its name is 'size' (method shorthand
@@ -103,32 +104,18 @@ class CountQueuingStrategy {
   }
 }
 
-const kEnumerable = { __proto__: null, enumerable: true };
-
 ObjectDefineProperties(ByteLengthQueuingStrategy.prototype, {
   __proto__: null,
   highWaterMark: kEnumerable,
   size: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'ByteLengthQueuingStrategy',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('ByteLengthQueuingStrategy'),
 });
 
 ObjectDefineProperties(CountQueuingStrategy.prototype, {
   __proto__: null,
   highWaterMark: kEnumerable,
   size: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'CountQueuingStrategy',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('CountQueuingStrategy'),
 });
 
 module.exports = {
