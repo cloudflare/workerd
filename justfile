@@ -46,7 +46,7 @@ test-compile-flags:
     exit 1
   fi
 
-  just _clangd-check "src/workerd/server/server.c++"
+  just _clangd-check "src/workerd/server/factory/worker-factory.c++"
   just _clangd-check "src/workerd/server/workerd-api.c++"
 
 CLANGD := "clangd"

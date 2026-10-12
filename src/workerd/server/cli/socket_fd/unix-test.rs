@@ -10,7 +10,10 @@ fn listening_socket_is_taken_and_duplicated() {
     let fd = listener.into_raw_fd().cast_unsigned();
     let socket = InheritedSocket::take(fd).unwrap();
     let duplicate = socket.duplicate_for_server().unwrap();
-    assert_ne!(i64::from(fd), duplicate);
+    assert_ne!(
+        i64::from(fd),
+        i64::from(std::os::fd::AsRawFd::as_raw_fd(&duplicate))
+    );
     // Both name the same listening socket.
     let bound = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
     drop(bound);

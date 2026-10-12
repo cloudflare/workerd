@@ -2,8 +2,9 @@
 //!
 //! `main()` finds the executable (a config compiled in by `workerd compile` selects a different
 //! command line), parses the command line, produces the encoded config (C++ compiles schema
-//! files), and hands the command to the C++ driver (cli-main.c++), which loads the config into a
-//! `Server` and runs it. C++ calls back into [`process::Process`] for `--watch`.
+//! files), and hands the command to the server crate (`workerd_server::entry`), whose C++
+//! driver (bootstrap.c++) sets up the process and runs the Rust server. [`process::Process`]
+//! is the `--watch` half: the files to watch, and the reload.
 
 // Two modules allow `unsafe`: bridge.rs, whose `cxx::bridge` macro expands to FFI declarations,
 // and socket_fd.rs, where a descriptor number from the command line becomes an owned descriptor.
@@ -24,6 +25,10 @@ use std::sync::OnceLock;
 use clap::CommandFactory;
 use clap::FromArgMatches;
 use clap::error::ErrorKind;
+use workerd_server::bridge::ffi as server;
+use workerd_server::config::Overrides;
+use workerd_server::entry;
+use workerd_server::run::RunOptions;
 
 use crate::bridge::ffi;
 use crate::config::Config;
@@ -61,14 +66,14 @@ pub fn main() -> ExitCode {
     };
 
     let result = match embedded_config {
-        Some(embedded_config) => run_compiled(&program_name, executable, &embedded_config),
-        None => run_command(&program_name, parse(args::Main::command()), executable),
+        Some(embedded_config) => run_compiled(executable, &embedded_config),
+        None => run_command(parse(args::Main::command()), executable),
     };
 
     match result {
         Ok(code) => u8::try_from(code).map_or(ExitCode::FAILURE, ExitCode::from),
         Err(error) => {
-            eprintln!("*** Uncaught exception ***\n{error}");
+            eprintln!("*** Uncaught exception ***\n{}", error.description());
             ExitCode::FAILURE
         }
     }
@@ -76,10 +81,9 @@ pub fn main() -> ExitCode {
 
 /// Serves the config compiled into this executable.
 fn run_compiled(
-    program_name: &str,
     executable: Option<Executable>,
     embedded_config: &[u64],
-) -> Result<i32, cxx::KjException> {
+) -> workerd_server::Result<i32> {
     type T = args::CompiledMain;
 
     let args: T = parse(T::command());
@@ -88,27 +92,21 @@ fn run_compiled(
         usage_error::<T>(format!("the config compiled into this executable: {error}"))
     });
     let watcher = watcher::<T>(&args.serve_or_test, executable.as_ref());
-    let (serve, inherited_sockets) = serve_options::<T>(args.serve);
-    ffi::run_serve(
-        &common_options(program_name.to_owned(), &args.global),
+    let (options, inherited_sockets) = serve_options::<T>(args.serve, &args.serve_or_test);
+    let process = Process::new(executable, watcher, inherited_sockets);
+    entry::serve(
+        args.global.verbose,
         config.into_words(),
-        &args.serve_or_test.into(),
-        &serve,
-        Box::new(Process::new(executable, watcher, inherited_sockets)),
+        (&args.serve_or_test).into(),
+        options,
+        watching(process),
     )
 }
 
-fn run_command(
-    program_name: &str,
-    args: args::Main,
-    executable: Option<Executable>,
-) -> Result<i32, cxx::KjException> {
+fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_server::Result<i32> {
     type T = args::Main;
 
-    let common = common_options(
-        format!("{program_name} {}", args.command_name()),
-        &args.global,
-    );
+    let verbose = args.global.verbose;
 
     match args.command {
         args::Command::Serve {
@@ -119,15 +117,15 @@ fn run_command(
         } => {
             check_serve_or_test::<T>(&serve_or_test);
             let watcher = watcher::<T>(&serve_or_test, executable.as_ref());
-            let (serve, inherited_sockets) = serve_options::<T>(serve);
-            let process = Box::new(Process::new(executable, watcher, inherited_sockets));
+            let (options, inherited_sockets) = serve_options::<T>(serve, &serve_or_test);
+            let process = Process::new(executable, watcher, inherited_sockets);
             let config = load_config::<T>(config, const_name.const_name, &process);
-            ffi::run_serve(
-                &common,
+            entry::serve(
+                verbose,
                 config.into_words(),
-                &serve_or_test.into(),
-                &serve,
-                process,
+                (&serve_or_test).into(),
+                options,
+                watching(process),
             )
         }
         args::Command::Compile {
@@ -150,14 +148,16 @@ fn run_command(
             }
             check_serve_or_test::<T>(&serve_or_test);
             let watcher = watcher::<T>(&serve_or_test, executable.as_ref());
-            let process = Box::new(Process::new(executable, watcher, Vec::new()));
+            let process = Process::new(executable, watcher, Vec::new());
             let config = load_config::<T>(config, None, &process);
-            ffi::run_test(
-                &common,
+            entry::test(
+                verbose,
                 config.into_words(),
-                &serve_or_test.into(),
-                &ffi::TestOptions::new(args::TestArgs::default(), args::TestFilter::default()),
-                process,
+                (&serve_or_test).into(),
+                (&args::TestArgs::default()).into(),
+                run_options(&serve_or_test),
+                patterns(args::TestFilter::default()),
+                watching(process),
             )
         }
         args::Command::Test {
@@ -168,14 +168,16 @@ fn run_command(
             check_serve_or_test::<T>(&serve_or_test);
             let filter = test.filter.take().unwrap_or_default();
             let watcher = watcher::<T>(&serve_or_test, executable.as_ref());
-            let process = Box::new(Process::new(executable, watcher, Vec::new()));
+            let process = Process::new(executable, watcher, Vec::new());
             let config = load_config::<T>(config, filter.const_name.clone(), &process);
-            ffi::run_test(
-                &common,
+            entry::test(
+                verbose,
                 config.into_words(),
-                &serve_or_test.into(),
-                &ffi::TestOptions::new(test, filter),
-                process,
+                (&serve_or_test).into(),
+                (&test).into(),
+                run_options(&serve_or_test),
+                patterns(filter),
+                watching(process),
             )
         }
         args::Command::PyodideLock => {
@@ -185,7 +187,7 @@ fn run_command(
         args::Command::MakePyodideBaselineSnapshot {
             python_version,
             output_directory,
-        } => run_baseline_snapshot(&common, &python_version, output_directory, executable),
+        } => run_baseline_snapshot(verbose, &python_version, output_directory, executable),
     }
 }
 
@@ -223,23 +225,27 @@ fn run_compile(
 
 /// Runs a synthesized Python worker's tests with a baseline snapshot saved to `output_directory`.
 fn run_baseline_snapshot(
-    common: &ffi::CommonOptions,
+    verbose: bool,
     python_version: &str,
     output_directory: String,
     executable: Option<Executable>,
-) -> Result<i32, cxx::KjException> {
-    ffi::run_test(
-        common,
+) -> workerd_server::Result<i32> {
+    let serve_or_test = args::ServeOrTestArgs::default();
+    let process = Process::new(executable, None, Vec::new());
+    entry::test(
+        verbose,
         Config::python_baseline(python_version).into_words(),
-        &ffi::ServeOrTestOptions {
+        server::ServeOrTestOptions {
             experimental: true,
             python_save_baseline_snapshot: true,
             pyodide_bundle_disk_cache_dir: Some(".".to_owned()).into(),
             pyodide_package_disk_cache_dir: Some(output_directory).into(),
-            ..args::ServeOrTestArgs::default().into()
+            ..(&serve_or_test).into()
         },
-        &ffi::TestOptions::new(args::TestArgs::default(), args::TestFilter::default()),
-        Box::new(Process::new(executable, None, Vec::new())),
+        (&args::TestArgs::default()).into(),
+        run_options(&serve_or_test),
+        patterns(args::TestFilter::default()),
+        watching(process),
     )
 }
 
@@ -278,13 +284,6 @@ fn usage_error<T: CommandFactory>(message: impl Display) -> ! {
 fn release_version() -> &'static str {
     static VERSION: OnceLock<String> = OnceLock::new();
     VERSION.get_or_init(|| String::from_utf8_lossy(ffi::release_version()).into_owned())
-}
-
-fn common_options(program_name: String, global: &args::GlobalArgs) -> ffi::CommonOptions {
-    ffi::CommonOptions {
-        program_name,
-        verbose: global.verbose,
-    }
 }
 
 /// The config to run: a schema file compiled now (the compiler registers every file it reads with
@@ -402,19 +401,20 @@ fn check_serve_or_test<T: CommandFactory>(serve_or_test: &args::ServeOrTestArgs)
     }
 }
 
-/// The `serve` options for the bridge, taking ownership of every `--socket-fd` socket (the server
-/// gets a duplicate). A socket given both an address and a descriptor, or a descriptor that is
-/// not a listening socket, is a usage error.
+/// The `serve` options for the server, taking ownership of every `--socket-fd` socket (the
+/// server gets a duplicate). A socket given both an address and a descriptor, or a descriptor that
+/// is not a listening socket, is a usage error.
 fn serve_options<T: CommandFactory>(
     serve: args::ServeArgs,
-) -> (ffi::ServeOptions, Vec<InheritedSocket>) {
+    serve_or_test: &args::ServeOrTestArgs,
+) -> (RunOptions, Vec<InheritedSocket>) {
     if let Some(name) = args::socket_overridden_twice(&serve) {
         usage_error::<T>(format!(
             "socket '{name}' is given both --socket-addr and --socket-fd; use one"
         ));
     }
     let mut inherited = Vec::with_capacity(serve.socket_fd_overrides.len());
-    let mut socket_fd_overrides = Vec::with_capacity(serve.socket_fd_overrides.len());
+    let mut socket_fds = std::collections::HashMap::new();
     for args::SocketFd { name, fd } in serve.socket_fd_overrides {
         let socket = InheritedSocket::take(fd).unwrap_or_else(|error| {
             let message = match error {
@@ -425,35 +425,54 @@ fn serve_options<T: CommandFactory>(
             };
             usage_error::<T>(format!("--socket-fd={name}={fd}: {message}"))
         });
-        let fd = socket
+        let duplicate = socket
             .duplicate_for_server()
             .unwrap_or_else(|error| usage_error::<T>(format!("--socket-fd={name}={fd}: {error}")));
-        socket_fd_overrides.push(ffi::SocketFd { name, fd });
+        socket_fds.insert(name, duplicate);
         inherited.push(socket);
     }
-    let options = ffi::ServeOptions {
-        socket_addr_overrides: serve
-            .socket_addr_overrides
-            .into_iter()
-            .map(Into::into)
-            .collect(),
-        socket_fd_overrides,
-        control_fd: serve.control_fd.into(),
-        debug_port: serve.debug_port.into(),
+    let control = serve.control_fd.map(|fd| {
+        socket_fd::control_file(fd)
+            .unwrap_or_else(|error| usage_error::<T>(format!("--control-fd={fd}: {error}")))
+    });
+    let options = RunOptions {
+        socket_addresses: args::override_map(serve.socket_addr_overrides),
+        socket_fds,
+        control,
+        debug_port: serve.debug_port,
+        ..run_options(serve_or_test)
     };
     (options, inherited)
 }
 
-impl args::Main {
-    /// The subcommand's name as typed, e.g. "serve".
-    const fn command_name(&self) -> &'static str {
-        match self.command {
-            args::Command::Serve { .. } => "serve",
-            args::Command::Compile { .. } => "compile",
-            args::Command::Fuzzilli { .. } => "fuzzilli",
-            args::Command::Test { .. } => "test",
-            args::Command::PyodideLock => "pyodide-lock",
-            args::Command::MakePyodideBaselineSnapshot { .. } => "make-pyodide-baseline-snapshot",
-        }
+/// The options `serve` and `test` share: `--directory-path`, `--external-addr` and
+/// `--inspector-addr`.
+fn run_options(serve_or_test: &args::ServeOrTestArgs) -> RunOptions {
+    RunOptions {
+        overrides: Overrides {
+            directories: args::override_map(serve_or_test.directory_overrides.clone()),
+            externals: args::override_map(serve_or_test.external_overrides.clone()),
+        },
+        inspector: serve_or_test.inspector_addr.clone(),
+        ..RunOptions::default()
     }
+}
+
+/// The `<service-pattern>` and `<entrypoint-pattern>` globs; `*` when not given.
+fn patterns(filter: args::TestFilter) -> (String, String) {
+    let any = || "*".to_owned();
+    (
+        filter.service_pattern.unwrap_or_else(any),
+        filter.entrypoint_pattern.unwrap_or_else(any),
+    )
+}
+
+/// `process` as the server's `--watch` half, when watching: a config change reloads it.
+fn watching(process: Process) -> Option<entry::Watch> {
+    process.is_watching().then(|| -> entry::Watch {
+        Box::pin(async move {
+            process::wait_for_changes(&process).await?;
+            process.reload()
+        })
+    })
 }
