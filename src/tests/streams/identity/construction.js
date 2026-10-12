@@ -11,10 +11,11 @@
 //   TypeError; the TypeScript implementation follows BigInt conversion
 //   semantics (RangeError for out-of-range/non-integer numbers, TypeError
 //   for wrong types).
-// - Coercion: C++ accepts non-integer numbers (truncating) and numeric
-//   strings; TypeScript rejects both.
-// - Range: C++ rejects lengths above 2^53-1; TypeScript accepts the full
-//   uint64 range.
+// - Coercion: C++ truncates non-integer numbers and converts numeric
+//   strings, null, booleans and objects (valueOf) through ToNumber;
+//   TypeScript rejects all of them.
+// - Range: C++ rejects lengths above 2^53-1, after it has read the
+//   strategy; TypeScript accepts the full uint64 range.
 //
 // The highWaterMark conversion diverges too (both classes): C++ converts
 // to a uint64 (TypeError for non-finite or negative values, fractions
@@ -104,13 +105,27 @@ export const fixedLengthInvalidLengths = {
     const expected = usingTsImpl ? RangeError : TypeError;
     throws(() => new FixedLengthStream(-1), expected);
     throws(() => new FixedLengthStream(-1n), expected);
+    throws(() => new FixedLengthStream(-0.5), expected);
     throws(() => new FixedLengthStream(NaN), expected);
+    throws(() => new FixedLengthStream(Infinity), expected);
     throws(() => new FixedLengthStream(2n ** 64n), expected);
+
+    // Values that do not convert to a number are a TypeError in both.
+    throws(() => new FixedLengthStream('abc'), TypeError);
+    throws(() => new FixedLengthStream({}), TypeError);
+    throws(() => new FixedLengthStream(Symbol()), TypeError);
   },
 };
 
 export const fixedLengthCoercionDivergence = {
   test() {
+    let valueOfCalls = 0;
+    const object = {
+      valueOf() {
+        valueOfCalls++;
+        return 4;
+      },
+    };
     if (usingTsImpl) {
       // TypeScript follows BigInt() conversion: non-integer numbers are a
       // RangeError, and numeric strings are rejected outright. This follows
@@ -118,28 +133,47 @@ export const fixedLengthCoercionDivergence = {
       // automatic coercion.
       throws(() => new FixedLengthStream(0.5), RangeError);
       throws(() => new FixedLengthStream('10'), TypeError);
+      throws(() => new FixedLengthStream(null), TypeError);
+      throws(() => new FixedLengthStream(true), TypeError);
+      throws(() => new FixedLengthStream(object), TypeError);
     } else {
       // C++ coerces: non-integer numbers truncate toward zero, and numeric
-      // strings convert.
+      // strings, null, booleans and objects convert through ToNumber.
       strictEqual(coercedLength(0.5), 0);
       strictEqual(coercedLength(2.9), 2);
       strictEqual(coercedLength('10'), 10);
+      strictEqual(coercedLength(null), 0);
+      strictEqual(coercedLength(true), 1);
+      strictEqual(coercedLength(object), 4);
     }
+    strictEqual(valueOfCalls, usingTsImpl ? 0 : 1);
   },
 };
 
 export const fixedLengthLengthsAboveMaxSafeInteger = {
   test() {
+    // Whether or not the length is accepted, the strategy is read first.
+    const reads = [];
+    const strategy = {
+      get highWaterMark() {
+        reads.push('highWaterMark');
+        return 1;
+      },
+    };
     if (usingTsImpl) {
       // TypeScript accepts the full uint64 range.
       ok(new FixedLengthStream(2 ** 53));
       ok(new FixedLengthStream(0xffff_ffff_ffff_ffffn));
+      ok(new FixedLengthStream(2 ** 53, strategy));
     } else {
       // C++ rejects anything above 2^53-1: "FixedLengthStream requires an
-      // integer expected length less than 2^53."
+      // integer expected length less than 2^53." It converts both
+      // arguments before its constructor checks the length.
       throws(() => new FixedLengthStream(2 ** 53), TypeError);
       throws(() => new FixedLengthStream(0xffff_ffff_ffff_ffffn), TypeError);
+      throws(() => new FixedLengthStream(2 ** 53, strategy), TypeError);
     }
+    deepStrictEqual(reads, ['highWaterMark']);
   },
 };
 

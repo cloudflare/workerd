@@ -110,9 +110,16 @@ export {
   transformExpectedLengthRequestBody,
 } from 'roundtrip';
 
-// Echo handler for the expectedLength fetch-body tests: reports the
-// Content-Length the subrequest actually carried (the implementations
-// diverge) and echoes the body.
+export {
+  transformExpectedLengthAccepted,
+  transformExpectedLengthRejected,
+  transformExpectedLengthCoercion,
+  transformExpectedLengthRange,
+} from 'expected-length';
+
+// Echo handler for the expectedLength fetch-body tests (roundtrip.js,
+// expected-length.js): reports the Content-Length the subrequest actually
+// carried and echoes the body.
 export default {
   async fetch(request) {
     return new Response(request.body, {

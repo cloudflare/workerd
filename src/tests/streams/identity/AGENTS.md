@@ -240,9 +240,9 @@ pattern; a change to either side fails its cell.
 
 | # | Area | C++ | TypeScript | Pinned in |
 | --- | --- | --- | --- | --- |
-| 1 | FLS invalid-length error type | `TypeError` for every invalid length | `RangeError` (range/non-integer), `TypeError` (wrong type) | `fixedLengthInvalidLengths` |
-| 2 | FLS length coercion | truncates non-integers (`0.5`→0, `2.9`→2), converts numeric strings (`'10'`→10) | rejects both | `fixedLengthCoercionDivergence` |
-| 3 | FLS length range | rejects > 2^53−1 (`TypeError`) | accepts full uint64 | `fixedLengthLengthsAboveMaxSafeInteger` |
+| 1 | FLS invalid-length error type | `TypeError` for every invalid length | `RangeError` (range/non-integer, including `-0.5` and `Infinity`), `TypeError` (wrong type) | `fixedLengthInvalidLengths` |
+| 2 | FLS length coercion | truncates non-integers (`0.5`→0, `2.9`→2); converts numeric strings (`'10'`→10), `null` (→0), booleans (`true`→1) and objects (`valueOf`, run once) through ToNumber | rejects all of them | `fixedLengthCoercionDivergence` |
+| 3 | FLS length range | rejects > 2^53−1 (`TypeError`), after reading the strategy | accepts full uint64 | `fixedLengthLengthsAboveMaxSafeInteger` |
 | 4 | `TransformStream` inheritance | `its instanceof TransformStream` is true | false (deliberate) | `identityBrandChecks` |
 | 5 | Accessor placement | inherited from `TransformStream.prototype` | own on `IdentityTransformStream.prototype` | `propertyPlacement` |
 | 6 | Invalid chunk aftermath | stream unaffected, remains usable | same — the sink signals the rejection through the non-fatal write-rejection channel; the write rejects, the stream survives (the per-write contract of the internal transforms) | `rejectsNumberChunk` |
