@@ -1,0 +1,233 @@
+diff --git a/packages/miniflare/src/index.ts b/packages/miniflare/src/index.ts
+index 1284d2679..1dc7fc022 100644
+--- a/packages/miniflare/src/index.ts
++++ b/packages/miniflare/src/index.ts
+@@ -165,6 +165,7 @@ import type {
+ 	Worker_DurableObjectNamespace,
+ 	Worker_Module,
+ } from "./runtime";
++import { selectConnectTrigger } from "./shared/connect";
+ import type { Log } from "./shared";
+ import type {
+ 	DevControl,
+@@ -3288,39 +3289,12 @@ export class Miniflare {
+ 		await this.ready;
+ 
+ 		const protocol = options.protocol ?? "tcp";
+-		const protocolName = protocol.toUpperCase();
+ 		const workerIndex = this.#findAndAssertWorkerIndex(options.workerName);
+ 		const workerOpts = this.#workerOpts[workerIndex];
+-		const connectTriggers = getTriggersOfType(
+-			workerOpts.config,
+-			"connect"
+-		).filter((trigger) => trigger.protocol === protocol);
+-		const workerDescription =
+-			options.workerName === undefined
+-				? "entrypoint worker"
+-				: `${JSON.stringify(options.workerName)} worker`;
+-
+-		let trigger: (typeof connectTriggers)[number] | undefined;
+-		if (options.port === undefined) {
+-			if (connectTriggers.length === 0) {
+-				throw new TypeError(
+-					`No ${protocolName} connect triggers configured for ${workerDescription}`
+-				);
+-			}
+-			if (connectTriggers.length > 1) {
+-				throw new TypeError(
+-					`Multiple ${protocolName} connect triggers configured for ${workerDescription}; specify a port`
+-				);
+-			}
+-			trigger = connectTriggers[0];
+-		} else {
+-			trigger = connectTriggers.find(({ port }) => port === options.port);
+-			if (trigger === undefined) {
+-				throw new TypeError(
+-					`${protocolName} connect trigger on port ${options.port} not found for ${workerDescription}`
+-				);
+-			}
+-		}
++		const trigger = selectConnectTrigger(
++			getTriggersOfType(workerOpts.config, "connect"),
++			options
++		);
+ 
+ 		assert(this.#socketPorts !== undefined);
+ 		const socketName = getConnectSocketName(
+diff --git a/packages/miniflare/test/index.spec.ts b/packages/miniflare/test/index.spec.ts
+index 6a3d8687f..4283f065e 100644
+--- a/packages/miniflare/test/index.spec.ts
++++ b/packages/miniflare/test/index.spec.ts
+@@ -13,7 +13,6 @@ import path from "node:path";
+ import { json, text } from "node:stream/consumers";
+ import util from "node:util";
+ import { NODEJS_COMPAT_DEFAULT_ON_DATE } from "@cloudflare/workers-utils";
+-import getPort from "get-port";
+ import {
+ 	_transformsForContentEncodingAndContentType,
+ 	DeferredPromise,
+@@ -3648,8 +3647,6 @@ test("Miniflare: dispatchConnect selects Worker TCP triggers", async ({
+ 	expect,
+ 	onTestFinished,
+ }) => {
+-	const firstPort = await getPort();
+-	const secondPort = await getPort({ exclude: [firstPort] });
+ 	const mf = new Miniflare({
+ 		workers: [
+ 			{
+@@ -3666,10 +3663,9 @@ test("Miniflare: dispatchConnect selects Worker TCP triggers", async ({
+ 							},
+ 						};
+ 					`),
+-					triggers: [
+-						{ type: "connect", protocol: "tcp", port: firstPort },
+-						{ type: "connect", protocol: "tcp", port: secondPort },
+-					],
++					// Let workerd bind the port atomically. Trigger-selection
++					// ambiguity is covered without sockets in connect.spec.ts.
++					triggers: [{ type: "connect", protocol: "tcp", port: 0 }],
+ 				},
+ 			},
+ 			{
+@@ -3693,15 +3689,14 @@ test("Miniflare: dispatchConnect selects Worker TCP triggers", async ({
+ 	});
+ 	onTestFinished(() => mf.dispose());
+ 
+-	await expect(mf.dispatchConnect()).rejects.toThrow(
+-		"Multiple TCP connect triggers configured for entrypoint worker; specify a port"
+-	);
+ 	await expect(mf.dispatchConnect({ port: 123 })).rejects.toThrow(
+ 		"TCP connect trigger on port 123 not found for entrypoint worker"
+ 	);
+ 
+-	const firstSocket = await mf.dispatchConnect({ port: firstPort });
+-	expect(await text(firstSocket)).toBe("a");
++	const entrypointSocket = await mf.dispatchConnect();
++	expect(await text(entrypointSocket)).toBe("a");
++	const explicitPortSocket = await mf.dispatchConnect({ port: 0 });
++	expect(await text(explicitPortSocket)).toBe("a");
+ 	const secondWorkerSocket = await mf.dispatchConnect({ workerName: "b" });
+ 	expect(await text(secondWorkerSocket)).toBe("b");
+ });
+diff --git a/packages/miniflare/src/shared/connect.ts b/packages/miniflare/src/shared/connect.ts
+new file mode 100644
+index 000000000..01bc682db
+--- /dev/null
++++ b/packages/miniflare/src/shared/connect.ts
+@@ -0,0 +1,47 @@
++import type { MiniflareTrigger } from "../config/schema";
++
++type ConnectTrigger = Extract<MiniflareTrigger, { type: "connect" }>;
++
++interface ConnectTriggerSelectionOptions {
++	protocol?: "tcp" | "udp";
++	workerName?: string;
++	port?: number;
++}
++
++/** Selects a configured connect trigger independently of its bound socket. */
++export function selectConnectTrigger(
++	triggers: ConnectTrigger[],
++	options: ConnectTriggerSelectionOptions = {}
++): ConnectTrigger {
++	const protocol = options.protocol ?? "tcp";
++	const protocolName = protocol.toUpperCase();
++	const connectTriggers = triggers.filter(
++		(trigger) => trigger.protocol === protocol
++	);
++	const workerDescription =
++		options.workerName === undefined
++			? "entrypoint worker"
++			: `${JSON.stringify(options.workerName)} worker`;
++
++	if (options.port === undefined) {
++		if (connectTriggers.length === 0) {
++			throw new TypeError(
++				`No ${protocolName} connect triggers configured for ${workerDescription}`
++			);
++		}
++		if (connectTriggers.length > 1) {
++			throw new TypeError(
++				`Multiple ${protocolName} connect triggers configured for ${workerDescription}; specify a port`
++			);
++		}
++		return connectTriggers[0];
++	}
++
++	const trigger = connectTriggers.find(({ port }) => port === options.port);
++	if (trigger === undefined) {
++		throw new TypeError(
++			`${protocolName} connect trigger on port ${options.port} not found for ${workerDescription}`
++		);
++	}
++	return trigger;
++}
+diff --git a/packages/miniflare/test/connect.spec.ts b/packages/miniflare/test/connect.spec.ts
+new file mode 100644
+index 000000000..dfc74ffeb
+--- /dev/null
++++ b/packages/miniflare/test/connect.spec.ts
+@@ -0,0 +1,63 @@
++import { test } from "vitest";
++import { selectConnectTrigger } from "../src/shared/connect";
++import type { MiniflareTrigger } from "../src/config/schema";
++
++type ConnectTrigger = Extract<MiniflareTrigger, { type: "connect" }>;
++
++test.for([
++	{ protocol: "tcp", workerName: undefined },
++	{ protocol: "tcp", workerName: "named" },
++	{ protocol: "udp", workerName: undefined },
++	{ protocol: "udp", workerName: "named" },
++] as const)("selectConnectTrigger: %j", (options, { expect }) => {
++	const { protocol, workerName } = options;
++	const first: ConnectTrigger = { type: "connect", protocol, port: 1234 };
++	const second: ConnectTrigger = { type: "connect", protocol, port: 1235 };
++	const automatic: ConnectTrigger = { type: "connect", protocol, port: 0 };
++	const otherProtocol: ConnectTrigger = {
++		type: "connect",
++		protocol: protocol === "tcp" ? "udp" : "tcp",
++		port: first.port,
++	};
++	const triggers = [otherProtocol, first, second];
++	const workerDescription =
++		workerName === undefined
++			? "entrypoint worker"
++			: `${JSON.stringify(workerName)} worker`;
++	const protocolName = protocol.toUpperCase();
++
++	// These ports are selection keys only: the test never binds them.
++	expect(selectConnectTrigger(triggers, { ...options, port: first.port })).toBe(
++		first
++	);
++	expect(selectConnectTrigger(triggers, { ...options, port: second.port })).toBe(
++		second
++	);
++	expect(selectConnectTrigger([otherProtocol, automatic], options)).toBe(
++		automatic
++	);
++	expect(
++		selectConnectTrigger([otherProtocol, automatic], { ...options, port: 0 })
++	).toBe(automatic);
++	expect(() => selectConnectTrigger(triggers, options)).toThrow(
++		new TypeError(
++			`Multiple ${protocolName} connect triggers configured for ${workerDescription}; specify a port`
++		)
++	);
++	expect(() => selectConnectTrigger(triggers, { ...options, port: 123 })).toThrow(
++		new TypeError(
++			`${protocolName} connect trigger on port 123 not found for ${workerDescription}`
++		)
++	);
++	expect(() => selectConnectTrigger([otherProtocol], options)).toThrow(
++		new TypeError(
++			`No ${protocolName} connect triggers configured for ${workerDescription}`
++		)
++	);
++});
++
++test("selectConnectTrigger: defaults to TCP", ({ expect }) => {
++	const tcp: ConnectTrigger = { type: "connect", protocol: "tcp", port: 0 };
++	const udp: ConnectTrigger = { type: "connect", protocol: "udp", port: 0 };
++	expect(selectConnectTrigger([udp, tcp])).toBe(tcp);
++});
