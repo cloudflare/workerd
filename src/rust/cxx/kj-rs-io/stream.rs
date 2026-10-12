@@ -93,8 +93,11 @@ struct Inner {
     read_abort: tokio::sync::Notify,
 }
 
-/// A registered tokio socket of either family. Constructed only by net.rs, from sockets it
-/// registered on the loop thread (lib.rs, "The tokio runtime").
+/// A registered tokio socket of either family.
+///
+/// One net.rs registered on the loop thread (lib.rs, "The tokio runtime"): wrapped in a
+/// [`TokioStream`] for C++, or handed to a Rust caller as it is (`TokioListener::accept`,
+/// `TokioAddress::connect_first`).
 pub enum Socket {
     Tcp(TcpStream),
     #[cfg(unix)]

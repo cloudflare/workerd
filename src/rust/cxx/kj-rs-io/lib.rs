@@ -114,6 +114,9 @@ compile_error!("kj-rs-io supports Unix and Windows targets only");
 
 pub use error::exception_type;
 pub use net::TokioAddress;
+pub use net::TokioListener;
+pub use net::wrap_listener;
+pub use stream::Socket;
 pub use stream::TokioStream;
 pub use stream::when_write_disconnected;
 pub use watcher::TokioFileWatcher;
