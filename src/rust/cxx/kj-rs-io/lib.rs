@@ -112,8 +112,10 @@
 #[cfg(not(any(unix, windows)))]
 compile_error!("kj-rs-io supports Unix and Windows targets only");
 
+pub use error::exception_type;
 pub use net::TokioAddress;
 pub use stream::TokioStream;
+pub use stream::when_write_disconnected;
 pub use watcher::TokioFileWatcher;
 
 mod error;
