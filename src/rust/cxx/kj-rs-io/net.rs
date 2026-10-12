@@ -18,8 +18,6 @@
 //! - Unix domain: `"unix:/path/to/socket"` (the path is arbitrary bytes) and, on Linux,
 //!   `"unix-abstract:name"` for the abstract namespace -- both documented for workerd's
 //!   `Socket.address` / `ExternalServer.address`.
-//! - `"loopback:name"`, once the network's [`LoopbackRegistry`] is enabled (workerd test
-//!   only): connections serviced within the process (loopback.rs).
 //!
 //! # Typed addresses
 //!
@@ -47,8 +45,7 @@
 //! workerd's Rust server uses the same addresses without the C++ adapter and without a filter:
 //! [`TokioAddress::parse_str`], then `listen` and [`TokioListener::accept`], `connect_first` or
 //! `bind_udp`; [`wrap_listener`] for an inherited socket. It gets tokio's own sockets back
-//! ([`Socket`], `UdpSocket`) and serves them itself. A `loopback:` address has no socket, so
-//! these fail on one.
+//! ([`Socket`], `UdpSocket`) and serves them itself.
 //!
 //! # Runtime and ownership
 //!
@@ -85,8 +82,6 @@ use crate::error::op;
 use crate::ffi::AddressKind;
 use crate::ffi::PeerStream;
 use crate::ffi::SocketAddress;
-use crate::loopback::LoopbackQueue;
-use crate::loopback::LoopbackRegistry;
 use crate::stream::Socket;
 use crate::stream::TokioStream;
 
@@ -109,13 +104,6 @@ impl SocketAddress {
             flowinfo: 0,
             scope_id: 0,
             name: Vec::new(),
-        }
-    }
-
-    fn loopback(name: &[u8]) -> Self {
-        Self {
-            name: name.to_vec(),
-            ..Self::blank(AddressKind::Loopback)
         }
     }
 }
@@ -295,8 +283,6 @@ enum Spec {
     },
     #[cfg(unix)]
     Unix(UnixName),
-    /// `"loopback:name"`: the queue the network's registry gave for the name at parse time.
-    Loopback(Arc<LoopbackQueue>),
 }
 
 // ======================================================================================
@@ -456,12 +442,7 @@ impl TokioAddress {
     }
 
     /// `SocketAddress::parse` (kj/async-io-unix.c++), see the module docs.
-    async fn parse(text: &[u8], port_hint: u16, loopback: &LoopbackRegistry) -> Result<Self> {
-        if let Some(queue) = loopback.parse(text) {
-            return Ok(Self {
-                spec: Spec::Loopback(queue?),
-            });
-        }
+    async fn parse(text: &[u8], port_hint: u16) -> Result<Self> {
         if let Some(unix) = Self::parse_unix(text) {
             return unix;
         }
@@ -498,9 +479,9 @@ impl TokioAddress {
         Self::lookup_host(addr_part, None, port).await
     }
 
-    /// [`Self::parse`] for a Rust caller, which has no loopback registry.
+    /// [`Self::parse`] for a Rust caller.
     pub async fn parse_str(text: &str, port_hint: u16) -> Result<Self> {
-        Self::parse(text.as_bytes(), port_hint, &LoopbackRegistry::new()).await
+        Self::parse(text.as_bytes(), port_hint).await
     }
 
     /// `connect()` for a Rust caller, which filters nothing: the first of [`Self::targets`] that
@@ -565,22 +546,6 @@ impl TokioAddress {
             Spec::Ip { addrs, .. } => Ok(addrs.iter().copied().map(SocketAddress::from).collect()),
             #[cfg(unix)]
             Spec::Unix(name) => Ok(vec![name.to_socket_address()]),
-            Spec::Loopback(queue) => Ok(vec![SocketAddress::loopback(queue.name())]),
-        }
-    }
-
-    /// `connect()` to one of [`Self::targets`]. The address itself supplies what a
-    /// `SocketAddress` cannot name: the queue behind a loopback target.
-    fn connect(
-        &self,
-        target: SocketAddress,
-    ) -> impl Future<Output = Result<Box<TokioStream>>> + use<> {
-        let spec = self.spec.clone();
-        async move {
-            match spec {
-                Spec::Loopback(queue) => queue.connect(),
-                _ => connect_to(target).await,
-            }
         }
     }
 
@@ -602,7 +567,6 @@ impl TokioAddress {
             Spec::Unix(name) => ListenerBackend::sockets(vec![ListenerInner::Unix(
                 UnixListener::bind_addr(&name.to_tokio()?).map_err(op("bind()"))?,
             )]),
-            Spec::Loopback(queue) => ListenerBackend::Loopback(Arc::clone(queue)),
         };
         Ok(Box::new(TokioListener::new(backend)?))
     }
@@ -632,12 +596,6 @@ impl TokioAddress {
                 return Err(KjIoError::other(
                     "bind()",
                     "Unix datagram sockets are not supported",
-                ));
-            }
-            Spec::Loopback(_) => {
-                return Err(KjIoError::other(
-                    "bind()",
-                    "loopback addresses do not support datagrams",
                 ));
             }
         };
@@ -676,7 +634,6 @@ impl TokioAddress {
             }
             #[cfg(unix)]
             Spec::Unix(name) => name.display_bytes(),
-            Spec::Loopback(queue) => [b"loopback:".as_slice(), queue.name()].concat(),
         }
     }
 }
@@ -687,11 +644,6 @@ impl TokioAddress {
 /// tokio's connect (`connect(2)`, wait for writability, read `SO_ERROR`), then KJ's
 /// unconditional `TCP_NODELAY` on outbound TCP sockets (a hard failure in KJ's
 /// `SocketAddress::socket()`, and here).
-async fn connect_to(target: SocketAddress) -> Result<Box<TokioStream>> {
-    Ok(Box::new(TokioStream::new(connect_socket(target).await?)?))
-}
-
-/// [`connect_to`]'s socket, unwrapped.
 async fn connect_socket(target: SocketAddress) -> Result<Socket> {
     ensure_loop_thread()?;
     let socket = match target.kind {
@@ -797,7 +749,7 @@ fn bind_tcp(addr: SocketAddr, wildcard: bool) -> Result<ListenerInner> {
 /// A `kj::ConnectionReceiver` backend.
 ///
 /// One or more listening sockets (several when the address resolved to several -- KJ's
-/// aggregate receiver), accepted from in round-robin order of readiness; or a loopback queue. A
+/// aggregate receiver), accepted from in round-robin order of readiness. A
 /// handle to `Arc`-shared state; each `accept()` future owns a share.
 pub struct TokioListener {
     shared: Arc<ListenerShared>,
@@ -809,20 +761,17 @@ struct ListenerShared {
     owner: tokio::runtime::Id,
 }
 
-enum ListenerBackend {
-    Sockets {
-        /// Never empty.
-        inners: Vec<ListenerInner>,
-        /// Round-robin start index for the next `accept()` poll, so a busy first socket cannot
-        /// starve the others.
-        next: AtomicUsize,
-    },
-    Loopback(Arc<LoopbackQueue>),
+struct ListenerBackend {
+    /// Never empty.
+    inners: Vec<ListenerInner>,
+    /// Round-robin start index for the next `accept()` poll, so a busy first socket cannot
+    /// starve the others.
+    next: AtomicUsize,
 }
 
 impl ListenerBackend {
     fn sockets(inners: Vec<ListenerInner>) -> Self {
-        Self::Sockets {
+        Self {
             inners,
             next: AtomicUsize::new(0),
         }
@@ -962,13 +911,6 @@ impl ListenerShared {
     /// One accepted connection: whether the peer is allowed is the adapter's decision (module
     /// docs, "Where filtering happens").
     async fn accept(&self) -> Result<PeerStream> {
-        if let ListenerBackend::Loopback(queue) = &self.backend {
-            crate::ensure_owner_loop(self.owner)?;
-            return Ok(PeerStream {
-                stream: queue.accept().await?,
-                peer: SocketAddress::loopback(queue.name()),
-            });
-        }
         let (socket, peer) = self.accept_socket().await?;
         Ok(PeerStream {
             stream: Box::new(TokioStream::new(socket)?),
@@ -979,15 +921,7 @@ impl ListenerShared {
     /// One accepted socket and its peer; KJ's transient errors are retried here.
     async fn accept_socket(&self) -> Result<(Socket, SocketAddress)> {
         crate::ensure_owner_loop(self.owner)?;
-        let (inners, next) = match &self.backend {
-            ListenerBackend::Sockets { inners, next } => (inners, next),
-            ListenerBackend::Loopback(_) => {
-                return Err(KjIoError::other(
-                    "accept()",
-                    "a loopback: listener has no socket",
-                ));
-            }
-        };
+        let ListenerBackend { inners, next } = &self.backend;
         loop {
             let (socket, peer) =
                 match std::future::poll_fn(|cx| ListenerBackend::poll_accept_any(inners, next, cx))
@@ -1025,35 +959,22 @@ impl TokioListener {
         Ok((socket, ip_socket_addr(&peer).ok()))
     }
 
-    /// `kj::ConnectionReceiver::getPort`: the first socket's, like KJ's aggregate receiver; 0 for
-    /// a loopback receiver, as for KJ's non-IP receivers.
+    /// `kj::ConnectionReceiver::getPort`: the first socket's, like KJ's aggregate receiver.
     pub fn port(&self) -> Result<u16> {
-        match &self.shared.backend {
-            ListenerBackend::Sockets { inners, .. } => inners[0].port(),
-            ListenerBackend::Loopback(_) => Ok(0),
-        }
+        self.shared.backend.inners[0].port()
     }
 
     /// `kj::ConnectionReceiver::getsockname`: the first socket's.
     fn local_addr(&self) -> Result<SocketAddress> {
-        match &self.shared.backend {
-            ListenerBackend::Sockets { inners, .. } => inners[0].local_addr(),
-            ListenerBackend::Loopback(queue) => Ok(SocketAddress::loopback(queue.name())),
-        }
+        self.shared.backend.inners[0].local_addr()
     }
 }
 
 // ======================================================================================
 // Bridge entry points (see ffi.rs)
 
-pub async fn parse_address(
-    addr: &[u8],
-    port_hint: u16,
-    loopback: &LoopbackRegistry,
-) -> Result<Box<TokioAddress>> {
-    Ok(Box::new(
-        TokioAddress::parse(addr, port_hint, loopback).await?,
-    ))
+pub async fn parse_address(addr: &[u8], port_hint: u16) -> Result<Box<TokioAddress>> {
+    Ok(Box::new(TokioAddress::parse(addr, port_hint).await?))
 }
 
 /// `kj::Network::getSockaddr`: the C++ adapter decoded the caller's `struct sockaddr` into a
@@ -1083,11 +1004,8 @@ pub fn address_targets(addr: &TokioAddress) -> Result<Vec<SocketAddress>> {
     addr.targets()
 }
 
-pub fn connect_target(
-    addr: &TokioAddress,
-    target: SocketAddress,
-) -> impl Future<Output = Result<Box<TokioStream>>> + use<> {
-    addr.connect(target)
+pub async fn connect_target(target: SocketAddress) -> Result<Box<TokioStream>> {
+    Ok(Box::new(TokioStream::new(connect_socket(target).await?)?))
 }
 
 pub fn address_listen(addr: &TokioAddress) -> Result<Box<TokioListener>> {
