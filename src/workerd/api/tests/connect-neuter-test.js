@@ -10,23 +10,25 @@ import { strictEqual, rejects } from 'assert';
 
 let writeRejected = false;
 let lateWrite;
-const { promise: socketClosed, resolve: signalSocketClosed } =
-  Promise.withResolvers();
 
 export default {
   async connect(socket, env, ctx) {
     const writer = socket.writable.getWriter();
 
     lateWrite = (async () => {
-      // The test signals after the connect handler returns and the peer observes closure.
-      await socketClosed;
+      // Yield until connect returns, resuming through this handler's I/O context.
+      await scheduler.wait(0);
 
       await rejects(
         async () => await writer.write(new Uint8Array([0x41, 0x42])),
-        {
-          name: 'TypeError',
-          message:
+        (error) => {
+          strictEqual(error.name, 'TypeError', error.stack);
+          strictEqual(
+            error.message,
             "Can't read from request stream because client disconnected.",
+            error.stack
+          );
+          return true;
         }
       );
 
@@ -45,7 +47,6 @@ export const connectNeuterRegression = {
     // The destination will close the socket when its `connect` returns.
     await socket.closed;
 
-    signalSocketClosed();
     await lateWrite;
 
     strictEqual(writeRejected, true, 'write must throw on a neutered stream');
