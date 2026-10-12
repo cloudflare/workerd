@@ -289,6 +289,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":actor-id-impl",
+        ":compiled-bindings_capnp",
         ":fallback-service",
         ":pyodide",
         ":workerd-debug-port-client",
@@ -320,6 +321,7 @@ wd_cc_library(
     name = "channel-token",
     srcs = ["channel-token.c++"],
     hdrs = ["channel-token.h"],
+    visibility = [":__subpackages__"],
     deps = [
         ":channel-token_capnp",
         "//src/workerd/io",
@@ -370,6 +372,11 @@ wd_cc_library(
 )
 
 wd_capnp_library(src = "docker-api.capnp")
+
+wd_capnp_library(
+    src = "compiled-bindings.capnp",
+    deps = [":workerd_capnp"],
+)
 
 wd_capnp_library(src = "log-schema.capnp")
 
@@ -440,6 +447,7 @@ wd_cc_library(
     hdrs = [
         "v8-platform-impl.h",
     ],
+    visibility = [":__subpackages__"],
     deps = [
         "//src/workerd/io",
         "//src/workerd/jsg",
@@ -466,7 +474,7 @@ wd_capnp_library(
     # Limit visibility to avoid accidental usage – there should be no need to use this outside of
     # test-fixture and the workerd binary.
     visibility = [
-        ":__pkg__",
+        ":__subpackages__",
         "//src/workerd/api:__pkg__",
         "//src/workerd/tests:__pkg__",
     ],
