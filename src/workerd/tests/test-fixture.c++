@@ -393,11 +393,7 @@ TestFixture::TestFixture(SetupParams&& params)
           kj::none,
           SpanParent(nullptr),
           newWorkerFileSystem(kj::heap<FsMap>(), getTmpDirectoryImpl()),
-          // TestFixture does not support the new module registry: no registry
-          // is constructed here, and Worker::Script rejects feature flags that
-          // enable it without one. A test that needs the new registry must
-          // build one (see WorkerdApi::newWorkerdModuleRegistry) and pass it.
-          kj::none)),
+          kj::mv(params.newModuleRegistry))),
       worker(kj::atomicRefcounted<Worker>(kj::atomicAddRef(*workerScript),
           kj::atomicRefcounted<WorkerObserver>(),
           [](jsg::Lock&, const Worker::Api&, v8::Local<v8::Object>, v8::Local<v8::Object>) {

@@ -7,6 +7,7 @@
 
 #include <workerd/io/worker-fs.h>
 #include <workerd/io/worker.h>
+#include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/tests/test-fixture.h>
 
@@ -80,30 +81,45 @@ constexpr kj::StringPtr MAIN_MODULE =
 constexpr kj::StringPtr MAIN_SCRIPT =
     "addEventListener('fetch', (event) => event.respondWith(new Response('hi')));"_kj;
 
+struct CountingObserver final: public JsgIsolateObserver {
+  mutable uint found = 0;
+  mutable uint generated = 0;
+
+  void onCompileCacheFound(v8::Isolate*) const override {
+    ++found;
+  }
+  void onCompileCacheGenerated(v8::Isolate*) const override {
+    ++generated;
+  }
+};
+
 // Owns an isolate, taken from a TestFixture, whose later scripts use `store`.
 struct IsolateWithStore {
   TestFixture fixture;
   kj::Own<const Worker::Isolate> isolate;
   kj::Own<CountingStore> store = kj::atomicRefcounted<CountingStore>();
 
-  IsolateWithStore() {
+  IsolateWithStore(TestFixture::SetupParams&& params = {.useRealTimers = false})
+      : fixture(kj::mv(params)) {
     fixture.runInIoContext([&](const TestFixture::Environment& env) {
       isolate = kj::atomicAddRef(env.lock.getWorker().getIsolate());
       jsg::IsolateBase::from(env.isolate).setCodeCacheStore(kj::atomicAddRef(*store));
     });
   }
 
-  kj::Own<const Worker::Script> newScript() {
+  kj::Own<const Worker::Script> newScript(
+      kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> registry = kj::none) {
     auto modules = kj::heapArray<Worker::Script::Module>(1);
     modules[0] = {
       .name = "main"_kj,
       .content = Worker::Script::EsModule{.body = MAIN_MODULE},
     };
-    return newScript(Worker::Script::Source(Worker::Script::ModulesSource{
+    Worker::Script::Source source(Worker::Script::ModulesSource{
       .mainModule = "main"_kj,
       .modules = kj::mv(modules),
       .isPython = false,
-    }));
+    });
+    return newScript(source, kj::mv(registry));
   }
 
   // A script in service-worker syntax.
@@ -114,9 +130,11 @@ struct IsolateWithStore {
     }));
   }
 
-  kj::Own<const Worker::Script> newScript(const Worker::Script::Source& source) {
+  kj::Own<const Worker::Script> newScript(const Worker::Script::Source& source,
+      kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> registry = kj::none) {
     return isolate->newScript("code-cache-script"_kj, source, IsolateObserver::StartType::COLD,
-        SpanParent(nullptr), newWorkerFileSystem(kj::heap<FsMap>(), getTmpDirectoryImpl()));
+        SpanParent(nullptr), newWorkerFileSystem(kj::heap<FsMap>(), getTmpDirectoryImpl()), false,
+        kj::none, kj::none, kj::mv(registry));
   }
 
   kj::Own<const Worker> newWorker(const Worker::Script& script) {
@@ -189,6 +207,47 @@ KJ_TEST("Identical bundle modules share a lookup outside the startup CPU limit")
     KJ_EXPECT(env.lookupsInStartupLimit() == 0);
     KJ_EXPECT(env.insertCount() == 1);
     KJ_EXPECT(env.claimCount() == 0);
+  }
+}
+
+KJ_TEST("A Worker with the new registry consumes a lookup prepared outside the startup limit") {
+  auto newRegistry = []() {
+    const auto base = "file:///"_url;
+    jsg::modules::ModuleRegistry::Builder builder(
+        base, jsg::modules::ModuleRegistry::Builder::Options::CODE_CACHE_KEYS);
+    jsg::modules::ModuleBundle::BundleBuilder bundleBuilder(base);
+    bundleBuilder.addEsmModule("main"_kj, jsg::copyToArc(MAIN_MODULE),
+        jsg::modules::Module::Flags::ESM, builder.newCodeCacheKey(MAIN_MODULE));
+    return builder.add(bundleBuilder.finish()).finish();
+  };
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setNewModuleRegistry(true);
+  auto observer = kj::atomicRefcounted<CountingObserver>();
+  IsolateWithStore env({
+    .featureFlags = flags.asReader(),
+    .mainModuleSource = MAIN_MODULE,
+    .useRealTimers = false,
+    .jsgIsolateObserver = kj::atomicAddRef(*observer),
+    .newModuleRegistry = newRegistry(),
+  });
+  // The fixture ran its initial Worker before the store was installed.
+  auto initialFound = observer->found;
+  auto initialGenerated = observer->generated;
+
+  for (auto i: kj::zeroTo(2)) {
+    auto script = env.newScript(newRegistry());
+    KJ_EXPECT(env.lookupCount() == i + 1);
+    KJ_EXPECT(env.lookupsInStartupLimit() == 0);
+    KJ_EXPECT(env.claimCount() == (i == 0 ? 1 : 0));
+    auto worker = env.newWorker(*script);
+    // First-import compilation happens in the Worker; it must reuse the prepared lookup.
+    KJ_EXPECT(env.lookupCount() == i + 1);
+    KJ_EXPECT(env.lookupsInStartupLimit() == 0);
+    KJ_EXPECT(env.insertCount() == 1);
+    KJ_EXPECT(env.claimCount() == 0);
+    KJ_EXPECT(observer->generated == initialGenerated + 1);
+    KJ_EXPECT(observer->found == initialFound + i);
   }
 }
 
