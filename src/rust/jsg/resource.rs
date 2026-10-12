@@ -484,14 +484,14 @@ impl Resources {
         }
     }
 
-    /// Drains every cached resource-template handle, transferring ownership of the raw
-    /// persistent-handle words (bit-identical to C++ `v8::Global<v8::FunctionTemplate>`) to
-    /// the caller. Used by the `PREPARE_SNAPSHOT` pipeline, which disposes each handle before
-    /// `CreateBlob`; the cache is left empty and templates are recreated lazily on demand.
-    pub fn take_template_handles(&mut self) -> Vec<usize> {
+    /// Drains every cached resource-template handle, transferring ownership of each
+    /// `v8::Global<v8::FunctionTemplate>` to the caller. Used by the `PREPARE_SNAPSHOT`
+    /// pipeline, which disposes each handle before `CreateBlob`; the cache is left empty and
+    /// templates are recreated lazily on demand.
+    pub fn take_template_handles(&mut self) -> Vec<v8::ffi::Global> {
         self.templates
             .drain()
-            .map(|(_, global)| global.into_raw_handle_for_snapshot())
+            .map(|(_, global)| global.into_ffi_for_snapshot())
             .collect()
     }
 }

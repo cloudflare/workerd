@@ -674,6 +674,15 @@ void JsRpcPromise::resolve(jsg::Lock& js, jsg::JsValue result) {
   }
 }
 
+void JsRpcPromise::reject(kj::Exception exception) {
+  if (state.is<Pending>()) {
+    state = Rejected{
+      .exception = kj::mv(exception),
+      .ctxCheck = IoContext::current().addObject(*this),
+    };
+  }
+}
+
 void JsRpcPromise::setOriginatingCall(kj::Maybe<TraceContextParent> value) {
   originatingCall = ownOriginatingCall(kj::mv(value));
 }
@@ -759,6 +768,15 @@ JsRpcClientProvider::ClientForOneCall JsRpcPromise::getClientForOneCall(
           JSG_FAIL_REQUIRE(TypeError, "Can't pipeline on RPC that did not return an object.");
         }
       }),
+        .callSpanParents = kj::mv(callSpanParents),
+      };
+    }
+    KJ_CASE_ONEOF(rejected, Rejected) {
+      // Dereference `ctxCheck` just to verify we're running in the correct context. (If not,
+      // this will throw.)
+      *rejected.ctxCheck;
+      return {
+        .client = rejected.exception.clone(),
         .callSpanParents = kj::mv(callSpanParents),
       };
     }
@@ -1392,6 +1410,29 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
         return jsg::Value(js.v8Isolate, jsResult);
       };
 
+      auto rejectResult = [weakRef = kj::atomicAddRef(*weakRef)](
+                              jsg::Lock& js, jsg::Value error) -> jsg::Value {
+        if (weakRef->ref != kj::none) {
+          // exceptionToKj() can run application code, such as getters on Error.prototype. That
+          // code can throw, or let GC destroy the promise, so look the promise up again after.
+          auto exception = [&]() -> kj::Exception {
+            JSG_TRY(js) {
+              return js.exceptionToKj(jsg::JsValue(error.getHandle(js)));
+            }
+            JSG_CATCH(_) {
+              // Only pipelined operations report this error. The caller still receives `error`,
+              // which is rethrown below.
+              return JSG_KJ_EXCEPTION(
+                  FAILED, Error, "The RPC call failed with an error that could not be serialized.");
+            }
+          }();
+          KJ_IF_SOME(r, weakRef->ref) {
+            r.reject(kj::mv(exception));
+          }
+        }
+        js.throwException(kj::mv(error));
+      };
+
       auto jsPromise = [&]() -> jsg::Promise<jsg::Value> {
         KJ_IF_SOME(retryState, callRetryState) {
           return awaitJsRpcCallAttempt(
@@ -1426,7 +1467,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
           }
         }
         return promise;
-      }();
+      }().catch_(js, kj::mv(rejectResult));
 
       auto pendingPipeline =
           [&]() -> kj::OneOf<rpc::JsRpcTarget::CallResults::Pipeline, kj::Rc<JsRpcCallRetryState>> {
@@ -1697,9 +1738,9 @@ rpc::JsRpcTarget::Client JsRpcStub::getClient() {
   }
 }
 
-kj::Maybe<kj::Own<IoChannelFactory::RpcChannel>> JsRpcStub::getRpcChannel(IoContext& ioctx) {
+kj::Maybe<kj::Rc<IoChannelFactory::RpcChannel>> JsRpcStub::getRpcChannel(IoContext& ioctx) {
   KJ_IF_SOME(c, rpcChannel) {
-    return kj::addRef(*c);
+    return c->addRef();
   } else KJ_IF_SOME(c, channelNumber) {
     return ioctx.getIoChannelFactory().getRpcChannel(c);
   } else {
@@ -1789,7 +1830,7 @@ void JsRpcStub::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       auto channel = JSG_REQUIRE_NONNULL(getRpcChannel(ioctx), DOMDataCloneError,
           "RpcStub cannot be serialized in this context because it is not a persistent stub.");
       channel->requireAllowsTransfer();
-      serializer.writeRawUint32(frankenvalueHandler.add(kj::mv(channel)));
+      serializer.writeRawUint32(frankenvalueHandler.add(channel.toOwn()));
       return;
     } else KJ_IF_SOME(externalHandler, kj::tryDowncast<RpcSerializerExternalHandler>(handler)) {
       // Confirm that the destination can be opened before serialization can consume this stub.
@@ -1904,7 +1945,7 @@ jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
           "serialized RpcStub had invalid cap table index");
 
       KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::RpcChannel>(cap)) {
-        return js.alloc<JsRpcStub>(IoContext::current().addObject(kj::addRef(channel)), kj::none);
+        return js.alloc<JsRpcStub>(IoContext::current().addObject(channel.addRef()), kj::none);
       } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
         // NOTE: In this case we are quite possibly not in any I/O context! This case happens
         //   when a JsRpcStub is in the `env` object (e.g. of a Dynamic Worker) and refers to a
@@ -1923,7 +1964,7 @@ jsg::Ref<JsRpcStub> JsRpcStub::deserialize(
       auto externalMemory = js.getExternalMemoryAdjustment(ESTIMATED_EXTERNAL_MEMORY_PER_STUB);
 
       auto& ioctx = IoContext::current();
-      kj::Maybe<kj::Own<IoChannelFactory::RpcChannel>> channel;
+      kj::Maybe<kj::Rc<IoChannelFactory::RpcChannel>> channel;
       if (rpcTarget.isDelayedChannelToken()) {
         auto promise = ioctx.getExternalPusher()->unwrapDelayedChannelToken(
             rpcTarget.getDelayedChannelToken());
@@ -2747,7 +2788,7 @@ class TransientJsRpcTarget final: public JsRpcTargetBase {
   void maybeSetJsRpcInfo(IoContext& ctx, const kj::ConstString& methodNameForTrace) override {}
 
   // Calls on a returned stub or pipeline are covered by the session's top-level claim. They need
-  // no @retryable check even when that claim admitted a duplicate: the sender replays only the
+  // no retryable() check even when that claim admitted a duplicate: the sender replays only the
   // top-level call, and calling through its pending result commits the attempt so it is never
   // replayed. A call made here therefore runs for the first time, even in a duplicate session.
   void maybeClaimRetryToken(
@@ -3360,8 +3401,8 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       JSG_REQUIRE(claim == IsRetryableHandler::NO ||
               isRetryableMethod(js, targetInfo, params) == IsRetryableHandler::YES,
           Error,
-          "After calling a @retryable method, a Durable Object RPC session can only call "
-          "@retryable methods.");
+          "After calling a method marked with retryable(), a Durable Object RPC session can only "
+          "call methods marked with retryable().");
       return;
     }
     auto retryable = isRetryableMethod(js, targetInfo, params);
@@ -3374,7 +3415,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
     }
   }
 
-  // YES if the call invokes a method decorated with @retryable and DURABLE_OBJECT_RETRIES_USERLAND
+  // YES if the call invokes a method marked with retryable() and DURABLE_OBJECT_RETRIES_USERLAND
   // is enabled. This runs before the claim, so it must run no user code.
   IsRetryableHandler isRetryableMethod(
       jsg::Lock& js, const TargetInfo& targetInfo, rpc::JsRpcTarget::CallParams::Reader params) {

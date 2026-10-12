@@ -76,17 +76,16 @@ void EntrypointsModule::abortIsolate(jsg::Lock& js, jsg::Optional<kj::String> re
   js.terminateExecutionNow();
 }
 
-jsg::JsValue EntrypointsModule::retryable(
-    jsg::Lock& js, jsg::JsValue value, jsg::JsObject context) {
-  v8::Local<v8::Function> function = JSG_REQUIRE_NONNULL(value.tryCast<jsg::JsFunction>(),
-      TypeError, "@retryable can only decorate public instance methods.");
-  JSG_REQUIRE(context.get(js, "kind"_kj).strictEquals(js.strIntern("method"_kj)) &&
-          context.get(js, "static"_kj).strictEquals(js.boolean(false)) &&
-          context.get(js, "private"_kj).strictEquals(js.boolean(false)),
-      TypeError, "@retryable can only decorate public instance methods.");
-
-  jsg::JsObject(function).setPrivate(js, RETRYABLE_METHOD_PRIVATE_KEY, js.boolean(true));
-  return value;
+void EntrypointsModule::retryable(jsg::Lock& js, jsg::Arguments<jsg::Value> methods) {
+  // Check every argument before marking any, so a call that throws marks nothing.
+  for (auto& method: methods) {
+    JSG_REQUIRE(jsg::JsValue(method.getHandle(js)).isFunction(), TypeError,
+        "retryable() accepts only functions.");
+  }
+  for (auto& method: methods) {
+    KJ_ASSERT_NONNULL(jsg::JsValue(method.getHandle(js)).tryCast<jsg::JsObject>())
+        .setPrivate(js, RETRYABLE_METHOD_PRIVATE_KEY, js.boolean(true));
+  }
 }
 
 jsg::JsSymbol EntrypointsModule::getRestoreSymbol(jsg::Lock& js) {

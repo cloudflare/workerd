@@ -1069,7 +1069,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return getIoChannelFactory().getCapability(channel);
   }
 
-  kj::Own<IoChannelFactory::ActorChannel> getGlobalActorChannel(uint channel,
+  kj::Rc<IoChannelFactory::ActorChannel> getGlobalActorChannel(uint channel,
       const ActorIdFactory::ActorId& id,
       kj::Maybe<kj::String> locationHint,
       ActorGetMode mode,
@@ -1081,7 +1081,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return getIoChannelFactory().getGlobalActor(channel, id, kj::mv(locationHint), mode,
         enableReplicaRouting, routingMode, kj::mv(parentSpan), kj::mv(version), persistent);
   }
-  kj::Own<IoChannelFactory::ActorChannel> getColoLocalActorChannel(
+  kj::Rc<IoChannelFactory::ActorChannel> getColoLocalActorChannel(
       uint channel, kj::StringPtr id, SpanParent parentSpan) {
     return getIoChannelFactory().getColoLocalActor(channel, id, kj::mv(parentSpan));
   }

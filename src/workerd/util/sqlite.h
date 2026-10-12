@@ -26,6 +26,11 @@ namespace workerd {
 using kj::byte;
 using kj::uint;
 
+// Identifies the top-level operation (i.e. a single `exec()` or KV op) that a query belongs to,
+// so related statements can be grouped together in analytics. Minted by callers at the operation
+// boundary and threaded down into every Query the operation spawns.
+using SqliteQueryId = uint64_t;
+
 // Used to collect periodic metrics about queries and size of sqlite db
 class SqliteObserver {
  public:
@@ -50,7 +55,8 @@ class SqliteObserver {
       int queryResult,
       int extendedErrorCode,
       bool isInternalQuery,
-      kj::Maybe<kj::String> queryErrorDescription) {}
+      kj::Maybe<kj::String> queryErrorDescription,
+      kj::Maybe<SqliteQueryId> queryId) {}
 
   static SqliteObserver DEFAULT;
 
@@ -105,6 +111,7 @@ class SqliteDatabase {
   struct QueryOptions {
     StaticRegulator regulator;
     bool allowUnconfirmed = false;
+    kj::Maybe<SqliteQueryId> queryId = kj::none;
   };
 
   struct IngestResult {
@@ -356,6 +363,10 @@ class SqliteDatabase {
     }
   }
 
+  // Generates a randomly generated fresh id for a new top-level operation so related statements
+  // can be grouped in analytics.
+  SqliteQueryId generateQueryId();
+
  private:
   const Vfs& vfs;
   kj::Path path;
@@ -467,7 +478,8 @@ class SqliteDatabase {
       kj::StringPtr sqlCode,
       uint prepFlags,
       Multi multi,
-      kj::Maybe<kj::Vector<Statement>&> prelude = kj::none);
+      kj::Maybe<kj::Vector<Statement>&> prelude = kj::none,
+      kj::Maybe<SqliteQueryId> queryId = kj::none);
 
   // Implements SQLite authorizer callback, see sqlite3_set_authorizer().
   bool isAuthorized(int actionCode,
@@ -523,6 +535,7 @@ class SqliteDatabase::Statement final: private ResetListener {
 
   struct StatementOptions {
     bool allowUnconfirmed = false;
+    kj::Maybe<SqliteQueryId> queryId = kj::none;
   };
 
   template <typename... Params>
@@ -551,7 +564,7 @@ class SqliteDatabase::Statement final: private ResetListener {
 
   // Get the underlying StatementAndEffect, which the caller will then execute. If `prelude` is
   // non-empty, prepareForExecution() actually executes the prelude.
-  StatementAndEffect& prepareForExecution();
+  StatementAndEffect& prepareForExecution(kj::Maybe<SqliteQueryId> queryId = kj::none);
 
   friend class SqliteDatabase;
 };
@@ -675,7 +688,7 @@ class SqliteDatabase::Query final: private ResetListener {
 
       observer.reportQueryEvent(kj::mv(queryStatement), rowsRead, rowsWritten, queryLatency,
           dbWalBytesWritten, queryResult, extendedErrorCode, isInternalQuery,
-          kj::mv(queryErrorDescription));
+          kj::mv(queryErrorDescription), queryId);
     }
 
     void setQueryEventStats(uint64_t rowsRead, uint64_t rowsWritten, bool isInternalQuery) {
@@ -700,6 +713,10 @@ class SqliteDatabase::Query final: private ResetListener {
       extendedErrorCode = res;
     }
 
+    void setQueryId(kj::Maybe<SqliteQueryId> queryId) {
+      this->queryId = queryId;
+    }
+
    private:
     SqliteObserver& observer;
     kj::Maybe<kj::String> queryStatement = kj::none;
@@ -710,6 +727,7 @@ class SqliteDatabase::Query final: private ResetListener {
     uint64_t rowsWritten = 0;
     int queryResult = 0;
     int extendedErrorCode = 0;
+    kj::Maybe<SqliteQueryId> queryId = kj::none;
     kj::Maybe<kj::String> queryErrorDescription = kj::none;
   };
 
@@ -742,25 +760,27 @@ class SqliteDatabase::Query final: private ResetListener {
   Query(SqliteDatabase& db, QueryOptions options, Statement& statement, Params&&... bindings)
       : ResetListener(db),
         regulator(options.regulator),
-        maybeStatement(statement.prepareForExecution()),
+        maybeStatement(statement.prepareForExecution(options.queryId)),
         queryEvent(this->db.sqliteObserver),
         allowUnconfirmed(options.allowUnconfirmed) {
     // If we throw from the constructor, the destructor won't run. Need to call destroy()
     // explicitly.
     KJ_ON_SCOPE_FAILURE(destroy());
+    queryEvent.setQueryId(options.queryId);
     bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
   }
   template <typename... Params>
   Query(SqliteDatabase& db, QueryOptions options, kj::StringPtr sqlCode, Params&&... bindings)
       : ResetListener(db),
         regulator(options.regulator),
-        ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
+        ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI, kj::none, options.queryId)),
         maybeStatement(ownStatement),
         queryEvent(this->db.sqliteObserver),
         allowUnconfirmed(options.allowUnconfirmed) {
     // If we throw from the constructor, the destructor won't run. Need to call destroy()
     // explicitly.
     KJ_ON_SCOPE_FAILURE(destroy());
+    queryEvent.setQueryId(options.queryId);
     bindAll(std::index_sequence_for<Params...>(), kj::fwd<Params>(bindings)...);
   }
 
@@ -1070,8 +1090,11 @@ SqliteDatabase::Query SqliteDatabase::Statement::run(Params&&... params) {
 
 template <typename... Params>
 SqliteDatabase::Query SqliteDatabase::Statement::run(StatementOptions options, Params&&... params) {
-  return Query(db, {.regulator = regulator, .allowUnconfirmed = options.allowUnconfirmed}, *this,
-      kj::fwd<Params>(params)...);
+  return Query(db,
+      {.regulator = regulator,
+        .allowUnconfirmed = options.allowUnconfirmed,
+        .queryId = options.queryId},
+      *this, kj::fwd<Params>(params)...);
 }
 
 template <size_t size, typename... Params>

@@ -18,6 +18,7 @@ export {
   initDictionaryIsRequired,
   missingHighWaterMarkDiverges,
   highWaterMarkIsUnrestrictedDouble,
+  initHighWaterMarkReadOnce,
 } from 'construction';
 
 export {

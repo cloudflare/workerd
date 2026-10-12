@@ -72,6 +72,25 @@ wpt_test(
 )
 
 wpt_test(
+    name = "fetch/api-ts",
+    size = "large",
+    autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
+    compat_flags = [
+        "strip_bom_in_read_all_text",
+        "typescript_implemented_streams",
+    ],
+    config = "fetch/api-test-ts.ts",
+    start_server = True,
+    target_compatible_with = select({
+        # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
+        # Currently we only have a Unix shell script.
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    wpt_directory = "@wpt//:fetch/api@module",
+)
+
+wpt_test(
     name = "encoding",
     size = "large",
     compat_flags = [

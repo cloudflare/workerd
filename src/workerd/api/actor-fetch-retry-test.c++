@@ -641,7 +641,7 @@ struct ActorIoChannelFactory final: public TestFixture::DummyIoChannelFactory {
         locationHints(locationHints),
         cohorts(cohorts) {}
 
-  kj::Own<ActorChannel> getGlobalActor(uint,
+  kj::Rc<ActorChannel> getGlobalActor(uint,
       const ActorIdFactory::ActorId&,
       kj::Maybe<kj::String> locationHint,
       ActorGetMode,
@@ -659,7 +659,7 @@ struct ActorIoChannelFactory final: public TestFixture::DummyIoChannelFactory {
         cohorts.add(kj::mv(cohort));
       }
     }
-    return kj::refcounted<RecordingActorChannel>(capturedMetadata);
+    return kj::rc<RecordingActorChannel>(capturedMetadata);
   }
 
   kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata>& capturedMetadata;
@@ -1364,7 +1364,7 @@ KJ_TEST("replica actor fetch retries a request-level disconnect on its primary c
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = env.js.alloc<Fetcher>(
         env.context.addObject<Fetcher::OutgoingFactory>(kj::heap<ReplicaActorOutgoingFactory>(
-            kj::refcounted<ReplayActorChannel>(state), kj::str("actor-id"))),
+            kj::rc<ReplayActorChannel>(state), kj::str("actor-id"))),
         Fetcher::RequiresHostAndProtocol::YES);
     auto promise = fetcher->fetch(env.js, kj::str("http://example.com"), kj::none);
     return env.context.awaitJs(env.js, kj::mv(promise)).ignoreResult().attach(kj::mv(fetcher));
@@ -1604,18 +1604,17 @@ class LostFirstResponseOutgoingFactory final: public Fetcher::OutgoingFactory {
   TestFixture& receiver;
 };
 
-// workerd does not transform decorator syntax, so the script calls the decorator the way a
-// bundler's standard-decorator output does.
 constexpr kj::StringPtr RETRYABLE_FETCH_ACTOR_SOURCE = R"SCRIPT(
   import { DurableObject } from "cloudflare:workers";
   import { retryable } from "cloudflare:durable-objects";
   class Actor extends DurableObject {
+    static {
+      retryable(this.prototype.fetch);
+    }
     async fetch() {
       return new Response("OK");
     }
   }
-  retryable(Actor.prototype.fetch, { kind: "method", name: "fetch", static: false, private: false,
-      addInitializer() {} });
   export default Actor;
 )SCRIPT"_kj;
 
@@ -1678,7 +1677,7 @@ kj::Maybe<kj::Exception> runFetchWithLostFirstResponse(
   return failure;
 }
 
-KJ_TEST("a @retryable actor fetch whose response was lost recovers on retry") {
+KJ_TEST("a retryable() actor fetch whose response was lost recovers on retry") {
   ReplayState state;
   uint claimCount = 0;
 
@@ -1691,7 +1690,7 @@ KJ_TEST("a @retryable actor fetch whose response was lost recovers on retry") {
   KJ_EXPECT(state.outcomes[0] == ActorRetryOutcome::RECOVERED);
 }
 
-KJ_TEST("an actor fetch whose response was lost is rejected on retry without @retryable") {
+KJ_TEST("an actor fetch whose response was lost is rejected on retry without retryable()") {
   ReplayState state;
   uint claimCount = 0;
 

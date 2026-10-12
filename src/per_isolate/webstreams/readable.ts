@@ -5049,6 +5049,10 @@ class CollectedBytes {
     return result + TextDecoderDecode(decoder);
   }
 }
+// collectChunks() is async, so its result is resolved through a thenable
+// check; off the Object.prototype chain, a patched Object.prototype.then
+// cannot intercept it.
+ObjectSetPrototypeOf(CollectedBytes.prototype, null);
 
 // Cancels the stream with a consumption failure and rethrows it. A cancel
 // that rejects replaces it, as in the C++ AllReader.

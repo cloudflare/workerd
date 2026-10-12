@@ -132,7 +132,11 @@ jsg::Promise<kj::String> getReadableStreamText(jsg::Lock& js, jsg::JsObject obj,
   jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_PROMISE(result));
   return js.toPromise(promise).then(js, [](jsg::Lock& js, jsg::Value ref) {
     auto value = jsg::JsValue(ref.getHandle(js));
-    return value.toString(js);
+    // JsString::toString() is sized by the string's UTF-8 length, so embedded NULs survive;
+    // JsValue::toString() stringifies through a NUL-terminated buffer and would truncate.
+    // If it throws, it manifests as an internal error. That's intended.
+    auto str = KJ_REQUIRE_NONNULL(value.tryCast<jsg::JsString>());
+    return str.toString(js);
   });
 }
 
@@ -1484,10 +1488,15 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
   }
 
   auto& ioContext = IoContext::current();
+  // Dereferencing the IoOwn throws when called from another request: start the read
+  // before marking it in flight, so a pull that never started leaves no flag behind.
+  auto& source = *active.source;
+  auto startLength = source.tryGetLength(StreamEncoding::IDENTITY);
+  auto read = source.tryRead(scratch.begin(), 1, scratch.size());
   pullInFlight = true;
-  inFlightReadStartLength = active.source->tryGetLength(StreamEncoding::IDENTITY);
+  inFlightReadStartLength = kj::mv(startLength);
   return ioContext
-      .awaitIo(js, active.source->tryRead(scratch.begin(), 1, scratch.size()),
+      .awaitIo(js, kj::mv(read),
           [self = JSG_THIS, controller = controller.addRef(js), signal = kj::mv(signal)](
               jsg::Lock& js, size_t amount) mutable {
     self->pullInFlight = false;
@@ -1613,10 +1622,14 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
   }
 
   auto& ioContext = IoContext::current();
+  // As in pullDefault: start the read before marking it in flight.
+  auto& source = *active.source;
+  auto startLength = source.tryGetLength(StreamEncoding::IDENTITY);
+  auto read = source.tryRead(scratch.begin(), minBytes, maxBytes);
   pullInFlight = true;
-  inFlightReadStartLength = active.source->tryGetLength(StreamEncoding::IDENTITY);
+  inFlightReadStartLength = kj::mv(startLength);
   return ioContext
-      .awaitIo(js, active.source->tryRead(scratch.begin(), minBytes, maxBytes),
+      .awaitIo(js, kj::mv(read),
           [self = JSG_THIS, controller = controller.addRef(js),
               byobRequest = byobRequest.addRef(js), view = view.addRef(js), signal = kj::mv(signal),
               minBytes, elementSize](jsg::Lock& js, size_t amount) mutable {

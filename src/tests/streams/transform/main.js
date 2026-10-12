@@ -26,6 +26,7 @@ export {
   readableWritableTypeValidation,
   highWaterMarkValidated,
   hwmInfinityRejected,
+  strategyMembersReadOnce,
 } from 'construction';
 
 export {

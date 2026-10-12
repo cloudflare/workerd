@@ -60,8 +60,10 @@ export const sinkTypeValidation = {
 // DIVERGENCE: the spec converts the queuingStrategy argument before
 // inspecting the underlying sink (the WPT constructor.any "converted
 // after queuingStrategy" case). TypeScript reads strategy.size, then
-// strategy.highWaterMark (twice: validation and storage), then
-// sink.write. C++ converts the sink dictionary first.
+// strategy.highWaterMark, then sink.write. C++ converts the sink
+// dictionary first. Within the strategy, WebIDL converts members in
+// lexicographic order (highWaterMark, then size), as C++ does; TypeScript
+// reads size first, so only its strategy-before-sink order is spec.
 export const argumentConversionOrder = {
   test() {
     const order = [];
@@ -89,7 +91,6 @@ export const argumentConversionOrder = {
     if (usingTsImpl) {
       deepStrictEqual(order, [
         'strategy.size',
-        'strategy.highWaterMark',
         'strategy.highWaterMark',
         'sink.write',
       ]);
@@ -163,5 +164,32 @@ const globalPipe = (async () => {
 export const globalScopePipe = {
   async test() {
     strictEqual(await globalPipe, 'hello');
+  },
+};
+
+// A strategy dictionary whose members count their reads.
+function countingStrategy(highWaterMark) {
+  const reads = { highWaterMark: 0, size: 0 };
+  const strategy = {
+    get highWaterMark() {
+      reads.highWaterMark++;
+      return highWaterMark;
+    },
+    get size() {
+      reads.size++;
+      return undefined;
+    },
+  };
+  return { reads, strategy };
+}
+
+// The strategy dictionary's members are each read once, as WebIDL dictionary
+// conversion does (parity).
+export const strategyMembersReadOnce = {
+  test() {
+    const { reads, strategy } = countingStrategy(2);
+    const ws = new WritableStream({}, strategy);
+    deepStrictEqual(reads, { highWaterMark: 1, size: 1 });
+    strictEqual(ws.getWriter().desiredSize, 2);
   },
 };

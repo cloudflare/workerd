@@ -443,15 +443,15 @@ class Container: public jsg::Object {
   // don't want them trying to access `rpcClient` via the `IoOwn`.
   static kj::Promise<void> interceptOutboundHttpImpl(rpc::Container::Client rpcClient,
       kj::String addr,
-      kj::Own<IoChannelFactory::SubrequestChannel> channel);
+      kj::Rc<IoChannelFactory::SubrequestChannel> channel);
   static kj::Promise<void> interceptAllOutboundHttpImpl(
-      rpc::Container::Client rpcClient, kj::Own<IoChannelFactory::SubrequestChannel> channel);
+      rpc::Container::Client rpcClient, kj::Rc<IoChannelFactory::SubrequestChannel> channel);
   static kj::Promise<void> interceptOutboundHttpsImpl(rpc::Container::Client rpcClient,
       kj::String addr,
-      kj::Own<IoChannelFactory::SubrequestChannel> channel);
+      kj::Rc<IoChannelFactory::SubrequestChannel> channel);
   static kj::Promise<void> interceptOutboundTcpImpl(rpc::Container::Client rpcClient,
       kj::String addr,
-      kj::Own<IoChannelFactory::SubrequestChannel> channel);
+      kj::Rc<IoChannelFactory::SubrequestChannel> channel);
 };
 
 #define EW_CONTAINER_ISOLATE_TYPES                                                                 \

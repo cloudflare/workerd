@@ -169,8 +169,7 @@ class DurableObjectNamespace: public jsg::Object {
   // than being a long-lived binding.
   class ActorChannelFactory: public kj::Refcounted {
    public:
-    virtual kj::Own<IoChannelFactory::ActorChannel> getGlobalActor(
-        const ActorIdFactory::ActorId& id,
+    virtual kj::Rc<IoChannelFactory::ActorChannel> getGlobalActor(const ActorIdFactory::ActorId& id,
         kj::Maybe<kj::String> locationHint,
         ActorGetMode mode,
         bool enableReplicaRouting,
@@ -381,7 +380,7 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
   Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,
       ActorCallRetryState::Attempt attempt,
       MakeUserSpanParent makeUserSpanParent) override;
-  kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
+  kj::Rc<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
 
  private:
   IoChannelFactory::ActorChannel& getOrCreateActorChannel(
@@ -402,7 +401,7 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
 
   kj::Maybe<UserDefinedRetryPolicy> userDefinedRetryPolicy;
 
-  kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
+  kj::Maybe<kj::Rc<IoChannelFactory::ActorChannel>> actorChannel;
 
   // Registered when actorChannel is lazily created, to reflect the cost of holding an open
   // connection (file descriptor) to the target DO. This pressures V8 to GC the owning stub
@@ -425,7 +424,7 @@ class LocalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
   kj::Maybe<ActorRetryCandidate> getActorRetryProbeCandidate() const override {
     return ActorRetryCandidate::UNSUPPORTED_COLO_LOCAL;
   }
-  kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
+  kj::Rc<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
 
  private:
   IoChannelFactory::ActorChannel& getOrCreateActorChannel(
@@ -433,7 +432,7 @@ class LocalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
 
   uint channelId;
   kj::String actorId;
-  kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
+  kj::Maybe<kj::Rc<IoChannelFactory::ActorChannel>> actorChannel;
   // As in GlobalActorOutgoingFactory, reflects the cost of holding an open connection.
   kj::Maybe<jsg::ExternalMemoryAdjustment> channelMemoryAdjustment;
 };
@@ -445,7 +444,7 @@ class LocalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
 // make an outgoing request to set things up.
 class ReplicaActorOutgoingFactory final: public Fetcher::OutgoingFactory {
  public:
-  ReplicaActorOutgoingFactory(kj::Own<IoChannelFactory::ActorChannel> channel, kj::String actorId)
+  ReplicaActorOutgoingFactory(kj::Rc<IoChannelFactory::ActorChannel> channel, kj::String actorId)
       : actorChannel(kj::mv(channel)),
         actorId(kj::mv(actorId)) {}
 
@@ -464,10 +463,10 @@ class ReplicaActorOutgoingFactory final: public Fetcher::OutgoingFactory {
   Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,
       ActorCallRetryState::Attempt attempt,
       MakeUserSpanParent makeUserSpanParent) override;
-  kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
+  kj::Rc<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
 
  private:
-  kj::Own<IoChannelFactory::ActorChannel> actorChannel;
+  kj::Rc<IoChannelFactory::ActorChannel> actorChannel;
   kj::String actorId;
 };
 
@@ -479,7 +478,7 @@ class DurableObjectClass: public jsg::Object {
   DurableObjectClass(IoOwn<IoChannelFactory::ActorClassChannel> channel)
       : channel(kj::mv(channel)) {}
 
-  kj::Own<IoChannelFactory::ActorClassChannel> getChannel(IoContext& ioctx);
+  kj::Rc<IoChannelFactory::ActorClassChannel> getChannel(IoContext& ioctx);
 
   JSG_RESOURCE_TYPE(DurableObjectClass) {
     // No methods - this is just a handle that gets passed to ctx.facets.get()

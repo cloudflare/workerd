@@ -37,10 +37,10 @@ index 731965722fb310fec7aa503c0866f923266f374e..923a13a76f5220cbb106447f84c279b9
     * Reads raw data in various common formats to the buffer.
     * Note that integer types are read in base-128 varint format, not with a
 diff --git a/src/api/api.cc b/src/api/api.cc
-index adee19691fcf4dbcc719e58330d3b894bbf9911f..aaa787e6ef52e8e9d96d206c591c3354620b6f5b 100644
+index 568671193c5ad61c81889fa9959eed12ac85536c..9f282a4c7df8b07e4896ed3877462284fabccb70 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3822,6 +3822,10 @@ uint32_t ValueDeserializer::GetWireFormatVersion() const {
+@@ -3826,6 +3826,10 @@ uint32_t ValueDeserializer::GetWireFormatVersion() const {
    return private_->deserializer.GetWireFormatVersion();
  }
  

@@ -57,17 +57,19 @@ mod ffi {
         unsafe fn realm_create(isolate: *mut Isolate, feature_flags_data: &[u8]) -> Box<Realm>;
 
         /// Drains the Realm's cached resource-template handles for the `PREPARE_SNAPSHOT`
-        /// pipeline. Each returned word is a raw persistent handle bit-identical to a C++
-        /// `v8::Global<v8::FunctionTemplate>`; ownership transfers to the caller, which must
+        /// pipeline. Each returned handle is a `v8::Global<v8::FunctionTemplate>`, recovered on
+        /// the C++ side with `global_from_ffi`; ownership transfers to the caller, which must
         /// dispose the handle before `CreateBlob`. The cache is left empty (templates are
         /// recreated lazily; `START_FROM_SNAPSHOT` isolates start empty anyway).
-        fn realm_take_resource_templates(realm: &mut Realm) -> Vec<usize>;
+        fn realm_take_resource_templates(realm: &mut Realm) -> Vec<Global>;
     }
 
     unsafe extern "C++" {
         include!("workerd/rust/jsg/ffi.h");
+        include!("workerd/rust/jsg/v8.rs.h");
 
         type Isolate = crate::v8::ffi::Isolate;
+        type Global = crate::v8::ffi::Global;
 
         // Realm
         pub unsafe fn realm_from_isolate(isolate: *mut Isolate) -> *mut Realm;
@@ -989,7 +991,7 @@ unsafe fn realm_create(isolate: *mut v8::ffi::Isolate, feature_flags_data: &[u8]
 
 /// See the bridge declaration: drains the cached resource-template persistent handles for
 /// the `PREPARE_SNAPSHOT` pipeline.
-fn realm_take_resource_templates(realm: &mut Realm) -> Vec<usize> {
+fn realm_take_resource_templates(realm: &mut Realm) -> Vec<v8::ffi::Global> {
     realm.resources.take_template_handles()
 }
 

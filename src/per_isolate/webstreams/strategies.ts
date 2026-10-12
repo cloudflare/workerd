@@ -48,13 +48,15 @@ class ByteLengthQueuingStrategy {
     if (!isActualObject(init)) {
       throw new TypeError('init must be an object');
     }
-    if (init.highWaterMark === undefined) {
+    // Read once, as WebIDL dictionary conversion reads each member once.
+    const highWaterMark = init.highWaterMark;
+    if (highWaterMark === undefined) {
       throw new TypeError('init.highWaterMark is required');
     }
     // Stored as-converted WITHOUT range validation: per spec (and WPT),
     // bogus values like NaN or -1 are accepted here and only rejected by
     // ExtractHighWaterMark at stream construction time.
-    this.#highWaterMark = +init.highWaterMark;
+    this.#highWaterMark = +highWaterMark;
   }
 
   get highWaterMark(): number {
@@ -82,10 +84,12 @@ class CountQueuingStrategy {
     if (!isActualObject(init)) {
       throw new TypeError('init must be an object');
     }
-    if (init.highWaterMark === undefined) {
+    // Read once, as WebIDL dictionary conversion reads each member once.
+    const highWaterMark = init.highWaterMark;
+    if (highWaterMark === undefined) {
       throw new TypeError('init.highWaterMark is required');
     }
-    this.#highWaterMark = +init.highWaterMark;
+    this.#highWaterMark = +highWaterMark;
   }
 
   get highWaterMark(): number {

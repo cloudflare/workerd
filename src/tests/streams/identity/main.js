@@ -35,6 +35,7 @@ export {
   acceptsArrayBuffer,
   acceptsDataViewSubrange,
   acceptsStringAsUtf8,
+  stringWithNulDivergence,
   respectsViewOffsets,
   rejectsNumberChunk,
   invalidChunkAfterQueuedValidWrites,

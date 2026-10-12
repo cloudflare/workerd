@@ -3029,24 +3029,26 @@ impl<T> From<ffi::Global> for Global<T> {
 }
 
 impl<T> Global<T> {
-    /// Consumes the `Global`, returning the raw persistent-handle word (bit-identical to a
-    /// C++ `v8::Global<T>`) and transferring ownership to the caller, which becomes
-    /// responsible for disposing the handle. Snapshot-pipeline use only.
+    /// Consumes the `Global`, returning its strong FFI handle and transferring ownership to
+    /// the caller, which becomes responsible for disposing the handle. Snapshot-pipeline use
+    /// only.
     ///
     /// # Panics
     ///
     /// Panics if a traced reference has been installed on this `Global`; cached resource
     /// templates are never GC-traced, so this does not happen for them.
-    pub fn into_raw_handle_for_snapshot(self) -> usize {
+    pub fn into_ffi_for_snapshot(self) -> ffi::Global {
         // SAFETY: reading the UnsafeCell is sound — we hold the only reference.
         let traced_ptr = unsafe { (*self.traced.get()).ptr };
         assert_eq!(
             traced_ptr, 0,
             "cannot transfer a Global with an active traced reference"
         );
-        let ptr = self.handle.ptr;
+        let handle = ffi::Global {
+            ptr: self.handle.ptr,
+        };
         std::mem::forget(self);
-        ptr
+        handle
     }
 }
 

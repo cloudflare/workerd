@@ -593,10 +593,9 @@ class TransformStream<I = unknown, O = unknown> {
         return this.#backpressureChange.promise;
       };
 
-      const readableHWM =
-        readableStrategy.highWaterMark === undefined
-          ? 0
-          : readableStrategy.highWaterMark;
+      // Read once, as WebIDL dictionary conversion reads each member once.
+      const rawReadableHWM = readableStrategy.highWaterMark;
+      const readableHWM = rawReadableHWM === undefined ? 0 : rawReadableHWM;
       this.#readable = new ReadableStream(
         {
           __proto__: null,
@@ -706,10 +705,9 @@ class TransformStream<I = unknown, O = unknown> {
         this.#setBackpressure(false);
         return this.#backpressureChange.promise;
       };
-      const readableHWM =
-        readableStrategy.highWaterMark === undefined
-          ? 0
-          : readableStrategy.highWaterMark;
+      // Read once, as WebIDL dictionary conversion reads each member once.
+      const rawReadableHWM = readableStrategy.highWaterMark;
+      const readableHWM = rawReadableHWM === undefined ? 0 : rawReadableHWM;
       this.#readable = new ReadableStream(
         {
           __proto__: null,

@@ -16,6 +16,7 @@
 //   promise rejects and subsequent writes reject.
 
 import { strictEqual, deepStrictEqual, rejects } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
 
 export const acceptsUint8Array = {
   async test() {
@@ -74,6 +75,29 @@ export const acceptsStringAsUtf8 = {
     strictEqual(done, false);
     strictEqual(new TextDecoder().decode(value), 'hello');
     await writer.close();
+  },
+};
+
+// A string containing NUL (ledger #25): TypeScript writes all its UTF-8
+// bytes; C++ (WritableStreamInternalController::write) writes only the bytes
+// before the first NUL.
+export const stringWithNulDivergence = {
+  async test() {
+    const { readable, writable } = new IdentityTransformStream();
+    const writer = writable.getWriter();
+    const reader = readable.getReader();
+    const bytes = [];
+    const drained = (async () => {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) return;
+        bytes.push(...value);
+      }
+    })();
+    await writer.write('a\0b');
+    await writer.close();
+    await drained;
+    deepStrictEqual(bytes, usingTsImpl ? [0x61, 0x00, 0x62] : [0x61]);
   },
 };
 

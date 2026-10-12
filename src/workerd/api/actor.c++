@@ -77,9 +77,9 @@ Fetcher::OutgoingFactory::Result LocalActorOutgoingFactory::newSingleUseClient(
   return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
 }
 
-kj::Own<IoChannelFactory::SubrequestChannel> LocalActorOutgoingFactory::getSubrequestChannel() {
+kj::Rc<IoChannelFactory::SubrequestChannel> LocalActorOutgoingFactory::getSubrequestChannel() {
   auto& context = IoContext::current();
-  return kj::addRef(getOrCreateActorChannel(context, context.getCurrentTraceSpan()));
+  return getOrCreateActorChannel(context, context.getCurrentTraceSpan()).addRef();
 }
 
 IoChannelFactory::ActorChannel& GlobalActorOutgoingFactory::getOrCreateActorChannel(
@@ -149,9 +149,9 @@ Fetcher::OutgoingFactory::Result GlobalActorOutgoingFactory::newActorCallAttempt
   return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
 }
 
-kj::Own<IoChannelFactory::SubrequestChannel> GlobalActorOutgoingFactory::getSubrequestChannel() {
+kj::Rc<IoChannelFactory::SubrequestChannel> GlobalActorOutgoingFactory::getSubrequestChannel() {
   auto& context = IoContext::current();
-  return kj::addRef(getOrCreateActorChannel(context, context.getCurrentTraceSpan()));
+  return getOrCreateActorChannel(context, context.getCurrentTraceSpan()).addRef();
 }
 
 Fetcher::OutgoingFactory::Result ReplicaActorOutgoingFactory::newSingleUseClient(
@@ -187,8 +187,8 @@ Fetcher::OutgoingFactory::Result ReplicaActorOutgoingFactory::newActorCallAttemp
   return {.client = kj::mv(client), .spanParents = kj::mv(spanParents)};
 }
 
-kj::Own<IoChannelFactory::SubrequestChannel> ReplicaActorOutgoingFactory::getSubrequestChannel() {
-  return kj::addRef(*actorChannel);
+kj::Rc<IoChannelFactory::SubrequestChannel> ReplicaActorOutgoingFactory::getSubrequestChannel() {
+  return actorChannel.addRef();
 }
 
 jsg::Ref<Fetcher> ColoLocalActorNamespace::get(jsg::Lock& js, kj::String actorId) {
@@ -312,13 +312,13 @@ jsg::Ref<DurableObjectNamespace> DurableObjectNamespace::jurisdiction(
   KJ_UNREACHABLE;
 }
 
-kj::Own<IoChannelFactory::ActorClassChannel> DurableObjectClass::getChannel(IoContext& ioctx) {
+kj::Rc<IoChannelFactory::ActorClassChannel> DurableObjectClass::getChannel(IoContext& ioctx) {
   KJ_SWITCH_ONEOF(channel) {
     KJ_CASE_ONEOF(number, uint) {
       return ioctx.getIoChannelFactory().getActorClass(number);
     }
     KJ_CASE_ONEOF(object, IoOwn<IoChannelFactory::ActorClassChannel>) {
-      return kj::addRef(*object);
+      return object->addRef();
     }
   }
   KJ_UNREACHABLE;
@@ -332,7 +332,7 @@ void DurableObjectClass::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   KJ_IF_SOME(handler, serializer.getExternalHandler()) {
     KJ_IF_SOME(frankenvalueHandler, kj::tryDowncast<Frankenvalue::CapTableBuilder>(handler)) {
       // Encoding a Frankenvalue (e.g. for dynamic loopback props or dynamic isolate env).
-      serializer.writeRawUint32(frankenvalueHandler.add(kj::mv(channel)));
+      serializer.writeRawUint32(frankenvalueHandler.add(channel.toOwn()));
       return;
     } else KJ_IF_SOME(rpcHandler, kj::tryDowncast<RpcSerializerExternalHandler>(handler)) {
       KJ_SWITCH_ONEOF(channel->getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::RPC)) {
@@ -405,7 +405,7 @@ jsg::Ref<DurableObjectClass> DurableObjectClass::deserialize(
 
       KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::ActorClassChannel>(cap)) {
         // Probably decoding dynamic ctx.props.
-        return js.alloc<DurableObjectClass>(IoContext::current().addObject(kj::addRef(channel)));
+        return js.alloc<DurableObjectClass>(IoContext::current().addObject(channel.addRef()));
       } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
         // Probably decoding dynamic isolate env.
         return js.alloc<DurableObjectClass>(
@@ -417,7 +417,7 @@ jsg::Ref<DurableObjectClass> DurableObjectClass::deserialize(
     } else KJ_IF_SOME(rpcHandler, kj::tryDowncast<RpcDeserializerExternalHandler>(handler)) {
       auto external = rpcHandler.read();
       auto& ioctx = IoContext::current();
-      kj::Own<IoChannelFactory::ActorClassChannel> channel;
+      kj::Rc<IoChannelFactory::ActorClassChannel> channel;
 
       if (external.isDelayedActorClassChannelToken()) {
         auto promise = ioctx.getExternalPusher()->unwrapDelayedChannelToken(
@@ -440,7 +440,7 @@ jsg::Ref<DurableObjectClass> DurableObjectClass::deserialize(
           "DurableObjectClass cannot be deserialized in this context.");
       auto& ioctx = IoContext::current();
       auto token = deserializer.readLengthDelimitedBytes();
-      kj::Own<IoChannelFactory::ActorClassChannel> channel;
+      kj::Rc<IoChannelFactory::ActorClassChannel> channel;
       if (token.size() > 0) {
         // Token embedded inline, just use it.
         channel = ioctx.getIoChannelFactory().actorClassFromToken(

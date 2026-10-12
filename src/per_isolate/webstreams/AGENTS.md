@@ -165,6 +165,10 @@ connection.
   argument — the source checks `signal.aborted` before delivery and stashes
   bytes for redelivery if aborted (race buffering lives source-side; the JS
   conduit is uniformly bufferless).
+- The `webstreams/cpp_exports` table, which the C++ bridge reads with an
+  ordinary property get (`getCppExport`), is frozen and has a null
+  prototype, so a name missing from it cannot resolve through
+  `Object.prototype`. Keep both when adding exports.
 - `nativeStreamInternals` (markers, extraction symbols, conduit
   construction) is module-private, consumed only by readable.ts/writable.ts
   and the C++ bridge via the API-symbol registry. The C++ mocks in

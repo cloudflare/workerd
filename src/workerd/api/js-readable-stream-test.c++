@@ -767,6 +767,61 @@ KJ_TEST("ReadableStreamNativeSource BYOB pull fills the view; zero-byte EOF clos
   });
 }
 
+// Calls `op` twice from a request other than the one that created the object it uses,
+// recording each outcome: a synchronous throw, or the promise's settlement.
+template <typename Op>
+kj::Promise<void> recordCrossRequestOutcomes(
+    const TestFixture::Environment& env, kj::Vector<kj::String>& outcomes, Op op) {
+  auto& js = env.js;
+  for (int i = 0; i < 2; i++) {
+    js.tryCatch([&] {
+      op(js)
+          .then(js, [&outcomes](jsg::Lock& js) { outcomes.add(kj::str("resolved")); },
+              [&outcomes](jsg::Lock& js, jsg::Value e) {
+        outcomes.add(kj::str("rejected: ", jsg::JsValue(e.getHandle(js))));
+      }).markAsHandled(js);
+    }, [&](jsg::Value e) { outcomes.add(kj::str("threw: ", jsg::JsValue(e.getHandle(js)))); });
+  }
+  return env.context.awaitJs(js, env.context.awaitIo(js, kj::Promise<void>(kj::READY_NOW)));
+}
+
+KJ_TEST("ReadableStreamNativeSource pull from another request leaves no pull in flight") {
+  // The source's IoOwn belongs to the request that created it; dereferencing it from
+  // another request throws. A pull that fails that way never started a read, so a
+  // second pull must fail the same way rather than report a pull still in flight.
+  TestFixture testFixture;
+  MockControllerState state;
+  // One source per read mode, both created by the first request.
+  kj::Vector<jsg::Ref<ReadableStreamNativeSource>> held;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) {
+    for (int i = 0; i < 2; i++) {
+      held.add(
+          env.js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ContentSource>(kData)));
+    }
+  });
+  for (bool byob: {false, true}) {
+    kj::Vector<kj::String> outcomes;
+    testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+      auto& js = env.js;
+      auto source = held[byob].addRef();
+      auto controller = byob ? makeMockController(js, state,
+                                   makeMockByobRequest(js, state,
+                                       jsg::JsUint8Array::create(js, static_cast<size_t>(64)), 1))
+                             : makeMockController(js, state, js.null());
+      return recordCrossRequestOutcomes(env, outcomes,
+          [&, source = kj::mv(source), controller = controller.addRef(js)](jsg::Lock& js) mutable {
+        return source->pull(js, controller.getHandle(js), freshSignal(js));
+      });
+    });
+    KJ_ASSERT(outcomes.size() == 2, outcomes);
+    for (auto& outcome: outcomes) {
+      KJ_EXPECT(outcome.find("already in flight"_kj) == kj::none, byob, outcomes);
+    }
+    KJ_EXPECT(outcomes[0].find("different request"_kj) != kj::none, byob, outcomes);
+  }
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) { held.clear(); });
+}
+
 KJ_TEST("ReadableStreamNativeSource BYOB under-delivery responds then closes (fused EOF)") {
   TestFixture testFixture;
   MockControllerState state;

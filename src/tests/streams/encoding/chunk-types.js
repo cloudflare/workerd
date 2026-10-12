@@ -6,6 +6,11 @@
 // rejection TypeError's message diverges (pinned below) but the aftermath
 // is shared: the stream errors and every later interaction rejects with
 // the same error. TextEncoderStream ToString-coerces, so symbols throw.
+//
+// A bare SharedArrayBuffer chunk diverges: TypeScript decodes it, as the
+// Encoding Standard's AllowSharedBufferSource writable (and Node) do; C++
+// rejects it as not a BufferSource. Views over shared memory decode in
+// both.
 
 import { strictEqual, deepStrictEqual, rejects } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -39,6 +44,64 @@ export const decoderAcceptsBufferSources = {
     }
     deepStrictEqual(got, ['A', 'B', 'C']);
     await writer.close();
+  },
+};
+
+export const decoderSharedArrayBufferChunks = {
+  async test() {
+    const shared = (bytes) => {
+      const buffer = new SharedArrayBuffer(bytes.length);
+      new Uint8Array(buffer).set(bytes);
+      return buffer;
+    };
+    const decode = async (chunks) => {
+      const tds = new TextDecoderStream();
+      const writer = tds.writable.getWriter();
+      const reader = tds.readable.getReader();
+      const writes = Promise.all([
+        ...chunks.map((c) => writer.write(c)),
+        writer.close(),
+      ]);
+      let text = '';
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        text += value;
+      }
+      await writes;
+      return text;
+    };
+    // Views over shared memory, including one split character: parity.
+    const euro = [0xe2, 0x82, 0xac];
+    strictEqual(
+      await decode([
+        new Uint8Array(shared([0x00, 0x41, 0x00]), 1, 1),
+        new DataView(shared([0x42])),
+        new Uint8Array(shared(euro.slice(0, 1))),
+        new Uint8Array(shared(euro.slice(1))),
+      ]),
+      'AB€'
+    );
+    // A bare SharedArrayBuffer (also growable, and a character split across
+    // two of them): TypeScript decodes it; C++ rejects it as an invalid
+    // chunk (ledger #8).
+    const growable = new SharedArrayBuffer(1, { maxByteLength: 4 });
+    new Uint8Array(growable)[0] = 0x44;
+    const bare = [
+      shared([0x43]),
+      growable,
+      shared(euro.slice(0, 2)),
+      shared(euro.slice(2)),
+    ];
+    if (usingTsImpl) {
+      strictEqual(await decode(bare), 'CD€');
+    } else {
+      await rejects(decode(bare), (err) => {
+        strictEqual(err.constructor, TypeError);
+        strictEqual(err.message, cppBadChunkMsg);
+        return true;
+      });
+    }
   },
 };
 

@@ -79,8 +79,9 @@ HWM 1 (count-based) and readable HWM 0 under
 
 ### TextDecoderStream
 
-- Accepts `BufferSource` chunks only (any view type, honoring offsets);
-  anything else rejects with `TypeError` (message per ledger #4) and errors
+- Accepts `BufferSource` chunks only (any view type, honoring offsets;
+  views over shared memory included; a bare `SharedArrayBuffer` per ledger
+  #8); anything else rejects with `TypeError` (message per ledger #4) and errors
   the stream: `closed`, pending reads, and later writes all reject with the
   same error. An already-detached `ArrayBuffer` decodes as zero bytes (a
   no-op).
@@ -194,6 +195,7 @@ Every entry is asserted on both sides via the `which-impl` pattern.
 | 5 | Constructor source text | native code | not | `constructorSurface` |
 | 6 | Thenable check during read resolution | `Object.prototype.then` getter consulted once per read | same | `thenInterceptionDuringReadResolution` |
 | 7 | In-flight write rejection when the readable is cancelled mid-transform | `TypeError` "The readable side of this TransformStream is no longer readable." | `TypeError` "Cannot enqueue a chunk into a stream that is closed or has been errored" | `cancelReadableFromChunkToString` |
+| 8 | Bare `SharedArrayBuffer` TDS chunk | rejected as an invalid chunk (ledger #4 message); the stream errors | decoded like an `ArrayBuffer` (the spec's `AllowSharedBufferSource`, as in Node) | `decoderSharedArrayBufferChunks` |
 
 ## Assertion catalogue
 
@@ -201,7 +203,7 @@ Every entry is asserted on both sides via the `which-impl` pattern.
 | --- | --- |
 | `api-surface.js` | encoding getter; toStringTag branding; inheritance (ledger #2); accessor placement (ledger #3); side stability + no own instance props; getter brand checks; `node:stream/web` re-exports are the same classes; constructor name/length/source (ledger #5) |
 | `construction.js` | option reflection + `utf-16` alias; fatal defaults (ledger #1) incl. explicit values and ignoreBOM default; invalid label `RangeError` with exact message; label whitespace/case/alias normalization |
-| `chunk-types.js` | TDS BufferSource acceptance across view types with offsets; detached-buffer no-op; non-BufferSource rejection (ledger #4) with errored-stream aftermath; TES symbol chunk `TypeError` errors the stream |
+| `chunk-types.js` | TDS BufferSource acceptance across view types with offsets; shared-memory views (parity) and bare `SharedArrayBuffer` chunks (ledger #8); detached-buffer no-op; non-BufferSource rejection (ledger #4) with errored-stream aftermath; TES symbol chunk `TypeError` errors the stream |
 | `encode-coercion.js` | ToString coercion of undefined/number/object chunks |
 | `encode-surrogates.js` | pair split across writes → single astral chunk; lone high + BMP → replacement-plus-char in one chunk; lone low → replacement; pending high at close → flush replacement |
 | `decode-splits.js` | split BOM stripped by default; `ignoreBOM` preserves it; incomplete sequence at close → replacement from the flush |

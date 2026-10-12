@@ -118,6 +118,7 @@ class MockSqliteObserver: public SqliteObserver {
     int extendedErrorCode;
     bool isInternalQuery;
     kj::Maybe<kj::String> queryErrorDescription;
+    kj::Maybe<SqliteQueryId> queryId;
   };
 
   uint64_t rowsRead = 0;
@@ -137,7 +138,8 @@ class MockSqliteObserver: public SqliteObserver {
       int queryError,
       int extendedErrorCode,
       bool isInternalQuery,
-      kj::Maybe<kj::String> queryErrorDescription) override {
+      kj::Maybe<kj::String> queryErrorDescription,
+      kj::Maybe<uint64_t> queryId) override {
     events.add(Event{
       .queryStatement = kj::mv(queryStatement),
       .queryRowsRead = queryRowsRead,
@@ -148,6 +150,7 @@ class MockSqliteObserver: public SqliteObserver {
       .extendedErrorCode = extendedErrorCode,
       .isInternalQuery = isInternalQuery,
       .queryErrorDescription = kj::mv(queryErrorDescription),
+      .queryId = queryId,
     });
   }
 };
@@ -983,6 +986,27 @@ KJ_TEST("SQLite observer addQueryStats") {
 }
 
 KJ_TEST("SQLite observer reportQueryEvent") {
+  class TestSqliteObserver: public SqliteObserver {
+   public:
+    int capturedEvents = 0;
+
+    void reportQueryEvent(kj::Maybe<kj::String> queryStatement,
+        uint64_t queryRowsRead,
+        uint64_t queryRowsWritten,
+        kj::Duration,
+        uint64_t dbWalBytesWritten,
+        int queryError,
+        int extendedErrorCode,
+        bool isInternalQuery,
+        kj::Maybe<kj::String> queryErrorDescription,
+        kj::Maybe<uint64_t> queryId) override {
+      KJ_IF_SOME(err, queryErrorDescription) {
+        KJ_ASSERT(err.contains("query canceled because reset()"));
+      }
+      capturedEvents++;
+    }
+  };
+
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
   MockSqliteObserver sqliteObserver;
@@ -1095,6 +1119,45 @@ KJ_TEST("SQLite failed statement reset") {
 
   // Sanity check that those queries were doing something.
   KJ_EXPECT(db.run("SELECT COUNT(*) FROM things").getInt(0) == 4);
+}
+
+KJ_TEST("SQLite observer reportQueryEvent groups statements by queryId") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  MockSqliteObserver sqliteObserver;
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/kj::maxValue, /*sqliteMaxMemoryPerProcessBytes=*/kj::maxValue,
+      sqliteObserver);
+
+  auto& regulator = DEFAULT_REGULATOR_FOR_TEST;
+
+  // A multi-statement operation stamps every statement it runs with the one id it was given. The
+  // leading statements are reported from prepareSql(); the final statement is reported when the
+  // Query is destroyed.
+  auto id1 = db.generateQueryId();
+  {
+    db.run({.regulator = regulator, .queryId = id1},
+        "CREATE TABLE t (a INTEGER); INSERT INTO t VALUES (1); SELECT * FROM t"_kj);
+  }
+
+  KJ_ASSERT(sqliteObserver.events.size() == 3);
+  for (auto& event: sqliteObserver.events) {
+    KJ_EXPECT(KJ_ASSERT_NONNULL(event.queryId) == id1);
+  }
+
+  // A second top-level operation gets a distinct id, and nextQueryId() keeps advancing.
+  auto id2 = db.generateQueryId();
+  KJ_EXPECT(id2 != id1);
+  size_t before = sqliteObserver.events.size();
+  { db.run({.regulator = regulator, .queryId = id2}, "SELECT * FROM t"_kj); }
+  KJ_ASSERT(sqliteObserver.events.size() == before + 1);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(sqliteObserver.events[before].queryId) == id2);
+
+  // An operation run without an id leaves queryId unset.
+  before = sqliteObserver.events.size();
+  { db.run({.regulator = regulator}, "SELECT * FROM t"_kj); }
+  KJ_ASSERT(sqliteObserver.events.size() == before + 1);
+  KJ_EXPECT(sqliteObserver.events[before].queryId == kj::none);
 }
 
 KJ_TEST("SQLite extended error codes in messages") {

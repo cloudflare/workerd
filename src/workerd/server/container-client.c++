@@ -1078,7 +1078,7 @@ struct ContainerClient::EgressMapping {
   kj::OneOf<kj::CidrRange, kj::String> destination;
   uint16_t port;  // 0 means match all ports
   EgressProtocol protocol;
-  kj::Own<workerd::IoChannelFactory::SubrequestChannel> channel;
+  kj::Rc<workerd::IoChannelFactory::SubrequestChannel> channel;
 };
 
 // Holds all egress mapping state. Stored via kj::Own<EgressState> in ContainerClient
@@ -1377,7 +1377,7 @@ class TcpEgressConnectResponse final: public kj::HttpService::ConnectResponse {
 // Forwards requests to the worker binding via SubrequestChannel.
 class InnerEgressService final: public kj::HttpService {
  public:
-  using ChannelLookup = kj::Function<kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>>()>;
+  using ChannelLookup = kj::Function<kj::Maybe<kj::Rc<IoChannelFactory::SubrequestChannel>>()>;
 
   InnerEgressService(ChannelLookup lookupChannel, kj::StringPtr destAddr, bool isTls = false)
       : lookupChannel(kj::mv(lookupChannel)),
@@ -1508,7 +1508,7 @@ class EgressHttpService final: public kj::HttpService {
           [&client = containerClient, addr = kj::str(destAddr),
               hostname = requestHostname.map([](auto& value) { return kj::str(value); }),
               defaultPort,
-              protocol]() mutable -> kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> {
+              protocol]() mutable -> kj::Maybe<kj::Rc<IoChannelFactory::SubrequestChannel>> {
         return client.findEgressMapping(addr, defaultPort,
             hostname.map([](auto& value) {
           return kj::Maybe<kj::StringPtr>(value);
@@ -2955,7 +2955,7 @@ kj::Vector<kj::String> ContainerClient::getDnsAllowHostnames() const {
   return result;
 }
 
-kj::Maybe<kj::Own<workerd::IoChannelFactory::SubrequestChannel>> ContainerClient::findEgressMapping(
+kj::Maybe<kj::Rc<workerd::IoChannelFactory::SubrequestChannel>> ContainerClient::findEgressMapping(
     kj::StringPtr destAddr,
     uint16_t defaultPort,
     kj::Maybe<kj::StringPtr> hostname,
@@ -2982,13 +2982,13 @@ kj::Maybe<kj::Own<workerd::IoChannelFactory::SubrequestChannel>> ContainerClient
     KJ_SWITCH_ONEOF(mapping.destination) {
       KJ_CASE_ONEOF(cidr, kj::CidrRange) {
         if (cidr.matches(hostAndPort.host)) {
-          return kj::addRef(*mapping.channel);
+          return mapping.channel->addRef();
         }
       }
       KJ_CASE_ONEOF(hostnameGlob, kj::String) {
         KJ_IF_SOME(hostnameValue, normalizedHostname) {
           if (hostnameGlobMatches(hostnameGlob, hostnameValue)) {
-            return kj::addRef(*mapping.channel);
+            return mapping.channel->addRef();
           }
         }
       }

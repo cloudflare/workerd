@@ -15,10 +15,10 @@ unchanged.
 See https://github.com/llvm/llvm-project/pull/156817.
 
 diff --git a/include/v8config.h b/include/v8config.h
-index b36169f1f77d85e46d2840d19f78f98fd0494749..3be703206ca1c241c0d63803c4b8242aaa63c9d0 100644
+index b7aeeade6b81054edee802d058a2b944562a40d0..738d8d19e7615c7ae0e87e553540f73e66127792 100644
 --- a/include/v8config.h
 +++ b/include/v8config.h
-@@ -396,8 +396,13 @@ path. Add it with -I<path> to the command line
+@@ -403,8 +403,13 @@ path. Add it with -I<path> to the command line
           && !defined(_WIN32)))                         /* not on windows */    \
       && !defined(COMPONENT_BUILD)                      /* no component build */\
       && __clang_major__ >= 17                          /* clang >= 17 */

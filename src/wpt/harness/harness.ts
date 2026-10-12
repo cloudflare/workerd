@@ -362,9 +362,14 @@ type Runner = {
   printResults: () => TestCase;
 };
 
+// `moduleBase` is the test target's name (e.g. `fetch/api-ts`), used to name
+// generated output. `wptPath` is the tested directory's path within the WPT
+// tree (e.g. `fetch/api`); test URLs are rooted there so relative resource
+// URLs resolve against the WPT server's layout regardless of the target name.
 export function createRunner(
   config: TestRunnerConfig,
   moduleBase: string,
+  wptPath: string,
   allTestFiles: string[]
 ): Runner {
   const testsNotFound = new Set(Object.keys(config)).difference(
@@ -389,7 +394,7 @@ export function createRunner(
 
       return {
         async test(_: unknown, env: Env): Promise<void> {
-          return runTest(config[file], env, moduleBase, file);
+          return runTest(config[file], env, wptPath, file);
         },
       };
     },
@@ -406,7 +411,7 @@ export function createRunner(
 async function runTest(
   options: TestRunnerOptions | undefined,
   env: Env,
-  moduleBase: string,
+  wptPath: string,
   file: string
 ): Promise<void> {
   if (!options) {
@@ -416,7 +421,7 @@ async function runTest(
   }
 
   const testUrl = new URL(
-    path.join(moduleBase, file),
+    path.join(wptPath, file),
     `http://${env.SIDECAR_HOSTNAME ?? 'localhost'}`
   );
 

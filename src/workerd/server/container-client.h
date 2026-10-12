@@ -251,7 +251,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
 
   // Find a matching egress mapping for the given destination address (host:port format).
   // Returns an addRef'd Own so the channel stays alive even if the mapping is later replaced.
-  kj::Maybe<kj::Own<workerd::IoChannelFactory::SubrequestChannel>> findEgressMapping(
+  kj::Maybe<kj::Rc<workerd::IoChannelFactory::SubrequestChannel>> findEgressMapping(
       kj::StringPtr destAddr,
       uint16_t defaultPort,
       kj::Maybe<kj::StringPtr> hostname,

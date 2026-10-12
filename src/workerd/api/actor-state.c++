@@ -228,7 +228,7 @@ kj::Promise<void> updateStorageDeletes(
 DurableObjectStorage::DurableObjectStorage(jsg::Lock& js,
     IoPtr<ActorCacheInterface> cache,
     bool enableSql,
-    kj::Own<IoChannelFactory::ActorChannel> primaryActorChannel,
+    kj::Rc<IoChannelFactory::ActorChannel> primaryActorChannel,
     kj::Own<ActorIdFactory::ActorId> primaryActorId)
     : cache(kj::mv(cache)),
       enableSql(enableSql) {
@@ -1048,8 +1048,8 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
     return ActorCallTargetRetryable::NO;
   }
 
-  kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override {
-    return kj::addRef(getOrCreateActorChannel());
+  kj::Rc<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override {
+    return getOrCreateActorChannel().addRef();
   }
 
  private:
@@ -1059,7 +1059,7 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
   // This is moved away when `actorChannel` is initialized.
   kj::Function<kj::Promise<Worker::Actor::FacetManager::StartInfo>()> getStartInfo;
 
-  kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
+  kj::Maybe<kj::Rc<IoChannelFactory::ActorChannel>> actorChannel;
 
   IoChannelFactory::ActorChannel& getOrCreateActorChannel() {
     if (actorChannel == kj::none) {

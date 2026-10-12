@@ -211,6 +211,9 @@ wd_cc_library(
     copts = [
         "-std=c23",
     ],
+    features = [
+        "parse_headers_as_c",
+    ],
 )
 
 kj_test(

@@ -244,6 +244,7 @@ wd_cc_library(
     ],
     implementation_deps = [
         ":autogate",
+        ":entropy",
         ":strings",
         "//src/workerd/jsg:exception",
         "@sqlite3",
@@ -535,10 +536,10 @@ wd_cc_library(
     srcs = ["setup-async-io.c++"],
     visibility = ["//visibility:public"],
     deps = [
-        "//deps:rust_runtime",
         "//src/rust/cxx/kj-rs-io",
         "//src/rust/cxx/kj-rs-io:bridge",
         "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "@@//deps:rust_runtime",
         "@capnp-cpp//src/kj:kj-async-core",
         "@capnp-cpp//src/kj:kj-async-io",
         "@capnp-cpp//src/kj:kj-async-os-hdrs",

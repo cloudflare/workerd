@@ -100,13 +100,10 @@ wd_cc_library(
         "async-context.h",
         "dom-exception.h",
         "fast-api.h",
-        "function.h",
         "jsg.h",
         "jsvalue.h",
         "jsvalue-defs.h",
-        "modules.h",
         "modules-new.h",
-        "promise.h",
         "resource.h",
         "ser.h",
         "setup.h",
@@ -118,8 +115,6 @@ wd_cc_library(
         "wrappable.h",
         "wrappable-tag.h",
     ],
-    # Some JSG headers can't be compiled on their own
-    features = ["-parse_headers"],
     implementation_deps = [
         "//src/workerd/util:entropy",
         "@simdutf",
@@ -127,6 +122,12 @@ wd_cc_library(
     ],
     local_defines = ["JSG_IMPLEMENTATION"],
     tags = ["no-clang-tidy"],
+    # Some JSG headers can't be compiled on their own
+    textual_hdrs = [
+        "function.h",
+        "modules.h",
+        "promise.h",
+    ],
     visibility = [
         "//src/rust/jsg:__pkg__",
         "//src/rust/jsg-test:__pkg__",

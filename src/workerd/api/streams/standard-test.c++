@@ -2527,6 +2527,83 @@ KJ_TEST("DrainingReader: controller closes promptly after drainingRead done (byt
   });
 }
 
+KJ_TEST("ReadableStream pumpTo cancels a pending sink write when the pump is dropped") {
+  // Dropping the pumpTo() promise while a write to the sink is pending frees the sink. If the
+  // pending write were not canceled first, the sink's destructor would shut down the write side
+  // with that write still outstanding.
+
+  struct TestSink final: public WritableStreamSink {
+    kj::TwoWayPipe pipe;
+    kj::PromiseFulfillerPair<void> paf;
+    kj::Vector<kj::String>& events;
+    TestSink(kj::Vector<kj::String>& events)
+        : pipe(kj::newTwoWayPipe()),
+          paf(kj::newPromiseAndFulfiller<void>()),
+          events(events) {}
+
+    ~TestSink() {
+      events.add(kj::str("sink was destroyed"));
+      pipe.ends[0]->shutdownWrite();
+    }
+
+    kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
+      events.add(kj::str("got the write"));
+      paf.fulfiller->fulfill();
+      return pipe.ends[0]->write(buffer).attach(
+          kj::defer([this] { events.add(kj::str("write promise was dropped")); }));
+    }
+
+    kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+      events.add(kj::str("got the write"));
+      paf.fulfiller->fulfill();
+      kj::Vector<byte> data;
+      for (auto& piece: pieces) {
+        data.addAll(piece);
+      }
+      auto arr = data.releaseAsArray();
+      return pipe.ends[0]->write(arr).attach(
+          kj::mv(arr), kj::defer([this] { events.add(kj::str("write promise was dropped")); }));
+    }
+
+    kj::Promise<void> end() override {
+      return kj::READY_NOW;
+    }
+
+    void abort(kj::Exception reason) override {}
+  };
+
+  kj::Vector<kj::String> events;
+  capnp::MallocMessageBuilder flagsBuilder;
+  auto featureFlags = flagsBuilder.initRoot<CompatibilityFlags>();
+  featureFlags.setStreamsJavaScriptControllers(true);
+  TestFixture testFixture({.featureFlags = featureFlags.asReader()});
+
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+    auto stream = ReadableStream::constructor(js,
+        UnderlyingSource{.start =
+                             [](jsg::Lock& js, auto controller) {
+      auto& c = KJ_REQUIRE_NONNULL(
+          controller.template tryGet<jsg::Ref<ReadableStreamDefaultController>>());
+      c->enqueue(js, jsg::JsValue(v8::ArrayBuffer::New(js.v8Isolate, 10)));
+      c->close(js);
+      return js.resolvedPromise();
+    }},
+        kj::none);
+
+    auto sink = kj::heap<TestSink>(events);
+    auto writePromise = kj::mv(sink->paf.promise);
+    auto promise = stream->pumpTo(js, kj::mv(sink), true);
+
+    return writePromise.attach(kj::mv(promise));
+  });
+
+  KJ_ASSERT(events.size() == 3);
+  KJ_ASSERT(events[0] == "got the write");
+  KJ_ASSERT(events[1] == "write promise was dropped");
+  KJ_ASSERT(events[2] == "sink was destroyed");
+}
+
 }  // namespace
 }  // namespace workerd::api
 

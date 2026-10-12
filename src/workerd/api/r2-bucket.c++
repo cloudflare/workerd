@@ -531,7 +531,7 @@ jsg::Ref<R2Bucket> R2Bucket::deserialize(
   KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(cap)) {
     // Decoding dynamic ctx.props: the cap is a live subrequest channel.
     return js.alloc<R2Bucket>(FeatureFlags(workerd::FeatureFlags::get(js)),
-        IoContext::current().addObject(kj::addRef(channel)));
+        IoContext::current().addObject(channel.addRef()));
   } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
     // Decoding dynamic isolate env: the cap is a numbered I/O channel.
     return js.alloc<R2Bucket>(workerd::FeatureFlags::get(js),

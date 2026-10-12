@@ -27,6 +27,7 @@
 #include <workerd/jsg/script.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
+#include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
 #include <workerd/util/autogate.h>
@@ -39,7 +40,6 @@
 #include <workerd/util/uuid.h>
 #include <workerd/util/xthreadnotifier.h>
 
-#include <rust/jsg/ffi.h>
 #include <v8-inspector.h>
 #include <v8-profiler.h>
 #include <v8-wasm.h>
@@ -2412,11 +2412,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       kj::Vector<v8::Global<v8::FunctionTemplate>> rustTemplateHandles;
       {
         auto* realm = ::workerd::rust::jsg::realm_from_isolate(lock.v8Isolate);
-        for (size_t word: ::workerd::rust::jsg::realm_take_resource_templates(*realm)) {
-          v8::Global<v8::FunctionTemplate> handle;
-          static_assert(sizeof(handle) == sizeof(word), "v8::Global must be one pointer word");
-          memcpy(static_cast<void*>(&handle), &word, sizeof(word));
-          rustTemplateHandles.add(kj::mv(handle));
+        for (auto& handle: ::workerd::rust::jsg::realm_take_resource_templates(*realm)) {
+          rustTemplateHandles.add(
+              ::workerd::rust::jsg::global_from_ffi<v8::FunctionTemplate>(kj::mv(handle)));
         }
       }
       auto contextGlobal = jsContext->extractContextGlobalForSnapshot();

@@ -15,7 +15,6 @@ rust_library(
     edition = "2024",
     link_deps = [
         ":core",
-        "//src/rust/cxx/third-party:runtime",
         "@@//deps:rust_runtime",
     ],
     proc_macro_deps = [

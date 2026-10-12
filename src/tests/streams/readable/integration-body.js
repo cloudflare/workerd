@@ -74,6 +74,28 @@ export const readAllTextResponseSmall = {
   },
 };
 
+// text() keeps NUL code points, from a byte body and from a stream body,
+// for Request and Response (WPT fetch/api/basic/text-utf8.any.js).
+export const readAllTextKeepsEmbeddedNul = {
+  async test() {
+    const bytes = () => new Uint8Array([0xe6, 0x00, 0xf8, 0x00, 0x61, 0x00]);
+    const expected = '\ufffd\u0000\ufffd\u0000a\u0000';
+    const streamOf = (chunk) =>
+      new ReadableStream({
+        start(c) {
+          c.enqueue(chunk);
+          c.close();
+        },
+      });
+    strictEqual(await new Response(bytes()).text(), expected);
+    strictEqual(await new Response(streamOf(bytes())).text(), expected);
+    const request = (body) =>
+      new Request('http://example.org', { method: 'POST', body });
+    strictEqual(await request(bytes()).text(), expected);
+    strictEqual(await request(streamOf(bytes())).text(), expected);
+  },
+};
+
 export const readAllTextResponseBig = {
   async test() {
     const chunks = [

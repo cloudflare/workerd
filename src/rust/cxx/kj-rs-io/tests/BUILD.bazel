@@ -54,7 +54,7 @@ cc_test(
         ":bridge",
         ":tests",
         "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
-        "//src/rust/cxx/third-party:runtime",
+        "@@//deps:rust_runtime",
         "@capnp-cpp//src/kj:kj-test",
     ],
 )
@@ -73,7 +73,7 @@ cc_test(
     deps = [
         ":tests",
         "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
-        "//src/rust/cxx/third-party:runtime",
+        "@@//deps:rust_runtime",
         "@capnp-cpp//src/kj:kj-test",
     ],
 )
@@ -92,7 +92,7 @@ cc_test(
     deps = [
         ":tests",
         "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
-        "//src/rust/cxx/third-party:runtime",
+        "@@//deps:rust_runtime",
         "@capnp-cpp//src/kj:kj-test",
         "@capnp-cpp//src/kj/compat:kj-http",
     ],
@@ -109,7 +109,7 @@ cc_test(
     }),
     deps = [
         "//src/rust/cxx/kj-rs-io:peer-filter-lib",
-        "//src/rust/cxx/third-party:runtime",
+        "@@//deps:rust_runtime",
         "@capnp-cpp//src/kj:kj-test",
     ],
 )
@@ -128,7 +128,7 @@ cc_test(
     deps = [
         ":tests",
         "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
-        "//src/rust/cxx/third-party:runtime",
+        "@@//deps:rust_runtime",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/kj:kj-test",
     ],

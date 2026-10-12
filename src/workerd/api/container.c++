@@ -616,7 +616,7 @@ jsg::Promise<void> Container::interceptOutboundHttp(
 
 kj::Promise<void> Container::interceptOutboundHttpImpl(rpc::Container::Client rpcClient,
     kj::String addr,
-    kj::Own<IoChannelFactory::SubrequestChannel> channel) {
+    kj::Rc<IoChannelFactory::SubrequestChannel> channel) {
   // Get a channel token for RPC usage, the container runtime can use this
   // token later to redeem a Fetcher.
   kj::Array<byte> token = co_await channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
@@ -635,7 +635,7 @@ jsg::Promise<void> Container::interceptAllOutboundHttp(jsg::Lock& js, jsg::Ref<F
 }
 
 kj::Promise<void> Container::interceptAllOutboundHttpImpl(
-    rpc::Container::Client rpcClient, kj::Own<IoChannelFactory::SubrequestChannel> channel) {
+    rpc::Container::Client rpcClient, kj::Rc<IoChannelFactory::SubrequestChannel> channel) {
   auto token = co_await channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
   { auto drop = kj::mv(channel); }  // no longer needed
 
@@ -661,7 +661,7 @@ jsg::Promise<void> Container::interceptOutboundHttps(
 
 kj::Promise<void> Container::interceptOutboundHttpsImpl(rpc::Container::Client rpcClient,
     kj::String addr,
-    kj::Own<IoChannelFactory::SubrequestChannel> channel) {
+    kj::Rc<IoChannelFactory::SubrequestChannel> channel) {
   auto token = co_await channel->getToken(IoChannelFactory::ChannelTokenUsage::RPC);
   { auto drop = kj::mv(channel); }  // no longer needed
 
@@ -865,7 +865,7 @@ jsg::Promise<void> Container::interceptOutboundTcp(
 
 kj::Promise<void> Container::interceptOutboundTcpImpl(rpc::Container::Client rpcClient,
     kj::String addr,
-    kj::Own<IoChannelFactory::SubrequestChannel> channel) {
+    kj::Rc<IoChannelFactory::SubrequestChannel> channel) {
 
   // Get a channel token for RPC usage, the container runtime can use this
   // token later to redeem a Fetcher whose connect() handler processes the TCP stream.

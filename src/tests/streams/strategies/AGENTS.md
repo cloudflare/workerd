@@ -47,7 +47,7 @@ with `pedantic_wpt` added, pinning the absence of pedantic effects.
 | Module | Asserts |
 | --- | --- |
 | `api-surface.js` | branding; accessor placement + brand checks; no own instance props; hwm reflection incl. fractional; size identity (#1) and shape (#2, #3) |
-| `construction.js` | init required with per-impl message (#4); missing highWaterMark (#5); unrestricted-double storage + ToNumber coercion |
+| `construction.js` | init required with per-impl message (#4); missing highWaterMark (#5); unrestricted-double storage + ToNumber coercion; `init.highWaterMark` read once (parity) |
 | `size-semantics.js` | CQS constant 1; BLQS on views/buffers/DataViews with offsets, detached (0), length-tracking resizable views; plain-object byteLength reads; nullish handling (#6); shadowing getter (#6) |
 | `integration.js` | strategies drive RS/WS desiredSize; detached class size fn in a plain bag; fractional HWM stream truncation (#7); zero HWM |
 | `reentrancy.js` | plain-chunk byteLength getter runs inside the class size fn: throws propagate, re-entrant size calls work; size fns are receiver-agnostic; init-bag highWaterMark getter re-entering the constructor is safe (all parity). In-stream user-size-callback reentrancy is readable/writable-suite territory |

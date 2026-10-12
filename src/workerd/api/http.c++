@@ -2475,7 +2475,7 @@ void Fetcher::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   KJ_IF_SOME(handler, serializer.getExternalHandler()) {
     KJ_IF_SOME(frankenvalueHandler, kj::tryDowncast<Frankenvalue::CapTableBuilder>(handler)) {
       // Encoding a Frankenvalue (e.g. for dynamic loopback props or dynamic isolate env).
-      serializer.writeRawUint32(frankenvalueHandler.add(kj::mv(channel)));
+      serializer.writeRawUint32(frankenvalueHandler.add(channel.toOwn()));
       return;
     } else KJ_IF_SOME(rpcHandler, kj::tryDowncast<RpcSerializerExternalHandler>(handler)) {
       KJ_SWITCH_ONEOF(channel->getTokenMaybeSync(IoChannelFactory::ChannelTokenUsage::RPC)) {
@@ -2562,7 +2562,7 @@ jsg::Ref<Fetcher> Fetcher::deserializeImpl(jsg::Lock& js,
 
       KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(cap)) {
         // Probably decoding dynamic ctx.props.
-        return js.alloc<Fetcher>(IoContext::current().addObject(kj::addRef(channel)),
+        return js.alloc<Fetcher>(IoContext::current().addObject(channel.addRef()),
             RequiresHostAndProtocol::YES, /*isInHouse=*/false, rpcCompatGateBypassed);
       } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
         // Probably decoding dynamic isolate env.
@@ -2575,7 +2575,7 @@ jsg::Ref<Fetcher> Fetcher::deserializeImpl(jsg::Lock& js,
     } else KJ_IF_SOME(rpcHandler, kj::tryDowncast<RpcDeserializerExternalHandler>(handler)) {
       auto external = rpcHandler.read();
       auto& ioctx = IoContext::current();
-      kj::Own<IoChannelFactory::SubrequestChannel> channel;
+      kj::Rc<IoChannelFactory::SubrequestChannel> channel;
 
       if (external.isDelayedSubrequestChannelToken()) {
         auto promise = ioctx.getExternalPusher()->unwrapDelayedChannelToken(
@@ -2600,7 +2600,7 @@ jsg::Ref<Fetcher> Fetcher::deserializeImpl(jsg::Lock& js,
           "ServiceStub cannot be deserialized in this context.");
       auto& ioctx = IoContext::current();
       auto token = deserializer.readLengthDelimitedBytes();
-      kj::Own<IoChannelFactory::SubrequestChannel> channel;
+      kj::Rc<IoChannelFactory::SubrequestChannel> channel;
       if (token.size() > 0) {
         // Token embedded inline, just use it.
         channel = ioctx.getIoChannelFactory().subrequestChannelFromToken(
@@ -3008,13 +3008,13 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
   KJ_UNREACHABLE;
 }
 
-kj::Own<IoChannelFactory::SubrequestChannel> Fetcher::getSubrequestChannel(IoContext& ioContext) {
+kj::Rc<IoChannelFactory::SubrequestChannel> Fetcher::getSubrequestChannel(IoContext& ioContext) {
   KJ_SWITCH_ONEOF(channelOrClientFactory) {
     KJ_CASE_ONEOF(channel, uint) {
       return ioContext.getIoChannelFactory().getSubrequestChannel(channel);
     }
     KJ_CASE_ONEOF(channel, IoOwn<IoChannelFactory::SubrequestChannel>) {
-      return kj::addRef(*channel);
+      return channel->addRef();
     }
     KJ_CASE_ONEOF(outgoingFactory, IoOwn<OutgoingFactory>) {
       return outgoingFactory->getSubrequestChannel();

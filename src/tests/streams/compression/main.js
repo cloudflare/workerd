@@ -103,6 +103,9 @@ export {
 export {
   thenInterceptionDuringReadResolution,
   cancelFromReadResultThenGetterDuringWrite,
+  cancelFromReadResultThenGetterDuringClose,
+  interopErrorFromReadResultThenGetterDuringClose,
+  interopErrorFromReadResultThenGetterDuringWrite,
   secondConcurrentRead,
   writeFromReadContinuation,
   cancelSiblingFromReadContinuation,

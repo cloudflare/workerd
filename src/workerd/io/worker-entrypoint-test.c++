@@ -304,22 +304,21 @@ KJ_TEST("actor fetch claims after construction and before the fetch handler") {
   KJ_EXPECT(getJsEvents(fixture) == "constructor;fetch;");
 }
 
-// workerd does not transform decorator syntax, so the script calls the decorator the way a
-// bundler's standard-decorator output does.
 constexpr kj::StringPtr RETRYABLE_FETCH_ACTOR_SOURCE = R"SCRIPT(
   import { DurableObject } from "cloudflare:workers";
   import { retryable } from "cloudflare:durable-objects";
   class Actor extends DurableObject {
+    static {
+      retryable(this.prototype.fetch);
+    }
     async fetch() {
       return new Response("OK");
     }
   }
-  retryable(Actor.prototype.fetch, { kind: "method", name: "fetch", static: false, private: false,
-      addInitializer() {} });
   export default Actor;
 )SCRIPT"_kj;
 
-IsRetryableHandler claimRetryableForDecoratedFetch(kj::ArrayPtr<const kj::StringPtr> autogates) {
+IsRetryableHandler claimRetryableForMarkedFetch(kj::ArrayPtr<const kj::StringPtr> autogates) {
   auto observer = kj::refcounted<RetryClaimObserver>();
   auto params = recordingActorParams(*observer);
   params.mainModuleSource = RETRYABLE_FETCH_ACTOR_SOURCE;
@@ -336,13 +335,13 @@ IsRetryableHandler claimRetryableForDecoratedFetch(kj::ArrayPtr<const kj::String
   return observer->retryableAtClaim;
 }
 
-KJ_TEST("a @retryable fetch claims as retryable when the userland gate is enabled") {
+KJ_TEST("a retryable() fetch claims as retryable when the userland gate is enabled") {
   auto gates = kj::arr("durable-object-retries-userland"_kj);
-  KJ_EXPECT(claimRetryableForDecoratedFetch(gates) == IsRetryableHandler::YES);
+  KJ_EXPECT(claimRetryableForMarkedFetch(gates) == IsRetryableHandler::YES);
 }
 
-KJ_TEST("a @retryable fetch claims as not retryable when the userland gate is disabled") {
-  KJ_EXPECT(claimRetryableForDecoratedFetch(nullptr) == IsRetryableHandler::NO);
+KJ_TEST("a retryable() fetch claims as not retryable when the userland gate is disabled") {
+  KJ_EXPECT(claimRetryableForMarkedFetch(nullptr) == IsRetryableHandler::NO);
 }
 
 KJ_TEST("a rejected actor fetch claim runs the constructor but not the handler") {
