@@ -1,4 +1,4 @@
-name: Code cache focused verification
+name: Code cache Windows case verification
 on:
   workflow_dispatch:
 
@@ -8,102 +8,19 @@ permissions:
   actions: write
 
 jobs:
-  focused-windows:
+  worker-cases-windows:
     uses: ./.github/workflows/_bazel.yml
     with:
       image: windows-2025-16core
       os_name: windows
       arch_name: X64
       suffix: -cache-focused
-      extra_bazel_args: '--config=ci-test --config=ci-windows --runs_per_test=5 --flaky_test_attempts=1 --test_output=all'
+      extra_bazel_args: '--config=ci-test --config=ci-windows --runs_per_test=5 --flaky_test_attempts=1 --test_output=all --test_arg=--filter=*worker-code-cache-test.c++:221-299'
       build_target: >-
-        //src/workerd/jsg:code-cache-test@
-        //src/workerd/jsg:code-cache-test@all-autogates
         //src/workerd/io:worker-code-cache-test@
         //src/workerd/io:worker-code-cache-test@all-autogates
-        //src/workerd/api/tests:actor-alarms-name-test@
-        //src/workerd/api/tests:actor-alarms-name-test@all-autogates
-        //src/workerd/api/tests:actor-alarms-name-test@all-compat-flags
-        //src/workerd/server/tests/unsafe-module:unsafe-module-test@
-        //src/workerd/server/tests/unsafe-module:unsafe-module-test@all-autogates
-        //src/workerd/server/tests/unsafe-module:unsafe-module-test@all-compat-flags
       test_target: >-
-        //src/workerd/jsg:code-cache-test@
-        //src/workerd/jsg:code-cache-test@all-autogates
         //src/workerd/io:worker-code-cache-test@
         //src/workerd/io:worker-code-cache-test@all-autogates
-        //src/workerd/api/tests:actor-alarms-name-test@
-        //src/workerd/api/tests:actor-alarms-name-test@all-autogates
-        //src/workerd/api/tests:actor-alarms-name-test@all-compat-flags
-        //src/workerd/server/tests/unsafe-module:unsafe-module-test@
-        //src/workerd/server/tests/unsafe-module:unsafe-module-test@all-autogates
-        //src/workerd/server/tests/unsafe-module:unsafe-module-test@all-compat-flags
       upload_test_logs: true
-    secrets: inherit
-
-  focused-asan:
-    uses: ./.github/workflows/_bazel.yml
-    with:
-      image: ubuntu-22.04-16core
-      os_name: linux
-      arch_name: X64
-      suffix: -cache-focused-asan
-      extra_bazel_args: '--config=ci-test --config=ci-linux-asan --runs_per_test=5 --flaky_test_attempts=1'
-      build_target: >-
-        //src/workerd/jsg:code-cache-test@
-        //src/workerd/jsg:code-cache-test@all-autogates
-        //src/workerd/io:worker-code-cache-test@
-        //src/workerd/io:worker-code-cache-test@all-autogates
-        //src/workerd/api/tests:actor-alarms-name-test@
-        //src/workerd/api/tests:actor-alarms-name-test@all-autogates
-        //src/workerd/api/tests:actor-alarms-name-test@all-compat-flags
-        //src/workerd/server/tests/unsafe-module:unsafe-module-test@
-        //src/workerd/server/tests/unsafe-module:unsafe-module-test@all-autogates
-        //src/workerd/server/tests/unsafe-module:unsafe-module-test@all-compat-flags
-      test_target: >-
-        //src/workerd/jsg:code-cache-test@
-        //src/workerd/jsg:code-cache-test@all-autogates
-        //src/workerd/io:worker-code-cache-test@
-        //src/workerd/io:worker-code-cache-test@all-autogates
-        //src/workerd/api/tests:actor-alarms-name-test@
-        //src/workerd/api/tests:actor-alarms-name-test@all-autogates
-        //src/workerd/api/tests:actor-alarms-name-test@all-compat-flags
-        //src/workerd/server/tests/unsafe-module:unsafe-module-test@
-        //src/workerd/server/tests/unsafe-module:unsafe-module-test@all-autogates
-        //src/workerd/server/tests/unsafe-module:unsafe-module-test@all-compat-flags
-      upload_test_logs: true
-    secrets: inherit
-
-  focused-coverage:
-    uses: ./.github/workflows/_bazel.yml
-    with:
-      image: ubuntu-22.04-16core
-      os_name: linux
-      arch_name: X64
-      suffix: -cache-focused-coverage
-      extra_bazel_args: '--config=ci-linux-common --config=ci-limit-storage --config=coverage --test_env=CI=true --config=wpt-test --test_tag_filters= --runs_per_test=5 --flaky_test_attempts=1'
-      build_target: >-
-        //src/workerd/jsg:code-cache-test@
-        //src/workerd/jsg:code-cache-test@all-autogates
-        //src/workerd/io:worker-code-cache-test@
-        //src/workerd/io:worker-code-cache-test@all-autogates
-        //src/workerd/api/tests:actor-alarms-name-test@
-        //src/workerd/api/tests:actor-alarms-name-test@all-autogates
-        //src/workerd/api/tests:actor-alarms-name-test@all-compat-flags
-        //src/workerd/server/tests/unsafe-module:unsafe-module-test@
-        //src/workerd/server/tests/unsafe-module:unsafe-module-test@all-autogates
-        //src/workerd/server/tests/unsafe-module:unsafe-module-test@all-compat-flags
-      test_target: >-
-        //src/workerd/jsg:code-cache-test@
-        //src/workerd/jsg:code-cache-test@all-autogates
-        //src/workerd/io:worker-code-cache-test@
-        //src/workerd/io:worker-code-cache-test@all-autogates
-        //src/workerd/api/tests:actor-alarms-name-test@
-        //src/workerd/api/tests:actor-alarms-name-test@all-autogates
-        //src/workerd/api/tests:actor-alarms-name-test@all-compat-flags
-        //src/workerd/server/tests/unsafe-module:unsafe-module-test@
-        //src/workerd/server/tests/unsafe-module:unsafe-module-test@all-autogates
-        //src/workerd/server/tests/unsafe-module:unsafe-module-test@all-compat-flags
-      upload_test_logs: true
-      run_coverage: true
     secrets: inherit
