@@ -1,64 +1,42 @@
-name: Code cache focused verification
+name: Code cache Windows verification
 on:
   workflow_dispatch:
 
-# CI-only branch; its parent is the PR head. Do not merge this workflow change.
+# CI-only branch; production code matches the PR head.
 permissions:
   contents: read
   actions: write
 
 jobs:
-  focused-asan:
+  focused-windows:
     uses: ./.github/workflows/_bazel.yml
     with:
-      image: ubuntu-22.04-16core
-      os_name: linux
+      image: windows-2025-16core
+      os_name: windows
       arch_name: X64
-      suffix: -focused-asan
-      extra_bazel_args: '--config=ci-test --config=ci-linux-asan --runs_per_test=5 --flaky_test_attempts=1'
+      suffix: -cache-focused
+      extra_bazel_args: '--config=ci-test --config=ci-windows --runs_per_test=5 --flaky_test_attempts=1 --test_output=all'
       build_target: >-
         //src/workerd/jsg:code-cache-test@
         //src/workerd/jsg:code-cache-test@all-autogates
         //src/workerd/io:worker-code-cache-test@
         //src/workerd/io:worker-code-cache-test@all-autogates
+        //src/workerd/api/tests:actor-alarms-name-test@
+        //src/workerd/api/tests:actor-alarms-name-test@all-autogates
+        //src/workerd/api/tests:actor-alarms-name-test@all-compat-flags
+        //src/workerd/server/tests/unsafe-module:unsafe-module-test@
+        //src/workerd/server/tests/unsafe-module:unsafe-module-test@all-autogates
+        //src/workerd/server/tests/unsafe-module:unsafe-module-test@all-compat-flags
       test_target: >-
         //src/workerd/jsg:code-cache-test@
         //src/workerd/jsg:code-cache-test@all-autogates
         //src/workerd/io:worker-code-cache-test@
         //src/workerd/io:worker-code-cache-test@all-autogates
-      upload_test_logs: true
-    secrets: inherit
-
-  focused-coverage:
-    uses: ./.github/workflows/_bazel.yml
-    with:
-      image: ubuntu-22.04-16core
-      os_name: linux
-      arch_name: X64
-      suffix: -focused-coverage
-      extra_bazel_args: '--config=ci-linux-common --config=ci-limit-storage --config=coverage --test_env=CI=true --config=wpt-test --test_tag_filters= --runs_per_test=5 --flaky_test_attempts=1'
-      build_target: >-
-        //src/workerd/jsg:code-cache-test@
-        //src/workerd/jsg:code-cache-test@all-autogates
-        //src/workerd/io:worker-code-cache-test@
-        //src/workerd/io:worker-code-cache-test@all-autogates
-      test_target: >-
-        //src/workerd/jsg:code-cache-test@
-        //src/workerd/jsg:code-cache-test@all-autogates
-        //src/workerd/io:worker-code-cache-test@
-        //src/workerd/io:worker-code-cache-test@all-autogates
-      upload_test_logs: true
-      run_coverage: true
-    secrets: inherit
-  benchmark:
-    uses: ./.github/workflows/_bazel.yml
-    with:
-      image: ubuntu-22.04-16core
-      os_name: linux
-      arch_name: X64
-      suffix: -code-cache-benchmark
-      extra_bazel_args: '--config=ci-test --config=ci-linux --test_output=all --flaky_test_attempts=1'
-      build_target: //src/workerd/jsg:code-cache-benchmark-test@
-      test_target: //src/workerd/jsg:code-cache-benchmark-test@
+        //src/workerd/api/tests:actor-alarms-name-test@
+        //src/workerd/api/tests:actor-alarms-name-test@all-autogates
+        //src/workerd/api/tests:actor-alarms-name-test@all-compat-flags
+        //src/workerd/server/tests/unsafe-module:unsafe-module-test@
+        //src/workerd/server/tests/unsafe-module:unsafe-module-test@all-autogates
+        //src/workerd/server/tests/unsafe-module:unsafe-module-test@all-compat-flags
       upload_test_logs: true
     secrets: inherit
