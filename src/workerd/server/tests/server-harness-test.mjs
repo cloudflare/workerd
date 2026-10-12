@@ -97,6 +97,17 @@ test('control EOF rejects readiness even if the child is still alive', async (t)
   await failed;
 });
 
+test('control stream errors reject readiness', async (t) => {
+  const { control, harness } = mockWorkerd(t);
+  await harness.start();
+  const failed = assert.rejects(
+    harness.getListenPort('udp'),
+    /control pipe failed/
+  );
+  control.emit('error', new Error('control pipe failed'));
+  await failed;
+});
+
 test('startup timeout reports the PID, pending socket, and last message', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { control, harness } = mockWorkerd(t, { startupTimeoutMs: 30 });
