@@ -497,6 +497,28 @@ v8::Local<v8::WasmModuleObject> compileWasmModule(
       js.v8Isolate, std::span<const uint8_t>(code.begin(), code.size()), options));
 }
 
+v8::Local<v8::WasmModuleObject> CompiledWasmModuleHolder::getOrCompile(jsg::Lock& js,
+    kj::ArrayPtr<const kj::byte> wireBytes,
+    const CompilationObserver& observer) const {
+  auto& slot = compiled[js.isWasmEsmIntegrationBuiltinsEnabled() ? 1 : 0];
+  {
+    auto lock = slot.lockShared();
+    KJ_IF_SOME(module, *lock) {
+      auto metrics = observer.onWasmCompilationFromCacheStart(js.v8Isolate);
+      return jsg::check(v8::WasmModuleObject::FromCompiledModule(js.v8Isolate, module));
+    }
+  }
+
+  // Compile without holding the lock, so a thread that finds the holder empty never blocks on
+  // another thread's compile. Concurrent first loads then each compile once.
+  auto module = compileWasmModule(js, wireBytes, observer);
+  auto lock = slot.lockExclusive();
+  if (*lock == kj::none) {
+    *lock = module->GetCompiledModule();
+  }
+  return module;
+}
+
 // ======================================================================================
 
 kj::Maybe<kj::OneOf<kj::String, ModuleRegistry::ModuleInfo>> tryResolveFromFallbackService(Lock& js,
