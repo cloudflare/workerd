@@ -14,15 +14,7 @@ assert_impl_all!(TokioAddress: Send, Sync);
 assert_impl_all!(TokioDatagram: Send, Sync);
 
 fn parse_once(text: &[u8], port_hint: u16) -> Option<Result<TokioAddress>> {
-    parse_once_in(text, port_hint, &LoopbackRegistry::new())
-}
-
-fn parse_once_in(
-    text: &[u8],
-    port_hint: u16,
-    loopback: &LoopbackRegistry,
-) -> Option<Result<TokioAddress>> {
-    let mut fut = std::pin::pin!(TokioAddress::parse(text, port_hint, loopback));
+    let mut fut = std::pin::pin!(TokioAddress::parse(text, port_hint));
     let mut cx = Context::from_waker(Waker::noop());
     match fut.as_mut().poll(&mut cx) {
         Poll::Ready(result) => Some(result),
@@ -59,58 +51,14 @@ fn err_of<T>(result: Result<T>) -> KjError {
 fn ip_addrs(addr: &TokioAddress) -> (&[SocketAddr], bool) {
     match &addr.spec {
         Spec::Ip { addrs, wildcard } => (addrs, *wildcard),
-        _ => panic!("expected an IP address"),
+        #[cfg(unix)]
+        Spec::Unix(_) => panic!("expected an IP address"),
     }
 }
 
 /// How many sockets a listener binds (KJ's aggregate receiver: one per resolved address).
 fn socket_count(listener: &TokioListener) -> usize {
-    match &listener.shared.backend {
-        ListenerBackend::Sockets { inners, .. } => inners.len(),
-        ListenerBackend::Loopback(_) => panic!("expected a socket listener"),
-    }
-}
-
-#[test]
-fn loopback_addresses_need_the_registry_enabled() {
-    let registry = LoopbackRegistry::new();
-    // Disabled: "loopback:svc" is a hostname lookup, which this port-less thread refuses.
-    let Some(Err(err)) = parse_once_in(b"loopback:svc", 0, &registry) else {
-        panic!("expected the hostname lookup to be refused at once")
-    };
-    assert!(
-        KjError::from(err)
-            .description()
-            .contains("no TokioEventPort")
-    );
-
-    registry.enable();
-    // Binding and listening register with the loop; parsing a loopback address does not.
-    let _port = kj_rs_tokio::TokioPort::new();
-    let addr = parse_once_in(b"loopback:svc", 0, &registry)
-        .unwrap()
-        .unwrap();
-    assert_eq!(addr.to_display_bytes(), b"loopback:svc");
-    let targets = addr.targets().unwrap();
-    assert_eq!(targets, [SocketAddress::loopback(b"svc")]);
-    // Same name, same queue; the registry's children (clone_handle) see it too.
-    let again = parse_once_in(b"loopback:svc", 0, &registry.clone_handle())
-        .unwrap()
-        .unwrap();
-    match (&addr.spec, &again.spec) {
-        (Spec::Loopback(a), Spec::Loopback(b)) => {
-            assert!(Arc::ptr_eq(a, b));
-        }
-        _ => panic!("expected loopback addresses"),
-    }
-    let Err(err) = addr.bind_datagram() else {
-        panic!("expected bind_datagram() to fail")
-    };
-    assert!(
-        KjError::from(err)
-            .description()
-            .contains("loopback addresses do not support datagrams")
-    );
+    listener.shared.backend.inners.len()
 }
 
 #[test]
