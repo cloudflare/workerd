@@ -8,7 +8,7 @@ end = source.index('\ntest("Miniflare: dispatchConnect sockets are closed on dis
 test = source[start:end]
 test = test.replace(
     'test("Miniflare: dispatchConnect selects Worker TCP triggers", async ({',
-    'test.each(Array.from({ length: 51 }, (_, round) => round))(\n'
+    'test.for(Array.from({ length: 51 }, (_, round) => round))(\n'
     '\t"TCP fixture port allocation investigation %i", async (round, {',
     1,
 )
