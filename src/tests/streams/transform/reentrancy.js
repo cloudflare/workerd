@@ -253,6 +253,60 @@ export const readableCancelInsideSize = {
   },
 };
 
+// readable.cancel() inside a size() that then throws e2, for a write
+// with no hooks, with flush() only (the default transform enqueues) and
+// with a transform() that enqueues. TypeScript's hook paths follow the
+// spec (TransformStreamDefaultControllerEnqueue step 5): the write
+// rejects with the closed readable's stored error, undefined, and the
+// writable is errored with e2. Its zero-hook path rejects the write with
+// e2, and the cancel errors the writable with its reason. DIVERGENCE
+// (#23): C++ swallows the throw (#20), so the write fulfills and the
+// writable is errored with the cancel reason.
+export const readableCancelInsideThrowingSize = {
+  async test() {
+    for (const hooks of ['none', 'flush', 'transform']) {
+      const reason = new Error('cancel-reason');
+      const e2 = new Error('e2');
+      let transformer;
+      if (hooks === 'flush') transformer = { flush() {} };
+      if (hooks === 'transform') {
+        transformer = {
+          transform(chunk, c) {
+            c.enqueue(chunk);
+          },
+        };
+      }
+      let cancelPromise;
+      const ts = new TransformStream(transformer, undefined, {
+        size() {
+          cancelPromise ??= ts.readable.cancel(reason);
+          throw e2;
+        },
+        highWaterMark: 1,
+      });
+      await scheduler.wait(1);
+      const writer = ts.writable.getWriter();
+      const [write, closed] = await Promise.allSettled([
+        writer.write('a'),
+        writer.closed,
+      ]);
+      strictEqual(await cancelPromise, undefined, hooks);
+      strictEqual(closed.status, 'rejected', hooks);
+      if (!usingTsImpl) {
+        strictEqual(write.status, 'fulfilled', hooks);
+        strictEqual(closed.reason, reason, hooks);
+      } else if (hooks === 'none') {
+        strictEqual(write.reason, e2, hooks);
+        strictEqual(closed.reason, reason, hooks);
+      } else {
+        strictEqual(write.status, 'rejected', hooks);
+        strictEqual(write.reason, undefined, hooks);
+        strictEqual(closed.reason, e2, hooks);
+      }
+    }
+  },
+};
+
 // writer.write() inside size() (parity): the outer write's size() issues
 // a nested write whose own size() call is suppressed by the calls guard;
 // the nested chunk is enqueued after the outer one.

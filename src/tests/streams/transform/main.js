@@ -72,6 +72,7 @@ export {
   enqueueInsideSize,
   terminateInsideSize,
   readableCancelInsideSize,
+  readableCancelInsideThrowingSize,
   writerWriteInsideSize,
   syncWriterWriteInsideSize,
   sizeCallbackErrorIdentity,
@@ -142,4 +143,5 @@ export {
   cancelAfterWritableSizeError,
   cancelThenCloseSameTurn,
   writeReachesSinkAfterCancelClearedAlgorithms,
+  writeAfterCancelSameTurn,
 } from 'cancel-outcomes';

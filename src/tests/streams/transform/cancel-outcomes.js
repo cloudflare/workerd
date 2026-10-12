@@ -10,8 +10,9 @@
 // has errored by then, the cancel rejects with its stored error.
 // TypeScript follows the spec (Node agrees on every case); C++ diverges
 // (ledger #16), and only the parts stable across its cells are asserted.
-// The last case is a write racing the cancel, which the spec leaves
-// undefined (ledger #19).
+// The last two cases are writes that reach the sink after the cancel
+// cleared the algorithms and before it settles, which the spec leaves
+// undefined (ledger #19, #22).
 
 import { strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -168,18 +169,23 @@ export const cancelThenCloseSameTurn = {
 // chunk is dropped while the write reports success (Node fulfills it).
 // TypeScript never calls transform() after cancel() and rejects the write
 // with the writable's stored error; C++ rejects it with a TypeError and,
-// with a cancel hook, still runs transform() (ledger #19).
+// with a cancel hook, still runs transform() (ledger #19). Without hooks,
+// TypeScript's zero-hook path rejects it with the readable controller's
+// TypeError instead.
 export const writeReachesSinkAfterCancelClearedAlgorithms = {
   async test() {
-    for (const hooks of ['transform', 'cancel', 'cancel-rejects']) {
+    for (const hooks of ['none', 'transform', 'cancel', 'cancel-rejects']) {
       const hookError = new Error('hook');
       const transformed = [];
-      const transformer = {
-        transform(chunk, c) {
-          transformed.push(chunk);
-          c.enqueue(chunk);
-        },
-      };
+      const transformer =
+        hooks === 'none'
+          ? undefined
+          : {
+              transform(chunk, c) {
+                transformed.push(chunk);
+                c.enqueue(chunk);
+              },
+            };
       if (hooks === 'cancel') transformer.cancel = () => {};
       if (hooks === 'cancel-rejects') {
         transformer.cancel = () => Promise.reject(hookError);
@@ -206,7 +212,15 @@ export const writeReachesSinkAfterCancelClearedAlgorithms = {
       strictEqual(await outcome(writer.closed), settled);
       const writeOutcome = await write;
       if (usingTsImpl) {
-        strictEqual(writeOutcome, settled);
+        if (hooks === 'none') {
+          strictEqual(writeOutcome.name, 'TypeError');
+          strictEqual(
+            writeOutcome.message,
+            'Cannot enqueue a chunk into a stream that is closed or closing'
+          );
+        } else {
+          strictEqual(writeOutcome, settled);
+        }
         strictEqual(transformed.length, 0);
       } else {
         // DIVERGENCE (ledger #19).
@@ -215,8 +229,58 @@ export const writeReachesSinkAfterCancelClearedAlgorithms = {
           writeOutcome.message,
           'The readable side of this TransformStream is no longer readable.'
         );
-        strictEqual(transformed.length, hooks === 'transform' ? 0 : 1);
+        strictEqual(
+          transformed.length,
+          hooks === 'none' || hooks === 'transform' ? 0 : 1
+        );
       }
+    }
+  },
+};
+
+// readable.cancel() then writer.write() in the same turn, with room in
+// the readable, so the write reaches the sink at once: after the cancel
+// cleared the algorithms, before it settles. With no hooks, with flush()
+// only and with transform(), both implementations reject the write with
+// the cancel reason and never call transform(); TypeScript's zero-hook
+// path instead rejects it with the readable controller's TypeError
+// (ledger #22).
+export const writeAfterCancelSameTurn = {
+  async test() {
+    for (const hooks of ['none', 'flush', 'transform']) {
+      const transformed = [];
+      let transformer;
+      if (hooks === 'flush') transformer = { flush() {} };
+      if (hooks === 'transform') {
+        transformer = {
+          transform(chunk, c) {
+            transformed.push(chunk);
+            c.enqueue(chunk);
+          },
+        };
+      }
+      const ts = new TransformStream(transformer, undefined, {
+        highWaterMark: 1,
+      });
+      await scheduler.wait(1);
+      const writer = ts.writable.getWriter();
+      const reason = new Error('cancel');
+      const cancel = outcome(ts.readable.cancel(reason));
+      const write = outcome(writer.write('a'));
+      strictEqual(await cancel, 'fulfilled');
+      strictEqual(await outcome(writer.closed), reason);
+      const writeOutcome = await write;
+      if (usingTsImpl && hooks === 'none') {
+        // DIVERGENCE (ledger #22).
+        strictEqual(writeOutcome.name, 'TypeError');
+        strictEqual(
+          writeOutcome.message,
+          'Cannot enqueue a chunk into a stream that is closed or closing'
+        );
+      } else {
+        strictEqual(writeOutcome, reason);
+      }
+      strictEqual(transformed.length, 0);
     }
   },
 };
