@@ -4,7 +4,7 @@ Per-isolate JavaScript/TypeScript bootstrap: scripts that run synchronously
 at context creation, before any user code. Gated by the
 `per-isolate-javascript-bootstrap` autogate (config:
 `workerd-autogate-per-isolate-javascript-bootstrap`). C++ entry point:
-`src/workerd/io/per-isolate-bootstrap.c++`.
+`src/workerd/api/per-isolate-bootstrap.c++`.
 
 ## EXECUTION MODEL
 
