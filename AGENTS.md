@@ -162,8 +162,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 - **`jsg/`** - JavaScript Glue layer for V8 integration
   - Core JavaScript engine bindings and type wrappers
   - Promise handling, memory management, module system
-- **`server/`** - Main server implementation and configuration
-  - Main binary entry point and Cap'n Proto config handling
+- **`server/`** - The `workerd` binary: the Rust command line (`cli/`) and server (`server/`) over the C++ worker factory (`factory/`), plus the Cap'n Proto config schema; see `src/workerd/server/AGENTS.md`
 - **`util/`** - Utility libraries (SQLite, UUID, threading, etc.)
 
 ### Multi-Language Support
@@ -171,7 +170,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 - **`src/cloudflare/`** - Cloudflare-specific APIs (TypeScript)
 - **`src/node/`** - Node.js compatibility layer (TypeScript)
 - **`src/pyodide/`** - Python runtime support via Pyodide
-- **`src/rust/`** - Rust integration components; see `src/rust/AGENTS.md` for the full macro reference and GC tracing guide
+- **`src/rust/`** - Rust crates without a C++ home of their own and the in-tree cxx fork; see `src/rust/AGENTS.md` for the full macro reference and GC tracing guide (component crates such as the server live beside their C++)
 
 ### Configuration System
 
@@ -190,6 +189,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Modify compat flags    | `src/workerd/io/compatibility-date.capnp`                     | ~1400 lines; annotations define flag names + enable dates                                                    |
 | Add autogate           | `src/workerd/util/autogate.h`                                 | Add key to WORKERD_AUTOGATES macro; kebab-case name auto-derived; see header comment                         |
 | Config schema          | `src/workerd/server/workerd.capnp`                            | Cap'n Proto; capability-based security                                                                       |
+| Server / binary        | `src/workerd/server/`                                         | Rust `workerd-server` crate (`server/`) drives the C++ `worker-factory`; see `server/AGENTS.md`              |
 | Worker lifecycle       | `src/workerd/io/worker.{h,c++}`                               | Isolate, Script, Worker, Actor classes                                                                       |
 | Request lifecycle      | `src/workerd/io/io-context.{h,c++}`                           | IoContext: the per-request god object                                                                        |
 | Coroutine cancellation | `docs/reference/detail/async-patterns.md`                     | `CURRENT_INVOCATION` with `KJ_DEFER`; `KJ_ON_SCOPE_FAILURE` is exception-only                                |

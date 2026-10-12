@@ -1,9 +1,10 @@
 //! `--socket-fd`: listen sockets inherited from the parent process, named by descriptor on the
-//! command line.
+//! command line; and `--control-fd`, the descriptor the server writes its events to.
 //!
-//! This process keeps the inherited descriptor itself, exactly as it arrived (no close-on-exec, so
-//! a `--watch` re-exec passes it on under the same number), and gives the server a duplicate to
-//! own. This is the one place a number from the command line becomes an owned descriptor.
+//! This process keeps the inherited listen descriptor itself, exactly as it arrived (no
+//! close-on-exec, so a `--watch` re-exec passes it on under the same number), and gives the server
+//! a duplicate to own. This is the one place a number from the command line becomes an owned
+//! descriptor.
 
 #![allow(
     unsafe_code,
@@ -41,3 +42,4 @@ impl fmt::Display for Error {
 mod imp;
 
 pub use imp::InheritedSocket;
+pub use imp::control_file;
