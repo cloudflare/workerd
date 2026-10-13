@@ -1180,9 +1180,11 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::sendRpc
   }
 }
 
-TailStreamWriter::TailStreamWriter(Pending pending, kj::TaskSet& waitUntilTasks)
+TailStreamWriter::TailStreamWriter(
+    Pending pending, kj::TaskSet& waitUntilTasks, kj::Maybe<TargetWrapper> wrapTarget)
     : inner(kj::mv(pending)),
-      waitUntilTasks(waitUntilTasks) {}
+      waitUntilTasks(waitUntilTasks),
+      wrapTarget(kj::mv(wrapTarget)) {}
 
 bool TailStreamWriter::reportImpl(TailEvent&& event, size_t sizeHint) {
   // In reportImpl, our inner state must be active.
@@ -1329,12 +1331,15 @@ kj::Promise<void> TailStreamWriter::pump(kj::Own<Active> current) {
 // If we are using streaming tail workers, initialize the mechanism that will deliver events
 // to that collection of tail workers.
 kj::Maybe<kj::Own<TailStreamWriter>> initializeTailStreamWriter(
-    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers, kj::TaskSet& waitUntilTasks) {
+    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers,
+    kj::TaskSet& waitUntilTasks,
+    kj::Maybe<TailStreamWriter::TargetWrapper> wrapTarget) {
   if (streamingTailWorkers.size() == 0) {
     return kj::none;
   }
 
-  return kj::heap<TailStreamWriter>(kj::mv(streamingTailWorkers), waitUntilTasks);
+  return kj::heap<TailStreamWriter>(
+      kj::mv(streamingTailWorkers), waitUntilTasks, kj::mv(wrapTarget));
 }
 
 void TailStreamWriter::report(const InvocationSpanContext& context,
@@ -1385,6 +1390,9 @@ void TailStreamWriter::report(const InvocationSpanContext& context,
       inner = kj::Vector<kj::Own<Active>>( KJ_MAP(wi, pending) {
         auto customEvent = kj::heap<TailStreamCustomEvent>();
         auto result = customEvent->getCap();
+        KJ_IF_SOME(wrap, wrapTarget) {
+          result = wrap(kj::mv(result));
+        }
         auto active = kj::refcounted<Active>(kj::mv(result));
 
         // Attach the workerInterface and customEvent to the waitUntil tasks so that they stay alive
