@@ -27,6 +27,21 @@ ActorRetryStopReason nonDisconnectStopReason(kj::Exception::Type type) {
   KJ_UNREACHABLE;
 }
 
+struct RetryBackoff {
+  kj::Duration min;
+  kj::Duration max;
+};
+
+// Each retry waits a uniformly random delay from its range, and retries beyond the last range
+// reuse it. Early retries stay quick so brief faults recover fast, and the floors on later retries
+// spread a call's attempts across more of its retry timeout.
+constexpr RetryBackoff RETRY_BACKOFFS[] = {
+  {0 * kj::SECONDS, 500 * kj::MILLISECONDS},
+  {0 * kj::SECONDS, 1 * kj::SECONDS},
+  {1 * kj::SECONDS, 3 * kj::SECONDS},
+  {2 * kj::SECONDS, 4 * kj::SECONDS},
+};
+
 }  // namespace
 
 ActorCallRetryState::ActorCallRetryState(TimerChannel& timer,
@@ -177,8 +192,9 @@ kj::Duration ActorCallRetryState::retryDelay() {
     getEntropy(kj::asBytes(seed));
     return std::mt19937_64(seed);
   }();
-  auto maximum = kj::min(INITIAL_BACKOFF * (1u << (attemptCount - 1)), MAX_BACKOFF);
-  std::uniform_int_distribution<uint64_t> distribution(0, maximum / kj::NANOSECONDS);
+  auto& backoff = RETRY_BACKOFFS[kj::min(attemptCount, kj::size(RETRY_BACKOFFS)) - 1];
+  std::uniform_int_distribution<uint64_t> distribution(
+      backoff.min / kj::NANOSECONDS, backoff.max / kj::NANOSECONDS);
   return distribution(generator) * kj::NANOSECONDS;
 }
 

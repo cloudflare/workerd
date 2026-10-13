@@ -262,6 +262,34 @@ KJ_TEST("system retry policy allows five total attempts") {
   KJ_EXPECT(observer->outcomes[0] == ActorRetryOutcome::ATTEMPTS_EXHAUSTED);
 }
 
+KJ_TEST("actor retry backoff floors later retries and reuses the last range") {
+  struct Range {
+    kj::Duration min;
+    kj::Duration max;
+  };
+  constexpr Range expected[] = {
+    {0 * kj::SECONDS, 500 * kj::MILLISECONDS},
+    {0 * kj::SECONDS, 1 * kj::SECONDS},
+    {1 * kj::SECONDS, 3 * kj::SECONDS},
+    {2 * kj::SECONDS, 4 * kj::SECONDS},
+    {2 * kj::SECONDS, 4 * kj::SECONDS},
+  };
+
+  // Delays are random, so sample enough calls that an out-of-range draw would show up.
+  for (uint call = 0; call < 100; ++call) {
+    TestTimerChannel timer;
+    auto observer = kj::refcounted<RecordingObserver>();
+    auto state = newRetryState(
+        timer, *observer, ActorRetryPolicy::userDefined(UserDefinedRetryPolicy{.maxAttempts = 5}));
+    for (auto& range: expected) {
+      startAttempt(*state);
+      auto result = handleFailure(*state, makeDisconnect("disconnected"_kj));
+      auto delay = KJ_ASSERT_NONNULL(result.tryGet<kj::Duration>());
+      KJ_EXPECT(delay >= range.min && delay <= range.max, delay);
+    }
+  }
+}
+
 KJ_TEST("actor retries report retry budget exhaustion when budget expires during an attempt") {
   TestTimerChannel timer;
   auto observer = kj::refcounted<RecordingObserver>();
