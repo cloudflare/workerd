@@ -47,7 +47,7 @@ jobs:
       phase: '-negative-utf8'
       build_target: //src/workerd/jsg:compile-cache-test_binary
       run_tests: false
-      extra_bazel_args: '--config=ci-test --config=ci-linux'
+      extra_bazel_args: '--config=ci-test --config=ci-linux --remote_download_toplevel'
     secrets: inherit
   negative-loader:
     if: ${{ !inputs.debug_only }}
@@ -59,7 +59,7 @@ jobs:
       phase: '-negative-loader'
       build_target: //src/workerd/jsg:compile-cache-test_binary
       run_tests: false
-      extra_bazel_args: '--config=ci-test --config=ci-linux'
+      extra_bazel_args: '--config=ci-test --config=ci-linux --remote_download_toplevel'
     secrets: inherit
   debug-loader:
     uses: ./.github/workflows/_bazel.yml
