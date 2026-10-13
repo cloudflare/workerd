@@ -7,6 +7,7 @@
 #include "sockets.h"
 
 #include <workerd/api/global-scope.h>
+#include <workerd/io/worker-interface.h>
 #include <workerd/util/entropy.h>
 
 #include <kj/compat/http.h>
@@ -135,13 +136,17 @@ kj::Promise<kj::Own<kj::AsyncIoStream>> Hyperdrive::connectToDb() {
   kj::HttpHeaderTable headerTable;
   kj::HttpHeaders headers(headerTable);
 
-  auto connectReq = kj::newHttpClient(*service)->connect(
-      kj::str(getHost(), ":", getPort()), headers, kj::HttpConnectSettings{});
+  // The client must own the subrequest channel, and the returned stream must own the client.
+  // Tying both to the stream keeps the lifetimes correct by construction instead of relying on
+  // the destination happening to be an external service.
+  auto client = asHttpClient(kj::mv(service));
+  auto connectReq =
+      client->connect(kj::str(getHost(), ":", getPort()), headers, kj::HttpConnectSettings{});
 
   auto status = co_await connectReq.status;
 
   if (status.statusCode >= 200 && status.statusCode < 300) {
-    co_return kj::mv(connectReq.connection);
+    co_return kj::mv(connectReq.connection).attach(kj::mv(client));
   }
 
   KJ_IF_SOME(e, status.errorBody) {
