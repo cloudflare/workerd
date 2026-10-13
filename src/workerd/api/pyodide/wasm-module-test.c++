@@ -45,9 +45,9 @@ KJ_TEST("Python module registration reuses manager-owned Wasm after isolate dest
   capnp::MallocMessageBuilder message;
   auto wasm = message.initRoot<jsg::Bundle>().initModules(1)[0];
   wasm.setName("pyodide-internal:pyodide.asm.wasm");
-  wasm.setType(jsg::Module::Type::INTERNAL);
+  wasm.setType(jsg::ModuleRegistry::Type::INTERNAL);
   static constexpr kj::byte WIRE_BYTES[] = {0, 0x61, 0x73, 0x6d, 1, 0, 0, 0};
-  wasm.setWasm(WIRE_BYTES);
+  wasm.setWasm(kj::arrayPtr(WIRE_BYTES, kj::size(WIRE_BYTES)));
   auto serialized = capnp::messageToFlatArray(message);
   manager.setPyodideBundleData(kj::str("dev"), kj::heapArray(serialized.asBytes()));
 

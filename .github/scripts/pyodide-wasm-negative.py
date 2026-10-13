@@ -9,7 +9,8 @@ if sys.argv[1] == "prepare":
     source = path.read_text()
     old = "modules.addBuiltinBundle(pyodideBundle, holder);"
     assert source.count(old) == 1
-    path.write_text(source.replace(old, "modules.addBuiltinBundle(pyodideBundle);"))
+    path.write_text(source.replace(
+        old, "static_cast<void>(holder);\n    modules.addBuiltinBundle(pyodideBundle);"))
 else:
     result = subprocess.run(
         ["bazel-bin/src/workerd/api/pyodide/wasm-module-test_binary"],
