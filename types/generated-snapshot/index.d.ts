@@ -13037,25 +13037,24 @@ interface BrowserRunBaseOptions {
    */
   cacheTTL?: number;
 }
-/**
- * Backend selection, mixed into the options of the quick actions that support it.
- * Deliberately not part of `BrowserRunBaseOptions`: `scrape`, `links` and `snapshot`
- * reject an alternate backend, so they must not accept the field.
- */
+/** Backend selection for quick actions. */
 interface BrowserRunAlternateBackendOptions {
   /** Render with an alternate browser backend instead of the default one. */
   browser?: "kitesurf";
 }
 /** Common options shared by all quick actions. Exactly one of `url` or `html` must be provided.*/
-type BrowserRunCommonOptions =
-  | (BrowserRunBaseOptions & {
-      /** URL to navigate to, e.g. `"https://example.com"`. */
-      url: string;
-    })
-  | (BrowserRunBaseOptions & {
-      /** Set the HTML content of the page directly. */
-      html: string;
-    });
+type BrowserRunCommonOptions = BrowserRunBaseOptions &
+  BrowserRunAlternateBackendOptions &
+  (
+    | {
+        /** URL to navigate to, e.g. `"https://example.com"`. */
+        url: string;
+      }
+    | {
+        /** Set the HTML content of the page directly. */
+        html: string;
+      }
+  );
 type BrowserRunPuppeteerScreenshotOptions = {
   /** @default "png" */
   type?: "png" | "jpeg" | "webp";
@@ -13082,7 +13081,7 @@ type BrowserRunScreenshotOptions = BrowserRunCommonOptions & {
   scrollPage?: boolean;
   /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
   screenshotOptions?: BrowserRunPuppeteerScreenshotOptions;
-} & BrowserRunAlternateBackendOptions;
+};
 type BrowserRunPDFOptions = BrowserRunCommonOptions & {
   /** @see https://pptr.dev/api/puppeteer.pdfoptions */
   pdfOptions?: {
@@ -13129,7 +13128,7 @@ type BrowserRunPDFOptions = BrowserRunCommonOptions & {
     /** @default 30000 */
     timeout?: number;
   };
-} & BrowserRunAlternateBackendOptions;
+};
 type BrowserRunScrapeOptions = BrowserRunCommonOptions & {
   /** CSS selectors to scrape. At least one element is required. */
   elements: Array<{
@@ -13165,7 +13164,7 @@ type BrowserRunAccessibilityTreeOptions = BrowserRunCommonOptions & {
    * HTTP 200; a malformed selector is an error.
    */
   root?: string;
-} & BrowserRunAlternateBackendOptions;
+};
 interface BrowserRunJsonBaseOptions {
   /** Custom AI models to try in order. Max 3. Falls back to next on error. */
   custom_ai?: Array<{
@@ -13180,7 +13179,6 @@ interface BrowserRunJsonBaseOptions {
  * At least one of `prompt` or `response_format` must be provided.
  */
 type BrowserRunJsonOptions = BrowserRunCommonOptions &
-  BrowserRunAlternateBackendOptions &
   BrowserRunJsonBaseOptions &
   (
     | {
@@ -13196,10 +13194,8 @@ type BrowserRunJsonOptions = BrowserRunCommonOptions &
         response_format: AiTextGenerationResponseFormat;
       }
   );
-type BrowserRunContentOptions = BrowserRunCommonOptions &
-  BrowserRunAlternateBackendOptions;
-type BrowserRunMarkdownOptions = BrowserRunCommonOptions &
-  BrowserRunAlternateBackendOptions;
+type BrowserRunContentOptions = BrowserRunCommonOptions;
+type BrowserRunMarkdownOptions = BrowserRunCommonOptions;
 type BrowserRunRedirectHop = {
   /** URL that returned the redirect. */
   url: string;
