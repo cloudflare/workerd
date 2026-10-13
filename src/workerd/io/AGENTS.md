@@ -33,7 +33,7 @@ I/O lifecycle, per-request context, worker/isolate management, actor storage, co
 | Metrics/logging hooks           | `observer.h` — `RequestObserver`, `IsolateObserver`, `ActorObserver`              |
 | Tracing                         | `trace.{h,c++,capnp}`, `trace-stream.{h,c++}`, `tracer.{h,c++}`                   |
 | Resource limits                 | `limit-enforcer.h` (abstract interface)                                           |
-| Timer scheduling                | `io-timers.{h,c++}`                                                               |
+| Timer scheduling                | `io-context.c++` (`TimeoutManagerImpl`), `timer-queue.{h,c++}`, `io-timers.{h,c++}`                         |
 | Hibernatable WebSockets         | `hibernation-manager.{h,c++}`                                                     |
 | Cap'n Proto schemas             | `worker-interface.capnp`, `actor-storage.capnp`, `container.capnp`, `trace.capnp` |
 
@@ -47,6 +47,10 @@ I/O lifecycle, per-request context, worker/isolate management, actor storage, co
 - `ActorCacheOps` methods return `kj::OneOf<Result, kj::Promise<Result>>` — sync when cached, async otherwise
 - `OutputGate::lockWhile(promise)` blocks outgoing responses until the promise resolves
 - `InputGate::CriticalSection` must succeed or permanently breaks the gate
+- Timer callbacks serialize per input-gate scope; `IoContext::finishCriticalSection()` completes the section and merges its timer queue into the parent. Already-fired callbacks retain input-gate waiter order across adoption and can run before earlier parent deadlines that have not yet been armed.
+- `TimerQueue` (`timer-queue.{h,c++}`) owns deadline ordering and timer rearming and is nonmovable because its timer task captures its address. Section records retain their critical section only while they have timers. Clock reads and cancellation never allocate section records.
+- `bench-timer-clock` measures clock reads inside a critical section with blocked parent timers; lookups must not scan unrelated timer backlogs. It shares the deterministic clock and gate fixture with `io-context-timer-test`.
+- `IoContext::observeTime()` advances the observable clock floor only while an input lock selects the caller's scope; internal pre-entry reads see the root scope and must not override a nested timer's clamp. Timer delivery samples the channel with the callback's own deadline and retains that observation through the V8 microtask checkpoint. Handoff tests must cover callbacks that defer their first clock read to a microtask.
 - Observer classes (`RequestObserver`, `IsolateObserver`, etc.) have no-op defaults; all methods optional
 - Module registry selection: **always** use `isNewModuleRegistryEnabled(flags)` (`features.h`), never read `getNewModuleRegistry()` directly — Python workers ignore the flag and must not end up split across the two registries
 
