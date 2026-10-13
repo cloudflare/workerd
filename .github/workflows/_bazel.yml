@@ -146,9 +146,11 @@ jobs:
         shell: bash
         run: |
           sudo apt-get install -y gdb
+          test -x bazel-bin/src/workerd/jsg/compile-cache-test_binary
           gdb --batch -ex 'set pagination off' -ex run -ex 'thread apply all bt' \
             --args bazel-bin/src/workerd/jsg/compile-cache-test_binary \
-            --filter=compile-cache-test.c++:59
+            --filter=compile-cache-test.c++:59 | tee loader-backtrace.log
+          grep -E 'Program received signal|\[ PASS \].*runtime UTF-8' loader-backtrace.log
       - name: Require both non-ASCII caches to be rejected
         if: inputs.phase == '-negative-utf8'
         shell: bash
