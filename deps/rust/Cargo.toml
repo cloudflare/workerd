@@ -90,6 +90,7 @@ tower-service = "0.3"
 # tokio is huge, let's enable only features when we actually need them.
 # kj-rs-io: net (sockets), io-util (`try_read_buf` into uninitialized buffers is gated on it),
 # signal, sync (Notify), time; rt/rt-multi-thread are kj-rs-tokio's.
+# Resolved to the `[patch.crates-io]` fork below.
 tokio = { version = "1", default-features = false, features = ["io-util", "net", "rt", "rt-multi-thread", "signal", "sync", "time"] }
 x509-cert = { version = "0.2", default-features = false }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
@@ -109,3 +110,10 @@ notify = "8"
 tracing = { version = "0", default-features = false, features = ["std"] }
 swc_common = "25"
 swc_ts_fast_strip = "57"
+
+[patch.crates-io]
+# kj-rs-tokio drives tokio as a `LocalEventLoop` (`tick` / `park` / `next_sleep`), the host
+# event-loop API proposed in tokio-rs/tokio#8479. Until it is released, tokio comes from that
+# PR's branch; the API is behind `--cfg tokio_unstable`, set on the crate in
+# build/deps/rust.MODULE.bazel.
+tokio = { git = "https://github.com/guybedford/tokio", branch = "emscripten-event-loop" }

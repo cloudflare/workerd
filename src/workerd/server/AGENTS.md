@@ -103,9 +103,10 @@ Bazel labels: `//src/workerd/server:workerd` (and `:workerd_cross`, which `wd_te
 ## I/O: THE TOKIO EVENT LOOP
 
 - One thread, one loop: `server/entry.rs` creates a `kj_rs_tokio::Runtime` (the KJ event loop
-  on kj-rs-tokio's port, with its tokio `current_thread` runtime) and `block_on`s the command,
-  which runs as a task on the loop's `LocalSet` while the main thread is blocked in
-  `promise.wait()`: the KJ loop schedules the thread, and tokio runs whenever it sleeps. The
+  on kj-rs-tokio's port, with its tokio `LocalEventLoop`) and `block_on`s the command, which
+  runs as a task on that loop while the main thread is blocked in `promise.wait()`: the KJ loop
+  schedules the thread, and whenever its queue empties it sleeps in tokio's driver and then runs
+  one batch of tokio tasks. The
   factory takes its `kj::Timer` from the Runtime's context and its `kj::Network` from a kj-rs-io
   provider the bootstrap builds over it, so the C++ side (actor storage, alarms, RPC, containers)
   sees KJ I/O interfaces over tokio. The Rust server binds its sockets and dials external
