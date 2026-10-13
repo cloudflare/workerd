@@ -8,7 +8,7 @@ Some userland code relies on `new Function("")` throwing to figure out if they c
 create functions, so we need to keep the old behavior of `new Function("")` throwing.
 
 diff --git a/src/builtins/builtins-function.cc b/src/builtins/builtins-function.cc
-index f7ca54126017bea1e41e54615bdf4693db6e341e..36efc48fd4e49b53a0cf0ca29d1f78eeb11c9e7b 100644
+index c001e3762eeb7d4aa8ea2fef4c7efcadbbe10ca0..a3938d78fff0a61ec42ec99288d570618d7cdaa8 100644
 --- a/src/builtins/builtins-function.cc
 +++ b/src/builtins/builtins-function.cc
 @@ -86,7 +86,7 @@ MaybeDirectHandle<Object> CreateDynamicFunction(Isolate* isolate,

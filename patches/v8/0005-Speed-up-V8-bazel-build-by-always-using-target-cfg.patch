@@ -10,18 +10,18 @@ both target and exec configurations as generator tools depend on them.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index a672f3299ba55574585bb5985a260d708cd31f11..29df31fa21b2addd10a1d6b9ed450ee585dd42f7 100644
+index 9e069ce4e8d513aa4975bb90936e6b2179845114..794919e1154a944b9e6013e64952eb88cf9010d5 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -20,6 +20,7 @@ load(
+@@ -19,6 +19,7 @@ load(
+     "v8_library",
      "v8_mksnapshot",
      "v8_string",
-     "v8_torque_files",
 +    "genrule_target",
  )
- load(":bazel/v8-non-pointer-compression.bzl", "v8_binary_non_pointer_compression")
+ load(":bazel/v8-generators.bzl", "v8_torque_files")
  
-@@ -4754,22 +4755,20 @@ filegroup(
+@@ -4806,22 +4807,20 @@ filegroup(
      ],
  )
  
@@ -50,7 +50,7 @@ index a672f3299ba55574585bb5985a260d708cd31f11..29df31fa21b2addd10a1d6b9ed450ee5
  )
  
  v8_mksnapshot(
-@@ -5020,7 +5019,6 @@ v8_binary(
+@@ -5073,7 +5072,6 @@ v8_binary(
      srcs = [
          "src/regexp/gen-regexp-special-case.cc",
          "src/regexp/special-case.h",
@@ -59,7 +59,7 @@ index a672f3299ba55574585bb5985a260d708cd31f11..29df31fa21b2addd10a1d6b9ed450ee5
      copts = ["-Wno-implicit-fallthrough"],
      defines = [
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 4e3471ad6e7fc208ecca37b4a1ae46214c814f32..ef73dfc9e0aae7e1ab42b930ae8cd4f4dd68f54b 100644
+index e3fb161199f276eb04369c0605279317258191ab..df60f89397365ff5d64637b2de8ffef68890ed0d 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -358,6 +358,15 @@ def v8_library(
@@ -75,19 +75,10 @@ index 4e3471ad6e7fc208ecca37b4a1ae46214c814f32..ef73dfc9e0aae7e1ab42b930ae8cd4f4
 +    # (once for exec and for target).
 +    return "target"
 +
- # Use a single generator target for torque definitions and initializers. We can
- # split the set of outputs by using OutputGroupInfo, that way we do not need to
- # run the torque generator twice.
-@@ -424,7 +433,7 @@ _v8_torque_files = rule(
-         "tool": attr.label(
-             allow_files = True,
-             executable = True,
--            cfg = "exec",
-+            cfg = get_cfg(),
-         ),
-         "args": attr.string_list(),
-     },
-@@ -526,13 +535,16 @@ _v8_mksnapshot = rule(
+ def _v8_target_cpu_transition_impl(settings,
+                                    attr, # @unused
+                                   ):
+@@ -428,13 +437,16 @@ _v8_mksnapshot = rule(
              mandatory = True,
              allow_files = True,
              executable = True,
@@ -106,7 +97,7 @@ index 4e3471ad6e7fc208ecca37b4a1ae46214c814f32..ef73dfc9e0aae7e1ab42b930ae8cd4f4
  )
  
  def v8_mksnapshot(name, args, suffix = ""):
-@@ -954,3 +966,34 @@ def v8_build_config(name, arch):
+@@ -878,3 +890,34 @@ def v8_build_config(name, arch):
          outs = ["icu/" + name + ".json"],
          cmd = "echo '" + build_config_content(cpu, "true") + "' > \"$@\"",
      )
@@ -141,3 +132,25 @@ index 4e3471ad6e7fc208ecca37b4a1ae46214c814f32..ef73dfc9e0aae7e1ab42b930ae8cd4f4
 +        ),
 +    },
 +)
+diff --git a/bazel/v8-generators.bzl b/bazel/v8-generators.bzl
+index 63a01ac3b3e94b9823418ab28da05ce9ec10f6f1..c780d04552ea89cd7e12aa23d3b3ad5de09b4cda 100644
+--- a/bazel/v8-generators.bzl
++++ b/bazel/v8-generators.bzl
+@@ -4,6 +4,8 @@
+ 
+ """Private helpers for V8 generators."""
+ 
++load(":bazel/defs.bzl", "get_cfg")
++
+ visibility("private")
+ 
+ # Use a single generator target for torque definitions and initializers. We can
+@@ -120,7 +122,7 @@ _v8_torque_files = rule(
+         "tool": attr.label(
+             mandatory = True,
+             providers = [V8ToolInfo],
+-            cfg = "exec",
++            cfg = get_cfg(),
+         ),
+         "args": attr.string_list(),
+         "layout_json": attr.label(
