@@ -83,9 +83,9 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_AI_GATEWAY_TOKEN }}
           # Read-only; lets the agent query the GitHub API for upstream WPT history.
           GH_TOKEN: ${{ github.token }}
-          # Nobody can answer a permission prompt in CI. Deny paths outside the workspace and the
-          # Bazel output base; rules are matched last-wins, so "*" must come first.
-          OPENCODE_CONFIG_CONTENT: '{"permission":{"external_directory":{"*":"deny","/home/runner/work/**":"allow","/home/runner/.cache/bazel/**":"allow"},"question":"deny","doom_loop":"deny"}}'
+          # Nobody can answer a question in CI. The skill downloads upstream WPT diffs and history
+          # outside the workspace, and reruns identical WPT test commands until they pass.
+          OPENCODE_CONFIG_CONTENT: '{"permission":{"external_directory":"allow","question":"deny","doom_loop":"allow"}}'
           REPORT_FILE: ${{ runner.temp }}/wpt-triage-report.md
           COMMIT_MESSAGE_FILE: ${{ runner.temp }}/wpt-triage-commit.txt
         run: |
