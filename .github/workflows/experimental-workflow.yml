@@ -1,20 +1,67 @@
-name: Experimental Workflow
+name: Alarm fixture strict audit
 on:
   workflow_dispatch:
 
-# You can modify this workflow in order to verify your changes to Github Actions on a branch.
-# DO NOT MERGE THESE CHANGES TO MAIN
-# This workflow exists to work around a limitation in Github Actions. You can only use 
-# workflow_dispatch on files that exist in main. However, once the file exists, you can dispatch to
-# your branch and make sure changes work.
-
+# This workflow is confined to the diagnostic branch.
 permissions:
-  contents: none
+  contents: read
+  actions: write
 
 jobs:
-  experiment:
-    runs-on: ubuntu-22.04
+  audit:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu-22.04-16core
+            os: linux
+            arch: X64
+          - image: macos-15-xlarge
+            os: macOS
+            arch: ARM64
+          - image: windows-2025-16core
+            os: windows
+            arch: X64
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ${{ matrix.image }}
+      os_name: ${{ matrix.os }}
+      arch_name: ${{ matrix.arch }}
+      macos_use_lld: true
+      build_target: >-
+        //src/workerd/api/tests:actor-alarms-test@
+        //src/workerd/api/tests:tail-worker-test@
+      test_target: >-
+        //src/workerd/api/tests:actor-alarms-test@
+        //src/workerd/api/tests:actor-alarms-test@all-autogates
+        //src/workerd/api/tests:actor-alarms-test@all-compat-flags
+        //src/workerd/api/tests:tail-worker-test@
+        //src/workerd/api/tests:tail-worker-test@all-autogates
+        //src/workerd/api/tests:tail-worker-test@all-compat-flags
+      extra_bazel_args: >-
+        --config=ci-test --config=ci-${{ matrix.os }}
+        --runs_per_test=5 --flaky_test_attempts=1
+      upload_test_logs: true
+    secrets: inherit
+  clamp-probe:
+    runs-on: ubuntu-22.04-16core
     steps:
-      - name: Hello World
-        shell: bash
-        run: echo Hello World
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          show-progress: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: linux-X64-binary
+          run-id: 38391277423
+          github-token: ${{ github.token }}
+          path: /tmp/alarm-runtime
+      - name: Verify original failure and repaired expired deadlines
+        run: python3 .github/scripts/alarm-clamp-probe.py
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: alarm-clamp-probe
+          path: |
+            alarm-*.log
+            alarm-clamp-results.json
