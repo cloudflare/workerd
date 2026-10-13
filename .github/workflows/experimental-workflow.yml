@@ -1,6 +1,11 @@
 name: UTF-8 ESM cache regression audit
 on:
   workflow_dispatch:
+    inputs:
+      debug_only:
+        description: Run only the loader backtrace diagnostic
+        type: boolean
+        default: false
 
 # This workflow is confined to the diagnostic branch.
 permissions:
@@ -9,6 +14,7 @@ permissions:
 
 jobs:
   positive:
+    if: ${{ !inputs.debug_only }}
     strategy:
       fail-fast: false
       matrix:
@@ -32,6 +38,7 @@ jobs:
       upload_test_logs: true
     secrets: inherit
   negative:
+    if: ${{ !inputs.debug_only }}
     uses: ./.github/workflows/_bazel.yml
     with:
       image: ubuntu-22.04-16core
@@ -43,6 +50,7 @@ jobs:
       extra_bazel_args: '--config=ci-test --config=ci-linux'
     secrets: inherit
   negative-loader:
+    if: ${{ !inputs.debug_only }}
     uses: ./.github/workflows/_bazel.yml
     with:
       image: ubuntu-22.04-16core

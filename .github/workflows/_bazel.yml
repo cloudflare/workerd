@@ -144,10 +144,11 @@ jobs:
       - name: Capture the runtime loader trap
         if: inputs.phase == '-debug-loader'
         shell: bash
-        run: >-
-          gdb --batch -ex 'set pagination off' -ex run -ex 'thread apply all bt'
-          --args bazel-bin/src/workerd/jsg/compile-cache-test_binary
-          --filter=compile-cache-test.c++:59
+        run: |
+          sudo apt-get install -y gdb
+          gdb --batch -ex 'set pagination off' -ex run -ex 'thread apply all bt' \
+            --args bazel-bin/src/workerd/jsg/compile-cache-test_binary \
+            --filter=compile-cache-test.c++:59
       - name: Require both non-ASCII caches to be rejected
         if: inputs.phase == '-negative-utf8'
         shell: bash
