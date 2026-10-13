@@ -124,6 +124,7 @@ const {
   normalizeExpectedLength,
   toStringTagProperty,
   requireObject,
+  toDictionary,
   convertQueuingStrategy,
   extractHighWaterMark,
   extractSizeAlgorithm,
@@ -1137,9 +1138,10 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
         "view's backing buffer must have a non-zero byteLength"
       );
     }
-    if (!isActualObject(options)) {
-      throw new TypeError('options must be an object');
-    }
+    options = toDictionary(
+      options,
+      'options must be an object'
+    ) as ReadableStreamBYOBReaderReadOptions;
     // --- min validation (steps 4-6). min is in ELEMENTS for typed arrays
     // (bytes for DataView, where info.length === byteLength). NO clamping:
     // out-of-range is an error, not a request to do less.
@@ -2966,12 +2968,10 @@ interface ConvertedPipeOptions {
 // Members are read once each in spec order (WPT
 // piping/throwing-options.any.js).
 function convertPipeOptions(options: unknown): ConvertedPipeOptions {
-  // WebIDL: null and undefined become {}.
-  if (options == null) options = kNullProtoObject;
-  if (!isActualObject(options)) {
-    throw new TypeError('Pipe options must be an object');
-  }
-  const dict = options as StreamPipeOptions;
+  const dict = toDictionary(
+    options,
+    'Pipe options must be an object'
+  ) as StreamPipeOptions;
   const preventAbort = !!dict.preventAbort;
   const preventCancel = !!dict.preventCancel;
   const preventClose = !!dict.preventClose;
@@ -4636,15 +4636,13 @@ class ReadableStream<R> {
     options: { mode?: 'byob' } | null = kNullProtoObject
   ): ReadableStreamReaderType<R> {
     assertIsReadableStream(this);
-    // WebIDL dictionary conversion: null and undefined become {},
-    // objects have their properties read, primitives are rejected.
-    if (options != null && !isActualObject(options)) {
-      throw new TypeError('Reader options must be an object');
-    }
+    const dict = toDictionary(options, 'Reader options must be an object') as {
+      mode?: 'byob';
+    };
 
     // WebIDL: the 'mode' member is a string enum — perform ToString() on
     // non-undefined values so that objects with toString()/valueOf() work.
-    const rawMode = isActualObject(options) ? options.mode : undefined;
+    const rawMode = dict.mode;
     const mode = rawMode === undefined ? undefined : `${rawMode}`;
     if (mode === undefined) {
       return acquireReadableStreamDefaultReader(this);
@@ -4742,10 +4740,10 @@ class ReadableStream<R> {
     options: { preventCancel?: boolean } = kNullProtoObject
   ): AsyncIterableIterator<R> {
     assertIsReadableStream(this);
-    if (!isActualObject(options)) {
-      throw new TypeError('Options must be an object');
-    }
-    const { preventCancel } = options;
+    const { preventCancel } = toDictionary(
+      options,
+      'Options must be an object'
+    ) as { preventCancel?: boolean };
 
     if (isReadableStreamLocked(this)) {
       throw new TypeError('Cannot get an iterator for a stream that is locked');

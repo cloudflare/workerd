@@ -68,24 +68,30 @@ function normalizeExpectedLength(value: unknown): bigint | undefined {
   return BigInt(length - (length % 1));
 }
 
-// WebIDL conversion of a constructor argument typed `object` (an underlying
-// source or sink, a transformer): any object, a function included, passes;
-// null and every other primitive throw. Nothing is read. An omitted argument
-// defaults to kNullProtoObject before it gets here.
+// WebIDL's check that a value is an object, a function included: null and
+// every other primitive throw. Nothing is read. It converts an argument typed
+// `object` (an underlying source or sink, a transformer), and a dictionary
+// with a required member, which undefined and null cannot be.
 function requireObject(value: unknown, message: string): void {
   if (!isActualObject(value) && typeof value !== 'function') {
     throw new TypeError(message);
   }
 }
 
-// WebIDL dictionary conversion of a strategy argument, as in C++: undefined
-// and null mean no strategy; any other non-object throws.
-function toStrategyDictionary(value: unknown): QueuingStrategy<unknown> {
+// WebIDL conversion of an optional dictionary argument (a strategy, an
+// options bag), as in C++: undefined and null mean an empty dictionary, and
+// anything else must pass requireObject.
+function toDictionary(value: unknown, message: string): object {
   if (value === undefined || value === null) return kNullProtoObject;
-  if (typeof value !== 'object' && typeof value !== 'function') {
-    throw new TypeError('The queuing strategy must be an object.');
-  }
-  return value as QueuingStrategy<unknown>;
+  requireObject(value, message);
+  return value as object;
+}
+
+function toStrategyDictionary(value: unknown): QueuingStrategy<unknown> {
+  return toDictionary(
+    value,
+    'The queuing strategy must be an object.'
+  ) as QueuingStrategy<unknown>;
 }
 
 // A strategy argument as WebIDL converts a QueuingStrategy dictionary: each
@@ -154,6 +160,7 @@ export type CommonHelpers = {
   toStringTagProperty: typeof toStringTagProperty;
   normalizeExpectedLength: typeof normalizeExpectedLength;
   requireObject: typeof requireObject;
+  toDictionary: typeof toDictionary;
   toStrategyDictionary: typeof toStrategyDictionary;
   convertQueuingStrategy: typeof convertQueuingStrategy;
   convertHighWaterMark: typeof convertHighWaterMark;
@@ -168,6 +175,7 @@ module.exports = ObjectFreeze({
   toStringTagProperty,
   normalizeExpectedLength,
   requireObject,
+  toDictionary,
   toStrategyDictionary,
   convertQueuingStrategy,
   convertHighWaterMark,

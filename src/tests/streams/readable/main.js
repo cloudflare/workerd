@@ -22,6 +22,7 @@ export {
   controllerNotConstructable,
   getReaderBadModeThrows,
   defaultStreamNoByobReader,
+  getReaderOptionsShapes,
   lockedLifecycle,
 } from 'api-surface';
 
@@ -142,6 +143,7 @@ export {
   asyncIteratorReturnMethod,
   asyncIteratorReturnThenNext,
   asyncIteratorPreventCancel,
+  valuesOptionsShapes,
   asyncIteratorOnClosedStream,
   asyncIteratorOnErroredStream,
   asyncIteratorLocksStream,

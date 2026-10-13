@@ -10,7 +10,7 @@
 // resolves done with an empty view. The WPT read-min.any suite stays disabled on the C++
 // side for its own hangs; the TypeScript side runs it.
 
-import { strictEqual, ok, throws, rejects } from 'node:assert';
+import { strictEqual, deepStrictEqual, ok, throws, rejects } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 const enc = new TextEncoder();
@@ -102,6 +102,42 @@ export const readMinValidation = {
       name: 'TypeError',
     });
     reader3.releaseLock();
+  },
+};
+
+// read(view, options) converts its options as a WebIDL dictionary
+// (parity): null means no options (min 1), a function's members are read
+// (here a min of 0, rejected as in readMinValidation), and every other
+// primitive rejects with TypeError (messages differ).
+export const byobReadOptionsShapes = {
+  async test() {
+    const { rs, controller } = byteStream();
+    const reader = rs.getReader({ mode: 'byob' });
+    const read = reader.read(new Uint8Array(4), null);
+    controller().enqueue(new Uint8Array([1, 2]));
+    const { value, done } = await read;
+    strictEqual(done, false);
+    deepStrictEqual([...value], [1, 2]);
+    await rejects(
+      reader.read(
+        new Uint8Array(4),
+        Object.assign(function options() {}, { min: 0 })
+      ),
+      {
+        name: 'TypeError',
+        message: usingTsImpl
+          ? 'options.min must be greater than 0'
+          : 'Requested invalid minimum number of bytes to read (0).',
+      }
+    );
+    for (const options of [5, 'x', true, 1n, Symbol('s')]) {
+      await rejects(
+        reader.read(new Uint8Array(4), options),
+        usingTsImpl
+          ? { name: 'TypeError', message: 'options must be an object' }
+          : TypeError
+      );
+    }
   },
 };
 

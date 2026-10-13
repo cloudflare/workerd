@@ -102,7 +102,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 
 | Module | Coverage |
 | --- | --- |
-| `api-surface.js` | globals, controller not constructable, getReader modes, locked lifecycle |
+| `api-surface.js` | globals, controller not constructable, getReader modes, getReader options as a WebIDL dictionary (parity: null, a function's members, primitives rejected), locked lifecycle |
 | `construction.js` | ledger #1-#3, #31, #32, default hwm 1 |
 | `source-algorithms.js` | ledger #4-#6, #23, pull serialization, rejection identity, cancel-with-pending-pull |
 | `controller.js` | desiredSize accounting/terminal states, error idempotence, close terminality (#17), close-drains-queue, error during a pending close (#18) |
@@ -113,7 +113,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `tee.js` | migrated edge cases + error propagation + cancel composite (#11) + pull-per-read + slowest-branch backpressure + a branch leaving after the close, cancelled or errored through the interop hook (TS only), while the others have drained: a parked cancel settles with undefined and the source is not cancelled (parity) |
 | `tee-reentrancy.js` | the three C++ push-loop crash regressions (from api/streams/streams-test.js) |
 | `from.js` | 11 migrated + fromString (#12) + return validation messages + iterator protocol (next read once, done before value, gets not `has`, objects only, return() lookup; parity) + ArrayBufferView as one chunk (#27) + async-from-sync edges (#28) + sync-path schedule (#29) |
-| `async-iteration.js` | 7 migrated + no-await interleavings + proto shape and class string (#13) + foreign `this` (#25) + first next() pulls synchronously, next() from that pull() (parity) + ongoing-promise interleavings (#22) |
+| `async-iteration.js` | 7 migrated + values() options as a WebIDL dictionary (parity) + no-await interleavings + proto shape and class string (#13) + foreign `this` (#25) + first next() pulls synchronously, next() from that pull() (parity) + ongoing-promise interleavings (#22) |
 | `reentrancy.js` | enqueue/close/cancel-in-size (parity) + read-in-size (#14; guard the size() or C++ captures every later chunk) + close-in-size with chunks still to read (#30) and on a tee with a drained branch (the chunk dropped for every branch, the other branch's cancel settling; parity) |
 | `buffer-lifecycle.js` | chunk by reference, detach observed |
 | `integration-body.js` | readAll family, normalization (incl. detached and out-of-bounds views, DataViews included, SharedArrayBuffer-backed views, resizable-extent pinning), clone, cancel-then-consume, SELF round-trips |
