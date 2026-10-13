@@ -42,13 +42,14 @@ export const abortInsideTimeout = {
     const log = [];
     const req = get(env, `/never-ends?id=${uniqueId('reenter-timeout')}`);
     record(log, 'req', req, ['abort', 'error', 'close']);
+    const res = await once(req, 'response');
+    record(log, 'res', res, ['timeout', 'aborted', 'error', 'close']);
+    res.resume();
+    // The timeout exercises response teardown, so arm it once the response exists.
     req.setTimeout(40, () => {
       log.push('timeout');
       req.abort();
     });
-    const res = await once(req, 'response');
-    record(log, 'res', res, ['timeout', 'aborted', 'error', 'close']);
-    res.resume();
     await Promise.all([once(req, 'close'), once(res, 'close')]);
     deepStrictEqual(log, [
       'timeout',
@@ -71,9 +72,9 @@ export const setTimeoutInsideTimeoutDoesNotOutliveTeardown = {
     const req = get(env, `/never-ends?id=${uniqueId('reenter-rearm')}`);
     record(log, 'req', req, ['timeout', 'error', 'close']);
     req.on('timeout', () => req.setTimeout(20));
-    req.setTimeout(40);
     const res = await once(req, 'response');
     res.resume();
+    req.setTimeout(40);
     await once(req, 'close');
     await scheduler.wait(80);
     deepStrictEqual(log, [
