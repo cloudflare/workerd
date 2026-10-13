@@ -938,10 +938,12 @@ class StaticServiceSelfTokenFactory final: public ChannelTokenHandler::ServerSel
 // carries headers; every other event constructs the entrypoint without access info.
 class AccessHeaderExtractor final: public WorkerInterface {
  public:
-  AccessHeaderExtractor(kj::String headerName,
+  AccessHeaderExtractor(const kj::HttpHeaderTable& headerTable,
+      kj::String headerName,
       kj::Maybe<kj::uint> identityServiceChannel,
       kj::Function<kj::Own<WorkerInterface>(kj::Maybe<kj::Own<AccessInfo>>)> factory)
-      : headerName(kj::mv(headerName)),
+      : headerTable(headerTable),
+        headerName(kj::mv(headerName)),
         identityServiceChannel(identityServiceChannel),
         factory(kj::mv(factory)) {}
 
@@ -951,12 +953,19 @@ class AccessHeaderExtractor final: public WorkerInterface {
       kj::AsyncInputStream& requestBody,
       kj::HttpService::Response& response) override {
     kj::Maybe<kj::Own<AccessInfo>> accessInfo;
+    kj::HttpHeaders filteredHeaders(headerTable);
     headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
-      if (strcaseeq(name, headerName)) accessInfo = parseAccessBlob(value, identityServiceChannel);
+      if (strcaseeq(name, headerName)) {
+        accessInfo = parseAccessBlob(value, identityServiceChannel);
+      } else {
+        filteredHeaders.addPtrPtr(name, value);
+      }
     });
     KJ_ASSERT(inner == kj::none, "request() called more than once");
     auto& worker = *inner.emplace(factory(kj::mv(accessInfo)));
-    co_await worker.request(method, url, headers, requestBody, response);
+    // Access metadata belongs to this invocation and must not be exposed to JavaScript or
+    // forwarded to another worker through a service binding.
+    co_await worker.request(method, url, filteredHeaders, requestBody, response);
   }
   kj::Promise<void> connect(kj::StringPtr host,
       const kj::HttpHeaders& headers,
@@ -985,6 +994,7 @@ class AccessHeaderExtractor final: public WorkerInterface {
   }
 
  private:
+  const kj::HttpHeaderTable& headerTable;
   kj::String headerName;
   kj::Maybe<kj::uint> identityServiceChannel;
   kj::Function<kj::Own<WorkerInterface>(kj::Maybe<kj::Own<AccessInfo>>)> factory;
@@ -1113,7 +1123,8 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
 
   KJ_IF_SOME(headerName, impl.accessBlobHeader) {
     auto identityChannel = channels->access_binding_channel();
-    return kj::heap<AccessHeaderExtractor>(kj::str(headerName), identityChannel,
+    return kj::heap<AccessHeaderExtractor>(impl.factory.getImpl().threadContext.getHeaderTable(),
+        kj::str(headerName), identityChannel,
         [&impl, meta = kj::mv(meta), entrypointName = kj::mv(entrypointName),
             props = kj::mv(propsValue), actor = kj::mv(actorRef), channels = kj::mv(channels),
             tails = kj::mv(tails)](kj::Maybe<kj::Own<AccessInfo>> accessInfo) mutable {

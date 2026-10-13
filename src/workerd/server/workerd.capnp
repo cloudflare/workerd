@@ -855,6 +855,8 @@ struct Worker {
   accessBlobHeader @18 :Text;
   # Name of the HTTP header carrying per-request Cloudflare Access metadata for local dev.
   # When set, the worker reads this header from every incoming request to populate `ctx.access`.
+  # The header is removed before the request is delivered to the worker's fetch handler, so
+  # forwarding the request does not propagate Access metadata to another worker.
   # The header value is a JSON object matching the production Access struct:
   #   { "app_aud": "<audience>", "jwt_claims": { ... } }
   # `app_aud` (string, required) populates `ctx.access.aud`.
