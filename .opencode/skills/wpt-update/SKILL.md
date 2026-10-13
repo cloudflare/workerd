@@ -102,6 +102,12 @@ Clearing `test_size_filters` ensures that enormous WPT targets are included.
 The complete pattern runs default and all-autogates variants plus ESLint and
 TypeScript checks.
 
+If most WPT targets fail during analysis with `Build did NOT complete
+successfully`, run `bazel build` on a single suite to see the root error.
+A common cause is a `patches/wpt` patch that no longer applies to the new
+archive (`CONTENT_DOES_NOT_MATCH_TARGET`). Fixing such a patch requires a
+patch change, so it falls under the Scope rules above.
+
 Use an affected suite target while iterating. Include the required `@` suffix.
 For standalone workerd:
 
