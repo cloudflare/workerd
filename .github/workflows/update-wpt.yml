@@ -91,7 +91,7 @@ jobs:
           # the initial build and complete WPT runs need.
           BASH_MAX_TIMEOUT_MS: 3600000
           REPORT_FILE: ${{ runner.temp }}/wpt-update/report.md
-          COMMIT_MESSAGE_FILE: ${{ runner.temp }}/wpt-triage-commit.txt
+          COMMIT_MESSAGE_FILE: ${{ runner.temp }}/wpt-update/commit-message.txt
         run: |
           export ANTHROPIC_BASE_URL="https://gateway.ai.cloudflare.com/v1/$CLOUDFLARE_ACCOUNT_ID/$CLOUDFLARE_GATEWAY_ID/anthropic"
           export ANTHROPIC_CUSTOM_HEADERS="cf-aig-authorization: Bearer $CLOUDFLARE_API_TOKEN"
@@ -136,19 +136,19 @@ jobs:
         if: steps.update.outputs.updated == 'true'
         env:
           TRIAGE_OUTCOME: ${{ steps.triage.outcome }}
-          COMMIT_MESSAGE_FILE: ${{ runner.temp }}/wpt-triage-commit.txt
         run: |
+          git format-patch -1 HEAD -o "$RUNNER_TEMP/wpt-update"
           # Edits from a triage that did not finish may be incomplete, so only the bump is kept.
           if [ "$TRIAGE_OUTCOME" = success ]; then
             ./tools/cross/format.py git
+            # Staged so that new files are included.
             git add src/wpt .opencode/skills/wpt-update patches/wpt build/deps/shared_deps.jsonc build/deps/gen
-            if ! git diff --cached --quiet; then
-              git commit -F "$COMMIT_MESSAGE_FILE" || git commit -m "Triage WPT update"
+            git diff --cached --binary > "$RUNNER_TEMP/wpt-update/triage.diff"
+            if [ -s "$RUNNER_TEMP/wpt-update/triage.diff" ]; then
               echo "triaged=true" >> "$GITHUB_OUTPUT"
             fi
           fi
-          git format-patch "$BASE_SHA..HEAD" -o "$RUNNER_TEMP/wpt-update/patches"
-      - name: Upload commits
+      - name: Upload changes
         if: steps.update.outputs.updated == 'true'
         uses: actions/upload-artifact@v7
         with:
@@ -168,16 +168,20 @@ jobs:
           show-progress: false
           token: ${{ secrets.DEVPROD_PAT }}
           ref: main
-      - name: Download commits
+      - name: Download changes
         uses: actions/download-artifact@v8
         with:
           name: wpt-update
           path: ${{ runner.temp }}/wpt-update
-      - name: Apply commits
+      - name: Apply changes
         run: |
           git config user.name "Workers DevProd"
           git config user.email "workers-devprod@cloudflare.com"
-          git am "$RUNNER_TEMP"/wpt-update/patches/*.patch
+          git am "$RUNNER_TEMP"/wpt-update/*.patch
+          if [ -s "$RUNNER_TEMP/wpt-update/triage.diff" ]; then
+            git apply --index "$RUNNER_TEMP/wpt-update/triage.diff"
+            git commit -F "$RUNNER_TEMP/wpt-update/commit-message.txt" || git commit -m "Triage WPT update"
+          fi
       - name: Write pull request body
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
