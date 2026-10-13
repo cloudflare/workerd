@@ -1,20 +1,47 @@
-name: Experimental Workflow
+name: Python manager-owned Wasm regression audit
 on:
   workflow_dispatch:
-
-# You can modify this workflow in order to verify your changes to Github Actions on a branch.
-# DO NOT MERGE THESE CHANGES TO MAIN
-# This workflow exists to work around a limitation in Github Actions. You can only use 
-# workflow_dispatch on files that exist in main. However, once the file exists, you can dispatch to
-# your branch and make sure changes work.
-
 permissions:
-  contents: none
-
+  contents: read
+  actions: write
 jobs:
-  experiment:
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Hello World
-        shell: bash
-        run: echo Hello World
+  positive:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu-22.04-16core
+            os: linux
+            extra: ''
+          - image: ubuntu-22.04-16core
+            os: linux
+            extra: '--config=asan'
+          - image: windows-2025-16core
+            os: windows
+            extra: ''
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ${{ matrix.image }}
+      os_name: ${{ matrix.os }}
+      arch_name: X64
+      suffix: ${{ matrix.extra == '--config=asan' && '-asan' || '' }}
+      build_target: //src/workerd/api:pyodide/wasm-module-test@
+      test_target: >-
+        //src/workerd/api:pyodide/wasm-module-test@
+        //src/workerd/api:pyodide/wasm-module-test@all-autogates
+      extra_bazel_args: >-
+        --config=ci-test --config=ci-${{ matrix.os }} ${{ matrix.extra }}
+        --runs_per_test=5 --flaky_test_attempts=1
+      upload_test_logs: true
+    secrets: inherit
+  negative:
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ubuntu-22.04-16core
+      os_name: linux
+      arch_name: X64
+      phase: '-negative-pyodide-holder'
+      build_target: //src/workerd/api:pyodide/wasm-module-test_binary
+      run_tests: false
+      extra_bazel_args: '--config=ci-test --config=ci-linux'
+    secrets: inherit

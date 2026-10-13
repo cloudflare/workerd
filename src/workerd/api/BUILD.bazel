@@ -466,6 +466,16 @@ kj_test(
     deps = [":pyodide"],
 )
 
+kj_test(
+    src = "pyodide/wasm-module-test.c++",
+    local_defines = ["JSG_IMPLEMENTATION"],
+    deps = [
+        ":pyodide",
+        "//src/workerd/io:worker-modules",
+        "//src/workerd/jsg",
+    ],
+)
+
 wd_cc_library(
     name = "util",
     srcs = ["util.c++"],

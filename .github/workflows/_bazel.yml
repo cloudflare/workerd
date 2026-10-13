@@ -129,9 +129,17 @@ jobs:
             # Strip comment in front of WORKERS_MIRROR_URL, then substitute secret to use it.
             sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak build/deps/nodejs.MODULE.bazel
           fi
+      - name: Disconnect the Pyodide manager holder for the negative control
+        if: inputs.phase == '-negative-pyodide-holder'
+        shell: bash
+        run: python3 .github/scripts/pyodide-wasm-negative.py prepare
       - name: Bazel build
         run: |
           bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.build_target }}
+      - name: Require the Python registration regression to fail
+        if: inputs.phase == '-negative-pyodide-holder'
+        shell: bash
+        run: python3 .github/scripts/pyodide-wasm-negative.py verify
       - name: Check I/O backend dependency graph
         # One cquery: the workerd binary must not reach kj-async-os (kj's own event loop).
         if: inputs.check_io_backend_graph
