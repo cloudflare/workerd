@@ -96,7 +96,6 @@ import type { CommonHelpers } from './common';
 import type { ViewExtentHelpers } from './view-extent';
 
 const {
-  ArrayBufferPrototypeByteLengthGet,
   ArrayPrototypePush,
   BigInt,
   Number,
@@ -120,8 +119,6 @@ const {
   uncurryThis,
 } = primordials;
 
-const { isArrayBufferView, isArrayBuffer, isSharedArrayBuffer } = utils;
-
 const {
   ReadableStream,
   ReadableByteStreamController,
@@ -140,7 +137,7 @@ const {
   normalizeExpectedLength,
   toStringTagProperty,
 } = require('webstreams/common') as CommonHelpers;
-const { copyExtent, viewByteExtent } =
+const { bufferSourceExtent, copyExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
@@ -189,30 +186,16 @@ function validateAndCopyChunk(chunk: unknown): Uint8Array | undefined {
     if (chunk.length === 0) return undefined;
     return TextEncoderEncode(textEncoderInstance, chunk);
   }
-  if (isArrayBuffer(chunk)) {
-    // A detached ArrayBuffer has byteLength 0, so it is empty, as in C++.
-    const byteLength = ArrayBufferPrototypeByteLengthGet(chunk);
-    if (byteLength === 0) return undefined;
-    return copyExtent(chunk, 0, byteLength);
+  // A detached or out-of-bounds input is empty (see view-extent.ts).
+  const extent = bufferSourceExtent(chunk);
+  if (extent === undefined) {
+    throw new TypeError(
+      'IdentityTransformStream: chunk must be a BufferSource or string'
+    );
   }
-  if (isSharedArrayBuffer(chunk)) {
-    // ArrayBuffer.prototype.byteLength throws on a SharedArrayBuffer, so read
-    // the length through a Uint8Array; shared memory cannot be detached.
-    const byteLength = TypedArrayPrototypeGetByteLength(
-      new Uint8Array(chunk)
-    ) as number;
-    if (byteLength === 0) return undefined;
-    return copyExtent(chunk, 0, byteLength);
-  }
-  if (isArrayBufferView(chunk)) {
-    // A detached or out-of-bounds view is empty (see view-extent.ts).
-    const { buffer, byteOffset, byteLength } = viewByteExtent(chunk);
-    if (byteLength === 0) return undefined;
-    return copyExtent(buffer, byteOffset, byteLength);
-  }
-  throw new TypeError(
-    'IdentityTransformStream: chunk must be a BufferSource or string'
-  );
+  const { buffer, byteOffset, byteLength } = extent;
+  if (byteLength === 0) return undefined;
+  return copyExtent(buffer, byteOffset, byteLength);
 }
 
 let assertIsIdentityTransformStream: (self: IdentityTransformStream) => void;

@@ -41,7 +41,6 @@ import type { CommonHelpers } from './common';
 import type { ViewExtentHelpers } from './view-extent';
 
 const {
-  ArrayBufferPrototypeByteLengthGet,
   MathMin,
   ObjectDefineProperties,
   SymbolToStringTag,
@@ -50,7 +49,7 @@ const {
   uncurryThis,
 } = primordials;
 
-const { isArrayBuffer, isArrayBufferView, isSharedArrayBuffer } = utils;
+const { isSharedArrayBuffer } = utils;
 
 // Captured for primordials discipline — ToString coercion per spec.
 const StringCoerce = String;
@@ -67,7 +66,7 @@ const {
 } = require('webstreams/writable');
 const { isActualObject, kEnumerable, toStringTagProperty } =
   require('webstreams/common') as CommonHelpers;
-const { copyExtent, viewByteExtent } =
+const { bufferSourceExtent, copyExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
@@ -129,22 +128,13 @@ const newCodec = utils.newCompressionCodec as (
 // the spec shape wins over parity with the identity streams, which accept
 // shared views by copying.
 function snapshotChunk(chunk: unknown): Uint8Array {
-  if (isArrayBuffer(chunk)) {
-    return copyExtent(
-      chunk as ArrayBuffer,
-      0,
-      ArrayBufferPrototypeByteLengthGet(chunk) as number
+  const extent = bufferSourceExtent(chunk);
+  if (extent === undefined || isSharedArrayBuffer(extent.buffer)) {
+    throw new TypeError(
+      'The provided value is not of type (ArrayBuffer or ArrayBufferView)'
     );
   }
-  if (isArrayBufferView(chunk)) {
-    const { buffer, byteOffset, byteLength } = viewByteExtent(chunk);
-    if (!isSharedArrayBuffer(buffer)) {
-      return copyExtent(buffer, byteOffset, byteLength);
-    }
-  }
-  throw new TypeError(
-    'The provided value is not of type (ArrayBuffer or ArrayBufferView)'
-  );
+  return copyExtent(extent.buffer, extent.byteOffset, extent.byteLength);
 }
 
 type SnapshotEntry =
