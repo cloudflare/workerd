@@ -93,8 +93,9 @@ readable's queue, before any read occurs.)
 ### Chunk handling
 
 - Accepted chunk types: `ArrayBufferView` (any, honoring offset/length),
-  `ArrayBuffer`, and strings, which are UTF-8 encoded (C++ stops at the
-  first NUL, ledger #25). Anything else fails with `TypeError`.
+  `ArrayBuffer`, `SharedArrayBuffer`, and strings, which are UTF-8 encoded
+  (C++ stops at the first NUL, ledger #25). Shared memory is copied like
+  any other bytes. Anything else fails with `TypeError`.
 - Zero-length chunks (empty view, empty buffer, empty string) are no-ops:
   they resolve without delivering a chunk and without closing the stream.
   So is an undefined chunk (`write(undefined)`, `write()`).
@@ -272,7 +273,7 @@ pattern; a change to either side fails its cell.
 | --- | --- |
 | `api-surface.js` | toStringTag branding; `FixedLengthStream` subclassing; `readable`/`writable` are `ReadableStream`/`WritableStream` instances, stable, enumerable prototype accessors (placement per ledger #5); constructor source text (native code under C++, not under TS); accessor brand checks |
 | `construction.js` | valid lengths (0, 5, −0.0, `MAX_SAFE_INTEGER`, bigints, with strategy); coerced length observable via HWM cap; invalid, coerced and above-2^53−1 lengths, the same in both (ledger #1–3); inheritance (ledger #4); a user-supplied strategy `size` is never invoked (ITS and FLS, with and without explicit HWM); the strategy argument converts as a WebIDL dictionary (undefined/null mean none, other non-objects throw `TypeError`); `highWaterMark` read and converted once by both classes (numeric strings, booleans, null, `valueOf`), its conversion per ledger #24 |
-| `chunk-types.js` | accepted: `Uint8Array`, `ArrayBuffer`, `DataView` subrange, string→UTF-8 (a NUL truncates under C++, ledger #25), subarray offsets; rejected: numbers, plain objects (`TypeError`; per-write — the stream survives, ledger #6); an invalid chunk queued behind valid writes surfaces its error in FIFO order — earlier writes still deliver and later traffic still flows in both implementations |
+| `chunk-types.js` | accepted: `Uint8Array`, `ArrayBuffer`, `DataView` subrange, shared memory (a `SharedArrayBuffer` and views over one, copied at `write()`; an empty one is a no-op), string→UTF-8 (a NUL truncates under C++, ledger #25), subarray offsets; rejected: numbers, plain objects (`TypeError`; per-write — the stream survives, ledger #6); an invalid chunk queued behind valid writes surfaces its error in FIFO order — earlier writes still deliver and later traffic still flows in both implementations |
 | `zero-length-writes.js` | empty view / buffer / string are non-closing no-ops; so is an undefined chunk (`write(undefined)`, `write()`; ITS, FLS, with a byte highWaterMark) |
 | `copy-semantics.js` | delivered chunk never aliases the source; source mutation after delivery is invisible; source is not detached |
 | `buffer-lifecycle.js` | write-time snapshot survives later resize/detach in both implementations; degenerate write-time inputs (already-detached per ledger #12; detached and out-of-bounds typed-array and DataView views are no-ops); shadowing/throwing metadata getters never consulted |
