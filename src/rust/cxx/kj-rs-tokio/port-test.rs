@@ -1,7 +1,7 @@
 use super::*;
 
 impl TokioPort {
-    /// What the C++ port's wait() does, minus the KJ timer: park, then one batch.
+    /// What the C++ port's `wait()` does, minus the KJ timer: park, then one batch.
     fn wait_forever(&mut self) -> bool {
         self.park_forever();
         self.tick()

@@ -218,8 +218,10 @@ impl TokioPort {
         // The runtime is left before the tasks are dropped: a task `Drop` that tried to spawn
         // during teardown finds no runtime and panics per `spawn`'s contract, rather than
         // enqueueing onto a runtime that is going away. Rescheduling from a destructor during
-        // teardown is not a sane pattern.
-        LOOP_RUNTIME_HANDLE.with(|h| {
+        // teardown is not a sane pattern. `try_with`: a port destroyed at process exit (a static
+        // owner under KJ_CLEAN_SHUTDOWN) may get here after this thread's Rust TLS destructors
+        // have run, and then there is nothing to clear.
+        let _ = LOOP_RUNTIME_HANDLE.try_with(|h| {
             *h.borrow_mut() = None;
         });
         drop(self.event_loop.take());
