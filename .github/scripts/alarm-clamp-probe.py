@@ -27,6 +27,7 @@ for version, source, runs in [("original", original, 1), ("repaired", repaired, 
             storage.mkdir()
             result = subprocess.run(
                 [str(binary), "test", str(path), "--experimental",
+                 "--compat-date=2000-01-01",
                  "-dTEST_TMPDIR=" + str(storage)],
                 text=True, capture_output=True, timeout=30,
             )

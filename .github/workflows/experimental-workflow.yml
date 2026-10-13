@@ -1,6 +1,11 @@
 name: Alarm fixture strict audit
 on:
   workflow_dispatch:
+    inputs:
+      probe_only:
+        description: Run only the expired-deadline probe
+        type: boolean
+        default: false
 
 # This workflow is confined to the diagnostic branch.
 permissions:
@@ -9,6 +14,7 @@ permissions:
 
 jobs:
   audit:
+    if: ${{ !inputs.probe_only }}
     strategy:
       fail-fast: false
       matrix:
