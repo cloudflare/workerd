@@ -40,6 +40,10 @@ basics) are parity under direct observation and are pinned as such.
 | 21 | (no divergence) `transformer.expectedLength` conversion, as the readable-byte suite's #35 describes: as any `uint64_t` converts, every failure a `TypeError` | same | same | `transformExpectedLengthRejected`, `transformExpectedLengthCoercion`, `transformExpectedLengthRange` (parity) |
 | 22 | (no divergence) readable.cancel() then writer.write() in the same turn, with room in the readable: the write reaches the sink at once, after the cancel cleared the algorithms and before it settles. With no hooks, flush() only or transform(), the write rejects with the cancel reason and transform() is not called | same | same | `writeAfterCancelSameTurn` (parity) |
 | 23 | a write whose readable-side size() calls readable.cancel() and then throws e2 (no hooks, flush() only, transform()) | size()'s throw is swallowed (#20): the write fulfills, and the writable is errored with the cancel reason | the spec (TransformStreamDefaultControllerEnqueue step 5), with or without hooks: the write rejects with the closed readable's stored error, undefined, and the writable is errored with e2 | `readableCancelInsideThrowingSize` |
+| 24 | constructor argument conversion order | the transformer's members, then each strategy: hwm and its ToNumber, then size (writable, then readable) | the transformer's members, then the writable strategy's size, hwm and its ToNumber, then the readable strategy's hwm, size and hwm's ToNumber. The spec converts both strategies (hwm and its ToNumber, then size, writable first) before the transformer's members | `argumentConversionOrder` |
+| 25 | transformer argument shapes | WebIDL dictionary: null means no transformer, a function is a transformer whose members are read; every other primitive throws TypeError | null is accepted as no transformer; every other primitive and a function throw TypeError 'transformer must be an object' (spec: null and the other primitives throw, a function is accepted) | `garbageTransformerValidation` |
+| 26 | strategy argument shapes (either strategy) | WebIDL dictionary: null means a strategy with no members; every other primitive throws TypeError. A readable strategy without a highWaterMark (null or `{}`) gets the ReadableStream default (1): the TransformStream default (0) applies only when the argument is omitted | null and every other primitive are accepted as no strategy; any readable strategy without a highWaterMark gets 0 (spec ExtractHighWaterMark). A function's members are read on both sides (spec) | `strategyArgumentShapes` |
+| 27 | which error wins when two are possible (a primitive transformer's TypeError beats a throwing strategy getter in both; spec) | all three arguments are converted before anything is validated: a throwing writable strategy getter beats readableType 'bytes'; an invalid writable highWaterMark (TypeError, integer conversion) beats readableType 'bytes' and a throwing readable strategy getter | readableType 'bytes' (RangeError) beats a throwing writable strategy getter and an invalid writable highWaterMark; an invalid writable highWaterMark (RangeError) beats a throwing readable strategy getter. The spec converts both strategies, then checks readableType, then each highWaterMark's range | `conversionErrorPrecedence` |
 
 Parity worth noting (probed, pinned): cancel hook runs (not flush) with
 the reason for both readable.cancel() and writable.abort(), exactly once
@@ -47,8 +51,8 @@ even for cancel-then-abort; terminate() reads done + rejects the writable
 with the same TypeError message on both sides; hook invocation shape
 (start/transform/flush get 1/2/1 args, receiver = transformer,
 prototype-chain hooks work); the fixup backpressure LATCH engages on both
-sides (only the release diverges, #8); default readable strategy is
-hwm 0; chunk identity through the transform; a buffer detached while its
+sides (only the release diverges, #8); an omitted readable strategy
+is hwm 0 (one without a highWaterMark is #26); chunk identity through the transform; a buffer detached while its
 view is queued is observed detached by the reader; queue totals recorded
 at write time.
 
@@ -82,7 +86,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | Module | Asserts |
 | --- | --- |
 | `api-surface.js` | transform globals; controller not constructable; bare ctor is standard pass-through, not ITS |
-| `construction.js` | ledger #5, #6, #9; both strategies' members read once each (parity) |
+| `construction.js` | ledger #5, #6, #9, #24–#27; both strategies' members read once each (parity) |
 | `transformer-algorithms.js` | ledger #17; start/transform/flush ordering, async hooks, chunk-type freedom; hook shape + prototype-chain (parity) |
 | `error-propagation.js` | sync/async start/transform/flush error fan-out across writes/close/readable (#1); controller.error() rejects reads; error() no-op after hook throw (parity, identity); enqueue() once flush() has settled throws TypeError and leaves the writable's close untouched (parity) |
 | `backpressure.js` | writable desiredSize through the transform; dual strategies; default readable hwm 0; latch + racy release (#8); a parked write released by a read transforms even when a same-turn enqueue re-asserts backpressure (parity at hwm 0; #14 at hwm 1) or rejects when the turn also errors the controller (#15) |

@@ -9,36 +9,36 @@ import { usingTsImpl } from 'which-impl';
 
 // DIVERGENCE (the WPT general.any seed): a size() in the strategy of a
 // byte stream is rejected by TypeScript (spec: RangeError) but silently
-// accepted — and ignored — by C++.
+// accepted — and ignored — by C++. TypeScript rejects it before checking
+// highWaterMark, as the spec does; C++ converts an invalid highWaterMark
+// to an integer first and throws TypeError.
 export const sizeStrategyForBytes = {
   test() {
-    if (usingTsImpl) {
-      throws(
-        () =>
-          new ReadableStream(
-            { type: 'bytes' },
-            {
-              size() {
-                return 1;
-              },
-              highWaterMark: 4,
-            }
-          ),
-        {
+    for (const highWaterMark of [4, -1]) {
+      const construct = () =>
+        new ReadableStream(
+          { type: 'bytes' },
+          {
+            size() {
+              return 1;
+            },
+            highWaterMark,
+          }
+        );
+      if (usingTsImpl) {
+        throws(construct, {
           name: 'RangeError',
           message: 'The strategy for a byte stream cannot have a size function',
-        }
-      );
-    } else {
-      new ReadableStream(
-        { type: 'bytes' },
-        {
-          size() {
-            return 1;
-          },
-          highWaterMark: 4,
-        }
-      );
+        });
+      } else if (highWaterMark < 0) {
+        throws(construct, {
+          name: 'TypeError',
+          message:
+            'The value cannot be converted because it is negative and this API expects a positive bigint.',
+        });
+      } else {
+        construct();
+      }
     }
   },
 };

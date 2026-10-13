@@ -29,6 +29,8 @@ export {
   garbageSourceValidation,
   invalidTypeValidation,
   argumentConversionOrder,
+  strategyArgumentShapes,
+  conversionErrorPrecedence,
   highWaterMarkValidated,
   hwmDefaultIsOne,
 } from 'construction';

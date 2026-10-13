@@ -15,7 +15,7 @@ behavior-parity (messages aside).
 
 | # | Area | C++ | TypeScript | Pinned in |
 | --- | --- | --- | --- | --- |
-| 1 | size() in a byte stream's strategy | silently accepted and ignored | RangeError (spec) — root of the WPT ctor seed | `sizeStrategyForBytes` |
+| 1 | size() in a byte stream's strategy | silently accepted and ignored; with an invalid highWaterMark too, that highWaterMark's TypeError (integer conversion) | RangeError (spec), before the highWaterMark is checked — root of the WPT ctor seed | `sizeStrategyForBytes` |
 | 2 | autoAllocateChunkSize 0/-1/NaN | TypeError 'cannot be zero.' (all three) | TypeError 'must be a positive integer' | `autoAllocateChunkSizeValidated` |
 | 3 | pull counts (hwm 1, enqueue-in-pull) | 1,1,3 (readable ledger #4 mirror) | 1,2,3 (spec) | `pullCountShape` |
 | 4 | sync start() throw | captured; stream errored (readable #6 mirror) | escapes constructor (spec) | `syncStartThrow`, `jsSourceError` |

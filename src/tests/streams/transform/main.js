@@ -26,6 +26,10 @@ export {
   readableWritableTypeValidation,
   highWaterMarkValidated,
   hwmInfinityRejected,
+  argumentConversionOrder,
+  garbageTransformerValidation,
+  strategyArgumentShapes,
+  conversionErrorPrecedence,
   strategyMembersReadOnce,
 } from 'construction';
 
