@@ -1,4 +1,4 @@
-name: Persistent stubs Windows timing investigation
+name: Persistent stubs storage budget with original Windows launcher
 on:
   workflow_dispatch:
 
