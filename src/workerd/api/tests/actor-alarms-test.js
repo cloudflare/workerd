@@ -9,13 +9,7 @@ export class DurableObjectExample {
     this.state = state;
   }
 
-  async waitForAlarm(scheduledTime) {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias
-    let self = this;
-    const { promise, resolve, reject } = Promise.withResolvers();
-    self.resolve = resolve;
-    self.reject = reject;
-
+  async waitForAlarm(scheduledTime, promise) {
     try {
       await promise;
       if (Date.now() < scheduledTime.valueOf()) {
@@ -36,12 +30,21 @@ export class DurableObjectExample {
   }
 
   async fetch() {
-    const time = Date.now() + 50;
-    this.scheduledTime = time;
-    await this.state.storage.setAlarm(time);
-    assert.equal(await this.state.storage.getAlarm(), time);
+    const { promise, resolve, reject } = Promise.withResolvers();
+    this.resolve = resolve;
+    this.reject = reject;
+    await this.state.blockConcurrencyWhile(async () => {
+      const time = Date.now() + 50;
+      await this.state.storage.setAlarm(time);
+      const storedTime = await this.state.storage.getAlarm();
+      // setAlarm clamps expired dates to the runtime clock. Hold the input gate until the
+      // stored deadline and completion handlers are ready for the alarm invocation.
+      assert.ok(storedTime >= time);
+      assert.ok(storedTime <= Math.max(time, Date.now()));
+      this.scheduledTime = storedTime;
+    });
 
-    await this.waitForAlarm(time);
+    await this.waitForAlarm(this.scheduledTime, promise);
 
     return new Response('OK');
   }
