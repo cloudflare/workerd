@@ -87,7 +87,8 @@ def _rust_build_std_impl(ctx):
             str(len(patches)),
         ] + [patch.path for patch in patches] + _STDLIB_CRATES,
         inputs = depset(
-            ctx.files.rust_src + ctx.files.rust_toolchain_files + patches,
+            patches,
+            transitive = [ctx.attr.rust_src.files] + [t.files for t in ctx.attr.rust_toolchain_files],
         ),
         outputs = outputs,
         tools = [ctx.executable.cargo, ctx.executable.rustc],
