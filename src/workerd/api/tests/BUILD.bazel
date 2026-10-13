@@ -238,7 +238,6 @@ wd_test(
         "jsrpc-callback-trace-test.js",
         "jsrpc-callback-trace-test-tail.js",
     ],
-    tags = ["no-coverage"],
 )
 
 # Test: a callee invocation is parented to the first caller jsRpcCall, and each dispatch links to
@@ -250,7 +249,6 @@ wd_test(
         "jsrpc-pipelined-trace-test.js",
         "jsrpc-pipelined-trace-test-tail.js",
     ],
-    tags = ["no-coverage"],
 )
 
 # Regression test: jsrpc onset.info emitted into a streaming tail worker must remain
@@ -343,6 +341,15 @@ wd_test(
         "cache-mock.js",
         "cache-operations-test.js",
         "instrumentation-tail-worker.js",
+    ],
+)
+
+wd_test(
+    src = "cache-span-parent-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "cache-span-parent-test.js",
+        "cache-span-parent-test-tail.js",
     ],
 )
 
