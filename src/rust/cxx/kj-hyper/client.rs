@@ -45,6 +45,7 @@ use hyper_util::client::legacy::connect::Connected;
 use hyper_util::client::legacy::connect::Connection;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::rt::TokioIo;
+use hyper_util::rt::TokioTimer;
 use kj::http::ConnectResponse;
 use kj::http::ConnectSettings;
 use kj::http::HeaderId;
@@ -288,7 +289,7 @@ impl Internet {
     }
 }
 
-/// The usual `connect` of [`Client::internet`]: resolves `host` and connects to the first address
+/// The usual `connect` of [`ClientPool::internet`]: resolves `host` and connects to the first address
 /// that `allow` admits and that accepts.
 ///
 /// When none accepts, the error is the last connection failure, else `PermissionDenied` if
@@ -371,20 +372,23 @@ impl tower_service::Service<http::Uri> for Connector {
 /// The authority an origin peer's requests are pooled under; it never goes on the wire.
 const FIXED_AUTHORITY: &str = "fixed.invalid";
 
-/// See the module docs. Requests are made through `kj::http::Service`; clone it to share the
-/// pool.
+/// The connections a [`Client`] makes, kept alive between requests.
+///
+/// One pool and the peer it dials. A pool owns no header table, so a service can keep one for its
+/// whole life and lend it to a [`Client`] per call ([`Self::client`]); clones share the pool.
 #[derive(Clone)]
-pub struct Client<'t> {
+pub struct ClientPool {
     inner: legacy::Client<Connector, ChannelBody>,
     connector: Connector,
-    table: &'t HeaderTable,
     settings: Rc<ClientSettings>,
 }
 
-impl<'t> Client<'t> {
-    fn build(table: &'t HeaderTable, settings: ClientSettings, connector: Connector) -> Self {
+impl ClientPool {
+    fn build(settings: ClientSettings, connector: Connector) -> Self {
         let inner = legacy::Client::builder(TokioExecutor::new())
             .pool_idle_timeout(settings.idle_timeout)
+            // Without a timer, idle connections are evicted only when their host is next asked for.
+            .pool_timer(TokioTimer::new())
             .http1_title_case_headers(true)
             .http1_preserve_header_case(true)
             .http1_max_headers(MAX_HEADERS)
@@ -395,20 +399,14 @@ impl<'t> Client<'t> {
         Self {
             inner,
             connector,
-            table,
             settings: Rc::new(settings),
         }
     }
 
-    /// A client of one peer, every connection dialed by `dial` (a socket, or a [`Dialed`]: TLS,
-    /// an in-process pipe...). An origin is asked for paths, sent as given; an HTTP proxy for
-    /// absolute URLs, sent whole. `table` builds the response headers.
-    pub fn new<F, Fut, IO>(
-        table: &'t HeaderTable,
-        settings: ClientSettings,
-        peer: Peer,
-        dial: F,
-    ) -> Self
+    /// A pool of one peer, every connection dialed by `dial` (a socket, or a [`Dialed`]: TLS, an
+    /// in-process pipe...). An origin is asked for paths, sent as given; an HTTP proxy for
+    /// absolute URLs, sent whole.
+    pub fn new<F, Fut, IO>(settings: ClientSettings, peer: Peer, dial: F) -> Self
     where
         F: Fn() -> Fut + Send + Sync + 'static,
         Fut: Future<Output = io::Result<IO>> + Send + 'static,
@@ -418,14 +416,13 @@ impl<'t> Client<'t> {
             let dialing = dial();
             Box::pin(async move { dialing.await.map(Into::into) })
         });
-        Self::build(table, settings, Connector::Fixed(dialer, peer))
+        Self::build(settings, Connector::Fixed(dialer, peer))
     }
 
-    /// A client of whatever authority a request's (absolute) URL names, over the connection
+    /// A pool of whatever authority a request's (absolute) URL names, over the connection
     /// `connect` makes to its host and port (TCP through [`connect_allowed`], usually), with
     /// `tls` for `https` URLs.
     pub fn internet<F, Fut, IO>(
-        table: &'t HeaderTable,
         settings: ClientSettings,
         tls: Option<Arc<rustls::ClientConfig>>,
         connect: F,
@@ -440,17 +437,35 @@ impl<'t> Client<'t> {
             Box::pin(async move { connecting.await.map(Into::into) })
         });
         let internet = Arc::new(Internet { tls, connect });
-        Self::build(table, settings, Connector::Internet(internet))
+        Self::build(settings, Connector::Internet(internet))
     }
 
+    /// A client over this pool; `table` builds the response headers.
+    pub fn client<'t>(&self, table: &'t HeaderTable) -> Client<'t> {
+        Client {
+            pool: self.clone(),
+            table,
+        }
+    }
+}
+
+/// See the module docs. Requests are made through `kj::http::Service`, over the connections of
+/// a [`ClientPool`]; clone it to share the pool.
+#[derive(Clone)]
+pub struct Client<'t> {
+    pool: ClientPool,
+    table: &'t HeaderTable,
+}
+
+impl Client<'_> {
     fn websocket_errors(&self) -> KjMaybe<&WebSocketErrorHandler> {
-        self.settings.websocket_errors.as_deref().into()
+        self.pool.settings.websocket_errors.as_deref().into()
     }
 
     /// The request URI and, for the "internet" client, the `Host` kj's client sets from it.
     fn target(&self, url: &[u8]) -> Result<(http::Uri, Option<http::HeaderValue>)> {
         let url = from_utf8(url).map_err(failed)?;
-        match self.connector {
+        match self.pool.connector {
             Connector::Fixed(_, Peer::Origin) => {
                 let uri = format!("http://{FIXED_AUTHORITY}{url}")
                     .parse()
@@ -490,7 +505,8 @@ impl<'t> Client<'t> {
     }
 
     async fn send(&self, request: http::Request<ChannelBody>) -> Result<http::Response<Incoming>> {
-        self.inner
+        self.pool
+            .inner
             .request(request)
             .await
             .map_err(|e| client_error(&e))
@@ -543,7 +559,7 @@ impl<'t> Client<'t> {
         headers: HeadersRef<'_>,
         into: ServiceResponse<'_>,
     ) -> Result<()> {
-        let mode = self.settings.websocket_compression;
+        let mode = self.pool.settings.websocket_compression;
         let offer = websocket_offer(headers.as_ffi(), mode);
         let key = client_key();
         // As kj: the handshake's connection-level headers are the client's own, so no framing
@@ -733,7 +749,7 @@ impl Service for Client<'_> {
         // installed here rather than when the future first runs.
         let use_tls = settings.use_tls;
         let starter: Option<Pin<&mut TlsStarterCallback>> = settings.tls_starter.into();
-        let upgrade = match (&self.connector, starter) {
+        let upgrade = match (&self.pool.connector, starter) {
             (Connector::Internet(internet), Some(starter)) if !use_tls => {
                 internet.tls.clone().and_then(|config| {
                     let (host, _) = host_port(from_utf8(host).ok()?).ok()?;
@@ -764,7 +780,7 @@ impl Client<'_> {
             ));
         }
         let host_str = from_utf8(host).map_err(failed)?;
-        match &self.connector {
+        match &self.pool.connector {
             // As kj's network client: a plain connection to the host is the tunnel, TLS from the
             // start or from when the starter says.
             Connector::Internet(internet) => {
@@ -837,14 +853,14 @@ impl Client<'_> {
         }
     }
 
-    /// A tunnel to `host` through the peer of a client of one peer ([`Client::new`]): an HTTP
+    /// A tunnel to `host` through the peer of a client of one peer ([`ClientPool::new`]): an HTTP
     /// CONNECT, which the peer must accept.
     ///
     /// # Errors
     ///
     /// A peer that cannot be reached or that refuses, and a client of no one peer.
     pub async fn tunnel(&self, host: &str) -> Result<KjOwn<AsyncIoStream>> {
-        let Connector::Fixed(..) = self.connector else {
+        let Connector::Fixed(..) = self.pool.connector else {
             return Err(failed("this client has no peer to tunnel through"));
         };
         let uri: http::Uri = host.parse().map_err(failed)?;
