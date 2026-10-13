@@ -85,7 +85,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           # Nobody can answer a question in CI. The skill downloads upstream WPT diffs and history
           # outside the workspace, and reruns identical WPT test commands until they pass.
-          OPENCODE_CONFIG_CONTENT: '{"permission":{"external_directory":"allow","question":"deny","doom_loop":"allow"}}'
+          OPENCODE_CONFIG_CONTENT: '{"plugin":["file://${{ github.workspace }}/.github/opencode/log-tool-calls.js"],"permission":{"external_directory":"allow","question":"deny","doom_loop":"allow"}}'
           REPORT_FILE: ${{ runner.temp }}/wpt-triage-report.md
           COMMIT_MESSAGE_FILE: ${{ runner.temp }}/wpt-triage-commit.txt
         run: |
@@ -94,7 +94,8 @@ jobs:
             --print-logs \
             --log-level ERROR \
             --model cloudflare-ai-gateway/anthropic/claude-opus-5.5 \
-            --variant high \
+            --variant medium \
+            --thinking \
             --auto \
             "$(cat <<EOF
           Load the wpt-update skill (.opencode/skills/wpt-update/SKILL.md) and perform a
