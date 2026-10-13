@@ -2,11 +2,13 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+#include <workerd/jsg/setup.h>
+#include <workerd/jsg/type-wrapper.h>
+
+// API declarations need the JSG implementation templates above for their JSG_STRUCT expansions.
 #include "pyodide.h"
 
 #include <workerd/io/worker-modules.h>
-#include <workerd/jsg/setup.h>
-#include <workerd/jsg/type-wrapper.h>
 
 #include <capnp/serialize.h>
 #include <kj/test.h>
