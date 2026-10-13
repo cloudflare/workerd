@@ -134,7 +134,7 @@ def _wpt_module_impl(ctx):
     return [
         DefaultInfo(files = depset(ctx.files.srcs)),
         WPTModuleInfo(
-            base = ctx.attr.dir.files.to_list()[0],
+            base = ctx.file.dir,
             path = ctx.attr.dir.label.name,
         ),
     ]
@@ -161,8 +161,7 @@ def _wpt_js_test_gen_impl(ctx):
     src = ctx.actions.declare_file("{}-test.generated.js".format(ctx.attr.test_name))
     base = ctx.attr.wpt_directory[WPTModuleInfo].base
 
-    files = ctx.attr.wpt_directory.files.to_list()
-    test_files = [file for file in files if is_test_file(file, ctx.attr.include_tentative)]
+    test_files = [file for file in ctx.files.wpt_directory if is_test_file(file, ctx.attr.include_tentative)]
 
     ctx.actions.write(
         output = src,
@@ -264,13 +263,13 @@ def _wpt_wd_test_gen_impl(ctx):
     base = ctx.attr.wpt_directory[WPTModuleInfo].base
 
     # Generate bindings for test directory files plus common/**/*.js, resources/**/*.js, and interfaces/**/*.idl
-    bindings = generate_external_bindings(src, base, ctx.attr.wpt_directory.files)
+    bindings = generate_external_bindings(src, base, ctx.files.wpt_directory)
     common_base = ctx.attr.wpt_common[WPTModuleInfo].base
-    common_bindings = generate_common_bindings(src, common_base, ctx.attr.wpt_common.files)
+    common_bindings = generate_common_bindings(src, common_base, ctx.files.wpt_common)
     resources_base = ctx.attr.wpt_resources[WPTModuleInfo].base
-    resources_bindings = generate_resources_bindings(src, resources_base, ctx.attr.wpt_resources.files)
+    resources_bindings = generate_resources_bindings(src, resources_base, ctx.files.wpt_resources)
     interfaces_base = ctx.attr.wpt_interfaces[WPTModuleInfo].base
-    interfaces_bindings = generate_interfaces_bindings(src, interfaces_base, ctx.attr.wpt_interfaces.files)
+    interfaces_bindings = generate_interfaces_bindings(src, interfaces_base, ctx.files.wpt_interfaces)
     all_bindings = ",\n".join([b for b in [bindings, common_bindings, resources_bindings, interfaces_bindings] if b])
     ctx.actions.write(
         output = src,
@@ -279,7 +278,7 @@ def _wpt_wd_test_gen_impl(ctx):
             test_config = ctx.file.test_config.basename,
             test_js_generated = ctx.file.test_js_generated.basename,
             bindings = all_bindings,
-            harness_modules = generate_harness_modules(src, ctx.attr.harness.files),
+            harness_modules = generate_harness_modules(src, ctx.files.harness),
             wpt_cacert = wd_test_relative_path(src, ctx.file.wpt_cacert),
             autogates = generate_autogates_field(ctx.attr.autogates),
             compat_flags = generate_compat_flags_field(ctx.attr.compat_flags),
@@ -396,7 +395,7 @@ def generate_external_bindings(wd_test_file, base, files):
 
     result = []
 
-    for file in files.to_list():
+    for file in files:
         if file.extension == "js":
             binding_type = "text"
         elif file.extension == "json":
@@ -420,7 +419,7 @@ def generate_common_bindings(wd_test_file, base, files):
 
     result = []
 
-    for file in files.to_list():
+    for file in files:
         if file.extension == "js":
             binding_type = "text"
         else:
@@ -445,7 +444,7 @@ def generate_resources_bindings(wd_test_file, base, files):
     result = []
     webidl2_file = None
 
-    for file in files.to_list():
+    for file in files:
         if file.extension != "js":
             # Skip non-JS files
             continue
@@ -474,7 +473,7 @@ def generate_interfaces_bindings(wd_test_file, base, files):
 
     result = []
 
-    for file in files.to_list():
+    for file in files:
         if file.extension != "idl":
             # Skip non-IDL files
             continue
@@ -491,7 +490,7 @@ def generate_harness_modules(wd_test_file, files):
     """
     result = []
 
-    for file in files.to_list():
+    for file in files:
         relative_path = wd_test_relative_path(wd_test_file, file)
         import_path = paths.basename(relative_path).removesuffix(".js")
         result.append('(name = "harness/{}", esModule = embed "{}")'.format(import_path, relative_path))
