@@ -19,11 +19,31 @@ unless the user explicitly requests a bump-only change.
 
 ## Scope
 
-Allowed edits are dependency metadata produced by the updater and WPT config
-files under `src/wpt`. Do not fix runtime conformance bugs during a WPT update.
-If correct triage requires runtime, harness, build-rule, patch, or upstream
-changes, report the required follow-up but don't make changes unless the user
-expands the scope.
+Allowed edits are dependency metadata produced by the updater, WPT config
+files under `src/wpt`, and the WPT patches described in
+[WPT patches](#wpt-patches). Do not fix runtime conformance bugs during a WPT
+update. If correct triage requires runtime, harness, build-rule, upstream, or
+other dependency patch changes, report the required follow-up but don't make
+changes unless the user expands the scope.
+
+## WPT patches
+
+workerd applies the patches under `patches/wpt` to the WPT archive. They are
+listed in the `patches` of the `wpt` entry in `build/deps/shared_deps.jsonc`.
+Unlike patches to other dependencies, maintaining these is in scope for every
+WPT update: they target WPT's own files, so upstream changes can stop them from
+applying or leave them incomplete.
+
+If most WPT targets fail during analysis with `Build did NOT complete
+successfully`, run `bazel build` on a single suite to see the root error. A
+patch that no longer applies to the new archive reports
+`CONTENT_DOES_NOT_MATCH_TARGET`. Rebase it onto the new upstream file and keep
+its intent. If you add, remove, or rename a patch, update the patch list and
+regenerate `build/deps/gen/shared_deps.MODULE.bazel` with
+`./build/deps/update-deps.py wpt`, which keeps the pinned `freeze_version`.
+
+Describe each patch change and the upstream commit that required it in the
+final report.
 
 ## Preflight
 
@@ -102,11 +122,7 @@ Clearing `test_size_filters` ensures that enormous WPT targets are included.
 The complete pattern runs default and all-autogates variants plus ESLint and
 TypeScript checks.
 
-If most WPT targets fail during analysis with `Build did NOT complete
-successfully`, run `bazel build` on a single suite to see the root error.
-A common cause is a `patches/wpt` patch that no longer applies to the new
-archive (`CONTENT_DOES_NOT_MATCH_TARGET`). Fixing such a patch requires a
-patch change, so it falls under the Scope rules above.
+If most WPT targets fail during analysis, see [WPT patches](#wpt-patches).
 
 Use an affected suite target while iterating. Include the required `@` suffix.
 For standalone workerd:
@@ -269,13 +285,12 @@ updates.
 Report:
 
 * The old and new WPT tags and pinned upstream comparison URL.
+* WPT patch changes and the upstream commits that required them.
 * Added, removed, and renamed suites.
 * Expectations added or removed.
 * Each classification and its durable technical reason.
 * Relevant upstream and workerd source locations.
 * Proposed out-of-scope fixes and unresolved items.
-* Exact validation commands and final executed counts.
-* Final Git state.
 
 ### Git handoff
 
