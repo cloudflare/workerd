@@ -20,6 +20,15 @@ export const WorkflowEntrypoint = entrypoints.WorkflowEntrypoint;
 
 export const restore = entrypoints.restore;
 
+// Well-known symbol consulted by `node:util`'s `inspect()` (and therefore `console.log()`) to
+// obtain a custom representation of a value. `util.inspect`/`util.format` intentionally avoid
+// invoking traps on Proxy objects to prevent side effects: before formatting a Proxy, it
+// unwraps to the proxy's *target* and reads this symbol directly off of that, bypassing the
+// `get` trap entirely. Without this, the proxies below are always logged as an empty object even
+// though property access on the proxy itself works correctly. So the fix has to define the
+// property on each proxy's target object, not intercept it in a `get` trap.
+const inspectCustomSymbol = Symbol.for('nodejs.util.inspect.custom');
+
 export function withEnv(newEnv: unknown, fn: () => unknown): unknown {
   return innerEnv.withEnv(newEnv, fn);
 }
@@ -42,7 +51,9 @@ export function withEnvAndExports(
 // Mutations via this proxy modify the current underlying env object in-place - if you're
 // inside a withEnv() scope, mutations affect the override object, not the base environment.
 export const env = new Proxy(
-  {},
+  {
+    [inspectCustomSymbol]: (): unknown => innerEnv.getCurrentEnv(),
+  },
   {
     get(_: unknown, prop: string | symbol): unknown {
       const inner = innerEnv.getCurrentEnv();
@@ -114,7 +125,9 @@ export const env = new Proxy(
 // delegating to different underlying exports objects based on async context (see
 // withExports()). This proxy is read-only - mutations are not supported.
 export const exports = new Proxy(
-  {},
+  {
+    [inspectCustomSymbol]: (): unknown => innerEnv.getCurrentExports(),
+  },
   {
     get(_: unknown, prop: string | symbol): unknown {
       const inner = innerEnv.getCurrentExports();
@@ -160,7 +173,9 @@ export const waitUntil = entrypoints.waitUntil.bind(entrypoints);
 // to the current request's CacheContext. This ensures that cache remains entrypoint specific
 // ensuring that the runtime always delegates the right host to clear.
 export const cache = new Proxy(
-  {},
+  {
+    [inspectCustomSymbol]: (): unknown => entrypoints.getCtxCache(),
+  },
   {
     get(_: unknown, prop: string | symbol): unknown {
       const inner = entrypoints.getCtxCache();
