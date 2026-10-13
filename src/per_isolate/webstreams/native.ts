@@ -121,6 +121,8 @@ import type {
   RingBuffer as RingBufferType,
   RingBufferConstructor,
 } from './ring-buffer';
+import type { CommonHelpers } from './common';
+import type { ViewExtentHelpers } from './view-extent';
 
 const {
   AbortController,
@@ -128,9 +130,6 @@ const {
   AbortControllerSignalGet,
   AbortSignalAbortedGet,
   BigInt,
-  DataViewPrototypeGetBuffer,
-  DataViewPrototypeGetByteLength,
-  DataViewPrototypeGetByteOffset,
   NumberIsNaN,
   ObjectGetOwnPropertyDescriptor,
   ObjectGetPrototypeOf,
@@ -141,15 +140,16 @@ const {
   PromisePrototypeThen,
   RangeError,
   TypeError,
-  TypedArrayPrototypeGetBuffer,
   TypedArrayPrototypeGetByteLength,
-  TypedArrayPrototypeGetByteOffset,
   Uint8Array,
   uncurryThis,
 } = primordials;
 
 const { isArrayBufferView, isUint8Array, markPromiseHandled } = utils;
 
+const { isActualObject } = require('webstreams/common') as CommonHelpers;
+const { viewByteExtent } =
+  require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
 };
@@ -212,10 +212,6 @@ function isNativeUnderlyingSink(sink: object): boolean {
 // symbol comes from the runtime's API-symbol registry, unreachable from
 // user code.
 const kExtractNativeSource: symbol = utils.getApiSymbol('kExtractNativeSource');
-
-function isActualObject(value: unknown): value is object {
-  return value != null && typeof value === 'object';
-}
 
 // Returns true if `source` is native-marked; false for ordinary (queued)
 // sources. Throws on a malformed marker — by the time the marker key is
@@ -897,22 +893,7 @@ class NativePullConduit implements ByteStreamConsumerType {
       if (isUint8Array(chunk)) {
         view = chunk as Uint8Array;
       } else {
-        const isDataView = utils.isDataView(chunk);
-        const buffer = (
-          isDataView
-            ? DataViewPrototypeGetBuffer(chunk)
-            : TypedArrayPrototypeGetBuffer(chunk)
-        ) as ArrayBuffer;
-        const byteOffset = (
-          isDataView
-            ? DataViewPrototypeGetByteOffset(chunk)
-            : TypedArrayPrototypeGetByteOffset(chunk)
-        ) as number;
-        const byteLength = (
-          isDataView
-            ? DataViewPrototypeGetByteLength(chunk)
-            : TypedArrayPrototypeGetByteLength(chunk)
-        ) as number;
+        const { buffer, byteOffset, byteLength } = viewByteExtent(chunk);
         view = new Uint8Array(buffer, byteOffset, byteLength);
       }
       // EXPECTED-LENGTH CONTRACT: overflow check before commit.
@@ -1146,7 +1127,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     this.#byobRequestCache = null;
     const cancelAlgorithm = this.#cancelAlgorithm;
     if (cancelAlgorithm === undefined) {
-      return PromiseResolve() as Promise<void>;
+      return PromiseResolve();
     }
     return cancelAlgorithm(reason);
   }
@@ -1296,11 +1277,9 @@ function createNativeReadableStreamParts(
       signal: AbortSignal
     ) => {
       try {
-        return PromiseResolve(
-          callPull(source, controller, signal)
-        ) as Promise<void>;
+        return PromiseResolve(callPull(source, controller, signal));
       } catch (e) {
-        return PromiseReject(e) as Promise<void>;
+        return PromiseReject(e);
       }
     };
   }
@@ -1309,9 +1288,9 @@ function createNativeReadableStreamParts(
     const callCancel = uncurryThis(cancelFn);
     cancelAlgorithm = (reason: unknown) => {
       try {
-        return PromiseResolve(callCancel(source, reason)) as Promise<void>;
+        return PromiseResolve(callCancel(source, reason));
       } catch (e) {
-        return PromiseReject(e) as Promise<void>;
+        return PromiseReject(e);
       }
     };
   }

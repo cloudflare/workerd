@@ -91,17 +91,15 @@ import type {
   RingBuffer as RingBufferType,
   RingBufferConstructor,
 } from './ring-buffer';
+import type { CommonHelpers } from './common';
 import type { ViewExtentHelpers } from './view-extent';
 
 const {
-  ArrayBuffer,
   ArrayPrototypePush,
   BigInt,
   Number,
   NumberIsNaN,
   ObjectDefineProperties,
-  ObjectFreeze,
-  ObjectGetOwnPropertyDescriptor,
   PromisePrototypeThen,
   PromiseResolve,
   PromiseWithResolvers,
@@ -116,6 +114,7 @@ const {
   TypedArrayPrototypeGetByteOffset,
   TypedArrayPrototypeSet,
   Uint8Array,
+  getProtoGetter,
   uncurryThis,
 } = primordials;
 
@@ -132,7 +131,9 @@ const {
   WritableStreamDefaultController,
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
-const { viewByteExtent } =
+const { isActualObject, kNullProtoObject, kEnumerable, toStringTagProperty } =
+  require('webstreams/common') as CommonHelpers;
+const { copyExtent, viewByteExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
@@ -142,10 +143,6 @@ const writableControllerError = uncurryThis(
   WritableStreamDefaultController.prototype.error
 ) as (controller: object, reason: unknown) => void;
 
-function isActualObject(value: unknown) {
-  return value != null && typeof value === 'object';
-}
-
 // --- Bootstrap captures (byte controller methods + TextEncoder) ----------
 
 const byteControllerClose = uncurryThis(
@@ -154,25 +151,15 @@ const byteControllerClose = uncurryThis(
 const byteControllerError = uncurryThis(
   ReadableByteStreamController.prototype.error
 ) as (controller: object, reason: unknown) => void;
-function captureGetter(proto: object, name: string): (self: object) => unknown {
-  const desc = ObjectGetOwnPropertyDescriptor(proto, name);
-  if (desc === undefined || desc.get === undefined) {
-    throw new TypeError(`Expected accessor property '${name}' on prototype`);
-  }
-  return uncurryThis(desc.get) as (self: object) => unknown;
-}
-const byteControllerByobRequestGet = captureGetter(
-  ReadableByteStreamController.prototype,
-  'byobRequest'
-) as (controller: object) => object | null;
-const byobRequestViewGet = captureGetter(
-  ReadableStreamBYOBRequest.prototype,
-  'view'
-) as (request: object) => Uint8Array | null;
-const byteControllerDesiredSizeGet = captureGetter(
-  ReadableByteStreamController.prototype,
-  'desiredSize'
-) as (controller: object) => number | null;
+const byteControllerByobRequestGet = getProtoGetter<
+  (controller: object) => object | null
+>(ReadableByteStreamController.prototype, 'byobRequest');
+const byobRequestViewGet = getProtoGetter<
+  (request: object) => Uint8Array | null
+>(ReadableStreamBYOBRequest.prototype, 'view');
+const byteControllerDesiredSizeGet = getProtoGetter<
+  (controller: object) => number | null
+>(ReadableByteStreamController.prototype, 'desiredSize');
 const byobRequestRespond = uncurryThis(
   ReadableStreamBYOBRequest.prototype.respond
 ) as (request: object, bytesWritten: number) => void;
@@ -196,27 +183,21 @@ function validateAndCopyChunk(chunk: unknown): Uint8Array | undefined {
     return TextEncoderEncode(textEncoderInstance, chunk);
   }
   if (isArrayBuffer(chunk) || isSharedArrayBuffer(chunk)) {
-    // Wrap in Uint8Array for a uniform code path — Uint8Array accepts
-    // both ArrayBuffer and SharedArrayBuffer, and its byteLength getter
-    // works on both (unlike ArrayBuffer.prototype.byteLength, which
-    // throws on SAB receivers).
-    const src = new Uint8Array(chunk as ArrayBuffer);
-    const byteLength = TypedArrayPrototypeGetByteLength(src) as number;
+    // Read the length through a Uint8Array: its byteLength getter works on
+    // both ArrayBuffer and SharedArrayBuffer (ArrayBuffer.prototype.byteLength
+    // throws on SAB receivers). Constructing it throws for a detached
+    // ArrayBuffer.
+    const byteLength = TypedArrayPrototypeGetByteLength(
+      new Uint8Array(chunk as ArrayBuffer)
+    ) as number;
     if (byteLength === 0) return undefined;
-    const copy = new Uint8Array(new ArrayBuffer(byteLength));
-    TypedArrayPrototypeSet(copy, src);
-    return copy;
+    return copyExtent(chunk, 0, byteLength);
   }
   if (isArrayBufferView(chunk)) {
     // A detached or out-of-bounds view is empty (see view-extent.ts).
     const { buffer, byteOffset, byteLength } = viewByteExtent(chunk);
     if (byteLength === 0) return undefined;
-    const copy = new Uint8Array(new ArrayBuffer(byteLength));
-    TypedArrayPrototypeSet(
-      copy,
-      new Uint8Array(buffer as ArrayBuffer, byteOffset, byteLength)
-    );
-    return copy;
+    return copyExtent(buffer, byteOffset, byteLength);
   }
   throw new TypeError(
     'IdentityTransformStream: chunk must be a BufferSource or string'
@@ -228,10 +209,6 @@ let assertIsIdentityTransformStream: (self: IdentityTransformStream) => void;
 // ---------------------------------------------------------------------------
 
 const kPrivateSymbol: symbol = Symbol('private');
-
-const kEmptyStrategy = ObjectFreeze({
-  __proto__: null,
-}) as QueuingStrategy<unknown>;
 
 // The writable's WHATWG high-water-mark conversion (ToNumber; NaN or a
 // negative number is a RangeError), for FixedLengthStream, which caps the
@@ -248,7 +225,7 @@ function convertHighWaterMark(value: unknown): number {
 // WebIDL dictionary conversion of a constructor's strategy argument, as in
 // C++: undefined and null mean no strategy; any other non-object throws.
 function toStrategyDictionary(value: unknown): QueuingStrategy<unknown> {
-  if (value === undefined || value === null) return kEmptyStrategy;
+  if (value === undefined || value === null) return kNullProtoObject;
   if (typeof value !== 'object' && typeof value !== 'function') {
     throw new TypeError('The queuing strategy must be an object.');
   }
@@ -589,7 +566,7 @@ class IdentityTransformStream {
     } else {
       writableStrategy = toStrategyDictionary(writableStrategyOrInternal);
     }
-    writableStrategy ??= kEmptyStrategy;
+    writableStrategy ??= kNullProtoObject;
 
     // Initialize byte budget for FixedLengthStream enforcement.
     // Stored as bigint to cover the full uint64_t range without
@@ -913,30 +890,16 @@ class FixedLengthStream extends IdentityTransformStream {
   }
 }
 
-const kEnumerable = { __proto__: null, enumerable: true };
-
 ObjectDefineProperties(IdentityTransformStream.prototype, {
   __proto__: null,
   readable: kEnumerable,
   writable: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'IdentityTransformStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('IdentityTransformStream'),
 });
 
 ObjectDefineProperties(FixedLengthStream.prototype, {
   __proto__: null,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'FixedLengthStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('FixedLengthStream'),
 });
 
 module.exports = {

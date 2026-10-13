@@ -35,6 +35,12 @@ import type {
   NativeStreamInternals,
 } from './native';
 
+type AnyReadableController =
+  | ReadableStreamDefaultControllerType
+  | ReadableByteStreamControllerType
+  | NativeReadableStreamControllerType;
+type ReadableStreamState = 'readable' | 'closed' | 'errored';
+
 const {
   AbortSignalAbortedGet,
   AbortSignalReasonGet,
@@ -110,6 +116,10 @@ const {
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
 
+import type { CommonHelpers } from './common';
+const { isActualObject, kNullProtoObject, kEnumerable, toStringTagProperty } =
+  require('webstreams/common') as CommonHelpers;
+
 import type { ViewExtentHelpers } from './view-extent';
 const { viewByteExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
@@ -182,14 +192,6 @@ function makeCompositeCancelReason(reasons: unknown[]): AggregateError {
 }
 
 const kPrivateSymbol = Symbol('private');
-
-// What an omitted (or null) dictionary argument stands for. Null-prototype:
-// WebIDL reads nothing for an omitted dictionary, so neither may we.
-const kEmptyDictionary: object = ObjectFreeze({ __proto__: null });
-
-function isActualObject(value: unknown) {
-  return value != null && typeof value === 'object';
-}
 
 // The spec's "Type(x) is Object", which INCLUDES callables -- used for the iterator
 // protocol's object checks in from() (GetIterator/IteratorNext accept function-valued
@@ -321,11 +323,7 @@ function isByteCapableController(value: unknown): boolean {
 
 let getReadableStreamController: <R>(
   stream: ReadableStream<R>
-) =>
-  | ReadableStreamDefaultControllerType
-  | ReadableByteStreamControllerType
-  | NativeReadableStreamControllerType
-  | undefined;
+) => AnyReadableController | undefined;
 let getReadableStreamReader: <R>(
   stream: ReadableStream<R>
 ) => ReadableStreamReaderType<R> | undefined;
@@ -350,33 +348,15 @@ let setReadableStreamConsumer: <R>(
 // default assigns first, queued byte wraps it, and the native backend's
 // wrap is joined at the bottom of this module (its brand lives across the
 // module fence in native.ts).
-let controllerPullIfNeeded: (
-  controller:
-    | ReadableStreamDefaultControllerType
-    | ReadableByteStreamControllerType
-    | NativeReadableStreamControllerType
-) => void;
+let controllerPullIfNeeded: (controller: AnyReadableController) => void;
 let controllerCancelSteps: (
-  controller:
-    | ReadableStreamDefaultControllerType
-    | ReadableByteStreamControllerType
-    | NativeReadableStreamControllerType,
+  controller: AnyReadableController,
   reason: unknown
 ) => Promise<void>;
-let controllerMaybeCloseStream: (
-  controller:
-    | ReadableStreamDefaultControllerType
-    | ReadableByteStreamControllerType
-    | NativeReadableStreamControllerType
-) => void;
+let controllerMaybeCloseStream: (controller: AnyReadableController) => void;
 // A reader released its lock. The native controller drops its cached
 // byobRequest; the queued byte controller keeps its own (spec).
-let controllerOnReaderRelease: (
-  controller:
-    | ReadableStreamDefaultControllerType
-    | ReadableByteStreamControllerType
-    | NativeReadableStreamControllerType
-) => void;
+let controllerOnReaderRelease: (controller: AnyReadableController) => void;
 // A consumer of the controller's queue leaves it — cancelled, or errored
 // alone before close is requested (controllerConsumerErrored). Only the last
 // one to leave cancels the underlying source, with the reasons of every
@@ -386,10 +366,7 @@ let controllerOnReaderRelease: (
 // promise). A native controller has one consumer, so the leaving is its
 // cancel.
 let controllerConsumerLeaving: (
-  controller:
-    | ReadableStreamDefaultControllerType
-    | ReadableByteStreamControllerType
-    | NativeReadableStreamControllerType,
+  controller: AnyReadableController,
   reason: unknown,
   isLastConsumer: boolean
 ) => Promise<void>;
@@ -409,19 +386,11 @@ let controllerConsumerErrored: (
 // The stream a QUEUED controller was created for — the source's own stream,
 // as opposed to the tee branches sharing the controller. undefined for a
 // native controller.
-let controllerStream: (
-  controller:
-    | ReadableStreamDefaultControllerType
-    | ReadableByteStreamControllerType
-    | NativeReadableStreamControllerType
-) => object | undefined;
+let controllerStream: (controller: AnyReadableController) => object | undefined;
 // The controller's error() for internal callers, which must not dispatch
 // through the user-patchable prototype method.
 let controllerError: (
-  controller:
-    | ReadableStreamDefaultControllerType
-    | ReadableByteStreamControllerType
-    | NativeReadableStreamControllerType,
+  controller: AnyReadableController,
   reason: unknown
 ) => void;
 let getReaderStream: <R>(reader: object) => ReadableStream<R> | undefined;
@@ -438,10 +407,7 @@ let extractNativeSource: <R>(this: ReadableStream<R>) => object;
 // value; native → cached construction value (joined in ReadableStream's
 // static block).
 let getControllerExpectedLength: (
-  controller:
-    | ReadableStreamDefaultControllerType
-    | ReadableByteStreamControllerType
-    | NativeReadableStreamControllerType
+  controller: AnyReadableController
 ) => bigint | undefined;
 let byteControllerEnqueueBatch: (
   controller: ReadableByteStreamController,
@@ -473,12 +439,12 @@ let getReadableStreamNativeSource: <R>(
 ) => object | undefined;
 let getReadableStreamGetState: <R>(
   stream: ReadableStream<R>
-) => 'readable' | 'closed' | 'errored';
+) => ReadableStreamState;
 let getReadableStreamIsDisturbed: <R>(stream: ReadableStream<R>) => boolean;
 let getReadableStreamStoredError: <R>(stream: ReadableStream<R>) => unknown;
 let setReadableStreamState: <R>(
   stream: ReadableStream<R>,
-  state: 'readable' | 'closed' | 'errored'
+  state: ReadableStreamState
 ) => void;
 // Marks the stream disturbed (one-way — there is no un-disturb).
 let setReadableStreamDisturbed: <R>(stream: ReadableStream<R>) => void;
@@ -641,13 +607,11 @@ const ReadableStreamAsyncIteratorPrototype = ObjectSetPrototypeOf(
   },
   AsyncIteratorPrototype
 );
-ObjectDefineProperty(ReadableStreamAsyncIteratorPrototype, SymbolToStringTag, {
-  __proto__: null,
-  value: 'ReadableStream AsyncIterator',
-  writable: false,
-  enumerable: false,
-  configurable: true,
-});
+ObjectDefineProperty(
+  ReadableStreamAsyncIteratorPrototype,
+  SymbolToStringTag,
+  toStringTagProperty('ReadableStream AsyncIterator')
+);
 // ---- end async iterator prototype ------------------------------------------
 
 class ReadableStreamReaderBase<R> {
@@ -735,9 +699,7 @@ class ReadableStreamReaderBase<R> {
       const base = getReaderBase(reader);
       const stream = base.#stream;
       if (stream === undefined) {
-        return PromiseReject(
-          new TypeError('This reader has been released')
-        ) as Promise<void>;
+        return PromiseReject(new TypeError('This reader has been released'));
       }
       return readableStreamCancel(stream, reason);
     };
@@ -798,11 +760,7 @@ function readBufferedSync<R>(
   reader: object,
   stream: ReadableStream<R>,
   consumer: StreamConsumerType<R>,
-  controller:
-    | ReadableStreamDefaultControllerType
-    | ReadableByteStreamControllerType
-    | NativeReadableStreamControllerType
-    | undefined
+  controller: AnyReadableController | undefined
 ): ReadableStreamReadResult<R> | undefined {
   const result = consumer.tryReadSync(reader) as
     ReadableStreamReadResult<R> | undefined;
@@ -853,16 +811,12 @@ function defaultReaderReadSteps<R>(
   present: (result: ReadableStreamReadResult<R>) => ReadableStreamReadResult<R>
 ): Promise<ReadableStreamReadResult<R>> {
   if (isReadableStreamPendingClosure(stream)) {
-    return PromiseReject(pendingClosureError()) as Promise<
-      ReadableStreamReadResult<R>
-    >;
+    return PromiseReject(pendingClosureError());
   }
   setReadableStreamDisturbed(stream);
   const state = getReadableStreamGetState(stream);
   if (state === 'errored') {
-    return PromiseReject(getReadableStreamStoredError(stream)) as Promise<
-      ReadableStreamReadResult<R>
-    >;
+    return PromiseReject(getReadableStreamStoredError(stream));
   }
   const consumer = getReadableStreamConsumer(stream);
   if (state === 'closed' || consumer === undefined) {
@@ -993,11 +947,7 @@ function readViaAutoAllocateDescriptor(
 // What a default read does once it has its result, before handing it over.
 function readCompletionSteps<R>(
   stream: ReadableStream<R>,
-  controller:
-    | ReadableStreamDefaultControllerType
-    | ReadableByteStreamControllerType
-    | NativeReadableStreamControllerType
-    | undefined,
+  controller: AnyReadableController | undefined,
   result: ReadableStreamReadResult<unknown>
 ): void {
   // Drain-then-close (spec HandleQueueDrain): if this read consumed the
@@ -1090,7 +1040,7 @@ class ReadableStreamDefaultReader<
     try {
       return getGenericReaderClosedPromise(this);
     } catch (e) {
-      return PromiseReject(e) as Promise<void>;
+      return PromiseReject(e);
     }
   }
 
@@ -1098,7 +1048,7 @@ class ReadableStreamDefaultReader<
     try {
       return cancelReadableStreamGenericReader(this, reason);
     } catch (e) {
-      return PromiseReject(e) as Promise<void>;
+      return PromiseReject(e);
     }
   }
 
@@ -1106,13 +1056,11 @@ class ReadableStreamDefaultReader<
     try {
       const stream = getReaderStream<R>(this);
       if (stream === undefined) {
-        return PromiseReject(
-          new TypeError('This reader has been released')
-        ) as Promise<ReadableStreamReadResult<R>>;
+        return PromiseReject(new TypeError('This reader has been released'));
       }
       return defaultReaderRead<R>(this, stream);
     } catch (e) {
-      return PromiseReject(e) as Promise<ReadableStreamReadResult<R>>;
+      return PromiseReject(e);
     }
   }
 
@@ -1161,7 +1109,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     try {
       return getGenericReaderClosedPromise(this);
     } catch (e) {
-      return PromiseReject(e) as Promise<void>;
+      return PromiseReject(e);
     }
   }
 
@@ -1169,20 +1117,20 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     try {
       return cancelReadableStreamGenericReader(this, reason);
     } catch (e) {
-      return PromiseReject(e) as Promise<void>;
+      return PromiseReject(e);
     }
   }
 
   read<T extends ArrayBufferView>(
     view: T,
-    options: ReadableStreamBYOBReaderReadOptions = kEmptyDictionary as ReadableStreamBYOBReaderReadOptions
+    options: ReadableStreamBYOBReaderReadOptions = kNullProtoObject as ReadableStreamBYOBReaderReadOptions
   ): Promise<ReadableStreamReadResult<T>> {
     try {
       return this.#read(view, options);
     } catch (e) {
       // A foreign `this`: the brand check throws, and promise-returning
       // operations reject (WebIDL).
-      return PromiseReject(e) as Promise<ReadableStreamReadResult<T>>;
+      return PromiseReject(e);
     }
   }
 
@@ -1312,7 +1260,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     try {
       return this.#read(view, { min: minElements });
     } catch (e) {
-      return PromiseReject(e) as Promise<ReadableStreamReadResult<T>>;
+      return PromiseReject(e);
     }
   }
 
@@ -1542,7 +1490,7 @@ class ReadableStreamDefaultController<
           isLastConsumer
         );
       }
-      return PromiseResolve() as Promise<void>;
+      return PromiseResolve();
     };
 
     controllerConsumerErrored = (controller, reason, isLastConsumer) => {
@@ -1552,7 +1500,7 @@ class ReadableStreamDefaultController<
           isLastConsumer
         );
       }
-      return PromiseResolve() as Promise<void>;
+      return PromiseResolve();
     };
 
     controllerStream = (controller) => {
@@ -1611,11 +1559,9 @@ class ReadableStreamDefaultController<
       // a promise.
       this.#cancelAlgorithm = (reason: unknown) => {
         try {
-          return PromiseResolve(
-            callCancel(underlyingSource, reason)
-          ) as Promise<void>;
+          return PromiseResolve(callCancel(underlyingSource, reason));
         } catch (e) {
-          return PromiseReject(e) as Promise<void>;
+          return PromiseReject(e);
         }
       };
     }
@@ -1623,11 +1569,9 @@ class ReadableStreamDefaultController<
       const callPull = uncurryThis(pullFn);
       this.#pullAlgorithm = () => {
         try {
-          return PromiseResolve(
-            callPull(underlyingSource, this)
-          ) as Promise<void>;
+          return PromiseResolve(callPull(underlyingSource, this));
         } catch (e) {
-          return PromiseReject(e) as Promise<void>;
+          return PromiseReject(e);
         }
       };
     }
@@ -1868,7 +1812,7 @@ class ReadableStreamDefaultController<
       this.#clearAlgorithms();
       this.#pendingCancel?.resolve();
     }
-    return PromiseResolve() as Promise<void>;
+    return PromiseResolve();
   }
 
   #shouldCallPull(): boolean {
@@ -1924,7 +1868,7 @@ class ReadableStreamDefaultController<
     this.#clearAlgorithms();
     this.#cancelPromise =
       cancelAlgorithm === undefined
-        ? (PromiseResolve() as Promise<void>)
+        ? PromiseResolve()
         : cancelAlgorithm(reason);
     // Consumers that left earlier were promised the source's cancel.
     this.#pendingCancel?.resolve(this.#cancelPromise);
@@ -2260,11 +2204,9 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       const callCancel = uncurryThis(cancelFn);
       this.#cancelAlgorithm = (reason: unknown) => {
         try {
-          return PromiseResolve(
-            callCancel(underlyingSource, reason)
-          ) as Promise<void>;
+          return PromiseResolve(callCancel(underlyingSource, reason));
         } catch (e) {
-          return PromiseReject(e) as Promise<void>;
+          return PromiseReject(e);
         }
       };
     }
@@ -2272,11 +2214,9 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       const callPull = uncurryThis(pullFn);
       this.#pullAlgorithm = () => {
         try {
-          return PromiseResolve(
-            callPull(underlyingSource, this)
-          ) as Promise<void>;
+          return PromiseResolve(callPull(underlyingSource, this));
         } catch (e) {
-          return PromiseReject(e) as Promise<void>;
+          return PromiseReject(e);
         }
       };
     }
@@ -2680,7 +2620,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   // which drops it).
   #respondToReleasedHead(
     bytesWritten: number,
-    state: 'readable' | 'closed' | 'errored'
+    state: ReadableStreamState
   ): void {
     const head = this.#releasedHead as PullIntoDescriptor;
     this.#releasedHead = undefined;
@@ -2774,7 +2714,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       this.#clearAlgorithms();
       this.#pendingCancel?.resolve();
     }
-    return PromiseResolve() as Promise<void>;
+    return PromiseResolve();
   }
 
   #shouldCallPull(): boolean {
@@ -2820,7 +2760,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     this.#clearAlgorithms();
     this.#cancelPromise =
       cancelAlgorithm === undefined
-        ? (PromiseResolve() as Promise<void>)
+        ? PromiseResolve()
         : cancelAlgorithm(reason);
     this.#pendingCancel?.resolve(this.#cancelPromise);
     return this.#cancelPromise;
@@ -2980,7 +2920,7 @@ class ReadableStreamDrainingReader<R> {
     try {
       return getGenericReaderClosedPromise(this);
     } catch (e) {
-      return PromiseReject(e) as Promise<void>;
+      return PromiseReject(e);
     }
   }
 
@@ -3003,7 +2943,7 @@ class ReadableStreamDrainingReader<R> {
     try {
       return cancelReadableStreamGenericReader(this, reason);
     } catch (e) {
-      return PromiseReject(e) as Promise<void>;
+      return PromiseReject(e);
     }
   }
 
@@ -3011,7 +2951,7 @@ class ReadableStreamDrainingReader<R> {
   // strategy size units — bytes for byte streams). Always makes progress:
   // waits for at least one chunk when nothing is buffered.
   async read(
-    options: { maxSize?: number } = kEmptyDictionary
+    options: { maxSize?: number } = kNullProtoObject
   ): Promise<DrainingReadResult<R>> {
     const stream = getReaderStream<R>(this);
     if (stream === undefined) {
@@ -3047,7 +2987,7 @@ interface ConvertedPipeOptions {
 // piping/throwing-options.any.js).
 function convertPipeOptions(options: unknown): ConvertedPipeOptions {
   // WebIDL: null and undefined become {}.
-  if (options == null) options = kEmptyDictionary;
+  if (options == null) options = kNullProtoObject;
   if (!isActualObject(options)) {
     throw new TypeError('Pipe options must be an object');
   }
@@ -3134,9 +3074,7 @@ function pipeToInternal<R>(
 
   // Settles with the pipe's latest write, so that shutdownWithAction can
   // wait for every write to be acknowledged.
-  let lastWriteSettled: Promise<void> = PromiseResolve(
-    undefined
-  ) as Promise<void>;
+  let lastWriteSettled: Promise<void> = PromiseResolve(undefined);
 
   // Whether a shutdown is waiting for the pipe's writes before its action.
   let waitingForWrites = false;
@@ -3293,14 +3231,14 @@ function pipeToInternal<R>(
       ArrayPrototypePush(actions, () =>
         writableInternals.getState(destination) === 'writable'
           ? writableInternals.writableStreamAbort(destination, e)
-          : (PromiseResolve(undefined) as Promise<void>)
+          : PromiseResolve(undefined)
       );
     }
     if (!preventCancel) {
       ArrayPrototypePush(actions, () =>
         getReadableStreamGetState(source) === 'readable'
           ? readableStreamCancel(source, e)
-          : (PromiseResolve(undefined) as Promise<void>)
+          : PromiseResolve(undefined)
       );
     }
     return actions;
@@ -3332,7 +3270,7 @@ function pipeToInternal<R>(
           // Spec step 14.1.3: only abort if dest is still writable.
           writableInternals.getState(destination) === 'writable'
             ? writableInternals.writableStreamAbort(destination, abortReason)
-            : (PromiseResolve(undefined) as Promise<void>)
+            : PromiseResolve(undefined)
         );
       }
       if (!preventCancel) {
@@ -3340,7 +3278,7 @@ function pipeToInternal<R>(
           // Spec step 14.1.4: only cancel if source is still readable.
           getReadableStreamGetState(source) === 'readable'
             ? readableStreamCancel(source, abortReason)
-            : (PromiseResolve(undefined) as Promise<void>)
+            : PromiseResolve(undefined)
         );
       }
       shutdownWithAction(
@@ -3623,13 +3561,13 @@ function asyncFromSyncContinuation(
     done = !!(result as { done?: unknown }).done;
     const value = (result as { value?: unknown }).value;
     try {
-      valueWrapper = PromiseResolve(value) as Promise<unknown>;
+      valueWrapper = PromiseResolve(value);
     } catch (e) {
       if (!done && closeOnRejection) closeSyncIteratorAfterError(iterator);
       throw e;
     }
   } catch (e) {
-    return PromiseReject(e) as Promise<void>;
+    return PromiseReject(e);
   }
   return PromisePrototypeThen(
     valueWrapper,
@@ -3653,11 +3591,11 @@ function closeAsyncIterator(iterator: object, reason: unknown): Promise<void> {
       'Iterator return() is not a function'
     );
     if (returnMethod === undefined) {
-      return PromiseResolve(undefined) as Promise<void>;
+      return PromiseResolve(undefined);
     }
     returnResult = uncurryThis(returnMethod)(iterator, reason);
   } catch (e) {
-    return PromiseReject(e) as Promise<void>;
+    return PromiseReject(e);
   }
   return PromisePrototypeThen(
     writableInternals.promiseResolvedWith(returnResult),
@@ -3683,14 +3621,14 @@ function closeSyncIterator(iterator: object, reason: unknown): Promise<void> {
       'Iterator return() is not a function'
     );
     if (returnMethod === undefined) {
-      return PromiseResolve(undefined) as Promise<void>;
+      return PromiseResolve(undefined);
     }
     result = uncurryThis(returnMethod)(iterator, reason);
     if (!isObjectLike(result)) {
       throw new TypeError('The return method must return an object');
     }
   } catch (e) {
-    return PromiseReject(e) as Promise<void>;
+    return PromiseReject(e);
   }
   return asyncFromSyncContinuation(iterator, result as object, false, () => {});
 }
@@ -3719,7 +3657,7 @@ function readableStreamFromIterable<R>(
         try {
           nextResult = iteratorNext(iterator, next);
         } catch (e) {
-          return PromiseReject(e) as Promise<void>;
+          return PromiseReject(e);
         }
         return PromisePrototypeThen(
           writableInternals.promiseResolvedWith(nextResult),
@@ -3762,7 +3700,7 @@ function readableStreamFromIterable<R>(
         try {
           result = iteratorNext(iterator, next);
         } catch (e) {
-          return PromiseReject(e) as Promise<void>;
+          return PromiseReject(e);
         }
         return asyncFromSyncContinuation(
           iterator,
@@ -3788,11 +3726,7 @@ function readableStreamFromIterable<R>(
 let assertIsReadableStream: <W>(self: ReadableStream<W>) => void;
 
 class ReadableStream<R> {
-  #controller?:
-    | ReadableStreamDefaultControllerType
-    | ReadableByteStreamControllerType
-    | NativeReadableStreamControllerType
-    | undefined;
+  #controller?: AnyReadableController | undefined;
   #reader?:
     | ReadableStreamDefaultReaderType<R>
     | ReadableStreamBYOBReaderType
@@ -3809,7 +3743,7 @@ class ReadableStream<R> {
   // at the tee (see readableStreamTee).
   #consumer?: StreamConsumerType<R> | undefined;
   #disturbed: boolean = false;
-  #state: 'readable' | 'closed' | 'errored' = 'readable';
+  #state: ReadableStreamState = 'readable';
   #storedError?: unknown;
   // The Node.js interop closed-promise (see kIsClosedPromise), created on
   // first request and settled by readableStreamClose/readableStreamError.
@@ -3909,17 +3843,17 @@ class ReadableStream<R> {
       stream.#disturbed = true;
       const state = stream.#state;
       if (state === 'closed') {
-        return PromiseResolve() as Promise<void>;
+        return PromiseResolve();
       }
       if (state === 'errored') {
-        return PromiseReject(stream.#storedError) as Promise<void>;
+        return PromiseReject(stream.#storedError);
       }
       // Close FIRST (spec ReadableStreamCancel): transitions state and
       // resolves the attached reader's closedPromise.
       readableStreamClose(stream);
       const consumer = stream.#consumer;
       const controller = stream.#controller;
-      let cancelPromise: Promise<void> = PromiseResolve() as Promise<void>;
+      let cancelPromise: Promise<void> = PromiseResolve();
       // BACKEND-BLIND: the STREAM layer owns the source-cancel POLICY (the
       // controller's consumer-leaving rule: only the last consumer of a
       // teed queue cancels the source, with every departed consumer's
@@ -3929,7 +3863,7 @@ class ReadableStream<R> {
       // StreamConsumer.cancelStream in queue.ts.
       const decideSourceCancel = (isLastConsumer: boolean): Promise<void> => {
         if (controller === undefined) {
-          return PromiseResolve() as Promise<void>;
+          return PromiseResolve();
         }
         return controllerConsumerLeaving(controller, reason, isLastConsumer);
       };
@@ -3976,7 +3910,7 @@ class ReadableStream<R> {
       // guards the native+native fast path, which returns before reaching
       // here.)
       if (source.#pendingClosure) {
-        return PromiseReject(pendingClosureError()) as Promise<void>;
+        return PromiseReject(pendingClosureError());
       }
       return pipeToInternal(source, destination, options);
     };
@@ -3990,7 +3924,7 @@ class ReadableStream<R> {
     readableStreamPipeTo = <R>(
       source: ReadableStream<R>,
       destination: WritableStreamType<R>,
-      options: unknown = kEmptyDictionary
+      options: unknown = kNullProtoObject
     ): Promise<void> => {
       try {
         // WebIDL argument conversion first: the destination brand check,
@@ -4087,7 +4021,7 @@ class ReadableStream<R> {
         }
         return readableStreamPipeThroughTo(source, destination, converted);
       } catch (e) {
-        return PromiseReject(e) as Promise<void>;
+        return PromiseReject(e);
       }
     };
 
@@ -4424,7 +4358,7 @@ class ReadableStream<R> {
 
     setReadableStreamState = <R>(
       stream: ReadableStream<R>,
-      state: 'readable' | 'closed' | 'errored'
+      state: ReadableStreamState
     ) => {
       stream.#state = state;
     };
@@ -4584,8 +4518,8 @@ class ReadableStream<R> {
   }
 
   constructor(
-    underlyingSource: UnderlyingSource<R> = kEmptyDictionary as UnderlyingSource<R>,
-    strategy: QueuingStrategy<R> = kEmptyDictionary as QueuingStrategy<R>
+    underlyingSource: UnderlyingSource<R> = kNullProtoObject as UnderlyingSource<R>,
+    strategy: QueuingStrategy<R> = kNullProtoObject as QueuingStrategy<R>
   ) {
     // The C++-recognition brand (see kReadableStreamBrand). Stamped before
     // the early returns below so every instance carries it: internal
@@ -4737,12 +4671,12 @@ class ReadableStream<R> {
       }
       return readableStreamCancel(this, reason) as Promise<void>;
     } catch (e) {
-      return PromiseReject(e) as Promise<void>;
+      return PromiseReject(e);
     }
   }
 
   getReader(
-    options: { mode?: 'byob' } | null = kEmptyDictionary
+    options: { mode?: 'byob' } | null = kNullProtoObject
   ): ReadableStreamReaderType<R> {
     assertIsReadableStream(this);
     // WebIDL dictionary conversion: null and undefined become {},
@@ -4768,7 +4702,7 @@ class ReadableStream<R> {
     transform: TransformStreamType<R, T>,
     // WebIDL: optional dictionary — null/undefined both become {}.
     // The default keeps Function.length at 1 (IDL harness check).
-    options: StreamPipeOptions = kEmptyDictionary as StreamPipeOptions
+    options: StreamPipeOptions = kNullProtoObject as StreamPipeOptions
   ): ReadableStreamType<T> {
     assertIsReadableStream(this);
     // WebIDL argument conversion precedes the locked checks, so no user
@@ -4803,12 +4737,12 @@ class ReadableStream<R> {
     destination: WritableStream<R>,
     // WebIDL: optional dictionary — null/undefined both become {}.
     // The default keeps Function.length at 1 (IDL harness check).
-    options: StreamPipeOptions = kEmptyDictionary as StreamPipeOptions
+    options: StreamPipeOptions = kNullProtoObject as StreamPipeOptions
   ): Promise<void> {
     try {
       assertIsReadableStream(this);
     } catch (e) {
-      return PromiseReject(e) as Promise<void>;
+      return PromiseReject(e);
     }
     // The shared implementation (also the C++ bridge entry point) carries
     // the locked/options preconditions and the pipe dispatch.
@@ -4848,7 +4782,7 @@ class ReadableStream<R> {
   }
 
   values(
-    options: { preventCancel?: boolean } = kEmptyDictionary
+    options: { preventCancel?: boolean } = kNullProtoObject
   ): AsyncIterableIterator<R> {
     assertIsReadableStream(this);
     if (!isActualObject(options)) {
@@ -5159,21 +5093,13 @@ async function consumeReadableStreamAsJSON<R>(
   return JSONParse(await consumeReadableStreamAsText(stream, limit));
 }
 
-const kEnumerable = { __proto__: null, enumerable: true };
-
 ObjectDefineProperties(ReadableStreamDefaultReader.prototype, {
   __proto__: null,
   closed: kEnumerable,
   cancel: kEnumerable,
   read: kEnumerable,
   releaseLock: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'ReadableStreamDefaultReader',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('ReadableStreamDefaultReader'),
 });
 ObjectDefineProperties(ReadableStreamBYOBReader.prototype, {
   __proto__: null,
@@ -5181,13 +5107,7 @@ ObjectDefineProperties(ReadableStreamBYOBReader.prototype, {
   cancel: kEnumerable,
   read: kEnumerable,
   releaseLock: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'ReadableStreamBYOBReader',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('ReadableStreamBYOBReader'),
 });
 ObjectDefineProperties(ReadableStream, {
   __proto__: null,
@@ -5210,13 +5130,7 @@ ObjectDefineProperties(ReadableStream.prototype, {
     enumerable: false,
     configurable: true,
   },
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'ReadableStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('ReadableStream'),
 });
 ObjectDefineProperties(ReadableStreamDefaultController, {
   __proto__: null,
@@ -5236,13 +5150,7 @@ ObjectDefineProperties(ReadableStreamDefaultController.prototype, {
   enqueue: kEnumerable,
   error: kEnumerable,
   desiredSize: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'ReadableStreamDefaultController',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('ReadableStreamDefaultController'),
 });
 
 // Captured controller operations for INTERNAL stream production (from() and
@@ -5263,26 +5171,14 @@ ObjectDefineProperties(ReadableByteStreamController.prototype, {
   error: kEnumerable,
   byobRequest: kEnumerable,
   desiredSize: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'ReadableByteStreamController',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('ReadableByteStreamController'),
 });
 ObjectDefineProperties(ReadableStreamBYOBRequest.prototype, {
   __proto__: null,
   respond: kEnumerable,
   respondWithNewView: kEnumerable,
   view: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'ReadableStreamBYOBRequest',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('ReadableStreamBYOBRequest'),
 });
 ObjectDefineProperties(ReadableStreamDefaultController.prototype.enqueue, {
   __proto__: null,

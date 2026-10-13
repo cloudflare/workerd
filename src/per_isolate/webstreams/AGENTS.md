@@ -13,7 +13,8 @@ private-brand dispatch, no `instanceof`) apply here — see
 | File          | Role                                                                                         |
 | ------------- | -------------------------------------------------------------------------------------------- |
 | `ring-buffer.ts` | O(1) FIFO with indexed access backing every internal queue below; leaf module             |
-| `view-extent.ts` | A caller-supplied view's byte extent through captured getters; detached/out-of-bounds views (DataViews included) read as empty; leaf module |
+| `view-extent.ts` | A caller-supplied view's byte extent through captured getters; detached/out-of-bounds views (DataViews included) read as empty; `copyExtent` copies an extent; leaf module |
+| `common.ts`   | Helpers shared by the webstreams modules; leaf module                                        |
 | `queue.ts`    | QUEUED backend: single-queue/multi-cursor, JS sources; fence interfaces; invariant list      |
 | `native.ts`   | NATIVE backend: C++-backed pull conduit; **the C++/JS contract** + invariants                |
 | `readable.ts` | Reader layer + queued controllers + the BACKEND-DISPATCH points (constructor, tee, chains, byte-capable gate, JS-to-C++ extraction) |
@@ -136,7 +137,7 @@ connection.
   plus that internal entry.
 - Every dictionary the implementation builds itself — the sources, sinks,
   strategies and transformers of the internal pairs, and the stand-in for
-  an omitted argument (`kEmptyDictionary`) — is null-prototype, so a
+  an omitted argument (`kNullProtoObject`) — is null-prototype, so a
   polluted `Object.prototype` cannot supply members. Members of the C++
   native source are read with `declaresMember`, which stops before
   `Object.prototype`. Copies of internal bytes use `cloneArrayBuffer`

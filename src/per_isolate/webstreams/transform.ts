@@ -20,11 +20,10 @@ import type {
   TransformStreamDefaultController as TransformStreamDefaultControllerType,
   WritableStream as WritableStreamType,
 } from './types';
+import type { CommonHelpers } from './common';
 
 const {
   ObjectDefineProperties,
-  ObjectFreeze,
-  ObjectGetOwnPropertyDescriptor,
   PromiseResolve,
   PromiseReject,
   PromiseWithResolvers,
@@ -33,20 +32,16 @@ const {
   Symbol,
   SymbolToStringTag,
   TypeError,
+  getProtoGetter,
   uncurryThis,
 } = primordials;
 
 const { markPromiseHandled } = utils;
 
+const { isActualObject, kNullProtoObject, kEnumerable, toStringTagProperty } =
+  require('webstreams/common') as CommonHelpers;
+
 const kPrivateSymbol: symbol = Symbol('private');
-
-// What an omitted dictionary argument stands for. Null-prototype: WebIDL
-// reads nothing for an omitted dictionary, so neither may we.
-const kEmptyDictionary: object = ObjectFreeze({ __proto__: null });
-
-function isActualObject(value: unknown): boolean {
-  return value != null && typeof value === 'object';
-}
 
 function assertPrivateSymbol(symbol: symbol): void {
   if (symbol !== kPrivateSymbol) {
@@ -78,18 +73,9 @@ const readableControllerClose = uncurryThis(
 const readableControllerError = uncurryThis(
   ReadableStreamDefaultController.prototype.error
 ) as (controller: object, reason: unknown) => void;
-const readableControllerDesiredSizeGet = (() => {
-  const desc = ObjectGetOwnPropertyDescriptor(
-    ReadableStreamDefaultController.prototype,
-    'desiredSize'
-  );
-  if (desc === undefined || desc.get === undefined) {
-    throw new TypeError(
-      "Expected accessor property 'desiredSize' on prototype"
-    );
-  }
-  return uncurryThis(desc.get);
-})() as (controller: object) => number | null;
+const readableControllerDesiredSizeGet = getProtoGetter<
+  (controller: object) => number | null
+>(ReadableStreamDefaultController.prototype, 'desiredSize');
 const writableControllerError = uncurryThis(
   WritableStreamDefaultController.prototype.error
 ) as (controller: object, reason: unknown) => void;
@@ -129,11 +115,9 @@ function makeTransformerAlgorithms<I, O>(
     // the spec.
     transform = (chunk: I) => {
       try {
-        return PromiseResolve(
-          callTransform(transformer, chunk, controller)
-        ) as Promise<void>;
+        return PromiseResolve(callTransform(transformer, chunk, controller));
       } catch (e) {
-        return PromiseReject(e) as Promise<void>;
+        return PromiseReject(e);
       }
     };
   }
@@ -144,7 +128,7 @@ function makeTransformerAlgorithms<I, O>(
       try {
         return promiseResolvedWith(callFlush(transformer, controller));
       } catch (e) {
-        return PromiseReject(e) as Promise<void>;
+        return PromiseReject(e);
       }
     };
   }
@@ -155,7 +139,7 @@ function makeTransformerAlgorithms<I, O>(
       try {
         return promiseResolvedWith(callCancel(transformer, reason));
       } catch (e) {
-        return PromiseReject(e) as Promise<void>;
+        return PromiseReject(e);
       }
     };
   }
@@ -368,9 +352,7 @@ class TransformStream<I = unknown, O = unknown> {
     this.#finishPromise = promise;
     const flushAlgorithm = this.#flushAlgorithm;
     const flushResult =
-      flushAlgorithm !== undefined
-        ? flushAlgorithm()
-        : (PromiseResolve() as Promise<void>);
+      flushAlgorithm !== undefined ? flushAlgorithm() : PromiseResolve();
     this.#clearAlgorithms();
     markPromiseHandled(
       PromisePrototypeThen(
@@ -410,7 +392,7 @@ class TransformStream<I = unknown, O = unknown> {
     const cancelResult =
       cancelAlgorithm !== undefined
         ? cancelAlgorithm(reason)
-        : (PromiseResolve() as Promise<void>);
+        : PromiseResolve();
     this.#clearAlgorithms();
     markPromiseHandled(
       PromisePrototypeThen(
@@ -446,7 +428,7 @@ class TransformStream<I = unknown, O = unknown> {
     const cancelResult =
       cancelAlgorithm !== undefined
         ? cancelAlgorithm(reason)
-        : (PromiseResolve() as Promise<void>);
+        : PromiseResolve();
     this.#clearAlgorithms();
     markPromiseHandled(
       PromisePrototypeThen(
@@ -488,9 +470,9 @@ class TransformStream<I = unknown, O = unknown> {
     writableStrategy?: QueuingStrategy<I>,
     readableStrategy?: QueuingStrategy<O>
   ) {
-    transformer ??= kEmptyDictionary as Transformer<I, O>;
-    writableStrategy ??= kEmptyDictionary as QueuingStrategy<I>;
-    readableStrategy ??= kEmptyDictionary as QueuingStrategy<O>;
+    transformer ??= kNullProtoObject as Transformer<I, O>;
+    writableStrategy ??= kNullProtoObject as QueuingStrategy<I>;
+    readableStrategy ??= kNullProtoObject as QueuingStrategy<O>;
 
     if (!isActualObject(transformer)) {
       throw new TypeError('transformer must be an object');
@@ -642,9 +624,9 @@ class TransformStream<I = unknown, O = unknown> {
         ((chunk: I) => {
           try {
             transformStreamEnqueue(this, chunk as unknown as O);
-            return PromiseResolve() as Promise<void>;
+            return PromiseResolve();
           } catch (e) {
-            return PromiseReject(e) as Promise<void>;
+            return PromiseReject(e);
           }
         });
       this.#flushAlgorithm = algorithms.flush;
@@ -762,8 +744,6 @@ class TransformStream<I = unknown, O = unknown> {
   }
 }
 
-const kEnumerable = { __proto__: null, enumerable: true };
-
 ObjectDefineProperties(TransformStream, {
   __proto__: null,
   length: { __proto__: null, value: 0 },
@@ -776,13 +756,7 @@ ObjectDefineProperties(TransformStream.prototype, {
   __proto__: null,
   readable: kEnumerable,
   writable: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'TransformStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('TransformStream'),
 });
 ObjectDefineProperties(TransformStreamDefaultController.prototype, {
   __proto__: null,
@@ -790,13 +764,7 @@ ObjectDefineProperties(TransformStreamDefaultController.prototype, {
   enqueue: kEnumerable,
   error: kEnumerable,
   terminate: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'TransformStreamDefaultController',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('TransformStreamDefaultController'),
 });
 
 module.exports = {
