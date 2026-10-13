@@ -14,13 +14,14 @@
 namespace workerd::jsg::test {
 namespace {
 
+V8System v8System;
+
 struct CacheContext: public Object, public ContextGlobal {
   JSG_RESOURCE_TYPE(CacheContext) {}
 };
 JSG_DECLARE_ISOLATE_TYPE(CacheIsolate, CacheContext);
 
 KJ_TEST("embedded ESM caches accept ASCII, Latin-1 and UTF-16 source strings") {
-  V8System v8System;
   CacheIsolate isolate(v8System, kj::heap<IsolateObserver>());
   isolate.runInLockScope([&](CacheIsolate::Lock& js) {
     JSG_WITHIN_CONTEXT_SCOPE(js, js.newContext<CacheContext>().getHandle(js), [&](jsg::Lock& js) {
@@ -57,7 +58,6 @@ KJ_TEST("embedded ESM caches accept ASCII, Latin-1 and UTF-16 source strings") {
 }
 
 KJ_TEST("runtime UTF-8 module loading consumes embedded ESM caches") {
-  V8System v8System;
   const kj::StringPtr expectedValues[] = {"plain ASCII", "café", "π🚀"};
   CacheIsolate isolate(v8System, kj::heap<IsolateObserver>());
   isolate.runInLockScope([&](CacheIsolate::Lock& js) {
