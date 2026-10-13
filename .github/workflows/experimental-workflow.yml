@@ -1,20 +1,37 @@
-name: Experimental Workflow
+name: HTTP timeout fixture strict audit
 on:
   workflow_dispatch:
 
-# You can modify this workflow in order to verify your changes to Github Actions on a branch.
-# DO NOT MERGE THESE CHANGES TO MAIN
-# This workflow exists to work around a limitation in Github Actions. You can only use 
-# workflow_dispatch on files that exist in main. However, once the file exists, you can dispatch to
-# your branch and make sure changes work.
-
+# This workflow is confined to the diagnostic branch.
 permissions:
-  contents: none
+  contents: read
+  actions: write
 
 jobs:
-  experiment:
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Hello World
-        shell: bash
-        run: echo Hello World
+  audit:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu-22.04-16core
+            os: linux
+            suffix: ''
+          - image: ubuntu-22.04-16core
+            os: linux
+            suffix: '-tsan'
+          - image: windows-2025-16core
+            os: windows
+            suffix: ''
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ${{ matrix.image }}
+      os_name: ${{ matrix.os }}
+      arch_name: X64
+      suffix: ${{ matrix.suffix }}
+      build_target: //src/tests/node/http-client/...
+      test_target: //src/tests/node/http-client/...
+      extra_bazel_args: >-
+        --config=ci-test --config=ci-${{ matrix.os }}${{ matrix.suffix }}
+        --runs_per_test=5 --flaky_test_attempts=1
+      upload_test_logs: true
+    secrets: inherit
