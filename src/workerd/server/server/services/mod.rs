@@ -6,9 +6,9 @@
 //! the process over HTTP or TCP.
 //!
 //! Each is an `Rc` of shared state; `start_request` wraps it in a fresh `worker::Interface` for
-//! one event. Outbound HTTP goes through kj-hyper's pooled client, which borrows the factory's
-//! header table, so a client is built per event over the service's dialer or peer filter; the
-//! TLS configuration, the expensive part, is built once per service.
+//! one event. Outbound HTTP goes through kj-hyper: each service keeps one `ClientPool` for its
+//! whole life, so connections are reused across events, and lends it to a `Client` per event,
+//! which borrows the factory's header table.
 
 pub mod disk;
 pub mod network;
@@ -33,6 +33,7 @@ use kj::io::AsyncInputStream;
 use kj::io::AsyncIoStream;
 use kj_hyper::WebSocketCompression;
 use kj_hyper::client::Client;
+use kj_hyper::client::ClientPool;
 use kj_hyper::client::ClientSettings;
 use kj_hyper::client::Dialed;
 use kj_hyper::client::Peer;
@@ -193,9 +194,9 @@ fn reborrow_settings<'s>(
     }
 }
 
-/// A kj-hyper client of the dialer's peer, asked for URLs in `style`.
-fn fixed_client<'t>(table: &'t HeaderTable, dialer: &Arc<Dialer>, style: Style) -> Client<'t> {
-    let dialer = Arc::clone(dialer);
+/// A kj-hyper pool of the dialer's peer, asked for URLs in `style`.
+fn fixed_pool(dialer: Dialer, style: Style) -> ClientPool {
+    let dialer = Arc::new(dialer);
     let dial = move || {
         let dialer = Arc::clone(&dialer);
         async move { dialer.dial().await }
@@ -204,7 +205,7 @@ fn fixed_client<'t>(table: &'t HeaderTable, dialer: &Arc<Dialer>, style: Style) 
         Style::Host => Peer::Origin,
         Style::Proxy => Peer::Proxy,
     };
-    Client::new(table, client_settings(), peer, dial)
+    ClientPool::new(client_settings(), peer, dial)
 }
 
 // =======================================================================================
@@ -215,7 +216,8 @@ struct RpcConnection(KjOwn<ffi::RpcClient>);
 
 struct ExternalHttp {
     factory: Rc<Factory>,
-    dialer: Arc<Dialer>,
+    /// The connections of every event, the RPC tunnel's included.
+    pool: ClientPool,
     rewriter: HttpRewriter,
     /// The capnp connection custom events go over, made when the first one needs it and dropped
     /// when it is lost.
@@ -234,8 +236,7 @@ impl ExternalHttp {
             .capnp_connect_host()
             .ok_or_else(|| kj::failed!("jsg.Error: This ExternalServer not configured for RPC."))?;
         // The tunnel is an HTTP CONNECT to the external server.
-        let table = header_table(&self.factory);
-        let client = fixed_client(table, &self.dialer, self.rewriter.style());
+        let client = self.pool.client(header_table(&self.factory));
         let tunnel = client.tunnel(host).await?;
         let connection = Rc::new(RpcConnection(ffi::new_rpc_client(
             self.factory.raw(),
@@ -304,7 +305,7 @@ impl Service for ExternalHttpRequest {
             .headers
             .as_deref()
             .map_or(headers, HeadersRef::from);
-        let mut client = fixed_client(table, &self.service.dialer, rewriter.style());
+        let mut client = self.service.pool.client(table);
         let mut response =
             bridge::rewriting_response(response.into_ffi(), table, rewriter.response_edits())?;
         client
@@ -326,9 +327,10 @@ impl Service for ExternalHttpRequest {
         response: ConnectResponse<'a>,
         settings: ConnectSettings<'a>,
     ) -> Result<()> {
-        let table = header_table(&self.service.factory);
-        let style = self.service.rewriter.style();
-        let mut client = fixed_client(table, &self.service.dialer, style);
+        let mut client = self
+            .service
+            .pool
+            .client(header_table(&self.service.factory));
         let mut tls_starter = settings.tls_starter.into();
         let settings = reborrow_settings(settings.use_tls, &mut tls_starter);
         client
@@ -428,9 +430,8 @@ impl Interface for ExternalTcpRequest {
 
 struct Network {
     factory: Rc<Factory>,
-    filter: Arc<PeerFilter>,
-    /// None when the config has no `tlsOptions`: `https` URLs then fail.
-    tls: Option<Arc<rustls::ClientConfig>>,
+    /// The connections of every event.
+    pool: ClientPool,
 }
 
 /// A `network` service: connections to whatever host a request names, within the filter.
@@ -450,31 +451,36 @@ struct NetworkRequest(Rc<Network>);
 
 impl NetworkRequest {
     fn client(&self) -> Client<'_> {
-        let filter = Arc::clone(&self.0.filter);
-        let loopback = self.0.factory.loopback().clone();
-        let connect = move |host: String, port| {
-            let filter = Arc::clone(&filter);
-            let loopback = loopback.clone();
-            async move {
-                if loopback.mocks_internet() {
-                    let name = if port == 80 {
-                        host
-                    } else {
-                        format!("{host}:{port}")
-                    };
-                    return Ok(loopback.connect(&name).map_err(refused)?.into());
-                }
-                let stream = connect_allowed(&host, port, |peer| filter.allows(peer.ip())).await?;
-                Ok(Dialed::from(stream))
-            }
-        };
-        Client::internet(
-            header_table(&self.0.factory),
-            client_settings(),
-            self.0.tls.clone(),
-            connect,
-        )
+        self.0.pool.client(header_table(&self.0.factory))
     }
+}
+
+/// The pool of a `network` service: whatever host a request names, within `filter`, with `tls`
+/// for `https` URLs (which fail when it is None, the config having no `tlsOptions`).
+fn internet_pool(
+    loopback: &Loopback,
+    filter: PeerFilter,
+    tls: Option<Arc<rustls::ClientConfig>>,
+) -> ClientPool {
+    let filter = Arc::new(filter);
+    let loopback = loopback.clone();
+    let connect = move |host: String, port| {
+        let filter = Arc::clone(&filter);
+        let loopback = loopback.clone();
+        async move {
+            if loopback.mocks_internet() {
+                let name = if port == 80 {
+                    host
+                } else {
+                    format!("{host}:{port}")
+                };
+                return Ok(loopback.connect(&name).map_err(refused)?.into());
+            }
+            let stream = connect_allowed(&host, port, |peer| filter.allows(peer.ip())).await?;
+            Ok(Dialed::from(stream))
+        }
+    };
+    ClientPool::internet(client_settings(), tls, connect)
 }
 
 #[async_trait::async_trait(?Send)]
@@ -549,7 +555,7 @@ pub fn make_external_service(
     let http = |rewriter: HttpRewriter, dialer: Dialer| -> Rc<dyn Channel> {
         Rc::new(ExternalHttpService(Rc::new(ExternalHttp {
             factory: Rc::clone(factory),
-            dialer: Arc::new(dialer),
+            pool: fixed_pool(dialer, rewriter.style()),
             rewriter,
             rpc: RefCell::new(None),
         })))
@@ -600,8 +606,7 @@ fn network_service(
 ) -> Rc<dyn Channel> {
     Rc::new(NetworkService(Rc::new(Network {
         factory: Rc::clone(factory),
-        filter: Arc::new(filter),
-        tls,
+        pool: internet_pool(factory.loopback(), filter, tls),
     })))
 }
 

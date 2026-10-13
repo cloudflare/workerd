@@ -4700,6 +4700,51 @@ KJ_TEST("Server: external server") {
   conn.recvHttp200("OK");
 }
 
+KJ_TEST("Server: external server reuses its connection") {
+  TestServer test(R"((
+    services = [
+      (name = "hello", external = "ext-addr")
+    ],
+    sockets = [
+      (name = "main", address = "test-addr", service = "hello")
+    ]
+  ))"_kj);
+
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/first");
+
+  auto subreq = test.receiveSubrequest("ext-addr");
+  subreq.recv(R"(
+    GET /first HTTP/1.1
+    Host: foo
+
+  )"_blockquote);
+  subreq.send(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 2
+    Content-Type: text/plain;charset=UTF-8
+
+    OK)"_blockquote);
+  conn.recvHttp200("OK");
+
+  // The second request, an event of its own, goes over the connection the first one opened.
+  conn.sendHttpGet("/second");
+  subreq.recv(R"(
+    GET /second HTTP/1.1
+    Host: foo
+
+  )"_blockquote);
+  subreq.send(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 3
+    Content-Type: text/plain;charset=UTF-8
+
+    OK2)"_blockquote);
+  conn.recvHttp200("OK2");
+}
+
 KJ_TEST("Server: external server proxy style") {
   TestServer test(R"((
     services = [
@@ -5515,25 +5560,24 @@ KJ_TEST("Server: re-put of raw cache.match() body resolves") {
 
     seed)"_blockquote);
 
-  {
-    auto putSubreq = test.receiveSubrequest("cache-host");
-    putSubreq.recv(R"(
-      PUT / HTTP/1.1
-      Content-Length: 92
-      Host: foo
+  // The GET's response is complete, so its connection is back in the cache service's pool and
+  // the PUT goes over it.
+  getSubreq.recv(R"(
+    PUT / HTTP/1.1
+    Content-Length: 92
+    Host: foo
 
-      HTTP/1.1 200 OK
-      Content-Length: 4
-      Cache-Control: max-age=300
-      CF-Cache-Status: HIT
+    HTTP/1.1 200 OK
+    Content-Length: 4
+    Cache-Control: max-age=300
+    CF-Cache-Status: HIT
 
-      seed)"_blockquote);
-    putSubreq.send(R"(
-      HTTP/1.1 204 No Content
-      Content-Length: 0
+    seed)"_blockquote);
+  getSubreq.send(R"(
+    HTTP/1.1 204 No Content
+    Content-Length: 0
 
-    )"_blockquote);
-  }
+  )"_blockquote);
 
   // Advance past the 5-second hang-detection race in the worker.
   test.wait(6);
