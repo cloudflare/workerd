@@ -176,7 +176,9 @@ else
 fi
 """
 
-WINDOWS_RUNTEST_NORMAL = """powershell -Command \"%*\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR"""
+WINDOWS_RUNTEST_NORMAL = """%* "-dTEST_TMPDIR=%TEST_TMPDIR%""""
+
+WINDOWS_RUNTEST_SIDECAR = """powershell -Command \"%*\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR"""
 
 SH_RUNTEST_NORMAL = """"$@" -dTEST_TMPDIR=$TEST_TMPDIR"""
 
@@ -224,7 +226,12 @@ def _wd_test_impl(ctx):
         # Batch script executables must end with ".bat"
         executable = ctx.actions.declare_file("%s_wd_test.bat" % ctx.label.name)
         template = WINDOWS_TEMPLATE
-        runtest = WINDOWS_RUNTEST_SNAPSHOT if ctx.attr.python_snapshot_test else WINDOWS_RUNTEST_NORMAL
+        if ctx.attr.python_snapshot_test:
+            runtest = WINDOWS_RUNTEST_SNAPSHOT
+        elif ctx.file.sidecar:
+            runtest = WINDOWS_RUNTEST_SIDECAR
+        else:
+            runtest = WINDOWS_RUNTEST_NORMAL
     else:
         executable = ctx.outputs.executable
         template = SH_TEMPLATE
