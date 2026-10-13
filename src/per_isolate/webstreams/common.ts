@@ -82,7 +82,7 @@ function requireObject(value: unknown, message: string): void {
 // options bag), as in C++: undefined and null mean an empty dictionary, and
 // anything else must pass requireObject.
 function toDictionary(value: unknown, message: string): object {
-  if (value === undefined || value === null) return kNullProtoObject;
+  if (value == null) return kNullProtoObject;
   requireObject(value, message);
   return value as object;
 }
@@ -113,7 +113,7 @@ function convertQueuingStrategy(value: unknown): QueuingStrategyDict {
     throw new TypeError('strategy.size must be a function');
   }
   return {
-    __proto__: null,
+    __proto__: kNullProtoObject,
     highWaterMark,
     size,
   } as QueuingStrategyDict;
