@@ -4,6 +4,7 @@ load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_js_bundle.bzl", "wd_js_bundle")
 
 exports_files(["modules.capnp"])
 
@@ -323,6 +324,7 @@ wd_cc_library(
     ["*-test.c++"],
     exclude = [
         # defined below
+        "compile-cache-test.c++",
         "macro-meta-test.c++",
         "resource-test.c++",
         "rtti-test.c++",
@@ -330,6 +332,29 @@ wd_cc_library(
         "multiple-typewrappers-test.c++",
     ],
 )]
+
+wd_js_bundle(
+    name = "compile-cache-fixture",
+    builtin_modules = [
+        "testdata/compile-cache/ascii.js",
+        "testdata/compile-cache/latin1.js",
+        "testdata/compile-cache/utf16.js",
+    ],
+    gen_compile_cache = True,
+    import_name = "cacheTest",
+    schema_id = "0xab478e72c91d805f",
+)
+
+kj_test(
+    src = "compile-cache-test.c++",
+    local_defines = ["JSG_IMPLEMENTATION"],
+    # Downstream builds can generate caches with different V8 flags.
+    tags = ["no-downstream"],
+    deps = [
+        ":compile-cache-fixture",
+        ":jsg",
+    ],
+)
 
 # Moved out as macro-meta-test does not depend on V8 or JSG proper, this makes the test much
 # smaller.
