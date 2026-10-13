@@ -510,6 +510,51 @@ KJ_TEST("connect rejection failures stay tagged after delivery") {
   KJ_EXPECT(e.getDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID) != kj::none);
 }
 
+// Fails an actor CONNECT with `gateFailure`. An output gate failure replaces the handler's, so it
+// reaches the entrypoint's catch.
+kj::Exception failActorConnectAtOutputGate(kj::Exception gateFailure) {
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = RECORDING_ACTOR_SOURCE,
+    .actorId = Worker::Actor::Id(kj::str("connect-test")),
+    .actorClassName = "default"_kj,
+  });
+  auto gatePaf = kj::newPromiseAndFulfiller<void>();
+  auto blocker = fixture.getActor().getOutputGate().lockWhile(kj::mv(gatePaf.promise), nullptr);
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+  kj::NullStream connection;
+  TestConnectResponse response;
+  auto connect = entrypoint->connect("example.com", headers, connection, response, {})
+                     .eagerlyEvaluate(nullptr);
+
+  fixture.pollEventLoop();
+  gatePaf.fulfiller->reject(kj::mv(gateFailure));
+
+  auto e =
+      KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { connect.wait(fixture.getWaitScope()); }));
+  KJ_EXPECT(kj::runCatchingExceptions([&]() { blocker.wait(fixture.getWaitScope()); }) != kj::none);
+  return e;
+}
+
+KJ_TEST("actor connect marks a not-delivered disconnect as delivered") {
+  auto gateFailure = KJ_EXCEPTION(DISCONNECTED, "output gate failed");
+  jsg::markActorRequestNotDelivered(gateFailure);
+
+  auto e = failActorConnectAtOutputGate(kj::mv(gateFailure));
+
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none, e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none, e);
+}
+
+KJ_TEST("actor connect preserves not-delivered for a predecessor rejection") {
+  auto e = failActorConnectAtOutputGate(makePredecessorRejection());
+
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none, e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none, e);
+  KJ_EXPECT(e.getDetail(jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID) != kj::none, e);
+}
+
 KJ_TEST("alarm scheduling tags failures after delivery") {
   RejectingTimerChannel timer;
   TestFixture fixture(TestFixture::SetupParams{

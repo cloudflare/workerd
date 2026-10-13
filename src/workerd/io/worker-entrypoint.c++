@@ -842,11 +842,15 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
         // `delivered()` above), so user code may have run. Annotate DISCONNECTED failures so the
         // caller-side actor-call classifier knows this failure must not be retried as a fresh
         // delivery. Only DISCONNECTED failures participate in the delivery-position metric, so other
-        // exception types need no annotation. Set before exceptionToPropagate() so it survives the
+        // exception types need no annotation. Preserve not-delivered only for a predecessor
+        // rejection, as fetch does. Set before exceptionToPropagate() so it survives the
         // internal-exception description rewrite; the detail serializes back across the RPC boundary.
         if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
-          exception.setDetail(
-              jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+          if (!jsg::isActorPredecessorRejection(exception)) {
+            exception.releaseDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID);
+            exception.setDetail(
+                jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+          }
         }
       }
       // We want to tunnel exceptions from actors back to the caller.
