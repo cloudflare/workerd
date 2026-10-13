@@ -40,6 +40,10 @@ jobs:
           key: bazel-disk-cache-linux-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel') }}
       - name: Setup Runner
         uses: ./.github/actions/setup-runner
+      # The updater needs tomllib (Python 3.11+); this runner image ships Python 3.10.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
       - name: Configure Bazel and Git
         run: |
           # Match the flags of the Linux release job in test.yml so the restored cache is used.
