@@ -205,11 +205,12 @@ jobs:
       contents: write
       pull-requests: write
     steps:
+      # Checks out the same ref as the update job, so its commits apply. The pull request targets
+      # that ref.
       - uses: actions/checkout@v7
         with:
           show-progress: false
           token: ${{ secrets.DEVPROD_PAT }}
-          ref: main
       - name: Download commits
         uses: actions/download-artifact@v8
         with:
@@ -241,7 +242,8 @@ jobs:
         id: create-pr
         uses: peter-evans/create-pull-request@v8
         with:
-          branch: "automatic-update-wpt"
+          # A manual run from another branch gets its own pull request branch, leaving main's alone.
+          branch: automatic-update-wpt${{ github.ref_name != 'main' && format('-{0}', github.ref_name) || '' }}
           title: "Update WPT"
           token: ${{ secrets.DEVPROD_PAT }}
           author: "Workers DevProd <workers-devprod@cloudflare.com>"
@@ -250,7 +252,7 @@ jobs:
           delete-branch: true
       - name: Enable Pull Request Automerge
         # Triage changes to test expectations need human review; a bump that needed none does not.
-        if: needs.update.outputs.triage_outcome == 'success' && needs.update.outputs.triaged != 'true'
+        if: github.ref_name == 'main' && needs.update.outputs.triage_outcome == 'success' && needs.update.outputs.triaged != 'true'
         run: gh pr merge --rebase --auto ${{ steps.create-pr.outputs.pull-request-number }}
         env:
           GH_TOKEN: ${{ secrets.DEVPROD_PAT }}
