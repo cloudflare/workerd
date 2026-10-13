@@ -68,57 +68,18 @@ jobs:
           ./tools/cross/format.py git
           git add build/deps/shared_deps.jsonc build/deps/gen
           git commit -m "update WPT to latest version"
-      - name: Check AI Gateway access
-        id: gateway
-        if: steps.update.outputs.updated == 'true'
-        # Like a failed triage, failing here still yields a pull request containing only the bump.
-        continue-on-error: true
-        env:
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_AI_GATEWAY_ACCOUNT_ID }}
-          CLOUDFLARE_GATEWAY_ID: ${{ secrets.CF_AI_GATEWAY_NAME }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_AI_GATEWAY_TOKEN }}
-        run: |
-          url="https://gateway.ai.cloudflare.com/v1/$CLOUDFLARE_ACCOUNT_ID/$CLOUDFLARE_GATEWAY_ID/anthropic/v1/messages"
-          body='{"model":"claude-opus-5-5","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}'
-          probe() {
-            curl -sS -o "$RUNNER_TEMP/gateway-probe.json" -w '%{http_code}' "$url" \
-              -H "cf-aig-authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-              -H "anthropic-version: 2023-06-01" \
-              -H "content-type: application/json" \
-              "$@" -d "$body"
-          }
-          # Claude Code always sends a credential of its own: x-api-key for ANTHROPIC_API_KEY, or
-          # Authorization for ANTHROPIC_AUTH_TOKEN. Use whichever placeholder the gateway accepts,
-          # which it does only if it supplies the Anthropic credential itself.
-          for mode in none api-key auth-token; do
-            case "$mode" in
-              none) status=$(probe) ;;
-              api-key) status=$(probe -H "x-api-key: unused") ;;
-              auth-token) status=$(probe -H "Authorization: Bearer unused") ;;
-            esac
-            echo "$mode: HTTP $status $(head -c 500 "$RUNNER_TEMP/gateway-probe.json")"
-            if [ "$status" = 200 ] && [ "$mode" != none ] && [ -z "${auth:-}" ]; then
-              auth="$mode"
-            fi
-          done
-          if [ -z "${auth:-}" ]; then
-            echo "::error::The AI Gateway rejected every credential header Claude Code can send."
-            exit 1
-          fi
-          echo "auth=$auth" >> "$GITHUB_OUTPUT"
       - name: Install Claude Code
-        if: steps.gateway.outcome == 'success'
+        if: steps.update.outputs.updated == 'true'
         run: npm install --global @anthropic-ai/claude-code
       - name: Triage WPT update
         id: triage
-        if: steps.gateway.outcome == 'success'
+        if: steps.update.outputs.updated == 'true'
         # A failed triage still yields a pull request containing only the bump.
         continue-on-error: true
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_AI_GATEWAY_ACCOUNT_ID }}
           CLOUDFLARE_GATEWAY_ID: ${{ secrets.CF_AI_GATEWAY_NAME }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_AI_GATEWAY_TOKEN }}
-          GATEWAY_AUTH: ${{ steps.gateway.outputs.auth }}
           # Read-only; lets the agent query the GitHub API for upstream WPT history.
           GH_TOKEN: ${{ github.token }}
           CLAUDE_CODE_EFFORT_LEVEL: medium
@@ -152,11 +113,7 @@ jobs:
           export ANTHROPIC_BASE_URL="https://gateway.ai.cloudflare.com/v1/$CLOUDFLARE_ACCOUNT_ID/$CLOUDFLARE_GATEWAY_ID/anthropic"
           export ANTHROPIC_CUSTOM_HEADERS="cf-aig-authorization: Bearer $CLOUDFLARE_API_TOKEN"
           # The gateway supplies the Anthropic credential; Claude Code still requires one of its own.
-          if [ "$GATEWAY_AUTH" = api-key ]; then
-            export ANTHROPIC_API_KEY=unused
-          else
-            export ANTHROPIC_AUTH_TOKEN=unused
-          fi
+          export ANTHROPIC_AUTH_TOKEN=unused
 
           # Claude Code discovers project skills only under .claude/skills.
           mkdir -p .claude/skills
