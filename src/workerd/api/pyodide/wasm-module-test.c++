@@ -14,6 +14,9 @@
 #include <kj/test.h>
 
 namespace workerd::api::pyodide {
+
+WD_STRONG_BOOL(WithWasmBuiltins);
+
 namespace {
 
 struct PythonContext: public jsg::Object, public jsg::ContextGlobal {
@@ -36,8 +39,6 @@ class WasmCompilationObserver final: public jsg::CompilationObserver {
     return {};
   }
 };
-
-WD_STRONG_BOOL(WithWasmBuiltins);
 
 KJ_TEST("Python module registration reuses manager-owned Wasm after isolate destruction") {
   jsg::V8System v8System;
