@@ -70,7 +70,8 @@ jobs:
           git commit -m "update WPT to latest version"
       - name: Install opencode
         if: steps.update.outputs.updated == 'true'
-        run: npm install --global opencode-ai@latest
+        # Bonk also runs the dev build; releases can lag behind the AI Gateway model catalog.
+        run: npm install --global opencode-ai@dev
       - name: Triage WPT update
         id: triage
         if: steps.update.outputs.updated == 'true'
@@ -88,8 +89,11 @@ jobs:
           REPORT_FILE: ${{ runner.temp }}/wpt-triage-report.md
           COMMIT_MESSAGE_FILE: ${{ runner.temp }}/wpt-triage-commit.txt
         run: |
+          # Without --print-logs, opencode reports failures only as an opaque error reference.
           timeout 200m opencode run \
-            --model cloudflare-ai-gateway/anthropic/claude-opus-5-5 \
+            --print-logs \
+            --log-level ERROR \
+            --model cloudflare-ai-gateway/anthropic/claude-opus-5.5 \
             --variant high \
             --auto \
             "$(cat <<EOF
