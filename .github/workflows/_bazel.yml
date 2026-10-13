@@ -163,12 +163,17 @@ jobs:
       - name: Measure persistent-stubs startup and shutdown
         if: always() && inputs.phase == '-persistent-timing'
         run: python .github/scripts/persistent-stubs-timing.py
+      - name: Verify native argument forwarding
+        if: always() && inputs.phase == '-persistent-timing'
+        run: python .github/scripts/windows-arguments-probe.py
       - name: Upload timing observations
         if: always() && inputs.phase == '-persistent-timing'
         uses: actions/upload-artifact@v7
         with:
           name: persistent-stubs-timing
-          path: persistent-timing-*.json
+          path: |
+            persistent-timing-*.json
+            windows-arguments-results.json
       - name: Upload coverage to Codecov
         if: inputs.run_coverage
         uses: codecov/codecov-action@v5
