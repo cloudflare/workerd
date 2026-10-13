@@ -443,12 +443,12 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   // Log an uncaught exception from an asynchronous context, i.e. when the IoContext is not
   // "current". The exception is added to the trace of `incomingRequest`, or of the current incoming
-  // request if none is given. Pass `incomingRequest` when the exception is known to belong to a
-  // specific request, such as the failure of its event handler: in an actor, the current incoming
-  // request may be a newer, unrelated one.
+  // request as a fallback if none is given. Pass `incomingRequest` whenever the exception is known
+  // to belong to a specific request, such as the failure of its event handler: in an actor, the
+  // current incoming request may be a newer, unrelated one.
   void logUncaughtExceptionAsync(UncaughtExceptionSource source,
       kj::Exception&& e,
-      kj::Maybe<IncomingRequest&> incomingRequest = kj::none);
+      kj::Maybe<IncomingRequest&> incomingRequest);
 
   // Returns a promise that will reject with an exception if and when the request should be
   // aborted, e.g. because its CPU time expired. This should be joined with any promises for

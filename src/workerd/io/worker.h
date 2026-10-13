@@ -794,7 +794,7 @@ class Worker::Lock {
   // error may be extracted and used.
   void logUncaughtException(UncaughtExceptionSource source,
       kj::Exception&& exception,
-      kj::Maybe<IoContext_IncomingRequest&> incomingRequest = kj::none);
+      kj::Maybe<IoContext_IncomingRequest&> incomingRequest);
 
   void reportPromiseRejectEvent(v8::PromiseRejectMessage& message);
 

@@ -1550,7 +1550,9 @@ void IoContext::taskFailed(kj::Exception&& exception) {
   // If `taskFailed()` throws the whole event loop blows up... let's be careful not to let that
   // happen.
   KJ_IF_SOME(e, kj::runCatchingExceptions([&]() {
-    logUncaughtExceptionAsync(UncaughtExceptionSource::ASYNC_TASK, kj::mv(exception));
+    // There may no longer be an incoming request at task fail time – provide kj::none to indicate
+    // that the tracer and metrics should be taken from the current request, if available
+    logUncaughtExceptionAsync(UncaughtExceptionSource::ASYNC_TASK, kj::mv(exception), kj::none);
   })) {
     KJ_LOG(ERROR, "logUncaughtExceptionAsync() threw an exception?", e);
   }
