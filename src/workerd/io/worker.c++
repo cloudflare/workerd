@@ -2066,17 +2066,28 @@ void Worker::setupContext(jsg::Lock& lock, v8::Local<v8::Context> context) {
 }
 
 void Worker::setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context> context) {
-  // For isolates created by SnapshotCreator V8's bootstrapper skips InstallSpecialObjects,
-  // so the `WebAssembly` global does not exist and these shims would fail.
-  // That's fine: wasm modules aren't captured in the snapshot anyway, and this runs again
-  // in normal mode on the context restored from the snapshot, installing the shims then.
-  if (!lock.isPreparingSnapshot()) {
-    // Set WebAssembly.Module @@HasInstance
-    setWebAssemblyModuleHasInstance(lock, context);
-
-    // Shim WebAssembly.instantiate to detect modules exporting "__instance_signal".
-    shimWebAssemblyInstantiate(lock, context);
+  // V8 only installs the `WebAssembly` global when a Wasm engine is available. It is absent under
+  // the `--jitless` v8Flag, since V8 has no Wasm interpreter, and in isolates created by
+  // SnapshotCreator, whose bootstrapper skips InstallSpecialObjects. Both helpers below reach into
+  // that global unconditionally, so running them in such an isolate aborts the entire process
+  // during context setup, before any script executes. Skip them instead: a Worker that never
+  // touches WebAssembly is perfectly serviceable without either, so an absent optional capability
+  // must not be fatal. For snapshots this is also correct because wasm modules aren't captured in
+  // the snapshot anyway, and this runs again on the context restored from it, installing the shims
+  // then.
+  bool hasWebAssembly = false;
+  JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& lock) {
+    hasWebAssembly = lock.global().get(lock, "WebAssembly").tryCast<jsg::JsObject>() != kj::none;
+  });
+  if (!hasWebAssembly) {
+    return;
   }
+
+  // Set WebAssembly.Module @@HasInstance
+  setWebAssemblyModuleHasInstance(lock, context);
+
+  // Shim WebAssembly.instantiate to detect modules exporting "__instance_signal".
+  shimWebAssemblyInstantiate(lock, context);
 }
 // =======================================================================================
 
