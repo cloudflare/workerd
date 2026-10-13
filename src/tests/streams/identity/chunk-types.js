@@ -10,11 +10,8 @@
 // returns a rejected promise here like TypeScript does, rather than its
 // pre-flag synchronous throw. It still emits a console warning.)
 //
-// What happens to the stream afterward deliberately diverges and is asserted
-// per implementation below:
-// - C++: the stream is unaffected by the invalid chunk and remains usable.
-// - TypeScript: the invalid chunk errors the stream — the writer's closed
-//   promise rejects and subsequent writes reject.
+// An invalid chunk rejects only its own write, in both implementations: the
+// stream survives and later writes still flow (ledger #6).
 
 import { strictEqual, deepStrictEqual, rejects } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
