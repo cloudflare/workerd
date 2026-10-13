@@ -162,24 +162,25 @@ async fn with_watch<T>(
     }
 }
 
-/// Resolves on SIGTERM: the signal to drain gracefully. The handler is installed by the call, so
-/// that a signal during startup drains the server once it is up. Never on Windows.
+/// Resolves on SIGTERM, or on Windows on Ctrl-Break (`CTRL_BREAK_EVENT`, the console event a
+/// parent can send a process group, where Ctrl-C is the interactive interrupt): the signal to
+/// drain gracefully. The handler is installed by the call, so that a signal during startup drains
+/// the server once it is up.
 fn sigterm() -> impl Future<Output = ()> {
     #[cfg(unix)]
     let signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate());
+    #[cfg(windows)]
+    let signal = tokio::signal::windows::ctrl_break();
     async move {
-        #[cfg(unix)]
         match signal {
             Ok(mut signal) => {
                 signal.recv().await;
             }
             Err(e) => {
-                tracing::error!("SIGTERM handler: {e}");
+                tracing::error!("drain signal handler: {e}");
                 std::future::pending::<()>().await;
             }
         }
-        #[cfg(not(unix))]
-        std::future::pending::<()>().await;
     }
 }
 
