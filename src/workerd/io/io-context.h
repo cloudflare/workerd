@@ -172,7 +172,7 @@ class IoContext_IncomingRequest final {
   // Access the event loop's current time point. This will remain constant between ticks. This is
   // used to implement IoContext::now(), which should be preferred so that time can be adjusted
   // based on setTimeout() when needed.
-  kj::Date now(kj::Maybe<kj::Date> nextTimeout = kj::none);
+  kj::Date now(kj::Maybe<kj::Date> clockClamp = kj::none);
 
   // Read the time for trace onset information, which is recorded ahead of delivered().
   //
@@ -1230,7 +1230,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // that clears the timer slot via clearTimeoutImpl) still need a live timeoutManager. C++ destroys
   // members in reverse declaration order, so declaring timeoutManager first ensures it is destroyed
   // last among these three.
-  kj::Own<TimeoutManager> timeoutManager;
+  kj::Own<TimeoutManagerImpl> timeoutManager;
+  // Clock reads and timer delivery advance this floor using the TimerChannel's clock policy.
+  // It persists through microtasks and scope changes that expose older pending deadlines.
+  kj::Maybe<kj::Date> lastObservedTime;
+
+  kj::Date observeTime(kj::Date time);
+  InputGate::Lock finishCriticalSection(InputGate::CriticalSection& section);
 
   kj::TaskSet waitUntilTasks;
   EventOutcome waitUntilStatusValue = EventOutcome::OK;
@@ -1927,7 +1933,7 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhileImpl(
           .then(
               [this, cs = kj::mv(cs), resolver = kj::mv(resolver),
                   maybeAsyncContext = jsg::AsyncContextFrame::currentRef(js)](T&& value) mutable {
-    auto inputLock = cs->succeeded();
+    auto inputLock = finishCriticalSection(*cs);
     return run(
         [value = kj::mv(value), resolver = kj::mv(resolver),
             maybeAsyncContext = kj::mv(maybeAsyncContext)](Worker::Lock& lock) mutable {

@@ -504,6 +504,12 @@ wd_test(
 )
 
 wd_test(
+    src = "actor-block-concurrency-timer-test.wd-test",
+    args = ["--experimental"],
+    data = ["actor-block-concurrency-timer-test.js"],
+)
+
+wd_test(
     # Repeated constructor failures log symbolized stacks in debug builds.
     size = "large",
     src = "actor-fetch-rejection-test.wd-test",

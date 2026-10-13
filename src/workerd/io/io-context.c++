@@ -6,6 +6,7 @@
 
 #include <workerd/io/access-info.h>
 #include <workerd/io/io-gate.h>
+#include <workerd/io/timer-queue.h>
 #include <workerd/io/tracer.h>
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
@@ -73,18 +74,21 @@ class IoContext::TimeoutManagerImpl final: public TimeoutManager {
     return timeoutsStarted - timeoutsFinished;
   }
 
-  kj::Maybe<kj::Date> getNextTimeout() const override {
-    if (timeoutTimes.size() == 0) {
-      return kj::none;
-    } else {
-      return timeoutTimes.begin()->key.when;
+  // Earliest deadline on the active input-gate scope, including fired timers whose callbacks
+  // have not completed.
+  kj::Maybe<kj::Date> getClockClamp(IoContext& context) const {
+    KJ_IF_SOME(queue, findQueue(currentSection(context))) {
+      return queue.getClockClamp();
     }
+    return kj::none;
   }
 
+  void adoptTimersFromCompletedSection(IoContext& context, InputGate::CriticalSection& section);
+
   void cancelAll() override {
-    timerTask = nullptr;
     timeouts.clear();
-    timeoutTimes.clear();
+    sectionScopes.clear();
+    rootQueue.clear();
   }
 
  private:
@@ -96,39 +100,72 @@ class IoContext::TimeoutManagerImpl final: public TimeoutManager {
 
   void setTimeoutImpl(IoContext& context, Iterator it);
 
-  // A pair of a Date and a numeric ID, used as entry in timeoutTimes set, below.
-  struct TimeoutTime {
-    kj::Date when;
-    uint tiebreaker;  // Unique number, in case two timeouts target same time.
+  using TimeoutKey = TimerQueue::Key;
 
-    inline bool operator<(const TimeoutTime& other) const {
-      if (when < other.when) return true;
-      if (when > other.when) return false;
-      return tiebreaker < other.tiebreaker;
-    }
-    inline bool operator==(const TimeoutTime& other) const {
-      return when == other.when && tiebreaker == other.tiebreaker;
-    }
+  struct SectionScope {
+    explicit SectionScope(kj::Rc<InputGate::CriticalSection> section): section(kj::mv(section)) {}
+
+    // Keeps the map key alive while the section has timers.
+    kj::Rc<InputGate::CriticalSection> section;
+    TimerQueue timers;
   };
 
-  // Tracks registered timeouts sorted by the next time the timeout is expected to fire.
-  //
-  // The associated fulfiller should be fulfilled when the time has been reached AND all previous
-  // timeouts have completed.
-  kj::TreeMap<TimeoutTime, kj::Own<kj::PromiseFulfiller<void>>> timeoutTimes;
-  uint timeoutTimesTiebreakerCounter = 0;
+  TimerQueue rootQueue;
+  // Section records are removed when their final timer is removed or adopted by the parent.
+  kj::HashMap<const InputGate::CriticalSection*, kj::Own<SectionScope>> sectionScopes;
+  uint timeoutTiebreakerCounter = 0;
+
+  static kj::Maybe<InputGate::CriticalSection&> currentSection(
+      IoContext& context KJ_LIFETIMEBOUND) {
+    KJ_IF_SOME(lock, context.currentInputLock) {
+      return lock.getCriticalSection();
+    }
+    return kj::none;
+  }
+
+  static kj::Maybe<InputGate::CriticalSection&> resolveSection(
+      kj::Maybe<InputGate::CriticalSection&> section KJ_LIFETIMEBOUND) {
+    KJ_IF_SOME(s, section) {
+      return s.getActive();
+    }
+    return kj::none;
+  }
+
+  // Reading the clock and removing a timer must not allocate a scope.
+  kj::Maybe<TimerQueue&> findQueue(
+      kj::Maybe<InputGate::CriticalSection&> section) KJ_LIFETIMEBOUND {
+    KJ_IF_SOME(active, resolveSection(section)) {
+      return sectionScopes.find(&active).map(
+          [](auto& entry) -> TimerQueue& { return entry->timers; });
+    }
+    return rootQueue;
+  }
+
+  kj::Maybe<const TimerQueue&> findQueue(
+      kj::Maybe<InputGate::CriticalSection&> section) const KJ_LIFETIMEBOUND {
+    KJ_IF_SOME(active, resolveSection(section)) {
+      return sectionScopes.find(&active).map(
+          [](auto& entry) -> const TimerQueue& { return entry->timers; });
+    }
+    return rootQueue;
+  }
+
+  TimerQueue& getOrCreateQueue(kj::Maybe<InputGate::CriticalSection&> section) KJ_LIFETIMEBOUND {
+    KJ_IF_SOME(active, resolveSection(section)) {
+      return sectionScopes
+          .findOrCreate(&active, [&] {
+        return decltype(sectionScopes)::Entry{&active, kj::heap<SectionScope>(active.clone())};
+      })->timers;
+    }
+    return rootQueue;
+  }
+
+  void removeTimeout(
+      kj::Maybe<InputGate::CriticalSection&> section, TimeoutKey key, TimerChannel& timerChannel);
 
   uint timeoutsStarted = 0;
   uint timeoutsFinished = 0;
   Map timeouts;
-
-  // Promise that is waiting for the closest timeout, and will fulfill its fulfiller. We only ever
-  // actually wait on the next timeout in `timeoutTasks`, so that we can't fulfill timer callbacks
-  // out-of-order. This task gets replaced each time the lead timeout changes.
-  kj::Promise<void> timerTask = nullptr;
-
-  // Must be called any time timeoutTimes.begin() changes.
-  void resetTimerTask(TimerChannel& timerChannel);
 };
 
 class IoContext::TimeoutManagerImpl::TimeoutState {
@@ -291,9 +328,9 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
   }
 }
 
-kj::Date IoContext::IncomingRequest::now(kj::Maybe<kj::Date> nextTimeout) {
+kj::Date IoContext::IncomingRequest::now(kj::Maybe<kj::Date> clockClamp) {
   metrics->clockRead();
-  return ioChannelFactory->getTimer().now(kj::mv(nextTimeout));
+  return ioChannelFactory->getTimer().now(kj::mv(clockClamp));
 }
 
 kj::Date IoContext::IncomingRequest::nowForTraceOnset() {
@@ -901,12 +938,13 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
 
   // Schedule relative to Date.now() so the delay appears exact to the application.
   auto when = context.now() + state.params.msDelay * kj::MILLISECONDS;
+  TimeoutKey timeoutKey{when, timeoutTiebreakerCounter++};
   // TODO(cleanup): The manual use of run() here (including carrying over the critical section) is
   //   kind of ugly, but using awaitIo() doesn't work here because we need the ability to cancel
   //   the timer, so we don't want to addTask() it, which awaitIo() does implicitly.
   auto promise =
-      paf.promise.then([this, &context, it, cs = context.getCriticalSection()]() mutable {
-    return context.run([this, it](Worker::Lock& lock, IoContext& context) mutable {
+      paf.promise.then([this, &context, it, when, cs = context.getCriticalSection()]() mutable {
+    return context.run([this, it, when](Worker::Lock& lock, IoContext& context) mutable {
       auto& state = it->second;
 
       auto stateGuard = kj::defer([&] {
@@ -960,6 +998,9 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
           }
         }););
 
+        // An adopted callback can precede earlier deadlines in its new queue. Observe its own
+        // deadline using the channel's clock policy, and retain that time through its microtasks.
+        context.observeTime(context.getCurrentIncomingRequest().now(when));
         state.trigger(lock);
       }
     }, kj::mv(cs));
@@ -967,27 +1008,23 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
 
   promise = promise.attach(context.registerPendingEvent());
 
-  // Add an entry to the timeoutTimes map, to track when the nearest timeout is. Arrange for it
-  // to be removed when the promise completes.
-  TimeoutTime timeoutTimesKey{when, timeoutTimesTiebreakerCounter++};
-  timeoutTimes.insert(timeoutTimesKey, kj::mv(paf.fulfiller));
-  auto deferredTimeoutTimeRemoval = kj::defer([this, &context, timeoutTimesKey]() {
+  // The critical section may have completed and handed its timers to an enclosing scope.
+  auto deferredTimeoutRemoval =
+      kj::defer([this, &context, timeoutKey, section = context.getCriticalSection()]() mutable {
     // If the promise is being destroyed due to IoContext teardown then IoChannelFactory may
     // no longer be available, but we can just skip starting a new timer in that case as it'd be
     // canceled anyway. Similarly we should skip rescheduling if the context has been aborted since
     // there's no way the events can run anyway (and we'll cause trouble if `cancelAll()` is being
     // called in ~IoContext_IncomingRequest).
     if (context.selfRef->isValid() && context.abortException == kj::none) {
-      bool isNext = timeoutTimes.begin()->key == timeoutTimesKey;
-      timeoutTimes.erase(timeoutTimesKey);
-      if (isNext) resetTimerTask(context.getIoChannelFactory().getTimer());
+      removeTimeout(section.map([](auto& cs) -> InputGate::CriticalSection& { return *cs; }),
+          timeoutKey, context.getIoChannelFactory().getTimer());
     }
   });
 
-  if (timeoutTimes.begin()->key == timeoutTimesKey) {
-    resetTimerTask(context.getIoChannelFactory().getTimer());
-  }
-  promise = promise.attach(kj::mv(deferredTimeoutTimeRemoval));
+  auto& queue = getOrCreateQueue(currentSection(context));
+  queue.insert(timeoutKey, kj::mv(paf.fulfiller), context.getIoChannelFactory().getTimer());
+  promise = promise.attach(kj::mv(deferredTimeoutRemoval));
 
   if (context.actor != kj::none) {
     // Add a wait-until task which resolves when this timer completes. This ensures that
@@ -1001,22 +1038,36 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
   state.maybePromise = promise.eagerlyEvaluate(nullptr);
 }
 
-void IoContext::TimeoutManagerImpl::resetTimerTask(TimerChannel& timerChannel) {
-  if (timeoutTimes.size() == 0) {
-    // Not waiting for any timer, clear the existing timer task.
-    timerTask = nullptr;
-  } else {
-    // Wait for the first timer.
-    auto& entry = *timeoutTimes.begin();
-    timerTask = timerChannel.atTime(entry.key.when)
-                    .then([this, key = entry.key]() {
-      auto& newEntry = *timeoutTimes.begin();
-      KJ_ASSERT(newEntry.key == key,
-          "front of timeoutTimes changed without calling resetTimerTask(), we probably missed "
-          "a timeout!");
-      newEntry.value->fulfill();
-    }).eagerlyEvaluate([](kj::Exception&& e) { KJ_LOG(ERROR, e); });
+void IoContext::TimeoutManagerImpl::adoptTimersFromCompletedSection(
+    IoContext& context, InputGate::CriticalSection& section) {
+  KJ_IF_SOME(active, section.getActive()) {
+    KJ_ASSERT(&active != &section, "timer adoption requires a successful critical section");
   }
+  KJ_IF_SOME(scope, sectionScopes.find(&section)) {
+    auto source = kj::mv(scope);
+    sectionScopes.erase(&section);
+    // InputGate resolves this completed section to the nearest enclosing active section.
+    auto& destination = getOrCreateQueue(section);
+    destination.adoptFrom(source->timers, context.getIoChannelFactory().getTimer());
+  }
+}
+
+void IoContext::TimeoutManagerImpl::removeTimeout(
+    kj::Maybe<InputGate::CriticalSection&> section, TimeoutKey key, TimerChannel& timerChannel) {
+  // A registered timer's effective scope exists until its queue entry is removed.
+  auto& queue = KJ_ASSERT_NONNULL(findQueue(section));
+  queue.erase(key, timerChannel);
+  if (queue.empty()) {
+    KJ_IF_SOME(active, resolveSection(section)) {
+      sectionScopes.erase(&active);
+    }
+  }
+}
+
+InputGate::Lock IoContext::finishCriticalSection(InputGate::CriticalSection& section) {
+  auto inputLock = section.succeeded();
+  timeoutManager->adoptTimersFromCompletedSection(*this, section);
+  return inputLock;
 }
 
 void IoContext::TimeoutManagerImpl::clearTimeout(IoContext& context, TimeoutId timeoutId) {
@@ -1060,9 +1111,21 @@ kj::Date IoContext::now(IncomingRequest& incomingRequest) {
     return kj::UNIX_EPOCH + roundedMs * kj::MILLISECONDS;
   }
 
-  // Let TimerChannel decide whether to clamp to the next timeout time. This is how Spectre
-  // mitigations ensure Date.now() inside a callback returns exactly the scheduled time.
-  return incomingRequest.now(timeoutManager->getNextTimeout());
+  // Only timers on the active input-gate scope clamp observable time. Returning to a parent
+  // scope must not rewind a clock that advanced inside a critical section.
+  return observeTime(incomingRequest.now(timeoutManager->getClockClamp(*this)));
+}
+
+kj::Date IoContext::observeTime(kj::Date time) {
+  KJ_IF_SOME(previous, lastObservedTime) {
+    time = kj::max(time, previous);
+  }
+  // Only reads under an input lock select the caller's scope. Internal pre-entry reads, such as
+  // actor-cache maintenance, see the root scope and must not override a nested timer's clamp.
+  if (currentInputLock != kj::none) {
+    lastObservedTime = time;
+  }
+  return time;
 }
 
 kj::Date IoContext::now() {
