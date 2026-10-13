@@ -305,8 +305,7 @@ def _wd_test_impl(ctx):
     if ctx.attr.load_snapshot:
         if ctx.attr.python_snapshot_test:
             environment["PYTHON_SAVE_SNAPSHOT_ARGS"] = "--python-load-snapshot load_snapshot.bin"
-        f = ctx.attr.load_snapshot.files.to_list()[0]
-        runfiles = runfiles.merge(ctx.runfiles(symlinks = {"load_snapshot.bin": f}))
+        runfiles = runfiles.merge(ctx.runfiles(symlinks = {"load_snapshot.bin": ctx.file.load_snapshot}))
 
     return [
         DefaultInfo(
