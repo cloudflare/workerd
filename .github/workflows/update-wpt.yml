@@ -27,10 +27,11 @@ jobs:
       triage_outcome: ${{ steps.triage.outcome }}
     steps:
       - uses: actions/checkout@v7
+        # Checks out the ref the workflow runs from, so a manual run from a branch tests that
+        # branch's skill and configuration. Scheduled runs use main.
         with:
           show-progress: false
           persist-credentials: false
-          ref: main
       - name: Restore Bazel disk cache
         # Restore-only, so nothing this job builds is reused by other workflows. The key matches
         # the cache saved by the Linux release job in test.yml.
