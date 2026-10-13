@@ -1,7 +1,15 @@
-load("@aspect_rules_js//js:defs.bzl", "js_library")
+load("@aspect_rules_js//js:defs.bzl", "js_library", "js_test")
 
 js_library(
     name = "server-harness_js_lib",
     srcs = ["server-harness.mjs"],
     visibility = ["//visibility:public"],
+)
+
+js_test(
+    name = "server-harness-test",
+    size = "small",
+    data = [":server-harness_js_lib"],
+    entry_point = "server-harness-test.mjs",
+    tags = ["js-test"],
 )
