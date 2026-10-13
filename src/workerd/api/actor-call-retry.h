@@ -173,9 +173,6 @@ class ActorCallRetryState final: public kj::Refcounted {
   void recordCanceled();
 
  private:
-  static constexpr auto INITIAL_BACKOFF = 500 * kj::MILLISECONDS;
-  static constexpr auto MAX_BACKOFF = 2 * kj::SECONDS;
-
   IoChannelFactory::ActorRetryRequestMetadata freshMetadata() const;
   // No retry may start, or still be running, at or after this point.
   kj::TimePoint retryCutoff() const {

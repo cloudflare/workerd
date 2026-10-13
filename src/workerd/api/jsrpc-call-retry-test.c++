@@ -122,9 +122,9 @@ class PausingTimerChannel final: public TimerChannel {
   }
 
   kj::Promise<void> afterLimitTimeout(kj::Duration delay) override {
-    // Retry backoffs never exceed 2 seconds. Longer waits, such as the blockConcurrencyWhile()
+    // Retry backoffs never exceed 4 seconds. Longer waits, such as the blockConcurrencyWhile()
     // timeout, never finish.
-    if (delay > 2 * kj::SECONDS) return kj::NEVER_DONE;
+    if (delay > 4 * kj::SECONDS) return kj::NEVER_DONE;
     if (++backoffCount == pauseAtBackoff) {
       KJ_REQUIRE_NONNULL(backoffStartedFulfiller)->fulfill();
       backoffStartedFulfiller = kj::none;
