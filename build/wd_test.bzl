@@ -159,18 +159,19 @@ exit /b !TEST_EXIT!
 
 :run_workerd
 REM cmd requires a quoted native path for Bazel's slash-separated executable name.
+setlocal DisableDelayedExpansion
 set "WORKERD_BINARY=%~1"
-set "WORKERD_BINARY=!WORKERD_BINARY:/=\\!"
+set "WORKERD_BINARY=%WORKERD_BINARY:/=\\%"
 set "WORKERD_ARGUMENTS="
 shift
 :next_workerd_argument
-if "%1"=="" goto launch_workerd
-set "WORKERD_ARGUMENTS=!WORKERD_ARGUMENTS! %1"
+if [%1]==[] goto launch_workerd
+set WORKERD_ARGUMENTS=%WORKERD_ARGUMENTS% %1
 shift
 goto next_workerd_argument
 :launch_workerd
-"!WORKERD_BINARY!" !WORKERD_ARGUMENTS! "-dTEST_TMPDIR=%TEST_TMPDIR%"
-exit /b !ERRORLEVEL!
+"%WORKERD_BINARY%" %WORKERD_ARGUMENTS% "-dTEST_TMPDIR=%TEST_TMPDIR%"
+exit /b %ERRORLEVEL%
 """
 
 SH_TEMPLATE = """#!/bin/bash
@@ -191,7 +192,7 @@ else
 fi
 """
 
-WINDOWS_RUNTEST_NORMAL = "call :run_workerd %*"
+WINDOWS_RUNTEST_NORMAL = "goto run_workerd"
 
 WINDOWS_RUNTEST_SIDECAR = """powershell -Command \"%*\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR"""
 
