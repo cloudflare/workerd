@@ -98,7 +98,9 @@ readable's queue, before any read occurs.)
   any other bytes. Anything else fails with `TypeError`.
 - Zero-length chunks (empty view, empty buffer, empty string) are no-ops:
   they resolve without delivering a chunk and without closing the stream.
-  So is an undefined chunk (`write(undefined)`, `write()`).
+  So is an undefined chunk (`write(undefined)`, `write()`). A detached
+  buffer, and a view whose buffer is detached or out of bounds, is
+  zero-length.
 - Writes **copy** their bytes; the delivered chunk never aliases the
   caller's buffer, and the caller's buffer is never detached by a write.
   The copy is taken synchronously inside `write()` in both
@@ -252,7 +254,7 @@ pattern; a change to either side fails its cell.
 | 9 | Writes after abort | `TypeError` "This WritableStream has been closed." | original abort reason | `abortRejectsSubsequentWrites` |
 | 10 | Writes after cancel with close in flight | closed `TypeError` | original cancel reason | `cancelRejectsPendingWriteAndClose` |
 | 11 | FLS enforcement | read-side `TypeError`; the offending write/close succeeds | eager write-side `RangeError`; readable errors too | `fixed-length-errors.js` |
-| 12 | Already-detached `ArrayBuffer` chunk | zero-length no-op | rejects `TypeError` (per-write; the stream survives) | `alreadyDetachedBufferAtWrite` |
+| 12 | (no divergence) Already-detached `ArrayBuffer` chunk: a zero-length no-op, as a detached view is, adding nothing toward a `FixedLengthStream`'s length | same | same | `alreadyDetachedBufferAtWrite` (parity) |
 | 13 | Single tee-branch cancel promise | resolves immediately | WHATWG semantics: shared promise, settles when both branches cancel | `cancelOneBranchKeepsWriterFlowing` |
 | 14 | Write after both tee branches cancel | parks forever (composite cancel not propagated to the writable) | rejects `AggregateError` "All readable stream tee branches were canceled" — also a write in flight when the last branch cancels, even if a branch had read it | `writeAfterBothBranchesCancel`, `inFlightWriteRejectsWhenBranchesLeaveAfterRead` |
 | 15 | Piping between identity streams | not implemented: `pipeTo()` takes both locks then rejects `TypeError` ("Inter-TransformStream ReadableStream.pipeTo() is not implemented."); `pipeThrough()` throws it synchronously | fully functional: delivery, completion, and error propagation in both directions with original reason instances; circular `pipeThrough(its)` currently succeeds and locks both sides — `TODO(streams-ts)`: it should fail | `pipe-integration.js` |
@@ -276,7 +278,7 @@ pattern; a change to either side fails its cell.
 | `chunk-types.js` | accepted: `Uint8Array`, `ArrayBuffer`, `DataView` subrange, shared memory (a `SharedArrayBuffer` and views over one, copied at `write()`; an empty one is a no-op), string→UTF-8 (a NUL truncates under C++, ledger #25), subarray offsets; rejected: numbers, plain objects (`TypeError`; per-write — the stream survives, ledger #6); an invalid chunk queued behind valid writes surfaces its error in FIFO order — earlier writes still deliver and later traffic still flows in both implementations |
 | `zero-length-writes.js` | empty view / buffer / string are non-closing no-ops; so is an undefined chunk (`write(undefined)`, `write()`; ITS, FLS, with a byte highWaterMark) |
 | `copy-semantics.js` | delivered chunk never aliases the source; source mutation after delivery is invisible; source is not detached |
-| `buffer-lifecycle.js` | write-time snapshot survives later resize/detach in both implementations; degenerate write-time inputs (already-detached per ledger #12; detached and out-of-bounds typed-array and DataView views are no-ops); shadowing/throwing metadata getters never consulted |
+| `buffer-lifecycle.js` | write-time snapshot survives later resize/detach in both implementations; degenerate write-time inputs are no-ops (an already-detached buffer, ITS and FLS, ledger #12; detached and out-of-bounds typed-array and DataView views); shadowing/throwing metadata getters never consulted |
 | `ordering.js` | 1:1 write/read correspondence in both interleavings; multi-chunk aggregate integrity; clean EOF tails |
 | `byob.js` | BYOB reader support; partial fills across reads with write completion on full consumption (still pending a macrotask after a partial read); reads spanning queued writes, past zero-length and invalid ones, stopping at a close, through FLS (#22); lying destination extents (at call and after enqueue) with sentinel overwrite guards; read-call validation (zero-length view, non-view, missing argument); input buffer detached by read with non-detachable (SAB-backed) destinations rejected; repeated EOF zero-length views with preserved buffers |
 | `backpressure.js` | writes and close queue unboundedly with settlement on consumption (a write read ahead of its turn settles when the writable reaches it, so recovery is asserted after the writes settle); a partial BYOB read keeps the write pending and its bytes counted in `desiredSize`; advisory overfill (negative `desiredSize`); default HWM 1 with divergent accounting (ledger #17); explicit HWM as initial `desiredSize` (negative-zero HWM normalized to +0); byte-level tracking incl. in-flight bytes; string accounting by exact UTF-8 bytes, ITS and FLS (parity); `ready` replacement and recovery |

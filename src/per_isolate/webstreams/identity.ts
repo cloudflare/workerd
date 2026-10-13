@@ -20,8 +20,9 @@
 //     processChunk copies inside write() for exactly these hazards).
 //   - Zero-length writes are accepted as NO-OPS: the write resolves
 //     immediately without touching the readable queue (no zero-length
-//     chunk enqueued, no backpressure interaction, no pull). A view whose
-//     buffer is detached or out of bounds is zero-length, as in C++.
+//     chunk enqueued, no backpressure interaction, no pull). A detached
+//     ArrayBuffer, and a view whose buffer is detached or out of bounds,
+//     is zero-length, as in C++.
 //
 // See /src/tests/streams/identity/AGENTS.md for the IdentityTransformStream
 // and FixedLengthStream specification.
@@ -95,6 +96,7 @@ import type { CommonHelpers } from './common';
 import type { ViewExtentHelpers } from './view-extent';
 
 const {
+  ArrayBufferPrototypeByteLengthGet,
   ArrayPrototypePush,
   BigInt,
   Number,
@@ -187,13 +189,17 @@ function validateAndCopyChunk(chunk: unknown): Uint8Array | undefined {
     if (chunk.length === 0) return undefined;
     return TextEncoderEncode(textEncoderInstance, chunk);
   }
-  if (isArrayBuffer(chunk) || isSharedArrayBuffer(chunk)) {
-    // Read the length through a Uint8Array: its byteLength getter works on
-    // both ArrayBuffer and SharedArrayBuffer (ArrayBuffer.prototype.byteLength
-    // throws on SAB receivers). Constructing it throws for a detached
-    // ArrayBuffer.
+  if (isArrayBuffer(chunk)) {
+    // A detached ArrayBuffer has byteLength 0, so it is empty, as in C++.
+    const byteLength = ArrayBufferPrototypeByteLengthGet(chunk);
+    if (byteLength === 0) return undefined;
+    return copyExtent(chunk, 0, byteLength);
+  }
+  if (isSharedArrayBuffer(chunk)) {
+    // ArrayBuffer.prototype.byteLength throws on a SharedArrayBuffer, so read
+    // the length through a Uint8Array; shared memory cannot be detached.
     const byteLength = TypedArrayPrototypeGetByteLength(
-      new Uint8Array(chunk as ArrayBuffer)
+      new Uint8Array(chunk)
     ) as number;
     if (byteLength === 0) return undefined;
     return copyExtent(chunk, 0, byteLength);
