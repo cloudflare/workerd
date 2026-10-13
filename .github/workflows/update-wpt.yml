@@ -73,7 +73,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Install Claude Code
         if: steps.update.outputs.updated == 'true'
-        run: npm install --global @anthropic-ai/claude-code
+        run: |
+          npm install --global @anthropic-ai/claude-code
+          # Claude Code's Bash sandbox needs these on Linux.
+          sudo apt-get install -y -qq --no-install-recommends bubblewrap socat
       - name: Triage WPT update
         id: triage
         if: steps.update.outputs.updated == 'true'
@@ -83,9 +86,14 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_AI_GATEWAY_ACCOUNT_ID }}
           CLOUDFLARE_GATEWAY_ID: ${{ secrets.CF_AI_GATEWAY_NAME }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_AI_GATEWAY_TOKEN }}
-          # Read-only; lets the agent query the GitHub API for upstream WPT history.
+          # Read-only; lets the agent query the GitHub API for upstream WPT history. Sandboxed
+          # commands see only a placeholder, which the sandbox proxy replaces with the token on
+          # requests to api.github.com.
           GH_TOKEN: ${{ github.token }}
           CLAUDE_CODE_EFFORT_LEVEL: medium
+          # Runs sandboxed commands in their own PID namespace, so they cannot read Claude Code's
+          # environment through /proc.
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: 1
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1
           # Commands time out after the default 2 minutes unless the agent asks for longer, which
           # the initial build and complete WPT runs need.
@@ -97,6 +105,39 @@ jobs:
           export ANTHROPIC_CUSTOM_HEADERS="cf-aig-authorization: Bearer $CLOUDFLARE_API_TOKEN"
           # The gateway supplies the Anthropic credential; Claude Code still requires one of its own.
           export ANTHROPIC_AUTH_TOKEN=unused
+          unset CLOUDFLARE_API_TOKEN
+
+          # Every Bash command runs in Claude Code's sandbox, without the gateway token. Claude's
+          # own file tools run outside the sandbox, so they are denied /proc, where Claude Code's
+          # environment is readable, and its user settings, which could weaken the sandbox. The
+          # settings are passed inline so there is no file for the agent to edit.
+          settings=$(cat <<EOF
+          {
+            "sandbox": {
+              "enabled": true,
+              "failIfUnavailable": true,
+              "allowUnsandboxedCommands": false,
+              "filesystem": {
+                "allowWrite": ["/tmp", "~/.cache", "~/bazel-disk-cache", "$RUNNER_TEMP"]
+              },
+              "network": {
+                "tlsTerminate": {},
+                "allowedDomains": ["api.github.com"]
+              },
+              "credentials": {
+                "envVars": [
+                  { "name": "ANTHROPIC_CUSTOM_HEADERS", "mode": "deny" },
+                  { "name": "ANTHROPIC_AUTH_TOKEN", "mode": "deny" },
+                  { "name": "GH_TOKEN", "mode": "mask", "injectHosts": ["api.github.com"] }
+                ]
+              }
+            },
+            "permissions": {
+              "deny": ["Read(//proc/**)", "Edit(~/.claude/**)"]
+            }
+          }
+          EOF
+          )
 
           mkdir -p "$(dirname "$REPORT_FILE")"
 
@@ -109,6 +150,7 @@ jobs:
           timeout 200m claude -p \
             --model claude-opus-5-5 \
             --permission-mode bypassPermissions \
+            --settings "$settings" \
             --output-format stream-json \
             --verbose \
             "$(cat <<EOF
