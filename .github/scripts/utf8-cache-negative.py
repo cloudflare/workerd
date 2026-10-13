@@ -4,7 +4,13 @@ import re
 import subprocess
 import sys
 
-if sys.argv[1] == "prepare":
+if sys.argv[1] == "prepare-no-cache":
+    path = Path("src/workerd/jsg/modules.c++")
+    source = path.read_text()
+    old = "}, compileCache, ModuleInfoCompileOption::BUNDLE, observer)) {}"
+    assert source.count(old) == 1
+    path.write_text(source.replace(old, "}, {}, ModuleInfoCompileOption::BUNDLE, observer)) {}"))
+elif sys.argv[1] == "prepare":
     path = Path("src/rust/gen-compile-cache/cxx-bridge.c++")
     source = path.read_text()
     source, count = re.subn(
@@ -23,6 +29,11 @@ else:
     output = result.stdout + result.stderr
     print(output)
     assert result.returncode != 0, output
+    if sys.argv[1] == "verify-no-cache":
+        assert re.search(r"\[ FAIL \].*runtime UTF-8 module loading", output), output
+        assert re.search(r"\[ PASS \].*embedded ESM caches accept", output), output
+        print("Negative control detected dropped runtime cache data.")
+        sys.exit(0)
     rejected = [line for line in output.splitlines()
                 if "source.GetCachedData()->rejected" in line]
     assert len(rejected) == 2, rejected

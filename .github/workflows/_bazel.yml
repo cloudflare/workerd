@@ -134,6 +134,10 @@ jobs:
         shell: bash
         run: |
           python3 .github/scripts/utf8-cache-negative.py prepare
+      - name: Drop cache data from the runtime UTF-8 loader for the negative control
+        if: inputs.phase == '-negative-loader'
+        shell: bash
+        run: python3 .github/scripts/utf8-cache-negative.py prepare-no-cache
       - name: Bazel build
         run: |
           bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.build_target }}
@@ -141,6 +145,10 @@ jobs:
         if: inputs.phase == '-negative-utf8'
         shell: bash
         run: python3 .github/scripts/utf8-cache-negative.py verify
+      - name: Require the runtime cache-consumption regression to fail
+        if: inputs.phase == '-negative-loader'
+        shell: bash
+        run: python3 .github/scripts/utf8-cache-negative.py verify-no-cache
       - name: Check I/O backend dependency graph
         # One cquery: the workerd binary must not reach kj-async-os (kj's own event loop).
         if: inputs.check_io_backend_graph
