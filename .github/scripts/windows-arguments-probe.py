@@ -8,7 +8,7 @@ import tempfile
 
 wrapper = Path("bazel-bin/src/workerd/api/tests/persistent-stubs-test@_wd_test.bat").resolve()
 assert wrapper.is_file(), wrapper
-values = ["plain", "two words", "", "literal!bang", "semi;colon", "slash/path",
+values = ["plain", "two words", "", "literal!bang", "semi;colon", "amp&ersand", "slash/path",
           "backslash\\path", "--long=some words"] + [f"argument-{n}" for n in range(12)]
 with tempfile.TemporaryDirectory(prefix="argument probe ") as directory:
     directory = Path(directory)
@@ -17,7 +17,9 @@ with tempfile.TemporaryDirectory(prefix="argument probe ") as directory:
     child.write_text("import json,sys\nfrom pathlib import Path\n"
                      "Path(sys.argv[1]).write_text(json.dumps(sys.argv[2:]))\n")
     environment = dict(os.environ, TEST_TMPDIR=str(directory / "storage with spaces"))
-    command = [str(wrapper), sys.executable, str(child), str(output)] + values
+    # Python's native command-line quoting does not cover cmd's semicolon delimiter.
+    command = " ".join('"' + value + '"' for value in
+                       [str(wrapper), sys.executable, str(child), str(output)] + values)
     result = subprocess.run(command, env=environment, text=True, capture_output=True, timeout=15)
     print(result.stdout + result.stderr)
     assert result.returncode == 0, result.returncode

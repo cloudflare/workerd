@@ -6,7 +6,7 @@ permissions:
   contents: read
   actions: write
 
-# Confined to this diagnostic branch; the fixture's existing timeout is retained.
+# Confined to this diagnostic branch; measure completion with a storage-suite budget.
 jobs:
   audit:
     uses: ./.github/workflows/_bazel.yml

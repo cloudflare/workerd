@@ -854,6 +854,8 @@ wd_test(
 )
 
 wd_test(
+    # Exercise the whole persistent-storage suite before assessing the timeout budget.
+    size = "large",
     src = "persistent-stubs-test.wd-test",
     args = ["--experimental"],
     data = ["persistent-stubs-test.js"],
