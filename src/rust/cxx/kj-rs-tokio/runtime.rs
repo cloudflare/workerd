@@ -52,7 +52,7 @@ impl Runtime {
     }
 
     /// Runs `future` to completion, blocking this thread in `promise.wait()` on the loop's
-    /// `WaitScope` meanwhile. `future` is polled by a task on the loop's `LocalSet` (see
+    /// `WaitScope` meanwhile. `future` is polled by a task on the loop's runtime (see
     /// [`crate::spawn`]): KJ events run, and whenever none is left, tokio does. Tasks still
     /// pending when `future` completes run whenever the loop next waits (a later `block_on`, or a
     /// wait on [`context()`](Self::context)), until the Runtime is dropped.
@@ -95,7 +95,7 @@ impl Runtime {
             .context
             .as_mut()
             .block_on(Box::new(BlockOnTask(Box::pin(join))));
-        // After a failed wait the task is still on the `LocalSet`; once this frame drops `future`
+        // After a failed wait the task is still on the runtime; once this frame drops `future`
         // it has nothing left to poll.
         abort.abort();
         waited?;

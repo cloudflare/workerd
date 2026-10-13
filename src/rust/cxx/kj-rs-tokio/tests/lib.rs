@@ -57,10 +57,10 @@ mod ffi {
         /// True if `kj_rs_tokio::current_handle()` finds a runtime on this thread.
         fn has_loop_runtime_handle() -> bool;
 
-        /// Detaches a task onto the loop's LocalSet that awaits a 60s KJ timer promise (via
+        /// Detaches a task onto the loop's runtime that awaits a 60s KJ timer promise (via
         /// `kjTimerDelay`), so the task HOLDS live KJ objects -- a TimerPromiseAdapter in the
         /// port's TimerImpl and an armed RustPromiseAwaiter Event -- when the context is torn
-        /// down. Teardown-ordering regression: the LocalSet must be dropped while those KJ
+        /// down. Teardown-ordering regression: the runtime must shut down while those KJ
         /// objects' owners (timer, event loop) are still alive.
         fn spawn_task_holding_kj_timer();
         /// Same shape, but the task awaits a never-resolving bridged KJ promise.
@@ -77,17 +77,17 @@ mod ffi {
         /// completed_task_count().
         fn spawn_detached_completing_task();
 
-        /// Spawns a task that sleeps `delay_ms` (tokio time, i.e. while the KJ loop is parked
-        /// inside the port) and then fulfills the test fulfiller installed by C++
+        /// Spawns a task that sleeps `delay_ms` (tokio time, i.e. while the KJ loop is inside
+        /// the port's wait()) and then fulfills the test fulfiller installed by C++
         /// (`setTestFulfiller`) with `value` -- a KJ event armed from a tokio task, by a means
-        /// other than a bridged waker, while the loop is parked. KJ's setRunnable(true) must
-        /// hand the thread back to KJ; nothing else will.
+        /// other than a bridged waker. The port's wait() must end at the tokio timer and run
+        /// the task; nothing else will.
         fn task_fulfills_kj_fulfiller(delay_ms: u64, value: i32);
 
         /// Spawns a task that sleeps `delay_ms` (tokio time), then arms and awaits a KJ timer of
         /// `timer_ms` (via `kjTimerDelay`) to completion, and awaits the task's JoinHandle. The
-        /// KJ timer is registered while the loop is parked with a longer (or no) planned
-        /// deadline; the port's TimerImpl::SleepHooks must notice the sooner deadline.
+        /// KJ timer is registered inside a wait() that slept against a longer (or no) KJ
+        /// deadline; the next wait() must sleep against the sooner one.
         async fn task_awaits_kj_timer(delay_ms: u64, timer_ms: u64) -> Result<()>;
 
         /// A bridged future that stashes a clone of its waker on every Pending poll (as a channel
