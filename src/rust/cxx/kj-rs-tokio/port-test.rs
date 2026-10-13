@@ -83,7 +83,10 @@ fn wait_runs_a_bounded_batch_and_leaves_the_rest_for_the_next_turn() {
     }
     let start = std::time::Instant::now();
     assert!(!port.wait_timeout_ns(1_000_000_000));
-    assert!(start.elapsed() < Duration::from_millis(500), "wait slept with work ready");
+    assert!(
+        start.elapsed() < Duration::from_millis(500),
+        "wait slept with work ready"
+    );
     assert_eq!(ran.get(), TICK_BUDGET);
     assert!(!port.tick());
     assert_eq!(ran.get(), TICK_BUDGET + 10);
