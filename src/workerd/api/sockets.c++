@@ -506,7 +506,7 @@ kj::Promise<void> pumpDatagramsToRpc(
 // Joins up the two ends of a startTls() upgrade on a tunnel where neither end can perform a TLS
 // handshake because the tunnel is one of our internal transports. See
 // setupInternalTlsRendezvous(), which is the only thing that creates one of these.
-class TlsRendezvous: public kj::Refcounted {
+class TlsRendezvous {
  public:
   enum class Side {
     // The socket held by the worker that opened the tunnel by calling connect().
@@ -520,7 +520,7 @@ class TlsRendezvous: public kj::Refcounted {
   // side is gone and no upgrade is coming.
   class Claim {
    public:
-    Claim(kj::Own<TlsRendezvous> rendezvous, Side side)
+    Claim(kj::Rc<TlsRendezvous> rendezvous, Side side)
         : rendezvous(kj::mv(rendezvous)),
           side(side) {}
     KJ_DISALLOW_COPY(Claim);
@@ -540,7 +540,7 @@ class TlsRendezvous: public kj::Refcounted {
     }
 
    private:
-    kj::Own<TlsRendezvous> rendezvous;
+    kj::Rc<TlsRendezvous> rendezvous;
     Side side;
   };
 
@@ -586,16 +586,16 @@ class TlsRendezvous: public kj::Refcounted {
 // the first rejection as soon as it happens, without waiting for the other promise to settle.
 jsg::Promise<void> whenBothResolved(
     jsg::Lock& js, jsg::Promise<void> first, jsg::Promise<void> second) {
-  struct Countdown: public kj::Refcounted {
+  struct Countdown {
     uint pending = 2;
   };
-  auto countdown = kj::refcounted<Countdown>();
+  auto countdown = kj::rc<Countdown>();
   auto paf = js.newPromiseAndResolver<void>();
 
   auto settle = [&](jsg::Promise<void>& promise) {
     promise.then(js,
-        JSG_VISITABLE_LAMBDA(
-            (resolver = paf.resolver.addRef(js), countdown = kj::addRef(*countdown)), (resolver),
+        JSG_VISITABLE_LAMBDA((resolver = paf.resolver.addRef(js), countdown = countdown.addRef()),
+            (resolver),
             (jsg::Lock& js) {
               if (--countdown->pending == 0) {
               resolver.resolve(js);
@@ -805,11 +805,11 @@ tracing::EventInfo UdpConnectCustomEvent::getEventInfo() const {
   return tracing::ConnectEventInfo();
 }
 
-kj::Own<kj::TlsStarterCallback> setupInternalTlsRendezvous(kj::TlsStarterCallback& peerStarter) {
-  auto rendezvous = kj::refcounted<TlsRendezvous>();
+kj::Rc<kj::TlsStarterCallback> setupInternalTlsRendezvous(kj::TlsStarterCallback& peerStarter) {
+  auto rendezvous = kj::rc<TlsRendezvous>();
 
   kj::Function<kj::Promise<void>(kj::StringPtr)> peerClaim =
-      TlsRendezvous::Claim(kj::addRef(*rendezvous), TlsRendezvous::Side::PEER);
+      TlsRendezvous::Claim(rendezvous.addRef(), TlsRendezvous::Side::PEER);
   peerStarter = kj::mv(peerClaim);
 
   kj::Function<kj::Promise<void>(kj::StringPtr)> handlerClaim =

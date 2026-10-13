@@ -264,18 +264,18 @@ kj::Promise<void> ServiceWorkerGlobalScope::connect(kj::String host,
     auto tlsStarter = kj::heap<kj::TlsStarterCallback>();
     auto secureTransport = SecureTransportKind::OFF;
     KJ_IF_SOME(starter, settings.tlsStarter) {
-      if (starter != kj::none) {
+      KJ_IF_SOME(s, starter) {
         // The transport can run a real handshake on this connection -- a TCP listener holding a
         // server-side TLS context, for instance. Take its callback over; only the application
         // knows the point in the protocol where the upgrade belongs.
-        *tlsStarter = kj::mv(KJ_ASSERT_NONNULL(starter));
+        *tlsStarter = kj::mv(s);
         // The callback is ours now, so leave nothing behind for the peer to invoke.
         starter = kj::none;
         secureTransport = SecureTransportKind::STARTTLS;
       } else {
         // The slot is here but empty: the peer is another Socket on one of our internal
         // transports, waiting to hear when we upgrade and to tell us when it does.
-        tlsStarter = setupInternalTlsRendezvous(starter);
+        tlsStarter = setupInternalTlsRendezvous(starter).toOwn();
         secureTransport = SecureTransportKind::STARTTLS;
       }
     }
