@@ -50,6 +50,11 @@ jobs:
           echo "build --config=ci --config=ci-linux" >> .bazelrc
           git config --global user.name "Workers DevProd"
           git config --global user.email "workers-devprod@cloudflare.com"
+      - name: Build WPT tests
+        # Builds workerd and the WPT targets at the current WPT version, so the agent spends its
+        # time on triage rather than compilation: after the bump, only targets that depend on WPT
+        # are rebuilt.
+        run: bazel build //src/wpt/...
       - name: Update WPT
         id: update
         run: |
