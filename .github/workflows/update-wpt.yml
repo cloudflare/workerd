@@ -128,6 +128,25 @@ jobs:
           BASH_MAX_TIMEOUT_MS: 3600000
           REPORT_FILE: ${{ runner.temp }}/wpt-triage-report.md
           COMMIT_MESSAGE_FILE: ${{ runner.temp }}/wpt-triage-commit.txt
+          # Renders Claude Code's stream-json output as readable log lines. It lives here rather than
+          # in a file because the job checks out main, not the branch this workflow runs from.
+          STREAM_FILTER: |
+            def clip: if length > 2000 then .[:2000] + "..." else . end;
+
+            fromjson?
+            | if .type == "assistant" then
+                .message.content[]
+                | if .type == "text" then "Claude: \(.text)"
+                  elif .type == "thinking" then "Thinking: \(.thinking)"
+                  elif .type == "tool_use" then "Tool call: \(.name) \(.input | tojson | clip)"
+                  else empty end
+              elif .type == "user" then
+                .message.content[]?
+                | select(type == "object" and .type == "tool_result")
+                | "Tool result: \(.content | if type == "string" then . else tojson end | clip)"
+              elif .type == "result" then
+                "Result: \(.subtype) after \(.num_turns) turns, \(.duration_ms / 60000 | floor) minutes"
+              else empty end
         run: |
           set -o pipefail
           export ANTHROPIC_BASE_URL="https://gateway.ai.cloudflare.com/v1/$CLOUDFLARE_ACCOUNT_ID/$CLOUDFLARE_GATEWAY_ID/anthropic"
@@ -167,7 +186,7 @@ jobs:
           - If you changed any files, write a commit message for them to $COMMIT_MESSAGE_FILE:
             a title line, a blank line, and a description wrapped at 70 columns.
           EOF
-          )" | jq -rR --unbuffered -f .github/claude-stream.jq
+          )" | jq -rR --unbuffered "$STREAM_FILTER"
       - name: Commit triage
         id: commit-triage
         if: steps.triage.outcome == 'success'
