@@ -277,9 +277,7 @@ Hmac.prototype.digest = function (
 ): Buffer | string {
   const state = this[kState];
   if (state[kFinalized]) {
-    return !outputEncoding || outputEncoding === 'buffer'
-      ? Buffer.from('')
-      : '';
+    throw new ERR_CRYPTO_HASH_FINALIZED();
   }
 
   // Explicit conversion for backward compatibility.
