@@ -42,6 +42,16 @@ its intent. If you add, remove, or rename a patch, update the patch list and
 regenerate `build/deps/gen/shared_deps.MODULE.bazel` with
 `./build/deps/update-deps.py wpt`, which keeps the pinned `freeze_version`.
 
+The `0001-disable-virtualenv-for-serve-command` patch sets `"virtualenv":
+false` for the `serve` command in `tools/serve/commands.json`. The wpt CLI
+(`tools/wpt/wpt.py`) asserts that a command without a virtualenv declares no
+`requirements` or `conditional_requirements`, so the patch must remove every
+such key that upstream adds to that command.
+
+To produce a rebased patch, download the release archive from
+`cloudflare/workerd-tools` into a fresh directory, edit a copy of the target
+file, and write a unified diff with `a/` and `b/` path prefixes.
+
 Describe each patch change and the upstream commit that required it in the
 final report.
 

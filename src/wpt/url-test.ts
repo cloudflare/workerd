@@ -6,7 +6,19 @@ import { type TestRunnerConfig } from 'harness/harness';
 
 export default {
   'IdnaTestV2-removed.any.js': {},
-  'IdnaTestV2.any.js': {},
+  'IdnaTestV2.any.js': {
+    comment:
+      'ada-url IDNA tables predate Unicode 18, so code points assigned in Unicode 18 are rejected',
+    expectedFailures: [
+      'ToASCII("\u2d0d\u{3f8cd}\ua868\u05ae.\u2d1e")',
+      'ToASCII("\u10ad\u{3f8cd}\ua868\u05ae.\u10be")',
+      'ToASCII("\u10ad\u{3f8cd}\ua868\u05ae.\u2d1e")',
+      'ToASCII("\u{3e8ac}\u3002\u0729\u3002\ucbd95")',
+      'ToASCII("\u{3e8ac}\u3002\u0729\u3002\u110d\u1173\u11ac5")',
+      'ToASCII("\u{3e8ac}.\u0729.\ucbd95")',
+      'ToASCII("\u{3e8ac}.\u0729.\u110d\u1173\u11ac5")',
+    ],
+  },
   'historical.any.js': {},
   'idlharness.any.js': {
     comment:
