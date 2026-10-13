@@ -181,11 +181,11 @@ class LifetimeExtendedSubrequestChannel final: public IoChannelFactory::Subreque
 };
 
 // EventDispatcher server that forwards events to a restored service channel. This is a minimal
-// duplicate of the (private) `Server::WorkerdBootstrapImpl::EventDispatcherImpl` in workerd's
-// server.c++, used to implement the `service :WorkerdBootstrap` result of `restoreService()` when
-// the restore event is received over RPC. A restored ServiceStub is only ever used to make HTTP
-// requests, make JS-RPC calls, or receive the next hop of a restore chain, so other event types
-// are unsupported.
+// duplicate of the (private) `WorkerdBootstrapImpl::EventDispatcherImpl` in workerd's
+// worker-factory-rpc.c++, used to implement the `service :WorkerdBootstrap` result of
+// `restoreService()` when the restore event is received over RPC. A restored ServiceStub is only
+// ever used to make HTTP requests, make JS-RPC calls, or receive the next hop of a restore chain,
+// so other event types are unsupported.
 class RestoredServiceEventDispatcher final: public rpc::EventDispatcher::Server {
  public:
   RestoredServiceEventDispatcher(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,

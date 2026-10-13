@@ -58,6 +58,11 @@ struct WorkerSource {
     // isolate to avoid recompiling. In this case `body` points at the module's wire bytes, which
     // are owned by the compiled module.
     kj::Maybe<v8::CompiledWasmModule> compiledModule;
+
+    // Whether `compiledModule` was compiled with the wasm_esm_integration_builtins compile
+    // options. Compiled code is only shared with a target whose own setting matches, since the
+    // setting is baked into the compiled module; otherwise the target recompiles from `body`.
+    bool compiledWithEsmIntegrationBuiltins = false;
   };
   struct JsonModule {
     // JSON-encoded content; will be parsed automatically when imported.

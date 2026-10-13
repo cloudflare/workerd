@@ -48,7 +48,9 @@ pub fn op(name: &'static str) -> impl Fn(std::io::Error) -> KjIoError {
     }
 }
 
-fn exception_type(error: &std::io::Error) -> KjExceptionType {
+/// The `kj::Exception::Type` KJ gives an I/O failure.
+#[must_use]
+pub fn exception_type(error: &std::io::Error) -> KjExceptionType {
     use std::io::ErrorKind;
     // Primary classification: by raw errno, mirroring KJ's own table (`typeOfErrno()` in
     // kj/debug.c++) errno-for-errno. Consumers (kj-http, capnp-rpc) change behavior on the
@@ -223,6 +225,13 @@ impl std::fmt::Display for KjIoError {
 impl From<KjIoError> for KjError {
     fn from(error: KjIoError) -> Self {
         Self::new(exception_type(&error.inner), error.to_string())
+    }
+}
+
+/// The failure itself, for a Rust caller that speaks `std::io`.
+impl From<KjIoError> for std::io::Error {
+    fn from(error: KjIoError) -> Self {
+        error.inner
     }
 }
 

@@ -28,7 +28,9 @@
     },
     {
       "name": "apple_support",
-      "type": "bazel_dep"
+      "type": "bazel_dep",
+      // 2.10 breaks the ring crate due to libtool changes, unfreeze once that's fixed
+      "freeze_version": "2.9.1"
     },
     {
       "name": "rules_cc",

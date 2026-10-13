@@ -400,6 +400,14 @@ class IsolateBase {
     usingFastJsgStruct = true;
   }
 
+  void setWasmEsmIntegrationBuiltinsEnabled() {
+    wasmEsmIntegrationBuiltinsEnabled = true;
+  }
+
+  bool isWasmEsmIntegrationBuiltinsEnabled() const {
+    return wasmEsmIntegrationBuiltinsEnabled;
+  }
+
   bool getUsingFastJsgStruct() const {
     return usingFastJsgStruct;
   }
@@ -558,6 +566,7 @@ class IsolateBase {
   bool usingNewModuleRegistry = false;
   bool usingEnhancedErrorSerialization = false;
   bool usingFastJsgStruct = false;
+  bool wasmEsmIntegrationBuiltinsEnabled = false;
   bool extraMicrotaskCheckpointRequested = false;
 
   uint moduleEvaluationDepth = 0;

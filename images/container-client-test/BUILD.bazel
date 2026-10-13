@@ -27,7 +27,7 @@ oci_image(
     base = "@node_25_slim",
     cmd = ["/{}/app".format(package_name())],
     tags = [
-        "no-remote",
+        "no-remote-exec",
         "requires-container-engine",
     ],
     target_compatible_with = [

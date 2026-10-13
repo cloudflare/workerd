@@ -1686,4 +1686,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # key encapsulation helpers, getPublicKey(), SubtleCrypto.supports(), and AKP JWK support. It is
   # explicitly gated because the draft is still changing and workerd does not implement the full
   # proposal. The API may change as the draft evolves.
+
+  wasmEsmIntegrationBuiltins @192 :Bool
+      $compatEnableFlag("wasm_esm_integration_builtins");
+  # Compiles Wasm modules with the js-string builtins and imported string constants enabled,
+  # equivalent to `new WebAssembly.Module(src, { builtins: ['js-string'],
+  # importedStringConstants: 'wasm:js/string-constants' })`. The proposal is still in the
+  # implementation phase, so the feature is opt-in. Modules that don't import the `wasm:*`
+  # namespaces are unaffected.
 }

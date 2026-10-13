@@ -1,5 +1,6 @@
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
+load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_test.bzl", "wd_test")
@@ -42,6 +43,7 @@ wd_cc_library(
         "legacy-hibernation-manager.c++",
         "per-isolate-bootstrap.c++",
         "stored-value.c++",
+        "timer-queue.c++",
         "trace-stream.c++",
         "tracer.c++",
         "worker.c++",
@@ -57,6 +59,7 @@ wd_cc_library(
         "legacy-hibernation-manager.h",
         "per-isolate-bootstrap.h",
         "stored-value.h",
+        "timer-queue.h",
         "trace-stream.h",
         "tracer.h",
         "worker.h",
@@ -691,4 +694,31 @@ kj_test(
         ":io",
         "//src/workerd/tests:test-fixture",
     ],
+)
+
+kj_test(
+    src = "timer-queue-test.c++",
+    deps = [":io"],
+)
+
+kj_test(
+    src = "io-context-timer-test.c++",
+    deps = [":timer-test-fixture"],
+)
+
+wd_cc_library(
+    name = "timer-test-fixture",
+    testonly = True,
+    hdrs = ["timer-test-fixture.h"],
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+        "@capnp-cpp//src/kj:kj-async-io",
+    ],
+)
+
+wd_cc_benchmark(
+    name = "bench-timer-clock",
+    srcs = ["bench-timer-clock.c++"],
+    deps = [":timer-test-fixture"],
 )
