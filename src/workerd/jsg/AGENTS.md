@@ -120,6 +120,15 @@ These rules MUST be followed when writing or modifying JSG code:
     caller may pass `InstantiateModuleOptions::ALLOW_PENDING_EVALUATION` to receive the
     pending evaluation promise instead of an error.
 
+13. **Compiled Wasm reuse MUST preserve compilation settings.** Compatibility flags
+    that change Wasm compilation options or compile-time imports must be included
+    in the slot key used by `CompiledWasmModuleHolder::getOrCompile()` in
+    `modules.c++`. Keep its slot selection and `compiled` storage in `modules.h`
+    consistent with `compileWasmModule()`. The current key is
+    `Lock::isWasmEsmIntegrationBuiltinsEnabled()`. Extend the reuse tests in
+    `modules-new-test.c++` and `api/pyodide/wasm-module-test.c++` when adding a
+    setting, including isolate destruction and a distinct compilation per setting.
+
 The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
 automatically detects missing `visitForGc` implementations and unvisited fields
 across the codebase, enforcing invariants 1 and 2 at build time.
