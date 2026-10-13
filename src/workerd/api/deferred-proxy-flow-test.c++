@@ -23,9 +23,9 @@
 
 #include <workerd/api/js-readable-stream.h>
 #include <workerd/api/js-streams-bridge.h>
+#include <workerd/api/per-isolate-bootstrap.h>
 #include <workerd/api/system-streams.h>
 #include <workerd/io/io-context.h>
-#include <workerd/io/per-isolate-bootstrap.h>
 #include <workerd/tests/test-fixture.h>
 
 #include <capnp/message.h>
