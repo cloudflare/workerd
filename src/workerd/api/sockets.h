@@ -321,8 +321,8 @@ class Socket: public jsg::Object {
     kj::Maybe<kj::Promise<void>> watchForDisconnectTask;
     // tlsStarter must be declared after connectionStream so that it is destroyed first, since it
     // holds a reference that keeps the connection alive.
-    kj::Own<kj::TlsStarterCallback> tlsStarter;
-    ConnectionData(kj::Own<kj::TlsStarterCallback> tlsStarter,
+    kj::Rc<kj::TlsStarterCallback> tlsStarter;
+    ConnectionData(kj::Rc<kj::TlsStarterCallback> tlsStarter,
         kj::OneOf<kj::Rc<kj::AsyncIoStream>, kj::Rc<DatagramChannel>> connectionStream,
         kj::Promise<void> disconnectTask)
         : connectionStream(kj::mv(connectionStream)),
@@ -502,7 +502,7 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
 // side hands its stream to a fresh Socket at that point. Thus each side's startTls() completes only
 // once the other side has called startTls() too - the same rule that applies for a real handshake
 // - and fails if the other side can no longer call it: its socket closes or the handler returns.
-kj::Own<kj::TlsStarterCallback> setupInternalTlsRendezvous(kj::TlsStarterCallback& peerStarter);
+kj::Rc<kj::TlsStarterCallback> setupInternalTlsRendezvous(kj::TlsStarterCallback& peerStarter);
 
 // Materializes a socket received over RPC from its three external-table entries (socket
 // metadata, then the readable and writable stream halves, in Socket::serialize()'s order),
