@@ -77,15 +77,13 @@ export const hwmInfinityRejected = {
   },
 };
 
-// DIVERGENCE: argument conversion order. The spec converts both
-// strategies first, the writable then the readable (each highWaterMark
-// and its ToNumber, then size), and only then reads the transformer's
-// members. C++ reads the transformer's members first, then each strategy
-// in that order. TypeScript reads the transformer's members first, then
-// the writable strategy's size before its highWaterMark, and converts the
-// readable strategy's highWaterMark after reading its size. An empty
-// transformer and one with a transform() hook cover the TS
-// implementation's elided and standard construction paths.
+// DIVERGENCE: argument conversion order. The spec (TypeScript) converts
+// both strategies first, the writable then the readable (each
+// highWaterMark and its ToNumber, then size), and only then reads the
+// transformer's members. C++ reads the transformer's members first, then
+// each strategy in that order. An empty transformer and one with a
+// transform() hook cover the TS implementation's elided and standard
+// construction paths.
 export const argumentConversionOrder = {
   test() {
     const loggedStrategy = (order, name) => ({
@@ -120,13 +118,13 @@ export const argumentConversionOrder = {
         order,
         usingTsImpl
           ? [
-              'transformer.start',
-              'writable.size',
               'writable.hwm',
               'writable.hwm.valueOf',
+              'writable.size',
               'readable.hwm',
-              'readable.size',
               'readable.hwm.valueOf',
+              'readable.size',
+              'transformer.start',
             ]
           : [
               'transformer.start',
@@ -142,51 +140,47 @@ export const argumentConversionOrder = {
   },
 };
 
-// DIVERGENCE: C++ converts the transformer as a WebIDL dictionary: null
-// means no transformer, a function is a transformer whose members are
-// read, and every other primitive throws TypeError. TypeScript accepts
-// null too, but throws TypeError for every other primitive and for a
-// function. The spec rejects null and the other primitives (the argument
-// is typed `object`) and accepts a function.
+// DIVERGENCE: a null transformer is accepted by C++, which converts it as
+// a WebIDL dictionary (no transformer), but rejected by TypeScript (spec:
+// the argument is typed `object`, which null is not). Every other
+// primitive throws TypeError, and a function is accepted and its members
+// read, in both (spec).
 export const garbageTransformerValidation = {
   test() {
     const transformerError = {
       name: 'TypeError',
       message: 'transformer must be an object',
     };
+    if (usingTsImpl) {
+      throws(() => new TransformStream(null), transformerError);
+    } else {
+      new TransformStream(null);
+    }
     for (const transformer of [42, 'x', true, 1n, Symbol('s')]) {
       throws(
         () => new TransformStream(transformer),
         usingTsImpl ? transformerError : TypeError
       );
     }
-    new TransformStream(null);
     let started = false;
-    const transformer = Object.assign(function transformer() {}, {
-      start() {
-        started = true;
-      },
-    });
-    if (usingTsImpl) {
-      throws(() => new TransformStream(transformer), transformerError);
-      strictEqual(started, false);
-    } else {
-      new TransformStream(transformer);
-      strictEqual(started, true);
-    }
+    new TransformStream(
+      Object.assign(function transformer() {}, {
+        start() {
+          started = true;
+        },
+      })
+    );
+    strictEqual(started, true);
   },
 };
 
-// DIVERGENCE: C++ converts each strategy argument as a WebIDL dictionary:
-// null means a strategy with no members and every other primitive throws
-// TypeError. TypeScript accepts null and every other primitive as no
-// strategy, reading a primitive's members through its wrapper prototype.
-// A readable strategy without a highWaterMark (null or {}) differs too:
-// C++ applies the TransformStream default highWaterMark (0) only when the
-// argument is omitted, so the readable side takes the ReadableStream
-// default (1); TypeScript applies 0 to any strategy without one, as the
-// spec's ExtractHighWaterMark does. Both read a function's members, as
-// the spec does.
+// DIVERGENCE: each strategy argument converts as a WebIDL dictionary in
+// both (spec): a function's members are read, and every primitive except
+// null throws TypeError (messages differ). A readable strategy without a
+// highWaterMark (null or {}) differs: C++ applies the TransformStream
+// default highWaterMark (0) only when the argument is omitted, so the
+// readable side takes the ReadableStream default (1); TypeScript applies
+// 0 to any strategy without one, as the spec's ExtractHighWaterMark does.
 export const strategyArgumentShapes = {
   test() {
     // The writable's and the readable's desiredSize at construction.
@@ -211,29 +205,30 @@ export const strategyArgumentShapes = {
       highWaterMark: 3,
     });
     deepStrictEqual(desiredSizes(strategy, strategy), [3, 3]);
+    const strategyError = usingTsImpl
+      ? {
+          name: 'TypeError',
+          message: 'The queuing strategy must be an object.',
+        }
+      : TypeError;
     for (const primitive of [5, 'x', true, 1n, Symbol('s')]) {
-      if (usingTsImpl) {
-        deepStrictEqual(desiredSizes(primitive, undefined), [1, 0]);
-        deepStrictEqual(desiredSizes(undefined, primitive), [1, 0]);
-      } else {
-        throws(() => desiredSizes(primitive, undefined), TypeError);
-        throws(() => desiredSizes(undefined, primitive), TypeError);
-      }
+      throws(() => desiredSizes(primitive, undefined), strategyError);
+      throws(() => desiredSizes(undefined, primitive), strategyError);
     }
   },
 };
 
 // DIVERGENCE: which error wins when two are possible. Both reject a
 // primitive transformer before reading the strategies, so its TypeError
-// beats a throwing strategy getter (spec). C++ converts all three
-// arguments before validating anything, converting each highWaterMark
-// to an integer: a throwing writable strategy getter beats readableType:
-// 'bytes', and an invalid writable highWaterMark beats both readableType:
-// 'bytes' and a throwing readable strategy getter. TypeScript checks
-// readableType before reading either strategy, and range-checks the
-// writable highWaterMark before reading the readable strategy. The spec
-// converts both strategies first, then checks readableType, then each
-// highWaterMark's range.
+// beats a throwing strategy getter (spec), and both convert the
+// strategies before checking readableType, so a throwing writable
+// strategy getter beats readableType: 'bytes' (spec). C++ converts each
+// highWaterMark to an integer while converting the arguments, so an
+// invalid writable highWaterMark (TypeError) beats readableType: 'bytes'
+// and a throwing readable strategy getter. TypeScript follows the spec:
+// both strategies are converted, then readableType is checked, then each
+// highWaterMark's range, so readableType: 'bytes' and the readable
+// strategy getter's error both beat an invalid writable highWaterMark.
 export const conversionErrorPrecedence = {
   test() {
     const boom = new Error('boom');
@@ -259,7 +254,7 @@ export const conversionErrorPrecedence = {
     );
     throws(
       () => new TransformStream({ readableType: 'bytes' }, throwingStrategy),
-      usingTsImpl ? readableTypeError : (e) => e === boom
+      (e) => e === boom
     );
     throws(
       () =>
@@ -268,9 +263,7 @@ export const conversionErrorPrecedence = {
     );
     throws(
       () => new TransformStream({}, { highWaterMark: -1 }, throwingStrategy),
-      usingTsImpl
-        ? { name: 'RangeError', message: 'Invalid highWaterMark' }
-        : negativeHighWaterMark
+      usingTsImpl ? (e) => e === boom : negativeHighWaterMark
     );
   },
 };

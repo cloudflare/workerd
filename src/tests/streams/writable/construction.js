@@ -59,12 +59,10 @@ export const sinkTypeValidation = {
 
 // DIVERGENCE: the spec converts the queuingStrategy argument before
 // inspecting the underlying sink (the WPT constructor.any "converted
-// after queuingStrategy" case). TypeScript reads strategy.size, then
-// strategy.highWaterMark and its ToNumber, then sink.write. C++ converts
-// the sink dictionary first. Within the strategy, WebIDL converts members
-// in lexicographic order (highWaterMark and its ToNumber, then size), as
-// C++ does; TypeScript reads size first, so only its strategy-before-sink
-// order is spec.
+// after queuingStrategy" case), its members in lexicographic order:
+// highWaterMark and its ToNumber, then size. TypeScript follows it. C++
+// converts the sink dictionary first, then the strategy in the same
+// order.
 export const argumentConversionOrder = {
   test() {
     const order = [];
@@ -96,9 +94,9 @@ export const argumentConversionOrder = {
     new WritableStream(sink, strategy);
     if (usingTsImpl) {
       deepStrictEqual(order, [
-        'strategy.size',
         'strategy.highWaterMark',
         'hwm.valueOf',
+        'strategy.size',
         'sink.write',
       ]);
     } else {
@@ -112,18 +110,22 @@ export const argumentConversionOrder = {
   },
 };
 
-// DIVERGENCE: C++ converts the underlyingSink as a WebIDL dictionary:
-// null means no sink, a function is a sink whose members are read, and
-// every other primitive throws TypeError. TypeScript throws TypeError for
-// null, every other primitive and a function alike. The spec rejects
-// null and the other primitives (the argument is typed `object`) and
-// accepts a function.
+// DIVERGENCE: a null underlyingSink is accepted by C++, which converts it
+// as a WebIDL dictionary (no sink), but rejected by TypeScript (spec: the
+// argument is typed `object`, which null is not). Every other primitive
+// throws TypeError, and a function is accepted and its members read, in
+// both (spec).
 export const garbageSinkValidation = {
   test() {
     const sinkError = {
       name: 'TypeError',
       message: 'underlyingSink must be an object',
     };
+    if (usingTsImpl) {
+      throws(() => new WritableStream(null), sinkError);
+    } else {
+      new WritableStream(null);
+    }
     for (const sink of [42, 'x', true, 1n, Symbol('s')]) {
       throws(
         () => new WritableStream(sink),
@@ -131,46 +133,35 @@ export const garbageSinkValidation = {
       );
     }
     let started = false;
-    const sink = Object.assign(function sink() {}, {
-      start() {
-        started = true;
-      },
-    });
-    if (usingTsImpl) {
-      throws(() => new WritableStream(null), sinkError);
-      throws(() => new WritableStream(sink), sinkError);
-      strictEqual(started, false);
-    } else {
-      new WritableStream(null);
-      new WritableStream(sink);
-      strictEqual(started, true);
-    }
+    new WritableStream(
+      Object.assign(function sink() {}, {
+        start() {
+          started = true;
+        },
+      })
+    );
+    strictEqual(started, true);
   },
 };
 
-// DIVERGENCE: C++ converts the strategy argument as a WebIDL dictionary:
-// null means no strategy and every other primitive throws TypeError.
-// TypeScript throws for null (reading its size) and accepts every other
-// primitive as no strategy, reading its members through the wrapper
-// prototype. Both read a function's members, as the spec does.
+// The strategy argument converts as a WebIDL dictionary in both (spec):
+// null means no strategy, a function's members are read, and every other
+// primitive throws TypeError (messages differ).
 export const strategyArgumentShapes = {
   test() {
     const desiredSize = (strategy) =>
       new WritableStream({}, strategy).getWriter().desiredSize;
-    const primitives = [5, 'x', true, 1n, Symbol('s')];
-    if (usingTsImpl) {
-      throws(() => desiredSize(null), {
-        name: 'TypeError',
-        message: "Cannot read properties of null (reading 'size')",
-      });
-      for (const strategy of primitives) {
-        strictEqual(desiredSize(strategy), 1);
-      }
-    } else {
-      strictEqual(desiredSize(null), 1);
-      for (const strategy of primitives) {
-        throws(() => desiredSize(strategy), TypeError);
-      }
+    strictEqual(desiredSize(null), 1);
+    for (const strategy of [5, 'x', true, 1n, Symbol('s')]) {
+      throws(
+        () => desiredSize(strategy),
+        usingTsImpl
+          ? {
+              name: 'TypeError',
+              message: 'The queuing strategy must be an object.',
+            }
+          : TypeError
+      );
     }
     const strategy = Object.assign(function strategy() {}, {
       highWaterMark: 3,
@@ -179,15 +170,13 @@ export const strategyArgumentShapes = {
   },
 };
 
-// DIVERGENCE: which error wins when two are possible. C++ converts the
-// sink before reading the strategy, so a primitive sink beats a throwing
-// strategy getter, and converts highWaterMark to an integer before the
-// sink's type is checked (pedantic_wpt included), so an invalid
-// highWaterMark beats an invalid sink type. TypeScript reads the strategy
-// first: the getter's error beats the primitive sink, and the
-// highWaterMark RangeError beats the sink type's. The spec rejects the
-// primitive sink first, and checks the sink's type before the
-// highWaterMark.
+// DIVERGENCE: which error wins when two are possible. Both reject a
+// primitive sink before reading the strategy, so its TypeError beats a
+// throwing strategy getter (spec). TypeScript checks the sink's type
+// before the highWaterMark's range (spec), so an invalid sink type's
+// RangeError beats an invalid highWaterMark's; C++ converts highWaterMark
+// to an integer before the sink's type is checked (pedantic_wpt
+// included), so its TypeError wins.
 export const conversionErrorPrecedence = {
   test() {
     const boom = new Error('boom');
@@ -198,12 +187,14 @@ export const conversionErrorPrecedence = {
             throw boom;
           },
         }),
-      usingTsImpl ? (e) => e === boom : TypeError
+      usingTsImpl
+        ? { name: 'TypeError', message: 'underlyingSink must be an object' }
+        : TypeError
     );
     throws(
       () => new WritableStream({ type: 'bytes' }, { highWaterMark: -1 }),
       usingTsImpl
-        ? { name: 'RangeError', message: 'Invalid highWaterMark' }
+        ? { name: 'RangeError', message: 'Invalid underlying sink type' }
         : {
             name: 'TypeError',
             message:

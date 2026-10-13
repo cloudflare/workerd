@@ -123,6 +123,10 @@ const {
   kEnumerable,
   normalizeExpectedLength,
   toStringTagProperty,
+  requireObject,
+  convertQueuingStrategy,
+  extractHighWaterMark,
+  extractSizeAlgorithm,
 } = require('webstreams/common') as CommonHelpers;
 
 import type { ViewExtentHelpers } from './view-extent';
@@ -4513,12 +4517,16 @@ class ReadableStream<R> {
       return;
     }
 
+    // WebIDL argument conversion: the source is typed `object`, so null and
+    // every other primitive throw before the strategy is read.
+    requireObject(underlyingSource, 'underlyingSource must be an object');
+
     // BACKEND-DISPATCH: stream construction (one of the five sanctioned
     // dispatch points): native vs queued byte vs queued default.
     //
-    // The native check runs FIRST: native sources are forbidden from
-    // declaring `type` (enforced during native extraction), so a
-    // native-marked source must never fall through to the queued
+    // The native check runs before any member is read: native sources are
+    // forbidden from declaring `type` (enforced during native extraction),
+    // so a native-marked source must never fall through to the queued
     // branches. The strategy argument is PERMANENTLY ignored on the
     // native branch: native pacing is purely demand-driven (the source
     // contractually ignores desiredSize).
@@ -4565,23 +4573,10 @@ class ReadableStream<R> {
       return;
     }
 
-    // --- WebIDL strategy dictionary conversion (BEFORE source reads) ---
-    // Per WebIDL, dictionary-typed arguments are converted (property reads
-    // happen) at the IDL layer before the constructor body runs. The
-    // `strategy` parameter is QueuingStrategy (a dictionary); the
-    // `underlyingSource` parameter is plain `object` (no dictionary
-    // conversion). We simulate this by reading strategy properties first.
-    const sizeFn = strategy.size;
-    let sizeAlgorithm: (chunk: R) => number;
-    if (sizeFn === undefined) {
-      sizeAlgorithm = () => 1;
-    } else if (typeof sizeFn !== 'function') {
-      throw new TypeError('strategy.size must be a function');
-    } else {
-      const callSize = uncurryThis(sizeFn);
-      sizeAlgorithm = (chunk: R) => callSize(undefined, chunk);
-    }
-    const rawHWM = strategy.highWaterMark;
+    // WebIDL converts the strategy dictionary at the IDL layer, before the
+    // constructor body converts the source to an UnderlyingSource
+    // dictionary and reads its members.
+    const strategyDict = convertQueuingStrategy(strategy);
 
     // WebIDL: the 'type' member is a string enum — perform ToString() on
     // non-undefined values so that objects with toString()/valueOf() work
@@ -4592,22 +4587,15 @@ class ReadableStream<R> {
 
     if (type === 'bytes') {
       // Byte streams: size() is forbidden, highWaterMark defaults to 0.
-      if (sizeFn !== undefined) {
+      if (strategyDict.size !== undefined) {
         throw new RangeError(
           'The strategy for a byte stream cannot have a size function'
         );
       }
-      let highWaterMark = 0;
-      if (rawHWM !== undefined) {
-        highWaterMark = +rawHWM;
-        if (NumberIsNaN(highWaterMark) || highWaterMark < 0) {
-          throw new RangeError('Invalid highWaterMark');
-        }
-      }
       this.#controller = setupReadableByteStreamControllerFromUnderlyingSource(
         this,
         underlyingSource,
-        highWaterMark
+        extractHighWaterMark(strategyDict, 0)
       );
     } else {
       // The spec says, "Assert: underlyingSourceDict["type"] does not exist"
@@ -4617,19 +4605,12 @@ class ReadableStream<R> {
         throw new TypeError(`Invalid underlying source type: ${type}`);
       }
       // Default streams: highWaterMark defaults to 1.
-      let highWaterMark = 1;
-      if (rawHWM !== undefined) {
-        highWaterMark = +rawHWM;
-        if (NumberIsNaN(highWaterMark) || highWaterMark < 0) {
-          throw new RangeError('Invalid highWaterMark');
-        }
-      }
       this.#controller =
         setupReadableStreamDefaultControllerFromUnderlyingSource(
           this,
           underlyingSource,
-          sizeAlgorithm,
-          highWaterMark
+          extractSizeAlgorithm<R>(strategyDict),
+          extractHighWaterMark(strategyDict, 1)
         );
     }
   }

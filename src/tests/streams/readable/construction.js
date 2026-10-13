@@ -9,28 +9,27 @@
 import { strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
-// DIVERGENCE (mirror-image!): C++ converts the underlyingSource as a
-// WebIDL dictionary: null means no source and every other primitive
-// throws TypeError. TypeScript rejects null (spec: the argument is typed
-// `object`, which null is not) but accepts every other primitive,
-// reading its members through the wrapper prototype. Both accept a
-// function and read its members, as the spec does.
+// DIVERGENCE: a null underlyingSource is accepted by C++, which converts
+// it as a WebIDL dictionary (no source), but rejected by TypeScript
+// (spec: the argument is typed `object`, which null is not). Every other
+// primitive throws TypeError, and a function is accepted and its members
+// read, in both (spec).
 export const garbageSourceValidation = {
   test() {
-    const primitives = [42, 'x', true, 1n, Symbol('s')];
+    const sourceError = {
+      name: 'TypeError',
+      message: 'underlyingSource must be an object',
+    };
     if (usingTsImpl) {
-      throws(() => new ReadableStream(null), {
-        name: 'TypeError',
-        message: 'Cannot convert undefined or null to object',
-      });
-      for (const source of primitives) {
-        new ReadableStream(source);
-      }
+      throws(() => new ReadableStream(null), sourceError);
     } else {
       new ReadableStream(null);
-      for (const source of primitives) {
-        throws(() => new ReadableStream(source), TypeError);
-      }
+    }
+    for (const source of [42, 'x', true, 1n, Symbol('s')]) {
+      throws(
+        () => new ReadableStream(source),
+        usingTsImpl ? sourceError : TypeError
+      );
     }
     let started = false;
     new ReadableStream(
@@ -60,11 +59,9 @@ export const invalidTypeValidation = {
 };
 
 // DIVERGENCE: argument conversion order (the WPT constructor.any seed).
-// The spec converts the queuingStrategy FIRST (highWaterMark and its
-// ToNumber, then size), then reads the source's type. TypeScript reads
-// the strategy first but size before highWaterMark, and converts
-// highWaterMark only after reading the source's type; C++ reads the
-// source's type first, then highWaterMark and its ToNumber, then size.
+// The spec (TypeScript) converts the queuingStrategy FIRST (highWaterMark
+// and its ToNumber, then size), then reads the source's type; C++ reads
+// the source's type first, then the strategy in the same order.
 export const argumentConversionOrder = {
   test() {
     const order = [];
@@ -94,17 +91,15 @@ export const argumentConversionOrder = {
     strictEqual(
       order.join(','),
       usingTsImpl
-        ? 'strategy.size,strategy.hwm,source.type,hwm.valueOf'
+        ? 'strategy.hwm,hwm.valueOf,strategy.size,source.type'
         : 'source.type,strategy.hwm,hwm.valueOf,strategy.size'
     );
   },
 };
 
-// DIVERGENCE: C++ converts the strategy argument as a WebIDL dictionary:
-// null means no strategy and every other primitive throws TypeError.
-// TypeScript throws for null (reading its size) and accepts every other
-// primitive as no strategy, reading its members through the wrapper
-// prototype. Both read a function's members, as the spec does.
+// The strategy argument converts as a WebIDL dictionary in both (spec):
+// null means no strategy, a function's members are read, and every other
+// primitive throws TypeError (messages differ).
 export const strategyArgumentShapes = {
   test() {
     const desiredSize = (strategy) => {
@@ -119,20 +114,17 @@ export const strategyArgumentShapes = {
       );
       return seen;
     };
-    const primitives = [5, 'x', true, 1n, Symbol('s')];
-    if (usingTsImpl) {
-      throws(() => desiredSize(null), {
-        name: 'TypeError',
-        message: "Cannot read properties of null (reading 'size')",
-      });
-      for (const strategy of primitives) {
-        strictEqual(desiredSize(strategy), 1);
-      }
-    } else {
-      strictEqual(desiredSize(null), 1);
-      for (const strategy of primitives) {
-        throws(() => desiredSize(strategy), TypeError);
-      }
+    strictEqual(desiredSize(null), 1);
+    for (const strategy of [5, 'x', true, 1n, Symbol('s')]) {
+      throws(
+        () => desiredSize(strategy),
+        usingTsImpl
+          ? {
+              name: 'TypeError',
+              message: 'The queuing strategy must be an object.',
+            }
+          : TypeError
+      );
     }
     const strategy = Object.assign(function strategy() {}, {
       highWaterMark: 3,
@@ -141,15 +133,13 @@ export const strategyArgumentShapes = {
   },
 };
 
-// DIVERGENCE: which error wins when two are possible. C++ converts the
-// source before reading the strategy, so a primitive source beats a
-// throwing strategy getter, and converts highWaterMark to an integer
-// before validating anything else, so an invalid highWaterMark beats an
-// invalid type and a non-callable size. TypeScript reads the strategy
-// first, so the getter's error beats the primitive source (the spec
-// rejects the source first); an invalid type and a non-callable size
-// beat an invalid highWaterMark, as the spec's ExtractHighWaterMark
-// range check comes after both.
+// DIVERGENCE: which error wins when two are possible. Both reject a
+// primitive source before reading the strategy, so its TypeError beats a
+// throwing strategy getter (spec). An invalid type and a non-callable
+// size beat an invalid highWaterMark under TypeScript, as the spec's
+// ExtractHighWaterMark range check comes after both; C++ converts
+// highWaterMark to an integer before validating anything else, so its
+// TypeError wins.
 export const conversionErrorPrecedence = {
   test() {
     const boom = new Error('boom');
@@ -160,7 +150,9 @@ export const conversionErrorPrecedence = {
             throw boom;
           },
         }),
-      usingTsImpl ? (e) => e === boom : TypeError
+      usingTsImpl
+        ? { name: 'TypeError', message: 'underlyingSource must be an object' }
+        : TypeError
     );
     throws(
       () => new ReadableStream({ type: 'potato' }, { highWaterMark: -1 }),

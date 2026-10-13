@@ -2,7 +2,17 @@
 
 // Helpers shared by the webstreams modules. Leaf module: requires nothing.
 
-const { BigInt, NumberIsFinite, ObjectFreeze, TypeError } = primordials;
+import type { QueuingStrategy } from './types';
+
+const {
+  BigInt,
+  NumberIsFinite,
+  NumberIsNaN,
+  ObjectFreeze,
+  RangeError,
+  TypeError,
+  uncurryThis,
+} = primordials;
 
 function isActualObject(value: unknown): value is object {
   return value != null && typeof value === 'object';
@@ -58,12 +68,97 @@ function normalizeExpectedLength(value: unknown): bigint | undefined {
   return BigInt(length - (length % 1));
 }
 
+// WebIDL conversion of a constructor argument typed `object` (an underlying
+// source or sink, a transformer): any object, a function included, passes;
+// null and every other primitive throw. Nothing is read. An omitted argument
+// defaults to kNullProtoObject before it gets here.
+function requireObject(value: unknown, message: string): void {
+  if (!isActualObject(value) && typeof value !== 'function') {
+    throw new TypeError(message);
+  }
+}
+
+// WebIDL dictionary conversion of a strategy argument, as in C++: undefined
+// and null mean no strategy; any other non-object throws.
+function toStrategyDictionary(value: unknown): QueuingStrategy<unknown> {
+  if (value === undefined || value === null) return kNullProtoObject;
+  if (typeof value !== 'object' && typeof value !== 'function') {
+    throw new TypeError('The queuing strategy must be an object.');
+  }
+  return value as QueuingStrategy<unknown>;
+}
+
+// A strategy argument as WebIDL converts a QueuingStrategy dictionary: each
+// member read once, in lexicographic order. highWaterMark has been through
+// ToNumber; size is a function. An absent member is undefined.
+interface QueuingStrategyDict {
+  highWaterMark: number | undefined;
+  size: ((chunk: unknown) => number) | undefined;
+}
+
+function convertQueuingStrategy(value: unknown): QueuingStrategyDict {
+  const strategy = toStrategyDictionary(value);
+  const rawHighWaterMark: unknown = strategy.highWaterMark;
+  // Unary plus is ToNumber (see normalizeExpectedLength).
+  const highWaterMark =
+    rawHighWaterMark === undefined ? undefined : +(rawHighWaterMark as number);
+  const size: unknown = strategy.size;
+  if (size !== undefined && typeof size !== 'function') {
+    throw new TypeError('strategy.size must be a function');
+  }
+  return {
+    __proto__: null,
+    highWaterMark,
+    size,
+  } as QueuingStrategyDict;
+}
+
+// ToNumber and the range check of the spec's ExtractHighWaterMark: NaN and
+// negative numbers are a RangeError; Infinity and fractions are kept.
+// Converting a number again has no side effects.
+function convertHighWaterMark(value: unknown): number {
+  const highWaterMark = +(value as number);
+  if (NumberIsNaN(highWaterMark) || highWaterMark < 0) {
+    throw new RangeError('Invalid highWaterMark');
+  }
+  return highWaterMark;
+}
+
+// The spec's ExtractHighWaterMark, on a converted strategy.
+function extractHighWaterMark(
+  strategy: QueuingStrategyDict,
+  defaultHighWaterMark: number
+): number {
+  const { highWaterMark } = strategy;
+  return highWaterMark === undefined
+    ? defaultHighWaterMark
+    : convertHighWaterMark(highWaterMark);
+}
+
+// The spec's ExtractSizeAlgorithm, on a converted strategy: size() runs with
+// an undefined receiver and the chunk as its only argument. Without one,
+// every chunk counts 1.
+function extractSizeAlgorithm<T>(
+  strategy: QueuingStrategyDict
+): (chunk: T) => number {
+  const { size } = strategy;
+  if (size === undefined) return () => 1;
+  const callSize = uncurryThis(size);
+  return (chunk: T) => callSize(undefined, chunk);
+}
+
 export type CommonHelpers = {
   isActualObject: typeof isActualObject;
   kNullProtoObject: typeof kNullProtoObject;
   kEnumerable: typeof kEnumerable;
   toStringTagProperty: typeof toStringTagProperty;
   normalizeExpectedLength: typeof normalizeExpectedLength;
+  requireObject: typeof requireObject;
+  toStrategyDictionary: typeof toStrategyDictionary;
+  convertQueuingStrategy: typeof convertQueuingStrategy;
+  convertHighWaterMark: typeof convertHighWaterMark;
+  extractHighWaterMark: typeof extractHighWaterMark;
+  extractSizeAlgorithm: typeof extractSizeAlgorithm;
 };
 
 module.exports = ObjectFreeze({
@@ -72,4 +167,10 @@ module.exports = ObjectFreeze({
   kEnumerable,
   toStringTagProperty,
   normalizeExpectedLength,
+  requireObject,
+  toStrategyDictionary,
+  convertQueuingStrategy,
+  convertHighWaterMark,
+  extractHighWaterMark,
+  extractSizeAlgorithm,
 });

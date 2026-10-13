@@ -99,7 +99,6 @@ const {
   ArrayPrototypePush,
   BigInt,
   Number,
-  NumberIsNaN,
   ObjectDefineProperties,
   PromisePrototypeThen,
   PromiseResolve,
@@ -136,6 +135,8 @@ const {
   kEnumerable,
   normalizeExpectedLength,
   toStringTagProperty,
+  toStrategyDictionary,
+  convertHighWaterMark,
 } = require('webstreams/common') as CommonHelpers;
 const { bufferSourceExtent, copyExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
@@ -203,28 +204,6 @@ let assertIsIdentityTransformStream: (self: IdentityTransformStream) => void;
 // ---------------------------------------------------------------------------
 
 const kPrivateSymbol: symbol = Symbol('private');
-
-// The writable's WHATWG high-water-mark conversion (ToNumber; NaN or a
-// negative number is a RangeError), for FixedLengthStream, which caps the
-// converted number at its length before IdentityTransformStream hands it
-// on. Converting a number again there has no side effects.
-function convertHighWaterMark(value: unknown): number {
-  const highWaterMark = +(value as number);
-  if (NumberIsNaN(highWaterMark) || highWaterMark < 0) {
-    throw new RangeError('Invalid highWaterMark');
-  }
-  return highWaterMark;
-}
-
-// WebIDL dictionary conversion of a constructor's strategy argument, as in
-// C++: undefined and null mean no strategy; any other non-object throws.
-function toStrategyDictionary(value: unknown): QueuingStrategy<unknown> {
-  if (value === undefined || value === null) return kNullProtoObject;
-  if (typeof value !== 'object' && typeof value !== 'function') {
-    throw new TypeError('The queuing strategy must be an object.');
-  }
-  return value as QueuingStrategy<unknown>;
-}
 
 // A write accepted by the writable, snapshotted in its size() callback (see
 // sizeAndSnapshot). Entries are tagged with an own `ok` data property rather
