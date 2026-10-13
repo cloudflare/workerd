@@ -71,47 +71,27 @@ jobs:
           echo "updated=true" >> "$GITHUB_OUTPUT"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Install Claude Code
+      - name: Set up Claude Code
         if: steps.update.outputs.updated == 'true'
-        run: |
-          npm install --global @anthropic-ai/claude-code
-          # Claude Code's Bash sandbox needs these on Linux.
-          sudo apt-get install -y -qq --no-install-recommends bubblewrap socat
-      - name: Triage WPT update
-        id: triage
-        if: steps.update.outputs.updated == 'true'
-        # A failed triage still yields a pull request containing only the bump.
-        continue-on-error: true
-        timeout-minutes: 200
         env:
-          ANTHROPIC_BASE_URL: https://gateway.ai.cloudflare.com/v1/${{ secrets.CF_AI_GATEWAY_ACCOUNT_ID }}/${{ secrets.CF_AI_GATEWAY_NAME }}/anthropic
-          ANTHROPIC_CUSTOM_HEADERS: 'cf-aig-authorization: Bearer ${{ secrets.CF_AI_GATEWAY_TOKEN }}'
-          # The gateway supplies the Anthropic credential; Claude Code still requires one of its own.
-          ANTHROPIC_AUTH_TOKEN: unused
-          # Read-only; lets the agent query the GitHub API for upstream WPT history. Sandboxed
-          # commands see only a placeholder, which the sandbox proxy replaces with the token on
-          # requests to api.github.com.
-          GH_TOKEN: ${{ github.token }}
-          CLAUDE_CODE_EFFORT_LEVEL: medium
-          # Runs sandboxed commands in their own PID namespace, so they cannot read Claude Code's
-          # environment through /proc.
-          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: 1
-          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1
-          # Commands time out after the default 2 minutes unless the agent asks for longer, which
-          # the initial build and complete WPT runs need.
-          BASH_MAX_TIMEOUT_MS: 3600000
-          # Every Bash command runs in Claude Code's sandbox, without the gateway token. Claude's
-          # own file tools run outside the sandbox, so they are denied /proc, where Claude Code's
-          # environment is readable, and its user settings, which could weaken the sandbox. The
-          # settings are passed inline so there is no file for the agent to edit.
+          # The gateway token reaches Claude Code through this settings file rather than the triage
+          # step's environment, which commands the agent runs can read through /proc. Neither those
+          # commands nor Claude's own file tools may read the file. Every Bash command runs in the
+          # sandbox, without the gateway token, and sees only a placeholder GH_TOKEN that the sandbox
+          # proxy replaces with the token on requests to api.github.com. Listing api.github.com in
+          # allowedDomains scopes that replacement; it does not restrict other hosts.
           CLAUDE_SETTINGS: |
             {
+              "env": {
+                "ANTHROPIC_CUSTOM_HEADERS": "cf-aig-authorization: Bearer ${{ secrets.CF_AI_GATEWAY_TOKEN }}"
+              },
               "sandbox": {
                 "enabled": true,
                 "failIfUnavailable": true,
                 "allowUnsandboxedCommands": false,
                 "filesystem": {
-                  "allowWrite": ["/tmp", "~/.cache", "~/bazel-disk-cache", "${{ runner.temp }}"]
+                  "allowWrite": ["/tmp", "~/.cache", "~/bazel-disk-cache", "${{ runner.temp }}"],
+                  "denyRead": ["~/.config/wpt-triage"]
                 },
                 "network": {
                   "tlsTerminate": {},
@@ -126,9 +106,37 @@ jobs:
                 }
               },
               "permissions": {
-                "deny": ["Read(//proc/**)", "Edit(~/.claude/**)"]
+                "deny": [
+                  "Read(~/.config/wpt-triage/**)",
+                  "Edit(~/.config/wpt-triage/**)",
+                  "Edit(~/.claude/**)"
+                ]
               }
             }
+        run: |
+          npm install --global @anthropic-ai/claude-code
+          # Claude Code's Bash sandbox needs these on Linux.
+          sudo apt-get install -y -qq --no-install-recommends bubblewrap socat
+          install -d -m 700 ~/.config/wpt-triage
+          printf '%s' "$CLAUDE_SETTINGS" > ~/.config/wpt-triage/settings.json
+          chmod 600 ~/.config/wpt-triage/settings.json
+      - name: Triage WPT update
+        id: triage
+        if: steps.update.outputs.updated == 'true'
+        # A failed triage still yields a pull request containing only the bump.
+        continue-on-error: true
+        timeout-minutes: 200
+        env:
+          ANTHROPIC_BASE_URL: https://gateway.ai.cloudflare.com/v1/${{ secrets.CF_AI_GATEWAY_ACCOUNT_ID }}/${{ secrets.CF_AI_GATEWAY_NAME }}/anthropic
+          # The gateway supplies the Anthropic credential; Claude Code still requires one of its own.
+          ANTHROPIC_AUTH_TOKEN: unused
+          # Read-only; lets the agent query the GitHub API for upstream WPT history.
+          GH_TOKEN: ${{ github.token }}
+          CLAUDE_CODE_EFFORT_LEVEL: medium
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1
+          # Commands time out after the default 2 minutes unless the agent asks for longer, which
+          # the initial build and complete WPT runs need.
+          BASH_MAX_TIMEOUT_MS: 3600000
           PROMPT: |
             Use the wpt-update skill to perform a triage-only WPT update. This is standalone
             workerd, running unattended in GitHub Actions; nobody can answer questions.
@@ -136,7 +144,9 @@ jobs:
             - The dependency bump is already committed as HEAD; the agreed base is
               ${{ env.BASE_SHA }}. Do not rerun the updater.
             - .bazelrc has uncommitted CI settings, and .claude/skills holds uncommitted
-              symlinks to .opencode/skills. Leave them alone.
+              symlinks to .opencode/skills. Other untracked files at the repository root, such
+              as llvm.sh, build.bazel-profile.gz, and empty .bashrc, .mcp.json, or .env
+              entries, come from CI setup and the sandbox. Leave all of these alone.
             - Do not commit, push, or create branches. Leave your edits in the working tree; the
               workflow commits them.
             - Run Bazel in the foreground with a Bash timeout long enough for it to finish; the
@@ -160,7 +170,7 @@ jobs:
           claude -p "$PROMPT" \
             --model claude-opus-5-5 \
             --permission-mode bypassPermissions \
-            --settings "$CLAUDE_SETTINGS" \
+            --settings ~/.config/wpt-triage/settings.json \
             --output-format stream-json \
             --verbose
       - name: Export changes
