@@ -31,7 +31,7 @@ KJ_TEST("embedded ESM caches accept ASCII, Latin-1 and UTF-16 source strings") {
         js.withinHandleScope([&] {
           // wd_js_bundle generates the caches in module mode. Runtime ESM loading decodes UTF-8.
           auto content = js.str(module.getSrc().asChars());
-          if (content->IsOneByte()) {
+          if (content.isOneByte(js)) {
             ++oneByteCount;
           } else {
             ++utf16Count;
@@ -46,7 +46,7 @@ KJ_TEST("embedded ESM caches accept ASCII, Latin-1 and UTF-16 source strings") {
           auto compiled = v8::ScriptCompiler::CompileModule(
               js.v8Isolate, &source, v8::ScriptCompiler::kConsumeCodeCache);
           KJ_EXPECT(!compiled.IsEmpty(), module.getName());
-          KJ_EXPECT(!source.GetCachedData()->rejected, module.getName(), content->Length());
+          KJ_EXPECT(!source.GetCachedData()->rejected, module.getName(), content.length(js));
         });
       }
       KJ_EXPECT(oneByteCount == 2);
