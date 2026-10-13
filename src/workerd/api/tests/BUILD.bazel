@@ -854,6 +854,8 @@ wd_test(
 )
 
 wd_test(
+    # Persistent RPC cases exercise multiple SQLite-backed actors and durable storage flushes.
+    size = "large",
     src = "persistent-stubs-test.wd-test",
     args = ["--experimental"],
     data = ["persistent-stubs-test.js"],
