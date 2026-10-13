@@ -74,7 +74,10 @@ export const test = {
     const newer = stub.fetch('http://example.com/newer');
     await assert.rejects(older, { message: 'older request failed' });
 
-    await stub.fetch('http://example.com/release');
+    // A request's trace is only delivered once its response body has been fully sent, so read
+    // every body. Otherwise the request stays open until the unread body is garbage collected.
+    const release = await stub.fetch('http://example.com/release');
+    assert.strictEqual(await release.text(), 'released');
     assert.strictEqual(await (await newer).text(), 'newer request done');
 
     const [olderTrace, newerTrace, releaseTrace] = await waitForTraces([
