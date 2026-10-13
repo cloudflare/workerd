@@ -51,6 +51,8 @@ KJ_TEST("Python module registration reuses manager-owned Wasm after isolate dest
   wasm.setWasm(kj::arrayPtr(WIRE_BYTES, kj::size(WIRE_BYTES)));
   auto serialized = capnp::messageToFlatArray(message);
   manager.setPyodideBundleData(kj::str("dev"), kj::heapArray(serialized.asBytes()));
+  auto maybeBundle = manager.getPyodideBundle("dev");
+  auto bundle = KJ_REQUIRE_NONNULL(maybeBundle);
 
   capnp::MallocMessageBuilder flagsMessage;
   auto flags = flagsMessage.initRoot<CompatibilityFlags>();
@@ -75,9 +77,9 @@ KJ_TEST("Python module registration reuses manager-owned Wasm after isolate dest
         auto registry = jsg::ModuleRegistryImpl<PythonIsolate_TypeWrapper>::install(
             js.v8Isolate, js.v8Context(), observer);
         modules::python::registerPythonCommonModules<DisabledInternalJaeger>(js, *registry,
-            flags.asReader(), KJ_REQUIRE_NONNULL(manager.getPyodideBundle("dev")), source, kj::none,
-            IsWorkerd::YES, IsTracing::NO, SnapshotToDisk::NO, CreateBaselineSnapshot::NO, kj::none,
-            kj::none, kj::none, kj::none, manager.getPyodideWasmModuleHolder("dev"));
+            flags.asReader(), bundle, source, kj::none, IsWorkerd::YES, IsTracing::NO,
+            SnapshotToDisk::NO, CreateBaselineSnapshot::NO, kj::none, kj::none, kj::none, kj::none,
+            manager.getPyodideWasmModuleHolder("dev"));
         auto path = kj::Path::parse("pyodide-internal:pyodide.asm.wasm");
         auto& info = KJ_REQUIRE_NONNULL(registry->resolve(
             js, path, kj::none, jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY));
