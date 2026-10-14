@@ -470,6 +470,10 @@ class WritableStreamInternalController: public WritableStreamController {
       return kj::rc<State>(parent.addRef(), addWeakToThis());
     }
 
+    kj::Weak<Pipe> addWeakRef() {
+      return addWeakToThis();
+    }
+
     void visitForGc(jsg::GcVisitor& visitor) {
       visitor.visit(readable, promise, maybeSignal, capturedSourceError);
     }

@@ -432,6 +432,29 @@ void onConsumerClose(jsg::Lock& js) override {
   references to `Pipe` in the queue, ensures continuations remain safe if the
   pipe is somehow destroyed while operations are pending.
 
+### Pattern: Traced Queue Entries Leave by Move
+
+- **When**: Taking GC-visited entries (promise resolvers, `jsg::Ref`s, `jsg::JsRef`s)
+  out of a container that `visitForGc()` iterates, e.g. `drain()` on the internal
+  writable controller's `queue`
+- **Why**: Once traced, such a handle is weak and stays valid only while it keeps being
+  traced through the container. Moving the handle itself makes it strong again
+  (`jsg::Data::moveFromTraced`, `jsg::Ref`'s move constructor). Moving the *container*
+  (`RingBuffer`, `std::list`) only transfers its storage and leaves every entry weak and
+  unreached, so a GC before the entries are settled collects them.
+- **Rule**: Move each handle out individually before the entry leaves the container. A
+  non-movable heap entry (`kj::Own<Pipe>`) cannot be re-strengthened that way: it must
+  stay in the container, where it is still traced, while any JS can run, with reentrant
+  teardown guarded by a weak ref.
+
+```cpp
+while (!queue.empty()) {
+  auto promise = kj::mv(queue.front().promise);  // The move makes the handle strong.
+  maybeRejectPromise<void>(js, promise, reason);
+  queue.pop_front();
+}
+```
+
 ### Pattern: Generation Counter
 
 - **When**: `writeLoop()` -- detecting queue modification during async operation

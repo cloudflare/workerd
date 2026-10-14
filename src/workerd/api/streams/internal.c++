@@ -2848,19 +2848,35 @@ void WritableStreamInternalController::Pipe::releaseSource(
 
 void WritableStreamInternalController::drain(jsg::Lock& js, jsg::JsValue reason) {
   doError(js, reason);
-  // Move the queue into a local before iterating. releaseSource() below can run
-  // arbitrary user JS (a JS-backed source's cancel algorithm), which may re-enter this
-  // controller and mutate `queue` — and RingBuffer mutation invalidates references.
-  // With the queue moved out, reentrant code observes an empty queue and can neither
-  // invalidate our iteration nor double-process these events.
-  auto draining = kj::mv(queue);
-  while (!draining.empty()) {
-    KJ_SWITCH_ONEOF(draining.front().event) {
+  // Each event is settled while it is still the front of `queue` and popped afterwards.
+  //
+  // The events' GC-visited handles (the promise resolvers and the Pipe's refs) are weak once
+  // visitForGc() has traced them, and stay valid only while they continue to be traced through
+  // `queue` or until they are moved, which is what makes them strong again (see
+  // jsg::Data::moveFromTraced). So an event may only leave `queue` by having its handles moved
+  // out first, as below. Moving the RingBuffer itself into a local would not do: that transfers
+  // the storage without moving any element, leaving every handle weak and unreached, so a GC
+  // during the drain would collect them before they are settled.
+  //
+  // Reentrancy: the stream is errored (doError() above), so nothing can be enqueued from here
+  // on, and the only step that runs user JS is the Pipe's releaseSource(), handled below.
+  while (!queue.empty()) {
+    KJ_SWITCH_ONEOF(queue.front().event) {
       KJ_CASE_ONEOF(writeRequest, Write) {
         auto promise = kj::mv(writeRequest.promise);
         maybeRejectPromise<void>(js, promise, reason);
+        queue.pop_front();
       }
       KJ_CASE_ONEOF(pipeRequest, kj::Own<Pipe>) {
+        // The Pipe lives on the heap and cannot be moved, so moving the kj::Own out of the
+        // queue would not re-strengthen its handles. It therefore stays in `queue`, where
+        // visitForGc() keeps reaching it, until it has been settled. The promise is taken
+        // first (the move makes it strong), and only a weak reference is held across
+        // releaseSource(): with a cancel reason, it runs the source's cancel algorithm
+        // (arbitrary user JS), which may re-enter this controller and tear the Pipe down.
+        // `pipeRequest` must not be used after that call.
+        auto promise = pipeRequest->takePromise();
+        auto weakPipe = pipeRequest->addWeakRef();
         // Cancel (unless preventCancel) and unlock the source. Note that the unlock
         // happens even under preventCancel: the pipe is over, so holding the source's
         // pipe lock any longer would leave it locked forever. This matches the standard
@@ -2870,19 +2886,24 @@ void WritableStreamInternalController::drain(jsg::Lock& js, jsg::JsValue reason)
         } else {
           pipeRequest->releaseSource(js);
         }
-        auto promise = pipeRequest->takePromise();
         maybeRejectPromise<void>(js, promise, reason);
+        if (weakPipe != nullptr) {
+          // A Pipe is always the last event in the queue and nothing can be enqueued once the
+          // stream has errored, so a Pipe that survived the call is still the front event.
+          queue.pop_front();
+        }
       }
       KJ_CASE_ONEOF(closeRequest, Close) {
         auto promise = kj::mv(closeRequest.promise);
         maybeRejectPromise<void>(js, promise, reason);
+        queue.pop_front();
       }
       KJ_CASE_ONEOF(flushRequest, Flush) {
         auto promise = kj::mv(flushRequest.promise);
         maybeRejectPromise<void>(js, promise, reason);
+        queue.pop_front();
       }
     }
-    draining.pop_front();
   }
 }
 
