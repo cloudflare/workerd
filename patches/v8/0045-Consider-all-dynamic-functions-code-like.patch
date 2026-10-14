@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Cormick Holland <cormick@cloudflare.com>
+Date: Wed, 14 Oct 2026 14:47:01 +0000
+Subject: Consider all dynamic functions code-like
+
+
+diff --git a/src/builtins/builtins-function.cc b/src/builtins/builtins-function.cc
+index f7ca54126017bea1e41e54615bdf4693db6e341e..36efc48fd4e49b53a0cf0ca29d1f78eeb11c9e7b 100644
+--- a/src/builtins/builtins-function.cc
++++ b/src/builtins/builtins-function.cc
+@@ -86,7 +86,7 @@ MaybeDirectHandle<Object> CreateDynamicFunction(Isolate* isolate,
+ 
+   // A call with no arguments has nothing trustworthy to base "code-like"
+   // on, so it starts false instead of true.
+-  bool is_code_like = argc > 0;
++  bool is_code_like = true;
+   DirectHandle<String> body_string = isolate->factory()->empty_string();
+   for (int i = 1; i <= argc; ++i) {
+     DirectHandle<Object> arg = args.at(i);
