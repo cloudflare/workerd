@@ -292,14 +292,19 @@ When `pumpTo()` is called on the adapter:
 - **When**: Calling code that may invoke JS callbacks during a read/write operation
 - **Why**: JS callbacks can trigger close/error mid-operation; state must not change
   until operation completes
-- **How**: `beginOperation()` increments counter; `endOperation()` applies pending
-  transition when counter hits 0
-- **Entry point**: `deferControllerStateChange()` in `standard.h`
+- **How**: `scopedOperation()` returns an RAII guard that increments the operation
+  counter and decrements it when destroyed, applying any pending transition when the
+  counter hits 0. Call `end()` explicitly only when the caller needs to know whether a
+  transition was applied. The guard keeps the counter balanced on exceptions and on
+  termination, so prefer it to manual `beginOperation()`/`endOperation()` calls.
+- **Entry point**: `deferControllerStateChange()` in `standard.c++`
 
 ```cpp
-controller.state.beginOperation();  // Increment counter
-auto result = readCallback();       // May trigger JS that calls close()
-controller.state.endOperation();    // Apply pending state if counter == 0
+auto operation = controller.state.scopedOperation();
+auto result = readCallback();  // May trigger JS that calls close()
+if (operation.end()) {         // Apply pending state if counter == 0
+  // Notify the lock about the applied transition.
+}
 ```
 
 ### Pattern: Consumer Snapshot
