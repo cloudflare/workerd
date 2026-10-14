@@ -77,6 +77,197 @@ export const hwmInfinityRejected = {
   },
 };
 
+// DIVERGENCE: argument conversion order. The spec (TypeScript) converts
+// both strategies first, the writable then the readable (each
+// highWaterMark and its ToNumber, then size), and only then reads the
+// transformer's members. C++ reads the transformer's members first, then
+// each strategy in that order. An empty transformer and one with a
+// transform() hook cover the TS implementation's elided and standard
+// construction paths.
+export const argumentConversionOrder = {
+  test() {
+    const loggedStrategy = (order, name) => ({
+      get highWaterMark() {
+        order.push(`${name}.hwm`);
+        return {
+          valueOf() {
+            order.push(`${name}.hwm.valueOf`);
+            return 1;
+          },
+        };
+      },
+      get size() {
+        order.push(`${name}.size`);
+        return undefined;
+      },
+    });
+    for (const hooks of [{}, { transform() {} }]) {
+      const order = [];
+      new TransformStream(
+        {
+          get start() {
+            order.push('transformer.start');
+            return undefined;
+          },
+          ...hooks,
+        },
+        loggedStrategy(order, 'writable'),
+        loggedStrategy(order, 'readable')
+      );
+      deepStrictEqual(
+        order,
+        usingTsImpl
+          ? [
+              'writable.hwm',
+              'writable.hwm.valueOf',
+              'writable.size',
+              'readable.hwm',
+              'readable.hwm.valueOf',
+              'readable.size',
+              'transformer.start',
+            ]
+          : [
+              'transformer.start',
+              'writable.hwm',
+              'writable.hwm.valueOf',
+              'writable.size',
+              'readable.hwm',
+              'readable.hwm.valueOf',
+              'readable.size',
+            ]
+      );
+    }
+  },
+};
+
+// DIVERGENCE: a null transformer is accepted by C++, which converts it as
+// a WebIDL dictionary (no transformer), but rejected by TypeScript (spec:
+// the argument is typed `object`, which null is not). Every other
+// primitive throws TypeError, and a function is accepted and its members
+// read, in both (spec).
+export const garbageTransformerValidation = {
+  test() {
+    const transformerError = {
+      name: 'TypeError',
+      message: 'transformer must be an object',
+    };
+    if (usingTsImpl) {
+      throws(() => new TransformStream(null), transformerError);
+    } else {
+      new TransformStream(null);
+    }
+    for (const transformer of [42, 'x', true, 1n, Symbol('s')]) {
+      throws(
+        () => new TransformStream(transformer),
+        usingTsImpl ? transformerError : TypeError
+      );
+    }
+    let started = false;
+    new TransformStream(
+      Object.assign(function transformer() {}, {
+        start() {
+          started = true;
+        },
+      })
+    );
+    strictEqual(started, true);
+  },
+};
+
+// DIVERGENCE: each strategy argument converts as a WebIDL dictionary in
+// both (spec): a function's members are read, and every primitive except
+// null throws TypeError (messages differ). A readable strategy without a
+// highWaterMark (null or {}) differs: C++ applies the TransformStream
+// default highWaterMark (0) only when the argument is omitted, so the
+// readable side takes the ReadableStream default (1); TypeScript applies
+// 0 to any strategy without one, as the spec's ExtractHighWaterMark does.
+export const strategyArgumentShapes = {
+  test() {
+    // The writable's and the readable's desiredSize at construction.
+    const desiredSizes = (writableStrategy, readableStrategy) => {
+      let readable;
+      const ts = new TransformStream(
+        {
+          start(c) {
+            readable = c.desiredSize;
+          },
+        },
+        writableStrategy,
+        readableStrategy
+      );
+      return [ts.writable.getWriter().desiredSize, readable];
+    };
+    deepStrictEqual(desiredSizes(undefined, undefined), [1, 0]);
+    for (const empty of [null, {}]) {
+      deepStrictEqual(desiredSizes(empty, empty), [1, usingTsImpl ? 0 : 1]);
+    }
+    const strategy = Object.assign(function strategy() {}, {
+      highWaterMark: 3,
+    });
+    deepStrictEqual(desiredSizes(strategy, strategy), [3, 3]);
+    const strategyError = usingTsImpl
+      ? {
+          name: 'TypeError',
+          message: 'The queuing strategy must be an object.',
+        }
+      : TypeError;
+    for (const primitive of [5, 'x', true, 1n, Symbol('s')]) {
+      throws(() => desiredSizes(primitive, undefined), strategyError);
+      throws(() => desiredSizes(undefined, primitive), strategyError);
+    }
+  },
+};
+
+// DIVERGENCE: which error wins when two are possible. Both reject a
+// primitive transformer before reading the strategies, so its TypeError
+// beats a throwing strategy getter (spec), and both convert the
+// strategies before checking readableType, so a throwing writable
+// strategy getter beats readableType: 'bytes' (spec). C++ converts each
+// highWaterMark to an integer while converting the arguments, so an
+// invalid writable highWaterMark (TypeError) beats readableType: 'bytes'
+// and a throwing readable strategy getter. TypeScript follows the spec:
+// both strategies are converted, then readableType is checked, then each
+// highWaterMark's range, so readableType: 'bytes' and the readable
+// strategy getter's error both beat an invalid writable highWaterMark.
+export const conversionErrorPrecedence = {
+  test() {
+    const boom = new Error('boom');
+    const throwingStrategy = {
+      get highWaterMark() {
+        throw boom;
+      },
+    };
+    const readableTypeError = {
+      name: 'RangeError',
+      message: 'transformer.readableType must be undefined',
+    };
+    const negativeHighWaterMark = {
+      name: 'TypeError',
+      message:
+        'The value cannot be converted because it is negative and this API expects a positive bigint.',
+    };
+    throws(
+      () => new TransformStream(42, throwingStrategy),
+      usingTsImpl
+        ? { name: 'TypeError', message: 'transformer must be an object' }
+        : TypeError
+    );
+    throws(
+      () => new TransformStream({ readableType: 'bytes' }, throwingStrategy),
+      (e) => e === boom
+    );
+    throws(
+      () =>
+        new TransformStream({ readableType: 'bytes' }, { highWaterMark: -1 }),
+      usingTsImpl ? readableTypeError : negativeHighWaterMark
+    );
+    throws(
+      () => new TransformStream({}, { highWaterMark: -1 }, throwingStrategy),
+      usingTsImpl ? (e) => e === boom : negativeHighWaterMark
+    );
+  },
+};
+
 // A strategy dictionary whose members count their reads.
 function countingStrategy(highWaterMark) {
   const reads = { highWaterMark: 0, size: 0 };

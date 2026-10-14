@@ -35,6 +35,25 @@ export const initDictionaryIsRequired = {
   },
 };
 
+// init converts as a WebIDL dictionary (parity): a function's members are
+// read, and every other primitive throws TypeError (messages differ).
+export const initDictionaryShapes = {
+  test() {
+    for (const Ctor of classes) {
+      const init = Object.assign(function init() {}, { highWaterMark: 3 });
+      strictEqual(new Ctor(init).highWaterMark, 3, Ctor.name);
+      for (const bad of [5, 'x', true, 1n, Symbol('s')]) {
+        throws(
+          () => new Ctor(bad),
+          usingTsImpl
+            ? { name: 'TypeError', message: 'init must be an object' }
+            : TypeError
+        );
+      }
+    }
+  },
+};
+
 export const missingHighWaterMarkDiverges = {
   test() {
     for (const Ctor of classes) {

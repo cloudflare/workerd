@@ -75,6 +75,43 @@ export const invalidSignalRejected = {
   },
 };
 
+// The pipe options convert as a WebIDL dictionary (parity): null means no
+// options, so the pipe closes the destination; a function's members are
+// read, here preventClose; every other primitive throws TypeError from
+// pipeThrough (messages differ).
+export const pipeOptionsShapes = {
+  async test() {
+    const closed = [];
+    const pipeClosedSource = (name, options) =>
+      new ReadableStream({
+        start(c) {
+          c.close();
+        },
+      }).pipeTo(
+        new WritableStream({
+          close() {
+            closed.push(name);
+          },
+        }),
+        options
+      );
+    await pipeClosedSource('null', null);
+    await pipeClosedSource(
+      'function',
+      Object.assign(function options() {}, { preventClose: true })
+    );
+    deepStrictEqual(closed, ['null']);
+    for (const options of [5, 'x', true, 1n, Symbol('s')]) {
+      throws(
+        () => new ReadableStream().pipeThrough(new TransformStream(), options),
+        usingTsImpl
+          ? { name: 'TypeError', message: 'Pipe options must be an object' }
+          : TypeError
+      );
+    }
+  },
+};
+
 // Brand checks: pipeTo on a non-stream this, a non-WritableStream
 // destination, and pipeThrough with a bad pair. DIVERGENCE (the WPT
 // general.any brand seed): C++ THROWS the TypeError synchronously from

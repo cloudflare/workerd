@@ -44,6 +44,8 @@ const {
   kEnumerable,
   normalizeExpectedLength,
   toStringTagProperty,
+  requireObject,
+  convertQueuingStrategy,
 } = require('webstreams/common') as CommonHelpers;
 
 const kPrivateSymbol: symbol = Symbol('private');
@@ -471,17 +473,17 @@ class TransformStream<I = unknown, O = unknown> {
   }
 
   constructor(
-    transformer?: Transformer<I, O>,
-    writableStrategy?: QueuingStrategy<I>,
-    readableStrategy?: QueuingStrategy<O>
+    transformer: Transformer<I, O> = kNullProtoObject as Transformer<I, O>,
+    writableStrategy: QueuingStrategy<I> = kNullProtoObject as QueuingStrategy<I>,
+    readableStrategy: QueuingStrategy<O> = kNullProtoObject as QueuingStrategy<O>
   ) {
-    transformer ??= kNullProtoObject as Transformer<I, O>;
-    writableStrategy ??= kNullProtoObject as QueuingStrategy<I>;
-    readableStrategy ??= kNullProtoObject as QueuingStrategy<O>;
-
-    if (!isActualObject(transformer)) {
-      throw new TypeError('transformer must be an object');
-    }
+    // WebIDL converts the arguments at the IDL layer, before the constructor
+    // body runs: the transformer is typed `object` (null and every other
+    // primitive throw, nothing is read), and each strategy is a
+    // QueuingStrategy dictionary, the writable's first.
+    requireObject(transformer, 'transformer must be an object');
+    const writableStrategyDict = convertQueuingStrategy(writableStrategy);
+    const readableStrategyDict = convertQueuingStrategy(readableStrategy);
 
     // --- Transformer method extraction (alphabetical property reads) ---
     const cancelFn = transformer.cancel;
@@ -648,16 +650,15 @@ class TransformStream<I = unknown, O = unknown> {
         close: () => this.#sinkClose(),
         abort: (reason: unknown) => this.#sinkAbort(reason),
       },
-      writableStrategy
+      // Converted already: the inner stream reads its own data properties,
+      // and its default highWaterMark (1) is the TransformStream's.
+      writableStrategyDict as QueuingStrategy<I>
     );
 
     const sourcePull = (): Promise<void> => {
       this.#setBackpressure(false);
       return this.#backpressureChange.promise;
     };
-    // Read once, as WebIDL dictionary conversion reads each member once.
-    const rawReadableHWM = readableStrategy.highWaterMark;
-    const readableHWM = rawReadableHWM === undefined ? 0 : rawReadableHWM;
     this.#readable = new ReadableStream(
       {
         __proto__: null,
@@ -670,8 +671,9 @@ class TransformStream<I = unknown, O = unknown> {
       },
       {
         __proto__: null,
-        highWaterMark: readableHWM,
-        size: readableStrategy.size,
+        // The TransformStream default, where the ReadableStream's is 1.
+        highWaterMark: readableStrategyDict.highWaterMark ?? 0,
+        size: readableStrategyDict.size,
       }
     );
     if (expectedLength !== undefined) {

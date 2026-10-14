@@ -15,8 +15,8 @@ behavioral gaps; the reentrancy family is mostly parity at finite hwm.
 
 | # | Area | C++ | TypeScript | Pinned in |
 | --- | --- | --- | --- | --- |
-| 1 | garbage underlyingSource | accepts null, rejects numbers | rejects null (spec), accepts numbers | `garbageSourceValidation` |
-| 2 | ctor argument conversion order | source.type, hwm, size | strategy size, hwm, then source.type (spec) | `argumentConversionOrder` |
+| 1 | null underlyingSource (every other primitive throws TypeError, and a function is accepted with its members read, in both; spec) | accepted as no source (a WebIDL dictionary) | TypeError 'underlyingSource must be an object' (spec: the argument is typed `object`) | `garbageSourceValidation` |
+| 2 | ctor argument conversion order | source.type, then the strategy: hwm and its ToNumber, size | the strategy first (spec): hwm and its ToNumber, size, then source.type | `argumentConversionOrder` |
 | 3 | invalid hwm (-1/NaN) + Infinity | TypeError; Infinity REJECTED (integer conversion) — root cause of many WPT reentrant/errors failures | RangeError; Infinity accepted (spec) | `highWaterMarkValidated` |
 | 4 | pull counts (hwm 1, enqueue-in-pull) | 1,1,3 — first read served from queue without pull, deferred pulls batch | 1,2,3 (spec: pull after start and every read) | `pullCountShape` |
 | 5 | pull on reading the LAST queued chunk | no pull | pulls (spec) | `pullOnLastChunkRead` |
@@ -45,6 +45,8 @@ behavioral gaps; the reentrancy family is mostly parity at finite hwm.
 | 28 | from() iterator protocol edges | reads `value` of an async iterator's final result; a sync iterator whose value rejects (not done) is left open; the `value` of a sync return() result is not resolved; a non-callable `next` ends the stream; DEFECT: a throwing `return` getter's error escapes into the I/O context as an uncaught exception and fails the request, whether or not the cancel's promise is handled (unpinnable) | spec (WebIDL async_sequence + ECMA-262 async-from-sync): only `done` of the final result; the sync iterator is closed through return(); the return() result's value is resolved (a rejection rejects the cancel); the read rejects with TypeError; the cancel rejects | `fromIteratorProtocolEdges`, `fromCancelReturnLookup` |
 | 29 | when a sync iterable's from() reads and cancels settle, relative to an async iterator whose next()/return() returns a settled promise | one tick earlier; a throwing next()/return() in the same tick | two ticks earlier, and a throwing one in the same tick: the async-from-sync continuation is reacted to directly, not through "a promise resolved with" it (the spec lands both on the same tick, and a throwing sync one two ticks later); intentional, sparing two microtasks and a Promise.prototype.then lookup per chunk | `fromSyncIterableSettlesEarly` |
 | 30 | close() inside size() while chunks are still to be read (no tee: a chunk queued; tee: every branch behind the close) | the in-flight chunk is dropped (the transform suite's ledger #10 shows the same through writer.close()) | the close is only requested and the chunk is still readable: every branch reads it (spec without a tee; Node agrees there). With a tee the chunk reaches every branch or none: one already drained to the close drops it for all (parity, `closeInsideSizeTeeDrainedBranch`) | `closeInsideSizeWithQueuedChunk`, `closeInsideSizeTeeBranchesBehind` |
+| 31 | (no divergence) the strategy argument converts as a WebIDL dictionary: null means no strategy, a function's members are read, and every other primitive throws TypeError (messages differ) | same | same | `strategyArgumentShapes` (parity) |
+| 32 | which error wins when two are possible (a primitive source's TypeError beats a throwing strategy getter in both; spec) | an invalid highWaterMark (TypeError, integer conversion) beats an invalid type and a non-callable size | an invalid type and a non-callable size (TypeError) beat an invalid highWaterMark (spec) | `conversionErrorPrecedence` |
 
 Parity worth noting (probed, pinned): pull serialization (never
 re-entered); pull/async-start rejection identity; error-undefined
@@ -100,8 +102,8 @@ C++ implementation; `draining-reader.js` asserts both sides.
 
 | Module | Coverage |
 | --- | --- |
-| `api-surface.js` | globals, controller not constructable, getReader modes, locked lifecycle |
-| `construction.js` | ledger #1-#3, default hwm 1 |
+| `api-surface.js` | globals, controller not constructable, getReader modes, getReader options as a WebIDL dictionary (parity: null, a function's members, primitives rejected), locked lifecycle |
+| `construction.js` | ledger #1-#3, #31, #32, default hwm 1 |
 | `source-algorithms.js` | ledger #4-#6, #23, pull serialization, rejection identity, cancel-with-pending-pull |
 | `controller.js` | desiredSize accounting/terminal states, error idempotence, close terminality (#17), close-drains-queue, error during a pending close (#18) |
 | `reader.js` | read ordering, releaseLock, closed replacement (#7), undefined error, reader.cancel, reader swap |
@@ -111,7 +113,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `tee.js` | migrated edge cases + error propagation + cancel composite (#11) + pull-per-read + slowest-branch backpressure + a branch leaving after the close, cancelled or errored through the interop hook (TS only), while the others have drained: a parked cancel settles with undefined and the source is not cancelled (parity) |
 | `tee-reentrancy.js` | the three C++ push-loop crash regressions (from api/streams/streams-test.js) |
 | `from.js` | 11 migrated + fromString (#12) + return validation messages + iterator protocol (next read once, done before value, gets not `has`, objects only, return() lookup; parity) + ArrayBufferView as one chunk (#27) + async-from-sync edges (#28) + sync-path schedule (#29) |
-| `async-iteration.js` | 7 migrated + no-await interleavings + proto shape and class string (#13) + foreign `this` (#25) + first next() pulls synchronously, next() from that pull() (parity) + ongoing-promise interleavings (#22) |
+| `async-iteration.js` | 7 migrated + values() options as a WebIDL dictionary (parity) + no-await interleavings + proto shape and class string (#13) + foreign `this` (#25) + first next() pulls synchronously, next() from that pull() (parity) + ongoing-promise interleavings (#22) |
 | `reentrancy.js` | enqueue/close/cancel-in-size (parity) + read-in-size (#14; guard the size() or C++ captures every later chunk) + close-in-size with chunks still to read (#30) and on a tee with a drained branch (the chunk dropped for every branch, the other branch's cancel settling; parity) |
 | `buffer-lifecycle.js` | chunk by reference, detach observed |
 | `integration-body.js` | readAll family, normalization (incl. detached and out-of-bounds views, DataViews included, SharedArrayBuffer-backed views, resizable-extent pinning), clone, cancel-then-consume, SELF round-trips |

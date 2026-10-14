@@ -162,6 +162,7 @@ export {
   byobMin,
   readMinStagedFulfillment,
   readMinValidation,
+  byobReadOptionsShapes,
   closeBelowMin,
   closedOrderAtEndOfData,
   minMetThenClose,

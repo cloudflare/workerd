@@ -123,6 +123,11 @@ const {
   kEnumerable,
   normalizeExpectedLength,
   toStringTagProperty,
+  requireObject,
+  toDictionary,
+  convertQueuingStrategy,
+  extractHighWaterMark,
+  extractSizeAlgorithm,
 } = require('webstreams/common') as CommonHelpers;
 
 import type { ViewExtentHelpers } from './view-extent';
@@ -1133,9 +1138,10 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
         "view's backing buffer must have a non-zero byteLength"
       );
     }
-    if (!isActualObject(options)) {
-      throw new TypeError('options must be an object');
-    }
+    options = toDictionary(
+      options,
+      'options must be an object'
+    ) as ReadableStreamBYOBReaderReadOptions;
     // --- min validation (steps 4-6). min is in ELEMENTS for typed arrays
     // (bytes for DataView, where info.length === byteLength). NO clamping:
     // out-of-range is an error, not a request to do less.
@@ -2962,12 +2968,10 @@ interface ConvertedPipeOptions {
 // Members are read once each in spec order (WPT
 // piping/throwing-options.any.js).
 function convertPipeOptions(options: unknown): ConvertedPipeOptions {
-  // WebIDL: null and undefined become {}.
-  if (options == null) options = kNullProtoObject;
-  if (!isActualObject(options)) {
-    throw new TypeError('Pipe options must be an object');
-  }
-  const dict = options as StreamPipeOptions;
+  const dict = toDictionary(
+    options,
+    'Pipe options must be an object'
+  ) as StreamPipeOptions;
   const preventAbort = !!dict.preventAbort;
   const preventCancel = !!dict.preventCancel;
   const preventClose = !!dict.preventClose;
@@ -4513,12 +4517,16 @@ class ReadableStream<R> {
       return;
     }
 
+    // WebIDL argument conversion: the source is typed `object`, so null and
+    // every other primitive throw before the strategy is read.
+    requireObject(underlyingSource, 'underlyingSource must be an object');
+
     // BACKEND-DISPATCH: stream construction (one of the five sanctioned
     // dispatch points): native vs queued byte vs queued default.
     //
-    // The native check runs FIRST: native sources are forbidden from
-    // declaring `type` (enforced during native extraction), so a
-    // native-marked source must never fall through to the queued
+    // The native check runs before any member is read: native sources are
+    // forbidden from declaring `type` (enforced during native extraction),
+    // so a native-marked source must never fall through to the queued
     // branches. The strategy argument is PERMANENTLY ignored on the
     // native branch: native pacing is purely demand-driven (the source
     // contractually ignores desiredSize).
@@ -4565,23 +4573,10 @@ class ReadableStream<R> {
       return;
     }
 
-    // --- WebIDL strategy dictionary conversion (BEFORE source reads) ---
-    // Per WebIDL, dictionary-typed arguments are converted (property reads
-    // happen) at the IDL layer before the constructor body runs. The
-    // `strategy` parameter is QueuingStrategy (a dictionary); the
-    // `underlyingSource` parameter is plain `object` (no dictionary
-    // conversion). We simulate this by reading strategy properties first.
-    const sizeFn = strategy.size;
-    let sizeAlgorithm: (chunk: R) => number;
-    if (sizeFn === undefined) {
-      sizeAlgorithm = () => 1;
-    } else if (typeof sizeFn !== 'function') {
-      throw new TypeError('strategy.size must be a function');
-    } else {
-      const callSize = uncurryThis(sizeFn);
-      sizeAlgorithm = (chunk: R) => callSize(undefined, chunk);
-    }
-    const rawHWM = strategy.highWaterMark;
+    // WebIDL converts the strategy dictionary at the IDL layer, before the
+    // constructor body converts the source to an UnderlyingSource
+    // dictionary and reads its members.
+    const strategyDict = convertQueuingStrategy(strategy);
 
     // WebIDL: the 'type' member is a string enum — perform ToString() on
     // non-undefined values so that objects with toString()/valueOf() work
@@ -4592,22 +4587,15 @@ class ReadableStream<R> {
 
     if (type === 'bytes') {
       // Byte streams: size() is forbidden, highWaterMark defaults to 0.
-      if (sizeFn !== undefined) {
+      if (strategyDict.size !== undefined) {
         throw new RangeError(
           'The strategy for a byte stream cannot have a size function'
         );
       }
-      let highWaterMark = 0;
-      if (rawHWM !== undefined) {
-        highWaterMark = +rawHWM;
-        if (NumberIsNaN(highWaterMark) || highWaterMark < 0) {
-          throw new RangeError('Invalid highWaterMark');
-        }
-      }
       this.#controller = setupReadableByteStreamControllerFromUnderlyingSource(
         this,
         underlyingSource,
-        highWaterMark
+        extractHighWaterMark(strategyDict, 0)
       );
     } else {
       // The spec says, "Assert: underlyingSourceDict["type"] does not exist"
@@ -4617,19 +4605,12 @@ class ReadableStream<R> {
         throw new TypeError(`Invalid underlying source type: ${type}`);
       }
       // Default streams: highWaterMark defaults to 1.
-      let highWaterMark = 1;
-      if (rawHWM !== undefined) {
-        highWaterMark = +rawHWM;
-        if (NumberIsNaN(highWaterMark) || highWaterMark < 0) {
-          throw new RangeError('Invalid highWaterMark');
-        }
-      }
       this.#controller =
         setupReadableStreamDefaultControllerFromUnderlyingSource(
           this,
           underlyingSource,
-          sizeAlgorithm,
-          highWaterMark
+          extractSizeAlgorithm<R>(strategyDict),
+          extractHighWaterMark(strategyDict, 1)
         );
     }
   }
@@ -4655,15 +4636,13 @@ class ReadableStream<R> {
     options: { mode?: 'byob' } | null = kNullProtoObject
   ): ReadableStreamReaderType<R> {
     assertIsReadableStream(this);
-    // WebIDL dictionary conversion: null and undefined become {},
-    // objects have their properties read, primitives are rejected.
-    if (options != null && !isActualObject(options)) {
-      throw new TypeError('Reader options must be an object');
-    }
+    const dict = toDictionary(options, 'Reader options must be an object') as {
+      mode?: 'byob';
+    };
 
     // WebIDL: the 'mode' member is a string enum — perform ToString() on
     // non-undefined values so that objects with toString()/valueOf() work.
-    const rawMode = isActualObject(options) ? options.mode : undefined;
+    const rawMode = dict.mode;
     const mode = rawMode === undefined ? undefined : `${rawMode}`;
     if (mode === undefined) {
       return acquireReadableStreamDefaultReader(this);
@@ -4761,10 +4740,10 @@ class ReadableStream<R> {
     options: { preventCancel?: boolean } = kNullProtoObject
   ): AsyncIterableIterator<R> {
     assertIsReadableStream(this);
-    if (!isActualObject(options)) {
-      throw new TypeError('Options must be an object');
-    }
-    const { preventCancel } = options;
+    const { preventCancel } = toDictionary(
+      options,
+      'Options must be an object'
+    ) as { preventCancel?: boolean };
 
     if (isReadableStreamLocked(this)) {
       throw new TypeError('Cannot get an iterator for a stream that is locked');

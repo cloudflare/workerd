@@ -15,7 +15,7 @@ behavior-parity (messages aside).
 
 | # | Area | C++ | TypeScript | Pinned in |
 | --- | --- | --- | --- | --- |
-| 1 | size() in a byte stream's strategy | silently accepted and ignored | RangeError (spec) — root of the WPT ctor seed | `sizeStrategyForBytes` |
+| 1 | size() in a byte stream's strategy | silently accepted and ignored; with an invalid highWaterMark too, that highWaterMark's TypeError (integer conversion) | RangeError (spec), before the highWaterMark is checked — root of the WPT ctor seed | `sizeStrategyForBytes` |
 | 2 | autoAllocateChunkSize 0/-1/NaN | TypeError 'cannot be zero.' (all three) | TypeError 'must be a positive integer' | `autoAllocateChunkSizeValidated` |
 | 3 | pull counts (hwm 1, enqueue-in-pull) | 1,1,3 (readable ledger #4 mirror) | 1,2,3 (spec) | `pullCountShape` |
 | 4 | sync start() throw | captured; stream errored (readable #6 mirror) | escapes constructor (spec) | `syncStartThrow`, `jsSourceError` |
@@ -128,7 +128,7 @@ named suite test pins directly, differing only in incidental asserts.
 | `byob-reader.js` | ledger #20, #28, #31; view-type matrix + offsets + auto-allocate sizing (migrated streams-byob-edge-cases) + mismatched sizes/types, subarray, multi-pending-reads, byobreaderRegression (migrated streams-js-test) |
 | `respond.js` | ledger #6, #8, #15, #16; all 31 streams-respond-test tests (respond/respondWithNewView/pumps/cancel races/UAF shapes) + js-test respond family |
 | `release-relock.js` | ledger #9, #10, #32; the WPT releaseLock→second-reader cluster; release with two pending reads or a partially filled head |
-| `read-min.js` | ledger #11-#13, #27; byobMin/constraints/readAtLeast (migrated streams-test.js); /chunked SELF endpoint |
+| `read-min.js` | ledger #11-#13, #27; byobMin/constraints/readAtLeast (migrated streams-test.js); read(view, options) options as a WebIDL dictionary (parity: null, a function's members, primitives rejected); /chunked SELF endpoint |
 | `tee.js` | ledger #7 (on a branch), #14, #24, #25, #29, #32; clone-per-branch; migrated byte-tee pair; error propagation; released branch reads, incl. partially filled ones and tee() after a release; byobRequest held across tee(); tee() of a closed native body locking it |
 | `buffer-lifecycle.js` | ledger #18, #30; resizable ArrayBuffers; WASM Memory; SharedArrayBuffer-backed typed arrays and DataViews rejected by read(view), readAtLeast(), enqueue() and respondWithNewView() (TS also after close(), #19) |
 | `gc.js` | pending BYOB read + byobRequest survive gc(); both tee branches collected while the controller is held: enqueue() accepted, desiredSize at the high-water mark, byobRequest null, close() then enqueue() as ever (a parity pin of the observable surface — the retention checks are the readable suite's, a transferred buffer leaving nothing to WeakRef), one branch cancelled and the other collected, observed in the gc()'s own job (the readable suite's teeSurvivorBranchCollected, plus byobRequest null), and pull() stops (ledger #26) |
