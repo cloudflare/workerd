@@ -2024,6 +2024,56 @@ KJ_TEST("WritableStream pipe survives termination in the source's cancel algorit
   });
 }
 
+KJ_TEST("ReadableStream survives its pipe being released during pull") {
+  preamble([](jsg::Lock& js) {
+    kj::Maybe<jsg::Ref<WritableStreamDefaultController>> sinkController;
+    auto ws = js.alloc<WritableStream>(newWritableStreamJsController());
+    // clang-format off
+    ws->getController().setup(js, UnderlyingSink{
+      .start = [&](jsg::Lock& js, UnderlyingSink::Controller controller) -> jsg::Promise<void> {
+        sinkController = kj::mv(controller);
+        return js.resolvedPromise();
+      },
+    }, StreamQueuingStrategy{});
+    // clang-format on
+    // Let the sink start, so that erroring it below tears the pipe down synchronously.
+    js.runMicrotasks();
+
+    uint pulls = 0;
+    bool released = false;
+    bool pipeSettled = false;
+    kj::Maybe<jsg::Promise<void>> pipe;
+    {
+      auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+      // clang-format off
+      rs->getController().setup(js, UnderlyingSource{
+        .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+          if (pulls++ == 0) {
+            KJ_ASSERT_NONNULL(controller.tryGet<jsg::Ref<ReadableStreamDefaultController>>())
+                ->enqueue(js, js.str("chunk"_kj));
+          } else {
+            // Erroring the destination releases the pipe, dropping the pipe's reference to this
+            // stream: the only one left.
+            KJ_ASSERT_NONNULL(sinkController)->error(js, js.str("sink error"_kj));
+            released = !ws->isLocked();
+            js.v8Isolate->LowMemoryNotification();
+          }
+          return js.resolvedPromise();
+        },
+      }, StreamQueuingStrategy{.highWaterMark = 0});
+      // clang-format on
+      pipe = rs->pipeTo(js, ws.addRef(), PipeToOptions{}).then(js, [&](jsg::Lock& js) {
+        pipeSettled = true;
+      }, [&](jsg::Lock& js, jsg::Value reason) { pipeSettled = true; });
+    }
+
+    js.runMicrotasks();
+    KJ_ASSERT(pulls == 2);
+    KJ_ASSERT(released);
+    KJ_ASSERT(pipeSettled);
+  });
+}
+
 // ======================================================================================
 // WritableStream re-entrancy tests
 

@@ -2734,9 +2734,16 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
     return js.rejectedPromise<void>(destClosed);
   }
 
+  // The read can run the source's pull algorithm, and that code can end this pipe, destroying
+  // *this and dropping the last reference to the source, while the read is still on the stack.
+  // Keep the source alive until the read returns, and take everything the continuations need
+  // from *this before starting it.
+  auto readableRef = readable.addRef();
+  auto state = getState();
+  auto errorState = state.addRef();
   return source->read(js).then(js,
       ioContext.addFunctor(
-          [state = getState()](jsg::Lock& js, ReadResult result) mutable -> jsg::Promise<void> {
+          [state = kj::mv(state)](jsg::Lock& js, ReadResult result) mutable -> jsg::Promise<void> {
     if (state->isAborted() || state->checkSignal(js) || result.done) {
       return js.resolvedPromise();
     }
@@ -2777,8 +2784,8 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
     // The error condition will be handled at the start of the next iteration.
     return state->pipeLoop(js);
   }),
-      ioContext.addFunctor(
-          [state = getState()](jsg::Lock& js, jsg::Value reason) mutable -> jsg::Promise<void> {
+      ioContext.addFunctor([state = kj::mv(errorState)](
+                               jsg::Lock& js, jsg::Value reason) mutable -> jsg::Promise<void> {
     if (state->isAborted() || state->isSourceReleased()) {
       return js.resolvedPromise();
     }
