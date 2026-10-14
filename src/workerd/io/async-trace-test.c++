@@ -349,6 +349,55 @@ KJ_TEST("creation stacks are captured, deduplicated, and reported once per track
   KJ_EXPECT(captures == 3);
 }
 
+// Reports FakeStackCapturer's stack, adding its positions first and its frames only if the isolate
+// doesn't keep it. Counts how often it adds the frames.
+class PositionsFirstStackCapturer final: public AsyncStackCapturer {
+ public:
+  explicit PositionsFirstStackCapturer(uint& framings): framings(framings) {}
+
+  void capture(AsyncStackBuilder& builder) const override {
+    builder.addFramePosition(7, 3, 5);
+    builder.addFramePosition(7, 10, 1);
+    if (builder.isKnown()) return;
+    ++framings;
+    builder.addFrame("inner"_kj.asArray(), "worker.js"_kj.asArray(), 7, 3, 5);
+    builder.addFrame(""_kj.asArray(), "worker.js"_kj.asArray(), 7, 10, 1);
+  }
+
+ private:
+  uint& framings;
+};
+
+KJ_TEST("a capturer that asks first adds the frames of a new stack only") {
+  uint framings = 0;
+  AsyncTraceIsolate isolate(kj::arc<PositionsFirstStackCapturer>(framings));
+  kj::Vector<kj::String> events;
+  auto makeTracker = [&]() {
+    AsyncTraceSinks sinks;
+    sinks.add(kj::heap<RecordingListener>(events));
+    return KJ_ASSERT_NONNULL(
+        AsyncTracker::tryCreate(isolate, kj::mv(sinks), "worker"_kj, kj::none));
+  };
+
+  auto first = makeTracker();
+  auto a = first->create(AsyncKind::TIMER, "setTimeout"_kj);
+  auto b = first->create(AsyncKind::TIMER, "setTimeout"_kj);
+  KJ_EXPECT(framings == 1);
+
+  // Another tracker reports the frames the isolate kept, though its capture added none.
+  auto second = makeTracker();
+  auto c = second->create(AsyncKind::MICROTASK, "queueMicrotask"_kj);
+  KJ_EXPECT(framings == 1);
+
+  auto sameStack = kj::str("stack 1: inner worker.js#7:3:5 |  worker.js#7:10:1");
+  kj::String expected[] = {kj::str("context_begin"), kj::str(sameStack),
+    kj::str("init ", a.getId(), " kind=3 name=setTimeout trigger=0 exec=0 stack=1"),
+    kj::str("init ", b.getId(), " kind=3 name=setTimeout trigger=0 exec=0 stack=1"),
+    kj::str("context_begin"), kj::str(sameStack),
+    kj::str("init ", c.getId(), " kind=4 name=queueMicrotask trigger=0 exec=0 stack=1")};
+  KJ_EXPECT(joined(events.asPtr()) == joined(expected), joined(events.asPtr()));
+}
+
 // Reports an `outer` frame on its first capture and a `nested` frame after that, so that a test
 // can tell the stacks of nested captures apart.
 class SequenceStackCapturer final: public AsyncStackCapturer {

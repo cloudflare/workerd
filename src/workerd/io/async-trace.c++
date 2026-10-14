@@ -41,6 +41,14 @@ void AsyncStackBuilder::addFrame(kj::ArrayPtr<const char> function,
       column);
 }
 
+void AsyncStackBuilder::addFramePosition(int32_t scriptId, uint32_t line, uint32_t column) {
+  tracker.push_frame_position(scriptId, line, column);
+}
+
+bool AsyncStackBuilder::isKnown() {
+  return tracker.find_stack();
+}
+
 AsyncTraceIsolate::AsyncTraceIsolate(kj::Maybe<kj::Arc<const AsyncStackCapturer>> stackCapturer)
     : impl(rust::async_trace::new_isolate()),
       stackCapturer(kj::mv(stackCapturer)) {}

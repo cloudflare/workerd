@@ -16,6 +16,7 @@ use crate::ContextId;
 use crate::ContextInfo;
 use crate::ContextStats;
 use crate::Frame;
+use crate::FrameKey;
 use crate::InitEvent;
 use crate::IsolateId;
 use crate::IsolateState;
@@ -106,6 +107,11 @@ pub struct Tracker {
     reported_stacks: HashSet<StackId>,
     /// Frames collected between `begin_stack` and `end_stack`.
     building_stack: Vec<Frame>,
+    /// Frame positions collected between `begin_stack` and `find_stack`. Cleared rather than
+    /// replaced, so that its capacity carries over from one stack to the next.
+    building_positions: Vec<FrameKey>,
+    /// The kept stack `find_stack` found for the one being collected.
+    found_stack: Option<StackId>,
     stats: ContextStats,
     max_live: usize,
     closed: bool,
@@ -138,6 +144,8 @@ impl Tracker {
             last_op: None,
             reported_stacks: HashSet::new(),
             building_stack: Vec::new(),
+            building_positions: Vec::new(),
+            found_stack: None,
             stats: ContextStats::default(),
             max_live: DEFAULT_MAX_LIVE,
             closed: false,
@@ -623,6 +631,22 @@ impl Tracker {
     /// Starts collecting a creation stack, innermost frame first.
     pub fn begin_stack(&mut self) {
         self.building_stack.clear();
+        self.building_positions.clear();
+        self.found_stack = None;
+    }
+
+    /// Adds the position of the stack's next frame, for [`Tracker::find_stack`].
+    pub fn push_frame_position(&mut self, script_id: i32, line: u32, column: u32) {
+        self.building_positions.push((script_id, line, column));
+    }
+
+    /// Whether the isolate keeps a stack at the positions pushed since [`Tracker::begin_stack`].
+    /// If it does, [`Tracker::end_stack`] returns that stack and no frames need pushing, so the
+    /// caller skips building them: their names are the expensive part, and most resources are
+    /// created where others were.
+    pub fn find_stack(&mut self) -> bool {
+        self.found_stack = self.isolate.find_stack(&self.building_positions);
+        self.found_stack.is_some()
     }
 
     pub fn push_frame(
@@ -643,8 +667,12 @@ impl Tracker {
     }
 
     /// Finishes the stack begun by [`Tracker::begin_stack`] and returns its ID for
-    /// [`Tracker::create`], or `None` if it was empty.
+    /// [`Tracker::create`]: the one [`Tracker::find_stack`] found, or else that of the pushed
+    /// frames, from [`IsolateState::intern_stack`].
     pub fn end_stack(&mut self) -> Option<StackId> {
+        if let Some(id) = self.found_stack.take() {
+            return Some(id);
+        }
         let frames = std::mem::take(&mut self.building_stack);
         self.isolate.intern_stack(frames)
     }

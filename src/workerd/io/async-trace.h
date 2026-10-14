@@ -38,6 +38,11 @@ extern thread_local const AsyncTracker* trackerInTurn;
 }  // namespace _
 
 // Receives the frames of a creation stack, innermost first. See AsyncStackCapturer.
+//
+// A capturer either adds the frames, or first adds their positions and asks isKnown(). If the
+// isolate already keeps a stack at those positions, that is the stack and the capturer is done;
+// otherwise it adds the frames. Most resources are created where others were, so asking first
+// saves converting most frames' names.
 class AsyncStackBuilder {
  public:
   // Strings need not be valid UTF-8 or NUL-terminated. `line` and `column` are 1-based.
@@ -46,6 +51,12 @@ class AsyncStackBuilder {
       int32_t scriptId,
       uint32_t line,
       uint32_t column);
+
+  // A frame's position alone, as addFrame() takes it.
+  void addFramePosition(int32_t scriptId, uint32_t line, uint32_t column);
+
+  // Whether the isolate keeps a stack whose frames are at the positions added so far.
+  bool isKnown();
 
  private:
   explicit AsyncStackBuilder(rust::async_trace::Tracker& tracker): tracker(tracker) {}
@@ -60,7 +71,7 @@ class AsyncStackCapturer: public kj::AtomicRefcounted {
  public:
   virtual ~AsyncStackCapturer() noexcept(false) = default;
 
-  // Adds the current stack's frames, or none if the isolate isn't running JavaScript on this
+  // Adds the current stack to `builder`, or nothing if the isolate isn't running JavaScript on this
   // thread.
   virtual void capture(AsyncStackBuilder& builder) const = 0;
 };

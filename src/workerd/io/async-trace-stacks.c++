@@ -28,7 +28,15 @@ class V8StackCapturer final: public AsyncStackCapturer {
         static_cast<v8::StackTrace::StackTraceOptions>(v8::StackTrace::kColumnOffset |
             v8::StackTrace::kScriptName | v8::StackTrace::kFunctionName |
             v8::StackTrace::kScriptId));
-    for (int i = 0; i < trace->GetFrameCount(); ++i) {
+    int count = trace->GetFrameCount();
+    for (int i = 0; i < count; ++i) {
+      auto frame = trace->GetFrame(isolate, i);
+      builder.addFramePosition(frame->GetScriptId(), static_cast<uint32_t>(frame->GetLineNumber()),
+          static_cast<uint32_t>(frame->GetColumn()));
+    }
+    // Names are needed only for a stack the isolate doesn't keep yet.
+    if (builder.isKnown()) return;
+    for (int i = 0; i < count; ++i) {
       auto frame = trace->GetFrame(isolate, i);
       v8::String::Utf8Value function(isolate, frame->GetFunctionName());
       v8::String::Utf8Value script(isolate, frame->GetScriptName());

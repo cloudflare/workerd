@@ -647,6 +647,42 @@ fn stacks_are_reported_once_per_tracker() {
 }
 
 #[test]
+fn a_kept_stack_is_found_by_its_positions() {
+    let positions = [(3, 10, 5), (3, 20, 1)];
+    let begin_with_positions = |tracker: &mut Tracker| {
+        tracker.begin_stack();
+        for (script_id, line, column) in positions {
+            tracker.push_frame_position(script_id, line, column);
+        }
+    };
+    let mut f = Fixture::new();
+    begin_with_positions(&mut f.tracker);
+    assert!(!f.tracker.find_stack());
+    f.tracker.push_frame("handle", "worker.js", 3, 10, 5);
+    f.tracker.push_frame("", "worker.js", 3, 20, 1);
+    let stack = f.tracker.end_stack();
+    assert!(stack.is_some());
+
+    // Another tracker on the isolate finds it without pushing frames, and reports the frames the
+    // isolate kept.
+    let mut other = Fixture::with_isolate(Arc::clone(&f.isolate));
+    begin_with_positions(&mut other.tracker);
+    assert!(other.tracker.find_stack());
+    assert_eq!(other.tracker.end_stack(), stack);
+    other.tracker.create(Kind::Operation, "kv_get", 0, stack);
+    assert!(matches!(
+        &other.events()[0],
+        Event::Stack { frames, .. } if frames.len() == 2 && frames[0].function == "handle"
+    ));
+
+    // A stack found for one capture is forgotten by the next.
+    begin_with_positions(&mut other.tracker);
+    assert!(other.tracker.find_stack());
+    other.tracker.begin_stack();
+    assert_eq!(other.tracker.end_stack(), None);
+}
+
+#[test]
 fn empty_stack() {
     let mut f = Fixture::new();
     f.tracker.begin_stack();

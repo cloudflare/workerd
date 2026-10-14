@@ -40,9 +40,9 @@ pub struct Frame {
     pub column: u32,
 }
 
-/// The identity of a frame for deduplication. Two frames at the same position in the same script
-/// are the same frame, so names don't need comparing (or copying, on a hit).
-type FrameKey = (i32, u32, u32);
+/// A frame's position (script ID, line, column), which identifies it for deduplication: frames at
+/// the same position are the same frame, so names don't need comparing (or copying, on a hit).
+pub type FrameKey = (i32, u32, u32);
 
 #[derive(Default)]
 struct Stacks {
@@ -125,6 +125,16 @@ impl IsolateState {
         stacks.bytes = bytes;
         drop(stacks);
         Some(id)
+    }
+
+    /// The ID of the kept stack whose frames are at `positions`, innermost first. Registers
+    /// nothing, so a caller can look a stack up before building its frames. Doesn't allocate.
+    pub fn find_stack(&self, positions: &[FrameKey]) -> Option<StackId> {
+        if positions.is_empty() {
+            return None;
+        }
+        let stacks = self.stacks.lock().unwrap_or_else(PoisonError::into_inner);
+        stacks.ids.get(positions).copied()
     }
 
     /// The frames registered for `id`.

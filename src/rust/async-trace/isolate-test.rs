@@ -75,6 +75,21 @@ fn stack_lookup() {
 }
 
 #[test]
+fn find_stack_matches_positions_and_registers_nothing() {
+    let isolate = IsolateState::new();
+    let positions = [(7, 1, 3), (7, 2, 3)];
+    assert_eq!(isolate.find_stack(&positions), None);
+    assert!(isolate.stack(1).is_none());
+
+    let id = isolate
+        .intern_stack(vec![frame("f", 1), frame("g", 2)])
+        .unwrap();
+    assert_eq!(isolate.find_stack(&positions), Some(id));
+    assert_eq!(isolate.find_stack(&positions[..1]), None);
+    assert_eq!(isolate.find_stack(&[]), None);
+}
+
+#[test]
 fn new_stacks_beyond_the_count_cap_get_no_id() {
     let mut isolate = IsolateState::new();
     isolate.set_stack_limits(2, usize::MAX);

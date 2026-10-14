@@ -111,6 +111,8 @@ mod bridge {
 
         fn accepts_resources(self: &Tracker) -> bool;
         fn begin_stack(self: &mut Tracker);
+        fn push_frame_position(self: &mut Tracker, script_id: i32, line: u32, column: u32);
+        fn find_stack(self: &mut Tracker) -> bool;
         #[cxx_name = "push_frame"]
         fn push_frame_ffi(
             self: &mut Tracker,

@@ -40,6 +40,7 @@ pub use clock::MonotonicClock;
 pub use clock::Nanos;
 pub use clock::epoch_unix_ms;
 pub use isolate::Frame;
+pub use isolate::FrameKey;
 pub use isolate::IsolateId;
 pub use isolate::IsolateState;
 pub use isolate::StackId;
