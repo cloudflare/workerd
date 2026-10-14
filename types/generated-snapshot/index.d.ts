@@ -3889,7 +3889,7 @@ interface Socket {
   get secureTransport(): "on" | "off" | "starttls";
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
-  proxyTo(sock: Socket, options?: StreamPipeOptions): Promise<void>;
+  proxyTo(other: Socket, options?: ProxyToOptions): Promise<void>;
 }
 interface SocketOptions {
   secureTransport?: string;
@@ -3906,6 +3906,9 @@ interface TlsOptions {
 interface SocketInfo {
   remoteAddress?: string;
   localAddress?: string;
+}
+interface ProxyToOptions {
+  signal?: AbortSignal;
 }
 /**
  * The **`EventSource`** interface is web content's interface to server-sent events.
