@@ -689,17 +689,19 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
   if (!obj.has(js, "cacheControl")) {
     if (hasCacheMode) {
       // Synthesize from the cache request option.
-      switch (cacheMode) {
-        case CacheMode::NOSTORE:
-          obj.set(js, "cacheControl", js.str("no-store"_kjc));
-          break;
-        case CacheMode::NOCACHE:
-          obj.set(js, "cacheControl", js.str("no-cache"_kjc));
-          break;
-        case CacheMode::RELOAD:
-          break;
-        case CacheMode::NONE:
-          KJ_UNREACHABLE;
+      if (!FeatureFlags::get(js).getCacheOptionPreservesCacheControl()) {
+        switch (cacheMode) {
+          case CacheMode::NOSTORE:
+            obj.set(js, "cacheControl", js.str("no-store"_kjc));
+            break;
+          case CacheMode::NOCACHE:
+            obj.set(js, "cacheControl", js.str("no-cache"_kjc));
+            break;
+          case CacheMode::RELOAD:
+            break;
+          case CacheMode::NONE:
+            KJ_UNREACHABLE;
+        }
       }
     } else if (obj.has(js, "cacheTtl")) {
       // Synthesize from cacheTtl value: positive/zero → max-age=N, -1 → no-store.
