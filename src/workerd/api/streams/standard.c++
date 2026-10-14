@@ -200,7 +200,7 @@ class WritableLockImpl {
     // given). Idempotent: a second call is a no-op, and we never release a lock we no
     // longer own. The write-side lock state is not affected.
     void releaseSource(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) {
-      if (source == nullptr) return;
+      if (isSourceReleased()) return;
       source = nullptr;
       // Hold a local ref across the call: when maybeError is given and the source is
       // JS-backed, releasePipeLock() runs the source's cancel algorithm (arbitrary
@@ -209,6 +209,13 @@ class WritableLockImpl {
       // member — while the source's controller is still executing releasePipeLock().
       auto readable = readableStreamRef.addRef();
       readable->getController().releasePipeLock(js, maybeError);
+    }
+
+    // True once releaseSource() has run. The write-side lock can outlive the source: a failed
+    // write leaves it for doError(), and an exception from the source's cancel algorithm (e.g.
+    // execution terminating) skips the caller's releasePipeLock().
+    bool isSourceReleased() const {
+      return source == nullptr;
     }
 
     struct Flags {
@@ -4161,6 +4168,15 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
   auto preventCancel = pipeLock.flags.preventCancel;
   auto preventClose = pipeLock.flags.preventClose;
   auto pipeThrough = pipeLock.flags.pipeThrough;
+
+  if (pipeLock.isSourceReleased()) {
+    // Whatever released the source stopped the pipe; finish tearing it down.
+    auto reason = isErroredOrErroring(js).orDefault(
+        [&] { return js.typeError("This pipe's source has already been released."_kj); });
+    lock.releasePipeLock();
+    return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
+  }
+
   // At the start of each pipe step, we check to see if either the source or
   // the destination has closed or errored and propagate that on to the other.
   //
@@ -4255,8 +4271,8 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
         } else {
         }  // Trailing else() is squash compiler warning
 
-        if (result.done) {
-          // We'll handle the close at the start of the next iteration.
+        if (result.done || pipeLock.isSourceReleased()) {
+          // We'll handle the close, or the released source, at the start of the next iteration.
           return pipeLoop(js);
         }
 

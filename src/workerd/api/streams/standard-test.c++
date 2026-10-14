@@ -1973,6 +1973,57 @@ KJ_TEST("ReadableStream handles execution termination during read") {
   });
 }
 
+// Erroring the destination of a pipe while its read is pending cancels the source. If execution
+// is terminated inside the source's cancel algorithm, the exception escapes after the source has
+// been released but before the destination's pipe lock is. Canceling the source has already
+// closed it, so the pending read then resolves done and re-enters the pipe loop, which must not
+// touch the released source.
+KJ_TEST("WritableStream pipe survives termination in the source's cancel algorithm") {
+  preamble([](jsg::Lock& js) {
+    v8::TryCatch outerTryCatch(js.v8Isolate);
+
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .cancel = [](jsg::Lock& js, jsg::JsValue reason) -> jsg::Promise<void> {
+        js.terminateNextExecution();
+        // V8 only notices the termination while running JS.
+        jsg::check(v8::JSON::Stringify(js.v8Context(), js.str("test"_kj)));
+        return js.resolvedPromise();
+      },
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    kj::Maybe<jsg::Ref<WritableStreamDefaultController>> sinkController;
+    auto ws = js.alloc<WritableStream>(newWritableStreamJsController());
+    // clang-format off
+    ws->getController().setup(js, UnderlyingSink{
+      .start = [&](jsg::Lock& js, UnderlyingSink::Controller controller) -> jsg::Promise<void> {
+        sinkController = kj::mv(controller);
+        return js.resolvedPromise();
+      },
+    }, StreamQueuingStrategy{});
+    // clang-format on
+
+    bool pipeRejected = false;
+    auto pipe = rs->pipeTo(js, ws.addRef(), PipeToOptions{}).then(js, [](jsg::Lock& js) {
+    }, [&](jsg::Lock& js, jsg::Value reason) { pipeRejected = true; });
+    // Let the pipe loop issue its read, which stays pending since the source never enqueues.
+    js.runMicrotasks();
+    KJ_ASSERT(!pipeRejected);
+
+    try {
+      KJ_ASSERT_NONNULL(sinkController)->error(js, js.str("sink error"_kj));
+      KJ_FAIL_ASSERT("expected the source's cancel algorithm to terminate execution");
+    } catch (jsg::JsExceptionThrown&) {}
+    js.v8Isolate->CancelTerminateExecution();
+
+    js.runMicrotasks();
+    KJ_ASSERT(pipeRejected);
+    KJ_ASSERT(!ws->isLocked());
+  });
+}
+
 // ======================================================================================
 // WritableStream re-entrancy tests
 
