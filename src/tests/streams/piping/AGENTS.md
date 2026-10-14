@@ -9,10 +9,11 @@ identity suite's pipe-integration.js.
 
 The suite COMPLEMENTS WPT (`//src/wpt:streams`). The C++ seeds in
 piping/error-propagation-forward largely root-cause to harness shapes
-plus ledger #5/#6 below; piping/close-propagation-backward and
-error-propagation-backward are DISABLED for hangs — this suite covers
-that territory with BOUNDED observations (a pinned 'pending' outcome is
-a deliberate defect pin, not a hole).
+plus ledger #5/#6 below. piping/close-propagation-backward and
+error-propagation-backward pass with `pipe_to_backward_propagation`,
+which the WPT run enables through its future compatibility date; this
+suite pins the unflagged behavior with BOUNDED observations (a pinned
+'pending' outcome is a deliberate defect pin, not a hole).
 
 ## Divergence ledger (C++ vs TypeScript)
 
@@ -21,10 +22,10 @@ a deliberate defect pin, not a hole).
 | 1 | non-byte chunks piped into native identity | strings are UTF-8 encoded and pass through on both; the NUMBER chunk fails the pipe — C++ rejects 'This WritableStream only supports writing byte types.'; TypeScript surfaces the identity validation TypeError through the non-fatal write-rejection pipe path (dest aborted, downstream reads reject) | `pipeThroughJsToInternal` |
 | 2 | writable lock after a completed pipeThrough | stays locked; getWriter throws | spec finalize: both locks release when the pipe settles — one macrotask after the output's done, `.locked` is deterministically false and getWriter() succeeds (the release cascade is not synchronized with the output's done delivery, so loop-exit-instant reads are unspecified; `.locked` and getWriter share one predicate and never disagree at an instant) | `pipeThroughJsToInternalCloses` |
 | 3 | write-after-close rejection message | 'This WritableStream has been closed.' | 'Cannot write to a stream that is closing or closed' (`CLOSED_WRITE_MSG` helper) | `pipeToInternalToJsSimple`, `pipeToInternalToJsClose` |
-| 4 | ws.close() queued BEFORE pipeTo | pipe locks both ends, waits, cancels source with 'This destination writable stream is closed.', then RESOLVES (see the TODO(conform) in the test) | pipe REJECTS IMMEDIATELY 'Destination closed before the pipe completed', cancels source with the same error (preventCancel suppresses), locks never observed held | `pipeToJsToJsCloseQueuedDestination`(+`PreventCancel`) |
+| 4 | ws.close() queued BEFORE pipeTo | pipe locks both ends, waits, cancels source with 'This destination writable stream is closed.', then RESOLVES; with `pipe_to_backward_propagation` it rejects with that TypeError (spec) | pipe REJECTS IMMEDIATELY 'Destination closed before the pipe completed', cancels source with the same error (preventCancel suppresses), locks never observed held | `pipeToJsToJsCloseQueuedDestination`(+`PreventCancel`) |
 | 5 | pipeTo brand check on a broken `this` | THROWS synchronously (before the capture_async_api_throws wrapper; the WPT general.any seed); a real stream with a bad destination REJECTS | both reject (spec) | `brandChecks` |
 | 6 | destination hwm 0 (never desires) | pipe writes an available chunk anyway — ignores desiredSize (the WPT 'dest never desires chunks' seed family) | never writes (spec) | `sourceErroredAfterChunkHwmZero` |
-| 7 | dest controller error()s while the pipe waits on a read | HALF-PROPAGATES: cancels the source with the error but FULFILLS the pipe promise | rejects the pipe and cancels the source with the error (spec) | `destControllerErrorsMidPipe`, `destErroringWaitsForInFlightWrite` |
+| 7 | dest controller error()s while the pipe waits on a read | HALF-PROPAGATES: cancels the source with the error but FULFILLS the pipe promise; with `pipe_to_backward_propagation` it rejects with the error (spec) | rejects the pipe and cancels the source with the error (spec) | `destControllerErrorsMidPipe`, `destErroringWaitsForInFlightWrite` |
 | 8 | FixedLengthStream length violations via pipe | overflow: pipe NEVER SETTLES (bounded); underflow: never settles | overflow: rejects RangeError; underflow: never settles (parity of nonconformance) | `fixedLengthStreamPipeOverflow`/`Underflow` |
 | 9 | already-closed source → already-closed dest | rejects TypeError (a C++ deviation: the spec's ordered shutdown conditions give closing-forward priority) | FULFILLS (spec; WPT multiple-propagation 'closed readable to closed writable' pins the fulfillment) | `closedSourceToClosedDest` |
 | 10 | SharedArrayBuffer-backed views into CompressionStream | copies the shared bytes; round-trips | write path REJECTS TypeError 'The provided value is not of type (ArrayBuffer or ArrayBufferView)' (spec: BufferSource without [AllowShared]) — while its identity stream ACCEPTS the same views | `sabViewThroughCompressionRoundTrip` |
@@ -70,6 +71,7 @@ the source FIRST, then releasing the write (`pipeStopsPullingWhenDestStalls`).
 | `streams_enable_constructors` + `transformstream_enable_standard_constructor` (2022-11-30) | yes (JS-backed endpoints) | `piping-cpp-legacy`: JS ctors throw the flag-naming Error; NATIVE→NATIVE pipes (body ↔ IdentityTransformStream) work unflagged |
 | `capture_async_api_throws` | ledger #5's bad-dest rejection shape | — |
 | `pedantic_wpt` (dateless opt-in) | `piping-cpp-pedantic` cell | zero observable deltas on this suite's surface |
+| `pipe_to_backward_propagation` | off (ledger #4, #7 pin the unflagged outcome) | on in the C++ `@all-compat-flags` variants, which take the spec branch (`pipeToBackwardPropagation` in which-impl.js) |
 | others (nodejs_compat, getters-on-prototype, toString tag, backpressure fixup, spec-compliant writer) | as in the sibling suites | — |
 
 ## Module map

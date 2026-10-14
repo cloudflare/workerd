@@ -21,6 +21,9 @@ namespace workerd::api {
 using DefaultController = jsg::Ref<ReadableStreamDefaultController>;
 using ByobController = jsg::Ref<ReadableByteStreamController>;
 
+// Whether a pipe was started by pipeThrough(), whose pipe promise is marked as handled.
+WD_STRONG_BOOL(IsPipeThrough);
+
 namespace {
 struct ValueReadable;
 struct ByteReadable;
@@ -164,7 +167,10 @@ class WritableLockImpl {
 
   void visitForGc(jsg::GcVisitor& visitor);
 
-  bool pipeLock(WritableStream& owner, jsg::Ref<ReadableStream> source, PipeToOptions& options);
+  bool pipeLock(WritableStream& owner,
+      jsg::Ref<ReadableStream> source,
+      PipeToOptions& options,
+      jsg::Promise<void>::Resolver resolver);
   void releasePipeLock();
 
   JSG_MEMORY_INFO(WritableLockImpl) {
@@ -193,23 +199,42 @@ class WritableLockImpl {
 
     kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
 
+    // Settles the promise returned by pipeTo(). The pipe loop's own outcome feeds it, but when
+    // something outside the loop ends the pipe (the destination erroring or closing), shutDown()
+    // settles it directly: the loop may be waiting on a read that never completes.
+    jsg::Promise<void>::Resolver resolver;
+
     kj::Maybe<jsg::Promise<void>> checkSignal(jsg::Lock& js, Controller& self);
 
     // Drops our kj::Ptr to the source's PipeController, then releases the source's
-    // pipe lock through its controller (canceling the source first if maybeError is
-    // given). Idempotent: a second call is a no-op, and we never release a lock we no
-    // longer own. The write-side lock state is not affected.
-    void releaseSource(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) {
-      if (isSourceReleased()) return;
+    // pipe lock through its controller, canceling the source first if maybeError is
+    // given. Returns the cancel's promise, if there was one. Idempotent: a second call is a
+    // no-op, and we never release a lock we no longer own. The write-side lock state is not
+    // affected.
+    kj::Maybe<jsg::Promise<void>> releaseSource(
+        jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) {
+      if (isSourceReleased()) return kj::none;
       source = nullptr;
-      // Hold a local ref across the call: when maybeError is given and the source is
-      // JS-backed, releasePipeLock() runs the source's cancel algorithm (arbitrary
-      // user JS) synchronously. That JS may re-enter the controller and release the
-      // write-side pipe lock, destroying *this — including the readableStreamRef
-      // member — while the source's controller is still executing releasePipeLock().
+      // Hold a local ref across the calls: when maybeError is given, cancel() may run the
+      // source's cancel algorithm (arbitrary user JS) synchronously. That JS may re-enter the
+      // controller and release the write-side pipe lock, destroying *this — including the
+      // readableStreamRef member — while the source's controller is still running.
       auto readable = readableStreamRef.addRef();
-      readable->getController().releasePipeLock(js, maybeError);
+      // The source stays pipe-locked while its cancel algorithm is invoked, as the spec
+      // requires. The pipe promise may remain pending, waiting on the cancel's promise, after
+      // this function releases the source lock. Releasing without an error runs no
+      // JavaScript, so this also runs if the cancel throws (e.g. execution terminating).
+      KJ_DEFER(readable->getController().releasePipeLock(js));
+      KJ_IF_SOME(error, maybeError) {
+        return readable->getController().cancel(js, error);
+      }
+      return kj::none;
     }
+
+    // Ends the pipe from outside the pipe loop because the destination errored or closed with
+    // `reason`: releases the source, canceling it unless preventCancel, and rejects the pipe
+    // promise. The caller then drops the write-side lock.
+    void shutDown(jsg::Lock& js, jsg::JsValue reason);
 
     // True once releaseSource() has run. The write-side lock can outlive the source: a failed
     // write leaves it for doError(), and an exception from the source's cancel algorithm (e.g.
@@ -234,6 +259,7 @@ class WritableLockImpl {
     JSG_MEMORY_INFO(PipeLocked) {
       tracker.trackField("readableStreamRef", readableStreamRef);
       tracker.trackField("signal", maybeSignal);
+      tracker.trackField("resolver", resolver);
     }
   };
 
@@ -518,8 +544,10 @@ void WritableLockImpl<Controller>::releaseWriter(
 }
 
 template <typename Controller>
-bool WritableLockImpl<Controller>::pipeLock(
-    WritableStream& owner, jsg::Ref<ReadableStream> source, PipeToOptions& options) {
+bool WritableLockImpl<Controller>::pipeLock(WritableStream& owner,
+    jsg::Ref<ReadableStream> source,
+    PipeToOptions& options,
+    jsg::Promise<void>::Resolver resolver) {
   if (isLockedToWriter()) {
     return false;
   }
@@ -530,6 +558,7 @@ bool WritableLockImpl<Controller>::pipeLock(
     .readableStreamRef = kj::mv(source),
     .source = kj::mv(sourceLock),
     .maybeSignal = kj::mv(options.signal),
+    .resolver = kj::mv(resolver),
     .flags =
         {
           .preventAbort = options.preventAbort.orDefault(false),
@@ -561,8 +590,51 @@ void WritableLockImpl<Controller>::visitForGc(jsg::GcVisitor& visitor) {
       KJ_IF_SOME(signal, locked.maybeSignal) {
         visitor.visit(signal);
       }
+      visitor.visit(locked.resolver);
     }
   }
+}
+
+// Completes a pipe whose destination errored or closed with `reason`, given the promise of the
+// source's cancel, if it was canceled. Per the spec's "shutdown with an action", the pipe rejects
+// with `reason` once the cancel completes, or with the cancel's error if it fails. Without the
+// pipe_to_backward_propagation compatibility flag, the pipe rejects with `reason` right away and
+// the cancel's outcome is ignored.
+jsg::Promise<void> rejectAfterCancel(jsg::Lock& js,
+    kj::Maybe<jsg::Promise<void>> maybeCancel,
+    jsg::JsValue reason,
+    IsPipeThrough isPipeThrough) {
+  bool pipeThrough = isPipeThrough.toBool();
+  if (!FeatureFlags::get(js).getPipeToBackwardPropagation()) {
+    return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
+  }
+  KJ_IF_SOME(cancel, maybeCancel) {
+    auto onSuccess =
+        JSG_VISITABLE_LAMBDA((reason = reason.addRef(js), pipeThrough), (reason), (jsg::Lock& js) {
+          return rejectedMaybeHandledPromise<void>(js, reason.getHandle(js), pipeThrough);
+        });
+    auto onFailure = [pipeThrough](jsg::Lock& js, jsg::Value error) {
+      return rejectedMaybeHandledPromise<void>(js, jsg::JsValue(error.getHandle(js)), pipeThrough);
+    };
+    return cancel.then(js, kj::mv(onSuccess), kj::mv(onFailure));
+  }
+  return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
+}
+
+template <typename Controller>
+void WritableLockImpl<Controller>::PipeLocked::shutDown(jsg::Lock& js, jsg::JsValue reason) {
+  // Copy what we need first: the source's cancel algorithm can run user JS that re-enters the
+  // controller and releases the write-side pipe lock, destroying *this.
+  auto pipeResolver = resolver.addRef(js);
+  IsPipeThrough pipeThrough(flags.pipeThrough);
+  auto cancel = flags.preventCancel ? releaseSource(js) : releaseSource(js, reason);
+  if (!FeatureFlags::get(js).getPipeToBackwardPropagation()) {
+    // Without the compatibility flag, the pipe promise is left to the pipe loop, which resolves
+    // it once it notices the pipe is gone (or never, if its read never completes).
+    return;
+  }
+  // Whatever the pipe loop later produces is ignored: a promise can only be resolved once.
+  pipeResolver.resolve(js, rejectAfterCancel(js, kj::mv(cancel), reason, pipeThrough));
 }
 
 template <typename Controller>
@@ -3982,11 +4054,7 @@ void WritableStreamJsController::doClose(jsg::Lock& js) {
     // preventCancel. releaseSource() is idempotent, making this safe when the pipe's
     // write-failure path already released the source (a write rejected by the queued
     // close).
-    if (!pipeLocked.flags.preventCancel) {
-      pipeLocked.releaseSource(js, js.typeError("This destination writable stream is closed."_kj));
-    } else {
-      pipeLocked.releaseSource(js);
-    }
+    pipeLocked.shutDown(js, js.typeError("This destination writable stream is closed."_kj));
     (void)lock.state.transitionFromTo<WritableLockImpl::PipeLocked, Unlocked>();
   }
 }
@@ -4005,14 +4073,10 @@ void WritableStreamJsController::doError(jsg::Lock& js, jsg::JsValue reason) {
     maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
     maybeResolvePromise(js, locked.getReadyFulfiller());
   } else KJ_IF_SOME(pipeLocked, lock.state.tryGetUnsafe<WritableLockImpl::PipeLocked>()) {
-    // When the writable side of a pipe errors, we need to release the source stream.
-    // The pipeLoop may be waiting on a read from the source that will never complete,
-    // so we need to proactively release the source here.
-    if (!pipeLocked.flags.preventCancel) {
-      pipeLocked.releaseSource(js, reason);
-    } else {
-      pipeLocked.releaseSource(js);
-    }
+    // When the writable side of a pipe errors, we need to release the source stream and
+    // settle the pipe. The pipeLoop may be waiting on a read from the source that will
+    // never complete, so we can't leave either to it.
+    pipeLocked.shutDown(js, reason);
     (void)lock.state.transitionFromTo<WritableLockImpl::PipeLocked, Unlocked>();
   }
 }
@@ -4169,13 +4233,21 @@ kj::Maybe<jsg::Promise<void>> WritableStreamJsController::tryPipeFrom(
   // completes, or is rejected if the pipe operation is aborted or errored.
 
   // Let's also acquire the destination pipe lock.
-  lock.pipeLock(owner.assertLive(), kj::mv(source), options);
+  auto prp = js.newPromiseAndResolver<void>();
+  lock.pipeLock(owner.assertLive(), kj::mv(source), options, prp.resolver.addRef(js));
 
-  return pipeLoop(js).then(js, JSG_VISITABLE_LAMBDA((ref = addRef()), (ref), (auto& js){}));
+  auto onSuccess = JSG_VISITABLE_LAMBDA((ref = addRef(), resolver = prp.resolver.addRef(js)),
+      (ref, resolver), (jsg::Lock& js) { resolver.resolve(js); });
+  auto onFailure =
+      JSG_VISITABLE_LAMBDA((ref = addRef(), resolver = kj::mv(prp.resolver)), (ref, resolver),
+          (jsg::Lock& js, jsg::Value reason) { resolver.reject(js, reason.getHandle(js)); });
+  pipeLoop(js).then(js, kj::mv(onSuccess), kj::mv(onFailure));
+  return kj::mv(prp.promise);
 }
 
 jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
   auto maybePipeLock = lock.tryGetPipe();
+  // Whatever released the lock settled the pipe; this outcome is ignored.
   if (maybePipeLock == kj::none) return js.resolvedPromise();
   auto& pipeLock = KJ_REQUIRE_NONNULL(maybePipeLock);
 
@@ -4220,23 +4292,15 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
 
   KJ_IF_SOME(errored, state.tryGetUnsafe<StreamStates::Errored>()) {
     auto reason = errored.getHandle(js);
-    if (!preventCancel) {
-      pipeLock.releaseSource(js, reason);
-    } else {
-      pipeLock.releaseSource(js);
-    }
+    auto cancel = preventCancel ? pipeLock.releaseSource(js) : pipeLock.releaseSource(js, reason);
     lock.releasePipeLock();
-    return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
+    return rejectAfterCancel(js, kj::mv(cancel), reason, IsPipeThrough(pipeThrough));
   }
 
   KJ_IF_SOME(erroring, isErroring(js)) {
-    if (!preventCancel) {
-      pipeLock.releaseSource(js, erroring);
-    } else {
-      pipeLock.releaseSource(js);
-    }
+    auto cancel = preventCancel ? pipeLock.releaseSource(js) : pipeLock.releaseSource(js, erroring);
     lock.releasePipeLock();
-    return rejectedMaybeHandledPromise<void>(js, erroring, pipeThrough);
+    return rejectAfterCancel(js, kj::mv(cancel), erroring, IsPipeThrough(pipeThrough));
   }
 
   if (pipeLock.source->isClosed()) {
@@ -4254,14 +4318,9 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
 
   if (state.is<StreamStates::Closed>()) {
     auto reason = js.typeError("This destination writable stream is closed."_kj);
-    if (!preventCancel) {
-      pipeLock.releaseSource(js, reason);
-    } else {
-      pipeLock.releaseSource(js);
-    }
+    auto cancel = preventCancel ? pipeLock.releaseSource(js) : pipeLock.releaseSource(js, reason);
     lock.releasePipeLock();
-
-    return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
+    return rejectAfterCancel(js, kj::mv(cancel), reason, IsPipeThrough(pipeThrough));
   }
 
   // Assuming we get by that, we perform a read on the source. If the read errors,
@@ -4299,14 +4358,11 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
       // The write-side pipe lock is left in place; doError() cleans it up when the
       // underlying error propagates to this controller.
       auto reason = jsg::JsValue(exception.getHandle(js));
+      kj::Maybe<jsg::Promise<void>> cancel;
       KJ_IF_SOME(pipeLock, lock.tryGetPipe()) {
-        if (!preventCancel) {
-          pipeLock.releaseSource(js, reason);
-        } else {
-          pipeLock.releaseSource(js);
-        }
+        cancel = preventCancel ? pipeLock.releaseSource(js) : pipeLock.releaseSource(js, reason);
       } else {} // Trailing else() to squash compiler warning
-      return rejectedMaybeHandledPromise<void>(js, reason, pipeThrough);
+      return rejectAfterCancel(js, kj::mv(cancel), reason, IsPipeThrough(pipeThrough));
     } );
 
         auto promise = write(js,

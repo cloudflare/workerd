@@ -1694,4 +1694,15 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # importedStringConstants: 'wasm:js/string-constants' })`. The proposal is still in the
   # implementation phase, so the feature is opt-in. Modules that don't import the `wasm:*`
   # namespaces are unaffected.
+
+  pipeToBackwardPropagation @193 :Bool
+      $compatEnableFlag("pipe_to_backward_propagation")
+      $compatDisableFlag("no_pipe_to_backward_propagation")
+      $compatEnableDate("2026-11-17");
+  # Makes pipeTo() and pipeThrough() on JavaScript-backed WritableStreams propagate the
+  # destination's errors and closure backward as the Streams spec requires: the pipe promise
+  # rejects with the destination's error, or with the source's cancel error if canceling the
+  # source fails, once that cancel completes. Previously, a destination that errored or closed
+  # while the pipe waited on a read canceled the source but resolved the pipe promise, or left it
+  # pending forever with preventCancel, and a failed cancel was not reported.
 }
