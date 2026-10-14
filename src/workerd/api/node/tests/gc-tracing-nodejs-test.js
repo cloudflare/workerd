@@ -14,19 +14,16 @@ import {
 const COMPRESSED_DEFLATE = deflateSync(new Uint8Array(1024));
 
 async function awaitGc() {
-  // Multiple GC passes with yields between them; gives the cycle collector
-  // room to reclaim and avoids the conservative stack scanner pinning the
-  // most recent allocation. scheduler.wait is a Workers-platform extension.
+  // Queue stackless GC before yielding, as in eventsource-gc-test. Synchronous GC can retain
+  // several engines through conservative native stack roots, even after repeated yields.
   for (let i = 0; i < 4; i++) {
+    const gcPromise = globalThis.gc({ type: 'major', execution: 'async' });
     await scheduler.wait(0);
-    globalThis.gc();
+    await gcPromise;
   }
 }
 
-// Performing the allocation loop inside a separate function ensures the
-// caller's stack frame doesn't keep the last allocated engine rooted
-// (V8's conservative stack scanner can otherwise pin the most recent
-// value via a register/spill slot).
+// Keep strong engine references out of the test's suspended async frame.
 function collectRefs(fn) {
   const refs = [];
   for (let i = 0; i < 256; i++) {
@@ -43,12 +40,10 @@ async function expectAllCollected(refs, label) {
   for (const ref of refs) {
     if (ref.deref() !== undefined) alive++;
   }
-  // Allow at most a single straggler. V8's conservative stack scanner
-  // can keep the most recently allocated object rooted via a stale
-  // register/spill slot for one extra cycle. The leak we are testing
-  // for is uncollectable cycles, which would leave all of them alive.
+  // Stackless GC has no conservative native stack roots. Without callback tracing, the
+  // uncollectable JS/C++ cycles retain every engine.
   ok(
-    alive <= 1,
+    alive === 0,
     `expected ${label} engines to be collected, ${alive} of ${refs.length} still alive`
   );
 }
