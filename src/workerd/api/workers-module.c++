@@ -92,4 +92,8 @@ jsg::JsSymbol EntrypointsModule::getRestoreSymbol(jsg::Lock& js) {
   return js.symbolInternal("cloudflare:workers:restore");
 }
 
+jsg::JsSymbol EntrypointsModule::getOnEvictSymbol(jsg::Lock& js) {
+  return js.symbolInternal(ON_EVICT_SYMBOL_KEY);
+}
+
 }  // namespace workerd::api

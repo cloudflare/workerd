@@ -703,6 +703,9 @@ export interface DurableObjectClass<
 export interface DurableObjectNamespaceGetDurableObjectOptionsVersionOptions {
   cohort?: string;
 }
+export interface DurableObjectEvictionInfo {
+  readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
+}
 export interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   readonly exports: Cloudflare.Exports;
