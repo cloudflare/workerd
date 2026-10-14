@@ -517,6 +517,7 @@ void EventSource::close(jsg::Lock& js) {
 
 void EventSource::enqueueMessages(
     kj::Array<PendingMessage> messages, kj::Rc<jsg::WeakRef<EventSource>> weakSelf) {
+  if (!context.hasCurrentIncomingRequest()) return;
   context.addTask(
       context.run([weakSelf = kj::mv(weakSelf), messages = kj::mv(messages)](auto& lock) mutable {
     KJ_IF_SOME(self, weakSelf->tryAddRef(lock)) {

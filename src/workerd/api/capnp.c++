@@ -551,6 +551,7 @@ kj::Maybe<jsg::V8Ref<v8::Function>> CapnpServer::getCloseMethod(jsg::Lock& js) {
 CapnpServer::~CapnpServer() noexcept(false) {
   KJ_IF_SOME(c, closeMethod) {
     ioContext->runIfAlive([&](IoContext& rc) {
+      if (!rc.hasCurrentIncomingRequest()) return;
       rc.addTask(
           rc.run([object = kj::mv(object), closeMethod = kj::mv(c)](Worker::Lock& lock) mutable {
         auto handle = object.getHandle(lock);

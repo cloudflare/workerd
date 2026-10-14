@@ -454,10 +454,12 @@ struct QueuedPumpState {
 
 // Cancels `reader` (a ReadableStreamDrainingReader) with `exception` as the reason, from outside
 // any JS-lock scope: the work is queued on the IoContext, which may already be gone, in which case
-// there is nothing left to cancel.
+// there is nothing left to cancel, or may have no request in progress to run it under, in which
+// case the reader is left as it is.
 void cancelReaderFromKj(
     IoContext::WeakRef& weakContext, jsg::JsRef<jsg::JsObject> reader, kj::Exception exception) {
   weakContext.runIfAlive([&](IoContext& context) {
+    if (!context.hasCurrentIncomingRequest()) return;
     context.addTask(context.run(
         [reader = kj::mv(reader), exception = kj::mv(exception)](Worker::Lock& lock) mutable {
       jsg::Lock& js = lock;
