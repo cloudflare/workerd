@@ -637,9 +637,14 @@ export async function initPython(): Promise<PythonInitResult> {
     // to introspect the user's main module. So we are effectively using Python to analyse the
     // classes exported by the user worker here. The class names are then exported from here and
     // used to create the equivalent JS classes via makeEntrypointClass.
-    const introspectionMod = await getIntrospectionMod();
-    pythonEntrypointClasses =
-      introspectionMod.collect_entrypoint_classes(mainModule);
+    const introspectionMod = await enterJaegerSpan(
+      'load_introspection_module',
+      async () => getIntrospectionMod()
+    );
+    pythonEntrypointClasses = enterJaegerSpan(
+      'collect_entrypoint_classes',
+      () => introspectionMod.collect_entrypoint_classes(mainModule)
+    );
     handleDefaultClass(handlers, pythonEntrypointClasses.workerEntrypoints);
 
     if (LEGACY_GLOBAL_HANDLERS) {
