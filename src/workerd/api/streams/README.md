@@ -390,7 +390,9 @@ auto onSuccess = [this, ref = addRef(), ...](...) mutable {
   into the source's `PipeLocked` lock state. `kj::Ptr` tracks liveness (asserting in
   debug builds): the `PipeLocked` state must not be destroyed while any pointer to its
   `PipeController` remains.
-- **Rule**: The source stays `PipeLocked` for the entire lifetime of the pipe. ONLY the
+- **Rule**: The source stays `PipeLocked` until the destination's pipe machinery tears
+  the pipe down, including while the source's cancel algorithm is invoked. The pipe
+  promise may stay pending after that, waiting on the cancel's promise. ONLY the
   destination's pipe machinery may release the lock, and only via
   `ReadableStreamController::releasePipeLock()` *after* dropping every
   `kj::Ptr<PipeController>` it holds (`Pipe::releaseSource()` /

@@ -41,22 +41,15 @@ export default {
       'a rejection from underlyingSource.cancel() should be returned by pipeTo()',
       'a rejection from underlyingSink.abort() should be preferred to one from underlyingSource.cancel()',
       'abort should do nothing after the readable is errored, even with pending writes',
-      'abort should do nothing after the writable is errored',
       'pipeTo on a teed readable byte stream should only be aborted when both branches are aborted',
       "(reason: 'null') underlyingSource.cancel() should called when abort, even with pending pull",
       "(reason: 'undefined') underlyingSource.cancel() should called when abort, even with pending pull",
       "(reason: 'error1: error1') underlyingSource.cancel() should called when abort, even with pending pull",
     ],
   },
-  'piping/close-propagation-backward.any.js': {
-    comment: 'A hanging Promise was canceled.',
-    disabledTests: true,
-  },
+  'piping/close-propagation-backward.any.js': {},
   'piping/close-propagation-forward.any.js': {},
-  'piping/error-propagation-backward.any.js': {
-    comment: 'A hanging Promise was canceled.',
-    disabledTests: true,
-  },
+  'piping/error-propagation-backward.any.js': {},
   'piping/error-propagation-forward.any.js': {
     comment: 'To be investigated',
     expectedFailures: [
