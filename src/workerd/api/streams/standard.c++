@@ -343,6 +343,11 @@ template <typename Controller>
 void ReadableLockImpl<Controller>::releasePipeLock(
     Controller& self, jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError) {
   if (!state.template is<PipeLocked>()) return;
+  // The transition destroys the PipeLocked (the PipeController the pipe machinery held
+  // a kj::Ptr to); the caller must have dropped all of its pointers before calling. It runs
+  // even if the cancel below throws (e.g. execution terminating): the caller has already let
+  // go of the pipe, so nothing else would ever unlock this stream.
+  KJ_DEFER((void)(state.template transitionFromTo<PipeLocked, Unlocked>()));
   KJ_IF_SOME(error, maybeError) {
     // Cancel returns a Promise but we do not need to propagate it. We can safely
     // drop it on the floor here. Note that the cancel algorithm may run user JS;
@@ -350,9 +355,6 @@ void ReadableLockImpl<Controller>::releasePipeLock(
     // locks only after the shutdown action completes).
     auto promise KJ_UNUSED = self.cancel(js, error);
   }
-  // The transition destroys the PipeLocked (the PipeController the pipe machinery held
-  // a kj::Ptr to); the caller must have dropped all of its pointers before calling.
-  (void)state.template transitionFromTo<PipeLocked, Unlocked>();
 }
 
 template <typename Controller>
@@ -695,19 +697,21 @@ template <typename Controller>
 jsg::Promise<ReadResult> deferControllerStateChange(jsg::Lock& js,
     Controller& controller,
     kj::FunctionParam<jsg::Promise<ReadResult>()> readCallback) {
+  // Fatal errors (e.g. execution terminating) skip JSG_CATCH, so the scope ends the operation
+  // while they unwind.
+  auto operation = controller.state.scopedOperation();
   bool endOperation = true;
   // The readCallback and the controller.doClose(..) and controller.doError(...)
   // methods, as well as the methods can trigger JavaScript errors to be thrown
   // synchronously in some cases. We want to make sure non-fatal errors cause the
   // stream to error and only fatal cases bubble up.
   JSG_TRY(js) {
-    controller.state.beginOperation();
     auto result = readCallback();
     endOperation = false;
 
-    // endOperation() will automatically apply any pending state if this was the last operation.
-    // Returns true if a pending state was applied.
-    if (controller.state.endOperation()) {
+    // Ending the operation will automatically apply any pending state if this was the last
+    // operation. Returns true if a pending state was applied.
+    if (operation.end()) {
       // A pending state was applied. Call the appropriate callback.
       // Skip callbacks if execution is being terminated (e.g., CPU time limit) since we can't
       // safely execute JavaScript in that state.
@@ -728,7 +732,7 @@ jsg::Promise<ReadResult> deferControllerStateChange(jsg::Lock& js,
     if (endOperation) {
       // Clear any pending state since we're erroring
       controller.state.clearPendingState();
-      (void)controller.state.endOperation();
+      (void)operation.end();
     }
     auto err = jsg::JsValue(exception.getHandle(js));
     controller.doError(js, err);
@@ -1996,11 +2000,12 @@ struct ValueReadable final: public kj::PtrTarget,
     KJ_IF_SOME(s, state) {
       // Save a COPY of the owner Ptr before calling pull — not a reference to the
       // member, which dies with `this`. The pull callback may trigger close/error
-      // which could destroy this ValueReadable. By using beginOperation(), we ensure
+      // which could destroy this ValueReadable. By running the pull as an operation, we ensure
       // doClose/doError defers the actual destruction until after we return. The
-      // owner itself outlives us: only the owner can drop this ValueReadable.
+      // owner itself outlives us: only the owner can drop this ValueReadable. If the pull throws,
+      // the scope ends the operation as the exception unwinds.
       auto owner = s.owner;
-      owner->state.beginOperation();
+      auto operation = owner->state.scopedOperation();
 
       // For draining reads, use forcePull to bypass backpressure checks.
       // This ensures we pull all available data regardless of highWaterMark.
@@ -2010,13 +2015,13 @@ struct ValueReadable final: public kj::PtrTarget,
         s.controller->pull(js);
       }
 
-      // Check if state is still valid BEFORE calling endOperation(),
-      // because that call may destroy this ValueReadable if close was deferred.
+      // Check if state is still valid BEFORE ending the operation,
+      // because that may destroy this ValueReadable if close was deferred.
       bool result =
           state.map([](State& s2) { return !s2.controller->isPulling(); }).orDefault(false);
 
       // Process any deferred close/error. This may destroy this ValueReadable.
-      if (owner->state.endOperation()) {
+      if (operation.end()) {
         // A pending state was applied. Call the appropriate callback.
         if (owner->state.template is<StreamStates::Closed>()) {
           owner->lock.onClose(js);
@@ -2259,11 +2264,12 @@ struct ByteReadable final: public kj::PtrTarget,
     KJ_IF_SOME(s, state) {
       // Save a COPY of the owner Ptr before calling pull — not a reference to the
       // member, which dies with `this`. The pull callback may trigger close/error
-      // which could destroy this ByteReadable. By using beginOperation(), we ensure
+      // which could destroy this ByteReadable. By running the pull as an operation, we ensure
       // doClose/doError defers the actual destruction until after we return. The
-      // owner itself outlives us: only the owner can drop this ByteReadable.
+      // owner itself outlives us: only the owner can drop this ByteReadable. If the pull throws,
+      // the scope ends the operation as the exception unwinds.
       auto owner = s.owner;
-      owner->state.beginOperation();
+      auto operation = owner->state.scopedOperation();
 
       // For draining reads, use forcePull to bypass backpressure checks.
       // This ensures we pull all available data regardless of highWaterMark.
@@ -2273,13 +2279,13 @@ struct ByteReadable final: public kj::PtrTarget,
         s.controller->pull(js);
       }
 
-      // Check if state is still valid BEFORE calling endOperation(),
-      // because that call may destroy this ByteReadable if close was deferred.
+      // Check if state is still valid BEFORE ending the operation,
+      // because that may destroy this ByteReadable if close was deferred.
       bool result =
           state.map([](State& s2) { return !s2.controller->isPulling(); }).orDefault(false);
 
       // Process any deferred close/error. This may destroy this ByteReadable.
-      if (owner->state.endOperation()) {
+      if (operation.end()) {
         // A pending state was applied. Call the appropriate callback.
         if (owner->state.template is<StreamStates::Closed>()) {
           owner->lock.onClose(js);
