@@ -557,6 +557,19 @@ void IoContext::logUncaughtExceptionAsync(
       runnable, Worker::Lock::TakeSynchronously(metrics), kj::none, Runnable::Exceptional(true));
 }
 
+kj::Maybe<kj::Exception> IoContext::tryGetRunFailure() {
+  KJ_IF_SOME(e, abortException) {
+    return e.clone();
+  }
+  if (incomingRequests.empty()) {
+    auto e = JSG_KJ_EXCEPTION(FAILED, Error,
+        "Couldn't complete operation because the execution context has no request in progress.");
+    e.setDetail(NO_CURRENT_INCOMING_REQUEST_DETAIL_ID, kj::heapArray<kj::byte>(0));
+    return kj::mv(e);
+  }
+  return kj::none;
+}
+
 void IoContext::abort(kj::Exception&& e) {
   if (abortException != kj::none) {
     return;
