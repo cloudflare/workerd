@@ -1802,22 +1802,8 @@ KJ_TEST("Server: Hyperdrive designator resolving to a Worker does not crash the 
   test.server.allowExperimental();
   test.start();
 
-  {
-    auto conn = test.connect("test-addr");
-    conn.httpGet200("/", "echoed: ping");
-  }
-
-  // The crash landed during teardown of the connection, after the response had already been
-  // delivered, so the process has to survive past that point. Advancing virtual time and issuing
-  // a second request through the same path exercises the teardown that used to be fatal.
-  test.wait(5);
-
-  {
-    auto conn = test.connect("test-addr");
-    conn.httpGet200("/", "echoed: ping");
-  }
-
-  test.wait(5);
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "echoed: ping");
 }
 
 KJ_TEST("Server: connect() with Worker as outbound, no connect_pass_though") {

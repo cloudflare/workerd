@@ -136,9 +136,6 @@ kj::Promise<kj::Own<kj::AsyncIoStream>> Hyperdrive::connectToDb() {
   kj::HttpHeaderTable headerTable;
   kj::HttpHeaders headers(headerTable);
 
-  // The client must own the subrequest channel, and the returned stream must own the client.
-  // Tying both to the stream keeps the lifetimes correct by construction instead of relying on
-  // the destination happening to be an external service.
   auto client = asHttpClient(kj::mv(service));
   auto connectReq =
       client->connect(kj::str(getHost(), ":", getPort()), headers, kj::HttpConnectSettings{});
