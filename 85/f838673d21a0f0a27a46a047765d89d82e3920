@@ -1,0 +1,31 @@
+src/workerd/api/tests/BUILD.bazel
+  s_9e291bb5d844d4::t_91b4533b5619a8 1222-1227
+src/workerd/api/tests/actor-cross-context-promise-test.js
+  s_9e291bb5d844d4::t_ce4f7b2686ae5c 1-176
+src/workerd/api/tests/actor-cross-context-promise-test.wd-test
+  s_9e291bb5d844d4::t_5f1debfe14870e 1-26
+src/workerd/io/compatibility-date.capnp
+  s_9e291bb5d844d4::t_0866d087ac639b 601-604
+src/workerd/io/io-own-test.c++
+  s_9e291bb5d844d4::t_c1ef922c0a268a 116-263
+src/workerd/io/io-own.c++
+  s_9e291bb5d844d4::t_8a14479b8c243a 72-79,104-112
+src/workerd/io/io-own.h
+  s_9e291bb5d844d4::t_2defbe4c178168 95-101,116-119,124,151-155,158-161,173-174
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "85f838673d21a0f0a27a46a047765d89d82e3920",
+  "prompts": {},
+  "sessions": {
+    "s_9e291bb5d844d4": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ec5fadbe7ffe5kOVAieds3erCS",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Joaquim Silva <joaquim@cloudflare.com>"
+    }
+  }
+}
