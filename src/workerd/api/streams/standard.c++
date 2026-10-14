@@ -1169,9 +1169,10 @@ void ReadableImpl<Self>::doCancel(jsg::Lock& js, jsg::Ref<Self> self, jsg::JsVal
 template <typename Self>
 void ReadableImpl<Self>::enqueue(jsg::Lock& js, kj::Rc<Entry> entry, jsg::Ref<Self> self) {
   JSG_REQUIRE(canCloseOrEnqueue(), TypeError, "This ReadableStream is closed.");
-  KJ_DEFER(pullIfNeeded(js, kj::mv(self)));
   auto& queue = state.template getUnsafe<Queue>();
   queue.push(js, kj::mv(entry));
+  // Not a KJ_DEFER: pullIfNeeded() calls into JavaScript, which must not run while unwinding.
+  pullIfNeeded(js, kj::mv(self));
 }
 
 template <typename Self>
@@ -1358,10 +1359,14 @@ jsg::Promise<void> WritableImpl<Self>::abort(
     reason = js.undefined();
   }
 
-  KJ_DEFER(if (!wasAlreadyErroring) { startErroring(js, kj::mv(self), reason); });
-
   auto& pending = maybePendingAbort.emplace(js, reason, wasAlreadyErroring);
-  return pending.whenResolved(js);
+  auto promise = pending.whenResolved(js);
+  // Not a KJ_DEFER: startErroring() calls into JavaScript, which can throw (e.g. when execution is
+  // terminated). A destructor that throws after the return value is constructed leaks that value.
+  if (!wasAlreadyErroring) {
+    startErroring(js, kj::mv(self), reason);
+  }
+  return kj::mv(promise);
 }
 
 template <typename Self>
@@ -2740,26 +2745,30 @@ jsg::Promise<void> ReadableStreamJsController::cancel(
     // reach any API that closes this stream — notably tee(). Closing destroys the consumer whose
     // cancel() is on the stack, so run this as an operation: state transitions are queued rather
     // than applied under us.
-    state.beginOperation();
-    KJ_DEFER({
-      // endOperation() applies a queued transition if there is one. Whoever applies it owes the
-      // lock the matching notification, since doClose()/doError() skip it when they defer.
-      if (state.endOperation()) {
-        // Skip callbacks if execution is being terminated (e.g. CPU time limit) since we can't
-        // safely execute JavaScript in that state.
-        if (!js.v8Isolate->IsExecutionTerminating()) {
-          if (state.is<StreamStates::Closed>()) {
-            lock.onClose(js);
-          } else if (state.isErrored()) {
-            lock.onError(js, state.getErrorUnsafe().getHandle(js));
-          }
+    //
+    // If cancel() throws (e.g. execution terminating), the lock can't be notified, since that
+    // would call into JavaScript while unwinding. The stream still ends up closed.
+    KJ_ON_SCOPE_FAILURE(
+        if (!state.isTerminal()) { (void)state.deferTransitionTo<StreamStates::Closed>(); });
+    auto operation = state.scopedOperation();
+    auto promise = consumer->cancel(js, reason);
+    // Ending the operation applies a queued transition if there is one. Whoever applies it owes
+    // the lock the matching notification, since doClose()/doError() skip it when they defer.
+    if (operation.end()) {
+      // Skip callbacks if execution is being terminated (e.g. CPU time limit) since we can't
+      // safely execute JavaScript in that state.
+      if (!js.v8Isolate->IsExecutionTerminating()) {
+        if (state.is<StreamStates::Closed>()) {
+          lock.onClose(js);
+        } else if (state.isErrored()) {
+          lock.onError(js, state.getErrorUnsafe().getHandle(js));
         }
-      } else {
-        // Nothing was queued, so close the stream here.
-        doClose(js);
       }
-    });
-    return consumer->cancel(js, reason);
+    } else {
+      // Nothing was queued, so close the stream here.
+      doClose(js);
+    }
+    return kj::mv(promise);
   };
 
   // Check for pending state first (deferred close/error during a read operation)
