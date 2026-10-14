@@ -2384,8 +2384,8 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
               } else {
                 return invokeFn(js, fn, thisArg, args, jsRpcCallSpan.getSpanParentsIfObserved());
               }
-            } catch (kj::Exception&) {
-              throw;
+            } catch (kj::Exception& e) {
+              kj::throwFatalException(kj::mv(e));
             }
             JSG_CATCH(error) {
               return {.returnValue = js.rejectedJsPromise(jsg::JsValue(error.getHandle(js)))};
