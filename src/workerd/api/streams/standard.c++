@@ -4306,6 +4306,10 @@ jsg::Promise<void> WritableStreamJsController::pipeLoop(jsg::Lock& js) {
         return pipeLoop(js);
       });
 
+  // The read can run the source's pull algorithm, and that user JS can end this pipe (e.g. by
+  // erroring the destination) and drop the last reference to the source while its read is still
+  // on the stack. Keep it alive until the read returns.
+  auto sourceRef = pipeLock.readableStreamRef.addRef();
   return pipeLock.source->read(js).then(js, kj::mv(onSuccess), kj::mv(onFailure));
 }
 
