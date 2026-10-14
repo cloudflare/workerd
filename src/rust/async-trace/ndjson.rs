@@ -161,6 +161,13 @@ fn write_line(buf: &mut Vec<u8>, line: &Line<'_>) -> bool {
 
 /// A process-wide NDJSON output. The first I/O error disables it; later writes are dropped and
 /// [`NdjsonWriter::failed`] reports it.
+///
+/// One lock covers the output, including its writes to the file. Appending lines usually only
+/// copies them into the file's buffer, but each context's end flushes the buffer, and every other
+/// thread using the writer waits for that `write(2)`. workerd runs its contexts on one thread, so
+/// nothing waits there. With many threads ending short contexts, take the buffered bytes under
+/// the lock and write them outside it, in the order they were taken, so that each context's lines
+/// stay in order.
 pub struct NdjsonWriter {
     out: Mutex<Option<Box<dyn Write + Send>>>,
     failed: AtomicBool,
