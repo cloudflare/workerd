@@ -1,0 +1,19 @@
+ci/build.yml
+  s_03acf2309a4ac3::t_6f3c6fcca41b39 121
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "8ef348b876ad5c1e5cb78acefe4751343c73af72",
+  "prompts": {},
+  "sessions": {
+    "s_03acf2309a4ac3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_075d7c3a5ffeUU1f0YdOY4tEVX",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Cormick Holland <cormick@cloudflare.com>"
+    }
+  }
+}

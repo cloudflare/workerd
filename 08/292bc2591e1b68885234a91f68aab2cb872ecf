@@ -1,0 +1,39 @@
+BUILD.bazel
+  s_ad98b07a2ebbe9::t_6c8e49de647a2f 4,131-168
+build/kj_test.bzl
+  s_ad98b07a2ebbe9::t_a1fb126a56ec29 22-25
+build/rust_io_backend.bzl
+  s_ad98b07a2ebbe9::t_074156cd5c3470 1-14
+build/wd_cc_benchmark.bzl
+  s_ad98b07a2ebbe9::t_6df777518c7a81 25-26
+src/rust/cxx/kj-rs-io/BUILD.bazel
+  s_ad98b07a2ebbe9::t_a66642dfc41dff 49-73
+src/workerd/io/BUILD.bazel
+  s_ad98b07a2ebbe9::t_2cd834d212401f 638-639
+src/workerd/server/BUILD.bazel
+  s_ad98b07a2ebbe9::t_dd5b1fc318b062 5,81,83-84,235-238,269-270,321,334,455-456
+src/workerd/tests/BUILD.bazel
+  s_ad98b07a2ebbe9::t_e1de771f4c7287 32-39,51-53
+src/workerd/util/BUILD.bazel
+  s_ad98b07a2ebbe9::t_a6c12522cd9982 4,516-548
+src/workerd/util/setup-async-io-test.c++
+  s_ad98b07a2ebbe9::t_49def63280a5ed 1-54
+src/workerd/util/setup-async-io-tokio.c++
+  s_ad98b07a2ebbe9::t_36cc8bd6531945 1-177
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "08292bc2591e1b68885234a91f68aab2cb872ecf",
+  "prompts": {},
+  "sessions": {
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

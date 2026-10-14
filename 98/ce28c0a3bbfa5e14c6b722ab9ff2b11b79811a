@@ -1,0 +1,17 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "98ce28c0a3bbfa5e14c6b722ab9ff2b11b79811a",
+  "prompts": {},
+  "sessions": {
+    "s_9ba3d8a42a37b3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_099ff4091ffezSNBST9KDYtay2",
+        "model": "claude-sonnet-5"
+      },
+      "human_author": "Josh Howard <jhoward@cloudflare.com>"
+    }
+  }
+}

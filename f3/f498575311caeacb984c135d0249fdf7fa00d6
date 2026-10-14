@@ -1,0 +1,38 @@
+src/workerd/api/output-gate-test.c++
+  s_a29df4c77cfcb1::t_377c8da4f2dca2 32,39,43-44
+  s_a29df4c77cfcb1::t_872e31d0f4917e 5-17,30-31,33-38,40-42,45,48-82,84-86,88,90-91,93-94,96-97,99-103,105-109,112-118,120,122-124,127-132,134-136,138-141,144-152,154-156,158-162
+  s_a29df4c77cfcb1::t_97a48e25a824e9 121,125
+  s_a29df4c77cfcb1::t_6a74f81c60778b 2-4
+  s_a29df4c77cfcb1::t_cf8a8ae0a365a0 1
+  s_a29df4c77cfcb1::t_f9742b1c685675 18-29,46-47,119,126
+  s_a29df4c77cfcb1::t_b7904253398f14 153,157
+  s_a29df4c77cfcb1::t_e16c4410023e23 133,137,142-143
+  s_a29df4c77cfcb1::t_2daed8c12f615b 110-111
+  s_a29df4c77cfcb1::t_9712530e17bdf8 83,87,89,92,95,98,104
+src/workerd/api/web-socket.c++
+  s_a29df4c77cfcb1::t_2a5e95a584bda4 502-503
+  s_a29df4c77cfcb1::t_36dc8aad3db5fa 499-501,504-505,539-540
+src/workerd/api/BUILD.bazel
+  s_a29df4c77cfcb1::t_872e31d0f4917e 685-692
+  s_a29df4c77cfcb1::t_e5280c8102c25f 684
+src/workerd/api/queue.c++
+  s_a29df4c77cfcb1::t_36dc8aad3db5fa 265-268,271-274,289-290,408-411,414-417,432-433
+  s_a29df4c77cfcb1::t_96c05d07768e01 269-270
+  s_a29df4c77cfcb1::t_213e2a8b6ddac2 412-413
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f3f498575311caeacb984c135d0249fdf7fa00d6",
+  "prompts": {},
+  "sessions": {
+    "s_a29df4c77cfcb1": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_056700b0affe7yJjLtTlvExuxv",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    }
+  }
+}

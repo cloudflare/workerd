@@ -1,0 +1,47 @@
+src/workerd/api/http.c++
+  s_c1a7662859f799::t_9930d0f3e52039 2474-2482
+  s_c1a7662859f799::t_a00ea54c11fba9 2471-2473
+src/workerd/api/http.h
+  s_c1a7662859f799::t_727b5a1dec377f 237-238
+  s_c1a7662859f799::t_340adf0beafc27 239-242
+  s_c1a7662859f799::t_d8c98c99da2d05 243-244
+src/workerd/api/fetch-body-rewindable-test.c++
+  s_c1a7662859f799::t_43e3e1d5eceb87 7-8,76,80-83,94,101-147,158-173,175-176,272-274,291-319
+  s_c1a7662859f799::t_50db46829f0702 70-75,77-79,84-93,95-100,148-149,227-271,320-321
+  s_2192e8a6d105f9::t_890a437f866d0f 174,177-178
+  s_c1a7662859f799::t_b58f9a34699ada 275-290
+  s_c1a7662859f799::t_8add5056777c93 322
+src/workerd/api/actor.c++
+  s_c1a7662859f799::t_340adf0beafc27 96-106
+  s_c1a7662859f799::t_ad9956f42230e9 107
+src/workerd/io/io-channels.h
+  s_c1a7662859f799::t_8617d0f6450c12 131
+  s_c1a7662859f799::t_bc1d424fcee93d 132-134
+  s_c1a7662859f799::t_8e15185986d576 135-137
+src/workerd/api/actor.h
+  s_c1a7662859f799::t_340adf0beafc27 350-352,356-357
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "efe3ea700a7e29855ecc6160890a53ef286c95e1",
+  "prompts": {},
+  "sessions": {
+    "s_2192e8a6d105f9": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0949d7839ffe3PH73618sV9aBi",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_c1a7662859f799": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_037f52e35ffehXUiJ6v9H8O9VK",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    }
+  }
+}

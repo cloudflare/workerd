@@ -1,0 +1,29 @@
+types/generated-snapshot/index.d.ts
+  s_9496b046a1a364::t_bbc09e37e21bd5 709,783-784
+  s_9496b046a1a364::t_d4aab5e2d94ce0 785
+types/generated-snapshot/experimental/index.d.ts
+  s_9496b046a1a364::t_437f0c72b3e7e5 718,802-803
+  s_9496b046a1a364::t_95c9853dfd0b20 804
+types/generated-snapshot/index.ts
+  s_9496b046a1a364::t_bbc09e37e21bd5 712,786-787
+  s_9496b046a1a364::t_e1c4c120b5f33e 788
+types/generated-snapshot/experimental/index.ts
+  s_9496b046a1a364::t_437f0c72b3e7e5 721,805-806
+  s_9496b046a1a364::t_cef491fe5fc927 807
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ae449d7abf4d12a5ad8bcc4ab4b3f1d9651789cc",
+  "prompts": {},
+  "sessions": {
+    "s_9496b046a1a364": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0046a268affe2zLQ3xwXN6au9J",
+        "model": "@cf/moonshotai/kimi-k2.6"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,55 @@
+src/rust/cxx/kj-rs-tokio/BUILD.bazel
+  s_dadaf0660bfcbe::t_c664c888b78154 42,70
+src/rust/cxx/kj-rs-tokio/tests/test_helpers.rs
+  s_dadaf0660bfcbe::t_33c93b07c76e4e 159,161,163-170,175,222-231
+src/rust/cxx/kj-rs-tokio/tests/test-helpers.h
+  s_dadaf0660bfcbe::t_05c1ab3511d65b 3-4,20-21,29-31
+src/rust/cxx/AGENTS.md
+  s_dadaf0660bfcbe::t_70067b95b9869c 37-39
+src/rust/cxx/kj-rs-tokio/tokio-event-port.c++
+  s_dadaf0660bfcbe::t_94d8cbbe4237a2 3-4,131-134,136-140
+src/rust/cxx/kj-rs-tokio/lib.rs
+  s_ebdd4cc4002fcf::t_e6af446e4df318 5,11-12,19,23,27
+src/rust/cxx/kj-rs-tokio/tests/tokio-event-port-test.c++
+  s_dadaf0660bfcbe::t_4b3c54f05bba12 436-439,685-687,791-799
+src/rust/cxx/kj-rs-tokio/runtime-test.rs
+  s_dadaf0660bfcbe::t_d41578365cb1a4 1-95
+src/rust/cxx/kj-rs-tokio/runtime.rs
+  s_dadaf0660bfcbe::t_c32ef3b0f86b09 1-116
+src/rust/cxx/kj-rs-tokio/ffi.rs
+  s_dadaf0660bfcbe::t_526e6d76b82023 5-9,18-19,25-26,124-125,160-182
+src/rust/cxx/kj-rs-tokio/tests/lib.rs
+  s_dadaf0660bfcbe::t_ff106b1b699303 11,100-110,129-131
+src/rust/cxx/kj-rs-tokio/tokio-event-port.h
+  s_dadaf0660bfcbe::t_859c036dc9ae13 25-26,59,68-72,155-157,176-179,184-186
+src/rust/cxx/kj-rs-tokio/tests/BUILD.bazel
+  s_ebdd4cc4002fcf::t_ae07b1397fa5fe 31
+src/rust/cxx/kj-rs-tokio/port.rs
+  s_ebdd4cc4002fcf::t_dfd3237d97b4a1 75-76
+src/rust/cxx/kj-rs-io/net-test.rs
+  s_dadaf0660bfcbe::t_ba0a892e1a267b 192,199-201,203-206
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e95cc234e223fa8a7b81c629bf180395d9c82371",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_ebdd4cc4002fcf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a920ec81650d7b971",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,57 @@
+src/rust/cxx/kj-hyper/client.rs
+  s_b5100e8818a1d4::t_c44ff2739356eb 40,74,126-130,154-158,191-192,219-220,230,233-241,245,249-250,258-259,261-272,1528,1536-1545
+src/rust/cxx/kj-hyper/ffi.rs
+  s_b5100e8818a1d4::t_b3d4e3fcaf2760 17,215-225,618-623,971,976,1013,1016,1090,1105,1124,1139,1145-1165
+src/rust/cxx/kj-hyper/hyper-http.h
+  s_b5100e8818a1d4::t_836f9b2e7b4f38 389-398
+src/rust/cxx/kj-hyper/kj-stream.h
+  s_b5100e8818a1d4::t_489a279d1116c9 61-82
+src/rust/cxx/kj-hyper/rust_stream.rs
+  s_b5100e8818a1d4::t_7ed019559b4ab8 11-16,27-29,32-33,41-43,45,55-125,128-129,138-150,152-153,159-169,184,203,224-226,236-266,270,272,274-290,301-305,311
+src/rust/cxx/kj-hyper/serve.rs
+  s_b5100e8818a1d4::t_a0a57e00bb29c7 10-12,22,24-25,75,522-558,606-607,610,612,618,621,642,644,647-665,694,696,702,705
+src/rust/cxx/kj-hyper/server.rs
+  s_b5100e8818a1d4::t_54f7cdee3ff217 206-211,229,236,252,258-262
+src/rust/cxx/kj-hyper/tests/lib.rs
+  s_b5100e8818a1d4::t_73e038ca5b1f49 12-13,80-86
+src/rust/cxx/kj-hyper/tests/serve-test.c++
+  s_b5100e8818a1d4::t_5e08ba62a196aa 11-12,369-433
+src/rust/cxx/kj-hyper/tests/serve_helpers.rs
+  s_b5100e8818a1d4::t_d1b4d1425c91a0 8,10,141-171,173,200,214,234
+src/rust/cxx/kj-hyper/tls.rs
+  s_b5100e8818a1d4::t_e8e6c3b3cac22c 779-805,821-824
+src/workerd/api/BUILD.bazel
+  s_b5100e8818a1d4::t_5a5666c638ddfa 431
+src/workerd/api/container.c++
+  s_b5100e8818a1d4::t_2eb0c276005ff3 7-8,1399
+src/workerd/api/hyperdrive.c++
+  s_b5100e8818a1d4::t_1267697e87ebcc 8,34-36
+src/workerd/api/sockets.c++
+  s_b5100e8818a1d4::t_4179294853020a 11,627,633
+src/workerd/io/BUILD.bazel
+  s_b5100e8818a1d4::t_b013f49437593f 75
+src/workerd/util/BUILD.bazel
+  s_b5100e8818a1d4::t_778c54f41a8334 557-575
+src/workerd/util/kj-http-tokio.c++
+  s_b5100e8818a1d4::t_7bad22a1fb0c94 164,346,439,527
+src/workerd/util/promised-stream.c++
+  s_b5100e8818a1d4::t_5b5c2c48290e12 1-20
+src/workerd/util/promised-stream.h
+  s_b5100e8818a1d4::t_16d6783b07f43c 1-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5dcae9e4e9f9c036fc7bf6f5539eadf2ee5a771c",
+  "prompts": {},
+  "sessions": {
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

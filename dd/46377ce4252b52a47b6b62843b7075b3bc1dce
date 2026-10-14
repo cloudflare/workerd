@@ -1,0 +1,97 @@
+build/deps/deps.jsonc
+  s_4bcf40db0a56c1::t_e4ed6074d4454f 47,73
+build/deps/gen/deps.MODULE.bazel
+  s_4bcf40db0a56c1::t_34be5c574071ee 41,69-70,72
+build/deps/v8.MODULE.bazel
+  s_4bcf40db0a56c1::t_6927dee87fbaa7 21,23,68
+patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch
+  s_4bcf40db0a56c1::t_6abbf1e8cff8bd 40,43
+patches/v8/0002-Allow-manually-setting-ValueSerializer-format-versio.patch
+  s_4bcf40db0a56c1::t_fe0bc25dddffcb 26,29,41
+patches/v8/0003-Allow-Windows-builds-under-Bazel.patch
+  s_4bcf40db0a56c1::t_27ad0baac8587f 9,12,91,94,119
+patches/v8/0005-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch
+  s_4bcf40db0a56c1::t_88b8553d00a5dd 13,16,24,53,62,65,81,90,109
+patches/v8/0006-Implement-Promise-Context-Tagging.patch
+  s_4bcf40db0a56c1::t_2d4dc1f77c3853 8,11,27,30,40,61,64,208,211,250,262,270,312,315,353,356,370,373,457,460,516
+patches/v8/0007-Randomize-the-initial-ExecutionContextId-used-by-the.patch
+  s_4bcf40db0a56c1::t_70e63341c49d6a 13
+patches/v8/0009-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch
+  s_4bcf40db0a56c1::t_ac610754cefbfa 33,36,48
+patches/v8/0010-Modify-where-to-look-for-fp16-dependency.-This-depen.patch
+  s_4bcf40db0a56c1::t_d283de0d8e74b1 11,14
+patches/v8/0011-Revert-heap-Add-masm-specific-unwinding-annotations-.patch
+  s_4bcf40db0a56c1::t_6b38d888d116b5 17,20,30
+patches/v8/0012-Update-illegal-invocation-error-message-in-v8.patch
+  s_4bcf40db0a56c1::t_999d3adf48b173 26,29,47,61
+patches/v8/0013-Implement-cross-request-context-promise-resolve-hand.patch
+  s_4bcf40db0a56c1::t_eaa4686606bb1c 9,12,39,42,52,55,169,181,206,217,259,262,305,308,337,363,398,401,476
+patches/v8/0014-Add-another-slot-in-the-isolate-for-embedder.patch
+  s_4bcf40db0a56c1::t_78b375441ec927 9,12
+patches/v8/0015-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch
+  s_4bcf40db0a56c1::t_b26090a3c0629c 33,36,48
+patches/v8/0017-Enable-V8-shared-linkage.patch
+  s_4bcf40db0a56c1::t_80c186ff0110cc 9,12,20,28,36,45,53,64,73,76,84,92
+patches/v8/0018-Modify-where-to-look-for-fast_float-and-simdutf.patch
+  s_4bcf40db0a56c1::t_2b0d59144c7ace 15,18-27,35,49,60-61
+patches/v8/0019-Remove-unneded-latomic-linker-flag.patch
+  s_4bcf40db0a56c1::t_c353871c84db45 9,12
+patches/v8/0020-Add-methods-to-get-heap-and-external-memory-sizes-di.patch
+  s_4bcf40db0a56c1::t_02882d8e82ee74 11,14,32,35
+patches/v8/0021-Port-concurrent-mksnapshot-support.patch
+  s_4bcf40db0a56c1::t_26d7c8aac464ce 9,12,24
+patches/v8/0022-Port-V8_USE_ZLIB-support.patch
+  s_4bcf40db0a56c1::t_ea0d0b3b2866a4 9,12,24,32
+patches/v8/0023-Modify-where-to-look-for-dragonbox.patch
+  s_4bcf40db0a56c1::t_f1e08dd2f19124 8,11
+patches/v8/0026-Implement-additional-Exception-construction-methods.patch
+  s_4bcf40db0a56c1::t_71d93eee9999ba 28,31,43
+patches/v8/0028-bind-icu-to-googlesource.patch
+  s_4bcf40db0a56c1::t_6e4fb22cfc99c5 8,11-20,26-29
+patches/v8/0029-Add-v8-String-IsFlat-API.patch
+  s_4bcf40db0a56c1::t_6853f75ed1c758 27,30
+patches/v8/0030-Expose-AdjustAmountOfExternalAllocatedMemoryImpl-as-.patch
+  s_4bcf40db0a56c1::t_92da158edf5caa 17,20,35
+patches/v8/0031-Add-verify_write_barriers-flag-in-V8-s-bazel-config.patch
+  s_4bcf40db0a56c1::t_e9a05564b02384 8,11
+patches/v8/0033-Return-false-on-Object.hasOwnProperty-with-intercept.patch
+  s_4bcf40db0a56c1::t_4f046b89a46700 8
+patches/v8/0035-Remove-libcxx-dep-from-defs.bzl-not-resolvable-via-h.patch
+  s_4bcf40db0a56c1::t_ef73d4e0c2fdb1 14,17
+patches/v8/0036-Fix-ExtendedMap-layout-on-Windows.patch
+  s_4bcf40db0a56c1::t_e6db45572335b1 17,20,44,47,54-56
+patches/v8/0038-Properly-depend-on-llvm-libc.patch
+  s_4bcf40db0a56c1::t_bfcdfb0e2c73e8 9,12,26
+patches/v8/0039-Fix-TSan-build-without-the-V8-sandbox.patch
+  s_4bcf40db0a56c1::t_6a6106d5ddfeaa 12,15,23,31
+patches/v8/0040-Enable-Perfetto-support-in-the-V8-Bazel-build.patch
+  s_4bcf40db0a56c1::t_bc75f702d39f79 14,17,26,34,63,71,94
+patches/v8/0041-Disable-preserve_most-on-Windows-x64-before-Clang-22.patch
+  s_4bcf40db0a56c1::t_6cf1e3c52e8f26 18,21
+patches/v8/0042-cppgc-Sweep-cppgc-eagerly-with-non-incremental-GC.patch
+  s_4bcf40db0a56c1::t_a3e2676e02501d 13,16,36
+patches/v8/0043-Disable-metagen-instance-types-in-the-Bazel-build.patch
+  s_4bcf40db0a56c1::t_bca2e88ea60bf8 1-50
+src/workerd/jsg/observer.h
+  s_4bcf40db0a56c1::t_ea318a9389fb5e 172-173
+src/workerd/jsg/setup-test.c++
+  s_4bcf40db0a56c1::t_6c81849f443530 33-40
+src/workerd/jsg/setup.c++
+  s_4bcf40db0a56c1::t_c74efc8e6a77ff 547-552,556-563,566,570
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "dd46377ce4252b52a47b6b62843b7075b3bc1dce",
+  "prompts": {},
+  "sessions": {
+    "s_4bcf40db0a56c1": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f12b796aaffekAT7rS4GMcdHi5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Cormick Holland <cormick@cloudflare.com>"
+    }
+  }
+}
