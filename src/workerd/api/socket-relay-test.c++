@@ -28,7 +28,7 @@ kj::Promise<void> writeString(kj::AsyncOutputStream& out, kj::StringPtr text) {
 kj::String readString(kj::AsyncInputStream& in, size_t size, kj::WaitScope& waitScope) {
   auto buffer = kj::heapArray<kj::byte>(size);
   in.read(buffer).wait(waitScope);
-  return kj::heapString(buffer.asChars());
+  return kj::String(kj::mv(buffer).releaseAsChars());
 }
 
 void expectEof(kj::AsyncInputStream& in, kj::WaitScope& waitScope) {

@@ -7,12 +7,7 @@ import { rejects } from 'assert';
 // Checks that proxyTo() refuses to start. It throws, or rejects when the
 // capture_async_api_throws compatibility flag turns its throws into rejections.
 async function refuses(start, expected) {
-  let relay;
-  try {
-    relay = start();
-  } catch (e) {
-    relay = Promise.reject(e);
-  }
+  let relay = Promise.try(start);
   await rejects(relay, expected);
 }
 
