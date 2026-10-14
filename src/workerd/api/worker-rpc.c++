@@ -2321,7 +2321,18 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
         // (makeReentryCallback() ensures this). This does NOT cancel the JavaScript (because JS
         // promises are not RAII-cancelable), but it will cancel this trailing .then(), which is
         // why it's safe to capture `&ctx` here.
-        return result.then([&ctx]() mutable { return ctx.waitForOutputLocks(); });
+        //
+        // An exception must wait for the output gate as well. The method may have read (or
+        // written) state whose write has not been confirmed yet, and the error it throws can carry
+        // that state to the caller as easily as a return value can. This matches
+        // WorkerEntrypoint::request(), which does not let a fetch handler's exception escape the
+        // isolate before the output gate opens. If the gate is broken, its exception replaces
+        // the method's, as it does there.
+        return result.then([&ctx]() mutable { return ctx.waitForOutputLocks(); },
+            [&ctx](kj::Exception&& e) mutable -> kj::Promise<void> {
+          return ctx.waitForOutputLocks().then(
+              [e = kj::mv(e)]() mutable { kj::throwFatalException(kj::mv(e)); });
+        });
       } else {
         return result;
       }
@@ -2359,14 +2370,38 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
           // Record this call's span on any stubs/callbacks passed as arguments, so that if the
           // callee invokes them, the follow-up jsRpcCall nests under this call's span (mirrors the
           // return-value handling in callImpl). Only recorded when traced.
-          InvocationResult invocationResult;
-          KJ_IF_SOME(envCtx, targetInfo.envCtx) {
-            invocationResult = invokeFnInsertingEnvCtx(js, methodNameForTrace, fn, thisArg, args,
-                envCtx.env, envCtx.ctx, jsRpcCallSpan.getSpanParentsIfObserved());
-          } else {
-            invocationResult =
-                invokeFn(js, fn, thisArg, args, jsRpcCallSpan.getSpanParentsIfObserved());
-          }
+          //
+          // A method that throws synchronously answers with a rejected promise, so that its
+          // exception reaches the caller by the same path as an asynchronous one, behind the
+          // output gate (see handleResult()). Only JavaScript exceptions are caught: a KJ
+          // exception here comes from decoding the arguments, not from the method, and keeps
+          // propagating unchanged rather than being converted to JavaScript and back.
+          auto invocationResult = [&]() -> InvocationResult {
+            jsg::Value error = nullptr;
+            {
+              v8::TryCatch tryCatch(js.v8Isolate);
+              try {
+                KJ_IF_SOME(envCtx, targetInfo.envCtx) {
+                  return invokeFnInsertingEnvCtx(js, methodNameForTrace, fn, thisArg, args,
+                      envCtx.env, envCtx.ctx, jsRpcCallSpan.getSpanParentsIfObserved());
+                } else {
+                  return invokeFn(js, fn, thisArg, args, jsRpcCallSpan.getSpanParentsIfObserved());
+                }
+              } catch (jsg::JsExceptionThrown&) {
+                // As in jsg::Lock::tryCatch(): a termination cannot become a rejection.
+                if (!tryCatch.CanContinue() || !tryCatch.HasCaught() ||
+                    tryCatch.Exception().IsEmpty()) {
+                  tryCatch.ReThrow();
+                  throw;
+                }
+                error = jsg::Value(js.v8Isolate, tryCatch.Exception());
+              }
+            }
+            // Reject outside the TryCatch, so that it cannot swallow an exception from here.
+            auto resolver = jsg::check(v8::Promise::Resolver::New(js.v8Context()));
+            jsg::check(resolver->Reject(js.v8Context(), error.getHandle(js)));
+            return {.returnValue = resolver->GetPromise()};
+          }();
 
           // We have a function, so let's call it and serialize the result for RPC.
           // If the function returns a promise we will wait for the promise to finish so we can
