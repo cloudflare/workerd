@@ -52,6 +52,11 @@ namespace workerd {
 // Maximum depth to which blockConcurrencyWhile() calls may be nested.
 constexpr uint MAX_BLOCK_CONCURRENCY_WHILE_DEPTH = 64;
 
+// Marks the exception IoContext::run() fails with when there is no current IncomingRequest, e.g.
+// in an actor between events (only with the DEFER_CROSS_CONTEXT_ACTIONS autogate). Not transient:
+// a retry needs the context to get another request.
+constexpr kj::Exception::DetailTypeId NO_CURRENT_INCOMING_REQUEST_DETAIL_ID = 0x68a64a728b1be5c9ull;
+
 // This wishes it were IoContext::Runnable::Exceptional.
 WD_STRONG_BOOL(IoContext_Runnable_Exceptional);
 // Whether the caller awaits a subrequest with its next awaitIo(), so that the subrequest span's
@@ -60,6 +65,8 @@ WD_STRONG_BOOL(SpanAwaitedNext);
 // Whether IoContext::cancelPendingWork() also clears `tasks`, which in an actor holds the
 // abortWhen() watchers.
 WD_STRONG_BOOL(ClearTasks);
+// Whether IoContext::run() reports a run without a current IncomingRequest as a possible bug.
+WD_STRONG_BOOL(ReportRunWithoutRequest);
 
 [[noreturn]] void throwExceededMemoryLimit(bool isActor);
 
@@ -525,6 +532,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // outlive its last IncomingRequest, so callers reachable from teardown -- destructors and
   // kj::defer cleanups in particular -- must check hasCurrentIncomingRequest() first and skip
   // the work rather than call this and fault.
+  //
+  // With the DEFER_CROSS_CONTEXT_ACTIONS autogate enabled, the callback doesn't run without a
+  // request: run() throws, or rejects if the request ends while it waits for the locks, with
+  // NO_CURRENT_INCOMING_REQUEST_DETAIL_ID. An aborted context fails with its abort reason instead.
   template <typename Func>
   auto run(Func&& func, kj::Maybe<InputGate::Lock> inputLock = kj::none) KJ_WARN_UNUSED_RESULT {
     if constexpr (runFuncAcceptsIoContext<Func>) {
@@ -1427,10 +1438,20 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   static constexpr bool runFuncAcceptsIoContext =
       std::invocable<std::decay_t<Func>&, Worker::Lock&, IoContext&>;
 
-  // Internal implementation of run(), always invoked with a single-arg callback.
+  // Throws a JavaScript Error carrying NO_CURRENT_INCOMING_REQUEST_DETAIL_ID if there is no
+  // current IncomingRequest and the DEFER_CROSS_CONTEXT_ACTIONS autogate is enabled. If `report`
+  // is YES, also logs the miss, at most once an hour, as a possible bug. An aborted context throws
+  // its abort exception instead, without logging.
+  void requireCurrentIncomingRequestForRun(ReportRunWithoutRequest report);
+
+  // Internal implementation of run(), always invoked with a single-arg callback. `report` is
+  // passed to requireCurrentIncomingRequestForRun() for the check made when called. The checks
+  // made after waiting for a lock never report: the request can end during any wait, so losing
+  // it there is no sign of a bug.
   template <typename Func>
-  kj::PromiseForResult<Func, Worker::Lock&> runSingle(
-      Func&& func, kj::Maybe<InputGate::Lock> inputLock = kj::none);
+  kj::PromiseForResult<Func, Worker::Lock&> runSingle(Func&& func,
+      kj::Maybe<InputGate::Lock> inputLock = kj::none,
+      ReportRunWithoutRequest report = ReportRunWithoutRequest::YES);
 
   template <typename Func>
   kj::PromiseForResult<Func, Worker::Lock&> runSingle(
@@ -1557,11 +1578,13 @@ template <typename Func>
 kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
     Func&& func, kj::Maybe<kj::Rc<InputGate::CriticalSection>> criticalSection) {
   KJ_IF_SOME(cs, criticalSection) {
+    requireCurrentIncomingRequestForRun(ReportRunWithoutRequest::YES);
     return cs.get()
         ->wait(getCurrentTraceSpan())
         .then([self = addWeakToThis(), func = kj::fwd<Func>(func)](
                   InputGate::Lock&& inputLock) mutable {
-      return self.assertLive().runSingle(kj::fwd<Func>(func), kj::mv(inputLock));
+      return self.assertLive().runSingle(
+          kj::fwd<Func>(func), kj::mv(inputLock), ReportRunWithoutRequest::NO);
     });
   } else {
     return runSingle(kj::fwd<Func>(func));
@@ -1570,12 +1593,14 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
 
 template <typename Func>
 kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
-    Func&& func, kj::Maybe<InputGate::Lock> inputLock) {
+    Func&& func, kj::Maybe<InputGate::Lock> inputLock, ReportRunWithoutRequest report) {
   // Before we try running anything, let's make sure our IoContext hasn't been aborted. If it has
   // been aborted, there's likely not an active request so later operations will fail anyway.
   KJ_IF_SOME(ex, abortException) {
     return ex.clone();
   }
+  // The setup below needs the current request. Re-entry with the input lock checks again.
+  requireCurrentIncomingRequestForRun(report);
 
   kj::Promise<Worker::AsyncLock> asyncLockPromise = nullptr;
   KJ_IF_SOME(a, actor) {
@@ -1584,7 +1609,8 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
           .wait(getCurrentTraceSpan())
           .then([self = addWeakToThis(), func = kj::fwd<Func>(func)](
                     InputGate::Lock&& inputLock) mutable {
-        return self.assertLive().runSingle(kj::fwd<Func>(func), kj::mv(inputLock));
+        return self.assertLive().runSingle(
+            kj::fwd<Func>(func), kj::mv(inputLock), ReportRunWithoutRequest::NO);
       });
     }
 
@@ -1596,10 +1622,11 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
   return asyncLockPromise.then([self = addWeakToThis(), inputLock = kj::mv(inputLock),
                                    func = kj::fwd<Func>(func)](Worker::AsyncLock lock) mutable {
     auto& context = self.assertLive();
-    // Re-check if context was aborted while we waited for the lock.
+    // Re-check if the context was aborted or lost its request while we waited for the lock.
     KJ_IF_SOME(ex, context.abortException) {
       kj::throwException(ex.clone());
     }
+    context.requireCurrentIncomingRequestForRun(ReportRunWithoutRequest::NO);
 
     using Result = decltype(func(kj::instance<Worker::Lock&>()));
 

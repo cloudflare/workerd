@@ -10,6 +10,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/server/workerd.capnp.h>
+#include <workerd/util/autogate.h>
 
 #include <capnp/message.h>
 #include <kj/function.h>
@@ -38,6 +39,8 @@ struct TestFixture {
     // If set, the named autogates (bare names, without the "workerd-autogate-" prefix)
     // are enabled for the test. Otherwise autogates are initialized empty.
     kj::Maybe<kj::Array<kj::StringPtr>> autogates;
+    // Autogates enabled for the test, like those named in `autogates`.
+    kj::Array<util::AutogateKey> autogateKeys;
     kj::Maybe<kj::StringPtr> mainModuleSource;
     // If set, make a stub of an Actor with the given id.
     kj::Maybe<Worker::Actor::Id> actorId;
@@ -196,6 +199,13 @@ struct TestFixture {
   void enterWorkerLock(Callback&& callback) {
     auto asyncLock = worker->takeAsyncLockWithoutRequest(nullptr).wait(getWaitScope());
     worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) { callback(lock); });
+  }
+
+  // Takes this fixture's isolate lock without an IoContext, and returns it held. A thread takes
+  // one isolate lock at a time, so holding it holds up runs in another fixture's isolate on the
+  // same thread (and event loop), e.g. to test what happens while they wait for the lock.
+  Worker::AsyncLock takeAsyncLock() {
+    return worker->takeAsyncLockWithoutRequest(nullptr).wait(getWaitScope());
   }
 
   // Acquire a Worker::Lock synchronously without an IoContext.

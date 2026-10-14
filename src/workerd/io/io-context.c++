@@ -12,6 +12,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/uncaught-exception-source.h>
@@ -654,6 +655,26 @@ void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
   //   async lock here, we'll probably have to update all the call sites of this method... ick.
   runImpl(
       runnable, Worker::Lock::TakeSynchronously(metrics), kj::none, Runnable::Exceptional(true));
+}
+
+void IoContext::requireCurrentIncomingRequestForRun(ReportRunWithoutRequest report) {
+  if (incomingRequests.empty() &&
+      util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)) {
+    // As in runSingle(), the abort explains the failure better.
+    KJ_IF_SOME(ex, abortException) {
+      kj::throwException(ex.clone());
+    }
+    // Not necessarily a bug (e.g. an idle actor), so throw a JS error, but report it in case it is
+    // one.
+    if (report) {
+      LOG_PERIODICALLY(WARNING, "IoContext::run() without a current IncomingRequest",
+          lastDeliveredLocation, kj::getStackTrace());
+    }
+    auto e = JSG_KJ_EXCEPTION(FAILED, Error,
+        "Couldn't complete operation because the execution context has no request in progress.");
+    e.setDetail(NO_CURRENT_INCOMING_REQUEST_DETAIL_ID, kj::heapArray<kj::byte>(0));
+    kj::throwException(kj::mv(e));
+  }
 }
 
 void IoContext::abort(kj::Exception&& e) {

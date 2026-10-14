@@ -267,15 +267,18 @@ inline server::config::Worker::Reader buildConfig(
   modules[0].setName(mainModuleName);
   modules[0].setEsModule(params.mainModuleSource.orDefault(mainModuleSource));
 
-  // Initialize autogates (with an empty config unless the test supplied gate names).
+  // Initialize autogates (with an empty config unless the test supplied gates).
   //
   // This needs to happen here because `buildConfig` is called early in the construction of
   // `TestFixture`.
-  KJ_IF_SOME(gates, params.autogates) {
-    util::Autogate::initAutogateNamesForTest(gates);
-  } else {
-    util::Autogate::initAutogate({});
+  kj::Vector<kj::StringPtr> gates;
+  KJ_IF_SOME(names, params.autogates) {
+    gates.addAll(names);
   }
+  for (auto key: params.autogateKeys) {
+    gates.add(kj::toCharSequence(key));
+  }
+  util::Autogate::initAutogateNamesForTest(gates.asPtr());
 
   return config;
 }
