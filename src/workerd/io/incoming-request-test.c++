@@ -365,5 +365,79 @@ KJ_TEST("ambient IoContext is hidden while another V8 isolate is entered") {
   });
 }
 
+// Calls startRun() and waits for the run() it returns, expecting it to fail, by throwing or through
+// its promise, because its IoContext had no current request.
+template <typename StartRun>
+void expectNoCurrentIncomingRequest(kj::WaitScope& waitScope, StartRun&& startRun) {
+  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { startRun().wait(waitScope); })) {
+    KJ_EXPECT(e.getDetail(NO_CURRENT_INCOMING_REQUEST_DETAIL_ID) != kj::none, e);
+  } else {
+    KJ_FAIL_EXPECT("run() succeeded without a current IncomingRequest");
+  }
+}
+
+KJ_TEST("run() fails without running its callback when there is no current request") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+
+  bool ran = false;
+  expectNoCurrentIncomingRequest(fixture.getWaitScope(),
+      [&]() { return context->run([&ran](Worker::Lock&) { ran = true; }); });
+  KJ_EXPECT(!ran);
+}
+
+KJ_TEST("run() in a critical section fails when there is no current request") {
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("run-critical-section-test"))});
+  auto& waitScope = fixture.getWaitScope();
+  auto context = fixture.newIoContext();
+
+  auto inputLock = fixture.getActor().getInputGate().wait(nullptr).wait(waitScope);
+  auto criticalSection = inputLock.startCriticalSection();
+  kj::Maybe<kj::Rc<InputGate::CriticalSection>> runIn = criticalSection->clone();
+  bool ran = false;
+  expectNoCurrentIncomingRequest(waitScope,
+      [&]() { return context->run([&ran](Worker::Lock&) { ran = true; }, kj::mv(runIn)); });
+  KJ_EXPECT(!ran);
+}
+
+KJ_TEST("run() fails if the request is gone once the input lock is acquired") {
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("run-input-lock-test"))});
+  auto& waitScope = fixture.getWaitScope();
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+
+  auto inputLock = fixture.getActor().getInputGate().wait(nullptr).wait(waitScope);
+  bool ran = false;
+  auto run = context->run([&ran](Worker::Lock&) { ran = true; });
+  KJ_EXPECT(!run.poll(waitScope));
+
+  fixture.drainAndDestroy(kj::mv(request));
+  { auto released = kj::mv(inputLock); }
+  expectNoCurrentIncomingRequest(waitScope, [&]() { return kj::mv(run); });
+  KJ_EXPECT(!ran);
+}
+
+KJ_TEST("run() fails if the request is gone once the isolate lock is acquired") {
+  auto io = kj::setupAsyncIo();
+  TestFixture fixture({.waitScope = io.waitScope, .useRealTimers = false});
+  TestFixture other({.waitScope = io.waitScope, .useRealTimers = false});
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+
+  // A thread waits for one isolate lock at a time, so holding another isolate's lock holds up the
+  // run.
+  auto otherContext = other.newIoContext();
+  auto asyncLock =
+      otherContext->getWorker().takeAsyncLockWithoutRequest(nullptr).wait(io.waitScope);
+  bool ran = false;
+  auto run = context->run([&ran](Worker::Lock&) { ran = true; });
+  KJ_EXPECT(!run.poll(io.waitScope));
+
+  fixture.drainAndDestroy(kj::mv(request));
+  { auto released = kj::mv(asyncLock); }
+  expectNoCurrentIncomingRequest(io.waitScope, [&]() { return kj::mv(run); });
+  KJ_EXPECT(!ran);
+}
+
 }  // namespace
 }  // namespace workerd
