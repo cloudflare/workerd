@@ -6,6 +6,7 @@ import dns from 'node:dns';
 import dnsPromises from 'node:dns/promises';
 import { strictEqual, ok, deepStrictEqual, throws } from 'node:assert';
 import { inspect } from 'node:util';
+import { isIP } from 'node:net';
 
 // Taken from Node.js
 // https://github.com/nodejs/node/blob/d5d1e80763202ffa73307213211148571deac27c/test/common/internet.js
@@ -457,6 +458,57 @@ export const resolverResolvePtrExists = {
     ok(result.length > 0, 'expected at least one PTR record');
     for (const item of result) {
       strictEqual(typeof item, 'string');
+    }
+  },
+};
+
+// Regression: https://github.com/cloudflare/workerd/issues/6886
+// lookup() and resolve4() must only return IP address literals, never CNAME hostnames.
+export const lookupCnameDoesNotReturnHostname = {
+  async test() {
+    const hostWithCname = 'code.visualstudio.com';
+
+    // all: true, family: 0
+    const allResults = await dnsPromises.lookup(hostWithCname, {
+      all: true,
+      family: 0,
+    });
+    ok(allResults.length > 0, 'expected at least one address');
+    for (const entry of allResults) {
+      ok(
+        isIP(entry.address) !== 0,
+        `address must be an IP literal, got: ${entry.address}`
+      );
+      ok(
+        entry.family === 4 || entry.family === 6,
+        `family must be 4 or 6, got ${entry.family}`
+      );
+      strictEqual(isIP(entry.address), entry.family);
+    }
+
+    // all: false, default family
+    const singleResult = await dnsPromises.lookup(hostWithCname);
+    ok(
+      isIP(singleResult.address) !== 0,
+      `address must be an IP literal, got: ${singleResult.address}`
+    );
+    strictEqual(isIP(singleResult.address), singleResult.family);
+
+    // explicit family: 4
+    const v4Results = await dnsPromises.lookup(hostWithCname, {
+      all: true,
+      family: 4,
+    });
+    for (const entry of v4Results) {
+      strictEqual(isIP(entry.address), 4);
+      strictEqual(entry.family, 4);
+    }
+
+    // resolve4 must only return IPv4 literals
+    const resolvedIpv4 = await dnsPromises.resolve4(hostWithCname);
+    ok(resolvedIpv4.length > 0, 'expected at least one IPv4');
+    for (const ip of resolvedIpv4) {
+      strictEqual(isIP(typeof ip === 'string' ? ip : ip.address), 4);
     }
   },
 };
