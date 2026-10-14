@@ -52,6 +52,10 @@ namespace workerd {
 // Maximum depth to which blockConcurrencyWhile() calls may be nested.
 constexpr uint MAX_BLOCK_CONCURRENCY_WHILE_DEPTH = 64;
 
+// Marks the exception IoContext::run() fails with when there is no current IncomingRequest, e.g.
+// in an actor between events. Not transient: a retry needs the context to get another request.
+constexpr kj::Exception::DetailTypeId NO_CURRENT_INCOMING_REQUEST_DETAIL_ID = 0x68a64a728b1be5c9ull;
+
 // This wishes it were IoContext::Runnable::Exceptional.
 WD_STRONG_BOOL(IoContext_Runnable_Exceptional);
 // Whether the caller awaits a subrequest with its next awaitIo(), so that the subrequest span's
@@ -504,6 +508,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // outlive its last IncomingRequest, so callers reachable from teardown -- destructors and
   // kj::defer cleanups in particular -- must check hasCurrentIncomingRequest() first and skip
   // the work rather than call this and fault.
+  //
+  // Without a request, the callback doesn't run: run() throws, or rejects if the request ends
+  // while it waits for the locks, with NO_CURRENT_INCOMING_REQUEST_DETAIL_ID.
   template <typename Func>
   auto run(Func&& func, kj::Maybe<InputGate::Lock> inputLock = kj::none) KJ_WARN_UNUSED_RESULT {
     if constexpr (runFuncAcceptsIoContext<Func>) {
@@ -1385,6 +1392,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   static constexpr bool runFuncAcceptsIoContext =
       std::invocable<std::decay_t<Func>&, Worker::Lock&, IoContext&>;
 
+  // Throws a JavaScript Error carrying NO_CURRENT_INCOMING_REQUEST_DETAIL_ID if there is no
+  // current IncomingRequest.
+  void requireCurrentIncomingRequestForRun();
+
   // Internal implementation of run(), always invoked with a single-arg callback.
   template <typename Func>
   kj::PromiseForResult<Func, Worker::Lock&> runSingle(
@@ -1515,6 +1526,7 @@ template <typename Func>
 kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
     Func&& func, kj::Maybe<kj::Rc<InputGate::CriticalSection>> criticalSection) {
   KJ_IF_SOME(cs, criticalSection) {
+    requireCurrentIncomingRequestForRun();
     return cs.get()
         ->wait(getCurrentTraceSpan())
         .then([self = addWeakToThis(), func = kj::fwd<Func>(func)](
@@ -1534,6 +1546,8 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
   KJ_IF_SOME(ex, abortException) {
     return ex.clone();
   }
+  // The setup below needs the current request. Re-entry with the input lock checks again.
+  requireCurrentIncomingRequestForRun();
 
   kj::Promise<Worker::AsyncLock> asyncLockPromise = nullptr;
   KJ_IF_SOME(a, actor) {
@@ -1554,10 +1568,11 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
   return asyncLockPromise.then([self = addWeakToThis(), inputLock = kj::mv(inputLock),
                                    func = kj::fwd<Func>(func)](Worker::AsyncLock lock) mutable {
     auto& context = self.assertLive();
-    // Re-check if context was aborted while we waited for the lock.
+    // Re-check if the context was aborted or lost its request while we waited for the lock.
     KJ_IF_SOME(ex, context.abortException) {
       kj::throwException(ex.clone());
     }
+    context.requireCurrentIncomingRequestForRun();
 
     using Result = decltype(func(kj::instance<Worker::Lock&>()));
 
