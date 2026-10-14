@@ -42,7 +42,13 @@ export default {
       return new Response(rs);
     }
     return new Response(request.body, {
-      headers: { 'content-type': 'application/octet-stream' },
+      headers: {
+        'content-type': 'application/octet-stream',
+        // The Content-Length the subrequest carried, for expected-length.js.
+        'observed-content-length': String(
+          request.headers.get('content-length')
+        ),
+      },
     });
   },
 };
@@ -229,6 +235,7 @@ export {
 
 export {
   drainingReaderSweepsByteBacklog,
+  drainingReaderByteExpectedLengthPassThrough,
   drainingReaderDrivesBytePull,
   drainingReaderByteErrorPropagation,
   drainingReaderByteCancelReachesSource,
@@ -251,3 +258,10 @@ export {
   thenGetterFiresOncePerByteRead,
   byobReadThenLookupFollowsItsPull,
 } from 'pollution';
+
+export {
+  byteSourceExpectedLengthAccepted,
+  byteSourceExpectedLengthRejected,
+  byteSourceExpectedLengthCoercion,
+  byteSourceExpectedLengthRange,
+} from 'expected-length';

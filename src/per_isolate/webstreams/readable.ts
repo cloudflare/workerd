@@ -117,8 +117,13 @@ const {
 } = require('webstreams/writable');
 
 import type { CommonHelpers } from './common';
-const { isActualObject, kNullProtoObject, kEnumerable, toStringTagProperty } =
-  require('webstreams/common') as CommonHelpers;
+const {
+  isActualObject,
+  kNullProtoObject,
+  kEnumerable,
+  normalizeExpectedLength,
+  toStringTagProperty,
+} = require('webstreams/common') as CommonHelpers;
 
 import type { ViewExtentHelpers } from './view-extent';
 const { viewByteExtent } =
@@ -145,35 +150,6 @@ const {
   nativeControllerExpectedLength,
   nativeControllerPeekSource,
 } = nativeStreamInternals;
-
-// Normalizes the non-standard `expectedLength` extension property on
-// byte-stream underlying sources: the TOTAL bytes the source promises to
-// produce (undefined = unknown; the C++ side then uses chunked
-// encoding). Accepts a non-negative bigint or non-negative integer
-// number (normalized to bigint — totals can exceed MAX_SAFE_INTEGER).
-// Only meaningful for type:'bytes' sources; the default controller never
-// reads it. Duplicated for the native backend in native.ts.
-function normalizeExpectedLength(value: unknown): bigint | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value === 'bigint') {
-    if (value < 0n) {
-      throw new RangeError('expectedLength must be non-negative');
-    }
-    return value;
-  }
-  if (typeof value === 'number') {
-    if (NumberIsNaN(value) || value % 1 !== 0) {
-      throw new TypeError('expectedLength must be an integer');
-    }
-    if (value < 0) {
-      throw new RangeError('expectedLength must be non-negative');
-    }
-    return BigInt(value);
-  }
-  throw new TypeError(
-    'expectedLength must be a non-negative bigint or integer'
-  );
-}
 
 // --- Composite tee-cancel reasons ------------------------------------------
 // DELIBERATE SPEC DIVERGENCE (recorded in the design doc's divergence
@@ -5239,7 +5215,6 @@ module.exports = {
       getReadableStreamGetState(stream),
     getStoredError: <R>(stream: ReadableStream<R>) =>
       getReadableStreamStoredError(stream),
-    normalizeExpectedLength,
     // ReadableStreamDefaultControllerCanCloseOrEnqueue, for the
     // TransformStream controller's enqueue pre-check.
     canCloseOrEnqueue: <R>(controller: object) =>

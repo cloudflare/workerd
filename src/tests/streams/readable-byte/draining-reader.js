@@ -14,7 +14,8 @@
 // INTACT (no coalescing, no re-slicing); with autoAllocateChunkSize set
 // the conduit's wait-read synthesizes the auto-allocate descriptor, so
 // pull observes a byobRequest (without it, pull sees null — ledger #5);
-// byte streams never declare an expectedLength.
+// a byte stream that declares no expectedLength reads undefined, and a
+// declared one passes through as the exact bigint, across the uint64 range.
 
 /* global ReadableStreamDrainingReader */
 
@@ -44,6 +45,22 @@ export const drainingReaderSweepsByteBacklog = {
       chunks.map((chunk) => Array.from(chunk)),
       [[1, 2, 3], [4], [5, 6]]
     );
+  },
+};
+
+export const drainingReaderByteExpectedLengthPassThrough = {
+  async test() {
+    if (!usingTsImpl) {
+      strictEqual(typeof ReadableStreamDrainingReader, 'undefined');
+      return;
+    }
+    // Above 2^53 too, where a number would lose precision.
+    for (const length of [9007199254740993n, 0xffff_ffff_ffff_ffffn]) {
+      const rs = new ReadableStream({ type: 'bytes', expectedLength: length });
+      const reader = new ReadableStreamDrainingReader(rs);
+      strictEqual(reader.expectedLength, length);
+      await reader.cancel();
+    }
   },
 };
 

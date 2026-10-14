@@ -131,8 +131,13 @@ const {
   WritableStreamDefaultController,
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
-const { isActualObject, kNullProtoObject, kEnumerable, toStringTagProperty } =
-  require('webstreams/common') as CommonHelpers;
+const {
+  isActualObject,
+  kNullProtoObject,
+  kEnumerable,
+  normalizeExpectedLength,
+  toStringTagProperty,
+} = require('webstreams/common') as CommonHelpers;
 const { copyExtent, viewByteExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
@@ -282,8 +287,8 @@ class IdentityTransformStream {
   // IdentityTransformStream; set to expectedLength for FixedLengthStream.
   // Decremented as each write is delivered (or reaches the sink);
   // overwrite/underwrite errors match C++
-  // (identity-transform-stream.c++ tryReadInternal). Stored as bigint
-  // to preserve precision for the full uint64_t range.
+  // (identity-transform-stream.c++ tryReadInternal). A bigint, as the
+  // length converts to one (normalizeExpectedLength).
   #remaining: bigint | undefined;
 
   static {
@@ -547,19 +552,19 @@ class IdentityTransformStream {
   // Internal: called by FixedLengthStream.
   constructor(
     internal: symbol,
-    expectedLength: bigint | number,
+    expectedLength: bigint,
     writableStrategy?: QueuingStrategy<unknown>
   );
   constructor(
     writableStrategyOrInternal?: QueuingStrategy<unknown> | symbol,
-    internalExpectedLength?: bigint | number,
+    internalExpectedLength?: bigint,
     internalWritableStrategy?: QueuingStrategy<unknown>
   ) {
     // External: new IdentityTransformStream() or
     // new IdentityTransformStream(writableStrategy).
     // Internal (from FixedLengthStream): new ITS(kPrivateSymbol, len, strategy?).
     let writableStrategy: QueuingStrategy<unknown> | undefined;
-    let expectedLength: bigint | number | undefined;
+    let expectedLength: bigint | undefined;
     if (writableStrategyOrInternal === kPrivateSymbol) {
       expectedLength = internalExpectedLength;
       writableStrategy = internalWritableStrategy;
@@ -569,14 +574,7 @@ class IdentityTransformStream {
     writableStrategy ??= kNullProtoObject;
 
     // Initialize byte budget for FixedLengthStream enforcement.
-    // Stored as bigint to cover the full uint64_t range without
-    // precision loss.
-    if (expectedLength !== undefined) {
-      this.#remaining =
-        typeof expectedLength === 'bigint'
-          ? expectedLength
-          : BigInt(expectedLength);
-    }
+    this.#remaining = expectedLength;
 
     // The strategy size callback is the one hook the writable machinery
     // runs SYNCHRONOUSLY inside writer.write(), so the chunk snapshot is
@@ -836,57 +834,47 @@ class IdentityTransformStream {
   }
 }
 
-// Maximum expectedLength: uint64_t max. Content-Length is carried as
-// uint64_t through the C++/KJ HTTP layer, so values beyond this are
-// not representable.
-const MAX_UINT64 = 0xffff_ffff_ffff_ffffn;
+// The largest length the C++ implementation accepts: 2^53 - 1.
+const kMaxFixedLength = 2n ** 53n - 1n;
 
 class FixedLengthStream extends IdentityTransformStream {
   constructor(
     expectedLength: bigint | number,
     writableStrategy?: QueuingStrategy<unknown>
   ) {
-    if (
-      typeof expectedLength !== 'number' &&
-      typeof expectedLength !== 'bigint'
-    ) {
-      throw new TypeError(
-        'FixedLengthStream expected length must be a number or bigint.'
-      );
-    }
-    // BigInt() conversion rejects NaN and fractions (RangeError) naturally.
-    const bigLen =
-      typeof expectedLength === 'bigint'
-        ? expectedLength
-        : BigInt(expectedLength);
-    if (bigLen < 0n || bigLen > MAX_UINT64) {
-      throw new RangeError(
-        'FixedLengthStream requires a non-negative expected length ' +
-          'that fits in a uint64.'
-      );
+    // The steps run in the C++ implementation's order: the length
+    // converts as its required uint64_t argument, the strategy and its
+    // highWaterMark convert, and only then is the length checked against
+    // kMaxFixedLength.
+    const length = normalizeExpectedLength(expectedLength);
+    if (length === undefined) {
+      throw new TypeError('FixedLengthStream requires an expected length.');
     }
     writableStrategy = toStrategyDictionary(writableStrategy);
-    //
     // Cap highWaterMark at expectedLength, matching C++ behavior
     // (identity-transform-stream.c++ FixedLengthStream::constructor): buffering more than the
     // total expected output is pointless. The member is read and converted
     // once, as IdentityTransformStream's is, and the cap applies to the
     // converted number.
     const hwm: unknown = writableStrategy.highWaterMark;
-    if (hwm !== undefined) {
-      // Derive the cap from the COERCED length, not the raw input: BigInt
-      // conversion normalizes a -0.0 input to 0n, so Number(bigLen) is
-      // always +0-or-positive and a negative zero cannot leak through the
-      // min() below into the highWaterMark (and from there into the
-      // writer's desiredSize).
-      const numExpected = Number(bigLen);
-      const converted = convertHighWaterMark(hwm);
+    const converted = hwm === undefined ? undefined : convertHighWaterMark(hwm);
+    if (length > kMaxFixedLength) {
+      throw new TypeError(
+        'FixedLengthStream requires an integer expected length less than 2^53.'
+      );
+    }
+    if (converted !== undefined) {
+      // Derive the cap from the converted length, not the raw input: a -0
+      // input converts to 0n, so Number(length) is always +0-or-positive
+      // and a negative zero cannot leak through the min() below into the
+      // highWaterMark (and from there into the writer's desiredSize).
+      const numExpected = Number(length);
       writableStrategy = {
         __proto__: null,
         highWaterMark: converted < numExpected ? converted : numExpected,
       } as QueuingStrategy<unknown>;
     }
-    super(kPrivateSymbol, expectedLength, writableStrategy);
+    super(kPrivateSymbol, length, writableStrategy);
   }
 }
 

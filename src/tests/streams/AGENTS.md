@@ -111,7 +111,7 @@ side's exact behavior:
 import { usingTsImpl } from 'which-impl';
 
 const expected = usingTsImpl ? RangeError : TypeError;
-throws(() => new FixedLengthStream(-1), expected);
+throws(() => new IdentityTransformStream({ highWaterMark: -1 }), expected);
 ```
 
 `which-impl.js` reads
