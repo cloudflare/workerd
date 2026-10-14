@@ -817,6 +817,7 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
         // no need to drop the isolate lock and take it again every time some data is read/written.
         // That's a larger refactor, though.
         auto& ioContext = IoContext::current();
+        IoContext::AwaitIoOperation traceOperation(ioContext, "stream_read"_kj);
         return ioContext.awaitIoLegacy(js, kj::mv(promise))
             .then(js,
                 ioContext.addFunctor(
@@ -1037,6 +1038,7 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::dr
       }
 
       auto& ioContext = IoContext::current();
+      IoContext::AwaitIoOperation traceOperation(ioContext, "stream_read"_kj);
       return ioContext.awaitIoLegacy(js, kj::mv(promise))
           .then(js,
               ioContext.addFunctor(
@@ -2121,6 +2123,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       // jsg::Promises and not kj::Promises, so that it doesn't look like I/O at all, and there's
       // no need to drop the isolate lock and take it again every time some data is read/written.
       // That's a larger refactor, though.
+      IoContext::AwaitIoOperation traceOperation(ioContext, "stream_write"_kj);
       return ioContext.awaitIoLegacy(js, kj::mv(promise))
           .then(js,
               ioContext.addFunctor(
@@ -2351,6 +2354,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
       return KJ_ASSERT_NONNULL(
           state.whenActive([&](IoOwn<Writable>& writable) mutable -> jsg::Promise<void> {
         KJ_IF_SOME(promise, sourceRef->tryPumpTo(writable->sink->getPtr(), !preventClose)) {
+          IoContext::AwaitIoOperation traceOperation(ioContext, "stream_pipe"_kj);
           return handlePromise(js,
               ioContext.awaitIo(js,
                   writable->canceler.wrap(
@@ -2367,6 +2371,7 @@ jsg::Promise<void> WritableStreamInternalController::writeLoopAfterFrontOutputLo
     }
     KJ_CASE_ONEOF(request, Close) {
       return KJ_ASSERT_NONNULL(state.whenActive([&](IoOwn<Writable>& writable) {
+        IoContext::AwaitIoOperation traceOperation(ioContext, "stream_close"_kj);
         return ioContext.awaitIo(js, writable->canceler.wrap(writable->sink->end()))
             .then(js,
                 ioContext.addFunctor(
@@ -2532,6 +2537,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::write(
     }
     auto& ioContext = IoContext::current();
     return KJ_ASSERT_NONNULL(parent.state.whenActive([&](IoOwn<Writable>& writable) {
+      IoContext::AwaitIoOperation traceOperation(ioContext, "stream_pipe"_kj);
       return ioContext.awaitIo(js,
           writable->canceler.wrap(writable->sink->write(data).attach(kj::mv(data))),
           [](jsg::Lock&) {});
@@ -2703,6 +2709,7 @@ jsg::Promise<void> WritableStreamInternalController::Pipe::pipeLoop(jsg::Lock& j
         auto pipeState = getState();
         auto promise = KJ_ASSERT_NONNULL(parentRef.state.whenActive(
             [&](IoOwn<Writable>& writable) { return writable->sink->end(); }));
+        IoContext::AwaitIoOperation traceOperation(ioContext, "stream_close"_kj);
         return ioContext.awaitIo(js, kj::mv(promise), [](jsg::Lock&) {})
             .then(js, ioContext.addFunctor([state = pipeState.addRef()](jsg::Lock& js) mutable {
           if (state->isAborted()) return;

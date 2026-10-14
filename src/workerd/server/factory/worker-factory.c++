@@ -322,6 +322,46 @@ class NullIsolateLimitEnforcer final: public IsolateLimitEnforcer {
   TrackedWasmInstanceList trackedWasmInstances;
 };
 
+// Enables async tracing for an isolate (--async-trace, --async-trace-stacks,
+// --async-trace-promises) and writes each of its contexts to the --async-trace file, if there is
+// one.
+class AsyncTraceIsolateObserver final: public IsolateObserver {
+ public:
+  AsyncTraceIsolateObserver(
+      kj::Maybe<const AsyncTraceWriter&> writer, uint32_t stackDepth, bool promises)
+      : writer(writer),
+        stackDepth(stackDepth),
+        promises(promises) {}
+
+  kj::Maybe<AsyncTraceConfig> getAsyncTraceConfig() const override {
+    return AsyncTraceConfig{.stackDepth = stackDepth, .promises = promises};
+  }
+
+  void addAsyncTraceSinks(AsyncTraceSinks& sinks,
+      kj::StringPtr worker,
+      kj::Maybe<kj::StringPtr> actorId) const override {
+    KJ_IF_SOME(w, writer) {
+      sinks.addNdjson(w);
+    }
+  }
+
+ private:
+  kj::Maybe<const AsyncTraceWriter&> writer;
+  uint32_t stackDepth;
+  bool promises;
+};
+
+// The observer of each isolate: an AsyncTraceIsolateObserver if any async trace option is set,
+// otherwise the default one, which changes nothing.
+kj::Own<IsolateObserver> newIsolateObserver(const WorkerFactory::Options& options) {
+  if (options.asyncTraceWriter != kj::none || options.asyncTraceStackDepth > 0 ||
+      options.asyncTracePromises) {
+    return kj::atomicRefcounted<AsyncTraceIsolateObserver>(
+        options.asyncTraceWriter, options.asyncTraceStackDepth, options.asyncTracePromises);
+  }
+  return kj::atomicRefcounted<IsolateObserver>();
+}
+
 class NullLimitEnforcer final: public LimitEnforcer, public kj::Refcounted {
  public:
   kj::Own<void> enterJs(jsg::Lock& lock, IoContext& context) override {
@@ -1541,9 +1581,8 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
         workerSource.variant.is<WorkerSource::ScriptSource>() && !usingNewModuleRegistry
         ? Worker::ConsoleMode::INSPECTOR_ONLY
         : options.loggingOptions.consoleMode;
-    return kj::atomicRefcounted<Worker::Isolate>(kj::mv(api),
-        kj::atomicRefcounted<IsolateObserver>(), isolateName, kj::mv(limitEnforcer), policy,
-        kj::mv(isolateLoggingOptions));
+    return kj::atomicRefcounted<Worker::Isolate>(kj::mv(api), newIsolateObserver(options),
+        isolateName, kj::mv(limitEnforcer), policy, kj::mv(isolateLoggingOptions));
   };
 
   // Behind the STARTUP_SNAPSHOT autogate, a throwaway zygote Worker evaluates the top-level code

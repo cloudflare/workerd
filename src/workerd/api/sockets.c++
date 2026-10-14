@@ -323,6 +323,7 @@ JsReadableStream newDatagramReadableStream(jsg::Lock& js, IoOwn<DatagramChannel>
   return JsReadableStream::fromPull(js,
       [channel = kj::mv(channel)](jsg::Lock& js) mutable -> jsg::Promise<kj::Maybe<jsg::Value>> {
     auto& ioContext = IoContext::current();
+    IoContext::AwaitIoOperation traceOperation(ioContext, "datagram_receive"_kj);
     return ioContext.awaitIo(js, channel->receive(),
         [](jsg::Lock& js, kj::Maybe<kj::Array<kj::byte>> datagram) -> kj::Maybe<jsg::Value> {
       KJ_IF_SOME(bytes, datagram) {
@@ -348,7 +349,9 @@ JsWritableStream newDatagramWritableStream(jsg::Lock& js, IoOwn<DatagramChannel>
         "This socket's writable stream only accepts Datagram instances.");
     auto bytes = kj::heapArray<kj::byte>(datagram->getData(js).asArrayPtr());
     auto sendPromise = channel->send(bytes).attach(kj::mv(bytes));
-    return IoContext::current().awaitIo(js, kj::mv(sendPromise));
+    auto& ioContext = IoContext::current();
+    IoContext::AwaitIoOperation traceOperation(ioContext, "datagram_send"_kj);
+    return ioContext.awaitIo(js, kj::mv(sendPromise));
   });
 }
 
@@ -617,7 +620,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::run(
     bool isDynamicDispatch) {
   auto& context = incomingRequest->getContext();
 
-  incomingRequest->delivered();
+  incomingRequest->delivered("udp_connect"_kj);
 
   auto outcome = EventOutcome::OK;
   KJ_TRY {
@@ -941,6 +944,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
                 // secureStream for the promised stream. This keeps us from having to bounce in and
                 // out of the JS isolate lock.
                 auto forkedPromise = KJ_ASSERT_NONNULL(*tlsStarter)(acceptedHostname).fork();
+                IoContext::AwaitIoOperation traceOperation(context, "socket_start_tls"_kj);
 
                 openedResolver.resolve(js,
                     context.awaitIo(js, forkedPromise.addBranch(),
@@ -1026,6 +1030,7 @@ void Socket::handleProxyStatus(
           });
     }
   };
+  IoContext::AwaitIoOperation traceOperation(context, "socket_connect"_kj);
   auto result = context.awaitIo(js, status.catch_(kj::mv(errorHandler)), kj::mv(func));
   result.markAsHandled(js);
 }
@@ -1058,6 +1063,7 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
           });
     }
   };
+  IoContext::AwaitIoOperation traceOperation(context, "socket_connect"_kj);
   auto result = context.awaitIo(js, connectResult.catch_(kj::mv(errorHandler)), kj::mv(func));
   result.markAsHandled(js);
 }
@@ -1093,6 +1099,7 @@ void Socket::wireClosedToDisconnect(jsg::Lock& js, kj::Promise<bool> disconnecte
   // The reference to the Socket must be weak. A strong one would keep the Socket alive until the
   // peer disconnects, which for a long-lived connection means it is never collected and the
   // connection is never closed by GC.
+  IoContext::AwaitIoOperation traceOperation(context, "socket_disconnect"_kj);
   context.awaitIo(js, kj::mv(disconnected))
       .then(js, [self = JSG_THIS_WEAK(js)](jsg::Lock& js, bool canceled) mutable {
     // Silently ignore the canceled case (the Socket was GC'd before disconnect) without resolving

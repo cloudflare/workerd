@@ -78,6 +78,9 @@ struct TestFixture {
     // If set, used as the jsg::IsolateObserver for the worker's isolate instead of a no-op one.
     // Lets tests observe compilation hooks (e.g. onCompileCacheFound / onCompileCacheRejected).
     kj::Maybe<kj::Own<JsgIsolateObserver>> jsgIsolateObserver;
+    // If set, used as the worker isolate's IsolateObserver instead of a no-op one. Lets tests
+    // observe isolate-level hooks, e.g. enable async tracing and register its sinks.
+    kj::Maybe<kj::Own<IsolateObserver>> isolateObserver;
   };
 
   TestFixture(SetupParams&& params = {.useRealTimers = false});
