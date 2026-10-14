@@ -443,12 +443,13 @@ void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value>
     ser.write(js, JsValue(handle));
     exception.setDetail(TUNNELED_EXCEPTION_DETAIL_ID, ser.release().data);
   } catch (JsExceptionThrown&) {
-    // Either:
-    // a. The exception is not serializable, and we caught the exception. We will just ignore it
-    //    and proceed without annotating.
-    // b. The isolate's execution is being terminated, and so tryCatch.CanContinue() is false. In
-    //    this case we cannot serialize the exception, but again we'll just move on without the
-    //    annotation.
+    if (tryCatch.HasTerminated()) {
+      // Execution is being terminated. Let it continue to unwind: swallowing it here would let
+      // the caller carry on running as if execution could continue. The TryCatch's destructor
+      // hands the termination back to V8 if JavaScript is on the stack.
+      throw;
+    }
+    // The exception is not serializable. Proceed without annotating.
   }
 }
 
