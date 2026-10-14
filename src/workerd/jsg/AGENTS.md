@@ -107,7 +107,7 @@ These rules MUST be followed when writing or modifying JSG code:
     GC-visitable field intentionally is not visited (e.g., a `kj::Rc`-owned object
     unreachable from JS, or a type visited via a different mechanism), suppress the
     `jsg-visit-for-gc` clang-tidy diagnostic with a `// NOLINT(jsg-visit-for-gc)`
-    comment and a brief explanation of *why* it's safe to skip.
+    comment and a brief explanation of _why_ it's safe to skip.
 
 12. **Module evaluation MUST NOT drain the microtask queue while nested.** Draining
     while an ancestor module is still `kEvaluating` can run an async module's
