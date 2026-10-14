@@ -2377,30 +2377,19 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
           // exception here comes from decoding the arguments, not from the method, and keeps
           // propagating unchanged rather than being converted to JavaScript and back.
           auto invocationResult = [&]() -> InvocationResult {
-            jsg::Value error = nullptr;
-            {
-              v8::TryCatch tryCatch(js.v8Isolate);
-              try {
-                KJ_IF_SOME(envCtx, targetInfo.envCtx) {
-                  return invokeFnInsertingEnvCtx(js, methodNameForTrace, fn, thisArg, args,
-                      envCtx.env, envCtx.ctx, jsRpcCallSpan.getSpanParentsIfObserved());
-                } else {
-                  return invokeFn(js, fn, thisArg, args, jsRpcCallSpan.getSpanParentsIfObserved());
-                }
-              } catch (jsg::JsExceptionThrown&) {
-                // As in jsg::Lock::tryCatch(): a termination cannot become a rejection.
-                if (!tryCatch.CanContinue() || !tryCatch.HasCaught() ||
-                    tryCatch.Exception().IsEmpty()) {
-                  tryCatch.ReThrow();
-                  throw;
-                }
-                error = jsg::Value(js.v8Isolate, tryCatch.Exception());
+            JSG_TRY(js) {
+              KJ_IF_SOME(envCtx, targetInfo.envCtx) {
+                return invokeFnInsertingEnvCtx(js, methodNameForTrace, fn, thisArg, args,
+                    envCtx.env, envCtx.ctx, jsRpcCallSpan.getSpanParentsIfObserved());
+              } else {
+                return invokeFn(js, fn, thisArg, args, jsRpcCallSpan.getSpanParentsIfObserved());
               }
+            } catch (kj::Exception&) {
+              throw;
             }
-            // Reject outside the TryCatch, so that it cannot swallow an exception from here.
-            auto resolver = jsg::check(v8::Promise::Resolver::New(js.v8Context()));
-            jsg::check(resolver->Reject(js.v8Context(), error.getHandle(js)));
-            return {.returnValue = resolver->GetPromise()};
+            JSG_CATCH(error) {
+              return {.returnValue = js.rejectedJsPromise(jsg::JsValue(error.getHandle(js)))};
+            }
           }();
 
           // We have a function, so let's call it and serialize the result for RPC.
