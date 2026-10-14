@@ -1705,4 +1705,16 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # source fails, once that cancel completes. Previously, a destination that errored or closed
   # while the pipe waited on a read canceled the source but resolved the pipe promise, or left it
   # pending forever with preventCancel, and a failed cancel was not reported.
+
+  cacheOptionPreservesCacheControl @194 :Bool
+      $compatEnableFlag("cache_option_preserves_cache_control")
+      $compatDisableFlag("cache_option_overrides_cache_control")
+      $compatEnableDate("2026-11-17");
+  # Per the Fetch spec, a request's cache mode describes how the cache may use a stored response
+  # ("no-cache": revalidate it with the origin; "no-store": act as if there is no cache); it says
+  # nothing about how the response may be cached. Without this flag, `cache: 'no-cache'` and
+  # `cache: 'no-store'` also set `cf.cacheControl` to "no-cache" and "no-store", which overrides
+  # the origin's Cache-Control (for example, an origin `no-store` gets cached as `no-cache`). When
+  # enabled, the cache option no longer sets `cf.cacheControl`. To override the origin's
+  # Cache-Control, omit the `cache` option and use `cf.cacheControl` instead.
 }
