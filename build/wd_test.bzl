@@ -156,6 +156,22 @@ if not "{sidecar}" == "" (
 
 set TEST_EXIT=!ERRORLEVEL!
 exit /b !TEST_EXIT!
+
+:run_workerd
+REM cmd requires a quoted native path for Bazel's slash-separated executable name.
+setlocal DisableDelayedExpansion
+set "WORKERD_BINARY=%~1"
+set "WORKERD_BINARY=%WORKERD_BINARY:/=\\%"
+set "WORKERD_ARGUMENTS="
+shift
+:next_workerd_argument
+if [%1]==[] goto launch_workerd
+set WORKERD_ARGUMENTS=%WORKERD_ARGUMENTS% %1
+shift
+goto next_workerd_argument
+:launch_workerd
+"%WORKERD_BINARY%" %WORKERD_ARGUMENTS% "-dTEST_TMPDIR=%TEST_TMPDIR%"
+exit /b %ERRORLEVEL%
 """
 
 SH_TEMPLATE = """#!/bin/bash
@@ -176,7 +192,9 @@ else
 fi
 """
 
-WINDOWS_RUNTEST_NORMAL = """powershell -Command \"%*\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR"""
+WINDOWS_RUNTEST_NORMAL = "goto run_workerd"
+
+WINDOWS_RUNTEST_SIDECAR = """powershell -Command \"%*\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR"""
 
 SH_RUNTEST_NORMAL = """"$@" -dTEST_TMPDIR=$TEST_TMPDIR"""
 
@@ -224,7 +242,12 @@ def _wd_test_impl(ctx):
         # Batch script executables must end with ".bat"
         executable = ctx.actions.declare_file("%s_wd_test.bat" % ctx.label.name)
         template = WINDOWS_TEMPLATE
-        runtest = WINDOWS_RUNTEST_SNAPSHOT if ctx.attr.python_snapshot_test else WINDOWS_RUNTEST_NORMAL
+        if ctx.attr.python_snapshot_test:
+            runtest = WINDOWS_RUNTEST_SNAPSHOT
+        elif ctx.file.sidecar:
+            runtest = WINDOWS_RUNTEST_SIDECAR
+        else:
+            runtest = WINDOWS_RUNTEST_NORMAL
     else:
         executable = ctx.outputs.executable
         template = SH_TEMPLATE
