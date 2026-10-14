@@ -34,6 +34,7 @@ export {
   acceptsUint8Array,
   acceptsArrayBuffer,
   acceptsDataViewSubrange,
+  acceptsSharedMemory,
   acceptsStringAsUtf8,
   stringWithNulDivergence,
   respectsViewOffsets,
