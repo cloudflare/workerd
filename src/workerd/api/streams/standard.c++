@@ -200,7 +200,7 @@ class WritableLockImpl {
     // given). Idempotent: a second call is a no-op, and we never release a lock we no
     // longer own. The write-side lock state is not affected.
     void releaseSource(jsg::Lock& js, kj::Maybe<jsg::JsValue> maybeError = kj::none) {
-      if (source.get() == nullptr) return;
+      if (source == nullptr) return;
       source = nullptr;
       // Hold a local ref across the call: when maybeError is given and the source is
       // JS-backed, releasePipeLock() runs the source's cancel algorithm (arbitrary
