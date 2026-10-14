@@ -240,6 +240,8 @@ export {
 
 export {
   drainingReaderSweepsQueuedBacklog,
+  drainingReaderMaxSizeEndsAtClose,
+  drainingReaderSizeOverflowEndsAtClose,
   drainingReaderPullDriven,
   drainingReaderErrorPropagation,
   drainingReaderCancelReachesSource,

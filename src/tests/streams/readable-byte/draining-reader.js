@@ -11,7 +11,10 @@
 //
 // Byte-stream facts pinned here: a queued byte backlog plus the close
 // sentinel is swept in one batched read with each enqueued chunk kept
-// INTACT (no coalescing, no re-slicing); with autoAllocateChunkSize set
+// INTACT (no coalescing, no re-slicing); a read whose maxSize runs out
+// at the last bytes before the close reports done: false and leaves the
+// stream readable until the next read reaches the close (the readable
+// suite pins the same for value streams); with autoAllocateChunkSize set
 // the conduit's wait-read synthesizes the auto-allocate descriptor, so
 // pull observes a byobRequest (without it, pull sees null — ledger #5);
 // a byte stream that declares no expectedLength reads undefined, and a
@@ -45,6 +48,51 @@ export const drainingReaderSweepsByteBacklog = {
       chunks.map((chunk) => Array.from(chunk)),
       [[1, 2, 3], [4], [5, 6]]
     );
+  },
+};
+
+export const drainingReaderByteMaxSizeEndsAtClose = {
+  async test() {
+    if (!usingTsImpl) {
+      strictEqual(typeof ReadableStreamDrainingReader, 'undefined');
+      return;
+    }
+    // Three bytes, then close(): a read with maxSize 3 takes them and
+    // stops before the close sentinel. The stream stays readable,
+    // desiredSize at the high-water mark and closed pending, until the
+    // next read reaches the close. (A high-water mark of 8 tells
+    // readable from closed: at the byte default of 0, both read 0.)
+    let controller;
+    const rs = new ReadableStream(
+      {
+        type: 'bytes',
+        start(c) {
+          controller = c;
+          c.enqueue(new Uint8Array([1, 2, 3]));
+          c.close();
+        },
+      },
+      { highWaterMark: 8 }
+    );
+    const reader = new ReadableStreamDrainingReader(rs);
+    let closed = false;
+    reader.closed.then(() => {
+      closed = true;
+    });
+    const first = await reader.read({ maxSize: 3 });
+    deepStrictEqual(
+      first.chunks.map((chunk) => Array.from(chunk)),
+      [[1, 2, 3]]
+    );
+    strictEqual(first.done, false);
+    strictEqual(controller.desiredSize, 8);
+    await scheduler.wait(0);
+    strictEqual(closed, false);
+    const second = await reader.read({ maxSize: 3 });
+    deepStrictEqual(second.chunks, []);
+    strictEqual(second.done, true);
+    strictEqual(controller.desiredSize, 0);
+    strictEqual(closed, true);
   },
 };
 
