@@ -2387,7 +2387,6 @@ export let mapVirtualHostIdempotent = {
   async test(controller, env, ctx) {
     let host1 = ctx.mapVirtualHost(env.MyService, 5432);
     assert.ok(typeof host1 === 'string');
-    // Overrides that are first created using mapVirtualHost() always use .workers.alt.
     assert.match(host1, /^[0-9a-f]{32}\.workers\.alt:5432$/);
 
     // Once the override is installed, it doesn't change in future calls.

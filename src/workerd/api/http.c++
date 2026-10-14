@@ -2327,18 +2327,21 @@ jsg::Ref<Socket> Fetcher::connect(
   return connectImpl(js, JSG_THIS, kj::mv(address), kj::mv(options));
 }
 
-void Fetcher::registerOverride(jsg::Lock& js, IsHyperdrive isHyperdrive, uint16_t overridePort) {
+void Fetcher::registerOverride(jsg::Lock& js, uint16_t overridePort) {
   if (registeredConnectOverride) {
     return;
   }
   KJ_DASSERT(host == kj::none);
   kj::FixedArray<kj::byte, 16> randomBytes;
   workerd::getEntropy(randomBytes);
-  host = kj::str(kj::encodeHex(randomBytes), isHyperdrive ? ".hyperdrive.local" : ".workers.alt");
+  host = kj::str(kj::encodeHex(randomBytes), ".workers.alt");
 
   // Register an entry in the global scope connectOverrides HashMap so that cloudflare:sockets's
-  // connect() will route connections to this magic hostname through the fetcher.
-  auto& globalScope = IoContext::current().getCurrentLock().getGlobalScope();
+  // connect() will route connections to this magic hostname through the fetcher. The global scope
+  // is per-isolate, so this also works outside of a request, e.g. while constructing bindings.
+  auto context = js.v8Context();
+  auto& globalScope = jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
+      js.v8Isolate, context, context->Global(), jsg::kNonResourceWrappableTagRange);
   globalScope.setConnectOverride(
     kj::str(KJ_ASSERT_NONNULL(host), ":", overridePort),
     [self = JSG_THIS](jsg::Lock& js) mutable {
@@ -2352,10 +2355,15 @@ void Fetcher::registerOverride(jsg::Lock& js, IsHyperdrive isHyperdrive, uint16_
   registeredConnectOverride = true;
 }
 
+kj::String Fetcher::mapVirtualHost(jsg::Lock& js, uint16_t port) {
+  registerOverride(js, port);
+  return kj::str(KJ_ASSERT_NONNULL(host), ":", KJ_ASSERT_NONNULL(this->port));
+}
+
 kj::StringPtr ExtendedFetcher::getHost(jsg::Lock& js) {
   // Ensures the connect override is registered on the global scope using registerOverride(), then
   // returns the random hostname.
-  registerOverride(js, isHyperdrive, KJ_ASSERT_NONNULL(port));
+  registerOverride(js, KJ_ASSERT_NONNULL(port));
   return KJ_ASSERT_NONNULL(host);
 }
 
