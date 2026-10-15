@@ -1811,6 +1811,53 @@ KJ_TEST("JsReadableStream pumpTo of a locked TypeScript-backed stream throws") {
   });
 }
 
+KJ_TEST("TypeScript native stream errors when its source enqueues an empty chunk") {
+  auto fixture = makeTsStreamsFixture();
+  bool rejected = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // ReadableStreamNativeSource never enqueues an empty chunk: a zero-byte read is its
+    // EOF, which it signals with close(). The conduit takes any object carrying the
+    // kNativeSource marker as a native source, so a plain object stands in for a source
+    // that breaks the contract.
+    auto marker = jsg::JsValue(
+        v8::Symbol::ForApi(js.v8Isolate, jsg::v8StrIntern(js.v8Isolate, "kNativeSource")));
+    auto source = js.obj();
+    source.set(js, marker, marker);
+    source.set(js, "pull"_kj,
+        jsg::JsValue(js.wrapSimpleFunction(
+            js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
+      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
+      webstreams::invokeMethod(
+          js, controller, "enqueue"_kj, jsg::JsUint8Array::create(js, static_cast<size_t>(0)));
+    })));
+
+    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
+    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
+    auto constructor =
+        KJ_ASSERT_NONNULL(exportsObj.get(js, "ReadableStream"_kj).tryCast<jsg::JsFunction>());
+    auto streamObj = constructor.newInstance(js, jsg::JsValue(source));
+    auto reader = KJ_ASSERT_NONNULL(
+        JSG_TRY_CAST_OBJECT(webstreams::invokeMethod(js, streamObj, "getReader"_kj)));
+    auto read = js.toPromise(v8::Local<v8::Value>(
+        KJ_ASSERT_NONNULL(JSG_TRY_CAST_PROMISE(webstreams::invokeMethod(js, reader, "read"_kj)))));
+
+    // The refusal errors the stream, so the read rejects with it rather than handing
+    // the reader an empty chunk.
+    auto promise = read.then(js, [](jsg::Lock& js, jsg::Value) {
+      KJ_FAIL_REQUIRE("expected the read to reject");
+    }, [&rejected](jsg::Lock& js, jsg::Value exception) {
+      auto e = js.exceptionToKj(kj::mv(exception));
+      KJ_EXPECT(e.getDescription().startsWith("jsg.TypeError: enqueue() of an empty chunk"),
+          e.getDescription());
+      rejected = true;
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(rejected);
+}
+
 KJ_TEST("ReadableStreamNativeSource rejects concurrent pulls") {
   TestFixture testFixture;
   MockControllerState state;
