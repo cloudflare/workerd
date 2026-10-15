@@ -196,6 +196,7 @@ export {
   teeHeldByobRequestWithReleasedBytes,
   teeHeldByobRequestAfterCloseOrError,
   teeHeldByobRequestFractionalAtClose,
+  teeHeldByobRequestFromBranchFractionalAtClose,
   teeHeldByobRequestAcrossNestedTee,
   teeHeldByobRequestEnqueueFillsByobRead,
   teeHeldByobRequestNewViewAndAutoAllocate,
@@ -203,6 +204,7 @@ export {
   teeClosedNativeBodyLocksOriginal,
   teeBranchFractionalCloseErrorsBranch,
   teeSoleBranchFractionalCloseSkipsSourceCancel,
+  teeBranchesFractionalCloseErrorEach,
 } from 'tee';
 
 export {

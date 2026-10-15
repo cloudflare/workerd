@@ -775,6 +775,12 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
     return this.#pendingReads.length > 0;
   }
 
+  // A pending read holds part of an element, which the close errors (see
+  // ByteStreamCursor). A default read takes whole chunks.
+  get hasFractionalFill(): boolean {
+    return false;
+  }
+
   fulfillFirstPendingRead(value: V): void {
     const pending = this.#pendingReads.shift() as PendingRead<V>;
     pending.resolve(createReadResult(value, false));
@@ -1058,6 +1064,15 @@ class ByteStreamCursor
       if ((pending.get(i) as PullIntoDescriptor).readerType !== 'none') {
         return true;
       }
+    }
+    return false;
+  }
+
+  override get hasFractionalFill(): boolean {
+    const pending = this.#pendingPullIntos;
+    for (let i = 0; i < pending.length; i++) {
+      const desc = pending.get(i) as PullIntoDescriptor;
+      if (desc.bytesFilled % desc.elementSize !== 0) return true;
     }
     return false;
   }
@@ -1398,22 +1413,16 @@ class ByteStreamCursor
   // — error the stream with TypeError and reject all pending reads. Returns
   // true if the stream was errored (caller should bail out of notify).
   #checkFractionalFillAtClose(): boolean {
-    const pending = this.#pendingPullIntos;
-    for (let i = 0; i < pending.length; i++) {
-      const desc = pending.get(i) as PullIntoDescriptor;
-      if (desc.bytesFilled > 0 && desc.bytesFilled % desc.elementSize !== 0) {
-        const e = new TypeError(
-          'Insufficient bytes to fill elements in the given view'
-        );
-        if (this.#errorStreamCallback !== undefined) {
-          this.#errorStreamCallback(e, this.ownerDeref());
-        }
-        // errorAllReads is called by the callback's error path (the
-        // controller's error() or readableStreamErrorBranch), not here.
-        return true;
-      }
+    if (!this.hasFractionalFill) return false;
+    const e = new TypeError(
+      'Insufficient bytes to fill elements in the given view'
+    );
+    if (this.#errorStreamCallback !== undefined) {
+      this.#errorStreamCallback(e, this.ownerDeref());
     }
-    return false;
+    // errorAllReads is called by the callback's error path (the
+    // controller's error() or readableStreamErrorBranch), not here.
+    return true;
   }
 
   // The deferred end-of-data settlement. Scheduled (once per turn) whenever

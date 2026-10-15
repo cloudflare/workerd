@@ -1596,9 +1596,7 @@ class QueuedControllerCore<T, R> {
     const parentCursor = getReadableStreamConsumer(this.#stream) as
       QueueCursorType<T, R> | undefined;
     if (parentCursor !== undefined) {
-      if (this.#queue.getEntry(parentCursor.position) !== CLOSE_SENTINEL) {
-        return;
-      }
+      if (!this.#isDrained(parentCursor)) return;
       readableStreamClose(this.#stream);
     } else {
       // Check every live consumer stream (the tee branches).
@@ -1609,7 +1607,7 @@ class QueuedControllerCore<T, R> {
         const cursor = getReadableStreamConsumer(owner) as
           QueueCursorType<T, R> | undefined;
         if (cursor === undefined) continue;
-        if (this.#queue.getEntry(cursor.position) === CLOSE_SENTINEL) {
+        if (this.#isDrained(cursor)) {
           readableStreamClose(owner);
         } else {
           anyOpen = true;
@@ -1710,6 +1708,20 @@ class QueuedControllerCore<T, R> {
     // Consumers that left earlier were promised the source's cancel.
     this.#pendingCancel?.resolve(this.#cancelPromise);
     return this.#cancelPromise;
+  }
+
+  // A consumer has drained once its cursor reaches the close sentinel,
+  // unless a pending read holds part of an element: the close errors that
+  // consumer instead, when its cursor sees the close. maybeCloseStream can
+  // run before then, while queue.close() is still notifying the cursors (a
+  // branch the close errors alone runs it as it leaves); closing such a
+  // consumer then would leave its read pending for good, its error finding
+  // the stream closed.
+  #isDrained(cursor: QueueCursorType<T, R>): boolean {
+    return (
+      this.#queue.getEntry(cursor.position) === CLOSE_SENTINEL &&
+      !cursor.hasFractionalFill
+    );
   }
 
   #shouldCallPull(): boolean {
