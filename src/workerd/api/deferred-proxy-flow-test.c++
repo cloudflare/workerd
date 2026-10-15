@@ -30,6 +30,8 @@
 
 #include <capnp/message.h>
 #include <kj/async-io.h>
+#include <kj/compat/brotli.h>
+#include <kj/compat/gzip.h>
 #include <kj/test.h>
 
 namespace workerd::api {
@@ -172,10 +174,22 @@ TestFixture makeTsStreamsFixture() {
   });
 }
 
+template <typename Decompressor>
+void expectDecodedPrefix(
+    kj::ArrayPtr<const kj::byte> compressed, kj::ArrayPtr<const kj::byte> expected) {
+  kj::ArrayInputStream input(compressed);
+  Decompressor decompressor(input);
+  auto decoded = kj::heapArray<kj::byte>(expected.size());
+  KJ_ASSERT(decompressor.tryRead(decoded, decoded.size()) == decoded.size());
+  KJ_EXPECT(decoded == expected);
+}
+
 // The core proof, shared by the legacy and TypeScript backends: pump a gated system
 // source into a system sink, receive the DeferredProxy after the IoContext is destroyed,
 // and verify the whole flow happens in the deferred phase with a clean environment.
-void runRealProxyProof(TestFixture& fixture) {
+void runRealProxyProof(TestFixture& fixture,
+    StreamEncoding sinkEncoding = StreamEncoding::IDENTITY,
+    FlushCompressionAfterWrite flushAfterWrite = FlushCompressionAfterWrite::NO) {
   auto& ws = fixture.getWaitScope();
 
   auto gatePaf = kj::newPromiseAndFulfiller<void>();
@@ -189,7 +203,7 @@ void runRealProxyProof(TestFixture& fixture) {
   auto probingOut = kj::heap<ProbingOutputStream>(kj::mv(pipe.out), probes);
 
   auto deferred = fixture.runInIoContext(
-      [gated = kj::mv(gated), out = kj::mv(probingOut)](
+      [gated = kj::mv(gated), out = kj::mv(probingOut), sinkEncoding, flushAfterWrite](
           const TestFixture::Environment& env) mutable -> kj::Promise<DeferredProxy<void>> {
     // System source over the gated stream, system sink over the (probed) test pipe: the
     // system-to-system pump is the real deferred proxy production bodies use. Its
@@ -198,7 +212,7 @@ void runRealProxyProof(TestFixture& fixture) {
     // pending events on the IoContext are not part of it, which is what makes running it
     // after IoContext destruction legitimate.
     auto source = newSystemStream(kj::mv(gated), StreamEncoding::IDENTITY, env.context);
-    auto sink = newSystemStream(kj::mv(out), StreamEncoding::IDENTITY, env.context);
+    auto sink = newSystemStream(kj::mv(out), sinkEncoding, env.context, flushAfterWrite);
     auto stream = JsReadableStream::create(env.js, env.context, kj::mv(source));
     return stream.pumpTo(env.js, kj::mv(sink), EndStream::YES);
   });
@@ -218,16 +232,32 @@ void runRealProxyProof(TestFixture& fixture) {
   // read may run in-request. The post-destruction guarantees start at the gate.) Any
   // IoOwn tether left in the pump would trip its far-get check from here on.
   KJ_EXPECT(!deferred.proxyTask.poll(ws));
-  KJ_EXPECT(received.asPtr() == kPreGate.asBytes());
+  if (sinkEncoding == StreamEncoding::GZIP) {
+    expectDecodedPrefix<kj::GzipInputStream>(received.asPtr(), kPreGate.asBytes());
+  } else if (sinkEncoding == StreamEncoding::BROTLI) {
+    expectDecodedPrefix<kj::BrotliInputStream>(received.asPtr(), kPreGate.asBytes());
+  } else {
+    KJ_EXPECT(received.asPtr() == kPreGate.asBytes());
+  }
 
   // Release the gate and finish the flow: the remaining reads, writes, and the sink's
   // end all run after IoContext destruction.
   gatePaf.fulfiller->fulfill();
   deferred.proxyTask.wait(ws);
   readerTask.wait(ws);
-  KJ_EXPECT(received.size() == kPreGate.size() + kPostGate.size());
-  KJ_EXPECT(received.asPtr().first(kPreGate.size()) == kPreGate.asBytes());
-  KJ_EXPECT(received.asPtr().slice(kPreGate.size()) == kPostGate.asBytes());
+  if (sinkEncoding == StreamEncoding::GZIP) {
+    kj::ArrayInputStream input(received.asPtr());
+    kj::GzipInputStream decompressor(input);
+    KJ_EXPECT(decompressor.readAllText() == kj::str(kPreGate, kPostGate));
+  } else if (sinkEncoding == StreamEncoding::BROTLI) {
+    kj::ArrayInputStream input(received.asPtr());
+    kj::BrotliInputStream decompressor(input);
+    KJ_EXPECT(decompressor.readAllText() == kj::str(kPreGate, kPostGate));
+  } else {
+    KJ_EXPECT(received.size() == kPreGate.size() + kPostGate.size());
+    KJ_EXPECT(received.asPtr().first(kPreGate.size()) == kPreGate.asBytes());
+    KJ_EXPECT(received.asPtr().slice(kPreGate.size()) == kPostGate.asBytes());
+  }
 
   // Every deferred-phase operation -- the post-gate read, the post-gate write, the EOF
   // read(s), and the sink teardown -- ran with the isolate un-entered and no current
@@ -253,6 +283,16 @@ KJ_TEST("TS pumpTo: a real deferred proxy flows entirely after IoContext destruc
   // the extraction plumbing fully de-tethers the source from the IoContext.
   auto fixture = makeTsStreamsFixture();
   runRealProxyProof(fixture);
+}
+
+KJ_TEST("pumpTo: gzip writes flush after IoContext destruction") {
+  TestFixture fixture;
+  runRealProxyProof(fixture, StreamEncoding::GZIP, FlushCompressionAfterWrite::YES);
+}
+
+KJ_TEST("pumpTo: brotli writes flush after IoContext destruction") {
+  TestFixture fixture;
+  runRealProxyProof(fixture, StreamEncoding::BROTLI, FlushCompressionAfterWrite::YES);
 }
 
 // ---------------------------------------------------------------------------
