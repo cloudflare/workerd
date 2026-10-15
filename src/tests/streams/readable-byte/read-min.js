@@ -217,6 +217,57 @@ export const closedOrderAtEndOfData = {
   },
 };
 
+// DIVERGENCE (ledger #38): where closed settles relative to the read that
+// a native body's end answers. At a zero-byte end, C++ resolves closed
+// first for read() and read(view) alike; TypeScript does so for read(),
+// but settles a pending read(view) before closed. A readAtLeast() that
+// gets fewer bytes than its minimum at the end: C++ fulfills it and leaves
+// closed pending until the next read, which closes the stream; TypeScript
+// fulfills it and closes the stream in the same turn.
+export const closedOrderAtNativeEndOfData = {
+  async test() {
+    for (const mode of [undefined, 'byob']) {
+      const reader = new Response('abc').body.getReader(
+        mode ? { mode } : undefined
+      );
+      const read = () =>
+        mode ? reader.read(new Uint8Array(8)) : reader.read();
+      strictEqual((await read()).value.byteLength, 3);
+      const log = [];
+      await Promise.all([
+        reader.closed.then(() => log.push('closed')),
+        read().then((r) => {
+          ok(r.done);
+          log.push('end');
+        }),
+      ]);
+      strictEqual(
+        log.join(),
+        usingTsImpl && mode ? 'end,closed' : 'closed,end',
+        `mode ${mode}`
+      );
+    }
+
+    const reader = new Response('abc').body.getReader({ mode: 'byob' });
+    const log = [];
+    reader.closed.then(() => log.push('closed'));
+    const partial = await reader.readAtLeast(4, new Uint8Array(8)).then((r) => {
+      log.push('partial');
+      return r;
+    });
+    strictEqual(partial.done, false);
+    strictEqual(partial.value.byteLength, 3);
+    await scheduler.wait(5);
+    strictEqual(log.join(), usingTsImpl ? 'partial,closed' : 'partial');
+    const next = await reader.read(new Uint8Array(8)).then((r) => {
+      log.push('next');
+      return r;
+    });
+    strictEqual(next.done, true);
+    strictEqual(log.join(), 'partial,closed,next');
+  },
+};
+
 // A read whose min is met fulfills immediately without waiting for the
 // view to fill; close() afterwards succeeds (parity).
 export const minMetThenClose = {
