@@ -181,7 +181,7 @@ static void compileCompatibilityFlags(kj::StringPtr compatDate,
         enableByDate = parsedCompatDate >= parsedDate;
       } else if (annotation.getId() == COMPAT_ENABLE_ALL_DATES_ANNOTATION_ID) {
         enableByDate = true;
-      } else if (annotation.getId() == EXPERIMENTAl_ANNOTATION_ID) {
+      } else if (annotation.getId() == EXPERIMENTAL_ANNOTATION_ID) {
         isExperimental = true;
       } else if (annotation.getId() == IMPLIED_BY_AFTER_DATE_ANNOTATION_ID) {
         auto value = annotation.getValue();
