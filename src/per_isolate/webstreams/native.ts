@@ -53,17 +53,19 @@
 //     respond is the source's COMPLETE answer for the read. Any internal
 //     accumulation toward `atLeast` happens inside the native source;
 //     the conduit never re-pulls an unsatisfied read. Responding with
-//     fewer bytes than `atLeast` IMPLICITLY SIGNALS CLOSURE: the partial
-//     fill commits as { done: false, value: partialView }, the stream
-//     closes, and every subsequent read returns EOF (BYOB reads get a
-//     zero-length view over their transferred buffer). This is the
+//     fewer bytes than `atLeast` IMPLICITLY SIGNALS CLOSURE: the stream
+//     closes, the partial fill commits as { done: false, value:
+//     partialView }, and every subsequent read returns EOF (BYOB reads
+//     get a zero-length view over their transferred buffer). This is the
 //     C++-parity readAtLeast tail shape — the below-minimum
 //     tail is never fused with the done flag — and it matches the
 //     queued backend's deferred end-of-data settlement, so consumers
-//     observe the same tail on both backends. (Only an explicit
-//     same-turn respond(0)-after-close on the QUEUED backend produces
-//     the spec's fused { done: true, value: partial } fold; the native
-//     conduit has no respond(0) — close() is the EOF verb.)
+//     observe the same tail on both backends. The legacy C++ streams
+//     differ only in settling the tail before the stream closes, which
+//     happens at their next read. (Only an explicit same-turn
+//     respond(0)-after-close on the QUEUED backend produces the spec's
+//     fused { done: true, value: partial } fold; the native conduit has
+//     no respond(0) — close() is the EOF verb.)
 //   - Close is otherwise a fused close-commit: controller.close() may
 //     follow a respond() in the same pull turn — deliberately divergent
 //     from the queued backend's drain-then-sentinel model.
@@ -101,6 +103,12 @@
 //   - Stream-level state transitions cross the module fence through the
 //     injected NativeStreamHooks (readableStreamClose/Error on the far
 //     side) — never by touching stream internals from here.
+//   - The stream transitions before the reads it ends settle: every
+//     close or error the conduit makes calls its hook first, then
+//     settles the reads (spec ReadableStreamClose/ReadableStreamError:
+//     reader.closed first), so reader.closed and the C++ EOF signal
+//     precede the last read. (A cancel is closed by the stream layer
+//     before it reaches the conduit.)
 //   - A COMPLETION LATCH prevents busy-loop re-pulls: a pull that
 //     settles without delivering, closing, or erroring while requests
 //     are still pending errors the stream. Aborted pulls are exempt.
@@ -936,12 +944,12 @@ class NativePullConduit implements ByteStreamConsumerType {
     }
     // MIN-READ CONTRACT: the respond is the source's COMPLETE answer for
     // this read. Delivering fewer bytes than the requested minimum
-    // (atLeast) signals end-of-stream: the partial fill commits
-    // { done: false, value: partialView }, the stream closes, and every
-    // subsequent read returns EOF — the C++-parity readAtLeast
-    // tail shape. The conduit never re-pulls an unsatisfied read — any
-    // accumulation toward the minimum happens inside the native source
-    // (tryRead-style). State transitions before promise resolutions.
+    // (atLeast) signals end-of-stream: the stream closes, the partial fill
+    // commits { done: false, value: partialView }, and every subsequent
+    // read returns EOF — the C++-parity readAtLeast tail shape. The
+    // conduit never re-pulls an unsatisfied read — any accumulation toward
+    // the minimum happens inside the native source (tryRead-style). State
+    // transitions before promise resolutions.
     //
     // EXPECTED-LENGTH: under-delivery is a close signal, so the
     // exact-total contract applies — landing short of expectedLength is
@@ -965,9 +973,9 @@ class NativePullConduit implements ByteStreamConsumerType {
       return;
     }
     this.#status = 'closed';
+    this.#hooks.closeStream();
     desc.resolve(createReadResult(value, false));
     this.#settleRemainingAsEof();
-    this.#hooks.closeStream();
   }
 
   // The exact-total accounting: adds `byteLength` to the running total,
@@ -995,7 +1003,7 @@ class NativePullConduit implements ByteStreamConsumerType {
 
   // Resolves every queued request as end-of-stream (default reads get
   // {done, undefined}; BYOB reads get their buffer back via a zero-length
-  // view). Shared by the close paths.
+  // view). Shared by the close paths, after their closeStream hook.
   #settleRemainingAsEof(): void {
     const requests = this.#requests;
     this.#requests = new RingBuffer();
@@ -1043,39 +1051,41 @@ class NativePullConduit implements ByteStreamConsumerType {
     // reintroduce partial responds; the shape mirrors the under-delivery
     // tail (partial done: false, then #settleRemainingAsEof).
     const head = this.#requests.peek();
+    const partial =
+      head !== undefined && head.kind === 'byob' && head.desc.bytesFilled > 0
+        ? head.desc
+        : undefined;
     if (
-      head !== undefined &&
-      head.kind === 'byob' &&
-      head.desc.bytesFilled > 0
+      partial !== undefined &&
+      partial.bytesFilled % partial.elementSize !== 0
     ) {
-      const desc = head.desc;
-      if (desc.bytesFilled % desc.elementSize !== 0) {
-        // Closed mid-element: unrecoverable (no queue to carry the
-        // remainder). Error everything instead.
-        const error = new TypeError(
-          'native source closed mid-element on a BYOB read'
-        );
-        this.#status = 'errored';
-        this.#storedError = error;
-        this.#hooks.errorStream(error);
-        this.errorAllReads(error);
-        return;
-      }
+      // Closed mid-element: unrecoverable (no queue to carry the
+      // remainder). Error everything instead.
+      const error = new TypeError(
+        'native source closed mid-element on a BYOB read'
+      );
+      this.#status = 'errored';
+      this.#storedError = error;
+      this.#hooks.errorStream(error);
+      this.errorAllReads(error);
+      return;
+    }
+
+    this.#hooks.closeStream();
+    if (partial !== undefined) {
       this.#requests.shift();
-      desc.resolve(
+      partial.resolve(
         createReadResult(
-          new desc.viewCtor(
-            desc.buffer,
-            desc.byteOffset,
-            desc.bytesFilled / desc.elementSize
+          new partial.viewCtor(
+            partial.buffer,
+            partial.byteOffset,
+            partial.bytesFilled / partial.elementSize
           ),
           false
         )
       );
     }
-
     this.#settleRemainingAsEof();
-    this.#hooks.closeStream();
   }
 
   errorFromSource(reason: unknown): void {
