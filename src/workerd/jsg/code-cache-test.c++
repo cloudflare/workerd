@@ -116,6 +116,7 @@ struct CountingObserver final: public CompilationObserver {
   mutable uint rejected = 0;
   mutable uint generated = 0;
   mutable uint generationFailed = 0;
+  mutable uint hintsConsumed = 0;
 
   void onCompileCacheFound(v8::Isolate*) const override {
     ++found;
@@ -128,6 +129,9 @@ struct CountingObserver final: public CompilationObserver {
   }
   void onCompileCacheGenerationFailed(v8::Isolate*) const override {
     ++generationFailed;
+  }
+  void onCompileHintsConsumed(v8::Isolate*, size_t, size_t) const override {
+    ++hintsConsumed;
   }
 };
 
@@ -160,10 +164,11 @@ void withIsolate(kj::Own<const CodeCacheStore> store,
 v8::Local<v8::Module> compileLegacyModule(jsg::Lock& js,
     kj::StringPtr code,
     const CompilationObserver& observer,
-    kj::StringPtr name = "main"_kj) {
+    kj::StringPtr name = "main"_kj,
+    kj::ArrayPtr<const int> compileHints = nullptr) {
   auto modules = ModuleRegistryImpl<CodeCacheIsolate_TypeWrapper>::from(js);
   auto path = kj::Path::parse(name);
-  modules->add(path, ModuleRegistry::ModuleInfo(js, name, code, observer));
+  modules->add(path, ModuleRegistry::ModuleInfo(js, name, code, observer, compileHints));
   return KJ_REQUIRE_NONNULL(modules->resolve(js, path)).module.getHandle(js);
 }
 
@@ -233,6 +238,27 @@ KJ_TEST("Legacy registry: a second isolate consumes the cache produced after eva
   }
   KJ_EXPECT(observer.found == 1);
   KJ_EXPECT(observer.rejected == 0);
+}
+
+KJ_TEST("An installed code cache takes precedence over hints on a miss and a hit") {
+  auto store = newStore();
+  CountingObserver observer;
+  // The opening parenthesis of `compute` in LAZY_MODULE.
+  const int hints[] = {16};
+
+  for (uint i = 0; i < 2; ++i) {
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+      auto module = compileLegacyModule(js, LAZY_MODULE, observer, "main", hints);
+      instantiateModule(js, module);
+    });
+    auto lock = store->state.lockShared();
+    KJ_EXPECT(lock->lookups == i + 1);
+    KJ_EXPECT(lock->hits == i);
+    KJ_EXPECT(lock->inserts == 1);
+    KJ_EXPECT(observer.hintsConsumed == 0);
+  }
+  KJ_EXPECT(observer.generated == 1);
+  KJ_EXPECT(observer.found == 1);
 }
 
 KJ_TEST("A cache produced after evaluation includes the functions that ran") {

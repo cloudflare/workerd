@@ -583,6 +583,7 @@ null. Builds without the sandbox store an ordinary pointer.
 | `CompilationObserver`       | `onCompileCacheRejected`          | Cached data rejected (version mismatch)   |
 | `CompilationObserver`       | `onCompileCacheGenerated`         | New cache data generated                  |
 | `CompilationObserver`       | `onCompileCacheGenerationFailed`  | Cache generation failed                   |
+| `CompilationObserver`       | `onCompileHintsConsumed`          | Legacy ESM compiled using function hints  |
 | `ResolveObserver`           | `onResolveModule`                 | Module resolution begins                  |
 | `InternalExceptionObserver` | `reportInternalException`         | Internal exception for metrics            |
 | `IsolateObserver`           | `onDynamicEval`                   | `eval()`, `new Function()`, etc. detected |
