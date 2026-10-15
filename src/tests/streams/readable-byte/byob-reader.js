@@ -716,14 +716,12 @@ async function byobReadRejects(stream) {
   );
 }
 
-// DIVERGENCE (ledger #36): a BYOB reader on a closed or errored stream with
-// no controller: a branch of a closed native body's tee(), or the body that
-// new Request(request) makes of a closed or errored stream, a default
-// stream's included. C++ gives any closed or errored stream a BYOB reader,
-// whose read resolves done with an empty view or rejects with the stored
-// error. TypeScript requires a byte-capable controller, which these streams
-// lack. The closed body itself, and a branch of a closed JS byte stream,
-// which shares its controller, take a BYOB reader in both.
+// A BYOB reader on a closed or errored stream with no controller: a branch
+// of a closed native body's tee(), or the body that new Request(request)
+// makes of a closed or errored stream, a default stream's included. Its
+// read resolves done with an empty view, or rejects with the stored error
+// (parity, ledger #36). The closed body itself, and a branch of a closed JS
+// byte stream, which shares its controller, take one as well.
 export const byobReaderOnSettledBranchOrDetachedBody = {
   async test() {
     const detach = (stream) =>
@@ -751,12 +749,6 @@ export const byobReaderOnSettledBranchOrDetachedBody = {
       detach(erroredStream(byteSource)),
       detach(erroredStream()),
     ];
-    if (usingTsImpl) {
-      for (const stream of [...closed, ...errored]) {
-        throws(() => stream.getReader({ mode: 'byob' }), notByteSource);
-      }
-      return;
-    }
     for (const stream of closed) {
       await byobReadsDone(stream);
     }
@@ -768,9 +760,10 @@ export const byobReaderOnSettledBranchOrDetachedBody = {
 
 // DIVERGENCE (ledger #37): a BYOB reader on a closed or errored default
 // stream, or on a branch of its tee(), which shares its controller. C++
-// gives any closed or errored stream a BYOB reader (as in ledger #36).
-// TypeScript refuses one, as the spec does in any state, because the
-// controller is not a byte stream controller.
+// gives any closed or errored stream a BYOB reader. TypeScript gives one
+// only to such a stream with no controller (ledger #36), and refuses one
+// here, as the spec does in any state, because the controller is not a
+// byte stream controller.
 export const byobReaderOnSettledDefaultStream = {
   async test() {
     const closed = [closedStream(), ...closedStream().tee()];

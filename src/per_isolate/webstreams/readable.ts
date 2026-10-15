@@ -1067,8 +1067,13 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     // The byte-CAPABLE gate (see isByteCapableController): queued byte
     // controllers and ALL native controllers pass (native sources are
     // byte-capable by definition). Using the queued-only brand here would
-    // wrongly reject getReader({mode:'byob'}) on a native stream.
-    if (!isByteCapableController(controller)) {
+    // wrongly reject getReader({mode:'byob'}) on a native stream. A stream
+    // with no controller passes too, as in C++: it is a shell of a closed or
+    // errored stream (makeShell), which #read settles without one; the
+    // other kind, a handed-off husk, is locked. A closed or errored stream
+    // that still has a default controller is refused, as the spec has it,
+    // though C++ accepts it.
+    if (controller !== undefined && !isByteCapableController(controller)) {
       throw new TypeError(
         'BYOB reader can only be used on a stream with a byte source'
       );
@@ -1174,7 +1179,9 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
       return PromiseResolve(userReadResult(emptyView as T, true));
     }
     // BACKEND-BLIND: the byte-consumer interface covers both backends; the
-    // cast is justified by the byte-capable reader gate in the constructor.
+    // cast is justified by the byte-capable reader gate in the constructor,
+    // which lets in a stream with no controller only when it is closed or
+    // errored, as settled above.
     const consumer = getReadableStreamConsumer(
       stream
     ) as unknown as ByteStreamConsumerType;
