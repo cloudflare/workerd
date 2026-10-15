@@ -16,6 +16,7 @@ const unitTests :Workerd.Config = (
           "nodejs_compat",
           "typescript_implemented_streams",
           "experimental",
+          "enable_weak_ref",
         ],
       )
     ),
