@@ -157,11 +157,12 @@ connection.
 - Do not port logic across the fence without checking BOTH invariant
   lists (`queue.ts` and `native.ts` headers).
 - The native source contract (marker symbol, standard pull/cancel hooks,
-  byobRequest discrimination, once-per-pull delivery, per-pull abort
-  signal for cancellation, under-delivery = EOF signal delivering the
-  partial as `{done: false, value: partial}` with the next read
-  observing EOF, tee hook, `expectedLength` exact-total byte contract)
-  is specified in the `native.ts` header.
+  byobRequest discrimination, once-per-pull delivery of a non-empty
+  answer, memory handed over that the conduit neither checks nor
+  transfers, per-pull abort signal for cancellation, under-delivery =
+  EOF signal delivering the partial as `{done: false, value: partial}`
+  with the next read observing EOF, tee hook, `expectedLength`
+  exact-total byte contract) is specified in the `native.ts` header.
   The C++ implementation (`ReadableStreamNativeSource` in
   `src/workerd/api/js-readable-stream.{h,c++}`) MUST conform to it; JS
   mocks in tests exercise the conduit independently. Key addition:
@@ -177,7 +178,9 @@ connection.
   construction) is module-private, consumed only by readable.ts/writable.ts
   and the C++ bridge via the API-symbol registry. The C++ mocks in
   `js-readable-stream-test.c++` construct real `ReadableStreamNativeSource`
-  objects; no JS-visible marker export exists.
+  objects, or, for a source that breaks the contract, mark a plain object
+  with the `kNativeSource` symbol from that registry; no JS-visible marker
+  export exists.
 - Every stream instance carries an own, non-enumerable api-symbol brand
   (`kReadableStreamBrand` / `kWritableStreamBrand`), stamped at the very
   top of the constructor (before any early return). The C++ bridge's
