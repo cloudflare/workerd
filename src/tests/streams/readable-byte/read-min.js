@@ -217,13 +217,13 @@ export const closedOrderAtEndOfData = {
   },
 };
 
-// DIVERGENCE (ledger #38): where closed settles relative to the read that
-// a native body's end answers. At a zero-byte end, C++ resolves closed
-// first for read() and read(view) alike; TypeScript does so for read(),
-// but settles a pending read(view) before closed. A readAtLeast() that
-// gets fewer bytes than its minimum at the end: C++ fulfills it and leaves
-// closed pending until the next read, which closes the stream; TypeScript
-// fulfills it and closes the stream in the same turn.
+// DIVERGENCE (ledger #38): where closed settles relative to a readAtLeast()
+// that gets fewer bytes than its minimum at a native body's end. C++
+// fulfills the read and leaves closed pending until the next read, which
+// closes the stream; TypeScript closes the stream, then fulfills the read,
+// as at a JS byte source's close() below min (#27). At a zero-byte end
+// both resolve closed first, for read() and read(view) alike; that parity
+// is asserted first.
 export const closedOrderAtNativeEndOfData = {
   async test() {
     for (const mode of [undefined, 'byob']) {
@@ -241,11 +241,7 @@ export const closedOrderAtNativeEndOfData = {
           log.push('end');
         }),
       ]);
-      strictEqual(
-        log.join(),
-        usingTsImpl && mode ? 'end,closed' : 'closed,end',
-        `mode ${mode}`
-      );
+      strictEqual(log.join(), 'closed,end', `mode ${mode}`);
     }
 
     const reader = new Response('abc').body.getReader({ mode: 'byob' });
@@ -258,13 +254,16 @@ export const closedOrderAtNativeEndOfData = {
     strictEqual(partial.done, false);
     strictEqual(partial.value.byteLength, 3);
     await scheduler.wait(5);
-    strictEqual(log.join(), usingTsImpl ? 'partial,closed' : 'partial');
+    strictEqual(log.join(), usingTsImpl ? 'closed,partial' : 'partial');
     const next = await reader.read(new Uint8Array(8)).then((r) => {
       log.push('next');
       return r;
     });
     strictEqual(next.done, true);
-    strictEqual(log.join(), 'partial,closed,next');
+    strictEqual(
+      log.join(),
+      usingTsImpl ? 'closed,partial,next' : 'partial,closed,next'
+    );
   },
 };
 
