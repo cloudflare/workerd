@@ -14,15 +14,15 @@ struct HintsContext: public Object, public ContextGlobal {
 };
 JSG_DECLARE_ISOLATE_TYPE(HintsIsolate, HintsContext);
 
-// Valid both as a classic script and as a module, so that hints produced by compiling it as a
-// script apply to the module: source positions depend only on the text.
 constexpr kj::StringPtr SOURCE = "function used() { return 42; }\n"
                                  "function unused() { return 0; }\n"
-                                 "globalThis.result = used();\n"_kj;
+                                 "export function handler() { return used() + 1; }\n"
+                                 "export const result = used();\n"_kj;
 
 // V8 reports a function's start as the opening parenthesis of its parameter list.
-int usedPosition() {
-  return static_cast<int>(KJ_ASSERT_NONNULL(SOURCE.findFirst('(')));
+int startPosition(kj::StringPtr functionName) {
+  auto nameStart = KJ_ASSERT_NONNULL(SOURCE.find(kj::str(functionName, "(")));
+  return static_cast<int>(nameStart + functionName.size());
 }
 
 v8::MaybeLocal<v8::Module> resolveNothing(v8::Local<v8::Context> context,
@@ -31,6 +31,10 @@ v8::MaybeLocal<v8::Module> resolveNothing(v8::Local<v8::Context> context,
     v8::Local<v8::Module> referrer) {
   // The test module has no imports.
   return {};
+}
+
+v8::Local<v8::Object> getNamespace(jsg::Lock& js, v8::Local<v8::Module> module) {
+  return check(module->GetModuleNamespace()->ToObject(js.v8Context()));
 }
 
 class HintsObserver final: public CompilationObserver {
@@ -55,18 +59,28 @@ void withContext(HintsIsolate& isolate, Func&& func) {
   });
 }
 
-// Compiles SOURCE as a classic script with kProduceCompileHints, runs it, and returns the
-// positions of the functions V8 compiled lazily while it ran.
+// Compiles SOURCE as a module with kProduceCompileHints, evaluates it, then calls `handler`, as a
+// first request would. Returns the positions of the functions V8 compiled lazily meanwhile.
 kj::Array<int> produceHints() {
   HintsIsolate isolate(v8System, newIsolateGroup(), nullptr, kj::heap<IsolateObserver>());
   kj::Array<int> result;
   withContext(isolate, [&](jsg::Lock& js) {
-    v8::ScriptOrigin origin(v8StrIntern(js.v8Isolate, "producer.js"_kj));
+    constexpr bool isModule = true;
+    v8::ScriptOrigin origin(
+        v8StrIntern(js.v8Isolate, "producer.js"_kj), 0, 0, false, -1, {}, false, false, isModule);
     v8::ScriptCompiler::Source source(v8Str(js.v8Isolate, SOURCE), origin);
-    auto script = check(v8::ScriptCompiler::Compile(
-        js.v8Context(), &source, v8::ScriptCompiler::kProduceCompileHints));
-    check(script->Run(js.v8Context()));
-    auto positions = script->GetCompileHintsCollector()->GetCompileHints(js.v8Isolate);
+    auto module = check(v8::ScriptCompiler::CompileModule(
+        js.v8Isolate, &source, v8::ScriptCompiler::kProduceCompileHints));
+    // Obtained before evaluation; it keeps collecting while the module's functions run.
+    auto collector = module->GetUnboundModuleScript()->GetCompileHintsCollector();
+    check(module->InstantiateModule(js.v8Context(), &resolveNothing));
+    check(module->Evaluate(js.v8Context()));
+
+    auto handler = check(
+        getNamespace(js, module)->Get(js.v8Context(), v8StrIntern(js.v8Isolate, "handler"_kj)));
+    check(handler.As<v8::Function>()->Call(js.v8Context(), js.v8Undefined(), 0, nullptr));
+
+    auto positions = collector->GetCompileHints(js.v8Isolate);
     result = kj::heapArray<int>(positions.data(), positions.size());
   });
   return result;
@@ -98,27 +112,29 @@ void compileAndEvaluateModule(kj::ArrayPtr<const kj::byte> compileCache,
     check(module->InstantiateModule(js.v8Context(), &resolveNothing));
     check(module->Evaluate(js.v8Context()));
     auto result = check(
-        js.v8Context()->Global()->Get(js.v8Context(), v8StrIntern(js.v8Isolate, "result"_kj)));
+        getNamespace(js, module)->Get(js.v8Context(), v8StrIntern(js.v8Isolate, "result"_kj)));
     KJ_EXPECT(check(result->Int32Value(js.v8Context())) == 42);
   });
 }
 
-KJ_TEST("hints produced by running code make V8 compile those functions with the module") {
+KJ_TEST("hints produced by a module make V8 compile those functions with the module") {
   auto hints = produceHints();
-  // Only `used` ran; `unused` was never compiled.
-  KJ_ASSERT(hints.size() == 1, hints.size());
-  KJ_EXPECT(hints[0] == usedPosition(), hints[0], usedPosition());
+  // `used` ran during evaluation and `handler` afterwards; `unused` never ran.
+  KJ_ASSERT(hints.size() == 2, hints.size());
+  KJ_EXPECT(hints[0] == startPosition("used"), hints[0], startPosition("used"));
+  KJ_EXPECT(hints[1] == startPosition("handler"), hints[1], startPosition("handler"));
 
   HintsObserver observer;
   compileAndEvaluateModule(nullptr, hints, observer);
   KJ_EXPECT(observer.calls == 1);
-  KJ_EXPECT(observer.lastHintCount == 1);
-  // V8 asked about `used` and `unused`, and compiled only `used` eagerly.
-  KJ_EXPECT(observer.lastEagerFunctionCount == 1, observer.lastEagerFunctionCount);
+  KJ_EXPECT(observer.lastHintCount == 2);
+  // V8 asked about all three functions and compiled the two hinted ones eagerly.
+  KJ_EXPECT(observer.lastEagerFunctionCount == 2, observer.lastEagerFunctionCount);
 }
 
 KJ_TEST("unsorted hints and positions that start no function are tolerated") {
-  const int hints[] = {9999, usedPosition(), 3};
+  // Without normalization, binary search skips `used` after comparing the smaller midpoint.
+  const int hints[] = {startPosition("used"), 3, 9999};
 
   HintsObserver observer;
   compileAndEvaluateModule(nullptr, hints, observer);
@@ -134,7 +150,7 @@ KJ_TEST("a code cache takes precedence over compile hints") {
           v8::ScriptCompiler::kConsumeCodeCache | v8::ScriptCompiler::kConsumeCompileHints)));
 
   auto cache = produceCodeCache();
-  const int hints[] = {usedPosition()};
+  const int hints[] = {startPosition("used")};
 
   HintsObserver observer;
   compileAndEvaluateModule(cache, hints, observer);
