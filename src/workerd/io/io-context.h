@@ -53,7 +53,8 @@ namespace workerd {
 constexpr uint MAX_BLOCK_CONCURRENCY_WHILE_DEPTH = 64;
 
 // Marks the exception IoContext::run() fails with when there is no current IncomingRequest, e.g.
-// in an actor between events. Not transient: a retry needs the context to get another request.
+// in an actor between events (only with the DEFER_CROSS_CONTEXT_ACTIONS autogate). Not transient:
+// a retry needs the context to get another request.
 constexpr kj::Exception::DetailTypeId NO_CURRENT_INCOMING_REQUEST_DETAIL_ID = 0x68a64a728b1be5c9ull;
 
 // This wishes it were IoContext::Runnable::Exceptional.
@@ -509,8 +510,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // kj::defer cleanups in particular -- must check hasCurrentIncomingRequest() first and skip
   // the work rather than call this and fault.
   //
-  // Without a request, the callback doesn't run: run() throws, or rejects if the request ends
-  // while it waits for the locks, with NO_CURRENT_INCOMING_REQUEST_DETAIL_ID.
+  // With the DEFER_CROSS_CONTEXT_ACTIONS autogate enabled, the callback doesn't run without a
+  // request: run() throws, or rejects if the request ends while it waits for the locks, with
+  // NO_CURRENT_INCOMING_REQUEST_DETAIL_ID.
   template <typename Func>
   auto run(Func&& func, kj::Maybe<InputGate::Lock> inputLock = kj::none) KJ_WARN_UNUSED_RESULT {
     if constexpr (runFuncAcceptsIoContext<Func>) {
@@ -1393,7 +1395,7 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       std::invocable<std::decay_t<Func>&, Worker::Lock&, IoContext&>;
 
   // Throws a JavaScript Error carrying NO_CURRENT_INCOMING_REQUEST_DETAIL_ID if there is no
-  // current IncomingRequest.
+  // current IncomingRequest and the DEFER_CROSS_CONTEXT_ACTIONS autogate is enabled.
   void requireCurrentIncomingRequestForRun();
 
   // Internal implementation of run(), always invoked with a single-arg callback.
@@ -1490,6 +1492,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   kj::Promise<void> deleteQueueSignalTask;
   static kj::Promise<void> startDeleteQueueSignalTask(IoContext* context);
+
+  // Runs the actions queued on deleteQueue under the input lock and current IncomingRequest. If
+  // the run loses its request while waiting for a lock, they stay queued; other failures abort.
+  kj::Promise<void> runQueuedActions();
 
   friend class Finalizeable;
   friend class DeleteQueue;

@@ -44,6 +44,7 @@ I/O lifecycle, per-request context, worker/isolate management, actor storage, co
 - `awaitIo(js, kjPromise, func)` bridges KJ→JS; `func` runs under V8 lock. `awaitIo(js, kjPromise)` for identity
 - `awaitJs(js, jsPromise)` bridges JS→KJ
 - `addObject(kj::Own<T>)` returns `IoOwn<T>` — the **only** safe way to store KJ I/O objects reachable from JS heap
+- Cross-context actions (`IoCrossContextExecutor::tryExecute()`, `DeleteQueue::scheduleAction()`) run in the owning IoContext under its current `IncomingRequest`; with `DEFER_CROSS_CONTEXT_ACTIONS`, an idle actor's actions wait for its next request. Only the isolate's memory limit bounds the queue, so coalesce actions holding just a weak reference, and count native copies of JS data as external memory (`jsg::ExternalMemoryAdjustment`). See `scheduleAction()` in `io-own.h`.
 - Two-phase locking: `Worker::AsyncLock` (fair queue) → `Worker::Lock` (V8 isolate lock)
 - `ActorCacheOps` methods return `kj::OneOf<Result, kj::Promise<Result>>` — sync when cached, async otherwise
 - `OutputGate::lockWhile(promise)` blocks outgoing responses until the promise resolves

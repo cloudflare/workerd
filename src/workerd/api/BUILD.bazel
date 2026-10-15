@@ -847,6 +847,15 @@ kj_test(
 )
 
 kj_test(
+    src = "abort-signal-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/io:worker-interface",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "actor-call-retry-test.c++",
     deps = [
         "//src/workerd/io",

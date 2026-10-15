@@ -365,6 +365,11 @@ KJ_TEST("ambient IoContext is hidden while another V8 isolate is entered") {
   });
 }
 
+// run()'s typed failure is behind this autogate.
+kj::Array<kj::StringPtr> deferCrossContextActionsAutogate() {
+  return kj::arr("defer-cross-context-actions"_kj);
+}
+
 // Expects the run() in startRun() to throw for lack of a current request, not return a promise.
 template <typename StartRun>
 void expectThrowsForNoCurrentIncomingRequest(StartRun&& startRun) {
@@ -385,7 +390,7 @@ void expectRejectsForNoCurrentIncomingRequest(kj::WaitScope& waitScope, kj::Prom
 }
 
 KJ_TEST("run() fails without running its callback when there is no current request") {
-  TestFixture fixture;
+  TestFixture fixture({.autogates = deferCrossContextActionsAutogate()});
   auto context = fixture.newIoContext();
 
   bool ran = false;
@@ -395,7 +400,8 @@ KJ_TEST("run() fails without running its callback when there is no current reque
 }
 
 KJ_TEST("run() in a critical section fails when there is no current request") {
-  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("run-critical-section-test"))});
+  TestFixture fixture({.autogates = deferCrossContextActionsAutogate(),
+    .actorId = Worker::Actor::Id(kj::str("run-critical-section-test"))});
   auto& waitScope = fixture.getWaitScope();
   auto context = fixture.newIoContext();
 
@@ -409,7 +415,8 @@ KJ_TEST("run() in a critical section fails when there is no current request") {
 }
 
 KJ_TEST("run() fails if the request is gone once the input lock is acquired") {
-  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("run-input-lock-test"))});
+  TestFixture fixture({.autogates = deferCrossContextActionsAutogate(),
+    .actorId = Worker::Actor::Id(kj::str("run-input-lock-test"))});
   auto& waitScope = fixture.getWaitScope();
   auto context = fixture.newIoContext();
   auto request = fixture.newIncomingRequest(*context);
@@ -427,8 +434,13 @@ KJ_TEST("run() fails if the request is gone once the input lock is acquired") {
 
 KJ_TEST("run() fails if the request is gone once the isolate lock is acquired") {
   auto io = kj::setupAsyncIo();
-  TestFixture fixture({.waitScope = io.waitScope, .useRealTimers = false});
-  TestFixture other({.waitScope = io.waitScope, .useRealTimers = false});
+  // Each fixture initializes the process's autogates, so both enable it.
+  TestFixture fixture({.waitScope = io.waitScope,
+    .autogates = deferCrossContextActionsAutogate(),
+    .useRealTimers = false});
+  TestFixture other({.waitScope = io.waitScope,
+    .autogates = deferCrossContextActionsAutogate(),
+    .useRealTimers = false});
   auto context = fixture.newIoContext();
   auto request = fixture.newIncomingRequest(*context);
 

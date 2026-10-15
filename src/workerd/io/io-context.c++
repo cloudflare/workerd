@@ -12,6 +12,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/sentry.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/uncaught-exception-source.h>
@@ -346,7 +347,8 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
 
 void IoContext::IncomingRequest::delivered(kj::StringPtr eventType, kj::SourceLocation location) {
   KJ_REQUIRE(!wasDelivered, "delivered() can only be called once");
-  if (!context->incomingRequests.empty()) {
+  bool hadRequest = !context->incomingRequests.empty();
+  if (hadRequest) {
     // There is already an IncomingRequest running in this context, and we're going to make it no
     // longer current. Make sure to attribute accumulated CPU time to it.
     auto& oldFront = context->incomingRequests.front();
@@ -394,6 +396,13 @@ void IoContext::IncomingRequest::delivered(kj::StringPtr eventType, kj::SourceLo
 
     // Record a new incoming request to actor metrics.
     a.getMetrics().startRequest();
+  }
+
+  if (!hadRequest && util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS) &&
+      context->deleteQueue.queue->hasQueuedActions()) {
+    // Actions are only left queued while there is no request. Run them as a waitUntil task, so
+    // that this request can't finish draining before they have run.
+    context->addWaitUntil(context->runQueuedActions());
   }
 }
 
@@ -643,7 +652,8 @@ void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
 }
 
 void IoContext::requireCurrentIncomingRequestForRun() {
-  if (incomingRequests.empty()) {
+  if (incomingRequests.empty() &&
+      util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)) {
     // Not necessarily a bug (e.g. an idle actor), so throw a JS error, but log in case it is one.
     LOG_PERIODICALLY(WARNING, "NOSENTRY IoContext::run() without a current IncomingRequest",
         lastDeliveredLocation, kj::getStackTrace());
@@ -1982,25 +1992,75 @@ jsg::JsObject IoContext::getPromiseContextTag(jsg::Lock& js) {
 kj::Promise<void> IoContext::startDeleteQueueSignalTask(IoContext* context) {
   // The promise that is returned is held by the IoContext itself, so when the
   // IoContext is destroyed, the promise will be canceled and the loop will
-  // end. On each iteration of the loop we want to reset the cross thread
-  // signal in the delete queue, then wait on the promise. Once the promise
-  // is fulfilled, we will run an empty task to prompt the IoContext to drain
-  // the DeleteQueue.
+  // end. On each iteration of the loop we wait for the delete queue's cross
+  // thread signal, then run the queued actions.
   try {
+    if (!util::Autogate::isEnabled(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)) {
+      // Without the autogate, every wake runs the actions, aborting the IoContext if that fails.
+      for (;;) {
+        co_await context->deleteQueue.queue->resetCrossThreadSignal();
+        co_await context->run([](auto& lock) {
+          auto& context = IoContext::current();
+          auto l = context.deleteQueue.queue->crossThreadDeleteQueue.lockExclusive();
+          auto& state = KJ_ASSERT_NONNULL(*l);
+          for (auto& action: state.actions) {
+            action(lock);
+          }
+          state.actions.clear();
+        });
+      }
+    }
+
+    auto& queue = *context->deleteQueue.queue;
+    auto signal = queue.resetCrossThreadSignal();
     for (;;) {
-      co_await context->deleteQueue.queue->resetCrossThreadSignal();
-      co_await context->run([](auto& lock) {
-        auto& context = IoContext::current();
-        auto l = context.deleteQueue.queue->crossThreadDeleteQueue.lockExclusive();
-        auto& state = KJ_ASSERT_NONNULL(*l);
-        for (auto& action: state.actions) {
-          action(lock);
-        }
-        state.actions.clear();
-      });
+      co_await signal;
+
+      // Re-arm first, so that an action scheduled during the run wakes us again.
+      signal = queue.resetCrossThreadSignal();
+
+      // Without a request, the next one's delivered() runs the actions. An earlier run may also
+      // have taken them already.
+      if (context->incomingRequests.empty() || !queue.hasQueuedActions()) {
+        continue;
+      }
+
+      kj::Promise<void> run = context->runQueuedActions();
+      if (context->actor != kj::none) {
+        // As in delivered(), keep the request draining until the run is done, so the actions
+        // aren't stranded until the actor's next request. Other contexts end with their request.
+        auto forked = run.fork();
+        context->addWaitUntil(forked.addBranch());
+        run = forked.addBranch();
+      }
+      co_await run;
+      if (context->abortException != kj::none) {
+        co_return;
+      }
     }
   } catch (...) {
     context->abort(kj::getCaughtExceptionAsKj());
+  }
+}
+
+kj::Promise<void> IoContext::runQueuedActions() {
+  bool tookActions = false;
+  try {
+    co_await run([&tookActions](Worker::Lock& lock, IoContext& context) {
+      // Take all the actions out first, since one may schedule another.
+      tookActions = true;
+      for (auto& action: context.deleteQueue.queue->takeActions()) {
+        action(lock);
+      }
+    });
+  } catch (...) {
+    auto e = kj::getCaughtExceptionAsKj();
+    // Only losing the request before the actions were taken leaves them queued for the next one.
+    // Anything else aborts, including an action's own failure, whatever its exception's details.
+    if (tookActions || abortException != kj::none ||
+        e.getDetail(NO_CURRENT_INCOMING_REQUEST_DETAIL_ID) == kj::none) {
+      abort(kj::mv(e));
+    }
   }
 }
 }  // namespace workerd
