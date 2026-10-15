@@ -41,6 +41,9 @@ struct TestFixture {
     kj::Maybe<kj::Array<kj::StringPtr>> autogates;
     // Autogates enabled for the test, like those named in `autogates`.
     kj::Array<util::AutogateKey> autogateKeys;
+    // If true, only the autogates above are enabled, even under WORKERD_ALL_AUTOGATES (as in the
+    // @all-autogates test variant), e.g. to test the behavior with a gate disabled.
+    bool ignoreAllAutogatesEnv;
     kj::Maybe<kj::StringPtr> mainModuleSource;
     // If set, make a stub of an Actor with the given id.
     kj::Maybe<Worker::Actor::Id> actorId;
@@ -161,6 +164,10 @@ struct TestFixture {
   // Create a new IoContext, owned by the caller. Use this when you need an IoContext that
   // outlives a single IncomingRequest, e.g. to model an actor receiving multiple requests.
   kj::Own<IoContext> newIoContext();
+
+  // Like newIoContext(), but the IoContext is never bound to the fixture's actor, e.g. to model a
+  // stateless request in the same isolate as an actor.
+  kj::Own<IoContext> newStatelessIoContext();
 
   // Create a new IncomingRequest bound to a fresh IoContext. The returned IncomingRequest is the
   // sole owner of that IoContext (via kj refcounting): destroying the IR destroys the IoContext.
@@ -333,6 +340,8 @@ struct TestFixture {
 
   // Construct a fresh Worker::Actor with the given id, using the saved Loopback.
   kj::Own<Worker::Actor> makeActor(Worker::Actor::Id id);
+
+  kj::Own<IoContext> newIoContextFor(kj::Maybe<Worker::Actor&> maybeActor);
 
  public:
   // Default IoChannelFactory used by tests. Exposed so tests can subclass it

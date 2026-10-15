@@ -278,7 +278,8 @@ inline server::config::Worker::Reader buildConfig(
   for (auto key: params.autogateKeys) {
     gates.add(kj::toCharSequence(key));
   }
-  util::Autogate::initAutogateNamesForTest(gates.asPtr());
+  util::Autogate::initAutogateNamesForTest(
+      gates.asPtr(), util::IgnoreAllAutogatesEnv(params.ignoreAllAutogatesEnv));
 
   return config;
 }
@@ -509,7 +510,15 @@ void TestFixture::runInIoContext(kj::Function<kj::Promise<void>(const Environmen
 }
 
 kj::Own<IoContext> TestFixture::newIoContext() {
-  return kj::refcounted<IoContext>(threadContext, kj::atomicAddRef(*worker), actor,
+  return newIoContextFor(actor);
+}
+
+kj::Own<IoContext> TestFixture::newStatelessIoContext() {
+  return newIoContextFor(kj::none);
+}
+
+kj::Own<IoContext> TestFixture::newIoContextFor(kj::Maybe<Worker::Actor&> maybeActor) {
+  return kj::refcounted<IoContext>(threadContext, kj::atomicAddRef(*worker), maybeActor,
       kj::heap<MockLimitEnforcer>(checkedSubrequestCount, actorCallReplayMemoryReserver));
 }
 

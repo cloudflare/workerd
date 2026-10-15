@@ -1410,16 +1410,10 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
           // refcounted pointer to the DeleteQueue for the correct isolate.
           // We simply pass the given callback, reactions, and argument to
           // a function that will be added to the queue inside DeleteQueue.
-          // The next time the relevant IoContext is entered, this queue will
-          // be drained and the actions will be run. Adding the task to the
-          // delete queue will also signal the IoContext that it should wake
-          // up and drain the queue. Simple, eh?
-          //
-          // A word of warning tho! It is possible for the IoContext to be
-          // destroyed before the promise is resolved. Any actions that have
-          // already been added to the queue would end up being dropped silently
-          // on the floor. Actions that are added to the queue now will be run
-          // immediately in the wrong IoContext.
+          // Adding the task to the delete queue also signals the IoContext
+          // that it should wake up and run it. See DeleteQueue::scheduleAction()
+          // for when it runs, and for what happens if the IoContext is
+          // destroyed first.
           auto& ref = jsg::unwrapOpaqueRef<kj::Own<IoCrossContextExecutor>>(isolate, tag);
           ref->execute(js,
               [reactions = jsg::Data(isolate, reactions), argument = jsg::V8Ref(isolate, argument),
@@ -4923,7 +4917,10 @@ kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
   auto incomingRequest =
       kj::heap<IoContext::IncomingRequest>(kj::addRef(context), kj::mv(ioChannelFactory),
           kj::mv(observer), kj::mv(workerTracer), kj::none /* maybeTriggerInvocationSpan */);
-  incomingRequest->delivered("onHibernate"_kj);
+  // Cross-context actions queued while the actor was idle are dropped rather than run with the
+  // handler: they would use up its CPU budget, and the cleanup below would cancel whatever they
+  // start. Those queued once its request is current still run, since the handler may await them.
+  incomingRequest->delivered("onHibernate"_kj, DropQueuedCrossContextActions::YES);
   context.getLimitEnforcer().limitOnHibernateCpu();
 
   {

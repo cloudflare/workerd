@@ -67,6 +67,9 @@ WD_STRONG_BOOL(SpanAwaitedNext);
 WD_STRONG_BOOL(ClearTasks);
 // Whether IoContext::run() reports a run without a current IncomingRequest as a possible bug.
 WD_STRONG_BOOL(ReportRunWithoutRequest);
+// Whether IoContext::IncomingRequest::delivered() drops the cross-context actions queued while the
+// actor had no request, rather than run them.
+WD_STRONG_BOOL(DropQueuedCrossContextActions);
 
 [[noreturn]] void throwExceededMemoryLimit(bool isActor);
 
@@ -149,10 +152,16 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
   // the IoContext.
   //
   // If delivered() is never called, then drain() need not be called.
+  //
+  // With the DEFER_CROSS_CONTEXT_ACTIONS autogate, if the actor had no current request, this also
+  // runs the cross-context actions queued meanwhile (see DeleteQueue::scheduleAction()) as a
+  // waitUntil task of this request, or drops them if `dropQueuedActions` is YES.
   void delivered(kj::SourceLocation = kj::SourceLocation());
   // As delivered(), naming the event type (e.g. "fetch", "alarm") for async tracing. Without it,
   // the request's async trace resource is named after the delivering function.
-  void delivered(kj::StringPtr eventType, kj::SourceLocation location = kj::SourceLocation());
+  void delivered(kj::StringPtr eventType,
+      DropQueuedCrossContextActions dropQueuedActions = DropQueuedCrossContextActions::NO,
+      kj::SourceLocation location = kj::SourceLocation());
 
   // Continues running the request in the background until it is "done", scheduling the work into
   // `waitUntilTasks` and keeping `self` alive until work is finished.
@@ -1542,6 +1551,15 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
 
   kj::Promise<void> deleteQueueSignalTask;
   static kj::Promise<void> startDeleteQueueSignalTask(IoContext* context);
+
+  // Runs the actions queued on deleteQueue under the input lock and current IncomingRequest. If
+  // the run loses its request while waiting for a lock, they stay queued; other failures abort.
+  kj::Promise<void> runQueuedActions();
+
+  // Called by IncomingRequest::delivered() when an actor gets a request after having none. With
+  // the DEFER_CROSS_CONTEXT_ACTIONS autogate, runs the cross-context actions queued meanwhile as a
+  // waitUntil task of the request, or drops them.
+  void handleActionsQueuedWhileIdle(kj::StringPtr eventType, DropQueuedCrossContextActions drop);
 
   friend class Finalizeable;
   friend class DeleteQueue;

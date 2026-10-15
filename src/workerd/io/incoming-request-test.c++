@@ -530,22 +530,20 @@ KJ_TEST("cancelPendingWorkForHibernation() logs a throwing destructor and keeps 
 }
 
 // Constructs the fixture's actor from `source`, a Durable Object class with an onHibernate
-// handler that appends to `globalThis.events`, then calls `body`.
+// handler that appends to `globalThis.events`, then calls `body`. The fixture is set up with
+// `params`, apart from its feature flags, module and actor, which this sets.
 void withOnHibernateActor(kj::StringPtr source,
     kj::StringPtr actorId,
     kj::FunctionParam<void(TestFixture&, IoContext&, Worker::Actor&)> body,
-    bool flushActorStorage = false) {
+    TestFixture::SetupParams params = {}) {
   capnp::MallocMessageBuilder flagsMessage;
   auto flags = flagsMessage.initRoot<CompatibilityFlags>();
   flags.setWorkerdExperimental(true);
-  TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = source,
-    .actorId = Worker::Actor::Id(kj::str(actorId)),
-    .actorClassName = "default"_kj,
-    .useRealTimers = false,
-    .flushActorStorage = flushActorStorage,
-  });
+  params.featureFlags = flags.asReader();
+  params.mainModuleSource = source;
+  params.actorId = Worker::Actor::Id(kj::str(actorId));
+  params.actorClassName = "default"_kj;
+  TestFixture fixture(kj::mv(params));
   auto& actor = fixture.getActor();
   auto context = fixture.newIoContext();
   actor.setIoContext(kj::addRef(*context));
@@ -709,7 +707,7 @@ KJ_TEST("runOnHibernate() rejects when the handler's writes can't be flushed") {
     KJ_EXPECT_LOG(ERROR, "actorCacheFlush");
     KJ_EXPECT_THROW_MESSAGE("broken.outputGateBroken", promise.wait(fixture.getWaitScope()));
     KJ_EXPECT(observer->outcome == EventOutcome::OK);
-  }, /*flushActorStorage=*/true);
+  }, {.flushActorStorage = true});
 }
 
 KJ_TEST("canceling runOnHibernate() cancels pending work but keeps abort watchers armed") {
@@ -877,6 +875,76 @@ KJ_TEST("run() in a critical section fails with the abort reason of an aborted c
   KJ_EXPECT_THROW_MESSAGE("test abort",
       auto promise = context->run([&ran](Worker::Lock&) { ran = true; }, kj::mv(runIn)));
   KJ_EXPECT(!ran);
+}
+
+KJ_TEST("runOnHibernate() drops the cross-context actions queued while the actor was idle") {
+  constexpr kj::StringPtr source = R"SCRIPT(
+    import { DurableObject } from "cloudflare:workers";
+    import { onHibernate } from "cloudflare:durable-objects";
+    globalThis.events = "";
+    export default class extends DurableObject {
+      async [onHibernate]() {
+        globalThis.events += "onHibernate;";
+      }
+    }
+  )SCRIPT"_kj;
+  withOnHibernateActor(source, "on-hibernate-queued-actions-test"_kj,
+      [](TestFixture& fixture, IoContext& context, Worker::Actor& actor) {
+    auto executor = context.getCrossContextExecutor();
+    uint ran = 0;
+    KJ_ASSERT(executor.tryExecute([&ran](jsg::Lock&) { ++ran; }));
+    fixture.pollEventLoop();
+
+    auto observer = kj::refcounted<OnHibernateObserver>();
+    runOnHibernate(fixture, actor, kj::addRef(*observer)).wait(fixture.getWaitScope());
+
+    KJ_EXPECT(observer->outcome == EventOutcome::OK);
+    KJ_EXPECT(readEvents(fixture) == "onHibernate;", readEvents(fixture));
+    KJ_EXPECT(ran == 0, ran);
+    KJ_EXPECT(executor.getQueuedActionCountForTest() == 0, executor.getQueuedActionCountForTest());
+    KJ_EXPECT(context.getAbortReason() == kj::none, context.getAbortReason());
+  }, {.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)});
+}
+
+KJ_TEST("runOnHibernate() runs the cross-context actions queued during the handler, but not those "
+        "queued while the actor was idle") {
+  // The handler waits for the test to call resume() from a cross-context action.
+  constexpr kj::StringPtr source = R"SCRIPT(
+    import { DurableObject } from "cloudflare:workers";
+    import { onHibernate } from "cloudflare:durable-objects";
+    globalThis.events = "";
+    export default class extends DurableObject {
+      async [onHibernate]() {
+        globalThis.events += "onHibernate;";
+        await new Promise((resolve) => { globalThis.resume = resolve; });
+        globalThis.events += "resumed;";
+      }
+    }
+  )SCRIPT"_kj;
+  withOnHibernateActor(source, "on-hibernate-handler-actions-test"_kj,
+      [](TestFixture& fixture, IoContext& context, Worker::Actor& actor) {
+    auto& waitScope = fixture.getWaitScope();
+    auto executor = context.getCrossContextExecutor();
+
+    // Queued just before the handler, so the context hasn't woken up for it yet.
+    uint idleRan = 0;
+    KJ_ASSERT(executor.tryExecute([&idleRan](jsg::Lock&) { ++idleRan; }));
+    auto observer = kj::refcounted<OnHibernateObserver>();
+    auto promise = runOnHibernate(fixture, actor, kj::addRef(*observer));
+    KJ_EXPECT(!promise.poll(waitScope));
+    KJ_EXPECT(readEvents(fixture) == "onHibernate;", readEvents(fixture));
+
+    KJ_ASSERT(executor.tryExecute([](jsg::Lock& js) {
+      auto resume = KJ_ASSERT_NONNULL(js.global().get(js, "resume"_kj).tryCast<jsg::JsFunction>());
+      resume.call(js, js.undefined(), js.undefined());
+    }));
+    promise.wait(waitScope);
+
+    KJ_EXPECT(observer->outcome == EventOutcome::OK);
+    KJ_EXPECT(readEvents(fixture) == "onHibernate;resumed;", readEvents(fixture));
+    KJ_EXPECT(idleRan == 0, idleRan);
+    KJ_EXPECT(context.getAbortReason() == kj::none, context.getAbortReason());
+  }, {.autogateKeys = kj::arr(util::AutogateKey::DEFER_CROSS_CONTEXT_ACTIONS)});
 }
 
 }  // namespace
