@@ -1,20 +1,33 @@
-name: Experimental Workflow
+name: Tracing allocation regression audit
 on:
   workflow_dispatch:
-
-# You can modify this workflow in order to verify your changes to Github Actions on a branch.
-# DO NOT MERGE THESE CHANGES TO MAIN
-# This workflow exists to work around a limitation in Github Actions. You can only use 
-# workflow_dispatch on files that exist in main. However, once the file exists, you can dispatch to
-# your branch and make sure changes work.
-
 permissions:
-  contents: none
-
+  contents: read
+  actions: write
 jobs:
-  experiment:
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Hello World
-        shell: bash
-        run: echo Hello World
+  audit:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suffix: ''
+            extra: ''
+          - suffix: '-debug'
+            extra: '--config=debug'
+          - suffix: '-asan'
+            extra: '--config=asan'
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ubuntu-22.04-16core
+      os_name: linux
+      arch_name: X64
+      suffix: ${{ matrix.suffix }}
+      build_target: //src/workerd/jsg:tracing-test@
+      test_target: >-
+        //src/workerd/jsg:tracing-test@
+        //src/workerd/jsg:tracing-test@all-autogates
+      extra_bazel_args: >-
+        --config=ci-test --config=ci-linux ${{ matrix.extra }}
+        --runs_per_test=5 --flaky_test_attempts=1
+      upload_test_logs: true
+    secrets: inherit
