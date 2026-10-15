@@ -2,7 +2,7 @@
 
 // Helpers shared by the webstreams modules. Leaf module: requires nothing.
 
-import type { QueuingStrategy } from './types';
+import type { QueuingStrategy, UnderlyingSink } from './types';
 
 const {
   BigInt,
@@ -173,6 +173,43 @@ function extractSizeAlgorithm<T>(
   return (chunk: T) => callSize(undefined, chunk);
 }
 
+// WebIDL's conversion of an optional callback member of a source, sink or
+// transformer: undefined means none, and anything else must be callable.
+// `name` names the member in the TypeError.
+function convertCallback<F>(value: F | undefined, name: string): F | undefined {
+  if (value !== undefined && typeof value !== 'function') {
+    throw new TypeError(`${name} must be a function`);
+  }
+  return value;
+}
+
+// An underlying sink as WebIDL converts it to an UnderlyingSink dictionary,
+// before the constructor checks anything: every member read once, in
+// lexicographic order, each callback checked. type is kept as read, for the
+// WritableStream constructor to check. The callbacks still run with the
+// sink itself as their receiver.
+export interface UnderlyingSinkDict<W> {
+  abort: UnderlyingSink<W>['abort'];
+  close: UnderlyingSink<W>['close'];
+  start: UnderlyingSink<W>['start'];
+  type: unknown;
+  write: UnderlyingSink<W>['write'];
+}
+
+function convertUnderlyingSink<W>(
+  sink: UnderlyingSink<W>
+): UnderlyingSinkDict<W> {
+  // The members are read in the order listed.
+  return {
+    __proto__: kNullProtoObject,
+    abort: convertCallback(sink.abort, 'underlyingSink.abort'),
+    close: convertCallback(sink.close, 'underlyingSink.close'),
+    start: convertCallback(sink.start, 'underlyingSink.start'),
+    type: (sink as { type?: unknown }).type,
+    write: convertCallback(sink.write, 'underlyingSink.write'),
+  } as UnderlyingSinkDict<W>;
+}
+
 export type CommonHelpers = {
   isActualObject: typeof isActualObject;
   kNullProtoObject: typeof kNullProtoObject;
@@ -187,6 +224,7 @@ export type CommonHelpers = {
   convertHighWaterMark: typeof convertHighWaterMark;
   extractHighWaterMark: typeof extractHighWaterMark;
   extractSizeAlgorithm: typeof extractSizeAlgorithm;
+  convertUnderlyingSink: typeof convertUnderlyingSink;
 };
 
 module.exports = ObjectFreeze({
@@ -203,4 +241,5 @@ module.exports = ObjectFreeze({
   convertHighWaterMark,
   extractHighWaterMark,
   extractSizeAlgorithm,
+  convertUnderlyingSink,
 });

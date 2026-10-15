@@ -62,10 +62,8 @@ export const sinkTypeValidation = {
 // after queuingStrategy" case), its members in lexicographic order:
 // highWaterMark and its ToNumber, then size. TypeScript follows it. C++
 // converts the sink dictionary first, then the strategy in the same
-// order. Every sink member is logged: C++ reads them in its own order;
-// TypeScript reads type, then abort, close, start and write in
-// lexicographic order (the spec reads all five in lexicographic order,
-// type fourth).
+// order. Every sink member is logged: C++ reads them in its own order,
+// TypeScript in the spec's lexicographic order.
 export const argumentConversionOrder = {
   test() {
     const order = [];
@@ -102,10 +100,10 @@ export const argumentConversionOrder = {
         'strategy.highWaterMark',
         'hwm.valueOf',
         'strategy.size',
-        'sink.type',
         'sink.abort',
         'sink.close',
         'sink.start',
+        'sink.type',
         'sink.write',
       ]);
     } else {
@@ -189,23 +187,19 @@ export const strategyArgumentShapes = {
 // before the highWaterMark's range (spec), so an invalid sink type's
 // RangeError beats an invalid highWaterMark's; C++ converts highWaterMark
 // to an integer before the sink's type is checked (pedantic_wpt
-// included), so its TypeError wins. C++ converts every sink member
-// before it checks the type or the highWaterMark, as the spec does, so a
-// non-callable write (TypeError) or a throwing write getter beats an
-// invalid type, and a non-callable write beats an invalid highWaterMark.
-// TypeScript checks the type, and then the highWaterMark, before it
-// reads write, so their RangeErrors win.
+// included), so its TypeError wins. Both convert every sink member
+// before they check the type or the highWaterMark (spec), so a
+// non-callable write (TypeError, messages differ) or a throwing write
+// getter beats an invalid type, and a non-callable write beats an
+// invalid highWaterMark.
 export const conversionErrorPrecedence = {
   test() {
     const boom = new Error('boom');
-    const sinkTypeError = {
-      name: 'RangeError',
-      message: 'Invalid underlying sink type',
-    };
     const writeError = {
       name: 'TypeError',
-      message:
-        "Incorrect type for the 'write' field on 'UnderlyingSink': the provided value is not of type 'function'.",
+      message: usingTsImpl
+        ? 'underlyingSink.write must be a function'
+        : "Incorrect type for the 'write' field on 'UnderlyingSink': the provided value is not of type 'function'.",
     };
     throws(
       () =>
@@ -228,10 +222,7 @@ export const conversionErrorPrecedence = {
               'The value cannot be converted because it is negative and this API expects a positive bigint.',
           }
     );
-    throws(
-      () => new WritableStream({ type: 'bytes', write: 1 }),
-      usingTsImpl ? sinkTypeError : writeError
-    );
+    throws(() => new WritableStream({ type: 'bytes', write: 1 }), writeError);
     throws(
       () =>
         new WritableStream({
@@ -240,13 +231,11 @@ export const conversionErrorPrecedence = {
             throw boom;
           },
         }),
-      usingTsImpl ? sinkTypeError : (e) => e === boom
+      (e) => e === boom
     );
     throws(
       () => new WritableStream({ write: 1 }, { highWaterMark: -1 }),
-      usingTsImpl
-        ? { name: 'RangeError', message: 'Invalid highWaterMark' }
-        : writeError
+      writeError
     );
   },
 };

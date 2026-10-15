@@ -60,7 +60,7 @@ const { nativeStreamInternals } = require('webstreams/native') as {
 };
 const { kExtractNativeSink, isNativeUnderlyingSink } = nativeStreamInternals;
 
-import type { CommonHelpers } from './common';
+import type { CommonHelpers, UnderlyingSinkDict } from './common';
 const {
   isActualObject,
   kNullProtoObject,
@@ -70,6 +70,7 @@ const {
   convertQueuingStrategy,
   extractHighWaterMark,
   extractSizeAlgorithm,
+  convertUnderlyingSink,
 } = require('webstreams/common') as CommonHelpers;
 
 import type { ViewExtentHelpers } from './view-extent';
@@ -805,8 +806,10 @@ class WritableStream<W = unknown> {
     requireObject(underlyingSink, 'underlyingSink must be an object');
     const strategyDict = convertQueuingStrategy(strategy);
 
-    // --- Now read underlyingSink properties ---
-    if (underlyingSink.type !== undefined) {
+    // The body converts the sink to an UnderlyingSink dictionary before it
+    // checks anything, so a bad callback beats an invalid type.
+    const sinkDict = convertUnderlyingSink(underlyingSink);
+    if (sinkDict.type !== undefined) {
       throw new RangeError('Invalid underlying sink type');
     }
     const sizeAlgorithm = extractSizeAlgorithm<W>(strategyDict);
@@ -830,6 +833,7 @@ class WritableStream<W = unknown> {
       kPrivateSymbol,
       this,
       underlyingSink,
+      sinkDict,
       sizeAlgorithm,
       highWaterMark
     );
@@ -1092,31 +1096,22 @@ class WritableStreamDefaultController<
   constructor(
     privateSymbol: symbol,
     stream: WritableStream<W>,
+    // The hooks' receiver, and its members as the constructor converted
+    // them.
     underlyingSink: UnderlyingSink<W>,
+    sinkDict: UnderlyingSinkDict<W>,
     sizeAlgorithm: (chunk: W) => number,
     highWaterMark: number
   ) {
     assertPrivateSymbol(privateSymbol);
     this.#stream = stream;
 
-    // --- Sink method extraction (alphabetical property reads) ---
-    const abortFn = underlyingSink.abort;
-    if (abortFn !== undefined && typeof abortFn !== 'function') {
-      throw new TypeError('underlyingSink.abort must be a function');
-    }
-    const closeFn = underlyingSink.close;
-    if (closeFn !== undefined && typeof closeFn !== 'function') {
-      throw new TypeError('underlyingSink.close must be a function');
-    }
-    const startFn = underlyingSink.start;
-    if (startFn !== undefined && typeof startFn !== 'function') {
-      throw new TypeError('underlyingSink.start must be a function');
-    }
-    const writeFn = underlyingSink.write;
-    if (writeFn !== undefined && typeof writeFn !== 'function') {
-      throw new TypeError('underlyingSink.write must be a function');
-    }
-
+    const {
+      abort: abortFn,
+      close: closeFn,
+      start: startFn,
+      write: writeFn,
+    } = sinkDict;
     if (abortFn !== undefined) {
       const callAbort = uncurryThis(abortFn);
       this.#abortAlgorithm = (reason: unknown) => {
