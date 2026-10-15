@@ -296,8 +296,8 @@ let setReadableStreamInteropErrorHook: <R>(
 // BYOB reads: the queued byte controller, or ANY native controller —
 // native sources are byte-capable by definition (the marker is
 // sufficient). Distinct from isByteStreamController, which remains the
-// QUEUED-byte brand check used by the queued-only paths (autoAllocate
-// synthesis, tee's cursor fork).
+// QUEUED-byte brand check used by the queued-only paths (the cursor forks
+// of tee and detach).
 function isByteCapableController(value: unknown): boolean {
   return isByteStreamController(value) || isNativeController(value);
 }
@@ -746,13 +746,8 @@ function readBufferedSync<R>(
   const result = consumer.tryReadSync(reader) as
     ReadableStreamReadResult<R> | undefined;
   if (result === undefined) return undefined;
-  if (controller !== undefined) {
-    controllerPullIfNeeded(controller);
-    controllerMaybeCloseStream(controller);
-  }
-  if (result.done) {
-    readableStreamClose(stream);
-  }
+  if (controller !== undefined) controllerPullIfNeeded(controller);
+  readCompletionSteps(stream, controller, result.done);
   return result;
 }
 
@@ -825,14 +820,12 @@ function defaultReaderReadSteps<R>(
     ReadableStreamReadResult<R>
   >;
   const resolve = (result: ReadableStreamReadResult<unknown>): void => {
-    readCompletionSteps(stream, controller, result);
+    readCompletionSteps(stream, controller, result.done);
     pending.resolve(present(result as ReadableStreamReadResult<R>));
   };
   const autoAllocateChunkSize =
-    controller !== undefined && isByteStreamController(controller)
-      ? getByteControllerAutoAllocateChunkSize(
-          controller as ReadableByteStreamController
-        )
+    controller !== undefined
+      ? getByteControllerAutoAllocateChunkSize(controller)
       : undefined;
   if (autoAllocateChunkSize !== undefined) {
     // QUEUED-BYTE-SPECIFIC (sanctioned exception to backend-blindness):
@@ -925,19 +918,20 @@ function readViaAutoAllocateDescriptor(
   return consumer.readBYOB(descriptor);
 }
 
-// What a default read does once it has its result, before handing it over.
+// What a read does once it has its result, before handing it over.
+// Shared by the default and draining reads; each does its own pull.
 function readCompletionSteps<R>(
   stream: ReadableStream<R>,
   controller: AnyReadableController | undefined,
-  result: ReadableStreamReadResult<unknown>
+  done: boolean
 ): void {
   // Drain-then-close (spec HandleQueueDrain): if this read consumed the
   // last data with close requested, the controller's primary stream
   // transitions now — checked on every read completion, not just done
-  // results, because the read that drains the final chunk resolves with
-  // done: false.
+  // results, because a default read that drains the final chunk resolves
+  // with done: false.
   if (controller !== undefined) controllerMaybeCloseStream(controller);
-  if (result.done) {
+  if (done) {
     // This stream's cursor reached the sentinel. Close THIS stream (tee
     // branches close independently of the controller's primary stream).
     readableStreamClose(stream);
@@ -1883,8 +1877,10 @@ let byteControllerRespondWithNewView: (
   controller: ReadableByteStreamController,
   view: ArrayBufferView
 ) => void;
+// The queued byte controller's autoAllocateChunkSize; undefined for any
+// other controller.
 let getByteControllerAutoAllocateChunkSize: (
-  controller: ReadableByteStreamController
+  controller: AnyReadableController
 ) => number | undefined;
 // tee() and detach are about to replace the cursor `from`; `wasSole` when
 // it was the queue's only cursor.
@@ -2113,7 +2109,9 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     };
 
     getByteControllerAutoAllocateChunkSize = (controller) => {
-      return controller.#autoAllocateChunkSize;
+      return #queue in controller
+        ? controller.#autoAllocateChunkSize
+        : undefined;
     };
 
     byteControllerOnFork = (controller, from, wasSole) => {
@@ -2830,22 +2828,18 @@ async function drainingReaderReadInternal<R>(
     // machinery so the source's pull observes a byobRequest over the
     // auto-allocated buffer — the body and pipe pumps drive
     // respond()-oriented sources exactly like C++'s BYOB pump.
-    let promise: Promise<ReadableStreamReadResult<unknown>> | undefined;
-    if (controller !== undefined && isByteStreamController(controller)) {
-      const autoAllocateChunkSize = getByteControllerAutoAllocateChunkSize(
-        controller as ReadableByteStreamController
-      );
-      if (autoAllocateChunkSize !== undefined) {
-        promise = readViaAutoAllocateDescriptor(
-          consumer as unknown as ByteStreamConsumerType,
-          autoAllocateChunkSize,
-          reader
-        );
-      }
-    }
-    if (promise === undefined) {
-      promise = consumer.read(reader);
-    }
+    const autoAllocateChunkSize =
+      controller !== undefined
+        ? getByteControllerAutoAllocateChunkSize(controller)
+        : undefined;
+    const promise: Promise<ReadableStreamReadResult<unknown>> =
+      autoAllocateChunkSize !== undefined
+        ? readViaAutoAllocateDescriptor(
+            consumer as unknown as ByteStreamConsumerType,
+            autoAllocateChunkSize,
+            reader
+          )
+        : consumer.read(reader);
     if (controller !== undefined) controllerPullIfNeeded(controller);
     const single = await promise;
     if (single.done) {
@@ -2862,10 +2856,7 @@ async function drainingReaderReadInternal<R>(
   // Pump: draining freed queue space, so the source may pull again
   // immediately (synchronous sources refill before we return).
   if (controller !== undefined) controllerPullIfNeeded(controller);
-  if (result.done) {
-    if (controller !== undefined) controllerMaybeCloseStream(controller);
-    readableStreamClose(stream);
-  }
+  readCompletionSteps(stream, controller, result.done);
   return result;
 }
 

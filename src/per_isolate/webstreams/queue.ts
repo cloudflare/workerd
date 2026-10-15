@@ -278,7 +278,8 @@ export interface StreamConsumer<V> {
   // preserving spec PullSteps timing for the drain-then-close check.
   tryReadSync(reader: object): ReadableStreamReadResult<V> | undefined;
   // Bulk read for the draining reader / pipeTo. Synchronous: collects what
-  // is buffered (the draining reader handles the empty-then-wait case).
+  // is buffered (the draining reader handles the empty-then-wait case),
+  // and is done once the consumer has reached the end of the stream.
   drain(maxSize?: number): { chunks: V[]; done: boolean };
   // Reject pending reads submitted by a specific reader (lock release).
   cancelReadsForReader(reader: object, reason: unknown): void;
@@ -992,29 +993,25 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   // (in strategy size units — bytes for byte streams). Returns
   // synchronously; the draining reader wraps in a promise at its API
   // boundary. Always takes at least one available entry so callers make
-  // progress even when maxSize is smaller than the next entry.
+  // progress even when maxSize is smaller than the next entry. Done
+  // whenever the cursor ends at the close sentinel, the limit
+  // notwithstanding: the sentinel has no size.
   drain(maxSize: number = Infinity): { chunks: V[]; done: boolean } {
     const chunks: V[] = [];
     let total = 0;
-    let done = false;
-    while (total < maxSize) {
-      const slot = this.#queue.getEntry(this.#position);
-      if (slot === undefined) break;
-      if (slot === CLOSE_SENTINEL) {
-        done = true;
-        break;
-      }
-      const entry = slot as QueueEntry<T>;
-      ArrayPrototypePush(chunks, this.readEntryValue(entry));
-      total += entry.size;
+    let slot = this.#queue.getEntry(this.#position);
+    while (isQueueEntry(slot) && total < maxSize) {
+      ArrayPrototypePush(chunks, this.readEntryValue(slot));
+      total += slot.size;
       this.advancePastEntry();
+      slot = this.#queue.getEntry(this.#position);
     }
     if (chunks.length > 0) {
       this.#queue.onCursorAdvanced();
     }
     const result = ObjectCreate(null) as { chunks: V[]; done: boolean };
     result.chunks = chunks;
-    result.done = done;
+    result.done = slot === CLOSE_SENTINEL;
     return result;
   }
 }
