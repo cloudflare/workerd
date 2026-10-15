@@ -340,10 +340,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return *getCurrentIncomingRequest().metrics;
   }
 
-  kj::Maybe<BaseTracer&> getWorkerTracer() {
-    if (incomingRequests.empty()) return kj::none;
-    return getCurrentIncomingRequest().getWorkerTracer();
-  }
+  // Prefer the originating request's tracer when running an async continuation.
+  kj::Maybe<BaseTracer&> getWorkerTracer();
 
   // Returns the root user trace span for the current incoming request, if any.
   SpanParent getRootUserTraceSpan() {
@@ -1208,13 +1206,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   SpanParent getCurrentTraceSpan();
   SpanParent getCurrentUserTraceSpan();
 
-  // Returns the invocation's traceId/invocationId paired with the currently-active user
-  // span's spanId (as pushed by `ctx.tracing.enterSpan`), falling back to the invocation
-  // root's spanId when no user span is active.
-  tracing::InvocationSpanContext getInvocationSpanContext() {
-    auto userSpan = getCurrentUserTraceSpan();
-    return getCurrentIncomingRequest().getInvocationSpanContextForUserSpan(userSpan);
-  }
+  // Returns the active user span's complete context, including its originating invocation.
+  tracing::InvocationSpanContext getInvocationSpanContext();
 
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).
   // If called while the JS lock is held, uses the trace information from the current async
@@ -1437,6 +1430,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     }
     return {};
   }
+
+  // Only returns state accessible from this IoContext whose captured tracer has not expired.
+  // Untraced frames remain untraced. The returned reference must not cross async boundaries.
+  kj::Maybe<UserTraceAsyncContext&> getUserTraceAsyncContext();
 
   // The IncomingRequest that is currently considered "current". This is always the
   // latest-starting request that hasn't yet completed.

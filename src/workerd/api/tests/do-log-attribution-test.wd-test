@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "do-log-attribution-test", worker = (
+      modules = [(name = "worker", esModule = embed "do-log-attribution-test.js")],
+      compatibilityFlags = ["nodejs_compat", "rpc"],
+      streamingTails = ["tail"],
+      durableObjectNamespaces = [
+        (className = "Probe", uniqueKey = "do-log-attribution"),
+        (className = "Gates", uniqueKey = "do-log-attribution-gates"),
+      ],
+      durableObjectStorage = (inMemory = void),
+      bindings = [
+        (name = "TAIL", service = "tail"),
+        (name = "PROBE", durableObjectNamespace = "Probe"),
+        (name = "GATES", durableObjectNamespace = "Gates"),
+      ],
+    )),
+    (name = "tail", worker = (
+      modules = [(name = "worker", esModule = embed "do-log-attribution-test-tail.js")],
+      compatibilityFlags = ["nodejs_compat"],
+    )),
+  ],
+);

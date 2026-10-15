@@ -35,6 +35,18 @@ ts_project(
 )
 
 wd_test(
+    src = "do-log-attribution-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "do-log-attribution-test.js",
+        "do-log-attribution-test-tail.js",
+    ],
+    # Predictable mode deliberately reuses trace/invocation IDs. This test verifies their
+    # association across requests, so it needs real IDs (request ordering is still gated).
+    predictable = False,
+)
+
+wd_test(
     src = "stdio-writesync-reentry-uaf-test.wd-test",
     args = ["--experimental"],
     data = ["stdio-writesync-reentry-uaf-test.js"],
