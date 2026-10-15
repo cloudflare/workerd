@@ -66,6 +66,7 @@ const {
   kNullProtoObject,
   kEnumerable,
   toStringTagProperty,
+  promiseResolvedWith,
   requireObject,
   convertQueuingStrategy,
   extractHighWaterMark,
@@ -127,20 +128,6 @@ function assertPrivateSymbol(symbol: symbol): void {
   if (symbol !== kPrivateSymbol) {
     throw new TypeError('Illegal constructor');
   }
-}
-
-// WebIDL "a promise resolved with" a value: a new promise resolved with it.
-// For a promise or thenable, its reactions run one microtask after the
-// value's (two if the value settles before the resolution job subscribes
-// to it), where PromiseResolve adopts a native promise as is. The
-// controllers here and in readable.ts settle their start() results this
-// way, as the transformer's cancel and flush are (transform.ts); that
-// timing is observable, as in WPT transform-streams/cancel.any.js.
-function promiseResolvedWith(value: unknown): Promise<void> {
-  const { promise, resolve } =
-    PromiseWithResolvers() as PromiseWithResolversType<void>;
-  resolve(value as void);
-  return promise;
 }
 
 type WritableState = 'writable' | 'erroring' | 'errored' | 'closed';
@@ -1972,7 +1959,6 @@ module.exports = {
       getWriterReadyPromiseInternal(writer),
     getWriterClosedPromise: <W>(writer: WritableStreamDefaultWriter<W>) =>
       getWriterClosedPromiseInternal(writer),
-    promiseResolvedWith,
   },
 
   // Part of the internal implementation. Do not re-export to user code

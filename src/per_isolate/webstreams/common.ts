@@ -3,6 +3,7 @@
 // Helpers shared by the webstreams modules. Leaf module: requires nothing.
 
 import type {
+  PromiseWithResolvers as PromiseWithResolversType,
   QueuingStrategy,
   Transformer,
   UnderlyingSink,
@@ -14,6 +15,7 @@ const {
   NumberIsFinite,
   NumberIsNaN,
   ObjectFreeze,
+  PromiseWithResolvers,
   RangeError,
   TypeError,
   uncurryThis,
@@ -31,6 +33,20 @@ const kEnumerable: PropertyDescriptor = ObjectFreeze({
   __proto__: kNullProtoObject,
   enumerable: true,
 });
+
+// WebIDL "a promise resolved with" a value: a new promise resolved with it.
+// For a promise or thenable, its reactions run one microtask after the
+// value's (two if the value settles before the resolution job subscribes
+// to it), where PromiseResolve adopts a native promise as is. The readable
+// and writable controllers settle their start() results this way, as the
+// transformer's cancel and flush are (transform.ts); that timing is
+// observable, as in WPT transform-streams/cancel.any.js.
+function promiseResolvedWith(value: unknown): Promise<void> {
+  const { promise, resolve } =
+    PromiseWithResolvers() as PromiseWithResolversType<void>;
+  resolve(value as void);
+  return promise;
+}
 
 function toStringTagProperty(tag: string): PropertyDescriptor {
   return {
@@ -310,6 +326,7 @@ export type CommonHelpers = {
   kNullProtoObject: typeof kNullProtoObject;
   kEnumerable: typeof kEnumerable;
   toStringTagProperty: typeof toStringTagProperty;
+  promiseResolvedWith: typeof promiseResolvedWith;
   normalizeExpectedLength: typeof normalizeExpectedLength;
   requireObject: typeof requireObject;
   toDictionary: typeof toDictionary;
@@ -328,6 +345,7 @@ module.exports = ObjectFreeze({
   kNullProtoObject,
   kEnumerable,
   toStringTagProperty,
+  promiseResolvedWith,
   normalizeExpectedLength,
   requireObject,
   toDictionary,
