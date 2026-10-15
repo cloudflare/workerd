@@ -238,10 +238,11 @@ let readableStreamDefaultReaderRead: <R>(
   readRequest: ReadableStreamAsyncIteratorReadRequest<R>
 ) => void;
 
-// Closes a stream whose data has moved to another stream (extraction,
-// native detach, tee of a native stream or of a branch) and drops its
-// controller, so it neither reaches nor retains the moved source. Legacy
-// C++ leaves the same streams locked, disturbed and closed.
+// Closes a stream whose data has moved to another stream (extraction, and
+// the tee or detach of a native stream, or of a queued one other than its
+// controller's own stream, such as a tee branch) and drops its controller,
+// so it neither reaches nor retains the moved source. Legacy C++ leaves the
+// same streams locked, disturbed and closed.
 let closeReadableStreamHusk: <R>(stream: ReadableStream<R>) => void;
 
 // Errors a queued tee branch alone (see [kControllerErrorFunction]).
@@ -4240,8 +4241,9 @@ class ReadableStream<R> {
       // Neutralize the original: no consumer, and handed off (disturbed
       // and locked for good) as extraction and tee leave theirs. A native
       // husk is handed off and closed instead (closeReadableStreamHusk
-      // drops its consumer); a queued one stays the controller's stream,
-      // closing and erroring with the source.
+      // drops its consumer), and a queued one is closed below unless it is
+      // its controller's own stream, which closes and errors with the
+      // source.
       const neutralize = (): void => {
         stream.#consumer = undefined;
         markHandedOff(stream);
@@ -4287,9 +4289,16 @@ class ReadableStream<R> {
         cursor.queue.removeCursor(cursor);
       }
       neutralize();
-      // As in tee: with close already requested, the husk closes now if it
-      // is the source's own stream (see #maybeCloseStream).
-      if (controller !== undefined) controllerMaybeCloseStream(controller);
+      if (controller !== undefined) {
+        // As in tee: with close already requested, the husk closes now if
+        // it is the source's own stream (see #maybeCloseStream). Any other
+        // husk (a tee branch, or the copy an earlier detach made) consumes
+        // nothing now, and no source event would ever reach it: close it.
+        controllerMaybeCloseStream(controller);
+        if (controllerStream(controller) !== stream) {
+          closeReadableStreamHusk(stream);
+        }
+      }
       return shell;
     };
 

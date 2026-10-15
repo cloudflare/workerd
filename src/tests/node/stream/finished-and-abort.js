@@ -866,10 +866,10 @@ export const finishedOnDetachedQueuedBodyFollowsSource = {
 
 // A JS-backed stream that is not its source's own stream (a tee branch, or
 // a body that new Request(request) has already detached once), detached by
-// new Request(request). The stream left behind stays readable: finished()
-// on it does not call back, not even once the source has closed, and its
-// error hook does nothing, so the detached body still reads to the end. A
-// tee of such a stream closes it (finishedOnHandedOffStreamSettlesAtHandoff).
+// new Request(request), closes at the handoff, as a tee of it does
+// (finishedOnHandedOffStreamSettlesAtHandoff): finished() on it calls back
+// at once, before the source has closed, and its error hook does nothing,
+// so the detached body still reads to the end.
 export const finishedOnDetachedNonOwnQueuedBody = {
   async test() {
     if (!usingTsImpl) return;
@@ -885,7 +885,8 @@ export const finishedOnDetachedNonOwnQueuedBody = {
       const done = husks.map((husk) => callbackOf((cb) => finished(husk, cb)));
       const copies = [new Request(branchRequest), new Request(once)];
       for (const settled of done) {
-        strictEqual(await settlement(settled), 'pending');
+        strictEqual(await settlement(settled), 'settled');
+        strictEqual(await settled, undefined);
       }
       for (const husk of husks) {
         husk[kControllerErrorFunction](new Error('ignored'));
@@ -898,9 +899,6 @@ export const finishedOnDetachedNonOwnQueuedBody = {
         strictEqual(await copy.text(), 'a');
       }
       strictEqual(await new Response(sibling).text(), 'a');
-      for (const settled of done) {
-        strictEqual(await settlement(settled), 'pending');
-      }
     }
   },
 };

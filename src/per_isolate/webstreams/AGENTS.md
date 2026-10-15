@@ -108,15 +108,17 @@ aunt. Consequences, all handled by the controller (`readable.ts`,
 A stream whose data moves to another stream is closed at the handoff,
 left locked and disturbed, and drops its controller
 (`closeReadableStreamHusk`): a teed branch (above), the source of a
-native-backed tee, and a native-backed stream whose source is extracted
+native-backed tee, a native-backed stream whose source is extracted
 (a native-to-native pipe, the C++ bridge's `pumpTo`) or detached (the
-bridge's `detach()`: `new Request(request)`, socket upgrades). The legacy
-C++ streams leave the same streams locked, disturbed and closed. The
-Node.js interop closed-promise settles then, and the interop error hook,
-which acts only on a readable stream, cannot reach the moved source. A
-queued stream detached from its source is the exception: it stays the
-controller's stream, closing and erroring with the source, and the hook
-on it errors the detached stream. Suites:
+bridge's `detach()`: `new Request(request)`, socket upgrades), and a
+detached queued stream other than the source's own stream (a tee
+branch, or a copy detached again). The legacy C++ streams leave the
+same streams locked, disturbed and closed. The Node.js interop
+closed-promise settles then, and the interop error hook, which acts only
+on a readable stream, cannot reach the moved source. A queued source's
+own stream, once detached, is the exception: it stays the controller's
+stream, closing and erroring with the source, and the hook on it errors
+the detached stream. Suites:
 `src/tests/node/stream/finished-and-abort.js`,
 `src/tests/streams/sockets/socket-streams.js`.
 
