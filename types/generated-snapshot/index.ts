@@ -15098,6 +15098,59 @@ export declare abstract class D1PreparedStatement {
 // TypeScript's interface merging will ensure our empty interface is effectively
 // ignored when `Disposable` is included in the standard lib.
 export interface Disposable {}
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+/** The HTTP request in which DLP found a match. */
+export interface DlpValidationRequestInfo {
+  method: string;
+  url: string;
+}
+/** A DLP match for a validation Worker to score. */
+export interface DlpValidationInput {
+  entryId: string;
+  accountId: string;
+  userId?: string;
+  /** Start index of the DLP match in `excerpt`. */
+  start: number;
+  /** End index of the DLP match in `excerpt`. */
+  end: number;
+  /** Base64-encoded excerpt containing the match and surrounding context. */
+  excerpt: string;
+  requestInfo: DlpValidationRequestInfo;
+}
+/**
+ * A confidence score from -1 to 1, or `"veto"` to reject the match. A score of 0 does not affect
+ * confidence; positive scores increase it and negative scores decrease it.
+ */
+export type DlpValidationVerdict = number | "veto";
+export interface DlpValidationResult {
+  score: DlpValidationVerdict;
+}
+/**
+ * The contract of a DLP validation entrypoint. Implement it on a `WorkerEntrypoint` and select
+ * that export as the validator in the DLP profile.
+ *
+ * @example
+ * ```ts
+ * import { WorkerEntrypoint } from "cloudflare:workers";
+ *
+ * export class TrustedDomains extends WorkerEntrypoint implements DlpValidation {
+ *   async validate(input: DlpValidationInput): Promise<DlpValidationResult> {
+ *     const hostname = new URL(input.requestInfo.url).hostname;
+ *     if (await this.env.TRUSTED_DOMAINS.get(hostname)) {
+ *       return { score: "veto" };
+ *     }
+ *     return { score: 0 };
+ *   }
+ * }
+ * ```
+ */
+export interface DlpValidation {
+  validate(
+    input: DlpValidationInput,
+  ): DlpValidationResult | Promise<DlpValidationResult>;
+}
 /**
  * The returned data after sending an email
  */
@@ -15416,6 +15469,88 @@ export declare abstract class Flagship {
     defaultValue: T,
     context?: FlagshipEvaluationContext,
   ): Promise<FlagshipEvaluationDetails<T>>;
+}
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+/** Gateway-managed continuation to the original upstream. */
+export type GatewayMiddlewareNext = (request: Request) => Promise<Response>;
+/** Gateway metadata describing the original request. */
+export interface GatewayMiddlewareContext {
+  readonly srcIp: string;
+  readonly srcPort: number;
+  readonly dstIp?: string;
+  readonly dstPort?: number;
+  readonly networkProtocol: string;
+  readonly embeddedProtocols?: readonly string[];
+  readonly sni?: string;
+  readonly host: string;
+  /** Original request URL normalized by Gateway. */
+  readonly uri: string;
+  /** Destination category IDs, not category names. */
+  readonly domainCategories?: readonly number[];
+  readonly onrampType?: string;
+  readonly vnetId?: string;
+  readonly proxyEndpoint?: string;
+  readonly internalSrcIp?: string;
+  readonly accountId: string;
+  /** UUID of the policy that selected this middleware. */
+  readonly policyId: string;
+  /** Rejects if identity is unavailable. */
+  identity(): Promise<GatewayMiddlewareIdentity>;
+  /** Rejects if device posture is unavailable. */
+  devicePosture(): Promise<GatewayMiddlewareDevicePosture>;
+}
+export interface GatewayMiddlewareIdentity {
+  readonly email?: string;
+  readonly name?: string;
+  readonly groups?: readonly GatewayMiddlewareIdentityGroup[];
+  readonly samlAttributes?: readonly string[];
+  readonly oidcClaims?: readonly string[];
+}
+export interface GatewayMiddlewareIdentityGroup {
+  readonly id?: string;
+  readonly email?: string;
+  readonly name?: string;
+}
+export interface GatewayMiddlewareDevicePosture {
+  readonly checks: GatewayMiddlewareDevicePostureChecks;
+}
+export interface GatewayMiddlewareDevicePostureChecks {
+  /** Identifiers of posture checks that passed; may be empty. */
+  readonly passed: readonly string[];
+}
+/**
+ * The contract of a Gateway middleware entrypoint. Implement it on a `WorkerEntrypoint` and
+ * select that export in a Gateway policy. A Worker may export any number of middleware
+ * entrypoints.
+ *
+ * @example
+ * ```ts
+ * import { WorkerEntrypoint } from "cloudflare:workers";
+ *
+ * export class RequireIdentity extends WorkerEntrypoint implements GatewayMiddleware {
+ *   async handle(
+ *     request: Request,
+ *     context: GatewayMiddlewareContext,
+ *     next: GatewayMiddlewareNext,
+ *   ): Promise<Response> {
+ *     try {
+ *       await context.identity();
+ *     } catch {
+ *       return new Response("Forbidden", { status: 403 });
+ *     }
+ *     return next(request);
+ *   }
+ * }
+ * ```
+ */
+export interface GatewayMiddleware {
+  handle(
+    request: Request,
+    context: GatewayMiddlewareContext,
+    next: GatewayMiddlewareNext,
+  ): Promise<Response>;
 }
 /**
  * Hello World binding to serve as an explanatory example. DO NOT USE
