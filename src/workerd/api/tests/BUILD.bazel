@@ -1216,6 +1216,8 @@ wd_test(
 )
 
 wd_test(
+    # The cyclic and expired-context cases wait for the runtime's hang detection.
+    size = "large",
     src = "cross-context-promise-test.wd-test",
     args = ["--experimental"],
     data = ["cross-context-promise-test.js"],

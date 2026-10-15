@@ -614,9 +614,19 @@ wd_cc_library(
         "streams/draining-read-uaf-test.c++",
         "streams/queue-test.c++",
         "streams/standard-test.c++",
-        "streams/termination-injection-test.c++",
     ]
 ]
+
+kj_test(
+    # Each injection point drains microtasks and forces a full GC, including under ASan.
+    size = "large",
+    src = "streams/termination-injection-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/io:promise-wrapper",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
 
 kj_test(
     src = "data-url-test.c++",
