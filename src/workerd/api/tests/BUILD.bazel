@@ -176,6 +176,8 @@ wd_test(
 )
 
 wd_test(
+    # Actor eviction has a 30-second deadline, followed by a real-time alarm wait.
+    size = "large",
     src = "actor-alarms-name-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-name-test.js"],

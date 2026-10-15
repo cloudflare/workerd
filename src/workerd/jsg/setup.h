@@ -10,6 +10,7 @@
 #include "snapshot.h"
 #include "v8-platform-wrapper.h"
 
+#include <workerd/jsg/code-cache.h>
 #include <workerd/jsg/observer.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/batch-queue.h>
@@ -162,6 +163,16 @@ class IsolateBase {
       return moduleFallbackCallback;
     }
     return kj::none;
+  }
+
+  // Makes worker bundle modules and scripts compiled in this isolate use code caches from
+  // `store`. Must be called once, before any of them is compiled.
+  void setCodeCacheStore(kj::Own<const CodeCacheStore> store) {
+    KJ_REQUIRE(codeCache == kj::none, "code cache store already set");
+    codeCache.emplace(kj::mv(store));
+  }
+  kj::Maybe<IsolateCodeCache&> tryGetCodeCache() KJ_LIFETIMEBOUND {
+    return codeCache;
   }
 
   // Requests an extra microtask checkpoint after the current one completes.
@@ -577,6 +588,7 @@ class IsolateBase {
   kj::Maybe<kj::Function<Logger>> maybeLogger;
   kj::Maybe<kj::Function<ErrorReporter>> maybeErrorReporter;
   kj::Maybe<kj::Function<ModuleFallbackCallback>> maybeModuleFallbackCallback;
+  kj::Maybe<IsolateCodeCache> codeCache;
 
   // Registry backing Lock::tryGetTypeHandler(), keyed by typeid(TypeHandler<T>) and
   // populated at isolate construction (see registerTypeHandler()). The values point at
