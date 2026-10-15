@@ -436,6 +436,8 @@ wd_test(
 )
 
 wd_test(
+    # Exporting and comparing complete API schemas needs time in debug builds.
+    size = "large",
     src = "rtti-test.wd-test",
     args = ["--experimental"],
     data = ["rtti-test.js"],
@@ -716,6 +718,8 @@ wd_test(
 )
 
 wd_test(
+    # The RPC suite includes hang detection and stream transfers across requests.
+    size = "large",
     src = "js-rpc-streams-ts-test.wd-test",
     args = [
         "--experimental",
