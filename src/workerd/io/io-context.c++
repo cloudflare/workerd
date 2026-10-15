@@ -1451,6 +1451,7 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
     Worker::Lock& lock, kj::Maybe<SpanParent> userSpanOverride) {
   auto& ioContext = IoContext::current();
   jsg::Lock& js = lock;
+  bool nested = userSpanOverride != kj::none;
   SpanParent userSpan(nullptr);
   KJ_IF_SOME(sp, kj::mv(userSpanOverride)) {
     userSpan = kj::mv(sp);
@@ -1458,21 +1459,25 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
     userSpan = getRootUserTraceSpan();
   }
 
+  // An invocation entry starts from the incoming request. A nested span inherits the async
+  // caller's context, which may belong to an older overlapping Durable Object request.
+  auto& incoming = getCurrentIncomingRequest();
+  kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
+  KJ_IF_SOME(value, nested ? getWorkerTracer() : incoming.getWorkerTracer()) {
+    tracer = value.getWeakRef();
+  }
+
   kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
-  if (userSpan.isObserved()) {
-    auto& baseContext = getCurrentIncomingRequest().getInvocationSpanContext();
+  if (userSpan.isObserved() || tracer != kj::none) {
+    auto baseContext =
+        nested ? getInvocationSpanContext() : incoming.getInvocationSpanContext().clone();
     auto spanId = userSpan.getSpanId();
     if (spanId != tracing::SpanId::nullId) {
       invocationSpanContext = tracing::InvocationSpanContext(baseContext.getTraceId(),
           baseContext.getInvocationId(), spanId, baseContext.getTraceFlags());
     } else {
-      invocationSpanContext = baseContext.clone();
+      invocationSpanContext = kj::mv(baseContext);
     }
-  }
-
-  kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
-  KJ_IF_SOME(value, getWorkerTracer()) {
-    tracer = value.getWeakRef();
   }
 
   auto asyncContext = kj::heap<UserTraceAsyncContext>(
@@ -1481,6 +1486,54 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
   auto contextHandle = jsg::wrapOpaque(js.v8Context(), kj::mv(ioOwnAsyncContext));
   return jsg::AsyncContextFrame::StorageScope(
       js, lock.getUserTraceAsyncContextKey(), js.v8Ref(contextHandle));
+}
+
+kj::Maybe<UserTraceAsyncContext&> IoContext::getUserTraceAsyncContext() {
+  KJ_IF_SOME(lock, currentLock) {
+    // Logging can reach here from GC callbacks without a caller-provided HandleScope.
+    jsg::Lock& js = lock;
+    return js.withinHandleScope([&]() -> kj::Maybe<UserTraceAsyncContext&> {
+      KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(lock)) {
+        KJ_IF_SOME(value, frame.get(*lock.getUserTraceAsyncContextKey())) {
+          auto& holder = jsg::unwrapOpaqueRef<IoOwn<UserTraceAsyncContext>>(
+              js.v8Isolate, value.getHandle(lock));
+          // A frame restored by AsyncLocalStorage.snapshot() may belong to another IoContext.
+          KJ_IF_SOME(context, holder.tryGet()) {
+            KJ_IF_SOME(tracer, context.getTracer()) {
+              // Durable Object background work can outlive its originating request. Once that
+              // tracer has finished, use the current request for the tracer, IDs, and span parent
+              // together. A frame that was never traced still retains its untraced context.
+              if (tracer.tryGet() == kj::none) return kj::none;
+            }
+            return context;
+          }
+        }
+      }
+      return kj::none;
+    });
+  }
+  return kj::none;
+}
+
+kj::Maybe<BaseTracer&> IoContext::getWorkerTracer() {
+  if (incomingRequests.empty()) return kj::none;
+  KJ_IF_SOME(context, getUserTraceAsyncContext()) {
+    KJ_IF_SOME(tracer, context.getTracer()) {
+      return tracer.tryGet();
+    }
+    // Never send an untraced continuation's events to a newer request's tracer.
+    return kj::none;
+  }
+  return getCurrentIncomingRequest().getWorkerTracer();
+}
+
+tracing::InvocationSpanContext IoContext::getInvocationSpanContext() {
+  KJ_IF_SOME(context, getUserTraceAsyncContext()) {
+    KJ_IF_SOME(invocation, context.getInvocationSpanContext()) {
+      return invocation.clone();
+    }
+  }
+  return getCurrentIncomingRequest().getInvocationSpanContext().clone();
 }
 
 SpanParent IoContext::getCurrentTraceSpan() {
@@ -1509,22 +1562,8 @@ SpanParent IoContext::getCurrentUserTraceSpan() {
   if (incomingRequests.empty()) {
     return SpanParent(nullptr);
   }
-
-  // If called while lock is held, try to use the trace info stored in the async context.
-  KJ_IF_SOME(lock, currentLock) {
-    KJ_IF_SOME(frame, jsg::AsyncContextFrame::current(lock)) {
-      KJ_IF_SOME(value, frame.get(*lock.getUserTraceAsyncContextKey())) {
-        auto handle = value.getHandle(lock);
-        jsg::Lock& js = lock;
-        auto& asyncContext =
-            jsg::unwrapOpaqueRef<IoOwn<UserTraceAsyncContext>>(js.v8Isolate, handle);
-        // As in getCurrentTraceSpan(), the frame may belong to a different request, in which case
-        // fall back to this request's root span.
-        KJ_IF_SOME(context, asyncContext.tryGet()) {
-          return context.getSpan();
-        }
-      }
-    }
+  KJ_IF_SOME(context, getUserTraceAsyncContext()) {
+    return context.getSpan();
   }
   return getCurrentIncomingRequest().getRootUserTraceSpan();
 }
