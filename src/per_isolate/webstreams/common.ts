@@ -327,6 +327,7 @@ export type CommonHelpers = {
   kEnumerable: typeof kEnumerable;
   toStringTagProperty: typeof toStringTagProperty;
   promiseResolvedWith: typeof promiseResolvedWith;
+  convertCallback: typeof convertCallback;
   normalizeExpectedLength: typeof normalizeExpectedLength;
   requireObject: typeof requireObject;
   toDictionary: typeof toDictionary;
@@ -346,6 +347,7 @@ module.exports = ObjectFreeze({
   kEnumerable,
   toStringTagProperty,
   promiseResolvedWith,
+  convertCallback,
   normalizeExpectedLength,
   requireObject,
   toDictionary,
