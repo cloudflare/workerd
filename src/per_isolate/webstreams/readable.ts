@@ -326,10 +326,17 @@ let setReadableStreamConsumer: <R>(
 ) => void;
 // Controller internals exposed for the reader/stream layers. Each takes the
 // full controller union; the implementations are CHAINED (see the
-// BACKEND-DISPATCH note at the default controller's static block): queued
-// default assigns first, queued byte wraps it, and the native backend's
-// wrap is joined at the bottom of this module (its brand lives across the
-// module fence in native.ts).
+// BACKEND-DISPATCH note at the default controller's static block): the
+// queued arm, assigned there, reaches either queued controller's core
+// through queuedCoreOf, and the native backend's wrap is joined at the
+// bottom of this module (its brand lives across the module fence in
+// native.ts).
+//
+// The core of a queued controller, default or byte; undefined for a native
+// controller. Chained in turn: each queued class answers for its own brand.
+let queuedCoreOf: (
+  controller: AnyReadableController
+) => QueuedControllerCore<unknown, unknown> | undefined;
 let controllerPullIfNeeded: (controller: AnyReadableController) => void;
 let controllerCancelSteps: (
   controller: AnyReadableController,
@@ -1488,6 +1495,10 @@ class QueuedControllerCore<T, R> {
     }) as StreamQueueType<T, R>;
   }
 
+  get stream(): ReadableStream<R> {
+    return this.#stream;
+  }
+
   get queue(): StreamQueueType<T, R> {
     return this.#queue;
   }
@@ -1748,17 +1759,18 @@ class ReadableStreamDefaultController<
     // sanctioned dispatch points). Each backend wraps the previous
     // implementation behind its own brand check — private-brand `in` for
     // the queued controllers, NEVER instanceof: these classes end up on
-    // the global, so Symbol.hasInstance on them is user-reachable. The
-    // byte controller chains in its static block below; the native
-    // controller's wrap is joined at the bottom of this module (its brand
-    // predicate crosses the module fence from native.ts).
+    // the global, so Symbol.hasInstance on them is user-reachable. Both
+    // queued controllers share one arm per helper, below, through
+    // queuedCoreOf, which the byte controller chains in its static block;
+    // the native controller's wrap is joined at the bottom of this module
+    // (its brand predicate crosses the module fence from native.ts).
+    queuedCoreOf = (controller) =>
+      #queue in controller
+        ? (controller as ReadableStreamDefaultController).#core
+        : undefined;
+
     controllerPullIfNeeded = (controller) => {
-      if (#queue in controller) {
-        (
-          controller as ReadableStreamDefaultController
-        ).#core.callPullIfNeeded();
-      }
-      // The byte controller wires its own branch in the byte pass.
+      queuedCoreOf(controller)?.callPullIfNeeded();
     };
 
     // Default controllers never read expectedLength from an underlying
@@ -1776,52 +1788,25 @@ class ReadableStreamDefaultController<
     defaultControllerCanCloseOrEnqueue = (controller) =>
       controller.#core.canCloseOrEnqueue();
 
-    controllerCancelSteps = (controller, reason) => {
-      if (#queue in controller) {
-        return (
-          controller as ReadableStreamDefaultController
-        ).#core.cancelSteps(reason);
-      }
-      return PromiseResolve();
-    };
+    controllerCancelSteps = (controller, reason) =>
+      queuedCoreOf(controller)?.cancelSteps(reason) ?? PromiseResolve();
 
     controllerMaybeCloseStream = (controller) => {
-      if (#queue in controller) {
-        (
-          controller as ReadableStreamDefaultController
-        ).#core.maybeCloseStream();
-      }
+      queuedCoreOf(controller)?.maybeCloseStream();
     };
 
-    controllerConsumerLeaving = (controller, reason, isLastConsumer) => {
-      if (#queue in controller) {
-        return (
-          controller as ReadableStreamDefaultController
-        ).#core.consumerLeaving(reason, isLastConsumer);
-      }
-      return PromiseResolve();
-    };
+    controllerConsumerLeaving = (controller, reason, isLastConsumer) =>
+      queuedCoreOf(controller)?.consumerLeaving(reason, isLastConsumer) ??
+      PromiseResolve();
 
-    controllerConsumerErrored = (controller, reason, isLastConsumer) => {
-      if (#queue in controller) {
-        return (
-          controller as ReadableStreamDefaultController
-        ).#core.consumerErrored(reason, isLastConsumer);
-      }
-      return PromiseResolve();
-    };
+    controllerConsumerErrored = (controller, reason, isLastConsumer) =>
+      queuedCoreOf(controller)?.consumerErrored(reason, isLastConsumer) ??
+      PromiseResolve();
 
-    controllerStream = (controller) => {
-      if (#queue in controller) {
-        return (controller as ReadableStreamDefaultController).#stream;
-      }
-      return undefined;
-    };
+    controllerStream = (controller) => queuedCoreOf(controller)?.stream;
 
     controllerError = (controller, reason) => {
-      if (#queue in controller) {
-        (controller as ReadableStreamDefaultController).#core.error(reason);
-      }
+      queuedCoreOf(controller)?.error(reason);
     };
 
     // Nothing to do for either queued controller. A default controller has
@@ -2120,69 +2105,15 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
         throw new TypeError('Illegal invocation');
     };
 
-    // Chain the controller dispatch helpers. The default controller's
-    // static block (which runs earlier in module evaluation) assigned the
-    // initial implementations; we wrap them. Note the two classes' #queue
-    // private names are distinct brands, so the `in` checks discriminate
-    // correctly.
-    const prevPullIfNeeded = controllerPullIfNeeded;
-    controllerPullIfNeeded = (controller) => {
-      if (#queue in controller) {
-        controller.#core.callPullIfNeeded();
-      } else {
-        prevPullIfNeeded(controller);
-      }
-    };
-
-    const prevCancelSteps = controllerCancelSteps;
-    controllerCancelSteps = (controller, reason) => {
-      if (#queue in controller) {
-        return controller.#core.cancelSteps(reason);
-      }
-      return prevCancelSteps(controller, reason);
-    };
-
-    const prevMaybeCloseStream = controllerMaybeCloseStream;
-    controllerMaybeCloseStream = (controller) => {
-      if (#queue in controller) {
-        controller.#core.maybeCloseStream();
-      } else {
-        prevMaybeCloseStream(controller);
-      }
-    };
-
-    const prevConsumerLeaving = controllerConsumerLeaving;
-    controllerConsumerLeaving = (controller, reason, isLastConsumer) => {
-      if (#queue in controller) {
-        return controller.#core.consumerLeaving(reason, isLastConsumer);
-      }
-      return prevConsumerLeaving(controller, reason, isLastConsumer);
-    };
-
-    const prevConsumerErrored = controllerConsumerErrored;
-    controllerConsumerErrored = (controller, reason, isLastConsumer) => {
-      if (#queue in controller) {
-        return controller.#core.consumerErrored(reason, isLastConsumer);
-      }
-      return prevConsumerErrored(controller, reason, isLastConsumer);
-    };
-
-    const prevControllerStream = controllerStream;
-    controllerStream = (controller) => {
-      if (#queue in controller) {
-        return controller.#stream;
-      }
-      return prevControllerStream(controller);
-    };
-
-    const prevControllerError = controllerError;
-    controllerError = (controller, reason) => {
-      if (#queue in controller) {
-        controller.#core.error(reason);
-      } else {
-        prevControllerError(controller, reason);
-      }
-    };
+    // Chain queuedCoreOf, which the default controller's static block
+    // (run earlier in module evaluation) assigned for its own class. The
+    // two classes' #queue private names are distinct brands, so the `in`
+    // checks discriminate correctly.
+    const prevQueuedCoreOf = queuedCoreOf;
+    queuedCoreOf = (controller) =>
+      #queue in controller
+        ? (controller.#core as QueuedControllerCore<unknown, unknown>)
+        : prevQueuedCoreOf(controller);
 
     byteControllerRespond = (controller, bytesWritten) => {
       controller.#respond(bytesWritten);
