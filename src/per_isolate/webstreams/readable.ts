@@ -3694,6 +3694,74 @@ function readableStreamFromIterable<R>(
   return new ReadableStream<R>(source, kFromStrategy as QueuingStrategy<R>);
 }
 
+// Forks `from`, the consumer of a queued stream that tee() or detach() hands
+// off, into a cursor for each of `owners` at from's exact position and byte
+// offset, so partial entry consumption survives the fork. On a byte stream
+// they are byte cursors, which take BYOB reads; they copy from's undelivered
+// released bytes and take `onError` as their error callback (from's own when
+// omitted: a detach moves the consumer, keeping its role); and the
+// controller hears of the fork while from still holds its head. The caller
+// removes `from` afterwards: removing the queue's only cursor before the new
+// ones joined it would fire the all-cursors-gone hook, dropping the buffered
+// entries and releasing the source.
+function forkQueuedCursors<R>(
+  controller: AnyReadableController | undefined,
+  from: QueueCursorType<R, R>,
+  owners: ReadableStream<R>[],
+  onError?: ErrorStreamCallback
+): QueueCursorType<R, R>[] {
+  const queue = from.queue;
+  const isBytes =
+    controller !== undefined && isByteStreamController(controller);
+  const totalSize = from.remainingSize;
+  const wasSole = queue.singleCursor === from;
+  const cursors: QueueCursorType<R, R>[] = [];
+  for (let i = 0; i < owners.length; i++) {
+    const owner = owners[i] as ReadableStream<R>;
+    ArrayPrototypePush(
+      cursors,
+      isBytes
+        ? new ByteStreamCursor(
+            queue,
+            owner,
+            from.position,
+            from.byteOffset,
+            totalSize
+          )
+        : new QueueCursor(
+            queue,
+            owner,
+            from.position,
+            from.byteOffset,
+            totalSize
+          )
+    );
+  }
+  if (isBytes) {
+    const fromBytes = from as unknown as ByteStreamCursorType;
+    const errorCallback = onError ?? fromBytes.errorStreamCallback;
+    for (let i = 0; i < cursors.length; i++) {
+      const to = cursors[i] as unknown as ByteStreamCursorType;
+      to.adoptReleasedBytes(fromBytes);
+      to.errorStreamCallback = errorCallback;
+    }
+    byteControllerOnFork(
+      controller as ReadableByteStreamController,
+      fromBytes,
+      wasSole
+    );
+  }
+  return cursors;
+}
+
+// Marks a stream whose data has moved to another stream (tee, detach,
+// extraction; see HANDED-OFF STREAMS in webstreams/AGENTS.md): it stays
+// locked for good, by an internal reader that is never exposed and so never
+// released.
+function markHandedOff<R>(stream: ReadableStream<R>): void {
+  acquireReadableStreamDefaultReader(stream);
+}
+
 let assertIsReadableStream: <W>(self: ReadableStream<W>) => void;
 
 class ReadableStream<R> {
@@ -4030,6 +4098,22 @@ class ReadableStream<R> {
       controllerMaybeCloseStream(controller);
     };
 
+    // A shell carries another stream's state forward: a tee branch, or the
+    // stream detach() moves a body to. It copies the state, stored error and
+    // pending closure, and shares `controller`, if any; the caller gives it a
+    // consumer when it has data to read.
+    const makeShell = <R>(
+      from: ReadableStream<R>,
+      controller?: AnyReadableController
+    ): ReadableStream<R> => {
+      const shell = new ReadableStream<R>(kPrivateSymbol as never);
+      shell.#state = from.#state;
+      shell.#storedError = from.#storedError;
+      shell.#pendingClosure = from.#pendingClosure;
+      shell.#controller = controller;
+      return shell;
+    };
+
     // BACKEND-DISPATCH: tee is one of the five sanctioned dispatch points
     // (native-stream-integration.md §10). The native branch runs first:
     // the source's tee hook produces a PAIR of new native source objects
@@ -4055,14 +4139,9 @@ class ReadableStream<R> {
           // Closed/errored native parents produce two branches in the
           // same state and are locked, mirroring the queued behavior
           // below — without touching the (closed) source.
-          const b1 = new ReadableStream<R>(kPrivateSymbol as never);
-          const b2 = new ReadableStream<R>(kPrivateSymbol as never);
-          b1.#state = stream.#state;
-          b2.#state = stream.#state;
-          b1.#storedError = stream.#storedError;
-          b2.#storedError = stream.#storedError;
-          acquireReadableStreamDefaultReader(stream);
-          return [b1, b2] as [ReadableStream<R>, ReadableStream<R>];
+          const branches = [makeShell(stream), makeShell(stream)];
+          markHandedOff(stream);
+          return branches as [ReadableStream<R>, ReadableStream<R>];
         }
         // Sources from the tee hook are full native sources; ordinary
         // construction validates and wires each branch.
@@ -4073,95 +4152,33 @@ class ReadableStream<R> {
         const branch2 = new ReadableStream<R>(
           sources[1] as UnderlyingSource<R>
         );
-        if (!isReadableStreamLocked(stream)) {
-          acquireReadableStreamDefaultReader(stream);
-        }
+        markHandedOff(stream);
         closeReadableStreamHusk(stream);
         return [branch1, branch2] as [ReadableStream<R>, ReadableStream<R>];
       }
-      const state = stream.#state;
 
       // Branch streams are shells wired to the SHARED controller — same
       // queue, per-branch cursors.
-      const branch1 = new ReadableStream<R>(kPrivateSymbol as never);
-      const branch2 = new ReadableStream<R>(kPrivateSymbol as never);
-      branch1.#controller = controller;
-      branch2.#controller = controller;
+      const branch1 = makeShell(stream, controller);
+      const branch2 = makeShell(stream, controller);
 
       // QUEUED INVARIANT: this branch is queued-backend territory — the
       // consumer is necessarily a QueueCursor (position/byteOffset/queue
       // are cursor-only concepts); sanctioned cast.
       const cursor = stream.#consumer as QueueCursorType<R, R> | undefined;
 
-      if (state === 'errored') {
-        branch1.#state = 'errored';
-        branch2.#state = 'errored';
-        branch1.#storedError = stream.#storedError;
-        branch2.#storedError = stream.#storedError;
-      } else if (state === 'closed') {
-        branch1.#state = 'closed';
-        branch2.#state = 'closed';
-      } else if (cursor !== undefined) {
-        const queue = cursor.queue;
-        const isBytes =
-          controller !== undefined && isByteStreamController(controller);
-        // Each branch forks at the original cursor's position AND
-        // byteOffset — partial entry consumption survives the fork. Byte
-        // streams need ByteStreamCursor (BYOB reads on branches).
-        //
-        // ORDER MATTERS: add the branch cursors BEFORE removing the
-        // original — removing the sole cursor first would fire the
-        // all-cursors-gone hook mid-tee, dropping the buffered entries and
-        // releasing the source.
-        const totalSize = cursor.remainingSize;
-        const wasSole = queue.singleCursor === cursor;
-        branch1.#consumer = isBytes
-          ? new ByteStreamCursor(
-              queue,
-              branch1,
-              cursor.position,
-              cursor.byteOffset,
-              totalSize
-            )
-          : new QueueCursor(
-              queue,
-              branch1,
-              cursor.position,
-              cursor.byteOffset,
-              totalSize
-            );
-        branch2.#consumer = isBytes
-          ? new ByteStreamCursor(
-              queue,
-              branch2,
-              cursor.position,
-              cursor.byteOffset,
-              totalSize
-            )
-          : new QueueCursor(
-              queue,
-              branch2,
-              cursor.position,
-              cursor.byteOffset,
-              totalSize
-            );
-        if (isBytes) {
-          const from = cursor as unknown as ByteStreamCursorType;
-          const to1 = branch1.#consumer as unknown as ByteStreamCursorType;
-          const to2 = branch2.#consumer as unknown as ByteStreamCursorType;
-          to1.adoptReleasedBytes(from);
-          to2.adoptReleasedBytes(from);
-          // A branch shares the controller with its siblings, so a
-          // fractional fill at close errors it alone.
-          to1.errorStreamCallback = errorTeeBranchFromCursor;
-          to2.errorStreamCallback = errorTeeBranchFromCursor;
-          byteControllerOnFork(
-            controller as ReadableByteStreamController,
-            from,
-            wasSole
-          );
-        }
-        queue.removeCursor(cursor);
+      if (stream.#state === 'readable' && cursor !== undefined) {
+        // A branch shares the controller with its siblings, so a
+        // fractional fill at close errors it alone.
+        const cursors = forkQueuedCursors(
+          controller,
+          cursor,
+          [branch1, branch2],
+          errorTeeBranchFromCursor
+        );
+        branch1.#consumer = cursors[0];
+        branch2.#consumer = cursors[1];
+        cursor.queue.removeCursor(cursor);
         stream.#consumer = undefined;
         // With close already requested, the source's own stream — now
         // consuming nothing — closes here rather than when a branch next
@@ -4175,11 +4192,8 @@ class ReadableStream<R> {
       // once the last of them has left — tees of tee branches simply add
       // consumers to the same queue.
 
-      // Per spec, tee() locks the original permanently. Acquire a real
-      // reader (never exposed, so it can never be released).
-      if (!isReadableStreamLocked(stream)) {
-        acquireReadableStreamDefaultReader(stream);
-      }
+      // Per spec, tee() locks the original permanently.
+      markHandedOff(stream);
       // A teed branch (not the source's own stream) consumes nothing now,
       // and no source event would ever reach it: close it.
       if (controller !== undefined && controllerStream(controller) !== stream) {
@@ -4213,27 +4227,21 @@ class ReadableStream<R> {
         throw new TypeError('The ReadableStream has been locked to a reader.');
       }
 
-      // Neutralize the original: no consumer, disturbed, permanently locked
-      // via an internal reader (never exposed, never released) -- the same
-      // pattern extraction and tee use. A native husk is disturbed, locked
-      // and closed instead (closeReadableStreamHusk drops its consumer); a
-      // queued one stays the controller's stream, closing and erroring with
-      // the source.
+      // Neutralize the original: no consumer, disturbed, and handed off
+      // (locked for good) as extraction and tee leave theirs. A native husk
+      // is disturbed, handed off and closed instead (closeReadableStreamHusk
+      // drops its consumer); a queued one stays the controller's stream,
+      // closing and erroring with the source.
       const neutralize = (): void => {
         stream.#consumer = undefined;
         stream.#disturbed = true;
-        if (!isReadableStreamLocked(stream)) {
-          acquireReadableStreamDefaultReader(stream);
-        }
+        markHandedOff(stream);
       };
 
       // Closed/errored: the detached stream is a state-copy shell (tee's
       // non-readable precedent); the underlying source is not touched.
       if (stream.#state !== 'readable') {
-        const shell = new ReadableStream<R>(kPrivateSymbol as never);
-        shell.#state = stream.#state;
-        shell.#storedError = stream.#storedError;
-        shell.#pendingClosure = stream.#pendingClosure;
+        const shell = makeShell(stream);
         neutralize();
         return shell;
       }
@@ -4249,9 +4257,7 @@ class ReadableStream<R> {
         // bytes -- stays exact.
         const source = nativeControllerExtractSource(controller);
         stream.#disturbed = true;
-        if (!isReadableStreamLocked(stream)) {
-          acquireReadableStreamDefaultReader(stream);
-        }
+        markHandedOff(stream);
         closeReadableStreamHusk(stream);
         const detached = new ReadableStream<R>(source as UnderlyingSource<R>);
         detached.#pendingClosure = stream.#pendingClosure;
@@ -4262,51 +4268,15 @@ class ReadableStream<R> {
       // forking -- a fresh shell adopts the SHARED controller and a cursor
       // at the original cursor's exact position (partial entry consumption
       // survives the move).
-      const shell = new ReadableStream<R>(kPrivateSymbol as never);
-      shell.#controller = controller;
-      shell.#pendingClosure = stream.#pendingClosure;
+      const shell = makeShell(stream, controller);
 
       // QUEUED INVARIANT: this branch is queued-backend territory -- the
       // consumer is necessarily a QueueCursor (position/byteOffset/queue
       // are cursor-only concepts); sanctioned cast (tee precedent).
       const cursor = stream.#consumer as QueueCursorType<R, R> | undefined;
       if (cursor !== undefined) {
-        const queue = cursor.queue;
-        const isBytes =
-          controller !== undefined && isByteStreamController(controller);
-        const totalSize = cursor.remainingSize;
-        const wasSole = queue.singleCursor === cursor;
-        // ORDER MATTERS: attach the shell's cursor BEFORE removing the
-        // original -- removing the sole cursor first would fire the
-        // all-cursors-gone hook mid-detach, dropping the buffered entries
-        // and releasing the source (tee precedent).
-        shell.#consumer = isBytes
-          ? new ByteStreamCursor(
-              queue,
-              shell,
-              cursor.position,
-              cursor.byteOffset,
-              totalSize
-            )
-          : new QueueCursor(
-              queue,
-              shell,
-              cursor.position,
-              cursor.byteOffset,
-              totalSize
-            );
-        if (isBytes) {
-          const from = cursor as unknown as ByteStreamCursorType;
-          const to = shell.#consumer as unknown as ByteStreamCursorType;
-          to.adoptReleasedBytes(from);
-          to.errorStreamCallback = from.errorStreamCallback;
-          byteControllerOnFork(
-            controller as ReadableByteStreamController,
-            from,
-            wasSole
-          );
-        }
-        queue.removeCursor(cursor);
+        shell.#consumer = forkQueuedCursors(controller, cursor, [shell])[0];
+        cursor.queue.removeCursor(cursor);
       }
       neutralize();
       // As in tee: with close already requested, the husk closes now if it
@@ -4480,9 +4450,7 @@ class ReadableStream<R> {
       // Atomic: validate -> extract -> lock+disturb+close. No TOCTOU gap.
       const source = nativeControllerExtractSource(controller);
       this.#disturbed = true;
-      // Permanent lock via an internal reader (never exposed, never
-      // released) — same pattern as tee's parent locking.
-      acquireReadableStreamDefaultReader(this);
+      markHandedOff(this);
       closeReadableStreamHusk(this);
       return source;
     };
@@ -4500,10 +4468,10 @@ class ReadableStream<R> {
       value: true,
     } as PropertyDescriptor);
 
-    // Internal shell creation (tee branches): skip controller setup
-    // entirely — the tee wiring attaches the SHARED controller and a
-    // forked cursor afterwards. The private symbol is unreachable from
-    // user code.
+    // Internal shell creation (makeShell: tee branches, detached copies):
+    // skip controller setup entirely — the shell takes over another
+    // stream's state and its SHARED controller, if any. The private symbol
+    // is unreachable from user code.
     if ((underlyingSource as unknown) === kPrivateSymbol) {
       return;
     }
