@@ -190,3 +190,39 @@ export const byobRequestSurvivesGc = {
     strictEqual(value[0], 7);
   },
 };
+
+// A byte stream that has closed, been cancelled or errored releases its
+// underlying source (the readable suite's sourceReleasedOnceEnded), while
+// the stream and its controller stay reachable; a stream still open keeps
+// it (parity).
+export const sourceReleasedOnceEnded = {
+  async test() {
+    for (const end of ['open', 'close', 'cancel', 'error']) {
+      let controller;
+      let ref;
+      const stream = (() => {
+        const source = {
+          type: 'bytes',
+          start(c) {
+            controller = c;
+          },
+          pull() {},
+          cancel() {},
+        };
+        ref = new WeakRef(source);
+        return new ReadableStream(source, { highWaterMark: 4 });
+      })();
+      await scheduler.wait(1);
+      if (end === 'close') controller.close();
+      if (end === 'cancel') await stream.cancel();
+      if (end === 'error') controller.error(new Error('boom'));
+      await collectGarbage();
+      strictEqual(ref.deref() !== undefined, end === 'open', end);
+      strictEqual(
+        controller.desiredSize,
+        { open: 4, close: 0, cancel: 0, error: null }[end]
+      );
+      strictEqual(stream.locked, false);
+    }
+  },
+};

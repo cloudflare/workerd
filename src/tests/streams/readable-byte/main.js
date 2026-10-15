@@ -223,6 +223,7 @@ export {
   teeBranchesCollectedPullStops,
   pendingByobReadSurvivesGc,
   byobRequestSurvivesGc,
+  sourceReleasedOnceEnded,
 } from 'gc';
 
 export {

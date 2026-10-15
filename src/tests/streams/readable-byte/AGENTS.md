@@ -121,7 +121,7 @@ named suite test pins directly, differing only in incidental asserts.
 | `internal_stream_byob_return_view` (2024-05-13) | yes — NATIVE streams only | legacy + nodetach cells: native done-reads resolve value UNDEFINED; JS-backed done-reads resolve an empty view in every era |
 | `streams_no_default_auto_allocate_chunk_size` (experimental, dateless) | no (ledger #5 is the default behavior) | `readable-byte-cpp-no-auto-allocate`: byobRequest null for default reads without autoAllocateChunkSize (the TS/spec behavior) |
 | `pedantic_wpt` (dateless opt-in) | `readable-byte-cpp-pedantic` cell | zero observable deltas on this suite's surface |
-| others (nodejs_compat, transform ctor, backpressure fixup, async-throws capture, prototype accessors, toString tag, spec-compliant writer) | as in the readable suite | — |
+| others (nodejs_compat, transform ctor, backpressure fixup, async-throws capture, prototype accessors, toString tag, spec-compliant writer, enable_weak_ref) | as in the readable suite | — |
 
 ## Module map
 
@@ -136,7 +136,7 @@ named suite test pins directly, differing only in incidental asserts.
 | `read-min.js` | ledger #11-#13, #27, #38; byobMin/constraints/readAtLeast (migrated streams-test.js); read(view, options) options as a WebIDL dictionary (parity: null, a function's members, primitives rejected); /chunked SELF endpoint |
 | `tee.js` | ledger #7 (on a branch), #14, #24, #25, #29, #32; clone-per-branch; migrated byte-tee pair; error propagation; released branch reads, incl. partially filled ones and tee() after a release; byobRequest held across tee(); tee() of a closed native body locking it |
 | `buffer-lifecycle.js` | ledger #18, #30; resizable ArrayBuffers; WASM Memory; SharedArrayBuffer-backed typed arrays and DataViews rejected by read(view), readAtLeast(), enqueue() and respondWithNewView() (TS also after close(), #19) |
-| `gc.js` | pending BYOB read + byobRequest survive gc(); both tee branches collected while the controller is held: enqueue() accepted, desiredSize at the high-water mark, byobRequest null, close() then enqueue() as ever (a parity pin of the observable surface — the retention checks are the readable suite's, a transferred buffer leaving nothing to WeakRef), one branch cancelled and the other collected, observed in the gc()'s own job (the readable suite's teeSurvivorBranchCollected, plus byobRequest null), and pull() stops (ledger #26) |
+| `gc.js` | pending BYOB read + byobRequest survive gc(); both tee branches collected while the controller is held: enqueue() accepted, desiredSize at the high-water mark, byobRequest null, close() then enqueue() as ever (a parity pin of the observable surface — the retention checks are the readable suite's, a transferred buffer leaving nothing to WeakRef), one branch cancelled and the other collected, observed in the gc()'s own job (the readable suite's teeSurvivorBranchCollected, plus byobRequest null), and pull() stops (ledger #26); a closed, cancelled or errored stream releases its underlying source (WeakRef-checked; parity) |
 | `integration.js` | BYOB round-trips via SELF; readAtLeast on echoed body; bytes() |
 | `js-compat.js` | ledger #17, #22; byte halves of the mixed streams-js-test tests (closed promise, cancel reads, locked ops, globals) |
 | `flag-no-auto-allocate.js` | the flag cell (migrated streams-no-auto-allocate-test) |

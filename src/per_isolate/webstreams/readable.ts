@@ -1374,6 +1374,51 @@ function validateAndTransferView(view: ArrayBufferView): ByteQueueEntry {
   };
 }
 
+interface SourceAlgorithms {
+  pull: (() => Promise<void>) | undefined;
+  cancel: ((reason: unknown) => Promise<void>) | undefined;
+}
+
+// A queued controller's pull and cancel algorithms, calling the hooks
+// through captured uncurryThis wrappers with the source object as `this`
+// (spec CreateAlgorithmFromUnderlyingMethod). Built outside the controller
+// constructors so that `underlyingSource` is captured only by these
+// closures, not by the constructor's shared context (which the queue's
+// all-consumers-gone hook keeps alive with the stream): once
+// ClearAlgorithms drops them, the source is collectable.
+function makeSourceAlgorithms<C>(
+  underlyingSource: unknown,
+  controller: C,
+  pullFn: ((controller: C) => void | PromiseLike<void>) | undefined,
+  cancelFn: ((reason?: unknown) => void | PromiseLike<void>) | undefined
+): SourceAlgorithms {
+  // Spec PromiseCall: sync throws become rejections; result is always a
+  // promise.
+  let cancel: SourceAlgorithms['cancel'];
+  if (cancelFn !== undefined) {
+    const callCancel = uncurryThis(cancelFn);
+    cancel = (reason: unknown) => {
+      try {
+        return PromiseResolve(callCancel(underlyingSource, reason));
+      } catch (e) {
+        return PromiseReject(e);
+      }
+    };
+  }
+  let pull: SourceAlgorithms['pull'];
+  if (pullFn !== undefined) {
+    const callPull = uncurryThis(pullFn);
+    pull = () => {
+      try {
+        return PromiseResolve(callPull(underlyingSource, controller));
+      } catch (e) {
+        return PromiseReject(e);
+      }
+    };
+  }
+  return { pull, cancel };
+}
+
 let assertIsReadableStreamDefaultController: <R>(
   self: ReadableStreamDefaultController<R>
 ) => void;
@@ -1522,31 +1567,15 @@ class ReadableStreamDefaultController<
     assertPrivateSymbol(privateSymbol);
     this.#stream = stream;
 
-    // The hooks run through captured uncurryThis wrappers, with the source
-    // object as `this` (spec CreateAlgorithmFromUnderlyingMethod).
     const { cancel: cancelFn, pull: pullFn, start: startFn } = sourceDict;
-    if (cancelFn !== undefined) {
-      const callCancel = uncurryThis(cancelFn);
-      // Spec PromiseCall: sync throws become rejections; result is always
-      // a promise.
-      this.#cancelAlgorithm = (reason: unknown) => {
-        try {
-          return PromiseResolve(callCancel(underlyingSource, reason));
-        } catch (e) {
-          return PromiseReject(e);
-        }
-      };
-    }
-    if (pullFn !== undefined) {
-      const callPull = uncurryThis(pullFn);
-      this.#pullAlgorithm = () => {
-        try {
-          return PromiseResolve(callPull(underlyingSource, this));
-        } catch (e) {
-          return PromiseReject(e);
-        }
-      };
-    }
+    const algorithms = makeSourceAlgorithms(
+      underlyingSource,
+      this,
+      pullFn,
+      cancelFn
+    );
+    this.#pullAlgorithm = algorithms.pull;
+    this.#cancelAlgorithm = algorithms.cancel;
 
     // Strategy already extracted by caller (WebIDL conversion order).
     this.#sizeAlgorithm = sizeAlgorithm;
@@ -2167,26 +2196,14 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     // Exposed to the C++ bridge via the DrainingReader.
     this.#expectedLength = expectedLength;
 
-    if (cancelFn !== undefined) {
-      const callCancel = uncurryThis(cancelFn);
-      this.#cancelAlgorithm = (reason: unknown) => {
-        try {
-          return PromiseResolve(callCancel(underlyingSource, reason));
-        } catch (e) {
-          return PromiseReject(e);
-        }
-      };
-    }
-    if (pullFn !== undefined) {
-      const callPull = uncurryThis(pullFn);
-      this.#pullAlgorithm = () => {
-        try {
-          return PromiseResolve(callPull(underlyingSource, this));
-        } catch (e) {
-          return PromiseReject(e);
-        }
-      };
-    }
+    const algorithms = makeSourceAlgorithms(
+      underlyingSource,
+      this,
+      pullFn,
+      cancelFn
+    );
+    this.#pullAlgorithm = algorithms.pull;
+    this.#cancelAlgorithm = algorithms.cancel;
 
     // Strategy already extracted by caller (WebIDL conversion order).
 
