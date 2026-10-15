@@ -1,0 +1,35 @@
+src/rust/cxx/kj-rs-io/tests/async-io-test.c++
+  s_dadaf0660bfcbe::t_d9d0064768362d 1313
+src/rust/cxx/kj-rs-io/async-io.h
+  s_dadaf0660bfcbe::t_03d26b5ba47e64 167,172,176
+src/rust/cxx/kj-rs-io/net.rs
+  s_dadaf0660bfcbe::t_00d4cd712074cb 48,445,482,484,749-753,764-769,774,924,962,964,969,976-977,1007-1008
+src/rust/cxx/kj-rs-io/net-test.rs
+  s_dadaf0660bfcbe::t_4a6b9dbb584754 17,54-55,61
+src/workerd/util/setup-async-io.c++
+  s_dadaf0660bfcbe::t_b29118a4667a17 18-19
+src/rust/cxx/kj-rs-io/ffi.rs
+  s_dadaf0660bfcbe::t_94cdc1340e3d22 186-187,190,281
+src/rust/cxx/kj-rs-io/lib.rs
+  s_dadaf0660bfcbe::t_9059e64d1bb7f7 35,37,61,71-72,81
+src/rust/cxx/kj-rs-io/async-io.c++
+  s_dadaf0660bfcbe::t_102f6a0280d604 187,226-228,236,368,375,486,556-560,574-575
+src/rust/cxx/AGENTS.md
+  s_dadaf0660bfcbe::t_9c1df1402b58cb 46-50,52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e1e3723499134b2d01a18ca07ebc1b7fd943a9a4",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
