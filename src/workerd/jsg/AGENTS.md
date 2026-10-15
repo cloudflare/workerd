@@ -76,7 +76,9 @@ The legacy `js.tryCatch(fn)` is deprecated and will be eventually removed.
 - **NEVER** opaque-wrap `V8Ref<T>` — use handle directly
 - **NEVER** use v8::Context embedder data slot 0 (`ContextPointerSlot::RESERVED`)
 - **NEVER** hold traced handles (`Ref<T>`/`V8Ref<T>`) without marking in `visitForGc` — causes GC corruption
-- **NEVER** use `FastOneByteString` in Fast API calls (GC corruption risk)
+- **NEVER** use `FastOneByteString` in a Fast API method unless the whole signature satisfies
+  `FastApiNoScopeMethod` (fast-api.h) — its `data` pointer dies at the next GC, and unwrapping
+  any other argument can trigger one (#4625). `FastApiArgType` enforces this; don't bypass it
 - **NEVER** unwrap `Ref<Object>` — use `V8Ref<v8::Object>` instead
 - `JSG_CATCH` is NOT a true catch — cannot rethrow with `throw`
 - `NonCoercible<T>` runs counter to Web IDL best practices; avoid in new APIs

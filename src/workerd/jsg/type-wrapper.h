@@ -492,6 +492,20 @@ class TypeWrapperOps {
   template <typename U>
   auto unwrapFastApi(jsg::Lock& js,
       v8::Local<v8::Context> context,
+      const v8::FastOneByteString& handle,
+      TypeErrorContext errorContext) -> U {
+    auto& self = static_cast<Self&>(*this);
+    auto maybe = self.tryUnwrap(js, context, handle, (kj::Decay<U>*)nullptr);
+    KJ_IF_SOME(result, maybe) {
+      return kj::fwd<RemoveMaybe<decltype(maybe)>>(result);
+    } else {
+      throwTypeError(js.v8Isolate, errorContext, Self::getName((kj::Decay<U>*)nullptr));
+    }
+  }
+
+  template <typename U>
+  auto unwrapFastApi(jsg::Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value>& arg,
       TypeErrorContext errorContext) -> RemoveRvalueRef<U> {
     return static_cast<Self&>(*this).template unwrap<U>(js, context, arg, errorContext);

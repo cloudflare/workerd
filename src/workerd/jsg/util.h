@@ -10,6 +10,7 @@
 
 #include <v8-array-buffer.h>
 #include <v8-exception.h>
+#include <v8-local-handle.h>
 #include <v8-primitive.h>
 #include <v8-promise.h>
 
@@ -347,6 +348,16 @@ struct LiftKj_ {
       isolate = info.GetIsolate();
     }
 
+    // A no-scope fast callback has no HandleScope, but throwing needs one. Only on the error path.
+    auto reportingError = [&](auto&& report) {
+      if constexpr (isFastApi) {
+        v8::HandleScope errorScope(isolate);
+        report();
+      } else {
+        report();
+      }
+    };
+
     try {
       try {
         if constexpr (isFastApi) {
@@ -371,15 +382,17 @@ struct LiftKj_ {
         // v8::Value representing the tunneled error, it itself may cause a JS exception to be
         // thrown. This is the reason for the nested try-catch blocks -- we need to be able to
         // swallow any JsExceptionThrown exceptions that this catch block generates.
-        throwInternalError(isolate, kj::mv(exception));
+        reportingError([&]() { throwInternalError(isolate, kj::mv(exception)); });
       }
     } catch (JsExceptionThrown&) {
       // nothing to do
     } catch (std::exception& exception) {
-      throwInternalError(isolate, exception.what());
+      reportingError([&]() { throwInternalError(isolate, exception.what()); });
     } catch (...) {
-      throwInternalError(
-          isolate, kj::str("caught unknown exception of type: ", kj::getCaughtExceptionType()));
+      reportingError([&]() {
+        throwInternalError(
+            isolate, kj::str("caught unknown exception of type: ", kj::getCaughtExceptionType()));
+      });
     }
 
     if constexpr (isFastApi && !isVoid<Ret>()) {

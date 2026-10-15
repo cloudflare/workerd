@@ -13,6 +13,7 @@
 #include <workerd/jsg/web-idl.h>
 #include <workerd/jsg/wrappable.h>
 
+#include <simdutf.h>
 #include <v8-container.h>
 #include <v8-date.h>
 
@@ -493,6 +494,33 @@ class StringWrapper {
       Lock& js, v8::Local<v8::Context> context, kj::Maybe<v8::Local<v8::Object>> creator, T value) {
     // TODO(cleanup): Move to a HeaderStringWrapper in the api directory.
     return v8Str(js.v8Isolate, value.asPtr());
+  }
+
+  // V8 hands over latin1 bytes pointing into its own heap. Nothing here may call into V8: the
+  // bytes must be copied before anything can GC.
+  template <StringLike T>
+  kj::Maybe<T> tryUnwrap(
+      Lock& js, v8::Local<v8::Context> context, const v8::FastOneByteString& handle, T*) {
+    size_t utf8Length = simdutf::utf8_length_from_latin1(handle.data, handle.length);
+    kj::String out = kj::heapString(utf8Length);
+    if (utf8Length == handle.length) {
+      // Pure ASCII, so latin1 and UTF-8 match.
+      out.asArray().copyFrom(kj::arrayPtr(handle.data, handle.length));
+    } else {
+      size_t actualLength =
+          simdutf::convert_latin1_to_utf8(handle.data, handle.length, out.begin());
+      KJ_DASSERT(actualLength == utf8Length);
+    }
+
+    if constexpr (kj::isSameType<kj::String, T>()) {
+      return kj::mv(out);
+    } else if constexpr (kj::isSameType<USVString, T>()) {
+      return USVString(kj::mv(out));
+    } else if constexpr (kj::isSameType<DOMString, T>()) {
+      return DOMString(kj::mv(out));
+    } else {
+      return out.releaseArray();
+    }
   }
 
   template <typename T>
