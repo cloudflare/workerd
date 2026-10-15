@@ -761,6 +761,58 @@ export const teeHeldByobRequestAfterCloseOrError = {
   },
 };
 
+// Ledger #7 through a held request: the released read holds one byte of a
+// Uint16Array, and the sibling has cancelled. Under TS close() succeeds and
+// the sole remaining branch errors alone at it, on the fractional fill;
+// that ends the source, which retires the request and lets the held read
+// go: no request is minted over it again. The source's cancel() never
+// runs, and the sibling's cancel() resolves undefined. C++ never errors
+// the branch, and the request stays, over the rest of the read's buffer.
+// The spec has close() itself throw the TypeError, the held read being the
+// source's own pull-into; the branch errors with it, as here.
+export const teeHeldByobRequestFractionalAtClose = {
+  async test() {
+    let controller;
+    let cancelled = false;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        controller = c;
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const reader = rs.getReader({ mode: 'byob' });
+    const read = reader.read(new Uint16Array(2), { min: 2 });
+    await scheduler.wait(5);
+    controller.byobRequest.view[0] = 1;
+    controller.byobRequest.respond(1);
+    const request = controller.byobRequest;
+    reader.releaseLock();
+    await rejectionOf(read);
+    const [a, b] = rs.tee();
+    const siblingCancel = b.cancel('sibling');
+    await scheduler.wait(5);
+    strictEqual(controller.byobRequest, request);
+    controller.close();
+    if (usingTsImpl) {
+      strictEqual(request.view, null);
+      strictEqual(controller.byobRequest, null);
+      strictEqual(
+        (await rejectionOf(a.getReader().read())).message,
+        'Insufficient bytes to fill elements in the given view'
+      );
+    } else {
+      strictEqual(request.view.byteLength, 3);
+      strictEqual(controller.byobRequest, request);
+      strictEqual((await a.getReader().read()).done, true);
+    }
+    strictEqual(await siblingCancel, undefined);
+    strictEqual(cancelled, false);
+  },
+};
+
 // tee() of a closed native body (drained, or cancelled) locks it like any
 // other tee(): a second tee() throws, and both branches are closed
 // (parity).

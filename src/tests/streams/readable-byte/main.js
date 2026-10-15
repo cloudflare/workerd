@@ -195,6 +195,7 @@ export {
   teeSoleBranchUsesHeldByobRequest,
   teeHeldByobRequestWithReleasedBytes,
   teeHeldByobRequestAfterCloseOrError,
+  teeHeldByobRequestFractionalAtClose,
   teeHeldByobRequestAcrossNestedTee,
   teeHeldByobRequestEnqueueFillsByobRead,
   teeHeldByobRequestNewViewAndAutoAllocate,
