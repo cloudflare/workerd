@@ -56,6 +56,9 @@ export default {
 export {
   sizeStrategyForBytes,
   autoAllocateChunkSizeValidated,
+  fractionalAutoAllocateChunkSize,
+  argumentConversionOrder,
+  conversionErrorPrecedence,
   byteHwmDefaultIsZero,
   syncStartThrow,
 } from 'construction';

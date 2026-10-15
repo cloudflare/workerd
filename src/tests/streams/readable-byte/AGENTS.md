@@ -16,7 +16,7 @@ behavior-parity (messages aside).
 | # | Area | C++ | TypeScript | Pinned in |
 | --- | --- | --- | --- | --- |
 | 1 | size() in a byte stream's strategy | silently accepted and ignored; with an invalid highWaterMark too, that highWaterMark's TypeError (integer conversion) | RangeError (spec), before the highWaterMark is checked — root of the WPT ctor seed | `sizeStrategyForBytes` |
-| 2 | autoAllocateChunkSize 0/-1/NaN | TypeError 'cannot be zero.' (all three) | TypeError 'must be a positive integer' | `autoAllocateChunkSizeValidated` |
+| 2 | autoAllocateChunkSize conversion (0, -1, NaN, 'a' and ±Infinity TypeError in both) | an int: those TypeError 'cannot be zero.'; a fraction truncates (1.5 and 3.9 give a default read 1- and 3-byte views); 2 ** 31 and up TypeError 'Value out of range' | a positive integer: those and any fraction TypeError 'must be a positive integer'; no upper bound (2 ** 31, 2 ** 53 and 2 ** 64 accepted). The spec's [EnforceRange] unsigned long long truncates a fraction and rejects anything above 2 ** 53 - 1 | `autoAllocateChunkSizeValidated`, `fractionalAutoAllocateChunkSize` |
 | 3 | pull counts (hwm 1, enqueue-in-pull) | 1,1,3 (readable ledger #4 mirror) | 1,2,3 (spec) | `pullCountShape` |
 | 4 | sync start() throw | captured; stream errored (readable #6 mirror) | escapes constructor (spec) | `syncStartThrow`, `jsSourceError` |
 | 5 | byobRequest on DEFAULT read, no autoAllocate | auto-allocates anyway: view(4096), or view(16384) under the UPDATED_AUTO_ALLOCATE_CHUNK_SIZE autogate (@all-autogates) | null (spec) — the subject of the streams_no_default_auto_allocate_chunk_size flag cell | `byobRequestOnDefaultRead` |
@@ -53,6 +53,8 @@ behavior-parity (messages aside).
 | 36 | (no divergence) a BYOB reader on a closed or errored stream with no controller (a branch of a closed native body's tee(), or the body new Request(request) makes of a closed or errored stream, a default stream's included) is accepted: the read resolves done with an empty view, or rejects with the stored error (the closed body itself, and a branch of a closed JS byte stream, which shares its controller, take one too) | same | same | `byobReaderOnSettledBranchOrDetachedBody` (parity) |
 | 37 | a BYOB reader on a closed or errored default stream, or a branch of its tee() (which shares its controller) | accepted, as on any closed or errored stream: the read resolves done with an empty view, or rejects with the stored error | TypeError 'BYOB reader can only be used on a stream with a byte source' (spec: the reader requires a byte stream controller, whatever the stream's state; a stream with no controller takes one, #36) | `byobReaderOnSettledDefaultStream` |
 | 38 | where `closed` settles relative to a readAtLeast() short of its minimum at a native body's end (#13) | the read fulfills with closed still pending, and the stream closes at the next read | closed first, then the read, as at a JS byte source's close() below min (#27). At a zero-byte end both resolve closed first, for read() and read(view) alike (parity, pinned alongside) | `closedOrderAtNativeEndOfData` |
+| 39 | ctor argument conversion order, every member of a byte source (the readable suite's #2 for a default source) | the source first, every member in its own order (type, autoAllocateChunkSize, start, pull, cancel, expectedLength), then the strategy: hwm and its ToNumber, size | the strategy first (spec); then source.type, then autoAllocateChunkSize, cancel, expectedLength, pull and start (the spec reads every member in lexicographic order, type last) | `argumentConversionOrder` |
+| 40 | which error wins when two are possible (the readable suite's #32; a zero autoAllocateChunkSize is checked after an invalid highWaterMark in both, spec, so the highWaterMark's error wins: #1's classes) | the source converts before the strategy, so a non-callable pull (TypeError) beats an invalid highWaterMark and a size function (spec); it also beats a negative autoAllocateChunkSize, which the int conversion accepts and a later range check rejects | a size function and an invalid highWaterMark are checked before pull is read, so their RangeErrors win; a negative autoAllocateChunkSize (TypeError) beats a non-callable pull (spec: it converts first) | `conversionErrorPrecedence` |
 
 Parity worth noting (probed, pinned): byte hwm defaults to 0 with NO
 automatic pull; pull-throw and error-then-throw identity; enqueue
@@ -125,7 +127,7 @@ named suite test pins directly, differing only in incidental asserts.
 
 | Module | Coverage |
 | --- | --- |
-| `construction.js` | ledger #1, #2, #4; byte hwm default 0 |
+| `construction.js` | ledger #1, #2, #4, #39, #40; byte hwm default 0 |
 | `pull-timing.js` | ledger #3, #33; pull-throw seeds |
 | `controller.js` | ledger #5, #7, #21, #22, #23; enqueue-discards-request; read-after-close and read-after-cancel; detach-at-call |
 | `byob-reader.js` | ledger #20, #28, #31, #36, #37; view-type matrix + offsets + auto-allocate sizing (migrated streams-byob-edge-cases) + mismatched sizes/types, subarray, multi-pending-reads, byobreaderRegression (migrated streams-js-test) |
