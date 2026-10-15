@@ -79,7 +79,13 @@ class TailStreamWriter final {
   // reported (the onset) we will arrange to acquire tailStream capabilities from each then use
   // those to report the initial onset.
   using Pending = kj::Array<kj::Own<WorkerInterface>>;
-  TailStreamWriter(Pending pending, kj::TaskSet& waitUntilTasks);
+
+  // Wraps each tail worker's TailStreamTarget before any events are delivered to it, allowing the
+  // embedder to rewrite events in transit.
+  using TargetWrapper = kj::Function<rpc::TailStreamTarget::Client(rpc::TailStreamTarget::Client)>;
+
+  TailStreamWriter(
+      Pending pending, kj::TaskSet& waitUntilTasks, kj::Maybe<TargetWrapper> wrapTarget = kj::none);
   KJ_DISALLOW_COPY_AND_MOVE(TailStreamWriter);
 
   void report(const InvocationSpanContext& context,
@@ -111,6 +117,7 @@ class TailStreamWriter final {
 
   kj::OneOf<Pending, kj::Vector<kj::Own<Active>>, Closed> inner;
   kj::TaskSet& waitUntilTasks;
+  kj::Maybe<TargetWrapper> wrapTarget;
 
   static kj::Promise<void> pump(kj::Own<Active> current);
   // Report an event to the tail stream writer.
@@ -123,6 +130,8 @@ class TailStreamWriter final {
 };
 
 kj::Maybe<kj::Own<tracing::TailStreamWriter>> initializeTailStreamWriter(
-    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers, kj::TaskSet& waitUntilTasks);
+    kj::Array<kj::Own<WorkerInterface>> streamingTailWorkers,
+    kj::TaskSet& waitUntilTasks,
+    kj::Maybe<TailStreamWriter::TargetWrapper> wrapTarget = kj::none);
 
 }  // namespace workerd::tracing
