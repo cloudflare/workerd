@@ -30,8 +30,9 @@ private-brand dispatch, no `instanceof`) apply here — see
 The spec's `tee()` gives each branch its own controller and queue, fed by a
 reader on the original. The queued backend instead has ONE queue with N
 consumers (cursors), one per live branch: `tee()` forks the stream's cursor
-into two branch cursors, removes the original's, and leaves the original a
-permanently locked, inert shell — it consumes nothing, and there is no
+into two branch cursors, removes the original's, and leaves the original an
+inert shell, permanently locked and disturbed (as C++ leaves it; the spec
+disturbs it at the tee's first read) — it consumes nothing, and there is no
 per-branch controller to close or error. A tee of a branch does the same to
 the branch: its two branches join the queue as consumers alongside their
 aunt. Consequences, all handled by the controller (`readable.ts`,
@@ -107,15 +108,17 @@ aunt. Consequences, all handled by the controller (`readable.ts`,
 A stream whose data moves to another stream is closed at the handoff,
 left locked and disturbed, and drops its controller
 (`closeReadableStreamHusk`): a teed branch (above), the source of a
-native-backed tee, and a native-backed stream whose source is extracted
+native-backed tee, a native-backed stream whose source is extracted
 (a native-to-native pipe, the C++ bridge's `pumpTo`) or detached (the
-bridge's `detach()`: `new Request(request)`, socket upgrades). The legacy
-C++ streams leave the same streams locked, disturbed and closed. The
-Node.js interop closed-promise settles then, and the interop error hook,
-which acts only on a readable stream, cannot reach the moved source. A
-queued stream detached from its source is the exception: it stays the
-controller's stream, closing and erroring with the source, and the hook
-on it errors the detached stream. Suites:
+bridge's `detach()`: `new Request(request)`, socket upgrades), and a
+detached queued stream other than the source's own stream (a tee
+branch, or a copy detached again). The legacy C++ streams leave the
+same streams locked, disturbed and closed. The Node.js interop
+closed-promise settles then, and the interop error hook, which acts only
+on a readable stream, cannot reach the moved source. A queued source's
+own stream, once detached, is the exception: it stays the controller's
+stream, closing and erroring with the source, and the hook on it errors
+the detached stream. Suites:
 `src/tests/node/stream/finished-and-abort.js`,
 `src/tests/streams/sockets/socket-streams.js`.
 

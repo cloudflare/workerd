@@ -212,6 +212,8 @@ export {
   disturbedStreamIntoResponse,
   lockedStreamIntoResponse,
   bodyIdentityAndLockCoupling,
+  teedStreamIntoResponse,
+  bodyUsedAfterBodyTee,
 } from 'integration-locked-disturbed';
 
 export {

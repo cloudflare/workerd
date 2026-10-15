@@ -863,3 +863,42 @@ export const finishedOnDetachedQueuedBodyFollowsSource = {
     await rejects(copy2.text(), (err) => err === boom);
   },
 };
+
+// A JS-backed stream that is not its source's own stream (a tee branch, or
+// a body that new Request(request) has already detached once), detached by
+// new Request(request), closes at the handoff, as a tee of it does
+// (finishedOnHandedOffStreamSettlesAtHandoff): finished() on it calls back
+// at once, before the source has closed, and its error hook does nothing,
+// so the detached body still reads to the end.
+export const finishedOnDetachedNonOwnQueuedBody = {
+  async test() {
+    if (!usingTsImpl) return;
+    const post = (body) =>
+      new Request('http://example.com/', { method: 'POST', body });
+    for (const bytes of [false, true]) {
+      const teed = sourceStream(bytes);
+      const [branch, sibling] = teed.stream.tee();
+      const branchRequest = post(branch);
+      const twice = sourceStream(bytes);
+      const once = new Request(post(twice.stream));
+      const husks = [branch, once.body];
+      const done = husks.map((husk) => callbackOf((cb) => finished(husk, cb)));
+      const copies = [new Request(branchRequest), new Request(once)];
+      for (const settled of done) {
+        strictEqual(await settlement(settled), 'settled');
+        strictEqual(await settled, undefined);
+      }
+      for (const husk of husks) {
+        husk[kControllerErrorFunction](new Error('ignored'));
+      }
+      for (const { controller } of [teed, twice]) {
+        controller.enqueue(new Uint8Array([97]));
+        controller.close();
+      }
+      for (const copy of copies) {
+        strictEqual(await copy.text(), 'a');
+      }
+      strictEqual(await new Response(sibling).text(), 'a');
+    }
+  },
+};
