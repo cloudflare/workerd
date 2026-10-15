@@ -2,7 +2,7 @@
 
 // Helpers shared by the webstreams modules. Leaf module: requires nothing.
 
-import type { QueuingStrategy, UnderlyingSink } from './types';
+import type { QueuingStrategy, Transformer, UnderlyingSink } from './types';
 
 const {
   BigInt,
@@ -210,6 +210,43 @@ function convertUnderlyingSink<W>(
   } as UnderlyingSinkDict<W>;
 }
 
+// A transformer as WebIDL converts it to a Transformer dictionary, before
+// the constructor checks anything: every member read once, in
+// lexicographic order, each callback checked, and the expectedLength
+// extension converted. readableType and writableType are kept as read, for
+// the TransformStream constructor to check. The callbacks still run with
+// the transformer itself as their receiver.
+interface TransformerDict<I, O> {
+  cancel: Transformer<I, O>['cancel'];
+  expectedLength: bigint | undefined;
+  flush: Transformer<I, O>['flush'];
+  readableType: unknown;
+  start: Transformer<I, O>['start'];
+  transform: Transformer<I, O>['transform'];
+  writableType: unknown;
+}
+
+function convertTransformer<I, O>(
+  transformer: Transformer<I, O>
+): TransformerDict<I, O> {
+  const members = transformer as {
+    expectedLength?: unknown;
+    readableType?: unknown;
+    writableType?: unknown;
+  };
+  // The members are read in the order listed.
+  return {
+    __proto__: kNullProtoObject,
+    cancel: convertCallback(transformer.cancel, 'transformer.cancel'),
+    expectedLength: normalizeExpectedLength(members.expectedLength),
+    flush: convertCallback(transformer.flush, 'transformer.flush'),
+    readableType: members.readableType,
+    start: convertCallback(transformer.start, 'transformer.start'),
+    transform: convertCallback(transformer.transform, 'transformer.transform'),
+    writableType: members.writableType,
+  } as TransformerDict<I, O>;
+}
+
 export type CommonHelpers = {
   isActualObject: typeof isActualObject;
   kNullProtoObject: typeof kNullProtoObject;
@@ -225,6 +262,7 @@ export type CommonHelpers = {
   extractHighWaterMark: typeof extractHighWaterMark;
   extractSizeAlgorithm: typeof extractSizeAlgorithm;
   convertUnderlyingSink: typeof convertUnderlyingSink;
+  convertTransformer: typeof convertTransformer;
 };
 
 module.exports = ObjectFreeze({
@@ -242,4 +280,5 @@ module.exports = ObjectFreeze({
   extractHighWaterMark,
   extractSizeAlgorithm,
   convertUnderlyingSink,
+  convertTransformer,
 });

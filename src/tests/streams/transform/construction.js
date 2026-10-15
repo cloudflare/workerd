@@ -252,12 +252,10 @@ export const strategyArgumentShapes = {
 // both strategies are converted, then readableType is checked, then each
 // highWaterMark's range, so readableType: 'bytes' and the readable
 // strategy getter's error both beat an invalid writable highWaterMark.
-// C++ converts every transformer member before it checks readableType,
-// as the spec does, so a non-callable start (TypeError) or a throwing
-// start getter beats readableType: 'bytes'. TypeScript checks
-// readableType as it reads it, in lexicographic order, so its RangeError
-// beats start, read later, but not flush, read earlier. Both check every
-// callback before either highWaterMark's range (spec).
+// Both convert every transformer member before they check readableType
+// (spec), so a non-callable start or flush (TypeError, messages differ)
+// or a throwing start getter beats readableType: 'bytes', and both check
+// every callback before either highWaterMark's range (spec).
 export const conversionErrorPrecedence = {
   test() {
     const boom = new Error('boom');
@@ -302,7 +300,7 @@ export const conversionErrorPrecedence = {
     };
     throws(
       () => new TransformStream({ readableType: 'bytes', start: 1 }),
-      usingTsImpl ? readableTypeError : startError
+      startError
     );
     throws(
       () =>
@@ -312,7 +310,7 @@ export const conversionErrorPrecedence = {
             throw boom;
           },
         }),
-      usingTsImpl ? readableTypeError : (e) => e === boom
+      (e) => e === boom
     );
     throws(() => new TransformStream({ readableType: 'bytes', flush: 1 }), {
       name: 'TypeError',

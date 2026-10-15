@@ -42,10 +42,10 @@ const {
   isActualObject,
   kNullProtoObject,
   kEnumerable,
-  normalizeExpectedLength,
   toStringTagProperty,
   requireObject,
   convertQueuingStrategy,
+  convertTransformer,
 } = require('webstreams/common') as CommonHelpers;
 
 const kPrivateSymbol: symbol = Symbol('private');
@@ -485,34 +485,22 @@ class TransformStream<I = unknown, O = unknown> {
     const writableStrategyDict = convertQueuingStrategy(writableStrategy);
     const readableStrategyDict = convertQueuingStrategy(readableStrategy);
 
-    // --- Transformer method extraction (alphabetical property reads) ---
-    const cancelFn = transformer.cancel;
-    if (cancelFn !== undefined && typeof cancelFn !== 'function') {
-      throw new TypeError('transformer.cancel must be a function');
-    }
-    // Non-standard workerd extension: the TOTAL bytes the readable side
-    // will produce (undefined = unknown). Advertised through the
-    // readable's controller so the C++ bridge derives a Content-Length
-    // for bodies built from this transform; not enforced here.
-    const expectedLength = normalizeExpectedLength(
-      (transformer as { expectedLength?: unknown }).expectedLength
-    );
-    const flushFn = transformer.flush;
-    if (flushFn !== undefined && typeof flushFn !== 'function') {
-      throw new TypeError('transformer.flush must be a function');
-    }
-    if (transformer.readableType !== undefined) {
+    // The body converts the transformer to a Transformer dictionary before
+    // it checks anything, so a bad callback beats readableType and
+    // writableType.
+    const {
+      cancel: cancelFn,
+      expectedLength,
+      flush: flushFn,
+      readableType,
+      start: startFn,
+      transform: transformFn,
+      writableType,
+    } = convertTransformer(transformer);
+    if (readableType !== undefined) {
       throw new RangeError('transformer.readableType must be undefined');
     }
-    const startFn = transformer.start;
-    if (startFn !== undefined && typeof startFn !== 'function') {
-      throw new TypeError('transformer.start must be a function');
-    }
-    const transformFn = transformer.transform;
-    if (transformFn !== undefined && typeof transformFn !== 'function') {
-      throw new TypeError('transformer.transform must be a function');
-    }
-    if (transformer.writableType !== undefined) {
+    if (writableType !== undefined) {
       throw new RangeError('transformer.writableType must be undefined');
     }
 
@@ -676,6 +664,10 @@ class TransformStream<I = unknown, O = unknown> {
         size: readableStrategyDict.size,
       }
     );
+    // Non-standard workerd extension: the TOTAL bytes the readable side
+    // will produce (undefined = unknown). Advertised through the
+    // readable's controller so the C++ bridge derives a Content-Length
+    // for bodies built from this transform; not enforced here.
     if (expectedLength !== undefined) {
       readableInternals.setControllerExpectedLength(
         this.#readableController as object,
