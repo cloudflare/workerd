@@ -704,6 +704,22 @@ constexpr kj::StringPtr ACTOR_SOURCE = R"JS(
   }
 )JS"_kj;
 
+constexpr kj::StringPtr LATE_REJECTION_ACTOR_SOURCE = R"JS(
+  import { DurableObject } from "cloudflare:workers";
+  globalThis.events = "";
+  globalThis.rejectPending = undefined;
+  export default class extends DurableObject {
+    startPending() {
+      globalThis.events += "startPending;";
+      return new Promise((resolve, reject) => { globalThis.rejectPending = reject; });
+    }
+    rejectPending() {
+      globalThis.events += "rejectPending;";
+      globalThis.rejectPending(new Error("late rejection"));
+    }
+  }
+)JS"_kj;
+
 struct StartedSession {
   rpc::JsRpcTarget::Client cap;
   kj::Promise<WorkerInterface::CustomEvent::Result> session;
@@ -787,7 +803,12 @@ class RetryClaimObserver final: public RequestObserver {
     }
   }
 
+  void reportFailure(const kj::Exception&, FailureSource) override {
+    ++failureCount;
+  }
+
   uint claimCount = 0;
+  uint failureCount = 0;
   IsRetryableHandler retryableAtClaim = IsRetryableHandler::NO;
   kj::String jsEventsAtClaim;
   kj::Maybe<kj::Exception> rejection;
@@ -797,6 +818,17 @@ TestFixture::SetupParams retryClaimActorParams(RetryClaimObserver& observer) {
   return {
     .mainModuleSource = RETRY_CLAIM_ACTOR_SOURCE,
     .actorId = Worker::Actor::Id(kj::str("jsrpc-claim-test")),
+    .actorClassName = "default"_kj,
+    .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
+        [&observer]() -> kj::Own<RequestObserver> { return kj::addRef(observer); }),
+  };
+}
+
+TestFixture::SetupParams observedActorParams(
+    RetryClaimObserver& observer, kj::StringPtr source, kj::StringPtr actorId) {
+  return {
+    .mainModuleSource = source,
+    .actorId = Worker::Actor::Id(kj::str(actorId)),
     .actorClassName = "default"_kj,
     .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
         [&observer]() -> kj::Own<RequestObserver> { return kj::addRef(observer); }),
@@ -837,6 +869,51 @@ KJ_TEST("a JSRPC session without calls does not claim") {
   session.wait(fixture.getWaitScope());
 
   KJ_EXPECT(observer->claimCount == 0);
+  KJ_EXPECT(observer->failureCount == 0);
+}
+
+KJ_TEST("a thrown JSRPC method reports its request failure exactly once") {
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  TestFixture fixture(observedActorParams(*observer, ACTOR_SOURCE, "jsrpc-failure-test"_kj));
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto [cap, session] = startSession(*entrypoint);
+
+  expectCallFailure(cap, "fail", fixture.getWaitScope());
+  KJ_EXPECT(observer->failureCount == 1);
+
+  cap = nullptr;
+  session.wait(fixture.getWaitScope());
+  KJ_EXPECT(observer->failureCount == 1);
+}
+
+KJ_TEST("a late JSRPC rejection after session cancellation is not reported") {
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  TestFixture fixture(
+      observedActorParams(*observer, LATE_REJECTION_ACTOR_SOURCE, "jsrpc-late-rejection-test"_kj));
+
+  {
+    auto entrypoint = fixture.makeWorkerEntrypoint();
+    auto [cap, session] = startSession(*entrypoint);
+    auto request = cap.callRequest();
+    request.setMethodName("startPending");
+    auto pendingCall = request.send();
+
+    // Let the method save its rejector before dropping every handle that keeps the call live.
+    fixture.getWaitScope().poll();
+    KJ_EXPECT(getJsEvents(fixture) == "startPending;");
+  }
+
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto [cap, session] = startSession(*entrypoint);
+  call(cap, "rejectPending", fixture.getWaitScope());
+  fixture.getWaitScope().poll();
+
+  KJ_EXPECT(getJsEvents(fixture) == "startPending;rejectPending;");
+  KJ_EXPECT(observer->failureCount == 0);
+
+  cap = nullptr;
+  session.wait(fixture.getWaitScope());
+  KJ_EXPECT(observer->failureCount == 0);
 }
 
 KJ_TEST("calls on a stub returned by the top-level JSRPC call do not claim") {
