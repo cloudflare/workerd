@@ -122,6 +122,7 @@ const {
   kNullProtoObject,
   kEnumerable,
   normalizeExpectedLength,
+  convertAutoAllocateChunkSize,
   toStringTagProperty,
   requireObject,
   toDictionary,
@@ -2158,16 +2159,14 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     this.#stream = stream;
 
     // --- Underlying source extraction (alphabetical property reads) ---
-    const autoAllocateChunkSize = underlyingSource.autoAllocateChunkSize;
-    if (autoAllocateChunkSize !== undefined) {
-      const size = +autoAllocateChunkSize;
-      // Approximates WebIDL [EnforceRange] unsigned long long plus the
-      // spec's explicit zero check.
-      if (NumberIsNaN(size) || size <= 0 || size % 1 !== 0) {
-        throw new TypeError('autoAllocateChunkSize must be a positive integer');
-      }
-      this.#autoAllocateChunkSize = size;
+    const autoAllocateChunkSize = convertAutoAllocateChunkSize(
+      underlyingSource.autoAllocateChunkSize
+    );
+    // The conversion accepts zero; the spec's setup step rejects it.
+    if (autoAllocateChunkSize === 0) {
+      throw new TypeError('autoAllocateChunkSize cannot be zero');
     }
+    this.#autoAllocateChunkSize = autoAllocateChunkSize;
     const cancelFn = underlyingSource.cancel;
     if (cancelFn !== undefined && typeof cancelFn !== 'function') {
       throw new TypeError('underlyingSource.cancel must be a function');

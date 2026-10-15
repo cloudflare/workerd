@@ -68,6 +68,26 @@ function normalizeExpectedLength(value: unknown): bigint | undefined {
   return BigInt(length - (length % 1));
 }
 
+// Converts a source's autoAllocateChunkSize as WebIDL converts an
+// [EnforceRange] unsigned long long: ToNumber, then NaN, ±Infinity and a
+// result outside [0, 2^53 - 1] are a TypeError, and a fraction truncates.
+// undefined means none. Zero passes: the byte controller rejects it itself,
+// after the highWaterMark, as the spec does.
+function convertAutoAllocateChunkSize(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  // Unary plus is ToNumber (see normalizeExpectedLength).
+  const size = +(value as number);
+  // The truncated value lies in [0, 2^53 - 1] exactly when the value lies
+  // in (-1, 2^53). NaN fails both comparisons.
+  if (!(size > -1 && size < 2 ** 53)) {
+    throw new TypeError(
+      'autoAllocateChunkSize must be a finite number from 0 to 2^53 - 1'
+    );
+  }
+  // Truncates, and turns -0 into 0.
+  return size - (size % 1);
+}
+
 // WebIDL's check that a value is an object, a function included: null and
 // every other primitive throw. Nothing is read. It converts an argument typed
 // `object` (an underlying source or sink, a transformer), and a dictionary
@@ -159,6 +179,7 @@ export type CommonHelpers = {
   kEnumerable: typeof kEnumerable;
   toStringTagProperty: typeof toStringTagProperty;
   normalizeExpectedLength: typeof normalizeExpectedLength;
+  convertAutoAllocateChunkSize: typeof convertAutoAllocateChunkSize;
   requireObject: typeof requireObject;
   toDictionary: typeof toDictionary;
   toStrategyDictionary: typeof toStrategyDictionary;
@@ -174,6 +195,7 @@ module.exports = ObjectFreeze({
   kEnumerable,
   toStringTagProperty,
   normalizeExpectedLength,
+  convertAutoAllocateChunkSize,
   requireObject,
   toDictionary,
   toStrategyDictionary,

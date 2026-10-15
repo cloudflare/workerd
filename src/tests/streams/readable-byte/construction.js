@@ -51,27 +51,37 @@ export const sizeStrategyForBytes = {
 
 // DIVERGENCE: autoAllocateChunkSize conversion. Zero, a negative number,
 // NaN, a non-numeric string and ±Infinity throw TypeError on both sides
-// (different messages). C++ converts the member as an int: a fraction
-// truncates (fractionalAutoAllocateChunkSize), and 2 ** 31 and up throw.
-// TypeScript requires a positive integer and sets no upper bound: a
-// fraction throws, and 2 ** 31, 2 ** 53 and 2 ** 64 are accepted. (The
-// spec's [EnforceRange] unsigned long long truncates a fraction and
-// rejects anything above 2 ** 53 - 1.)
+// (different messages), and a fraction truncates in both, so -0.5 is zero
+// (and fractionalAutoAllocateChunkSize). C++ converts the member as an
+// int, so 2 ** 31 and up throw. TypeScript converts it as the spec's
+// [EnforceRange] unsigned long long and then rejects zero, so it accepts
+// up to 2 ** 53 - 1 and throws from 2 ** 53.
 export const autoAllocateChunkSizeValidated = {
   test() {
-    for (const bad of [0, -1, NaN, 'a', Infinity, -Infinity]) {
+    const notZero = 'autoAllocateChunkSize cannot be zero';
+    const outOfRange =
+      'autoAllocateChunkSize must be a finite number from 0 to 2^53 - 1';
+    for (const [bad, message] of [
+      [0, notZero],
+      [-0.5, notZero],
+      [-1, outOfRange],
+      [NaN, outOfRange],
+      ['a', outOfRange],
+      [Infinity, outOfRange],
+      [-Infinity, outOfRange],
+    ]) {
       throws(
         () => new ReadableStream({ type: 'bytes', autoAllocateChunkSize: bad }),
         {
           name: 'TypeError',
           message: usingTsImpl
-            ? 'autoAllocateChunkSize must be a positive integer'
+            ? message
             : 'The autoAllocateChunkSize option cannot be zero.',
         }
       );
     }
     new ReadableStream({ type: 'bytes', autoAllocateChunkSize: 2 ** 31 - 1 });
-    for (const big of [2 ** 31, 2 ** 53, 2 ** 64]) {
+    for (const big of [2 ** 31, 2 ** 53 - 1]) {
       const construct = () =>
         new ReadableStream({ type: 'bytes', autoAllocateChunkSize: big });
       if (usingTsImpl) {
@@ -80,13 +90,18 @@ export const autoAllocateChunkSizeValidated = {
         throws(construct, outOfIntRange);
       }
     }
+    for (const big of [2 ** 53, 2 ** 64]) {
+      throws(
+        () => new ReadableStream({ type: 'bytes', autoAllocateChunkSize: big }),
+        usingTsImpl ? { name: 'TypeError', message: outOfRange } : outOfIntRange
+      );
+    }
   },
 };
 
-// DIVERGENCE: a fractional autoAllocateChunkSize. C++ truncates it, as
-// the spec's [EnforceRange] conversion does, so 1.5 and 3.9 give a
-// default read's byobRequest 1- and 3-byte views. TypeScript requires a
-// positive integer and throws TypeError (autoAllocateChunkSizeValidated).
+// (no divergence) A fractional autoAllocateChunkSize truncates, as the
+// spec's [EnforceRange] conversion does: 1.5 and 3.9 give a default
+// read's byobRequest 1- and 3-byte views.
 export const fractionalAutoAllocateChunkSize = {
   async test() {
     for (const [autoAllocateChunkSize, viewSize] of [
@@ -94,25 +109,17 @@ export const fractionalAutoAllocateChunkSize = {
       [3.9, 3],
     ]) {
       let seen;
-      const construct = () =>
-        new ReadableStream({
-          type: 'bytes',
-          autoAllocateChunkSize,
-          pull(c) {
-            const { view } = c.byobRequest;
-            seen = view.byteLength;
-            view[0] = 7;
-            c.byobRequest.respond(1);
-          },
-        });
-      if (usingTsImpl) {
-        throws(construct, {
-          name: 'TypeError',
-          message: 'autoAllocateChunkSize must be a positive integer',
-        });
-        continue;
-      }
-      const { value } = await construct().getReader().read();
+      const rs = new ReadableStream({
+        type: 'bytes',
+        autoAllocateChunkSize,
+        pull(c) {
+          const { view } = c.byobRequest;
+          seen = view.byteLength;
+          view[0] = 7;
+          c.byobRequest.respond(1);
+        },
+      });
+      const { value } = await rs.getReader().read();
       strictEqual(seen, viewSize);
       deepStrictEqual([...value], [7]);
     }
@@ -238,7 +245,8 @@ export const conversionErrorPrecedence = {
       usingTsImpl
         ? {
             name: 'TypeError',
-            message: 'autoAllocateChunkSize must be a positive integer',
+            message:
+              'autoAllocateChunkSize must be a finite number from 0 to 2^53 - 1',
           }
         : pullError
     );
