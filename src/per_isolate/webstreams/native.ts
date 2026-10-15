@@ -34,7 +34,9 @@
 //     and the default-read enqueue() path already covers source-allocated
 //     buffers.
 //     byobRequest === null ⇒ default read — the source allocates its OWN
-//     buffer and calls controller.enqueue(view).
+//     buffer and calls controller.enqueue(view). The view is never empty:
+//     as with respond(0), an empty answer would mean end-of-stream, for
+//     which close() is the verb, so enqueue() refuses one (TypeError).
 //   - The source calls enqueue-or-respond AT MOST ONCE per pull
 //     invocation and never pushes outside pull. desiredSize is exposed
 //     but the native source never consults it.
@@ -871,8 +873,16 @@ class NativePullConduit implements ByteStreamConsumerType {
         const { buffer, byteOffset, byteLength } = viewByteExtent(chunk);
         view = new Uint8Array(buffer, byteOffset, byteLength);
       }
+      const byteLength = TypedArrayPrototypeGetByteLength(view) as number;
+      if (byteLength === 0) {
+        throw new TypeError(
+          'enqueue() of an empty chunk is not supported for native ' +
+            'streams; an empty answer means end-of-stream — call close() ' +
+            'instead'
+        );
+      }
       // EXPECTED-LENGTH CONTRACT: overflow check before commit.
-      this.#accountDelivery(TypedArrayPrototypeGetByteLength(view) as number);
+      this.#accountDelivery(byteLength);
       this.#requests.shift();
       this.#deliveredThisPull = true;
       head.read.resolve(createReadResult(view, false));
