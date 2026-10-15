@@ -7,7 +7,7 @@
 // partial-respond alignment. Migrated from
 // streams-byob-edge-cases-test.js (all parity).
 
-import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert';
+import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 // Helper to create a byte stream that responds with data
@@ -686,5 +686,65 @@ export const nativeByobMultiByteViews = {
       strictEqual((await odd.read(new Uint16Array(4))).done, true);
       await odd.closed;
     }
+  },
+};
+
+// DIVERGENCE (ledger #36): a BYOB reader on a closed or errored stream with
+// no controller: a branch of a closed native body's tee(), or the body that
+// new Request(request) makes of a closed or errored stream. C++ gives any
+// closed or errored stream a BYOB reader, whose read resolves done with an
+// empty view or rejects with the stored error. TypeScript requires a
+// byte-capable controller, which these streams lack. The closed body
+// itself, and a branch of a closed JS byte stream, which shares its
+// controller, take a BYOB reader in both.
+export const byobReaderOnSettledBranchOrDetachedBody = {
+  async test() {
+    const readsDone = async (stream) => {
+      const { done, value } = await stream
+        .getReader({ mode: 'byob' })
+        .read(new Uint8Array(4));
+      strictEqual(done, true);
+      strictEqual(value.byteLength, 0);
+    };
+    const byteStream = (start) => new ReadableStream({ type: 'bytes', start });
+    const detach = (stream) =>
+      new Request(new Request('http://test/', { method: 'POST', body: stream }))
+        .body;
+
+    const cancelled = new Response('abc').body;
+    await cancelled.cancel();
+    const drained = new Response('abc').body;
+    const reader = drained.getReader();
+    while (!(await reader.read()).done);
+    reader.releaseLock();
+    const body = new Response('abc').body;
+    await body.cancel();
+    await readsDone(body);
+    await readsDone(byteStream((c) => c.close()).tee()[0]);
+
+    const boom = new Error('boom');
+    const closed = [
+      ...cancelled.tee(),
+      ...drained.tee(),
+      detach(byteStream((c) => c.close())),
+    ];
+    const errored = detach(byteStream((c) => c.error(boom)));
+    if (usingTsImpl) {
+      for (const stream of [...closed, errored]) {
+        throws(() => stream.getReader({ mode: 'byob' }), {
+          name: 'TypeError',
+          message:
+            'BYOB reader can only be used on a stream with a byte source',
+        });
+      }
+      return;
+    }
+    for (const stream of closed) {
+      await readsDone(stream);
+    }
+    await rejects(
+      errored.getReader({ mode: 'byob' }).read(new Uint8Array(4)),
+      (e) => e === boom
+    );
   },
 };

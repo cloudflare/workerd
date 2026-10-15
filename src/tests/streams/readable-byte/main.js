@@ -101,6 +101,7 @@ export {
   byobreaderRegression,
   partialViewThenDefaultRead,
   nativeByobMultiByteViews,
+  byobReaderOnSettledBranchOrDetachedBody,
 } from 'byob-reader';
 
 export {
