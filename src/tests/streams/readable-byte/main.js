@@ -102,6 +102,7 @@ export {
   partialViewThenDefaultRead,
   nativeByobMultiByteViews,
   byobReaderOnSettledBranchOrDetachedBody,
+  byobReaderOnSettledDefaultStream,
 } from 'byob-reader';
 
 export {
