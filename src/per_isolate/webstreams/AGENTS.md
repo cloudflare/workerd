@@ -177,7 +177,9 @@ connection.
   construction) is module-private, consumed only by readable.ts/writable.ts
   and the C++ bridge via the API-symbol registry. The C++ mocks in
   `js-readable-stream-test.c++` construct real `ReadableStreamNativeSource`
-  objects; no JS-visible marker export exists.
+  objects, or, for a source that breaks the contract, mark a plain object
+  with the `kNativeSource` symbol from that registry; no JS-visible marker
+  export exists.
 - Every stream instance carries an own, non-enumerable api-symbol brand
   (`kReadableStreamBrand` / `kWritableStreamBrand`), stamped at the very
   top of the constructor (before any early return). The C++ bridge's
