@@ -177,15 +177,26 @@ class ModuleRegistry {
         v8::Local<v8::Module> module,
         kj::Maybe<SyntheticModuleInfo> maybeSynthetic = kj::none);
 
-    // The ESM constructors below only read `compileCache` during the call.
+    // The ESM constructors below only read `compileCache` and `compileHints` during the call.
 
     // Compiles a bundle (user) module from UTF-8 source. The source is copied into the V8 heap,
     // so it only needs to outlive this call.
+    //
+    // `compileHints` lists the source positions of functions that V8 should compile together
+    // with the module, because they are expected to run soon, instead of preparsing them now and
+    // compiling them on their first call. A position is where V8 considers a function to start
+    // (SharedFunctionInfo::StartPosition(); for most functions the opening parenthesis of the
+    // parameter list), in UTF-16 code units of the source, as reported by
+    // v8::CompileHintsCollector for a compilation with kProduceCompileHints.
+    // Hints are only a performance input: positions at which no function starts are ignored, and
+    // they need not be sorted. A non-empty `compileCache` takes precedence, since V8 cannot
+    // consume a code cache and compile hints in one compilation.
     ModuleInfo(jsg::Lock& js,
         kj::StringPtr name,
         kj::ArrayPtr<const char> content,
         kj::ArrayPtr<const kj::byte> compileCache,
-        const CompilationObserver& observer);
+        const CompilationObserver& observer,
+        kj::ArrayPtr<const int> compileHints = nullptr);
 
     // Compiles a builtin module whose source V8 references without copying.
     ModuleInfo(jsg::Lock& js,

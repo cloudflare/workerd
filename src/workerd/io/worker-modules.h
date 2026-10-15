@@ -372,7 +372,7 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
     KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
       // TODO(soon): Make sure passing nullptr to compile cache is desired.
       return jsg::ModuleRegistry::ModuleInfo(
-          js, name, content.body, nullptr /* compile cache */, observer);
+          js, name, content.body, nullptr /* compile cache */, observer, content.compileHints);
     }
     KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
       return jsg::ModuleRegistry::ModuleInfo(js, name, content.namedExports,
