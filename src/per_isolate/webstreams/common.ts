@@ -2,7 +2,12 @@
 
 // Helpers shared by the webstreams modules. Leaf module: requires nothing.
 
-import type { QueuingStrategy, Transformer, UnderlyingSink } from './types';
+import type {
+  QueuingStrategy,
+  Transformer,
+  UnderlyingSink,
+  UnderlyingSource,
+} from './types';
 
 const {
   BigInt,
@@ -247,13 +252,65 @@ function convertTransformer<I, O>(
   } as TransformerDict<I, O>;
 }
 
+// WebIDL's conversion of the ReadableStreamType enum, whose one value is
+// 'bytes': ToString, so an object's toString() runs, then any other string
+// is a TypeError. undefined means absent.
+function convertReadableStreamType(value: unknown): 'bytes' | undefined {
+  if (value === undefined) return undefined;
+  const type = `${value as string}`;
+  if (type !== 'bytes') {
+    throw new TypeError(`Invalid underlying source type: ${type}`);
+  }
+  return type;
+}
+
+// An underlying source as WebIDL converts it to an UnderlyingSource
+// dictionary, before the constructor checks anything: every member read
+// once, in lexicographic order, each callback checked, type converted as
+// its enum, and autoAllocateChunkSize and the expectedLength extension
+// converted, on a default source too, although only a byte source uses
+// them. The callbacks still run with the source itself as their receiver.
+// S narrows the callbacks to one kind of source, once type is known.
+export interface UnderlyingSourceDict<
+  R,
+  S extends UnderlyingSource<R> = UnderlyingSource<R>,
+> {
+  autoAllocateChunkSize: number | undefined;
+  cancel: S['cancel'];
+  expectedLength: bigint | undefined;
+  pull: S['pull'];
+  start: S['start'];
+  type: 'bytes' | undefined;
+}
+
+function convertUnderlyingSource<R>(
+  source: UnderlyingSource<R>
+): UnderlyingSourceDict<R> {
+  const members = source as {
+    autoAllocateChunkSize?: unknown;
+    expectedLength?: unknown;
+    type?: unknown;
+  };
+  // The members are read in the order listed.
+  return {
+    __proto__: kNullProtoObject,
+    autoAllocateChunkSize: convertAutoAllocateChunkSize(
+      members.autoAllocateChunkSize
+    ),
+    cancel: convertCallback(source.cancel, 'underlyingSource.cancel'),
+    expectedLength: normalizeExpectedLength(members.expectedLength),
+    pull: convertCallback(source.pull, 'underlyingSource.pull'),
+    start: convertCallback(source.start, 'underlyingSource.start'),
+    type: convertReadableStreamType(members.type),
+  } as UnderlyingSourceDict<R>;
+}
+
 export type CommonHelpers = {
   isActualObject: typeof isActualObject;
   kNullProtoObject: typeof kNullProtoObject;
   kEnumerable: typeof kEnumerable;
   toStringTagProperty: typeof toStringTagProperty;
   normalizeExpectedLength: typeof normalizeExpectedLength;
-  convertAutoAllocateChunkSize: typeof convertAutoAllocateChunkSize;
   requireObject: typeof requireObject;
   toDictionary: typeof toDictionary;
   toStrategyDictionary: typeof toStrategyDictionary;
@@ -263,6 +320,7 @@ export type CommonHelpers = {
   extractSizeAlgorithm: typeof extractSizeAlgorithm;
   convertUnderlyingSink: typeof convertUnderlyingSink;
   convertTransformer: typeof convertTransformer;
+  convertUnderlyingSource: typeof convertUnderlyingSource;
 };
 
 module.exports = ObjectFreeze({
@@ -271,7 +329,6 @@ module.exports = ObjectFreeze({
   kEnumerable,
   toStringTagProperty,
   normalizeExpectedLength,
-  convertAutoAllocateChunkSize,
   requireObject,
   toDictionary,
   toStrategyDictionary,
@@ -281,4 +338,5 @@ module.exports = ObjectFreeze({
   extractSizeAlgorithm,
   convertUnderlyingSink,
   convertTransformer,
+  convertUnderlyingSource,
 });

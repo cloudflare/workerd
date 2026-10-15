@@ -116,19 +116,18 @@ const {
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
 
-import type { CommonHelpers } from './common';
+import type { CommonHelpers, UnderlyingSourceDict } from './common';
 const {
   isActualObject,
   kNullProtoObject,
   kEnumerable,
-  normalizeExpectedLength,
-  convertAutoAllocateChunkSize,
   toStringTagProperty,
   requireObject,
   toDictionary,
   convertQueuingStrategy,
   extractHighWaterMark,
   extractSizeAlgorithm,
+  convertUnderlyingSource,
 } = require('webstreams/common') as CommonHelpers;
 
 import type { ViewExtentHelpers } from './view-extent';
@@ -1513,31 +1512,19 @@ class ReadableStreamDefaultController<
   constructor(
     privateSymbol: symbol,
     stream: ReadableStream<R>,
+    // The hooks' receiver, and its members as the ReadableStream
+    // constructor converted them.
     underlyingSource: UnderlyingDefaultSource<R>,
+    sourceDict: UnderlyingSourceDict<R, UnderlyingDefaultSource<R>>,
     sizeAlgorithm: (chunk: R) => number,
     highWaterMark: number
   ) {
     assertPrivateSymbol(privateSymbol);
     this.#stream = stream;
 
-    // --- Underlying source method extraction ---
-    // Methods are read ONCE here (spec: dictionary conversion /
-    // CreateAlgorithmFromUnderlyingMethod) and invoked via captured
-    // uncurryThis wrappers with the source object as `this`. Property reads
-    // are in alphabetical order to match WebIDL dictionary conversion.
-    const cancelFn = underlyingSource.cancel;
-    if (cancelFn !== undefined && typeof cancelFn !== 'function') {
-      throw new TypeError('underlyingSource.cancel must be a function');
-    }
-    const pullFn = underlyingSource.pull;
-    if (pullFn !== undefined && typeof pullFn !== 'function') {
-      throw new TypeError('underlyingSource.pull must be a function');
-    }
-    const startFn = underlyingSource.start;
-    if (startFn !== undefined && typeof startFn !== 'function') {
-      throw new TypeError('underlyingSource.start must be a function');
-    }
-
+    // The hooks run through captured uncurryThis wrappers, with the source
+    // object as `this` (spec CreateAlgorithmFromUnderlyingMethod).
+    const { cancel: cancelFn, pull: pullFn, start: startFn } = sourceDict;
     if (cancelFn !== undefined) {
       const callCancel = uncurryThis(cancelFn);
       // Spec PromiseCall: sync throws become rejections; result is always
@@ -2152,40 +2139,33 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   constructor(
     privateSymbol: symbol,
     stream: ReadableStream<Uint8Array>,
+    // The hooks' receiver, and its members as the ReadableStream
+    // constructor converted them.
     underlyingSource: UnderlyingByteSource,
+    sourceDict: UnderlyingSourceDict<Uint8Array, UnderlyingByteSource>,
     highWaterMark: number
   ) {
     assertPrivateSymbol(privateSymbol);
     this.#stream = stream;
 
-    // --- Underlying source extraction (alphabetical property reads) ---
-    const autoAllocateChunkSize = convertAutoAllocateChunkSize(
-      underlyingSource.autoAllocateChunkSize
-    );
-    // The conversion accepts zero; the spec's setup step rejects it.
+    const {
+      autoAllocateChunkSize,
+      cancel: cancelFn,
+      expectedLength,
+      pull: pullFn,
+      start: startFn,
+    } = sourceDict;
+    // The conversion accepts zero; the spec's setup step rejects it, after
+    // the highWaterMark.
     if (autoAllocateChunkSize === 0) {
       throw new TypeError('autoAllocateChunkSize cannot be zero');
     }
     this.#autoAllocateChunkSize = autoAllocateChunkSize;
-    const cancelFn = underlyingSource.cancel;
-    if (cancelFn !== undefined && typeof cancelFn !== 'function') {
-      throw new TypeError('underlyingSource.cancel must be a function');
-    }
-    // Non-standard extension (byte streams only): the TOTAL bytes this
-    // source promises to produce. Read once and cached; this controller
-    // enforces the contract at enqueue/respond (overflow) and close()
-    // (underflow). Exposed to the C++ bridge via the DrainingReader.
-    this.#expectedLength = normalizeExpectedLength(
-      underlyingSource.expectedLength
-    );
-    const pullFn = underlyingSource.pull;
-    if (pullFn !== undefined && typeof pullFn !== 'function') {
-      throw new TypeError('underlyingSource.pull must be a function');
-    }
-    const startFn = underlyingSource.start;
-    if (startFn !== undefined && typeof startFn !== 'function') {
-      throw new TypeError('underlyingSource.start must be a function');
-    }
+    // Non-standard extension, used by byte streams only: the TOTAL bytes
+    // this source promises to produce. This controller enforces the
+    // contract at enqueue/respond (overflow) and close() (underflow).
+    // Exposed to the C++ bridge via the DrainingReader.
+    this.#expectedLength = expectedLength;
 
     if (cancelFn !== undefined) {
       const callCancel = uncurryThis(cancelFn);
@@ -2762,12 +2742,14 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 function setupReadableByteStreamControllerFromUnderlyingSource<R>(
   stream: ReadableStream<R>,
   underlyingSource: UnderlyingSource<R>,
+  sourceDict: UnderlyingSourceDict<R>,
   highWaterMark: number
 ): ReadableByteStreamControllerType {
   return new ReadableByteStreamController(
     kPrivateSymbol,
     stream as unknown as ReadableStream<Uint8Array>,
     underlyingSource as UnderlyingByteSource,
+    sourceDict as UnderlyingSourceDict<Uint8Array, UnderlyingByteSource>,
     highWaterMark
   );
 }
@@ -2775,6 +2757,7 @@ function setupReadableByteStreamControllerFromUnderlyingSource<R>(
 function setupReadableStreamDefaultControllerFromUnderlyingSource<R>(
   stream: ReadableStream<R>,
   underlyingSource: UnderlyingSource<R>,
+  sourceDict: UnderlyingSourceDict<R>,
   sizeAlgorithm: (chunk: R) => number,
   highWaterMark: number
 ): ReadableStreamDefaultControllerType {
@@ -2782,6 +2765,7 @@ function setupReadableStreamDefaultControllerFromUnderlyingSource<R>(
     kPrivateSymbol,
     stream,
     underlyingSource as UnderlyingDefaultSource<R>,
+    sourceDict as UnderlyingSourceDict<R, UnderlyingDefaultSource<R>>,
     sizeAlgorithm,
     highWaterMark
   ) as ReadableStreamDefaultControllerType;
@@ -4551,15 +4535,12 @@ class ReadableStream<R> {
     // constructor body converts the source to an UnderlyingSource
     // dictionary and reads its members.
     const strategyDict = convertQueuingStrategy(strategy);
+    // The body converts the source before it checks anything, so a bad
+    // callback beats a byte stream's size function and an invalid
+    // highWaterMark. The conversion rejects any type but 'bytes'.
+    const sourceDict = convertUnderlyingSource<R>(underlyingSource);
 
-    // WebIDL: the 'type' member is a string enum — perform ToString() on
-    // non-undefined values so that objects with toString()/valueOf() work
-    // (per spec: "Let type be ? Get(underlyingSourceDict, "type").
-    //  If type is not undefined, set type to ? ToString(type).")
-    const rawType = underlyingSource.type;
-    const type = rawType === undefined ? undefined : `${rawType}`;
-
-    if (type === 'bytes') {
+    if (sourceDict.type === 'bytes') {
       // Byte streams: size() is forbidden, highWaterMark defaults to 0.
       if (strategyDict.size !== undefined) {
         throw new RangeError(
@@ -4569,20 +4550,16 @@ class ReadableStream<R> {
       this.#controller = setupReadableByteStreamControllerFromUnderlyingSource(
         this,
         underlyingSource,
+        sourceDict,
         extractHighWaterMark(strategyDict, 0)
       );
     } else {
-      // The spec says, "Assert: underlyingSourceDict["type"] does not exist"
-      // but we're not going to be that strict about it. We'll assert only
-      // that its value is `undefined`.
-      if (type !== undefined) {
-        throw new TypeError(`Invalid underlying source type: ${type}`);
-      }
       // Default streams: highWaterMark defaults to 1.
       this.#controller =
         setupReadableStreamDefaultControllerFromUnderlyingSource(
           this,
           underlyingSource,
+          sourceDict,
           extractSizeAlgorithm<R>(strategyDict),
           extractHighWaterMark(strategyDict, 1)
         );

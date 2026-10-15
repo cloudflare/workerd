@@ -130,10 +130,9 @@ export const fractionalAutoAllocateChunkSize = {
 // logged (the readable suite's argumentConversionOrder, ledger #2, for a
 // default source). The spec (TypeScript) converts the strategy first
 // (highWaterMark and its ToNumber, then size), then the source; C++
-// converts the source first, then the strategy in the same order. C++
-// reads every member of the source in its own order; TypeScript reads
-// type, then the byte controller's members in lexicographic order. The
-// spec reads every member in lexicographic order, type last.
+// converts the source first, then the strategy in the same order. Both
+// read every member of the source: C++ in its own order, TypeScript in
+// the spec's lexicographic order.
 export const argumentConversionOrder = {
   test() {
     const order = [];
@@ -174,12 +173,12 @@ export const argumentConversionOrder = {
       usingTsImpl
         ? [
             ...strategy,
-            'source.type',
             'source.autoAllocateChunkSize',
             'source.cancel',
             'source.expectedLength',
             'source.pull',
             'source.start',
+            'source.type',
           ]
         : [
             'source.type',
@@ -195,23 +194,24 @@ export const argumentConversionOrder = {
 };
 
 // DIVERGENCE: which error wins when two are possible on a byte source
-// (the readable suite's conversionErrorPrecedence). The spec converts
-// every member of the source before it checks the strategy, and C++
-// converts the source before the strategy, so a non-callable pull
-// (TypeError) beats an invalid highWaterMark and a size function there;
-// TypeScript checks both before it reads pull, so their RangeErrors win.
-// A negative autoAllocateChunkSize beats a non-callable pull under
-// TypeScript, as in the spec, where autoAllocateChunkSize converts
-// first; C++'s int accepts -1 and checks its range later, so pull's
-// TypeError wins. Both check a zero autoAllocateChunkSize after the
-// highWaterMark (spec), whose error wins: TypeError in C++, RangeError
-// in TypeScript, as for any invalid highWaterMark.
+// (the readable suite's conversionErrorPrecedence). Both convert every
+// member of the source before they check the strategy or a zero
+// autoAllocateChunkSize (spec), so a non-callable pull (TypeError,
+// messages differ) beats an invalid highWaterMark, a size function and a
+// zero autoAllocateChunkSize. A negative autoAllocateChunkSize beats a
+// non-callable pull under TypeScript, as in the spec, where
+// autoAllocateChunkSize converts first; C++'s int accepts -1 and checks
+// its range later, so pull's TypeError wins. Both check a zero
+// autoAllocateChunkSize after the highWaterMark (spec), whose error
+// wins: TypeError in C++, RangeError in TypeScript, as for any invalid
+// highWaterMark.
 export const conversionErrorPrecedence = {
   test() {
     const pullError = {
       name: 'TypeError',
-      message:
-        "Incorrect type for the 'pull' field on 'UnderlyingSource': the provided value is not of type 'function'.",
+      message: usingTsImpl
+        ? 'underlyingSource.pull must be a function'
+        : "Incorrect type for the 'pull' field on 'UnderlyingSource': the provided value is not of type 'function'.",
     };
     const highWaterMarkError = usingTsImpl
       ? { name: 'RangeError', message: 'Invalid highWaterMark' }
@@ -223,17 +223,20 @@ export const conversionErrorPrecedence = {
     throws(
       () =>
         new ReadableStream({ type: 'bytes', pull: 1 }, { highWaterMark: -1 }),
-      usingTsImpl ? highWaterMarkError : pullError
+      pullError
     );
     throws(
       () => new ReadableStream({ type: 'bytes', pull: 1 }, { size() {} }),
-      usingTsImpl
-        ? {
-            name: 'RangeError',
-            message:
-              'The strategy for a byte stream cannot have a size function',
-          }
-        : pullError
+      pullError
+    );
+    throws(
+      () =>
+        new ReadableStream({
+          type: 'bytes',
+          autoAllocateChunkSize: 0,
+          pull: 1,
+        }),
+      pullError
     );
     throws(
       () =>
