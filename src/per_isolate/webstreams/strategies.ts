@@ -6,7 +6,7 @@ import type { CommonHelpers } from './common';
 
 const { ObjectDefineProperties, SymbolToStringTag, TypeError } = primordials;
 
-const { isActualObject, kEnumerable, toStringTagProperty } =
+const { isActualObject, kEnumerable, requireObject, toStringTagProperty } =
   require('webstreams/common') as CommonHelpers;
 
 // Per spec, the size function is the SAME function object for every
@@ -44,11 +44,10 @@ class ByteLengthQueuingStrategy {
   }
 
   // The init type is optional-shaped because user input is arbitrary; the
-  // required-member check is the explicit TypeError below.
+  // required-member check is the explicit TypeError below. A dictionary with
+  // a required member cannot be converted from undefined or null.
   constructor(init: { highWaterMark?: number }) {
-    if (!isActualObject(init)) {
-      throw new TypeError('init must be an object');
-    }
+    requireObject(init, 'init must be an object');
     // Read once, as WebIDL dictionary conversion reads each member once.
     const highWaterMark = init.highWaterMark;
     if (highWaterMark === undefined) {
@@ -82,9 +81,7 @@ class CountQueuingStrategy {
   }
 
   constructor(init: { highWaterMark?: number }) {
-    if (!isActualObject(init)) {
-      throw new TypeError('init must be an object');
-    }
+    requireObject(init, 'init must be an object');
     // Read once, as WebIDL dictionary conversion reads each member once.
     const highWaterMark = init.highWaterMark;
     if (highWaterMark === undefined) {

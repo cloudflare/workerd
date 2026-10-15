@@ -745,10 +745,12 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
-  // Received runAlarm (called from C++, not JS).
+  // Received runAlarm (called from C++, not JS). `incomingRequest` is the alarm's own incoming
+  // request, which must outlive the returned promise.
   kj::Promise<WorkerInterface::AlarmResult> runAlarm(kj::Date scheduledTime,
       kj::Duration timeout,
       uint32_t retryCount,
+      IoContext_IncomingRequest& incomingRequest,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
@@ -828,7 +830,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       jsg::Arguments<jsg::Value> args);
   void clearTimeout(jsg::Lock& js, kj::Maybe<jsg::JsNumber> timeoutId);
 
-  TimeoutId::NumberType setTimeoutInternal(jsg::Function<void()> function, double msDelay);
+  // `asyncTraceName` names the timer's async trace resource (see IoContext::setTimeoutImpl()).
+  TimeoutId::NumberType setTimeoutInternal(
+      jsg::Function<void()> function, double msDelay, kj::StringPtr asyncTraceName);
 
   TimeoutId::NumberType setInterval(jsg::Lock& js,
       jsg::Function<void(jsg::Arguments<jsg::Value>)> function,

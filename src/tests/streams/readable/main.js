@@ -22,6 +22,7 @@ export {
   controllerNotConstructable,
   getReaderBadModeThrows,
   defaultStreamNoByobReader,
+  getReaderOptionsShapes,
   lockedLifecycle,
 } from 'api-surface';
 
@@ -29,6 +30,8 @@ export {
   garbageSourceValidation,
   invalidTypeValidation,
   argumentConversionOrder,
+  strategyArgumentShapes,
+  conversionErrorPrecedence,
   highWaterMarkValidated,
   hwmDefaultIsOne,
 } from 'construction';
@@ -140,6 +143,7 @@ export {
   asyncIteratorReturnMethod,
   asyncIteratorReturnThenNext,
   asyncIteratorPreventCancel,
+  valuesOptionsShapes,
   asyncIteratorOnClosedStream,
   asyncIteratorOnErroredStream,
   asyncIteratorLocksStream,
@@ -236,6 +240,8 @@ export {
 
 export {
   drainingReaderSweepsQueuedBacklog,
+  drainingReaderMaxSizeEndsAtClose,
+  drainingReaderSizeOverflowEndsAtClose,
   drainingReaderPullDriven,
   drainingReaderErrorPropagation,
   drainingReaderCancelReachesSource,

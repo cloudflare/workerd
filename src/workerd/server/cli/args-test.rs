@@ -62,6 +62,9 @@ fn serve_options() {
         "--control-fd=3",
         "--inspector-addr=127.0.0.1:9229",
         "--inspector-addr=127.0.0.1:9230",
+        "--async-trace=trace.ndjson",
+        "--async-trace-stacks=8",
+        "--async-trace-promises",
     ])
     .command
     else {
@@ -78,6 +81,9 @@ fn serve_options() {
         serve_or_test.inspector_addr.as_deref(),
         Some("127.0.0.1:9230")
     );
+    assert_eq!(serve_or_test.async_trace.as_deref(), Some("trace.ndjson"));
+    assert_eq!(serve_or_test.async_trace_stacks, Some(8));
+    assert!(serve_or_test.async_trace_promises);
     assert_eq!(serve.control_fd, Some(3));
     assert_eq!(
         serve.socket_addr_overrides,

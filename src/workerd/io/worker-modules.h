@@ -480,6 +480,10 @@ jsg::Bundle::Reader retrievePyodideBundle(
 // variants.
 //
 // This function is used by both workerd and edgeworker.
+//
+// `pyodideWasmModuleHolder`, if given, must outlive the registry. Pyodide's pyodide.asm.wasm is
+// then instantiated from it: once a Python isolate has stored a compilation there, later Python
+// isolates with the same Wasm compile setting reuse it instead of compiling again.
 template <typename TracerApi, class Registry>
 void registerPythonCommonModules(jsg::Lock& lock,
     Registry& modules,
@@ -494,7 +498,8 @@ void registerPythonCommonModules(jsg::Lock& lock,
     kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
     kj::Maybe<jsg::Ref<api::pyodide::DiskCache>> diskCache,
     kj::Maybe<jsg::Ref<TracerApi>> internalJaeger,
-    kj::Maybe<jsg::ModuleRegistry::ModuleCallback> maybeLimiter) {
+    kj::Maybe<jsg::ModuleRegistry::ModuleCallback> maybeLimiter,
+    kj::Maybe<const jsg::CompiledWasmModuleHolder&> pyodideWasmModuleHolder = kj::none) {
   KJ_REQUIRE(featureFlags.getPythonWorkers(),
       "The python_workers compatibility flag is required to use Python.");
 
@@ -505,7 +510,11 @@ void registerPythonCommonModules(jsg::Lock& lock,
   auto pythonRelease = KJ_REQUIRE_NONNULL(getPythonSnapshotRelease(featureFlags));
 
   // Inject pyodide bundle.
-  modules.addBuiltinBundle(pyodideBundle);
+  KJ_IF_SOME(holder, pyodideWasmModuleHolder) {
+    modules.addBuiltinBundle(pyodideBundle, holder);
+  } else {
+    modules.addBuiltinBundle(pyodideBundle);
+  }
 
   modules.addBuiltinModule("pyodide-internal:runtime-generated/metadata",
       lock.alloc<PyodideMetadataReader>(workerd::modules::python::createPyodideMetadataState(source,
@@ -568,6 +577,8 @@ void registerPythonWorkerdModules(jsg::Lock& lockParam,
   auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
   auto version = getPythonBundleName(pythonRelease);
   auto bundle = retrievePyodideBundle(pythonConfig, version);
+  auto& wasmModuleHolder =
+      KJ_ASSERT_NONNULL(pythonConfig.pyodideBundleManager.getPyodideWasmModuleHolder(version));
 
   // Inject pyodide bootstrap module (TODO: load this from the capnproto bundle?)
   {
@@ -604,7 +615,7 @@ void registerPythonWorkerdModules(jsg::Lock& lockParam,
   modules::python::registerPythonCommonModules<api::pyodide::DisabledInternalJaeger>(lockParam,
       modules, featureFlags, bundle, source, kj::mv(snapshot), api::pyodide::IsWorkerd::YES,
       api::pyodide::IsTracing::NO, snapshotToDisk, createBaselineSnapshot, kj::mv(artifacts),
-      kj::mv(diskCache), kj::none /* internalJaeger */, kj::none /* limiter */);
+      kj::mv(diskCache), kj::none /* internalJaeger */, kj::none /* limiter */, wasmModuleHolder);
 }
 }  // namespace modules::python
 

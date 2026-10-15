@@ -170,12 +170,15 @@ pub mod ffi {
     // =====================================================================================
     // The command line (bootstrap.h): the options the C++ driver applies, and the driver itself.
 
-    /// The options of `serve` and `test` the C++ driver applies: to the process (perfetto), or
-    /// to the worker factory (experimental, Python).
+    /// The options of `serve` and `test` the C++ driver applies: to the process (perfetto, the
+    /// async trace file), or to the worker factory (async tracing, experimental, Python).
     #[namespace = "workerd::server::cli"]
     struct ServeOrTestOptions {
         perfetto_trace_path: KjMaybe<String>,
         perfetto_trace_categories: KjMaybe<String>,
+        async_trace_path: KjMaybe<String>,
+        async_trace_stacks: KjMaybe<u32>,
+        async_trace_promises: bool,
         experimental: bool,
         pyodide_package_disk_cache_dir: KjMaybe<String>,
         pyodide_bundle_disk_cache_dir: KjMaybe<String>,

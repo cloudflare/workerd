@@ -61,8 +61,16 @@ const { nativeStreamInternals } = require('webstreams/native') as {
 const { kExtractNativeSink, isNativeUnderlyingSink } = nativeStreamInternals;
 
 import type { CommonHelpers } from './common';
-const { isActualObject, kNullProtoObject, kEnumerable, toStringTagProperty } =
-  require('webstreams/common') as CommonHelpers;
+const {
+  isActualObject,
+  kNullProtoObject,
+  kEnumerable,
+  toStringTagProperty,
+  requireObject,
+  convertQueuingStrategy,
+  extractHighWaterMark,
+  extractSizeAlgorithm,
+} = require('webstreams/common') as CommonHelpers;
 
 import type { ViewExtentHelpers } from './view-extent';
 const { viewByteLength } =
@@ -791,37 +799,18 @@ class WritableStream<W = unknown> {
       value: true,
     } as PropertyDescriptor);
 
-    // --- WebIDL strategy dictionary conversion (BEFORE sink reads) ---
-    // Per WebIDL, dictionary-typed arguments are converted at the IDL
-    // layer before the constructor body runs. strategy is QueuingStrategy
-    // (a dictionary); underlyingSink is plain object.
-    const sizeFn = strategy.size;
-    let sizeAlgorithm: (chunk: W) => number;
-    if (sizeFn === undefined) {
-      sizeAlgorithm = () => 1;
-    } else if (typeof sizeFn !== 'function') {
-      throw new TypeError('strategy.size must be a function');
-    } else {
-      const callSize = uncurryThis(sizeFn);
-      sizeAlgorithm = (chunk: W) => callSize(undefined, chunk);
-    }
-    // Read once, as WebIDL dictionary conversion reads each member once.
-    const rawHWM = strategy.highWaterMark;
-    let highWaterMark = 1;
-    if (rawHWM !== undefined) {
-      highWaterMark = +rawHWM;
-      if (NumberIsNaN(highWaterMark) || highWaterMark < 0) {
-        throw new RangeError('Invalid highWaterMark');
-      }
-    }
+    // WebIDL converts the arguments at the IDL layer, before the constructor
+    // body runs: the sink is typed `object` (null and every other primitive
+    // throw, nothing is read), the strategy is a QueuingStrategy dictionary.
+    requireObject(underlyingSink, 'underlyingSink must be an object');
+    const strategyDict = convertQueuingStrategy(strategy);
 
     // --- Now read underlyingSink properties ---
-    if (!isActualObject(underlyingSink)) {
-      throw new TypeError('underlyingSink must be an object');
-    }
     if (underlyingSink.type !== undefined) {
       throw new RangeError('Invalid underlying sink type');
     }
+    const sizeAlgorithm = extractSizeAlgorithm<W>(strategyDict);
+    const highWaterMark = extractHighWaterMark(strategyDict, 1);
 
     // Native sink detection: the standard WritableStream machinery
     // drives the sink via start/write/close/abort as-is. The marker

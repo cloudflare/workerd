@@ -44,6 +44,8 @@ const {
   kEnumerable,
   normalizeExpectedLength,
   toStringTagProperty,
+  requireObject,
+  convertQueuingStrategy,
 } = require('webstreams/common') as CommonHelpers;
 
 const kPrivateSymbol: symbol = Symbol('private');
@@ -471,17 +473,17 @@ class TransformStream<I = unknown, O = unknown> {
   }
 
   constructor(
-    transformer?: Transformer<I, O>,
-    writableStrategy?: QueuingStrategy<I>,
-    readableStrategy?: QueuingStrategy<O>
+    transformer: Transformer<I, O> = kNullProtoObject as Transformer<I, O>,
+    writableStrategy: QueuingStrategy<I> = kNullProtoObject as QueuingStrategy<I>,
+    readableStrategy: QueuingStrategy<O> = kNullProtoObject as QueuingStrategy<O>
   ) {
-    transformer ??= kNullProtoObject as Transformer<I, O>;
-    writableStrategy ??= kNullProtoObject as QueuingStrategy<I>;
-    readableStrategy ??= kNullProtoObject as QueuingStrategy<O>;
-
-    if (!isActualObject(transformer)) {
-      throw new TypeError('transformer must be an object');
-    }
+    // WebIDL converts the arguments at the IDL layer, before the constructor
+    // body runs: the transformer is typed `object` (null and every other
+    // primitive throw, nothing is read), and each strategy is a
+    // QueuingStrategy dictionary, the writable's first.
+    requireObject(transformer, 'transformer must be an object');
+    const writableStrategyDict = convertQueuingStrategy(writableStrategy);
+    const readableStrategyDict = convertQueuingStrategy(readableStrategy);
 
     // --- Transformer method extraction (alphabetical property reads) ---
     const cancelFn = transformer.cancel;
@@ -541,11 +543,13 @@ class TransformStream<I = unknown, O = unknown> {
       startFn === undefined &&
       transformFn === undefined;
 
+    let controller: TransformStreamDefaultController<I, O> | undefined;
+    let sinkWrite: (chunk: I) => Promise<void>;
     if (isElided) {
       // ---- ELIDED PATH ----
       // No controller and no algorithm wrappers.
 
-      const sinkWrite = async (chunk: I): Promise<void> => {
+      sinkWrite = async (chunk: I): Promise<void> => {
         if (this.#backpressure) {
           await this.#backpressureChange.promise;
           const state = writableInternals.getState(this.#writable);
@@ -553,65 +557,23 @@ class TransformStream<I = unknown, O = unknown> {
             throw writableInternals.getStoredError(this.#writable);
           }
         }
-        const rc = this.#readableController as object;
-        readableControllerEnqueue(rc, chunk);
-        const desiredSize = readableControllerDesiredSizeGet(rc);
-        const backpressure = desiredSize !== null && desiredSize <= 0;
-        if (backpressure !== this.#backpressure) {
-          this.#setBackpressure(backpressure);
+        // With the finish promise set, a readable.cancel() started before
+        // this write reached the sink; close and abort wait for this
+        // write. The cancel errors the writable when it settles, so
+        // reject as the standard path's cleared-algorithms check does.
+        const finishPromise = this.#finishPromise;
+        if (finishPromise !== undefined) {
+          await PromisePrototypeThen(finishPromise, undefined, () => {});
+          throw writableInternals.getStoredError(this.#writable);
         }
+        // Enqueue as the default transform algorithm does: a throwing
+        // size() then settles the write as on the standard path.
+        transformStreamEnqueue(this, chunk as unknown as O);
       };
-      this.#writable = new WritableStream(
-        {
-          __proto__: null,
-          start: (c: object) => {
-            this.#writableController = c;
-            return startPromise;
-          },
-          write: sinkWrite,
-          close: () => this.#sinkClose(),
-          abort: (reason: unknown) => this.#sinkAbort(reason),
-        },
-        writableStrategy
-      );
-
-      const sourcePull = (): Promise<void> => {
-        this.#setBackpressure(false);
-        return this.#backpressureChange.promise;
-      };
-
-      // Read once, as WebIDL dictionary conversion reads each member once.
-      const rawReadableHWM = readableStrategy.highWaterMark;
-      const readableHWM = rawReadableHWM === undefined ? 0 : rawReadableHWM;
-      this.#readable = new ReadableStream(
-        {
-          __proto__: null,
-          start: (c: object) => {
-            this.#readableController = c;
-            return startPromise;
-          },
-          pull: sourcePull,
-          cancel: (reason: unknown) => this.#sourceCancel(reason),
-        },
-        {
-          __proto__: null,
-          highWaterMark: readableHWM,
-          size: readableStrategy.size,
-        }
-      );
-      if (expectedLength !== undefined) {
-        readableInternals.setControllerExpectedLength(
-          this.#readableController as object,
-          expectedLength
-        );
-      }
-      startHolder.resolve();
     } else {
       // ---- STANDARD PATH (transformer has algorithms) ----
 
-      const controller = new TransformStreamDefaultController<I, O>(
-        kPrivateSymbol
-      );
+      controller = new TransformStreamDefaultController<I, O>(kPrivateSymbol);
       transformStreamDefaultControllerInit(controller, this);
       this.#controller = controller;
 
@@ -637,7 +599,7 @@ class TransformStream<I = unknown, O = unknown> {
       this.#flushAlgorithm = algorithms.flush;
       this.#cancelAlgorithm = algorithms.cancel;
 
-      const sinkWrite = async (chunk: I): Promise<void> => {
+      sinkWrite = async (chunk: I): Promise<void> => {
         if (this.#backpressure) {
           await this.#backpressureChange.promise;
           const state = writableInternals.getState(this.#writable);
@@ -674,51 +636,57 @@ class TransformStream<I = unknown, O = unknown> {
           }
         ) as Promise<void>;
       };
-      this.#writable = new WritableStream(
-        {
-          __proto__: null,
-          start: (c: object) => {
-            this.#writableController = c;
-            return startPromise;
-          },
-          write: sinkWrite,
-          close: () => this.#sinkClose(),
-          abort: (reason: unknown) => this.#sinkAbort(reason),
-        },
-        writableStrategy
-      );
+    }
 
-      const sourcePull = (): Promise<void> => {
-        this.#setBackpressure(false);
-        return this.#backpressureChange.promise;
-      };
-      // Read once, as WebIDL dictionary conversion reads each member once.
-      const rawReadableHWM = readableStrategy.highWaterMark;
-      const readableHWM = rawReadableHWM === undefined ? 0 : rawReadableHWM;
-      this.#readable = new ReadableStream(
-        {
-          __proto__: null,
-          start: (c: object) => {
-            this.#readableController = c;
-            return startPromise;
-          },
-          pull: sourcePull,
-          cancel: (reason: unknown) => this.#sourceCancel(reason),
+    // --- The inner streams (both paths) ---
+    this.#writable = new WritableStream(
+      {
+        __proto__: null,
+        start: (c: object) => {
+          this.#writableController = c;
+          return startPromise;
         },
-        {
-          __proto__: null,
-          highWaterMark: readableHWM,
-          size: readableStrategy.size,
-        }
-      );
-      if (expectedLength !== undefined) {
-        readableInternals.setControllerExpectedLength(
-          this.#readableController as object,
-          expectedLength
-        );
+        write: sinkWrite,
+        close: () => this.#sinkClose(),
+        abort: (reason: unknown) => this.#sinkAbort(reason),
+      },
+      // Converted already: the inner stream reads its own data properties,
+      // and its default highWaterMark (1) is the TransformStream's.
+      writableStrategyDict as QueuingStrategy<I>
+    );
+
+    const sourcePull = (): Promise<void> => {
+      this.#setBackpressure(false);
+      return this.#backpressureChange.promise;
+    };
+    this.#readable = new ReadableStream(
+      {
+        __proto__: null,
+        start: (c: object) => {
+          this.#readableController = c;
+          return startPromise;
+        },
+        pull: sourcePull,
+        cancel: (reason: unknown) => this.#sourceCancel(reason),
+      },
+      {
+        __proto__: null,
+        // The TransformStream default, where the ReadableStream's is 1.
+        highWaterMark: readableStrategyDict.highWaterMark ?? 0,
+        size: readableStrategyDict.size,
       }
+    );
+    if (expectedLength !== undefined) {
+      readableInternals.setControllerExpectedLength(
+        this.#readableController as object,
+        expectedLength
+      );
+    }
 
-      // --- Start the transformer ---
+    // --- Start the transformer (the elided path has none to start) ---
+    if (controller === undefined) {
+      startHolder.resolve();
+    } else {
       const startResult: unknown =
         startFn === undefined
           ? undefined

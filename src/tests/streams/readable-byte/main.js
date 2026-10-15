@@ -162,6 +162,7 @@ export {
   byobMin,
   readMinStagedFulfillment,
   readMinValidation,
+  byobReadOptionsShapes,
   closeBelowMin,
   closedOrderAtEndOfData,
   minMetThenClose,
@@ -235,6 +236,7 @@ export {
 
 export {
   drainingReaderSweepsByteBacklog,
+  drainingReaderByteMaxSizeEndsAtClose,
   drainingReaderByteExpectedLengthPassThrough,
   drainingReaderDrivesBytePull,
   drainingReaderByteErrorPropagation,

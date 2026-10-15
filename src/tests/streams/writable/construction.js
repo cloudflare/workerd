@@ -59,11 +59,10 @@ export const sinkTypeValidation = {
 
 // DIVERGENCE: the spec converts the queuingStrategy argument before
 // inspecting the underlying sink (the WPT constructor.any "converted
-// after queuingStrategy" case). TypeScript reads strategy.size, then
-// strategy.highWaterMark, then sink.write. C++ converts the sink
-// dictionary first. Within the strategy, WebIDL converts members in
-// lexicographic order (highWaterMark, then size), as C++ does; TypeScript
-// reads size first, so only its strategy-before-sink order is spec.
+// after queuingStrategy" case), its members in lexicographic order:
+// highWaterMark and its ToNumber, then size. TypeScript follows it. C++
+// converts the sink dictionary first, then the strategy in the same
+// order.
 export const argumentConversionOrder = {
   test() {
     const order = [];
@@ -84,23 +83,124 @@ export const argumentConversionOrder = {
     Object.defineProperty(strategy, 'highWaterMark', {
       get() {
         order.push('strategy.highWaterMark');
-        return 1;
+        return {
+          valueOf() {
+            order.push('hwm.valueOf');
+            return 1;
+          },
+        };
       },
     });
     new WritableStream(sink, strategy);
     if (usingTsImpl) {
       deepStrictEqual(order, [
-        'strategy.size',
         'strategy.highWaterMark',
+        'hwm.valueOf',
+        'strategy.size',
         'sink.write',
       ]);
     } else {
       deepStrictEqual(order, [
         'sink.write',
         'strategy.highWaterMark',
+        'hwm.valueOf',
         'strategy.size',
       ]);
     }
+  },
+};
+
+// DIVERGENCE: a null underlyingSink is accepted by C++, which converts it
+// as a WebIDL dictionary (no sink), but rejected by TypeScript (spec: the
+// argument is typed `object`, which null is not). Every other primitive
+// throws TypeError, and a function is accepted and its members read, in
+// both (spec).
+export const garbageSinkValidation = {
+  test() {
+    const sinkError = {
+      name: 'TypeError',
+      message: 'underlyingSink must be an object',
+    };
+    if (usingTsImpl) {
+      throws(() => new WritableStream(null), sinkError);
+    } else {
+      new WritableStream(null);
+    }
+    for (const sink of [42, 'x', true, 1n, Symbol('s')]) {
+      throws(
+        () => new WritableStream(sink),
+        usingTsImpl ? sinkError : TypeError
+      );
+    }
+    let started = false;
+    new WritableStream(
+      Object.assign(function sink() {}, {
+        start() {
+          started = true;
+        },
+      })
+    );
+    strictEqual(started, true);
+  },
+};
+
+// The strategy argument converts as a WebIDL dictionary in both (spec):
+// null means no strategy, a function's members are read, and every other
+// primitive throws TypeError (messages differ).
+export const strategyArgumentShapes = {
+  test() {
+    const desiredSize = (strategy) =>
+      new WritableStream({}, strategy).getWriter().desiredSize;
+    strictEqual(desiredSize(null), 1);
+    for (const strategy of [5, 'x', true, 1n, Symbol('s')]) {
+      throws(
+        () => desiredSize(strategy),
+        usingTsImpl
+          ? {
+              name: 'TypeError',
+              message: 'The queuing strategy must be an object.',
+            }
+          : TypeError
+      );
+    }
+    const strategy = Object.assign(function strategy() {}, {
+      highWaterMark: 3,
+    });
+    strictEqual(desiredSize(strategy), 3);
+  },
+};
+
+// DIVERGENCE: which error wins when two are possible. Both reject a
+// primitive sink before reading the strategy, so its TypeError beats a
+// throwing strategy getter (spec). TypeScript checks the sink's type
+// before the highWaterMark's range (spec), so an invalid sink type's
+// RangeError beats an invalid highWaterMark's; C++ converts highWaterMark
+// to an integer before the sink's type is checked (pedantic_wpt
+// included), so its TypeError wins.
+export const conversionErrorPrecedence = {
+  test() {
+    const boom = new Error('boom');
+    throws(
+      () =>
+        new WritableStream(42, {
+          get highWaterMark() {
+            throw boom;
+          },
+        }),
+      usingTsImpl
+        ? { name: 'TypeError', message: 'underlyingSink must be an object' }
+        : TypeError
+    );
+    throws(
+      () => new WritableStream({ type: 'bytes' }, { highWaterMark: -1 }),
+      usingTsImpl
+        ? { name: 'RangeError', message: 'Invalid underlying sink type' }
+        : {
+            name: 'TypeError',
+            message:
+              'The value cannot be converted because it is negative and this API expects a positive bigint.',
+          }
+    );
   },
 };
 

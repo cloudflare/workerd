@@ -287,6 +287,11 @@ wd_test(
 )
 
 wd_test(
+    src = "actor-exception-attribution-tail-test.wd-test",
+    data = ["actor-exception-attribution-tail-test.js"],
+)
+
+wd_test(
     src = "tail-cf-gc-test.wd-test",
     data = ["tail-cf-gc-test.js"],
 )
@@ -436,6 +441,8 @@ wd_test(
 )
 
 wd_test(
+    # Exporting and comparing complete API schemas needs time in debug builds.
+    size = "large",
     src = "rtti-test.wd-test",
     args = ["--experimental"],
     data = ["rtti-test.js"],
@@ -716,6 +723,8 @@ wd_test(
 )
 
 wd_test(
+    # The RPC suite includes hang detection and stream transfers across requests.
+    size = "large",
     src = "js-rpc-streams-ts-test.wd-test",
     args = [
         "--experimental",
@@ -1216,6 +1225,8 @@ wd_test(
 )
 
 wd_test(
+    # The cyclic and expired-context cases wait for the runtime's hang detection.
+    size = "large",
     src = "cross-context-promise-test.wd-test",
     args = ["--experimental"],
     data = ["cross-context-promise-test.js"],

@@ -20,8 +20,26 @@ const unitTests :Workerd.Config = (
         ],
         bindings = [
           ( name = "CACHE_ENABLED", json = "true" ),
+          ( name = "SERVICE", service = "cf-cache-control-test-cache-enabled" ),
+          ( name = "CACHE_OPTION_PRESERVES_CACHE_CONTROL", json = "false" ),
         ],
-        compatibilityFlags = ["nodejs_compat", "cache_option_enabled"],
+        compatibilityFlags = ["nodejs_compat", "cache_option_enabled", "cache_no_cache_enabled",
+                              "cache_option_overrides_cache_control"],
+      )
+    ),
+    ( name = "cf-cache-control-test-cache-option-preserves-cache-control",
+      worker = (
+        modules = [
+          ( name = "worker-cache-option-preserves-cache-control",
+            esModule = embed "cf-cache-control-test.js" )
+        ],
+        bindings = [
+          ( name = "CACHE_ENABLED", json = "true" ),
+          ( name = "SERVICE", service = "cf-cache-control-test-cache-option-preserves-cache-control" ),
+          ( name = "CACHE_OPTION_PRESERVES_CACHE_CONTROL", json = "true" ),
+        ],
+        compatibilityFlags = ["nodejs_compat", "cache_option_enabled", "cache_no_cache_enabled",
+                              "cache_option_preserves_cache_control"],
       )
     ),
   ],

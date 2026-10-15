@@ -441,7 +441,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
     workerTracer = t;
   }
 
-  incomingRequest->delivered();
+  incomingRequest->delivered("fetch"_kj);
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
   auto metricsForProxyTask = kj::addRef(incomingRequest->getMetrics());
@@ -552,7 +552,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         bool dispatchRejected = isActorDispatchRejection(exception);
         if (!dispatchRejected) {
           context.logUncaughtExceptionAsync(
-              UncaughtExceptionSource::REQUEST_HANDLER, exception.clone());
+              UncaughtExceptionSource::REQUEST_HANDLER, exception.clone(), *incomingRequest);
         }
 
         // Record a failure if cancellation interrupts either wait. Otherwise the WorkerInterface
@@ -745,7 +745,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
   auto featureFlags = context.getWorker().getIsolate().getApi().getFeatureFlags();
 
   if (featureFlags.getConnectPassThrough()) {
-    incomingRequest->delivered();
+    incomingRequest->delivered("connect"_kj);
 
     KJ_DEFER({
       // Since we called incomingRequest->delivered, we are obliged to call `drain()`.
@@ -778,10 +778,14 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     t.setEventInfo(*incomingRequest, tracing::ConnectEventInfo());
     workerTracer = t;
   }
-  incomingRequest->delivered();
+  incomingRequest->delivered("connect"_kj);
 
   auto metricsForCatch = kj::addRef(incomingRequest->getMetrics());
   auto wrappedResponse = kj::heap<ConnectResponseSentTracker>(response);
+
+  // `incomingRequest` is moved into the attachment below, which keeps it alive until the
+  // continuations the attachment wraps have run.
+  auto& incomingRequestRef = *incomingRequest;
 
   return wrapWithCanceler(
       context
@@ -802,11 +806,13 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       t.setReturn(context.now());
     }
   })
-          .catch_([this, &context](kj::Exception&& exception) mutable -> kj::Promise<void> {
+          .catch_([this, &context, &incomingRequestRef](
+                      kj::Exception&& exception) mutable -> kj::Promise<void> {
     // Log JS exceptions to the JS console, if inspector is attached. This also has the effect of
     // logging internal errors to syslog.
     loggedExceptionEarlier = true;
-    context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER, exception.clone());
+    context.logUncaughtExceptionAsync(
+        UncaughtExceptionSource::REQUEST_HANDLER, exception.clone(), incomingRequestRef);
 
     // Do not allow the exception to escape the isolate without waiting for the output gate to
     // open. Note that in the success path, this is taken care of in `FetchEvent::respondWith()`.
@@ -929,7 +935,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
     t.setEventInfo(*incomingRequest, tracing::ScheduledEventInfo(eventTime, kj::str(cron)));
   }
 
-  incomingRequest->delivered();
+  incomingRequest->delivered("scheduled"_kj);
 
   // Scheduled handlers run entirely in waitUntil() tasks.
   context.addWaitUntil(context.run([scheduledTime, cron, entrypointName = entrypointName.clone(),
@@ -989,7 +995,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
     t.setEventInfo(*incomingRequest, tracing::AlarmEventInfo(scheduledTime));
   }
 
-  incomingRequest->delivered();
+  incomingRequest->delivered("alarm"_kj);
 
   auto scheduleAlarmResult = co_await kj::evalNow([&]() {
     return actor.scheduleAlarm(scheduledTime);
@@ -1013,8 +1019,8 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
 
       KJ_TRY {
         auto result = co_await context.run(
-            [scheduledTime, retryCount, entrypointName = entrypointName.clone(),
-                versionInfo = kj::mv(versionInfo),
+            [scheduledTime, retryCount, &incomingRequest = *incomingRequest,
+                entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
                 props = kj::mv(props)](Worker::Lock& lock, IoContext& context) mutable {
           jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
           jsg::AsyncContextFrame::StorageScope userTraceScope =
@@ -1029,7 +1035,8 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
 
           auto handler = lock.getExportedHandler(
               asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor());
-          return lock.getGlobalScope().runAlarm(scheduledTime, timeout, retryCount, lock, handler);
+          return lock.getGlobalScope().runAlarm(
+              scheduledTime, timeout, retryCount, incomingRequest, lock, handler);
         });
 
         // The alarm handler was successfully complete. We must guarantee this same alarm does not
@@ -1109,7 +1116,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
     t.setEventInfo(*incomingRequest, tracing::CustomEventInfo());
   }
 
-  incomingRequest->delivered();
+  incomingRequest->delivered("test"_kj);
 
   context.addWaitUntil(
       context.run([entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),

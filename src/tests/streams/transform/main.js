@@ -26,6 +26,10 @@ export {
   readableWritableTypeValidation,
   highWaterMarkValidated,
   hwmInfinityRejected,
+  argumentConversionOrder,
+  garbageTransformerValidation,
+  strategyArgumentShapes,
+  conversionErrorPrecedence,
   strategyMembersReadOnce,
 } from 'construction';
 
@@ -72,6 +76,7 @@ export {
   enqueueInsideSize,
   terminateInsideSize,
   readableCancelInsideSize,
+  readableCancelInsideThrowingSize,
   writerWriteInsideSize,
   syncWriterWriteInsideSize,
   sizeCallbackErrorIdentity,
@@ -142,4 +147,5 @@ export {
   cancelAfterWritableSizeError,
   cancelThenCloseSameTurn,
   writeReachesSinkAfterCancelClearedAlgorithms,
+  writeAfterCancelSameTurn,
 } from 'cancel-outcomes';

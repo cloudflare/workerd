@@ -276,6 +276,8 @@ When `pumpTo()` is called on the adapter:
 1. Acquires isolate lock
 2. Runs read->write promise loop
 3. Ends when data exhausted or stream errors
+4. If the pump promise is dropped first (e.g. client disconnect), cancels the stream
+   (undefined reason) from a waitUntil task, so the source's cancel algorithm runs
 
 ## Safety Pattern Catalog
 
@@ -292,14 +294,19 @@ When `pumpTo()` is called on the adapter:
 - **When**: Calling code that may invoke JS callbacks during a read/write operation
 - **Why**: JS callbacks can trigger close/error mid-operation; state must not change
   until operation completes
-- **How**: `beginOperation()` increments counter; `endOperation()` applies pending
-  transition when counter hits 0
-- **Entry point**: `deferControllerStateChange()` in `standard.h`
+- **How**: `scopedOperation()` returns an RAII guard that increments the operation
+  counter and decrements it when destroyed, applying any pending transition when the
+  counter hits 0. Call `end()` explicitly only when the caller needs to know whether a
+  transition was applied. The guard keeps the counter balanced on exceptions and on
+  termination, so prefer it to manual `beginOperation()`/`endOperation()` calls.
+- **Entry point**: `deferControllerStateChange()` in `standard.c++`
 
 ```cpp
-controller.state.beginOperation();  // Increment counter
-auto result = readCallback();       // May trigger JS that calls close()
-controller.state.endOperation();    // Apply pending state if counter == 0
+auto operation = controller.state.scopedOperation();
+auto result = readCallback();  // May trigger JS that calls close()
+if (operation.end()) {         // Apply pending state if counter == 0
+  // Notify the lock about the applied transition.
+}
 ```
 
 ### Pattern: Consumer Snapshot
@@ -385,7 +392,9 @@ auto onSuccess = [this, ref = addRef(), ...](...) mutable {
   into the source's `PipeLocked` lock state. `kj::Ptr` tracks liveness (asserting in
   debug builds): the `PipeLocked` state must not be destroyed while any pointer to its
   `PipeController` remains.
-- **Rule**: The source stays `PipeLocked` for the entire lifetime of the pipe. ONLY the
+- **Rule**: The source stays `PipeLocked` until the destination's pipe machinery tears
+  the pipe down, including while the source's cancel algorithm is invoked. The pipe
+  promise may stay pending after that, waiting on the cancel's promise. ONLY the
   destination's pipe machinery may release the lock, and only via
   `ReadableStreamController::releasePipeLock()` *after* dropping every
   `kj::Ptr<PipeController>` it holds (`Pipe::releaseSource()` /

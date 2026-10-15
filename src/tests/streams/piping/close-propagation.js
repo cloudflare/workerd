@@ -9,7 +9,7 @@
 // deliberate defect pin, not a hole.
 
 import { strictEqual, rejects } from 'node:assert';
-import { usingTsImpl } from 'which-impl';
+import { usingTsImpl, pipeToBackwardPropagation } from 'which-impl';
 
 const outcomeOf = (p, ms = 250) =>
   Promise.race([
@@ -131,7 +131,8 @@ export const destWriteThrowsMidPipePreventCancel = {
 // waits on a read: backward error propagation with nothing in flight.
 // DIVERGENCE: TypeScript rejects the pipe with the error and cancels
 // the source with it (spec); C++ half-propagates — it cancels the
-// source with the error but FULFILLS the pipe promise.
+// source with the error but FULFILLS the pipe promise — unless
+// pipe_to_backward_propagation is enabled.
 export const destControllerErrorsMidPipe = {
   async test() {
     const derr = new Error('dest-err');
@@ -154,7 +155,7 @@ export const destControllerErrorsMidPipe = {
     await scheduler.wait(1);
     wc.error(derr);
     const outcome = await outcomeOf(pipeP);
-    if (usingTsImpl) {
+    if (usingTsImpl || pipeToBackwardPropagation) {
       strictEqual(outcome.state, 'rejected');
       strictEqual(outcome.reason, derr);
       strictEqual(cancelArg, derr);
@@ -169,7 +170,8 @@ export const destControllerErrorsMidPipe = {
 // destination is erroring until the write settles, and only then errored.
 // Backward propagation waits for errored (spec), so the source is not
 // cancelled while the write is outstanding. DIVERGENCE (ledger #7): C++
-// then cancels the source with the error but FULFILLS the pipe promise.
+// then cancels the source with the error but FULFILLS the pipe promise,
+// unless pipe_to_backward_propagation is enabled.
 export const destErroringWaitsForInFlightWrite = {
   async test() {
     const derr = new Error('dest-err');
@@ -202,7 +204,7 @@ export const destErroringWaitsForInFlightWrite = {
     strictEqual(cancelArg, 'not-called');
     releaseWrite();
     const outcome = await outcomeOf(pipeP);
-    if (usingTsImpl) {
+    if (usingTsImpl || pipeToBackwardPropagation) {
       strictEqual(outcome.state, 'rejected');
       strictEqual(outcome.reason, derr);
     } else {

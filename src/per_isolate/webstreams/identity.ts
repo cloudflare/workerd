@@ -20,8 +20,9 @@
 //     processChunk copies inside write() for exactly these hazards).
 //   - Zero-length writes are accepted as NO-OPS: the write resolves
 //     immediately without touching the readable queue (no zero-length
-//     chunk enqueued, no backpressure interaction, no pull). A view whose
-//     buffer is detached or out of bounds is zero-length, as in C++.
+//     chunk enqueued, no backpressure interaction, no pull). A detached
+//     ArrayBuffer, and a view whose buffer is detached or out of bounds,
+//     is zero-length, as in C++.
 //
 // See /src/tests/streams/identity/AGENTS.md for the IdentityTransformStream
 // and FixedLengthStream specification.
@@ -98,7 +99,6 @@ const {
   ArrayPrototypePush,
   BigInt,
   Number,
-  NumberIsNaN,
   ObjectDefineProperties,
   PromisePrototypeThen,
   PromiseResolve,
@@ -118,8 +118,6 @@ const {
   uncurryThis,
 } = primordials;
 
-const { isArrayBufferView, isArrayBuffer, isSharedArrayBuffer } = utils;
-
 const {
   ReadableStream,
   ReadableByteStreamController,
@@ -137,8 +135,10 @@ const {
   kEnumerable,
   normalizeExpectedLength,
   toStringTagProperty,
+  toStrategyDictionary,
+  convertHighWaterMark,
 } = require('webstreams/common') as CommonHelpers;
-const { copyExtent, viewByteExtent } =
+const { bufferSourceExtent, copyExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
@@ -187,26 +187,16 @@ function validateAndCopyChunk(chunk: unknown): Uint8Array | undefined {
     if (chunk.length === 0) return undefined;
     return TextEncoderEncode(textEncoderInstance, chunk);
   }
-  if (isArrayBuffer(chunk) || isSharedArrayBuffer(chunk)) {
-    // Read the length through a Uint8Array: its byteLength getter works on
-    // both ArrayBuffer and SharedArrayBuffer (ArrayBuffer.prototype.byteLength
-    // throws on SAB receivers). Constructing it throws for a detached
-    // ArrayBuffer.
-    const byteLength = TypedArrayPrototypeGetByteLength(
-      new Uint8Array(chunk as ArrayBuffer)
-    ) as number;
-    if (byteLength === 0) return undefined;
-    return copyExtent(chunk, 0, byteLength);
+  // A detached or out-of-bounds input is empty (see view-extent.ts).
+  const extent = bufferSourceExtent(chunk);
+  if (extent === undefined) {
+    throw new TypeError(
+      'IdentityTransformStream: chunk must be a BufferSource or string'
+    );
   }
-  if (isArrayBufferView(chunk)) {
-    // A detached or out-of-bounds view is empty (see view-extent.ts).
-    const { buffer, byteOffset, byteLength } = viewByteExtent(chunk);
-    if (byteLength === 0) return undefined;
-    return copyExtent(buffer, byteOffset, byteLength);
-  }
-  throw new TypeError(
-    'IdentityTransformStream: chunk must be a BufferSource or string'
-  );
+  const { buffer, byteOffset, byteLength } = extent;
+  if (byteLength === 0) return undefined;
+  return copyExtent(buffer, byteOffset, byteLength);
 }
 
 let assertIsIdentityTransformStream: (self: IdentityTransformStream) => void;
@@ -214,28 +204,6 @@ let assertIsIdentityTransformStream: (self: IdentityTransformStream) => void;
 // ---------------------------------------------------------------------------
 
 const kPrivateSymbol: symbol = Symbol('private');
-
-// The writable's WHATWG high-water-mark conversion (ToNumber; NaN or a
-// negative number is a RangeError), for FixedLengthStream, which caps the
-// converted number at its length before IdentityTransformStream hands it
-// on. Converting a number again there has no side effects.
-function convertHighWaterMark(value: unknown): number {
-  const highWaterMark = +(value as number);
-  if (NumberIsNaN(highWaterMark) || highWaterMark < 0) {
-    throw new RangeError('Invalid highWaterMark');
-  }
-  return highWaterMark;
-}
-
-// WebIDL dictionary conversion of a constructor's strategy argument, as in
-// C++: undefined and null mean no strategy; any other non-object throws.
-function toStrategyDictionary(value: unknown): QueuingStrategy<unknown> {
-  if (value === undefined || value === null) return kNullProtoObject;
-  if (typeof value !== 'object' && typeof value !== 'function') {
-    throw new TypeError('The queuing strategy must be an object.');
-  }
-  return value as QueuingStrategy<unknown>;
-}
 
 // A write accepted by the writable, snapshotted in its size() callback (see
 // sizeAndSnapshot). Entries are tagged with an own `ok` data property rather
