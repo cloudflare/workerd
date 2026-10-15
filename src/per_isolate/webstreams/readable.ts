@@ -3755,10 +3755,12 @@ function forkQueuedCursors<R>(
 }
 
 // Marks a stream whose data has moved to another stream (tee, detach,
-// extraction; see HANDED-OFF STREAMS in webstreams/AGENTS.md): it stays
-// locked for good, by an internal reader that is never exposed and so never
-// released.
+// extraction; see HANDED-OFF STREAMS in webstreams/AGENTS.md). It is
+// disturbed, as the legacy C++ streams leave it, so a body that was teed
+// reports bodyUsed and cannot become another body. It stays locked for good,
+// by an internal reader that is never exposed and so never released.
 function markHandedOff<R>(stream: ReadableStream<R>): void {
+  setReadableStreamDisturbed(stream);
   acquireReadableStreamDefaultReader(stream);
 }
 
@@ -3777,9 +3779,9 @@ class ReadableStream<R> {
   // during controller setup, removed on cancel/tee. A queued stream that
   // has been teed (the source's own stream, or a branch teed again) keeps
   // none: its former consumer's place in the queue went to the two
-  // branches, and it is left permanently locked. The source's own stream
-  // still closes and errors with the source; a branch teed again is closed
-  // at the tee (see readableStreamTee).
+  // branches, and it is left permanently locked and disturbed. The
+  // source's own stream still closes and errors with the source; a branch
+  // teed again is closed at the tee (see readableStreamTee).
   #consumer?: StreamConsumerType<R> | undefined;
   #disturbed: boolean = false;
   #state: ReadableStreamState = 'readable';
@@ -4121,8 +4123,8 @@ class ReadableStream<R> {
     // ReadableStream via ordinary construction. Branches are fully
     // independent — no shared consumer and no composite-cancel wiring
     // (deliberate divergence from the queued model below: branch cancels
-    // go to each branch's OWN source). The parent is left locked and
-    // closed (closeReadableStreamHusk).
+    // go to each branch's OWN source). The parent is left locked,
+    // disturbed and closed (markHandedOff, closeReadableStreamHusk).
     readableStreamTee = <R>(stream: ReadableStream<R>) => {
       // The locked precondition lives HERE (not in the prototype method) so that every
       // entry point shares it -- the method after its brand assert, and the C++
@@ -4192,7 +4194,8 @@ class ReadableStream<R> {
       // once the last of them has left — tees of tee branches simply add
       // consumers to the same queue.
 
-      // Per spec, tee() locks the original permanently.
+      // Locked for good, as the spec has it, and disturbed at once, as C++
+      // has it (the spec disturbs the original at the tee's first read).
       markHandedOff(stream);
       // A teed branch (not the source's own stream) consumes nothing now,
       // and no source event would ever reach it: close it.
@@ -4227,14 +4230,13 @@ class ReadableStream<R> {
         throw new TypeError('The ReadableStream has been locked to a reader.');
       }
 
-      // Neutralize the original: no consumer, disturbed, and handed off
-      // (locked for good) as extraction and tee leave theirs. A native husk
-      // is disturbed, handed off and closed instead (closeReadableStreamHusk
+      // Neutralize the original: no consumer, and handed off (disturbed
+      // and locked for good) as extraction and tee leave theirs. A native
+      // husk is handed off and closed instead (closeReadableStreamHusk
       // drops its consumer); a queued one stays the controller's stream,
       // closing and erroring with the source.
       const neutralize = (): void => {
         stream.#consumer = undefined;
-        stream.#disturbed = true;
         markHandedOff(stream);
       };
 
@@ -4256,7 +4258,6 @@ class ReadableStream<R> {
         // the source, so residual accounting -- including any stashed
         // bytes -- stays exact.
         const source = nativeControllerExtractSource(controller);
-        stream.#disturbed = true;
         markHandedOff(stream);
         closeReadableStreamHusk(stream);
         const detached = new ReadableStream<R>(source as UnderlyingSource<R>);
@@ -4449,7 +4450,6 @@ class ReadableStream<R> {
       }
       // Atomic: validate -> extract -> lock+disturb+close. No TOCTOU gap.
       const source = nativeControllerExtractSource(controller);
-      this.#disturbed = true;
       markHandedOff(this);
       closeReadableStreamHusk(this);
       return source;

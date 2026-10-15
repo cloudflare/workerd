@@ -75,10 +75,9 @@ export const bodyIdentityAndLockCoupling = {
   },
 };
 
-// DIVERGENCE (ledger #33): the stream tee() leaves behind, whether teed
-// directly or as a branch teed again. C++ marks it disturbed, so the
-// Response constructor rejects it. TypeScript leaves it undisturbed, so
-// the constructor accepts it as merely locked (lockedStreamIntoResponse).
+// The stream tee() leaves behind, whether teed directly or as a branch
+// teed again, is disturbed, so the Response constructor rejects it as it
+// does any disturbed stream (parity, ledger #33).
 export const teedStreamIntoResponse = {
   test() {
     const teed = closedWithChunk();
@@ -87,21 +86,15 @@ export const teedStreamIntoResponse = {
     branch.tee();
     for (const stream of [teed, branch]) {
       strictEqual(stream.locked, true);
-      if (usingTsImpl) {
-        new Response(stream);
-      } else {
-        throws(() => new Response(stream), disturbed);
-      }
+      throws(() => new Response(stream), disturbed);
     }
   },
 };
 
-// DIVERGENCE (ledger #33): bodyUsed once a Response's body has been teed,
-// for a native body and a JS-backed one. C++ reports true from the tee()
-// on. TypeScript reports false, even after both branches have been read
-// to the end. clone() gives the response a branch as its body, so its
-// bodyUsed stays false in both, but the body it had is the stream tee()
-// left behind.
+// bodyUsed once a Response's body has been teed, for a native body and a
+// JS-backed one: true from the tee() on (parity, ledger #33). clone()
+// gives the response a branch as its body, so its bodyUsed stays false,
+// but the body it had is the stream tee() left behind.
 export const bodyUsedAfterBodyTee = {
   async test() {
     const responses = () => [
@@ -110,21 +103,17 @@ export const bodyUsedAfterBodyTee = {
     ];
     for (const response of responses()) {
       const [a, b] = response.body.tee();
-      strictEqual(response.bodyUsed, !usingTsImpl);
+      strictEqual(response.bodyUsed, true);
       strictEqual(await new Response(a).text(), 'abc');
       strictEqual(await new Response(b).text(), 'abc');
-      strictEqual(response.bodyUsed, !usingTsImpl);
+      strictEqual(response.bodyUsed, true);
     }
     for (const response of responses()) {
       const body = response.body;
       const clone = response.clone();
       strictEqual(response.bodyUsed, false);
       notStrictEqual(response.body, body);
-      if (usingTsImpl) {
-        new Response(body);
-      } else {
-        throws(() => new Response(body), disturbed);
-      }
+      throws(() => new Response(body), disturbed);
       strictEqual(await response.text(), 'abc');
       strictEqual(await clone.text(), 'abc');
     }

@@ -30,8 +30,9 @@ private-brand dispatch, no `instanceof`) apply here — see
 The spec's `tee()` gives each branch its own controller and queue, fed by a
 reader on the original. The queued backend instead has ONE queue with N
 consumers (cursors), one per live branch: `tee()` forks the stream's cursor
-into two branch cursors, removes the original's, and leaves the original a
-permanently locked, inert shell — it consumes nothing, and there is no
+into two branch cursors, removes the original's, and leaves the original an
+inert shell, permanently locked and disturbed (as C++ leaves it; the spec
+disturbs it at the tee's first read) — it consumes nothing, and there is no
 per-branch controller to close or error. A tee of a branch does the same to
 the branch: its two branches join the queue as consumers alongside their
 aunt. Consequences, all handled by the controller (`readable.ts`,
