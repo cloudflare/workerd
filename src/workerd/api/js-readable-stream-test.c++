@@ -2878,6 +2878,98 @@ KJ_TEST("JsReadableStream consumption helpers drain TypeScript-backed streams") 
   });
 }
 
+// A ReadableStreamSource that records the (minBytes, maxBytes) of every tryRead() and
+// serves each read as a well-behaved KJ source does: min(maxBytes, remaining) bytes.
+// With `declareLength` false it reports no length, like a chunked HTTP body.
+class RecordingSource final: public ReadableStreamSource {
+ public:
+  struct Read {
+    size_t minBytes;
+    size_t maxBytes;
+  };
+
+  RecordingSource(kj::ArrayPtr<const kj::byte> data, bool declareLength, kj::Vector<Read>& reads)
+      : data(data),
+        declareLength(declareLength),
+        reads(reads) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    reads.add(Read{minBytes, maxBytes});
+    auto amount = kj::min(maxBytes, data.size() - offset);
+    kj::arrayPtr(static_cast<kj::byte*>(buffer), amount).write(data.slice(offset, offset + amount));
+    offset += amount;
+    return amount;
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    if (declareLength && encoding == StreamEncoding::IDENTITY) {
+      return data.size() - offset;
+    }
+    return kj::none;
+  }
+
+ private:
+  kj::ArrayPtr<const kj::byte> data;
+  bool declareLength;
+  kj::Vector<Read>& reads;
+  size_t offset = 0;
+};
+
+kj::Array<kj::byte> makePatternData(size_t size) {
+  auto data = kj::heapArray<kj::byte>(size);
+  for (size_t i = 0; i < size; i++) {
+    data[i] = static_cast<kj::byte>(i * 7 + (i >> 10));
+  }
+  return data;
+}
+
+KJ_TEST("JsReadableStream arrayBuffer() of a native TypeScript stream reads in large "
+        "fill-the-buffer steps") {
+  // Body collection must not read a native source one network chunk at a time: each read is
+  // a C++/JS round trip. Like the legacy AllReader, it asks the source to fill a large buffer
+  // (minBytes == maxBytes, at least 64 KiB), and treats a short read as EOF.
+  auto fixture = makeTsStreamsFixture();
+  auto data = makePatternData(300 * 1024);
+  kj::Vector<RecordingSource::Read> reads;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+    auto stream = JsReadableStream::create(
+        js, env.context, kj::heap<RecordingSource>(data.asPtr(), false, reads));
+    auto promise = stream.arrayBuffer(js, kLimit)
+                       .then(js, [&data](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) {
+      KJ_EXPECT(buffer.getHandle(js).asArrayPtr() == data.asPtr());
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(reads.size() <= 4, reads.size());
+  for (auto& read: reads) {
+    KJ_EXPECT(read.minBytes == read.maxBytes, read.minBytes, read.maxBytes);
+    KJ_EXPECT(read.minBytes >= 64 * 1024, read.minBytes);
+  }
+}
+
+KJ_TEST("JsReadableStream arrayBuffer() of a native TypeScript stream with a declared length "
+        "reads it whole") {
+  // A declared length sizes the first read to the whole body; the only further read is the
+  // one that observes EOF.
+  auto fixture = makeTsStreamsFixture();
+  auto data = makePatternData(10000);
+  kj::Vector<RecordingSource::Read> reads;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+    auto stream = JsReadableStream::create(
+        js, env.context, kj::heap<RecordingSource>(data.asPtr(), true, reads));
+    auto promise = stream.arrayBuffer(js, kLimit)
+                       .then(js, [&data](jsg::Lock& js, jsg::JsRef<jsg::JsArrayBuffer> buffer) {
+      KJ_EXPECT(buffer.getHandle(js).asArrayPtr() == data.asPtr());
+    });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(reads.size() == 2, reads.size());
+  KJ_EXPECT(reads[0].minBytes == data.size(), reads[0].minBytes);
+  KJ_EXPECT(reads[0].maxBytes == data.size(), reads[0].maxBytes);
+}
+
 KJ_TEST("JsReadableStream addRef shares a TypeScript-backed stream") {
   auto fixture = makeTsStreamsFixture();
   fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
