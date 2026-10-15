@@ -167,6 +167,7 @@ export {
   byobReadOptionsShapes,
   closeBelowMin,
   closedOrderAtEndOfData,
+  closedOrderAtNativeEndOfData,
   minMetThenClose,
   readAtLeastDefaultReaderThrows,
   byobReaderConstraints,
