@@ -69,6 +69,14 @@ bool DeleteQueue::isDefunct() const {
   return *crossThreadDeleteQueue.lockShared() == kj::none;
 }
 
+kj::Array<kj::Function<void(jsg::Lock&)>> DeleteQueue::takeActions() const {
+  auto lock = crossThreadDeleteQueue.lockExclusive();
+  KJ_IF_SOME(state, *lock) {
+    return state.actions.releaseAsArray();
+  }
+  return nullptr;
+}
+
 void DeleteQueue::checkFarGet(const DeleteQueue& deleteQueue, const std::type_info& type) {
   IoContext::current().checkFarGet(deleteQueue, type);
 }
@@ -90,6 +98,15 @@ kj::Promise<void> DeleteQueue::resetCrossThreadSignal() const {
     return kj::mv(paf.promise);
   } else {
     return kj::NEVER_DONE;
+  }
+}
+
+void DeleteQueue::signalIfActionsQueued() const {
+  auto lock = crossThreadDeleteQueue.lockExclusive();
+  KJ_IF_SOME(state, *lock) {
+    if (!state.actions.empty()) {
+      KJ_REQUIRE_NONNULL(state.crossThreadFulfiller)->fulfill();
+    }
   }
 }
 

@@ -326,6 +326,10 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
     // Record a new incoming request to actor metrics.
     a.getMetrics().startRequest();
   }
+
+  // Cross-context actions that arrived while the context had no request to run them under are
+  // still queued. Wake the delete queue signal task to run them under this request.
+  context->deleteQueue.queue->signalIfActionsQueued();
 }
 
 kj::Date IoContext::IncomingRequest::now(kj::Maybe<kj::Date> clockClamp) {
@@ -1828,22 +1832,36 @@ jsg::JsObject IoContext::getPromiseContextTag(jsg::Lock& js) {
 kj::Promise<void> IoContext::startDeleteQueueSignalTask(IoContext* context) {
   // The promise that is returned is held by the IoContext itself, so when the
   // IoContext is destroyed, the promise will be canceled and the loop will
-  // end. On each iteration of the loop we want to reset the cross thread
-  // signal in the delete queue, then wait on the promise. Once the promise
-  // is fulfilled, we will run an empty task to prompt the IoContext to drain
-  // the DeleteQueue.
+  // end. On each iteration of the loop we wait for the delete queue's cross
+  // thread signal, then run the queued actions.
   try {
+    auto& queue = *context->deleteQueue.queue;
+    auto signal = queue.resetCrossThreadSignal();
     for (;;) {
-      co_await context->deleteQueue.queue->resetCrossThreadSignal();
-      co_await context->run([](auto& lock) {
-        auto& context = IoContext::current();
-        auto l = context.deleteQueue.queue->crossThreadDeleteQueue.lockExclusive();
-        auto& state = KJ_ASSERT_NONNULL(*l);
-        for (auto& action: state.actions) {
-          action(lock);
+      co_await signal;
+
+      // Re-arm before running the actions, so that an action scheduled while they run fulfills
+      // this fresh signal instead of the one we just consumed.
+      signal = queue.resetCrossThreadSignal();
+
+      // Like any other event, the actions wait for the input lock and run under the current
+      // IncomingRequest.
+      try {
+        co_await context->run([](Worker::Lock& lock, IoContext& context) {
+          // An action is free to schedule another, so they're all taken out of the queue first.
+          for (auto& action: context.deleteQueue.queue->takeActions()) {
+            action(lock);
+          }
+        });
+      } catch (...) {
+        auto e = kj::getCaughtExceptionAsKj();
+        if (e.getDetail(NO_CURRENT_INCOMING_REQUEST_DETAIL_ID) == kj::none) {
+          context->abort(kj::mv(e));
+          co_return;
         }
-        state.actions.clear();
-      });
+        // There is no request to run the actions under, as with an actor between events. They
+        // stay queued until delivered() signals again for the next request.
+      }
     }
   } catch (...) {
     context->abort(kj::getCaughtExceptionAsKj());
