@@ -128,6 +128,19 @@ export let nonClass = {
     } else if (req.url.endsWith('/stream-from-rpc')) {
       let stream = await env.MyService.returnReadableStream();
       return new Response(stream);
+    } else if (req.url.endsWith('/aborted-stream-from-rpc')) {
+      let stream = await env.MyService.returnAbortedReadableStream();
+      return new Response(stream);
+    } else if (req.url.endsWith('/gzip-body-from-rpc')) {
+      let resp = await env.MyService.returnResponse();
+      // Waiting on a timer gives the received body time to finish connecting, so that its length
+      // is known by the time the runtime pumps it into the gzip encoder.
+      await scheduler.wait(0);
+      return new Response(resp.body, {
+        headers: {
+          'Content-Encoding': 'gzip',
+        },
+      });
     } else {
       throw new Error('unknown route');
     }
@@ -435,6 +448,18 @@ export class MyService extends WorkerEntrypoint {
   async returnReadableStream() {
     let { readable, writable } = new IdentityTransformStream();
     this.ctx.waitUntil(this.writeToStream(writable));
+    return readable;
+  }
+
+  async returnAbortedReadableStream() {
+    let { readable, writable } = new IdentityTransformStream();
+    this.ctx.waitUntil(
+      (async () => {
+        let writer = writable.getWriter();
+        await writer.write(new TextEncoder().encode('foo, '));
+        await writer.abort(new Error('boom'));
+      })()
+    );
     return readable;
   }
 
@@ -1800,6 +1825,23 @@ export let streams = {
 
       assert.strictEqual(await resp.text(), 'foo, bar, baz!');
     }
+
+    // Same, but the stream has a known length and the response is gzip-encoded, so the body is
+    // pumped by length into an encoder that must still be ended afterwards.
+    {
+      let resp = await env.self.fetch('http://foo/gzip-body-from-rpc');
+
+      assert.strictEqual(resp.headers.get('Content-Encoding'), 'gzip');
+      assert.strictEqual(await resp.text(), 'Response body!');
+    }
+
+    // When the producer of a stream obtained over RPC fails partway through, the response must
+    // fail rather than end cleanly with truncated content. Depending on the transport, the failure
+    // surfaces either from fetch() or from reading the body.
+    await assert.rejects(async () => {
+      let resp = await env.self.fetch('http://foo/aborted-stream-from-rpc');
+      await resp.text();
+    });
   },
 };
 
