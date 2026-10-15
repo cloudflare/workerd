@@ -1419,23 +1419,18 @@ function makeSourceAlgorithms<C>(
   return { pull, cancel };
 }
 
-let assertIsReadableStreamDefaultController: <R>(
-  self: ReadableStreamDefaultController<R>
-) => void;
-
-class ReadableStreamDefaultController<
-  R = unknown,
-> implements ReadableStreamDefaultControllerType<R> {
+// The state both queued controllers keep, and the steps they share: the
+// queue, the source's algorithms, starting and pulling, closing, erroring
+// and cancelling the source, and the queued tee's consumers leaving (see
+// THE QUEUED TEE MODEL in webstreams/AGENTS.md). Each controller owns one
+// and keeps what is its own: enqueue(), close()'s checks and, for bytes,
+// the BYOB request.
+class QueuedControllerCore<T, R> {
   #stream: ReadableStream<R>;
-  #queue: StreamQueueType<R, R>;
-  // The non-standard expectedLength pass-through (undefined = unknown).
-  // Default controllers never read it from an underlying source — it is
-  // set ONLY through the internal setter, by the TransformStream
-  // constructor's workerd `expectedLength` extension, so the C++ bridge
-  // can derive Content-Length for bodies built from such transforms.
-  #expectedLength: bigint | undefined = undefined;
+  #queue: StreamQueueType<T, R>;
   // Algorithms are cleared (closures dropped) on close-complete, error, and
-  // cancel, per spec ClearAlgorithms.
+  // cancel, per spec ClearAlgorithms. Only a default controller sizes its
+  // chunks.
   #sizeAlgorithm: ((chunk: R) => number) | undefined;
   #pullAlgorithm: (() => Promise<void>) | undefined;
   #cancelAlgorithm: ((reason: unknown) => Promise<void>) | undefined;
@@ -1448,7 +1443,7 @@ class ReadableStreamDefaultController<
   // every consumer drained (the spec's "stream is no longer readable",
   // which gates error()). Tracked here rather than read off #stream: once
   // that stream is teed away its state follows the source's own events
-  // (see #maybeCloseStream), while what the branches have yet to drain
+  // (see maybeCloseStream), while what the branches have yet to drain
   // after a close is this controller's business.
   #done: boolean = false;
   // Consumers that left the queue (see controllerConsumerLeaving) while
@@ -1458,6 +1453,271 @@ class ReadableStreamDefaultController<
   // errored on its own.
   #departedReasons: unknown[] = [];
   #pendingCancel: PromiseWithResolversType<void> | undefined;
+
+  constructor(
+    stream: ReadableStream<R>,
+    highWaterMark: number,
+    algorithms: SourceAlgorithms,
+    sizeAlgorithm: ((chunk: R) => number) | undefined
+  ) {
+    this.#stream = stream;
+    this.#pullAlgorithm = algorithms.pull;
+    this.#cancelAlgorithm = algorithms.cancel;
+    this.#sizeAlgorithm = sizeAlgorithm;
+    this.#queue = new StreamQueue(highWaterMark, () => {
+      // Every consumer has been collected (see StreamQueue#noConsumers).
+      // Release the source rather than cancel it: GC timing must not run
+      // the user's cancel callback. The size algorithm stays, so enqueue()
+      // sizes chunks as before; the queue drops them.
+      this.#pullAlgorithm = undefined;
+      this.#cancelAlgorithm = undefined;
+    }) as StreamQueueType<T, R>;
+  }
+
+  get queue(): StreamQueueType<T, R> {
+    return this.#queue;
+  }
+
+  get sizeAlgorithm(): ((chunk: R) => number) | undefined {
+    return this.#sizeAlgorithm;
+  }
+
+  get desiredSize(): number | null {
+    // null when ERRORED, 0 when CLOSED, computed while readable — including
+    // while close-requested-but-still-draining (spec GetDesiredSize).
+    switch (getReadableStreamGetState(this.#stream)) {
+      case 'errored':
+        return null;
+      case 'closed':
+        return 0;
+      default:
+        return this.#queue.desiredSize;
+    }
+  }
+
+  // The source's start() returned `startResult`: pulling starts once it
+  // settles, and a rejection errors the stream.
+  start(startResult: unknown): void {
+    PromisePrototypeThen(
+      writableInternals.promiseResolvedWith(startResult),
+      () => {
+        this.#started = true;
+        this.callPullIfNeeded();
+      },
+      (e: unknown) => {
+        this.error(e);
+      }
+    );
+  }
+
+  canCloseOrEnqueue(): boolean {
+    // #cancelPromise marks a cancelled source: CancelSteps cleared its
+    // algorithms, whatever state its stream reports.
+    return (
+      !this.#closeRequested &&
+      this.#cancelPromise === undefined &&
+      getReadableStreamGetState(this.#stream) === 'readable'
+    );
+  }
+
+  // close(), once the controller's checks have passed.
+  requestClose(): void {
+    this.#closeRequested = true;
+    this.#queue.close(); // pushes the sentinel; notifies all cursors
+    // If the stream's own cursor has already drained to the sentinel, the
+    // stream closes immediately; otherwise the read paths complete the
+    // transition when the cursor reaches the sentinel (drain-then-close).
+    this.maybeCloseStream();
+  }
+
+  // Internal callers error through here: the prototype's error() is
+  // user-patchable.
+  error(reason: unknown): void {
+    if (this.#done) return;
+    this.#done = true;
+    // Propagate to every live consumer stream (tee branches) via the
+    // cursors' weak owner refs — no strong retention of branches. The
+    // primary stream is handled explicitly: a tee'd-away parent has no
+    // cursor. readableStreamError is state-guarded, so overlap is fine.
+    // Every stream errors before its pending reads reject: reader.closed
+    // rejects first (spec ReadableStreamError).
+    const owners = this.#queue.getLiveOwners();
+    for (let i = 0; i < owners.length; i++) {
+      readableStreamError(owners[i] as ReadableStream<R>, reason);
+    }
+    readableStreamError(this.#stream, reason);
+    this.#queue.error(reason); // rejects pending reads, drops buffered data
+    this.#clearAlgorithms();
+    // The source settled on its own: consumers that had left are owed
+    // undefined (spec ReadableStreamTee step 14.c.ii).
+    this.#pendingCancel?.resolve();
+  }
+
+  maybeCloseStream(): void {
+    if (!this.#closeRequested) return;
+    // A stream whose cursor has reached the close sentinel transitions to
+    // 'closed'; one with buffered data before the sentinel stays 'readable'
+    // until drained (drain-then-close on subsequent reads).
+    //
+    // The source's own stream. With a cursor it is the queue's only
+    // consumer (tee and detach take its cursor away) and drains to the
+    // sentinel like any; without one it consumes nothing, so there is
+    // nothing to drain and it closes now. The source's own events close it
+    // — close requested here, cancelled in cancelSteps, errored in error()
+    // — never the branches' progress (the queued tee model, AGENTS.md).
+    // Its closing does not end the source: that is #done, below, once
+    // every consumer has drained.
+    const parentCursor = getReadableStreamConsumer(this.#stream) as
+      QueueCursorType<T, R> | undefined;
+    if (parentCursor !== undefined) {
+      if (this.#queue.getEntry(parentCursor.position) !== CLOSE_SENTINEL) {
+        return;
+      }
+      readableStreamClose(this.#stream);
+    } else {
+      // Check every live consumer stream (the tee branches).
+      let anyOpen = false;
+      const owners = this.#queue.getLiveOwners();
+      for (let i = 0; i < owners.length; i++) {
+        const owner = owners[i] as ReadableStream<R>;
+        const cursor = getReadableStreamConsumer(owner) as
+          QueueCursorType<T, R> | undefined;
+        if (cursor === undefined) continue;
+        if (this.#queue.getEntry(cursor.position) === CLOSE_SENTINEL) {
+          readableStreamClose(owner);
+        } else {
+          anyOpen = true;
+        }
+      }
+      readableStreamClose(this.#stream);
+      if (anyOpen) return;
+    }
+    this.#done = true;
+    this.#clearAlgorithms();
+    // Every remaining consumer has closed: the source will never be
+    // cancelled, and consumers that had left are owed undefined (spec
+    // ReadableStreamTee step 14.b.v).
+    this.#pendingCancel?.resolve();
+  }
+
+  // A consumer leaves the queue; see controllerConsumerLeaving. Decided
+  // BEFORE the cursor's removal (QueueCursor.cancelStream): removing it
+  // first would make the leaving consumer look like it was not the last
+  // (parking the cancel in #pendingCancel with nobody left to settle it)
+  // and fire the all-cursors-gone hook, which clears the cancel algorithm
+  // before cancelSteps could run it.
+  consumerLeaving(reason: unknown, isLastConsumer: boolean): Promise<void> {
+    const reasons = this.#departedReasons;
+    ArrayPrototypePush(reasons, reason);
+    if (isLastConsumer) {
+      return this.cancelSteps(
+        reasons.length > 1 ? makeCompositeCancelReason(reasons) : reason
+      );
+    }
+    this.#pendingCancel ??=
+      PromiseWithResolvers() as PromiseWithResolversType<void>;
+    return this.#pendingCancel.promise;
+  }
+
+  // A consumer errors alone; see controllerConsumerErrored. Decided before
+  // the cursor's removal, as consumerLeaving is.
+  consumerErrored(reason: unknown, isLastConsumer: boolean): Promise<void> {
+    if (!this.#closeRequested) {
+      return this.consumerLeaving(reason, isLastConsumer);
+    }
+    if (isLastConsumer) {
+      // As in maybeCloseStream once every consumer has drained.
+      this.#done = true;
+      this.#clearAlgorithms();
+      this.#pendingCancel?.resolve();
+    }
+    return PromiseResolve();
+  }
+
+  callPullIfNeeded(): void {
+    if (!this.#shouldCallPull()) return;
+    if (this.#pulling) {
+      this.#pullAgain = true;
+      return;
+    }
+    this.#pulling = true;
+    const pullAlgorithm = this.#pullAlgorithm;
+    const result =
+      pullAlgorithm === undefined ? PromiseResolve() : pullAlgorithm();
+    PromisePrototypeThen(
+      result,
+      () => {
+        this.#pulling = false;
+        if (this.#pullAgain) {
+          this.#pullAgain = false;
+          this.callPullIfNeeded();
+        }
+      },
+      (e: unknown) => {
+        this.error(e);
+      }
+    );
+  }
+
+  // Cancel the underlying source (spec CancelSteps). Idempotent and cached.
+  // Reached through consumerLeaving once the last consumer has left the
+  // queue — an explicit stream/branch cancel, or a branch errored through
+  // the Node.js interop hook. The all-cursors-gone GC hook never comes
+  // here: it only releases the source (see the constructor).
+  cancelSteps(reason: unknown): Promise<void> {
+    if (this.#cancelPromise !== undefined) return this.#cancelPromise;
+    this.#done = true;
+    // The source's own stream, if teed away, closes with this cancel, as
+    // readableStreamCancel closes an un-teed stream before its cancel
+    // steps; being locked, nothing else can reach it.
+    if (getReadableStreamConsumer(this.#stream) === undefined) {
+      readableStreamClose(this.#stream);
+    }
+    const cancelAlgorithm = this.#cancelAlgorithm;
+    this.#clearAlgorithms();
+    this.#cancelPromise =
+      cancelAlgorithm === undefined
+        ? PromiseResolve()
+        : cancelAlgorithm(reason);
+    // Consumers that left earlier were promised the source's cancel.
+    this.#pendingCancel?.resolve(this.#cancelPromise);
+    return this.#cancelPromise;
+  }
+
+  #shouldCallPull(): boolean {
+    if (!this.#started) return false;
+    if (!this.canCloseOrEnqueue()) return false;
+    // The pending-read clause is what keeps a fast consumer from starving
+    // when the queue is at the high water mark: a consumer that reads
+    // faster than the HWM drains must still trigger pulls. With every
+    // consumer collected there is nobody to pull for.
+    return this.#queue.wantsPull();
+  }
+
+  #clearAlgorithms(): void {
+    this.#pullAlgorithm = undefined;
+    this.#cancelAlgorithm = undefined;
+    this.#sizeAlgorithm = undefined;
+  }
+}
+
+let assertIsReadableStreamDefaultController: <R>(
+  self: ReadableStreamDefaultController<R>
+) => void;
+
+class ReadableStreamDefaultController<
+  R = unknown,
+> implements ReadableStreamDefaultControllerType<R> {
+  #stream: ReadableStream<R>;
+  #core: QueuedControllerCore<R, R>;
+  // The core's queue, held here too: the class's brand, and enqueue()'s.
+  #queue: StreamQueueType<R, R>;
+  // The non-standard expectedLength pass-through (undefined = unknown).
+  // Default controllers never read it from an underlying source — it is
+  // set ONLY through the internal setter, by the TransformStream
+  // constructor's workerd `expectedLength` extension, so the C++ bridge
+  // can derive Content-Length for bodies built from such transforms.
+  #expectedLength: bigint | undefined = undefined;
 
   static {
     assertIsReadableStreamDefaultController = function <R>(
@@ -1477,7 +1737,9 @@ class ReadableStreamDefaultController<
     // predicate crosses the module fence from native.ts).
     controllerPullIfNeeded = (controller) => {
       if (#queue in controller) {
-        (controller as ReadableStreamDefaultController).#callPullIfNeeded();
+        (
+          controller as ReadableStreamDefaultController
+        ).#core.callPullIfNeeded();
       }
       // The byte controller wires its own branch in the byte pass.
     };
@@ -1495,39 +1757,39 @@ class ReadableStreamDefaultController<
     };
 
     defaultControllerCanCloseOrEnqueue = (controller) =>
-      controller.#canCloseOrEnqueue();
+      controller.#core.canCloseOrEnqueue();
 
     controllerCancelSteps = (controller, reason) => {
       if (#queue in controller) {
-        return (controller as ReadableStreamDefaultController).#cancelSteps(
-          reason
-        );
+        return (
+          controller as ReadableStreamDefaultController
+        ).#core.cancelSteps(reason);
       }
       return PromiseResolve();
     };
 
     controllerMaybeCloseStream = (controller) => {
       if (#queue in controller) {
-        (controller as ReadableStreamDefaultController).#maybeCloseStream();
+        (
+          controller as ReadableStreamDefaultController
+        ).#core.maybeCloseStream();
       }
     };
 
     controllerConsumerLeaving = (controller, reason, isLastConsumer) => {
       if (#queue in controller) {
-        return (controller as ReadableStreamDefaultController).#consumerLeaving(
-          reason,
-          isLastConsumer
-        );
+        return (
+          controller as ReadableStreamDefaultController
+        ).#core.consumerLeaving(reason, isLastConsumer);
       }
       return PromiseResolve();
     };
 
     controllerConsumerErrored = (controller, reason, isLastConsumer) => {
       if (#queue in controller) {
-        return (controller as ReadableStreamDefaultController).#consumerErrored(
-          reason,
-          isLastConsumer
-        );
+        return (
+          controller as ReadableStreamDefaultController
+        ).#core.consumerErrored(reason, isLastConsumer);
       }
       return PromiseResolve();
     };
@@ -1541,7 +1803,7 @@ class ReadableStreamDefaultController<
 
     controllerError = (controller, reason) => {
       if (#queue in controller) {
-        (controller as ReadableStreamDefaultController).#error(reason);
+        (controller as ReadableStreamDefaultController).#core.error(reason);
       }
     };
 
@@ -1568,27 +1830,17 @@ class ReadableStreamDefaultController<
     this.#stream = stream;
 
     const { cancel: cancelFn, pull: pullFn, start: startFn } = sourceDict;
-    const algorithms = makeSourceAlgorithms(
-      underlyingSource,
-      this,
-      pullFn,
-      cancelFn
-    );
-    this.#pullAlgorithm = algorithms.pull;
-    this.#cancelAlgorithm = algorithms.cancel;
-
     // Strategy already extracted by caller (WebIDL conversion order).
-    this.#sizeAlgorithm = sizeAlgorithm;
+    const core = new QueuedControllerCore<R, R>(
+      stream,
+      highWaterMark,
+      makeSourceAlgorithms(underlyingSource, this, pullFn, cancelFn),
+      sizeAlgorithm
+    );
+    this.#core = core;
+    this.#queue = core.queue;
 
-    // --- Queue + the stream's own cursor ---
-    this.#queue = new StreamQueue(highWaterMark, () => {
-      // Every consumer has been collected (see StreamQueue#noConsumers).
-      // Release the source rather than cancel it: GC timing must not run
-      // the user's cancel callback. The size algorithm stays, so enqueue()
-      // sizes chunks as before; the queue drops them.
-      this.#pullAlgorithm = undefined;
-      this.#cancelAlgorithm = undefined;
-    }) as StreamQueueType<R, R>;
+    // --- The stream's own cursor ---
     const cursor = new QueueCursor(this.#queue, stream) as QueueCursorType<
       R,
       R
@@ -1599,39 +1851,22 @@ class ReadableStreamDefaultController<
     // --- Start ---
     // Per spec, start is invoked synchronously and a sync throw propagates
     // out of the ReadableStream constructor.
-    const startResult: unknown =
+    core.start(
       startFn === undefined
         ? undefined
-        : uncurryThis(startFn)(underlyingSource, this);
-    PromisePrototypeThen(
-      writableInternals.promiseResolvedWith(startResult),
-      () => {
-        this.#started = true;
-        this.#callPullIfNeeded();
-      },
-      (e: unknown) => {
-        this.#error(e);
-      }
+        : uncurryThis(startFn)(underlyingSource, this)
     );
   }
 
   get desiredSize(): number | null {
     assertIsReadableStreamDefaultController(this);
-    // null when ERRORED, 0 when CLOSED, computed while readable — including
-    // while close-requested-but-still-draining (spec GetDesiredSize).
-    switch (getReadableStreamGetState(this.#stream)) {
-      case 'errored':
-        return null;
-      case 'closed':
-        return 0;
-      default:
-        return this.#queue.desiredSize;
-    }
+    return this.#core.desiredSize;
   }
 
   enqueue(chunk: R = undefined as R): void {
     assertIsReadableStreamDefaultController(this);
-    if (!this.#canCloseOrEnqueue()) {
+    const core = this.#core;
+    if (!core.canCloseOrEnqueue()) {
       throw new TypeError(
         'Cannot enqueue a chunk into a stream that is closed or closing'
       );
@@ -1648,7 +1883,7 @@ class ReadableStreamDefaultController<
       isReadableStreamLocked(this.#stream)
     ) {
       cursor.fulfillFirstPendingRead(chunk);
-      this.#callPullIfNeeded();
+      core.callPullIfNeeded();
       return;
     }
     // Snapshot pending-read state before size(). Reads added reentrantly
@@ -1661,7 +1896,8 @@ class ReadableStreamDefaultController<
     try {
       // assert: sizeAlgorithm is set (canCloseOrEnqueue guard above
       // rejects after clearAlgorithms)
-      size = +(this.#sizeAlgorithm as (chunk: R) => number)(chunk as R);
+      const sizeAlgorithm = core.sizeAlgorithm as (chunk: R) => number;
+      size = +sizeAlgorithm(chunk as R);
       // Spec EnqueueValueWithSize: NaN, negative, and +Infinity sizes are
       // RangeErrors.
       if (NumberIsNaN(size) || size < 0 || size === Infinity) {
@@ -1670,7 +1906,7 @@ class ReadableStreamDefaultController<
     } catch (e) {
       // A throwing size() (or invalid size) errors the stream AND
       // propagates to the caller (spec enqueue error steps).
-      this.#error(e);
+      core.error(e);
       throw e;
     }
     // Suppress cursor notification when reads were added reentrantly
@@ -1679,207 +1915,22 @@ class ReadableStreamDefaultController<
     // enqueue triggers the direct-fulfillment path (step 3).
     const notify = hadPendingRead || !cursor?.hasPendingRead;
     this.#queue.enqueue({ value: chunk as R, size }, notify);
-    this.#callPullIfNeeded();
+    core.callPullIfNeeded();
   }
 
   close(): void {
     assertIsReadableStreamDefaultController(this);
-    if (!this.#canCloseOrEnqueue()) {
+    if (!this.#core.canCloseOrEnqueue()) {
       throw new TypeError(
         'Cannot close a stream that is already closed or closing'
       );
     }
-    this.#closeRequested = true;
-    this.#queue.close(); // pushes the sentinel; notifies all cursors
-    // If the stream's own cursor has already drained to the sentinel, the
-    // stream closes immediately; otherwise the read paths complete the
-    // transition when the cursor reaches the sentinel (drain-then-close).
-    this.#maybeCloseStream();
+    this.#core.requestClose();
   }
 
   error(reason: unknown = undefined): void {
     assertIsReadableStreamDefaultController(this);
-    this.#error(reason);
-  }
-
-  // Internal callers error through here: the prototype's error() is
-  // user-patchable.
-  #error(reason: unknown): void {
-    if (this.#done) return;
-    this.#done = true;
-    // Propagate to every live consumer stream (tee branches) via the
-    // cursors' weak owner refs — no strong retention of branches. The
-    // primary stream is handled explicitly: a tee'd-away parent has no
-    // cursor. readableStreamError is state-guarded, so overlap is fine.
-    // Every stream errors before its pending reads reject: reader.closed
-    // rejects first (spec ReadableStreamError).
-    const owners = this.#queue.getLiveOwners();
-    for (let i = 0; i < owners.length; i++) {
-      readableStreamError(owners[i] as ReadableStream<R>, reason);
-    }
-    readableStreamError(this.#stream, reason);
-    this.#queue.error(reason); // rejects pending reads, drops buffered data
-    this.#clearAlgorithms();
-    // The source settled on its own: consumers that had left are owed
-    // undefined (spec ReadableStreamTee step 14.c.ii).
-    this.#pendingCancel?.resolve();
-  }
-
-  #canCloseOrEnqueue(): boolean {
-    // #cancelPromise marks a cancelled source: CancelSteps cleared its
-    // algorithms, whatever state its stream reports.
-    return (
-      !this.#closeRequested &&
-      this.#cancelPromise === undefined &&
-      getReadableStreamGetState(this.#stream) === 'readable'
-    );
-  }
-
-  #maybeCloseStream(): void {
-    if (!this.#closeRequested) return;
-    // A stream whose cursor has reached the close sentinel transitions to
-    // 'closed'; one with buffered data before the sentinel stays 'readable'
-    // until drained (drain-then-close on subsequent reads).
-    //
-    // The source's own stream. With a cursor it is the queue's only
-    // consumer (tee and detach take its cursor away) and drains to the
-    // sentinel like any; without one it consumes nothing, so there is
-    // nothing to drain and it closes now. The source's own events close it
-    // — close requested here, cancelled in #cancelSteps, errored in
-    // error() — never the branches' progress (the queued tee model,
-    // AGENTS.md). Its closing does not end the source: that is #done,
-    // below, once every consumer has drained.
-    const parentCursor = getReadableStreamConsumer(this.#stream) as
-      QueueCursorType<R, R> | undefined;
-    if (parentCursor !== undefined) {
-      if (this.#queue.getEntry(parentCursor.position) !== CLOSE_SENTINEL) {
-        return;
-      }
-      readableStreamClose(this.#stream);
-    } else {
-      // Check every live consumer stream (the tee branches).
-      let anyOpen = false;
-      const owners = this.#queue.getLiveOwners();
-      for (let i = 0; i < owners.length; i++) {
-        const owner = owners[i] as ReadableStream<R>;
-        const cursor = getReadableStreamConsumer(owner) as
-          QueueCursorType<R, R> | undefined;
-        if (cursor === undefined) continue;
-        if (this.#queue.getEntry(cursor.position) === CLOSE_SENTINEL) {
-          readableStreamClose(owner);
-        } else {
-          anyOpen = true;
-        }
-      }
-      readableStreamClose(this.#stream);
-      if (anyOpen) return;
-    }
-    this.#done = true;
-    this.#clearAlgorithms();
-    // Every remaining consumer has closed: the source will never be
-    // cancelled, and consumers that had left are owed undefined (spec
-    // ReadableStreamTee step 14.b.v).
-    this.#pendingCancel?.resolve();
-  }
-
-  // A consumer leaves the queue; see controllerConsumerLeaving. Decided
-  // BEFORE the cursor's removal (QueueCursor.cancelStream): removing it
-  // first would make the leaving consumer look like it was not the last
-  // (parking the cancel in #pendingCancel with nobody left to settle it)
-  // and fire the all-cursors-gone hook, which clears the cancel algorithm
-  // before #cancelSteps could run it.
-  #consumerLeaving(reason: unknown, isLastConsumer: boolean): Promise<void> {
-    const reasons = this.#departedReasons;
-    ArrayPrototypePush(reasons, reason);
-    if (isLastConsumer) {
-      return this.#cancelSteps(
-        reasons.length > 1 ? makeCompositeCancelReason(reasons) : reason
-      );
-    }
-    this.#pendingCancel ??=
-      PromiseWithResolvers() as PromiseWithResolversType<void>;
-    return this.#pendingCancel.promise;
-  }
-
-  // A consumer errors alone; see controllerConsumerErrored. Decided before
-  // the cursor's removal, as #consumerLeaving is.
-  #consumerErrored(reason: unknown, isLastConsumer: boolean): Promise<void> {
-    if (!this.#closeRequested) {
-      return this.#consumerLeaving(reason, isLastConsumer);
-    }
-    if (isLastConsumer) {
-      // As in #maybeCloseStream once every consumer has drained.
-      this.#done = true;
-      this.#clearAlgorithms();
-      this.#pendingCancel?.resolve();
-    }
-    return PromiseResolve();
-  }
-
-  #shouldCallPull(): boolean {
-    if (!this.#started) return false;
-    if (!this.#canCloseOrEnqueue()) return false;
-    // The pending-read clause is what keeps a fast consumer from starving
-    // when the queue is at the high water mark: a consumer that reads
-    // faster than the HWM drains must still trigger pulls. With every
-    // consumer collected there is nobody to pull for.
-    return this.#queue.wantsPull();
-  }
-
-  #callPullIfNeeded(): void {
-    if (!this.#shouldCallPull()) return;
-    if (this.#pulling) {
-      this.#pullAgain = true;
-      return;
-    }
-    this.#pulling = true;
-    const pullAlgorithm = this.#pullAlgorithm;
-    const result =
-      pullAlgorithm === undefined ? PromiseResolve() : pullAlgorithm();
-    PromisePrototypeThen(
-      result,
-      () => {
-        this.#pulling = false;
-        if (this.#pullAgain) {
-          this.#pullAgain = false;
-          this.#callPullIfNeeded();
-        }
-      },
-      (e: unknown) => {
-        this.#error(e);
-      }
-    );
-  }
-
-  // Cancel the underlying source (spec CancelSteps). Idempotent and cached.
-  // Reached through #consumerLeaving once the last consumer has left the
-  // queue — an explicit stream/branch cancel, or a branch errored through
-  // the Node.js interop hook. The all-cursors-gone GC hook never comes
-  // here: it only releases the source (see the constructor).
-  #cancelSteps(reason: unknown): Promise<void> {
-    if (this.#cancelPromise !== undefined) return this.#cancelPromise;
-    this.#done = true;
-    // The source's own stream, if teed away, closes with this cancel, as
-    // readableStreamCancel closes an un-teed stream before its cancel
-    // steps; being locked, nothing else can reach it.
-    if (getReadableStreamConsumer(this.#stream) === undefined) {
-      readableStreamClose(this.#stream);
-    }
-    const cancelAlgorithm = this.#cancelAlgorithm;
-    this.#clearAlgorithms();
-    this.#cancelPromise =
-      cancelAlgorithm === undefined
-        ? PromiseResolve()
-        : cancelAlgorithm(reason);
-    // Consumers that left earlier were promised the source's cancel.
-    this.#pendingCancel?.resolve(this.#cancelPromise);
-    return this.#cancelPromise;
-  }
-
-  #clearAlgorithms(): void {
-    this.#pullAlgorithm = undefined;
-    this.#cancelAlgorithm = undefined;
-    this.#sizeAlgorithm = undefined;
+    this.#core.error(reason);
   }
 }
 
@@ -2019,7 +2070,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   #pullAgain: boolean = false;
   #closeRequested: boolean = false;
   #cancelPromise: Promise<void> | undefined;
-  // As the default controller's: see there.
+  // As QueuedControllerCore's: see there.
   #done: boolean = false;
   #departedReasons: unknown[] = [];
   #pendingCancel: PromiseWithResolversType<void> | undefined;
@@ -2209,8 +2260,8 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
     // --- Queue + the stream's own (byte) cursor ---
     this.#queue = new StreamQueue(highWaterMark, () => {
-      // Every consumer has been collected: release the source, as the
-      // default controller's hook does.
+      // Every consumer has been collected: release the source, as
+      // QueuedControllerCore's hook does.
       this.#clearAlgorithms();
       this.#invalidateByobRequest();
       this.#releasedHead = undefined;
@@ -2436,8 +2487,8 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     this.#done = true;
     this.#invalidateByobRequest();
     this.#releasedHead = undefined;
-    // Branch propagation and ordering — see the default controller's
-    // #error().
+    // Branch propagation and ordering — see QueuedControllerCore's
+    // error().
     const owners = this.#queue.getLiveOwners();
     for (let i = 0; i < owners.length; i++) {
       readableStreamError(owners[i] as ReadableStream<Uint8Array>, reason);
@@ -2643,7 +2694,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
   #maybeCloseStream(): void {
     if (!this.#closeRequested) return;
-    // Mirror of the default controller's logic — see that for comments.
+    // Mirror of QueuedControllerCore's — see that for comments.
     const parentCursor = getReadableStreamConsumer(this.#stream) as
       QueueCursorType<ByteQueueEntry, Uint8Array> | undefined;
     if (parentCursor !== undefined) {
@@ -2673,7 +2724,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     this.#pendingCancel?.resolve();
   }
 
-  // As the default controller's: see there.
+  // As QueuedControllerCore's: see there.
   #consumerLeaving(reason: unknown, isLastConsumer: boolean): Promise<void> {
     const reasons = this.#departedReasons;
     ArrayPrototypePush(reasons, reason);
@@ -2687,7 +2738,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     return this.#pendingCancel.promise;
   }
 
-  // As the default controller's: see there.
+  // As QueuedControllerCore's: see there.
   #consumerErrored(reason: unknown, isLastConsumer: boolean): Promise<void> {
     if (!this.#closeRequested) {
       return this.#consumerLeaving(reason, isLastConsumer);
@@ -4091,8 +4142,9 @@ class ReadableStream<R> {
       readableStreamError(stream, reason);
       cursor.errorAllReads(reason);
       // Decided BEFORE the cursor's removal, for the reasons given at
-      // #consumerLeaving (as in QueueCursor.cancelStream). The controller is
-      // queued: its branch's consumer is a QueueCursor (above).
+      // QueuedControllerCore.consumerLeaving (as in QueueCursor.cancelStream).
+      // The controller is queued: its branch's consumer is a QueueCursor
+      // (above).
       markPromiseHandled(
         controllerConsumerErrored(
           controller as
@@ -4192,7 +4244,7 @@ class ReadableStream<R> {
         stream.#consumer = undefined;
         // With close already requested, the source's own stream — now
         // consuming nothing — closes here rather than when a branch next
-        // reads (see #maybeCloseStream).
+        // reads (see QueuedControllerCore.maybeCloseStream).
         if (controller !== undefined) controllerMaybeCloseStream(controller);
       }
 
@@ -4291,9 +4343,10 @@ class ReadableStream<R> {
       neutralize();
       if (controller !== undefined) {
         // As in tee: with close already requested, the husk closes now if
-        // it is the source's own stream (see #maybeCloseStream). Any other
-        // husk (a tee branch, or the copy an earlier detach made) consumes
-        // nothing now, and no source event would ever reach it: close it.
+        // it is the source's own stream (see
+        // QueuedControllerCore.maybeCloseStream). Any other husk (a tee
+        // branch, or the copy an earlier detach made) consumes nothing now,
+        // and no source event would ever reach it: close it.
         controllerMaybeCloseStream(controller);
         if (controllerStream(controller) !== stream) {
           closeReadableStreamHusk(stream);

@@ -651,8 +651,9 @@ class StreamQueue<T, V = T> {
   // A cursor joins a queue that already has one only through tee or detach,
   // which then remove the parent's. The controllers rely on that: while the
   // source's own cursor is present it is the queue's sole consumer
-  // (#maybeCloseStream in readable.ts skips the owners walk). A new path
-  // that adds a cursor beside the source's own must revisit those checks.
+  // (QueuedControllerCore.maybeCloseStream in readable.ts skips the owners
+  // walk). A new path that adds a cursor beside the source's own must
+  // revisit those checks.
   addCursor(cursor: QueueCursor<T, V>, owner: object): void {
     this.#hadCursors = true;
     ArrayPrototypePush(this.#cursors, cursor);
