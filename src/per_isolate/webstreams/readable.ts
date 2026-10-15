@@ -2308,8 +2308,8 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     this.#enqueueChunk(chunk, true);
   }
 
-  // enqueue()'s steps. With `notify` false the chunk is queued without
-  // notifying the consumers (byteControllerEnqueueBatch notifies with its
+  // enqueue()'s steps. With `notify` false the consumers are not notified
+  // and pull is not called (byteControllerEnqueueBatch does both with its
   // last chunk).
   #enqueueChunk(chunk: ArrayBufferView, notify: boolean): void {
     if (!this.#canCloseOrEnqueue()) {
@@ -2364,7 +2364,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
           entry.byteLength
         );
         autoDesc.resolve(createReadResult(view, false));
-        this.#callPullIfNeeded();
+        if (notify) this.#callPullIfNeeded();
         return;
       }
     } else {
