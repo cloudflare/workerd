@@ -2088,6 +2088,12 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   // and new, for every cursor, dropping their copies. enqueue(), error(),
   // cancel and a closed-state respond(0) discard it.
   #releasedHead: PullIntoDescriptor | undefined;
+  // Whether #releasedHead came from a cursor whose fractional fill at close
+  // errors the whole stream (the source's own, or its successor after a
+  // detach), so that close() checks it as it does such a cursor's head.
+  // Taken from a tee branch's cursor, it is that branch's read: the forked
+  // cursors' copies of it error their branches alone.
+  #releasedHeadErrorsStream: boolean = false;
 
   static {
     isByteStreamController = (value: unknown) => {
@@ -2150,6 +2156,8 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
         controller.#releasedHead === undefined
       ) {
         controller.#releasedHead = head;
+        controller.#releasedHeadErrorsStream =
+          from.errorStreamCallback !== errorTeeBranchFromCursor;
         return;
       }
       // A request over `from`'s head would outlive it.
@@ -2369,20 +2377,27 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     }
     // Spec: closing with a fractional-element partial fill in a head
     // descriptor is a TypeError that also errors the stream — the bytes to
-    // complete the element can never arrive. Only a cursor whose fractional
-    // fill errors the whole stream counts: the source's own, or its
-    // successor after a detach, which inherits its callback. A tee branch's
-    // errors that branch alone (the spec closes each branch through its own
-    // controller), which its cursor does itself when the close reaches it,
-    // so this close() succeeds and the sibling keeps every byte.
-    const hasFractionalFill = this.#queue.someLiveCursor((cursor) => {
-      const byteCursor = cursor as unknown as ByteStreamCursorType;
-      if (byteCursor.errorStreamCallback === errorTeeBranchFromCursor) {
-        return false;
-      }
-      const head: PullIntoDescriptor | undefined = byteCursor.headPullInto;
-      return head !== undefined && head.bytesFilled % head.elementSize !== 0;
-    });
+    // complete the element can never arrive. Only a fill that errors the
+    // whole stream counts: a head on the source's own cursor, or on its
+    // successor after a detach, which inherits its callback, and a released
+    // head taken over from one of those (the source's own pull-into). A tee
+    // branch's errors that branch alone (the spec closes each branch
+    // through its own controller), which its cursor does itself when the
+    // close reaches it, so this close() succeeds and the sibling keeps
+    // every byte.
+    const released = this.#releasedHead;
+    const hasFractionalFill =
+      (released !== undefined &&
+        this.#releasedHeadErrorsStream &&
+        released.bytesFilled % released.elementSize !== 0) ||
+      this.#queue.someLiveCursor((cursor) => {
+        const byteCursor = cursor as unknown as ByteStreamCursorType;
+        if (byteCursor.errorStreamCallback === errorTeeBranchFromCursor) {
+          return false;
+        }
+        const head: PullIntoDescriptor | undefined = byteCursor.headPullInto;
+        return head !== undefined && head.bytesFilled % head.elementSize !== 0;
+      });
     if (hasFractionalFill) {
       const e = new TypeError(
         'Insufficient bytes to fill elements in the given view'

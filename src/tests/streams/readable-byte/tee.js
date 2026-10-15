@@ -801,65 +801,78 @@ export const teeHeldByobRequestAfterCloseOrError = {
   },
 };
 
-// Ledger #7 through a held request: the released read holds one byte of a
-// Uint16Array, and the sibling has cancelled. Under TS close() succeeds and
-// the sole remaining branch errors alone at it, on the fractional fill;
-// that ends the source, which retires the request and lets the held read
-// go: no request is minted over it again. The source's cancel() never
-// runs, and the sibling's cancel() resolves undefined. C++ never errors
-// the branch, and the request stays, over the rest of the read's buffer.
-// The spec has close() itself throw the TypeError, the held read being the
-// source's own pull-into; the branch errors with it, as here.
+// Ledger #7 through a held request: the released read, which the source's
+// own stream made before tee(), holds one byte of a Uint16Array, both
+// branches live or the sibling cancelled. Under TS close() throws the
+// TypeError and errors the source, as the spec's does, the held read being
+// the source's own pull-into: every live branch errors with it, the
+// request is retired, and none is minted over the held read again. A
+// sibling's cancel() resolves undefined, and the source's cancel() never
+// runs. C++ closes, never errors a branch, and keeps the request, over the
+// rest of the read's buffer.
 export const teeHeldByobRequestFractionalAtClose = {
   async test() {
-    let controller;
-    let cancelled = false;
-    const rs = new ReadableStream({
-      type: 'bytes',
-      start(c) {
-        controller = c;
-      },
-      cancel() {
-        cancelled = true;
-      },
-    });
-    const reader = rs.getReader({ mode: 'byob' });
-    const read = reader.read(new Uint16Array(2), { min: 2 });
-    await scheduler.wait(5);
-    controller.byobRequest.view[0] = 1;
-    controller.byobRequest.respond(1);
-    const request = controller.byobRequest;
-    reader.releaseLock();
-    await rejectionOf(read);
-    const [a, b] = rs.tee();
-    const siblingCancel = b.cancel('sibling');
-    await scheduler.wait(5);
-    strictEqual(controller.byobRequest, request);
-    controller.close();
-    if (usingTsImpl) {
-      strictEqual(request.view, null);
-      strictEqual(controller.byobRequest, null);
-      strictEqual(
-        (await rejectionOf(a.getReader().read())).message,
-        'Insufficient bytes to fill elements in the given view'
-      );
-    } else {
-      strictEqual(request.view.byteLength, 3);
+    const expected = 'Insufficient bytes to fill elements in the given view';
+    for (const cancelSibling of [false, true]) {
+      let controller;
+      let cancelled = false;
+      const rs = new ReadableStream({
+        type: 'bytes',
+        start(c) {
+          controller = c;
+        },
+        cancel() {
+          cancelled = true;
+        },
+      });
+      const reader = rs.getReader({ mode: 'byob' });
+      const read = reader.read(new Uint16Array(2), { min: 2 });
+      await scheduler.wait(5);
+      controller.byobRequest.view[0] = 1;
+      controller.byobRequest.respond(1);
+      const request = controller.byobRequest;
+      reader.releaseLock();
+      await rejectionOf(read);
+      const [a, b] = rs.tee();
+      const siblingCancel = cancelSibling ? b.cancel('sibling') : undefined;
+      await scheduler.wait(5);
       strictEqual(controller.byobRequest, request);
-      strictEqual((await a.getReader().read()).done, true);
+      const live = cancelSibling ? [a] : [a, b];
+      if (usingTsImpl) {
+        throws(() => controller.close(), {
+          name: 'TypeError',
+          message: expected,
+        });
+        strictEqual(controller.desiredSize, null);
+        strictEqual(request.view, null);
+        strictEqual(controller.byobRequest, null);
+        for (const branch of live) {
+          const result = branch.getReader().read();
+          strictEqual((await rejectionOf(result)).message, expected);
+        }
+      } else {
+        controller.close();
+        strictEqual(controller.desiredSize, 0);
+        strictEqual(request.view.byteLength, 3);
+        strictEqual(controller.byobRequest, request);
+        for (const branch of live) {
+          strictEqual((await branch.getReader().read()).done, true);
+        }
+      }
+      strictEqual(await siblingCancel, undefined);
+      strictEqual(cancelled, false);
     }
-    strictEqual(await siblingCancel, undefined);
-    strictEqual(cancelled, false);
   },
 };
 
 // The held read taken over from a branch: the source's request, minted
 // while that branch was the only consumer (its sibling cancelled), is
-// held across the branch's own tee(). Under TS close() succeeds and both
-// of the branch's branches error alone at it, on the fractional fill, as
-// the branch itself would have (ledger #7); the request is retired, and
-// none is minted over the held read again. C++ never errors a branch, and
-// the request stays.
+// held across the branch's own tee(). The held read is the branch's, not
+// the source's own (above): under TS close() succeeds and both of the
+// branch's branches error alone at it, on the fractional fill, as the
+// branch itself would have (ledger #7); the request is retired, and none
+// is minted over the held read again. C++ never errors a branch, and the
+// request stays.
 export const teeHeldByobRequestFromBranchFractionalAtClose = {
   async test() {
     const expected = 'Insufficient bytes to fill elements in the given view';

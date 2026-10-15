@@ -99,7 +99,12 @@ aunt. Consequences, all handled by the controller (`readable.ts`,
   keeps working, as in the spec. Responding to it enqueues the head's
   bytes, old and new, for every cursor (each drops its own copy of the old
   ones, from `adoptReleasedBytes`). `enqueue()`, `error()`, cancel and a
-  closed-state `respond(0)` retire it. Suite: readable-byte ledger #25.
+  closed-state `respond(0)` retire it. A fractional element fill in it
+  makes `close()` throw and error the source, as the spec's does, when the
+  source's own stream made the read (it is the source's own pull-into);
+  a read taken over from a tee branch is that branch's, and the forked
+  branches error alone at the close, as the branch would. Suite:
+  readable-byte ledgers #25 and #7.
 - Nothing walks a tree of streams: closing, cancelling and erroring act on
   cursors and their owners, and no stream retains another.
 
