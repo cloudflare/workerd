@@ -338,10 +338,20 @@ wd_cc_library(
         "macro-meta-test.c++",
         "resource-test.c++",
         "rtti-test.c++",
+        "tracing-test.c++",
         "url-test.c++",
         "multiple-typewrappers-test.c++",
     ],
 )]
+
+# The native allocation regression creates a million wrappers to trigger an automatic major GC.
+# Debug builds need more than the default 15-second budget to finish the allocation loop.
+kj_test(
+    size = "large",
+    src = "tracing-test.c++",
+    local_defines = ["JSG_IMPLEMENTATION"],
+    deps = [":jsg"],
+)
 
 # Moved out as macro-meta-test does not depend on V8 or JSG proper, this makes the test much
 # smaller.
