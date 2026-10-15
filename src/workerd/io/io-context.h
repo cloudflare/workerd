@@ -214,6 +214,10 @@ class IoContext_IncomingRequest final {
   // worker invocation.
   tracing::InvocationSpanContext& getInvocationSpanContext();
 
+  // Returns this request's invocation span context, with the span ID replaced by that of
+  // `userSpan` if it has one.
+  tracing::InvocationSpanContext getInvocationSpanContextForUserSpan(SpanParent& userSpan);
+
   // The async trace REQUEST resource for this request, created by delivered(); 0 if the context
   // is not traced.
   AsyncId getAsyncTraceId() const {
@@ -438,8 +442,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       const jsg::JsMessage& message = jsg::JsMessage());
 
   // Log an uncaught exception from an asynchronous context, i.e. when the IoContext is not
-  // "current".
-  void logUncaughtExceptionAsync(UncaughtExceptionSource source, kj::Exception&& e);
+  // "current". The exception is added to the trace of `incomingRequest`, or of the current incoming
+  // request as a fallback if none is given. Pass `incomingRequest` whenever the exception is known
+  // to belong to a specific request, such as the failure of its event handler: in an actor, the
+  // current incoming request may be a newer, unrelated one.
+  void logUncaughtExceptionAsync(UncaughtExceptionSource source,
+      kj::Exception&& e,
+      kj::Maybe<IncomingRequest&> incomingRequest);
 
   // Returns a promise that will reject with an exception if and when the request should be
   // aborted, e.g. because its CPU time expired. This should be joined with any promises for
@@ -1203,13 +1212,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // span's spanId (as pushed by `ctx.tracing.enterSpan`), falling back to the invocation
   // root's spanId when no user span is active.
   tracing::InvocationSpanContext getInvocationSpanContext() {
-    auto& base = getCurrentIncomingRequest().getInvocationSpanContext();
-    tracing::SpanId sid = getCurrentUserTraceSpan().getSpanId();
-    if (sid != tracing::SpanId::nullId) {
-      return tracing::InvocationSpanContext(
-          base.getTraceId(), base.getInvocationId(), sid, base.getTraceFlags());
-    }
-    return base.clone();
+    auto userSpan = getCurrentUserTraceSpan();
+    return getCurrentIncomingRequest().getInvocationSpanContextForUserSpan(userSpan);
   }
 
   // Returns a builder for recording tracing spans (or a no-op builder if tracing is inactive).

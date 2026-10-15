@@ -3244,6 +3244,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       Frankenvalue props,
       kj::Maybe<kj::String> wrapperModule,
       kj::Maybe<kj::Rc<BaseTracer>> tracer,
+      IoContext::IncomingRequest& incomingRequest,
       bool isDynamicDispatch)
       : JsRpcTargetBase(ioCtx, CantOutliveIncomingRequest()),
         ioCtx(ioCtx),
@@ -3255,6 +3256,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
         props(kj::mv(props)),
         wrapperModule(kj::mv(wrapperModule)),
         tracer(kj::mv(tracer)),
+        incomingRequest(incomingRequest),
         isDynamicDispatch(isDynamicDispatch) {}
 
   // Override call() to emit the Return event when the top-level RPC call completes.
@@ -3263,8 +3265,8 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   kj::Promise<void> call(CallContext callContext) override {
     return JsRpcTargetBase::call(kj::mv(callContext))
         .then([this]() {
-      KJ_IF_SOME(t, ioCtx.getWorkerTracer()) {
-        t.setReturn(ioCtx.now());
+      KJ_IF_SOME(t, tracer) {
+        t->setReturn(ioCtx.now());
       }
     }).catch_([this](kj::Exception&& exception) {
       markJsRpcExceptionAsDelivered(ioCtx, exception);
@@ -3355,7 +3357,11 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   kj::Maybe<Worker::VersionInfo> versionInfo;
   Frankenvalue props;
   kj::Maybe<kj::String> wrapperModule;
+  // The session's own tracer and incoming request. IoContext::getWorkerTracer() and
+  // IoContext::getInvocationSpanContext() may refer to a different request to the same actor. The
+  // incoming request outlives this target (see CantOutliveIncomingRequest).
   kj::Maybe<kj::Rc<BaseTracer>> tracer;
+  IoContext::IncomingRequest& incomingRequest;
   bool isDynamicDispatch;
 
   bool isReservedName(kj::StringPtr name) override {
@@ -3387,8 +3393,12 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   }
 
   void maybeSetJsRpcInfo(IoContext& ctx, const kj::ConstString& methodNameForTrace) override {
-    KJ_IF_SOME(tracer, ctx.getWorkerTracer()) {
-      tracer.setJsRpcInfo(ctx.getInvocationSpanContext(), ctx.now(), methodNameForTrace);
+    KJ_IF_SOME(t, tracer) {
+      // callImpl() runs without a user span in its async context, so the current request's
+      // context would use its root user span. Do the same for this session's request.
+      auto userSpan = incomingRequest.getRootUserTraceSpan();
+      t->setJsRpcInfo(incomingRequest.getInvocationSpanContextForUserSpan(userSpan), ctx.now(),
+          methodNameForTrace);
     }
   }
 
@@ -3466,7 +3476,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
 
   EntrypointJsRpcTarget target(ioctx, kj::addRef(incomingRequest->getMetrics()), entrypointName,
       kj::mv(versionInfo), kj::mv(props), kj::mv(wrapperModule),
-      incomingRequest->getWorkerTracer().clone(), isDynamicDispatch);
+      incomingRequest->getWorkerTracer().clone(), *incomingRequest, isDynamicDispatch);
   capnp::RevocableServer<rpc::JsRpcTarget> revocableTarget(target);
 
   KJ_DEFER({
@@ -3502,8 +3512,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
     // an exception outcome – log the exception to avoid reporting an exception outcome without the
     // actual exception.
     KJ_IF_SOME(exc, kj::runCatchingExceptions([&]() {
-      incomingRequest->getContext().logUncaughtExceptionAsync(
-          UncaughtExceptionSource::ASYNC_TASK, e.clone());
+      ioctx.logUncaughtExceptionAsync(
+          UncaughtExceptionSource::ASYNC_TASK, e.clone(), *incomingRequest);
     })) {
       KJ_LOG(ERROR, "logUncaughtExceptionAsync() threw an exception?", exc);
     }
