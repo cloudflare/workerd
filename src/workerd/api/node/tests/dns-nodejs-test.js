@@ -5,6 +5,7 @@
 import dns from 'node:dns';
 import dnsPromises from 'node:dns/promises';
 import { strictEqual, ok, deepStrictEqual, throws } from 'node:assert';
+import { isIP } from 'node:net';
 import { inspect } from 'node:util';
 
 // Taken from Node.js
@@ -43,6 +44,8 @@ const addresses = {
   CAA_HOST: 'google.com',
   // A host with CNAME records registered
   CNAME_HOST: 'blog.nodejs.org',
+  // A host whose A and AAAA responses begin with a CNAME record
+  CNAME_CHAIN_HOST: 'www.iana.org',
   // A host with NS records registered
   NS_HOST: 'nodejs.org',
   // A host with TXT records registered
@@ -439,6 +442,49 @@ export const lookupDefaultFamilyResolvesIPv4 = {
       resolve();
     });
     await promise;
+  },
+};
+
+// Regression: address resolvers must not expose CNAME records as IP addresses.
+export const cnameChainReturnsOnlyIpAddresses = {
+  async test() {
+    const lookupResults = await Promise.all([
+      dnsPromises.lookup(addresses.CNAME_CHAIN_HOST, {
+        all: true,
+        family: 0,
+      }),
+      dnsPromises.lookup(addresses.CNAME_CHAIN_HOST, { family: 0 }),
+      dnsPromises.lookup(addresses.CNAME_CHAIN_HOST, {
+        all: true,
+        family: 4,
+      }),
+      dnsPromises.lookup(addresses.CNAME_CHAIN_HOST, { family: 6 }),
+    ]);
+
+    for (const result of lookupResults) {
+      const entries = Array.isArray(result) ? result : [result];
+      ok(entries.length > 0, 'expected at least one address');
+
+      for (const entry of entries) {
+        strictEqual(
+          isIP(entry.address),
+          entry.family,
+          `${entry.address} is not an IPv${entry.family} address`
+        );
+      }
+    }
+
+    const [ipv4Addresses, ipv6Addresses] = await Promise.all([
+      dnsPromises.resolve4(addresses.CNAME_CHAIN_HOST),
+      dnsPromises.resolve6(addresses.CNAME_CHAIN_HOST),
+    ]);
+
+    for (const address of ipv4Addresses) {
+      strictEqual(isIP(address), 4, `${address} is not an IPv4 address`);
+    }
+    for (const address of ipv6Addresses) {
+      strictEqual(isIP(address), 6, `${address} is not an IPv6 address`);
+    }
   },
 };
 
