@@ -1,20 +1,48 @@
-name: Experimental Workflow
+name: API debug budget audit
 on:
   workflow_dispatch:
-
-# You can modify this workflow in order to verify your changes to Github Actions on a branch.
-# DO NOT MERGE THESE CHANGES TO MAIN
-# This workflow exists to work around a limitation in Github Actions. You can only use 
-# workflow_dispatch on files that exist in main. However, once the file exists, you can dispatch to
-# your branch and make sure changes work.
-
 permissions:
-  contents: none
-
+  contents: read
+  actions: write
 jobs:
-  experiment:
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Hello World
-        shell: bash
-        run: echo Hello World
+  audit:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu-22.04-arm-16core
+            os: linux-arm
+            arch: ARM64
+            extra: '--config=ci-linux-arm-debug'
+            suffix: '-debug'
+          - image: ubuntu-22.04-16core
+            os: linux
+            arch: X64
+            extra: '--config=debug --config=ci-linux'
+            suffix: '-debug'
+          - image: ubuntu-22.04-16core
+            os: linux
+            arch: X64
+            extra: '--config=asan --config=ci-linux'
+            suffix: '-asan'
+    uses: ./.github/workflows/_bazel.yml
+    with:
+      image: ${{ matrix.image }}
+      os_name: ${{ matrix.os }}
+      arch_name: ${{ matrix.arch }}
+      suffix: ${{ matrix.suffix }}
+      build_target: >-
+        //src/workerd/api/tests:rtti-test@
+        //src/workerd/api/tests:js-rpc-streams-ts-test@
+      test_target: >-
+        //src/workerd/api/tests:rtti-test@
+        //src/workerd/api/tests:rtti-test@all-autogates
+        //src/workerd/api/tests:rtti-test@all-compat-flags
+        //src/workerd/api/tests:js-rpc-streams-ts-test@
+        //src/workerd/api/tests:js-rpc-streams-ts-test@all-autogates
+        //src/workerd/api/tests:js-rpc-streams-ts-test@all-compat-flags
+      extra_bazel_args: >-
+        --config=ci-test ${{ matrix.extra }}
+        --runs_per_test=5 --flaky_test_attempts=1 --local_test_jobs=4
+      upload_test_logs: true
+    secrets: inherit
