@@ -40,6 +40,13 @@
 //   - The source calls enqueue-or-respond AT MOST ONCE per pull
 //     invocation and never pushes outside pull. desiredSize is exposed
 //     but the native source never consults it.
+//   - The source hands over memory it never touches again: each
+//     enqueue()d chunk is a fresh buffer, never a SharedArrayBuffer, and
+//     the source stops writing to byobRequest.view once it responds.
+//     The conduit relies on this rather than checking it: it neither
+//     refuses a shared chunk nor transfers what it delivers, so the
+//     source's view of a responded read stays attached. The queued
+//     controller does both, because its source is user code.
 //   - PER-PULL CANCELLATION: pull receives an extension argument
 //     pull(controller, signal) — an AbortSignal that fires when the
 //     consumer abandons the read (releaseLock, cancel, tee). The source
