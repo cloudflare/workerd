@@ -23,6 +23,11 @@ wd_cc_library(
     }),
 )
 
+kj_test(
+    src = "bench-tools-test.c++",
+    deps = [":bench-tools"],
+)
+
 # Calls kj::setupAsyncIo(). The I/O backend is meant to be the BINARY's choice (kj_test and
 # wd_cc_benchmark link //src/workerd/util:setup-async-io into every test binary; libraries do not
 # carry it), but this one still does, so that binaries outside this repo which link the fixture
