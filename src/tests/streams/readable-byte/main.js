@@ -279,4 +279,6 @@ export {
   byteSourceExpectedLengthRejected,
   byteSourceExpectedLengthCoercion,
   byteSourceExpectedLengthRange,
+  byteSourceExpectedLengthContract,
+  byteSourceExpectedLengthHeldRequest,
 } from 'expected-length';
