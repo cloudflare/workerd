@@ -1302,15 +1302,21 @@ interface ViewInfo {
   ) => ArrayBufferView;
 }
 
-// PRECONDITION: caller has verified isArrayBufferView(view). Every
-// ArrayBufferView is either a typed array (identified via the internal
-// [[TypedArrayName]] slot) or a DataView; the DataView getters brand-check
-// the receiver, so nothing dishonest survives this function.
-function getViewInfo(view: ArrayBufferView): ViewInfo {
+// A view's ViewInfo at the byte-stream trust boundaries (read(view),
+// enqueue(), respondWithNewView()), after WebIDL's ArrayBufferView
+// conversion, without [AllowShared], so a value that is not a view, or a
+// view backed by a SharedArrayBuffer, throws. `what` names the argument in
+// messages. Every ArrayBufferView is either a typed array (identified via
+// the internal [[TypedArrayName]] slot) or a DataView.
+function getUnsharedViewInfo(view: unknown, what: string): ViewInfo {
+  if (!isArrayBufferView(view)) {
+    throw new TypeError(`${what} must be an ArrayBufferView`);
+  }
+  let info: ViewInfo;
   const name = TypedArrayPrototypeGetSymbolToStringTag(view);
   if (name !== undefined) {
     const viewCtor = TypedArrayCtorByName[name];
-    return {
+    info = {
       buffer: TypedArrayPrototypeGetBuffer(view),
       byteOffset: TypedArrayPrototypeGetByteOffset(view),
       byteLength: TypedArrayPrototypeGetByteLength(view),
@@ -1320,28 +1326,18 @@ function getViewInfo(view: ArrayBufferView): ViewInfo {
       length: TypedArrayPrototypeGetLength(view),
       viewCtor,
     };
+  } else {
+    const dataView = view as DataView;
+    const byteLength = DataViewPrototypeGetByteLength(dataView);
+    info = {
+      buffer: DataViewPrototypeGetBuffer(dataView),
+      byteOffset: DataViewPrototypeGetByteOffset(dataView),
+      byteLength,
+      elementSize: 1,
+      length: byteLength,
+      viewCtor: DataView,
+    };
   }
-  const dataView = view as DataView;
-  const byteLength = DataViewPrototypeGetByteLength(dataView);
-  return {
-    buffer: DataViewPrototypeGetBuffer(dataView),
-    byteOffset: DataViewPrototypeGetByteOffset(dataView),
-    byteLength,
-    elementSize: 1,
-    length: byteLength,
-    viewCtor: DataView,
-  };
-}
-
-// getViewInfo() for the byte-stream trust boundaries (read(view),
-// enqueue(), respondWithNewView()): WebIDL's ArrayBufferView conversion,
-// without [AllowShared], so a value that is not a view, or a view backed
-// by a SharedArrayBuffer, throws. `what` names the argument in messages.
-function getUnsharedViewInfo(view: unknown, what: string): ViewInfo {
-  if (!isArrayBufferView(view)) {
-    throw new TypeError(`${what} must be an ArrayBufferView`);
-  }
-  const info = getViewInfo(view);
   if (isSharedArrayBuffer(info.buffer)) {
     throw new TypeError(`${what} must not be backed by a SharedArrayBuffer`);
   }
