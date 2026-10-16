@@ -1134,18 +1134,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     options: ReadableStreamBYOBReaderReadOptions
   ): Promise<ReadableStreamReadResult<T>> {
     // --- View validation (spec read(view, options) steps 1-3) ---
-    if (!isArrayBufferView(view)) {
-      throw new TypeError('view must be an ArrayBufferView');
-    }
-    const info = getUnsharedViewInfo(view, 'view');
-    if (info.byteLength === 0) {
-      throw new TypeError('view must have a non-zero byteLength');
-    }
-    if (ArrayBufferPrototypeByteLengthGet(info.buffer) === 0) {
-      throw new TypeError(
-        "view's backing buffer must have a non-zero byteLength"
-      );
-    }
+    const info = getNonEmptyUnsharedViewInfo(view, 'view');
     options = toDictionary(
       options,
       'options must be an object'
@@ -1313,15 +1302,21 @@ interface ViewInfo {
   ) => ArrayBufferView;
 }
 
-// PRECONDITION: caller has verified isArrayBufferView(view). Every
-// ArrayBufferView is either a typed array (identified via the internal
-// [[TypedArrayName]] slot) or a DataView; the DataView getters brand-check
-// the receiver, so nothing dishonest survives this function.
-function getViewInfo(view: ArrayBufferView): ViewInfo {
+// A view's ViewInfo at the byte-stream trust boundaries (read(view),
+// enqueue(), respondWithNewView()), after WebIDL's ArrayBufferView
+// conversion, without [AllowShared], so a value that is not a view, or a
+// view backed by a SharedArrayBuffer, throws. `what` names the argument in
+// messages. Every ArrayBufferView is either a typed array (identified via
+// the internal [[TypedArrayName]] slot) or a DataView.
+function getUnsharedViewInfo(view: unknown, what: string): ViewInfo {
+  if (!isArrayBufferView(view)) {
+    throw new TypeError(`${what} must be an ArrayBufferView`);
+  }
+  let info: ViewInfo;
   const name = TypedArrayPrototypeGetSymbolToStringTag(view);
   if (name !== undefined) {
     const viewCtor = TypedArrayCtorByName[name];
-    return {
+    info = {
       buffer: TypedArrayPrototypeGetBuffer(view),
       byteOffset: TypedArrayPrototypeGetByteOffset(view),
       byteLength: TypedArrayPrototypeGetByteLength(view),
@@ -1331,55 +1326,37 @@ function getViewInfo(view: ArrayBufferView): ViewInfo {
       length: TypedArrayPrototypeGetLength(view),
       viewCtor,
     };
+  } else {
+    const dataView = view as DataView;
+    const byteLength = DataViewPrototypeGetByteLength(dataView);
+    info = {
+      buffer: DataViewPrototypeGetBuffer(dataView),
+      byteOffset: DataViewPrototypeGetByteOffset(dataView),
+      byteLength,
+      elementSize: 1,
+      length: byteLength,
+      viewCtor: DataView,
+    };
   }
-  const dataView = view as DataView;
-  const byteLength = DataViewPrototypeGetByteLength(dataView);
-  return {
-    buffer: DataViewPrototypeGetBuffer(dataView),
-    byteOffset: DataViewPrototypeGetByteOffset(dataView),
-    byteLength,
-    elementSize: 1,
-    length: byteLength,
-    viewCtor: DataView,
-  };
-}
-
-// getViewInfo() for the byte-stream trust boundaries, which reject
-// SharedArrayBuffer-backed views (WebIDL ArrayBufferView without
-// [AllowShared]).
-function getUnsharedViewInfo(view: ArrayBufferView, what: string): ViewInfo {
-  const info = getViewInfo(view);
   if (isSharedArrayBuffer(info.buffer)) {
     throw new TypeError(`${what} must not be backed by a SharedArrayBuffer`);
   }
   return info;
 }
 
-// Validate and normalize a user-provided chunk for a byte stream at the
-// enqueue()/respondWithNewView() trust boundary: snapshot metadata, reject
-// zero-length views and zero-length (or detached — detached buffers report
-// byteLength 0) buffers, and transfer the backing buffer. The returned
-// triple references the TRANSFERRED buffer; the caller's view is detached.
-// All byte-stream transfers are to fixed length (spec
-// TransferArrayBuffer), so a source cannot shrink a buffer we hold.
-function validateAndTransferView(view: ArrayBufferView): ByteQueueEntry {
-  if (!isArrayBufferView(view)) {
-    throw new TypeError('chunk must be an ArrayBufferView');
-  }
-  const info = getUnsharedViewInfo(view, 'chunk');
+// getUnsharedViewInfo() for a view that must hold bytes (spec read(view)
+// steps 1-3, enqueue() steps 1-2): a zero-length view throws. The spec
+// also checks that the view's buffer is neither zero-length nor detached,
+// because a view's [[ByteLength]] slot keeps its value once the buffer is
+// detached. Here the byteLength getters read 0 for a detached or
+// out-of-bounds typed array (a DataView's throw), and a view that holds
+// bytes lies within its buffer, so those checks cannot fail.
+function getNonEmptyUnsharedViewInfo(view: unknown, what: string): ViewInfo {
+  const info = getUnsharedViewInfo(view, what);
   if (info.byteLength === 0) {
-    throw new TypeError('chunk must have a non-zero byteLength');
+    throw new TypeError(`${what} must have a non-zero byteLength`);
   }
-  if (ArrayBufferPrototypeByteLengthGet(info.buffer) === 0) {
-    throw new TypeError(
-      "chunk's backing buffer must have a non-zero byteLength"
-    );
-  }
-  return {
-    buffer: ArrayBufferPrototypeTransferToFixedLength(info.buffer),
-    byteOffset: info.byteOffset,
-    byteLength: info.byteLength,
-  };
+  return info;
 }
 
 interface SourceAlgorithms {
@@ -1958,7 +1935,7 @@ let byteControllerRespond: (
 ) => void;
 let byteControllerRespondWithNewView: (
   controller: ReadableByteStreamController,
-  view: ArrayBufferView
+  info: ViewInfo
 ) => void;
 // The queued byte controller's autoAllocateChunkSize; undefined for any
 // other controller.
@@ -2040,18 +2017,16 @@ class ReadableStreamBYOBRequest implements ReadableStreamBYOBRequestType {
 
   respondWithNewView(view: ArrayBufferView): void {
     assertIsReadableStreamBYOBRequest(this);
+    // WebIDL converts the view before the method steps run.
+    const info = getUnsharedViewInfo(view, 'view');
     if (this.#controller === null) {
       throw new TypeError('This BYOB request has been invalidated');
     }
-    if (!isArrayBufferView(view)) {
-      throw new TypeError('view must be an ArrayBufferView');
-    }
     // Spec step 2: detached buffers are TypeError, not RangeError.
-    const info = getUnsharedViewInfo(view, 'view');
     if (ArrayBufferPrototypeDetachedGet(info.buffer)) {
       throw new TypeError("The view's buffer has been detached");
     }
-    byteControllerRespondWithNewView(this.#controller, view);
+    byteControllerRespondWithNewView(this.#controller, info);
   }
 }
 
@@ -2128,8 +2103,8 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       controller.#respond(bytesWritten);
     };
 
-    byteControllerRespondWithNewView = (controller, view) => {
-      controller.#respondWithNewView(view);
+    byteControllerRespondWithNewView = (controller, info) => {
+      controller.#respondWithNewView(info);
     };
 
     getByteControllerAutoAllocateChunkSize = (controller) => {
@@ -2290,15 +2265,23 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   // and pull is not called (byteControllerEnqueueBatch does both with its
   // last chunk).
   #enqueueChunk(chunk: ArrayBufferView, notify: boolean): void {
+    // Trust boundary: snapshot metadata via captured getters and validate:
+    // WebIDL's conversion and spec steps 1-2 come before the state checks.
+    const info = getNonEmptyUnsharedViewInfo(chunk, 'chunk');
     if (!this.#core.canCloseOrEnqueue()) {
       throw new TypeError(
         'Cannot enqueue a chunk into a stream that is closed or closing'
       );
     }
-    // Trust boundary: snapshot metadata via captured getters, validate,
-    // transfer the backing buffer, normalize to a {buffer, byteOffset,
-    // byteLength} triple. Queue internals never touch the user's view.
-    const entry = validateAndTransferView(chunk);
+    // Transfer the backing buffer and normalize to a {buffer, byteOffset,
+    // byteLength} triple; queue internals never touch the user's view,
+    // which is now detached. The transfer is to fixed length (spec
+    // TransferArrayBuffer), so a source cannot shrink a buffer we hold.
+    const entry: ByteQueueEntry = {
+      buffer: ArrayBufferPrototypeTransferToFixedLength(info.buffer),
+      byteOffset: info.byteOffset,
+      byteLength: info.byteLength,
+    };
     // EXPECTED-LENGTH CONTRACT: overflow check before the entry reaches
     // the queue. (The buffer was already transferred above — a refused
     // overflow chunk's buffer is detached. Contract violators lose the
@@ -2502,8 +2485,9 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     this.#bytesDelivered = delivered;
   }
 
-  // byobRequest.respondWithNewView(view).
-  #respondWithNewView(view: ArrayBufferView): void {
+  // byobRequest.respondWithNewView(view), given the metadata the request
+  // read from the view at its trust boundary (getUnsharedViewInfo).
+  #respondWithNewView(info: ViewInfo): void {
     const released = this.#releasedHead;
     const cursor =
       released === undefined
@@ -2513,7 +2497,6 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     if (head === undefined) {
       throw new TypeError('No pending BYOB request');
     }
-    const info = getViewInfo(view);
     const state = getReadableStreamGetState(this.#stream);
     if (state === 'closed') {
       if (info.byteLength !== 0) {
