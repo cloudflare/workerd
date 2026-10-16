@@ -195,6 +195,8 @@ export {
   teeSoleBranchUsesHeldByobRequest,
   teeHeldByobRequestWithReleasedBytes,
   teeHeldByobRequestAfterCloseOrError,
+  teeHeldByobRequestFractionalAtClose,
+  teeHeldByobRequestFromBranchFractionalAtClose,
   teeHeldByobRequestAcrossNestedTee,
   teeHeldByobRequestEnqueueFillsByobRead,
   teeHeldByobRequestNewViewAndAutoAllocate,
@@ -202,6 +204,7 @@ export {
   teeClosedNativeBodyLocksOriginal,
   teeBranchFractionalCloseErrorsBranch,
   teeSoleBranchFractionalCloseSkipsSourceCancel,
+  teeBranchesFractionalCloseErrorEach,
 } from 'tee';
 
 export {
@@ -221,8 +224,10 @@ export {
   teeBranchesCollected,
   teeSurvivorBranchCollected,
   teeBranchesCollectedPullStops,
+  teeHeldByobRequestBranchesCollected,
   pendingByobReadSurvivesGc,
   byobRequestSurvivesGc,
+  sourceReleasedOnceEnded,
 } from 'gc';
 
 export {
