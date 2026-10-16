@@ -75,8 +75,28 @@ void CombinedTraceScopes(benchmark::State& state) {
   traceScopes<ScopeLayout::COMBINED>(state);
 }
 
-WD_BENCHMARK(SeparateTraceScopes)->Arg(0)->Arg(4)->Arg(16);
-WD_BENCHMARK(CombinedTraceScopes)->Arg(0)->Arg(4)->Arg(16);
+void FrameLookup(benchmark::State& state) {
+  Evaluator<AsyncContextBenchmarkContext, AsyncContextBenchmarkIsolate> evaluator(v8System);
+  evaluator.run([&](auto& js) {
+    kj::Vector<kj::Arc<AsyncContextFrame::StorageKey>> keys;
+    kj::Vector<AsyncContextFrame::StorageEntry> entries;
+    for (auto i: kj::zeroTo(static_cast<int>(state.range(0)))) {
+      keys.add(kj::arc<AsyncContextFrame::StorageKey>());
+      entries.add(AsyncContextFrame::StorageEntry(keys.back().addRef(),
+          js.v8Ref(v8::Integer::New(js.v8Isolate, i).template As<v8::Value>())));
+    }
+    AsyncContextFrame::StorageScope scope(js, entries.asPtr());
+    auto& frame = KJ_ASSERT_NONNULL(AsyncContextFrame::current(js));
+    for (auto _: state) {
+      benchmark::DoNotOptimize(&KJ_ASSERT_NONNULL(frame.get(*keys.back())));
+    }
+  });
+  state.SetItemsProcessed(state.iterations());
+}
+
+WD_BENCHMARK(SeparateTraceScopes)->Arg(0)->Arg(1)->Arg(2)->Arg(4)->Arg(16)->Arg(64);
+WD_BENCHMARK(CombinedTraceScopes)->Arg(0)->Arg(1)->Arg(2)->Arg(4)->Arg(16)->Arg(64);
+WD_BENCHMARK(FrameLookup)->Arg(1)->Arg(2)->Arg(3)->Arg(4)->Arg(16)->Arg(64);
 
 }  // namespace
 }  // namespace workerd::jsg::test

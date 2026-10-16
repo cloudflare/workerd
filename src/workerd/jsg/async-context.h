@@ -221,7 +221,19 @@ class AsyncContextFrame final: public Wrappable {
   }
   void jsgGetMemoryInfo(MemoryTracker& tracker) const override {
     Wrappable::jsgGetMemoryInfo(tracker);
-    tracker.trackField("storage", storage);
+    KJ_SWITCH_ONEOF(storage) {
+      KJ_CASE_ONEOF(entries, InlineStorage) {
+        for (const auto& slot: entries) {
+          KJ_IF_SOME(entry, slot) {
+            // The entry's bytes are already included in this frame's self size.
+            entry.jsgGetMemoryInfo(tracker);
+          }
+        }
+      }
+      KJ_CASE_ONEOF(table, TableStorage) {
+        tracker.trackField("storage", table);
+      }
+    }
   }
 
  private:
@@ -239,8 +251,13 @@ class AsyncContextFrame final: public Wrappable {
     }
   };
 
-  using Storage = kj::Table<StorageEntry, kj::HashIndex<StorageEntryCallbacks>>;
-  Storage storage;
+  // Keep the internal and user tracing keys inline. Larger contexts retain indexed lookup.
+  using InlineStorage = kj::FixedArray<kj::Maybe<StorageEntry>, 2>;
+  using TableStorage = kj::Table<StorageEntry, kj::HashIndex<StorageEntryCallbacks>>;
+  kj::OneOf<InlineStorage, TableStorage> storage = InlineStorage();
+
+  void eraseDeadStorage();
+  void upsertStorageEntry(StorageEntry entry);
 
   void jsgVisitForGc(GcVisitor& visitor) override;
 

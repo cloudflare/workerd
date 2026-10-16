@@ -1948,6 +1948,10 @@ JSG provides rudimentary async context tracking via `AsyncContextFrame` in
 frame. Each frame has a storage context (a map of storage cells keyed by opaque keys).
 When a new frame is created, the current frame's storage context is propagated.
 
+Small frames keep their storage cells inline. Larger frames use a hash table. Dead keys are
+removed before storage is inherited, so a child with few live cells can use inline storage even
+when its parent used a hash table.
+
 All JavaScript promises, timers, and microtasks propagate the async context.
 
 ```js
