@@ -1239,6 +1239,26 @@ kj::Own<CacheClient> IoContext::getCacheClient() {
 
 jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(
     Worker::Lock& lock, kj::Maybe<SpanParent> spanParentOverride) {
+  return jsg::AsyncContextFrame::StorageScope(
+      lock, lock.getTraceAsyncContextKey(), makeTraceScopeValue(lock, kj::mv(spanParentOverride)));
+}
+
+jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
+    Worker::Lock& lock, kj::Maybe<SpanParent> userSpanOverride) {
+  return jsg::AsyncContextFrame::StorageScope(lock, lock.getUserTraceAsyncContextKey(),
+      makeUserTraceScopeValue(lock, kj::mv(userSpanOverride)));
+}
+
+jsg::AsyncContextFrame::StorageScope IoContext::makeRequestTraceScope(Worker::Lock& lock) {
+  jsg::AsyncContextFrame::StorageEntry entries[] = {
+    {lock.getTraceAsyncContextKey(), makeTraceScopeValue(lock, kj::none)},
+    {lock.getUserTraceAsyncContextKey(), makeUserTraceScopeValue(lock, kj::none)},
+  };
+  return jsg::AsyncContextFrame::StorageScope(lock, entries);
+}
+
+jsg::Value IoContext::makeTraceScopeValue(
+    Worker::Lock& lock, kj::Maybe<SpanParent> spanParentOverride) {
   static const SpanParent dummySpanParent = nullptr;
 
   jsg::Lock& js = lock;
@@ -1259,11 +1279,10 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(
   }
   auto ioOwnSpanParent = IoContext::current().addObject(kj::mv(spanParent));
   auto spanHandle = jsg::wrapOpaque(js.v8Context(), kj::mv(ioOwnSpanParent));
-  return jsg::AsyncContextFrame::StorageScope(
-      js, lock.getTraceAsyncContextKey(), js.v8Ref(spanHandle));
+  return js.v8Ref(spanHandle);
 }
 
-jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
+jsg::Value IoContext::makeUserTraceScopeValue(
     Worker::Lock& lock, kj::Maybe<SpanParent> userSpanOverride) {
   auto& ioContext = IoContext::current();
   jsg::Lock& js = lock;
@@ -1295,8 +1314,7 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
       kj::mv(userSpan), kj::mv(tracer), kj::mv(invocationSpanContext));
   auto ioOwnAsyncContext = ioContext.addObject(kj::mv(asyncContext));
   auto contextHandle = jsg::wrapOpaque(js.v8Context(), kj::mv(ioOwnAsyncContext));
-  return jsg::AsyncContextFrame::StorageScope(
-      js, lock.getUserTraceAsyncContextKey(), js.v8Ref(contextHandle));
+  return js.v8Ref(contextHandle);
 }
 
 SpanParent IoContext::getCurrentTraceSpan() {

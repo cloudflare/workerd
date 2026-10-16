@@ -121,6 +121,7 @@ class AsyncContextFrame final: public Wrappable {
   };
 
   AsyncContextFrame(Lock& js, StorageEntry storageEntry);
+  AsyncContextFrame(Lock& js, kj::ArrayPtr<StorageEntry> storageEntries);
 
   inline Ref<AsyncContextFrame> addRef() {
     return JSG_THIS;
@@ -140,6 +141,9 @@ class AsyncContextFrame final: public Wrappable {
   // Create a new AsyncContextFrame. The new frame inherits the storage context of the current
   // frame (if any) and the given StorageEntry is added.
   static Ref<AsyncContextFrame> create(Lock& js, StorageEntry storageEntry);
+
+  // Moves the entries into a single frame, copying inherited storage once.
+  static Ref<AsyncContextFrame> create(Lock& js, kj::ArrayPtr<StorageEntry> storageEntries);
 
   // Wraps the given JavaScript function such that whenever the wrapper function is called,
   // the root AsyncContextFrame will be entered.
@@ -205,6 +209,7 @@ class AsyncContextFrame final: public Wrappable {
     Scope scope;
 
     StorageScope(Lock& js, kj::Arc<StorageKey> key, Value store);
+    StorageScope(Lock& js, kj::ArrayPtr<StorageEntry> storageEntries);
     KJ_DISALLOW_COPY(StorageScope);
   };
 

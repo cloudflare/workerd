@@ -20,6 +20,85 @@ void collectGarbage(Lock& js) {
   check(script->Run(js.v8Context()));
 }
 
+AsyncContextFrame::StorageEntry numberEntry(
+    Lock& js, const kj::Arc<AsyncContextFrame::StorageKey>& key, int value) {
+  return {key.addRef(), js.v8Ref(v8::Integer::New(js.v8Isolate, value).As<v8::Value>())};
+}
+
+int storedNumber(Lock& js, AsyncContextFrame& frame, const AsyncContextFrame::StorageKey& key) {
+  return KJ_ASSERT_NONNULL(frame.get(key)).getHandle(js).As<v8::Int32>()->Value();
+}
+
+KJ_TEST("multi-entry async scopes inherit storage and restore their prior frame") {
+  Evaluator<AsyncContextTestContext, AsyncContextTestIsolate> evaluator(v8System);
+  evaluator.run([&](auto& js) {
+    auto inheritedKey = kj::arc<AsyncContextFrame::StorageKey>();
+    auto internalKey = kj::arc<AsyncContextFrame::StorageKey>();
+    auto userKey = kj::arc<AsyncContextFrame::StorageKey>();
+    AsyncContextFrame::StorageEntry priorEntries[] = {
+      numberEntry(js, inheritedKey, 1),
+      numberEntry(js, internalKey, 2),
+    };
+    AsyncContextFrame::StorageScope priorScope(js, priorEntries);
+    auto& prior = KJ_ASSERT_NONNULL(AsyncContextFrame::current(js));
+    kj::Maybe<Ref<AsyncContextFrame>> captured;
+    {
+      AsyncContextFrame::StorageEntry entries[] = {
+        numberEntry(js, internalKey, 3),
+        numberEntry(js, userKey, 4),
+      };
+      AsyncContextFrame::StorageScope scope(js, entries);
+      auto& current = KJ_ASSERT_NONNULL(AsyncContextFrame::current(js));
+      KJ_EXPECT(storedNumber(js, current, *inheritedKey) == 1);
+      KJ_EXPECT(storedNumber(js, current, *internalKey) == 3);
+      KJ_EXPECT(storedNumber(js, current, *userKey) == 4);
+      KJ_EXPECT(storedNumber(js, prior, *internalKey) == 2);
+      KJ_EXPECT(prior.get(*userKey) == kj::none);
+      captured = current.addRef();
+    }
+    KJ_EXPECT(&KJ_ASSERT_NONNULL(AsyncContextFrame::current(js)) == &prior);
+
+    collectGarbage(js);
+    {
+      AsyncContextFrame::Scope scope(js, captured);
+      auto& current = KJ_ASSERT_NONNULL(AsyncContextFrame::current(js));
+      KJ_EXPECT(storedNumber(js, current, *inheritedKey) == 1);
+      KJ_EXPECT(storedNumber(js, current, *internalKey) == 3);
+      KJ_EXPECT(storedNumber(js, current, *userKey) == 4);
+    }
+    KJ_EXPECT(&KJ_ASSERT_NONNULL(AsyncContextFrame::current(js)) == &prior);
+  });
+}
+
+KJ_TEST("multi-entry async scopes ignore dead keys and keep the last value for duplicate keys") {
+  Evaluator<AsyncContextTestContext, AsyncContextTestIsolate> evaluator(v8System);
+  evaluator.run([&](auto& js) {
+    auto deadKey = kj::arc<AsyncContextFrame::StorageKey>();
+    auto liveKey = kj::arc<AsyncContextFrame::StorageKey>();
+    deadKey->reset();
+    v8::Global<v8::Object> deadValue;
+    kj::Maybe<AsyncContextFrame::StorageScope> scope;
+    {
+      v8::HandleScope handleScope(js.v8Isolate);
+      auto value = v8::Object::New(js.v8Isolate);
+      deadValue.Reset(js.v8Isolate, value);
+      deadValue.SetWeak();
+      AsyncContextFrame::StorageEntry entries[] = {
+        numberEntry(js, liveKey, 1),
+        {deadKey.addRef(), js.v8Ref(value.template As<v8::Value>())},
+        numberEntry(js, liveKey, 3),
+      };
+      scope.emplace(js, entries);
+    }
+    collectGarbage(js);
+    KJ_EXPECT(deadValue.IsEmpty());
+    auto& current = KJ_ASSERT_NONNULL(AsyncContextFrame::current(js));
+    KJ_EXPECT(storedNumber(js, current, *liveKey) == 3);
+    scope = kj::none;
+    KJ_EXPECT(AsyncContextFrame::current(js) == kj::none);
+  });
+}
+
 KJ_TEST("AsyncContextFrame::Scope retains its prior frame") {
   Evaluator<AsyncContextTestContext, AsyncContextTestIsolate> evaluator(v8System);
   evaluator.run([&](auto& js) {
