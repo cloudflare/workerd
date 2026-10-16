@@ -284,11 +284,7 @@ class TransformStream<I = unknown, O = unknown> {
     };
 
     transformStreamTerminate = <I, O>(stream: TransformStream<I, O>) => {
-      try {
-        readableControllerClose(stream.#readableController);
-      } catch {
-        // Already closed or errored — nothing to do.
-      }
+      stream.#closeReadable();
       stream.#errorWritableAndUnblockWrite(
         new TypeError('The transform stream has been terminated')
       );
@@ -313,99 +309,63 @@ class TransformStream<I = unknown, O = unknown> {
     this.#flushAlgorithm = undefined;
   }
 
-  // Spec: TransformStreamDefaultSinkCloseAlgorithm.
-  #sinkClose(): Promise<void> {
-    if (this.#finishPromise !== undefined) return this.#finishPromise;
-    const { promise, resolve, reject } =
-      PromiseWithResolvers() as PromiseWithResolversType<void>;
-    this.#finishPromise = promise;
-    const flushAlgorithm = this.#flushAlgorithm;
-    const flushResult =
-      flushAlgorithm !== undefined ? flushAlgorithm() : PromiseResolve();
-    this.#clearAlgorithms();
-    markPromiseHandled(
-      PromisePrototypeThen(
-        flushResult,
-        () => {
-          if (readableInternals.getState(this.#readable) === 'errored') {
-            reject(readableInternals.getStoredError(this.#readable));
-            return;
-          }
-          try {
-            readableControllerClose(this.#readableController);
-          } catch {
-            // Already closed — acceptable per spec.
-          }
-          resolve();
-        },
-        (r: unknown) => {
-          readableControllerError(this.#readableController, r);
-          reject(r);
-        }
-      )
-    );
-    return promise;
+  // Spec: ReadableStreamDefaultControllerClose, which returns at once when
+  // the readable can no longer close or enqueue (close requested, closed or
+  // errored); the captured close() throws then.
+  #closeReadable(): void {
+    const readableController = this.#readableController;
+    if (readableInternals.canCloseOrEnqueue(readableController)) {
+      readableControllerClose(readableController);
+    }
   }
 
-  // Spec: TransformStreamDefaultSinkAbortAlgorithm.
-  #sinkAbort(reason: unknown): Promise<void> {
+  // Spec: TransformStreamDefaultSinkCloseAlgorithm ('close'),
+  // TransformStreamDefaultSinkAbortAlgorithm ('abort') and
+  // TransformStreamDefaultSourceCancelAlgorithm ('cancel'). They differ in
+  // the algorithm they run, flush or cancel, and in the half they end: the
+  // sink's close and abort end the readable, the source's cancel the
+  // writable. Whichever runs first sets the finish promise before its
+  // algorithm runs, so one started from inside flush() or cancel() returns
+  // it, as does any started later. The ended half's state is read when the
+  // algorithm settles (step 7.1.1): an abort, a terminate() or an error that
+  // reached it by then rejects the finish with its stored error.
+  #finish(kind: 'close' | 'abort' | 'cancel', reason?: unknown): Promise<void> {
     if (this.#finishPromise !== undefined) return this.#finishPromise;
     const { promise, resolve, reject } =
       PromiseWithResolvers() as PromiseWithResolversType<void>;
     this.#finishPromise = promise;
-    const cancelAlgorithm = this.#cancelAlgorithm;
-    const cancelResult =
-      cancelAlgorithm !== undefined
-        ? cancelAlgorithm(reason)
-        : PromiseResolve();
+    const algorithm: ((reason: unknown) => Promise<void>) | undefined =
+      kind === 'close' ? this.#flushAlgorithm : this.#cancelAlgorithm;
+    const result =
+      algorithm !== undefined ? algorithm(reason) : PromiseResolve();
     this.#clearAlgorithms();
-    markPromiseHandled(
-      PromisePrototypeThen(
-        cancelResult,
-        () => {
-          if (readableInternals.getState(this.#readable) === 'errored') {
-            reject(readableInternals.getStoredError(this.#readable));
-            return;
-          }
-          readableControllerError(this.#readableController, reason);
-          resolve();
-        },
-        (r: unknown) => {
-          readableControllerError(this.#readableController, r);
-          reject(r);
+    const endsWritable = kind === 'cancel';
+    const internals = endsWritable ? writableInternals : readableInternals;
+    const ended = endsWritable ? this.#writable : this.#readable;
+    const errorEnded = endsWritable
+      ? (e: unknown): void => {
+          this.#errorWritableAndUnblockWrite(e);
         }
-      )
-    );
-    return promise;
-  }
-
-  // Spec: TransformStreamDefaultSourceCancelAlgorithm. The writable's state
-  // is read when the cancel algorithm settles (step 7.1.1): an abort, a
-  // terminate() or an error that reached it by then rejects the cancel.
-  #sourceCancel(reason: unknown): Promise<void> {
-    if (this.#finishPromise !== undefined) return this.#finishPromise;
-    const { promise, resolve, reject } =
-      PromiseWithResolvers() as PromiseWithResolversType<void>;
-    this.#finishPromise = promise;
-    const cancelAlgorithm = this.#cancelAlgorithm;
-    const cancelResult =
-      cancelAlgorithm !== undefined
-        ? cancelAlgorithm(reason)
-        : PromiseResolve();
-    this.#clearAlgorithms();
+      : (e: unknown): void => {
+          readableControllerError(this.#readableController, e);
+        };
     markPromiseHandled(
       PromisePrototypeThen(
-        cancelResult,
+        result,
         () => {
-          if (writableInternals.getState(this.#writable) === 'errored') {
-            reject(writableInternals.getStoredError(this.#writable));
+          if (internals.getState(ended) === 'errored') {
+            reject(internals.getStoredError(ended));
             return;
           }
-          this.#errorWritableAndUnblockWrite(reason);
+          if (kind === 'close') {
+            this.#closeReadable();
+          } else {
+            errorEnded(reason);
+          }
           resolve();
         },
         (r: unknown) => {
-          this.#errorWritableAndUnblockWrite(r);
+          errorEnded(r);
           reject(r);
         }
       )
@@ -590,8 +550,8 @@ class TransformStream<I = unknown, O = unknown> {
           return startPromise;
         },
         write: sinkWrite,
-        close: () => this.#sinkClose(),
-        abort: (reason: unknown) => this.#sinkAbort(reason),
+        close: () => this.#finish('close'),
+        abort: (reason: unknown) => this.#finish('abort', reason),
       },
       // Converted already: the inner stream reads its own data properties,
       // and its default highWaterMark (1) is the TransformStream's.
@@ -610,7 +570,7 @@ class TransformStream<I = unknown, O = unknown> {
           return startPromise;
         },
         pull: sourcePull,
-        cancel: (reason: unknown) => this.#sourceCancel(reason),
+        cancel: (reason: unknown) => this.#finish('cancel', reason),
       },
       {
         __proto__: null,
