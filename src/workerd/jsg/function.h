@@ -415,8 +415,10 @@ class FunctionWrapper {
       //   to set this on constructors and methods (see resource.h). Remember not to count
       //   injected parameters!
       using Callback = FunctorCallback<TypeWrapper, Signature>;
-      return check(v8::Function::New(context,
-          once ? &Callback::template callback<true> : &Callback::template callback<false>, data));
+      if (once) {
+        return check(v8::Function::New(context, &Callback::template callback<true>, data));
+      }
+      return check(v8::Function::New(context, &Callback::template callback<false>, data));
     });
   }
 

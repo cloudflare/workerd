@@ -1074,6 +1074,10 @@ void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, jsg::Function<void(
     }
   }
 
+  // TODO(perf): Enqueue the task with the MicrotaskQueue::EnqueueMicrotask() overload that takes a
+  //   MicrotaskCallbackWithData and a v8::Data, instead of wrapping it in a new function. Every
+  //   v8::Function::New() call allocates a FunctionTemplateInfo in old space, so each call to
+  //   queueMicrotask() leaves objects behind that only a full GC frees.
   auto fn = js.wrapSimpleFunction(js.v8Context(),
       JSG_VISITABLE_LAMBDA(
           (this, fn = kj::mv(task), asyncTraceResource = kj::mv(asyncTraceResource)), (fn),
@@ -1108,12 +1112,14 @@ void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, jsg::Function<void(
             js.reportError(stack);
             return;
             }
-            }
+            } else {
+            }  // To squash the lint warning
             // Otherwise just log the stringified value generically.
             js.reportError(val);
             };
             };
-          }));
+          }),
+      jsg::Once::YES);
 
   js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate, fn);
 }

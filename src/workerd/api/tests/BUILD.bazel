@@ -685,6 +685,11 @@ wd_test(
 )
 
 wd_test(
+    src = "queue-microtask-gc-test.wd-test",
+    data = ["queue-microtask-gc-test.js"],
+)
+
+wd_test(
     size = "large",
     src = "unhandled-rejection-test.wd-test",
     args = ["--experimental"],
