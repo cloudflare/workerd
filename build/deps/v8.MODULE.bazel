@@ -68,6 +68,7 @@ PATCHES = [
     "0043-Build-V8-release-archives-without-metagen.patch",
     "0044-Load-cc_library-in-BUILD.icu.patch",
     "0045-Consider-all-dynamic-functions-code-like.patch",
+    "0046-Add-UnboundModuleScript-GetCompileHintsCollector.patch",
 ]
 
 http_archive(
