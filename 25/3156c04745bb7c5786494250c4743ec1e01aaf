@@ -1,0 +1,91 @@
+build/deps/deps.jsonc
+  s_73100c46b4bc3f::t_9b3b67b1861a52 47,73
+build/deps/gen/deps.MODULE.bazel
+  s_73100c46b4bc3f::t_4b103b6d99a2a5 41,67-68,70
+build/deps/v8.MODULE.bazel
+  s_73100c46b4bc3f::t_3a571fc12265c8 21,23,57-69
+patches/v8/0001-Allow-manually-setting-ValueDeserializer-format-vers.patch
+  s_73100c46b4bc3f::t_637767000f2baa 40,43
+patches/v8/0002-Allow-manually-setting-ValueSerializer-format-versio.patch
+  s_73100c46b4bc3f::t_f74ef685ae2942 26,29,41,71
+patches/v8/0003-Allow-Windows-builds-under-Bazel.patch
+  s_73100c46b4bc3f::t_7b93f99270f6aa 9,12,91
+patches/v8/0005-Speed-up-V8-bazel-build-by-always-using-target-cfg.patch
+  s_73100c46b4bc3f::t_e882ae8458d028 13,16-17,22,24,53,62,78-81,100,135-156
+patches/v8/0006-Implement-Promise-Context-Tagging.patch
+  s_73100c46b4bc3f::t_5fb3d39a7f5322 8,11,27,30,40,61,64,190,208,211,250,262,270,312,315,331,344,353,356,370,373,403,424,445,451,457,460,516,551
+patches/v8/0009-Add-ValueSerializer-SetTreatFunctionsAsHostObjects.patch
+  s_73100c46b4bc3f::t_2cc64192d13413 33,36,48,62
+patches/v8/0010-Modify-where-to-look-for-fp16-dependency.-This-depen.patch
+  s_73100c46b4bc3f::t_bf7aca872b270e 11,14,45
+patches/v8/0011-Revert-heap-Add-masm-specific-unwinding-annotations-.patch
+  s_73100c46b4bc3f::t_2069175fb2b61d 17,20,30
+patches/v8/0012-Update-illegal-invocation-error-message-in-v8.patch
+  s_73100c46b4bc3f::t_04d1067fc90ccc 26,29,46-47,61
+patches/v8/0013-Implement-cross-request-context-promise-resolve-hand.patch
+  s_73100c46b4bc3f::t_6f96e822ad946f 9,12,39,42,52,55,169,181,206,217,244,259,262,287,305,308,337,363,398,401,476,488
+patches/v8/0014-Add-another-slot-in-the-isolate-for-embedder.patch
+  s_73100c46b4bc3f::t_dd079fb08ebf3d 9,12
+patches/v8/0015-Add-ValueSerializer-SetTreatProxiesAsHostObjects.patch
+  s_73100c46b4bc3f::t_75011fd463c0bc 33,36,48,62,76
+patches/v8/0017-Enable-V8-shared-linkage.patch
+  s_73100c46b4bc3f::t_36af7b31fa8b9a 9,12,20,28,36,45,53,64,73
+patches/v8/0018-Modify-where-to-look-for-fast_float-and-simdutf.patch
+  s_73100c46b4bc3f::t_e6d983c2c511a2 15,18,26,35-44,76,94-102
+patches/v8/0019-Remove-unneded-latomic-linker-flag.patch
+  s_73100c46b4bc3f::t_d35c44fc7e9edb 9
+patches/v8/0020-Add-methods-to-get-heap-and-external-memory-sizes-di.patch
+  s_73100c46b4bc3f::t_b0916014734c5e 11,14,32,35
+patches/v8/0021-Port-concurrent-mksnapshot-support.patch
+  s_73100c46b4bc3f::t_e4a53fd1be3a71 9,12,24
+patches/v8/0022-Port-V8_USE_ZLIB-support.patch
+  s_73100c46b4bc3f::t_fce4ca41e65b9d 9,12,24,26-27,32
+patches/v8/0023-Modify-where-to-look-for-dragonbox.patch
+  s_73100c46b4bc3f::t_cda6aa0cc60899 8,11
+patches/v8/0026-Implement-additional-Exception-construction-methods.patch
+  s_73100c46b4bc3f::t_4030609341422d 28,31,43
+patches/v8/0028-bind-icu-to-googlesource.patch
+  s_73100c46b4bc3f::t_17f779534682cd 8,11,18-20
+patches/v8/0029-Add-v8-String-IsFlat-API.patch
+  s_73100c46b4bc3f::t_2f43566fc4d82e 27,30
+patches/v8/0030-Expose-AdjustAmountOfExternalAllocatedMemoryImpl-as-.patch
+  s_73100c46b4bc3f::t_19f46915c62b4f 17,20,35
+patches/v8/0031-Add-verify_write_barriers-flag-in-V8-s-bazel-config.patch
+  s_73100c46b4bc3f::t_5e509407830197 8,11
+patches/v8/0032-Return-false-on-Object.hasOwnProperty-with-intercept.patch
+  s_73100c46b4bc3f::t_a9a22c8f3db666 8,11
+patches/v8/0034-Remove-libcxx-dep-from-defs.bzl-not-resolvable-via-h.patch
+  s_73100c46b4bc3f::t_d8a9a3041c2d77 14
+patches/v8/0035-Fix-ExtendedMap-layout-on-Windows.patch
+  s_73100c46b4bc3f::t_c5fc8c5ea45839 44,47,56,59,69,72,82
+patches/v8/0036-Fix-CFunction-MemorySpan-declarations-on-Windows.patch
+  s_73100c46b4bc3f::t_f5215dfe93d78f 14
+patches/v8/0037-Properly-depend-on-llvm-libc.patch
+  s_73100c46b4bc3f::t_d01952db941636 9,12,26
+patches/v8/0038-Fix-TSan-build-without-the-V8-sandbox.patch
+  s_73100c46b4bc3f::t_7aa8856141ec22 12
+patches/v8/0039-Enable-Perfetto-support-in-the-V8-Bazel-build.patch
+  s_73100c46b4bc3f::t_f9d8d756e9196e 14,17,26,28-29,34,63,71,94
+patches/v8/0042-Build-V8-release-archives-without-metagen.patch
+  s_73100c46b4bc3f::t_1a8ba2f32afa43 2-3,8,10-14,24,27-30,32,36,41-42,50
+patches/v8/0043-Load-cc_library-in-BUILD.icu.patch
+  s_73100c46b4bc3f::t_06a1d5c013488c 9
+patches/v8/0044-Consider-all-dynamic-functions-code-like.patch
+  s_73100c46b4bc3f::t_1f63aeebe8e22f 11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "253156c04745bb7c5786494250c4743ec1e01aaf",
+  "prompts": {},
+  "sessions": {
+    "s_73100c46b4bc3f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_73100c46b4bc3f",
+        "model": "unknown"
+      },
+      "human_author": "Cormick Holland <cormick@cloudflare.com>"
+    }
+  }
+}
