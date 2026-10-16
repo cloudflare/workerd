@@ -1,0 +1,22 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Fully-unflagged legacy cell (C++ only): without
+# workers_api_getters_setters_on_prototype Event's attributes are
+# per-instance data properties, and without set_tostring_tag neither class
+# is branded. The BUILD rule disables the @all-compat-flags variant, which
+# would turn the omitted flags back on.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "events-event-cpp-legacy",
+      worker = (
+        modules = [
+          (name = "main", esModule = embed "legacy-main.js"),
+          (name = "legacy-instance-properties", esModule = embed "legacy-instance-properties.js"),
+          (name = "legacy-to-string-tag", esModule = embed "legacy-to-string-tag.js"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);
