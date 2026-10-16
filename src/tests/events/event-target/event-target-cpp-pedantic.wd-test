@@ -1,0 +1,28 @@
+using Workerd = import "/workerd/workerd.capnp";
+using EventTargetModules = import "event-target-modules.capnp";
+
+# The main C++ cell plus the dateless opt-in pedantic_wpt flag, which makes
+# currentTarget null once dispatch ends. The shared modules branch on
+# which-impl's pedanticWpt where it shows.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "events-event-target-cpp-pedantic",
+      worker = (
+        modules = EventTargetModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "workers_api_getters_setters_on_prototype",
+          "dont_substitute_null_on_type_error",
+          "set_tostring_tag",
+          "set_event_target_this",
+          "spec_compliant_dispatch_exceptions",
+          "enable_weak_ref",
+          "pedantic_wpt",
+        ],
+      )
+    ),
+  ],
+  # For gc.js.
+  v8Flags = ["--expose-gc"],
+);
