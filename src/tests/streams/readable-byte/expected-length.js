@@ -150,8 +150,7 @@ const respondFive = {
   },
 };
 
-// DIVERGENCE (ledger #42): the declared length as an exact total, which
-// TS enforces and C++ does not.
+// DIVERGENCE (ledger #42)
 export const byteSourceExpectedLengthContract = {
   async test() {
     const deliverFive = {
@@ -219,9 +218,7 @@ async function teeWithHeldByobRequest(expectedLength) {
   return { controller, branches };
 }
 
-// DIVERGENCE (ledger #42) through a byobRequest held across tee(): the
-// response that goes past the declared total errors both branches under
-// TS and reaches both under C++.
+// DIVERGENCE (ledger #42)
 export const byteSourceExpectedLengthHeldRequest = {
   async test() {
     for (const [name, deliver] of Object.entries(respondFive)) {
