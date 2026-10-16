@@ -41,10 +41,10 @@ index f351cb0fb0a75ab7639b56d0e4f8c0dc10e935e8..9795025976d26792bcc16c0f7120949c
    indexed_interceptor: InterceptorInfo;
    // This prototype validity cell guards modifications of the interceptor's
 diff --git a/src/objects/map.h b/src/objects/map.h
-index a33c7f01ac16fb720ddf7eefda491cd8988802bc..ba78c4bc131d1ad829b5e0ae701c0bd44ad03670 100644
+index 04454f14e747b714d49503bf5a3b451131903939..bd4887167d34837d8821be84c93b51b71a742dc2 100644
 --- a/src/objects/map.h
 +++ b/src/objects/map.h
-@@ -1221,7 +1221,7 @@ static_assert(offsetof(Map, instance_type_) ==
+@@ -1260,7 +1260,7 @@ static_assert(offsetof(Map, instance_type_) ==
                Internals::kMapInstanceTypeOffset);
  
  // Base class for Maps with extra fields. Subclasses must be defined with
@@ -53,10 +53,10 @@ index a33c7f01ac16fb720ddf7eefda491cd8988802bc..ba78c4bc131d1ad829b5e0ae701c0bd4
  V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
    V8_IT_REUSE_PARENT;
  
-@@ -1249,7 +1249,10 @@ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
+@@ -1293,7 +1293,10 @@ V8_ABSTRACT_OBJECT class ExtendedMap : public Map {
    static const int kStartOfStrongExtendedFieldsOffset;
  
-   std::atomic<uint8_t> bit_field_ex_;
+   std::atomic<BitsEx> bit_field_ex_;
 -  // Leaves kTaggedSize-1 unused bytes, they will be used by subclasses.
 +  // Keep the non-tagged fields in one kTaggedSize slot so subclasses begin at
 +  // tagged alignment.
@@ -66,10 +66,10 @@ index a33c7f01ac16fb720ddf7eefda491cd8988802bc..ba78c4bc131d1ad829b5e0ae701c0bd4
  
  constexpr int ExtendedMapSizeForKind(ExtendedMapKind kind);
 diff --git a/src/objects/map.tq b/src/objects/map.tq
-index cb85e7788e6a38116fc690341ca51f6288869247..fd23b760c2d57bebf16f6abbd71a5ffab2431c89 100644
+index cc90e8ae94f3d7ecec74fb799b2161d4a42183a8..a8feedfe614c07c21429af5fd9027b9cc4f81a0a 100644
 --- a/src/objects/map.tq
 +++ b/src/objects/map.tq
-@@ -110,13 +110,17 @@ bitfield struct ExtendedMapBitFields extends uint8 {
+@@ -114,13 +114,17 @@ bitfield struct ExtendedMapBitsEx extends uint8 {
  }
  
  // Base class for Maps with extra fields. Subclasses must be defined with
@@ -79,7 +79,7 @@ index cb85e7788e6a38116fc690341ca51f6288869247..fd23b760c2d57bebf16f6abbd71a5ffa
  @hasSameInstanceTypeAsParent
  @doNotGenerateCast
  extern class ExtendedMap extends Map {
-   bit_field_ex: ExtendedMapBitFields;
+   bit_field_ex: ExtendedMapBitsEx;
 -  // Leaves kTaggedSize-1 unused bytes, they will be used by subclasses.
 +  // Keep the non-tagged fields in one kTaggedSize slot so subclasses begin at
 +  // tagged alignment.

@@ -6,6 +6,7 @@ Subject: Load cc_library in BUILD.icu
 Bazel 9 no longer provides cc_library as a builtin.
 
 diff --git a/bazel/BUILD.icu b/bazel/BUILD.icu
+index de8e20ac3ad50fe2199d3b56753e655d1355b19f..59b6145116018be623a1eabf8da831698bf75d0c 100644
 --- a/bazel/BUILD.icu
 +++ b/bazel/BUILD.icu
 @@ -1,6 +1,8 @@

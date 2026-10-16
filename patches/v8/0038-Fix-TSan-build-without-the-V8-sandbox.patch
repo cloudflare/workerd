@@ -9,7 +9,7 @@ without the sandbox, so compile the indirect-pointer handling only when the
 field is present.
 
 diff --git a/src/compiler/backend/x64/code-generator-x64.cc b/src/compiler/backend/x64/code-generator-x64.cc
-index 42ae89aeba43c54b9de8dd3da0c2faf7f76374cc..440f15e0146cd41248b7245ec7a3dc975128ecc4 100644
+index 859bfc5e15ac829250cbd9466c620ea75522a63a..cfd95ba9ae512226e2b74c6cc5dba1ac2dc2feb7 100644
 --- a/src/compiler/backend/x64/code-generator-x64.cc
 +++ b/src/compiler/backend/x64/code-generator-x64.cc
 @@ -813,6 +813,7 @@ Register GetTSANValueRegister(MacroAssembler* masm, Register value,
