@@ -2445,22 +2445,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     if (!head.settledAtEndOfData) {
       head.buffer = ArrayBufferPrototypeTransferToFixedLength(head.buffer);
     }
-    this.#invalidateByobRequest();
-    if (cursor === undefined) {
-      this.#respondToReleasedHead(bytesWritten, state);
-    } else if (state === 'closed') {
-      // respond(0)-while-closed: commit all pending descriptors with
-      // { done: true, value: filled-so-far view }.
-      cursor.commitPullIntosOnClose();
-    } else {
-      // EXPECTED-LENGTH CONTRACT: respond() bytes count toward the total
-      // (the second ingress path alongside enqueue).
-      this.#accountDelivery(bytesWritten);
-      cursor.respondBYOB(bytesWritten);
-      // The respond may have drained the queue with close requested.
-      this.#core.maybeCloseStream();
-      this.#core.callPullIfNeeded();
-    }
+    this.#respondInternal(cursor, bytesWritten, state);
   }
 
   // Exact-total accounting (see #expectedLength). On overflow (more bytes
@@ -2534,15 +2519,31 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     if (!head.settledAtEndOfData) {
       head.buffer = ArrayBufferPrototypeTransferToFixedLength(info.buffer);
     }
+    this.#respondInternal(cursor, info.byteLength, state);
+  }
+
+  // Spec ReadableByteStreamControllerRespondInternal: respond() and
+  // respondWithNewView() once they have validated the response and
+  // transferred the head pull-into's buffer. `cursor` is the sole cursor
+  // whose head was answered, or undefined for #releasedHead.
+  #respondInternal(
+    cursor: ByteStreamCursorType | undefined,
+    bytesWritten: number,
+    state: ReadableStreamState
+  ): void {
     this.#invalidateByobRequest();
     if (cursor === undefined) {
-      this.#respondToReleasedHead(info.byteLength, state);
+      this.#respondToReleasedHead(bytesWritten, state);
     } else if (state === 'closed') {
+      // A closed-state response (respond(0), or a zero-length view):
+      // commit all pending descriptors with { done: true, value:
+      // filled-so-far view }.
       cursor.commitPullIntosOnClose();
     } else {
-      // EXPECTED-LENGTH CONTRACT: counts toward the total like respond().
-      this.#accountDelivery(info.byteLength);
-      cursor.respondBYOB(info.byteLength);
+      // EXPECTED-LENGTH CONTRACT: responded bytes count toward the total
+      // (the second ingress path alongside enqueue).
+      this.#accountDelivery(bytesWritten);
+      cursor.respondBYOB(bytesWritten);
       // The respond may have drained the queue with close requested.
       this.#core.maybeCloseStream();
       this.#core.callPullIfNeeded();
