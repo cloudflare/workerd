@@ -35,7 +35,7 @@ the abort reason).
 | --- | --- | --- | --- | --- |
 | 1 | invalid highWaterMark at ctor | TypeError (jsg uint64 conversion messages) | RangeError "Invalid highWaterMark" (spec) | `highWaterMarkValidated` |
 | 2 | sink.type validation | ignored (pedantic_wpt: RangeError) | RangeError "Invalid underlying sink type" (spec) | `sinkTypeValidation` |
-| 3 | argument conversion order | sink dictionary first (sink.write, hwm and its ToNumber, size) | strategy first (spec): hwm and its ToNumber, size, then sink.write | `argumentConversionOrder` |
+| 3 | argument conversion order, every sink member | sink dictionary first, every member in its own order (type, start, write, abort, close), then hwm and its ToNumber, size | strategy first (spec): hwm and its ToNumber, size; then the sink's members in lexicographic order (spec: abort, close, start, type, write) | `argumentConversionOrder` |
 | 4 | ready at construction (no backpressure) | pending after a microtask, fulfills on a later turn | fulfilled within a microtask (spec) | `readyFulfillTiming` |
 | 5 | sync start() throw | captured; stream errored, writes reject | escapes the constructor (spec) | `newWritableStreamStartError` |
 | 6 | abort() on an errored stream | rejects with the stored error | fulfills with undefined (spec) | `newWritableStreamAbortError` |
@@ -51,7 +51,7 @@ the abort reason).
 | 15 | a write from inside sink.close() whose size() throws | rejects with size()'s error | TypeError (closing): the close in flight is checked before the erroring state (spec; Node agrees); the close completes either way | `sizeConsultedForWriteInsideSinkClose` |
 | 16 | null underlyingSink (every other primitive throws TypeError, and a function is accepted with its members read, in both; spec) | accepted as no sink (a WebIDL dictionary) | TypeError 'underlyingSink must be an object' (spec: the argument is typed `object`) | `garbageSinkValidation` |
 | 17 | (no divergence) the strategy argument converts as a WebIDL dictionary: null means no strategy, a function's members are read, and every other primitive throws TypeError (messages differ) | same | same | `strategyArgumentShapes` (parity) |
-| 18 | which error wins when two are possible (a primitive sink's TypeError beats a throwing strategy getter in both; spec) | an invalid highWaterMark (TypeError, integer conversion) beats an invalid sink type, pedantic_wpt included | the sink type's RangeError ('Invalid underlying sink type') beats an invalid highWaterMark's (spec) | `conversionErrorPrecedence` |
+| 18 | which error wins when two are possible (a primitive sink's TypeError beats a throwing strategy getter in both; every sink member converts before the type and the highWaterMark are checked, so a non-callable write, TypeError with different messages, or a throwing write getter beats an invalid type, and a non-callable write beats an invalid highWaterMark, in both; spec) | an invalid highWaterMark (TypeError, integer conversion) beats an invalid sink type, pedantic_wpt included | the sink type's RangeError ('Invalid underlying sink type') beats an invalid highWaterMark's (spec) | `conversionErrorPrecedence` |
 
 Parity worth noting (probed, pinned): the whole in-flight abort matrix —
 abort-before-start reason identity on ready/closed, errored-state reason

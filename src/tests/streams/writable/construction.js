@@ -62,18 +62,21 @@ export const sinkTypeValidation = {
 // after queuingStrategy" case), its members in lexicographic order:
 // highWaterMark and its ToNumber, then size. TypeScript follows it. C++
 // converts the sink dictionary first, then the strategy in the same
-// order.
+// order. Every sink member is logged: C++ reads them in its own order,
+// TypeScript in the spec's lexicographic order.
 export const argumentConversionOrder = {
   test() {
     const order = [];
     const sink = {};
     const strategy = {};
-    Object.defineProperty(sink, 'write', {
-      get() {
-        order.push('sink.write');
-        return undefined;
-      },
-    });
+    for (const name of ['type', 'start', 'write', 'abort', 'close']) {
+      Object.defineProperty(sink, name, {
+        get() {
+          order.push(`sink.${name}`);
+          return undefined;
+        },
+      });
+    }
     Object.defineProperty(strategy, 'size', {
       get() {
         order.push('strategy.size');
@@ -97,11 +100,19 @@ export const argumentConversionOrder = {
         'strategy.highWaterMark',
         'hwm.valueOf',
         'strategy.size',
+        'sink.abort',
+        'sink.close',
+        'sink.start',
+        'sink.type',
         'sink.write',
       ]);
     } else {
       deepStrictEqual(order, [
+        'sink.type',
+        'sink.start',
         'sink.write',
+        'sink.abort',
+        'sink.close',
         'strategy.highWaterMark',
         'hwm.valueOf',
         'strategy.size',
@@ -176,10 +187,20 @@ export const strategyArgumentShapes = {
 // before the highWaterMark's range (spec), so an invalid sink type's
 // RangeError beats an invalid highWaterMark's; C++ converts highWaterMark
 // to an integer before the sink's type is checked (pedantic_wpt
-// included), so its TypeError wins.
+// included), so its TypeError wins. Both convert every sink member
+// before they check the type or the highWaterMark (spec), so a
+// non-callable write (TypeError, messages differ) or a throwing write
+// getter beats an invalid type, and a non-callable write beats an
+// invalid highWaterMark.
 export const conversionErrorPrecedence = {
   test() {
     const boom = new Error('boom');
+    const writeError = {
+      name: 'TypeError',
+      message: usingTsImpl
+        ? 'underlyingSink.write must be a function'
+        : "Incorrect type for the 'write' field on 'UnderlyingSink': the provided value is not of type 'function'.",
+    };
     throws(
       () =>
         new WritableStream(42, {
@@ -200,6 +221,21 @@ export const conversionErrorPrecedence = {
             message:
               'The value cannot be converted because it is negative and this API expects a positive bigint.',
           }
+    );
+    throws(() => new WritableStream({ type: 'bytes', write: 1 }), writeError);
+    throws(
+      () =>
+        new WritableStream({
+          type: 'bytes',
+          get write() {
+            throw boom;
+          },
+        }),
+      (e) => e === boom
+    );
+    throws(
+      () => new WritableStream({ write: 1 }, { highWaterMark: -1 }),
+      writeError
     );
   },
 };

@@ -32,6 +32,7 @@ export {
   argumentConversionOrder,
   strategyArgumentShapes,
   conversionErrorPrecedence,
+  byteMembersOnDefaultSource,
   highWaterMarkValidated,
   hwmDefaultIsOne,
 } from 'construction';
