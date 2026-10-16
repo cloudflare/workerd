@@ -15,9 +15,10 @@
 // range check to a cast whose result is undefined, so that one value is
 // asserted for TypeScript only.
 //
-// DIVERGENCE (ledger #42): TS also holds the source to the declared length
-// as an exact total of what it delivers through enqueue(), respond() and
-// respondWithNewView(). The delivery that goes past it throws RangeError,
+// DIVERGENCE (ledger #42), by design: TS also holds the source to the
+// declared length as an exact total of what it delivers through enqueue(),
+// respond() and respondWithNewView(), a response to a byobRequest held
+// across tee() included. The delivery that goes past it throws RangeError,
 // and so does a close() short of it; either errors the stream with that
 // error. C++ enforces neither: every delivery reaches the reader, and
 // close() closes the stream.
@@ -131,33 +132,38 @@ async function pendingByobRead(expectedLength) {
   const reader = rs.getReader({ mode: 'byob' });
   const read = reader.read(new Uint8Array(8));
   await scheduler.wait(5);
-  return { controller, reader, read };
+  return { rs, controller, reader, read };
 }
+
+const OVERFLOW = {
+  name: 'RangeError',
+  message: 'byte source delivered more bytes than its declared expectedLength',
+};
+
+// Five bytes, one past an expectedLength of 4, through each way of
+// answering the byobRequest.
+const respondFive = {
+  'respond()': (c) => c.byobRequest.respond(5),
+  'respondWithNewView()': (c) => {
+    const { buffer, byteOffset } = c.byobRequest.view;
+    c.byobRequest.respondWithNewView(new Uint8Array(buffer, byteOffset, 5));
+  },
+};
 
 // DIVERGENCE (ledger #42): the declared length as an exact total, which
 // TS enforces and C++ does not.
 export const byteSourceExpectedLengthContract = {
   async test() {
-    const overflow =
-      'byte source delivered more bytes than its declared expectedLength';
     const deliverFive = {
-      'respond()': (c) => c.byobRequest.respond(5),
-      'respondWithNewView()': (c) => {
-        const { buffer, byteOffset } = c.byobRequest.view;
-        c.byobRequest.respondWithNewView(new Uint8Array(buffer, byteOffset, 5));
-      },
+      ...respondFive,
       'enqueue()': (c) => c.enqueue(new Uint8Array(5)),
     };
     for (const [name, deliver] of Object.entries(deliverFive)) {
       const { controller, reader, read } = await pendingByobRead(4);
       if (usingTsImpl) {
-        throws(
-          () => deliver(controller),
-          { name: 'RangeError', message: overflow },
-          name
-        );
-        await rejects(read, { name: 'RangeError', message: overflow });
-        await rejects(reader.closed, { name: 'RangeError', message: overflow });
+        throws(() => deliver(controller), OVERFLOW, name);
+        await rejects(read, OVERFLOW);
+        await rejects(reader.closed, OVERFLOW);
       } else {
         deliver(controller);
         strictEqual((await read).value.byteLength, 5, name);
@@ -195,6 +201,54 @@ export const byteSourceExpectedLengthContract = {
         strictEqual((await read).value.byteLength, 2);
         await reader.closed;
       }
+    }
+  },
+};
+
+// pendingByobRead's source with its reader released, the source holding
+// the byobRequest over the released read, then teed: the request survives
+// the fork, and a response to it reaches both branches (ledger #25).
+async function teeWithHeldByobRequest(expectedLength) {
+  const { rs, controller, reader, read } =
+    await pendingByobRead(expectedLength);
+  const request = controller.byobRequest;
+  reader.releaseLock();
+  await rejects(read, TypeError);
+  const branches = rs.tee();
+  strictEqual(controller.byobRequest, request);
+  return { controller, branches };
+}
+
+// DIVERGENCE (ledger #42) through a byobRequest held across tee(): the
+// response that goes past the declared total errors both branches under
+// TS and reaches both under C++.
+export const byteSourceExpectedLengthHeldRequest = {
+  async test() {
+    for (const [name, deliver] of Object.entries(respondFive)) {
+      const { controller, branches } = await teeWithHeldByobRequest(4);
+      if (usingTsImpl) {
+        throws(() => deliver(controller), OVERFLOW, name);
+        for (const branch of branches) {
+          await rejects(branch.getReader().read(), OVERFLOW);
+        }
+      } else {
+        deliver(controller);
+        for (const branch of branches) {
+          const { value } = await branch.getReader().read();
+          strictEqual(value.byteLength, 5, name);
+        }
+        controller.error(new Error('cleanup'));
+      }
+    }
+
+    // Exactly the declared total, then close(): parity.
+    const { controller, branches } = await teeWithHeldByobRequest(4);
+    controller.byobRequest.respond(4);
+    controller.close();
+    for (const branch of branches) {
+      const reader = branch.getReader();
+      strictEqual((await reader.read()).value.byteLength, 4);
+      strictEqual((await reader.read()).done, true);
     }
   },
 };
