@@ -296,34 +296,42 @@ export const teeBranchesCollectedPullStops = {
 // A stream that has closed, been cancelled or errored releases its
 // underlying source (spec ClearAlgorithms drops the algorithms, its only
 // path to the source), while the stream and its controller stay
-// reachable; a stream still open keeps it (parity).
+// reachable; a stream still open keeps it, unless the source has only
+// start(), which leaves no algorithm to keep it by (parity).
 export const sourceReleasedOnceEnded = {
   async test() {
-    for (const end of ['open', 'close', 'cancel', 'error']) {
-      let controller;
-      let ref;
-      const stream = (() => {
-        const source = {
-          start(c) {
-            controller = c;
-          },
-          pull() {},
-          cancel() {},
-        };
-        ref = new WeakRef(source);
-        return new ReadableStream(source);
-      })();
-      await scheduler.wait(1);
-      if (end === 'close') controller.close();
-      if (end === 'cancel') await stream.cancel();
-      if (end === 'error') controller.error(new Error('boom'));
-      await collectGarbage();
-      strictEqual(ref.deref() !== undefined, end === 'open', end);
-      strictEqual(
-        controller.desiredSize,
-        { open: 1, close: 0, cancel: 0, error: null }[end]
-      );
-      strictEqual(stream.locked, false);
+    for (const startOnly of [false, true]) {
+      for (const end of ['open', 'close', 'cancel', 'error']) {
+        const label = startOnly ? `${end}, start only` : end;
+        let controller;
+        let ref;
+        const stream = (() => {
+          const source = {
+            start(c) {
+              controller = c;
+            },
+            ...(startOnly ? {} : { pull() {}, cancel() {} }),
+          };
+          ref = new WeakRef(source);
+          return new ReadableStream(source);
+        })();
+        await scheduler.wait(1);
+        if (end === 'close') controller.close();
+        if (end === 'cancel') await stream.cancel();
+        if (end === 'error') controller.error(new Error('boom'));
+        await collectGarbage();
+        strictEqual(
+          ref.deref() !== undefined,
+          end === 'open' && !startOnly,
+          label
+        );
+        strictEqual(
+          controller.desiredSize,
+          { open: 1, close: 0, cancel: 0, error: null }[end],
+          label
+        );
+        strictEqual(stream.locked, false, label);
+      }
     }
   },
 };

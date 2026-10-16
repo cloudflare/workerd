@@ -1426,12 +1426,6 @@ function makeSourceAlgorithms<C>(
   return { pull, cancel };
 }
 
-// How a queued source ended, for its controller's own end-of-life steps
-// (see QueuedControllerCore's #onEnd): 'ended' when it errored, was
-// cancelled or lost every consumer to collection; 'lastConsumerErrored'
-// when the last consumer errored alone after close was requested.
-type QueuedSourceEnd = 'ended' | 'lastConsumerErrored';
-
 // The state both queued controllers keep, and the steps they share: the
 // queue, the source's algorithms, starting and pulling, closing, erroring
 // and cancelling the source, and the queued tee's consumers leaving (see
@@ -1470,14 +1464,14 @@ class QueuedControllerCore<T, R> {
   // byobRequest and released head), called where they belong among the
   // core's. Never called when the source ends with every consumer
   // drained: the spec keeps a byobRequest valid then, for respond(0).
-  #onEnd: ((end: QueuedSourceEnd) => void) | undefined;
+  #onEnd: (() => void) | undefined;
 
   constructor(
     stream: ReadableStream<R>,
     highWaterMark: number,
     algorithms: SourceAlgorithms,
     sizeAlgorithm: ((chunk: R) => number) | undefined,
-    onEnd?: (end: QueuedSourceEnd) => void
+    onEnd?: () => void
   ) {
     this.#stream = stream;
     this.#pullAlgorithm = algorithms.pull;
@@ -1485,13 +1479,15 @@ class QueuedControllerCore<T, R> {
     this.#sizeAlgorithm = sizeAlgorithm;
     this.#onEnd = onEnd;
     this.#queue = new StreamQueue(highWaterMark, () => {
-      // Every consumer has been collected (see StreamQueue#noConsumers).
-      // Release the source rather than cancel it: GC timing must not run
-      // the user's cancel callback. The size algorithm stays, so enqueue()
-      // sizes chunks as before; the queue drops them.
+      // No consumer remains (see StreamQueue#noConsumers). If the last one
+      // left, cancelled or errored alone, it has already ended the source
+      // (cancelSteps, consumerErrored), which ran these steps. If it was
+      // collected, release the source rather than cancel it: GC timing
+      // must not run the user's cancel callback. The size algorithm stays,
+      // so enqueue() sizes chunks as before; the queue drops them.
       this.#pullAlgorithm = undefined;
       this.#cancelAlgorithm = undefined;
-      this.#onEnd?.('ended');
+      this.#onEnd?.();
     }) as StreamQueueType<T, R>;
   }
 
@@ -1560,7 +1556,7 @@ class QueuedControllerCore<T, R> {
   error(reason: unknown): void {
     if (this.#done) return;
     this.#done = true;
-    this.#onEnd?.('ended');
+    this.#onEnd?.();
     // Propagate to every live consumer stream (tee branches) via the
     // cursors' weak owner refs — no strong retention of branches. The
     // primary stream is handled explicitly: a tee'd-away parent has no
@@ -1650,9 +1646,10 @@ class QueuedControllerCore<T, R> {
       return this.consumerLeaving(reason, isLastConsumer);
     }
     if (isLastConsumer) {
-      // As in maybeCloseStream once every consumer has drained.
+      // As in maybeCloseStream once every consumer has drained; with no
+      // consumer left, the controller's own steps run too (see #onEnd).
       this.#done = true;
-      this.#onEnd?.('lastConsumerErrored');
+      this.#onEnd?.();
       this.#clearAlgorithms();
       this.#pendingCancel?.resolve();
     }
@@ -1687,8 +1684,9 @@ class QueuedControllerCore<T, R> {
   // Cancel the underlying source (spec CancelSteps). Idempotent and cached.
   // Reached through consumerLeaving once the last consumer has left the
   // queue — an explicit stream/branch cancel, or a branch errored through
-  // the Node.js interop hook. The all-cursors-gone GC hook never comes
-  // here: it only releases the source (see the constructor).
+  // the Node.js interop hook. The all-cursors-gone hook never comes here:
+  // for consumers that were collected, it only releases the source (see
+  // the constructor).
   cancelSteps(reason: unknown): Promise<void> {
     if (this.#cancelPromise !== undefined) return this.#cancelPromise;
     this.#done = true;
@@ -1698,7 +1696,7 @@ class QueuedControllerCore<T, R> {
     if (getReadableStreamConsumer(this.#stream) === undefined) {
       readableStreamClose(this.#stream);
     }
-    this.#onEnd?.('ended');
+    this.#onEnd?.();
     const cancelAlgorithm = this.#cancelAlgorithm;
     this.#clearAlgorithms();
     this.#cancelPromise =
@@ -1750,8 +1748,6 @@ class ReadableStreamDefaultController<
 > implements ReadableStreamDefaultControllerType<R> {
   #stream: ReadableStream<R>;
   #core: QueuedControllerCore<R, R>;
-  // The core's queue, held here too: the class's brand, and enqueue()'s.
-  #queue: StreamQueueType<R, R>;
   // The non-standard expectedLength pass-through (undefined = unknown).
   // Default controllers never read it from an underlying source — it is
   // set ONLY through the internal setter, by the TransformStream
@@ -1763,7 +1759,7 @@ class ReadableStreamDefaultController<
     assertIsReadableStreamDefaultController = function <R>(
       self: ReadableStreamDefaultController<R>
     ): void {
-      if (!isActualObject(self) || !(#queue in self))
+      if (!isActualObject(self) || !(#core in self))
         throw new TypeError('Illegal invocation');
     };
 
@@ -1777,7 +1773,7 @@ class ReadableStreamDefaultController<
     // the native controller's wrap is joined at the bottom of this module
     // (its brand predicate crosses the module fence from native.ts).
     queuedCoreOf = (controller) =>
-      #queue in controller
+      #core in controller
         ? (controller as ReadableStreamDefaultController).#core
         : undefined;
 
@@ -1852,14 +1848,10 @@ class ReadableStreamDefaultController<
       sizeAlgorithm
     );
     this.#core = core;
-    this.#queue = core.queue;
 
     // --- The stream's own cursor ---
-    const cursor = new QueueCursor(this.#queue, stream) as QueueCursorType<
-      R,
-      R
-    >;
-    this.#queue.anchorCursor(cursor);
+    const cursor = new QueueCursor(core.queue, stream) as QueueCursorType<R, R>;
+    core.queue.anchorCursor(cursor);
     setReadableStreamConsumer(stream, cursor);
 
     // --- Start ---
@@ -1928,7 +1920,7 @@ class ReadableStreamDefaultController<
     // accounting) but pending reads are left unfilled until the next
     // enqueue triggers the direct-fulfillment path (step 3).
     const notify = hadPendingRead || !cursor?.hasPendingRead;
-    this.#queue.enqueue({ value: chunk as R, size }, notify);
+    core.queue.enqueue({ value: chunk as R, size }, notify);
     core.callPullIfNeeded();
   }
 
@@ -2069,8 +2061,6 @@ let assertIsReadableByteStreamController: (
 class ReadableByteStreamController implements ReadableByteStreamControllerType {
   #stream: ReadableStream<Uint8Array>;
   #core: QueuedControllerCore<ByteQueueEntry, Uint8Array>;
-  // As the default controller's: the core's queue.
-  #queue: StreamQueueType<ByteQueueEntry, Uint8Array>;
   #autoAllocateChunkSize: number | undefined;
   // The non-standard exact-total byte contract (undefined = unknown).
   // The source must deliver exactly this many bytes over its lifetime
@@ -2097,7 +2087,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
   static {
     isByteStreamController = (value: unknown) => {
-      return isActualObject(value) && #queue in value;
+      return isActualObject(value) && #core in value;
     };
 
     // Enqueues several chunks, in order, notifying the consumers once after
@@ -2113,7 +2103,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     };
 
     byteControllerSetConsumptionHook = (controller, hook) => {
-      controller.#queue.setConsumptionHook(hook);
+      controller.#core.queue.setConsumptionHook(hook);
     };
 
     assertIsReadableByteStreamController = function (
@@ -2125,11 +2115,11 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
     // Chain queuedCoreOf, which the default controller's static block
     // (run earlier in module evaluation) assigned for its own class. The
-    // two classes' #queue private names are distinct brands, so the `in`
+    // two classes' #core private names are distinct brands, so the `in`
     // checks discriminate correctly.
     const prevQueuedCoreOf = queuedCoreOf;
     queuedCoreOf = (controller) =>
-      #queue in controller
+      #core in controller
         ? (controller.#core as QueuedControllerCore<unknown, unknown>)
         : prevQueuedCoreOf(controller);
 
@@ -2142,7 +2132,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     };
 
     getByteControllerAutoAllocateChunkSize = (controller) => {
-      return #queue in controller
+      return #core in controller
         ? controller.#autoAllocateChunkSize
         : undefined;
     };
@@ -2168,7 +2158,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
 
     const prevExpectedLength = getControllerExpectedLength;
     getControllerExpectedLength = (controller) => {
-      if (#queue in controller) {
+      if (#core in controller) {
         return (controller as ReadableByteStreamController).#expectedLength;
       }
       return prevExpectedLength(controller);
@@ -2212,20 +2202,18 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       highWaterMark,
       makeSourceAlgorithms(underlyingSource, this, pullFn, cancelFn),
       undefined,
-      (end) => {
-        // The byobRequest is retired whenever the source ends other than
-        // drained; the released head stays only when the last consumer
-        // errored after close.
+      () => {
+        // The source has ended other than drained: the request is retired,
+        // and none is minted over the released head again.
         this.#invalidateByobRequest();
-        if (end === 'ended') this.#releasedHead = undefined;
+        this.#releasedHead = undefined;
       }
     );
     this.#core = core;
-    this.#queue = core.queue;
 
     // --- The stream's own (byte) cursor ---
-    const cursor = new ByteStreamCursor(this.#queue, stream);
-    this.#queue.anchorCursor(cursor);
+    const cursor = new ByteStreamCursor(core.queue, stream);
+    core.queue.anchorCursor(cursor);
     // Wire up the fractional-element-at-close error callback so the
     // cursor can error the stream when a BYOB read lands at the close
     // sentinel with a non-element-aligned partial fill.
@@ -2271,7 +2259,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       // auto-allocated for a default read when autoAllocateChunkSize is
       // set). Otherwise the source must fall back to enqueue(). The
       // request object is cached for identity until invalidated.
-      const cursor = this.#queue.singleCursor as
+      const cursor = this.#core.queue.singleCursor as
         ByteStreamCursorType | undefined;
       if (cursor === undefined) return null;
       const view = cursor.pendingPullIntoView;
@@ -2330,8 +2318,8 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
         );
       }
     }
-    const drainCursor = this.#queue.singleCursor as
-      ByteStreamCursorType | undefined;
+    const queue = this.#core.queue;
+    const drainCursor = queue.singleCursor as ByteStreamCursorType | undefined;
     if (drainCursor !== undefined) {
       const head = drainCursor.headPullInto;
       if (head !== undefined) {
@@ -2358,11 +2346,11 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       }
     } else {
       // Step 8.5 on a shared queue: each cursor keeps its own released bytes.
-      this.#queue.forEachLiveCursor((cursor) => {
+      queue.forEachLiveCursor((cursor) => {
         (cursor as unknown as ByteStreamCursorType).flushReleasedHead();
       });
     }
-    this.#queue.enqueue({ value: entry, size: entry.byteLength }, notify);
+    queue.enqueue({ value: entry, size: entry.byteLength }, notify);
     // The cursors' notify() (run by queue.enqueue) services pending
     // pull-intos and default reads alike.
     if (notify) this.#core.callPullIfNeeded();
@@ -2390,7 +2378,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       (released !== undefined &&
         this.#releasedHeadErrorsStream &&
         released.bytesFilled % released.elementSize !== 0) ||
-      this.#queue.someLiveCursor((cursor) => {
+      this.#core.queue.someLiveCursor((cursor) => {
         const byteCursor = cursor as unknown as ByteStreamCursorType;
         if (byteCursor.errorStreamCallback === errorTeeBranchFromCursor) {
           return false;
@@ -2440,7 +2428,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     const released = this.#releasedHead;
     const cursor =
       released === undefined
-        ? (this.#queue.singleCursor as ByteStreamCursorType | undefined)
+        ? (this.#core.queue.singleCursor as ByteStreamCursorType | undefined)
         : undefined;
     const head = released ?? cursor?.headPullInto;
     if (head === undefined) {
@@ -2518,7 +2506,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     const released = this.#releasedHead;
     const cursor =
       released === undefined
-        ? (this.#queue.singleCursor as ByteStreamCursorType | undefined)
+        ? (this.#core.queue.singleCursor as ByteStreamCursorType | undefined)
         : undefined;
     const head = released ?? cursor?.headPullInto;
     if (head === undefined) {
@@ -2590,10 +2578,11 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     if (state === 'closed') return;
     this.#accountDelivery(bytesWritten);
     const filled = head.bytesFilled + bytesWritten;
-    this.#queue.forEachLiveCursor((cursor) => {
+    const queue = this.#core.queue;
+    queue.forEachLiveCursor((cursor) => {
       (cursor as unknown as ByteStreamCursorType).dropReleasedHead();
     });
-    this.#queue.enqueue({
+    queue.enqueue({
       value: {
         buffer: cloneArrayBuffer(head.buffer, head.byteOffset, filled),
         byteOffset: 0,

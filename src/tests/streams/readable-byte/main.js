@@ -224,6 +224,7 @@ export {
   teeBranchesCollected,
   teeSurvivorBranchCollected,
   teeBranchesCollectedPullStops,
+  teeHeldByobRequestBranchesCollected,
   pendingByobReadSurvivesGc,
   byobRequestSurvivesGc,
   sourceReleasedOnceEnded,

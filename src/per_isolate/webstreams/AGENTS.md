@@ -77,10 +77,12 @@ aunt. Consequences, all handled by the controller (`readable.ts`,
   consumer for good: it drops what it holds and what is enqueued later,
   `desiredSize` reads as the high-water mark, and the controller releases
   the source — no more pulls, and its cancel never runs, since GC timing
-  runs no user callback — while keeping its own state machine (`close()`
-  closes the source's stream; `enqueue()` after it throws as ever). C++
-  does the same but keeps pulling (readable ledger #20). Suite:
-  `gc.js` in the readable and readable-byte suites.
+  runs no user callback — and retires a `byobRequest` the source holds,
+  while keeping its own state machine (`close()` closes the source's
+  stream; `enqueue()` after it throws as ever). C++ does the same but
+  keeps pulling (readable ledger #20) and keeps the request
+  (readable-byte ledger #25). Suite: `gc.js` in the readable and
+  readable-byte suites.
 - Backpressure follows the SLOWEST consumer: `desiredSize` is the
   high-water mark minus the largest backlog among the cursors. This trades
   flow for bounded memory: the spec's per-branch queues keep a reading
