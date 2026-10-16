@@ -115,7 +115,7 @@ http.archive(
     build_file = "@workerd//:build/BUILD.wpt",
     patch_strip = 1,
     patches = [
-        "//:patches/wpt/0001-disable-virtualenv-for-serve-command.patch",
+        "@workerd//:patches/wpt/0001-disable-virtualenv-for-serve-command.patch",
     ],
     sha256 = "e45f3ab903c74784ce5e41fc61f72200a0adf429f06203fe3e16bf2abeaa9431",
     strip_prefix = "wpt-2f17dec1f",
