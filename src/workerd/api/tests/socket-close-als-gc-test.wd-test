@@ -1,0 +1,34 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
+  # Required for the rpcClose mode, which returns a Socket over RPC.
+  autogates = ["workerd-autogate-socket-rpc-transfer"],
+  services = [
+    ( name = "socket-close-als-gc-test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "socket-close-als-gc-test.js")],
+        # enable_weak_ref: the default wd_test variant runs with the oldest compat date.
+        compatibilityFlags = ["nodejs_compat", "enable_weak_ref", "experimental"],
+        globalOutbound = (name = "socket-close-als-gc-test", entrypoint = "peer"),
+        bindings = [
+          (name = "SUBJECT", service = "socket-close-als-gc-test"),
+          (name = "PRODUCER", service = "producer-loop"),
+        ],
+      ),
+    ),
+    ( name = "producer-loop",
+      external = (
+        address = "loopback:producer-loop",
+        http = (capnpConnectHost = "cappy"),
+      ),
+    ),
+  ],
+  sockets = [
+    ( name = "producer-loop",
+      address = "loopback:producer-loop",
+      service = (name = "socket-close-als-gc-test", entrypoint = "Producer"),
+      http = (capnpConnectHost = "cappy"),
+    ),
+  ],
+);
