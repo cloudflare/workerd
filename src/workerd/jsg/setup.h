@@ -1059,10 +1059,10 @@ class Isolate: public IsolateBase {
       return jsgIsolate.getWrapperByContext(*this)->wrap(v8Isolate, kj::none, kj::mv(data));
     }
     v8::Local<v8::Function> wrapSimpleFunction(v8::Local<v8::Context> context,
-        jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction)
-        override {
+        jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction,
+        Once once) override {
       return jsgIsolate.getWrapperByContext(context)->wrap(
-          *this, context, kj::none, kj::mv(simpleFunction));
+          *this, context, kj::none, kj::mv(simpleFunction), once);
     }
     v8::Local<v8::Function> wrapReturningFunction(v8::Local<v8::Context> context,
         jsg::Function<v8::Local<v8::Value>(const v8::FunctionCallbackInfo<v8::Value>& info)>
