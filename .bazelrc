@@ -578,3 +578,7 @@ build:native-arm64 --define=native_arm64_no_op=1
 
 # Local workstation overrides. /.local/ is gitgnored.
 try-import %workspace%/.local/bazelrc
+build:linux --repo_env=CC=/usr/lib/llvm-22/bin/clang
+build:linux --linkopt=--ld-path=/usr/lib/llvm-22/bin/ld.lld
+build:linux --host_linkopt=--ld-path=/usr/lib/llvm-22/bin/ld.lld
+build:linux --repo_env=AR=/usr/lib/llvm-22/bin/llvm-ar
