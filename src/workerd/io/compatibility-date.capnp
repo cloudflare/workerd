@@ -598,7 +598,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # in the wrong IoContext leading to errors and difficult to diagnose bugs. With this
   # compatibility flag we arrange to have such promise continuations scheduled to run
   # in the correct IoContext if it is still alive, or dropped on the floor with a warning
-  # if the correct IoContext is not still alive.
+  # if the correct IoContext is not still alive. A scheduled continuation runs once that
+  # IoContext has a request in progress, which for a Durable Object between events means
+  # its next event. If the IoContext ends before then, the continuation is dropped
+  # without a warning.
   obsolete63 @63 :Bool
       $experimental;
 

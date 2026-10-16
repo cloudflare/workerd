@@ -52,6 +52,11 @@ namespace workerd {
 // Maximum depth to which blockConcurrencyWhile() calls may be nested.
 constexpr uint MAX_BLOCK_CONCURRENCY_WHILE_DEPTH = 64;
 
+// Identifies the exception with which IoContext::run() fails when the context has no current
+// IncomingRequest to run under, e.g. an actor between events. Callers that can legitimately race
+// with the end of a context's last request check for it rather than match the message.
+constexpr kj::Exception::DetailTypeId NO_CURRENT_INCOMING_REQUEST_DETAIL_ID = 0x68a64a728b1be5c9ull;
+
 // This wishes it were IoContext::Runnable::Exceptional.
 WD_STRONG_BOOL(IoContext_Runnable_Exceptional);
 // Whether the caller awaits a subrequest with its next awaitIo(), so that the subrequest span's
@@ -499,11 +504,13 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // two-argument form is used, *this is passed as the second argument. Existing single-argument
   // call sites are unaffected.
   //
-  // Requires a current IncomingRequest: the setup work reaches for per-request state (the
-  // IoChannelFactory's timer, the request's metrics) before the callback runs. An IoContext can
-  // outlive its last IncomingRequest, so callers reachable from teardown -- destructors and
-  // kj::defer cleanups in particular -- must check hasCurrentIncomingRequest() first and skip
-  // the work rather than call this and fault.
+  // Requires a current IncomingRequest, both when called and once the locks have been acquired:
+  // entering the context reaches for per-request state (the IoChannelFactory's timer, the
+  // request's metrics). An IoContext can outlive its last IncomingRequest, e.g. an actor between
+  // events. Without one, the callback does not run and the returned promise rejects with an
+  // exception carrying NO_CURRENT_INCOMING_REQUEST_DETAIL_ID. Callers reachable from teardown --
+  // destructors and kj::defer cleanups in particular -- must check hasCurrentIncomingRequest()
+  // first and skip the work rather than start a run that will fail.
   template <typename Func>
   auto run(Func&& func, kj::Maybe<InputGate::Lock> inputLock = kj::none) KJ_WARN_UNUSED_RESULT {
     if constexpr (runFuncAcceptsIoContext<Func>) {
@@ -1373,6 +1380,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   static constexpr bool runFuncAcceptsIoContext =
       std::invocable<std::decay_t<Func>&, Worker::Lock&, IoContext&>;
 
+  // Returns the exception with which a run starting now must fail, if any: the abort reason if
+  // this context has been aborted, or else a NO_CURRENT_INCOMING_REQUEST_DETAIL_ID exception if it
+  // has no current IncomingRequest.
+  kj::Maybe<kj::Exception> tryGetRunFailure();
+
   // Internal implementation of run(), always invoked with a single-arg callback.
   template <typename Func>
   kj::PromiseForResult<Func, Worker::Lock&> runSingle(
@@ -1503,6 +1515,9 @@ template <typename Func>
 kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
     Func&& func, kj::Maybe<kj::Rc<InputGate::CriticalSection>> criticalSection) {
   KJ_IF_SOME(cs, criticalSection) {
+    KJ_IF_SOME(e, tryGetRunFailure()) {
+      return kj::mv(e);
+    }
     return cs.get()
         ->wait(getCurrentTraceSpan())
         .then([self = addWeakToThis(), func = kj::fwd<Func>(func)](
@@ -1517,10 +1532,10 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
 template <typename Func>
 kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
     Func&& func, kj::Maybe<InputGate::Lock> inputLock) {
-  // Before we try running anything, let's make sure our IoContext hasn't been aborted. If it has
-  // been aborted, there's likely not an active request so later operations will fail anyway.
-  KJ_IF_SOME(ex, abortException) {
-    return ex.clone();
+  // Make sure the IoContext hasn't been aborted and still has a current request before reaching
+  // for it below. This runs again on re-entry once the input lock is held.
+  KJ_IF_SOME(e, tryGetRunFailure()) {
+    return kj::mv(e);
   }
 
   kj::Promise<Worker::AsyncLock> asyncLockPromise = nullptr;
@@ -1542,9 +1557,10 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
   return asyncLockPromise.then([self = addWeakToThis(), inputLock = kj::mv(inputLock),
                                    func = kj::fwd<Func>(func)](Worker::AsyncLock lock) mutable {
     auto& context = self.assertLive();
-    // Re-check if context was aborted while we waited for the lock.
-    KJ_IF_SOME(ex, context.abortException) {
-      kj::throwFatalException(ex.clone());
+    // Re-check, since the context may have been aborted or lost its last request while we waited
+    // for the lock.
+    KJ_IF_SOME(e, context.tryGetRunFailure()) {
+      kj::throwFatalException(kj::mv(e));
     }
 
     using Result = decltype(func(kj::instance<Worker::Lock&>()));
