@@ -21,7 +21,24 @@ constexpr auto ERROR_PREFIX_DELIM = "; "_kj;
 constexpr auto ERROR_REMOTE_PREFIX = "remote."_kj;
 constexpr auto ERROR_TUNNELED_PREFIX_JSG = "jsg."_kj;
 constexpr auto ERROR_INTERNAL_SOURCE_PREFIX_JSG = "jsg-internal."_kj;
+
+// Does `message` contain the diagnostic delimiter entirely before index `end`?
+bool hasDelimiterBefore(kj::StringPtr message, size_t end) {
+  KJ_IF_SOME(i, message.find(ERROR_PREFIX_DELIM)) {
+    return i + ERROR_PREFIX_DELIM.size() <= end;
+  }
+  return false;
+}
 }  // namespace
+
+bool hasInternalExceptionDetails(kj::StringPtr message) {
+  constexpr auto referenceMarker = "internal error; reference = "_kj;
+  KJ_IF_SOME(i, message.find(referenceMarker)) {
+    return hasDelimiterBefore(message, i) ||
+        message.slice(i + referenceMarker.size()).contains(ERROR_PREFIX_DELIM);
+  }
+  return message.contains(ERROR_PREFIX_DELIM);
+}
 
 TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
   // A tunneled error in an internal message is prefixed by one of the following patterns,
@@ -130,6 +147,43 @@ TunneledErrorType tunneledErrorType(kj::StringPtr internalMessage) {
   } else {
     return makeDefaultError(internalMessage, properties);
   }
+}
+
+namespace {
+// Does a tunneled message, such as "Error: ..." or "DOMException(Name): ...", contain diagnostic
+// fields in either its error type or its public message?
+bool tunneledMessageHasInternalDetails(kj::StringPtr message) {
+  KJ_IF_SOME(i, message.find(": "_kj)) {
+    return hasDelimiterBefore(message, i) || hasInternalExceptionDetails(message.slice(i + 2));
+  }
+  return message.contains(ERROR_PREFIX_DELIM);
+}
+
+// Was `tunneledMessage` recorded by markMessageFromJs() and left unchanged since?
+bool isMessageFromJs(const kj::Exception& exception, kj::StringPtr tunneledMessage) {
+  KJ_IF_SOME(recorded, exception.getDetail(EXCEPTION_MESSAGE_FROM_JS)) {
+    return recorded == tunneledMessage.asBytes();
+  }
+  return false;
+}
+}  // namespace
+
+void markMessageFromJs(kj::Exception& exception) {
+  auto message = tunneledErrorType(exception.getDescription()).message;
+  exception.setDetail(EXCEPTION_MESSAGE_FROM_JS, kj::heapArray(message.asBytes()));
+}
+
+TunneledErrorType tunneledErrorType(const kj::Exception& exception) {
+  auto result = tunneledErrorType(exception.getDescription());
+  // Messages written by JavaScript pass through unchanged. Runtime messages fail closed when they
+  // may carry diagnostic fields, including skipping serialized-error restoration.
+  if (result.isJsgError && !isMessageFromJs(exception, result.message) &&
+      tunneledMessageHasInternalDetails(result.message)) {
+    result.isJsgError = false;
+    result.isInternal = true;
+    result.hasInternalDetails = true;
+  }
+  return result;
 }
 
 bool isTunneledException(kj::StringPtr internalMessage) {

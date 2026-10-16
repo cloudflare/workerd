@@ -256,7 +256,7 @@ void FormData::parse(jsg::Lock& js,
     if (MimeType::FORM_DATA == parsed) {
       auto& boundary = JSG_REQUIRE_NONNULL(params.find("boundary"_kj), TypeError,
           "No boundary string in Content-Type header. The multipart/form-data MIME "
-          "type requires a boundary parameter, e.g. 'Content-Type: multipart/form-data; "
+          "type requires a boundary parameter, e.g. 'Content-Type: multipart/form-data;"
           "boundary=\"abcd\"'. See RFC 7578, section 4.");
 
       parseFormDataImpl(rawText, boundary,

@@ -197,7 +197,9 @@ struct TypeErrorContext {
 // Callback used when attempting to construct a type that can't be constructed from JavaScript.
 void throwIllegalConstructor(const v8::FunctionCallbackInfo<v8::Value>& args);
 
-kj::StringPtr extractTunneledExceptionDescription(kj::StringPtr message);
+// Returns the tunneled description ("Error: ...") that JavaScript may see, or "Error: internal
+// error" when the exception is internal. See tunneledErrorType(const kj::Exception&).
+kj::StringPtr extractTunneledExceptionDescription(const kj::Exception& exception);
 
 // Given a JavaScript exception, returns a KJ exception that contains a tunneled exception type that
 // can be converted back to JavaScript via makeInternalError().

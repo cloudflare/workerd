@@ -1407,8 +1407,8 @@ KJ_TEST("ActorCache flush hard failure includes internal error reference id") {
 
   KJ_EXPECT_LOG(ERROR, "raw storage failure");
   KJ_EXPECT_THROW_MESSAGE("broken.outputGateBroken; jsg.Error: Internal error in Durable "
-                          "Object storage write caused object to be reset; "
-                          "reference = 0123456789abcdefghijklmn",
+                          "Object storage write caused object to be reset "
+                          "(reference = 0123456789abcdefghijklmn)",
       promise.wait(ws));
 }
 
@@ -5466,8 +5466,8 @@ KJ_TEST("ActorCache deleteAll() failure includes internal error reference id") {
 
   KJ_EXPECT_LOG(ERROR, "raw storage failure");
   KJ_EXPECT_THROW_MESSAGE("broken.outputGateBroken; jsg.Error: Internal error in Durable "
-                          "Object storage deleteAll() caused object to be reset; "
-                          "reference = 0123456789abcdefghijklmn",
+                          "Object storage deleteAll() caused object to be reset "
+                          "(reference = 0123456789abcdefghijklmn)",
       brokenPromise.wait(ws));
 }
 

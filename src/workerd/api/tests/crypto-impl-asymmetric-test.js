@@ -92,6 +92,25 @@ export const ecdhJwkTest = {
       true,
       []
     );
+
+    for (const coordinate of ['x', 'y']) {
+      const invalidJwk = Object.fromEntries(
+        Object.entries(publicJwk).filter(([key]) => key !== coordinate)
+      );
+      await assert.rejects(
+        crypto.subtle.importKey(
+          'jwk',
+          invalidJwk,
+          { name: 'ECDH', namedCurve: 'P-256' },
+          true,
+          []
+        ),
+        {
+          name: 'DataError',
+          message: `Invalid EC key in JSON Web Key: missing "${coordinate}".`,
+        }
+      );
+    }
   },
 };
 
