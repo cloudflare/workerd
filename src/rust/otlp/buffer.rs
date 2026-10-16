@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use prost::Message;
 
@@ -57,7 +56,7 @@ struct OpenSpan {
 /// invocation, and nothing bounds how long the next one would take to arrive.
 ///
 /// Each span also gets `cloudflare.invocation.sequence.number`, counted in open order so the root
-/// is 1, and a start time no other span of the invocation shares.
+/// is 1.
 pub struct SpanBuffer {
     options: Options,
     resource: proto::Resource,
@@ -65,8 +64,6 @@ pub struct SpanBuffer {
     default_attributes: Attributes,
     root_closed: bool,
     last_sequence_number: i64,
-    /// Start times handed out so far, as unix nanoseconds.
-    start_times: HashSet<i64>,
     open: HashMap<u64, OpenSpan>,
     closed: Vec<proto::Span>,
     /// Encoded size of `closed`, kept so a close does not re-measure the batch.
@@ -83,7 +80,6 @@ impl SpanBuffer {
             default_attributes,
             root_closed: false,
             last_sequence_number: 0,
-            start_times: HashSet::new(),
             open: HashMap::new(),
             closed: Vec::new(),
             closed_bytes: 0,
@@ -95,10 +91,6 @@ impl SpanBuffer {
     pub fn open(&mut self, span_id: u64, parent_span_id: u64, name: String, start: i64) -> bool {
         if self.open.len() >= MAX_OPEN_SPANS || self.open.contains_key(&span_id) {
             return false;
-        }
-        let mut start = start;
-        while !self.start_times.insert(start) {
-            start += 1;
         }
         self.last_sequence_number += 1;
         self.open.insert(
@@ -601,8 +593,8 @@ mod tests {
         assert_eq!(ipv6.status, None);
         assert_eq!(attribute(&ipv6.attributes, "error.type"), None);
         assert_eq!(ipv6.end_time_unix_nano, ipv6.start_time_unix_nano);
-        // Spans opened at the same instant get distinct start times.
-        assert!(ipv6.start_time_unix_nano > fetch.start_time_unix_nano);
+        assert_eq!(fetch.start_time_unix_nano, T0.cast_unsigned());
+        assert_eq!(ipv6.start_time_unix_nano, T0.cast_unsigned());
 
         let root = named(&request, "scheduled");
         assert_eq!(root.kind(), SpanKind::Consumer);
