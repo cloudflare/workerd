@@ -533,6 +533,12 @@ void registerPythonCommonModules(jsg::Lock& lock,
       api::pyodide::EmbeddedPackagesReader::fromBundle(lock, pyodideBundle),
       jsg::ModuleRegistry::Type::INTERNAL);
 
+  // Inject a reader over the bundle's Python stdlib zip.
+  modules.addBuiltinModule("pyodide-internal:python_stdlib",
+      api::pyodide::ReadOnlyBuffer::fromBundleDataModule(
+          lock, pyodideBundle, "pyodideRuntime-internal:python_stdlib.zip"),
+      jsg::ModuleRegistry::Type::INTERNAL);
+
   // Inject disk cache module
   modules.addBuiltinModule("pyodide-internal:disk_cache",
       kj::mv(diskCache).orDefault([&lock]() { return lock.alloc<DiskCache>(); }),

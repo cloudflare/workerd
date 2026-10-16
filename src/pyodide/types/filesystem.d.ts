@@ -9,12 +9,8 @@ interface Reader {
 interface TarFSInfo {
   children: Map<string, TarFSInfo> | undefined;
   mode: number;
-  type: string;
   modtime: number;
   size: number;
-  path: string;
-  name: string;
-  parts: string[];
   contentsOffset?: number;
   reader: Reader | null;
 }
@@ -35,6 +31,7 @@ interface FS {
     options?: { canOwn: boolean }
   ) => void;
   readFile: (fname: string, options?: { encoding?: string }) => Uint8Array;
+  symlink: (target: string, path: string) => void;
   mount(fs: object, options: { info?: any }, path: string): void;
   createNode<Info>(
     parent: FSNode<Info> | null,
