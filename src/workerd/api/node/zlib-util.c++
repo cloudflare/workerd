@@ -669,16 +669,21 @@ bool ZlibUtil::ZstdCompressionStream<CompressionContext>::initialize(jsg::Lock& 
     jsg::JsArrayBufferView params,
     jsg::JsArrayBufferView writeResult,
     jsg::Function<void()> writeCallback,
-    jsg::Optional<uint64_t> pledgedSrcSize) {
+    jsg::Optional<uint64_t> pledgedSrcSize,
+    jsg::Optional<kj::Array<kj::byte>> dictionary) {
   this->initializeStream(js, writeResult, kj::mv(writeCallback));
 
   uint64_t srcSize = pledgedSrcSize.orDefault(ZSTD_CONTENTSIZE_UNKNOWN);
+  kj::ArrayPtr<const kj::byte> dict = nullptr;
+  KJ_IF_SOME(d, dictionary) {
+    dict = d.asPtr();
+  }
 
   kj::Maybe<CompressionError> maybeError;
   if constexpr (CompressionContext::Mode == ZlibMode::ZSTD_ENCODE) {
-    maybeError = this->context()->initialize(srcSize);
+    maybeError = this->context()->initialize(srcSize, dict);
   } else {
-    maybeError = this->context()->initialize();
+    maybeError = this->context()->initialize(dict);
   }
 
   KJ_IF_SOME(err, maybeError) {
@@ -900,13 +905,18 @@ kj::Array<kj::byte> ZlibUtil::zstdSync(jsg::Lock& js, InputSource data, ZstdCont
   GrowableBuffer result(ZLIB_PERFORMANT_CHUNK_SIZE, maxOutputLength);
 
   // Initialize the context
+  kj::ArrayPtr<const kj::byte> dictionary = nullptr;
+  KJ_IF_SOME(d, opts.dictionary) {
+    dictionary = d.asPtr();
+  }
+
   if constexpr (Context::Mode == ZlibMode::ZSTD_ENCODE) {
     uint64_t pledgedSrcSize = opts.pledgedSrcSize.orDefault(ZSTD_CONTENTSIZE_UNKNOWN);
-    KJ_IF_SOME(err, ctx.initialize(pledgedSrcSize)) {
+    KJ_IF_SOME(err, ctx.initialize(pledgedSrcSize, dictionary)) {
       JSG_FAIL_REQUIRE(Error, err.message);
     }
   } else {
-    KJ_IF_SOME(err, ctx.initialize()) {
+    KJ_IF_SOME(err, ctx.initialize(dictionary)) {
       JSG_FAIL_REQUIRE(Error, err.message);
     }
   }
