@@ -14,8 +14,15 @@
 // 0. Every failure is a TypeError. C++ lets the number 2 ** 64 through its
 // range check to a cast whose result is undefined, so that one value is
 // asserted for TypeScript only.
+//
+// DIVERGENCE (ledger #42): TS also holds the source to the declared length
+// as an exact total of what it delivers through enqueue(), respond() and
+// respondWithNewView(). The delivery that goes past it throws RangeError,
+// and so does a close() short of it; either errors the stream with that
+// error. C++ enforces neither: every delivery reaches the reader, and
+// close() closes the stream.
 
-import { ok, strictEqual, throws } from 'node:assert';
+import { ok, rejects, strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 function byteSource(expectedLength, byteCount = 0) {
@@ -107,5 +114,87 @@ export const byteSourceExpectedLengthRange = {
       throws(() => byteSource(value), TypeError);
     }
     if (usingTsImpl) throws(() => byteSource(2 ** 64), TypeError);
+  },
+};
+
+// A byte source declaring expectedLength, with a read(view) of 8 bytes
+// pending, so that its controller holds a byobRequest.
+async function pendingByobRead(expectedLength) {
+  let controller;
+  const rs = new ReadableStream({
+    type: 'bytes',
+    expectedLength,
+    start(c) {
+      controller = c;
+    },
+  });
+  const reader = rs.getReader({ mode: 'byob' });
+  const read = reader.read(new Uint8Array(8));
+  await scheduler.wait(5);
+  return { controller, reader, read };
+}
+
+// DIVERGENCE (ledger #42): the declared length as an exact total, which
+// TS enforces and C++ does not.
+export const byteSourceExpectedLengthContract = {
+  async test() {
+    const overflow =
+      'byte source delivered more bytes than its declared expectedLength';
+    const deliverFive = {
+      'respond()': (c) => c.byobRequest.respond(5),
+      'respondWithNewView()': (c) => {
+        const { buffer, byteOffset } = c.byobRequest.view;
+        c.byobRequest.respondWithNewView(new Uint8Array(buffer, byteOffset, 5));
+      },
+      'enqueue()': (c) => c.enqueue(new Uint8Array(5)),
+    };
+    for (const [name, deliver] of Object.entries(deliverFive)) {
+      const { controller, reader, read } = await pendingByobRead(4);
+      if (usingTsImpl) {
+        throws(
+          () => deliver(controller),
+          { name: 'RangeError', message: overflow },
+          name
+        );
+        await rejects(read, { name: 'RangeError', message: overflow });
+        await rejects(reader.closed, { name: 'RangeError', message: overflow });
+      } else {
+        deliver(controller);
+        strictEqual((await read).value.byteLength, 5, name);
+        await reader.cancel('cleanup');
+      }
+    }
+
+    // Exactly the declared total, then close(): parity.
+    {
+      const { controller, reader, read } = await pendingByobRead(4);
+      controller.byobRequest.respond(4);
+      controller.close();
+      strictEqual((await read).value.byteLength, 4);
+      await reader.closed;
+    }
+
+    // close() short of the declared total.
+    {
+      const { controller, reader, read } = await pendingByobRead(4);
+      controller.byobRequest.respond(2);
+      if (usingTsImpl) {
+        const underflow =
+          'byte source closed before producing its declared expectedLength';
+        throws(() => controller.close(), {
+          name: 'RangeError',
+          message: underflow,
+        });
+        strictEqual((await read).value.byteLength, 2);
+        await rejects(reader.closed, {
+          name: 'RangeError',
+          message: underflow,
+        });
+      } else {
+        controller.close();
+        strictEqual((await read).value.byteLength, 2);
+        await reader.closed;
+      }
+    }
   },
 };
