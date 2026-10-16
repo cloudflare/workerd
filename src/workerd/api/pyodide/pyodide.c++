@@ -61,6 +61,20 @@ uint32_t ReadOnlyBuffer::read(jsg::Lock& js, uint64_t offset, kj::Array<kj::byte
   return readToTarget(source, offset, buf);
 }
 
+uint32_t ReadOnlyBuffer::getSize() {
+  return source.size();
+}
+
+jsg::Ref<ReadOnlyBuffer> ReadOnlyBuffer::fromBundleDataModule(
+    jsg::Lock& js, jsg::Bundle::Reader bundle, kj::StringPtr name) {
+  for (auto module: bundle.getModules()) {
+    if (module.which() == jsg::Module::DATA && module.getName() == name) {
+      return js.alloc<ReadOnlyBuffer>(module.getData().asBytes());
+    }
+  }
+  KJ_FAIL_REQUIRE("Pyodide bundle has no data module with the expected name", name);
+}
+
 kj::Array<kj::StringPtr> PyodideMetadataReader::getNames(
     jsg::Lock& js, jsg::Optional<kj::String> maybeExtFilter) {
   auto builder = kj::Vector<kj::StringPtr>(state->moduleInfo.names.size());
