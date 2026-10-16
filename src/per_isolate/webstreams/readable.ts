@@ -4805,12 +4805,16 @@ function acquireReadableStreamDrainingReader<R>(
   return new ReadableStreamDrainingReader<R>(stream);
 }
 
-// The collected bytes, copied out of the drained chunks as they arrive so
-// nothing is retained per chunk. Blocks grow geometrically from the first
-// chunk's size to kCollectBlockSize; a declared length that fits one block
+// The collected bytes: copied out of drained chunks as they arrive, so
+// nothing is retained per chunk, or read straight into the block being
+// filled (readTarget/commit). Blocks grow geometrically from the first
+// one's size to kCollectBlockSize; a declared length that fits one block
 // is allocated whole up front, so a body that meets it fills exactly one
 // block and is handed over without a further copy.
 const kCollectBlockSize = 1024 * 1024;
+// The first block a native stream is read into, with no declared length;
+// the legacy AllReader's default read size.
+const kNativeReadSize = 128 * 1024;
 const kStreamingDecode = ObjectFreeze({ __proto__: null, stream: true });
 
 class CollectedBytes {
@@ -4842,14 +4846,30 @@ class CollectedBytes {
         new Uint8Array(buffer, byteOffset, take),
         this.#filled
       );
-      this.#filled += take;
-      this.#length += take;
+      this.commit(take);
       byteOffset += take;
       byteLength -= take;
-      if (this.#filled === this.#blockSize) {
-        ArrayPrototypePush(this.#blocks, block);
-        this.#block = undefined;
-      }
+    }
+  }
+
+  // The unfilled part of the block being filled, at most `limit` bytes, as
+  // a view to read into; opens a block when none is. PRECONDITION: limit > 0.
+  readTarget(limit: number): Uint8Array {
+    const block = this.#block ?? this.#addBlock(kNativeReadSize);
+    return new Uint8Array(
+      TypedArrayPrototypeGetBuffer(block),
+      this.#filled,
+      MathMin(limit, this.#blockSize - this.#filled)
+    );
+  }
+
+  // Accounts `byteLength` bytes written to the block being filled.
+  commit(byteLength: number): void {
+    this.#filled += byteLength;
+    this.#length += byteLength;
+    if (this.#filled === this.#blockSize) {
+      ArrayPrototypePush(this.#blocks, this.#block as Uint8Array);
+      this.#block = undefined;
     }
   }
 
@@ -4948,6 +4968,19 @@ async function collectChunks<R>(
   const collected = new CollectedBytes(
     declaredBinds && bound <= kCollectBlockSize ? bound : 0
   );
+  // BACKEND-DISPATCH: a native stream is read in block-sized steps (see
+  // collectNativeBytes); any other is drained chunk by chunk.
+  const controller = getReadableStreamController(stream);
+  if (controller !== undefined && isNativeController(controller)) {
+    return collectNativeBytes<R>(
+      reader,
+      stream,
+      controller,
+      collected,
+      bound,
+      declaredBinds
+    );
+  }
   while (true) {
     const result = await drainingReaderReadInternal<R>(reader, stream);
     const drained = result.chunks as unknown[];
@@ -4991,6 +5024,98 @@ async function collectChunks<R>(
     }
     if (result.done) return collected;
   }
+}
+
+// A native source answers a read with a minimum in one KJ read (its tryRead
+// accumulates toward minBytes), and a short answer is its EOF. So a native
+// stream is collected as the legacy AllReader read its source: each read
+// asks for the whole unfilled part of the block being filled, straight into
+// it. A body then costs one C++/JS round trip per block rather than one per
+// network chunk (a default read settles on the first bytes to arrive), and
+// its bytes land in the result with no further copy. A stream that fills
+// the bound exactly is left with a default read, which allocates nothing,
+// to observe its EOF; a chunk from it breaches the bound.
+async function collectNativeBytes<R>(
+  reader: object,
+  stream: ReadableStream<R>,
+  controller: AnyReadableController,
+  collected: CollectedBytes,
+  bound: number,
+  declaredBinds: boolean
+): Promise<CollectedBytes> {
+  for (;;) {
+    if (isReadableStreamPendingClosure(stream)) {
+      throw pendingClosureError();
+    }
+    setReadableStreamDisturbed(stream);
+    const state = getReadableStreamGetState(stream);
+    if (state === 'closed') return collected;
+    if (state === 'errored') throw getReadableStreamStoredError(stream);
+    const consumer = getReadableStreamConsumer(stream);
+    if (consumer === undefined) return collected;
+    const room = bound - collected.length;
+    if (room === 0) {
+      const result = await defaultReaderReadInternal<R>(reader, stream);
+      if (result.done) return collected;
+      return failCollect(
+        reader,
+        declaredBinds
+          ? new RangeError(
+              'stream delivered more bytes than its declared expectedLength'
+            )
+          : new TypeError('Memory limit exceeded before EOF.')
+      );
+    }
+    const result = await readIntoViewInternal(
+      consumer as unknown as ByteStreamConsumerType,
+      controller,
+      collected.readTarget(room),
+      reader
+    );
+    collected.commit(
+      TypedArrayPrototypeGetByteLength(result.value as Uint8Array)
+    );
+    if (result.done) return collected;
+  }
+}
+
+// A read of the whole of `view` (min = its length) for collectNativeBytes.
+// The view is over the collector's own buffer, which nothing else holds, so
+// the buffer is not transferred and the result's view is over it too. The
+// result is the backend's own (createReadResult), never user-visible.
+function readIntoViewInternal(
+  consumer: ByteStreamConsumerType,
+  controller: AnyReadableController,
+  view: Uint8Array,
+  reader: object
+): Promise<ReadableStreamReadResult<ArrayBufferView>> {
+  const withResolvers = PromiseWithResolvers() as PromiseWithResolversType<
+    ReadableStreamReadResult<ArrayBufferView>
+  >;
+  const buffer = TypedArrayPrototypeGetBuffer(view);
+  const byteLength = TypedArrayPrototypeGetByteLength(view);
+  const descriptor: PullIntoDescriptor = {
+    buffer,
+    bufferByteLength: ArrayBufferPrototypeByteLengthGet(buffer),
+    byteOffset: TypedArrayPrototypeGetByteOffset(view),
+    byteLength,
+    bytesFilled: 0,
+    minimumFill: byteLength,
+    elementSize: 1,
+    viewCtor: Uint8Array,
+    readerType: 'byob',
+    settledAtEndOfData: false,
+    promise: withResolvers.promise,
+    resolve: (result) => {
+      controllerMaybeCloseStream(controller);
+      withResolvers.resolve(result);
+    },
+    reject: withResolvers.reject,
+    reader,
+  };
+  const promise = consumer.readBYOB(descriptor);
+  controllerPullIfNeeded(controller);
+  return promise;
 }
 
 async function consumeReadableStreamAsArrayBuffer<R>(
