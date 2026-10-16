@@ -420,9 +420,10 @@ v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
     kj::StringPtr name,
     GetContent&& getContent,
     kj::ArrayPtr<const kj::byte> compileCache,
-    kj::ArrayPtr<const int> compileHints,
     ModuleInfoCompileOption option,
-    const CompilationObserver& observer) {
+    const CompilationObserver& observer,
+    kj::ArrayPtr<const int> compileHints = nullptr,
+    ProduceCompileHints produceCompileHints = ProduceCompileHints::NO) {
   // destroy the observer after compilation finished to indicate the end of the process.
   auto compilationObserver =
       observer.onEsmCompilationStart(js.v8Isolate, name, convertOption(option));
@@ -438,6 +439,12 @@ v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
   v8::ScriptOrigin origin(v8StrIntern(js.v8Isolate, name), resourceLineOffset, resourceColumnOffset,
       resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, isModule);
   auto contentStr = getContent();
+
+  if (produceCompileHints) {
+    v8::ScriptCompiler::Source source(contentStr, origin);
+    return jsg::check(v8::ScriptCompiler::CompileModule(
+        js.v8Isolate, &source, v8::ScriptCompiler::kProduceCompileHints));
+  }
 
   if (compileCache.size() > 0 && compileCache.begin() != nullptr) {
     auto cached =
@@ -471,6 +478,14 @@ v8::Local<v8::Module> createSyntheticModule(
 }
 }  // namespace
 
+kj::Array<int> getProducedCompileHints(jsg::Lock& js, v8::Local<v8::Module> module) {
+  auto positions =
+      module->GetUnboundModuleScript()->GetCompileHintsCollector()->GetCompileHints(js.v8Isolate);
+  std::sort(positions.begin(), positions.end());
+  positions.erase(std::unique(positions.begin(), positions.end()), positions.end());
+  return kj::heapArray<int>(positions.data(), positions.size());
+}
+
 intptr_t getSyntheticModuleEvalRef() {
   return reinterpret_cast<intptr_t>(&evaluateSyntheticModuleCallback);
 }
@@ -485,10 +500,19 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::ArrayPtr<const char> content,
     kj::ArrayPtr<const kj::byte> compileCache,
     const CompilationObserver& observer,
-    kj::ArrayPtr<const int> compileHints)
-    : ModuleInfo(js, compileEsmModule(js, name, [&]() {
-        return jsg::v8Str(js.v8Isolate, content);
-      }, compileCache, compileHints, ModuleInfoCompileOption::BUNDLE, observer)) {}
+    kj::ArrayPtr<const int> compileHints,
+    ProduceCompileHints produceCompileHints)
+    : ModuleInfo(js,
+          compileEsmModule(js,
+              name,
+              [&]() { return jsg::v8Str(js.v8Isolate, content); },
+              compileCache,
+              ModuleInfoCompileOption::BUNDLE,
+              observer,
+              compileHints,
+              produceCompileHints)) {
+  producesCompileHints = produceCompileHints;
+}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::StringPtr name,
@@ -497,7 +521,7 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     const CompilationObserver& observer)
     : ModuleInfo(js, compileEsmModule(js, name, [&]() {
         return jsg::newExternalString(js, content);
-      }, compileCache, nullptr, ModuleInfoCompileOption::BUILTIN, observer)) {}
+      }, compileCache, ModuleInfoCompileOption::BUILTIN, observer)) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::StringPtr name,
@@ -506,7 +530,7 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     const CompilationObserver& observer)
     : ModuleInfo(js, compileEsmModule(js, name, [&]() {
         return jsg::newExternalOneByteString(js, kj::mv(content));
-      }, compileCache, nullptr, ModuleInfoCompileOption::BUILTIN, observer)) {}
+      }, compileCache, ModuleInfoCompileOption::BUILTIN, observer)) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::StringPtr name,
