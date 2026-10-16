@@ -1799,6 +1799,26 @@ KJ_TEST("SQLite memory metering enforces SQLITE_NOMEM when limit is exceeded") {
   KJ_EXPECT_THROW_MESSAGE("out of memory: SQLITE_NOMEM", db.run("SELECT hex(zeroblob(65536))"));
 }
 
+KJ_TEST("SQLite PRAGMA quick_check succeeds on a schema with many tables") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  // PRAGMA quick_check compiles checks for every table and index into a single statement, so its
+  // VDBE program grows with the schema. SQLITE_LIMIT_VDBE_OP must leave room for realistic schemas
+  // like this one; exceeding it fails the prepare with a misleading SQLITE_NOMEM.
+  for (auto i: kj::zeroTo(100)) {
+    db.run({.regulator = SqliteDatabase::TRUSTED},
+        kj::str("CREATE TABLE t", i,
+            " (id INTEGER PRIMARY KEY, a TEXT NOT NULL, b INTEGER, c BLOB);", "CREATE INDEX t", i,
+            "_a ON t", i, "(a);"));
+  }
+
+  auto query = db.run("PRAGMA quick_check");
+  KJ_ASSERT(!query.isDone());
+  KJ_EXPECT(query.getText(0) == "ok");
+}
+
 KJ_TEST("SQLite memory metering tracks allocations correctly") {
   auto dir = kj::newInMemoryDirectory(kj::nullClock());
   SqliteDatabase::Vfs vfs(*dir);
