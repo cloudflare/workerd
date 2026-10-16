@@ -62,6 +62,11 @@ export default {
     comment: 'Frames are not implemented in workers',
     disabledTests: true,
   },
+  'FileSystemBaseHandle-postMessage-insecure-context.https.window.js': {
+    comment:
+      'Requires window.open(), frames, and a non-secure context, which are not applicable to workerd',
+    omittedTests: true,
+  },
   'FileSystemBaseHandle-postMessage-windows.https.window.js': {
     comment: 'postMessage is not implemented in workers',
     disabledTests: true,
