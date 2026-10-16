@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """
-Usage: update-wpt.py
+Usage: update_wpt.py [--latest | VERSION]
 
-Pins the wpt dependency to the newest matching release of the workerd-tools
-repository, which also holds releases of several other tools, so the plain
-"latest release" is usually not one of ours.
+Pins the wpt dependency to VERSION, a wpt release tag of the workerd-tools
+repository, or by default to the newest such release. That repository also
+holds releases of several other tools, so the plain "latest release" is usually
+not one of ours. With --latest, prints the newest release's tag instead of
+pinning it.
 """
 
+import argparse
 import importlib
 import json
 import re
@@ -62,27 +65,46 @@ def matching_releases(repo):
     )
 
 
+def latest_release(repo):
+    """The tag of the newest wpt release of `repo`."""
+    releases = matching_releases(repo)
+    if not releases:
+        raise LookupError(
+            f"No release of {repo['owner']}/{repo['repo']} is titled like {TITLE.pattern}"
+        )
+    return releases[0]["tag_name"]
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[1])
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--latest", action="store_true", help="print the newest release's tag"
+    )
+    group.add_argument("version", nargs="?", help="the release tag to pin")
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
     update_deps.GITHUB_ACCESS_TOKEN = update_deps.read_access_token()
 
     deps_path = update_deps.SCRIPT_DIR / "shared_deps.jsonc"
     deps = jsonc.loads(deps_path.read_text())
     repo = next(r for r in deps.data["repositories"] if r["name"] == "wpt")
 
-    releases = matching_releases(repo)
-    if not releases:
-        raise LookupError(
-            f"No release of {repo['owner']}/{repo['repo']} is titled like {TITLE.pattern}"
-        )
-
-    latest = releases[0]["tag_name"]
-    current = repo.get("freeze_version")
-    if latest == current:
-        print(f"wpt is up to date at {current}")
+    if args.latest:
+        print(latest_release(repo))
         return
 
-    print(f"Updating wpt {current} -> {latest}")
-    repo["freeze_version"] = latest
+    version = args.version or latest_release(repo)
+    current = repo.get("freeze_version")
+    if version == current:
+        print(f"wpt is already at {current}")
+        return
+
+    print(f"Updating wpt {current} -> {version}")
+    repo["freeze_version"] = version
     deps_path.write_text(jsonc.dumps(deps) + "\n")
 
     # Regenerate this one dependency, which downloads the release to record its
