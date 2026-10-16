@@ -42,6 +42,19 @@ its intent. If you add, remove, or rename a patch, update the patch list and
 regenerate `build/deps/gen/shared_deps.MODULE.bazel` with
 `./build/deps/update-deps.py wpt`, which keeps the pinned `freeze_version`.
 
+The `0001-disable-virtualenv-for-serve-command.patch` patch sets
+`"virtualenv": false` for the `serve` command in `tools/serve/commands.json`.
+`tools/wpt/wpt.py` asserts that a command without a virtualenv declares no
+`requirements` or `conditional_requirements`, so the rebased patch must also
+remove any such entries that upstream added. Check that the dropped Python
+packages are not needed by handlers under the mapped WPT directories.
+
+To inspect or test-apply a patch, extract the pinned archive from Bazel's
+repository cache at
+`$(bazel info repository_cache)/content_addressable/sha256/<sha256>/file`,
+where `<sha256>` is the `sha256` in the generated module file. Extract it into
+a new empty directory and run `patch -p1 --dry-run` there.
+
 Describe each patch change and the upstream commit that required it in the
 final report.
 
@@ -145,6 +158,10 @@ Do not use test-case filter arguments. Resolve the log root with
 `bazel info bazel-testlogs` or use the path printed by Bazel. Parent-repository
 logs are nested beneath the external workerd repository.
 
+Each suite's output in a target log is delimited by `[ TEST ] <target>:<Suite>`
+and `[ PASS ]` or `[ FAIL ] <target>:<Suite>` lines, where `<Suite>` is the
+camel-cased file name. Extract that range to read one suite's failures.
+
 Search logs first for these messages instead of reading them in full:
 
 ```text
@@ -241,6 +258,11 @@ Each property accepts `true` for a whole suite or an array of exact strings and
 regular expressions. Prefer exact subtest names. Use a regex only when it is
 narrow, anchored where practical, and checked against every intended name. Do
 not use broad regexes or whole-suite `true` merely to make a target pass.
+
+Subtest names generated from data files can contain non-BMP, combining, or
+visually identical characters, such as precomposed and decomposed Hangul. Take
+those names from the data file, not from terminal output, and write them with
+JavaScript escapes such as `\u{3F8CD}` so that the distinction stays visible.
 
 Every classification requires a `comment` describing the current technical
 reason. Source comments must describe current behavior, not the investigation
