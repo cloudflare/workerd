@@ -114,6 +114,12 @@ wd_cc_benchmark(
 )
 
 wd_cc_benchmark(
+    name = "bench-trace-scopes",
+    srcs = ["bench-trace-scopes.c++"],
+    deps = [":test-fixture"],
+)
+
+wd_cc_benchmark(
     name = "bench-regex",
     srcs = ["bench-regex.c++"],
     deps = [

@@ -569,6 +569,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return id;
   }
 
+  // Unobserved scopes retain only their context identity. This masks inherited spans while
+  // allowing accessors to fall back to the current request when a captured frame is foreign.
+  using TraceScopeState = kj::OneOf<Id, IoOwn<SpanParent>>;
+  using UserTraceScopeState = kj::OneOf<Id, IoOwn<UserTraceAsyncContext>>;
+
   void setEntrypointHandler(jsg::Lock& js, jsg::JsObject handler);
   jsg::JsObject getEntrypointHandler(jsg::Lock& js);
 
