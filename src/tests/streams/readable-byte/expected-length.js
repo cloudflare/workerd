@@ -140,6 +140,11 @@ const OVERFLOW = {
   message: 'byte source delivered more bytes than its declared expectedLength',
 };
 
+const UNDERFLOW = {
+  name: 'RangeError',
+  message: 'byte source closed before producing its declared expectedLength',
+};
+
 // Five bytes, one past an expectedLength of 4, through each way of
 // answering the byobRequest.
 const respondFive = {
@@ -184,17 +189,9 @@ export const byteSourceExpectedLengthContract = {
       const { controller, reader, read } = await pendingByobRead(4);
       controller.byobRequest.respond(2);
       if (usingTsImpl) {
-        const underflow =
-          'byte source closed before producing its declared expectedLength';
-        throws(() => controller.close(), {
-          name: 'RangeError',
-          message: underflow,
-        });
+        throws(() => controller.close(), UNDERFLOW);
         strictEqual((await read).value.byteLength, 2);
-        await rejects(reader.closed, {
-          name: 'RangeError',
-          message: underflow,
-        });
+        await rejects(reader.closed, UNDERFLOW);
       } else {
         controller.close();
         strictEqual((await read).value.byteLength, 2);
@@ -239,13 +236,34 @@ export const byteSourceExpectedLengthHeldRequest = {
     }
 
     // Exactly the declared total, then close(): parity.
-    const { controller, branches } = await teeWithHeldByobRequest(4);
-    controller.byobRequest.respond(4);
-    controller.close();
-    for (const branch of branches) {
-      const reader = branch.getReader();
-      strictEqual((await reader.read()).value.byteLength, 4);
-      strictEqual((await reader.read()).done, true);
+    {
+      const { controller, branches } = await teeWithHeldByobRequest(4);
+      controller.byobRequest.respond(4);
+      controller.close();
+      for (const branch of branches) {
+        const reader = branch.getReader();
+        strictEqual((await reader.read()).value.byteLength, 4);
+        strictEqual((await reader.read()).done, true);
+      }
+    }
+
+    // close() short of the declared total.
+    {
+      const { controller, branches } = await teeWithHeldByobRequest(4);
+      controller.byobRequest.respond(2);
+      if (usingTsImpl) {
+        throws(() => controller.close(), UNDERFLOW);
+        for (const branch of branches) {
+          await rejects(branch.getReader().read(), UNDERFLOW);
+        }
+      } else {
+        controller.close();
+        for (const branch of branches) {
+          const reader = branch.getReader();
+          strictEqual((await reader.read()).value.byteLength, 2);
+          strictEqual((await reader.read()).done, true);
+        }
+      }
     }
   },
 };
