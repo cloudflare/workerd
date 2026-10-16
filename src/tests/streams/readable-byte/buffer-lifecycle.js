@@ -4,12 +4,15 @@
 
 // Buffer ownership hazards at every stage of the BYOB cycle: detached
 // buffers, foreign buffers in respondWithNewView, resizable
-// ArrayBuffers, and non-detachable (WebAssembly.Memory, SharedArrayBuffer)
-// buffers. The BEHAVIOR is parity — only messages differ (the WPT
-// bad-buffers-and-views and non-transferable-buffers families) — except
-// for resizable buffers (ledger #30): TS transfers them to fixed length
-// (spec TransferArrayBuffer), while C++ can hand the source a resizable
-// byobRequest buffer and return resizable results.
+// ArrayBuffers, non-detachable (WebAssembly.Memory, SharedArrayBuffer)
+// buffers, and values that are not views. The BEHAVIOR is parity — only
+// messages differ (the WPT bad-buffers-and-views and
+// non-transferable-buffers families) — except for resizable buffers
+// (ledger #30): TS transfers them to fixed length (spec
+// TransferArrayBuffer), while C++ can hand the source a resizable
+// byobRequest buffer and return resizable results; and for a bare
+// ArrayBuffer at enqueue() and respondWithNewView(), which C++ accepts
+// (ledger #41).
 
 import { deepStrictEqual, strictEqual, throws, rejects } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -286,6 +289,93 @@ export const sharedBuffersRejected = {
             ),
           { name: 'TypeError', message: respondMessage }
         );
+      }
+    }
+  },
+};
+
+// A value that is not a view is rejected with TypeError by read(view),
+// readAtLeast(), enqueue() and respondWithNewView(), whose WebIDL
+// parameter is an ArrayBufferView. DIVERGENCE (ledger #41): C++ types the
+// chunk of enqueue() and the view of respondWithNewView() as a
+// BufferSource, so it takes a bare ArrayBuffer as a view over the whole
+// buffer: enqueue() detaches it and delivers its bytes, and
+// respondWithNewView() accepts one of the request's buffer length. TS
+// rejects it as any other non-view: the buffer stays attached, nothing is
+// enqueued, and the pending read is left for a later response.
+export const nonViewArgumentsRejected = {
+  async test() {
+    for (const value of ['x', {}, undefined, new ArrayBuffer(4)]) {
+      const { rs } = byteStream();
+      const reader = rs.getReader({ mode: 'byob' });
+      await rejects(reader.read(value), {
+        name: 'TypeError',
+        message: usingTsImpl
+          ? 'view must be an ArrayBufferView'
+          : "Failed to execute 'read' on 'ReadableStreamBYOBReader': parameter 1 is not of type 'ArrayBufferView'.",
+      });
+      await rejects(reader.readAtLeast(1, value), {
+        name: 'TypeError',
+        message: usingTsImpl
+          ? 'view must be an ArrayBufferView'
+          : "Failed to execute 'readAtLeast' on 'ReadableStreamBYOBReader': parameter 2 is not of type 'ArrayBufferView'.",
+      });
+    }
+    for (const value of ['x', {}, undefined]) {
+      const { rs, controller } = byteStream();
+      throws(() => controller().enqueue(value), {
+        name: 'TypeError',
+        message: usingTsImpl
+          ? 'chunk must be an ArrayBufferView'
+          : "Failed to execute 'enqueue' on 'ReadableByteStreamController': parameter 1 is not of type 'BufferSource'.",
+      });
+      const reader = rs.getReader({ mode: 'byob' });
+      const read = reader.read(new Uint8Array(4));
+      await scheduler.wait(5);
+      throws(() => controller().byobRequest.respondWithNewView(value), {
+        name: 'TypeError',
+        message: usingTsImpl
+          ? 'view must be an ArrayBufferView'
+          : "Failed to execute 'respondWithNewView' on 'ReadableStreamBYOBRequest': parameter 1 is not of type 'BufferSource'.",
+      });
+      controller().enqueue(new Uint8Array([5]));
+      deepStrictEqual([...(await read).value], [5]);
+    }
+
+    {
+      const { rs, controller } = byteStream();
+      const buffer = new Uint8Array([1, 2, 3]).buffer;
+      if (usingTsImpl) {
+        throws(() => controller().enqueue(buffer), {
+          name: 'TypeError',
+          message: 'chunk must be an ArrayBufferView',
+        });
+        strictEqual(buffer.detached, false);
+        controller().close();
+        strictEqual((await rs.getReader().read()).done, true);
+      } else {
+        controller().enqueue(buffer);
+        strictEqual(buffer.detached, true);
+        deepStrictEqual([...(await rs.getReader().read()).value], [1, 2, 3]);
+      }
+    }
+    {
+      const { rs, controller } = byteStream();
+      const read = rs.getReader({ mode: 'byob' }).read(new Uint8Array(4));
+      await scheduler.wait(5);
+      const buffer = new Uint8Array([9, 8, 7, 6]).buffer;
+      if (usingTsImpl) {
+        throws(() => controller().byobRequest.respondWithNewView(buffer), {
+          name: 'TypeError',
+          message: 'view must be an ArrayBufferView',
+        });
+        strictEqual(buffer.detached, false);
+        controller().enqueue(new Uint8Array([5]));
+        deepStrictEqual([...(await read).value], [5]);
+      } else {
+        controller().byobRequest.respondWithNewView(buffer);
+        strictEqual(buffer.detached, true);
+        deepStrictEqual([...(await read).value], [9, 8, 7, 6]);
       }
     }
   },

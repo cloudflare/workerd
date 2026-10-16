@@ -217,6 +217,7 @@ export {
   resizableByobRequestCannotShrink,
   resizableBuffersDeliveredFixedLength,
   sharedBuffersRejected,
+  nonViewArgumentsRejected,
   nonDetachableBuffersRejected,
 } from 'buffer-lifecycle';
 
