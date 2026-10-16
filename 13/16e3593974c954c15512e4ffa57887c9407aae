@@ -1,0 +1,21 @@
+src/workerd/io/io-context.c++
+  s_9e291bb5d844d4::t_d9ce286aab4917 1851,1854-1862,1867-1871,1873-1876
+src/workerd/io/io-own-test.c++
+  s_9e291bb5d844d4::t_4ee8cc45e61b98 264-286
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1316e3593974c954c15512e4ffa57887c9407aae",
+  "prompts": {},
+  "sessions": {
+    "s_9e291bb5d844d4": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ec5fadbe7ffe5kOVAieds3erCS",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Joaquim Silva <joaquim@cloudflare.com>"
+    }
+  }
+}
