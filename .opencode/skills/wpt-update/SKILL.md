@@ -42,6 +42,18 @@ its intent. If you add, remove, or rename a patch, update the patch list and
 regenerate `build/deps/gen/shared_deps.MODULE.bazel` with
 `./build/deps/update-deps.py wpt`, which keeps the pinned `freeze_version`.
 
+Bazel deletes the extracted repository when a patch fails, but the archive
+remains in the repository cache at
+`$(bazel info repository_cache)/content_addressable/sha256/<sha256>/file`,
+using the `sha256` values from the old and new dependency metadata. Extract the
+old and new archives into separate empty directories under `$TMPDIR` to rebase
+patches and to compare the mapped WPT directories with `diff -rq`.
+
+The `serve` patch keeps `tools/serve/commands.json` from requesting a
+virtualenv. `tools/wpt/wpt.py` asserts that any command declaring
+`requirements` or `conditional_requirements` uses a virtualenv, so the patch
+must also remove any such keys that upstream adds to the `serve` entry.
+
 Describe each patch change and the upstream commit that required it in the
 final report.
 
@@ -238,7 +250,10 @@ missing.
   coverage.
 
 Each property accepts `true` for a whole suite or an array of exact strings and
-regular expressions. Prefer exact subtest names. Use a regex only when it is
+regular expressions. Prefer exact subtest names. Copy non-ASCII names with
+`\u` escapes when they contain decomposed or otherwise non-NFC text, because
+copying them through a terminal or editor can normalize them into different
+strings. Use a regex only when it is
 narrow, anchored where practical, and checked against every intended name. Do
 not use broad regexes or whole-suite `true` merely to make a target pass.
 
@@ -270,6 +285,9 @@ Before completion:
 python3 tools/cross/format.py --check git
 git diff --check
 ```
+
+Running `python3 tools/cross/format.py git` without `--check` applies the
+formatting to the reported files. Rerun the affected targets afterwards.
 
 ### Continuous improvement
 
