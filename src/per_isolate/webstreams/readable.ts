@@ -1359,20 +1359,6 @@ function getNonEmptyUnsharedViewInfo(view: unknown, what: string): ViewInfo {
   return info;
 }
 
-// A chunk enqueued into a byte stream, validated at the enqueue() trust
-// boundary and normalized: the returned triple references the TRANSFERRED
-// buffer; the caller's view is detached. All byte-stream transfers are to
-// fixed length (spec TransferArrayBuffer), so a source cannot shrink a
-// buffer we hold.
-function validateAndTransferView(view: ArrayBufferView): ByteQueueEntry {
-  const info = getNonEmptyUnsharedViewInfo(view, 'chunk');
-  return {
-    buffer: ArrayBufferPrototypeTransferToFixedLength(info.buffer),
-    byteOffset: info.byteOffset,
-    byteLength: info.byteLength,
-  };
-}
-
 interface SourceAlgorithms {
   pull: (() => Promise<void>) | undefined;
   cancel: ((reason: unknown) => Promise<void>) | undefined;
@@ -2031,10 +2017,11 @@ class ReadableStreamBYOBRequest implements ReadableStreamBYOBRequestType {
 
   respondWithNewView(view: ArrayBufferView): void {
     assertIsReadableStreamBYOBRequest(this);
+    // WebIDL converts the view before the method steps run.
+    const info = getUnsharedViewInfo(view, 'view');
     if (this.#controller === null) {
       throw new TypeError('This BYOB request has been invalidated');
     }
-    const info = getUnsharedViewInfo(view, 'view');
     // Spec step 2: detached buffers are TypeError, not RangeError.
     if (ArrayBufferPrototypeDetachedGet(info.buffer)) {
       throw new TypeError("The view's buffer has been detached");
@@ -2278,15 +2265,23 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
   // and pull is not called (byteControllerEnqueueBatch does both with its
   // last chunk).
   #enqueueChunk(chunk: ArrayBufferView, notify: boolean): void {
+    // Trust boundary: snapshot metadata via captured getters and validate:
+    // WebIDL's conversion and spec steps 1-2 come before the state checks.
+    const info = getNonEmptyUnsharedViewInfo(chunk, 'chunk');
     if (!this.#core.canCloseOrEnqueue()) {
       throw new TypeError(
         'Cannot enqueue a chunk into a stream that is closed or closing'
       );
     }
-    // Trust boundary: snapshot metadata via captured getters, validate,
-    // transfer the backing buffer, normalize to a {buffer, byteOffset,
-    // byteLength} triple. Queue internals never touch the user's view.
-    const entry = validateAndTransferView(chunk);
+    // Transfer the backing buffer and normalize to a {buffer, byteOffset,
+    // byteLength} triple; queue internals never touch the user's view,
+    // which is now detached. The transfer is to fixed length (spec
+    // TransferArrayBuffer), so a source cannot shrink a buffer we hold.
+    const entry: ByteQueueEntry = {
+      buffer: ArrayBufferPrototypeTransferToFixedLength(info.buffer),
+      byteOffset: info.byteOffset,
+      byteLength: info.byteLength,
+    };
     // EXPECTED-LENGTH CONTRACT: overflow check before the entry reaches
     // the queue. (The buffer was already transferred above — a refused
     // overflow chunk's buffer is detached. Contract violators lose the

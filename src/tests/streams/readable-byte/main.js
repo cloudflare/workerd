@@ -218,6 +218,7 @@ export {
   resizableBuffersDeliveredFixedLength,
   sharedBuffersRejected,
   nonViewArgumentsRejected,
+  viewConvertedBeforeMethodSteps,
   nonDetachableBuffersRejected,
 } from 'buffer-lifecycle';
 

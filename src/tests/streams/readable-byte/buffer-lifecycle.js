@@ -381,6 +381,46 @@ export const nonViewArgumentsRejected = {
   },
 };
 
+// WebIDL converts a method's arguments before its steps run, so a value
+// that is not a view fails as such at respondWithNewView() on an
+// invalidated request, and at enqueue() once the stream has closed or
+// errored; so does a zero-length chunk, which enqueue() checks (spec steps
+// 1-2) before the stream's state. Parity, messages aside.
+export const viewConvertedBeforeMethodSteps = {
+  async test() {
+    const { rs, controller } = byteStream();
+    const read = rs.getReader({ mode: 'byob' }).read(new Uint8Array(4));
+    await scheduler.wait(5);
+    const request = controller().byobRequest;
+    request.view[0] = 1;
+    request.respond(1);
+    await read;
+    throws(() => request.respondWithNewView('x'), {
+      name: 'TypeError',
+      message: usingTsImpl
+        ? 'view must be an ArrayBufferView'
+        : "Failed to execute 'respondWithNewView' on 'ReadableStreamBYOBRequest': parameter 1 is not of type 'BufferSource'.",
+    });
+
+    for (const end of [(c) => c.close(), (c) => c.error(new Error('boom'))]) {
+      const { controller } = byteStream();
+      end(controller());
+      throws(() => controller().enqueue('x'), {
+        name: 'TypeError',
+        message: usingTsImpl
+          ? 'chunk must be an ArrayBufferView'
+          : "Failed to execute 'enqueue' on 'ReadableByteStreamController': parameter 1 is not of type 'BufferSource'.",
+      });
+      throws(() => controller().enqueue(new Uint8Array(0)), {
+        name: 'TypeError',
+        message: usingTsImpl
+          ? 'chunk must have a non-zero byteLength'
+          : 'Cannot enqueue a zero-length ArrayBuffer.',
+      });
+    }
+  },
+};
+
 // Non-detachable buffers (WebAssembly.Memory) are rejected with
 // TypeError from both enqueue() and read(view).
 export const nonDetachableBuffersRejected = {
