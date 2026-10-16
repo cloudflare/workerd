@@ -1349,17 +1349,16 @@ function getUnsharedViewInfo(view: unknown, what: string): ViewInfo {
 }
 
 // getUnsharedViewInfo() for a view that must hold bytes (spec read(view)
-// steps 1-3, enqueue() steps 1-2): a zero-length view, or a view over a
-// zero-length buffer, throws.
+// steps 1-3, enqueue() steps 1-2): a zero-length view throws. The spec
+// also checks that the view's buffer is neither zero-length nor detached,
+// because a view's [[ByteLength]] slot keeps its value once the buffer is
+// detached. Here the byteLength getters read 0 for a detached or
+// out-of-bounds typed array (a DataView's throw), and a view that holds
+// bytes lies within its buffer, so those checks cannot fail.
 function getNonEmptyUnsharedViewInfo(view: unknown, what: string): ViewInfo {
   const info = getUnsharedViewInfo(view, what);
   if (info.byteLength === 0) {
     throw new TypeError(`${what} must have a non-zero byteLength`);
-  }
-  if (ArrayBufferPrototypeByteLengthGet(info.buffer) === 0) {
-    throw new TypeError(
-      `${what}'s backing buffer must have a non-zero byteLength`
-    );
   }
   return info;
 }
