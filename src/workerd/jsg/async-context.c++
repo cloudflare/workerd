@@ -24,7 +24,10 @@ inline void maybeSetV8ContinuationContext(
 }
 }  // namespace
 
-AsyncContextFrame::AsyncContextFrame(Lock& js, StorageEntry storageEntry) {
+AsyncContextFrame::AsyncContextFrame(Lock& js, StorageEntry storageEntry)
+    : AsyncContextFrame(js, kj::arrayPtr(&storageEntry, 1)) {}
+
+AsyncContextFrame::AsyncContextFrame(Lock& js, kj::ArrayPtr<StorageEntry> storageEntries) {
   KJ_IF_SOME(frame, current(js)) {
     // Propagate the storage context of the current frame (if any).
     // If current(js) returns nullptr, we assume we're in the root
@@ -35,13 +38,12 @@ AsyncContextFrame::AsyncContextFrame(Lock& js, StorageEntry storageEntry) {
     }
   }
 
-  // This case is extremely unlikely to happen but let's handle it anyway
-  // just out of an excess of caution.
-  if (storageEntry.key->isDead()) return;
-
-  storage.upsert(kj::mv(storageEntry), [](StorageEntry& existing, StorageEntry&& row) mutable {
-    existing.value = kj::mv(row.value);
-  });
+  for (auto& entry: storageEntries) {
+    if (entry.key->isDead()) continue;
+    storage.upsert(kj::mv(entry), [](StorageEntry& existing, StorageEntry&& row) mutable {
+      existing.value = kj::mv(row.value);
+    });
+  }
 }
 
 AsyncContextFrame::StorageEntry::StorageEntry(kj::Arc<StorageKey> key, Value value)
@@ -76,6 +78,11 @@ kj::Maybe<AsyncContextFrame&> AsyncContextFrame::current(v8::Isolate* isolate) {
 
 Ref<AsyncContextFrame> AsyncContextFrame::create(Lock& js, StorageEntry storageEntry) {
   return js.alloc<AsyncContextFrame>(js, kj::mv(storageEntry));
+}
+
+Ref<AsyncContextFrame> AsyncContextFrame::create(
+    Lock& js, kj::ArrayPtr<StorageEntry> storageEntries) {
+  return js.alloc<AsyncContextFrame>(js, storageEntries);
 }
 
 v8::Local<v8::Function> AsyncContextFrame::wrap(Lock& js,
@@ -177,6 +184,10 @@ AsyncContextFrame::Scope::~Scope() noexcept(false) {
 
 AsyncContextFrame::StorageScope::StorageScope(Lock& js, kj::Arc<StorageKey> key, Value store)
     : frame(AsyncContextFrame::create(js, StorageEntry(kj::mv(key), kj::mv(store)))),
+      scope(js, *frame) {}
+
+AsyncContextFrame::StorageScope::StorageScope(Lock& js, kj::ArrayPtr<StorageEntry> storageEntries)
+    : frame(AsyncContextFrame::create(js, storageEntries)),
       scope(js, *frame) {}
 
 v8::Local<v8::Object> AsyncContextFrame::getJSWrapper(v8::Isolate* isolate) {

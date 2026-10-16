@@ -1203,6 +1203,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   jsg::AsyncContextFrame::StorageScope makeUserAsyncTraceScope(
       Worker::Lock& lock, kj::Maybe<SpanParent> userSpan = kj::none) KJ_WARN_UNUSED_RESULT;
 
+  // Captures the request's internal and user tracing contexts in a single async frame.
+  jsg::AsyncContextFrame::StorageScope makeRequestTraceScope(
+      Worker::Lock& lock) KJ_WARN_UNUSED_RESULT;
+
   // Returns the current span being recorded.  If called while the JS lock is held, uses the trace
   // information from the current async context, if available.
   SpanParent getCurrentTraceSpan();
@@ -1248,6 +1252,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   void pumpMessageLoop();
 
  private:
+  jsg::Value makeTraceScopeValue(Worker::Lock& lock, kj::Maybe<SpanParent> spanParentOverride);
+  jsg::Value makeUserTraceScopeValue(Worker::Lock& lock, kj::Maybe<SpanParent> userSpanOverride);
+
   ThreadContext& thread;
 
   kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<IoContext>(), *this);
