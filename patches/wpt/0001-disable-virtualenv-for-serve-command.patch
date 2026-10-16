@@ -1,10 +1,11 @@
 --- a/tools/serve/commands.json
 +++ b/tools/serve/commands.json
-@@ -4,17 +4,7 @@
+@@ -4,18 +4,7 @@
      "script": "run",
      "parser": "get_parser",
      "help": "Run wptserve server",
 -    "virtualenv": true,
+-    "requirements": ["requirements.txt"],
 -    "conditional_requirements": {
 -      "commandline_flag": {
 -        "webtransport_h3": [
