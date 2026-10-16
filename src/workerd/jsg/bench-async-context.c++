@@ -39,31 +39,6 @@ void withTraceScopes(Lock& js,
   }
 }
 
-#ifdef WD_USE_TCMALLOC
-// Collect allocation samples separately so profiling does not affect the timing measurements.
-template <typename Callback>
-void recordAllocationStats(benchmark::State& state, Callback&& callback) {
-  auto samplingInterval = tcmalloc::MallocExtension::GetProfileSamplingInterval();
-  tcmalloc::MallocExtension::SetProfileSamplingInterval(1);
-  KJ_DEFER(tcmalloc::MallocExtension::SetProfileSamplingInterval(samplingInterval));
-  callback();
-  auto token = tcmalloc::MallocExtension::StartAllocationProfiling();
-  constexpr uint SAMPLES = 128;
-  for (uint i = 0; i < SAMPLES; ++i) {
-    callback();
-  }
-  auto profile = kj::mv(token).Stop();
-  int64_t bytes = 0;
-  int64_t allocations = 0;
-  profile.Iterate([&](const tcmalloc::Profile::Sample& sample) {
-    bytes += sample.sum;
-    allocations += sample.count;
-  });
-  state.counters["native_bytes/op"] = static_cast<double>(bytes) / SAMPLES;
-  state.counters["native_allocs/op"] = static_cast<double>(allocations) / SAMPLES;
-}
-#endif
-
 template <ScopeLayout layout>
 void traceScopes(benchmark::State& state) {
   Evaluator<AsyncContextBenchmarkContext, AsyncContextBenchmarkIsolate> evaluator(v8System);
@@ -87,9 +62,7 @@ void traceScopes(benchmark::State& state) {
     for (auto _: state) {
       run();
     }
-#ifdef WD_USE_TCMALLOC
-    recordAllocationStats(state, run);
-#endif
+    bench::recordAllocationStats(state, run);
   });
   state.SetItemsProcessed(state.iterations());
 }
