@@ -164,7 +164,7 @@ const {
 
 const { isArrayBufferView, isUint8Array, markPromiseHandled } = utils;
 
-const { isActualObject, normalizeExpectedLength } =
+const { isActualObject, normalizeExpectedLength, convertCallback } =
   require('webstreams/common') as CommonHelpers;
 const { viewByteExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
@@ -1238,25 +1238,22 @@ function createNativeReadableStreamParts(
     throw new TypeError('Native stream sources must not declare type');
   }
   const {
-    cancel: cancelFn,
+    cancel,
     expectedLength: rawExpectedLength,
-    pull: pullFn,
-    tee: teeFn,
+    pull,
+    tee,
   } = source as {
-    cancel?: unknown;
+    cancel?: (reason: unknown) => void | PromiseLike<void>;
     expectedLength?: unknown;
-    pull?: unknown;
-    tee?: unknown;
+    pull?: (
+      controller: NativeReadableStreamController,
+      signal: AbortSignal
+    ) => void | PromiseLike<void>;
+    tee?: () => unknown;
   };
-  if (cancelFn !== undefined && typeof cancelFn !== 'function') {
-    throw new TypeError('underlyingSource.cancel must be a function');
-  }
-  if (pullFn !== undefined && typeof pullFn !== 'function') {
-    throw new TypeError('underlyingSource.pull must be a function');
-  }
-  if (teeFn !== undefined && typeof teeFn !== 'function') {
-    throw new TypeError('underlyingSource.tee must be a function');
-  }
+  const cancelFn = convertCallback(cancel, 'underlyingSource.cancel');
+  const pullFn = convertCallback(pull, 'underlyingSource.pull');
+  const teeFn = convertCallback(tee, 'underlyingSource.tee');
   // Non-standard extension: the TOTAL bytes this source promises to
   // produce. Read once here and cached; the conduit enforces the
   // contract (overflow at delivery, underflow at source-initiated

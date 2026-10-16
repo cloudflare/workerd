@@ -43,6 +43,7 @@ const {
   kNullProtoObject,
   kEnumerable,
   toStringTagProperty,
+  promiseResolvedWith,
   requireObject,
   convertQueuingStrategy,
   convertTransformer,
@@ -87,13 +88,6 @@ const writableControllerError = uncurryThis(
   WritableStreamDefaultController.prototype.error
 ) as (controller: object, reason: unknown) => void;
 
-// The transformer's cancel and flush results are settled in a new promise
-// (see promiseResolvedWith in writable.ts); that timing decides whether a
-// same-turn error has reached the other side when they settle.
-const promiseResolvedWith = writableInternals.promiseResolvedWith as (
-  value: unknown
-) => Promise<void>;
-
 interface TransformerAlgorithms<I> {
   transform: ((chunk: I) => Promise<void>) | undefined;
   flush: (() => Promise<void>) | undefined;
@@ -104,7 +98,10 @@ interface TransformerAlgorithms<I> {
 // outside the TransformStream constructor so that `transformer` is captured
 // only by these closures, not by the constructor's shared context (which
 // every closure the constructor creates keeps alive): once ClearAlgorithms
-// drops them, the transformer is collectable.
+// drops them, the transformer is collectable. cancel and flush settle the
+// transformer's results in a new promise (promiseResolvedWith); that timing
+// decides whether a same-turn error has reached the other side when they
+// settle.
 function makeTransformerAlgorithms<I, O>(
   transformer: Transformer<I, O>,
   controller: TransformStreamDefaultController<I, O>,

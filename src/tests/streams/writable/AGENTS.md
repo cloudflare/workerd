@@ -88,6 +88,7 @@ promises (they resolve with undefined).
 | `workers_api_getters_setters_on_prototype`, `set_tostring_tag` | yes | generic placement/branding; identity suite legacy cell |
 | `internal_writable_stream_abort_clears_queue` (2024-09-02) | NOT pinned | internal-impl only (`internal.c++`); unreachable from JS-backed WritableStream |
 | `pedantic_wpt` (dateless opt-in) | `writable-cpp-pedantic` cell | flag-off sides are the C++ columns of ledger #2/#10/#11 |
+| `enable_weak_ref` | yes, in every cell running the shared modules | none needed: it exposes `WeakRef`, which `gc.js` uses, and changes no streams behavior |
 
 ## Assertion catalogue
 
@@ -104,7 +105,7 @@ promises (they resolve with undefined).
 | `backpressure.js` | desiredSize accounting/recovery; ready replaced at capacity; WPT floating-point scenarios and invalid sizes, incl. after close() (#9); erroring desiredSize (#11) |
 | `reentrancy.js` | size()-reentrant write ordering; releaseLock inside size (#12; flag-gated, cf. legacy-writer); controller.error inside write hook; doomed-write size skip; size receiver/arity; size() consulted for a write from inside sink.close() (#15) and sink.abort() |
 | `then-interceptors.js` | then-getter never fires on writer promise settlement |
-| `gc.js` | pending write survives gc() with all user refs dropped (--expose-gc) |
+| `gc.js` | pending write survives gc() with all user refs dropped (--expose-gc); a stream that has closed, been aborted or errored (by its controller, or by a rejected write) releases its underlying sink, at once when its controller errors it while start() is still pending, while an open one keeps it (WeakRef-checked; parity) |
 | `legacy-ctor-gate.js` | fully-unflagged: ctor Error + absent controller global |
 | `legacy-writer.js` | pre-flag writer semantics (see Compatibility flags) |
 | `data-volumes.js` | write-side volumes: 4096 × 16 B writes, single 1 MiB write, 1 MiB / 8 MiB chunked with writer.ready honored; the sink verifies the continuous prime-modulus pattern as chunks arrive |
