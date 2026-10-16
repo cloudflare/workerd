@@ -47,6 +47,15 @@ wd_test(
 )
 
 wd_test(
+    src = "do-on-evict-symbol-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "do-on-evict-symbol-test.js",
+        "do-on-evict-symbol-unflagged-test.js",
+    ],
+)
+
+wd_test(
     src = "retryable-test.wd-test",
     data = ["retryable-test.js"],
 )

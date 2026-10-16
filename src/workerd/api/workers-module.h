@@ -101,6 +101,7 @@ class EntrypointsModule: public jsg::Object {
   void retryable(jsg::Lock& js, jsg::Arguments<jsg::Value> methods);
 
   jsg::JsSymbol getRestoreSymbol(jsg::Lock& js);
+  jsg::JsSymbol getOnEvictSymbol(jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(EntrypointsModule, CompatibilityFlags::Reader flags) {
     JSG_NESTED_TYPE(WorkerEntrypoint);
@@ -118,6 +119,11 @@ class EntrypointsModule: public jsg::Object {
     JSG_LAZY_INSTANCE_PROPERTY(restore, getRestoreSymbol);
     JSG_METHOD(abortIsolate);
     JSG_METHOD(retryable);
+    // Experimental until the runtime delivers the hook, so that no one can define a handler that
+    // never runs.
+    if (flags.getWorkerdExperimental()) {
+      JSG_LAZY_INSTANCE_PROPERTY(onEvict, getOnEvictSymbol);
+    }
   }
 };
 
