@@ -77,6 +77,10 @@ const WeakSetCtor = WeakSet;
 
 // Function
 const FunctionPrototypeBind = uncurryThis(FunctionPrototype.bind);
+const FunctionPrototypeCall = uncurryThis(FunctionPrototype.call);
+
+// Date
+const DateNow = Date.now;
 
 // Object
 const ObjectCreate = Object.create;
@@ -699,6 +703,10 @@ module.exports = ObjectFreeze({
   // Function
   FunctionPrototype,
   FunctionPrototypeBind,
+  FunctionPrototypeCall,
+
+  // Date
+  DateNow,
 
   // Object
   ObjectPrototype,

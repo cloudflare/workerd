@@ -23,7 +23,8 @@ at context creation, before any user code. Gated by the
 - `main.ts` installs the real stream globals (ReadableStream et al.) when
   the `typescript_implemented_streams` compat flag is enabled, plus the
   internal-testing `ReadableStreamDrainingReader` under
-  `expose_draining_reader`.
+  `expose_draining_reader`; and `Event`, `CustomEvent` and `EventTarget`
+  (`events/`) under `typescript_implemented_events`.
 - Files are auto-discovered (`BUILD.bazel` and `tsconfig.json` both glob
   `**/*.ts`). No registration needed for new files.
 - Local convention: no copyright headers in this directory's bootstrap
@@ -46,8 +47,8 @@ at context creation, before any user code. Gated by the
   The bootstrap runs for every worker regardless of compat date — both layouts
   must work. JSG *methods* are always on the prototype.
 - Internal cross-module surfaces are exported as a single namespace
-  object (`internalsForPipe`, `nativeStreamInternals`), never
-  re-exported to users.
+  object (`internalsForPipe`, `nativeStreamInternals`, `eventInternals`),
+  never re-exported to users.
 - Internal class dispatch uses private-brand `in` checks, NEVER
   `instanceof` (classes reachable from the global have user-reachable
   `Symbol.hasInstance`).
@@ -220,4 +221,4 @@ to prevent accidental mutation by downstream bootstrap scripts.
 - **NEVER** add a runtime require cycle between bootstrap scripts.
 
 See also `webstreams/AGENTS.md` for streams-specific architecture and
-anti-patterns.
+anti-patterns, and `events/AGENTS.md` for the events classes.

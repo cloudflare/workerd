@@ -1,0 +1,37 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The Event suite runs the same test modules under three configs: event-cpp
+# against the C++ implementation, event-cpp-pedantic against it with
+# pedantic_wpt, and event-ts against the TypeScript implementation.
+# event-cpp-legacy guards the C++ behaviors without the date-gated flags.
+
+event_suite_srcs = glob(["*.js"]) + ["event-modules.capnp"]
+
+wd_test(
+    size = "large",
+    src = "event-cpp.wd-test",
+    data = event_suite_srcs,
+)
+
+wd_test(
+    size = "large",
+    src = "event-cpp-pedantic.wd-test",
+    data = event_suite_srcs,
+)
+
+wd_test(
+    size = "large",
+    src = "event-ts.wd-test",
+    args = ["--experimental"],
+    data = event_suite_srcs,
+)
+
+# Legacy (pre-flag) regression guard, C++ implementation only. The
+# @all-compat-flags variant is disabled: at the 2999-12-31 date the flags
+# the cell deliberately omits would all turn on.
+wd_test(
+    size = "large",
+    src = "event-cpp-legacy.wd-test",
+    data = event_suite_srcs,
+    generate_all_compat_flags_variant = False,
+)

@@ -1717,4 +1717,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # the origin's Cache-Control (for example, an origin `no-store` gets cached as `no-cache`). When
   # enabled, the cache option no longer sets `cf.cacheControl`. To override the origin's
   # Cache-Control, omit the `cache` option and use `cf.cacheControl` instead.
+
+  typeScriptImplementedEvents @195 :Bool
+      $compatEnableFlag("typescript_implemented_events")
+      $experimental;
+  # When enabled, the per-isolate bootstrap installs TypeScript implementations of Event,
+  # CustomEvent and EventTarget as globals (src/per_isolate/events/). Events created by the
+  # runtime, AbortSignal, the global scope and the other built-in event targets still use the
+  # C++ classes.
 }
