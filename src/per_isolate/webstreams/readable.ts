@@ -1954,7 +1954,7 @@ let byteControllerRespond: (
 ) => void;
 let byteControllerRespondWithNewView: (
   controller: ReadableByteStreamController,
-  view: ArrayBufferView
+  info: ViewInfo
 ) => void;
 // The queued byte controller's autoAllocateChunkSize; undefined for any
 // other controller.
@@ -2044,7 +2044,7 @@ class ReadableStreamBYOBRequest implements ReadableStreamBYOBRequestType {
     if (ArrayBufferPrototypeDetachedGet(info.buffer)) {
       throw new TypeError("The view's buffer has been detached");
     }
-    byteControllerRespondWithNewView(this.#controller, view);
+    byteControllerRespondWithNewView(this.#controller, info);
   }
 }
 
@@ -2121,8 +2121,8 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
       controller.#respond(bytesWritten);
     };
 
-    byteControllerRespondWithNewView = (controller, view) => {
-      controller.#respondWithNewView(view);
+    byteControllerRespondWithNewView = (controller, info) => {
+      controller.#respondWithNewView(info);
     };
 
     getByteControllerAutoAllocateChunkSize = (controller) => {
@@ -2495,8 +2495,9 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     this.#bytesDelivered = delivered;
   }
 
-  // byobRequest.respondWithNewView(view).
-  #respondWithNewView(view: ArrayBufferView): void {
+  // byobRequest.respondWithNewView(view), given the metadata the request
+  // read from the view at its trust boundary (getUnsharedViewInfo).
+  #respondWithNewView(info: ViewInfo): void {
     const released = this.#releasedHead;
     const cursor =
       released === undefined
@@ -2506,7 +2507,6 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     if (head === undefined) {
       throw new TypeError('No pending BYOB request');
     }
-    const info = getViewInfo(view);
     const state = getReadableStreamGetState(this.#stream);
     if (state === 'closed') {
       if (info.byteLength !== 0) {
