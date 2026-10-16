@@ -18,6 +18,22 @@ src/rust/cxx/kj-rs/waker.rs
         "model": "claude-fable-5-1"
       },
       "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_bc1ce62da9d11e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-ad5470e1322dfd218",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
     }
   }
 }

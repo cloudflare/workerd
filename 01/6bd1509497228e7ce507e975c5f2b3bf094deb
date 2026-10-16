@@ -1,0 +1,97 @@
+patches/rust/crates/http-kj-lenient-header-values.patch
+  s_dadaf0660bfcbe::t_575df52a7332d6 1-17
+src/rust/cxx/AGENTS.md
+  s_dadaf0660bfcbe::t_8892d599d8d796 39-43,108-165
+src/rust/cxx/kj-hyper/io.rs
+  s_dadaf0660bfcbe::t_aade71740f2e9f 1-532
+patches/rust/crates/hyper-client-lazy-response-body.patch
+  s_dadaf0660bfcbe::t_6ca0b43c880d36 1-16
+src/rust/cxx/kj-hyper/starttls.rs
+  s_dadaf0660bfcbe::t_0c4507e725e4fc 1-245
+src/rust/cxx/kj-rs-io/async-io.h
+  s_dadaf0660bfcbe::t_3ca790d6c9322e 40,85-94,98-102
+patches/rust/BUILD.bazel
+  s_dadaf0660bfcbe::t_bb0968a8a78c0d 1-3
+patches/rust/crates/hyper-public-header-case-map.patch
+  s_dadaf0660bfcbe::t_2a60c9d4f80935 1-43
+src/rust/kj/ffi.h
+  s_dadaf0660bfcbe::t_25699a4c9c63e1 31-39,47-50,151,161-165
+deps/rust/Cargo.lock
+  s_b63afcce9fec5b::t_9a8565bf145b22 89-94,117-122,327-336,364-385,459-481,520,535-538,547,550-552,557,565-566,569,671-676,846-857,866,925-998,1166-1214,1469-1474,1544,1655-1660,1680-1691,1701-1711,1723-1731,1761-1774,1852-1924,1946-1954,1973-1995,2112-2121,2162-2171,2195-2200,2630-2645,2687-2692,2745,2748-2753,2804-2812,2819-2827,2873-2881,2897-2905,2912,2924-2939,2947-2954,2957-2962,2969-2974,2981-2986,2993-2998,3005-3010,3017-3022,3029-3034,3041-3046,3053-3058,3074-3084,3149-3154
+src/rust/cxx/kj-hyper/handshake.rs
+  s_dadaf0660bfcbe::t_32bb1eed7ea55b 1-56
+src/rust/cxx/kj-hyper/lib.rs
+  s_dadaf0660bfcbe::t_645fc589db95bd 1-50
+patches/rust/crates/httparse-kj-lenient-header-values.patch
+  s_dadaf0660bfcbe::t_f7ad2ebddd7b54 1-29
+src/rust/cxx/kj-hyper/kj-hyper.c++
+  s_dadaf0660bfcbe::t_5bf37ca092e08d 1-410
+build/deps/rust.MODULE.bazel
+  s_dadaf0660bfcbe::t_142701010609b3 61-96
+src/rust/cxx/kj-rs-io/async-io.c++
+  s_dadaf0660bfcbe::t_b2799a87cd87f8 283-284,288-289,302,306,310,314,318,322,329,335
+src/rust/cxx/kj-hyper/ffi.rs
+  s_dadaf0660bfcbe::t_7aed1ec728e6a6 1-403
+src/rust/cxx/kj-hyper/kj-hyper.h
+  s_dadaf0660bfcbe::t_ac50a041e7dfa1 1-78
+src/rust/cxx/kj-rs-io/lib.rs
+  s_dadaf0660bfcbe::t_bcbd9a42d69693 138
+src/rust/cxx/kj-hyper/tests/BUILD.bazel
+  s_dadaf0660bfcbe::t_269c7a3f288758 1-59
+src/rust/cxx/kj-hyper/tests/lib.rs
+  s_dadaf0660bfcbe::t_263cc9644c2b34 1-117
+src/rust/kj/http.rs
+  s_dadaf0660bfcbe::t_49f0776a2277fd 99,134-135,145-149,212,220-227,383-391
+deps/rust/Cargo.toml
+  s_dadaf0660bfcbe::t_68e43ab0269de9 35-37,50-55,63-66,69-74,79,84-85
+src/rust/AGENTS.md
+  s_dadaf0660bfcbe::t_054ce6e9a2511b 24
+deps/rust/BUILD.bazel
+  s_dadaf0660bfcbe::t_da760c7d7e4c55 14-21
+src/rust/cxx/kj-hyper/client.rs
+  s_dadaf0660bfcbe::t_9f5b452dcd159b 1-806
+src/rust/cxx/kj-hyper/BUILD.bazel
+  s_dadaf0660bfcbe::t_1b1a4fd2e3b169 1-89
+src/rust/cxx/kj-hyper/tls.rs
+  s_dadaf0660bfcbe::t_90560f00ac452a 1-880
+src/rust/cxx/kj-rs-io/stream.rs
+  s_dadaf0660bfcbe::t_2d8ccbad564afe 59,97-100,394-399,417-446,809-835
+src/rust/cxx/kj-hyper/tests/kj-hyper-test.c++
+  s_dadaf0660bfcbe::t_8bb42226154d93 1-1189
+patches/rust/crates/hyper-graceful-shutdown-partial-request.patch
+  s_dadaf0660bfcbe::t_9b65790d535853 1-13
+src/rust/cxx/kj-hyper/tests/test-helpers.h
+  s_dadaf0660bfcbe::t_2b5ac3f51b595b 1-17
+src/rust/cxx/kj-hyper/tests/harness.rs
+  s_dadaf0660bfcbe::t_4a62ae6562625a 1-402
+src/rust/kj/io.rs
+  s_dadaf0660bfcbe::t_53919e0914013f 25-32,45-61
+src/rust/cxx/kj-hyper/body.rs
+  s_dadaf0660bfcbe::t_404cce0bb9ef8f 1-443
+src/rust/cxx/kj-hyper/server.rs
+  s_dadaf0660bfcbe::t_4914b7b4af3198 1-958
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "016bd1509497228e7ce507e975c5f2b3bf094deb",
+  "prompts": {},
+  "sessions": {
+    "s_b63afcce9fec5b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a711f949f06b95420",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

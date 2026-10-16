@@ -1,5 +1,7 @@
 build/deps/gen/deps.MODULE.bazel
   s_ad98b07a2ebbe9::t_c6eff73685fa8b 30-31,33
+deps/rust/Cargo.lock
+  s_b63afcce9fec5b::t_9a8565bf145b22 550,552,1596-1597
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -12,6 +14,22 @@ build/deps/gen/deps.MODULE.bazel
         "tool": "claude",
         "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
         "model": "claude-fable-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_b63afcce9fec5b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a711f949f06b95420",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
       },
       "human_author": "Dan Lapid <dlapid@cloudflare.com>"
     }

@@ -4,12 +4,14 @@ build/deps/gen/deps.MODULE.bazel
   s_2427bf394889ab::t_a048a31b1a800f 30-31,33
 src/rust/cxx/kj-rs-tokio/ffi.rs
   s_2427bf394889ab::t_3a5e0879cc37db 3-7,25,32-33,36-37,51-55
+  s_dadaf0660bfcbe::t_2667834b9daa66 7
 src/rust/cxx/kj-rs-tokio/lib.rs
   s_2427bf394889ab::t_a0a2c0696e22bb 8-10,15-17
 src/rust/cxx/kj-rs-tokio/port.rs
   s_2427bf394889ab::t_2ea69d0a6d3796 40,69-76,96-97,105-109,144-148,175,190-194,228-230,240,249,277-281,310-311,324,326,343-346,511-513,515
 src/rust/cxx/kj-rs-tokio/tests/lib.rs
   s_2427bf394889ab::t_0def42a18b445f 19-20,75-87,103-105
+  s_dadaf0660bfcbe::t_901e40c3d9de4f 88-89
 src/rust/cxx/kj-rs-tokio/tests/test-helpers.h
   s_2427bf394889ab::t_ab20c19bda4520 22-26
 src/rust/cxx/kj-rs-tokio/tests/test_helpers.rs
@@ -20,6 +22,20 @@ src/rust/cxx/kj-rs-tokio/tokio-event-port.c++
   s_2427bf394889ab::t_3c3146f8c889de 8-9,25-26,30-34,41-64,69-77,85-86,103-104,106,112-113
 src/rust/cxx/kj-rs-tokio/tokio-event-port.h
   s_2427bf394889ab::t_5d8de3354eb487 11-26,30,34-40,48-49,52-53,55-57,68,71,74-76,82-85,101-102,106-114,116-118,121-126,128-131,135-136,138-141,143,149-150,161-163
+deps/rust/Cargo.lock
+  s_dadaf0660bfcbe::t_242bb245158c5f 561,563,1617-1618,2081,2084,2086,2090-2091
+src/rust/cxx/kj-rs-io/async-io.h
+  s_dadaf0660bfcbe::t_4131cf49fe9fa5 70-71
+src/rust/cxx/kj-rs-io/stream.rs
+  s_dadaf0660bfcbe::t_586de943008789 332,350-352,805
+src/rust/cxx/kj-rs-tokio/tests/BUILD.bazel
+  s_dadaf0660bfcbe::t_b60988005caf00 29-31
+src/rust/cxx/kj-rs/tests/awaitables-cc-test.c++
+  s_dadaf0660bfcbe::t_3496f922418791 331-333,376-377
+src/workerd/server/AGENTS.md
+  s_dadaf0660bfcbe::t_042283de69be9a 23-24
+src/workerd/server/BUILD.bazel
+  s_dadaf0660bfcbe::t_313f79207dac76 255
 ---
 {
   "schema_version": "authorship/3.0.0",
@@ -31,6 +47,14 @@ src/rust/cxx/kj-rs-tokio/tokio-event-port.h
       "agent_id": {
         "tool": "claude",
         "id": "28753db2-9693-4557-828c-5c58d097f066",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
         "model": "claude-fable-5-1"
       },
       "human_author": "Dan Lapid <dlapid@cloudflare.com>"
