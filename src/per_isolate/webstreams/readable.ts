@@ -1134,18 +1134,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     options: ReadableStreamBYOBReaderReadOptions
   ): Promise<ReadableStreamReadResult<T>> {
     // --- View validation (spec read(view, options) steps 1-3) ---
-    if (!isArrayBufferView(view)) {
-      throw new TypeError('view must be an ArrayBufferView');
-    }
-    const info = getUnsharedViewInfo(view, 'view');
-    if (info.byteLength === 0) {
-      throw new TypeError('view must have a non-zero byteLength');
-    }
-    if (ArrayBufferPrototypeByteLengthGet(info.buffer) === 0) {
-      throw new TypeError(
-        "view's backing buffer must have a non-zero byteLength"
-      );
-    }
+    const info = getNonEmptyUnsharedViewInfo(view, 'view');
     options = toDictionary(
       options,
       'options must be an object'
@@ -1344,10 +1333,14 @@ function getViewInfo(view: ArrayBufferView): ViewInfo {
   };
 }
 
-// getViewInfo() for the byte-stream trust boundaries, which reject
-// SharedArrayBuffer-backed views (WebIDL ArrayBufferView without
-// [AllowShared]).
-function getUnsharedViewInfo(view: ArrayBufferView, what: string): ViewInfo {
+// getViewInfo() for the byte-stream trust boundaries (read(view),
+// enqueue(), respondWithNewView()): WebIDL's ArrayBufferView conversion,
+// without [AllowShared], so a value that is not a view, or a view backed
+// by a SharedArrayBuffer, throws. `what` names the argument in messages.
+function getUnsharedViewInfo(view: unknown, what: string): ViewInfo {
+  if (!isArrayBufferView(view)) {
+    throw new TypeError(`${what} must be an ArrayBufferView`);
+  }
   const info = getViewInfo(view);
   if (isSharedArrayBuffer(info.buffer)) {
     throw new TypeError(`${what} must not be backed by a SharedArrayBuffer`);
@@ -1355,26 +1348,29 @@ function getUnsharedViewInfo(view: ArrayBufferView, what: string): ViewInfo {
   return info;
 }
 
-// Validate and normalize a user-provided chunk for a byte stream at the
-// enqueue()/respondWithNewView() trust boundary: snapshot metadata, reject
-// zero-length views and zero-length (or detached — detached buffers report
-// byteLength 0) buffers, and transfer the backing buffer. The returned
-// triple references the TRANSFERRED buffer; the caller's view is detached.
-// All byte-stream transfers are to fixed length (spec
-// TransferArrayBuffer), so a source cannot shrink a buffer we hold.
-function validateAndTransferView(view: ArrayBufferView): ByteQueueEntry {
-  if (!isArrayBufferView(view)) {
-    throw new TypeError('chunk must be an ArrayBufferView');
-  }
-  const info = getUnsharedViewInfo(view, 'chunk');
+// getUnsharedViewInfo() for a view that must hold bytes (spec read(view)
+// steps 1-3, enqueue() steps 1-2): a zero-length view, or a view over a
+// zero-length buffer, throws.
+function getNonEmptyUnsharedViewInfo(view: unknown, what: string): ViewInfo {
+  const info = getUnsharedViewInfo(view, what);
   if (info.byteLength === 0) {
-    throw new TypeError('chunk must have a non-zero byteLength');
+    throw new TypeError(`${what} must have a non-zero byteLength`);
   }
   if (ArrayBufferPrototypeByteLengthGet(info.buffer) === 0) {
     throw new TypeError(
-      "chunk's backing buffer must have a non-zero byteLength"
+      `${what}'s backing buffer must have a non-zero byteLength`
     );
   }
+  return info;
+}
+
+// A chunk enqueued into a byte stream, validated at the enqueue() trust
+// boundary and normalized: the returned triple references the TRANSFERRED
+// buffer; the caller's view is detached. All byte-stream transfers are to
+// fixed length (spec TransferArrayBuffer), so a source cannot shrink a
+// buffer we hold.
+function validateAndTransferView(view: ArrayBufferView): ByteQueueEntry {
+  const info = getNonEmptyUnsharedViewInfo(view, 'chunk');
   return {
     buffer: ArrayBufferPrototypeTransferToFixedLength(info.buffer),
     byteOffset: info.byteOffset,
@@ -2043,11 +2039,8 @@ class ReadableStreamBYOBRequest implements ReadableStreamBYOBRequestType {
     if (this.#controller === null) {
       throw new TypeError('This BYOB request has been invalidated');
     }
-    if (!isArrayBufferView(view)) {
-      throw new TypeError('view must be an ArrayBufferView');
-    }
-    // Spec step 2: detached buffers are TypeError, not RangeError.
     const info = getUnsharedViewInfo(view, 'view');
+    // Spec step 2: detached buffers are TypeError, not RangeError.
     if (ArrayBufferPrototypeDetachedGet(info.buffer)) {
       throw new TypeError("The view's buffer has been detached");
     }
