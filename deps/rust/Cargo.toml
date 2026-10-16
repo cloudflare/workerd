@@ -18,7 +18,6 @@ foldhash = "0.2"
 proc-macro2 = { version = "1", features = ["span-locations"] }
 quote = "1"
 rustversion = "1"
-scratch = "1"
 static_assertions = "1"
 syn = { version = "2", features = ["full"] }
 

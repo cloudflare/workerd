@@ -15,3 +15,7 @@ The in-tree fork contains these major behavioral changes:
   generated symbol names remain compatible with cxx.
 - **Workerd build integration.** Bazel targets use workerd's in-tree Rust toolchain, crate vendor
   repository, Cap'n Proto/KJ dependency, formatting, and lint configuration.
+- **No `scratch` dependency in `cxx-build`.** When no Cargo target directory can be found, the
+  shared debugging directory is `$OUT_DIR/cxxbridge/shared/` rather than a `scratch` directory.
+  `scratch` embeds the absolute `OUT_DIR` of its own build, which under Bazel is a per-build sandbox
+  path, so depending on it made `cxx-build`'s metadata nondeterministic.
