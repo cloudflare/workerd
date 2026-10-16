@@ -30,6 +30,8 @@ namespace workerd::server::cli {
 
 struct ServeOrTestOptions;
 struct TestOptions;
+struct BenchOptions;
+struct BuildInfo;
 
 ::rust::Slice<const uint8_t> release_version();
 bool perfetto_supported();
@@ -42,7 +44,10 @@ int32_t with_process_context(
 kj::Own<WorkerFactory> bootstrap(kj_rs_tokio::TokioAsyncIoContext& loop,
     ::rust::Vec<uint64_t> config,
     const ServeOrTestOptions& options,
-    kj::Maybe<const TestOptions&> test);
+    kj::Maybe<const TestOptions&> test,
+    kj::Maybe<const BenchOptions&> bench);
+BuildInfo build_info();
+::rust::String newest_compat_date();
 [[noreturn]] void cli_exit(int32_t code);
 void kj_log(uint8_t severity, ::rust::Str file, uint32_t line, ::rust::Str message);
 void json_log_to_stderr(uint8_t severity, ::rust::Str file, uint32_t line, ::rust::Str message);

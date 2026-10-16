@@ -112,6 +112,14 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
     bool experimental = false;
     // When set, every worker uses this compatibility date and none may specify its own.
     kj::Maybe<kj::String> testCompatibilityDateOverride;
+    // When set, the compatibility date of workers that don't specify one, which is otherwise an
+    // error. Workers that specify one use it.
+    kj::Maybe<kj::String> defaultCompatibilityDate;
+    // Whether requests get tail workers. `workerd bench` turns them off unless given `--trace`:
+    // benchmarked code often makes a subrequest on every call (e.g. `env.SELF.fetch()`), and tail
+    // workers would add their cost to each. The server still looks a config worker's tails up, so
+    // that their config errors are reported, but does not link them.
+    bool tailWorkers = true;
     Worker::LoggingOptions loggingOptions;
     api::pyodide::PythonConfig pythonConfig;
     // When set, async activity in every worker is traced to this file (--async-trace), which must
@@ -163,6 +171,7 @@ class WorkerFactory final: private ChannelTokenHandler::Resolver {
 ::rust::Slice<const uint8_t> factory_config(const WorkerFactory& factory);
 const kj::HttpHeaderTable& factory_header_table(const WorkerFactory& factory);
 bool factory_experimental(const WorkerFactory& factory);
+bool factory_tail_workers(const WorkerFactory& factory);
 void factory_set_server(const WorkerFactory& factory, ::rust::Box<ServerHandle> server);
 void factory_spawn(const WorkerFactory& factory, ::rust::Box<SpawnedTask> task);
 void factory_clear_tasks(const WorkerFactory& factory);
@@ -203,6 +212,8 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
     ::rust::Box<WorkerInterfaceList> tails);
 kj::Own<WorkerInterface> worker_interface_attach(
     kj::Own<WorkerInterface> inner, ::rust::Box<KeepAlive> keep);
+kj::Promise<::rust::Vec<uint64_t>> worker_bench(
+    kj::Own<WorkerInterface> worker, ::rust::Slice<const uint64_t> params);
 kj::Own<ActorHandle> worker_new_actor(const CompiledWorker& worker,
     ::rust::Str className,
     kj::Maybe<kj::Own<Frankenvalue>> props,

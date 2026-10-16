@@ -2,13 +2,14 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! The `serve` and `test` commands: the command line's Rust half, and the process's schedule.
+//! The `serve`, `test` and `bench` commands: the command line's Rust half, and the process's
+//! schedule.
 //!
 //! The command line (cli/lib.rs) parses the arguments into [`RunOptions`] and calls
-//! [`serve`] / [`test`]. Each creates the event loop -- a `kj_rs_tokio::Runtime`, the KJ loop
-//! with tokio running whenever it sleeps -- has the C++ bootstrap
+//! [`serve`] / [`test`] / [`bench`]. Each creates the event loop -- a `kj_rs_tokio::Runtime`, the
+//! KJ loop with tokio running whenever it sleeps -- has the C++ bootstrap
 //! (bootstrap.c++) set up the process (logging, perfetto, V8) and build the worker factory on that
-//! loop, then blocks on `server_serve` / `server_test`, which run the server
+//! loop, then blocks on `server_serve` / `server_test` / `server_bench`, which run the server
 //! (`run.rs`). Every config error is printed, and the server then does not serve; unless
 //! `--watch` is on, in which case it serves what it can, waits for the config to change and the
 //! process re-executes itself.
@@ -30,6 +31,7 @@ use futures::future::LocalBoxFuture;
 use kj_rs::KjOwn;
 
 use crate::Result;
+use crate::bench;
 use crate::bridge::ffi;
 use crate::channels::AbortReason;
 use crate::config::Factory;
@@ -53,7 +55,7 @@ pub fn serve(
     watch: Option<Watch>,
 ) -> Result<i32> {
     let command = move |factory, structured| server_serve(factory, run_options, watch, structured);
-    run(verbose, config, options, None, command)
+    run(verbose, config, options, None, None, command)
 }
 
 /// Runs `workerd test` (see the module doc); the exit status, if the process is to go on.
@@ -69,7 +71,33 @@ pub fn test(
 ) -> Result<i32> {
     let command =
         move |factory, structured| server_test(factory, run_options, patterns, watch, structured);
-    run(verbose, config, options, Some(test), command)
+    run(verbose, config, options, Some(test), None, command)
+}
+
+/// Runs `workerd bench` (see the module doc); the exit status, if the process is to go on.
+/// `patterns` are the `<service-pattern>` and `<entrypoint-pattern>` globs.
+pub fn bench(
+    verbose: bool,
+    config: Vec<u64>,
+    options: ffi::ServeOrTestOptions,
+    bench: bench::Options,
+    run_options: RunOptions,
+    patterns: (String, String),
+    watch: Option<Watch>,
+) -> Result<i32> {
+    let dates = bench.compat_dates()?;
+    let process = bench.process(&dates);
+    let command = move |factory, structured| {
+        server_bench(
+            factory,
+            run_options,
+            patterns,
+            (bench, dates),
+            watch,
+            structured,
+        )
+    };
+    run(verbose, config, options, None, Some(process), command)
 }
 
 /// A command's Rust half, for the C++ frame that sets up the process's logging around it
@@ -89,17 +117,24 @@ pub fn run_pending_command(
 }
 
 /// The process's schedule (see the module doc): the logging, the loop, the bootstrap, the
-/// command, the exit.
+/// command, the exit. `test` and `bench` are the bootstrap's options for those commands.
 fn run<Fut: Future<Output = Result<()>> + 'static>(
     verbose: bool,
     config: Vec<u64>,
     options: ffi::ServeOrTestOptions,
     test: Option<ffi::TestOptions>,
+    bench: Option<ffi::BenchOptions>,
     command: impl FnOnce(KjOwn<ffi::WorkerFactory>, bool) -> Fut + 'static,
 ) -> Result<i32> {
     let command = move |config, structured| {
         let mut runtime = kj_rs_tokio::Runtime::new()?;
-        let factory = ffi::bootstrap(runtime.context(), config, &options, test.as_ref().into())?;
+        let factory = ffi::bootstrap(
+            runtime.context(),
+            config,
+            &options,
+            test.as_ref().into(),
+            bench.as_ref().into(),
+        )?;
         // The command owns the factory and drops it when it completes (`shutdown`); if it does not
         // complete, `block_on` drops it, and the factory with it, before returning.
         let result = runtime.block_on(command(factory, structured));
@@ -218,6 +253,26 @@ pub(crate) async fn shutdown(factory: Rc<Factory>) -> Result<()> {
     Ok(())
 }
 
+/// Runs `command` -- `run::test` or `run::bench` -- on `factory` with loopback sockets enabled,
+/// alongside the watcher, then tears the run down (`shutdown`).
+async fn run_local<T, Fut: Future<Output = Result<T>>>(
+    factory: KjOwn<ffi::WorkerFactory>,
+    watch: &mut Option<Watch>,
+    structured: bool,
+    command: impl FnOnce(Rc<Factory>, Reporter) -> Fut,
+) -> Result<T> {
+    crate::log::install();
+    let report = reporter(watch.is_some(), structured);
+    let factory = Rc::new(Factory::new(factory));
+    // Loopback sockets are for tests and benchmarks only.
+    factory.loopback().enable();
+    let result = with_watch(command(Rc::clone(&factory), report), watch.as_mut()).await;
+    let shutdown = shutdown(factory).await;
+    let result = result?;
+    shutdown?;
+    Ok(result)
+}
+
 /// `workerd test`: runs the tests of `factory`'s config. Under `--watch`, waits for a change
 /// afterwards instead of returning.
 async fn server_test(
@@ -227,27 +282,54 @@ async fn server_test(
     mut watch: Option<Watch>,
     structured: bool,
 ) -> Result<()> {
-    crate::log::install();
-    let report = reporter(watch.is_some(), structured);
-    let factory = Rc::new(Factory::new(factory));
-    // Loopback sockets are for tests only.
-    factory.loopback().enable();
-    let result = with_watch(
+    let passed = run_local(factory, &mut watch, structured, |factory, report| {
         crate::run::test(
-            Rc::clone(&factory),
+            factory,
             options,
             report,
             &service_pattern,
             &entrypoint_pattern,
-        ),
-        watch.as_mut(),
-    )
-    .await;
-    let shutdown = shutdown(factory).await;
-    let passed = result?;
-    shutdown?;
+        )
+    })
+    .await?;
     if passed == Some(false) {
         error(structured, "Tests failed!");
+    }
+    if let Some(watch) = watch {
+        // Under --watch the process stays for the next change rather than exiting.
+        watch.await?;
+    }
+    Ok(())
+}
+
+/// `workerd bench`: runs the benchmarks of `factory`'s config and writes the report, as `bench`
+/// asks, with the workers' compatibility dates `dates`. Under `--watch`, waits for a change
+/// afterwards instead of returning.
+async fn server_bench(
+    factory: KjOwn<ffi::WorkerFactory>,
+    options: RunOptions,
+    (service_pattern, entrypoint_pattern): (String, String),
+    (bench, dates): (bench::Options, bench::CompatDates),
+    mut watch: Option<Watch>,
+    structured: bool,
+) -> Result<()> {
+    let results = run_local(factory, &mut watch, structured, |factory, report| {
+        crate::run::bench(
+            factory,
+            options,
+            report,
+            &service_pattern,
+            &entrypoint_pattern,
+            bench.params(),
+        )
+    })
+    .await?;
+    if let Some(mut results) = results {
+        results.set_environment(&bench, &dates)?;
+        results.write(&bench)?;
+        if !results.passed() {
+            error(structured, "Benchmarks failed!");
+        }
     }
     if let Some(watch) = watch {
         // Under --watch the process stays for the next change rather than exiting.
