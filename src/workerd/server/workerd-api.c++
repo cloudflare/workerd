@@ -668,18 +668,10 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
 
     case Global::DURABLE_ACTOR_NAMESPACE: {
       auto ns = global.getDurableActorNamespace();
-      kj::Maybe<api::UserDefinedRetryPolicy> retryPolicy;
-      if (ns.hasRetryPolicy()) {
-        auto policy = ns.getRetryPolicy();
-        retryPolicy = api::UserDefinedRetryPolicy{
-          .maxAttempts = policy.getMaxAttempts(),
-          .timeout = policy.getTimeoutMs() * kj::MILLISECONDS,
-        };
-      }
       return lock.wrap(context,
           lock.alloc<api::DurableObjectNamespace>(ns.getActorChannel(),
               kj::heap<ActorIdFactoryImpl>(ns.getUniqueKey()), api::ActorCallRetriesAllowed::YES,
-              Persistent::NO, retryPolicy));
+              Persistent::NO));
     }
 
     case Global::LOOPBACK_DURABLE_ACTOR_NAMESPACE: {
@@ -687,8 +679,7 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
       return lock.wrap(context,
           lock.alloc<api::LoopbackDurableObjectNamespace>(ns.getActorChannel(),
               kj::heap<ActorIdFactoryImpl>(ns.getUniqueKey()), api::ActorCallRetriesAllowed::YES,
-              lock.alloc<api::LoopbackDurableObjectClass>(ns.getClassChannel()), featureFlags,
-              /*userDefinedRetryPolicy=*/kj::none));
+              lock.alloc<api::LoopbackDurableObjectClass>(ns.getClassChannel()), featureFlags));
     }
 
     case Global::ANALYTICS_ENGINE: {

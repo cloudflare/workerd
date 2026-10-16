@@ -30,12 +30,6 @@ use workerd_capnp::service_designator;
 use workerd_capnp::worker;
 use workerd_capnp::worker::binding;
 
-/// The limits of a `durableObjectNamespace` binding's `retryPolicy`: the retries after the first
-/// attempt, and the milliseconds from the call's start after which none may begin
-/// (`api::UserDefinedRetryPolicy` in actor-call-retry.h).
-const RETRY_MAX_CONFIGURABLE_ATTEMPTS: u32 = 10;
-const RETRY_CONFIGURABLE_TIMEOUT_MS: std::ops::RangeInclusive<u32> = 500..=60_000;
-
 /// `IoContext::SPECIAL_SUBREQUEST_CHANNEL_COUNT` (src/workerd/io/io-context.h): the subrequest
 /// channels with a special meaning (the global outbound), ahead of the bindings' channels.
 pub const SPECIAL_SUBREQUEST_CHANNEL_COUNT: u32 = 2;
@@ -650,20 +644,6 @@ impl Compiler<'_> {
         } else {
             None
         };
-        let retry_policy = if designator.has_retry_policy() {
-            let policy = designator.get_retry_policy()?;
-            if policy.get_max_attempts() > RETRY_MAX_CONFIGURABLE_ATTEMPTS
-                || !RETRY_CONFIGURABLE_TIMEOUT_MS.contains(&policy.get_timeout_ms())
-            {
-                self.error(format!(
-                    "{error_context} has a Durable Object retry policy outside the system limits."
-                ));
-                return Ok(false);
-            }
-            Some(policy)
-        } else {
-            None
-        };
         let actor_configs = self.actor_configs;
         let config = if let Some(service) = service {
             let Some(classes) = actor_configs.get(service) else {
@@ -704,9 +684,6 @@ impl Compiler<'_> {
                 let mut namespace = global.init_durable_actor_namespace();
                 namespace.set_actor_channel(channel);
                 namespace.set_unique_key(unique_key.as_str());
-                if let Some(policy) = retry_policy {
-                    namespace.set_retry_policy(policy)?;
-                }
             }
             ActorConfig::Ephemeral { .. } => global.set_ephemeral_actor_namespace(channel),
         }

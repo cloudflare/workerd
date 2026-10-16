@@ -5,10 +5,11 @@ const config :Workerd.Config = (
     (name = "main", worker = .mainWorker),
     (name = "TEST_TMPDIR", disk = (writable = true)),
   ],
+  autogates = ["workerd-autogate-durable-object-retries-userland"],
 );
 
 const mainWorker :Workerd.Worker = (
-  compatibilityFlags = ["experimental", "nodejs_compat", "js_rpc"],
+  compatibilityFlags = ["experimental", "nodejs_compat", "js_rpc", "enable_ctx_exports"],
 
   modules = [
     (name = "worker", esModule = embed "actor-stub-test.js"),

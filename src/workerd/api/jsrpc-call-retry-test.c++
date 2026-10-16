@@ -1268,7 +1268,7 @@ KJ_TEST("configured retry count limits actor RPC retries") {
 
   sender.runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 3,
-        Replacement::RECEIVER, UserDefinedRetryPolicy{.maxAttempts = 1});
+        Replacement::RECEIVER, UserDefinedRetryPolicy{.maxRetries = 1});
     auto function = getRpcFunction(env.js, *fetcher, "echo"_kj);
     auto rejected =
         expectDisconnect(env.js, function.call(env.js, env.js.undefined(), env.js.num(42)));
@@ -1292,7 +1292,7 @@ KJ_TEST("zero configured retries disables nested actor RPC retries") {
 
   sender.runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 1,
-        Replacement::RECEIVER, UserDefinedRetryPolicy{.maxAttempts = 0});
+        Replacement::RECEIVER, UserDefinedRetryPolicy{.maxRetries = 0});
     auto property = KJ_REQUIRE_NONNULL(fetcher->getRpcMethodForTestOnly(env.js, kj::str("nested")));
     auto method = KJ_REQUIRE_NONNULL(property->getProperty(env.js, kj::str("echo")));
     auto& handler = KJ_REQUIRE_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<JsRpcProperty>>());
@@ -1354,7 +1354,7 @@ KJ_TEST("configured retry policy is ignored for actor RPC with the userland gate
 
   sender.runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = makeRetryFetcher(env, receiver, state, FailurePattern::AMBIGUOUS, 1,
-        Replacement::RECEIVER, UserDefinedRetryPolicy{.maxAttempts = 0});
+        Replacement::RECEIVER, UserDefinedRetryPolicy{.maxRetries = 0});
     auto function = getRpcFunction(env.js, *fetcher, "echo"_kj);
     auto result = function.call(env.js, env.js.undefined(), env.js.num(42));
     auto checked = env.js.toPromise(result).then(env.js, [](jsg::Lock& js, jsg::Value value) {

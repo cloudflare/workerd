@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <workerd/api/http.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/io/worker.h>

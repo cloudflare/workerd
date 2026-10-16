@@ -950,7 +950,7 @@ struct JsRpcRetrySetup {
   kj::Maybe<ActorCallRetryState::Attempt> attempt;
 };
 
-// A binding's own policy applies only when it configured one and the retry request gates and the
+// A stub's own policy applies only when it was given one and the retry request gates and the
 // userland gate are all on. Otherwise the runtime's default applies.
 ActorRetryPolicy getJsRpcRetryPolicy(JsRpcClientProvider& parent, bool enforcementRequested) {
   if (enforcementRequested &&

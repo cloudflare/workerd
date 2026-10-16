@@ -18,13 +18,13 @@ namespace workerd::api {
 WD_STRONG_BOOL(ActorCallRetriesAllowed);
 WD_STRONG_BOOL(IsFirstActorCallAttempt);
 
-// Retry behavior carried from a Durable Object namespace binding that configures one. Applied when
-// DURABLE_OBJECT_RETRIES_USERLAND is enabled. A binding without a retry policy runs under
-// ActorRetryPolicy::systemDefault() instead.
+// Retry behavior set by the `retry` option of `DurableObjectNamespace.get()` and carried by the
+// returned stub. Applied when DURABLE_OBJECT_RETRIES_USERLAND is enabled. A stub without a retry
+// policy runs under ActorRetryPolicy::systemDefault() instead.
 struct UserDefinedRetryPolicy {
   // Matches the runtime's default of five attempts in total.
-  static constexpr uint DEFAULT_MAX_ATTEMPTS = 4;
-  static constexpr uint MAX_CONFIGURABLE_ATTEMPTS = 10;
+  static constexpr uint DEFAULT_MAX_RETRIES = 4;
+  static constexpr uint MAX_CONFIGURABLE_RETRIES = 10;
   // Matches the runtime's default retry timeout.
   static constexpr auto DEFAULT_TIMEOUT = 10 * kj::SECONDS;
   // The first retry's backoff can be up to 500ms, so a shorter timeout would usually stop the call
@@ -33,20 +33,20 @@ struct UserDefinedRetryPolicy {
   static constexpr auto MAX_CONFIGURABLE_TIMEOUT = 60 * kj::SECONDS;
 
   // Retries after the initial attempt, so the total attempt count is one more than this.
-  uint maxAttempts = DEFAULT_MAX_ATTEMPTS;
+  uint maxRetries = DEFAULT_MAX_RETRIES;
   // See ActorRetryPolicy::timeout().
   kj::Duration timeout = DEFAULT_TIMEOUT;
 };
 
 // The retry limits a single actor call runs under, resolved from either the runtime's defaults or
-// a binding's UserDefinedRetryPolicy. Everything downstream reads this and never asks which.
+// a stub's UserDefinedRetryPolicy. Everything downstream reads this and never asks which.
 class ActorRetryPolicy {
  public:
   static ActorRetryPolicy systemDefault() {
     return ActorRetryPolicy(SYSTEM_DEFAULT_MAX_ATTEMPTS, SYSTEM_DEFAULT_TIMEOUT);
   }
   static ActorRetryPolicy userDefined(const UserDefinedRetryPolicy& policy) {
-    return ActorRetryPolicy(1 + policy.maxAttempts, policy.timeout);
+    return ActorRetryPolicy(1 + policy.maxRetries, policy.timeout);
   }
 
   // Total attempts, including the initial one.
