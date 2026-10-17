@@ -467,8 +467,7 @@ class NativePullConduit implements ByteStreamConsumerType {
   #cancelAlgorithm: CancelAlgorithm | undefined;
   #teeAlgorithm: (() => unknown) | undefined;
   #hooks: NativeStreamHooks;
-  // Set immediately after construction by createNativeReadableStreamParts.
-  #controller: NativeReadableStreamController | undefined;
+  #controller: NativeReadableStreamController;
   #byobRequestCache: NativeReadableStreamBYOBRequest | null = null;
   // Back-reference to the original source object, kept for extraction
   // (the JS-to-C++ path returns this object so C++ can unwrap its
@@ -495,10 +494,12 @@ class NativePullConduit implements ByteStreamConsumerType {
     this.#cancelAlgorithm = algorithms.cancelAlgorithm;
     this.#teeAlgorithm = algorithms.teeAlgorithm;
     this.#hooks = hooks;
+    this.#controller = new NativeReadableStreamController(this);
   }
 
-  attachController(controller: NativeReadableStreamController): void {
-    this.#controller = controller;
+  // The façade the stream holds as its controller.
+  get controller(): NativeReadableStreamController {
+    return this.#controller;
   }
 
   // --- StreamConsumer surface ----------------------------------------------
@@ -713,15 +714,13 @@ class NativePullConduit implements ByteStreamConsumerType {
     const pullAlgorithm = this.#pullAlgorithm;
     if (pullAlgorithm === undefined) return;
     if (this.#pullAbortController !== undefined) return;
-    const controller = this.#controller;
-    if (controller === undefined) return;
     const ac = new AbortController();
     this.#pullAbortController = ac;
     this.#deliveredThisPull = false;
     const signal = AbortControllerSignalGet(ac);
     markPromiseHandled(
       PromisePrototypeThen(
-        pullAlgorithm(controller, signal),
+        pullAlgorithm(this.#controller, signal),
         () => {
           this.#pullAbortController = undefined;
           // COMPLETION LATCH: a live pull that settled without delivering,
@@ -1221,9 +1220,7 @@ function createNativeReadableStreamParts(
     { pullAlgorithm, cancelAlgorithm, teeAlgorithm, expectedLength },
     hooks
   );
-  const controller = new NativeReadableStreamController(conduit);
-  conduit.attachController(controller);
-  return { controller, conduit };
+  return { controller: conduit.controller, conduit };
 }
 
 // ---------------------------------------------------------------------------
