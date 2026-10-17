@@ -1,5 +1,18 @@
 use super::*;
 
+impl TokioPort {
+    /// What the C++ port's `wait()` does, minus the KJ timer: park, then one batch.
+    fn wait_forever(&mut self) -> bool {
+        self.park_forever();
+        self.tick()
+    }
+
+    fn wait_timeout_ns(&mut self, timeout_ns: u64) -> bool {
+        self.park_timeout_ns(timeout_ns);
+        self.tick()
+    }
+}
+
 thread_local! {
     static LATE_DROP_PORT: RefCell<Option<TokioPort>> = const { RefCell::new(None) };
 }
@@ -57,32 +70,33 @@ fn port_drop_does_not_wait_for_blocking_tasks() {
 }
 
 #[test]
-fn foreign_cancellation_does_not_cancel_the_callers_loop() {
-    let owner_port = TokioPort::new();
-    std::thread::scope(|scope| {
-        scope
-            .spawn(|| {
-                let caller_port = TokioPort::new();
-                let ran = Arc::new(AtomicBool::new(false));
-                let task_ran = Arc::clone(&ran);
-                let _task = spawn(async move {
-                    task_ran.store(true, Ordering::SeqCst);
-                });
-
-                owner_port.cancel_spawned_tasks();
-                assert!(!caller_port.poll());
-                assert!(ran.load(Ordering::SeqCst));
-            })
-            .join()
-            .unwrap();
-    });
+fn wait_runs_a_bounded_batch_and_leaves_the_rest_for_the_next_turn() {
+    // More ready tasks than one batch admits: wait() returns after TICK_BUDGET of them, with
+    // the rest still queued, and a following tick() runs them.
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let mut port = TokioPort::new();
+    let ran = Rc::new(Cell::new(0usize));
+    for _ in 0..(TICK_BUDGET + 10) {
+        let ran = Rc::clone(&ran);
+        drop(spawn(async move { ran.set(ran.get() + 1) }));
+    }
+    let start = std::time::Instant::now();
+    assert!(!port.wait_timeout_ns(1_000_000_000));
+    assert!(
+        start.elapsed() < Duration::from_millis(500),
+        "wait slept with work ready"
+    );
+    assert_eq!(ran.get(), TICK_BUDGET);
+    assert!(!port.tick());
+    assert_eq!(ran.get(), TICK_BUDGET + 10);
 }
 
 #[test]
 fn bare_port_drop_cancels_spawned_tasks() {
     // A TokioPort NOT owned by a TokioEventPort: dropping it must still cancel tasks
-    // spawned onto its LocalSet (the Drop fallback), and leave the thread clean so a fresh
-    // port can be created afterward.
+    // spawned onto it (the Drop fallback), and leave the thread clean so a fresh port can be
+    // created afterward.
     {
         let port = TokioPort::new();
         drop(spawn(std::future::pending::<()>()));
@@ -99,19 +113,19 @@ fn bare_port_drop_cancels_spawned_tasks() {
 
 #[test]
 fn concurrent_wake_storm_from_many_threads_terminates() {
-    // TSAN stressor for SharedState (notify + woken latch): four threads hammer wake()
+    // TSAN stressor for the waker (unparker + woken latch): four threads hammer wake()
     // concurrently while the loop thread services wait_timeout_ns. The assertion is
     // deliberately interleaving-agnostic -- it only requires termination and that at least
-    // one wake was observed -- because exact latch counts are inherently racy. (Scoped
-    // threads borrowing `&TokioPort`: the port is `Sync` but, by design, not `Send`.)
+    // one wake was observed -- because exact latch counts are inherently racy.
     use std::sync::atomic::AtomicUsize;
-    let port = TokioPort::new();
+    let mut port = TokioPort::new();
+    let waker = port.waker();
     let done = AtomicUsize::new(0);
     std::thread::scope(|scope| {
         for _ in 0..4 {
             scope.spawn(|| {
                 for _ in 0..250 {
-                    port.wake();
+                    waker.wake();
                 }
                 done.fetch_add(1, Ordering::SeqCst);
             });
@@ -132,9 +146,9 @@ fn concurrent_wake_storm_from_many_threads_terminates() {
 
 #[test]
 fn handle_spawns_a_runtime_task_from_another_thread() {
-    // `handle()` + `tokio::spawn` (the runtime-driven path, distinct from spawn()/LocalSet)
-    // from a foreign thread: the Send task runs when the loop next drives block_on.
-    let port = TokioPort::new();
+    // `handle()` + `tokio::spawn` from a foreign thread: the Send task runs in the loop's next
+    // batch.
+    let mut port = TokioPort::new();
     let flag = Arc::new(AtomicBool::new(false));
     let handle = port.handle();
     let f2 = Arc::clone(&flag);
@@ -158,9 +172,9 @@ fn handle_spawns_a_runtime_task_from_another_thread() {
 
 #[test]
 fn poll_advances_a_ready_local_task() {
-    // Complements poll_never_sleeps (pending task): a ready LocalSet task (no await) is
-    // actually driven to completion by poll() within its budget, and poll() never latches.
-    let port = TokioPort::new();
+    // Complements poll_never_sleeps (pending task): a ready task (no await) is actually driven
+    // to completion by tick() within its budget, and tick() never latches.
+    let mut port = TokioPort::new();
     let flag = Arc::new(AtomicBool::new(false));
     let f2 = Arc::clone(&flag);
     let _jh = spawn(async move {
@@ -168,7 +182,7 @@ fn poll_advances_a_ready_local_task() {
     });
     let mut ran = false;
     for _ in 0..10 {
-        assert!(!port.poll(), "poll() must not report a wake latch here");
+        assert!(!port.tick(), "tick() must not report a wake latch here");
         if flag.load(Ordering::SeqCst) {
             ran = true;
             break;
@@ -179,33 +193,35 @@ fn poll_advances_a_ready_local_task() {
 
 #[test]
 fn wake_latch_semantics() {
-    let port = TokioPort::new();
+    let mut port = TokioPort::new();
+    let waker = port.waker();
     // No wake: a timed-out wait reports false.
     assert!(!port.wait_timeout_ns(1_000_000));
     // Wake before wait: latch is reported exactly once.
-    port.wake();
+    waker.wake();
     assert!(port.wait_timeout_ns(1_000_000));
     assert!(!port.wait_timeout_ns(1_000_000));
-    // Wake is also consumed by poll().
-    port.wake();
-    assert!(port.poll());
-    assert!(!port.poll());
+    // Wake is also consumed by tick().
+    waker.wake();
+    assert!(port.tick());
+    assert!(!port.tick());
 }
 
 #[test]
 fn wake_from_other_thread_unblocks_wait_forever() {
-    let port = TokioPort::new();
+    let mut port = TokioPort::new();
+    let waker = port.waker();
     std::thread::scope(|scope| {
         scope.spawn(|| {
             std::thread::sleep(Duration::from_millis(10));
-            port.wake();
+            waker.wake();
         });
         assert!(port.wait_forever());
     });
 }
 
 /// The loop thread is inside the runtime's context for the port's whole life, so tokio
-/// resources can be created outside `block_on` without any explicit `enter()`.
+/// resources can be created outside `tick` without any explicit `enter()`.
 #[test]
 fn loop_thread_is_permanently_in_the_runtime_context() {
     assert!(tokio::runtime::Handle::try_current().is_err());
@@ -224,13 +240,13 @@ fn loop_thread_is_permanently_in_the_runtime_context() {
 
 #[test]
 fn spawned_tasks_run_during_wait() {
-    let port = TokioPort::new();
+    let mut port = TokioPort::new();
     let (tx, mut rx) = tokio::sync::oneshot::channel::<u32>();
-    let mut jh = spawn(async move {
+    let jh = spawn(async move {
         tokio::time::sleep(Duration::from_millis(5)).await;
         tx.send(42).unwrap();
     });
-    // The task only runs inside wait_impl's block_on.
+    // The task only runs in wait_impl's batch.
     let mut done = false;
     for _ in 0..100 {
         let _ = port.wait_timeout_ns(20_000_000);
@@ -241,27 +257,27 @@ fn spawned_tasks_run_during_wait() {
         }
     }
     assert!(done);
-    // The JoinHandle should complete promptly now.
-    port.runtime.block_on(&mut jh).unwrap();
+    assert!(jh.is_finished());
 }
 
 #[test]
 fn poll_never_sleeps() {
-    let port = TokioPort::new();
-    // A pending spawned task must not make poll() block.
+    let mut port = TokioPort::new();
+    // A pending spawned task must not make tick() block.
     let _jh = spawn(std::future::pending::<()>());
     let start = std::time::Instant::now();
-    assert!(!port.poll());
+    assert!(!port.tick());
     assert!(start.elapsed() < Duration::from_millis(100));
 }
 
-/// `spawn` accepts `!Send` futures because it is backed by `LocalSet::spawn_local`. This
+/// `spawn` accepts `!Send` futures because the runtime is a `LocalRuntime`. This
 /// future holds an `Rc` — which is `!Send` — across an await point, exercising that path,
 /// and proves such a task actually runs to completion on the loop thread.
 #[test]
 fn spawn_accepts_non_send_futures() {
     use std::cell::Cell;
-    let port = TokioPort::new();
+    use std::rc::Rc;
+    let mut port = TokioPort::new();
     let counter = Rc::new(Cell::new(0u32));
     let task_counter = Rc::clone(&counter);
     // Detached on purpose; the `Rc` capture makes the future `!Send`.
@@ -287,7 +303,7 @@ fn spawn_accepts_non_send_futures() {
 /// timeout).
 #[test]
 fn timeouts_are_accurate_to_the_wheel() {
-    let port = TokioPort::new();
+    let mut port = TokioPort::new();
     let start = std::time::Instant::now();
     let _ = port.wait_timeout_ns(20_000_000);
     let elapsed = start.elapsed();
