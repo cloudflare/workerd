@@ -21,7 +21,6 @@
 #include <workerd/util/abortable.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/entropy.h>
-#include <workerd/util/http-util.h>
 #include <workerd/util/mimetype.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/strings.h>

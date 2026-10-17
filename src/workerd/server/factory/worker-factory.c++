@@ -24,6 +24,7 @@
 #include <workerd/server/pyodide.h>
 #include <workerd/server/workerd-api.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/http-util.h>
 #include <workerd/util/strings.h>
 #include <workerd/util/use-perfetto-categories.h>
 

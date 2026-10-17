@@ -493,6 +493,7 @@ wd_cc_library(
     deps = [
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj/compat:kj-http",
     ],
 )
 
@@ -508,6 +509,7 @@ wd_cc_library(
         "encoding-shared.h",
     ],
     implementation_deps = [
+        "//src/workerd/util:autogate",
         "//src/workerd/util:strings",
         "@simdutf",
     ],

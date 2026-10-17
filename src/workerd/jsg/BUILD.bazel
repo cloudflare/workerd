@@ -143,7 +143,6 @@ wd_cc_library(
         ":observer",
         ":url",
         "//src/workerd/util",  # Required for util/batch-queue.h
-        "//src/workerd/util:autogate",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
         "@capnp-cpp//src/kj",
@@ -335,6 +334,7 @@ wd_cc_library(
     ["*-test.c++"],
     exclude = [
         # defined below
+        "fast-api-test.c++",
         "macro-meta-test.c++",
         "resource-test.c++",
         "rtti-test.c++",
@@ -343,6 +343,15 @@ wd_cc_library(
         "multiple-typewrappers-test.c++",
     ],
 )]
+
+kj_test(
+    src = "fast-api-test.c++",
+    local_defines = ["JSG_IMPLEMENTATION"],
+    deps = [
+        ":jsg",
+        "//src/workerd/util:autogate",
+    ],
+)
 
 # The native allocation regression creates a million wrappers to trigger an automatic major GC.
 # Debug builds need more than the default 15-second budget to finish the allocation loop.

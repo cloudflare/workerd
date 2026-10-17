@@ -13,7 +13,6 @@
 #include <workerd/api/streams/readable.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-channels.h>
-#include <workerd/util/http-util.h>
 
 #include <capnp/compat/json.h>
 #include <capnp/message.h>
