@@ -688,6 +688,41 @@ export const teeHeldByobRequestWithReleasedBytes = {
   },
 };
 
+// Ledger #25 with the request first taken after tee(): the released read
+// holds 3 of its 8 bytes, and the source took no request after filling
+// them. The request is over the rest of the read's buffer (parity), and
+// responding delivers the held bytes with the new ones to both branches
+// under TS (spec); C++ drops the held bytes.
+export const teeByobRequestFirstTakenAfterTee = {
+  async test() {
+    let controller;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        controller = c;
+      },
+    });
+    const reader = rs.getReader({ mode: 'byob' });
+    const read = reader.read(new Uint8Array(8), { min: 8 });
+    await scheduler.wait(5);
+    controller.byobRequest.view.set([1, 2, 3]);
+    controller.byobRequest.respond(3);
+    reader.releaseLock();
+    await rejectionOf(read);
+    const [a, b] = rs.tee();
+    const { view } = controller.byobRequest;
+    strictEqual(view.byteOffset, 3);
+    strictEqual(view.byteLength, 5);
+    strictEqual(view.buffer.byteLength, 8);
+    view.set([4, 5, 6, 7, 8]);
+    controller.byobRequest.respond(5);
+    const expected = usingTsImpl ? [1, 2, 3, 4, 5, 6, 7, 8] : [4, 5, 6, 7, 8];
+    deepStrictEqual([...(await a.getReader().read()).value], expected);
+    deepStrictEqual([...(await b.getReader().read()).value], expected);
+    controller.close();
+  },
+};
+
 // Ledger #32 through a held request: enqueue() retires it, and a branch's
 // pending read(view) takes the released read's bytes and the chunk
 // together under TS (spec). C++ has dropped those bytes (ledger #25).
