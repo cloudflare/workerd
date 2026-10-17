@@ -270,6 +270,11 @@ class Bootstrap {
     if (testOptions.all_autogates) {
       util::Autogate::initAllAutogates();
     }
+    if (testOptions.startup_snapshot) {
+      KJ_REQUIRE(
+          !testOptions.all_autogates, "--startup-snapshot does not combine with --all-autogates");
+      util::Autogate::initAutogateNamesForTest({"startup-snapshot"_kj});
+    }
   }
 
   // The `test` options that apply to a factory.

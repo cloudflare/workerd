@@ -97,7 +97,7 @@ bool Autogate::isEnabled(AutogateKey key) {
   }
 
   static const bool defaultResult = getenv("WORKERD_ALL_AUTOGATES") != nullptr;
-  return defaultResult;
+  return defaultResult && !hasOwnTestVariant(key);
 }
 
 void Autogate::initAutogate(
@@ -125,7 +125,7 @@ void Autogate::deinitAutogate() {
 void Autogate::initAllAutogates() {
   Autogate autogate;
   for (AutogateKey key: getAutogateKeys()) {
-    autogate.gates[autogateToIndex(key)] = true;
+    autogate.gates[autogateToIndex(key)] = !hasOwnTestVariant(key);
   }
   globalAutogate = kj::mv(autogate);
   syncZlibRouter();

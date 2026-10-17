@@ -361,6 +361,11 @@ pub struct TestArgs {
     #[arg(long)]
     pub all_autogates: bool,
 
+    /// Enable the startup-snapshot autogate, which --all-autogates leaves off: a zygote Worker
+    /// takes a startup snapshot of every eligible Worker.
+    #[arg(long)]
+    pub startup_snapshot: bool,
+
     /// Set the compatibility date for all workers. When specified, workers must NOT specify
     /// compatibilityDate in the config. Use '0000-00-00' for oldest behavior or '9999-12-31' for
     /// newest behavior.
@@ -558,6 +563,7 @@ impl From<&TestArgs> for server::TestOptions {
             predictable: args.predictable,
             gc_stress: args.gc_stress,
             all_autogates: args.all_autogates,
+            startup_snapshot: args.startup_snapshot,
             compat_date: args.compat_date.clone().into(),
         }
     }
