@@ -222,6 +222,7 @@ export {
   teeKeepsHeldByobRequest,
   teeSoleBranchUsesHeldByobRequest,
   teeHeldByobRequestWithReleasedBytes,
+  teeByobRequestFirstTakenAfterTee,
   teeHeldByobRequestAfterCloseOrError,
   teeHeldByobRequestFractionalAtClose,
   teeHeldByobRequestFromBranchFractionalAtClose,

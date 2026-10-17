@@ -2,8 +2,8 @@
 
 // The NATIVE consumer backend: streams whose data is produced by a C++
 // (JSG/KJ) source rather than a JS underlying source feeding the shared
-// queue. See native-stream-integration.md §10 for the fence conventions
-// separating this backend from the queued one (queue.ts).
+// queue. See webstreams/AGENTS.md for the fence conventions separating
+// this backend from the queued one (queue.ts).
 //
 // THE C++/JS CONTRACT (phase 3; implemented on the C++ side by
 // ReadableStreamNativeSource in src/workerd/api/js-readable-stream.{h,c++},
@@ -132,6 +132,8 @@ import type {
   PendingRead,
   PullIntoDescriptor,
   createReadResult as createReadResultType,
+  filledView as filledViewType,
+  unfilledView as unfilledViewType,
 } from './queue';
 import type {
   PromiseWithResolvers as PromiseWithResolversType,
@@ -174,9 +176,12 @@ const { viewByteExtent } =
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
 };
-const { createReadResult } = require('webstreams/queue') as {
-  createReadResult: typeof createReadResultType;
-};
+const { createReadResult, filledView, unfilledView } =
+  require('webstreams/queue') as {
+    createReadResult: typeof createReadResultType;
+    filledView: typeof filledViewType;
+    unfilledView: typeof unfilledViewType;
+  };
 
 // ---------------------------------------------------------------------------
 // The construction-time handshake
@@ -342,12 +347,7 @@ class NativeReadableStreamBYOBRequest {
   get view(): Uint8Array | null {
     assertIsNativeReadableStreamBYOBRequest(this);
     if (!this.#conduit.isHeadDesc(this.#desc)) return null;
-    const desc = this.#desc;
-    return new Uint8Array(
-      desc.buffer,
-      desc.byteOffset + desc.bytesFilled,
-      desc.byteLength - desc.bytesFilled
-    );
+    return unfilledView(this.#desc);
   }
 
   // Non-standard workerd extension (mirrors the global BYOBRequest): the
@@ -573,11 +573,11 @@ class NativePullConduit implements ByteStreamConsumerType {
     if (this.#requests.length === 0) this.#abortCurrentPull(reason);
   }
 
-  errorAllReads(reason: unknown): void {
+  #errorAllReads(reason: unknown): void {
     this.#drainRequests((request) => settlerOf(request).reject(reason));
   }
 
-  resolveAllReadsAsDone(): void {
+  #resolveAllReadsAsDone(): void {
     this.#drainRequests((request) =>
       settlerOf(request).resolve(createReadResult(undefined, true))
     );
@@ -590,15 +590,6 @@ class NativePullConduit implements ByteStreamConsumerType {
     this.#requests.drain(visit);
   }
 
-  get hasPendingRead(): boolean {
-    return this.#requests.length > 0;
-  }
-
-  fulfillFirstPendingRead(value: Uint8Array): void {
-    const pending = this.#requests.shift() as NativeDefaultRequest;
-    pending.read.resolve(createReadResult(value, false));
-  }
-
   cancelStream(
     reason: unknown,
     decideSourceCancel: (isLastConsumer: boolean) => Promise<void>
@@ -607,7 +598,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     // streams, never shared consumers), so this conduit is always the
     // last one. Settle outstanding reads as done BEFORE the source-cancel
     // decision, per the StreamConsumer contract ordering.
-    this.resolveAllReadsAsDone();
+    this.#resolveAllReadsAsDone();
     // ABORT SITE: abort-then-cancel ordering. The cancel reason flows
     // through to signal.reason so the source can distinguish cancel from
     // release if it cares.
@@ -641,40 +632,6 @@ class NativePullConduit implements ByteStreamConsumerType {
       desc,
     } satisfies NativeByobRequestEntry);
     return desc.promise;
-  }
-
-  get headPullInto(): PullIntoDescriptor | undefined {
-    const head = this.#requests.peek();
-    return head !== undefined && head.kind === 'byob' ? head.desc : undefined;
-  }
-
-  get pendingPullIntoView(): Uint8Array | undefined {
-    const head = this.#requests.peek();
-    if (head === undefined || head.kind !== 'byob') return undefined;
-    const desc = head.desc;
-    return new Uint8Array(
-      desc.buffer,
-      desc.byteOffset + desc.bytesFilled,
-      desc.byteLength - desc.bytesFilled
-    );
-  }
-
-  respondBYOB(bytesWritten: number): void {
-    const head = this.#requests.peek();
-    if (head === undefined || head.kind !== 'byob') {
-      throw new TypeError('No pending BYOB read to respond to');
-    }
-    this.respondToDesc(head.desc, bytesWritten);
-  }
-
-  commitPullIntosOnClose(): void {
-    // The fused close-commit happens in closeFromSource(); once the
-    // conduit has left the active state there is nothing left to commit.
-  }
-
-  shiftAutoAllocateDescriptor(): PullIntoDescriptor | undefined {
-    // Native conduit doesn't use autoAllocateChunkSize.
-    return undefined;
   }
 
   // --- Pull pacing -----------------------------------------------------------
@@ -927,11 +884,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     }
     this.#byobRequestCache = null;
     this.#requests.shift();
-    const value = new desc.viewCtor(
-      desc.buffer,
-      desc.byteOffset,
-      filled / desc.elementSize
-    );
+    const value = filledView(desc);
     if (!endsStream) {
       desc.resolve(createReadResult(value, false));
       return;
@@ -1016,7 +969,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     // The stream errors before its reads reject (spec
     // ReadableStreamError: reader.closed first).
     this.#hooks.errorStream(reason);
-    this.errorAllReads(reason);
+    this.#errorAllReads(reason);
   }
 
   // Spec PromiseCall over the extracted cancel method; resolved if the
