@@ -973,14 +973,27 @@ function toUserReadResult<T>(
   } as ReadableStreamReadResult<T>;
 }
 
+let assertIsReadableStreamDefaultReader: <R>(
+  self: ReadableStreamDefaultReader<R>
+) => void;
+
 class ReadableStreamDefaultReader<
   R,
 > implements ReadableStreamDefaultReaderType<R> {
   #base: ReadableStreamReaderBase<R>;
 
   static {
+    assertIsReadableStreamDefaultReader = function <R>(
+      self: ReadableStreamDefaultReader<R>
+    ): void {
+      if (!isActualObject(self) || !(#base in self))
+        throw new TypeError('Illegal invocation');
+    };
+
     // Wire getReaderBase for the first reader type. The BYOB and draining
-    // readers chain onto this in their own static blocks.
+    // readers chain onto this in their own static blocks. It accepts a
+    // reader of any of the three classes, so each reader's public members
+    // check their own class first.
     const defaultGetBase = <R>(reader: object) => {
       return (reader as ReadableStreamDefaultReader<R>).#base;
     };
@@ -1025,6 +1038,7 @@ class ReadableStreamDefaultReader<
 
   get closed(): Promise<void> {
     try {
+      assertIsReadableStreamDefaultReader(this);
       return getGenericReaderClosedPromise(this);
     } catch (e) {
       return PromiseReject(e);
@@ -1033,6 +1047,7 @@ class ReadableStreamDefaultReader<
 
   cancel(reason: unknown = undefined): Promise<void> {
     try {
+      assertIsReadableStreamDefaultReader(this);
       return cancelReadableStreamGenericReader(this, reason);
     } catch (e) {
       return PromiseReject(e);
@@ -1041,6 +1056,7 @@ class ReadableStreamDefaultReader<
 
   read(): Promise<ReadableStreamReadResult<R>> {
     try {
+      assertIsReadableStreamDefaultReader(this);
       const stream = getReaderStream<R>(this);
       if (stream === undefined) {
         return PromiseReject(new TypeError('This reader has been released'));
@@ -1052,14 +1068,24 @@ class ReadableStreamDefaultReader<
   }
 
   releaseLock(): void {
+    assertIsReadableStreamDefaultReader(this);
     readableStreamReaderGenericRelease(this);
   }
 }
+
+let assertIsReadableStreamBYOBReader: (self: ReadableStreamBYOBReader) => void;
 
 class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
   #base: ReadableStreamReaderBase<ArrayBufferView>;
 
   static {
+    assertIsReadableStreamBYOBReader = function (
+      self: ReadableStreamBYOBReader
+    ): void {
+      if (!isActualObject(self) || !(#base in self))
+        throw new TypeError('Illegal invocation');
+    };
+
     const prev = getReaderBase;
     getReaderBase = <R>(reader: object) => {
       if (#base in reader) {
@@ -1098,6 +1124,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
 
   get closed(): Promise<void> {
     try {
+      assertIsReadableStreamBYOBReader(this);
       return getGenericReaderClosedPromise(this);
     } catch (e) {
       return PromiseReject(e);
@@ -1106,6 +1133,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
 
   cancel(reason: unknown = undefined): Promise<void> {
     try {
+      assertIsReadableStreamBYOBReader(this);
       return cancelReadableStreamGenericReader(this, reason);
     } catch (e) {
       return PromiseReject(e);
@@ -1248,6 +1276,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
   }
 
   releaseLock(): void {
+    assertIsReadableStreamBYOBReader(this);
     readableStreamReaderGenericRelease(this);
   }
 }
@@ -2694,6 +2723,10 @@ async function drainingReaderReadInternal<R>(
   return result;
 }
 
+let assertIsReadableStreamDrainingReader: <R>(
+  self: ReadableStreamDrainingReader<R>
+) => void;
+
 // Bulk reader for pipeTo and the C++ bridge (design doc "Draining Reads").
 // Lock-based exclusivity: while held, no default/BYOB reader can interfere
 // with the cursor. Internal-only for now (not exposed via getReader();
@@ -2702,6 +2735,13 @@ class ReadableStreamDrainingReader<R> {
   #base: ReadableStreamReaderBase<R>;
 
   static {
+    assertIsReadableStreamDrainingReader = function <R>(
+      self: ReadableStreamDrainingReader<R>
+    ): void {
+      if (!isActualObject(self) || !(#base in self))
+        throw new TypeError('Illegal invocation');
+    };
+
     const prev = getReaderBase;
     getReaderBase = <R>(reader: object) => {
       if (#base in reader) {
@@ -2725,6 +2765,7 @@ class ReadableStreamDrainingReader<R> {
 
   get closed(): Promise<void> {
     try {
+      assertIsReadableStreamDrainingReader(this);
       return getGenericReaderClosedPromise(this);
     } catch (e) {
       return PromiseReject(e);
@@ -2739,6 +2780,7 @@ class ReadableStreamDrainingReader<R> {
   // value the TransformStream expectedLength extension installed, if
   // any). Returns undefined after release.
   get expectedLength(): bigint | undefined {
+    assertIsReadableStreamDrainingReader(this);
     const stream = getReaderStream<R>(this);
     if (stream === undefined) return undefined;
     const controller = getReadableStreamController(stream);
@@ -2748,6 +2790,7 @@ class ReadableStreamDrainingReader<R> {
 
   cancel(reason?: unknown): Promise<void> {
     try {
+      assertIsReadableStreamDrainingReader(this);
       return cancelReadableStreamGenericReader(this, reason);
     } catch (e) {
       return PromiseReject(e);
@@ -2760,6 +2803,7 @@ class ReadableStreamDrainingReader<R> {
   async read(
     options: { maxSize?: number } = kNullProtoObject
   ): Promise<DrainingReadResult<R>> {
+    assertIsReadableStreamDrainingReader(this);
     const stream = getReaderStream<R>(this);
     if (stream === undefined) {
       throw new TypeError('This reader has been released');
@@ -2775,6 +2819,7 @@ class ReadableStreamDrainingReader<R> {
   }
 
   releaseLock(): void {
+    assertIsReadableStreamDrainingReader(this);
     readableStreamReaderGenericRelease(this);
   }
 }
