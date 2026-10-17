@@ -373,7 +373,9 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // rejection is the error path). `signal` is the per-pull cancellation signal: it aborts
   // when the consumer abandons the in-flight read (reader release, cancel, tee), in which
   // case any bytes read are retained for redelivery by the next pull rather than delivered
-  // or dropped.
+  // or dropped. A failed read leaves the source failed: its pull rejects, and so does every
+  // later pull, with the same failure. The conduit takes no rejection from an abandoned
+  // pull, so a failure its read met reaches the conduit through the next pull.
   jsg::Promise<void> pull(jsg::Lock& js, jsg::JsObject controller, jsg::Ref<AbortSignal> signal);
 
   // Cancels the underlying source, indicating a loss of interest in the data, and releases
@@ -388,7 +390,8 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // back to a generic kj::newTee()-based split (mirroring the legacy internal controller's
   // tee). Any bytes retained from an abandoned pull are inherited by BOTH branches,
   // delivered before anything further from upstream. If an abandoned pull's read is still
-  // in flight, the branches wait for it, then deliver its bytes ahead of the rest.
+  // in flight, the branches wait for it, then deliver its bytes ahead of the rest. A failed
+  // source (see pull()) gives two branches whose every read fails the same way.
   //
   // Throws if the source has already been consumed.
   kj::Array<jsg::Ref<ReadableStreamNativeSource>> tee(jsg::Lock& js);
@@ -444,8 +447,9 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // `data`, and the source unless `eof`. Returns false if no tee is waiting.
   bool handOffToTee(kj::ArrayPtr<const kj::byte> data, bool eof);
 
-  // Fails a tee waiting on the read that just failed, if any, with the read's exception.
-  void failTeeHandoff(jsg::Lock& js, jsg::Value& exception);
+  // Leaves the source failed after a read failed with `exception`: releases the underlying
+  // source, fails a tee waiting on the read, and keeps the failure for every later pull.
+  void fail(kj::Exception exception);
 
   jsg::Promise<void> pullDefault(
       jsg::Lock& js, jsg::JsObject controller, jsg::Ref<AbortSignal> signal, Active& active);
@@ -486,8 +490,12 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // Drop the first `bytes` bytes of the stash (they have been delivered).
   void consumeStash(size_t bytes);
 
-  // kj::none once the source has reached EOF, been canceled, or been consumed by tee().
+  // kj::none once the source has reached EOF, been canceled, been consumed by tee(), or
+  // failed.
   kj::Maybe<Active> state;
+
+  // The exception the source failed with, if a read failed (see fail()).
+  kj::Maybe<kj::Exception> failure;
 
   // Reusable read target, lazily allocated. KJ reads always land here -- never directly in
   // V8-visible memory -- and delivery copies out under the isolate lock. Sized

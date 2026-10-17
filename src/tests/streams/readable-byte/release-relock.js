@@ -367,9 +367,8 @@ export const relockRespondOverflowSecondView = {
 // DIVERGENCE (ledger #29): a native body's reader released while its read
 // is in flight, then a second reader's read waiting when the body fails.
 // C++ refuses the release (TypeError: outstanding read promises), and the
-// read rejects with the body's error. TypeScript rejects the read; DEFECT:
-// the failure reaches the second reader's read as a TypeError for a source
-// that settled a pull without delivering, closing or erroring.
+// read rejects with the body's error. TypeScript rejects the released read,
+// and the second reader's read rejects with the body's error.
 export const nativeBodyFailureAfterReleaseMidRead = {
   async test(ctrl, env) {
     for (const mode of [undefined, 'byob']) {
@@ -381,25 +380,16 @@ export const nativeBodyFailureAfterReleaseMidRead = {
       strictEqual((await startRead(reader)).done, false);
       // Let the pull that answered settle, so the next read pulls anew.
       await scheduler.wait(1);
-      const read = startRead(reader);
-      if (!usingTsImpl) {
+      let read = startRead(reader);
+      if (usingTsImpl) {
+        reader.releaseLock();
+        strictEqual((await rejectionOf(read)).name, 'TypeError');
+        read = startRead(getReader(body));
+      } else {
         throws(() => reader.releaseLock(), TypeError);
-        await env.SELF.fetch('http://test/fail-now');
-        strictEqual((await rejectionOf(read)).message, 'the body failed');
-        continue;
       }
-      reader.releaseLock();
-      strictEqual((await rejectionOf(read)).name, 'TypeError');
-      const next = startRead(getReader(body));
       await env.SELF.fetch('http://test/fail-now');
-      const error = await rejectionOf(next);
-      strictEqual(error.name, 'TypeError');
-      ok(
-        error.message.startsWith(
-          'native source pull settled without delivering, closing, or erroring'
-        ),
-        error.message
-      );
+      strictEqual((await rejectionOf(read)).message, 'the body failed');
     }
   },
 };
