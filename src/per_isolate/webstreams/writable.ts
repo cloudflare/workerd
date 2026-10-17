@@ -1189,17 +1189,11 @@ class WritableStreamDefaultController<
 
   error(reason: unknown = undefined): void {
     assertIsWritableStreamDefaultController(this);
-    if (getWritableStreamState(this.#stream) !== 'writable') return;
-    this.#errorStream(reason);
+    this.#errorIfNeeded(reason);
   }
 
   #errorIfNeeded(error: unknown): void {
-    if (getWritableStreamState(this.#stream) === 'writable') {
-      this.#errorStream(error);
-    }
-  }
-
-  #errorStream(error: unknown): void {
+    if (getWritableStreamState(this.#stream) !== 'writable') return;
     // WritableStreamDefaultControllerError: clear algorithms, start erroring.
     // Note: the queue is NOT cleared here — it is cleared later during
     // WritableStreamFinishErroring (via controllerErrorSteps).
