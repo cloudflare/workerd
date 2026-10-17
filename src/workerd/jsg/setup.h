@@ -433,6 +433,11 @@ class IsolateBase {
     return false;
   }
 
+  // True while createSnapshotBlob() collects garbage before its capture.
+  bool isCollectingForSnapshot() const {
+    return collectingForSnapshot;
+  }
+
   bool isStartingFromSnapshot() const {
     KJ_IF_SOME(c, snapshotConfig) {
       return c.is<FinalizedSnapshot>();
@@ -468,6 +473,8 @@ class IsolateBase {
   // empty handle if it does not or the zygote stored none. Each can be taken once.
   v8::Local<v8::FunctionTemplate> takeExternalSnapshotTemplate(kj::StringPtr name);
 
+  // See Lock::SnapshotWrapper.
+  void restoreSnapshotWrappers(Lock& js, kj::Vector<Lock::SnapshotWrapper> wrappers);
 
   void registerExternalReference(intptr_t addr) {
     if (!isPreparingSnapshot()) return;
@@ -496,6 +503,18 @@ class IsolateBase {
   // Visits every struct type's persistent handles (dictionary template + field-name handles).
   virtual void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
       kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictTmpl) {}
+
+  // Startup-snapshot re-creation of JSG objects; see DynamicResourceTypeMap. Overridden by
+  // Isolate<TypeWrapper>; the base has no types.
+  virtual kj::Maybe<SnapshotRecipe> trySnapshotRecipe(Lock& js, Object& instance) {
+    return kj::none;
+  }
+  virtual void restoreWrapperFromSnapshot(Lock& js,
+      v8::Local<v8::Object> holder,
+      uint32_t type,
+      kj::ArrayPtr<const kj::byte> recipe) {
+    KJ_UNIMPLEMENTED("this isolate has no resource types to restore");
+  }
 
  private:
   template <typename TypeWrapper>
@@ -553,6 +572,7 @@ class IsolateBase {
   //    to serialize a startup snapshot.
   //  * FinalizedSnapshot: an isolate initialized from a previously-produced snapshot blob.
   kj::Maybe<SnapshotConfig> snapshotConfig;
+  bool collectingForSnapshot = false;
   // When true, evalAllowed is true and switching it to false is a no-op.
   bool alwaysAllowEval = false;
   bool evalAllowed = false;
@@ -620,11 +640,20 @@ class IsolateBase {
 
   // Moved into SnapshotArtifact::externalTemplateRecords by createSnapshotBlob().
   kj::Vector<SnapshotArtifact::ExternalTemplateRecord> externalTemplateRecords;
+  // See serializeWrapperInternalField().
+  kj::HashMap<const void*, kj::Array<kj::byte>> snapshotFieldPayloads;
 
   // When starting from a snapshot: replaces the (not yet created) resource-type templates and the
   // opaque template with the ones the zygote recorded (SnapshotArtifact::templateDataIndices).
   // Runs as soon as the type wrapper exists, before anything asks for a template.
   void adoptTemplatesFromSnapshot();
+
+  // The re-creation payloads of the zygote's live JSG wrappers, by the object each wrapper points
+  // at. Throws if a wrapper cannot be re-created; see the definition.
+  using SnapshotWrapperPayloads = kj::HashMap<const Wrappable*, kj::Array<kj::byte>>;
+  SnapshotWrapperPayloads collectSnapshotWrapperPayloads(v8::Local<v8::Context> defaultContext);
+  static v8::StartupData serializeWrapperInternalField(
+      v8::Local<v8::Object> holder, int index, void* data);
 
   // Object used as the underlying storage for a workers exports.
   v8::Global<v8::Object> workerExportsObj;
@@ -949,6 +978,25 @@ class Isolate: public IsolateBase {
       kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictTmpl) override {
     if (!hasExtraWrappers) {
       wrappers[0]->visitStructTypeHandles(visitName, visitDictTmpl);
+    } else {
+      KJ_FAIL_ASSERT("Not yet implemented");
+    }
+  }
+
+  kj::Maybe<SnapshotRecipe> trySnapshotRecipe(Lock& js, Object& instance) override {
+    if (!hasExtraWrappers) {
+      return wrappers[0]->trySnapshotRecipe(js, instance);
+    } else {
+      KJ_FAIL_ASSERT("Not yet implemented");
+    }
+  }
+
+  void restoreWrapperFromSnapshot(Lock& js,
+      v8::Local<v8::Object> holder,
+      uint32_t type,
+      kj::ArrayPtr<const kj::byte> recipe) override {
+    if (!hasExtraWrappers) {
+      wrappers[0]->restoreWrapperFromSnapshot(js, holder, type, recipe);
     } else {
       KJ_FAIL_ASSERT("Not yet implemented");
     }

@@ -425,6 +425,10 @@ bool Lock::isStartingFromSnapshot() const {
   return IsolateBase::from(v8Isolate).isStartingFromSnapshot();
 }
 
+void Lock::restoreSnapshotWrappers(kj::Vector<SnapshotWrapper> wrappers) {
+  IsolateBase::from(v8Isolate).restoreSnapshotWrappers(*this, kj::mv(wrappers));
+}
+
 void Lock::terminateNextExecution() {
   v8Isolate->TerminateExecution();
 }

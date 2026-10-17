@@ -525,6 +525,11 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   // jsg::Function, raw v8::Global) that CreateBlob's global-handle check would otherwise reject.
   void destroyLiveWrappableInstances();
 
+  // Every Wrappable that currently has a JavaScript wrapper.
+  kj::List<Wrappable, &Wrappable::link>& liveWrappables() {
+    return wrappers;
+  }
+
   void addToFreelist(Wrappable::CppgcShim& shim);
   Wrappable::CppgcShim* allocateShim(Wrappable& wrappable, v8::CppHeapPointerTag tag);
   void clearFreelistedShims();

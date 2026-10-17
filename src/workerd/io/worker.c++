@@ -2506,7 +2506,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
     if (auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
         isolateBase.isPreparingSnapshot()) {
-      // In a handle scope of its own, for the handles taken below.
+      // In a handle scope of its own: the one above held the bindings and ctx.exports objects
+      // as stack roots, and createSnapshotBlob() collects garbage to tell wrappers only the
+      // zygote's setup reached from wrappers the worker retained.
       lock.withinHandleScope([&] {
         // The Rust realm caches its resource templates in v8::Globals, which CreateBlob refuses;
         // they go into the blob instead, and a restored realm adopts them on first use.

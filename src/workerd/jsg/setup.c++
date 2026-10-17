@@ -542,6 +542,73 @@ IsolateBase::IsolateBase(V8System& system,
   });
 }
 
+namespace {
+
+// A wrapper's startup-snapshot re-creation payload: the kind of object the wrapper wraps, followed
+// by data that depends on the kind: a SnapshotRecipe's type and bytes.
+kj::Array<kj::byte> makeSnapshotPayload(uint32_t kind, kj::ArrayPtr<const kj::byte> data) {
+  auto payload = kj::heapArray<kj::byte>(sizeof(kind) + data.size());
+  memcpy(payload.begin(), &kind, sizeof(kind));
+  // Not memcpy(): an empty `data` may have a null begin(), and a null memcpy() source lets the
+  // optimizer assume that it is not null (and drop the null check in the owner's destructor).
+  payload.slice(sizeof(kind)).copyFrom(data);
+  return payload;
+}
+
+}  // namespace
+
+IsolateBase::SnapshotWrapperPayloads IsolateBase::collectSnapshotWrapperPayloads(
+    v8::Local<v8::Context> defaultContext) {
+  // A wrapper's payload comes from its type's recipe, computed with the default context entered
+  // so that snapshotRecipe() may read JavaScript state.
+  //
+  // A wrapper without one has no C++ object behind it in a restored isolate, except the global
+  // object, which newContext() re-creates regardless. One still reachable after the caller's full
+  // GC was retained by the worker's top-level code (a `Fetcher` binding cached in module scope, an
+  // object whose type does not opt in, ...), so the worker cannot be snapshotted. The GC matters:
+  // the zygote's own setup leaves wrappers behind (bindings, the ctx.exports object) that only its
+  // C++ locals referenced.
+  SnapshotWrapperPayloads payloads;
+  kj::Vector<kj::String> leftovers;
+  v8::HandleScope scope(ptr);
+  v8::Context::Scope contextScope(defaultContext);
+  auto& js = Lock::from(ptr);
+  auto global = defaultContext->Global();
+  for (auto& wrappable: heapTracer.liveWrappables()) {
+    Object* object = wrappable.jsgTryGetObject();
+    if (object != nullptr) {
+      KJ_IF_SOME(recipe, trySnapshotRecipe(js, *object)) {
+        payloads.insert(&wrappable, makeSnapshotPayload(recipe.type, recipe.bytes));
+        continue;
+      }
+    }
+
+    auto handle = wrappable.tryGetHandle(ptr);
+    KJ_IF_SOME(h, handle) {
+      if (h->StrictEquals(global)) continue;
+    }
+    if (object != nullptr) {
+      leftovers.add(kj::str(wrappable.jsgGetMemoryName()));
+    } else {
+      // No JSG type name: name it by its full C++ type (the typeName() of a template such as
+      // OpaqueWrappable<kj::Own<T, std::nullptr_t>, false> is just its tail) and its JavaScript
+      // constructor.
+      kj::String name = fullyQualifiedTypeName(typeid(wrappable));
+      KJ_IF_SOME(h, handle) {
+        if (h->IsObject()) {
+          name = kj::str(name, "(", h.As<v8::Object>()->GetConstructorName(), ")");
+        }
+      }
+      leftovers.add(kj::mv(name));
+    }
+  }
+  KJ_REQUIRE(leftovers.size() == 0,
+      "worker retains JSG objects from its top-level evaluation that cannot be restored from a "
+      "snapshot",
+      leftovers);
+  return payloads;
+}
+
 void IsolateBase::addExternalSnapshotTemplate(
     kj::StringPtr name, v8::Local<v8::FunctionTemplate> tmpl) {
   KJ_REQUIRE(isPreparingSnapshot());
@@ -564,9 +631,41 @@ v8::Local<v8::FunctionTemplate> IsolateBase::takeExternalSnapshotTemplate(kj::St
   return {};
 }
 
+void IsolateBase::restoreSnapshotWrappers(Lock& js, kj::Vector<Lock::SnapshotWrapper> wrappers) {
+  for (auto& wrapper: wrappers) {
+    uint32_t kind;
+    KJ_REQUIRE(wrapper.payload.size() >= sizeof(kind), "malformed snapshot wrapper payload");
+    memcpy(&kind, wrapper.payload.begin(), sizeof(kind));
+    auto data = wrapper.payload.slice(sizeof(kind));
+    auto holder = wrapper.holder.Get(ptr);
+    restoreWrapperFromSnapshot(js, holder, kind, data);
+  }
+}
+
+v8::StartupData IsolateBase::serializeWrapperInternalField(
+    v8::Local<v8::Object> holder, int index, void* data) {
+  // A wrapper's only internal field is its tag (Wrappable::isWorkerdApiObject). Just before
+  // CreateBlob(), createSnapshotBlob() points the tag field of every wrapper that carries a
+  // re-creation payload at that payload (snapshotFieldPayloads); every other field, the tags of
+  // all other wrappers among them, is serialized empty. V8 runs this with garbage collection and
+  // JavaScript disallowed, and takes ownership of the returned bytes, which it `delete[]`s.
+  if (index != Wrappable::WRAPPABLE_TAG_FIELD_INDEX) return {nullptr, 0};
+  auto& self = *reinterpret_cast<IsolateBase*>(data);
+  const void* field = holder->GetAlignedPointerFromInternalField(
+      index, static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
+  KJ_IF_SOME(payload, self.snapshotFieldPayloads.find(field)) {
+    auto copy = new char[payload.size()];
+    memcpy(copy, payload.begin(), payload.size());
+    return {copy, static_cast<int>(payload.size())};
+  }
+  return {nullptr, 0};
+}
+
 void IsolateBase::setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext) {
   KJ_REQUIRE(isPreparingSnapshot());
-  KJ_ASSERT_NONNULL(snapshotCreator)->SetDefaultContext(defaultContext);
+  KJ_ASSERT_NONNULL(snapshotCreator)
+      ->SetDefaultContext(
+          defaultContext, v8::SerializeInternalFieldsCallback(&serializeWrapperInternalField, this));
 }
 
 void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle) {
@@ -574,6 +673,45 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   auto& artifact = mutableSnapshotArtifact();
   auto& creator = KJ_ASSERT_NONNULL(snapshotCreator);
   KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
+
+  // The wrappers that carry a re-creation payload into the blob. They stay reachable from the
+  // worker's own heap anyway; the Globals only find them again once step 1 below has detached
+  // every wrapper from its C++ object.
+  struct PayloadWrapper {
+    v8::Global<v8::Object> holder;
+    kj::Array<kj::byte> payload;
+  };
+  kj::Vector<PayloadWrapper> payloadWrappers;
+  {
+    v8::HandleScope scope(ptr);
+    auto defaultContext = defaultContextHandle.Get(ptr);
+    // A full GC first, so that only wrappers the worker actually retained are considered, both
+    // for re-creation payloads and for the rejection check. These collections also trace async
+    // context values (see AsyncContextFrame::jsgVisitForGc()).
+    collectingForSnapshot = true;
+    KJ_DEFER(collectingForSnapshot = false);
+    ptr->LowMemoryNotification();
+    // The collection can leave FinalizationRegistries with dead cells to clean up, and their
+    // callbacks can drop objects the worker retained. Their cleanup task is queued on the
+    // platform: run it, and the microtasks its callbacks enqueue, as the worker's first request
+    // would, then collect again what the callbacks dropped. (Step 1b below settles the
+    // registries that destroying the JSG objects leaves behind.)
+    while (pumpMsgLoop()) {
+      auto& js = Lock::from(ptr);
+      do {
+        js.runMicrotasks();
+      } while (pumpMsgLoop());
+      ptr->LowMemoryNotification();
+    }
+    auto payloads = collectSnapshotWrapperPayloads(defaultContext);
+    for (auto& entry: payloads) {
+      auto handle = KJ_ASSERT_NONNULL(const_cast<Wrappable*>(entry.key)->tryGetHandle(ptr));
+      payloadWrappers.add(PayloadWrapper{
+        .holder = v8::Global<v8::Object>(ptr, handle),
+        .payload = kj::mv(entry.value),
+      });
+    }
+  }
 
   // Record the templates every snapshotted JSG object was instantiated from, so that restored
   // isolates adopt them instead of creating new ones (see SnapshotArtifact::templateDataIndices).
@@ -631,6 +769,21 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
     }
     ptr->ClearKeptObjects();
   }
+
+  // 1c. Hand each payload to serializeWrapperInternalField() through the wrapper's tag field,
+  // the one internal field a wrapper has. Step 1 detached the wrapper from its C++ object, so
+  // nothing reads the tag any more; a restored isolate re-creates the object from the payload
+  // and attaches it, which sets the tag again (ResourceWrapper::newContext()).
+  for (auto& wrapper: payloadWrappers) {
+    v8::HandleScope scope(ptr);
+    auto field = static_cast<void*>(wrapper.payload.begin());
+    KJ_ASSERT(reinterpret_cast<uintptr_t>(field) % 2 == 0, "V8 requires aligned pointers");
+    wrapper.holder.Get(ptr)->SetAlignedPointerInInternalField(Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
+        field, static_cast<v8::EmbedderDataTypeTag>(Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
+    wrapper.holder.Reset();
+    snapshotFieldPayloads.insert(field, kj::mv(wrapper.payload));
+  }
+  KJ_DEFER(snapshotFieldPayloads.clear());
 
   // 2. Reset isolate level handles.
   opaqueTemplate.Reset();

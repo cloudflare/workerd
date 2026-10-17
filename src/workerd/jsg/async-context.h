@@ -11,6 +11,8 @@
 
 namespace workerd::jsg {
 
+class IsolateBase;
+
 #ifndef V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA
 #error "V8_ENABLE_CONTINUATION_PRESERVED_EMBEDDER_DATA must be defined"
 #endif
@@ -236,6 +238,7 @@ class AsyncContextFrame final: public Wrappable {
 
   using Storage = kj::Table<StorageEntry, kj::HashIndex<StorageEntryCallbacks>>;
   Storage storage;
+  IsolateBase& isolateBase;
 
   void jsgVisitForGc(GcVisitor& visitor) override;
 

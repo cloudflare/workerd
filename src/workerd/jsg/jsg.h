@@ -57,6 +57,35 @@ namespace workerd::jsg {
 // =======================================================================================
 // Macros for declaring type glue.
 
+// Startup snapshots serialize a JSG object's JavaScript wrapper like any other object, but its C++
+// half dies with the zygote isolate that produced the blob. A resource type whose C++ state is no
+// more than what its constructor computes can opt into being re-created in an isolate restored
+// from the snapshot by defining
+//
+//     static jsg::Ref<T> restoreFromSnapshot(jsg::Lock& js, kj::ArrayPtr<const kj::byte> recipe);
+//
+// and, when re-creation needs data from the zygote's instance,
+//
+//     kj::Maybe<kj::Array<kj::byte>> snapshotRecipe(jsg::Lock& js);
+//
+// The zygote computes the recipe before the blob is created, and the restored isolate hands it to
+// restoreFromSnapshot() verbatim. kj::none declares the instance unrestorable, which fails the
+// whole snapshot; without snapshotRecipe() the recipe is empty. The re-created object is attached
+// to the deserialized wrapper, so JavaScript keeps its identity and any properties the worker set
+// on it. See IsolateBase::createSnapshotBlob().
+//
+// JSG_SNAPSHOT_RESTORE declares the common case: an object that its constructor, taking either no
+// arguments or the jsg::Lock, fully re-creates.
+#define JSG_SNAPSHOT_RESTORE(Type)                                                                 \
+  static ::workerd::jsg::Ref<Type> restoreFromSnapshot(                                            \
+      ::workerd::jsg::Lock& js, kj::ArrayPtr<const kj::byte>) {                                    \
+    if constexpr (std::is_constructible_v<Type, ::workerd::jsg::Lock&>) {                          \
+      return js.alloc<Type>(js);                                                                   \
+    } else {                                                                                       \
+      return js.alloc<Type>();                                                                     \
+    }                                                                                              \
+  }
+
 #define JSG_RESOURCE_TYPE(Type, ...)                                                               \
   static constexpr ::workerd::jsg::JsgKind JSG_KIND KJ_UNUSED = ::workerd::jsg::JsgKind::RESOURCE; \
   using jsgSuper = typename Type::jsgThis;                                                         \
@@ -3303,6 +3332,16 @@ class Lock {
   // Logs and reports the error to tail workers (if called within an request),
   // the inspector (if attached), or to KJ_LOG(Info).
   virtual void reportError(const JsValue& value) = 0;
+
+  // Startup snapshots: a JSG wrapper that a context restored from the snapshot deserialized with a
+  // re-creation payload (see IsolateBase::createSnapshotBlob() in setup.h). V8 hands them out with
+  // garbage collection disallowed, so ResourceWrapper::newContext() collects them and has
+  // restoreSnapshotWrappers() re-create their C++ objects once the context exists.
+  struct SnapshotWrapper {
+    v8::Global<v8::Object> holder;
+    kj::Array<kj::byte> payload;
+  };
+  void restoreSnapshotWrappers(kj::Vector<SnapshotWrapper> wrappers);
 
   // Store the worker environment.
   virtual void setWorkerEnv(V8Ref<v8::Object> value) = 0;
