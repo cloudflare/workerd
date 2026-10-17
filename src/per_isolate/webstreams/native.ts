@@ -465,7 +465,7 @@ interface NativeAlgorithms {
 }
 
 class NativePullConduit implements ByteStreamConsumerType {
-  #requests: RingBufferType<NativeRequest> = new RingBuffer();
+  readonly #requests: RingBufferType<NativeRequest> = new RingBuffer();
   // 'closed' covers source-close, stream cancel, and tee (the contract
   // leaves a teed-away original source closed).
   #status: 'active' | 'closed' | 'errored' = 'active';
@@ -562,16 +562,14 @@ class NativePullConduit implements ByteStreamConsumerType {
   }
 
   cancelReadsForReader(reader: object, reason: unknown): void {
-    const requests = this.#takeRequests();
-    for (let i = 0; i < requests.length; i++) {
-      const request = requests.get(i) as NativeRequest;
+    this.#drainRequests((request) => {
       const settler = settlerOf(request);
       if (settler.reader === reader) {
         settler.reject(reason);
       } else {
         this.#requests.push(request);
       }
-    }
+    });
     // ABORT SITE: if the released reader's reads were the only demand and
     // a pull is in flight, abort it — the source contractually holds any
     // bytes and redelivers on the next pull.
@@ -579,29 +577,20 @@ class NativePullConduit implements ByteStreamConsumerType {
   }
 
   errorAllReads(reason: unknown): void {
-    const requests = this.#takeRequests();
-    for (let i = 0; i < requests.length; i++) {
-      settlerOf(requests.get(i) as NativeRequest).reject(reason);
-    }
+    this.#drainRequests((request) => settlerOf(request).reject(reason));
   }
 
   resolveAllReadsAsDone(): void {
-    const requests = this.#takeRequests();
-    for (let i = 0; i < requests.length; i++) {
-      settlerOf(requests.get(i) as NativeRequest).resolve(
-        createReadResult(undefined, true)
-      );
-    }
+    this.#drainRequests((request) =>
+      settlerOf(request).resolve(createReadResult(undefined, true))
+    );
   }
 
-  // Detaches the queued requests for a caller about to settle them, so
-  // nothing a settlement prompts can change the queue being settled, and
-  // drops the byobRequest minted for the old head.
-  #takeRequests(): RingBufferType<NativeRequest> {
-    const requests = this.#requests;
-    this.#requests = new RingBuffer();
+  // Settles every queued request through `visit` (see RingBuffer.drain),
+  // and drops the byobRequest minted for the old head.
+  #drainRequests(visit: (request: NativeRequest) => void): void {
     this.#byobRequestCache = null;
-    return requests;
+    this.#requests.drain(visit);
   }
 
   get hasPendingRead(): boolean {
@@ -986,9 +975,7 @@ class NativePullConduit implements ByteStreamConsumerType {
   // {done, undefined}; BYOB reads get their buffer back via a zero-length
   // view). Shared by the close paths, after their closeStream hook.
   #settleRemainingAsEof(): void {
-    const requests = this.#takeRequests();
-    for (let i = 0; i < requests.length; i++) {
-      const request = requests.get(i) as NativeRequest;
+    this.#drainRequests((request) => {
       if (request.kind === 'default') {
         request.read.resolve(createReadResult(undefined, true));
       } else {
@@ -1000,7 +987,7 @@ class NativePullConduit implements ByteStreamConsumerType {
           )
         );
       }
-    }
+    });
   }
 
   closeFromSource(): void {
