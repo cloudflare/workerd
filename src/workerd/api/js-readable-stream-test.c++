@@ -1089,6 +1089,53 @@ KJ_TEST("ReadableStreamNativeSource read failure rejects the pull") {
   });
 }
 
+KJ_TEST("ReadableStreamNativeSource after an abandoned pull's read fails") {
+  TestFixture testFixture;
+  MockControllerState state;
+  size_t checked = 0;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // A pull whose read fails, abandoned at once, as releasing the reader mid-read does. The
+    // conduit takes no settlement of an abandoned pull as the source's answer, so its
+    // rejection does not error the stream.
+    auto abandonedFailure = [&](jsg::JsObject controller) {
+      auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ErroringSource>());
+      auto abortController = AbortController::constructor(js);
+      auto pull = source->pull(js, controller, abortController->getSignal());
+      abortController->abort(js, kj::none);
+      return pull.then(js,
+          [](jsg::Lock& js) -> jsg::Promise<void> {
+        KJ_FAIL_REQUIRE("expected the abandoned pull to reject");
+      },
+          [&state, &checked, source = source.addRef(), controller = controller.addRef(js)](
+              jsg::Lock& js, jsg::Value exception) mutable {
+        auto message = kj::str(jsg::JsValue(exception.getHandle(js)));
+        KJ_EXPECT(message.contains("test read failure"), message);
+        // Nothing keeps the failure: the next pull settles without delivering, closing or
+        // erroring, and tee() refuses, as for a consumed source.
+        auto next = source->pull(js, controller.getHandle(js), freshSignal(js));
+        KJ_EXPECT_THROW_MESSAGE("already been consumed", source->tee(js));
+        return next.then(js, [&state, &checked](jsg::Lock& js) {
+          KJ_EXPECT(state.enqueued.size() == 0);
+          KJ_EXPECT(state.responded == kj::none);
+          KJ_EXPECT(!state.closed);
+          ++checked;
+        });
+      });
+    };
+    // Through a default read's pull, then a BYOB read's.
+    auto view = jsg::JsUint8Array::create(js, static_cast<size_t>(16));
+    auto defaultPull = abandonedFailure(makeMockController(js, state, js.null()));
+    auto byobPull =
+        abandonedFailure(makeMockController(js, state, makeMockByobRequest(js, state, view, 1)));
+    auto promise = defaultPull.then(
+        js, [byobPull = kj::mv(byobPull)](jsg::Lock& js) mutable { return kj::mv(byobPull); });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(checked == 2);
+}
+
 KJ_TEST("ReadableStreamNativeSource default pull fast path serves synchronously when gated on") {
   TestFixture testFixture;
   MockControllerState state;
