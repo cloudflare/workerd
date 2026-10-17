@@ -590,8 +590,7 @@ KJ_TEST("encode to full flag list") {
 }
 
 KJ_TEST("compatibility dates must be Tuesday, Wednesday, or Thursday") {
-  // List of specific flags that are allowed to use non-conformant dates
-  // (already deployed and can't be changed for compatibility reasons)
+  // Specific flags with compatibility dates outside the normal release weekdays.
   kj::HashSet<kj::StringPtr> allowedFlagExceptions;
   allowedFlagExceptions.insertAll(std::initializer_list<kj::StringPtr>{
     // Existing non-conformant dates that are already deployed
@@ -649,6 +648,9 @@ KJ_TEST("compatibility dates must be Tuesday, Wednesday, or Thursday") {
     "pythonWorkers20250116"_kj,          // 2025-09-29 (Monday) via impliedByAfterDate
     "removeNodejsCompatEOLv22"_kj,       // 2027-04-30 (Friday) via impliedByAfterDate
     "removeNodejsCompatEOLv24"_kj,       // 2028-04-30 (Sunday) via impliedByAfterDate
+
+    // Scheduled default enablement on November 1, 2026 (Sunday).
+    "newModuleRegistry"_kj,
   });
 
   // Helper function to suggest the next valid date (Tuesday, Wednesday, or Thursday)
