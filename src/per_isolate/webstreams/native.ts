@@ -453,22 +453,15 @@ class NativePullConduit implements ByteStreamConsumerType {
   // leaves a teed-away original source closed).
   #status: 'active' | 'closed' | 'errored' = 'active';
   #storedError: unknown;
-  #pulling: boolean = false;
-  #pullAgain: boolean = false;
   // Set by a successful enqueue/respond, cleared at pull start. Used for
   // the once-per-pull delivery check AND the completion latch: a pull
   // that settles without delivering, closing, or erroring while requests
   // are still pending is a broken source — the latch errors the stream
   // rather than busy-looping the re-pull. Aborted pulls are exempt.
   #deliveredThisPull: boolean = false;
-  // The AbortController for the currently in-flight pull, or undefined
-  // when no pull is active. Used as the identity key for superseded-
-  // settle detection: the settle handler captures its own controller
-  // reference and compares it to this field — a mismatch means the
-  // pull was superseded (tee/extract). Aborted pulls keep their
-  // controller reference so that #pulling serialization is maintained
-  // until the aborted promise settles (signal.aborted distinguishes
-  // aborted from live settlements).
+  // The AbortController of the pull in flight, or undefined when none is;
+  // its presence serializes pulls. An aborted pull keeps it until the
+  // pull's promise settles, so the next pull waits for that.
   #pullAbortController: AbortController | undefined;
   #pullAlgorithm: PullAlgorithm | undefined;
   #cancelAlgorithm: CancelAlgorithm | undefined;
@@ -697,61 +690,46 @@ class NativePullConduit implements ByteStreamConsumerType {
 
   // --- Pull pacing -----------------------------------------------------------
 
-  // Standard [[pulling]]/[[pullAgain]] serialization. Demand-driven: pull
-  // only while requests are pending (effective high-water mark of zero).
-  // Re-evaluated after each pull settles for the REMAINING requests; a
-  // single request never spans pulls (the respond is the complete answer
-  // for its read — see the min-read contract).
+  // Pulls are serialized as the spec's [[pulling]] flag serializes them:
+  // at most one is in flight (#pullAbortController), and a read made
+  // meanwhile waits for it to settle. Demand-driven: pull only while
+  // requests are pending (effective high-water mark of zero), and
+  // re-evaluate after each pull settles for the REMAINING requests, which
+  // covers what the spec's [[pullAgain]] records. A single request never
+  // spans pulls (the respond is the complete answer for its read — see
+  // the min-read contract).
   //
   // PER-PULL CANCELLATION: each pull invocation gets a fresh
   // AbortController whose signal is passed as pull(controller, signal).
   // The source contractually checks signal.aborted immediately before
   // enqueue/respond; the controller backstop refuses delivery on an
-  // aborted signal. Settle handlers compare their captured controller
-  // reference against #pullAbortController — a mismatch means the pull
-  // was aborted or superseded and its settlement is inert (the rejection
-  // from kj cancellation is swallowed, preventing a healthy stream from
-  // erroring on a cancelled read).
+  // aborted signal. An aborted pull's settlement is not the source's
+  // answer to anything: the source held its data for the next pull, so a
+  // fulfilled one skips the completion latch, and a rejected one (kj
+  // cancellation of its read) does not error a healthy stream.
   pullIfNeeded(): void {
     if (this.#status !== 'active') return;
     if (this.#requests.length === 0) return;
     const pullAlgorithm = this.#pullAlgorithm;
     if (pullAlgorithm === undefined) return;
-    if (this.#pulling) {
-      this.#pullAgain = true;
-      return;
-    }
+    if (this.#pullAbortController !== undefined) return;
     const controller = this.#controller;
     if (controller === undefined) return;
-    this.#pulling = true;
-    this.#deliveredThisPull = false;
     const ac = new AbortController();
     this.#pullAbortController = ac;
+    this.#deliveredThisPull = false;
     const signal = AbortControllerSignalGet(ac);
     markPromiseHandled(
       PromisePrototypeThen(
         pullAlgorithm(controller, signal),
         () => {
-          // Superseded-settle check: tee/extract may have cleared the
-          // controller reference; this settlement belongs to a dead pull.
-          if (this.#pullAbortController !== ac) return;
-          this.#pulling = false;
           this.#pullAbortController = undefined;
-          // Aborted-pull check: the pull's signal was aborted (reader
-          // release, cancel, tee, extract).  The source contractually
-          // held its data; skip the completion latch and just schedule
-          // the next pull if demand exists.
-          if (AbortSignalAbortedGet(signal)) {
-            if (this.#status === 'active' && this.#requests.length > 0) {
-              this.pullIfNeeded();
-            }
-            return;
-          }
-          // COMPLETION LATCH: a pull that settled without delivering,
+          // COMPLETION LATCH: a live pull that settled without delivering,
           // closing, or erroring while requests are still pending is a
           // broken source. Error the stream to prevent a busy-loop
           // re-pull against a source that will never deliver.
           if (
+            !AbortSignalAbortedGet(signal) &&
             !this.#deliveredThisPull &&
             this.#status === 'active' &&
             this.#requests.length > 0
@@ -764,42 +742,27 @@ class NativePullConduit implements ByteStreamConsumerType {
             );
             return;
           }
-          if (
-            this.#pullAgain ||
-            (this.#status === 'active' && this.#requests.length > 0)
-          ) {
-            this.#pullAgain = false;
-            this.pullIfNeeded();
-          }
+          this.pullIfNeeded();
         },
         (e: unknown) => {
-          if (this.#pullAbortController !== ac) return; // superseded
-          this.#pulling = false;
           this.#pullAbortController = undefined;
-          // Aborted-pull rejection is expected (kj cancellation, etc.)
-          // — not a source error.  Schedule the next pull if needed.
           if (AbortSignalAbortedGet(signal)) {
-            if (this.#status === 'active' && this.#requests.length > 0) {
-              this.pullIfNeeded();
-            }
-            return;
+            this.pullIfNeeded();
+          } else {
+            this.errorFromSource(e);
           }
-          this.#pullAgain = false;
-          this.errorFromSource(e);
         }
       ) as Promise<void>
     );
   }
 
-  // Aborts the in-flight pull's signal.  #pulling and #pullAbortController
-  // are deliberately NOT cleared — the aborted pull's promise must settle
-  // before a new pull can start, maintaining the non-reentrant [[pulling]]
-  // / [[pullAgain]] serialization.  The settle handler detects the abort
-  // via signal.aborted and skips the completion latch.
+  // Aborts the in-flight pull's signal. #pullAbortController is
+  // deliberately NOT cleared: the aborted pull's promise must settle
+  // before a new pull can start, keeping pulls serialized. The settle
+  // handler detects the abort via signal.aborted.
   #abortCurrentPull(reason: unknown): void {
     const ac = this.#pullAbortController;
     if (ac === undefined) return;
-    this.#pullAgain = false;
     this.#deliveredThisPull = false;
     this.#byobRequestCache = null;
     AbortControllerAbort(ac, reason);
