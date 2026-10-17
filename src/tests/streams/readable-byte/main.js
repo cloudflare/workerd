@@ -314,3 +314,5 @@ export {
   byteSourceExpectedLengthContract,
   byteSourceExpectedLengthHeldRequest,
 } from 'expected-length';
+
+export { readerMembersOnOtherReaderClasses } from 'reader-brand-checks';
