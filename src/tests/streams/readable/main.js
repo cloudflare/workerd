@@ -277,3 +277,5 @@ export {
   fromBuildsNoDictionariesFromObjectPrototype,
   asyncIteratorShape,
 } from 'pollution';
+
+export { readerClosedIsMarkedHandled } from 'unhandled-rejection';
