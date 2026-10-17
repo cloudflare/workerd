@@ -735,7 +735,7 @@ class NativePullConduit implements ByteStreamConsumerType {
             this.errorFromSource(
               new TypeError(
                 'native source pull settled without delivering, closing, ' +
-                  'or erroring — the source appears broken'
+                  'or erroring; the source appears broken'
               )
             );
             return;
@@ -845,8 +845,8 @@ class NativePullConduit implements ByteStreamConsumerType {
       if (byteLength === 0) {
         throw new TypeError(
           'enqueue() of an empty chunk is not supported for native ' +
-            'streams; an empty answer means end-of-stream — call close() ' +
-            'instead'
+            'streams; an empty answer means end-of-stream, so call ' +
+            'close() instead'
         );
       }
       // EXPECTED-LENGTH CONTRACT: overflow check before commit.
@@ -891,7 +891,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     if (written === 0) {
       throw new TypeError(
         'respond(0) is not supported for native streams; an empty answer ' +
-          'means end-of-stream — call close() instead'
+          'means end-of-stream, so call close() instead'
       );
     }
     const filled = desc.bytesFilled + written;
