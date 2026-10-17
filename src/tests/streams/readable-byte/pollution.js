@@ -8,7 +8,8 @@
 // body's C++ source, and an Object.prototype.then getter beyond the one
 // lookup the user's read promise makes. The C++ implementation reads none
 // of these; the TypeScript one must not either. Every mutation is undone
-// before any assertion runs.
+// before any assertion runs. What that getter does to the stream must not
+// reach the other reads a cancel() or close() answered.
 
 import { strictEqual, deepStrictEqual, rejects } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -282,6 +283,69 @@ export const thenGetterFiresOncePerByteRead = {
       strictEqual(fired, perRead[name] ?? 1, `${name}: ${fired}`);
       for (const result of results) {
         strictEqual(Object.getPrototypeOf(result), Object.prototype, name);
+      }
+    }
+  },
+};
+
+// A then getter that releases the reader from the first read's result,
+// while cancel() or close() settles the reader's pending reads: either call
+// answers every read at once, so the next read still resolves done rather
+// than rejecting with the release. Default reads, autoAllocateChunkSize
+// reads at cancel(), and BYOB reads at cancel() and at a close() the
+// source answers with respond(0) (C++ settles them at close(), and has no
+// byobRequest after it).
+export const thenGetterReleasesReaderWhileByteReadsSettle = {
+  async test() {
+    const cancel = (reader) => reader.cancel('bye');
+    const cases = {
+      defaultCancel: { end: cancel },
+      defaultClose: { end: (reader, controller) => controller.close() },
+      autoAllocateCancel: { source: { autoAllocateChunkSize: 8 }, end: cancel },
+      byobCancel: { mode: 'byob', end: cancel },
+      byobCloseAndRespond: {
+        mode: 'byob',
+        end: (reader, controller) => {
+          controller.close();
+          controller.byobRequest?.respond(0);
+        },
+      },
+    };
+    for (const [name, { mode, source, end }] of Object.entries(cases)) {
+      let controller;
+      const rs = new ReadableStream({
+        type: 'bytes',
+        ...source,
+        start(c) {
+          controller = c;
+        },
+      });
+      const reader = rs.getReader({ mode });
+      const read = () =>
+        mode === 'byob' ? reader.read(new Uint8Array(4)) : reader.read();
+      const reads = [read(), read()];
+      let fired = 0;
+      Object.defineProperty(Object.prototype, 'then', {
+        get() {
+          if (Object.hasOwn(this, 'done') && fired++ === 0) {
+            reader.releaseLock();
+          }
+          return undefined;
+        },
+        configurable: true,
+      });
+      try {
+        const ended = end(reader, controller);
+        for (const pending of reads) {
+          const result = await Promise.race([
+            pending,
+            scheduler.wait(250).then(() => 'pending'),
+          ]);
+          strictEqual(result.done, true, name);
+        }
+        await ended;
+      } finally {
+        delete Object.prototype.then;
       }
     }
   },
