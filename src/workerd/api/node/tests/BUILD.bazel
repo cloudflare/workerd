@@ -3,6 +3,12 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
+    src = "zlib-zstd-parameters-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["zlib-zstd-parameters-nodejs-test.js"],
+)
+
+wd_test(
     src = "assert-test.wd-test",
     args = ["--experimental"],
     data = ["assert-test.js"],
