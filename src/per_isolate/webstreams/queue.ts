@@ -2,8 +2,8 @@
 
 // Single-queue / multi-cursor model backing the TypeScript Streams
 // implementation: the QUEUED consumer backend. See the queue/cursor design
-// doc for the full rationale, and native-stream-integration.md §10 for the
-// fence conventions separating this backend from the native one.
+// doc for the full rationale, and webstreams/AGENTS.md for the fence
+// conventions separating this backend from the native one.
 //
 // One StreamQueue per controller holds each chunk exactly once. Every
 // consumer (the stream itself, and each tee branch) owns a QueueCursor — a
@@ -273,8 +273,7 @@ function fractionalFillError(): TypeError {
 // remain backend-blind: it never knows whether it is talking to the queued
 // cursor machinery in this file or the native pull conduit (native.ts).
 // All backend divergence lives behind this interface or at the five
-// enumerated BACKEND-DISPATCH points (see native-stream-integration.md
-// §10 "Fences and signposts").
+// enumerated BACKEND-DISPATCH points (see webstreams/AGENTS.md).
 
 export interface StreamConsumer<V> {
   // Submit a default read. Per-reader FIFO; reader identity enables
@@ -299,14 +298,6 @@ export interface StreamConsumer<V> {
   drain(maxSize?: number): { chunks: V[]; done: boolean };
   // Reject pending reads submitted by a specific reader (lock release).
   cancelReadsForReader(reader: object, reason: unknown): void;
-  // Reject all pending reads (stream ERROR path only).
-  errorAllReads(reason: unknown): void;
-  // Resolve all pending reads as done (stream CANCEL path).
-  resolveAllReadsAsDone(): void;
-  readonly hasPendingRead: boolean;
-  // Fulfill the first pending read directly with a value, skipping the queue.
-  // Spec ReadableStreamFulfillReadRequest: shift + chunk steps.
-  fulfillFirstPendingRead(value: V): void;
   // Stream-cancel teardown. The STREAM layer owns the source-cancel policy
   // (tee composite hooks vs direct controller cancel) and passes it as
   // `decideSourceCancel`, invoked with whether this consumer is the last
@@ -326,14 +317,6 @@ export interface ByteStreamConsumer extends StreamConsumer<Uint8Array> {
   readBYOB(
     desc: PullIntoDescriptor
   ): Promise<ReadableStreamReadResult<ArrayBufferView>>;
-  readonly headPullInto: PullIntoDescriptor | undefined;
-  readonly pendingPullIntoView: Uint8Array | undefined;
-  respondBYOB(bytesWritten: number): void;
-  commitPullIntosOnClose(): void;
-  // Spec step 9.3: if the head descriptor is an auto-allocate
-  // (readerType 'default'), shift it out and return it so the controller
-  // can fulfill the read directly from the enqueued chunk.
-  shiftAutoAllocateDescriptor(): PullIntoDescriptor | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -797,6 +780,8 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
     return false;
   }
 
+  // Fulfill the first pending read directly with a value, skipping the queue.
+  // Spec ReadableStreamFulfillReadRequest: shift + chunk steps.
   fulfillFirstPendingRead(value: V): void {
     const pending = this.#pendingReads.shift() as PendingRead<V>;
     pending.resolve(createReadResult(value, false));
