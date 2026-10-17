@@ -14,6 +14,7 @@
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/trace-stream.h>
 #include <workerd/io/tracer.h>
+#include <workerd/io/tracked-wasm-instance.h>
 #include <workerd/io/worker-entrypoint.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/jsg/snapshot.h>

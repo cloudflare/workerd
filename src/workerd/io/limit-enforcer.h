@@ -5,7 +5,6 @@
 #pragma once
 
 #include <workerd/io/outcome.capnp.h>
-#include <workerd/io/tracked-wasm-instance.h>
 
 #include <v8-isolate.h>
 
@@ -18,6 +17,7 @@
 namespace workerd {
 class IsolateObserver;
 class RequestObserver;
+class TrackedWasmInstanceList;
 
 struct ActorCacheSharedLruOptions;
 class IoContext;
