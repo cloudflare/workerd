@@ -3804,8 +3804,12 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
     auto promise = ioContext.run([weakReader = reader->getWeak(), ex = exception.clone()](
                                      jsg::Lock& js) mutable -> kj::Promise<void> {
       auto& ioContext = IoContext::current();
+      if (weakReader.tryGet() == kj::none) {
+        return KJ_EXCEPTION(DISCONNECTED, "The pump was canceled.");
+      }
+      // Reason conversion can run JavaScript that drops the pump. Borrow only afterwards.
+      auto reason = exceptionToCancelReason(js, kj::mv(ex));
       KJ_IF_SOME(reader, weakReader.tryGet()) {
-        auto reason = exceptionToCancelReason(js, kj::mv(ex));
         return ioContext.awaitJs(js, reader.cancel(js, reason));
       } else {
         return KJ_EXCEPTION(DISCONNECTED, "The pump was canceled.");

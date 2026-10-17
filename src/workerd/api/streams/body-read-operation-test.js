@@ -285,3 +285,48 @@ export const callbacksRetainPendingBodyRead = {
     }
   },
 };
+
+export const uploadAbortDuringReasonConversion = {
+  async test(_controller, env) {
+    const abort = new AbortController();
+    const original = Object.getOwnPropertyDescriptor(
+      Error.prototype,
+      'retryable'
+    );
+    let conversions = 0;
+    try {
+      Object.defineProperty(Error.prototype, 'retryable', {
+        configurable: true,
+        get() {
+          return true;
+        },
+        set() {
+          delete Error.prototype.retryable;
+          ++conversions;
+          abort.abort();
+        },
+      });
+      const stream = new ReadableStream({
+        async pull(controller) {
+          await scheduler.wait(10);
+          controller.error(new Error('upload failed'));
+        },
+      });
+      await rejects(
+        env.SUB.fetch('https://recipient/upload', {
+          method: 'POST',
+          body: stream,
+          signal: abort.signal,
+        }),
+        { name: 'AbortError' }
+      );
+      strictEqual(conversions, 1);
+      strictEqual(abort.signal.aborted, true);
+    } finally {
+      delete Error.prototype.retryable;
+      if (original !== undefined) {
+        Object.defineProperty(Error.prototype, 'retryable', original);
+      }
+    }
+  },
+};

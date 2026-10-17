@@ -5,5 +5,15 @@ const config :Workerd.Config = (
   services = [(name = "body-read-operation", worker = (
     compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
     modules = [(name = "worker", esModule = embed "body-read-operation-test.js")],
+    bindings = [(name = "SUB", service = "recipient")],
+  )), (name = "recipient", worker = (
+    modules = [(name = "worker", esModule =
+      `export default {
+      `  async fetch() {
+      `    await scheduler.wait(2500);
+      `    return new Response('ok');
+      `  }
+      `};
+    )],
   ))],
 );
