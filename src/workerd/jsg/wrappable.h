@@ -81,6 +81,13 @@ enum class ContextDataSlot : int {
   CONSOLE_ORIGINAL_INFO,
   CONSOLE_ORIGINAL_LOG,
   CONSOLE_ORIGINAL_WARN,
+
+  // State that a startup-snapshot zygote parks in its context for the isolates restored from the
+  // snapshot: C++ objects die with the zygote, and V8 handles held from C++ would keep
+  // v8::SnapshotCreator::CreateBlob() from running.
+  SNAPSHOT_MAIN_MODULE,      // The evaluated main module's namespace (io/worker.c++).
+  SNAPSHOT_WASM_SHIMS,       // `true` if the WebAssembly shims are installed (io/worker.c++).
+  SNAPSHOT_BOOTSTRAP_STATE,  // The per-isolate bootstrap's state (api/per-isolate-bootstrap.c++).
 };
 
 // Returns the slot holding the saved original of the i'th decorated console method, counting
@@ -98,6 +105,16 @@ inline void setContextDataSlot(
 inline v8::Local<v8::Data> getContextDataSlot(
     v8::Local<v8::Context> context, ContextDataSlot slot) {
   return context->GetEmbedderDataV2(static_cast<int>(slot));
+}
+
+// The value in `slot`, or undefined if it holds none.
+inline v8::Local<v8::Value> getContextDataSlotValue(
+    v8::Local<v8::Context> context, ContextDataSlot slot) {
+  if (static_cast<uint32_t>(slot) < context->GetNumberOfEmbedderDataFields()) {
+    auto data = getContextDataSlot(context, slot);
+    if (!data.IsEmpty() && data->IsValue()) return data.As<v8::Value>();
+  }
+  return v8::Undefined(v8::Isolate::GetCurrent());
 }
 
 inline void setAlignedPointerInEmbedderData(

@@ -658,6 +658,16 @@ pub mod ffi {
             args: Pin<&mut FunctionCallbackInfo>,
         );
 
+        // Startup snapshots (see `Resources::get_constructor`): store a resource template in the
+        // snapshot being prepared, and take one back in a restored isolate (an empty `Global` if
+        // there is none).
+        pub unsafe fn snapshot_add_template(
+            isolate: *mut Isolate,
+            name: &str,
+            tmpl: &Global, /* v8::Global<FunctionTemplate> */
+        );
+        pub unsafe fn snapshot_take_template(isolate: *mut Isolate, name: &str) -> Global /* v8::Global<FunctionTemplate> */;
+
         // Infallible: only defensive tag checks; returns kj::none for non-Rust
         // wrappables rather than throwing.
         pub unsafe fn unwrap_resource(
@@ -3025,30 +3035,6 @@ impl<T> From<ffi::Global> for Global<T> {
             traced: UnsafeCell::new(ffi::TracedReference { ptr: 0 }),
             _marker: PhantomData,
         }
-    }
-}
-
-impl<T> Global<T> {
-    /// Consumes the `Global`, returning its strong FFI handle and transferring ownership to
-    /// the caller, which becomes responsible for disposing the handle. Snapshot-pipeline use
-    /// only.
-    ///
-    /// # Panics
-    ///
-    /// Panics if a traced reference has been installed on this `Global`; cached resource
-    /// templates are never GC-traced, so this does not happen for them.
-    pub fn into_ffi_for_snapshot(self) -> ffi::Global {
-        // SAFETY: reading the UnsafeCell is sound — we hold the only reference.
-        let traced_ptr = unsafe { (*self.traced.get()).ptr };
-        assert_eq!(
-            traced_ptr, 0,
-            "cannot transfer a Global with an active traced reference"
-        );
-        let handle = ffi::Global {
-            ptr: self.handle.ptr,
-        };
-        std::mem::forget(self);
-        handle
     }
 }
 

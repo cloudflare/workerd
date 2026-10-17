@@ -1349,6 +1349,7 @@ struct ResourceTypeBuilder {
         typeWrapper.template getTemplate<isContext>(isolate, static_cast<Type*>(nullptr)));
     // Propagate wildcard proxy to children. It's a data property, so it should be propagated, but v8 only handles normal data properties.
     auto& parentWrapper = static_cast<ResourceWrapper<TypeWrapper, Type>&>(typeWrapper);
+    parentWrapper.ensureMembersRegistered(isolate);
     if (parentWrapper.wildcardHandler != kj::none) {
       auto& selfWrapper = static_cast<ResourceWrapper<TypeWrapper, Self>&>(typeWrapper);
       KJ_ASSERT(
@@ -1983,8 +1984,29 @@ class ResourceWrapper {
     // Construct an instance of this type to be used as the Javascript global object, creating
     // a new JavaScript context.
     auto isolate = js.v8Isolate;
-    auto tmpl = getTemplate<true>(isolate, nullptr)->InstanceTemplate();
-    v8::Local<v8::Context> context = v8::Context::New(isolate, nullptr, tmpl);
+    v8::Local<v8::Context> context;
+#ifdef V8_SNAPSHOT_RECORDS_ALL_GLOBAL_PROXY_SIZES
+    // Only a V8 that records the default context's global proxy size can rebuild the proxy for a
+    // global object created from a template with embedder fields; older V8s hit a size check.
+    constexpr bool canAdoptSnapshotContext = true;
+#else
+    constexpr bool canAdoptSnapshotContext = false;
+#endif
+    if (canAdoptSnapshotContext && js.isStartingFromSnapshot()) {
+      // The snapshot's default context is the zygote's context: built from this same template,
+      // every member installed, the worker's top-level code already run. Creating the context
+      // without a global template makes V8 hook the deserialized global object up to a fresh
+      // global proxy and stop there. Passing the template would make it build a new global object
+      // from the template (Genesis::ConfigureGlobalObject instantiating every member) and copy
+      // the snapshot's properties onto it, which was a third of the cost of starting a restored
+      // isolate. What is C++ state on this side (the wrapper, the embedder data slots, the module
+      // registry) is re-attached below exactly as for a fresh context.
+      context = v8::Context::New(isolate, nullptr, v8::MaybeLocal<v8::ObjectTemplate>());
+    } else {
+      // Not starting from a snapshot, or on a V8 that cannot adopt the snapshot's context.
+      auto tmpl = getTemplate<true>(isolate, nullptr)->InstanceTemplate();
+      context = v8::Context::New(isolate, nullptr, tmpl);
+    }
     auto global = context->Global();
 
     auto ptr = js.alloc<T>(kj::fwd<Args>(args)...);
@@ -2161,6 +2183,8 @@ class ResourceWrapper {
         T::template registerMembers<decltype(builder), T>(builder);
       }
 
+      membersRegistered = true;
+
       KJ_IF_SOME(handler, wildcardHandler) {
         instance->SetHandler(handler);
       }
@@ -2174,6 +2198,25 @@ class ResourceWrapper {
   }
 
   kj::Maybe<v8::NamedPropertyHandlerConfiguration> wildcardHandler;
+
+  // Whether getTemplate() registered this type's members in this isolate. A template adopted from
+  // a startup snapshot (IsolateBase::adoptTemplatesFromSnapshot) was built in the zygote, so the
+  // C++ state registration records, such as the wildcardHandler a child type copies in
+  // registerInherit(), is missing until ensureMembersRegistered() runs it.
+  bool membersRegistered = false;
+
+  void ensureMembersRegistered(v8::Isolate* isolate) {
+    if (membersRegistered) return;
+    if (memoizedConstructor.IsEmpty()) {
+      getTemplate(isolate, static_cast<T*>(nullptr));
+      return;
+    }
+    // Build a throwaway template for its registration's side effects and keep the adopted one,
+    // which the snapshot's objects were instantiated from.
+    auto adopted = kj::mv(memoizedConstructor);
+    getTemplate(isolate, static_cast<T*>(nullptr));
+    memoizedConstructor = kj::mv(adopted);
+  }
 
   // Enumerate this type's two constructor-template slots (empty or not) for startup-snapshot
   // handling. Slots are visited in a fixed compile-time order (parameter-pack order of the

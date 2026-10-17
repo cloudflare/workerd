@@ -268,6 +268,11 @@ kj::uint wrappable_strong_refcount(const Wrappable& wrappable);
 Local wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl);
 void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args);
 
+// Startup snapshots: the Rust realm's resource templates travel through the snapshot under their
+// type's name (jsg::IsolateBase::addExternalSnapshotTemplate / takeExternalSnapshotTemplate).
+void snapshot_add_template(Isolate* isolate, ::rust::Str name, const Global& tmpl);
+Global snapshot_take_template(Isolate* isolate, ::rust::Str name);
+
 // Unwrappers
 ::rust::String unwrap_string(Isolate* isolate, Local value);
 bool unwrap_boolean(Isolate* isolate, Local value);

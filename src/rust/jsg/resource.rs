@@ -458,19 +458,48 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
 
 #[derive(Default)]
 pub struct Resources {
-    /// Cached V8 `FunctionTemplate`s keyed by resource `TypeId`.
-    templates: HashMap<TypeId, v8::Global<v8::FunctionTemplate>>,
+    /// Cached V8 `FunctionTemplate`s keyed by resource `TypeId`, with the type's name, under which
+    /// a startup snapshot stores the template.
+    templates: HashMap<TypeId, (&'static str, v8::Global<v8::FunctionTemplate>)>,
 }
 
 impl Resources {
-    /// Gets or creates the cached `FunctionTemplate` for a resource type.
+    /// Gets or creates the cached `FunctionTemplate` for a resource type. An isolate restored from
+    /// a startup snapshot adopts the zygote's template instead of creating one: the snapshot's
+    /// wrappers of `R` were instantiated from it, and its methods' signatures only accept those.
     pub fn get_constructor<R: Resource + 'static>(
         &mut self,
         isolate: v8::IsolatePtr,
     ) -> &v8::Global<v8::FunctionTemplate> {
-        self.templates
+        &self
+            .templates
             .entry(TypeId::of::<R>())
-            .or_insert_with(|| Self::create_resource_constructor::<R>(isolate))
+            .or_insert_with(|| {
+                let name = std::any::type_name::<R>();
+                // SAFETY: Caller guarantees the isolate is valid and locked.
+                let adopted = unsafe { v8::ffi::snapshot_take_template(isolate.as_ffi(), name) };
+                let template = if adopted.ptr == 0 {
+                    Self::create_resource_constructor::<R>(isolate)
+                } else {
+                    adopted.into()
+                };
+                (name, template)
+            })
+            .1
+    }
+
+    /// Stores every cached template in the startup snapshot being prepared, under its type's
+    /// name, and drops the cache: the snapshot creator refuses live handles.
+    ///
+    /// # Safety
+    /// `isolate` must be live, locked and preparing a snapshot.
+    pub(crate) unsafe fn prepare_snapshot(&mut self, isolate: v8::IsolatePtr) {
+        for (_, (name, template)) in self.templates.drain() {
+            // SAFETY: forwarded from the caller; `template` is a live handle.
+            unsafe {
+                v8::ffi::snapshot_add_template(isolate.as_ffi(), name, template.as_ffi_ref());
+            }
+        }
     }
 
     /// Creates a new V8 `FunctionTemplate` for resource type `R` via the C++ FFI.
@@ -482,17 +511,6 @@ impl Resources {
             v8::ffi::create_resource_template(isolate.as_ffi(), &get_resource_descriptor::<R>())
                 .into()
         }
-    }
-
-    /// Drains every cached resource-template handle, transferring ownership of each
-    /// `v8::Global<v8::FunctionTemplate>` to the caller. Used by the `PREPARE_SNAPSHOT`
-    /// pipeline, which disposes each handle before `CreateBlob`; the cache is left empty and
-    /// templates are recreated lazily on demand.
-    pub fn take_template_handles(&mut self) -> Vec<v8::ffi::Global> {
-        self.templates
-            .drain()
-            .map(|(_, global)| global.into_ffi_for_snapshot())
-            .collect()
     }
 }
 

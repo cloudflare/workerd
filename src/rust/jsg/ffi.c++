@@ -649,6 +649,19 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
       static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
 }
 
+void snapshot_add_template(Isolate* isolate, ::rust::Str name, const Global& tmpl) {
+  auto& global = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
+  ::workerd::jsg::IsolateBase::from(isolate).addExternalSnapshotTemplate(
+      kj::str(kj::ArrayPtr<const char>(name.data(), name.size())), global.Get(isolate));
+}
+
+Global snapshot_take_template(Isolate* isolate, ::rust::Str name) {
+  auto tmpl = ::workerd::jsg::IsolateBase::from(isolate).takeExternalSnapshotTemplate(
+      kj::str(kj::ArrayPtr<const char>(name.data(), name.size())));
+  if (tmpl.IsEmpty()) return Global{.ptr = 0};
+  return to_ffi(v8::Global<v8::FunctionTemplate>(isolate, tmpl));
+}
+
 // Unwrappers
 
 // Runs `fn` (returning a v8::MaybeLocal<T>) and, on failure, converts the pending
@@ -1080,6 +1093,7 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
         // spec_compliant_property_attributes has no effect on inspect properties.
         auto symbol = v8::Symbol::New(isolate, v8Name);
         inspectProperties->Set(v8Name, symbol, v8::PropertyAttribute::ReadOnly);
+        registerExternalRef(prop.getter_callback);
         auto getterFn = v8::FunctionTemplate::New(isolate,
             reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(prop.getter_callback)));
         prototype->SetAccessorProperty(symbol, getterFn, v8::Local<v8::FunctionTemplate>(),

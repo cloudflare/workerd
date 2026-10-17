@@ -1322,7 +1322,16 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     // In our production environment, however, we can safely assume that there is always memory
     // pressure, because every machine is handling thousands of tenants all the time. So we might
     // as well just throw the switch to "moderate" right away.
-    lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
+    //
+    // Not for isolates restored from a startup snapshot, which are meant to be short-lived: the
+    // transition to "moderate" also makes V8 release every page that the isolate group pools
+    // (Heap::CheckMemoryPressure -> MemoryPool::ReleaseAllImmediately), and those pages let the
+    // group's next isolate start without mapping and faulting in a heap again (with their
+    // contents, for remapped snapshot pages). The GC heuristics that the level tunes hardly matter
+    // in a short-lived heap.
+    if (!lock->isStartingFromSnapshot()) {
+      lock->v8Isolate->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
+    }
 
     // Register GC prologue and epilogue callbacks so that we can report GC CPU time via the
     // "request_context" Jaeger span.
@@ -1821,6 +1830,9 @@ void setWebAssemblyModuleHasInstance(jsg::Lock& lock, v8::Local<v8::Context> con
       });
     };
     v8::Local<v8::Function> function = jsg::check(v8::Function::New(context, instanceof));
+    // The function may end up in a startup snapshot (see setupContextInternalScripts).
+    jsg::isolateRegisterExternalReference(
+        lock.v8Isolate, reinterpret_cast<intptr_t>(static_cast<v8::FunctionCallback>(instanceof)));
 
     auto webAssembly =
         KJ_ASSERT_NONNULL(lock.global().get(lock, "WebAssembly").tryCast<jsg::JsObject>());
@@ -1882,6 +1894,9 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
     });
   };
   auto registerFn = jsg::check(v8::Function::New(context, registerCb));
+  // The function may end up in a startup snapshot (see setupContextInternalScripts).
+  jsg::isolateRegisterExternalReference(
+      lock.v8Isolate, reinterpret_cast<intptr_t>(static_cast<v8::FunctionCallback>(registerCb)));
 
   // Build the shim in JavaScript. It wraps both WebAssembly.instantiate (async) and
   // WebAssembly.Instance (sync constructor).
@@ -2133,17 +2148,26 @@ void Worker::setupContext(jsg::Lock& lock, v8::Local<v8::Context> context) {
 }
 
 void Worker::setupContextInternalScripts(jsg::Lock& lock, v8::Local<v8::Context> context) {
-  // For isolates created by SnapshotCreator V8's bootstrapper skips InstallSpecialObjects,
-  // so the `WebAssembly` global does not exist and these shims would fail.
-  // That's fine: wasm modules aren't captured in the snapshot anyway, and this runs again
-  // in normal mode on the context restored from the snapshot, installing the shims then.
-  if (!lock.isPreparingSnapshot()) {
-    // Set WebAssembly.Module @@HasInstance
-    setWebAssemblyModuleHasInstance(lock, context);
-
-    // Shim WebAssembly.instantiate to detect modules exporting "__instance_signal".
-    shimWebAssemblyInstantiate(lock, context);
+  if (lock.isPreparingSnapshot()) {
+    // A context of an isolate created by v8::SnapshotCreator only has a `WebAssembly` global with
+    // V8's --experimental-natives-in-snapshot, which also keeps it in the contexts restored from
+    // the blob. Then the shims are installed here and travel in the snapshot (their callbacks are
+    // capture-less functions registered as external references). Otherwise they cannot be
+    // installed, and every restored isolate installs them instead.
+    v8::Context::Scope contextScope(context);
+    if (lock.global().get(lock, "WebAssembly").tryCast<jsg::JsObject>() == kj::none) return;
+    jsg::setContextDataSlot(
+        context, jsg::ContextDataSlot::SNAPSHOT_WASM_SHIMS, v8::True(lock.v8Isolate));
+  } else if (lock.isStartingFromSnapshot() &&
+      jsg::getContextDataSlotValue(context, jsg::ContextDataSlot::SNAPSHOT_WASM_SHIMS)->IsTrue()) {
+    return;
   }
+
+  // Set WebAssembly.Module @@HasInstance
+  setWebAssemblyModuleHasInstance(lock, context);
+
+  // Shim WebAssembly.instantiate to detect modules exporting "__instance_signal".
+  shimWebAssemblyInstantiate(lock, context);
 }
 // =======================================================================================
 
@@ -2268,18 +2292,6 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         isolateBase.setSnapshotDefaultContext(context);
       }
 
-      // The zygote context is never disposed through disposeContext() (see the snapshot step
-      // after this handle scope), so release the per-isolate bootstrap state on the way out,
-      // while the context handle is still valid. Its Globals (require(), the
-      // compatFlags/autogates/utils objects, primordials, the require() cache, the
-      // context-extension template) are not Wrappables and would otherwise be reported as
-      // unserialized by CreateBlob. A worker started from the snapshot re-runs the bootstrap.
-      KJ_DEFER({
-        if (lock.isPreparingSnapshot()) {
-          cleanupPerIsolateBootstrap(lock, context);
-        }
-      });
-
       // Run per-isolate bootstrap for freshly created service worker contexts.
       // (Modular worker contexts already ran bootstrap in the Script constructor.)
       if (freshContext) {
@@ -2374,8 +2386,18 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                 lock.runMicrotasks();
               }
               KJ_CASE_ONEOF(mainModule, kj::Path) {
-                KJ_IF_SOME(ns,
-                    tryResolveMainModule(lock, mainModule, *jsContext, *script, limitErrorOrTime)) {
+                kj::Maybe<jsg::JsObject> maybeNs;
+                if (lock.isStartingFromSnapshot()) {
+                  // The zygote evaluated the main module and left its namespace in the context.
+                  auto ns = jsg::getContextDataSlotValue(
+                      context, jsg::ContextDataSlot::SNAPSHOT_MAIN_MODULE);
+                  KJ_REQUIRE(ns->IsObject(), "snapshot does not record the main module namespace");
+                  maybeNs = jsg::JsObject(ns.As<v8::Object>());
+                } else {
+                  maybeNs =
+                      tryResolveMainModule(lock, mainModule, *jsContext, *script, limitErrorOrTime);
+                }
+                KJ_IF_SOME(ns, maybeNs) {
                   // To avoid resetting Worker-level C++ handles before snapshotting, we simply do not
                   // create them eagerly. This is safe because the top-level code has already executed,
                   // and the zygote worker will not handle any requests.
@@ -2385,6 +2407,15 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                   //     impl->ctxExports == IsolateBase::workerExportsObj.
                   // A real Worker repopulates these handles in START_FROM_SNAPSHOT mode.
                   if (lock.isPreparingSnapshot()) {
+                    // Top-level code that awaits a native promise (a framework importing its
+                    // session key with crypto.subtle.importKey, say) leaves the jsg promise
+                    // translation step queued as a microtask. Until it runs, the C++ result
+                    // is held through a strong v8::Global, which CreateBlob() refuses. The
+                    // script path above flushes for the same reason.
+                    lock.runMicrotasks();
+                    // Record the namespace so a restored isolate can skip evaluation entirely.
+                    jsg::setContextDataSlot(context, jsg::ContextDataSlot::SNAPSHOT_MAIN_MODULE,
+                        v8::Local<v8::Object>(ns));
                     break;
                   }
                   impl->env = lock.v8Ref(bindingsScope.As<v8::Value>());
@@ -2473,25 +2504,23 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
     if (auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
         isolateBase.isPreparingSnapshot()) {
-      // Rust JSG resource templates (e.g. node-internal:dns) are cached as v8::Globals
-      // inside the Rust Realm, invisible to the C++ template slots and reset passes — each
-      // one would trip CreateBlob's CheckGlobalAndEternalHandles. Drain them here (ownership
-      // of each persistent handle transfers to this vector) and hand them to
-      // createSnapshotBlob() to reset like any other isolate handle. Templates are recreated
-      // lazily on demand and a START_FROM_SNAPSHOT isolate starts with an empty cache.
-      kj::Vector<v8::Global<v8::FunctionTemplate>> rustTemplateHandles;
-      {
-        auto* realm = ::workerd::rust::jsg::realm_from_isolate(lock.v8Isolate);
-        for (auto& handle: ::workerd::rust::jsg::realm_take_resource_templates(*realm)) {
-          rustTemplateHandles.add(
-              ::workerd::rust::jsg::global_from_ffi<v8::FunctionTemplate>(kj::mv(handle)));
-        }
-      }
-      auto contextGlobal = jsContext->extractContextGlobalForSnapshot();
-      (*jsContext)->clear();
-      const_cast<Script&>(*script).impl->moduleContext = kj::none;
-      impl->context = kj::none;
-      isolateBase.createSnapshotBlob(kj::mv(contextGlobal), kj::mv(rustTemplateHandles));
+      // In a handle scope of its own, for the handles taken below.
+      lock.withinHandleScope([&] {
+        // The Rust realm caches its resource templates in v8::Globals, which CreateBlob refuses;
+        // they go into the blob instead, and a restored realm adopts them on first use.
+        // const_cast OK because guarded by `lock`.
+        ::workerd::rust::jsg::realm_prepare_snapshot(
+            const_cast<::workerd::rust::jsg::Realm&>(*script->isolate->impl->realm));
+        // The bootstrap's C++ state holds V8 handles: park it in the heap, where a restored
+        // isolate picks it up.
+        auto context = jsContext->getHandle(lock);
+        stashPerIsolateBootstrapForSnapshot(lock, context);
+        auto contextGlobal = jsContext->extractContextGlobalForSnapshot();
+        (*jsContext)->clear();
+        const_cast<Script&>(*script).impl->moduleContext = kj::none;
+        impl->context = kj::none;
+        isolateBase.createSnapshotBlob(kj::mv(contextGlobal));
+      });
     }
   });
 }

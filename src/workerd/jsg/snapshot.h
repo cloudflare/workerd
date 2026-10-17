@@ -8,8 +8,10 @@
 
 #include <v8-snapshot.h>
 
+#include <kj/array.h>
 #include <kj/one-of.h>
 #include <kj/refcount.h>
+#include <kj/string.h>
 
 namespace workerd::jsg {
 
@@ -23,6 +25,28 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
   v8::StartupData blob{nullptr, 0};
   kj::Array<intptr_t> externalReferences;
   size_t externalReferenceCursor = 0;
+
+  // The zygote's resource-type function templates, stored in the blob with
+  // v8::SnapshotCreator::AddData(): one index per slot visited by
+  // IsolateBase::iterateResourceTypeTemplates(), kNoTemplateData for a template the zygote never
+  // created, plus the opaque-object template. Every JS object in the snapshot was instantiated
+  // from these templates, and JSG unwraps by template identity (FindInstanceInPrototypeChain),
+  // so an isolate restored from the blob must adopt them (IsolateBase::adoptTemplatesFromSnapshot)
+  // rather than create fresh ones: otherwise `new Response()` from the snapshot's global fails to
+  // unwrap, snapshotted binding objects reject their own methods and `instanceof` breaks.
+  static constexpr size_t kNoTemplateData = SIZE_MAX;
+  kj::Array<size_t> templateDataIndices;
+  size_t opaqueTemplateDataIndex = kNoTemplateData;
+
+  // Function templates that JSG's type wrapper does not own, stored in the blob with
+  // v8::SnapshotCreator::AddData() under a name their owner chooses: the templates of Rust resource
+  // types, which the isolate's Rust Realm caches per type. They must be adopted for the same
+  // reason as templateDataIndices; see IsolateBase::addExternalSnapshotTemplate().
+  struct ExternalTemplateRecord {
+    kj::String name;
+    size_t dataIndex;
+  };
+  kj::Array<ExternalTemplateRecord> externalTemplateRecords;
 
   ~SnapshotArtifact() noexcept(false) {
     // v8::SnapshotCreator::CreateBlob() allocates the data with `new[]` and hands over ownership.

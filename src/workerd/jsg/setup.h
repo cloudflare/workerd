@@ -456,10 +456,18 @@ class IsolateBase {
   void setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext);
 
   // Serializes the isolate into the SnapshotArtifact passed at isolate creation.
-  // `extraTemplateHandles` carries template handles drained from embedder-side caches that this
-  // class cannot enumerate itself.
-  void createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
-      kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles);
+  void createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle);
+
+  // When preparing a snapshot: stores `tmpl`, a function template JSG's type wrapper does not own,
+  // in the blob under `name`. The owner must reset its own handle to the template before the blob
+  // is created, and adopt the template back with takeExternalSnapshotTemplate() in a restored
+  // isolate.
+  void addExternalSnapshotTemplate(kj::StringPtr name, v8::Local<v8::FunctionTemplate> tmpl);
+
+  // The template the zygote stored under `name` if this isolate starts from a snapshot, or an
+  // empty handle if it does not or the zygote stored none. Each can be taken once.
+  v8::Local<v8::FunctionTemplate> takeExternalSnapshotTemplate(kj::StringPtr name);
+
 
   void registerExternalReference(intptr_t addr) {
     if (!isPreparingSnapshot()) return;
@@ -609,6 +617,14 @@ class IsolateBase {
 
   // Object used as the underlying storage for a workers environment.
   v8::Global<v8::Object> workerEnvObj;
+
+  // Moved into SnapshotArtifact::externalTemplateRecords by createSnapshotBlob().
+  kj::Vector<SnapshotArtifact::ExternalTemplateRecord> externalTemplateRecords;
+
+  // When starting from a snapshot: replaces the (not yet created) resource-type templates and the
+  // opaque template with the ones the zygote recorded (SnapshotArtifact::templateDataIndices).
+  // Runs as soon as the type wrapper exists, before anything asks for a template.
+  void adoptTemplatesFromSnapshot();
 
   // Object used as the underlying storage for a workers exports.
   v8::Global<v8::Object> workerExportsObj;
@@ -903,6 +919,7 @@ class Isolate: public IsolateBase {
     auto wrapper = wrapperSpace.construct(ptr, kj::fwd<MetaConfiguration>(configuration));
     wrapper->initTypeWrapper();
     wrappers[0] = kj::mv(wrapper);
+    adoptTemplatesFromSnapshot();
   }
 
   // Populates the IsolateBase type handler registry (see Lock::tryGetTypeHandler()) with
