@@ -38,6 +38,13 @@ wd_cc_benchmark(
     deps = [":jsg"],
 )
 
+wd_cc_benchmark(
+    name = "bench-async-context",
+    srcs = ["bench-async-context.c++"],
+    local_defines = ["JSG_IMPLEMENTATION"],
+    deps = [":jsg"],
+)
+
 wd_cc_library(
     name = "iterator",
     srcs = [
