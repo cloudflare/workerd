@@ -902,18 +902,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     // EXPECTED-LENGTH CONTRACT: overflow check before commit.
     this.#accountDelivery(written);
     desc.bytesFilled = filled;
-    this.#byobRequestCache = null;
     this.#deliveredThisPull = true;
-    this.#requests.shift();
-    const value = new desc.viewCtor(
-      desc.buffer,
-      desc.byteOffset,
-      filled / desc.elementSize
-    );
-    if (filled >= desc.minimumFill) {
-      desc.resolve(createReadResult(value, false));
-      return;
-    }
     // MIN-READ CONTRACT: the respond is the source's COMPLETE answer for
     // this read. Delivering fewer bytes than the requested minimum
     // (atLeast) signals end-of-stream: the stream closes, the partial fill
@@ -927,21 +916,29 @@ class NativePullConduit implements ByteStreamConsumerType {
     // exact-total contract applies — landing short of expectedLength is
     // underflow and errors the stream instead of closing it. (Landing
     // exactly on it is a legitimate close-with-delivery.)
+    const endsStream = filled < desc.minimumFill;
     if (
+      endsStream &&
       this.#expectedLength !== undefined &&
       this.#bytesDelivered < this.#expectedLength
     ) {
-      const error = new RangeError(
-        'native source closed (via min-read under-delivery) before ' +
-          'producing its declared expectedLength'
+      this.errorFromSource(
+        new RangeError(
+          'native source closed (via min-read under-delivery) before ' +
+            'producing its declared expectedLength'
+        )
       );
-      this.#status = 'errored';
-      this.#storedError = error;
-      // The stream errors before its reads reject (spec
-      // ReadableStreamError: reader.closed first).
-      this.#hooks.errorStream(error);
-      desc.reject(error);
-      this.errorAllReads(error);
+      return;
+    }
+    this.#byobRequestCache = null;
+    this.#requests.shift();
+    const value = new desc.viewCtor(
+      desc.buffer,
+      desc.byteOffset,
+      filled / desc.elementSize
+    );
+    if (!endsStream) {
+      desc.resolve(createReadResult(value, false));
       return;
     }
     this.#status = 'closed';
@@ -1023,6 +1020,8 @@ class NativePullConduit implements ByteStreamConsumerType {
     if (this.#status !== 'active') return; // late settle tolerated
     this.#status = 'errored';
     this.#storedError = reason;
+    // The stream errors before its reads reject (spec
+    // ReadableStreamError: reader.closed first).
     this.#hooks.errorStream(reason);
     this.errorAllReads(reason);
   }
