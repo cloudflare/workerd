@@ -145,8 +145,10 @@ class EventSource: public EventTarget {
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
-  IoContext& context;
-  kj::Own<StreamState> streamState;
+  IoContext& getContext();
+  IoContext::Id contextId;
+  // IoOwn's checked lookup is non-const, including for read-only heap snapshot traversal.
+  mutable IoOwn<StreamState> streamState;
   struct FetchImpl {
     jsg::Url url;
     EventSourceInit options;

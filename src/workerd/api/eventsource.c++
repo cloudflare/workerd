@@ -20,7 +20,7 @@ class EventSourceSink final: public WritableStreamSink {
   EventSourceSink(IoContext& context,
       kj::Own<EventSource::StreamState> state,
       kj::Rc<jsg::WeakRef<EventSource>> weakEventSource)
-      : context(context),
+      : weakContext(context.getWeakRef()),
         state(kj::mv(state)),
         weakEventSource(kj::mv(weakEventSource)) {}
 
@@ -90,7 +90,8 @@ class EventSourceSink final: public WritableStreamSink {
   }
 
  private:
-  IoContext& context;
+  // The pump and its sink stay on the originating I/O thread, even outside the isolate.
+  kj::Own<IoContext::WeakRef> weakContext;
   kj::Own<EventSource::StreamState> state;
   kj::Rc<jsg::WeakRef<EventSource>> weakEventSource;
   bool ended = false;
@@ -187,7 +188,9 @@ class EventSourceSink final: public WritableStreamSink {
     if (pendingMessages.empty()) return;
     auto pending = pendingMessages.releaseAsArray();
     // If the event source is gone, just drop the messages on the floor.
-    EventSource::enqueueMessages(context, kj::mv(pending), weakEventSource.addRef());
+    weakContext->runIfAlive([&](IoContext& context) {
+      EventSource::enqueueMessages(context, kj::mv(pending), weakEventSource.addRef());
+    });
   }
 
   void clear() {
@@ -268,8 +271,8 @@ jsg::Ref<EventSource> EventSource::from(jsg::Lock& js, JsReadableStream readable
 }
 
 EventSource::EventSource(jsg::Lock& js, jsg::Url url, kj::Maybe<EventSourceInit> init)
-    : context(IoContext::current()),
-      streamState(kj::refcounted<StreamState>()),
+    : contextId(IoContext::current().getId()),
+      streamState(IoContext::current().addObject(kj::refcounted<StreamState>())),
       impl({
         .url = kj::mv(url),
         .options = kj::mv(init).orDefault({}),
@@ -278,13 +281,19 @@ EventSource::EventSource(jsg::Lock& js, jsg::Url url, kj::Maybe<EventSourceInit>
       readyState(State::CONNECTING) {}
 
 EventSource::EventSource(jsg::Lock& js)
-    : context(IoContext::current()),
-      streamState(kj::refcounted<StreamState>()),
+    : contextId(IoContext::current().getId()),
+      streamState(IoContext::current().addObject(kj::refcounted<StreamState>())),
       abortController(js.alloc<AbortController>(js)),
       readyState(State::CONNECTING) {}
 
+IoContext& EventSource::getContext() {
+  IoContext::requireCurrentOrThrowJs(contextId);
+  return IoContext::current();
+}
+
 void EventSource::notifyError(
     jsg::Lock& js, const jsg::JsValue& error, bool reconnecting, AlreadyReported alreadyReported) {
+  getContext();
   if (readyState == State::CLOSED) return;
 
   // Abort the connection if it hasn't already been. This will be a non-op if the
@@ -309,6 +318,7 @@ void EventSource::notifyError(
 }
 
 void EventSource::notifyOpen(jsg::Lock& js) {
+  getContext();
   if (readyState == State::CLOSED) return;
   readyState = State::OPEN;
   auto result = dispatchEventImpl(
@@ -321,6 +331,7 @@ void EventSource::notifyOpen(jsg::Lock& js) {
 }
 
 void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messages) {
+  getContext();
   if (readyState == State::CLOSED) return;
   auto policy = effectiveExceptionPolicy(js, DispatchExceptionPolicy::REPORT);
   // Under PROPAGATE (spec_compliant_dispatch_exceptions disabled), the first throwing
@@ -349,6 +360,8 @@ void EventSource::notifyMessages(jsg::Lock& js, kj::Array<PendingMessage> messag
 }
 
 void EventSource::reconnect(jsg::Lock& js) {
+  auto& context = getContext();
+  if (readyState == State::CLOSED) return;
   KJ_ASSERT(impl != kj::none);
   readyState = State::CONNECTING;
   abortController = js.alloc<AbortController>(js);
@@ -365,6 +378,7 @@ void EventSource::reconnect(jsg::Lock& js) {
 }
 
 void EventSource::start(jsg::Lock& js) {
+  getContext();
   auto& i = KJ_ASSERT_NONNULL(impl);
   if (readyState == State::CLOSED) return;
 
@@ -382,6 +396,7 @@ void EventSource::start(jsg::Lock& js) {
     return f.addRef();
   })),
       (self, fetcher), (jsg::Lock& js, jsg::Ref<Response> response) {
+        self->getContext();
         if (self->readyState == State::CLOSED) return js.resolvedPromise();
         auto& impl = KJ_ASSERT_NONNULL(self->impl);
         if (!response->getOk()) {
@@ -474,7 +489,9 @@ void EventSource::run(jsg::Lock& js,
     bool withReconnection,
     kj::Maybe<jsg::Ref<Response>> response,
     kj::Maybe<jsg::Ref<Fetcher>> fetcher) {
+  auto& context = getContext();
   notifyOpen(js);
+  if (readyState == State::CLOSED) return;
 
   KJ_IF_SOME(resp, response) {
     JSG_REQUIRE(resp->getType() != "error"_kj, TypeError,
@@ -485,6 +502,8 @@ void EventSource::run(jsg::Lock& js,
       JSG_VISITABLE_LAMBDA((self = JSG_THIS, readable = readable.addRef(js), withReconnection,
                                response = addRef(response), fetcher = addRef(fetcher)),
           (self, readable, response, fetcher), (jsg::Lock& js) {
+            self->getContext();
+            if (self->readyState == State::CLOSED) return;
             // The pump finished. Did the server disconnect? If so, try reconnecting if we can.
             self->notifyError(js, js.error("The server disconnected."), withReconnection);
             if (withReconnection) self->reconnect(js);
@@ -510,12 +529,14 @@ void EventSource::run(jsg::Lock& js,
 }
 
 kj::Own<WritableStreamSink> EventSource::newSink(jsg::Lock& js) {
+  auto& context = getContext();
   return kj::heap<EventSourceSink>(
       context, kj::addRef(*streamState), kj::rc<jsg::WeakRef<EventSource>>(JSG_THIS_WEAK(js)));
 }
 
 void EventSource::close(jsg::Lock& js) {
   if (closeCalled) return;
+  getContext();
   closeCalled = true;
   abortController->abort(js, kj::none);
   readyState = State::CLOSED;
@@ -551,7 +572,9 @@ void EventSource::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("url", i.url);
   }
   tracker.trackField("abortController", abortController);
-  tracker.trackField("streamState", &*streamState);
+  KJ_IF_SOME(state, streamState.tryGet()) {
+    tracker.trackField("streamState", &state);
+  }
 }
 
 }  // namespace workerd::api

@@ -1,0 +1,27 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "test", worker = (
+      modules = [(name = "worker", esModule = embed "eventsource-context-test.js")],
+      compatibilityFlags = ["nodejs_compat", "experimental"],
+      bindings = [
+        (name = "legacy", service = "legacy"),
+        (name = "current", service = "current"),
+      ],
+    )),
+    (name = "legacy", worker = (
+      modules = [(name = "worker", esModule = embed "eventsource-context-worker.js")],
+      compatibilityFlags = ["experimental", "no_handle_cross_request_promise_resolution"],
+      bindings = [(name = "backend", service = "helper")],
+    )),
+    (name = "current", worker = (
+      modules = [(name = "worker", esModule = embed "eventsource-context-worker.js")],
+      compatibilityFlags = ["experimental", "handle_cross_request_promise_resolution"],
+      bindings = [(name = "backend", service = "helper")],
+    )),
+    (name = "helper", worker = (
+      modules = [(name = "worker", esModule = embed "eventsource-context-worker.js")],
+    )),
+  ],
+);

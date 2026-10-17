@@ -104,5 +104,17 @@ KJ_TEST("EventSource native pump owns parser state after its EventSource is dest
   }
 }
 
+KJ_TEST("EventSource sink drops delivery after its originating context is destroyed") {
+  TestFixture fixture;
+  auto sink = fixture.runInIoContext([](const TestFixture::Environment& env) {
+    auto source = env.js.alloc<EventSource>(env.js);
+    return source->newSink(env.js);
+  });
+  KJ_ASSERT(!IoContext::hasCurrent());
+  sink->write("id: first\nretry: 1000\ndata: one\n\n"_kj.asBytes()).wait(fixture.getWaitScope());
+  sink->write("id: second\ndata: two\n\n"_kj.asBytes()).wait(fixture.getWaitScope());
+  sink->end().wait(fixture.getWaitScope());
+}
+
 }  // namespace
 }  // namespace workerd::api
