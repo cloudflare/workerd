@@ -14,6 +14,16 @@
 #include <kj/memory.h>
 #include <kj/vector.h>
 
+#ifdef WORKERD_USE_RUST_PERFETTO
+#include <workerd/rust/perfetto/ffi.rs.h>
+
+#include <atomic>
+
+// The Perfetto C ABI shares category state as C11 `atomic_bool`, which the Rust SDK reads as a
+// plain bool-sized atomic.
+static_assert(sizeof(std::atomic<bool>) == sizeof(bool));
+#endif
+
 PERFETTO_TRACK_EVENT_STATIC_STORAGE_IN_NAMESPACE(workerd::traces);
 
 namespace workerd {
@@ -60,6 +70,11 @@ void PerfettoSession::registerWorkerdTracks() {
   KJ_ASSERT(once, "workerd perfetto tracks are already registered");
   if (perfetto::Tracing::IsInitialized()) {
     workerd::traces::TrackEvent::Register();
+#ifdef WORKERD_USE_RUST_PERFETTO
+    // Registers the Perfetto C ABI's track_event data source and the Rust categories
+    // (//src/rust/perfetto) with the Perfetto instance initialized above.
+    workerd::rust::perfetto::register_track_events();
+#endif
     once = false;
   }
 }
