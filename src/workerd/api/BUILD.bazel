@@ -890,3 +890,9 @@ wd_test(
     args = ["--experimental"],
     data = ["streams/streams-test.js"],
 )
+
+wd_test(
+    src = "streams/body-read-operation-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams/body-read-operation-test.js"],
+)

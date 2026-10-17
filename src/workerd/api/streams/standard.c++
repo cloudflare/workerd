@@ -3475,7 +3475,7 @@ WD_STRONG_BOOL(StripBom);
 namespace {
 // Consumes all bytes from a stream, buffering in memory, with the purpose
 // of producing either a single concatenated kj::Array<byte> or kj::String.
-class AllReader {
+class AllReader final: public jsg::Wrappable {
  public:
   using PartList = kj::Array<kj::Array<kj::byte>>;
 
@@ -3485,36 +3485,48 @@ class AllReader {
   KJ_DISALLOW_COPY_AND_MOVE(AllReader);
 
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> allBytes(jsg::Lock& js) {
-    return loop(js).then(js, [this](auto& js, PartList partPtrs) -> jsg::JsRef<jsg::JsArrayBuffer> {
-      auto ab = jsg::JsArrayBuffer::create(js, runningTotal);
-      copyInto(ab.asArrayPtr(), partPtrs);
-      return ab.addRef(js);
-    });
+    return loop(js).then(
+        js,
+        JSG_VISITABLE_LAMBDA(
+            (this, self = JSG_THIS), (self), (jsg::Lock & js, PartList partPtrs)->jsg::JsRef<jsg::JsArrayBuffer> {
+              auto ab = jsg::JsArrayBuffer::create(js, runningTotal);
+              copyInto(ab.asArrayPtr(), partPtrs);
+              return ab.addRef(js);
+            }));
   }
 
   jsg::Promise<kj::String> allText(
       jsg::Lock& js, ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) {
-    return loop(js).then(js, [this, option](auto& js, PartList partPtrs) {
-      // Strip UTF-8 BOM if requested
-      bool hadBom = false;
-      if ((option & ReadAllTextOption::STRIP_BOM) && partPtrs.size() > 0 &&
-          hasUtf8Bom(partPtrs[0])) {
-        runningTotal -= UTF8_BOM_SIZE;
-        hadBom = true;
-      }
+    return loop(js).then(js,
+        JSG_VISITABLE_LAMBDA((this, self = JSG_THIS, option), (self), (jsg::Lock& js, PartList partPtrs) {
+          // Strip UTF-8 BOM if requested
+          bool hadBom = false;
+          if ((option & ReadAllTextOption::STRIP_BOM) && partPtrs.size() > 0 &&
+              hasUtf8Bom(partPtrs[0])) {
+          runningTotal -= UTF8_BOM_SIZE;
+          hadBom = true;
+          }
 
-      JSG_REQUIRE(runningTotal <= v8::String::kMaxLength, RangeError,
-          "String length exceeds v8::String::kMaxLength.");
+          JSG_REQUIRE(runningTotal <= v8::String::kMaxLength, RangeError,
+              "String length exceeds v8::String::kMaxLength.");
 
-      auto out = kj::heapArray<char>(runningTotal + 1);
-      copyInto(
-          out.first(out.size() - 1).asBytes(), partPtrs, hadBom ? StripBom::YES : StripBom::NO);
-      out.back() = '\0';
-      return kj::String(kj::mv(out));
-    });
+          auto out = kj::heapArray<char>(runningTotal + 1);
+          copyInto(
+              out.first(out.size() - 1).asBytes(), partPtrs, hadBom ? StripBom::YES : StripBom::NO);
+          out.back() = '\0';
+          return kj::String(kj::mv(out));
+        }));
   }
 
-  void visitForGc(jsg::GcVisitor& visitor) {
+  kj::StringPtr jsgGetMemoryName() const override {
+    return "AllReader"_kjc;
+  }
+
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(AllReader);
+  }
+
+  void jsgVisitForGc(jsg::GcVisitor& visitor) override {
     state.visitForGc(visitor);
   }
 
@@ -3542,12 +3554,10 @@ class AllReader {
         return js.template rejectedPromise<PartList>(errored.getHandle(js));
       }
       KJ_CASE_ONEOF(readable, jsg::Ref<ReadableStream>) {
-        // Note that these nested lambda retain references to `this` and `readable`
-        // and are passed into to promise returned by this method. It is the responsibility
-        // of the caller to ensure that the AllReader instance is kept alive until the
-        // promise is settled.
-        auto onSuccess = JSG_VISITABLE_LAMBDA((this, readable = readable.addRef()), (readable),
-            (jsg::Lock & js, ReadResult result) mutable->jsg::Promise<PartList> {
+        // Each callback retains the operation until its work finishes, independently of
+        // the returned promise. Trace shared state through one Wrappable.
+        auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = JSG_THIS, readable = readable.addRef()),
+            (self, readable), (jsg::Lock & js, ReadResult result) mutable->jsg::Promise<PartList> {
               if (result.done) {
               state.template transitionTo<StreamStates::Closed>();
               return loop(js);
@@ -3559,8 +3569,9 @@ class AllReader {
               if (!handle.isArrayBufferView() && !handle.isArrayBuffer()) {
               auto error = js.typeError("This ReadableStream did not return bytes.");
               state.template transitionTo<StreamStates::Errored>(error.addRef(js));
-              return readable->getController().cancel(js, error).then(
-                  js, [&](jsg::Lock& js) { return loop(js); });
+              return readable->getController().cancel(js, error).then(js,
+                  JSG_VISITABLE_LAMBDA(
+                      (this, self = JSG_THIS), (self), (jsg::Lock& js) { return loop(js); }));
               }
 
               auto bufferSource = jsg::JsBufferSource(handle);
@@ -3573,8 +3584,9 @@ class AllReader {
               if ((runningTotal + bufferSource.size()) > limit) {
               auto error = js.typeError("Memory limit exceeded before EOF.");
               state.template transitionTo<StreamStates::Errored>(error.addRef(js));
-              return readable->getController().cancel(js, error).then(
-                  js, [&](jsg::Lock& js) { return loop(js); });
+              return readable->getController().cancel(js, error).then(js,
+                  JSG_VISITABLE_LAMBDA(
+                      (this, self = JSG_THIS), (self), (jsg::Lock& js) { return loop(js); }));
               }
 
               runningTotal += bufferSource.size();
@@ -3591,12 +3603,13 @@ class AllReader {
               return loop(js);
             });
 
-        auto onFailure = [this](auto& js, jsg::Value exception) -> jsg::Promise<PartList> {
-          // In this case the stream should already be errored.
-          auto error = jsg::JsValue(exception.getHandle(js));
-          state.template transitionTo<StreamStates::Errored>(error.addRef(js));
-          return loop(js);
-        };
+        auto onFailure = JSG_VISITABLE_LAMBDA((this, self = JSG_THIS), (self),
+            (jsg::Lock & js, jsg::Value exception)->jsg::Promise<PartList> {
+              // In this case the stream should already be errored.
+              auto error = jsg::JsValue(exception.getHandle(js));
+              state.template transitionTo<StreamStates::Errored>(error.addRef(js));
+              return loop(js);
+            });
 
         return KJ_ASSERT_NONNULL(readable->getController().read(js, kj::none))
             .then(js, kj::mv(onSuccess), kj::mv(onFailure));
@@ -3807,26 +3820,18 @@ jsg::Promise<T> ReadableStreamJsController::readAll(jsg::Lock& js, uint64_t limi
   const auto readAll = [this, limit, stripBom](auto& js) -> jsg::Promise<T> {
     KJ_ASSERT(lock.lock());
     // The AllReader will hold a traceable reference to the ReadableStream.
-    auto reader = kj::heap<AllReader>(addRef(), limit);
+    auto reader = js.template alloc<AllReader>(addRef(), limit);
 
-    auto promise = ([&js, &reader, stripBom]() -> jsg::Promise<T> {
-      if constexpr (kj::isSameType<T, jsg::JsRef<jsg::JsArrayBuffer>>()) {
-        (void)stripBom;  // Unused in this branch.
-        return reader->allBytes(js);
-      } else {
-        auto option = ReadAllTextOption::NULL_TERMINATE;
-        if (stripBom) {
-          option |= ReadAllTextOption::STRIP_BOM;
-        }
-        return reader->allText(js, option);
+    if constexpr (kj::isSameType<T, jsg::JsRef<jsg::JsArrayBuffer>>()) {
+      (void)stripBom;  // Unused in this branch.
+      return reader->allBytes(js);
+    } else {
+      auto option = ReadAllTextOption::NULL_TERMINATE;
+      if (stripBom) {
+        option |= ReadAllTextOption::STRIP_BOM;
       }
-    })();
-
-    auto onSuccess = [reader = kj::mv(reader)](jsg::Lock& js, T result) -> jsg::Promise<T> {
-      return js.resolvedPromise(kj::mv(result));
-    };
-
-    return promise.then(js, kj::mv(onSuccess));
+      return reader->allText(js, option);
+    }
   };
 
   KJ_SWITCH_ONEOF(state) {
