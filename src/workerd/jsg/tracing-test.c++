@@ -140,6 +140,14 @@ struct TraceTestContext: public Object, public ContextGlobal {
     return kj::arr(kj::mv(obj1), kj::mv(obj2));
   }
 
+  // A full GC that does not scan the native stack. `gc()` scans it conservatively, so a stale
+  // pointer left on it (which depends on how the binary was optimized) keeps an object alive.
+  // Assertions that something was collected use this; assertions that it was kept use gc().
+  void preciseGc(jsg::Lock& js) {
+    js.v8Isolate->RequestGarbageCollectionForTesting(
+        v8::Isolate::kFullGarbageCollection, cppgc::EmbedderStackState::kNoHeapPointers);
+  }
+
   void assert_(bool condition, jsg::Optional<kj::String> message) {
     JSG_ASSERT(condition, Error, message.orDefault(nullptr));
   }
@@ -152,6 +160,7 @@ struct TraceTestContext: public Object, public ContextGlobal {
     JSG_METHOD(makeGcDetectorPair);
     JSG_METHOD(makeGcDetectorBoxPair);
     JSG_METHOD_NAMED(assert, assert_);
+    JSG_METHOD(preciseGc);
     JSG_PROTOTYPE_PROPERTY(strongRef, getStrongRef, setStrongRef);
   }
 };
@@ -174,7 +183,7 @@ KJ_TEST("GC collects objects when expected") {
     let b = pair[1];
     pair = null;
     a = null;
-    gc();
+    preciseGc();
     assert(b.siblingCollected, "full GC did not collect native objects");
   )",
       "undefined", "undefined");
@@ -189,7 +198,7 @@ KJ_TEST("GC collects objects when expected") {
     gc();
     assert(!b.siblingCollected);
     a = null;
-    gc();
+    preciseGc();
     assert(b.siblingCollected, "full GC did not collect cycles");
   )",
       "undefined", "undefined");
