@@ -12,6 +12,7 @@ pub mod macros;
 pub mod modules;
 pub mod nullable;
 pub mod resource;
+pub mod snapshot;
 pub mod v8;
 mod wrappable;
 
@@ -21,6 +22,7 @@ pub use nullable::Nullable;
 pub use resource::Rc;
 pub use resource::Resource;
 pub use resource::Weak;
+pub use snapshot::SnapshotRestore;
 pub use v8::ArrayBuffer;
 pub use v8::ArrayBufferView;
 pub use v8::BackingStore;

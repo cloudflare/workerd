@@ -784,6 +784,9 @@ struct Worker::Isolate::Impl {
           lock->v8Isolate, featureFlagsWords.asBytes().as<kj_rs::Rust>());
       lock->v8Isolate->SetData(
           ::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &*KJ_REQUIRE_NONNULL(realm));
+      // Rust resources retained by a startup-snapshot zygote are re-created by the Rust side.
+      jsg::IsolateBase::from(lock->v8Isolate)
+          .setExternalSnapshotRestorer(::workerd::rust::jsg::restoreSnapshotWrapper);
 
       limitEnforcer.customizeIsolate(lock->v8Isolate);
 

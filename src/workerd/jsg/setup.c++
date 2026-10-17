@@ -545,7 +545,9 @@ IsolateBase::IsolateBase(V8System& system,
 namespace {
 
 // A wrapper's startup-snapshot re-creation payload: the kind of object the wrapper wraps, followed
-// by data that depends on the kind: a SnapshotRecipe's type and bytes.
+// by data that depends on the kind. The kind is a SnapshotRecipe::type or one of these:
+constexpr uint32_t EXTERNAL_PAYLOAD = kj::maxValue;          // The data is a jsgSnapshotRecipe().
+
 kj::Array<kj::byte> makeSnapshotPayload(uint32_t kind, kj::ArrayPtr<const kj::byte> data) {
   auto payload = kj::heapArray<kj::byte>(sizeof(kind) + data.size());
   memcpy(payload.begin(), &kind, sizeof(kind));
@@ -576,11 +578,14 @@ IsolateBase::SnapshotWrapperPayloads IsolateBase::collectSnapshotWrapperPayloads
   auto global = defaultContext->Global();
   for (auto& wrappable: heapTracer.liveWrappables()) {
     Object* object = wrappable.jsgTryGetObject();
-    if (object != nullptr) {
-      KJ_IF_SOME(recipe, trySnapshotRecipe(js, *object)) {
-        payloads.insert(&wrappable, makeSnapshotPayload(recipe.type, recipe.bytes));
+    if (object == nullptr) {
+      KJ_IF_SOME(recipe, wrappable.jsgSnapshotRecipe()) {
+        payloads.insert(&wrappable, makeSnapshotPayload(EXTERNAL_PAYLOAD, recipe));
         continue;
       }
+    } else KJ_IF_SOME(recipe, trySnapshotRecipe(js, *object)) {
+      payloads.insert(&wrappable, makeSnapshotPayload(recipe.type, recipe.bytes));
+      continue;
     }
 
     auto handle = wrappable.tryGetHandle(ptr);
@@ -638,7 +643,15 @@ void IsolateBase::restoreSnapshotWrappers(Lock& js, kj::Vector<Lock::SnapshotWra
     memcpy(&kind, wrapper.payload.begin(), sizeof(kind));
     auto data = wrapper.payload.slice(sizeof(kind));
     auto holder = wrapper.holder.Get(ptr);
-    restoreWrapperFromSnapshot(js, holder, kind, data);
+    switch (kind) {
+      case EXTERNAL_PAYLOAD:
+        KJ_REQUIRE(externalSnapshotRestorer != nullptr,
+            "snapshot holds an external wrapper but no external snapshot restorer is installed");
+        externalSnapshotRestorer(ptr, holder, data);
+        break;
+      default:
+        restoreWrapperFromSnapshot(js, holder, kind, data);
+    }
   }
 }
 

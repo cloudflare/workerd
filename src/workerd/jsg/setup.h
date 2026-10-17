@@ -476,6 +476,15 @@ class IsolateBase {
   // See Lock::SnapshotWrapper.
   void restoreSnapshotWrappers(Lock& js, kj::Vector<Lock::SnapshotWrapper> wrappers);
 
+  // Wrappables that are not `jsg::Object`s (Rust resources) are re-created by whoever defines
+  // them: a restored isolate hands the restorer installed here the jsgSnapshotRecipe() the zygote
+  // recorded and the deserialized wrapper, and the restorer re-creates the object and attaches it.
+  using ExternalSnapshotRestorer = void(
+      v8::Isolate* isolate, v8::Local<v8::Object> holder, kj::ArrayPtr<const kj::byte> recipe);
+  void setExternalSnapshotRestorer(ExternalSnapshotRestorer& restorer) {
+    externalSnapshotRestorer = &restorer;
+  }
+
   void registerExternalReference(intptr_t addr) {
     if (!isPreparingSnapshot()) return;
     auto& artifact = mutableSnapshotArtifact();
@@ -642,6 +651,7 @@ class IsolateBase {
   kj::Vector<SnapshotArtifact::ExternalTemplateRecord> externalTemplateRecords;
   // See serializeWrapperInternalField().
   kj::HashMap<const void*, kj::Array<kj::byte>> snapshotFieldPayloads;
+  ExternalSnapshotRestorer* externalSnapshotRestorer = nullptr;
 
   // When starting from a snapshot: replaces the (not yet created) resource-type templates and the
   // opaque template with the ones the zygote recorded (SnapshotArtifact::templateDataIndices).

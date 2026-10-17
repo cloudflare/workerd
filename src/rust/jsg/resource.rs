@@ -89,6 +89,18 @@ impl<R: Resource> Rc<R> {
         }
     }
 
+    /// Attaches this resource to `object`, an existing wrapper created from `R`'s template: a
+    /// wrapper deserialized from a startup snapshot whose Rust half the zygote dropped (see
+    /// [`crate::snapshot`]).
+    ///
+    /// # Safety
+    /// `isolate` must be live and locked, and `object` must be an instance of `R`'s template that
+    /// has no resource attached.
+    pub(crate) unsafe fn attach_to_object(&self, isolate: v8::IsolatePtr, object: v8::ffi::Local) {
+        // SAFETY: forwarded from the caller.
+        unsafe { self.wrappable.attach_to_object(isolate, object) };
+    }
+
     /// Visits this Rc during GC tracing.
     ///
     /// Delegates to C++ `Wrappable::visitRef()` which handles strong/traced switching
