@@ -214,6 +214,9 @@ const kIsClosedPromise: symbol = SymbolFor('nodejs.webstream.isClosedPromise');
 const kControllerErrorFunction: symbol = SymbolFor(
   'nodejs.webstream.controllerErrorFunction'
 );
+// Settles the interop closed-promise, if one was requested, once the
+// stream's state is terminal.
+let settleWritableStreamClosedPromise: StreamOp<[], void>;
 let setWritableStreamPendingClosure: StreamOp<[], void>;
 let isWritableStreamPendingClosure: StreamOp<[], boolean>;
 // Permanently neutralizes a stream on behalf of the C++ bridge (e.g. a
@@ -338,9 +341,7 @@ class WritableStream<W = unknown> {
       return isActualObject(value) && #state in value;
     };
 
-    // Settles the interop closed-promise (if one was requested) to match the
-    // terminal state just entered.
-    const settleClosedPromise = <W>(stream: WritableStream<W>): void => {
+    settleWritableStreamClosedPromise = (stream) => {
       const closed = stream.#closedPromise;
       if (closed === undefined) return;
       if (stream.#state === 'closed') {
@@ -348,6 +349,17 @@ class WritableStream<W = unknown> {
       } else if (stream.#state === 'errored') {
         closed.reject(stream.#storedError);
       }
+    };
+
+    // Enters 'closed' or 'errored', settling the interop closed-promise and
+    // dropping the interop error hook (see the fields).
+    const enterTerminalState = <W>(
+      stream: WritableStream<W>,
+      state: 'closed' | 'errored'
+    ): void => {
+      stream.#state = state;
+      settleWritableStreamClosedPromise(stream);
+      stream.#interopErrorHook = undefined;
     };
 
     setWritableStreamPendingClosure = <W>(stream: WritableStream<W>) => {
@@ -458,9 +470,7 @@ class WritableStream<W = unknown> {
         inFlight.reject(reason);
       }
       stream.#writeRequests.drain((request) => request.reject(reason));
-      stream.#state = 'closed';
-      settleClosedPromise(stream);
-      stream.#interopErrorHook = undefined;
+      enterTerminalState(stream, 'closed');
       // Permanently lock via an internal writer (never exposed, never
       // released), leaving the stream unusable for further writes.
       new WritableStreamDefaultWriter<W>(stream);
@@ -618,9 +628,7 @@ class WritableStream<W = unknown> {
 
     const writableStreamFinishErroring = <W>(stream: WritableStream<W>) => {
       // assert: state 'erroring', no operations in flight
-      stream.#state = 'errored';
-      settleClosedPromise(stream);
-      stream.#interopErrorHook = undefined;
+      enterTerminalState(stream, 'errored');
       const storedError = stream.#storedError;
       const controller = stream.#controller;
       if (controller !== undefined) {
@@ -728,9 +736,7 @@ class WritableStream<W = unknown> {
           stream.#pendingAbortRequest = undefined;
         }
       }
-      stream.#state = 'closed';
-      settleClosedPromise(stream);
-      stream.#interopErrorHook = undefined;
+      enterTerminalState(stream, 'closed');
       const writer = stream.#writer;
       if (writer !== undefined) {
         writerResolveClosedPromise(writer);
@@ -862,11 +868,7 @@ class WritableStream<W = unknown> {
     if (closed === undefined) {
       closed = newHandledPending();
       this.#closedPromise = closed;
-      if (this.#state === 'closed') {
-        closed.resolve();
-      } else if (this.#state === 'errored') {
-        closed.reject(this.#storedError);
-      }
+      settleWritableStreamClosedPromise(this);
     }
     return { promise: closed.promise };
   }
