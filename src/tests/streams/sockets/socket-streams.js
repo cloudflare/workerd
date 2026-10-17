@@ -437,17 +437,21 @@ export const detachRejectsPendingWrites = {
   },
 };
 
-// DETACH WITH NOTHING PENDING: the writable is closed and locked.
+// DETACH WITH NOTHING PENDING: the writable is closed and locked. The
+// interop closed-promise is taken before the detach, which settles it.
 export const detachClosesIdleWritable = {
   async test(ctrl, env) {
     const socket = connect(echoAddress(env), { secureTransport: 'starttls' });
     await socket.opened;
+    const interopClosed = usingTsImpl
+      ? socket.writable[kIsClosedPromise].promise
+      : undefined;
     const tls = startTlsIgnoringUpgrade(socket);
     await socket.closed;
     strictEqual(socket.writable.locked, true);
     if (usingTsImpl) {
       const closed = await Promise.race([
-        socket.writable[kIsClosedPromise].promise.then(() => 'closed'),
+        interopClosed.then(() => 'closed'),
         scheduler.wait(100).then(() => 'pending'),
       ]);
       strictEqual(closed, 'closed');
