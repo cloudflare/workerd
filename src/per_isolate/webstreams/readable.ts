@@ -110,6 +110,7 @@ const {
   createReadResult,
   fractionalFillError,
   hasFractionalFill,
+  unfilledView,
 } = require('webstreams/queue');
 
 // Internal writable operations for the pipe (never re-exported to users).
@@ -2222,11 +2223,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
         initializeByobRequest(
           request,
           this,
-          new Uint8Array(
-            released.buffer,
-            released.byteOffset + released.bytesFilled,
-            released.byteLength - released.bytesFilled
-          ),
+          unfilledView(released),
           released.minimumFill - released.bytesFilled
         );
         this.#byobRequest = request;

@@ -134,6 +134,8 @@ import type {
   PendingRead,
   PullIntoDescriptor,
   createReadResult as createReadResultType,
+  filledView as filledViewType,
+  unfilledView as unfilledViewType,
 } from './queue';
 import type {
   PromiseWithResolvers as PromiseWithResolversType,
@@ -177,9 +179,12 @@ const { viewByteExtent } =
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
 };
-const { createReadResult } = require('webstreams/queue') as {
-  createReadResult: typeof createReadResultType;
-};
+const { createReadResult, filledView, unfilledView } =
+  require('webstreams/queue') as {
+    createReadResult: typeof createReadResultType;
+    filledView: typeof filledViewType;
+    unfilledView: typeof unfilledViewType;
+  };
 
 // ---------------------------------------------------------------------------
 // The construction-time handshake
@@ -345,12 +350,7 @@ class NativeReadableStreamBYOBRequest {
   get view(): Uint8Array | null {
     assertIsNativeReadableStreamBYOBRequest(this);
     if (!this.#conduit.isHeadDesc(this.#desc)) return null;
-    const desc = this.#desc;
-    return new Uint8Array(
-      desc.buffer,
-      desc.byteOffset + desc.bytesFilled,
-      desc.byteLength - desc.bytesFilled
-    );
+    return unfilledView(this.#desc);
   }
 
   // Non-standard workerd extension (mirrors the global BYOBRequest): the
@@ -890,11 +890,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     }
     this.#byobRequestCache = null;
     this.#requests.shift();
-    const value = new desc.viewCtor(
-      desc.buffer,
-      desc.byteOffset,
-      filled / desc.elementSize
-    );
+    const value = filledView(desc);
     if (!endsStream) {
       desc.resolve(createReadResult(value, false));
       return;
