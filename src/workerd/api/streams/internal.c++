@@ -797,12 +797,13 @@ kj::Maybe<jsg::Promise<ReadResult>> ReadableStreamInternalController::read(
           });
         }
 
+        auto readSource = readable.addRef();
         auto promise = kj::evalNow([&]() -> kj::Promise<kj::Array<kj::byte>> {
-          return readable->tryRead(bytes.begin(), atLeast, bytes.size())
+          return readSource->tryRead(bytes.begin(), atLeast, bytes.size())
               .then([tempBuffer = kj::mv(tempBuffer)](size_t amount) mutable {
             KJ_ASSERT(amount <= tempBuffer.size());
             return tempBuffer.first(amount).attach(kj::mv(tempBuffer));
-          });
+          }).attach(kj::mv(readSource));
         });
         KJ_IF_SOME(readerLock, readState.tryGetUnsafe<ReaderLocked>()) {
           promise = KJ_ASSERT_NONNULL(readerLock.getCanceler())->wrap(kj::mv(promise));
@@ -1026,12 +1027,13 @@ kj::Maybe<jsg::Promise<DrainingReadResult>> ReadableStreamInternalController::dr
 
       // The buffer is owned by the kj promise chain rather than by the continuation below. See the
       // corresponding comment in read().
+      auto readSource = readable.addRef();
       auto promise = kj::evalNow([&]() -> kj::Promise<kj::Array<kj::byte>> {
-        return readable->tryRead(bytes.begin(), kAtLeast, bytes.size())
+        return readSource->tryRead(bytes.begin(), kAtLeast, bytes.size())
             .then([store = kj::mv(store)](size_t amount) mutable {
           KJ_ASSERT(amount <= store.size());
           return store.first(amount).attach(kj::mv(store));
-        });
+        }).attach(kj::mv(readSource));
       });
       KJ_IF_SOME(readerLock, readState.tryGetUnsafe<ReaderLocked>()) {
         promise = KJ_ASSERT_NONNULL(readerLock.getCanceler())->wrap(kj::mv(promise));
@@ -1208,7 +1210,7 @@ ReadableStreamController::Tee ReadableStreamInternalController::tee(jsg::Lock& j
   KJ_UNREACHABLE;
 }
 
-kj::Maybe<kj::Own<ReadableStreamSource>> ReadableStreamInternalController::removeSource(
+kj::Maybe<kj::Rc<ReadableStreamSource>> ReadableStreamInternalController::removeSource(
     jsg::Lock& js, bool ignoreDisturbed) {
   JSG_REQUIRE(
       !isLockedToReader(), TypeError, "This ReadableStream is currently locked to a reader.");
@@ -1235,15 +1237,15 @@ kj::Maybe<kj::Own<ReadableStreamSource>> ReadableStreamInternalController::remov
         }
       };
 
-      return kj::heap<NullSource>();
+      return kj::Rc<ReadableStreamSource>(kj::heap<NullSource>());
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
       kj::throwFatalException(js.exceptionToKj(errored.addRef(js)));
     }
     KJ_CASE_ONEOF(readable, Readable) {
-      auto result = kj::mv(readable);
+      auto result = kj::mv(readable).take();
       state.transitionTo<StreamStates::Closed>();
-      return kj::Maybe<kj::Own<ReadableStreamSource>>(kj::mv(result));
+      return kj::mv(result);
     }
   }
 
@@ -3077,14 +3079,16 @@ void ReadableStreamInternalController::setOwnerRef(kj::Weak<ReadableStream> stre
 
 kj::Own<ReadableStreamController> ReadableStreamInternalController::detach(
     jsg::Lock& js, bool ignoreDetached) {
-  return newReadableStreamInternalController(
-      IoContext::current(), KJ_ASSERT_NONNULL(removeSource(js, ignoreDetached)));
+  // Move the shared claim directly so repeated transfers do not nest Own adapters.
+  auto source = KJ_ASSERT_NONNULL(removeSource(js, ignoreDetached));
+  return kj::heap<ReadableStreamInternalController>(
+      Readable(IoContext::current().createObject<kj::Rc<ReadableStreamSource>>(kj::mv(source))));
 }
 
 kj::Promise<DeferredProxy<void>> ReadableStreamInternalController::pumpTo(
     jsg::Lock& js, kj::Own<WritableStreamSink> sink, bool end) {
   auto source = KJ_ASSERT_NONNULL(removeSource(js));
-  return pumpOwnedSourceToSink(kj::mv(source), kj::mv(sink), end);
+  return pumpOwnedSourceToSink(source.toOwn(), kj::mv(sink), end);
 }
 
 StreamEncoding ReadableStreamInternalController::getPreferredEncoding() {
@@ -3096,7 +3100,8 @@ StreamEncoding ReadableStreamInternalController::getPreferredEncoding() {
 
 kj::Own<ReadableStreamController> newReadableStreamInternalController(
     IoContext& ioContext, kj::Own<ReadableStreamSource> source) {
-  return kj::heap<ReadableStreamInternalController>(ioContext.addObject(kj::mv(source)));
+  return kj::heap<ReadableStreamInternalController>(ReadableStreamInternalController::Readable(
+      ioContext.createObject<kj::Rc<ReadableStreamSource>>(kj::mv(source))));
 }
 
 kj::Own<WritableStreamController> newWritableStreamInternalController(IoContext& ioContext,
@@ -3157,8 +3162,7 @@ void ReadableStreamInternalController::jsgGetMemoryInfo(jsg::MemoryTracker& trac
       // Ideally we'd be able to track the size of any pending reads held in the source's
       // queue but since it is behind an IoOwn and we won't be holding the IoContext here,
       // we can't.
-      tracker.trackFieldWithSize(
-          "IoOwn<ReadableStreamSource>", sizeof(IoOwn<ReadableStreamSource>));
+      tracker.trackFieldWithSize("IoOwn<Rc<ReadableStreamSource>>", sizeof(Readable));
     }
   }
   KJ_SWITCH_ONEOF(readState) {

@@ -40,7 +40,30 @@ class WritableStreamInternalController;
 
 class ReadableStreamInternalController: public ReadableStreamController, public kj::PtrTarget {
  public:
-  using Readable = IoOwn<ReadableStreamSource>;
+  // Pending reads keep an independent claim even if the controller transfers its source.
+  class Readable {
+   public:
+    explicit Readable(IoOwn<kj::Rc<ReadableStreamSource>> source): source(kj::mv(source)) {}
+
+    ReadableStreamSource* operator->() {
+      return source->operator->();
+    }
+
+    kj::Rc<ReadableStreamSource> addRef() {
+      return source->addRef();
+    }
+
+    kj::Rc<ReadableStreamSource> take() && {
+      return kj::mv(*source);
+    }
+
+    operator kj::Own<ReadableStreamSource>() && {
+      return kj::mv(*this).take().toOwn();
+    }
+
+   private:
+    IoOwn<kj::Rc<ReadableStreamSource>> source;
+  };
 
   explicit ReadableStreamInternalController(StreamStates::Closed closed)
       : state(State::create<StreamStates::Closed>()) {}
@@ -74,8 +97,7 @@ class ReadableStreamInternalController: public ReadableStreamController, public 
 
   Tee tee(jsg::Lock& js) override;
 
-  kj::Maybe<kj::Own<ReadableStreamSource>> removeSource(
-      jsg::Lock& js, bool ignoreDisturbed = false);
+  kj::Maybe<kj::Rc<ReadableStreamSource>> removeSource(jsg::Lock& js, bool ignoreDisturbed = false);
 
   bool isClosedOrErrored() const override {
     return state.is<StreamStates::Closed>() || state.is<StreamStates::Errored>();

@@ -627,6 +627,7 @@ wd_cc_library(
         "streams/draining-read-uaf-test.c++",
         "streams/queue-test.c++",
         "streams/standard-test.c++",
+        "streams/streams-native-source-ownership-test.c++",
     ]
 ]
 
