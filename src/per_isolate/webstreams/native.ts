@@ -183,6 +183,30 @@ const { createReadResult } = require('webstreams/queue') as {
 // the identity check (reserved for future capability data).
 const kNativeSource: symbol = utils.getApiSymbol('kNativeSource');
 
+// Whether `object` carries `marker` (kNativeSource or kNativeSink) as its
+// own; `kind` names the object in the error. Throws on a malformed marker
+// — by the time the marker key is present at all, this is a contract
+// violation on the native/mock side, never a user-input condition.
+//
+// Hardening: OWN-property read via descriptor — a marker symbol planted
+// on Object.prototype must not convert every plain source or sink into a
+// native one, and a hostile accessor at the marker is never invoked (we
+// read desc.value; accessor-defined markers are ignored).
+function hasOwnMarker(
+  object: object,
+  marker: symbol,
+  kind: 'source' | 'sink'
+): boolean {
+  const desc = ObjectGetOwnPropertyDescriptor(object, marker) as
+    PropertyDescriptor | undefined;
+  const value = desc?.value as unknown;
+  if (value === undefined) return false;
+  if (value !== marker) {
+    throw new TypeError(`Invalid native stream ${kind} marker`);
+  }
+  return true;
+}
+
 // --- Writable-side markers (same conventions as the readable side) ---
 
 // A native underlying sink carries this symbol as an own property whose
@@ -209,14 +233,7 @@ const kNativeSink: symbol = utils.getApiSymbol('kNativeSink');
 const kExtractNativeSink: symbol = utils.getApiSymbol('kExtractNativeSink');
 
 function isNativeUnderlyingSink(sink: object): boolean {
-  const desc = ObjectGetOwnPropertyDescriptor(sink, kNativeSink) as
-    PropertyDescriptor | undefined;
-  const value = desc?.value as unknown;
-  if (value === undefined) return false;
-  if (value !== kNativeSink) {
-    throw new TypeError('Invalid native stream sink marker');
-  }
-  return true;
+  return hasOwnMarker(sink, kNativeSink, 'sink');
 }
 
 // The JS-to-C++ extraction marker. Installed on native-backed
@@ -232,23 +249,9 @@ function isNativeUnderlyingSink(sink: object): boolean {
 const kExtractNativeSource: symbol = utils.getApiSymbol('kExtractNativeSource');
 
 // Returns true if `source` is native-marked; false for ordinary (queued)
-// sources. Throws on a malformed marker — by the time the marker key is
-// present at all, this is a contract violation on the native/mock side,
-// never a user-input condition.
-//
-// Hardening: OWN-property read via descriptor — a marker symbol planted
-// on Object.prototype must not convert every plain source into a native
-// one, and a hostile accessor at the marker is never invoked (we read
-// desc.value; accessor-defined markers are ignored).
+// sources.
 function isNativeUnderlyingSource(source: object): boolean {
-  const desc = ObjectGetOwnPropertyDescriptor(source, kNativeSource) as
-    PropertyDescriptor | undefined;
-  const value = desc?.value as unknown;
-  if (value === undefined) return false;
-  if (value !== kNativeSource) {
-    throw new TypeError('Invalid native stream source marker');
-  }
-  return true;
+  return hasOwnMarker(source, kNativeSource, 'source');
 }
 
 // Stream-level transitions injected by readable.ts at construction (the
