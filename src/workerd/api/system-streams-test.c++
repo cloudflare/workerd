@@ -51,5 +51,40 @@ KJ_TEST("EncodedAsyncInputStream cancel with pending read on AsyncPipe") {
   });
 }
 
+// Pumps "foobar" from a native source into a native sink through the deferred pump. The pump holds
+// counted pointers to both ends, so with pointer counting enabled, destroying either end before
+// the pump settles would fail an assertion.
+kj::Promise<void> expectNativePump(IoContext& context, kj::Maybe<uint64_t> expectedLength) {
+  auto in = kj::newOneWayPipe(expectedLength);
+  auto out = kj::newOneWayPipe();
+  auto source = newSystemStream(kj::mv(in.in), StreamEncoding::IDENTITY, context);
+  auto sink = newSystemStream(kj::mv(out.out), StreamEncoding::IDENTITY, context);
+  auto received = out.in->readAllText();
+
+  auto proxy = co_await source->pumpTo(sink->getPtr(), true);
+  co_await in.out->write("foobar"_kjb);
+  in.out = nullptr;
+  co_await proxy.proxyTask;
+
+  // The pump has settled, so both ends may now be destroyed.
+  sink = nullptr;
+  source = nullptr;
+  KJ_EXPECT(co_await received == "foobar");
+}
+
+KJ_TEST("Native pump with a known length delivers all bytes") {
+  TestFixture fixture;
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    return expectNativePump(env.context, uint64_t(6));
+  });
+}
+
+KJ_TEST("Native pump without a known length delivers all bytes") {
+  TestFixture fixture;
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    return expectNativePump(env.context, kj::none);
+  });
+}
+
 }  // namespace
 }  // namespace workerd::api
