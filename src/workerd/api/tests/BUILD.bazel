@@ -13,6 +13,33 @@ wasm_tools_parse(
 exports_files(["starttls-server.pem"])
 
 wd_test(
+    src = "streams-byob-progress-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "streams-byob-progress-test.js",
+        "streams-byob-progress-worker.js",
+    ],
+)
+
+wd_test(
+    src = "streams-terminal-state-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "streams-terminal-state-test.js",
+        "streams-terminal-state-worker.js",
+    ],
+)
+
+wd_test(
+    src = "streams-consumer-reentry-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "streams-consumer-reentry-test.js",
+        "streams-consumer-reentry-worker.js",
+    ],
+)
+
+wd_test(
     src = "streams-native-read-ownership-test.wd-test",
     args = ["--experimental"],
     data = ["streams-native-read-ownership-test.js"],

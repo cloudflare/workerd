@@ -41,6 +41,12 @@ void ReaderImpl::detach() {
   }
 }
 
+void ReaderImpl::release() {
+  if (state.isActive()) {
+    state.transitionTo<Released>();
+  }
+}
+
 jsg::Promise<void> ReaderImpl::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   assertAttachedOrTerminal();
   if (state.is<Released>()) {
@@ -137,8 +143,6 @@ jsg::Promise<ReadResult> ReaderImpl::read(
 }
 
 void ReaderImpl::releaseLock(jsg::Lock& js) {
-  // TODO(soon): Releasing the lock should cancel any pending reads. This is a recent
-  // modification to the spec that we have not yet implemented.
   assertAttachedOrTerminal();
   // Closed and Released states are no-ops.
   KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
@@ -147,8 +151,7 @@ void ReaderImpl::releaseLock(jsg::Lock& js) {
     // reference to be cleared, so let's make sure we keep a reference to
     // the stream at least until the call to releaseLock completes.
     auto ref = attached.stream.addRef();
-    attached.stream->getController().releaseReader(reader, js);
-    state.transitionTo<Released>();
+    ref->getController().releaseReader(reader, js);
   }
 }
 
@@ -184,6 +187,10 @@ jsg::Promise<void> ReadableStreamDefaultReader::cancel(
 
 void ReadableStreamDefaultReader::detach() {
   impl.detach();
+}
+
+void ReadableStreamDefaultReader::release() {
+  impl.release();
 }
 
 jsg::MemoizedIdentity<jsg::Promise<void>>& ReadableStreamDefaultReader::getClosed() {
@@ -237,6 +244,10 @@ jsg::Promise<void> ReadableStreamBYOBReader::cancel(
 
 void ReadableStreamBYOBReader::detach() {
   impl.detach();
+}
+
+void ReadableStreamBYOBReader::release() {
+  impl.release();
 }
 
 jsg::MemoizedIdentity<jsg::Promise<void>>& ReadableStreamBYOBReader::getClosed() {
@@ -371,6 +382,12 @@ jsg::Promise<void> DrainingReader::cancel(jsg::Lock& js, jsg::Optional<jsg::JsVa
   KJ_UNREACHABLE;
 }
 
+void DrainingReader::release() {
+  if (state.is<Attached>()) {
+    state.init<Released>();
+  }
+}
+
 void DrainingReader::releaseLock(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(i, Initial) {
@@ -378,8 +395,7 @@ void DrainingReader::releaseLock(jsg::Lock& js) {
     }
     KJ_CASE_ONEOF(stream, Attached) {
       auto ref = stream.addRef();
-      stream->getController().releaseReader(addPtrToThis(), js);
-      state.init<Released>();
+      ref->getController().releaseReader(addPtrToThis(), js);
       return;
     }
     KJ_CASE_ONEOF(c, StreamStates::Closed) {

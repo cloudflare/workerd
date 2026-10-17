@@ -541,11 +541,14 @@ class ReadableStreamBYOBRequest: public jsg::Object {
 
   bool isPartiallyFulfilled();
 
+  bool isResponding() const;
+
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
   struct Impl {
-    kj::Own<ByteQueue::ByobRequest> readRequest;
+    // Responses retain a local reference while callbacks can invalidate this wrapper.
+    kj::Rc<ByteQueue::ByobRequest> readRequest;
     kj::Rc<WeakRef<ReadableByteStreamController>> controller;
     jsg::JsRef<jsg::JsUint8Array> view;
 

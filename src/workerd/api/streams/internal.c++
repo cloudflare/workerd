@@ -1282,25 +1282,26 @@ bool ReadableStreamInternalController::lockReader(jsg::Lock& js, kj::Ptr<Reader>
 
 void ReadableStreamInternalController::releaseReader(
     kj::Ptr<Reader> reader, kj::Maybe<jsg::Lock&> maybeJs) {
-  KJ_IF_SOME(locked, readState.tryGetUnsafe<ReaderLocked>()) {
-    KJ_IF_SOME(js, maybeJs) {
-      KJ_IF_SOME(canceler, locked.getCanceler()) {
+  KJ_IF_SOME(stored, readState.tryGetUnsafe<ReaderLocked>()) {
+    if (maybeJs == kj::none) {
+      // Destruction clears traced handles in place and leaves the stream locked.
+      stored.clear();
+      return;
+    }
+    if (maybeJs != kj::none) {
+      KJ_IF_SOME(canceler, stored.getCanceler()) {
         JSG_REQUIRE(canceler->isEmpty(), TypeError,
             "Cannot call releaseLock() on a reader with outstanding read promises.");
       }
+    }
+    auto locked = kj::mv(stored);
+    KJ_IF_SOME(js, maybeJs) {
+      reader->release();
+      readState.transitionTo<Unlocked>();
       maybeRejectPromise<void>(js, locked.getClosedFulfiller(),
           js.typeError("This ReadableStream reader has been released."_kj));
     }
     locked.clear();
-
-    // When maybeJs is nullptr, that means releaseReader was called when the reader is
-    // being deconstructed and not as the result of explicitly calling releaseLock. In
-    // that case, we don't want to change the lock state itself because we do not have
-    // an isolate lock. Clearing the lock above will free the lock state while keeping the
-    // ReadableStream marked as locked.
-    if (maybeJs != kj::none) {
-      readState.transitionTo<Unlocked>();
-    }
   }
 }
 
@@ -1864,21 +1865,19 @@ bool WritableStreamInternalController::lockWriter(jsg::Lock& js, kj::Ptr<Writer>
 
 void WritableStreamInternalController::releaseWriter(
     kj::Ptr<Writer> writer, kj::Maybe<jsg::Lock&> maybeJs) {
-  KJ_IF_SOME(locked, writeState.tryGetUnsafe<WriterLocked>()) {
+  KJ_IF_SOME(stored, writeState.tryGetUnsafe<WriterLocked>()) {
+    if (maybeJs == kj::none) {
+      // Destruction clears traced handles in place and leaves the stream locked.
+      stored.clear();
+      return;
+    }
+    auto locked = kj::mv(stored);
     KJ_IF_SOME(js, maybeJs) {
+      writeState.transitionTo<Unlocked>();
       maybeRejectPromise<void>(js, locked.getClosedFulfiller(),
           js.typeError("This WritableStream writer has been released."_kj));
     }
     locked.clear();
-
-    // When maybeJs is nullptr, that means releaseWriter was called when the writer is
-    // being deconstructed and not as the result of explicitly calling releaseLock and
-    // we do not have an isolate lock. In that case, we don't want to change the lock
-    // state itself. Clearing the lock above will free the lock state while keeping the
-    // WritableStream marked as locked.
-    if (maybeJs != kj::none) {
-      writeState.transitionTo<Unlocked>();
-    }
   }
 }
 
