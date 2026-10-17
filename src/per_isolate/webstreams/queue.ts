@@ -737,7 +737,7 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   #owner: unknown;
   #position: number;
   #byteOffset: number; // partial consumption of the entry at #position
-  #pendingReads: RingBufferType<PendingRead<V>> = new RingBuffer();
+  readonly #pendingReads: RingBufferType<PendingRead<V>> = new RingBuffer();
   // Running total mirroring the spec's [[queueTotalSize]]. Incremented on
   // enqueue, decremented on consume. Must use +=/-= (not recomputation):
   // the spec's double arithmetic leaves residues that WPTs verify. A
@@ -936,28 +936,20 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
 
   // Reject pending reads submitted by a specific reader (lock release).
   cancelReadsForReader(reader: object, reason: unknown): void {
-    const remaining: RingBufferType<PendingRead<V>> = new RingBuffer();
     const pending = this.#pendingReads;
-    this.#pendingReads = remaining;
-    for (let i = 0; i < pending.length; i++) {
-      const read = pending.get(i) as PendingRead<V>;
+    pending.drain((read) => {
       if (read.reader === reader) {
         read.reject(reason);
       } else {
-        remaining.push(read);
+        pending.push(read);
       }
-    }
+    });
   }
 
   // Reject all pending reads (stream ERROR path only).
   errorAllReads(reason: unknown): void {
     this.#queueTotalSize = 0;
-    const pending = this.#pendingReads;
-    this.#pendingReads = new RingBuffer();
-    for (let i = 0; i < pending.length; i++) {
-      const read = pending.get(i) as PendingRead<V>;
-      read.reject(reason);
-    }
+    this.#pendingReads.drain((read) => read.reject(reason));
   }
 
   // Resolve all pending reads as done (stream CANCEL path). Per spec,
@@ -987,12 +979,9 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   }
 
   #resolvePendingReadsAsDone(): void {
-    const pending = this.#pendingReads;
-    this.#pendingReads = new RingBuffer();
-    for (let i = 0; i < pending.length; i++) {
-      const read = pending.get(i) as PendingRead<V>;
-      read.resolve(createReadResult(undefined, true));
-    }
+    this.#pendingReads.drain((read) =>
+      read.resolve(createReadResult(undefined, true))
+    );
   }
 
   // Bulk read for the draining reader (and pipeTo): consume all buffered
@@ -1036,7 +1025,8 @@ class ByteStreamCursor
 {
   // Spec [[pendingPullIntos]] — a LIST. Multiple reads can be queued, and
   // autoAllocateChunkSize creates synthetic descriptors for default reads.
-  #pendingPullIntos: RingBufferType<PullIntoDescriptor> = new RingBuffer();
+  readonly #pendingPullIntos: RingBufferType<PullIntoDescriptor> =
+    new RingBuffer();
 
   // A released head's filled bytes (see flushReleasedHead), cursor-local
   // since the queue may be shared. Read before the data at the cursor's
@@ -1602,16 +1592,13 @@ class ByteStreamCursor
   // remains legal. A fractional-element fill never reaches this point:
   // controller.close() throws for it.
   commitPullIntosOnClose(): void {
-    const pending = this.#pendingPullIntos;
-    this.#pendingPullIntos = new RingBuffer();
-    for (let i = 0; i < pending.length; i++) {
-      const desc = pending.get(i) as PullIntoDescriptor;
+    this.#pendingPullIntos.drain((desc) => {
       // Skip already-resolved descriptors (auto-allocate close and deferred
       // end-of-data paths set readerType to 'none').
-      if (desc.readerType === 'none') continue;
+      if (desc.readerType === 'none') return;
       // assert: desc.bytesFilled % desc.elementSize === 0
       desc.resolve(createReadResult(this.#convert(desc), true));
-    }
+    });
   }
 
   // Spec ReadableByteStreamControllerEnqueue step 9.3: if the head
@@ -1628,12 +1615,7 @@ class ByteStreamCursor
   // Stream error: partial fills are lost.
   override errorAllReads(reason: unknown): void {
     this.#prefix = undefined;
-    const pending = this.#pendingPullIntos;
-    this.#pendingPullIntos = new RingBuffer();
-    for (let i = 0; i < pending.length; i++) {
-      const desc = pending.get(i) as PullIntoDescriptor;
-      desc.reject(reason);
-    }
+    this.#pendingPullIntos.drain((desc) => desc.reject(reason));
     super.errorAllReads(reason);
   }
 
@@ -1642,12 +1624,9 @@ class ByteStreamCursor
   // WPT-verified).
   override resolveAllReadsAsDone(): void {
     this.#prefix = undefined;
-    const pending = this.#pendingPullIntos;
-    this.#pendingPullIntos = new RingBuffer();
-    for (let i = 0; i < pending.length; i++) {
-      const desc = pending.get(i) as PullIntoDescriptor;
-      desc.resolve(createReadResult(undefined, true));
-    }
+    this.#pendingPullIntos.drain((desc) =>
+      desc.resolve(createReadResult(undefined, true))
+    );
     super.resolveAllReadsAsDone();
   }
 
@@ -1667,9 +1646,8 @@ class ByteStreamCursor
     const head = pending.peek();
     if (head !== undefined) {
       head.readerType = 'none';
-      const kept: RingBufferType<PullIntoDescriptor> = new RingBuffer();
-      kept.push(head);
-      this.#pendingPullIntos = kept;
+      pending.clear();
+      pending.push(head);
     }
     super.cancelReadsForReader(reader, reason);
   }

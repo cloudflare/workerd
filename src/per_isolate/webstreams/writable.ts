@@ -296,7 +296,7 @@ class WritableStream<W = unknown> {
   #writer?: WritableStreamDefaultWriter<W> | undefined;
   #state: WritableState = 'writable';
   #storedError: unknown = undefined;
-  #writeRequests: RingBufferType<PromiseWithResolversType<void>> =
+  readonly #writeRequests: RingBufferType<PromiseWithResolversType<void>> =
     new RingBuffer();
   #inFlightWriteRequest: PromiseWithResolversType<void> | undefined;
   #closeRequest: PromiseWithResolversType<void> | undefined;
@@ -458,11 +458,7 @@ class WritableStream<W = unknown> {
         stream.#inFlightWriteRequest = undefined;
         inFlight.reject(reason);
       }
-      const writeRequests = stream.#writeRequests;
-      stream.#writeRequests = new RingBuffer();
-      for (let i = 0; i < writeRequests.length; i++) {
-        (writeRequests.get(i) as PromiseWithResolversType<void>).reject(reason);
-      }
+      stream.#writeRequests.drain((request) => request.reject(reason));
       stream.#state = 'closed';
       settleClosedPromise(stream);
       stream.#interopErrorHook = undefined;
@@ -631,12 +627,7 @@ class WritableStream<W = unknown> {
       if (controller !== undefined) {
         controllerErrorSteps(controller, storedError); // reset the controller queue
       }
-      const writeRequests = stream.#writeRequests;
-      stream.#writeRequests = new RingBuffer();
-      for (let i = 0; i < writeRequests.length; i++) {
-        const request = writeRequests.get(i) as PromiseWithResolversType<void>;
-        request.reject(storedError);
-      }
+      stream.#writeRequests.drain((request) => request.reject(storedError));
       const abortRequest = stream.#pendingAbortRequest;
       if (abortRequest === undefined) {
         writableStreamRejectCloseAndClosedPromiseIfNeeded(stream);
@@ -984,7 +975,7 @@ class WritableStreamDefaultController<
   W = unknown,
 > implements WritableStreamDefaultControllerType {
   #stream: WritableStream<W>;
-  #queue: RingBufferType<QueuedWrite<W>> = new RingBuffer();
+  readonly #queue: RingBufferType<QueuedWrite<W>> = new RingBuffer();
   #queueTotalSize: number = 0;
   #started: boolean = false;
   #strategyHWM: number;
@@ -1017,15 +1008,12 @@ class WritableStreamDefaultController<
       controller: WritableStreamDefaultController<W>,
       reason: unknown
     ) => {
-      const queue = controller.#queue;
-      controller.#queue = new RingBuffer();
       controller.#queueTotalSize = 0;
-      for (let i = 0; i < queue.length; i++) {
-        const entry = queue.get(i) as QueuedWrite<W>;
+      controller.#queue.drain((entry) => {
         if (entry.value === kFlushMarker) {
           (entry.flushRequest as PromiseWithResolversType<void>).reject(reason);
         }
-      }
+      });
     };
 
     // detachWritableStream's controller half: nothing reaches the sink
