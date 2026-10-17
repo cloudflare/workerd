@@ -144,7 +144,9 @@ connection.
   method: call the private method (`#error`, `#read`), a module slot
   (`controllerError`), or an `uncurryThis` capture taken at load time
   (`transform.ts`, `encoding.ts`). The public method is the brand check
-  plus that internal entry.
+  for its own class plus that internal entry. A helper chained across
+  sibling classes (`getReaderBase`, the chained controller helpers)
+  accepts every class in the chain, so it is no brand check.
 - Every dictionary the implementation builds itself — the sources, sinks,
   strategies and transformers of the internal pairs, and the stand-in for
   an omitted argument (`kNullProtoObject`) — is null-prototype, so a
