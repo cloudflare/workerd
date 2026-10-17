@@ -3477,8 +3477,6 @@ namespace {
 // of producing either a single concatenated kj::Array<byte> or kj::String.
 class AllReader final: public jsg::Wrappable {
  public:
-  using PartList = kj::Array<kj::Array<kj::byte>>;
-
   AllReader(jsg::Ref<ReadableStream> stream, uint64_t limit)
       : state(State::create<jsg::Ref<ReadableStream>>(kj::mv(stream))),
         limit(limit) {}
@@ -3488,7 +3486,8 @@ class AllReader final: public jsg::Wrappable {
     return loop(js).then(
         js,
         JSG_VISITABLE_LAMBDA(
-            (this, self = JSG_THIS), (self), (jsg::Lock & js, PartList partPtrs)->jsg::JsRef<jsg::JsArrayBuffer> {
+            (this, self = JSG_THIS), (self), (jsg::Lock & js)->jsg::JsRef<jsg::JsArrayBuffer> {
+              auto partPtrs = takeParts();
               auto ab = jsg::JsArrayBuffer::create(js, runningTotal);
               copyInto(ab.asArrayPtr(), partPtrs);
               return ab.addRef(js);
@@ -3498,19 +3497,21 @@ class AllReader final: public jsg::Wrappable {
   jsg::Promise<kj::String> allText(
       jsg::Lock& js, ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) {
     return loop(js).then(js,
-        JSG_VISITABLE_LAMBDA((this, self = JSG_THIS, option), (self), (jsg::Lock& js, PartList partPtrs) {
+        JSG_VISITABLE_LAMBDA((this, self = JSG_THIS, option), (self), (jsg::Lock& js) {
+          auto partPtrs = takeParts();
+          auto outputSize = runningTotal;
           // Strip UTF-8 BOM if requested
           bool hadBom = false;
           if ((option & ReadAllTextOption::STRIP_BOM) && partPtrs.size() > 0 &&
               hasUtf8Bom(partPtrs[0])) {
-          runningTotal -= UTF8_BOM_SIZE;
+          outputSize -= UTF8_BOM_SIZE;
           hadBom = true;
           }
 
-          JSG_REQUIRE(runningTotal <= v8::String::kMaxLength, RangeError,
+          JSG_REQUIRE(outputSize <= v8::String::kMaxLength, RangeError,
               "String length exceeds v8::String::kMaxLength.");
 
-          auto out = kj::heapArray<char>(runningTotal + 1);
+          auto out = kj::heapArray<char>(outputSize + 1);
           copyInto(
               out.first(out.size() - 1).asBytes(), partPtrs, hadBom ? StripBom::YES : StripBom::NO);
           out.back() = '\0';
@@ -3544,20 +3545,23 @@ class AllReader final: public jsg::Wrappable {
   uint64_t limit;
   kj::Vector<kj::Array<kj::byte>> parts;
   uint64_t runningTotal = 0;
+  bool consumed = false;
 
-  jsg::Promise<PartList> loop(jsg::Lock& js) {
+  // Promise adoption can invoke JavaScript. Keep parts and accounting in this operation;
+  // completion is notification-only, and consumption requires this read to be closed.
+  jsg::Promise<void> loop(jsg::Lock& js) {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-        return js.resolvedPromise(parts.releaseAsArray());
+        return js.resolvedPromise();
       }
       KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-        return js.template rejectedPromise<PartList>(errored.getHandle(js));
+        return js.rejectedPromise<void>(errored.getHandle(js));
       }
       KJ_CASE_ONEOF(readable, jsg::Ref<ReadableStream>) {
         // Each callback retains the operation until its work finishes, independently of
         // the returned promise. Trace shared state through one Wrappable.
         auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = JSG_THIS, readable = readable.addRef()),
-            (self, readable), (jsg::Lock & js, ReadResult result) mutable->jsg::Promise<PartList> {
+            (self, readable), (jsg::Lock & js, ReadResult result) mutable->jsg::Promise<void> {
               if (result.done) {
               state.template transitionTo<StreamStates::Closed>();
               return loop(js);
@@ -3581,7 +3585,7 @@ class AllReader final: public jsg::Wrappable {
               return loop(js);
               }
 
-              if ((runningTotal + bufferSource.size()) > limit) {
+              if (bufferSource.size() > limit - runningTotal) {
               auto error = js.typeError("Memory limit exceeded before EOF.");
               state.template transitionTo<StreamStates::Errored>(error.addRef(js));
               return readable->getController().cancel(js, error).then(js,
@@ -3604,7 +3608,7 @@ class AllReader final: public jsg::Wrappable {
             });
 
         auto onFailure = JSG_VISITABLE_LAMBDA((this, self = JSG_THIS), (self),
-            (jsg::Lock & js, jsg::Value exception)->jsg::Promise<PartList> {
+            (jsg::Lock & js, jsg::Value exception)->jsg::Promise<void> {
               // In this case the stream should already be errored.
               auto error = jsg::JsValue(exception.getHandle(js));
               state.template transitionTo<StreamStates::Errored>(error.addRef(js));
@@ -3616,6 +3620,19 @@ class AllReader final: public jsg::Wrappable {
       }
     }
     KJ_UNREACHABLE;
+  }
+
+  kj::Array<kj::Array<kj::byte>> takeParts() {
+    JSG_REQUIRE(
+        state.is<StreamStates::Closed>() && !consumed, TypeError, "Invalid stream read result.");
+    uint64_t total = 0;
+    for (auto& part: parts) {
+      KJ_ASSERT(part.size() <= runningTotal - total);
+      total += part.size();
+    }
+    KJ_ASSERT(total == runningTotal);
+    consumed = true;
+    return parts.releaseAsArray();
   }
 
   void copyInto(
@@ -3635,6 +3652,7 @@ class AllReader final: public jsg::Wrappable {
         out.write(part);
       }
     }
+    KJ_ASSERT(out.size() == 0);
   }
 };
 

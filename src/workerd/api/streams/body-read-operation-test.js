@@ -62,6 +62,94 @@ export const validBodies = {
   },
 };
 
+export const bodyReadUsesOperationLocalBytes = {
+  async test() {
+    for (const method of ['text', 'arrayBuffer', 'formData']) {
+      for (const donorSize of [8, 16, 32]) {
+        const original = Promise.prototype.then;
+        const donorBody = body([
+          new TextEncoder().encode('x=' + 'D'.repeat(donorSize - 2)),
+        ]);
+        const intercepted = new Error('custom completion handler');
+        let donor;
+        let notifications = 0;
+        Promise.prototype.then = function (resolve, reject) {
+          Promise.prototype.then = original;
+          return original.call(
+            this,
+            (notification) => {
+              ++notifications;
+              donor = notification;
+              reject(intercepted);
+            },
+            reject
+          );
+        };
+        try {
+          strictEqual(await failureOf(donorBody.text()), intercepted);
+          strictEqual(notifications, 1);
+          // Completion is notification-only; buffered parts remain local to each read.
+          strictEqual(donor, undefined);
+          const text = 'x=' + 'V'.repeat(14);
+          const target = body([new TextEncoder().encode(text)]);
+          Promise.prototype.then = function (resolve, reject) {
+            Promise.prototype.then = original;
+            return original.call(this, () => resolve(donor), reject);
+          };
+          const value = await target[method]();
+          strictEqual(
+            method === 'text'
+              ? value
+              : method === 'arrayBuffer'
+                ? new TextDecoder().decode(value)
+                : 'x=' + value.get('x'),
+            text
+          );
+        } finally {
+          Promise.prototype.then = original;
+        }
+      }
+    }
+  },
+};
+
+export const pendingBodyReadRequiresCompletion = {
+  async test() {
+    for (const method of ['arrayBuffer', 'text']) {
+      let controller;
+      const response = new Response(
+        new ReadableStream({
+          start(value) {
+            controller = value;
+            controller.enqueue(new Uint8Array(0));
+          },
+        })
+      );
+      await 0;
+      const original = Promise.prototype.then;
+      let inner;
+      const pending = response[method]();
+      Promise.prototype.then = function (resolve) {
+        Promise.prototype.then = original;
+        inner = this;
+        resolve(undefined);
+      };
+      try {
+        const failure = await failureOf(pending);
+        strictEqual(failure instanceof TypeError, true);
+        strictEqual(failure.message, 'Invalid stream read result.');
+        strictEqual(inner instanceof Promise, true);
+        collect();
+        controller.enqueue(new Uint8Array([65]));
+        controller.close();
+        await inner;
+      } finally {
+        Promise.prototype.then = original;
+      }
+    }
+  },
+};
+
 export const pendingReadAcrossGc = {
   async test() {
     for (const method of ['arrayBuffer', 'text']) {
