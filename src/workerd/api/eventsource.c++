@@ -17,8 +17,11 @@ namespace workerd::api {
 namespace {
 class EventSourceSink final: public WritableStreamSink {
  public:
-  EventSourceSink(EventSource& eventSource, kj::Rc<jsg::WeakRef<EventSource>> weakEventSource)
-      : eventSource(eventSource),
+  EventSourceSink(IoContext& context,
+      kj::Own<EventSource::StreamState> state,
+      kj::Rc<jsg::WeakRef<EventSource>> weakEventSource)
+      : context(context),
+        state(kj::mv(state)),
         weakEventSource(kj::mv(weakEventSource)) {}
 
   kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
@@ -28,7 +31,7 @@ class EventSourceSink final: public WritableStreamSink {
     // sequence in the remaining input, we buffer it and wait for the next write to continue
     // scanning, or until the stream is ended or aborted.
 
-    if (eventSource == kj::none) {
+    if (ended) {
       // Write was received after end() or abort() was called.
       // We'll just ignore the write.
       return kj::READY_NOW;
@@ -87,8 +90,10 @@ class EventSourceSink final: public WritableStreamSink {
   }
 
  private:
-  kj::Maybe<EventSource&> eventSource;
+  IoContext& context;
+  kj::Own<EventSource::StreamState> state;
   kj::Rc<jsg::WeakRef<EventSource>> weakEventSource;
+  bool ended = false;
 
   // Retained bytes to be processed in the next write.
   kj::Vector<char> kept;
@@ -140,7 +145,7 @@ class EventSourceSink final: public WritableStreamSink {
         // This message is done and ready to be dispatched. Add it to the
         // pendingMessages list. The next time release() is called, it will
         // be passed off to the EventSource.
-        pending.id = kj::str(KJ_ASSERT_NONNULL(eventSource).getLastEventId());
+        pending.id = kj::str(state->lastEventId);
         pendingMessages.add(kj::mv(pending));
         currentPendingMessage = kj::none;
       }
@@ -150,7 +155,6 @@ class EventSourceSink final: public WritableStreamSink {
       static constexpr auto handle = [](auto& self, kj::ArrayPtr<const char> field,
                                          kj::ArrayPtr<const char> value) {
         auto& pending = self.getPendingMessage();
-        auto& ev = KJ_ASSERT_NONNULL(self.eventSource);
         // Per the spec, only one space after the colon is optional and trimmed.
         // Any other whitespace, or additional spaces aren't accounted for so would
         // be part of the value.
@@ -162,10 +166,10 @@ class EventSourceSink final: public WritableStreamSink {
         } else if (field == "event"_kjc) {
           pending.event = kj::str(value);
         } else if (field == "id"_kjc) {
-          ev.setLastEventId(kj::str(value));
+          self.state->lastEventId = kj::str(value);
         } else if (field == "retry"_kjc) {
           KJ_IF_SOME(time, kj::str(value).tryParseAs<uint32_t>()) {
-            KJ_ASSERT_NONNULL(self.eventSource).setReconnectionTime(time);
+            self.state->setReconnectionTime(time);
           }
           // Ignore the line if it cannot be successfully parsed as a uint32_t
         }
@@ -183,13 +187,11 @@ class EventSourceSink final: public WritableStreamSink {
     if (pendingMessages.empty()) return;
     auto pending = pendingMessages.releaseAsArray();
     // If the event source is gone, just drop the messages on the floor.
-    KJ_IF_SOME(es, eventSource) {
-      es.enqueueMessages(kj::mv(pending), weakEventSource.addRef());
-    }
+    EventSource::enqueueMessages(context, kj::mv(pending), weakEventSource.addRef());
   }
 
   void clear() {
-    eventSource = kj::none;
+    ended = true;
     kept.clear();
     pendingMessages.clear();
     currentPendingMessage = kj::none;
@@ -217,9 +219,9 @@ class EventSourceSink final: public WritableStreamSink {
   }
 };
 
-kj::Promise<void> processBody(IoContext& context, kj::Promise<DeferredProxy<void>> promise) {
+kj::Promise<void> processBody(kj::Promise<void> promise) {
   try {
-    co_await context.waitForDeferredProxy(kj::mv(promise));
+    co_await promise;
   } catch (...) {
     auto ex = kj::getCaughtExceptionAsKj();
     // We would see a disconnection exception if the eventstream is closed for
@@ -267,6 +269,7 @@ jsg::Ref<EventSource> EventSource::from(jsg::Lock& js, JsReadableStream readable
 
 EventSource::EventSource(jsg::Lock& js, jsg::Url url, kj::Maybe<EventSourceInit> init)
     : context(IoContext::current()),
+      streamState(kj::refcounted<StreamState>()),
       impl({
         .url = kj::mv(url),
         .options = kj::mv(init).orDefault({}),
@@ -276,6 +279,7 @@ EventSource::EventSource(jsg::Lock& js, jsg::Url url, kj::Maybe<EventSourceInit>
 
 EventSource::EventSource(jsg::Lock& js)
     : context(IoContext::current()),
+      streamState(kj::refcounted<StreamState>()),
       abortController(js.alloc<AbortController>(js)),
       readyState(State::CONNECTING) {}
 
@@ -349,7 +353,7 @@ void EventSource::reconnect(jsg::Lock& js) {
   readyState = State::CONNECTING;
   abortController = js.alloc<AbortController>(js);
   auto signal = abortController->getSignal();
-  context.awaitIo(js, signal->wrap(js, context.afterLimitTimeout(reconnectionTime)))
+  context.awaitIo(js, signal->wrap(js, context.afterLimitTimeout(streamState->reconnectionTime)))
       .then(js,
           JSG_VISITABLE_LAMBDA(
               (self = JSG_THIS), (self), (jsg::Lock & js) mutable { self->start(js); }),
@@ -446,8 +450,8 @@ void EventSource::start(jsg::Lock& js) {
   auto headers = js.alloc<Headers>();
   headers->setCommon(capnp::CommonHeaderName::ACCEPT, MimeType::EVENT_STREAM.essence());
   headers->setCommon(capnp::CommonHeaderName::CACHE_CONTROL, kj::str("no-cache"));
-  if (lastEventId != ""_kjc) {
-    headers->setUnguarded(js, kj::str("last-event-id"), kj::str(lastEventId));
+  if (streamState->lastEventId != ""_kjc) {
+    headers->setUnguarded(js, kj::str("last-event-id"), kj::str(streamState->lastEventId));
   }
 
   fetchImpl(js, kj::mv(fetcher), kj::str(i.url),
@@ -495,17 +499,19 @@ void EventSource::run(jsg::Lock& js,
         self->notifyError(js, jsg::JsValue(exception.getHandle(js)));
       });
 
-  // Well, ok! We're ready to start trying to process the stream! We do so by
-  // pumping the body into an EventSourceSink until the body is closed, canceled,
-  // or errored.
+  // Transfer ownership of all parser state before pumpTo(), which can start work and then
+  // throw before returning a promise. The sink must not borrow from this EventSource.
+  auto sink = newSink(js);
   context
       .awaitIo(js,
-          processBody(context,
-              readable.pumpTo(js,
-                  kj::heap<EventSourceSink>(
-                      *this, kj::rc<jsg::WeakRef<EventSource>>(JSG_THIS_WEAK(js))),
-                  EndStream::YES)))
+          processBody(
+              context.waitForDeferredProxy(readable.pumpTo(js, kj::mv(sink), EndStream::YES))))
       .then(js, kj::mv(onSuccess), kj::mv(onFailed));
+}
+
+kj::Own<WritableStreamSink> EventSource::newSink(jsg::Lock& js) {
+  return kj::heap<EventSourceSink>(
+      context, kj::addRef(*streamState), kj::rc<jsg::WeakRef<EventSource>>(JSG_THIS_WEAK(js)));
 }
 
 void EventSource::close(jsg::Lock& js) {
@@ -515,8 +521,9 @@ void EventSource::close(jsg::Lock& js) {
   readyState = State::CLOSED;
 }
 
-void EventSource::enqueueMessages(
-    kj::Array<PendingMessage> messages, kj::Rc<jsg::WeakRef<EventSource>> weakSelf) {
+void EventSource::enqueueMessages(IoContext& context,
+    kj::Array<PendingMessage> messages,
+    kj::Rc<jsg::WeakRef<EventSource>> weakSelf) {
   context.addTask(
       context.run([weakSelf = kj::mv(weakSelf), messages = kj::mv(messages)](auto& lock) mutable {
     KJ_IF_SOME(self, weakSelf->tryAddRef(lock)) {
@@ -525,19 +532,10 @@ void EventSource::enqueueMessages(
   }));
 }
 
-void EventSource::setReconnectionTime(uint32_t time) {
+void EventSource::StreamState::setReconnectionTime(uint32_t time) {
   // We enforce both a min and max reconnection time. The minimum is 1 second,
   // and the maximum is 10 seconds.
-  reconnectionTime =
-      kj::max(kj::min(time, MAX_RECONNECTION_TIME), MIN_RECONNECTION_TIME) * kj::MILLISECONDS;
-}
-
-kj::StringPtr EventSource::getLastEventId() {
-  return lastEventId;
-}
-
-void EventSource::setLastEventId(kj::String id) {
-  lastEventId = kj::mv(id);
+  reconnectionTime = kj::max(kj::min(time, uint32_t(10000)), uint32_t(1000)) * kj::MILLISECONDS;
 }
 
 void EventSource::visitForGc(jsg::GcVisitor& visitor) {
@@ -553,7 +551,7 @@ void EventSource::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     tracker.trackField("url", i.url);
   }
   tracker.trackField("abortController", abortController);
-  tracker.trackField("lastEventId", lastEventId);
+  tracker.trackField("streamState", &*streamState);
 }
 
 }  // namespace workerd::api

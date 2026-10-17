@@ -31,6 +31,12 @@ wd_test(
 )
 
 wd_test(
+    src = "eventsource-lifetime-test.wd-test",
+    args = ["--experimental"],
+    data = ["eventsource-lifetime-test.js"],
+)
+
+wd_test(
     src = "streams-consumer-reentry-test.wd-test",
     args = ["--experimental"],
     data = [
