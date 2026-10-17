@@ -291,18 +291,27 @@ export const thenGetterFiresOncePerByteRead = {
 // A then getter that releases the reader from the first read's result,
 // while cancel() or close() settles the reader's pending reads: either call
 // answers every read at once, so the next read still resolves done rather
-// than rejecting with the release. Default reads, autoAllocateChunkSize
-// reads at cancel(), and BYOB reads at cancel() and at a close() the
-// source answers with respond(0) (C++ settles them at close(), and has no
-// byobRequest after it).
+// than rejecting with the release. Default, autoAllocateChunkSize and BYOB
+// reads, at cancel() and close(); BYOB reads at a close() the source
+// answers with respond(0) as well (C++ settles them at close(), and has no
+// byobRequest after it). DIVERGENCE (ledger #43): at close(), TypeScript
+// rejects the autoAllocateChunkSize reads after the first, and the BYOB
+// reads after the first that the source does not answer.
 export const thenGetterReleasesReaderWhileByteReadsSettle = {
   async test() {
     const cancel = (reader) => reader.cancel('bye');
+    const close = (reader, controller) => controller.close();
     const cases = {
       defaultCancel: { end: cancel },
-      defaultClose: { end: (reader, controller) => controller.close() },
+      defaultClose: { end: close },
       autoAllocateCancel: { source: { autoAllocateChunkSize: 8 }, end: cancel },
+      autoAllocateClose: {
+        source: { autoAllocateChunkSize: 8 },
+        end: close,
+        tsRejectsLater: true,
+      },
       byobCancel: { mode: 'byob', end: cancel },
+      byobClose: { mode: 'byob', end: close, tsRejectsLater: true },
       byobCloseAndRespond: {
         mode: 'byob',
         end: (reader, controller) => {
@@ -311,7 +320,9 @@ export const thenGetterReleasesReaderWhileByteReadsSettle = {
         },
       },
     };
-    for (const [name, { mode, source, end }] of Object.entries(cases)) {
+    for (const [name, { mode, source, end, tsRejectsLater }] of Object.entries(
+      cases
+    )) {
       let controller;
       const rs = new ReadableStream({
         type: 'bytes',
@@ -336,7 +347,15 @@ export const thenGetterReleasesReaderWhileByteReadsSettle = {
       });
       try {
         const ended = end(reader, controller);
-        for (const pending of reads) {
+        for (const [i, pending] of reads.entries()) {
+          if (usingTsImpl && tsRejectsLater && i > 0) {
+            await rejects(
+              pending,
+              { name: 'TypeError', message: 'This reader has been released' },
+              name
+            );
+            continue;
+          }
           const result = await Promise.race([
             pending,
             scheduler.wait(250).then(() => 'pending'),
@@ -344,6 +363,65 @@ export const thenGetterReleasesReaderWhileByteReadsSettle = {
           strictEqual(result.done, true, name);
         }
         await ended;
+      } finally {
+        delete Object.prototype.then;
+      }
+    }
+  },
+};
+
+// A then getter that errors the source from the first result of a tee
+// branch's pending reads, while close() settles them: the close answers
+// them all, so the next read still resolves done. The other branch still
+// holds a chunk, so in TypeScript the error reaches it (ledger #23, on a
+// tee branch). autoAllocateChunkSize and BYOB reads. DIVERGENCE (ledger
+// #43): TypeScript rejects the reads after the first with the error.
+export const thenGetterErrorsSourceWhileBranchByteReadsSettle = {
+  async test() {
+    const cases = {
+      autoAllocate: { source: { autoAllocateChunkSize: 8 } },
+      byob: { mode: 'byob' },
+    };
+    for (const [name, { mode, source }] of Object.entries(cases)) {
+      let controller;
+      const rs = new ReadableStream({
+        type: 'bytes',
+        ...source,
+        start(c) {
+          controller = c;
+        },
+      });
+      const [branch] = rs.tee();
+      controller.enqueue(new Uint8Array([1]));
+      const reader = branch.getReader({ mode });
+      const read = () =>
+        mode === 'byob' ? reader.read(new Uint8Array(4)) : reader.read();
+      strictEqual((await read()).done, false, name);
+      const reads = [read(), read()];
+      const error = new Error('boom');
+      let fired = 0;
+      Object.defineProperty(Object.prototype, 'then', {
+        get() {
+          if (Object.hasOwn(this, 'done') && fired++ === 0) {
+            controller.error(error);
+          }
+          return undefined;
+        },
+        configurable: true,
+      });
+      try {
+        controller.close();
+        for (const [i, pending] of reads.entries()) {
+          if (usingTsImpl && i > 0) {
+            await rejects(pending, (e) => e === error, name);
+            continue;
+          }
+          const result = await Promise.race([
+            pending,
+            scheduler.wait(250).then(() => 'pending'),
+          ]);
+          strictEqual(result.done, true, name);
+        }
       } finally {
         delete Object.prototype.then;
       }

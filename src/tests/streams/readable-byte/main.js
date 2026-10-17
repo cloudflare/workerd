@@ -300,6 +300,7 @@ export {
   nativeSourceIgnoresPollutedMembers,
   thenGetterFiresOncePerByteRead,
   thenGetterReleasesReaderWhileByteReadsSettle,
+  thenGetterErrorsSourceWhileBranchByteReadsSettle,
   byobReadThenLookupFollowsItsPull,
 } from 'pollution';
 
