@@ -47,8 +47,6 @@ const auto kIllegalInvocation =
 class Serializer;
 class Deserializer;
 
-void isolateRegisterExternalReference(v8::Isolate* isolate, intptr_t addr);
-
 // Return true if the type requires GC visitation, which we assume is the case if the type or any
 // superclass (other than Object) declares a `visitForGc()` method.
 template <typename T>

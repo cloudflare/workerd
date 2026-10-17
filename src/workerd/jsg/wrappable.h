@@ -48,6 +48,10 @@ class Visitor;
 
 namespace workerd::jsg {
 
+// Records a C++ callback address that V8 can find in the heap, so that a startup snapshot can
+// serialize it; a no-op unless the isolate is preparing one (IsolateBase in setup.h).
+void isolateRegisterExternalReference(v8::Isolate* isolate, intptr_t addr);
+
 WD_STRONG_BOOL(IsContextGlobal);
 
 // The ContextPointerSlot enum defines the embedder slots we use in v8::Context for
