@@ -1052,7 +1052,6 @@ class ReadableStreamDefaultReader<
   }
 
   releaseLock(): void {
-    if (!isReaderBoundToStream(this)) return;
     readableStreamReaderGenericRelease(this);
   }
 }
@@ -1249,7 +1248,6 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
   }
 
   releaseLock(): void {
-    if (!isReaderBoundToStream(this)) return;
     readableStreamReaderGenericRelease(this);
   }
 }
@@ -2777,7 +2775,6 @@ class ReadableStreamDrainingReader<R> {
   }
 
   releaseLock(): void {
-    if (!isReaderBoundToStream(this)) return;
     readableStreamReaderGenericRelease(this);
   }
 }
