@@ -108,6 +108,8 @@ const {
   CLOSE_SENTINEL,
   cloneArrayBuffer,
   createReadResult,
+  fractionalFillError,
+  hasFractionalFill,
 } = require('webstreams/queue');
 
 // Internal writable operations for the pipe (never re-exported to users).
@@ -2358,22 +2360,20 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     // close reaches it, so this close() succeeds and the sibling keeps
     // every byte.
     const released = this.#releasedHead;
-    const hasFractionalFill =
+    const fractional =
       (released !== undefined &&
         this.#releasedHeadErrorsStream &&
-        released.bytesFilled % released.elementSize !== 0) ||
+        hasFractionalFill(released)) ||
       this.#core.queue.someLiveCursor((cursor) => {
         const byteCursor = cursor as unknown as ByteStreamCursorType;
         if (byteCursor.errorStreamCallback === errorTeeBranchFromCursor) {
           return false;
         }
         const head: PullIntoDescriptor | undefined = byteCursor.headPullInto;
-        return head !== undefined && head.bytesFilled % head.elementSize !== 0;
+        return head !== undefined && hasFractionalFill(head);
       });
-    if (hasFractionalFill) {
-      const e = new TypeError(
-        'Insufficient bytes to fill elements in the given view'
-      );
+    if (fractional) {
+      const e = fractionalFillError();
       this.#core.error(e);
       throw e;
     }
