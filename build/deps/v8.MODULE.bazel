@@ -72,6 +72,7 @@ PATCHES = [
     "0047-Keep-llvm-libc-private-to-v8_libbase.patch",
     "0048-Keep-v8_libshared-private-to-v8.patch",
     "0049-Build-Temporal-in-the-V8-Bazel-build.patch",
+    "0050-Keep-functions-created-by-v8-Function-New-in-the-context-snapshot.patch",
 ]
 
 http_archive(
