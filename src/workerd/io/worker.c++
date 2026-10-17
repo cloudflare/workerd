@@ -943,7 +943,12 @@ struct Worker::Script::Impl {
   // modules and bindings.
   kj::Maybe<kj::Own<capnp::SchemaLoader>> maybeSchemaLoader;
 
-  kj::OneOf<jsg::NonModuleScript, kj::Path> unboundScriptOrMainModule;
+  // The service-worker script of an isolate restored from a startup snapshot: the zygote
+  // compiled and ran it, and everything it did (globals, listeners) is in the deserialized
+  // context, so there is nothing to compile.
+  struct ScriptFromSnapshot {};
+
+  kj::OneOf<jsg::NonModuleScript, kj::Path, ScriptFromSnapshot> unboundScriptOrMainModule;
 
   kj::Array<CompiledGlobal> globals;
 
@@ -1557,6 +1562,14 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
     });
 
     lock.withinHandleScope([&] {
+      if (!modular && lock.isStartingFromSnapshot()) {
+        // The zygote compiled and ran the script into the context this isolate is restored from,
+        // so there is nothing to compile, and no context to compile it in yet: the Worker
+        // constructor adopts the snapshot's context (jsg::ResourceWrapper::newContext).
+        impl->unboundScriptOrMainModule = Impl::ScriptFromSnapshot{};
+        return;
+      }
+
       if (isolate->impl->inspector != kj::none || errorReporter != kj::none) {
         lock.v8Isolate->SetCaptureStackTraceForUncaughtExceptions(true);
       }
@@ -2383,6 +2396,12 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
             jsg::IsolateBase::from(lock.v8Isolate)
                 .recordOrRebindSnapshotBindings(js, bindingsScope, ""_kj, scopeBeforeBindings);
+            if (lock.isStartingFromSnapshot()) {
+              auto stashed = jsg::getContextDataSlotValue(
+                  context, jsg::ContextDataSlot::SNAPSHOT_GLOBAL_SCOPE);
+              KJ_ASSERT(stashed->IsArray());
+              (*jsContext)->restoreStateFromSnapshot(js, jsg::JsArray(stashed.As<v8::Array>()));
+            }
 
             // Execute script.
             currentSpan = maybeMakeSpan("lw:top_level_execution"_kjc);
@@ -2405,6 +2424,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             KJ_DEFER(js.setAllowEval(false));
 
             KJ_SWITCH_ONEOF(script->impl->unboundScriptOrMainModule) {
+              KJ_CASE_ONEOF(restored, Script::Impl::ScriptFromSnapshot) {
+                // The zygote ran the script; its listeners were re-registered above.
+              }
               KJ_CASE_ONEOF(unboundScript, jsg::NonModuleScript) {
                 auto limitScope =
                     script->isolate->getLimitEnforcer().enterStartupJs(lock, limitErrorOrTime);
@@ -2545,10 +2567,23 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         // const_cast OK because guarded by `lock`.
         ::workerd::rust::jsg::realm_prepare_snapshot(
             const_cast<::workerd::rust::jsg::Realm&>(*script->isolate->impl->realm));
-        // The bootstrap's C++ state holds V8 handles: park it in the heap, where a restored
-        // isolate picks it up.
+        // A service worker's Script holds the compiled script and its globals as v8::Globals,
+        // which CreateBlob refuses. The zygote's Script is never used again: the restored
+        // isolate's own Script starts out as ScriptFromSnapshot (the global object already
+        // carries the globals' values).
+        auto& scriptImpl = *const_cast<Script&>(*script).impl;
+        if (scriptImpl.unboundScriptOrMainModule.is<jsg::NonModuleScript>()) {
+          scriptImpl.unboundScriptOrMainModule = Script::Impl::ScriptFromSnapshot{};
+        }
+        scriptImpl.globals = nullptr;
+        // The bootstrap's and the global scope's C++ state hold V8 handles: park it in the heap,
+        // where a restored isolate picks it up, before clear() below drops what is left.
         auto context = jsContext->getHandle(lock);
         stashPerIsolateBootstrapForSnapshot(lock, context);
+        JSG_WITHIN_CONTEXT_SCOPE(lock, context, [&](jsg::Lock& js) {
+          jsg::setContextDataSlot(context, jsg::ContextDataSlot::SNAPSHOT_GLOBAL_SCOPE,
+              v8::Local<v8::Array>((*jsContext)->stashStateForSnapshot(js)));
+        });
         auto contextGlobal = jsContext->extractContextGlobalForSnapshot();
         (*jsContext)->clear();
         const_cast<Script&>(*script).impl->moduleContext = kj::none;

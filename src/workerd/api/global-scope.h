@@ -910,6 +910,16 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   void setBuffer(jsg::Lock& js, jsg::JsValue newBuffer);
   jsg::JsValue getProcess(jsg::Lock& js);
   void setProcess(jsg::Lock& js, jsg::JsValue newProcess);
+
+  // Startup snapshots (jsg::IsolateBase::createSnapshotBlob). The state the worker's top-level
+  // code gave this C++ object, which dies with the zygote: the listeners registered on the global
+  // scope (see EventTarget::stashEventHandlersForSnapshot()), and the `process` and `Buffer`
+  // values resolved so far, which are cached as jsg::JsRefs that CreateBlob refuses. Moves it
+  // into the heap and leaves this object without it. restoreStateFromSnapshot() puts it back in a
+  // restored isolate, so that a value the top-level code captured stays the one
+  // `globalThis.process` returns there.
+  jsg::JsArray stashStateForSnapshot(jsg::Lock& js);
+  void restoreStateFromSnapshot(jsg::Lock& js, const jsg::JsArray& stashed);
   jsg::Ref<Immediate> setImmediate(jsg::Lock& js,
       jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
       jsg::Arguments<jsg::Value> args);

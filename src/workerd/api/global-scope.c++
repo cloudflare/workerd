@@ -1324,6 +1324,32 @@ void ServiceWorkerGlobalScope::setBuffer(jsg::Lock& js, jsg::JsValue newBuffer) 
   bufferValue = jsg::JsRef(js, newBuffer);
 }
 
+jsg::JsArray ServiceWorkerGlobalScope::stashStateForSnapshot(jsg::Lock& js) {
+  auto take = [&](kj::Maybe<jsg::JsRef<jsg::JsValue>>& slot) -> jsg::JsValue {
+    KJ_IF_SOME(v, slot) {
+      auto handle = v.getHandle(js);
+      slot = kj::none;
+      return handle;
+    }
+    return js.undefined();
+  };
+  auto listeners = stashEventHandlersForSnapshot(js);
+  auto process = take(processValue);
+  auto buffer = take(bufferValue);
+  return js.arr(listeners, process, buffer);
+}
+
+void ServiceWorkerGlobalScope::restoreStateFromSnapshot(
+    jsg::Lock& js, const jsg::JsArray& stashed) {
+  auto put = [&](kj::Maybe<jsg::JsRef<jsg::JsValue>>& slot, jsg::JsValue value) {
+    if (!value.isUndefined()) slot = jsg::JsRef(js, value);
+  };
+  restoreEventHandlersFromSnapshot(
+      js, KJ_ASSERT_NONNULL(stashed.get(js, 0).tryCast<jsg::JsArray>()));
+  put(processValue, stashed.get(js, 1));
+  put(bufferValue, stashed.get(js, 2));
+}
+
 jsg::JsValue ServiceWorkerGlobalScope::getProcess(jsg::Lock& js) {
   KJ_IF_SOME(p, processValue) {
     return p.getHandle(js);

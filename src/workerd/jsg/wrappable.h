@@ -88,6 +88,7 @@ enum class ContextDataSlot : int {
   SNAPSHOT_MAIN_MODULE,      // The evaluated main module's namespace (io/worker.c++).
   SNAPSHOT_WASM_SHIMS,       // `true` if the WebAssembly shims are installed (io/worker.c++).
   SNAPSHOT_BOOTSTRAP_STATE,  // The per-isolate bootstrap's state (api/per-isolate-bootstrap.c++).
+  SNAPSHOT_GLOBAL_SCOPE,     // api::ServiceWorkerGlobalScope::stashStateForSnapshot().
 };
 
 // Returns the slot holding the saved original of the i'th decorated console method, counting
