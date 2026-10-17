@@ -299,6 +299,8 @@ export {
   speciesNotConsultedByInternalCopies,
   nativeSourceIgnoresPollutedMembers,
   thenGetterFiresOncePerByteRead,
+  thenGetterReleasesReaderWhileByteReadsSettle,
+  thenGetterErrorsSourceWhileBranchByteReadsSettle,
   byobReadThenLookupFollowsItsPull,
 } from 'pollution';
 

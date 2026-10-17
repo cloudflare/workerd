@@ -232,9 +232,11 @@ export interface PullIntoDescriptor {
   viewCtor: ArrayBufferViewCtor;
   // 'default' = synthetic descriptor for a default read on a byte stream
   // with autoAllocateChunkSize set.
-  // 'none' = descriptor whose reader was released (releaseLock), or whose
-  // read was settled at end-of-data. In readable state, respond() enqueues
-  // the data rather than resolving a read promise.
+  // 'none' = descriptor whose read has been answered: its reader was
+  // released (releaseLock), or the end of the data settled it (or is
+  // settling it; see AnsweredRead). The paths that reject reads skip it.
+  // In readable state, respond() enqueues the data rather than resolving a
+  // read promise.
   readerType: 'byob' | 'default' | 'none';
   // Set when the deferred end-of-data settlement resolved this read: the
   // result view was built over `buffer` (transferred once, at settlement),
@@ -737,7 +739,7 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   #owner: unknown;
   #position: number;
   #byteOffset: number; // partial consumption of the entry at #position
-  #pendingReads: RingBufferType<PendingRead<V>> = new RingBuffer();
+  readonly #pendingReads: RingBufferType<PendingRead<V>> = new RingBuffer();
   // Running total mirroring the spec's [[queueTotalSize]]. Incremented on
   // enqueue, decremented on consume. Must use +=/-= (not recomputation):
   // the spec's double arithmetic leaves residues that WPTs verify. A
@@ -936,28 +938,20 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
 
   // Reject pending reads submitted by a specific reader (lock release).
   cancelReadsForReader(reader: object, reason: unknown): void {
-    const remaining: RingBufferType<PendingRead<V>> = new RingBuffer();
     const pending = this.#pendingReads;
-    this.#pendingReads = remaining;
-    for (let i = 0; i < pending.length; i++) {
-      const read = pending.get(i) as PendingRead<V>;
+    pending.drain((read) => {
       if (read.reader === reader) {
         read.reject(reason);
       } else {
-        remaining.push(read);
+        pending.push(read);
       }
-    }
+    });
   }
 
   // Reject all pending reads (stream ERROR path only).
   errorAllReads(reason: unknown): void {
     this.#queueTotalSize = 0;
-    const pending = this.#pendingReads;
-    this.#pendingReads = new RingBuffer();
-    for (let i = 0; i < pending.length; i++) {
-      const read = pending.get(i) as PendingRead<V>;
-      read.reject(reason);
-    }
+    this.#pendingReads.drain((read) => read.reject(reason));
   }
 
   // Resolve all pending reads as done (stream CANCEL path). Per spec,
@@ -987,12 +981,9 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   }
 
   #resolvePendingReadsAsDone(): void {
-    const pending = this.#pendingReads;
-    this.#pendingReads = new RingBuffer();
-    for (let i = 0; i < pending.length; i++) {
-      const read = pending.get(i) as PendingRead<V>;
-      read.resolve(createReadResult(undefined, true));
-    }
+    this.#pendingReads.drain((read) =>
+      read.resolve(createReadResult(undefined, true))
+    );
   }
 
   // Bulk read for the draining reader (and pipeTo): consume all buffered
@@ -1026,6 +1017,26 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
 // ---------------------------------------------------------------------------
 // ByteStreamCursor
 
+// A read answered by a loop that answers several at once, with its
+// result. Such a loop answers every read before it resolves any
+// (resolveAnswered): resolving a user's read looks up `then` on its
+// result, which a patched Object.prototype.then getter turns into user
+// code, and that code can release the reader or error the stream. Neither
+// reaches a read already answered: the loop has taken its descriptor out
+// of the list, or marked it 'none', which the paths that reject reads
+// skip.
+interface AnsweredRead {
+  desc: PullIntoDescriptor;
+  result: ReadableStreamReadResult<ArrayBufferView>;
+}
+
+function resolveAnswered(answered: AnsweredRead[]): void {
+  for (let i = 0; i < answered.length; i++) {
+    const read = answered[i] as AnsweredRead;
+    read.desc.resolve(read.result);
+  }
+}
+
 // Byte cursors add sub-entry granularity (partial entry consumption) and
 // BYOB support via spec-shaped pull-into descriptors. Entry values are
 // {buffer, byteOffset, byteLength} triples; read results are Uint8Array
@@ -1036,7 +1047,8 @@ class ByteStreamCursor
 {
   // Spec [[pendingPullIntos]] — a LIST. Multiple reads can be queued, and
   // autoAllocateChunkSize creates synthetic descriptors for default reads.
-  #pendingPullIntos: RingBufferType<PullIntoDescriptor> = new RingBuffer();
+  readonly #pendingPullIntos: RingBufferType<PullIntoDescriptor> =
+    new RingBuffer();
 
   // A released head's filled bytes (see flushReleasedHead), cursor-local
   // since the queue may be shared. Read before the data at the cursor's
@@ -1333,10 +1345,14 @@ class ByteStreamCursor
     // fill ALL ready descriptors first, THEN resolve them. This ensures
     // byobRequest is null by the time any resolve fires (which may trigger
     // user-observable code via Object.prototype.then interception).
-    let filledPullIntos:
-      Array<{ desc: PullIntoDescriptor; view: ArrayBufferView }> | undefined;
+    let filledPullIntos: AnsweredRead[] | undefined;
     if (committed !== undefined) {
-      filledPullIntos = [{ desc: committed, view: this.#convert(committed) }];
+      filledPullIntos = [
+        {
+          desc: committed,
+          result: createReadResult(this.#convert(committed), false),
+        },
+      ];
     }
     let errored = false;
     while (this.#pendingPullIntos.length > 0) {
@@ -1380,26 +1396,23 @@ class ByteStreamCursor
       const prefixView = this.#takePrefixForDefaultPullInto();
       if (prefixView !== undefined) {
         if (filledPullIntos === undefined) filledPullIntos = [];
-        ArrayPrototypePush(filledPullIntos, { desc: head, view: prefixView });
+        ArrayPrototypePush(filledPullIntos, {
+          desc: head,
+          result: createReadResult(prefixView, false),
+        });
         continue;
       }
       this.#fillFromQueue(head);
       if (head.bytesFilled < head.minimumFill) break; // need more data
       this.#pendingPullIntos.shift();
-      const view = this.#convert(head);
       if (filledPullIntos === undefined) filledPullIntos = [];
-      ArrayPrototypePush(filledPullIntos, { desc: head, view });
+      ArrayPrototypePush(filledPullIntos, {
+        desc: head,
+        result: createReadResult(this.#convert(head), false),
+      });
     }
     // Phase 2: resolve all filled descriptors after the fill loop.
-    if (filledPullIntos !== undefined) {
-      for (let i = 0; i < filledPullIntos.length; i++) {
-        const filled = filledPullIntos[i] as {
-          desc: PullIntoDescriptor;
-          view: ArrayBufferView;
-        };
-        filled.desc.resolve(createReadResult(filled.view, false));
-      }
-    }
+    if (filledPullIntos !== undefined) resolveAnswered(filledPullIntos);
     if (errored) return;
     if (this.#prefix !== undefined && super.hasPendingRead) {
       this.fulfillFirstPendingRead(this.#takePrefix());
@@ -1465,11 +1478,13 @@ class ByteStreamCursor
   // those paths not to transfer again. (A byobRequest minted after
   // settlement therefore aliases the delivered buffer's unfilled tail;
   // writing into it after close() is a source bug with no spec meaning.)
+  // Every read is answered before any resolves (see AnsweredRead).
   // Bails when the cursor no longer faces the sentinel: error() dropped
   // the entries (getEntry returns undefined), and cancel()/respond(0)
   // paths emptied the descriptor list.
   #settlePullIntosAtEndOfData(): void {
     if (this.queue.getEntry(this.position) !== CLOSE_SENTINEL) return;
+    const answered: AnsweredRead[] = [];
     const pending = this.#pendingPullIntos;
     for (let i = 0; i < pending.length; i++) {
       const desc = pending.get(i) as PullIntoDescriptor;
@@ -1477,26 +1492,27 @@ class ByteStreamCursor
       // resolved by #resolveDefaultPullIntosAsDone, or a BYOB read settled
       // by an earlier invocation) — nothing to settle.
       if (desc.readerType === 'none') continue;
+      let result: ReadableStreamReadResult<ArrayBufferView>;
       if (desc.readerType === 'default') {
         // Defensive: auto-allocate default reads normally resolve in
         // #resolveDefaultPullIntosAsDone before this runs. Default-read
         // close semantics: done with value undefined, never a view.
-        desc.readerType = 'none';
-        desc.resolve(createReadResult(undefined, true));
+        result = createReadResult(undefined, true);
       } else {
         // assert: desc.bytesFilled % desc.elementSize === 0 (fractional
         // fills errored the stream before settlement could be scheduled)
         desc.buffer = ArrayBufferPrototypeTransferToFixedLength(desc.buffer);
         const view = this.#convert(desc);
-        desc.readerType = 'none';
         desc.settledAtEndOfData = true;
-        if (desc.bytesFilled > 0) {
-          desc.resolve(createReadResult(view, false));
-        } else {
-          desc.resolve(createReadResult(view, true));
-        }
+        result =
+          desc.bytesFilled > 0
+            ? createReadResult(view, false)
+            : createReadResult(view, true);
       }
+      desc.readerType = 'none';
+      ArrayPrototypePush(answered, { desc, result });
     }
+    resolveAnswered(answered);
   }
 
   // Resolve synthetic default-read descriptors (autoAllocateChunkSize) as
@@ -1506,17 +1522,23 @@ class ByteStreamCursor
   // defensive.
   //
   // The descriptor is KEPT in the list (not shifted) so that a subsequent
-  // respond(0) finds it and doesn't throw. commitPullIntosOnClose skips
-  // already-resolved descriptors.
+  // respond(0) finds it and doesn't throw; it is marked 'none', which
+  // commitPullIntosOnClose skips. Every read is answered before any
+  // resolves (see AnsweredRead).
   #resolveDefaultPullIntosAsDone(): void {
+    const answered: AnsweredRead[] = [];
     const pending = this.#pendingPullIntos;
     for (let i = 0; i < pending.length; i++) {
       const desc = pending.get(i) as PullIntoDescriptor;
       if (desc.readerType === 'default') {
-        desc.resolve(createReadResult(undefined, true));
-        desc.readerType = 'none'; // mark as consumed
+        desc.readerType = 'none';
+        ArrayPrototypePush(answered, {
+          desc,
+          result: createReadResult(undefined, true),
+        });
       }
     }
+    resolveAnswered(answered);
   }
 
   // byobRequest.respond(bytesWritten) — zero-copy path. The controller has
@@ -1602,16 +1624,13 @@ class ByteStreamCursor
   // remains legal. A fractional-element fill never reaches this point:
   // controller.close() throws for it.
   commitPullIntosOnClose(): void {
-    const pending = this.#pendingPullIntos;
-    this.#pendingPullIntos = new RingBuffer();
-    for (let i = 0; i < pending.length; i++) {
-      const desc = pending.get(i) as PullIntoDescriptor;
+    this.#pendingPullIntos.drain((desc) => {
       // Skip already-resolved descriptors (auto-allocate close and deferred
       // end-of-data paths set readerType to 'none').
-      if (desc.readerType === 'none') continue;
+      if (desc.readerType === 'none') return;
       // assert: desc.bytesFilled % desc.elementSize === 0
       desc.resolve(createReadResult(this.#convert(desc), true));
-    }
+    });
   }
 
   // Spec ReadableByteStreamControllerEnqueue step 9.3: if the head
@@ -1625,15 +1644,13 @@ class ByteStreamCursor
     return head;
   }
 
-  // Stream error: partial fills are lost.
+  // Stream error: partial fills are lost. A read already answered keeps
+  // its answer ('none').
   override errorAllReads(reason: unknown): void {
     this.#prefix = undefined;
-    const pending = this.#pendingPullIntos;
-    this.#pendingPullIntos = new RingBuffer();
-    for (let i = 0; i < pending.length; i++) {
-      const desc = pending.get(i) as PullIntoDescriptor;
-      desc.reject(reason);
-    }
+    this.#pendingPullIntos.drain((desc) => {
+      if (desc.readerType !== 'none') desc.reject(reason);
+    });
     super.errorAllReads(reason);
   }
 
@@ -1642,12 +1659,9 @@ class ByteStreamCursor
   // WPT-verified).
   override resolveAllReadsAsDone(): void {
     this.#prefix = undefined;
-    const pending = this.#pendingPullIntos;
-    this.#pendingPullIntos = new RingBuffer();
-    for (let i = 0; i < pending.length; i++) {
-      const desc = pending.get(i) as PullIntoDescriptor;
-      desc.resolve(createReadResult(undefined, true));
-    }
+    this.#pendingPullIntos.drain((desc) =>
+      desc.resolve(createReadResult(undefined, true))
+    );
     super.resolveAllReadsAsDone();
   }
 
@@ -1656,20 +1670,19 @@ class ByteStreamCursor
     // Spec ReleaseSteps: the reader's reads reject and pendingPullIntos
     // shrinks to its head, marked 'none'; respond()/enqueue() then move the
     // head's filled bytes ahead of new data. The byobRequest (over the head)
-    // is NOT invalidated.
+    // is NOT invalidated. A read already answered keeps its answer ('none').
     const pending = this.#pendingPullIntos;
     for (let i = 0; i < pending.length; i++) {
       const desc = pending.get(i) as PullIntoDescriptor;
-      if (desc.reader === reader) {
+      if (desc.reader === reader && desc.readerType !== 'none') {
         desc.reject(reason);
       }
     }
     const head = pending.peek();
     if (head !== undefined) {
       head.readerType = 'none';
-      const kept: RingBufferType<PullIntoDescriptor> = new RingBuffer();
-      kept.push(head);
-      this.#pendingPullIntos = kept;
+      pending.clear();
+      pending.push(head);
     }
     super.cancelReadsForReader(reader, reason);
   }
