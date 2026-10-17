@@ -1995,8 +1995,32 @@ KJ_TEST("TypeScript native stream errors when its source enqueues an empty chunk
         },
       }).getReader();
       const error = await erroredBy(reader, reader.read());
-      assert(error instanceof TypeError &&
-        error.message.startsWith('enqueue() of an empty chunk'), `errored with ${error}`);
+      assert(error instanceof TypeError && error.message ===
+        'enqueue() of an empty chunk is not supported for native streams; an empty ' +
+          'answer means end-of-stream, so call close() instead',
+        `errored with ${error}`);
+    )js"_kj);
+  });
+}
+
+KJ_TEST("TypeScript native stream errors when its source responds with zero bytes") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    // As with an empty chunk, a zero-byte answer to a BYOB read would mean end-of-stream,
+    // which the source signals with close(). The refusal errors the stream, so the read
+    // rejects with it.
+    return runConduitScript(env, R"js(
+      const reader = new ReadableStream({
+        [markers.kNativeSource]: markers.kNativeSource,
+        pull(controller) {
+          controller.byobRequest.respond(0);
+        },
+      }).getReader({ mode: 'byob' });
+      const error = await erroredBy(reader, reader.read(new Uint8Array(4)));
+      assert(error instanceof TypeError && error.message ===
+        'respond(0) is not supported for native streams; an empty answer means ' +
+          'end-of-stream, so call close() instead',
+        `errored with ${error}`);
     )js"_kj);
   });
 }
@@ -2072,8 +2096,9 @@ KJ_TEST("TypeScript native stream errors when a pull settles without delivering"
       await microtasks();
       assert(pulls.length === 1, 'pulled again after a pull that delivered nothing');
       const error = await errored;
-      assert(error instanceof TypeError &&
-        error.message.startsWith('native source pull settled without delivering'),
+      assert(error instanceof TypeError && error.message ===
+        'native source pull settled without delivering, closing, or erroring; the ' +
+          'source appears broken',
         `errored with ${error}`);
     )js"_kj);
   });
