@@ -239,6 +239,28 @@ class NullSource final: public ReadableStreamSource {
   }
 };
 
+// A ReadableStreamSource whose every read fails with the same exception: each branch of a
+// tee() of a ReadableStreamNativeSource whose read failed.
+class FailedSource final: public ReadableStreamSource {
+ public:
+  explicit FailedSource(kj::Exception exception): exception(kj::mv(exception)) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    return exception.clone();
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    return kj::none;
+  }
+
+  void cancel(kj::Exception reason) override {
+    // Nothing to do here.
+  }
+
+ private:
+  kj::Exception exception;
+};
+
 // Serves the given prefix bytes, then delegates to the inner source. Used for the rare
 // pump-with-stashed-bytes case (a tee-seeded branch extracted before being read).
 class PrefixedSource final: public ReadableStreamSource {
@@ -1434,6 +1456,12 @@ jsg::Promise<void> ReadableStreamNativeSource::pull(
     return pullDefault(js, controller, kj::mv(signal), active);
   }
 
+  KJ_IF_SOME(exception, failure) {
+    // A read failed. Its pull may have been abandoned, which the conduit takes no
+    // rejection from, so every later pull rejects with the failure.
+    return js.rejectedPromise<void>(exception.clone());
+  }
+
   // The source already reached EOF or was canceled. The conduit stops pulling once it
   // observes close/error, so this is unreachable in practice; tolerate it defensively.
   return js.resolvedPromise();
@@ -1469,9 +1497,8 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
     KJ_CATCH(exception) {
       // tryReadSync() may throw when a synchronous read is possible but fails. Handle it
       // exactly like the asynchronous catch_ below: the source is no longer usable.
-      state = kj::none;
-      return js.rejectedPromise<void>(
-          jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js)));
+      fail(exception.clone());
+      return js.rejectedPromise<void>(kj::mv(exception));
     }
     KJ_IF_SOME(amount, maybeSyncAmount) {
       // Mirrors the asynchronous continuation below, minus the in-flight-only concerns:
@@ -1527,12 +1554,12 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
         js, controller.getHandle(js), "enqueue"_kj, jsg::JsUint8Array::create(js, data));
   }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
     // The read failed; the source is no longer usable. Rethrow to reject the pull promise
-    // -- the conduit errors the stream (or ignores the settlement if this pull was already
-    // abandoned). A waiting tee's branches fail with the same error.
+    // -- the conduit errors the stream, or, if this pull was already abandoned, ignores the
+    // settlement and learns of the failure from its next pull. A waiting tee's branches
+    // fail with the same error.
     self->pullInFlight = false;
     self->pendingCancel = false;
-    self->state = kj::none;
-    self->failTeeHandoff(js, exception);
+    self->fail(js.exceptionToKj(jsg::JsValue(exception.getHandle(js))));
     js.throwException(kj::mv(exception));
   });
 }
@@ -1608,9 +1635,8 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
     }
     KJ_CATCH(exception) {
       // Handle a synchronous failure exactly like the asynchronous catch_ below.
-      state = kj::none;
-      return js.rejectedPromise<void>(
-          jsg::JsValue(js.exceptionToJs(kj::mv(exception)).getHandle(js)));
+      fail(exception.clone());
+      return js.rejectedPromise<void>(kj::mv(exception));
     }
     KJ_IF_SOME(amount, maybeSyncAmount) {
       // Mirrors the asynchronous continuation below, minus the in-flight-only concerns:
@@ -1664,8 +1690,7 @@ jsg::Promise<void> ReadableStreamNativeSource::pullByob(jsg::Lock& js,
   }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
     self->pullInFlight = false;
     self->pendingCancel = false;
-    self->state = kj::none;
-    self->failTeeHandoff(js, exception);
+    self->fail(js.exceptionToKj(jsg::JsValue(exception.getHandle(js))));
     js.throwException(kj::mv(exception));
   });
 }
@@ -1736,6 +1761,15 @@ void ReadableStreamNativeSource::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValu
 }
 
 kj::Array<jsg::Ref<ReadableStreamNativeSource>> ReadableStreamNativeSource::tee(jsg::Lock& js) {
+  KJ_IF_SOME(exception, failure) {
+    // The failure is all this source would produce, so it is all each branch produces.
+    auto& ioContext = IoContext::current();
+    auto failedBranch = [&]() {
+      return js.alloc<ReadableStreamNativeSource>(
+          ioContext, kj::heap<FailedSource>(exception.clone()));
+    };
+    return kj::arr(failedBranch(), failedBranch());
+  }
   auto& active = JSG_REQUIRE_NONNULL(
       state, TypeError, "This ReadableStream source has already been consumed.");
   // Canceled mid-read, the source is done; only its release waits on the read (see
@@ -1820,11 +1854,13 @@ bool ReadableStreamNativeSource::handOffToTee(kj::ArrayPtr<const kj::byte> data,
   return false;
 }
 
-void ReadableStreamNativeSource::failTeeHandoff(jsg::Lock& js, jsg::Value& exception) {
+void ReadableStreamNativeSource::fail(kj::Exception exception) {
+  state = kj::none;
   KJ_IF_SOME(pending, teeHandoff) {
-    pending->fulfiller->reject(js.exceptionToKj(jsg::JsValue(exception.getHandle(js))));
+    pending->fulfiller->reject(exception.clone());
     teeHandoff = kj::none;
   }
+  failure = kj::mv(exception);
 }
 
 jsg::Optional<jsg::JsBigInt> ReadableStreamNativeSource::getExpectedLength(jsg::Lock& js) {
