@@ -34,6 +34,11 @@ namespace workerd::jsg {
 static bool v8Initialized = false;
 static V8System::FatalErrorCallback* v8FatalErrorCallback = nullptr;
 static void reportV8FatalError(kj::StringPtr location, kj::StringPtr message) {
+  // V8 often PrintF()s the details of a fatal error (e.g. which global handles the snapshot
+  // serializer could not account for) right before calling us; don't lose them when the callback
+  // aborts.
+  fflush(stdout);
+  fflush(stderr);
   if (v8FatalErrorCallback == nullptr) {
     KJ_LOG(FATAL, "V8 fatal error", location, message);
     abort();
