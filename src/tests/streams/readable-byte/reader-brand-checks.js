@@ -2,20 +2,12 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// Reader members called with a reader of another class as `this`, which
-// WebIDL's brand check rejects with TypeError. C++ throws TypeError from
-// every member and leaves that reader as it was. It throws where WebIDL has
-// the members that return a promise reject, the shape WPT's idlharness pins
-// for a plain `this`.
-//
-// DEFECT (ledger #44): TypeScript's members reach a reader's state through
-// one lookup that accepts every reader class, so most act on the other
-// reader: releaseLock() releases it, cancel() cancels its stream, closed is
-// its closed promise, a default or draining read() reads from its stream,
-// and the draining reader's expectedLength answers for it. The BYOB
-// reader's read() and readAtLeast() reject with TypeError and leave it as
-// it was. Under TS the draining reader is checked too, as the owner of the
-// members and as `this`.
+// Reader members called with a reader of another class as `this` fail
+// WebIDL's brand check with a TypeError and leave that reader as it was
+// (parity). TypeScript rejects from the members that return a promise, as
+// WebIDL has them; C++ throws from every member, the shape WPT's
+// idlharness pins for a plain `this`. Under TS the draining reader is
+// checked too, as the owner of the members and as `this`.
 
 /* global ReadableStreamDrainingReader */
 
@@ -83,45 +75,19 @@ async function assertUntouched(s) {
   deepStrictEqual(bytesOf(await read), [1, 2]);
 }
 
-// What TypeScript does with a reader of another class (the DEFECT).
-async function assertActsOnOtherReader(owner, name, s) {
-  switch (name) {
-    case 'closed':
-      strictEqual(invoke(owner, name, s.reader), s.reader.closed);
-      await assertUntouched(s);
-      break;
-    case 'expectedLength':
-      strictEqual(invoke(owner, name, s.reader), undefined);
-      await assertUntouched(s);
-      break;
-    case 'cancel':
-      strictEqual(await invoke(owner, name, s.reader), undefined);
-      strictEqual(await s.reader.closed, undefined);
-      break;
-    case 'read': {
-      const read = invoke(owner, name, s.reader);
-      s.controller.enqueue(new Uint8Array([1, 2]));
-      deepStrictEqual(bytesOf(await read), [1, 2]);
-      break;
-    }
-    case 'releaseLock':
-      strictEqual(invoke(owner, name, s.reader), undefined);
-      strictEqual(s.rs.locked, false);
-      break;
-  }
-}
+// The members WebIDL makes reject, rather than throw, when the brand check
+// fails.
+const PROMISE_MEMBERS = new Set(['closed', 'cancel', 'read', 'readAtLeast']);
 
 async function checkMember(owner, name, kind) {
   const s = readerOf(kind);
-  if (!usingTsImpl) {
-    throws(() => invoke(owner, name, s.reader), TypeError);
-    await assertUntouched(s);
-  } else if (owner === 'byob' && (name === 'read' || name === 'readAtLeast')) {
-    await rejects(invoke(owner, name, s.reader), TypeError);
-    await assertUntouched(s);
+  const call = () => invoke(owner, name, s.reader);
+  if (usingTsImpl && PROMISE_MEMBERS.has(name)) {
+    await rejects(call(), TypeError);
   } else {
-    await assertActsOnOtherReader(owner, name, s);
+    throws(call, TypeError);
   }
+  await assertUntouched(s);
 }
 
 export const readerMembersOnOtherReaderClasses = {
