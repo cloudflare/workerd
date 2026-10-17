@@ -661,6 +661,10 @@ class Worker::Api {
   virtual jsg::JsContext<api::ServiceWorkerGlobalScope> newContext(
       jsg::Lock& lock, NewContextOptions options = {}) const = 0;
 
+  // Fills the legacy module registry. In an isolate restored from a startup snapshot, the
+  // registry first adopts the modules that the snapshot recorded, which the restored heap already
+  // holds (jsg::ModuleRegistryImpl::restoreFromSnapshot(), after the builtins are registered,
+  // since its entries replace theirs), and only the bundle modules it lacks are compiled.
   virtual void compileModules(jsg::Lock& lock,
       const Script::ModulesSource& source,
       const Worker::Isolate& isolate,

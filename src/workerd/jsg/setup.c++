@@ -10,6 +10,7 @@
 #include "setup.h"
 
 #include "libplatform/libplatform.h"
+#include "modules-new.h"
 
 #include <v8-cppgc.h>
 #include <v8-initialization.h>
@@ -588,6 +589,22 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
         ? SnapshotArtifact::kNoTemplateData
         : creator->AddData(opaqueTemplate.Get(ptr));
     artifact.externalTemplateRecords = externalTemplateRecords.releaseAsArray();
+  }
+
+  // Record the modules the registry holds in the blob, so that the restored isolate's registry
+  // adopts them (SnapshotArtifact::moduleRecords, legacyModuleRecords). Done before step 1 below,
+  // whose destruction of the global scope also destroys the legacy registry.
+  {
+    v8::HandleScope scope(ptr);
+    auto defaultContext = defaultContextHandle.Get(ptr);
+    if (usingNewModuleRegistry) {
+      artifact.moduleRecords =
+          modules::recordIsolateModuleRegistryForSnapshot(defaultContext, *creator);
+    } else {
+      auto& moduleRegistry = KJ_ASSERT_NONNULL(getAlignedPointerFromEmbedderData<ModuleRegistry>(
+          defaultContext, ContextPointerSlot::MODULE_REGISTRY));
+      artifact.legacyModuleRecords = moduleRegistry.recordForSnapshot(defaultContext, *creator);
+    }
   }
 
   // We need to reset all C++ handles that point to JavaScript objects before creating

@@ -543,21 +543,7 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
     using namespace workerd::api::pyodide;
     auto featureFlags = getFeatureFlags();
 
-    for (auto& module: source.modules) {
-      auto path = kj::Path::parse(module.name);
-      auto maybeInfo = tryCompileLegacyModule(
-          lockParam, module.name, module.content, modules->getObserver(), featureFlags);
-      KJ_IF_SOME(info, maybeInfo) {
-        modules->add(path, kj::mv(info));
-      }
-    }
-
     api::registerModules(*modules, featureFlags);
-
-    if (source.isPython) {
-      modules::python::registerPythonWorkerdModules<JsgWorkerdIsolate>(
-          lockParam, *modules, featureFlags, kj::mv(artifacts), impl->pythonConfig, source);
-    }
 
     for (auto extension: impl->extensions) {
       for (auto module: extension.getModules()) {
@@ -565,6 +551,29 @@ void WorkerdApi::compileModules(jsg::Lock& lockParam,
             module.getInternal() ? jsg::ModuleRegistry::Type::INTERNAL
                                  : jsg::ModuleRegistry::Type::BUILTIN);
       }
+    }
+
+    if (lockParam.isStartingFromSnapshot()) {
+      modules->restoreFromSnapshot(lockParam,
+          jsg::IsolateBase::from(lockParam.v8Isolate).finalizedSnapshotArtifact().legacyModuleRecords);
+    }
+
+    for (auto& module: source.modules) {
+      auto path = kj::Path::parse(module.name);
+      if (lockParam.isStartingFromSnapshot() &&
+          modules->contains(path, jsg::ModuleRegistry::Type::BUNDLE)) {
+        continue;  // restored from the snapshot
+      }
+      auto maybeInfo = tryCompileLegacyModule(
+          lockParam, module.name, module.content, modules->getObserver(), featureFlags);
+      KJ_IF_SOME(info, maybeInfo) {
+        modules->add(path, kj::mv(info));
+      }
+    }
+
+    if (source.isPython) {
+      modules::python::registerPythonWorkerdModules<JsgWorkerdIsolate>(
+          lockParam, *modules, featureFlags, kj::mv(artifacts), impl->pythonConfig, source);
     }
   });
 }
