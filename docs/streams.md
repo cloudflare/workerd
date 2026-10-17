@@ -465,6 +465,30 @@ Standard stream data flow happens **inside** the isolate lock via JavaScript pro
 When these two worlds interact (piping between types, passing standard streams to
 internal APIs), bridging code must carefully manage both async models.
 
+Promise settlement is also a reentry boundary: cross-request diagnostics can synchronously
+invoke JavaScript while a read or write is being settled. The implementation removes pending
+requests from live queues into local ownership first, and publishes closed or released state
+before callbacks can observe it. A callback may acquire a replacement reader or writer; the
+outer operation must not drain its requests or release its lock. BYOB responses revalidate the
+originating request after delivering data to sibling consumers.
+
+While a BYOB response is publishing bytes or settling reads, another response to that same
+request throws before consuming bytes or detaching a supplied view. Once the native response
+returns, the wrapper updates its view before calling the source's `pull()` callback; that
+callback can provide the next bytes without counting the preceding response twice.
+
+A native read retains its source and non-sandbox destination buffer in the KJ promise, not in
+the JS continuation. Releasing a pipe with `preventCancel` does not cancel that read. Detaching
+the stream moves its existing shared source claim directly, keeping ownership flat across
+repeated transfers.
+
+Whole-body reads use `AllReader`, a GC-traced operation independently retained by each read,
+cancel, and completion continuation. Its promise chain carries completion notifications rather
+than buffered data. Promise adoption can invoke JavaScript, so parts and accounting remain
+local until `takeParts()` verifies that this operation closed,
+has not already been consumed, and owns exactly the recorded number of bytes. See the
+[private operation results pattern](../src/workerd/api/streams/README.md#pattern-private-operation-results).
+
 ## Further Reading
 
 - [AGENTS.md](../src/workerd/api/streams/AGENTS.md) -- file map, architecture summary, coding invariants
