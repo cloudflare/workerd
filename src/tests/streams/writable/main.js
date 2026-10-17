@@ -136,3 +136,5 @@ export {
   pollutedResolversDoNotReachWriterPromises,
   omittedDictionariesReadNothing,
 } from 'pollution';
+
+export { writerPromisesAreMarkedHandled } from 'unhandled-rejection';
