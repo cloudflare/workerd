@@ -46,6 +46,12 @@ wd_test(
 )
 
 wd_test(
+    src = "queue-backing-store-test.wd-test",
+    args = ["--experimental", "queue-backing-store-test"],
+    data = ["queue-backing-store-test.js"],
+)
+
+wd_test(
     src = "streams-consumer-reentry-test.wd-test",
     args = ["--experimental"],
     data = [
