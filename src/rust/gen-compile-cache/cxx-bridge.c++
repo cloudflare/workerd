@@ -3,6 +3,7 @@
 #include <workerd/jsg/compile-cache.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/type-wrapper.h>
+#include <workerd/rust/gen-compile-cache/main.rs.h>
 
 #include <kj-rs/kj-rs.h>
 
@@ -92,18 +93,21 @@ v8::ScriptCompiler::CachedData* compileAsModule(jsg::Lock& js,
 ::rust::Vec<uint8_t> compile(::rust::Str path,
     ::rust::Str source,
     ::rust::Slice<const ::rust::String> v8Flags,
-    bool asFunction,
-    bool eager) {
+    const CompileOptions& options) {
   auto& ccIsolate = getState(v8Flags).isolate;
   auto compileOptions =
-      eager ? v8::ScriptCompiler::kEagerCompile : v8::ScriptCompiler::kNoCompileOptions;
+      options.eager ? v8::ScriptCompiler::kEagerCompile : v8::ScriptCompiler::kNoCompileOptions;
+  auto asFunction = options.as_function;
 
   auto data = ccIsolate.runInLockScope([&](CompileCacheIsolate::Lock& isolateLock) {
     return JSG_WITHIN_CONTEXT_SCOPE(isolateLock,
         isolateLock.newContext<CompilerCacheContext>().getHandle(isolateLock), [&](jsg::Lock& js) {
       return js.tryCatch([&]() {
         auto resourceName = jsg::newExternalOneByteString(js, jsg::copyToArc(kj::from<Rust>(path)));
-        auto contentStr = jsg::newExternalOneByteString(js, jsg::copyToArc(kj::from<Rust>(source)));
+        // ESM source is decoded as UTF-8 to match the runtime's transcoded strings. V8's source
+        // hash includes the UTF-16 code-unit length. Bootstrap functions use raw one-byte strings.
+        auto contentStr = asFunction ? js.strExtern(jsg::copyToArc(kj::from<Rust>(source)))
+                                     : js.str(kj::from<Rust>(source));
 
         auto codeCache = asFunction
             ? compileAsFunction(js, resourceName, contentStr, compileOptions)
