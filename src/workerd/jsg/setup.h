@@ -485,6 +485,30 @@ class IsolateBase {
     externalSnapshotRestorer = &restorer;
   }
 
+  // Bindings retained by the worker's top-level code (a `Fetcher` kept in module scope) are
+  // handles to I/O state that no recipe can re-create; an isolate restored from the snapshot
+  // re-binds the retained wrapper to the binding it compiles itself under the same name instead.
+  // Called once the bindings are installed on `scope` (the `env` object, or a service worker's
+  // global object):
+  //
+  //  * In a zygote, records the JSG wrappers among `scope`'s values, except those `before` (a map
+  //    of `scope`'s properties from before the bindings were installed) already held. They get a
+  //    payload naming the binding, unless their type has a recipe of its own.
+  //  * In an isolate restored from the snapshot, moves each freshly compiled binding onto the
+  //    wrapper the zygote retained under its name (Wrappable::transplantWrapperForSnapshot) and
+  //    puts the retained wrapper back on `scope`, so that `env.X` keeps its identity too. For the
+  //    Worker's own bindings (no prefix), throws if a retained binding was not compiled again.
+  //  * Otherwise, does nothing.
+  //
+  // The inner bindings of a wrapped binding live on a private `env` object that the binding's
+  // module wraps (an AI binding's Fetcher, held by the object the module returns). They go by
+  // `namePrefix`, snapshotBindingNamePrefix() of the enclosing binding's name.
+  void recordOrRebindSnapshotBindings(Lock& js,
+      v8::Local<v8::Object> scope,
+      kj::StringPtr namePrefix = ""_kj,
+      v8::Local<v8::Map> before = {});
+  static kj::String snapshotBindingNamePrefix(kj::StringPtr outerPrefix, kj::StringPtr name);
+
   void registerExternalReference(intptr_t addr) {
     if (!isPreparingSnapshot()) return;
     auto& artifact = mutableSnapshotArtifact();
@@ -652,6 +676,15 @@ class IsolateBase {
   // See serializeWrapperInternalField().
   kj::HashMap<const void*, kj::Array<kj::byte>> snapshotFieldPayloads;
   ExternalSnapshotRestorer* externalSnapshotRestorer = nullptr;
+  // See recordOrRebindSnapshotBindings(). The keys of snapshotBindingNames are only compared
+  // with live wrappers' addresses, never dereferenced: a binding that died in the pre-capture GC
+  // is never looked up.
+  struct RetainedSnapshotBinding {
+    v8::Global<v8::Object> holder;
+    kj::String name;
+  };
+  kj::HashMap<const Wrappable*, kj::String> snapshotBindingNames;
+  kj::Vector<RetainedSnapshotBinding> retainedSnapshotBindings;
 
   // When starting from a snapshot: replaces the (not yet created) resource-type templates and the
   // opaque template with the ones the zygote recorded (SnapshotArtifact::templateDataIndices).
@@ -664,6 +697,11 @@ class IsolateBase {
   SnapshotWrapperPayloads collectSnapshotWrapperPayloads(v8::Local<v8::Context> defaultContext);
   static v8::StartupData serializeWrapperInternalField(
       v8::Local<v8::Object> holder, int index, void* data);
+  void recordSnapshotBindings(v8::Local<v8::Context> context,
+      v8::Local<v8::Object> scope,
+      kj::StringPtr namePrefix,
+      v8::Local<v8::Map> before);
+  void rebindSnapshotBindings(Lock& js, v8::Local<v8::Object> scope, kj::StringPtr namePrefix);
 
   // Object used as the underlying storage for a workers exports.
   v8::Global<v8::Object> workerExportsObj;

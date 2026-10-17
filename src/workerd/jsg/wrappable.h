@@ -414,6 +414,15 @@ class Wrappable: public kj::Refcounted {
   static Wrappable* unwrapFromShimInRangeOrAbort(
       v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange);
 
+  // For isolates restored from a startup snapshot: moves the object behind `from`, a wrapper
+  // created in this isolate, onto `to`, a wrapper deserialized from the snapshot whose C++ half
+  // died with the zygote, so that JavaScript's references to `to` reach a live object. `from` is
+  // left as an inert object with empty internal fields. Used to re-bind a binding the worker's
+  // top-level code retained (a `Fetcher` kept in module scope) to the binding the restored
+  // isolate compiled under the same name; see IsolateBase::recordOrRebindSnapshotBindings().
+  static void transplantWrapperForSnapshot(
+      v8::Isolate* isolate, v8::Local<v8::Object> from, v8::Local<v8::Object> to);
+
   // Called by HeapTracer when V8 tells us that it found a reference to this object.
   void traceFromV8(cppgc::Visitor& cppgcVisitor);
 

@@ -2227,6 +2227,25 @@ kj::Maybe<jsg::JsObject> tryResolveMainModule(jsg::Lock& js,
 }
 }  // anonymous namespace
 
+namespace {
+
+// The own properties of `scope` and their values, from which
+// IsolateBase::recordOrRebindSnapshotBindings() tells what installing the bindings added.
+v8::Local<v8::Map> snapshotOwnProperties(jsg::Lock& js, v8::Local<v8::Object> scope) {
+  auto context = js.v8Context();
+  auto map = v8::Map::New(js.v8Isolate);
+  auto names = jsg::check(scope->GetOwnPropertyNames(context,
+      static_cast<v8::PropertyFilter>(v8::PropertyFilter::ALL_PROPERTIES | v8::SKIP_SYMBOLS),
+      v8::KeyConversionMode::kConvertToString));
+  for (uint32_t i = 0; i < names->Length(); i++) {
+    auto name = jsg::check(names->Get(context, i));
+    jsg::check(map->Set(context, name, jsg::check(scope->Get(context, name))));
+  }
+  return map;
+}
+
+}  // namespace
+
 Worker::Worker(kj::Own<const Script> scriptParam,
     kj::Own<WorkerObserver> metricsParam,
     kj::FunctionParam<void(jsg::Lock& lock,
@@ -2347,6 +2366,11 @@ Worker::Worker(kj::Own<const Script> scriptParam,
               bindingsScope = context->Global();
             }
 
+            v8::Local<v8::Map> scopeBeforeBindings;
+            if (lock.isPreparingSnapshot()) {
+              scopeBeforeBindings = snapshotOwnProperties(js, bindingsScope);
+            }
+
             // Load globals.
             // const_cast OK because we hold the lock.
             for (auto& global: const_cast<Script&>(*script).impl->globals) {
@@ -2356,6 +2380,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             v8::Local<v8::Object> ctxExports = v8::Object::New(lock.v8Isolate);
 
             compileBindings(lock, script->isolate->getApi(), bindingsScope, ctxExports);
+
+            jsg::IsolateBase::from(lock.v8Isolate)
+                .recordOrRebindSnapshotBindings(js, bindingsScope, ""_kj, scopeBeforeBindings);
 
             // Execute script.
             currentSpan = maybeMakeSpan("lw:top_level_execution"_kjc);

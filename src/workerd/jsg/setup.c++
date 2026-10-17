@@ -547,6 +547,7 @@ namespace {
 // A wrapper's startup-snapshot re-creation payload: the kind of object the wrapper wraps, followed
 // by data that depends on the kind. The kind is a SnapshotRecipe::type or one of these:
 constexpr uint32_t EXTERNAL_PAYLOAD = kj::maxValue;          // The data is a jsgSnapshotRecipe().
+constexpr uint32_t BINDING_PAYLOAD = EXTERNAL_PAYLOAD - 1;  // The data is the binding's name.
 
 kj::Array<kj::byte> makeSnapshotPayload(uint32_t kind, kj::ArrayPtr<const kj::byte> data) {
   auto payload = kj::heapArray<kj::byte>(sizeof(kind) + data.size());
@@ -557,12 +558,30 @@ kj::Array<kj::byte> makeSnapshotPayload(uint32_t kind, kj::ArrayPtr<const kj::by
   return payload;
 }
 
+// Joins the names in a binding name with a prefix; see IsolateBase::snapshotBindingNamePrefix().
+constexpr char BINDING_NAME_SEPARATOR = '\x1f';
+
+// The JSG object behind `value`, if it is a JSG wrapper.
+kj::Maybe<Wrappable&> tryGetWrappable(v8::Isolate* isolate, v8::Local<v8::Value> value) {
+  if (!value->IsObject()) return kj::none;
+  auto object = value.As<v8::Object>();
+  if (object->InternalFieldCount() != Wrappable::INTERNAL_FIELD_COUNT ||
+      !Wrappable::isWorkerdApiObject(object)) {
+    return kj::none;
+  }
+  auto* wrappable = Wrappable::unwrapFromShimAnyType(isolate, object);
+  if (wrappable == nullptr) return kj::none;
+  return *wrappable;
+}
+
 }  // namespace
 
 IsolateBase::SnapshotWrapperPayloads IsolateBase::collectSnapshotWrapperPayloads(
     v8::Local<v8::Context> defaultContext) {
-  // A wrapper's payload comes from its type's recipe, computed with the default context entered
-  // so that snapshotRecipe() may read JavaScript state.
+  // A wrapper's payload comes from its type's recipe (computed with the default context entered,
+  // so that snapshotRecipe() may read JavaScript state) or, for a binding, from
+  // recordSnapshotBindings(). A type's own recipe wins: it re-creates the object without a lookup,
+  // and a binding of such a type is no handle to I/O state.
   //
   // A wrapper without one has no C++ object behind it in a restored isolate, except the global
   // object, which newContext() re-creates regardless. One still reachable after the caller's full
@@ -585,6 +604,10 @@ IsolateBase::SnapshotWrapperPayloads IsolateBase::collectSnapshotWrapperPayloads
       }
     } else KJ_IF_SOME(recipe, trySnapshotRecipe(js, *object)) {
       payloads.insert(&wrappable, makeSnapshotPayload(recipe.type, recipe.bytes));
+      continue;
+    }
+    KJ_IF_SOME(name, snapshotBindingNames.find(&wrappable)) {
+      payloads.insert(&wrappable, makeSnapshotPayload(BINDING_PAYLOAD, name.asBytes()));
       continue;
     }
 
@@ -612,6 +635,72 @@ IsolateBase::SnapshotWrapperPayloads IsolateBase::collectSnapshotWrapperPayloads
       "snapshot",
       leftovers);
   return payloads;
+}
+
+void IsolateBase::recordOrRebindSnapshotBindings(
+    Lock& js, v8::Local<v8::Object> scope, kj::StringPtr namePrefix, v8::Local<v8::Map> before) {
+  if (isPreparingSnapshot()) {
+    recordSnapshotBindings(js.v8Context(), scope, namePrefix, before);
+  } else if (isStartingFromSnapshot()) {
+    rebindSnapshotBindings(js, scope, namePrefix);
+  }
+}
+
+kj::String IsolateBase::snapshotBindingNamePrefix(kj::StringPtr outerPrefix, kj::StringPtr name) {
+  return kj::str(outerPrefix, name, BINDING_NAME_SEPARATOR);
+}
+
+void IsolateBase::recordSnapshotBindings(v8::Local<v8::Context> context,
+    v8::Local<v8::Object> scope,
+    kj::StringPtr namePrefix,
+    v8::Local<v8::Map> before) {
+  v8::HandleScope handleScope(ptr);
+  auto& js = Lock::from(ptr);
+  auto names = check(scope->GetOwnPropertyNames(context,
+      static_cast<v8::PropertyFilter>(v8::PropertyFilter::ALL_PROPERTIES | v8::SKIP_SYMBOLS),
+      v8::KeyConversionMode::kConvertToString));
+  for (uint32_t i = 0; i < names->Length(); i++) {
+    auto name = check(names->Get(context, i));
+    auto value = check(scope->Get(context, name));
+    if (!before.IsEmpty() && check(before->Has(context, name)) &&
+        check(before->Get(context, name))->StrictEquals(value)) {
+      continue;  // was there before the bindings were installed
+    }
+    KJ_IF_SOME(wrappable, tryGetWrappable(ptr, value)) {
+      if (value->StrictEquals(scope)) continue;  // `self` on a service worker's global
+      snapshotBindingNames.upsert(&wrappable, kj::str(namePrefix, JsValue(name).toString(js)),
+          [](kj::String&, kj::String&&) {});
+    }
+  }
+}
+
+void IsolateBase::rebindSnapshotBindings(
+    Lock& js, v8::Local<v8::Object> scope, kj::StringPtr namePrefix) {
+  auto context = js.v8Context();
+  kj::Vector<RetainedSnapshotBinding> others;
+  for (auto& retained: retainedSnapshotBindings) {
+    kj::StringPtr rest = retained.name;
+    if (!rest.startsWith(namePrefix) ||
+        rest.slice(namePrefix.size()).findFirst(BINDING_NAME_SEPARATOR) != kj::none) {
+      others.add(kj::mv(retained));
+      continue;
+    }
+    auto holder = retained.holder.Get(ptr);
+    auto name = v8Str(ptr, rest.slice(namePrefix.size()));
+    auto fresh = check(scope->Get(context, name));
+    KJ_REQUIRE(fresh->IsObject() && !fresh->StrictEquals(holder),
+        "a binding retained by the worker's top-level code was not compiled again in the "
+        "restored isolate",
+        retained.name);
+    Wrappable::transplantWrapperForSnapshot(ptr, fresh.As<v8::Object>(), holder);
+    check(scope->Set(context, name, holder));
+  }
+  retainedSnapshotBindings = kj::mv(others);
+  // The inner bindings of wrapped bindings were re-bound while the bindings were compiled.
+  KJ_REQUIRE(namePrefix.size() > 0 || retainedSnapshotBindings.empty(),
+      "a binding retained by the worker's top-level code was not compiled again in the restored "
+      "isolate",
+      KJ_MAP(retained, retainedSnapshotBindings) { return kj::str(retained.name); });
 }
 
 void IsolateBase::addExternalSnapshotTemplate(
@@ -644,6 +733,13 @@ void IsolateBase::restoreSnapshotWrappers(Lock& js, kj::Vector<Lock::SnapshotWra
     auto data = wrapper.payload.slice(sizeof(kind));
     auto holder = wrapper.holder.Get(ptr);
     switch (kind) {
+      case BINDING_PAYLOAD:
+        // Re-bound once the Worker has compiled its bindings; see recordOrRebindSnapshotBindings().
+        retainedSnapshotBindings.add(RetainedSnapshotBinding{
+          .holder = kj::mv(wrapper.holder),
+          .name = kj::str(data.asChars()),
+        });
+        break;
       case EXTERNAL_PAYLOAD:
         KJ_REQUIRE(externalSnapshotRestorer != nullptr,
             "snapshot holds an external wrapper but no external snapshot restorer is installed");

@@ -586,7 +586,10 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
     Global::Reader global,
     CompatibilityFlags::Reader featureFlags,
     api::MemoryCacheProvider& memoryCacheProvider,
-    IsInternalBinding isInternal) {
+    IsInternalBinding isInternal,
+    // For an inner binding, the prefix of its name in a startup snapshot; see
+    // jsg::IsolateBase::recordOrRebindSnapshotBindings().
+    kj::StringPtr snapshotNamePrefix = ""_kj) {
   TRACE_EVENT("workerd", "WorkerdApi::createBindingValue()");
   auto context = lock.v8Context();
 
@@ -717,11 +720,15 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
       KJ_IF_SOME(moduleNs, lock.resolveInternalModule(wrapped.getModuleName())) {
         // build env object with inner bindings
         auto env = v8::Object::New(lock.v8Isolate);
+        auto innerPrefix =
+            jsg::IsolateBase::snapshotBindingNamePrefix(snapshotNamePrefix, global.getName());
         for (auto innerBinding: innerBindings) {
           lock.v8Set(env, innerBinding.getName(),
-              createBindingValue(
-                  lock, innerBinding, featureFlags, memoryCacheProvider, IsInternalBinding::YES));
+              createBindingValue(lock, innerBinding, featureFlags, memoryCacheProvider,
+                  IsInternalBinding::YES, innerPrefix));
         }
+        // The object the module returns holds on to the inner bindings.
+        jsg::IsolateBase::from(lock.v8Isolate).recordOrRebindSnapshotBindings(lock, env, innerPrefix);
 
         // obtain exported function to call
         auto fn = lock.v8Get(moduleNs, wrapped.getEntrypoint());
