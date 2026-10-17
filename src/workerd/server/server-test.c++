@@ -6108,7 +6108,10 @@ KJ_TEST("Server: bench command") {
       KJ_EXPECT(c.getWallNs().getSamples().size() == 4);
       KJ_EXPECT(c.getCpuNs().getSamples().size() == 4);
       auto wall = c.getWallNs();
-      KJ_EXPECT(wall.getMin() > 0);
+      // Samples have the runner's measured overhead subtracted and are clamped at zero. The
+      // overhead is measured over long batches, which a loaded machine inflates more than these
+      // 3-call batches, so a sample can be zero.
+      KJ_EXPECT(wall.getMin() >= 0);
       KJ_EXPECT(wall.getMin() <= wall.getMedian() && wall.getMedian() <= wall.getMax());
       KJ_EXPECT(wall.getMedianLow() <= wall.getMedian());
       KJ_EXPECT(wall.getMedian() <= wall.getMedianHigh());
