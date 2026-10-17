@@ -1801,6 +1801,81 @@ KJ_TEST("Server: connect() to default outbound") {
   conn.recvHttp200("OK");
 }
 
+KJ_TEST("Server: Hyperdrive designator resolving to a Worker does not crash the process") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    try {
+                `      const socket = env.hyperdrive.connect();
+                `      await socket.opened;
+                `      const writer = socket.writable.getWriter();
+                `      await writer.write(new TextEncoder().encode("ping"));
+                `      const { value } = await socket.readable.getReader().read();
+                `      await socket.close();
+                `      return new Response("echoed: " + new TextDecoder().decode(value));
+                `    } catch (err) {
+                `      return new Response("caught: " + err.message);
+                `    }
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "hyperdrive",
+              hyperdrive = (
+                designator = "db-worker",
+                database = "test-db",
+                user = "test-user",
+                password = "test-password",
+                scheme = "postgresql"
+              )
+            )
+          ]
+        )
+      ),
+      ( name = "db-worker",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    throw new Error("HTTP not expected");
+                `  },
+                `  async connect(socket, env, ctx) {
+                `    await socket.opened;
+                `    const { value } = await socket.readable.getReader().read();
+                `    await socket.writable.getWriter().write(value);
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "echoed: ping");
+}
+
 KJ_TEST("Server: connect() with Worker as outbound, no connect_pass_though") {
   TestServer test(R"((
     services = [
