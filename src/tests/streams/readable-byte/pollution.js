@@ -294,9 +294,7 @@ export const thenGetterFiresOncePerByteRead = {
 // than rejecting with the release. Default, autoAllocateChunkSize and BYOB
 // reads, at cancel() and close(); BYOB reads at a close() the source
 // answers with respond(0) as well (C++ settles them at close(), and has no
-// byobRequest after it). DIVERGENCE (ledger #43): at close(), TypeScript
-// rejects the autoAllocateChunkSize reads after the first, and the BYOB
-// reads after the first that the source does not answer.
+// byobRequest after it).
 export const thenGetterReleasesReaderWhileByteReadsSettle = {
   async test() {
     const cancel = (reader) => reader.cancel('bye');
@@ -305,13 +303,9 @@ export const thenGetterReleasesReaderWhileByteReadsSettle = {
       defaultCancel: { end: cancel },
       defaultClose: { end: close },
       autoAllocateCancel: { source: { autoAllocateChunkSize: 8 }, end: cancel },
-      autoAllocateClose: {
-        source: { autoAllocateChunkSize: 8 },
-        end: close,
-        tsRejectsLater: true,
-      },
+      autoAllocateClose: { source: { autoAllocateChunkSize: 8 }, end: close },
       byobCancel: { mode: 'byob', end: cancel },
-      byobClose: { mode: 'byob', end: close, tsRejectsLater: true },
+      byobClose: { mode: 'byob', end: close },
       byobCloseAndRespond: {
         mode: 'byob',
         end: (reader, controller) => {
@@ -320,9 +314,7 @@ export const thenGetterReleasesReaderWhileByteReadsSettle = {
         },
       },
     };
-    for (const [name, { mode, source, end, tsRejectsLater }] of Object.entries(
-      cases
-    )) {
+    for (const [name, { mode, source, end }] of Object.entries(cases)) {
       let controller;
       const rs = new ReadableStream({
         type: 'bytes',
@@ -347,15 +339,7 @@ export const thenGetterReleasesReaderWhileByteReadsSettle = {
       });
       try {
         const ended = end(reader, controller);
-        for (const [i, pending] of reads.entries()) {
-          if (usingTsImpl && tsRejectsLater && i > 0) {
-            await rejects(
-              pending,
-              { name: 'TypeError', message: 'This reader has been released' },
-              name
-            );
-            continue;
-          }
+        for (const pending of reads) {
           const result = await Promise.race([
             pending,
             scheduler.wait(250).then(() => 'pending'),
@@ -374,8 +358,7 @@ export const thenGetterReleasesReaderWhileByteReadsSettle = {
 // branch's pending reads, while close() settles them: the close answers
 // them all, so the next read still resolves done. The other branch still
 // holds a chunk, so in TypeScript the error reaches it (ledger #23, on a
-// tee branch). autoAllocateChunkSize and BYOB reads. DIVERGENCE (ledger
-// #43): TypeScript rejects the reads after the first with the error.
+// tee branch). autoAllocateChunkSize and BYOB reads.
 export const thenGetterErrorsSourceWhileBranchByteReadsSettle = {
   async test() {
     const cases = {
@@ -411,11 +394,7 @@ export const thenGetterErrorsSourceWhileBranchByteReadsSettle = {
       });
       try {
         controller.close();
-        for (const [i, pending] of reads.entries()) {
-          if (usingTsImpl && i > 0) {
-            await rejects(pending, (e) => e === error, name);
-            continue;
-          }
+        for (const pending of reads) {
           const result = await Promise.race([
             pending,
             scheduler.wait(250).then(() => 'pending'),
