@@ -1569,9 +1569,6 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
   bool usingNewModuleRegistry = isNewModuleRegistryEnabled(featureFlags);
   kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> newModuleRegistry;
   if (usingNewModuleRegistry) {
-    KJ_REQUIRE(experimental,
-        "The new ModuleRegistry implementation is an experimental feature. "
-        "You must run workerd with `--experimental` to use this feature.");
     // Module URLs follow the virtual file system: a module at "/foo/bar/baz.js" in the bundle
     // is "file:///foo/bar/baz.js".
     const jsg::Url& bundleBase = workerFs->getBundleRoot();
