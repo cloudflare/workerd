@@ -8,7 +8,7 @@
 
 import { strictEqual, ok, throws, deepStrictEqual } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
-import { drainBytes, rejectionOf } from 'helpers';
+import { assertFractionalFillError, drainBytes, rejectionOf } from 'helpers';
 
 // DIVERGENCE (the subject of the streams_no_default_auto_allocate_
 // chunk_size flag): with a DEFAULT reader and no autoAllocateChunkSize,
@@ -86,10 +86,8 @@ export const closeWithPartiallyFilledView = {
         message: 'Insufficient bytes to fill elements in the given view',
       };
       throws(() => controller.close(), expected);
-      const readErr = await rejectionOf(readP);
-      strictEqual(readErr.message, expected.message);
-      const closedErr = await rejectionOf(reader.closed);
-      strictEqual(closedErr.message, expected.message);
+      assertFractionalFillError(await rejectionOf(readP));
+      assertFractionalFillError(await rejectionOf(reader.closed));
     } else {
       controller.close();
       const r = await readP;
@@ -151,8 +149,9 @@ export const closeWithPartiallyFilledViewDetached = {
           last = reader.read(new Uint16Array(4));
         }
         if (usingTsImpl) {
-          strictEqual((await rejectionOf(last)).message, expected);
-          strictEqual((await rejectionOf(reader.closed)).message, expected);
+          const error = await rejectionOf(last);
+          assertFractionalFillError(error);
+          strictEqual(await rejectionOf(reader.closed), error);
         } else {
           const r = await last;
           // A read pending at close() settles with the tail shape; one
