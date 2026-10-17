@@ -1059,49 +1059,10 @@ class NativePullConduit implements ByteStreamConsumerType {
       return;
     }
     this.#status = 'closed';
-    this.#byobRequestCache = null;
-
-    // DEFENSIVE, currently unreachable: under the min-read contract every
-    // respond commits (satisfied → done: false; under-delivered → the
-    // done: false tail followed by EOF), so a partially-filled descriptor
-    // cannot persist to close(). Retained should a future revision
-    // reintroduce partial responds; the shape mirrors the under-delivery
-    // tail (partial done: false, then #settleRemainingAsEof).
-    const head = this.#requests.peek();
-    const partial =
-      head !== undefined && head.kind === 'byob' && head.desc.bytesFilled > 0
-        ? head.desc
-        : undefined;
-    if (
-      partial !== undefined &&
-      partial.bytesFilled % partial.elementSize !== 0
-    ) {
-      // Closed mid-element: unrecoverable (no queue to carry the
-      // remainder). Error everything instead.
-      const error = new TypeError(
-        'native source closed mid-element on a BYOB read'
-      );
-      this.#status = 'errored';
-      this.#storedError = error;
-      this.#hooks.errorStream(error);
-      this.errorAllReads(error);
-      return;
-    }
-
+    // Every respond commits its read (see respondToDesc), so no read holds
+    // bytes at close: the spec's check for a partially filled pull-into
+    // (ReadableByteStreamControllerClose) has nothing to find here.
     this.#hooks.closeStream();
-    if (partial !== undefined) {
-      this.#requests.shift();
-      partial.resolve(
-        createReadResult(
-          new partial.viewCtor(
-            partial.buffer,
-            partial.byteOffset,
-            partial.bytesFilled / partial.elementSize
-          ),
-          false
-        )
-      );
-    }
     this.#settleRemainingAsEof();
   }
 
