@@ -1,0 +1,58 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Functions implemented in C++ across a startup snapshot; see startup-snapshot-functions-test.js.
+# The runner's test() fetches the case service and asserts its report. The @all-autogates variant
+# turns the startup-snapshot autogate on, so both services go through the zygote; the @ variant
+# runs them as plain Workers.
+
+const compatibilityFlags :List(Text) = [
+  "nodejs_compat",
+  "typescript_implemented_streams",
+  "experimental",
+];
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "runner",
+      worker = (
+        modules = [
+          (name = "worker.js", esModule = embed "startup-snapshot-functions-test.js"),
+        ],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "SELF", service = "runner"),
+          (name = "create-require", service = "create-require"),
+          (name = "bind", service = "bind"),
+        ],
+      )
+    ),
+    ( name = "create-require",
+      worker = (
+        modules = [
+          (name = "worker.js", esModule = embed "startup-snapshot-functions-case-test.js"),
+          (name = "lib.cjs", commonJsModule = "module.exports = { token: {} };"),
+        ],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"create-require\""),
+          (name = "SELF", service = "create-require"),
+        ],
+      )
+    ),
+    # A function whose native state cannot be copied: the zygote rejects the snapshot.
+    ( name = "bind",
+      worker = (
+        modules = [
+          (name = "worker.js", esModule = embed "startup-snapshot-functions-case-test.js"),
+        ],
+        compatibilityFlags = .compatibilityFlags,
+        bindings = [
+          (name = "MODE", json = "\"bind\""),
+          (name = "SELF", service = "bind"),
+        ],
+      )
+    ),
+  ],
+  # typescript_implemented_streams needs the per-isolate bootstrap in every variant.
+  autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
+);
