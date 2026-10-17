@@ -55,7 +55,10 @@
 //     on the next pull. The controller REFUSES delivery on an aborted
 //     signal as a backstop. This eliminates JS-side buffering for the
 //     release-mid-pull race: race buffering lives SOURCE-SIDE; the JS
-//     conduit is uniformly bufferless.
+//     conduit is uniformly bufferless. A failure is kept the same way:
+//     the conduit takes no rejection from an aborted pull, so a source
+//     whose read fails rejects every later pull with that failure, and
+//     its tee() gives two branches that fail with it.
 //     FUTURE OPTIMIZATION: reuse a single AbortController per conduit
 //     (reset between pulls) rather than allocating one per pull.
 //   - MIN-READ / UNDER-DELIVERY CONTRACT (KJ tryRead semantics): the
