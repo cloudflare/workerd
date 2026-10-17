@@ -259,6 +259,8 @@ class UtilModule final: public jsg::Object {
     JSG_METHOD(isAnyArrayBuffer);
     JSG_METHOD(isBoxedPrimitive);
   }
+
+  JSG_SNAPSHOT_RESTORE(UtilModule);
 };
 
 #define EW_NODE_UTIL_ISOLATE_TYPES                                                                 \

@@ -185,6 +185,8 @@ class MessageChannelModule final: public jsg::Object {
     JSG_NESTED_TYPE(MessageChannel);
     JSG_NESTED_TYPE(MessagePort);
   }
+
+  JSG_SNAPSHOT_RESTORE(MessageChannelModule);
 };
 
 template <class Registry>

@@ -995,6 +995,8 @@ class AbortController final: public jsg::Object {
 // a subset of the API that is being defined.
 class Scheduler final: public jsg::Object {
  public:
+  JSG_SNAPSHOT_RESTORE(Scheduler);
+
   struct WaitOptions {
     jsg::Optional<jsg::Ref<AbortSignal>> signal;
     JSG_STRUCT(signal);

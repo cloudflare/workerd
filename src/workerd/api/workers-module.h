@@ -119,6 +119,8 @@ class EntrypointsModule: public jsg::Object {
     JSG_METHOD(abortIsolate);
     JSG_METHOD(retryable);
   }
+
+  JSG_SNAPSHOT_RESTORE(EntrypointsModule);
 };
 
 #define EW_WORKERS_MODULE_ISOLATE_TYPES                                                            \

@@ -594,6 +594,8 @@ class CryptoImpl final: public jsg::Object {
     JSG_METHOD(getCipherInfo);
     JSG_METHOD(getCiphers);
   }
+
+  JSG_SNAPSHOT_RESTORE(CryptoImpl);
 };
 
 #define EW_NODE_CRYPTO_ISOLATE_TYPES                                                               \

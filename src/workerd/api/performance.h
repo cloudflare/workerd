@@ -518,6 +518,13 @@ class Performance: public EventTarget {
   explicit Performance(const IsolateLimitEnforcer& isolateLimitEnforcer)
       : isolateLimitEnforcer(isolateLimitEnforcer) {}
 
+  // Startup-snapshot re-creation (JSG_SNAPSHOT_RESTORE in jsg.h): the `performance` global is
+  // a lazy instance property that a worker's top-level code may retain on the global object.
+  // Its only state is the isolate's limit enforcer, which the restored isolate has its own of;
+  // marks and measures recorded by the zygote are not carried over.
+  static jsg::Ref<Performance> restoreFromSnapshot(
+      jsg::Lock& js, kj::ArrayPtr<const kj::byte> recipe);
+
   // We always return a time origin of 0, making performance.now() equivalent to Date.now(). There
   // is no other appropriate time origin to use given that the Worker platform is intended to be
   // treated like one big computer rather than many individual instances. In particular, if and

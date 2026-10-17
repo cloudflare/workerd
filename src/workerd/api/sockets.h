@@ -523,6 +523,8 @@ class SocketsModule final: public jsg::Object {
       JSG_METHOD(internalNewHttpClient);
     }
   }
+
+  JSG_SNAPSHOT_RESTORE(SocketsModule);
 };
 
 template <class Registry>

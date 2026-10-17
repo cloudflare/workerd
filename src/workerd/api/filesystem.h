@@ -165,6 +165,9 @@ class FileSystemModule final: public jsg::Object {
   FileSystemModule() = default;
   FileSystemModule(jsg::Lock&, const jsg::Url&) {}
 
+  // tmpFileCounter starts at zero again in an isolate restored from a startup snapshot.
+  JSG_SNAPSHOT_RESTORE(FileSystemModule);
+
   jsg::Ref<FileFdHandle> getFdHandle(jsg::Lock& js, int fd) {
     return FileFdHandle::constructor(js, fd);
   }
@@ -655,6 +658,8 @@ class StorageManager final: public jsg::Object {
   JSG_RESOURCE_TYPE(StorageManager) {
     JSG_METHOD(getDirectory);
   }
+
+  JSG_SNAPSHOT_RESTORE(StorageManager);
 };
 
 #define EW_WEB_FILESYSTEM_ISOLATE_TYPE                                                             \

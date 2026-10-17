@@ -109,6 +109,8 @@ class InspectorModule final: public jsg::Object {
   JSG_RESOURCE_TYPE(InspectorModule) {
     JSG_NESTED_TYPE_NAMED(InspectorConnection, Connection);
   }
+
+  JSG_SNAPSHOT_RESTORE(InspectorModule);
 };
 
 #define EW_NODE_INSPECTOR_ISOLATE_TYPES api::node::InspectorConnection, api::node::InspectorModule

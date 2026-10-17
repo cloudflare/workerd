@@ -309,6 +309,14 @@ class CryptoKey: public jsg::Object {
     JSG_READONLY_INSTANCE_PROPERTY(usages, getUsages);
   }
 
+  // Startup-snapshot re-creation (JSG_SNAPSHOT_RESTORE in jsg.h): a key kept in module scope
+  // (frameworks import their session key at top level) is exported as a JWK in the zygote and
+  // imported again in the restored isolate. A non-extractable key has no recipe, so a worker
+  // retaining one cannot be snapshotted.
+  kj::Maybe<kj::Array<kj::byte>> snapshotRecipe(jsg::Lock& js);
+  static jsg::Ref<CryptoKey> restoreFromSnapshot(
+      jsg::Lock& js, kj::ArrayPtr<const kj::byte> recipe);
+
   // HACK: Needs to be public so derived classes can inherit from it.
   class Impl;
 
@@ -347,6 +355,8 @@ struct CryptoKeyPair {
 
 class SubtleCrypto: public jsg::Object {
  public:
+  JSG_SNAPSHOT_RESTORE(SubtleCrypto);
+
   // Algorithm dictionaries
   //
   // Every method of SubtleCrypto except `exportKey()` takes an `algorithm` parameter, usually as the
@@ -991,6 +1001,8 @@ class DigestStream: public WritableStream {
 class Crypto: public jsg::Object {
  public:
   Crypto(jsg::Lock& js): subtle(js.alloc<SubtleCrypto>()) {}
+
+  JSG_SNAPSHOT_RESTORE(Crypto);
 
   jsg::JsArrayBufferView getRandomValues(jsg::JsArrayBufferView buffer);
 

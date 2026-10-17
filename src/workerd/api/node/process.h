@@ -64,6 +64,8 @@ class ProcessModule final: public jsg::Object {
     JSG_LAZY_READONLY_INSTANCE_PROPERTY(platform, getPlatform);
     JSG_METHOD(shouldThrowOnNotImplementedTlsOption);
   }
+
+  JSG_SNAPSHOT_RESTORE(ProcessModule);
 };
 
 #define EW_NODE_PROCESS_ISOLATE_TYPES api::node::ProcessModule

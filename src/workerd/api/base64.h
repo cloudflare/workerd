@@ -25,6 +25,8 @@ class Base64Module final: public jsg::Object {
       encodeArrayToString(source: ArrayBuffer | ArrayBufferView): string;
     });
   }
+
+  JSG_SNAPSHOT_RESTORE(Base64Module);
 };
 
 template <class Registry>

@@ -106,6 +106,19 @@ class DiagnosticsChannelModule: public jsg::Object {
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
+  // Startup-snapshot re-creation (JSG_SNAPSHOT_RESTORE in jsg.h). The module object is retained by
+  // any worker that imports node:diagnostics_channel, but its only state is the channels, whose
+  // subscribers are JavaScript functions held from C++; so it is re-created fresh as long as the
+  // worker's top-level code created no channel.
+  kj::Maybe<kj::Array<kj::byte>> snapshotRecipe(jsg::Lock& js) {
+    if (channels.size() > 0) return kj::none;
+    return kj::heapArray<kj::byte>(0);
+  }
+  static jsg::Ref<DiagnosticsChannelModule> restoreFromSnapshot(
+      jsg::Lock& js, kj::ArrayPtr<const kj::byte> recipe) {
+    return js.alloc<DiagnosticsChannelModule>();
+  }
+
  private:
   kj::HashMap<kj::String, jsg::Ref<Channel>> channels;
 

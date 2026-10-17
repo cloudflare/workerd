@@ -23,6 +23,8 @@ class ModuleUtil final: public jsg::Object {
     JSG_METHOD(createRequire);
     JSG_METHOD(isBuiltin);
   }
+
+  JSG_SNAPSHOT_RESTORE(ModuleUtil);
 };
 
 #define EW_NODE_MODULE_ISOLATE_TYPES api::node::ModuleUtil

@@ -26,6 +26,8 @@ class TimersUtil final: public jsg::Object {
     JSG_METHOD(setImmediate);
     JSG_METHOD(clearImmediate);
   }
+
+  JSG_SNAPSHOT_RESTORE(TimersUtil);
 };
 
 #define EW_NODE_TIMERS_ISOLATE_TYPES api::node::TimersUtil

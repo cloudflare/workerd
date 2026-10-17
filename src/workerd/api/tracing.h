@@ -264,6 +264,8 @@ class Tracing: public jsg::Object {
       getActiveSpan(): Span | undefined;
     });
   }
+
+  JSG_SNAPSHOT_RESTORE(Tracing);
 };
 
 // Registers `cloudflare-internal:tracing` as a builtin module. The `Module` suffix on the

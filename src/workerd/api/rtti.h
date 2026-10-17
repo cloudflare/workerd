@@ -25,6 +25,8 @@ class RTTIModule final: public jsg::Object {
     JSG_METHOD(exportTypes);
     JSG_METHOD(exportExperimentalTypes);
   }
+
+  JSG_SNAPSHOT_RESTORE(RTTIModule);
 };
 
 template <class Registry>

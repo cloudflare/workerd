@@ -48,6 +48,8 @@ class EnvModule final: public jsg::Object {
     JSG_METHOD(withExports);
     JSG_METHOD(withEnvAndExports);
   }
+
+  JSG_SNAPSHOT_RESTORE(EnvModule);
 };
 
 template <class Registry>
