@@ -97,7 +97,7 @@ pub fn spawn_task_holding_kj_timer() {
 
 /// Like `spawn_task_holding_kj_timer`, but the detached task awaits a bridged KJ promise that
 /// never resolves (`kjNeverPromise`): at teardown it holds an `OwnPromiseNode` and an armed
-/// `RustPromiseAwaiter` event registered with the loop, which the `LocalSet` cancellation must
+/// `RustPromiseAwaiter` event registered with the loop, which the runtime shutdown must
 /// drop while the loop still exists.
 pub fn spawn_task_awaiting_kj_never_promise() {
     drop(kj_rs_tokio::spawn(async {

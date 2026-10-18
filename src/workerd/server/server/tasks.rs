@@ -10,7 +10,7 @@
 //! future the server hands C++, so they are ordered with the events they react to: a monitor
 //! sees its actor break before the failed request's reply reaches the caller. They also end
 //! with the server (its drop clears them; `Factory::settle_tasks` ends the ones the drop
-//! spawned), before V8 goes away. Neither holds for tasks on the tokio `LocalSet`
+//! spawned), before V8 goes away. Neither holds for tasks on the tokio runtime
 //! (`kj_rs_tokio::spawn`), which run only once the KJ loop idles and live until the event port is
 //! torn down.
 

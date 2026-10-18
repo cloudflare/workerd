@@ -1,8 +1,7 @@
-//! Per-thread tokio `current_thread` runtime management and the Rust half of `TokioEventPort`.
+//! The Rust half of `TokioEventPort`: a tokio [`LocalEventLoop`] that KJ's `EventPort` drives.
 
 use std::cell::RefCell;
 use std::future::Future;
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -10,38 +9,24 @@ use std::time::Duration;
 
 use tokio::runtime::Builder;
 use tokio::runtime::Handle;
-use tokio::sync::Notify;
+use tokio::runtime::LocalOptions;
+use tokio::runtime::Unparker;
 use tokio::task::JoinHandle;
-use tokio::task::LocalSet;
 
-use crate::ffi::EnteredRuntime;
+use crate::ffi::EnteredLoop;
 
-/// How many bounded yield points `poll()` grants the runtime. This gives ready work opportunities
-/// to run without promising an ordering or an exact number of task or driver polls, which are
-/// Tokio scheduler implementation details.
+/// How many ready tasks one `tick` (hence one `wait()` or `poll()`) runs before handing the
+/// thread back to KJ.
 ///
-/// The value is a latency/throughput compromise, not derived from any tokio internal: large
-/// enough to drain a typical burst of already-ready tasks in one `poll()` call, small enough to
-/// bound how long `poll()` withholds control from the KJ loop when spawned tasks keep re-readying
-/// each other. Safe to retune if profiling shows either starvation or excessive poll latency.
-const POLL_YIELD_BUDGET: u32 = 16;
+/// Tasks left ready make tokio's next `park` return at once, so KJ calls `wait()` again as soon
+/// as its own queue is empty: leftover work is not lost, it is interleaved with KJ's events.
+/// The value only bounds how long a burst of tokio work withholds the thread from KJ.
+const TICK_BUDGET: usize = 64;
 
 thread_local! {
-    /// Handle to the `TokioPort` runtime driving the KJ event loop on this thread, if any.
-    /// Registered by `TokioPort::new` and cleared on drop. Used by code (e.g. kj-rs-io) that
-    /// needs to *enter* the runtime context so tokio resources can register with its I/O driver
-    /// and timers.
+    /// Handle to the runtime of the `TokioPort` on this thread, if any. Registered by
+    /// `TokioPort::new` and cleared on drop; kj-rs-io checks it before registering a resource.
     static LOOP_RUNTIME_HANDLE: RefCell<Option<Handle>> = const { RefCell::new(None) };
-
-    /// The `LocalSet` onto which [`spawn`] enqueues tasks, and which `wait_*`/`poll` drive. Held
-    /// behind an `Rc` so `spawn` (which has no `&TokioPort`) can reach it while the port keeps
-    /// driving it. The `LocalSet` is `!Send`/`!Sync` and lives entirely on the loop thread, so it
-    /// cannot be stored in the `Sync` TokioPort shared with cross-thread `wake()` callers;
-    /// ownership lives here. It is dropped -- cancelling every still-pending spawned
-    /// task -- by [`TokioPort::cancel_spawned_tasks`], which the C++ `TokioEventPort` destructor
-    /// calls while the KJ event loop and timer are still alive (spawned tasks may own KJ
-    /// promises), with `TokioPort::drop` as the fallback.
-    static LOOP_LOCAL_SET: RefCell<Option<Rc<LocalSet>>> = const { RefCell::new(None) };
 }
 
 /// Returns a handle to this thread's KJ-loop tokio runtime, if a `TokioEventPort` exists on this
@@ -51,33 +36,23 @@ pub fn current_handle() -> Option<Handle> {
     LOOP_RUNTIME_HANDLE.with(|h| h.borrow().clone())
 }
 
-/// Returns this thread's KJ-loop `LocalSet`, if a `TokioEventPort` exists on this thread.
-fn current_local_set() -> Option<Rc<LocalSet>> {
-    LOOP_LOCAL_SET.with(|l| l.borrow().clone())
-}
-
 /// Spawns a future onto this thread's KJ-loop tokio runtime.
 ///
-/// The task runs whenever the KJ event loop sleeps (i.e. whenever C++ is blocked in
-/// `promise.wait(waitScope)` or pumping via `poll()`), driven by the port's [`LocalSet`].
-///
-/// The future is spawned with [`LocalSet::spawn_local`], so it is pinned to this (the loop)
-/// thread and does **not** need to be `Send`: the per-thread `current_thread` runtime never
-/// migrates a task to another thread. This is what lets bridged futures that hold `!Send` KJ
-/// handles (`OwnPromiseNode`, `kj::Own`, ...) be spawned directly. Dropping the returned
+/// Tasks run from the port's `wait()` and `poll()`, in bounded batches between KJ's own events.
+/// The future need not be `Send`: the runtime is a `LocalRuntime`, pinned to this thread, so a
+/// task may hold `!Send` KJ handles (`OwnPromiseNode`, `kj::Own`, ...). Dropping the returned
 /// `JoinHandle` detaches the task, matching `tokio::spawn`; port teardown cancels detached tasks.
 ///
-/// A spawned task may use KJ freely: complete bridged futures, fulfill `kj::PromiseFulfiller`s,
-/// arm KJ timers, create and await bridged promises. Every one of those either arms a KJ event,
-/// which KJ reports to the port through `EventPort::setRunnable(true)`, or moves the next KJ
-/// timer deadline, which KJ reports through the `TimerImpl::SleepHooks` the port installs while
-/// sleeping; either way the port ends the park. The one thing a task must not do is re-enter
-/// `promise.wait()` / `waitScope.poll()` on this thread: the loop is already inside a `wait()`,
-/// and KJ refuses the nested one with a `kj::Exception`.
+/// A task may use KJ freely: fulfill a `kj::PromiseFulfiller`, arm a KJ timer, create and await
+/// bridged promises. Each of those arms a KJ event, which KJ runs once the batch returns. The one
+/// thing a task must not do is re-enter `promise.wait()` / `waitScope.poll()` on this thread:
+/// the loop is already inside a `wait()` or `poll()`, and KJ refuses the nested one with a
+/// `kj::Exception`.
 ///
 /// # Panics
 ///
-/// Panics if no `TokioEventPort` has been created on this thread.
+/// Panics if no `TokioEventPort` has been created on this thread, or if its tasks have been
+/// cancelled (`TokioPort::cancel_spawned_tasks`).
 pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
 where
     F: Future + 'static,
@@ -87,52 +62,61 @@ where
         clippy::expect_used,
         reason = "documented `# Panics` on this public API: calling spawn() without first creating a TokioEventPort on this thread is a caller-contract violation, not a recoverable runtime path"
     )]
-    let local = current_local_set()
+    let handle = current_handle()
         .expect("no kj-rs-tokio runtime on this thread; create a TokioEventPort first");
-    local.spawn_local(future)
+    // `tokio::task::spawn_local` resolves through the thread's current runtime, which is the
+    // port's for its whole life (see `EnteredLoop`) except under another runtime's `block_on`;
+    // entering the port's handle pins it either way. tokio checks that the runtime is a
+    // `LocalRuntime` of this thread.
+    let _entered = handle.enter();
+    tokio::task::spawn_local(future)
 }
 
-/// State shared with `wake()` callers on other threads.
-struct SharedState {
-    /// Unblocks the `block_on(...)` inside `wait_*` when `wake()` fires, or when KJ reports (via
-    /// `notify_kj_service`) that it has work.
-    notify: Notify,
-
-    /// The `kj::EventPort::wake()` latch: set by `wake()`, consumed (swapped to `false`) by the
-    /// return value of `wait_*`/`poll`. The KJ event loop uses a `true` return to know it must
-    /// drain cross-thread events (`kj::Executor`, `CrossThreadPromiseFulfiller`).
+/// What `kj::EventPort::wake()` touches: shared with any thread through [`TokioWaker`].
+struct WakeState {
+    /// Ends a `park` in progress, or makes the next one return at once.
+    unparker: Unparker,
+    /// The `kj::EventPort::wake()` latch: set by `wake()`, consumed by the return value of
+    /// `wait_*`/`poll`. The KJ event loop uses a `true` return to know it must drain
+    /// cross-thread events (`kj::Executor`, `CrossThreadPromiseFulfiller`).
     woken: AtomicBool,
-
-    /// True while the loop thread is inside `wait_*`'s `block_on`. `notify_kj_service` only acts
-    /// then: KJ also reports runnable transitions while it is turning events itself, and a permit
-    /// stored then would only make the next wait return spuriously once. Only mutated from the
-    /// loop thread; atomic so the struct stays `Sync`.
-    in_wait: AtomicBool,
 }
 
-/// The Rust backing of one `kj_rs_tokio::TokioEventPort` (C++): owns the per-thread
-/// `current_thread` tokio runtime.
-///
-/// The loop thread stays inside that runtime's context for the port's whole life (see
-/// [`EnteredRuntime`]): tokio resources created anywhere on the loop thread -- inside or outside
-/// `block_on` -- register with this runtime's drivers without any per-call `enter()`.
-///
-/// One instance per KJ event loop, created on (and driven by) that loop's thread. Only `wake()`
-/// may be called from other threads. `!Send` by type: the entered context must be left on the
-/// thread that entered it, which is also the only thread that may drive or drop the port.
-pub struct TokioPort {
-    runtime: EnteredRuntime,
-    state: Arc<SharedState>,
-    owner_thread: std::thread::ThreadId,
+/// The cross-thread end of a [`TokioPort`]: `wake()` for `kj::EventPort::wake()`, callable from
+/// any thread, while the port itself stays on its loop thread.
+pub struct TokioWaker {
+    state: Arc<WakeState>,
 }
 
-// `wake()` is called through a `&TokioPort` shared with arbitrary threads, so the type must be
-// `Sync` (`Runtime`, `Notify`, the atomics and the entered guard all are). It is deliberately
-// NOT `Send` (the guard is not), matching the one-thread contract above.
+// `wake()` is called through a `&TokioWaker` shared with arbitrary threads.
 const _: () = {
-    const fn assert_sync<T: Sync>() {}
-    assert_sync::<TokioPort>();
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<TokioWaker>();
 };
+
+impl TokioWaker {
+    pub(crate) fn wake(&self) {
+        self.state.woken.store(true, Ordering::SeqCst);
+        self.state.unparker.unpark();
+    }
+}
+
+/// The Rust backing of one `kj_rs_tokio::TokioEventPort` (C++): the per-thread tokio
+/// `LocalEventLoop`, driven from the port's `wait()` and `poll()`.
+///
+/// The loop thread stays inside the runtime's context for the port's whole life (see
+/// [`EnteredLoop`]): tokio resources created anywhere on the loop thread -- inside a task or in a
+/// KJ event -- register with this runtime's drivers without any per-call `enter()`.
+///
+/// One instance per KJ event loop, created on and driven by that loop's thread, and neither
+/// `Send` nor `Sync` (as a `LocalRuntime` is): the entered context must be left on the thread
+/// that entered it, which is also the only thread that may drive or drop the port. Other threads
+/// reach it only through a [`TokioWaker`].
+pub struct TokioPort {
+    /// `None` once `cancel_spawned_tasks` has shut the runtime down.
+    event_loop: Option<EnteredLoop>,
+    state: Arc<WakeState>,
+}
 
 // Opaque cxx types must cross the bridge boxed. The lint's firing is platform-dependent (it has
 // a size threshold and `TokioPort`'s size differs by target), so `#[expect]` would be unfulfilled
@@ -149,32 +133,42 @@ pub fn new_tokio_port() -> Box<TokioPort> {
     Box::new(TokioPort::new())
 }
 
+#[expect(
+    clippy::allow_attributes,
+    reason = "`unnecessary_box_returns` does not fire on every target, where `expect` would be unfulfilled"
+)]
+#[allow(
+    clippy::unnecessary_box_returns,
+    reason = "cxx takes the opaque `TokioWaker` boxed"
+)]
+pub fn new_tokio_waker(port: &TokioPort) -> Box<TokioWaker> {
+    Box::new(port.waker())
+}
+
 impl TokioPort {
     /// # Panics
     ///
-    /// Panics if the tokio runtime cannot be built.
+    /// Panics if the tokio runtime cannot be built, or if this thread already has a port.
     #[must_use]
     pub fn new() -> Self {
-        let state = Arc::new(SharedState {
-            notify: Notify::new(),
-            woken: AtomicBool::new(false),
-            in_wait: AtomicBool::new(false),
-        });
         #[expect(
             clippy::expect_used,
-            reason = "startup-only: building the per-thread current_thread runtime fails only under resource exhaustion, at which point fail-fast at port construction is the correct behavior"
+            reason = "startup-only: building the per-thread runtime fails only under resource exhaustion, at which point fail-fast at port construction is the correct behavior"
         )]
-        let runtime = Builder::new_current_thread()
+        let event_loop = Builder::new_current_thread()
             .enable_time()
-            // The I/O driver dispatches readiness for tokio sockets (used by kj-rs-io's
-            // tokio-backed KJ streams). It is only *driven* while this runtime is inside
-            // `block_on` (i.e. in `wait_*`/`poll`), which is exactly when the KJ loop sleeps.
+            // The I/O driver dispatches readiness for tokio sockets (kj-rs-io's streams). It
+            // turns in `park` and `tick`, i.e. from the port's `wait()` and `poll()`.
             .enable_io()
-            .build()
-            .expect("failed to build current_thread tokio runtime");
-        // Enter the runtime context for the life of the port (see EnteredRuntime): from here on,
+            .build_local_event_loop(LocalOptions::default())
+            .expect("failed to build the tokio LocalEventLoop");
+        let state = Arc::new(WakeState {
+            unparker: event_loop.unparker(),
+            woken: AtomicBool::new(false),
+        });
+        // Enter the runtime context for the life of the port (see EnteredLoop): from here on,
         // `Handle::current()` on this thread is this runtime.
-        let runtime = EnteredRuntime::new(runtime);
+        let event_loop = EnteredLoop::new(event_loop);
         LOOP_RUNTIME_HANDLE.with(|h| {
             let mut slot = h.borrow_mut();
             assert!(
@@ -182,29 +176,35 @@ impl TokioPort {
                 "a kj-rs-tokio runtime already exists on this thread (one KJ event loop per \
                  thread, hence one TokioEventPort per thread)"
             );
-            *slot = Some(runtime.handle().clone());
-        });
-        // The `LocalSet` that `spawn()` enqueues onto and `wait_*`/`poll` drive. Owned by the
-        // thread-local (not by `TokioPort`, which must stay `Send + Sync`); dropped in `drop()`.
-        LOOP_LOCAL_SET.with(|l| {
-            *l.borrow_mut() = Some(Rc::new(LocalSet::new()));
+            *slot = Some(event_loop.handle().clone());
         });
         Self {
-            runtime,
+            event_loop: Some(event_loop),
             state,
-            owner_thread: std::thread::current().id(),
         }
     }
 
-    /// Handle to this port's runtime, usable to spawn tasks from any thread. (On the loop thread
-    /// itself `tokio::runtime::Handle::current()` is the same runtime; see [`EnteredRuntime`].)
+    /// Handle to this port's runtime, usable to spawn `Send` tasks from any thread. (On the loop
+    /// thread itself `tokio::runtime::Handle::current()` is the same runtime; see
+    /// [`EnteredLoop`].)
+    ///
+    /// # Panics
+    ///
+    /// Panics after `cancel_spawned_tasks`.
     #[must_use]
     pub fn handle(&self) -> Handle {
-        self.runtime.handle().clone()
+        self.event_loop().handle().clone()
     }
 
-    /// Cancels every task spawned onto this thread's `LocalSet` via [`spawn`], by dropping the
-    /// `LocalSet` (their `Drop` impls run synchronously, here, on the loop thread).
+    /// The cross-thread end of this port, for `kj::EventPort::wake()`.
+    #[must_use]
+    pub fn waker(&self) -> TokioWaker {
+        TokioWaker {
+            state: Arc::clone(&self.state),
+        }
+    }
+
+    /// Shuts the runtime down, dropping every task spawned onto it here, on the loop thread.
     ///
     /// Spawned tasks routinely own KJ objects -- a bridged `PromiseFuture` holds an
     /// `OwnPromiseNode` and an armed `RustPromiseAwaiter` event; a KJ timer promise holds a
@@ -212,106 +212,61 @@ impl TokioPort {
     /// loop and timer to still exist. The C++ `TokioEventPort` owns both and calls this FIRST in
     /// its destructor, before any member is destroyed, which makes the teardown order a
     /// structural guarantee rather than a rule spawned tasks have to follow. This is a terminal
-    /// operation: repeated calls find nothing to do, but later spawn, wait, or poll operations are
-    /// invalid. A call from another thread is a no-op and never touches that caller's `LocalSet`.
-    ///
-    /// Tasks spawned with plain `tokio::spawn` onto the runtime are unaffected (they are
-    /// cancelled when the runtime drops); being `Send`, they cannot hold KJ objects
-    /// (`OwnPromiseNode` and friends are `!Send`), so their order relative to the loop does
-    /// not matter.
-    pub fn cancel_spawned_tasks(&self) {
-        if self.owner_thread != std::thread::current().id() {
-            return;
-        }
-        // Take the `Rc` out of the slot and drop it AFTER the borrow ends, so a cancelled
-        // task's `Drop` that itself borrows the slot does not hit a re-entrant-borrow panic.
-        // (A task `Drop` that tries to *spawn* during cancellation is unsupported: the slot is
-        // already `None`, so `spawn()` panics per its documented contract. Rescheduling from a
-        // destructor during teardown is not a sane pattern.)
-        let local_set = LOOP_LOCAL_SET
-            .try_with(|l| l.borrow_mut().take())
-            .ok()
-            .flatten();
-        drop(local_set);
-    }
-
-    pub(crate) fn wait_forever(&self) -> bool {
-        self.wait_impl(None)
-    }
-
-    pub(crate) fn wait_timeout_ns(&self, timeout_ns: u64) -> bool {
-        self.wait_impl(Some(Duration::from_nanos(timeout_ns)))
-    }
-
-    fn wait_impl(&self, timeout: Option<Duration>) -> bool {
-        let state = &self.state;
-
-        // This `block_on` is where tokio owns the thread: it drives *all* tasks — those spawned
-        // onto the port's `LocalSet` via `spawn()` (driven by `LocalSet::block_on`'s `run_until`)
-        // as well as any `tokio::spawn`ed tasks on the current_thread runtime — not just the
-        // future passed to it. Wake-up sources: `wake()` from another thread (with the `woken`
-        // latch set), KJ itself via `notify_kj_service` (a task in this very `block_on` armed a
-        // KJ event -- `EventPort::setRunnable(true)` -- or a sooner KJ timer -- the port's
-        // `TimerImpl::SleepHooks`), and the next KJ timer deadline via the tokio timer wheel.
-        // `Notify` stores a permit if `notify_one()` arrives before `notified()` is polled, so
-        // there is no lost-wakeup window; spurious early returns are explicitly allowed by the
-        // `kj::EventPort::wait()` contract.
-        #[expect(
-            clippy::expect_used,
-            reason = "TokioPort::new registers this thread's LocalSet; wait() only runs while this port drives its own thread, so the LocalSet is always present — absence is an unreachable internal invariant"
-        )]
-        let local =
-            current_local_set().expect("TokioPort is driving without a registered LocalSet");
-        state.in_wait.store(true, Ordering::Relaxed);
-        local.block_on(&self.runtime, async {
-            match timeout {
-                Some(t) => {
-                    let _ = tokio::time::timeout(t, state.notify.notified()).await;
-                }
-                None => state.notify.notified().await,
-            }
+    /// operation: repeated calls find nothing to do, but later spawn, wait, or poll operations
+    /// panic.
+    pub fn cancel_spawned_tasks(&mut self) {
+        // The runtime is left before the tasks are dropped: a task `Drop` that tried to spawn
+        // during teardown finds no runtime and panics per `spawn`'s contract, rather than
+        // enqueueing onto a runtime that is going away. Rescheduling from a destructor during
+        // teardown is not a sane pattern. `try_with`: a port destroyed at process exit (a static
+        // owner under KJ_CLEAN_SHUTDOWN) may get here after this thread's Rust TLS destructors
+        // have run, and then there is nothing to clear.
+        let _ = LOOP_RUNTIME_HANDLE.try_with(|h| {
+            *h.borrow_mut() = None;
         });
-        state.in_wait.store(false, Ordering::Relaxed);
+        drop(self.event_loop.take());
+    }
 
+    pub(crate) fn park_forever(&mut self) {
+        self.event_loop_mut().park(None);
+    }
+
+    pub(crate) fn park_timeout_ns(&mut self, timeout_ns: u64) {
+        self.event_loop_mut()
+            .park(Some(Duration::from_nanos(timeout_ns)));
+    }
+
+    /// One driver turn and one batch of tasks, never sleeping: `kj::EventPort::poll()`, and the
+    /// second half of `wait()`. Returns the wake latch.
+    pub(crate) fn tick(&mut self) -> bool {
+        self.event_loop_mut().tick(TICK_BUDGET);
         self.take_wake_latch()
-    }
-
-    pub(crate) fn poll(&self) -> bool {
-        // Bounded, non-blocking pump: each yield gives ready LocalSet and runtime work an
-        // opportunity to run. Tokio does not guarantee exact scheduling order or driver-poll
-        // counts here, so only the number of yield attempts is part of this implementation.
-        #[expect(
-            clippy::expect_used,
-            reason = "TokioPort::new registers this thread's LocalSet; poll() only runs while this port drives its own thread, so the LocalSet is always present — absence is an unreachable internal invariant"
-        )]
-        let local =
-            current_local_set().expect("TokioPort is driving without a registered LocalSet");
-        local.block_on(&self.runtime, async {
-            for _ in 0..POLL_YIELD_BUDGET {
-                tokio::task::yield_now().await;
-            }
-        });
-        self.take_wake_latch()
-    }
-
-    pub(crate) fn wake(&self) {
-        self.state.woken.store(true, Ordering::SeqCst);
-        self.state.notify.notify_one();
-    }
-
-    /// See the bridge doc (ffi.rs): KJ has told the C++ port it has work (`setRunnable(true)`,
-    /// or a sooner timer through the port's `TimerImpl::SleepHooks`). Wake the `notified()`
-    /// future if we are parked in `wait_*`; a no-op otherwise.
-    pub(crate) fn notify_kj_service(&self) {
-        if self.state.in_wait.load(Ordering::Relaxed) {
-            self.state.notify.notify_one();
-        }
     }
 
     /// Consumes the wake latch: returns `true` iff `wake()` was called since the last `true`
     /// return from `wait_*`/`poll`.
     fn take_wake_latch(&self) -> bool {
         self.state.woken.swap(false, Ordering::SeqCst)
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "documented `# Panics`: driving a port after `cancel_spawned_tasks` is a caller-contract violation"
+    )]
+    fn event_loop(&self) -> &EnteredLoop {
+        self.event_loop
+            .as_ref()
+            .expect("TokioPort used after cancel_spawned_tasks")
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "documented `# Panics`: driving a port after `cancel_spawned_tasks` is a caller-contract violation"
+    )]
+    fn event_loop_mut(&mut self) -> &mut EnteredLoop {
+        self.event_loop
+            .as_mut()
+            .expect("TokioPort used after cancel_spawned_tasks")
     }
 }
 
@@ -325,18 +280,13 @@ impl Drop for TokioPort {
     fn drop(&mut self) {
         // `try_with`, not `with`: a port owned by an object destroyed during thread/process
         // teardown (e.g. under KJ_CLEAN_SHUTDOWN) can be dropped after this thread's Rust TLS
-        // destructors have already run, where `with` panics with an AccessError. If the TLS is
-        // gone, its values (including the LocalSet) were already dropped with it, so there is
-        // nothing left to clear.
+        // destructors have already run, where `with` panics with an AccessError.
         let _ = LOOP_RUNTIME_HANDLE.try_with(|h| {
             *h.borrow_mut() = None;
         });
-        // Fallback cancellation of spawned tasks (normally already done, while the KJ loop was
-        // still alive, by the C++ `TokioEventPort` destructor -- see `cancel_spawned_tasks`). A
-        // bare `TokioPort` (Rust unit tests) reaches here with its tasks still pending.
-        self.cancel_spawned_tasks();
-        // Dropping `self.runtime` cancels any tasks spawned via `tokio::spawn` (as opposed to the
-        // LocalSet); those are `Send` and so cannot hold KJ objects.
+        // Normally already done, while the KJ loop was still alive, by the C++ `TokioEventPort`
+        // destructor; a bare `TokioPort` (Rust unit tests) reaches here with its tasks pending.
+        drop(self.event_loop.take());
     }
 }
 

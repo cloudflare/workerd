@@ -1,5 +1,5 @@
 // Tests for TokioEventPort / setupTokioAsyncIo: a kj::EventLoop driven by a per-thread tokio
-// current_thread runtime. Following kj-rs conventions, C++ KJ_TESTs drive; Rust helpers (see
+// LocalEventLoop. Following kj-rs conventions, C++ KJ_TESTs drive; Rust helpers (see
 // tests/lib.rs, bridged by workerd-cxx) provide async behaviors.
 
 #include "kj-rs-tokio-test/lib.rs.h"
@@ -441,8 +441,8 @@ namespace {
 
 KJ_TEST("context destruction with a spawned task HOLDING a KJ timer promise is clean") {
   // Unlike the test below, the spawned task itself owns live KJ objects (TimerPromiseAdapter in
-  // the port's TimerImpl, armed RustPromiseAwaiter Event on the loop) at teardown. The LocalSet
-  // cancellation that drops them must run while the timer and loop still exist.
+  // the port's TimerImpl, armed RustPromiseAwaiter Event on the loop) at teardown. The runtime
+  // shutdown that drops them must run while the timer and loop still exist.
   {
     auto io = setupTokioAsyncIo();
     auto &ws = io.getWaitScope();
@@ -525,10 +525,10 @@ KJ_TEST("bridged future woken from a plain std::thread while the loop is parked"
 }
 
 // =======================================================================================
-// A tokio task hands KJ work by means other than a bridged waker while the loop is parked in
-// wait(): KJ reports it to the port (setRunnable(true) for events, the TimerImpl SleepHooks for
-// timers) and the park must end. Each test is bounded by a long timer that turns "hangs forever"
-// into a failed assertion.
+// A tokio task hands KJ work by means other than a bridged waker from inside wait(): the park
+// ends at the tokio timer that readies the task, the batch after it runs the task, and KJ runs
+// what the task armed. Each test is bounded by a long timer that turns "hangs forever" into a
+// failed assertion.
 
 KJ_TEST("a spawned task fulfilling a kj::PromiseFulfiller while the loop is parked wakes it") {
   auto io = setupTokioAsyncIo();
@@ -540,8 +540,8 @@ KJ_TEST("a spawned task fulfilling a kj::PromiseFulfiller while the loop is park
   testFulfiller = kj::mv(paf.fulfiller);
   KJ_DEFER(testFulfiller = kj::none);
 
-  // The task fulfills ~20 ms into the park; the 10 s timer is the "we hung" bound. Without KJ
-  // reporting the arm (setRunnable(true)) it sits unserviced until that timer.
+  // The task fulfills ~20 ms into the wait; the 10 s timer is the "we hung" bound. A port that
+  // slept through tokio's timer would leave it unserviced until that timer.
   task_fulfills_kj_fulfiller(20, 42);
   auto before = sysClock.now();
   int value = paf.promise
@@ -584,13 +584,12 @@ KJ_TEST("a KJ timer armed by a spawned task during the park is honored at its ow
   setTestTimer(&timer);
   KJ_DEFER(setTestTimer(nullptr));
 
-  // wait() plans against the 10 s bound; 10 ms (wall clock) into the park the task arms a 20 ms
-  // KJ timer and awaits it to completion. The park must end at that timer, not at 10 s.
+  // wait() sleeps against the 10 s bound; 10 ms (wall clock) in, the task arms a 20 ms KJ timer
+  // and awaits it to completion. The wait must end at that timer, not at 10 s.
   //
-  // The port is the TimerImpl's SleepHooks while parked, so kj::Timer::now() reads the live
-  // clock: the task's afterDelay(20ms) is measured from the moment it is armed (~10 ms in), and
-  // the timer is due at ~30 ms of wall time -- KJ's intended semantics for code using the timer
-  // while the loop sleeps (see kj::TimerImpl::setSleeping).
+  // The port advances the KJ timer when the park ends, before the batch runs the task, so the
+  // task's afterDelay(20ms) is measured from the moment it is armed (~10 ms in), and the timer
+  // is due at ~30 ms of wall time.
   auto before = sysClock.now();
   task_awaits_kj_timer(10, 20)
       .exclusiveJoin(timer.afterDelay(10 * kj::SECONDS).then([]() {
@@ -673,7 +672,7 @@ KJ_TEST("a task that yields forever keeps poll() bounded and does not starve the
   // The KJ side still makes progress alongside the spinning task.
   KJ_EXPECT(kj::evalLater([]() { return 21; }).wait(ws) == 21);
   KJ_EXPECT(spawn_task_on_runtime(1, 9).wait(ws) == 9);
-  // The spinning task is cancelled at teardown (LocalSet cancellation, above).
+  // The spinning task is cancelled at teardown (runtime shutdown, above).
 }
 
 KJ_TEST("a spawned task re-entering promise.wait() gets a kj::Exception, not an abort") {

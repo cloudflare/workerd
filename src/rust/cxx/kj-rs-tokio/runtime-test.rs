@@ -63,8 +63,8 @@ fn a_kj_exception_out_of_the_wait_is_an_error_and_drops_the_future() {
     let mut runtime = Runtime::new().unwrap();
     let dropped = Rc::new(Cell::new(false));
     let guard = SetOnDrop(Rc::clone(&dropped));
-    // Under another runtime's `block_on` the port cannot sleep: its own `block_on` panics, and
-    // the port's wait() throws that as a kj::Exception.
+    // Under another runtime's `block_on` the port cannot sleep: its `park` panics, and the
+    // port's wait() throws that as a kj::Exception.
     let foreign = Builder::new_current_thread().build().unwrap();
     foreign.block_on(async {
         let error = runtime
@@ -73,7 +73,7 @@ fn a_kj_exception_out_of_the_wait_is_an_error_and_drops_the_future() {
                 std::future::pending::<()>().await;
             })
             .unwrap_err();
-        assert!(error.description().contains("wait_forever"), "{error:?}");
+        assert!(error.description().contains("park_forever"), "{error:?}");
         assert!(dropped.get());
     });
     drop(foreign);

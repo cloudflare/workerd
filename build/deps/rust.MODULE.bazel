@@ -97,6 +97,16 @@ crate.annotation(
         "//:patches/rust/crates/hyper/parse-error-explanation.patch",
     ],
 )
+
+# The `LocalEventLoop` API kj-rs-tokio drives (see the `[patch.crates-io]` entry in
+# deps/rust/Cargo.toml) is unstable; `tokio_unstable` is tokio's opt-in for it.
+crate.annotation(
+    crate = "tokio",
+    rustc_flags = [
+        "--cfg",
+        "tokio_unstable",
+    ],
+)
 crate.from_cargo(
     # TODO(cleanup): This name is a bit misleading now that we don't vendor. We can clean it up as a
     # followup.
