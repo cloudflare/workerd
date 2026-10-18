@@ -553,17 +553,19 @@ class WritableStream<W = unknown> {
       return promise;
     };
 
+    // Both close() methods' closing check, then WritableStreamClose. The
+    // closing check comes first: a close queued ahead of an abort stays
+    // queued after the stream has become 'errored', until the sink's
+    // abort() settles.
     writableStreamCloseInternal = <W>(stream: WritableStream<W>) => {
+      if (writableStreamCloseQueuedOrInFlight(stream)) {
+        return PromiseReject(new TypeError('Stream is already closing'));
+      }
       const state = stream.#state;
       if (state === 'closed' || state === 'errored') {
         return PromiseReject(
           new TypeError('Cannot close a stream that is closed or errored')
         );
-      }
-      // Caller (writer.close / stream.close) has rejected the
-      // close-queued-or-in-flight case already; assert-not anyway.
-      if (writableStreamCloseQueuedOrInFlight(stream)) {
-        return PromiseReject(new TypeError('Stream is already closing'));
       }
       const request = PromiseWithResolvers() as PromiseWithResolversType<void>;
       stream.#closeRequest = request;
@@ -844,9 +846,6 @@ class WritableStream<W = unknown> {
       assertIsWritableStream(this);
       if (isWritableStreamLocked(this)) {
         throw new TypeError('Cannot close a stream that is locked');
-      }
-      if (writableStreamCloseQueuedOrInFlight(this)) {
-        throw new TypeError('Stream is already closing');
       }
       return writableStreamCloseInternal(this);
     } catch (e) {
@@ -1432,9 +1431,6 @@ class WritableStreamDefaultWriter<
       const stream = writer.#stream;
       if (stream === undefined) {
         return PromiseReject(new TypeError('This writer has been released'));
-      }
-      if (writableStreamCloseQueuedOrInFlight(stream)) {
-        return PromiseReject(new TypeError('Stream is already closing'));
       }
       return writableStreamCloseInternal(stream);
     };
