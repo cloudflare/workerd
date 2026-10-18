@@ -562,10 +562,11 @@ export const fromArrayBufferViewIsOneChunk = {
 // iterator's final result has only `done` read; a sync
 // iterator whose value rejects while not done is closed through return();
 // the value of a sync iterator's final result, and of its return() result,
-// is resolved, so a rejection rejects the read or the cancel; a `next` that
-// is not callable rejects the read. C++ reads `value` of the final result
-// too, leaves the sync iterator open, does not resolve the return() result's
-// value, and ends the stream on a non-callable `next`.
+// is resolved, so a rejection rejects the read or the cancel (and does not
+// call return() again); a `next` that is not callable rejects the read.
+// C++ reads `value` of the final result too, leaves the sync iterator open,
+// does not resolve the return() result's value, and ends the stream on a
+// non-callable `next`.
 export const fromIteratorProtocolEdges = {
   async test() {
     {
@@ -639,6 +640,7 @@ export const fromIteratorProtocolEdges = {
     {
       const log = [];
       const returnError = new Error('return value');
+      let returnCalls = 0;
       const rs = ReadableStream.from({
         [Symbol.iterator]() {
           return {
@@ -646,6 +648,7 @@ export const fromIteratorProtocolEdges = {
               return { value: 1, done: false };
             },
             return() {
+              returnCalls++;
               return {
                 get done() {
                   log.push('done');
@@ -667,6 +670,7 @@ export const fromIteratorProtocolEdges = {
         await cancelled;
       }
       deepStrictEqual(log, ['done', 'value']);
+      strictEqual(returnCalls, 1);
     }
     for (const key of [Symbol.asyncIterator, Symbol.iterator]) {
       const rs = ReadableStream.from({
