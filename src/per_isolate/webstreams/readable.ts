@@ -2758,10 +2758,8 @@ interface ConvertedPipeOptions {
   readonly signal: AbortSignal | undefined;
 }
 
-// WebIDL conversion of StreamPipeOptions. The pipe methods run it before
-// their locked checks, so a getter cannot change a lock after it is checked.
-// Members are read once each in spec order (WPT
-// piping/throwing-options.any.js).
+// WebIDL conversion of StreamPipeOptions. Members are read once each in spec
+// order (WPT piping/throwing-options.any.js).
 function convertPipeOptions(options: unknown): ConvertedPipeOptions {
   const dict = toDictionary(
     options,
@@ -2795,6 +2793,26 @@ function convertPipeOptions(options: unknown): ConvertedPipeOptions {
     preventClose,
     signal,
   } as ConvertedPipeOptions;
+}
+
+// The pipe methods' steps after their brand checks. The options convert
+// before the locked checks, so a getter cannot change a lock after it is
+// checked, and no user code runs between the checks and the pipe taking
+// both endpoints. pipeThrough() throws what this throws; pipeTo() rejects
+// with it.
+function convertAndCheckPipe<R>(
+  source: ReadableStream<R>,
+  destination: WritableStreamType<R>,
+  options: unknown
+): ConvertedPipeOptions {
+  const converted = convertPipeOptions(options);
+  if (isReadableStreamLocked(source)) {
+    throw new TypeError('Cannot pipe a stream that is locked');
+  }
+  if (writableInternals.isWritableStreamLocked(destination)) {
+    throw new TypeError('Cannot pipe to a locked writable stream');
+  }
+  return converted;
 }
 
 // The pipe (spec ReadableStreamPipeTo). Internal operations only on both
@@ -3752,14 +3770,8 @@ class ReadableStream<R> {
             "Failed to execute 'pipeTo': destination is not a WritableStream"
           );
         }
-        const converted = convertPipeOptions(options);
+        const converted = convertAndCheckPipe(source, destination, options);
         const { preventAbort, preventCancel, preventClose } = converted;
-        if (isReadableStreamLocked(source)) {
-          throw new TypeError('Cannot pipe a stream that is locked');
-        }
-        if (writableInternals.isWritableStreamLocked(destination)) {
-          throw new TypeError('Cannot pipe to a locked writable stream');
-        }
         if (source.#pendingClosure) {
           throw pendingClosureError();
         }
@@ -4397,8 +4409,6 @@ class ReadableStream<R> {
     options: StreamPipeOptions = kNullProtoObject as StreamPipeOptions
   ): ReadableStreamType<T> {
     assertIsReadableStream(this);
-    // WebIDL argument conversion precedes the locked checks, so no user
-    // code runs between those checks and pipeToInternal taking the locks.
     // Dictionary members are read in alphabetical order: "readable" is read
     // and brand-checked before "writable" (WPT pipe-through.any.js).
     const readable = transform.readable;
@@ -4413,13 +4423,7 @@ class ReadableStream<R> {
         "Failed to execute 'pipeThrough': writable is not a WritableStream"
       );
     }
-    const converted = convertPipeOptions(options);
-    if (isReadableStreamLocked(this)) {
-      throw new TypeError('Cannot pipe a stream that is locked');
-    }
-    if (writableInternals.isWritableStreamLocked(writable)) {
-      throw new TypeError('Cannot pipe to a locked writable stream');
-    }
+    const converted = convertAndCheckPipe(this, writable, options);
     const promise = readableStreamPipeThroughTo(this, writable, converted);
     markPromiseHandled(promise);
     return readable;
