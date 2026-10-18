@@ -139,3 +139,5 @@ export {
 } from 'pollution';
 
 export { writerPromisesAreMarkedHandled } from 'unhandled-rejection';
+
+export { releasedWriterMembers } from 'released-writer';
