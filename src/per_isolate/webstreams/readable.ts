@@ -2937,27 +2937,18 @@ function pipeToInternal<R>(
       // (the C++ pipe, which awaits each write, can never reach its
       // close step past a failed write). Shutdowns that already carry
       // an error keep it — first cause wins.
-      if (error === undefined && pendingNonFatalWriteFailure !== undefined) {
-        const reason = pendingNonFatalWriteFailure.reason;
-        const failureActions = nonFatalWriteFailureActions(reason);
-        if (failureActions.length === 0) {
-          finalize({ reason });
-          return;
-        }
-        PromisePrototypeThen(
-          combineShutdownActions(failureActions),
-          () => finalize({ reason }),
-          (actionError: unknown) => finalize({ reason: actionError })
-        );
-        return;
-      }
-      if (action === undefined) {
-        finalize(error);
+      const upgrade =
+        error === undefined ? pendingNonFatalWriteFailure : undefined;
+      const finalError = upgrade ?? error;
+      const finalAction =
+        upgrade === undefined ? action : failureAction(upgrade.reason);
+      if (finalAction === undefined) {
+        finalize(finalError);
         return;
       }
       PromisePrototypeThen(
-        action(),
-        () => finalize(error),
+        finalAction(),
+        () => finalize(finalError),
         (actionError: unknown) => finalize({ reason: actionError })
       );
     };
@@ -2995,10 +2986,8 @@ function pipeToInternal<R>(
   };
 
   const onDestClosedEarly = (): void => {
-    const e = new TypeError('Destination closed before the pipe completed');
-    shutdownWithAction(
-      preventCancel ? undefined : () => readableStreamCancel(source, e),
-      { reason: e }
+    onDestErrored(
+      new TypeError('Destination closed before the pipe completed')
     );
   };
 
@@ -3012,8 +3001,7 @@ function pipeToInternal<R>(
 
   // Runs `actions` in parallel and settles when all have settled,
   // rejecting with the first failure (spec: shutdown actions run in
-  // parallel). Shared by the abort-signal algorithm and the non-fatal
-  // write-rejection path.
+  // parallel).
   const combineShutdownActions = (
     actions: (() => Promise<unknown>)[]
   ): Promise<void> => {
@@ -3042,29 +3030,34 @@ function pipeToInternal<R>(
     return all.promise;
   };
 
-  // The failure actions for a non-fatal write rejection: abort the
-  // destination (unless preventAbort) and cancel the source (unless
-  // preventCancel), both with the write's reason — the C++ pipe outcome
-  // for a rejected write.
-  const nonFatalWriteFailureActions = (
-    e: unknown
-  ): (() => Promise<unknown>)[] => {
+  // The shutdown action of an abort signal's abort algorithm (spec step
+  // 14.1), which a non-fatal write rejection shares, as the C++ pipe
+  // treats a rejected write: abort the destination (unless preventAbort)
+  // and cancel the source (unless preventCancel) with `reason`, in
+  // parallel. Undefined when both are prevented.
+  const failureAction = (
+    reason: unknown
+  ): (() => Promise<unknown>) | undefined => {
     const actions: (() => Promise<unknown>)[] = [];
     if (!preventAbort) {
       ArrayPrototypePush(actions, () =>
+        // Spec step 14.1.3: only abort if dest is still writable.
         writableInternals.getState(destination) === 'writable'
-          ? writableInternals.writableStreamAbort(destination, e)
+          ? writableInternals.writableStreamAbort(destination, reason)
           : PromiseResolve(undefined)
       );
     }
     if (!preventCancel) {
       ArrayPrototypePush(actions, () =>
+        // Spec step 14.1.4: only cancel if source is still readable.
         getReadableStreamGetState(source) === 'readable'
-          ? readableStreamCancel(source, e)
+          ? readableStreamCancel(source, reason)
           : PromiseResolve(undefined)
       );
     }
-    return actions;
+    return actions.length === 0
+      ? undefined
+      : () => combineShutdownActions(actions);
   };
 
   // Workerd extension: the internal transforms (identity, compression)
@@ -3075,11 +3068,7 @@ function pipeToInternal<R>(
   // silently dropped and the pipe would complete. Match the C++ pipe
   // outcome instead: treat the rejection as a pipe failure.
   const onWriteRejectedNonFatally = (e: unknown): void => {
-    const actions = nonFatalWriteFailureActions(e);
-    shutdownWithAction(
-      actions.length === 0 ? undefined : () => combineShutdownActions(actions),
-      { reason: e }
-    );
+    shutdownWithAction(failureAction(e), { reason: e });
   };
 
   // Spec: an abort algorithm, not an 'abort' listener, so a synthetic event
@@ -3087,29 +3076,7 @@ function pipeToInternal<R>(
   if (signal !== undefined) {
     const abortAlgorithm = (): void => {
       const abortReason = AbortSignalReasonGet(signal);
-      const actions: (() => Promise<unknown>)[] = [];
-      if (!preventAbort) {
-        ArrayPrototypePush(actions, () =>
-          // Spec step 14.1.3: only abort if dest is still writable.
-          writableInternals.getState(destination) === 'writable'
-            ? writableInternals.writableStreamAbort(destination, abortReason)
-            : PromiseResolve(undefined)
-        );
-      }
-      if (!preventCancel) {
-        ArrayPrototypePush(actions, () =>
-          // Spec step 14.1.4: only cancel if source is still readable.
-          getReadableStreamGetState(source) === 'readable'
-            ? readableStreamCancel(source, abortReason)
-            : PromiseResolve(undefined)
-        );
-      }
-      shutdownWithAction(
-        actions.length === 0
-          ? undefined
-          : () => combineShutdownActions(actions),
-        { reason: abortReason }
-      );
+      shutdownWithAction(failureAction(abortReason), { reason: abortReason });
     };
     if (AbortSignalAbortedGet(signal)) {
       abortAlgorithm();
