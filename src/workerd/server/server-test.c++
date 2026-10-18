@@ -1221,6 +1221,60 @@ KJ_TEST("Server: serve basic modular Worker") {
   conn.httpGet200("/", "Hello: http://foo/");
 }
 
+KJ_TEST("Server: Expect: 100-continue is answered when the Worker reads the body") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `export default {
+          `  async fetch(request) {
+          `    if (new URL(request.url).pathname == "/read") {
+          `      return new Response("read: " + await request.text());
+          `    }
+          `    return new Response("unread");
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+  test.start();
+
+  {
+    auto conn = test.connect("test-addr");
+    conn.send(R"(
+      POST /read HTTP/1.1
+      Host: foo
+      Expect: 100-continue
+      Content-Length: 5
+
+    )"_blockquote);
+    conn.recv(R"(
+      HTTP/1.1 100 Continue
+
+    )"_blockquote);
+    conn.send("hello");
+    conn.recvHttp200("read: hello");
+    // The connection stays in sync for the next request.
+    conn.httpGet200("/unread", "unread");
+  }
+
+  {
+    // A Worker that responds without reading the body gets no 100 Continue. The client never
+    // sends the body, so the connection closes after the response.
+    auto conn = test.connect("test-addr");
+    conn.send(R"(
+      POST /unread HTTP/1.1
+      Host: foo
+      Expect: 100-continue
+      Content-Length: 5
+
+    )"_blockquote);
+    conn.recvHttp200("unread");
+    KJ_EXPECT(conn.isEof());
+  }
+}
+
 KJ_TEST("Server: serve modular Worker with imports") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
