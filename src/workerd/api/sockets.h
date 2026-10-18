@@ -29,7 +29,8 @@ class DatagramChannel {
   // outstanding call at a time.
   virtual kj::Promise<kj::Maybe<kj::Array<kj::byte>>> receive() = 0;
 
-  // Sends one outbound datagram to the peer.
+  // Sends one outbound datagram to the peer. The caller keeps `datagram` alive until the returned
+  // promise resolves.
   virtual kj::Promise<void> send(kj::ArrayPtr<const kj::byte> datagram) = 0;
 };
 

@@ -611,7 +611,9 @@ void ServiceWorkerGlobalScope::startScheduled(kj::Date scheduledTime,
     KJ_IF_SOME(f, h.scheduled) {
       auto promise =
           f(lock, js.alloc<ScheduledController>(event.addRef()), h.env.addRef(isolate), h.getCtx())
-              .then([&context]() {
+              .then([weakContext = context.getWeakRef()]() {
+        auto& context = KJ_REQUIRE_NONNULL(
+            weakContext->tryGet(), "IoContext destroyed before handler completed");
         KJ_IF_SOME(t, context.getWorkerTracer()) {
           t.setReturn(context.now());
         }
@@ -960,7 +962,9 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketMessage(IoContext& conte
     KJ_IF_SOME(handler, h.webSocketMessage) {
       event->waitUntil(setHibernatableEventTimeout(
           handler(lock, kj::mv(websocket), kj::mv(message)), eventTimeoutMs)
-                           .then([&context]() {
+                           .then([weakContext = context.getWeakRef()]() {
+        auto& context = KJ_REQUIRE_NONNULL(
+            weakContext->tryGet(), "IoContext destroyed before handler completed");
         KJ_IF_SOME(t, context.getWorkerTracer()) {
           t.setReturn(context.now());
         }
@@ -992,7 +996,9 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketClose(IoContext& context
       event->waitUntil(setHibernatableEventTimeout(
           handler(lock, kj::mv(websocket), close.code, kj::mv(close.reason), close.wasClean),
           eventTimeoutMs)
-                           .then([&context]() {
+                           .then([weakContext = context.getWeakRef()]() {
+        auto& context = KJ_REQUIRE_NONNULL(
+            weakContext->tryGet(), "IoContext destroyed before handler completed");
         KJ_IF_SOME(t, context.getWorkerTracer()) {
           t.setReturn(context.now());
         }
@@ -1024,7 +1030,9 @@ void ServiceWorkerGlobalScope::sendHibernatableWebSocketError(IoContext& context
     KJ_IF_SOME(handler, h.webSocketError) {
       event->waitUntil(setHibernatableEventTimeout(
           handler(js, kj::mv(websocket), js.exceptionToJs(kj::mv(e))), eventTimeoutMs)
-                           .then([&context]() {
+                           .then([weakContext = context.getWeakRef()]() {
+        auto& context = KJ_REQUIRE_NONNULL(
+            weakContext->tryGet(), "IoContext destroyed before handler completed");
         KJ_IF_SOME(t, context.getWorkerTracer()) {
           t.setReturn(context.now());
         }

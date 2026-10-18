@@ -427,6 +427,7 @@ wd_cc_library(
     srcs = ["hyperdrive.c++"],
     hdrs = ["hyperdrive.h"],
     implementation_deps = [
+        "//src/workerd/util",
         "//src/workerd/util:entropy",
     ],
     visibility = ["//visibility:public"],

@@ -452,59 +452,65 @@ kj::Promise<void> Rewriter::write(kj::ArrayPtr<const byte> buffer) {
   // (e.g. by stream pump cancellation), no fiber is created, avoiding
   // a KJ assertion failure when destroying an unfired fiber. Once the event loop processes this,
   // the fiber is created and immediately fires (armDepthFirst), so cancellation works normally.
-  return kj::evalLater([this, buffer]() {
-    return getFiberPool().startFiber([this, buffer](kj::WaitScope& scope) {
-      maybeWaitScope = scope;
-      if (!isPoisoned()) {
+  return kj::evalLater([weakThis = addWeakToThis(), buffer]() mutable {
+    return getFiberPool().startFiber([weakThis = kj::mv(weakThis), buffer](kj::WaitScope& scope) {
+      auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "Rewriter destroyed before write ran");
+      self.maybeWaitScope = scope;
+      if (!self.isPoisoned()) {
         // Cannot use `check()` because `finishWrite()` implements the error path.
-        auto rc = lol_html_rewriter_write(rewriter, buffer.asChars().begin(), buffer.size());
-        tryHandleCancellation(rc);
+        auto rc = lol_html_rewriter_write(self.rewriter, buffer.asChars().begin(), buffer.size());
+        self.tryHandleCancellation(rc);
         if (rc == -1) {
-          maybePoison(getLastError());
+          self.maybePoison(getLastError());
         }
       }
-      return finishWrite();
+      return self.finishWrite();
     });
   });
 }
 
 kj::Promise<void> Rewriter::write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) {
   KJ_ASSERT(maybeWaitScope == kj::none);
-  return kj::evalLater([this, pieces]() {
-    return getFiberPool().startFiber([this, pieces](kj::WaitScope& scope) {
-      maybeWaitScope = scope;
-      if (!isPoisoned()) {
+  return kj::evalLater([weakThis = addWeakToThis(), pieces]() mutable {
+    return getFiberPool().startFiber([weakThis = kj::mv(weakThis), pieces](kj::WaitScope& scope) {
+      auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "Rewriter destroyed before write ran");
+      self.maybeWaitScope = scope;
+      if (!self.isPoisoned()) {
         for (const auto& bytes: pieces) {
           auto chars = bytes.asChars();
           // Cannot use `check()` because `finishWrite()` implements the error path.
-          auto rc = lol_html_rewriter_write(rewriter, chars.begin(), chars.size());
-          tryHandleCancellation(rc);
+          auto rc = lol_html_rewriter_write(self.rewriter, chars.begin(), chars.size());
+          self.tryHandleCancellation(rc);
           if (rc == -1) {
-            maybePoison(getLastError());
+            self.maybePoison(getLastError());
             // A handler threw an exception; stop calling `lol_html_rewriter_write()`.
             break;
           }
         }
       }
-      return finishWrite();
+      return self.finishWrite();
     });
   });
 }
 
 kj::Promise<void> Rewriter::end() {
   KJ_ASSERT(maybeWaitScope == kj::none);
-  return kj::evalLater([this]() {
-    return getFiberPool().startFiber([this](kj::WaitScope& scope) {
-      maybeWaitScope = scope;
-      if (!isPoisoned()) {
+  return kj::evalLater([weakThis = addWeakToThis()]() mutable {
+    return getFiberPool().startFiber([weakThis = kj::mv(weakThis)](kj::WaitScope& scope) {
+      auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "Rewriter destroyed before end ran");
+      self.maybeWaitScope = scope;
+      if (!self.isPoisoned()) {
         // Cannot use `check()` because `finishWrite()` implements the error path.
-        auto rc = lol_html_rewriter_end(rewriter);
-        tryHandleCancellation(rc);
+        auto rc = lol_html_rewriter_end(self.rewriter);
+        self.tryHandleCancellation(rc);
         if (rc == -1) {
-          maybePoison(getLastError());
+          self.maybePoison(getLastError());
         }
       }
-      return finishWrite().then([this]() { return inner->end(); });
+      return self.finishWrite().then([weakThis = self.addWeakToThis()]() {
+        return KJ_REQUIRE_NONNULL(weakThis.tryGet(), "Rewriter destroyed before end completed")
+            .inner->end();
+      });
     });
   });
 }

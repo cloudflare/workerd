@@ -8,6 +8,7 @@
 #include <workerd/io/io-channels.h>
 #include <workerd/server/channel-token.h>
 #include <workerd/server/docker-api.capnp.h>
+#include <workerd/util/weak-refs.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <capnp/compat/json.h>

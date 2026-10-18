@@ -172,11 +172,12 @@ class TsWriterSink final: public WritableStreamSink {
       return KJ_EXCEPTION(FAILED, "Write after stream has been closed.");
     }
     if (buffer == nullptr) return kj::READY_NOW;
-    return context.run([this, buffer](Worker::Lock& lock) mutable {
+    return context.run([weakThis = addWeakToThis(), buffer](Worker::Lock& lock) mutable {
       jsg::Lock& js = lock;
       auto ab = jsg::JsArrayBuffer::create(js, buffer);
-      return context.awaitJs(
-          lock, invokeWriter(js, "writableStreamWriterWrite"_kj, jsg::JsValue(ab)));
+      auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "sink destroyed before write ran");
+      return self.context.awaitJs(
+          lock, self.invokeWriter(js, "writableStreamWriterWrite"_kj, jsg::JsValue(ab)));
     });
   }
 
@@ -189,7 +190,7 @@ class TsWriterSink final: public WritableStreamSink {
       amount += piece.size();
     }
     if (amount == 0) return kj::READY_NOW;
-    return context.run([this, amount, pieces](Worker::Lock& lock) mutable {
+    return context.run([weakThis = addWeakToThis(), amount, pieces](Worker::Lock& lock) mutable {
       jsg::Lock& js = lock;
       // The received buffers are only guaranteed to live until the returned promise
       // resolves, but the application may hold the delivered ArrayBuffer longer, so the
@@ -200,8 +201,9 @@ class TsWriterSink final: public WritableStreamSink {
         if (piece.size() == 0) continue;
         ptr.write(piece);
       }
-      return context.awaitJs(
-          lock, invokeWriter(js, "writableStreamWriterWrite"_kj, jsg::JsValue(ab)));
+      auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "sink destroyed before write ran");
+      return self.context.awaitJs(
+          lock, self.invokeWriter(js, "writableStreamWriterWrite"_kj, jsg::JsValue(ab)));
     });
   }
 
@@ -210,9 +212,10 @@ class TsWriterSink final: public WritableStreamSink {
       return KJ_EXCEPTION(FAILED, "End after stream has been closed.");
     }
     ended = true;
-    return context.run([this](Worker::Lock& lock) mutable {
+    return context.run([weakThis = addWeakToThis()](Worker::Lock& lock) mutable {
       jsg::Lock& js = lock;
-      return context.awaitJs(lock, invokeWriter(js, "writableStreamWriterClose"_kj));
+      auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "sink destroyed before end ran");
+      return self.context.awaitJs(lock, self.invokeWriter(js, "writableStreamWriterClose"_kj));
     });
   }
 

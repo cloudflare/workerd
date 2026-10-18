@@ -4,6 +4,8 @@
 
 #include "kj-hyper.h"
 
+#include <workerd/util/weak-refs.h>
+
 #include <kj-hyper/ffi.rs.h>
 #include <openssl/digest.h>
 #include <openssl/ec.h>

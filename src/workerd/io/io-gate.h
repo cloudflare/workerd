@@ -24,6 +24,7 @@
 
 #include <kj/async.h>
 #include <kj/list.h>
+#include <kj/memory.h>
 #include <kj/one-of.h>
 #include <kj/sticky-flag.h>
 
