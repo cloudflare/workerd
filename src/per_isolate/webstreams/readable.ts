@@ -245,10 +245,6 @@ let detachReadableStream: <R>(
   ignoreDisturbed: boolean
 ) => ReadableStream<R>;
 let readableStreamReaderGenericRelease: (reader: object) => void;
-let readableStreamDefaultReaderRead: <R>(
-  reader: ReadableStreamDefaultReaderType<R>,
-  readRequest: ReadableStreamAsyncIteratorReadRequest<R>
-) => void;
 
 // Closes a stream whose data has moved to another stream (extraction, and
 // the tee or detach of a native stream, or of a queued one other than its
@@ -466,40 +462,6 @@ interface ReadableStreamIteratorState<R> {
   current?: Promise<IteratorResult<R> | undefined> | undefined;
 }
 
-class ReadableStreamAsyncIteratorReadRequest<R> {
-  #reader: ReadableStreamDefaultReaderType;
-  #state: ReadableStreamIteratorState<R>;
-  #promise: PromiseWithResolversType<IteratorResult<R>>;
-  constructor(
-    reader: ReadableStreamDefaultReaderType,
-    state: ReadableStreamIteratorState<R>,
-    promise: PromiseWithResolversType<IteratorResult<R>>
-  ) {
-    this.#reader = reader;
-    this.#state = state;
-    this.#promise = promise;
-  }
-
-  chunk(chunk: R) {
-    this.#state.current = undefined;
-    this.#promise.resolve(userReadResult(chunk, false));
-  }
-
-  close() {
-    this.#state.current = undefined;
-    this.#state.done = true;
-    readableStreamReaderGenericRelease(this.#reader);
-    this.#promise.resolve(userReadResult(undefined, true));
-  }
-
-  error(error: unknown) {
-    this.#state.current = undefined;
-    this.#state.done = true;
-    readableStreamReaderGenericRelease(this.#reader);
-    this.#promise.reject(error);
-  }
-}
-
 // --- ReadableStream async iterator prototype (spec §4.2.4) -----------------
 // Shared prototype with next/return methods; per-instance state stored in a
 // WeakMap. This matches the spec's ReadableStreamAsyncIteratorPrototype which
@@ -515,19 +477,38 @@ const iteratorStateMap = new SafeWeakMap() as WeakMap<
   IteratorInternalState
 >;
 
+// WebIDL's next steps over the streams spec's read request: its chunk,
+// close and error steps settle the promise next() returns, clearing the
+// ongoing promise as WebIDL's fulfill and reject steps do.
 function iteratorNextSteps(s: IteratorInternalState) {
   if (s.state.done) {
     return PromiseResolve(userReadResult(undefined, true));
   }
-  if (!isReaderBoundToStream(s.reader)) {
+  const stream = getReaderStream(s.reader);
+  if (stream === undefined) {
     return PromiseReject(
       new TypeError('The reader is not bound to a ReadableStream')
     );
   }
   const promise = PromiseWithResolvers();
-  readableStreamDefaultReaderRead(
-    s.reader,
-    new ReadableStreamAsyncIteratorReadRequest(s.reader, s.state, promise)
+  PromisePrototypeThen(
+    defaultReaderReadInternal(s.reader, stream),
+    (result: ReadableStreamReadResult<unknown>) => {
+      s.state.current = undefined;
+      if (result.done) {
+        s.state.done = true;
+        readableStreamReaderGenericRelease(s.reader);
+        promise.resolve(userReadResult(undefined, true));
+      } else {
+        promise.resolve(userReadResult(result.value, false));
+      }
+    },
+    (e: unknown) => {
+      s.state.current = undefined;
+      s.state.done = true;
+      readableStreamReaderGenericRelease(s.reader);
+      promise.reject(e);
+    }
   );
   return promise.promise;
 }
@@ -970,30 +951,6 @@ class ReadableStreamDefaultReader<
       return (reader as ReadableStreamDefaultReader<R>).#base;
     };
     getReaderBase = defaultGetBase;
-
-    readableStreamDefaultReaderRead = <R>(
-      reader: ReadableStreamDefaultReaderType<R>,
-      readRequest: ReadableStreamAsyncIteratorReadRequest<R>
-    ) => {
-      const stream = getReaderStream<R>(reader);
-      if (stream === undefined) {
-        readRequest.error(new TypeError('This reader has been released'));
-        return;
-      }
-      PromisePrototypeThen(
-        defaultReaderReadInternal<R>(reader, stream),
-        (result: ReadableStreamReadResult<R>) => {
-          if (result.done) {
-            readRequest.close();
-          } else {
-            readRequest.chunk(result.value as R);
-          }
-        },
-        (e: unknown) => {
-          readRequest.error(e);
-        }
-      );
-    };
   }
 
   constructor(stream: ReadableStream<R>) {
