@@ -233,7 +233,8 @@ export const fromString = {
   },
 };
 
-// The exact cancel-rejection messages for broken return() differ.
+// The exact cancel-rejection messages for broken return() differ, on async
+// and sync iterators alike.
 export const fromReturnValidationMessages = {
   async test() {
     {
@@ -270,6 +271,42 @@ export const fromReturnValidationMessages = {
         message: usingTsImpl
           ? 'The return method must return an object'
           : /Incorrect type for Promise/,
+      });
+    }
+    {
+      const rs = ReadableStream.from({
+        next() {
+          return { value: 1, done: false };
+        },
+        return: 42,
+        [Symbol.iterator]() {
+          return this;
+        },
+      });
+      await rejects(rs.getReader().cancel('why'), {
+        name: 'TypeError',
+        message: usingTsImpl
+          ? 'Iterator return() is not a function'
+          : "Property 'return' is not a function",
+      });
+    }
+    {
+      const rs = ReadableStream.from({
+        next() {
+          return { value: 1, done: false };
+        },
+        return() {
+          return 42;
+        },
+        [Symbol.iterator]() {
+          return this;
+        },
+      });
+      await rejects(rs.getReader().cancel('why'), {
+        name: 'TypeError',
+        message: usingTsImpl
+          ? 'The return method must return an object'
+          : "Callback returned incorrect type; expected 'Promise'",
       });
     }
   },
