@@ -1327,6 +1327,13 @@ class WritableStreamDefaultController<
 
 // ---------------------------------------------------------------------------
 // WritableStreamDefaultWriter
+
+// What a released writer's operations reject or throw with, and what
+// releaseLock() rejects the writer's ready and closed promises with.
+function releasedWriterError(): TypeError {
+  return new TypeError('This writer has been released');
+}
+
 let assertIsWritableStreamDefaultWriter: <W>(
   self: WritableStreamDefaultWriter<W>
 ) => void;
@@ -1363,7 +1370,7 @@ class WritableStreamDefaultWriter<
     ) => {
       const stream = writer.#stream;
       if (stream === undefined) {
-        return PromiseReject(new TypeError('This writer has been released'));
+        return PromiseReject(releasedWriterError());
       }
       // The pending-closure gate (see #pendingClosure): checked before the
       // size algorithm runs, so no user code executes for a write against a
@@ -1388,7 +1395,7 @@ class WritableStreamDefaultWriter<
       // Step 5: Re-check writer.[[stream]] — size() may have called
       // releaseLock().
       if (writer.#stream !== stream) {
-        return PromiseReject(new TypeError('This writer has been released'));
+        return PromiseReject(releasedWriterError());
       }
 
       // Steps 6–9: State checks (AFTER size ran).
@@ -1422,7 +1429,7 @@ class WritableStreamDefaultWriter<
     ) => {
       const stream = writer.#stream;
       if (stream === undefined) {
-        return PromiseReject(new TypeError('This writer has been released'));
+        return PromiseReject(releasedWriterError());
       }
       return writableStreamAbort(stream, reason);
     };
@@ -1430,7 +1437,7 @@ class WritableStreamDefaultWriter<
     writerCloseInternal = <W>(writer: WritableStreamDefaultWriter<W>) => {
       const stream = writer.#stream;
       if (stream === undefined) {
-        return PromiseReject(new TypeError('This writer has been released'));
+        return PromiseReject(releasedWriterError());
       }
       return writableStreamCloseInternal(stream);
     };
@@ -1438,7 +1445,7 @@ class WritableStreamDefaultWriter<
     writerReleaseInternal = <W>(writer: WritableStreamDefaultWriter<W>) => {
       const stream = writer.#stream;
       if (stream === undefined) return;
-      const releaseError = new TypeError('This writer has been released');
+      const releaseError = releasedWriterError();
       writerEnsureReadyPromiseRejected(writer, releaseError);
       writerEnsureClosedPromiseRejected(writer, releaseError);
       setWritableStreamWriter(stream, undefined);
@@ -1537,7 +1544,7 @@ class WritableStreamDefaultWriter<
     assertIsWritableStreamDefaultWriter(this);
     const stream = this.#stream;
     if (stream === undefined) {
-      throw new TypeError('This writer has been released');
+      throw releasedWriterError();
     }
     const state = getWritableStreamState(stream);
     if (state === 'errored' || state === 'erroring') return null;
@@ -1549,11 +1556,7 @@ class WritableStreamDefaultWriter<
   abort(reason: unknown = undefined): Promise<void> {
     try {
       assertIsWritableStreamDefaultWriter(this);
-      const stream = this.#stream;
-      if (stream === undefined) {
-        throw new TypeError('This writer has been released');
-      }
-      return writableStreamAbort(stream, reason);
+      return writerAbortInternal(this, reason);
     } catch (e) {
       return PromiseReject(e);
     }
@@ -1562,9 +1565,6 @@ class WritableStreamDefaultWriter<
   close(): Promise<void> {
     try {
       assertIsWritableStreamDefaultWriter(this);
-      if (this.#stream === undefined) {
-        throw new TypeError('This writer has been released');
-      }
       return writerCloseInternal(this);
     } catch (e) {
       return PromiseReject(e);
@@ -1594,7 +1594,7 @@ function writerCloseWithErrorPropagation<W>(
 ): Promise<void> {
   const stream = getWriterStream(writer);
   if (stream === undefined) {
-    return PromiseReject(new TypeError('This writer has been released'));
+    return PromiseReject(releasedWriterError());
   }
   const state = getWritableStreamState(stream);
   if (writableStreamCloseQueuedOrInFlight(stream) || state === 'closed') {
