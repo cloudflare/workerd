@@ -3323,8 +3323,15 @@ function asyncFromSyncContinuation(
   ) as Promise<void>;
 }
 
-// WebIDL "close an async iterator" on the user's async iterator.
-function closeAsyncIterator(iterator: object, reason: unknown): Promise<void> {
+// The steps of WebIDL "close an async iterator" up to calling the
+// iterator's return() with the reason: without a return() the close
+// resolves at once, and a throw from looking it up or calling it rejects
+// the close. `settle` continues from what return() returned.
+function closeIterator(
+  iterator: object,
+  reason: unknown,
+  settle: (returnResult: unknown) => Promise<void>
+): Promise<void> {
   let returnResult: unknown;
   try {
     const returnMethod = getIteratorMethod(
@@ -3339,14 +3346,24 @@ function closeAsyncIterator(iterator: object, reason: unknown): Promise<void> {
   } catch (e) {
     return PromiseReject(e);
   }
-  return PromisePrototypeThen(
-    promiseResolvedWith(returnResult),
-    (iterResult: unknown) => {
-      if (!isObjectLike(iterResult)) {
-        throw new TypeError('The return method must return an object');
-      }
-    }
-  ) as Promise<void>;
+  return settle(returnResult);
+}
+
+// WebIDL "close an async iterator" on the user's async iterator.
+function closeAsyncIterator(iterator: object, reason: unknown): Promise<void> {
+  return closeIterator(
+    iterator,
+    reason,
+    (returnResult) =>
+      PromisePrototypeThen(
+        promiseResolvedWith(returnResult),
+        (iterResult: unknown) => {
+          if (!isObjectLike(iterResult)) {
+            throw new TypeError('The return method must return an object');
+          }
+        }
+      ) as Promise<void>
+  );
 }
 
 // WebIDL "close an async iterator" on the async-from-sync wrapper of the
@@ -3355,24 +3372,11 @@ function closeAsyncIterator(iterator: object, reason: unknown): Promise<void> {
 // `done`); the wrapper's own result is always an object. As for next(), the
 // continuation is reacted to directly (ledger #29).
 function closeSyncIterator(iterator: object, reason: unknown): Promise<void> {
-  let result: unknown;
-  try {
-    const returnMethod = getIteratorMethod(
-      iterator,
-      'return',
-      'Iterator return() is not a function'
-    );
-    if (returnMethod === undefined) {
-      return PromiseResolve(undefined);
-    }
-    result = uncurryThis(returnMethod)(iterator, reason);
-    if (!isObjectLike(result)) {
-      throw new TypeError('The return method must return an object');
-    }
-  } catch (e) {
-    return PromiseReject(e);
-  }
-  return asyncFromSyncContinuation(iterator, result as object, false, () => {});
+  return closeIterator(iterator, reason, (result) =>
+    isObjectLike(result)
+      ? asyncFromSyncContinuation(iterator, result as object, false, () => {})
+      : PromiseReject(new TypeError('The return method must return an object'))
+  );
 }
 
 function readableStreamFromIterable<R>(
