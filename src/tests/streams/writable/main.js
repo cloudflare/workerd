@@ -59,6 +59,7 @@ export {
 export {
   writableStreamCloseThrowRejectsPromises,
   writerDoubleClose,
+  closeWhileQueuedCloseAwaitsAbort,
 } from 'close-semantics';
 
 export {

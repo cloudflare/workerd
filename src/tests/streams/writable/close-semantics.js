@@ -2,8 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-// close() semantics: promise fan-out when the close hook throws, and
-// double-close rejection. Migrated from streams-js-test.js. Both main
+// close() semantics: promise fan-out when the close hook throws,
+// double-close rejection, and a close() while a queued close waits on the
+// sink's abort(). Mostly migrated from streams-js-test.js. Both main
 // cells run with async APIs returning rejections (capture_async_api_throws
 // pinned for C++; hard-coded in TypeScript) — the sync-throw side lives in
 // the legacy-throws cell.
@@ -64,5 +65,61 @@ export const writerDoubleClose = {
 
     writer.close();
     await rejects(writer.close(), TypeError);
+  },
+};
+
+// close() while a close queued before an abort waits on the sink's
+// abort(): the stream is already errored, but that close is rejected only
+// once abort() settles, so it is still queued. TypeScript checks the
+// queued close first and rejects with 'Stream is already closing' (spec:
+// both close() methods check it before WritableStreamClose checks the
+// state); C++ rejects with the abort reason. Through the writer and,
+// once it is released, the stream alike (ledger #19). Once abort()
+// settles, the queued close rejects with the abort reason and the abort
+// fulfills (parity).
+export const closeWhileQueuedCloseAwaitsAbort = {
+  async test() {
+    for (const via of ['writer', 'stream']) {
+      const abortCalled = Promise.withResolvers();
+      const abortFinished = Promise.withResolvers();
+      let resolveStart;
+      const ws = new WritableStream({
+        start() {
+          return new Promise((resolve) => {
+            resolveStart = resolve;
+          });
+        },
+        abort() {
+          abortCalled.resolve();
+          return abortFinished.promise;
+        },
+      });
+      const writer = ws.getWriter();
+      const reason = new Error('reason');
+      const queuedClose = writer.close();
+      const abort = writer.abort(reason);
+      resolveStart();
+      await abortCalled.promise;
+
+      let close;
+      if (via === 'writer') {
+        close = writer.close();
+      } else {
+        writer.releaseLock();
+        close = ws.close();
+      }
+      if (usingTsImpl) {
+        await rejects(close, {
+          name: 'TypeError',
+          message: 'Stream is already closing',
+        });
+      } else {
+        await rejects(close, (e) => e === reason);
+      }
+
+      abortFinished.resolve();
+      await rejects(queuedClose, (e) => e === reason);
+      strictEqual(await abort, undefined);
+    }
   },
 };
