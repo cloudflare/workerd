@@ -254,7 +254,7 @@ class InputGate::CriticalSection: private InputGate, public kj::Refcounted {
 
 // An OutputGate blocks outgoing messages from an Actor until writes which they might depend on
 // are confirmed.
-class OutputGate {
+class OutputGate: public kj::PtrTarget {
  public:
   // Hooks that can be used to customize OutputGate behavior.
   //
@@ -286,6 +286,10 @@ class OutputGate {
   // Hooks has no member variables, so const_cast is acceptable.
   OutputGate(Hooks& hooks = const_cast<Hooks&>(Hooks::DEFAULT));
   ~OutputGate() noexcept(false);
+
+  kj::Weak<OutputGate> addWeak() {
+    return addWeakToThis();
+  }
 
   // Block all future `wait()` calls until `promise` completes. Returns a wrapper around `promise`.
   // If `promise` rejects, the exception will propagate to all future `wait()`s. If the returned

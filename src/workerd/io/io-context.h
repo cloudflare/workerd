@@ -110,7 +110,7 @@ class UserTraceAsyncContext final {
 // heuristic approximation, we attribute each subrequest (and all other forms of resource
 // usage) to the "current" incoming request, which is defined as the newest request that hasn't
 // already completed.
-class IoContext_IncomingRequest final {
+class IoContext_IncomingRequest final: public kj::PtrTarget {
  public:
   IoContext_IncomingRequest(kj::Own<IoContext> context,
       kj::Rc<IoChannelFactory> ioChannelFactory,
@@ -120,6 +120,10 @@ class IoContext_IncomingRequest final {
       kj::Maybe<kj::Own<AccessInfo>> accessInfo = kj::none,
       kj::Maybe<kj::Rc<IoChannelFactory::SelfTokenFactory>> selfTokenFactory = kj::none);
   KJ_DISALLOW_COPY_AND_MOVE(IoContext_IncomingRequest);
+
+  kj::Weak<IoContext_IncomingRequest> addWeak() {
+    return addWeakToThis();
+  }
   ~IoContext_IncomingRequest() noexcept(false);
 
   IoContext& getContext() {

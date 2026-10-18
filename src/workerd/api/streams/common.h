@@ -231,6 +231,10 @@ class WritableStreamSink: public kj::PtrTarget {
     return addPtrToThis();
   }
 
+  kj::Weak<WritableStreamSink> addWeak() {
+    return addWeakToThis();
+  }
+
   // As with kj::AsyncOutputStream, the caller keeps `buffer` / `pieces` alive until the returned
   // promise resolves.
   virtual kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) KJ_WARN_UNUSED_RESULT = 0;

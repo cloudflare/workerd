@@ -744,8 +744,10 @@ jsg::Promise<void> WritableStreamNativeSink::write(
       auto& canceler = *active.canceler;
       kj::Promise<void> promise = nullptr;
       KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
-        promise = lock.then([&sink, data = kj::mv(data)]() mutable {
-          return sink.write(data.asPtr()).attach(kj::mv(data));
+        promise = lock.then([weakSink = sink.addWeak(), data = kj::mv(data)]() mutable {
+          return KJ_REQUIRE_NONNULL(weakSink.tryGet(), "sink released before write ran")
+              .write(data.asPtr())
+              .attach(kj::mv(data));
         });
       } else {
         promise = sink.write(data.asPtr()).attach(kj::mv(data));
@@ -822,7 +824,9 @@ jsg::Promise<void> WritableStreamNativeSink::closeImpl(jsg::Lock& js) {
     closeInFlight = true;
     kj::Promise<void> endPromise = nullptr;
     KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
-      endPromise = lock.then([&sink = *active.sink]() { return sink.end(); });
+      endPromise = lock.then([weakSink = active.sink->addWeak()]() {
+        return KJ_REQUIRE_NONNULL(weakSink.tryGet(), "sink released before end ran").end();
+      });
     } else {
       endPromise = active.sink->end();
     }

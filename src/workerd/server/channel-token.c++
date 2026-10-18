@@ -86,8 +86,9 @@ kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
     return serializeTokenImpl(usage, *message);
   } else {
     return kj::joinPromisesFailFast(promises.releaseAsArray())
-        .then([this, usage, message = kj::mv(message)]() mutable {
-      return serializeTokenImpl(usage, *message);
+        .then([weakThis = addWeakToThis(), usage, message = kj::mv(message)]() mutable {
+      return KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ChannelTokenHandler destroyed during encoding")
+          .serializeTokenImpl(usage, *message);
     });
   }
 }
@@ -274,8 +275,9 @@ kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
     return serializeTokenImpl(usage, *message);
   } else {
     return kj::joinPromisesFailFast(promises.releaseAsArray())
-        .then([this, usage, message = kj::mv(message)]() mutable {
-      return serializeTokenImpl(usage, *message);
+        .then([weakThis = addWeakToThis(), usage, message = kj::mv(message)]() mutable {
+      return KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ChannelTokenHandler destroyed during encoding")
+          .serializeTokenImpl(usage, *message);
     });
   }
 }
@@ -314,9 +316,10 @@ kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
       return encodeRestoredChannelToken(usage, type, vendorToken, kj::mv(restoreArg), persistent);
     }
     KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
-      return promise.then([this, usage, type, keepVendorAlive = kj::mv(keepVendorAlive),
-                              restoreArg = kj::mv(restoreArg), persistent](
-                              kj::Array<byte> vendorToken) mutable -> kj::Promise<kj::Array<byte>> {
+      return promise.then(
+          [weakThis = addWeakToThis(), usage, type, keepVendorAlive = kj::mv(keepVendorAlive),
+              restoreArg = kj::mv(restoreArg),
+              persistent](kj::Array<byte> vendorToken) mutable -> kj::Promise<kj::Array<byte>> {
         // Ugh, we need to deconstruct the variant just to wrap a sychronous token in an
         // immediate promise.
         // TODO(cleanup): This could benefit from some helper around OneOf<T, Promise<T>> that
@@ -324,7 +327,9 @@ kj::OneOf<kj::Array<byte>, kj::Promise<kj::Array<byte>>> ChannelTokenHandler::
         //   asynchronous.
         // TODO(cleanup): Another, different way to clean this up would be to allow kj::OneOf to
         //   convert to type T if all of the OneOf's variants can convert to T.
-        KJ_SWITCH_ONEOF(encodeRestoredChannelToken(
+        auto& self =
+            KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ChannelTokenHandler destroyed during encoding");
+        KJ_SWITCH_ONEOF(self.encodeRestoredChannelToken(
                             usage, type, vendorToken, kj::mv(restoreArg), persistent)) {
           KJ_CASE_ONEOF(baseToken, kj::Array<byte>) {
             return kj::mv(baseToken);
@@ -543,11 +548,11 @@ class ChannelTokenHandler::RestoredRpcChannel final: public IoChannelFactory::Rp
                 IoChannelFactory::ChannelTokenUsage::RPC, token);
           }
           KJ_CASE_ONEOF(promise, kj::Promise<kj::Array<byte>>) {
-            auto& handlerRef = handler;
             return newPromisedChannel<IoChannelFactory::SubrequestChannel>(
-                promise.then([&handlerRef](kj::Array<byte> token) {
-              return handlerRef.decodeSubrequestChannelToken(
-                  IoChannelFactory::ChannelTokenUsage::RPC, token);
+                promise.then([weakHandler = handler.addWeak()](kj::Array<byte> token) {
+              return KJ_REQUIRE_NONNULL(
+                  weakHandler.tryGet(), "ChannelTokenHandler destroyed before token was resolved")
+                  .decodeSubrequestChannelToken(IoChannelFactory::ChannelTokenUsage::RPC, token);
             }));
           }
         }

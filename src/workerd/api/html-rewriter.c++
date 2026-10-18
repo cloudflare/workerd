@@ -298,7 +298,7 @@ class Rewriter final: public WritableStreamSink {
   template <typename T, typename CType = T::CType>
   lol_html_rewriter_directive_t thunkImpl(CType* content, RegisteredHandler& registration);
   template <typename T, typename CType = T::CType>
-  kj::Promise<void> thunkPromise(CType* content, RegisteredHandler& registration);
+  void waitForThunk(CType* content, RegisteredHandler& registration);
 
   // Eagerly free this handler. Should only be called if we're confident the handler will never be
   // used again.
@@ -308,8 +308,7 @@ class Rewriter final: public WritableStreamSink {
   kj::HashMap<void*, kj::Own<RegisteredReplacer>> registeredReplacers;
 
   static int replacerThunk(lol_html_streaming_sink_t* sink, void* userData);
-  kj::Promise<void> replacerThunkPromise(
-      lol_html_streaming_sink_t* sink, RegisteredReplacer& registration);
+  void waitForReplacerThunk(lol_html_streaming_sink_t* sink, RegisteredReplacer& registration);
   int replacerThunkImpl(lol_html_streaming_sink_t* sink, RegisteredReplacer& registration);
   static void removeRegisteredReplacer(void* userData);
 
@@ -563,13 +562,7 @@ lol_html_rewriter_directive_t Rewriter::thunkImpl(
 
   try {
     KJ_IF_SOME(exception, kj::runCatchingExceptions([&] {
-      // V8 has a thread local pointer that points to where the stack limit is on this thread which
-      // is tested for overflows when we enter any JS code. However since we're running in a fiber
-      // here, we're in an entirely different stack that V8 doesn't know about, so it gets confused
-      // and may think we've overflowed our stack. evalLater will run thunkPromise on the main stack
-      // to keep V8 from getting confused.
-      auto promise = kj::evalLater([&]() { return thunkPromise<T>(content, registeredHandler); });
-      promise.wait(KJ_ASSERT_NONNULL(maybeWaitScope));
+      waitForThunk<T>(content, registeredHandler);
       flushWrite().wait(KJ_ASSERT_NONNULL(maybeWaitScope));
     })) {
       // Exception in handler. We need to abort the streaming parser, but can't do so just yet: we
@@ -607,30 +600,38 @@ void Rewriter::removeEndTagHandler(RegisteredHandler& handler) {
 }
 
 template <typename T, typename CType>
-kj::Promise<void> Rewriter::thunkPromise(CType* content, RegisteredHandler& registeredHandler) {
-  return ioContext.run(
-      [this, content, &registeredHandler](Worker::Lock& lock) -> kj::Promise<void> {
-    // We enter the AsyncContextFrame that was current when the Rewriter was created
-    // (when transform() was called). If someone wants, instead, to use the context
-    // that was current when on(...) is called, the ElementHandler can use AsyncResource
-    // (or eventually the standard AsyncContext once that lands).
-    jsg::Lock& js = lock;
-    jsg::AsyncContextFrame::Scope asyncContextScope(js, maybeAsyncContext);
-    auto jsContent = js.alloc<T>(*content, *this);
-    auto scope = HTMLRewriter::TokenScope(jsContent);
-    auto value = registeredHandler.callback(js, kj::mv(jsContent));
+void Rewriter::waitForThunk(CType* content, RegisteredHandler& registeredHandler) {
+  // V8 has a thread local pointer that points to where the stack limit is on this thread which
+  // is tested for overflows when we enter any JS code. However since we're running in a fiber
+  // here, we're in an entirely different stack that V8 doesn't know about, so it gets confused
+  // and may think we've overflowed our stack. evalLater will run the handler on the main stack
+  // to keep V8 from getting confused.
+  auto promise = kj::evalLater([&]() {
+    return ioContext.run(
+        [this, content, &registeredHandler](Worker::Lock& lock) -> kj::Promise<void> {
+      // We enter the AsyncContextFrame that was current when the Rewriter was created
+      // (when transform() was called). If someone wants, instead, to use the context
+      // that was current when on(...) is called, the ElementHandler can use AsyncResource
+      // (or eventually the standard AsyncContext once that lands).
+      jsg::Lock& js = lock;
+      jsg::AsyncContextFrame::Scope asyncContextScope(js, maybeAsyncContext);
+      auto jsContent = js.alloc<T>(*content, *this);
+      auto scope = HTMLRewriter::TokenScope(jsContent);
+      auto value = registeredHandler.callback(js, kj::mv(jsContent));
 
-    if constexpr (kj::isSameType<T, EndTag>()) {
-      // TODO(someday): We can't unconditionally pop the top of `registeredEndTagHandlers`,
-      //   because that depends on https://github.com/cloudflare/lol-html/issues/110
-      //   being resolved. For now we let handles to end tag handlers tags live for the duration of
-      //   the response transformation, but eagerly release ones that we can.
-      //   In particular, note that `thunkPromise` is never called for implied end tags.
-      removeEndTagHandler(registeredHandler);
-    }
+      if constexpr (kj::isSameType<T, EndTag>()) {
+        // TODO(someday): We can't unconditionally pop the top of `registeredEndTagHandlers`,
+        //   because that depends on https://github.com/cloudflare/lol-html/issues/110
+        //   being resolved. For now we let handles to end tag handlers tags live for the duration of
+        //   the response transformation, but eagerly release ones that we can.
+        //   In particular, note that `waitForThunk` is never called for implied end tags.
+        removeEndTagHandler(registeredHandler);
+      }
 
-    return value.attach(kj::mv(scope));
+      return value.attach(kj::mv(scope));
+    });
   });
+  promise.wait(KJ_ASSERT_NONNULL(maybeWaitScope));
 }
 
 lol_html_streaming_handler_t Rewriter::registerReplacer(JsReadableStream content, bool isHtml) {
@@ -703,15 +704,8 @@ int Rewriter::replacerThunkImpl(
   }
 
   try {
-    KJ_IF_SOME(exception, kj::runCatchingExceptions([&] {
-      // V8 has a thread local pointer that points to where the stack limit is on this thread which
-      // is tested for overflows when we enter any JS code. However since we're running in a fiber
-      // here, we're in an entirely different stack that V8 doesn't know about, so it gets confused
-      // and may think we've overflowed our stack. evalLater will run thunkPromise on the main stack
-      // to keep V8 from getting confused.
-      auto promise = kj::evalLater([&]() { return replacerThunkPromise(sink, registeredHandler); });
-      promise.wait(KJ_ASSERT_NONNULL(maybeWaitScope));
-    })) {
+    KJ_IF_SOME(exception,
+        kj::runCatchingExceptions([&] { waitForReplacerThunk(sink, registeredHandler); })) {
       // Exception in handler. We need to abort the streaming parser, but can't do so just yet: we
       // need to unwind the stack because we're probably still inside a cool_thing_rewriter_write().
       // We can't unwind with an exception across the Rust/C++ boundary, so instead we'll keep this
@@ -731,15 +725,23 @@ int Rewriter::replacerThunkImpl(
   return 0;
 }
 
-kj::Promise<void> Rewriter::replacerThunkPromise(
+void Rewriter::waitForReplacerThunk(
     lol_html_streaming_sink_t* sink, RegisteredReplacer& registration) {
-  return ioContext.run([this, sink, &registration](Worker::Lock& lock) -> kj::Promise<void> {
-    jsg::AsyncContextFrame::Scope asyncContextScope(lock, maybeAsyncContext);
+  // V8 has a thread local pointer that points to where the stack limit is on this thread which
+  // is tested for overflows when we enter any JS code. However since we're running in a fiber
+  // here, we're in an entirely different stack that V8 doesn't know about, so it gets confused
+  // and may think we've overflowed our stack. evalLater will run the handler on the main stack
+  // to keep V8 from getting confused.
+  auto promise = kj::evalLater([&]() {
+    return ioContext.run([this, sink, &registration](Worker::Lock& lock) -> kj::Promise<void> {
+      jsg::AsyncContextFrame::Scope asyncContextScope(lock, maybeAsyncContext);
 
-    auto streamSink = kj::heap<ReplacerStreamSink>(sink, registration.isHtml);
-    return ioContext.waitForDeferredProxy(
-        registration.stream.pumpTo(lock, kj::mv(streamSink), EndStream::YES));
+      auto streamSink = kj::heap<ReplacerStreamSink>(sink, registration.isHtml);
+      return ioContext.waitForDeferredProxy(
+          registration.stream.pumpTo(lock, kj::mv(streamSink), EndStream::YES));
+    });
   });
+  promise.wait(KJ_ASSERT_NONNULL(maybeWaitScope));
 }
 
 void Rewriter::removeRegisteredReplacer(void* userData) {
@@ -750,7 +752,7 @@ void Rewriter::removeRegisteredReplacer(void* userData) {
 
 void Rewriter::onEndTag(lol_html_element_t* element, ElementCallbackFunction&& callback) {
   auto registeredHandler = Rewriter::RegisteredHandler{*this, kj::mv(callback)};
-  // NOTE: this gets freed in `thunkPromise` above.
+  // NOTE: this gets freed in `waitForThunk` above.
   // TODO(someday): this uses more memory than necessary for implied end tags, which lol-html
   // doesn't actually call `thunk` on.  LOL HTML drops the handler after it finishes transforming
   // the current element, but this code will keep it around until the entire HTML document is

@@ -38,7 +38,7 @@ kj::Maybe<kj::StringPtr> asPtr(kj::Maybe<kj::String>& value) {
 // - Catching exceptions and converting them to HTTP error responses.
 //   - Or, falling back to proxying if passThroughOnException() was used.
 // - Finish waitUntil() tasks.
-class WorkerEntrypoint final: public WorkerInterface {
+class WorkerEntrypoint final: public WorkerInterface, public kj::PtrTarget {
  public:
   // Call this instead of the constructor. It actually adds a wrapper object around the
   // `WorkerEntrypoint`, but the wrapper still implements `WorkerInterface`.
@@ -201,10 +201,15 @@ class WorkerEntrypoint::ResponseSentTracker final: public kj::HttpService::Respo
 };
 
 // Like ResponseSentTracker, for the response to a CONNECT request.
-class WorkerEntrypoint::ConnectResponseSentTracker final: public kj::HttpService::ConnectResponse {
+class WorkerEntrypoint::ConnectResponseSentTracker final: public kj::HttpService::ConnectResponse,
+                                                          public kj::PtrTarget {
  public:
   ConnectResponseSentTracker(kj::HttpService::ConnectResponse& inner): inner(inner) {}
   KJ_DISALLOW_COPY_AND_MOVE(ConnectResponseSentTracker);
+
+  kj::Weak<ConnectResponseSentTracker> addWeak() {
+    return addWeakToThis();
+  }
 
   bool isSent() const {
     return sent;
@@ -785,27 +790,38 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
 
   return wrapWithCanceler(
       context
-          .run([this, &headers, &connection, &response = *wrappedResponse,
+          .run([weakThis = addWeakToThis(), &headers, &connection,
+                   weakResponse = wrappedResponse->addWeak(),
                    entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
                    host = kj::str(host), clientAddress = kj::mv(clientAddress),
                    settings = kj::mv(settings)](Worker::Lock& lock, IoContext& context) mutable {
     auto traceScope = context.makeRequestTraceScope(lock);
 
+    auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "WorkerEntrypoint destroyed before connect");
+    auto& response = KJ_REQUIRE_NONNULL(weakResponse.tryGet(), "response destroyed before connect");
     return lock.getGlobalScope().connect(kj::mv(host), kj::mv(clientAddress), headers, connection,
         response, kj::mv(settings), lock,
-        lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props),
-            context.getActor(), isDynamicDispatch));
+        lock.getExportedHandler(asPtr(entrypointName), kj::mv(versionInfo), kj::mv(self.props),
+            context.getActor(), self.isDynamicDispatch));
   })
-          .then([&context, workerTracer]() {
+          .then([weakContext = context.getWeakRef(), workerTracer]() {
     KJ_IF_SOME(t, workerTracer) {
-      t.setReturn(context.now());
+      t.setReturn(
+          KJ_REQUIRE_NONNULL(weakContext->tryGet(), "IoContext destroyed before connect returned")
+              .now());
     }
   })
-          .catch_([this, &context, &incomingRequestRef](
+          .catch_([weakThis = addWeakToThis(), weakContext = context.getWeakRef(),
+                      weakIncomingRequest = incomingRequestRef.addWeak()](
                       kj::Exception&& exception) mutable -> kj::Promise<void> {
+    auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "WorkerEntrypoint destroyed during connect");
+    auto& context = KJ_REQUIRE_NONNULL(weakContext->tryGet(), "IoContext destroyed during connect");
+    auto& incomingRequestRef = KJ_REQUIRE_NONNULL(
+        weakIncomingRequest.tryGet(), "IncomingRequest destroyed during connect");
+
     // Log JS exceptions to the JS console, if inspector is attached. This also has the effect of
     // logging internal errors to syslog.
-    loggedExceptionEarlier = true;
+    self.loggedExceptionEarlier = true;
     context.logUncaughtExceptionAsync(
         UncaughtExceptionSource::REQUEST_HANDLER, exception.clone(), incomingRequestRef);
 
@@ -820,14 +836,16 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     // The request has been canceled, but allow it to continue executing in the background.
     incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
   }))
-          .catch_([this, isActor, &response = *wrappedResponse, metrics = kj::mv(metricsForCatch),
+          .catch_([weakThis = addWeakToThis(), isActor, weakResponse = wrappedResponse->addWeak(),
+                      metrics = kj::mv(metricsForCatch),
                       workerTracer](kj::Exception&& exception) mutable -> kj::Promise<void> {
     markExceptionAsDelivered(exception);
 
     // Don't return errors to end user.
     auto isInternalException = !jsg::isTunneledException(exception.getDescription()) &&
         !jsg::isDoNotLogException(exception.getDescription());
-    if (!loggedExceptionEarlier) {
+    auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "WorkerEntrypoint destroyed during connect");
+    if (!self.loggedExceptionEarlier) {
       // This exception seems to have originated during the deferred proxy task, so it was not
       // logged to the IoContext earlier.
       if (exception.getType() != kj::Exception::Type::DISCONNECTED && isInternalException) {
@@ -837,7 +855,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       }
     }
 
-    if (isActor || tunnelExceptions) {
+    if (isActor || self.tunnelExceptions) {
       if (isActor) {
         // Reaching this catch means the request reached the actor (we are past
         // `delivered()` above), so user code may have run. Annotate every failure, whatever its
@@ -863,12 +881,15 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
       // an exception.
       metrics->reportFailure(exception);
 
+      auto& response = KJ_REQUIRE_NONNULL(
+          weakResponse.tryGet(), "response destroyed before connect error was reported");
+
       // Once the tunnel is answered, there is no status left to replace with an error, and ending
       // it is all that remains.
       if (response.isSent()) return kj::READY_NOW;
 
       KJ_TRY {
-        kj::HttpHeaders headers(threadContext.getHeaderTable());
+        kj::HttpHeaders headers(self.threadContext.getHeaderTable());
         if (exception.getType() == kj::Exception::Type::OVERLOADED) {
           // Overloaded-type exceptions generally represent some resource exhaustion (i.e. not
           // necessarily an internal error) and correspond to HTTP error 503.
