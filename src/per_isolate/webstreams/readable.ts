@@ -538,10 +538,34 @@ function iteratorReturnSteps(
   return PromiseResolve(undefined);
 }
 
+// WebIDL's ongoing promise: a next() or return() made while another's
+// promise is pending runs its steps once that promise settles, either way;
+// one made with none pending runs them at once, so the first next() reads
+// (and pulls) synchronously. Their promise becomes the ongoing one once the
+// steps return, so a next() made inside them (from the pull() they run)
+// runs at once too, reading right behind them.
+function runAfterOngoing(
+  s: IteratorInternalState,
+  steps: (
+    s: IteratorInternalState,
+    arg: unknown
+  ) => Promise<IteratorResult<unknown> | undefined>,
+  arg?: unknown
+): Promise<IteratorResult<unknown> | undefined> {
+  const ongoing = s.current;
+  let current: Promise<IteratorResult<unknown> | undefined>;
+  if (ongoing === undefined) {
+    current = steps(s, arg);
+  } else {
+    const run = () => steps(s, arg);
+    current = PromisePrototypeThen(ongoing, run, run);
+  }
+  s.current = current;
+  return current;
+}
+
 // WebIDL: next() and return() called on anything but one of these
-// iterators return a rejected promise rather than throwing, and a call with
-// no ongoing promise runs its steps at once, so the first next() reads (and
-// pulls) synchronously.
+// iterators return a rejected promise rather than throwing.
 const ReadableStreamAsyncIteratorPrototype = ObjectSetPrototypeOf(
   {
     next(this: object) {
@@ -549,15 +573,7 @@ const ReadableStreamAsyncIteratorPrototype = ObjectSetPrototypeOf(
       if (s === undefined) {
         return PromiseReject(new TypeError('Illegal invocation'));
       }
-      s.current =
-        s.current !== undefined
-          ? PromisePrototypeThen(
-              s.current,
-              () => iteratorNextSteps(s),
-              () => iteratorNextSteps(s)
-            )
-          : iteratorNextSteps(s);
-      return s.current;
+      return runAfterOngoing(s, iteratorNextSteps);
     },
 
     return(this: object, error: unknown) {
@@ -565,17 +581,12 @@ const ReadableStreamAsyncIteratorPrototype = ObjectSetPrototypeOf(
       if (s === undefined) {
         return PromiseReject(new TypeError('Illegal invocation'));
       }
-      s.current =
-        s.current !== undefined
-          ? PromisePrototypeThen(
-              s.current,
-              () => iteratorReturnSteps(s, error),
-              () => iteratorReturnSteps(s, error)
-            )
-          : iteratorReturnSteps(s, error);
       // Unlike next(), the caller gets a separate promise chained on the
       // ongoing one.
-      return PromisePrototypeThen(s.current, () => userReadResult(error, true));
+      return PromisePrototypeThen(
+        runAfterOngoing(s, iteratorReturnSteps, error),
+        () => userReadResult(error, true)
+      );
     },
 
     [SymbolAsyncIterator](this: object) {
