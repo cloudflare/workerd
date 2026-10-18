@@ -4995,8 +4995,8 @@ module.exports = {
       getReadableStreamGetState(stream),
     getStoredError: <R>(stream: ReadableStream<R>) =>
       getReadableStreamStoredError(stream),
-    // ReadableStreamDefaultControllerCanCloseOrEnqueue, for the
-    // TransformStream controller's enqueue pre-check.
+    // ReadableStreamDefaultControllerCanCloseOrEnqueue, which TransformStream
+    // checks before it enqueues into its readable and before it closes it.
     canCloseOrEnqueue: <R>(controller: object) =>
       defaultControllerCanCloseOrEnqueue(
         controller as ReadableStreamDefaultController<R>
