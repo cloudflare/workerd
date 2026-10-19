@@ -75,7 +75,7 @@ kj::Promise<void> expectNativePump(IoContext& context, kj::Maybe<uint64_t> expec
 KJ_TEST("Native pump with a known length delivers all bytes") {
   TestFixture fixture;
   fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
-    return expectNativePump(env.context, uint64_t(6));
+    return expectNativePump(env.context, static_cast<uint64_t>(6));
   });
 }
 

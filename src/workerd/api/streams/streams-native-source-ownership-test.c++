@@ -24,10 +24,10 @@ KJ_TEST("native source ownership stays flat across repeated transfers") {
       ++state.destroyed;
     }
     kj::Promise<size_t> tryRead(void*, size_t, size_t) override {
-      return size_t(0);
+      return static_cast<size_t>(0);
     }
     kj::Maybe<uint64_t> tryGetLength(StreamEncoding) override {
-      return uint64_t(1);
+      return static_cast<uint64_t>(1);
     }
     void cancel(kj::Exception) override {
       ++state.canceled;

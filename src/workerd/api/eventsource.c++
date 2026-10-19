@@ -556,7 +556,9 @@ void EventSource::enqueueMessages(IoContext& context,
 void EventSource::StreamState::setReconnectionTime(uint32_t time) {
   // We enforce both a min and max reconnection time. The minimum is 1 second,
   // and the maximum is 10 seconds.
-  reconnectionTime = kj::max(kj::min(time, uint32_t(10000)), uint32_t(1000)) * kj::MILLISECONDS;
+  reconnectionTime =
+      kj::max(kj::min(time, static_cast<uint32_t>(10000)), static_cast<uint32_t>(1000)) *
+      kj::MILLISECONDS;
 }
 
 void EventSource::visitForGc(jsg::GcVisitor& visitor) {

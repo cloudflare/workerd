@@ -127,17 +127,19 @@ export const pendingBodyReadRequiresCompletion = {
       );
       await 0;
       const original = Promise.prototype.then;
-      let inner;
+      // The promises whose then() ran, i.e. the one being adopted.
+      const adopted = [];
       const pending = response[method]();
       Promise.prototype.then = function (resolve) {
         Promise.prototype.then = original;
-        inner = this;
+        adopted.push(this);
         resolve(undefined);
       };
       try {
         const failure = await failureOf(pending);
         strictEqual(failure instanceof TypeError, true);
         strictEqual(failure.message, 'Invalid stream read result.');
+        const [inner] = adopted;
         strictEqual(inner instanceof Promise, true);
         collect();
         controller.enqueue(new Uint8Array([65]));
@@ -232,19 +234,21 @@ export const callbacksRetainPendingBodyRead = {
             'then'
           );
           const early = new Error('adoption failed');
-          let inner;
+          // The promises whose then was looked up, i.e. the one being adopted.
+          const adopted = [];
           await 0;
           const outer = target[method]();
           Object.defineProperty(Promise.prototype, 'then', {
             configurable: true,
             get() {
               Object.defineProperty(Promise.prototype, 'then', original);
-              inner = this;
+              adopted.push(this);
               throw early;
             },
           });
           try {
             strictEqual(await failureOf(outer), early);
+            const [inner] = adopted;
             strictEqual(inner instanceof Promise, true);
             let settled = false;
             let failure;
