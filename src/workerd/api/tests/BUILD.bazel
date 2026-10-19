@@ -6,6 +6,11 @@ load("//:build/wd_bench.bzl", "wd_bench")
 load("//:build/wd_test.bzl", "wd_cli_test", "wd_test")
 
 wasm_tools_parse(
+    name = "compact-imports.wasm",
+    src = "compact-imports.wat",
+)
+
+wasm_tools_parse(
     name = "js-string-builtins.wasm",
     src = "js-string-builtins.wat",
 )
@@ -1225,6 +1230,14 @@ wd_test(
         ":js-string-builtins.wasm",
     ],
     lint = False,
+)
+
+wd_test(
+    src = "wasm-compact-imports-test.wd-test",
+    data = [
+        "wasm-compact-imports-test.js",
+        ":compact-imports.wasm",
+    ],
 )
 
 wd_test(
