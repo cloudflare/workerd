@@ -979,6 +979,12 @@ bool ByteQueue::ByobRequest::respondWithNewView(jsg::Lock& js, jsg::JsBufferSour
 
   const auto offset = destView.getOffset();
   const auto size = destView.size();
+  KJ_IF_SOME(replacement, jsg::JsValue(view).tryCast<jsg::JsArrayBufferView>()) {
+    // The destination adopts the replacement's element size, so a size it doesn't divide could
+    // never be filled. Check before the transfer so the read stays usable.
+    JSG_REQUIRE(size % replacement.getElementSize() == 0, RangeError,
+        "The view's element size must divide the destination size.");
+  }
   auto prefix = kj::heapArray(destView.asArrayPtr().first(req.pullInto.filled));
   auto detached = view.detachAndTake(js);
   if (self == nullptr || pending == nullptr || self.assertLive().isInvalidated()) return true;

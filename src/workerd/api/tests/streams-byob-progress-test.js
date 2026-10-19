@@ -414,3 +414,30 @@ export const replacementViewRetainsAlignmentBelowMinimum = {
     strictEqual((await settled(reader.read(new Uint8Array(8)))).done, true);
   },
 };
+
+// The read adopts a replacement view's element size, so one that can't fill the destination
+// exactly is rejected, and the original view stays usable.
+export const respondWithNewViewRejectsNonDividingElementSize = {
+  async test() {
+    const stream = new ReadableStream({
+      type: 'bytes',
+      pull(controller) {
+        const view = controller.byobRequest.view;
+        strictEqual(view.byteLength, 7);
+        throws(
+          () =>
+            controller.byobRequest.respondWithNewView(
+              new Uint16Array(view.buffer, view.byteOffset, 3)
+            ),
+          RangeError
+        );
+        view.set([1, 2, 3, 4, 5, 6, 7]);
+        controller.byobRequest.respond(7);
+      },
+    });
+    const reader = stream.getReader({ mode: 'byob' });
+    const { value, done } = await reader.read(new Uint8Array(7), { min: 7 });
+    strictEqual(done, false);
+    deepStrictEqual([...value], [1, 2, 3, 4, 5, 6, 7]);
+  },
+};
