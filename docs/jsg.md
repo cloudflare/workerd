@@ -1948,6 +1948,10 @@ JSG provides rudimentary async context tracking via `AsyncContextFrame` in
 frame. Each frame has a storage context (a map of storage cells keyed by opaque keys).
 When a new frame is created, the current frame's storage context is propagated.
 
+Small frames keep their storage cells inline. Larger frames use a hash table. Dead keys are
+removed before storage is inherited, so a child with few live cells can use inline storage even
+when its parent used a hash table.
+
 All JavaScript promises, timers, and microtasks propagate the async context.
 
 ```js
@@ -1986,11 +1990,16 @@ kj::Arc<AsyncContextFrame::StorageKey> key =
 KJ_DEFER(key->reset());  // Clear when done
 
 {
-  jsg::AsyncContextFrame::StorageScope(js, key.addRef(), value);
+  jsg::AsyncContextFrame::StorageScope scope(js, key.addRef(), kj::mv(value));
   // code runs with this storage context
 }
 // Automatically reset to previous context
 ```
+
+To install several storage cells in one frame, pass a mutable array of
+`AsyncContextFrame::StorageEntry` to `StorageScope`. The entries are moved into the frame,
+and inherited storage is copied once. All of the cells remain available to asynchronous work
+that captures the frame, and leaving the scope restores the previous frame.
 
 ---
 
