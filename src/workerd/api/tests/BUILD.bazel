@@ -1614,14 +1614,14 @@ sh_test(
     size = "medium",
     srcs = ["abortIsolate.sh"],
     args = [
-        "$(location //src/workerd/server:workerd_cross)",
+        "$(location //src/workerd/server:workerd)",
         "$(location abortIsolate.wd-test)",
         "$(location abortIsolate.js)",
     ],
     data = [
         "abortIsolate.js",
         "abortIsolate.wd-test",
-        "//src/workerd/server:workerd_cross",
+        "//src/workerd/server:workerd",
     ],
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
@@ -1640,7 +1640,7 @@ wd_cli_test(
     name = "bench-default-compat-date-test",
     src = "bench-default-compat-date-test.wd-bench",
     args = [
-        "$(location //src/workerd/server:workerd_cross)",
+        "$(location //src/workerd/server:workerd)",
         "bench",
         "$(location bench-default-compat-date-test.wd-bench)",
         "--quick",
@@ -1648,6 +1648,6 @@ wd_cli_test(
     data = [
         "bench-default-compat-date-test.js",
         "bench-default-compat-date-test.wd-bench",
-        "//src/workerd/server:workerd_cross",
+        "//src/workerd/server:workerd",
     ],
 )

@@ -128,7 +128,7 @@ sh_test(
     size = "enormous",
     srcs = ["python-abort-isolate-on-fatal/python-abort-isolate-on-fatal.sh"],
     args = [
-        "$(location //src/workerd/server:workerd_cross)",
+        "$(location //src/workerd/server:workerd)",
         "$(location python-abort-isolate-on-fatal/python-abort-isolate-on-fatal.wd-test)",
         "$(location //src/workerd/server/tests/python:pyodide_dev.capnp.bin@rule)",
         "../+pyodide+all_pyodide_wheels_20250808",
@@ -136,7 +136,7 @@ sh_test(
     data = [
         "python-abort-isolate-on-fatal/python-abort-isolate-on-fatal.wd-test",
         "python-abort-isolate-on-fatal/worker.py",
-        "//src/workerd/server:workerd_cross",
+        "//src/workerd/server:workerd",
         "//src/workerd/server/tests/python:pyodide_dev.capnp.bin@rule",
         "@all_pyodide_wheels_20250808//:whls",
     ],

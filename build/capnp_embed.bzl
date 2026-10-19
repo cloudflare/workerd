@@ -32,12 +32,6 @@ def capnp_embed(
     This is useful for including embedding the output of a `genrule` in a Cap'n Proto schema.
     The generated target should be included in `cc_capnp_library` `deps`.
     """
-    if target_compatible_with == None:
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        })
-
     _capnp_embed(
         name = name + "_gen",
         src = src,

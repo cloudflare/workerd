@@ -19,20 +19,6 @@ string_flag(
     visibility = ["//visibility:public"],
 )
 
-# Dummy config settings for when workerd is built standalone
-# These always return false since we don't want prebuilt behavior in standalone workerd
-config_setting(
-    name = "no_build",
-    values = {"define": "never_match=true"},  # This will never match
-    visibility = ["//visibility:public"],
-)
-
-config_setting(
-    name = "prebuilt_binaries_arm64",
-    values = {"define": "never_match=true"},  # This will never match
-    visibility = ["//visibility:public"],
-)
-
 # V8 flags to pass to gen-compile-cache when producing the compile caches
 # embedded in the builtin bundles (//src/node, //src/per_isolate, ...).
 # Must match the flags used by the consumer when compiling, otherwise flag

@@ -13,10 +13,6 @@ def wd_capnp_library(
     - `file-name_capnp_rust` rust library
     """
     base_name = src.removesuffix(".capnp")
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    })
 
     # json.capnp is available implicitly for c++ targets
     cc_deps = [dep for dep in deps if dep != "@capnp-cpp//src/capnp/compat:json_capnp"]
@@ -27,7 +23,6 @@ def wd_capnp_library(
         deps = cc_deps,
         srcs = [src],
         tags = ["manual"] + tags,
-        target_compatible_with = target_compatible_with,
     )
 
     rust_deps = [dep + "_rust" if dep.endswith("_capnp") else dep for dep in deps]
@@ -39,5 +34,4 @@ def wd_capnp_library(
         deps = rust_deps,
         srcs = [src],
         tags = ["manual"] + tags,
-        target_compatible_with = target_compatible_with,
     )

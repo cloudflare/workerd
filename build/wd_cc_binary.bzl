@@ -7,16 +7,11 @@ def wd_cc_binary(
         visibility = None,
         deps = [],
         tags = [],
-        target_compatible_with = [],
         **kwargs):
     """Wrapper for cc_binary that sets common attributes
     """
     cc_binary(
         name = name,
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }) + target_compatible_with,
         visibility = visibility,
         # Tag with cpu:4 since this target depends on linkopts_tool.
         tags = tags + ["cpu:4"],
@@ -24,18 +19,4 @@ def wd_cc_binary(
         exec_properties = {"runner": "high-cpu"},
         deps = deps + ["//build/deps:linkopts_tool"],
         **kwargs
-    )
-
-    pkg = native.package_name().removeprefix("src/")
-    cross_alias = name + "_cross"
-    prebuilt_binary_name = name.removesuffix("_bin")
-    native.alias(
-        name = cross_alias,
-        visibility = visibility,
-        actual = select({
-            "@//build/config:prebuilt_binaries_arm64": "@//:bin.arm64/tmp/{}/{}.aarch64-linux-gnu".format(pkg, prebuilt_binary_name),
-            "//conditions:default": name,
-        }),
-        testonly = kwargs.get("testonly", False),
-        target_compatible_with = target_compatible_with,
     )

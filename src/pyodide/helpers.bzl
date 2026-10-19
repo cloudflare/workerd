@@ -114,10 +114,6 @@ def pyodide_extra():
             ":pyodide-lock_%s.json@capnp" % tag
             for tag in package_tags
         ],
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
     )
 
 def _packages_tag_for_version(version):
@@ -301,10 +297,6 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, 
                 ":pack_python_packages",
                 "@capnp-cpp//src/capnp:capnp_tool",
             ],
-            target_compatible_with = select({
-                "@//build/config:no_build": ["@platforms//:incompatible"],
-                "//conditions:default": [],
-            }),
         )
         internal_data_modules.append(_out_path("python_packages.bin", version))
         extra_deps.append("python_packages.bin@rule@" + version)
@@ -358,9 +350,5 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, 
         ]),
         tools = ["@capnp-cpp//src/capnp:capnp_tool"],
         visibility = ["//visibility:public"],
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
     )
     return pyodide_cappn_bin_rule
