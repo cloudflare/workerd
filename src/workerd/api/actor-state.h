@@ -332,9 +332,14 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
 
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(waitForBookmark);
+      JSG_READONLY_INSTANCE_PROPERTY(primary, getPrimary);
+    }
+
+    // TODO(cleanup): Stop accepting workerdExperimental once existing users have migrated to
+    //   durable_object_snapshots.
+    if (flags.getWorkerdExperimental() || flags.getDurableObjectSnapshots()) {
       JSG_METHOD(snapshot);
       JSG_METHOD(onNextSessionRestore);
-      JSG_READONLY_INSTANCE_PROPERTY(primary, getPrimary);
     }
 
     if (flags.getReplicaRouting()) {
