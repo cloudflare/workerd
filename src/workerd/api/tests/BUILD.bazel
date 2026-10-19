@@ -12,6 +12,63 @@ wasm_tools_parse(
 
 exports_files(["starttls-server.pem"])
 
+wd_test(
+    src = "streams-byob-progress-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "streams-byob-progress-test.js",
+        "streams-byob-progress-worker.js",
+    ],
+)
+
+wd_test(
+    src = "streams-terminal-state-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "streams-terminal-state-test.js",
+        "streams-terminal-state-worker.js",
+    ],
+)
+
+wd_test(
+    src = "eventsource-context-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "eventsource-context-test.js",
+        "eventsource-context-worker.js",
+    ],
+)
+
+wd_test(
+    src = "eventsource-lifetime-test.wd-test",
+    args = ["--experimental"],
+    data = ["eventsource-lifetime-test.js"],
+)
+
+wd_test(
+    src = "queue-backing-store-test.wd-test",
+    args = [
+        "--experimental",
+        "queue-backing-store-test",
+    ],
+    data = ["queue-backing-store-test.js"],
+)
+
+wd_test(
+    src = "streams-consumer-reentry-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "streams-consumer-reentry-test.js",
+        "streams-consumer-reentry-worker.js",
+    ],
+)
+
+wd_test(
+    src = "streams-native-read-ownership-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-native-read-ownership-test.js"],
+)
+
 # Compile all ts test sources in one project. This is needed to work around https://github.com/aspect-build/rules_ts/issues/664 –
 # rules_ts transpiles all .ts files for each ts_project where the files are present based on the
 # tsconfig "include": ["**/*.ts"] directive, which is an issue on Windows where Bazel does not have
@@ -85,6 +142,12 @@ wd_test(
     src = "streams-internal-read-buffer-gc-test.wd-test",
     args = ["--experimental"],
     data = ["streams-internal-read-buffer-gc-test.js"],
+)
+
+wd_test(
+    src = "streams-internal-drain-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-internal-drain-gc-test.js"],
 )
 
 wd_test(

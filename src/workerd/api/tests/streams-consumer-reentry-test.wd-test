@@ -1,0 +1,18 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [(
+    name = "main",
+    worker = (
+      modules = [(name = "worker", esModule = embed "streams-consumer-reentry-test.js")],
+      compatibilityFlags = ["nodejs_compat_v2", "streams_enable_constructors", "writable_stream_spec_compliant_writer"],
+      bindings = [(name = "REENTRY", service = "reentry")],
+    ),
+  ), (
+    name = "reentry",
+    worker = (
+      modules = [(name = "worker", esModule = embed "streams-consumer-reentry-worker.js")],
+      compatibilityFlags = ["nodejs_compat_v2", "streams_enable_constructors", "handle_cross_request_promise_resolution", "writable_stream_spec_compliant_writer", "streams_no_default_auto_allocate_chunk_size"],
+    ),
+  )],
+);

@@ -91,7 +91,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 
 ## WPT map: readable-byte-streams/general.any.js expectedFailures
 
-The 34 C++ expectedFailures in that WPT file (see
+The 33 C++ expectedFailures in that WPT file (see
 src/wpt/streams-test.ts), each mapped to the suite pin that owns the
 divergence root. "Family" means the WPT test fails for the same root a
 named suite test pins directly, differing only in incidental asserts.
@@ -105,7 +105,7 @@ named suite test pins directly, differing only in incidental asserts.
 | constructor rejects size with type "bytes" | ledger #1 | `sizeStrategyForBytes` |
 | cancel() with partially filled pending pull() | partial-enqueue replacement request (ledger #21) and cancel-result shape (ledger #22) | `cancelWithPartiallyFilledPull` (direct) |
 | getReader(), read(view), then cancel() | pull runs before cancel under C++ | `readViewThenCancelOrdering` (direct) |
-| enqueue() with Uint16Array then read() / 3 byte + 2-element Uint16Array | mismatched view/enqueue granularity | `readableStreamBytesMismatchedSizes`, `byobUint16Array` |
+| enqueue() with Uint16Array then read() | mismatched view/enqueue granularity | `readableStreamBytesMismatchedSizes`, `byobUint16Array` |
 | read(view) Uint32Array filled by multiple enqueue() | partial fills across enqueues | `byobUint32Array`, `byobPartialRespondMisalignsFillOffset` |
 | enqueue(), read(view) partially, then read() | remainder copied vs viewed (ledger #20) | `partialViewThenDefaultRead` (direct) |
 | read(view) Uint16 on close()-d with 1 byte / errored if close()-d before fulfilling read(view) | close-with-partial (ledger #7) | `closeWithPartiallyFilledView` |

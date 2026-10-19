@@ -145,11 +145,13 @@ class ConsumerImpl;
 template <typename Self>
 class QueueImpl;
 
+class ByteQueue;
+
 // DrainingReadResult is defined in common.h
 
 // Provides the underlying implementation shared by ByteQueue and ValueQueue.
 template <typename Self>
-class QueueImpl final {
+class QueueImpl final: public kj::PtrTarget {
  public:
   using ConsumerImpl = ConsumerImpl<Self>;
   using Entry = Self::Entry;
@@ -159,8 +161,7 @@ class QueueImpl final {
       : highWaterMark(highWaterMark),
         state(QueueState::template create<Ready>()) {}
 
-  QueueImpl(QueueImpl&&) = default;
-  QueueImpl& operator=(QueueImpl&&) = default;
+  KJ_DISALLOW_COPY_AND_MOVE(QueueImpl);
 
   // Consumer's Weak<QueueImpl> will be nullified automatically.
   ~QueueImpl() noexcept(false) = default;
@@ -169,12 +170,14 @@ class QueueImpl final {
   // If we are already closed or errored, do nothing here.
   void close(jsg::Lock& js) {
     if (state.isActive()) {
+      // Keep pending BYOB handles alive through fan-out, but publish the terminal state first.
+      auto ready KJ_UNUSED = kj::mv(state.requireActiveUnsafe());
+      state.template transitionTo<Closed>();
 #ifdef KJ_DEBUG
       isClosingOrErroring = true;
       KJ_DEFER(isClosingOrErroring = false);
 #endif
       allConsumers.forEach([&](auto& consumer) { consumer.close(js); });
-      state.template transitionTo<Closed>();
     }
   }
 
@@ -192,12 +195,13 @@ class QueueImpl final {
   // If we are already closed or errored, do nothing here.
   void error(jsg::Lock& js, jsg::JsValue reason) {
     if (state.isActive()) {
+      auto ready KJ_UNUSED = kj::mv(state.requireActiveUnsafe());
+      state.template transitionTo<Errored>(reason.addRef(js));
 #ifdef KJ_DEBUG
       isClosingOrErroring = true;
       KJ_DEFER(isClosingOrErroring = false);
 #endif
       allConsumers.forEach([&](auto& consumer) { consumer.error(js, reason); });
-      state.template transitionTo<Errored>(reason.addRef(js));
     }
   }
 
@@ -228,6 +232,10 @@ class QueueImpl final {
       }
       consumer.push(js, entry->clone(js));
     });
+    if constexpr (kj::isSameType<Self, ByteQueue>()) {
+      // Publish to every branch before settlement can enqueue a later chunk.
+      allConsumers.forEach([&](auto& consumer) { Self::drain(js, consumer.getWeak()); });
+    }
   }
 
   // The current size of consumer with the most stored data.
@@ -368,6 +376,10 @@ class ConsumerImpl final: public kj::PtrTarget {
 
   KJ_DISALLOW_COPY_AND_MOVE(ConsumerImpl);
 
+  kj::Weak<ConsumerImpl> getWeak() {
+    return addWeakToThis();
+  }
+
   ~ConsumerImpl() noexcept(false) {
     // queue may be null if the queue was destroyed before this consumer
     // (e.g., during isolate teardown) or if cloned from a closed stream.
@@ -380,10 +392,12 @@ class ConsumerImpl final: public kj::PtrTarget {
   void cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue>) {
     // Already closed or errored - nothing to do.
     KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
-      for (auto& request: ready.readRequests) {
+      // Settlement can release the reader and destroy this consumer.
+      auto requests = kj::mv(ready.readRequests);
+      state.template transitionTo<Closed>();
+      for (auto& request: requests) {
         request->resolveAsDone(js);
       }
-      state.template transitionTo<Closed>();
     }
   }
 
@@ -524,12 +538,13 @@ class ConsumerImpl final: public kj::PtrTarget {
 
   void cancelPendingReads(jsg::Lock& js, jsg::JsValue reason) {
     // Already closed or errored - nothing to do.
-    state.whenActive([&](Ready& ready) {
-      for (auto& request: ready.readRequests) {
-        request->resolver.reject(js, reason);
+    KJ_IF_SOME(ready, state.tryGetActiveUnsafe()) {
+      // Leave the live ring reusable if a callback acquires another reader.
+      auto requests = extractPendingReads(ready);
+      for (auto& request: requests) {
+        request->reject(js, reason);
       }
-      ready.readRequests.clear();
-    });
+    }
   }
 
   void visitForGc(jsg::GcVisitor& visitor) {
@@ -629,27 +644,15 @@ class ConsumerImpl final: public kj::PtrTarget {
         // In that case, we want to reset/clear the buffer and reject any remaining
         // pending read requests using the given reason.
 
-        // We extract pending reads to local ownership before rejecting. The reject
-        // calls perform V8 allocations (wrapOpaque) which can trigger GC. If GC
-        // collects the ReadableStream that owns this ConsumerImpl (see the ownership
-        // gap: QueueImpl only holds weak refs to consumers, actual ownership is through
-        // ReadableStream → ReadableStreamJsController → ValueReadable → Consumer),
-        // the ConsumerImpl and its readRequests would be destroyed mid-iteration.
-        // By extracting to a local vector, the ReadRequests survive even if `this`
-        // is destroyed during the reject calls.
-        //
-        // We preserve the original ordering (reject reads, then transition state,
-        // then notify listener) and use a weak ref to check if `this` is still alive
-        // after the reject calls before accessing any members.
         auto pendingReads = extractPendingReads(ready);
         auto weak = addWeakToThis();
+        state.template transitionTo<Errored>(reason.addRef(js));
         for (auto& request: pendingReads) {
           request->reject(js, reason);
         }
         // After the reject calls, `this` may have been destroyed by GC.
         // Use the weak ref to safely access members only if still alive.
         KJ_IF_SOME(self, weak) {
-          self->state.template transitionTo<Errored>(reason.addRef(js));
           KJ_IF_SOME(listener, consume(kj::mv(self))->stateListener) {
             consume(kj::mv(listener))->onConsumerError(js, reason);
             // After this point, we should not assume that this consumer can
@@ -667,14 +670,10 @@ class ConsumerImpl final: public kj::PtrTarget {
           // ConsumerImpl& references. We must take a weak ref before calling handleMaybeClose
           // and check liveness after it returns.
           auto weak = addWeakToThis();
-          if (!empty() && !Self::handleMaybeClose(js, ready, weak)) {
+          if (!Self::handleMaybeClose(js, ready, weak)) {
             // handleMaybeClose may have freed *this via GC during resolve.
             if (weak == nullptr) return;
-            // If the queue is not empty, we'll have the implementation see
-            // if it can drain the remaining data into pending reads. If handleMaybeClose
-            // returns false, then it could not and we can't yet close. If it returns true,
-            // yay! Our queue is empty and we can continue closing down.
-            KJ_ASSERT(!empty());  // We're still not empty
+            // Buffered data or a reserved response still prevents the terminal transition.
             return;
           }
 
@@ -682,18 +681,21 @@ class ConsumerImpl final: public kj::PtrTarget {
           // (its V8 allocations can trigger collection). Re-check before touching any members.
           if (weak == nullptr) return;
 
-          KJ_ASSERT(empty());
-          KJ_REQUIRE(ready.buffer.size() == 1);  // The close should be the only item remaining.
+          // Re-entry may have canceled or errored the consumer without destroying it.
+          auto& self = weak.assertLive();
+          if (!self.state.isActive()) return;
+          auto& current = self.state.requireActiveUnsafe();
+          KJ_ASSERT(self.empty());
+          KJ_REQUIRE(current.buffer.size() == 1);  // Only the close sentinel remains.
 
-          // Extract pending reads and resolve them as done. Same GC safety concern
-          // as the error path above — see detailed comment there.
-          auto pendingReads = extractPendingReads(ready);
+          // Own the requests and publish Closed before settlement can enter JS.
+          auto pendingReads = extractPendingReads(current);
+          self.state.template transitionTo<Closed>();
           for (auto& request: pendingReads) {
             request->resolveAsDone(js);
           }
           // After the resolve calls, `this` may have been destroyed by GC.
           KJ_IF_SOME(self, weak) {
-            self->state.template transitionTo<Closed>();
             KJ_IF_SOME(listener, consume(kj::mv(self))->stateListener) {
               consume(kj::mv(listener))->onConsumerClose(js);
               // After this point, we should not assume that this consumer can
@@ -848,7 +850,7 @@ class ValueQueue final {
   inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
-  kj::Pin<QueueImpl> impl;
+  kj::Rc<QueueImpl> impl;
 
   static void handlePush(jsg::Lock& js,
       ConsumerImpl::Ready& state,
@@ -882,12 +884,17 @@ class ByteQueue final {
     // which happens either when respond(), respondWithNewView(), or invalidate()
     // is called, or when the ByobRequest is destroyed, whichever comes first.
     kj::Weak<ByobRequest> byobReadRequest;
+    // Revocation must not expose another handle for the same read.
+    bool nativeHandleIssued = false;
+    // Enqueue may revoke the BYOB handle while its accepted response is being distributed.
+    bool responseInProgress = false;
 
     struct PullInto {
       jsg::JsRef<jsg::JsArrayBufferView> view;
       size_t elementSize;
       size_t originalOffset;
       size_t filled = 0;
+      // Remaining bytes needed; zero means a response is ready to settle.
       size_t atLeast = 1;
       Type type = Type::DEFAULT;
 
@@ -898,6 +905,10 @@ class ByteQueue final {
 
     ReadRequest(jsg::Promise<ReadResult>::Resolver resolver, PullInto pullInto);
     ~ReadRequest() noexcept(false);
+    kj::Weak<ReadRequest> getWeak() {
+      return addWeakToThis();
+    }
+
     void resolveAsDone(jsg::Lock& js);
     void resolve(jsg::Lock& js);
     void reject(jsg::Lock& js, jsg::JsValue value);
@@ -945,7 +956,13 @@ class ByteQueue final {
       return request == nullptr;
     }
 
+    bool isResponding() const {
+      return responding;
+    }
+
     bool isPartiallyFulfilled();
+
+    bool prepareView(jsg::Lock& js);
 
     size_t getAtLeast() const;
 
@@ -967,6 +984,7 @@ class ByteQueue final {
     kj::Weak<ReadRequest> request;
     kj::Weak<ConsumerImpl> consumer;
     kj::Weak<QueueImpl> queue;
+    bool responding = false;
   };
 
   struct State {
@@ -1100,7 +1118,7 @@ class ByteQueue final {
   // that byobRequest long after it has been invalidated. We heap-allocate these just to allow
   // their lifespan to be attached to the ReadableStreamBYOBRequest object but internally they
   // will be disconnected as appropriate.
-  kj::Maybe<kj::Own<ByobRequest>> nextPendingByobReadRequest();
+  kj::Maybe<kj::Own<ByobRequest>> nextPendingByobReadRequest(jsg::Lock& js);
 
   void visitForGc(jsg::GcVisitor& visitor);
 
@@ -1109,12 +1127,19 @@ class ByteQueue final {
   inline void jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
-  kj::Pin<QueueImpl> impl;
+  kj::Rc<QueueImpl> impl;
 
   static void handlePush(jsg::Lock& js,
       ConsumerImpl::Ready& state,
       kj::Weak<ConsumerImpl> consumer,
       kj::Rc<Entry> entry);
+  enum class DrainMode { OPEN, CLOSING };
+
+  static void drain(jsg::Lock& js,
+      kj::Weak<ConsumerImpl> consumer,
+      kj::Weak<ReadRequest> partialRead = nullptr,
+      DrainMode mode = DrainMode::OPEN);
+  static void invalidateReadRequests(ConsumerImpl& consumer);
   static void handleRead(jsg::Lock& js,
       ConsumerImpl::Ready& state,
       kj::Weak<ConsumerImpl> consumer,
@@ -1125,6 +1150,7 @@ class ByteQueue final {
 
   friend ConsumerImpl;
   friend class Consumer;
+  friend QueueImpl;
 };
 
 template <typename Self>
@@ -1212,7 +1238,7 @@ size_t ValueQueue::jsgGetMemorySelfSize() const {
 }
 
 void ValueQueue::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  tracker.trackField("impl", impl);
+  tracker.trackField("impl", impl.get());
 }
 
 kj::StringPtr ByteQueue::Consumer::jsgGetMemoryName() const {
@@ -1236,7 +1262,7 @@ size_t ByteQueue::jsgGetMemorySelfSize() const {
 }
 
 void ByteQueue::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
-  tracker.trackField("impl", impl);
+  tracker.trackField("impl", impl.get());
 }
 
 }  // namespace workerd::api

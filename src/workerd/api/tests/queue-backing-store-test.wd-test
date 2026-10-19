@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Run only the producer's test() using the service-name filter in the test rule.
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "queue-backing-store-test", worker = .worker),
+    (name = "queue-backing-store-test-target", worker = .worker),
+  ],
+);
+
+const worker :Workerd.Worker = (
+  modules = [(name = "worker", esModule = embed "queue-backing-store-test.js")],
+  bindings = [(name = "QUEUE", queue = "queue-backing-store-test-target")],
+  compatibilityFlags = ["nodejs_compat", "queues_json_messages"],
+);
