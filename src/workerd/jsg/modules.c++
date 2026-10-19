@@ -462,12 +462,23 @@ ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::StringPtr name,
     kj::ArrayPtr<const char> content,
     const CompilationObserver& observer)
+    : ModuleInfo(js, name, content, nullptr, observer) {}
+
+ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
+    kj::StringPtr name,
+    kj::ArrayPtr<const char> content,
+    kj::ArrayPtr<const kj::byte> compileCache,
+    const CompilationObserver& observer)
     : ModuleInfo(js,
           compileEsmModule(js,
               name,
               ModuleInfoCompileOption::BUNDLE,
               observer,
               [&](const v8::ScriptOrigin& origin) {
+                if (compileCache.size() > 0) {
+                  return compileWithStaticCache(
+                      js, jsg::v8Str(js.v8Isolate, content), origin, compileCache);
+                }
                 return compileBundleModule(js, content, origin, observer);
               })) {}
 

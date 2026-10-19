@@ -218,6 +218,14 @@ class ModuleRegistry {
         kj::ArrayPtr<const char> content,
         const CompilationObserver& observer);
 
+    // Compiles UTF-8 source with an embedded cache, read only during this call. An empty cache
+    // uses the isolate's code cache store, if installed.
+    ModuleInfo(jsg::Lock& js,
+        kj::StringPtr name,
+        kj::ArrayPtr<const char> content,
+        kj::ArrayPtr<const kj::byte> compileCache,
+        const CompilationObserver& observer);
+
     // The builtin ESM constructors below only read `compileCache` during the call.
 
     // Compiles a builtin module whose source V8 references without copying.
