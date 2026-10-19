@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "socket-proxy-to-test.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2", "experimental"],
+        compatibilityFlags = ["nodejs_compat_v2", "experimental", "connect_handler_starttls"],
         bindings = [
           (name = "ECHO", service = (name = "socket-proxy-to-test", entrypoint = "Echo")),
           (name = "GREETER", service = (name = "socket-proxy-to-test", entrypoint = "Greeter")),

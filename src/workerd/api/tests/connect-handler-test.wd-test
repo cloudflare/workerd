@@ -28,7 +28,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "connect-handler-starttls-test.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2"],
+        compatibilityFlags = ["nodejs_compat_v2", "connect_handler_starttls"],
         bindings = [
           (name = "STARTTLS_TARGET", service = (
             name = "connect-handler-test-starttls-endpoint",
@@ -41,7 +41,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "connect-handler-test-proxy.js"),
         ],
-        compatibilityFlags = ["nodejs_compat_v2"],
+        compatibilityFlags = ["nodejs_compat_v2", "connect_handler_starttls"],
       )
     ),
     ( name = "connect-handler-test-proxy",
