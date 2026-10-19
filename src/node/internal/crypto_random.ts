@@ -36,7 +36,6 @@ import {
 import {
   isAnyArrayBuffer,
   isArrayBufferView,
-  isDataView,
 } from 'node-internal:internal_types';
 
 import {
@@ -70,11 +69,11 @@ export function randomBytes(
   }
 }
 
-export function randomFillSync(
-  buffer: NodeJS.ArrayBufferView,
-  offset?: number,
-  size?: number
-): Uint8Array {
+const MAX_RANDOM_BYTES = 65536;
+
+export function randomFillSync<
+  T extends NodeJS.ArrayBufferView | ArrayBuffer | SharedArrayBuffer,
+>(buffer: T, offset?: number, size?: number): T {
   if (!isAnyArrayBuffer(buffer) && !isArrayBufferView(buffer)) {
     throw new ERR_INVALID_ARG_TYPE(
       'buffer',
@@ -82,7 +81,7 @@ export function randomFillSync(
       buffer
     );
   }
-  // Use byteLength, not length — DataView has no .length property and
+  // Use byteLength, not length: DataView has no .length property and
   // TypedArray .length is element count, not bytes.
   const maxLength = (buffer as Uint8Array).byteLength;
   if (offset !== undefined) {
@@ -91,17 +90,29 @@ export function randomFillSync(
   if (size !== undefined) {
     validateInteger(size, 'size', 0, maxLength - offset);
   } else size = maxLength - offset;
-  if (isAnyArrayBuffer(buffer)) {
-    buffer = Buffer.from(buffer);
-  } else if (isDataView(buffer)) {
-    buffer = new Uint8Array(
-      buffer.buffer,
-      buffer.byteOffset,
-      buffer.byteLength
-    );
+
+  if (size > 0) {
+    let underlyingBuffer: ArrayBuffer | SharedArrayBuffer;
+    let byteOffset: number;
+    if (isAnyArrayBuffer(buffer)) {
+      underlyingBuffer = buffer as ArrayBuffer | SharedArrayBuffer;
+      byteOffset = offset;
+    } else {
+      underlyingBuffer = (buffer as NodeJS.ArrayBufferView).buffer as
+        ArrayBuffer | SharedArrayBuffer;
+      byteOffset = (buffer as NodeJS.ArrayBufferView).byteOffset + offset;
+    }
+
+    const view = new Uint8Array(underlyingBuffer, byteOffset, size);
+    for (let i = 0; i < size; i += MAX_RANDOM_BYTES) {
+      const chunkSize = Math.min(size - i, MAX_RANDOM_BYTES);
+      crypto.getRandomValues(
+        view.subarray(i, i + chunkSize) as Uint8Array<ArrayBuffer>
+      );
+    }
   }
-  buffer = (buffer as Buffer).subarray(offset, offset + size);
-  return crypto.getRandomValues(buffer as Uint8Array<ArrayBuffer>);
+
+  return buffer;
 }
 
 export type RandomFillCallback = (
