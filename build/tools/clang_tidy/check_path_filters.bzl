@@ -16,10 +16,4 @@ Behavior:
 Once a check is fully rolled out, remove its entry to run everywhere.
 """
 
-CHECK_PATH_FILTERS = {
-    "workerd-unsafe-continuation-capture": [
-        # Add paths here as they are cleaned up:
-        # "src/workerd/io",
-        # "src/workerd/api",
-    ],
-}
+CHECK_PATH_FILTERS = {}

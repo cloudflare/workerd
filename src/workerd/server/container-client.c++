@@ -1090,6 +1090,7 @@ struct ContainerClient::EgressState {
 ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     kj::Timer& timer,
     kj::Network& network,
+    kj::Weak<WeakOwner<kj::Network&>> weakNetwork,
     kj::String dockerPath,
     kj::String containerName,
     kj::Maybe<kj::String> imageName,
@@ -1102,6 +1103,7 @@ ContainerClient::ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
     : byteStreamFactory(byteStreamFactory),
       timer(timer),
       network(network),
+      weakNetwork(kj::mv(weakNetwork)),
       dockerPath(kj::mv(dockerPath)),
       containerName(kj::encodeUriComponent(kj::str(containerName))),
       sidecarContainerName(kj::encodeUriComponent(kj::str(containerName, "-proxy"))),
@@ -1137,13 +1139,17 @@ void ContainerClient::shutdown() {
   auto volumes = snapshotClones.releaseAsArray();
   auto cleanup = removeContainer(network, kj::str(dockerPath), kj::str(containerName))
                      .catch_([](kj::Exception&&) {})
-                     .then([&network = network, dockerPath = kj::str(dockerPath),
+                     .then([weakNetwork = weakNetwork, dockerPath = kj::str(dockerPath),
                                volumes = kj::mv(volumes)]() mutable {
+    auto& network =
+        KJ_REQUIRE_NONNULL(weakNetwork.tryGet(), "network destroyed before cleanup").get();
     return deleteVolumes(network, kj::mv(dockerPath), kj::mv(volumes));
   })
                      .catch_([](kj::Exception&&) {})
-                     .then([&network = network, dockerPath = kj::str(dockerPath),
+                     .then([weakNetwork = weakNetwork, dockerPath = kj::str(dockerPath),
                                sidecarContainerName = kj::str(sidecarContainerName)]() mutable {
+    auto& network =
+        KJ_REQUIRE_NONNULL(weakNetwork.tryGet(), "network destroyed before cleanup").get();
     return removeContainer(network, kj::mv(dockerPath), kj::mv(sidecarContainerName));
   }).catch_([](kj::Exception&&) {});
 
@@ -1208,17 +1214,33 @@ class ContainerClient::DockerPort final: public rpc::Container::Port::Server,
     auto downEnd =
         containerClient.byteStreamFactory.capnpToKjExplicitEnd(context.getParams().getDown());
 
-    auto& connectionRef = *connection;
-    auto& downEndRef = *downEnd;
-    auto upPump = upEnd->pumpTo(connectionRef).then([&connectionRef](uint64_t) {
-      connectionRef.shutdownWrite();
+    // Holds both pump endpoints so the continuations below can refer to them weakly. Its members
+    // are destroyed in the same order as when they were attached individually.
+    struct PumpEnds final: public kj::PtrTarget {
+      PumpEnds(
+          kj::Own<kj::AsyncIoStream> connection, kj::Own<capnp::ExplicitEndOutputStream> downEnd)
+          : connection(kj::mv(connection)),
+            downEnd(kj::mv(downEnd)) {}
+      kj::Weak<PumpEnds> addWeak() {
+        return addWeakToThis();
+      }
+      kj::Own<kj::AsyncIoStream> connection;
+      kj::Own<capnp::ExplicitEndOutputStream> downEnd;
+    };
+    auto ends = kj::heap<PumpEnds>(kj::mv(connection), kj::mv(downEnd));
+    auto upPump = upEnd->pumpTo(*ends->connection).then([weakEnds = ends->addWeak()](uint64_t) {
+      KJ_REQUIRE_NONNULL(weakEnds.tryGet(), "container connection destroyed before pump finished")
+          .connection->shutdownWrite();
     });
     auto downPump =
-        connectionRef.pumpTo(downEndRef).then([&downEndRef](uint64_t) { return downEndRef.end(); });
+        ends->connection->pumpTo(*ends->downEnd).then([weakEnds = ends->addWeak()](uint64_t) {
+      return KJ_REQUIRE_NONNULL(
+          weakEnds.tryGet(), "container stream destroyed before pump finished")
+          .downEnd->end();
+    });
 
-    pumpTasks.add(
-        kj::joinPromisesFailFast(kj::arr(kj::mv(upPump), kj::mv(downPump)))
-            .attach(kj::mv(httpClient), kj::mv(upEnd), kj::mv(connection), kj::mv(downEnd)));
+    pumpTasks.add(kj::joinPromisesFailFast(kj::arr(kj::mv(upPump), kj::mv(downPump)))
+                      .attach(kj::mv(httpClient), kj::mv(upEnd), kj::mv(ends)));
     co_return;
   }
 

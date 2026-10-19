@@ -85,6 +85,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   ContainerClient(capnp::ByteStreamFactory& byteStreamFactory,
       kj::Timer& timer,
       kj::Network& network,
+      kj::Weak<WeakOwner<kj::Network&>> weakNetwork,
       kj::String dockerPath,
       kj::String containerName,
       kj::Maybe<kj::String> imageName,
@@ -126,6 +127,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::HttpHeaderTable headerTable;
   kj::Timer& timer;
   kj::Network& network;
+  // For cleanup that outlives this client.
+  kj::Weak<WeakOwner<kj::Network&>> weakNetwork;
   kj::String dockerPath;
   kj::String containerName;
   kj::String sidecarContainerName;
