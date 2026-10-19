@@ -2562,7 +2562,8 @@ void ReadableStreamBYOBRequest::invalidate(jsg::Lock& js) {
 void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
   auto& impl = JSG_REQUIRE_NONNULL(
       maybeImpl, TypeError, "This ReadableStreamBYOBRequest has been invalidated.");
-  JSG_REQUIRE(!impl.readRequest->isResponding(), TypeError, "A BYOB response is already in progress.");
+  JSG_REQUIRE(
+      !impl.readRequest->isResponding(), TypeError, "A BYOB response is already in progress.");
   JSG_REQUIRE(impl.controller->isValid(), Error, "The ReadableStreamBYOBRequest is invalid.");
   JSG_REQUIRE(impl.view.getHandle(js).size() > 0, TypeError,
       "Cannot respond with a zero-length or detached view");
@@ -2621,7 +2622,8 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
 void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::JsBufferSource view) {
   auto& impl = JSG_REQUIRE_NONNULL(
       maybeImpl, TypeError, "This ReadableStreamBYOBRequest has been invalidated.");
-  JSG_REQUIRE(!impl.readRequest->isResponding(), TypeError, "A BYOB response is already in progress.");
+  JSG_REQUIRE(
+      !impl.readRequest->isResponding(), TypeError, "A BYOB response is already in progress.");
   JSG_REQUIRE(impl.controller->isValid(), Error, "The ReadableStreamBYOBRequest is invalid.");
   auto readRequest = impl.readRequest.addRef();
   auto weakController = impl.controller.addRef();

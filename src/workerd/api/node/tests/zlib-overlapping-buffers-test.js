@@ -38,7 +38,16 @@ export const overlappingWriteSyncThrows = {
         [N, 0],
       ]) {
         throws(
-          () => handle.writeSync(BROTLI_OPERATION_FINISH, buf, inOff, 2 * N, buf, outOff, 2 * N),
+          () =>
+            handle.writeSync(
+              BROTLI_OPERATION_FINISH,
+              buf,
+              inOff,
+              2 * N,
+              buf,
+              outOff,
+              2 * N
+            ),
           overlapError
         );
       }
@@ -51,7 +60,8 @@ export const overlappingWriteThrows = {
     for (const handle of createHandles()) {
       const buf = new Uint8Array(N * 2);
       await rejects(
-        async () => handle.write(BROTLI_OPERATION_FINISH, buf, 0, N, buf, N / 2, N),
+        async () =>
+          handle.write(BROTLI_OPERATION_FINISH, buf, 0, N, buf, N / 2, N),
         overlapError
       );
     }
@@ -65,7 +75,16 @@ export const overlappingViewsOfOneArrayBufferThrow = {
     const input = new Uint8Array(ab, 0, N + 1);
     const output = new Uint8Array(ab, N);
     throws(
-      () => handle.writeSync(BROTLI_OPERATION_FINISH, input, 0, N + 1, output, 0, N),
+      () =>
+        handle.writeSync(
+          BROTLI_OPERATION_FINISH,
+          input,
+          0,
+          N + 1,
+          output,
+          0,
+          N
+        ),
       overlapError
     );
   },

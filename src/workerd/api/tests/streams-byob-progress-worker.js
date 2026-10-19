@@ -14,7 +14,8 @@ async function bounded(promise) {
       promise,
       new Promise((_resolve, reject) => {
         timer = setTimeout(
-          () => reject(new Error('Read did not settle after response progress')),
+          () =>
+            reject(new Error('Read did not settle after response progress')),
           1000
         );
       }),
@@ -55,7 +56,9 @@ function start(url) {
   state.reader = branches[0].getReader({ mode: 'byob' });
   state.sibling = notification.getReader();
   if (branches[1]) state.third = branches[1].getReader();
-  for (const reader of [state.reader, state.sibling, state.third].filter(Boolean)) {
+  for (const reader of [state.reader, state.sibling, state.third].filter(
+    Boolean
+  )) {
     ignore(reader.closed);
   }
   if (!url.searchParams.get('name').endsWith('Prefix')) {
@@ -71,22 +74,24 @@ async function settle(url, env, state) {
   const prefix = name.endsWith('Prefix');
   const pendingReads = name === 'pendingReads';
   const closeDuringResponse = name === 'closeDuringResponse';
-  const chunk = name === 'typedPrefix'
-    ? [102]
-    : prefix
-      ? [51]
-      : name === 'typedTail'
-        ? [68]
-        : name === 'largeEnqueue' || pendingReads
-          ? [34, 51, 68]
-          : [34];
-  const supplied = name === 'typedPrefix'
-    ? [34, 51, 68, 85]
-    : typed
-      ? [17, 34, 51]
+  const chunk =
+    name === 'typedPrefix'
+      ? [102]
       : prefix
-        ? [34]
-        : [17];
+        ? [51]
+        : name === 'typedTail'
+          ? [68]
+          : name === 'largeEnqueue' || pendingReads
+            ? [34, 51, 68]
+            : [34];
+  const supplied =
+    name === 'typedPrefix'
+      ? [34, 51, 68, 85]
+      : typed
+        ? [17, 34, 51]
+        : prefix
+          ? [34]
+          : [17];
   const view = typed
     ? new Uint16Array(new ArrayBuffer(16), 4, 4)
     : new Uint8Array(pendingReads ? 2 : 8);
@@ -99,7 +104,9 @@ async function settle(url, env, state) {
   if (prefix) {
     request.view[0] = 17;
     request.respond(1);
-    const parked = await env.SELF.fetch(`https://progress/park?${url.searchParams}`);
+    const parked = await env.SELF.fetch(
+      `https://progress/park?${url.searchParams}`
+    );
     if ((await parked.text()) !== 'sibling parked') {
       throw new Error('Sibling read was not parked');
     }
@@ -163,7 +170,9 @@ async function settle(url, env, state) {
       ),
       collect(
         state.sibling,
-        closeDuringResponse ? 0 : chunk.length + (name === 'followupPull' ? 1 : 0),
+        closeDuringResponse
+          ? 0
+          : chunk.length + (name === 'followupPull' ? 1 : 0),
         siblingRead
       ),
       state.third ? collect(state.third, 2) : [],

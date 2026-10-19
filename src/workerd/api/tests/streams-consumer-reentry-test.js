@@ -186,9 +186,10 @@ export const typedPartialResponsePreservesTail = {
       ),
       [17, 34, 51, 68]
     );
-    deepStrictEqual(Array.from((await reader.read(new Uint8Array(8))).value), [
-      85,
-    ]);
+    deepStrictEqual(
+      Array.from((await reader.read(new Uint8Array(8))).value),
+      [85]
+    );
     controller.close();
     strictEqual((await reader.read(new Uint8Array(8))).done, true);
   },

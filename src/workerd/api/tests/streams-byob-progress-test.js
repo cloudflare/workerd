@@ -8,11 +8,26 @@ const cases = {
   partial: { origin: [[17, 34]], sibling: [34] },
   bufferedSibling: { origin: [[17, 34]], sibling: [34] },
   largeEnqueue: { origin: [[17, 34, 51, 68]], sibling: [34, 51, 68] },
-  pendingReads: { origin: [[17, 34], [51, 68]], sibling: [34, 51, 68] },
+  pendingReads: {
+    origin: [
+      [17, 34],
+      [51, 68],
+    ],
+    sibling: [34, 51, 68],
+  },
   respondedPrefix: { origin: [[17, 34, 51]], sibling: [51] },
-  typedTail: { origin: [[17, 34], [51, 68]], sibling: [68] },
+  typedTail: {
+    origin: [
+      [17, 34],
+      [51, 68],
+    ],
+    sibling: [68],
+  },
   typedPrefix: {
-    origin: [[17, 34, 51, 68], [85, 102]],
+    origin: [
+      [17, 34, 51, 68],
+      [85, 102],
+    ],
     sibling: [102],
   },
   threeConsumers: {
@@ -31,9 +46,13 @@ function progressTest(name) {
       const typed = name.startsWith('typed');
       for (const method of typed ? ['respond'] : ['respond', 'new-view']) {
         const query = new URLSearchParams({ name, method });
-        const origin = await env.PROGRESS.fetch(`https://progress/origin?${query}`);
+        const origin = await env.PROGRESS.fetch(
+          `https://progress/origin?${query}`
+        );
         strictEqual(await origin.text(), 'origin complete');
-        const response = await env.PROGRESS.fetch(`https://progress/settle?${query}`);
+        const response = await env.PROGRESS.fetch(
+          `https://progress/settle?${query}`
+        );
         const result = await response.json();
         deepStrictEqual(
           result.origin.map((read) => read.bytes),
@@ -41,7 +60,11 @@ function progressTest(name) {
           `${name}/${method}`
         );
         deepStrictEqual(result.sibling, expected.sibling, `${name}/${method}`);
-        deepStrictEqual(result.third, expected.third ?? [], `${name}/${method}`);
+        deepStrictEqual(
+          result.third,
+          expected.third ?? [],
+          `${name}/${method}`
+        );
         strictEqual(result.entries, 1);
         strictEqual(result.nestedError, null);
         strictEqual(result.wrapperView, null);
@@ -51,10 +74,10 @@ function progressTest(name) {
           expected.origin.map(() => false)
         );
         if (typed) {
-          deepStrictEqual(result.origin.map((read) => read.type), [
-            'Uint16Array',
-            'Uint16Array',
-          ]);
+          deepStrictEqual(
+            result.origin.map((read) => read.type),
+            ['Uint16Array', 'Uint16Array']
+          );
           strictEqual(result.origin[0].offset, 4);
         }
         strictEqual(result.closed, true);
@@ -64,7 +87,8 @@ function progressTest(name) {
 }
 
 export const partialResponseWithEnqueue = progressTest('partial');
-export const partialResponseWithBufferedSibling = progressTest('bufferedSibling');
+export const partialResponseWithBufferedSibling =
+  progressTest('bufferedSibling');
 export const partialResponseWithLargerEnqueue = progressTest('largeEnqueue');
 export const responseDrainsPendingReads = progressTest('pendingReads');
 export const responsePreservesEarlierPrefix = progressTest('respondedPrefix');
@@ -72,7 +96,9 @@ export const typedResponseTailPrecedesEnqueue = progressTest('typedTail');
 export const typedResponsePreservesEarlierPrefix = progressTest('typedPrefix');
 export const responseOrdersThreeConsumers = progressTest('threeConsumers');
 export const revokedResponseStillPulls = progressTest('followupPull');
-export const reservedResponseFinishesBeforeClose = progressTest('closeDuringResponse');
+export const reservedResponseFinishesBeforeClose = progressTest(
+  'closeDuringResponse'
+);
 
 async function settled(promise) {
   let timer;
@@ -81,7 +107,8 @@ async function settled(promise) {
       promise,
       new Promise((_resolve, reject) => {
         timer = setTimeout(
-          () => reject(new Error('Read did not settle after response progress')),
+          () =>
+            reject(new Error('Read did not settle after response progress')),
           1000
         );
       }),
@@ -134,7 +161,10 @@ async function queuedPrefix({ revoked, typed, method }) {
   }
   const firstResult = await settled(first);
   strictEqual(firstResult.done, false);
-  deepStrictEqual(bytes(firstResult.value), typed ? [17, 34, 51, 68] : [17, 34]);
+  deepStrictEqual(
+    bytes(firstResult.value),
+    typed ? [17, 34, 51, 68] : [17, 34]
+  );
   if (typed) strictEqual(firstResult.value.byteOffset, 4);
   if (second) {
     const next = controller.byobRequest;
@@ -271,9 +301,12 @@ export const alignedShortTypedReadAtClose = {
         const reader = stream.getReader({ mode: 'byob' });
         const prefix = new Uint8Array([17, 34, 51, 68]);
         if (queuedBeforeRead) controller.enqueue(prefix);
-        const pending = reader.read(new Uint16Array(new ArrayBuffer(16), 4, 4), {
-          min: 3,
-        });
+        const pending = reader.read(
+          new Uint16Array(new ArrayBuffer(16), 4, 4),
+          {
+            min: 3,
+          }
+        );
         if (!queuedBeforeRead) controller.enqueue(prefix);
         if (exposeView) strictEqual(controller.byobRequest.view.byteOffset, 8);
         controller.close();
@@ -282,7 +315,10 @@ export const alignedShortTypedReadAtClose = {
         strictEqual(result.value.constructor, Uint16Array);
         strictEqual(result.value.byteOffset, 4);
         deepStrictEqual(bytes(result.value), [17, 34, 51, 68]);
-        strictEqual((await settled(reader.read(new Uint16Array(4)))).done, true);
+        strictEqual(
+          (await settled(reader.read(new Uint16Array(4)))).done,
+          true
+        );
         await settled(reader.closed);
       }
     }
