@@ -329,11 +329,13 @@ void expectRejected(kj::Function<CodeCacheStore::Bytes(kj::ArrayPtr<const kj::by
 }
 
 KJ_TEST("A cache whose flags hash differs is rejected before compilation") {
-  // The code cache header is a sequence of 32-bit words: magic number, version hash, source hash,
-  // flags hash, read-only snapshot checksum, payload length and payload checksum.
+  // V8's SerializedCodeData header starts with 32-bit magic and version words, followed by a
+  // 256-bit source hash and the 32-bit flags hash.
   expectRejected([](kj::ArrayPtr<const kj::byte> bytes) {
     auto copy = kj::heapArray(bytes);
-    copy[12] ^= 1;
+    constexpr size_t flagsHashOffset = 2 * sizeof(uint32_t) + 32;
+    KJ_ASSERT(copy.size() > flagsHashOffset);
+    copy[flagsHashOffset] ^= 1;
     return CodeCacheStore::Bytes(kj::mv(copy));
   }, CompatibilityCheckResult::kFlagsMismatch);
 }
