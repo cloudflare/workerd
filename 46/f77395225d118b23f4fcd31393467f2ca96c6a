@@ -1,0 +1,29 @@
+src/workerd/tests/BUILD.bazel
+  s_1e024e77d05daf::t_a9eb8b00bd83f2 39
+src/workerd/io/worker-interface.h
+  s_313a31aedf23dd::t_3d78a74fad23c5 23-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "46f77395225d118b23f4fcd31393467f2ca96c6a",
+  "prompts": {},
+  "sessions": {
+    "s_1e024e77d05daf": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fdb02ef23ffeK04umsMAByNDsE",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_313a31aedf23dd": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fcbe3c50fffe2n0SS9S2tgJDBh",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

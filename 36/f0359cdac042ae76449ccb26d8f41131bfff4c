@@ -1,0 +1,39 @@
+src/workerd/util/sqlite-test.c++
+  s_b0ec58b9f961bf::t_b3775f5cf82175 8
+  s_b0ec58b9f961bf::t_caeb6c1773f1db 111,430
+  s_7d609c0c90c406::t_39e6b3b128c9f2 1147
+src/workerd/util/sqlite.c++
+  s_7d609c0c90c406::t_39e6b3b128c9f2 740
+  s_b0ec58b9f961bf::t_6fc4dc9929269e 1214
+  s_b0ec58b9f961bf::t_caeb6c1773f1db 1223,1225-1227,1229,1231,1248-1255,1288,1290-1291,1293
+  s_b0ec58b9f961bf::t_6cbc96f89945da 1213,1224,1289,1310-1312
+  s_b0ec58b9f961bf::t_17e07675fcaa2e 1294
+  s_b0ec58b9f961bf::t_104ed70f5aea8e 1313
+src/workerd/api/sql.c++
+  s_b0ec58b9f961bf::t_5974ce7212c852 139-141
+  s_b0ec58b9f961bf::t_caeb6c1773f1db 11,138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "36f0359cdac042ae76449ccb26d8f41131bfff4c",
+  "prompts": {},
+  "sessions": {
+    "s_7d609c0c90c406": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fa2196cefffeVkJ5vJOz86BSa6",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": null
+    },
+    "s_b0ec58b9f961bf": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fa6ae2039ffeT6jAWgdvM1tYhn",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Josh Howard <jhoward@cloudflare.com>"
+    }
+  }
+}

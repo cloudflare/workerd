@@ -1,0 +1,29 @@
+src/workerd/api/http.c++
+  s_1e53911e7fcf94::t_880644ec1257cf 2320-2321,2331,2334-2341,2345-2352,2732-2742,2744-2745,2763
+src/workerd/api/http.h
+  s_1e53911e7fcf94::t_c3278763388c37 339-344,439-440
+src/workerd/api/worker-rpc.h
+  s_1e53911e7fcf94::t_934e5d457f8071 17,312-313,350-351,447-448,560-561
+src/workerd/tests/test-fixture.c++
+  s_1e53911e7fcf94::t_e975a1c9eff418 405-406,433-434
+src/workerd/tests/test-fixture.h
+  s_1e53911e7fcf94::t_d41a1d4d7d69c8 277
+src/workerd/util/autogate.h
+  s_1e53911e7fcf94::t_7ddfcb47e5abd8 96-100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "86596bbbad05cb69327d6c2fa0e5a74d94c2cf0e",
+  "prompts": {},
+  "sessions": {
+    "s_1e53911e7fcf94": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f5b2867c7ffezdqHlya2kQfmcv",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

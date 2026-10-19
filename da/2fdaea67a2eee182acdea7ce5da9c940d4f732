@@ -1,0 +1,19 @@
+build/deps/gen/deps.MODULE.bazel
+  s_ad98b07a2ebbe9::t_ba821ed0d3c0cd 30-31,33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "da2fdaea67a2eee182acdea7ce5da9c940d4f732",
+  "prompts": {},
+  "sessions": {
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

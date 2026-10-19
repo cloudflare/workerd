@@ -1,0 +1,47 @@
+src/workerd/api/worker-rpc.c++
+  s_f70c3d9c923e90::t_81bffdbcce8a63 2058-2059,2249,2705-2710,3073-3147,3262-3263,3307-3309,3313-3326,3332-3346
+src/workerd/api/global-scope.c++
+  s_f70c3d9c923e90::t_a1e5f2560f8844 34,205-216
+src/workerd/io/observer.h
+  s_f70c3d9c923e90::t_b3128ec2802e25 33-35,218-221
+src/workerd/io/worker-entrypoint.c++
+  s_f70c3d9c923e90::t_ef2c6466d5c35d 494-498
+types/defines/durable-objects.d.ts
+  s_f70c3d9c923e90::t_020797703fe010 7-8
+  s_f70c3d9c923e90::t_fa96e9062acf58 9
+types/generated-snapshot/index.d.ts
+  s_f70c3d9c923e90::t_054891b231b08e 14974
+  s_f70c3d9c923e90::t_468271e5d23449 14972-14973
+src/workerd/api/actor-fetch-retry-test.c++
+  s_f70c3d9c923e90::t_519bc302b2e0eb 13,1421-1561,1564-1568,1571-1574,1576-1659
+  s_f70c3d9c923e90::t_c9094deced0106 1562-1563,1569-1570,1575
+types/generated-snapshot/experimental/index.d.ts
+  s_f70c3d9c923e90::t_618ab994ed5d54 15257
+  s_f70c3d9c923e90::t_b2447fd51aa695 15255-15256
+src/workerd/api/global-scope.h
+  s_f70c3d9c923e90::t_7b6ca4349724fb 22,614-616,619-622
+src/workerd/api/jsrpc-call-plan-test.c++
+  s_f70c3d9c923e90::t_1f27ebf6ad085b 781,783,791,906-908,911,914-1035,1038-1042,1045-1060,1063-1066,1069-1082,1085-1099,1102-1106,1109-1139
+  s_f70c3d9c923e90::t_3eb2944233f98f 909-910,912-913,1036-1037,1043-1044,1061-1062,1067-1068,1083-1084,1100-1101,1107-1108
+src/workerd/io/worker-entrypoint-test.c++
+  s_f70c3d9c923e90::t_d62684b5381afd 310-311,317-318
+  s_f70c3d9c923e90::t_1d273c41a710da 9,135,138,147,302,307-309,312-316,319-347
+src/workerd/api/jsrpc-call-retry-test.c++
+  s_f70c3d9c923e90::t_c3d7b756f23991 69,289-290,292,603-653
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1f5432b176fe642a8ca376356b18b5510b414c26",
+  "prompts": {},
+  "sessions": {
+    "s_f70c3d9c923e90": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2fdf8364ffeOHX8yTIJunIGkw",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

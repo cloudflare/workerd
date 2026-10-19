@@ -1,0 +1,35 @@
+build/rust/build_std.bzl
+  s_0b06bab0bca86e::t_7b461ab3c37d64 86,106,128,132-135,143
+build/rust/build_std.sh
+  s_0b06bab0bca86e::t_13b58dce993b8c 17,24-25,41-43,111
+build/rust/sanitizer_toolchain.bzl
+  s_0b06bab0bca86e::t_6dc5b0da803530 5,11-15,17-75,77-82,84-87,91-92,94,100-102,104-105,112-113,115,117-118,120,122,124-128,130,132,134,136-137,143,145
+src/rust/asan/heap_buffer_overflow.rs
+  s_0b06bab0bca86e::t_3e43cbf1fbff81 1-35
+.bazelrc
+  s_0b06bab0bca86e::t_58304d040eef5c 246-247,250-252,261-263
+build/deps/rust.MODULE.bazel
+  s_0b06bab0bca86e::t_77bf21349445b8 35
+build/rust/BUILD.bazel
+  s_0b06bab0bca86e::t_4fe01838fd1600 1,5-27,29-30,33,35-36
+src/rust/asan/BUILD.bazel
+  s_0b06bab0bca86e::t_7b4fc30c62d3b6 1-11
+src/rust/cxx/AGENTS.md
+  s_0b06bab0bca86e::t_41c0b43ae87765 96-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "97d4153b4416c71b725dbbdb36b2e79131f4f893",
+  "prompts": {},
+  "sessions": {
+    "s_0b06bab0bca86e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9c119bf4-5a11-4cf5-8efd-8fa67b483b3e",
+        "model": "claude-watermelon-eap"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

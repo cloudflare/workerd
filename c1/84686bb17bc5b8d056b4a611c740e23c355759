@@ -1,0 +1,27 @@
+src/workerd/api/actor-call-retry-test.c++
+  s_ba99c3d31db716::t_8f00ceb1bbeb4d 54-57,61,222-223,228,412-414,423-475
+src/workerd/api/actor-call-retry.c++
+  s_ba99c3d31db716::t_fceeb6ab191cfc 14-31,89-90,97,120,124,170-171,173,177-183
+src/workerd/api/actor-call-retry.h
+  s_ba99c3d31db716::t_a101caf36d4c79 126-128,185-187
+src/workerd/api/worker-rpc.c++
+  s_ba99c3d31db716::t_0ad940619bd859 560-561,1078-1079
+src/workerd/io/observer.h
+  s_ba99c3d31db716::t_557a14cb28e063 53-65,225-230
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "c184686bb17bc5b8d056b4a611c740e23c355759",
+  "prompts": {},
+  "sessions": {
+    "s_ba99c3d31db716": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ef430b2c9ffexQnmJf281UfNnX",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

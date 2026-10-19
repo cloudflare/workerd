@@ -1,0 +1,27 @@
+.github/workflows/test.yml
+  s_ad98b07a2ebbe9::t_408feb262b66a3 121-139
+BUILD.bazel
+  s_ad98b07a2ebbe9::t_148d24bafb3d4a 134,141-143,149
+compile_flags.txt
+  s_ad98b07a2ebbe9::t_8cf4a6266fbdb6 83
+src/workerd/server/AGENTS.md
+  s_ad98b07a2ebbe9::t_8a2e1cc0f109f0 31-52
+src/workerd/util/AGENTS.md
+  s_ad98b07a2ebbe9::t_13302710a5bc34 44-52
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3633be556693a9b58c71bd8a1d70dd73ab2f9a7f",
+  "prompts": {},
+  "sessions": {
+    "s_ad98b07a2ebbe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6a08ce34-c31d-417a-bda6-d204e066dd3c",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

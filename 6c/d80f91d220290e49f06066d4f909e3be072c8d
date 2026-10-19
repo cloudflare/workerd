@@ -1,0 +1,32 @@
+types/generated-snapshot/index.d.ts
+  s_89cf167df5318a::t_2e528f92c26603 844,982
+types/generated-snapshot/index.ts
+  s_89cf167df5318a::t_2e528f92c26603 850,988
+src/workerd/api/tests/opennextjs/README.md
+  s_89cf167df5318a::t_9a6aea69dec684 47
+types/generated-snapshot/experimental/index.d.ts
+  s_89cf167df5318a::t_2e528f92c26603 869,1007
+types/generated-snapshot/experimental/index.ts
+  s_89cf167df5318a::t_2e528f92c26603 875,1013
+src/workerd/api/tests/opennextjs/opennext-ssr-test.wd-test
+  s_89cf167df5318a::t_8b781a1b19e912 18
+types/test/index.spec.ts
+  s_89cf167df5318a::t_44d9f6a53b33cf 152
+  s_89cf167df5318a::t_f5617c84fd4a4f 145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6cd80f91d220290e49f06066d4f909e3be072c8d",
+  "prompts": {},
+  "sessions": {
+    "s_89cf167df5318a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_01301d38fffeWoHoPSEzS9t7G2",
+        "model": "claude-opus-5"
+      },
+      "human_author": null
+    }
+  }
+}

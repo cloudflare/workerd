@@ -1,0 +1,21 @@
+src/workerd/api/http.c++
+  s_80fd8e845a3525::t_6fe50ddb3c24d0 1867
+src/workerd/tests/test-fixture.h
+  s_80fd8e845a3525::t_3c09735b321027 63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "17d22bea8012f117257084f98a5dfe0ff2fe1da4",
+  "prompts": {},
+  "sessions": {
+    "s_80fd8e845a3525": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f6e9d45fbffe5iEZ6BSRFX4oBB",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

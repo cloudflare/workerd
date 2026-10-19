@@ -1,0 +1,31 @@
+types/defines/images.d.ts
+  s_66767b9e401d0e::t_6df069841e664a 22-24
+  s_66767b9e401d0e::t_40ea3d0668e17a 14,16,20
+  s_66767b9e401d0e::t_7656aec64adebe 15,17-19,21
+  s_66767b9e401d0e::t_c2f4c41b1d0f23 25-27
+src/cloudflare/internal/images-api.ts
+  s_66767b9e401d0e::t_3038c16b13933a 148
+  s_66767b9e401d0e::t_5adc189c0e56f0 214
+  s_66767b9e401d0e::t_3dcad9e80a6a55 15-16
+  s_66767b9e401d0e::t_a621496155545f 17-19
+  s_66767b9e401d0e::t_1717f6062cc223 145-147
+  s_66767b9e401d0e::t_7bc01370786186 149-151
+  s_66767b9e401d0e::t_a749e58b9b6c14 211-213
+  s_66767b9e401d0e::t_ad0b5d0b8b7c21 215-217
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3e8d3077802f65b88f6e73ce3e84eccb9a75c299",
+  "prompts": {},
+  "sessions": {
+    "s_66767b9e401d0e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0dcbb83c4ffeQ8K1jA4PhRRlgt",
+        "model": "@cf/moonshotai/kimi-k2.6"
+      },
+      "human_author": null
+    }
+  }
+}
