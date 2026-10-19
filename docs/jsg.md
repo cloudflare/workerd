@@ -249,6 +249,25 @@ jsg::NewContextOptions options {
 auto context = lock.newContext<MyGlobalObject>(options, constructorArg1, constructorArg2);
 ```
 
+#### Additional VM realms
+
+The experimental Node VM implementation creates contexts without a JSG global wrapper.
+Their traced `OWNER_CONTEXT` slot retains the worker context. Global receiver fallback
+and type-wrapper selection follow that owner, so a host API called from a VM realm still
+uses the worker's configuration. A new realm does not grant code-generation permission.
+Its string and Wasm settings can further restrict the isolate's existing permission.
+
+VM module callbacks run through `ContextModuleCallbacks` before either worker module
+registry handles an import. The context retains its callback resource through a traced
+embedder-data slot. Compiled units retain unique symbols in their host-defined options;
+a private WeakMap uses those symbols to retain callbacks and native module wrappers.
+Keep these edges weak when the compiled unit is unreachable. A context-wide strong table
+would retain every module compiled during a long-lived invocation. Request-local VM module
+evaluation preserves the caller's I/O context, holds `Lock::ModuleEvaluationScope`, and
+returns its promise without draining microtasks. It can perform I/O before its first await,
+including from a synthetic evaluation callback. Worker startup still has no I/O context,
+and shared worker-registry evaluation continues to suppress it.
+
 ### Using the Lock
 
 The `Lock` class provides access to type wrapping and unwrapping:

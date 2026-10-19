@@ -787,6 +787,24 @@ wd_test(
 )
 
 wd_test(
+    src = "vm-nodejs-test.wd-test",
+    args = ["--experimental"],
+    data = ["vm-nodejs-test.js"],
+)
+
+wd_test(
+    src = "vm-codegen-policy-test.wd-test",
+    args = ["--experimental"],
+    data = ["vm-codegen-policy-test.js"],
+)
+
+wd_test(
+    src = "vm-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["vm-gc-test.js"],
+)
+
+wd_test(
     src = "domain-nodejs-test.wd-test",
     args = ["--experimental"],
     data = ["domain-nodejs-test.js"],

@@ -39,7 +39,6 @@ import {
   validateStringArray,
   validateUint32,
   kValidateObjectAllowArray,
-  kValidateObjectAllowNullable,
 } from 'node-internal:validators';
 
 import { Buffer } from 'node-internal:internal_buffer';
@@ -54,6 +53,21 @@ import type {
   MemoryMeasurement,
 } from 'node:vm';
 
+import nativeVm from 'node-internal:vm';
+import type * as NativeVm from 'node-internal:vm';
+import {
+  Module as VmModule,
+  SourceTextModule as VmSourceTextModule,
+  SyntheticModule as VmSyntheticModule,
+  contexts,
+  realVmEnabled,
+  dynamicImportCallback,
+  validateRunOptions,
+} from 'node-internal:internal_vm_module';
+export const Module = realVmEnabled ? VmModule : undefined;
+export const SourceTextModule = realVmEnabled ? VmSourceTextModule : undefined;
+export const SyntheticModule = realVmEnabled ? VmSyntheticModule : undefined;
+
 export const constants = {
   __proto__: null,
   USE_MAIN_CONTEXT_DEFAULT_LOADER: Symbol(
@@ -65,12 +79,15 @@ Object.freeze(constants);
 
 const kContextSymbol = Symbol('vm_context_symbol');
 
-export function isContext(object: unknown): boolean {
+export function isContext(object: unknown): object is object {
   validateObject(object, 'object', kValidateObjectAllowArray);
-  return kContextSymbol in object && object[kContextSymbol] === true;
+  return realVmEnabled
+    ? contexts.has(object)
+    : kContextSymbol in object && object[kContextSymbol] === true;
 }
 
 export class Script {
+  #script: NativeVm.VmScript | undefined;
   cachedDataRejected: undefined | boolean = undefined;
   cachedDataProduced: undefined | boolean = undefined;
   cachedData: undefined | Buffer = undefined;
@@ -93,7 +110,11 @@ export class Script {
       importModuleDynamically = false,
     } = options;
 
-    validateBoolean(importModuleDynamically, 'options.importModuleDynamically');
+    if (!realVmEnabled)
+      validateBoolean(
+        importModuleDynamically,
+        'options.importModuleDynamically'
+      );
     validateString(filename, 'options.filename');
     validateInt32(lineOffset, 'options.lineOffset');
     validateInt32(columnOffset, 'options.columnOffset');
@@ -101,10 +122,32 @@ export class Script {
       validateBuffer(cachedData, 'options.cachedData');
     }
     validateBoolean(produceCachedData, 'options.produceCachedData');
+    if (realVmEnabled) {
+      if (cachedData !== undefined)
+        throw new ERR_METHOD_NOT_IMPLEMENTED('options.cachedData');
+      this.#script = nativeVm.compileScript(
+        _code,
+        filename,
+        lineOffset,
+        columnOffset,
+        {
+          importModuleDynamically: dynamicImportCallback(
+            options.importModuleDynamically,
+            () => this
+          ),
+        }
+      );
+      if (produceCachedData) {
+        this.cachedData = this.createCachedData();
+        this.cachedDataProduced = true;
+      }
+    }
   }
 
   createCachedData(): Buffer {
-    return Buffer.alloc(0);
+    return this.#script === undefined
+      ? Buffer.alloc(0)
+      : Buffer.from(this.#script.createCachedData());
   }
 
   runInThisContext(options: RunningScriptOptions = {}): unknown {
@@ -114,6 +157,10 @@ export class Script {
     validateBoolean(displayErrors, 'options.displayErrors');
     if (timeout !== undefined) {
       validateUint32(timeout, 'options.timeout', true);
+    }
+    if (this.#script !== undefined) {
+      validateRunOptions(options);
+      return this.#script.run();
     }
     throw new ERR_METHOD_NOT_IMPLEMENTED('runInThisContext');
   }
@@ -130,11 +177,15 @@ export class Script {
     if (timeout !== undefined) {
       validateUint32(timeout, 'options.timeout', true);
     }
+    if (this.#script !== undefined) {
+      validateRunOptions(options);
+      return this.#script.run(contexts.get(contextifiedObject));
+    }
     throw new ERR_METHOD_NOT_IMPLEMENTED('runInThisContext');
   }
 
   runInNewContext(
-    contextObject: object | symbol,
+    contextObject: object | symbol = {},
     options: RunningScriptInNewContextOptions = {}
   ): unknown {
     const context = createContext(contextObject, getContextOptions(options));
@@ -184,7 +235,7 @@ function getContextOptions(
 }
 
 export function createContext(
-  contextObject = {},
+  contextObject: object | symbol = {},
   options: CreateContextOptions = {}
 ): object {
   if (contextObject !== constants.DONT_CONTEXTIFY && isContext(contextObject)) {
@@ -205,7 +256,8 @@ export function createContext(
   if (origin !== undefined) validateString(origin, 'options.origin');
   if (codeGeneration !== undefined)
     validateObject(codeGeneration, 'options.codeGeneration');
-  validateBoolean(importModuleDynamically, 'options.importModuleDynamically');
+  if (!realVmEnabled)
+    validateBoolean(importModuleDynamically, 'options.importModuleDynamically');
 
   let strings = true;
   let wasm = true;
@@ -222,6 +274,22 @@ export function createContext(
     'afterEvaluate',
     undefined,
   ]);
+
+  if (realVmEnabled) {
+    if (microtaskMode !== undefined)
+      throw new ERR_METHOD_NOT_IMPLEMENTED('options.microtaskMode');
+    if (options.importModuleDynamically !== undefined)
+      throw new ERR_METHOD_NOT_IMPLEMENTED('options.importModuleDynamically');
+    let sandbox: object | undefined;
+    if (contextObject !== constants.DONT_CONTEXTIFY) {
+      validateObject(contextObject, 'contextObject', kValidateObjectAllowArray);
+      sandbox = contextObject;
+    }
+    const context = nativeVm.createContext(sandbox, strings, wasm);
+    const result = sandbox ?? context.getGlobal();
+    contexts.set(result, context);
+    return result;
+  }
 
   return Object.create(null, {
     [kContextSymbol]: {
@@ -253,7 +321,7 @@ export function runInContext(
 
 export function runInNewContext(
   code: string,
-  contextObject: object | RunningScriptInNewContextOptions | symbol,
+  contextObject: object | RunningScriptInNewContextOptions | symbol = {},
   options?: RunningScriptInNewContextOptions | string
 ): unknown {
   if (typeof options === 'string') {
@@ -308,7 +376,8 @@ export function compileFunction(
   if (cachedData !== undefined)
     validateBuffer(cachedData, 'options.cachedData');
   validateBoolean(produceCachedData, 'options.produceCachedData');
-  validateBoolean(importModuleDynamically, 'options.importModuleDynamically');
+  if (!realVmEnabled)
+    validateBoolean(importModuleDynamically, 'options.importModuleDynamically');
   if (parsingContext !== undefined) {
     if (
       typeof parsingContext !== 'object' ||
@@ -323,11 +392,35 @@ export function compileFunction(
     }
   }
   validateArray(contextExtensions, 'options.contextExtensions');
-  contextExtensions.forEach((extension, i) => {
+  const extensions: object[] = [];
+  contextExtensions.forEach((extension: unknown, i) => {
+    if (extension === null) return;
     const name = `options.contextExtensions[${i}]`;
-    validateObject(extension, name, kValidateObjectAllowNullable);
+    validateObject(extension, name);
+    extensions.push(extension);
   });
 
+  if (realVmEnabled) {
+    if (cachedData !== undefined || produceCachedData)
+      throw new ERR_METHOD_NOT_IMPLEMENTED('compileFunction cachedData');
+    const callbacks = {
+      importModuleDynamically: dynamicImportCallback(
+        options.importModuleDynamically,
+        (): unknown => fn
+      ),
+    };
+    const fn = nativeVm.compileFunction(
+      code,
+      params,
+      filename,
+      lineOffset,
+      columnOffset,
+      parsingContext === undefined ? undefined : contexts.get(parsingContext),
+      extensions,
+      callbacks
+    );
+    return fn;
+  }
   throw new ERR_METHOD_NOT_IMPLEMENTED('compileFunction');
 }
 
@@ -352,6 +445,5 @@ export default {
   compileFunction,
   measureMemory,
   constants,
-  // TODO(later): They are still experimental, but eventually we should have non-op
-  // exports for vm.Module, vm.SourceTextModule, and vm.SyntheticModule
+  ...(realVmEnabled ? { Module, SourceTextModule, SyntheticModule } : {}),
 };

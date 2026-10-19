@@ -1405,6 +1405,12 @@ wd_test(
 )
 
 wd_test(
+    src = "worker-loader-vm-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-loader-vm-test.js"],
+)
+
+wd_test(
     src = "worker-loader-wasm-test.wd-test",
     args = ["--experimental"],
     data = [

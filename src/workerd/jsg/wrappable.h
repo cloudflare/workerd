@@ -58,13 +58,14 @@ enum class ContextPointerSlot : int {
   EXTENDED_CONTEXT_WRAPPER = 2,
   VIRTUAL_FILE_SYSTEM = 3,
   BOOTSTRAP_STATE = 4,
+  CONTEXT_MODULE_CALLBACKS = 5,
   // Keep the MAX_POINTER_SLOT as the last entry and always set to
   // to the highest value of the other entries. We use this to
   // ensure that the highest used index is always initialized in
   // every context we create without having to update the specific
   // callsites whenever we add a new slot. We can just make the
   // change here.
-  MAX_POINTER_SLOT = BOOTSTRAP_STATE,
+  MAX_POINTER_SLOT = CONTEXT_MODULE_CALLBACKS,
 };
 
 // V2 (Local<Data>) embedder data slots. Read/written via
@@ -81,6 +82,12 @@ enum class ContextDataSlot : int {
   CONSOLE_ORIGINAL_INFO,
   CONSOLE_ORIGINAL_LOG,
   CONSOLE_ORIGINAL_WARN,
+  // Child realms keep their owner and callback resource alive through traced V8 edges.
+  OWNER_CONTEXT,
+  CONTEXT_MODULE_RESOURCE,
+  // Optional per-realm restrictions. True never grants permission denied by the isolate.
+  CODE_GENERATION_STRINGS,
+  CODE_GENERATION_WASM,
 };
 
 // Returns the slot holding the saved original of the i'th decorated console method, counting
@@ -97,7 +104,17 @@ inline void setContextDataSlot(
 
 inline v8::Local<v8::Data> getContextDataSlot(
     v8::Local<v8::Context> context, ContextDataSlot slot) {
-  return context->GetEmbedderDataV2(static_cast<int>(slot));
+  auto index = static_cast<int>(slot);
+  if (context->GetNumberOfEmbedderDataFields() <= index) return {};
+  return context->GetEmbedderDataV2(index);
+}
+
+inline v8::Local<v8::Context> getOwnerContext(v8::Local<v8::Context> context) {
+  for (;;) {
+    auto owner = getContextDataSlot(context, ContextDataSlot::OWNER_CONTEXT);
+    if (owner.IsEmpty() || !owner->IsContext()) return context;
+    context = owner.As<v8::Context>();
+  }
 }
 
 inline void setAlignedPointerInEmbedderData(
@@ -681,9 +698,11 @@ T& extractInternalPointer(v8::Isolate* isolate,
     KJ_IF_SOME(w, Wrappable::tryUnwrapGlobalReceiver(isolate, object)) {
       return downcastWrappable<T>(w);
     }
-    // Fall back to the current context's global for the Fast API and instance properties callbacks.
+    // A VM realm has ordinary intrinsics rather than a WorkerGlobalScope wrapper. Host
+    // methods called from that realm still belong to the owning worker's global scope.
+    auto ownerContext = getOwnerContext(context);
     return downcastWrappable<T>(
-        KJ_ASSERT_NONNULL(Wrappable::tryUnwrapGlobalReceiver(isolate, context->Global())));
+        KJ_ASSERT_NONNULL(Wrappable::tryUnwrapGlobalReceiver(isolate, ownerContext->Global())));
   } else {
     // A tag outside the range for the type this dispatch site expects is an invariant violation
     // (an object whose CppHeap handle names an unrelated type), so this aborts

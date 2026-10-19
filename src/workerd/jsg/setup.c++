@@ -671,6 +671,10 @@ void IsolateBase::oomError(const char* location, const v8::OOMDetails& oom) {
 
 v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
     v8::Local<v8::Context> context, v8::Local<v8::Value> source, bool isCodeLike) {
+  auto permission = getContextDataSlot(context, ContextDataSlot::CODE_GENERATION_STRINGS);
+  if (!permission.IsEmpty() && permission->IsValue() && permission.As<v8::Value>()->IsFalse()) {
+    return {.codegen_allowed = false, .modified_source = {}};
+  }
   // For undefined sources (e.g. eval() with no argument or eval(undefined)),
   // there is no code generation from strings. V8 returns undefined as-is per spec.
   // We allow it through without further checks.
@@ -729,6 +733,9 @@ v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
 }
 
 bool IsolateBase::allowWasmCallback(v8::Local<v8::Context> context, v8::Local<v8::String> source) {
+  auto permission = getContextDataSlot(context, ContextDataSlot::CODE_GENERATION_WASM);
+  if (!permission.IsEmpty() && permission->IsValue() && permission.As<v8::Value>()->IsFalse())
+    return false;
   // Don't allow WASM unless arbitrary eval() is allowed.
   IsolateBase* self =
       static_cast<IsolateBase*>(v8::Isolate::GetCurrent()->GetData(SET_DATA_ISOLATE_BASE));

@@ -1298,6 +1298,9 @@ v8::MaybeLocal<v8::Promise> SyntheticModule::evaluationSteps(
 // Set up the special `import.meta` property for the module.
 void importMeta(
     v8::Local<v8::Context> context, v8::Local<v8::Module> module, v8::Local<v8::Object> meta) {
+  KJ_IF_SOME(callbacks, getContextModuleCallbacks(context)) {
+    if (callbacks.initializeImportMeta(context, module, meta)) return;
+  }
   auto& js = Lock::current();
   auto& registry = IsolateModuleRegistry::from(js.v8Isolate);
   try {
@@ -1428,6 +1431,12 @@ v8::MaybeLocal<v8::Promise> dynamicImportModuleCallback(v8::Local<v8::Context> c
     v8::Local<v8::String> specifier,
     SourcePhase isSourcePhase,
     v8::Local<v8::FixedArray> import_attributes) {
+  KJ_IF_SOME(callbacks, getContextModuleCallbacks(context)) {
+    KJ_IF_SOME(result,
+        callbacks.importDynamically(context, host_defined_options, specifier, import_attributes)) {
+      return result;
+    }
+  }
   auto& js = Lock::current();
 
   // Since this method is called directly by V8, we don't want to use jsg::check

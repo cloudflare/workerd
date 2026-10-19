@@ -1237,6 +1237,7 @@ class Isolate: public IsolateBase {
     if (KJ_LIKELY(!hasExtraWrappers)) {
       return wrappers[0].get();
     } else {
+      context = jsg::getOwnerContext(context);
       KJ_IF_SOME(data,
           jsg::getAlignedPointerFromEmbedderData<TypeWrapper>(
               context, ContextPointerSlot::EXTENDED_CONTEXT_WRAPPER)) {

@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [(
+    name = "worker-loader-vm-test",
+    worker = (
+      modules = [(name = "worker", esModule = embed "worker-loader-vm-test.js")],
+      compatibilityFlags = [
+        "nodejs_compat", "nodejs_compat_v2", "enable_nodejs_vm_module",
+        "enable_nodejs_vm_context", "rpc", "enable_ctx_exports", "experimental"
+      ],
+      bindings = [(name = "loader", workerLoader = ())],
+    ),
+  )],
+);

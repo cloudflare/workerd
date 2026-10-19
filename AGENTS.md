@@ -292,7 +292,7 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 - **NEVER** use boolean arguments; prefer `WD_STRONG_BOOL`
 - `Ref<T>` stored in C++ objects visible from JS heap **MUST** implement `visitForGc()`; C++ reference cycles are **NEVER** collected
 - SQLite `SQLITE_MISUSE` errors always throw (never suppressed); transactions disallowed in DO SQLite
-- Module evaluation **MUST NOT** be in an IoContext; async I/O is **FORBIDDEN** in global scope
+- Worker startup module evaluation **MUST NOT** be in an IoContext; async I/O is **FORBIDDEN** in global scope. Request-local `node:vm` evaluation preserves the caller's IoContext; see `docs/jsg.md` under Additional VM realms.
 - **NEVER** use generic names for top-level ambient types in `types/defines/` (e.g., `Identity`, `Preview`, `Config`); always prefix with the product/feature name (e.g., `CloudflareAccessIdentity`, `TracePreviewInfo`, `AiSearchConfig`)
 - **NEVER** use bare `object` as a type in `types/defines/`; use a proper interface with known fields (optionally extending `Record<string, unknown>` for forward-compatibility)
 - **NEVER** edit `types/generated-snapshot/` directly; fix the source layer and run `just generate-types`

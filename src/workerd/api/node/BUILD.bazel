@@ -43,6 +43,7 @@ wd_cc_library(
         "process.c++",
         "timers.c++",
         "util.c++",
+        "vm.c++",
         "zlib-util.c++",
     ],
     hdrs = [
@@ -56,6 +57,7 @@ wd_cc_library(
         "process.h",
         "timers.h",
         "util.h",
+        "vm.h",
         "zlib-util.h",
     ],
     implementation_deps = [

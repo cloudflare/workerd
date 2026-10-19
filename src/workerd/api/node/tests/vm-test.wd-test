@@ -7,7 +7,7 @@ const unitTests :Workerd.Config = (
         modules = [
           (name = "worker", esModule = embed "vm-test.js")
         ],
-        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "enable_nodejs_vm_module", "experimental"]
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2", "enable_nodejs_vm_module", "disable_nodejs_vm_context", "experimental"]
       )
     ),
   ],

@@ -1717,4 +1717,15 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # the origin's Cache-Control (for example, an origin `no-store` gets cached as `no-cache`). When
   # enabled, the cache option no longer sets `cf.cacheControl`. To override the origin's
   # Cache-Control, omit the `cache` option and use `cf.cacheControl` instead.
+
+  enableNodeJsVmContext @195 :Bool
+      $compatEnableFlag("enable_nodejs_vm_context")
+      $compatDisableFlag("disable_nodejs_vm_context")
+      $experimental;
+  # Enables native V8 contexts and modules in node:vm. Code compilation still requires
+  # the isolate's explicit code-generation permission. The vm module otherwise keeps
+  # its existing stub behavior.
+  # Unsupported options throw: timeout, breakOnSigint, microtaskMode, cached-data inputs,
+  # compileFunction cached-data production, SourceTextModule.createCachedData,
+  # USE_MAIN_CONTEXT_DEFAULT_LOADER, createContext importModuleDynamically, and source-phase imports.
 }

@@ -4,6 +4,7 @@
 #include "diagnostics-channel.h"
 #include "inspector.h"
 #include "module-source.h"
+#include "vm.h"
 #include "zlib-util.h"
 
 #include <workerd/api/node/async-hooks.h>
@@ -37,7 +38,8 @@ namespace workerd::api::node {
   V(ZlibUtil, "node-internal:zlib")                                                                \
   V(TimersUtil, "node-internal:timers")                                                            \
   V(SqliteUtil, "node-internal:sqlite")                                                            \
-  V(InspectorModule, "node-internal:inspector")
+  V(InspectorModule, "node-internal:inspector")                                                    \
+  V(VmUtil, "node-internal:vm")
 
 // Add to the NODEJS_MODULES_EXPERIMENTAL list any currently in-development
 // node.js compat C++ modules that should be guarded by the experimental compat
@@ -49,6 +51,8 @@ namespace workerd::api::node {
 // functionality is gated at runtime: a Connection can only be created when the experimental
 // `enable_nodejs_inspector_local_dev` flag created the isolate's V8 inspector, and never in a
 // multi-tenant production process.
+// `node-internal:vm` is also always registered so the public layer can preserve legacy stubs
+// without an experimental flag. Its native constructors require enable_nodejs_vm_context.
 #define NODEJS_MODULES_EXPERIMENTAL(V)
 
 bool isNodeJsCompatEnabled(auto featureFlags) {
@@ -402,4 +406,4 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(
       EW_NODE_DIAGNOSTICCHANNEL_ISOLATE_TYPES, EW_NODE_ASYNCHOOKS_ISOLATE_TYPES,                   \
       EW_NODE_UTIL_ISOLATE_TYPES, EW_NODE_PROCESS_ISOLATE_TYPES, EW_NODE_ZLIB_ISOLATE_TYPES,       \
       EW_NODE_MODULE_ISOLATE_TYPES, EW_NODE_TIMERS_ISOLATE_TYPES, EW_NODE_SQLITE_ISOLATE_TYPES,    \
-      EW_NODE_INSPECTOR_ISOLATE_TYPES
+      EW_NODE_INSPECTOR_ISOLATE_TYPES, EW_NODE_VM_ISOLATE_TYPES

@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
+  services = [(
+    name = "vm-gc-test",
+    worker = (
+      modules = [(name = "worker", esModule = embed "vm-gc-test.js")],
+      compatibilityFlags = [
+        "nodejs_compat", "nodejs_compat_v2", "enable_nodejs_vm_module", "enable_nodejs_vm_context",
+        "allow_insecure_inefficient_logged_eval", "enable_weak_ref", "experimental"
+      ]
+    )
+  )],
+);

@@ -23,6 +23,36 @@ namespace workerd::jsg {
 template <typename T>
 class Promise;
 
+// Additional realms can supply module callbacks without replacing the isolate's worker loader.
+// The context must retain the implementation in a traced embedder-data slot.
+class ContextModuleCallbacks {
+ public:
+  // True means this context handled the module, including a pending V8 exception.
+  // False lets the worker registry initialize import.meta for its own modules.
+  virtual bool initializeImportMeta(
+      v8::Local<v8::Context> context, v8::Local<v8::Module> module, v8::Local<v8::Object> meta) = 0;
+  // None delegates to the worker registry. A present result handles the import, with
+  // an empty MaybeLocal propagating a pending V8 exception or termination.
+  // Implementations run directly under V8 and must not unwind C++ exceptions.
+  virtual kj::Maybe<v8::MaybeLocal<v8::Promise>> importDynamically(v8::Local<v8::Context> context,
+      v8::Local<v8::Data> options,
+      v8::Local<v8::String> specifier,
+      v8::Local<v8::FixedArray> attributes) = 0;
+};
+
+inline kj::Maybe<ContextModuleCallbacks&> getContextModuleCallbacks(
+    v8::Local<v8::Context> context) {
+  return getAlignedPointerFromEmbedderData<ContextModuleCallbacks>(
+      context, ContextPointerSlot::CONTEXT_MODULE_CALLBACKS);
+}
+
+inline void initializeContextImportMeta(
+    v8::Local<v8::Context> context, v8::Local<v8::Module> module, v8::Local<v8::Object> meta) {
+  KJ_IF_SOME(callbacks, getContextModuleCallbacks(context)) {
+    callbacks.initializeImportMeta(context, module, meta);
+  }
+}
+
 enum class InstantiateModuleOptions {
   // Allows pending top-level await in the module when evaluated. Will cause the microtask
   // queue to be drained once in an attempt to resolve those, but only when not nested inside
@@ -356,6 +386,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     jsg::setAlignedPointerInEmbedderData(
         context, jsg::ContextPointerSlot::MODULE_REGISTRY, registry.get());
     isolate->SetHostImportModuleDynamicallyCallback(dynamicImportCallback<TypeWrapper>);
+    isolate->SetHostInitializeImportMetaObjectCallback(initializeContextImportMeta);
     return kj::mv(registry);
   }
 
@@ -797,6 +828,12 @@ v8::MaybeLocal<v8::Promise> dynamicImportCallback(v8::Local<v8::Context> context
     v8::Local<v8::Value> resource_name,
     v8::Local<v8::String> specifier,
     v8::Local<v8::FixedArray> import_attributes) {
+  KJ_IF_SOME(callbacks, getContextModuleCallbacks(context)) {
+    KJ_IF_SOME(result,
+        callbacks.importDynamically(context, host_defined_options, specifier, import_attributes)) {
+      return result;
+    }
+  }
   auto& js = Lock::current();
   auto registry = ModuleRegistry::from(js);
   auto& wrapper = TypeWrapper::from(js.v8Isolate);
