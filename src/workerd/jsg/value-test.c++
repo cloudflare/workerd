@@ -1215,6 +1215,15 @@ KJ_TEST("MemoizedIdentity Values") {
 // ========================================================================================
 
 struct IdentifiedContext: public ContextGlobalObject {
+  struct Record {
+    int value;
+    JSG_STRUCT(value);
+  };
+
+  int readRecord(Identified<Record> record) {
+    return record.unwrapped.value;
+  }
+
   kj::String compare(jsg::Lock& js, Identified<kj::Date> a, Identified<kj::Date> b) {
     bool result = a.identity == b.identity;
     KJ_EXPECT(a.identity.hashCode() != 0);
@@ -1232,9 +1241,10 @@ struct IdentifiedContext: public ContextGlobalObject {
 
   JSG_RESOURCE_TYPE(IdentifiedContext) {
     JSG_METHOD(compare);
+    JSG_METHOD(readRecord);
   }
 };
-JSG_DECLARE_ISOLATE_TYPE(IdentifiedIsolate, IdentifiedContext);
+JSG_DECLARE_ISOLATE_TYPE(IdentifiedIsolate, IdentifiedContext, IdentifiedContext::Record);
 
 KJ_TEST("Identified values") {
   Evaluator<IdentifiedContext, IdentifiedIsolate> e(v8System);
@@ -1242,6 +1252,7 @@ KJ_TEST("Identified values") {
   e.expectEval("compare(new Date(123), new Date(123))", "string", "false 0ns");
   e.expectEval("compare(new Date(456), new Date(123))", "string", "false 333ms");
   e.expectEval("let d = new Date(123); compare(d, d)", "string", "true 0ns");
+  e.expectEval("readRecord({ value: 17 })", "number", "17");
 }
 
 // ========================================================================================

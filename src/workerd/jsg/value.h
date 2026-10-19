@@ -1342,7 +1342,7 @@ class MemoizedIdentityWrapper {
 class IdentifiedWrapper {
  public:
   template <typename T>
-  auto getName(this auto&& self, Identified<T>*) {
+  decltype(auto) getName(this auto&& self, Identified<T>*) {
     return self.getName(static_cast<T*>(nullptr));
   }
 
