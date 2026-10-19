@@ -4536,6 +4536,9 @@ export interface WorkerLoader {
     getCode: () => WorkerLoaderWorkerCode | Promise<WorkerLoaderWorkerCode>,
   ): WorkerStub;
   load(code: WorkerLoaderWorkerCode): WorkerStub;
+  createGeneration(
+    sharedMemory: Record<string, number>,
+  ): WorkerGenerationController;
 }
 export interface WorkerLoaderModule {
   js?: string;
@@ -4557,10 +4560,17 @@ export interface WorkerLoaderWorkerCode {
   globalOutbound?: Fetcher | null;
   tails?: Fetcher[];
   streamingTails?: Fetcher[];
+  generation?: WorkerGenerationController;
 }
 export interface workerdResourceLimits {
   cpuMs?: number;
   subRequests?: number;
+}
+export interface WorkerGenerationController {
+  getSharedMemory(name: string): SharedArrayBuffer;
+  terminate(): Promise<void>;
+  terminateAfter(milliseconds: number): void;
+  whenTerminated(): Promise<void>;
 }
 /**
  * The Workers runtime supports a subset of the Performance API, used to measure timing and performance,

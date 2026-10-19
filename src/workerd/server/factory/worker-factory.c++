@@ -892,6 +892,15 @@ class RustIoChannelFactory final: public IoChannelFactory {
     channels->abort_isolate(toRustString(reason));
   }
 
+  bool supportsWorkerGenerations() override {
+#ifdef V8_ENABLE_SANDBOX
+    // Each worker has its own isolate group; sandboxed V8 cannot share backing between groups.
+    return false;
+#else
+    return true;
+#endif
+  }
+
   kj::Own<WorkerStubChannel> loadIsolate(uint loaderChannel,
       kj::Maybe<kj::String> name,
       kj::Function<kj::Promise<DynamicWorkerSource>()> fetchSource) override {
@@ -1059,6 +1068,7 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
     ::rust::Box<ChannelFactory> channels,
     ::rust::Box<WorkerInterfaceList> tails,
     kj::Maybe<kj::Own<AccessInfo>> accessInfo) {
+  auto& instance = worker.getWorker();
   auto& threadContext = worker.factory.getImpl().threadContext;
 
   // The test event is not traced. A dynamic worker's tails are its source's; the server passes
@@ -1132,8 +1142,8 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
   }
 
   auto ioChannelFactory = kj::rc<RustIoChannelFactory>(kj::addRef(worker), kj::mv(channels));
-  return newWorkerEntrypoint(threadContext, kj::atomicAddRef(worker.getWorker()),
-      entrypointName.clone(), kj::mv(props), kj::mv(actor), kj::refcounted<NullLimitEnforcer>(), {},
+  return newWorkerEntrypoint(threadContext, kj::atomicAddRef(instance), entrypointName.clone(),
+      kj::mv(props), kj::mv(actor), kj::refcounted<NullLimitEnforcer>(), {},
       kj::mv(ioChannelFactory), kj::mv(observer), worker.waitUntilTasks, true, kj::mv(workerTracer),
       kj::mv(metadata.cfBlobJson), kj::none, kj::mv(triggerContext), IsDynamicDispatch::NO,
       kj::mv(accessInfo), kj::mv(metadata.restoredSelfTokenFactory), metadata.fromPersistentStub,
@@ -1517,6 +1527,14 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
   auto& factory = constFactory.getImpl();
   auto name = kj::str(spec.name);
   TRACE_EVENT("workerd", "factory_new_worker()", "name", name.cStr());
+  kj::Maybe<kj::Own<WorkerGeneration>> startupGeneration;
+  KJ_DEFER({
+    KJ_IF_SOME(generation, startupGeneration) {
+      generation->finishStartup();
+    } else {
+      // Else block to avoid dangling else clang warning.
+    }
+  });
   auto impl = kj::refcounted<CompiledWorker::Impl>(constFactory, kj::mv(name));
   impl->isDynamic = dynamicSource != kj::none;
   ErrorReporter errorReporter;
@@ -1542,7 +1560,16 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
     };
   } else {
     auto fetched = co_await (*KJ_ASSERT_NONNULL(dynamicSource))();
-    co_await fetched.ensureAllResolved();
+    KJ_IF_SOME(generation, fetched.generation) {
+      generation->beginStartup();
+      startupGeneration = kj::atomicAddRef(*generation);
+      generation->requireRunning();
+    }
+    auto resolved = fetched.ensureAllResolved();
+    KJ_IF_SOME(generation, startupGeneration) {
+      resolved = resolved.exclusiveJoin(generation->onStop());
+    }
+    co_await resolved;
     auto& dynamic = impl->dynamicSource.emplace(kj::mv(fetched));
     if (!options.tailWorkers) {
       dynamic.tails = nullptr;
@@ -1551,16 +1578,30 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
     indexDynamicChannels(*impl, dynamic);
     featureFlags = dynamic.compatibilityFlags;
     source = kj::mv(dynamic.source);
-    compileBindings = [&env = dynamic.env](
-                          jsg::Lock& js, const Worker::Api&, v8::Local<v8::Object> target) {
-      env.populateJsObject(js, jsg::JsObject(target));
+    compileBindings = [&dynamic](jsg::Lock& js, const Worker::Api&, v8::Local<v8::Object> target) {
+      dynamic.env.populateJsObject(js, jsg::JsObject(target));
+      KJ_IF_SOME(generation, dynamic.generation) {
+        generation->requireRunning();
+        for (auto& memory: generation->getMemories()) {
+          JSG_REQUIRE(
+              target
+                  ->CreateDataProperty(js.v8Context(), jsg::v8Str(js.v8Isolate, memory.name),
+                      v8::SharedArrayBuffer::New(js.v8Isolate, memory.backing))
+                  .FromMaybe(false),
+              Error, "Failed to install generation shared memory.");
+        }
+      }
     };
   }
   auto& workerSource = KJ_ASSERT_NONNULL(source);
   // The server passes the header only under `--experimental`.
   KJ_IF_SOME(header, spec.access_blob_header) impl->accessBlobHeader = kj::str(header);
 
-  co_await preloadPython(factory, featureFlags);
+  auto preload = preloadPython(factory, featureFlags);
+  KJ_IF_SOME(generation, startupGeneration) {
+    preload = preload.exclusiveJoin(generation->onStop());
+  }
+  co_await preload;
 
   // The file system roots use their defaults; the config does not expose mount points.
   auto workerFs = newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(workerSource));
@@ -1621,7 +1662,7 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
   // to produce a V8 startup snapshot of it.
   kj::Maybe<jsg::SnapshotConfig> snapshotConfig;
   if (util::Autogate::isEnabled(util::AutogateKey::STARTUP_SNAPSHOT) &&
-      supportsStartupSnapshot(featureFlags, workerSource)) {
+      startupGeneration == kj::none && supportsStartupSnapshot(featureFlags, workerSource)) {
     // The zygote reports into a reporter of its own: its failures must never surface as the
     // Worker's.
     ErrorReporter zygoteErrors;
@@ -1708,6 +1749,9 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
 
   kj::Maybe<kj::Own<void>> ownContent;
   KJ_IF_SOME(dynamic, impl->dynamicSource) ownContent = kj::mv(dynamic.ownContent);
+  KJ_IF_SOME(generation, startupGeneration) {
+    isolate->setGeneration(kj::atomicAddRef(*generation));
+  }
   auto script = isolate->newScript(impl->name, workerSource, IsolateObserver::StartType::COLD,
       SpanParent(nullptr), workerFs.attach(kj::mv(ownContent)), false, errorReporter,
       api::pyodide::ArtifactBundler::makeDisabledBundler(), kj::mv(newModuleRegistry));
@@ -1740,6 +1784,27 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
     .env_actor_classes = static_cast<uint32_t>(impl->actorClassChannels.size()),
   };
   impl->worker = kj::mv(worker);
+  KJ_IF_SOME(generation, startupGeneration) {
+    factory.tasks.add(
+        generation->onStop().catch_([keep = kj::addRef(*impl)](kj::Exception&&) mutable {
+      auto& state = *keep;
+      state.waitUntilTasks.clear();
+      state.subrequestChannels.clear();
+      state.actorClassChannels.clear();
+      state.rpcChannels.clear();
+      KJ_IF_SOME(dynamic, state.dynamicSource) {
+        dynamic.env = Frankenvalue();
+        dynamic.globalOutbound = kj::none;
+        dynamic.tails = nullptr;
+        dynamic.streamingTails = nullptr;
+      }
+      KJ_IF_SOME(worker, state.worker) {
+        worker->runInLockScope(Worker::Lock::TakeSynchronously(kj::none),
+            [&](Worker::Lock&) { state.ctxExportsHandle = kj::none; });
+      }
+      state.worker = kj::none;
+    }));
+  }
   co_return kj::heap<CompiledWorker>(kj::mv(impl));
 }
 

@@ -9,6 +9,7 @@
 #include <workerd/io/frankenvalue.h>
 #include <workerd/io/io-util.h>
 #include <workerd/io/trace.h>
+#include <workerd/io/worker-generation.h>
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/io/worker-source.h>
 #include <workerd/util/strong-bool.h>
@@ -482,6 +483,10 @@ class IoChannelFactory: public virtual kj::Refcounted {
     JSG_FAIL_REQUIRE(Error, "Dynamic worker loading is not supported by this runtime.");
   }
 
+  virtual bool supportsWorkerGenerations() {
+    return false;
+  }
+
   // Get the network for connecting to workerd debug ports.
   // This is used by the workerdDebugPort binding to connect to remote workerd instances.
   virtual kj::Network& getWorkerdDebugPortNetwork() {
@@ -600,6 +605,9 @@ struct DynamicWorkerSource {
   kj::Array<kj::Rc<IoChannelFactory::SubrequestChannel>> tails;
   kj::Array<kj::Rc<IoChannelFactory::SubrequestChannel>> streamingTails;
 
+  // This capability requires colocated shared backing and a single, non-recreatable isolate.
+  kj::Maybe<kj::Own<WorkerGeneration>> generation;
+
   // Owns any data structures pointed into by the other members. (E.g. `source` contains a lot of
   // `StringPtr`s; `ownContent` owns the backing buffer for them.)
   kj::Own<void> ownContent;
@@ -624,6 +632,7 @@ struct DynamicWorkerSource {
       .globalOutbound = globalOutbound.clone(),
       .tails = KJ_MAP(t, tails) { return t.addRef(); },
       .streamingTails = KJ_MAP(t, streamingTails) { return t.addRef(); },
+      .generation = generation.map([](auto& g) { return kj::atomicAddRef(*g); }),
       .ownContent = kj::mv(newOwnContent),
       .ownContentIsRpcResponse = ownContentIsRpcResponse,
     };

@@ -154,9 +154,11 @@ wd_cc_library(
 wd_cc_library(
     name = "worker-loader",
     srcs = [
+        "worker-generation.c++",
         "worker-loader.c++",
     ],
     hdrs = [
+        "worker-generation.h",
         "worker-loader.h",
     ],
     visibility = ["//visibility:public"],

@@ -284,6 +284,10 @@ IoContext::IoContext(ThreadContext& thread,
   // Arrange to abort when limits expire.
   abortWhen(makeLimitsPromise());
 
+  KJ_IF_SOME(generation, this->worker->getIsolate().getGeneration()) {
+    abortWhen(generation.onStop());
+  }
+
   KJ_IF_SOME(a, actor) {
     // Arrange to complain if the input gate is broken, which indicates a critical section failed
     // and the actor can no longer be used.
@@ -1640,6 +1644,9 @@ void IoContext::runImpl(Runnable& runnable,
     kj::Own<void> event;
     if (!exceptional) {
       workerLock.requireNoPermanentException();
+      KJ_IF_SOME(generation, worker->getIsolate().getGeneration()) {
+        generation.requireRunning();
+      }
       // Prevent prematurely detecting a hang while we're still executing JavaScript.
       // TODO(cleanup): Is this actually still needed or is this vestigial? Seems like it should
       //   not be necessary.
@@ -1749,6 +1756,9 @@ void IoContext::runImpl(Runnable& runnable,
         limiterScope = nullptr;
 
         // Check if we hit a limit.
+        KJ_IF_SOME(generation, worker->getIsolate().getGeneration()) {
+          generation.requireRunning();
+        }
         limitEnforcer->requireLimitsNotExceeded();
 
         // Check if we were aborted. TerminateExecution() may be called after abort() in order

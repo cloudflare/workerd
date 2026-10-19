@@ -111,6 +111,7 @@ wd_cc_library(
         ":trace",
         ":tracked-wasm-instance",
         ":wasm-instantiate-shim",
+        ":worker-generation",
         ":worker-interface",
         ":worker-source",
         ":worker-source-stats",
@@ -254,6 +255,45 @@ wd_cc_library(
 kj_test(
     src = "worker-source-stats-test.c++",
     deps = [":worker-source-stats"],
+)
+
+wd_cc_library(
+    name = "worker-generation",
+    srcs = ["worker-generation.c++"],
+    hdrs = ["worker-generation.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/workerd/jsg:exception",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@workerd-v8//:v8",
+    ],
+)
+
+kj_test(
+    src = "worker-generation-test.c++",
+    deps = [
+        ":worker-generation",
+        "//src/workerd/jsg",
+        "@workerd-v8//:v8",
+    ],
+)
+
+kj_test(
+    size = "large",
+    src = "worker-generation-v8-test.c++",
+    deps = [
+        ":worker-generation",
+        "//src/workerd/jsg",
+        "@workerd-v8//:v8",
+    ],
+)
+
+kj_test(
+    src = "worker-generation-lifetime-test.c++",
+    deps = [
+        ":worker-generation",
+        "//src/workerd/tests:test-fixture",
+    ],
 )
 
 # TODO(cleanup): Split this up further.

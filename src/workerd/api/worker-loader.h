@@ -1,5 +1,6 @@
 #pragma once
 
+#include <workerd/api/worker-generation.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/io-channels.h>
@@ -17,7 +18,10 @@ class DurableObjectClass;
 // specify arbitrary props).
 class WorkerStub: public jsg::Object {
  public:
-  WorkerStub(IoOwn<WorkerStubChannel> channel): channel(kj::mv(channel)) {}
+  WorkerStub(IoOwn<WorkerStubChannel> channel,
+      kj::Maybe<kj::Own<workerd::WorkerGeneration>> generation = kj::none)
+      : channel(kj::mv(channel)),
+        generation(kj::mv(generation)) {}
 
   struct EntrypointOptions {
     jsg::Optional<jsg::JsRef<jsg::JsObject>> props;
@@ -47,6 +51,7 @@ class WorkerStub: public jsg::Object {
 
  private:
   IoOwn<WorkerStubChannel> channel;
+  kj::Maybe<kj::Own<workerd::WorkerGeneration>> generation;
 };
 
 // JS interface for worker loader binding.
@@ -130,20 +135,43 @@ class WorkerLoader: public jsg::Object {
         tails,
         streamingTails);
 
-    JSG_STRUCT_TS_OVERRIDE(WorkerLoaderWorkerCode {
-      modules: Record<string, string | WebAssembly.Module | WorkerLoaderModule>;
-    });
+    JSG_STRUCT_TS_OVERRIDE_DYNAMIC(CompatibilityFlags::Reader flags) {
+      if (flags.getEnableWorkerGenerations()) {
+        JSG_TS_OVERRIDE(WorkerLoaderWorkerCode {
+          generation?: WorkerGenerationController;
+          modules: Record<string, string | WebAssembly.Module | WorkerLoaderModule>;
+        });
+      } else {
+        JSG_TS_OVERRIDE(WorkerLoaderWorkerCode {
+          modules: Record<string, string | WebAssembly.Module | WorkerLoaderModule>;
+        });
+      }
+    }
+
+    // Parse this only when its compatibility flag is enabled so older workers continue ignoring
+    // unknown dictionary members, including getters that would otherwise run during conversion.
+    jsg::Optional<jsg::Ref<WorkerGenerationController>> generation;
   };
 
-  jsg::Ref<WorkerStub> get(
-      jsg::Lock& js, kj::Maybe<kj::String> name, jsg::Function<jsg::Promise<WorkerCode>()> getCode);
+  jsg::Ref<WorkerStub> get(jsg::Lock& js,
+      kj::Maybe<kj::String> name,
+      jsg::Function<jsg::Promise<jsg::Identified<WorkerCode>>()> getCode,
+      const jsg::TypeHandler<jsg::Ref<WorkerGenerationController>>& generationHandler);
 
   // Shortcut for `get(null, () => code)`.
-  jsg::Ref<WorkerStub> load(jsg::Lock& js, WorkerCode code);
+  jsg::Ref<WorkerStub> load(jsg::Lock& js,
+      jsg::Identified<WorkerCode> code,
+      const jsg::TypeHandler<jsg::Ref<WorkerGenerationController>>& generationHandler);
 
-  JSG_RESOURCE_TYPE(WorkerLoader) {
+  jsg::Ref<WorkerGenerationController> createGeneration(
+      jsg::Lock& js, jsg::Dict<uint32_t> sharedMemory);
+
+  JSG_RESOURCE_TYPE(WorkerLoader, CompatibilityFlags::Reader flags) {
     JSG_METHOD(get);
     JSG_METHOD(load);
+    if (flags.getEnableWorkerGenerations()) {
+      JSG_METHOD(createGeneration);
+    }
 
     JSG_TS_ROOT();
   }
@@ -157,6 +185,10 @@ class WorkerLoader: public jsg::Object {
       CompatibilityDateValidation compatDateValidation,
       WorkerCode code);
 
+  static WorkerCode parseWorkerCode(jsg::Lock& js,
+      jsg::Identified<WorkerCode> code,
+      const jsg::TypeHandler<jsg::Ref<WorkerGenerationController>>& generationHandler);
+
   static Worker::Script::Source extractSource(jsg::Lock& js, WorkerCode& code);
   static kj::Own<CompatibilityFlags::Reader> extractCompatFlags(
       jsg::Lock& js, WorkerCode& code, CompatibilityDateValidation compatDateValidation);
@@ -167,6 +199,7 @@ class WorkerLoader: public jsg::Object {
 
 #define EW_WORKER_LOADER_ISOLATE_TYPES                                                             \
   api::WorkerStub, api::WorkerStub::EntrypointOptions, api::WorkerLoader,                          \
-      api::WorkerLoader::Module, api::WorkerLoader::WorkerCode, workerd::ResourceLimits
+      api::WorkerLoader::Module, api::WorkerLoader::WorkerCode, workerd::ResourceLimits,           \
+      api::WorkerGenerationController
 
 }  // namespace workerd::api

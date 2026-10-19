@@ -1717,4 +1717,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # the origin's Cache-Control (for example, an origin `no-store` gets cached as `no-cache`). When
   # enabled, the cache option no longer sets `cf.cacheControl`. To override the origin's
   # Cache-Control, omit the `cache` option and use `cf.cacheControl` instead.
+
+  enableWorkerGenerations @195 :Bool
+      $compatEnableFlag("enable_worker_generations")
+      $compatDisableFlag("disable_worker_generations")
+      $experimental;
+  # Opts into colocated, one-shot Worker Loader generations with bounded shared memory and
+  # parent-owned termination acknowledgement. The runtime must explicitly support the capability.
+
 }

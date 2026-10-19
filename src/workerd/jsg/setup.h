@@ -137,6 +137,9 @@ class IsolateBase {
   // be thrown. Safe to call across threads, without holding the lock.
   void terminateExecution() const;
 
+  // Runs independently of foreground JavaScript, including a synchronous turn that never yields.
+  void scheduleBackgroundTask(std::unique_ptr<v8::Task> task, double delaySeconds);
+
   using Logger = Lock::Logger;
   inline void setLoggerCallback(kj::Badge<Lock>, kj::Function<Logger>&& logger) {
     maybeLogger = kj::mv(logger);

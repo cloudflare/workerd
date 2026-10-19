@@ -1616,3 +1616,23 @@ wd_cli_test(
         "//src/workerd/server:workerd_cross",
     ],
 )
+
+wd_test(
+    src = "worker-generation-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-generation-test.js"],
+)
+
+# Run only after the native background-task guard passes, with an external process deadline.
+wd_test(
+    src = "worker-generation-cpu-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-generation-cpu-test.js"],
+    tags = ["manual"],
+)
+
+wd_test(
+    src = "worker-generation-legacy-test.wd-test",
+    args = ["--experimental"],
+    data = ["worker-generation-legacy-test.js"],
+)

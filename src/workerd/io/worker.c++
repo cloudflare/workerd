@@ -1710,6 +1710,10 @@ kj::StringPtr Worker::Isolate::getUuid() const {
 }
 
 Worker::Isolate::~Isolate() noexcept(false) {
+  generationLifetime.unwindDetector = kj::UnwindDetector();
+  KJ_IF_SOME(generation, generationLifetime.generation) {
+    generation->detachIsolate();
+  }
   metrics->teardownStarted();
 
   // Update the isolate stats one last time to make sure we're accurate for cleanup in
@@ -1744,6 +1748,23 @@ Worker::Isolate::~Isolate() noexcept(false) {
     // This is analogous to the cpuTimeLimitNearlyExceededCallback detaching above ^^^
     limitEnforcer->getTrackedWasmInstances().clear(*recordedLock.lock);
   });
+}
+
+Worker::Isolate::GenerationLifetime::~GenerationLifetime() noexcept(false) {
+  KJ_IF_SOME(g, generation) {
+    if (!unwindDetector.isUnwinding()) g->isolateDisposed();
+  }
+}
+
+void Worker::Isolate::setGeneration(kj::Own<WorkerGeneration> generation) {
+  KJ_REQUIRE(generationLifetime.generation == kj::none);
+  generation->attachIsolate(impl->v8Isolate);
+  generationLifetime.generation = kj::mv(generation);
+}
+
+kj::Maybe<const WorkerGeneration&> Worker::Isolate::getGeneration() const {
+  return generationLifetime.generation.map(
+      [](const auto& g) -> const WorkerGeneration& { return *g; });
 }
 
 Worker::Script::~Script() noexcept(false) {

@@ -280,6 +280,11 @@ void IsolateBase::terminateExecution() const {
   ptr->TerminateExecution();
 }
 
+void IsolateBase::scheduleBackgroundTask(std::unique_ptr<v8::Task> task, double delaySeconds) {
+  v8System.platformWrapper->PostDelayedTaskOnWorkerThread(
+      v8::TaskPriority::kUserBlocking, kj::mv(task), delaySeconds);
+}
+
 void IsolateBase::applyDeferredActions() {
   // Clear the deferred destruction queue.
   {

@@ -23,9 +23,30 @@ constexpr size_t MAX_DYNAMIC_WORKER_ENV_SIZE = 1 * 1024 * 1024;
 
 }  // namespace
 
+jsg::Ref<WorkerGenerationController> WorkerLoader::createGeneration(
+    jsg::Lock& js, jsg::Dict<uint32_t> sharedMemory) {
+  return WorkerGenerationController::create(js, kj::mv(sharedMemory));
+}
+
+WorkerLoader::WorkerCode WorkerLoader::parseWorkerCode(jsg::Lock& js,
+    jsg::Identified<WorkerCode> identifiedCode,
+    const jsg::TypeHandler<jsg::Ref<WorkerGenerationController>>& generationHandler) {
+  auto code = kj::mv(identifiedCode.unwrapped);
+  if (FeatureFlags::get(js).getEnableWorkerGenerations()) {
+    auto generation = jsg::check(
+        identifiedCode.identity.getHandle(js)->Get(js.v8Context(), js.strIntern("generation"_kj)));
+    if (!generation->IsUndefined()) {
+      code.generation = JSG_REQUIRE_NONNULL(generationHandler.tryUnwrap(js, generation), TypeError,
+          "generation must be a WorkerGenerationController.");
+    }
+  }
+  return code;
+}
+
 jsg::Ref<Fetcher> WorkerStub::getEntrypoint(jsg::Lock& js,
     jsg::Optional<kj::Maybe<kj::String>> name,
     jsg::Optional<EntrypointOptions> options) {
+  KJ_IF_SOME(g, generation) g->requireRunning();
   Frankenvalue props;
   kj::Maybe<ResourceLimits> limits;
   KJ_IF_SOME(o, options) {
@@ -51,6 +72,8 @@ jsg::Ref<Fetcher> WorkerStub::getEntrypoint(jsg::Lock& js,
 jsg::Ref<DurableObjectClass> WorkerStub::getDurableObjectClass(jsg::Lock& js,
     jsg::Optional<kj::Maybe<kj::String>> name,
     jsg::Optional<EntrypointOptions> options) {
+  JSG_REQUIRE(
+      generation == kj::none, Error, "Generation workers do not support Durable Object classes.");
   Frankenvalue props;
   kj::Maybe<ResourceLimits> limits;
   KJ_IF_SOME(o, options) {
@@ -73,22 +96,27 @@ jsg::Ref<DurableObjectClass> WorkerStub::getDurableObjectClass(jsg::Lock& js,
       channel->getActorClass(kj::mv(entrypointName), kj::mv(props), limits)));
 }
 
-jsg::Ref<WorkerStub> WorkerLoader::get(
-    jsg::Lock& js, kj::Maybe<kj::String> name, jsg::Function<jsg::Promise<WorkerCode>()> getCode) {
+jsg::Ref<WorkerStub> WorkerLoader::get(jsg::Lock& js,
+    kj::Maybe<kj::String> name,
+    jsg::Function<jsg::Promise<jsg::Identified<WorkerCode>>()> getCode,
+    const jsg::TypeHandler<jsg::Ref<WorkerGenerationController>>& generationHandler) {
   auto& ioctx = IoContext::current();
 
   // It's important that we use a *weak* reentry callback because this callback will held by the
   // WorkerStub and any entrypoint stubs in vends until they are GC'd. We don't want to create
   // a cycle where a request context holds itself open (which would block DO hibernation).
   auto reenterAndGetCode = ioctx.makeReentryCallbackWeak(
-      [getCode = kj::mv(getCode), compatDateValidation = compatDateValidation](
+      [getCode = kj::mv(getCode), compatDateValidation = compatDateValidation, &generationHandler](
           jsg::Lock& js, IoContext& ioctx) mutable {
     // getCode() is application-provided and may resolve its promise from a different context.
     // Binding the continuation to this context ensures that it either runs here or throws before
     // accessing the context.
     return getCode(js).then(js,
-        ioctx.addFunctor([compatDateValidation](jsg::Lock& js, IoContext& ioctx,
-                             WorkerCode code) -> DynamicWorkerSource {
+        ioctx.addFunctor([compatDateValidation, &generationHandler](jsg::Lock& js, IoContext& ioctx,
+                             jsg::Identified<WorkerCode> identifiedCode) -> DynamicWorkerSource {
+      auto code = WorkerLoader::parseWorkerCode(js, kj::mv(identifiedCode), generationHandler);
+      JSG_REQUIRE(code.generation == kj::none, TypeError,
+          "A generation can only be attached with load(), not get().");
       return toDynamicWorkerSource(js, ioctx, compatDateValidation, kj::mv(code));
     }));
   });
@@ -99,10 +127,28 @@ jsg::Ref<WorkerStub> WorkerLoader::get(
   return js.alloc<WorkerStub>(ioctx.addObject(kj::mv(isolateChannel)));
 }
 
-jsg::Ref<WorkerStub> WorkerLoader::load(jsg::Lock& js, WorkerCode code) {
+jsg::Ref<WorkerStub> WorkerLoader::load(jsg::Lock& js,
+    jsg::Identified<WorkerCode> identifiedCode,
+    const jsg::TypeHandler<jsg::Ref<WorkerGenerationController>>& generationHandler) {
   auto& ioctx = IoContext::current();
 
+  auto code = parseWorkerCode(js, kj::mv(identifiedCode), generationHandler);
   auto source = toDynamicWorkerSource(js, ioctx, compatDateValidation, kj::mv(code));
+
+  auto generation = source.generation.map([](auto& g) { return kj::atomicAddRef(*g); });
+  KJ_IF_SOME(generation, source.generation) {
+    JSG_REQUIRE(ioctx.getIoChannelFactory().supportsWorkerGenerations(), Error,
+        "This runtime does not support colocated worker generations.");
+    generation->claim();
+  }
+
+  KJ_ON_SCOPE_FAILURE({
+    KJ_IF_SOME(g, generation) {
+      g->finishStartup();
+    } else {
+      // Else block to avoid dangling else clang warning.
+    }
+  });
 
   // Annoyingly, the callback we pass to `loadIsolate()` technically may be called any number of
   // times. Yes, even though we aren't providing an ID. The runtime can actually evict the isolate
@@ -120,7 +166,7 @@ jsg::Ref<WorkerStub> WorkerLoader::load(jsg::Lock& js, WorkerCode code) {
     return source.clone(kj::atomicAddRef(*ownContentWrapper));
   });
 
-  return js.alloc<WorkerStub>(ioctx.addObject(kj::mv(isolateChannel)));
+  return js.alloc<WorkerStub>(ioctx.addObject(kj::mv(isolateChannel)), kj::mv(generation));
 }
 
 DynamicWorkerSource WorkerLoader::toDynamicWorkerSource(jsg::Lock& js,
@@ -172,6 +218,22 @@ DynamicWorkerSource WorkerLoader::toDynamicWorkerSource(jsg::Lock& js,
 
   auto ownCompatFlags = extractCompatFlags(js, code, compatDateValidation);
   CompatibilityFlags::Reader compatFlags = *ownCompatFlags;
+
+  kj::Maybe<kj::Own<workerd::WorkerGeneration>> generation;
+  KJ_IF_SOME(controller, code.generation) {
+    JSG_REQUIRE(code.allowExperimental.orDefault(false), Error,
+        "Worker generations require 'allowExperimental: true'.");
+    generation = kj::atomicAddRef(controller->getGeneration());
+    KJ_IF_SOME(env, code.env) {
+      v8::Local<v8::Object> envObject = env.getHandle(js);
+      for (auto& memory: controller->getGeneration().getMemories()) {
+        // HasOwnProperty() can invoke a Proxy trap, so preserve any exception it throws.
+        JSG_REQUIRE(!jsg::check(envObject->HasOwnProperty(
+                        js.v8Context(), jsg::v8Str(js.v8Isolate, memory.name))),
+            TypeError, "Generation shared memory conflicts with env property: ", memory.name);
+      }
+    }
+  }
 
   Frankenvalue env;
   KJ_IF_SOME(codeEnv, code.env) {
@@ -230,6 +292,7 @@ DynamicWorkerSource WorkerLoader::toDynamicWorkerSource(jsg::Lock& js,
     .globalOutbound = kj::mv(globalOutbound),
     .tails = kj::mv(tailChannels),
     .streamingTails = kj::mv(streamingTailChannels),
+    .generation = kj::mv(generation),
     .ownContent = ownCompatFlags.attach(kj::mv(code.modules), kj::mv(code.mainModule)),
     .ownContentIsRpcResponse = false};
 }

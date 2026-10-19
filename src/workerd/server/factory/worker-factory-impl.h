@@ -200,6 +200,9 @@ class CompiledWorker::Impl final: public kj::Refcounted, private kj::TaskSet::Er
   WorkerInfo info;
 
   const Worker& getWorker() const {
+    KJ_IF_SOME(source, dynamicSource) {
+      KJ_IF_SOME(generation, source.generation) generation->requireRunning();
+    }
     return *KJ_ASSERT_NONNULL(worker);
   }
 

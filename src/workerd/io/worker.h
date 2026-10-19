@@ -357,6 +357,9 @@ class Worker::Isolate: public kj::AtomicRefcounted {
   // Get the current Worker::Isolate from the current jsg::Lock
   static const Isolate& from(jsg::Lock& js);
 
+  void setGeneration(kj::Own<WorkerGeneration> generation);
+  kj::Maybe<const WorkerGeneration&> getGeneration() const;
+
   // This callback gets executed when the CPU limiter is nearly out of time. It has to be signal
   // safe since we call it in a signal handler.
   //
@@ -558,6 +561,13 @@ class Worker::Isolate: public kj::AtomicRefcounted {
  private:
   kj::Promise<AsyncLock> takeAsyncLockImpl(
       kj::Maybe<kj::Own<IsolateObserver::LockTiming>> lockTiming) const;
+
+  // Declared first so acknowledgement follows API and V8 destruction.
+  struct GenerationLifetime {
+    kj::Maybe<kj::Own<WorkerGeneration>> generation;
+    kj::UnwindDetector unwindDetector;
+    ~GenerationLifetime() noexcept(false);
+  } generationLifetime;
 
   kj::Own<IsolateObserver> metrics;
   // NOTE: destruction order is important here. The teardown guard should be destroyed after the
