@@ -1,0 +1,44 @@
+using Workerd = import "/workerd/workerd.capnp";
+using EventTargetModules = import "event-target-modules.capnp";
+
+# Runs the EventTarget suite against the C++ implementation;
+# event-target-ts.wd-test runs the identical modules against the TypeScript
+# implementation.
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes. Date-gated semantics are pinned by flag,
+# and event-target-cpp-legacy.wd-test guards their unflagged sides (all but
+# one, as noted):
+# - nodejs_compat: node:assert and node:events for the tests themselves.
+# - workers_api_getters_setters_on_prototype: Event attributes are
+#   prototype accessors (unflagged, srcElement reads the current target).
+# - dont_substitute_null_on_type_error: a primitive listener is a TypeError
+#   (unflagged, it is taken as null).
+# - set_tostring_tag: Symbol.toStringTag branding.
+# - set_event_target_this: a listener's `this` is the target, or its object
+#   (unflagged, the global).
+# - spec_compliant_dispatch_exceptions: listener exceptions are reported
+#   and dispatch continues (unflagged, the first one propagates; guarded by
+#   src/workerd/api/tests/legacy-dispatch-exceptions-test.js).
+# - enable_weak_ref: FinalizationRegistry for gc.js.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "events-event-target-cpp",
+      worker = (
+        modules = EventTargetModules.modules,
+        compatibilityFlags = [
+          "nodejs_compat",
+          "workers_api_getters_setters_on_prototype",
+          "dont_substitute_null_on_type_error",
+          "set_tostring_tag",
+          "set_event_target_this",
+          "spec_compliant_dispatch_exceptions",
+          "enable_weak_ref",
+        ],
+      )
+    ),
+  ],
+  # For gc.js.
+  v8Flags = ["--expose-gc"],
+);

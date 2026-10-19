@@ -278,3 +278,34 @@ if (compatFlags['typescript_implemented_streams']) {
     });
   }
 }
+
+// The TypeScript classes shadow the C++ ones on the global only. Events the
+// runtime creates, AbortSignal, the global scope and the other built-in event
+// targets are still the C++ classes, which stay registered.
+if (compatFlags['typescript_implemented_events']) {
+  const { Event, CustomEvent, EventTarget } = require('events/events');
+
+  ObjectDefineProperties(globalThis, {
+    Event: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: Event,
+    },
+    CustomEvent: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: CustomEvent,
+    },
+    EventTarget: {
+      __proto__: null,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: EventTarget,
+    },
+  });
+}
