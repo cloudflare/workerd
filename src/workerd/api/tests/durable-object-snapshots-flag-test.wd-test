@@ -1,0 +1,47 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "flag-enabled", worker = .flagEnabledWorker),
+    (name = "flag-disabled", worker = .flagDisabledWorker),
+  ],
+);
+
+const flagEnabledWorker :Workerd.Worker = (
+  # Deliberately omits the catch-all "experimental" flag, which also exposes the snapshot APIs.
+  compatibilityFlags = ["durable_object_snapshots", "nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "durable-object-snapshots-flag-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "SnapshotsFlagObject", uniqueKey = "610bd0cbd803ef7883a1ee9d86cce06f"),
+  ],
+
+  durableObjectStorage = (inMemory = void),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "SnapshotsFlagObject"),
+    (name = "expectedSurface", json = "{\"snapshot\": \"function\", \"onNextSessionRestore\": \"function\", \"waitForBookmark\": \"undefined\"}"),
+  ],
+);
+
+const flagDisabledWorker :Workerd.Worker = (
+  compatibilityFlags = ["nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "durable-object-snapshots-flag-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "SnapshotsFlagObject", uniqueKey = "710bd0cbd803ef7883a1ee9d86cce06f"),
+  ],
+
+  durableObjectStorage = (inMemory = void),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "SnapshotsFlagObject"),
+    (name = "expectedSurface", json = "{\"snapshot\": \"undefined\", \"onNextSessionRestore\": \"undefined\", \"waitForBookmark\": \"undefined\"}"),
+  ],
+);
