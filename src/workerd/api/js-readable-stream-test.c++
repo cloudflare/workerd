@@ -7,6 +7,7 @@
 #include <workerd/api/js-streams-bridge.h>
 #include <workerd/api/js-writable-stream.h>
 #include <workerd/api/per-isolate-bootstrap.h>
+#include <workerd/jsg/script.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/autogate.h>
 
@@ -1088,6 +1089,53 @@ KJ_TEST("ReadableStreamNativeSource read failure rejects the pull") {
   });
 }
 
+KJ_TEST("ReadableStreamNativeSource abandoned pull failure rejects and releases the source") {
+  TestFixture testFixture;
+  MockControllerState state;
+  size_t checked = 0;
+  testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+
+    // A pull whose read fails, abandoned at once, as releasing the reader mid-read does. It
+    // rejects with the read's failure, not the abort's reason, so the conduit errors the
+    // stream with it as it would for a live pull.
+    auto abandonedFailure = [&](jsg::JsObject controller) {
+      auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ErroringSource>());
+      auto abortController = AbortController::constructor(js);
+      auto pull = source->pull(js, controller, abortController->getSignal());
+      abortController->abort(js, kj::none);
+      return pull.then(js,
+          [](jsg::Lock& js) -> jsg::Promise<void> {
+        KJ_FAIL_REQUIRE("expected the abandoned pull to reject");
+      },
+          [&state, &checked, source = source.addRef(), controller = controller.addRef(js)](
+              jsg::Lock& js, jsg::Value exception) mutable {
+        auto message = kj::str(jsg::JsValue(exception.getHandle(js)));
+        KJ_EXPECT(message.contains("test read failure"), message);
+        // The source was released: the next pull settles without delivering, closing or
+        // erroring, and tee() refuses, as for a consumed source.
+        auto next = source->pull(js, controller.getHandle(js), freshSignal(js));
+        KJ_EXPECT_THROW_MESSAGE("already been consumed", source->tee(js));
+        return next.then(js, [&state, &checked](jsg::Lock& js) {
+          KJ_EXPECT(state.enqueued.size() == 0);
+          KJ_EXPECT(state.responded == kj::none);
+          KJ_EXPECT(!state.closed);
+          ++checked;
+        });
+      });
+    };
+    // Through a default read's pull, then a BYOB read's.
+    auto view = jsg::JsUint8Array::create(js, static_cast<size_t>(16));
+    auto defaultPull = abandonedFailure(makeMockController(js, state, js.null()));
+    auto byobPull =
+        abandonedFailure(makeMockController(js, state, makeMockByobRequest(js, state, view, 1)));
+    auto promise = defaultPull.then(
+        js, [byobPull = kj::mv(byobPull)](jsg::Lock& js) mutable { return kj::mv(byobPull); });
+    return env.context.awaitJs(js, kj::mv(promise));
+  });
+  KJ_EXPECT(checked == 2);
+}
+
 KJ_TEST("ReadableStreamNativeSource default pull fast path serves synchronously when gated on") {
   TestFixture testFixture;
   MockControllerState state;
@@ -1172,41 +1220,52 @@ KJ_TEST("ReadableStreamNativeSource BYOB pull fast path fills the view and fuses
 
 KJ_TEST("ReadableStreamNativeSource pull fast path failure rejects and releases the source") {
   TestFixture testFixture;
-  MockControllerState state;
+  MockControllerState defaultState;
+  MockControllerState byobState;
   const bool gateOn =
       util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS);
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<SyncThrowingSource>());
-    auto controller = makeMockController(js, state, js.null());
-
-    if (!gateOn) {
-      // Ungated, the synchronous path never runs; the source EOFs via the async path.
-      auto promise =
-          source->pull(js, controller, freshSignal(js)).then(js, [&state](jsg::Lock& js) {
-        KJ_EXPECT(state.closed);
+    auto failingPull = [&](MockControllerState& state,
+                           jsg::JsObject controller) -> jsg::Promise<void> {
+      auto source =
+          js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<SyncThrowingSource>());
+      if (!gateOn) {
+        // Ungated, the synchronous path never runs; the source EOFs via the async path.
+        return source->pull(js, controller, freshSignal(js)).then(js, [&state](jsg::Lock& js) {
+          KJ_EXPECT(state.closed);
+        });
+      }
+      return source->pull(js, controller, freshSignal(js))
+          .then(js,
+              [](jsg::Lock& js) -> jsg::Promise<void> {
+        KJ_FAIL_ASSERT("pull should have rejected");
+      },
+              [&state, source = source.addRef(), controller = controller.addRef(js)](
+                  jsg::Lock& js, jsg::Value exception) mutable {
+        auto message = kj::str(jsg::JsValue(exception.getHandle(js)));
+        KJ_EXPECT(message.contains("sync read failed"), message);
+        KJ_EXPECT(state.enqueued.size() == 0);
+        KJ_EXPECT(!state.closed);
+        // The source was released: a subsequent pull resolves defensively without
+        // enqueuing or closing.
+        return source->pull(js, controller.getHandle(js), freshSignal(js));
+      }).then(js, [&state](jsg::Lock& js) {
+        KJ_EXPECT(state.enqueued.size() == 0);
+        KJ_EXPECT(!state.closed);
       });
-      return env.context.awaitJs(js, kj::mv(promise));
-    }
-    auto promise = source->pull(js, controller, freshSignal(js))
-                       .then(js,
-                           [](jsg::Lock& js) -> jsg::Promise<void> {
-      KJ_FAIL_ASSERT("pull should have rejected");
-    },
-                           [&state, source = source.addRef(), controller = controller.addRef(js)](
-                               jsg::Lock& js, jsg::Value exception) mutable {
-      KJ_EXPECT(state.enqueued.size() == 0);
-      KJ_EXPECT(!state.closed);
-      // The source was released: a subsequent pull resolves defensively without
-      // enqueuing or closing.
-      return source->pull(js, controller.getHandle(js), freshSignal(js));
-    }).then(js, [&state](jsg::Lock& js) {
-      KJ_EXPECT(state.enqueued.size() == 0);
-      KJ_EXPECT(!state.closed);
-    });
+    };
+    // Through a default read's pull, then a BYOB read's.
+    auto view = jsg::JsUint8Array::create(js, static_cast<size_t>(16));
+    auto defaultPull = failingPull(defaultState, makeMockController(js, defaultState, js.null()));
+    auto byobPull = failingPull(
+        byobState, makeMockController(js, byobState, makeMockByobRequest(js, byobState, view, 1)));
+    auto promise = defaultPull.then(
+        js, [byobPull = kj::mv(byobPull)](jsg::Lock& js) mutable { return kj::mv(byobPull); });
     return env.context.awaitJs(js, kj::mv(promise));
   });
+  KJ_EXPECT(byobState.responded == kj::none);
 }
 
 KJ_TEST("ReadableStreamNativeSource tee splits via the source's optimized tryTee") {
@@ -1811,53 +1870,6 @@ KJ_TEST("JsReadableStream pumpTo of a locked TypeScript-backed stream throws") {
   });
 }
 
-KJ_TEST("TypeScript native stream errors when its source enqueues an empty chunk") {
-  auto fixture = makeTsStreamsFixture();
-  bool rejected = false;
-  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
-    auto& js = env.js;
-
-    // ReadableStreamNativeSource never enqueues an empty chunk: a zero-byte read is its
-    // EOF, which it signals with close(). The conduit takes any object carrying the
-    // kNativeSource marker as a native source, so a plain object stands in for a source
-    // that breaks the contract.
-    auto marker = jsg::JsValue(
-        v8::Symbol::ForApi(js.v8Isolate, jsg::v8StrIntern(js.v8Isolate, "kNativeSource")));
-    auto source = js.obj();
-    source.set(js, marker, marker);
-    source.set(js, "pull"_kj,
-        jsg::JsValue(js.wrapSimpleFunction(
-            js.v8Context(), [](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>& info) {
-      auto controller = KJ_ASSERT_NONNULL(jsg::JsValue(info[0]).tryCast<jsg::JsObject>());
-      webstreams::invokeMethod(
-          js, controller, "enqueue"_kj, jsg::JsUint8Array::create(js, static_cast<size_t>(0)));
-    })));
-
-    auto cppExports = KJ_ASSERT_NONNULL(tryGetBootstrapExport(js, "webstreams/cpp_exports"));
-    auto exportsObj = KJ_ASSERT_NONNULL(cppExports.tryCast<jsg::JsObject>());
-    auto constructor =
-        KJ_ASSERT_NONNULL(exportsObj.get(js, "ReadableStream"_kj).tryCast<jsg::JsFunction>());
-    auto streamObj = constructor.newInstance(js, jsg::JsValue(source));
-    auto reader = KJ_ASSERT_NONNULL(
-        JSG_TRY_CAST_OBJECT(webstreams::invokeMethod(js, streamObj, "getReader"_kj)));
-    auto read = js.toPromise(v8::Local<v8::Value>(
-        KJ_ASSERT_NONNULL(JSG_TRY_CAST_PROMISE(webstreams::invokeMethod(js, reader, "read"_kj)))));
-
-    // The refusal errors the stream, so the read rejects with it rather than handing
-    // the reader an empty chunk.
-    auto promise = read.then(js, [](jsg::Lock& js, jsg::Value) {
-      KJ_FAIL_REQUIRE("expected the read to reject");
-    }, [&rejected](jsg::Lock& js, jsg::Value exception) {
-      auto e = js.exceptionToKj(kj::mv(exception));
-      KJ_EXPECT(e.getDescription().startsWith("jsg.TypeError: enqueue() of an empty chunk"),
-          e.getDescription());
-      rejected = true;
-    });
-    return env.context.awaitJs(js, kj::mv(promise));
-  });
-  KJ_EXPECT(rejected);
-}
-
 KJ_TEST("ReadableStreamNativeSource rejects concurrent pulls") {
   TestFixture testFixture;
   MockControllerState state;
@@ -1886,6 +1898,306 @@ KJ_TEST("ReadableStreamNativeSource rejects concurrent pulls") {
       KJ_EXPECT(state.enqueued[0].asPtr() == kData.asBytes());
     });
     return env.context.awaitJs(js, kj::mv(promise));
+  });
+}
+
+// =======================================================================================
+// The TypeScript conduit's side of the native source contract
+//
+// The conduit takes any object carrying the kNativeSource marker as a native source, so a
+// scripted plain object stands in for ReadableStreamNativeSource here: the script settles
+// each pull itself, and can break the contract.
+
+// Every conduit script runs after this prologue, as the body of an async function whose
+// `markers` argument holds the api-registry symbols, which JavaScript cannot name.
+// scriptedSource() builds a native source whose pull() records { controller, signal,
+// resolve, reject } in `pulls` and stays pending until the script settles it.
+// erroredBy(reader, read) waits for `read` and the reader's closed promise to reject with
+// one error, closed first (the stream errors before the reads it ends settle), and returns
+// the error.
+constexpr kj::StringPtr kConduitScriptPrologue = R"js(
+  const assert = (condition, message) => {
+    if (!condition) throw new Error(message);
+  };
+  // Lets the reactions already queued run, and those they queue in turn.
+  const microtasks = async () => {
+    for (let i = 0; i < 10; i++) await undefined;
+  };
+  const scriptedSource = (members = {}) => {
+    const pulls = [];
+    const source = {
+      [markers.kNativeSource]: markers.kNativeSource,
+      pull(controller, signal) {
+        const { promise, resolve, reject } = Promise.withResolvers();
+        pulls.push({ controller, signal, resolve, reject });
+        return promise;
+      },
+      ...members,
+    };
+    return { source, pulls };
+  };
+  const erroredBy = async (reader, read) => {
+    const order = [];
+    const rejection = (promise, name) => promise.then(
+      (value) => {
+        throw new Error(`${name} fulfilled with ${JSON.stringify(value)}`);
+      },
+      (reason) => {
+        order.push(name);
+        return reason;
+      });
+    const [closedError, readError] =
+      await Promise.all([rejection(reader.closed, 'closed'), rejection(read, 'read')]);
+    assert(closedError === readError, 'closed and the read rejected with different errors');
+    assert(order.join() === 'closed,read', 'the read rejected before closed');
+    return readError;
+  };
+)js"_kj;
+
+// Runs `body` after kConduitScriptPrologue, and waits for the promise it returns.
+kj::Promise<void> runConduitScript(const TestFixture::Environment& env, kj::StringPtr body) {
+  auto& js = env.js;
+  auto markers = js.obj();
+  for (auto& name: kj::arr("kNativeSource"_kj, "kExtractNativeSource"_kj, "kNativeSink"_kj,
+           "kExtractNativeSink"_kj)) {
+    markers.set(js, name, js.symbolInternal(name));
+  }
+  auto code = kj::str("(async (markers) => {", kConduitScriptPrologue, body, "})");
+  auto fn = KJ_ASSERT_NONNULL(jsg::NonModuleScript::compile(js, code, "conduit-script.js"_kj)
+                                  .runAndReturn(js)
+                                  .tryCast<jsg::JsFunction>());
+  auto promise = fn.call(js, js.undefined(), jsg::JsValue(markers));
+  return env.context.awaitJs(js, js.toPromise(promise)).ignoreResult();
+}
+
+KJ_TEST("TypeScript native stream errors when its source enqueues an empty chunk") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    // ReadableStreamNativeSource never enqueues an empty chunk: a zero-byte read is its EOF,
+    // which it signals with close(). The refusal errors the stream, so the read rejects with
+    // it rather than handing the reader an empty chunk.
+    return runConduitScript(env, R"js(
+      const reader = new ReadableStream({
+        [markers.kNativeSource]: markers.kNativeSource,
+        pull(controller) {
+          controller.enqueue(new Uint8Array(0));
+        },
+      }).getReader();
+      const error = await erroredBy(reader, reader.read());
+      assert(error instanceof TypeError && error.message ===
+        'enqueue() of an empty chunk is not supported for native streams; an empty ' +
+          'answer means end-of-stream, so call close() instead',
+        `errored with ${error}`);
+    )js"_kj);
+  });
+}
+
+KJ_TEST("TypeScript native stream errors when its source responds with zero bytes") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    // As with an empty chunk, a zero-byte answer to a BYOB read would mean end-of-stream,
+    // which the source signals with close(). The refusal errors the stream, so the read
+    // rejects with it.
+    return runConduitScript(env, R"js(
+      const reader = new ReadableStream({
+        [markers.kNativeSource]: markers.kNativeSource,
+        pull(controller) {
+          controller.byobRequest.respond(0);
+        },
+      }).getReader({ mode: 'byob' });
+      const error = await erroredBy(reader, reader.read(new Uint8Array(4)));
+      assert(error instanceof TypeError && error.message ===
+        'respond(0) is not supported for native streams; an empty answer means ' +
+          'end-of-stream, so call close() instead',
+        `errored with ${error}`);
+    )js"_kj);
+  });
+}
+
+KJ_TEST("TypeScript native stream pulls its source one pull at a time") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    // ReadableStreamNativeSource rejects a pull while one is in flight (above), so a read
+    // made while a pull is pending waits for it to settle.
+    return runConduitScript(env, R"js(
+      const { source, pulls } = scriptedSource();
+      const reader = new ReadableStream(source).getReader();
+      const first = reader.read();
+      const second = reader.read();
+      assert(pulls.length === 1, `two reads started ${pulls.length} pulls`);
+      pulls[0].controller.enqueue(new Uint8Array([1]));
+      pulls[0].resolve();
+      assert((await first).value[0] === 1, 'the first read missed its chunk');
+      await microtasks();
+      assert(pulls.length === 2, 'the second read did not pull once the first pull settled');
+      pulls[1].controller.enqueue(new Uint8Array([2]));
+      pulls[1].resolve();
+      assert((await second).value[0] === 2, 'the second read missed its chunk');
+    )js"_kj);
+  });
+}
+
+KJ_TEST("TypeScript native stream waits out a pull its reader abandoned") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    // Releasing the reader aborts its pull, and ReadableStreamNativeSource keeps the bytes
+    // that pull would have delivered for the next one. The next pull starts once the
+    // aborted one settles. A fulfillment is not the source's answer to anything, nor is a
+    // rejection with the abort's reason, which reports only the abort.
+    return runConduitScript(env, R"js(
+      const settlements = {
+        fulfilled: (pull) => pull.resolve(),
+        'rejected with the abort reason': (pull) => pull.reject(pull.signal.reason),
+      };
+      for (const [outcome, settle] of Object.entries(settlements)) {
+        const { source, pulls } = scriptedSource();
+        const stream = new ReadableStream(source);
+        const released = stream.getReader();
+        const abandoned = released.read().then(() => undefined, (e) => e);
+        released.releaseLock();
+        assert(pulls[0].signal.aborted, 'releasing the reader did not abort its pull');
+        assert((await abandoned) instanceof TypeError, 'releasing the reader left its read');
+        const read = stream.getReader().read();
+        assert(pulls.length === 1, `${outcome}: pulled while the aborted pull was pending`);
+        settle(pulls[0]);
+        await microtasks();
+        assert(pulls.length === 2, `${outcome}: the new read did not pull`);
+        pulls[1].controller.enqueue(new Uint8Array([7]));
+        pulls[1].resolve();
+        const { done, value } = await read;
+        assert(!done && value[0] === 7, `${outcome}: the new read missed the next chunk`);
+      }
+    )js"_kj);
+  });
+}
+
+KJ_TEST("TypeScript native stream errors when a pull its reader abandoned fails") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    // Any other rejection of the aborted pull is the source's error, as a live pull's is:
+    // ReadableStreamNativeSource rejects with the failure of its read. The stream errors at
+    // once, so the next reader's closed rejects whether or not it has a read waiting.
+    return runConduitScript(env, R"js(
+      const failure = new Error('the aborted read failed');
+      for (const waiting of [false, true]) {
+        const when = waiting ? 'with a read waiting' : 'with no read waiting';
+        const { source, pulls } = scriptedSource();
+        const stream = new ReadableStream(source);
+        const released = stream.getReader();
+        const abandoned = released.read().then(() => undefined, (e) => e);
+        released.releaseLock();
+        assert((await abandoned) instanceof TypeError, 'releasing the reader left its read');
+        const reader = stream.getReader();
+        const settled = [];
+        const observe = (promise, name) => promise.then(
+          () => settled.push(`${name} fulfilled`),
+          (e) => settled.push(e === failure ? `${name} rejected` : `${name} rejected with ${e}`));
+        observe(reader.closed, 'closed');
+        if (waiting) observe(reader.read(), 'read');
+        pulls[0].reject(failure);
+        await microtasks();
+        assert(pulls.length === 1, `${when}: pulled again after the aborted pull failed`);
+        const expected = waiting ? 'closed rejected,read rejected' : 'closed rejected';
+        assert(settled.join() === expected, `${when}: ${settled.join() || 'nothing settled'}`);
+      }
+    )js"_kj);
+  });
+}
+
+KJ_TEST("TypeScript native stream errors when a pull settles without delivering") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    // A native source answers every pull by delivering, closing or erroring. A source that
+    // settles a pull with none of them would be pulled again and again, so the stream errors
+    // instead.
+    return runConduitScript(env, R"js(
+      const { source, pulls } = scriptedSource();
+      const reader = new ReadableStream(source).getReader();
+      const errored = erroredBy(reader, reader.read());
+      pulls[0].resolve();
+      await microtasks();
+      assert(pulls.length === 1, 'pulled again after a pull that delivered nothing');
+      const error = await errored;
+      assert(error instanceof TypeError && error.message ===
+        'native source pull settled without delivering, closing, or erroring; the ' +
+          'source appears broken',
+        `errored with ${error}`);
+    )js"_kj);
+  });
+}
+
+KJ_TEST("TypeScript native stream errors when its source ends short of its expectedLength") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    // A source that declares an expectedLength delivers exactly that many bytes. Ending
+    // short of it errors the stream, whether by close() or by answering a read with fewer
+    // bytes than its minimum, which ends the stream.
+    return runConduitScript(env, R"js(
+      {
+        const { source, pulls } = scriptedSource({ expectedLength: 4n });
+        const reader = new ReadableStream(source).getReader();
+        const first = reader.read();
+        pulls[0].controller.enqueue(new Uint8Array([1, 2]));
+        pulls[0].resolve();
+        assert((await first).value.length === 2, 'the first read missed its chunk');
+        const errored = erroredBy(reader, reader.read());
+        pulls[1].controller.close();
+        const error = await errored;
+        assert(error instanceof RangeError && error.message ===
+          'native source closed before producing its declared expectedLength',
+          `close() errored the stream with ${error}`);
+      }
+      {
+        const { source, pulls } = scriptedSource({ expectedLength: 4n });
+        const reader = new ReadableStream(source).getReader({ mode: 'byob' });
+        const errored = erroredBy(reader, reader.read(new Uint8Array(4), { min: 3 }));
+        const request = pulls[0].controller.byobRequest;
+        request.view.set([1, 2]);
+        request.respond(2);
+        const error = await errored;
+        assert(error instanceof RangeError && error.message ===
+          'native source closed (via min-read under-delivery) before producing its ' +
+            'declared expectedLength',
+          `the short answer errored the stream with ${error}`);
+      }
+    )js"_kj);
+  });
+}
+
+KJ_TEST("TypeScript streams take a native marker only as an own data property") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    // An inherited marker, as from a polluted Object.prototype, must not make a plain source
+    // or sink native, and a marker accessor never runs. Any other value at the marker is a
+    // broken native or mock object, never user input, and throws.
+    return runConduitScript(env, R"js(
+      const kinds = [
+        [ReadableStream, markers.kNativeSource, markers.kExtractNativeSource, 'source'],
+        [WritableStream, markers.kNativeSink, markers.kExtractNativeSink, 'sink'],
+      ];
+      for (const [Stream, marker, extractor, kind] of kinds) {
+        // Only a native-backed stream carries the extractor.
+        const isNative = (underlying) => Object.hasOwn(new Stream(underlying), extractor);
+        assert(isNative({ [marker]: marker }), `an own ${kind} marker was not taken`);
+        assert(!isNative(Object.create({ [marker]: marker })),
+          `an inherited ${kind} marker was taken`);
+        const accessor = Object.defineProperty({}, marker, {
+          get() {
+            throw new Error(`the ${kind} marker accessor ran`);
+          },
+        });
+        assert(!isNative(accessor), `a ${kind} marker accessor was taken`);
+        let error;
+        try {
+          new Stream({ [marker]: true });
+        } catch (e) {
+          error = e;
+        }
+        assert(error instanceof TypeError &&
+          error.message === `Invalid native stream ${kind} marker`,
+          `a ${kind} marker of another value threw ${error}`);
+      }
+    )js"_kj);
   });
 }
 
