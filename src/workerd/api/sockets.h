@@ -293,7 +293,9 @@ class Socket: public jsg::Object {
     }
     JSG_METHOD(close);
     JSG_METHOD(startTls);
-    JSG_METHOD(proxyTo);
+    if (flags.getWorkerdExperimental()) {
+      JSG_METHOD(proxyTo);
+    }
   }
 
   JSG_SERIALIZABLE(rpc::SerializationTag::SOCKET);
