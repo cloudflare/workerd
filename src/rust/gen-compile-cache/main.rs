@@ -53,8 +53,10 @@ fn main() {
             input_path,
             &input,
             &args.v8_flags,
-            args.kind == Kind::Function,
-            args.eager,
+            &ffi::CompileOptions {
+                as_function: args.kind == Kind::Function,
+                eager: args.eager,
+            },
         );
 
         fs::write(Path::new(output_path), output).expect("error writing output file");
@@ -64,6 +66,11 @@ fn main() {
 #[cxx::bridge(namespace = "workerd::rust::gen_compile_cache")]
 #[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {
+    struct CompileOptions {
+        as_function: bool,
+        eager: bool,
+    }
+
     unsafe extern "C++" {
         include!("workerd/rust/gen-compile-cache/cxx-bridge.h");
 
@@ -72,8 +79,7 @@ mod ffi {
             path: &str,
             source_code: &str,
             v8_flags: &[String],
-            as_function: bool,
-            eager: bool,
+            options: &CompileOptions,
         ) -> Vec<u8>;
     }
 }
