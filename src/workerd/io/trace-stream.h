@@ -12,10 +12,18 @@ namespace workerd::tracing {
 // events to a tail worker.
 class TailStreamCustomEvent final: public WorkerInterface::CustomEvent {
  public:
-  TailStreamCustomEvent(kj::PromiseFulfillerPair<rpc::TailStreamTarget::Client> paf =
-                            kj::newPromiseAndFulfiller<rpc::TailStreamTarget::Client>())
+  // `completion`, if given, is kept until the session's work is done. See TraceCompletion in
+  // worker-interface.capnp.
+  explicit TailStreamCustomEvent(kj::Maybe<rpc::TraceCompletion::Client> completion = kj::none,
+      kj::PromiseFulfillerPair<rpc::TailStreamTarget::Client> paf =
+          kj::newPromiseAndFulfiller<rpc::TailStreamTarget::Client>())
       : capFulfiller(kj::mv(paf.fulfiller)),
-        clientCap(kj::mv(paf.promise)) {}
+        clientCap(kj::mv(paf.promise)),
+        completion(kj::mv(completion)) {}
+
+  // Builds the event that a tailStreamSession() callee runs, keeping the caller's completion.
+  static kj::Own<TailStreamCustomEvent> fromRpc(
+      rpc::EventDispatcher::TailStreamSessionParams::Reader params);
 
   ~TailStreamCustomEvent() noexcept(false) {
     if (capFulfiller->isWaiting()) {
@@ -53,6 +61,11 @@ class TailStreamCustomEvent final: public WorkerInterface::CustomEvent {
   // Specify the event type for TailStreamCustomEvent (defined internally).
   static constexpr uint16_t TYPE = 12;
 
+  // Sets `completion` (see the constructor) on an event created without one.
+  void setCompletion(rpc::TraceCompletion::Client value) {
+    completion = kj::mv(value);
+  }
+
   rpc::TailStreamTarget::Client getCap() {
     auto result = kj::mv(KJ_ASSERT_NONNULL(clientCap, "can only call getCap() once"));
     clientCap = kj::none;
@@ -62,6 +75,7 @@ class TailStreamCustomEvent final: public WorkerInterface::CustomEvent {
  private:
   kj::Own<kj::PromiseFulfiller<workerd::rpc::TailStreamTarget::Client>> capFulfiller;
   kj::Maybe<rpc::TailStreamTarget::Client> clientCap;
+  kj::Maybe<rpc::TraceCompletion::Client> completion;
 };
 
 // A utility class that receives tracing events and generates/reports TailEvents.
