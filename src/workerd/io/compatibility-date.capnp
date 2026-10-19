@@ -1718,7 +1718,15 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # enabled, the cache option no longer sets `cf.cacheControl`. To override the origin's
   # Cache-Control, omit the `cache` option and use `cf.cacheControl` instead.
 
-  enableWorkerGenerations @195 :Bool
+  durableObjectSnapshots @195 :Bool
+      $compatEnableFlag("durable_object_snapshots")
+      $experimental;
+  # Exposes DurableObjectStorage.snapshot(), which captures a Durable Object's storage at a
+  # bookmark as an opaque handle that can be passed over RPC, and
+  # DurableObjectStorage.onNextSessionRestore(), which restores a snapshot or bookmark when the
+  # next session starts. The experimental catch-all flag also exposes these methods.
+
+  enableWorkerGenerations @196 :Bool
       $compatEnableFlag("enable_worker_generations")
       $compatDisableFlag("disable_worker_generations")
       $experimental;
