@@ -176,7 +176,8 @@ connection.
   `pull` receives an extension `signal`
   argument — the source checks `signal.aborted` before delivery and stashes
   bytes for redelivery if aborted (race buffering lives source-side; the JS
-  conduit is uniformly bufferless).
+  conduit is uniformly bufferless), while an aborted pull's rejection errors
+  the stream as a live pull's does, unless it is `signal.reason`.
 - The `webstreams/cpp_exports` table, which the C++ bridge reads with an
   ordinary property get (`getCppExport`), is frozen and has a null
   prototype, so a name missing from it cannot resolve through

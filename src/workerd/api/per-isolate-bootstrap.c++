@@ -394,6 +394,9 @@ void requireCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
       // putting them on globalThis.
       auto source = script.getSrc();
       auto& observer = jsg::IsolateBase::from(js.v8Isolate).getObserver();
+      // Both branches hand V8 the script's bytes as a one-byte (Latin-1) string, without
+      // transcoding, so the text a script produces at runtime must be ASCII: a non-ASCII
+      // character in a string literal reads as its UTF-8 bytes.
 #if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
       // Under LSAN, use a copied string to avoid false-positive leak reports.
       // The ExternString resource is properly owned by V8 (freed via Dispose()
