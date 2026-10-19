@@ -17,10 +17,12 @@ const numberValue = flags.getValue('limit', 10);
 const details = flags.getDetails('message', 'fallback', {
   targetingKey: 'user-123',
 });
+const configurationVersion = flags.getConfigurationVersion();
 
 assertType<Equal<typeof booleanValue, Promise<boolean>>>();
 assertType<Equal<typeof stringValue, Promise<string>>>();
 assertType<Equal<typeof numberValue, Promise<number>>>();
+assertType<Equal<typeof configurationVersion, Promise<string | null>>>();
 assertType<
   Equal<typeof details, Promise<FlagshipEvaluationDetails<string>>>
 >();

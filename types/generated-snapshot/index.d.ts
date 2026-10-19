@@ -14933,6 +14933,11 @@ declare abstract class Flagship {
     defaultValue: T,
     context?: FlagshipEvaluationContext,
   ): Promise<FlagshipEvaluationDetails<T>>;
+  /**
+   * Get the opaque version of the app's current evaluation configuration.
+   * Providers can use this to invalidate cached evaluations when the version changes.
+   */
+  getConfigurationVersion(): Promise<string | null>;
 }
 /**
  * Hello World binding to serve as an explanatory example. DO NOT USE
