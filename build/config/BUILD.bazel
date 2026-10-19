@@ -12,13 +12,6 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
-# Similar to --run_under flag to be able to run cross-compiled target binaries.
-string_flag(
-    name = "target_run_under",
-    build_setting_default = "",
-    visibility = ["//visibility:public"],
-)
-
 # V8 flags to pass to gen-compile-cache when producing the compile caches
 # embedded in the builtin bundles (//src/node, //src/per_isolate, ...).
 # Must match the flags used by the consumer when compiling, otherwise flag
