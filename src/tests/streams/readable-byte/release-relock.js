@@ -365,31 +365,44 @@ export const relockRespondOverflowSecondView = {
 };
 
 // DIVERGENCE (ledger #29): a native body's reader released while its read
-// is in flight, then a second reader's read waiting when the body fails.
-// C++ refuses the release (TypeError: outstanding read promises), and the
-// read rejects with the body's error. TypeScript rejects the released read,
-// and the second reader's read rejects with the body's error.
+// is in flight, then a failure of the body. C++ refuses the release
+// (TypeError: outstanding read promises), and the read rejects with the
+// body's error. TypeScript rejects the released read, and the failure
+// errors the stream at once: a second reader's closed rejects with the
+// body's error, whether or not the reader has a read waiting, and so does
+// that read.
 export const nativeBodyFailureAfterReleaseMidRead = {
   async test(ctrl, env) {
     for (const mode of [undefined, 'byob']) {
       const getReader = (body) => body.getReader(mode ? { mode } : undefined);
       const startRead = (reader) =>
         mode ? reader.read(new Uint8Array(16)) : reader.read();
-      const { body } = await env.SELF.fetch('http://test/failing');
-      const reader = getReader(body);
-      strictEqual((await startRead(reader)).done, false);
-      // Let the pull that answered settle, so the next read pulls anew.
-      await scheduler.wait(1);
-      let read = startRead(reader);
-      if (usingTsImpl) {
+      // TypeScript runs it with the second reader's read waiting, then with
+      // none.
+      for (const waiting of usingTsImpl ? [true, false] : [true]) {
+        const { body } = await env.SELF.fetch('http://test/failing');
+        const reader = getReader(body);
+        strictEqual((await startRead(reader)).done, false);
+        // Let the pull that answered settle, so the next read pulls anew.
+        await scheduler.wait(1);
+        const read = startRead(reader);
+        if (!usingTsImpl) {
+          throws(() => reader.releaseLock(), TypeError);
+          await env.SELF.fetch('http://test/fail-now');
+          strictEqual((await rejectionOf(read)).message, 'the body failed');
+          continue;
+        }
         reader.releaseLock();
         strictEqual((await rejectionOf(read)).name, 'TypeError');
-        read = startRead(getReader(body));
-      } else {
-        throws(() => reader.releaseLock(), TypeError);
+        const second = getReader(body);
+        const closed = rejectionOf(second.closed);
+        const secondRead = waiting ? rejectionOf(startRead(second)) : null;
+        await env.SELF.fetch('http://test/fail-now');
+        strictEqual((await closed).message, 'the body failed');
+        if (waiting) {
+          strictEqual((await secondRead).message, 'the body failed');
+        }
       }
-      await env.SELF.fetch('http://test/fail-now');
-      strictEqual((await rejectionOf(read)).message, 'the body failed');
     }
   },
 };

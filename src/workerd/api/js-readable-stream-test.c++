@@ -1089,21 +1089,16 @@ KJ_TEST("ReadableStreamNativeSource read failure rejects the pull") {
   });
 }
 
-KJ_TEST("ReadableStreamNativeSource keeps the failure of an abandoned pull's read") {
+KJ_TEST("ReadableStreamNativeSource abandoned pull failure rejects and releases the source") {
   TestFixture testFixture;
   MockControllerState state;
-  size_t failures = 0;
+  size_t checked = 0;
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
-    auto expectFailure = [&failures](jsg::Lock& js, jsg::Value exception) {
-      auto message = kj::str(jsg::JsValue(exception.getHandle(js)));
-      KJ_EXPECT(message.contains("test read failure"), message);
-      ++failures;
-    };
-    // A pull whose read fails, abandoned at once, as releasing the reader mid-read does. The
-    // conduit takes no rejection from an abandoned pull, so the source keeps the failure:
-    // the next pull rejects with it, as does each branch of a tee.
+    // A pull whose read fails, abandoned at once, as releasing the reader mid-read does. It
+    // rejects with the read's failure, not the abort's reason, so the conduit errors the
+    // stream with it as it would for a live pull.
     auto abandonedFailure = [&](jsg::JsObject controller) {
       auto source = js.alloc<ReadableStreamNativeSource>(env.context, kj::heap<ErroringSource>());
       auto abortController = AbortController::constructor(js);
@@ -1113,21 +1108,20 @@ KJ_TEST("ReadableStreamNativeSource keeps the failure of an abandoned pull's rea
           [](jsg::Lock& js) -> jsg::Promise<void> {
         KJ_FAIL_REQUIRE("expected the abandoned pull to reject");
       },
-          [expectFailure, source = source.addRef(), controller = controller.addRef(js)](
+          [&state, &checked, source = source.addRef(), controller = controller.addRef(js)](
               jsg::Lock& js, jsg::Value exception) mutable {
-        expectFailure(js, kj::mv(exception));
-        auto pullFailure = [&](ReadableStreamNativeSource& from) {
-          return from.pull(js, controller.getHandle(js), freshSignal(js)).then(js, [](jsg::Lock&) {
-          }, kj::cp(expectFailure));
-        };
-        auto next = pullFailure(*source);
-        auto branches = source->tee(js);
-        auto first = pullFailure(*branches[0]);
-        auto second = pullFailure(*branches[1]);
-        return next
-            .then(js, [first = kj::mv(first)](jsg::Lock& js) mutable {
-          return kj::mv(first);
-        }).then(js, [second = kj::mv(second)](jsg::Lock& js) mutable { return kj::mv(second); });
+        auto message = kj::str(jsg::JsValue(exception.getHandle(js)));
+        KJ_EXPECT(message.contains("test read failure"), message);
+        // The source was released: the next pull settles without delivering, closing or
+        // erroring, and tee() refuses, as for a consumed source.
+        auto next = source->pull(js, controller.getHandle(js), freshSignal(js));
+        KJ_EXPECT_THROW_MESSAGE("already been consumed", source->tee(js));
+        return next.then(js, [&state, &checked](jsg::Lock& js) {
+          KJ_EXPECT(state.enqueued.size() == 0);
+          KJ_EXPECT(state.responded == kj::none);
+          KJ_EXPECT(!state.closed);
+          ++checked;
+        });
       });
     };
     // Through a default read's pull, then a BYOB read's.
@@ -1139,11 +1133,7 @@ KJ_TEST("ReadableStreamNativeSource keeps the failure of an abandoned pull's rea
         js, [byobPull = kj::mv(byobPull)](jsg::Lock& js) mutable { return kj::mv(byobPull); });
     return env.context.awaitJs(js, kj::mv(promise));
   });
-  // For each source: the abandoned pull, the next pull, and a pull of each branch.
-  KJ_EXPECT(failures == 8);
-  KJ_EXPECT(state.enqueued.size() == 0);
-  KJ_EXPECT(state.responded == kj::none);
-  KJ_EXPECT(!state.closed);
+  KJ_EXPECT(checked == 2);
 }
 
 KJ_TEST("ReadableStreamNativeSource default pull fast path serves synchronously when gated on") {
@@ -1254,15 +1244,14 @@ KJ_TEST("ReadableStreamNativeSource pull fast path failure rejects and releases 
       },
               [&state, source = source.addRef(), controller = controller.addRef(js)](
                   jsg::Lock& js, jsg::Value exception) mutable {
-        KJ_EXPECT(state.enqueued.size() == 0);
-        KJ_EXPECT(!state.closed);
-        // The source was released, and keeps the failure: a later pull rejects with it.
-        return source->pull(js, controller.getHandle(js), freshSignal(js));
-      }).then(js, [](jsg::Lock& js) {
-        KJ_FAIL_ASSERT("the later pull should have rejected");
-      }, [&state](jsg::Lock& js, jsg::Value exception) {
         auto message = kj::str(jsg::JsValue(exception.getHandle(js)));
         KJ_EXPECT(message.contains("sync read failed"), message);
+        KJ_EXPECT(state.enqueued.size() == 0);
+        KJ_EXPECT(!state.closed);
+        // The source was released: a subsequent pull resolves defensively without
+        // enqueuing or closing.
+        return source->pull(js, controller.getHandle(js), freshSignal(js));
+      }).then(js, [&state](jsg::Lock& js) {
         KJ_EXPECT(state.enqueued.size() == 0);
         KJ_EXPECT(!state.closed);
       });
@@ -2048,17 +2037,17 @@ KJ_TEST("TypeScript native stream pulls its source one pull at a time") {
   });
 }
 
-KJ_TEST("TypeScript native stream waits out a pull its reader abandoned, however it settles") {
+KJ_TEST("TypeScript native stream waits out a pull its reader abandoned") {
   auto fixture = makeTsStreamsFixture();
   fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
     // Releasing the reader aborts its pull, and ReadableStreamNativeSource keeps the bytes
     // that pull would have delivered for the next one. The next pull starts once the
-    // aborted one settles, and that settlement, fulfilled or rejected, is not the source's
-    // answer to anything.
+    // aborted one settles. A fulfillment is not the source's answer to anything, nor is a
+    // rejection with the abort's reason, which reports only the abort.
     return runConduitScript(env, R"js(
       const settlements = {
         fulfilled: (pull) => pull.resolve(),
-        rejected: (pull) => pull.reject(new Error('the aborted read failed')),
+        'rejected with the abort reason': (pull) => pull.reject(pull.signal.reason),
       };
       for (const [outcome, settle] of Object.entries(settlements)) {
         const { source, pulls } = scriptedSource();
@@ -2077,6 +2066,39 @@ KJ_TEST("TypeScript native stream waits out a pull its reader abandoned, however
         pulls[1].resolve();
         const { done, value } = await read;
         assert(!done && value[0] === 7, `${outcome}: the new read missed the next chunk`);
+      }
+    )js"_kj);
+  });
+}
+
+KJ_TEST("TypeScript native stream errors when a pull its reader abandoned fails") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    // Any other rejection of the aborted pull is the source's error, as a live pull's is:
+    // ReadableStreamNativeSource rejects with the failure of its read. The stream errors at
+    // once, so the next reader's closed rejects whether or not it has a read waiting.
+    return runConduitScript(env, R"js(
+      const failure = new Error('the aborted read failed');
+      for (const waiting of [false, true]) {
+        const when = waiting ? 'with a read waiting' : 'with no read waiting';
+        const { source, pulls } = scriptedSource();
+        const stream = new ReadableStream(source);
+        const released = stream.getReader();
+        const abandoned = released.read().then(() => undefined, (e) => e);
+        released.releaseLock();
+        assert((await abandoned) instanceof TypeError, 'releasing the reader left its read');
+        const reader = stream.getReader();
+        const settled = [];
+        const observe = (promise, name) => promise.then(
+          () => settled.push(`${name} fulfilled`),
+          (e) => settled.push(e === failure ? `${name} rejected` : `${name} rejected with ${e}`));
+        observe(reader.closed, 'closed');
+        if (waiting) observe(reader.read(), 'read');
+        pulls[0].reject(failure);
+        await microtasks();
+        assert(pulls.length === 1, `${when}: pulled again after the aborted pull failed`);
+        const expected = waiting ? 'closed rejected,read rejected' : 'closed rejected';
+        assert(settled.join() === expected, `${when}: ${settled.join() || 'nothing settled'}`);
       }
     )js"_kj);
   });

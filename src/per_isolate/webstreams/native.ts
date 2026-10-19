@@ -55,10 +55,12 @@
 //     on the next pull. The controller REFUSES delivery on an aborted
 //     signal as a backstop. This eliminates JS-side buffering for the
 //     release-mid-pull race: race buffering lives SOURCE-SIDE; the JS
-//     conduit is uniformly bufferless. A failure is kept the same way:
-//     the conduit takes no rejection from an aborted pull, so a source
-//     whose read fails rejects every later pull with that failure, and
-//     its tee() gives two branches that fail with it.
+//     conduit is uniformly bufferless. A failure, by contrast, is
+//     reported at once: an aborted pull that rejects errors the stream,
+//     as a live pull does, unless it rejects with signal.reason, which
+//     reports only the abort. A read that fails after its reader is
+//     released thus errors the stream whether or not another read
+//     waits, as a pull's rejection does in the spec.
 //     FUTURE OPTIMIZATION: reuse a single AbortController per conduit
 //     (reset between pulls) rather than allocating one per pull.
 //   - MIN-READ / UNDER-DELIVERY CONTRACT (KJ tryRead semantics): the
@@ -149,6 +151,7 @@ const {
   AbortControllerAbort,
   AbortControllerSignalGet,
   AbortSignalAbortedGet,
+  AbortSignalReasonGet,
   BigInt,
   NumberIsNaN,
   ObjectGetOwnPropertyDescriptor,
@@ -703,10 +706,10 @@ class NativePullConduit implements ByteStreamConsumerType {
   // AbortController whose signal is passed as pull(controller, signal).
   // The source contractually checks signal.aborted immediately before
   // enqueue/respond; the controller backstop refuses delivery on an
-  // aborted signal. An aborted pull's settlement is not the source's
-  // answer to anything: the source held its data for the next pull, so a
-  // fulfilled one skips the completion latch, and a rejected one (kj
-  // cancellation of its read) does not error a healthy stream.
+  // aborted signal. An aborted pull's fulfillment is not the source's
+  // answer to anything: the source held its data for the next pull, so it
+  // skips the completion latch. Its rejection is the source's error, as a
+  // live pull's is, unless it carries the abort's own reason.
   pullIfNeeded(): void {
     if (this.#status !== 'active') return;
     if (this.#requests.length === 0) return;
@@ -744,7 +747,10 @@ class NativePullConduit implements ByteStreamConsumerType {
         },
         (e: unknown) => {
           this.#pullAbortController = undefined;
-          if (AbortSignalAbortedGet(signal)) {
+          if (
+            AbortSignalAbortedGet(signal) &&
+            e === AbortSignalReasonGet(signal)
+          ) {
             this.pullIfNeeded();
           } else {
             this.errorFromSource(e);
