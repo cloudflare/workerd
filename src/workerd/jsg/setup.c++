@@ -544,9 +544,13 @@ IsolateBase::IsolateBase(V8System& system,
   });
 }
 
-void IsolateBase::setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext) {
+void IsolateBase::setSnapshotDefaultContext(
+    v8::Local<v8::Context> defaultContext, uint32_t* badTagFieldsCount) {
   KJ_REQUIRE(isPreparingSnapshot());
-  KJ_ASSERT_NONNULL(snapshotCreator)->SetDefaultContext(defaultContext);
+  *badTagFieldsCount = 0;
+  KJ_ASSERT_NONNULL(snapshotCreator)
+      ->SetDefaultContext(defaultContext,
+          v8::SerializeInternalFieldsCallback(&serializeInternalFields, badTagFieldsCount));
 }
 
 void IsolateBase::bakeConstructorTemplatesIntoSnapshot() {
@@ -563,7 +567,8 @@ void IsolateBase::bakeConstructorTemplatesIntoSnapshot() {
 }
 
 void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
-    kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles) {
+    kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles,
+    const uint32_t* badTagFieldsCount) {
   KJ_REQUIRE(isPreparingSnapshot());
   auto& artifact = mutableSnapshotArtifact();
   KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
@@ -617,8 +622,13 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   // consumes it.
   defaultContextHandle.Reset();
 
-  artifact.blob = KJ_ASSERT_NONNULL(snapshotCreator)
-                      ->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
+  artifact.blob =
+      getSnapshotCreator()->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
+
+  KJ_REQUIRE(*badTagFieldsCount == 0,
+      "PREPARE_SNAPSHOT: aligned-pointer internal fields reachable from the context are not "
+      "workerd wrapper markers",
+      *badTagFieldsCount);
 }
 
 void IsolateBase::restoreConstructorTemplatesFromSnapshot() {
