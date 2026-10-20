@@ -1622,6 +1622,7 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
   kj::Maybe<jsg::SnapshotConfig> snapshotConfig;
   if (util::Autogate::isEnabled(util::AutogateKey::STARTUP_SNAPSHOT) &&
       supportsStartupSnapshot(featureFlags, workerSource)) {
+
     // The zygote reports into a reporter of its own: its failures must never surface as the
     // Worker's.
     ErrorReporter zygoteErrors;
@@ -1654,8 +1655,7 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
           Worker::Lock::TakeSynchronously(kj::none), [&](jsg::Lock& lock) {
         artifact = jsg::IsolateBase::from(lock.v8Isolate).extractSnapshotArtifact();
       });
-      // TODO(soon): start the Worker from the snapshot artifact.
-      (void)artifact;
+      snapshotConfig = jsg::SnapshotConfig(jsg::FinalizedSnapshot{.artifact = artifact->addRef()});
     } else {
       auto errors = kj::strArray(zygoteErrors.errors, "\n");
       KJ_LOG(
