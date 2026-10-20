@@ -112,8 +112,9 @@ class BaseTracer: public kj::Refcounted {
   // makes it the root that makeUserRequestSpan() returns. `func` is given the invocation's span
   // context, whose ids the span takes. The tracer names and tags the span from the invocation's
   // events (see invocation-span.h), including those the worker reports for its active span, and
-  // ends it with the outcome.
-  using StartInvocationSpanFunc = kj::Function<SpanBuilder(const tracing::InvocationSpanContext&)>;
+  // ends it with the outcome. The hook can supply a default sampling decision on the context
+  // before user spans and subrequests inherit it.
+  using StartInvocationSpanFunc = kj::Function<SpanBuilder(tracing::InvocationSpanContext&)>;
   void setStartInvocationSpanFunc(StartInvocationSpanFunc func);
 
   virtual void setJsRpcInfo(const tracing::InvocationSpanContext& context,

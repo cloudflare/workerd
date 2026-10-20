@@ -161,6 +161,37 @@ KJ_TEST("InvocationSpanContext propagates traceFlags from trigger") {
   KJ_EXPECT(child2.getTraceFlags() == kj::none);
 }
 
+KJ_TEST(
+    "InvocationSpanContext default trace flags propagate without replacing upstream decisions") {
+  setPredictableModeForTest();
+  FakeEntropySource fakeEntropySource;
+
+  auto root = InvocationSpanContext::newForInvocation(kj::none, fakeEntropySource);
+  root.setDefaultTraceFlags(TraceFlags(0x01));
+  KJ_EXPECT(root.getParent() == kj::none);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(root.getTraceFlags()) == TraceFlags(0x01));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(root.clone().getTraceFlags()) == TraceFlags(0x01));
+  auto child = root.newChild();
+  KJ_EXPECT(child.getTraceId() == root.getTraceId());
+  KJ_EXPECT(KJ_ASSERT_NONNULL(child.getTraceFlags()) == TraceFlags(0x01));
+
+  for (auto flags: {0x00, 0x03}) {
+    auto trigger =
+        InvocationSpanContext(TraceId(1, 2), TraceId(3, 4), SpanId(5), TraceFlags(flags));
+    auto invocation = InvocationSpanContext::newForInvocation(trigger, fakeEntropySource);
+    invocation.setDefaultTraceFlags(TraceFlags(0x01));
+    KJ_EXPECT(KJ_ASSERT_NONNULL(invocation.getTraceFlags()) == TraceFlags(flags));
+    KJ_EXPECT(KJ_ASSERT_NONNULL(invocation.getParent()).getSpanId() == trigger.getSpanId());
+
+    capnp::MallocMessageBuilder builder;
+    invocation.toCapnp(builder.initRoot<rpc::InvocationSpanContext>());
+    auto restored = KJ_ASSERT_NONNULL(
+        InvocationSpanContext::fromCapnp(builder.getRoot<rpc::InvocationSpanContext>()));
+    auto next = InvocationSpanContext::newForInvocation(restored, fakeEntropySource);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(next.newChild().getTraceFlags()) == TraceFlags(flags));
+  }
+}
+
 KJ_TEST("InvocationSpanContext traceFlags capnp round-trip and newChild propagation") {
   setPredictableModeForTest();
   FakeEntropySource fakeEntropySource;

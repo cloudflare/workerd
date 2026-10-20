@@ -115,9 +115,9 @@ struct TracingOptions {
   #
   # Use `HttpOptions.injectRequestHeaders` to send credentials along. The `service.name` resource
   # attribute is the name of the Worker's service. A request arriving on a socket starts its trace
-  # with an `http_request` span of the `workers-runtime` service, under which the invocation's span
-  # sits. Invocations of the designated service itself are not traced. While this is set, spans are
-  # not delivered to streaming tail workers.
+  # with the Worker's invocation span. Traces without an upstream sampling decision are sampled.
+  # Invocations of the designated service itself are not traced. While this is set, spans are not
+  # delivered to streaming tail workers.
 }
 
 struct LoggingOptions {

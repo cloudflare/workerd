@@ -4160,7 +4160,10 @@ class Server::WorkerService final: public Service,
               [&entropySource = threadContext.getEntropySource(), exporter = kj::addRef(exporter),
                   serviceName = kj::str(service.serviceName), resource = makeOtlpResource(service),
                   identityTags = makeOtlpIdentityTags(service)](
-                  const tracing::InvocationSpanContext& invocation) mutable {
+                  tracing::InvocationSpanContext& invocation) mutable {
+        // Standalone export samples traces without an upstream decision. Set the invocation's
+        // context so user spans and subrequests inherit the same flags.
+        invocation.setDefaultTraceFlags(tracing::TraceFlags(0x01));
         auto parent = invocation.getParent().map(
             [](const tracing::InvocationSpanContext& p) { return p.getSpanId(); });
         return startExportedUserSpan(entropySource, kj::addRef(*exporter),
@@ -6859,17 +6862,6 @@ class Server::HttpListener final: public kj::Refcounted {
 
   kj::Maybe<capnp::TwoPartyServer> capnpServer;
 
-  // The span the runtime opens for a request as it starts handling it, when spans are exported
-  // (see TracingOptions.otlp). It starts the trace: the listener has no trace context to continue.
-  SpanBuilder startRuntimeSpan() {
-    auto& exporter = *KJ_UNWRAP_OR(owner.otlpExporter, return nullptr);
-    if (exporter.isCollector(*service)) return nullptr;
-    return startExportedUserSpan(owner.entropySource, kj::addRef(exporter),
-        tracing::SpanContext(tracing::TraceId::fromEntropy(owner.entropySource), kj::none,
-            tracing::TraceFlags(0x01)),
-        OtlpSpanSubmitter::Options{.serviceName = "workers-runtime"_kj}, "http_request"_kjc);
-  }
-
   kj::Promise<void> acceptCapnpConnection(kj::AsyncIoStream& conn) {
     KJ_IF_SOME(s, capnpServer) {
       return s.accept(conn);
@@ -6938,8 +6930,6 @@ class Server::HttpListener final: public kj::Refcounted {
       TRACE_EVENT("workerd", "Connection:request()");
       IoChannelFactory::SubrequestMetadata metadata;
       metadata.cfBlobJson = mapCopyString(cfBlobJson);
-      auto runtimeSpan = parent.startRuntimeSpan();
-      metadata.userSpanParent = runtimeSpan;
 
       Response* wrappedResponse = &response;
       kj::Own<ResponseWrapper> ownResponse;
@@ -6976,8 +6966,6 @@ class Server::HttpListener final: public kj::Refcounted {
 
       IoChannelFactory::SubrequestMetadata metadata;
       metadata.cfBlobJson = mapCopyString(cfBlobJson);
-      auto runtimeSpan = parent.startRuntimeSpan();
-      metadata.userSpanParent = runtimeSpan;
 
       auto worker = parent.service->startRequest(kj::mv(metadata));
       co_return co_await worker->connect(host, headers, connection, response, kj::mv(settings));
