@@ -47,5 +47,6 @@ wd_rust_crate(
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/jsg",
+        "@crates_vendor//:capnp",
     ],
 )
