@@ -4,6 +4,8 @@
 
 #include "jsg-test.h"
 
+#include <v8-microtask-queue.h>
+
 namespace workerd::jsg::test {
 namespace {
 
@@ -343,7 +345,7 @@ KJ_TEST("JSG_TRY/JSG_CATCH with TerminateExecution") {
 
 struct MicrotaskCanary {
   bool& destroyed;
-  ~MicrotaskCanary() noexcept(false) {
+  ~MicrotaskCanary() {
     destroyed = true;
   }
 };
@@ -406,6 +408,48 @@ KJ_TEST("Lock::enqueueMicrotask() runs in the enqueuing context") {
     auto otherContext = lock.template newContext<FunctionContext>();
     JSG_WITHIN_CONTEXT_SCOPE(js, otherContext.getHandle(js), [](Lock& js) { js.runMicrotasks(); });
     KJ_EXPECT(ranInEnqueuingContext);
+  });
+}
+
+size_t oldSpaceUsed(v8::Isolate* isolate) {
+  for (size_t i = 0; i < isolate->NumberOfHeapSpaces(); i++) {
+    v8::HeapSpaceStatistics stats;
+    isolate->GetHeapSpaceStatistics(&stats, i);
+    if (kj::StringPtr(stats.space_name()) == "old_space") {
+      return stats.space_used_size();
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+KJ_TEST("Lock::enqueueMicrotask() allocates nothing in old space") {
+  Evaluator<FunctionContext, FunctionIsolate> e(v8System);
+
+  e.run([](Lock& js) {
+    auto isolate = js.v8Isolate;
+    constexpr uint count = 10000;
+    auto oldSpaceGrowth = [&](auto enqueue) {
+      isolate->RequestGarbageCollectionForTesting(v8::Isolate::kFullGarbageCollection);
+      auto before = oldSpaceUsed(isolate);
+      for (uint i = 0; i < count; i++) {
+        enqueue();
+      }
+      js.runMicrotasks();
+      isolate->RequestGarbageCollectionForTesting(v8::Isolate::kMinorGarbageCollection);
+      auto after = oldSpaceUsed(isolate);
+      return after > before ? after - before : 0;
+    };
+
+    // A wrapped function allocates a FunctionTemplateInfo in old space per call.
+    auto wrapped = oldSpaceGrowth([&]() {
+      js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(isolate,
+          js.wrapSimpleFunction(
+              js.v8Context(), [](Lock&, const v8::FunctionCallbackInfo<v8::Value>&) {}));
+    });
+    auto enqueued = oldSpaceGrowth([&]() { js.enqueueMicrotask([](Lock&) {}); });
+
+    KJ_EXPECT(wrapped > count * 32, wrapped);
+    KJ_EXPECT(enqueued < wrapped / 10, enqueued, wrapped);
   });
 }
 

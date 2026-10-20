@@ -13,6 +13,7 @@
 #include <workerd/util/thread-scopes.h>
 
 #include <v8-cppgc.h>
+#include <v8-microtask-queue.h>
 
 #ifdef V8_ENABLE_SANDBOX
 #include <sys/mman.h>
@@ -380,6 +381,10 @@ bool Lock::v8Has(v8::Local<v8::Object> obj, kj::StringPtr name) {
 
 bool Lock::v8HasOwn(v8::Local<v8::Object> obj, kj::StringPtr name) {
   return check(obj->HasOwnProperty(v8Context(), v8StrIntern(v8Isolate, name)));
+}
+
+void Lock::enqueueMicrotaskData(void (*callback)(v8::Local<v8::Data>), v8::Local<v8::Data> data) {
+  v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(v8Isolate, callback, data);
 }
 
 void Lock::runMicrotasks() {

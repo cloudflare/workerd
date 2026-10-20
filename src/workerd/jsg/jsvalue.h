@@ -5,7 +5,6 @@
 #include <v8-container.h>
 #include <v8-date.h>
 #include <v8-external.h>
-#include <v8-microtask-queue.h>
 #include <v8-proxy.h>
 
 namespace workerd::jsg {
@@ -971,11 +970,8 @@ void runOpaqueMicrotask(v8::Local<v8::Data> data) {
 }  // namespace _
 
 template <typename Func>
-inline void Lock::enqueueMicrotask(Func&& func) {
-  static_assert(!kj::isReference<Func>());
-  auto context = v8Context();
-  auto data = wrapOpaque(context, kj::mv(func));
-  context->GetMicrotaskQueue()->EnqueueMicrotask(v8Isolate, &_::runOpaqueMicrotask<Func>, data);
+inline void Lock::enqueueMicrotask(Func func) {
+  enqueueMicrotaskData(&_::runOpaqueMicrotask<Func>, wrapOpaque(v8Context(), kj::mv(func)));
 }
 
 class JsFunction final: public JsBase<v8::Function, JsFunction> {

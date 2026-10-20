@@ -3273,10 +3273,10 @@ class Lock {
   // Enqueues `func(Lock&)` on the current context's microtask queue, to run in the current context
   // regardless of which context drains the queue. While the microtask is pending, `func` is
   // GC-visited if it is GC-visitable. It is moved out before it runs, so it and everything it
-  // captures is destroyed as soon as it returns, rather than at the next GC. A JavaScript exception
-  // escaping `func` is passed to reportError().
+  // captures is destroyed as soon as it returns, rather than at the next GC. Any exception escaping
+  // `func`, JavaScript or KJ, is passed to reportError(); only termination propagates.
   template <typename Func>
-  void enqueueMicrotask(Func&& func);
+  void enqueueMicrotask(Func func);
 
   // Request an extra microtask checkpoint after the current one completes.
   void requestExtraMicrotaskCheckpoint();
@@ -3351,6 +3351,7 @@ class Lock {
   }
 
  private:
+  void enqueueMicrotaskData(void (*callback)(v8::Local<v8::Data>), v8::Local<v8::Data> data);
 #ifdef WORKERD_ASAN
   void maybeAllocGcStress();
 #else
