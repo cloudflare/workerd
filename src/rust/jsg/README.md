@@ -590,7 +590,10 @@ The module docs of `wrappable.rs` list every Rust type that converts to or from 
 how. Most convert both ways. `&[T]` converts only from JavaScript, so it can be a method parameter
 but not a return value. A number is an `f64`, which converts like C++ JSG's `double`: to a number,
 and from any value with JavaScript's `ToNumber`. An `f32` converts only to JavaScript. A number
-that stays on the V8 heap is a `v8::Local<'s, v8::Number>`, which accepts only a number.
+that stays on the V8 heap is a `v8::Local<'s, v8::Number>`, which accepts only a number. A
+`String` converts from any value with `ToString`, copying it out of the V8 heap. To convert any
+value as C++ JSG's `jsg::JsString` parameter does, without the copy, take a
+`v8::Local<'s, v8::Value>` and call `to_js_string(lock)` on it.
 
 Integers convert like C++ JSG's. `u8`, `u16`, `u32`, `i8`, `i16` and `i32` convert to a number,
 and from a value converted to a number, which must be in range; whether a fraction just past a

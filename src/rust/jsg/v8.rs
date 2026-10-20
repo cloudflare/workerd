@@ -331,6 +331,9 @@ pub mod ffi {
             value: Local,
             result: &mut i64,
         ) -> bool;
+        // Coerce with ToString (`v8::Value::ToString()`), or return an empty handle if the
+        // coercion threw, leaving the exception pending; see `call_into_js()`.
+        pub unsafe fn local_value_to_string(isolate: *mut Isolate, value: Local) -> MaybeLocal;
 
         // Local<String>
         pub unsafe fn local_string_length(value: &Local) -> i32;
@@ -1761,6 +1764,27 @@ impl<'s, T> Local<'s, T> {
                 )
             };
             Ok(ok.then_some(result))
+        })
+    }
+
+    /// Converts the value with JavaScript's `ToString`, which, unlike `String()`, rejects a
+    /// `Symbol`. The result is a V8 string: nothing is copied out of the V8 heap. If the coercion
+    /// throws, or execution is terminating, fails with an error for which [`Error::is_pending`]
+    /// is true.
+    ///
+    /// Corresponds to `v8::Value::ToString()` and C++ JSG's `JsValue::toJsString()`, and to what
+    /// C++ JSG does for a `jsg::JsString` parameter. Unlike `Local<String>::to_string()`, which
+    /// copies a string into a Rust `String`, the result stays on the V8 heap.
+    pub fn to_js_string(&self, lock: &mut Lock<'s>) -> Result<Local<'s, String>, Error> {
+        call_into_js(lock, |lock| {
+            // SAFETY: `lock` guarantees the isolate is locked; handle is valid within the
+            // current HandleScope, and a non-empty result is a string in that scope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_value_to_string(
+                    lock.isolate().as_ffi(),
+                    self.into_ffi(),
+                ))
+            })
         })
     }
 }

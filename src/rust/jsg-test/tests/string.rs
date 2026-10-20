@@ -2,12 +2,16 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+use jsg::ExceptionType;
+use jsg::FromJS;
 use jsg::ToJS;
 use jsg::v8::Local;
 use jsg::v8::String as JsString;
 use jsg::v8::Utf8Value;
 use jsg::v8::Value;
 use jsg::v8::WriteFlags;
+use jsg_macros::jsg_method;
+use jsg_macros::jsg_resource;
 
 // Convenience: create a Local<String> from a UTF-8 str literal.
 fn from_utf8<'a>(lock: &mut jsg::Lock<'a>, s: &str) -> Local<'a, JsString> {
@@ -471,6 +475,99 @@ fn string_upcast_to_value() {
         let s = from_utf8(lock, "upcast");
         let val: Local<'_, Value> = s.into();
         assert!(val.is_string());
+        Ok(())
+    });
+}
+
+// =============================================================================
+// Local<Value>::to_js_string
+// =============================================================================
+
+#[jsg_resource]
+struct Strings;
+
+#[jsg_resource]
+impl Strings {
+    #[jsg_method]
+    pub fn coerce<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        value: Local<'s, Value>,
+    ) -> Result<Local<'s, JsString>, jsg::Error> {
+        value.to_js_string(lock)
+    }
+}
+
+/// `to_js_string` converts any value as JavaScript's `ToString` does, running `toString` where
+/// there is one, like C++ JSG's `jsg::JsString` parameter.
+#[test]
+fn value_to_js_string_coerces() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        for (expr, expected) in [
+            ("'s'", "s"),
+            ("42", "42"),
+            ("-0", "0"),
+            ("1n", "1"),
+            ("null", "null"),
+            ("undefined", "undefined"),
+            ("[1, 2]", "1,2"),
+            ("new String('boxed')", "boxed"),
+            ("({ toString() { return 'obj'; } })", "obj"),
+        ] {
+            let value = ctx.eval_raw(lock, expr).unwrap();
+            let string = value.to_js_string(lock).unwrap();
+            assert_eq!(string.to_string(lock), expected, "{expr}");
+        }
+
+        // A string converts to itself.
+        let value = ctx.eval_raw(lock, "'x'.repeat(3)").unwrap();
+        let string: Local<'_, Value> = value.to_js_string(lock).unwrap().into();
+        assert_eq!(string, value);
+        Ok(())
+    });
+}
+
+/// What `toString` throws, or `ToString` throws for a `Symbol`, stays pending, so that a method
+/// passing the error on throws it to its caller.
+#[test]
+fn value_to_js_string_passes_on_what_to_string_throws() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let thrower = "({ toString() { throw new RangeError('boom'); } })";
+        for (expr, name, message) in [
+            (thrower, ExceptionType::RangeError, "boom"),
+            (
+                "Symbol()",
+                ExceptionType::TypeError,
+                "Cannot convert a Symbol value to a string",
+            ),
+        ] {
+            let value = ctx.eval_raw(lock, expr).unwrap();
+            let caught = lock
+                .try_catch(|lock| {
+                    let err = value.to_js_string(lock).map(drop).unwrap_err();
+                    assert!(err.is_pending(), "{expr}");
+                    Err::<(), _>(err)
+                })
+                .expect("execution should not be terminating");
+            let Err(exception) = caught else {
+                panic!("{expr} should not convert");
+            };
+            let err = jsg::Error::from_js(lock, exception).unwrap();
+            assert_eq!(err.name, name, "{expr}");
+            assert_eq!(err.message, message, "{expr}");
+        }
+
+        let resource = jsg::Rc::new(Strings).to_js(lock)?;
+        ctx.set_global(lock, "r", resource);
+        assert_eq!(ctx.eval::<String>(lock, "r.coerce(7)").unwrap(), "7");
+        let err = ctx
+            .eval::<String>(lock, &format!("r.coerce({thrower})"))
+            .unwrap_err()
+            .unwrap_jsg_err(lock);
+        assert_eq!(err.name, ExceptionType::RangeError);
+        assert_eq!(err.message, "boom");
         Ok(())
     });
 }

@@ -172,6 +172,9 @@ bool local_is_date(const Local& val);
 bool local_value_int32_value(Isolate* isolate, Local value, int32_t& result);
 bool local_value_uint32_value(Isolate* isolate, Local value, uint32_t& result);
 bool local_value_integer_value(Isolate* isolate, Local value, int64_t& result);
+// Coerce with ToString (v8::Value::ToString()), or return an empty handle if the coercion threw,
+// leaving the exception pending.
+MaybeLocal local_value_to_string(Isolate* isolate, Local value);
 
 // Local<String>
 Local local_string_empty(Isolate* isolate);
