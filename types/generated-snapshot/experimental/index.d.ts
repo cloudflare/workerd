@@ -4532,7 +4532,7 @@ interface WorkerLoaderModule {
   js?: string;
   cjs?: string;
   text?: string;
-  data?: ArrayBuffer;
+  data?: ArrayBuffer | ArrayBufferView;
   json?: any;
   py?: string;
   wasm?: ArrayBuffer | ArrayBufferView | WebAssembly.Module;
