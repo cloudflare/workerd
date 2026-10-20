@@ -6,6 +6,7 @@
 // Types describing a V8 startup snapshot and how an isolate relates to one. Only high-level code
 // that creates isolates (jsg::IsolateBase and its callers) needs to include this file.
 
+#include <v8-object.h>
 #include <v8-snapshot.h>
 
 #include <kj/array.h>
@@ -50,6 +51,21 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
     return addRefToThis();
   }
 };
+
+// SerializeInternalFieldsCallback registered with the snapshot's default context
+// (IsolateBase::setSnapshotDefaultContext). V8 runs it inside CreateBlob() for every embedder
+// field that does not hold a heap object (aligned pointers and empty slots alike) the context
+// reaches. `data` is a uint32_t counter of non-null aligned-pointer fields at the wrong index or
+// with an unknown marker. V8 is built without exceptions, so the callback only increments the
+// counter and IsolateBase::createSnapshotBlob() raises it after CreateBlob() returns.
+v8::StartupData serializeInternalFields(v8::Local<v8::Object> holder, int index, void* data);
+
+// DeserializeInternalFieldsCallback for Context::New() from a startup snapshot. Restores the
+// workerd marker in WRAPPABLE_TAG_FIELD_INDEX of each deserialized wrapper from the marker value
+// the serializer emitted. `data` is a uint32_t counter of payloads at the wrong index or with an
+// unknown marker; the caller raises it after Context::New() returns.
+void deserializeInternalFields(
+    v8::Local<v8::Object> holder, int index, v8::StartupData payload, void* data);
 
 // Different views for snapshot artifacts:
 // * MutableSnapshot: a zygote isolate built via v8::SnapshotCreator; holds an owning ref to
