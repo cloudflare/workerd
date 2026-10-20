@@ -916,6 +916,12 @@ wd_test(
 )
 
 wd_test(
+    src = "text-encoder-global-test.wd-test",
+    args = ["--experimental"],
+    data = ["text-encoder-global-test.js"],
+)
+
+wd_test(
     src = "autovuln-63-test.wd-test",
     args = ["--experimental"],
     data = ["autovuln-63-test.js"],
