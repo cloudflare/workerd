@@ -6262,3 +6262,26 @@ export const invalidThisTests = {
     ok(new bufferModule.Blob([]));
   },
 };
+
+// Ref: https://github.com/cloudflare/workerd/issues/6897
+export const writeWithOffsetDefaultLength = {
+  test() {
+    // When offset is provided but length is omitted, length must default to
+    // (this.length - offset), not this.length.
+    const buf = Buffer.alloc(10);
+    const written = buf.utf8Write('hello', 5);
+    strictEqual(written, 5);
+    strictEqual(buf.toString('utf8', 5), 'hello');
+
+    // Test protobufjs pattern: writing string at non-zero offset without length
+    const buf2 = Buffer.allocUnsafe(100);
+    const written2 = buf2.utf8Write('x'.repeat(45), 40);
+    strictEqual(written2, 45);
+
+    // Test asciiWrite, latin1Write, hexWrite
+    const buf3 = Buffer.alloc(10);
+    strictEqual(buf3.asciiWrite('abc', 7), 3);
+    strictEqual(buf3.latin1Write('def', 0), 3);
+    strictEqual(buf3.hexWrite('aabb', 4), 2);
+  },
+};
