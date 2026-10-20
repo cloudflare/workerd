@@ -841,9 +841,9 @@ export interface AnalyticsEngineDataset {
   writeDataPoint(event?: AnalyticsEngineDataPoint): void;
 }
 export interface AnalyticsEngineDataPoint {
-  indexes?: ((ArrayBuffer | string) | null)[];
+  indexes?: ((ArrayBuffer | ArrayBufferView | string) | null)[];
   doubles?: number[];
-  blobs?: ((ArrayBuffer | string) | null)[];
+  blobs?: ((ArrayBuffer | ArrayBufferView | string) | null)[];
 }
 /**
  * The **`Event`** interface represents an event which takes place on an EventTarget.
