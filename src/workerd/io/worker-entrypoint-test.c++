@@ -10,6 +10,7 @@
 #include <workerd/util/exception.h>
 
 #include <kj/async-io.h>
+#include <kj/sticky-flag.h>
 #include <kj/test.h>
 
 namespace workerd {
@@ -310,11 +311,11 @@ kj::Maybe<kj::Exception> sendFetch(TestFixture& fixture, TestResponse& response)
 }
 
 // Accepts the server end of a WebSocketPair, records its error and close events, and returns the
-// client end in a 101.
+// client end in a 101. With an X-Close header, the server end also starts closing immediately.
 constexpr kj::StringPtr LOCAL_WEB_SOCKET_SOURCE = R"(
   globalThis.events = "";
   export default {
-    fetch() {
+    fetch(request) {
       const [client, server] = Object.values(new WebSocketPair());
       server.accept();
       server.addEventListener("error", () => {
@@ -323,16 +324,23 @@ constexpr kj::StringPtr LOCAL_WEB_SOCKET_SOURCE = R"(
       server.addEventListener("close", (event) => {
         globalThis.events += `close:${event.code}:${event.wasClean};`;
       });
+      if (request.headers.get("X-Close") !== null) {
+        server.close(1000, "done");
+      }
       return new Response(null, { status: 101, webSocket: client });
     }
   };
 )"_kj;
 
+// Whether the Worker closes its end of the WebSocket as soon as it accepts it.
+enum class WorkerClose { NONE, ON_ACCEPT };
+
 // An upgrade request to LOCAL_WEB_SOCKET_SOURCE whose response accepts `transport`. The request
 // is started and the event loop polled once on construction.
 class LocalWebSocketRequest {
  public:
-  explicit LocalWebSocketRequest(kj::Own<kj::WebSocket> transport)
+  explicit LocalWebSocketRequest(
+      kj::Own<kj::WebSocket> transport, WorkerClose workerClose = WorkerClose::NONE)
       : fixture(TestFixture::SetupParams{
           .mainModuleSource = LOCAL_WEB_SOCKET_SOURCE,
           .useRealTimers = false,
@@ -343,6 +351,9 @@ class LocalWebSocketRequest {
         headers(headerTable),
         response(kj::mv(transport)) {
     headers.setPtr(kj::HttpHeaderId::UPGRADE, "websocket");
+    if (workerClose == WorkerClose::ON_ACCEPT) {
+      headers.addPtrPtr("X-Close", "1");
+    }
     request =
         entrypoint
             ->request(kj::HttpMethod::GET, "https://example.com", headers, requestBody, response)
@@ -368,6 +379,48 @@ class LocalWebSocketRequest {
   kj::NullStream requestBody;
   TestResponse response;
   kj::Promise<void> request = nullptr;
+};
+
+// A transport whose close() completes when the test settles `closeResult`, and which never
+// receives a message.
+class ControlledWebSocket final: public kj::WebSocket {
+ public:
+  explicit ControlledWebSocket(bool& destroyed): destroyed(destroyed) {}
+  ~ControlledWebSocket() noexcept(false) {
+    destroyed = true;
+  }
+
+  kj::Promise<void> send(kj::ArrayPtr<const kj::byte> message) override {
+    return kj::READY_NOW;
+  }
+  kj::Promise<void> send(kj::ArrayPtr<const char> message) override {
+    return kj::READY_NOW;
+  }
+  kj::Promise<void> close(uint16_t code, kj::StringPtr reason) override {
+    return closeResult.whenSignaled();
+  }
+  void disconnect() override {}
+  void abort() override {}
+  kj::Promise<void> whenAborted() override {
+    return kj::NEVER_DONE;
+  }
+  kj::Promise<Message> receive(size_t maxSize) override {
+    return kj::NEVER_DONE;
+  }
+  uint64_t sentByteCount() override {
+    return 0;
+  }
+  uint64_t receivedByteCount() override {
+    return 0;
+  }
+  kj::Maybe<kj::String> getPreferredExtensions(ExtensionsContext ctx) override {
+    return kj::none;
+  }
+
+  kj::StickyFlag closeResult;
+
+ private:
+  bool& destroyed;
 };
 
 KJ_TEST("actor fetch claims after construction and before the fetch handler") {
@@ -745,6 +798,26 @@ KJ_TEST("local WebSocket protocol error is reported as an exception") {
   test.finish();
 
   KJ_EXPECT(getJsEvents(test.fixture) == "error;");
+  KJ_EXPECT(test.outcome() == EventOutcome::EXCEPTION);
+}
+
+KJ_TEST("local WebSocket transport failure ends the request without waiting for the peer") {
+  bool transportDestroyed = false;
+  auto transportOwn = kj::heap<ControlledWebSocket>(transportDestroyed);
+  auto& transport = *transportOwn;
+  LocalWebSocketRequest test(kj::mv(transportOwn), WorkerClose::ON_ACCEPT);
+  KJ_ASSERT(test.response.statusCode == 101);
+
+  // The Worker's Close reaches the transport, which fails to send it while the incoming pump is
+  // still waiting for a message. The failure alone ends the session and releases the transport.
+  KJ_EXPECT_LOG(ERROR, "transport close failed");
+  KJ_EXPECT_LOG(ERROR, "transport close failed");
+  transport.closeResult.reject(KJ_EXCEPTION(FAILED, "transport close failed"));
+  test.fixture.pollEventLoop();
+  KJ_ASSERT(test.request.poll(test.fixture.getWaitScope()));
+  KJ_EXPECT(transportDestroyed);
+  test.finish();
+
   KJ_EXPECT(test.outcome() == EventOutcome::EXCEPTION);
 }
 

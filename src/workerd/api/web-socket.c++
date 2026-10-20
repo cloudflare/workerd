@@ -631,12 +631,6 @@ kj::Promise<DeferredProxy<void>> LegacyWebSocketAdapter::couple(
       }
     }
 
-    // We need to use `eagerlyEvaluate()` on both inputs to `joinPromises` to work around the awkward
-    // behavior of `joinPromises` lazily-evaluating tail continuations.
-    auto promise = kj::joinPromises(
-        kj::arr(upstream.eagerlyEvaluate(nullptr), downstream.eagerlyEvaluate(nullptr)))
-                       .attach(kj::mv(self), kj::mv(other));
-
     KJ_IF_SOME(peerRef, maybePeerRef) {
       // Since the WebSocket is terminated locally, we generally want the request and associated
       // IoContext to stay alive until the WebSocket connection has terminated.
@@ -645,12 +639,36 @@ kj::Promise<DeferredProxy<void>> LegacyWebSocketAdapter::couple(
       // the existence of this connection to prevent the actor from being evicted, so we fall through
       // to deferred proxying in this case.
       if (!peerRef->isHibernatable()) {
-        co_await promise;
+        // One pump completing only closes one direction, so the session continues until both
+        // have. A failure in either direction ends the session, though: the first failure is its
+        // cause, and waiting for the other pump could hold the request open indefinitely.
+        KJ_TRY {
+          co_await kj::joinPromisesFailFast(kj::arr(kj::mv(upstream), kj::mv(downstream)));
+        }
+        KJ_CATCH(exception) {
+          // An abort that has not been delivered yet still takes precedence, as it would have if
+          // the pumps had failed a moment later. A failure rethrown here reaches the request
+          // handler's catch, which waits for output locks before reporting it.
+          KJ_IF_SOME(reason, context.getAbortReason()) {
+            kj::throwFatalException(kj::mv(reason));
+          }
+          kj::throwFatalException(kj::mv(exception));
+        }
         co_return;
       }
       // Drop the maybePeerRef before we hit the BEGIN_DEFERRED_PROXYING below.
       maybePeerRef = kj::none;
     }
+
+    // We need to use `eagerlyEvaluate()` on both inputs to `joinPromises` to work around the awkward
+    // behavior of `joinPromises` lazily-evaluating tail continuations.
+    //
+    // TODO(soon): This join waits for both pumps even after one fails, so a failure in one
+    //   direction can leave the proxy task waiting on the other indefinitely. Consider failing fast,
+    //   as for a locally terminated WebSocket above.
+    auto promise = kj::joinPromises(
+        kj::arr(upstream.eagerlyEvaluate(nullptr), downstream.eagerlyEvaluate(nullptr)))
+                       .attach(kj::mv(self), kj::mv(other));
 
     // Either:
     // 1. This websocket is just proxying through, in which case we can allow the IoContext to go
