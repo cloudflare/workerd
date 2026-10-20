@@ -443,3 +443,15 @@ export const cacheMode = {
     }
   },
 };
+
+// Without pedantic_wpt, statusText rejects only control characters, which could otherwise inject
+// headers into the status line. WPT covers the stricter validation under pedantic_wpt.
+export const statusTextValidationWithoutPedanticWpt = {
+  test() {
+    assert.throws(
+      () => new Response(null, { statusText: 'a\r\nX-Injected: 1' }),
+      { name: 'TypeError', message: 'Invalid statusText' }
+    );
+    assert.strictEqual(new Response(null, { statusText: 'Ā' }).statusText, 'Ā');
+  },
+};
