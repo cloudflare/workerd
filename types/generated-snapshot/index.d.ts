@@ -2392,7 +2392,7 @@ interface KVNamespacePutOptions {
 interface KVNamespaceGetWithMetadataResult<Value, Metadata> {
   value: Value | null;
   metadata: Metadata | null;
-  cacheStatus: string | null;
+  cacheStatus?: string | null;
 }
 type QueueContentType = "text" | "bytes" | "json" | "v8";
 interface Queue<Body = unknown> {

@@ -89,10 +89,13 @@ class KvNamespace: public jsg::Object {
     kj::Maybe<jsg::JsRef<jsg::JsValue>> cacheStatus;
 
     JSG_STRUCT(value, metadata, cacheStatus);
+    // `cacheStatus` is optional in TS: the single-key path always sets it (a string from the
+    // CF-Cache-Status header, or null), but getBulk() passes each entry of the backend's JSON
+    // through unchanged, and those entries carry only `value` and `metadata`.
     JSG_STRUCT_TS_OVERRIDE(KVNamespaceGetWithMetadataResult<Value, Metadata> {
       value: Value | null;
       metadata: Metadata | null;
-      cacheStatus: string | null;
+      cacheStatus?: string | null;
     });
   };
 
