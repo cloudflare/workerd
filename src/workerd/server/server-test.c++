@@ -9347,6 +9347,78 @@ MF-Access-Blob: {"app_aud":"test-aud-12345","jwt_claims":{"email":"test@example.
   conn.httpGet200("/", "no-access");
 }
 
+KJ_TEST("Server: accessBlobHeader is stripped before fetch and does not propagate") {
+  TestServer test(R"((
+    services = [
+      ( name = "upstream",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          accessBlobHeader = "MF-Access-Blob",
+          bindings = [(name = "DOWNSTREAM", service = "downstream")],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    const downstream = await env.DOWNSTREAM.fetch(request);
+                `    return new Response(JSON.stringify({
+                `      aud: ctx.access?.aud ?? null,
+                `      header: request.headers.get("MF-Access-Blob"),
+                `      downstream: await downstream.json(),
+                `    }));
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+      ( name = "downstream",
+        worker = (
+          compatibilityDate = "2025-08-01",
+          accessBlobHeader = "MF-Access-Blob",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env, ctx) {
+                `    return Response.json({
+                `      aud: ctx.access?.aud ?? null,
+                `      header: request.headers.get("MF-Access-Blob"),
+                `      host: request.headers.get("Host"),
+                `      preserved: request.headers.get("X-Preserved"),
+                `      method: request.method,
+                `      body: await request.text(),
+                `    });
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "upstream",
+        http = ()
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.send(R"(POST / HTTP/1.1
+Host: foo
+mF-aCcEsS-bLoB: {"app_aud":"test-aud","jwt_claims":{"email":"user@example.com"}}
+X-Preserved: keep
+Content-Length: 4
+
+body)"_kj);
+  conn.recvHttp200(
+      R"({"aud":"test-aud","header":null,"downstream":{"aud":null,"header":null,"host":"foo","preserved":"keep","method":"POST","body":"body"}})");
+}
+
 KJ_TEST("Server: ctx.access.getIdentity() dispatches to accessBindingService") {
   // Exercises the full channel-based identity dispatch path with two workers:
   //   - main-worker: has accessBlobHeader + accessBindingService configured
