@@ -67,25 +67,13 @@ void HeapTracer::destroyLiveWrappableInstances() {
   v8::HandleScope scope(isolate);
   while (!wrappers.empty()) {
     auto& wrappable = wrappers.front();
-    // Empty Local if the wrapper is already detached.
-    auto handle = wrappable.tryGetHandle(isolate).orDefault({});
-    bool isContextGlobal = Wrappable::tryUnwrapGlobalReceiver(isolate, handle) != kj::none;
-    auto own = wrappable.detachWrapper(true);
+    // Retire the shim rather than freelist it; see the declaration.
+    auto own = wrappable.detachWrapper(false);
     if (own.get() == nullptr) {
       KJ_DASSERT(wrappable.isCondemned());
       wrappers.remove(wrappable);
-      continue;
     }
-    // Detach the JS object from its CppgcShim: the serialized object must not point at C++. A
-    // context global's hidden JSGlobalObject points at the shim too, so clear both.
-    if (!handle.IsEmpty()) {
-      if (isContextGlobal) {
-        v8::Object::WrapGlobal(isolate, handle, nullptr,
-            static_cast<v8::CppHeapPointerTag>(kContextGlobalWrappableTag));
-      } else {
-        v8::Object::Wrap<Wrappable::WRAPPABLE_TAG>(isolate, handle, nullptr);
-      }
-    }
+    // Otherwise `own` drops here, destroying the Wrappable if the wrapper was its last owner.
   }
 }
 
@@ -126,6 +114,13 @@ class Wrappable::CppgcShim final: public v8::Object::Wrappable {
     wrappable.weakShim = this;
   }
 
+  // Startup-snapshot load: the shim exists before the wrapper it will back. See Restoring.
+  CppgcShim(kj::Own<JSGWrappable> clone, v8::CppHeapPointerTag tag)
+      : tag(tag),
+        state(Restoring{kj::mv(clone)}) {
+    KJ_DASSERT(!state.get<Restoring>().wrappable->hasWrapper());
+  }
+
   ~CppgcShim() {
     // (Unlike most KJ destructors, we don't mark this noexcept(false) because it's called from
     // V8 which doesn't support exceptions.)
@@ -153,6 +148,10 @@ class Wrappable::CppgcShim final: public v8::Object::Wrappable {
         }
       }
       KJ_CASE_ONEOF(d, Dead) {}
+      KJ_CASE_ONEOF(restoring, Restoring) {
+        // Only reachable when a snapshot restore was abandoned before linkRestoredWrapper(): the
+        // clone was never attached to anything, so dropping it is all there is to do.
+      }
     }
   }
 
@@ -169,6 +168,10 @@ class Wrappable::CppgcShim final: public v8::Object::Wrappable {
         // collected on this pass but hopefully it can be on the next pass.
       }
       KJ_CASE_ONEOF(d, Dead) {}
+      KJ_CASE_ONEOF(restoring, Restoring) {
+        // Not linked yet, and the clone holds no V8 handles (snapshotClone() contract): nothing
+        // to trace.
+      }
     }
   }
 
@@ -191,6 +194,15 @@ class Wrappable::CppgcShim final: public v8::Object::Wrappable {
   };
   struct Dead {};
 
+  // Allocated ahead of a startup-snapshot context deserialization (see
+  // HeapTracer::allocateShimForSnapshotRestore()), owning the clone that the API-wrapper
+  // deserializer will link to its restored wrapper. Until linkRestoredWrapper() moves the shim to
+  // Active, a cppgc::Persistent held by the restore state is its only root, and the clone has no
+  // wrapper, no isolate and no handles.
+  struct Restoring {
+    kj::Own<JSGWrappable> wrappable;
+  };
+
   kj::StringPtr jsgGetMemoryName() const {
     return "CppgcShim"_kjc;
   }
@@ -200,6 +212,9 @@ class Wrappable::CppgcShim final: public v8::Object::Wrappable {
   void jsgGetMemoryInfo(MemoryTracker& tracker) const {
     KJ_IF_SOME(active, state.tryGet<Active>()) {
       tracker.trackField("wrappable", active.wrappable);
+    }
+    KJ_IF_SOME(restoring, state.tryGet<Restoring>()) {
+      tracker.trackField("wrappable", restoring.wrappable);
     }
   }
   bool jsgGetMemoryInfoIsRootNode() const {
@@ -232,7 +247,7 @@ class Wrappable::CppgcShim final: public v8::Object::Wrappable {
   // minor-GC path is the exception and must Reset() explicitly; see HeapTracer::ResetRoot().
   kj::Maybe<v8::TracedReference<v8::Object>> wrapper;
 
-  mutable kj::OneOf<Active, Freelisted, Dead> state;
+  mutable kj::OneOf<Active, Freelisted, Dead, Restoring> state;
   // This is `mutable` because `Trace()` is const. We configure V8 to perform traces atomically in
   // the main thread so concurrency is not a concern.
 };
@@ -285,6 +300,46 @@ JSGWrappable::CppgcShim* HeapTracer::allocateShim(
   return shim;
 }
 
+cppgc::Persistent<v8::Object::Wrappable> HeapTracer::allocateShimForSnapshotRestore(
+    kj::Own<JSGWrappable> clone, v8::CppHeapPointerTag tag) {
+  KJ_REQUIRE(!clone->hasWrapper() && clone->isolate == nullptr && clone->getStrongRefcount() == 0,
+      "a snapshot clone must be a fresh, never-wrapped object that no jsg::Ref holds");
+  KJ_REQUIRE(static_cast<uint16_t>(tag) != kContextGlobalWrappableTag,
+      "the context global is rebuilt by newContext(), never restored from the artifact");
+  // Always a fresh allocation rather than a freelisted shim: the freelist hands out shims that
+  // become Active around a live Wrappable, whereas this one starts in Restoring.
+  auto& cppgcAllocHandle = isolate->GetCppHeap()->GetAllocationHandle();
+  auto* shim =
+      cppgc::MakeGarbageCollected<JSGWrappable::CppgcShim>(cppgcAllocHandle, kj::mv(clone), tag);
+  return cppgc::Persistent<v8::Object::Wrappable>(shim);
+}
+
+void HeapTracer::linkRestoredWrapper(
+    v8::Object::Wrappable& shimBase, v8::Local<v8::Object> object) {
+  auto& shim = static_cast<JSGWrappable::CppgcShim&>(shimBase);
+  KJ_DASSERT(shim.state.is<JSGWrappable::CppgcShim::Restoring>());
+  KJ_DASSERT(object->InternalFieldCount() == JSGWrappable::INTERNAL_FIELD_COUNT);
+
+  auto own = kj::mv(shim.state.get<JSGWrappable::CppgcShim::Restoring>().wrappable);
+  JSGWrappable& wrappable = *own;
+  KJ_DASSERT(!wrappable.hasWrapper());
+  KJ_DASSERT(wrappable.isolate == nullptr);
+  KJ_DASSERT(wrappable.strongRefcount == 0);
+  shim.state = JSGWrappable::CppgcShim::Active{kj::mv(own)};
+  wrappable.isolate = isolate;
+  wrappable.weakShim = &shim;
+
+  {
+    // Same invariant as in attachWrapper.
+    cppgc::subtle::NoGarbageCollectionScope noGcScope(isolate->GetCppHeap()->GetHeapHandle());
+    shim.wrapper.emplace(isolate, object, v8::TracedReference<v8::Object>::IsDroppable());
+    v8::Object::Wrap(isolate, object, &shim, shim.tag);
+  }
+
+  // Linked last, so the Wrappable is never briefly linked-but-wrapperless (see isCondemned()).
+  wrappers.add(wrappable);
+}
+
 void HeapTracer::clearFreelistedShims() {
   for (auto& head: freelistedShimsByTag) {
     for (;;) {
@@ -294,6 +349,16 @@ void HeapTracer::clearFreelistedShims() {
       } else {
         break;
       }
+    }
+  }
+}
+
+void HeapTracer::forEachLiveWrapper(
+    kj::FunctionParam<void(Wrappable&, v8::Object::Wrappable& shim, v8::CppHeapPointerTag tag)>
+        fn) {
+  for (auto& wrappable: wrappers) {
+    KJ_IF_SOME(shim, wrappable.getShim()) {
+      fn(wrappable, shim, shim.tag);
     }
   }
 }

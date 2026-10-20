@@ -18,6 +18,7 @@
 
 #include <kj/common.h>
 #include <kj/debug.h>
+#include <kj/function.h>
 #include <kj/list.h>
 #include <kj/refcount.h>
 #include <kj/vector.h>
@@ -389,6 +390,20 @@ class Wrappable: public kj::Refcounted {
   static Wrappable* unwrapFromShimInRangeOrAbort(
       v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTagRange tagRange);
 
+  // Override in subclasses that want to survive a V8 startup snapshot. Must return a deep,
+  // isolate-independent copy: no V8 handles, no jsg::Ref<T> members, no IoContext/IO refs. A
+  // kj::none result marks the type as not transferable; a snapshot whose context reaches such a
+  // wrapper is rejected (see IsolateBase::createSnapshotBlob()).
+  //
+  // Called twice per transferred object: once in the zygote, on the live original (under the
+  // isolate lock, with its wrapper still attached), to produce the copy stored in the
+  // SnapshotArtifact; then once per worker started from that snapshot, on the stored copy, to
+  // produce the object attached to the restored wrapper. Both calls must therefore only touch
+  // plain C++ state.
+  virtual kj::Maybe<kj::Own<Wrappable>> snapshotClone() const {
+    return kj::none;
+  }
+
   // Called by HeapTracer when V8 tells us that it found a reference to this object.
   void traceFromV8(cppgc::Visitor& cppgcVisitor);
 
@@ -502,6 +517,10 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   }
   void clearWrappers();
 
+  void forEachLiveWrapper(
+      kj::FunctionParam<void(Wrappable&, v8::Object::Wrappable& shim, v8::CppHeapPointerTag tag)>
+          fn);
+
   // Detach the V8 wrapper from every live Wrappable and release the wrapper's ownership share,
   // destroying each Wrappable whose last owner that was. Startup-snapshot preparation only: the
   // zygote never runs again, and the destructors reset every member handle (jsg::Data, V8Ref,
@@ -511,6 +530,20 @@ class HeapTracer: public v8::EmbedderRootsHandler {
   void addToFreelist(Wrappable::CppgcShim& shim);
   Wrappable::CppgcShim* allocateShim(Wrappable& wrappable, v8::CppHeapPointerTag tag);
   void clearFreelistedShims();
+
+  // Startup-snapshot load. Allocates the CppgcShim that will back `clone`'s restored wrapper ahead
+  // of Context::New(): the deserializer callback that links wrapper and shim runs under V8's
+  // DisallowGarbageCollection and must not allocate. The shim owns `clone` from here on, and the
+  // returned Persistent is the only root keeping it alive until linkRestoredWrapper().
+  cppgc::Persistent<v8::Object::Wrappable> allocateShimForSnapshotRestore(
+      kj::Own<Wrappable> clone, v8::CppHeapPointerTag tag);
+
+  // Links a deserialized wrapper object to a shim from allocateShimForSnapshotRestore(): writes the
+  // CppHeap pointer, creates the traced handle and completes the Wrappable's attach bookkeeping.
+  // Allocates nothing on either GC heap, so it is callable from a DeserializeAPIWrapperCallback.
+  // Does not throw; callers validate the slot first.
+  void linkRestoredWrapper(v8::Object::Wrappable& shim, v8::Local<v8::Object> wrapper);
+
   static void substituteCppgcShimForTest(
       v8::Isolate* isolate, v8::Local<v8::Object> target, v8::Local<v8::Object> source);
 

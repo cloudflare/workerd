@@ -2243,10 +2243,13 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
     jsg::JsContext<api::ServiceWorkerGlobalScope>* jsContext = nullptr;
 
-    // Counter the snapshot serializer callback (serializeInternalFields) writes through while
-    // V8 runs CreateBlob(); it outlives the handle scope below because createSnapshotBlob() checks
-    // it after that scope closes.
+    // Data of the snapshot serializer callbacks registered with the zygote context. Both outlive
+    // the handle scope below because createSnapshotBlob() checks them after that scope closes.
+    // Unused unless the isolate is preparing a snapshot.
+    // * The counter serializeInternalFields() writes through while V8 runs CreateBlob().
     uint32_t snapshotBadTagFieldsCount = 0;
+    // * The API-wrapper serializer's metadata.
+    jsg::WrappablesSerializeMetadata wrappablesMetadata;
 
     // Create a stack-allocated handle scope.
     lock.withinHandleScope([&] {
@@ -2271,7 +2274,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
       if (auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
           isolateBase.isPreparingSnapshot()) {
-        isolateBase.setSnapshotDefaultContext(context, &snapshotBadTagFieldsCount);
+        isolateBase.setSnapshotDefaultContext(
+            context, &snapshotBadTagFieldsCount, &wrappablesMetadata);
       }
 
       // The zygote context is never disposed through disposeContext() (see the snapshot step
@@ -2513,8 +2517,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       (*jsContext)->clear();
       const_cast<Script&>(*script).impl->moduleContext = kj::none;
       impl->context = kj::none;
-      isolateBase.createSnapshotBlob(
-          kj::mv(contextGlobal), kj::mv(rustTemplateHandles), &snapshotBadTagFieldsCount);
+      isolateBase.createSnapshotBlob(kj::mv(contextGlobal), kj::mv(rustTemplateHandles),
+          &snapshotBadTagFieldsCount, &wrappablesMetadata);
     }
   });
 }

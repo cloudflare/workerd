@@ -1860,6 +1860,10 @@ struct NewContextOptions {
 
   // Callback V8 invokes to deserialize the internal fields of a JS object.
   v8::DeserializeInternalFieldsCallback internalFieldsDeserializer;
+
+  // Same as the internal fields callback, but for objects that reference
+  // cppgc-managed objects.
+  v8::DeserializeAPIWrapperCallback apiWrapperDeserializer{};
 };
 
 void deleteWeakRefGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context);
@@ -1988,7 +1992,9 @@ class ResourceWrapper {
     auto isolate = js.v8Isolate;
     auto tmpl = getTemplate<true>(isolate, nullptr)->InstanceTemplate();
     v8::Local<v8::Context> context = v8::Context::New(isolate, /*extensions=*/nullptr, tmpl,
-        /*global_object=*/v8::MaybeLocal<v8::Value>(), options.internalFieldsDeserializer);
+        /*global_object=*/v8::MaybeLocal<v8::Value>(), options.internalFieldsDeserializer,
+        /*microtask_queue=*/nullptr, v8::DeserializeContextDataCallback(),
+        options.apiWrapperDeserializer);
     auto global = context->Global();
 
     auto ptr = js.alloc<T>(kj::fwd<Args>(args)...);

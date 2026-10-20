@@ -479,16 +479,25 @@ class IsolateBase {
   }
 
   // Registers the context the snapshot is built around. It takes a v8::Local, so the caller is
-  // inside a handle scope.
-  void setSnapshotDefaultContext(
-      v8::Local<v8::Context> defaultContext, uint32_t* badTagFieldsCount);
+  // inside a handle scope. `badTagFieldsCount` and `wrappablesMetadata` are the data of the
+  // serializer callbacks; both must stay alive until createSnapshotBlob() has checked them.
+  void setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext,
+      uint32_t* badTagFieldsCount,
+      WrappablesSerializeMetadata* wrappablesMetadata);
 
   // Serializes the isolate into the SnapshotArtifact passed at isolate creation.
+  // `badTagFieldsCount` and `wrappablesMetadata` are the objects given to
+  // setSnapshotDefaultContext(); the metadata is filled with the live wrappers' clones right
+  // before CreateBlob() and both are checked afterwards.
   // `extraTemplateHandles` carries template handles drained from embedder-side caches that this
   // class cannot enumerate itself.
   void createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
       kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles,
-      const uint32_t* badTagFieldsCount);
+      const uint32_t* badTagFieldsCount,
+      WrappablesSerializeMetadata* wrappablesMetadata);
+
+  void prepareWrappableDeserializeMetadata(WrappableDeserializeMetadata& metadata);
+  void finishWrappableDeserializeMetadata(WrappableDeserializeMetadata& metadata);
 
   void registerExternalReference(intptr_t addr) {
     if (!isPreparingSnapshot()) return;
@@ -1154,9 +1163,13 @@ class Isolate: public IsolateBase {
       //   allocate the object (forwarding arguments to the constructor) and return something like
       //   a Ref.
       uint32_t badTagFieldsCount = 0;
+      WrappableDeserializeMetadata metadata;
       if (jsgIsolate.isStartingFromSnapshot()) {
+        jsgIsolate.prepareWrappableDeserializeMetadata(metadata);
         options.internalFieldsDeserializer =
             v8::DeserializeInternalFieldsCallback(&deserializeInternalFields, &badTagFieldsCount);
+        options.apiWrapperDeserializer =
+            v8::DeserializeAPIWrapperCallback(&deserializeApiWrapperCallback, &metadata);
       }
       auto context = wrapper->newContext(*this, options, jsgIsolate.getObserver(),
           static_cast<T*>(nullptr), kj::fwd<Args>(args)...);
@@ -1166,6 +1179,9 @@ class Isolate: public IsolateBase {
           "START_FROM_SNAPSHOT: internal fields in the deserialized context are not workerd "
           "wrapper markers",
           badTagFieldsCount);
+      if (jsgIsolate.isStartingFromSnapshot()) {
+        jsgIsolate.finishWrappableDeserializeMetadata(metadata);
+      }
       return context;
     }
 
