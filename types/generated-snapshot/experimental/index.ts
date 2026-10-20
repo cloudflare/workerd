@@ -16699,6 +16699,19 @@ export declare namespace CloudflareWorkersModule {
   export abstract class RpcTarget implements Rpc.RpcTargetBranded {
     [Rpc.__RPC_TARGET_BRAND]: never;
   }
+  // The class of `Fetcher` stubs (service bindings and Durable Object stubs). Exported for `instanceof` checks; it
+  // cannot be constructed from JavaScript.
+  export type ServiceStub<
+    T extends Rpc.EntrypointBranded | undefined = undefined,
+    Reserved extends string = never,
+  > = Fetcher<T, Reserved>;
+  export const ServiceStub: abstract new () => Fetcher;
+  // The custom thenables returned by an RPC call (`RpcPromise`) and by a pipelined property
+  // access on a stub or an `RpcPromise` (`RpcProperty`). They quack like `Promise`s (see
+  // `Rpc.Result`) and are exported for `instanceof` checks; neither can be constructed from
+  // JavaScript.
+  export const RpcPromise: abstract new () => Promise<unknown>;
+  export const RpcProperty: abstract new () => Promise<unknown>;
   // `protected` fields don't appear in `keyof`s, so can't be accessed over RPC
   export abstract class WorkerEntrypoint<Env = Cloudflare.Env, Props = {}>
     implements Rpc.WorkerEntrypointBranded
