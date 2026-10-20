@@ -940,6 +940,26 @@ void fci_set_return_value(FunctionCallbackInfo* args, Local value) {
   args->GetReturnValue().Set(local_from_ffi<v8::Value>(kj::mv(value)));
 }
 
+Isolate* pci_get_isolate(PropertyCallbackInfo* info) {
+  return info->GetIsolate();
+}
+
+Local pci_get_this(PropertyCallbackInfo* info) {
+  return to_ffi(info->Holder());
+}
+
+void pci_set_return_value(PropertyCallbackInfo* info, Local value) {
+  info->GetReturnValue().Set(local_from_ffi<v8::Value>(kj::mv(value)));
+}
+
+Isolate* psci_get_isolate(PropertySetterCallbackInfo* info) {
+  return info->GetIsolate();
+}
+
+Local psci_get_this(PropertySetterCallbackInfo* info) {
+  return to_ffi(info->Holder());
+}
+
 Global create_resource_template(Isolate* isolate, const ResourceDescriptor& descriptor) {
   // Construct lazily.
   v8::EscapableHandleScope scope(isolate);
@@ -1062,20 +1082,22 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
         break;
       }
       case PropertyKind::Instance: {
-        // Mirrors registerInstanceProperty / registerReadonlyInstanceProperty in resource.h.
-        //
-        // We use ObjectTemplate::SetAccessorProperty with FunctionTemplates rather than
-        // SetNativeDataProperty because our Rust callbacks are FunctionCallbackInfo-style
-        // (matching #[jsg_method]), not PropertyCallbackInfo-style.
-        // SetAccessorProperty on the InstanceTemplate installs the accessor as an own
-        // property on every instance, matching JSG_INSTANCE_PROPERTY semantics.
-        auto getterFn = makePropFn(prop.getter_callback, true /* isGetter */);
+        // Mirrors registerInstanceProperty / registerReadonlyInstanceProperty in resource.h: a
+        // native data property, which reads as a plain data property from JS.
+        // The Rust callbacks take each v8::Local as a usize. That matches the C++ signature on
+        // every ABI we target because v8::Local is one trivially copyable pointer.
+        static_assert(std::is_trivially_copyable_v<v8::Local<v8::Value>>);
+        static_assert(sizeof(v8::Local<v8::Value>) == sizeof(size_t));
+        registerExternalRef(prop.getter_callback);
+        auto getter = reinterpret_cast<v8::AccessorNameGetterCallback>(prop.getter_callback);
         KJ_IF_SOME(setterCb, prop.setter_callback) {
-          auto setterFn = makePropFn(setterCb, false /* isGetter */);
-          instance->SetAccessorProperty(v8Name, getterFn, setterFn, v8::PropertyAttribute::None);
+          registerExternalRef(setterCb);
+          instance->SetNativeDataProperty(v8Name, getter,
+              reinterpret_cast<v8::AccessorNameSetterCallbackV2>(setterCb), v8::Local<v8::Value>(),
+              v8::PropertyAttribute::None);
         } else {
-          instance->SetAccessorProperty(
-              v8Name, getterFn, v8::Local<v8::FunctionTemplate>(), v8::PropertyAttribute::ReadOnly);
+          instance->SetNativeDataProperty(
+              v8Name, getter, nullptr, v8::Local<v8::Value>(), v8::PropertyAttribute::ReadOnly);
         }
         break;
       }

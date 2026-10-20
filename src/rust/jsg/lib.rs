@@ -884,7 +884,8 @@ impl From<u64> for ConstantValue {
 /// as follows:
 ///
 /// - `Prototype` — accessor on the prototype chain; enumerable.
-/// - `Instance`  — own accessor on every instance; enumerable.
+/// - `Instance`  — own data property on every instance; enumerable. Only
+///   [`Member::InstanceProperty`] registers these.
 /// - `Inspect`   — symbol-keyed on the prototype; hidden from normal enumeration,
 ///   surfaced by `node:util` `inspect()`.
 pub use crate::v8::ffi::PropertyKind;
@@ -897,14 +898,24 @@ pub enum Member {
         name: String,
         callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
     },
-    /// A property accessor with configurable placement. `setter_callback = None`
-    /// makes the property read-only; `Inspect` properties are always read-only.
+    /// A property accessor on the prototype (`Prototype` or `Inspect`; `Instance`
+    /// panics). `setter_callback = None` makes the property read-only; `Inspect`
+    /// properties are always read-only.
     Property {
         name: String,
         kind: PropertyKind,
         getter_callback: unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo),
         /// `None` for read-only properties.
         setter_callback: Option<unsafe extern "C" fn(*mut v8::ffi::FunctionCallbackInfo)>,
+    },
+    /// An own data property on every instance, computed by native callbacks
+    /// (V8's `SetNativeDataProperty`). `setter_callback = None` makes it
+    /// read-only. The `usize` arguments are `v8::Local` handles.
+    InstanceProperty {
+        name: String,
+        getter_callback: unsafe extern "C" fn(usize, *mut v8::ffi::PropertyCallbackInfo),
+        setter_callback:
+            Option<unsafe extern "C" fn(usize, usize, *mut v8::ffi::PropertySetterCallbackInfo)>,
     },
     StaticMethod {
         name: String,

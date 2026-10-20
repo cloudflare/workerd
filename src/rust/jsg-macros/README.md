@@ -146,11 +146,12 @@ is optional and must be either `prototype` or `instance`; it defaults to `protot
 is empty), but `"prop" in obj` is `true`. Can be overridden by subclasses. Equivalent to C++
 `JSG_PROTOTYPE_PROPERTY` / `JSG_READONLY_PROTOTYPE_PROPERTY`.
 
-**`instance`** — own property on every instance. `Object.keys()` includes it,
-`hasOwnProperty()` returns `true`, not overridable by subclasses. Equivalent to C++
-`JSG_INSTANCE_PROPERTY` / `JSG_READONLY_INSTANCE_PROPERTY`.
+**`instance`** — own data property on every instance, computed by the getter on each read (V8
+`SetNativeDataProperty`). Its descriptor has `value` and `writable`, not `get`/`set`;
+`Object.keys()` includes it, `hasOwnProperty()` returns `true`, not overridable by subclasses.
+Equivalent to C++ `JSG_INSTANCE_PROPERTY` / `JSG_READONLY_INSTANCE_PROPERTY`.
 
-> **Prefer `prototype` in almost all cases.** Own-property accessors prevent minor-GC collection
+> **Prefer `prototype` in almost all cases.** Own properties prevent minor-GC collection
 > of the object and inhibit some V8 optimisations.
 
 **`name = "..."`** — overrides the JS property name. Otherwise the Rust method name is converted
@@ -168,9 +169,10 @@ either prefix is a compile error.  The prefix is stripped and the remainder is c
 Omitting a setter (or using `readonly`) makes the property read-only. In
 strict mode, assigning to a read-only property throws a `TypeError`.
 
-**Compat flag** — when `spec_compliant_property_attributes` is enabled, getter `.length` is set
-to `0`, setter `.length` to `1`, getter `.name` to `"get <name>"`, and setter `.name` to
-`"set <name>"`, per Web IDL §3.7.6.
+**Compat flag** — when `spec_compliant_property_attributes` is enabled, a `prototype` getter's
+`.length` is set to `0`, its setter's `.length` to `1`, the getter's `.name` to `"get <name>"`,
+and the setter's `.name` to `"set <name>"`, per Web IDL §3.7.6. `instance` properties have no
+getter or setter functions.
 
 ```rust
 use std::cell::{Cell, RefCell};

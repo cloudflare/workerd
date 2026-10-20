@@ -141,6 +141,8 @@ pub mod ffi {
 
         type Isolate;
         type FunctionCallbackInfo;
+        type PropertyCallbackInfo;
+        type PropertySetterCallbackInfo;
         type Wrappable;
 
         // BackingStore
@@ -569,6 +571,13 @@ pub mod ffi {
         pub unsafe fn fci_get_length(args: *mut FunctionCallbackInfo) -> usize;
         pub unsafe fn fci_get_arg(args: *mut FunctionCallbackInfo, index: usize) -> Local;
         pub unsafe fn fci_set_return_value(args: *mut FunctionCallbackInfo, value: Local);
+
+        // PropertyCallbackInfo, for native data properties
+        pub unsafe fn pci_get_isolate(info: *mut PropertyCallbackInfo) -> *mut Isolate;
+        pub unsafe fn pci_get_this(info: *mut PropertyCallbackInfo) -> Local;
+        pub unsafe fn pci_set_return_value(info: *mut PropertyCallbackInfo, value: Local);
+        pub unsafe fn psci_get_isolate(info: *mut PropertySetterCallbackInfo) -> *mut Isolate;
+        pub unsafe fn psci_get_this(info: *mut PropertySetterCallbackInfo) -> Local;
 
         // Errors
         pub unsafe fn exception_create_from_bytes(
@@ -3312,6 +3321,70 @@ impl<'a> FunctionCallbackInfo<'a> {
             ffi::fci_set_return_value(self.0, value.into_ffi());
         }
     }
+}
+
+/// The arguments to a native data property getter.
+pub struct PropertyCallbackInfo<'a>(*mut ffi::PropertyCallbackInfo, PhantomData<&'a ()>);
+
+impl<'a> PropertyCallbackInfo<'a> {
+    /// # Safety
+    /// `info` must be a valid pointer to a `PropertyCallbackInfo`.
+    pub unsafe fn from_ffi(info: *mut ffi::PropertyCallbackInfo) -> Self {
+        Self(info, PhantomData)
+    }
+
+    pub fn isolate(&self) -> IsolatePtr {
+        // SAFETY: self.0 is valid (guaranteed by constructor).
+        unsafe { IsolatePtr::from_ffi(ffi::pci_get_isolate(self.0)) }
+    }
+
+    pub fn this(&self) -> Local<'a, Value> {
+        // SAFETY: self.0 is valid (guaranteed by constructor).
+        unsafe { Local::from_ffi(self.isolate(), ffi::pci_get_this(self.0)) }
+    }
+
+    pub fn set_return_value(&self, value: Local<Value>) {
+        // SAFETY: self.0 is valid (guaranteed by constructor).
+        unsafe { ffi::pci_set_return_value(self.0, value.into_ffi()) }
+    }
+}
+
+/// The arguments to a native data property setter. `get(0)` is the value
+/// assigned, so setters share codegen with methods.
+pub struct PropertySetterCallbackInfo<'a>(
+    *mut ffi::PropertySetterCallbackInfo,
+    usize,
+    PhantomData<&'a ()>,
+);
+
+impl<'a> PropertySetterCallbackInfo<'a> {
+    /// # Safety
+    /// `info` must be a valid pointer to a `PropertySetterCallbackInfo` and
+    /// `value` the `v8::Local<v8::Value>` V8 passed alongside it.
+    pub unsafe fn from_ffi(info: *mut ffi::PropertySetterCallbackInfo, value: usize) -> Self {
+        Self(info, value, PhantomData)
+    }
+
+    pub fn isolate(&self) -> IsolatePtr {
+        // SAFETY: self.0 is valid (guaranteed by constructor).
+        unsafe { IsolatePtr::from_ffi(ffi::psci_get_isolate(self.0)) }
+    }
+
+    pub fn this(&self) -> Local<'a, Value> {
+        // SAFETY: self.0 is valid (guaranteed by constructor).
+        unsafe { Local::from_ffi(self.isolate(), ffi::psci_get_this(self.0)) }
+    }
+
+    /// # Panics
+    /// If `index` is not 0.
+    pub fn get(&self, index: usize) -> Local<'a, Value> {
+        assert_eq!(index, 0);
+        // SAFETY: self.1 is the live handle V8 passed (guaranteed by constructor).
+        unsafe { Local::from_ffi(self.isolate(), ffi::Local { ptr: self.1 }) }
+    }
+
+    /// Setters return nothing.
+    pub fn set_return_value(&self, _value: Local<Value>) {}
 }
 
 /// A fat pointer to a `dyn GarbageCollected` trait object, decomposed into its

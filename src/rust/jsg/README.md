@@ -235,8 +235,8 @@ impl Greeting {
 
 ## Properties
 
-Two macros expose accessor properties on resource types: `#[jsg_property]` for prototype and
-instance properties, and `#[jsg_inspect_property]` for debug-only symbol-keyed properties.
+Two macros expose properties on resource types: `#[jsg_property]` for prototype accessors and
+instance data properties, and `#[jsg_inspect_property]` for debug-only symbol-keyed properties.
 
 Full reference documentation (arguments, naming rules, compat-flag behavior, examples) lives in
 **[`jsg-macros/README.md`](../jsg-macros/README.md#jsg_propertyrequired-placement--name---readonly)**.
@@ -259,7 +259,7 @@ impl Counter {
     #[jsg_property(prototype, readonly)]
     pub fn get_label(&self) -> String { /* ... */ }
 
-    // Own-property accessor (use sparingly; inhibits minor-GC)
+    // Own data property (use sparingly; inhibits minor-GC)
     #[jsg_property(instance)]
     pub fn get_id(&self) -> String { /* ... */ }
 
