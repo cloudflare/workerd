@@ -25,6 +25,11 @@ class NonModuleScript final {
   static jsg::NonModuleScript compile(
       jsg::Lock& js, kj::StringPtr code, kj::StringPtr name = "worker.js");
 
+  // Like compile(), for a worker's main script: uses the isolate's code cache if it has one (see
+  // IsolateBase::setCodeCacheStore()).
+  static jsg::NonModuleScript compileWorkerScript(
+      jsg::Lock& js, kj::StringPtr code, kj::StringPtr name);
+
  private:
   v8::Global<v8::UnboundScript> unboundScript;
 };
