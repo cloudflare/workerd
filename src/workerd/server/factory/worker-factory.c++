@@ -1725,8 +1725,7 @@ kj::Promise<kj::Own<CompiledWorker>> compileWorker(const WorkerFactory& constFac
           Worker::Lock::TakeSynchronously(kj::none), [&](jsg::Lock& lock) {
         artifact = jsg::IsolateBase::from(lock.v8Isolate).extractSnapshotArtifact();
       });
-      // TODO(soon): start the Worker from the snapshot artifact.
-      (void)artifact;
+      snapshotConfig = jsg::SnapshotConfig(jsg::FinalizedSnapshot{.artifact = artifact->addRef()});
     } else {
       auto errors = kj::strArray(zygoteErrors.errors, "\n");
       KJ_LOG(
