@@ -4,6 +4,7 @@
 
 #include "worker-entrypoint.h"
 
+#include <workerd/io/legacy-hibernation-manager.h>
 #include <workerd/jsg/util.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/autogate.h>
@@ -311,18 +312,34 @@ kj::Maybe<kj::Exception> sendFetch(TestFixture& fixture, TestResponse& response)
 }
 
 // Accepts the server end of a WebSocketPair, records its error and close events, and returns the
-// client end in a 101. With an X-Close header, the server end also starts closing immediately.
+// client end in a 101. With an X-Close header, the server end also starts closing immediately. A
+// "throw" message makes its message listener throw. "throw-retryable" throws a retryable Error,
+// which JSG converts to DISCONNECTED, and makes the close listener close the server end.
 constexpr kj::StringPtr LOCAL_WEB_SOCKET_SOURCE = R"(
   globalThis.events = "";
   export default {
     fetch(request) {
       const [client, server] = Object.values(new WebSocketPair());
       server.accept();
+      let closeOnClose = false;
       server.addEventListener("error", () => {
         globalThis.events += "error;";
       });
       server.addEventListener("close", (event) => {
         globalThis.events += `close:${event.code}:${event.wasClean};`;
+        if (closeOnClose) {
+          server.close();
+        }
+      });
+      server.addEventListener("message", (event) => {
+        if (event.data === "throw") {
+          throw new Error("listener failed");
+        } else if (event.data === "throw-retryable") {
+          closeOnClose = true;
+          const error = new Error("listener failed");
+          error.retryable = true;
+          throw error;
+        }
       });
       if (request.headers.get("X-Close") !== null) {
         server.close(1000, "done");
@@ -335,14 +352,21 @@ constexpr kj::StringPtr LOCAL_WEB_SOCKET_SOURCE = R"(
 // Whether the Worker closes its end of the WebSocket as soon as it accepts it.
 enum class WorkerClose { NONE, ON_ACCEPT };
 
+// Whether the Worker runs statelessly or as a Durable Object, which has an output gate.
+enum class WorkerHost { STATELESS, ACTOR };
+
 // An upgrade request to LOCAL_WEB_SOCKET_SOURCE whose response accepts `transport`. The request
 // is started and the event loop polled once on construction.
 class LocalWebSocketRequest {
  public:
-  explicit LocalWebSocketRequest(
-      kj::Own<kj::WebSocket> transport, WorkerClose workerClose = WorkerClose::NONE)
+  explicit LocalWebSocketRequest(kj::Own<kj::WebSocket> transport,
+      WorkerClose workerClose = WorkerClose::NONE,
+      WorkerHost host = WorkerHost::STATELESS)
       : fixture(TestFixture::SetupParams{
           .mainModuleSource = LOCAL_WEB_SOCKET_SOURCE,
+          .actorId = host == WorkerHost::ACTOR
+              ? kj::Maybe<Worker::Actor::Id>(kj::str("local-web-socket-test"))
+              : kj::none,
           .useRealTimers = false,
           .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
               [this]() -> kj::Own<RequestObserver> { return observer.addRef().toOwn(); }),
@@ -421,6 +445,38 @@ class ControlledWebSocket final: public kj::WebSocket {
 
  private:
   bool& destroyed;
+};
+
+// A Durable Object that accepts the server end of a WebSocketPair for hibernation, records close
+// events, and echoes the Close.
+constexpr kj::StringPtr HIBERNATABLE_WEB_SOCKET_SOURCE = R"SCRIPT(
+  import { DurableObject } from "cloudflare:workers";
+  globalThis.events = "";
+  export default class extends DurableObject {
+    fetch() {
+      const [client, server] = Object.values(new WebSocketPair());
+      this.ctx.acceptWebSocket(server);
+      return new Response(null, { status: 101, webSocket: client });
+    }
+    webSocketClose(ws, code, reason, wasClean) {
+      globalThis.events += `close:${code}:${wasClean};`;
+      ws.close(code, reason);
+    }
+  }
+)SCRIPT"_kj;
+
+// Delivers hibernation events to the fixture's own actor, as production's loopback does.
+class FixtureLoopback final: public Worker::Actor::Loopback, public kj::Refcounted {
+ public:
+  kj::Own<WorkerInterface> getWorker(IoChannelFactory::SubrequestMetadata metadata) override {
+    return KJ_ASSERT_NONNULL(fixture).makeWorkerEntrypoint();
+  }
+
+  kj::Own<Worker::Actor::Loopback> addRef() override {
+    return kj::addRef(*this);
+  }
+
+  kj::Maybe<TestFixture&> fixture;
 };
 
 KJ_TEST("actor fetch claims after construction and before the fetch handler") {
@@ -777,6 +833,174 @@ KJ_TEST("synthetic response failures stay tagged after delivery") {
   KJ_EXPECT(e.getDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID) != kj::none);
 }
 
+KJ_TEST("local WebSocket clean close is reported as a stream disconnect") {
+  auto pipe = kj::newTwoWayPipe();
+  LocalWebSocketRequest test(
+      kj::newWebSocket(kj::mv(pipe.ends[0]), kj::none), WorkerClose::ON_ACCEPT);
+  auto peer = kj::newWebSocket(kj::mv(pipe.ends[1]), kj::none);
+  KJ_ASSERT(test.response.statusCode == 101);
+
+  // The Worker closes first and the peer replies. The session still ends with a disconnect, when
+  // the Worker releases its end, as for a hibernatable WebSocket.
+  auto message = peer->receive().wait(test.fixture.getWaitScope());
+  KJ_ASSERT(message.is<kj::WebSocket::Close>());
+  peer->close(1000, "done").wait(test.fixture.getWaitScope());
+  test.finish();
+
+  KJ_EXPECT(getJsEvents(test.fixture) == "close:1000:true;");
+  KJ_EXPECT(test.outcome() == EventOutcome::RESPONSE_STREAM_DISCONNECTED);
+}
+
+KJ_TEST("hibernatable WebSocket clean close is reported as a stream disconnect") {
+  // Only the upgrade request is recorded. RecordingObserver cannot wrap the custom events that
+  // deliver hibernation events, and they are separate invocations with their own outcomes.
+  auto observer = kj::rc<RecordingObserver>();
+  bool recordRequests = true;
+  auto loopback = kj::refcounted<FixtureLoopback>();
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = HIBERNATABLE_WEB_SOCKET_SOURCE,
+    .actorId = Worker::Actor::Id(kj::str("hibernatable-web-socket-test")),
+    .actorClassName = "default"_kj,
+    .useRealTimers = false,
+    .actorLoopback = kj::addRef(*loopback),
+    .requestObserverFactory =
+        kj::Function<kj::Own<RequestObserver>()>([&]() -> kj::Own<RequestObserver> {
+    if (recordRequests) {
+      return observer.addRef().toOwn();
+    }
+    return kj::refcounted<RequestObserver>();
+  }),
+  });
+  loopback->fixture = fixture;
+  auto& actor = fixture.getActor();
+  actor.setHibernationManager(
+      kj::refcounted<LegacyHibernationManagerImpl>(actor.getLoopback(), /*eventType=*/0));
+
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  recordRequests = false;
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+  headers.setPtr(kj::HttpHeaderId::UPGRADE, "websocket");
+  kj::NullStream requestBody;
+  auto pipe = kj::newTwoWayPipe();
+  TestResponse response(kj::newWebSocket(kj::mv(pipe.ends[0]), kj::none));
+  auto request =
+      entrypoint->request(
+                    kj::HttpMethod::GET, "https://example.com", headers, requestBody, response)
+          .eagerlyEvaluate(nullptr);
+  auto peer = kj::newWebSocket(kj::mv(pipe.ends[1]), kj::none);
+  fixture.pollEventLoop();
+  KJ_ASSERT(response.statusCode == 101);
+
+  // The peer closes and the Durable Object echoes the Close from its webSocketClose() handler.
+  peer->close(1000, "done").wait(fixture.getWaitScope());
+  auto message = peer->receive().wait(fixture.getWaitScope());
+  KJ_ASSERT(message.is<kj::WebSocket::Close>());
+
+  // A Durable Object returns the failure to its caller.
+  auto exception = kj::runCatchingExceptions([&]() { request.wait(fixture.getWaitScope()); });
+  KJ_EXPECT(KJ_ASSERT_NONNULL(exception).getType() == kj::Exception::Type::DISCONNECTED);
+  fixture.pollEventLoop();
+  KJ_EXPECT(getJsEvents(fixture) == "close:1000:true;");
+  KJ_EXPECT(
+      observer->outcome.orDefault(EventOutcome::OK) == EventOutcome::RESPONSE_STREAM_DISCONNECTED);
+}
+
+KJ_TEST("local WebSocket disconnect is not a script exception") {
+  auto pipe = kj::newTwoWayPipe();
+  LocalWebSocketRequest test(kj::newWebSocket(kj::mv(pipe.ends[0]), kj::none));
+  auto peer = kj::mv(pipe.ends[1]);
+  KJ_ASSERT(test.response.statusCode == 101);
+  KJ_EXPECT(!test.request.poll(test.fixture.getWaitScope()));
+
+  // Drop the transport without a WebSocket Close frame, while keeping the request alive.
+  peer = nullptr;
+  test.finish();
+
+  KJ_EXPECT(getJsEvents(test.fixture) == "close:1006:false;");
+  KJ_EXPECT(test.outcome() == EventOutcome::RESPONSE_STREAM_DISCONNECTED);
+}
+
+KJ_TEST("local WebSocket listener exception is a script exception") {
+  auto pipe = kj::newTwoWayPipe();
+  LocalWebSocketRequest test(kj::newWebSocket(kj::mv(pipe.ends[0]), kj::none));
+  auto peer = kj::newWebSocket(kj::mv(pipe.ends[1]), kj::none);
+  KJ_ASSERT(test.response.statusCode == 101);
+  KJ_ASSERT(!test.request.poll(test.fixture.getWaitScope()));
+
+  // The listener's exception errors the Worker's WebSocket, which then releases its end of the
+  // session. The coupled transport sees that as a disconnect, but the session failed in the Worker.
+  peer->send("throw"_kj).wait(test.fixture.getWaitScope());
+  test.finish();
+
+  KJ_EXPECT(getJsEvents(test.fixture) == "error;");
+  KJ_EXPECT(test.outcome() == EventOutcome::EXCEPTION);
+}
+
+KJ_TEST("local WebSocket retryable listener exception is a script exception") {
+  auto pipe = kj::newTwoWayPipe();
+  LocalWebSocketRequest test(kj::newWebSocket(kj::mv(pipe.ends[0]), kj::none));
+  auto peer = kj::newWebSocket(kj::mv(pipe.ends[1]), kj::none);
+  KJ_ASSERT(test.response.statusCode == 101);
+  KJ_ASSERT(!test.request.poll(test.fixture.getWaitScope()));
+
+  // The retryable exception reaches the read loop as DISCONNECTED, so JavaScript sees a 1006 close
+  // even though the peer is still connected. The close listener then closes the Worker's end, which
+  // the coupled transport again sees as a disconnect.
+  auto peerReceive = peer->receive().eagerlyEvaluate(nullptr);
+  peer->send("throw-retryable"_kj).wait(test.fixture.getWaitScope());
+  test.finish();
+
+  KJ_EXPECT(getJsEvents(test.fixture) == "close:1006:false;");
+  KJ_EXPECT(test.outcome() == EventOutcome::EXCEPTION);
+}
+
+KJ_TEST("local WebSocket disconnect waits for pending output locks") {
+  auto pipe = kj::newTwoWayPipe();
+  LocalWebSocketRequest test(
+      kj::newWebSocket(kj::mv(pipe.ends[0]), kj::none), WorkerClose::NONE, WorkerHost::ACTOR);
+  auto peer = kj::mv(pipe.ends[1]);
+  KJ_ASSERT(test.response.statusCode == 101);
+
+  auto lock = kj::newPromiseAndFulfiller<void>();
+  auto blocker = test.fixture.getActor().getOutputGate().lockWhile(kj::mv(lock.promise), nullptr);
+  peer = nullptr;
+  test.fixture.pollEventLoop();
+  KJ_EXPECT(!test.request.poll(test.fixture.getWaitScope()));
+
+  lock.fulfiller->fulfill();
+  // A Durable Object returns the failure to its caller.
+  auto exception =
+      kj::runCatchingExceptions([&]() { test.request.wait(test.fixture.getWaitScope()); });
+  KJ_EXPECT(KJ_ASSERT_NONNULL(exception).getType() == kj::Exception::Type::DISCONNECTED);
+  KJ_EXPECT(test.outcome() == EventOutcome::RESPONSE_STREAM_DISCONNECTED);
+  blocker.wait(test.fixture.getWaitScope());
+}
+
+KJ_TEST("output gate failure replaces a local WebSocket disconnect") {
+  auto pipe = kj::newTwoWayPipe();
+  LocalWebSocketRequest test(
+      kj::newWebSocket(kj::mv(pipe.ends[0]), kj::none), WorkerClose::NONE, WorkerHost::ACTOR);
+  auto peer = kj::mv(pipe.ends[1]);
+  KJ_ASSERT(test.response.statusCode == 101);
+
+  // Storage work started after the 101 holds an output lock when the peer disconnects.
+  auto lock = kj::newPromiseAndFulfiller<void>();
+  auto blocker = test.fixture.getActor().getOutputGate().lockWhile(kj::mv(lock.promise), nullptr);
+  peer = nullptr;
+  test.fixture.pollEventLoop();
+  KJ_ASSERT(!test.request.poll(test.fixture.getWaitScope()));
+
+  // The gate failure ends the request in place of the disconnect, so the request handler logs it.
+  KJ_EXPECT_LOG(ERROR, "output gate failed");
+  lock.fulfiller->reject(KJ_EXCEPTION(OVERLOADED, "output gate failed"));
+  auto exception =
+      kj::runCatchingExceptions([&]() { test.request.wait(test.fixture.getWaitScope()); });
+  KJ_EXPECT(KJ_ASSERT_NONNULL(exception).getType() == kj::Exception::Type::OVERLOADED);
+  KJ_EXPECT(test.outcome() == EventOutcome::INTERNAL_ERROR);
+  KJ_EXPECT_THROW_MESSAGE("output gate failed", blocker.wait(test.fixture.getWaitScope()));
+}
+
 KJ_TEST("local WebSocket protocol error is reported as an exception") {
   auto pipe = kj::newTwoWayPipe();
   LocalWebSocketRequest test(kj::newWebSocket(kj::mv(pipe.ends[0]), kj::none));
@@ -861,6 +1085,50 @@ KJ_TEST("an abort pending with a peer disconnect reports the abort") {
       EventOutcome::EXCEPTION);
   KJ_EXPECT(abortCoupledRequest(cpuLimitException(), PeerDrop::BEFORE_ABORT) ==
       EventOutcome::EXCEEDED_CPU);
+}
+
+// When an actor's output lock is released relative to an abort of its coupled request, which is
+// waiting for that lock after a peer disconnect. Both happen before the event loop runs again.
+enum class LockRelease { BEFORE_ABORT, AFTER_ABORT };
+
+// Aborts a coupled Durable Object request while its disconnect waits for an output lock, and
+// returns the request's outcome.
+EventOutcome abortWhileAwaitingOutputLock(kj::Exception reason, LockRelease lockRelease) {
+  auto pipe = kj::newTwoWayPipe();
+  LocalWebSocketRequest test(
+      kj::newWebSocket(kj::mv(pipe.ends[0]), kj::none), WorkerClose::NONE, WorkerHost::ACTOR);
+  auto peer = kj::mv(pipe.ends[1]);
+  KJ_ASSERT(test.response.statusCode == 101);
+
+  auto lock = kj::newPromiseAndFulfiller<void>();
+  auto blocker = test.fixture.getActor().getOutputGate().lockWhile(kj::mv(lock.promise), nullptr);
+  peer = nullptr;
+  test.fixture.pollEventLoop();
+  KJ_ASSERT(!test.request.poll(test.fixture.getWaitScope()));
+
+  auto& context = KJ_ASSERT_NONNULL(test.observer->coupledContext);
+  if (lockRelease == LockRelease::BEFORE_ABORT) {
+    lock.fulfiller->fulfill();
+    context.abort(kj::mv(reason));
+  } else {
+    context.abort(kj::mv(reason));
+    lock.fulfiller->fulfill();
+  }
+
+  // A Durable Object returns the failure to its caller.
+  KJ_EXPECT(kj::runCatchingExceptions([&]() { test.request.wait(test.fixture.getWaitScope()); }) !=
+      kj::none);
+  blocker.wait(test.fixture.getWaitScope());
+  return test.outcome();
+}
+
+KJ_TEST("an abort while a coupled local WebSocket waits for output locks reports the abort") {
+  for (auto lockRelease: {LockRelease::BEFORE_ABORT, LockRelease::AFTER_ABORT}) {
+    KJ_EXPECT(abortWhileAwaitingOutputLock(KJ_EXCEPTION(DISCONNECTED, "test abort"), lockRelease) ==
+        EventOutcome::EXCEPTION);
+    KJ_EXPECT(abortWhileAwaitingOutputLock(cpuLimitException(), lockRelease) ==
+        EventOutcome::EXCEEDED_CPU);
+  }
 }
 
 KJ_TEST("output gate failure replaces an earlier handler failure") {
