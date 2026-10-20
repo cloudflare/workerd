@@ -1629,19 +1629,26 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
         makeIsolate(kj::str(impl->name, "-snapshot"), Worker::Isolate::InspectorPolicy::DISALLOW,
             jsg::SnapshotConfig(
                 jsg::MutableSnapshot{.artifact = kj::atomicRefcounted<jsg::SnapshotArtifact>()}));
-    auto zygoteScript = zygoteIsolate->newScript(impl->name, workerSource,
-        IsolateObserver::StartType::COLD, SpanParent(nullptr),
-        newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(workerSource)), false,
-        zygoteErrors, api::pyodide::ArtifactBundler::makeDisabledBundler());
-    // As the Worker's, except that `ctx.exports` is not kept: a v8::Global outliving the
-    // zygote isolate breaks snapshot creation.
-    auto zygote =
-        kj::atomicRefcounted<Worker>(kj::mv(zygoteScript), kj::atomicRefcounted<WorkerObserver>(),
-            [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
-                v8::Local<v8::Object>) { compileBindings(lock, api, target); },
-            IsolateObserver::StartType::COLD, SpanParent(nullptr),
-            Worker::Lock::TakeSynchronously(kj::none), zygoteErrors);
-    if (zygoteErrors.errors.empty()) {
+    // Anything the zygote throws while compiling, evaluating or serializing only means this
+    // Worker starts without a snapshot.
+    kj::Maybe<kj::Own<Worker>> zygote;
+    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
+      auto zygoteScript = zygoteIsolate->newScript(impl->name, workerSource,
+          IsolateObserver::StartType::COLD, SpanParent(nullptr),
+          newWorkerFileSystem(kj::heap<FsMap>(), getBundleDirectory(workerSource)), false,
+          zygoteErrors, api::pyodide::ArtifactBundler::makeDisabledBundler());
+      // As the Worker's, except that `ctx.exports` is not kept: a v8::Global outliving the
+      // zygote isolate breaks snapshot creation.
+      zygote =
+          kj::atomicRefcounted<Worker>(kj::mv(zygoteScript), kj::atomicRefcounted<WorkerObserver>(),
+              [&](jsg::Lock& lock, const Worker::Api& api, v8::Local<v8::Object> target,
+                  v8::Local<v8::Object>) { compileBindings(lock, api, target); },
+              IsolateObserver::StartType::COLD, SpanParent(nullptr),
+              Worker::Lock::TakeSynchronously(kj::none), zygoteErrors);
+    })) {
+      KJ_LOG(INFO, "startup snapshot skipped: the zygote Worker threw", impl->name,
+          exception.getDescription());
+    } else if (zygoteErrors.errors.empty()) {
       kj::Own<jsg::SnapshotArtifact> artifact;
       zygoteIsolate->runInLockScope(
           Worker::Lock::TakeSynchronously(kj::none), [&](jsg::Lock& lock) {
