@@ -17,13 +17,7 @@ const unsupported = (alg: string) =>
 
 export default {
   'algorithm-discards-context.https.window.js': supportFile,
-  'crypto_key_cached_slots.https.any.js': {
-    comment: 'Investigate this',
-    expectedFailures: [
-      'CryptoKey.algorithm getter returns cached object',
-      'CryptoKey.usages getter returns cached object',
-    ],
-  },
+  'crypto_key_cached_slots.https.any.js': {},
   'derive_bits_keys/argon2.js': {
     comment: 'Argon2 is not supported',
     omittedTests: true,

@@ -445,6 +445,26 @@ kj::StringPtr CryptoImpl::getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey
   return found != mapping.end() ? found->second : name;
 }
 
+uint32_t CryptoImpl::getSymmetricKeySize(jsg::Lock& js, jsg::Ref<CryptoKey> key) {
+  JSG_REQUIRE(
+      key->getType() == "secret"_kj, TypeError, "Only secret keys have a symmetric key size");
+  KJ_SWITCH_ONEOF(key->getAlgorithm(js)) {
+    KJ_CASE_ONEOF(algorithm, CryptoKey::AesKeyAlgorithm) {
+      return algorithm.length;
+    }
+    KJ_CASE_ONEOF(algorithm, CryptoKey::HmacKeyAlgorithm) {
+      return algorithm.length;
+    }
+    KJ_CASE_ONEOF(algorithm, CryptoKey::ArbitraryKeyAlgorithm) {
+      return algorithm.length.orDefault(0);
+    }
+    KJ_CASE_ONEOF_DEFAULT {
+      return 0;
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 jsg::Ref<CryptoKey> CryptoImpl::createSecretKey(jsg::Lock& js, jsg::JsBufferSource keyData) {
   // The keyData we receive here should be an exclusive copy of the key data.
   // It will have been copied on the JS side before being passed to this function.
