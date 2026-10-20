@@ -61,11 +61,12 @@
 //! ## Integer Parameter Types
 //!
 //! Integer types (`u8`, `u16`, `u32`, `i8`, `i16`, `i32`) can be used as method
-//! parameters. JavaScript numbers are converted via truncation:
+//! parameters. They convert like C++ JSG's integers:
 //!
-//! - Values are truncated toward zero (e.g., `3.7` → `3`, `-2.9` → `-2`)
-//! - Out-of-range values wrap (e.g., `256.0` → `0` for `u8`)
-//! - `NaN` becomes `0`
+//! - Values out of the type's range, checked before truncation, are a
+//!   `TypeError` (e.g., `256` or `255.5` for `u8`)
+//! - Non-finite values are a `TypeError`, except that `i32` reads them as `0`
+//! - Other values are truncated toward zero (e.g., `3.7` → `3`, `-2.9` → `-2`)
 //!
 //! For strict validation, wrap parameters in `NonCoercible<T>` or validate manually.
 
@@ -469,26 +470,31 @@ impl<T: Type + FromJS<ResultType = T>> FromJS for &[T] {
     }
 }
 
-// Integer types - JavaScript numbers are IEEE 754 doubles (f64)
-//
-// Conversion behavior:
-// - Values are truncated toward zero (e.g., 3.7 → 3, -2.9 → -2)
-// - Values outside the target type's range wrap around (e.g., 256.0 → 0 for u8)
-// - NaN becomes 0
-// - Infinity wraps to 0 for unsigned types, or type MIN/MAX for signed types
-//
-// This matches JavaScript's behavior for TypedArray element assignment.
-// For strict validation, use `NonCoercible<T>` or validate in your method.
+// Integer types follow C++ JSG (jsg/value.h): a value out of the type's
+// range, checked before truncation, is a TypeError, and so is a non-finite
+// one, except that i32 reads it as 0. In-range values truncate toward zero.
 macro_rules! impl_integer_from_js {
-    ($($type:ty),*) => {
+    ($($type:ty => $non_finite:expr, $range:expr);* $(;)?) => {
         $(
             impl FromJS for $type {
                 type ResultType = Self;
 
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "wrapping conversion is intended, matching TypedArray element assignment")]
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_lossless, reason = "range is checked first")]
                 fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
                     // SAFETY: The isolate is locked and value is a valid V8 local handle.
                     let num = unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) }?;
+                    if !num.is_finite() {
+                        return $non_finite;
+                    }
+                    if <$type>::MIN == 0 && num < 0.0 {
+                        return Err(Error::new_type_error(
+                            "The value cannot be converted because it is negative and this API \
+                             expects a positive number.",
+                        ));
+                    }
+                    if num < <$type>::MIN as f64 || num > <$type>::MAX as f64 {
+                        return Err(Error::new_type_error($range));
+                    }
                     Ok(num as $type)
                 }
             }
@@ -496,7 +502,28 @@ macro_rules! impl_integer_from_js {
     };
 }
 
-impl_integer_from_js!(u8, u16, u32, i8, i16, i32);
+fn not_an_integer<T>() -> Result<T, Error> {
+    Err(Error::new_type_error(
+        "The value cannot be converted because it is not an integer.",
+    ))
+}
+
+fn unsigned_range<T: std::fmt::Display>(max: T) -> String {
+    format!("Value out of range. Must be less than or equal to {max}.")
+}
+
+fn signed_range<T: std::fmt::Display>(min: T, max: T) -> String {
+    format!("Value out of range. Must be between {min} and {max} (inclusive).")
+}
+
+impl_integer_from_js!(
+    u8 => not_an_integer(), unsigned_range(u8::MAX);
+    u16 => not_an_integer(), unsigned_range(u16::MAX);
+    u32 => not_an_integer(), unsigned_range(u32::MAX);
+    i8 => not_an_integer(), signed_range(i8::MIN, i8::MAX);
+    i16 => not_an_integer(), signed_range(i16::MIN, i16::MAX);
+    i32 => Ok(0), signed_range(i32::MIN, i32::MAX);
+);
 
 // =============================================================================
 // Wrapper type implementations
