@@ -101,6 +101,7 @@ wd_cc_library(
         "resource.c++",
         "ser.c++",
         "setup.c++",
+        "snapshot.c++",
         "util.c++",
         "v8-platform-wrapper.c++",
         "wrappable.c++",

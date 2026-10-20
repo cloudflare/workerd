@@ -478,14 +478,17 @@ class IsolateBase {
     return kj::mv(KJ_REQUIRE_NONNULL(snapshotConfig).get<MutableSnapshot>().artifact);
   }
 
-  // Registers the context the snapshot is built around. It takes a v8::Local, so the caller is inside a handle scope.
-  void setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext);
+  // Registers the context the snapshot is built around. It takes a v8::Local, so the caller is
+  // inside a handle scope.
+  void setSnapshotDefaultContext(
+      v8::Local<v8::Context> defaultContext, uint32_t* badTagFieldsCount);
 
   // Serializes the isolate into the SnapshotArtifact passed at isolate creation.
   // `extraTemplateHandles` carries template handles drained from embedder-side caches that this
   // class cannot enumerate itself.
   void createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
-      kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles);
+      kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles,
+      const uint32_t* badTagFieldsCount);
 
   void registerExternalReference(intptr_t addr) {
     if (!isPreparingSnapshot()) return;
@@ -1150,10 +1153,19 @@ class Isolate: public IsolateBase {
       // TODO(soon): Requiring move semantics for the global object is awkward. This should instead
       //   allocate the object (forwarding arguments to the constructor) and return something like
       //   a Ref.
+      uint32_t badTagFieldsCount = 0;
+      if (jsgIsolate.isStartingFromSnapshot()) {
+        options.internalFieldsDeserializer =
+            v8::DeserializeInternalFieldsCallback(&deserializeInternalFields, &badTagFieldsCount);
+      }
       auto context = wrapper->newContext(*this, options, jsgIsolate.getObserver(),
           static_cast<T*>(nullptr), kj::fwd<Args>(args)...);
       jsg::setAlignedPointerInEmbedderData(
           context.getHandle(v8Isolate), jsg::ContextPointerSlot::EXTENDED_CONTEXT_WRAPPER, wrapper);
+      KJ_REQUIRE(badTagFieldsCount == 0,
+          "START_FROM_SNAPSHOT: internal fields in the deserialized context are not workerd "
+          "wrapper markers",
+          badTagFieldsCount);
       return context;
     }
 
