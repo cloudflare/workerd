@@ -7,7 +7,9 @@
 #include <workerd/jsg/util.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/exception.h>
 
+#include <kj/async-io.h>
 #include <kj/test.h>
 
 namespace workerd {
@@ -78,6 +80,8 @@ class ThrowingConnectResponse final: public kj::HttpService::ConnectResponse {
 
 class TestResponse final: public kj::HttpService::Response {
  public:
+  explicit TestResponse(kj::Own<kj::WebSocket> webSocket = {}): webSocket(kj::mv(webSocket)) {}
+
   kj::Own<kj::AsyncOutputStream> send(uint statusCode,
       kj::StringPtr statusText,
       const kj::HttpHeaders& headers,
@@ -87,10 +91,15 @@ class TestResponse final: public kj::HttpService::Response {
   }
 
   kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
-    KJ_FAIL_ASSERT("request unexpectedly returned a WebSocket");
+    KJ_REQUIRE(webSocket.get() != nullptr, "request unexpectedly returned a WebSocket");
+    statusCode = 101;
+    return kj::mv(webSocket);
   }
 
   uint statusCode = 0;
+
+ private:
+  kj::Own<kj::WebSocket> webSocket;
 };
 
 // Actor scripts in these tests append to `globalThis.events` from their constructor and handler.
@@ -261,9 +270,19 @@ class RecordingObserver final: public RequestObserver, public WorkerInterface {
     KJ_UNIMPLEMENTED();
   }
 
+  kj::Maybe<kj::Own<WebSocketObserver>> tryCreateWebSocketObserver() override {
+    // Coupling a locally accepted WebSocket asks for its observer while the request's IoContext is
+    // current.
+    coupledContext = IoContext::current();
+    return kj::none;
+  }
+
   kj::Maybe<EventOutcome> outcome;
 
   uint failureCount = 0;
+
+  // The IoContext of the request that coupled a WebSocket. Valid only while that request is pending.
+  kj::Maybe<IoContext&> coupledContext;
 
  private:
   kj::Maybe<WorkerInterface&> inner;
@@ -289,6 +308,67 @@ kj::Maybe<kj::Exception> sendFetch(TestFixture& fixture, TestResponse& response)
         .wait(fixture.getWaitScope());
   });
 }
+
+// Accepts the server end of a WebSocketPair, records its error and close events, and returns the
+// client end in a 101.
+constexpr kj::StringPtr LOCAL_WEB_SOCKET_SOURCE = R"(
+  globalThis.events = "";
+  export default {
+    fetch() {
+      const [client, server] = Object.values(new WebSocketPair());
+      server.accept();
+      server.addEventListener("error", () => {
+        globalThis.events += "error;";
+      });
+      server.addEventListener("close", (event) => {
+        globalThis.events += `close:${event.code}:${event.wasClean};`;
+      });
+      return new Response(null, { status: 101, webSocket: client });
+    }
+  };
+)"_kj;
+
+// An upgrade request to LOCAL_WEB_SOCKET_SOURCE whose response accepts `transport`. The request
+// is started and the event loop polled once on construction.
+class LocalWebSocketRequest {
+ public:
+  explicit LocalWebSocketRequest(kj::Own<kj::WebSocket> transport)
+      : fixture(TestFixture::SetupParams{
+          .mainModuleSource = LOCAL_WEB_SOCKET_SOURCE,
+          .useRealTimers = false,
+          .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
+              [this]() -> kj::Own<RequestObserver> { return observer.addRef().toOwn(); }),
+        }),
+        entrypoint(fixture.makeWorkerEntrypoint()),
+        headers(headerTable),
+        response(kj::mv(transport)) {
+    headers.setPtr(kj::HttpHeaderId::UPGRADE, "websocket");
+    request =
+        entrypoint
+            ->request(kj::HttpMethod::GET, "https://example.com", headers, requestBody, response)
+            .eagerlyEvaluate(nullptr);
+    fixture.pollEventLoop();
+  }
+
+  // Waits for the request to complete, then lets its wait-until tasks run.
+  void finish() {
+    request.wait(fixture.getWaitScope());
+    fixture.pollEventLoop();
+  }
+
+  EventOutcome outcome() {
+    return observer->outcome.orDefault(EventOutcome::OK);
+  }
+
+  kj::Rc<RecordingObserver> observer = kj::rc<RecordingObserver>();
+  TestFixture fixture;
+  kj::Own<WorkerInterface> entrypoint;
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers;
+  kj::NullStream requestBody;
+  TestResponse response;
+  kj::Promise<void> request = nullptr;
+};
 
 KJ_TEST("actor fetch claims after construction and before the fetch handler") {
   auto observer = kj::refcounted<RetryClaimObserver>();
@@ -642,6 +722,72 @@ KJ_TEST("synthetic response failures stay tagged after delivery") {
   auto& e = KJ_ASSERT_NONNULL(exception);
   KJ_EXPECT(e.getDescription().contains("response send failed"));
   KJ_EXPECT(e.getDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID) != kj::none);
+}
+
+KJ_TEST("local WebSocket protocol error is reported as an exception") {
+  auto pipe = kj::newTwoWayPipe();
+  LocalWebSocketRequest test(kj::newWebSocket(kj::mv(pipe.ends[0]), kj::none));
+  auto peer = kj::mv(pipe.ends[1]);
+  KJ_ASSERT(test.response.statusCode == 101);
+  KJ_EXPECT(!test.request.poll(test.fixture.getWaitScope()));
+
+  // Consume the server's Close reply so that its write can complete.
+  auto peerOutput = peer->readAllBytes().eagerlyEvaluate(nullptr);
+
+  // The internal error is logged once when converted for the JavaScript error event, and once as
+  // the request handler's uncaught exception.
+  KJ_EXPECT_LOG(ERROR, "WebSocket protocol error");
+  KJ_EXPECT_LOG(ERROR, "WebSocket protocol error");
+
+  // A masked, empty text frame with the reserved RSV2 bit set violates the protocol.
+  static constexpr kj::byte invalidFrame[] = {0xa1, 0x80, 0, 0, 0, 0};
+  peer->write(kj::arrayPtr(invalidFrame)).wait(test.fixture.getWaitScope());
+  test.finish();
+
+  KJ_EXPECT(getJsEvents(test.fixture) == "error;");
+  KJ_EXPECT(test.outcome() == EventOutcome::EXCEPTION);
+}
+
+// When the peer transport is dropped relative to the abort. Both happen before the event loop
+// runs again.
+enum class PeerDrop { BEFORE_ABORT, AFTER_ABORT };
+
+// Aborts the IoContext of a live coupled request and returns the request's outcome.
+EventOutcome abortCoupledRequest(kj::Exception reason, PeerDrop peerDrop) {
+  auto pipe = kj::newTwoWayPipe();
+  LocalWebSocketRequest test(kj::newWebSocket(kj::mv(pipe.ends[0]), kj::none));
+  auto peer = kj::mv(pipe.ends[1]);
+  KJ_ASSERT(test.response.statusCode == 101);
+  KJ_ASSERT(!test.request.poll(test.fixture.getWaitScope()));
+
+  auto& context = KJ_ASSERT_NONNULL(test.observer->coupledContext);
+  if (peerDrop == PeerDrop::BEFORE_ABORT) {
+    peer = nullptr;
+  }
+  context.abort(kj::mv(reason));
+  peer = nullptr;
+  test.finish();
+  return test.outcome();
+}
+
+kj::Exception cpuLimitException() {
+  auto exception = KJ_EXCEPTION(OVERLOADED, "worker_do_not_log; script exceeded its CPU limit");
+  exception.setDetail(CPU_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  return exception;
+}
+
+KJ_TEST("aborting a coupled local WebSocket request reports the abort") {
+  KJ_EXPECT(abortCoupledRequest(KJ_EXCEPTION(DISCONNECTED, "test abort"), PeerDrop::AFTER_ABORT) ==
+      EventOutcome::EXCEPTION);
+  KJ_EXPECT(abortCoupledRequest(cpuLimitException(), PeerDrop::AFTER_ABORT) ==
+      EventOutcome::EXCEEDED_CPU);
+}
+
+KJ_TEST("an abort pending with a peer disconnect reports the abort") {
+  KJ_EXPECT(abortCoupledRequest(KJ_EXCEPTION(DISCONNECTED, "test abort"), PeerDrop::BEFORE_ABORT) ==
+      EventOutcome::EXCEPTION);
+  KJ_EXPECT(abortCoupledRequest(cpuLimitException(), PeerDrop::BEFORE_ABORT) ==
+      EventOutcome::EXCEEDED_CPU);
 }
 
 KJ_TEST("output gate failure replaces an earlier handler failure") {
