@@ -174,10 +174,14 @@ impl FromJS for Error {
 
             let name = obj
                 .get(lock, "name")
+                .ok()
+                .filter(|v| !v.is_undefined())
                 .and_then(|v| String::from_js(lock, v).ok());
 
             let message = obj
                 .get(lock, "message")
+                .ok()
+                .filter(|v| !v.is_undefined())
                 .and_then(|v| String::from_js(lock, v).ok())
                 .unwrap_or_else(|| "Unknown error".to_owned());
 

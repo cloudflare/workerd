@@ -434,22 +434,34 @@ void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key,
   ::workerd::jsg::check(v8_obj->Set(context, v8_key, local_from_ffi<v8::Value>(kj::mv(value))));
 }
 
+// Runs `fn` (returning a v8::MaybeLocal<T> or v8::Maybe<T>) and, on failure, converts the pending
+// JS exception into a `jsg.<Type>:`-prefixed kj::Exception and throws it, so
+// workerd-cxx's Result::run catches it in C++ and hands Rust a catchable error
+// instead of aborting. Termination exceptions are re-thrown unchanged. The
+// TryCatch and termination handling are delegated to jsg::Lock::tryCatch.
+template <typename Func>
+static auto unwrapCoerce(v8::Isolate* isolate, Func&& fn) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  JSG_TRY(js) {
+    return ::workerd::jsg::check(fn());
+  }
+  JSG_CATCH(error) {
+    kj::throwFatalException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
+  };
+}
+
 bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key) {
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   auto v8_key = makeInternedStr(isolate, key);
-  return v8_obj->Has(context, v8_key).FromJust();
+  return unwrapCoerce(isolate, [&] { return v8_obj->Has(context, v8_key); });
 }
 
-kj::Maybe<Local> local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key) {
+Local local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key) {
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   auto v8_key = makeInternedStr(isolate, key);
-  v8::Local<v8::Value> result;
-  if (!v8_obj->Get(context, v8_key).ToLocal(&result)) {
-    return kj::none;
-  }
-  return to_ffi(kj::mv(result));
+  return to_ffi(unwrapCoerce(isolate, [&] { return v8_obj->Get(context, v8_key); }));
 }
 
 // Local<Array>
@@ -651,22 +663,6 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
 
 // Unwrappers
 
-// Runs `fn` (returning a v8::MaybeLocal<T>) and, on failure, converts the pending
-// JS exception into a `jsg.<Type>:`-prefixed kj::Exception and throws it, so
-// workerd-cxx's Result::run catches it in C++ and hands Rust a catchable error
-// instead of aborting. Termination exceptions are re-thrown unchanged. The
-// TryCatch and termination handling are delegated to jsg::Lock::tryCatch.
-template <typename T, typename Func>
-static v8::Local<T> unwrapCoerce(v8::Isolate* isolate, Func&& fn) {
-  auto& js = ::workerd::jsg::Lock::from(isolate);
-  JSG_TRY(js) {
-    return ::workerd::jsg::check(fn());
-  }
-  JSG_CATCH(error) {
-    kj::throwFatalException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
-  };
-}
-
 ::rust::String unwrap_string(Isolate* isolate, Local value) {
   auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
   // Fast path: a string primitive needs no coercion and can't throw, so skip
@@ -676,7 +672,7 @@ static v8::Local<T> unwrapCoerce(v8::Isolate* isolate, Func&& fn) {
     v8Str = v8Value.As<v8::String>();
   } else {
     auto context = isolate->GetCurrentContext();
-    v8Str = unwrapCoerce<v8::String>(isolate, [&] { return v8Value->ToString(context); });
+    v8Str = unwrapCoerce(isolate, [&] { return v8Value->ToString(context); });
   }
   v8::String::ValueView view(isolate, v8Str);
   if (!view.is_one_byte()) {
@@ -697,8 +693,7 @@ double unwrap_number(Isolate* isolate, Local value) {
     return v8Value.As<v8::Number>()->Value();
   }
   auto context = isolate->GetCurrentContext();
-  v8::Local<v8::Number> number =
-      unwrapCoerce<v8::Number>(isolate, [&] { return v8Value->ToNumber(context); });
+  v8::Local<v8::Number> number = unwrapCoerce(isolate, [&] { return v8Value->ToNumber(context); });
   return number->Value();
 }
 
