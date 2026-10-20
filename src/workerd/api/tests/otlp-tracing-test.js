@@ -52,6 +52,7 @@ export const test = {
     const [leaf, outer] = requests;
     for (const request of requests) {
       assert.strictEqual(request.contentType, 'application/x-protobuf');
+      for (const span of request.spans) assert.strictEqual(span.flags & 1, 1);
       assert.deepStrictEqual(request.resource, {
         'service.name': 'traced',
         'telemetry.sdk.name': 'workers-runtime',

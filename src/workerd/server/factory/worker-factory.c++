@@ -1136,7 +1136,10 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
             [&entropySource = threadContext.getEntropySource(), exporter = kj::addRef(exporter),
                 serviceName = kj::str(service.serviceName), resource = makeOtlpResource(service),
                 identityTags = makeOtlpIdentityTags(service)](
-                const tracing::InvocationSpanContext& invocation) mutable {
+                tracing::InvocationSpanContext& invocation) mutable {
+      // Standalone export samples traces without an upstream decision. Set the invocation's
+      // context so user spans and subrequests inherit the same flags.
+      invocation.setDefaultTraceFlags(tracing::TraceFlags(0x01));
       auto parent = invocation.getParent().map(
           [](const tracing::InvocationSpanContext& p) { return p.getSpanId(); });
       return startExportedUserSpan(entropySource, kj::addRef(*exporter),
