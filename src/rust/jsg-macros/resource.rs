@@ -136,7 +136,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
 /// Scans `impl_block` for `#[jsg_method]`-annotated functions and returns a
 /// `Member::Method` / `Member::StaticMethod` token stream for each.
-fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::TokenStream> {
+fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<proc_macro2::TokenStream> {
     impl_block
         .items
         .iter()
@@ -174,7 +174,7 @@ fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::
 
 /// Scans `impl_block` for `#[jsg_static_constant]`-annotated consts and returns
 /// a `Member::StaticConstant` token stream for each.
-fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::TokenStream> {
+fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<proc_macro2::TokenStream> {
     impl_block
         .items
         .iter()
@@ -253,7 +253,7 @@ pub fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
 ///
 /// Returns a `compile_error!` token stream if the method has a `self` receiver
 /// or does not return `Self`; returns `None` if the method is valid.
-fn validate_constructor(method: &syn::ImplItemFn) -> Option<quote::__private::TokenStream> {
+fn validate_constructor(method: &syn::ImplItemFn) -> Option<proc_macro2::TokenStream> {
     let has_self = method
         .sig
         .inputs
@@ -284,8 +284,8 @@ fn extract_constructor_params(
     method: &syn::ImplItemFn,
 ) -> (
     bool,
-    Vec<quote::__private::TokenStream>,
-    Vec<quote::__private::TokenStream>,
+    Vec<proc_macro2::TokenStream>,
+    Vec<proc_macro2::TokenStream>,
 ) {
     let params: Vec<_> = method
         .sig
@@ -333,7 +333,7 @@ fn extract_constructor_params(
 fn generate_constructor_registration(
     impl_block: &ItemImpl,
     self_ty: &syn::Type,
-) -> Option<quote::__private::TokenStream> {
+) -> Option<proc_macro2::TokenStream> {
     let constructors: Vec<_> = impl_block
         .items
         .iter()
@@ -409,7 +409,7 @@ fn emit_property_group(
     kind: PropertyKind,
     getter: Option<syn::Ident>,
     setter: Option<syn::Ident>,
-) -> Result<quote::__private::TokenStream, quote::__private::TokenStream> {
+) -> Result<proc_macro2::TokenStream, proc_macro2::TokenStream> {
     let Some(getter_name) = getter else {
         return Err(quote! {
             compile_error!(concat!("no getter found for property \"", #js_name, "\""))
@@ -445,7 +445,7 @@ fn emit_property_group(
 /// Returns `(PropertyKind, Option<js_name_override>, is_readonly)`.
 fn parse_jsg_property_args(
     tokens: TokenStream,
-) -> Result<(PropertyKind, Option<String>, bool), quote::__private::TokenStream> {
+) -> Result<(PropertyKind, Option<String>, bool), proc_macro2::TokenStream> {
     use syn::parse::Parser as _;
     let metas = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated
         .parse(tokens)
@@ -549,7 +549,7 @@ fn prop_groups_find_or_insert(
 /// and group the annotated methods by `(js_name, PropertyKind)`.
 fn scan_property_annotations(
     impl_block: &ItemImpl,
-) -> Result<PropGroups, quote::__private::TokenStream> {
+) -> Result<PropGroups, proc_macro2::TokenStream> {
     let mut groups: PropGroups = Vec::new();
 
     for item in &impl_block.items {
@@ -615,7 +615,7 @@ fn validate_and_emit_property(
     js_name: &str,
     kind: PropertyKind,
     methods: Vec<PropMethod>,
-) -> Result<quote::__private::TokenStream, quote::__private::TokenStream> {
+) -> Result<proc_macro2::TokenStream, proc_macro2::TokenStream> {
     let has_readonly_getter = methods.iter().any(|m| m.is_readonly && !m.is_setter);
     for m in &methods {
         if m.is_readonly && m.is_setter {
@@ -666,7 +666,7 @@ fn validate_and_emit_property(
 
 /// Scans an impl block for `#[jsg_property]` and `#[jsg_inspect_property]` annotations
 /// and returns a `Member::Property` token stream for each property group.
-fn collect_property_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::TokenStream> {
+fn collect_property_registrations(impl_block: &ItemImpl) -> Vec<proc_macro2::TokenStream> {
     let groups = match scan_property_annotations(impl_block) {
         Ok(g) => g,
         Err(e) => return vec![e],
