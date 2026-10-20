@@ -166,6 +166,9 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   // Enable source phase imports for WebAssembly modules
   v8::V8::SetFlagsFromString("--js-source-phase-imports");
 
+  // Enable the WebAssembly compact import section encoding.
+  v8::V8::SetFlagsFromString("--wasm-compact-imports");
+
 #ifdef __APPLE__
   // On macOS arm64, we find that V8 can be collecting pages that contain compiled code when
   // handling requests in short succession. There are some specific differences for macOS arm64
