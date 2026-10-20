@@ -997,6 +997,14 @@ wd_test(
 )
 
 wd_test(
+    src = "response-status-text-test.wd-test",
+    data = [
+        "response-status-text-target.js",
+        "response-status-text-test.js",
+    ],
+)
+
+wd_test(
     size = "large",
     src = "scheduler-test.wd-test",
     args = ["--experimental"],

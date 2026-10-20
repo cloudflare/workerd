@@ -1930,7 +1930,7 @@ export let serializeHttpTypes = {
       let req = await env.MyService.returnResponse();
 
       assert.strictEqual(req.status, 404);
-      assert.strictEqual(req.statusText, 'Not Found');
+      assert.strictEqual(req.statusText, '');
       assert.strictEqual(req.headers.get('Content-Type'), 'abc');
       assert.deepEqual(req.cf, { foo: 123, bar: 'def' });
 
