@@ -154,6 +154,83 @@ const server = createServer(function (req, res) {
     return;
   }
 
+  // Send two PUTs with `Expect: 100-continue` to x-host (host:port) on one raw socket, holding
+  // each body until `100 Continue` arrives as a strict client does, and return everything the
+  // server sent back up to the end of the second final response.
+  if (req.url === '/intercept-expect-continue') {
+    const [host, portStr] = (req.headers['x-host'] || '').split(':');
+    const requestHead =
+      `PUT /upload HTTP/1.1\r\nHost: ${host}\r\nContent-Length: 5\r\n` +
+      'Expect: 100-continue\r\n\r\n';
+    const continueHead = 'HTTP/1.1 100 Continue\r\n\r\n';
+    let received = '';
+    // The part of `received` that belongs to the current exchange.
+    let pending = '';
+    let responses = 0;
+    let sentBody = false;
+    let done = false;
+    const finish = (status, text) => {
+      if (done) return;
+      done = true;
+      socket.destroy();
+      res.writeHead(status, { 'Content-Type': 'text/plain' });
+      res.write(text);
+      res.end();
+    };
+
+    const socket = net.createConnection(
+      { host, port: parseInt(portStr || '80', 10) },
+      () => socket.write(requestHead)
+    );
+
+    socket.on('data', (chunk) => {
+      received += chunk.toString();
+      pending += chunk.toString();
+      if (!sentBody) {
+        if (pending.length < continueHead.length) return;
+        if (!pending.startsWith(continueHead)) {
+          return finish(
+            500,
+            `expected 100 Continue: ${JSON.stringify(received)}`
+          );
+        }
+        sentBody = true;
+        pending = pending.slice(continueHead.length);
+        socket.write('hello');
+      }
+      // Wait for the final response's head and its Content-Length worth of body.
+      const headEnd = pending.indexOf('\r\n\r\n');
+      if (headEnd < 0) return;
+      const match = /\r\ncontent-length: *(\d+)/i.exec(
+        pending.slice(0, headEnd)
+      );
+      if (!match) {
+        return finish(500, `no Content-Length: ${JSON.stringify(received)}`);
+      }
+      const end = headEnd + 4 + parseInt(match[1], 10);
+      if (pending.length < end) return;
+      if (pending.length > end) {
+        return finish(
+          500,
+          `bytes after a response: ${JSON.stringify(received)}`
+        );
+      }
+      if (++responses === 2) return finish(200, received);
+      pending = '';
+      sentBody = false;
+      socket.write(requestHead);
+    });
+
+    socket.on('error', (err) => finish(500, `TCP error: ${err.message}`));
+    socket.on('close', () =>
+      finish(500, `closed early; received: ${JSON.stringify(received)}`)
+    );
+    socket.setTimeout(5000, () =>
+      finish(500, `timed out; received: ${JSON.stringify(received)}`)
+    );
+    return;
+  }
+
   if (req.url === '/intercept-https') {
     const targetHost = req.headers['x-host'] || 'example.com';
     fetch(`https://${targetHost}`)

@@ -444,6 +444,25 @@ kj::Maybe<kj::StringPtr> getHeader(const kj::HttpHeaders& headers, kj::StringPtr
   return result;
 }
 
+// Whether a request waits for `100 Continue` before sending its body: it has a body and a
+// `100-continue` token in `Expect`. kj does not record a request's HTTP version, so unlike
+// most servers this cannot ignore `Expect` on HTTP/1.0 requests.
+bool expectsContinue(const kj::HttpHeaders& headers, kj::AsyncInputStream& body) {
+  KJ_IF_SOME(length, body.tryGetLength()) {
+    if (length == 0) return false;
+  }
+  bool result = false;
+  headers.forEach([&](kj::StringPtr name, kj::StringPtr value) {
+    if (!workerd::strcaseeq(name, "Expect"_kj)) return;
+    for (const auto& token: value.asArray().split(',')) {
+      if (workerd::strcaseeq(workerd::trimLeadingAndTrailingWhitespace(token), "100-continue"_kj)) {
+        result = true;
+      }
+    }
+  });
+  return result;
+}
+
 // Parses "host[:port]" strings. Handles:
 // - IPv4: "10.0.0.1", "10.0.0.1:8080", "10.0.0.0/8", "10.0.0.0/8:8080"
 // - IPv6 with brackets: "[::1]", "[::1]:8080", "[fe80::1]", "[fe80::/10]:8080"
@@ -1379,9 +1398,13 @@ class InnerEgressService final: public kj::HttpService {
  public:
   using ChannelLookup = kj::Function<kj::Maybe<kj::Rc<IoChannelFactory::SubrequestChannel>>()>;
 
-  InnerEgressService(ChannelLookup lookupChannel, kj::StringPtr destAddr, bool isTls = false)
+  InnerEgressService(ChannelLookup lookupChannel,
+      kj::StringPtr destAddr,
+      kj::AsyncIoStream& connection,
+      bool isTls = false)
       : lookupChannel(kj::mv(lookupChannel)),
         destAddr(kj::str(destAddr)),
+        connection(connection),
         isTls(isTls) {}
 
   kj::Promise<void> request(kj::HttpMethod method,
@@ -1414,12 +1437,23 @@ class InnerEgressService final: public kj::HttpService {
       }
     }
 
+    // kj::HttpServer ignores `Expect`, so a client that sends `Expect: 100-continue` holds its
+    // body until it gives up waiting: about a second for curl and botocore, forever for a
+    // stricter client. Answer before invoking the Fetcher, while nothing else can be writing to
+    // the connection: the server flushed the previous response before it parsed this request,
+    // and this request's response cannot start until the Fetcher runs. Answering when the
+    // Fetcher first reads the body instead could race its response.
+    if (expectsContinue(headers, requestBody)) {
+      co_await connection.write("HTTP/1.1 100 Continue\r\n\r\n"_kjb);
+    }
+
     co_await worker->request(method, urlForWorker, headers, requestBody, response);
   }
 
  private:
   ChannelLookup lookupChannel;
   kj::String destAddr;
+  kj::AsyncIoStream& connection;
   bool isTls;
 };
 
@@ -1515,7 +1549,7 @@ class EgressHttpService final: public kj::HttpService {
         }).orDefault(kj::none),
             protocol);
       },
-          destAddr, isTls);
+          destAddr, connection, isTls);
       auto innerServer =
           kj::heap<kj::HttpServer>(containerClient.timer, headerTable, *innerService);
 

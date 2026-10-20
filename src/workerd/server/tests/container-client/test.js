@@ -1741,6 +1741,39 @@ export class DurableObjectExample extends DurableObject {
     }
   }
 
+  async testSetEgressHttpExpectContinue() {
+    const container = this.ctx.container;
+    if (!container.running) container.start();
+    container.monitor().catch((err) => {
+      console.error('Container exited with an error:', err.message);
+    });
+    await this.waitUntilContainerIsHealthy();
+
+    await container.interceptOutboundHttp(
+      '11.0.0.1:9999',
+      this.ctx.exports.TestService({ props: { id: 7 } })
+    );
+
+    // The container's client sends each body only after 100 Continue, so without it the
+    // exchange times out. The second request checks that the 100 stays out of the previous
+    // response on a reused connection.
+    const response = await container
+      .getTcpPort(8080)
+      .fetch('http://foo/intercept-expect-continue', {
+        headers: { 'x-host': '11.0.0.1:9999' },
+        signal: AbortSignal.timeout(DEFAULT_TIMEOUT_DURATION),
+      });
+    const body = await response.text();
+    assert.equal(response.status, 200, body);
+    const [before, ...responses] = body.split('HTTP/1.1 100 Continue\r\n\r\n');
+    assert.equal(before, '', body);
+    assert.equal(responses.length, 2, body);
+    for (const finalResponse of responses) {
+      assert.ok(finalResponse.startsWith('HTTP/1.1 200 OK\r\n'), body);
+      assert.ok(finalResponse.endsWith('binding 7 got: hello'), body);
+    }
+  }
+
   async testInterceptWebSocket() {
     const container = this.ctx.container;
     if (container.running) {
@@ -2865,7 +2898,7 @@ export class DurableObjectExample extends DurableObject {
 }
 
 export class TestService extends WorkerEntrypoint {
-  fetch(request) {
+  async fetch(request) {
     // Check if this is a WebSocket upgrade request
     const upgradeHeader = request.headers.get('Upgrade');
     if (upgradeHeader && upgradeHeader.toLowerCase() === 'websocket') {
@@ -2886,6 +2919,12 @@ export class TestService extends WorkerEntrypoint {
         status: 101,
         webSocket: client,
       });
+    }
+
+    if (request.method === 'PUT') {
+      return new Response(
+        `binding ${this.ctx.props.id} got: ${await request.text()}`
+      );
     }
 
     // Regular HTTP request
@@ -3497,6 +3536,15 @@ export const testSetEgressTcp = {
 
     stub = env.MY_CONTAINER.get(id);
     await stub.testSetEgressTcp();
+  },
+};
+
+export const testSetEgressHttpExpectContinue = {
+  async test(_ctrl, env) {
+    const id = env.MY_CONTAINER.idFromName(
+      getRandomDurableObjectName('testSetEgressHttpExpectContinue')
+    );
+    await env.MY_CONTAINER.get(id).testSetEgressHttpExpectContinue();
   },
 };
 
