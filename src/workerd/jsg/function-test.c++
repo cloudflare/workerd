@@ -7,7 +7,7 @@
 namespace workerd::jsg::test {
 namespace {
 
-V8System v8System;
+V8System v8System({"--expose-gc"_kj});
 class ContextGlobalObject: public Object, public ContextGlobal {};
 
 struct CallbackContext: public ContextGlobalObject {
@@ -341,81 +341,72 @@ KJ_TEST("JSG_TRY/JSG_CATCH with TerminateExecution") {
 
 // ========================================================================================
 
-struct OnceContext: public ContextGlobalObject {
-  // What the callback of the most recently made function observed, since a wrapSimpleFunction()
-  // callback can't return a value. Static rather than members, because a callback can outlive the
-  // context, e.g. when a test fails.
-  static inline int calls = 0;
-  static inline bool visitedBeforeFirstCall = false;
-  static inline bool captureDestroyed = false;
-
-  // Sets `captureDestroyed` when the callback that captured it is destroyed.
-  struct Canary {
-    ~Canary() noexcept(false) {
-      captureDestroyed = true;
-    }
-  };
-
-  JsValue makeOnceFunction(Lock& js) {
-    return makeFunction(js, Once::YES);
-  }
-  JsValue makeRepeatableFunction(Lock& js) {
-    return makeFunction(js, Once::NO);
-  }
-  kj::String state() {
-    return kj::str(
-        "calls=", calls, " visited=", visitedBeforeFirstCall, " destroyed=", captureDestroyed);
-  }
-
-  JSG_RESOURCE_TYPE(OnceContext) {
-    JSG_METHOD(makeOnceFunction);
-    JSG_METHOD(makeRepeatableFunction);
-    JSG_METHOD(state);
-  }
-
- private:
-  static JsValue makeFunction(Lock& js, Once once) {
-    calls = 0;
-    visitedBeforeFirstCall = false;
-    captureDestroyed = false;
-    return JsValue(js.wrapSimpleFunction(js.v8Context(),
-        JSG_VISITABLE_LAMBDA(
-            (canary = kj::heap<Canary>(), detector = FunctionContext::VisitDetector()), (detector),
-            (Lock&, const v8::FunctionCallbackInfo<v8::Value>&) {
-              if (calls++ == 0) {
-              visitedBeforeFirstCall = detector.visited;
-              }
-            }),
-        once));
+struct MicrotaskCanary {
+  bool& destroyed;
+  ~MicrotaskCanary() noexcept(false) {
+    destroyed = true;
   }
 };
-JSG_DECLARE_ISOLATE_TYPE(OnceIsolate, OnceContext);
 
-KJ_TEST("wrapSimpleFunction() with Once") {
-  Evaluator<OnceContext, OnceIsolate> e(v8System);
+KJ_TEST("Lock::enqueueMicrotask()") {
+  Evaluator<FunctionContext, FunctionIsolate> e(v8System);
 
-  // The callback and its captures are destroyed as soon as the call returns, without waiting for
-  // GC. Until then, GC visitation reaches the captures.
-  e.expectEval("const fn = makeOnceFunction();\n"
-               "const before = state();\n"
-               "fn();\n"
-               "before + ' / ' + state()",
-      "string", "calls=0 visited=false destroyed=false / calls=1 visited=true destroyed=true");
+  // GC keeps the callback alive and visits it while it is pending, and the callback and its
+  // captures are destroyed as soon as it returns, without waiting for GC.
+  e.run([](Lock& js) {
+    bool destroyed = false;
+    bool visitedBeforeRun = false;
+    uint runs = 0;
+    js.enqueueMicrotask(JSG_VISITABLE_LAMBDA(
+        (canary = kj::heap<MicrotaskCanary>(destroyed), detector = FunctionContext::VisitDetector(),
+            &runs, &visitedBeforeRun),
+        (detector), (Lock&) {
+          ++runs;
+          visitedBeforeRun = detector.visited;
+        }));
+    js.v8Isolate->RequestGarbageCollectionForTesting(v8::Isolate::kFullGarbageCollection);
+    KJ_EXPECT(runs == 0);
+    KJ_EXPECT(!destroyed);
 
-  {
-    KJ_EXPECT_LOG(ERROR, "function wrapped with Once::YES was called again");
-    e.expectEval("const fn = makeOnceFunction();\n"
-                 "fn();\n"
-                 "try { fn(); 'no error'; } catch (e) { e.message.split(';')[0]; }",
-        "string", "internal error");
-  }
+    js.runMicrotasks();
+    KJ_EXPECT(runs == 1);
+    KJ_EXPECT(visitedBeforeRun);
+    KJ_EXPECT(destroyed);
+  });
 
-  // Without Once::YES, the callback lives as long as the function, which can be called again.
-  e.expectEval("const fn = makeRepeatableFunction();\n"
-               "fn();\n"
-               "fn();\n"
-               "state()",
-      "string", "calls=2 visited=true destroyed=false");
+  // A JavaScript exception escaping the callback is reported, and doesn't stop later microtasks.
+  e.run([](Lock& js) {
+    kj::Vector<kj::String> reported;
+    js.setErrorReporterCallback([&reported](Lock&, kj::String desc, const JsValue&,
+                                    const JsMessage&) { reported.add(kj::mv(desc)); });
+    bool destroyed = false;
+    bool ranAfter = false;
+    js.enqueueMicrotask([canary = kj::heap<MicrotaskCanary>(destroyed)](
+                            Lock& js) { js.throwException(js.error("boom")); });
+    js.enqueueMicrotask([&ranAfter](Lock&) { ranAfter = true; });
+
+    js.runMicrotasks();
+    KJ_EXPECT(destroyed);
+    KJ_EXPECT(ranAfter);
+    KJ_EXPECT(reported.size() == 1);
+    KJ_EXPECT(reported[0] == "Error: boom", reported[0]);
+  });
+}
+
+KJ_TEST("Lock::enqueueMicrotask() runs in the enqueuing context") {
+  Evaluator<FunctionContext, FunctionIsolate> e(v8System);
+
+  e.run([](auto& lock) {
+    Lock& js = lock;
+    auto enqueuingContext = js.v8Context();
+    bool ranInEnqueuingContext = false;
+    js.enqueueMicrotask(
+        [&](Lock& js) { ranInEnqueuingContext = js.v8Context() == enqueuingContext; });
+
+    auto otherContext = lock.template newContext<FunctionContext>();
+    JSG_WITHIN_CONTEXT_SCOPE(js, otherContext.getHandle(js), [](Lock& js) { js.runMicrotasks(); });
+    KJ_EXPECT(ranInEnqueuingContext);
+  });
 }
 
 }  // namespace

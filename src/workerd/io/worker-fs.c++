@@ -5,8 +5,6 @@
 #include <workerd/util/uuid.h>
 #include <workerd/util/weak-refs.h>
 
-#include <v8-microtask-queue.h>
-
 #include <algorithm>
 
 namespace workerd {
@@ -2010,8 +2008,7 @@ class StdioFile final: public File {
     microtaskScheduled = true;
 
     // Create ephemeral callback with weak reference for safety
-    auto callback = js.wrapSimpleFunction(js.v8Context(),
-        [weakThis = weakThis->addRef()](jsg::Lock& js, const v8::FunctionCallbackInfo<v8::Value>&) {
+    js.enqueueMicrotask([weakThis = weakThis->addRef()](jsg::Lock& js) {
       weakThis->runIfAlive([&](StdioFile& self) {
         self.microtaskScheduled = false;
 
@@ -2025,8 +2022,7 @@ class StdioFile final: public File {
           }
         }
       });
-    }, jsg::Once::YES);
-    js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate, callback);
+    });
   }
 };
 

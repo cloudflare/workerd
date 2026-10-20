@@ -1358,37 +1358,20 @@ jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
   // The bodies touch IoContext-bound state, but the isolate's microtask queue can in principle be
   // drained with no active IoContext, so both bail out early if there is no current context (the
   // socket is being torn down, so there is nothing to wire up). The wiring runs JS that can throw
-  // with no user code on the stack, so each body is wrapped in JSG_TRY/JSG_CATCH and reports via
-  // js.reportError() (matching the queueMicrotask() pattern in global-scope.c++).
+  // with no user code on the stack; enqueueMicrotask() reports such errors via js.reportError().
   auto disconnectedOwn = ioContext.createObject<kj::Promise<bool>>(kj::mv(disconnected));
-  js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate,
-      js.wrapSimpleFunction(js.v8Context(),
-          JSG_VISITABLE_LAMBDA((self = socket.addRef(), disconnected = kj::mv(disconnectedOwn)),
-              (self),
-              (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& args) mutable {
-                if (!IoContext::hasCurrent()) return;
-                JSG_TRY(js) {
-                self.get()->wireClosedToDisconnect(js, kj::mv(*disconnected));
-                }
-                JSG_CATCH(exception) {
-                js.reportError(jsg::JsValue(exception.getHandle(js)));
-                }
-              }),
-          jsg::Once::YES));
+  js.enqueueMicrotask(
+      JSG_VISITABLE_LAMBDA((self = socket.addRef(), disconnected = kj::mv(disconnectedOwn)), (self),
+          (jsg::Lock & js) mutable {
+            if (!IoContext::hasCurrent()) return;
+            self.get()->wireClosedToDisconnect(js, kj::mv(*disconnected));
+          }));
   KJ_IF_SOME(p, eofPromise) {
-    js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate,
-        js.wrapSimpleFunction(js.v8Context(),
-            JSG_VISITABLE_LAMBDA((self = socket.addRef(), eof = kj::mv(p)), (self, eof),
-                (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& args) mutable {
-                  if (!IoContext::hasCurrent()) return;
-                  JSG_TRY(js) {
-                  self.get()->handleReadableEof(js, kj::mv(eof));
-                  }
-                  JSG_CATCH(exception) {
-                  js.reportError(jsg::JsValue(exception.getHandle(js)));
-                  }
-                }),
-            jsg::Once::YES));
+    js.enqueueMicrotask(JSG_VISITABLE_LAMBDA(
+        (self = socket.addRef(), eof = kj::mv(p)), (self, eof), (jsg::Lock & js) mutable {
+          if (!IoContext::hasCurrent()) return;
+          self.get()->handleReadableEof(js, kj::mv(eof));
+        }));
   }
 
   // `opened` was resolved synchronously above, so the transferred socket is immediately in the

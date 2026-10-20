@@ -5,6 +5,7 @@
 #include <v8-container.h>
 #include <v8-date.h>
 #include <v8-external.h>
+#include <v8-microtask-queue.h>
 #include <v8-proxy.h>
 
 namespace workerd::jsg {
@@ -939,6 +940,42 @@ inline JsObject Lock::opaque(T&& inner) {
   KJ_ASSERT(!wrapped.IsEmpty());
   KJ_ASSERT(wrapped->IsObject());
   return JsObject(wrapped.template As<v8::Object>());
+}
+
+namespace _ {
+
+template <typename Func>
+void runOpaqueMicrotask(v8::Local<v8::Data> data) {
+  auto isolate = v8::Isolate::GetCurrent();
+  auto& js = Lock::from(isolate);
+  // V8 only expects termination to escape a callback microtask, so everything else is caught here.
+  try {
+    // Every context in the isolate shares its microtask queue, and V8 runs a callback microtask in
+    // whichever context drains it, so enter the one the microtask was enqueued from.
+    auto handle = data.As<v8::Object>();
+    v8::Context::Scope contextScope(handle->GetCreationContextChecked(isolate));
+    auto func = unwrapOpaque<Func>(isolate, handle);
+    JSG_TRY(js) {
+      func(js);
+    }
+    JSG_CATCH(exception) {
+      js.reportError(JsValue(exception.getHandle(js)));
+    }
+  } catch (JsExceptionThrown&) {
+    // Termination is left pending in the isolate, which stops the checkpoint.
+  } catch (kj::Exception& e) {
+    KJ_LOG(ERROR, "microtask failed", e);
+  }
+}
+
+}  // namespace _
+
+template <typename Func>
+inline void Lock::enqueueMicrotask(Func&& func) {
+  static_assert(!kj::isReference<Func>());
+  auto context = v8Context();
+  auto data = wrapOpaque(context, kj::mv(func));
+  context->GetMicrotaskQueue()->EnqueueMicrotask(v8Isolate, &_::runOpaqueMicrotask<Func>, data);
 }
 
 class JsFunction final: public JsBase<v8::Function, JsFunction> {
