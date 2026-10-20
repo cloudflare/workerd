@@ -916,6 +916,12 @@ wd_test(
 )
 
 wd_test(
+    src = "encoding-ts-text-encoder-test.wd-test",
+    args = ["--experimental"],
+    data = ["encoding-test.js"],
+)
+
+wd_test(
     src = "text-encoder-global-test.wd-test",
     args = ["--experimental"],
     data = ["text-encoder-global-test.js"],

@@ -2,10 +2,20 @@ load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 wd_rust_crate(
     name = "encoding",
-    cxx_bridge_src = "lib.rs",
+    cxx_bridge_deps = {"text_encoder.rs": [
+        "//src/rust/jsg",
+        "@simdutf",
+    ]},
+    cxx_bridge_srcs = [
+        "lib.rs",
+        "text_encoder.rs",
+    ],
+    proc_macro_deps = ["//src/rust/jsg-macros"],
+    test_deps = ["//src/rust/jsg-test"],
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/cxx-integration",
+        "//src/rust/jsg",
         "@crates_vendor//encoding_rs",
     ],
 )

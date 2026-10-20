@@ -708,6 +708,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "addAbortAlgorithm",
     "utf8Length",
     "encodeUtf8",
+    "TextEncoderUtil",
     "getPrivateSymbol",
     "setListenerCountHook",
     "getEventHandlerAttribute",
@@ -772,6 +773,9 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, AddAbortAlgorithm),
     getMethod(js, Utf8Length),
     getMethod(js, EncodeUtf8),
+    util::Autogate::isEnabled(util::AutogateKey::TS_TEXT_ENCODER)
+        ? v8::Local<v8::Value>(api::getTextEncoderUtil(js))
+        : js.v8Undefined(),
     getMethod(js, GetPrivateSymbol),
     getMethod(js, SetListenerCountHook),
     getMethod(js, GetEventHandlerAttribute),

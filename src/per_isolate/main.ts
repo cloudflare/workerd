@@ -383,6 +383,33 @@ if (compatFlags['spec_compliant_property_attributes']) {
   });
 }
 
+// The TypeScript TextEncoder replaces the C++ one on the global, keeping the
+// property's place. The C++ class stays registered for primordials.ts, which
+// captures it before this runs.
+if (autogates['ts-text-encoder']) {
+  const { TextEncoder } = require('text-encoder');
+  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+    TextEncoder: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: TextEncoder,
+    },
+  });
+  if (compatFlags['spec_compliant_property_attributes']) {
+    ObjectDefineProperties(globalThis, {
+      TextEncoder: {
+        __proto__: null,
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: TextEncoder,
+      },
+    });
+  }
+}
+
 // The TypeScript URL and URLSearchParams replace the C++ ones, which
 // global-scope.h then leaves out. Installed as WebIDL installs an interface:
 // own, non-enumerable properties of the global, and not on its prototype.

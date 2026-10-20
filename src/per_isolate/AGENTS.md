@@ -30,6 +30,10 @@ at context creation, before any user code. C++ entry point:
 - Under the `TS_URL_PATTERN` autogate, `main.ts` installs the TypeScript
   `URLPattern` (`urlpattern/`), which replaces both C++ implementations;
   see `urlpattern/AGENTS.md`.
+- Under the `TS_TEXT_ENCODER` autogate, `main.ts` installs the TypeScript
+  `TextEncoder` (`text-encoder.ts`), a WebIDL layer over the static methods
+  of the Rust `utils.TextEncoderUtil` (`src/rust/encoding/text_encoder.rs`),
+  which replaces the C++ class.
 - Under the `TS_STRUCTURED_CLONE` autogate, `main.ts` installs the
   TypeScript `structuredClone()` (`structured-clone.ts`, a WebIDL layer over
   the native `utils.structuredClone()`), which replaces the C++ method; its
