@@ -23,7 +23,9 @@ class R2MultipartUpload: public jsg::Object {
     jsg::Optional<kj::OneOf<kj::Array<byte>, kj::String>> ssecKey;
 
     JSG_STRUCT(ssecKey);
-    JSG_STRUCT_TS_OVERRIDE(R2UploadPartOptions);
+    JSG_STRUCT_TS_OVERRIDE(R2UploadPartOptions {
+      ssecKey?: ArrayBuffer | ArrayBufferView | string;
+    });
   };
 
   R2MultipartUpload(kj::String key, kj::String uploadId, jsg::Ref<R2Bucket> bucket)

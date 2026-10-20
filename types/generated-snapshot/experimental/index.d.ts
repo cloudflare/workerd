@@ -2720,7 +2720,7 @@ interface R2Conditional {
 interface R2GetOptions {
   onlyIf?: R2Conditional | Headers;
   range?: R2Range | Headers;
-  ssecKey?: ArrayBuffer | string;
+  ssecKey?: ArrayBuffer | ArrayBufferView | string;
 }
 interface R2PutOptions {
   onlyIf?: R2Conditional | Headers;
@@ -2732,13 +2732,13 @@ interface R2PutOptions {
   sha384?: (ArrayBuffer | ArrayBufferView) | string;
   sha512?: (ArrayBuffer | ArrayBufferView) | string;
   storageClass?: string;
-  ssecKey?: ArrayBuffer | string;
+  ssecKey?: ArrayBuffer | ArrayBufferView | string;
 }
 interface R2MultipartOptions {
   httpMetadata?: R2HTTPMetadata | Headers;
   customMetadata?: Record<string, string>;
   storageClass?: string;
-  ssecKey?: ArrayBuffer | string;
+  ssecKey?: ArrayBuffer | ArrayBufferView | string;
 }
 interface R2Checksums {
   readonly md5?: ArrayBuffer;
@@ -2776,7 +2776,7 @@ type R2Objects = {
     }
 );
 interface R2UploadPartOptions {
-  ssecKey?: ArrayBuffer | string;
+  ssecKey?: ArrayBuffer | ArrayBufferView | string;
 }
 declare abstract class JsRpcPromise {
   then(handler: Function, errorHandler?: Function): any;
