@@ -103,6 +103,35 @@ fn set_resource(lock: &mut jsg::Lock, ctx: &crate::EvalContext<'_>, base: i32) {
 }
 
 #[test]
+fn function_lengths_follow_compat_flag_with_fast_api_enabled() {
+    for (enabled, expected) in [(false, "0,0,0,0"), (true, "2,1,0,2")] {
+        let harness = crate::Harness::with_fast_api_and_flags(|mut flags| {
+            flags.set_spec_compliant_property_attributes(enabled);
+        });
+        harness.run_in_context(|lock, ctx| {
+            set_resource(lock, ctx, 0);
+            let lengths = ctx
+                .eval::<String>(
+                    lock,
+                    "[r.add.length, r.idI32.length, r.touch.length, FastResource.hypot.length].join()",
+                )
+                .unwrap();
+            assert_eq!(lengths, expected);
+            let (result, fast_calls) = count_fast_calls(|| {
+                ctx.eval::<Number>(
+                    lock,
+                    &optimized("a, b", "return r.add(a, b);", "1, 2", "3, 4"),
+                )
+                .unwrap()
+            });
+            assert!((result.value() - 7.0).abs() < f64::EPSILON);
+            assert_ne!(fast_calls, Some(0));
+            Ok(())
+        });
+    }
+}
+
+#[test]
 fn instance_method_takes_fast_path() {
     let harness = crate::Harness::with_fast_api();
     harness.run_in_context(|lock, ctx| {

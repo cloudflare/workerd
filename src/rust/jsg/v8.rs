@@ -702,6 +702,8 @@ pub mod ffi {
 
     pub struct ConstructorDescriptor {
         callback: usize,
+        /// Web IDL `.length`: the number of leading required arguments.
+        length: u32,
     }
 
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -721,6 +723,8 @@ pub mod ffi {
         name: String,
         callback: usize,
         fast: KjMaybe<FastApiDescriptor>,
+        /// Web IDL `.length`: the number of leading required arguments.
+        length: u32,
     }
 
     pub struct StaticConstantDescriptor {

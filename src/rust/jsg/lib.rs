@@ -1126,14 +1126,19 @@ pub enum PropertyPlacement {
     LazyInstance,
 }
 
+/// A member of a resource type. `length` is the function's Web IDL `.length`, the number of
+/// leading required arguments; it is applied when `spec_compliant_property_attributes` is
+/// enabled, as in C++ JSG.
 pub enum Member {
     Constructor {
         callback: RawFunctionCallback,
+        length: u32,
     },
     Method {
         name: String,
         callback: RawFunctionCallback,
         fast: Option<v8::ffi::FastApiDescriptor>,
+        length: u32,
     },
     /// A property accessor on the prototype (`Prototype` or `Inspect`; `Instance`
     /// panics). `setter_callback = None` makes the property read-only; `Inspect`
@@ -1168,6 +1173,7 @@ pub enum Member {
         name: String,
         callback: RawFunctionCallback,
         fast: Option<v8::ffi::FastApiDescriptor>,
+        length: u32,
     },
     StaticConstant {
         name: String,

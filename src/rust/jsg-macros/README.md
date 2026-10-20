@@ -72,6 +72,10 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 - To take or return handles, name the callback's scope:
   `fn f<'s>(&self, lock: &mut Lock<'s>, v: Local<'s, Value>) -> Local<'s, Value>`. The
   generated callback ties `'s` to its own scope.
+- When `spec_compliant_property_attributes` is enabled, the function's `.length` is the
+  Web IDL count of leading required arguments: `this` and the lock are not counted, and counting
+  stops at the first type whose `FromJS::is_optional()` returns true (such as `Option<T>` or
+  `jsg::Lenient<T>`). Otherwise `.length` is `0`.
 
 ```rust
 #[jsg_resource]
@@ -234,7 +238,8 @@ JavaScript constructor. An `Err` is converted with `Into<jsg::Error>` and thrown
 `#[jsg_method]`. Only one per impl block is allowed. Without it, `new MyClass()` throws
 `Illegal constructor`. An optional first parameter of `&mut Lock` is passed the
 isolate lock and is not counted as a JavaScript argument. Calling the constructor without
-`new` (`MyClass()`, `MyClass.call(obj)`) throws a `TypeError`, as in C++ JSG.
+`new` (`MyClass()`, `MyClass.call(obj)`) throws a `TypeError`, as in C++ JSG. Parameter
+conversion and `.length` follow the [`#[jsg_method]`](#jsg_method) rules.
 
 ```rust
 #[jsg_resource]

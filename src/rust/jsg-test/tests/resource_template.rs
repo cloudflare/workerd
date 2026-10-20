@@ -20,6 +20,25 @@ use jsg_macros::jsg_static_constant;
 
 use crate::Harness;
 
+type OptionalNumber = Option<Number>;
+
+struct OptionalValue;
+
+impl<'s> jsg::FromJS<'s> for OptionalValue {
+    type ResultType = Self;
+
+    fn from_js(
+        _lock: &mut jsg::Lock<'s>,
+        _value: jsg::v8::Local<'s, jsg::v8::Value>,
+    ) -> jsg::Result<Self> {
+        Ok(Self)
+    }
+
+    fn is_optional() -> bool {
+        true
+    }
+}
+
 #[jsg_resource]
 struct Sample {
     label: RefCell<String>,
@@ -31,10 +50,35 @@ impl Sample {
     const VALUE: f64 = 1.0;
 
     #[jsg_constructor]
-    fn constructor(label: String) -> Self {
+    fn constructor(this: String, _extra: OptionalNumber) -> Self {
         Self {
-            label: RefCell::new(label),
+            label: RefCell::new(this),
         }
+    }
+
+    #[jsg_method]
+    fn two(&self, a: Number, b: Number, _c: OptionalNumber) -> Number {
+        Number::new(a.value() + b.value())
+    }
+
+    #[jsg_method]
+    fn with_lock(&self, _lock: &mut jsg::Lock, a: Number) -> Number {
+        a
+    }
+
+    #[jsg_method]
+    fn add(a: Number, b: Number) -> Number {
+        Number::new(a.value() + b.value())
+    }
+
+    #[jsg_method]
+    fn custom_optional<'s>(
+        &self,
+        _value: jsg::v8::Local<'s, jsg::v8::Value>,
+        _optional: OptionalValue,
+        _after: jsg::Lenient<Number>,
+    ) -> bool {
+        true
     }
 
     #[jsg_property]
@@ -89,6 +133,10 @@ impl Resource for Sample {
         };
         let mut members = vec![
             Self::constructor_member(),
+            Self::two_member(),
+            Self::with_lock_member(),
+            Self::add_member(),
+            Self::custom_optional_member(),
             Self::value_member(),
             Self::get_kind_member(placement),
             Self::get_label_member(placement),
@@ -315,7 +363,7 @@ fn custom_templates_are_cached_per_isolate_for_both_wrapping_paths() {
             ctx.set_global(
                 lock,
                 "wrapped",
-                jsg::Rc::new(Sample::constructor("x".to_owned())),
+                jsg::Rc::new(Sample::constructor("x".to_owned(), None)),
             );
             let constructor = jsg::resource::function_template_of::<Sample>(lock);
             ctx.set_global(lock, "Sample", constructor);
@@ -334,4 +382,51 @@ fn custom_templates_are_cached_per_isolate_for_both_wrapping_paths() {
             Ok(())
         });
     }
+}
+
+#[test]
+fn constructor_length_counts_argument_named_this() {
+    for (enabled, expected) in [(false, "0,value"), (true, "1,value")] {
+        let harness = Harness::with_flags(|mut flags| {
+            flags.set_spec_compliant_property_attributes(enabled);
+        });
+        assert_eq!(
+            eval_string(
+                &harness,
+                "const s = new Sample('value'); [Sample.length, s.label].join()",
+            ),
+            expected,
+        );
+    }
+}
+
+#[test]
+fn function_lengths_are_zero_without_spec_compliant_property_attributes() {
+    let lengths = eval_string(
+        &Harness::new(),
+        "[Sample.length, Sample.prototype.two.length, Sample.prototype.withLock.length, \
+         Sample.add.length, Sample.prototype.customOptional.length].join()",
+    );
+    assert_eq!(lengths, "0,0,0,0,0");
+}
+
+/// Web IDL `.length` counts leading required arguments using `FromJS`, including aliases
+/// and custom optional types. A `&mut Lock` is not a JavaScript argument.
+#[test]
+fn function_lengths_follow_web_idl_with_spec_compliant_property_attributes() {
+    let harness =
+        Harness::with_flags(|mut flags| flags.set_spec_compliant_property_attributes(true));
+    let lengths = eval_string(
+        &harness,
+        "[Sample.length, Sample.prototype.two.length, Sample.prototype.withLock.length, \
+         Sample.add.length, Sample.prototype.customOptional.length].join()",
+    );
+    assert_eq!(lengths, "1,2,1,2,1");
+    assert_eq!(
+        eval_string(
+            &harness,
+            "const s = new Sample('x'); [s.two(1, 2), s.customOptional('x')].join()",
+        ),
+        "3,true",
+    );
 }
