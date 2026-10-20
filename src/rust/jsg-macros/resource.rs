@@ -27,7 +27,7 @@ use crate::utils::snake_to_camel;
 // and emit the correct token streams. Cannot reuse the runtime type directly
 // because proc-macro crates cannot link against CXX-bridge runtime crates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum PropertyKind {
+pub enum PropertyKind {
     Prototype,
     Instance,
     Inspect,
@@ -429,6 +429,15 @@ fn emit_property_group(
         quote! { None }
     };
 
+    if kind == PropertyKind::Instance {
+        return Ok(quote! {
+            jsg::Member::InstanceProperty {
+                name: #js_name.to_owned(),
+                getter_callback: Self::#getter_cb,
+                setter_callback: #setter_tokens,
+            }
+        });
+    }
     Ok(quote! {
         jsg::Member::Property {
             name: #js_name.to_owned(),
@@ -443,7 +452,7 @@ fn emit_property_group(
 ///
 /// `placement` is optional; when omitted it defaults to `Prototype`.
 /// Returns `(PropertyKind, Option<js_name_override>, is_readonly)`.
-fn parse_jsg_property_args(
+pub fn parse_jsg_property_args(
     tokens: TokenStream,
 ) -> Result<(PropertyKind, Option<String>, bool), proc_macro2::TokenStream> {
     use syn::parse::Parser as _;
