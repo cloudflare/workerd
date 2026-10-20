@@ -303,6 +303,7 @@ bool local_array_buffer_is_shared(const Local& value);
 Isolate* fci_get_isolate(FunctionCallbackInfo* args);
 Local fci_get_this(FunctionCallbackInfo* args);
 size_t fci_get_length(FunctionCallbackInfo* args);
+bool fci_is_construct_call(FunctionCallbackInfo* args);
 Local fci_get_arg(FunctionCallbackInfo* args, size_t index);
 void fci_set_return_value(FunctionCallbackInfo* args, Local value);
 

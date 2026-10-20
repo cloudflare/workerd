@@ -2,8 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! Tests for resource template shape that depends on compatibility flags.
+//! Tests for compatibility-dependent resource template shape and constructor call checks.
 
+use jsg::Number;
 use jsg_macros::jsg_constructor;
 use jsg_macros::jsg_resource;
 use jsg_macros::jsg_static_constant;
@@ -30,7 +31,7 @@ fn eval_string(harness: &Harness, code: &str) -> String {
     let mut out = String::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<Sample>(lock);
-        ctx.set_global("Sample", constructor.into());
+        ctx.set_global(lock, "Sample", constructor);
         out = ctx.eval(lock, code).unwrap();
         Ok(())
     });
@@ -60,4 +61,38 @@ fn constant_descriptor_follows_spec_compliant_property_attributes() {
         eval_string(&harness, code),
         r#"{"value":1,"writable":false,"enumerable":true,"configurable":false}"#
     );
+}
+
+#[test]
+fn constructor_called_without_new_throws_type_error() {
+    let harness = Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let constructor = jsg::resource::function_template_of::<Sample>(lock);
+        ctx.set_global(lock, "Sample", constructor);
+
+        for code in ["Sample('x')", "Sample.call({}, 'x')"] {
+            let err = ctx
+                .eval::<Number>(lock, code)
+                .unwrap_err()
+                .unwrap_jsg_err(lock);
+            assert_eq!(err.name, jsg::ExceptionType::TypeError, "{code}");
+            assert_eq!(
+                err.message,
+                "Failed to construct 'Sample': Please use the 'new' operator, this object \
+                 constructor cannot be called as a function.",
+                "{code}"
+            );
+        }
+
+        // A receiver passed to a failed call is left unwrapped.
+        let result: String = ctx
+            .eval(
+                lock,
+                "const receiver = {}; try { Sample.call(receiver, 'x'); } catch {} \
+                 String(Object.getOwnPropertyNames(receiver).length)",
+            )
+            .unwrap();
+        assert_eq!(result, "0");
+        Ok(())
+    });
 }

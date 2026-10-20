@@ -373,6 +373,18 @@ fn generate_constructor_registration(
             quote! {
                 jsg::Member::Constructor {
                     callback: jsg::function_callback(|lock, args| {
+                        // Without `new`, `this` is an arbitrary receiver with no
+                        // internal fields to attach the resource to. The message
+                        // matches C++ `throwIfConstructorCalledAsFunction`.
+                        if !args.is_construct_call() {
+                            lock.throw_exception(&jsg::Error::new_type_error(format!(
+                                "Failed to construct '{}': Please use the 'new' operator, \
+                                 this object constructor cannot be called as a function.",
+                                <#self_ty as jsg::Type>::class_name(),
+                            )));
+                            return;
+                        }
+
                         #(#unwraps)*
 
                         let resource = #self_ty::#rust_method_name(#lock_arg #(#arg_exprs),*);
