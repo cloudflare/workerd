@@ -2389,6 +2389,10 @@ type KVNamespaceListResult<Metadata, Key extends string = string> =
       keys: KVNamespaceListKey<Metadata, Key>[];
       cacheStatus: string | null;
     };
+type KVNamespaceGetWithMetadataBulkResult<Value, Metadata> = Omit<
+  KVNamespaceGetWithMetadataResult<Value, Metadata>,
+  "cacheStatus"
+>;
 interface KVNamespace<Key extends string = string> {
   get(
     key: Key,
@@ -2481,26 +2485,32 @@ interface KVNamespace<Key extends string = string> {
   getWithMetadata<Metadata = unknown>(
     key: Array<Key>,
     type: "text",
-  ): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>>;
+  ): Promise<
+    Map<string, KVNamespaceGetWithMetadataBulkResult<string, Metadata>>
+  >;
   getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(
     key: Array<Key>,
     type: "json",
   ): Promise<
-    Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>
+    Map<string, KVNamespaceGetWithMetadataBulkResult<ExpectedValue, Metadata>>
   >;
   getWithMetadata<Metadata = unknown>(
     key: Array<Key>,
     options?: Partial<KVNamespaceGetOptions<undefined>>,
-  ): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>>;
+  ): Promise<
+    Map<string, KVNamespaceGetWithMetadataBulkResult<string, Metadata>>
+  >;
   getWithMetadata<Metadata = unknown>(
     key: Array<Key>,
     options?: KVNamespaceGetOptions<"text">,
-  ): Promise<Map<string, KVNamespaceGetWithMetadataResult<string, Metadata>>>;
+  ): Promise<
+    Map<string, KVNamespaceGetWithMetadataBulkResult<string, Metadata>>
+  >;
   getWithMetadata<ExpectedValue = unknown, Metadata = unknown>(
     key: Array<Key>,
     options?: KVNamespaceGetOptions<"json">,
   ): Promise<
-    Map<string, KVNamespaceGetWithMetadataResult<ExpectedValue, Metadata>>
+    Map<string, KVNamespaceGetWithMetadataBulkResult<ExpectedValue, Metadata>>
   >;
   delete(key: Key): Promise<void>;
   deleteBulk(keys: Key | Key[]): Promise<void>;
@@ -2522,7 +2532,7 @@ interface KVNamespacePutOptions {
 interface KVNamespaceGetWithMetadataResult<Value, Metadata> {
   value: Value | null;
   metadata: Metadata | null;
-  cacheStatus?: string | null;
+  cacheStatus: string | null;
 }
 type QueueContentType = "text" | "bytes" | "json" | "v8";
 interface Queue<Body = unknown> {
