@@ -210,8 +210,8 @@ constexpr SpanId SpanId::nullId = nullptr;
 // Fixed spanId value to be used for tests
 constexpr uint64_t staticSpanId = 0x2a2a2a2a2a2a2a2aULL;
 
-// W3C trace flags propagated from an upstream traceparent. Wrapped in kj::Maybe
-// at usage sites: kj::none means no upstream decision was made.
+// W3C trace flags propagated from upstream or selected locally. Wrapped in kj::Maybe
+// at usage sites: kj::none means no sampling decision was made.
 class TraceFlags final {
  public:
   explicit constexpr TraceFlags(uint8_t flags): flags(flags) {}
@@ -289,10 +289,15 @@ class InvocationSpanContext final {
     return kj::none;
   }
 
-  // W3C trace flags propagated from an upstream traceparent. kj::none when
-  // no upstream sampling decision exists.
+  // W3C trace flags propagated from upstream or selected locally. kj::none when
+  // no sampling decision exists.
   inline kj::Maybe<TraceFlags> getTraceFlags() const {
     return traceFlags;
+  }
+
+  // Supply a local sampling decision without overriding one propagated from upstream.
+  void setDefaultTraceFlags(TraceFlags flags) {
+    if (traceFlags == kj::none) traceFlags = flags;
   }
 
   // Creates a new child span. If the current context does not have an entropy
@@ -310,8 +315,7 @@ class InvocationSpanContext final {
 
   // Creates a new InvocationSpanContext. If the triggerContext is given, then its
   // traceId is used as the traceId for the newly created context. Otherwise a new
-  // traceId is generated. The invocationId is always generated new and the spanId
-  // will be 0 with no parent span.
+  // traceId is generated. The invocationId and spanId are always generated new.
   static InvocationSpanContext newForInvocation(
       kj::Maybe<const InvocationSpanContext&> triggerContext = kj::none,
       kj::Maybe<kj::EntropySource&> entropySource = kj::none);
@@ -337,8 +341,8 @@ class InvocationSpanContext final {
   // testing is enabled). The isTrigger() should also return true.
   kj::Maybe<kj::Own<InvocationSpanContext>> parentSpanContext;
 
-  // W3C trace flags from an upstream traceparent, propagated through the
-  // invocation chain. kj::none when no upstream sampling decision was made.
+  // W3C trace flags propagated through the invocation chain. kj::none when no
+  // upstream or local sampling decision was made.
   kj::Maybe<TraceFlags> traceFlags;
 };
 
