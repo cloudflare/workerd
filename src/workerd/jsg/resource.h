@@ -1820,6 +1820,9 @@ struct NewContextOptions {
   // --harmony-temporal flag, which cannot vary per isolate, so gating Temporal per Worker
   // means removing what V8 already installed.
   bool enableTemporal = false;
+
+  // Callback V8 invokes to deserialize the internal fields of a JS object.
+  v8::DeserializeInternalFieldsCallback internalFieldsDeserializer;
 };
 
 void deleteWeakRefGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context);
@@ -1956,7 +1959,8 @@ class ResourceWrapper {
         "jsg::ContextGlobal");
     auto isolate = js.v8Isolate;
     auto tmpl = getTemplate<true>(isolate, nullptr)->InstanceTemplate();
-    v8::Local<v8::Context> context = v8::Context::New(isolate, nullptr, tmpl);
+    v8::Local<v8::Context> context = v8::Context::New(isolate, /*extensions=*/nullptr, tmpl,
+        /*global_object=*/v8::MaybeLocal<v8::Value>(), options.internalFieldsDeserializer);
     auto global = context->Global();
 
     auto ptr = js.alloc<T>(kj::fwd<Args>(args)...);
