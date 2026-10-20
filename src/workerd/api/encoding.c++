@@ -9,6 +9,8 @@
 
 #include <workerd/io/features.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/rust/encoding/text_encoder.rs.h>
+#include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/strings.h>
 
@@ -547,6 +549,16 @@ kj::Maybe<kj::Own<jsg::Wrappable>> TextDecoder::snapshotClone() const {
 
 // =======================================================================================
 // TextEncoder implementation
+
+jsg::JsValue getTextEncoderUtil(jsg::Lock& js) {
+  v8::Local<v8::Value> util;
+  if (!::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(
+          ::workerd::rust::encoding::text_encoder_util(js.v8Isolate))
+           .ToLocal(&util)) {
+    throw jsg::JsExceptionThrown();
+  }
+  return jsg::JsValue(util);
+}
 
 jsg::Ref<TextEncoder> TextEncoder::constructor(jsg::Lock& js) {
   return js.alloc<TextEncoder>();

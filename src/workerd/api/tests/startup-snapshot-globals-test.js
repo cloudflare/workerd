@@ -5,8 +5,8 @@
 // Top-level code that touches what V8 adds to a context only when it is not building a startup
 // snapshot: Error.stackTraceLimit, WebAssembly, SharedArrayBuffer, the Iterator helpers behind
 // shipped flags and Temporal (RESTORE_TIME_GLOBALS in jsg/setup.h), and the globals the runtime
-// defines in ways a snapshot must carry: process and Buffer, and the lazy MessageChannel and
-// MessagePort. One service per case: MODE selects the case's top-level behaviour, and each case
+// defines in ways a snapshot must carry: process and Buffer, the lazy MessageChannel and
+// MessagePort, and, under TS_TEXT_ENCODER, the lazy TextEncoder. One service per case: MODE selects the case's top-level behaviour, and each case
 // reports what its Worker sees at request time. The runner asserts the reports. Under the
 // startup-snapshot autogate every service here goes through the zygote; without it they are plain
 // Workers and the same assertions hold with snapshotUsed false.
@@ -144,6 +144,12 @@ switch (MODE) {
   case 'message-channel-read':
     topLevel.messageChannelType = typeof MessageChannel;
     break;
+  // Under TS_TEXT_ENCODER, TextEncoder is a lazy data property too.
+  case 'text-encoder':
+    break;
+  case 'text-encoder-read':
+    topLevel.encoded = [...new TextEncoder().encode('hi')];
+    break;
   default:
     throw new Error(`unknown MODE ${MODE}`);
 }
@@ -232,10 +238,22 @@ async function reportMessageChannel() {
   };
 }
 
+function reportTextEncoder() {
+  const encoder = new TextEncoder();
+  return {
+    isInstance: encoder instanceof TextEncoder,
+    encoded: [...encoder.encode('h\u00e9')],
+    encodedInto: encoder.encodeInto('h\u00e9', new Uint8Array(4)),
+  };
+}
+
 async function fetch() {
   const r = report();
   if (MODE.startsWith('message-channel')) {
     r.messageChannel = await reportMessageChannel();
+  }
+  if (MODE.startsWith('text-encoder')) {
+    r.textEncoder = reportTextEncoder();
   }
   return Response.json(r);
 }
@@ -244,6 +262,12 @@ const MESSAGE_CHANNEL_WORKS = {
   sameAsWorkerThreads: true,
   extendsEventTarget: true,
   received: 'ping',
+};
+
+const TEXT_ENCODER_WORKS = {
+  isInstance: true,
+  encoded: [104, 195, 169],
+  encodedInto: { read: 2, written: 3 },
 };
 
 async function test(ctrl, env) {
@@ -316,6 +340,13 @@ async function test(ctrl, env) {
     'message-channel-read'(r) {
       strictEqual(r.topLevel.messageChannelType, 'function');
       deepStrictEqual(r.messageChannel, MESSAGE_CHANNEL_WORKS);
+    },
+    'text-encoder'(r) {
+      deepStrictEqual(r.textEncoder, TEXT_ENCODER_WORKS);
+    },
+    'text-encoder-read'(r) {
+      deepStrictEqual(r.topLevel.encoded, [104, 105]);
+      deepStrictEqual(r.textEncoder, TEXT_ENCODER_WORKS);
     },
   };
   // Cases whose top level fails the zygote: always started as plain Workers, which run the top

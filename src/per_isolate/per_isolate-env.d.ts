@@ -251,6 +251,14 @@ declare const utils: {
     value: unknown
   ): 'locked' | 'disturbed' | 'readable' | undefined;
   encodeUtf8(str: string): Uint8Array;
+  // The Rust TextEncoderUtil (src/rust/encoding/text_encoder.rs), whose static
+  // methods are TextEncoder's encode() and encodeInto() without the argument
+  // conversions. encodeInto() writes the code units read and bytes written to
+  // `counts`.
+  getTextEncoderUtil(): {
+    encode(input: string): Uint8Array;
+    encodeInto(input: string, dest: Uint8Array, counts: Uint32Array): void;
+  };
   // The structured clone of `value` (jsg::structuredClone), transferring the
   // objects in `transfer`, a dense array the caller built. The native
   // serializer's rules apply: an ArrayBuffer or a view's buffer is transferred,

@@ -550,6 +550,15 @@ static void EncodeUtf8(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// The Rust TextEncoderUtil class, which text-encoder.ts asks for when it loads, so an isolate
+// whose Worker never reads TextEncoder doesn't create it.
+static void GetTextEncoderUtil(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return api::getTextEncoderUtil(js);
+  });
+}
+
 // The V8 private symbol of the given name (v8::Private::ForApi), as a value the bootstrap
 // scripts use as a property key: `object[key]` reads or writes the slot that
 // jsg::JsObject::getPrivate() and setPrivate() reach with that name, without a call into C++
@@ -642,6 +651,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "addAbortAlgorithm",
     "utf8Length",
     "encodeUtf8",
+    "getTextEncoderUtil",
     "getPrivateSymbol",
     "setListenerCountHook",
     "getEventHandlerAttribute",
@@ -687,6 +697,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, AddAbortAlgorithm),
     getMethod(js, Utf8Length),
     getMethod(js, EncodeUtf8),
+    getMethod(js, GetTextEncoderUtil),
     getMethod(js, GetPrivateSymbol),
     getMethod(js, SetListenerCountHook),
     getMethod(js, GetEventHandlerAttribute),

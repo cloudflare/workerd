@@ -12,6 +12,8 @@
 //! avoid repeated heap allocations. C++ reads the decoded UTF-16 data via
 //! the pointer and length returned in `DecodeResult`.
 
+pub mod text_encoder;
+
 #[cxx::bridge(namespace = "workerd::rust::encoding")]
 #[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {

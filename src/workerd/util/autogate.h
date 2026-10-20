@@ -134,7 +134,10 @@ namespace workerd::util {
   /* Worker::Isolate's constructor skips its MemoryPressureNotification(kModerate) call, which     \
      flushes the Liftoff code of every Wasm module in the process and empties the isolate          \
      group's memory pools. */                                                                      \
-  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)
+  V(SKIP_ISOLATE_MEMORY_PRESSURE_HINT)                                                             \
+  /* Expose the TypeScript TextEncoder (src/per_isolate/text-encoder.ts), which encodes in Rust     \
+     (src/rust/encoding/text_encoder.rs), instead of the C++ one (api/encoding.h). */              \
+  V(TS_TEXT_ENCODER)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
