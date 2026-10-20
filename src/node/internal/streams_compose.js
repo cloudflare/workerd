@@ -126,7 +126,7 @@ export function compose(...streams) {
     }
   }
 
-  // Completes _final once the tail has finished — and, for a web tail, once
+  // Completes _final once the tail has finished - and, for a web tail, once
   // the pipeline has completed too. A web tail is observed through its
   // readable side (eos over the interop hook), which can close before the
   // pipeline's last write into it has settled (a close() that closes the
@@ -342,8 +342,8 @@ export function compose(...streams) {
     } else if (!d.readableEnded || !d.writableFinished) {
       // A running composition is torn down. One whose sides have both
       // completed (the automatic destroy that follows) is not: its pipeline
-      // is completing on its own — a web tail's readable side can close
-      // before the pipeline's last write into it settles — and the composed
+      // is completing on its own - a web tail's readable side can close
+      // before the pipeline's last write into it settles - and the composed
       // stream reports the pipeline's outcome, as with a node tail. The
       // tail's reader is cancelled as well: a pipeline that had already
       // completed still holds the tail's unread output.
