@@ -387,12 +387,12 @@ pub mod ffi {
             isolate: *mut Isolate,
             object: &Local,
             key: &str,
-        ) -> bool;
+        ) -> Result<bool>;
         pub unsafe fn local_object_get_property(
             isolate: *mut Isolate,
             object: &Local,
             key: &str,
-        ) -> KjMaybe<Local>;
+        ) -> Result<Local>;
 
         // Local<Array>
         pub unsafe fn local_array_length(isolate: *mut Isolate, array: &Local) -> u32;
@@ -2955,23 +2955,21 @@ impl<'a> Local<'a, Object> {
         }
     }
 
-    pub fn has(&self, lock: &mut Lock, key: &str) -> bool {
+    /// Whether `key` is in the object or its prototype chain. A throwing
+    /// Proxy `has` trap is an `Err`.
+    pub fn has(&self, lock: &mut Lock, key: &str) -> crate::Result<bool> {
         // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
-        unsafe { ffi::local_object_has_property(lock.isolate().as_ffi(), &self.handle, key) }
+        Ok(unsafe { ffi::local_object_has_property(lock.isolate().as_ffi(), &self.handle, key) }?)
     }
 
-    pub fn get(&self, lock: &mut Lock, key: &str) -> Option<Local<'a, Value>> {
-        if !self.has(lock, key) {
-            return None;
-        }
-
+    /// Reads `key`, like JS `obj[key]`: an absent property is `undefined`,
+    /// and a throwing getter or Proxy trap is an `Err`.
+    pub fn get(&self, lock: &mut Lock, key: &str) -> crate::Result<Local<'a, Value>> {
         // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
-        unsafe {
-            let maybe_local =
-                ffi::local_object_get_property(lock.isolate().as_ffi(), &self.handle, key);
-            let opt_local: Option<ffi::Local> = maybe_local.into();
-            opt_local.map(|local| Local::from_ffi(lock.isolate(), local))
-        }
+        let local =
+            unsafe { ffi::local_object_get_property(lock.isolate().as_ffi(), &self.handle, key) }?;
+        // SAFETY: the handle was just created in the current HandleScope.
+        Ok(unsafe { Local::from_ffi(lock.isolate(), local) })
     }
 }
 

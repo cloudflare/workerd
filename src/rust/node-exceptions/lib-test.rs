@@ -9,6 +9,8 @@ use super::*;
 
 fn get_string(lock: &mut Lock, obj: &v8::Local<v8::Object>, key: &str) -> Option<String> {
     obj.get(lock, key)
+        .ok()
+        .filter(|value| !value.is_undefined())
         .and_then(|value| String::from_js(lock, value).ok())
 }
 

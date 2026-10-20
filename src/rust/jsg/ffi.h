@@ -187,7 +187,7 @@ Local local_function_call(
 // Local<Object>
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);
 bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key);
-kj::Maybe<Local> local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key);
+Local local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key);
 
 // Local<Array>
 Local local_new_array(Isolate* isolate, size_t length);

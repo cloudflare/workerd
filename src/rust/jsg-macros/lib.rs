@@ -85,10 +85,12 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         });
         field_extractions.push(quote! {
             let #field_name = {
-                let prop = obj.get(lock, #field_name_str)
-                    .ok_or_else(|| jsg::Error::new_type_error(
+                if !obj.has(lock, #field_name_str)? {
+                    return Err(jsg::Error::new_type_error(
                         format!("Missing property '{}'", #field_name_str)
-                    ))?;
+                    ));
+                }
+                let prop = obj.get(lock, #field_name_str)?;
                 <#field_type as jsg::FromJS>::from_js(lock, prop)?
             };
         });

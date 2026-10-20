@@ -35,14 +35,14 @@ fn objects_can_be_wrapped_and_unwrapped() {
         };
         let wrapped = instance.to_js(lock);
         let mut obj: v8::Local<'_, v8::Object> = wrapped.into();
-        assert!(obj.has(lock, "str"));
+        assert!(obj.has(lock, "str").unwrap());
         let str_value = obj.get(lock, "str");
         assert!(str_value.unwrap().is_string());
-        assert!(!obj.has(lock, "test"));
+        assert!(!obj.has(lock, "test").unwrap());
         let value = "value".to_local(lock);
         assert!(value.is_string());
         obj.set(lock, "test", value);
-        assert!(obj.has(lock, "test"));
+        assert!(obj.has(lock, "test").unwrap());
         Ok(())
     });
 }
@@ -59,19 +59,19 @@ fn struct_with_multiple_properties() {
         let wrapped = instance.to_js(lock);
         let obj: v8::Local<'_, v8::Object> = wrapped.into();
 
-        assert!(obj.has(lock, "name"));
-        assert!(obj.has(lock, "age"));
-        assert!(obj.has(lock, "active"));
+        assert!(obj.has(lock, "name").unwrap());
+        assert!(obj.has(lock, "age").unwrap());
+        assert!(obj.has(lock, "active").unwrap());
 
         let name_value = obj.get(lock, "name");
-        assert!(name_value.is_some());
+        assert!(name_value.is_ok());
         assert!(name_value.unwrap().is_string());
 
         let age_value = obj.get(lock, "age");
-        assert!(age_value.is_some());
+        assert!(age_value.is_ok());
 
         let active_value = obj.get(lock, "active");
-        assert!(active_value.is_some());
+        assert!(active_value.is_ok());
         assert!(active_value.unwrap().is_string());
         Ok(())
     });
@@ -98,23 +98,23 @@ fn empty_object_and_property_setting() {
     harness.run_in_context(|lock, _ctx| {
         let mut obj = lock.new_object();
 
-        assert!(!obj.has(lock, "nonexistent"));
-        assert!(obj.get(lock, "nonexistent").is_none());
+        assert!(!obj.has(lock, "nonexistent").unwrap());
+        assert!(obj.get(lock, "nonexistent").unwrap().is_undefined());
 
         let str_value = "hello".to_local(lock);
         obj.set(lock, "key1", str_value);
-        assert!(obj.has(lock, "key1"));
+        assert!(obj.has(lock, "key1").unwrap());
 
         let num_value = 100u32.to_local(lock);
         obj.set(lock, "key2", num_value);
-        assert!(obj.has(lock, "key2"));
+        assert!(obj.has(lock, "key2").unwrap());
 
         let val1 = obj.get(lock, "key1");
-        assert!(val1.is_some());
+        assert!(val1.is_ok());
         assert!(val1.unwrap().is_string());
 
         let val2 = obj.get(lock, "key2");
-        assert!(val2.is_some());
+        assert!(val2.is_ok());
         Ok(())
     });
 }
@@ -145,15 +145,15 @@ fn nested_object_properties() {
         let inner_wrapped = inner_instance.to_js(lock);
         outer.set(lock, "nested", inner_wrapped);
 
-        assert!(outer.has(lock, "nested"));
+        assert!(outer.has(lock, "nested").unwrap());
         let nested_val = outer.get(lock, "nested");
-        assert!(nested_val.is_some());
+        assert!(nested_val.is_ok());
 
         let nested_obj: v8::Local<'_, v8::Object> = nested_val.unwrap().into();
-        assert!(nested_obj.has(lock, "inner"));
+        assert!(nested_obj.has(lock, "inner").unwrap());
 
         let inner_val = nested_obj.get(lock, "inner");
-        assert!(inner_val.is_some());
+        assert!(inner_val.is_ok());
         assert!(inner_val.unwrap().is_string());
         Ok(())
     });
