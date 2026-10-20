@@ -2483,11 +2483,6 @@ impl<'a, T> MaybeLocal<'a, T> {
         unsafe { ffi::maybe_local_is_empty(&self.handle) }
     }
 
-    /// Returns the contained value as a `Local<T>`, or `None` if empty.
-    pub fn to_local(&self, lock: &mut crate::Lock) -> Option<Local<'a, T>> {
-        self.into_option(lock)
-    }
-
     /// Converts into `Option<Local<'a, T>>`.
     pub fn into_option(self, lock: &mut crate::Lock) -> Option<Local<'a, T>> {
         if self.handle.ptr == 0 {
@@ -2839,7 +2834,7 @@ impl<'a> Local<'a, Symbol> {
                 &self.handle,
             ))
         };
-        maybe.to_local(lock)
+        maybe.into_option(lock)
     }
 }
 
