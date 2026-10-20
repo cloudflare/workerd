@@ -2272,6 +2272,12 @@ Worker::Worker(kj::Own<const Script> scriptParam,
     currentSpan = maybeMakeSpan("lw:new_context"_kjc);
 
     jsg::JsContext<api::ServiceWorkerGlobalScope>* jsContext = nullptr;
+
+    // Counter the snapshot serializer callback (serializeInternalFields) writes through while
+    // V8 runs CreateBlob(); it outlives the handle scope below because createSnapshotBlob() checks
+    // it after that scope closes.
+    uint32_t snapshotBadTagFieldsCount = 0;
+
     // Create a stack-allocated handle scope.
     lock.withinHandleScope([&] {
       bool freshContext = false;
@@ -2295,7 +2301,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
       if (auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
           isolateBase.isPreparingSnapshot()) {
-        isolateBase.setSnapshotDefaultContext(context);
+        isolateBase.setSnapshotDefaultContext(context, &snapshotBadTagFieldsCount);
       }
 
       // The zygote context is never disposed through disposeContext() (see the snapshot step
@@ -2549,7 +2555,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       (*jsContext)->clear();
       const_cast<Script&>(*script).impl->moduleContext = kj::none;
       impl->context = kj::none;
-      isolateBase.createSnapshotBlob(kj::mv(contextGlobal), kj::mv(rustTemplateHandles));
+      isolateBase.createSnapshotBlob(
+          kj::mv(contextGlobal), kj::mv(rustTemplateHandles), &snapshotBadTagFieldsCount);
     }
   });
 }
