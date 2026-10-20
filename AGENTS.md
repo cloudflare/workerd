@@ -211,7 +211,8 @@ This project generally follows the [KJ Style Guide](https://github.com/capnproto
 - **Formatting**: `just format` runs clang-format + prettier + ruff + buildifier + rustfmt;
   use `just format <path>...` for specific files or `just format-head` for files changed since
   `HEAD~`
-- **Pre-commit hook**: Blocks `KJ_DBG` in staged code; runs format check
+- **Pre-commit hook**: `githooks/pre-commit`, enabled with `git config core.hooksPath githooks`;
+  blocks `KJ_DBG` in staged code and runs a format check (see `docs/development.md`)
 - **Commit discipline**: Split PRs into small commits; each must compile + pass tests; no fixup commits
 - **TypeScript**: Strict mode, `exactOptionalPropertyTypes`, private `#` syntax enforced, explicit return types
 
