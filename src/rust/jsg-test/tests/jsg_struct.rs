@@ -96,11 +96,11 @@ fn number_type_conversions() {
     harness.run_in_context(|lock, _ctx| {
         let byte_val: u8 = 42;
         let byte_local = byte_val.to_local(lock);
-        assert!(byte_local.has_value());
+        assert!(byte_local.is_number());
 
         let int_val: u32 = 12345;
         let int_local = int_val.to_local(lock);
-        assert!(int_local.has_value());
+        assert!(int_local.is_number());
         Ok(())
     });
 }
@@ -137,11 +137,11 @@ fn global_handle_conversion() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let local_str = "global test".to_local(lock);
-        assert!(local_str.has_value());
+        assert!(local_str.is_string());
 
         let global_str = local_str.to_global(lock);
         let local_again = global_str.as_local(lock);
-        assert!(local_again.has_value());
+        assert!(local_again.is_string());
         Ok(())
     });
 }

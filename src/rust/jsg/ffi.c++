@@ -148,10 +148,6 @@ bool local_eq(const Local& lhs, const Local& rhs) {
   return local_as_ref_from_ffi<v8::Value>(lhs) == local_as_ref_from_ffi<v8::Value>(rhs);
 }
 
-bool local_has_value(const Local& val) {
-  return *local_as_ref_from_ffi<v8::Value>(val) != nullptr;
-}
-
 bool local_is_string(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsString();
 }
