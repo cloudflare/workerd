@@ -256,15 +256,12 @@ impl Error {
         // SAFETY: isolate is valid and locked (guaranteed by caller); message
         // pointer and len describe a valid byte slice.
         unsafe {
-            v8::Local::from_ffi(
-                isolate,
-                v8::ffi::exception_create_from_bytes(
-                    isolate.as_ffi(),
-                    self.name,
-                    message.as_ptr(),
-                    len,
-                ),
-            )
+            v8::Local::from_ffi(v8::ffi::exception_create_from_bytes(
+                isolate.as_ffi(),
+                self.name,
+                message.as_ptr(),
+                len,
+            ))
         }
     }
 }
@@ -624,33 +621,18 @@ impl<'s> Lock<'s> {
     /// Returns `undefined`.
     pub fn undefined(&mut self) -> v8::Local<'s, v8::Value> {
         // SAFETY: Lock guarantees the isolate is valid and locked.
-        unsafe {
-            v8::Local::from_ffi(
-                self.isolate(),
-                v8::ffi::local_new_undefined(self.isolate().as_ffi()),
-            )
-        }
+        unsafe { v8::Local::from_ffi(v8::ffi::local_new_undefined(self.isolate().as_ffi())) }
     }
 
     /// Returns `null`.
     pub fn null(&mut self) -> v8::Local<'s, v8::Value> {
         // SAFETY: Lock guarantees the isolate is valid and locked.
-        unsafe {
-            v8::Local::from_ffi(
-                self.isolate(),
-                v8::ffi::local_new_null(self.isolate().as_ffi()),
-            )
-        }
+        unsafe { v8::Local::from_ffi(v8::ffi::local_new_null(self.isolate().as_ffi())) }
     }
 
     pub fn new_object(&mut self) -> v8::Local<'s, v8::Object> {
         // SAFETY: Lock guarantees the isolate is valid and locked
-        unsafe {
-            v8::Local::from_ffi(
-                self.isolate(),
-                v8::ffi::local_new_object(self.isolate().as_ffi()),
-            )
-        }
+        unsafe { v8::Local::from_ffi(v8::ffi::local_new_object(self.isolate().as_ffi())) }
     }
 
     /// Creates a JavaScript `Error` object with the given message.
@@ -718,15 +700,12 @@ impl<'s> Lock<'s> {
         // SAFETY: Lock guarantees the isolate is valid and locked; message.as_ptr()
         // and len describe a valid byte slice.
         let value: v8::Local<'s, v8::Value> = unsafe {
-            v8::Local::from_ffi(
-                self.isolate(),
-                v8::ffi::exception_create_from_bytes(
-                    self.isolate().as_ffi(),
-                    exception_type,
-                    message.as_ptr(),
-                    len,
-                ),
-            )
+            v8::Local::from_ffi(v8::ffi::exception_create_from_bytes(
+                self.isolate().as_ffi(),
+                exception_type,
+                message.as_ptr(),
+                len,
+            ))
         };
         // Error, TypeError, and RangeError are all JS objects.
         value.into()

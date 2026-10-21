@@ -348,7 +348,7 @@ impl<'s> ToJS<'s> for bool {
     fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
         let isolate = lock.isolate();
         // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
-        unsafe { v8::Local::from_ffi(isolate, v8::ffi::local_new_boolean(isolate.as_ffi(), self)) }
+        unsafe { v8::Local::from_ffi(v8::ffi::local_new_boolean(isolate.as_ffi(), self)) }
     }
 }
 
@@ -388,7 +388,7 @@ impl<'s> ToJS<'s> for &str {
     fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
         let isolate = lock.isolate();
         // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
-        unsafe { v8::Local::from_ffi(isolate, v8::ffi::local_new_string(isolate.as_ffi(), self)) }
+        unsafe { v8::Local::from_ffi(v8::ffi::local_new_string(isolate.as_ffi(), self)) }
     }
 }
 
@@ -423,12 +423,7 @@ impl<'s> ToJS<'s> for Number {
     fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
         let isolate = lock.isolate();
         // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
-        unsafe {
-            v8::Local::from_ffi(
-                isolate,
-                v8::ffi::local_new_number(isolate.as_ffi(), self.value()),
-            )
-        }
+        unsafe { v8::Local::from_ffi(v8::ffi::local_new_number(isolate.as_ffi(), self.value())) }
     }
 }
 
@@ -687,7 +682,7 @@ impl<'s, T: Type + FromJS<'s>> FromJS<'s> for NonCoercible<T> {
             let error_msg = format!(
                 "Expected a {} value but got {}",
                 T::class_name(),
-                value.type_of()
+                value.type_of(lock)
             );
             return Err(Error::new_type_error(error_msg));
         }
@@ -803,7 +798,7 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        let type_name = value.type_of();
+        let type_name = value.type_of(lock);
         Self::try_from_js(lock, value)?
             .ok_or_else(|| Error::new_type_error(format!("Expected Array but got {type_name}")))
     }
@@ -881,10 +876,11 @@ macro_rules! impl_typed_array {
                 let isolate = lock.isolate();
                 // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
                 unsafe {
-                    v8::Local::from_ffi(
-                        isolate,
-                        v8::ffi::$new_fn(isolate.as_ffi(), self.as_ptr(), self.len()),
-                    )
+                    v8::Local::from_ffi(v8::ffi::$new_fn(
+                        isolate.as_ffi(),
+                        self.as_ptr(),
+                        self.len(),
+                    ))
                 }
             }
         }
@@ -904,7 +900,7 @@ macro_rules! impl_typed_array {
                     return Err(Error::new_type_error(format!(
                         "Expected {} but got {}",
                         stringify!($marker),
-                        value.type_of()
+                        value.type_of(lock)
                     )));
                 }
                 // SAFETY: The isolate is locked and value is a valid V8 local handle of the correct TypedArray type.

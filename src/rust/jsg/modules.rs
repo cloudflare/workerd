@@ -43,9 +43,8 @@ pub fn add_builtin<F>(
         crate::catch_panic(scope, |lock| {
             // SAFETY: `add_builtin` was handed a value of `F`.
             let callback = unsafe { crate::scope::unit_value::<F>() };
-            let exports = v8::MaybeLocal::from(Some(callback(lock)));
             // SAFETY: the handle lives in the registry's HandleScope, which outlives this call.
-            unsafe { exports.into_ffi() }
+            unsafe { v8::Local::into_ffi_maybe(Some(callback(lock))) }
         })
         .unwrap_or_default()
     }

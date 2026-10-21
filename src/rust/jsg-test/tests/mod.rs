@@ -16,6 +16,7 @@ mod isolates;
 mod jsg_oneof;
 mod jsg_struct;
 mod local_cast;
+mod local_handle;
 mod name;
 mod non_coercible;
 mod option;

@@ -92,13 +92,13 @@ fn call_zero_args() {
 fn call_with_args() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let value = ctx.eval_raw(lock, "((a, b) => a + b)").unwrap();
+        let value = ctx.eval_raw(lock, "((a, b) => a - b)").unwrap();
         let func = value.try_as::<v8::Function>().unwrap();
 
         let a = Number::new(10.0).to_js(lock);
         let b = Number::new(32.0).to_js(lock);
         let result = func.call::<Number>(lock, None::<v8::Local<v8::Value>>, &[a, b])?;
-        assert!((result.value() - 42.0).abs() < f64::EPSILON);
+        assert!((result.value() + 22.0).abs() < f64::EPSILON);
         Ok(())
     });
 }

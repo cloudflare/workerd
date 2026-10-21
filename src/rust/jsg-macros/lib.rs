@@ -154,7 +154,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 }
                 if !value.is_object() {
                     return Err(jsg::Error::new_type_error(
-                        format!("Expected object but got {}", value.type_of())
+                        format!("Expected object but got {}", value.type_of(lock))
                     ));
                 }
                 let obj: jsg::v8::Local<'s, jsg::v8::Object> = value.into();
@@ -635,7 +635,7 @@ pub fn jsg_oneof(_attr: TokenStream, item: TokenStream) -> TokenStream {
             }
 
             fn from_js(lock: &mut jsg::Lock<'s>, value: jsg::v8::Local<'s, jsg::v8::Value>) -> Result<Self::ResultType, jsg::Error> {
-                let type_name = value.type_of();
+                let type_name = value.type_of(lock);
                 Self::try_from_js(lock, value)?.ok_or_else(|| {
                     jsg::Error::new_type_error({ #error_msg })
                 })

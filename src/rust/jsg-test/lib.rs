@@ -19,12 +19,15 @@ mod ffi {
         include!("workerd/rust/jsg/ffi.h");
         type Isolate = jsg::v8::ffi::Isolate;
         type Local = jsg::v8::ffi::Local;
+        type MaybeLocal = jsg::v8::ffi::MaybeLocal;
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone, Copy)]
     struct EvalResult {
         success: bool,
-        value: KjMaybe<Local>,
+        /// The completion value, or the exception if `success` is false; empty if evaluation
+        /// failed without one.
+        value: MaybeLocal,
     }
 
     enum GcType {
@@ -65,6 +68,16 @@ mod ffi {
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
         pub unsafe fn create_cpp_tagged_object(isolate: *mut Isolate) -> Local;
+
+        /// Returns an empty `v8::MaybeLocal`.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub fn empty_maybe_local() -> MaybeLocal;
+
+        /// Returns whether C++ sees `value` as an empty `v8::MaybeLocal`.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub fn cpp_sees_empty_maybe_local(value: MaybeLocal) -> bool;
 
     }
 }
@@ -141,28 +154,17 @@ impl EvalContext<'_> {
     }
 
     fn raw_result<'s>(
-        lock: &jsg::Lock<'s>,
+        _lock: &jsg::Lock<'s>,
         result: ffi::EvalResult,
     ) -> Result<v8::Local<'s, v8::Value>, EvalError<'s>> {
-        let opt_local: Option<v8::ffi::Local> = result.value.into();
-        let isolate = lock.isolate();
-
-        if result.success {
-            match opt_local {
-                // SAFETY: the C++ harness evaluates in `lock`'s HandleScope, so the completion
-                // value lives in scope `'s`.
-                Some(local) => Ok(unsafe { v8::Local::from_ffi(isolate, local) }),
-                None => unreachable!(),
-            }
-        } else {
-            match opt_local {
-                Some(local) => {
-                    // SAFETY: as above, for the exception value.
-                    let value = unsafe { v8::Local::from_ffi(isolate, local) };
-                    Err(EvalError::Exception(value))
-                }
-                None => Err(EvalError::EvalFailed),
-            }
+        // SAFETY: the C++ harness evaluates in `lock`'s HandleScope, so the completion value or
+        // exception lives in scope `'s`.
+        let value = unsafe { v8::Local::from_ffi_maybe(result.value) };
+        match (result.success, value) {
+            (true, Some(value)) => Ok(value),
+            (true, None) => unreachable!(),
+            (false, Some(exception)) => Err(EvalError::Exception(exception)),
+            (false, None) => Err(EvalError::EvalFailed),
         }
     }
 
@@ -280,7 +282,7 @@ impl Harness {
         // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
         unsafe {
             let local = ffi::create_cpp_tagged_object(isolate.as_ffi());
-            v8::Local::from_ffi(isolate, local)
+            v8::Local::from_ffi(local)
         }
     }
 }
