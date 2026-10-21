@@ -9,18 +9,20 @@ use jsg::ExceptionType;
 use jsg::FromJS;
 
 /// Evaluates `expr` and converts it to `T`, as an argument would be.
-fn convert<T: FromJS>(
-    lock: &mut jsg::Lock,
+fn convert<'s, T: FromJS<'s>>(
+    lock: &mut jsg::Lock<'s>,
     ctx: &crate::EvalContext<'_>,
     expr: &str,
 ) -> Result<T::ResultType, jsg::Error> {
-    let value = ctx.eval_raw(expr).expect("expression should evaluate");
+    let value = ctx
+        .eval_raw(lock, expr)
+        .expect("expression should evaluate");
     T::from_js(lock, value)
 }
 
 /// Asserts that converting `expr` to `T` is a `TypeError` with `message`.
-fn assert_type_error<T: FromJS>(
-    lock: &mut jsg::Lock,
+fn assert_type_error<'s, T: FromJS<'s>>(
+    lock: &mut jsg::Lock<'s>,
     ctx: &crate::EvalContext<'_>,
     expr: &str,
     message: &str,

@@ -9,22 +9,50 @@
 
 use std::pin::Pin;
 
-pub use ffi::ModuleType;
-
+use crate::CallbackScope;
+use crate::Lock;
+use crate::UnitType;
+use crate::v8;
 use crate::v8::ffi;
+pub use crate::v8::ffi::ModuleType;
 
 /// Registers a builtin module with the given specifier and module type.
 ///
-/// The callback is invoked when JavaScript imports the module, receiving the isolate pointer
-/// and returning a V8 Local handle to the module's exports object.
-pub fn add_builtin(
+/// `callback` produces the module's exports when JavaScript imports it. It runs in the module
+/// registry's current scope, so it receives a [`Lock`] for that scope and returns a handle
+/// branded with the same scope. It must capture nothing: C++ calls it through a plain function
+/// pointer, so there is nowhere to keep captured state (see [`UnitType`]).
+pub fn add_builtin<F>(
     registry: Pin<&mut ffi::ModuleRegistry>,
     specifier: &str,
-    callback: fn(*mut ffi::Isolate) -> ffi::Local,
+    callback: F,
     module_type: ModuleType,
-) {
-    // SAFETY: registry is a valid pinned ModuleRegistry; specifier and callback are valid.
+) where
+    F: UnitType + for<'s> Fn(&mut Lock<'s>) -> v8::Local<'s, v8::Value>,
+{
+    // Called only by the C++ module registry, while `isolate` is locked, a context is entered
+    // and a `HandleScope` is open that outlives the call. It is not an `unsafe fn` because cxx
+    // passes function pointers as safe `fn`s, and no other code can name it. Returns an empty
+    // handle if `F` panicked, with the exception pending.
+    fn trampoline<F>(isolate: *mut ffi::Isolate) -> ffi::MaybeLocal
+    where
+        F: UnitType + for<'s> Fn(&mut Lock<'s>) -> v8::Local<'s, v8::Value>,
+    {
+        // SAFETY: see above.
+        let scope = std::pin::pin!(unsafe { CallbackScope::new(isolate) });
+        crate::catch_panic(scope, |lock| {
+            // SAFETY: `add_builtin` was handed a value of `F`.
+            let callback = unsafe { crate::scope::unit_value::<F>() };
+            let exports = v8::MaybeLocal::from(Some(callback(lock)));
+            // SAFETY: the handle lives in the registry's HandleScope, which outlives this call.
+            unsafe { exports.into_ffi() }
+        })
+        .unwrap_or_default()
+    }
+
+    let _ = callback;
+    // SAFETY: the registry calls `trampoline` as its contract requires.
     unsafe {
-        ffi::register_add_builtin_module(registry, specifier, callback, module_type);
+        ffi::register_add_builtin_module(registry, specifier, trampoline::<F>, module_type);
     }
 }

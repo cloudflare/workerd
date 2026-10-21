@@ -11,7 +11,7 @@ use jsg::v8::Local;
 // Helpers
 // =============================================================================
 
-fn str_to_name<'a>(lock: &mut jsg::Lock, s: &str) -> Local<'a, v8::Name> {
+fn str_to_name<'a>(lock: &mut jsg::Lock<'a>, s: &str) -> Local<'a, v8::Name> {
     let js_str = v8::String::new_from_str(lock, s).unwrap(lock);
     js_str.into()
 }

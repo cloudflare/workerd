@@ -125,7 +125,7 @@ impl<R: Resource> Rc<R> {
     /// the `this` object from the `FunctionTemplate`'s `InstanceTemplate`;
     /// this method attaches the `Wrappable` to it so that instance methods
     /// can resolve the resource via `resolve_resource`.
-    pub fn attach_to_this(&self, info: &mut v8::FunctionCallbackInfo) {
+    pub fn attach_to_this(&self, info: &mut v8::FunctionCallbackInfo<'_>) {
         self.wrappable.attach_to_this(info);
     }
 
@@ -164,31 +164,31 @@ impl<R: Resource> Drop for Rc<R> {
     }
 }
 
-impl<R: Resource + 'static> ToJS for Rc<R> {
-    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
+impl<'s, R: Resource + 'static> ToJS<'s> for Rc<R> {
+    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
         wrap(lock, self)
     }
 }
 
-impl<R: Resource + 'static> FromJS for Rc<R> {
+impl<'s, R: Resource + 'static> FromJS<'s> for Rc<R> {
     type ResultType = Self;
 
     fn type_name() -> String {
         R::class_name().to_owned()
     }
 
-    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self, Error> {
+    fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self, Error> {
         let type_name = value.type_of();
         Self::try_from_js(lock, value)?.ok_or_else(|| {
             Error::new_type_error(format!("expected {}, got {type_name}", R::class_name()))
         })
     }
 
-    fn try_from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Option<Self>, Error> {
-        let Some(mut wrappable) = v8::WrappableRc::from_js(lock.isolate(), value) else {
+    fn try_from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Option<Self>, Error> {
+        let Some(mut wrappable) = v8::WrappableRc::from_js(lock, value) else {
             return Ok(None);
         };
         let Some(resource_ptr) = wrappable.resolve_resource::<R>() else {
@@ -366,29 +366,43 @@ impl<R: Resource> Default for Weak<R> {
 /// **Ownership**: The `Rc` is consumed. The JS wrapper keeps the `Wrappable`
 /// alive via `CppgcShim`. When the JS object is garbage collected and all Rust
 /// `Rc`s are dropped, the resource is destroyed.
+///
+/// # Panics
+/// Panics if the resource already has a JavaScript wrapper in another isolate. The `Rc` is
+/// leaked in that case.
 #[expect(
-    clippy::needless_pass_by_value,
-    reason = "the `Rc` is consumed: the JS wrapper takes over the reference"
+    clippy::panic,
+    reason = "using a wrapper in another isolate would mix the isolates' heaps"
 )]
-pub fn wrap<'a, R: Resource + 'static>(
-    lock: &mut Lock,
+pub fn wrap<'s, R: Resource + 'static>(
+    lock: &mut Lock<'s>,
     resource: Rc<R>,
-) -> v8::Local<'a, v8::Value> {
-    let isolate = lock.isolate();
-    let constructor = lock.realm().resources.get_constructor::<R>(isolate);
-
-    resource.wrappable.to_js(isolate, constructor)
+) -> v8::Local<'s, v8::Value> {
+    if let Some(wrapper) = resource.wrappable.to_js::<R>(lock) {
+        return wrapper;
+    }
+    // Dropping `resource` here would release its strong reference on a wrapper of another
+    // isolate, which needs that isolate's lock. It is leaked in a box instead, which keeps
+    // pointers to the resource and its Wrappable for LeakSanitizer to follow.
+    let leaked = Box::leak(Box::new(resource));
+    // SAFETY: `leaked` is a live heap allocation.
+    unsafe { v8::ffi::ignore_leak(std::ptr::from_mut(leaked).expose_provenance()) };
+    panic!("attempt to wrap a resource in an isolate other than the one it was wrapped in");
 }
 
 /// Returns the constructor function for a resource type as a `Local<Function>`.
 ///
 /// Lazily creates and caches the `FunctionTemplate` in the `Realm` on first call.
 /// The returned function can be exposed as a global (e.g., `ctx.set_global("MyClass", func)`).
-pub fn function_template_of<'a, R: Resource + 'static>(
-    lock: &mut Lock,
-) -> v8::Local<'a, v8::Function> {
+pub fn function_template_of<'s, R: Resource + 'static>(
+    lock: &mut Lock<'s>,
+) -> v8::Local<'s, v8::Function> {
     let isolate = lock.isolate();
-    let constructor = lock.realm().resources.get_constructor::<R>(isolate);
+    let isolate_id = lock.isolate_id();
+    let constructor = lock
+        .realm()
+        .resources
+        .get_constructor::<R>(isolate, isolate_id);
     // SAFETY: `isolate` is valid and locked (Lock invariant). `constructor` is a valid
     // Global<FunctionTemplate> cached in the Realm. Inlined from `as_local_function` to
     // avoid re-borrowing `self` while `constructor` holds an immutable borrow through `realm()`.
@@ -485,24 +499,26 @@ pub struct Resources {
 
 impl Resources {
     /// Gets or creates the cached `FunctionTemplate` for a resource type.
-    pub fn get_constructor<R: Resource + 'static>(
+    pub(crate) fn get_constructor<R: Resource + 'static>(
         &mut self,
         isolate: v8::IsolatePtr,
+        isolate_id: crate::scope::IsolateId,
     ) -> &v8::Global<v8::FunctionTemplate> {
         self.templates
             .entry(TypeId::of::<R>())
-            .or_insert_with(|| Self::create_resource_constructor::<R>(isolate))
+            .or_insert_with(|| Self::create_resource_constructor::<R>(isolate, isolate_id))
     }
 
     /// Creates a new V8 `FunctionTemplate` for resource type `R` via the C++ FFI.
     fn create_resource_constructor<R: Resource>(
         isolate: v8::IsolatePtr,
+        isolate_id: crate::scope::IsolateId,
     ) -> v8::Global<v8::FunctionTemplate> {
         // SAFETY: Caller guarantees the isolate is valid and locked.
-        unsafe {
+        let handle = unsafe {
             v8::ffi::create_resource_template(isolate.as_ffi(), &get_resource_descriptor::<R>())
-                .into()
-        }
+        };
+        v8::Global::from_ffi_in(handle, isolate_id)
     }
 
     /// Drains every cached resource-template handle, transferring ownership of each

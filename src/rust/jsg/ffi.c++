@@ -19,6 +19,10 @@
 
 #include <memory>
 
+#if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+#include <sanitizer/lsan_interface.h>
+#endif
+
 #if V8_MAJOR_VERSION >= 15
 #define Utf8LengthV2 Utf8Length
 #define WriteV2 Write
@@ -613,10 +617,14 @@ DEFINE_TYPED_ARRAY_NEW(bigint64_array, BigInt64Array, int64_t)
 DEFINE_TYPED_ARRAY_NEW(biguint64_array, BigUint64Array, uint64_t)
 
 // Wrappers
-Local wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl) {
+MaybeLocal wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl) {
+  if (wrappable->hasWrapper() && wrappable->getIsolate() != isolate) {
+    return MaybeLocal{.ptr = 0};
+  }
+
   // Check if already wrapped
   KJ_IF_SOME(handle, wrappable->tryGetHandle(isolate)) {
-    return to_ffi(v8::Local<v8::Value>::Cast(handle));
+    return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(handle));
   }
 
   auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
@@ -634,7 +642,7 @@ Local wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global&
       tagAddress,
       static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
 
-  return to_ffi(v8::Local<v8::Value>::Cast(object));
+  return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(object));
 }
 
 void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args) {
@@ -1201,8 +1209,18 @@ void isolate_terminate_execution(Isolate* isolate) {
   ::workerd::jsg::IsolateBase::from(isolate).terminateExecution();
 }
 
+void ignore_leak(size_t ptr) {
+#if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+  __lsan_ignore_object(reinterpret_cast<const void*>(ptr));
+#endif
+}
+
 bool isolate_is_locked(Isolate* isolate) {
   return v8::Locker::IsLocked(isolate);
+}
+
+bool isolate_in_context(Isolate* isolate) {
+  return isolate->InContext();
 }
 
 }  // namespace workerd::rust::jsg

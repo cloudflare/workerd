@@ -82,7 +82,7 @@ fn missing_required_argument() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let args = jsg::Rc::new(Args {}).to_js(lock);
-        ctx.set_global("args", args);
+        ctx.set_global(lock, "args", args);
         assert_eq!(
             error(lock, ctx, "args.takeCount()"),
             "TypeError: Failed to execute 'takeCount' on 'Args': parameter 1 is not of type \
@@ -110,7 +110,7 @@ fn top_level_type_mismatch() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let args = jsg::Rc::new(Args {}).to_js(lock);
-        ctx.set_global("args", args);
+        ctx.set_global(lock, "args", args);
         assert_eq!(
             error(lock, ctx, "args.takePoint(5)"),
             "TypeError: Failed to execute 'takePoint' on 'Args': parameter 1 is not of type \
@@ -130,7 +130,7 @@ fn deeper_errors_are_kept() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let args = jsg::Rc::new(Args {}).to_js(lock);
-        ctx.set_global("args", args);
+        ctx.set_global(lock, "args", args);
         let negative = "TypeError: The value cannot be converted because it is negative and \
                         this API expects a positive number.";
         assert_eq!(error(lock, ctx, "args.takeCount(-1)"), negative);

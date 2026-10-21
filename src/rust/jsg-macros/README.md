@@ -47,6 +47,9 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
   `#[jsg_method(name = "jsName")]`.
 - The first typed parameter may be `&mut Lock` / `&mut jsg::Lock` to receive the
   isolate lock directly — it is not exposed as a JavaScript argument.
+- To take or return handles, name the callback's scope:
+  `fn f<'s>(&self, lock: &mut Lock<'s>, v: Local<'s, Value>) -> Local<'s, Value>`. The
+  generated callback ties `'s` to its own scope.
 
 ```rust
 #[jsg_resource]

@@ -12,6 +12,7 @@ mod function;
 mod gc;
 mod harness;
 mod integer;
+mod isolates;
 mod jsg_oneof;
 mod jsg_struct;
 mod local_cast;

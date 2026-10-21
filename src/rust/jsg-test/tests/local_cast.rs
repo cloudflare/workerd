@@ -189,7 +189,7 @@ fn biguint64_array_into_typed_array() {
 fn function_into_object() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let func_val = ctx.eval_raw("(function myFunc() {})").unwrap();
+        let func_val = ctx.eval_raw(lock, "(function myFunc() {})").unwrap();
         assert!(func_val.is_function());
         let func = func_val.try_as::<v8::Function>().unwrap();
         let obj: v8::Local<v8::Object> = func.into();
@@ -207,7 +207,7 @@ fn function_into_object() {
 fn array_into_object() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let arr_val = ctx.eval_raw("[1, 2, 3]").unwrap();
+        let arr_val = ctx.eval_raw(lock, "[1, 2, 3]").unwrap();
         assert!(arr_val.is_array());
         let arr = arr_val.try_as::<v8::Array>().unwrap();
         assert_eq!(arr.len(), 3);
@@ -254,7 +254,7 @@ fn function_as_object_property_access() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let func_val = ctx
-            .eval_raw("var f = () => {}; f.custom = 'hello'; f")
+            .eval_raw(lock, "var f = () => {}; f.custom = 'hello'; f")
             .unwrap();
         let func = func_val.try_as::<v8::Function>().unwrap();
         let obj: v8::Local<v8::Object> = func.into();
@@ -272,7 +272,7 @@ fn function_as_object_property_access() {
 fn array_as_object_property_access() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let arr_val = ctx.eval_raw("[10, 20, 30]").unwrap();
+        let arr_val = ctx.eval_raw(lock, "[10, 20, 30]").unwrap();
         let arr = arr_val.try_as::<v8::Array>().unwrap();
         let obj: v8::Local<v8::Object> = arr.into();
 
@@ -406,7 +406,9 @@ fn biguint64_array_value_roundtrip() {
 fn function_object_roundtrip() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let func_val = ctx.eval_raw("(function namedFn() { return 42; })").unwrap();
+        let func_val = ctx
+            .eval_raw(lock, "(function namedFn() { return 42; })")
+            .unwrap();
         assert!(func_val.is_function());
         let func = func_val.try_as::<v8::Function>().unwrap();
         let obj: v8::Local<v8::Object> = func.into();
@@ -417,7 +419,7 @@ fn function_object_roundtrip() {
         assert_eq!(name, "namedFn");
         // Roundtrip back and verify it's still callable
         let back: v8::Local<v8::Function> = obj.into();
-        let result = back.call::<jsg::Number, v8::Local<v8::Value>>(lock, None, &[])?;
+        let result = back.call::<jsg::Number>(lock, None, &[])?;
         assert!((result.value() - 42.0).abs() < f64::EPSILON);
         Ok(())
     });
@@ -428,7 +430,7 @@ fn function_object_roundtrip() {
 fn array_object_roundtrip() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let arr_val = ctx.eval_raw("[10, 20, 30]").unwrap();
+        let arr_val = ctx.eval_raw(lock, "[10, 20, 30]").unwrap();
         assert!(arr_val.is_array());
         let arr = arr_val.try_as::<v8::Array>().unwrap();
         assert_eq!(arr.len(), 3);
@@ -450,8 +452,10 @@ fn array_object_roundtrip() {
 #[test]
 fn data_view_cannot_cast_to_typed_array() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("new DataView(new ArrayBuffer(8))").unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx
+            .eval_raw(lock, "new DataView(new ArrayBuffer(8))")
+            .unwrap();
         assert!(val.is_array_buffer_view());
         assert!(!val.is_typed_array());
 

@@ -20,7 +20,7 @@ fn transcodes_into_a_narrowed_uint8_array() {
         let array =
             transcode_impl(lock, source, ffi::Encoding::Utf8, ffi::Encoding::Ascii).unwrap();
         assert_eq!(array.len(), 1);
-        assert_eq!(array.as_slice(), b"?");
+        assert_eq!(array.as_slice(lock), b"?");
         Ok(())
     });
 }
@@ -43,7 +43,7 @@ fn full_length_result_is_not_narrowed() {
         // conversion fills the destination exactly.
         let array =
             transcode_impl(lock, b"Hi", ffi::Encoding::Latin1, ffi::Encoding::Utf16Le).unwrap();
-        assert_eq!(array.as_slice(), &[0x48, 0x00, 0x69, 0x00]);
+        assert_eq!(array.as_slice(lock), &[0x48, 0x00, 0x69, 0x00]);
         Ok(())
     });
 }

@@ -11,7 +11,7 @@ use jsg::v8::Value;
 use jsg::v8::WriteFlags;
 
 // Convenience: create a Local<String> from a UTF-8 str literal.
-fn from_utf8<'a>(lock: &mut jsg::Lock, s: &str) -> Local<'a, JsString> {
+fn from_utf8<'a>(lock: &mut jsg::Lock<'a>, s: &str) -> Local<'a, JsString> {
     JsString::new_from_utf8(lock, s.as_bytes()).unwrap(lock)
 }
 
@@ -479,7 +479,9 @@ fn utf8_value_as_ptr_is_non_null() {
 fn utf8_value_coerces_number_to_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let val = ctx.eval_raw("42").map_err(|e| e.unwrap_jsg_err(lock))?;
+        let val = ctx
+            .eval_raw(lock, "42")
+            .map_err(|e| e.unwrap_jsg_err(lock))?;
         let utf8 = Utf8Value::new(lock, &val);
         assert_eq!(utf8.as_str(), Some("42"));
         Ok(())

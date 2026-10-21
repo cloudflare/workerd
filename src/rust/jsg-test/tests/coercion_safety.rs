@@ -40,7 +40,9 @@ fn string_from_hostile_values_returns_err() {
             "new Proxy({}, { get() { throw new Error('trap'); } })",
         ];
         for expr in hostile {
-            let value = ctx.eval_raw(expr).expect("expression should evaluate");
+            let value = ctx
+                .eval_raw(lock, expr)
+                .expect("expression should evaluate");
             let result = <String as FromJS>::from_js(lock, value);
             assert!(
                 result.is_err(),
@@ -57,7 +59,7 @@ fn string_from_throwing_tostring_maps_to_type_error() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx
-            .eval_raw("({ toString() { throw new TypeError('boom'); } })")
+            .eval_raw(lock, "({ toString() { throw new TypeError('boom'); } })")
             .expect("expression should evaluate");
         let err = <String as FromJS>::from_js(lock, value)
             .expect_err("coercion failure should be an Err");
@@ -77,7 +79,7 @@ fn string_from_lone_surrogate_is_lossy_not_abort() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx
-            .eval_raw("'\\uD800'")
+            .eval_raw(lock, "'\\uD800'")
             .expect("expression should evaluate");
         let s = <String as FromJS>::from_js(lock, value)
             .expect("lone surrogate should decode lossily, not error");
@@ -85,7 +87,7 @@ fn string_from_lone_surrogate_is_lossy_not_abort() {
 
         // A surrogate embedded in otherwise valid text.
         let value = ctx
-            .eval_raw("'a\\uD800b'")
+            .eval_raw(lock, "'a\\uD800b'")
             .expect("expression should evaluate");
         let s = <String as FromJS>::from_js(lock, value).expect("should decode lossily");
         assert_eq!(s, "a\u{FFFD}b");
@@ -104,7 +106,9 @@ fn number_from_hostile_values_returns_err() {
             "({ valueOf() { throw new TypeError('no number'); } })",
         ];
         for expr in hostile {
-            let value = ctx.eval_raw(expr).expect("expression should evaluate");
+            let value = ctx
+                .eval_raw(lock, expr)
+                .expect("expression should evaluate");
             let result = <Number as FromJS>::from_js(lock, value);
             assert!(
                 result.is_err(),
@@ -120,7 +124,7 @@ fn number_from_hostile_values_returns_err() {
 fn integer_from_symbol_returns_err() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let value = ctx.eval_raw("Symbol('s')").expect("should evaluate");
+        let value = ctx.eval_raw(lock, "Symbol('s')").expect("should evaluate");
         let result = <u32 as FromJS>::from_js(lock, value);
         assert!(result.is_err(), "u32::from_js(Symbol) should be Err");
         Ok(())
@@ -134,7 +138,7 @@ fn typed_array_from_wrong_type_returns_err() {
     harness.run_in_context(|lock, ctx| {
         // Not a Uint8Array: a plain array, a number, and a Symbol.
         for expr in ["[1, 2, 3]", "42", "Symbol('s')"] {
-            let value = ctx.eval_raw(expr).expect("should evaluate");
+            let value = ctx.eval_raw(lock, expr).expect("should evaluate");
             let result = <Vec<u8> as FromJS>::from_js(lock, value);
             assert!(
                 result.is_err(),
@@ -155,6 +159,7 @@ fn array_iterate_throwing_element_getter_returns_err() {
     harness.run_in_context(|lock, ctx| {
         let value = ctx
             .eval_raw(
+                lock,
                 "(() => { \
                      const arr = [1, 2, 3]; \
                      Object.defineProperty(arr, 1, { get() { throw new RangeError('trap'); } }); \
@@ -173,7 +178,7 @@ fn array_iterate_throwing_element_getter_returns_err() {
         );
 
         // The isolate must still be usable afterwards.
-        let ok = ctx.eval_raw("'still fine'").expect("should evaluate");
+        let ok = ctx.eval_raw(lock, "'still fine'").expect("should evaluate");
         let s = <String as FromJS>::from_js(lock, ok).expect("should coerce cleanly");
         assert_eq!(s, "still fine");
         Ok(())
@@ -185,11 +190,11 @@ fn array_iterate_throwing_element_getter_returns_err() {
 fn coercion_failure_does_not_poison_isolate() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let hostile = ctx.eval_raw("Symbol('s')").expect("should evaluate");
+        let hostile = ctx.eval_raw(lock, "Symbol('s')").expect("should evaluate");
         assert!(<String as FromJS>::from_js(lock, hostile).is_err());
 
         // A subsequent, well-formed coercion still works.
-        let ok = ctx.eval_raw("'still fine'").expect("should evaluate");
+        let ok = ctx.eval_raw(lock, "'still fine'").expect("should evaluate");
         let s = <String as FromJS>::from_js(lock, ok).expect("should coerce cleanly");
         assert_eq!(s, "still fine");
         Ok(())
@@ -249,10 +254,11 @@ impl ReentrantResource {
 fn string_from_tostring_side_effects_are_observed() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        ctx.eval_raw("globalThis.__sideEffect = 0;")
+        ctx.eval_raw(lock, "globalThis.__sideEffect = 0;")
             .expect("should evaluate");
         let value = ctx
             .eval_raw(
+                lock,
                 "({ toString() { \
                      globalThis.__sideEffect += 1; \
                      return 'computed-' + globalThis.__sideEffect; \
@@ -274,10 +280,11 @@ fn string_from_tostring_side_effects_are_observed() {
 fn number_from_valueof_side_effects_are_observed() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        ctx.eval_raw("globalThis.__sideEffect = 0;")
+        ctx.eval_raw(lock, "globalThis.__sideEffect = 0;")
             .expect("should evaluate");
         let value = ctx
             .eval_raw(
+                lock,
                 "({ valueOf() { \
                      globalThis.__sideEffect += 1; \
                      return 41 + globalThis.__sideEffect; \
@@ -306,10 +313,11 @@ fn string_coercion_reentrant_into_rust_resource_method() {
             call_count: Cell::new(0),
         });
         let wrapped = resource.to_js(lock);
-        ctx.set_global("resource", wrapped);
+        ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
             .eval_raw(
+                lock,
                 "({ toString() { \
                      return resource.echo({ toString() { return 'inner'; } }); \
                  } })",
@@ -334,10 +342,11 @@ fn number_coercion_reentrant_into_rust_resource_method() {
             call_count: Cell::new(0),
         });
         let wrapped = resource.to_js(lock);
-        ctx.set_global("resource", wrapped);
+        ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
             .eval_raw(
+                lock,
                 "({ valueOf() { \
                      return resource.double({ valueOf() { return 21; } }); \
                  } })",
@@ -364,10 +373,11 @@ fn string_coercion_handles_deeply_nested_reentrancy() {
             call_count: Cell::new(0),
         });
         let wrapped = resource.to_js(lock);
-        ctx.set_global("resource", wrapped);
+        ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
             .eval_raw(
+                lock,
                 "({ toString() { \
                      return resource.echo({ toString() { \
                          return resource.echo({ toString() { \
@@ -399,10 +409,13 @@ fn string_coercion_reentrant_panic_is_catchable_not_abort() {
             call_count: Cell::new(0),
         });
         let wrapped = resource.to_js(lock);
-        ctx.set_global("resource", wrapped);
+        ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
-            .eval_raw("({ toString() { resource.panicNow(); return 'unreachable'; } })")
+            .eval_raw(
+                lock,
+                "({ toString() { resource.panicNow(); return 'unreachable'; } })",
+            )
             .expect("expression should evaluate");
 
         let result = <String as FromJS>::from_js(lock, value);
@@ -423,10 +436,10 @@ fn number_coercion_reentrant_panic_is_catchable_not_abort() {
             call_count: Cell::new(0),
         });
         let wrapped = resource.to_js(lock);
-        ctx.set_global("resource", wrapped);
+        ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
-            .eval_raw("({ valueOf() { resource.panicNow(); return 0; } })")
+            .eval_raw(lock, "({ valueOf() { resource.panicNow(); return 0; } })")
             .expect("expression should evaluate");
 
         let result = <Number as FromJS>::from_js(lock, value);
@@ -450,10 +463,13 @@ fn reentrant_panic_during_coercion_does_not_poison_isolate() {
             call_count: Cell::new(0),
         });
         let wrapped = resource.to_js(lock);
-        ctx.set_global("resource", wrapped);
+        ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
-            .eval_raw("({ toString() { resource.panicNow(); return 'unreachable'; } })")
+            .eval_raw(
+                lock,
+                "({ toString() { resource.panicNow(); return 'unreachable'; } })",
+            )
             .expect("expression should evaluate");
         assert!(<String as FromJS>::from_js(lock, value).is_err());
         Ok(())
@@ -461,7 +477,7 @@ fn reentrant_panic_during_coercion_does_not_poison_isolate() {
 
     // A subsequent, independent context on the same isolate still works.
     harness.run_in_context(|lock, ctx| {
-        let ok = ctx.eval_raw("'still fine'").expect("should evaluate");
+        let ok = ctx.eval_raw(lock, "'still fine'").expect("should evaluate");
         let s = <String as FromJS>::from_js(lock, ok).expect("should coerce cleanly");
         assert_eq!(s, "still fine");
         Ok(())
@@ -474,7 +490,7 @@ fn object_get_from_throwing_getter_returns_err() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx
-            .eval_raw("({ get x() { throw new RangeError('getter'); } })")
+            .eval_raw(lock, "({ get x() { throw new RangeError('getter'); } })")
             .expect("expression should evaluate");
         let obj: jsg::v8::Local<'_, jsg::v8::Object> = value.into();
         let err = obj
@@ -493,7 +509,10 @@ fn object_has_from_throwing_proxy_returns_err() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx
-            .eval_raw("new Proxy({}, { has() { throw new TypeError('trap'); } })")
+            .eval_raw(
+                lock,
+                "new Proxy({}, { has() { throw new TypeError('trap'); } })",
+            )
             .expect("expression should evaluate");
         let obj: jsg::v8::Local<'_, jsg::v8::Object> = value.into();
         let err = obj

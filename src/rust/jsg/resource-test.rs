@@ -11,7 +11,7 @@ impl Type for Bad {
         "Bad"
     }
 
-    fn is_exact(_value: &v8::Local<v8::Value>) -> bool {
+    fn is_exact(_value: v8::Local<'_, v8::Value>) -> bool {
         false
     }
 }

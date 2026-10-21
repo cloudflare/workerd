@@ -1,0 +1,9 @@
+load("//:build/wd_rust_compile_test.bzl", "wd_rust_compile_test")
+
+# Snippets that must not compile against jsg (each annotates the errors it expects) and snippets
+# that must (no annotations). See build/wd_rust_compile_test.bzl.
+wd_rust_compile_test(
+    name = "jsg",
+    srcs = glob(["*.rs"]),
+    deps = ["//src/rust/jsg"],
+)

@@ -109,19 +109,52 @@ let r: jsg::Rc<MyResource> = jsg::Rc::from_js(&mut lock, js_val)?;
 
 ## V8 Handle Types
 
-### `Local<'a, T>`
+### `Lock<'s>` and handle scopes
 
-A stack-allocated handle to a V8 value. The lifetime `'a` is tied to the `HandleScope` that created it.
+`Lock<'s>` stands for "the isolate is locked and the `HandleScope` `'s` is the innermost open
+one". Locks are only handed out as `&'s mut Lock<'s>`, borrowed from the pinned storage of
+a `jsg::CallbackScope`, so no handle created through one (`Local<'s, _>`) can outlive the
+scope. There is no public constructor; locks come from:
+
+- `#[jsg_method]` / `#[jsg_constructor]` callbacks, one lock per callback. They are built
+  with `jsg::function_callback`, which turns a closure that captures nothing into a V8
+  function callback without any `unsafe`, as `rusty_v8` does; `#[jsg_property(instance)]`
+  accessors likewise with `jsg::getter_callback` / `jsg::setter_callback`,
+- `jsg::modules::add_builtin`, whose callback is a closure that captures nothing, of type
+  `for<'s> Fn(&mut Lock<'s>) -> Local<'s, Value>`,
+- `jsg::callback_scope!(unsafe let lock, isolate)` for other Rust code that C++ calls with a
+  scope already open; the caller vouches for the isolate's state, hence `unsafe`. A panic
+  that reaches C++ aborts, so entry points instead pin a `jsg::CallbackScope` and open it
+  with `jsg::catch_panic`, which turns a panic into a JS internal error,
+- `jsg_test::Harness::run_in_context`.
+
+Code that only needs the isolate to be locked, with no context or scope, takes
+`&mut jsg::Isolate`. A `Lock` dereferences to its isolate, and C++ that only locks the
+isolate passes it through `unsafe` `jsg::Isolate::from_raw`.
+
+All scopes open on a thread at the same time must belong to one isolate: opening a scope of
+another isolate while one is open panics, so a handle is never used with another isolate's
+lock. `jsg::allow_scopes_of_another_isolate` (`unsafe`) lifts the rule for code that must open
+scopes of a second isolate. Handles that outlive scopes remember their isolate and panic when
+used in another: `Global<T>`, and the JS wrapper of a `jsg::Rc<T>`.
+
+### `Local<'s, T>`
+
+A `Copy` handle to a V8 value, valid for the scope `'s` it was created in. Every API that
+creates a handle takes `&mut Lock<'s>` and returns `Local<'s, _>`; methods that may run
+JavaScript take `&mut Lock<'s>` as well, and borrowed views into V8 memory
+(`as_slice(&lock)`) borrow the lock, so no JavaScript can run while they are alive.
 
 ```rust
-let str_value = "hello".to_local(&mut lock);
-let num_value = 42u32.to_local(&mut lock);
-let global = local.to_global(&mut lock);
+let str_value = "hello".to_js(lock);
+let num_value = 42u32.to_local(lock); // `ToLocalValue` also covers integers
+let global = str_value.to_global(lock);
 ```
 
 ### `Global<T>`
 
-A persistent handle that outlives `HandleScope`s. Must be explicitly managed.
+A persistent handle that outlives `HandleScope`s. Must be explicitly managed. Opening or cloning
+it in an isolate other than the one it was created in panics.
 
 `Global<T>` fields on `#[jsg_resource]` structs participate in GC tracing when visited via `GcVisitor::visit_global`. This enables the garbage collector to detect and collect back-reference cycles — for example, a resource that stores a JS callback which closes over the resource's own JS wrapper:
 
