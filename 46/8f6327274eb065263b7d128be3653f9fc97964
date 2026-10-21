@@ -1,0 +1,22 @@
+src/workerd/io/compatibility-date.capnp
+  s_5a348c985a0e40::t_f4215084ee1bd5 516-517
+src/workerd/io/compatibility-date-test.c++
+  s_5a348c985a0e40::t_0bee81e54338c5 593,651-653,758-780
+  s_5a348c985a0e40::t_075ad8d29daec2 781-782
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "468f6327274eb065263b7d128be3653f9fc97964",
+  "prompts": {},
+  "sessions": {
+    "s_5a348c985a0e40": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14a6c-e336-7860-809b-befba0601804",
+        "model": "unknown"
+      },
+      "human_author": "Brendan Irvine-Broque <birvine-broque@cloudflare.com>"
+    }
+  }
+}

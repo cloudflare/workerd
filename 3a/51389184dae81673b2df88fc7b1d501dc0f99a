@@ -1,0 +1,31 @@
+types/generated-snapshot/experimental/index.d.ts
+  s_284c8901817bfc::t_10c96607c034ad 15424-15476,15829-15910
+types/generated-snapshot/experimental/index.ts
+  s_284c8901817bfc::t_09a1f975d95a9b 15449-15501,15821-15902
+types/generated-snapshot/index.d.ts
+  s_284c8901817bfc::t_c83ffa44bbf7e8 15076-15128,15481-15562
+types/generated-snapshot/index.ts
+  s_284c8901817bfc::t_36f0980ea86c58 15101-15153,15473-15554
+types/test/types/cf1-entrypoints.ts
+  s_284c8901817bfc::t_9bcfad7728f7b0 1-60
+types/defines/dlp.d.ts
+  s_284c8901817bfc::t_a63fa11b95fdf8 1-58
+types/defines/gateway-middleware.d.ts
+  s_284c8901817bfc::t_e2f06f22a2ac54 1-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3a51389184dae81673b2df88fc7b1d501dc0f99a",
+  "prompts": {},
+  "sessions": {
+    "s_284c8901817bfc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "222abe4c-1bb8-4eb0-b4dc-28d7a9deec84",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

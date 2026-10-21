@@ -1,0 +1,31 @@
+src/cloudflare/internal/test/hyperdrive/hyperdrive-test.js
+  s_c95635740bd55d::t_a388db0745ba8d 1-209
+src/cloudflare/internal/test/hyperdrive/hyperdrive-test.wd-test
+  s_c95635740bd55d::t_3250bea5f84b13 1-59
+src/cloudflare/internal/test/hyperdrive/extended-fetcher-mock.js
+  s_877c75261468ad::t_2808f275255a52 1-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "72f75adac7fa9ca748d390e5e5e8d9172c4976b7",
+  "prompts": {},
+  "sessions": {
+    "s_877c75261468ad": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ee294d7dfffeOuumFe5wjkj0lP",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "adriangracia <adrian.gracia@icloud.com>"
+    },
+    "s_c95635740bd55d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f124be853ffe8iI310HpFFBupi",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "adriangracia <adrian.gracia@icloud.com>"
+    }
+  }
+}
