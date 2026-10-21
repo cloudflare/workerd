@@ -112,6 +112,8 @@ mod ffi {
         #[allow(dead_code)]
         pub fn cpp_sees_empty_maybe_local(value: MaybeLocal) -> bool;
 
+        /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
+        pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
     }
 }
 
@@ -433,6 +435,13 @@ impl Harness {
             v8::Local::from_ffi(local)
         }
     }
+}
+
+/// Whether `a` and `b` belong to the same `v8::IsolateGroup`.
+pub fn isolates_share_group(a: &jsg::Isolate, b: &jsg::Isolate) -> bool {
+    // SAFETY: both references keep their isolates alive; reading an isolate's group needs no
+    // lock.
+    unsafe { ffi::isolates_share_group(a.as_ffi(), b.as_ffi()) }
 }
 
 impl Default for Harness {

@@ -256,6 +256,13 @@ pub mod ffi {
         pub unsafe fn local_array_buffer_view_is_integer_type(view: &Local) -> bool;
 
         pub unsafe fn local_eq(lhs: &Local, rhs: &Local) -> bool;
+        /// Whether `value` can be used in `isolate`: Smis in any isolate, values in read-only or
+        /// writable shared space in any isolate of their isolate group, and other values only in
+        /// the isolate whose heap holds them. Reads only the value's page header.
+        pub unsafe fn local_is_compatible_with_isolate(
+            isolate: *mut Isolate,
+            value: &Local,
+        ) -> bool;
         pub unsafe fn local_is_string(value: &Local) -> bool;
         pub unsafe fn local_is_boolean(value: &Local) -> bool;
         pub unsafe fn local_is_number(value: &Local) -> bool;
@@ -1184,6 +1191,21 @@ impl<'s, T> Local<'s, T> {
         self.raw()
     }
 
+    /// Panics in debug builds if the value cannot be used in `lock`'s isolate: if it is in the
+    /// heap of another isolate, or in the read-only or shared space of another isolate group.
+    ///
+    /// The scope rules keep handles in their isolate, except inside
+    /// [`allow_scopes_of_another_isolate`](crate::allow_scopes_of_another_isolate); this
+    /// catches handles that cross isolates there.
+    fn debug_assert_isolate(&self, lock: &Lock<'_>) {
+        debug_assert!(
+            // SAFETY: the lock's isolate is locked, and the check reads only the value's page
+            // header, which is valid whichever isolate owns the value.
+            unsafe { ffi::local_is_compatible_with_isolate(lock.isolate().as_ffi(), self.raw()) },
+            "attempt to use a Local in an isolate other than the one it was created in"
+        );
+    }
+
     /// The handle as the FFI type that C++ functions take, without giving up its lifetime.
     fn raw(&self) -> &ffi::Local {
         // SAFETY: `Local` is a `repr(transparent)` pointer and `ffi::Local` a pointer-sized
@@ -1502,6 +1524,11 @@ impl<'s> Local<'s, Function> {
         args: &[Local<'s, Value>],
     ) -> Result<R::ResultType, Error> {
         let recv = receiver.unwrap_or_else(|| lock.undefined());
+        self.debug_assert_isolate(lock);
+        recv.debug_assert_isolate(lock);
+        for arg in args {
+            arg.debug_assert_isolate(lock);
+        }
 
         // SAFETY: lock guarantees the isolate is locked and a HandleScope is active.
         // self is a valid Local<Function>; recv and args are valid Local handles.
@@ -2886,6 +2913,8 @@ impl Drop for Utf8Value {
 impl<'s> Local<'s, Object> {
     /// Sets `key` to `value`. May run JavaScript (setters, proxy traps).
     pub fn set(self, lock: &mut Lock<'s>, key: &str, value: Local<'s, Value>) {
+        self.debug_assert_isolate(lock);
+        value.debug_assert_isolate(lock);
         let mut handle = *self.raw();
         // SAFETY: isolate is valid and locked (guaranteed by Lock); handles are valid in 's.
         unsafe {
@@ -2958,6 +2987,7 @@ pub struct Global<T> {
 impl<T> Global<T> {
     /// Creates a persistent handle to `local`.
     pub fn new(lock: &mut Lock<'_>, local: Local<'_, T>) -> Self {
+        local.debug_assert_isolate(lock);
         // SAFETY: isolate is valid and locked (guaranteed by Lock); the handle is valid, and
         // belongs to the lock's isolate because all open scopes do.
         let handle = unsafe { ffi::local_to_global(lock.isolate().as_ffi(), local.into_ffi()) };

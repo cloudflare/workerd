@@ -88,6 +88,9 @@ size_t used_global_handles_size(Isolate* isolate);
 // Returns whether `value` is empty as a v8::MaybeLocal, to test what Rust passes for `None`.
 bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
 
+// Returns whether `a` and `b` belong to the same v8::IsolateGroup.
+bool isolates_share_group(Isolate* a, Isolate* b);
+
 }  // namespace rust::jsg_test
 
 }  // namespace workerd

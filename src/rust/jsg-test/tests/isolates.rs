@@ -278,3 +278,147 @@ fn gc_of_another_isolate_leaves_a_global_alone() {
         Ok(())
     });
 }
+
+const ISOLATE_CHECK_MESSAGE: &str =
+    "attempt to use a Local in an isolate other than the one it was created in";
+
+/// Runs `f` and asserts that it panics with the debug isolate check's message.
+fn assert_isolate_check_panics(what: &str, f: impl FnOnce()) {
+    let payload =
+        std::panic::catch_unwind(AssertUnwindSafe(f)).expect_err(&format!("{what} must panic"));
+    assert_eq!(panic_message(&*payload), ISOLATE_CHECK_MESSAGE);
+}
+
+#[test]
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "the isolate check is a debug assertion"
+)]
+fn local_of_another_isolate_panics_in_debug_builds() {
+    let a = crate::Harness::new();
+    let b = crate::Harness::new();
+    a.run_in_context(|lock_a, _ctx| {
+        let object: v8::Local<v8::Value> = lock_a.new_object().into();
+        let number = jsg::Number::new(1.0).to_js(lock_a);
+        // SAFETY: deliberately breaks the rule to check that debug builds catch it; the
+        // handle of A is rejected before it reaches V8.
+        unsafe {
+            jsg::allow_scopes_of_another_isolate(|| {
+                b.run_in_context(|lock_b, _ctx| {
+                    assert_isolate_check_panics("a Global of A's object in B", || {
+                        v8::Global::new(lock_b, object);
+                    });
+                    // A Smi belongs to no isolate.
+                    let global = v8::Global::new(lock_b, number);
+                    let local = global.as_local(lock_b);
+                    assert!(
+                        (jsg::Number::from_js(lock_b, local)?.value() - 1.0).abs() < f64::EPSILON
+                    );
+                    Ok(())
+                });
+            });
+        }
+        Ok(())
+    });
+}
+
+#[test]
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "the isolate check is a debug assertion"
+)]
+fn function_call_with_argument_of_another_isolate_panics_in_debug_builds() {
+    let a = crate::Harness::new();
+    let b = crate::Harness::new();
+    a.run_in_context(|lock_a, _ctx| {
+        let object: v8::Local<v8::Value> = lock_a.new_object().into();
+        // SAFETY: deliberately breaks the rule to check that debug builds catch it; the
+        // handle of A, given the lifetime of B's scope, which A's scope encloses, is rejected
+        // before it reaches V8.
+        unsafe {
+            jsg::allow_scopes_of_another_isolate(|| {
+                b.run_in_context(|lock_b, ctx| {
+                    let object = v8::Local::from_ffi(object.into_ffi());
+                    let func = ctx
+                        .eval_raw(lock_b, "(() => 0)")
+                        .unwrap()
+                        .try_as::<v8::Function>()
+                        .unwrap();
+                    assert_isolate_check_panics("calling B's function with A's object", || {
+                        let _ = func.call::<jsg::Number>(lock_b, None, &[object]);
+                    });
+                    Ok(())
+                });
+            });
+        }
+        Ok(())
+    });
+}
+
+#[test]
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "the isolate check is a debug assertion"
+)]
+fn object_set_with_value_of_another_isolate_panics_in_debug_builds() {
+    let a = crate::Harness::new();
+    let b = crate::Harness::new();
+    a.run_in_context(|lock_a, _ctx| {
+        let object: v8::Local<v8::Value> = lock_a.new_object().into();
+        // SAFETY: deliberately breaks the rule to check that debug builds catch it; the
+        // handle of A, given the lifetime of B's scope, which A's scope encloses, is rejected
+        // before it reaches V8.
+        unsafe {
+            jsg::allow_scopes_of_another_isolate(|| {
+                b.run_in_context(|lock_b, _ctx| {
+                    let object = v8::Local::from_ffi(object.into_ffi());
+                    let target = lock_b.new_object();
+                    assert_isolate_check_panics("setting A's object on B's object", || {
+                        target.set(lock_b, "value", object);
+                    });
+                    Ok(())
+                });
+            });
+        }
+        Ok(())
+    });
+}
+
+#[test]
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "the isolate check is a debug assertion"
+)]
+fn read_only_value_of_another_isolate_is_accepted_only_in_its_group() {
+    let a = crate::Harness::new();
+    let b = crate::Harness::new();
+    a.run_in_context(|lock_a, _ctx| {
+        let values = [lock_a.undefined(), true.to_js(lock_a), "".to_js(lock_a)];
+        let isolate_a: &jsg::Isolate = lock_a;
+        // SAFETY: the read-only values of A reach B only when both isolates share a group,
+        // whose isolates share the read-only heap; otherwise the check rejects them before
+        // they reach V8.
+        unsafe {
+            jsg::allow_scopes_of_another_isolate(|| {
+                b.run_in_context(|lock_b, _ctx| {
+                    if crate::isolates_share_group(isolate_a, lock_b) {
+                        for value in values {
+                            v8::Global::new(lock_b, value);
+                        }
+                    } else {
+                        for value in values {
+                            assert_isolate_check_panics(
+                                "a Global of A's read-only value in another group",
+                                || {
+                                    v8::Global::new(lock_b, value);
+                                },
+                            );
+                        }
+                    }
+                    Ok(())
+                });
+            });
+        }
+        Ok(())
+    });
+}

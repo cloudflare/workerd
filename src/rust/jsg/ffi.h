@@ -115,6 +115,7 @@ Local local_new_object(Isolate* isolate);
 Local local_new_null(Isolate* isolate);
 Local local_new_undefined(Isolate* isolate);
 bool local_eq(const Local& lhs, const Local& rhs);
+bool local_is_compatible_with_isolate(Isolate* isolate, const Local& value);
 bool local_is_string(const Local& val);
 bool local_is_boolean(const Local& val);
 bool local_is_number(const Local& val);
