@@ -191,7 +191,7 @@ Local local_object_get_property(Isolate* isolate, const Local& object, ::rust::S
 
 // Local<Array>
 Local local_new_array(Isolate* isolate, size_t length);
-uint32_t local_array_length(Isolate* isolate, const Local& array);
+uint32_t local_array_length(const Local& array);
 Local local_array_get(Isolate* isolate, const Local& array, uint32_t index);
 void local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value);
 ::rust::Vec<Global> local_array_iterate(Isolate* isolate, Local value);
@@ -214,25 +214,25 @@ Local local_new_biguint64_array(Isolate* isolate, const uint64_t* data, size_t l
 // `buffer`'s byte length.
 Local uint8_array_from_buffer(
     Isolate* isolate, const Local& buffer, size_t byte_offset, size_t length);
-size_t local_typed_array_length(Isolate* isolate, const Local& array);
+size_t local_typed_array_length(const Local& array);
 // Returns a raw pointer to the underlying ArrayBuffer's data (without byte offset).
 // Use local_typed_array_byte_offset to compute the start of this view's data.
-uintptr_t local_typed_array_buffer_data(Isolate* isolate, const Local& array);
+uintptr_t local_typed_array_buffer_data(const Local& array);
 // Returns the byte offset of this TypedArray view within its backing ArrayBuffer.
-size_t local_typed_array_byte_offset(Isolate* isolate, const Local& array);
+size_t local_typed_array_byte_offset(const Local& array);
 // Returns the byte length of the TypedArray.
-size_t local_typed_array_byte_length(Isolate* isolate, const Local& array);
-uint8_t local_uint8_array_get(Isolate* isolate, const Local& array, size_t index);
-uint16_t local_uint16_array_get(Isolate* isolate, const Local& array, size_t index);
-uint32_t local_uint32_array_get(Isolate* isolate, const Local& array, size_t index);
-int8_t local_int8_array_get(Isolate* isolate, const Local& array, size_t index);
-int16_t local_int16_array_get(Isolate* isolate, const Local& array, size_t index);
-int32_t local_int32_array_get(Isolate* isolate, const Local& array, size_t index);
-float local_float32_array_get(Isolate* isolate, const Local& array, size_t index);
-double local_float64_array_get(Isolate* isolate, const Local& array, size_t index);
-int64_t local_bigint64_array_get(Isolate* isolate, const Local& array, size_t index);
-uint64_t local_biguint64_array_get(Isolate* isolate, const Local& array, size_t index);
-uint8_t local_uint8clamped_array_get(Isolate* isolate, const Local& array, size_t index);
+size_t local_typed_array_byte_length(const Local& array);
+uint8_t local_uint8_array_get(const Local& array, size_t index);
+uint16_t local_uint16_array_get(const Local& array, size_t index);
+uint32_t local_uint32_array_get(const Local& array, size_t index);
+int8_t local_int8_array_get(const Local& array, size_t index);
+int16_t local_int16_array_get(const Local& array, size_t index);
+int32_t local_int32_array_get(const Local& array, size_t index);
+float local_float32_array_get(const Local& array, size_t index);
+double local_float64_array_get(const Local& array, size_t index);
+int64_t local_bigint64_array_get(const Local& array, size_t index);
+uint64_t local_biguint64_array_get(const Local& array, size_t index);
+uint8_t local_uint8clamped_array_get(const Local& array, size_t index);
 
 // Local<ArrayBuffer>
 Local local_new_array_buffer(Isolate* isolate, const uint8_t* data, size_t length);
@@ -240,17 +240,17 @@ Local local_new_array_buffer_empty(Isolate* isolate, size_t byte_length);
 kj::Maybe<Local> array_buffer_new_with_mode(
     Isolate* isolate, size_t byte_length, BackingStoreInitializationMode mode);
 Local array_buffer_from_backing_store(Isolate* isolate, size_t store);
-size_t local_array_buffer_byte_length(Isolate* isolate, const Local& buffer);
-uint8_t* local_array_buffer_data(Isolate* isolate, const Local& buffer);
-size_t local_array_buffer_get_backing_store(Isolate* isolate, const Local& buffer);
+size_t local_array_buffer_byte_length(const Local& buffer);
+uint8_t* local_array_buffer_data(const Local& buffer);
+size_t local_array_buffer_get_backing_store(const Local& buffer);
 
 // Local<ArrayBufferView>
-size_t local_array_buffer_view_byte_offset(Isolate* isolate, const Local& view);
-size_t local_array_buffer_view_byte_length(Isolate* isolate, const Local& view);
-uint8_t* local_array_buffer_view_buffer_data(Isolate* isolate, const Local& view);
+size_t local_array_buffer_view_byte_offset(const Local& view);
+size_t local_array_buffer_view_byte_length(const Local& view);
+uint8_t* local_array_buffer_view_buffer_data(const Local& view);
 Local local_array_buffer_view_get_buffer(Isolate* isolate, const Local& view);
-size_t local_array_buffer_view_element_size(Isolate* isolate, const Local& view);
-bool local_array_buffer_view_is_integer_type(Isolate* isolate, const Local& view);
+size_t local_array_buffer_view_element_size(const Local& view);
+bool local_array_buffer_view_is_integer_type(const Local& view);
 
 // BackingStore
 size_t backing_store_new_resizable(size_t byte_length, size_t max_byte_length);
@@ -293,8 +293,8 @@ kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value);
 ::rust::Vec<uint64_t> unwrap_biguint64_array(Isolate* isolate, Local value);
 // ArrayBuffer detach/detachable/was-detached
 void local_array_buffer_detach(Isolate* isolate, Local& buffer);
-bool local_array_buffer_was_detached(Isolate* isolate, const Local& buffer);
-bool local_array_buffer_is_detachable(Isolate* isolate, const Local& buffer);
+bool local_array_buffer_was_detached(const Local& buffer);
+bool local_array_buffer_is_detachable(const Local& buffer);
 
 // Value-level shared check
 bool local_array_buffer_is_shared(const Local& value);

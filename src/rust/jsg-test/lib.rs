@@ -141,24 +141,23 @@ impl EvalContext<'_> {
     }
 
     fn raw_result<'s>(
-        lock: &jsg::Lock<'s>,
+        _lock: &jsg::Lock<'s>,
         result: ffi::EvalResult,
     ) -> Result<v8::Local<'s, v8::Value>, EvalError<'s>> {
         let opt_local: Option<v8::ffi::Local> = result.value.into();
-        let isolate = lock.isolate();
 
         if result.success {
             match opt_local {
                 // SAFETY: the C++ harness evaluates in `lock`'s HandleScope, so the completion
                 // value lives in scope `'s`.
-                Some(local) => Ok(unsafe { v8::Local::from_ffi(isolate, local) }),
+                Some(local) => Ok(unsafe { v8::Local::from_ffi(local) }),
                 None => unreachable!(),
             }
         } else {
             match opt_local {
                 Some(local) => {
                     // SAFETY: as above, for the exception value.
-                    let value = unsafe { v8::Local::from_ffi(isolate, local) };
+                    let value = unsafe { v8::Local::from_ffi(local) };
                     Err(EvalError::Exception(value))
                 }
                 None => Err(EvalError::EvalFailed),
@@ -280,7 +279,7 @@ impl Harness {
         // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
         unsafe {
             let local = ffi::create_cpp_tagged_object(isolate.as_ffi());
-            v8::Local::from_ffi(isolate, local)
+            v8::Local::from_ffi(local)
         }
     }
 }

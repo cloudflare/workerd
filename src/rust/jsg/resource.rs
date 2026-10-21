@@ -178,7 +178,7 @@ impl<'s, R: Resource + 'static> FromJS<'s> for Rc<R> {
     }
 
     fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self, Error> {
-        let type_name = value.type_of();
+        let type_name = value.type_of(lock);
         Self::try_from_js(lock, value)?.ok_or_else(|| {
             Error::new_type_error(format!("expected {}, got {type_name}", R::class_name()))
         })
@@ -407,10 +407,10 @@ pub fn function_template_of<'s, R: Resource + 'static>(
     // Global<FunctionTemplate> cached in the Realm. Inlined from `as_local_function` to
     // avoid re-borrowing `self` while `constructor` holds an immutable borrow through `realm()`.
     unsafe {
-        v8::Local::from_ffi(
-            isolate,
-            v8::ffi::function_template_get_function(isolate.as_ffi(), constructor.as_ffi_ref()),
-        )
+        v8::Local::from_ffi(v8::ffi::function_template_get_function(
+            isolate.as_ffi(),
+            constructor.as_ffi_ref(),
+        ))
     }
 }
 
