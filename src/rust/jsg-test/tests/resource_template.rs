@@ -30,7 +30,7 @@ fn eval_string(harness: &Harness, code: &str) -> String {
     let mut out = String::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<Sample>(lock);
-        ctx.set_global("Sample", constructor.into());
+        ctx.set_global(lock, "Sample", constructor);
         out = ctx.eval(lock, code).unwrap();
         Ok(())
     });
