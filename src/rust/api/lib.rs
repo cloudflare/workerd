@@ -22,23 +22,25 @@ mod ffi {
         type ModuleRegistry = jsg::v8::ffi::ModuleRegistry;
     }
     extern "Rust" {
-        pub fn register_nodejs_modules(registry: Pin<&mut ModuleRegistry>);
+        pub fn register_nodejs_modules(registry: Pin<&mut ModuleRegistry>) -> Result<()>;
     }
 }
 
-pub fn register_nodejs_modules(mut registry: Pin<&mut ffi::ModuleRegistry>) {
+pub fn register_nodejs_modules(
+    mut registry: Pin<&mut ffi::ModuleRegistry>,
+) -> Result<(), cxx::KjError> {
     jsg::modules::add_builtin(
         registry.as_mut(),
         "node-internal:dns",
         |lock| DnsUtil::new().to_js(lock),
         jsg::modules::ModuleType::Internal,
-    );
+    )?;
     jsg::modules::add_builtin(
         registry,
         "node-internal:url",
         |lock| UrlUtil::new().to_js(lock),
         jsg::modules::ModuleType::Internal,
-    );
+    )
 }
 
 #[cfg(test)]

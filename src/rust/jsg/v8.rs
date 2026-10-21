@@ -763,7 +763,7 @@ pub mod ffi {
             specifier: &str,
             callback: unsafe fn(*mut Isolate) -> MaybeLocal,
             module_type: ModuleType,
-        );
+        ) -> Result<()>;
     }
 }
 

@@ -27,7 +27,8 @@ pub fn add_builtin<F>(
     specifier: &str,
     callback: F,
     module_type: ModuleType,
-) where
+) -> Result<(), cxx::KjError>
+where
     F: UnitType + for<'s> Fn(&mut Lock<'s>) -> v8::Local<'s, v8::Value>,
 {
     // Called only by the C++ module registry, while `isolate` is locked, a context is entered
@@ -52,6 +53,7 @@ pub fn add_builtin<F>(
     let _ = callback;
     // SAFETY: the registry calls `trampoline` as its contract requires.
     unsafe {
-        ffi::register_add_builtin_module(registry, specifier, trampoline::<F>, module_type);
+        ffi::register_add_builtin_module(registry, specifier, trampoline::<F>, module_type)?;
     }
+    Ok(())
 }
