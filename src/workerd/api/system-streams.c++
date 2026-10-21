@@ -213,6 +213,8 @@ class EncodedAsyncOutputStream final: public WritableStreamSink {
  private:
   void ensureIdentityEncoding();
 
+  kj::Promise<void> pumpFromNative(kj::Ptr<ReadableStreamSource> source, bool end);
+
   // Unwrap `inner` as a `kj::AsyncOutputStream`.
   kj::AsyncOutputStream& getInner();
   // TODO(cleanup): Obviously this is polymorphism. We should be able to do better.
@@ -327,53 +329,60 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
       nativeInput.ensureIdentityEncoding();
     }
 
-    // When the input advertises its length, pump exactly that length and then verify EOF with
-    // a direct read on the input. A single unbounded pump-to-EOF can deadlock: if the
-    // destination adopts the pump (e.g. kj's AsyncPipe) and its reader consumes exactly the
-    // expected number of bytes and then stops reading while keeping the read end open, no one
-    // ever issues the read that would observe the input's EOF, and the pump never settles.
-    // The explicit read still drains the input through EOF, so the producer observes clean
-    // completion rather than a mid-stream drop.
-    kj::Promise<void> promise = nullptr;
-    KJ_IF_SOME(length, nativeInput.inner->tryGetLength()) {
-      promise = nativeInput.inner->pumpTo(getInner(), length)
-                    .then([&input = *nativeInput.inner](uint64_t) {
-        auto buffer = kj::heap<kj::byte>();
-        auto read = input.tryRead(buffer.get(), 1, 1);
-        return read.attach(kj::mv(buffer));
-      }).then([](size_t n) {
-        JSG_REQUIRE(n == 0, TypeError, "Stream produced more data than its advertised length.");
-      });
-    } else {
-      promise = nativeInput.inner->pumpTo(getInner()).ignoreResult();
-    }
-    if (end) {
-      // TODO(cleanup): When KJ streams are refactored to have a general end(), this stupid switch
-      //   can go away.
-      KJ_SWITCH_ONEOF(inner) {
-        KJ_CASE_ONEOF(stream, kj::Own<kj::AsyncOutputStream>) {
-          KJ_IF_SOME(ee, kj::dynamicDowncastIfAvailable<capnp::ExplicitEndOutputStream>(*stream)) {
-            promise = promise.then([&ee = ee]() { return ee.end(); });
-          } else KJ_IF_SOME(aio, kj::dynamicDowncastIfAvailable<kj::AsyncIoStream>(*stream)) {
-            promise = promise.then([&aio = aio]() { aio.shutdownWrite(); });
-          }
-        }
-        KJ_CASE_ONEOF(gz, kj::Own<kj::GzipAsyncOutputStream>) {
-          promise = promise.then([&gz = gz]() { return gz->end(); });
-        }
-        KJ_CASE_ONEOF(br, kj::Own<kj::BrotliAsyncOutputStream>) {
-          promise = promise.then([&br = br]() { return br->end(); });
-        }
-        KJ_CASE_ONEOF(e, Ended) {}
-      }
-    }
-
     // Since this is a system stream, the pump task is eligible to be deferred past IoContext
     // lifetime!
-    return kj::Promise<DeferredProxy<void>>(DeferredProxy<void>{kj::mv(promise)});
+    return kj::Promise<DeferredProxy<void>>(
+        DeferredProxy<void>{pumpFromNative(kj::mv(input), end)});
   }
 
   return kj::none;
+}
+
+// A coroutine, so that its frame holds a counted pointer to each end for the whole pump, which can
+// outlive the IoContext. The caller must still keep both ends alive until the pump settles; with
+// pointer counting enabled, destroying either one early is caught rather than read after free.
+kj::Promise<void> EncodedAsyncOutputStream::pumpFromNative(
+    kj::Ptr<ReadableStreamSource> source, bool end) {
+  auto self = addPtrToThis();
+  auto& input = *kj::downcast<EncodedAsyncInputStream>(source.asRef()).inner;
+  auto& output = getInner();
+
+  // When the input advertises its length, pump exactly that length and then verify EOF with
+  // a direct read on the input. A single unbounded pump-to-EOF can deadlock: if the
+  // destination adopts the pump (e.g. kj's AsyncPipe) and its reader consumes exactly the
+  // expected number of bytes and then stops reading while keeping the read end open, no one
+  // ever issues the read that would observe the input's EOF, and the pump never settles.
+  // The explicit read still drains the input through EOF, so the producer observes clean
+  // completion rather than a mid-stream drop.
+  KJ_IF_SOME(length, input.tryGetLength()) {
+    co_await input.pumpTo(output, length);
+    kj::byte extra;
+    auto n = co_await input.tryRead(&extra, 1, 1);
+    JSG_REQUIRE(n == 0, TypeError, "Stream produced more data than its advertised length.");
+  } else {
+    co_await input.pumpTo(output);
+  }
+
+  if (end) {
+    // TODO(cleanup): When KJ streams are refactored to have a general end(), this stupid switch
+    //   can go away.
+    KJ_SWITCH_ONEOF(inner) {
+      KJ_CASE_ONEOF(stream, kj::Own<kj::AsyncOutputStream>) {
+        KJ_IF_SOME(ee, kj::dynamicDowncastIfAvailable<capnp::ExplicitEndOutputStream>(*stream)) {
+          co_await ee.end();
+        } else KJ_IF_SOME(aio, kj::dynamicDowncastIfAvailable<kj::AsyncIoStream>(*stream)) {
+          aio.shutdownWrite();
+        }
+      }
+      KJ_CASE_ONEOF(gz, kj::Own<kj::GzipAsyncOutputStream>) {
+        co_await gz->end();
+      }
+      KJ_CASE_ONEOF(br, kj::Own<kj::BrotliAsyncOutputStream>) {
+        co_await br->end();
+      }
+      KJ_CASE_ONEOF(e, Ended) {}
+    }
+  }
 }
 
 StreamEncoding EncodedAsyncOutputStream::disownEncodingResponsibility() {

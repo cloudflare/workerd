@@ -71,9 +71,7 @@ struct Global {
     durableActorNamespace :group {
       actorChannel @26 :UInt32;
       uniqueKey @27 :Text;
-      retryPolicy @28 :Workerd.Worker.Binding.DurableObjectNamespaceDesignator.RetryPolicy;
-      # The binding's `retryPolicy`, already checked against the runtime's limits
-      # (`api::UserDefinedRetryPolicy`); the runtime's defaults apply when absent.
+      obsolete28 @28 :AnyPointer;
     }
     loopbackDurableActorNamespace :group {
       actorChannel @29 :UInt32;

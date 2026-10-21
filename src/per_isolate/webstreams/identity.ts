@@ -20,8 +20,9 @@
 //     processChunk copies inside write() for exactly these hazards).
 //   - Zero-length writes are accepted as NO-OPS: the write resolves
 //     immediately without touching the readable queue (no zero-length
-//     chunk enqueued, no backpressure interaction, no pull). A view whose
-//     buffer is detached or out of bounds is zero-length, as in C++.
+//     chunk enqueued, no backpressure interaction, no pull). A detached
+//     ArrayBuffer, and a view whose buffer is detached or out of bounds,
+//     is zero-length, as in C++.
 //
 // See /src/tests/streams/identity/AGENTS.md for the IdentityTransformStream
 // and FixedLengthStream specification.
@@ -91,17 +92,14 @@ import type {
   RingBuffer as RingBufferType,
   RingBufferConstructor,
 } from './ring-buffer';
+import type { CommonHelpers } from './common';
 import type { ViewExtentHelpers } from './view-extent';
 
 const {
-  ArrayBuffer,
   ArrayPrototypePush,
   BigInt,
   Number,
-  NumberIsNaN,
   ObjectDefineProperties,
-  ObjectFreeze,
-  ObjectGetOwnPropertyDescriptor,
   PromisePrototypeThen,
   PromiseResolve,
   PromiseWithResolvers,
@@ -116,10 +114,9 @@ const {
   TypedArrayPrototypeGetByteOffset,
   TypedArrayPrototypeSet,
   Uint8Array,
+  getProtoGetter,
   uncurryThis,
 } = primordials;
-
-const { isArrayBufferView, isArrayBuffer, isSharedArrayBuffer } = utils;
 
 const {
   ReadableStream,
@@ -132,7 +129,16 @@ const {
   WritableStreamDefaultController,
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
-const { viewByteExtent } =
+const {
+  isActualObject,
+  kNullProtoObject,
+  kEnumerable,
+  normalizeExpectedLength,
+  toStringTagProperty,
+  toStrategyDictionary,
+  convertHighWaterMark,
+} = require('webstreams/common') as CommonHelpers;
+const { bufferSourceExtent, copyExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
@@ -142,10 +148,6 @@ const writableControllerError = uncurryThis(
   WritableStreamDefaultController.prototype.error
 ) as (controller: object, reason: unknown) => void;
 
-function isActualObject(value: unknown) {
-  return value != null && typeof value === 'object';
-}
-
 // --- Bootstrap captures (byte controller methods + TextEncoder) ----------
 
 const byteControllerClose = uncurryThis(
@@ -154,25 +156,15 @@ const byteControllerClose = uncurryThis(
 const byteControllerError = uncurryThis(
   ReadableByteStreamController.prototype.error
 ) as (controller: object, reason: unknown) => void;
-function captureGetter(proto: object, name: string): (self: object) => unknown {
-  const desc = ObjectGetOwnPropertyDescriptor(proto, name);
-  if (desc === undefined || desc.get === undefined) {
-    throw new TypeError(`Expected accessor property '${name}' on prototype`);
-  }
-  return uncurryThis(desc.get) as (self: object) => unknown;
-}
-const byteControllerByobRequestGet = captureGetter(
-  ReadableByteStreamController.prototype,
-  'byobRequest'
-) as (controller: object) => object | null;
-const byobRequestViewGet = captureGetter(
-  ReadableStreamBYOBRequest.prototype,
-  'view'
-) as (request: object) => Uint8Array | null;
-const byteControllerDesiredSizeGet = captureGetter(
-  ReadableByteStreamController.prototype,
-  'desiredSize'
-) as (controller: object) => number | null;
+const byteControllerByobRequestGet = getProtoGetter<
+  (controller: object) => object | null
+>(ReadableByteStreamController.prototype, 'byobRequest');
+const byobRequestViewGet = getProtoGetter<
+  (request: object) => Uint8Array | null
+>(ReadableStreamBYOBRequest.prototype, 'view');
+const byteControllerDesiredSizeGet = getProtoGetter<
+  (controller: object) => number | null
+>(ReadableByteStreamController.prototype, 'desiredSize');
 const byobRequestRespond = uncurryThis(
   ReadableStreamBYOBRequest.prototype.respond
 ) as (request: object, bytesWritten: number) => void;
@@ -195,32 +187,16 @@ function validateAndCopyChunk(chunk: unknown): Uint8Array | undefined {
     if (chunk.length === 0) return undefined;
     return TextEncoderEncode(textEncoderInstance, chunk);
   }
-  if (isArrayBuffer(chunk) || isSharedArrayBuffer(chunk)) {
-    // Wrap in Uint8Array for a uniform code path — Uint8Array accepts
-    // both ArrayBuffer and SharedArrayBuffer, and its byteLength getter
-    // works on both (unlike ArrayBuffer.prototype.byteLength, which
-    // throws on SAB receivers).
-    const src = new Uint8Array(chunk as ArrayBuffer);
-    const byteLength = TypedArrayPrototypeGetByteLength(src) as number;
-    if (byteLength === 0) return undefined;
-    const copy = new Uint8Array(new ArrayBuffer(byteLength));
-    TypedArrayPrototypeSet(copy, src);
-    return copy;
-  }
-  if (isArrayBufferView(chunk)) {
-    // A detached or out-of-bounds view is empty (see view-extent.ts).
-    const { buffer, byteOffset, byteLength } = viewByteExtent(chunk);
-    if (byteLength === 0) return undefined;
-    const copy = new Uint8Array(new ArrayBuffer(byteLength));
-    TypedArrayPrototypeSet(
-      copy,
-      new Uint8Array(buffer as ArrayBuffer, byteOffset, byteLength)
+  // A detached or out-of-bounds input is empty (see view-extent.ts).
+  const extent = bufferSourceExtent(chunk);
+  if (extent === undefined) {
+    throw new TypeError(
+      'IdentityTransformStream: chunk must be a BufferSource or string'
     );
-    return copy;
   }
-  throw new TypeError(
-    'IdentityTransformStream: chunk must be a BufferSource or string'
-  );
+  const { buffer, byteOffset, byteLength } = extent;
+  if (byteLength === 0) return undefined;
+  return copyExtent(buffer, byteOffset, byteLength);
 }
 
 let assertIsIdentityTransformStream: (self: IdentityTransformStream) => void;
@@ -228,32 +204,6 @@ let assertIsIdentityTransformStream: (self: IdentityTransformStream) => void;
 // ---------------------------------------------------------------------------
 
 const kPrivateSymbol: symbol = Symbol('private');
-
-const kEmptyStrategy = ObjectFreeze({
-  __proto__: null,
-}) as QueuingStrategy<unknown>;
-
-// The writable's WHATWG high-water-mark conversion (ToNumber; NaN or a
-// negative number is a RangeError), for FixedLengthStream, which caps the
-// converted number at its length before IdentityTransformStream hands it
-// on. Converting a number again there has no side effects.
-function convertHighWaterMark(value: unknown): number {
-  const highWaterMark = +(value as number);
-  if (NumberIsNaN(highWaterMark) || highWaterMark < 0) {
-    throw new RangeError('Invalid highWaterMark');
-  }
-  return highWaterMark;
-}
-
-// WebIDL dictionary conversion of a constructor's strategy argument, as in
-// C++: undefined and null mean no strategy; any other non-object throws.
-function toStrategyDictionary(value: unknown): QueuingStrategy<unknown> {
-  if (value === undefined || value === null) return kEmptyStrategy;
-  if (typeof value !== 'object' && typeof value !== 'function') {
-    throw new TypeError('The queuing strategy must be an object.');
-  }
-  return value as QueuingStrategy<unknown>;
-}
 
 // A write accepted by the writable, snapshotted in its size() callback (see
 // sizeAndSnapshot). Entries are tagged with an own `ok` data property rather
@@ -305,8 +255,8 @@ class IdentityTransformStream {
   // IdentityTransformStream; set to expectedLength for FixedLengthStream.
   // Decremented as each write is delivered (or reaches the sink);
   // overwrite/underwrite errors match C++
-  // (identity-transform-stream.c++ tryReadInternal). Stored as bigint
-  // to preserve precision for the full uint64_t range.
+  // (identity-transform-stream.c++ tryReadInternal). A bigint, as the
+  // length converts to one (normalizeExpectedLength).
   #remaining: bigint | undefined;
 
   static {
@@ -570,36 +520,29 @@ class IdentityTransformStream {
   // Internal: called by FixedLengthStream.
   constructor(
     internal: symbol,
-    expectedLength: bigint | number,
+    expectedLength: bigint,
     writableStrategy?: QueuingStrategy<unknown>
   );
   constructor(
     writableStrategyOrInternal?: QueuingStrategy<unknown> | symbol,
-    internalExpectedLength?: bigint | number,
+    internalExpectedLength?: bigint,
     internalWritableStrategy?: QueuingStrategy<unknown>
   ) {
     // External: new IdentityTransformStream() or
     // new IdentityTransformStream(writableStrategy).
     // Internal (from FixedLengthStream): new ITS(kPrivateSymbol, len, strategy?).
     let writableStrategy: QueuingStrategy<unknown> | undefined;
-    let expectedLength: bigint | number | undefined;
+    let expectedLength: bigint | undefined;
     if (writableStrategyOrInternal === kPrivateSymbol) {
       expectedLength = internalExpectedLength;
       writableStrategy = internalWritableStrategy;
     } else {
       writableStrategy = toStrategyDictionary(writableStrategyOrInternal);
     }
-    writableStrategy ??= kEmptyStrategy;
+    writableStrategy ??= kNullProtoObject;
 
     // Initialize byte budget for FixedLengthStream enforcement.
-    // Stored as bigint to cover the full uint64_t range without
-    // precision loss.
-    if (expectedLength !== undefined) {
-      this.#remaining =
-        typeof expectedLength === 'bigint'
-          ? expectedLength
-          : BigInt(expectedLength);
-    }
+    this.#remaining = expectedLength;
 
     // The strategy size callback is the one hook the writable machinery
     // runs SYNCHRONOUSLY inside writer.write(), so the chunk snapshot is
@@ -859,84 +802,60 @@ class IdentityTransformStream {
   }
 }
 
-// Maximum expectedLength: uint64_t max. Content-Length is carried as
-// uint64_t through the C++/KJ HTTP layer, so values beyond this are
-// not representable.
-const MAX_UINT64 = 0xffff_ffff_ffff_ffffn;
+// The largest length the C++ implementation accepts: 2^53 - 1.
+const kMaxFixedLength = 2n ** 53n - 1n;
 
 class FixedLengthStream extends IdentityTransformStream {
   constructor(
     expectedLength: bigint | number,
     writableStrategy?: QueuingStrategy<unknown>
   ) {
-    if (
-      typeof expectedLength !== 'number' &&
-      typeof expectedLength !== 'bigint'
-    ) {
-      throw new TypeError(
-        'FixedLengthStream expected length must be a number or bigint.'
-      );
-    }
-    // BigInt() conversion rejects NaN and fractions (RangeError) naturally.
-    const bigLen =
-      typeof expectedLength === 'bigint'
-        ? expectedLength
-        : BigInt(expectedLength);
-    if (bigLen < 0n || bigLen > MAX_UINT64) {
-      throw new RangeError(
-        'FixedLengthStream requires a non-negative expected length ' +
-          'that fits in a uint64.'
-      );
+    // The steps run in the C++ implementation's order: the length
+    // converts as its required uint64_t argument, the strategy and its
+    // highWaterMark convert, and only then is the length checked against
+    // kMaxFixedLength.
+    const length = normalizeExpectedLength(expectedLength);
+    if (length === undefined) {
+      throw new TypeError('FixedLengthStream requires an expected length.');
     }
     writableStrategy = toStrategyDictionary(writableStrategy);
-    //
     // Cap highWaterMark at expectedLength, matching C++ behavior
     // (identity-transform-stream.c++ FixedLengthStream::constructor): buffering more than the
     // total expected output is pointless. The member is read and converted
     // once, as IdentityTransformStream's is, and the cap applies to the
     // converted number.
     const hwm: unknown = writableStrategy.highWaterMark;
-    if (hwm !== undefined) {
-      // Derive the cap from the COERCED length, not the raw input: BigInt
-      // conversion normalizes a -0.0 input to 0n, so Number(bigLen) is
-      // always +0-or-positive and a negative zero cannot leak through the
-      // min() below into the highWaterMark (and from there into the
-      // writer's desiredSize).
-      const numExpected = Number(bigLen);
-      const converted = convertHighWaterMark(hwm);
+    const converted = hwm === undefined ? undefined : convertHighWaterMark(hwm);
+    if (length > kMaxFixedLength) {
+      throw new TypeError(
+        'FixedLengthStream requires an integer expected length less than 2^53.'
+      );
+    }
+    if (converted !== undefined) {
+      // Derive the cap from the converted length, not the raw input: a -0
+      // input converts to 0n, so Number(length) is always +0-or-positive
+      // and a negative zero cannot leak through the min() below into the
+      // highWaterMark (and from there into the writer's desiredSize).
+      const numExpected = Number(length);
       writableStrategy = {
         __proto__: null,
         highWaterMark: converted < numExpected ? converted : numExpected,
       } as QueuingStrategy<unknown>;
     }
-    super(kPrivateSymbol, expectedLength, writableStrategy);
+    super(kPrivateSymbol, length, writableStrategy);
   }
 }
-
-const kEnumerable = { __proto__: null, enumerable: true };
 
 ObjectDefineProperties(IdentityTransformStream.prototype, {
   __proto__: null,
   readable: kEnumerable,
   writable: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'IdentityTransformStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('IdentityTransformStream'),
 });
 
 ObjectDefineProperties(FixedLengthStream.prototype, {
   __proto__: null,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'FixedLengthStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('FixedLengthStream'),
 });
 
 module.exports = {

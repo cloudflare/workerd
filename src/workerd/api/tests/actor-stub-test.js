@@ -49,7 +49,7 @@ function checkNullishJurisdiction(env, jurisdiction) {
 }
 
 export default {
-  async test(_request, env, _ctx) {
+  async test(_request, env, ctx) {
     // This test verifies we can still use registered methods like `fetch()`, and also confirms that
     // dynamic names (foo() in this case) can also be called.
     //
@@ -103,6 +103,28 @@ export default {
       let otherObj = env.ns.getByName('foo', { locationHint: 'wnam' });
       assert.deepStrictEqual(obj, otherObj);
       checkDurableObject(otherObj);
+    }
+
+    {
+      // Check that stubs accept a retry policy from both env bindings and ctx.exports, and that
+      // it is validated. actor-fetch-retry-test.c++ covers the full set of rejected values.
+      const retry = { maxRetries: 2, timeoutMs: 1000 };
+      for (const ns of [env.ns, ctx.exports.DurableObjectExample]) {
+        const otherObj = ns.get(ns.idFromName('foo'), { retry });
+        assert.equal(otherObj.name, 'foo');
+        assert.equal(await otherObj.foo(), 'foo from remote');
+        assert.equal(
+          await ns.getByName('foo', { retry: {} }).foo(),
+          'foo from remote'
+        );
+        assert.throws(() => ns.get(id, { retry: { maxRetries: 11 } }), {
+          name: 'RangeError',
+          message: 'retry.maxRetries must be an integer between 0 and 10',
+        });
+        assert.throws(() => ns.get(id, { retry: { timeoutMs: '1000' } }), {
+          name: 'TypeError',
+        });
+      }
     }
 
     {

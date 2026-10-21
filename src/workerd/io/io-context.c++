@@ -5,6 +5,7 @@
 #include "io-context.h"
 
 #include <workerd/io/access-info.h>
+#include <workerd/io/async-trace-perfetto.h>
 #include <workerd/io/io-gate.h>
 #include <workerd/io/timer-queue.h>
 #include <workerd/io/tracer.h>
@@ -64,6 +65,9 @@ class IoContext::TimeoutManagerImpl final: public TimeoutManager {
         "TimeoutId Generator mismatch - using a generator from wrong ServiceWorkerGlobalScope");
 
     auto [id, it] = addState(generator, kj::mv(params));
+    KJ_IF_SOME(tracker, context.tryGetAsyncTracker()) {
+      startAsyncTrace(tracker, it);
+    }
     setTimeoutImpl(context, it);
     return id;
   }
@@ -99,6 +103,8 @@ class IoContext::TimeoutManagerImpl final: public TimeoutManager {
   IdAndIterator addState(TimeoutId::Generator& generator, TimeoutParameters params);
 
   void setTimeoutImpl(IoContext& context, Iterator it);
+
+  void startAsyncTrace(const AsyncTracker& tracker, Iterator it);
 
   using TimeoutKey = TimerQueue::Key;
 
@@ -182,8 +188,48 @@ class IoContext::TimeoutManagerImpl::TimeoutState {
   bool isCanceled = false;
   bool isRunning = false;
 
+  // Settles when a one-shot timer fires; an interval stays unsettled until cleared. Each firing
+  // causes a turn. Declared before `maybePromise`, so it is released after the timer's promise.
+  AsyncResource asyncTraceResource;
+
   kj::Maybe<kj::Promise<void>> maybePromise;
 };
+
+namespace {
+
+// Creates the context's tracker if the isolate has async tracing enabled and there is at least one
+// sink: the embedder's, Perfetto's if it is recording "workerd.async", or the inspector's if a
+// DevTools session is connected to the isolate.
+kj::Maybe<kj::Arc<AsyncTracker>> makeAsyncTracker(
+    const Worker& worker, kj::Maybe<Worker::Actor&> actor) {
+  auto& isolate = worker.getIsolate();
+  KJ_IF_SOME(traceIsolate, isolate.getAsyncTraceIsolate()) {
+    kj::Maybe<kj::String> actorId = actor.map([](Worker::Actor& a) -> kj::String {
+      KJ_SWITCH_ONEOF(a.getId()) {
+        KJ_CASE_ONEOF(id, kj::Own<ActorIdFactory::ActorId>) {
+          return id->toString();
+        }
+        KJ_CASE_ONEOF(name, kj::String) {
+          return kj::str(name);
+        }
+      }
+      KJ_UNREACHABLE;
+    });
+    auto actorIdPtr = actorId.map([](kj::String& id) -> kj::StringPtr { return id; });
+    AsyncTraceSinks sinks;
+    isolate.getMetrics().addAsyncTraceSinks(sinks, isolate.getId(), actorIdPtr);
+    if (isAsyncTracePerfettoEnabled()) {
+      sinks.add(newAsyncTracePerfettoSink(isolate.getId(), actorIdPtr));
+    }
+    KJ_IF_SOME(sink, isolate.newAsyncTraceInspectorSink()) {
+      sinks.add(kj::mv(sink));
+    }
+    return AsyncTracker::tryCreate(traceIsolate, kj::mv(sinks), isolate.getId(), actorIdPtr);
+  }
+  return kj::none;
+}
+
+}  // namespace
 
 IoContext::IoContext(ThreadContext& thread,
     kj::Own<const Worker> workerParam,
@@ -193,6 +239,7 @@ IoContext::IoContext(ThreadContext& thread,
       worker(kj::mv(workerParam)),
       actor(actorParam),
       limitEnforcer(kj::mv(limitEnforcerParam)),
+      asyncTracker(makeAsyncTracker(*worker, actor)),
       id(nextId()),
       threadId(getThreadId()),
       deleteQueue(kj::arc<DeleteQueue>()),
@@ -279,10 +326,25 @@ tracing::InvocationSpanContext& IoContext::IncomingRequest::getInvocationSpanCon
   return KJ_ASSERT_NONNULL(invocationSpanContext);
 }
 
+tracing::InvocationSpanContext IoContext::IncomingRequest::getInvocationSpanContextForUserSpan(
+    SpanParent& userSpan) {
+  auto& base = getInvocationSpanContext();
+  tracing::SpanId sid = userSpan.getSpanId();
+  if (sid != tracing::SpanId::nullId) {
+    return tracing::InvocationSpanContext(
+        base.getTraceId(), base.getInvocationId(), sid, base.getTraceFlags());
+  }
+  return base.clone();
+}
+
 // A call to delivered() implies a promise to call drain() later (or one of the other methods
 // that sets waitedForWaitUntil). So, we can now safely add the request to
 // context->incomingRequests, which implies taking responsibility for draining on the way out.
 void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
+  delivered(location.function, location);
+}
+
+void IoContext::IncomingRequest::delivered(kj::StringPtr eventType, kj::SourceLocation location) {
   KJ_REQUIRE(!wasDelivered, "delivered() can only be called once");
   if (!context->incomingRequests.empty()) {
     // There is already an IncomingRequest running in this context, and we're going to make it no
@@ -301,6 +363,13 @@ void IoContext::IncomingRequest::delivered(kj::SourceLocation location) {
   wasDelivered = true;
   deliveredLocation = location;
   metrics->delivered();
+
+  KJ_IF_SOME(tracker, context->tryGetAsyncTracker()) {
+    asyncTraceResource = tracker.create(AsyncKind::REQUEST, eventType);
+    // Delivered synchronously from another context's turn (e.g. a service binding fetch), the
+    // request records what caused it there.
+    tracker.linkFromCallerTurn(asyncTraceResource.getId());
+  }
 
   // Create the root user trace span once per request. Stale references to the span (e.g. from
   // AsyncContextFrame storage via IoOwn, which for actors can outlive this request via the
@@ -348,6 +417,8 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
     // Request was never added to context->incomingRequests in the first place.
     return;
   }
+
+  asyncTraceResource.settle(AsyncOutcome::OK);
 
   bool hadUndrainedWaitUntilTasks = !waitedForWaitUntil && !context->waitUntilTasks.isEmpty();
   kj::Maybe<kj::Exception> cancellationException;
@@ -513,9 +584,21 @@ void IoContext::logUncaughtException(
   KJ_REQUIRE_NONNULL(currentLock).logUncaughtException(source, exception, message);
 }
 
-void IoContext::logUncaughtExceptionAsync(
-    UncaughtExceptionSource source, kj::Exception&& exception) {
-  if (getWorkerTracer() == kj::none && !worker->getIsolate().isInspectorEnabled()) {
+void IoContext::logUncaughtExceptionAsync(UncaughtExceptionSource source,
+    kj::Exception&& exception,
+    kj::Maybe<IncomingRequest&> incomingRequest) {
+  kj::Maybe<BaseTracer&> tracer;
+  kj::Maybe<RequestObserver&> metrics;
+  KJ_IF_SOME(request, incomingRequest) {
+    KJ_DASSERT(&request.getContext() == this);
+    tracer = request.getWorkerTracer();
+    metrics = request.getMetrics();
+  } else if (!incomingRequests.empty()) {
+    tracer = getWorkerTracer();
+    metrics = getMetrics();
+  }
+
+  if (tracer == kj::none && !worker->getIsolate().isInspectorEnabled()) {
     // We don't need to take the isolate lock as neither inspecting nor tracing is enabled. We
     // do still want to syslog if relevant, but we can do that without a lock.
     if (!jsg::isTunneledException(exception.getDescription()) &&
@@ -533,13 +616,17 @@ void IoContext::logUncaughtExceptionAsync(
   struct RunnableImpl: public Runnable {
     UncaughtExceptionSource source;
     kj::Exception exception;
+    kj::Maybe<IncomingRequest&> incomingRequest;
 
-    RunnableImpl(UncaughtExceptionSource source, kj::Exception&& exception)
+    RunnableImpl(UncaughtExceptionSource source,
+        kj::Exception&& exception,
+        kj::Maybe<IncomingRequest&> incomingRequest)
         : source(source),
-          exception(kj::mv(exception)) {}
+          exception(kj::mv(exception)),
+          incomingRequest(incomingRequest) {}
     void run(Worker::Lock& lock) override {
       // TODO(soon): Add logUncaughtException to jsg::Lock.
-      lock.logUncaughtException(source, kj::mv(exception));
+      lock.logUncaughtException(source, kj::mv(exception), incomingRequest);
     }
   };
 
@@ -547,12 +634,10 @@ void IoContext::logUncaughtExceptionAsync(
   // e.g. if `runImpl` throws before calling logUncaughtException.
   // This is useful for tests (and in fact only affects tests, since it's logged at an INFO level).
   KJ_ON_SCOPE_FAILURE({ KJ_LOG(INFO, "uncaught exception", source, exception); });
-  RunnableImpl runnable(source, kj::mv(exception));
+  RunnableImpl runnable(source, kj::mv(exception), incomingRequest);
   // TODO(perf): Is it worth using an async lock here? The only case where it really matters is
   //   when a trace worker is active, but maybe they'll be more common in the future. To take an
   //   async lock here, we'll probably have to update all the call sites of this method... ick.
-  kj::Maybe<RequestObserver&> metrics;
-  if (!incomingRequests.empty()) metrics = getMetrics();
   runImpl(
       runnable, Worker::Lock::TakeSynchronously(metrics), kj::none, Runnable::Exceptional(true));
 }
@@ -898,6 +983,9 @@ void IoContext::TimeoutManagerImpl::TimeoutState::cancel() {
     maybePromise = kj::none;
   }
 
+  // Reports `destroy` now, unless the timer already fired (and settled).
+  asyncTraceResource.release();
+
   ++manager.timeoutsFinished;
 }
 
@@ -924,6 +1012,12 @@ auto IoContext::TimeoutManagerImpl::addState(
   return {id, it};
 }
 
+void IoContext::TimeoutManagerImpl::startAsyncTrace(const AsyncTracker& tracker, Iterator it) {
+  auto& state = it->second;
+  state.asyncTraceResource = tracker.create(AsyncKind::TIMER, state.params.asyncTraceName);
+  state.asyncTraceResource.annotate("delayMs"_kj, kj::str(state.params.msDelay));
+}
+
 void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator it) {
   auto& state = it->second;
 
@@ -944,6 +1038,10 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
   //   the timer, so we don't want to addTask() it, which awaitIo() does implicitly.
   auto promise =
       paf.promise.then([this, &context, it, when, cs = context.getCriticalSection()]() mutable {
+    auto& firing = it->second;
+    if (!firing.params.repeat) {
+      firing.asyncTraceResource.settle(AsyncOutcome::OK);
+    }
     return context.run([this, it, when](Worker::Lock& lock, IoContext& context) mutable {
       auto& state = it->second;
 
@@ -975,6 +1073,8 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
         // Because Promise has an underspecified move ctor, we need to explicitly nullify the Maybe
         // to indicate that we've consumed the promise.
         state.maybePromise = kj::none;
+
+        state.asyncTraceResource.enterAsTurnCause();
 
         // The user's callback might throw, but we need to at least attempt to reschedule interval
         // callbacks even if they throw. This deferred action takes care of that. Note that we don't
@@ -1081,8 +1181,11 @@ void IoContext::TimeoutManagerImpl::clearTimeout(IoContext& context, TimeoutId t
   timeout->second.cancel();
 }
 
-TimeoutId IoContext::setTimeoutImpl(
-    TimeoutId::Generator& generator, bool repeat, jsg::Function<void()> function, double msDelay) {
+TimeoutId IoContext::setTimeoutImpl(TimeoutId::Generator& generator,
+    bool repeat,
+    jsg::Function<void()> function,
+    double msDelay,
+    kj::Maybe<kj::StringPtr> asyncTraceName) {
   static constexpr int64_t max = 3153600000000;  // Milliseconds in 100 years
   // Clamp the range on timers to [0, 3153600000000] (inclusive). The specs
   // do not indicate a clear maximum range for setTimeout/setInterval so the
@@ -1091,6 +1194,7 @@ TimeoutId IoContext::setTimeoutImpl(
       : msDelay >= static_cast<double>(max)           ? max
                                                       : static_cast<int64_t>(msDelay);
   auto params = TimeoutManager::TimeoutParameters(repeat, delay, kj::mv(function));
+  params.asyncTraceName = asyncTraceName.orDefault(repeat ? "setInterval"_kj : "setTimeout"_kj);
   return timeoutManager->setTimeout(*this, generator, kj::mv(params));
 }
 
@@ -1163,7 +1267,17 @@ kj::Own<WorkerInterface> IoContext::getSubrequestNoChecks(
         kj::mv(ret), getHeaderIds().contentEncoding, metrics);
   }
 
-  if (tracing.isObserved()) {
+  // The span lives as long as the client, not just until the caller's next awaitIo(), which may
+  // await something else; unless the caller says that awaitIo() awaits this subrequest.
+  bool keepForAsyncTrace = false;
+  if (options.spanAwaitedNext == SpanAwaitedNext::NO) {
+    tracing.detachAsync();
+  } else {
+    // Unobserved spans are dropped here, which would settle the operation before awaitIo() can
+    // adopt it; keep it with the client, as an observed span would be.
+    keepForAsyncTrace = tryGetAsyncTracker() != kj::none;
+  }
+  if (tracing.isObserved() || keepForAsyncTrace) {
     auto ioOwnedSpan = addObject(kj::heap(kj::mv(tracing)));
     ret = ret.attach(kj::mv(ioOwnedSpan));
   }
@@ -1187,8 +1301,11 @@ kj::Own<WorkerInterface> IoContext::getSubrequest(
   return getSubrequestNoChecks(kj::mv(func), kj::mv(options), CountSubrequest::YES);
 }
 
-kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
-    uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName) {
+kj::Own<WorkerInterface> IoContext::getSubrequestChannel(uint channel,
+    bool isInHouse,
+    kj::Maybe<kj::String> cfBlobJson,
+    kj::ConstString operationName,
+    SpanAwaitedNext spanAwaitedNext) {
   return getSubrequest(
       [&](TraceContext& tracing, IoChannelFactory& channelFactory) {
     return getSubrequestChannelImpl(
@@ -1198,6 +1315,7 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannel(
         .inHouse = isInHouse,
         .wrapMetrics = !isInHouse,
         .operationName = kj::mv(operationName),
+        .spanAwaitedNext = spanAwaitedNext,
       });
 }
 
@@ -1271,10 +1389,13 @@ kj::Own<WorkerInterface> IoContext::getSubrequestChannelImpl(uint channel,
   return client;
 }
 
-kj::Own<kj::HttpClient> IoContext::getHttpClient(
-    uint channel, bool isInHouse, kj::Maybe<kj::String> cfBlobJson, kj::ConstString operationName) {
-  return asHttpClient(
-      getSubrequestChannel(channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName)));
+kj::Own<kj::HttpClient> IoContext::getHttpClient(uint channel,
+    bool isInHouse,
+    kj::Maybe<kj::String> cfBlobJson,
+    kj::ConstString operationName,
+    SpanAwaitedNext spanAwaitedNext) {
+  return asHttpClient(getSubrequestChannel(
+      channel, isInHouse, kj::mv(cfBlobJson), kj::mv(operationName), spanAwaitedNext));
 }
 
 kj::Own<kj::HttpClient> IoContext::getHttpClient(
@@ -1302,31 +1423,38 @@ kj::Own<CacheClient> IoContext::getCacheClient() {
 
 jsg::AsyncContextFrame::StorageScope IoContext::makeAsyncTraceScope(
     Worker::Lock& lock, kj::Maybe<SpanParent> spanParentOverride) {
-  static const SpanParent dummySpanParent = nullptr;
-
-  jsg::Lock& js = lock;
-  kj::Own<SpanParent> spanParent;
-  KJ_IF_SOME(spo, kj::mv(spanParentOverride)) {
-    spanParent = kj::heap(kj::mv(spo));
-  } else {
-    // TODO(cleanup): Can we also elide the other memory allocations for the (unused) storage
-    // scope if tracing is disabled?
-    SpanParent metricsSpan = getMetrics().getSpan();
-    if (!metricsSpan.isObserved()) {
-      // const_cast is ok: There's no state that could be changed in a non-observed span parent.
-      spanParent = kj::Own<SpanParent>(
-          &const_cast<SpanParent&>(dummySpanParent), kj::NullDisposer::instance);
-    } else {
-      spanParent = kj::heap(kj::mv(metricsSpan));
-    }
-  }
-  auto ioOwnSpanParent = IoContext::current().addObject(kj::mv(spanParent));
-  auto spanHandle = jsg::wrapOpaque(js.v8Context(), kj::mv(ioOwnSpanParent));
   return jsg::AsyncContextFrame::StorageScope(
-      js, lock.getTraceAsyncContextKey(), js.v8Ref(spanHandle));
+      lock, lock.getTraceAsyncContextKey(), makeTraceScopeValue(lock, kj::mv(spanParentOverride)));
 }
 
 jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
+    Worker::Lock& lock, kj::Maybe<SpanParent> userSpanOverride) {
+  return jsg::AsyncContextFrame::StorageScope(lock, lock.getUserTraceAsyncContextKey(),
+      makeUserTraceScopeValue(lock, kj::mv(userSpanOverride)));
+}
+
+jsg::AsyncContextFrame::StorageScope IoContext::makeRequestTraceScope(Worker::Lock& lock) {
+  jsg::AsyncContextFrame::StorageEntry entries[] = {
+    {lock.getTraceAsyncContextKey(), makeTraceScopeValue(lock, kj::none)},
+    {lock.getUserTraceAsyncContextKey(), makeUserTraceScopeValue(lock, kj::none)},
+  };
+  return jsg::AsyncContextFrame::StorageScope(lock, entries);
+}
+
+jsg::Value IoContext::makeTraceScopeValue(
+    Worker::Lock& lock, kj::Maybe<SpanParent> spanParentOverride) {
+  auto& ioContext = IoContext::current();
+  jsg::Lock& js = lock;
+  auto spanParent = kj::mv(spanParentOverride).orDefault([&]() { return getMetrics().getSpan(); });
+  if (!spanParent.isObserved()) {
+    return js.v8Ref(jsg::wrapOpaque(js.v8Context(), TraceScopeState(ioContext.getId())));
+  }
+  auto ioOwnSpanParent = ioContext.addObject(kj::heap(kj::mv(spanParent)));
+  auto spanHandle = jsg::wrapOpaque(js.v8Context(), TraceScopeState(kj::mv(ioOwnSpanParent)));
+  return js.v8Ref(spanHandle);
+}
+
+jsg::Value IoContext::makeUserTraceScopeValue(
     Worker::Lock& lock, kj::Maybe<SpanParent> userSpanOverride) {
   auto& ioContext = IoContext::current();
   jsg::Lock& js = lock;
@@ -1337,16 +1465,18 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
     userSpan = getRootUserTraceSpan();
   }
 
+  if (!userSpan.isObserved()) {
+    return js.v8Ref(jsg::wrapOpaque(js.v8Context(), UserTraceScopeState(ioContext.getId())));
+  }
+
   kj::Maybe<tracing::InvocationSpanContext> invocationSpanContext;
-  if (userSpan.isObserved()) {
-    auto& baseContext = getCurrentIncomingRequest().getInvocationSpanContext();
-    auto spanId = userSpan.getSpanId();
-    if (spanId != tracing::SpanId::nullId) {
-      invocationSpanContext = tracing::InvocationSpanContext(baseContext.getTraceId(),
-          baseContext.getInvocationId(), spanId, baseContext.getTraceFlags());
-    } else {
-      invocationSpanContext = baseContext.clone();
-    }
+  auto& baseContext = getCurrentIncomingRequest().getInvocationSpanContext();
+  auto spanId = userSpan.getSpanId();
+  if (spanId != tracing::SpanId::nullId) {
+    invocationSpanContext = tracing::InvocationSpanContext(baseContext.getTraceId(),
+        baseContext.getInvocationId(), spanId, baseContext.getTraceFlags());
+  } else {
+    invocationSpanContext = baseContext.clone();
   }
 
   kj::Maybe<kj::Own<workerd::WeakRef<BaseTracer>>> tracer;
@@ -1357,9 +1487,9 @@ jsg::AsyncContextFrame::StorageScope IoContext::makeUserAsyncTraceScope(
   auto asyncContext = kj::heap<UserTraceAsyncContext>(
       kj::mv(userSpan), kj::mv(tracer), kj::mv(invocationSpanContext));
   auto ioOwnAsyncContext = ioContext.addObject(kj::mv(asyncContext));
-  auto contextHandle = jsg::wrapOpaque(js.v8Context(), kj::mv(ioOwnAsyncContext));
-  return jsg::AsyncContextFrame::StorageScope(
-      js, lock.getUserTraceAsyncContextKey(), js.v8Ref(contextHandle));
+  auto contextHandle =
+      jsg::wrapOpaque(js.v8Context(), UserTraceScopeState(kj::mv(ioOwnAsyncContext)));
+  return js.v8Ref(contextHandle);
 }
 
 SpanParent IoContext::getCurrentTraceSpan() {
@@ -1369,11 +1499,18 @@ SpanParent IoContext::getCurrentTraceSpan() {
       KJ_IF_SOME(value, frame.get(*lock.getTraceAsyncContextKey())) {
         auto handle = value.getHandle(lock);
         jsg::Lock& js = lock;
-        auto& spanParent = jsg::unwrapOpaqueRef<IoOwn<SpanParent>>(js.v8Isolate, handle);
+        auto& state = jsg::unwrapOpaqueRef<TraceScopeState>(js.v8Isolate, handle);
         // The frame may have been captured by a different request (e.g. via
         // AsyncLocalStorage.snapshot()), whose span this request can't use.
-        KJ_IF_SOME(span, spanParent.tryGet()) {
-          return span.addRef();
+        KJ_SWITCH_ONEOF(state) {
+          KJ_CASE_ONEOF(id, Id) {
+            if (id.isCurrent()) return SpanParent(nullptr);
+          }
+          KJ_CASE_ONEOF(spanParent, IoOwn<SpanParent>) {
+            KJ_IF_SOME(span, spanParent.tryGet()) {
+              return span.addRef();
+            }
+          }
         }
       }
     }
@@ -1395,12 +1532,18 @@ SpanParent IoContext::getCurrentUserTraceSpan() {
       KJ_IF_SOME(value, frame.get(*lock.getUserTraceAsyncContextKey())) {
         auto handle = value.getHandle(lock);
         jsg::Lock& js = lock;
-        auto& asyncContext =
-            jsg::unwrapOpaqueRef<IoOwn<UserTraceAsyncContext>>(js.v8Isolate, handle);
+        auto& state = jsg::unwrapOpaqueRef<UserTraceScopeState>(js.v8Isolate, handle);
         // As in getCurrentTraceSpan(), the frame may belong to a different request, in which case
         // fall back to this request's root span.
-        KJ_IF_SOME(context, asyncContext.tryGet()) {
-          return context.getSpan();
+        KJ_SWITCH_ONEOF(state) {
+          KJ_CASE_ONEOF(id, Id) {
+            if (id.isCurrent()) return SpanParent(nullptr);
+          }
+          KJ_CASE_ONEOF(asyncContext, IoOwn<UserTraceAsyncContext>) {
+            KJ_IF_SOME(context, asyncContext.tryGet()) {
+              return context.getSpan();
+            }
+          }
         }
       }
     }
@@ -1414,7 +1557,7 @@ SpanBuilder IoContext::makeTraceSpan(kj::ConstString operationName) {
 
 TraceContext IoContext::makeUserTraceSpan(kj::ConstString operationName) {
   TraceContextParent parents(getCurrentTraceSpan(), getCurrentUserTraceSpan());
-  return parents.newChild(kj::mv(operationName));
+  return parents.newChild(kj::mv(operationName), tryGetAsyncTracker());
 }
 
 void IoContext::taskFailed(kj::Exception&& exception) {
@@ -1429,7 +1572,9 @@ void IoContext::taskFailed(kj::Exception&& exception) {
   // If `taskFailed()` throws the whole event loop blows up... let's be careful not to let that
   // happen.
   KJ_IF_SOME(e, kj::runCatchingExceptions([&]() {
-    logUncaughtExceptionAsync(UncaughtExceptionSource::ASYNC_TASK, kj::mv(exception));
+    // There may no longer be an incoming request at task fail time – provide kj::none to indicate
+    // that the tracer and metrics should be taken from the current request, if available
+    logUncaughtExceptionAsync(UncaughtExceptionSource::ASYNC_TASK, kj::mv(exception), kj::none);
   })) {
     KJ_LOG(ERROR, "logUncaughtExceptionAsync() threw an exception?", e);
   }
@@ -1503,7 +1648,17 @@ void IoContext::runImpl(Runnable& runnable,
 
   getIoChannelFactory().getTimer().syncTime();
 
+  // Spans the lock wait, the JavaScript, and the microtask drain, and ends before the lock is
+  // released. Without a better-known cause (set by whatever resumed JavaScript), the turn is
+  // attributed to the current request.
+  AsyncTracker::TurnScope turnScope(tryGetAsyncTracker(),
+      incomingRequests.empty() ? 0 : incomingRequests.front().getAsyncTraceId());
+
   runInContextScope(lockType, kj::mv(inputLock), [&](Worker::Lock& workerLock) {
+    turnScope.locked();
+    // Declared before the microtask drain's KJ_DEFER below, so it runs after it, still under the
+    // lock.
+    KJ_DEFER(turnScope.end());
     kj::Own<void> event;
     if (!exceptional) {
       workerLock.requireNoPermanentException();

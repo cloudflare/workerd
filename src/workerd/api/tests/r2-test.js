@@ -159,13 +159,16 @@ export default {
 
         const jsonRequest = JSON.parse(new TextDecoder().decode(value));
 
-        // Currently not using the body in these test so I'm going to just discard
-        for await (const _ of request.body) {
-          // intentionally empty
+        // The rest of the body is the object payload.
+        const decoder = new TextDecoder();
+        let payload = '';
+        for await (const chunk of request.body) {
+          payload += decoder.decode(chunk, { stream: true });
         }
+        payload += decoder.decode();
 
         // Assert it's the correct version
-        assert((jsonRequest.version = 1));
+        assert.strictEqual(jsonRequest.version, 1);
 
         if (jsonRequest.method === 'delete') {
           if (jsonRequest.objects) {
@@ -391,13 +394,18 @@ export default {
               },
             });
           }
+          case 'blobBody': {
+            assert.strictEqual(jsonRequest.method, 'put');
+            assert.strictEqual(payload, body);
+            break;
+          }
         }
         return Response.json(objResponse);
       }
       case 'GET': {
         const rawHeader = request.headers.get('cf-r2-request');
         const jsonRequest = JSON.parse(rawHeader);
-        assert((jsonRequest.version = 1));
+        assert.strictEqual(jsonRequest.version, 1);
         if (jsonRequest.method === 'list') {
           switch (jsonRequest.prefix) {
             case 'basic': {
@@ -613,6 +621,8 @@ export default {
     {
       // PutObject
       await compareResponse(env.BUCKET.put(key, body));
+      // PutObject with a Blob body
+      await compareResponse(env.BUCKET.put('blobBody', new Blob([body])));
       // GetObject
       await compareResponse(env.BUCKET.get(key), {
         body,

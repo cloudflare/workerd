@@ -532,7 +532,9 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
     headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
   }
 
-  auto client = context.getHttpClient(0, false, kj::none, "websocket_open"_kjc);
+  // initConnection() below awaits the open.
+  auto client =
+      context.getHttpClient(0, false, kj::none, "websocket_open"_kjc, SpanAwaitedNext::YES);
   auto prom = ([](auto& context, auto outputLock, auto connUrl, auto headers,
                    auto client) -> kj::Promise<PackedWebSocket> {
     KJ_IF_SOME(lock, outputLock) {

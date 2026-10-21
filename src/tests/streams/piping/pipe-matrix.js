@@ -10,7 +10,7 @@
 
 import { strictEqual, ok, rejects, deepStrictEqual, throws } from 'node:assert';
 import { mock } from 'node:test';
-import { usingTsImpl } from 'which-impl';
+import { usingTsImpl, pipeToBackwardPropagation } from 'which-impl';
 
 // Writing to a closed JS WritableStream rejects with per-implementation
 // messages.
@@ -1097,10 +1097,17 @@ export const pipeToJsToJsCloseQueuedDestination = {
     const writer = ws.getWriter();
     await writer.closed;
 
-    // TODO(conform): The spec's "closing must be propagated backward" would have
-    // rejected the pipe promise with the TypeError above. The pipe loop bails out
-    // once the pipe lock is gone, so the promise currently resolves instead.
-    await pipePromise;
+    // The spec's "closing must be propagated backward" rejects the pipe promise
+    // with the TypeError above. Without pipe_to_backward_propagation the pipe loop
+    // bails out once the pipe lock is gone, so the promise resolves instead.
+    if (pipeToBackwardPropagation) {
+      await rejects(pipePromise, {
+        name: 'TypeError',
+        message: 'This destination writable stream is closed.',
+      });
+    } else {
+      await pipePromise;
+    }
   },
 };
 
@@ -1155,10 +1162,18 @@ export const pipeToJsToJsCloseQueuedDestinationPreventCancel = {
     const reader = rs.getReader();
 
     // Close the source to settle the pipe's still-pending read, which lets the
-    // pipe promise settle.
+    // pipe promise settle without pipe_to_backward_propagation. With it, the
+    // pipe has already rejected with the backward-propagated close.
     rc.close();
     await reader.closed;
-    await pipePromise;
+    if (pipeToBackwardPropagation) {
+      await rejects(pipePromise, {
+        name: 'TypeError',
+        message: 'This destination writable stream is closed.',
+      });
+    } else {
+      await pipePromise;
+    }
   },
 };
 

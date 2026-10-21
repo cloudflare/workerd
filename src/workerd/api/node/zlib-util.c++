@@ -618,8 +618,18 @@ void ZlibUtil::CompressionStream<CompressionContext>::write(jsg::Lock& js,
   JSG_REQUIRE(IsWithinBounds(outputOffset, outputLength, outputBytes.size()), Error,
       "Output access is not within bounds"_kj);
 
-  writeStream<async>(js, flush, inputBytes.slice(inputOffset, inputOffset + inputLength),
-      outputBytes.slice(outputOffset, outputOffset + outputLength));
+  auto inputSlice = inputBytes.slice(inputOffset, inputOffset + inputLength);
+  auto outputSlice = outputBytes.slice(outputOffset, outputOffset + outputLength);
+
+  // The compression libraries assume the input and output regions are disjoint. Brotli's fast
+  // encoder, for example, compresses directly into the caller's output while still reading the
+  // caller's input, so an overlapping output rewrites input the encoder has already examined and
+  // breaks its internal invariants. A guest can alias both regions onto the same ArrayBuffer.
+  JSG_REQUIRE(inputSlice.size() == 0 || outputSlice.size() == 0 ||
+          inputSlice.end() <= outputSlice.begin() || outputSlice.end() <= inputSlice.begin(),
+      Error, "Input and output buffers must not overlap"_kj);
+
+  writeStream<async>(js, flush, inputSlice, outputSlice);
 }
 
 template <typename CompressionContext>

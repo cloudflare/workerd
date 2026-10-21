@@ -170,6 +170,20 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// conversion of the Rust function name.
 #[proc_macro_attribute]
 pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    callback(item, Callback::Function)
+}
+
+/// The V8 callback shape a generated callback takes.
+#[derive(Clone, Copy)]
+enum Callback {
+    Function,
+    /// `AccessorNameGetterCallback`, for instance properties.
+    Getter,
+    /// `AccessorNameSetterCallback`, for instance properties.
+    Setter,
+}
+
+fn callback(item: TokenStream, kind: Callback) -> TokenStream {
     let input_fn = parse_macro_input!(item as ItemFn);
     let fn_name = &input_fn.sig.ident;
     let fn_vis = &input_fn.vis;
@@ -282,16 +296,18 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
+    let (params, isolate, info) = callback_signature(kind);
+
     quote! {
         #fn_vis #fn_sig { #fn_block }
 
         #[automatically_derived]
         #[expect(clippy::undocumented_unsafe_blocks)]
-        extern "C" fn #callback_name(args: *mut jsg::v8::ffi::FunctionCallbackInfo) {
-            let mut lock = unsafe { jsg::Lock::from_args(args) };
+        extern "C" fn #callback_name(#params) {
+            let mut lock = unsafe { jsg::Lock::from_isolate_ptr(#isolate) };
             jsg::catch_panic(&mut lock, || {
-                let mut lock = unsafe { jsg::Lock::from_args(args) };
-                let mut args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(args) };
+                let mut lock = unsafe { jsg::Lock::from_isolate_ptr(#isolate) };
+                let mut args = unsafe { #info };
                 #(#unwraps)*
                 #invocation
                 #result_handling
@@ -299,6 +315,38 @@ pub fn jsg_method(_attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
     .into()
+}
+
+/// The parameters of a generated callback, and expressions for its isolate and
+/// its argument info.
+fn callback_signature(
+    kind: Callback,
+) -> (
+    quote::__private::TokenStream,
+    quote::__private::TokenStream,
+    quote::__private::TokenStream,
+) {
+    match kind {
+        Callback::Function => (
+            quote! { args: *mut jsg::v8::ffi::FunctionCallbackInfo },
+            quote! { jsg::v8::ffi::fci_get_isolate(args) },
+            quote! { jsg::v8::FunctionCallbackInfo::from_ffi(args) },
+        ),
+        Callback::Getter => (
+            quote! { _name: usize, args: *mut jsg::v8::ffi::PropertyCallbackInfo },
+            quote! { jsg::v8::ffi::pci_get_isolate(args) },
+            quote! { jsg::v8::PropertyCallbackInfo::from_ffi(args) },
+        ),
+        Callback::Setter => (
+            quote! {
+                _name: usize,
+                value: usize,
+                args: *mut jsg::v8::ffi::PropertySetterCallbackInfo
+            },
+            quote! { jsg::v8::ffi::psci_get_isolate(args) },
+            quote! { jsg::v8::PropertySetterCallbackInfo::from_ffi(args, value) },
+        ),
+    }
 }
 
 // =============================================================================
@@ -394,10 +442,21 @@ pub fn jsg_constructor(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// omitted, the prefix is stripped and the remainder is converted
 /// `snake_case` -> `camelCase`.
 #[proc_macro_attribute]
-pub fn jsg_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Reuse jsg_method callback generation; registration as Member::Property is
-    // handled by #[jsg_resource] on the enclosing impl block.
-    jsg_method(TokenStream::new(), item)
+pub fn jsg_property(attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Registration as a Member is handled by #[jsg_resource] on the enclosing
+    // impl block, which also reports malformed arguments.
+    let instance = matches!(
+        resource::parse_jsg_property_args(attr),
+        Ok((resource::PropertyKind::Instance, _, _))
+    );
+    let setter = syn::parse::<ItemFn>(item.clone())
+        .is_ok_and(|f| f.sig.ident.to_string().starts_with("set_"));
+    let kind = match (instance, setter) {
+        (false, _) => Callback::Function,
+        (true, false) => Callback::Getter,
+        (true, true) => Callback::Setter,
+    };
+    callback(item, kind)
 }
 
 /// Registers a method as a debug-inspect-only property on a `#[jsg_resource]`

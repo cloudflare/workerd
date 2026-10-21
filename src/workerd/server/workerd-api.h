@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <workerd/api/http.h>
 #include <workerd/api/pyodide/pyodide.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/io/worker.h>
@@ -65,6 +64,8 @@ class WorkerdApi final: public Worker::Api {
   const jsg::TypeHandler<ErrorInterface>& getErrorInterfaceTypeHandler(
       jsg::Lock& lock) const override;
   const jsg::TypeHandler<api::QueueExportedHandler>& getQueueTypeHandler(
+      jsg::Lock& lock) const override;
+  const jsg::TypeHandler<api::BenchExportedHandler>& getBenchTypeHandler(
       jsg::Lock& lock) const override;
   jsg::JsObject wrapExecutionContext(
       jsg::Lock& lock, jsg::Ref<api::ExecutionContext> ref) const override;

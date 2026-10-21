@@ -998,7 +998,9 @@ export function maybeRestoreSnapshot(Module: Module): void {
   );
   // Invalidate caches if we have a snapshot because the contents of site-packages
   // may have changed.
-  invalidateCaches(Module);
+  enterJaegerSpan('invalidate_caches', () => {
+    invalidateCaches(Module);
+  });
 }
 
 function collectSnapshot(

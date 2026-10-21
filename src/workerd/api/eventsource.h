@@ -122,26 +122,33 @@ class EventSource: public EventTarget {
 
   // Called by the internal implementation to notify the EventSource about messages
   // received from the server.
-  void enqueueMessages(
-      kj::Array<PendingMessage> messages, kj::Rc<jsg::WeakRef<EventSource>> weakSelf);
+  static void enqueueMessages(IoContext& context,
+      kj::Array<PendingMessage> messages,
+      kj::Rc<jsg::WeakRef<EventSource>> weakSelf);
 
-  // Called by the internal implementation to notify the EventSource that the server
-  // has provided a new reconnection time.
-  void setReconnectionTime(uint32_t time);
+  // The native parser owns its state and refers back to this EventSource only weakly.
+  kj::Own<WritableStreamSink> newSink(jsg::Lock& js);
 
-  // Called by the internal implementation to retrieve the last event id that was
-  // specified by the server.
-  kj::StringPtr getLastEventId();
+  // Shared with the sink, which can survive failure to register the pump's JS callbacks.
+  // This state has no references back to the EventSource or its request.
+  struct StreamState final: public kj::Refcounted {
+    kj::String lastEventId;
+    kj::Duration reconnectionTime = 2 * kj::SECONDS;
+    void setReconnectionTime(uint32_t time);
 
-  // Called by the internal implementation to set the last event id that was specified
-  // by the server.
-  void setLastEventId(kj::String id);
+    JSG_MEMORY_INFO(StreamState) {
+      tracker.trackField("lastEventId", lastEventId);
+    }
+  };
 
   void visitForGc(jsg::GcVisitor& visitor);
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
 
  private:
-  IoContext& context;
+  IoContext& getContext();
+  IoContext::Id contextId;
+  // IoOwn's checked lookup is non-const, including for read-only heap snapshot traversal.
+  mutable IoOwn<StreamState> streamState;
   struct FetchImpl {
     jsg::Url url;
     EventSourceInit options;
@@ -159,21 +166,12 @@ class EventSource: public EventTarget {
   kj::Maybe<FetchImpl> impl;
   jsg::Ref<AbortController> abortController;
   State readyState;
-  kj::String lastEventId;
 
   // Indicates that the close method has been previously called.
   bool closeCalled = false;
 
   // The EventSource spec defines onopen, onmessage, and onerror as prototype
   // properties on the class.
-
-  // The default reconnection wait time. This is fairly arbitrary and is left
-  // entirely up to the implementation. The event stream can provide a new value.
-  static constexpr auto DEFAULT_RECONNECTION_TIME = 2 * kj::SECONDS;
-  static constexpr uint32_t MIN_RECONNECTION_TIME = 1000;
-  static constexpr uint32_t MAX_RECONNECTION_TIME = 10 * 1000;
-
-  kj::Duration reconnectionTime = DEFAULT_RECONNECTION_TIME;
 
   void notifyOpen(jsg::Lock& js);
   // AlreadyReported::YES indicates the error was already delivered to the global scope's

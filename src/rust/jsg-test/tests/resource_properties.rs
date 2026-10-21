@@ -723,32 +723,39 @@ fn instance_property_is_own_property() {
 }
 
 #[test]
-fn instance_property_has_accessor_descriptor() {
+fn instance_property_has_data_descriptor() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Token::new("tok", "bearer"));
         ctx.set_global("t", r.to_js(lock));
-        // An accessor descriptor has `get`/`set` keys, not `value`/`writable`.
-        let has_get: bool = ctx
+        // Like C++ JSG_INSTANCE_PROPERTY, a native data property: `value` and
+        // `writable`, no `get`/`set`.
+        let desc: String = ctx
             .eval(
                 lock,
-                "typeof Object.getOwnPropertyDescriptor(t, 'id').get === 'function'",
+                "const d = (k) => Object.getOwnPropertyDescriptor(t, k); \
+                 [d('id'), d('kind')].map(x => \
+                   [typeof x.get, typeof x.set, x.value, x.writable].join()).join(';')",
             )
             .unwrap();
-        let has_set: bool = ctx
-            .eval(
-                lock,
-                "typeof Object.getOwnPropertyDescriptor(t, 'id').set === 'function'",
-            )
-            .unwrap();
-        assert!(
-            has_get,
-            "instance property must have a getter in its descriptor"
+        assert_eq!(
+            desc,
+            "undefined,undefined,tok,true;undefined,undefined,bearer,false"
         );
-        assert!(
-            has_set,
-            "read-write instance property must have a setter in its descriptor"
-        );
+        Ok(())
+    });
+}
+
+#[test]
+fn instance_property_key_order() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let r = jsg::Rc::new(Token::new("tok", "bearer"));
+        ctx.set_global("t", r.to_js(lock));
+        // Native data properties enumerate in reverse declaration order, as
+        // C++ JSG_INSTANCE_PROPERTY does.
+        let keys: String = ctx.eval(lock, "Object.keys(t).join()").unwrap();
+        assert_eq!(keys, "kind,id");
         Ok(())
     });
 }

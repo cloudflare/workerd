@@ -191,7 +191,7 @@ void MessagePort::close(jsg::Lock& js) {
 void MessagePort::start(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(pending, Pending) {
-      auto list = kj::mv(pending);
+      auto list = KJ_MAP(item, pending) { return kj::mv(item); };
       state = Started{};
       // We're going to dispatch the messages using a microtask so that the actual
       // delivery is deferred to match Node.js' behavior as close as possible.

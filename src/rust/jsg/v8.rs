@@ -56,7 +56,7 @@ use crate::Resource;
 )]
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
 pub mod ffi {
-    #[derive(Debug)]
+    #[derive(Debug, Clone, Copy)]
     struct Local {
         ptr: usize,
     }
@@ -64,7 +64,7 @@ pub mod ffi {
     /// Mirrors `v8::MaybeLocal<T>`: a single pointer-sized word where `ptr == 0` means empty.
     /// This matches V8's internal layout exactly — `v8::MaybeLocal<T>` holds one `Local<T>`
     /// field which is itself one `internal::Address*` (one pointer word).
-    #[derive(Debug)]
+    #[derive(Debug, Clone, Copy)]
     struct MaybeLocal {
         ptr: usize,
     }
@@ -141,6 +141,8 @@ pub mod ffi {
 
         type Isolate;
         type FunctionCallbackInfo;
+        type PropertyCallbackInfo;
+        type PropertySetterCallbackInfo;
         type Wrappable;
 
         // BackingStore
@@ -156,8 +158,6 @@ pub mod ffi {
         ) -> usize;
 
         // Local<T>
-        pub unsafe fn local_drop(value: Local);
-        pub unsafe fn local_clone(value: &Local) -> Local;
         pub unsafe fn local_to_global(isolate: *mut Isolate, value: Local) -> Global;
         pub unsafe fn local_new_number(isolate: *mut Isolate, value: f64) -> Local;
         pub unsafe fn local_new_string(isolate: *mut Isolate, value: &str) -> Local;
@@ -412,6 +412,13 @@ pub mod ffi {
         ) -> Result<Vec<Global>>;
 
         // Local<TypedArray>
+        // Fallible: KJ_REQUIREs the view is within the buffer's bounds.
+        pub unsafe fn uint8_array_from_buffer(
+            isolate: *mut Isolate,
+            buffer: &Local,
+            byte_offset: usize,
+            length: usize,
+        ) -> Result<Local>;
         pub unsafe fn local_typed_array_length(isolate: *mut Isolate, array: &Local) -> usize;
         pub unsafe fn local_typed_array_buffer_data(isolate: *mut Isolate, array: &Local) -> usize;
         pub unsafe fn local_typed_array_byte_offset(isolate: *mut Isolate, array: &Local) -> usize;
@@ -562,6 +569,13 @@ pub mod ffi {
         pub unsafe fn fci_get_length(args: *mut FunctionCallbackInfo) -> usize;
         pub unsafe fn fci_get_arg(args: *mut FunctionCallbackInfo, index: usize) -> Local;
         pub unsafe fn fci_set_return_value(args: *mut FunctionCallbackInfo, value: Local);
+
+        // PropertyCallbackInfo, for native data properties
+        pub unsafe fn pci_get_isolate(info: *mut PropertyCallbackInfo) -> *mut Isolate;
+        pub unsafe fn pci_get_this(info: *mut PropertyCallbackInfo) -> Local;
+        pub unsafe fn pci_set_return_value(info: *mut PropertyCallbackInfo, value: Local);
+        pub unsafe fn psci_get_isolate(info: *mut PropertySetterCallbackInfo) -> *mut Isolate;
+        pub unsafe fn psci_get_this(info: *mut PropertySetterCallbackInfo) -> Local;
 
         // Errors
         pub unsafe fn exception_create_from_bytes(
@@ -938,7 +952,7 @@ impl Display for Local<'_, Value> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // SAFETY: isolate is valid and locked (guaranteed by the Local's invariant).
         let mut lock = unsafe { Lock::from_isolate_ptr(self.isolate.as_ffi()) };
-        match <std::string::String as FromJS>::from_js(&mut lock, self.clone()) {
+        match <std::string::String as FromJS>::from_js(&mut lock, *self) {
             Ok(value) => write!(f, "{value}"),
             Err(e) => write!(f, "{e:?}"),
         }
@@ -1119,14 +1133,13 @@ pub struct Local<'a, T> {
     _marker: PhantomData<(&'a (), T)>,
 }
 
-impl<T> Drop for Local<'_, T> {
-    fn drop(&mut self) {
-        if self.handle.ptr == 0 {
-            return;
-        }
-        let handle = std::mem::replace(&mut self.handle, ffi::Local { ptr: 0 });
-        // SAFETY: handle is valid within the current HandleScope.
-        unsafe { ffi::local_drop(handle) };
+// A `Local` is a pointer to a slot in its `HandleScope`, not an owner of anything, so it is
+// `Copy`. Hand-written because `#[derive]` would require `T: Copy`.
+impl<T> Copy for Local<'_, T> {}
+
+impl<T> Clone for Local<'_, T> {
+    fn clone(&self) -> Self {
+        *self
     }
 }
 
@@ -1145,16 +1158,12 @@ impl<'a, T> Local<'a, T> {
         }
     }
 
-    /// Consumes this `Local` and returns the underlying FFI handle.
+    /// Returns the underlying FFI handle.
     ///
     /// # Safety
     /// The returned FFI handle must not outlive the `HandleScope` that owns the V8 value.
-    pub unsafe fn into_ffi(mut self) -> ffi::Local {
-        let handle = ffi::Local {
-            ptr: self.handle.ptr,
-        };
-        self.handle.ptr = 0;
-        handle
+    pub unsafe fn into_ffi(self) -> ffi::Local {
+        self.handle
     }
 
     /// Returns a reference to the underlying FFI handle.
@@ -1377,13 +1386,6 @@ impl<'a, T> Local<'a, T> {
     }
 }
 
-impl<T> Clone for Local<'_, T> {
-    fn clone(&self) -> Self {
-        // SAFETY: handle is valid within the current HandleScope.
-        unsafe { Self::from_ffi(self.isolate, ffi::local_clone(&self.handle)) }
-    }
-}
-
 /// Trait for safe checked casts between V8 `Local` handle types.
 ///
 /// Use via the turbofish method on `Local<Value>`:
@@ -1482,11 +1484,7 @@ impl Local<'_, Function> {
         let recv = receiver.map_or_else(|| Local::<Value>::undefined(lock), Into::into);
 
         // Build a contiguous array of ffi::Local handles for the FFI call.
-        let ffi_args: Vec<ffi::Local> = args
-            .iter()
-            // SAFETY: each arg handle is valid within the current HandleScope.
-            .map(|a| unsafe { ffi::local_clone(a.as_ffi()) })
-            .collect();
+        let ffi_args: Vec<ffi::Local> = args.iter().map(|a| a.handle).collect();
 
         // SAFETY: lock guarantees the isolate is locked and a HandleScope is active.
         // self.handle is a valid Local<Function>. recv and ffi_args are valid Local handles.
@@ -1711,6 +1709,39 @@ impl ArrayBuffer {
                 ffi::local_new_array_buffer_empty(isolate.as_ffi(), byte_length),
             )
         }
+    }
+
+    /// Attempts to create a new zero-initialized `ArrayBuffer` with
+    /// `byte_length` bytes, and lets `fill` write into it before anything else
+    /// can observe it. Returns the buffer along with `fill`'s result, or `None`
+    /// if allocation fails, in which case `fill` is not called.
+    ///
+    /// This is the safe way to produce an `ArrayBuffer` from bytes computed in
+    /// Rust without an intermediate `Vec`: unlike the `unsafe`
+    /// `Local::<ArrayBuffer>::as_mut_slice`, exclusive access to the backing
+    /// store is guaranteed by construction rather than by the caller.
+    ///
+    /// Bytes `fill` does not write remain zero. The buffer is always zeroed
+    /// first because JavaScript can read the whole backing store once it has
+    /// the buffer, including any bytes a view over it excludes.
+    pub fn new_zeroed_with<'a, R>(
+        lock: &mut crate::Lock,
+        byte_length: usize,
+        fill: impl FnOnce(&mut [u8]) -> R,
+    ) -> Option<(Local<'a, Self>, R)> {
+        let mut buffer = Self::new_with_mode(
+            lock,
+            byte_length,
+            ffi::BackingStoreInitializationMode::ZeroInitialized,
+        )?;
+        // SAFETY: `buffer` was allocated just above and is the only handle to
+        // it: no other `Local` refers to it and it has never been exposed to
+        // JavaScript, so nothing else can reach its backing store until it is
+        // returned. `fill` is not passed the `Lock` and cannot capture it,
+        // since `lock` is mutably borrowed for this call, so it cannot run
+        // JavaScript. The slice does not outlive `fill`.
+        let result = fill(unsafe { buffer.as_mut_slice(lock) });
+        Some((buffer, result))
     }
 }
 
@@ -1988,10 +2019,9 @@ pub struct TypedArrayIter<'a, 'b, T, E> {
     _marker: PhantomData<E>,
 }
 
-/// Owning iterator over `TypedArray` elements.
+/// Iterator over `TypedArray` elements that holds its own copy of the array handle.
 ///
 /// Created by calling `into_iter()` on a `Local<'a, TypedArray>`.
-/// Consumes the array handle.
 pub struct TypedArrayIntoIter<'a, T, E> {
     array: Local<'a, T>,
     index: usize,
@@ -2336,6 +2366,38 @@ impl_typed_array!(BigUint64Array, u64, local_biguint64_array_get);
 // Uint8ClampedArray has the same element type as Uint8Array; clamping is a write-side JS concern.
 impl_typed_array!(Uint8ClampedArray, u8, local_uint8clamped_array_get);
 
+impl Uint8Array {
+    /// Creates a `Uint8Array` viewing `length` bytes of `buffer`, starting at
+    /// `byte_offset`.
+    ///
+    /// Zero-copy, unlike [`Vec<u8>::to_js`](crate::ToJS), which allocates a fresh
+    /// backing store and copies into it. Producing a `Uint8Array` from bytes computed
+    /// in Rust therefore does not require an intermediate `Vec`: allocate and fill
+    /// the buffer with [`ArrayBuffer::new_zeroed_with`], and wrap the written prefix
+    /// here.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `byte_offset + length` exceeds `buffer`'s byte
+    /// length.
+    pub fn from_buffer<'a>(
+        lock: &mut crate::Lock,
+        buffer: &Local<'_, ArrayBuffer>,
+        byte_offset: usize,
+        length: usize,
+    ) -> crate::Result<Local<'a, Self>> {
+        let isolate = lock.isolate();
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active;
+        // `buffer` is a live handle to an ArrayBuffer. The C++ side checks the
+        // bounds and reports a violation as an `Err`.
+        let handle = unsafe {
+            ffi::uint8_array_from_buffer(isolate.as_ffi(), &buffer.handle, byte_offset, length)
+        }?;
+        // SAFETY: `handle` is a fresh Uint8Array created in `isolate`.
+        Ok(unsafe { Local::from_ffi(isolate, handle) })
+    }
+}
+
 // =============================================================================
 // `String`-specific implementations
 // =============================================================================
@@ -2394,6 +2456,14 @@ pub struct MaybeLocal<'a, T> {
     _marker: PhantomData<(&'a (), T)>,
 }
 
+impl<T> Copy for MaybeLocal<'_, T> {}
+
+impl<T> Clone for MaybeLocal<'_, T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
 impl<'a, T> MaybeLocal<'a, T> {
     /// Wraps a raw `ffi::MaybeLocal` returned from the FFI layer.
     ///
@@ -2413,46 +2483,25 @@ impl<'a, T> MaybeLocal<'a, T> {
         unsafe { ffi::maybe_local_is_empty(&self.handle) }
     }
 
-    /// Returns the contained value as a `Local<T>` without consuming `self`, or `None` if empty.
-    ///
-    /// Copies the underlying V8 handle pointer so that both `self` and the returned `Local`
-    /// refer to the same V8 value. V8 `Local` handles are non-owning references into the
-    /// `HandleScope` stack; `local_clone` is a cheap pointer copy (not a deep clone), and
-    /// `local_drop` is a no-op for locals. Use [`into_option`](Self::into_option) to transfer
-    /// ownership without the copy when `self` is no longer needed.
+    /// Returns the contained value as a `Local<T>`, or `None` if empty.
     pub fn to_local(&self, lock: &mut crate::Lock) -> Option<Local<'a, T>> {
-        // SAFETY: handle is a valid ffi::MaybeLocal; no isolate or HandleScope needed.
-        if unsafe { ffi::maybe_local_is_empty(&self.handle) } {
-            return None;
-        }
-        // local_clone is a bitwise pointer copy — both the MaybeLocal and the returned Local
-        // refer to the same HandleScope entry. This is safe because Local handles are
-        // non-owning and local_drop is a no-op; the HandleScope itself manages the lifetime.
-        // SAFETY: handle is non-empty and points to a live V8 value in the current HandleScope.
-        let cloned = unsafe {
-            ffi::local_clone(&ffi::Local {
-                ptr: self.handle.ptr,
-            })
-        };
-        // SAFETY: handle is non-empty, isolate is valid, and cloned is a valid Local.
-        Some(unsafe { Local::from_ffi(lock.isolate(), cloned) })
+        self.into_option(lock)
     }
 
-    /// Converts into `Option<Local<'a, T>>`, consuming `self`.
-    ///
-    /// Transfers ownership of the underlying handle without cloning, which is more efficient
-    /// than [`to_local`](Self::to_local) when `self` is no longer needed after the call.
+    /// Converts into `Option<Local<'a, T>>`.
     pub fn into_option(self, lock: &mut crate::Lock) -> Option<Local<'a, T>> {
         if self.handle.ptr == 0 {
             return None;
         }
-        // Transfer ownership: zero out the ptr so Drop becomes a no-op, then wrap in Local.
-        let ptr = self.handle.ptr;
-        // SAFETY: We are taking ownership of the handle; zeroing the ptr prevents double-free.
-        let mut this = std::mem::ManuallyDrop::new(self);
-        this.handle.ptr = 0;
-        // SAFETY: ptr is non-zero (checked above), isolate is valid, handle ownership transferred.
-        Some(unsafe { Local::from_ffi(lock.isolate(), ffi::Local { ptr }) })
+        // SAFETY: ptr is non-zero (checked above), isolate is valid.
+        Some(unsafe {
+            Local::from_ffi(
+                lock.isolate(),
+                ffi::Local {
+                    ptr: self.handle.ptr,
+                },
+            )
+        })
     }
 
     /// Unwraps the value, panicking if empty.
@@ -2474,33 +2523,51 @@ impl<'a, T> MaybeLocal<'a, T> {
     }
 }
 
-impl<T> Drop for MaybeLocal<'_, T> {
-    fn drop(&mut self) {
-        if self.handle.ptr != 0 {
-            let handle = std::mem::replace(&mut self.handle, ffi::MaybeLocal { ptr: 0 });
-            // SAFETY: handle is a valid non-empty V8 handle being released.
-            unsafe { ffi::local_drop(ffi::Local { ptr: handle.ptr }) };
-        }
-    }
-}
-
 impl<'a, T> From<Option<Local<'a, T>>> for MaybeLocal<'a, T> {
     /// Constructs a `MaybeLocal` from an `Option<Local<T>>`.
     /// `None` produces an empty handle (`ptr == 0`); `Some(local)` reuses its pointer.
     fn from(opt: Option<Local<'a, T>>) -> Self {
-        let ptr = match opt {
-            None => 0,
-            Some(local) => {
-                // SAFETY: we take the handle's ptr out without dropping the Local so the
-                // handle slot stays alive in the HandleScope.
-                let ptr = local.handle.ptr;
-                std::mem::forget(local);
-                ptr
-            }
-        };
+        let ptr = opt.map_or(0, |local| local.handle.ptr);
         Self {
             handle: ffi::MaybeLocal { ptr },
             _marker: PhantomData,
+        }
+    }
+}
+
+/// Runs a synchronous callback entered from C++ with a valid, locked V8 isolate.
+///
+/// The callback receives a safe [`Lock`] and returns a local handle. On success,
+/// the handle is transferred back across the CXX bridge as a [`ffi::MaybeLocal`].
+/// On failure, the error is scheduled as a JavaScript exception and an empty
+/// `MaybeLocal` is returned.
+///
+/// This centralizes the raw-isolate and local-handle ownership transitions for
+/// C++ entry points implemented in Rust. The callback itself contains no FFI
+/// safety obligations.
+///
+/// # Safety
+///
+/// `isolate` must point to a live V8 isolate locked by the current thread, and
+/// the C++ caller must keep its active `HandleScope` alive until it consumes the
+/// returned handle.
+pub unsafe fn run_ffi_callback<T, E, F>(isolate: *mut ffi::Isolate, callback: F) -> ffi::MaybeLocal
+where
+    E: Into<Error>,
+    F: for<'a> FnOnce(&'a mut Lock) -> Result<Local<'a, T>, E>,
+{
+    // SAFETY: forwarded from this function's safety contract.
+    let mut lock = unsafe { Lock::from_isolate_ptr(isolate) };
+    let result = callback(&mut lock).map(|local| {
+        // SAFETY: the handle is consumed by the C++ caller while its
+        // `HandleScope` is still alive, per this function's safety contract.
+        unsafe { local.into_ffi() }
+    });
+    match result {
+        Ok(local) => ffi::MaybeLocal { ptr: local.ptr },
+        Err(error) => {
+            lock.throw_exception(&error.into());
+            ffi::MaybeLocal { ptr: 0 }
         }
     }
 }
@@ -2814,10 +2881,7 @@ impl Utf8Value {
     /// Corresponds to `v8::String::Utf8Value(isolate, obj)`.
     pub fn new(lock: &mut Lock, value: &Local<'_, Value>) -> Self {
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
-        // local_clone produces a cheap handle copy matching V8's by-value constructor semantics.
-        let inner = unsafe {
-            ffi::utf8_value_new(lock.isolate().as_ffi(), ffi::local_clone(value.as_ffi()))
-        };
+        let inner = unsafe { ffi::utf8_value_new(lock.isolate().as_ffi(), value.into_ffi()) };
         Self { inner }
     }
 
@@ -3203,6 +3267,70 @@ impl<'a> FunctionCallbackInfo<'a> {
             ffi::fci_set_return_value(self.0, value.into_ffi());
         }
     }
+}
+
+/// The arguments to a native data property getter.
+pub struct PropertyCallbackInfo<'a>(*mut ffi::PropertyCallbackInfo, PhantomData<&'a ()>);
+
+impl<'a> PropertyCallbackInfo<'a> {
+    /// # Safety
+    /// `info` must be a valid pointer to a `PropertyCallbackInfo`.
+    pub unsafe fn from_ffi(info: *mut ffi::PropertyCallbackInfo) -> Self {
+        Self(info, PhantomData)
+    }
+
+    pub fn isolate(&self) -> IsolatePtr {
+        // SAFETY: self.0 is valid (guaranteed by constructor).
+        unsafe { IsolatePtr::from_ffi(ffi::pci_get_isolate(self.0)) }
+    }
+
+    pub fn this(&self) -> Local<'a, Value> {
+        // SAFETY: self.0 is valid (guaranteed by constructor).
+        unsafe { Local::from_ffi(self.isolate(), ffi::pci_get_this(self.0)) }
+    }
+
+    pub fn set_return_value(&self, value: Local<Value>) {
+        // SAFETY: self.0 is valid (guaranteed by constructor).
+        unsafe { ffi::pci_set_return_value(self.0, value.into_ffi()) }
+    }
+}
+
+/// The arguments to a native data property setter. `get(0)` is the value
+/// assigned, so setters share codegen with methods.
+pub struct PropertySetterCallbackInfo<'a>(
+    *mut ffi::PropertySetterCallbackInfo,
+    usize,
+    PhantomData<&'a ()>,
+);
+
+impl<'a> PropertySetterCallbackInfo<'a> {
+    /// # Safety
+    /// `info` must be a valid pointer to a `PropertySetterCallbackInfo` and
+    /// `value` the `v8::Local<v8::Value>` V8 passed alongside it.
+    pub unsafe fn from_ffi(info: *mut ffi::PropertySetterCallbackInfo, value: usize) -> Self {
+        Self(info, value, PhantomData)
+    }
+
+    pub fn isolate(&self) -> IsolatePtr {
+        // SAFETY: self.0 is valid (guaranteed by constructor).
+        unsafe { IsolatePtr::from_ffi(ffi::psci_get_isolate(self.0)) }
+    }
+
+    pub fn this(&self) -> Local<'a, Value> {
+        // SAFETY: self.0 is valid (guaranteed by constructor).
+        unsafe { Local::from_ffi(self.isolate(), ffi::psci_get_this(self.0)) }
+    }
+
+    /// # Panics
+    /// If `index` is not 0.
+    pub fn get(&self, index: usize) -> Local<'a, Value> {
+        assert_eq!(index, 0);
+        // SAFETY: self.1 is the live handle V8 passed (guaranteed by constructor).
+        unsafe { Local::from_ffi(self.isolate(), ffi::Local { ptr: self.1 }) }
+    }
+
+    /// Setters return nothing.
+    pub fn set_return_value(&self, _value: Local<Value>) {}
 }
 
 /// A fat pointer to a `dyn GarbageCollected` trait object, decomposed into its

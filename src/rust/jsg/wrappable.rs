@@ -305,7 +305,7 @@ pub trait FromJS: Sized {
             return None;
         }
 
-        match Self::try_from_js(lock, value.clone()) {
+        match Self::try_from_js(lock, *value) {
             Ok(Some(result)) => Some(Ok(result)),
             Ok(None) => None,
             Err(err) => Some(Err(err)),
@@ -649,7 +649,7 @@ impl<T: FromJS> FromJS for Lenient<T> {
         } else if value.is_undefined() {
             Ok(Lenient::Undefined)
         } else {
-            match T::try_from_js(lock, value.clone())? {
+            match T::try_from_js(lock, value)? {
                 Some(v) => Ok(Lenient::Some(v)),
                 None => Ok(Lenient::Unconvertable(value.into())),
             }

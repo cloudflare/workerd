@@ -54,11 +54,18 @@ if __name__ == "__main__":
     # Poll build status
     failed_requests = 0
     FAILED_REQUEST_LIMIT = 10
+    pipeline_url = None
 
     while failed_requests < FAILED_REQUEST_LIMIT:
         try:
             resp = requests.get(args.URL, headers=headers, params={"id": workflow_id})
             resp.raise_for_status()
+
+            # Print the internal pipeline as soon as it's known
+            if not pipeline_url:
+                pipeline_url = resp.json().get("pipeline_url")
+                if pipeline_url:
+                    print(f"Internal pipeline: {pipeline_url}")
 
             status = resp.json()["status"]
             if status == "errored":

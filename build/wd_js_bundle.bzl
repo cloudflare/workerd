@@ -28,9 +28,7 @@ def _relative_path(file_path, dir_path):
 def _gen_compile_cache_impl(ctx):
     file_list = ctx.actions.declare_file("in")
 
-    srcs = []
-    for src in ctx.attr.srcs:
-        srcs.extend(src.files.to_list())
+    srcs = ctx.files.srcs
 
     outs = [ctx.actions.declare_file(src.basename + "_cache") for src in srcs]
 

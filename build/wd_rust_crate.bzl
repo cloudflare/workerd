@@ -66,11 +66,13 @@ def wd_rust_crate(
         deps = [],
         link_deps = [],
         proc_macro_deps = [],
+        rustc_env = {},
         data = [],
         test_env = {},
         test_tags = [],
         test_deps = [],
         test_proc_macro_deps = [],
+        test_compile_data = [],
         test_size = "medium",
         cxx_bridge_deps = [],
         cxx_bridge_hdrs = None,
@@ -100,6 +102,8 @@ def wd_rust_crate(
         test_tags: additional test tags.
         test_deps: test-only dependencies.
         test_proc_macro_deps: test-only proc_macro dependencies.
+        test_compile_data: files the unit tests read at compile time (include_str!, include_bytes!),
+            such as test vectors. Like the *-test.rs files, they are inputs of <name>_test only.
         test_size: Bazel test size (default "medium"); affects test timeout. Use "large" for
             crates with many subtests, since RUST_TEST_THREADS=1 forces serial execution.
         cxx_bridge_deps: either a flat dependency list applied to every bridge source, or a dict of
@@ -174,6 +178,7 @@ def wd_rust_crate(
         srcs = srcs,
         deps = deps,
         link_deps = link_deps + ["@@//deps:rust_runtime"],
+        rustc_env = rustc_env,
         visibility = visibility,
         data = data,
         proc_macro_deps = proc_macro_deps,
@@ -189,12 +194,13 @@ def wd_rust_crate(
 
     wd_rust_test(
         name = name + "_test",
-        compile_data = test_srcs,
+        compile_data = test_srcs + test_compile_data,
         crate = ":" + name,
         env = test_env,
         size = test_size,
         tags = test_tags,
         crate_features = crate_features,
+        rustc_env = rustc_env,
         deps = test_deps,
         proc_macro_deps = test_proc_macro_deps,
     )

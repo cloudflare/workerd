@@ -7,7 +7,7 @@
 // partial-respond alignment. Migrated from
 // streams-byob-edge-cases-test.js (all parity).
 
-import { deepStrictEqual, ok, rejects, strictEqual } from 'node:assert';
+import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 // Helper to create a byte stream that responds with data
@@ -685,6 +685,100 @@ export const nativeByobMultiByteViews = {
       deepStrictEqual([...word.value], [1, 2, 3, 4, 5, 6, 7]);
       strictEqual((await odd.read(new Uint16Array(4))).done, true);
       await odd.closed;
+    }
+  },
+};
+
+// Helpers for the BYOB readers on closed and errored streams below.
+const boom = new Error('boom');
+const closedStream = (source = {}) =>
+  new ReadableStream({ ...source, start: (c) => c.close() });
+const erroredStream = (source = {}) =>
+  new ReadableStream({ ...source, start: (c) => c.error(boom) });
+const byteSource = { type: 'bytes' };
+const notByteSource = {
+  name: 'TypeError',
+  message: 'BYOB reader can only be used on a stream with a byte source',
+};
+
+async function byobReadsDone(stream) {
+  const { done, value } = await stream
+    .getReader({ mode: 'byob' })
+    .read(new Uint8Array(4));
+  strictEqual(done, true);
+  strictEqual(value.byteLength, 0);
+}
+
+async function byobReadRejects(stream) {
+  await rejects(
+    stream.getReader({ mode: 'byob' }).read(new Uint8Array(4)),
+    (e) => e === boom
+  );
+}
+
+// A BYOB reader on a closed or errored stream with no controller: a branch
+// of a closed native body's tee(), or the body that new Request(request)
+// makes of a closed or errored stream, a default stream's included. Its
+// read resolves done with an empty view, or rejects with the stored error
+// (parity, ledger #36). The closed body itself, and a branch of a closed JS
+// byte stream, which shares its controller, take one as well.
+export const byobReaderOnSettledBranchOrDetachedBody = {
+  async test() {
+    const detach = (stream) =>
+      new Request(new Request('http://test/', { method: 'POST', body: stream }))
+        .body;
+
+    const cancelled = new Response('abc').body;
+    await cancelled.cancel();
+    const drained = new Response('abc').body;
+    const reader = drained.getReader();
+    while (!(await reader.read()).done);
+    reader.releaseLock();
+    const body = new Response('abc').body;
+    await body.cancel();
+    await byobReadsDone(body);
+    await byobReadsDone(closedStream(byteSource).tee()[0]);
+
+    const closed = [
+      ...cancelled.tee(),
+      ...drained.tee(),
+      detach(closedStream(byteSource)),
+      detach(closedStream()),
+    ];
+    const errored = [
+      detach(erroredStream(byteSource)),
+      detach(erroredStream()),
+    ];
+    for (const stream of closed) {
+      await byobReadsDone(stream);
+    }
+    for (const stream of errored) {
+      await byobReadRejects(stream);
+    }
+  },
+};
+
+// DIVERGENCE (ledger #37): a BYOB reader on a closed or errored default
+// stream, or on a branch of its tee(), which shares its controller. C++
+// gives any closed or errored stream a BYOB reader. TypeScript gives one
+// only to such a stream with no controller (ledger #36), and refuses one
+// here, as the spec does in any state, because the controller is not a
+// byte stream controller.
+export const byobReaderOnSettledDefaultStream = {
+  async test() {
+    const closed = [closedStream(), ...closedStream().tee()];
+    const errored = [erroredStream(), ...erroredStream().tee()];
+    if (usingTsImpl) {
+      for (const stream of [...closed, ...errored]) {
+        throws(() => stream.getReader({ mode: 'byob' }), notByteSource);
+      }
+      return;
+    }
+    for (const stream of closed) {
+      await byobReadsDone(stream);
+    }
+    for (const stream of errored) {
+      await byobReadRejects(stream);
     }
   },
 };

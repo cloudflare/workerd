@@ -19,6 +19,7 @@ use tokio::sync::Notify;
 use tokio::sync::mpsc;
 
 use crate::Result;
+use crate::bench;
 use crate::bridge::ffi;
 use crate::config::Factory;
 use crate::config::Reporter;
@@ -96,6 +97,29 @@ impl InProcessServer {
         )
         .await?;
         Ok(passed == Some(true))
+    }
+
+    /// `workerd bench`, with `params` (an encoded `BenchParams` message).
+    pub async fn bench(
+        &self,
+        service_pattern: &str,
+        entrypoint_pattern: &str,
+        params: &[u64],
+    ) -> Result<ffi::BenchOutcome> {
+        let results = crate::run::bench(
+            Rc::clone(&self.factory),
+            RunOptions::default(),
+            self.reporter(),
+            service_pattern,
+            entrypoint_pattern,
+            params.to_vec(),
+        )
+        .await?
+        .unwrap_or_else(|| bench::Report::new(0));
+        Ok(ffi::BenchOutcome {
+            passed: results.passed(),
+            report: results.to_words(),
+        })
     }
 
     pub fn drain(&self) {

@@ -2381,9 +2381,9 @@ export function newReadableStreamFromStreamReadable(
   function onData(chunk) {
     // Copy the Buffer to detach it from the pool.
     if (Buffer.isBuffer(chunk) && !objectMode) chunk = new Uint8Array(chunk);
-    // An enqueue that fails — the strategy's size() throwing or returning
+    // An enqueue that fails - the strategy's size() throwing or returning
     // an invalid size, or the stream having just been cancelled from an
-    // earlier 'data' listener — has errored the stream (or found it
+    // earlier 'data' listener - has errored the stream (or found it
     // closed); thrown from here it would escape the source's 'data'
     // emission as an uncaught exception. The source has no consumer left:
     // destroy it with the error (a no-op for a source the cancel already
@@ -2549,9 +2549,9 @@ export function newStreamReadableFromReadableStream(
     // A Promise.prototype.then that throws (the adapter calls the live one):
     // the caller gets the throw, not a stream left locked for a Readable
     // nobody will have. That Readable is destroyed quietly first (the web
-    // stream, marked closed here, is not cancelled), so that the release —
+    // stream, marked closed here, is not cancelled), so that the release -
     // which rejects the reader's closed promise, possibly into a handler
-    // the throwing then did register — has nothing left to destroy.
+    // the throwing then did register - has nothing left to destroy.
     closed = true;
     readable.destroy();
     reader.releaseLock();

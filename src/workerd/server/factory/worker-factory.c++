@@ -14,6 +14,7 @@
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/trace-stream.h>
 #include <workerd/io/tracer.h>
+#include <workerd/io/tracked-wasm-instance.h>
 #include <workerd/io/worker-entrypoint.h>
 #include <workerd/io/worker-fs.h>
 #include <workerd/jsg/snapshot.h>
@@ -254,6 +255,10 @@ bool factory_experimental(const WorkerFactory& factory) {
   return factory.getImpl().options->experimental;
 }
 
+bool factory_tail_workers(const WorkerFactory& factory) {
+  return factory.getImpl().options->tailWorkers;
+}
+
 Worker::Actor::Id normalizeActorId(Worker::Actor::Id id) {
   KJ_IF_SOME(doId, id.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
     KJ_IF_SOME(name, doId->getName()) {
@@ -321,6 +326,46 @@ class NullIsolateLimitEnforcer final: public IsolateLimitEnforcer {
  private:
   TrackedWasmInstanceList trackedWasmInstances;
 };
+
+// Enables async tracing for an isolate (--async-trace, --async-trace-stacks,
+// --async-trace-promises) and writes each of its contexts to the --async-trace file, if there is
+// one.
+class AsyncTraceIsolateObserver final: public IsolateObserver {
+ public:
+  AsyncTraceIsolateObserver(
+      kj::Maybe<const AsyncTraceWriter&> writer, uint32_t stackDepth, bool promises)
+      : writer(writer),
+        stackDepth(stackDepth),
+        promises(promises) {}
+
+  kj::Maybe<AsyncTraceConfig> getAsyncTraceConfig() const override {
+    return AsyncTraceConfig{.stackDepth = stackDepth, .promises = promises};
+  }
+
+  void addAsyncTraceSinks(AsyncTraceSinks& sinks,
+      kj::StringPtr worker,
+      kj::Maybe<kj::StringPtr> actorId) const override {
+    KJ_IF_SOME(w, writer) {
+      sinks.addNdjson(w);
+    }
+  }
+
+ private:
+  kj::Maybe<const AsyncTraceWriter&> writer;
+  uint32_t stackDepth;
+  bool promises;
+};
+
+// The observer of each isolate: an AsyncTraceIsolateObserver if any async trace option is set,
+// otherwise the default one, which changes nothing.
+kj::Own<IsolateObserver> newIsolateObserver(const WorkerFactory::Options& options) {
+  if (options.asyncTraceWriter != kj::none || options.asyncTraceStackDepth > 0 ||
+      options.asyncTracePromises) {
+    return kj::atomicRefcounted<AsyncTraceIsolateObserver>(
+        options.asyncTraceWriter, options.asyncTraceStackDepth, options.asyncTracePromises);
+  }
+  return kj::atomicRefcounted<IsolateObserver>();
+}
 
 class NullLimitEnforcer final: public LimitEnforcer, public kj::Refcounted {
  public:
@@ -421,6 +466,10 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
   }
   kj::Promise<bool> test() override {
     co_return co_await observe(KJ_ASSERT_NONNULL(inner).test());
+  }
+  kj::Promise<void> bench(
+      bench::BenchParams::Reader params, bench::BenchReport::Group::Builder report) override {
+    co_return co_await observe(KJ_ASSERT_NONNULL(inner).bench(params, report));
   }
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     auto result = co_await observe(KJ_ASSERT_NONNULL(inner).customEvent(kj::mv(event)));
@@ -597,9 +646,12 @@ class CacheHttpClientImpl final: public kj::HttpClient {
   CacheHttpClientImpl(IoChannelFactory::SubrequestChannel& parent,
       kj::HttpHeaderId cacheNamespaceHeader,
       kj::Maybe<kj::String> cacheName,
-      kj::Maybe<kj::String> cfBlobJson,
-      SpanParent parentSpan)
-      : client(asHttpClient(parent.startRequest({kj::mv(cfBlobJson), kj::mv(parentSpan)}))),
+      CacheClient::SubrequestMetadata metadata)
+      : client(asHttpClient(parent.startRequest({
+          .cfBlobJson = kj::mv(metadata.cfBlobJson),
+          .parentSpan = kj::mv(metadata.parentSpan),
+          .userSpanParent = kj::mv(metadata.userSpanParent),
+        }))),
         cacheName(kj::mv(cacheName)),
         cacheNamespaceHeader(cacheNamespaceHeader) {}
 
@@ -628,14 +680,13 @@ class CacheClientImpl final: public CacheClient {
         cacheNamespaceHeader(cacheNamespaceHeader) {}
 
   kj::Own<kj::HttpClient> getDefault(CacheClient::SubrequestMetadata metadata) override {
-    return kj::heap<CacheHttpClientImpl>(*cacheService, cacheNamespaceHeader, kj::none,
-        kj::mv(metadata.cfBlobJson), kj::mv(metadata.parentSpan));
+    return kj::heap<CacheHttpClientImpl>(
+        *cacheService, cacheNamespaceHeader, kj::none, kj::mv(metadata));
   }
   kj::Own<kj::HttpClient> getNamespace(
       kj::StringPtr cacheName, CacheClient::SubrequestMetadata metadata) override {
-    return kj::heap<CacheHttpClientImpl>(*cacheService, cacheNamespaceHeader,
-        kj::encodeUriComponent(cacheName), kj::mv(metadata.cfBlobJson),
-        kj::mv(metadata.parentSpan));
+    return kj::heap<CacheHttpClientImpl>(
+        *cacheService, cacheNamespaceHeader, kj::encodeUriComponent(cacheName), kj::mv(metadata));
   }
 
  private:
@@ -980,6 +1031,10 @@ class AccessHeaderExtractor final: public WorkerInterface {
   kj::Promise<bool> test() override {
     co_return co_await getInner().test();
   }
+  kj::Promise<void> bench(
+      bench::BenchParams::Reader params, bench::BenchReport::Group::Builder report) override {
+    co_await getInner().bench(params, report);
+  }
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     co_return co_await getInner().customEvent(kj::mv(event));
   }
@@ -1123,6 +1178,17 @@ kj::Own<WorkerInterface> worker_start_request(const CompiledWorker& worker,
   }
   return createEntrypoint(impl, kj::mv(meta), entrypointName, kj::mv(propsValue), kj::mv(actorRef),
       kj::mv(channels), kj::mv(tails), kj::none);
+}
+
+kj::Promise<::rust::Vec<uint64_t>> worker_bench(
+    kj::Own<WorkerInterface> worker, ::rust::Slice<const uint64_t> params) {
+  capnp::FlatArrayMessageReader paramsMessage(asWords(kj::from<Rust>(params)));
+  capnp::MallocMessageBuilder groupMessage;
+  co_await worker->bench(paramsMessage.getRoot<bench::BenchParams>(),
+      groupMessage.initRoot<bench::BenchReport::Group>());
+  auto words = capnp::messageToFlatArray(groupMessage);
+  co_return kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size())
+      .as<kj_rs::RustCopy>();
 }
 
 // =======================================================================================
@@ -1356,6 +1422,10 @@ CompatibilityFlags::Reader compileFlags(const WorkerFactory::Options& options,
     compileCompatibilityFlags(conf.getCompatibilityDate(), conf.getCompatibilityFlags(), flags,
         errorReporter, options.experimental, CompatibilityDateValidation::CODE_VERSION, nullptr,
         isPythonMainModule(conf));
+  } else KJ_IF_SOME(defaultDate, options.defaultCompatibilityDate) {
+    compileCompatibilityFlags(defaultDate, conf.getCompatibilityFlags(), flags, errorReporter,
+        options.experimental, CompatibilityDateValidation::CODE_VERSION, nullptr,
+        isPythonMainModule(conf));
   } else {
     errorReporter.addError(kj::str("Worker must specify compatibilityDate."));
   }
@@ -1474,6 +1544,10 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
     auto fetched = co_await (*KJ_ASSERT_NONNULL(dynamicSource))();
     co_await fetched.ensureAllResolved();
     auto& dynamic = impl->dynamicSource.emplace(kj::mv(fetched));
+    if (!options.tailWorkers) {
+      dynamic.tails = nullptr;
+      dynamic.streamingTails = nullptr;
+    }
     indexDynamicChannels(*impl, dynamic);
     featureFlags = dynamic.compatibilityFlags;
     source = kj::mv(dynamic.source);
@@ -1539,9 +1613,8 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
         workerSource.variant.is<WorkerSource::ScriptSource>() && !usingNewModuleRegistry
         ? Worker::ConsoleMode::INSPECTOR_ONLY
         : options.loggingOptions.consoleMode;
-    return kj::atomicRefcounted<Worker::Isolate>(kj::mv(api),
-        kj::atomicRefcounted<IsolateObserver>(), isolateName, kj::mv(limitEnforcer), policy,
-        kj::mv(isolateLoggingOptions));
+    return kj::atomicRefcounted<Worker::Isolate>(kj::mv(api), newIsolateObserver(options),
+        isolateName, kj::mv(limitEnforcer), policy, kj::mv(isolateLoggingOptions));
   };
 
   // Behind the STARTUP_SNAPSHOT autogate, a throwaway zygote Worker evaluates the top-level code

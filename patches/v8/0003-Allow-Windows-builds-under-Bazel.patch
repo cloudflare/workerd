@@ -6,10 +6,10 @@ Subject: Allow Windows builds under Bazel
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 914fe144311eb7ec5dfe2635c28a1c2adaa96df1..a672f3299ba55574585bb5985a260d708cd31f11 100644
+index 3c5522710b4f39975f6d408c444da303b7935cf8..9e069ce4e8d513aa4975bb90936e6b2179845114 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4182,6 +4182,8 @@ filegroup(
+@@ -4207,6 +4207,8 @@ filegroup(
          "@v8//bazel/config:is_inline_asm_x64": ["src/heap/base/asm/x64/push_registers_asm.cc"],
          "@v8//bazel/config:is_inline_asm_arm": ["src/heap/base/asm/arm/push_registers_asm.cc"],
          "@v8//bazel/config:is_inline_asm_arm64": ["src/heap/base/asm/arm64/push_registers_asm.cc"],
@@ -88,7 +88,7 @@ index 4d002e3659aabe48faf357ba07a3f6c689a30e67..c6741a87758ec3c88807800eca9dca17
      name = "is_clang",
      match_any = [
 diff --git a/bazel/defs.bzl b/bazel/defs.bzl
-index 68f283bcfc3c8a5f606ba77e29629637b0f2ca34..4e3471ad6e7fc208ecca37b4a1ae46214c814f32 100644
+index e0eb187f9ea528bc33da62e0c8639152cb08e7fe..e3fb161199f276eb04369c0605279317258191ab 100644
 --- a/bazel/defs.bzl
 +++ b/bazel/defs.bzl
 @@ -135,6 +135,24 @@ def _default_args():

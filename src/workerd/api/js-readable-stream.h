@@ -55,7 +55,7 @@ class JsReadableStream final {
     kj::ArrayPtr<const kj::byte> view;
 
     explicit Buffer(kj::Array<const kj::byte> data);
-    explicit Buffer(jsg::Ref<Blob> data);
+    Buffer(jsg::Lock& js, jsg::Ref<Blob> data);
   };
 
   struct Impl {
@@ -373,7 +373,8 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // rejection is the error path). `signal` is the per-pull cancellation signal: it aborts
   // when the consumer abandons the in-flight read (reader release, cancel, tee), in which
   // case any bytes read are retained for redelivery by the next pull rather than delivered
-  // or dropped.
+  // or dropped. A failure is not retained: a read that fails rejects its pull, abandoned or
+  // not, and the conduit errors the stream with it.
   jsg::Promise<void> pull(jsg::Lock& js, jsg::JsObject controller, jsg::Ref<AbortSignal> signal);
 
   // Cancels the underlying source, indicating a loss of interest in the data, and releases
@@ -486,7 +487,8 @@ class ReadableStreamNativeSource final: public jsg::Object {
   // Drop the first `bytes` bytes of the stash (they have been delivered).
   void consumeStash(size_t bytes);
 
-  // kj::none once the source has reached EOF, been canceled, or been consumed by tee().
+  // kj::none once the source has reached EOF, been canceled, been consumed by tee(), or
+  // failed.
   kj::Maybe<Active> state;
 
   // Reusable read target, lazily allocated. KJ reads always land here -- never directly in

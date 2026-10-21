@@ -11,10 +11,15 @@
 //
 // Value-stream facts pinned here: a JS stream's real queue (unlike the
 // identity rendezvous) makes batching directly observable — a queued
-// backlog plus the close sentinel is swept in ONE read; value chunks
-// pass through the conduit UNTOUCHED (object identity included); a JS
-// stream never declares an expectedLength; cancel and error propagate
-// through the conduit like a default reader's.
+// backlog plus the close sentinel is swept in ONE read; a read whose
+// size limit runs out at the last chunk, its maxSize or the chunk sizes
+// adding up to Infinity (the one limit a read without a maxSize, such
+// as the C++ bridge's, can meet), reaches the close all the same: it
+// reports done and closes the stream in that call, as a default read
+// closes it as it takes the last chunk; value chunks pass through the
+// conduit UNTOUCHED (object identity included); a JS stream never
+// declares an expectedLength; cancel and error propagate through the
+// conduit like a default reader's.
 
 /* global ReadableStreamDrainingReader */
 
@@ -47,6 +52,77 @@ export const drainingReaderSweepsQueuedBacklog = {
     strictEqual(chunks[0], 'a');
     strictEqual(chunks[1], 42);
     strictEqual(chunks[2], marker); // the very instance
+  },
+};
+
+export const drainingReaderMaxSizeEndsAtClose = {
+  async test() {
+    if (!usingTsImpl) {
+      strictEqual(typeof ReadableStreamDrainingReader, 'undefined');
+      return;
+    }
+    // One chunk of the default strategy's size 1, then close(): a read
+    // with maxSize 1 takes the chunk, using up its maxSize, and reaches
+    // the close sentinel all the same. It reports done, and the stream
+    // closes in that call: closed resolves before the read does, and
+    // desiredSize reads 0.
+    let controller;
+    const rs = new ReadableStream({
+      start(c) {
+        controller = c;
+        c.enqueue('a');
+        c.close();
+      },
+    });
+    const reader = new ReadableStreamDrainingReader(rs);
+    let closed = false;
+    reader.closed.then(() => {
+      closed = true;
+    });
+    const first = await reader.read({ maxSize: 1 });
+    deepStrictEqual(first.chunks, ['a']);
+    strictEqual(first.done, true);
+    strictEqual(controller.desiredSize, 0);
+    strictEqual(closed, true);
+    const second = await reader.read({ maxSize: 1 });
+    deepStrictEqual(second.chunks, []);
+    strictEqual(second.done, true);
+  },
+};
+
+export const drainingReaderSizeOverflowEndsAtClose = {
+  async test() {
+    if (!usingTsImpl) {
+      strictEqual(typeof ReadableStreamDrainingReader, 'undefined');
+      return;
+    }
+    // A read without a maxSize, as the C++ bridge and body consumption
+    // read, has its limit used up once the chunk sizes add up to
+    // Infinity: here by the second of two chunks of size
+    // Number.MAX_VALUE, the last before the close. It reaches the close
+    // all the same: it reports done, and the stream closes in that call.
+    const rs = new ReadableStream(
+      {
+        start(c) {
+          c.enqueue('a');
+          c.enqueue('b');
+          c.close();
+        },
+      },
+      { size: () => Number.MAX_VALUE }
+    );
+    const reader = new ReadableStreamDrainingReader(rs);
+    let closed = false;
+    reader.closed.then(() => {
+      closed = true;
+    });
+    const first = await reader.read();
+    deepStrictEqual(first.chunks, ['a', 'b']);
+    strictEqual(first.done, true);
+    strictEqual(closed, true);
+    const second = await reader.read();
+    deepStrictEqual(second.chunks, []);
+    strictEqual(second.done, true);
   },
 };
 

@@ -280,10 +280,11 @@ kj::Promise<R2Result> doR2HTTPPutRequest(jsg::Lock& js,
         body = kj::heapArray(data.asPtr());
       }
       KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
-        expectedBodySize = blob->getSize();
+        auto bytes = blob->getData(js);
+        expectedBodySize = bytes.size();
         KJ_REQUIRE(streamSize == kj::none);
         // Blob data is likewise a V8 ArrayBuffer; see above.
-        body = kj::heapArray(blob->getData());
+        body = kj::heapArray(bytes);
       }
     }
   } else {

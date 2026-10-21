@@ -278,7 +278,8 @@ export interface StreamConsumer<V> {
   // preserving spec PullSteps timing for the drain-then-close check.
   tryReadSync(reader: object): ReadableStreamReadResult<V> | undefined;
   // Bulk read for the draining reader / pipeTo. Synchronous: collects what
-  // is buffered (the draining reader handles the empty-then-wait case).
+  // is buffered (the draining reader handles the empty-then-wait case),
+  // and is done once the consumer has reached the end of the stream.
   drain(maxSize?: number): { chunks: V[]; done: boolean };
   // Reject pending reads submitted by a specific reader (lock release).
   cancelReadsForReader(reader: object, reason: unknown): void;
@@ -650,8 +651,9 @@ class StreamQueue<T, V = T> {
   // A cursor joins a queue that already has one only through tee or detach,
   // which then remove the parent's. The controllers rely on that: while the
   // source's own cursor is present it is the queue's sole consumer
-  // (#maybeCloseStream in readable.ts skips the owners walk). A new path
-  // that adds a cursor beside the source's own must revisit those checks.
+  // (QueuedControllerCore.maybeCloseStream in readable.ts skips the owners
+  // walk). A new path that adds a cursor beside the source's own must
+  // revisit those checks.
   addCursor(cursor: QueueCursor<T, V>, owner: object): void {
     this.#hadCursors = true;
     ArrayPrototypePush(this.#cursors, cursor);
@@ -771,6 +773,12 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
 
   get hasPendingRead(): boolean {
     return this.#pendingReads.length > 0;
+  }
+
+  // A pending read holds part of an element, which the close errors (see
+  // ByteStreamCursor). A default read takes whole chunks.
+  get hasFractionalFill(): boolean {
+    return false;
   }
 
   fulfillFirstPendingRead(value: V): void {
@@ -992,29 +1000,25 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
   // (in strategy size units — bytes for byte streams). Returns
   // synchronously; the draining reader wraps in a promise at its API
   // boundary. Always takes at least one available entry so callers make
-  // progress even when maxSize is smaller than the next entry.
+  // progress even when maxSize is smaller than the next entry. Done
+  // whenever the cursor ends at the close sentinel, the limit
+  // notwithstanding: the sentinel has no size.
   drain(maxSize: number = Infinity): { chunks: V[]; done: boolean } {
     const chunks: V[] = [];
     let total = 0;
-    let done = false;
-    while (total < maxSize) {
-      const slot = this.#queue.getEntry(this.#position);
-      if (slot === undefined) break;
-      if (slot === CLOSE_SENTINEL) {
-        done = true;
-        break;
-      }
-      const entry = slot as QueueEntry<T>;
-      ArrayPrototypePush(chunks, this.readEntryValue(entry));
-      total += entry.size;
+    let slot = this.#queue.getEntry(this.#position);
+    while (isQueueEntry(slot) && total < maxSize) {
+      ArrayPrototypePush(chunks, this.readEntryValue(slot));
+      total += slot.size;
       this.advancePastEntry();
+      slot = this.#queue.getEntry(this.#position);
     }
     if (chunks.length > 0) {
       this.#queue.onCursorAdvanced();
     }
     const result = ObjectCreate(null) as { chunks: V[]; done: boolean };
     result.chunks = chunks;
-    result.done = done;
+    result.done = slot === CLOSE_SENTINEL;
     return result;
   }
 }
@@ -1060,6 +1064,15 @@ class ByteStreamCursor
       if ((pending.get(i) as PullIntoDescriptor).readerType !== 'none') {
         return true;
       }
+    }
+    return false;
+  }
+
+  override get hasFractionalFill(): boolean {
+    const pending = this.#pendingPullIntos;
+    for (let i = 0; i < pending.length; i++) {
+      const desc = pending.get(i) as PullIntoDescriptor;
+      if (desc.bytesFilled % desc.elementSize !== 0) return true;
     }
     return false;
   }
@@ -1400,22 +1413,16 @@ class ByteStreamCursor
   // — error the stream with TypeError and reject all pending reads. Returns
   // true if the stream was errored (caller should bail out of notify).
   #checkFractionalFillAtClose(): boolean {
-    const pending = this.#pendingPullIntos;
-    for (let i = 0; i < pending.length; i++) {
-      const desc = pending.get(i) as PullIntoDescriptor;
-      if (desc.bytesFilled > 0 && desc.bytesFilled % desc.elementSize !== 0) {
-        const e = new TypeError(
-          'Insufficient bytes to fill elements in the given view'
-        );
-        if (this.#errorStreamCallback !== undefined) {
-          this.#errorStreamCallback(e, this.ownerDeref());
-        }
-        // errorAllReads is called by the callback's error path (the
-        // controller's error() or readableStreamErrorBranch), not here.
-        return true;
-      }
+    if (!this.hasFractionalFill) return false;
+    const e = new TypeError(
+      'Insufficient bytes to fill elements in the given view'
+    );
+    if (this.#errorStreamCallback !== undefined) {
+      this.#errorStreamCallback(e, this.ownerDeref());
     }
-    return false;
+    // errorAllReads is called by the callback's error path (the
+    // controller's error() or readableStreamErrorBranch), not here.
+    return true;
   }
 
   // The deferred end-of-data settlement. Scheduled (once per turn) whenever

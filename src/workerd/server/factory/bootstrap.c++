@@ -6,6 +6,7 @@
 
 #include "worker-factory.h"
 
+#include <workerd/io/async-trace.h>
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/release-version.embed.h>
@@ -21,6 +22,7 @@
 
 #include <kj-rs-io/async-io.h>
 #include <kj-rs/kj-rs.h>
+#include <v8-initialization.h>
 
 #include <capnp/message.h>
 #include <capnp/serialize.h>
@@ -103,6 +105,19 @@ class EntropySourceImpl: public kj::EntropySource {
 
 // =======================================================================================
 
+// How the binary was built, for `workerd bench`'s report: a sanitizer's instrumentation and a
+// debug build's checks make code slower than in a release build.
+kj::StringPtr buildMode() {
+#if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) ||                         \
+    __has_feature(memory_sanitizer) || __has_feature(undefined_behavior_sanitizer)
+  return "sanitizer"_kj;
+#elifdef NDEBUG
+  return "release"_kj;
+#else
+  return "debug"_kj;
+#endif
+}
+
 bool structuredLogging(const ::rust::Vec<uint64_t>& configWords) {
   capnp::FlatArrayMessageReader reader(asWords(kj::from<Rust>(configWords)), CONFIG_READER_OPTIONS);
   auto config = reader.getRoot<config::Config>();
@@ -118,7 +133,8 @@ class Bootstrap {
   Bootstrap(kj_rs_tokio::TokioAsyncIoContext& loop,
       const ::rust::Vec<uint64_t>& configWords,
       const ServeOrTestOptions& serveOrTest,
-      kj::Maybe<const TestOptions&> test)
+      kj::Maybe<const TestOptions&> test,
+      kj::Maybe<const BenchOptions&> bench)
       : timer(loop.getTimer()),
         monotonicClock(kj::systemPreciseMonotonicClock()),
         provider(loop.getTimer()) {
@@ -133,16 +149,22 @@ class Bootstrap {
       KJ_UNIMPLEMENTED("perfetto tracing is not supported by this build", kj::str(path));
 #endif
     }
+    KJ_IF_SOME(path, serveOrTest.async_trace_path) {
+      asyncTraceWriter = AsyncTraceWriter::open(kj::str(path), RELEASE_VERSION);
+    }
     TRACE_EVENT("workerd", "Bootstrap()");
 
-    // The process is set up for this config and these options: autogates, the test modes, and V8
-    // with its flags (V8 reads the test modes as it starts).
+    // The process is set up for this config and these options: autogates, the test and bench
+    // modes, and V8 with its flags (V8 reads the test modes as it starts).
     capnp::FlatArrayMessageReader reader(
         asWords(kj::from<Rust>(configWords)), CONFIG_READER_OPTIONS);
     auto config = reader.getRoot<config::Config>();
     util::Autogate::initAutogate(config.getAutogates());
     KJ_IF_SOME(t, test) {
       setUpTestProcess(t);
+    }
+    KJ_IF_SOME(b, bench) {
+      setUpBenchProcess(b);
     }
 
     platform = jsg::defaultPlatform(0);
@@ -151,17 +173,29 @@ class Bootstrap {
         KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; }, platform.get());
   }
 
+  // Ends the --async-trace file. The factory is destroyed first, ending every context, so the exit
+  // line follows their ends.
+  ~Bootstrap() noexcept(false) {
+    KJ_IF_SOME(writer, asyncTraceWriter) {
+      writer->finish();
+    }
+  }
+
   KJ_DISALLOW_COPY_AND_MOVE(Bootstrap);
 
   // A factory over `configWords`, which it owns for its run.
   kj::Own<WorkerFactory> makeFactory(::rust::Vec<uint64_t> configWords,
       const ServeOrTestOptions& serveOrTest,
-      kj::Maybe<const TestOptions&> test) {
+      kj::Maybe<const TestOptions&> test,
+      kj::Maybe<const BenchOptions&> bench) {
     auto options = kj::heap<WorkerFactory::Options>();
     options->loggingOptions = Worker::LoggingOptions(Worker::ConsoleMode::STDOUT);
     applyServeOrTestOptions(*options, serveOrTest);
     KJ_IF_SOME(t, test) {
       applyTestOptions(*options, t);
+    }
+    KJ_IF_SOME(b, bench) {
+      applyBenchOptions(*options, b);
     }
     return kj::heap<WorkerFactory>(*v8System, timer, monotonicClock, provider.getNetwork(),
         entropySource, *fs, kj::mv(options), kj::mv(configWords));
@@ -180,6 +214,9 @@ class Bootstrap {
   kj::Maybe<PerfettoSession> perfettoSession;
 #endif
 
+  // Set by --async-trace. The factory's isolates write to it, so it outlives them.
+  kj::Maybe<kj::Own<AsyncTraceWriter>> asyncTraceWriter;
+
   kj::Own<v8::Platform> platform;
   kj::Own<WorkerdPlatform> v8Platform;
   kj::Own<jsg::V8System> v8System;
@@ -190,6 +227,13 @@ class Bootstrap {
 
   void applyServeOrTestOptions(
       WorkerFactory::Options& options, const ServeOrTestOptions& serveOrTest) {
+    KJ_IF_SOME(writer, asyncTraceWriter) {
+      options.asyncTraceWriter = *writer;
+    }
+    KJ_IF_SOME(frames, serveOrTest.async_trace_stacks) {
+      options.asyncTraceStackDepth = frames;
+    }
+    options.asyncTracePromises = serveOrTest.async_trace_promises;
     options.experimental = serveOrTest.experimental;
     auto& python = options.pythonConfig;
     KJ_IF_SOME(path, serveOrTest.pyodide_package_disk_cache_dir) {
@@ -233,6 +277,29 @@ class Bootstrap {
     KJ_IF_SOME(compatDate, testOptions.compat_date) {
       options.testCompatibilityDateOverride = kj::str(compatDate);
     }
+  }
+
+  // The `bench` options that apply to the process. Bench mode is on before any worker compiles.
+  static void setUpBenchProcess(const BenchOptions& benchOptions) {
+    setBenchMode();
+    if (!benchOptions.no_verbose) {
+      // As for tests, so that uncaught exceptions are displayed.
+      kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
+    }
+    if (benchOptions.all_autogates) {
+      util::Autogate::initAllAutogates();
+    }
+  }
+
+  // The `bench` options that apply to a factory.
+  static void applyBenchOptions(WorkerFactory::Options& options, const BenchOptions& benchOptions) {
+    KJ_IF_SOME(compatDate, benchOptions.compat_date) {
+      options.testCompatibilityDateOverride = kj::str(compatDate);
+    }
+    KJ_IF_SOME(compatDate, benchOptions.default_compat_date) {
+      options.defaultCompatibilityDate = kj::str(compatDate);
+    }
+    options.tailWorkers = benchOptions.trace;
   }
 };
 
@@ -288,10 +355,23 @@ int32_t with_process_context(
 kj::Own<WorkerFactory> bootstrap(kj_rs_tokio::TokioAsyncIoContext& loop,
     ::rust::Vec<uint64_t> config,
     const ServeOrTestOptions& options,
-    kj::Maybe<const TestOptions&> test) {
-  auto bootstrap = kj::heap<Bootstrap>(loop, config, options, test);
-  auto factory = bootstrap->makeFactory(kj::mv(config), options, test);
+    kj::Maybe<const TestOptions&> test,
+    kj::Maybe<const BenchOptions&> bench) {
+  auto bootstrap = kj::heap<Bootstrap>(loop, config, options, test, bench);
+  auto factory = bootstrap->makeFactory(kj::mv(config), options, test, bench);
   return factory.attach(kj::mv(bootstrap));
+}
+
+BuildInfo build_info() {
+  return BuildInfo{
+    .workerd_version = RELEASE_VERSION.as<RustCopyUncheckedUtf8>(),
+    .build_mode = buildMode().as<RustCopyUncheckedUtf8>(),
+    .v8_version = kj::StringPtr(v8::V8::GetVersion()).as<RustCopyUncheckedUtf8>(),
+  };
+}
+
+::rust::String newest_compat_date() {
+  return newestCompatDateStr().as<RustCopyUncheckedUtf8>();
 }
 
 void cli_exit(int32_t code) {

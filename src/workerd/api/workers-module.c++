@@ -68,6 +68,11 @@ jsg::Optional<jsg::Ref<CacheContext>> EntrypointsModule::getCtxCache(jsg::Lock& 
   return kj::none;
 }
 
+kj::String EntrypointsModule::mapVirtualHost(
+    jsg::Lock& js, jsg::Ref<Fetcher> fetcher, uint16_t port) {
+  return fetcher->mapVirtualHost(js, port);
+}
+
 void EntrypointsModule::abortIsolate(jsg::Lock& js, jsg::Optional<kj::String> reason) {
   auto& r = reason.orDefault(nullptr);
   KJ_IF_SOME(context, IoContext::tryCurrent()) {

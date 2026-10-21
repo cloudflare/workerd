@@ -128,6 +128,16 @@ export default {
   'encrypt_decrypt/rsa_oaep.https.any.js': {},
   'encrypt_decrypt/rsa_vectors.js': {},
 
+  'export-key-error-order.https.any.js': {
+    comment:
+      'exportKey() and wrapKey() check extractable before export support, so HKDF and PBKDF2 keys throw InvalidAccessError instead of NotSupportedError',
+    expectedFailures: [
+      'exportKey() with a HKDF key throws NotSupportedError',
+      'wrapKey() with a HKDF key throws NotSupportedError',
+      'exportKey() with a PBKDF2 key throws NotSupportedError',
+      'wrapKey() with a PBKDF2 key throws NotSupportedError',
+    ],
+  },
   'generateKey/algorithm_registry.js': {},
   'generateKey/failures.js': {},
   'generateKey/failures_AES-CBC.https.any.js': {},
@@ -439,6 +449,16 @@ export default {
     expectedFailures: true,
   },
   'serialization/x448.tentative.https.any.js': unsupported('X448'),
+  'sharedarraybuffer.https.any.js': {
+    comment:
+      'SubtleCrypto BufferSource arguments accept views backed by a SharedArrayBuffer instead of throwing TypeError',
+    expectedFailures: [
+      'digest() data is a Uint8Array(SharedArrayBuffer)',
+      'encrypt() data is a Uint8Array(SharedArrayBuffer)',
+      'encrypt() AesGcmParams.iv is a Uint8Array(SharedArrayBuffer)',
+      'encrypt() AesGcmParams.additionalData is a Uint8Array(SharedArrayBuffer)',
+    ],
+  },
   'sign_verify/ecdsa.https.any.js': {},
   'sign_verify/ecdsa.js': supportFile,
   'sign_verify/ecdsa_vectors.js': supportFile,

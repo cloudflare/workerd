@@ -37,23 +37,19 @@ import type {
   RingBuffer as RingBufferType,
   RingBufferConstructor,
 } from './ring-buffer';
+import type { CommonHelpers } from './common';
 import type { ViewExtentHelpers } from './view-extent';
 
 const {
-  ArrayBufferPrototypeByteLengthGet,
-  DataViewPrototypeGetBuffer,
   MathMin,
   ObjectDefineProperties,
   SymbolToStringTag,
   TypeError,
-  TypedArrayPrototypeGetBuffer,
-  TypedArrayPrototypeSet,
   Uint8Array,
   uncurryThis,
 } = primordials;
 
-const { isArrayBuffer, isArrayBufferView, isSharedArrayBuffer, isDataView } =
-  utils;
+const { isSharedArrayBuffer } = utils;
 
 // Captured for primordials discipline — ToString coercion per spec.
 const StringCoerce = String;
@@ -68,7 +64,9 @@ const {
   WritableStreamDefaultController,
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
-const { viewByteExtent } =
+const { isActualObject, kEnumerable, toStringTagProperty } =
+  require('webstreams/common') as CommonHelpers;
+const { bufferSourceExtent, copyExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
@@ -115,27 +113,6 @@ const newCodec = utils.newCompressionCodec as (
   format: string
 ) => CodecHandle;
 
-function isActualObject(value: unknown): boolean {
-  return value != null && typeof value === 'object';
-}
-
-// True for BufferSource chunks the codec accepts: ArrayBuffers and views,
-// excluding anything SharedArrayBuffer-backed. The Compression Streams
-// spec takes a Web IDL BufferSource without [AllowShared], so shared
-// memory is a TypeError (WPT compression-bad-chunks pins the rejection).
-// This is a standard API, so the spec shape wins over parity with the
-// identity streams, which accept shared views by copying. Captured getters
-// are used for the view's buffer — prototype accessors are user-patchable.
-function isValidChunk(chunk: unknown): boolean {
-  if (isArrayBuffer(chunk)) return true;
-  if (isSharedArrayBuffer(chunk)) return false;
-  if (!isArrayBufferView(chunk)) return false;
-  const buffer = isDataView(chunk)
-    ? DataViewPrototypeGetBuffer(chunk)
-    : TypedArrayPrototypeGetBuffer(chunk);
-  return !isSharedArrayBuffer(buffer);
-}
-
 // Validates a chunk and copies its CURRENT bytes. Runs synchronously
 // inside writer.write() (via the strategy size callback), so resizing,
 // detaching, or mutating the buffer after write() returns cannot change
@@ -143,34 +120,21 @@ function isValidChunk(chunk: unknown): boolean {
 // copies inside write() for exactly these hazards. Detached or
 // out-of-bounds inputs, DataViews included, copy as empty (a codec no-op;
 // see view-extent.ts).
+//
+// The codec accepts ArrayBuffers and views, excluding anything
+// SharedArrayBuffer-backed. The Compression Streams spec takes a Web IDL
+// BufferSource without [AllowShared], so shared memory is a TypeError (WPT
+// compression-bad-chunks pins the rejection). This is a standard API, so
+// the spec shape wins over parity with the identity streams, which accept
+// shared views by copying.
 function snapshotChunk(chunk: unknown): Uint8Array {
-  if (!isValidChunk(chunk)) {
+  const extent = bufferSourceExtent(chunk);
+  if (extent === undefined || isSharedArrayBuffer(extent.buffer)) {
     throw new TypeError(
       'The provided value is not of type (ArrayBuffer or ArrayBufferView)'
     );
   }
-  let buffer: ArrayBuffer;
-  let byteOffset: number;
-  let byteLength: number;
-  if (isArrayBuffer(chunk)) {
-    buffer = chunk as ArrayBuffer;
-    byteOffset = 0;
-    byteLength = ArrayBufferPrototypeByteLengthGet(chunk) as number;
-  } else {
-    const extent = viewByteExtent(chunk as ArrayBufferView);
-    buffer = extent.buffer as ArrayBuffer;
-    byteOffset = extent.byteOffset;
-    byteLength = extent.byteLength;
-  }
-  const copy = new Uint8Array(byteLength);
-  if (byteLength > 0) {
-    TypedArrayPrototypeSet(
-      copy,
-      new Uint8Array(buffer, byteOffset, byteLength),
-      0
-    );
-  }
-  return copy;
+  return copyExtent(extent.buffer, extent.byteOffset, extent.byteLength);
 }
 
 type SnapshotEntry =
@@ -457,32 +421,18 @@ class DecompressionStream {
   }
 }
 
-const kEnumerable = { __proto__: null, enumerable: true };
-
 ObjectDefineProperties(CompressionStream.prototype, {
   __proto__: null,
   readable: kEnumerable,
   writable: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'CompressionStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('CompressionStream'),
 });
 
 ObjectDefineProperties(DecompressionStream.prototype, {
   __proto__: null,
   readable: kEnumerable,
   writable: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'DecompressionStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('DecompressionStream'),
 });
 
 module.exports = {

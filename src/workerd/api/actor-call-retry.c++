@@ -27,6 +27,21 @@ ActorRetryStopReason nonDisconnectStopReason(kj::Exception::Type type) {
   KJ_UNREACHABLE;
 }
 
+struct RetryBackoff {
+  kj::Duration min;
+  kj::Duration max;
+};
+
+// Each retry waits a uniformly random delay from its range, and retries beyond the last range
+// reuse it. Early retries stay quick so brief faults recover fast, and the floors on later retries
+// spread a call's attempts across more of its retry timeout.
+constexpr RetryBackoff RETRY_BACKOFFS[] = {
+  {0 * kj::SECONDS, 500 * kj::MILLISECONDS},
+  {0 * kj::SECONDS, 1 * kj::SECONDS},
+  {1 * kj::SECONDS, 3 * kj::SECONDS},
+  {2 * kj::SECONDS, 4 * kj::SECONDS},
+};
+
 }  // namespace
 
 ActorCallRetryState::ActorCallRetryState(TimerChannel& timer,
@@ -75,7 +90,7 @@ kj::Exception ActorCallRetryState::retryTimeoutExpired() {
         config.callType, ActorRetryCandidate::FIRST_FAILURE_BUDGET_SPENT);
   }
   recordOutcome(ActorRetryOutcome::RETRY_BUDGET_EXHAUSTED);
-  return KJ_ASSERT_NONNULL(originalDisconnect).clone();
+  return KJ_ASSERT_NONNULL(originalFailure).clone();
 }
 
 kj::OneOf<kj::Duration, kj::Exception> ActorCallRetryState::handleAttemptFailure(
@@ -87,7 +102,7 @@ kj::OneOf<kj::Duration, kj::Exception> ActorCallRetryState::handleAttemptFailure
     return kj::mv(claimRejection);
   }
   KJ_IF_SOME(candidate, config.probeCandidate) {
-    if (exception.getType() == kj::Exception::Type::DISCONNECTED &&
+    if (jsg::isRetryable(exception) &&
         exception.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none) {
       auto recorded = candidate;
       config.probeCandidate = kj::none;
@@ -111,7 +126,7 @@ kj::Exception ActorCallRetryState::handleCommittedAttemptFailure(
 }
 
 void ActorCallRetryState::maybeStartRetryLatencyTimer(const kj::Exception& exception) {
-  if (exception.getType() == kj::Exception::Type::DISCONNECTED && retryStartTime == kj::none) {
+  if (jsg::isRetryable(exception) && retryStartTime == kj::none) {
     retryStartTime = kj::systemPreciseMonotonicClock().now();
   }
 }
@@ -123,12 +138,12 @@ kj::Maybe<kj::Exception> ActorCallRetryState::handleClaimRejection(const kj::Exc
 
   recordOutcome(ActorRetryOutcome::CLAIM_REJECTED);
   return KJ_ASSERT_NONNULL(
-      originalDisconnect, "actor retry claim rejected before a retry was attempted")
+      originalFailure, "actor retry claim rejected before a retry was attempted")
       .clone();
 }
 
 kj::OneOf<kj::Duration, kj::Exception> ActorCallRetryState::checkCanRetry(kj::Exception exception) {
-  if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
+  if (!jsg::isRetryable(exception)) {
     recordUnableToRetry(nonDisconnectStopReason(exception.getType()));
     return kj::mv(exception);
   }
@@ -136,15 +151,15 @@ kj::OneOf<kj::Duration, kj::Exception> ActorCallRetryState::checkCanRetry(kj::Ex
     recordUnableToRetry(ActorRetryStopReason::DELIVERED_DISCONNECT);
     return kj::mv(exception);
   }
-  if (originalDisconnect == kj::none) {
-    originalDisconnect = exception.clone();
+  if (originalFailure == kj::none) {
+    originalFailure = exception.clone();
   }
   if (attemptCount >= policy.maxAttempts()) {
     if (recordOutcome(ActorRetryOutcome::ATTEMPTS_EXHAUSTED)) {
       observer->recordActorRetryAttemptsExhausted(
           config.callType, timer.nowForLimitTimeout() - callStart);
     }
-    return KJ_ASSERT_NONNULL(originalDisconnect).clone();
+    return KJ_ASSERT_NONNULL(originalFailure).clone();
   }
 
   auto delay = retryDelay();
@@ -162,7 +177,7 @@ kj::OneOf<kj::Duration, kj::Exception> ActorCallRetryState::checkCanRetry(kj::Ex
 }
 
 void ActorCallRetryState::recordRecovered() {
-  if (originalDisconnect != kj::none) {
+  if (originalFailure != kj::none) {
     recordOutcome(ActorRetryOutcome::RECOVERED);
   }
 }
@@ -177,8 +192,9 @@ kj::Duration ActorCallRetryState::retryDelay() {
     getEntropy(kj::asBytes(seed));
     return std::mt19937_64(seed);
   }();
-  auto maximum = kj::min(INITIAL_BACKOFF * (1u << (attemptCount - 1)), MAX_BACKOFF);
-  std::uniform_int_distribution<uint64_t> distribution(0, maximum / kj::NANOSECONDS);
+  auto& backoff = RETRY_BACKOFFS[kj::min(attemptCount, kj::size(RETRY_BACKOFFS)) - 1];
+  std::uniform_int_distribution<uint64_t> distribution(
+      backoff.min / kj::NANOSECONDS, backoff.max / kj::NANOSECONDS);
   return distribution(generator) * kj::NANOSECONDS;
 }
 

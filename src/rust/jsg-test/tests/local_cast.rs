@@ -456,7 +456,7 @@ fn data_view_cannot_cast_to_typed_array() {
         assert!(!val.is_typed_array());
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ta: v8::Local<v8::TypedArray> = val.clone().into();
+            let _ta: v8::Local<v8::TypedArray> = val.into();
         }));
         assert!(
             result.is_err(),

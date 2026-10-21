@@ -1,7 +1,7 @@
 // Copyright (c) 2024 Cloudflare, Inc.
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
-import { spawn } from 'node:child_process';
+import childProcess from 'node:child_process';
 import assert from 'node:assert';
 
 // A convenience class to:
@@ -14,23 +14,28 @@ export class WorkerdServerHarness {
   #workerdConfig = null;
   #listenPortNames = null;
   #extraArgs = null;
+  #startupTimeoutMs = null;
 
   // Properties set by `start()` and cleared by `stop()`.
   #child = null;
   #listenPorts = null;
   #listenInspectorPort = null;
   #closed = null;
+  #pendingReadiness = null;
+  #lastControlMessage = null;
 
   constructor({
     workerdBinary,
     workerdConfig,
     listenPortNames,
     extraArgs = [],
+    startupTimeoutMs = 30000,
   }) {
     this.#workerdBinary = workerdBinary;
     this.#workerdConfig = workerdConfig;
     this.#listenPortNames = listenPortNames;
     this.#extraArgs = extraArgs;
+    this.#startupTimeoutMs = startupTimeoutMs;
   }
 
   // Spawn our workerd process and wait for it to start.
@@ -61,63 +66,109 @@ export class WorkerdServerHarness {
 
     // Start the subprocess.
     console.log('[HARNESS] Starting workerd with args:', args);
-    this.#child = spawn(this.#workerdBinary, args, options);
+    this.#child = childProcess.spawn(this.#workerdBinary, args, options);
+    this.#pendingReadiness = new Map();
+    this.#lastControlMessage = 'none';
+    this.#listenPorts = new Map(
+      this.#listenPortNames.map((name) => [
+        name,
+        this.#expectReadiness(`listen:${name}`),
+      ])
+    );
+    this.#listenInspectorPort = this.#expectReadiness('listen-inspector');
+    const spawned = this.#expectReadiness('spawn');
 
-    // Create a promise for every named listen port we were told in our constructor to expect, and
-    // resolve them as the control FD reports ports coming online. The control FD carries one JSON
-    // object per line; a read may return several lines at once or a partial one, so the stream is
-    // split on newlines before parsing.
-    const listeners = new Set();
-    let buffered = '';
-    this.#child.stdio[CONTROL_FD].on('data', (data) => {
-      buffered += data;
-      const lines = buffered.split('\n');
-      buffered = lines.pop();
-      for (const line of lines) {
+    this.#closed = new Promise((resolve) => {
+      this.#child.once('close', (code, signal) => resolve([code, signal]));
+    });
+    this.#watchChild(this.#child.stdio[CONTROL_FD]);
+
+    const timeout = setTimeout(() => {
+      this.#failReadiness(
+        `timed out after ${this.#startupTimeoutMs}ms waiting for ${[
+          ...this.#pendingReadiness.keys(),
+        ].join(', ')}`
+      );
+    }, this.#startupTimeoutMs);
+    // Observe every readiness promise so an unused inspector promise cannot cause an unhandled
+    // rejection. Callers receive readiness failures when they await their requested listen port.
+    Promise.all([
+      spawned,
+      this.#listenInspectorPort,
+      ...this.#listenPorts.values(),
+    ]).then(
+      () => clearTimeout(timeout),
+      () => clearTimeout(timeout)
+    );
+    await spawned;
+  }
+
+  #expectReadiness(name) {
+    const deferred = Promise.withResolvers();
+    this.#pendingReadiness.set(name, deferred);
+    return deferred.promise;
+  }
+
+  #resolveReadiness(name, value) {
+    const deferred = this.#pendingReadiness.get(name);
+    if (deferred !== undefined) {
+      this.#pendingReadiness.delete(name);
+      deferred.resolve(value);
+    }
+  }
+
+  #failReadiness(reason) {
+    if (!this.#pendingReadiness?.size) return;
+    const error = new Error(
+      `Workerd startup failed (PID ${this.#child.pid ?? 'unassigned'}): ${reason}; ` +
+        `last control message: ${this.#lastControlMessage}`
+    );
+    for (const deferred of this.#pendingReadiness.values()) {
+      deferred.reject(error);
+    }
+    this.#pendingReadiness.clear();
+  }
+
+  #watchChild(control) {
+    this.#child.once('spawn', () => {
+      console.log('[HARNESS] Workerd process spawned');
+      this.#resolveReadiness('spawn');
+    });
+    this.#child.once('error', (error) => this.#failReadiness(error.message));
+    this.#child.once('exit', (code, signal) => {
+      this.#failReadiness(`process exited (code ${code}, signal ${signal})`);
+    });
+    control.once('end', () => {
+      this.#failReadiness('control stream ended before readiness');
+    });
+    control.once('error', (error) => this.#failReadiness(error.message));
+    control.setEncoding('utf8');
+    let buffer = '';
+    control.on('data', (data) => {
+      buffer += data;
+      let newline;
+      while ((newline = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
         if (line.length === 0) continue;
-        const parsed = JSON.parse(line);
-        console.log('[HARNESS] Control message:', parsed);
-        for (const listener of listeners) listener(parsed);
+        this.#readControlMessage(line);
       }
     });
+  }
 
-    this.#listenPorts = new Map();
-    for (const listenPort of this.#listenPortNames) {
-      this.#listenPorts.set(
-        listenPort,
-        new Promise((resolve, reject) => {
-          listeners.add((parsed) => {
-            if (parsed.event === 'listen' && parsed.socket === listenPort) {
-              resolve(parsed.port);
-            }
-          });
-          this.#child.once('error', reject);
-        })
-      );
+  #readControlMessage(line) {
+    let message;
+    try {
+      message = JSON.parse(line);
+    } catch (error) {
+      this.#failReadiness(`invalid control message ${line}: ${error.message}`);
+      return;
     }
-
-    // Do the same as the above for the inspector port.
-    this.#listenInspectorPort = new Promise((resolve, reject) => {
-      listeners.add((parsed) => {
-        if (parsed.event === 'listen-inspector') {
-          resolve(parsed.port);
-        }
-      });
-      this.#child.once('error', reject);
-    });
-
-    // Set up a closed promise, too.
-    this.#closed = new Promise((resolve, reject) => {
-      this.#child
-        .once('close', (code, signal) => resolve([code, signal]))
-        .once('error', reject);
-    });
-
-    // Wait for the subprocess to complete spawning before we return.
-    await new Promise((resolve, reject) => {
-      this.#child.once('spawn', resolve).once('error', reject);
-      console.log('[HARNESS] Workerd process spawned');
-    });
+    this.#lastControlMessage = line;
+    console.log('[HARNESS] Control message:', message);
+    const name =
+      message.event === 'listen' ? `listen:${message.socket}` : message.event;
+    this.#resolveReadiness(name, message.port);
   }
 
   // Return a promise for the inspector port.
@@ -184,6 +235,8 @@ export class WorkerdServerHarness {
     this.#listenPorts = null;
     this.#listenInspectorPort = null;
     this.#closed = null;
+    this.#pendingReadiness = null;
+    this.#lastControlMessage = null;
 
     return result;
   }

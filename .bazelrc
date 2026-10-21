@@ -293,6 +293,8 @@ build:tsan-common --test_timeout=30,150,600,2400
 # not currently derive these defines from the compiler's sanitizer flags.
 build:tsan-common --copt="-DV8_IS_TSAN"
 build:tsan-common --per_file_copt='external/.*v8@-DTHREAD_SANITIZER'
+# Perfetto also requires this define to enable its shared-memory scraping annotations.
+build:tsan-common --per_file_copt='external/.*perfetto@-DTHREAD_SANITIZER'
 # One toolchain per host; resolution picks the one matching the (host-parented) tsan platform.
 build:tsan-common --extra_toolchains=//build/rust:tsan_toolchain_linux_x86_64,//build/rust:tsan_toolchain_macos_aarch64
 build:tsan-common --@rules_rust//:extra_rustc_flag=-Zsanitizer=thread

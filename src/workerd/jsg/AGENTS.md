@@ -9,28 +9,30 @@ Macro-driven C++/V8 binding layer: declares C++ types as JS-visible resources/st
 
 ## KEY FILES
 
-| File             | Purpose                                                                                                                     |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `jsg.h`          | Core header (3115 lines): all macros (`JSG_RESOURCE_TYPE`, `JSG_METHOD`, etc.), type mappings, `Lock`, `V8Ref`, `GcVisitor` |
-| `resource.h`     | Template metaprogramming: V8 callback generation, `FunctionCallbackInfo` dispatch, prototype/constructor wiring             |
-| `struct.h`       | `JSG_STRUCT` value-type mapping: deep-copies C++ structs to/from JS objects                                                 |
-| `wrappable.h`    | GC integration: `Wrappable` base class, CppGC visitor hooks, ref marking, weak pointers                                     |
-| `promise.h`      | `jsg::Promise<T>` wrapping KJ promises ↔ JS promises; resolver pairs, coroutine integration                                |
-| `modules.h`      | Legacy `ModuleRegistry`: ESM/CJS module resolution, evaluation, top-level await handling                                    |
-| `modules-new.h`  | New module registry (`jsg::modules::ModuleRegistry`): URL-based specifiers, shareable across isolate replicas, gated by the `new_module_registry` compat flag via `workerd::isNewModuleRegistryEnabled()`. Full reference: `docs/reference/detail/new-module-registry.md` |
-| `setup.h`        | `V8System`, `IsolateBase`, `JsgConfig`; process-level V8 init; `JSG_DECLARE_ISOLATE_TYPE`                                   |
-| `function.h`     | `jsg::Function<Sig>` wrapping C++ callables ↔ JS functions                                                                 |
-| `memory.h`       | `MemoryTracker`, `JSG_MEMORY_INFO` macro; heap snapshot support                                                             |
-| `rtti.capnp`     | Cap'n Proto schema for type introspection; consumed by `types/` for TS generation                                           |
-| `rtti.h`         | C++ RTTI builder: walks JSG type graph → `rtti.capnp` structures                                                            |
-| `jsvalue.h`      | `JsValue`, `JsObject`, `JsString`, etc. — typed wrappers over `v8::Value`                                                   |
-| `type-wrapper.h` | `TypeWrapper` template: compile-time dispatch for C++ ↔ V8 conversions; `SelfConvertible` concept for self-converting types |
-| `meta.h`         | Argument unwrapping, `ArgumentContext`, parameter pack metaprogramming                                                      |
-| `unwrap-args.h`  | `UnwrappedArgs` helper: deterministic left-to-right argument unwrapping in V8 callbacks                                     |
-| `fast-api.h`     | V8 Fast API call optimizations                                                                                              |
-| `ser.h`          | Structured clone: `Serializer`/`Deserializer`                                                                               |
-| `web-idl.h`      | Web IDL types: `NonCoercible<T>`, `Sequence`, etc.                                                                          |
-| `observer.h`     | `IsolateObserver`, `CompilationObserver` — hooks for metrics/tracing                                                        |
+| File              | Purpose                                                                                                                                                                                                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `jsg.h`           | Core header (3115 lines): all macros (`JSG_RESOURCE_TYPE`, `JSG_METHOD`, etc.), type mappings, `Lock`, `V8Ref`, `GcVisitor`                                                                                                                                               |
+| `resource.h`      | Template metaprogramming: V8 callback generation, `FunctionCallbackInfo` dispatch, prototype/constructor wiring                                                                                                                                                           |
+| `struct.h`        | `JSG_STRUCT` value-type mapping: deep-copies C++ structs to/from JS objects                                                                                                                                                                                               |
+| `wrappable.h`     | GC integration: `Wrappable` base class, CppGC visitor hooks, ref marking, weak pointers                                                                                                                                                                                   |
+| `promise.h`       | `jsg::Promise<T>` wrapping KJ promises ↔ JS promises; resolver pairs, coroutine integration                                                                                                                                                                               |
+| `modules.h`       | Legacy `ModuleRegistry`: ESM/CJS module resolution, evaluation, top-level await handling                                                                                                                                                                                  |
+| `modules-new.h`   | New module registry (`jsg::modules::ModuleRegistry`): URL-based specifiers, shareable across isolate replicas, gated by the `new_module_registry` compat flag via `workerd::isNewModuleRegistryEnabled()`. Full reference: `docs/reference/detail/new-module-registry.md` |
+| `setup.h`         | `V8System`, `IsolateBase`, `JsgConfig`; process-level V8 init; `JSG_DECLARE_ISOLATE_TYPE`                                                                                                                                                                                 |
+| `sandbox.{h,c++}` | Cage-relative byte views for ArrayBuffer-backed native objects                                                                                                                                                                                                            |
+| `function.h`      | `jsg::Function<Sig>` wrapping C++ callables ↔ JS functions                                                                                                                                                                                                                |
+| `memory.h`        | `MemoryTracker`, `JSG_MEMORY_INFO` macro; heap snapshot support                                                                                                                                                                                                           |
+| `rtti.capnp`      | Cap'n Proto schema for type introspection; consumed by `types/` for TS generation                                                                                                                                                                                         |
+| `rtti.h`          | C++ RTTI builder: walks JSG type graph → `rtti.capnp` structures                                                                                                                                                                                                          |
+| `jsvalue.h`       | `JsValue`, `JsObject`, `JsString`, etc. — typed wrappers over `v8::Value`                                                                                                                                                                                                 |
+| `type-wrapper.h`  | `TypeWrapper` template: compile-time dispatch for C++ ↔ V8 conversions; `SelfConvertible` concept for self-converting types                                                                                                                                               |
+| `meta.h`          | Argument unwrapping, `ArgumentContext`, parameter pack metaprogramming                                                                                                                                                                                                    |
+| `unwrap-args.h`   | `UnwrappedArgs` helper: deterministic left-to-right argument unwrapping in V8 callbacks                                                                                                                                                                                   |
+| `fast-api.h`      | V8 Fast API call optimizations                                                                                                                                                                                                                                            |
+| `ser.h`           | Structured clone: `Serializer`/`Deserializer`                                                                                                                                                                                                                             |
+| `web-idl.h`       | Web IDL types: `NonCoercible<T>`, `Sequence`, etc.                                                                                                                                                                                                                        |
+| `observer.h`      | `IsolateObserver`, `CompilationObserver` — hooks for metrics/tracing                                                                                                                                                                                                      |
+| `code-cache.h`    | `CodeCacheStore` (embedder-provided, process-wide V8 code caches for worker code, keyed by source SHA-256) and `IsolateCodeCache` (per-isolate use: prepared lookups, production window; holds pending V8 globals that must be released under the isolate lock)           |
 
 ## BINDING PATTERN
 
@@ -105,7 +107,7 @@ These rules MUST be followed when writing or modifying JSG code:
     GC-visitable field intentionally is not visited (e.g., a `kj::Rc`-owned object
     unreachable from JS, or a type visited via a different mechanism), suppress the
     `jsg-visit-for-gc` clang-tidy diagnostic with a `// NOLINT(jsg-visit-for-gc)`
-    comment and a brief explanation of *why* it's safe to skip.
+    comment and a brief explanation of _why_ it's safe to skip.
 
 12. **Module evaluation MUST NOT drain the microtask queue while nested.** Draining
     while an ancestor module is still `kEvaluating` can run an async module's
@@ -118,6 +120,15 @@ These rules MUST be followed when writing or modifying JSG code:
     or the guard is silently bypassed. Callers that can return a promise to their own
     caller may pass `InstantiateModuleOptions::ALLOW_PENDING_EVALUATION` to receive the
     pending evaluation promise instead of an error.
+
+13. **Compiled Wasm reuse MUST preserve compilation settings.** Compatibility flags
+    that change Wasm compilation options or compile-time imports must be included
+    in the slot key used by `CompiledWasmModuleHolder::getOrCompile()` in
+    `modules.c++`. Keep its slot selection and `compiled` storage in `modules.h`
+    consistent with `compileWasmModule()`. The current key is
+    `Lock::isWasmEsmIntegrationBuiltinsEnabled()`. Extend the reuse tests in
+    `modules-new-test.c++` and `api/pyodide/wasm-module-test.c++` when adding a
+    setting, including isolate destruction and a distinct compilation per setting.
 
 The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
 automatically detects missing `visitForGc` implementations and unvisited fields

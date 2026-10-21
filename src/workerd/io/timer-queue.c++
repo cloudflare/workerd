@@ -31,7 +31,7 @@ void TimerQueue::armNextTimeout(TimerChannel& timerChannel) {
   // Its continuation runs independently of timerTask, including while its scope is suspended.
   if (queue.size() == 0 || queue.begin()->value == kj::none) {
     timerTask = nullptr;
-    trackedHead = next;
+    trackedHead = kj::mv(next);
     return;
   }
 
@@ -48,7 +48,7 @@ void TimerQueue::armNextTimeout(TimerChannel& timerChannel) {
     queue.begin()->value = kj::none;
     fulfiller->fulfill();
   }).eagerlyEvaluate([](kj::Exception&& e) { KJ_LOG(ERROR, e); });
-  trackedHead = next;
+  trackedHead = kj::mv(next);
 }
 
 }  // namespace workerd

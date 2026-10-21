@@ -10,15 +10,18 @@
 
 import * as assert from 'node:assert';
 
-// Per-invocation span data: invocationId -> { onset, rootSpanId, spans: Map(spanId -> span) }.
+// Per-invocation span data:
+// invocationId -> { onset, rootSpanId, spans: Map(spanId -> span), ended }.
 // Each span records its name, its parent span ID (from the spanOpen's spanContext), and any
-// attributes merged from subsequent attributes events targeting that span.
+// attributes merged from subsequent attributes events targeting that span. ended settles once the
+// invocation's tail stream delivers its outcome, the stream's last event.
 let invocations = new Map();
 
 export default {
   tailStream(onsetEvent, env, ctx) {
     const invocationId = onsetEvent.invocationId;
     const rootSpanId = onsetEvent.event.spanId;
+    const { promise: ended, resolve: end } = Promise.withResolvers();
     const data = {
       onset: {
         info: onsetEvent.event.info?.type,
@@ -26,6 +29,7 @@ export default {
       },
       rootSpanId,
       spans: new Map(),
+      ended,
     };
     invocations.set(invocationId, data);
 
@@ -44,6 +48,8 @@ export default {
             span.attrs[name] = value;
           }
         }
+      } else if (type === 'outcome') {
+        end();
       }
     };
   },
@@ -56,8 +62,7 @@ function jsRpcCalls(data) {
     .map(([spanId, span]) => ({ spanId, ...span }));
 }
 
-// Find both callback invocations and their spans, or return incomplete results.
-// Tail events are delivered asynchronously, so callers poll.
+// Find both callback invocations and their spans.
 function findCallbackSpans() {
   let caller = null;
   let callee = null;
@@ -101,22 +106,13 @@ function findCallbackSpans() {
 
 export const test = {
   async test() {
-    // Poll until the expected spans arrive. Tail events are asynchronous, so avoid relying on a
-    // fixed delay.
-    const deadline = Date.now() + 5000;
-    let found = findCallbackSpans();
-    while (
-      !(
-        found.callerDispatch &&
-        found.calleeDispatch &&
-        found.callerTransientCalls.length === 3 &&
-        found.calleeStubCalls.length === 3
-      ) &&
-      Date.now() < deadline
-    ) {
-      await scheduler.wait(10);
-      found = findCallbackSpans();
-    }
+    // Tail events can still be in flight when the caller's test() returns. Wait until every tail
+    // stream has delivered its outcome, including streams that start while waiting.
+    let count;
+    do {
+      count = invocations.size;
+      await Promise.all([...invocations.values()].map((data) => data.ended));
+    } while (invocations.size > count);
 
     const {
       caller,
@@ -125,7 +121,7 @@ export const test = {
       calleeDispatch,
       callerTransientCalls,
       calleeStubCalls,
-    } = found;
+    } = findCallbackSpans();
     assert.ok(
       callee,
       'Could not find the CallbackService JSRPC invocation in tail events'

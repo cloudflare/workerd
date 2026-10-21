@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 #include <workerd/api/js-streams-bridge.h>
-#include <workerd/io/per-isolate-bootstrap.h>
+#include <workerd/api/per-isolate-bootstrap.h>
 
 namespace workerd::api::webstreams {
 

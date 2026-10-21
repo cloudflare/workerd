@@ -100,6 +100,12 @@ impl Factory {
         ffi::factory_experimental(&self.inner)
     }
 
+    /// Whether requests get tail workers: not under `workerd bench`, unless given `--trace`.
+    #[must_use]
+    pub fn tail_workers(&self) -> bool {
+        ffi::factory_tail_workers(&self.inner)
+    }
+
     /// The reading of the factory's `kj::Timer`, which the server's own delays run on, as the
     /// time since the timer's origin.
     #[must_use]
@@ -1141,8 +1147,13 @@ impl Server {
 
         let storage_path = self.storage_path(name, pending.storage.as_deref());
 
-        let tails = pending.tails.iter().map(lookup).collect();
-        let streaming_tails = pending.streaming_tails.iter().map(lookup).collect();
+        let mut tails: Vec<_> = pending.tails.iter().map(lookup).collect();
+        let mut streaming_tails: Vec<_> = pending.streaming_tails.iter().map(lookup).collect();
+        // Without tail workers, the tails are only looked up, for their config errors.
+        if !self.factory.tail_workers() {
+            tails.clear();
+            streaming_tails.clear();
+        }
 
         let worker_loaders = pending
             .bindings

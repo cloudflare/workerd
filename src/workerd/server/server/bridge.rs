@@ -147,6 +147,13 @@ pub mod ffi {
         message: String,
     }
 
+    /// The in-process server's `workerd bench`: whether it passed, and its encoded
+    /// `BenchReport` (bench.capnp) in words.
+    struct BenchOutcome {
+        passed: bool,
+        report: Vec<u64>,
+    }
+
     /// Where an actor keeps its data.
     struct ActorStorageSpec {
         /// Durable: keep state across requests. Ephemeral: no storage at all.
@@ -170,12 +177,16 @@ pub mod ffi {
     // =====================================================================================
     // The command line (bootstrap.h): the options the C++ driver applies, and the driver itself.
 
-    /// The options of `serve` and `test` the C++ driver applies: to the process (perfetto), or
-    /// to the worker factory (experimental, Python).
+    /// The options of `serve`, `test` and `bench` the C++ driver applies: to the process
+    /// (perfetto, the async trace file), or to the worker factory (async tracing, experimental,
+    /// Python).
     #[namespace = "workerd::server::cli"]
     struct ServeOrTestOptions {
         perfetto_trace_path: KjMaybe<String>,
         perfetto_trace_categories: KjMaybe<String>,
+        async_trace_path: KjMaybe<String>,
+        async_trace_stacks: KjMaybe<u32>,
+        async_trace_promises: bool,
         experimental: bool,
         pyodide_package_disk_cache_dir: KjMaybe<String>,
         pyodide_bundle_disk_cache_dir: KjMaybe<String>,
@@ -194,6 +205,29 @@ pub mod ffi {
         gc_stress: bool,
         all_autogates: bool,
         compat_date: KjMaybe<String>,
+    }
+
+    /// The options of `bench` the C++ driver applies: bench mode, which they turn on, logging,
+    /// autogates, the compatibility dates workers get, whether requests get tail workers.
+    #[namespace = "workerd::server::cli"]
+    struct BenchOptions {
+        no_verbose: bool,
+        all_autogates: bool,
+        /// Every worker's date; none may specify its own.
+        compat_date: KjMaybe<String>,
+        /// The date of workers that don't specify one.
+        default_compat_date: KjMaybe<String>,
+        trace: bool,
+    }
+
+    /// What the binary was built from, as `workerd bench`'s report records it.
+    #[namespace = "workerd::server::cli"]
+    struct BuildInfo {
+        /// The release date of the workerd source.
+        workerd_version: String,
+        /// "release", "debug", or "sanitizer".
+        build_mode: String,
+        v8_version: String,
     }
 
     #[namespace = "kj_rs_tokio"]
@@ -225,8 +259,8 @@ pub mod ffi {
         /// and returns the worker factory over the config, which owns it all: dropping the
         /// factory tears the rest down after it, in reverse, flushing the perfetto trace.
         /// `config` is an encoded message (segment table, then segments) in 8-byte words.
-        /// `test` is the `test` command's options, absent for `serve`. An error means the
-        /// process failed to start.
+        /// `test` and `bench` are the options of those commands, at most one of them given. An
+        /// error means the process failed to start.
         ///
         /// The factory dies before the Runtime (the timer and the loop must outlive everything
         /// on them).
@@ -235,7 +269,14 @@ pub mod ffi {
             config: Vec<u64>,
             options: &ServeOrTestOptions,
             test: KjMaybe<&TestOptions>,
+            bench: KjMaybe<&BenchOptions>,
         ) -> Result<KjOwn<WorkerFactory>>;
+
+        fn build_info() -> Result<BuildInfo>;
+
+        /// The newest compatibility date a worker may specify: today's, or the build's maximum
+        /// if that is earlier. `workerd bench`'s `--compat-date=latest`, and its default.
+        fn newest_compat_date() -> Result<String>;
 
         /// Ends the process with `code` at once, without running destructors (what
         /// `kj::ProcessContext::exit()` does when `KJ_CLEAN_SHUTDOWN` is not set). Does not return.
@@ -267,6 +308,9 @@ pub mod ffi {
         /// both read. Owned by the factory for the run; every reader into it stays valid.
         fn factory_config<'a>(factory: &'a WorkerFactory) -> &'a [u8];
         fn factory_experimental(factory: &WorkerFactory) -> bool;
+        /// Whether requests get tail workers (`WorkerFactory::Options::tailWorkers`): not under
+        /// `workerd bench`, unless given `--trace`.
+        fn factory_tail_workers(factory: &WorkerFactory) -> bool;
         /// Registers the server as the resolver of channel tokens and debug-port requests.
         /// Tokens cannot be decoded before this.
         fn factory_set_server(factory: &WorkerFactory, server: Box<ServerHandle>);
@@ -331,6 +375,11 @@ pub mod ffi {
             inner: KjOwn<WorkerInterface>,
             keep: Box<KeepAlive>,
         ) -> KjOwn<WorkerInterface>;
+        /// Runs the `bench()` handler of the request `worker` with `params`, an encoded
+        /// `BenchParams` message (bench.capnp) in words. Returns the `BenchReport.Group` the
+        /// handler filled in, encoded, without its name. The failures of the handler's code are
+        /// in the group; an error means the handler could not be run at all.
+        async fn worker_bench(worker: KjOwn<WorkerInterface>, params: &[u64]) -> Result<Vec<u64>>;
         /// Constructs an actor of `class_name` whose storage lives in `storage`. `hooks` is the
         /// actor's way back to the server; `hibernation_manager` is the evicted predecessor's,
         /// whose WebSockets the actor adopts. `container` gives the actor its container's Docker
@@ -604,8 +653,9 @@ pub mod ffi {
 
         /// The server run inside a test process (in_process.rs), on a factory the test built.
         /// `run` is `workerd serve` until `drain`, with `--debug-port` if `debug_port` is not
-        /// empty; `test` is `workerd test`. `next_report` is the next config error or warning.
-        /// `connect` and `accept` are the two ends of a `loopback:` name.
+        /// empty; `test` is `workerd test`; `bench` is `workerd bench` with `params`, an encoded
+        /// `BenchParams` message. `next_report` is the next config error or warning. `connect`
+        /// and `accept` are the two ends of a `loopback:` name.
         type InProcessServer;
         fn new_in_process_server(factory: KjOwn<WorkerFactory>) -> Box<InProcessServer>;
         async unsafe fn run<'a>(self: &'a InProcessServer, debug_port: &'a str) -> Result<()>;
@@ -614,6 +664,12 @@ pub mod ffi {
             service_pattern: &'a str,
             entrypoint_pattern: &'a str,
         ) -> Result<bool>;
+        async unsafe fn bench<'a>(
+            self: &'a InProcessServer,
+            service_pattern: &'a str,
+            entrypoint_pattern: &'a str,
+            params: &'a [u64],
+        ) -> Result<BenchOutcome>;
         fn drain(self: &InProcessServer);
         async unsafe fn next_report<'a>(self: &'a InProcessServer) -> ConfigReport;
         fn connect(self: &InProcessServer, name: &str) -> Result<KjOwn<AsyncIoStream>>;

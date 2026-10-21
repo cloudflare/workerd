@@ -19,6 +19,7 @@ Custom Bazel rules (`wd_*` macros) for C++, TypeScript, Rust, Cap'n Proto, and t
 | `wd_js_bundle.bzl`                         | JS bundle -> Cap'n Proto `Modules.Bundle` embedding via generated `.capnp`                        |
 | `wd_capnp_library.bzl`                     | Cap'n Proto schema compilation                                                                    |
 | `wd_rust_crate.bzl` / `wd_rust_binary.bzl` | Rust build rules; apply `//build/rust:lints` to every crate, test code excepted                   |
+| `wd_rust_compile_test.bzl`                 | Rust compile tests checked against `//~ ERROR` annotations; harness in `rust/compile_test_harness/` |
 | `lint_test.bzl`                            | ESLint integration                                                                                |
 | `//tools/clang-tidy:workerd-lint`          | Custom clang-tidy plugin (source: `tools/clang-tidy/workerd-lint.c++`); ships several custom checks |
 

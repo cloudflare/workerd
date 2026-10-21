@@ -46,6 +46,7 @@ export {
   optionGetterReadOrder,
   throwingOptionGetter,
   invalidSignalRejected,
+  pipeOptionsShapes,
   brandChecks,
   pipeThroughLockedEndpoints,
   badDestinationLeavesSourceUnlocked,
