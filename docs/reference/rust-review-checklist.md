@@ -77,8 +77,11 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   pointers used by the C++ JSG layer to wrap/unwrap the Rust object.
 - **`#[jsg_resource]`** on the impl block registers the type as a JS-visible resource.
 - **`#[jsg_method]`** auto-converts Rust `snake_case` method names to JavaScript `camelCase`.
-  Methods with a receiver (`&self`/`&mut self`) are registered as instance methods on the prototype;
-  methods without a receiver are registered as static methods on the constructor.
+  Methods with a `&self` receiver are registered as instance methods on the prototype; methods
+  without a receiver are registered as static methods on the constructor. Any other receiver is a
+  compile error, since JavaScript can call back into the resource while a method runs; state that
+  methods change belongs in `Cell` or `RefCell` fields. Flag a `RefCell` borrow held across a call
+  that can run JavaScript: a re-entrant call then panics.
   Verify the converted name is correct and matches the intended API surface.
 - **`#[jsg_static_constant]`** on a `const` item inside a `#[jsg_resource]` impl block exposes it
   as a read-only numeric constant on both the constructor and prototype (Rust equivalent of

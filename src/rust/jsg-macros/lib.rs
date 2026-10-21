@@ -192,6 +192,8 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// The first typed parameter may be `&mut Lock` (or `&mut jsg::Lock`) to receive
 /// the isolate lock directly; it is not counted as a JavaScript argument.
 ///
+/// Instance methods take `&self`; any other receiver is a compile error.
+///
 /// Use `#[jsg_method(name = "jsName")]` to override the default `camelCase`
 /// conversion of the Rust function name.
 #[proc_macro_attribute]
@@ -234,8 +236,12 @@ fn callback_with_instance(
     let fn_sig = &input_fn.sig;
     let fn_block = &input_fn.block;
 
-    // Methods with a receiver (&self, &mut self) become instance methods on the prototype.
+    // Methods with a `&self` receiver become instance methods on the prototype.
     // Methods without a receiver become static methods on the constructor.
+    let callback_kinds = callback_names(fn_name, kind, instance_kind);
+    if let Some(error) = receiver_error(&input_fn, callback_kinds.clone()) {
+        return error.into();
+    }
     let has_self = fn_sig.receiver().is_some();
 
     let params: Vec<_> = fn_sig
@@ -314,11 +320,10 @@ fn callback_with_instance(
                 lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
                 return;
             };
-            // SAFETY: `resource` points at a live `Self` owned by the V8-wrapped
-            // resource whose method is being invoked; the `&mut` is sound because
-            // V8 is single-threaded and no other Rust code can alias the resource
-            // during the callback.
-            let self_: &mut Self = unsafe { &mut *resource.as_ptr() };
+            // SAFETY: `resource` points at the `Self` of `this`, whose wrapper keeps it alive
+            // during the call. Resources are only ever borrowed shared, so this may alias the
+            // borrow of a method that called into JavaScript, or of GC tracing.
+            let self_: &Self = unsafe { resource.as_ref() };
             let result = self_.#fn_name(#(#arg_exprs),*);
         }
     } else {
@@ -334,29 +339,43 @@ fn callback_with_instance(
     } else {
         quote! {}
     };
-    let callbacks = std::iter::once((kind, "callback"))
-        .chain(instance_kind.map(|kind| (kind, "instance_callback")))
-        .map(|(kind, suffix)| {
-            let callback_name = syn::Ident::new(&format!("{fn_name}_{suffix}"), fn_name.span());
-            let (raw_callback, make_callback) = callback_constructor(kind);
-            quote! {
-                #[automatically_derived]
-                #lint_attr
-                fn #callback_name() -> #raw_callback {
-                    #make_callback(|lock, args| {
-                        #(#unwraps)*
-                        #invocation
-                        #result_handling
-                    })
-                }
+    let callbacks = callback_kinds.map(|(kind, callback_name)| {
+        let (raw_callback, make_callback) = callback_constructor(kind);
+        quote! {
+            #[automatically_derived]
+            #lint_attr
+            fn #callback_name() -> #raw_callback {
+                #make_callback(|lock, args| {
+                    #(#unwraps)*
+                    #invocation
+                    #result_handling
+                })
             }
-        });
+        }
+    });
 
     quote! {
         #fn_vis #fn_sig { #fn_block }
         #(#callbacks)*
     }
     .into()
+}
+
+/// The callbacks generated for `fn_name`: `{fn_name}_callback` of shape `kind`, and
+/// `{fn_name}_instance_callback` of shape `instance_kind` if there is one.
+fn callback_names(
+    fn_name: &syn::Ident,
+    kind: Callback,
+    instance_kind: Option<Callback>,
+) -> impl Iterator<Item = (Callback, syn::Ident)> + Clone + '_ {
+    std::iter::once((kind, "callback"))
+        .chain(instance_kind.map(|kind| (kind, "instance_callback")))
+        .map(move |(kind, suffix)| {
+            (
+                kind,
+                syn::Ident::new(&format!("{fn_name}_{suffix}"), fn_name.span()),
+            )
+        })
 }
 
 /// Unwraps JS argument `js_index` into `arg`, or throws and returns.
@@ -461,6 +480,41 @@ fn callback_constructor(kind: Callback) -> (proc_macro2::TokenStream, proc_macro
     }
 }
 
+/// Rejects a method receiver other than `&self`. JavaScript can call back into the resource, and
+/// GC can trace it, while a method runs, so a method never has exclusive access to its resource.
+fn receiver_error(
+    input_fn: &ItemFn,
+    callbacks: impl Iterator<Item = (Callback, syn::Ident)>,
+) -> Option<proc_macro2::TokenStream> {
+    let receiver = input_fn.sig.receiver()?;
+    // `&self` and `self: &Self` (with any lifetime) are the same receiver; nested forms such as
+    // `self: &&Self` are not.
+    if matches!(&*receiver.ty, syn::Type::Reference(r)
+        if r.mutability.is_none()
+            && matches!(&*r.elem, syn::Type::Path(p) if p.qself.is_none() && p.path.is_ident("Self")))
+    {
+        return None;
+    }
+    let error = syn::Error::new_spanned(
+        receiver,
+        "a resource method takes `&self`: JavaScript can call into the resource while the \
+         method runs, so the method cannot have exclusive access. Keep state that methods \
+         change in `Cell` or `RefCell` fields",
+    )
+    .to_compile_error();
+    // The callbacks are still emitted so that their registration in `#[jsg_resource]` adds no
+    // errors of its own, and so is the method, so that its callers add none.
+    let callbacks = callbacks.map(|(kind, callback_name)| {
+        let (raw_callback, _) = callback_constructor(kind);
+        quote! { fn #callback_name() -> #raw_callback { unreachable!() } }
+    });
+    Some(quote! {
+        #error
+        #input_fn
+        #(#callbacks)*
+    })
+}
+
 // =============================================================================
 // #[jsg_resource]
 // =============================================================================
@@ -555,6 +609,8 @@ pub fn jsg_constructor(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Methods must start with `get_` (getter) or `set_` (setter). If `name` is
 /// omitted, the prefix is stripped and the remainder is converted
 /// `snake_case` -> `camelCase`.
+///
+/// Getters and setters take `&self`; any other receiver is a compile error.
 #[proc_macro_attribute]
 pub fn jsg_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Registration as a Member is handled by #[jsg_resource] on the enclosing
@@ -577,6 +633,7 @@ pub fn jsg_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Optional argument: `name = "..."` to set the symbol description.
 ///
 /// Inspect properties are always read-only; setters are rejected at compile time.
+/// The getter takes `&self`; any other receiver is a compile error.
 #[proc_macro_attribute]
 pub fn jsg_inspect_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Reuse jsg_method callback generation; registration as Member::Property is
