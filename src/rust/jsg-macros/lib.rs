@@ -394,9 +394,9 @@ fn unwrap_argument(
 fn callback_signature(
     kind: Callback,
 ) -> (
-    quote::__private::TokenStream,
-    quote::__private::TokenStream,
-    quote::__private::TokenStream,
+    proc_macro2::TokenStream,
+    proc_macro2::TokenStream,
+    proc_macro2::TokenStream,
 ) {
     match kind {
         Callback::Function => (
