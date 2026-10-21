@@ -237,7 +237,12 @@ impl SpanBuffer {
         let request = proto::ExportTraceServiceRequest {
             resource_spans: vec![proto::ResourceSpans {
                 resource: Some(self.resource.clone()),
-                scope_spans: vec![proto::ScopeSpans { spans }],
+                scope_spans: vec![proto::ScopeSpans {
+                    scope: Some(proto::InstrumentationScope {
+                        name: "workers-runtime".to_owned(),
+                    }),
+                    spans,
+                }],
             }],
         };
         Some(Batch {

@@ -159,8 +159,8 @@ function decodeRequest(bytes) {
         }
       }
       if (number === 2) {
-        for (const [, span] of fields(value)) {
-          request.spans.push(decodeSpan(span));
+        for (const [number, span] of fields(value)) {
+          if (number === 2) request.spans.push(decodeSpan(span));
         }
       }
     }
