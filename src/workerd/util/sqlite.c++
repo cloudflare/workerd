@@ -249,11 +249,11 @@ class SqliteCallScope {
     KJ_IF_SOME(e, error) {
       appendErrorContext(e, errorContext);
       // Slight hack: The exception already has a stack trace attached which should include the
-      // current stack, but `kj::throwFatalException()` would re-append the current stack trace
+      // current stack, but `kj::throwException()` would re-append the current stack trace
       // to the exception. We can avoid that by calling
-      // kj::getExceptionCallback().onFatalException() directly, which is what
-      // `throwFatalException()` does after extending the stack.
-      kj::getExceptionCallback().onFatalException(kj::mv(e));
+      // kj::getExceptionCallback().onException() directly, which is what
+      // `throwException()` does after extending the stack.
+      kj::getExceptionCallback().onException(kj::mv(e));
     }
   }
 
