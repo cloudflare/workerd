@@ -30,8 +30,16 @@ pub struct Resource {
 
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct ScopeSpans {
+    #[prost(message, optional, tag = "1")]
+    pub scope: Option<InstrumentationScope>,
     #[prost(message, repeated, tag = "2")]
     pub spans: Vec<Span>,
+}
+
+#[derive(Clone, PartialEq, Eq, prost::Message)]
+pub struct InstrumentationScope {
+    #[prost(string, tag = "1")]
+    pub name: String,
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
