@@ -14,8 +14,8 @@ use jsg::v8::Local;
 #[test]
 fn value_is_symbol_for_symbol() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("Symbol('test')").unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "Symbol('test')").unwrap();
         assert!(val.is_symbol());
         Ok(())
     });
@@ -24,8 +24,8 @@ fn value_is_symbol_for_symbol() {
 #[test]
 fn value_is_symbol_false_for_string() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("'not a symbol'").unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "'not a symbol'").unwrap();
         assert!(!val.is_symbol());
         Ok(())
     });
@@ -34,8 +34,8 @@ fn value_is_symbol_false_for_string() {
 #[test]
 fn value_is_symbol_false_for_number() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("42").unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "42").unwrap();
         assert!(!val.is_symbol());
         Ok(())
     });
@@ -87,10 +87,10 @@ fn symbol_new_is_unique() {
 fn symbol_with_same_description_is_still_unique() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let make_sym = |lock: &mut jsg::Lock| {
+        fn make_sym<'s>(lock: &mut jsg::Lock<'s>) -> Local<'s, v8::Symbol> {
             let desc = v8::String::new_from_str(lock, "same").unwrap(lock);
             v8::Symbol::new(lock, Some(desc))
-        };
+        }
         let a = make_sym(lock);
         let b = make_sym(lock);
         let a_val: Local<v8::Value> = a.into();
@@ -108,8 +108,8 @@ fn symbol_with_same_description_is_still_unique() {
 #[test]
 fn value_try_as_symbol_succeeds() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("Symbol('cast-test')").unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "Symbol('cast-test')").unwrap();
         assert!(val.is_symbol());
         let sym = val.try_as::<v8::Symbol>().expect("should cast to Symbol");
         assert!(sym.is_symbol());
@@ -120,8 +120,8 @@ fn value_try_as_symbol_succeeds() {
 #[test]
 fn value_try_as_symbol_fails_for_string() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("'hello'").unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "'hello'").unwrap();
         assert!(val.try_as::<v8::Symbol>().is_none());
         Ok(())
     });

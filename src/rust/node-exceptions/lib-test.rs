@@ -7,7 +7,11 @@ use jsg_test::Harness;
 
 use super::*;
 
-fn get_string(lock: &mut Lock, obj: &v8::Local<v8::Object>, key: &str) -> Option<String> {
+fn get_string<'s>(
+    lock: &mut Lock<'s>,
+    obj: &v8::Local<'s, v8::Object>,
+    key: &str,
+) -> Option<String> {
     obj.get(lock, key)
         .ok()
         .filter(|value| !value.is_undefined())

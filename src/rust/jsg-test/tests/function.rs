@@ -12,8 +12,8 @@ use jsg::v8;
 #[test]
 fn try_as_function_succeeds() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let value = ctx.eval_raw("(x => x * 2)").unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let value = ctx.eval_raw(lock, "(x => x * 2)").unwrap();
         assert!(value.try_as::<v8::Function>().is_some());
         Ok(())
     });
@@ -23,8 +23,8 @@ fn try_as_function_succeeds() {
 #[test]
 fn try_as_function_fails_for_number() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let value = ctx.eval_raw("42").unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let value = ctx.eval_raw(lock, "42").unwrap();
         assert!(value.try_as::<v8::Function>().is_none());
         Ok(())
     });
@@ -34,8 +34,8 @@ fn try_as_function_fails_for_number() {
 #[test]
 fn try_as_object_succeeds() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let value = ctx.eval_raw("({a: 1})").unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let value = ctx.eval_raw(lock, "({a: 1})").unwrap();
         assert!(value.try_as::<v8::Object>().is_some());
         Ok(())
     });
@@ -45,8 +45,8 @@ fn try_as_object_succeeds() {
 #[test]
 fn try_as_object_fails_for_string() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let value = ctx.eval_raw("'hello'").unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let value = ctx.eval_raw(lock, "'hello'").unwrap();
         assert!(value.try_as::<v8::Object>().is_none());
         Ok(())
     });
@@ -56,8 +56,8 @@ fn try_as_object_fails_for_string() {
 #[test]
 fn try_as_array_succeeds() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let value = ctx.eval_raw("[1, 2, 3]").unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let value = ctx.eval_raw(lock, "[1, 2, 3]").unwrap();
         assert!(value.try_as::<v8::Array>().is_some());
         Ok(())
     });
@@ -67,8 +67,8 @@ fn try_as_array_succeeds() {
 #[test]
 fn try_as_array_fails_for_object() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let value = ctx.eval_raw("({length: 3})").unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let value = ctx.eval_raw(lock, "({length: 3})").unwrap();
         assert!(value.try_as::<v8::Array>().is_none());
         Ok(())
     });
@@ -79,9 +79,9 @@ fn try_as_array_fails_for_object() {
 fn call_zero_args() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let value = ctx.eval_raw("(() => 42)").unwrap();
+        let value = ctx.eval_raw(lock, "(() => 42)").unwrap();
         let func = value.try_as::<v8::Function>().unwrap();
-        let result = func.call::<Number, _>(lock, None::<v8::Local<v8::Value>>, &[])?;
+        let result = func.call::<Number>(lock, None::<v8::Local<v8::Value>>, &[])?;
         assert!((result.value() - 42.0).abs() < f64::EPSILON);
         Ok(())
     });
@@ -92,12 +92,12 @@ fn call_zero_args() {
 fn call_with_args() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let value = ctx.eval_raw("((a, b) => a + b)").unwrap();
+        let value = ctx.eval_raw(lock, "((a, b) => a + b)").unwrap();
         let func = value.try_as::<v8::Function>().unwrap();
 
         let a = Number::new(10.0).to_js(lock);
         let b = Number::new(32.0).to_js(lock);
-        let result = func.call::<Number, _>(lock, None::<v8::Local<v8::Value>>, &[a, b])?;
+        let result = func.call::<Number>(lock, None::<v8::Local<v8::Value>>, &[a, b])?;
         assert!((result.value() - 42.0).abs() < f64::EPSILON);
         Ok(())
     });
@@ -108,11 +108,11 @@ fn call_with_args() {
 fn call_returns_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let value = ctx.eval_raw("(s => s.toUpperCase())").unwrap();
+        let value = ctx.eval_raw(lock, "(s => s.toUpperCase())").unwrap();
         let func = value.try_as::<v8::Function>().unwrap();
 
         let arg = String::from("hello").to_js(lock);
-        let result = func.call::<String, _>(lock, None::<v8::Local<v8::Value>>, &[arg])?;
+        let result = func.call::<String>(lock, None::<v8::Local<v8::Value>>, &[arg])?;
         assert_eq!(result, "HELLO");
         Ok(())
     });
@@ -124,11 +124,13 @@ fn call_with_receiver() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         // Create an object with a property and a function that reads `this.x`
-        let obj = ctx.eval_raw("({x: 100})").unwrap();
-        let func_val = ctx.eval_raw("(function() { return this.x; })").unwrap();
+        let obj = ctx.eval_raw(lock, "({x: 100})").unwrap();
+        let func_val = ctx
+            .eval_raw(lock, "(function() { return this.x; })")
+            .unwrap();
         let func = func_val.try_as::<v8::Function>().unwrap();
 
-        let result = func.call::<Number, _>(lock, Some(obj), &[])?;
+        let result = func.call::<Number>(lock, Some(obj), &[])?;
         assert!((result.value() - 100.0).abs() < f64::EPSILON);
         Ok(())
     });
@@ -139,16 +141,16 @@ fn call_with_receiver() {
 fn call_with_object_receiver_via_into() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let obj_val = ctx.eval_raw("({name: 'world'})").unwrap();
+        let obj_val = ctx.eval_raw(lock, "({name: 'world'})").unwrap();
         let obj = obj_val.try_as::<v8::Object>().unwrap();
 
         let func_val = ctx
-            .eval_raw("(function() { return 'hello ' + this.name; })")
+            .eval_raw(lock, "(function() { return 'hello ' + this.name; })")
             .unwrap();
         let func = func_val.try_as::<v8::Function>().unwrap();
 
         // Pass Local<Object> as receiver — the Into<Local<Value>> bound handles conversion.
-        let result = func.call::<String, v8::Local<v8::Object>>(lock, Some(obj), &[])?;
+        let result = func.call::<String>(lock, Some(obj.into()), &[])?;
         assert_eq!(result, "hello world");
         Ok(())
     });
@@ -158,8 +160,8 @@ fn call_with_object_receiver_via_into() {
 #[test]
 fn local_object_into_value() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let obj_val = ctx.eval_raw("({})").unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let obj_val = ctx.eval_raw(lock, "({})").unwrap();
         let obj = obj_val.try_as::<v8::Object>().unwrap();
         // Into<Local<Value>> should compile and not panic in debug.
         let value: v8::Local<v8::Value> = obj.into();
@@ -172,8 +174,8 @@ fn local_object_into_value() {
 #[test]
 fn local_function_into_value() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let func_val = ctx.eval_raw("(() => {})").unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let func_val = ctx.eval_raw(lock, "(() => {})").unwrap();
         let func = func_val.try_as::<v8::Function>().unwrap();
         let value: v8::Local<v8::Value> = func.into();
         assert!(value.is_object());
@@ -185,8 +187,8 @@ fn local_function_into_value() {
 #[test]
 fn local_array_into_value() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let arr_val = ctx.eval_raw("[1, 2]").unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let arr_val = ctx.eval_raw(lock, "[1, 2]").unwrap();
         let arr = arr_val.try_as::<v8::Array>().unwrap();
         let value: v8::Local<v8::Value> = arr.into();
         assert!(value.is_array());

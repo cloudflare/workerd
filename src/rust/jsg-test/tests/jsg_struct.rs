@@ -47,7 +47,7 @@ fn objects_can_be_wrapped_and_unwrapped() {
             str: "test".to_owned(),
         };
         let wrapped = instance.to_js(lock);
-        let mut obj: v8::Local<'_, v8::Object> = wrapped.into();
+        let obj: v8::Local<'_, v8::Object> = wrapped.into();
         assert!(obj.has(lock, "str").unwrap());
         let str_value = obj.get(lock, "str");
         assert!(str_value.unwrap().is_string());
@@ -109,7 +109,7 @@ fn number_type_conversions() {
 fn empty_object_and_property_setting() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let mut obj = lock.new_object();
+        let obj = lock.new_object();
 
         assert!(!obj.has(lock, "nonexistent").unwrap());
         assert!(obj.get(lock, "nonexistent").unwrap().is_undefined());
@@ -150,7 +150,7 @@ fn global_handle_conversion() {
 fn nested_object_properties() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let mut outer = lock.new_object();
+        let outer = lock.new_object();
 
         let inner_instance = NestedStruct {
             inner: "nested value".to_owned(),
@@ -222,12 +222,14 @@ fn type_of_returns_correct_js_types() {
 }
 
 /// Converts the JS expression `expr` with `T`'s `FromJS`.
-fn convert<T: jsg::FromJS>(
-    lock: &mut jsg::Lock,
+fn convert<'s, T: jsg::FromJS<'s>>(
+    lock: &mut jsg::Lock<'s>,
     ctx: &crate::EvalContext<'_>,
     expr: &str,
 ) -> Result<T::ResultType, Error> {
-    let value = ctx.eval_raw(expr).expect("expression should evaluate");
+    let value = ctx
+        .eval_raw(lock, expr)
+        .expect("expression should evaluate");
     T::from_js(lock, value)
 }
 

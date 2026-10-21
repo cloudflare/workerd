@@ -36,7 +36,6 @@
 
 use std::any::TypeId;
 use std::cell::UnsafeCell;
-use std::fmt::Display;
 use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use std::pin::Pin;
@@ -64,7 +63,7 @@ pub mod ffi {
     /// Mirrors `v8::MaybeLocal<T>`: a single pointer-sized word where `ptr == 0` means empty.
     /// This matches V8's internal layout exactly — `v8::MaybeLocal<T>` holds one `Local<T>`
     /// field which is itself one `internal::Address*` (one pointer word).
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, Default)]
     struct MaybeLocal {
         ptr: usize,
     }
@@ -591,6 +590,11 @@ pub mod ffi {
         pub unsafe fn isolate_throw_internal_error(isolate: *mut Isolate, internal_message: &str);
         pub unsafe fn isolate_terminate_execution(isolate: *mut Isolate);
         pub unsafe fn isolate_is_locked(isolate: *mut Isolate) -> bool;
+        pub unsafe fn isolate_in_context(isolate: *mut Isolate) -> bool;
+
+        /// Tells LeakSanitizer, if enabled, that the heap allocation at `ptr` is leaked on
+        /// purpose, along with everything reachable from it.
+        pub unsafe fn ignore_leak(ptr: usize);
     }
 
     /// Fat pointer to a `dyn GarbageCollected` trait object plus its TypeId.
@@ -665,7 +669,7 @@ pub mod ffi {
             isolate: *mut Isolate,
             wrappable: KjRc<Wrappable>,
             constructor: &Global, /* v8::Global<FunctionTemplate> */
-        ) -> Local /* v8::Local<Value> */;
+        ) -> MaybeLocal /* v8::Local<Value>, empty if wrapped in another isolate */;
 
         pub unsafe fn wrappable_attach_wrapper(
             wrappable: KjRc<Wrappable>,
@@ -706,7 +710,7 @@ pub mod ffi {
         pub unsafe fn register_add_builtin_module(
             registry: Pin<&mut ModuleRegistry>,
             specifier: &str,
-            callback: unsafe fn(*mut Isolate) -> Local,
+            callback: unsafe fn(*mut Isolate) -> MaybeLocal,
             module_type: ModuleType,
         );
     }
@@ -763,7 +767,7 @@ impl String {
     /// Returns the empty string singleton.
     ///
     /// Corresponds to `v8::String::Empty()`.
-    pub fn empty<'a>(lock: &mut crate::Lock) -> Local<'a, Self> {
+    pub fn empty<'s>(lock: &mut crate::Lock<'s>) -> Local<'s, Self> {
         let isolate = lock.isolate();
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
         unsafe { Local::from_ffi(isolate, ffi::local_string_empty(isolate.as_ffi())) }
@@ -772,7 +776,7 @@ impl String {
     /// Creates a new string from a `&str`.
     ///
     /// Corresponds to `v8::String::NewFromUtf8`.
-    pub fn new_from_str<'a>(lock: &mut crate::Lock, data: &str) -> MaybeLocal<'a, Self> {
+    pub fn new_from_str<'s>(lock: &mut crate::Lock<'s>, data: &str) -> MaybeLocal<'s, Self> {
         Self::new_from_utf8(lock, data.as_bytes())
     }
 
@@ -782,10 +786,10 @@ impl String {
     /// property-key lookups at the cost of a hash-table probe on creation.
     ///
     /// Corresponds to `v8::String::NewFromUtf8` with `kInternalized`.
-    pub fn new_internalized_from_str<'a>(
-        lock: &mut crate::Lock,
+    pub fn new_internalized_from_str<'s>(
+        lock: &mut crate::Lock<'s>,
         data: &str,
-    ) -> MaybeLocal<'a, Self> {
+    ) -> MaybeLocal<'s, Self> {
         Self::new_internalized_from_utf8(lock, data.as_bytes())
     }
 
@@ -799,10 +803,10 @@ impl String {
     /// Panics if `literal.len()` exceeds [`Self::MAX_LENGTH`].
     ///
     /// Corresponds to `v8::String::NewFromUtf8Literal`.
-    pub fn new_from_utf8_literal<'a>(
-        lock: &mut crate::Lock,
+    pub fn new_from_utf8_literal<'s>(
+        lock: &mut crate::Lock<'s>,
         literal: &'static str,
-    ) -> MaybeLocal<'a, Self> {
+    ) -> MaybeLocal<'s, Self> {
         assert!(
             literal.len() <= Self::MAX_LENGTH as usize,
             "string literal exceeds v8::String::kMaxLength"
@@ -819,7 +823,7 @@ impl String {
     /// that large anyway due to heap limits.
     ///
     /// Corresponds to `v8::String::NewFromUtf8`.
-    pub fn new_from_utf8<'a>(lock: &mut crate::Lock, data: &[u8]) -> MaybeLocal<'a, Self> {
+    pub fn new_from_utf8<'s>(lock: &mut crate::Lock<'s>, data: &[u8]) -> MaybeLocal<'s, Self> {
         let isolate = lock.isolate();
         let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active;
@@ -838,10 +842,10 @@ impl String {
     /// Strings longer than `i32::MAX` bytes are silently truncated to `i32::MAX` bytes.
     ///
     /// Corresponds to `v8::String::NewFromUtf8` with `kInternalized`.
-    pub fn new_internalized_from_utf8<'a>(
-        lock: &mut crate::Lock,
+    pub fn new_internalized_from_utf8<'s>(
+        lock: &mut crate::Lock<'s>,
         data: &[u8],
-    ) -> MaybeLocal<'a, Self> {
+    ) -> MaybeLocal<'s, Self> {
         let isolate = lock.isolate();
         let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active;
@@ -860,7 +864,7 @@ impl String {
     /// Strings longer than `i32::MAX` bytes are silently truncated to `i32::MAX` bytes.
     ///
     /// Corresponds to `v8::String::NewFromOneByte`.
-    pub fn new_from_one_byte<'a>(lock: &mut crate::Lock, data: &[u8]) -> MaybeLocal<'a, Self> {
+    pub fn new_from_one_byte<'s>(lock: &mut crate::Lock<'s>, data: &[u8]) -> MaybeLocal<'s, Self> {
         let isolate = lock.isolate();
         let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
         // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
@@ -877,10 +881,10 @@ impl String {
     /// Strings longer than `i32::MAX` bytes are silently truncated to `i32::MAX` bytes.
     ///
     /// Corresponds to `v8::String::NewFromOneByte` with `kInternalized`.
-    pub fn new_internalized_from_one_byte<'a>(
-        lock: &mut crate::Lock,
+    pub fn new_internalized_from_one_byte<'s>(
+        lock: &mut crate::Lock<'s>,
         data: &[u8],
-    ) -> MaybeLocal<'a, Self> {
+    ) -> MaybeLocal<'s, Self> {
         let isolate = lock.isolate();
         let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
         // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
@@ -898,7 +902,7 @@ impl String {
     /// Strings longer than `i32::MAX` code units are silently truncated to `i32::MAX` code units.
     ///
     /// Corresponds to `v8::String::NewFromTwoByte`.
-    pub fn new_from_two_byte<'a>(lock: &mut crate::Lock, data: &[u16]) -> MaybeLocal<'a, Self> {
+    pub fn new_from_two_byte<'s>(lock: &mut crate::Lock<'s>, data: &[u16]) -> MaybeLocal<'s, Self> {
         let isolate = lock.isolate();
         let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
         // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
@@ -915,10 +919,10 @@ impl String {
     /// Strings longer than `i32::MAX` code units are silently truncated to `i32::MAX` code units.
     ///
     /// Corresponds to `v8::String::NewFromTwoByte` with `kInternalized`.
-    pub fn new_internalized_from_two_byte<'a>(
-        lock: &mut crate::Lock,
+    pub fn new_internalized_from_two_byte<'s>(
+        lock: &mut crate::Lock<'s>,
         data: &[u16],
-    ) -> MaybeLocal<'a, Self> {
+    ) -> MaybeLocal<'s, Self> {
         let isolate = lock.isolate();
         let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
         // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
@@ -932,11 +936,11 @@ impl String {
     /// Concatenates two strings.
     ///
     /// Corresponds to `v8::String::Concat()`.
-    pub fn concat<'a>(
-        lock: &mut crate::Lock,
-        left: Local<'a, Self>,
-        right: Local<'a, Self>,
-    ) -> Local<'a, Self> {
+    pub fn concat<'s>(
+        lock: &mut crate::Lock<'s>,
+        left: Local<'s, Self>,
+        right: Local<'s, Self>,
+    ) -> Local<'s, Self> {
         let isolate = lock.isolate();
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
         unsafe {
@@ -948,16 +952,6 @@ impl String {
     }
 }
 
-impl Display for Local<'_, Value> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // SAFETY: isolate is valid and locked (guaranteed by the Local's invariant).
-        let mut lock = unsafe { Lock::from_isolate_ptr(self.isolate.as_ffi()) };
-        match <std::string::String as FromJS>::from_js(&mut lock, *self) {
-            Ok(value) => write!(f, "{value}"),
-            Err(e) => write!(f, "{e:?}"),
-        }
-    }
-}
 #[derive(Debug)]
 pub struct Object;
 pub struct Function;
@@ -1081,9 +1075,10 @@ impl BackingStore {
 
     /// Returns a shared byte slice into the backing store data.
     ///
-    /// Requires `&mut Lock` so that no JavaScript can execute while the slice
-    /// is live — JS could otherwise modify the buffer through a `TypedArray`
-    /// view, violating the immutability of `&[u8]`.
+    /// The slice borrows `lock`. Everything that can run JavaScript needs
+    /// `&mut Lock`, so no JavaScript can modify the buffer through a
+    /// `TypedArray` view while the slice is live, which would violate the
+    /// immutability of `&[u8]`.
     ///
     /// # Safety
     /// For shared backing stores (`is_shared() == true`), other agents may
@@ -1093,7 +1088,7 @@ impl BackingStore {
     /// TODO(soon): When there is a safe aliasing model for Rust mutable access,
     /// integrate this method with that somehow.
     #[inline]
-    pub unsafe fn as_slice(&self, _lock: &mut crate::Lock) -> &[u8] {
+    pub unsafe fn as_slice<'b>(&'b self, _lock: &'b crate::Lock<'_>) -> &'b [u8] {
         if self.is_empty() {
             return &[];
         }
@@ -1116,7 +1111,7 @@ impl BackingStore {
     /// of the current Rust execution model.
     #[doc(hidden)]
     #[inline]
-    pub unsafe fn as_mut_slice(&mut self, _lock: &mut crate::Lock) -> &mut [u8] {
+    pub unsafe fn as_mut_slice<'b>(&'b mut self, _lock: &'b mut crate::Lock<'_>) -> &'b mut [u8] {
         if self.is_empty() {
             return &mut [];
         }
@@ -1125,16 +1120,21 @@ impl BackingStore {
     }
 }
 
-// Generic Local<'a, T> handle with lifetime
-#[derive(Debug)]
-pub struct Local<'a, T> {
+/// A handle to a V8 value, valid while the `HandleScope` identified by `'s` is open.
+///
+/// `'s` is the brand of the [`Lock`](crate::Lock) whose scope created the handle; every API
+/// that creates a handle takes a `&mut Lock<'s>` and returns a `Local<'s, _>`. The handle is
+/// `Copy` (it is a pointer to a slot in the scope, not an owner of anything) and covariant in
+/// `'s`, so a handle from an outer scope can be used wherever a handle of an inner scope is
+/// expected. It is neither `Send` nor `Sync`.
+pub struct Local<'s, T> {
     handle: ffi::Local,
     isolate: IsolatePtr,
-    _marker: PhantomData<(&'a (), T)>,
+    _marker: PhantomData<(&'s (), *const T)>,
 }
 
-// A `Local` is a pointer to a slot in its `HandleScope`, not an owner of anything, so it is
-// `Copy`. Hand-written because `#[derive]` would require `T: Copy`.
+// Hand-written so that `Local<'s, T>` is `Copy` for every marker type `T`; `#[derive]` would
+// require `T: Copy`.
 impl<T> Copy for Local<'_, T> {}
 
 impl<T> Clone for Local<'_, T> {
@@ -1143,13 +1143,22 @@ impl<T> Clone for Local<'_, T> {
     }
 }
 
-// Common implementations for all Local<'a, T>
-impl<'a, T> Local<'a, T> {
+impl<T> std::fmt::Debug for Local<'_, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Local")
+            .field("handle", &self.handle)
+            .finish_non_exhaustive()
+    }
+}
+
+// Common implementations for all Local<'s, T>
+impl<'s, T> Local<'s, T> {
     /// Creates a `Local` from an FFI handle.
     ///
     /// # Safety
     /// The caller must ensure that `isolate` is valid and that `handle` points to a V8 value
-    /// that is still alive within the current `HandleScope`.
+    /// that stays alive within the `HandleScope` identified by `'s`. The caller picks `'s`;
+    /// prefer letting it be inferred from a `Lock<'s>` the handle is used with.
     pub unsafe fn from_ffi(isolate: IsolatePtr, handle: ffi::Local) -> Self {
         Local {
             handle,
@@ -1161,7 +1170,8 @@ impl<'a, T> Local<'a, T> {
     /// Returns the underlying FFI handle.
     ///
     /// # Safety
-    /// The returned FFI handle must not outlive the `HandleScope` that owns the V8 value.
+    /// The returned FFI handle carries no lifetime; it must not be used after the
+    /// `HandleScope` that owns the V8 value is closed.
     pub unsafe fn into_ffi(self) -> ffi::Local {
         self.handle
     }
@@ -1182,19 +1192,9 @@ impl<'a, T> Local<'a, T> {
         &mut self.handle
     }
 
-    pub fn null(lock: &mut crate::Lock) -> Local<'a, Value> {
-        // SAFETY: isolate is valid and locked (guaranteed by Lock).
-        unsafe { Local::from_ffi(lock.isolate(), ffi::local_new_null(lock.isolate().as_ffi())) }
-    }
-
-    pub fn undefined(lock: &mut crate::Lock) -> Local<'a, Value> {
-        // SAFETY: isolate is valid and locked (guaranteed by Lock).
-        unsafe {
-            Local::from_ffi(
-                lock.isolate(),
-                ffi::local_new_undefined(lock.isolate().as_ffi()),
-            )
-        }
+    /// Creates a persistent handle to this value.
+    pub fn to_global(self, lock: &mut Lock<'s>) -> Global<T> {
+        Global::new(lock, self)
     }
 
     pub fn has_value(&self) -> bool {
@@ -1428,12 +1428,7 @@ impl_as!(ArrayBuffer, is_array_buffer);
 impl_as!(ArrayBufferView, is_array_buffer_view);
 
 // Value-specific implementations
-impl<'a> Local<'a, Value> {
-    pub fn to_global(self, lock: &'a mut Lock) -> Global<Value> {
-        // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
-        unsafe { ffi::local_to_global(lock.isolate().as_ffi(), self.into_ffi()).into() }
-    }
-
+impl Local<'_, Value> {
     /// Attempts a checked cast to a more specific `Local<T>` type.
     ///
     /// Returns `None` if the value is not of the target type.
@@ -1461,27 +1456,28 @@ impl PartialEq for Local<'_, String> {
 
 impl Eq for Local<'_, String> {}
 
-impl Local<'_, Function> {
+impl<'s> Local<'s, Function> {
     /// Calls this function and converts the result via [`FromJS`].
     ///
-    /// `receiver` is the `this` value; pass `None` for `undefined`. Any `Local<T>`
-    /// that converts to `Local<Value>` (via `Into`) can be used directly.
+    /// `receiver` is the `this` value; pass `None` for `undefined`.
     ///
-    /// `args` is a slice of `Local<Value>` — use [`ToJS::to_js`] to convert Rust
-    /// values, or `.into()` for other `Local<T>` handles.
+    /// `args` is a slice of `Local<Value>` — use [`ToJS::to_js`](crate::ToJS::to_js) to
+    /// convert Rust values, or `.into()` for other `Local<T>` handles.
     ///
     /// # Example
     ///
     /// ```ignore
-    /// let result: Number = func.call(lock, None::<Local<Value>>, &[x.to_js(lock), y.to_js(lock)])?;
+    /// let x = x.to_js(lock);
+    /// let y = y.to_js(lock);
+    /// let result: Number = func.call(lock, None, &[x, y])?;
     /// ```
-    pub fn call<'b, R: FromJS, Recv: Into<Local<'b, Value>>>(
-        &self,
-        lock: &mut Lock,
-        receiver: Option<Recv>,
-        args: &[Local<'_, Value>],
+    pub fn call<R: FromJS<'s>>(
+        self,
+        lock: &mut Lock<'s>,
+        receiver: Option<Local<'s, Value>>,
+        args: &[Local<'s, Value>],
     ) -> Result<R::ResultType, Error> {
-        let recv = receiver.map_or_else(|| Local::<Value>::undefined(lock), Into::into);
+        let recv = receiver.unwrap_or_else(|| lock.undefined());
 
         // Build a contiguous array of ffi::Local handles for the FFI call.
         let ffi_args: Vec<ffi::Local> = args.iter().map(|a| a.handle).collect();
@@ -1494,7 +1490,7 @@ impl Local<'_, Function> {
                 ffi::local_function_call(
                     lock.isolate().as_ffi(),
                     &self.handle,
-                    recv.as_ffi(),
+                    &recv.handle,
                     &ffi_args,
                 ),
             )
@@ -1593,14 +1589,14 @@ impl_local_cast!(BigUint64Array -> ArrayBufferView, is_biguint64_array);
 
 impl Array {
     /// Creates a new JavaScript array with the given length.
-    pub fn new<'a>(lock: &mut crate::Lock, len: usize) -> Local<'a, Self> {
+    pub fn new<'s>(lock: &mut crate::Lock<'s>, len: usize) -> Local<'s, Self> {
         let isolate = lock.isolate();
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe { Local::from_ffi(isolate, ffi::local_new_array(isolate.as_ffi(), len)) }
     }
 }
 
-impl Local<'_, Array> {
+impl<'s> Local<'s, Array> {
     /// Returns the length of the array.
     #[inline]
     pub fn len(&self) -> usize {
@@ -1615,12 +1611,15 @@ impl Local<'_, Array> {
     }
 
     /// Sets an element at the given index.
-    pub fn set(&mut self, index: usize, value: Local<'_, Value>) {
-        // SAFETY: handle is valid within the current HandleScope.
+    ///
+    /// May run JavaScript (setters on the prototype chain).
+    pub fn set(self, lock: &mut Lock<'s>, index: usize, value: Local<'s, Value>) {
+        let mut handle = self.handle;
+        // SAFETY: lock guarantees the isolate is locked; both handles are valid in scope 's.
         unsafe {
             ffi::local_array_set(
-                self.isolate.as_ffi(),
-                &mut self.handle,
+                lock.isolate().as_ffi(),
+                &mut handle,
                 index as u32,
                 value.into_ffi(),
             );
@@ -1631,13 +1630,14 @@ impl Local<'_, Array> {
     /// Returns Global handles because Local handles get reused during iteration.
     /// Errs (rather than aborting) if the value is not an array, or if a proxy
     /// trap/getter throws while an element is being read during iteration.
-    pub fn iterate(self) -> crate::Result<Vec<Global<Value>>> {
-        // SAFETY: handle is valid within the current HandleScope.
-        let globals = unsafe { ffi::local_array_iterate(self.isolate.as_ffi(), self.into_ffi()) }?;
+    pub fn iterate(self, lock: &mut Lock<'s>) -> crate::Result<Vec<Global<Value>>> {
+        // SAFETY: lock guarantees the isolate is locked; handle is valid in scope 's.
+        let globals =
+            unsafe { ffi::local_array_iterate(lock.isolate().as_ffi(), self.into_ffi()) }?;
+        let isolate = lock.isolate_id();
         Ok(globals
             .into_iter()
-            // SAFETY: each Global handle was created by the C++ side and is valid.
-            .map(|g| unsafe { Global::from_ffi(g) })
+            .map(|g| Global::from_ffi_in(g, isolate))
             .collect())
     }
 }
@@ -1648,7 +1648,7 @@ impl Local<'_, Array> {
 
 impl ArrayBuffer {
     /// Creates a new `ArrayBuffer` by copying `data`.
-    pub fn new<'a>(lock: &mut crate::Lock, data: &[u8]) -> Local<'a, Self> {
+    pub fn new<'s>(lock: &mut crate::Lock<'s>, data: &[u8]) -> Local<'s, Self> {
         let isolate = lock.isolate();
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
         unsafe {
@@ -1663,11 +1663,11 @@ impl ArrayBuffer {
     /// the given initialization mode (zeroed or uninitialized).
     ///
     /// Returns `None` if allocation fails.
-    pub fn new_with_mode<'a>(
-        lock: &mut crate::Lock,
+    pub fn new_with_mode<'s>(
+        lock: &mut crate::Lock<'s>,
         byte_length: usize,
         mode: ffi::BackingStoreInitializationMode,
-    ) -> Option<Local<'a, Self>> {
+    ) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
         let opt: Option<ffi::Local> =
@@ -1686,7 +1686,10 @@ impl ArrayBuffer {
         clippy::needless_pass_by_value,
         reason = "ownership transfer semantics"
     )]
-    pub fn from_backing_store<'a>(lock: &mut crate::Lock, store: BackingStore) -> Local<'a, Self> {
+    pub fn from_backing_store<'s>(
+        lock: &mut crate::Lock<'s>,
+        store: BackingStore,
+    ) -> Local<'s, Self> {
         let isolate = lock.isolate();
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
         // store.ptr is a valid heap-allocated shared_ptr; we pass it by raw pointer
@@ -1700,7 +1703,7 @@ impl ArrayBuffer {
     }
 
     /// Creates a new zero-initialized `ArrayBuffer` with the given byte length.
-    pub fn new_zeroed<'a>(lock: &mut crate::Lock, byte_length: usize) -> Local<'a, Self> {
+    pub fn new_zeroed<'s>(lock: &mut crate::Lock<'s>, byte_length: usize) -> Local<'s, Self> {
         let isolate = lock.isolate();
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
         unsafe {
@@ -1724,11 +1727,11 @@ impl ArrayBuffer {
     /// Bytes `fill` does not write remain zero. The buffer is always zeroed
     /// first because JavaScript can read the whole backing store once it has
     /// the buffer, including any bytes a view over it excludes.
-    pub fn new_zeroed_with<'a, R>(
-        lock: &mut crate::Lock,
+    pub fn new_zeroed_with<'s, R>(
+        lock: &mut crate::Lock<'s>,
         byte_length: usize,
         fill: impl FnOnce(&mut [u8]) -> R,
-    ) -> Option<(Local<'a, Self>, R)> {
+    ) -> Option<(Local<'s, Self>, R)> {
         let mut buffer = Self::new_with_mode(
             lock,
             byte_length,
@@ -1745,7 +1748,7 @@ impl ArrayBuffer {
     }
 }
 
-impl Local<'_, ArrayBuffer> {
+impl<'s> Local<'s, ArrayBuffer> {
     /// Returns the byte length of this `ArrayBuffer`.
     #[inline]
     pub fn byte_length(&self) -> usize {
@@ -1774,14 +1777,19 @@ impl Local<'_, ArrayBuffer> {
     ///
     /// Zero-copy: the slice points directly into V8-managed memory.
     ///
+    /// The slice borrows `lock`. Everything that can run JavaScript (and so detach,
+    /// resize or write to the buffer) needs `&mut Lock`, so none of it can happen while
+    /// the slice is live.
+    ///
     /// TODO(soon): When there is a safe aliasing model for Rust mutable access,
     /// integrate this method with that somehow.
     #[inline]
-    pub fn as_slice(&self) -> &[u8] {
+    pub fn as_slice<'b>(self, _lock: &'b Lock<'s>) -> &'b [u8] {
         if self.is_empty() {
             return &[];
         }
-        // SAFETY: data() is non-null for non-empty buffers; byte_length() bytes are valid.
+        // SAFETY: data() is non-null for non-empty buffers; byte_length() bytes are valid
+        // until JS runs, which the shared borrow of the lock prevents for 'b.
         unsafe { std::slice::from_raw_parts(self.data().cast_const(), self.byte_length()) }
     }
 
@@ -1789,44 +1797,53 @@ impl Local<'_, ArrayBuffer> {
     ///
     /// Zero-copy: points directly into V8-managed memory.
     ///
-    /// Requires `&mut Lock` so that no JavaScript can execute while the mutable
-    /// slice is live — the borrow on the lock prevents calling `eval`, invoking
+    /// The slice mutably borrows `lock` for its whole lifetime, so no JavaScript
+    /// can execute while it is live — the borrow prevents calling `eval`, invoking
     /// functions, or any other operation that could modify or detach the buffer.
     ///
     /// # Safety
     ///
     /// The caller must ensure that no other live reference (shared or mutable)
     /// into the same `ArrayBuffer` region exists for the duration of the returned
-    /// slice. `&mut self` prevents aliasing through *this* `Local` handle, but
-    /// two distinct `Local` handles may back the same buffer — the caller is
-    /// responsible for ensuring exclusivity.
+    /// slice. `Local` is `Copy`, so `&mut self` does not prevent aliasing through
+    /// another handle to the same buffer — the caller is responsible for ensuring
+    /// exclusivity.
     ///
     /// TODO(soon): Define a safe aliasing model for Rust mutable access based on
     /// interrogating the backing store shared_ptr being singular for the lifetime
     /// of the current Rust execution model.
     #[doc(hidden)]
     #[inline]
-    pub unsafe fn as_mut_slice(&mut self, _lock: &mut crate::Lock) -> &mut [u8] {
+    pub unsafe fn as_mut_slice<'b>(&mut self, _lock: &'b mut Lock<'s>) -> &'b mut [u8] {
         if self.is_empty() {
             return &mut [];
         }
         // SAFETY: caller guarantees exclusive access; data() is non-null for
-        // non-empty buffers; byte_length() bytes are valid.
+        // non-empty buffers; byte_length() bytes are valid while the lock is borrowed.
         unsafe { std::slice::from_raw_parts_mut(self.data(), self.byte_length()) }
     }
 
     /// Copies the `ArrayBuffer` contents into a new `Vec<u8>`.
     pub fn to_vec(&self) -> Vec<u8> {
-        self.as_slice().to_vec()
+        if self.is_empty() {
+            return Vec::new();
+        }
+        // SAFETY: data() is non-null for non-empty buffers; byte_length() bytes are valid,
+        // and no JS can run before the copy completes.
+        unsafe { std::slice::from_raw_parts(self.data().cast_const(), self.byte_length()) }.to_vec()
     }
 
     /// Detaches this `ArrayBuffer`, setting its byte length to zero.
     ///
     /// After detaching, the buffer's data is no longer accessible from JS.
     /// Typed array views backed by this buffer also become zero-length.
-    pub fn detach(&mut self) {
-        // SAFETY: handle is valid within the current HandleScope.
-        unsafe { ffi::local_array_buffer_detach(self.isolate.as_ffi(), &mut self.handle) }
+    ///
+    /// Takes the lock mutably so that a detach cannot happen while a slice
+    /// borrowed from it (see [`as_slice`](Self::as_slice)) is live.
+    pub fn detach(self, lock: &mut Lock<'_>) {
+        let mut handle = self.handle;
+        // SAFETY: lock guarantees the isolate is locked; handle is valid.
+        unsafe { ffi::local_array_buffer_detach(lock.isolate().as_ffi(), &mut handle) }
     }
 
     /// Returns `true` if this `ArrayBuffer` has been detached.
@@ -1868,7 +1885,7 @@ impl Local<'_, ArrayBuffer> {
 // `ArrayBufferView`-specific implementations
 // =============================================================================
 
-impl<'a> Local<'a, ArrayBufferView> {
+impl<'s> Local<'s, ArrayBufferView> {
     /// Returns the byte offset of this view within its backing `ArrayBuffer`.
     #[inline]
     pub fn byte_offset(&self) -> usize {
@@ -1922,29 +1939,32 @@ impl<'a> Local<'a, ArrayBufferView> {
     }
 
     /// Returns the backing `ArrayBuffer` of this view.
-    pub fn buffer(&self) -> Local<'a, ArrayBuffer> {
-        // SAFETY: handle is valid within the current HandleScope.
+    pub fn buffer(self, lock: &mut Lock<'s>) -> Local<'s, ArrayBuffer> {
+        // SAFETY: lock guarantees the isolate is locked; the new handle is created in the
+        // lock's scope.
         unsafe {
             Local::from_ffi(
-                self.isolate,
-                ffi::local_array_buffer_view_get_buffer(self.isolate.as_ffi(), &self.handle),
+                lock.isolate(),
+                ffi::local_array_buffer_view_get_buffer(lock.isolate().as_ffi(), &self.handle),
             )
         }
     }
 
     /// Returns a shared byte slice of the view's visible region.
     ///
-    /// Zero-copy: points directly into V8-managed memory.
+    /// Zero-copy: points directly into V8-managed memory. The slice borrows `lock`, so
+    /// no JavaScript (which could detach, resize or write to the buffer) can run while
+    /// it is live.
     ///
     /// TODO(soon): When there is a safe aliasing model for Rust mutable access,
     /// integrate this method with that somehow.
     #[inline]
-    pub fn as_slice(&self) -> &[u8] {
+    pub fn as_slice<'b>(self, _lock: &'b Lock<'s>) -> &'b [u8] {
         if self.is_empty() {
             return &[];
         }
         // SAFETY: buffer_data() + byte_offset() gives the start of the view's region;
-        // byte_length() bytes are valid for the lifetime of this Local.
+        // byte_length() bytes are valid until JS runs, which the lock borrow prevents.
         unsafe {
             let ptr = self.buffer_data().byte_add(self.byte_offset());
             std::slice::from_raw_parts(ptr.cast_const(), self.byte_length())
@@ -1955,29 +1975,29 @@ impl<'a> Local<'a, ArrayBufferView> {
     ///
     /// Zero-copy: points directly into V8-managed memory.
     ///
-    /// Requires `&mut Lock` so that no JavaScript can execute while the mutable
-    /// slice is live — the borrow on the lock prevents calling `eval`, invoking
+    /// The slice mutably borrows `lock` for its whole lifetime, so no JavaScript
+    /// can execute while it is live — the borrow prevents calling `eval`, invoking
     /// functions, or any other operation that could modify or detach the buffer.
     ///
     /// # Safety
     ///
     /// The caller must ensure that no other live reference (shared or mutable)
     /// into the same buffer region exists for the duration of the returned
-    /// slice. `&mut self` prevents aliasing through *this* handle, but two
-    /// distinct handles backed by the same buffer could alias — the caller is
-    /// responsible for ensuring exclusivity.
+    /// slice. `Local` is `Copy`, so `&mut self` does not prevent aliasing through
+    /// another handle backed by the same buffer — the caller is responsible for
+    /// ensuring exclusivity.
     ///
     /// TODO(soon): Define a safe aliasing model for Rust mutable access based on
     /// interrogating the backing store shared_ptr being singular for the lifetime
     /// of the current Rust execution model.
     #[doc(hidden)]
     #[inline]
-    pub unsafe fn as_mut_slice(&mut self, _lock: &mut crate::Lock) -> &mut [u8] {
+    pub unsafe fn as_mut_slice<'b>(&mut self, _lock: &'b mut Lock<'s>) -> &'b mut [u8] {
         if self.is_empty() {
             return &mut [];
         }
         // SAFETY: caller guarantees exclusive access; same pointer derivation
-        // as as_slice; &mut self prevents aliasing through this handle.
+        // as as_slice; the lock borrow keeps JS from running.
         unsafe {
             let ptr = self.buffer_data().byte_add(self.byte_offset());
             std::slice::from_raw_parts_mut(ptr, self.byte_length())
@@ -1986,7 +2006,15 @@ impl<'a> Local<'a, ArrayBufferView> {
 
     /// Copies the view's visible byte range into a new `Vec<u8>`.
     pub fn to_vec(&self) -> Vec<u8> {
-        self.as_slice().to_vec()
+        if self.is_empty() {
+            return Vec::new();
+        }
+        // SAFETY: same pointer derivation as as_slice; no JS can run before the copy
+        // completes.
+        unsafe {
+            let ptr = self.buffer_data().byte_add(self.byte_offset());
+            std::slice::from_raw_parts(ptr.cast_const(), self.byte_length()).to_vec()
+        }
     }
 }
 
@@ -2115,12 +2143,13 @@ macro_rules! impl_typed_array {
             /// Returns a shared slice view of the typed array's data.
             ///
             /// Zero-copy: points directly into the V8 `ArrayBuffer`'s backing store.
-            /// The slice is valid for the lifetime of this `Local` handle.
+            /// The slice borrows `lock`, so no JavaScript (which could detach, resize
+            /// or write to the buffer) can run while it is live.
             ///
             /// TODO(soon): When there is a safe aliasing model for Rust mutable access,
             /// integrate this method with that somehow.
             #[inline]
-            pub fn as_slice(&self) -> &[$elem] {
+            pub fn as_slice<'b>(self, _lock: &'b crate::Lock<'a>) -> &'b [$elem] {
                 if self.is_empty() {
                     return &[];
                 }
@@ -2135,10 +2164,9 @@ macro_rules! impl_typed_array {
             /// Returns a mutable slice view of the typed array's data.
             ///
             /// Zero-copy: points directly into the V8 `ArrayBuffer`'s backing store.
-            /// The slice is valid for the lifetime of this `Local` handle.
             ///
-            /// Requires `&mut Lock` so that no JavaScript can execute while the
-            /// mutable slice is live — the borrow on the lock prevents calling
+            /// The slice mutably borrows `lock` for its whole lifetime, so no
+            /// JavaScript can execute while it is live — the borrow prevents calling
             /// `eval`, invoking functions, or any other operation that could modify
             /// or detach the underlying buffer.
             ///
@@ -2146,16 +2174,19 @@ macro_rules! impl_typed_array {
             ///
             /// The caller must ensure that no other live reference (shared or mutable)
             /// into the same `ArrayBuffer` region exists for the duration of the returned
-            /// slice. `&mut self` prevents aliasing through *this* `Local` handle, but
-            /// two distinct `Local` handles may back the same buffer — the caller is
-            /// responsible for ensuring exclusivity.
+            /// slice. `Local` is `Copy`, so `&mut self` does not prevent aliasing through
+            /// another handle to the same buffer — the caller is responsible for
+            /// ensuring exclusivity.
             ///
             /// TODO(soon): Define a safe aliasing model for Rust mutable access based on
             /// interrogating the backing store shared_ptr being singular for the lifetime
             /// of the current Rust execution model.
             #[doc(hidden)]
             #[inline]
-            pub unsafe fn as_mut_slice(&mut self, _lock: &mut crate::Lock) -> &mut [$elem] {
+            pub unsafe fn as_mut_slice<'b>(
+                &mut self,
+                _lock: &'b mut crate::Lock<'a>,
+            ) -> &'b mut [$elem] {
                 if self.is_empty() {
                     return &mut [];
                 }
@@ -2302,10 +2333,13 @@ macro_rules! impl_typed_array {
 /// Generates `FromJS` for `Local<'_, T>` typed array types.
 macro_rules! impl_typed_array_from_js {
     ($marker:ident, $check:ident, $name:expr) => {
-        impl crate::FromJS for Local<'_, $marker> {
+        impl<'s> crate::FromJS<'s> for Local<'s, $marker> {
             type ResultType = Self;
 
-            fn from_js(_lock: &mut crate::Lock, value: Local<Value>) -> Result<Self, crate::Error> {
+            fn from_js(
+                _lock: &mut crate::Lock<'s>,
+                value: Local<'s, Value>,
+            ) -> Result<Self, crate::Error> {
                 if !value.$check() {
                     return Err(crate::Error::new_type_error(format!(
                         "expected {}, got {}",
@@ -2319,8 +2353,8 @@ macro_rules! impl_typed_array_from_js {
             }
 
             fn try_from_js(
-                _lock: &mut crate::Lock,
-                value: Local<Value>,
+                _lock: &mut crate::Lock<'s>,
+                value: Local<'s, Value>,
             ) -> Result<Option<Self>, crate::Error> {
                 if !value.$check() {
                     return Ok(None);
@@ -2380,12 +2414,12 @@ impl Uint8Array {
     ///
     /// Returns an error if `byte_offset + length` exceeds `buffer`'s byte
     /// length.
-    pub fn from_buffer<'a>(
-        lock: &mut crate::Lock,
-        buffer: &Local<'_, ArrayBuffer>,
+    pub fn from_buffer<'s>(
+        lock: &mut crate::Lock<'s>,
+        buffer: &Local<'s, ArrayBuffer>,
         byte_offset: usize,
         length: usize,
-    ) -> crate::Result<Local<'a, Self>> {
+    ) -> crate::Result<Local<'s, Self>> {
         let isolate = lock.isolate();
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active;
         // `buffer` is a live handle to an ArrayBuffer. The C++ side checks the
@@ -2448,12 +2482,12 @@ impl std::ops::BitOr for WriteFlags {
 /// No boxing, no `Option` overhead, no stored isolate — this is a direct ABI-compatible
 /// view of the `ffi::MaybeLocal` returned across the FFI boundary.
 ///
-/// Methods that produce a `Local<T>` require a `&mut Lock` so they can recover the
-/// isolate pointer on demand, matching the pattern used by `Local<T>` constructors.
-pub struct MaybeLocal<'a, T> {
+/// Methods that produce a `Local<T>` take the `Lock` of the same scope so they can
+/// recover the isolate pointer on demand. Like `Local`, `MaybeLocal` is `Copy`.
+pub struct MaybeLocal<'s, T> {
     /// The raw FFI handle. `ptr == 0` means empty (matches `v8::MaybeLocal` default).
     handle: ffi::MaybeLocal,
-    _marker: PhantomData<(&'a (), T)>,
+    _marker: PhantomData<(&'s (), *const T)>,
 }
 
 impl<T> Copy for MaybeLocal<'_, T> {}
@@ -2464,17 +2498,26 @@ impl<T> Clone for MaybeLocal<'_, T> {
     }
 }
 
-impl<'a, T> MaybeLocal<'a, T> {
+impl<'s, T> MaybeLocal<'s, T> {
     /// Wraps a raw `ffi::MaybeLocal` returned from the FFI layer.
     ///
     /// # Safety
     /// If `handle.ptr != 0`, the handle must point to a live V8 value within the
-    /// current `HandleScope` of the active isolate.
+    /// `HandleScope` identified by `'s`.
     pub unsafe fn from_ffi(handle: ffi::MaybeLocal) -> Self {
         Self {
             handle,
             _marker: PhantomData,
         }
+    }
+
+    /// Returns the underlying FFI handle.
+    ///
+    /// # Safety
+    /// The returned FFI handle carries no lifetime; it must not be used after the
+    /// `HandleScope` that owns the V8 value is closed.
+    pub unsafe fn into_ffi(self) -> ffi::MaybeLocal {
+        self.handle
     }
 
     /// Returns `true` if this `MaybeLocal` is empty.
@@ -2484,16 +2527,16 @@ impl<'a, T> MaybeLocal<'a, T> {
     }
 
     /// Returns the contained value as a `Local<T>`, or `None` if empty.
-    pub fn to_local(&self, lock: &mut crate::Lock) -> Option<Local<'a, T>> {
+    pub fn to_local(&self, lock: &Lock<'s>) -> Option<Local<'s, T>> {
         self.into_option(lock)
     }
 
-    /// Converts into `Option<Local<'a, T>>`.
-    pub fn into_option(self, lock: &mut crate::Lock) -> Option<Local<'a, T>> {
+    /// Converts into `Option<Local<'s, T>>`.
+    pub fn into_option(self, lock: &Lock<'s>) -> Option<Local<'s, T>> {
         if self.handle.ptr == 0 {
             return None;
         }
-        // SAFETY: ptr is non-zero (checked above), isolate is valid.
+        // SAFETY: ptr is non-zero (checked above) and lives in scope 's; isolate is valid.
         Some(unsafe {
             Local::from_ffi(
                 lock.isolate(),
@@ -2513,20 +2556,20 @@ impl<'a, T> MaybeLocal<'a, T> {
         clippy::expect_used,
         reason = "panicking on an empty handle is this method's contract, as with `Option::unwrap`"
     )]
-    pub fn unwrap(self, lock: &mut crate::Lock) -> Local<'a, T> {
+    pub fn unwrap(self, lock: &Lock<'s>) -> Local<'s, T> {
         self.into_option(lock).expect("MaybeLocal is empty")
     }
 
     /// Returns the contained `Local<T>`, or `default` if empty.
-    pub fn unwrap_or(self, lock: &mut crate::Lock, default: Local<'a, T>) -> Local<'a, T> {
+    pub fn unwrap_or(self, lock: &Lock<'s>, default: Local<'s, T>) -> Local<'s, T> {
         self.into_option(lock).unwrap_or(default)
     }
 }
 
-impl<'a, T> From<Option<Local<'a, T>>> for MaybeLocal<'a, T> {
+impl<'s, T> From<Option<Local<'s, T>>> for MaybeLocal<'s, T> {
     /// Constructs a `MaybeLocal` from an `Option<Local<T>>`.
     /// `None` produces an empty handle (`ptr == 0`); `Some(local)` reuses its pointer.
-    fn from(opt: Option<Local<'a, T>>) -> Self {
+    fn from(opt: Option<Local<'s, T>>) -> Self {
         let ptr = opt.map_or(0, |local| local.handle.ptr);
         Self {
             handle: ffi::MaybeLocal { ptr },
@@ -2537,10 +2580,13 @@ impl<'a, T> From<Option<Local<'a, T>>> for MaybeLocal<'a, T> {
 
 /// Runs a synchronous callback entered from C++ with a valid, locked V8 isolate.
 ///
-/// The callback receives a safe [`Lock`] and returns a local handle. On success,
-/// the handle is transferred back across the CXX bridge as a [`ffi::MaybeLocal`].
-/// On failure, the error is scheduled as a JavaScript exception and an empty
-/// `MaybeLocal` is returned.
+/// The callback receives the [`Lock`] of the caller's `HandleScope` and returns a local handle
+/// in it. On success, the handle is transferred back across the CXX bridge as a
+/// [`ffi::MaybeLocal`]. On failure, the error is scheduled as a JavaScript exception and an
+/// empty `MaybeLocal` is returned. A panic is handled by [`catch_panic`](crate::catch_panic)
+/// and also returns an empty `MaybeLocal`. A broken precondition is not caught: an isolate
+/// that is not locked, or has no context entered, fails an assert before `catch_panic` runs,
+/// which aborts the process, since reporting the panic as a JS error needs that state.
 ///
 /// This centralizes the raw-isolate and local-handle ownership transitions for
 /// C++ entry points implemented in Rust. The callback itself contains no FFI
@@ -2548,31 +2594,32 @@ impl<'a, T> From<Option<Local<'a, T>>> for MaybeLocal<'a, T> {
 ///
 /// # Safety
 ///
-/// `isolate` must point to a live V8 isolate locked by the current thread, and
-/// the C++ caller must keep its active `HandleScope` alive until it consumes the
-/// returned handle.
+/// `isolate` must point to a live V8 isolate locked by the current thread with a context
+/// entered, and the caller's innermost `HandleScope` must stay open and innermost until the
+/// caller consumes the returned handle.
 pub unsafe fn run_ffi_callback<T, E, F>(isolate: *mut ffi::Isolate, callback: F) -> ffi::MaybeLocal
 where
     E: Into<Error>,
-    F: for<'a> FnOnce(&'a mut Lock) -> Result<Local<'a, T>, E>,
+    F: for<'s> FnOnce(&mut Lock<'s>) -> Result<Local<'s, T>, E>,
 {
     // SAFETY: forwarded from this function's safety contract.
-    let mut lock = unsafe { Lock::from_isolate_ptr(isolate) };
-    let result = callback(&mut lock).map(|local| {
-        // SAFETY: the handle is consumed by the C++ caller while its
-        // `HandleScope` is still alive, per this function's safety contract.
-        unsafe { local.into_ffi() }
-    });
-    match result {
-        Ok(local) => ffi::MaybeLocal { ptr: local.ptr },
+    let scope = std::pin::pin!(unsafe { crate::CallbackScope::new(isolate) });
+    crate::catch_panic(scope, |lock| match callback(lock) {
+        Ok(local) => {
+            // SAFETY: the handle lives in the caller's `HandleScope`, which stays open until
+            // the caller consumes it, per this function's safety contract.
+            let local = unsafe { local.into_ffi() };
+            ffi::MaybeLocal { ptr: local.ptr }
+        }
         Err(error) => {
             lock.throw_exception(&error.into());
-            ffi::MaybeLocal { ptr: 0 }
+            ffi::MaybeLocal::default()
         }
-    }
+    })
+    .unwrap_or_default()
 }
 
-impl Local<'_, String> {
+impl<'s> Local<'s, String> {
     // Instance methods — correspond to `v8::String` member functions
 
     /// Returns the number of characters (UTF-16 code units) in the string.
@@ -2748,7 +2795,7 @@ impl Local<'_, String> {
     ///
     /// Corresponds to `v8::String::InternalizeString()`.
     #[must_use]
-    pub fn internalize(&self, lock: &mut crate::Lock) -> Self {
+    pub fn internalize(self, lock: &mut crate::Lock<'s>) -> Self {
         let isolate = lock.isolate();
         // SAFETY: Lock guarantees the isolate is locked; self.handle is a valid String handle.
         unsafe {
@@ -2806,10 +2853,10 @@ impl Symbol {
     /// without a description.
     ///
     /// Corresponds to `v8::Symbol::New()`.
-    pub fn new<'a>(
-        lock: &mut crate::Lock,
-        description: Option<Local<'a, String>>,
-    ) -> Local<'a, Self> {
+    pub fn new<'s>(
+        lock: &mut crate::Lock<'s>,
+        description: Option<Local<'s, String>>,
+    ) -> Local<'s, Self> {
         let isolate = lock.isolate();
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
         unsafe {
@@ -2824,13 +2871,13 @@ impl Symbol {
     }
 }
 
-impl<'a> Local<'a, Symbol> {
+impl<'s> Local<'s, Symbol> {
     /// Returns the description of this symbol, if any.
     ///
     /// Returns `None` if the symbol was created without a description.
     ///
     /// Corresponds to `v8::Symbol::Description()`.
-    pub fn description(&self, lock: &mut crate::Lock) -> Option<Local<'a, String>> {
+    pub fn description(self, lock: &mut crate::Lock<'s>) -> Option<Local<'s, String>> {
         let isolate = lock.isolate();
         // SAFETY: Lock guarantees the isolate is locked; self.handle is a valid Symbol handle.
         let maybe = unsafe {
@@ -2881,7 +2928,7 @@ impl Utf8Value {
     /// Corresponds to `v8::String::Utf8Value(isolate, obj)`.
     pub fn new(lock: &mut Lock, value: &Local<'_, Value>) -> Self {
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
-        let inner = unsafe { ffi::utf8_value_new(lock.isolate().as_ffi(), value.into_ffi()) };
+        let inner = unsafe { ffi::utf8_value_new(lock.isolate().as_ffi(), value.handle) };
         Self { inner }
     }
 
@@ -2942,13 +2989,15 @@ impl Drop for Utf8Value {
 }
 
 // Object-specific implementations
-impl<'a> Local<'a, Object> {
-    pub fn set(&mut self, lock: &mut Lock, key: &str, value: Local<'a, Value>) {
-        // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
+impl<'s> Local<'s, Object> {
+    /// Sets `key` to `value`. May run JavaScript (setters, proxy traps).
+    pub fn set(self, lock: &mut Lock<'s>, key: &str, value: Local<'s, Value>) {
+        let mut handle = self.handle;
+        // SAFETY: isolate is valid and locked (guaranteed by Lock); handles are valid in 's.
         unsafe {
             ffi::local_object_set_property(
                 lock.isolate().as_ffi(),
-                &mut self.handle,
+                &mut handle,
                 key,
                 value.into_ffi(),
             );
@@ -2957,14 +3006,14 @@ impl<'a> Local<'a, Object> {
 
     /// Whether `key` is in the object or its prototype chain. A throwing
     /// Proxy `has` trap is an `Err`.
-    pub fn has(&self, lock: &mut Lock, key: &str) -> crate::Result<bool> {
+    pub fn has(self, lock: &mut Lock<'s>, key: &str) -> crate::Result<bool> {
         // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
         Ok(unsafe { ffi::local_object_has_property(lock.isolate().as_ffi(), &self.handle, key) }?)
     }
 
     /// Reads `key`, like JS `obj[key]`: an absent property is `undefined`,
     /// and a throwing getter or Proxy trap is an `Err`.
-    pub fn get(&self, lock: &mut Lock, key: &str) -> crate::Result<Local<'a, Value>> {
+    pub fn get(self, lock: &mut Lock<'s>, key: &str) -> crate::Result<Local<'s, Value>> {
         // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
         let local =
             unsafe { ffi::local_object_get_property(lock.isolate().as_ffi(), &self.handle, key) }?;
@@ -2987,21 +3036,50 @@ pub struct Global<T> {
     /// This is sound because GC tracing is always single-threaded within a V8
     /// isolate and `trace` is never re-entrant on the same object.
     traced: UnsafeCell<ffi::TracedReference>,
-    _marker: PhantomData<T>,
+    /// The isolate the handle was created in; every use checks it.
+    isolate: crate::scope::IsolateId,
+    /// `*const T` makes `Global` neither `Send` nor `Sync`: dropping it resets the V8
+    /// handle, which must happen on the isolate's thread.
+    _marker: PhantomData<*const T>,
 }
 
 // Common implementations for all Global<T>
 impl<T> Global<T> {
+    /// Creates a persistent handle to `local`.
+    pub fn new(lock: &mut Lock<'_>, local: Local<'_, T>) -> Self {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock); the handle is valid, and
+        // belongs to the lock's isolate because all open scopes do.
+        let handle = unsafe { ffi::local_to_global(lock.isolate().as_ffi(), local.into_ffi()) };
+        Self::from_ffi_in(handle, lock.isolate_id())
+    }
+
     /// Creates a `Global` from an FFI handle.
     ///
     /// # Safety
-    /// The caller must ensure that `handle` points to a valid V8 persistent handle.
-    pub unsafe fn from_ffi(handle: ffi::Global) -> Self {
+    /// The caller must ensure that `handle` points to a valid V8 persistent handle of the
+    /// lock's isolate.
+    pub unsafe fn from_ffi(lock: &mut Lock<'_>, handle: ffi::Global) -> Self {
+        Self::from_ffi_in(handle, lock.isolate_id())
+    }
+
+    pub(crate) fn from_ffi_in(handle: ffi::Global, isolate: crate::scope::IsolateId) -> Self {
         Self {
             handle,
             traced: UnsafeCell::new(ffi::TracedReference { ptr: 0 }),
+            isolate,
             _marker: PhantomData,
         }
+    }
+
+    /// Checks that `lock` belongs to the isolate this handle was created in.
+    ///
+    /// # Panics
+    /// Panics if it does not.
+    fn assert_in_isolate_of(&self, lock: &mut Lock<'_>) {
+        assert!(
+            self.isolate == lock.isolate_id(),
+            "attempt to use a Global in an isolate other than the one it was created in"
+        );
     }
 
     /// Returns a reference to the underlying FFI handle.
@@ -3020,7 +3098,9 @@ impl<T> Global<T> {
         &raw mut self.handle
     }
 
-    pub fn as_local<'a>(&self, lock: &mut Lock) -> Local<'a, T> {
+    /// Materializes this handle as a `Local` in the scope of `lock`.
+    pub fn as_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, T> {
+        self.assert_in_isolate_of(lock);
         // SAFETY: isolate is valid and locked (guaranteed by Lock); global handle is valid.
         unsafe {
             Local::from_ffi(
@@ -3049,43 +3129,22 @@ impl<T> Global<T> {
     }
 }
 
-impl<T> From<Local<'_, T>> for Global<T> {
-    fn from(local: Local<'_, T>) -> Self {
-        Self {
-            // SAFETY: isolate is valid (guaranteed by Local's invariant); handle is valid.
-            handle: unsafe { ffi::local_to_global(local.isolate.as_ffi(), local.into_ffi()) },
-            traced: UnsafeCell::new(ffi::TracedReference { ptr: 0 }),
-            _marker: PhantomData,
-        }
-    }
-}
-
 impl Global<FunctionTemplate> {
     /// Returns the constructor function for this function template.
     ///
     /// This is the V8 `Function` object that can be called as a constructor or
     /// used to access static methods, analogous to a JavaScript class reference
     /// (e.g., `URL`, `TextEncoder`).
-    pub fn as_local_function<'a>(&self, lock: &mut Lock) -> Local<'a, Function> {
+    pub fn as_local_function<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Function> {
+        self.assert_in_isolate_of(lock);
         // SAFETY: `lock` guarantees the isolate is locked and a HandleScope is active.
         // `self.handle` is a valid `Global<FunctionTemplate>` created by `create_resource_template`.
-        // The returned `Local` is tied to the current HandleScope via the `'a` lifetime.
+        // The returned `Local` is tied to the lock's HandleScope via the `'s` lifetime.
         unsafe {
             Local::from_ffi(
                 lock.isolate(),
                 ffi::function_template_get_function(lock.isolate().as_ffi(), &self.handle),
             )
-        }
-    }
-}
-
-// Allow implicit conversion from ffi::Global
-impl<T> From<ffi::Global> for Global<T> {
-    fn from(handle: ffi::Global) -> Self {
-        Self {
-            handle,
-            traced: UnsafeCell::new(ffi::TracedReference { ptr: 0 }),
-            _marker: PhantomData,
         }
     }
 }
@@ -3144,27 +3203,29 @@ impl<T> Global<T> {
     /// next GC cycle.
     #[must_use]
     pub fn clone(&self, lock: &mut Lock) -> Self {
+        self.assert_in_isolate_of(lock);
         // SAFETY: isolate is valid and locked (guaranteed by Lock); global handle is valid.
-        unsafe { ffi::global_clone(lock.isolate().as_ffi(), &self.handle).into() }
+        let handle = unsafe { ffi::global_clone(lock.isolate().as_ffi(), &self.handle) };
+        Self::from_ffi_in(handle, self.isolate)
     }
 }
 
+/// Converts a primitive Rust value into a JavaScript value in the scope of `lock`.
+///
+/// Unlike [`ToJS`](crate::ToJS), this borrows `self` and also covers the integer types,
+/// which `ToJS` cannot: `ToJS` maps `Vec<u8>` (and the other integer vectors) to typed
+/// arrays, which would conflict with its generic `Vec<T: ToJS>` impl if the element
+/// types were themselves `ToJS`. `#[jsg_struct]` uses it for fields.
 pub trait ToLocalValue {
-    fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value>;
+    fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value>;
 }
 
 macro_rules! impl_to_local_value_integer {
     ($($type:ty),*) => {
         $(
             impl ToLocalValue for $type {
-                fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
-                    // SAFETY: isolate is valid and locked (guaranteed by Lock).
-                    unsafe {
-                        Local::from_ffi(
-                            lock.isolate(),
-                            ffi::local_new_number(lock.isolate().as_ffi(), f64::from(*self)),
-                        )
-                    }
+                fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
+                    Number::new(f64::from(*self)).to_local(lock)
                 }
             }
         )*
@@ -3174,63 +3235,56 @@ macro_rules! impl_to_local_value_integer {
 impl_to_local_value_integer!(u8, u16, u32, i8, i16, i32);
 
 impl ToLocalValue for std::string::String {
-    fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
+    fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
         self.as_str().to_local(lock)
     }
 }
 
 impl ToLocalValue for &str {
-    fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
-        // SAFETY: isolate is valid and locked (guaranteed by Lock).
-        unsafe {
-            Local::from_ffi(
-                lock.isolate(),
-                ffi::local_new_string(lock.isolate().as_ffi(), self),
-            )
-        }
+    fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
+        crate::ToJS::to_js(*self, lock)
     }
 }
 
 impl ToLocalValue for bool {
-    fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
-        // SAFETY: isolate is valid and locked (guaranteed by Lock).
-        unsafe {
-            Local::from_ffi(
-                lock.isolate(),
-                ffi::local_new_boolean(lock.isolate().as_ffi(), *self),
-            )
-        }
+    fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
+        crate::ToJS::to_js(*self, lock)
     }
 }
 
 impl ToLocalValue for Number {
-    fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
-        // SAFETY: isolate is valid and locked (guaranteed by Lock).
-        unsafe {
-            Local::from_ffi(
-                lock.isolate(),
-                ffi::local_new_number(lock.isolate().as_ffi(), self.value()),
-            )
-        }
+    fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
+        crate::ToJS::to_js(*self, lock)
     }
 }
 
 impl<T: ToLocalValue> ToLocalValue for Nullable<T> {
-    fn to_local<'a>(&self, lock: &mut Lock) -> Local<'a, Value> {
+    fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
         match self {
             Self::Some(v) => v.to_local(lock),
-            Self::Null => Local::<Value>::null(lock),
-            Self::Undefined => Local::<Value>::undefined(lock),
+            Self::Null => lock.null(),
+            Self::Undefined => lock.undefined(),
         }
     }
 }
 
-pub struct FunctionCallbackInfo<'a>(*mut ffi::FunctionCallbackInfo, PhantomData<&'a ()>);
+/// The arguments of a V8 function callback.
+///
+/// `'cb` is the brand of the callback's [`Lock`](crate::Lock): V8 opens a `HandleScope`
+/// for every callback, and the arguments, `this` and the return value all live in it.
+/// Invariant in `'cb`.
+pub struct FunctionCallbackInfo<'cb>(*mut ffi::FunctionCallbackInfo, PhantomData<*mut &'cb ()>);
 
-impl<'a> FunctionCallbackInfo<'a> {
+impl<'cb> FunctionCallbackInfo<'cb> {
+    /// Wraps the `FunctionCallbackInfo` of the running callback, whose lock is `lock`.
+    ///
     /// # Safety
-    /// The caller must ensure that `info` is a valid pointer to `FunctionCallbackInfo`.
-    pub unsafe fn from_ffi(info: *mut ffi::FunctionCallbackInfo) -> Self {
+    /// `info` must be the `FunctionCallbackInfo` V8 passed to the running callback, and
+    /// `lock` the lock of the [`CallbackScope`](crate::CallbackScope) opened from it.
+    pub(crate) unsafe fn new(
+        _lock: &crate::Lock<'cb>,
+        info: *mut ffi::FunctionCallbackInfo,
+    ) -> Self {
         Self(info, PhantomData)
     }
 
@@ -3240,7 +3294,7 @@ impl<'a> FunctionCallbackInfo<'a> {
         unsafe { IsolatePtr::from_ffi(ffi::fci_get_isolate(self.0)) }
     }
 
-    pub fn this(&self) -> Local<'a, Value> {
+    pub fn this(&self) -> Local<'cb, Value> {
         // SAFETY: self.0 is a valid FunctionCallbackInfo pointer (guaranteed by constructor).
         unsafe { Local::from_ffi(self.isolate(), ffi::fci_get_this(self.0)) }
     }
@@ -3254,12 +3308,12 @@ impl<'a> FunctionCallbackInfo<'a> {
         self.len() == 0
     }
 
-    pub fn get(&self, index: usize) -> Local<'a, Value> {
+    pub fn get(&self, index: usize) -> Local<'cb, Value> {
         // SAFETY: self.0 is a valid FunctionCallbackInfo pointer (guaranteed by constructor).
         unsafe { Local::from_ffi(self.isolate(), ffi::fci_get_arg(self.0, index)) }
     }
 
-    pub fn set_return_value(&self, value: Local<Value>) {
+    pub fn set_return_value(&mut self, value: Local<'cb, Value>) {
         // SAFETY: self.0 is a valid FunctionCallbackInfo pointer (guaranteed by constructor).
         unsafe {
             ffi::fci_set_return_value(self.0, value.into_ffi());
@@ -3268,12 +3322,21 @@ impl<'a> FunctionCallbackInfo<'a> {
 }
 
 /// The arguments to a native data property getter.
-pub struct PropertyCallbackInfo<'a>(*mut ffi::PropertyCallbackInfo, PhantomData<&'a ()>);
+///
+/// `'cb` is the brand of the callback's [`Lock`](crate::Lock), as for
+/// [`FunctionCallbackInfo`]. Invariant in `'cb`.
+pub struct PropertyCallbackInfo<'cb>(*mut ffi::PropertyCallbackInfo, PhantomData<*mut &'cb ()>);
 
-impl<'a> PropertyCallbackInfo<'a> {
+impl<'cb> PropertyCallbackInfo<'cb> {
+    /// Wraps the `PropertyCallbackInfo` of the running getter, whose lock is `lock`.
+    ///
     /// # Safety
-    /// `info` must be a valid pointer to a `PropertyCallbackInfo`.
-    pub unsafe fn from_ffi(info: *mut ffi::PropertyCallbackInfo) -> Self {
+    /// `info` must be the `PropertyCallbackInfo` V8 passed to the running getter, and `lock`
+    /// the lock of the [`CallbackScope`](crate::CallbackScope) opened from it.
+    pub(crate) unsafe fn new(
+        _lock: &crate::Lock<'cb>,
+        info: *mut ffi::PropertyCallbackInfo,
+    ) -> Self {
         Self(info, PhantomData)
     }
 
@@ -3282,30 +3345,41 @@ impl<'a> PropertyCallbackInfo<'a> {
         unsafe { IsolatePtr::from_ffi(ffi::pci_get_isolate(self.0)) }
     }
 
-    pub fn this(&self) -> Local<'a, Value> {
+    pub fn this(&self) -> Local<'cb, Value> {
         // SAFETY: self.0 is valid (guaranteed by constructor).
         unsafe { Local::from_ffi(self.isolate(), ffi::pci_get_this(self.0)) }
     }
 
-    pub fn set_return_value(&self, value: Local<Value>) {
-        // SAFETY: self.0 is valid (guaranteed by constructor).
+    pub fn set_return_value(&mut self, value: Local<'cb, Value>) {
+        // SAFETY: self.0 is valid (guaranteed by constructor), and `value` lives in the
+        // callback's scope.
         unsafe { ffi::pci_set_return_value(self.0, value.into_ffi()) }
     }
 }
 
 /// The arguments to a native data property setter. `get(0)` is the value
 /// assigned, so setters share codegen with methods.
-pub struct PropertySetterCallbackInfo<'a>(
+///
+/// `'cb` is the brand of the callback's [`Lock`](crate::Lock), as for
+/// [`FunctionCallbackInfo`]. Invariant in `'cb`.
+pub struct PropertySetterCallbackInfo<'cb>(
     *mut ffi::PropertySetterCallbackInfo,
     usize,
-    PhantomData<&'a ()>,
+    PhantomData<*mut &'cb ()>,
 );
 
-impl<'a> PropertySetterCallbackInfo<'a> {
+impl<'cb> PropertySetterCallbackInfo<'cb> {
+    /// Wraps the `PropertyCallbackInfo` of the running setter, whose lock is `lock`.
+    ///
     /// # Safety
-    /// `info` must be a valid pointer to a `PropertySetterCallbackInfo` and
-    /// `value` the `v8::Local<v8::Value>` V8 passed alongside it.
-    pub unsafe fn from_ffi(info: *mut ffi::PropertySetterCallbackInfo, value: usize) -> Self {
+    /// `info` must be the `PropertyCallbackInfo` V8 passed to the running setter, `value` the
+    /// `v8::Local<v8::Value>` V8 passed alongside it, and `lock` the lock of the
+    /// [`CallbackScope`](crate::CallbackScope) opened from it.
+    pub(crate) unsafe fn new(
+        _lock: &crate::Lock<'cb>,
+        info: *mut ffi::PropertySetterCallbackInfo,
+        value: usize,
+    ) -> Self {
         Self(info, value, PhantomData)
     }
 
@@ -3314,21 +3388,21 @@ impl<'a> PropertySetterCallbackInfo<'a> {
         unsafe { IsolatePtr::from_ffi(ffi::psci_get_isolate(self.0)) }
     }
 
-    pub fn this(&self) -> Local<'a, Value> {
+    pub fn this(&self) -> Local<'cb, Value> {
         // SAFETY: self.0 is valid (guaranteed by constructor).
         unsafe { Local::from_ffi(self.isolate(), ffi::psci_get_this(self.0)) }
     }
 
     /// # Panics
     /// If `index` is not 0.
-    pub fn get(&self, index: usize) -> Local<'a, Value> {
+    pub fn get(&self, index: usize) -> Local<'cb, Value> {
         assert_eq!(index, 0);
         // SAFETY: self.1 is the live handle V8 passed (guaranteed by constructor).
         unsafe { Local::from_ffi(self.isolate(), ffi::Local { ptr: self.1 }) }
     }
 
     /// Setters return nothing.
-    pub fn set_return_value(&self, _value: Local<Value>) {}
+    pub fn set_return_value(&mut self, _value: Local<'cb, Value>) {}
 }
 
 /// A fat pointer to a `dyn GarbageCollected` trait object, decomposed into its
@@ -3687,30 +3761,35 @@ impl WrappableRc {
     /// The C++ `unwrap_resource` returns `None` when the value doesn't contain
     /// a Rust Wrappable.
     #[doc(hidden)]
-    pub fn from_js(isolate: IsolatePtr, value: Local<Value>) -> Option<Self> {
-        // SAFETY: isolate is valid and locked; value handle is valid.
+    pub fn from_js(lock: &mut Lock<'_>, value: Local<'_, Value>) -> Option<Self> {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock); value handle is valid.
         let handle: Option<kj_rs::KjRc<ffi::Wrappable>> =
-            unsafe { ffi::unwrap_resource(isolate.as_ffi(), value.into_ffi()) }.into();
+            unsafe { ffi::unwrap_resource(lock.isolate().as_ffi(), value.into_ffi()) }.into();
         handle.map(|handle| Self { handle })
     }
 
-    /// Wraps this Wrappable as a JavaScript object using the given constructor template.
-    pub(crate) fn to_js<'a>(
-        &self,
-        isolate: IsolatePtr,
-        constructor: &Global<FunctionTemplate>,
-    ) -> Local<'a, Value> {
+    /// Wraps this Wrappable as a JavaScript object of resource type `R`, using (and on first
+    /// use creating) `R`'s cached constructor template.
+    ///
+    /// Returns `None` if the Wrappable already has a JavaScript wrapper in another isolate.
+    pub(crate) fn to_js<'s, R: Resource>(&self, lock: &mut Lock<'s>) -> Option<Local<'s, Value>> {
+        let isolate = lock.isolate();
+        let isolate_id = lock.isolate_id();
+        let constructor = lock
+            .realm()
+            .resources
+            .get_constructor::<R>(isolate, isolate_id);
         // SAFETY: isolate is valid and locked; constructor global handle is valid.
-        unsafe {
-            Local::from_ffi(
-                isolate,
-                ffi::wrap_resource(
-                    isolate.as_ffi(),
-                    self.handle.clone(),
-                    constructor.as_ffi_ref(),
-                ),
+        let handle = unsafe {
+            ffi::wrap_resource(
+                isolate.as_ffi(),
+                self.handle.clone(),
+                constructor.as_ffi_ref(),
             )
-        }
+        };
+        // SAFETY: the wrapper is created in (or read into) the scope of `lock`.
+        let handle: MaybeLocal<'s, Value> = unsafe { MaybeLocal::from_ffi(handle) };
+        handle.into_option(lock)
     }
 
     /// Attaches this Wrappable to the `this` object in a V8 constructor callback.
@@ -3718,7 +3797,7 @@ impl WrappableRc {
     /// V8 has already created the `this` object from the `FunctionTemplate`'s
     /// `InstanceTemplate`; this method attaches the Wrappable to it via
     /// `CppgcShim` so that instance methods can resolve the resource.
-    pub fn attach_to_this(&self, info: &mut FunctionCallbackInfo) {
+    pub fn attach_to_this(&self, info: &mut FunctionCallbackInfo<'_>) {
         // SAFETY: info is valid for the duration of the callback.
         let pin = unsafe { std::pin::Pin::new_unchecked(&mut *info.0) };
         // SAFETY: The Pin guarantees info is valid. wrap_constructor attaches

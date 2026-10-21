@@ -7,12 +7,14 @@
 
 use jsg::FromJS;
 
-fn convert<T: FromJS>(
-    lock: &mut jsg::Lock,
+fn convert<'s, T: FromJS<'s>>(
+    lock: &mut jsg::Lock<'s>,
     ctx: &crate::EvalContext<'_>,
     expr: &str,
 ) -> Result<T::ResultType, jsg::Error> {
-    let value = ctx.eval_raw(expr).expect("expression should evaluate");
+    let value = ctx
+        .eval_raw(lock, expr)
+        .expect("expression should evaluate");
     T::from_js(lock, value)
 }
 
@@ -47,15 +49,17 @@ fn option_passes_null_to_inner_type() {
 fn option_try_from_js_passes_null_to_inner_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let null = ctx.eval_raw("null").expect("expression should evaluate");
+        let null = ctx
+            .eval_raw(lock, "null")
+            .expect("expression should evaluate");
         let result = <Option<String> as FromJS>::try_from_js(lock, null)?;
         assert_eq!(result, Some(Some("null".to_owned())));
         // A top-level mismatch in T stays a mismatch, not an error.
-        let number = ctx.eval_raw("1").expect("expression should evaluate");
+        let number = ctx.eval_raw(lock, "1").expect("expression should evaluate");
         let result = <Option<jsg::NonCoercible<String>> as FromJS>::try_from_js(lock, number)?;
         assert!(result.is_none());
         let undefined = ctx
-            .eval_raw("undefined")
+            .eval_raw(lock, "undefined")
             .expect("expression should evaluate");
         assert_eq!(
             <Option<String> as FromJS>::try_from_js(lock, undefined)?,

@@ -160,7 +160,7 @@ fn resource_accepts_array_parameter() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         let result: Number = ctx.eval(lock, "arr.sum([1, 2, 3, 4, 5])").unwrap();
         assert!((result.value() - 15.0).abs() < f64::EPSILON);
@@ -179,7 +179,7 @@ fn resource_accepts_slice_parameter() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         let result: Number = ctx.eval(lock, "arr.sumSlice([1, 2, 3, 4, 5])").unwrap();
         assert!((result.value() - 15.0).abs() < f64::EPSILON);
@@ -199,7 +199,7 @@ fn resource_returns_array() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         let result: Vec<Number> = ctx.eval(lock, "arr.double([1, 2, 3])").unwrap();
         let values: Vec<f64> = result.iter().map(jsg::Number::value).collect();
@@ -223,7 +223,7 @@ fn resource_accepts_typed_array_parameter() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         let result: Vec<u8> = ctx
             .eval(lock, "arr.reverseBytes(new Uint8Array([1, 2, 3]))")
@@ -244,7 +244,7 @@ fn resource_returns_typed_array() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         let is_u8: bool = ctx
             .eval(
@@ -263,7 +263,7 @@ fn resource_accepts_typed_array_slice_parameter() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         // Test &[u8] accepts Uint8Array
         let result: Vec<u8> = ctx
@@ -293,7 +293,7 @@ fn typed_array_slice_rejects_wrong_type() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         // &[u8] should reject Int8Array
         let result: Result<Vec<u8>, _> =
@@ -323,7 +323,7 @@ fn resource_accepts_and_returns_struct_array() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         let result: Vec<Person> = ctx
             .eval(
@@ -344,7 +344,7 @@ fn vec_to_js_creates_array() {
     harness.run_in_context(|lock, ctx| {
         let vec = vec!["hello".to_owned(), "world".to_owned()];
         let js_val = vec.to_js(lock);
-        ctx.set_global("arr", js_val);
+        ctx.set_global(lock, "arr", js_val);
 
         let is_array: bool = ctx.eval(lock, "Array.isArray(arr)").unwrap();
         assert!(is_array);
@@ -355,14 +355,14 @@ fn vec_to_js_creates_array() {
 
         let vec = vec![Number::new(1.5), Number::new(2.5), Number::new(3.5)];
         let js_val = vec.to_js(lock);
-        ctx.set_global("nums", js_val);
+        ctx.set_global(lock, "nums", js_val);
 
         let sum: Number = ctx.eval(lock, "nums[0] + nums[1] + nums[2]").unwrap();
         assert!((sum.value() - 7.5).abs() < f64::EPSILON);
 
         let vec = vec![true, false, true];
         let js_val = vec.to_js(lock);
-        ctx.set_global("bools", js_val);
+        ctx.set_global(lock, "bools", js_val);
 
         let result: Vec<bool> = ctx.eval(lock, "bools").unwrap();
         assert_eq!(result, vec![true, false, true]);
@@ -390,7 +390,7 @@ fn vec_empty_roundtrip() {
     harness.run_in_context(|lock, ctx| {
         let vec: Vec<String> = vec![];
         let js_val = vec.to_js(lock);
-        ctx.set_global("arr", js_val);
+        ctx.set_global(lock, "arr", js_val);
 
         let length: Number = ctx.eval(lock, "arr.length").unwrap();
         assert!(length.value().abs() < f64::EPSILON);
@@ -410,7 +410,7 @@ fn vec_nested_arrays() {
             vec![Number::new(3.0), Number::new(4.0)],
         ];
         let js_val = nested.to_js(lock);
-        ctx.set_global("matrix", js_val);
+        ctx.set_global(lock, "matrix", js_val);
 
         let first_row_sum: Number = ctx.eval(lock, "matrix[0][0] + matrix[0][1]").unwrap();
         assert!((first_row_sum.value() - 3.0).abs() < f64::EPSILON);
@@ -436,42 +436,42 @@ fn typed_array_to_js() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let vec: Vec<u8> = vec![1, 2, 255];
-        ctx.set_global("u8_arr", vec.to_js(lock));
+        ctx.set_global(lock, "u8_arr", vec);
         let check: bool = ctx.eval(lock, "u8_arr instanceof Uint8Array").unwrap();
         assert!(check);
         let val: Number = ctx.eval(lock, "u8_arr[2]").unwrap();
         assert!((val.value() - 255.0).abs() < f64::EPSILON);
 
         let vec: Vec<u16> = vec![1, 2, 65535];
-        ctx.set_global("u16_arr", vec.to_js(lock));
+        ctx.set_global(lock, "u16_arr", vec);
         let check: bool = ctx.eval(lock, "u16_arr instanceof Uint16Array").unwrap();
         assert!(check);
         let val: Number = ctx.eval(lock, "u16_arr[2]").unwrap();
         assert!((val.value() - 65535.0).abs() < f64::EPSILON);
 
         let vec: Vec<u32> = vec![1, 2, 4_294_967_295];
-        ctx.set_global("u32_arr", vec.to_js(lock));
+        ctx.set_global(lock, "u32_arr", vec);
         let check: bool = ctx.eval(lock, "u32_arr instanceof Uint32Array").unwrap();
         assert!(check);
         let val: Number = ctx.eval(lock, "u32_arr[2]").unwrap();
         assert!((val.value() - 4_294_967_295.0).abs() < f64::EPSILON);
 
         let vec: Vec<i8> = vec![-128, 0, 127];
-        ctx.set_global("i8_arr", vec.to_js(lock));
+        ctx.set_global(lock, "i8_arr", vec);
         let check: bool = ctx.eval(lock, "i8_arr instanceof Int8Array").unwrap();
         assert!(check);
         let val: Number = ctx.eval(lock, "i8_arr[0]").unwrap();
         assert!((val.value() - (-128.0)).abs() < f64::EPSILON);
 
         let vec: Vec<i16> = vec![-32768, 0, 32767];
-        ctx.set_global("i16_arr", vec.to_js(lock));
+        ctx.set_global(lock, "i16_arr", vec);
         let check: bool = ctx.eval(lock, "i16_arr instanceof Int16Array").unwrap();
         assert!(check);
         let val: Number = ctx.eval(lock, "i16_arr[0]").unwrap();
         assert!((val.value() - (-32768.0)).abs() < f64::EPSILON);
 
         let vec: Vec<i32> = vec![-2_147_483_648, 0, 2_147_483_647];
-        ctx.set_global("i32_arr", vec.to_js(lock));
+        ctx.set_global(lock, "i32_arr", vec);
         let check: bool = ctx.eval(lock, "i32_arr instanceof Int32Array").unwrap();
         assert!(check);
         let val: Number = ctx.eval(lock, "i32_arr[0]").unwrap();
@@ -521,7 +521,7 @@ fn typed_array_empty_roundtrip() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let vec: Vec<u8> = vec![];
-        ctx.set_global("arr", vec.to_js(lock));
+        ctx.set_global(lock, "arr", vec);
 
         let length: Number = ctx.eval(lock, "arr.length").unwrap();
         assert!(length.value().abs() < f64::EPSILON);
@@ -556,7 +556,7 @@ fn large_typed_array_roundtrip() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let vec: Vec<u8> = (0_u32..65536).map(|i| (i % 256) as u8).collect();
-        ctx.set_global("arr", vec.clone().to_js(lock));
+        ctx.set_global(lock, "arr", vec.clone());
 
         let length: Number = ctx.eval(lock, "arr.length").unwrap();
         assert!((length.value() - 65536.0).abs() < f64::EPSILON);
@@ -678,7 +678,7 @@ fn float32_array_parameter_and_return() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         // Test Vec<f32> parameter
         let result: Number = ctx
@@ -710,7 +710,7 @@ fn float32_array_slice_parameter() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         // Test &[f32] parameter
         let result: Number = ctx
@@ -734,7 +734,7 @@ fn float32_array_rejects_wrong_type() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         // Float32Array should reject Float64Array
         let result: Result<Number, _> =
@@ -756,7 +756,7 @@ fn float32_array_to_js_and_from_js() {
         // Test ToJS: Vec<f32> -> Float32Array
         let data: Vec<f32> = vec![1.5, 2.5, 3.5, 4.5];
         let js_value = data.to_js(lock);
-        ctx.set_global("f32arr", js_value);
+        ctx.set_global(lock, "f32arr", js_value);
 
         let is_f32: bool = ctx.eval(lock, "f32arr instanceof Float32Array").unwrap();
         assert!(is_f32);
@@ -777,7 +777,7 @@ fn float32_array_to_js_and_from_js() {
         // Test roundtrip with special values
         let special: Vec<f32> = vec![f32::MIN, f32::MAX, 0.0, -0.0];
         let js_special = special.to_js(lock);
-        ctx.set_global("special", js_special);
+        ctx.set_global(lock, "special", js_special);
         let roundtrip: Vec<f32> = ctx.eval(lock, "special").unwrap();
         #[expect(clippy::float_cmp)]
         {
@@ -799,7 +799,7 @@ fn float64_array_parameter_and_return() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         // Test Vec<f64> parameter
         let result: Number = ctx
@@ -831,7 +831,7 @@ fn float64_array_slice_parameter() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         // Test &[f64] parameter
         let result: Number = ctx
@@ -855,7 +855,7 @@ fn float64_array_rejects_wrong_type() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         // Float64Array should reject Float32Array
         let result: Result<Number, _> =
@@ -876,7 +876,7 @@ fn float64_array_to_js_and_from_js() {
     harness.run_in_context(|lock, ctx| {
         // Test Vec<f64> to JavaScript
         let vec: Vec<f64> = vec![1.5, 2.5, -3.5];
-        ctx.set_global("f64_arr", vec.to_js(lock));
+        ctx.set_global(lock, "f64_arr", vec);
 
         let is_f64: bool = ctx.eval(lock, "f64_arr instanceof Float64Array").unwrap();
         assert!(is_f64);
@@ -907,7 +907,7 @@ fn bigint64_array_parameter_and_return() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         // Test Vec<i64> parameter
         let result: Number = ctx
@@ -945,7 +945,7 @@ fn bigint64_array_slice_parameter() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         // Test &[i64] parameter
         let result: Number = ctx
@@ -969,7 +969,7 @@ fn bigint64_array_rejects_wrong_type() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         // BigInt64Array should reject BigUint64Array
         let result: Result<Number, _> =
@@ -990,7 +990,7 @@ fn bigint64_array_to_js_and_from_js() {
     harness.run_in_context(|lock, ctx| {
         // Test Vec<i64> to JavaScript
         let vec: Vec<i64> = vec![100, -200, 300];
-        ctx.set_global("i64_arr", vec.to_js(lock));
+        ctx.set_global(lock, "i64_arr", vec);
 
         let is_i64: bool = ctx.eval(lock, "i64_arr instanceof BigInt64Array").unwrap();
         assert!(is_i64);
@@ -1022,28 +1022,40 @@ struct SliceResource;
 impl SliceResource {
     /// Accepts a `Local<Uint8Array>` directly and sums its elements via `as_slice`.
     #[jsg_method]
-    pub fn sum_u8_local(&self, arr: jsg::v8::Local<jsg::v8::Uint8Array>) -> jsg::Number {
-        jsg::Number::new(arr.as_slice().iter().map(|&x| f64::from(x)).sum())
+    pub fn sum_u8_local<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        arr: jsg::v8::Local<'s, jsg::v8::Uint8Array>,
+    ) -> jsg::Number {
+        jsg::Number::new(arr.as_slice(lock).iter().map(|&x| f64::from(x)).sum())
     }
 
     /// Accepts a `Local<Int32Array>` directly and sums its elements via `as_slice`.
     #[jsg_method]
-    pub fn sum_i32_local(&self, arr: jsg::v8::Local<jsg::v8::Int32Array>) -> jsg::Number {
-        jsg::Number::new(arr.as_slice().iter().map(|&x| f64::from(x)).sum())
+    pub fn sum_i32_local<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        arr: jsg::v8::Local<'s, jsg::v8::Int32Array>,
+    ) -> jsg::Number {
+        jsg::Number::new(arr.as_slice(lock).iter().map(|&x| f64::from(x)).sum())
     }
 
     /// Accepts a `Local<Float64Array>` directly and sums its elements via `as_slice`.
     #[jsg_method]
-    pub fn sum_f64_local(&self, arr: jsg::v8::Local<jsg::v8::Float64Array>) -> jsg::Number {
-        jsg::Number::new(arr.as_slice().iter().copied().sum())
+    pub fn sum_f64_local<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        arr: jsg::v8::Local<'s, jsg::v8::Float64Array>,
+    ) -> jsg::Number {
+        jsg::Number::new(arr.as_slice(lock).iter().copied().sum())
     }
 
     /// Writes `0xFF` into every byte via `as_mut_slice` and returns the length.
     #[jsg_method]
-    pub fn fill_ff(
+    pub fn fill_ff<'s>(
         &self,
-        lock: &mut jsg::Lock,
-        mut arr: jsg::v8::Local<jsg::v8::Uint8Array>,
+        lock: &mut jsg::Lock<'s>,
+        mut arr: jsg::v8::Local<'s, jsg::v8::Uint8Array>,
     ) -> jsg::Number {
         // SAFETY: no other reference into this buffer is live during this call;
         // lock borrow prevents JS from running.
@@ -1058,7 +1070,7 @@ fn typed_array_as_slice_zero_copy_sum() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let res = jsg::Rc::new(SliceResource);
-        ctx.set_global("r", res.to_js(lock));
+        ctx.set_global(lock, "r", res);
 
         // Uint8Array
         let result: jsg::Number = ctx
@@ -1092,7 +1104,7 @@ fn typed_array_as_slice_empty() {
             // SAFETY: isolate valid, js_val is a Uint8Array Local.
             unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
 
-        assert_eq!(typed.as_slice(), &[] as &[u8]);
+        assert_eq!(typed.as_slice(lock), &[] as &[u8]);
         Ok(())
     });
 }
@@ -1102,7 +1114,7 @@ fn typed_array_as_mut_slice_mutations_visible_in_js() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let res = jsg::Rc::new(SliceResource);
-        ctx.set_global("r", res.to_js(lock));
+        ctx.set_global(lock, "r", res);
 
         // fill_ff writes 0xFF into every element in-place.
         // The returned length tells us how many bytes were written.
@@ -1137,6 +1149,7 @@ fn typed_array_byte_offset_non_zero() {
         // byte_offset() must return 4, len() must return 1.
         let js_val = ctx
             .eval_raw(
+                lock,
                 r"
                     const buf = new ArrayBuffer(8);
                     const view = new Uint32Array(buf, 4, 1);
@@ -1163,6 +1176,7 @@ fn typed_array_as_slice_with_byte_offset() {
         // starting at offset 4 covering 4 bytes: [4, 5, 6, 7].
         let js_val = ctx
             .eval_raw(
+                lock,
                 r"
                     const buf = new ArrayBuffer(12);
                     const all = new Uint8Array(buf);
@@ -1177,7 +1191,7 @@ fn typed_array_as_slice_with_byte_offset() {
 
         assert_eq!(typed.byte_offset(), 4);
         assert_eq!(typed.len(), 4);
-        assert_eq!(typed.as_slice(), &[4u8, 5, 6, 7]);
+        assert_eq!(typed.as_slice(lock), &[4u8, 5, 6, 7]);
         Ok(())
     });
 }
@@ -1197,7 +1211,7 @@ fn typed_array_data_pointer_and_byte_offset() {
 
         // data() + byte_offset() must point at the first element.
         // as_slice() is derived from exactly this computation, so they must agree.
-        let slice = typed.as_slice();
+        let slice = typed.as_slice(lock);
         // SAFETY: as_slice() contracts guarantee the pointer + len are valid here.
         let from_ptr: &[u8] = unsafe {
             std::slice::from_raw_parts(
@@ -1216,7 +1230,7 @@ fn typed_array_from_js_local_rejects_wrong_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let res = jsg::Rc::new(SliceResource);
-        ctx.set_global("r", res.to_js(lock));
+        ctx.set_global(lock, "r", res);
 
         // sumU8Local expects Uint8Array — Int8Array must be rejected.
         let result: Result<jsg::Number, _> =
@@ -1286,7 +1300,7 @@ fn biguint64_array_parameter_and_return() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         // Test Vec<u64> parameter
         let result: Number = ctx
@@ -1318,7 +1332,7 @@ fn biguint64_array_slice_parameter() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         // Test &[u64] parameter
         let result: Number = ctx
@@ -1342,7 +1356,7 @@ fn biguint64_array_rejects_wrong_type() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("arr", wrapped);
+        ctx.set_global(lock, "arr", wrapped);
 
         // BigUint64Array should reject BigInt64Array
         let result: Result<Number, _> =
@@ -1363,7 +1377,7 @@ fn biguint64_array_to_js_and_from_js() {
     harness.run_in_context(|lock, ctx| {
         // Test Vec<u64> to JavaScript
         let vec: Vec<u64> = vec![100, 200, 300];
-        ctx.set_global("u64_arr", vec.to_js(lock));
+        ctx.set_global(lock, "u64_arr", vec);
 
         let is_u64: bool = ctx.eval(lock, "u64_arr instanceof BigUint64Array").unwrap();
         assert!(is_u64);
@@ -1391,7 +1405,7 @@ fn uint8clamped_array_from_js() {
         use jsg::v8::Uint8ClampedArray;
 
         let val = ctx
-            .eval_raw("new Uint8ClampedArray([0, 128, 255])")
+            .eval_raw(lock, "new Uint8ClampedArray([0, 128, 255])")
             .unwrap();
         assert!(val.is_uint8clamped_array());
         assert!(!val.is_uint8_array());
@@ -1403,7 +1417,7 @@ fn uint8clamped_array_from_js() {
         assert_eq!(arr.get(0), 0u8);
         assert_eq!(arr.get(1), 128u8);
         assert_eq!(arr.get(2), 255u8);
-        assert_eq!(arr.as_slice(), &[0u8, 128, 255]);
+        assert_eq!(arr.as_slice(lock), &[0u8, 128, 255]);
         assert!(arr.is_integer_type());
         assert_eq!(arr.element_size(), 1);
 
@@ -1419,7 +1433,7 @@ fn uint8clamped_array_rejects_wrong_type() {
         use jsg::v8::Local;
         use jsg::v8::Uint8ClampedArray;
 
-        let val = ctx.eval_raw("new Uint8Array([1, 2, 3])").unwrap();
+        let val = ctx.eval_raw(lock, "new Uint8Array([1, 2, 3])").unwrap();
         let result = Local::<Uint8ClampedArray>::from_js(lock, val);
         assert!(result.is_err());
 
@@ -1430,12 +1444,12 @@ fn uint8clamped_array_rejects_wrong_type() {
 #[test]
 fn is_float16_array_check() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let f16_val = ctx.eval_raw("new Float16Array([1.0, 2.0])").unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let f16_val = ctx.eval_raw(lock, "new Float16Array([1.0, 2.0])").unwrap();
         assert!(f16_val.is_float16_array());
         assert!(!f16_val.is_float32_array());
 
-        let f32_val = ctx.eval_raw("new Float32Array([1.0])").unwrap();
+        let f32_val = ctx.eval_raw(lock, "new Float32Array([1.0])").unwrap();
         assert!(!f32_val.is_float16_array());
 
         Ok(())

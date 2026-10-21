@@ -103,7 +103,7 @@ fn jsg_oneof_string_or_number_accepts_string() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(EnumTestResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("resource", wrapped);
+        ctx.set_global(lock, "resource", wrapped);
 
         let result: String = ctx.eval(lock, "resource.stringOrNumber('hello')").unwrap();
         assert_eq!(result, "string:hello");
@@ -117,7 +117,7 @@ fn jsg_oneof_string_or_number_accepts_number() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(EnumTestResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("resource", wrapped);
+        ctx.set_global(lock, "resource", wrapped);
 
         let result: String = ctx.eval(lock, "resource.stringOrNumber(42)").unwrap();
         assert_eq!(result, "number:42");
@@ -131,7 +131,7 @@ fn jsg_oneof_string_or_number_rejects_boolean() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(EnumTestResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("resource", wrapped);
+        ctx.set_global(lock, "resource", wrapped);
 
         let err = ctx
             .eval::<String>(lock, "resource.stringOrNumber(true)")
@@ -150,7 +150,7 @@ fn jsg_oneof_string_or_bool_accepts_both() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(EnumTestResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("resource", wrapped);
+        ctx.set_global(lock, "resource", wrapped);
 
         let result: String = ctx.eval(lock, "resource.stringOrBool('test')").unwrap();
         assert_eq!(result, "string:test");
@@ -167,7 +167,7 @@ fn jsg_oneof_three_types_accepts_all() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(EnumTestResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("resource", wrapped);
+        ctx.set_global(lock, "resource", wrapped);
 
         let result: String = ctx.eval(lock, "resource.threeTypes('hello')").unwrap();
         assert_eq!(result, "string:hello");
@@ -187,7 +187,7 @@ fn jsg_oneof_three_types_rejects_null_and_undefined() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(EnumTestResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("resource", wrapped);
+        ctx.set_global(lock, "resource", wrapped);
 
         let err = ctx
             .eval::<String>(lock, "resource.threeTypes(null)")
@@ -210,7 +210,7 @@ fn jsg_oneof_variant_order_matches_declaration() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(EnumTestResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("resource", wrapped);
+        ctx.set_global(lock, "resource", wrapped);
 
         // StringOrNumber has String first, Number second
         let result: String = ctx.eval(lock, "resource.stringOrNumber('42')").unwrap();
@@ -235,7 +235,7 @@ fn jsg_oneof_reference_parameter() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(EnumTestResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("resource", wrapped);
+        ctx.set_global(lock, "resource", wrapped);
 
         let result: String = ctx
             .eval(lock, "resource.stringOrNumberRef('hello')")

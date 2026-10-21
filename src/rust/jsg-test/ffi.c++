@@ -99,7 +99,10 @@ EvalResult runScript(
 }  // namespace
 
 EvalResult EvalContext::eval(::rust::Str code, kj::Maybe<::rust::Str> maybeResourceName) const {
+  // Entered again so the code can be evaluated while another isolate is entered.
+  v8::Isolate::Scope isolateScope(v8Isolate);
   v8::Local<v8::Context> ctx = v8Context.Get(v8Isolate);
+  v8::Context::Scope contextScope(ctx);
 
   v8::Local<v8::String> source = ::workerd::jsg::check(v8::String::NewFromUtf8(
       v8Isolate, code.data(), v8::NewStringType::kNormal, static_cast<int>(code.size())));

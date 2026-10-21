@@ -79,7 +79,7 @@ mod bridge {
         ///
         /// # Safety
         /// `isolate` must be a valid pointer to a locked `v8::Isolate` with an
-        /// active `HandleScope`.
+        /// entered context and an active `HandleScope`.
         unsafe fn transcode(
             isolate: *mut Isolate,
             source: &[u8],
@@ -90,8 +90,8 @@ mod bridge {
 }
 
 /// # Safety
-/// `isolate` must be a valid pointer to a locked `v8::Isolate` with an active
-/// `HandleScope`.
+/// `isolate` must be a valid pointer to a locked `v8::Isolate` with an entered
+/// context and an active `HandleScope`.
 unsafe fn transcode(
     isolate: *mut bridge::Isolate,
     source: &[u8],
