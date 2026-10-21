@@ -176,6 +176,10 @@ impl<R: Resource + 'static> ToJS for Rc<R> {
 impl<R: Resource + 'static> FromJS for Rc<R> {
     type ResultType = Self;
 
+    fn type_name() -> String {
+        R::class_name().to_owned()
+    }
+
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self, Error> {
         let type_name = value.type_of();
         Self::try_from_js(lock, value)?.ok_or_else(|| {
