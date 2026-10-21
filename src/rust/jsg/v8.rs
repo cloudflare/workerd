@@ -566,6 +566,7 @@ pub mod ffi {
         pub unsafe fn fci_get_isolate(args: *mut FunctionCallbackInfo) -> *mut Isolate;
         pub unsafe fn fci_get_this(args: *mut FunctionCallbackInfo) -> Local;
         pub unsafe fn fci_get_length(args: *mut FunctionCallbackInfo) -> usize;
+        pub unsafe fn fci_is_construct_call(args: *mut FunctionCallbackInfo) -> bool;
         pub unsafe fn fci_get_arg(args: *mut FunctionCallbackInfo, index: usize) -> Local;
         pub unsafe fn fci_set_return_value(args: *mut FunctionCallbackInfo, value: Local);
 
@@ -3306,6 +3307,12 @@ impl<'cb> FunctionCallbackInfo<'cb> {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Returns `true` if the function was called with `new` (or `Reflect.construct`).
+    pub fn is_construct_call(&self) -> bool {
+        // SAFETY: self.0 is a valid FunctionCallbackInfo pointer (guaranteed by constructor).
+        unsafe { ffi::fci_is_construct_call(self.0) }
     }
 
     pub fn get(&self, index: usize) -> Local<'cb, Value> {

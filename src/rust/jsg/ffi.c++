@@ -926,6 +926,10 @@ size_t fci_get_length(FunctionCallbackInfo* args) {
   return args->Length();
 }
 
+bool fci_is_construct_call(FunctionCallbackInfo* args) {
+  return args->IsConstructCall();
+}
+
 Local fci_get_arg(FunctionCallbackInfo* args, size_t index) {
   return to_ffi((*args)[index]);
 }

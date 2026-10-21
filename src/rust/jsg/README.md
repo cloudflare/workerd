@@ -286,6 +286,7 @@ impl Greeting {
 - Only one `#[jsg_constructor]` is allowed per impl block.
 - The first parameter may be `&mut Lock` (or `&mut jsg::Lock`) if the constructor needs isolate access; it is not exposed as a JS argument.
 - If no `#[jsg_constructor]` is present, `new MyResource()` throws an `Illegal constructor` error, matching C++ JSG behavior.
+- Calling the constructor without `new` throws a `TypeError`, matching C++ JSG behavior.
 
 ## Properties
 
