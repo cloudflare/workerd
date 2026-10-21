@@ -40,6 +40,7 @@ use utils::error;
 use utils::extract_name_attribute;
 use utils::extract_named_fields;
 use utils::is_lock_ref;
+use utils::is_option_type;
 use utils::is_result_type;
 
 // =============================================================================
@@ -66,6 +67,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut field_assignments = Vec::new();
     let mut field_extractions = Vec::new();
     let mut field_names = Vec::new();
+    let mut all_optional = true;
 
     for field in &named_fields {
         // Only public fields are projected into JavaScript objects.
@@ -78,24 +80,39 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         };
         let field_name_str = field_name.to_string();
         let field_type = &field.ty;
+        let optional = is_option_type(field_type);
+        all_optional &= optional;
 
-        field_assignments.push(quote! {
-            let #field_name = jsg::v8::ToLocalValue::to_local(&this.#field_name, lock);
-            obj.set(lock, #field_name_str, #field_name);
+        // Like C++ JSG, an absent optional field is omitted, not undefined.
+        let set = quote! {
+            let value = jsg::v8::ToLocalValue::to_local(value, lock);
+            obj.set(lock, #field_name_str, value);
+        };
+        field_assignments.push(if optional {
+            quote! { if let Some(value) = &this.#field_name { #set } }
+        } else {
+            quote! { { let value = &this.#field_name; #set } }
         });
+        // Like C++ JSG, an absent property reads as undefined.
         field_extractions.push(quote! {
-            let #field_name = {
-                if !obj.has(lock, #field_name_str)? {
-                    return Err(jsg::Error::new_type_error(
-                        format!("Missing property '{}'", #field_name_str)
-                    ));
-                }
-                let prop = obj.get(lock, #field_name_str)?;
-                <#field_type as jsg::FromJS>::from_js(lock, prop)?
-            };
+            let prop = obj.get(lock, #field_name_str)?;
+            let #field_name = <#field_type as jsg::FromJS>::from_js(lock, prop)?;
         });
         field_names.push(field_name);
     }
+
+    // Like C++ JSG, null or undefined is an empty dictionary, which is an
+    // error if a field is required.
+    let empty = if all_optional {
+        quote! { return Ok(Self { #(#field_names: None),* }); }
+    } else {
+        quote! {
+            return Err(jsg::Error::new_type_error(format!(
+                "Cannot initialize {} with required members from an undefined or null value.",
+                #class_name,
+            )));
+        }
+    };
 
     quote! {
         #input
@@ -129,6 +146,9 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             type ResultType = Self;
 
             fn from_js(lock: &mut jsg::Lock, value: jsg::v8::Local<jsg::v8::Value>) -> Result<Self::ResultType, jsg::Error> {
+                if value.is_null() || value.is_undefined() {
+                    #empty
+                }
                 if !value.is_object() {
                     return Err(jsg::Error::new_type_error(
                         format!("Expected object but got {}", value.type_of())
@@ -140,7 +160,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             }
 
             fn try_from_js(lock: &mut jsg::Lock, value: jsg::v8::Local<jsg::v8::Value>) -> Result<Option<Self::ResultType>, jsg::Error> {
-                if !value.is_object() {
+                if !value.is_object() && !value.is_null() && !value.is_undefined() {
                     return Ok(None);
                 }
                 Self::from_js(lock, value).map(Some)

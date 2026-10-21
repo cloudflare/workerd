@@ -26,6 +26,19 @@ struct NestedStruct {
     pub inner: String,
 }
 
+#[jsg_struct]
+#[derive(Debug, PartialEq)]
+struct OptionalStruct {
+    pub label: Option<String>,
+    pub count: Option<u32>,
+}
+
+#[jsg_struct]
+#[derive(Debug)]
+struct RequiredStruct {
+    pub count: u32,
+}
+
 #[test]
 fn objects_can_be_wrapped_and_unwrapped() {
     let harness = crate::Harness::new();
@@ -204,6 +217,96 @@ fn type_of_returns_correct_js_types() {
         let obj_val = lock.new_object();
         assert_eq!(obj_val.type_of(), "object");
         assert!(!obj_val.is_null_or_undefined());
+        Ok(())
+    });
+}
+
+/// Converts the JS expression `expr` with `T`'s `FromJS`.
+fn convert<T: jsg::FromJS>(
+    lock: &mut jsg::Lock,
+    ctx: &crate::EvalContext<'_>,
+    expr: &str,
+) -> Result<T::ResultType, Error> {
+    let value = ctx.eval_raw(expr).expect("expression should evaluate");
+    T::from_js(lock, value)
+}
+
+/// Like C++ JSG, null or undefined is an empty dictionary when every field is
+/// optional, and absent properties read as undefined.
+#[test]
+fn optional_struct_from_null_undefined_and_partial_objects() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let empty = OptionalStruct {
+            label: None,
+            count: None,
+        };
+        assert_eq!(convert::<OptionalStruct>(lock, ctx, "null")?, empty);
+        assert_eq!(convert::<OptionalStruct>(lock, ctx, "undefined")?, empty);
+        assert_eq!(convert::<OptionalStruct>(lock, ctx, "({})")?, empty);
+        assert_eq!(
+            convert::<OptionalStruct>(lock, ctx, "({ count: 3 })")?,
+            OptionalStruct {
+                label: None,
+                count: Some(3),
+            }
+        );
+        Ok(())
+    });
+}
+
+/// A struct with a required field cannot come from null or undefined, and an
+/// absent required property converts from undefined.
+#[test]
+fn required_struct_from_null_and_absent_property() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let err = convert::<RequiredStruct>(lock, ctx, "null").unwrap_err();
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert_eq!(
+            err.message,
+            "Cannot initialize RequiredStruct with required members from an undefined or null value."
+        );
+        let err = convert::<RequiredStruct>(lock, ctx, "({})").unwrap_err();
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert_eq!(
+            err.message,
+            "The value cannot be converted because it is not an integer."
+        );
+        Ok(())
+    });
+}
+
+/// A throwing getter fails the conversion with its own error.
+#[test]
+fn struct_from_throwing_getter_propagates_error() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let err = convert::<OptionalStruct>(
+            lock,
+            ctx,
+            "({ get label() { throw new RangeError('getter'); } })",
+        )
+        .unwrap_err();
+        assert_eq!(err.name, ExceptionType::RangeError);
+        assert!(err.message.contains("getter"), "got {:?}", err.message);
+        Ok(())
+    });
+}
+
+/// Like C++ JSG, an absent optional field is omitted from the JS object.
+#[test]
+fn struct_omits_absent_optional_fields() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let value = OptionalStruct {
+            label: None,
+            count: Some(1),
+        }
+        .to_js(lock);
+        let obj: v8::Local<'_, v8::Object> = value.into();
+        assert!(!obj.has(lock, "label")?);
+        assert!(obj.has(lock, "count")?);
         Ok(())
     });
 }
