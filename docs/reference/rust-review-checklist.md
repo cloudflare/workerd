@@ -83,7 +83,9 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
 - **Type mappings**: `jsg::Number` wraps JS numbers (distinct from `f64`). `Vec<u8>` maps to
   `Uint8Array`, not a regular JS `Array`. `Option<T>` maps to `T | undefined`; like
   `jsg::Optional<T>`, `null` converts as `T`. `Nullable<T>` maps to `T | null | undefined`.
-  `String`/`&str` map to JS strings.
+  `String`/`&str` map to JS strings. Integers and `#[jsg_struct]`s convert like C++ JSG's
+  integers and dictionaries: out-of-range integers throw, and an absent struct field reads as
+  `undefined`.
 - **GC tracing**: `Ref<T>`, `Option<Ref<T>>`, and `Nullable<Ref<T>>` fields on `#[jsg_resource]`
   structs are automatically traced during GC. `WeakRef<T>` fields are not traced (no-op). Verify
   that any resource holding a `Ref<T>` or `Nullable<Ref<T>>` to another resource is properly

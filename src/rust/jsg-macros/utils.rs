@@ -145,6 +145,12 @@ pub fn is_lock_ref(ty: &syn::Type) -> bool {
     }
 }
 
+/// Returns true if `ty` is `Option<T>`.
+pub fn is_option_type(ty: &syn::Type) -> bool {
+    matches!(ty, syn::Type::Path(p)
+        if p.path.segments.last().is_some_and(|s| s.ident == "Option"))
+}
+
 #[cfg(test)]
 #[path = "utils-test.rs"]
 mod tests;
