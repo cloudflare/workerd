@@ -107,6 +107,7 @@ export {
   readAfterCancelReturnsEmptyView,
   readDetachesCallerBuffer,
   closeWithPendingUnfilledByobRead,
+  closeWithPendingDefaultRead,
   controllerType,
   errorAfterCloseWithQueuedBytes,
   cancelWithPartiallyFilledPull,
@@ -299,6 +300,8 @@ export {
   speciesNotConsultedByInternalCopies,
   nativeSourceIgnoresPollutedMembers,
   thenGetterFiresOncePerByteRead,
+  thenGetterReleasesReaderWhileByteReadsSettle,
+  thenGetterErrorsSourceWhileBranchByteReadsSettle,
   byobReadThenLookupFollowsItsPull,
 } from 'pollution';
 

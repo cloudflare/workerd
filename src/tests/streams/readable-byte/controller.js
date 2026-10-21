@@ -281,6 +281,42 @@ export const closeWithPendingUnfilledByobRead = {
   },
 };
 
+// DIVERGENCE (ledger #43, the close() half of #22's default reads):
+// close() while a default read is pending, with or without
+// autoAllocateChunkSize. TypeScript resolves the read done with value
+// undefined (spec: ReadableStreamClose runs the read request's close
+// steps); C++ resolves it done with a zero-length Uint8Array.
+export const closeWithPendingDefaultRead = {
+  async test() {
+    const sources = {
+      default: {},
+      autoAllocate: { autoAllocateChunkSize: 8 },
+    };
+    for (const [name, source] of Object.entries(sources)) {
+      let controller;
+      const rs = new ReadableStream({
+        type: 'bytes',
+        ...source,
+        start(c) {
+          controller = c;
+        },
+      });
+      const reader = rs.getReader();
+      const read = reader.read();
+      controller.close();
+      const { done, value } = await read;
+      strictEqual(done, true, name);
+      if (usingTsImpl) {
+        strictEqual(value, undefined, name);
+      } else {
+        ok(value instanceof Uint8Array, name);
+        strictEqual(value.byteLength, 0, name);
+      }
+      await reader.closed;
+    }
+  },
+};
+
 // DIVERGENCE (ledger #23, the byte mirror of readable #18): error() while
 // a close() is still pending (bytes queued). Per spec the stream is still
 // "readable", so the TypeScript implementation reports desiredSize as
