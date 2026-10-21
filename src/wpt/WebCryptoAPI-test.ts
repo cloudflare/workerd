@@ -92,7 +92,7 @@ export default {
   'digest/digest.js': {},
   'digest/digest_test_data.js': {},
   'digest/kangarootwelve.tentative.https.any.js': unsupported('KangarooTwelve'),
-  'digest/sha3.tentative.https.any.js': unsupported('SHA3'),
+  'digest/sha3.tentative.https.any.js': {},
   'digest/turboshake.tentative.https.any.js': unsupported('TurboSHAKE'),
   'digest/xof_digest.js': {},
   'encap_decap/encap_decap_bits.tentative.https.any.js': {
