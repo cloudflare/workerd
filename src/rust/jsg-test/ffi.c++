@@ -38,15 +38,20 @@ namespace rust::jsg_test {
 
 // Lazy initialization of V8System to avoid static initialization order issues
 static ::workerd::jsg::V8System& getV8System() {
-  static ::workerd::jsg::V8System v8System;
+  // Lets tests optimize functions on demand to reach fast callbacks.
+  static ::workerd::jsg::V8System v8System({"--allow-natives-syntax"});
   return v8System;
 }
 
-TestHarness::TestHarness(::workerd::jsg::V8StackScope&, ::rust::Slice<const uint8_t> flags)
+TestHarness::TestHarness(
+    ::workerd::jsg::V8StackScope&, ::rust::Slice<const uint8_t> flags, FastApi fastApi)
     : isolate(kj::heap<TestIsolate>(getV8System(), kj::heap<::workerd::jsg::IsolateObserver>())),
       locker(isolate->getIsolate()),
       isolateScope(isolate->getIsolate()),
       realm(::workerd::rust::jsg::realm_create(isolate->getIsolate(), flags)) {
+  if (fastApi == FastApi::Enabled) {
+    isolate->setFastApiEnabledForTest();
+  }
   auto* v8Isolate = isolate->getIsolate();
   v8Isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &*realm);
 
@@ -62,9 +67,9 @@ TestHarness::TestHarness(::workerd::jsg::V8StackScope&, ::rust::Slice<const uint
   });
 }
 
-kj::Own<TestHarness> create_test_harness(::rust::Slice<const uint8_t> flags) {
-  return ::workerd::jsg::runInV8Stack([flags](::workerd::jsg::V8StackScope& stackScope) {
-    return kj::heap<TestHarness>(stackScope, flags);
+kj::Own<TestHarness> create_test_harness(::rust::Slice<const uint8_t> flags, FastApi fast_api) {
+  return ::workerd::jsg::runInV8Stack([flags, fast_api](::workerd::jsg::V8StackScope& stackScope) {
+    return kj::heap<TestHarness>(stackScope, flags, fast_api);
   });
 }
 

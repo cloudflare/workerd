@@ -165,10 +165,14 @@ fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<proc_macro2::Token
                 .iter()
                 .any(|arg| matches!(arg, FnArg::Receiver(_)));
 
+            let fast_api =
+                syn::Ident::new(&format!("{rust_method_name}_fast_api"), rust_method_name.span());
+            let fast = quote! { Self::#fast_api() };
+
             Some(if has_self {
-                quote! { jsg::Member::Method { name: #js_name.to_owned(), callback: Self::#callback_name() } }
+                quote! { jsg::Member::Method { name: #js_name.to_owned(), callback: Self::#callback_name(), fast: #fast } }
             } else {
-                quote! { jsg::Member::StaticMethod { name: #js_name.to_owned(), callback: Self::#callback_name() } }
+                quote! { jsg::Member::StaticMethod { name: #js_name.to_owned(), callback: Self::#callback_name(), fast: #fast } }
             })
         })
         .collect()

@@ -434,10 +434,15 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
                     callback: callback as usize,
                 });
             }
-            Member::Method { name, callback } => {
+            Member::Method {
+                name,
+                callback,
+                fast,
+            } => {
                 descriptor.methods.push(v8::ffi::MethodDescriptor {
                     name,
                     callback: callback as usize,
+                    fast: fast.into(),
                 });
             }
             Member::Property {
@@ -470,10 +475,15 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
                     setter_callback: setter_callback.map(|f| f as usize).into(),
                 });
             }
-            Member::StaticMethod { name, callback } => {
+            Member::StaticMethod {
+                name,
+                callback,
+                fast,
+            } => {
                 descriptor.static_methods.push(v8::ffi::MethodDescriptor {
                     name,
                     callback: callback as usize,
+                    fast: fast.into(),
                 });
             }
             Member::StaticConstant { name, value } => {
