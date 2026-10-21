@@ -194,7 +194,7 @@ fn function_into_object() {
         let func = func_val.try_as::<v8::Function>().unwrap();
         let obj: v8::Local<v8::Object> = func.into();
         // Functions are objects — the `name` property should be accessible.
-        assert!(obj.has(lock, "name"));
+        assert!(obj.has(lock, "name").unwrap());
         let prop = obj.get(lock, "name").unwrap();
         let name: String = <String as jsg::FromJS>::from_js(lock, prop)?;
         assert_eq!(name, "myFunc");
@@ -212,7 +212,7 @@ fn array_into_object() {
         let arr = arr_val.try_as::<v8::Array>().unwrap();
         assert_eq!(arr.len(), 3);
         let obj: v8::Local<v8::Object> = arr.into();
-        assert!(obj.has(lock, "length"));
+        assert!(obj.has(lock, "length").unwrap());
         let prop = obj.get(lock, "length").unwrap();
         let len: jsg::Number = <jsg::Number as jsg::FromJS>::from_js(lock, prop)?;
         assert!((len.value() - 3.0).abs() < f64::EPSILON);
@@ -235,7 +235,7 @@ fn typed_array_into_object() {
         let ta: v8::Local<v8::TypedArray> = typed.into();
         assert_eq!(ta.len(), 3);
         let obj: v8::Local<v8::Object> = ta.into();
-        assert!(obj.has(lock, "byteLength"));
+        assert!(obj.has(lock, "byteLength").unwrap());
         let prop = obj.get(lock, "byteLength").unwrap();
         let byte_len: jsg::Number = <jsg::Number as jsg::FromJS>::from_js(lock, prop)?;
         assert!((byte_len.value() - 3.0).abs() < f64::EPSILON);
@@ -259,7 +259,7 @@ fn function_as_object_property_access() {
         let func = func_val.try_as::<v8::Function>().unwrap();
         let obj: v8::Local<v8::Object> = func.into();
 
-        assert!(obj.has(lock, "custom"));
+        assert!(obj.has(lock, "custom").unwrap());
         let prop = obj.get(lock, "custom").unwrap();
         let val: String = <String as jsg::FromJS>::from_js(lock, prop)?;
         assert_eq!(val, "hello");
@@ -276,7 +276,7 @@ fn array_as_object_property_access() {
         let arr = arr_val.try_as::<v8::Array>().unwrap();
         let obj: v8::Local<v8::Object> = arr.into();
 
-        assert!(obj.has(lock, "length"));
+        assert!(obj.has(lock, "length").unwrap());
         let prop = obj.get(lock, "length").unwrap();
         let val: jsg::Number = <jsg::Number as jsg::FromJS>::from_js(lock, prop)?;
         assert!((val.value() - 3.0).abs() < f64::EPSILON);
@@ -297,8 +297,8 @@ fn typed_array_as_object_property_access() {
         let ta: v8::Local<v8::TypedArray> = typed.into();
         let obj: v8::Local<v8::Object> = ta.into();
 
-        assert!(obj.has(lock, "byteLength"));
-        assert!(obj.has(lock, "length"));
+        assert!(obj.has(lock, "byteLength").unwrap());
+        assert!(obj.has(lock, "length").unwrap());
         let prop = obj.get(lock, "byteLength").unwrap();
         let byte_len: jsg::Number = <jsg::Number as jsg::FromJS>::from_js(lock, prop)?;
         assert!((byte_len.value() - 5.0).abs() < f64::EPSILON);
@@ -411,7 +411,7 @@ fn function_object_roundtrip() {
         let func = func_val.try_as::<v8::Function>().unwrap();
         let obj: v8::Local<v8::Object> = func.into();
         // Verify function-specific property is readable as Object
-        assert!(obj.has(lock, "name"));
+        assert!(obj.has(lock, "name").unwrap());
         let prop = obj.get(lock, "name").unwrap();
         let name: String = <String as jsg::FromJS>::from_js(lock, prop)?;
         assert_eq!(name, "namedFn");

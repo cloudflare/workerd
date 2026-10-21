@@ -146,7 +146,8 @@ class MimeType final {
     auto type = mimeType.type();
     auto subtype = mimeType.subtype();
     return type == "text" || isXml(mimeType) || isJson(mimeType) || isJavascript(mimeType) ||
-        (type == "application" && subtype == "dns-json");
+        (type == "application" &&
+            (subtype == "dns-json" || subtype == "x-amz-json-1.0" || subtype == "x-amz-json-1.1"));
   }
 
   template <IsMimeType T>

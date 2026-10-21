@@ -61,11 +61,12 @@
 //! ## Integer Parameter Types
 //!
 //! Integer types (`u8`, `u16`, `u32`, `i8`, `i16`, `i32`) can be used as method
-//! parameters. JavaScript numbers are converted via truncation:
+//! parameters. They convert like C++ JSG's integers:
 //!
-//! - Values are truncated toward zero (e.g., `3.7` → `3`, `-2.9` → `-2`)
-//! - Out-of-range values wrap (e.g., `256.0` → `0` for `u8`)
-//! - `NaN` becomes `0`
+//! - Values out of the type's range, checked before truncation, are a
+//!   `TypeError` (e.g., `256` or `255.5` for `u8`)
+//! - Non-finite values are a `TypeError`, except that `i32` reads them as `0`
+//! - Other values are truncated toward zero (e.g., `3.7` → `3`, `-2.9` → `-2`)
 //!
 //! For strict validation, wrap parameters in `NonCoercible<T>` or validate manually.
 
@@ -278,6 +279,21 @@ pub trait FromJS: Sized {
     /// Converts a JavaScript value into this Rust type.
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error>;
 
+    /// The type's name in argument errors, as C++ JSG's `getName()` reports
+    /// it. Defaults to the Rust type's name without its path or generics.
+    #[doc(hidden)]
+    fn type_name() -> String {
+        let name = std::any::type_name::<Self>();
+        let name = name.split('<').next().unwrap_or(name);
+        name.rsplit("::").next().unwrap_or(name).to_owned()
+    }
+
+    /// Whether a method may omit this argument, like C++ JSG's optional types.
+    #[doc(hidden)]
+    fn is_optional() -> bool {
+        false
+    }
+
     /// Performs a shallow conversion probe.
     ///
     /// `Ok(None)` indicates a top-level type mismatch. Once the top-level type
@@ -340,6 +356,10 @@ impl ToJS for bool {
 impl FromJS for bool {
     type ResultType = Self;
 
+    fn type_name() -> String {
+        "boolean".to_owned()
+    }
+
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
         // SAFETY: The isolate is locked and value is a valid V8 local handle.
         Ok(unsafe { v8::ffi::unwrap_boolean(lock.isolate().as_ffi(), value.into_ffi()) })
@@ -367,6 +387,10 @@ impl ToJS for std::string::String {
 
 impl FromJS for std::string::String {
     type ResultType = Self;
+
+    fn type_name() -> String {
+        "string".to_owned()
+    }
 
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
         // SAFETY: The isolate is locked and value is a valid V8 local handle.
@@ -397,6 +421,10 @@ impl ToJS for Number {
 impl FromJS for Number {
     type ResultType = Self;
 
+    fn type_name() -> String {
+        "number".to_owned()
+    }
+
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
         // SAFETY: The isolate is locked and value is a valid V8 local handle.
         let f64_value =
@@ -421,6 +449,10 @@ impl Type for &str {
 impl FromJS for &str {
     type ResultType = String;
 
+    fn type_name() -> String {
+        "string".to_owned()
+    }
+
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
         // SAFETY: The isolate is locked and value is a valid V8 local handle.
         Ok(unsafe { v8::ffi::unwrap_string(lock.isolate().as_ffi(), value.into_ffi()) }?)
@@ -429,6 +461,10 @@ impl FromJS for &str {
 
 impl<T: FromJS<ResultType = T>> FromJS for &T {
     type ResultType = T;
+
+    fn type_name() -> String {
+        T::type_name()
+    }
 
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
         T::from_js(lock, value)
@@ -457,6 +493,10 @@ impl<T: Type> Type for &[T] {
 impl<T: Type + FromJS<ResultType = T>> FromJS for &[T] {
     type ResultType = Vec<T>;
 
+    fn type_name() -> String {
+        "Array".to_owned()
+    }
+
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
         Vec::<T>::from_js(lock, value)
     }
@@ -469,26 +509,35 @@ impl<T: Type + FromJS<ResultType = T>> FromJS for &[T] {
     }
 }
 
-// Integer types - JavaScript numbers are IEEE 754 doubles (f64)
-//
-// Conversion behavior:
-// - Values are truncated toward zero (e.g., 3.7 → 3, -2.9 → -2)
-// - Values outside the target type's range wrap around (e.g., 256.0 → 0 for u8)
-// - NaN becomes 0
-// - Infinity wraps to 0 for unsigned types, or type MIN/MAX for signed types
-//
-// This matches JavaScript's behavior for TypedArray element assignment.
-// For strict validation, use `NonCoercible<T>` or validate in your method.
+// Integer types follow C++ JSG (jsg/value.h): a value out of the type's
+// range, checked before truncation, is a TypeError, and so is a non-finite
+// one, except that i32 reads it as 0. In-range values truncate toward zero.
 macro_rules! impl_integer_from_js {
-    ($($type:ty),*) => {
+    ($($type:ty => $name:literal, $non_finite:expr, $range:expr);* $(;)?) => {
         $(
             impl FromJS for $type {
                 type ResultType = Self;
 
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "wrapping conversion is intended, matching TypedArray element assignment")]
+                fn type_name() -> String {
+                    $name.to_owned()
+                }
+
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_lossless, reason = "range is checked first")]
                 fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
                     // SAFETY: The isolate is locked and value is a valid V8 local handle.
                     let num = unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) }?;
+                    if !num.is_finite() {
+                        return $non_finite;
+                    }
+                    if <$type>::MIN == 0 && num < 0.0 {
+                        return Err(Error::new_type_error(
+                            "The value cannot be converted because it is negative and this API \
+                             expects a positive number.",
+                        ));
+                    }
+                    if num < <$type>::MIN as f64 || num > <$type>::MAX as f64 {
+                        return Err(Error::new_type_error($range));
+                    }
                     Ok(num as $type)
                 }
             }
@@ -496,7 +545,28 @@ macro_rules! impl_integer_from_js {
     };
 }
 
-impl_integer_from_js!(u8, u16, u32, i8, i16, i32);
+fn not_an_integer<T>() -> Result<T, Error> {
+    Err(Error::new_type_error(
+        "The value cannot be converted because it is not an integer.",
+    ))
+}
+
+fn unsigned_range<T: std::fmt::Display>(max: T) -> String {
+    format!("Value out of range. Must be less than or equal to {max}.")
+}
+
+fn signed_range<T: std::fmt::Display>(min: T, max: T) -> String {
+    format!("Value out of range. Must be between {min} and {max} (inclusive).")
+}
+
+impl_integer_from_js!(
+    u8 => "octet", not_an_integer(), unsigned_range(u8::MAX);
+    u16 => "unsigned short integer", not_an_integer(), unsigned_range(u16::MAX);
+    u32 => "unsigned integer", not_an_integer(), unsigned_range(u32::MAX);
+    i8 => "byte", not_an_integer(), signed_range(i8::MIN, i8::MAX);
+    i16 => "short integer", not_an_integer(), signed_range(i16::MIN, i16::MAX);
+    i32 => "integer", Ok(0), signed_range(i32::MIN, i32::MAX);
+);
 
 // =============================================================================
 // Wrapper type implementations
@@ -558,37 +628,42 @@ impl<T: ToJS> ToJS for Lenient<T> {
     }
 }
 
-impl<T: Type + FromJS> FromJS for Option<T> {
+// Like C++ `jsg::Optional<T>`, only `undefined` is absent; `null` goes to `T`.
+impl<T: FromJS> FromJS for Option<T> {
     type ResultType = Option<T::ResultType>;
 
+    fn type_name() -> String {
+        T::type_name()
+    }
+
+    fn is_optional() -> bool {
+        true
+    }
+
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
-        if value.is_null() {
-            let msg = format!("Expected {} or undefined but got null", T::class_name());
-            Err(Error::new_type_error(msg))
-        } else if value.is_undefined() {
-            Ok(None)
-        } else {
-            Ok(Some(T::from_js(lock, value)?))
+        if value.is_undefined() {
+            return Ok(None);
         }
+        Ok(Some(T::from_js(lock, value)?))
     }
 
     fn try_from_js(
         lock: &mut Lock,
         value: v8::Local<v8::Value>,
     ) -> Result<Option<Self::ResultType>, Error> {
-        if value.is_null() {
-            let msg = format!("Expected {} or undefined but got null", T::class_name());
-            Err(Error::new_type_error(msg))
-        } else if value.is_undefined() {
-            Ok(Some(None))
-        } else {
-            Ok(T::try_from_js(lock, value)?.map(Some))
+        if value.is_undefined() {
+            return Ok(Some(None));
         }
+        Ok(T::try_from_js(lock, value)?.map(Some))
     }
 }
 
 impl<T: Type + FromJS> FromJS for NonCoercible<T> {
     type ResultType = NonCoercible<T::ResultType>;
+
+    fn type_name() -> String {
+        T::type_name()
+    }
 
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
         if !T::is_exact(&value) {
@@ -616,6 +691,10 @@ impl<T: Type + FromJS> FromJS for NonCoercible<T> {
 impl<T: FromJS> FromJS for Nullable<T> {
     type ResultType = Nullable<T::ResultType>;
 
+    fn type_name() -> String {
+        T::type_name()
+    }
+
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
         if value.is_null() {
             Ok(Nullable::Null)
@@ -642,6 +721,14 @@ impl<T: FromJS> FromJS for Nullable<T> {
 
 impl<T: FromJS> FromJS for Lenient<T> {
     type ResultType = Lenient<T::ResultType>;
+
+    fn type_name() -> String {
+        T::type_name()
+    }
+
+    fn is_optional() -> bool {
+        true
+    }
 
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
         if value.is_null() {
@@ -686,6 +773,10 @@ impl<T: ToJS> ToJS for Vec<T> {
 
 impl<T: Type + FromJS<ResultType = T>> FromJS for Vec<T> {
     type ResultType = Self;
+
+    fn type_name() -> String {
+        "Array".to_owned()
+    }
 
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
         let type_name = value.type_of();
@@ -780,6 +871,10 @@ macro_rules! impl_typed_array {
         impl FromJS for Vec<$elem> {
             type ResultType = Self;
 
+            fn type_name() -> String {
+                stringify!($marker).to_owned()
+            }
+
             fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self, Error> {
                 if !value.$is_check() {
                     return Err(Error::new_type_error(format!(
@@ -808,6 +903,10 @@ macro_rules! impl_typed_array {
 
         impl FromJS for &[$elem] {
             type ResultType = Vec<$elem>;
+
+            fn type_name() -> String {
+                stringify!($marker).to_owned()
+            }
 
             fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Vec<$elem>, Error> {
                 Vec::<$elem>::from_js(lock, value)

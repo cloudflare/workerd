@@ -467,3 +467,40 @@ fn reentrant_panic_during_coercion_does_not_poison_isolate() {
         Ok(())
     });
 }
+
+/// A throwing getter is an `Err` from `Object::get`, with its JS error intact.
+#[test]
+fn object_get_from_throwing_getter_returns_err() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let value = ctx
+            .eval_raw("({ get x() { throw new RangeError('getter'); } })")
+            .expect("expression should evaluate");
+        let obj: jsg::v8::Local<'_, jsg::v8::Object> = value.into();
+        let err = obj
+            .get(lock, "x")
+            .expect_err("a throwing getter should be an Err");
+        assert_eq!(err.name, ExceptionType::RangeError);
+        assert!(err.message.contains("getter"), "got {:?}", err.message);
+        assert!(obj.get(lock, "absent").unwrap().is_undefined());
+        Ok(())
+    });
+}
+
+/// A throwing Proxy `has` trap is an `Err` from `Object::has`, not an abort.
+#[test]
+fn object_has_from_throwing_proxy_returns_err() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let value = ctx
+            .eval_raw("new Proxy({}, { has() { throw new TypeError('trap'); } })")
+            .expect("expression should evaluate");
+        let obj: jsg::v8::Local<'_, jsg::v8::Object> = value.into();
+        let err = obj
+            .has(lock, "x")
+            .expect_err("a throwing trap should be an Err");
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert!(err.message.contains("trap"), "got {:?}", err.message);
+        Ok(())
+    });
+}
