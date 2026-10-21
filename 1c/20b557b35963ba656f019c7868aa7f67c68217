@@ -1,20 +1,11 @@
-src/workerd/api/tests/BUILD.bazel
-  s_9e291bb5d844d4::t_fecb057d39591d 1222-1227
-  s_9e291bb5d844d4::t_cd3fb913df609e 1222-1227
-src/workerd/api/tests/actor-cross-context-promise-test.js
-  s_9e291bb5d844d4::t_5f9d02305df724 1-176
 src/workerd/api/tests/actor-cross-context-promise-test.wd-test
-  s_9e291bb5d844d4::t_60c5c2570d6f43 1-26
   s_9e291bb5d844d4::t_37ea54e3720d80 1-26
-src/workerd/io/compatibility-date.capnp
-  s_9e291bb5d844d4::t_9d331344233784 601-604
-src/workerd/io/io-context.c++
-  s_9e291bb5d844d4::t_f6ef5e76e7f6aa 329-332,1835-1836,1838-1839,1841-1864,1866-1868
 src/workerd/io/io-own-test.c++
-  s_9e291bb5d844d4::t_4cb478d1550ab1 116-263
-  s_9e291bb5d844d4::t_86341be10c70ab 116-263
-src/workerd/io/io-own.c++
-  s_9e291bb5d844d4::t_971d30e0f0d918 72-79,104-112
+  s_9e291bb5d844d4::t_3325e2d5001b8a 258-263
+  s_9e291bb5d844d4::t_86341be10c70ab 116-257
+src/workerd/api/tests/BUILD.bazel
+  s_9e291bb5d844d4::t_cd3fb913df609e 1223-1227
+  s_9e291bb5d844d4::t_73ce2108e005c9 1222
 ---
 {
   "schema_version": "authorship/3.0.0",
