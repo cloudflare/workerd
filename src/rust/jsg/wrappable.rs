@@ -585,32 +585,25 @@ impl<T: ToJS> ToJS for Lenient<T> {
     }
 }
 
-impl<T: Type + FromJS> FromJS for Option<T> {
+// Like C++ `jsg::Optional<T>`, only `undefined` is absent; `null` goes to `T`.
+impl<T: FromJS> FromJS for Option<T> {
     type ResultType = Option<T::ResultType>;
 
     fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
-        if value.is_null() {
-            let msg = format!("Expected {} or undefined but got null", T::class_name());
-            Err(Error::new_type_error(msg))
-        } else if value.is_undefined() {
-            Ok(None)
-        } else {
-            Ok(Some(T::from_js(lock, value)?))
+        if value.is_undefined() {
+            return Ok(None);
         }
+        Ok(Some(T::from_js(lock, value)?))
     }
 
     fn try_from_js(
         lock: &mut Lock,
         value: v8::Local<v8::Value>,
     ) -> Result<Option<Self::ResultType>, Error> {
-        if value.is_null() {
-            let msg = format!("Expected {} or undefined but got null", T::class_name());
-            Err(Error::new_type_error(msg))
-        } else if value.is_undefined() {
-            Ok(Some(None))
-        } else {
-            Ok(T::try_from_js(lock, value)?.map(Some))
+        if value.is_undefined() {
+            return Ok(Some(None));
         }
+        Ok(T::try_from_js(lock, value)?.map(Some))
     }
 }
 

@@ -15,6 +15,7 @@ mod jsg_struct;
 mod local_cast;
 mod name;
 mod non_coercible;
+mod option;
 mod resource_callback;
 mod resource_conversion;
 mod resource_properties;
