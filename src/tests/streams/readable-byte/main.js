@@ -107,6 +107,7 @@ export {
   readAfterCancelReturnsEmptyView,
   readDetachesCallerBuffer,
   closeWithPendingUnfilledByobRead,
+  closeWithPendingDefaultRead,
   controllerType,
   errorAfterCloseWithQueuedBytes,
   cancelWithPartiallyFilledPull,
