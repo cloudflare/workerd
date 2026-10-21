@@ -113,6 +113,10 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         impl jsg::FromJS for #name {
             type ResultType = jsg::Rc<Self>;
 
+            fn type_name() -> String {
+                <Self as jsg::Type>::class_name().to_owned()
+            }
+
             fn from_js(
                 lock: &mut jsg::Lock,
                 value: jsg::v8::Local<jsg::v8::Value>,

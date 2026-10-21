@@ -49,3 +49,11 @@ fn is_attr_cases() {
     // Qualified path (`jsg_macros::jsg_method`) must also match by last segment.
     assert!(is_attr(&qualified.attrs[0], "jsg_method"));
 }
+
+#[test]
+fn is_option_type_cases() {
+    assert!(is_option_type(&parse_quote!(Option<String>)));
+    assert!(is_option_type(&parse_quote!(std::option::Option<u32>)));
+    assert!(!is_option_type(&parse_quote!(String)));
+    assert!(!is_option_type(&parse_quote!(&Option<String>)));
+}

@@ -38,6 +38,10 @@ struct WorkerSource {
     // Module::clone() relies on that invariant to re-point the cloned view at
     // the cloned buffer.
     kj::Maybe<::rust::String> ownBody;
+    // Start positions of functions that V8 should compile together with the module because they
+    // are expected to run; see jsg::ModuleRegistry::ModuleInfo. Points at external data, like
+    // `body`. Currently only honored by the legacy module registry.
+    kj::ArrayPtr<const int> compileHints = nullptr;
   };
   struct CommonJsModule {
     kj::StringPtr body;
@@ -116,7 +120,8 @@ struct WorkerSource {
             KJ_DASSERT(content.body.begin() == own.data() && content.body.size() == own.size());
             ::rust::String ownCopy(own);
             kj::ArrayPtr<const char> bodyView(ownCopy.data(), ownCopy.size());
-            result.content = EsModule{.body = bodyView, .ownBody = kj::mv(ownCopy)};
+            result.content = EsModule{
+              .body = bodyView, .ownBody = kj::mv(ownCopy), .compileHints = content.compileHints};
           } else {
             result.content = content;
           }

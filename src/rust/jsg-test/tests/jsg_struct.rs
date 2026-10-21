@@ -26,6 +26,19 @@ struct NestedStruct {
     pub inner: String,
 }
 
+#[jsg_struct]
+#[derive(Debug, PartialEq)]
+struct OptionalStruct {
+    pub label: Option<String>,
+    pub count: Option<u32>,
+}
+
+#[jsg_struct]
+#[derive(Debug)]
+struct RequiredStruct {
+    pub count: u32,
+}
+
 #[test]
 fn objects_can_be_wrapped_and_unwrapped() {
     let harness = crate::Harness::new();
@@ -35,14 +48,14 @@ fn objects_can_be_wrapped_and_unwrapped() {
         };
         let wrapped = instance.to_js(lock);
         let mut obj: v8::Local<'_, v8::Object> = wrapped.into();
-        assert!(obj.has(lock, "str"));
+        assert!(obj.has(lock, "str").unwrap());
         let str_value = obj.get(lock, "str");
         assert!(str_value.unwrap().is_string());
-        assert!(!obj.has(lock, "test"));
+        assert!(!obj.has(lock, "test").unwrap());
         let value = "value".to_local(lock);
         assert!(value.is_string());
         obj.set(lock, "test", value);
-        assert!(obj.has(lock, "test"));
+        assert!(obj.has(lock, "test").unwrap());
         Ok(())
     });
 }
@@ -59,19 +72,19 @@ fn struct_with_multiple_properties() {
         let wrapped = instance.to_js(lock);
         let obj: v8::Local<'_, v8::Object> = wrapped.into();
 
-        assert!(obj.has(lock, "name"));
-        assert!(obj.has(lock, "age"));
-        assert!(obj.has(lock, "active"));
+        assert!(obj.has(lock, "name").unwrap());
+        assert!(obj.has(lock, "age").unwrap());
+        assert!(obj.has(lock, "active").unwrap());
 
         let name_value = obj.get(lock, "name");
-        assert!(name_value.is_some());
+        assert!(name_value.is_ok());
         assert!(name_value.unwrap().is_string());
 
         let age_value = obj.get(lock, "age");
-        assert!(age_value.is_some());
+        assert!(age_value.is_ok());
 
         let active_value = obj.get(lock, "active");
-        assert!(active_value.is_some());
+        assert!(active_value.is_ok());
         assert!(active_value.unwrap().is_string());
         Ok(())
     });
@@ -98,23 +111,23 @@ fn empty_object_and_property_setting() {
     harness.run_in_context(|lock, _ctx| {
         let mut obj = lock.new_object();
 
-        assert!(!obj.has(lock, "nonexistent"));
-        assert!(obj.get(lock, "nonexistent").is_none());
+        assert!(!obj.has(lock, "nonexistent").unwrap());
+        assert!(obj.get(lock, "nonexistent").unwrap().is_undefined());
 
         let str_value = "hello".to_local(lock);
         obj.set(lock, "key1", str_value);
-        assert!(obj.has(lock, "key1"));
+        assert!(obj.has(lock, "key1").unwrap());
 
         let num_value = 100u32.to_local(lock);
         obj.set(lock, "key2", num_value);
-        assert!(obj.has(lock, "key2"));
+        assert!(obj.has(lock, "key2").unwrap());
 
         let val1 = obj.get(lock, "key1");
-        assert!(val1.is_some());
+        assert!(val1.is_ok());
         assert!(val1.unwrap().is_string());
 
         let val2 = obj.get(lock, "key2");
-        assert!(val2.is_some());
+        assert!(val2.is_ok());
         Ok(())
     });
 }
@@ -145,15 +158,15 @@ fn nested_object_properties() {
         let inner_wrapped = inner_instance.to_js(lock);
         outer.set(lock, "nested", inner_wrapped);
 
-        assert!(outer.has(lock, "nested"));
+        assert!(outer.has(lock, "nested").unwrap());
         let nested_val = outer.get(lock, "nested");
-        assert!(nested_val.is_some());
+        assert!(nested_val.is_ok());
 
         let nested_obj: v8::Local<'_, v8::Object> = nested_val.unwrap().into();
-        assert!(nested_obj.has(lock, "inner"));
+        assert!(nested_obj.has(lock, "inner").unwrap());
 
         let inner_val = nested_obj.get(lock, "inner");
-        assert!(inner_val.is_some());
+        assert!(inner_val.is_ok());
         assert!(inner_val.unwrap().is_string());
         Ok(())
     });
@@ -204,6 +217,96 @@ fn type_of_returns_correct_js_types() {
         let obj_val = lock.new_object();
         assert_eq!(obj_val.type_of(), "object");
         assert!(!obj_val.is_null_or_undefined());
+        Ok(())
+    });
+}
+
+/// Converts the JS expression `expr` with `T`'s `FromJS`.
+fn convert<T: jsg::FromJS>(
+    lock: &mut jsg::Lock,
+    ctx: &crate::EvalContext<'_>,
+    expr: &str,
+) -> Result<T::ResultType, Error> {
+    let value = ctx.eval_raw(expr).expect("expression should evaluate");
+    T::from_js(lock, value)
+}
+
+/// Like C++ JSG, null or undefined is an empty dictionary when every field is
+/// optional, and absent properties read as undefined.
+#[test]
+fn optional_struct_from_null_undefined_and_partial_objects() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let empty = OptionalStruct {
+            label: None,
+            count: None,
+        };
+        assert_eq!(convert::<OptionalStruct>(lock, ctx, "null")?, empty);
+        assert_eq!(convert::<OptionalStruct>(lock, ctx, "undefined")?, empty);
+        assert_eq!(convert::<OptionalStruct>(lock, ctx, "({})")?, empty);
+        assert_eq!(
+            convert::<OptionalStruct>(lock, ctx, "({ count: 3 })")?,
+            OptionalStruct {
+                label: None,
+                count: Some(3),
+            }
+        );
+        Ok(())
+    });
+}
+
+/// A struct with a required field cannot come from null or undefined, and an
+/// absent required property converts from undefined.
+#[test]
+fn required_struct_from_null_and_absent_property() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let err = convert::<RequiredStruct>(lock, ctx, "null").unwrap_err();
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert_eq!(
+            err.message,
+            "Cannot initialize RequiredStruct with required members from an undefined or null value."
+        );
+        let err = convert::<RequiredStruct>(lock, ctx, "({})").unwrap_err();
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert_eq!(
+            err.message,
+            "The value cannot be converted because it is not an integer."
+        );
+        Ok(())
+    });
+}
+
+/// A throwing getter fails the conversion with its own error.
+#[test]
+fn struct_from_throwing_getter_propagates_error() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let err = convert::<OptionalStruct>(
+            lock,
+            ctx,
+            "({ get label() { throw new RangeError('getter'); } })",
+        )
+        .unwrap_err();
+        assert_eq!(err.name, ExceptionType::RangeError);
+        assert!(err.message.contains("getter"), "got {:?}", err.message);
+        Ok(())
+    });
+}
+
+/// Like C++ JSG, an absent optional field is omitted from the JS object.
+#[test]
+fn struct_omits_absent_optional_fields() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let value = OptionalStruct {
+            label: None,
+            count: Some(1),
+        }
+        .to_js(lock);
+        let obj: v8::Local<'_, v8::Object> = value.into();
+        assert!(!obj.has(lock, "label")?);
+        assert!(obj.has(lock, "count")?);
         Ok(())
     });
 }
