@@ -81,6 +81,9 @@ struct TestFixture {
     // If set, used as the worker isolate's IsolateObserver instead of a no-op one. Lets tests
     // observe isolate-level hooks, e.g. enable async tracing and register its sinks.
     kj::Maybe<kj::Own<IsolateObserver>> isolateObserver;
+    // If set, passed to the Script. The feature flags must enable the new module registry,
+    // and the registry must contain the fixture's main module, named "main".
+    kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> newModuleRegistry;
   };
 
   TestFixture(SetupParams&& params = {.useRealTimers = false});
@@ -144,6 +147,10 @@ struct TestFixture {
 
   // Constructs the same WorkerEntrypoint wrapper used in production.
   kj::Own<WorkerInterface> makeWorkerEntrypoint();
+
+  // Whether the calling thread is inside the startup CPU limit scope (enterStartupJs() or
+  // enterStartupPython()) of a fixture's isolate.
+  static bool isInStartupLimitScope();
 
   // Create a new IoContext, owned by the caller. Use this when you need an IoContext that
   // outlives a single IncomingRequest, e.g. to model an actor receiving multiple requests.

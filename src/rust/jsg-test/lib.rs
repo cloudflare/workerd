@@ -94,7 +94,7 @@ impl EvalError<'_> {
     /// `jsg::Error`.
     pub fn unwrap_jsg_err(&self, lock: &mut jsg::Lock) -> jsg::Error {
         match self {
-            EvalError::Exception(value) => jsg::Error::from_js(lock, value.clone())
+            EvalError::Exception(value) => jsg::Error::from_js(lock, *value)
                 .expect("Failed to convert exception to jsg::Error"),
             _ => panic!("Unexpected error"),
         }
@@ -114,7 +114,7 @@ impl EvalContext<'_> {
                 Some(local) => {
                     // SAFETY: self.isolate is valid and local is from a successful eval result.
                     let local = unsafe { v8::Local::from_ffi(self.isolate, local) };
-                    match T::from_js(lock, local.clone()) {
+                    match T::from_js(lock, local) {
                         Err(e) => Err(EvalError::UncoercibleResult {
                             value: local,
                             message: e.to_string(),

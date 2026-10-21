@@ -166,6 +166,9 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   // Enable source phase imports for WebAssembly modules
   v8::V8::SetFlagsFromString("--js-source-phase-imports");
 
+  // Enable the WebAssembly compact import section encoding.
+  v8::V8::SetFlagsFromString("--wasm-compact-imports");
+
 #ifdef __APPLE__
   // On macOS arm64, we find that V8 can be collecting pages that contain compiled code when
   // handling requests in short succession. There are some specific differences for macOS arm64
@@ -638,6 +641,12 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     // We MUST call heapTracer.destroy(), but we can't do it yet because destroying other handles
     // may call into the heap tracer.
     KJ_DEFER(heapTracer.destroy());
+
+    // Release the code caches still waiting to be produced, whose v8::Globals must be destroyed
+    // under lock.
+    KJ_IF_SOME(c, codeCache) {
+      c.discardDeferred();
+    }
 
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(opaqueTemplate.Reset());

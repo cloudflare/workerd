@@ -6,6 +6,7 @@
 
 #include <workerd/jsg/function.h>
 #include <workerd/jsg/jsg.h>
+#include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
 
 #include <simdutf.h>
@@ -198,10 +199,16 @@ class EsModule final: public Module {
     KJ_DASSERT(isEsm());
   }
   // Source owned by this module (e.g. transpiled TypeScript or fallback-service
-  // responses, where the original buffer is transient).
-  explicit EsModule(Url id, Type type, Flags flags, kj::Arc<OwnedAscii> code)
+  // responses, where the original buffer is transient). A module with a
+  // `codeCacheKey` uses the code cache of isolates that have one.
+  explicit EsModule(Url id,
+      Type type,
+      Flags flags,
+      kj::Arc<OwnedAscii> code,
+      kj::Maybe<CodeCacheKey> codeCacheKey)
       : Module(kj::mv(id), type, flags | Flags::ESM | Flags::EVAL),
         source(kj::mv(code)),
+        codeCacheKey(codeCacheKey),
         cachedData(kj::none) {
     KJ_DASSERT(isEsm());
   }
@@ -221,6 +228,15 @@ class EsModule final: public Module {
     static constexpr bool isWasm = false;
     v8::ScriptOrigin origin(js.str(id().getHref()), resourceLineOffset, resourceColumnOffset,
         resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, true);
+
+    // A module with a code cache key uses the isolate's code cache if there is one, else the slot
+    // below.
+    KJ_IF_SOME(key, codeCacheKey) {
+      KJ_IF_SOME(codeCache, IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
+        return codeCache.compileModule(
+            js.v8Isolate, key, newExternalString(js, getEncodedSource().repr), origin, observer);
+      }
+    }
 
     auto options = v8::ScriptCompiler::CompileOptions::kNoCompileOptions;
     bool cacheWasRejected = false;
@@ -256,31 +272,7 @@ class EsModule final: public Module {
         }
       }
 
-      // Encode the UTF-8 source into a V8-compatible external representation,
-      // once, shared across all isolates compiling this module. See
-      // EncodedSource for the tiering. kj::Lazy handles cross-thread once-init.
-      const auto& encoded = encodedSource.get([this](kj::SpaceFor<EncodedSource>& space) {
-        KJ_SWITCH_ONEOF(source) {
-          KJ_CASE_ONEOF(borrowed, kj::ArrayPtr<const char>) {
-            return space.construct(encodeSource(kj::mv(borrowed)));
-          }
-          KJ_CASE_ONEOF(encoded, StaticExternalStringSource) {
-            KJ_SWITCH_ONEOF(encoded) {
-              KJ_CASE_ONEOF(oneByte, kj::ArrayPtr<const char>) {
-                return space.construct(EncodedSource{.repr = kj::mv(oneByte)});
-              }
-              KJ_CASE_ONEOF(twoByte, kj::ArrayPtr<const uint16_t>) {
-                return space.construct(EncodedSource{.repr = kj::mv(twoByte)});
-              }
-            }
-          }
-          KJ_CASE_ONEOF(owned, kj::Arc<OwnedAscii>) {
-            return space.construct(encodeSource(kj::mv(owned)));
-          }
-        }
-        KJ_UNREACHABLE;
-      });
-      auto contentStr = newExternalString(js, encoded.repr);
+      auto contentStr = newExternalString(js, getEncodedSource().repr);
 
       // Note that the Source takes ownership of the CachedData pointer that we pass in.
       // (but not the actual buffer it holds). Do not use data after this point.
@@ -377,6 +369,33 @@ class EsModule final: public Module {
     return actuallyEvaluate(js, module, observer);
   }
 
+  // Encodes the UTF-8 source into a V8-compatible external representation,
+  // once, shared across all isolates compiling this module. See EncodedSource
+  // for the tiering. kj::Lazy handles cross-thread once-init.
+  const EncodedSource& getEncodedSource() const {
+    return encodedSource.get([this](kj::SpaceFor<EncodedSource>& space) {
+      KJ_SWITCH_ONEOF(source) {
+        KJ_CASE_ONEOF(borrowed, kj::ArrayPtr<const char>) {
+          return space.construct(encodeSource(kj::mv(borrowed)));
+        }
+        KJ_CASE_ONEOF(encoded, StaticExternalStringSource) {
+          KJ_SWITCH_ONEOF(encoded) {
+            KJ_CASE_ONEOF(oneByte, kj::ArrayPtr<const char>) {
+              return space.construct(EncodedSource{.repr = kj::mv(oneByte)});
+            }
+            KJ_CASE_ONEOF(twoByte, kj::ArrayPtr<const uint16_t>) {
+              return space.construct(EncodedSource{.repr = kj::mv(twoByte)});
+            }
+          }
+        }
+        KJ_CASE_ONEOF(owned, kj::Arc<OwnedAscii>) {
+          return space.construct(encodeSource(kj::mv(owned)));
+        }
+      }
+      KJ_UNREACHABLE;
+    });
+  }
+
   // The UTF-8 source text, either borrowed from process-lifetime storage or
   // held through shared ownership. The encoding initializer moves this into
   // EncodedSource; its only reader is the initializer itself.
@@ -387,8 +406,14 @@ class EsModule final: public Module {
   // each V8 string retains an Arc to owned backing storage.
   kj::Lazy<EncodedSource> encodedSource;
 
+  // The key of this module's entry in the isolate's code cache, computed from
+  // the UTF-8 source when the registry was built. See
+  // ModuleRegistry::Builder::newCodeCacheKey().
+  kj::Maybe<CodeCacheKey> codeCacheKey;
+
   // The cachedData holds the cached compilation data for this module, if any. It is
-  // generated on-demand the first time the module is compiled, if possible.
+  // generated on-demand the first time the module is compiled, if possible. Modules with a
+  // code cache key do not use it in an isolate with a code cache; see getDescriptor().
   kj::MutexGuarded<kj::Maybe<kj::Own<v8::ScriptCompiler::CachedData>>> cachedData;
 };
 
@@ -2074,14 +2099,16 @@ ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
   return *this;
 }
 
-ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(
-    kj::StringPtr name, kj::Arc<OwnedAscii> source, Module::Flags flags) {
+ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addEsmModule(kj::StringPtr name,
+    kj::Arc<OwnedAscii> source,
+    Module::Flags flags,
+    kj::Maybe<CodeCacheKey> codeCacheKey) {
   const auto url = processModuleName(name, bundleBase);
   add(url,
-      [url = url.clone(), source = kj::mv(source), flags, type = type()](
+      [url = url.clone(), source = kj::mv(source), flags, type = type(), codeCacheKey](
           const ResolveContext& context) mutable
       -> kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>> {
-    kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, kj::mv(source), flags);
+    kj::Own<Module> mod = Module::newEsm(kj::mv(url), type, kj::mv(source), flags, codeCacheKey);
     return kj::Maybe<kj::OneOf<kj::String, kj::Own<Module>>>(kj::mv(mod));
   });
   return *this;
@@ -2184,6 +2211,13 @@ bool ModuleRegistry::Builder::allowsFallback() const {
   return (options & Options::ALLOW_FALLBACK) == Options::ALLOW_FALLBACK;
 }
 
+kj::Maybe<CodeCacheKey> ModuleRegistry::Builder::newCodeCacheKey(kj::ArrayPtr<const char> code) {
+  if ((options & Options::CODE_CACHE_KEYS) != Options::CODE_CACHE_KEYS) return kj::none;
+  auto key = CodeCacheKey::compute(CodeCacheKey::Unit::NEW_REGISTRY_ESM, code);
+  codeCacheKeys.add(key);
+  return key;
+}
+
 ModuleRegistry::Builder& ModuleRegistry::Builder::add(kj::Own<ModuleBundle> bundle) {
   if (!allowsFallback()) {
     KJ_REQUIRE(bundle->type() != ModuleBundle::Type::FALLBACK,
@@ -2206,7 +2240,8 @@ ModuleRegistry::ModuleRegistry(ModuleRegistry::Builder* builder)
     : bundleBase(builder->bundleBase.clone()),
       impl(Impl(builder->bundles_.asPtr())),
       maybeEvalCallback(kj::mv(builder->maybeEvalCallback)),
-      schemaLoader(kj::mv(builder->schemaLoader)) {}
+      schemaLoader(kj::mv(builder->schemaLoader)),
+      codeCacheKeys(builder->codeCacheKeys.releaseAsArray()) {}
 
 kj::Maybe<jsg::JsPromise> ModuleRegistry::evaluateImpl(jsg::Lock& js,
     const Module& module,
@@ -2476,11 +2511,15 @@ kj::Own<Module> Module::newSynthetic(Url id,
       kj::mv(id), type, kj::mv(callback), kj::mv(namedExports), flags, contentType);
 }
 
-kj::Own<Module> Module::newEsm(Url id, Type type, kj::Arc<OwnedAscii> code, Flags flags) {
+kj::Own<Module> Module::newEsm(Url id,
+    Type type,
+    kj::Arc<OwnedAscii> code,
+    Flags flags,
+    kj::Maybe<CodeCacheKey> codeCacheKey) {
   // The module owns the source buffer (rather than having it attached to the
   // kj::Own) so that it can release the UTF-8 original once an owned transcoded
   // representation replaces it on first compile.
-  return kj::heap<EsModule>(kj::mv(id), type, flags, kj::mv(code));
+  return kj::heap<EsModule>(kj::mv(id), type, flags, kj::mv(code), codeCacheKey);
 }
 
 kj::Own<Module> Module::newEsm(Url id, Type type, kj::ArrayPtr<const char> code) {

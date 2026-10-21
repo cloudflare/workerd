@@ -1,0 +1,63 @@
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_proc_macro")
+load("//:build/wd_rust_compile_test.bzl", "wd_rust_compile_test")
+
+# Tests of the compile test harness itself. `must_compile` snippets must compile, `must_error`
+# snippets exercise the annotation syntax, and every `must_mismatch` snippet's annotations are
+# wrong in some way the checker must catch. The first two depend on the fixtures, so they also
+# check that direct, transitive and proc-macro dependencies reach rustc, and
+# `must_compile_with_flags` checks `edition` and `rustc_flags`.
+
+wd_rust_compile_test(
+    name = "must_compile",
+    srcs = glob(["must_compile/*.rs"]),
+    proc_macro_deps = [":fixture_macro"],
+    deps = [":fixture"],
+)
+
+wd_rust_compile_test(
+    name = "must_error",
+    srcs = glob(["must_error/*.rs"]),
+    deps = [":fixture"],
+)
+
+wd_rust_compile_test(
+    name = "must_compile_with_flags",
+    srcs = glob(["must_compile_with_flags/*.rs"]),
+    edition = "2021",
+    rustc_flags = ["--cfg=fixture_cfg"],
+)
+
+wd_rust_compile_test(
+    name = "must_mismatch",
+    srcs = glob(["must_mismatch/*.rs"]),
+    expect_mismatch = True,
+)
+
+rust_library(
+    name = "fixture",
+    testonly = True,
+    srcs = ["fixtures/fixture.rs"],
+    proc_macro_deps = [":fixture_reexported_macro"],
+    deps = [":fixture_dep"],
+)
+
+rust_library(
+    name = "fixture_dep",
+    testonly = True,
+    srcs = ["fixtures/fixture_dep.rs"],
+)
+
+rust_proc_macro(
+    name = "fixture_macro",
+    testonly = True,
+    srcs = ["fixtures/fixture_macro.rs"],
+    data = ["fixtures/fixture_macro.txt"],
+)
+
+# Reached only through `fixture`'s re-export.
+rust_proc_macro(
+    name = "fixture_reexported_macro",
+    testonly = True,
+    srcs = ["fixtures/fixture_macro.rs"],
+    data = ["fixtures/fixture_reexported_macro.txt"],
+)
