@@ -63,10 +63,10 @@ export function printDefinitions(
   extraDefinitions: string
 ): { ambient: string; importable: string } {
   // Generate TypeScript nodes from capnp request
-  const { nodes } = generateDefinitions(root);
+  const { nodes, included } = generateDefinitions(root);
 
   // Assemble partial overrides and defines to valid TypeScript source files
-  const [sources, replacements] = compileOverridesDefines(root);
+  const [sources, replacements] = compileOverridesDefines(root, included);
   // Add source file containing generated nodes
   const sourcePath = '/$virtual/source.ts';
   let source = printNodeList(nodes);

@@ -15,6 +15,7 @@ import {
 } from '@workerd/jsg/rtti';
 import ts from 'typescript';
 import { createStructureNode } from './structure';
+import { getTypeName } from './type';
 
 export { getTypeName } from './type';
 
@@ -178,9 +179,23 @@ function collectClasses(map: StructureMap): Set<string> {
 export function generateDefinitions(root: StructureGroups): {
   nodes: ts.Statement[];
   structureMap: StructureMap;
+  included: ReadonlySet<string>;
 } {
   const structureMap = collectStructureMap(root);
   const globalIncluded = collectIncluded(structureMap);
+  const declarationNames = new Map<string, Structure>();
+  for (const identity of globalIncluded) {
+    const structure = structureMap.get(identity);
+    assert(structure !== undefined);
+    const name = getTypeName(structure);
+    const previous = declarationNames.get(name);
+    assert(
+      previous === undefined ||
+        (previous.tsName === '' && structure.tsName === ''),
+      `Conflicting TypeScript name "${name}": ${previous?.fullyQualifiedName} and ${identity}`
+    );
+    declarationNames.set(name, structure);
+  }
   const classes = collectClasses(structureMap);
 
   // Can't use `flatMap()` here as `getGroups()` returns a `capnp.List`
@@ -197,7 +212,7 @@ export function generateDefinitions(root: StructureGroups): {
   });
   const flatNodes = nodes.flat();
 
-  return { nodes: flatNodes, structureMap };
+  return { nodes: flatNodes, structureMap, included: globalIncluded };
 }
 
 export function collectTypeScriptModules(root: StructureGroups): string {

@@ -14,7 +14,7 @@ $Cxx.allowCancellation;
 # using Modules = import "/workerd/jsg/modules.capnp";
 
 struct Type {
-  # A description of the C++ type.
+  # A description of a native binding type.
   # It is as precise as needed for applications, and is mostly how the type looks from the js side.
 
   union {
@@ -86,6 +86,9 @@ struct StructureType {
   name @0 :Text;
 
   fullyQualifiedName @1 :Text;
+
+  tsName @2 :Text;
+  # Explicit declaration name; empty means derive it from fullyQualifiedName.
 }
 
 struct StringType {
@@ -107,10 +110,19 @@ struct ArrayType {
 }
 
 struct MaybeType {
-  # kj::Maybe, jsg::Optional, jsg::LenientOptional
+  # Nullable/optional bindings, including kj::Maybe, jsg::Optional, and Rust wrappers.
   value @0 :Type;
 
   name @1 :Text;
+
+  allowsNull @2 :Bool;
+  # The value may be null in addition to the wrapped type.
+
+  allowsUndefined @3 :Bool;
+  # The value may be undefined in addition to the wrapped type.
+
+  # If both flags are false, infer the alternative from name for legacy producers.
+  # New producers set at least one flag; a plain value does not need a MaybeType.
 }
 
 struct DictType {
@@ -145,6 +157,33 @@ struct BuiltinType {
 
     v8ArrayBuffer @5;
     # v8::ArrayBuffer
+
+    v8Uint16Array @6;
+    # v8::Uint16Array
+    v8Uint32Array @7;
+    # v8::Uint32Array
+    v8Int8Array @8;
+    # v8::Int8Array
+    v8Int16Array @9;
+    # v8::Int16Array
+    v8Int32Array @10;
+    # v8::Int32Array
+    v8Float32Array @11;
+    # v8::Float32Array
+    v8Float64Array @12;
+    # v8::Float64Array
+    v8BigInt64Array @13;
+    # v8::BigInt64Array
+    v8BigUint64Array @14;
+    # v8::BigUint64Array
+    v8Uint8ClampedArray @15;
+    # v8::Uint8ClampedArray
+    v8Symbol @16;
+    # v8::Symbol
+    v8TypedArray @17;
+    # Any concrete V8 typed array, excluding DataView.
+    jsgError @18;
+    # A native JavaScript Error.
   }
 
   type @0 :Type;
@@ -241,6 +280,9 @@ struct Structure {
 
   builtinModules @12 :List(Module);
   # List of all builtin modules provided by the context.
+
+  tsName @17 :Text;
+  # Explicit declaration name; empty means derive it from fullyQualifiedName.
 }
 
 struct Member {
@@ -275,6 +317,8 @@ struct Method {
   args @2 :List(Type);
   static @3 :Bool;
   fastApiCompatible @4: Bool;
+  argNames @5 :List(Text);
+  # Names aligned with args; empty entries use the external parameter-name table.
 }
 
 struct Property {
@@ -292,12 +336,16 @@ struct Constant {
 
   name @0 :Text;
 
-  value @1 :Int64;
-  # TODO: we may need a union here
+  union {
+    value @1 :Int64;
+    numberValue @2 :Float64;
+  }
 }
 
 struct Constructor {
   args @0 :List(Type);
+  argNames @1 :List(Text);
+  # Names aligned with args; empty entries use the external parameter-name table.
 }
 
 struct Module {
