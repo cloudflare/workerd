@@ -205,6 +205,7 @@ export const thenGetterReleasesReaderWhileReadsSettle = {
             strictEqual(result.done, true, name);
             strictEqual(result.value, undefined, name);
           }
+          strictEqual(fired > 0, true, `${name}: the then getter did not run`);
           await ended;
         }
       );

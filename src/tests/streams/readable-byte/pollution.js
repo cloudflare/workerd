@@ -346,6 +346,7 @@ export const thenGetterReleasesReaderWhileByteReadsSettle = {
           ]);
           strictEqual(result.done, true, name);
         }
+        strictEqual(fired > 0, true, `${name}: the then getter did not run`);
         await ended;
       } finally {
         delete Object.prototype.then;
@@ -401,6 +402,7 @@ export const thenGetterErrorsSourceWhileBranchByteReadsSettle = {
           ]);
           strictEqual(result.done, true, name);
         }
+        strictEqual(fired > 0, true, `${name}: the then getter did not run`);
       } finally {
         delete Object.prototype.then;
       }

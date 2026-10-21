@@ -2202,6 +2202,7 @@ KJ_TEST("TypeScript native stream settles every read a cancel or close answers")
           } finally {
             delete Object.prototype.then;
           }
+          assert(fired > 0, `${mode ?? 'default'} reads at ${name}: the then getter did not run`);
           assert(outcomes.join() === 'true,true',
             `${mode ?? 'default'} reads at ${name}: ${outcomes.join()}`);
         }
