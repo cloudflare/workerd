@@ -83,24 +83,18 @@ void EvalContext::set_global(::rust::Str name, ::workerd::rust::jsg::Local value
 namespace {
 EvalResult runScript(
     v8::Isolate* v8Isolate, v8::Local<v8::Context> ctx, v8::Local<v8::Script> script) {
-  EvalResult result;
-  result.success = false;
-
   v8::TryCatch catcher(v8Isolate);
 
-  v8::Local<v8::Value> value;
-  if (script->Run(ctx).ToLocal(&value)) {
-    result.success = true;
-    result.value = ::workerd::rust::jsg::to_ffi(kj::mv(value));
-  } else if (catcher.HasCaught()) {
-    result.success = false;
-    auto exception = catcher.Exception();
-    result.value = ::workerd::rust::jsg::to_ffi(kj::mv(exception));
-  } else {
-    result.success = false;
+  v8::MaybeLocal<v8::Value> value = script->Run(ctx);
+  bool success = !value.IsEmpty();
+  if (!success && catcher.HasCaught()) {
+    value = catcher.Exception();
   }
 
-  return result;
+  return EvalResult{
+    .success = success,
+    .value = ::workerd::rust::jsg::maybe_local_to_ffi(value),
+  };
 }
 }  // namespace
 
@@ -174,6 +168,14 @@ void request_gc(Isolate* isolate, GcType gc_type) {
       static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
 
   return ::workerd::rust::jsg::to_ffi(v8::Local<v8::Value>::Cast(obj));
+}
+
+::workerd::rust::jsg::MaybeLocal empty_maybe_local() {
+  return ::workerd::rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+}
+
+bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
+  return ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(kj::mv(value)).IsEmpty();
 }
 
 }  // namespace rust::jsg_test

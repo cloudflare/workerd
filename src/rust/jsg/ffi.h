@@ -161,7 +161,7 @@ size_t local_string_write_utf8_v2(
     Isolate* isolate, const Local& value, uint8_t* buffer, size_t capacity, int32_t flags);
 bool local_string_equals(const Local& value, const Local& other);
 bool local_string_is_flat(const Local& value);
-Local local_string_concat(Isolate* isolate, Local left, Local right);
+MaybeLocal local_string_concat(Isolate* isolate, Local left, Local right);
 Local local_string_internalize(Isolate* isolate, const Local& value);
 MaybeLocal local_string_new_from_utf8(
     Isolate* isolate, const uint8_t* data, int32_t length, bool internalized);
@@ -169,7 +169,6 @@ MaybeLocal local_string_new_from_one_byte(
     Isolate* isolate, const uint8_t* data, int32_t length, bool internalized);
 MaybeLocal local_string_new_from_two_byte(
     Isolate* isolate, const uint16_t* data, int32_t length, bool internalized);
-bool maybe_local_is_empty(const MaybeLocal& value);
 
 // Local<Name>
 int32_t local_name_get_identity_hash(const Local& value);
@@ -236,7 +235,7 @@ uint8_t local_uint8clamped_array_get(const Local& array, size_t index);
 // Local<ArrayBuffer>
 Local local_new_array_buffer(Isolate* isolate, const uint8_t* data, size_t length);
 Local local_new_array_buffer_empty(Isolate* isolate, size_t byte_length);
-kj::Maybe<Local> array_buffer_new_with_mode(
+MaybeLocal array_buffer_new_with_mode(
     Isolate* isolate, size_t byte_length, BackingStoreInitializationMode mode);
 Local array_buffer_from_backing_store(Isolate* isolate, size_t store);
 size_t local_array_buffer_byte_length(const Local& buffer);

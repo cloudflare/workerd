@@ -345,9 +345,10 @@ bool local_string_is_flat(const Local& value) {
   return local_as_ref_from_ffi<v8::String>(value)->IsFlat();
 }
 
-Local local_string_concat(Isolate* isolate, Local left, Local right) {
-  return to_ffi(v8::String::Concat(isolate, local_from_ffi<v8::String>(kj::mv(left)),
-      local_from_ffi<v8::String>(kj::mv(right))));
+MaybeLocal local_string_concat(Isolate* isolate, Local left, Local right) {
+  // `Concat` returns an empty handle when the result would be too long.
+  return maybe_local_to_ffi(v8::MaybeLocal<v8::String>(v8::String::Concat(isolate,
+      local_from_ffi<v8::String>(kj::mv(left)), local_from_ffi<v8::String>(kj::mv(right)))));
 }
 
 Local local_string_internalize(Isolate* isolate, const Local& value) {
@@ -371,11 +372,6 @@ MaybeLocal local_string_new_from_two_byte(
     Isolate* isolate, const uint16_t* data, int32_t length, bool internalized) {
   auto type = internalized ? v8::NewStringType::kInternalized : v8::NewStringType::kNormal;
   return maybe_local_to_ffi(v8::String::NewFromTwoByte(isolate, data, type, length));
-}
-
-bool maybe_local_is_empty(const MaybeLocal& value) {
-  auto ptr_void = reinterpret_cast<const void*>(&value.ptr);
-  return reinterpret_cast<const v8::MaybeLocal<v8::Value>*>(ptr_void)->IsEmpty();
 }
 
 // Local<Name>
@@ -491,12 +487,10 @@ Local local_new_array_buffer_empty(Isolate* isolate, size_t byte_length) {
   return to_ffi(v8::ArrayBuffer::New(isolate, byte_length));
 }
 
-kj::Maybe<Local> array_buffer_new_with_mode(
+MaybeLocal array_buffer_new_with_mode(
     Isolate* isolate, size_t byte_length, BackingStoreInitializationMode mode) {
-  auto maybe = v8::ArrayBuffer::MaybeNew(
-      isolate, byte_length, static_cast<v8::BackingStoreInitializationMode>(mode));
-  if (maybe.IsEmpty()) return kj::none;
-  return to_ffi(maybe.ToLocalChecked());
+  return maybe_local_to_ffi(v8::ArrayBuffer::MaybeNew(
+      isolate, byte_length, static_cast<v8::BackingStoreInitializationMode>(mode)));
 }
 
 Local array_buffer_from_backing_store(Isolate* isolate, size_t ptr) {

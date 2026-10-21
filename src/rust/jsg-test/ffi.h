@@ -66,6 +66,12 @@ void request_gc(Isolate* isolate, GcType gc_type);
 // Used to test that Rust unwrap correctly rejects non-Rust wrappable objects.
 ::workerd::rust::jsg::Local create_cpp_tagged_object(Isolate* isolate);
 
+// Returns an empty v8::MaybeLocal, to test how it reaches Rust.
+::workerd::rust::jsg::MaybeLocal empty_maybe_local();
+
+// Returns whether `value` is empty as a v8::MaybeLocal, to test what Rust passes for `None`.
+bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
+
 }  // namespace rust::jsg_test
 
 }  // namespace workerd

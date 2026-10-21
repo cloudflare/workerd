@@ -63,6 +63,11 @@ pub mod ffi {
     /// Mirrors `v8::MaybeLocal<T>`: a single pointer-sized word where `ptr == 0` means empty.
     /// This matches V8's internal layout exactly — `v8::MaybeLocal<T>` holds one `Local<T>`
     /// field which is itself one `internal::Address*` (one pointer word).
+    ///
+    /// Rust code uses `Option<Local<'s, T>>`, which has the same layout. This struct exists only
+    /// because CXX bridge signatures cannot name `Option<Local>`; convert with
+    /// [`Local::from_ffi_maybe`](super::Local::from_ffi_maybe) and
+    /// [`Local::into_ffi_maybe`](super::Local::into_ffi_maybe).
     #[derive(Debug, Clone, Copy, Default)]
     struct MaybeLocal {
         ptr: usize,
@@ -228,7 +233,7 @@ pub mod ffi {
             isolate: *mut Isolate,
             byte_length: usize,
             mode: BackingStoreInitializationMode,
-        ) -> KjMaybe<Local>;
+        ) -> MaybeLocal;
         pub unsafe fn array_buffer_from_backing_store(isolate: *mut Isolate, store: usize)
         -> Local;
         pub unsafe fn local_array_buffer_byte_length(buffer: &Local) -> usize;
@@ -312,7 +317,7 @@ pub mod ffi {
             isolate: *mut Isolate,
             left: Local,
             right: Local,
-        ) -> Local;
+        ) -> MaybeLocal;
         pub unsafe fn local_string_internalize(isolate: *mut Isolate, value: &Local) -> Local;
         pub unsafe fn local_string_new_from_utf8(
             isolate: *mut Isolate,
@@ -332,7 +337,6 @@ pub mod ffi {
             length: i32,
             internalized: bool,
         ) -> MaybeLocal;
-        pub unsafe fn maybe_local_is_empty(value: &MaybeLocal) -> bool;
 
         // Local<Name>
         pub unsafe fn local_name_get_identity_hash(value: &Local) -> i32;
@@ -686,7 +690,7 @@ impl String {
     /// Maximum length of a V8 string in UTF-16 code units.
     ///
     /// Matches `v8::String::kMaxLength`. Attempting to create a string longer than
-    /// this will cause V8 to return an empty `MaybeLocal`.
+    /// this will cause V8 to return `None`.
     pub const MAX_LENGTH: i32 = if cfg!(target_pointer_width = "32") {
         (1 << 28) - 16
     } else {
@@ -705,7 +709,7 @@ impl String {
     /// Creates a new string from a `&str`.
     ///
     /// Corresponds to `v8::String::NewFromUtf8`.
-    pub fn new_from_str<'s>(lock: &mut crate::Lock<'s>, data: &str) -> MaybeLocal<'s, Self> {
+    pub fn new_from_str<'s>(lock: &mut crate::Lock<'s>, data: &str) -> Option<Local<'s, Self>> {
         Self::new_from_utf8(lock, data.as_bytes())
     }
 
@@ -718,7 +722,7 @@ impl String {
     pub fn new_internalized_from_str<'s>(
         lock: &mut crate::Lock<'s>,
         data: &str,
-    ) -> MaybeLocal<'s, Self> {
+    ) -> Option<Local<'s, Self>> {
         Self::new_internalized_from_utf8(lock, data.as_bytes())
     }
 
@@ -735,7 +739,7 @@ impl String {
     pub fn new_from_utf8_literal<'s>(
         lock: &mut crate::Lock<'s>,
         literal: &'static str,
-    ) -> MaybeLocal<'s, Self> {
+    ) -> Option<Local<'s, Self>> {
         assert!(
             literal.len() <= Self::MAX_LENGTH as usize,
             "string literal exceeds v8::String::kMaxLength"
@@ -745,22 +749,22 @@ impl String {
 
     /// Creates a new string from UTF-8 data.
     ///
-    /// Returns an empty `MaybeLocal` if V8 cannot allocate the string.
+    /// Returns `None` if V8 cannot allocate the string.
     ///
     /// Strings longer than `i32::MAX` bytes are silently truncated to `i32::MAX` bytes
     /// to satisfy V8's `int`-typed length parameter; in practice V8 will reject strings
     /// that large anyway due to heap limits.
     ///
     /// Corresponds to `v8::String::NewFromUtf8`.
-    pub fn new_from_utf8<'s>(lock: &mut crate::Lock<'s>, data: &[u8]) -> MaybeLocal<'s, Self> {
+    pub fn new_from_utf8<'s>(lock: &mut crate::Lock<'s>, data: &[u8]) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
         let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active;
         // data.as_ptr() and len describe a valid byte slice.
         let handle =
             unsafe { ffi::local_string_new_from_utf8(isolate.as_ffi(), data.as_ptr(), len, false) };
-        // SAFETY: handle is a valid MaybeLocal from V8; ptr==0 means empty.
-        unsafe { MaybeLocal::from_ffi(handle) }
+        // SAFETY: a non-empty handle is a string V8 created in the lock's scope.
+        unsafe { Local::from_ffi_maybe(handle) }
     }
 
     /// Creates an internalized string from UTF-8 data.
@@ -774,34 +778,37 @@ impl String {
     pub fn new_internalized_from_utf8<'s>(
         lock: &mut crate::Lock<'s>,
         data: &[u8],
-    ) -> MaybeLocal<'s, Self> {
+    ) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
         let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active;
         // data.as_ptr() and len describe a valid byte slice.
         let handle =
             unsafe { ffi::local_string_new_from_utf8(isolate.as_ffi(), data.as_ptr(), len, true) };
-        // SAFETY: handle is a valid MaybeLocal from V8; ptr==0 means empty.
-        unsafe { MaybeLocal::from_ffi(handle) }
+        // SAFETY: a non-empty handle is a string V8 created in the lock's scope.
+        unsafe { Local::from_ffi_maybe(handle) }
     }
 
     /// Creates a new string from Latin-1 (one-byte) data.
     ///
     /// Each byte is mapped to the Unicode code point with the same value.
-    /// Returns an empty `MaybeLocal` if V8 cannot allocate the string.
+    /// Returns `None` if V8 cannot allocate the string.
     ///
     /// Strings longer than `i32::MAX` bytes are silently truncated to `i32::MAX` bytes.
     ///
     /// Corresponds to `v8::String::NewFromOneByte`.
-    pub fn new_from_one_byte<'s>(lock: &mut crate::Lock<'s>, data: &[u8]) -> MaybeLocal<'s, Self> {
+    pub fn new_from_one_byte<'s>(
+        lock: &mut crate::Lock<'s>,
+        data: &[u8],
+    ) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
         let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
         // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
         let handle = unsafe {
             ffi::local_string_new_from_one_byte(isolate.as_ffi(), data.as_ptr(), len, false)
         };
-        // SAFETY: handle is a valid MaybeLocal from V8; ptr==0 means empty.
-        unsafe { MaybeLocal::from_ffi(handle) }
+        // SAFETY: a non-empty handle is a string V8 created in the lock's scope.
+        unsafe { Local::from_ffi_maybe(handle) }
     }
 
     /// Creates an internalized string from Latin-1 (one-byte) data.
@@ -813,33 +820,36 @@ impl String {
     pub fn new_internalized_from_one_byte<'s>(
         lock: &mut crate::Lock<'s>,
         data: &[u8],
-    ) -> MaybeLocal<'s, Self> {
+    ) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
         let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
         // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
         let handle = unsafe {
             ffi::local_string_new_from_one_byte(isolate.as_ffi(), data.as_ptr(), len, true)
         };
-        // SAFETY: handle is a valid MaybeLocal from V8; ptr==0 means empty.
-        unsafe { MaybeLocal::from_ffi(handle) }
+        // SAFETY: a non-empty handle is a string V8 created in the lock's scope.
+        unsafe { Local::from_ffi_maybe(handle) }
     }
 
     /// Creates a new string from UTF-16 data.
     ///
-    /// Returns an empty `MaybeLocal` if V8 cannot allocate the string.
+    /// Returns `None` if V8 cannot allocate the string.
     ///
     /// Strings longer than `i32::MAX` code units are silently truncated to `i32::MAX` code units.
     ///
     /// Corresponds to `v8::String::NewFromTwoByte`.
-    pub fn new_from_two_byte<'s>(lock: &mut crate::Lock<'s>, data: &[u16]) -> MaybeLocal<'s, Self> {
+    pub fn new_from_two_byte<'s>(
+        lock: &mut crate::Lock<'s>,
+        data: &[u16],
+    ) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
         let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
         // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
         let handle = unsafe {
             ffi::local_string_new_from_two_byte(isolate.as_ffi(), data.as_ptr(), len, false)
         };
-        // SAFETY: handle is a valid MaybeLocal from V8; ptr==0 means empty.
-        unsafe { MaybeLocal::from_ffi(handle) }
+        // SAFETY: a non-empty handle is a string V8 created in the lock's scope.
+        unsafe { Local::from_ffi_maybe(handle) }
     }
 
     /// Creates an internalized string from UTF-16 data.
@@ -851,29 +861,31 @@ impl String {
     pub fn new_internalized_from_two_byte<'s>(
         lock: &mut crate::Lock<'s>,
         data: &[u16],
-    ) -> MaybeLocal<'s, Self> {
+    ) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
         let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
         // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
         let handle = unsafe {
             ffi::local_string_new_from_two_byte(isolate.as_ffi(), data.as_ptr(), len, true)
         };
-        // SAFETY: handle is a valid MaybeLocal from V8; ptr==0 means empty.
-        unsafe { MaybeLocal::from_ffi(handle) }
+        // SAFETY: a non-empty handle is a string V8 created in the lock's scope.
+        unsafe { Local::from_ffi_maybe(handle) }
     }
 
-    /// Concatenates two strings.
+    /// Concatenates two strings. Returns `None` if the result would be longer than
+    /// [`MAX_LENGTH`](Self::MAX_LENGTH).
     ///
     /// Corresponds to `v8::String::Concat()`.
     pub fn concat<'s>(
         lock: &mut crate::Lock<'s>,
         left: Local<'s, Self>,
         right: Local<'s, Self>,
-    ) -> Local<'s, Self> {
+    ) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
-        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active; a
+        // non-empty handle is a string V8 created in the lock's scope.
         unsafe {
-            Local::from_ffi(ffi::local_string_concat(
+            Local::from_ffi_maybe(ffi::local_string_concat(
                 isolate.as_ffi(),
                 left.into_ffi(),
                 right.into_ffi(),
@@ -1139,6 +1151,29 @@ impl<'s, T> Local<'s, T> {
         // SAFETY: `Local` is a `repr(transparent)` pointer and `ffi::Local` a pointer-sized
         // integer, with the same size and alignment (asserted above).
         unsafe { &*std::ptr::from_ref(self).cast::<ffi::Local>() }
+    }
+
+    /// Creates an `Option<Local>` from an FFI handle that may be empty.
+    ///
+    /// # Safety
+    /// If `handle` is not empty, it must point to a V8 value that stays alive within the
+    /// `HandleScope` identified by `'s`, as for [`from_ffi`](Self::from_ffi).
+    pub unsafe fn from_ffi_maybe(handle: ffi::MaybeLocal) -> Option<Self> {
+        NonNull::new(std::ptr::with_exposed_provenance_mut(handle.ptr)).map(|ptr| Local {
+            ptr,
+            _marker: PhantomData,
+        })
+    }
+
+    /// Returns the FFI handle of `local`, empty for `None`.
+    ///
+    /// # Safety
+    /// The returned FFI handle carries no lifetime; it must not be used after the
+    /// `HandleScope` that owns the V8 value is closed.
+    pub unsafe fn into_ffi_maybe(local: Option<Self>) -> ffi::MaybeLocal {
+        ffi::MaybeLocal {
+            ptr: local.map_or(0, |local| local.raw().ptr),
+        }
     }
 
     /// Views `locals` as the FFI handles C++ functions take, without copying.
@@ -1615,11 +1650,15 @@ impl ArrayBuffer {
         mode: ffi::BackingStoreInitializationMode,
     ) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
-        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
-        let opt: Option<ffi::Local> =
-            unsafe { ffi::array_buffer_new_with_mode(isolate.as_ffi(), byte_length, mode) }.into();
-        // SAFETY: isolate is valid and locked; local is a valid handle from V8.
-        opt.map(|local| unsafe { Local::from_ffi(local) })
+        // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active; a
+        // non-empty result is an `ArrayBuffer` V8 created in the lock's scope.
+        unsafe {
+            Local::from_ffi_maybe(ffi::array_buffer_new_with_mode(
+                isolate.as_ffi(),
+                byte_length,
+                mode,
+            ))
+        }
     }
 
     /// Wraps an existing `BackingStore` in a new `ArrayBuffer`.
@@ -2407,105 +2446,6 @@ impl std::ops::BitOr for WriteFlags {
     }
 }
 
-/// Rust equivalent of `v8::MaybeLocal<T>` — either a `Local<T>` or empty.
-///
-/// Mirrors V8's layout exactly: one pointer-sized word where `ptr == 0` is empty.
-/// No boxing, no `Option` overhead, no stored isolate — this is a direct ABI-compatible
-/// view of the `ffi::MaybeLocal` returned across the FFI boundary.
-///
-/// Methods that produce a `Local<T>` take the `Lock` of the same scope so they can
-/// recover the isolate pointer on demand. Like `Local`, `MaybeLocal` is `Copy`.
-pub struct MaybeLocal<'s, T> {
-    /// The raw FFI handle. `ptr == 0` means empty (matches `v8::MaybeLocal` default).
-    handle: ffi::MaybeLocal,
-    _marker: PhantomData<(&'s (), *const T)>,
-}
-
-impl<T> Copy for MaybeLocal<'_, T> {}
-
-impl<T> Clone for MaybeLocal<'_, T> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<'s, T> MaybeLocal<'s, T> {
-    /// Wraps a raw `ffi::MaybeLocal` returned from the FFI layer.
-    ///
-    /// # Safety
-    /// If `handle.ptr != 0`, the handle must point to a live V8 value within the
-    /// `HandleScope` identified by `'s`.
-    pub unsafe fn from_ffi(handle: ffi::MaybeLocal) -> Self {
-        Self {
-            handle,
-            _marker: PhantomData,
-        }
-    }
-
-    /// Returns the underlying FFI handle.
-    ///
-    /// # Safety
-    /// The returned FFI handle carries no lifetime; it must not be used after the
-    /// `HandleScope` that owns the V8 value is closed.
-    pub unsafe fn into_ffi(self) -> ffi::MaybeLocal {
-        self.handle
-    }
-
-    /// Returns `true` if this `MaybeLocal` is empty.
-    pub fn is_empty(&self) -> bool {
-        // SAFETY: handle is a valid ffi::MaybeLocal; no isolate or HandleScope needed.
-        unsafe { ffi::maybe_local_is_empty(&self.handle) }
-    }
-
-    /// Returns the contained value as a `Local<T>`, or `None` if empty.
-    pub fn to_local(&self, lock: &Lock<'s>) -> Option<Local<'s, T>> {
-        self.into_option(lock)
-    }
-
-    /// Converts into `Option<Local<'s, T>>`.
-    pub fn into_option(self, _lock: &Lock<'s>) -> Option<Local<'s, T>> {
-        if self.handle.ptr == 0 {
-            return None;
-        }
-        // SAFETY: ptr is non-zero (checked above) and lives in scope 's; isolate is valid.
-        Some(unsafe {
-            Local::from_ffi(ffi::Local {
-                ptr: self.handle.ptr,
-            })
-        })
-    }
-
-    /// Unwraps the value, panicking if empty.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the `MaybeLocal` is empty.
-    #[expect(
-        clippy::expect_used,
-        reason = "panicking on an empty handle is this method's contract, as with `Option::unwrap`"
-    )]
-    pub fn unwrap(self, lock: &Lock<'s>) -> Local<'s, T> {
-        self.into_option(lock).expect("MaybeLocal is empty")
-    }
-
-    /// Returns the contained `Local<T>`, or `default` if empty.
-    pub fn unwrap_or(self, lock: &Lock<'s>, default: Local<'s, T>) -> Local<'s, T> {
-        self.into_option(lock).unwrap_or(default)
-    }
-}
-
-impl<'s, T> From<Option<Local<'s, T>>> for MaybeLocal<'s, T> {
-    /// Constructs a `MaybeLocal` from an `Option<Local<T>>`.
-    /// `None` produces an empty handle (`ptr == 0`); `Some(local)` reuses its pointer.
-    fn from(opt: Option<Local<'s, T>>) -> Self {
-        let ptr = opt.map_or(0, |local| local.raw().ptr);
-        Self {
-            handle: ffi::MaybeLocal { ptr },
-            _marker: PhantomData,
-        }
-    }
-}
-
 /// Runs a synchronous callback entered from C++ with a valid, locked V8 isolate.
 ///
 /// The callback receives the [`Lock`] of the caller's `HandleScope` and returns a local handle
@@ -2532,17 +2472,13 @@ where
 {
     // SAFETY: forwarded from this function's safety contract.
     let scope = std::pin::pin!(unsafe { crate::CallbackScope::new(isolate) });
-    crate::catch_panic(scope, |lock| match callback(lock) {
-        Ok(local) => {
-            // SAFETY: the handle lives in the caller's `HandleScope`, which stays open until
-            // the caller consumes it, per this function's safety contract.
-            let local = unsafe { local.into_ffi() };
-            ffi::MaybeLocal { ptr: local.ptr }
-        }
-        Err(error) => {
-            lock.throw_exception(&error.into());
-            ffi::MaybeLocal::default()
-        }
+    crate::catch_panic(scope, |lock| {
+        let local = callback(lock)
+            .map_err(|error| lock.throw_exception(&error.into()))
+            .ok();
+        // SAFETY: the handle lives in the caller's `HandleScope`, which stays open until the
+        // caller consumes it, per this function's safety contract.
+        unsafe { Local::into_ffi_maybe(local) }
     })
     .unwrap_or_default()
 }
@@ -2802,14 +2738,11 @@ impl<'s> Local<'s, Symbol> {
     /// Corresponds to `v8::Symbol::Description()`.
     pub fn description(self, lock: &mut crate::Lock<'s>) -> Option<Local<'s, String>> {
         let isolate = lock.isolate();
-        // SAFETY: Lock guarantees the isolate is locked; the handle is a valid Symbol handle.
-        let maybe = unsafe {
-            MaybeLocal::<String>::from_ffi(ffi::local_symbol_description(
-                isolate.as_ffi(),
-                self.raw(),
-            ))
-        };
-        maybe.to_local(lock)
+        // SAFETY: Lock guarantees the isolate is locked; the handle is a valid Symbol handle,
+        // and a description is a string in the lock's scope.
+        unsafe {
+            Local::from_ffi_maybe(ffi::local_symbol_description(isolate.as_ffi(), self.raw()))
+        }
     }
 }
 
@@ -3712,8 +3645,7 @@ impl WrappableRc {
             )
         };
         // SAFETY: the wrapper is created in (or read into) the scope of `lock`.
-        let handle: MaybeLocal<'s, Value> = unsafe { MaybeLocal::from_ffi(handle) };
-        handle.into_option(lock)
+        unsafe { Local::from_ffi_maybe(handle) }
     }
 
     /// Attaches this Wrappable to the `this` object in a V8 constructor callback.

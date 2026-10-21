@@ -15,3 +15,33 @@ fn from_ffi_rejects_an_empty_handle() {
     });
     assert!(result.is_err());
 }
+
+#[test]
+fn empty_cpp_maybe_local_reaches_rust_as_none() {
+    crate::Harness::new().run_in_context(|_lock, _ctx| {
+        // SAFETY: the handle is empty.
+        let local: Option<v8::Local<'_, v8::Value>> =
+            unsafe { v8::Local::from_ffi_maybe(crate::ffi::empty_maybe_local()) };
+        assert!(local.is_none());
+        Ok(())
+    });
+}
+
+#[test]
+fn option_local_round_trips_through_cpp_maybe_local() {
+    crate::Harness::new().run_in_context(|lock, _ctx| {
+        // SAFETY: the handles are used only while `lock`'s scope is open.
+        unsafe {
+            assert!(crate::ffi::cpp_sees_empty_maybe_local(
+                v8::Local::<v8::Value>::into_ffi_maybe(None)
+            ));
+
+            let value = lock.null();
+            let maybe = v8::Local::into_ffi_maybe(Some(value));
+            assert!(!crate::ffi::cpp_sees_empty_maybe_local(maybe));
+            let back: Option<v8::Local<'_, v8::Value>> = v8::Local::from_ffi_maybe(maybe);
+            assert_eq!(back, Some(value));
+        }
+        Ok(())
+    });
+}
