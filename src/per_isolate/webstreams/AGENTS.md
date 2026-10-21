@@ -14,10 +14,10 @@ private-brand dispatch, no `instanceof`) apply here — see
 | ------------- | -------------------------------------------------------------------------------------------- |
 | `ring-buffer.ts` | O(1) FIFO with indexed access backing every internal queue below; leaf module             |
 | `view-extent.ts` | A caller-supplied view's byte extent through captured getters, and any BufferSource's (`bufferSourceExtent`); detached/out-of-bounds inputs (DataViews included) read as empty; `copyExtent` copies an extent; leaf module |
-| `common.ts`   | Helpers shared by the webstreams modules, including WebIDL argument conversion (`requireObject` for a source, sink, transformer or strategy `init`; `toDictionary` for an options dictionary; `convertQueuingStrategy`, then `extractHighWaterMark` and `extractSizeAlgorithm`, for a strategy) and `normalizeExpectedLength` (every `expectedLength` and `FixedLengthStream` length converts through it, as C++ converts a uint64_t); leaf module |
+| `common.ts`   | Helpers shared by the webstreams modules, including WebIDL argument conversion (`requireObject` for a source, sink, transformer or strategy `init`; `toDictionary` for an options dictionary; `convertQueuingStrategy`, then `extractHighWaterMark` and `extractSizeAlgorithm`, for a strategy; `convertUnderlyingSource`, `convertUnderlyingSink` and `convertTransformer` for the constructors' first argument, each reading every member once, in lexicographic order, into a null-prototype record before the constructor checks `type` or the strategy), `normalizeExpectedLength` (every `expectedLength` and `FixedLengthStream` length converts through it, as C++ converts a uint64_t) and `promiseResolvedWith` (WebIDL's "a promise resolved with", for the controllers' start() results and the transformer's cancel and flush); leaf module |
 | `queue.ts`    | QUEUED backend: single-queue/multi-cursor, JS sources; fence interfaces; invariant list      |
 | `native.ts`   | NATIVE backend: C++-backed pull conduit; **the C++/JS contract** + invariants                |
-| `readable.ts` | Reader layer + queued controllers + the BACKEND-DISPATCH points (constructor, tee, chains, byte-capable gate, JS-to-C++ extraction) |
+| `readable.ts` | Reader layer + queued controllers (their shared state machine in `QueuedControllerCore`) + the BACKEND-DISPATCH points (constructor, tee, chains, byte-capable gate, JS-to-C++ extraction) |
 | `writable.ts` / `transform.ts` / `strategies.ts` | WHATWG writable/transform/strategies                                     |
 | `identity.ts` | IdentityTransformStream and FixedLengthStream (byte-capable identity transforms)             |
 | `compression.ts` | CompressionStream/DecompressionStream over the C++ codec handle (utils.newCompressionCodec) |
@@ -77,10 +77,12 @@ aunt. Consequences, all handled by the controller (`readable.ts`,
   consumer for good: it drops what it holds and what is enqueued later,
   `desiredSize` reads as the high-water mark, and the controller releases
   the source — no more pulls, and its cancel never runs, since GC timing
-  runs no user callback — while keeping its own state machine (`close()`
-  closes the source's stream; `enqueue()` after it throws as ever). C++
-  does the same but keeps pulling (readable ledger #20). Suite:
-  `gc.js` in the readable and readable-byte suites.
+  runs no user callback — and retires a `byobRequest` the source holds,
+  while keeping its own state machine (`close()` closes the source's
+  stream; `enqueue()` after it throws as ever). C++ does the same but
+  keeps pulling (readable ledger #20) and keeps the request
+  (readable-byte ledger #25). Suite: `gc.js` in the readable and
+  readable-byte suites.
 - Backpressure follows the SLOWEST consumer: `desiredSize` is the
   high-water mark minus the largest backlog among the cursors. This trades
   flow for bounded memory: the spec's per-branch queues keep a reading
@@ -99,7 +101,12 @@ aunt. Consequences, all handled by the controller (`readable.ts`,
   keeps working, as in the spec. Responding to it enqueues the head's
   bytes, old and new, for every cursor (each drops its own copy of the old
   ones, from `adoptReleasedBytes`). `enqueue()`, `error()`, cancel and a
-  closed-state `respond(0)` retire it. Suite: readable-byte ledger #25.
+  closed-state `respond(0)` retire it. A fractional element fill in it
+  makes `close()` throw and error the source, as the spec's does, when the
+  source's own stream made the read (it is the source's own pull-into);
+  a read taken over from a tee branch is that branch's, and the forked
+  branches error alone at the close, as the branch would. Suite:
+  readable-byte ledgers #25 and #7.
 - Nothing walks a tree of streams: closing, cancelling and erroring act on
   cursors and their owners, and no stream retains another.
 
@@ -169,7 +176,8 @@ connection.
   `pull` receives an extension `signal`
   argument — the source checks `signal.aborted` before delivery and stashes
   bytes for redelivery if aborted (race buffering lives source-side; the JS
-  conduit is uniformly bufferless).
+  conduit is uniformly bufferless), while an aborted pull's rejection errors
+  the stream as a live pull's does, unless it is `signal.reason`.
 - The `webstreams/cpp_exports` table, which the C++ bridge reads with an
   ordinary property get (`getCppExport`), is frozen and has a null
   prototype, so a name missing from it cannot resolve through

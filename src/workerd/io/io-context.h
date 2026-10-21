@@ -569,6 +569,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return id;
   }
 
+  // Unobserved scopes retain only their context identity. This masks inherited spans while
+  // allowing accessors to fall back to the current request when a captured frame is foreign.
+  using TraceScopeState = kj::OneOf<Id, IoOwn<SpanParent>>;
+  using UserTraceScopeState = kj::OneOf<Id, IoOwn<UserTraceAsyncContext>>;
+
   void setEntrypointHandler(jsg::Lock& js, jsg::JsObject handler);
   jsg::JsObject getEntrypointHandler(jsg::Lock& js);
 
@@ -1203,6 +1208,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   jsg::AsyncContextFrame::StorageScope makeUserAsyncTraceScope(
       Worker::Lock& lock, kj::Maybe<SpanParent> userSpan = kj::none) KJ_WARN_UNUSED_RESULT;
 
+  // Captures the request's internal and user tracing contexts in a single async frame.
+  jsg::AsyncContextFrame::StorageScope makeRequestTraceScope(
+      Worker::Lock& lock) KJ_WARN_UNUSED_RESULT;
+
   // Returns the current span being recorded.  If called while the JS lock is held, uses the trace
   // information from the current async context, if available.
   SpanParent getCurrentTraceSpan();
@@ -1248,6 +1257,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   void pumpMessageLoop();
 
  private:
+  jsg::Value makeTraceScopeValue(Worker::Lock& lock, kj::Maybe<SpanParent> spanParentOverride);
+  jsg::Value makeUserTraceScopeValue(Worker::Lock& lock, kj::Maybe<SpanParent> userSpanOverride);
+
   ThreadContext& thread;
 
   kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<IoContext>(), *this);

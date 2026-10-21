@@ -222,8 +222,9 @@ export const closedOrderAtEndOfData = {
 // fulfills the read and leaves closed pending until the next read, which
 // closes the stream; TypeScript closes the stream, then fulfills the read,
 // as at a JS byte source's close() below min (#27). At a zero-byte end
-// both resolve closed first, for read() and read(view) alike; that parity
-// is asserted first.
+// both resolve closed first, for read() and read(view) alike, and the
+// read(view) gets its buffer back in an empty view; that parity is
+// asserted first.
 export const closedOrderAtNativeEndOfData = {
   async test() {
     for (const mode of [undefined, 'byob']) {
@@ -238,6 +239,13 @@ export const closedOrderAtNativeEndOfData = {
         reader.closed.then(() => log.push('closed')),
         read().then((r) => {
           ok(r.done);
+          if (mode) {
+            ok(r.value instanceof Uint8Array);
+            strictEqual(r.value.byteLength, 0);
+            strictEqual(r.value.buffer.byteLength, 8);
+          } else {
+            strictEqual(r.value, undefined);
+          }
           log.push('end');
         }),
       ]);

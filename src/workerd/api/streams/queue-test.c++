@@ -504,7 +504,7 @@ KJ_TEST("ByteQueue with single byob consumer") {
 
     prp.promise.then(js, readContinuation);
 
-    auto pendingByob = KJ_ASSERT_NONNULL(queue.nextPendingByobReadRequest());
+    auto pendingByob = KJ_ASSERT_NONNULL(queue.nextPendingByobReadRequest(js));
 
     KJ_ASSERT(!pendingByob->isInvalidated());
 
@@ -562,7 +562,7 @@ KJ_TEST("ByteQueue with byob consumer and default consumer") {
 
     prp.promise.then(js, readContinuation);
 
-    auto pendingByob = KJ_ASSERT_NONNULL(queue.nextPendingByobReadRequest());
+    auto pendingByob = KJ_ASSERT_NONNULL(queue.nextPendingByobReadRequest(js));
 
     KJ_ASSERT(!pendingByob->isInvalidated());
 
@@ -647,8 +647,8 @@ KJ_TEST("ByteQueue with multiple byob consumers") {
     byobRead(js, consumer1, 4).then(js, readContinuation);
     byobRead(js, consumer2, 4).then(js, readContinuation);
 
-    auto pendingByob = KJ_ASSERT_NONNULL(queue.nextPendingByobReadRequest());
-    auto nextPending = KJ_ASSERT_NONNULL(queue.nextPendingByobReadRequest());
+    auto pendingByob = KJ_ASSERT_NONNULL(queue.nextPendingByobReadRequest(js));
+    auto nextPending = KJ_ASSERT_NONNULL(queue.nextPendingByobReadRequest(js));
 
     KJ_ASSERT(!pendingByob->isInvalidated());
 
@@ -666,7 +666,7 @@ KJ_TEST("ByteQueue with multiple byob consumers") {
 
     // The next pendingByobReadRequest was invalidated.
     KJ_ASSERT(nextPending->isInvalidated());
-    KJ_ASSERT(queue.nextPendingByobReadRequest() == kj::none);
+    KJ_ASSERT(queue.nextPendingByobReadRequest(js) == kj::none);
 
     js.runMicrotasks();
   });
@@ -704,8 +704,8 @@ KJ_TEST("ByteQueue with multiple byob consumers") {
     byobRead(js, consumer1, 4).then(js, readContinuation);
     byobRead(js, consumer2, 4).then(js, readContinuation);
 
-    auto pendingByob = KJ_ASSERT_NONNULL(queue.nextPendingByobReadRequest());
-    auto nextPending = KJ_ASSERT_NONNULL(queue.nextPendingByobReadRequest());
+    auto pendingByob = KJ_ASSERT_NONNULL(queue.nextPendingByobReadRequest(js));
+    auto nextPending = KJ_ASSERT_NONNULL(queue.nextPendingByobReadRequest(js));
 
     KJ_ASSERT(!pendingByob->isInvalidated());
 
@@ -723,7 +723,7 @@ KJ_TEST("ByteQueue with multiple byob consumers") {
 
     // The next pendingByobReadRequest was invalidated.
     KJ_ASSERT(nextPending->isInvalidated());
-    KJ_ASSERT(queue.nextPendingByobReadRequest() == kj::none);
+    KJ_ASSERT(queue.nextPendingByobReadRequest(js) == kj::none);
 
     js.runMicrotasks();
   });
@@ -801,7 +801,7 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads)") {
     }, 2);
 
     kj::Maybe<kj::Own<ByteQueue::ByobRequest>> pendingByob;
-    while ((pendingByob = queue.nextPendingByobReadRequest()) != kj::none) {
+    while ((pendingByob = queue.nextPendingByobReadRequest(js)) != kj::none) {
       auto& pending = KJ_ASSERT_NONNULL(pendingByob);
       if (pending->isInvalidated()) {
         continue;
@@ -884,7 +884,7 @@ KJ_TEST("ByteQueue with multiple byob consumers (multi-reads, 2)") {
     }, 2);
 
     kj::Maybe<kj::Own<ByteQueue::ByobRequest>> pendingByob;
-    while ((pendingByob = queue.nextPendingByobReadRequest()) != kj::none) {
+    while ((pendingByob = queue.nextPendingByobReadRequest(js)) != kj::none) {
       auto& pending = KJ_ASSERT_NONNULL(pendingByob);
       if (pending->isInvalidated()) {
         continue;

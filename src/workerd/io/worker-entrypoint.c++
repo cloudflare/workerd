@@ -88,6 +88,8 @@ class WorkerEntrypoint final: public WorkerInterface {
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override;
   kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override;
   kj::Promise<bool> test() override;
+  kj::Promise<void> bench(
+      bench::BenchParams::Reader params, bench::BenchReport::Group::Builder report) override;
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override;
 
  private:
@@ -500,9 +502,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
           TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(&context));
           TRACE_EVENT(
               "workerd", "WorkerEntrypoint::request() run", PERFETTO_FLOW_FROM_POINTER(this));
-          jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
-          jsg::AsyncContextFrame::StorageScope userTraceScope =
-              context.makeUserAsyncTraceScope(lock);
+          auto traceScope = context.makeRequestTraceScope(lock);
 
           kj::Maybe<jsg::Ref<api::AbortSignal>> signal;
           auto featureFlags = FeatureFlags::get(lock);
@@ -666,19 +666,15 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
 
     if (isActor) {
       // Reaching this catch means the request reached the actor (we are past
-      // `delivered()` in Stage 1), so user code may have run. Annotate DISCONNECTED failures so the
-      // caller-side actor-call classifier knows this failure must not be retried as a fresh
-      // delivery. Only DISCONNECTED failures participate in the delivery-position metric, so other
-      // exception types need no annotation. Preserve not-delivered only for a predecessor rejection,
-      // which occurs before the fetch handler runs, though possibly after the actor constructor.
-      // Set before exceptionToPropagate() so the detail survives the internal-exception description
-      // rewrite and serializes back across the RPC boundary.
-      if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
-        if (!jsg::isActorPredecessorRejection(exception)) {
-          exception.releaseDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID);
-          exception.setDetail(
-              jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
-        }
+      // `delivered()` in Stage 1), so user code may have run. Annotate every failure, whatever its
+      // type, so the caller-side actor-call classifier knows it must not be retried, even if it is
+      // retryable. Preserve not-delivered only for a predecessor rejection, which occurs before the
+      // fetch handler runs, though possibly after the actor constructor. Set before
+      // exceptionToPropagate() so the detail survives the internal-exception description rewrite
+      // and serializes back across the RPC boundary.
+      if (!jsg::isActorPredecessorRejection(exception)) {
+        exception.releaseDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID);
+        exception.setDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
       }
       // TODO(cleanup): We'd really like to tunnel exceptions any time a worker is calling another
       // worker, not just for actors (and W2W below), but getting that right will require cleaning
@@ -793,8 +789,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
                    entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
                    host = kj::str(host), clientAddress = kj::mv(clientAddress)](
                    Worker::Lock& lock, IoContext& context) mutable {
-    jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
-    jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
+    auto traceScope = context.makeRequestTraceScope(lock);
 
     return lock.getGlobalScope().connect(kj::mv(host), kj::mv(clientAddress), headers, connection,
         response, lock,
@@ -845,18 +840,15 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
     if (isActor || tunnelExceptions) {
       if (isActor) {
         // Reaching this catch means the request reached the actor (we are past
-        // `delivered()` above), so user code may have run. Annotate DISCONNECTED failures so the
-        // caller-side actor-call classifier knows this failure must not be retried as a fresh
-        // delivery. Only DISCONNECTED failures participate in the delivery-position metric, so other
-        // exception types need no annotation. Preserve not-delivered only for a predecessor
-        // rejection, as fetch does. Set before exceptionToPropagate() so it survives the
-        // internal-exception description rewrite; the detail serializes back across the RPC boundary.
-        if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
-          if (!jsg::isActorPredecessorRejection(exception)) {
-            exception.releaseDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID);
-            exception.setDetail(
-                jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
-          }
+        // `delivered()` above), so user code may have run. Annotate every failure, whatever its
+        // type, so the caller-side actor-call classifier knows it must not be retried, even if it is
+        // retryable. Preserve not-delivered only for a predecessor rejection, as fetch does. Set
+        // before exceptionToPropagate() so it survives the internal-exception description rewrite;
+        // the detail serializes back across the RPC boundary.
+        if (!jsg::isActorPredecessorRejection(exception)) {
+          exception.releaseDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID);
+          exception.setDetail(
+              jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
         }
       }
       // We want to tunnel exceptions from actors back to the caller.
@@ -943,8 +935,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
                                        &metrics = incomingRequest->getMetrics()](
                                        Worker::Lock& lock, IoContext& context) mutable {
     TRACE_EVENT("workerd", "WorkerEntrypoint::runScheduled() run");
-    jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
-    jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
+    auto traceScope = context.makeRequestTraceScope(lock);
 
     lock.getGlobalScope().startScheduled(scheduledTime, cron, lock,
         lock.getExportedHandler(
@@ -1022,9 +1013,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
             [scheduledTime, retryCount, &incomingRequest = *incomingRequest,
                 entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
                 props = kj::mv(props)](Worker::Lock& lock, IoContext& context) mutable {
-          jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
-          jsg::AsyncContextFrame::StorageScope userTraceScope =
-              context.makeUserAsyncTraceScope(lock);
+          auto traceScope = context.makeRequestTraceScope(lock);
 
           // If we have an invalid timeout, set it to the default value of 15 minutes.
           auto timeout = context.getLimitEnforcer().getAlarmLimit();
@@ -1106,6 +1095,39 @@ kj::Promise<kj::Maybe<kj::Date>> WorkerEntrypoint::abandonAlarm(kj::Date schedul
   return persistent.abandonAlarm(scheduledTime);
 }
 
+kj::Promise<void> WorkerEntrypoint::bench(
+    bench::BenchParams::Reader params, bench::BenchReport::Group::Builder report) {
+  TRACE_EVENT("workerd", "WorkerEntrypoint::bench()");
+  auto incomingRequest =
+      kj::mv(KJ_REQUIRE_NONNULL(this->incomingRequest, "bench() can only be called once"));
+  this->incomingRequest = kj::none;
+  auto& context = incomingRequest->getContext();
+  KJ_IF_SOME(t, incomingRequest->getWorkerTracer()) {
+    t.setEventInfo(*incomingRequest, tracing::CustomEventInfo());
+  }
+
+  incomingRequest->delivered();
+  // Background work that the cases leave behind may continue; it isn't waited for.
+  KJ_DEFER(incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest)));
+
+  // Unlike test(), this awaits the handler directly rather than through finishScheduled(), since
+  // the report needs the handler's result.
+  auto result = co_await context.run(
+      [params, entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
+          props = kj::mv(props)](Worker::Lock& lock, IoContext& context) mutable {
+    TRACE_EVENT("workerd", "WorkerEntrypoint::bench() run");
+    jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
+    jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
+
+    return context.awaitJs(lock,
+        lock.getGlobalScope().bench(lock,
+            lock.getExportedHandler(
+                asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor()),
+            params));
+  });
+  api::fillBenchReport(result, report);
+}
+
 kj::Promise<bool> WorkerEntrypoint::test() {
   TRACE_EVENT("workerd", "WorkerEntrypoint::test()");
   auto incomingRequest =
@@ -1123,8 +1145,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
                       props = kj::mv(props), &metrics = incomingRequest->getMetrics()](
                       Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::test() run");
-    jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
-    jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
+    auto traceScope = context.makeRequestTraceScope(lock);
 
     return context.awaitJs(lock,
         lock.getGlobalScope().test(lock,

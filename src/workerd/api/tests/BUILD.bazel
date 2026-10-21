@@ -2,7 +2,13 @@ load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//:build/wasm_tools_parse.bzl", "wasm_tools_parse")
-load("//:build/wd_test.bzl", "wd_test")
+load("//:build/wd_bench.bzl", "wd_bench")
+load("//:build/wd_test.bzl", "wd_cli_test", "wd_test")
+
+wasm_tools_parse(
+    name = "compact-imports.wasm",
+    src = "compact-imports.wat",
+)
 
 wasm_tools_parse(
     name = "js-string-builtins.wasm",
@@ -10,6 +16,63 @@ wasm_tools_parse(
 )
 
 exports_files(["starttls-server.pem"])
+
+wd_test(
+    src = "streams-byob-progress-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "streams-byob-progress-test.js",
+        "streams-byob-progress-worker.js",
+    ],
+)
+
+wd_test(
+    src = "streams-terminal-state-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "streams-terminal-state-test.js",
+        "streams-terminal-state-worker.js",
+    ],
+)
+
+wd_test(
+    src = "eventsource-context-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "eventsource-context-test.js",
+        "eventsource-context-worker.js",
+    ],
+)
+
+wd_test(
+    src = "eventsource-lifetime-test.wd-test",
+    args = ["--experimental"],
+    data = ["eventsource-lifetime-test.js"],
+)
+
+wd_test(
+    src = "queue-backing-store-test.wd-test",
+    args = [
+        "--experimental",
+        "queue-backing-store-test",
+    ],
+    data = ["queue-backing-store-test.js"],
+)
+
+wd_test(
+    src = "streams-consumer-reentry-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "streams-consumer-reentry-test.js",
+        "streams-consumer-reentry-worker.js",
+    ],
+)
+
+wd_test(
+    src = "streams-native-read-ownership-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-native-read-ownership-test.js"],
+)
 
 # Compile all ts test sources in one project. This is needed to work around https://github.com/aspect-build/rules_ts/issues/664 –
 # rules_ts transpiles all .ts files for each ts_project where the files are present based on the
@@ -32,6 +95,11 @@ ts_project(
     composite = True,
     tsconfig = ":ts_config",
     deps = ["//src/node:node@tsproject"],
+)
+
+wd_test(
+    src = "exported-handler-proxy-test.wd-test",
+    data = ["exported-handler-proxy-test.js"],
 )
 
 wd_test(
@@ -82,6 +150,12 @@ wd_test(
 )
 
 wd_test(
+    src = "streams-internal-drain-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-internal-drain-gc-test.js"],
+)
+
+wd_test(
     src = "error-deser-prototype-setter-test.wd-test",
     args = ["--experimental"],
     data = ["error-deser-prototype-setter-test.js"],
@@ -121,6 +195,12 @@ wd_test(
     src = "delete-all-deletes-alarm-test.wd-test",
     args = ["--experimental"],
     data = ["delete-all-deletes-alarm-test.js"],
+)
+
+wd_test(
+    src = "durable-object-snapshots-flag-test.wd-test",
+    args = ["--experimental"],
+    data = ["durable-object-snapshots-flag-test.js"],
 )
 
 # For tests that listen on fixed TCP ports 8081-8083. The "socket" resource (see .bazelrc) keeps
@@ -176,6 +256,8 @@ wd_test(
 )
 
 wd_test(
+    # Actor eviction has a 30-second deadline, followed by a real-time alarm wait.
+    size = "large",
     src = "actor-alarms-name-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-name-test.js"],
@@ -685,6 +767,11 @@ wd_test(
 )
 
 wd_test(
+    src = "queue-microtask-gc-test.wd-test",
+    data = ["queue-microtask-gc-test.js"],
+)
+
+wd_test(
     size = "large",
     src = "unhandled-rejection-test.wd-test",
     args = ["--experimental"],
@@ -1159,6 +1246,14 @@ wd_test(
 )
 
 wd_test(
+    src = "wasm-compact-imports-test.wd-test",
+    data = [
+        "wasm-compact-imports-test.js",
+        ":compact-imports.wasm",
+    ],
+)
+
+wd_test(
     src = "wasm-js-string-builtins-test.wd-test",
     data = [
         "wasm-js-string-builtins-test.js",
@@ -1523,4 +1618,27 @@ sh_test(
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
+)
+
+wd_bench(
+    src = "text-encoder-bench.wd-bench",
+    data = ["text-encoder-bench.js"],
+)
+
+# wd_bench() always passes --compat-date, so this runs `workerd bench` without it, to check that
+# workers that omit compatibilityDate get the newest date.
+wd_cli_test(
+    name = "bench-default-compat-date-test",
+    src = "bench-default-compat-date-test.wd-bench",
+    args = [
+        "$(location //src/workerd/server:workerd_cross)",
+        "bench",
+        "$(location bench-default-compat-date-test.wd-bench)",
+        "--quick",
+    ],
+    data = [
+        "bench-default-compat-date-test.js",
+        "bench-default-compat-date-test.wd-bench",
+        "//src/workerd/server:workerd_cross",
+    ],
 )

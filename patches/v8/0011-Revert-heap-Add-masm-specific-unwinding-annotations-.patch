@@ -14,10 +14,10 @@ of getting our V8 upgrade unblocked.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.gn b/BUILD.gn
-index 1df3d4e31bcc427acc5c2fd705ede40018412d9e..daabb371b0af5f5b40e4fc74f975000f7cc6f995 100644
+index 8956a3dc35741e89953b8275ca69d130856182bd..e0f0518d2cf7f443a66c496582491b8da4f4b0ee 100644
 --- a/BUILD.gn
 +++ b/BUILD.gn
-@@ -4991,8 +4991,8 @@ v8_header_set("v8_internal_headers") {
+@@ -5049,8 +5049,8 @@ v8_header_set("v8_internal_headers") {
      "src/tasks/operations-barrier.h",
      "src/tasks/task-utils.h",
      "src/torque/runtime-macro-shims.h",
@@ -27,7 +27,7 @@ index 1df3d4e31bcc427acc5c2fd705ede40018412d9e..daabb371b0af5f5b40e4fc74f975000f
      "src/tracing/trace-id.h",
      "src/tracing/traced-value.h",
      "src/tracing/tracing-category-observer.h",
-@@ -7952,12 +7952,7 @@ v8_source_set("v8_heap_base") {
+@@ -8022,12 +8022,7 @@ v8_source_set("v8_heap_base") {
    ]
  
    if (current_cpu == "x64") {

@@ -1,0 +1,18 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [(
+    name = "main",
+    worker = (
+      modules = [(name = "worker", esModule = embed "streams-native-read-ownership-test.js")],
+      compatibilityFlags = ["nodejs_compat_v2", "streams_enable_constructors"],
+    ),
+  ), (
+    name = "typescript",
+    worker = (
+      modules = [(name = "worker", esModule = embed "streams-native-read-ownership-test.js")],
+      compatibilityFlags = ["nodejs_compat_v2", "streams_enable_constructors", "typescript_implemented_streams", "experimental"],
+    ),
+  )],
+  autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
+);

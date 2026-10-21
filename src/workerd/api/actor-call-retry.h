@@ -79,7 +79,7 @@ class ActorCallRetryState final: public kj::Refcounted {
     ActorRetryCallType callType;
     ActorRetryGateEnabled enforcementEnabled;
     ActorCallPayloadReplayable payloadReplayable;
-    // The target's ActorRetryCandidate, recorded and cleared at the first disconnect before
+    // The target's ActorRetryCandidate, recorded and cleared at the first retryable failure before
     // commitment that is not marked delivered.
     kj::Maybe<ActorRetryCandidate> probeCandidate = kj::none;
   };
@@ -130,8 +130,8 @@ class ActorCallRetryState final: public kj::Refcounted {
   kj::Exception handleCommittedAttemptFailure(
       kj::Exception exception, ActorRetryStopReason commitPoint);
 
-  kj::Exception getOriginalDisconnect() const {
-    return KJ_ASSERT_NONNULL(originalDisconnect).clone();
+  kj::Exception getOriginalFailure() const {
+    return KJ_ASSERT_NONNULL(originalFailure).clone();
   }
 
   bool isRetryEnabled() const {
@@ -144,7 +144,7 @@ class ActorCallRetryState final: public kj::Refcounted {
   void restartCallStart() {
     callStart = timer.nowForLimitTimeout();
   }
-  // Rejects `promise` with the original disconnect if the retry timeout expires first. The first
+  // Rejects `promise` with the original failure if the retry timeout expires first. The first
   // attempt is never cancelled, so this only affects retries.
   template <typename T>
   kj::Promise<T> enforceRetryTimeout(kj::Promise<T> promise) {
@@ -193,7 +193,7 @@ class ActorCallRetryState final: public kj::Refcounted {
   kj::TimePoint callStart;
   bool retriesEnabled;
   kj::Maybe<IoChannelFactory::ActorRetryRequestMetadata> metadata;
-  kj::Maybe<kj::Exception> originalDisconnect;
+  kj::Maybe<kj::Exception> originalFailure;
   kj::Maybe<kj::TimePoint> retryStartTime;
   uint attemptCount = 1;
   uint retryAttemptsStarted = 0;

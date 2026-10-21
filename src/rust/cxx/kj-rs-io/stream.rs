@@ -361,7 +361,7 @@ impl Inner {
                 .try_clone_to_owned()
                 .map_err(op("dup()"))?;
             crate::ensure_owner_loop(self.owner)?;
-            let async_fd = tokio::io::unix::AsyncFd::with_interest(owned, Interest::WRITABLE)
+            let async_fd = crate::ffi::register_fd(owned, Interest::WRITABLE)
                 .map_err(op("whenWriteDisconnected"))?;
             // A concurrent first caller may have stored its own registration meanwhile; then
             // this one is dropped (closing its dup) and the stored one is shared.
@@ -407,7 +407,7 @@ pub fn when_write_disconnected<S: std::os::fd::AsFd>(
     let owned = socket.as_fd().try_clone_to_owned().map_err(op("dup()"));
     async move {
         crate::ensure_loop_thread()?;
-        let async_fd = tokio::io::unix::AsyncFd::with_interest(owned?, Interest::WRITABLE)
+        let async_fd = crate::ffi::register_fd(owned?, Interest::WRITABLE)
             .map_err(op("whenWriteDisconnected"))?;
         write_closed(&async_fd).await
     }

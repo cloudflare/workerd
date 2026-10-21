@@ -1966,6 +1966,15 @@ class Name final {
 template <typename Signature>
 class Function;
 
+// Whether a JavaScript function that wraps a C++ callback will be called at most once.
+//
+// A wrapped callback, and everything it captures, normally lives until the GC collects the
+// function. In practice that means the next full GC: v8::Function::New() allocates a template in
+// old space that references the callback's data, so minor GCs never free it. With Once::YES, the
+// callback is destroyed as soon as its first call returns, and a second call is an internal
+// error. Use it for functions that only ever run once, such as microtasks.
+WD_STRONG_BOOL(Once);
+
 // Use this to unwrap a JavaScript function that should be called as a constructor (with `new`).
 // The return type in this case is the constructed type. `Constructor` is a subclass of `Function`;
 // it can be used in all the same ways.
@@ -3017,8 +3026,11 @@ class Lock {
 
   v8::Local<v8::String> wrapString(kj::StringPtr text);
   virtual v8::Local<v8::ArrayBuffer> wrapBytes(kj::Array<byte> data) = 0;
+  // Wraps a C++ callback as a JavaScript function. Pass Once::YES if the function will be called
+  // at most once; see `Once`.
   virtual v8::Local<v8::Function> wrapSimpleFunction(v8::Local<v8::Context> context,
-      jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction) = 0;
+      jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction,
+      Once once = Once::NO) = 0;
 
   // A variation on wrapSimpleFunction that allows for a return value. While the wrapSimpleFunction
   // implementation passes the FunctionCallbackInfo into the called function, any call to

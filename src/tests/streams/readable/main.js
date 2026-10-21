@@ -32,6 +32,7 @@ export {
   argumentConversionOrder,
   strategyArgumentShapes,
   conversionErrorPrecedence,
+  byteMembersOnDefaultSource,
   highWaterMarkValidated,
   hwmDefaultIsOne,
 } from 'construction';
@@ -225,6 +226,7 @@ export {
   teeBranchesCollectedReleaseBacklog,
   teeSurvivorBranchCollected,
   teeBranchesCollectedPullStops,
+  sourceReleasedOnceEnded,
 } from 'gc';
 
 export {

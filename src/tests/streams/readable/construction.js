@@ -6,7 +6,7 @@
 // and constructor.any, whose C++ expectedFailures here narrow to
 // argument-conversion ORDER and validation types.
 
-import { strictEqual, throws } from 'node:assert';
+import { deepStrictEqual, strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 // DIVERGENCE: a null underlyingSource is accepted by C++, which converts
@@ -58,41 +58,69 @@ export const invalidTypeValidation = {
   },
 };
 
-// DIVERGENCE: argument conversion order (the WPT constructor.any seed).
-// The spec (TypeScript) converts the queuingStrategy FIRST (highWaterMark
-// and its ToNumber, then size), then reads the source's type; C++ reads
-// the source's type first, then the strategy in the same order.
+// DIVERGENCE: argument conversion order (the WPT constructor.any seed),
+// every member of a default source logged. The spec (TypeScript) converts
+// the queuingStrategy FIRST (highWaterMark and its ToNumber, then size),
+// then the source; C++ converts the source first, then the strategy in
+// the same order. Both read every member of the source: C++ in its own
+// order, TypeScript in the spec's lexicographic order (a byte source:
+// the readable-byte suite's argumentConversionOrder).
 export const argumentConversionOrder = {
   test() {
     const order = [];
-    new ReadableStream(
-      {
-        get type() {
-          order.push('source.type');
+    const source = {};
+    for (const name of [
+      'type',
+      'autoAllocateChunkSize',
+      'start',
+      'pull',
+      'cancel',
+      'expectedLength',
+    ]) {
+      Object.defineProperty(source, name, {
+        get() {
+          order.push(`source.${name}`);
           return undefined;
         },
+      });
+    }
+    new ReadableStream(source, {
+      get size() {
+        order.push('strategy.size');
+        return undefined;
       },
-      {
-        get size() {
-          order.push('strategy.size');
-          return undefined;
-        },
-        get highWaterMark() {
-          order.push('strategy.hwm');
-          return {
-            valueOf() {
-              order.push('hwm.valueOf');
-              return 1;
-            },
-          };
-        },
-      }
-    );
-    strictEqual(
-      order.join(','),
+      get highWaterMark() {
+        order.push('strategy.hwm');
+        return {
+          valueOf() {
+            order.push('hwm.valueOf');
+            return 1;
+          },
+        };
+      },
+    });
+    const strategy = ['strategy.hwm', 'hwm.valueOf', 'strategy.size'];
+    deepStrictEqual(
+      order,
       usingTsImpl
-        ? 'strategy.hwm,hwm.valueOf,strategy.size,source.type'
-        : 'source.type,strategy.hwm,hwm.valueOf,strategy.size'
+        ? [
+            ...strategy,
+            'source.autoAllocateChunkSize',
+            'source.cancel',
+            'source.expectedLength',
+            'source.pull',
+            'source.start',
+            'source.type',
+          ]
+        : [
+            'source.type',
+            'source.autoAllocateChunkSize',
+            'source.start',
+            'source.pull',
+            'source.cancel',
+            'source.expectedLength',
+            ...strategy,
+          ]
     );
   },
 };
@@ -139,10 +167,19 @@ export const strategyArgumentShapes = {
 // size beat an invalid highWaterMark under TypeScript, as the spec's
 // ExtractHighWaterMark range check comes after both; C++ converts
 // highWaterMark to an integer before validating anything else, so its
-// TypeError wins.
+// TypeError wins. Both convert every member of the source before they
+// check the type or the highWaterMark (spec), so a non-callable pull
+// (TypeError, messages differ) or a throwing pull getter beats an
+// invalid type, and a non-callable pull beats an invalid highWaterMark.
 export const conversionErrorPrecedence = {
   test() {
     const boom = new Error('boom');
+    const pullError = {
+      name: 'TypeError',
+      message: usingTsImpl
+        ? 'underlyingSource.pull must be a function'
+        : "Incorrect type for the 'pull' field on 'UnderlyingSource': the provided value is not of type 'function'.",
+    };
     throws(
       () =>
         new ReadableStream(42, {
@@ -169,6 +206,83 @@ export const conversionErrorPrecedence = {
         ? 'strategy.size must be a function'
         : 'The value cannot be converted because it is not an integer.',
     });
+    throws(() => new ReadableStream({ type: 'potato', pull: 1 }), pullError);
+    throws(
+      () =>
+        new ReadableStream({
+          type: 'potato',
+          get pull() {
+            throw boom;
+          },
+        }),
+      (e) => e === boom
+    );
+    throws(
+      () => new ReadableStream({ pull: 1 }, { highWaterMark: -1 }),
+      pullError
+    );
+  },
+};
+
+// DIVERGENCE: autoAllocateChunkSize and expectedLength on a default
+// source, which uses neither. Both convert them on every source, as on a
+// byte source but with no zero check (spec): expectedLength as a uint64,
+// so 'abc' and -1 throw TypeError (messages differ; the readable-byte
+// suite's ledger #35), and autoAllocateChunkSize as a number whose
+// fraction truncates, so 0, 1.5 and 2 ** 31 - 1 are accepted. C++
+// converts autoAllocateChunkSize as an int: it accepts -1, 'abc', NaN and
+// Infinity, and throws from 2 ** 31. TypeScript converts it as the spec's
+// [EnforceRange] unsigned long long: it throws for those, and accepts up
+// to 2 ** 53 - 1.
+export const byteMembersOnDefaultSource = {
+  test() {
+    const outOfRange = {
+      name: 'TypeError',
+      message:
+        'autoAllocateChunkSize must be a finite number from 0 to 2^53 - 1',
+    };
+    const outOfIntRange = {
+      name: 'TypeError',
+      message:
+        'Value out of range. Must be between -2147483648 and 2147483647 (inclusive).',
+    };
+    for (const autoAllocateChunkSize of [0, 1.5, 2 ** 31 - 1]) {
+      new ReadableStream({ autoAllocateChunkSize });
+    }
+    for (const autoAllocateChunkSize of [-1, 'abc', NaN, Infinity]) {
+      const construct = () => new ReadableStream({ autoAllocateChunkSize });
+      if (usingTsImpl) {
+        throws(construct, outOfRange);
+      } else {
+        construct();
+      }
+    }
+    const beyondInt = () =>
+      new ReadableStream({ autoAllocateChunkSize: 2 ** 31 });
+    if (usingTsImpl) {
+      beyondInt();
+    } else {
+      throws(beyondInt, outOfIntRange);
+    }
+    throws(
+      () => new ReadableStream({ autoAllocateChunkSize: 2 ** 53 }),
+      usingTsImpl ? outOfRange : outOfIntRange
+    );
+    for (const [expectedLength, message] of [
+      ['abc', 'The value cannot be converted because it is not an integer.'],
+      [
+        -1,
+        'The value cannot be converted because it is negative and this API expects a positive bigint.',
+      ],
+    ]) {
+      throws(() => new ReadableStream({ expectedLength }), {
+        name: 'TypeError',
+        message: usingTsImpl
+          ? 'expectedLength must be a non-negative number that fits in a uint64'
+          : message,
+      });
+    }
+    new ReadableStream({ expectedLength: 1.5 });
   },
 };
 

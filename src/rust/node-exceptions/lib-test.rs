@@ -22,7 +22,7 @@ fn node_exception_uses_default_message_and_code() {
             ffi::JsErrorType::Error,
             None,
         );
-        let value: v8::Local<v8::Value> = err.clone().into();
+        let value: v8::Local<v8::Value> = err.into();
         assert!(value.is_native_error());
         assert_eq!(
             get_string(lock, &err, "message").as_deref(),

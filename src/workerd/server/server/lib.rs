@@ -8,9 +8,10 @@
 //! runs the event loop. Everything that touches the isolate is delegated to the C++ worker
 //! factory (worker-factory.h) through the bridge in `bridge`; the server owns the rest:
 //! config interpretation, bindings and channel numbering, services, listeners, actors, dynamic
-//! workers, drain and the test runner.
+//! workers, drain and the test and bench runners.
 
 pub mod actor;
+pub mod bench;
 pub mod bindings;
 pub mod bridge;
 pub mod channels;

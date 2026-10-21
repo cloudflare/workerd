@@ -60,16 +60,18 @@ const { nativeStreamInternals } = require('webstreams/native') as {
 };
 const { kExtractNativeSink, isNativeUnderlyingSink } = nativeStreamInternals;
 
-import type { CommonHelpers } from './common';
+import type { CommonHelpers, UnderlyingSinkDict } from './common';
 const {
   isActualObject,
   kNullProtoObject,
   kEnumerable,
   toStringTagProperty,
+  promiseResolvedWith,
   requireObject,
   convertQueuingStrategy,
   extractHighWaterMark,
   extractSizeAlgorithm,
+  convertUnderlyingSink,
 } = require('webstreams/common') as CommonHelpers;
 
 import type { ViewExtentHelpers } from './view-extent';
@@ -126,20 +128,6 @@ function assertPrivateSymbol(symbol: symbol): void {
   if (symbol !== kPrivateSymbol) {
     throw new TypeError('Illegal constructor');
   }
-}
-
-// WebIDL "a promise resolved with" a value: a new promise resolved with it.
-// For a promise or thenable, its reactions run one microtask after the
-// value's (two if the value settles before the resolution job subscribes
-// to it), where PromiseResolve adopts a native promise as is. The
-// controllers here and in readable.ts settle their start() results this
-// way, as the transformer's cancel and flush are (transform.ts); that
-// timing is observable, as in WPT transform-streams/cancel.any.js.
-function promiseResolvedWith(value: unknown): Promise<void> {
-  const { promise, resolve } =
-    PromiseWithResolvers() as PromiseWithResolversType<void>;
-  resolve(value as void);
-  return promise;
 }
 
 type WritableState = 'writable' | 'erroring' | 'errored' | 'closed';
@@ -805,8 +793,10 @@ class WritableStream<W = unknown> {
     requireObject(underlyingSink, 'underlyingSink must be an object');
     const strategyDict = convertQueuingStrategy(strategy);
 
-    // --- Now read underlyingSink properties ---
-    if (underlyingSink.type !== undefined) {
+    // The body converts the sink to an UnderlyingSink dictionary before it
+    // checks anything, so a bad callback beats an invalid type.
+    const sinkDict = convertUnderlyingSink(underlyingSink);
+    if (sinkDict.type !== undefined) {
       throw new RangeError('Invalid underlying sink type');
     }
     const sizeAlgorithm = extractSizeAlgorithm<W>(strategyDict);
@@ -830,6 +820,7 @@ class WritableStream<W = unknown> {
       kPrivateSymbol,
       this,
       underlyingSink,
+      sinkDict,
       sizeAlgorithm,
       highWaterMark
     );
@@ -920,6 +911,62 @@ let controllerStartedOf: ControllerOp<[], boolean>;
 
 // ---------------------------------------------------------------------------
 // WritableStreamDefaultController
+
+interface SinkAlgorithms<W> {
+  write: ((chunk: W) => Promise<void>) | undefined;
+  close: (() => Promise<void>) | undefined;
+  abort: ((reason: unknown) => Promise<void>) | undefined;
+}
+
+// The controller's write, close and abort algorithms, calling the hooks
+// through captured uncurryThis wrappers with the sink as `this` (spec
+// SetUpWritableStreamDefaultControllerFromUnderlyingSink). Built outside
+// the controller constructor so that `underlyingSink` is captured only by
+// these closures, not by the constructor's shared context (which start()'s
+// reactions keep alive until it settles): once ClearAlgorithms drops them,
+// the sink is collectable.
+function makeSinkAlgorithms<W>(
+  underlyingSink: UnderlyingSink<W>,
+  controller: WritableStreamDefaultController<W>,
+  writeFn: UnderlyingSink<W>['write'],
+  closeFn: UnderlyingSink<W>['close'],
+  abortFn: UnderlyingSink<W>['abort']
+): SinkAlgorithms<W> {
+  let write: SinkAlgorithms<W>['write'];
+  if (writeFn !== undefined) {
+    const callWrite = uncurryThis(writeFn);
+    write = (chunk: W) => {
+      try {
+        return PromiseResolve(callWrite(underlyingSink, chunk, controller));
+      } catch (e) {
+        return PromiseReject(e);
+      }
+    };
+  }
+  let close: SinkAlgorithms<W>['close'];
+  if (closeFn !== undefined) {
+    const callClose = uncurryThis(closeFn);
+    close = () => {
+      try {
+        return PromiseResolve(callClose(underlyingSink));
+      } catch (e) {
+        return PromiseReject(e);
+      }
+    };
+  }
+  let abort: SinkAlgorithms<W>['abort'];
+  if (abortFn !== undefined) {
+    const callAbort = uncurryThis(abortFn);
+    abort = (reason: unknown) => {
+      try {
+        return PromiseResolve(callAbort(underlyingSink, reason));
+      } catch (e) {
+        return PromiseReject(e);
+      }
+    };
+  }
+  return { write, close, abort };
+}
 
 interface QueuedWrite<W> {
   value: W | typeof kCloseMarker | typeof kFlushMarker;
@@ -1092,61 +1139,32 @@ class WritableStreamDefaultController<
   constructor(
     privateSymbol: symbol,
     stream: WritableStream<W>,
+    // The hooks' receiver, and its members as the constructor converted
+    // them.
     underlyingSink: UnderlyingSink<W>,
+    sinkDict: UnderlyingSinkDict<W>,
     sizeAlgorithm: (chunk: W) => number,
     highWaterMark: number
   ) {
     assertPrivateSymbol(privateSymbol);
     this.#stream = stream;
 
-    // --- Sink method extraction (alphabetical property reads) ---
-    const abortFn = underlyingSink.abort;
-    if (abortFn !== undefined && typeof abortFn !== 'function') {
-      throw new TypeError('underlyingSink.abort must be a function');
-    }
-    const closeFn = underlyingSink.close;
-    if (closeFn !== undefined && typeof closeFn !== 'function') {
-      throw new TypeError('underlyingSink.close must be a function');
-    }
-    const startFn = underlyingSink.start;
-    if (startFn !== undefined && typeof startFn !== 'function') {
-      throw new TypeError('underlyingSink.start must be a function');
-    }
-    const writeFn = underlyingSink.write;
-    if (writeFn !== undefined && typeof writeFn !== 'function') {
-      throw new TypeError('underlyingSink.write must be a function');
-    }
-
-    if (abortFn !== undefined) {
-      const callAbort = uncurryThis(abortFn);
-      this.#abortAlgorithm = (reason: unknown) => {
-        try {
-          return PromiseResolve(callAbort(underlyingSink, reason));
-        } catch (e) {
-          return PromiseReject(e);
-        }
-      };
-    }
-    if (closeFn !== undefined) {
-      const callClose = uncurryThis(closeFn);
-      this.#closeAlgorithm = () => {
-        try {
-          return PromiseResolve(callClose(underlyingSink));
-        } catch (e) {
-          return PromiseReject(e);
-        }
-      };
-    }
-    if (writeFn !== undefined) {
-      const callWrite = uncurryThis(writeFn);
-      this.#writeAlgorithm = (chunk: W) => {
-        try {
-          return PromiseResolve(callWrite(underlyingSink, chunk, this));
-        } catch (e) {
-          return PromiseReject(e);
-        }
-      };
-    }
+    const {
+      abort: abortFn,
+      close: closeFn,
+      start: startFn,
+      write: writeFn,
+    } = sinkDict;
+    const algorithms = makeSinkAlgorithms(
+      underlyingSink,
+      this,
+      writeFn,
+      closeFn,
+      abortFn
+    );
+    this.#writeAlgorithm = algorithms.write;
+    this.#closeAlgorithm = algorithms.close;
+    this.#abortAlgorithm = algorithms.abort;
 
     // Strategy already extracted by caller (WebIDL conversion order).
     this.#sizeAlgorithm = sizeAlgorithm;
@@ -1941,7 +1959,6 @@ module.exports = {
       getWriterReadyPromiseInternal(writer),
     getWriterClosedPromise: <W>(writer: WritableStreamDefaultWriter<W>) =>
       getWriterClosedPromiseInternal(writer),
-    promiseResolvedWith,
   },
 
   // Part of the internal implementation. Do not re-export to user code

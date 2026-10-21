@@ -35,7 +35,7 @@ the abort reason).
 | --- | --- | --- | --- | --- |
 | 1 | invalid highWaterMark at ctor | TypeError (jsg uint64 conversion messages) | RangeError "Invalid highWaterMark" (spec) | `highWaterMarkValidated` |
 | 2 | sink.type validation | ignored (pedantic_wpt: RangeError) | RangeError "Invalid underlying sink type" (spec) | `sinkTypeValidation` |
-| 3 | argument conversion order | sink dictionary first (sink.write, hwm and its ToNumber, size) | strategy first (spec): hwm and its ToNumber, size, then sink.write | `argumentConversionOrder` |
+| 3 | argument conversion order, every sink member | sink dictionary first, every member in its own order (type, start, write, abort, close), then hwm and its ToNumber, size | strategy first (spec): hwm and its ToNumber, size; then the sink's members in lexicographic order (spec: abort, close, start, type, write) | `argumentConversionOrder` |
 | 4 | ready at construction (no backpressure) | pending after a microtask, fulfills on a later turn | fulfilled within a microtask (spec) | `readyFulfillTiming` |
 | 5 | sync start() throw | captured; stream errored, writes reject | escapes the constructor (spec) | `newWritableStreamStartError` |
 | 6 | abort() on an errored stream | rejects with the stored error | fulfills with undefined (spec) | `newWritableStreamAbortError` |
@@ -51,7 +51,7 @@ the abort reason).
 | 15 | a write from inside sink.close() whose size() throws | rejects with size()'s error | TypeError (closing): the close in flight is checked before the erroring state (spec; Node agrees); the close completes either way | `sizeConsultedForWriteInsideSinkClose` |
 | 16 | null underlyingSink (every other primitive throws TypeError, and a function is accepted with its members read, in both; spec) | accepted as no sink (a WebIDL dictionary) | TypeError 'underlyingSink must be an object' (spec: the argument is typed `object`) | `garbageSinkValidation` |
 | 17 | (no divergence) the strategy argument converts as a WebIDL dictionary: null means no strategy, a function's members are read, and every other primitive throws TypeError (messages differ) | same | same | `strategyArgumentShapes` (parity) |
-| 18 | which error wins when two are possible (a primitive sink's TypeError beats a throwing strategy getter in both; spec) | an invalid highWaterMark (TypeError, integer conversion) beats an invalid sink type, pedantic_wpt included | the sink type's RangeError ('Invalid underlying sink type') beats an invalid highWaterMark's (spec) | `conversionErrorPrecedence` |
+| 18 | which error wins when two are possible (a primitive sink's TypeError beats a throwing strategy getter in both; every sink member converts before the type and the highWaterMark are checked, so a non-callable write, TypeError with different messages, or a throwing write getter beats an invalid type, and a non-callable write beats an invalid highWaterMark, in both; spec) | an invalid highWaterMark (TypeError, integer conversion) beats an invalid sink type, pedantic_wpt included | the sink type's RangeError ('Invalid underlying sink type') beats an invalid highWaterMark's (spec) | `conversionErrorPrecedence` |
 
 Parity worth noting (probed, pinned): the whole in-flight abort matrix —
 abort-before-start reason identity on ready/closed, errored-state reason
@@ -88,6 +88,7 @@ promises (they resolve with undefined).
 | `workers_api_getters_setters_on_prototype`, `set_tostring_tag` | yes | generic placement/branding; identity suite legacy cell |
 | `internal_writable_stream_abort_clears_queue` (2024-09-02) | NOT pinned | internal-impl only (`internal.c++`); unreachable from JS-backed WritableStream |
 | `pedantic_wpt` (dateless opt-in) | `writable-cpp-pedantic` cell | flag-off sides are the C++ columns of ledger #2/#10/#11 |
+| `enable_weak_ref` | yes, in every cell running the shared modules | none needed: it exposes `WeakRef`, which `gc.js` uses, and changes no streams behavior |
 
 ## Assertion catalogue
 
@@ -104,7 +105,7 @@ promises (they resolve with undefined).
 | `backpressure.js` | desiredSize accounting/recovery; ready replaced at capacity; WPT floating-point scenarios and invalid sizes, incl. after close() (#9); erroring desiredSize (#11) |
 | `reentrancy.js` | size()-reentrant write ordering; releaseLock inside size (#12; flag-gated, cf. legacy-writer); controller.error inside write hook; doomed-write size skip; size receiver/arity; size() consulted for a write from inside sink.close() (#15) and sink.abort() |
 | `then-interceptors.js` | then-getter never fires on writer promise settlement |
-| `gc.js` | pending write survives gc() with all user refs dropped (--expose-gc) |
+| `gc.js` | pending write survives gc() with all user refs dropped (--expose-gc); a stream that has closed, been aborted or errored (by its controller, or by a rejected write) releases its underlying sink, at once when its controller errors it while start() is still pending, while an open one keeps it (WeakRef-checked; parity) |
 | `legacy-ctor-gate.js` | fully-unflagged: ctor Error + absent controller global |
 | `legacy-writer.js` | pre-flag writer semantics (see Compatibility flags) |
 | `data-volumes.js` | write-side volumes: 4096 × 16 B writes, single 1 MiB write, 1 MiB / 8 MiB chunked with writer.ready honored; the sink verifies the continuous prime-modulus pattern as chunks arrive |

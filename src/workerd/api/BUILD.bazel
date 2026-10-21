@@ -13,6 +13,7 @@ filegroup(
         "actor-call-retry.c++",
         "actor-state.c++",
         "basics.c++",
+        "bench.c++",
         "blob.c++",
         "cache.c++",
         "container.c++",
@@ -71,6 +72,7 @@ filegroup(
         "actor-call-retry.h",
         "actor-state.h",
         "basics.h",
+        "bench.h",
         "blob.h",
         "cache.h",
         "container.h",
@@ -604,6 +606,7 @@ wd_cc_library(
         "streams/pendingabort-gc-uaf-test.c++",
         "actor-state-test.c++",
         "alarm-retry-test.c++",
+        "bench-test.c++",
         "basics-test.c++",
         "crypto/aes-test.c++",
         "crypto/impl-test.c++",
@@ -624,6 +627,7 @@ wd_cc_library(
         "streams/draining-read-uaf-test.c++",
         "streams/queue-test.c++",
         "streams/standard-test.c++",
+        "streams/streams-native-source-ownership-test.c++",
     ]
 ]
 
@@ -681,6 +685,14 @@ kj_test(
 
 kj_test(
     src = "streams/internal-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "eventsource-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
@@ -885,4 +897,10 @@ wd_test(
     src = "streams/streams-test.wd-test",
     args = ["--experimental"],
     data = ["streams/streams-test.js"],
+)
+
+wd_test(
+    src = "streams/body-read-operation-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams/body-read-operation-test.js"],
 )

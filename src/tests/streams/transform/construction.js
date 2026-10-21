@@ -77,13 +77,14 @@ export const hwmInfinityRejected = {
   },
 };
 
-// DIVERGENCE: argument conversion order. The spec (TypeScript) converts
-// both strategies first, the writable then the readable (each
-// highWaterMark and its ToNumber, then size), and only then reads the
-// transformer's members. C++ reads the transformer's members first, then
-// each strategy in that order. An empty transformer and one with a
-// transform() hook cover the TS implementation's elided and standard
-// construction paths.
+// DIVERGENCE: argument conversion order, every member logged. The spec
+// (TypeScript) converts both strategies first, the writable then the
+// readable (each highWaterMark and its ToNumber, then size), and only
+// then reads the transformer's members, in lexicographic order. C++
+// reads the transformer's members first, in its own order, then each
+// strategy in that order. A transformer without and with a transform()
+// hook covers the TS implementation's elided and standard construction
+// paths.
 export const argumentConversionOrder = {
   test() {
     const loggedStrategy = (order, name) => ({
@@ -101,40 +102,62 @@ export const argumentConversionOrder = {
         return undefined;
       },
     });
-    for (const hooks of [{}, { transform() {} }]) {
+    const strategies = [
+      'writable.hwm',
+      'writable.hwm.valueOf',
+      'writable.size',
+      'readable.hwm',
+      'readable.hwm.valueOf',
+      'readable.size',
+    ];
+    const members = (
+      usingTsImpl
+        ? [
+            'cancel',
+            'expectedLength',
+            'flush',
+            'readableType',
+            'start',
+            'transform',
+            'writableType',
+          ]
+        : [
+            'readableType',
+            'writableType',
+            'start',
+            'transform',
+            'flush',
+            'cancel',
+            'expectedLength',
+          ]
+    ).map((name) => `transformer.${name}`);
+    for (const transform of [undefined, function transform() {}]) {
       const order = [];
-      new TransformStream(
-        {
-          get start() {
-            order.push('transformer.start');
-            return undefined;
+      const transformer = {};
+      for (const name of [
+        'readableType',
+        'writableType',
+        'start',
+        'transform',
+        'flush',
+        'cancel',
+        'expectedLength',
+      ]) {
+        Object.defineProperty(transformer, name, {
+          get() {
+            order.push(`transformer.${name}`);
+            return name === 'transform' ? transform : undefined;
           },
-          ...hooks,
-        },
+        });
+      }
+      new TransformStream(
+        transformer,
         loggedStrategy(order, 'writable'),
         loggedStrategy(order, 'readable')
       );
       deepStrictEqual(
         order,
-        usingTsImpl
-          ? [
-              'writable.hwm',
-              'writable.hwm.valueOf',
-              'writable.size',
-              'readable.hwm',
-              'readable.hwm.valueOf',
-              'readable.size',
-              'transformer.start',
-            ]
-          : [
-              'transformer.start',
-              'writable.hwm',
-              'writable.hwm.valueOf',
-              'writable.size',
-              'readable.hwm',
-              'readable.hwm.valueOf',
-              'readable.size',
-            ]
+        usingTsImpl ? [...strategies, ...members] : [...members, ...strategies]
       );
     }
   },
@@ -229,6 +252,10 @@ export const strategyArgumentShapes = {
 // both strategies are converted, then readableType is checked, then each
 // highWaterMark's range, so readableType: 'bytes' and the readable
 // strategy getter's error both beat an invalid writable highWaterMark.
+// Both convert every transformer member before they check readableType
+// (spec), so a non-callable start or flush (TypeError, messages differ)
+// or a throwing start getter beats readableType: 'bytes', and both check
+// every callback before either highWaterMark's range (spec).
 export const conversionErrorPrecedence = {
   test() {
     const boom = new Error('boom');
@@ -264,6 +291,36 @@ export const conversionErrorPrecedence = {
     throws(
       () => new TransformStream({}, { highWaterMark: -1 }, throwingStrategy),
       usingTsImpl ? (e) => e === boom : negativeHighWaterMark
+    );
+    const startError = {
+      name: 'TypeError',
+      message: usingTsImpl
+        ? 'transformer.start must be a function'
+        : "Incorrect type for the 'start' field on 'Transformer': the provided value is not of type 'function'.",
+    };
+    throws(
+      () => new TransformStream({ readableType: 'bytes', start: 1 }),
+      startError
+    );
+    throws(
+      () =>
+        new TransformStream({
+          readableType: 'bytes',
+          get start() {
+            throw boom;
+          },
+        }),
+      (e) => e === boom
+    );
+    throws(() => new TransformStream({ readableType: 'bytes', flush: 1 }), {
+      name: 'TypeError',
+      message: usingTsImpl
+        ? 'transformer.flush must be a function'
+        : "Incorrect type for the 'flush' field on 'Transformer': the provided value is not of type 'function'.",
+    });
+    throws(
+      () => new TransformStream({ start: 1 }, {}, { highWaterMark: -1 }),
+      startError
     );
   },
 };

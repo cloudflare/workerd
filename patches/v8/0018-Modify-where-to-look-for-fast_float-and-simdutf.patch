@@ -12,10 +12,10 @@ include changes are needed.
 Signed-off-by: James M Snell <jsnell@cloudflare.com>
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 74a610af2887d8527a20eb52ac11da3c2a2fd4e8..e050165da217db64b24febc589f2bef9686115f8 100644
+index c6372e7eea1d9e88d4192418ca2a1f15499767ed..1cf5f394dc5d1781ae995e75cd73b23caa0ebb65 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4522,7 +4522,6 @@ filegroup(
+@@ -4568,7 +4568,6 @@ filegroup(
          # than a blanket third_party/**, which would also stage the
          # large gclient trees.
          "third_party/utf8-decoder/**/*.h",
@@ -23,7 +23,7 @@ index 74a610af2887d8527a20eb52ac11da3c2a2fd4e8..e050165da217db64b24febc589f2bef9
          "third_party/rapidhash-v8/**/*.h",
          "third_party/wasm-api/**/*.h",
          "third_party/siphash/**/*.h",
-@@ -4627,7 +4626,7 @@ metagen_instance_types(
+@@ -4679,7 +4678,7 @@ run_metagen(
          ":define_flags",
          ":v8_libbase",
          ":lib_fp16",
@@ -32,7 +32,16 @@ index 74a610af2887d8527a20eb52ac11da3c2a2fd4e8..e050165da217db64b24febc589f2bef9
          "@abseil-cpp//absl/container:btree",
          "@abseil-cpp//absl/container:flat_hash_map",
          "@abseil-cpp//absl/container:flat_hash_set",
-@@ -4874,18 +4873,19 @@ cc_library(
+@@ -4919,7 +4918,7 @@ cc_library(
+     }),
+     features = ["-use_header_modules"],
+     deps = [
+-        ":simdutf",
++        "@simdutf",
+         ":torque_base_headers",
+         ":v8_libbase",
+         "@abseil-cpp//absl/container:node_hash_map",
+@@ -4927,18 +4926,19 @@ cc_library(
      ],
  )
  
@@ -64,7 +73,7 @@ index 74a610af2887d8527a20eb52ac11da3c2a2fd4e8..e050165da217db64b24febc589f2bef9
  
  v8_library(
      name = "v8_libshared",
-@@ -4932,15 +4932,15 @@ v8_library(
+@@ -4985,15 +4985,15 @@ v8_library(
      }),
      deps = [
          ":lib_dragonbox",
@@ -82,3 +91,12 @@ index 74a610af2887d8527a20eb52ac11da3c2a2fd4e8..e050165da217db64b24febc589f2bef9
      ],
  )
  
+@@ -5112,7 +5112,7 @@ v8_binary(
+         "//conditions:default": [],
+     }),
+     deps = [
+-        ":simdutf",
++        "@simdutf",
+         "v8_libbase",
+         "@abseil-cpp//absl/container:node_hash_map",
+         "@abseil-cpp//absl/container:node_hash_set",

@@ -1256,7 +1256,7 @@ Writable.prototype[Symbol.asyncDispose] = async function () {
 // The web streams each node writable has been adapted to (one per
 // Writable.toWeb() over it), kept alive by the node writable. The C++
 // streams implementation's controller does not keep its stream alive; the
-// node side — which its own pending I/O keeps alive — holds only the
+// node side - which its own pending I/O keeps alive - holds only the
 // controller, so a full GC could collect the web stream, its writer and
 // whatever awaits them (a writer.closed or write() that then never
 // settles). The entries live exactly as long as the node writable does.
@@ -1322,8 +1322,8 @@ export function newWritableStreamFromStreamWritable(streamWritable) {
       },
 
       close() {
-        // The node side completes on its own terms — a _final() may still
-        // be running when the caller ended it directly — so close() settles
+        // The node side completes on its own terms - a _final() may still
+        // be running when the caller ended it directly - so close() settles
         // with its finish or its error (the eos callback below), ending it
         // only if the caller has not.
         closed = Promise.withResolvers();

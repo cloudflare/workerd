@@ -172,7 +172,6 @@ rust_library(
         "@crates_vendor//:codespan-reporting",
         "@crates_vendor//:proc-macro2",
         "@crates_vendor//:quote",
-        "@crates_vendor//:scratch",
         "@crates_vendor//:syn",
     ],
 )

@@ -117,7 +117,11 @@ export {
 
 export { thenGetterDoesNotFireOnWriterPromises } from 'then-interceptors';
 
-export { writableStreamGc, writableStreamGcTraceFinishes } from 'gc';
+export {
+  writableStreamGc,
+  writableStreamGcTraceFinishes,
+  sinkReleasedOnceEnded,
+} from 'gc';
 
 export {
   manySmallWrites,

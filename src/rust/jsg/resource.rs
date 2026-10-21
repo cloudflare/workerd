@@ -428,9 +428,26 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
                 getter_callback,
                 setter_callback,
             } => {
+                // Instance properties take PropertyCallbackInfo-style callbacks.
+                assert!(
+                    kind != v8::ffi::PropertyKind::Instance,
+                    "use Member::InstanceProperty"
+                );
                 descriptor.properties.push(v8::ffi::PropertyDescriptor {
                     name,
                     kind,
+                    getter_callback: getter_callback as usize,
+                    setter_callback: setter_callback.map(|f| f as usize).into(),
+                });
+            }
+            Member::InstanceProperty {
+                name,
+                getter_callback,
+                setter_callback,
+            } => {
+                descriptor.properties.push(v8::ffi::PropertyDescriptor {
+                    name,
+                    kind: v8::ffi::PropertyKind::Instance,
                     getter_callback: getter_callback as usize,
                     setter_callback: setter_callback.map(|f| f as usize).into(),
                 });
@@ -507,3 +524,7 @@ pub trait Resource: Type + GarbageCollected + Sized + 'static {
     where
         Self: Sized;
 }
+
+#[cfg(test)]
+#[path = "resource-test.rs"]
+mod tests;

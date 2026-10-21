@@ -32,7 +32,7 @@
 //! This is ordinary tokio code. tokio registers a resource with the runtime *entered* on the
 //! calling thread, and kj-rs-tokio makes a `TokioEventPort` thread a tokio runtime thread for its
 //! whole life (port.rs, `EnteredRuntime`), so `TcpStream::connect`, `UnixListener::bind_addr`,
-//! `AsyncFd::with_interest`, `spawn_blocking` and friends register with the loop's
+//! `AsyncFd::register_with_interest`, `spawn_blocking` and friends register with the loop's
 //! driver as they are. Two checks are added, both cheap (two thread-local reads):
 //! [`ensure_loop_thread`] before every *registration* (connect, listen, wrap, resolve,
 //! the hangup watch), so a call on a thread without a port, or under another runtime entered
@@ -96,8 +96,9 @@
 // Unsafe-code boundary. Exactly one module, `ffi.rs`, allows `unsafe_code`, and it holds the
 // `#[cxx::bridge]` plus every hand-written `unsafe` in the crate:
 // raw-handle -> owned-fd conversions (as `unsafe fn`s, discharged at the bridge entry points),
-// raw read-buffer pointers -> `&mut [MaybeUninit<u8>]`, and the SIGPIPE disposition. The other
-// modules cannot write `unsafe` at all, and no `unsafe fn` is part of the crate's public surface.
+// raw read-buffer pointers -> `&mut [MaybeUninit<u8>]`, the SIGPIPE disposition, and registering
+// an owned fd with tokio's I/O driver (`AsyncFd::register_with_interest`). The other modules
+// cannot write `unsafe` at all, and no `unsafe fn` is part of the crate's public surface.
 // What this buys is precisely that: the code to audit for memory safety is one file, and its
 // `// Safety:` comments name the C++ contracts (KJ's buffer-validity and fd-ownership rules) it
 // relies on. Concentrating `unsafe` does not by itself make the safe interfaces sound: an

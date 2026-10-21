@@ -635,8 +635,34 @@ kj::Maybe<CompressionError> ZstdEncoderContext::resetStream() {
 }
 
 kj::Maybe<CompressionError> ZstdEncoderContext::setParams(int key, int value) {
-  KJ_DASSERT(key >= ZSTD_c_compressionLevel,
-      "key must be a valid ZSTD_cParameter (first valid value is ZSTD_c_compressionLevel)");
+  // Experimental parameters can require stable input/output buffers across writes or change
+  // the frame format. Only permit parameters supported by this streaming interface.
+  switch (key) {
+    case ZSTD_c_compressionLevel:
+    case ZSTD_c_windowLog:
+    case ZSTD_c_hashLog:
+    case ZSTD_c_chainLog:
+    case ZSTD_c_searchLog:
+    case ZSTD_c_minMatch:
+    case ZSTD_c_targetLength:
+    case ZSTD_c_strategy:
+    case ZSTD_c_targetCBlockSize:
+    case ZSTD_c_enableLongDistanceMatching:
+    case ZSTD_c_ldmHashLog:
+    case ZSTD_c_ldmMinMatch:
+    case ZSTD_c_ldmBucketSizeLog:
+    case ZSTD_c_ldmHashRateLog:
+    case ZSTD_c_contentSizeFlag:
+    case ZSTD_c_checksumFlag:
+    case ZSTD_c_dictIDFlag:
+    case ZSTD_c_nbWorkers:
+    case ZSTD_c_jobSize:
+    case ZSTD_c_overlapLog:
+      break;
+    default:
+      return CompressionError(kj::str("Unsupported Zstd compression parameter: ", key),
+          "ERR_ZSTD_PARAM_SET_FAILED"_kj, -1);
+  }
   size_t result = ZSTD_CCtx_setParameter(cctx_.get(), static_cast<ZSTD_cParameter>(key), value);
   if (ZSTD_isError(result)) {
     return CompressionError(kj::str("Setting parameter failed: ", ZSTD_getErrorName(result)),
@@ -707,6 +733,10 @@ kj::Maybe<CompressionError> ZstdDecoderContext::resetStream() {
 
 kj::Maybe<CompressionError> ZstdDecoderContext::setParams(int key, int value) {
   KJ_DASSERT(dctx_.get() != nullptr, "Zstd decompression context should not be null");
+  if (key != ZSTD_d_windowLogMax) {
+    return CompressionError(kj::str("Unsupported Zstd decompression parameter: ", key),
+        "ERR_ZSTD_PARAM_SET_FAILED"_kj, -1);
+  }
   size_t result = ZSTD_DCtx_setParameter(dctx_.get(), static_cast<ZSTD_dParameter>(key), value);
   if (ZSTD_isError(result)) {
     return CompressionError(kj::str("Setting parameter failed: ", ZSTD_getErrorName(result)),

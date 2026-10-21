@@ -99,6 +99,12 @@ kj::String currentDateStr() {
   return CompatDate::today().toString();
 }
 
+kj::String newestCompatDateStr() {
+  auto maximum = KJ_ASSERT_NONNULL(CompatDate::parse(MAXIMUM_COMPATIBILITY_DATE));
+  auto today = CompatDate::today();
+  return (today < maximum ? today : maximum).toString();
+}
+
 static void compileCompatibilityFlags(kj::StringPtr compatDate,
     kj::HashSet<kj::String> flagSet,
     CompatibilityFlags::Builder output,

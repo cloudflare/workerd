@@ -2,13 +2,20 @@
 
 // Helpers shared by the webstreams modules. Leaf module: requires nothing.
 
-import type { QueuingStrategy } from './types';
+import type {
+  PromiseWithResolvers as PromiseWithResolversType,
+  QueuingStrategy,
+  Transformer,
+  UnderlyingSink,
+  UnderlyingSource,
+} from './types';
 
 const {
   BigInt,
   NumberIsFinite,
   NumberIsNaN,
   ObjectFreeze,
+  PromiseWithResolvers,
   RangeError,
   TypeError,
   uncurryThis,
@@ -26,6 +33,20 @@ const kEnumerable: PropertyDescriptor = ObjectFreeze({
   __proto__: kNullProtoObject,
   enumerable: true,
 });
+
+// WebIDL "a promise resolved with" a value: a new promise resolved with it.
+// For a promise or thenable, its reactions run one microtask after the
+// value's (two if the value settles before the resolution job subscribes
+// to it), where PromiseResolve adopts a native promise as is. The readable
+// and writable controllers settle their start() results this way, as the
+// transformer's cancel and flush are (transform.ts); that timing is
+// observable, as in WPT transform-streams/cancel.any.js.
+function promiseResolvedWith(value: unknown): Promise<void> {
+  const { promise, resolve } =
+    PromiseWithResolvers() as PromiseWithResolversType<void>;
+  resolve(value as void);
+  return promise;
+}
 
 function toStringTagProperty(tag: string): PropertyDescriptor {
   return {
@@ -66,6 +87,26 @@ function normalizeExpectedLength(value: unknown): bigint | undefined {
   }
   // Truncates, as length is finite and non-negative.
   return BigInt(length - (length % 1));
+}
+
+// Converts a source's autoAllocateChunkSize as WebIDL converts an
+// [EnforceRange] unsigned long long: ToNumber, then NaN, ±Infinity and a
+// result outside [0, 2^53 - 1] are a TypeError, and a fraction truncates.
+// undefined means none. Zero passes: the byte controller rejects it itself,
+// after the highWaterMark, as the spec does.
+function convertAutoAllocateChunkSize(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  // Unary plus is ToNumber (see normalizeExpectedLength).
+  const size = +(value as number);
+  // The truncated value lies in [0, 2^53 - 1] exactly when the value lies
+  // in (-1, 2^53). NaN fails both comparisons.
+  if (!(size > -1 && size < 2 ** 53)) {
+    throw new TypeError(
+      'autoAllocateChunkSize must be a finite number from 0 to 2^53 - 1'
+    );
+  }
+  // Truncates, and turns -0 into 0.
+  return size - (size % 1);
 }
 
 // WebIDL's check that a value is an object, a function included: null and
@@ -153,11 +194,140 @@ function extractSizeAlgorithm<T>(
   return (chunk: T) => callSize(undefined, chunk);
 }
 
+// WebIDL's conversion of an optional callback member of a source, sink or
+// transformer: undefined means none, and anything else must be callable.
+// `name` names the member in the TypeError.
+function convertCallback<F>(value: F | undefined, name: string): F | undefined {
+  if (value !== undefined && typeof value !== 'function') {
+    throw new TypeError(`${name} must be a function`);
+  }
+  return value;
+}
+
+// An underlying sink as WebIDL converts it to an UnderlyingSink dictionary,
+// before the constructor checks anything: every member read once, in
+// lexicographic order, each callback checked. type is kept as read, for the
+// WritableStream constructor to check. The callbacks still run with the
+// sink itself as their receiver.
+export interface UnderlyingSinkDict<W> {
+  abort: UnderlyingSink<W>['abort'];
+  close: UnderlyingSink<W>['close'];
+  start: UnderlyingSink<W>['start'];
+  type: unknown;
+  write: UnderlyingSink<W>['write'];
+}
+
+function convertUnderlyingSink<W>(
+  sink: UnderlyingSink<W>
+): UnderlyingSinkDict<W> {
+  // The members are read in the order listed.
+  return {
+    __proto__: kNullProtoObject,
+    abort: convertCallback(sink.abort, 'underlyingSink.abort'),
+    close: convertCallback(sink.close, 'underlyingSink.close'),
+    start: convertCallback(sink.start, 'underlyingSink.start'),
+    type: (sink as { type?: unknown }).type,
+    write: convertCallback(sink.write, 'underlyingSink.write'),
+  } as UnderlyingSinkDict<W>;
+}
+
+// A transformer as WebIDL converts it to a Transformer dictionary, before
+// the constructor checks anything: every member read once, in
+// lexicographic order, each callback checked, and the expectedLength
+// extension converted. readableType and writableType are kept as read, for
+// the TransformStream constructor to check. The callbacks still run with
+// the transformer itself as their receiver.
+interface TransformerDict<I, O> {
+  cancel: Transformer<I, O>['cancel'];
+  expectedLength: bigint | undefined;
+  flush: Transformer<I, O>['flush'];
+  readableType: unknown;
+  start: Transformer<I, O>['start'];
+  transform: Transformer<I, O>['transform'];
+  writableType: unknown;
+}
+
+function convertTransformer<I, O>(
+  transformer: Transformer<I, O>
+): TransformerDict<I, O> {
+  const members = transformer as {
+    expectedLength?: unknown;
+    readableType?: unknown;
+    writableType?: unknown;
+  };
+  // The members are read in the order listed.
+  return {
+    __proto__: kNullProtoObject,
+    cancel: convertCallback(transformer.cancel, 'transformer.cancel'),
+    expectedLength: normalizeExpectedLength(members.expectedLength),
+    flush: convertCallback(transformer.flush, 'transformer.flush'),
+    readableType: members.readableType,
+    start: convertCallback(transformer.start, 'transformer.start'),
+    transform: convertCallback(transformer.transform, 'transformer.transform'),
+    writableType: members.writableType,
+  } as TransformerDict<I, O>;
+}
+
+// WebIDL's conversion of the ReadableStreamType enum, whose one value is
+// 'bytes': ToString, so an object's toString() runs, then any other string
+// is a TypeError. undefined means absent.
+function convertReadableStreamType(value: unknown): 'bytes' | undefined {
+  if (value === undefined) return undefined;
+  const type = `${value as string}`;
+  if (type !== 'bytes') {
+    throw new TypeError(`Invalid underlying source type: ${type}`);
+  }
+  return type;
+}
+
+// An underlying source as WebIDL converts it to an UnderlyingSource
+// dictionary, before the constructor checks anything: every member read
+// once, in lexicographic order, each callback checked, type converted as
+// its enum, and autoAllocateChunkSize and the expectedLength extension
+// converted, on a default source too, although only a byte source uses
+// them. The callbacks still run with the source itself as their receiver.
+// S narrows the callbacks to one kind of source, once type is known.
+export interface UnderlyingSourceDict<
+  R,
+  S extends UnderlyingSource<R> = UnderlyingSource<R>,
+> {
+  autoAllocateChunkSize: number | undefined;
+  cancel: S['cancel'];
+  expectedLength: bigint | undefined;
+  pull: S['pull'];
+  start: S['start'];
+  type: 'bytes' | undefined;
+}
+
+function convertUnderlyingSource<R>(
+  source: UnderlyingSource<R>
+): UnderlyingSourceDict<R> {
+  const members = source as {
+    autoAllocateChunkSize?: unknown;
+    expectedLength?: unknown;
+    type?: unknown;
+  };
+  // The members are read in the order listed.
+  return {
+    __proto__: kNullProtoObject,
+    autoAllocateChunkSize: convertAutoAllocateChunkSize(
+      members.autoAllocateChunkSize
+    ),
+    cancel: convertCallback(source.cancel, 'underlyingSource.cancel'),
+    expectedLength: normalizeExpectedLength(members.expectedLength),
+    pull: convertCallback(source.pull, 'underlyingSource.pull'),
+    start: convertCallback(source.start, 'underlyingSource.start'),
+    type: convertReadableStreamType(members.type),
+  } as UnderlyingSourceDict<R>;
+}
+
 export type CommonHelpers = {
   isActualObject: typeof isActualObject;
   kNullProtoObject: typeof kNullProtoObject;
   kEnumerable: typeof kEnumerable;
   toStringTagProperty: typeof toStringTagProperty;
+  promiseResolvedWith: typeof promiseResolvedWith;
+  convertCallback: typeof convertCallback;
   normalizeExpectedLength: typeof normalizeExpectedLength;
   requireObject: typeof requireObject;
   toDictionary: typeof toDictionary;
@@ -166,6 +336,9 @@ export type CommonHelpers = {
   convertHighWaterMark: typeof convertHighWaterMark;
   extractHighWaterMark: typeof extractHighWaterMark;
   extractSizeAlgorithm: typeof extractSizeAlgorithm;
+  convertUnderlyingSink: typeof convertUnderlyingSink;
+  convertTransformer: typeof convertTransformer;
+  convertUnderlyingSource: typeof convertUnderlyingSource;
 };
 
 module.exports = ObjectFreeze({
@@ -173,6 +346,8 @@ module.exports = ObjectFreeze({
   kNullProtoObject,
   kEnumerable,
   toStringTagProperty,
+  promiseResolvedWith,
+  convertCallback,
   normalizeExpectedLength,
   requireObject,
   toDictionary,
@@ -181,4 +356,7 @@ module.exports = ObjectFreeze({
   convertHighWaterMark,
   extractHighWaterMark,
   extractSizeAlgorithm,
+  convertUnderlyingSink,
+  convertTransformer,
+  convertUnderlyingSource,
 });

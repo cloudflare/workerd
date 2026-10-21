@@ -180,6 +180,11 @@ fn run_command(args: args::Main, executable: Option<Executable>) -> workerd_serv
                 watching(process),
             )
         }
+        args::Command::Bench {
+            config,
+            serve_or_test,
+            bench,
+        } => run_bench(verbose, config, &serve_or_test, bench, executable),
         args::Command::PyodideLock => {
             println!("{}", ffi::pyodide_lock()?);
             Ok(0)
@@ -221,6 +226,32 @@ fn run_compile(
         process.write_compiled_binary(&config.into_words())
     };
     written.unwrap_or_else(|error| usage_error::<T>(format!("writing to stdout: {error}")));
+}
+
+/// `workerd bench`: the benchmarks of the config.
+fn run_bench(
+    verbose: bool,
+    config: args::ConfigFileArgs,
+    serve_or_test: &args::ServeOrTestArgs,
+    mut bench: args::BenchArgs,
+    executable: Option<Executable>,
+) -> workerd_server::Result<i32> {
+    type T = args::Main;
+
+    check_serve_or_test::<T>(serve_or_test);
+    let filter = bench.filter.take().unwrap_or_default();
+    let watcher = watcher::<T>(serve_or_test, executable.as_ref());
+    let process = Process::new(executable, watcher, Vec::new());
+    let config = load_config::<T>(config, filter.test.const_name.clone(), &process);
+    entry::bench(
+        verbose,
+        config.into_words(),
+        serve_or_test.into(),
+        bench.options(filter.case_pattern),
+        run_options(serve_or_test),
+        patterns(filter.test),
+        watching(process),
+    )
 }
 
 /// Runs a synthesized Python worker's tests with a baseline snapshot saved to `output_directory`.
@@ -445,7 +476,7 @@ fn serve_options<T: CommandFactory>(
     (options, inherited)
 }
 
-/// The options `serve` and `test` share: `--directory-path`, `--external-addr` and
+/// The options `serve`, `test` and `bench` share: `--directory-path`, `--external-addr` and
 /// `--inspector-addr`.
 fn run_options(serve_or_test: &args::ServeOrTestArgs) -> RunOptions {
     RunOptions {

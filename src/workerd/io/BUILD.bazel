@@ -72,6 +72,7 @@ wd_cc_library(
     implementation_deps = [
         ":async-trace-perfetto",
         "//src/per_isolate",
+        "//src/rust/histogram",
         "//src/rust/jsg",
         "//src/workerd/api:compression",
         "//src/workerd/api:crypto-crc-impl",
@@ -108,6 +109,7 @@ wd_cc_library(
         ":observer",
         ":release-version",
         ":trace",
+        ":tracked-wasm-instance",
         ":wasm-instantiate-shim",
         ":worker-interface",
         ":worker-source",
@@ -385,15 +387,28 @@ wd_cc_library(
 
 wd_cc_library(
     name = "limit-enforcer",
-    srcs = ["tracked-wasm-instance.c++"],
     hdrs = [
         "limit-enforcer.h",
-        "tracked-wasm-instance.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":outcome_capnp",
-        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@workerd-v8//:v8",
+    ],
+)
+
+wd_cc_library(
+    name = "tracked-wasm-instance",
+    srcs = ["tracked-wasm-instance.c++"],
+    hdrs = [
+        "tracked-wasm-instance.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
     ],
 )
 
@@ -418,6 +433,7 @@ wd_cc_library(
     hdrs = ["worker-interface.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":bench_capnp",
         ":frankenvalue_capnp",
         ":trace",
         ":worker-interface_capnp",
@@ -494,6 +510,8 @@ wd_capnp_library(
 )
 
 wd_capnp_library(src = "actor-storage.capnp")
+
+wd_capnp_library(src = "bench.capnp")
 
 wd_capnp_library(src = "outcome.capnp")
 
@@ -629,7 +647,7 @@ wd_test(
 kj_test(
     src = "tracked-wasm-instance-test.c++",
     deps = [
-        ":limit-enforcer",
+        ":tracked-wasm-instance",
     ],
 )
 
@@ -705,6 +723,14 @@ kj_test(
 )
 
 kj_test(
+    src = "trace-scope-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "io-own-test.c++",
     deps = [
         ":io",
@@ -714,6 +740,14 @@ kj_test(
 
 kj_test(
     src = "io-context-abort-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "worker-code-cache-test.c++",
     deps = [
         ":io",
         "//src/workerd/tests:test-fixture",
