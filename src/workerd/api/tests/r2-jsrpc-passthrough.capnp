@@ -24,11 +24,14 @@ const userModules :List(Workerd.Worker.Module) = [
 ];
 
 # Exports ObservedR2Binding and the HTTP mock, but no test handlers, so the test runner does not
-# run the tests exported by r2-test.js in this service.
+# run the tests exported by r2-test.js in this service. ObservedR2Binding is compiled from
+# r2-binding-service/r2-observed-binding.ts.
 const passthroughModules :List(Workerd.Worker.Module) = [
   ( name = "worker",
-    esModule = "import mock, { ObservedR2Binding } from './r2-test.js'; export { ObservedR2Binding }; export default { fetch: mock.fetch };" ),
+    esModule = "import mock from './r2-test.js'; export { ObservedR2Binding } from './r2-observed-binding.js'; export default { fetch: mock.fetch };" ),
   ( name = "r2-test.js", esModule = embed "r2-test.js" ),
+  ( name = "r2-observed-binding.js",
+    esModule = embed "r2-binding-service/r2-observed-binding.js" ),
 ];
 
 # r2_list_honor_include.

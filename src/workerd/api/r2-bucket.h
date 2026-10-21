@@ -585,6 +585,13 @@ class R2Bucket: public jsg::Object {
     JSG_STRUCT(objects, truncated, cursor, delimitedPrefixes);
   };
 
+  // The backing entrypoint's createMultipartUpload() reply, which must be `{ uploadId }`. A named
+  // field rather than a bare string, so an implementation cannot return some other string (such
+  // as the key) by mistake. NonCoercible so that a non-string uploadId is rejected rather than
+  // stringified. A Dict rather than a JSG_STRUCT because structs must be registered in the
+  // isolate's type list, which is at the compiler's fold-expression nesting limit.
+  using CreateMultipartUploadBackendResult = jsg::Dict<jsg::NonCoercible<kj::String>>;
+
   struct ListOptions {
     jsg::Optional<int> limit;
     jsg::Optional<jsg::NonCoercible<kj::String>> prefix;
@@ -672,7 +679,8 @@ class R2Bucket: public jsg::Object {
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
       const jsg::TypeHandler<
           jsg::Function<jsg::Value(kj::String, jsg::Optional<MultipartOptions>)>>& createFnHandler,
-      const jsg::TypeHandler<jsg::Promise<jsg::NonCoercible<kj::String>>>& uploadIdHandler);
+      const jsg::TypeHandler<jsg::Promise<CreateMultipartUploadBackendResult>>&
+          createResultHandler);
   jsg::Promise<ListResult> listRpc(jsg::Lock& js,
       jsg::Optional<ListOptions> options,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,

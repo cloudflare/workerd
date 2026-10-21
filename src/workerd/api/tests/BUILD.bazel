@@ -1,6 +1,7 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//:build/lint_test.bzl", "lint_test")
 load("//:build/wasm_tools_parse.bzl", "wasm_tools_parse")
 load("//:build/wd_bench.bzl", "wd_bench")
 load("//:build/wd_test.bzl", "wd_cli_test", "wd_test")
@@ -95,6 +96,35 @@ ts_project(
     composite = True,
     tsconfig = ":ts_config",
     deps = ["//src/node:node@tsproject"],
+)
+
+# Type-checks the R2 JSRPC binding contract and its test implementation against the Workers types
+# in the checked-in snapshot. Kept apart from :ts_project because the snapshot's globals conflict
+# with the DOM, WebWorker, and Node.js types that project uses.
+ts_config(
+    name = "r2_binding_service_ts_config",
+    src = "r2-binding-service/tsconfig.json",
+    deps = ["@workerd//tools:base-tsconfig"],
+)
+
+ts_project(
+    name = "r2_binding_service_ts_project",
+    srcs = glob(["r2-binding-service/*.ts"]),
+    composite = True,
+    tsconfig = ":r2_binding_service_ts_config",
+    deps = ["//types:generated_snapshot_experimental"],
+)
+
+lint_test(
+    name = "r2_binding_service",
+    srcs = glob(["r2-binding-service/*.ts"]),
+    data = ["//types:generated-snapshot/experimental/index.d.ts"],
+    eslintrc_json = "@workerd//tools:base.eslint.config.mjs",
+    no_copy_to_bin = [
+        "@workerd//tools:base.eslint.config.mjs",
+        "//types:generated-snapshot/experimental/index.d.ts",
+    ],
+    tsconfig_json = "r2-binding-service/tsconfig.json",
 )
 
 wd_test(
@@ -549,6 +579,7 @@ wd_test(
     data = [
         "r2-jsrpc-serialization-test.js",
         "r2-test.js",
+        ":r2_binding_service_ts_project",
     ],
 )
 
@@ -559,6 +590,7 @@ wd_test(
         "r2-jsrpc-serialization-test.js",
         "r2-jsrpc-serialization-test.wd-test",
         "r2-test.js",
+        ":r2_binding_service_ts_project",
     ],
     lint = False,
 )
@@ -569,6 +601,7 @@ wd_test(
     data = [
         "r2-jsrpc-passthrough.capnp",
         "r2-test.js",
+        ":r2_binding_service_ts_project",
     ],
 )
 
@@ -578,6 +611,7 @@ wd_test(
     data = [
         "r2-jsrpc-passthrough.capnp",
         "r2-test.js",
+        ":r2_binding_service_ts_project",
     ],
     generate_all_compat_flags_variant = False,
 )
@@ -589,6 +623,7 @@ wd_test(
     data = [
         "r2-jsrpc-passthrough.capnp",
         "r2-test.js",
+        ":r2_binding_service_ts_project",
     ],
 )
 

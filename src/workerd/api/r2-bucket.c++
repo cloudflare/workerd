@@ -1019,7 +1019,7 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUploadRpc(jsg
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
     const jsg::TypeHandler<jsg::Function<jsg::Value(kj::String, jsg::Optional<MultipartOptions>)>>&
         createFnHandler,
-    const jsg::TypeHandler<jsg::Promise<jsg::NonCoercible<kj::String>>>& uploadIdHandler) {
+    const jsg::TypeHandler<jsg::Promise<CreateMultipartUploadBackendResult>>& createResultHandler) {
   return js.evalNow([&] {
     R2MultipartUpload::Metadata metadata;
     KJ_IF_SOME(o, options) {
@@ -1044,17 +1044,20 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUploadRpc(jsg
       }
     }
 
-    // The R2GW returns only the upload ID; the key, bucket, and metadata are already known here.
-    // NonCoercible so a non-string reply is rejected as malformed rather than stringified.
-    auto uploadPromise = callR2RpcMethod<jsg::NonCoercible<kj::String>>(js,
+    // The backend replies with only `{ uploadId }`; the key, bucket, and metadata are already
+    // known here. Any other reply shape, including a bare string or additional fields, is
+    // rejected as malformed.
+    auto uploadPromise = callR2RpcMethod<CreateMultipartUploadBackendResult>(js,
         getRpcMethod(js, "createMultipartUpload"_kj), rpcPropHandler, createFnHandler,
-        uploadIdHandler, kj::str(key), kj::mv(options));
+        createResultHandler, kj::str(key), kj::mv(options));
 
     return uploadPromise.then(js,
         [bucket = JSG_THIS, key = kj::mv(key), metadata = kj::mv(metadata)](
-            jsg::Lock& js, jsg::NonCoercible<kj::String> uploadId) mutable {
+            jsg::Lock& js, CreateMultipartUploadBackendResult result) mutable {
+      KJ_ASSERT(result.fields.size() == 1 && result.fields[0].name == "uploadId"_kj,
+          "Malformed R2 createMultipartUpload RPC result: expected only an uploadId.");
       return js.alloc<R2MultipartUpload>(
-          kj::mv(key), kj::mv(uploadId.value), kj::mv(bucket), kj::mv(metadata));
+          kj::mv(key), kj::mv(result.fields[0].value.value), kj::mv(bucket), kj::mv(metadata));
     });
   });
 }
