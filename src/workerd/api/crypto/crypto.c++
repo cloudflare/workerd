@@ -104,8 +104,7 @@ namespace {
 //   somewhere in CryptoKey, perhaps implicitly in the default implementations of the
 //   encrypt/decrypt/sign/verify/etc. functions.
 //
-// Note that SubtleCrypto.digest() is special. It is not a key-based operation and we only support
-// one hash family, SHA, so its implementation is non-virtual.
+// SubtleCrypto.digest() is not a key-based operation, so its implementation is non-virtual.
 //
 // NOTE(perf): The SubtleCrypto interface is asynchronous, but all of our implementations perform
 //   the crypto synchronously before returning. In theory, we could be performing bulk crypto in a
@@ -120,6 +119,15 @@ namespace {
 
 // =======================================================================================
 // Registered algorithms
+
+const EVP_MD* lookupSubtleDigestAlgorithm(kj::StringPtr name) {
+  if (Worker::Api::current().getFeatureFlags().getWebCryptoModernAlgorithms()) {
+    if (strcasecmp(name.cStr(), "SHA3-256") == 0) return EVP_sha3_256();
+    if (strcasecmp(name.cStr(), "SHA3-384") == 0) return EVP_sha3_384();
+    if (strcasecmp(name.cStr(), "SHA3-512") == 0) return EVP_sha3_512();
+  }
+  return lookupDigestAlgorithm(name).second;
+}
 
 static kj::Maybe<const CryptoAlgorithm&> lookupAlgorithm(kj::StringPtr name) {
   static const std::set<CryptoAlgorithm> ALGORITHMS = {
@@ -759,7 +767,7 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::digest(
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
   return js.evalNow([&] {
-    auto type = lookupDigestAlgorithm(algorithm.name).second;
+    auto type = lookupSubtleDigestAlgorithm(algorithm.name);
 
     auto digestCtx = kj::disposeWith<EVP_MD_CTX_free>(EVP_MD_CTX_new());
     KJ_ASSERT(digestCtx.get() != nullptr);
@@ -1207,7 +1215,7 @@ bool SubtleCrypto::supports(jsg::Lock& js,
             auto normalizedAlgorithm =
                 normalizeSupportAlgorithm(js, algorithmValue, digestAlgorithmHandler);
             KJ_IF_SOME(exception, kj::runCatchingExceptions([&] {
-              lookupDigestAlgorithm(normalizedAlgorithm.name);
+              lookupSubtleDigestAlgorithm(normalizedAlgorithm.name);
             })) {
               (void)exception;
               return false;
