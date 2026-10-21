@@ -101,8 +101,6 @@ void wrappable_visit_global(GcVisitor* visitor, uintptr_t* global, TracedReferen
 void traced_reference_reset(TracedReference& traced);
 
 // Local<T>
-void local_drop(Local value);
-Local local_clone(const Local& value);
 Global local_to_global(Isolate* isolate, Local value);
 Local local_new_number(Isolate* isolate, double value);
 Local local_new_string(Isolate* isolate, ::rust::Str value);

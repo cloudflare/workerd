@@ -104,15 +104,6 @@ size_t Wrappable::jsgGetMemorySelfSize() const {
 }
 
 // Local<T>
-void local_drop(Local value) {
-  // Convert from FFI representation and let v8::Local destructor handle cleanup
-  local_from_ffi<v8::Value>(kj::mv(value));
-}
-
-Local local_clone(const Local& value) {
-  return Local{.ptr = value.ptr};
-}
-
 Global local_to_global(Isolate* isolate, Local value) {
   v8::Global<v8::Value> global(isolate, local_from_ffi<v8::Value>(kj::mv(value)));
   return to_ffi(kj::mv(global));
