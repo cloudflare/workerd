@@ -4,7 +4,7 @@
 
 #include "ffi.h"
 
-#include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/features.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/rust/jsg-test/lib.rs.h>
 #include <workerd/rust/jsg/ffi-inl.h>
@@ -42,24 +42,30 @@ static ::workerd::jsg::V8System& getV8System() {
   return v8System;
 }
 
-TestHarness::TestHarness(::workerd::jsg::V8StackScope&)
+TestHarness::TestHarness(::workerd::jsg::V8StackScope&, ::rust::Slice<const uint8_t> flags)
     : isolate(kj::heap<TestIsolate>(getV8System(), kj::heap<::workerd::jsg::IsolateObserver>())),
       locker(isolate->getIsolate()),
       isolateScope(isolate->getIsolate()),
-      realm([&] {
-        // Build default (all-false) feature flags for the test realm.
-        capnp::MallocMessageBuilder flagsMessage;
-        flagsMessage.initRoot<CompatibilityFlags>();
-        auto words = capnp::canonicalize(flagsMessage.getRoot<CompatibilityFlags>().asReader());
-        return ::workerd::rust::jsg::realm_create(
-            isolate->getIsolate(), words.asBytes().as<Rust>());
-      }()) {
-  isolate->getIsolate()->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &*realm);
+      realm(::workerd::rust::jsg::realm_create(isolate->getIsolate(), flags)) {
+  auto* v8Isolate = isolate->getIsolate();
+  v8Isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &*realm);
+
+  KJ_REQUIRE(
+      flags.size() % sizeof(capnp::word) == 0, "flags size must be a multiple of the word size");
+  auto words = kj::heapArray<capnp::word>(flags.size() / sizeof(capnp::word));
+  words.asBytes().copyFrom(kj::arrayPtr(flags.data(), flags.size()));
+  // A canonical message is a single segment with no segment table.
+  kj::ArrayPtr<const capnp::word> segments[1] = {words};
+  capnp::SegmentArrayMessageReader reader(segments);
+  isolate->runInLockScope([&](TestIsolate::Lock& lock) {
+    configureJsgIsolate(lock, reader.getRoot<CompatibilityFlags>());
+  });
 }
 
-kj::Own<TestHarness> create_test_harness() {
-  return ::workerd::jsg::runInV8Stack(
-      [](::workerd::jsg::V8StackScope& stackScope) { return kj::heap<TestHarness>(stackScope); });
+kj::Own<TestHarness> create_test_harness(::rust::Slice<const uint8_t> flags) {
+  return ::workerd::jsg::runInV8Stack([flags](::workerd::jsg::V8StackScope& stackScope) {
+    return kj::heap<TestHarness>(stackScope, flags);
+  });
 }
 
 EvalContext::EvalContext(v8::Isolate* isolate, v8::Local<v8::Context> context)

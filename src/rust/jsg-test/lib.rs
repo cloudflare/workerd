@@ -5,6 +5,7 @@
 use std::pin::Pin;
 
 use jsg::FromJS;
+use jsg::feature_flags::compatibility_flags;
 use jsg::v8;
 use kj_rs::KjOwn;
 
@@ -38,7 +39,7 @@ mod ffi {
         type TestHarness;
         type EvalContext;
 
-        pub unsafe fn create_test_harness() -> KjOwn<TestHarness>;
+        pub unsafe fn create_test_harness(flags: &[u8]) -> Result<KjOwn<TestHarness>>;
         pub unsafe fn run_in_context(
             self: &TestHarness,
             data: usize, /* callback */
@@ -188,9 +189,30 @@ impl EvalContext<'_> {
 }
 
 impl Harness {
+    /// Creates a harness whose compatibility flags are all false.
     pub fn new() -> Self {
+        Self::with_flags(|_| {})
+    }
+
+    /// Creates a harness whose compatibility flags are set by `set_flags`.
+    ///
+    /// All flags start false; no compatibility date or flag implications are applied.
+    /// The flags are visible through `Lock::feature_flags()` and, as in a real worker, also
+    /// configure the JSG isolate through the same flag handling used by workers.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the harness cannot be created.
+    pub fn with_flags(set_flags: impl FnOnce(compatibility_flags::Builder<'_>)) -> Self {
+        let mut message = capnp::message::Builder::new_default();
+        set_flags(message.init_root::<compatibility_flags::Builder<'_>>());
+        let words = message
+            .into_reader()
+            .canonicalize()
+            .expect("canonicalizing a freshly built message cannot fail");
+        let bytes = capnp::Word::words_to_bytes(&words);
         // SAFETY: create_test_harness initializes the V8 platform and returns a valid harness.
-        Self(unsafe { ffi::create_test_harness() })
+        Self(unsafe { ffi::create_test_harness(bytes) }.expect("failed to create test harness"))
     }
 
     /// Runs a callback within a V8 context.

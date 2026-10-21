@@ -183,6 +183,27 @@ if lock.feature_flags().get_node_js_compat() {
 
 `feature_flags()` returns a capnp-generated `compatibility_flags::Reader` with a getter for each boolean flag (e.g., `get_node_js_compat()`, `get_url_standard()`, `get_fetch_refuses_unknown_protocols()`).
 
+### Testing with flags
+
+`jsg_test::Harness::new()` starts with every compatibility flag false. Use `Harness::with_flags()`
+to set individual flags before creating resource templates:
+
+```rust
+let harness = jsg_test::Harness::with_flags(|mut flags| {
+    flags.set_node_js_compat(true);
+    flags.set_set_to_string_tag(true);
+});
+harness.run_in_context(|lock, _ctx| {
+    assert!(lock.feature_flags().get_node_js_compat());
+    Ok(())
+});
+```
+
+The harness sets raw flag values; it does not apply a compatibility date or resolve flag
+implications. It uses the same `configureJsgIsolate()` helper as workers to apply isolate-level
+JSG settings, including template behavior, Node.js compatibility, and module settings.
+It does not reproduce worker-specific initialization such as logging, inspectors, or limits.
+
 ### How it works
 
 1. During worker initialization, C++ canonicalizes the worker's `CompatibilityFlags` via `capnp::canonicalize()` and passes the bytes to `realm_create()`, which parses them once and stores the result in the per-context `Realm`.
