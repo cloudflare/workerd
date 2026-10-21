@@ -4,7 +4,7 @@
 
 #include "ffi.h"
 
-#include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/features.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/rust/jsg-test/lib.rs.h>
 #include <workerd/rust/jsg/ffi-inl.h>
@@ -50,8 +50,6 @@ TestHarness::TestHarness(::workerd::jsg::V8StackScope&, ::rust::Slice<const uint
   auto* v8Isolate = isolate->getIsolate();
   v8Isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &*realm);
 
-  // Mirrors the subset of `Worker::Isolate`'s flag handling that affects how resource
-  // templates are built.
   KJ_REQUIRE(
       flags.size() % sizeof(capnp::word) == 0, "flags size must be a multiple of the word size");
   auto words = kj::heapArray<capnp::word>(flags.size() / sizeof(capnp::word));
@@ -59,17 +57,9 @@ TestHarness::TestHarness(::workerd::jsg::V8StackScope&, ::rust::Slice<const uint
   // A canonical message is a single segment with no segment table.
   kj::ArrayPtr<const capnp::word> segments[1] = {words};
   capnp::SegmentArrayMessageReader reader(segments);
-  auto features = reader.getRoot<CompatibilityFlags>();
-  auto& isolateBase = ::workerd::jsg::IsolateBase::from(v8Isolate);
-  if (features.getSetToStringTag()) {
-    isolateBase.enableSetToStringTag();
-  }
-  if (features.getShouldSetImmutablePrototype() || features.getPythonWorkers()) {
-    isolateBase.enableSetImmutablePrototype();
-  }
-  if (features.getSpecCompliantPropertyAttributes()) {
-    isolateBase.enableSpecCompliantPropertyAttributes();
-  }
+  isolate->runInLockScope([&](TestIsolate::Lock& lock) {
+    configureJsgIsolate(lock, reader.getRoot<CompatibilityFlags>());
+  });
 }
 
 kj::Own<TestHarness> create_test_harness(::rust::Slice<const uint8_t> flags) {

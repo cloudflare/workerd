@@ -1246,42 +1246,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     }
     jsg::isolateRegisterExternalReference(lock->v8Isolate, jsg::getSyntheticModuleEvalRef());
 
-    lock->setCaptureThrowsAsRejections(features.getCaptureThrowsAsRejections());
-    // TODO(cleanup): Now that this list has grown significantly, we should probably
-    // refactor to pass all of the options in a single call instead of one by one.
-    if (features.getSetToStringTag()) {
-      lock->setToStringTag();
-    }
-    if (features.getShouldSetImmutablePrototype() || features.getPythonWorkers()) {
-      lock->setImmutablePrototype();
-    }
-    if (features.getSpecCompliantPropertyAttributes()) {
-      lock->setSpecCompliantPropertyAttributes();
-    }
-    if (features.getNodeJsCompatV2()) {
-      lock->setNodeJsCompatEnabled();
-    }
-    if (features.getEnableNodeJsProcessV2()) {
-      lock->setNodeJsProcessV2Enabled();
-    }
-    if (features.getRequireReturnsDefaultExport()) {
-      lock->setRequireReturnsDefaultExportEnabled();
-    }
-    if (features.getThrowOnUnrecognizedImportAssertion()) {
-      lock->setThrowOnUnrecognizedImportAssertion();
-    }
-    if (features.getNoTopLevelAwaitInRequire()) {
-      lock->disableTopLevelAwait();
-    }
-    if (features.getEnhancedErrorSerialization()) {
-      lock->setUsingEnhancedErrorSerialization();
-    }
-    if (features.getFastJsgStruct()) {
-      lock->setUsingFastJsgStruct();
-    }
-    if (features.getWasmEsmIntegrationBuiltins()) {
-      lock->setWasmEsmIntegrationBuiltinsEnabled();
-    }
+    configureJsgIsolate(*lock, features);
 
     if (impl->inspector != kj::none || ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO)) {
       lock->setLoggerCallback([this](jsg::Lock& js, kj::StringPtr message) {

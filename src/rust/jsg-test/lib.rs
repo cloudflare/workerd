@@ -198,8 +198,7 @@ impl Harness {
     ///
     /// All flags start false; no compatibility date or flag implications are applied.
     /// The flags are visible through `Lock::feature_flags()` and, as in a real worker, also
-    /// select the isolate-level template behavior they control (`set_to_string_tag`,
-    /// `should_set_immutable_prototype` or `python_workers`, `spec_compliant_property_attributes`).
+    /// configure the JSG isolate through the same flag handling used by workers.
     ///
     /// # Panics
     ///

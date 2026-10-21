@@ -200,9 +200,9 @@ harness.run_in_context(|lock, _ctx| {
 ```
 
 The harness sets raw flag values; it does not apply a compatibility date or resolve flag
-implications. It also applies the isolate-level template switches for `set_to_string_tag`,
-`should_set_immutable_prototype` (also enabled by `python_workers`), and
-`spec_compliant_property_attributes`. It does not reproduce all worker initialization.
+implications. It uses the same `configureJsgIsolate()` helper as workers to apply isolate-level
+JSG settings, including template behavior, Node.js compatibility, and module settings.
+It does not reproduce worker-specific initialization such as logging, inspectors, or limits.
 
 ### How it works
 

@@ -18,7 +18,7 @@ wd_cc_library(
     srcs = ["ffi.c++"],
     implementation_deps = [
         ":lib.rs@cxx",
-        "//src/workerd/io:compatibility-date_capnp",
+        "//src/workerd/io:features",
         "@capnp-cpp//src/capnp:capnp",
     ],
     visibility = ["//visibility:public"],
