@@ -1595,7 +1595,7 @@ class NeuterableDatagramChannelImpl final: public NeuterableDatagramChannel {
         return *channel;
       }
       KJ_CASE_ONEOF(exception, kj::Exception) {
-        kj::throwFatalException(exception.clone());
+        kj::throwException(exception.clone());
       }
     }
     KJ_UNREACHABLE;

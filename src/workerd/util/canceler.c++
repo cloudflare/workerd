@@ -56,7 +56,7 @@ void ReleasingCanceler::cancel(const kj::Exception& exception) {
 
 void ReleasingCanceler::throwIfCanceled() {
   KJ_IF_SOME(ex, reason) {
-    kj::throwFatalException(ex.clone());
+    kj::throwException(ex.clone());
   }
 }
 

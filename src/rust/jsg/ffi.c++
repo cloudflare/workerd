@@ -441,7 +441,7 @@ static auto unwrapCoerce(v8::Isolate* isolate, Func&& fn) {
     return ::workerd::jsg::check(fn());
   }
   JSG_CATCH(error) {
-    kj::throwFatalException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
+    kj::throwException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
   };
 }
 
@@ -775,7 +775,7 @@ DEFINE_TYPED_ARRAY_UNWRAP(biguint64_array, BigUint64Array, uint64_t)
     }
   }
   JSG_CATCH(error) {
-    kj::throwFatalException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
+    kj::throwException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
   };
 
   return result;

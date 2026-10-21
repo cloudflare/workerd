@@ -104,7 +104,7 @@ kj::Exception getLastError() {
 
 int check(int rc) {
   if (rc == -1) {
-    kj::throwFatalException(getLastError());
+    kj::throwException(getLastError());
   }
   return rc;
 }
@@ -113,7 +113,7 @@ template <typename T>
 [[nodiscard]] T& check(T* ptr) {
   // Nodiscard, because this function typically checks references that must later be freed.
   if (ptr == nullptr) {
-    kj::throwFatalException(getLastError());
+    kj::throwException(getLastError());
   }
   return *ptr;
 }
@@ -537,7 +537,7 @@ kj::Promise<void> Rewriter::flushWrite() {
 
   KJ_IF_SOME(exception, maybeException) {
     inner->abort(exception.clone());
-    kj::throwFatalException(exception.clone());
+    kj::throwException(exception.clone());
   }
 }
 template <typename T, typename CType>
@@ -856,7 +856,7 @@ kj::Maybe<kj::String> Element::getAttribute(kj::String name) {
   }
 
   KJ_IF_SOME(exception, tryGetLastError()) {
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   }
 
   // No error, just doesn't exist.

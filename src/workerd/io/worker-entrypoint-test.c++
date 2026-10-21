@@ -27,7 +27,7 @@ class ThrowingIoChannelFactory final: public TestFixture::DummyIoChannelFactory 
   ThrowingIoChannelFactory(TimerChannel& timer): DummyIoChannelFactory(timer) {}
 
   kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) override {
-    kj::throwFatalException(KJ_EXCEPTION(FAILED, "channel creation failed"));
+    kj::throwException(KJ_EXCEPTION(FAILED, "channel creation failed"));
   }
 };
 
@@ -72,7 +72,7 @@ class ThrowingConnectResponse final: public kj::HttpService::ConnectResponse {
       kj::StringPtr statusText,
       const kj::HttpHeaders& headers,
       kj::Maybe<uint64_t> expectedBodySize) override {
-    kj::throwFatalException(KJ_EXCEPTION(FAILED, "connect rejection failed"));
+    kj::throwException(KJ_EXCEPTION(FAILED, "connect rejection failed"));
   }
 };
 
@@ -138,7 +138,7 @@ class RetryClaimObserver final: public RequestObserver {
     retryableAtClaim = retryable;
     jsEventsAtClaim = getJsEvents(jsg::Lock::current());
     KJ_IF_SOME(e, rejection) {
-      kj::throwFatalException(e.clone());
+      kj::throwException(e.clone());
     }
   }
 
@@ -168,7 +168,7 @@ class ThrowingResponse final: public kj::HttpService::Response {
       kj::StringPtr statusText,
       const kj::HttpHeaders& headers,
       kj::Maybe<uint64_t> expectedBodySize) override {
-    kj::throwFatalException(KJ_EXCEPTION(FAILED, "response send failed"));
+    kj::throwException(KJ_EXCEPTION(FAILED, "response send failed"));
   }
 
   kj::Own<kj::WebSocket> acceptWebSocket(const kj::HttpHeaders& headers) override {
@@ -186,7 +186,7 @@ class FailingCustomEvent final: public WorkerInterface::CustomEvent {
       bool isDynamicDispatch) override {
     incomingRequest->delivered();
     incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));
-    kj::throwFatalException(KJ_EXCEPTION(FAILED, "custom event failed"));
+    kj::throwException(KJ_EXCEPTION(FAILED, "custom event failed"));
   }
 
   kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
@@ -233,7 +233,7 @@ class RecordingObserver final: public RequestObserver, public WorkerInterface {
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception, FailureSource::OTHER);
-      kj::throwFatalException(kj::mv(exception));
+      kj::throwException(kj::mv(exception));
     }
   }
 

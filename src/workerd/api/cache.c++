@@ -501,7 +501,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
           traceContext.setTag("cache.response.success"_kjc, false);
           auto exception = kj::getCaughtExceptionAsKj();
           if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
-            kj::throwFatalException(kj::mv(exception));
+            kj::throwException(kj::mv(exception));
           }
           // If the origin or the cache disconnected, we don't treat this as an error, as put()
           // doesn't guarantee that it stores anything anyway.

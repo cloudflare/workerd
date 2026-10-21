@@ -1556,7 +1556,7 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
     auto& context = self.assertLive();
     // Re-check if context was aborted while we waited for the lock.
     KJ_IF_SOME(ex, context.abortException) {
-      kj::throwFatalException(ex.clone());
+      kj::throwException(ex.clone());
     }
 
     using Result = decltype(func(kj::instance<Worker::Lock&>()));
@@ -2066,7 +2066,7 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhileImpl(
             "A call to blockConcurrencyWhile() in a Durable Object waited for "
             "too long. The call was canceled and the Durable Object was reset.");
         e.setDetail(WALL_TIME_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
-        kj::throwFatalException(kj::mv(e));
+        kj::throwException(kj::mv(e));
       });
 
       return context.awaitJs(lock, kj::mv(promise)).exclusiveJoin(kj::mv(timeout));
@@ -2101,7 +2101,7 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhileImpl(
     // at this point.
     cs->failed(e);
 
-    kj::throwFatalException(kj::mv(e));
+    kj::throwException(kj::mv(e));
   }));
 
   return kj::mv(result);

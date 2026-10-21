@@ -102,7 +102,7 @@ class SyncThrowingSource final: public ReadableStreamSource {
   }
 
   kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
-    kj::throwFatalException(KJ_EXCEPTION(FAILED, "jsg.Error: sync read failed"));
+    kj::throwException(KJ_EXCEPTION(FAILED, "jsg.Error: sync read failed"));
   }
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
