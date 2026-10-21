@@ -1,0 +1,19 @@
+src/workerd/api/tests/cross-context-promise-test.js
+  s_9e291bb5d844d4::t_e8fc53b129ccdf 402-406
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "719c6967ea851fb1bb3e7f3bf9fb02653329c573",
+  "prompts": {},
+  "sessions": {
+    "s_9e291bb5d844d4": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ec5fadbe7ffe5kOVAieds3erCS",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Joaquim Silva <joaquim@cloudflare.com>"
+    }
+  }
+}
