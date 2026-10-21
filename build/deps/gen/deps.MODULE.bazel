@@ -15,10 +15,10 @@ archive_override(
     patches = [
         "//:patches/boringssl/0001-Expose-libdecrepit-so-NodeJS-can-use-it-for-ncrypto.patch",
     ],
-    sha256 = "55827fd521a666a60293d06dc0410524d5eff8eb7cda23fdb6e2b1d56a5d4a20",
-    strip_prefix = "google-boringssl-866a4b0",
+    sha256 = "218355340f67452cdc340a290f20ccf77c2c1638148fe28997c4f80568d836f4",
+    strip_prefix = "google-boringssl-6b482f5",
     type = "tgz",
-    url = "https://api.github.com/repos/google/boringssl/tarball/0.20260929.0",
+    url = "https://api.github.com/repos/google/boringssl/tarball/0.20261020.0",
 )
 
 # brotli
@@ -27,10 +27,10 @@ bazel_dep(name = "brotli", version = "1.2.0.bcr.3")
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
-    sha256 = "cc15b6f82a2c91ae15c52410305c7d0db7a81e1fb0d5add49fd8a9d5d4b3b179",
-    strip_prefix = "capnproto-capnproto-b5ee48b/c++",
+    sha256 = "8cbb3db9d61ea1f0da5ece22e98ef8d3d6d1518a1c57275f4c35c413a354474b",
+    strip_prefix = "capnproto-capnproto-a49c8fb/c++",
     type = "tgz",
-    url = "https://github.com/capnproto/capnproto/tarball/b5ee48b9f3586fc83af8c429623e2c0d2435ec59",
+    url = "https://github.com/capnproto/capnproto/tarball/a49c8fb48462987aafd612220de2d7a6c3f3d211",
 )
 use_repo(http, "capnp-cpp")
 
@@ -134,10 +134,10 @@ archive_override(
 http.archive(
     name = "simdutf",
     build_file = "//:build/BUILD.simdutf",
-    sha256 = "a1b1fc3a3a8358820438f663237e9f252ce5ad356ae283ac066dcc9212eaa4dc",
+    sha256 = "37a5df90b6e1a1e793d8aa7a2df9cee90c5d585dbbbb5d31afc1e56203c059fb",
     strip_prefix = "",
     type = "zip",
-    url = "https://github.com/simdutf/simdutf/releases/download/v9.2.1/singleheader.zip",
+    url = "https://github.com/simdutf/simdutf/releases/download/v9.3.2/singleheader.zip",
 )
 use_repo(http, "simdutf")
 

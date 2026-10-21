@@ -1101,6 +1101,10 @@ void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, jsg::Function<void(
     }
   }
 
+  // TODO(perf): Enqueue the task with the MicrotaskQueue::EnqueueMicrotask() overload that takes a
+  //   MicrotaskCallbackWithData and a v8::Data, instead of wrapping it in a new function. Every
+  //   v8::Function::New() call allocates a FunctionTemplateInfo in old space, so each call to
+  //   queueMicrotask() leaves objects behind that only a full GC frees.
   auto fn = js.wrapSimpleFunction(js.v8Context(),
       JSG_VISITABLE_LAMBDA(
           (this, fn = kj::mv(task), asyncTraceResource = kj::mv(asyncTraceResource)), (fn),
@@ -1110,35 +1114,39 @@ void ServiceWorkerGlobalScope::queueMicrotask(jsg::Lock& js, jsg::Function<void(
             KJ_DEFER(asyncTraceResource.release());
             asyncTraceResource.settle(AsyncOutcome::OK);
             AsyncTracker::CallbackScope asyncTraceScope(asyncTraceResource);
-            js.tryCatch([&] {
-              // The function won't be called with any arguments, so we can
-              // safely ignore anything passed in to args.
-              fn(js);
-            }, [&](jsg::Value exception) {
-              // The reportError call itself can potentially throw errors. Let's catch
-              // and report them as well.
-              js.tryCatch([&] { reportError(js, jsg::JsValue(exception.getHandle(js))); },
-                  [&](jsg::Value exception) {
-                // An error was thrown by the 'error' event handler. That's unfortunate.
-                // Let's log the error and just continue. It won't be possible to actually
-                // catch or handle this error so logging is really the only way to notify
-                // folks about it.
-                auto val = jsg::JsValue(exception.getHandle(js));
-                // If the value is an object that has a stack property, log that so we get
-                // the stack trace if it is an exception.
-                KJ_IF_SOME(obj, val.tryCast<jsg::JsObject>()) {
-                auto stack = obj.get(js, "stack"_kj);
-                if (!stack.isUndefined()) {
-                js.reportError(stack);
-                return;
-                }
-                } else {
-                }  // Here to avoid a compile warning
-                // Otherwise just log the stringified value generically.
-                js.reportError(val);
-              });
-            });
-          }));
+            JSG_TRY(js) {
+            // The function won't be called with any arguments, so we can
+            // safely ignore anything passed in to args.
+            fn(js);
+            }
+            JSG_CATCH(exception) {
+            // The reportError call itself can potentially throw errors. Let's catch
+            // and report them as well.
+            JSG_TRY(js) {
+            reportError(js, jsg::JsValue(exception.getHandle(js)));
+            }
+            JSG_CATCH(exception) {
+            // An error was thrown by the 'error' event handler. That's unfortunate.
+            // Let's log the error and just continue. It won't be possible to actually
+            // catch or handle this error so logging is really the only way to notify
+            // folks about it.
+            auto val = jsg::JsValue(exception.getHandle(js));
+            // If the value is an object that has a stack property, log that so we get
+            // the stack trace if it is an exception.
+            KJ_IF_SOME(obj, val.tryCast<jsg::JsObject>()) {
+            auto stack = obj.get(js, "stack"_kj);
+            if (!stack.isUndefined()) {
+            js.reportError(stack);
+            return;
+            }
+            } else {
+            }  // To squash the lint warning
+            // Otherwise just log the stringified value generically.
+            js.reportError(val);
+            };
+            };
+          }),
+      jsg::Once::YES);
 
   js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate, fn);
 }

@@ -32,12 +32,39 @@ In order to install dependencies, please run the following command. Also refer t
 just prepare-ubuntu
 ```
 
-## Code Formatting
+## Formatting and Linting
 
-workerd code is automatically formatted by clang-format. Run `python ./tools/cross/format.py` to reformat the code
-or use the appropriate IDE extension.
-While building workerd currently requires LLVM 22 or above, formatting requires clang-format 18.1.8 as different
-versions result in different format suggestions. This is automatically fetched using Bazel and does not need to be
-installed manually.
+`just format` formats the repository using clang-format, prettier, ruff, buildifier, and rustfmt.
+`tools/cross/format.json` defines which formatter applies to which files.
 
-Code formatting is checked before check-in and during `Linting` CI build.
+```sh
+just format                    # everything
+just format path/to/file ...   # specific files
+just format-head               # files changed since HEAD~
+```
+
+The formatters are built by Bazel at pinned versions, so nothing needs to be installed beyond what
+`just prepare` sets up. To check without modifying files, run `python3 tools/cross/format.py --check`.
+
+### Pre-commit hook
+
+To enable the pre-commit hook, run:
+
+```sh
+git config core.hooksPath githooks
+```
+
+The hook rejects commits that add `KJ_DBG` and checks formatting of staged files. Skip it with
+`git commit --no-verify`.
+
+### CI
+
+CI checks formatting with `format.py --check`, runs clippy and rustfmt via `--config=lint`, and runs
+ESLint as `<target>@eslint` test targets.
+
+### Other linters
+
+- `just lint`: ESLint
+- `just clippy [package]`: Rust clippy; see [src/rust/AGENTS.md](../src/rust/AGENTS.md)
+- `just clang-tidy [target]`: clang-tidy with workerd's custom checks; see
+  [build/AGENTS.md](../build/AGENTS.md)

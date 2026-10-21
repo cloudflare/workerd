@@ -787,6 +787,14 @@ kj_test(
 )
 
 kj_test(
+    src = "worker-code-cache-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "io-context-task-test.c++",
     deps = [
         ":io",

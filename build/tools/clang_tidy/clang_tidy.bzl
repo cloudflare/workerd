@@ -37,6 +37,11 @@ def _clang_tidy_aspect_impl(target, ctx):
     if not CcInfo in target:
         return []
 
+    # disable clang tidy if no-clang-tidy tag is defined.
+    # todo: figure out a better way to control clang tidy on a per-target basis.
+    if "no-clang-tidy" in ctx.rule.attr.tags:
+        return []
+
     cc_toolchain = find_cc_toolchain(ctx)
     feature_configuration = cc_common.configure_features(
         ctx = ctx,
@@ -60,63 +65,28 @@ def _clang_tidy_aspect_impl(target, ctx):
     # we use $location in our copts, expand it
     rule_copts = [ctx.expand_location(opt) for opt in rule_copts]
 
-    srcs = []
-    if hasattr(ctx.rule.attr, "srcs"):
-        for src in ctx.rule.attr.srcs:
-            srcs += [
-                src
-                for src in src.files.to_list()
-                if src.is_source and src.short_path.endswith((".c++", ".c", ".h"))
-            ]
-    if hasattr(ctx.rule.attr, "hdrs"):
-        for src in ctx.rule.attr.hdrs:
-            srcs += [
-                src
-                for src in src.files.to_list()
-                if src.is_source and src.short_path.endswith((".c++", ".c", ".h"))
-            ]
-
-    defines = compilation_context.defines.to_list()
-    local_defines = compilation_context.local_defines.to_list()
-    includes = compilation_context.includes.to_list()
-    quote_includes = compilation_context.quote_includes.to_list()
-    system_includes = compilation_context.system_includes.to_list()
-    external_includes = compilation_context.external_includes.to_list()
-    headers = compilation_context.headers
-
-    # disable clang tidy if no-clang-tidy tag is defined.
-    # todo: figure out a better way to control clang tidy on a per-target basis.
-    if "no-clang-tidy" in ctx.rule.attr.tags:
-        return []
+    srcs = [
+        src
+        for src in getattr(ctx.rule.files, "srcs", []) + getattr(ctx.rule.files, "hdrs", [])
+        if src.is_source and src.short_path.endswith((".c++", ".c", ".h"))
+    ]
 
     # bazel doesn't expose implementation deps through compilation context
     # https://github.com/bazelbuild/bazel/issues/19663
-    if hasattr(ctx.rule.attr, "implementation_deps"):
-        deps = [dep[CcInfo].compilation_context for dep in ctx.rule.attr.implementation_deps if CcInfo in dep]
-        defines = depset(
-            defines,
-            transitive = [dep.defines for dep in deps],
-        )
-        includes = depset(
-            includes,
-            transitive = [dep.includes for dep in deps],
-        )
-        system_includes = depset(
-            system_includes,
-            transitive = [dep.system_includes for dep in deps],
-        )
-        quote_includes = depset(
-            quote_includes,
-            transitive = [dep.quote_includes for dep in deps],
-        )
-        external_includes = depset(
-            external_includes,
-            transitive = [dep.external_includes for dep in deps],
-        )
-        headers = depset(
-            headers.to_list(),
-            transitive = [dep.headers for dep in deps],
-        )
+    contexts = [compilation_context] + [
+        dep[CcInfo].compilation_context
+        for dep in getattr(ctx.rule.attr, "implementation_deps", [])
+        if CcInfo in dep
+    ]
+
+    # Kept as depsets rather than flattened: args.add_all() expands them lazily at execution time.
+    defines = depset(transitive = [c.defines for c in contexts])
+    local_defines = compilation_context.local_defines
+    includes = depset(transitive = [c.includes for c in contexts])
+    quote_includes = depset(transitive = [c.quote_includes for c in contexts])
+    system_includes = depset(transitive = [c.system_includes for c in contexts])
+    external_includes = depset(transitive = [c.external_includes for c in contexts])
+    headers = depset(transitive = [c.headers for c in contexts])
 
     tools = [
         ctx.attr._clang_tidy_executable.files,
@@ -125,8 +95,8 @@ def _clang_tidy_aspect_impl(target, ctx):
         ctx.attr._clang_tidy_plugin.files,
     ]
 
-    clang_tidy_config = ctx.attr._clang_tidy_config.files.to_list()[0]
-    plugin_path = ctx.attr._clang_tidy_plugin.files.to_list()[0].path
+    clang_tidy_config = ctx.file._clang_tidy_config
+    plugin_path = ctx.file._clang_tidy_plugin.path
 
     outs = []
     for src in srcs:
