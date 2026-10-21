@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import assert from 'node:assert';
-import { ObservedR2Binding as PassthroughR2Binding } from './r2-test.js';
+import { ObservedR2Binding as PassthroughR2Binding } from './r2-observed-binding.js';
 
 // Extends the shared passthrough so that some keys return a native R2 result of the wrong type
 // for the method, and adds methods that return native results to the test directly, without the
@@ -35,9 +35,18 @@ export class ObservedR2Binding extends PassthroughR2Binding {
   }
 
   async createMultipartUpload(requestKey, options) {
-    // The R2GW returns the upload ID as a bare string; an object must not be stringified into one.
-    if (requestKey === 'upload-handle-as-upload-id') {
-      return { key: requestKey, uploadId: 'upload-handle-id' };
+    // The backend must reply with `{ uploadId: string }`.
+    if (requestKey === 'upload-id-as-string') {
+      return 'upload-id';
+    }
+    if (requestKey === 'upload-id-as-number') {
+      return { uploadId: 123 };
+    }
+    if (requestKey === 'upload-id-missing') {
+      return {};
+    }
+    if (requestKey === 'upload-id-with-key') {
+      return { key: requestKey, uploadId: 'upload-id' };
     }
     return super.createMultipartUpload(requestKey, options);
   }
@@ -186,9 +195,15 @@ export const nativeR2ResultTests = {
     );
     await aborted.abort();
 
-    await assert.rejects(
-      () => env.BUCKET.createMultipartUpload('upload-handle-as-upload-id'),
-      { message: /^internal error; reference = \S+$/ }
-    );
+    for (const key of [
+      'upload-id-as-string',
+      'upload-id-as-number',
+      'upload-id-missing',
+      'upload-id-with-key',
+    ]) {
+      await assert.rejects(() => env.BUCKET.createMultipartUpload(key), {
+        message: /^internal error; reference = \S+$/,
+      });
+    }
   },
 };
