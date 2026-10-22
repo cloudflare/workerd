@@ -510,6 +510,21 @@ kj::Maybe<kj::Exception> IoContext::cancelPendingWork(
   return firstException;
 }
 
+void IoContext::IncomingRequest::cancelPendingWorkForHibernation() {
+  // This request must still be current: canceled work may have spans that read its timer.
+  waitedForWaitUntil = true;
+  context->reentryDisabled = true;
+  // Cross-context promise reactions queued for this context would run on its next turn. The
+  // context is about to be destroyed, which drops them anyway; drop them now. The task only runs
+  // on its own event-loop turns, never within this call, so it is safe to destroy here.
+  context->deleteQueueSignalTask = nullptr;
+  KJ_IF_SOME(exception, context->cancelPendingWork([]() {
+    return JSG_KJ_EXCEPTION(FAILED, Error, "The Durable Object is hibernating.");
+  }, ClearTasks::NO)) {
+    LOG_EXCEPTION("onHibernateCleanup", exception);
+  }
+}
+
 InputGate::Lock IoContext::getInputLock() {
   return KJ_ASSERT_NONNULL(currentInputLock, "no input lock available in this context")
       .addRef(getCurrentTraceSpan());

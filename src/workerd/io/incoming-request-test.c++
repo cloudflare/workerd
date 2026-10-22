@@ -10,6 +10,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/tests/test-fixture.h>
 
+#include <capnp/message.h>
 #include <kj/async.h>
 #include <kj/test.h>
 
@@ -434,6 +435,312 @@ KJ_TEST("IoContext::IncomingRequest::drain() releases a superseded (non-front) r
 
   // Tidy up the still-live front request so its destructor doesn't warn about undrained tasks.
   fixture.drainAndDestroy(kj::mv(second));
+}
+
+KJ_TEST("cancelPendingWorkForHibernation() cancels pending work but keeps abort watchers armed") {
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("hibernate-test"))});
+  auto& waitScope = fixture.getWaitScope();
+  // Declared before the context, whose destructor cancels the watcher.
+  bool taskCanceled = false;
+  bool watcherCanceled = false;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+
+  context->addTask(
+      kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() { taskCanceled = true; })));
+
+  kj::Function<kj::Promise<void>()> callback;
+  context
+      ->run([&callback](Worker::Lock&, IoContext& context) {
+    callback = context.makeReentryCallback(
+        [](Worker::Lock&, IoContext&) { return kj::Promise<void>(kj::NEVER_DONE); });
+  }).wait(waitScope);
+  auto pendingCallback = callback();
+  KJ_EXPECT(!pendingCallback.poll(waitScope));
+
+  context->abortWhen(
+      kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() { watcherCanceled = true; })));
+
+  request->cancelPendingWorkForHibernation();
+
+  KJ_EXPECT(taskCanceled);
+  KJ_EXPECT_THROW_MESSAGE("The Durable Object is hibernating.", pendingCallback.wait(waitScope));
+  KJ_EXPECT(!watcherCanceled);
+
+  // A callback that is still held, e.g. by an RPC target, can't start new work either.
+  KJ_EXPECT_THROW_MESSAGE("The Durable Object is hibernating.", callback());
+}
+
+KJ_TEST("cancelPendingWorkForHibernation() drops cross-context actions") {
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("hibernate-cross-context-test"))});
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  auto executor = context->getCrossContextExecutor();
+
+  // Cross-context promise resolution delivers reactions this way, on the context's next turn.
+  bool ranBefore = false;
+  KJ_ASSERT(executor.tryExecute([&](jsg::Lock&) { ranBefore = true; }));
+  fixture.pollEventLoop();
+  KJ_EXPECT(ranBefore);
+
+  request->cancelPendingWorkForHibernation();
+
+  bool ranAfter = false;
+  KJ_ASSERT(executor.tryExecute([&](jsg::Lock&) { ranAfter = true; }));
+  fixture.pollEventLoop();
+  KJ_EXPECT(!ranAfter);
+}
+
+KJ_TEST("cancelPendingWorkForHibernation() logs a throwing destructor and keeps canceling") {
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("hibernate-throw-test"))});
+  auto& waitScope = fixture.getWaitScope();
+  bool callbackCanceled = false;
+  bool waitUntilCanceled = false;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+
+  kj::Function<kj::Promise<void>()> callback;
+  kj::Function<kj::Promise<void>()> throwingCallback;
+  context
+      ->run([&](Worker::Lock&, IoContext& context) {
+    callback = context.makeReentryCallback([&](Worker::Lock&, IoContext&) {
+      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() {
+        callbackCanceled = true;
+      }));
+    });
+    throwingCallback = context.makeReentryCallback([](Worker::Lock&, IoContext&) {
+      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::heap<ThrowOnDestruction>());
+    });
+  }).wait(waitScope);
+  // The canceler cancels the most recent callback first, so the throwing one goes first.
+  auto pendingCallback = callback();
+  auto throwingPendingCallback = throwingCallback();
+  KJ_EXPECT(!pendingCallback.poll(waitScope));
+  KJ_EXPECT(!throwingPendingCallback.poll(waitScope));
+
+  context->addWaitUntil(
+      kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() { waitUntilCanceled = true; })));
+
+  KJ_EXPECT_LOG(ERROR, "test cancellation failure");
+  request->cancelPendingWorkForHibernation();
+
+  KJ_EXPECT(callbackCanceled);
+  KJ_EXPECT(waitUntilCanceled);
+}
+
+// Constructs the fixture's actor from `source`, a Durable Object class with an onHibernate
+// handler that appends to `globalThis.events`, then calls `body`.
+void withOnHibernateActor(kj::StringPtr source,
+    kj::StringPtr actorId,
+    kj::FunctionParam<void(TestFixture&, IoContext&, Worker::Actor&)> body,
+    bool flushActorStorage = false) {
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setWorkerdExperimental(true);
+  TestFixture fixture({
+    .featureFlags = flags.asReader(),
+    .mainModuleSource = source,
+    .actorId = Worker::Actor::Id(kj::str(actorId)),
+    .actorClassName = "default"_kj,
+    .useRealTimers = false,
+    .flushActorStorage = flushActorStorage,
+  });
+  auto& actor = fixture.getActor();
+  auto context = fixture.newIoContext();
+  actor.setIoContext(kj::addRef(*context));
+
+  // Delivering a request constructs the class instance, which reads the handler.
+  auto constructRequest = fixture.newIncomingRequest(*context);
+  fixture.pollEventLoop();
+  fixture.drainAndDestroy(kj::mv(constructRequest));
+  KJ_ASSERT(actor.hasOnHibernateHandler());
+
+  body(fixture, *context, actor);
+}
+
+kj::String readEvents(TestFixture& fixture) {
+  kj::String events;
+  fixture.enterWorkerLock([&](Worker::Lock& lock) {
+    jsg::Lock& js = lock;
+    js.withinHandleScope([&]() {
+      v8::Context::Scope contextScope(lock.getContext());
+      events = js.global().get(js, "events"_kj).toString(js);
+    });
+  });
+  return events;
+}
+
+// Records the outcome that runOnHibernate() reports.
+struct OnHibernateObserver final: public RequestObserver {
+  kj::Maybe<EventOutcome> outcome;
+  void reportOnHibernateOutcome(EventOutcome reported) override {
+    outcome = reported;
+  }
+};
+
+kj::Promise<void> runOnHibernate(TestFixture& fixture,
+    Worker::Actor& actor,
+    kj::Own<RequestObserver> observer,
+    kj::Maybe<TimerChannel&> timer = kj::none) {
+  return actor.runOnHibernate(Worker::Actor::HibernationReason::INACTIVE,
+      kj::rc<TestFixture::DummyIoChannelFactory>(timer.orDefault(fixture.getTimerChannel())),
+      kj::mv(observer), kj::none);
+}
+
+// An actor whose onHibernate handler never settles, leaving a timer behind.
+constexpr kj::StringPtr PENDING_ON_HIBERNATE_SOURCE = R"SCRIPT(
+  import { DurableObject } from "cloudflare:workers";
+  import { onHibernate } from "cloudflare:durable-objects";
+  globalThis.events = "";
+  export default class extends DurableObject {
+    async [onHibernate]() {
+      globalThis.events += "onHibernate;";
+      setTimeout(() => { globalThis.events += "timer;"; }, 1000);
+      await new Promise(() => {});
+    }
+  }
+)SCRIPT"_kj;
+
+// Starts the onHibernate handler of an actor running PENDING_ON_HIBERNATE_SOURCE, then calls
+// `body` while the handler is pending.
+void withPendingOnHibernate(kj::StringPtr actorId,
+    kj::FunctionParam<void(TestFixture&, IoContext&, Worker::Actor&, kj::Promise<void>&)> body) {
+  withOnHibernateActor(PENDING_ON_HIBERNATE_SOURCE, actorId,
+      [&](TestFixture& fixture, IoContext& context, Worker::Actor& actor) {
+    auto promise = runOnHibernate(fixture, actor, kj::refcounted<RequestObserver>());
+    KJ_EXPECT(!promise.poll(fixture.getWaitScope()));
+    auto events = readEvents(fixture);
+    KJ_ASSERT(events == "onHibernate;", events);
+
+    body(fixture, context, actor, promise);
+  });
+}
+
+KJ_TEST("runOnHibernate() runs the handler with the reason and resolves when it settles") {
+  constexpr kj::StringPtr source = R"SCRIPT(
+    import { DurableObject } from "cloudflare:workers";
+    import { onHibernate } from "cloudflare:durable-objects";
+    globalThis.events = "";
+    export default class extends DurableObject {
+      async [onHibernate](info) {
+        globalThis.events += `onHibernate:${info.reason}:${Object.isFrozen(info)};`;
+      }
+    }
+  )SCRIPT"_kj;
+  withOnHibernateActor(source, "on-hibernate-success-test"_kj,
+      [](TestFixture& fixture, IoContext&, Worker::Actor& actor) {
+    auto observer = kj::refcounted<OnHibernateObserver>();
+    runOnHibernate(fixture, actor, kj::addRef(*observer)).wait(fixture.getWaitScope());
+
+    KJ_EXPECT(observer->outcome == EventOutcome::OK);
+    KJ_EXPECT(readEvents(fixture) == "onHibernate:inactive:true;");
+  });
+}
+
+KJ_TEST("runOnHibernate() resolves when the handler throws, reporting the failure") {
+  constexpr kj::StringPtr source = R"SCRIPT(
+    import { DurableObject } from "cloudflare:workers";
+    import { onHibernate } from "cloudflare:durable-objects";
+    globalThis.events = "";
+    export default class extends DurableObject {
+      async [onHibernate]() {
+        throw new Error("handler failed");
+      }
+    }
+  )SCRIPT"_kj;
+  withOnHibernateActor(source, "on-hibernate-throw-test"_kj,
+      [](TestFixture& fixture, IoContext&, Worker::Actor& actor) {
+    auto observer = kj::refcounted<OnHibernateObserver>();
+    runOnHibernate(fixture, actor, kj::addRef(*observer)).wait(fixture.getWaitScope());
+
+    KJ_EXPECT(observer->outcome == EventOutcome::EXCEPTION);
+  });
+}
+
+// A TimerChannel whose limit timeouts have already expired.
+struct ExpiredLimitTimerChannel final: public TimerChannel {
+  explicit ExpiredLimitTimerChannel(TimerChannel& inner): inner(inner) {}
+  void syncTime() override {
+    inner.syncTime();
+  }
+  kj::Date now(kj::Maybe<kj::Date> clockClamp) override {
+    return inner.now(clockClamp);
+  }
+  kj::Promise<void> atTime(kj::Date when) override {
+    return inner.atTime(when);
+  }
+  kj::Promise<void> afterLimitTimeout(kj::Duration) override {
+    return kj::READY_NOW;
+  }
+  TimerChannel& inner;
+};
+
+KJ_TEST("runOnHibernate() resolves when the handler exceeds its budget") {
+  withOnHibernateActor(PENDING_ON_HIBERNATE_SOURCE, "on-hibernate-timeout-test"_kj,
+      [](TestFixture& fixture, IoContext& context, Worker::Actor& actor) {
+    ExpiredLimitTimerChannel timer(fixture.getTimerChannel());
+    auto observer = kj::refcounted<OnHibernateObserver>();
+    runOnHibernate(fixture, actor, kj::addRef(*observer), timer).wait(fixture.getWaitScope());
+
+    KJ_EXPECT(observer->outcome == EventOutcome::EXCEEDED_WALL_TIME);
+    KJ_EXPECT(readEvents(fixture) == "onHibernate;");
+    KJ_EXPECT(context.getTimeoutCount() == 0);
+  });
+}
+
+KJ_TEST("runOnHibernate() rejects when the handler's writes can't be flushed") {
+  // The fixture's actor storage is read-only, so the flush of the write fails.
+  constexpr kj::StringPtr source = R"SCRIPT(
+    import { DurableObject } from "cloudflare:workers";
+    import { onHibernate } from "cloudflare:durable-objects";
+    globalThis.events = "";
+    export default class extends DurableObject {
+      async [onHibernate]() {
+        this.ctx.storage.put("key", "value");
+      }
+    }
+  )SCRIPT"_kj;
+  withOnHibernateActor(source, "on-hibernate-flush-test"_kj,
+      [](TestFixture& fixture, IoContext&, Worker::Actor& actor) {
+    auto observer = kj::refcounted<OnHibernateObserver>();
+    auto promise = runOnHibernate(fixture, actor, kj::addRef(*observer));
+
+    KJ_EXPECT_LOG(ERROR, "actorCacheFlush");
+    KJ_EXPECT_THROW_MESSAGE("broken.outputGateBroken", promise.wait(fixture.getWaitScope()));
+    KJ_EXPECT(observer->outcome == EventOutcome::OK);
+  }, /*flushActorStorage=*/true);
+}
+
+KJ_TEST("canceling runOnHibernate() cancels pending work but keeps abort watchers armed") {
+  // These outlive the fixture, whose actor owns the context that holds the task and watcher.
+  bool taskCanceled = false;
+  bool watcherCanceled = false;
+  withPendingOnHibernate("on-hibernate-cancel-test"_kj,
+      [&](TestFixture&, IoContext& context, Worker::Actor&, kj::Promise<void>& promise) {
+    context.addTask(
+        kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() { taskCanceled = true; })));
+    context.abortWhen(
+        kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() { watcherCanceled = true; })));
+    KJ_EXPECT(context.getTimeoutCount() == 1);
+
+    promise = nullptr;
+
+    KJ_EXPECT(taskCanceled);
+    KJ_EXPECT(context.getTimeoutCount() == 0);
+    KJ_EXPECT(!watcherCanceled);
+  });
+}
+
+KJ_TEST("aborting the actor cancels a pending runOnHibernate()") {
+  withPendingOnHibernate("on-hibernate-abort-test"_kj,
+      [](TestFixture& fixture, IoContext& context, Worker::Actor& actor,
+          kj::Promise<void>& promise) {
+    actor.abort(KJ_EXCEPTION(FAILED, "test abort"));
+    // abort() destroys the handler's IncomingRequest synchronously, so it can tear down the
+    // IoContext.
+    KJ_EXPECT(!context.hasCurrentIncomingRequest());
+    KJ_EXPECT_THROW_MESSAGE("test abort", promise.wait(fixture.getWaitScope()));
+  });
 }
 
 KJ_TEST("ambient IoContext is hidden while another V8 isolate is entered") {
