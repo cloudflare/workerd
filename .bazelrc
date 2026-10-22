@@ -98,6 +98,11 @@ build:no-perfetto --//src/workerd/util:use_perfetto=False
 build:no-perfetto --@v8//:v8_use_perfetto=False
 build:unix --config=perfetto
 
+# Build V8's Temporal implementation on the temporal_capi crate from crates_vendor. Temporal stays
+# hidden from Workers; see --noharmony-temporal in src/workerd/jsg/setup.c++.
+build --@v8//:v8_enable_temporal_support=True
+build --@v8//:v8_temporal_capi=//deps/rust:temporal_capi
+
 # Increasing the optimization level of V8 significantly speeds up tests using V8 a lot, especially
 # python tests. This is useful for both CI and local development and enabled by default, but still
 # kept in a separate configuration to make it easy to disable.
