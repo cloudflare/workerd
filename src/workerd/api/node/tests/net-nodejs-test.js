@@ -1555,6 +1555,70 @@ export const testNetBoundSocketLocalAddressConflict = {
   },
 };
 
+// A refused connection is reported as Node's errno error, so code that switches
+// on err.code (such as the Emscripten node sockets backend, which maps it to an
+// errno) sees ECONNREFUSED rather than a generic failure.
+export const testNetConnectRefused = {
+  async test() {
+    const events = [];
+    const { promise, resolve } = Promise.withResolvers();
+    const socket = net.connect({ host: '127.0.0.1', port: 1 });
+    socket.on('connectionAttemptFailed', (host, port, family, err) =>
+      events.push(['connectionAttemptFailed', host, port, family, err.code])
+    );
+    socket.on('connect', () => events.push(['connect']));
+    socket.on('error', (err) => events.push(['error', err]));
+    socket.on('close', (hadError) => {
+      events.push(['close', hadError]);
+      resolve();
+    });
+    await promise;
+
+    deepStrictEqual(
+      events.map((e) => e[0]),
+      ['connectionAttemptFailed', 'error', 'close']
+    );
+    deepStrictEqual(events[0], [
+      'connectionAttemptFailed',
+      '127.0.0.1',
+      1,
+      4,
+      'ECONNREFUSED',
+    ]);
+    const err = events[1][1];
+    ok(err instanceof Error);
+    strictEqual(err.name, 'Error');
+    strictEqual(err.message, 'connect ECONNREFUSED 127.0.0.1:1');
+    strictEqual(err.code, 'ECONNREFUSED');
+    strictEqual(err.errno, -111);
+    strictEqual(err.syscall, 'connect');
+    strictEqual(err.address, '127.0.0.1');
+    strictEqual(err.port, 1);
+    deepStrictEqual(events[2], ['close', true]);
+    strictEqual(socket.connecting, false);
+    strictEqual(socket.destroyed, true);
+  },
+};
+
+// A host that does not resolve is reported as Node's getaddrinfo error:
+// ENOTFOUND from a resolver, EAI_AGAIN where the sandbox has no resolver.
+export const testNetConnectNotFound = {
+  async test() {
+    const { promise, resolve } = Promise.withResolvers();
+    const socket = net.connect({ host: 'something.invalid', port: 80 });
+    const attemptFn = mock.fn();
+    socket.on('connectionAttemptFailed', attemptFn);
+    socket.on('error', resolve);
+    const err = await promise;
+    ok(['ENOTFOUND', 'EAI_AGAIN'].includes(err.code), err.message);
+    strictEqual(err.message, `getaddrinfo ${err.code} something.invalid`);
+    strictEqual(err.errno, err.code === 'ENOTFOUND' ? -3008 : -3001);
+    strictEqual(err.syscall, 'getaddrinfo');
+    strictEqual(err.hostname, 'something.invalid');
+    strictEqual(attemptFn.mock.callCount(), 0);
+  },
+};
+
 export const testNetReconnect = {
   async test(ctrl, env) {
     const { promise, resolve } = Promise.withResolvers();

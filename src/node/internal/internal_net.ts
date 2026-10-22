@@ -54,6 +54,8 @@ import {
   EADDRNOTAVAIL,
   EPIPE,
   ENOBUFS,
+  ConnectException,
+  GetAddrInfoException,
 } from 'node-internal:internal_errors';
 
 import {
@@ -1705,6 +1707,23 @@ function cleanupAfterDestroy(
   socket.emit('close', isException);
 }
 
+// The platform's connect() error carries no cause; the errno name of a
+// recognized failure is exposed to node:net separately, and reported here the
+// way Node does. An unrecognized failure keeps the platform's error.
+function connectFailureError(
+  handle: ReturnType<typeof inner.connect>,
+  address: string,
+  port: number,
+  err: Error
+): Error {
+  const code = inner.getConnectFailureCode(handle);
+  if (code === undefined) return err;
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
+    return new GetAddrInfoException(code, address);
+  }
+  return new ConnectException(code, address, port);
+}
+
 function initializeConnection(
   socket: Socket,
   options: TcpSocketConnectOpts
@@ -1779,6 +1798,7 @@ function initializeConnection(
       },
     };
 
+    const address = `${host}`;
     if (family === 6) {
       // The host is an IPv6 address. We need to wrap it in square brackets.
       host = `[${host}]`;
@@ -1851,10 +1871,26 @@ function initializeConnection(
       // We need to undestroy the stream to connect to it.
       socket._undestroy();
 
-      handle.opened.then(onConnectionOpened.bind(socket), (err: unknown) => {
-        socket.emit('connectionAttemptFailed', host, port, addressType, err);
-        socket.destroy(err as Error);
-      });
+      // A failed connection attempt rejects both `closed` and `opened`, in
+      // that order, so whichever settles first reports it; the other finds
+      // the socket destroyed.
+      const onConnectionFailed = (err: unknown): void => {
+        if (socket.destroyed || socket._handle?.socket !== handle) return;
+        const error = connectFailureError(handle, address, port, err as Error);
+        // Node reports a failed lookup through 'lookup', not as an attempt.
+        if (!(error instanceof GetAddrInfoException)) {
+          socket.emit(
+            'connectionAttemptFailed',
+            host,
+            port,
+            addressType,
+            error
+          );
+        }
+        socket.destroy(error);
+      };
+
+      handle.opened.then(onConnectionOpened.bind(socket), onConnectionFailed);
 
       handle.closed.then(
         (): void => {
@@ -1865,6 +1901,10 @@ function initializeConnection(
           }
         },
         (error: unknown): void => {
+          if (socket.connecting) {
+            onConnectionFailed(error);
+            return;
+          }
           // Do not call socket.destroy.bind(socket) since user can override it.
           socket.destroy(error as Error);
         }

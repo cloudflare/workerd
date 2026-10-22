@@ -185,6 +185,12 @@ class Socket: public jsg::Object {
     return openedPromise;
   }
 
+  // The errno name of the failed connection attempt that rejected `opened`, when its cause was
+  // recognized. See connectErrnoName().
+  kj::Maybe<kj::StringPtr> getConnectErrno() {
+    return connectErrno;
+  }
+
   bool getUpgraded() const {
     return upgraded;
   }
@@ -341,6 +347,7 @@ class Socket: public jsg::Object {
   kj::Maybe<kj::String> domain;
   // Whether the port this socket connected to is 80/443. Used for nicer errors.
   bool isDefaultFetchPort;
+  kj::Maybe<kj::StringPtr> connectErrno;
   // This fulfiller is used to resolve the `openedPromise` below.
   jsg::Promise<SocketInfo>::Resolver openedResolver;
   // Copy kept so that it can be used in `close`.
@@ -505,6 +512,10 @@ class SocketsModule final: public jsg::Object {
   // Returns the synthetic IP registered for a magic hostname, or undefined. Used by node:dns.
   jsg::Optional<kj::StringPtr> getCallerDnsOverride(jsg::Lock& js, kj::String hostname);
 
+  // Returns the errno name of `socket`'s failed connection attempt, or undefined. Used by node:net
+  // to report connection failures the way Node.js does.
+  jsg::Optional<kj::StringPtr> getConnectFailureCode(jsg::Lock& js, jsg::Ref<Socket> socket);
+
   struct InboundListener {
     kj::String protocol;
     kj::String address;
@@ -517,6 +528,7 @@ class SocketsModule final: public jsg::Object {
   JSG_RESOURCE_TYPE(SocketsModule, CompatibilityFlags::Reader flags) {
     JSG_METHOD(connect);
     JSG_METHOD(getCallerDnsOverride);
+    JSG_METHOD(getConnectFailureCode);
     JSG_METHOD(getInboundListeners);
 
     if (flags.getWorkerdExperimental()) {
@@ -524,6 +536,14 @@ class SocketsModule final: public jsg::Object {
     }
   }
 };
+
+// Classifies a failed connection attempt as the errno name Node.js reports for it (ECONNREFUSED,
+// ETIMEDOUT, EHOSTUNREACH, ENETUNREACH, ENOTFOUND or EAI_AGAIN), or none when the cause is not
+// recognized.
+// A direct connection fails with the connect(2) or getaddrinfo(3) exception; a connection made
+// through a proxy fails with a non-2xx status whose Proxy-Status header (RFC 9209) names the error.
+kj::Maybe<kj::StringPtr> connectErrnoName(const kj::Exception& exception);
+kj::Maybe<kj::StringPtr> connectErrnoName(const kj::HttpHeaders& responseHeaders);
 
 template <class Registry>
 void registerSocketsModule(Registry& registry, auto featureFlags) {

@@ -723,6 +723,47 @@ export class EPIPE extends NodeError {
   }
 }
 
+// libuv's errno values on Linux, which Node.js reports there.
+const UV_ERRNO: Record<string, number> = {
+  ECONNREFUSED: -111,
+  ETIMEDOUT: -110,
+  EHOSTUNREACH: -113,
+  ENETUNREACH: -101,
+};
+
+// A failed connect(2), as Node reports it (its exceptionWithHostPort).
+export class ConnectException extends NodeError {
+  errno: number | undefined;
+  syscall = 'connect';
+  address: string;
+  port: number;
+
+  constructor(code: string, address: string, port: number) {
+    super(code, `connect ${code} ${address}:${port}`);
+    this.errno = UV_ERRNO[code];
+    this.address = address;
+    this.port = port;
+  }
+}
+
+const GETADDRINFO_ERRNO: Record<string, number> = {
+  ENOTFOUND: -3008,
+  EAI_AGAIN: -3001,
+};
+
+// A host name that does not resolve, as Node reports it from connect()'s lookup.
+export class GetAddrInfoException extends NodeError {
+  errno: number | undefined;
+  syscall = 'getaddrinfo';
+  hostname: string;
+
+  constructor(code: string, hostname: string) {
+    super(code, `getaddrinfo ${code} ${hostname}`);
+    this.errno = GETADDRINFO_ERRNO[code];
+    this.hostname = hostname;
+  }
+}
+
 // A read into an empty buffer, as Node reports it (the errno exception of
 // a read that libuv refuses with UV_ENOBUFS).
 export class ENOBUFS extends NodeError {

@@ -43,5 +43,7 @@ declare namespace sockets {
   ): Socket;
 
   function getCallerDnsOverride(hostname: string): string | undefined;
+
+  function getConnectFailureCode(socket: Socket): string | undefined;
 }
 export default sockets;

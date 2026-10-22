@@ -20,6 +20,8 @@
 #include <workerd/util/autogate.h>
 #include <workerd/util/uncaught-exception-source.h>
 
+#include <strings.h>
+
 #include <capnp/compat/byte-stream.h>
 #include <kj/async-queue.h>
 
@@ -982,10 +984,80 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
       protocol, kj::mv(domain), isDefaultFetchPort, kj::mv(openedPrPair));
 }
 
+namespace {
+
+kj::Maybe<kj::StringPtr> proxyStatusErrno(kj::StringPtr proxyStatus) {
+  // Only the `error` parameter is extracted from the structured-field list, e.g.
+  // `Cloudflare-Proxy;error=connection_refused`.
+  KJ_IF_SOME(pos, proxyStatus.find("error="_kj)) {
+    auto rest = proxyStatus.slice(pos + "error="_kj.size());
+    size_t end = 0;
+    while (end < rest.size() && rest[end] != ';' && rest[end] != ',' && rest[end] != ' ' &&
+        rest[end] != '\t') {
+      ++end;
+    }
+    auto token = rest.first(end);
+    if (token.size() >= 2 && token.front() == '"' && token.back() == '"') {
+      token = token.slice(1, token.size() - 1);
+    }
+    if (token == "connection_refused"_kj.asArray()) return "ECONNREFUSED"_kj;
+    if (token == "connection_timeout"_kj.asArray()) return "ETIMEDOUT"_kj;
+    if (token == "dns_error"_kj.asArray() || token == "dns_timeout"_kj.asArray()) {
+      return "ENOTFOUND"_kj;
+    }
+    if (token == "destination_unavailable"_kj.asArray() ||
+        token == "destination_ip_unroutable"_kj.asArray()) {
+      return "EHOSTUNREACH"_kj;
+    }
+  }
+  return kj::none;
+}
+
+}  // namespace
+
+kj::Maybe<kj::StringPtr> connectErrnoName(const kj::Exception& exception) {
+  // The syscall exception's description carries the strerror()/gai_strerror() text, whether it
+  // was raised by KJ ("connect(): ...", "DNS lookup failed.") or by Rust's std::io::Error
+  // ("... (os error N)", "failed to lookup address information: ...").
+  auto description = exception.getDescription();
+  if (description.contains("Connection refused"_kj)) return "ECONNREFUSED"_kj;
+  // "Connection timed out" on Linux, "Operation timed out" on macOS.
+  if (description.contains("timed out"_kj)) return "ETIMEDOUT"_kj;
+  if (description.contains("No route to host"_kj)) return "EHOSTUNREACH"_kj;
+  if (description.contains("Network is unreachable"_kj)) return "ENETUNREACH"_kj;
+  if (description.contains("DNS lookup failed"_kj) || description.contains("getaddrinfo"_kj) ||
+      description.contains("failed to lookup address information"_kj)) {
+    // gai_strerror(EAI_AGAIN) on glibc and musl respectively.
+    if (description.contains("Temporary failure in name resolution"_kj) ||
+        description.contains("Try again"_kj)) {
+      return "EAI_AGAIN"_kj;
+    }
+    return "ENOTFOUND"_kj;
+  }
+  return kj::none;
+}
+
+kj::Maybe<kj::StringPtr> connectErrnoName(const kj::HttpHeaders& responseHeaders) {
+  kj::Maybe<kj::StringPtr> result;
+  responseHeaders.forEach([&](kj::StringPtr name, kj::StringPtr value) {
+    if (result == kj::none && strcasecmp(name.cStr(), "proxy-status") == 0) {
+      result = proxyStatusErrno(value);
+    }
+  });
+  return result;
+}
+
 void Socket::handleProxyStatus(
     jsg::Lock& js, kj::Promise<kj::HttpClient::ConnectRequest::Status> status) {
   auto& context = IoContext::current();
-  auto errorHandler = [](kj::Exception&& e) {
+  using Status = kj::HttpClient::ConnectRequest::Status;
+  // A rejected status becomes a synthetic 500; only the errno name of its cause is kept.
+  struct Outcome {
+    Status status;
+    kj::Maybe<kj::StringPtr> errnoName;
+  };
+  auto outcome = status.then(
+      [](Status&& status) { return Outcome{kj::mv(status), kj::none}; }, [](kj::Exception&& e) {
     // Let's not log errors when we have a disconnected exception.
     // If we don't filter this out, whenever connect() fails, we'll
     // have noisy errors even though the user catches the error on JS side.
@@ -993,10 +1065,10 @@ void Socket::handleProxyStatus(
         e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) == kj::none) {
       LOG_ERROR_PERIODICALLY("Socket proxy disconnected abruptly", e);
     }
-    return kj::HttpClient::ConnectRequest::Status(500, nullptr, kj::Own<kj::HttpHeaders>());
-  };
-  auto func = [self = JSG_THIS](
-                  jsg::Lock& js, kj::HttpClient::ConnectRequest::Status&& status) mutable -> void {
+    return Outcome{Status(500, nullptr, kj::Own<kj::HttpHeaders>()), connectErrnoName(e)};
+  });
+  auto func = [self = JSG_THIS](jsg::Lock& js, Outcome&& outcome) mutable -> void {
+    auto& status = outcome.status;
     if (status.statusCode < 200 || status.statusCode >= 300) {
       // If the status indicates an unsuccessful connection we need to reject the `closeFulfiller`
       // with an exception. This will reject the socket's `closed` promise.
@@ -1019,6 +1091,10 @@ void Socket::handleProxyStatus(
             "attempt to use connectionStringOverride failed to trigger connectOverride",
             self->remoteAddress, status.statusCode, status.statusText);
       }
+      self->connectErrno = outcome.errnoName;
+      if (self->connectErrno == kj::none && status.headers.get() != nullptr) {
+        self->connectErrno = connectErrnoName(*status.headers);
+      }
       self->handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, msg));
     } else {
       // For outbound sockets we have no useful local address to expose. Inbound sockets (produced
@@ -1032,7 +1108,7 @@ void Socket::handleProxyStatus(
     }
   };
   IoContext::AwaitIoOperation traceOperation(context, "socket_connect"_kj);
-  auto result = context.awaitIo(js, status.catch_(kj::mv(errorHandler)), kj::mv(func));
+  auto result = context.awaitIo(js, kj::mv(outcome), kj::mv(func));
   result.markAsHandled(js);
 }
 
@@ -1051,7 +1127,8 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
     return KJ_EXCEPTION(FAILED, "connectResult raised an error");
   };
   auto func = [self = JSG_THIS](jsg::Lock& js, kj::Maybe<kj::Exception> result) mutable -> void {
-    if (result != kj::none) {
+    KJ_IF_SOME(e, result) {
+      self->connectErrno = connectErrnoName(e);
       self->handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, "connection attempt failed"));
     } else {
       // For outbound sockets we have no useful local address to expose. Inbound sockets (produced
@@ -1406,6 +1483,11 @@ jsg::Optional<kj::StringPtr> SocketsModule::getCallerDnsOverride(
     jsg::Lock& js, kj::String hostname) {
   auto& ioContext = IoContext::current();
   return ioContext.getCurrentLock().getGlobalScope().getDnsOverride(hostname);
+}
+
+jsg::Optional<kj::StringPtr> SocketsModule::getConnectFailureCode(
+    jsg::Lock& js, jsg::Ref<Socket> socket) {
+  return socket->getConnectErrno();
 }
 
 kj::Array<SocketsModule::InboundListener> SocketsModule::getInboundListeners(jsg::Lock& js) {

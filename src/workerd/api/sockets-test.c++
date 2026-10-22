@@ -285,5 +285,57 @@ KJ_TEST("connectImpl defers connect until output gate clears") {
       errorsToIgnore);
 }
 
+kj::StringPtr errnoFor(kj::StringPtr description) {
+  return KJ_ASSERT_NONNULL(connectErrnoName(KJ_EXCEPTION(DISCONNECTED, description)));
+}
+
+KJ_TEST("connect failure exceptions map to errno names") {
+  KJ_EXPECT(errnoFor("connect(): Connection refused; address = 127.0.0.1:1") == "ECONNREFUSED");
+  KJ_EXPECT(errnoFor("connect(): Connection timed out") == "ETIMEDOUT");
+  KJ_EXPECT(errnoFor("connect(): Operation timed out") == "ETIMEDOUT");
+  KJ_EXPECT(errnoFor("connect(): No route to host") == "EHOSTUNREACH");
+  KJ_EXPECT(errnoFor("connect(): Network is unreachable") == "ENETUNREACH");
+  KJ_EXPECT(errnoFor("DNS lookup failed.; params.host = nope.invalid; "
+                     "gai_strerror(status) = Name or service not known") == "ENOTFOUND");
+  KJ_EXPECT(errnoFor("Connection refused (os error 111)") == "ECONNREFUSED");
+  KJ_EXPECT(errnoFor("Connection timed out (os error 110)") == "ETIMEDOUT");
+  KJ_EXPECT(
+      errnoFor("failed to lookup address information: Name or service not known") == "ENOTFOUND");
+  KJ_EXPECT(
+      errnoFor("failed to lookup address information: Temporary failure in name resolution") ==
+      "EAI_AGAIN");
+  KJ_EXPECT(errnoFor("DNS lookup failed.; gai_strerror(status) = Try again") == "EAI_AGAIN");
+  KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, "something else went wrong")) == kj::none);
+}
+
+kj::Maybe<kj::StringPtr> errnoForProxyStatus(kj::StringPtr proxyStatus) {
+  kj::HttpHeaderTable table;
+  kj::HttpHeaders headers(table);
+  headers.add("Proxy-Status", proxyStatus);
+  return connectErrnoName(headers);
+}
+
+KJ_TEST("Proxy-Status error types map to errno names") {
+  KJ_EXPECT(KJ_ASSERT_NONNULL(errnoForProxyStatus("Cloudflare-Proxy;error=connection_refused")) ==
+      "ECONNREFUSED");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(errnoForProxyStatus(
+                "proxy; error=\"connection_timeout\"; details=x")) == "ETIMEDOUT");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(errnoForProxyStatus("a, b;error=dns_error")) == "ENOTFOUND");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(errnoForProxyStatus("p;error=dns_timeout")) == "ENOTFOUND");
+  KJ_EXPECT(
+      KJ_ASSERT_NONNULL(errnoForProxyStatus("p;error=destination_unavailable")) == "EHOSTUNREACH");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(errnoForProxyStatus("p;error=destination_ip_unroutable")) ==
+      "EHOSTUNREACH");
+  KJ_EXPECT(errnoForProxyStatus("Cloudflare-Proxy;error=connection_limit_reached") == kj::none);
+  KJ_EXPECT(errnoForProxyStatus("Cloudflare-Proxy") == kj::none);
+
+  kj::HttpHeaderTable table;
+  kj::HttpHeaders headers(table);
+  headers.add("proxy-status", "p;error=connection_refused");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(connectErrnoName(headers)) == "ECONNREFUSED");
+  kj::HttpHeaders none(table);
+  KJ_EXPECT(connectErrnoName(none) == kj::none);
+}
+
 }  // namespace
 }  // namespace workerd::api
