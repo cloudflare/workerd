@@ -45,8 +45,10 @@ kj::Exception translateEncodedStreamException(kj::Exception&& exception) {
 // stream and whether or not it requires pending event registration.
 class EncodedAsyncInputStream final: public ReadableStreamSource {
  public:
-  explicit EncodedAsyncInputStream(
-      kj::Own<kj::AsyncInputStream> inner, StreamEncoding encoding, IoContext& context);
+  explicit EncodedAsyncInputStream(kj::Own<kj::AsyncInputStream> inner,
+      StreamEncoding encoding,
+      IoContext& context,
+      kj::Maybe<uint64_t> identityLength = kj::none);
 
   // Read bytes in identity encoding. If the stream is not already in identity encoding, it will be
   // converted to identity encoding via an appropriate stream wrapper.
@@ -79,18 +81,23 @@ class EncodedAsyncInputStream final: public ReadableStreamSource {
   friend class EncodedAsyncOutputStream;
 
   void ensureIdentityEncoding();
+  size_t accountRead(size_t amount, size_t minBytes);
 
   kj::Own<kj::AsyncInputStream> inner;
   StreamEncoding encoding;
+  kj::Maybe<uint64_t> identityLength;
   kj::Canceler canceler;
 
   IoContext& ioContext;
 };
 
-EncodedAsyncInputStream::EncodedAsyncInputStream(
-    kj::Own<kj::AsyncInputStream> inner, StreamEncoding encoding, IoContext& context)
+EncodedAsyncInputStream::EncodedAsyncInputStream(kj::Own<kj::AsyncInputStream> inner,
+    StreamEncoding encoding,
+    IoContext& context,
+    kj::Maybe<uint64_t> identityLength)
     : inner(kj::mv(inner)),
       encoding(encoding),
+      identityLength(identityLength),
       ioContext(context) {}
 
 kj::Promise<size_t> EncodedAsyncInputStream::tryRead(
@@ -106,11 +113,14 @@ kj::Promise<size_t> EncodedAsyncInputStream::tryRead(
     // does for asynchronous reads.
     KJ_IF_SOME(n,
         inner->tryReadSync(kj::arrayPtr(static_cast<kj::byte*>(buffer), maxBytes), minBytes)) {
-      return n;
+      return accountRead(n, minBytes);
     }
 
-    return canceler.wrap(inner->tryRead(buffer, minBytes, maxBytes))
-        .attach(ioContext.registerPendingEvent());
+    return canceler
+        .wrap(inner->tryRead(buffer, minBytes, maxBytes)
+                  .then([self = addPtrToThis(), minBytes](size_t amount) {
+      return self->accountRead(amount, minBytes);
+    })).attach(ioContext.registerPendingEvent());
   }).catch_([](kj::Exception&& exception) -> kj::Promise<size_t> {
     return translateEncodedStreamException(kj::mv(exception));
   });
@@ -123,7 +133,9 @@ kj::Maybe<size_t> EncodedAsyncInputStream::tryReadSync(
   // There is no need to register a pending event since a synchronous read never suspends, and
   // the canceler does not apply since there is no in-flight operation to cancel.
   try {
-    return inner->tryReadSync(buffer, minBytes);
+    return inner->tryReadSync(buffer, minBytes).map([&](size_t amount) {
+      return accountRead(amount, minBytes);
+    });
   } catch (...) {
     // tryReadSync() may throw when a synchronous read is possible but fails (e.g. corrupt
     // compressed data); translate the error exactly as the asynchronous path would.
@@ -132,12 +144,29 @@ kj::Maybe<size_t> EncodedAsyncInputStream::tryReadSync(
 }
 
 kj::Maybe<uint64_t> EncodedAsyncInputStream::tryGetLength(StreamEncoding outEncoding) {
+  if (outEncoding == StreamEncoding::IDENTITY && identityLength != kj::none) {
+    return identityLength;
+  }
   if (outEncoding == encoding) {
     return inner->tryGetLength();
   } else {
     // We have no idea what the length will be once encoded/decoded.
     return kj::none;
   }
+}
+
+size_t EncodedAsyncInputStream::accountRead(size_t amount, size_t minBytes) {
+  KJ_IF_SOME(remaining, identityLength) {
+    if (amount < minBytes) {
+      remaining = 0;
+    } else if (amount > remaining) {
+      // The sender's count is no longer usable; do not let it underflow or reject the read.
+      identityLength = kj::none;
+    } else {
+      remaining -= amount;
+    }
+  }
+  return amount;
 }
 
 kj::Maybe<ReadableStreamSource::Tee> EncodedAsyncInputStream::tryTee(uint64_t limit) {
@@ -150,8 +179,10 @@ kj::Maybe<ReadableStreamSource::Tee> EncodedAsyncInputStream::tryTee(uint64_t li
   auto tee = kj::newTee(kj::mv(inner), limit);
 
   Tee result;
-  result.branches[0] = newSystemStream(newTeeErrorAdapter(kj::mv(tee.branches[0])), encoding);
-  result.branches[1] = newSystemStream(newTeeErrorAdapter(kj::mv(tee.branches[1])), encoding);
+  result.branches[0] = newSystemStream(
+      newTeeErrorAdapter(kj::mv(tee.branches[0])), encoding, ioContext, identityLength);
+  result.branches[1] = newSystemStream(
+      newTeeErrorAdapter(kj::mv(tee.branches[1])), encoding, ioContext, identityLength);
   return kj::mv(result);
 }
 
@@ -395,8 +426,12 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
 kj::Promise<void> EncodedAsyncOutputStream::pumpFromNative(
     kj::Ptr<ReadableStreamSource> source, bool end) {
   auto self = addPtrToThis();
-  auto& input = *kj::downcast<EncodedAsyncInputStream>(source.asRef()).inner;
+  auto& nativeInput = kj::downcast<EncodedAsyncInputStream>(source.asRef());
+  auto& input = *nativeInput.inner;
   auto& output = getInner();
+  // The optimized pump bypasses decoded reads. Its source is consumed while the pump runs;
+  // only successful completion establishes a remaining identity length of zero.
+  nativeInput.identityLength = kj::none;
 
   // When the input advertises its length, pump exactly that length and then verify EOF with
   // a direct read on the input. A single unbounded pump-to-EOF can deadlock: if the
@@ -413,6 +448,7 @@ kj::Promise<void> EncodedAsyncOutputStream::pumpFromNative(
   } else {
     co_await input.pumpTo(output);
   }
+  nativeInput.identityLength = uint64_t{0};
 
   if (end) {
     // TODO(cleanup): When KJ streams are refactored to have a general end(), this stupid switch
@@ -529,9 +565,11 @@ kj::AsyncOutputStream& EncodedAsyncOutputStream::getInner() {
 
 }  // namespace
 
-kj::Own<ReadableStreamSource> newSystemStream(
-    kj::Own<kj::AsyncInputStream> inner, StreamEncoding encoding, IoContext& context) {
-  return kj::heap<EncodedAsyncInputStream>(kj::mv(inner), encoding, context);
+kj::Own<ReadableStreamSource> newSystemStream(kj::Own<kj::AsyncInputStream> inner,
+    StreamEncoding encoding,
+    IoContext& context,
+    kj::Maybe<uint64_t> identityLength) {
+  return kj::heap<EncodedAsyncInputStream>(kj::mv(inner), encoding, context, identityLength);
 }
 kj::Own<WritableStreamSink> newSystemStream(kj::Own<kj::AsyncOutputStream> inner,
     StreamEncoding encoding,

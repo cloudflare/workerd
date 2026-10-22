@@ -133,13 +133,15 @@ export let nonClass = {
       return new Response(stream);
     } else if (req.url.endsWith('/gzip-body-from-rpc')) {
       let resp = await env.MyService.returnResponse();
-      // Waiting on a timer gives the received body time to finish connecting, so that its length
-      // is known by the time the runtime pumps it into the gzip encoder.
-      await scheduler.wait(0);
       return new Response(resp.body, {
         headers: {
           'Content-Encoding': 'gzip',
         },
+      });
+    } else if (req.url.endsWith('/stream-length')) {
+      return Response.json({
+        length: req.headers.get('Content-Length'),
+        text: await req.text(),
       });
     } else {
       throw new Error('unknown route');
@@ -443,6 +445,14 @@ export class MyService extends WorkerEntrypoint {
 
   async readFromStream(stream) {
     return await new Response(stream).text();
+  }
+
+  async inspectStreamLength(stream) {
+    const response = await this.env.self.fetch('http://foo/stream-length', {
+      method: 'POST',
+      body: stream,
+    });
+    return response.json();
   }
 
   async returnReadableStream() {
@@ -1842,6 +1852,26 @@ export let streams = {
       let resp = await env.self.fetch('http://foo/aborted-stream-from-rpc');
       await resp.text();
     });
+  },
+};
+
+export const rpcStreamLength = {
+  async test(controller, env) {
+    for (const text of ['', 'known remaining bytes']) {
+      assert.deepStrictEqual(
+        await env.MyService.inspectStreamLength(new Response(text).body),
+        { length: String(text.length), text }
+      );
+      const returned = await env.MyService.roundTrip(new Response(text).body);
+      const response = await env.self.fetch('http://foo/stream-length', {
+        method: 'POST',
+        body: returned,
+      });
+      assert.deepStrictEqual(await response.json(), {
+        length: String(text.length),
+        text,
+      });
+    }
   },
 };
 

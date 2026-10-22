@@ -43,6 +43,14 @@ async function isCrossImplementationRunner(env) {
   return true;
 }
 
+async function inspectLength(stream, http) {
+  const response = await http.fetch('http://length/', {
+    method: 'POST',
+    body: stream,
+  });
+  return response.json();
+}
+
 export class Peer extends WorkerEntrypoint {
   usesTypeScriptStreams() {
     return usingTsImpl;
@@ -74,6 +82,14 @@ export class Peer extends WorkerEntrypoint {
 
   roundTrip(value) {
     return value;
+  }
+
+  makeResponseBody(text) {
+    return new Response(text).body;
+  }
+
+  inspectLength(stream) {
+    return inspectLength(stream, this.env.HTTP);
   }
 
   // Returns a peer-created readable.
@@ -117,6 +133,17 @@ export class Peer extends WorkerEntrypoint {
 }
 
 export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (url.hostname === 'body') {
+      return new Response(url.searchParams.get('text'));
+    }
+    return Response.json({
+      length: request.headers.get('Content-Length'),
+      text: await request.text(),
+    });
+  },
+
   async test(controller, env) {
     if (!(await isCrossImplementationRunner(env))) return;
 
@@ -204,6 +231,84 @@ export default {
       await writer.close();
       assert.strictEqual(await text, 'round-tripped across implementations');
     }
+  },
+};
+
+export const readableLength = {
+  async test(controller, env) {
+    if (!(await isCrossImplementationRunner(env))) return;
+    // Arguments and results preserve both known zero and a UTF-8 byte count.
+    for (const text of ['', 'snowman: \u2603']) {
+      const expected = { length: String(enc.encode(text).byteLength), text };
+      assert.deepStrictEqual(
+        await env.PEER.inspectLength(new Response(text).body),
+        expected
+      );
+      const returned = await env.PEER.makeResponseBody(text);
+      assert.deepStrictEqual(await inspectLength(returned, env.HTTP), expected);
+    }
+
+    // Native HTTP bodies and the two queued controller types supply lengths differently.
+    const text = 'known length';
+    const bytes = enc.encode(text);
+    const expected = { length: String(bytes.byteLength), text };
+    const valueStream = new TransformStream({
+      expectedLength: bytes.byteLength,
+      start(c) {
+        c.enqueue(bytes);
+      },
+    });
+    await valueStream.writable.getWriter().close();
+    for (const [name, stream] of [
+      [
+        'http',
+        (await env.HTTP.fetch(`http://body/?text=${encodeURIComponent(text)}`))
+          .body,
+      ],
+      ['value', valueStream.readable],
+      [
+        'bytes',
+        new ReadableStream({
+          type: 'bytes',
+          expectedLength: bytes.byteLength,
+          start(c) {
+            c.enqueue(bytes.slice());
+            c.close();
+          },
+        }),
+      ],
+    ]) {
+      assert.deepStrictEqual(
+        await env.PEER.inspectLength(stream),
+        expected,
+        name
+      );
+    }
+
+    // Forwarding a received stream and teeing it preserve the length on both branches.
+    const forwarded = await env.PEER.roundTrip(new Response(text).body);
+    for (const branch of forwarded.tee()) {
+      assert.deepStrictEqual(await env.PEER.inspectLength(branch), expected);
+    }
+
+    // Transfer the fixed-length stream before its producer writes any bytes.
+    const { readable, writable } = new FixedLengthStream(6);
+    const reading = env.PEER.inspectLength(readable);
+    const writer = writable.getWriter();
+    await writer.write(enc.encode('foobar'));
+    await writer.close();
+    assert.deepStrictEqual(await reading, { length: '6', text: 'foobar' });
+
+    const unsized = new ReadableStream({
+      start(c) {
+        c.enqueue(enc.encode('unsized'));
+        c.close();
+      },
+    });
+    assert.deepStrictEqual(await env.PEER.inspectLength(unsized), {
+      length: null,
+      text: 'unsized',
+    });
   },
 };
 
