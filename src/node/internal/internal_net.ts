@@ -1809,7 +1809,18 @@ function initializeConnection(
     // @ts-expect-error TS2540 Unnecessary error due to using @types/node
     socket.autoSelectFamilyAttemptedAddresses = [`${host}:${port}`];
 
-    socket.emit('connectionAttempt', host, port, addressType);
+    // The platform resolves a host name as part of connecting, and a failed
+    // lookup never starts an attempt in Node, so for a name the attempt is
+    // only reported once its outcome shows one was made.
+    let attemptPending = isIP(address) === 0;
+    const emitConnectionAttempt = (): void => {
+      if (!attemptPending) return;
+      attemptPending = false;
+      socket.emit('connectionAttempt', host, port, addressType);
+    };
+    if (!attemptPending) {
+      socket.emit('connectionAttempt', host, port, addressType);
+    }
 
     socket._host = `${host}`;
 
@@ -1884,6 +1895,7 @@ function initializeConnection(
         if (error instanceof GetAddrInfoException) {
           socket.emit('lookup', error, undefined, undefined, address);
         } else {
+          emitConnectionAttempt();
           socket.emit(
             'connectionAttemptFailed',
             host,
@@ -1895,7 +1907,10 @@ function initializeConnection(
         socket.destroy(error);
       };
 
-      handle.opened.then(onConnectionOpened.bind(socket), onConnectionFailed);
+      handle.opened.then((): void => {
+        if (!socket.destroyed) emitConnectionAttempt();
+        onConnectionOpened.call(socket);
+      }, onConnectionFailed);
 
       handle.closed.then(
         (): void => {

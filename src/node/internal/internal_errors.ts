@@ -753,7 +753,6 @@ export class ConnectException extends Error {
 const GETADDRINFO_ERRNO: Record<string, number> = {
   ENOTFOUND: -3008,
   EAI_AGAIN: -3001,
-  EAI_FAIL: -3004,
 };
 
 // A failed name lookup, as Node reports it from connect()'s getaddrinfo.

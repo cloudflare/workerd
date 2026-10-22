@@ -1601,18 +1601,56 @@ export const testNetConnectRefused = {
   },
 };
 
+// A refused connection to a host name, which the platform resolves itself,
+// reports the attempt once its outcome shows one was made.
+export const testNetConnectRefusedHostname = {
+  async test() {
+    const events = [];
+    const { promise, resolve } = Promise.withResolvers();
+    const socket = net.connect({ host: 'localhost', port: 1 });
+    for (const name of [
+      'connectionAttempt',
+      'connectionAttemptFailed',
+      'lookup',
+    ]) {
+      socket.on(name, () => events.push(name));
+    }
+    socket.on('error', (err) => {
+      events.push('error');
+      resolve(err);
+    });
+    const err = await promise;
+    deepStrictEqual(events, [
+      'connectionAttempt',
+      'connectionAttemptFailed',
+      'error',
+    ]);
+    strictEqual(err.code, 'ECONNREFUSED');
+    strictEqual(err.address, 'localhost');
+    strictEqual(err.port, 1);
+  },
+};
+
 // A host that does not resolve is reported as Node's getaddrinfo error:
 // ENOTFOUND from a resolver, EAI_AGAIN where the sandbox has no resolver.
 export const testNetConnectNotFound = {
   async test() {
     const { promise, resolve } = Promise.withResolvers();
     const socket = net.connect({ host: 'something.invalid', port: 80 });
-    const attemptFn = mock.fn();
-    socket.on('connectionAttemptFailed', attemptFn);
+    const events = [];
+    for (const name of [
+      'connectionAttempt',
+      'connectionAttemptFailed',
+      'lookup',
+      'error',
+    ]) {
+      socket.on(name, () => events.push(name));
+    }
     const lookupFn = mock.fn();
     socket.on('lookup', lookupFn);
     socket.on('error', resolve);
     const err = await promise;
+    deepStrictEqual(events, ['lookup', 'error']);
     ok(['ENOTFOUND', 'EAI_AGAIN'].includes(err.code), err.message);
     strictEqual(
       String(err),
@@ -1622,7 +1660,6 @@ export const testNetConnectNotFound = {
     strictEqual(err.errno, err.code === 'ENOTFOUND' ? -3008 : -3001);
     strictEqual(err.syscall, 'getaddrinfo');
     strictEqual(err.hostname, 'something.invalid');
-    strictEqual(attemptFn.mock.callCount(), 0);
     strictEqual(lookupFn.mock.callCount(), 1);
     deepStrictEqual(lookupFn.mock.calls[0].arguments, [
       err,

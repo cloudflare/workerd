@@ -305,8 +305,6 @@ KJ_TEST("connect failure exceptions map to errno names") {
       errnoFor("failed to lookup address information: Temporary failure in name resolution") ==
       "EAI_AGAIN");
   KJ_EXPECT(errnoFor("DNS lookup failed.; gai_strerror(status) = Try again") == "EAI_AGAIN");
-  KJ_EXPECT(errnoFor("DNS lookup failed.; gai_strerror(status) = "
-                     "Non-recoverable failure in name resolution") == "EAI_FAIL");
   KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, "something else went wrong")) == kj::none);
   KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, "TLS handshake timed out")) == kj::none);
 }

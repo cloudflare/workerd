@@ -1057,12 +1057,11 @@ kj::Maybe<kj::StringPtr> connectErrnoName(const kj::Exception& exception) {
   if (description.contains("Network is unreachable"_kj)) return "ENETUNREACH"_kj;
   if (description.contains("DNS lookup failed"_kj) || description.contains("getaddrinfo"_kj) ||
       description.contains("failed to lookup address information"_kj)) {
-    // gai_strerror() texts: EAI_AGAIN on glibc and musl, then EAI_FAIL.
+    // gai_strerror(EAI_AGAIN) on glibc and musl respectively.
     if (description.contains("Temporary failure in name resolution"_kj) ||
         description.contains("Try again"_kj)) {
       return "EAI_AGAIN"_kj;
     }
-    if (description.contains("Non-recoverable"_kj)) return "EAI_FAIL"_kj;
     return "ENOTFOUND"_kj;
   }
   return kj::none;
