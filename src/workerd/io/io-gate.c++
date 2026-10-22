@@ -214,7 +214,7 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait(SpanParent parentS
         KJ_IF_SOME(e, target.brokenException) {
           // Oops, we're broken.
           setBroken(e);
-          kj::throwFatalException(e.clone());
+          kj::throwException(e.clone());
         }
 
         // Add ourselves to this parent's child waiter list.
@@ -232,7 +232,7 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait(SpanParent parentS
             auto exception = kj::getCaughtExceptionAsKj();
             state = RUNNING;
             setBroken(exception);
-            kj::throwFatalException(kj::mv(exception));
+            kj::throwException(kj::mv(exception));
           }
         }
       }

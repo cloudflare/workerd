@@ -783,7 +783,7 @@ class RetryClaimObserver final: public RequestObserver {
     retryableAtClaim = retryable;
     jsEventsAtClaim = getJsEvents(jsg::Lock::current());
     KJ_IF_SOME(e, rejection) {
-      kj::throwFatalException(e.clone());
+      kj::throwException(e.clone());
     }
   }
 

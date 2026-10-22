@@ -202,7 +202,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
       if (self->actorSqlite.broken == kj::none) {
         self->rollbackImpl();
       }
-      kj::throwFatalException(kj::mv(e));
+      kj::throwException(kj::mv(e));
     });
   } else {
     commitImpl();
@@ -660,7 +660,7 @@ void ActorSqlite::taskFailed(kj::Exception&& exception) {
 
 void ActorSqlite::requireNotBroken() {
   KJ_IF_SOME(e, broken) {
-    kj::throwFatalException(e.clone());
+    kj::throwException(e.clone());
   }
 }
 

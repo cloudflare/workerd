@@ -628,7 +628,7 @@ void throwIllegalConstructor(const v8::FunctionCallbackInfo<v8::Value>& args) {
 }
 
 void throwTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception) {
-  kj::throwFatalException(createTunneledException(isolate, exception));
+  kj::throwException(createTunneledException(isolate, exception));
 }
 
 kj::Exception createTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception) {

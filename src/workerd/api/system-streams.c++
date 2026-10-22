@@ -127,7 +127,7 @@ kj::Maybe<size_t> EncodedAsyncInputStream::tryReadSync(
   } catch (...) {
     // tryReadSync() may throw when a synchronous read is possible but fails (e.g. corrupt
     // compressed data); translate the error exactly as the asynchronous path would.
-    kj::throwFatalException(translateEncodedStreamException(kj::getCaughtExceptionAsKj()));
+    kj::throwException(translateEncodedStreamException(kj::getCaughtExceptionAsKj()));
   }
 }
 

@@ -53,7 +53,7 @@ class FailedWaitUntilTaskTracker final: public Worker::Actor::WaitUntilTaskTrack
 
   kj::Own<Worker::Actor::WaitUntilTaskHandle> registerTask() override {
     ++state->attempts;
-    kj::throwRecoverableException(KJ_EXCEPTION(FAILED, "synthetic tracking failure"));
+    kj::throwExceptionUnlessUnwinding(KJ_EXCEPTION(FAILED, "synthetic tracking failure"));
     KJ_UNREACHABLE;
   }
 
@@ -106,7 +106,7 @@ KJ_TEST("actor wait-until task holds tracker handle") {
   KJ_EXPECT(state->activeTasks == 0);
 
   context->addWaitUntil(kj::evalLater(
-      []() { kj::throwRecoverableException(KJ_EXCEPTION(FAILED, "expected task failure")); }));
+      []() { kj::throwExceptionUnlessUnwinding(KJ_EXCEPTION(FAILED, "expected task failure")); }));
   KJ_EXPECT(state->activeTasks == 1);
 
   KJ_EXPECT_LOG(ERROR, "expected task failure");
@@ -139,8 +139,9 @@ KJ_TEST("actor wait-until task runs without a tracker") {
   fixture.pollEventLoop();
   KJ_EXPECT(taskCanceled);
 
-  context->addWaitUntil(kj::evalLater(
-      []() { kj::throwRecoverableException(KJ_EXCEPTION(FAILED, "expected base task failure")); }));
+  context->addWaitUntil(kj::evalLater([]() {
+    kj::throwExceptionUnlessUnwinding(KJ_EXCEPTION(FAILED, "expected base task failure"));
+  }));
   KJ_EXPECT_LOG(ERROR, "expected base task failure");
   fixture.pollEventLoop();
 
@@ -187,7 +188,7 @@ KJ_TEST("tracking failure does not affect actor wait-until task") {
   {
     KJ_EXPECT_LOG(ERROR, "Actor::addedWaitUntilTask() threw an exception");
     context->addWaitUntil(kj::evalLater([]() {
-      kj::throwRecoverableException(KJ_EXCEPTION(FAILED, "expected untracked task failure"));
+      kj::throwExceptionUnlessUnwinding(KJ_EXCEPTION(FAILED, "expected untracked task failure"));
     }));
   }
   {

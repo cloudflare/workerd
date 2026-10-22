@@ -875,7 +875,7 @@ kj::Promise<void> demuxDockerExecOutput(kj::AsyncInputStream& input,
     KJ_IF_SOME(err, stderrWriter) {
       err->abortWrite(exception.clone());
     }
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   }
 }
 
@@ -903,7 +903,7 @@ kj::Promise<void> copyRawExecOutput(
     KJ_IF_SOME(out, stdoutWriter) {
       out->abortWrite(exception.clone());
     }
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   }
 }
 
@@ -2657,7 +2657,7 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
   }
 
   KJ_IF_SOME(exception, maybeError) {
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   }
 
   results.setExitCode(KJ_REQUIRE_NONNULL(maybeExitCode));
@@ -3036,7 +3036,7 @@ kj::Promise<void> ContainerClient::ensureSidecarStarted() {
 
     if (maybeError == kj::none) break;
     if (attempt >= MAX_READY_RETRIES - 1)
-      kj::throwFatalException(kj::mv(KJ_REQUIRE_NONNULL(maybeError)));
+      kj::throwException(kj::mv(KJ_REQUIRE_NONNULL(maybeError)));
     co_await timer.afterDelay(READY_RETRY_DELAY);
   }
 

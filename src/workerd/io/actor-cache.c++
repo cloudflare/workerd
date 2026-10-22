@@ -268,7 +268,7 @@ void ActorCache::requireNotTerminal(SpanParent traceSpan) {
       ensureFlushScheduled({}, kj::mv(traceSpan));
     }
 
-    kj::throwFatalException(e.clone());
+    kj::throwException(e.clone());
   }
 }
 
@@ -306,7 +306,7 @@ void ActorCache::evictOrOomIfNeeded(Lock& lock) {
       ensureFlushScheduled(WriteOptions(), nullptr);
     }
 
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   }
 }
 
@@ -2603,7 +2603,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
     // If we have a terminal exception, throw here to break the output gate and prevent any calls
     // to storage. This does not use `requireNotTerminal()` so that we don't recursively schedule
     // flushes.
-    kj::throwFatalException(e.clone());
+    kj::throwException(e.clone());
   }
 
   auto flushProm = startFlushTransaction();

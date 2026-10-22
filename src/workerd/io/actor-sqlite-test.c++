@@ -33,7 +33,7 @@ template <typename T>
 kj::Promise<T> eagerlyReportExceptions(kj::Promise<T> promise, kj::SourceLocation location = {}) {
   return promise.eagerlyEvaluate([location](kj::Exception&& e) -> T {
     KJ_LOG_AT(ERROR, location, e);
-    kj::throwFatalException(kj::mv(e));
+    kj::throwException(kj::mv(e));
   });
 }
 
@@ -533,7 +533,7 @@ KJ_TEST("synchronous alarm scheduling failure causes local db commit to throw sy
   test.scheduleRunHandler = [&](kj::Maybe<kj::Date>) -> kj::Promise<void> {
     startedScheduleRun = true;
     // Must throw synchronously; returning an exception is insufficient.
-    kj::throwFatalException(KJ_EXCEPTION(FAILED, "a_sync_fail"));
+    kj::throwException(KJ_EXCEPTION(FAILED, "a_sync_fail"));
   };
 
   KJ_ASSERT(!promise.poll(test.ws));

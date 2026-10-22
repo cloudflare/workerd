@@ -1433,7 +1433,7 @@ void importMeta(
       js.v8Isolate->ThrowException(exception.getHandle(js));
     });
   } catch (...) {
-    kj::throwFatalException(kj::getCaughtExceptionAsKj());
+    kj::throwException(kj::getCaughtExceptionAsKj());
   }
 }
 

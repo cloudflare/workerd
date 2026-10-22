@@ -1936,7 +1936,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
         } catch (...) {
           auto exception = kj::getCaughtExceptionAsKj();
           if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
-            kj::throwFatalException(kj::mv(exception));
+            kj::throwException(kj::mv(exception));
           }
           // Ignore DISCONNECTED exceptions thrown by the writePromise, so that we always
           // return the server's response, which should identify if any issue occurred with
