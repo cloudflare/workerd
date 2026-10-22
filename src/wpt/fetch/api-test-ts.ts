@@ -874,8 +874,6 @@ export default {
   'response/response-static-json.any.js': {
     comment: 'statusText does not match the status code',
     expectedFailures: [
-      // For this test specifically: failed to throw on non-encodable data
-      'Check static json() throws when data is not encodable',
       'Check response returned by static json() with init undefined',
       'Check response returned by static json() with init {"status":400}',
       'Check response returned by static json() with init {"headers":{}}',

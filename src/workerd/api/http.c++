@@ -1227,7 +1227,16 @@ jsg::Ref<Response> Response::json_(
     };
   }
 
-  return constructor(js, kj::Maybe(any.toJson(js)), kj::mv(maybeInit));
+  auto json = any.toJson(js);
+  if (FeatureFlags::get(js).getPedanticWpt()) {
+    // JSON.stringify() returns undefined for values that have no JSON representation, such as a
+    // symbol, a function, undefined, or an object whose toJSON() returns one of these. V8's
+    // JSON::Stringify() API converts that result to the string "undefined", which is never valid
+    // JSON text, so it identifies these values unambiguously.
+    JSG_REQUIRE(json != "undefined"_kj, TypeError,
+        "Response.json() requires a value that can be serialized to JSON.");
+  }
+  return constructor(js, kj::Maybe(kj::mv(json)), kj::mv(maybeInit));
 }
 
 jsg::Ref<Response> Response::clone(jsg::Lock& js) {
