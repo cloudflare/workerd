@@ -1,0 +1,49 @@
+load("@rules_python//python:defs.bzl", "py_test")
+load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_rust_crate(
+    name = "jsg-bench-fixture",
+    testonly = True,
+    cxx_bridge_deps = ["//src/rust/jsg"],
+    cxx_bridge_src = "lib.rs",
+    proc_macro_deps = ["//src/rust/jsg-macros"],
+    # The macro also creates a Rust test binary, which must link the C++ JSG implementation.
+    test_deps = ["//src/workerd/jsg"],
+    deps = ["//src/rust/jsg"],
+)
+
+wd_cc_benchmark(
+    name = "bench-jsg",
+    srcs = ["bench.c++"],
+    local_defines = ["JSG_IMPLEMENTATION"],
+    # Functional coverage is in smoke-test. CodSpeed also excludes manual benchmarks.
+    tags = ["manual"],
+    deps = [
+        ":jsg-bench-fixture",
+        "//src/rust/jsg",
+        "//src/workerd/io:compatibility-date_capnp",
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/capnp:capnp",
+    ],
+)
+
+py_test(
+    name = "smoke-test",
+    size = "large",
+    srcs = ["smoke-test.py"],
+    args = ["$(location :bench-jsg)"],
+    data = [":bench-jsg"],
+    tags = ["cpu:2"],
+)
+
+py_test(
+    name = "tooling-test",
+    srcs = ["analyze-test.py"],
+    data = [
+        "analyze.py",
+        "run.py",
+        "smoke-test.py",
+    ],
+    main = "analyze-test.py",
+)
