@@ -55,12 +55,21 @@ class EmbedderBootstrap {
 // embedder's, if any.
 //
 // Must be called within a V8 context scope, after JSG global setup is complete
-// but before any user code evaluation. The entry point script named "main" is
-// loaded via a minimal synchronous require() mechanism.
+// but before any user code evaluation.
 //
-// The require() function and compatFlags object are passed to each script as
-// parameters of the function V8's CompileFunction wraps it in, not via globalThis. Scripts
-// can install properties on globalThis; those become visible to user code.
+// On a context built from scratch this runs the bootstrap scripts: the entry
+// point script named "main" is loaded via a minimal synchronous require()
+// mechanism, then the embedder's entry point. The require() function and
+// compatFlags object are passed to each script as parameters of the function
+// V8's CompileFunction wraps it in, not via globalThis. Scripts can install
+// properties on globalThis; those become visible to user code.
+//
+// On a context deserialized from a startup snapshot the scripts' effects are
+// already in the context, and running them again would install a second set of
+// classes beside the one the zygote's top-level code captured. Instead the
+// bootstrap state is rebuilt from the object the zygote pinned into the snapshot
+// (jsg::SnapshotArtifact::bootstrapStateIndex), which V8 hands out once; the
+// isolate's `embedder` must then be the zygote's.
 //
 // The bootstrap state (require cache, compat flags) is heap-allocated and stored
 // in the context's BOOTSTRAP_STATE embedder data slot, so that require() remains
@@ -76,6 +85,14 @@ void runPerIsolateBootstrap(jsg::Lock& js,
 // Cleans up the per-isolate bootstrap state stored in the context's embedder data.
 // Must be called before the context is destroyed (e.g., from disposeContext()).
 void cleanupPerIsolateBootstrap(jsg::Lock& js, v8::Local<v8::Context> context);
+
+// Zygote only (preparing a startup snapshot): bundles the bootstrap's JS-held state
+// (require(), the embedder's require() if any, primordials, the
+// compatFlags/autogates/utils objects, the require() cache) into one object, pins
+// it into the snapshot and records the index in
+// jsg::SnapshotArtifact::bootstrapStateIndex, then releases the C++ bootstrap
+// state exactly as cleanupPerIsolateBootstrap() does.
+void stashPerIsolateBootstrapForSnapshot(jsg::Lock& js, v8::Local<v8::Context> context);
 
 // Returns a Maybe<JsValue> with the named bootstrap module export if it exists, or
 // kj::none if it does not. The module must have already been instantiated/required
