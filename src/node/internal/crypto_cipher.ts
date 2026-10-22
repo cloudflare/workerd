@@ -152,7 +152,11 @@ function getSecretKey(
 function getIv(
   iv: string | ArrayBuffer | ArrayBufferView | null
 ): ArrayBuffer | ArrayBufferView {
-  if (isAnyArrayBuffer(iv) || isArrayBufferView(iv)) {
+  if (iv === null) {
+    // Node.js documents null as the IV for ciphers that don't use one,
+    // such as ECB modes.
+    return new Uint8Array(0);
+  } else if (isAnyArrayBuffer(iv) || isArrayBufferView(iv)) {
     return iv;
   } else if (typeof iv === 'string') {
     return Buffer.from(iv, 'utf8');
@@ -518,8 +522,44 @@ function getPaddingAndHash(options: HashOptions): PublicPrivateCipherOptions {
   return { padding, oaepHash, oaepLabel: label };
 }
 
+type AsymmetricKeyInput =
+  | CreateAsymmetricKeyOptions
+  | KeyData
+  | KeyObject
+  | CryptoKey
+  | { key: KeyObject | CryptoKey };
+
+// Resolves the key argument of publicEncrypt() and its siblings. As in
+// Node.js, a KeyObject or CryptoKey may be passed either directly or as the
+// `key` property of an options object, which lets callers specify options
+// such as `padding` alongside it.
+function prepareAsymmetricKey(
+  key: AsymmetricKeyInput,
+  type: 'public' | 'private'
+): CryptoKey {
+  const inner = (key as { key?: unknown } | null)?.key;
+  let keyObject: KeyObject | CryptoKey;
+  if (key instanceof CryptoKey || isKeyObject(key)) {
+    keyObject = key;
+  } else if (inner instanceof CryptoKey || isKeyObject(inner)) {
+    keyObject = inner;
+  } else {
+    const options = key as CreateAsymmetricKeyOptions;
+    return getKeyObjectHandle(
+      type === 'public' ? createPublicKey(options) : createPrivateKey(options)
+    );
+  }
+
+  if (keyObject.type !== type) {
+    throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(keyObject.type, type);
+  }
+  return keyObject instanceof CryptoKey
+    ? keyObject
+    : getKeyObjectHandle(keyObject);
+}
+
 export function privateEncrypt(
-  privateKey: CreateAsymmetricKeyOptions | KeyObject | CryptoKey | undefined,
+  privateKey: AsymmetricKeyInput | undefined,
   buffer: string | ArrayBufferView | ArrayBuffer | undefined
 ): Buffer {
   if (privateKey === undefined) {
@@ -528,28 +568,7 @@ export function privateEncrypt(
   if (buffer === undefined) {
     throw new ERR_MISSING_ARGS('buffer');
   }
-  const key = ((): CryptoKey => {
-    if (privateKey instanceof CryptoKey) {
-      if (privateKey.type !== 'private') {
-        throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(
-          privateKey.type,
-          'private'
-        );
-      }
-      return privateKey;
-    } else if (isKeyObject(privateKey)) {
-      if (privateKey.type !== 'private') {
-        throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(
-          privateKey.type,
-          'private'
-        );
-      }
-      return getKeyObjectHandle(privateKey);
-    } else {
-      const pvtKey = createPrivateKey(privateKey);
-      return getKeyObjectHandle(pvtKey);
-    }
-  })();
+  const key = prepareAsymmetricKey(privateKey, 'private');
   if (typeof buffer === 'string') {
     const { encoding = 'utf8' } = privateKey as { encoding?: string };
     buffer = Buffer.from(buffer, encoding);
@@ -565,7 +584,7 @@ export function privateEncrypt(
 }
 
 export function privateDecrypt(
-  privateKey: CreateAsymmetricKeyOptions | KeyData,
+  privateKey: AsymmetricKeyInput,
   buffer: string | ArrayBufferView | ArrayBuffer
 ): Buffer {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
@@ -576,28 +595,7 @@ export function privateDecrypt(
   if (buffer === undefined) {
     throw new ERR_MISSING_ARGS('buffer');
   }
-  const key = ((): CryptoKey => {
-    if (privateKey instanceof CryptoKey) {
-      if (privateKey.type !== 'private') {
-        throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(
-          privateKey.type,
-          'private'
-        );
-      }
-      return privateKey;
-    } else if (isKeyObject(privateKey)) {
-      if (privateKey.type !== 'private') {
-        throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(
-          privateKey.type,
-          'private'
-        );
-      }
-      return getKeyObjectHandle(privateKey);
-    } else {
-      const pvtKey = createPrivateKey(privateKey as CreateAsymmetricKeyOptions);
-      return getKeyObjectHandle(pvtKey);
-    }
-  })();
+  const key = prepareAsymmetricKey(privateKey, 'private');
   if (typeof buffer === 'string') {
     const { encoding = 'utf8' } = privateKey as { encoding?: string };
     buffer = Buffer.from(buffer, encoding);
@@ -613,7 +611,7 @@ export function privateDecrypt(
 }
 
 export function publicEncrypt(
-  key: CreateAsymmetricKeyOptions | KeyData,
+  key: AsymmetricKeyInput,
   buffer: string | ArrayBufferView | ArrayBuffer
 ): Buffer {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
@@ -624,22 +622,7 @@ export function publicEncrypt(
   if (buffer === undefined) {
     throw new ERR_MISSING_ARGS('buffer');
   }
-  const pkey = ((): CryptoKey => {
-    if (key instanceof CryptoKey) {
-      if (key.type !== 'public') {
-        throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(key.type, 'public');
-      }
-      return key;
-    } else if (isKeyObject(key)) {
-      if (key.type !== 'public') {
-        throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(key.type, 'public');
-      }
-      return getKeyObjectHandle(key);
-    } else {
-      const pubKey = createPublicKey(key as CreateAsymmetricKeyOptions);
-      return getKeyObjectHandle(pubKey);
-    }
-  })();
+  const pkey = prepareAsymmetricKey(key, 'public');
   if (typeof buffer === 'string') {
     const { encoding = 'utf8' } = key as { encoding?: string };
     buffer = Buffer.from(buffer, encoding);
@@ -655,7 +638,7 @@ export function publicEncrypt(
 }
 
 export function publicDecrypt(
-  key: CreateAsymmetricKeyOptions | KeyData,
+  key: AsymmetricKeyInput,
   buffer: string | ArrayBufferView | ArrayBuffer
 ): Buffer {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
@@ -666,22 +649,7 @@ export function publicDecrypt(
   if (buffer === undefined) {
     throw new ERR_MISSING_ARGS('buffer');
   }
-  const pkey = ((): CryptoKey => {
-    if (key instanceof CryptoKey) {
-      if (key.type !== 'public') {
-        throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(key.type, 'public');
-      }
-      return key;
-    } else if (isKeyObject(key)) {
-      if (key.type !== 'public') {
-        throw new ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE(key.type, 'public');
-      }
-      return getKeyObjectHandle(key);
-    } else {
-      const pubKey = createPublicKey(key as CreateAsymmetricKeyOptions);
-      return getKeyObjectHandle(pubKey);
-    }
-  })();
+  const pkey = prepareAsymmetricKey(key, 'public');
   if (typeof buffer === 'string') {
     const { encoding = 'utf8' } = key as { encoding?: string };
     buffer = Buffer.from(buffer, encoding);

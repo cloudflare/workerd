@@ -19,6 +19,7 @@ import {
   createDecipher,
   Cipher,
   Decipher,
+  constants,
 } from 'node:crypto';
 
 import { strictEqual, deepStrictEqual, throws, ok } from 'node:assert';
@@ -117,6 +118,34 @@ export const cipheriv = {
       res += decipher.update(data, 'hex');
       res += decipher.final();
       strictEqual(res, 'Hello World');
+    });
+  },
+};
+
+export const cipherivNullIv = {
+  test() {
+    const key = Buffer.from('0123456789abcdef');
+
+    const cipher = createCipheriv('aes-128-ecb', key, null);
+    const encrypted = Buffer.concat([
+      cipher.update('Hello World', 'utf8'),
+      cipher.final(),
+    ]);
+    // Matches the output of Node.js for the same inputs.
+    strictEqual(encrypted.toString('hex'), '7b9c07a4903c9768ceeeb922bcb33448');
+
+    const decipher = createDecipheriv('aes-128-ecb', key, null);
+    strictEqual(
+      Buffer.concat([decipher.update(encrypted), decipher.final()]).toString(),
+      'Hello World'
+    );
+
+    // A null IV is still rejected by ciphers that require one.
+    throws(() => createCipheriv('aes-128-cbc', key, null), {
+      message: 'Invalid initialization vector',
+    });
+    throws(() => createCipheriv('aes-128-ecb', key, undefined), {
+      code: 'ERR_INVALID_ARG_TYPE',
     });
   },
 };
@@ -277,6 +306,36 @@ export const privateEncryptPublicDecrypt = {
       publicDecrypt(pub, privateEncrypt(pvt, input)).toString(),
       input
     );
+  },
+};
+
+export const keyObjectInOptions = {
+  test(_, env) {
+    const pub = createPublicKey(env['rsa_public.pem']);
+    const pvt = createPrivateKey(env['rsa_private.pem']);
+    const padding = constants.RSA_NO_PADDING;
+
+    const input = Buffer.alloc(256);
+    input.set(Buffer.from('hello'));
+
+    const encrypted = publicEncrypt({ key: pub, padding }, input);
+    // Matches the output of Node.js for the same inputs.
+    strictEqual(
+      encrypted.toString('hex').slice(0, 32),
+      '7dcf031fe441c87cc48361ca561bcc15'
+    );
+    deepStrictEqual(
+      encrypted,
+      publicEncrypt({ key: env['rsa_public.pem'], padding }, input)
+    );
+    deepStrictEqual(privateDecrypt({ key: pvt, padding }, encrypted), input);
+
+    const signed = privateEncrypt({ key: pvt, padding }, input);
+    deepStrictEqual(publicDecrypt({ key: pub, padding }, signed), input);
+
+    throws(() => privateDecrypt({ key: pub, padding }, encrypted), {
+      code: 'ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE',
+    });
   },
 };
 
