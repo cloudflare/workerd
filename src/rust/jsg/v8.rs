@@ -41,6 +41,7 @@ use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::ptr::NonNull;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::Error;
 use crate::FromJS;
@@ -49,6 +50,7 @@ use crate::Lock;
 use crate::Nullable;
 use crate::Number;
 use crate::Resource;
+use crate::isolate_state::IsolateState;
 #[expect(
     clippy::missing_safety_doc,
     reason = "bridge declarations of raw V8 FFI functions; their contracts are V8's own"
@@ -1645,10 +1647,10 @@ impl<'s> Local<'s, Array> {
         // SAFETY: lock guarantees the isolate is locked; handle is valid in scope 's.
         let globals =
             unsafe { ffi::local_array_iterate(lock.isolate().as_ffi(), self.into_ffi()) }?;
-        let isolate = lock.isolate_id();
+        let state = lock.isolate_state();
         Ok(globals
             .into_iter()
-            .map(|g| Global::from_ffi_in(g, isolate))
+            .map(|g| Global::from_ffi_in(g, Arc::clone(state)))
             .collect())
     }
 }
@@ -2923,8 +2925,9 @@ pub struct Global<T> {
     /// This is sound because GC tracing is always single-threaded within a V8
     /// isolate and `trace` is never re-entrant on the same object.
     traced: UnsafeCell<ffi::TracedReference>,
-    /// The isolate the handle was created in; every use checks it.
-    isolate: crate::scope::IsolateId,
+    /// The state of the isolate the handle was created in. Every use checks that the lock
+    /// belongs to that isolate, and a drop checks that the isolate is still alive.
+    state: Arc<IsolateState>,
     /// `*const T` makes `Global` neither `Send` nor `Sync`: dropping it resets the V8
     /// handle, which must happen on the isolate's thread.
     _marker: PhantomData<*const T>,
@@ -2937,7 +2940,7 @@ impl<T> Global<T> {
         // SAFETY: isolate is valid and locked (guaranteed by Lock); the handle is valid, and
         // belongs to the lock's isolate because all open scopes do.
         let handle = unsafe { ffi::local_to_global(lock.isolate().as_ffi(), local.into_ffi()) };
-        Self::from_ffi_in(handle, lock.isolate_id())
+        Self::from_ffi_in(handle, Arc::clone(lock.isolate_state()))
     }
 
     /// Creates a `Global` from an FFI handle.
@@ -2946,14 +2949,14 @@ impl<T> Global<T> {
     /// The caller must ensure that `handle` points to a valid V8 persistent handle of the
     /// lock's isolate.
     pub unsafe fn from_ffi(lock: &mut Lock<'_>, handle: ffi::Global) -> Self {
-        Self::from_ffi_in(handle, lock.isolate_id())
+        Self::from_ffi_in(handle, Arc::clone(lock.isolate_state()))
     }
 
-    pub(crate) fn from_ffi_in(handle: ffi::Global, isolate: crate::scope::IsolateId) -> Self {
+    pub(crate) fn from_ffi_in(handle: ffi::Global, state: Arc<IsolateState>) -> Self {
         Self {
             handle,
             traced: UnsafeCell::new(ffi::TracedReference { ptr: 0 }),
-            isolate,
+            state,
             _marker: PhantomData,
         }
     }
@@ -2964,7 +2967,7 @@ impl<T> Global<T> {
     /// Panics if it does not.
     fn assert_in_isolate_of(&self, lock: &mut Lock<'_>) {
         assert!(
-            self.isolate == lock.isolate_id(),
+            Arc::ptr_eq(&self.state, lock.isolate_state()),
             "attempt to use a Global in an isolate other than the one it was created in"
         );
     }
@@ -3040,23 +3043,25 @@ impl<T> Global<T> {
     ///
     /// Panics if a traced reference has been installed on this `Global`; cached resource
     /// templates are never GC-traced, so this does not happen for them.
-    pub fn into_ffi_for_snapshot(self) -> ffi::Global {
-        // SAFETY: reading the UnsafeCell is sound — we hold the only reference.
-        let traced_ptr = unsafe { (*self.traced.get()).ptr };
+    pub fn into_ffi_for_snapshot(mut self) -> ffi::Global {
         assert_eq!(
-            traced_ptr, 0,
+            self.traced.get_mut().ptr,
+            0,
             "cannot transfer a Global with an active traced reference"
         );
-        let handle = ffi::Global {
-            ptr: self.handle.ptr,
-        };
-        std::mem::forget(self);
-        handle
+        // `self` is dropped with an empty handle, whose reset does nothing, and releases its
+        // isolate state.
+        std::mem::replace(&mut self.handle, ffi::Global { ptr: 0 })
     }
 }
 
 impl<T> Drop for Global<T> {
     fn drop(&mut self) {
+        if self.state.is_closed() {
+            // The isolate is being disposed, or has been: `v8::Isolate::Dispose` frees every
+            // handle of the isolate, and a reset after it would touch freed memory.
+            return;
+        }
         // SAFETY: global handle is valid (guaranteed by construction).
         unsafe { self.reset() };
     }
@@ -3088,7 +3093,7 @@ impl<T> Global<T> {
         self.assert_in_isolate_of(lock);
         // SAFETY: isolate is valid and locked (guaranteed by Lock); global handle is valid.
         let handle = unsafe { ffi::global_clone(lock.isolate().as_ffi(), &self.handle) };
-        Self::from_ffi_in(handle, self.isolate)
+        Self::from_ffi_in(handle, Arc::clone(&self.state))
     }
 }
 

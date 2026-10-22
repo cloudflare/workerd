@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::ops::Deref;
 use std::ptr::NonNull;
+use std::sync::Arc;
 
 use kj_rs::KjMaybe;
 
@@ -26,6 +27,7 @@ use crate::ToJS;
 use crate::Traced;
 use crate::Type;
 use crate::feature_flags::compatibility_flags;
+use crate::isolate_state::IsolateState;
 use crate::v8;
 use crate::v8::ffi::Wrappable;
 
@@ -513,18 +515,18 @@ impl Resources {
     pub(crate) fn get_constructor<R: Resource + 'static>(
         &mut self,
         isolate: v8::IsolatePtr,
-        isolate_id: crate::scope::IsolateId,
+        state: &Arc<IsolateState>,
         flags: compatibility_flags::Reader<'_>,
     ) -> &v8::Global<v8::FunctionTemplate> {
         self.templates
             .entry(TypeId::of::<R>())
-            .or_insert_with(|| Self::create_resource_constructor::<R>(isolate, isolate_id, flags))
+            .or_insert_with(|| Self::create_resource_constructor::<R>(isolate, state, flags))
     }
 
     /// Creates a new V8 `FunctionTemplate` for resource type `R` via the C++ FFI.
     fn create_resource_constructor<R: Resource>(
         isolate: v8::IsolatePtr,
-        isolate_id: crate::scope::IsolateId,
+        state: &Arc<IsolateState>,
         flags: compatibility_flags::Reader<'_>,
     ) -> v8::Global<v8::FunctionTemplate> {
         // SAFETY: Caller guarantees the isolate is valid and locked.
@@ -534,7 +536,7 @@ impl Resources {
                 &get_resource_descriptor::<R>(flags),
             )
         };
-        v8::Global::from_ffi_in(handle, isolate_id)
+        v8::Global::from_ffi_in(handle, Arc::clone(state))
     }
 
     /// Drains every cached resource-template handle, transferring ownership of each

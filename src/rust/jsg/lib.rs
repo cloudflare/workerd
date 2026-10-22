@@ -6,9 +6,11 @@ use std::future::Future;
 use std::num::ParseIntError;
 use std::ops::Deref;
 use std::pin::Pin;
+use std::sync::Arc;
 
 pub mod fast_api;
 pub mod feature_flags;
+mod isolate_state;
 pub mod lenient;
 pub mod macros;
 pub mod modules;
@@ -19,6 +21,7 @@ pub mod v8;
 mod wrappable;
 
 pub use feature_flags::FeatureFlags;
+use isolate_state::IsolateState;
 pub use lenient::Lenient;
 pub use nullable::Nullable;
 pub use resource::Rc;
@@ -946,10 +949,15 @@ pub trait Struct: Type {}
 /// cached function templates and tracks resource instances. When all Rust `Ref` handles to a
 /// resource are dropped and no JS references remain, V8 GC collects the wrapper and the
 /// `CppgcShim` destruction triggers cleanup of the underlying `Wrappable`.
+///
+/// A Realm must be dropped under the isolate lock, before the isolate is disposed: dropping
+/// it closes the isolate's [`IsolateState`], after which the `Global`s of the isolate leave
+/// their handles to `v8::Isolate::Dispose`.
 pub struct Realm {
     isolate: v8::IsolatePtr,
-    id: scope::IsolateId,
-    pub(crate) resources: resource::Resources,
+    /// Shared with every `Global` of the isolate, which identifies its isolate by it.
+    state: Arc<IsolateState>,
+    resources: resource::Resources,
     /// Parsed `CompatibilityFlags` capnp message, initialized at construction.
     feature_flags: FeatureFlags,
 }
@@ -959,7 +967,7 @@ impl Realm {
     pub fn new(isolate: v8::IsolatePtr, feature_flags: FeatureFlags) -> Self {
         Self {
             isolate,
-            id: scope::IsolateId::next(),
+            state: IsolateState::new(),
             resources: resource::Resources::default(),
             feature_flags,
         }
@@ -969,15 +977,15 @@ impl Realm {
         self.isolate
     }
 
-    pub(crate) fn id(&self) -> scope::IsolateId {
-        self.id
+    pub(crate) fn state(&self) -> &Arc<IsolateState> {
+        &self.state
     }
 
     /// Gets or creates the cached `FunctionTemplate` for a resource type, built against
     /// this realm's compatibility flags.
     pub(crate) fn get_constructor<R: Resource>(&mut self) -> &v8::Global<v8::FunctionTemplate> {
         self.resources
-            .get_constructor::<R>(self.isolate, self.id, self.feature_flags.reader())
+            .get_constructor::<R>(self.isolate, &self.state, self.feature_flags.reader())
     }
 }
 
@@ -989,6 +997,13 @@ impl Drop for Realm {
             unsafe { self.isolate.is_locked() },
             "Realm must be dropped while holding the isolate lock"
         );
+        // Dropped before the state is closed, so that their handles are reset rather than
+        // left to `Dispose`.
+        drop(std::mem::take(&mut self.resources));
+        // SAFETY: the Realm is dropped under the isolate lock, while no `Lock` is in use
+        // (guaranteed by the embedder; see the type's documentation).
+        let isolate = unsafe { Isolate::from_raw(self.isolate.as_ffi()) };
+        self.state.close(isolate);
     }
 }
 

@@ -161,6 +161,11 @@ let global = str_value.to_global(lock);
 A persistent handle that outlives `HandleScope`s. Must be explicitly managed. Opening or cloning
 it in an isolate other than the one it was created in panics.
 
+Dropping a `Global` resets its V8 handle, unless its isolate is gone: a `Global` can outlive the
+isolate it was created in, and `v8::Isolate::Dispose` frees every handle of the isolate in bulk,
+so a drop after that leaves the handle alone. The `Realm` tells the isolate's `Global`s when it
+is dropped, which happens under the isolate lock, before the isolate is disposed.
+
 `Global<T>` fields on `#[jsg_resource]` structs participate in GC tracing when visited via `GcVisitor::visit_global`. This enables the garbage collector to detect and collect back-reference cycles — for example, a resource that stores a JS callback which closes over the resource's own JS wrapper:
 
 ```rust

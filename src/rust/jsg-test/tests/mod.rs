@@ -11,6 +11,7 @@ mod eval;
 mod fast_api;
 mod function;
 mod gc;
+mod global_lifetime;
 mod harness;
 mod integer;
 mod isolates;
