@@ -250,7 +250,7 @@ void IsolateBase::buildEmbedderGraph(v8::Isolate* isolate, v8::EmbedderGraph* gr
     // throw any exceptions. We'll treat any exception here as fatal, including
     // JsExceptionThrown. Note that we're not entered into any particular v8::Context
     // here so pulling out the details of the exception would be tricky anyway.
-    kj::throwFatalException(kj::getCaughtExceptionAsKj());
+    kj::throwException(kj::getCaughtExceptionAsKj());
   }
 }
 

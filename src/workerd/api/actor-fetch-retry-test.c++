@@ -317,11 +317,11 @@ class ReplayFetchTarget final: public WorkerInterface {
         case ReplayAction::NON_RETRYABLE_FAILURE:
         case ReplayAction::CLIENT_CREATION_FAILURE:
         case ReplayAction::CLIENT_CREATION_DISCONNECT:
-          kj::throwRecoverableException(makeReplayFailure(action));
+          kj::throwExceptionUnlessUnwinding(makeReplayFailure(action));
           break;
         case ReplayAction::RETRY_DELAY_EXCEEDS_BUDGET:
           KJ_REQUIRE_NONNULL(state.timerChannel).delayNextTimeoutBy(state.retryTimeoutDelay);
-          kj::throwRecoverableException(makeReplayFailure(action));
+          kj::throwExceptionUnlessUnwinding(makeReplayFailure(action));
           break;
       }
     }
@@ -396,10 +396,11 @@ class ReplayOutgoingFactory final: public Fetcher::OutgoingFactory {
     if (state.requestCount < state.actions.size()) {
       auto action = state.actions[state.requestCount];
       if (action == ReplayAction::CLIENT_CREATION_FAILURE) {
-        kj::throwRecoverableException(
+        kj::throwExceptionUnlessUnwinding(
             JSG_KJ_EXCEPTION(FAILED, Error, "actor client creation failed"));
       } else if (action == ReplayAction::CLIENT_CREATION_DISCONNECT) {
-        kj::throwRecoverableException(KJ_EXCEPTION(DISCONNECTED, "actor client creation failed"));
+        kj::throwExceptionUnlessUnwinding(
+            KJ_EXCEPTION(DISCONNECTED, "actor client creation failed"));
       }
     }
     return {.client = kj::heap<ReplayFetchTarget>(state), .spanParents = kj::none};
@@ -1626,7 +1627,7 @@ class DuplicateClaimObserver final: public RequestObserver {
     if (claimCount++ > 0 && !retryable.toBool()) {
       auto exception = KJ_EXCEPTION(FAILED, "retry token already claimed");
       exception.setDetail(jsg::ACTOR_RETRY_CLAIM_REJECTED_DETAIL_ID, kj::heapArray<kj::byte>(0));
-      kj::throwFatalException(kj::mv(exception));
+      kj::throwException(kj::mv(exception));
     }
   }
 
@@ -1696,7 +1697,7 @@ class ReceiverTarget final: public WorkerInterface {
     if (actorResponse == ActorResponse::LOST) {
       DiscardedResponse lost;
       co_await inner->request(method, url, headers, requestBody, lost);
-      kj::throwFatalException(KJ_EXCEPTION(DISCONNECTED, "actor fetch response lost"));
+      kj::throwException(KJ_EXCEPTION(DISCONNECTED, "actor fetch response lost"));
     }
     RelayedResponse relayed(response, headers);
     co_await inner->request(method, url, headers, requestBody, relayed);

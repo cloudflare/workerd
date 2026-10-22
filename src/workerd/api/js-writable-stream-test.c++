@@ -152,7 +152,7 @@ class SyncThrowingSink final: public WritableStreamSink {
   }
 
   bool tryWriteSync(kj::ArrayPtr<const kj::byte> buffer) override {
-    kj::throwFatalException(KJ_EXCEPTION(FAILED, "jsg.Error: sync write failed"));
+    kj::throwException(KJ_EXCEPTION(FAILED, "jsg.Error: sync write failed"));
   }
 
   kj::Promise<void> end() override {

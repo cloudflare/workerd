@@ -3820,7 +3820,7 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
     ioContext.addTask(forwardToFulfiller(kj::mv(promise), kj::mv(prp.fulfiller)));
 
     co_await prp.promise;
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   }
 }
 }  // namespace

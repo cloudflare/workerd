@@ -566,7 +566,7 @@ void runPerIsolateBootstrap(jsg::Lock& js, CompatibilityFlags::Reader flags) {
     }
   }
   JSG_CATCH(exception) {
-    kj::throwFatalException(js.exceptionToKj(kj::mv(exception)));
+    kj::throwException(js.exceptionToKj(kj::mv(exception)));
   }
 }
 

@@ -588,10 +588,10 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         co_await kj::yield();
         KJ_IF_SOME(e, outputGateException) {
           reportFailure.cancel();
-          kj::throwFatalException(kj::mv(e));
+          kj::throwException(kj::mv(e));
         }
         reportFailure.cancel();
-        kj::throwFatalException(kj::mv(exception));
+        kj::throwException(kj::mv(exception));
       }
     }  // Above KJ_DEFER fires here: abort signal + drain.
 
@@ -612,7 +612,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         metricsForProxyTask->reportFailure(e, RequestObserver::FailureSource::DEFERRED_PROXY);
         // See the matching yield in stage 2's catch.
         co_await kj::yield();
-        kj::throwFatalException(kj::mv(e));
+        kj::throwException(kj::mv(e));
       }
     }
   }
@@ -654,7 +654,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
       }
       KJ_CATCH(e) {
         markExceptionAsDelivered(e);
-        kj::throwFatalException(kj::mv(e));
+        kj::throwException(kj::mv(e));
       }
     };
 
@@ -682,7 +682,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
       auto propagated = exceptionToPropagate(isInternalException, kj::mv(exception));
       // See the matching yield in stage 2's catch.
       co_await kj::yield();
-      kj::throwFatalException(kj::mv(propagated));
+      kj::throwException(kj::mv(propagated));
     }
 
     KJ_IF_SOME(service, failOpenService) {
@@ -714,7 +714,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
       auto propagated = exceptionToPropagate(isInternalException, kj::mv(exception));
       // See the matching yield in stage 2's catch.
       co_await kj::yield();
-      kj::throwFatalException(kj::mv(propagated));
+      kj::throwException(kj::mv(propagated));
     }
 
     // We're catching the exception and replacing it with 5xx, but metrics should still indicate
@@ -1052,7 +1052,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
         // We failed, inform any other entrypoints that may be waiting upon us.
         af.reject(e);
         cancellationGuard.cancel();
-        kj::throwFatalException(kj::mv(e));
+        kj::throwException(kj::mv(e));
       }
     }
     KJ_CASE_ONEOF(outcome, WorkerInterface::AlarmOutcome) {

@@ -32,7 +32,7 @@ namespace {
     }
   }
 
-  kj::throwFatalException(JSG_KJ_EXCEPTION(FAILED, TypeError, message));
+  kj::throwException(JSG_KJ_EXCEPTION(FAILED, TypeError, message));
 }
 
 kj::Promise<void> pumpTo(
@@ -554,13 +554,13 @@ kj::Promise<DeferredProxy<void>> pumpOwnedSourceToSink(
     proxy.proxyTask = proxy.proxyTask.exclusiveJoin(rejectWhenWriteDisconnected<void>(sinkRef))
                           .catch_([holder = holder.addRef()](kj::Exception&& exception) mutable {
       holder->fail(exception);
-      kj::throwFatalException(kj::mv(exception));
+      kj::throwException(kj::mv(exception));
     }).attach(holder.addRef());
     holder->done = true;
     return kj::mv(proxy);
   }, [holder = holder.addRef()](kj::Exception&& exception) mutable -> DeferredProxy<void> {
     holder->fail(exception);
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   });
 }
 
@@ -1240,7 +1240,7 @@ kj::Maybe<kj::Rc<ReadableStreamSource>> ReadableStreamInternalController::remove
       return kj::Rc<ReadableStreamSource>(kj::heap<NullSource>());
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      kj::throwFatalException(js.exceptionToKj(errored.addRef(js)));
+      kj::throwException(js.exceptionToKj(errored.addRef(js)));
     }
     KJ_CASE_ONEOF(readable, Readable) {
       auto result = kj::mv(readable).take();
@@ -1776,7 +1776,7 @@ kj::Maybe<kj::Own<WritableStreamSink>> WritableStreamInternalController::removeS
       KJ_UNREACHABLE;
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      kj::throwFatalException(js.exceptionToKj(errored.addRef(js)));
+      kj::throwException(js.exceptionToKj(errored.addRef(js)));
     }
     KJ_CASE_ONEOF(writable, IoOwn<Writable>) {
       auto result = kj::mv(writable->sink);
@@ -1801,7 +1801,7 @@ void WritableStreamInternalController::detach(jsg::Lock& js) {
       KJ_UNREACHABLE;
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      kj::throwFatalException(js.exceptionToKj(errored.addRef(js)));
+      kj::throwException(js.exceptionToKj(errored.addRef(js)));
     }
     KJ_CASE_ONEOF(writable, IoOwn<Writable>) {
       state.transitionTo<StreamStates::Closed>();

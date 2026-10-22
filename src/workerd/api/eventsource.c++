@@ -234,7 +234,7 @@ kj::Promise<void> processBody(kj::Promise<void> promise) {
       co_return;
     }
     // Propagate the exception up.
-    kj::throwFatalException(kj::mv(ex));
+    kj::throwException(kj::mv(ex));
   }
 }
 }  // namespace
