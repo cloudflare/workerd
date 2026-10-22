@@ -20,10 +20,6 @@ class WrappedAbortSignal extends RpcTarget {
     this.ac = new AbortController();
   }
 
-  forget() {
-    this.ac.signal.skipReleaseForTest();
-  }
-
   getSignal() {
     return this.ac.signal;
   }
@@ -1059,31 +1055,6 @@ export const rpcRemoteCanIgnoreSignal = {
   },
 };
 
-export const rpcDestroySignalUnclean = {
-  async test(ctrl, env, ctx) {
-    // wrapper is a RPCTarget that just holds an AbortSignal
-    const wrapper = await env.RpcRemoteEnd.getWrappedSignal();
-
-    // Get our clone of the signal
-    const signal = await wrapper.getSignal();
-
-    // Tell the AbortSignal not to send a release message on disposal
-    await wrapper.forget();
-
-    // Destroy the wrapper
-    wrapper[Symbol.dispose]();
-
-    // No release message was sent, our clone will provide a message explaining the other side is
-    // gone.
-    ok(signal.aborted);
-    strictEqual(
-      signal.reason.message,
-      'An AbortSignal received over RPC was implicitly aborted because the connection back to its ' +
-        'trigger was lost.'
-    );
-  },
-};
-
 export const rpcDestroySignalClean = {
   async test(ctrl, env, ctx) {
     // wrapper is a RPCTarget that just holds an AbortSignal
@@ -1095,7 +1066,7 @@ export const rpcDestroySignalClean = {
     // Destroy the wrapper
     wrapper[Symbol.dispose]();
 
-    // A release message was sent, the signal will remain in an unaborted state
+    // Dropping the trigger doesn't abort the signal
     ok(!signal.aborted);
     strictEqual(signal.reason, undefined);
   },

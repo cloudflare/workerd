@@ -766,10 +766,6 @@ interface AbortTrigger $Cxx.allowCancellation {
   abort @0 (reason :JsValue) -> ();
   # Allows a cloned abort signal to be triggered over RPC when the original signal is triggered.
   # `reason` is an arbitrary JavaScript value which will appear in the resulting `AbortError`s.
-
-  release @1 () -> ();
-  # Informs a cloned signal that the original signal is being destroyed, and the abort will never
-  # be triggered. Otherwise, the cloned signal will treat a dropped cabability as an abort.
 }
 
 interface StreamCanceler $Cxx.allowCancellation {

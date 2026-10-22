@@ -188,34 +188,15 @@ class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
     return kj::READY_NOW;
   }
 
-  kj::Promise<void> release(ReleaseContext releaseCtx) override {
-    released = true;
-    return kj::READY_NOW;
-  }
-
   ~AbortTriggerRpcServer() noexcept(false) {
-    {
-      auto lock = pendingReason->value.lockExclusive();
-      if (*lock != nullptr) {
-        // Already triggered
-        return;
-      }
-
-      if (!released) {
-        *lock = JSG_KJ_EXCEPTION(FAILED, DOMAbortError,
-            "An AbortSignal received over RPC was implicitly aborted because the connection back "
-            "to its trigger was lost.");
-      }
-    }
-
-    // Always fulfill the promise in case the AbortSignal was waiting
+    // Losing the capability means the signal will never be triggered, so this leaves the pending
+    // reason empty and only unblocks an AbortSignal that is waiting.
     fulfiller->fulfill();
   }
 
  private:
   kj::Own<kj::PromiseFulfiller<void>> fulfiller;
   kj::Arc<ExternalPusherImpl::PendingAbortReasonBox> pendingReason;
-  bool released = false;
 };
 
 }  // namespace

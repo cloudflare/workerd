@@ -648,10 +648,8 @@ class AbortSignal final: public EventTarget {
     JSG_METHOD(throwIfAborted);
 
     if (flags.getWorkerdExperimental()) {
-      JSG_METHOD(skipReleaseForTest);
       JSG_METHOD(getNativeRegistrationCountForTest);
       JSG_TS_OVERRIDE({
-        skipReleaseForTest: never;
         getNativeRegistrationCountForTest: never;
       });
     }
@@ -751,10 +749,6 @@ class AbortSignal final: public EventTarget {
   }
 
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
-
-  // To test what happens if a capability is dropped before invoking release on the cloned abort
-  // signal, this method will tell every rpcClient to skip this step before destruction.
-  void skipReleaseForTest();
 
   // Test-only introspection: the number of native registration cells (live or empty awaiting
   // a sweep) plus RPC registrations currently held by this signal. Lets tests assert that
