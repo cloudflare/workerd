@@ -150,7 +150,7 @@ LegacyHibernationManagerImpl::~LegacyHibernationManagerImpl() noexcept(false) {
   // Note that the HibernatableWebSocket destructor handles removing any references to itself in
   // `tagToWs`, and even removes the hashmap entry if there are no more entries in the bucket.
   allWs.clear();
-  KJ_ASSERT(tagToWs.size() == 0, "tagToWs hashmap wasn't cleared.");
+  KJ_DTOR_ASSERT(tagToWs.size() == 0, "tagToWs hashmap wasn't cleared.");
 }
 
 kj::Own<Worker::Actor::HibernationManager> LegacyHibernationManagerImpl::addRef() {

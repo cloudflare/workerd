@@ -271,7 +271,6 @@ class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHa
   template <typename T>
   kj::Maybe<T> claimPrebuilt();
 
-  kj::UnwindDetector unwindDetector;
   RpcStubDisposalGroup& disposalGroup;
   kj::Maybe<TraceContextParent> originatingCall;
 };

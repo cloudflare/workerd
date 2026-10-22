@@ -147,9 +147,6 @@ class XThreadWaitList<void> {
 
     // Only initialized if useThreadLocalOptimization is enabled.
     kj::ForkedPromise<void> forkedPromise = nullptr;
-
-    // ~Waiter() is `noexcept(false)`
-    kj::UnwindDetector unwindDetector;
   };
 
   struct State: public kj::AtomicRefcounted {
@@ -313,11 +310,12 @@ class XThreadWaitList {
       }
 
       if (state->useThreadLocalOptimization) {
-        unwindDetector.catchExceptionsIfUnwinding([&]() {
-          auto& entry = KJ_ASSERT_NONNULL(threadLocalWaiters->findEntry(state.get()));
-          KJ_ASSERT(entry.value == nullptr);
+        KJ_IF_SOME(entry, threadLocalWaiters->findEntry(state.get())) {
+          KJ_DTOR_ASSERT(entry.value == nullptr);
           threadLocalWaiters->erase(entry);
-        });
+        } else {
+          KJ_DTOR_FAIL_ASSERT("XThreadWaitList waiter missing from the thread-local waiter map");
+        }
       }
     }
 
@@ -326,7 +324,6 @@ class XThreadWaitList {
     Registration registration;
     bool unlinked = false;
     kj::ForkedPromise<void> forkedPromise = nullptr;
-    kj::UnwindDetector unwindDetector;
   };
 
   using WaiterMap = kj::HashMap<const State*, kj::WeakRc<Waiter>>;
