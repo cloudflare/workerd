@@ -22,6 +22,7 @@ import {
   Transform,
   PassThrough,
   addAbortSignal,
+  compose,
   destroy,
   finished,
   isDisturbed,
@@ -11271,5 +11272,56 @@ export const testDuplexPair = {
       });
       await promise;
     }
+  },
+};
+
+// Duplex.from() over an iterable or a string yields a readable-only objectMode
+// Duplex that reads the values in order.
+export const duplexFromIterable = {
+  async test() {
+    {
+      const duplex = Duplex.from(['a', 'b']);
+      ok(duplex instanceof Duplex);
+      strictEqual(duplex.readableObjectMode, true);
+      strictEqual(duplex.writable, false);
+      strictEqual(duplex.writableFinished, true);
+      deepStrictEqual(await duplex.toArray(), ['a', 'b']);
+    }
+
+    // A string is a single chunk, not one chunk per character.
+    deepStrictEqual(await Duplex.from('xyz').toArray(), ['xyz']);
+
+    deepStrictEqual(await Duplex.from(new Set([1, 2])).toArray(), [1, 2]);
+
+    async function* generate() {
+      yield 'p';
+      yield 'q';
+    }
+    deepStrictEqual(await Duplex.from(generate()).toArray(), ['p', 'q']);
+  },
+};
+
+// Duplex.from() over an async generator function feeds what is written to the
+// function's source argument and reads what it yields. compose() turns a
+// leading or trailing function stage into a Duplex the same way.
+export const duplexFromAsyncGeneratorFunction = {
+  async test() {
+    async function* upper(source) {
+      for await (const chunk of source) yield String(chunk).toUpperCase();
+    }
+
+    {
+      const duplex = Duplex.from(upper);
+      strictEqual(duplex.readable, true);
+      strictEqual(duplex.writable, true);
+      duplex.write('a');
+      duplex.end('b');
+      deepStrictEqual(await duplex.toArray(), ['A', 'B']);
+    }
+
+    deepStrictEqual(
+      await compose(Readable.from(['he', 'llo']), upper).toArray(),
+      ['HE', 'LLO']
+    );
   },
 };
