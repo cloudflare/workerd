@@ -82,6 +82,13 @@ enum class ContextDataSlot : int {
   CONSOLE_ORIGINAL_INFO,
   CONSOLE_ORIGINAL_LOG,
   CONSOLE_ORIGINAL_WARN,
+
+  // The per-isolate bootstrap's JS-held state (require(), primordials, the compatFlags, autogates
+  // and utils objects, the require() cache), parked here by a zygote right before CreateBlob so the
+  // startup snapshot carries it with the context. A context deserialized from that snapshot
+  // rebuilds its C++ BootstrapState from it instead of running the bootstrap scripts again, and
+  // clears the slot. Absent or undefined on every other context.
+  BOOTSTRAP_SNAPSHOT_STATE,
 };
 
 // Returns the slot holding the saved original of the i'th decorated console method, counting
