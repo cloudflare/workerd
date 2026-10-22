@@ -841,9 +841,9 @@ export interface AnalyticsEngineDataset {
   writeDataPoint(event?: AnalyticsEngineDataPoint): void;
 }
 export interface AnalyticsEngineDataPoint {
-  indexes?: ((ArrayBuffer | string) | null)[];
+  indexes?: ((ArrayBuffer | ArrayBufferView | string) | null)[];
   doubles?: number[];
-  blobs?: ((ArrayBuffer | string) | null)[];
+  blobs?: ((ArrayBuffer | ArrayBufferView | string) | null)[];
 }
 /**
  * The **`Event`** interface represents an event which takes place on an EventTarget.
@@ -2588,7 +2588,7 @@ export interface R2Conditional {
 export interface R2GetOptions {
   onlyIf?: R2Conditional | Headers;
   range?: R2Range | Headers;
-  ssecKey?: ArrayBuffer | string;
+  ssecKey?: ArrayBuffer | ArrayBufferView | string;
 }
 export interface R2PutOptions {
   onlyIf?: R2Conditional | Headers;
@@ -2600,13 +2600,13 @@ export interface R2PutOptions {
   sha384?: (ArrayBuffer | ArrayBufferView) | string;
   sha512?: (ArrayBuffer | ArrayBufferView) | string;
   storageClass?: string;
-  ssecKey?: ArrayBuffer | string;
+  ssecKey?: ArrayBuffer | ArrayBufferView | string;
 }
 export interface R2MultipartOptions {
   httpMetadata?: R2HTTPMetadata | Headers;
   customMetadata?: Record<string, string>;
   storageClass?: string;
-  ssecKey?: ArrayBuffer | string;
+  ssecKey?: ArrayBuffer | ArrayBufferView | string;
 }
 export interface R2Checksums {
   readonly md5?: ArrayBuffer;
@@ -2644,7 +2644,7 @@ export type R2Objects = {
     }
 );
 export interface R2UploadPartOptions {
-  ssecKey?: ArrayBuffer | string;
+  ssecKey?: ArrayBuffer | ArrayBufferView | string;
 }
 export declare abstract class ScheduledEvent extends ExtendableEvent {
   readonly scheduledTime: number;
@@ -4188,7 +4188,7 @@ export interface WorkerLoaderModule {
   js?: string;
   cjs?: string;
   text?: string;
-  data?: ArrayBuffer;
+  data?: ArrayBuffer | ArrayBufferView;
   json?: any;
   py?: string;
   wasm?: ArrayBuffer | ArrayBufferView | WebAssembly.Module;
