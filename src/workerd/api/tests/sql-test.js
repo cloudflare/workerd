@@ -647,7 +647,7 @@ async function test(state) {
               'tbl_name', tbl_name,
               'rootpage', rootpage,
               'sql', sql,
-              'columns', (SELECT json_group_object(name, type) from pragma_table_info(tbl_name))
+              'columns', json((SELECT json_group_object(name, type) from pragma_table_info(tbl_name)))
           )) as data
        FROM sqlite_master
        WHERE type = "table" AND tbl_name != "_cf_KV";`
