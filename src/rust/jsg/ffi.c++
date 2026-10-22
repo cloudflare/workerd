@@ -47,16 +47,26 @@ namespace workerd::rust::jsg {
     return to_ffi(v8::v8_type::New(arrayBuffer, 0, length));                                       \
   }
 
+// No JS runs during the bulk copy, so non-shared backing data stays valid and immutable.
+// Shared data can change on another thread and must not become a Rust slice.
 #define DEFINE_TYPED_ARRAY_UNWRAP(name, v8_type, elem_type)                                        \
   ::rust::Vec<elem_type> unwrap_##name(Isolate* isolate, Local value) {                            \
     auto v8Val = local_from_ffi<v8::Value>(kj::mv(value));                                         \
     KJ_REQUIRE(v8Val->Is##v8_type(), "Expected a " #v8_type);                                      \
     auto typed = v8Val.As<v8::v8_type>();                                                          \
+    auto length = typed->Length();                                                                 \
+    if (length == 0) {                                                                             \
+      return {};                                                                                   \
+    }                                                                                              \
+    auto buffer = typed->Buffer();                                                                 \
+    auto data =                                                                                    \
+        reinterpret_cast<elem_type*>(static_cast<uint8_t*>(buffer->Data()) + typed->ByteOffset()); \
+    if (!buffer->IsSharedArrayBuffer()) {                                                          \
+      return copy_##name(::rust::Slice<const elem_type>(data, length));                            \
+    }                                                                                              \
     ::rust::Vec<elem_type> result;                                                                 \
-    result.reserve(typed->Length());                                                               \
-    auto data = reinterpret_cast<elem_type*>(                                                      \
-        static_cast<uint8_t*>(typed->Buffer()->Data()) + typed->ByteOffset());                     \
-    for (size_t i = 0; i < typed->Length(); i++) {                                                 \
+    result.reserve(length);                                                                        \
+    for (size_t i = 0; i < length; i++) {                                                          \
       result.push_back(data[i]);                                                                   \
     }                                                                                              \
     return result;                                                                                 \
