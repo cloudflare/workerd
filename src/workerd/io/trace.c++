@@ -1980,6 +1980,18 @@ kj::Array<kj::Maybe<T>> cloneAttributeArray(const kj::Array<kj::Maybe<T>>& array
   return result;
 }
 
+// Formats an attribute array for async trace annotations, which only carry text.
+template <typename T>
+kj::String attributeArrayToText(const kj::Array<kj::Maybe<T>>& array) {
+  auto elements = KJ_MAP(element, array) -> kj::String {
+    KJ_IF_SOME(value, element) {
+      return kj::str(value);
+    }
+    return kj::str("null");
+  };
+  return kj::str("[", kj::delimited(kj::mv(elements), ", "), "]");
+}
+
 }  // namespace
 
 SpanBuilder::SpanBuilder(
@@ -2147,6 +2159,15 @@ void TraceContext::setTag(kj::ConstString key, SpanBuilder::TagInitValue value) 
       }
       KJ_CASE_ONEOF(i, int64_t) {
         text = kj::str(i);
+      }
+      KJ_CASE_ONEOF(arr, tracing::AttributeStringArray) {
+        text = attributeArrayToText(arr);
+      }
+      KJ_CASE_ONEOF(arr, tracing::AttributeBoolArray) {
+        text = attributeArrayToText(arr);
+      }
+      KJ_CASE_ONEOF(arr, tracing::AttributeDoubleArray) {
+        text = attributeArrayToText(arr);
       }
     }
     asyncTraceResource.annotate(key, text);
