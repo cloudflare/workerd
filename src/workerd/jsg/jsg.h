@@ -2212,10 +2212,18 @@ consteval bool hasPublicVisitForGc() {
 // also give the function a `visitForGc()` method. In this case, `visitForGc()` must be public.
 //
 // GC visitation is optional. If your type owns no `Ref`s, it can skip implementing
-// `visitForGc()`. You can also omit `visitForGc()` if you don't care about the possibility of
-// reference cycles. Any `Ref` which is not explicitly visited will not be eligible for
-// garbage collection at all. Hence, failure to implement proper visitation may lead to memory
-// leaks, but NOT to use-after-free.
+// `visitForGc()`. A handle (`Ref`, `V8Ref`, `JsRef`, etc.) that is never visited stays strong:
+// it keeps its target alive and is not eligible for garbage collection. Missing visitation can
+// therefore cause leaks, for example when the handle is part of a cycle through JavaScript, but
+// not use-after-free.
+//
+// Visiting a handle switches it to traced mode. From then on, the target is kept alive only
+// because the GC reaches the handle by tracing its holder. So only visit handles held by objects
+// that the GC traverses on every cycle, such as a Resource Type with a live wrapper. Moving a
+// single handle is safe, because the destination becomes strong again. Moving a container of
+// visited handles without moving each element (for example `auto list = kj::mv(pending)` on a
+// `kj::Vector`) is not: the elements are still traced, but nothing visits them anymore, so the
+// GC can free their targets while they are still in use.
 //
 // Note that GC visitation technically only collects JavaScript objects, including wrapper
 // objects. C++ objects will not be collected if they contain reference cycles entirely in C++
