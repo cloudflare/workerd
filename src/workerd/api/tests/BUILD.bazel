@@ -1013,6 +1013,11 @@ wd_test(
 )
 
 wd_test(
+    src = "temporal-hidden-test.wd-test",
+    data = ["temporal-hidden-test.js"],
+)
+
+wd_test(
     src = "streams-consumer-reentry-gc-test.wd-test",
     args = ["--experimental"],
     data = ["streams-consumer-reentry-gc-test.js"],
