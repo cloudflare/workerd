@@ -60,7 +60,7 @@ fn symbol_new_without_description() {
 fn symbol_new_with_description() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let desc = v8::String::new_from_str(lock, "my-symbol").unwrap(lock);
+        let desc = v8::String::new_from_str(lock, "my-symbol").unwrap();
         let sym = v8::Symbol::new(lock, Some(desc));
         assert!(sym.is_symbol());
         let got = sym.description(lock).expect("expected a description");
@@ -88,7 +88,7 @@ fn symbol_with_same_description_is_still_unique() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         fn make_sym<'s>(lock: &mut jsg::Lock<'s>) -> Local<'s, v8::Symbol> {
-            let desc = v8::String::new_from_str(lock, "same").unwrap(lock);
+            let desc = v8::String::new_from_str(lock, "same").unwrap();
             v8::Symbol::new(lock, Some(desc))
         }
         let a = make_sym(lock);

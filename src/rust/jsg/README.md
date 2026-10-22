@@ -145,6 +145,11 @@ creates a handle takes `&mut Lock<'s>` and returns `Local<'s, _>`; methods that 
 JavaScript take `&mut Lock<'s>` as well, and borrowed views into V8 memory
 (`as_slice(&lock)`) borrow the lock, so no JavaScript can run while they are alive.
 
+A `Local` is one non-null pointer, laid out like `v8::Local<T>`. It does not record its
+isolate; methods that need the isolate take the lock. A handle that may be empty is an
+`Option<Local<'s, T>>`, laid out like `v8::MaybeLocal<T>`: for example, the `String`
+constructors return `None` when V8 cannot create the string.
+
 ```rust
 let str_value = "hello".to_js(lock);
 let num_value = 42u32.to_local(lock); // `ToLocalValue` also covers integers

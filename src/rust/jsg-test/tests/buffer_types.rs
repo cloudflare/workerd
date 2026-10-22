@@ -731,7 +731,7 @@ fn typed_arrays_cast_to_array_buffer_view() {
         let js = u8_data.to_js(lock);
         let typed: v8::Local<v8::Uint8Array> =
             // SAFETY: js was just created by to_js within the current HandleScope.
-            unsafe { v8::Local::from_ffi(lock.isolate(), js.into_ffi()) };
+            unsafe { v8::Local::from_ffi(js.into_ffi()) };
         let view: v8::Local<v8::ArrayBufferView> = typed.into();
         assert_eq!(view.byte_length(), 3);
 
@@ -740,7 +740,7 @@ fn typed_arrays_cast_to_array_buffer_view() {
         let js2 = f64_data.to_js(lock);
         let typed2: v8::Local<v8::Float64Array> =
             // SAFETY: js2 was just created by to_js within the current HandleScope.
-            unsafe { v8::Local::from_ffi(lock.isolate(), js2.into_ffi()) };
+            unsafe { v8::Local::from_ffi(js2.into_ffi()) };
         let view2: v8::Local<v8::ArrayBufferView> = typed2.into();
         assert_eq!(view2.byte_length(), 16); // 2 × 8 bytes
 
@@ -756,7 +756,7 @@ fn array_buffer_view_back_to_typed_array() {
         let js = data.to_js(lock);
         let typed: v8::Local<v8::Uint8Array> =
             // SAFETY: js was just created by to_js within the current HandleScope.
-            unsafe { v8::Local::from_ffi(lock.isolate(), js.into_ffi()) };
+            unsafe { v8::Local::from_ffi(js.into_ffi()) };
         let view: v8::Local<v8::ArrayBufferView> = typed.into();
         // Cast back to Uint8Array
         let back: v8::Local<v8::Uint8Array> = view.into();

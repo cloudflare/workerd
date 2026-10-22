@@ -63,10 +63,11 @@ export const closedPromiseByteReaders = {
   },
 };
 
-// reader.cancel() resolves pending reads done=true for default, BYOB,
-// and readAtLeast reads (byte halves of readableStreamCancelReads).
-// DIVERGENCE in the value of a cancelled pending read, for all three
-// read kinds (ledger #22): C++ resolves a zero-length Uint8Array,
+// reader.cancel() resolves pending reads done=true for default (with or
+// without autoAllocateChunkSize), BYOB, and readAtLeast reads (byte
+// halves of readableStreamCancelReads). DIVERGENCE in the value of a
+// cancelled pending read, for every read kind (ledger #22; close() with
+// a pending default read is #43): C++ resolves a zero-length Uint8Array,
 // TypeScript resolves undefined (spec ReadableStreamCancel). WPT's
 // assert_object_equals treats the two as equal, so this pin is the
 // only one guarding it. On a native body C++ rejects the three reads
@@ -83,8 +84,8 @@ export const cancelPendingReadsByteReaders = {
         strictEqual(value.byteLength, 0);
       }
     };
-    {
-      const rs = new ReadableStream({ type: 'bytes' });
+    for (const source of [{}, { autoAllocateChunkSize: 8 }]) {
+      const rs = new ReadableStream({ type: 'bytes', ...source });
       const reader = rs.getReader();
       const read = reader.read();
       reader.cancel();

@@ -240,6 +240,7 @@ export {
   thenGetterCancelsBranchDuringEnqueueBacklog,
   thenGetterCancelsBranchDuringClose,
   thenGetterCancelsTwoBranchesDuringEnqueue,
+  thenGetterReleasesReaderWhileReadsSettle,
 } from 'then-interceptors';
 
 export {

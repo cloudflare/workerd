@@ -5,7 +5,8 @@
 // Object.prototype.then pollution while a read settles: the streams
 // machinery must neither invoke the interceptor as a thenable nor leak
 // it into results, and what the interceptor does to the stream while a
-// result settles must not disturb the other consumers of a tee.
+// result settles must not disturb the other consumers of a tee, or the
+// other reads a cancel() or close() answered.
 
 import { deepStrictEqual, strictEqual } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -173,6 +174,42 @@ export const thenGetterCancelsTwoBranchesDuringEnqueue = {
         deepStrictEqual(await settled(readD), { value: 'x', done: false });
       }
     );
+  },
+};
+
+// The getter releases the reader while cancel() or close() settles its
+// pending reads, from the first read's result. Either call answers every
+// read at once, so the next read still resolves done rather than rejecting
+// with the release.
+export const thenGetterReleasesReaderWhileReadsSettle = {
+  async test() {
+    const ends = {
+      cancel: (reader) => reader.cancel('bye'),
+      close: (reader, controller) => controller.close(),
+    };
+    for (const [name, end] of Object.entries(ends)) {
+      const { rs, controller } = pushSource();
+      const reader = rs.getReader();
+      const reads = [reader.read(), reader.read()];
+      let fired = 0;
+      await withThenGetter(
+        (target) => {
+          if (Object.hasOwn(target, 'done') && fired++ === 0) {
+            reader.releaseLock();
+          }
+        },
+        async () => {
+          const ended = end(reader, controller);
+          for (const read of reads) {
+            const result = await settled(read);
+            strictEqual(result.done, true, name);
+            strictEqual(result.value, undefined, name);
+          }
+          strictEqual(fired > 0, true, `${name}: the then getter did not run`);
+          await ended;
+        }
+      );
+    }
   },
 };
 

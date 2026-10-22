@@ -575,7 +575,7 @@ fn typed_array_iter_uint8() {
         let js_val = data.to_js(lock);
         let typed: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
             // SAFETY: isolate is valid and locked, js_val is a valid Local.
-            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+            unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
 
         assert_eq!(typed.len(), 3);
         assert!(!typed.is_empty());
@@ -602,7 +602,7 @@ fn typed_array_into_iter_uint8() {
         let js_val = data.to_js(lock);
         let typed: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
             // SAFETY: isolate is valid and locked, js_val is a valid Local.
-            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+            unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
 
         let sum: u8 = typed.into_iter().sum();
         assert_eq!(sum, 15);
@@ -619,7 +619,7 @@ fn typed_array_iter_int32() {
         let js_val = data.to_js(lock);
         let typed: jsg::v8::Local<'_, jsg::v8::Int32Array> =
             // SAFETY: isolate is valid and locked, js_val is a valid Local.
-            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+            unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
 
         assert_eq!(typed.len(), 3);
         assert_eq!(typed.get(0), -100);
@@ -641,7 +641,7 @@ fn typed_array_iter_reverse() {
         let js_val = data.to_js(lock);
         let typed: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
             // SAFETY: isolate is valid and locked, js_val is a valid Local.
-            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+            unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
 
         let reversed: Vec<u8> = typed.iter().rev().collect();
         assert_eq!(reversed, vec![4, 3, 2, 1]);
@@ -658,7 +658,7 @@ fn typed_array_empty() {
         let js_val = data.to_js(lock);
         let typed: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
             // SAFETY: isolate is valid and locked, js_val is a valid Local.
-            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+            unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
 
         assert_eq!(typed.len(), 0);
         assert!(typed.is_empty());
@@ -1102,7 +1102,7 @@ fn typed_array_as_slice_empty() {
         let js_val = data.to_js(lock);
         let typed: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
             // SAFETY: isolate valid, js_val is a Uint8Array Local.
-            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+            unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
 
         assert_eq!(typed.as_slice(lock), &[] as &[u8]);
         Ok(())
@@ -1159,7 +1159,7 @@ fn typed_array_byte_offset_non_zero() {
             .unwrap();
         let typed: jsg::v8::Local<'_, jsg::v8::Uint32Array> =
             // SAFETY: isolate valid; js_val is a Uint32Array Local.
-            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+            unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
 
         assert_eq!(typed.byte_offset(), 4);
         assert_eq!(typed.byte_length(), 4); // 1 element × 4 bytes/u32
@@ -1187,7 +1187,7 @@ fn typed_array_as_slice_with_byte_offset() {
             .unwrap();
         let typed: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
             // SAFETY: isolate valid; js_val is a Uint8Array Local.
-            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+            unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
 
         assert_eq!(typed.byte_offset(), 4);
         assert_eq!(typed.len(), 4);
@@ -1204,7 +1204,7 @@ fn typed_array_data_pointer_and_byte_offset() {
         let js_val = data.to_js(lock);
         let typed: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
             // SAFETY: isolate valid; js_val is a Uint8Array Local.
-            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+            unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
 
         // A freshly created TypedArray has byte_offset == 0.
         assert_eq!(typed.byte_offset(), 0);
@@ -1258,7 +1258,7 @@ fn typed_array_element_size_and_is_integer_type() {
         let js_val = vec![0u8, 0].to_js(lock);
         let arr: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
             // SAFETY: isolate valid; js_val is a Uint8Array Local.
-            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+            unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
         assert_eq!(arr.element_size(), 1);
         assert!(arr.is_integer_type());
 
@@ -1266,7 +1266,7 @@ fn typed_array_element_size_and_is_integer_type() {
         let js_val = vec![0u32, 0].to_js(lock);
         let arr: jsg::v8::Local<'_, jsg::v8::Uint32Array> =
             // SAFETY: isolate valid; js_val is a Uint32Array Local.
-            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+            unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
         assert_eq!(arr.element_size(), 4);
         assert!(arr.is_integer_type());
 
@@ -1274,7 +1274,7 @@ fn typed_array_element_size_and_is_integer_type() {
         let js_val = vec![0f32, 0.0].to_js(lock);
         let arr: jsg::v8::Local<'_, jsg::v8::Float32Array> =
             // SAFETY: isolate valid; js_val is a Float32Array Local.
-            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+            unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
         assert_eq!(arr.element_size(), 4);
         assert!(!arr.is_integer_type());
 
@@ -1282,7 +1282,7 @@ fn typed_array_element_size_and_is_integer_type() {
         let js_val = vec![0f64, 0.0].to_js(lock);
         let arr: jsg::v8::Local<'_, jsg::v8::Float64Array> =
             // SAFETY: isolate valid; js_val is a Float64Array Local.
-            unsafe { jsg::v8::Local::from_ffi(lock.isolate(), js_val.into_ffi()) };
+            unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
         assert_eq!(arr.element_size(), 8);
         assert!(!arr.is_integer_type());
 
@@ -1412,7 +1412,7 @@ fn uint8clamped_array_from_js() {
 
         let arr: Local<Uint8ClampedArray> =
             // SAFETY: isolate valid; val is a Uint8ClampedArray Local.
-            unsafe { Local::from_ffi(lock.isolate(), val.into_ffi()) };
+            unsafe { Local::from_ffi(val.into_ffi()) };
         assert_eq!(arr.len(), 3);
         assert_eq!(arr.get(0), 0u8);
         assert_eq!(arr.get(1), 128u8);

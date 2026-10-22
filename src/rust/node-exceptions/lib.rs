@@ -126,8 +126,14 @@ fn create_js_error<'s>(
 /// Creates a V8 string value from raw UTF-8 bytes, used for exception
 /// properties (`path`, `dest`) that may hold arbitrary, potentially non-UTF-8
 /// byte strings. Invalid sequences are replaced with U+FFFD by V8.
+#[expect(
+    clippy::expect_used,
+    reason = "V8 fails only for strings longer than its maximum string length"
+)]
 fn bytes_to_value<'s>(lock: &mut Lock<'s>, data: &[u8]) -> v8::Local<'s, v8::Value> {
-    v8::String::new_from_utf8(lock, data).unwrap(lock).into()
+    v8::String::new_from_utf8(lock, data)
+        .expect("exception property is too long for a V8 string")
+        .into()
 }
 
 /// Returns the default message for a Node.js exception code.

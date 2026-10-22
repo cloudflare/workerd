@@ -96,11 +96,11 @@ fn number_type_conversions() {
     harness.run_in_context(|lock, _ctx| {
         let byte_val: u8 = 42;
         let byte_local = byte_val.to_local(lock);
-        assert!(byte_local.has_value());
+        assert!(byte_local.is_number());
 
         let int_val: u32 = 12345;
         let int_local = int_val.to_local(lock);
-        assert!(int_local.has_value());
+        assert!(int_local.is_number());
         Ok(())
     });
 }
@@ -137,11 +137,11 @@ fn global_handle_conversion() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let local_str = "global test".to_local(lock);
-        assert!(local_str.has_value());
+        assert!(local_str.is_string());
 
         let global_str = local_str.to_global(lock);
         let local_again = global_str.as_local(lock);
-        assert!(local_again.has_value());
+        assert!(local_again.is_string());
         Ok(())
     });
 }
@@ -200,22 +200,22 @@ fn type_of_returns_correct_js_types() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let str_val = "hello".to_local(lock);
-        assert_eq!(str_val.type_of(), "string");
+        assert_eq!(str_val.type_of(lock), "string");
         assert!(str_val.is_string());
         assert!(!str_val.is_null_or_undefined());
 
         let num_val = 42u32.to_local(lock);
-        assert_eq!(num_val.type_of(), "number");
+        assert_eq!(num_val.type_of(lock), "number");
         assert!(num_val.is_number());
         assert!(!num_val.is_null_or_undefined());
 
         let bool_val = true.to_local(lock);
-        assert_eq!(bool_val.type_of(), "boolean");
+        assert_eq!(bool_val.type_of(lock), "boolean");
         assert!(bool_val.is_boolean());
         assert!(!bool_val.is_null_or_undefined());
 
         let obj_val = lock.new_object();
-        assert_eq!(obj_val.type_of(), "object");
+        assert_eq!(obj_val.type_of(lock), "object");
         assert!(!obj_val.is_null_or_undefined());
         Ok(())
     });
