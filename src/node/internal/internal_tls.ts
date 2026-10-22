@@ -264,6 +264,4 @@ export function Server(): void {
   throw new Error('Not implemented');
 }
 
-export function getCiphers(): void {
-  throw new Error('Not implemented');
-}
+export { getCiphers } from 'node-internal:crypto_cipher';

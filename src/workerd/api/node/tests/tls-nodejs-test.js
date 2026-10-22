@@ -24,6 +24,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 import { connect } from 'cloudflare:sockets';
 import tls from 'node:tls';
+import crypto from 'node:crypto';
 import {
   strictEqual,
   ok,
@@ -1034,5 +1035,16 @@ export const testTlsStreamwrapBuffersize = {
 export const testEOLMethods = {
   async test() {
     strictEqual(typeof tls.createSecurePair, 'function');
+  },
+};
+
+export const testGetCiphers = {
+  test() {
+    const ciphers = tls.getCiphers();
+    ok(Array.isArray(ciphers));
+    ok(ciphers.length > 0);
+    ok(ciphers.every((cipher) => typeof cipher === 'string'));
+    // `tls.getCiphers()` reports the same list as `crypto.getCiphers()`.
+    deepStrictEqual(ciphers, crypto.getCiphers());
   },
 };
