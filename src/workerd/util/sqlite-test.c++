@@ -2077,6 +2077,30 @@ KJ_TEST("SQLite R*Tree extension is enabled") {
   }
 }
 
+KJ_TEST("SQLite prepared EXPLAIN survives its table being dropped and recreated") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  db.run("CREATE TABLE t (id TEXT PRIMARY KEY, name TEXT)");
+
+  auto stmt = db.prepare("EXPLAIN INSERT INTO t VALUES (?, ?)");
+
+  for (auto i KJ_UNUSED: kj::zeroTo(3)) {
+    {
+      auto query = stmt.run(nullptr, nullptr);
+      uint rows = 0;
+      for (; !query.isDone(); query.nextRow()) {
+        ++rows;
+      }
+      KJ_EXPECT(rows > 0);
+    }
+
+    db.run("DROP TABLE t");
+    db.run("CREATE TABLE t (id TEXT PRIMARY KEY, name TEXT)");
+  }
+}
+
 // NOTE: This test sets a process-global SQLite hard_heap_limit that is never reset.
 // It must remain the LAST test in this file.
 KJ_TEST("SQLite critical error handling for SQLITE_NOMEM") {

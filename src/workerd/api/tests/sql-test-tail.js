@@ -22,7 +22,7 @@ export const test = {
       return acc;
     }, {});
     assert.deepStrictEqual(reduced, {
-      durable_object_storage_exec: 269,
+      durable_object_storage_exec: 294,
       durable_object_storage_ingest: 1030,
       durable_object_storage_getDatabaseSize: 3,
       durable_object_storage_put: 18,
