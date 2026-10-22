@@ -937,6 +937,13 @@ export declare class Event {
    */
   get returnValue(): boolean;
   /**
+   * The Event property **`returnValue`** indicates whether the default action for this event has been prevented or not.
+   * @deprecated
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/returnValue)
+   */
+  set returnValue(value: boolean);
+  /**
    * The **`currentTarget`** read-only property of the Event interface identifies the element to which the event handler has been attached.
    *
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/currentTarget)
