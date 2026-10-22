@@ -1726,6 +1726,9 @@ JSG_FAIL_REQUIRE(RangeError, "Index ", index, " is out of bounds");
 JSG_ASSERT(condition, Error, "Internal assertion failed");
 ```
 
+In destructors, use `JSG_DTOR_REQUIRE(condition, Error, ...)`: like `KJ_DTOR_REQUIRE`, it logs
+the failure instead of throwing if the stack is already unwinding.
+
 The error type can be: `TypeError`, `Error`, `RangeError`, or DOMException types like
 `DOMOperationError`, `DOMDataError`, `DOMInvalidStateError`, etc. See the README for the
 full [error type catalog](../src/workerd/jsg/README.md#error-type-catalog).

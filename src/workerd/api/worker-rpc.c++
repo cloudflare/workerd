@@ -149,9 +149,7 @@ void JsRpcCallPlan::copyTo(rpc::JsRpcTarget::CallParams::Builder builder) {
 }
 
 RpcDeserializerExternalHandler::~RpcDeserializerExternalHandler() noexcept(false) {
-  if (!unwindDetector.isUnwinding()) {
-    KJ_ASSERT(i == externals.size(), "deserialization did not consume all of the externals");
-  }
+  KJ_DTOR_ASSERT(i == externals.size(), "deserialization did not consume all of the externals");
 }
 
 rpc::JsValue::External::Reader RpcDeserializerExternalHandler::read() {

@@ -692,9 +692,7 @@ SqliteDatabase::~SqliteDatabase() noexcept(false) {
     err = sqlite3_close_v2(db);
   }
 
-  KJ_REQUIRE(err == SQLITE_OK, sqlite3_errstr(err)) {
-    break;
-  }
+  KJ_DTOR_REQUIRE(err == SQLITE_OK, sqlite3_errstr(err));
 }
 
 SqliteDatabase::operator sqlite3*() {

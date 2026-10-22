@@ -57,6 +57,11 @@ namespace workerd::jsg {
 // "some message 5" (or JSG_REQUIRE(false, "some message; x = ", x) if you wanted identical output,
 // but then why not use KJ_REQUIRE).
 
+#define JSG_DTOR_REQUIRE(cond, jsErrorType, ...)                                                   \
+  KJ_DTOR_REQUIRE(cond, kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__))
+// JSG_REQUIRE + KJ_DTOR_REQUIRE: for destructors (and code called from destructors). If the stack
+// is already unwinding, a failure is logged instead of thrown. See KJ_DTOR_* in kj/debug.h.
+
 #define JSG_REQUIRE_NONNULL(value, jsErrorType, ...)                                               \
   KJ_REQUIRE_NONNULL(value, kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__))
 // JSG_REQUIRE + KJ_REQUIRE_NONNULL.

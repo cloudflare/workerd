@@ -101,7 +101,11 @@ class MockServer: public kj::Refcounted {
     }
     ~ExpectedCall() noexcept(false) {
       KJ_IF_SOME(r, maybeReceived) {
-        KJ_ASSERT(&KJ_ASSERT_NONNULL(r.expectedCall) == this);
+        KJ_IF_SOME(e, r.expectedCall) {
+          KJ_DTOR_ASSERT(&e == this);
+        } else {
+          KJ_DTOR_FAIL_ASSERT("ReceivedCall lost its ExpectedCall");
+        }
         r.expectedCall = kj::none;
       }
     }
