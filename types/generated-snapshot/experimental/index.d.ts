@@ -705,6 +705,12 @@ interface DurableObjectRetryOptions {
   maxRetries?: number;
   timeoutMs?: number;
 }
+interface DurableObjectEvictionInfo {
+  readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
+}
+declare module "cloudflare:durable-objects" {
+  export const onEvict: unique symbol;
+}
 interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   readonly exports: Cloudflare.Exports;

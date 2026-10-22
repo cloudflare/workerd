@@ -708,6 +708,9 @@ export interface DurableObjectRetryOptions {
   maxRetries?: number;
   timeoutMs?: number;
 }
+export interface DurableObjectEvictionInfo {
+  readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
+}
 export interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   readonly exports: Cloudflare.Exports;
