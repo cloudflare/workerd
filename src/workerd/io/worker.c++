@@ -46,6 +46,7 @@
 #include <workerd/util/uuid.h>
 #include <workerd/util/xthreadnotifier.h>
 
+#include <v8-cppgc.h>
 #include <v8-inspector.h>
 #include <v8-profiler.h>
 #include <v8-wasm.h>
@@ -3280,6 +3281,11 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
         takeHeapSnapshot(*lock, cmd.getTakeHeapSnapshot().getParams());
         break;
       }
+      case cdp::Command::RUNTIME_GET_HEAP_USAGE: {
+        auto& lock = recordedLock.lock;
+        getHeapUsage(*lock, cmd.getRuntimeGetHeapUsage().initResult());
+        break;
+      }
     }
 
     if (!cmd.isUnknown()) {
@@ -3611,6 +3617,17 @@ class Worker::Isolate::InspectorChannelImpl final: public v8_inspector::V8Inspec
   };
 
   WebSocketIoHandler ioHandler;
+
+  void getHeapUsage(jsg::Lock& js, cdp::Runtime::Command::GetHeapUsage::Result::Builder result) {
+    v8::HeapStatistics stats;
+    js.v8Isolate->GetHeapStatistics(&stats);
+    result.setUsedSize(stats.used_heap_size());
+    result.setTotalSize(stats.total_heap_size());
+    result.setBackingStorageSize(stats.external_memory());
+    auto& cppHeap = KJ_ASSERT_NONNULL(js.v8Isolate->GetCppHeap());
+    auto cppStats = cppHeap.CollectStatistics(cppgc::HeapStatistics::DetailLevel::kBrief);
+    result.setEmbedderHeapUsedSize(cppStats.used_size_bytes);
+  }
 
   void takeHeapSnapshot(
       jsg::Lock& js, cdp::HeapProfiler::Command::TakeHeapSnapshot::Params::Reader params) {
