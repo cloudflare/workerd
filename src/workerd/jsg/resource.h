@@ -253,28 +253,36 @@ struct MethodCallback<TypeWrapper,
     });
   }
 
+  // Gates both the preamble below and the `FastOneByteString` argument ABI.
+  static constexpr bool noScopeNeeded = FastApiNoScopeMethod<Ret, Args...> && !isContext;
+
   template <typename ReturnType = Ret>
   static ReturnType fastCallback(v8::Local<v8::Object> receiver,
-      FastApiJSGToV8<Args>::value... fastArgs,
+      FastApiArgType<noScopeNeeded, Args>::value... fastArgs,
       v8::FastApiCallbackOptions& options) {
     if constexpr (TypeWrapper::trackCallCounts) {
       callCounter.fast++;
     }
     auto isolate = options.isolate;
-    v8::HandleScope handleScope(isolate);
-    auto context = isolate->GetCurrentContext();
     auto& js = Lock::from(isolate);
-    auto& self = extractInternalPointerFor<TypeWrapper, T, isContext>(isolate, context, receiver);
     auto& wrapper = TypeWrapper::from(isolate);
 
-    return liftKj<Ret>(isolate, [&]() {
-      // Pack expansion order is unspecified by [expr.call], but ordering
-      // is safe here: `unwrapFastApi` is invoked only with parameter types
-      // that pass `isFastApiCompatible` (FastApiPrimitive or v8::Local), and
-      // neither path fires JS-observable side effects.  See unwrap-args.h.
-      return (self.*method)(wrapper.template unwrapFastApi<Args>(js, context, fastArgs,
-          TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
-    });
+    auto invoke = [&](v8::Local<v8::Context> context) -> ReturnType {
+      auto& self = extractInternalPointerFor<TypeWrapper, T, isContext>(isolate, context, receiver);
+      return liftKj<Ret>(isolate, [&]() {
+        // Pack expansion order is unspecified, but no `unwrapFastApi` here has side effects.
+        return (self.*method)(wrapper.template unwrapFastApi<Args>(js, context, fastArgs,
+            TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+      });
+    };
+
+    // `extractInternalPointer` reads the context only for context globals, which are excluded.
+    if constexpr (noScopeNeeded) {
+      return invoke({});
+    } else {
+      v8::HandleScope handleScope(isolate);
+      return invoke(isolate->GetCurrentContext());
+    }
   }
 };
 
@@ -319,26 +327,36 @@ struct MethodCallback<TypeWrapper,
     });
   }
 
+  // `Args...` excludes the `Lock&` itself.
+  static constexpr bool noScopeNeeded = FastApiNoScopeMethod<Ret, Args...> && !isContext;
+
   template <typename ReturnType = Ret>
   static ReturnType fastCallback(v8::Local<v8::Object> receiver,
-      FastApiJSGToV8<Args>::value... fastArgs,
+      FastApiArgType<noScopeNeeded, Args>::value... fastArgs,
       v8::FastApiCallbackOptions& options) {
     if constexpr (TypeWrapper::trackCallCounts) {
       callCounter.fast++;
     }
     auto isolate = options.isolate;
-    v8::HandleScope handleScope(isolate);
-    auto context = isolate->GetCurrentContext();
-    auto& self = extractInternalPointerFor<TypeWrapper, T, isContext>(isolate, context, receiver);
     auto& lock = Lock::from(isolate);
     auto& wrapper = TypeWrapper::from(isolate);
 
-    return liftKj<Ret>(isolate, [&]() {
-      // See note on fast-API ordering in the plain-method specialization above.
-      return (self.*method)(lock,
-          wrapper.template unwrapFastApi<Args>(lock, context, fastArgs,
-              TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
-    });
+    auto invoke = [&](v8::Local<v8::Context> context) -> ReturnType {
+      auto& self = extractInternalPointerFor<TypeWrapper, T, isContext>(isolate, context, receiver);
+      return liftKj<Ret>(isolate, [&]() {
+        // See note on fast-API ordering in the plain-method specialization above.
+        return (self.*method)(lock,
+            wrapper.template unwrapFastApi<Args>(lock, context, fastArgs,
+                TypeErrorContext::methodArgument(typeid(T), methodName, indexes))...);
+      });
+    };
+
+    v8::HandleScope handleScope(isolate);
+    if constexpr (noScopeNeeded) {
+      return invoke({});
+    } else {
+      return invoke(isolate->GetCurrentContext());
+    }
   }
 };
 

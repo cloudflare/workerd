@@ -9,6 +9,8 @@
 
 #include <workerd/jsg/exception-metadata.capnp.h>
 
+#include <simdutf.h>
+
 #include <capnp/message.h>
 #include <capnp/serialize.h>
 #include <kj/debug.h>
@@ -99,6 +101,20 @@ kj::String typeName(const std::type_info& type) {
   }
 
   return kj::mv(result);
+}
+
+kj::String latin1ToUtf8(kj::ArrayPtr<const char> latin1) {
+  size_t utf8Length = simdutf::utf8_length_from_latin1(latin1.begin(), latin1.size());
+  kj::String out = kj::heapString(utf8Length);
+  if (utf8Length == latin1.size()) {
+    // Pure ASCII, so latin1 and UTF-8 match.
+    out.asArray().copyFrom(latin1);
+  } else {
+    [[maybe_unused]] size_t actualLength =
+        simdutf::convert_latin1_to_utf8(latin1.begin(), latin1.size(), out.begin());
+    KJ_DASSERT(actualLength == utf8Length);
+  }
+  return out;
 }
 
 namespace {
