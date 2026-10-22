@@ -35,6 +35,7 @@ public:
   };
 
   Headers(): guard(Guard::NONE) {}
+  explicit Headers(Guard guard): guard(guard) {}
   explicit Headers(jsg::Lock& js, jsg::Dict<kj::String, kj::String> dict);
   explicit Headers(jsg::Lock& js, const Headers& other);
   explicit Headers(jsg::Lock& js, const kj::HttpHeaders& other, Guard guard);

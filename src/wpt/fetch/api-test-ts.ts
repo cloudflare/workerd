@@ -864,13 +864,7 @@ export default {
   },
   'response/response-init-002.any.js': {},
   'response/response-init-contenttype.any.js': {},
-  'response/response-static-error.any.js': {
-    comment:
-      'We need to make Headers immutable when constructing Response.error()',
-    expectedFailures: [
-      "the 'guard' of the Headers instance should be immutable",
-    ],
-  },
+  'response/response-static-error.any.js': {},
   'response/response-static-json.any.js': {
     comment: 'statusText does not match the status code',
     expectedFailures: [
