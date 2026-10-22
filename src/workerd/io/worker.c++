@@ -2308,15 +2308,9 @@ Worker::Worker(kj::Own<const Script> scriptParam,
             context, &snapshotBadTagFieldsCount, &wrappablesMetadata);
       }
 
-      // The zygote context is never disposed through disposeContext() (see the snapshot step
-      // after this handle scope), so release the per-isolate bootstrap state on the way out,
-      // while the context handle is still valid. Its Globals (require(), the
-      // compatFlags/autogates/utils objects, primordials, the require() cache, the
-      // context-extension template) are not Wrappables and would otherwise be reported as
-      // unserialized by CreateBlob. A worker started from the snapshot re-runs the bootstrap.
       KJ_DEFER({
         if (lock.isPreparingSnapshot()) {
-          cleanupPerIsolateBootstrap(lock, context);
+          stashPerIsolateBootstrapForSnapshot(lock, context);
         }
       });
 

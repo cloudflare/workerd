@@ -46,6 +46,12 @@ class Wrappable;
 //   snapshotClone() of the zygote's original plus the CppHeapPointerTag the original's wrapper carried.
 //   A worker started from this artifact clones the stored clone once more per restored wrapper
 //   and attaches it with the same tag. Slots whose index never reached the blob hold a null clone.
+// * `bootstrapStateIndex` is the context-level SnapshotCreator::AddData index of the per-isolate
+//   bootstrap's JS-held state (require(), primordials, the compatFlags, autogates and utils
+//   objects, the require() cache), bundled into one object and pinned by the zygote right before
+//   CreateBlob. A worker started from the snapshot rebuilds its C++ BootstrapState from it instead
+//   of running the bootstrap scripts again. None when the zygote ran without the per-isolate
+//   bootstrap.
 struct SnapshotArtifact: public kj::AtomicRefcounted {
   v8::StartupData blob{nullptr, 0};
   kj::Array<intptr_t> externalReferences;
@@ -59,6 +65,8 @@ struct SnapshotArtifact: public kj::AtomicRefcounted {
     v8::CppHeapPointerTag tag;
   };
   kj::Vector<LiveWrappable> liveWrappables;
+
+  kj::Maybe<uint32_t> bootstrapStateIndex;
 
   ~SnapshotArtifact() noexcept(false) {
     // v8::SnapshotCreator::CreateBlob() allocates the data with `new[]` and hands over ownership.
