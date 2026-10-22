@@ -192,6 +192,10 @@ class RequestObserver: public kj::Refcounted {
   // occurred asynchronously.
   virtual void reportFailure(const kj::Exception& e, FailureSource source = FailureSource::OTHER) {}
 
+  // Reports the outcome of a Durable Object onHibernate handler run under this observer. The hook
+  // isn't delivered through a WorkerInterface, so no wrapper sees its result.
+  virtual void reportOnHibernateOutcome(EventOutcome outcome) {}
+
   static EventOutcome outcomeFromException(
       const kj::Exception& e, FailureSource source = FailureSource::OTHER);
 
@@ -488,6 +492,10 @@ class ActorObserver: public kj::Refcounted, public SqliteObserver {
   // Called when the actor's JavaScript class constructor has run to completion successfully.
   // Not called for actors that have no class, nor when the constructor throws.
   virtual void constructorCompleted() {}
+
+  // Called when an attempt to run the actor's onHibernate handler has finished. Not called when the
+  // actor has no handler.
+  virtual void onHibernateFinished(EventOutcome outcome) {}
 
   virtual void webSocketAccepted() {}
   virtual void webSocketClosed() {}

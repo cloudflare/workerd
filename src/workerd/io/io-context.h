@@ -179,6 +179,19 @@ class IoContext_IncomingRequest final {
   kj::Promise<WorkerInterface::ScheduledResult> finishScheduled(
       kj::Own<IoContext_IncomingRequest>&& self);
 
+  // Cancels all work that could still run JavaScript in this actor: timers, reentry callbacks and
+  // wait-until tasks, including those started by other requests. Reentry callbacks invoked
+  // afterwards reject. Used by the onHibernate hook (see Worker::Actor::runOnHibernate()), which
+  // can't use drain(): for actors, drain() waits for the shutdown that the hook precedes. Also
+  // suppresses the destructor's warning that drain() was never called.
+  //
+  // Never throws: a cancellation failure is logged, since the actor isn't broken and the caller
+  // still has to flush storage.
+  //
+  // `tasks` is left alone. In an actor it holds only abortWhen() watchers, such as the CPU limit
+  // and output gate breaks, which must stay armed until the actor shuts down.
+  void cancelPendingWorkForHibernation();
+
   // Access the event loop's current time point. This will remain constant between ticks. This is
   // used to implement IoContext::now(), which should be preferred so that time can be adjusted
   // based on setTimeout() when needed.
@@ -1357,6 +1370,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // and returns the first exception, so the caller decides whether to rethrow, log or ignore it.
   kj::Maybe<kj::Exception> cancelPendingWork(const kj::Exception& reason, ClearTasks clearTasks);
 
+  // Set by IncomingRequest::cancelPendingWorkForHibernation(). Reentry callbacks created earlier
+  // may still be held, e.g. by RPC targets; once this is set, invoking one rejects instead of
+  // running JavaScript.
+  bool reentryDisabled = false;
+
   kj::Own<WorkerInterface> getSubrequestChannelImpl(uint channel,
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
@@ -1933,6 +1951,7 @@ auto IoContext::makeReentryCallbackImpl(Func func, kj::Own<void> attachment) {
              ioFunc = kj::mv(ioFunc)](auto&&... params) mutable {
     auto& ctx = JSG_REQUIRE_NONNULL(self->tryGet(), Error,
         "The execution context which hosts this callback is no longer running.");
+    JSG_REQUIRE(!ctx.reentryDisabled, Error, "The Durable Object is hibernating.");
 
     if constexpr (topUp == TOP_UP) {
       ctx.getLimitEnforcer().topUpActor();

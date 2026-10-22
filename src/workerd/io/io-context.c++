@@ -511,6 +511,17 @@ kj::Maybe<kj::Exception> IoContext::cancelPendingWork(
   return firstException;
 }
 
+void IoContext::IncomingRequest::cancelPendingWorkForHibernation() {
+  // This request must still be current: canceled work may have spans that read its timer.
+  waitedForWaitUntil = true;
+  context->reentryDisabled = true;
+  KJ_IF_SOME(exception,
+      context->cancelPendingWork(
+          JSG_KJ_EXCEPTION(FAILED, Error, "The Durable Object is hibernating."), ClearTasks::NO)) {
+    LOG_EXCEPTION("onHibernateCleanup", exception);
+  }
+}
+
 InputGate::Lock IoContext::getInputLock() {
   return KJ_ASSERT_NONNULL(currentInputLock, "no input lock available in this context")
       .addRef(getCurrentTraceSpan());
