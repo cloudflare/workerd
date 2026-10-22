@@ -77,12 +77,17 @@ globalThis.fetch = async (
   input: RequestInfo | URL,
   init?: RequestInit
 ): Promise<Response> => {
-  if (typeof input === 'string' && input.endsWith('.json')) {
+  // Without a wptserve sidecar, .json resource files are served from the bindings. With one, the
+  // request goes to the sidecar so the test sees a real fetch() response.
+  if (
+    globalThis.state.env.HTTP_PORT == null &&
+    typeof input === 'string' &&
+    input.endsWith('.json')
+  ) {
     const relativePath = getBindingPath(
       path.dirname(globalThis.state.testFileName),
       input
     );
-    // WPT sometimes uses fetch to load a resource file, we "serve" this from the bindings
     const exports: unknown = globalThis.state.env[relativePath];
     if (exports === undefined) {
       throw new Error(`Unable to load resources file ${input} from bindings`);
