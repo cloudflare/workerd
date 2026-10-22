@@ -656,8 +656,6 @@ class ReadableStreamReaderBase<R> {
       base.#closedPromise = slotResolved(base.#closedPromise);
     };
 
-    // Reached only as the stream errors, or as the reader is released from
-    // a readable stream: both while the closed promise is still pending.
     rejectGenericReaderPromise = (reader: object, reason?: unknown) => {
       const base = getReaderBase(reader);
       base.#closedPromise = slotRejected(base.#closedPromise, reason);
@@ -684,12 +682,9 @@ class ReadableStreamReaderBase<R> {
       const releaseError = new TypeError('This reader has been released');
       // Per spec: on a readable stream the pending closedPromise is
       // rejected; otherwise it is replaced with a fresh rejected promise.
-      // Both are marked handled.
-      if (getReadableStreamGetState(stream) === 'readable') {
-        rejectGenericReaderPromise(reader, releaseError);
-      } else {
-        base.#closedPromise = newHandledRejected(releaseError);
-      }
+      // The slot is pending exactly while the stream is readable, so
+      // slotRejected does both.
+      base.#closedPromise = slotRejected(base.#closedPromise, releaseError);
       // Reject THIS reader's pending reads. The consumer itself persists —
       // it is stream-owned, and a future reader resumes where it left off.
       const consumer = getReadableStreamConsumer(stream);
