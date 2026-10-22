@@ -986,29 +986,56 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
 
 namespace {
 
+kj::Maybe<kj::StringPtr> proxyErrorTypeErrno(kj::ArrayPtr<const char> type) {
+  if (type == "connection_refused"_kj.asArray()) return "ECONNREFUSED"_kj;
+  if (type == "connection_timeout"_kj.asArray()) return "ETIMEDOUT"_kj;
+  if (type == "dns_error"_kj.asArray() || type == "dns_timeout"_kj.asArray()) {
+    return "ENOTFOUND"_kj;
+  }
+  if (type == "destination_unavailable"_kj.asArray() ||
+      type == "destination_ip_unroutable"_kj.asArray()) {
+    return "EHOSTUNREACH"_kj;
+  }
+  return kj::none;
+}
+
 kj::Maybe<kj::StringPtr> proxyStatusErrno(kj::StringPtr proxyStatus) {
-  // Only the `error` parameter is extracted from the structured-field list, e.g.
-  // `Cloudflare-Proxy;error=connection_refused`.
-  KJ_IF_SOME(pos, proxyStatus.find("error="_kj)) {
-    auto rest = proxyStatus.slice(pos + "error="_kj.size());
-    size_t end = 0;
-    while (end < rest.size() && rest[end] != ';' && rest[end] != ',' && rest[end] != ' ' &&
-        rest[end] != '\t') {
-      ++end;
+  // Proxy-Status is a structured-field list of proxies, each with parameters, e.g.
+  // `Cloudflare-Proxy;error=connection_refused`. Only a top-level `error` parameter counts, so
+  // quoted strings (such as a `details` value) are skipped rather than searched.
+  size_t start = 0;
+  bool quoted = false;
+  for (size_t i = 0; i <= proxyStatus.size(); i++) {
+    if (i < proxyStatus.size()) {
+      char c = proxyStatus[i];
+      if (quoted) {
+        if (c == '\\') {
+          i++;
+        } else if (c == '"') {
+          quoted = false;
+        }
+        continue;
+      }
+      if (c == '"') {
+        quoted = true;
+        continue;
+      }
+      if (c != ';' && c != ',') continue;
     }
-    auto token = rest.first(end);
-    if (token.size() >= 2 && token.front() == '"' && token.back() == '"') {
-      token = token.slice(1, token.size() - 1);
+    auto item = proxyStatus.slice(start, i);
+    start = i + 1;
+    while (item.size() > 0 && (item.front() == ' ' || item.front() == '\t')) {
+      item = item.slice(1);
     }
-    if (token == "connection_refused"_kj.asArray()) return "ECONNREFUSED"_kj;
-    if (token == "connection_timeout"_kj.asArray()) return "ETIMEDOUT"_kj;
-    if (token == "dns_error"_kj.asArray() || token == "dns_timeout"_kj.asArray()) {
-      return "ENOTFOUND"_kj;
+    while (item.size() > 0 && (item.back() == ' ' || item.back() == '\t')) {
+      item = item.first(item.size() - 1);
     }
-    if (token == "destination_unavailable"_kj.asArray() ||
-        token == "destination_ip_unroutable"_kj.asArray()) {
-      return "EHOSTUNREACH"_kj;
+    if (!item.startsWith("error="_kj.asArray())) continue;
+    auto value = item.slice("error="_kj.size());
+    if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+      value = value.slice(1, value.size() - 1);
     }
+    return proxyErrorTypeErrno(value);
   }
   return kj::none;
 }
@@ -1021,17 +1048,21 @@ kj::Maybe<kj::StringPtr> connectErrnoName(const kj::Exception& exception) {
   // ("... (os error N)", "failed to lookup address information: ...").
   auto description = exception.getDescription();
   if (description.contains("Connection refused"_kj)) return "ECONNREFUSED"_kj;
-  // "Connection timed out" on Linux, "Operation timed out" on macOS.
-  if (description.contains("timed out"_kj)) return "ETIMEDOUT"_kj;
+  // Linux and macOS spellings of strerror(ETIMEDOUT).
+  if (description.contains("Connection timed out"_kj) ||
+      description.contains("Operation timed out"_kj)) {
+    return "ETIMEDOUT"_kj;
+  }
   if (description.contains("No route to host"_kj)) return "EHOSTUNREACH"_kj;
   if (description.contains("Network is unreachable"_kj)) return "ENETUNREACH"_kj;
   if (description.contains("DNS lookup failed"_kj) || description.contains("getaddrinfo"_kj) ||
       description.contains("failed to lookup address information"_kj)) {
-    // gai_strerror(EAI_AGAIN) on glibc and musl respectively.
+    // gai_strerror() texts: EAI_AGAIN on glibc and musl, then EAI_FAIL.
     if (description.contains("Temporary failure in name resolution"_kj) ||
         description.contains("Try again"_kj)) {
       return "EAI_AGAIN"_kj;
     }
+    if (description.contains("Non-recoverable"_kj)) return "EAI_FAIL"_kj;
     return "ENOTFOUND"_kj;
   }
   return kj::none;
@@ -1124,7 +1155,7 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
         e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) == kj::none) {
       LOG_ERROR_PERIODICALLY("Socket proxy disconnected abruptly", e);
     }
-    return KJ_EXCEPTION(FAILED, "connectResult raised an error");
+    return kj::mv(e);
   };
   auto func = [self = JSG_THIS](jsg::Lock& js, kj::Maybe<kj::Exception> result) mutable -> void {
     KJ_IF_SOME(e, result) {

@@ -305,7 +305,10 @@ KJ_TEST("connect failure exceptions map to errno names") {
       errnoFor("failed to lookup address information: Temporary failure in name resolution") ==
       "EAI_AGAIN");
   KJ_EXPECT(errnoFor("DNS lookup failed.; gai_strerror(status) = Try again") == "EAI_AGAIN");
+  KJ_EXPECT(errnoFor("DNS lookup failed.; gai_strerror(status) = "
+                     "Non-recoverable failure in name resolution") == "EAI_FAIL");
   KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, "something else went wrong")) == kj::none);
+  KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, "TLS handshake timed out")) == kj::none);
 }
 
 kj::Maybe<kj::StringPtr> errnoForProxyStatus(kj::StringPtr proxyStatus) {
@@ -326,8 +329,18 @@ KJ_TEST("Proxy-Status error types map to errno names") {
       KJ_ASSERT_NONNULL(errnoForProxyStatus("p;error=destination_unavailable")) == "EHOSTUNREACH");
   KJ_EXPECT(KJ_ASSERT_NONNULL(errnoForProxyStatus("p;error=destination_ip_unroutable")) ==
       "EHOSTUNREACH");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(errnoForProxyStatus(
+                "p;details=\"x; error=dns_error\";error=connection_refused")) == "ECONNREFUSED");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(errnoForProxyStatus(
+                "p;details=\"upstream error=connection_timeout\";error=connection_refused")) ==
+      "ECONNREFUSED");
   KJ_EXPECT(errnoForProxyStatus("Cloudflare-Proxy;error=connection_limit_reached") == kj::none);
   KJ_EXPECT(errnoForProxyStatus("Cloudflare-Proxy") == kj::none);
+  KJ_EXPECT(errnoForProxyStatus("p;noterror=connection_refused") == kj::none);
+  KJ_EXPECT(errnoForProxyStatus("p;details=\"error=connection_refused\"") == kj::none);
+  KJ_EXPECT(errnoForProxyStatus("p;details=\"x;error=connection_refused\"") == kj::none);
+  KJ_EXPECT(errnoForProxyStatus("p;details=\"a\\\"b;error=connection_refused\"") == kj::none);
+  KJ_EXPECT(errnoForProxyStatus("p;rcode=error=connection_refused") == kj::none);
 
   kj::HttpHeaderTable table;
   kj::HttpHeaders headers(table);

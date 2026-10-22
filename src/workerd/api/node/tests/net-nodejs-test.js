@@ -1588,6 +1588,7 @@ export const testNetConnectRefused = {
     const err = events[1][1];
     ok(err instanceof Error);
     strictEqual(err.name, 'Error');
+    strictEqual(String(err), 'Error: connect ECONNREFUSED 127.0.0.1:1');
     strictEqual(err.message, 'connect ECONNREFUSED 127.0.0.1:1');
     strictEqual(err.code, 'ECONNREFUSED');
     strictEqual(err.errno, -111);
@@ -1608,14 +1609,27 @@ export const testNetConnectNotFound = {
     const socket = net.connect({ host: 'something.invalid', port: 80 });
     const attemptFn = mock.fn();
     socket.on('connectionAttemptFailed', attemptFn);
+    const lookupFn = mock.fn();
+    socket.on('lookup', lookupFn);
     socket.on('error', resolve);
     const err = await promise;
     ok(['ENOTFOUND', 'EAI_AGAIN'].includes(err.code), err.message);
+    strictEqual(
+      String(err),
+      `Error: getaddrinfo ${err.code} something.invalid`
+    );
     strictEqual(err.message, `getaddrinfo ${err.code} something.invalid`);
     strictEqual(err.errno, err.code === 'ENOTFOUND' ? -3008 : -3001);
     strictEqual(err.syscall, 'getaddrinfo');
     strictEqual(err.hostname, 'something.invalid');
     strictEqual(attemptFn.mock.callCount(), 0);
+    strictEqual(lookupFn.mock.callCount(), 1);
+    deepStrictEqual(lookupFn.mock.calls[0].arguments, [
+      err,
+      undefined,
+      undefined,
+      'something.invalid',
+    ]);
   },
 };
 

@@ -1709,7 +1709,9 @@ function cleanupAfterDestroy(
 
 // The platform's connect() error carries no cause; the errno name of a
 // recognized failure is exposed to node:net separately, and reported here the
-// way Node does. An unrecognized failure keeps the platform's error.
+// way Node does. An unrecognized failure keeps the platform's error. The
+// platform resolves names itself, so `address` is the host as given, where
+// Node would report the resolved IP.
 function connectFailureError(
   handle: ReturnType<typeof inner.connect>,
   address: string,
@@ -1718,7 +1720,7 @@ function connectFailureError(
 ): Error {
   const code = inner.getConnectFailureCode(handle);
   if (code === undefined) return err;
-  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
+  if (code === 'ENOTFOUND' || code.startsWith('EAI_')) {
     return new GetAddrInfoException(code, address);
   }
   return new ConnectException(code, address, port);
@@ -1877,8 +1879,11 @@ function initializeConnection(
       const onConnectionFailed = (err: unknown): void => {
         if (socket.destroyed || socket._handle?.socket !== handle) return;
         const error = connectFailureError(handle, address, port, err as Error);
-        // Node reports a failed lookup through 'lookup', not as an attempt.
-        if (!(error instanceof GetAddrInfoException)) {
+        // A failed lookup never reaches a connection attempt in Node: it is
+        // reported through 'lookup' and the socket is destroyed with it.
+        if (error instanceof GetAddrInfoException) {
+          socket.emit('lookup', error, undefined, undefined, address);
+        } else {
           socket.emit(
             'connectionAttemptFailed',
             host,

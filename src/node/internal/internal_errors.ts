@@ -731,15 +731,19 @@ const UV_ERRNO: Record<string, number> = {
   ENETUNREACH: -101,
 };
 
-// A failed connect(2), as Node reports it (its exceptionWithHostPort).
-export class ConnectException extends NodeError {
+// A failed connect(2), as Node reports it (its exceptionWithHostPort). Node's
+// errno errors are plain Errors, so unlike NodeError these keep Error's
+// formatting: `Error: connect ECONNREFUSED 127.0.0.1:1`.
+export class ConnectException extends Error {
+  code: string;
   errno: number | undefined;
   syscall = 'connect';
   address: string;
   port: number;
 
   constructor(code: string, address: string, port: number) {
-    super(code, `connect ${code} ${address}:${port}`);
+    super(`connect ${code} ${address}:${port}`);
+    this.code = code;
     this.errno = UV_ERRNO[code];
     this.address = address;
     this.port = port;
@@ -749,16 +753,19 @@ export class ConnectException extends NodeError {
 const GETADDRINFO_ERRNO: Record<string, number> = {
   ENOTFOUND: -3008,
   EAI_AGAIN: -3001,
+  EAI_FAIL: -3004,
 };
 
-// A host name that does not resolve, as Node reports it from connect()'s lookup.
-export class GetAddrInfoException extends NodeError {
+// A failed name lookup, as Node reports it from connect()'s getaddrinfo.
+export class GetAddrInfoException extends Error {
+  code: string;
   errno: number | undefined;
   syscall = 'getaddrinfo';
   hostname: string;
 
   constructor(code: string, hostname: string) {
-    super(code, `getaddrinfo ${code} ${hostname}`);
+    super(`getaddrinfo ${code} ${hostname}`);
+    this.code = code;
     this.errno = GETADDRINFO_ERRNO[code];
     this.hostname = hostname;
   }

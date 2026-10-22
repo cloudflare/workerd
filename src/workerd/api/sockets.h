@@ -538,8 +538,8 @@ class SocketsModule final: public jsg::Object {
 };
 
 // Classifies a failed connection attempt as the errno name Node.js reports for it (ECONNREFUSED,
-// ETIMEDOUT, EHOSTUNREACH, ENETUNREACH, ENOTFOUND or EAI_AGAIN), or none when the cause is not
-// recognized.
+// ETIMEDOUT, EHOSTUNREACH, ENETUNREACH, ENOTFOUND, EAI_AGAIN or EAI_FAIL), or none when the cause
+// is not recognized.
 // A direct connection fails with the connect(2) or getaddrinfo(3) exception; a connection made
 // through a proxy fails with a non-2xx status whose Proxy-Status header (RFC 9209) names the error.
 kj::Maybe<kj::StringPtr> connectErrnoName(const kj::Exception& exception);
