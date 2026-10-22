@@ -213,10 +213,6 @@ class DeterministicTimerChannel final: public TimerChannel {
 struct ReplayState {
   kj::Array<ReplayAction> actions;
   ActorCallRetriesAllowed retriesAllowed = ActorCallRetriesAllowed::YES;
-  kj::Maybe<ActorRetryCandidate> probeCandidate;
-  // The probe candidate reported for each request.
-  kj::Vector<kj::Maybe<ActorRetryCandidate>> reportedProbeCandidates;
-  kj::Vector<ActorRetryCandidate> recordedCandidates;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> pauseStartedFulfiller;
   bool acceptWebSocket = false;
   kj::Maybe<kj::Own<kj::WebSocket>> acceptedWebSocket;
@@ -248,17 +244,9 @@ class RetryRecordingObserver final: public RequestObserver {
     state.outcomes.add(outcome);
   }
 
-  void recordActorRetryCandidate(
-      ActorRetryCallType callType, ActorRetryCandidate candidate) override {
-    KJ_EXPECT(callType == ActorRetryCallType::FETCH);
-    state.recordedCandidates.add(candidate);
-  }
-
-  void setNextSubrequestRetryEligibility(SubrequestBodyRewindable,
-      ActorCallTargetRetryable targetRetryable,
-      kj::Maybe<ActorRetryCandidate> probeCandidate) override {
+  void setNextSubrequestRetryEligibility(
+      SubrequestBodyRewindable, ActorCallTargetRetryable targetRetryable) override {
     KJ_EXPECT(targetRetryable.toBool() == state.retriesAllowed.toBool());
-    state.reportedProbeCandidates.add(probeCandidate);
   }
 
  private:
@@ -372,10 +360,6 @@ class ReplayOutgoingFactory final: public Fetcher::OutgoingFactory {
 
   kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
     return ActorCallTargetRetryable(state.retriesAllowed.toBool());
-  }
-
-  kj::Maybe<ActorRetryCandidate> getActorRetryProbeCandidate() const override {
-    return state.probeCandidate;
   }
 
   void onActorCallRetry() override {
@@ -1233,19 +1217,6 @@ KJ_TEST("actor fetch shares the retry timeout across redirects") {
   KJ_EXPECT(state.observedRetryCount == 0);
 }
 
-KJ_TEST("actor fetch reports a probe candidate only for its first hop") {
-  ReplayState state{
-    .actions = kj::arr(ReplayAction::REDIRECT, ReplayAction::NOT_DELIVERED),
-    .retriesAllowed = ActorCallRetriesAllowed::NO,
-    .probeCandidate = ActorRetryCandidate::UNSUPPORTED_MULTI_REPLICA,
-  };
-
-  KJ_EXPECT(runActorFetch(state, kj::none, ActorFetchKind::HTTP) != kj::none);
-  KJ_ASSERT(state.reportedProbeCandidates.size() == 2);
-  KJ_EXPECT(state.reportedProbeCandidates[0] == ActorRetryCandidate::UNSUPPORTED_MULTI_REPLICA);
-  KJ_EXPECT(state.reportedProbeCandidates[1] == kj::none);
-}
-
 KJ_TEST("actor fetch lets a redirected first attempt finish after the retry timeout") {
   ReplayState state{
     .actions = kj::arr(ReplayAction::SLOW_REDIRECT, ReplayAction::SLOW_RESPONSE),
@@ -1398,8 +1369,6 @@ KJ_TEST("replica actor fetch retries a request-level disconnect on its primary c
   KJ_EXPECT(state.metadata[1].isRetry == IsActorRetry::YES);
   KJ_EXPECT(checkedSubrequestCount == 1);
   KJ_ASSERT(state.outcomes.size() == 1);
-  KJ_ASSERT(state.recordedCandidates.size() == 1);
-  KJ_EXPECT(state.recordedCandidates[0] == ActorRetryCandidate::REPLICA_PRIMARY);
 }
 
 KJ_TEST("GlobalActorOutgoingFactory forwards metadata and recreates channels for retries") {

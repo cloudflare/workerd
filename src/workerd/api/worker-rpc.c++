@@ -467,12 +467,6 @@ class JsRpcCallAttemptObserver final: public kj::Refcounted {
     }
   }
 
-  // Classifies a deferred disconnect for a call that has no retry state. JavaScript is receiving
-  // the failure, which is where a retryable target would decide whether to retry.
-  void finishFailure() {
-    pendingFailureObserver = kj::none;
-  }
-
  private:
   DeferActorRpcFailure deferFailure;
   kj::Maybe<kj::Own<OutgoingActorCallObserver>> pendingFailureObserver;
@@ -567,8 +561,7 @@ class JsRpcCallRetryState final: public kj::Refcounted {
   }
 
   kj::Exception handleCommittedFailure(kj::Exception exception) {
-    auto result = getRetryState().handleCommittedAttemptFailure(
-        kj::mv(exception), ActorRetryStopReason::PIPELINE_COMMITTED_IN_FLIGHT);
+    auto result = getRetryState().handleCommittedAttemptFailure(kj::mv(exception));
     pipelineRevoker->reject(result.clone());
     return result;
   }
@@ -903,8 +896,7 @@ TraceContext prepareJsRpcCallAttempt(IoContext& ioContext,
 kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> observeActorRpcCallAttempt(
     kj::Own<OutgoingActorCallObserver> observer,
     kj::Rc<JsRpcCallAttemptObserver> observerState,
-    kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> promise,
-    kj::Maybe<kj::Promise<void>> outputGate);
+    kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> promise);
 
 struct JsRpcCallDispatch {
   kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> promise;
@@ -917,9 +909,7 @@ JsRpcCallDispatch dispatchJsRpcCall(IoContext& ioContext,
     JsRpcCallPlan& callPlan,
     TraceContext& callSpan,
     kj::Maybe<ActorCallTargetRetryable> targetRetryability,
-    kj::Maybe<ActorRetryCandidate> probeCandidate,
-    DeferActorRpcFailure deferFailure,
-    kj::Maybe<kj::Promise<void>> outputGate) {
+    DeferActorRpcFailure deferFailure) {
   auto builder = client.callRequest();
   callPlan.copyTo(builder);
   KJ_IF_SOME(callerSpanContext, callSpan.getUserSpanParent().toSpanContext()) {
@@ -931,11 +921,10 @@ JsRpcCallDispatch dispatchJsRpcCall(IoContext& ioContext,
   KJ_IF_SOME(targetRetryable, targetRetryability) {
     KJ_IF_SOME(observer,
         ioContext.getMetrics().observeOutgoingActorRpcCall(
-            ActorCallPayloadReplayable(callPlan.getReplayable()), targetRetryable,
-            probeCandidate)) {
+            ActorCallPayloadReplayable(callPlan.getReplayable()), targetRetryable)) {
       auto attemptObserver = kj::rc<JsRpcCallAttemptObserver>(deferFailure);
       parts.promise = observeActorRpcCallAttempt(
-          kj::mv(observer), attemptObserver.addRef(), kj::mv(parts.promise), kj::mv(outputGate));
+          kj::mv(observer), attemptObserver.addRef(), kj::mv(parts.promise));
       return {.promise = kj::mv(parts.promise),
         .pipeline = kj::mv(parts.pipeline),
         .attemptObserver = kj::mv(attemptObserver)};
@@ -1003,7 +992,6 @@ JsRpcRetrySetup setupJsRpcRetries(IoContext& ioContext,
         .callType = ActorRetryCallType::JSRPC,
         .enforcementEnabled = enforcementEnabled,
         .payloadReplayable = ActorCallPayloadReplayable::YES,
-        .probeCandidate = parent.getActorRetryProbeCandidate(),
       },
       policy, timer.nowForLimitTimeout());
   auto attemptOrException = KJ_ASSERT_NONNULL(result.state)->startAttempt();
@@ -1028,8 +1016,7 @@ JsRpcCallRetryState::StartedAttempt JsRpcCallRetryState::startAttempt(
       prepareJsRpcCallAttempt(ioContext, *parent, nameRef, pathViews.asPtr(), operation, oneCall);
 
   auto dispatch = dispatchJsRpcCall(ioContext, kj::mv(oneCall.client), KJ_ASSERT_NONNULL(callPlan),
-      callSpan, parent->getActorTargetRetryability(), parent->getActorRetryProbeCandidate(),
-      DeferActorRpcFailure::YES, kj::none);
+      callSpan, parent->getActorTargetRetryability(), DeferActorRpcFailure::YES);
   callSpanParents = callSpan.getSpanParentsIfObserved();
   setPipeline(kj::mv(dispatch.pipeline));
   attemptObserver = kj::mv(dispatch.attemptObserver);
@@ -1109,8 +1096,7 @@ JsRpcCallAttemptPromise handleFailedJsRpcCallAttempt(
     state->finishBackoffWait();
     if (state->isCommitted()) {
       auto exception = state->getRetryState().handleCommittedAttemptFailure(
-          state->getRetryState().getOriginalFailure(),
-          ActorRetryStopReason::PIPELINE_COMMITTED_IN_BACKOFF);
+          state->getRetryState().getOriginalFailure());
       return finishFailedJsRpcCall(js, *state, kj::mv(exception));
     }
 
@@ -1169,15 +1155,8 @@ JsRpcCallAttemptPromise awaitJsRpcCallAttempt(jsg::Lock& js,
 kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> observeActorRpcCallAttempt(
     kj::Own<OutgoingActorCallObserver> observer,
     kj::Rc<JsRpcCallAttemptObserver> observerState,
-    kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> promise,
-    kj::Maybe<kj::Promise<void>> outputGate) {
+    kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> promise) {
   KJ_TRY {
-    KJ_IF_SOME(gate, outputGate) {
-      // A broken gate fails the call through its client instead.
-      if (co_await gate.then([]() { return true; }, [](kj::Exception&&) { return false; })) {
-        observer->markOutputGateCleared();
-      }
-    }
     auto response = co_await promise;
     observerState->recordSuccess(*observer);
     co_return kj::mv(response);
@@ -1238,7 +1217,7 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
               prepareJsRpcCallAttempt(ioContext, *parent, name, path.asPtr(), operation, result);
           KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
             kj::Promise<void> clientLock = kj::mv(lock);
-            if (actorTargetRetryability != kj::none) {
+            if (destinationSupportsRetries) {
               clientLock = outputLock.emplace(kj::mv(clientLock).fork()).addBranch();
             }
             result.client = clientLock.then(
@@ -1321,15 +1300,8 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
       KJ_IF_SOME(state, retrySetup.state) {
         retriesEnabled = state->isRetryEnabled();
       }
-      auto probeCandidate = parent->getActorRetryProbeCandidate();
-      // Temporary retry diagnostics: a target that never retries still defers classifying a
-      // disconnect to where a retryable target would decide, so that pipeline use up to then counts.
-      auto deferForProbe = probeCandidate != kj::none && !destinationSupportsRetries;
-      auto client = kj::mv(resolveOneCall().client);
-      auto dispatch = dispatchJsRpcCall(ioContext, kj::mv(client), callPlan, jsRpcCallSpan,
-          actorTargetRetryability, probeCandidate,
-          DeferActorRpcFailure(retriesEnabled || deferForProbe),
-          outputLock.map([](kj::ForkedPromise<void>& lock) { return lock.addBranch(); }));
+      auto dispatch = dispatchJsRpcCall(ioContext, kj::mv(resolveOneCall().client), callPlan,
+          jsRpcCallSpan, actorTargetRetryability, DeferActorRpcFailure(retriesEnabled));
       auto resultPromise = kj::mv(dispatch.promise);
 
       // A follow-up call through this result's pending pipeline still targets the actor, but cannot
@@ -1452,21 +1424,10 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
             KJ_UNREACHABLE;
           });
         }
-        auto promise = ioContext.awaitIo(js, kj::mv(resultPromise),
+        return ioContext.awaitIo(js, kj::mv(resultPromise),
             [resolveResult = kj::mv(resolveResult), jsRpcCallSpan = kj::mv(jsRpcCallSpan)](
                 jsg::Lock& js, capnp::Response<rpc::JsRpcTarget::CallResults> response) mutable
-            -> jsg::Value { return resolveResult(js, response, jsRpcCallSpan); });
-        KJ_IF_SOME(observer, dispatch.attemptObserver) {
-          if (deferForProbe) {
-            return promise.catch_(js,
-                [observer = ioContext.addObject(observer.addRef())](
-                    jsg::Lock& js, jsg::Value error) mutable -> jsg::Value {
-              observer->finishFailure();
-              js.throwException(kj::mv(error));
-            });
-          }
-        }
-        return promise;
+                -> jsg::Value { return resolveResult(js, response, jsRpcCallSpan); });
       }().catch_(js, kj::mv(rejectResult));
 
       auto pendingPipeline =

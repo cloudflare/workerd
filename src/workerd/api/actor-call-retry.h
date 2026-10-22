@@ -79,9 +79,6 @@ class ActorCallRetryState final: public kj::Refcounted {
     ActorRetryCallType callType;
     ActorRetryGateEnabled enforcementEnabled;
     ActorCallPayloadReplayable payloadReplayable;
-    // The target's ActorRetryCandidate, recorded and cleared at the first retryable failure before
-    // commitment that is not marked delivered.
-    kj::Maybe<ActorRetryCandidate> probeCandidate = kj::none;
   };
 
   class Attempt {
@@ -126,9 +123,7 @@ class ActorCallRetryState final: public kj::Refcounted {
 
   kj::OneOf<Attempt, kj::Exception> startAttempt();
   kj::OneOf<kj::Duration, kj::Exception> handleAttemptFailure(kj::Exception exception);
-  // `commitPoint` is the PIPELINE_COMMITTED_* reason that describes when the call was committed.
-  kj::Exception handleCommittedAttemptFailure(
-      kj::Exception exception, ActorRetryStopReason commitPoint);
+  kj::Exception handleCommittedAttemptFailure(kj::Exception exception);
 
   kj::Exception getOriginalFailure() const {
     return KJ_ASSERT_NONNULL(originalFailure).clone();
@@ -182,9 +177,7 @@ class ActorCallRetryState final: public kj::Refcounted {
   kj::Maybe<kj::Exception> handleClaimRejection(const kj::Exception& exception);
   kj::OneOf<kj::Duration, kj::Exception> checkCanRetry(kj::Exception exception);
   kj::Duration retryDelay();
-  // Returns true if this reported the call's outcome, which happens once and only after a retry.
-  bool recordOutcome(ActorRetryOutcome outcome);
-  void recordUnableToRetry(ActorRetryStopReason reason);
+  void recordOutcome(ActorRetryOutcome outcome);
 
   TimerChannel& timer;
   kj::Own<RequestObserver> observer;

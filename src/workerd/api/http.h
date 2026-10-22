@@ -262,11 +262,6 @@ class Fetcher: public JsRpcClientProvider {
       return getActorTargetRetryability().orDefault(ActorCallTargetRetryable::NO).toBool();
     }
 
-    // Temporary retry diagnostics: the ActorRetryCandidate this factory's target counts toward.
-    virtual kj::Maybe<ActorRetryCandidate> getActorRetryProbeCandidate() const {
-      return kj::none;
-    }
-
     virtual void onActorCallRetry() {
       KJ_FAIL_REQUIRE("actor call retry requested from an unsupported Fetcher");
     }
@@ -363,7 +358,6 @@ class Fetcher: public JsRpcClientProvider {
       MakeUserSpanParent makeUserSpanParent);
 
   kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() override;
-  kj::Maybe<ActorRetryCandidate> getActorRetryProbeCandidate() override;
   kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() override;
   void onActorCallRetry() override;
 
