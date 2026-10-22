@@ -1,0 +1,180 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nicholas Paun <npaun@cloudflare.com>
+Date: Thu, 22 Oct 2026 21:38:28 +0000
+Subject: Build Temporal in the V8 Bazel build
+
+Adds --//:v8_enable_temporal_support, which defines V8_TEMPORAL_SUPPORT
+and builds the Temporal sources, and --//:v8_temporal_capi, the label
+of a target that links the temporal_capi Rust crate and exports its
+diplomat-generated C++ headers. The embedder supplies that target, as
+GN's v8_maybe_temporal depends on //third_party/rust/temporal_capi.
+
+Without ICU, Temporal bakes ICU's tzres/zoneinfo64.res into V8, as
+GN's make_temporal_zoneinfo_cpp action does.
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index ed733532389dfa5d1610ee5c79e12948ffe4ee2c..a12f96c06c767518761aad7d21a91989aed6dfeb 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -210,6 +210,20 @@ v8_flag(
+ 
+ v8_flag(name = "v8_use_perfetto")
+ 
++# Builds Temporal. Temporal is implemented on top of the temporal_capi Rust
++# crate (https://github.com/boa-dev/temporal), which the embedder provides
++# by pointing :v8_temporal_capi at a target that links the crate and exports
++# its diplomat-generated C++ headers (bindings/cpp, so they are included as
++# "temporal_rs/*.hpp").
++v8_flag(name = "v8_enable_temporal_support")
++
++label_flag(
++    name = "v8_temporal_capi",
++    build_setting_default = ":temporal_capi_not_configured",
++)
++
++cc_library(name = "temporal_capi_not_configured")
++
+ # Default setting for v8_enable_maglev
+ selects.config_setting_group(
+     name = "maglev_by_default",
+@@ -577,6 +591,7 @@ v8_config(
+         "v8_x64_16byte_stack_alignment": "V8_X64_16BYTE_STACK_ALIGNMENT",
+         "v8_support_la57": "V8_SUPPORT_LA57",
+         "v8_use_perfetto": "V8_USE_PERFETTO",
++        "v8_enable_temporal_support": "V8_TEMPORAL_SUPPORT",
+         "v8_use_zlib": "V8_USE_ZLIB",
+     },
+     defines = [
+@@ -1336,8 +1351,6 @@ filegroup(
+         "src/objects/js-shadow-realm.tq",
+         "src/objects/js-shared-array.tq",
+         "src/objects/js-struct.tq",
+-        # Temporal is currently gn-only
+-        # "src/objects/js-temporal-objects.tq",
+         "src/objects/js-weak-refs.tq",
+         "src/objects/literal-objects.tq",
+         "src/objects/managed.tq",
+@@ -1374,6 +1387,11 @@ filegroup(
+         "test/torque/test-torque.tq",
+         "third_party/v8/builtins/array-sort.tq",
+     ] + select({
++        ":is_v8_enable_temporal_support": [
++            "src/objects/js-temporal-objects.tq",
++        ],
++        "//conditions:default": [],
++    }) + select({
+         ":is_v8_enable_webassembly": [
+             "src/builtins/js-to-wasm.tq",
+             "src/builtins/wasm.tq",
+@@ -1480,6 +1498,34 @@ filegroup(
+     }),
+ )
+ 
++filegroup(
++    name = "v8_temporal_files",
++    srcs = [
++        "src/builtins/builtins-temporal.cc",
++        "src/objects/js-temporal-objects.cc",
++        "src/objects/js-temporal-objects.h",
++        "src/objects/js-temporal-objects-inl.h",
++        "src/objects/js-temporal-zoneinfo64.cc",
++        "src/objects/js-temporal-zoneinfo64.h",
++    ],
++)
++
++# With ICU, Temporal reads zoneinfo64.res from ICU's data. Without it, the
++# file is baked into V8.
++genrule(
++    name = "noicu/temporal_zoneinfo64_data",
++    srcs = ["@com_googlesource_chromium_icu//:tzres/zoneinfo64.res"],
++    outs = ["noicu/src/builtins/builtins-temporal-zoneinfo64-data.cc"],
++    cmd = "$(location :include_file_as_bytes) $< $@ zoneinfo64_static_data",
++    tools = [":include_file_as_bytes"],
++)
++
++py_binary(
++    name = "include_file_as_bytes",
++    srcs = ["tools/include-file-as-bytes.py"],
++    main = "tools/include-file-as-bytes.py",
++)
++
+ filegroup(
+     name = "v8_base_without_compiler_files",
+     srcs = [
+@@ -1578,8 +1624,6 @@ filegroup(
+         "src/builtins/builtins-string.cc",
+         "src/builtins/builtins-struct.cc",
+         "src/builtins/builtins-symbol.cc",
+-        # Temporal is currently gn-only
+-        # "src/builtins/builtins-temporal.cc",
+         "src/builtins/builtins-trace.cc",
+         "src/builtins/builtins-typed-array.cc",
+         "src/builtins/builtins-utils.h",
+@@ -2311,10 +2355,6 @@ filegroup(
+         "src/objects/js-shared-array.h",
+         "src/objects/js-struct.cc",
+         "src/objects/js-struct.h",
+-        # Temporal is currently gn-only
+-        # "src/objects/js-temporal-objects.cc",
+-        # "src/objects/js-temporal-objects.h",
+-        # "src/objects/js-temporal-objects-inl.h",
+         "src/objects/js-temporal-helpers.h",
+         "src/objects/js-temporal-helpers.cc",
+         "src/objects/js-weak-refs.cc",
+@@ -4649,8 +4689,8 @@ filegroup(
+ # includes src/objects/all-objects.h, whose feature-conditional groups
+ # are selected by the normal V8 feature defines. Bazel always defines
+ # V8_ENABLE_WEBASSEMBLY via :define_flags; V8_INTL_SUPPORT is added only by
+-# the icu-prefixed action. Temporal is disabled because temporal_rs is not a
+-# Bazel dependency.
++# the icu-prefixed action. The action does not see the temporal_capi
++# headers, so metagen does not support :v8_enable_temporal_support.
+ #
+ # The headers themselves reach the action through the
+ # `metagen_sandbox_headers` glob below, which already covers src/**.
+@@ -4987,6 +5027,9 @@ v8_library(
+             ":v8_compiler_files",
+         ],
+         "//conditions:default": [],
++    }) + select({
++        ":is_v8_enable_temporal_support": [":v8_temporal_files"],
++        "//conditions:default": [],
+     }),
+     copts = ["-Wno-implicit-fallthrough"],
+     icu_deps = [
+@@ -5019,6 +5062,9 @@ v8_library(
+     ] + select({
+         ":is_v8_use_metagen": [":noicu/run_metagen"],
+         "//conditions:default": [],
++    }) + select({
++        ":is_v8_enable_temporal_support": [":noicu/temporal_zoneinfo64_data"],
++        "//conditions:default": [],
+     }),
+     deps = [
+         ":lib_dragonbox",
+@@ -5036,6 +5082,9 @@ v8_library(
+     ] + select({
+         ":is_v8_use_perfetto": ["@perfetto//:libperfetto_client_experimental"],
+         "//conditions:default": [],
++    }) + select({
++        ":is_v8_enable_temporal_support": [":v8_temporal_capi"],
++        "//conditions:default": [],
+     }),
+ )
+ 
+diff --git a/bazel/BUILD.icu b/bazel/BUILD.icu
+index 59b6145116018be623a1eabf8da831698bf75d0c..288e65d102aa56f46e1ab421faa9e6da4df7cc82 100644
+--- a/bazel/BUILD.icu
++++ b/bazel/BUILD.icu
+@@ -3,7 +3,10 @@
+ # found in the LICENSE file.
+ load("@rules_cc//cc:cc_library.bzl", "cc_library")
+ 
+-exports_files(["common/icudtl.dat"])
++exports_files([
++    "common/icudtl.dat",
++    "tzres/zoneinfo64.res",
++])
+ 
+ filegroup(
+     name = "icudata",
