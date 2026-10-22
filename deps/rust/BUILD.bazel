@@ -43,3 +43,15 @@ rust_static_library(
     stamp = -1,  # default to bazel --stamp flag
     tags = ["manual"],
 )
+
+# V8's Temporal backend: the temporal_capi crate together with its diplomat-generated C++ headers.
+# Selected by --@v8//:v8_temporal_capi in .bazelrc.
+cc_library(
+    name = "temporal_capi",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":runtime",
+        "@crates_vendor//:temporal_capi",
+        "@crates_vendor//:temporal_capi_cpp_bindings",
+    ],
+)
