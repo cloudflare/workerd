@@ -31,7 +31,7 @@ constexpr size_t MAX_CACHED_TCP_PORTS = 4;
 
 constexpr size_t MAX_IMAGE_REFERENCE_SIZE = 4096;
 constexpr kj::StringPtr VALID_CONTAINER_INSTANCE_TYPES[] = {
-  "lite"_kj, "standard-1"_kj, "standard-2"_kj, "standard-3"_kj, "standard-4"_kj};
+  "lite"_kj, "basic"_kj, "standard-1"_kj, "standard-2"_kj, "standard-3"_kj, "standard-4"_kj};
 
 // JS numbers are doubles, but the wire format is UInt64.
 uint64_t requireResourceAmount(double value, kj::StringPtr name) {

@@ -345,25 +345,23 @@ int main() {
 
 ### Real-World Reference: workerd Initialization
 
-For a production example, see how workerd initializes V8 in `src/workerd/server/cli-main.c++`:
+For a production example, see how workerd initializes V8 in `src/workerd/server/factory/bootstrap.c++`:
 
 ```cpp
-// From cli-main.c++ serveImpl()
-auto platform = jsg::defaultPlatform(0);
-WorkerdPlatform v8Platform(*platform);
-jsg::V8System v8System(v8Platform,
-    KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; },
-    platform.get());
+// From bootstrap.c++ (Bootstrap)
+platform = jsg::defaultPlatform(0);
+v8Platform = kj::heap<WorkerdPlatform>(*platform);
+v8System = kj::heap<jsg::V8System>(*v8Platform,
+    KJ_MAP(flag, config.getV8Flags()) -> kj::StringPtr { return flag; }, platform.get());
 ```
 
-And how isolates are created in `src/workerd/server/server.c++`:
+And how isolates are created in `src/workerd/server/factory/worker-factory.c++`:
 
 ```cpp
-// From server.c++ when creating a worker
-auto isolateGroup = v8::IsolateGroup::GetDefault();
-auto api = kj::heap<WorkerdApi>(globalContext->v8System, def.featureFlags, extensions,
-    limitEnforcer->getCreateParams(), isolateGroup, kj::mv(jsgobserver),
-    *memoryCacheProvider, pythonConfig);
+// From worker-factory.c++ when compiling a worker
+auto api = kj::heap<WorkerdApi>(factory.v8System, featureFlags, extensions,
+    limitEnforcer->getCreateParams(), v8::IsolateGroup::GetDefault(), kj::mv(jsgobserver),
+    *factory.memoryCacheProvider, options.pythonConfig, kj::mv(listeners));
 ```
 
 ---
@@ -1950,6 +1948,10 @@ JSG provides rudimentary async context tracking via `AsyncContextFrame` in
 frame. Each frame has a storage context (a map of storage cells keyed by opaque keys).
 When a new frame is created, the current frame's storage context is propagated.
 
+Small frames keep their storage cells inline. Larger frames use a hash table. Dead keys are
+removed before storage is inherited, so a child with few live cells can use inline storage even
+when its parent used a hash table.
+
 All JavaScript promises, timers, and microtasks propagate the async context.
 
 ```js
@@ -1988,11 +1990,16 @@ kj::Arc<AsyncContextFrame::StorageKey> key =
 KJ_DEFER(key->reset());  // Clear when done
 
 {
-  jsg::AsyncContextFrame::StorageScope(js, key.addRef(), value);
+  jsg::AsyncContextFrame::StorageScope scope(js, key.addRef(), kj::mv(value));
   // code runs with this storage context
 }
 // Automatically reset to previous context
 ```
+
+To install several storage cells in one frame, pass a mutable array of
+`AsyncContextFrame::StorageEntry` to `StorageScope`. The entries are moved into the frame,
+and inherited storage is copied once. All of the cells remain available to asynchronous work
+that captures the frame, and leaving the scope restores the previous frame.
 
 ---
 

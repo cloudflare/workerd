@@ -10,6 +10,7 @@
 #include "snapshot.h"
 #include "v8-platform-wrapper.h"
 
+#include <workerd/jsg/code-cache.h>
 #include <workerd/jsg/observer.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/batch-queue.h>
@@ -162,6 +163,16 @@ class IsolateBase {
       return moduleFallbackCallback;
     }
     return kj::none;
+  }
+
+  // Makes worker bundle modules and scripts compiled in this isolate use code caches from
+  // `store`. Must be called once, before any of them is compiled.
+  void setCodeCacheStore(kj::Own<const CodeCacheStore> store) {
+    KJ_REQUIRE(codeCache == kj::none, "code cache store already set");
+    codeCache.emplace(kj::mv(store));
+  }
+  kj::Maybe<IsolateCodeCache&> tryGetCodeCache() KJ_LIFETIMEBOUND {
+    return codeCache;
   }
 
   // Requests an extra microtask checkpoint after the current one completes.
@@ -400,6 +411,14 @@ class IsolateBase {
     usingFastJsgStruct = true;
   }
 
+  void setWasmEsmIntegrationBuiltinsEnabled() {
+    wasmEsmIntegrationBuiltinsEnabled = true;
+  }
+
+  bool isWasmEsmIntegrationBuiltinsEnabled() const {
+    return wasmEsmIntegrationBuiltinsEnabled;
+  }
+
   bool getUsingFastJsgStruct() const {
     return usingFastJsgStruct;
   }
@@ -558,6 +577,7 @@ class IsolateBase {
   bool usingNewModuleRegistry = false;
   bool usingEnhancedErrorSerialization = false;
   bool usingFastJsgStruct = false;
+  bool wasmEsmIntegrationBuiltinsEnabled = false;
   bool extraMicrotaskCheckpointRequested = false;
 
   uint moduleEvaluationDepth = 0;
@@ -568,6 +588,7 @@ class IsolateBase {
   kj::Maybe<kj::Function<Logger>> maybeLogger;
   kj::Maybe<kj::Function<ErrorReporter>> maybeErrorReporter;
   kj::Maybe<kj::Function<ModuleFallbackCallback>> maybeModuleFallbackCallback;
+  kj::Maybe<IsolateCodeCache> codeCache;
 
   // Registry backing Lock::tryGetTypeHandler(), keyed by typeid(TypeHandler<T>) and
   // populated at isolate construction (see registerTypeHandler()). The values point at
@@ -1050,10 +1071,10 @@ class Isolate: public IsolateBase {
       return jsgIsolate.getWrapperByContext(*this)->wrap(v8Isolate, kj::none, kj::mv(data));
     }
     v8::Local<v8::Function> wrapSimpleFunction(v8::Local<v8::Context> context,
-        jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction)
-        override {
+        jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction,
+        Once once) override {
       return jsgIsolate.getWrapperByContext(context)->wrap(
-          *this, context, kj::none, kj::mv(simpleFunction));
+          *this, context, kj::none, kj::mv(simpleFunction), once);
     }
     v8::Local<v8::Function> wrapReturningFunction(v8::Local<v8::Context> context,
         jsg::Function<v8::Local<v8::Value>(const v8::FunctionCallbackInfo<v8::Value>& info)>

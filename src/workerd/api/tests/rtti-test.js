@@ -11,3 +11,16 @@ export default {
     assert(buffer.byteLength > 0);
   },
 };
+
+// typescript_implemented_streams swaps the Web Streams implementation without changing its
+// API, so it must not change the generated types.
+export const typescriptImplementedStreamsDoesNotChangeTypes = {
+  test() {
+    const without = rtti.exportTypes('2023-05-18', ['nodejs_compat']);
+    const withFlag = rtti.exportTypes('2023-05-18', [
+      'nodejs_compat',
+      'typescript_implemented_streams',
+    ]);
+    assert.deepStrictEqual(new Uint8Array(withFlag), new Uint8Array(without));
+  },
+};

@@ -114,7 +114,6 @@ void WritableStreamDefaultWriter::lockToStream(jsg::Lock& js, WritableStream& st
 }
 
 void WritableStreamDefaultWriter::releaseLock(jsg::Lock& js) {
-  // TODO(soon): Releasing the lock should cancel any pending writes.
   assertAttachedOrTerminal();
   // Closed and Released states are no-ops.
   KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
@@ -123,8 +122,8 @@ void WritableStreamDefaultWriter::releaseLock(jsg::Lock& js) {
     // strong reference to be cleared, so let's make sure we keep a reference
     // to the stream at least until the call to releaseLock completes.
     auto ref = attached.stream.addRef();
-    attached.stream->getController().releaseWriter(addPtrToThis(), js);
     state.transitionTo<Released>();
+    ref->getController().releaseWriter(addPtrToThis(), js);
   }
 }
 
@@ -145,7 +144,8 @@ jsg::Promise<void> WritableStreamDefaultWriter::write(
     return js.rejectedPromise<void>(js.typeError("This WritableStream has been closed."_kj));
   }
   auto& attached = state.requireActiveUnsafe();
-  return attached.stream->getController().write(js, chunk);
+  auto ref = attached.stream.addRef();
+  return ref->getController().write(js, chunk);
 }
 
 jsg::JsString WritableStream::inspectState(jsg::Lock& js) {

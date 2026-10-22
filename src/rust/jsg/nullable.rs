@@ -10,10 +10,11 @@ use crate::Result;
 
 /// A wrapper type that accepts `null`, `undefined`, or a value of type `T`.
 ///
-/// `Nullable<T>` is similar to `Option<T>` but also accepts `undefined` as a null-ish value.
-/// This is useful for writing flexible JavaScript APIs where we have full control over
-/// behavior depending on the passed value, including easily throwing errors to make an API
-/// conform to Web IDL nullable behavior.
+/// Unlike `Option<T>`, where only `undefined` is `None` and `null` goes to `T`,
+/// `Nullable<T>` tells `null` and `undefined` apart. This is useful for
+/// writing flexible JavaScript APIs where we have full control over behavior
+/// depending on the passed value, including easily throwing errors to make an
+/// API conform to Web IDL nullable behavior.
 ///
 /// # Behavior
 ///

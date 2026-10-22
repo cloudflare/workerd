@@ -417,6 +417,24 @@ KJ_TEST("actor fetch marks other not-delivered rejections from the claim as deli
   KJ_EXPECT(e.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none, e);
 }
 
+KJ_TEST("actor fetch marks retryable failures of any type as delivered") {
+  // A retryable failure that passes through the actor must not make its caller retry the actor.
+  auto observer = kj::refcounted<RetryClaimObserver>();
+  auto rejection = KJ_EXCEPTION(FAILED, "jsg.Error: retryable failure");
+  jsg::markTransient(rejection);
+  jsg::markActorRequestNotDelivered(rejection);
+  observer->rejection = kj::mv(rejection);
+  TestFixture fixture(recordingActorParams(*observer));
+  TestResponse response;
+
+  auto e = KJ_ASSERT_NONNULL(sendFetch(fixture, response));
+
+  KJ_EXPECT(e.getType() == kj::Exception::Type::FAILED, e);
+  KJ_EXPECT(jsg::isRetryable(e), e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none, e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none, e);
+}
+
 KJ_TEST("fetch claims once even without a fetch handler") {
   // The claim precedes the handler lookup, so a worker without a fetch handler still claims, once,
   // before the request fails.
@@ -508,6 +526,64 @@ KJ_TEST("connect rejection failures stay tagged after delivery") {
   auto& e = KJ_ASSERT_NONNULL(exception);
   KJ_EXPECT(e.getDescription().contains("connect rejection failed"));
   KJ_EXPECT(e.getDetail(WORKER_REQUEST_DELIVERED_DETAIL_ID) != kj::none);
+}
+
+// Fails an actor CONNECT with `gateFailure`. An output gate failure replaces the handler's, so it
+// reaches the entrypoint's catch.
+kj::Exception failActorConnectAtOutputGate(kj::Exception gateFailure) {
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = RECORDING_ACTOR_SOURCE,
+    .actorId = Worker::Actor::Id(kj::str("connect-test")),
+    .actorClassName = "default"_kj,
+  });
+  auto gatePaf = kj::newPromiseAndFulfiller<void>();
+  auto blocker = fixture.getActor().getOutputGate().lockWhile(kj::mv(gatePaf.promise), nullptr);
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  kj::HttpHeaderTable headerTable;
+  kj::HttpHeaders headers(headerTable);
+  kj::NullStream connection;
+  TestConnectResponse response;
+  auto connect = entrypoint->connect("example.com", headers, connection, response, {})
+                     .eagerlyEvaluate(nullptr);
+
+  fixture.pollEventLoop();
+  gatePaf.fulfiller->reject(kj::mv(gateFailure));
+
+  auto e =
+      KJ_ASSERT_NONNULL(kj::runCatchingExceptions([&]() { connect.wait(fixture.getWaitScope()); }));
+  KJ_EXPECT(kj::runCatchingExceptions([&]() { blocker.wait(fixture.getWaitScope()); }) != kj::none);
+  return e;
+}
+
+KJ_TEST("actor connect marks a not-delivered disconnect as delivered") {
+  auto gateFailure = KJ_EXCEPTION(DISCONNECTED, "output gate failed");
+  jsg::markActorRequestNotDelivered(gateFailure);
+
+  auto e = failActorConnectAtOutputGate(kj::mv(gateFailure));
+
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none, e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none, e);
+}
+
+KJ_TEST("actor connect marks retryable failures of any type as delivered") {
+  auto gateFailure = KJ_EXCEPTION(FAILED, "output gate failed");
+  jsg::markTransient(gateFailure);
+  jsg::markActorRequestNotDelivered(gateFailure);
+
+  auto e = failActorConnectAtOutputGate(kj::mv(gateFailure));
+
+  KJ_EXPECT(e.getType() == kj::Exception::Type::FAILED, e);
+  KJ_EXPECT(jsg::isRetryable(e), e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none, e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none, e);
+}
+
+KJ_TEST("actor connect preserves not-delivered for a predecessor rejection") {
+  auto e = failActorConnectAtOutputGate(makePredecessorRejection());
+
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID) != kj::none, e);
+  KJ_EXPECT(e.getDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID) == kj::none, e);
+  KJ_EXPECT(e.getDetail(jsg::ACTOR_PREDECESSOR_REJECTED_DETAIL_ID) != kj::none, e);
 }
 
 KJ_TEST("alarm scheduling tags failures after delivery") {

@@ -295,6 +295,14 @@ bool Lock::getThrowOnUnrecognizedImportAssertion() const {
   return IsolateBase::from(v8Isolate).getThrowOnUnrecognizedImportAssertion();
 }
 
+void Lock::setWasmEsmIntegrationBuiltinsEnabled() {
+  IsolateBase::from(v8Isolate).setWasmEsmIntegrationBuiltinsEnabled();
+}
+
+bool Lock::isWasmEsmIntegrationBuiltinsEnabled() const {
+  return IsolateBase::from(v8Isolate).isWasmEsmIntegrationBuiltinsEnabled();
+}
+
 void Lock::disableTopLevelAwait() {
   IsolateBase::from(v8Isolate).disableTopLevelAwait();
 }

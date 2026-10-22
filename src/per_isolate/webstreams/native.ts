@@ -34,10 +34,19 @@
 //     and the default-read enqueue() path already covers source-allocated
 //     buffers.
 //     byobRequest === null ⇒ default read — the source allocates its OWN
-//     buffer and calls controller.enqueue(view).
+//     buffer and calls controller.enqueue(view). The view is never empty:
+//     as with respond(0), an empty answer would mean end-of-stream, for
+//     which close() is the verb, so enqueue() refuses one (TypeError).
 //   - The source calls enqueue-or-respond AT MOST ONCE per pull
 //     invocation and never pushes outside pull. desiredSize is exposed
 //     but the native source never consults it.
+//   - The source hands over memory it never touches again: each
+//     enqueue()d chunk is a fresh buffer, never a SharedArrayBuffer, and
+//     the source stops writing to byobRequest.view once it responds.
+//     The conduit relies on this rather than checking it: it neither
+//     refuses a shared chunk nor transfers what it delivers, so the
+//     source's view of a responded read stays attached. The queued
+//     controller does both, because its source is user code.
 //   - PER-PULL CANCELLATION: pull receives an extension argument
 //     pull(controller, signal) — an AbortSignal that fires when the
 //     consumer abandons the read (releaseLock, cancel, tee). The source
@@ -46,24 +55,31 @@
 //     on the next pull. The controller REFUSES delivery on an aborted
 //     signal as a backstop. This eliminates JS-side buffering for the
 //     release-mid-pull race: race buffering lives SOURCE-SIDE; the JS
-//     conduit is uniformly bufferless.
+//     conduit is uniformly bufferless. A failure, by contrast, is
+//     reported at once: an aborted pull that rejects errors the stream,
+//     as a live pull does, unless it rejects with signal.reason, which
+//     reports only the abort. A read that fails after its reader is
+//     released thus errors the stream whether or not another read
+//     waits, as a pull's rejection does in the spec.
 //     FUTURE OPTIMIZATION: reuse a single AbortController per conduit
 //     (reset between pulls) rather than allocating one per pull.
 //   - MIN-READ / UNDER-DELIVERY CONTRACT (KJ tryRead semantics): the
 //     respond is the source's COMPLETE answer for the read. Any internal
 //     accumulation toward `atLeast` happens inside the native source;
 //     the conduit never re-pulls an unsatisfied read. Responding with
-//     fewer bytes than `atLeast` IMPLICITLY SIGNALS CLOSURE: the partial
-//     fill commits as { done: false, value: partialView }, the stream
-//     closes, and every subsequent read returns EOF (BYOB reads get a
-//     zero-length view over their transferred buffer). This is the
+//     fewer bytes than `atLeast` IMPLICITLY SIGNALS CLOSURE: the stream
+//     closes, the partial fill commits as { done: false, value:
+//     partialView }, and every subsequent read returns EOF (BYOB reads
+//     get a zero-length view over their transferred buffer). This is the
 //     C++-parity readAtLeast tail shape — the below-minimum
 //     tail is never fused with the done flag — and it matches the
 //     queued backend's deferred end-of-data settlement, so consumers
-//     observe the same tail on both backends. (Only an explicit
-//     same-turn respond(0)-after-close on the QUEUED backend produces
-//     the spec's fused { done: true, value: partial } fold; the native
-//     conduit has no respond(0) — close() is the EOF verb.)
+//     observe the same tail on both backends. The legacy C++ streams
+//     differ only in settling the tail before the stream closes, which
+//     happens at their next read. (Only an explicit same-turn
+//     respond(0)-after-close on the QUEUED backend produces the spec's
+//     fused { done: true, value: partial } fold; the native conduit has
+//     no respond(0) — close() is the EOF verb.)
 //   - Close is otherwise a fused close-commit: controller.close() may
 //     follow a respond() in the same pull turn — deliberately divergent
 //     from the queued backend's drain-then-sentinel model.
@@ -74,9 +90,9 @@
 //     running (the reader was released mid-pull); both branches must then
 //     deliver the bytes that read produces, ahead of anything later.
 //   - expectedLength (non-standard extension, optional): the TOTAL bytes
-//     the source promises to produce — a non-negative bigint or integer
-//     number that fits in a uint64 (normalized to bigint), read once at
-//     construction.
+//     the source promises to produce, a uint64 (the C++ source answers a
+//     bigint), read once at construction and converted to a bigint by
+//     normalizeExpectedLength (common.ts).
 //     undefined = unknown (C++ uses chunked encoding). The conduit
 //     enforces the exact-total contract: overflow at delivery and
 //     underflow at source-initiated close (including min-read
@@ -101,6 +117,12 @@
 //   - Stream-level state transitions cross the module fence through the
 //     injected NativeStreamHooks (readableStreamClose/Error on the far
 //     side) — never by touching stream internals from here.
+//   - The stream transitions before the reads it ends settle: every
+//     close or error the conduit makes calls its hook first, then
+//     settles the reads (spec ReadableStreamClose/ReadableStreamError:
+//     reader.closed first), so reader.closed and the C++ EOF signal
+//     precede the last read. (A cancel is closed by the stream layer
+//     before it reaches the conduit.)
 //   - A COMPLETION LATCH prevents busy-loop re-pulls: a pull that
 //     settles without delivering, closing, or erroring while requests
 //     are still pending errors the stream. Aborted pulls are exempt.
@@ -121,16 +143,16 @@ import type {
   RingBuffer as RingBufferType,
   RingBufferConstructor,
 } from './ring-buffer';
+import type { CommonHelpers } from './common';
+import type { ViewExtentHelpers } from './view-extent';
 
 const {
   AbortController,
   AbortControllerAbort,
   AbortControllerSignalGet,
   AbortSignalAbortedGet,
+  AbortSignalReasonGet,
   BigInt,
-  DataViewPrototypeGetBuffer,
-  DataViewPrototypeGetByteLength,
-  DataViewPrototypeGetByteOffset,
   NumberIsNaN,
   ObjectGetOwnPropertyDescriptor,
   ObjectGetPrototypeOf,
@@ -141,15 +163,17 @@ const {
   PromisePrototypeThen,
   RangeError,
   TypeError,
-  TypedArrayPrototypeGetBuffer,
   TypedArrayPrototypeGetByteLength,
-  TypedArrayPrototypeGetByteOffset,
   Uint8Array,
   uncurryThis,
 } = primordials;
 
 const { isArrayBufferView, isUint8Array, markPromiseHandled } = utils;
 
+const { isActualObject, normalizeExpectedLength, convertCallback } =
+  require('webstreams/common') as CommonHelpers;
+const { viewByteExtent } =
+  require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
 };
@@ -164,6 +188,30 @@ const { createReadResult } = require('webstreams/queue') as {
 // value is the symbol itself. The value is currently meaningless beyond
 // the identity check (reserved for future capability data).
 const kNativeSource: symbol = utils.getApiSymbol('kNativeSource');
+
+// Whether `object` carries `marker` (kNativeSource or kNativeSink) as its
+// own; `kind` names the object in the error. Throws on a malformed marker
+// — by the time the marker key is present at all, this is a contract
+// violation on the native/mock side, never a user-input condition.
+//
+// Hardening: OWN-property read via descriptor — a marker symbol planted
+// on Object.prototype must not convert every plain source or sink into a
+// native one, and a hostile accessor at the marker is never invoked (we
+// read desc.value; accessor-defined markers are ignored).
+function hasOwnMarker(
+  object: object,
+  marker: symbol,
+  kind: 'source' | 'sink'
+): boolean {
+  const desc = ObjectGetOwnPropertyDescriptor(object, marker) as
+    PropertyDescriptor | undefined;
+  const value = desc?.value as unknown;
+  if (value === undefined) return false;
+  if (value !== marker) {
+    throw new TypeError(`Invalid native stream ${kind} marker`);
+  }
+  return true;
+}
 
 // --- Writable-side markers (same conventions as the readable side) ---
 
@@ -191,14 +239,7 @@ const kNativeSink: symbol = utils.getApiSymbol('kNativeSink');
 const kExtractNativeSink: symbol = utils.getApiSymbol('kExtractNativeSink');
 
 function isNativeUnderlyingSink(sink: object): boolean {
-  const desc = ObjectGetOwnPropertyDescriptor(sink, kNativeSink) as
-    PropertyDescriptor | undefined;
-  const value = desc?.value as unknown;
-  if (value === undefined) return false;
-  if (value !== kNativeSink) {
-    throw new TypeError('Invalid native stream sink marker');
-  }
-  return true;
+  return hasOwnMarker(sink, kNativeSink, 'sink');
 }
 
 // The JS-to-C++ extraction marker. Installed on native-backed
@@ -213,28 +254,10 @@ function isNativeUnderlyingSink(sink: object): boolean {
 // user code.
 const kExtractNativeSource: symbol = utils.getApiSymbol('kExtractNativeSource');
 
-function isActualObject(value: unknown): value is object {
-  return value != null && typeof value === 'object';
-}
-
 // Returns true if `source` is native-marked; false for ordinary (queued)
-// sources. Throws on a malformed marker — by the time the marker key is
-// present at all, this is a contract violation on the native/mock side,
-// never a user-input condition.
-//
-// Hardening: OWN-property read via descriptor — a marker symbol planted
-// on Object.prototype must not convert every plain source into a native
-// one, and a hostile accessor at the marker is never invoked (we read
-// desc.value; accessor-defined markers are ignored).
+// sources.
 function isNativeUnderlyingSource(source: object): boolean {
-  const desc = ObjectGetOwnPropertyDescriptor(source, kNativeSource) as
-    PropertyDescriptor | undefined;
-  const value = desc?.value as unknown;
-  if (value === undefined) return false;
-  if (value !== kNativeSource) {
-    throw new TypeError('Invalid native stream source marker');
-  }
-  return true;
+  return hasOwnMarker(source, kNativeSource, 'source');
 }
 
 // Stream-level transitions injected by readable.ts at construction (the
@@ -243,40 +266,6 @@ function isNativeUnderlyingSource(source: object): boolean {
 export interface NativeStreamHooks {
   closeStream: () => void;
   errorStream: (reason: unknown) => void;
-}
-
-// Maximum expectedLength: uint64 max. The value is destined for the C++
-// bridge (Content-Length is carried as uint64_t through the C++/KJ HTTP
-// layer), so larger totals are not representable. Mirrors the
-// FixedLengthStream constructor validation in identity.ts.
-const MAX_UINT64 = 0xffff_ffff_ffff_ffffn;
-
-// Normalizes the non-standard `expectedLength` extension property: the
-// TOTAL number of bytes the source promises to produce over its
-// lifetime (undefined = unknown; C++ then uses chunked encoding).
-// Accepts a bigint or integer number in [0, 2^64) — totals can exceed
-// MAX_SAFE_INTEGER but must fit in a uint64. Shape violations (wrong
-// type) are TypeErrors; value violations (non-integer, negative,
-// > uint64 max) are RangeErrors, matching FixedLengthStream
-// (identity.ts). A near-duplicate (pending consolidation; no uint64
-// cap yet) lives in readable.ts for the queued byte controller.
-function normalizeExpectedLength(value: unknown): bigint | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== 'bigint' && typeof value !== 'number') {
-    throw new TypeError(
-      'expectedLength must be a non-negative bigint or integer'
-    );
-  }
-  // BigInt() conversion rejects NaN, ±Infinity, and fractions
-  // (RangeError) naturally. The typeof gate above is what prevents
-  // BigInt() string/object coercion (e.g. '5' → 5n) from sneaking in.
-  const normalized = typeof value === 'bigint' ? value : BigInt(value);
-  if (normalized < 0n || normalized > MAX_UINT64) {
-    throw new RangeError(
-      'expectedLength must be a non-negative integer that fits in a uint64'
-    );
-  }
-  return normalized;
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +286,14 @@ interface NativeByobRequestEntry {
 }
 
 type NativeRequest = NativeDefaultRequest | NativeByobRequestEntry;
+
+// What settles a request: its pending read, or the pull-into descriptor of
+// its BYOB read.
+function settlerOf(
+  request: NativeRequest
+): PendingRead<Uint8Array> | PullIntoDescriptor {
+  return request.kind === 'default' ? request.read : request.desc;
+}
 
 // Cross-class accessors (assigned in static blocks).
 let getRequestDesc: (
@@ -468,34 +465,26 @@ interface NativeAlgorithms {
 }
 
 class NativePullConduit implements ByteStreamConsumerType {
-  #requests: RingBufferType<NativeRequest> = new RingBuffer();
+  readonly #requests: RingBufferType<NativeRequest> = new RingBuffer();
   // 'closed' covers source-close, stream cancel, and tee (the contract
   // leaves a teed-away original source closed).
   #status: 'active' | 'closed' | 'errored' = 'active';
   #storedError: unknown;
-  #pulling: boolean = false;
-  #pullAgain: boolean = false;
   // Set by a successful enqueue/respond, cleared at pull start. Used for
   // the once-per-pull delivery check AND the completion latch: a pull
   // that settles without delivering, closing, or erroring while requests
   // are still pending is a broken source — the latch errors the stream
   // rather than busy-looping the re-pull. Aborted pulls are exempt.
   #deliveredThisPull: boolean = false;
-  // The AbortController for the currently in-flight pull, or undefined
-  // when no pull is active. Used as the identity key for superseded-
-  // settle detection: the settle handler captures its own controller
-  // reference and compares it to this field — a mismatch means the
-  // pull was superseded (tee/extract). Aborted pulls keep their
-  // controller reference so that #pulling serialization is maintained
-  // until the aborted promise settles (signal.aborted distinguishes
-  // aborted from live settlements).
+  // The AbortController of the pull in flight, or undefined when none is;
+  // its presence serializes pulls. An aborted pull keeps it until the
+  // pull's promise settles, so the next pull waits for that.
   #pullAbortController: AbortController | undefined;
   #pullAlgorithm: PullAlgorithm | undefined;
   #cancelAlgorithm: CancelAlgorithm | undefined;
   #teeAlgorithm: (() => unknown) | undefined;
   #hooks: NativeStreamHooks;
-  // Set immediately after construction by createNativeReadableStreamParts.
-  #controller: NativeReadableStreamController | undefined;
+  #controller: NativeReadableStreamController;
   #byobRequestCache: NativeReadableStreamBYOBRequest | null = null;
   // Back-reference to the original source object, kept for extraction
   // (the JS-to-C++ path returns this object so C++ can unwrap its
@@ -522,10 +511,12 @@ class NativePullConduit implements ByteStreamConsumerType {
     this.#cancelAlgorithm = algorithms.cancelAlgorithm;
     this.#teeAlgorithm = algorithms.teeAlgorithm;
     this.#hooks = hooks;
+    this.#controller = new NativeReadableStreamController(this);
   }
 
-  attachController(controller: NativeReadableStreamController): void {
-    this.#controller = controller;
+  // The façade the stream holds as its controller.
+  get controller(): NativeReadableStreamController {
+    return this.#controller;
   }
 
   // --- StreamConsumer surface ----------------------------------------------
@@ -571,61 +562,35 @@ class NativePullConduit implements ByteStreamConsumerType {
   }
 
   cancelReadsForReader(reader: object, reason: unknown): void {
-    const kept: RingBufferType<NativeRequest> = new RingBuffer();
-    const requests = this.#requests;
-    for (let i = 0; i < requests.length; i++) {
-      const request = requests.get(i) as NativeRequest;
-      const owner =
-        request.kind === 'default' ? request.read.reader : request.desc.reader;
-      if (owner === reader) {
-        if (request.kind === 'default') {
-          request.read.reject(reason);
-        } else {
-          request.desc.reject(reason);
-        }
+    this.#drainRequests((request) => {
+      const settler = settlerOf(request);
+      if (settler.reader === reader) {
+        settler.reject(reason);
       } else {
-        kept.push(request);
+        this.#requests.push(request);
       }
-    }
-    this.#requests = kept;
-    this.#byobRequestCache = null;
+    });
     // ABORT SITE: if the released reader's reads were the only demand and
     // a pull is in flight, abort it — the source contractually holds any
     // bytes and redelivers on the next pull.
-    if (
-      this.#requests.length === 0 &&
-      this.#pullAbortController !== undefined
-    ) {
-      this.#abortCurrentPull(reason);
-    }
+    if (this.#requests.length === 0) this.#abortCurrentPull(reason);
   }
 
   errorAllReads(reason: unknown): void {
-    const requests = this.#requests;
-    this.#requests = new RingBuffer();
-    this.#byobRequestCache = null;
-    for (let i = 0; i < requests.length; i++) {
-      const request = requests.get(i) as NativeRequest;
-      if (request.kind === 'default') {
-        request.read.reject(reason);
-      } else {
-        request.desc.reject(reason);
-      }
-    }
+    this.#drainRequests((request) => settlerOf(request).reject(reason));
   }
 
   resolveAllReadsAsDone(): void {
-    const requests = this.#requests;
-    this.#requests = new RingBuffer();
+    this.#drainRequests((request) =>
+      settlerOf(request).resolve(createReadResult(undefined, true))
+    );
+  }
+
+  // Settles every queued request through `visit` (see RingBuffer.drain),
+  // and drops the byobRequest minted for the old head.
+  #drainRequests(visit: (request: NativeRequest) => void): void {
     this.#byobRequestCache = null;
-    for (let i = 0; i < requests.length; i++) {
-      const request = requests.get(i) as NativeRequest;
-      if (request.kind === 'default') {
-        request.read.resolve(createReadResult(undefined, true));
-      } else {
-        request.desc.resolve(createReadResult(undefined, true));
-      }
-    }
+    this.#requests.drain(visit);
   }
 
   get hasPendingRead(): boolean {
@@ -717,61 +682,44 @@ class NativePullConduit implements ByteStreamConsumerType {
 
   // --- Pull pacing -----------------------------------------------------------
 
-  // Standard [[pulling]]/[[pullAgain]] serialization. Demand-driven: pull
-  // only while requests are pending (effective high-water mark of zero).
-  // Re-evaluated after each pull settles for the REMAINING requests; a
-  // single request never spans pulls (the respond is the complete answer
-  // for its read — see the min-read contract).
+  // Pulls are serialized as the spec's [[pulling]] flag serializes them:
+  // at most one is in flight (#pullAbortController), and a read made
+  // meanwhile waits for it to settle. Demand-driven: pull only while
+  // requests are pending (effective high-water mark of zero), and
+  // re-evaluate after each pull settles for the REMAINING requests, which
+  // covers what the spec's [[pullAgain]] records. A single request never
+  // spans pulls (the respond is the complete answer for its read — see
+  // the min-read contract).
   //
   // PER-PULL CANCELLATION: each pull invocation gets a fresh
   // AbortController whose signal is passed as pull(controller, signal).
   // The source contractually checks signal.aborted immediately before
   // enqueue/respond; the controller backstop refuses delivery on an
-  // aborted signal. Settle handlers compare their captured controller
-  // reference against #pullAbortController — a mismatch means the pull
-  // was aborted or superseded and its settlement is inert (the rejection
-  // from kj cancellation is swallowed, preventing a healthy stream from
-  // erroring on a cancelled read).
+  // aborted signal. An aborted pull's fulfillment is not the source's
+  // answer to anything: the source held its data for the next pull, so it
+  // skips the completion latch. Its rejection is the source's error, as a
+  // live pull's is, unless it carries the abort's own reason.
   pullIfNeeded(): void {
     if (this.#status !== 'active') return;
     if (this.#requests.length === 0) return;
     const pullAlgorithm = this.#pullAlgorithm;
     if (pullAlgorithm === undefined) return;
-    if (this.#pulling) {
-      this.#pullAgain = true;
-      return;
-    }
-    const controller = this.#controller;
-    if (controller === undefined) return;
-    this.#pulling = true;
-    this.#deliveredThisPull = false;
+    if (this.#pullAbortController !== undefined) return;
     const ac = new AbortController();
     this.#pullAbortController = ac;
+    this.#deliveredThisPull = false;
     const signal = AbortControllerSignalGet(ac);
     markPromiseHandled(
       PromisePrototypeThen(
-        pullAlgorithm(controller, signal),
+        pullAlgorithm(this.#controller, signal),
         () => {
-          // Superseded-settle check: tee/extract may have cleared the
-          // controller reference; this settlement belongs to a dead pull.
-          if (this.#pullAbortController !== ac) return;
-          this.#pulling = false;
           this.#pullAbortController = undefined;
-          // Aborted-pull check: the pull's signal was aborted (reader
-          // release, cancel, tee, extract).  The source contractually
-          // held its data; skip the completion latch and just schedule
-          // the next pull if demand exists.
-          if (AbortSignalAbortedGet(signal)) {
-            if (this.#status === 'active' && this.#requests.length > 0) {
-              this.pullIfNeeded();
-            }
-            return;
-          }
-          // COMPLETION LATCH: a pull that settled without delivering,
+          // COMPLETION LATCH: a live pull that settled without delivering,
           // closing, or erroring while requests are still pending is a
           // broken source. Error the stream to prevent a busy-loop
           // re-pull against a source that will never deliver.
           if (
+            !AbortSignalAbortedGet(signal) &&
             !this.#deliveredThisPull &&
             this.#status === 'active' &&
             this.#requests.length > 0
@@ -779,47 +727,35 @@ class NativePullConduit implements ByteStreamConsumerType {
             this.errorFromSource(
               new TypeError(
                 'native source pull settled without delivering, closing, ' +
-                  'or erroring — the source appears broken'
+                  'or erroring; the source appears broken'
               )
             );
             return;
           }
-          if (
-            this.#pullAgain ||
-            (this.#status === 'active' && this.#requests.length > 0)
-          ) {
-            this.#pullAgain = false;
-            this.pullIfNeeded();
-          }
+          this.pullIfNeeded();
         },
         (e: unknown) => {
-          if (this.#pullAbortController !== ac) return; // superseded
-          this.#pulling = false;
           this.#pullAbortController = undefined;
-          // Aborted-pull rejection is expected (kj cancellation, etc.)
-          // — not a source error.  Schedule the next pull if needed.
-          if (AbortSignalAbortedGet(signal)) {
-            if (this.#status === 'active' && this.#requests.length > 0) {
-              this.pullIfNeeded();
-            }
-            return;
+          if (
+            AbortSignalAbortedGet(signal) &&
+            e === AbortSignalReasonGet(signal)
+          ) {
+            this.pullIfNeeded();
+          } else {
+            this.errorFromSource(e);
           }
-          this.#pullAgain = false;
-          this.errorFromSource(e);
         }
       ) as Promise<void>
     );
   }
 
-  // Aborts the in-flight pull's signal.  #pulling and #pullAbortController
-  // are deliberately NOT cleared — the aborted pull's promise must settle
-  // before a new pull can start, maintaining the non-reentrant [[pulling]]
-  // / [[pullAgain]] serialization.  The settle handler detects the abort
-  // via signal.aborted and skips the completion latch.
+  // Aborts the in-flight pull's signal. #pullAbortController is
+  // deliberately NOT cleared: the aborted pull's promise must settle
+  // before a new pull can start, keeping pulls serialized. The settle
+  // handler detects the abort via signal.aborted.
   #abortCurrentPull(reason: unknown): void {
     const ac = this.#pullAbortController;
     if (ac === undefined) return;
-    this.#pullAgain = false;
     this.#deliveredThisPull = false;
     this.#byobRequestCache = null;
     AbortControllerAbort(ac, reason);
@@ -897,26 +833,19 @@ class NativePullConduit implements ByteStreamConsumerType {
       if (isUint8Array(chunk)) {
         view = chunk as Uint8Array;
       } else {
-        const isDataView = utils.isDataView(chunk);
-        const buffer = (
-          isDataView
-            ? DataViewPrototypeGetBuffer(chunk)
-            : TypedArrayPrototypeGetBuffer(chunk)
-        ) as ArrayBuffer;
-        const byteOffset = (
-          isDataView
-            ? DataViewPrototypeGetByteOffset(chunk)
-            : TypedArrayPrototypeGetByteOffset(chunk)
-        ) as number;
-        const byteLength = (
-          isDataView
-            ? DataViewPrototypeGetByteLength(chunk)
-            : TypedArrayPrototypeGetByteLength(chunk)
-        ) as number;
+        const { buffer, byteOffset, byteLength } = viewByteExtent(chunk);
         view = new Uint8Array(buffer, byteOffset, byteLength);
       }
+      const byteLength = TypedArrayPrototypeGetByteLength(view) as number;
+      if (byteLength === 0) {
+        throw new TypeError(
+          'enqueue() of an empty chunk is not supported for native ' +
+            'streams; an empty answer means end-of-stream, so call ' +
+            'close() instead'
+        );
+      }
       // EXPECTED-LENGTH CONTRACT: overflow check before commit.
-      this.#accountDelivery(TypedArrayPrototypeGetByteLength(view) as number);
+      this.#accountDelivery(byteLength);
       this.#requests.shift();
       this.#deliveredThisPull = true;
       head.read.resolve(createReadResult(view, false));
@@ -957,7 +886,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     if (written === 0) {
       throw new TypeError(
         'respond(0) is not supported for native streams; an empty answer ' +
-          'means end-of-stream — call close() instead'
+          'means end-of-stream, so call close() instead'
       );
     }
     const filled = desc.bytesFilled + written;
@@ -974,52 +903,49 @@ class NativePullConduit implements ByteStreamConsumerType {
     // EXPECTED-LENGTH CONTRACT: overflow check before commit.
     this.#accountDelivery(written);
     desc.bytesFilled = filled;
-    this.#byobRequestCache = null;
     this.#deliveredThisPull = true;
+    // MIN-READ CONTRACT: the respond is the source's COMPLETE answer for
+    // this read. Delivering fewer bytes than the requested minimum
+    // (atLeast) signals end-of-stream: the stream closes, the partial fill
+    // commits { done: false, value: partialView }, and every subsequent
+    // read returns EOF — the C++-parity readAtLeast tail shape. The
+    // conduit never re-pulls an unsatisfied read — any accumulation toward
+    // the minimum happens inside the native source (tryRead-style). State
+    // transitions before promise resolutions.
+    //
+    // EXPECTED-LENGTH: under-delivery is a close signal, so the
+    // exact-total contract applies — landing short of expectedLength is
+    // underflow and errors the stream instead of closing it. (Landing
+    // exactly on it is a legitimate close-with-delivery.)
+    const endsStream = filled < desc.minimumFill;
+    if (
+      endsStream &&
+      this.#expectedLength !== undefined &&
+      this.#bytesDelivered < this.#expectedLength
+    ) {
+      this.errorFromSource(
+        new RangeError(
+          'native source closed (via min-read under-delivery) before ' +
+            'producing its declared expectedLength'
+        )
+      );
+      return;
+    }
+    this.#byobRequestCache = null;
     this.#requests.shift();
     const value = new desc.viewCtor(
       desc.buffer,
       desc.byteOffset,
       filled / desc.elementSize
     );
-    if (filled >= desc.minimumFill) {
+    if (!endsStream) {
       desc.resolve(createReadResult(value, false));
       return;
     }
-    // MIN-READ CONTRACT: the respond is the source's COMPLETE answer for
-    // this read. Delivering fewer bytes than the requested minimum
-    // (atLeast) signals end-of-stream: the partial fill commits
-    // { done: false, value: partialView }, the stream closes, and every
-    // subsequent read returns EOF — the C++-parity readAtLeast
-    // tail shape. The conduit never re-pulls an unsatisfied read — any
-    // accumulation toward the minimum happens inside the native source
-    // (tryRead-style). State transitions before promise resolutions.
-    //
-    // EXPECTED-LENGTH: under-delivery is a close signal, so the
-    // exact-total contract applies — landing short of expectedLength is
-    // underflow and errors the stream instead of closing it. (Landing
-    // exactly on it is a legitimate close-with-delivery.)
-    if (
-      this.#expectedLength !== undefined &&
-      this.#bytesDelivered < this.#expectedLength
-    ) {
-      const error = new RangeError(
-        'native source closed (via min-read under-delivery) before ' +
-          'producing its declared expectedLength'
-      );
-      this.#status = 'errored';
-      this.#storedError = error;
-      // The stream errors before its reads reject (spec
-      // ReadableStreamError: reader.closed first).
-      this.#hooks.errorStream(error);
-      desc.reject(error);
-      this.errorAllReads(error);
-      return;
-    }
     this.#status = 'closed';
+    this.#hooks.closeStream();
     desc.resolve(createReadResult(value, false));
     this.#settleRemainingAsEof();
-    this.#hooks.closeStream();
   }
 
   // The exact-total accounting: adds `byteLength` to the running total,
@@ -1047,13 +973,9 @@ class NativePullConduit implements ByteStreamConsumerType {
 
   // Resolves every queued request as end-of-stream (default reads get
   // {done, undefined}; BYOB reads get their buffer back via a zero-length
-  // view). Shared by the close paths.
+  // view). Shared by the close paths, after their closeStream hook.
   #settleRemainingAsEof(): void {
-    const requests = this.#requests;
-    this.#requests = new RingBuffer();
-    this.#byobRequestCache = null;
-    for (let i = 0; i < requests.length; i++) {
-      const request = requests.get(i) as NativeRequest;
+    this.#drainRequests((request) => {
       if (request.kind === 'default') {
         request.read.resolve(createReadResult(undefined, true));
       } else {
@@ -1065,7 +987,7 @@ class NativePullConduit implements ByteStreamConsumerType {
           )
         );
       }
-    }
+    });
   }
 
   closeFromSource(): void {
@@ -1086,54 +1008,19 @@ class NativePullConduit implements ByteStreamConsumerType {
       return;
     }
     this.#status = 'closed';
-    this.#byobRequestCache = null;
-
-    // DEFENSIVE, currently unreachable: under the min-read contract every
-    // respond commits (satisfied → done: false; under-delivered → the
-    // done: false tail followed by EOF), so a partially-filled descriptor
-    // cannot persist to close(). Retained should a future revision
-    // reintroduce partial responds; the shape mirrors the under-delivery
-    // tail (partial done: false, then #settleRemainingAsEof).
-    const head = this.#requests.peek();
-    if (
-      head !== undefined &&
-      head.kind === 'byob' &&
-      head.desc.bytesFilled > 0
-    ) {
-      const desc = head.desc;
-      if (desc.bytesFilled % desc.elementSize !== 0) {
-        // Closed mid-element: unrecoverable (no queue to carry the
-        // remainder). Error everything instead.
-        const error = new TypeError(
-          'native source closed mid-element on a BYOB read'
-        );
-        this.#status = 'errored';
-        this.#storedError = error;
-        this.#hooks.errorStream(error);
-        this.errorAllReads(error);
-        return;
-      }
-      this.#requests.shift();
-      desc.resolve(
-        createReadResult(
-          new desc.viewCtor(
-            desc.buffer,
-            desc.byteOffset,
-            desc.bytesFilled / desc.elementSize
-          ),
-          false
-        )
-      );
-    }
-
-    this.#settleRemainingAsEof();
+    // Every respond commits its read (see respondToDesc), so no read holds
+    // bytes at close: the spec's check for a partially filled pull-into
+    // (ReadableByteStreamControllerClose) has nothing to find here.
     this.#hooks.closeStream();
+    this.#settleRemainingAsEof();
   }
 
   errorFromSource(reason: unknown): void {
     if (this.#status !== 'active') return; // late settle tolerated
     this.#status = 'errored';
     this.#storedError = reason;
+    // The stream errors before its reads reject (spec
+    // ReadableStreamError: reader.closed first).
     this.#hooks.errorStream(reason);
     this.errorAllReads(reason);
   }
@@ -1146,7 +1033,7 @@ class NativePullConduit implements ByteStreamConsumerType {
     this.#byobRequestCache = null;
     const cancelAlgorithm = this.#cancelAlgorithm;
     if (cancelAlgorithm === undefined) {
-      return PromiseResolve() as Promise<void>;
+      return PromiseResolve();
     }
     return cancelAlgorithm(reason);
   }
@@ -1263,25 +1150,22 @@ function createNativeReadableStreamParts(
     throw new TypeError('Native stream sources must not declare type');
   }
   const {
-    cancel: cancelFn,
+    cancel,
     expectedLength: rawExpectedLength,
-    pull: pullFn,
-    tee: teeFn,
+    pull,
+    tee,
   } = source as {
-    cancel?: unknown;
+    cancel?: (reason: unknown) => void | PromiseLike<void>;
     expectedLength?: unknown;
-    pull?: unknown;
-    tee?: unknown;
+    pull?: (
+      controller: NativeReadableStreamController,
+      signal: AbortSignal
+    ) => void | PromiseLike<void>;
+    tee?: () => unknown;
   };
-  if (cancelFn !== undefined && typeof cancelFn !== 'function') {
-    throw new TypeError('underlyingSource.cancel must be a function');
-  }
-  if (pullFn !== undefined && typeof pullFn !== 'function') {
-    throw new TypeError('underlyingSource.pull must be a function');
-  }
-  if (teeFn !== undefined && typeof teeFn !== 'function') {
-    throw new TypeError('underlyingSource.tee must be a function');
-  }
+  const cancelFn = convertCallback(cancel, 'underlyingSource.cancel');
+  const pullFn = convertCallback(pull, 'underlyingSource.pull');
+  const teeFn = convertCallback(tee, 'underlyingSource.tee');
   // Non-standard extension: the TOTAL bytes this source promises to
   // produce. Read once here and cached; the conduit enforces the
   // contract (overflow at delivery, underflow at source-initiated
@@ -1296,11 +1180,9 @@ function createNativeReadableStreamParts(
       signal: AbortSignal
     ) => {
       try {
-        return PromiseResolve(
-          callPull(source, controller, signal)
-        ) as Promise<void>;
+        return PromiseResolve(callPull(source, controller, signal));
       } catch (e) {
-        return PromiseReject(e) as Promise<void>;
+        return PromiseReject(e);
       }
     };
   }
@@ -1309,9 +1191,9 @@ function createNativeReadableStreamParts(
     const callCancel = uncurryThis(cancelFn);
     cancelAlgorithm = (reason: unknown) => {
       try {
-        return PromiseResolve(callCancel(source, reason)) as Promise<void>;
+        return PromiseResolve(callCancel(source, reason));
       } catch (e) {
-        return PromiseReject(e) as Promise<void>;
+        return PromiseReject(e);
       }
     };
   }
@@ -1327,9 +1209,7 @@ function createNativeReadableStreamParts(
     { pullAlgorithm, cancelAlgorithm, teeAlgorithm, expectedLength },
     hooks
   );
-  const controller = new NativeReadableStreamController(conduit);
-  conduit.attachController(controller);
-  return { controller, conduit };
+  return { controller: conduit.controller, conduit };
 }
 
 // ---------------------------------------------------------------------------

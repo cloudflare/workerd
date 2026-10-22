@@ -206,6 +206,7 @@ export {
   addAbortSignalOnResponseBody,
   finishedOnHandedOffStreamSettlesAtHandoff,
   finishedOnDetachedQueuedBodyFollowsSource,
+  finishedOnDetachedNonOwnQueuedBody,
 } from 'finished-and-abort';
 
 export {

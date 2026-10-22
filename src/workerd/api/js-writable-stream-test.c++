@@ -4,8 +4,8 @@
 
 #include <workerd/api/js-streams-bridge.h>
 #include <workerd/api/js-writable-stream.h>
+#include <workerd/api/per-isolate-bootstrap.h>
 #include <workerd/api/streams/identity-transform-stream.h>
-#include <workerd/io/per-isolate-bootstrap.h>
 #include <workerd/jsg/type-wrapper.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/autogate.h>

@@ -338,8 +338,8 @@ class JsRpcClientProvider: public jsg::Object {
     KJ_FAIL_REQUIRE("actor call retry requested from an unsupported RPC target");
   }
 
-  // The retry policy configured on the binding this provider dispatches through, if any. None means
-  // the runtime's default applies. Only called on providers that support actor call retries.
+  // The retry policy of the stub this provider dispatches through, if any. None means the
+  // runtime's default applies. Only called on providers that support actor call retries.
   virtual kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() {
     return kj::none;
   }

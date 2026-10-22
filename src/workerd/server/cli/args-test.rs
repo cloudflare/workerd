@@ -62,6 +62,9 @@ fn serve_options() {
         "--control-fd=3",
         "--inspector-addr=127.0.0.1:9229",
         "--inspector-addr=127.0.0.1:9230",
+        "--async-trace=trace.ndjson",
+        "--async-trace-stacks=8",
+        "--async-trace-promises",
     ])
     .command
     else {
@@ -78,6 +81,9 @@ fn serve_options() {
         serve_or_test.inspector_addr.as_deref(),
         Some("127.0.0.1:9230")
     );
+    assert_eq!(serve_or_test.async_trace.as_deref(), Some("trace.ndjson"));
+    assert_eq!(serve_or_test.async_trace_stacks, Some(8));
+    assert!(serve_or_test.async_trace_promises);
     assert_eq!(serve.control_fd, Some(3));
     assert_eq!(
         serve.socket_addr_overrides,
@@ -125,6 +131,66 @@ fn test_filters() {
         })
     );
     assert_eq!(filter("a:b:c:d"), Err("Too many colons."));
+}
+
+#[test]
+fn bench_filters() {
+    let filter = |param| parse_bench_filter(param);
+    assert_eq!(
+        filter("svc:ep/encode*"),
+        Ok(BenchFilter {
+            test: TestFilter {
+                service_pattern: Some("svc".into()),
+                entrypoint_pattern: Some("ep".into()),
+                ..TestFilter::default()
+            },
+            case_pattern: Some("encode*".into()),
+        })
+    );
+    assert_eq!(
+        filter("/a/b"),
+        Ok(BenchFilter {
+            case_pattern: Some("a/b".into()),
+            ..BenchFilter::default()
+        })
+    );
+    assert_eq!(
+        filter("svc"),
+        Ok(BenchFilter {
+            test: TestFilter {
+                service_pattern: Some("svc".into()),
+                ..TestFilter::default()
+            },
+            case_pattern: None,
+        })
+    );
+    assert_eq!(filter("a:b:c:d/x"), Err("Too many colons."));
+}
+
+#[test]
+fn bench_invocation() {
+    let Command::Bench { config, bench, .. } = parse(&[
+        "bench",
+        "foo.wd-test",
+        "--quick",
+        "--format=json",
+        "--output=out.json",
+        "--trace",
+        "svc/case",
+    ])
+    .command
+    else {
+        panic!("expected bench")
+    };
+    assert_eq!(config.config_file, "foo.wd-test");
+    assert!(bench.quick);
+    assert_eq!(bench.format, BenchFormat::Json);
+    assert_eq!(bench.output.as_deref(), Some("out.json"));
+    assert!(bench.trace);
+    assert_eq!(
+        bench.filter.map(|f| f.case_pattern),
+        Some(Some("case".into()))
+    );
 }
 
 #[test]

@@ -339,6 +339,13 @@ void InputGate::setBroken(const kj::Exception& e) {
   brokenException = e.clone();
 }
 
+kj::Maybe<InputGate::CriticalSection&> InputGate::CriticalSection::getActive() {
+  if (state != REPARENTED) return *this;
+  auto& parentGate = parentAsInputGate();
+  if (!parentGate.isCriticalSection) return kj::none;
+  return static_cast<CriticalSection&>(parentGate);
+}
+
 InputGate& InputGate::CriticalSection::parentAsInputGate() {
   CriticalSection* ptr = this;
   for (;;) {

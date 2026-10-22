@@ -71,6 +71,7 @@ const unitTests :Workerd.Config = (
           (name = "invalid-json", json = "1n"),
 
           (name = "wasm", wasm = embed "test.wasm"),
+          (name = "wasm-js-string", wasm = embed "js-string-builtins.wasm"),
 
           (name = "complex", esModule = "import * as abc from '././././././complex/complex2'; export { abc };"),
           (name = "complex/complex2", esModule = "import * as def from '/bundle/complex/complex3'; export { def }; export const foo = 1;"),
@@ -134,6 +135,7 @@ const unitTests :Workerd.Config = (
           "nodejs_compat_v2",
           "new_module_registry",
           "experimental",
+          "wasm_esm_integration_builtins",
         ],
         bindings = [
           (name = "unsafe", unsafeEval = void),

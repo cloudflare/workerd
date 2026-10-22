@@ -7,6 +7,12 @@
 export const usingTsImpl =
   globalThis.Cloudflare.compatibilityFlags['typescript_implemented_streams'];
 
+// True when the C++ implementation propagates destination errors and closure backward through
+// a pipe as the spec requires (ledger #4 and #7 in AGENTS.md). Off in the pinned cells; on in
+// their @all-compat-flags variants.
+export const pipeToBackwardPropagation =
+  globalThis.Cloudflare.compatibilityFlags['pipe_to_backward_propagation'];
+
 // True in the transform-cpp-pedantic cell: the dateless opt-in pedantic_wpt
 // flag aligns the C++ finish-operation coordination (abort/close/cancel
 // races) with the spec.

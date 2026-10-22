@@ -93,8 +93,11 @@ struct Inner {
     read_abort: tokio::sync::Notify,
 }
 
-/// A registered tokio socket of either family. Constructed only by net.rs, from sockets it
-/// registered on the loop thread (lib.rs, "The tokio runtime").
+/// A registered tokio socket of either family.
+///
+/// One net.rs registered on the loop thread (lib.rs, "The tokio runtime"): wrapped in a
+/// [`TokioStream`] for C++, or handed to a Rust caller as it is (`TokioListener::accept`,
+/// `TokioAddress::connect_first`).
 pub enum Socket {
     Tcp(TcpStream),
     #[cfg(unix)]
@@ -358,24 +361,13 @@ impl Inner {
                 .try_clone_to_owned()
                 .map_err(op("dup()"))?;
             crate::ensure_owner_loop(self.owner)?;
-            let async_fd = tokio::io::unix::AsyncFd::with_interest(owned, Interest::WRITABLE)
+            let async_fd = crate::ffi::register_fd(owned, Interest::WRITABLE)
                 .map_err(op("whenWriteDisconnected"))?;
             // A concurrent first caller may have stored its own registration meanwhile; then
             // this one is dropped (closing its dup) and the stored one is shared.
             self.hangup_watch.get_or_init(|| async_fd)
         };
-        loop {
-            let mut guard = async_fd
-                .ready(Interest::WRITABLE)
-                .await
-                .map_err(op("whenWriteDisconnected"))?;
-            if guard.ready().is_write_closed() {
-                return Ok(());
-            }
-            // Plain "writable": clear it so the next wait sleeps until an actual state-change
-            // event (edge-triggered), rather than spinning on an always-writable socket.
-            guard.clear_ready();
-        }
+        write_closed(async_fd).await
     }
 
     /// Never resolves: KJ parity, not a gap (see the unix arm's docs).
@@ -384,6 +376,47 @@ impl Inner {
         // `pending()` infers the Result<()> return type, so there is no unreachable tail.
         std::future::pending().await
     }
+}
+
+/// Waits for write-closed readiness on a socket's registered dup.
+#[cfg(unix)]
+async fn write_closed(dup: &tokio::io::unix::AsyncFd<std::os::fd::OwnedFd>) -> Result<()> {
+    loop {
+        let mut guard = dup
+            .ready(Interest::WRITABLE)
+            .await
+            .map_err(op("whenWriteDisconnected"))?;
+        if guard.ready().is_write_closed() {
+            return Ok(());
+        }
+        // Plain "writable": clear it so the next wait sleeps until an actual state-change
+        // event (edge-triggered), rather than spinning on an always-writable socket.
+        guard.clear_ready();
+    }
+}
+
+/// `whenWriteDisconnected` for a socket that stays with its owner, as one served by hyper does.
+///
+/// Resolves when a [`TokioStream`]'s over the socket would. The socket is dup'd now, so the
+/// future outlives the borrow and holds the connection open until it is dropped; the dup is
+/// registered with this thread's I/O driver when the future is first polled.
+#[cfg(unix)]
+pub fn when_write_disconnected<S: std::os::fd::AsFd>(
+    socket: &S,
+) -> impl Future<Output = Result<()>> + use<S> {
+    let owned = socket.as_fd().try_clone_to_owned().map_err(op("dup()"));
+    async move {
+        crate::ensure_loop_thread()?;
+        let async_fd = crate::ffi::register_fd(owned?, Interest::WRITABLE)
+            .map_err(op("whenWriteDisconnected"))?;
+        write_closed(&async_fd).await
+    }
+}
+
+/// Never resolves, as on a [`TokioStream`].
+#[cfg(windows)]
+pub fn when_write_disconnected(_socket: &TcpStream) -> impl Future<Output = Result<()>> + use<> {
+    std::future::pending()
 }
 
 impl TokioStream {

@@ -7,7 +7,11 @@
 // recommended in the full perfetto header (perfetto/tracing.h).
 #include "perfetto/tracing/track_event.h"
 
-PERFETTO_DEFINE_CATEGORIES_IN_NAMESPACE(workerd::traces, perfetto::Category("workerd"));
+PERFETTO_DEFINE_CATEGORIES_IN_NAMESPACE(workerd::traces,
+    perfetto::Category("workerd"),
+    // Async activity: requests, turns, timers, I/O and binding operations, and their causes.
+    // Recorded only when listed explicitly (see io/async-trace-perfetto.h).
+    perfetto::Category("workerd.async"));
 
 namespace kj {
 class StringPtr;

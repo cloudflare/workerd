@@ -23,10 +23,10 @@ index 923a13a76f5220cbb106447f84c279b9a1df3079..240fd2da3b1eb2c7858b026525a96340
     * Writes out a header, which includes the format version.
     */
 diff --git a/src/api/api.cc b/src/api/api.cc
-index 9f282a4c7df8b07e4896ed3877462284fabccb70..a108cb5cb12874835b5c6ca40ccf0d3e4897e9c2 100644
+index 0f2505d8455ba0c7d2c768502347733a1dea6455..145b1c9bd146775e9411daac59c8a4d6fb5474ee 100644
 --- a/src/api/api.cc
 +++ b/src/api/api.cc
-@@ -3686,6 +3686,10 @@ ValueSerializer::ValueSerializer(
+@@ -3683,6 +3683,10 @@ ValueSerializer::ValueSerializer(
  
  ValueSerializer::~ValueSerializer() { delete private_; }
  
@@ -38,7 +38,7 @@ index 9f282a4c7df8b07e4896ed3877462284fabccb70..a108cb5cb12874835b5c6ca40ccf0d3e
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
 diff --git a/src/objects/value-serializer.cc b/src/objects/value-serializer.cc
-index 36a784bcbf5a8cf0e95fdbd6b0d23f3713e7b637..7c6e1f7cfb27f49b0df997b4d7f2a4a7f5ec2921 100644
+index ee2cd7506ea6f48b37ebecb3837dbdce0f1a8b27..57edf069554924f820bb7c8e6590e43d51890cc7 100644
 --- a/src/objects/value-serializer.cc
 +++ b/src/objects/value-serializer.cc
 @@ -313,6 +313,7 @@ ValueSerializer::ValueSerializer(
@@ -68,7 +68,7 @@ index 36a784bcbf5a8cf0e95fdbd6b0d23f3713e7b637..7c6e1f7cfb27f49b0df997b4d7f2a4a7
  }
  
  void ValueSerializer::SetTreatArrayBufferViewsAsHostObjects(bool mode) {
-@@ -1142,10 +1151,12 @@ Maybe<bool> ValueSerializer::WriteJSArrayBufferView(
+@@ -1151,10 +1160,12 @@ Maybe<bool> ValueSerializer::WriteJSArrayBufferView(
    WriteVarint(static_cast<uint8_t>(tag));
    WriteVarint<size_t>(view->byte_offset());
    WriteVarint<size_t>(view->byte_length());

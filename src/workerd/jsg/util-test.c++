@@ -423,6 +423,39 @@ KJ_TEST("isTunneledException") {
 }
 
 // ========================================================================================
+
+struct RetryableContext: public ContextGlobalObject {
+  void throwException(kj::String type, kj::String description, bool transient) {
+    auto exceptionType = type == "overloaded" ? kj::Exception::Type::OVERLOADED
+        : type == "disconnected"              ? kj::Exception::Type::DISCONNECTED
+                                              : kj::Exception::Type::FAILED;
+    kj::Exception exception(exceptionType, __FILE__, __LINE__, kj::mv(description));
+    if (transient) markTransient(exception);
+    kj::throwFatalException(kj::mv(exception));
+  }
+  JSG_RESOURCE_TYPE(RetryableContext) {
+    JSG_METHOD(throwException);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(RetryableIsolate, RetryableContext);
+
+KJ_TEST("retryable reflects DISCONNECTED and the transient marker") {
+  Evaluator<RetryableContext, RetryableIsolate> e(v8System);
+  auto flags = [&](kj::StringPtr args) {
+    return kj::str("try { throwException(", args,
+        "); } catch (e) { `${e.retryable === true} ${e.overloaded === true}` }");
+  };
+  e.expectEval(flags("'failed', 'jsg.Error: unmarked', false"), "string", "false false");
+  e.expectEval(flags("'disconnected', 'jsg.Error: disconnected', false"), "string", "true false");
+  e.expectEval(flags("'failed', 'jsg.Error: marked', true"), "string", "true false");
+  e.expectEval(flags("'overloaded', 'jsg.Error: marked', true"), "string", "true true");
+  {
+    KJ_EXPECT_LOG(ERROR, "marked internal failure");
+    e.expectEval(flags("'failed', 'marked internal failure', true"), "string", "true false");
+  }
+}
+
+// ========================================================================================
 // Regression test for asBytes() with resizable ArrayBuffers.
 // resize(0) decommits pages even while the BackingStore shared_ptr is held, so asBytes()
 // must deep-copy. Ref: AUTOVULN-CLOUDFLARE-WORKERD-73

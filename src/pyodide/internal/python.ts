@@ -66,7 +66,9 @@ function prepareWasmLinearMemory(
 ): void {
   maybeRestoreSnapshot(Module);
   // entropyAfterRuntimeInit adjusts JS state ==> always needs to be called.
-  entropyAfterRuntimeInit(Module);
+  enterJaegerSpan('entropy_after_runtime_init', () => {
+    entropyAfterRuntimeInit(Module);
+  });
   if (!isRestoringSnapshot()) {
     // The effects of these are purely in Python state so they only need to be run
     // if we didn't restore a snapshot.
@@ -254,7 +256,9 @@ export async function loadPyodide(
       maybeCollectBaselineSnapshot(Module, customSerializedObjects);
       // Mount worker files after doing snapshot upload so we ensure that data from the files is never
       // present in snapshot memory.
-      mountWorkerFiles(Module);
+      enterJaegerSpan('mount_worker_files', () => {
+        mountWorkerFiles(Module);
+      });
 
       if (Module.API.version === PyodideVersion.V0_26_0a2) {
         // Finish setting up Pyodide's ffi so we can use the nice Python interface
@@ -264,7 +268,9 @@ export async function loadPyodide(
       const pyodide = Module.API.public_api;
 
       validatePyodideVersion(pyodide);
-      setupPythonSearchPath(pyodide);
+      enterJaegerSpan('setup_python_search_path', () => {
+        setupPythonSearchPath(pyodide);
+      });
       setupRuntimeSignalHandling(Module);
       Module.API.on_fatal = (error: unknown): void => {
         try {

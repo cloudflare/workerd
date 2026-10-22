@@ -311,12 +311,15 @@ KJ_TEST("allocating short-lived wrappers eventually triggers a major GC") {
   // heap, which is nearly empty, so the loop below crosses it quickly.
   e.expectEval("gc()", "undefined", "undefined");
 
+  auto countMajorGc = [](v8::Isolate*, v8::GCType, v8::GCCallbackFlags, void* data) {
+    ++*static_cast<uint*>(data);
+  };
   e.getIsolate().runInLockScope([&](TraceTestIsolate::Lock& lock) {
-    lock.v8Isolate->AddGCEpilogueCallback(
-        [](v8::Isolate*, v8::GCType, v8::GCCallbackFlags, void* data) {
-      ++*static_cast<uint*>(data);
-    }, &majorGcCount, v8::kGCTypeMarkSweepCompact);
+    lock.v8Isolate->AddGCEpilogueCallback(countMajorGc, &majorGcCount, v8::kGCTypeMarkSweepCompact);
   });
+  KJ_DEFER(e.getIsolate().runInLockScope([&](TraceTestIsolate::Lock& lock) {
+    lock.v8Isolate->RemoveGCEpilogueCallback(countMajorGc, &majorGcCount);
+  }));
 
   e.expectEval("(() => { for (let i = 0; i < 1000000; ++i) new NumberBox(i); })()", "undefined",
       "undefined");

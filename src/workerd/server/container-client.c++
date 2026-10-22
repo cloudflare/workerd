@@ -1073,7 +1073,7 @@ void configureContainerPrivileges(
 // Represents a parsed egress mapping. IP/CIDR mappings match destination IPs,
 // while hostnameGlob mappings match either HTTP hostnames or TLS SNI depending on protocol.
 // Defined here (not in the header) to avoid pulling kj::OneOf, kj::CidrRange, and
-// kj::Vector into server.c++ which includes container-client.h.
+// kj::Vector into the factory, which includes container-client.h.
 struct ContainerClient::EgressMapping {
   kj::OneOf<kj::CidrRange, kj::String> destination;
   uint16_t port;  // 0 means match all ports

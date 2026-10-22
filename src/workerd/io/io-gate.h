@@ -215,6 +215,10 @@ class InputGate::CriticalSection: private InputGate, public kj::Refcounted {
     return depth;
   }
 
+  // Returns this section until it succeeds, then the nearest enclosing section that has not
+  // succeeded, or none if events are delivered at the actor's root gate again.
+  kj::Maybe<CriticalSection&> getActive() KJ_LIFETIMEBOUND;
+
  private:
   enum State {
     // wait() hasn't been called.
@@ -223,10 +227,10 @@ class InputGate::CriticalSection: private InputGate, public kj::Refcounted {
     // wait() has been called once, and that wait hasn't finished yet.
     INITIAL_WAIT,
 
-    // First lock has been obtained, waiting for success() or failed().
+    // First lock has been obtained; succeeded() has not been called.
     RUNNING,
 
-    // success() or failed() has been called.
+    // succeeded() has been called; remaining waiters belong to the parent gate.
     REPARENTED
   };
 

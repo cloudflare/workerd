@@ -6,6 +6,13 @@
 
 import assert from 'node:assert';
 
+// Echoes the cf object this worker receives, so tests can inspect the cf blob a fetch serializes.
+export default {
+  async fetch(request) {
+    return Response.json(request.cf ?? null);
+  },
+};
+
 // Tests for cf.cacheControl mutual exclusion and synthesis.
 // These tests run regardless of cache option flag since cacheControl is always available.
 export const cacheControlMutualExclusion = {
@@ -201,5 +208,37 @@ export const additionalCacheSettings = {
       assert.strictEqual(req.cf.respectStrongEtag, true);
       assert.strictEqual(req.cf.cacheDeceptionArmor, true);
     }
+  },
+};
+
+export const cacheOptionSerialization = {
+  async test(ctrl, env, ctx) {
+    if (!env.CACHE_ENABLED) return;
+    const expectSynthesized = !env.CACHE_OPTION_PRESERVES_CACHE_CONTROL;
+
+    const noCacheCf = await (
+      await env.SERVICE.fetch('http://placeholder/', { cache: 'no-cache' })
+    ).json();
+    assert.strictEqual(noCacheCf.cacheForceRevalidate, true);
+    assert.strictEqual(
+      noCacheCf.cacheControl,
+      expectSynthesized ? 'no-cache' : undefined
+    );
+
+    const noStoreCf = await (
+      await env.SERVICE.fetch('http://placeholder/', { cache: 'no-store' })
+    ).json();
+    assert.strictEqual(noStoreCf.cacheTtl, -1);
+    assert.strictEqual(noStoreCf.cacheLevel, 'bypass');
+    assert.strictEqual(
+      noStoreCf.cacheControl,
+      expectSynthesized ? 'no-store' : undefined
+    );
+
+    // cacheTtl still synthesizes cacheControl regardless of the flag.
+    const ttlCf = await (
+      await env.SERVICE.fetch('http://placeholder/', { cf: { cacheTtl: 300 } })
+    ).json();
+    assert.strictEqual(ttlCf.cacheControl, 'max-age=300');
   },
 };

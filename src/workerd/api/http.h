@@ -26,8 +26,6 @@
 
 namespace workerd::api {
 
-WD_STRONG_BOOL(IsHyperdrive);
-
 // Whether a Fetcher is exempt from the `fetcher_rpc` compatibility gate that Fetcher::getRpcMethod
 // applies, so its JSRPC wildcard resolves regardless of the worker's compatibility date.
 
@@ -273,7 +271,7 @@ class Fetcher: public JsRpcClientProvider {
       KJ_FAIL_REQUIRE("actor call retry requested from an unsupported Fetcher");
     }
 
-    // The retry policy configured on the binding this factory was minted from, if any. None means
+    // The retry policy passed to `get()` when this factory's stub was minted, if any. None means
     // the runtime's default applies.
     virtual kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() const {
       return kj::none;
@@ -549,10 +547,12 @@ class Fetcher: public JsRpcClientProvider {
 
   JSG_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
 
-  // Set up a connection string override for a random host and the given port. isHyperdrive
-  // signifies whether the legacy hostname for hyperdrive should be used (only used with
-  // ExtendedFetcher).
-  void registerOverride(jsg::Lock& js, IsHyperdrive isHyperdrive, uint16_t overridePort);
+  // Set up a connection string override for a random `.workers.alt` host and the given port.
+  void registerOverride(jsg::Lock& js, uint16_t overridePort);
+
+  // Registers the connection string override (if not already registered) and returns the mapped
+  // `host:port`. Shared by ctx.mapVirtualHost() and the internal Hyperdrive binding.
+  kj::String mapVirtualHost(jsg::Lock& js, uint16_t port);
 
   kj::Maybe<uint16_t> getPortInternal() const {
     return port;
@@ -610,11 +610,9 @@ class ExtendedFetcher final: public Fetcher {
   explicit ExtendedFetcher(uint channel,
       RequiresHostAndProtocol requiresHost,
       uint16_t connectionStringOverridePort,
-      IsHyperdrive isHyperdrive,
       bool isInHouse = false,
       RpcCompatGateBypassed rpcCompatGateBypassed = RpcCompatGateBypassed::NO)
-      : Fetcher(channel, requiresHost, isInHouse, rpcCompatGateBypassed),
-        isHyperdrive(isHyperdrive) {
+      : Fetcher(channel, requiresHost, isInHouse, rpcCompatGateBypassed) {
     port = connectionStringOverridePort;
   }
 
@@ -637,9 +635,6 @@ class ExtendedFetcher final: public Fetcher {
   }
 
   JSG_ONEWAY_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
-
- private:
-  IsHyperdrive isHyperdrive;
 };
 
 // Type of the second parameter to Request's constructor. Also the type of the second parameter

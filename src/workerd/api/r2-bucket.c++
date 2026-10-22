@@ -38,6 +38,8 @@ kj::Own<kj::HttpClient> r2GetClient(
   }
 
   // TODO(o11y): Attach trace context to awaitIo call to match operation lifetime better?
+  // Until then it lives as long as the client, so no awaitIo() may adopt it.
+  traceContext.detachAsync();
   return context.getHttpClient(subrequestChannel, true, kj::none, traceContext)
       .attach(kj::mv(traceContext));
 }

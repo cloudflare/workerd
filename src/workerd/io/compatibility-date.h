@@ -70,12 +70,16 @@ kj::Maybe<kj::String> normalizeCompatDate(kj::StringPtr date);
 // Returns the current date as a string formatted by CompatDate.
 kj::String currentDateStr();
 
+// Returns the newest compatibility date that a Worker may set with CODE_VERSION validation: the
+// earlier of today's date and MAXIMUM_COMPATIBILITY_DATE.
+kj::String newestCompatDateStr();
+
 // These values come from src/workerd/io/compatibility-date.capnp
 static constexpr uint64_t COMPAT_ENABLE_FLAG_ANNOTATION_ID = 0xb6dabbc87cd1b03eull;
 static constexpr uint64_t COMPAT_DISABLE_FLAG_ANNOTATION_ID = 0xd145cf1adc42577cull;
 static constexpr uint64_t COMPAT_ENABLE_DATE_ANNOTATION_ID = 0x91a5d5d7244cf6d0ull;
 static constexpr uint64_t COMPAT_ENABLE_ALL_DATES_ANNOTATION_ID = 0x9a1d37c8030d9418;
-static constexpr uint64_t EXPERIMENTAl_ANNOTATION_ID = 0xe3e5a63e76284d88;
+static constexpr uint64_t EXPERIMENTAL_ANNOTATION_ID = 0xe3e5a63e76284d88;
 static constexpr uint64_t IMPLIED_BY_AFTER_DATE_ANNOTATION_ID = 0xe3e5a63e76284d89;
 static constexpr uint64_t NEEDED_BY_FL = 0xbd23aff9deefc308ull;
 static constexpr uint64_t PYTHON_SNAPSHOT_RELEASE_ANNOTATION_ID = 0xef74c0cc5d18cc0cull;

@@ -129,7 +129,7 @@ fn non_coercible_methods_accept_correct_types_and_reject_incorrect_types() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(MyResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("resource", wrapped);
+        ctx.set_global(lock, "resource", wrapped);
 
         // String method accepts string
         let result: String = ctx.eval(lock, "resource.string('hello')").unwrap();

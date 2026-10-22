@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: svc_ew_v8_patches <ew-v8-patches@cloudflare.com>
+Date: Sat, 10 Oct 2026 04:06:25 +0000
+Subject: Build V8 release archives without metagen
+
+workerd builds V8 from GitHub source archives, which do not include the
+llvm-libclang and llvm-build dependencies downloaded by gclient. V8's
+metagen generator needs them, so the archive cannot be built with it.
+
+V8 15.6 enables metagen instance types by default, and V8 15.7 also
+enables metagen layouts by default; both are now controlled by the
+single v8_use_metagen flag. Default v8_use_metagen to False so V8 uses
+the Torque-emitted instance types and the .tq object layouts, as it did
+by default before 15.6.
+
+V8 also requires the optional metagen Clang header glob to match while
+loading the Bazel package, even when metagen is disabled. Allow the glob
+to be empty. Builds that enable metagen still require the actual Clang
+headers.
+
+Assisted-by: Codex:gpt-5.6-sol
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 893a49dc94102b2b13501566a029da88f25781dc..166c685a0a3cd70ca405d68847f75619b120a615 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -190,9 +190,13 @@ v8_flag(name = "v8_enable_experimental_tq_to_tsa")
+ 
+ # Mirrors the GN arg of the same name: selects metagen's instance types and
+ # object layouts. When off, the metagen action is not part of the build graph.
++#
++# Off by default for workerd: metagen needs the llvm-libclang and
++# llvm-build gclient dependencies, which are not in the V8 source
++# tarball that the workerd build fetches.
+ v8_flag(
+     name = "v8_use_metagen",
+-    default = True,
++    default = False,
+ )
+ 
+ # Empty selects the default for the target OS. Set to "gcc" or "cl" when
+@@ -4638,7 +4642,7 @@ filegroup(
+     name = "metagen_clang_builtin_headers",
+     srcs = glob([
+         "third_party/llvm-build/Release+Asserts/lib/clang/*/include/**",
+-    ]),
++    ], allow_empty = True),
+ )
+ 
+ # Metagen's checked-in C++ driver, shared with GN and metagen.py. It

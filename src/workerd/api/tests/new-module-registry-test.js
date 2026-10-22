@@ -601,6 +601,36 @@ export const wasmDynamicSourcePhaseFailureTest = {
   },
 };
 
+// js-string-builtins.wasm imports the js-string `length` builtin and the
+// "hello world" imported string constant, so it only links if the runtime
+// compiles Wasm with js-string builtins and imported string constants enabled.
+// Query-distinct specifiers give each import path its own compile.
+async function assertJsStringBuiltinsLink(wasm) {
+  ok(wasm instanceof WebAssembly.Module);
+  const instance = await WebAssembly.instantiate(wasm, {});
+  strictEqual(instance.exports.constantLength(), 11);
+}
+
+export const wasmJsStringBuiltinsModuleTest = {
+  async test() {
+    const { default: wasm } = await import('wasm-js-string');
+    await assertJsStringBuiltinsLink(wasm);
+  },
+};
+
+import source wasmJsStringSource from 'wasm-js-string?1';
+export const wasmJsStringBuiltinsSourcePhaseTest = {
+  async test() {
+    await assertJsStringBuiltinsLink(wasmJsStringSource);
+  },
+};
+
+export const wasmJsStringBuiltinsDynamicSourcePhaseTest = {
+  async test() {
+    await assertJsStringBuiltinsLink(await import.source('wasm-js-string?2'));
+  },
+};
+
 export const complexModuleTest = {
   async test() {
     const { abc } = await import('complex');

@@ -179,6 +179,51 @@ void EncodedAsyncInputStream::ensureIdentityEncoding() {
 // =======================================================================================
 // EncodedAsyncOutputStream
 
+template <typename Compressor>
+class CompressionAsyncOutputStream final: public kj::AsyncOutputStream {
+ public:
+  CompressionAsyncOutputStream(
+      kj::AsyncOutputStream& inner, FlushCompressionAfterWrite flushAfterWrite)
+      : inner(inner),
+        compressor(inner),
+        flushAfterWrite(flushAfterWrite) {}
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    co_await compressor.write(buffer);
+    if (flushAfterWrite) {
+      co_await compressor.flush();
+    }
+  }
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    co_await compressor.write(pieces);
+    if (flushAfterWrite) {
+      co_await compressor.flush();
+    }
+  }
+
+  kj::Promise<void> whenWriteDisconnected() override {
+    return compressor.whenWriteDisconnected();
+  }
+
+  void abortWrite(kj::Exception&& reason) override {
+    // KJ's compressors inherit AsyncOutputStream's no-op abortWrite().
+    inner.abortWrite(kj::mv(reason));
+  }
+
+  kj::Promise<void> end() {
+    return compressor.end();
+  }
+
+ private:
+  kj::AsyncOutputStream& inner;
+  Compressor compressor;
+  FlushCompressionAfterWrite flushAfterWrite;
+};
+
+using GzipAsyncOutputStream = CompressionAsyncOutputStream<kj::GzipAsyncOutputStream>;
+using BrotliAsyncOutputStream = CompressionAsyncOutputStream<kj::BrotliAsyncOutputStream>;
+
 // A wrapper around a native `kj::AsyncOutputStream` which knows the underlying encoding of the
 // stream and optimizes pumps from `EncodedAsyncInputStream`.
 //
@@ -192,8 +237,10 @@ void EncodedAsyncInputStream::ensureIdentityEncoding() {
 // does, it is important for us to release it as soon as end() or abort() are called.
 class EncodedAsyncOutputStream final: public WritableStreamSink {
  public:
-  explicit EncodedAsyncOutputStream(
-      kj::Own<kj::AsyncOutputStream> inner, StreamEncoding encoding, IoContext& context);
+  explicit EncodedAsyncOutputStream(kj::Own<kj::AsyncOutputStream> inner,
+      StreamEncoding encoding,
+      IoContext& context,
+      FlushCompressionAfterWrite flushAfterWrite);
 
   kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override;
   kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override;
@@ -213,6 +260,8 @@ class EncodedAsyncOutputStream final: public WritableStreamSink {
  private:
   void ensureIdentityEncoding();
 
+  kj::Promise<void> pumpFromNative(kj::Ptr<ReadableStreamSource> source, bool end);
+
   // Unwrap `inner` as a `kj::AsyncOutputStream`.
   kj::AsyncOutputStream& getInner();
   // TODO(cleanup): Obviously this is polymorphism. We should be able to do better.
@@ -224,20 +273,24 @@ class EncodedAsyncOutputStream final: public WritableStreamSink {
   // correctness rather than for optimization. I "know" this code will never be compiled w/o RTTI,
   // but I'm paranoid.
   kj::OneOf<kj::Own<kj::AsyncOutputStream>,
-      kj::Own<kj::GzipAsyncOutputStream>,
-      kj::Own<kj::BrotliAsyncOutputStream>,
+      kj::Own<GzipAsyncOutputStream>,
+      kj::Own<BrotliAsyncOutputStream>,
       Ended>
       inner;
 
   StreamEncoding encoding;
+  FlushCompressionAfterWrite flushAfterWrite;
 
   IoContext& ioContext;
 };
 
-EncodedAsyncOutputStream::EncodedAsyncOutputStream(
-    kj::Own<kj::AsyncOutputStream> inner, StreamEncoding encoding, IoContext& context)
+EncodedAsyncOutputStream::EncodedAsyncOutputStream(kj::Own<kj::AsyncOutputStream> inner,
+    StreamEncoding encoding,
+    IoContext& context,
+    FlushCompressionAfterWrite flushAfterWrite)
     : inner(kj::mv(inner)),
       encoding(encoding),
+      flushAfterWrite(flushAfterWrite),
       ioContext(context) {}
 
 kj::Promise<void> EncodedAsyncOutputStream::write(kj::ArrayPtr<const byte> buffer) {
@@ -327,53 +380,60 @@ kj::Maybe<kj::Promise<DeferredProxy<void>>> EncodedAsyncOutputStream::tryPumpFro
       nativeInput.ensureIdentityEncoding();
     }
 
-    // When the input advertises its length, pump exactly that length and then verify EOF with
-    // a direct read on the input. A single unbounded pump-to-EOF can deadlock: if the
-    // destination adopts the pump (e.g. kj's AsyncPipe) and its reader consumes exactly the
-    // expected number of bytes and then stops reading while keeping the read end open, no one
-    // ever issues the read that would observe the input's EOF, and the pump never settles.
-    // The explicit read still drains the input through EOF, so the producer observes clean
-    // completion rather than a mid-stream drop.
-    kj::Promise<void> promise = nullptr;
-    KJ_IF_SOME(length, nativeInput.inner->tryGetLength()) {
-      promise = nativeInput.inner->pumpTo(getInner(), length)
-                    .then([&input = *nativeInput.inner](uint64_t) {
-        auto buffer = kj::heap<kj::byte>();
-        auto read = input.tryRead(buffer.get(), 1, 1);
-        return read.attach(kj::mv(buffer));
-      }).then([](size_t n) {
-        JSG_REQUIRE(n == 0, TypeError, "Stream produced more data than its advertised length.");
-      });
-    } else {
-      promise = nativeInput.inner->pumpTo(getInner()).ignoreResult();
-    }
-    if (end) {
-      // TODO(cleanup): When KJ streams are refactored to have a general end(), this stupid switch
-      //   can go away.
-      KJ_SWITCH_ONEOF(inner) {
-        KJ_CASE_ONEOF(stream, kj::Own<kj::AsyncOutputStream>) {
-          KJ_IF_SOME(ee, kj::dynamicDowncastIfAvailable<capnp::ExplicitEndOutputStream>(*stream)) {
-            promise = promise.then([&ee = ee]() { return ee.end(); });
-          } else KJ_IF_SOME(aio, kj::dynamicDowncastIfAvailable<kj::AsyncIoStream>(*stream)) {
-            promise = promise.then([&aio = aio]() { aio.shutdownWrite(); });
-          }
-        }
-        KJ_CASE_ONEOF(gz, kj::Own<kj::GzipAsyncOutputStream>) {
-          promise = promise.then([&gz = gz]() { return gz->end(); });
-        }
-        KJ_CASE_ONEOF(br, kj::Own<kj::BrotliAsyncOutputStream>) {
-          promise = promise.then([&br = br]() { return br->end(); });
-        }
-        KJ_CASE_ONEOF(e, Ended) {}
-      }
-    }
-
     // Since this is a system stream, the pump task is eligible to be deferred past IoContext
     // lifetime!
-    return kj::Promise<DeferredProxy<void>>(DeferredProxy<void>{kj::mv(promise)});
+    return kj::Promise<DeferredProxy<void>>(
+        DeferredProxy<void>{pumpFromNative(kj::mv(input), end)});
   }
 
   return kj::none;
+}
+
+// A coroutine, so that its frame holds a counted pointer to each end for the whole pump, which can
+// outlive the IoContext. The caller must still keep both ends alive until the pump settles; with
+// pointer counting enabled, destroying either one early is caught rather than read after free.
+kj::Promise<void> EncodedAsyncOutputStream::pumpFromNative(
+    kj::Ptr<ReadableStreamSource> source, bool end) {
+  auto self = addPtrToThis();
+  auto& input = *kj::downcast<EncodedAsyncInputStream>(source.asRef()).inner;
+  auto& output = getInner();
+
+  // When the input advertises its length, pump exactly that length and then verify EOF with
+  // a direct read on the input. A single unbounded pump-to-EOF can deadlock: if the
+  // destination adopts the pump (e.g. kj's AsyncPipe) and its reader consumes exactly the
+  // expected number of bytes and then stops reading while keeping the read end open, no one
+  // ever issues the read that would observe the input's EOF, and the pump never settles.
+  // The explicit read still drains the input through EOF, so the producer observes clean
+  // completion rather than a mid-stream drop.
+  KJ_IF_SOME(length, input.tryGetLength()) {
+    co_await input.pumpTo(output, length);
+    kj::byte extra;
+    auto n = co_await input.tryRead(&extra, 1, 1);
+    JSG_REQUIRE(n == 0, TypeError, "Stream produced more data than its advertised length.");
+  } else {
+    co_await input.pumpTo(output);
+  }
+
+  if (end) {
+    // TODO(cleanup): When KJ streams are refactored to have a general end(), this stupid switch
+    //   can go away.
+    KJ_SWITCH_ONEOF(inner) {
+      KJ_CASE_ONEOF(stream, kj::Own<kj::AsyncOutputStream>) {
+        KJ_IF_SOME(ee, kj::dynamicDowncastIfAvailable<capnp::ExplicitEndOutputStream>(*stream)) {
+          co_await ee.end();
+        } else KJ_IF_SOME(aio, kj::dynamicDowncastIfAvailable<kj::AsyncIoStream>(*stream)) {
+          aio.shutdownWrite();
+        }
+      }
+      KJ_CASE_ONEOF(gz, kj::Own<GzipAsyncOutputStream>) {
+        co_await gz->end();
+      }
+      KJ_CASE_ONEOF(br, kj::Own<BrotliAsyncOutputStream>) {
+        co_await br->end();
+      }
+      KJ_CASE_ONEOF(e, Ended) {}
+    }
+  }
 }
 
 StreamEncoding EncodedAsyncOutputStream::disownEncodingResponsibility() {
@@ -398,10 +458,10 @@ kj::Promise<void> EncodedAsyncOutputStream::end() {
         promise = promise.attach(kj::mv(stream));
       }
     }
-    KJ_CASE_ONEOF(gz, kj::Own<kj::GzipAsyncOutputStream>) {
+    KJ_CASE_ONEOF(gz, kj::Own<GzipAsyncOutputStream>) {
       promise = gz->end().attach(kj::mv(gz));
     }
-    KJ_CASE_ONEOF(br, kj::Own<kj::BrotliAsyncOutputStream>) {
+    KJ_CASE_ONEOF(br, kj::Own<BrotliAsyncOutputStream>) {
       promise = br->end().attach(kj::mv(br));
     }
     KJ_CASE_ONEOF(e, Ended) {}
@@ -417,10 +477,10 @@ void EncodedAsyncOutputStream::abort(kj::Exception reason) {
     KJ_CASE_ONEOF(stream, kj::Own<kj::AsyncOutputStream>) {
       stream->abortWrite(kj::mv(reason));
     }
-    KJ_CASE_ONEOF(gz, kj::Own<kj::GzipAsyncOutputStream>) {
+    KJ_CASE_ONEOF(gz, kj::Own<GzipAsyncOutputStream>) {
       gz->abortWrite(kj::mv(reason));
     }
-    KJ_CASE_ONEOF(br, kj::Own<kj::BrotliAsyncOutputStream>) {
+    KJ_CASE_ONEOF(br, kj::Own<BrotliAsyncOutputStream>) {
       br->abortWrite(kj::mv(reason));
     }
     KJ_CASE_ONEOF(e, Ended) {}
@@ -435,12 +495,12 @@ void EncodedAsyncOutputStream::ensureIdentityEncoding() {
     // This is safe because only a kj::AsyncOutputStream can have non-identity encoding.
     auto& stream = inner.get<kj::Own<kj::AsyncOutputStream>>();
 
-    inner = kj::heap<kj::GzipAsyncOutputStream>(*stream).attach(kj::mv(stream));
+    inner = kj::heap<GzipAsyncOutputStream>(*stream, flushAfterWrite).attach(kj::mv(stream));
     encoding = StreamEncoding::IDENTITY;
   } else if (encoding == StreamEncoding::BROTLI) {
     auto& stream = inner.get<kj::Own<kj::AsyncOutputStream>>();
 
-    inner = kj::heap<kj::BrotliAsyncOutputStream>(*stream).attach(kj::mv(stream));
+    inner = kj::heap<BrotliAsyncOutputStream>(*stream, flushAfterWrite).attach(kj::mv(stream));
     encoding = StreamEncoding::IDENTITY;
   } else {
     // We currently support gzip and brotli as non-identity content encodings.
@@ -453,10 +513,10 @@ kj::AsyncOutputStream& EncodedAsyncOutputStream::getInner() {
     KJ_CASE_ONEOF(stream, kj::Own<kj::AsyncOutputStream>) {
       return *stream;
     }
-    KJ_CASE_ONEOF(gz, kj::Own<kj::GzipAsyncOutputStream>) {
+    KJ_CASE_ONEOF(gz, kj::Own<GzipAsyncOutputStream>) {
       return *gz;
     }
-    KJ_CASE_ONEOF(br, kj::Own<kj::BrotliAsyncOutputStream>) {
+    KJ_CASE_ONEOF(br, kj::Own<BrotliAsyncOutputStream>) {
       return *br;
     }
     KJ_CASE_ONEOF(ended, Ended) {
@@ -473,9 +533,11 @@ kj::Own<ReadableStreamSource> newSystemStream(
     kj::Own<kj::AsyncInputStream> inner, StreamEncoding encoding, IoContext& context) {
   return kj::heap<EncodedAsyncInputStream>(kj::mv(inner), encoding, context);
 }
-kj::Own<WritableStreamSink> newSystemStream(
-    kj::Own<kj::AsyncOutputStream> inner, StreamEncoding encoding, IoContext& context) {
-  return kj::heap<EncodedAsyncOutputStream>(kj::mv(inner), encoding, context);
+kj::Own<WritableStreamSink> newSystemStream(kj::Own<kj::AsyncOutputStream> inner,
+    StreamEncoding encoding,
+    IoContext& context,
+    FlushCompressionAfterWrite flushAfterWrite) {
+  return kj::heap<EncodedAsyncOutputStream>(kj::mv(inner), encoding, context, flushAfterWrite);
 }
 
 SystemMultiStream newSystemMultiStream(kj::Rc<kj::AsyncIoStream> stream, IoContext& context) {
@@ -483,7 +545,7 @@ SystemMultiStream newSystemMultiStream(kj::Rc<kj::AsyncIoStream> stream, IoConte
   return {.readable = kj::heap<EncodedAsyncInputStream>(
               stream.addRef().toOwn(), StreamEncoding::IDENTITY, context),
     .writable = kj::heap<EncodedAsyncOutputStream>(
-        kj::mv(stream).toOwn(), StreamEncoding::IDENTITY, context)};
+        kj::mv(stream).toOwn(), StreamEncoding::IDENTITY, context, FlushCompressionAfterWrite::NO)};
 }
 
 ContentEncodingOptions::ContentEncodingOptions(CompatibilityFlags::Reader flags)

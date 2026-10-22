@@ -138,6 +138,47 @@ KJ_TEST("ambiguous actor calls retry with the same token") {
   state->recordRecovered();
 }
 
+KJ_TEST("transient failures retry like disconnects") {
+  for (auto type: {kj::Exception::Type::FAILED, kj::Exception::Type::OVERLOADED}) {
+    TestTimerChannel timer;
+    auto observer = kj::refcounted<RecordingObserver>();
+    auto state = newRetryState(timer, *observer);
+
+    auto first = startAttempt(*state);
+    auto firstNonce = KJ_ASSERT_NONNULL(first.getMetadata()).nonce;
+
+    kj::Exception notDelivered(type, __FILE__, __LINE__, kj::str("not delivered"));
+    jsg::markTransient(notDelivered);
+    jsg::markActorRequestNotDelivered(notDelivered);
+    KJ_EXPECT(handleFailure(*state, kj::mv(notDelivered)).is<kj::Duration>());
+    auto second = startAttempt(*state);
+    auto secondNonce = KJ_ASSERT_NONNULL(second.getMetadata()).nonce;
+    KJ_EXPECT(secondNonce != firstNonce);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(second.getMetadata()).isRetry == IsActorRetry::NO);
+
+    kj::Exception ambiguous(type, __FILE__, __LINE__, kj::str("ambiguous"));
+    jsg::markTransient(ambiguous);
+    KJ_EXPECT(handleFailure(*state, kj::mv(ambiguous)).is<kj::Duration>());
+    auto third = startAttempt(*state);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(third.getMetadata()).nonce == secondNonce);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(third.getMetadata()).isRetry == IsActorRetry::YES);
+
+    state->recordRecovered();
+  }
+}
+
+KJ_TEST("transient failures marked delivered do not retry") {
+  TestTimerChannel timer;
+  auto observer = kj::refcounted<RecordingObserver>();
+  auto state = newRetryState(timer, *observer);
+
+  startAttempt(*state);
+  auto delivered = KJ_EXCEPTION(FAILED, "delivered");
+  jsg::markTransient(delivered);
+  delivered.setDetail(jsg::REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
+  KJ_EXPECT(handleFailure(*state, kj::mv(delivered)).is<kj::Exception>());
+}
+
 KJ_TEST("actor retries count only the first attempt as a subrequest") {
   TestTimerChannel timer;
   auto observer = kj::refcounted<RecordingObserver>();
@@ -262,6 +303,34 @@ KJ_TEST("system retry policy allows five total attempts") {
   KJ_EXPECT(observer->outcomes[0] == ActorRetryOutcome::ATTEMPTS_EXHAUSTED);
 }
 
+KJ_TEST("actor retry backoff floors later retries and reuses the last range") {
+  struct Range {
+    kj::Duration min;
+    kj::Duration max;
+  };
+  constexpr Range expected[] = {
+    {0 * kj::SECONDS, 500 * kj::MILLISECONDS},
+    {0 * kj::SECONDS, 1 * kj::SECONDS},
+    {1 * kj::SECONDS, 3 * kj::SECONDS},
+    {2 * kj::SECONDS, 4 * kj::SECONDS},
+    {2 * kj::SECONDS, 4 * kj::SECONDS},
+  };
+
+  // Delays are random, so sample enough calls that an out-of-range draw would show up.
+  for (uint call = 0; call < 100; ++call) {
+    TestTimerChannel timer;
+    auto observer = kj::refcounted<RecordingObserver>();
+    auto state = newRetryState(
+        timer, *observer, ActorRetryPolicy::userDefined(UserDefinedRetryPolicy{.maxRetries = 5}));
+    for (auto& range: expected) {
+      startAttempt(*state);
+      auto result = handleFailure(*state, makeDisconnect("disconnected"_kj));
+      auto delay = KJ_ASSERT_NONNULL(result.tryGet<kj::Duration>());
+      KJ_EXPECT(delay >= range.min && delay <= range.max, delay);
+    }
+  }
+}
+
 KJ_TEST("actor retries report retry budget exhaustion when budget expires during an attempt") {
   TestTimerChannel timer;
   auto observer = kj::refcounted<RecordingObserver>();
@@ -306,14 +375,14 @@ KJ_TEST("user-defined retry count excludes the initial attempt") {
 
     uint attemptCount = 1;
     startAttempt(*state);
-    if (policy.maxAttempts == 0) {
+    if (policy.maxRetries == 0) {
       KJ_EXPECT(!state->isRetryEnabled());
       KJ_EXPECT(attemptCount == expectedAttempts);
       KJ_EXPECT(observer->retryCallTypes.size() == 0);
       return;
     }
 
-    for (uint retry = 0; retry < policy.maxAttempts; ++retry) {
+    for (uint retry = 0; retry < policy.maxRetries; ++retry) {
       KJ_EXPECT(handleFailure(*state, makeDisconnect("disconnected"_kj)).is<kj::Duration>());
       startAttempt(*state);
       ++attemptCount;
@@ -321,11 +390,11 @@ KJ_TEST("user-defined retry count excludes the initial attempt") {
 
     KJ_EXPECT(handleFailure(*state, makeDisconnect("disconnected"_kj)).is<kj::Exception>());
     KJ_EXPECT(attemptCount == expectedAttempts);
-    KJ_EXPECT(observer->retryCallTypes.size() == policy.maxAttempts);
+    KJ_EXPECT(observer->retryCallTypes.size() == policy.maxRetries);
   };
 
-  checkAttemptCount(UserDefinedRetryPolicy{.maxAttempts = 0}, 1);
-  checkAttemptCount(UserDefinedRetryPolicy{.maxAttempts = 1}, 2);
+  checkAttemptCount(UserDefinedRetryPolicy{.maxRetries = 0}, 1);
+  checkAttemptCount(UserDefinedRetryPolicy{.maxRetries = 1}, 2);
   checkAttemptCount(UserDefinedRetryPolicy{}, ActorRetryPolicy::systemDefault().maxAttempts());
 }
 
@@ -477,7 +546,7 @@ KJ_TEST("committed actor calls report when they were committed") {
   KJ_EXPECT(handleFailure(*state, makeDisconnect("disconnected"_kj)).is<kj::Duration>());
   startAttempt(*state);
   state->handleCommittedAttemptFailure(
-      state->getOriginalDisconnect(), ActorRetryStopReason::PIPELINE_COMMITTED_IN_BACKOFF);
+      state->getOriginalFailure(), ActorRetryStopReason::PIPELINE_COMMITTED_IN_BACKOFF);
 
   KJ_ASSERT(observer->stopReasons.size() == 1);
   KJ_EXPECT(observer->stopReasons[0] == ActorRetryStopReason::PIPELINE_COMMITTED_IN_BACKOFF);
@@ -527,7 +596,29 @@ KJ_TEST("a target's probe candidate is reported at its first uncommitted disconn
   KJ_EXPECT(observer->candidates[0] == ActorRetryCandidate::REPLICA_PRIMARY);
 }
 
-KJ_TEST("a target's probe candidate ignores non-disconnect, delivered, and committed failures") {
+KJ_TEST("a target's probe candidate is reported at its first transient failure") {
+  TestTimerChannel timer;
+  auto observer = kj::refcounted<RecordingObserver>();
+  auto state = newRetryState(
+      timer, *observer, ActorRetryPolicy::systemDefault(), ActorRetryCandidate::REPLICA_PRIMARY);
+
+  startAttempt(*state);
+  auto first = KJ_EXCEPTION(FAILED, "first");
+  jsg::markTransient(first);
+  KJ_EXPECT(handleFailure(*state, kj::mv(first)).is<kj::Duration>());
+  KJ_ASSERT(observer->candidates.size() == 1);
+  KJ_EXPECT(observer->candidates[0] == ActorRetryCandidate::REPLICA_PRIMARY);
+
+  startAttempt(*state);
+  auto second = KJ_EXCEPTION(FAILED, "second");
+  jsg::markTransient(second);
+  KJ_EXPECT(handleFailure(*state, kj::mv(second)).is<kj::Duration>());
+  KJ_EXPECT(observer->candidates.size() == 1);
+
+  state->recordRecovered();
+}
+
+KJ_TEST("a target's probe candidate ignores non-retryable, delivered, and committed failures") {
   TestTimerChannel timer;
   auto observer = kj::refcounted<RecordingObserver>();
   auto failed = newRetryState(

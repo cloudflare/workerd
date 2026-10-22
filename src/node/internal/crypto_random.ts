@@ -82,7 +82,7 @@ export function randomFillSync(
       buffer
     );
   }
-  // Use byteLength, not length — DataView has no .length property and
+  // Use byteLength, not length - DataView has no .length property and
   // TypedArray .length is element count, not bytes.
   const maxLength = (buffer as Uint8Array).byteLength;
   if (offset !== undefined) {
@@ -139,7 +139,7 @@ export function randomFill(
 
   let offset = 0;
   let size = 0;
-  // Use byteLength, not length — DataView has no .length property and
+  // Use byteLength, not length - DataView has no .length property and
   // TypedArray .length is element count, not bytes.
   const maxLength = (buffer as Uint8Array).byteLength;
   if (typeof callback === 'function') {

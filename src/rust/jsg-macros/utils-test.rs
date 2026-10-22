@@ -49,3 +49,38 @@ fn is_attr_cases() {
     // Qualified path (`jsg_macros::jsg_method`) must also match by last segment.
     assert!(is_attr(&qualified.attrs[0], "jsg_method"));
 }
+
+#[test]
+fn is_option_type_cases() {
+    assert!(is_option_type(&parse_quote!(Option<String>)));
+    assert!(is_option_type(&parse_quote!(std::option::Option<u32>)));
+    assert!(!is_option_type(&parse_quote!(String)));
+    assert!(!is_option_type(&parse_quote!(&Option<String>)));
+}
+
+#[test]
+fn elide_named_lifetimes_cases() {
+    let rewritten = |ty: syn::Type| elide_named_lifetimes(&ty).to_string();
+    assert_eq!(
+        rewritten(parse_quote!(jsg::v8::Local<'a, jsg::v8::Value>)),
+        quote::quote!(jsg::v8::Local<'_, jsg::v8::Value>).to_string()
+    );
+    assert_eq!(
+        rewritten(parse_quote!(&'b str)),
+        quote::quote!(&'_ str).to_string()
+    );
+    // Lifetimes nested inside groups are rewritten too.
+    assert_eq!(
+        rewritten(parse_quote!(Option<(Local<'s, Value>, fn(&'t u8))>)),
+        quote::quote!(Option<(Local<'_, Value>, fn(&'_ u8))>).to_string()
+    );
+    // `'static` and already-elided lifetimes are kept.
+    assert_eq!(
+        rewritten(parse_quote!(&'static str)),
+        quote::quote!(&'static str).to_string()
+    );
+    assert_eq!(
+        rewritten(parse_quote!(String)),
+        quote::quote!(String).to_string()
+    );
+}

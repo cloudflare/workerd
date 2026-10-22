@@ -2025,7 +2025,7 @@ class StdioFile final: public File {
           }
         }
       });
-    });
+    }, jsg::Once::YES);
     js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate, callback);
   }
 };

@@ -12,11 +12,12 @@ private-brand dispatch, no `instanceof`) apply here — see
 
 | File          | Role                                                                                         |
 | ------------- | -------------------------------------------------------------------------------------------- |
-| `ring-buffer.ts` | O(1) FIFO with indexed access backing every internal queue below; leaf module             |
-| `view-extent.ts` | A caller-supplied view's byte extent through captured getters; detached/out-of-bounds views (DataViews included) read as empty; leaf module |
+| `ring-buffer.ts` | O(1) FIFO with indexed access backing every internal queue below; `drain()` settles a whole queue, emptying it before the first settlement can run user code; leaf module |
+| `view-extent.ts` | A caller-supplied view's byte extent through captured getters, and any BufferSource's (`bufferSourceExtent`); detached/out-of-bounds inputs (DataViews included) read as empty; `copyExtent` copies an extent; leaf module |
+| `common.ts`   | Helpers shared by the webstreams modules, including WebIDL argument conversion (`requireObject` for a source, sink, transformer or strategy `init`; `toDictionary` for an options dictionary; `convertQueuingStrategy`, then `extractHighWaterMark` and `extractSizeAlgorithm`, for a strategy; `convertUnderlyingSource`, `convertUnderlyingSink` and `convertTransformer` for the constructors' first argument, each reading every member once, in lexicographic order, into a null-prototype record before the constructor checks `type` or the strategy), `normalizeExpectedLength` (every `expectedLength` and `FixedLengthStream` length converts through it, as C++ converts a uint64_t) and `promiseResolvedWith` (WebIDL's "a promise resolved with", for the controllers' start() results and the transformer's cancel and flush); leaf module |
 | `queue.ts`    | QUEUED backend: single-queue/multi-cursor, JS sources; fence interfaces; invariant list      |
 | `native.ts`   | NATIVE backend: C++-backed pull conduit; **the C++/JS contract** + invariants                |
-| `readable.ts` | Reader layer + queued controllers + the BACKEND-DISPATCH points (constructor, tee, chains, byte-capable gate, JS-to-C++ extraction) |
+| `readable.ts` | Reader layer + queued controllers (their shared state machine in `QueuedControllerCore`) + the BACKEND-DISPATCH points (constructor, tee, chains, byte-capable gate, JS-to-C++ extraction) |
 | `writable.ts` / `transform.ts` / `strategies.ts` | WHATWG writable/transform/strategies                                     |
 | `identity.ts` | IdentityTransformStream and FixedLengthStream (byte-capable identity transforms)             |
 | `compression.ts` | CompressionStream/DecompressionStream over the C++ codec handle (utils.newCompressionCodec) |
@@ -29,8 +30,9 @@ private-brand dispatch, no `instanceof`) apply here — see
 The spec's `tee()` gives each branch its own controller and queue, fed by a
 reader on the original. The queued backend instead has ONE queue with N
 consumers (cursors), one per live branch: `tee()` forks the stream's cursor
-into two branch cursors, removes the original's, and leaves the original a
-permanently locked, inert shell — it consumes nothing, and there is no
+into two branch cursors, removes the original's, and leaves the original an
+inert shell, permanently locked and disturbed (as C++ leaves it; the spec
+disturbs it at the tee's first read) — it consumes nothing, and there is no
 per-branch controller to close or error. A tee of a branch does the same to
 the branch: its two branches join the queue as consumers alongside their
 aunt. Consequences, all handled by the controller (`readable.ts`,
@@ -75,10 +77,12 @@ aunt. Consequences, all handled by the controller (`readable.ts`,
   consumer for good: it drops what it holds and what is enqueued later,
   `desiredSize` reads as the high-water mark, and the controller releases
   the source — no more pulls, and its cancel never runs, since GC timing
-  runs no user callback — while keeping its own state machine (`close()`
-  closes the source's stream; `enqueue()` after it throws as ever). C++
-  does the same but keeps pulling (readable ledger #20). Suite:
-  `gc.js` in the readable and readable-byte suites.
+  runs no user callback — and retires a `byobRequest` the source holds,
+  while keeping its own state machine (`close()` closes the source's
+  stream; `enqueue()` after it throws as ever). C++ does the same but
+  keeps pulling (readable ledger #20) and keeps the request
+  (readable-byte ledger #25). Suite: `gc.js` in the readable and
+  readable-byte suites.
 - Backpressure follows the SLOWEST consumer: `desiredSize` is the
   high-water mark minus the largest backlog among the cursors. This trades
   flow for bounded memory: the spec's per-branch queues keep a reading
@@ -97,7 +101,12 @@ aunt. Consequences, all handled by the controller (`readable.ts`,
   keeps working, as in the spec. Responding to it enqueues the head's
   bytes, old and new, for every cursor (each drops its own copy of the old
   ones, from `adoptReleasedBytes`). `enqueue()`, `error()`, cancel and a
-  closed-state `respond(0)` retire it. Suite: readable-byte ledger #25.
+  closed-state `respond(0)` retire it. A fractional element fill in it
+  makes `close()` throw and error the source, as the spec's does, when the
+  source's own stream made the read (it is the source's own pull-into);
+  a read taken over from a tee branch is that branch's, and the forked
+  branches error alone at the close, as the branch would. Suite:
+  readable-byte ledgers #25 and #7.
 - Nothing walks a tree of streams: closing, cancelling and erroring act on
   cursors and their owners, and no stream retains another.
 
@@ -106,15 +115,17 @@ aunt. Consequences, all handled by the controller (`readable.ts`,
 A stream whose data moves to another stream is closed at the handoff,
 left locked and disturbed, and drops its controller
 (`closeReadableStreamHusk`): a teed branch (above), the source of a
-native-backed tee, and a native-backed stream whose source is extracted
+native-backed tee, a native-backed stream whose source is extracted
 (a native-to-native pipe, the C++ bridge's `pumpTo`) or detached (the
-bridge's `detach()`: `new Request(request)`, socket upgrades). The legacy
-C++ streams leave the same streams locked, disturbed and closed. The
-Node.js interop closed-promise settles then, and the interop error hook,
-which acts only on a readable stream, cannot reach the moved source. A
-queued stream detached from its source is the exception: it stays the
-controller's stream, closing and erroring with the source, and the hook
-on it errors the detached stream. Suites:
+bridge's `detach()`: `new Request(request)`, socket upgrades), and a
+detached queued stream other than the source's own stream (a tee
+branch, or a copy detached again). The legacy C++ streams leave the
+same streams locked, disturbed and closed. The Node.js interop
+closed-promise settles then, and the interop error hook, which acts only
+on a readable stream, cannot reach the moved source. A queued source's
+own stream, once detached, is the exception: it stays the controller's
+stream, closing and erroring with the source, and the hook on it errors
+the detached stream. Suites:
 `src/tests/node/stream/finished-and-abort.js`,
 `src/tests/streams/sockets/socket-streams.js`.
 
@@ -136,7 +147,7 @@ connection.
   plus that internal entry.
 - Every dictionary the implementation builds itself — the sources, sinks,
   strategies and transformers of the internal pairs, and the stand-in for
-  an omitted argument (`kEmptyDictionary`) — is null-prototype, so a
+  an omitted argument (`kNullProtoObject`) — is null-prototype, so a
   polluted `Object.prototype` cannot supply members. Members of the C++
   native source are read with `declaresMember`, which stops before
   `Object.prototype`. Copies of internal bytes use `cloneArrayBuffer`
@@ -153,18 +164,20 @@ connection.
 - Do not port logic across the fence without checking BOTH invariant
   lists (`queue.ts` and `native.ts` headers).
 - The native source contract (marker symbol, standard pull/cancel hooks,
-  byobRequest discrimination, once-per-pull delivery, per-pull abort
-  signal for cancellation, under-delivery = EOF signal delivering the
-  partial as `{done: false, value: partial}` with the next read
-  observing EOF, tee hook, `expectedLength` exact-total byte contract)
-  is specified in the `native.ts` header.
+  byobRequest discrimination, once-per-pull delivery of a non-empty
+  answer, memory handed over that the conduit neither checks nor
+  transfers, per-pull abort signal for cancellation, under-delivery =
+  EOF signal delivering the partial as `{done: false, value: partial}`
+  with the next read observing EOF, tee hook, `expectedLength`
+  exact-total byte contract) is specified in the `native.ts` header.
   The C++ implementation (`ReadableStreamNativeSource` in
   `src/workerd/api/js-readable-stream.{h,c++}`) MUST conform to it; JS
   mocks in tests exercise the conduit independently. Key addition:
   `pull` receives an extension `signal`
   argument — the source checks `signal.aborted` before delivery and stashes
   bytes for redelivery if aborted (race buffering lives source-side; the JS
-  conduit is uniformly bufferless).
+  conduit is uniformly bufferless), while an aborted pull's rejection errors
+  the stream as a live pull's does, unless it is `signal.reason`.
 - The `webstreams/cpp_exports` table, which the C++ bridge reads with an
   ordinary property get (`getCppExport`), is frozen and has a null
   prototype, so a name missing from it cannot resolve through
@@ -173,7 +186,9 @@ connection.
   construction) is module-private, consumed only by readable.ts/writable.ts
   and the C++ bridge via the API-symbol registry. The C++ mocks in
   `js-readable-stream-test.c++` construct real `ReadableStreamNativeSource`
-  objects; no JS-visible marker export exists.
+  objects, or, for a source that breaks the contract, mark a plain object
+  with the `kNativeSource` symbol from that registry; no JS-visible marker
+  export exists.
 - Every stream instance carries an own, non-enumerable api-symbol brand
   (`kReadableStreamBrand` / `kWritableStreamBrand`), stamped at the very
   top of the constructor (before any early return). The C++ bridge's

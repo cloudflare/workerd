@@ -52,3 +52,47 @@ test('Inspector correctly receives exceptions with Unicode characters', async ()
   await inspectorClient.Runtime.disable();
   await inspectorClient.close();
 });
+
+// DevTools async stacks continue across timers and microtasks, which V8 can't see on its own; the
+// runtime reports them as async tasks.
+test('Inspector async stacks continue across setTimeout and queueMicrotask', async () => {
+  const inspectorClient = await connectInspector(
+    await workerd.getListenInspectorPort()
+  );
+  await inspectorClient.Debugger.enable();
+  await inspectorClient.Debugger.setAsyncCallStackDepth({ maxDepth: 32 });
+
+  const httpPort = await workerd.getListenPort('http');
+  const cases = [
+    {
+      path: '/asyncStack/timer',
+      description: 'setTimeout',
+      scheduler: 'scheduleTimer',
+    },
+    {
+      path: '/asyncStack/microtask',
+      description: 'queueMicrotask',
+      scheduler: 'scheduleMicrotask',
+    },
+  ];
+  for (const { path, description, scheduler } of cases) {
+    const paused = new Promise((resolve) => {
+      inspectorClient.once('Debugger.paused', resolve);
+    });
+    const response = fetch(`http://localhost:${httpPort}${path}`);
+    const params = await paused;
+    await inspectorClient.Debugger.resume();
+    assert.strictEqual((await response).status, 200);
+
+    const asyncStack = params.asyncStackTrace;
+    assert(asyncStack, `${path}: paused with an async stack`);
+    assert.strictEqual(asyncStack.description, description);
+    assert(
+      asyncStack.callFrames.some((frame) => frame.functionName === scheduler),
+      `${path}: the async stack includes ${scheduler}: ${JSON.stringify(asyncStack.callFrames)}`
+    );
+  }
+
+  await inspectorClient.Debugger.disable();
+  await inspectorClient.close();
+});

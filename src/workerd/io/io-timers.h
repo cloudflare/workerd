@@ -77,13 +77,16 @@ class TimeoutManager {
     // This is a maybe to allow cancel to clear it and free the reference
     // when it is no longer needed.
     kj::Maybe<jsg::Function<void()>> function;
+
+    // Names the timer's async trace resource. Must be a literal or otherwise outlive the call
+    // to setTimeout().
+    kj::StringPtr asyncTraceName;
   };
 
   virtual TimeoutId setTimeout(
       IoContext& context, TimeoutId::Generator& generator, TimeoutParameters params) = 0;
   virtual void clearTimeout(IoContext& context, TimeoutId id) = 0;
   virtual size_t getTimeoutCount() const = 0;
-  virtual kj::Maybe<kj::Date> getNextTimeout() const = 0;
   virtual void cancelAll() = 0;
 };
 

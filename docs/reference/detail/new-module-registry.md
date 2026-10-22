@@ -44,7 +44,10 @@ The new module registry was designed to address several limitations of the legac
 4. **Cross-isolate compile cache.** ESM modules cache their V8 compiled bytecode
    in a `kj::MutexGuarded` field on the `Module` object itself. When a second
    isolate imports the same module, the cached bytecode is consumed, skipping
-   recompilation. The legacy registry had no compile cache sharing.
+   recompilation. If the embedder gives isolates a code cache store
+   (`jsg::CodeCacheStore`, see `jsg/code-cache.h`), bundle modules use the
+   store instead, which both registries share; see
+   [Code cache store](#code-cache-store).
 
 5. **Separation of definition from instantiation.** `Module` objects are
    isolate-independent definitions. `IsolateModuleRegistry` holds the per-isolate
@@ -162,14 +165,17 @@ module construction time.
 EsModule extends Module {
   source:        kj::OneOf<kj::ArrayPtr<const char>, kj::Arc<OwnedAscii>> // UTF-8
   encodedSource: kj::Lazy<EncodedSource>                         // V8-compatible encoding (shared)
+  codeCacheKey:  Maybe<CodeCacheKey>                             // Key in the code cache store
   cachedData:    MutexGuarded<Maybe<Own<CachedData>>>            // Cross-isolate compile cache
 }
 ```
 
 - `getDescriptor()`: Encodes the source (see below), then compiles it via
-  `v8::ScriptCompiler::CompileModule`. Checks the `cachedData` shared cache first
-  (shared lock for reading, exclusive lock for writing). On cache miss, generates
-  and stores bytecode after compilation.
+  `v8::ScriptCompiler::CompileModule`. A module with a `codeCacheKey`, in an
+  isolate with a code cache store, compiles through the store (see
+  [Code cache store](#code-cache-store)). Otherwise it checks the `cachedData`
+  shared cache first (shared lock for reading, exclusive lock for writing). On
+  cache miss, generates and stores bytecode after compilation.
 
 #### Source Encoding (`EncodedSource`)
 
@@ -179,16 +185,17 @@ bytes, so each module's source is encoded once, lazily, on first compile
 (`kj::Lazy` handles cross-thread once-init) and the result is shared by every
 isolate that compiles the module:
 
-| Source content                     | Representation                                   |
-| ---------------------------------- | ------------------------------------------------ |
-| Pure ASCII (the common case)       | Zero-copy one-byte external over static or Arc-owned storage |
-| Non-ASCII, all code points ≤ U+00FF | One-time UTF-8→Latin-1 transcode into Arc-owned storage       |
-| Anything else (CJK, emoji, ...)    | One-time UTF-8→UTF-16 transcode into Arc-owned storage        |
+| Source content                      | Representation                                               |
+| ----------------------------------- | ------------------------------------------------------------ |
+| Pure ASCII (the common case)        | Zero-copy one-byte external over static or Arc-owned storage |
+| Non-ASCII, all code points ≤ U+00FF | One-time UTF-8→Latin-1 transcode into Arc-owned storage      |
+| Anything else (CJK, emoji, ...)     | One-time UTF-8→UTF-16 transcode into Arc-owned storage       |
 
 Invalid UTF-8 sequences are replaced with U+FFFD (via `kj::encodeUtf16`),
 matching `v8::String::NewFromUtf8`'s tolerance and the legacy registry. The
 encoding choice is a pure function of the source bytes, so all replicas agree
 and the shared compile cache stays consistent.
+
 - `evaluate()`: Calls `v8::Module::Evaluate()`. For modules with `Flags::EVAL`,
   delegates to the `Evaluator` to run evaluation outside the IoContext.
 - Always has `Flags::ESM | Flags::EVAL` set.
@@ -207,6 +214,28 @@ Second isolate compiles same module:
      -> kConsumeCodeCache -> CompileModule(source, cache)
   2. No exclusive lock needed (cache already populated)
 ```
+
+#### Code cache store
+
+The `cachedData` slot is per `Module`, so it is shared only by isolates that
+share the registry. An embedder can instead give each isolate a process-wide
+`jsg::CodeCacheStore` (`IsolateBase::setCodeCacheStore()`), keyed by a SHA-256
+of the module's UTF-8 source and its compilation unit. The legacy registry and
+service-worker scripts use the same store, through `jsg::IsolateCodeCache`.
+
+- A registry built with `ModuleRegistry::Builder::Options::CODE_CACHE_KEYS`
+  computes each bundle module's key while it is built
+  (`Builder::newCodeCacheKey()`) and lists the keys
+  (`getBundleCodeCacheKeys()`). `Worker::Script` looks them all up before the
+  startup CPU limit applies, so the limit does not cover hashing or lookups.
+- Builtins, and bundle modules in isolates without a store, keep using
+  `cachedData`.
+- Caches are produced only for modules compiled while `Worker::Script` and
+  `Worker` start the worker, after the top level has run. A module first
+  imported during a request consumes a cache if the store has one, and is
+  otherwise compiled from source and left uncached. Import modules during
+  startup to populate their caches. V8 deserialization remains inside the
+  startup CPU limit.
 
 ### `SyntheticModule` — All Non-ESM Modules
 
@@ -714,7 +743,7 @@ if (isolate.isUsingNewModuleRegistry()) {
 The isolate-level bit is set at isolate construction from
 `isNewModuleRegistryEnabled(flags)` (`io/features.h`), which returns false for
 Python workers regardless of the `new_module_registry` flag. All other
-flag-check sites (`server.c++` registry creation, `worker.c++` compile paths and
+flag-check sites (`worker-factory.c++` registry creation, `worker.c++` compile paths and
 the nodejs_compat_v2 process/buffer warm-up, and the api-level require paths)
 route through the same function, so a worker can never be split across the two
 registries. Note that `Cloudflare.compatibilityFlags.new_module_registry` as
@@ -780,7 +809,7 @@ returning a rejected promise with the cached exception.
 - `ModuleBundle` and `Module` objects are immutable after construction, with
   two exceptions:
   - `EsModule::cachedData` uses `kj::MutexGuarded` (shared lock for reads,
-    exclusive for writes).
+    exclusive for writes). A code cache store is thread-safe by contract.
   - `newWasmModuleHandler` similarly uses `kj::MutexGuarded` for its compiled
     Wasm cache.
   - `StaticModuleBundle::cache` and `FallbackModuleBundle::storage/aliases` are
@@ -808,9 +837,12 @@ returning a rejected promise with the cached exception.
 
 4. **Cross-isolate caching.** ESM compile cache and Wasm compiled modules are
    shared across isolate replicas, reducing startup time for subsequent replicas.
+   With a code cache store, bundle module caches are shared across registries.
 
 5. **Compile cache is transparent.** V8 bytecode caching is handled entirely
-   within `EsModule::getDescriptor()`. Callers never see compile cache details.
+   within `EsModule::getDescriptor()`. Callers never see compile cache details,
+   except that an embedder with a code cache store builds the registry with
+   `CODE_CACHE_KEYS`.
 
 6. **Evaluation callbacks are idempotent.** Synthetic module `EvaluateCallback`
    functions can be called multiple times from multiple isolates. They create

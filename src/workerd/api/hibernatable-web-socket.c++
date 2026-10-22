@@ -50,7 +50,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
     bool isDynamicDispatch) {
   // Mark the request as delivered because we're about to run some JS.
   auto& context = incomingRequest->getContext();
-  incomingRequest->delivered();
+  incomingRequest->delivered("hibernatable_websocket"_kj);
 
   KJ_DEFER({ incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest)); });
 
@@ -106,7 +106,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> HibernatableWebSocketCustomEve
       LOG_EXCEPTION("HibernatableWebSocketCustomEvent"_kj, e);
     }
     incomingRequest->getMetrics().reportFailure(e);
-    context.logUncaughtExceptionAsync(UncaughtExceptionSource::ASYNC_TASK, e.clone());
+    context.logUncaughtExceptionAsync(
+        UncaughtExceptionSource::ASYNC_TASK, e.clone(), *incomingRequest);
     outcome = EventOutcome::EXCEPTION;
   }
 

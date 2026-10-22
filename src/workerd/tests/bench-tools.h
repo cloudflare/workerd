@@ -20,9 +20,9 @@ namespace workerd::bench {
 
 struct TcmallocBenchmarkConfig {
   TcmallocBenchmarkConfig() {
-    // Disable heap profiling sampling by setting interval to max value.
+    // Disable heap profiling sampling.
     // Default is ~512KB which causes probabilistic sampling of allocations.
-    tcmalloc::MallocExtension::SetProfileSamplingInterval(std::numeric_limits<int64_t>::max());
+    tcmalloc::MallocExtension::SetProfileSamplingInterval(0);
 
     // Disable GWP-ASan guarded sampling. A negative value disables it.
     tcmalloc::MallocExtension::SetGuardedSamplingInterval(-1);
@@ -35,8 +35,59 @@ struct TcmallocBenchmarkConfig {
 // Global instance ensures configuration runs before main().
 inline TcmallocBenchmarkConfig tcmallocBenchmarkConfig;
 
+inline void warmUpAllocationSampling() {
+  // Each thread keeps its sampling countdown until it reaches the next sample. Advance it with
+  // probes until this thread has picked up the new interval, before measuring the callback.
+  constexpr size_t PROBE_SIZE = (1 << 20) + 17;
+  for (uint i = 0; i < 256; ++i) {
+    auto token = tcmalloc::MallocExtension::StartAllocationProfiling();
+    auto probe = kj::heapArray<kj::byte>(PROBE_SIZE);
+    benchmark::DoNotOptimize(probe.begin());
+    auto profile = kj::mv(token).Stop();
+    bool sampled = false;
+    profile.Iterate([&](const tcmalloc::Profile::Sample& sample) {
+      if (sample.requested_size == PROBE_SIZE) sampled = true;
+    });
+    if (sampled) return;
+  }
+  KJ_FAIL_REQUIRE("Allocation profiling did not sample the warm-up probes");
+}
+
 }  // namespace workerd::bench
 #endif  // defined(WD_USE_TCMALLOC)
+
+namespace workerd::bench {
+
+// Collect allocation samples separately so profiling does not affect the timing measurements.
+template <typename Callback>
+void recordAllocationStats(benchmark::State& state, Callback&& callback) {
+#ifdef WD_USE_TCMALLOC
+  auto samplingInterval = tcmalloc::MallocExtension::GetProfileSamplingInterval();
+  tcmalloc::MallocExtension::SetProfileSamplingInterval(1);
+  KJ_DEFER(tcmalloc::MallocExtension::SetProfileSamplingInterval(samplingInterval));
+  warmUpAllocationSampling();
+  callback();
+  auto token = tcmalloc::MallocExtension::StartAllocationProfiling();
+  constexpr uint SAMPLES = 128;
+  for (uint i = 0; i < SAMPLES; ++i) {
+    callback();
+  }
+  auto profile = kj::mv(token).Stop();
+  int64_t bytes = 0;
+  int64_t allocations = 0;
+  profile.Iterate([&](const tcmalloc::Profile::Sample& sample) {
+    bytes += sample.sum;
+    allocations += sample.count;
+  });
+  state.counters["native_bytes/op"] = static_cast<double>(bytes) / SAMPLES;
+  state.counters["native_allocs/op"] = static_cast<double>(allocations) / SAMPLES;
+#else
+  (void)state;
+  (void)callback;
+#endif
+}
+
+}  // namespace workerd::bench
 
 // Define a benchmark. Use microseconds instead of nanoseconds by default, most tests run long
 // enough to not need ns precision.

@@ -7,6 +7,7 @@
 #include "actor-state.h"
 
 #include <workerd/io/io-context.h>
+#include <workerd/util/sqlite.h>
 
 #if _WIN32
 #define strncasecmp _strnicmp
@@ -72,6 +73,8 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     };
   }
 
+  auto queryId = db.generateQueryId();
+
   if (slot->isShared()) {
     // Oops, this CachedStatement is currently in-use (presumably by a Cursor).
     //
@@ -81,10 +84,12 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     // In theory we could try to cache multiple copies of the statement, but as this is probably
     // exceedingly rare, it is not worth the added code complexity.
     return js.alloc<Cursor>(js, kj::mv(doneCallback), db,
-        SqliteDatabase::StaticRegulator(regulator), js.toString(querySql), kj::mv(bindings));
+        SqliteDatabase::StaticRegulator(regulator), js.toString(querySql), kj::mv(bindings),
+        queryId);
   }
 
-  auto result = js.alloc<Cursor>(js, kj::mv(doneCallback), slot.addRef(), kj::mv(bindings));
+  auto result =
+      js.alloc<Cursor>(js, kj::mv(doneCallback), slot.addRef(), kj::mv(bindings), queryId);
 
   // If the statement cache grew too big, drop the least-recently-used entry.
   while (statementCache.totalSize > SQL_STATEMENT_CACHE_MAX_SIZE) {
@@ -195,15 +200,19 @@ jsg::JsValue SqlStorage::wrapSqlValue(jsg::Lock& js, SqlValue value) {
 SqlStorage::Cursor::State::State(SqliteDatabase& db,
     SqliteDatabase::StaticRegulator regulator,
     kj::StringPtr sqlCode,
-    kj::Array<BindingValue> bindingsParam)
+    kj::Array<BindingValue> bindingsParam,
+    kj::Maybe<SqliteQueryId> queryId)
     : bindings(kj::mv(bindingsParam)),
-      query(db.run({.regulator = regulator}, sqlCode, mapBindings(bindings).asPtr())) {}
+      query(db.run(
+          {.regulator = regulator, .queryId = queryId}, sqlCode, mapBindings(bindings).asPtr())) {}
 
-SqlStorage::Cursor::State::State(
-    kj::Rc<CachedStatement> cachedStatementParam, kj::Array<BindingValue> bindingsParam)
+SqlStorage::Cursor::State::State(kj::Rc<CachedStatement> cachedStatementParam,
+    kj::Array<BindingValue> bindingsParam,
+    kj::Maybe<SqliteQueryId> queryId)
     : bindings(kj::mv(bindingsParam)),
       query(cachedStatement.emplace(kj::mv(cachedStatementParam))
-                ->statement.run(mapBindings(bindings).asPtr())) {}
+                ->statement.run(SqliteDatabase::Statement::StatementOptions{.queryId = queryId},
+                    mapBindings(bindings).asPtr())) {}
 
 SqlStorage::Cursor::~Cursor() noexcept(false) {
   // If this Cursor was created from a Statement, clear the Statement's currentCursor weak ref.

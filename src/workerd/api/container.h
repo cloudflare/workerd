@@ -291,7 +291,7 @@ class Container: public jsg::Object {
           enableInternet: boolean;
           env?: Record<string, string>;
           hardTimeout?: number | bigint;
-          instance?: "lite" | "standard-1" | "standard-2" | "standard-3" | "standard-4" | ContainerStartResources;
+          instance?: "lite" | "basic" | "standard-1" | "standard-2" | "standard-3" | "standard-4" | ContainerStartResources;
           labels?: Record<string, string>;
           directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
         } & (
@@ -311,7 +311,7 @@ class Container: public jsg::Object {
           entrypoint?: string[];
           enableInternet: boolean;
           env?: Record<string, string>;
-          instance?: "lite" | "standard-1" | "standard-2" | "standard-3" | "standard-4" | ContainerStartResources;
+          instance?: "lite" | "basic" | "standard-1" | "standard-2" | "standard-3" | "standard-4" | ContainerStartResources;
           labels?: Record<string, string>;
           directorySnapshots?: ContainerDirectorySnapshotRestoreParams[];
         } & (

@@ -99,6 +99,24 @@ class RingBuffer<T> {
     this.#mask = -1;
   }
 
+  // Remove every item, then pass each to `visit`, head first. The buffer
+  // is empty, its store released as by clear(), before the first visit,
+  // so nothing a visit does to it (a push, a shift, another drain)
+  // reaches the items being visited: an item pushed during the drain is
+  // not visited, and stays queued. This is how a whole queue of reads or
+  // writes is settled, since a settlement can run user code that reaches
+  // the queue. If a visit throws, the items after it are dropped.
+  drain(visit: (item: T) => void): void {
+    const backing = this.#backing;
+    const head = this.#head;
+    const size = this.#size;
+    const mask = this.#mask;
+    this.clear();
+    for (let i = 0; i < size; i++) {
+      visit(backing[(head + i) & mask] as T);
+    }
+  }
+
   // Whether a store above the initial capacity would be at most a quarter
   // full at `size` items.
   #isSparse(size: number): boolean {
