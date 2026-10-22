@@ -9,6 +9,8 @@
 #include <capnp/message.h>
 #include <kj/test.h>
 
+#include <cerrno>
+
 namespace workerd::api {
 namespace {
 
@@ -289,6 +291,23 @@ kj::StringPtr errnoFor(kj::StringPtr description) {
   return KJ_ASSERT_NONNULL(connectErrnoName(KJ_EXCEPTION(DISCONNECTED, description)));
 }
 
+KJ_TEST("os error codes map to errno names") {
+#if _WIN32
+  constexpr int refused = 10061, timedOut = 10060, hostUnreach = 10065, netUnreach = 10051;
+  KJ_EXPECT(errnoFor("No such host is known. (os error 11001)") == "ENOTFOUND");
+  KJ_EXPECT(errnoFor("This is usually a temporary error. (os error 11002)") == "EAI_AGAIN");
+#else
+  constexpr int refused = ECONNREFUSED, timedOut = ETIMEDOUT, hostUnreach = EHOSTUNREACH,
+                netUnreach = ENETUNREACH;
+#endif
+  KJ_EXPECT(errnoFor(kj::str("whatever text (os error ", refused, ")")) == "ECONNREFUSED");
+  KJ_EXPECT(errnoFor(kj::str("whatever text (os error ", timedOut, ")")) == "ETIMEDOUT");
+  KJ_EXPECT(errnoFor(kj::str("whatever text (os error ", hostUnreach, ")")) == "EHOSTUNREACH");
+  KJ_EXPECT(errnoFor(kj::str("whatever text (os error ", netUnreach, ")")) == "ENETUNREACH");
+  KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, "Permission denied (os error 13)")) == kj::none);
+  KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, "(os error )")) == kj::none);
+}
+
 KJ_TEST("connect failure exceptions map to errno names") {
   KJ_EXPECT(errnoFor("connect(): Connection refused; address = 127.0.0.1:1") == "ECONNREFUSED");
   KJ_EXPECT(errnoFor("connect(): Connection timed out") == "ETIMEDOUT");
@@ -297,8 +316,6 @@ KJ_TEST("connect failure exceptions map to errno names") {
   KJ_EXPECT(errnoFor("connect(): Network is unreachable") == "ENETUNREACH");
   KJ_EXPECT(errnoFor("DNS lookup failed.; params.host = nope.invalid; "
                      "gai_strerror(status) = Name or service not known") == "ENOTFOUND");
-  KJ_EXPECT(errnoFor("Connection refused (os error 111)") == "ECONNREFUSED");
-  KJ_EXPECT(errnoFor("Connection timed out (os error 110)") == "ETIMEDOUT");
   KJ_EXPECT(
       errnoFor("failed to lookup address information: Name or service not known") == "ENOTFOUND");
   KJ_EXPECT(

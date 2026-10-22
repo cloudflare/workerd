@@ -24,6 +24,8 @@
 #include <capnp/compat/byte-stream.h>
 #include <kj/async-queue.h>
 
+#include <cerrno>
+
 namespace workerd::api {
 
 namespace {
@@ -1041,11 +1043,62 @@ kj::Maybe<kj::StringPtr> proxyStatusErrno(kj::StringPtr proxyStatus) {
 
 }  // namespace
 
+namespace {
+
+// The errno name for an OS error code of the platform this process runs on, which is the one
+// that produced the failure.
+kj::Maybe<kj::StringPtr> osErrorErrnoName(int code) {
+#if _WIN32
+  switch (code) {
+    case 10061:  // WSAECONNREFUSED
+      return "ECONNREFUSED"_kj;
+    case 10060:  // WSAETIMEDOUT
+      return "ETIMEDOUT"_kj;
+    case 10065:  // WSAEHOSTUNREACH
+      return "EHOSTUNREACH"_kj;
+    case 10051:  // WSAENETUNREACH
+      return "ENETUNREACH"_kj;
+    case 11001:  // WSAHOST_NOT_FOUND
+    case 11004:  // WSANO_DATA
+      return "ENOTFOUND"_kj;
+    case 11002:  // WSATRY_AGAIN
+      return "EAI_AGAIN"_kj;
+  }
+#else
+  switch (code) {
+    case ECONNREFUSED:
+      return "ECONNREFUSED"_kj;
+    case ETIMEDOUT:
+      return "ETIMEDOUT"_kj;
+    case EHOSTUNREACH:
+      return "EHOSTUNREACH"_kj;
+    case ENETUNREACH:
+      return "ENETUNREACH"_kj;
+  }
+#endif
+  return kj::none;
+}
+
+}  // namespace
+
 kj::Maybe<kj::StringPtr> connectErrnoName(const kj::Exception& exception) {
-  // The syscall exception's description carries the strerror()/gai_strerror() text, whether it
-  // was raised by KJ ("connect(): ...", "DNS lookup failed.") or by Rust's std::io::Error
-  // ("... (os error N)", "failed to lookup address information: ...").
   auto description = exception.getDescription();
+  // A failure raised through Rust's std::io::Error ends in "(os error N)" with the platform's
+  // error code, which is classified by number. Otherwise the description carries the
+  // strerror()/gai_strerror() text, from KJ ("connect(): ...", "DNS lookup failed.") or from
+  // Rust's resolver ("failed to lookup address information: ...").
+  KJ_IF_SOME(pos, description.find("(os error "_kj)) {
+    auto digits = description.slice(pos + "(os error "_kj.size());
+    int code = 0;
+    size_t i = 0;
+    while (i < digits.size() && digits[i] >= '0' && digits[i] <= '9') {
+      code = code * 10 + (digits[i] - '0');
+      i++;
+    }
+    if (i > 0 && i < digits.size() && digits[i] == ')') {
+      KJ_IF_SOME(name, osErrorErrnoName(code)) return name;
+    }
+  }
   if (description.contains("Connection refused"_kj)) return "ECONNREFUSED"_kj;
   // Linux and macOS spellings of strerror(ETIMEDOUT).
   if (description.contains("Connection timed out"_kj) ||
