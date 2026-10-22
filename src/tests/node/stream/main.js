@@ -182,6 +182,7 @@ export {
 
 export {
   interopHooksPresence,
+  isClosedPromiseIsMarkedHandled,
   finishedObservesReadableClose,
   finishedObservesReadableError,
   finishedObservesWritable,

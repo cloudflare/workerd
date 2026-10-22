@@ -96,7 +96,6 @@ const {
 const {
   isArrayBuffer,
   isArrayBufferView,
-  isPromise,
   isSharedArrayBuffer,
   markPromiseHandled,
 } = utils;
@@ -119,13 +118,22 @@ const {
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
 
-import type { CommonHelpers, UnderlyingSourceDict } from './common';
+import type {
+  CommonHelpers,
+  PromiseSlot,
+  UnderlyingSourceDict,
+} from './common';
 const {
   isActualObject,
   kNullProtoObject,
   kEnumerable,
   toStringTagProperty,
   promiseResolvedWith,
+  newHandledPending,
+  newHandledRejected,
+  slotPromise,
+  slotResolved,
+  slotRejected,
   requireObject,
   toDictionary,
   convertQueuingStrategy,
@@ -610,7 +618,7 @@ ObjectDefineProperty(
 class ReadableStreamReaderBase<R> {
   #stream?: ReadableStream<R> | undefined;
   // @ts-expect-error
-  #closedPromise: Promise<void> | PromiseWithResolversType<void>;
+  #closedPromise: PromiseSlot;
   // NOTE: pending reads live on the stream's cursor (PendingRead entries
   // keyed by reader identity), not on the reader — the cursor outlives
   // reader attach/detach cycles.
@@ -624,10 +632,7 @@ class ReadableStreamReaderBase<R> {
 
       switch (getReadableStreamGetState(stream)) {
         case 'readable': {
-          base.#closedPromise = PromiseWithResolvers();
-          markPromiseHandled(
-            (base.#closedPromise as PromiseWithResolversType<void>).promise
-          );
+          base.#closedPromise = newHandledPending();
           break;
         }
         case 'closed': {
@@ -635,52 +640,25 @@ class ReadableStreamReaderBase<R> {
           break;
         }
         case 'errored': {
-          const stored = getReadableStreamStoredError(stream);
-          // Because we need to mark the promise as handled, and because
-          // Promise.reject does not give us the ability to do so before
-          // the promise is reported as rejected, we need to create the
-          // promise with PromiseWithResolvers and reject it manually.
-          const promise: PromiseWithResolversType<void> =
-            PromiseWithResolvers();
-          markPromiseHandled(promise.promise);
-          promise.reject(stored);
-          base.#closedPromise = promise.promise;
+          base.#closedPromise = newHandledRejected(
+            getReadableStreamStoredError(stream)
+          );
           break;
         }
       }
     };
 
-    getGenericReaderClosedPromise = (reader: object) => {
-      const base = getReaderBase(reader);
-      const promise = base.#closedPromise;
-      if (isPromise(promise)) {
-        return promise as Promise<void>;
-      }
-      if (!isPromise((promise as PromiseWithResolversType<void>).promise)) {
-        throw new TypeError('invalid reader state');
-      }
-      return (promise as PromiseWithResolversType<void>).promise;
-    };
+    getGenericReaderClosedPromise = (reader: object) =>
+      slotPromise(getReaderBase(reader).#closedPromise);
 
-    // #closedPromise holds either a settled Promise or a still-pending
-    // resolvers record, told apart with the native isPromise: a duck-typed
-    // `typeof x.resolve` would read Object.prototype on the Promise.
     resolveGenericReaderPromise = (reader: object) => {
       const base = getReaderBase(reader);
-      const promise = base.#closedPromise;
-      if (!isPromise(promise)) {
-        promise.resolve();
-        base.#closedPromise = promise.promise;
-      }
+      base.#closedPromise = slotResolved(base.#closedPromise);
     };
 
     rejectGenericReaderPromise = (reader: object, reason?: unknown) => {
       const base = getReaderBase(reader);
-      const promise = base.#closedPromise;
-      if (!isPromise(promise)) {
-        promise.reject(reason);
-        base.#closedPromise = promise.promise;
-      }
+      base.#closedPromise = slotRejected(base.#closedPromise, reason);
     };
 
     isReaderBoundToStream = (reader: object) => {
@@ -702,17 +680,11 @@ class ReadableStreamReaderBase<R> {
       const stream = base.#stream;
       if (stream === undefined) return;
       const releaseError = new TypeError('This reader has been released');
-      // Per spec: a still-pending closedPromise is rejected; a settled one
-      // is replaced with a fresh rejected promise. Both are marked handled.
-      if (getReadableStreamGetState(stream) === 'readable') {
-        rejectGenericReaderPromise(reader, releaseError);
-      } else {
-        const replacement: PromiseWithResolversType<void> =
-          PromiseWithResolvers();
-        markPromiseHandled(replacement.promise);
-        replacement.reject(releaseError);
-        base.#closedPromise = replacement.promise;
-      }
+      // Per spec: on a readable stream the pending closedPromise is
+      // rejected; otherwise it is replaced with a fresh rejected promise.
+      // The slot is pending exactly while the stream is readable, so
+      // slotRejected does both.
+      base.#closedPromise = slotRejected(base.#closedPromise, releaseError);
       // Reject THIS reader's pending reads. The consumer itself persists —
       // it is stream-owned, and a future reader resumes where it left off.
       const consumer = getReadableStreamConsumer(stream);
@@ -4608,8 +4580,7 @@ class ReadableStream<R> {
     assertIsReadableStream(this);
     let closed = this.#closedPromise;
     if (closed === undefined) {
-      closed = PromiseWithResolvers() as PromiseWithResolversType<void>;
-      markPromiseHandled(closed.promise);
+      closed = newHandledPending();
       this.#closedPromise = closed;
       settleReadableStreamClosedPromise(this);
     }

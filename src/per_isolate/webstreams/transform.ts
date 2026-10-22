@@ -44,6 +44,7 @@ const {
   kEnumerable,
   toStringTagProperty,
   promiseResolvedWith,
+  newHandledPending,
   requireObject,
   convertQueuingStrategy,
   convertTransformer,
@@ -295,10 +296,7 @@ class TransformStream<I = unknown, O = unknown> {
     // Resolve the previous change promise and mint a fresh one — anyone
     // awaiting the old promise (the sink's write algorithm) proceeds.
     this.#backpressureChange.resolve();
-    const replacement =
-      PromiseWithResolvers() as PromiseWithResolversType<void>;
-    markPromiseHandled(replacement.promise);
-    this.#backpressureChange = replacement;
+    this.#backpressureChange = newHandledPending();
     this.#backpressure = backpressure;
   }
 
@@ -417,10 +415,7 @@ class TransformStream<I = unknown, O = unknown> {
       throw new RangeError('transformer.writableType must be undefined');
     }
 
-    const initialBackpressureChange =
-      PromiseWithResolvers() as PromiseWithResolversType<void>;
-    markPromiseHandled(initialBackpressureChange.promise);
-    this.#backpressureChange = initialBackpressureChange;
+    this.#backpressureChange = newHandledPending();
 
     // Both inner streams' start algorithms return THIS promise, so
     // neither side processes anything until transformer.start()

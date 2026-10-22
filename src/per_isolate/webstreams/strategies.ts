@@ -26,6 +26,23 @@ const countSize = {
   },
 }.size;
 
+// Converts init as WebIDL converts a QueuingStrategyInit dictionary, to its
+// one member. The type is optional-shaped because user input is arbitrary;
+// the required-member check is the explicit TypeError below. A dictionary
+// with a required member cannot be converted from undefined or null.
+function convertQueuingStrategyInit(init: { highWaterMark?: number }): number {
+  requireObject(init, 'init must be an object');
+  // Read once, as WebIDL dictionary conversion reads each member once.
+  const highWaterMark = init.highWaterMark;
+  if (highWaterMark === undefined) {
+    throw new TypeError('init.highWaterMark is required');
+  }
+  // No range validation: per spec (and WPT), bogus values like NaN or -1
+  // are accepted here and only rejected by ExtractHighWaterMark at stream
+  // construction time.
+  return +highWaterMark;
+}
+
 let assertIsByteLengthQueuingStrategy: (
   value: ByteLengthQueuingStrategy
 ) => void;
@@ -43,20 +60,8 @@ class ByteLengthQueuingStrategy {
     };
   }
 
-  // The init type is optional-shaped because user input is arbitrary; the
-  // required-member check is the explicit TypeError below. A dictionary with
-  // a required member cannot be converted from undefined or null.
   constructor(init: { highWaterMark?: number }) {
-    requireObject(init, 'init must be an object');
-    // Read once, as WebIDL dictionary conversion reads each member once.
-    const highWaterMark = init.highWaterMark;
-    if (highWaterMark === undefined) {
-      throw new TypeError('init.highWaterMark is required');
-    }
-    // Stored as-converted WITHOUT range validation: per spec (and WPT),
-    // bogus values like NaN or -1 are accepted here and only rejected by
-    // ExtractHighWaterMark at stream construction time.
-    this.#highWaterMark = +highWaterMark;
+    this.#highWaterMark = convertQueuingStrategyInit(init);
   }
 
   get highWaterMark(): number {
@@ -81,13 +86,7 @@ class CountQueuingStrategy {
   }
 
   constructor(init: { highWaterMark?: number }) {
-    requireObject(init, 'init must be an object');
-    // Read once, as WebIDL dictionary conversion reads each member once.
-    const highWaterMark = init.highWaterMark;
-    if (highWaterMark === undefined) {
-      throw new TypeError('init.highWaterMark is required');
-    }
-    this.#highWaterMark = +highWaterMark;
+    this.#highWaterMark = convertQueuingStrategyInit(init);
   }
 
   get highWaterMark(): number {
