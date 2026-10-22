@@ -1,0 +1,17 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "aee976651526bad885b7b453e0617d5d3a96f017",
+  "prompts": {},
+  "sessions": {
+    "s_3488509ab9ca81": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e9ca41772ffed1IjkJIOSBbjP5",
+        "model": "@cf/zai-org/glm-5.3-flash"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}
