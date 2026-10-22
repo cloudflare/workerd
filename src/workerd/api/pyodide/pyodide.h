@@ -74,10 +74,17 @@ class ReadOnlyBuffer: public jsg::Object {
  public:
   ReadOnlyBuffer(kj::ArrayPtr<const kj::byte> src): source(src) {};
 
+  // Returns a reader over the bytes of the data module named `name` in a Pyodide bundle. The bytes
+  // stay in the process-wide bundle message, so every isolate shares them.
+  static jsg::Ref<ReadOnlyBuffer> fromBundleDataModule(
+      jsg::Lock& js, jsg::Bundle::Reader bundle, kj::StringPtr name);
+
   uint32_t read(jsg::Lock& js, uint64_t offset, kj::Array<kj::byte> buf);
+  uint32_t getSize();
 
   JSG_RESOURCE_TYPE(ReadOnlyBuffer) {
     JSG_METHOD(read);
+    JSG_METHOD(getSize);
   }
 };
 

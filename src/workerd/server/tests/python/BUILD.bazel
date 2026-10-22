@@ -94,6 +94,8 @@ py_wd_test("pth-file")
 
 py_wd_test("metadata-read-overflow")
 
+py_wd_test("stdlib-zip")
+
 js_binary(
     name = "socket-server",
     entry_point = "sockets/socket-server.js",
