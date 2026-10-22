@@ -1145,6 +1145,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     options: ReadableStreamBYOBReaderReadOptions = kNullProtoObject as ReadableStreamBYOBReaderReadOptions
   ): Promise<ReadableStreamReadResult<T>> {
     try {
+      assertIsReadableStreamBYOBReader(this);
       return this.#read(view, options);
     } catch (e) {
       // A foreign `this`: the brand check throws, and promise-returning
@@ -1269,6 +1270,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     view: T
   ): Promise<ReadableStreamReadResult<T>> {
     try {
+      assertIsReadableStreamBYOBReader(this);
       return this.#read(view, { min: minElements });
     } catch (e) {
       return PromiseReject(e);

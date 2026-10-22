@@ -3,11 +3,11 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // Reader members called with a reader of another class as `this` fail
-// WebIDL's brand check with a TypeError and leave that reader as it was
-// (parity). TypeScript rejects from the members that return a promise, as
-// WebIDL has them; C++ throws from every member, the shape WPT's
-// idlharness pins for a plain `this`. Under TS the draining reader is
-// checked too, as the owner of the members and as `this`.
+// WebIDL's brand check with a TypeError 'Illegal invocation' and leave that
+// reader as it was (parity). TypeScript rejects from the members that
+// return a promise, as WebIDL has them; C++ throws from every member, the
+// shape WPT's idlharness pins for a plain `this`. Under TS the draining
+// reader is checked too, as the owner of the members and as `this`.
 
 /* global ReadableStreamDrainingReader */
 
@@ -79,13 +79,26 @@ async function assertUntouched(s) {
 // fails.
 const PROMISE_MEMBERS = new Set(['closed', 'cancel', 'read', 'readAtLeast']);
 
+// C++ adds a pointer to its documentation after the colon.
+const ILLEGAL_INVOCATION = {
+  name: 'TypeError',
+  message: /^Illegal invocation/,
+};
+
+// Without its brand check, a read acts on the other reader and stays
+// pending; it resolves 'pending' here, so the test names the member rather
+// than hanging.
+function settledOrPending(promise) {
+  return Promise.race([promise, scheduler.wait(250).then(() => 'pending')]);
+}
+
 async function checkMember(owner, name, kind) {
   const s = readerOf(kind);
   const call = () => invoke(owner, name, s.reader);
   if (usingTsImpl && PROMISE_MEMBERS.has(name)) {
-    await rejects(call(), TypeError);
+    await rejects(settledOrPending(call()), ILLEGAL_INVOCATION);
   } else {
-    throws(call, TypeError);
+    throws(call, ILLEGAL_INVOCATION);
   }
   await assertUntouched(s);
 }
