@@ -34,6 +34,11 @@ namespace workerd::jsg {
 static bool v8Initialized = false;
 static V8System::FatalErrorCallback* v8FatalErrorCallback = nullptr;
 static void reportV8FatalError(kj::StringPtr location, kj::StringPtr message) {
+  // https://github.com/v8/v8/blob/main/src/base/logging.cc#L205
+  // V8 sometimes outputs error details before a fatal. Providing a custom fatal
+  // handler skips V8's fflushes, so flushing here helps make sure we see that detail.
+  fflush(stdout);
+  fflush(stderr);
   if (v8FatalErrorCallback == nullptr) {
     KJ_LOG(FATAL, "V8 fatal error", location, message);
     abort();
