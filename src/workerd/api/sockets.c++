@@ -18,9 +18,8 @@
 #include <workerd/jsg/exception.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/strings.h>
 #include <workerd/util/uncaught-exception-source.h>
-
-#include <strings.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <kj/async-queue.h>
@@ -1070,7 +1069,7 @@ kj::Maybe<kj::StringPtr> connectErrnoName(const kj::Exception& exception) {
 kj::Maybe<kj::StringPtr> connectErrnoName(const kj::HttpHeaders& responseHeaders) {
   kj::Maybe<kj::StringPtr> result;
   responseHeaders.forEach([&](kj::StringPtr name, kj::StringPtr value) {
-    if (result == kj::none && strcasecmp(name.cStr(), "proxy-status") == 0) {
+    if (result == kj::none && strcaseeq(name, "proxy-status"_kj)) {
       result = proxyStatusErrno(value);
     }
   });

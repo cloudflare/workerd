@@ -312,7 +312,7 @@ KJ_TEST("connect failure exceptions map to errno names") {
 kj::Maybe<kj::StringPtr> errnoForProxyStatus(kj::StringPtr proxyStatus) {
   kj::HttpHeaderTable table;
   kj::HttpHeaders headers(table);
-  headers.add("Proxy-Status", proxyStatus);
+  headers.addPtrPtr("Proxy-Status", proxyStatus);
   return connectErrnoName(headers);
 }
 
@@ -342,7 +342,7 @@ KJ_TEST("Proxy-Status error types map to errno names") {
 
   kj::HttpHeaderTable table;
   kj::HttpHeaders headers(table);
-  headers.add("proxy-status", "p;error=connection_refused");
+  headers.addPtrPtr("proxy-status", "p;error=connection_refused");
   KJ_EXPECT(KJ_ASSERT_NONNULL(connectErrnoName(headers)) == "ECONNREFUSED");
   kj::HttpHeaders none(table);
   KJ_EXPECT(connectErrnoName(none) == kj::none);
