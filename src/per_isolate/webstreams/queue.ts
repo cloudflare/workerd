@@ -2,8 +2,8 @@
 
 // Single-queue / multi-cursor model backing the TypeScript Streams
 // implementation: the QUEUED consumer backend. See the queue/cursor design
-// doc for the full rationale, and native-stream-integration.md §10 for the
-// fence conventions separating this backend from the native one.
+// doc for the full rationale, and webstreams/AGENTS.md for the fence
+// conventions separating this backend from the native one.
 //
 // One StreamQueue per controller holds each chunk exactly once. Every
 // consumer (the stream itself, and each tee branch) owns a QueueCursor — a
@@ -80,7 +80,6 @@ const {
   PromisePrototypeThen,
   PromiseResolve,
   PromiseWithResolvers,
-  ReflectConstruct,
   Symbol,
   TypeError,
   TypedArrayPrototypeSet,
@@ -266,6 +265,31 @@ function fractionalFillError(): TypeError {
   return new TypeError('Insufficient bytes to fill elements in the given view');
 }
 
+// A pull-into's filled bytes as a view of the read's own type, which its
+// read resolves with. The length is in ELEMENTS (bytesFilled /
+// elementSize): passing bytes happens to work for Uint8Array and is wrong
+// for every other view type. For DataView, elementSize is 1 and its length
+// parameter is in bytes, so the same expression holds.
+export function filledView(desc: PullIntoDescriptor): ArrayBufferView {
+  // assert: desc.bytesFilled % desc.elementSize === 0
+  // assert: desc.bytesFilled <= desc.byteLength
+  return new desc.viewCtor(
+    desc.buffer,
+    desc.byteOffset,
+    desc.bytesFilled / desc.elementSize
+  );
+}
+
+// The rest of a pull-into's buffer, still to be filled: the view a
+// byobRequest exposes to the source.
+export function unfilledView(desc: PullIntoDescriptor): Uint8Array {
+  return new Uint8Array(
+    desc.buffer,
+    desc.byteOffset + desc.bytesFilled,
+    desc.byteLength - desc.bytesFilled
+  );
+}
+
 // ---------------------------------------------------------------------------
 // The consumer interface (the FENCE between backends)
 //
@@ -273,8 +297,7 @@ function fractionalFillError(): TypeError {
 // remain backend-blind: it never knows whether it is talking to the queued
 // cursor machinery in this file or the native pull conduit (native.ts).
 // All backend divergence lives behind this interface or at the five
-// enumerated BACKEND-DISPATCH points (see native-stream-integration.md
-// §10 "Fences and signposts").
+// enumerated BACKEND-DISPATCH points (see webstreams/AGENTS.md).
 
 export interface StreamConsumer<V> {
   // Submit a default read. Per-reader FIFO; reader identity enables
@@ -299,14 +322,6 @@ export interface StreamConsumer<V> {
   drain(maxSize?: number): { chunks: V[]; done: boolean };
   // Reject pending reads submitted by a specific reader (lock release).
   cancelReadsForReader(reader: object, reason: unknown): void;
-  // Reject all pending reads (stream ERROR path only).
-  errorAllReads(reason: unknown): void;
-  // Resolve all pending reads as done (stream CANCEL path).
-  resolveAllReadsAsDone(): void;
-  readonly hasPendingRead: boolean;
-  // Fulfill the first pending read directly with a value, skipping the queue.
-  // Spec ReadableStreamFulfillReadRequest: shift + chunk steps.
-  fulfillFirstPendingRead(value: V): void;
   // Stream-cancel teardown. The STREAM layer owns the source-cancel policy
   // (tee composite hooks vs direct controller cancel) and passes it as
   // `decideSourceCancel`, invoked with whether this consumer is the last
@@ -326,14 +341,6 @@ export interface ByteStreamConsumer extends StreamConsumer<Uint8Array> {
   readBYOB(
     desc: PullIntoDescriptor
   ): Promise<ReadableStreamReadResult<ArrayBufferView>>;
-  readonly headPullInto: PullIntoDescriptor | undefined;
-  readonly pendingPullIntoView: Uint8Array | undefined;
-  respondBYOB(bytesWritten: number): void;
-  commitPullIntosOnClose(): void;
-  // Spec step 9.3: if the head descriptor is an auto-allocate
-  // (readerType 'default'), shift it out and return it so the controller
-  // can fulfill the read directly from the enqueued chunk.
-  shiftAutoAllocateDescriptor(): PullIntoDescriptor | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -797,6 +804,8 @@ class QueueCursor<T, V = T> implements StreamConsumer<V> {
     return false;
   }
 
+  // Fulfill the first pending read directly with a value, skipping the queue.
+  // Spec ReadableStreamFulfillReadRequest: shift + chunk steps.
   fulfillFirstPendingRead(value: V): void {
     const pending = this.#pendingReads.shift() as PendingRead<V>;
     pending.resolve(createReadResult(value, false));
@@ -1114,11 +1123,7 @@ class ByteStreamCursor
   get pendingPullIntoView(): Uint8Array | undefined {
     const head = this.#pendingPullIntos.peek();
     if (head === undefined) return undefined;
-    return new Uint8Array(
-      head.buffer,
-      head.byteOffset + head.bytesFilled,
-      head.byteLength - head.bytesFilled
-    );
+    return unfilledView(head);
   }
 
   // The callback through which the stream layer receives fractional-
@@ -1315,7 +1320,7 @@ class ByteStreamCursor
     if (this.#pendingPullIntos.length === 0) {
       this.#fillFromQueue(desc);
       if (desc.bytesFilled >= desc.minimumFill) {
-        desc.resolve(createReadResult(this.#convert(desc), false));
+        desc.resolve(createReadResult(filledView(desc), false));
         return desc.promise;
       }
       if (this.queue.getEntry(this.position) === CLOSE_SENTINEL) {
@@ -1357,7 +1362,7 @@ class ByteStreamCursor
       filledPullIntos = [
         {
           desc: committed,
-          result: createReadResult(this.#convert(committed), false),
+          result: createReadResult(filledView(committed), false),
         },
       ];
     }
@@ -1416,7 +1421,7 @@ class ByteStreamCursor
       if (filledPullIntos === undefined) filledPullIntos = [];
       ArrayPrototypePush(filledPullIntos, {
         desc: head,
-        result: createReadResult(this.#convert(head), false),
+        result: createReadResult(filledView(head), false),
       });
     }
     // Phase 2: resolve all filled descriptors after the fill loop.
@@ -1504,7 +1509,7 @@ class ByteStreamCursor
         // assert: desc.bytesFilled % desc.elementSize === 0 (fractional
         // fills errored the stream before settlement could be scheduled)
         desc.buffer = ArrayBufferPrototypeTransferToFixedLength(desc.buffer);
-        const view = this.#convert(desc);
+        const view = filledView(desc);
         desc.settledAtEndOfData = true;
         result =
           desc.bytesFilled > 0
@@ -1631,7 +1636,7 @@ class ByteStreamCursor
       // end-of-data paths set readerType to 'none').
       if (desc.readerType === 'none') return;
       // assert: desc.bytesFilled % desc.elementSize === 0
-      desc.resolve(createReadResult(this.#convert(desc), true));
+      desc.resolve(createReadResult(filledView(desc), true));
     });
   }
 
@@ -1687,24 +1692,6 @@ class ByteStreamCursor
       pending.push(head);
     }
     super.cancelReadsForReader(reader, reason);
-  }
-
-  // The ONLY place result views are built. Construction count is in
-  // ELEMENTS (bytesFilled / elementSize) — passing bytes happens to work
-  // for Uint8Array and is wrong for every other view type. For DataView,
-  // elementSize is 1 and its length parameter is in bytes, so the same
-  // expression holds.
-  #convert(
-    desc: PullIntoDescriptor,
-    buffer: ArrayBuffer = desc.buffer
-  ): ArrayBufferView {
-    // assert: desc.bytesFilled % desc.elementSize === 0
-    // assert: desc.bytesFilled <= desc.byteLength
-    return ReflectConstruct(desc.viewCtor, [
-      buffer,
-      desc.byteOffset,
-      desc.bytesFilled / desc.elementSize,
-    ]);
   }
 
   // Fill `desc` from the queue starting at (position, byteOffset). Mirrors
@@ -1790,8 +1777,10 @@ module.exports = {
   CLOSE_SENTINEL,
   cloneArrayBuffer,
   createReadResult,
+  filledView,
   fractionalFillError,
   hasFractionalFill,
+  unfilledView,
   StreamQueue,
   QueueCursor,
   ByteStreamCursor,

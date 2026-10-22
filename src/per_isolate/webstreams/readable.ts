@@ -110,6 +110,7 @@ const {
   createReadResult,
   fractionalFillError,
   hasFractionalFill,
+  unfilledView,
 } = require('webstreams/queue');
 
 // Internal writable operations for the pipe (never re-exported to users).
@@ -2222,11 +2223,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
         initializeByobRequest(
           request,
           this,
-          new Uint8Array(
-            released.buffer,
-            released.byteOffset + released.bytesFilled,
-            released.byteLength - released.bytesFilled
-          ),
+          unfilledView(released),
           released.minimumFill - released.bytesFilled
         );
         this.#byobRequest = request;
@@ -3612,7 +3609,7 @@ class ReadableStream<R> {
     | ReadableStreamBYOBReaderType
     | undefined;
   // The stream's own CONSUMER — the backend fence (see queue.ts and
-  // native-stream-integration.md §10). A QueueCursor/ByteStreamCursor for
+  // webstreams/AGENTS.md). A QueueCursor/ByteStreamCursor for
   // queued (JS-backed) streams; a NativePullConduit for native streams.
   // The stream owns it (readers only borrow it while locked); created
   // during controller setup, removed on cancel/tee. A queued stream that
@@ -3957,7 +3954,7 @@ class ReadableStream<R> {
     };
 
     // BACKEND-DISPATCH: tee is one of the five sanctioned dispatch points
-    // (native-stream-integration.md §10). The native branch runs first:
+    // (webstreams/AGENTS.md). The native branch runs first:
     // the source's tee hook produces a PAIR of new native source objects
     // (leaving the original source closed), each wrapped in a fresh
     // ReadableStream via ordinary construction. Branches are fully
