@@ -295,6 +295,8 @@ KJ_TEST("os error codes map to errno names") {
 #if _WIN32
   constexpr int refused = 10061, timedOut = 10060, hostUnreach = 10065, netUnreach = 10051;
   KJ_EXPECT(errnoFor("No such host is known. (os error 11001)") == "ENOTFOUND");
+  KJ_EXPECT(errnoFor("The requested name is valid, but no data of the requested type was found. "
+                     "(os error 11004)") == "ENOTFOUND");
   KJ_EXPECT(errnoFor("This is usually a temporary error. (os error 11002)") == "EAI_AGAIN");
 #else
   constexpr int refused = ECONNREFUSED, timedOut = ETIMEDOUT, hostUnreach = EHOSTUNREACH,
@@ -306,6 +308,7 @@ KJ_TEST("os error codes map to errno names") {
   KJ_EXPECT(errnoFor(kj::str("whatever text (os error ", netUnreach, ")")) == "ENETUNREACH");
   KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, "Permission denied (os error 13)")) == kj::none);
   KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, "(os error )")) == kj::none);
+  KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, "(os error 99999999999999999999)")) == kj::none);
 }
 
 KJ_TEST("connect failure exceptions map to errno names") {

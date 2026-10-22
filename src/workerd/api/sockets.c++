@@ -1089,14 +1089,14 @@ kj::Maybe<kj::StringPtr> connectErrnoName(const kj::Exception& exception) {
   // Rust's resolver ("failed to lookup address information: ...").
   KJ_IF_SOME(pos, description.find("(os error "_kj)) {
     auto digits = description.slice(pos + "(os error "_kj.size());
-    int code = 0;
     size_t i = 0;
     while (i < digits.size() && digits[i] >= '0' && digits[i] <= '9') {
-      code = code * 10 + (digits[i] - '0');
       i++;
     }
     if (i > 0 && i < digits.size() && digits[i] == ')') {
-      KJ_IF_SOME(name, osErrorErrnoName(code)) return name;
+      KJ_IF_SOME(code, kj::str(digits.first(i)).tryParseAs<int>()) {
+        KJ_IF_SOME(name, osErrorErrnoName(code)) return name;
+      }
     }
   }
   if (description.contains("Connection refused"_kj)) return "ECONNREFUSED"_kj;
