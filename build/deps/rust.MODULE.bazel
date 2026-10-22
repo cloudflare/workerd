@@ -105,6 +105,26 @@ crate.annotation(
     crate = "rust_icu_sys",
     rustc_env = {"RUST_ICU_MAJOR_VERSION_NUMBER": "78"},
 )
+crate.annotation(
+    # V8's Temporal sources include the crate's diplomat-generated C++ bindings as
+    # "temporal_rs/*.hpp"; //deps/rust:temporal_capi hands them to V8 with the crate.
+    #
+    # Not a triple-quoted string: Windows checkouts convert this file to CRLF line endings, which
+    # would end up in the string and change crate_universe's lockfile digest.
+    additive_build_file_content = "\n".join([
+        "",
+        'load("@rules_cc//cc:cc_library.bzl", "cc_library")',
+        "",
+        "cc_library(",
+        '    name = "cpp_bindings",',
+        '    hdrs = glob(["bindings/cpp/**/*.hpp"]),',
+        '    strip_include_prefix = "bindings/cpp",',
+        ")",
+        "",
+    ]),
+    crate = "temporal_capi",
+    extra_aliased_targets = {"temporal_capi_cpp_bindings": "cpp_bindings"},
+)
 crate.from_cargo(
     # TODO(cleanup): This name is a bit misleading now that we don't vendor. We can clean it up as a
     # followup.
