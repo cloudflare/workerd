@@ -308,7 +308,9 @@ KJ_TEST("os error codes map to errno names") {
   KJ_EXPECT(errnoFor(kj::str("whatever text (os error ", netUnreach, ")")) == "ENETUNREACH");
   KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, "Permission denied (os error 13)")) == kj::none);
   KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, "(os error )")) == kj::none);
-  KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, "(os error 99999999999999999999)")) == kj::none);
+  // Congruent to `refused` modulo 2^32, so wrapping instead of rejecting would misclassify it.
+  auto wrapped = kj::str("(os error ", 4294967296ull + refused, ")");
+  KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, wrapped)) == kj::none);
 }
 
 KJ_TEST("connect failure exceptions map to errno names") {
