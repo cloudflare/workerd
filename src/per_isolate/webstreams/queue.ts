@@ -252,6 +252,20 @@ export interface PullIntoDescriptor {
   reader: object;
 }
 
+// Whether a pull-into's fill ends partway through an element. Once the
+// source closes, no bytes can complete the element, and the close errors
+// the stream with fractionalFillError() instead (spec
+// ReadableByteStreamControllerClose step 4).
+function hasFractionalFill(desc: PullIntoDescriptor): boolean {
+  return desc.bytesFilled % desc.elementSize !== 0;
+}
+
+// The text matches ReadableStreamNativeSource's, for a partial element
+// left at the end of a native body.
+function fractionalFillError(): TypeError {
+  return new TypeError('Insufficient bytes to fill elements in the given view');
+}
+
 // ---------------------------------------------------------------------------
 // The consumer interface (the FENCE between backends)
 //
@@ -1083,8 +1097,7 @@ class ByteStreamCursor
   override get hasFractionalFill(): boolean {
     const pending = this.#pendingPullIntos;
     for (let i = 0; i < pending.length; i++) {
-      const desc = pending.get(i) as PullIntoDescriptor;
-      if (desc.bytesFilled % desc.elementSize !== 0) return true;
+      if (hasFractionalFill(pending.get(i) as PullIntoDescriptor)) return true;
     }
     return false;
   }
@@ -1308,16 +1321,10 @@ class ByteStreamCursor
       if (this.queue.getEntry(this.position) === CLOSE_SENTINEL) {
         // The cursor faces the sentinel: no more data can ever arrive
         // for this descriptor.
-        if (desc.bytesFilled > 0 && desc.bytesFilled % desc.elementSize !== 0) {
-          // Fractional element fill — the remaining bytes can never
-          // complete an element; error the stream immediately.
-          const e = new TypeError(
-            'Insufficient bytes to fill elements in the given view'
-          );
-          if (this.#errorStreamCallback !== undefined) {
-            this.#errorStreamCallback(e, this.ownerDeref());
-          }
-          desc.reject(e);
+        if (hasFractionalFill(desc)) {
+          // The read is not listed yet, so the stream's error does not
+          // reach it.
+          desc.reject(this.#errorStreamForFractionalFill());
           return desc.promise;
         }
         // Element-aligned (possibly empty) fill: settle via the deferred
@@ -1365,7 +1372,8 @@ class ByteStreamCursor
         // element size, the remaining bytes can never complete an element
         // — the stream must be errored with a TypeError (spec
         // ReadableByteStreamControllerClose step 4).
-        if (this.#checkFractionalFillAtClose()) {
+        if (this.hasFractionalFill) {
+          this.#errorStreamForFractionalFill();
           errored = true;
           break;
         }
@@ -1420,22 +1428,16 @@ class ByteStreamCursor
     super.notify();
   }
 
-  // Spec ReadableByteStreamControllerClose step 4: if any pending BYOB
-  // descriptor has a fractional element fill (bytesFilled > 0 but not
-  // element-aligned), the remaining bytes can never form a complete element
-  // — error the stream with TypeError and reject all pending reads. Returns
-  // true if the stream was errored (caller should bail out of notify).
-  #checkFractionalFillAtClose(): boolean {
-    if (!this.hasFractionalFill) return false;
-    const e = new TypeError(
-      'Insufficient bytes to fill elements in the given view'
-    );
+  // Errors the cursor's stream with fractionalFillError(), through the
+  // stream layer's callback, and returns the error. The callback's error
+  // path (the controller's error() or readableStreamErrorBranch) rejects
+  // the listed reads.
+  #errorStreamForFractionalFill(): TypeError {
+    const e = fractionalFillError();
     if (this.#errorStreamCallback !== undefined) {
       this.#errorStreamCallback(e, this.ownerDeref());
     }
-    // errorAllReads is called by the callback's error path (the
-    // controller's error() or readableStreamErrorBranch), not here.
-    return true;
+    return e;
   }
 
   // The deferred end-of-data settlement. Scheduled (once per turn) whenever
@@ -1788,6 +1790,8 @@ module.exports = {
   CLOSE_SENTINEL,
   cloneArrayBuffer,
   createReadResult,
+  fractionalFillError,
+  hasFractionalFill,
   StreamQueue,
   QueueCursor,
   ByteStreamCursor,
