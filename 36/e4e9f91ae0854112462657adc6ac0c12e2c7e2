@@ -1,18 +1,18 @@
+src/workerd/io/compatibility-date.capnp
+  s_9e291bb5d844d4::t_d72f5b62fc8597 601-604
+src/workerd/io/io-context.c++
+  s_9e291bb5d844d4::t_49250c500e4768 1987,1989-1990,1992-2009
+  s_9e291bb5d844d4::t_5f202a102a9f54 2010-2011
+  s_9e291bb5d844d4::t_a572eda06f5981 1986
+src/workerd/api/tests/actor-cross-context-promise-test.js
+  s_9e291bb5d844d4::t_59b67c615bb57a 1-176
 src/workerd/io/io-own.c++
   s_9e291bb5d844d4::t_f82f1c3261117d 72-79,104-108,110-111
   s_9e291bb5d844d4::t_66f011684b3044 109
   s_9e291bb5d844d4::t_02fc2c5d6fd949 112
-src/workerd/io/compatibility-date.capnp
-  s_9e291bb5d844d4::t_d72f5b62fc8597 601-604
-src/workerd/api/tests/actor-cross-context-promise-test.js
-  s_9e291bb5d844d4::t_59b67c615bb57a 1-176
 src/workerd/api/tests/BUILD.bazel
   s_9e291bb5d844d4::t_7441999a2701c8 1317-1320
   s_9e291bb5d844d4::t_1d138b161ef8ef 1315-1316
-src/workerd/io/io-context.c++
-  s_9e291bb5d844d4::t_49250c500e4768 1987,1989-1990,1992-2009
-  s_9e291bb5d844d4::t_a572eda06f5981 1986
-  s_9e291bb5d844d4::t_5f202a102a9f54 2010-2011
 src/workerd/io/io-own.h
   s_9e291bb5d844d4::t_d09e956509622f 95-101,116-119,124,151-155,158-161,173-174
 src/workerd/api/tests/actor-cross-context-promise-test.wd-test
