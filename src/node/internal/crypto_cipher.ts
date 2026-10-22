@@ -60,6 +60,7 @@ import {
   ERR_INVALID_ARG_TYPE,
   ERR_INVALID_ARG_VALUE,
   ERR_MISSING_ARGS,
+  ERR_UNKNOWN_ENCODING,
 } from 'node-internal:internal_errors';
 
 import {
@@ -73,6 +74,8 @@ import {
 } from 'node-internal:crypto';
 
 import { Buffer } from 'node-internal:internal_buffer';
+import { StringDecoder } from 'node-internal:internal_stringdecoder';
+import { getEncodingOps } from 'node-internal:internal_utils';
 
 export interface AADOptions {
   plaintextLength?: number;
@@ -80,6 +83,7 @@ export interface AADOptions {
 }
 
 const kHandle = Symbol('kHandle');
+const kDecoder = Symbol('kDecoder');
 
 const CipherMode: CipherMode = {
   CIPHER: 0,
@@ -88,6 +92,7 @@ const CipherMode: CipherMode = {
 
 export interface Cipheriv extends Transform {
   [kHandle]: CipherHandle | AeadHandle;
+  [kDecoder]?: StringDecoder;
   update(
     data: string | ArrayBuffer | ArrayBufferView,
     inputEncoding?: string,
@@ -104,6 +109,7 @@ export interface Cipheriv extends Transform {
 
 export interface Decipheriv extends Transform {
   [kHandle]: CipherHandle | AeadHandle;
+  [kDecoder]?: StringDecoder;
   update(
     data: string | ArrayBuffer | ArrayBufferView,
     inputEncoding?: string,
@@ -163,6 +169,34 @@ function getIv(
     ['string', 'Buffer', 'TypedArray', 'DataView', 'null'],
     iv
   );
+}
+
+// update() and final() return whatever the cipher has ready, which can end
+// partway through a multi-byte character or a base64 group. String output
+// therefore goes through one StringDecoder per instance, which holds those
+// bytes until the next call. As in Node.js, the decoder is created by the
+// first call that asks for a string, and later calls must use the same
+// encoding.
+function getDecoder(
+  self: Cipheriv | Decipheriv,
+  outputEncoding: string
+): StringDecoder {
+  const encoding = getEncodingOps(outputEncoding);
+  if (encoding === undefined) {
+    throw new ERR_UNKNOWN_ENCODING(outputEncoding);
+  }
+  const decoder = self[kDecoder];
+  if (decoder === undefined) {
+    return (self[kDecoder] = new StringDecoder(outputEncoding));
+  }
+  if (getEncodingOps(decoder.encoding) !== encoding) {
+    throw new ERR_INVALID_ARG_VALUE(
+      'outputEncoding',
+      outputEncoding,
+      `cannot be changed from '${decoder.encoding}'`
+    );
+  }
+  return decoder;
 }
 
 export const Cipheriv = function (
@@ -228,11 +262,11 @@ Cipheriv.prototype.update = function (
     );
   }
 
-  if (outputEncoding === undefined) {
+  if (outputEncoding == null || outputEncoding === 'buffer') {
     return Buffer.from(ret);
   }
 
-  return Buffer.from(ret).toString(outputEncoding);
+  return getDecoder(this, outputEncoding).write(Buffer.from(ret));
 };
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
@@ -241,10 +275,10 @@ Cipheriv.prototype.final = function (
   outputEncoding?: string
 ): string | Buffer {
   const ret = this[kHandle].final();
-  if (outputEncoding === undefined) {
+  if (outputEncoding == null || outputEncoding === 'buffer') {
     return Buffer.from(ret);
   }
-  return Buffer.from(ret).toString(outputEncoding);
+  return getDecoder(this, outputEncoding).end(Buffer.from(ret));
 };
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
@@ -375,11 +409,11 @@ Decipheriv.prototype.update = function (
     );
   }
 
-  if (outputEncoding === undefined) {
+  if (outputEncoding == null || outputEncoding === 'buffer') {
     return Buffer.from(ret);
   }
 
-  return Buffer.from(ret).toString(outputEncoding);
+  return getDecoder(this, outputEncoding).write(Buffer.from(ret));
 };
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
@@ -388,10 +422,10 @@ Decipheriv.prototype.final = function (
   outputEncoding?: string
 ): string | Buffer {
   const ret = this[kHandle].final();
-  if (outputEncoding === undefined) {
+  if (outputEncoding == null || outputEncoding === 'buffer') {
     return Buffer.from(ret);
   }
-  return Buffer.from(ret).toString(outputEncoding);
+  return getDecoder(this, outputEncoding).end(Buffer.from(ret));
 };
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access

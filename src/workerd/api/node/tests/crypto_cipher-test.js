@@ -157,6 +157,155 @@ export const largeData = {
   },
 };
 
+// update() and final() each return as many bytes as the cipher has ready,
+// which need not end on a base64 group or a character boundary. With a string
+// output encoding, the concatenated results must equal the encoding of the
+// whole output, as in Node.js.
+export const cipherivStringOutputAcrossCalls = {
+  test() {
+    const key = Buffer.alloc(32, 1);
+    const iv = Buffer.alloc(16, 2);
+    // 43 bytes: update() returns 32 bytes and final() returns 16.
+    const text = 'The quick brown fox jumps over the lazy dog';
+
+    const c = createCipheriv('aes-256-cbc', key, iv);
+    const ciphertext = Buffer.concat([c.update(text, 'utf8'), c.final()]);
+
+    for (const encoding of ['base64', 'base64url']) {
+      const cipher = createCipheriv('aes-256-cbc', key, iv);
+      const encrypted =
+        cipher.update(text, 'utf8', encoding) + cipher.final(encoding);
+      strictEqual(encrypted, ciphertext.toString(encoding));
+
+      const decipher = createDecipheriv('aes-256-cbc', key, iv);
+      const decrypted =
+        decipher.update(encrypted, encoding, 'utf8') + decipher.final('utf8');
+      strictEqual(decrypted, text);
+    }
+
+    // A stream mode returns every byte from update(), so the split also
+    // happens between two update() calls.
+    const parts = ['a'.repeat(20), 'b'.repeat(20)];
+    const gcm = createCipheriv('aes-256-gcm', key, iv);
+    const raw = Buffer.concat([
+      ...parts.map((p) => gcm.update(p, 'utf8')),
+      gcm.final(),
+    ]);
+
+    const cipher = createCipheriv('aes-256-gcm', key, iv);
+    let encrypted = '';
+    for (const p of parts) encrypted += cipher.update(p, 'utf8', 'base64');
+    encrypted += cipher.final('base64');
+    strictEqual(encrypted, raw.toString('base64'));
+
+    const decipher = createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(cipher.getAuthTag());
+    const decrypted =
+      decipher.update(encrypted, 'base64', 'utf8') + decipher.final('utf8');
+    strictEqual(decrypted, parts.join(''));
+  },
+};
+
+export const decipherivUtf8OutputAcrossCalls = {
+  test() {
+    const key = Buffer.alloc(32, 1);
+    const iv = Buffer.alloc(16, 2);
+    // 18 bytes: the 16 bytes that update() returns end inside the sixth
+    // character, whose last two bytes come from final().
+    const text = '€'.repeat(6);
+
+    const cipher = createCipheriv('aes-256-cbc', key, iv);
+    const encrypted = Buffer.concat([
+      cipher.update(text, 'utf8'),
+      cipher.final(),
+    ]);
+
+    const decipher = createDecipheriv('aes-256-cbc', key, iv);
+    const decrypted =
+      decipher.update(encrypted, undefined, 'utf8') + decipher.final('utf-8');
+    strictEqual(decrypted, text);
+  },
+};
+
+export const cipherivOutputEncodingCannotChange = {
+  test() {
+    const key = Buffer.alloc(32, 1);
+    const iv = Buffer.alloc(16, 2);
+
+    const cipher = createCipheriv('aes-256-cbc', key, iv);
+    cipher.update('Hello World', 'utf8', 'hex');
+    throws(() => cipher.final('base64'), {
+      code: 'ERR_INVALID_ARG_VALUE',
+      message:
+        "The argument 'outputEncoding' cannot be changed from 'hex'. Received 'base64'",
+    });
+
+    const decipher = createDecipheriv('aes-256-cbc', key, iv);
+    decipher.update(Buffer.alloc(16), undefined, 'utf8');
+    throws(() => decipher.update(Buffer.alloc(16), undefined, 'latin1'), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+  },
+};
+
+// As in Node.js, an output encoding of null or 'buffer' returns a Buffer, as no
+// output encoding does, also from a call that has no bytes to return.
+export const cipherivBufferOutputEncoding = {
+  test() {
+    const key = Buffer.alloc(32, 1);
+    const iv = Buffer.alloc(16, 2);
+    // 11 bytes: the cipher's update() returns no bytes and its final() returns
+    // one 16-byte block. The decipher's update() keeps that block back until
+    // final() has checked the padding, so it also returns no bytes.
+    const text = 'Hello World';
+
+    const c = createCipheriv('aes-256-cbc', key, iv);
+    const ciphertext = Buffer.concat([c.update(text, 'utf8'), c.final()]);
+
+    for (const encoding of [null, 'buffer']) {
+      const cipher = createCipheriv('aes-256-cbc', key, iv);
+      deepStrictEqual(cipher.update(text, 'utf8', encoding), Buffer.alloc(0));
+      deepStrictEqual(cipher.final(encoding), ciphertext);
+
+      const decipher = createDecipheriv('aes-256-cbc', key, iv);
+      deepStrictEqual(
+        decipher.update(ciphertext, undefined, encoding),
+        Buffer.alloc(0)
+      );
+      deepStrictEqual(decipher.final(encoding), Buffer.from(text));
+    }
+  },
+};
+
+// Stream modes and AEAD ciphers return every byte from update(), so final()
+// has no bytes to return, here after string output from update().
+export const cipherivBufferOutputEncodingStreamFinal = {
+  test() {
+    const key = Buffer.alloc(32, 1);
+    const text = 'Hello World';
+
+    for (const [algorithm, ivLength] of [
+      ['aes-256-gcm', 12],
+      ['aes-256-ctr', 16],
+      ['chacha20-poly1305', 12],
+    ]) {
+      const iv = Buffer.alloc(ivLength, 2);
+      for (const encoding of [null, 'buffer']) {
+        const cipher = createCipheriv(algorithm, key, iv);
+        const encrypted = cipher.update(text, 'utf8', 'hex');
+        deepStrictEqual(cipher.final(encoding), Buffer.alloc(0));
+
+        const decipher = createDecipheriv(algorithm, key, iv);
+        if (algorithm !== 'aes-256-ctr') {
+          decipher.setAuthTag(cipher.getAuthTag());
+        }
+        strictEqual(decipher.update(encrypted, 'hex', 'utf8'), text);
+        deepStrictEqual(decipher.final(encoding), Buffer.alloc(0));
+      }
+    }
+  },
+};
+
 export const publicEncryptPrivateDecrypt = {
   test(_, env) {
     const pub = createPublicKey(env['rsa_public.pem']);
