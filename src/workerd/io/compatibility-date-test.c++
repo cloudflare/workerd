@@ -649,7 +649,7 @@ KJ_TEST("compatibility dates must be Tuesday, Wednesday, or Thursday") {
     "removeNodejsCompatEOLv22"_kj,       // 2027-04-30 (Friday) via impliedByAfterDate
     "removeNodejsCompatEOLv24"_kj,       // 2028-04-30 (Sunday) via impliedByAfterDate
 
-    // Scheduled default enablement on November 1, 2026 (Sunday).
+    // Scheduled default enablement on November 8, 2026 (Sunday).
     "newModuleRegistry"_kj,
   });
 
