@@ -57,6 +57,9 @@ WD_STRONG_BOOL(IoContext_Runnable_Exceptional);
 // Whether the caller awaits a subrequest with its next awaitIo(), so that the subrequest span's
 // async trace operation may be adopted by it. See SubrequestOptions::spanAwaitedNext.
 WD_STRONG_BOOL(SpanAwaitedNext);
+// Whether IoContext::cancelPendingWork() also clears `tasks`, which in an actor holds the
+// abortWhen() watchers.
+WD_STRONG_BOOL(ClearTasks);
 
 [[noreturn]] void throwExceededMemoryLimit(bool isActor);
 
@@ -1352,6 +1355,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // need to be held externally but which should error if the IoContext is canceled. This is used
   // for `makeReentryCallback()` in particular.
   kj::Canceler canceler;
+
+  // Cancels the work that could still run JavaScript: reentry callbacks, timers, wait-until tasks
+  // and, if `clearTasks`, `tasks`. A canceled promise's destructor may throw; this keeps canceling
+  // and returns the first exception, so the caller decides whether to rethrow, log or ignore it.
+  // `makeReason` is only called if there are reentry callbacks to cancel, so that the common case
+  // doesn't allocate an exception.
+  kj::Maybe<kj::Exception> cancelPendingWork(
+      kj::FunctionParam<kj::Exception()> makeReason, ClearTasks clearTasks);
 
   kj::Own<WorkerInterface> getSubrequestChannelImpl(uint channel,
       bool isInHouse,
