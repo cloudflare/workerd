@@ -214,6 +214,9 @@ const kIsClosedPromise: symbol = SymbolFor('nodejs.webstream.isClosedPromise');
 const kControllerErrorFunction: symbol = SymbolFor(
   'nodejs.webstream.controllerErrorFunction'
 );
+// Settles the interop closed-promise, if one was requested, once the
+// stream's state is terminal.
+let settleWritableStreamClosedPromise: StreamOp<[], void>;
 let setWritableStreamPendingClosure: StreamOp<[], void>;
 let isWritableStreamPendingClosure: StreamOp<[], boolean>;
 // Permanently neutralizes a stream on behalf of the C++ bridge (e.g. a
@@ -338,9 +341,7 @@ class WritableStream<W = unknown> {
       return isActualObject(value) && #state in value;
     };
 
-    // Settles the interop closed-promise (if one was requested) to match the
-    // terminal state just entered.
-    const settleClosedPromise = <W>(stream: WritableStream<W>): void => {
+    settleWritableStreamClosedPromise = (stream) => {
       const closed = stream.#closedPromise;
       if (closed === undefined) return;
       if (stream.#state === 'closed') {
@@ -348,6 +349,17 @@ class WritableStream<W = unknown> {
       } else if (stream.#state === 'errored') {
         closed.reject(stream.#storedError);
       }
+    };
+
+    // Enters 'closed' or 'errored', settling the interop closed-promise and
+    // dropping the interop error hook (see the fields).
+    const enterTerminalState = <W>(
+      stream: WritableStream<W>,
+      state: 'closed' | 'errored'
+    ): void => {
+      stream.#state = state;
+      settleWritableStreamClosedPromise(stream);
+      stream.#interopErrorHook = undefined;
     };
 
     setWritableStreamPendingClosure = <W>(stream: WritableStream<W>) => {
@@ -458,9 +470,7 @@ class WritableStream<W = unknown> {
         inFlight.reject(reason);
       }
       stream.#writeRequests.drain((request) => request.reject(reason));
-      stream.#state = 'closed';
-      settleClosedPromise(stream);
-      stream.#interopErrorHook = undefined;
+      enterTerminalState(stream, 'closed');
       // Permanently lock via an internal writer (never exposed, never
       // released), leaving the stream unusable for further writes.
       new WritableStreamDefaultWriter<W>(stream);
@@ -543,17 +553,19 @@ class WritableStream<W = unknown> {
       return promise;
     };
 
+    // Both close() methods' closing check, then WritableStreamClose. The
+    // closing check comes first: a close queued ahead of an abort stays
+    // queued after the stream has become 'errored', until the sink's
+    // abort() settles.
     writableStreamCloseInternal = <W>(stream: WritableStream<W>) => {
+      if (writableStreamCloseQueuedOrInFlight(stream)) {
+        return PromiseReject(new TypeError('Stream is already closing'));
+      }
       const state = stream.#state;
       if (state === 'closed' || state === 'errored') {
         return PromiseReject(
           new TypeError('Cannot close a stream that is closed or errored')
         );
-      }
-      // Caller (writer.close / stream.close) has rejected the
-      // close-queued-or-in-flight case already; assert-not anyway.
-      if (writableStreamCloseQueuedOrInFlight(stream)) {
-        return PromiseReject(new TypeError('Stream is already closing'));
       }
       const request = PromiseWithResolvers() as PromiseWithResolversType<void>;
       stream.#closeRequest = request;
@@ -618,9 +630,7 @@ class WritableStream<W = unknown> {
 
     const writableStreamFinishErroring = <W>(stream: WritableStream<W>) => {
       // assert: state 'erroring', no operations in flight
-      stream.#state = 'errored';
-      settleClosedPromise(stream);
-      stream.#interopErrorHook = undefined;
+      enterTerminalState(stream, 'errored');
       const storedError = stream.#storedError;
       const controller = stream.#controller;
       if (controller !== undefined) {
@@ -728,9 +738,7 @@ class WritableStream<W = unknown> {
           stream.#pendingAbortRequest = undefined;
         }
       }
-      stream.#state = 'closed';
-      settleClosedPromise(stream);
-      stream.#interopErrorHook = undefined;
+      enterTerminalState(stream, 'closed');
       const writer = stream.#writer;
       if (writer !== undefined) {
         writerResolveClosedPromise(writer);
@@ -839,9 +847,6 @@ class WritableStream<W = unknown> {
       if (isWritableStreamLocked(this)) {
         throw new TypeError('Cannot close a stream that is locked');
       }
-      if (writableStreamCloseQueuedOrInFlight(this)) {
-        throw new TypeError('Stream is already closing');
-      }
       return writableStreamCloseInternal(this);
     } catch (e) {
       return PromiseReject(e);
@@ -862,11 +867,7 @@ class WritableStream<W = unknown> {
     if (closed === undefined) {
       closed = newHandledPending();
       this.#closedPromise = closed;
-      if (this.#state === 'closed') {
-        closed.resolve();
-      } else if (this.#state === 'errored') {
-        closed.reject(this.#storedError);
-      }
+      settleWritableStreamClosedPromise(this);
     }
     return { promise: closed.promise };
   }
@@ -1187,17 +1188,11 @@ class WritableStreamDefaultController<
 
   error(reason: unknown = undefined): void {
     assertIsWritableStreamDefaultController(this);
-    if (getWritableStreamState(this.#stream) !== 'writable') return;
-    this.#errorStream(reason);
+    this.#errorIfNeeded(reason);
   }
 
   #errorIfNeeded(error: unknown): void {
-    if (getWritableStreamState(this.#stream) === 'writable') {
-      this.#errorStream(error);
-    }
-  }
-
-  #errorStream(error: unknown): void {
+    if (getWritableStreamState(this.#stream) !== 'writable') return;
     // WritableStreamDefaultControllerError: clear algorithms, start erroring.
     // Note: the queue is NOT cleared here — it is cleared later during
     // WritableStreamFinishErroring (via controllerErrorSteps).
@@ -1332,6 +1327,13 @@ class WritableStreamDefaultController<
 
 // ---------------------------------------------------------------------------
 // WritableStreamDefaultWriter
+
+// What a released writer's operations reject or throw with, and what
+// releaseLock() rejects the writer's ready and closed promises with.
+function releasedWriterError(): TypeError {
+  return new TypeError('This writer has been released');
+}
+
 let assertIsWritableStreamDefaultWriter: <W>(
   self: WritableStreamDefaultWriter<W>
 ) => void;
@@ -1368,7 +1370,7 @@ class WritableStreamDefaultWriter<
     ) => {
       const stream = writer.#stream;
       if (stream === undefined) {
-        return PromiseReject(new TypeError('This writer has been released'));
+        return PromiseReject(releasedWriterError());
       }
       // The pending-closure gate (see #pendingClosure): checked before the
       // size algorithm runs, so no user code executes for a write against a
@@ -1393,7 +1395,7 @@ class WritableStreamDefaultWriter<
       // Step 5: Re-check writer.[[stream]] — size() may have called
       // releaseLock().
       if (writer.#stream !== stream) {
-        return PromiseReject(new TypeError('This writer has been released'));
+        return PromiseReject(releasedWriterError());
       }
 
       // Steps 6–9: State checks (AFTER size ran).
@@ -1427,7 +1429,7 @@ class WritableStreamDefaultWriter<
     ) => {
       const stream = writer.#stream;
       if (stream === undefined) {
-        return PromiseReject(new TypeError('This writer has been released'));
+        return PromiseReject(releasedWriterError());
       }
       return writableStreamAbort(stream, reason);
     };
@@ -1435,10 +1437,7 @@ class WritableStreamDefaultWriter<
     writerCloseInternal = <W>(writer: WritableStreamDefaultWriter<W>) => {
       const stream = writer.#stream;
       if (stream === undefined) {
-        return PromiseReject(new TypeError('This writer has been released'));
-      }
-      if (writableStreamCloseQueuedOrInFlight(stream)) {
-        return PromiseReject(new TypeError('Stream is already closing'));
+        return PromiseReject(releasedWriterError());
       }
       return writableStreamCloseInternal(stream);
     };
@@ -1446,7 +1445,7 @@ class WritableStreamDefaultWriter<
     writerReleaseInternal = <W>(writer: WritableStreamDefaultWriter<W>) => {
       const stream = writer.#stream;
       if (stream === undefined) return;
-      const releaseError = new TypeError('This writer has been released');
+      const releaseError = releasedWriterError();
       writerEnsureReadyPromiseRejected(writer, releaseError);
       writerEnsureClosedPromiseRejected(writer, releaseError);
       setWritableStreamWriter(stream, undefined);
@@ -1545,7 +1544,7 @@ class WritableStreamDefaultWriter<
     assertIsWritableStreamDefaultWriter(this);
     const stream = this.#stream;
     if (stream === undefined) {
-      throw new TypeError('This writer has been released');
+      throw releasedWriterError();
     }
     const state = getWritableStreamState(stream);
     if (state === 'errored' || state === 'erroring') return null;
@@ -1557,11 +1556,7 @@ class WritableStreamDefaultWriter<
   abort(reason: unknown = undefined): Promise<void> {
     try {
       assertIsWritableStreamDefaultWriter(this);
-      const stream = this.#stream;
-      if (stream === undefined) {
-        throw new TypeError('This writer has been released');
-      }
-      return writableStreamAbort(stream, reason);
+      return writerAbortInternal(this, reason);
     } catch (e) {
       return PromiseReject(e);
     }
@@ -1570,9 +1565,6 @@ class WritableStreamDefaultWriter<
   close(): Promise<void> {
     try {
       assertIsWritableStreamDefaultWriter(this);
-      if (this.#stream === undefined) {
-        throw new TypeError('This writer has been released');
-      }
       return writerCloseInternal(this);
     } catch (e) {
       return PromiseReject(e);
@@ -1602,7 +1594,7 @@ function writerCloseWithErrorPropagation<W>(
 ): Promise<void> {
   const stream = getWriterStream(writer);
   if (stream === undefined) {
-    return PromiseReject(new TypeError('This writer has been released'));
+    return PromiseReject(releasedWriterError());
   }
   const state = getWritableStreamState(stream);
   if (writableStreamCloseQueuedOrInFlight(stream) || state === 'closed') {

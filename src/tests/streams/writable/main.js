@@ -59,6 +59,7 @@ export {
 export {
   writableStreamCloseThrowRejectsPromises,
   writerDoubleClose,
+  closeWhileQueuedCloseAwaitsAbort,
 } from 'close-semantics';
 
 export {
@@ -138,3 +139,5 @@ export {
 } from 'pollution';
 
 export { writerPromisesAreMarkedHandled } from 'unhandled-rejection';
+
+export { releasedWriterMembers } from 'released-writer';
