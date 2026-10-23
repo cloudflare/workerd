@@ -395,7 +395,7 @@ class NullLimitEnforcer final: public LimitEnforcer, public kj::Refcounted {
   kj::Promise<void> onLimitsExceeded() override {
     return kj::NEVER_DONE;
   }
-  void setCpuLimitNearlyExceededCallback(kj::Function<void(void)> cb) override {}
+  void setCpuLimitNearlyExceededCallback(kj::Function<void()> cb) override {}
   void requireLimitsNotExceeded() override {}
   void reportMetrics(RequestObserver& requestMetrics) override {}
   kj::Duration consumeTimeElapsedForPeriodicLogging() override {
@@ -802,7 +802,7 @@ class RustIoChannelFactory final: public IoChannelFactory {
     auto client = kj::newHttpClient(*service);
     kj::HttpHeaderTable table;
     kj::HttpHeaders headers(table);
-    headers.set(kj::HttpHeaderId::CONTENT_TYPE, "application/json");
+    headers.setPtr(kj::HttpHeaderId::CONTENT_TYPE, "application/json");
     capnp::MallocMessageBuilder message;
     auto object = message.initRoot<capnp::JsonValue>();
     auto fields = object.initObject(request.audience == kj::none ? 0 : 1);
@@ -815,7 +815,11 @@ class RustIoChannelFactory final: public IoChannelFactory {
     co_await http.body->write(json.asBytes());
     http.body = nullptr;
     auto response = co_await http.response;
-    JSG_REQUIRE(response.statusCode == 200, Error, "Local OIDC token issuance failed.");
+    kj::StringPtr errorCode;
+    response.headers->forEach([&](kj::StringPtr name, kj::StringPtr value) {
+      if (toLower(name.asArray()) == "x-workers-oidc-error") errorCode = kj::mv(value);
+    });
+    requireLocalOidcSuccess(response.statusCode, errorCode);
     JSG_REQUIRE(response.headers->get(kj::HttpHeaderId::CONTENT_TYPE).orDefault("") == "text/plain",
         Error, "Invalid local OIDC token response.");
     auto token = co_await response.body->readAllText(64 * 1024);
@@ -835,6 +839,41 @@ class RustIoChannelFactory final: public IoChannelFactory {
     }
     JSG_REQUIRE(dots == 2 && segment, Error, "Invalid local OIDC token response.");
     co_return token;
+  }
+
+  static void requireLocalOidcSuccess(uint status, kj::StringPtr code) {
+    switch (status) {
+      case 200:
+        return;
+      case 400:
+        JSG_FAIL_REQUIRE(
+            Error, "Local OIDC request is invalid. Check the audience and broker configuration.");
+      case 401:
+        JSG_FAIL_REQUIRE(
+            Error, "Local OIDC login required. Sign in again and create a development session.");
+      case 403:
+        JSG_FAIL_REQUIRE(Error,
+            "Local OIDC access denied. Check account enablement and Worker edit permission.");
+      case 409:
+        JSG_FAIL_REQUIRE(Error,
+            "Local OIDC session needs renewal. Create a new development session with the current login.");
+      case 429:
+        if (code == "session_limit") {
+          JSG_FAIL_REQUIRE(
+              Error, "Local OIDC session limit reached. Wait for an existing session to expire.");
+        }
+        JSG_FAIL_REQUIRE(Error, "Local OIDC issuance is rate limited. Retry after 60 seconds.");
+      case 503:
+        if (code == "not_configured") {
+          JSG_FAIL_REQUIRE(Error,
+              "Local OIDC issuance is not configured. Check availability with your account team.");
+        }
+        JSG_FAIL_REQUIRE(Error,
+            "Local OIDC service is unavailable. Retry later; check the dev server for connection errors.");
+      default:
+        JSG_FAIL_REQUIRE(
+            Error, "Local OIDC token issuance failed. Check the dev server connection and retry.");
+    }
   }
 
   capnp::Capability::Client getCapability(uint channel) override {
@@ -1627,7 +1666,7 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
     // Module URLs follow the virtual file system: a module at "/foo/bar/baz.js" in the bundle
     // is "file:///foo/bar/baz.js".
     const jsg::Url& bundleBase = workerFs->getBundleRoot();
-    using ArtifactBundler = api::pyodide::ArtifactBundler;
+    using api::pyodide::ArtifactBundler;
     KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
       newModuleRegistry = WorkerdApi::newWorkerdModuleRegistry(
           workerSource.variant.tryGet<Worker::Script::ModulesSource>(), featureFlags,

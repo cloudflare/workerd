@@ -74,6 +74,11 @@ The native getter sends `POST http://oidc/token`, `Content-Type: application/jso
 64 KiB and the operation to 30 seconds. It rejects other status codes, content types, malformed
 compact tokens and oversized bodies without exposing response error bodies. The URL identifies
 the operation on the configured channel; workerd does not resolve it through global fetch.
+On failure, the broker forwards the API status: 400 for invalid requests, 401 for login, 403 for
+access denial, 409 for session renewal, 429 for limits, or 503 for service availability. Forward
+`X-Workers-OIDC-Error: session_limit` for exhausted session slots and
+`X-Workers-OIDC-Error: not_configured` for missing issuance configuration. workerd recognizes only
+these fixed hints and returns corrective messages without reflecting backend response bodies.
 
 The broker owns the authenticated Cloudflare API session and the shared token cache. It resolves
 an authorized Worker-development identity through the API, preserves the requested audience, and

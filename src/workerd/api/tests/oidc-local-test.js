@@ -7,6 +7,20 @@ import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
 
 const maximumEscapedAudience = '\0'.repeat(2048);
 const token = 'eyJhbGciOiJSUzI1NiJ9.eyJleGVjdXRpb24iOiJsb2NhbCJ9.c2ln';
+const failures = new Map([
+  ['bad-request', [400, '', /request is invalid/]],
+  ['login', [401, '', /Sign in again/]],
+  ['error', [403, '', /access denied/]],
+  ['renew-session', [409, '', /Create a new development session/]],
+  ['rate', [429, '', /Retry after 60 seconds/]],
+  ['sessions-full', [429, 'session_limit', /Wait for an existing session/]],
+  ['unconfigured', [503, 'not_configured', /not configured/]],
+  ['offline', [503, '', /service is unavailable/]],
+  [
+    'unknown-error',
+    [500, 'secret backend error', /Check the dev server connection/],
+  ],
+]);
 
 export class Broker extends WorkerEntrypoint {
   async fetch(request) {
@@ -18,9 +32,14 @@ export class Broker extends WorkerEntrypoint {
       Object.keys(options),
       options.audience === undefined ? [] : ['audience']
     );
+    if (failures.has(options.audience)) {
+      const [status, hint] = failures.get(options.audience);
+      return new Response('secret error details', {
+        status,
+        headers: { 'X-Workers-OIDC-Error': hint },
+      });
+    }
     switch (options.audience) {
-      case 'error':
-        return new Response('secret error details', { status: 403 });
       case 'large':
         return new Response('x'.repeat(65537), {
           headers: { 'Content-Type': 'text/plain' },
@@ -62,13 +81,19 @@ async function check(ctx) {
     await ctx.oidc.getToken({ audience: maximumEscapedAudience }),
     token
   );
-  for (const audience of ['error', 'large', 'invalid', 'wrong-type']) {
+  for (const audience of ['large', 'invalid', 'wrong-type']) {
     await assert.rejects(async () => ctx.oidc.getToken({ audience }));
   }
-  await assert.rejects(
-    async () => ctx.oidc.getToken({ audience: 'error' }),
-    /Local OIDC token issuance failed/
-  );
+  for (const [audience, [, , message]] of failures) {
+    await assert.rejects(
+      async () => ctx.oidc.getToken({ audience }),
+      (error) => {
+        assert.match(error.message, message);
+        assert.ok(!error.message.includes('secret'));
+        return true;
+      }
+    );
+  }
   for (const subject of ['object', 'namespace']) {
     await assert.rejects(async () => ctx.oidc.getToken({ subject }), TypeError);
   }
