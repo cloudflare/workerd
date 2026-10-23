@@ -15,7 +15,7 @@ export default {
   },
   'constructor/compile.any.js': {
     comment:
-      'WebAssembly.compile() and instantiate() of bytes finish on a V8 foreground task, which workerd only runs when other work wakes the isolate, so these promises never settle',
+      'WebAssembly.compile() and instantiate() of bytes finish on a V8 foreground task, which workerd only runs when other work wakes the isolate, so these promises never settle (https://github.com/cloudflare/workerd/issues/7930)',
     disabledTests: [
       'Branding',
       'Empty buffer',
@@ -27,12 +27,12 @@ export default {
   },
   'constructor/instantiate-bad-imports.any.js': {
     comment:
-      'WebAssembly.compile() and instantiate() of bytes finish on a V8 foreground task, which workerd only runs when other work wakes the isolate, so these promises never settle',
+      'WebAssembly.compile() and instantiate() of bytes finish on a V8 foreground task, which workerd only runs when other work wakes the isolate, so these promises never settle (https://github.com/cloudflare/workerd/issues/7930)',
     disabledTests: [/^WebAssembly\.instantiate\(buffer\): /],
   },
   'constructor/instantiate.any.js': {
     comment:
-      'WebAssembly.compile() and instantiate() of bytes finish on a V8 foreground task, which workerd only runs when other work wakes the isolate, so these promises never settle',
+      'WebAssembly.compile() and instantiate() of bytes finish on a V8 foreground task, which workerd only runs when other work wakes the isolate, so these promises never settle (https://github.com/cloudflare/workerd/issues/7930)',
     disabledTests: [
       'Branding',
       /: BufferSource argument$/,
@@ -44,7 +44,7 @@ export default {
   },
   'constructor/multi-value.any.js': {
     comment:
-      'WebAssembly.compile() and instantiate() of bytes finish on a V8 foreground task, which workerd only runs when other work wakes the isolate, so these promises never settle',
+      'WebAssembly.compile() and instantiate() of bytes finish on a V8 foreground task, which workerd only runs when other work wakes the isolate, so these promises never settle (https://github.com/cloudflare/workerd/issues/7930)',
     disabledTests: true,
   },
   'constructor/toStringTag.any.js': {},
@@ -60,8 +60,8 @@ export default {
   'global/valueOf.any.js': {},
   'idlharness.any.js': {
     comment:
-      'idl_test setup fetches /wasm/incrementer.wasm, which nothing serves, and then compiles it in a promise continuation, where workerd disallows Wasm code generation. ' +
-      'V8 makes WebAssembly.Module extend AbstractModuleSource (source phase imports), which wasm-js-api.idl does not describe. ' +
+      'idl_test setup compiles /wasm/incrementer.wasm in a promise continuation, where workerd disallows Wasm code generation; where allowed, the compile would never settle (https://github.com/cloudflare/workerd/issues/7930). ' +
+      'V8 makes WebAssembly.Module extend AbstractModuleSource (source phase imports), which wasm-js-api.idl does not describe (https://github.com/cloudflare/workerd/issues/7931). ' +
       "workerd's WebAssembly.Instance shim (io/worker.c++) has a writable prototype property",
     expectedFailures: [
       'idl_test setup',

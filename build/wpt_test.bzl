@@ -22,7 +22,7 @@ PORT_BINDINGS = [
 ### (Invokes wpt_js_test_gen, wpt_wd_test_gen and wd_test to assemble a complete test suite.)
 ### -----------------------------------------------------------------------------------------
 
-def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, include_tentative = False, extra_wpt_directories = [], tags = [], **kwargs):
+def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, include_tentative = False, extra_wpt_directories = [], extra_wpt_files = [], tags = [], **kwargs):
     """
     Main entry point.
 
@@ -34,6 +34,10 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
 
     extra_wpt_directories lists further WPT modules whose JS files the tests load by absolute path
     (e.g. `// META: script=/wasm/jsapi/assertions.js`). They are bound under that absolute path.
+
+    extra_wpt_files lists individual WPT .wasm resources that tests fetch by absolute path (e.g.
+    `fetch('/wasm/incrementer.wasm')`). They are bound under that absolute path as data, which the
+    harness's fetch() serves when no wptserve sidecar runs.
     """
 
     js_test_gen_rule = "{}@_wpt_js_test_gen".format(name)
@@ -71,6 +75,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         wpt_resources = wpt_resources,
         wpt_interfaces = wpt_interfaces,
         extra_wpt_directories = extra_wpt_directories,
+        extra_wpt_files = extra_wpt_files,
         compat_flags = compat_flags + ["immutable_api_prototypes", "spec_compliant_property_attributes", "pedantic_wpt", "experimental", "nodejs_compat", "unsupported_process_actual_platform"],
     )
 
@@ -83,7 +88,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         wpt_common,  # i.e. "wpt/common/**"
         wpt_resources,  # i.e. "wpt/resources/**"
         wpt_interfaces,  # i.e. "wpt/interfaces/**"
-    ] + [d for d in extra_wpt_directories if d != wpt_directory]
+    ] + [d for d in extra_wpt_directories if d != wpt_directory] + extra_wpt_files
 
     wd_test(
         name = "{}".format(name),
@@ -278,6 +283,7 @@ def _wpt_wd_test_gen_impl(ctx):
         generate_absolute_bindings(src, extra[WPTModuleInfo], extra.files.to_list())
         for extra in ctx.attr.extra_wpt_directories
     ]
+    extra_bindings.append(generate_extra_file_bindings(src, ctx.files.extra_wpt_files))
     all_bindings = ",\n".join([b for b in [bindings, common_bindings, resources_bindings, interfaces_bindings] + extra_bindings if b])
     ctx.actions.write(
         output = src,
@@ -320,6 +326,8 @@ _wpt_wd_test_gen = rule(
         "wpt_interfaces": attr.label(),
         # Further WPT directory modules whose JS files are bound by absolute path
         "extra_wpt_directories": attr.label_list(),
+        # Individual WPT .wasm resources bound as data by absolute path
+        "extra_wpt_files": attr.label_list(allow_files = [".wasm"]),
         # A list of autogates to specify in the generated wd-test file
         "autogates": attr.string_list(),
         # A list of compatibility flags to specify in the generated wd-test file
@@ -455,6 +463,19 @@ def generate_absolute_bindings(wd_test_file, module_info, files):
 
         relative_path = module_relative_path(module_info.base, file)
         result.append('(name = "/{}/{}", text = embed "{}")'.format(module_info.path, relative_path, wd_test_relative_path(wd_test_file, file)))
+
+    return ",\n".join(result)
+
+def generate_extra_file_bindings(wd_test_file, files):
+    """
+    Generates a data binding for each individual WPT file, named by its absolute path within the
+    WPT tree (e.g. /wasm/incrementer.wasm), as tests fetch them by that path.
+    """
+
+    result = []
+
+    for file in files:
+        result.append('(name = "/{}", data = embed "{}")'.format(file.owner.name, wd_test_relative_path(wd_test_file, file)))
 
     return ",\n".join(result)
 
