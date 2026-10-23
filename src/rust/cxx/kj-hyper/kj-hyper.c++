@@ -215,7 +215,7 @@ class ServerResponseImpl final: public kj::HttpService::Response {
       // the client had gone away, since the fault is the client's.
       impl->send_error(
           refused.status, bytes(refused.statusText), bytes(kj::str("ERROR: ", refused.message)));
-      kj::throwFatalException(
+      kj::throwException(
           KJ_EXCEPTION(DISCONNECTED, "received bad WebSocket handshake", refused.message));
     }
     // permessage-deflate, negotiated as kj's HttpServer does in each compression mode.
@@ -403,7 +403,7 @@ WsCompression websocket_agreement(
     if (offer.has_offer) clientOffer = fromRust(offer.offer);
     KJ_SWITCH_ONEOF(kj::_::tryParseExtensionAgreement(clientOffer, agreement)) {
       KJ_CASE_ONEOF(exception, kj::Exception) {
-        kj::throwFatalException(kj::mv(exception));
+        kj::throwException(kj::mv(exception));
       }
       KJ_CASE_ONEOF(parameters, kj::CompressionParameters) {
         return toRust(parameters);

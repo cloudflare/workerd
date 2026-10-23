@@ -35,6 +35,14 @@ V8_DEPENDENCIES = {
 # Keep the aligned markers in sync with the corresponding comments in
 # build/deps/deps.jsonc.
 
+# rust_icu_sys selects its bindings and versioned ICU symbol names from this
+# pin, which must match the major version of the ICU that V8 links.
+RUST_ICU_VERSION_PINS = (
+    ROOT / "build/deps/rust.MODULE.bazel",
+    ROOT / "src/rust/i18n/BUILD.bazel",
+)
+RUST_ICU_VERSION = re.compile(r'(?<="RUST_ICU_MAJOR_VERSION_NUMBER": ")\d+(?=")')
+
 
 def run(args, *, cwd=ROOT, check=True, env=None, stdout=None):
     print("+", shlex.join(map(str, args)), flush=True)
@@ -101,6 +109,41 @@ def _update_aligned_dependencies():
         if aligned:
             repositories[name]["freeze_commit"] = _v8_dependency_commit(path, v8_deps)
     DEPS.write_text(jsonc.dumps(doc) + "\n")
+
+
+def _icu_major_version(commit):
+    with urlopen(
+        "https://chromium.googlesource.com/chromium/deps/icu/+/"
+        f"{commit}/source/common/unicode/uvernum.h?format=TEXT",
+        timeout=30,
+    ) as response:
+        header = base64.b64decode(response.read()).decode()
+    match = re.search(
+        r"(?<=^#define U_ICU_VERSION_MAJOR_NUM )\d+$", header, re.MULTILINE
+    )
+    return match.group()
+
+
+def _update_rust_icu_version():
+    path, _ = V8_DEPENDENCIES["com_googlesource_chromium_icu"]
+    commit = _v8_dependency_commit(path, (CHECKOUT / "DEPS").read_text())
+    version = _icu_major_version(commit)
+    changed = False
+    for pin in RUST_ICU_VERSION_PINS:
+        text = pin.read_text()
+        old = RUST_ICU_VERSION.findall(text)
+        if len(old) != 1:
+            raise ValueError(
+                f"expected one RUST_ICU_MAJOR_VERSION_NUMBER in {pin}, found {len(old)}"
+            )
+        if old != [version]:
+            pin.write_text(RUST_ICU_VERSION.sub(version, text))
+            changed = True
+    if changed:
+        print(
+            f"Updated RUST_ICU_MAJOR_VERSION_NUMBER to {version}. Check that the pinned "
+            f"rust_icu_sys provides bindgen/lib_{version}.rs; update the crate if it does not."
+        )
 
 
 def _update_module(tag, patch_names):
@@ -220,6 +263,16 @@ def finish_update(target):
 
     _update_module(target, patch_names)
     _update_aligned_dependencies()
+    # The Rust ICU pin must match the ICU that Bazel builds, so regenerate the
+    # ICU repository from its new commit before deriving the pin.
+    run(
+        [
+            sys.executable,
+            ROOT / "build/deps/update-deps.py",
+            "com_googlesource_chromium_icu",
+        ]
+    )
+    _update_rust_icu_version()
 
 
 def parse_args():

@@ -338,6 +338,67 @@ export const throwingMessageListener = {
   },
 };
 
+// Messages queued on a pending port are held by JsRefs that the port traces for GC. Once a
+// GC has run, those handles are weak and kept alive only by tracing. start() moves them into
+// an untraced microtask continuation, so the move must make each handle strong again. If it
+// does not, a GC triggered while dispatching the first message collects the messages that
+// have not been dispatched yet.
+export const startResetsGcTracingOfQueuedMessages = {
+  async test() {
+    const { port1, port2 } = new MessageChannel();
+    const kCount = 8;
+
+    const makeMessage = (i) => ({
+      index: i,
+      nested: { label: `message-${i}`, list: [i, i + 1, i + 2] },
+      bytes: new Uint8Array([i, i, i, i]),
+    });
+
+    const checkMessage = (data, i) => {
+      strictEqual(data.index, i);
+      strictEqual(data.nested.label, `message-${i}`);
+      deepStrictEqual(data.nested.list, [i, i + 1, i + 2]);
+      ok(data.bytes instanceof Uint8Array);
+      deepStrictEqual(Array.from(data.bytes), [i, i, i, i]);
+    };
+
+    const runPhase = async (base) => {
+      // postMessage() clones its argument, so the queued copies are reachable only through
+      // port2's pending queue.
+      for (let i = 0; i < kCount; i++) port1.postMessage(makeMessage(base + i));
+
+      // Trace the pending queue so that its handles transition to the weak, traced state.
+      for (let i = 0; i < 5; i++) gc();
+
+      const received = [];
+      const { promise, resolve } = Promise.withResolvers();
+      const handler = (event) => {
+        received.push(event.data);
+        // GC while dispatching the first queued message, while the remaining messages
+        // are held only by the start() continuation.
+        if (received.length === 1) {
+          for (let i = 0; i < 5; i++) gc();
+        }
+        if (received.length === kCount) resolve();
+      };
+      // Adding the first 'message' listener calls start(), draining the queue.
+      port2.addEventListener('message', handler);
+      await promise;
+
+      strictEqual(received.length, kCount);
+      received.forEach((data, i) => checkMessage(data, base + i));
+
+      // Removing the last listener returns the port to the pending state.
+      port2.removeEventListener('message', handler);
+    };
+
+    // The first phase starts the port from its initial pending state. The second phase
+    // starts it again from a pending state re-entered after it had been started.
+    await runPhase(0);
+    await runPhase(100);
+  },
+};
+
 // User-constructed MessageEvents reflect the source and ports passed in their init.
 // (The runtime itself never attaches either: ports are not transferable here.)
 export const messageEventSourceAndPorts = {

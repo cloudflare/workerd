@@ -59,5 +59,30 @@ KJ_TEST("WorkerSource::Module::clone() keeps borrowed EsModule bodies as externa
   KJ_ASSERT(cloneContent.ownBody == kj::none);
 }
 
+KJ_TEST("WorkerSource::Module::clone() keeps EsModule compile hints") {
+  static constexpr kj::StringPtr kBody = "export function f() {}"_kj;
+  static constexpr int kHints[] = {17};
+
+  WorkerSource::Module borrowed{
+    .name = "borrowed.js"_kj,
+    .content = WorkerSource::EsModule{.body = kBody.asArray(), .compileHints = kHints},
+  };
+  auto borrowedClone = borrowed.clone();
+  KJ_ASSERT(borrowedClone.content.get<WorkerSource::EsModule>().compileHints.begin() == kHints);
+
+  ::rust::String ownBody(kBody.begin(), kBody.size());
+  kj::ArrayPtr<const char> bodyView(ownBody.data(), ownBody.size());
+  WorkerSource::Module owned{
+    .name = "owned.js"_kj,
+    .content =
+        WorkerSource::EsModule{
+          .body = bodyView, .ownBody = kj::mv(ownBody), .compileHints = kHints},
+  };
+  auto ownedClone = owned.clone();
+  auto& ownedCloneHints = ownedClone.content.get<WorkerSource::EsModule>().compileHints;
+  KJ_ASSERT(ownedCloneHints.begin() == kHints);
+  KJ_ASSERT(ownedCloneHints.size() == 1);
+}
+
 }  // namespace
 }  // namespace workerd

@@ -22,6 +22,45 @@ struct FeatureFlags {
   static kj::Maybe<CompatibilityFlags::Reader> tryGet(jsg::Lock&);
 };
 
+// Applies compatibility-dependent JSG settings to a fresh isolate before creating contexts or
+// resource templates. The flags are used as supplied, without resolving dates or implications.
+inline void configureJsgIsolate(jsg::Lock& js, CompatibilityFlags::Reader flags) {
+  js.setCaptureThrowsAsRejections(flags.getCaptureThrowsAsRejections());
+  if (flags.getSetToStringTag()) {
+    js.setToStringTag();
+  }
+  if (flags.getShouldSetImmutablePrototype() || flags.getPythonWorkers()) {
+    js.setImmutablePrototype();
+  }
+  if (flags.getSpecCompliantPropertyAttributes()) {
+    js.setSpecCompliantPropertyAttributes();
+  }
+  if (flags.getNodeJsCompatV2()) {
+    js.setNodeJsCompatEnabled();
+  }
+  if (flags.getEnableNodeJsProcessV2()) {
+    js.setNodeJsProcessV2Enabled();
+  }
+  if (flags.getRequireReturnsDefaultExport()) {
+    js.setRequireReturnsDefaultExportEnabled();
+  }
+  if (flags.getThrowOnUnrecognizedImportAssertion()) {
+    js.setThrowOnUnrecognizedImportAssertion();
+  }
+  if (flags.getNoTopLevelAwaitInRequire()) {
+    js.disableTopLevelAwait();
+  }
+  if (flags.getEnhancedErrorSerialization()) {
+    js.setUsingEnhancedErrorSerialization();
+  }
+  if (flags.getFastJsgStruct()) {
+    js.setUsingFastJsgStruct();
+  }
+  if (flags.getWasmEsmIntegrationBuiltins()) {
+    js.setWasmEsmIntegrationBuiltinsEnabled();
+  }
+}
+
 // Returns whether the new module registry implementation should be used for a
 // worker with the given flags. Python workers always use the original module
 // registry: the new_module_registry flag is ignored for them, whether it was

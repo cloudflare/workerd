@@ -133,11 +133,11 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
       // Reject paths that would override the URL authority when passed to
       // `new URL(path, base)`.  Two cases:
       //
-      // 1. Network-path references and backslash variants — the WHATWG URL
+      // 1. Network-path references and backslash variants - the WHATWG URL
       //    parser treats \ as / for special schemes, so any pair of / and \
       //    at the start (//  /\  \/  \\) introduces an authority.
       //
-      // 2. Absolute-form URLs — a scheme (e.g. "http:") before the first
+      // 2. Absolute-form URLs - a scheme (e.g. "http:") before the first
       //    separator causes the parser to ignore the base entirely.
       if (AUTHORITY_OVERRIDE_REGEX.test(options.path)) {
         throw new ERR_INVALID_ARG_VALUE(
@@ -325,8 +325,8 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
 
   #onFinish(): void {
     if (this.destroyed) return;
-    // A failure to send — a URL the host or path cannot form, a Blob that
-    // cannot be built, fetch() itself throwing — fails the request as a
+    // A failure to send - a URL the host or path cannot form, a Blob that
+    // cannot be built, fetch() itself throwing - fails the request as a
     // connection failure does, rather than escaping the 'finish' emission
     // and leaving the request unsent, never to close.
     try {
@@ -504,12 +504,12 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   }
 
   // Tears the exchange down as Node does when the socket goes away. The
-  // request reports `err` — or, for a bare destroy() before any response
-  // (and not through abort()), that the connection hung up — on a later
+  // request reports `err` - or, for a bare destroy() before any response
+  // (and not through abort()), that the connection hung up - on a later
   // tick, as a socket error would arrive; a response in flight is aborted
-  // at once with ECONNRESET 'aborted', whatever `err` is — in Node the
+  // at once with ECONNRESET 'aborted', whatever `err` is - in Node the
   // response learns only that its socket closed, `err` being the
-  // request's to report — which cancels its body so the server learns of
+  // request's to report - which cancels its body so the server learns of
   // it; a fetch still awaiting its response is aborted; 'close' follows.
   override destroy(err?: unknown, _cb?: (err?: unknown) => void): this {
     if (this.destroyed) return this;
@@ -551,7 +551,7 @@ export class ClientRequest extends OutgoingMessage implements _ClientRequest {
   // The quiet teardown: 'abort' on the next tick, then the destroy() of a
   // bare request without its 'socket hang up'. Node's abort() reports the
   // hang up once the request is on a socket; abort() is the common
-  // cancellation path and was always silent here, so it stays so — a
+  // cancellation path and was always silent here, so it stays so - a
   // deliberate divergence, recorded in src/tests/node/http-client/AGENTS.md.
   abort(): void {
     if (this.aborted) return;

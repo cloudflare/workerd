@@ -759,7 +759,7 @@ class TailStreamTarget final: public rpc::TailStreamTarget::Server, public kj::R
       KJ_IF_SOME(ctx, weakIoContext->tryGet()) {
         return ctx;
       }
-      kj::throwFatalException(KJ_EXCEPTION(DISCONNECTED,
+      kj::throwException(KJ_EXCEPTION(DISCONNECTED,
           "The destination object for this tail session no longer exists.", doneReceiving));
     })();
 
@@ -1177,7 +1177,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> TailStreamCustomEvent::sendRpc
     if (revokePaf.fulfiller->isWaiting()) {
       revokePaf.fulfiller->reject(e.clone());
     }
-    kj::throwFatalException(kj::mv(e));
+    kj::throwException(kj::mv(e));
   }
 }
 

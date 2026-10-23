@@ -6,11 +6,73 @@ load("//:build/wd_bench.bzl", "wd_bench")
 load("//:build/wd_test.bzl", "wd_cli_test", "wd_test")
 
 wasm_tools_parse(
+    name = "compact-imports.wasm",
+    src = "compact-imports.wat",
+)
+
+wasm_tools_parse(
     name = "js-string-builtins.wasm",
     src = "js-string-builtins.wat",
 )
 
 exports_files(["starttls-server.pem"])
+
+wd_test(
+    src = "streams-byob-progress-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "streams-byob-progress-test.js",
+        "streams-byob-progress-worker.js",
+    ],
+)
+
+wd_test(
+    src = "streams-terminal-state-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "streams-terminal-state-test.js",
+        "streams-terminal-state-worker.js",
+    ],
+)
+
+wd_test(
+    src = "eventsource-context-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "eventsource-context-test.js",
+        "eventsource-context-worker.js",
+    ],
+)
+
+wd_test(
+    src = "eventsource-lifetime-test.wd-test",
+    args = ["--experimental"],
+    data = ["eventsource-lifetime-test.js"],
+)
+
+wd_test(
+    src = "queue-backing-store-test.wd-test",
+    args = [
+        "--experimental",
+        "queue-backing-store-test",
+    ],
+    data = ["queue-backing-store-test.js"],
+)
+
+wd_test(
+    src = "streams-consumer-reentry-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "streams-consumer-reentry-test.js",
+        "streams-consumer-reentry-worker.js",
+    ],
+)
+
+wd_test(
+    src = "streams-native-read-ownership-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-native-read-ownership-test.js"],
+)
 
 # Compile all ts test sources in one project. This is needed to work around https://github.com/aspect-build/rules_ts/issues/664 –
 # rules_ts transpiles all .ts files for each ts_project where the files are present based on the
@@ -53,6 +115,15 @@ wd_test(
 )
 
 wd_test(
+    src = "do-on-evict-symbol-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "do-on-evict-symbol-test.js",
+        "do-on-evict-symbol-unflagged-test.js",
+    ],
+)
+
+wd_test(
     src = "retryable-test.wd-test",
     data = ["retryable-test.js"],
 )
@@ -85,6 +156,12 @@ wd_test(
     src = "streams-internal-read-buffer-gc-test.wd-test",
     args = ["--experimental"],
     data = ["streams-internal-read-buffer-gc-test.js"],
+)
+
+wd_test(
+    src = "streams-internal-drain-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-internal-drain-gc-test.js"],
 )
 
 wd_test(
@@ -127,6 +204,12 @@ wd_test(
     src = "delete-all-deletes-alarm-test.wd-test",
     args = ["--experimental"],
     data = ["delete-all-deletes-alarm-test.js"],
+)
+
+wd_test(
+    src = "durable-object-snapshots-flag-test.wd-test",
+    args = ["--experimental"],
+    data = ["durable-object-snapshots-flag-test.js"],
 )
 
 # For tests that listen on fixed TCP ports 8081-8083. The "socket" resource (see .bazelrc) keeps
@@ -182,6 +265,8 @@ wd_test(
 )
 
 wd_test(
+    # Actor eviction has a 30-second deadline, followed by a real-time alarm wait.
+    size = "large",
     src = "actor-alarms-name-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-name-test.js"],
@@ -691,6 +776,11 @@ wd_test(
 )
 
 wd_test(
+    src = "queue-microtask-gc-test.wd-test",
+    data = ["queue-microtask-gc-test.js"],
+)
+
+wd_test(
     size = "large",
     src = "unhandled-rejection-test.wd-test",
     args = ["--experimental"],
@@ -1165,6 +1255,14 @@ wd_test(
 )
 
 wd_test(
+    src = "wasm-compact-imports-test.wd-test",
+    data = [
+        "wasm-compact-imports-test.js",
+        ":compact-imports.wasm",
+    ],
+)
+
+wd_test(
     src = "wasm-js-string-builtins-test.wd-test",
     data = [
         "wasm-js-string-builtins-test.js",
@@ -1516,14 +1614,14 @@ sh_test(
     size = "medium",
     srcs = ["abortIsolate.sh"],
     args = [
-        "$(location //src/workerd/server:workerd_cross)",
+        "$(location //src/workerd/server:workerd)",
         "$(location abortIsolate.wd-test)",
         "$(location abortIsolate.js)",
     ],
     data = [
         "abortIsolate.js",
         "abortIsolate.wd-test",
-        "//src/workerd/server:workerd_cross",
+        "//src/workerd/server:workerd",
     ],
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
@@ -1542,7 +1640,7 @@ wd_cli_test(
     name = "bench-default-compat-date-test",
     src = "bench-default-compat-date-test.wd-bench",
     args = [
-        "$(location //src/workerd/server:workerd_cross)",
+        "$(location //src/workerd/server:workerd)",
         "bench",
         "$(location bench-default-compat-date-test.wd-bench)",
         "--quick",
@@ -1550,6 +1648,6 @@ wd_cli_test(
     data = [
         "bench-default-compat-date-test.js",
         "bench-default-compat-date-test.wd-bench",
-        "//src/workerd/server:workerd_cross",
+        "//src/workerd/server:workerd",
     ],
 )

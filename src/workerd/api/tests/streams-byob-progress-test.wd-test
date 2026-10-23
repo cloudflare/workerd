@@ -1,0 +1,19 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [(
+    name = "main",
+    worker = (
+      modules = [(name = "worker", esModule = embed "streams-byob-progress-test.js")],
+      compatibilityFlags = ["nodejs_compat_v2", "streams_enable_constructors"],
+      bindings = [(name = "PROGRESS", service = "progress")],
+    ),
+  ), (
+    name = "progress",
+    worker = (
+      modules = [(name = "worker", esModule = embed "streams-byob-progress-worker.js")],
+      compatibilityFlags = ["nodejs_compat_v2", "streams_enable_constructors", "handle_cross_request_promise_resolution", "streams_no_default_auto_allocate_chunk_size"],
+      bindings = [(name = "SELF", service = "progress")],
+    ),
+  )],
+);

@@ -1726,6 +1726,9 @@ JSG_FAIL_REQUIRE(RangeError, "Index ", index, " is out of bounds");
 JSG_ASSERT(condition, Error, "Internal assertion failed");
 ```
 
+In destructors, use `JSG_DTOR_REQUIRE(condition, Error, ...)`: like `KJ_DTOR_REQUIRE`, it logs
+the failure instead of throwing if the stack is already unwinding.
+
 The error type can be: `TypeError`, `Error`, `RangeError`, or DOMException types like
 `DOMOperationError`, `DOMDataError`, `DOMInvalidStateError`, etc. See the README for the
 full [error type catalog](../src/workerd/jsg/README.md#error-type-catalog).
@@ -1948,6 +1951,10 @@ JSG provides rudimentary async context tracking via `AsyncContextFrame` in
 frame. Each frame has a storage context (a map of storage cells keyed by opaque keys).
 When a new frame is created, the current frame's storage context is propagated.
 
+Small frames keep their storage cells inline. Larger frames use a hash table. Dead keys are
+removed before storage is inherited, so a child with few live cells can use inline storage even
+when its parent used a hash table.
+
 All JavaScript promises, timers, and microtasks propagate the async context.
 
 ```js
@@ -1986,11 +1993,16 @@ kj::Arc<AsyncContextFrame::StorageKey> key =
 KJ_DEFER(key->reset());  // Clear when done
 
 {
-  jsg::AsyncContextFrame::StorageScope(js, key.addRef(), value);
+  jsg::AsyncContextFrame::StorageScope scope(js, key.addRef(), kj::mv(value));
   // code runs with this storage context
 }
 // Automatically reset to previous context
 ```
+
+To install several storage cells in one frame, pass a mutable array of
+`AsyncContextFrame::StorageEntry` to `StorageScope`. The entries are moved into the frame,
+and inherited storage is copied once. All of the cells remain available to asynchronous work
+that captures the frame, and leaving the scope restores the previous frame.
 
 ---
 

@@ -170,7 +170,7 @@ fn unwrap_resource_rejects_cpp_tagged_object() {
 fn unwrap_resource_rejects_plain_js_object() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let plain_obj = ctx.eval_raw("({})").unwrap();
+        let plain_obj = ctx.eval_raw(lock, "({})").unwrap();
 
         let result: Option<kj_rs::KjRc<jsg::v8::ffi::Wrappable>> =
             // SAFETY: isolate is valid and locked, value is a valid Local.

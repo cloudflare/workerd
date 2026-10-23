@@ -109,19 +109,57 @@ let r: jsg::Rc<MyResource> = jsg::Rc::from_js(&mut lock, js_val)?;
 
 ## V8 Handle Types
 
-### `Local<'a, T>`
+### `Lock<'s>` and handle scopes
 
-A stack-allocated handle to a V8 value. The lifetime `'a` is tied to the `HandleScope` that created it.
+`Lock<'s>` stands for "the isolate is locked and the `HandleScope` `'s` is the innermost open
+one". Locks are only handed out as `&'s mut Lock<'s>`, borrowed from the pinned storage of
+a `jsg::CallbackScope`, so no handle created through one (`Local<'s, _>`) can outlive the
+scope. There is no public constructor; locks come from:
+
+- `#[jsg_method]` / `#[jsg_constructor]` callbacks, one lock per callback. They are built
+  with `jsg::function_callback`, which turns a closure that captures nothing into a V8
+  function callback without any `unsafe`, as `rusty_v8` does; `#[jsg_property(instance)]`
+  accessors likewise with `jsg::getter_callback` / `jsg::setter_callback`,
+- `jsg::modules::add_builtin`, whose callback is a closure that captures nothing, of type
+  `for<'s> Fn(&mut Lock<'s>) -> Local<'s, Value>`,
+- `jsg::callback_scope!(unsafe let lock, isolate)` for other Rust code that C++ calls with a
+  scope already open; the caller vouches for the isolate's state, hence `unsafe`. A panic
+  that reaches C++ aborts, so entry points instead pin a `jsg::CallbackScope` and open it
+  with `jsg::catch_panic`, which turns a panic into a JS internal error,
+- `jsg_test::Harness::run_in_context`.
+
+Code that only needs the isolate to be locked, with no context or scope, takes
+`&mut jsg::Isolate`. A `Lock` dereferences to its isolate, and C++ that only locks the
+isolate passes it through `unsafe` `jsg::Isolate::from_raw`.
+
+All scopes open on a thread at the same time must belong to one isolate: opening a scope of
+another isolate while one is open panics, so a handle is never used with another isolate's
+lock. `jsg::allow_scopes_of_another_isolate` (`unsafe`) lifts the rule for code that must open
+scopes of a second isolate. Handles that outlive scopes remember their isolate and panic when
+used in another: `Global<T>`, and the JS wrapper of a `jsg::Rc<T>`.
+
+### `Local<'s, T>`
+
+A `Copy` handle to a V8 value, valid for the scope `'s` it was created in. Every API that
+creates a handle takes `&mut Lock<'s>` and returns `Local<'s, _>`; methods that may run
+JavaScript take `&mut Lock<'s>` as well, and borrowed views into V8 memory
+(`as_slice(&lock)`) borrow the lock, so no JavaScript can run while they are alive.
+
+A `Local` is one non-null pointer, laid out like `v8::Local<T>`. It does not record its
+isolate; methods that need the isolate take the lock. A handle that may be empty is an
+`Option<Local<'s, T>>`, laid out like `v8::MaybeLocal<T>`: for example, the `String`
+constructors return `None` when V8 cannot create the string.
 
 ```rust
-let str_value = "hello".to_local(&mut lock);
-let num_value = 42u32.to_local(&mut lock);
-let global = local.to_global(&mut lock);
+let str_value = "hello".to_js(lock);
+let num_value = 42u32.to_local(lock); // `ToLocalValue` also covers integers
+let global = str_value.to_global(lock);
 ```
 
 ### `Global<T>`
 
-A persistent handle that outlives `HandleScope`s. Must be explicitly managed.
+A persistent handle that outlives `HandleScope`s. Must be explicitly managed. Opening or cloning
+it in an isolate other than the one it was created in panics.
 
 `Global<T>` fields on `#[jsg_resource]` structs participate in GC tracing when visited via `GcVisitor::visit_global`. This enables the garbage collector to detect and collect back-reference cycles — for example, a resource that stores a JS callback which closes over the resource's own JS wrapper:
 
@@ -183,6 +221,27 @@ if lock.feature_flags().get_node_js_compat() {
 
 `feature_flags()` returns a capnp-generated `compatibility_flags::Reader` with a getter for each boolean flag (e.g., `get_node_js_compat()`, `get_url_standard()`, `get_fetch_refuses_unknown_protocols()`).
 
+### Testing with flags
+
+`jsg_test::Harness::new()` starts with every compatibility flag false. Use `Harness::with_flags()`
+to set individual flags before creating resource templates:
+
+```rust
+let harness = jsg_test::Harness::with_flags(|mut flags| {
+    flags.set_node_js_compat(true);
+    flags.set_set_to_string_tag(true);
+});
+harness.run_in_context(|lock, _ctx| {
+    assert!(lock.feature_flags().get_node_js_compat());
+    Ok(())
+});
+```
+
+The harness sets raw flag values; it does not apply a compatibility date or resolve flag
+implications. It uses the same `configureJsgIsolate()` helper as workers to apply isolate-level
+JSG settings, including template behavior, Node.js compatibility, and module settings.
+It does not reproduce worker-specific initialization such as logging, inspectors, or limits.
+
 ### How it works
 
 1. During worker initialization, C++ canonicalizes the worker's `CompatibilityFlags` via `capnp::canonicalize()` and passes the bytes to `realm_create()`, which parses them once and stores the result in the per-context `Realm`.
@@ -232,11 +291,12 @@ impl Greeting {
 - Only one `#[jsg_constructor]` is allowed per impl block.
 - The first parameter may be `&mut Lock` (or `&mut jsg::Lock`) if the constructor needs isolate access; it is not exposed as a JS argument.
 - If no `#[jsg_constructor]` is present, `new MyResource()` throws an `Illegal constructor` error, matching C++ JSG behavior.
+- Calling the constructor without `new` throws a `TypeError`, matching C++ JSG behavior.
 
 ## Properties
 
-Two macros expose accessor properties on resource types: `#[jsg_property]` for prototype and
-instance properties, and `#[jsg_inspect_property]` for debug-only symbol-keyed properties.
+Two macros expose properties on resource types: `#[jsg_property]` for prototype accessors and
+instance data properties, and `#[jsg_inspect_property]` for debug-only symbol-keyed properties.
 
 Full reference documentation (arguments, naming rules, compat-flag behavior, examples) lives in
 **[`jsg-macros/README.md`](../jsg-macros/README.md#jsg_propertyrequired-placement--name---readonly)**.
@@ -259,7 +319,7 @@ impl Counter {
     #[jsg_property(prototype, readonly)]
     pub fn get_label(&self) -> String { /* ... */ }
 
-    // Own-property accessor (use sparingly; inhibits minor-GC)
+    // Own data property (use sparingly; inhibits minor-GC)
     #[jsg_property(instance)]
     pub fn get_id(&self) -> String { /* ... */ }
 

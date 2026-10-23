@@ -222,7 +222,7 @@ export class Server
 
   // An async 'request' listener whose promise rejects: the response is torn
   // down with the error, as a listener throwing synchronously tears it down
-  // (see #onRequest) — a Worker cannot die of an unhandled rejection as
+  // (see #onRequest) - a Worker cannot die of an unhandled rejection as
   // Node's process would, and the client would otherwise wait for a
   // response that never comes.
   //
@@ -476,7 +476,7 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
     const handleData = (events: DataWrittenEvent[]): void => {
       // A destroyed response sends nothing more: its body has been errored
       // (or closed), so a chunk the message buffer still held when the
-      // response was destroyed — by a handler throwing after writing it —
+      // response was destroyed - by a handler throwing after writing it -
       // is dropped, as a destroyed socket's pending writes are in Node.
       if (this.destroyed) return;
       for (const event of events) {
@@ -501,8 +501,8 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
         // The byte stream's enqueue transfers the buffer it is given, so
         // the bytes are copied: a written buffer stays the caller's (as in
         // Node, reusable once the write's callback has fired), and a view
-        // over memory that cannot be transferred — a SharedArrayBuffer, a
-        // WebAssembly.Memory — is written like any other.
+        // over memory that cannot be transferred - a SharedArrayBuffer, a
+        // WebAssembly.Memory - is written like any other.
         const copy = new Uint8Array(chunk);
         if (streamController) {
           streamController.enqueue(copy);
@@ -574,8 +574,8 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
   //
   // Once end() has been called the body has been handed off (every chunk
   // reached the stream before end() returned) and 'finish' is on its way,
-  // so there is nothing left to abort. A destroy() from then on — from
-  // inside 'finish', or right after end() — marks the response destroyed
+  // so there is nothing left to abort. A destroy() from then on - from
+  // inside 'finish', or right after end() - marks the response destroyed
   // and errored at once, as Node's does (a write that follows fails through
   // its callback alone), but emits no 'error' (Node's tears its socket down
   // instead, and emits none on the response either), leaves the body to
@@ -614,8 +614,8 @@ export class ServerResponse<Req extends IncomingMessage = IncomingMessage>
           onStreamStart(controller);
           // The controller settles once: 'finish' closes it, an 'error' or
           // a 'close' before that errors it. A 'finish' that still arrives
-          // after the response was destroyed — end() after destroy()
-          // queues one when nothing is left to flush — finds it errored,
+          // after the response was destroyed - end() after destroy()
+          // queues one when nothing is left to flush - finds it errored,
           // and must not close it a second time.
           let settled = false;
           this.once('finish', () => {

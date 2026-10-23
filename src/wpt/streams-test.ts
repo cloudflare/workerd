@@ -190,11 +190,6 @@ export default {
       // TODO(conform): The spec expects the read to fail here. Instead, we end up cancelling
       // it with a zero-length result, with the subsequent read marked as done.
       'ReadableStream with byte source: read(view) with Uint16Array on close()-d stream with 1 byte enqueue()-d must fail',
-      // TODO(conform): Per the spec, desiredSize should be zero here
-      // but since we are handling the backpressure a bit differently
-      // it won't be zero until the actual read is resolved.
-      //desiredSize = controller.desiredSize;
-      'ReadableStream with byte source: enqueue() 3 byte, getReader(), then read(view) with 2-element Uint16Array',
       'ReadableStream with byte source: Throwing in pull in response to read() must be ignored if the stream is errored in it',
       'ReadableStream with byte source: Throwing in pull function must error the stream',
       // TODO(conform): We handle things a bit differently here from the spec. The spec

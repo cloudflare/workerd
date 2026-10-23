@@ -39,6 +39,7 @@ I/O lifecycle, per-request context, worker/isolate management, actor storage, co
 
 ## CONVENTIONS
 
+- Isolate-level JSG compatibility settings belong in `configureJsgIsolate()` in `features.h`, shared by workers and the Rust JSG test harness. Call it on a fresh isolate before creating contexts or resource templates; it does not resolve compatibility dates or flag implications.
 - `IoContext::current()` — ambient thread-local access; only valid inside a request
 - `awaitIo(js, kjPromise, func)` bridges KJ→JS; `func` runs under V8 lock. `awaitIo(js, kjPromise)` for identity
 - `awaitJs(js, jsPromise)` bridges JS→KJ

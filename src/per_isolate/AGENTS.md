@@ -51,6 +51,11 @@ at context creation, before any user code. Gated by the
 - Internal class dispatch uses private-brand `in` checks, NEVER
   `instanceof` (classes reachable from the global have user-reachable
   `Symbol.hasInstance`).
+- **ASCII runtime text**: the loader (`per-isolate-bootstrap.c++`) hands V8
+  each script's bytes as a one-byte (Latin-1) string, without transcoding,
+  so a non-ASCII character in a string or template literal reaches users as
+  its UTF-8 bytes, mangled. Error messages use plain ASCII punctuation (no
+  em dashes or other typographic characters); comments are exempt.
 
 ## PRIMORDIALS USAGE
 

@@ -378,6 +378,10 @@ const E = {
   httpTest:
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"custom"}}{"type":"spanOpen","name":"fetch","spanId":"0000000000000001"}{"type":"attributes","info":[{"name":"network.protocol.name","value":"http"},{"name":"network.protocol.version","value":"HTTP/1.1"},{"name":"http.request.method","value":"POST"},{"name":"url.full","value":"http://placeholder/body-length"},{"name":"http.request.body.size","value":"3"},{"name":"http.response.status_code","value":"200"},{"name":"http.response.body.size","value":"22"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"fetch","spanId":"0000000000000002"}{"type":"attributes","info":[{"name":"network.protocol.name","value":"http"},{"name":"network.protocol.version","value":"HTTP/1.1"},{"name":"http.request.method","value":"POST"},{"name":"url.full","value":"http://placeholder/body-length"},{"name":"http.response.status_code","value":"200"},{"name":"http.response.body.size","value":"31"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"fetch","spanId":"0000000000000003"}{"type":"spanOpen","name":"scheduled","spanId":"0000000000000004"}{"type":"attributes","info":[{"name":"network.protocol.name","value":"http"},{"name":"network.protocol.version","value":"HTTP/1.1"},{"name":"http.request.method","value":"GET"},{"name":"url.full","value":"http://placeholder/ray-id"},{"name":"http.response.status_code","value":"200"},{"name":"http.response.body.size","value":"0"},{"name":"cloudflare.ray_id","value":"test-ray-id-123"}]}{"type":"spanClose","outcome":"ok"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"scheduled","spanId":"0000000000000005"}{"type":"spanClose","outcome":"ok"}{"type":"spanOpen","name":"scheduled","spanId":"0000000000000006"}{"type":"spanClose","outcome":"ok"}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
 
+  // http-test: statusText validation without pedantic_wpt
+  statusTextValidationWithoutPedanticWpt:
+    '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","entrypoint":"statusTextValidationWithoutPedanticWpt","scriptTags":[],"info":{"type":"custom"}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
+
   // http-test subrequest handlers
   fetchBodyLength:
     '{"type":"onset","executionModel":"stateless","spanId":"0000000000000000","scriptTags":[],"info":{"type":"fetch","method":"POST","url":"http://placeholder/body-length","headers":[]}}{"type":"return","info":{"type":"fetch","statusCode":200}}{"type":"outcome","outcome":"ok","cpuTime":0,"wallTime":0}',
@@ -491,6 +495,9 @@ const expected = [
   n(E.fetchNotFound),
   n(E.fetchWebSocket),
   n(E.fetchEmptyUrl),
+
+  // http-test: statusText validation is a separate test invocation
+  n(E.statusTextValidationWithoutPedanticWpt),
 
   // queue-test: caller has subrequest children
   n(E.queueTest, [

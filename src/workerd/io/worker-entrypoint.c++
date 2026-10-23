@@ -502,9 +502,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
           TRACE_EVENT_END("workerd", PERFETTO_TRACK_FROM_POINTER(&context));
           TRACE_EVENT(
               "workerd", "WorkerEntrypoint::request() run", PERFETTO_FLOW_FROM_POINTER(this));
-          jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
-          jsg::AsyncContextFrame::StorageScope userTraceScope =
-              context.makeUserAsyncTraceScope(lock);
+          auto traceScope = context.makeRequestTraceScope(lock);
 
           kj::Maybe<jsg::Ref<api::AbortSignal>> signal;
           auto featureFlags = FeatureFlags::get(lock);
@@ -590,10 +588,10 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         co_await kj::yield();
         KJ_IF_SOME(e, outputGateException) {
           reportFailure.cancel();
-          kj::throwFatalException(kj::mv(e));
+          kj::throwException(kj::mv(e));
         }
         reportFailure.cancel();
-        kj::throwFatalException(kj::mv(exception));
+        kj::throwException(kj::mv(exception));
       }
     }  // Above KJ_DEFER fires here: abort signal + drain.
 
@@ -614,7 +612,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
         metricsForProxyTask->reportFailure(e, RequestObserver::FailureSource::DEFERRED_PROXY);
         // See the matching yield in stage 2's catch.
         co_await kj::yield();
-        kj::throwFatalException(kj::mv(e));
+        kj::throwException(kj::mv(e));
       }
     }
   }
@@ -656,7 +654,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
       }
       KJ_CATCH(e) {
         markExceptionAsDelivered(e);
-        kj::throwFatalException(kj::mv(e));
+        kj::throwException(kj::mv(e));
       }
     };
 
@@ -684,7 +682,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
       auto propagated = exceptionToPropagate(isInternalException, kj::mv(exception));
       // See the matching yield in stage 2's catch.
       co_await kj::yield();
-      kj::throwFatalException(kj::mv(propagated));
+      kj::throwException(kj::mv(propagated));
     }
 
     KJ_IF_SOME(service, failOpenService) {
@@ -716,7 +714,7 @@ kj::Promise<void> WorkerEntrypoint::requestImpl(kj::HttpMethod method,
       auto propagated = exceptionToPropagate(isInternalException, kj::mv(exception));
       // See the matching yield in stage 2's catch.
       co_await kj::yield();
-      kj::throwFatalException(kj::mv(propagated));
+      kj::throwException(kj::mv(propagated));
     }
 
     // We're catching the exception and replacing it with 5xx, but metrics should still indicate
@@ -791,8 +789,7 @@ kj::Promise<void> WorkerEntrypoint::connect(kj::StringPtr host,
                    entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
                    host = kj::str(host), clientAddress = kj::mv(clientAddress)](
                    Worker::Lock& lock, IoContext& context) mutable {
-    jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
-    jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
+    auto traceScope = context.makeRequestTraceScope(lock);
 
     return lock.getGlobalScope().connect(kj::mv(host), kj::mv(clientAddress), headers, connection,
         response, lock,
@@ -938,8 +935,7 @@ kj::Promise<WorkerInterface::ScheduledResult> WorkerEntrypoint::runScheduled(
                                        &metrics = incomingRequest->getMetrics()](
                                        Worker::Lock& lock, IoContext& context) mutable {
     TRACE_EVENT("workerd", "WorkerEntrypoint::runScheduled() run");
-    jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
-    jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
+    auto traceScope = context.makeRequestTraceScope(lock);
 
     lock.getGlobalScope().startScheduled(scheduledTime, cron, lock,
         lock.getExportedHandler(
@@ -1017,9 +1013,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
             [scheduledTime, retryCount, &incomingRequest = *incomingRequest,
                 entrypointName = entrypointName.clone(), versionInfo = kj::mv(versionInfo),
                 props = kj::mv(props)](Worker::Lock& lock, IoContext& context) mutable {
-          jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
-          jsg::AsyncContextFrame::StorageScope userTraceScope =
-              context.makeUserAsyncTraceScope(lock);
+          auto traceScope = context.makeRequestTraceScope(lock);
 
           // If we have an invalid timeout, set it to the default value of 15 minutes.
           auto timeout = context.getLimitEnforcer().getAlarmLimit();
@@ -1058,7 +1052,7 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
         // We failed, inform any other entrypoints that may be waiting upon us.
         af.reject(e);
         cancellationGuard.cancel();
-        kj::throwFatalException(kj::mv(e));
+        kj::throwException(kj::mv(e));
       }
     }
     KJ_CASE_ONEOF(outcome, WorkerInterface::AlarmOutcome) {
@@ -1151,8 +1145,7 @@ kj::Promise<bool> WorkerEntrypoint::test() {
                       props = kj::mv(props), &metrics = incomingRequest->getMetrics()](
                       Worker::Lock& lock, IoContext& context) mutable -> kj::Promise<void> {
     TRACE_EVENT("workerd", "WorkerEntrypoint::test() run");
-    jsg::AsyncContextFrame::StorageScope traceScope = context.makeAsyncTraceScope(lock);
-    jsg::AsyncContextFrame::StorageScope userTraceScope = context.makeUserAsyncTraceScope(lock);
+    auto traceScope = context.makeRequestTraceScope(lock);
 
     return context.awaitJs(lock,
         lock.getGlobalScope().test(lock,

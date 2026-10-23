@@ -493,7 +493,7 @@ class RequestObserverWithTracer final: public RequestObserver, public WorkerInte
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       reportFailure(exception);
-      kj::throwFatalException(kj::mv(exception));
+      kj::throwException(kj::mv(exception));
     }
   }
 };
@@ -1272,7 +1272,7 @@ void request_metadata_set_actor_self_token(const WorkerFactory& factory,
 }
 
 void exception_throw(const kj::Exception& exception) {
-  kj::throwFatalException(exception.clone());
+  kj::throwException(exception.clone());
 }
 
 ::rust::String exception_text(const AbortReason& error) {

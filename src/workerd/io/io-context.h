@@ -569,6 +569,11 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
     return id;
   }
 
+  // Unobserved scopes retain only their context identity. This masks inherited spans while
+  // allowing accessors to fall back to the current request when a captured frame is foreign.
+  using TraceScopeState = kj::OneOf<Id, IoOwn<SpanParent>>;
+  using UserTraceScopeState = kj::OneOf<Id, IoOwn<UserTraceAsyncContext>>;
+
   void setEntrypointHandler(jsg::Lock& js, jsg::JsObject handler);
   jsg::JsObject getEntrypointHandler(jsg::Lock& js);
 
@@ -1203,6 +1208,10 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   jsg::AsyncContextFrame::StorageScope makeUserAsyncTraceScope(
       Worker::Lock& lock, kj::Maybe<SpanParent> userSpan = kj::none) KJ_WARN_UNUSED_RESULT;
 
+  // Captures the request's internal and user tracing contexts in a single async frame.
+  jsg::AsyncContextFrame::StorageScope makeRequestTraceScope(
+      Worker::Lock& lock) KJ_WARN_UNUSED_RESULT;
+
   // Returns the current span being recorded.  If called while the JS lock is held, uses the trace
   // information from the current async context, if available.
   SpanParent getCurrentTraceSpan();
@@ -1248,6 +1257,9 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   void pumpMessageLoop();
 
  private:
+  jsg::Value makeTraceScopeValue(Worker::Lock& lock, kj::Maybe<SpanParent> spanParentOverride);
+  jsg::Value makeUserTraceScopeValue(Worker::Lock& lock, kj::Maybe<SpanParent> userSpanOverride);
+
   ThreadContext& thread;
 
   kj::Own<WeakRef> selfRef = kj::refcounted<WeakRef>(kj::Badge<IoContext>(), *this);
@@ -1544,7 +1556,7 @@ kj::PromiseForResult<Func, Worker::Lock&> IoContext::runSingle(
     auto& context = self.assertLive();
     // Re-check if context was aborted while we waited for the lock.
     KJ_IF_SOME(ex, context.abortException) {
-      kj::throwFatalException(ex.clone());
+      kj::throwException(ex.clone());
     }
 
     using Result = decltype(func(kj::instance<Worker::Lock&>()));
@@ -2054,7 +2066,7 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhileImpl(
             "A call to blockConcurrencyWhile() in a Durable Object waited for "
             "too long. The call was canceled and the Durable Object was reset.");
         e.setDetail(WALL_TIME_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
-        kj::throwFatalException(kj::mv(e));
+        kj::throwException(kj::mv(e));
       });
 
       return context.awaitJs(lock, kj::mv(promise)).exclusiveJoin(kj::mv(timeout));
@@ -2089,7 +2101,7 @@ jsg::PromiseForResult<Func, void, true> IoContext::blockConcurrencyWhileImpl(
     // at this point.
     cs->failed(e);
 
-    kj::throwFatalException(kj::mv(e));
+    kj::throwException(kj::mv(e));
   }));
 
   return kj::mv(result);

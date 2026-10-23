@@ -708,6 +708,9 @@ export interface DurableObjectRetryOptions {
   maxRetries?: number;
   timeoutMs?: number;
 }
+export interface DurableObjectEvictionInfo {
+  readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
+}
 export interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   readonly exports: Cloudflare.Exports;
@@ -805,12 +808,12 @@ export interface DurableObjectStorage {
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
   onNextSessionRestoreBookmark(bookmark: string): Promise<string>;
   waitForBookmark(bookmark: string): Promise<void>;
+  /** @deprecated Use `ctx.primaryStub` instead. */
+  readonly primary?: DurableObjectStub;
   snapshot(
     options?: DurableObjectSnapshotOptions,
   ): Promise<DurableObjectSnapshot>;
   onNextSessionRestore(target: DurableObjectSnapshot | string): Promise<string>;
-  /** @deprecated Use `ctx.primaryStub` instead. */
-  readonly primary?: DurableObjectStub;
   /** @deprecated Use `ctx.configureReadReplication()` instead. */
   ensureReplicas(): void;
   /** @deprecated Use `ctx.configureReadReplication()` instead. */

@@ -21,6 +21,7 @@
 
 import { finished, addAbortSignal, promises } from 'node:stream';
 import { strictEqual, throws, rejects, ok } from 'node:assert';
+import { withUncaughtGuard } from 'helpers';
 import { usingTsImpl } from 'which-impl';
 
 const kIsClosedPromise = Symbol.for('nodejs.webstream.isClosedPromise');
@@ -99,6 +100,28 @@ export const interopHooksPresence = {
         strictEqual(instance[kControllerErrorFunction], undefined);
       }
     }
+  },
+};
+
+// The isClosedPromise object's promise is marked handled where it is made:
+// a stream that errors after its hook was read, with nothing looking at
+// the promise, reports no unhandled rejection.
+export const isClosedPromiseIsMarkedHandled = {
+  async test() {
+    if (!usingTsImpl) return;
+    await withUncaughtGuard(() => {
+      const readable = sourceStream(false);
+      ok(readable.stream[kIsClosedPromise].promise instanceof Promise);
+      readable.controller.error(new Error('boom'));
+      let writableController;
+      const ws = new WritableStream({
+        start(c) {
+          writableController = c;
+        },
+      });
+      ok(ws[kIsClosedPromise].promise instanceof Promise);
+      writableController.error(new Error('boom'));
+    });
   },
 };
 

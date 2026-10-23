@@ -33,6 +33,7 @@ strictEqual(typeof workers.withEnv, 'function');
 strictEqual(typeof workers.env, 'object');
 strictEqual(typeof workers.cache, 'object');
 strictEqual(typeof durableObjects.retryable, 'function');
+strictEqual(typeof durableObjects.onEvict, 'symbol');
 
 await rejects(import('cloudflare-internal:env'), {
   message: /Module not found/,

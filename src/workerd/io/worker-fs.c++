@@ -1149,10 +1149,13 @@ class VirtualFileSystemImpl final: public VirtualFileSystem {
     ~Lock() noexcept(false) {
       unlock(url);
       auto maybeParent = url.getParent();
-      while (maybeParent != kj::none) {
-        auto& parent = KJ_ASSERT_NONNULL(maybeParent);
-        unlock(parent);
-        maybeParent = parent.getParent();
+      for (;;) {
+        KJ_IF_SOME(parent, maybeParent) {
+          unlock(parent);
+          maybeParent = parent.getParent();
+        } else {
+          break;
+        }
       }
     }
   };
@@ -1368,7 +1371,7 @@ TmpDirStoreScope::TmpDirStoreScope(kj::Maybe<kj::Badge<TmpDirStoreScope>> guard)
 
 TmpDirStoreScope::~TmpDirStoreScope() noexcept(false) {
   if (onStack) {
-    KJ_ASSERT(tmpDirStorageScope == this, "this TmpDirStoreScope not on the stack");
+    KJ_DTOR_ASSERT(tmpDirStorageScope == this, "this TmpDirStoreScope not on the stack");
     tmpDirStorageScope = nullptr;
   }
 }
@@ -2025,7 +2028,7 @@ class StdioFile final: public File {
           }
         }
       });
-    });
+    }, jsg::Once::YES);
     js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate, callback);
   }
 };

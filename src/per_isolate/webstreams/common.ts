@@ -21,6 +21,8 @@ const {
   uncurryThis,
 } = primordials;
 
+const { isPromise, markPromiseHandled } = utils;
+
 function isActualObject(value: unknown): value is object {
   return value != null && typeof value === 'object';
 }
@@ -46,6 +48,49 @@ function promiseResolvedWith(value: unknown): Promise<void> {
     PromiseWithResolvers() as PromiseWithResolversType<void>;
   resolve(value as void);
   return promise;
+}
+
+// A promise slot (a writer's ready and closed promises, a reader's closed
+// promise) holds a still-pending resolvers record, or the settled promise
+// it became. The two are told apart with the native isPromise: a
+// duck-typed `typeof slot.resolve` would read Object.prototype on the
+// promise.
+export type PromiseSlot = Promise<void> | PromiseWithResolversType<void>;
+
+// A new resolvers record whose promise is marked handled, so nothing need
+// ever look at its rejection. A slot starts pending as one.
+function newHandledPending(): PromiseWithResolversType<void> {
+  const pending = PromiseWithResolvers() as PromiseWithResolversType<void>;
+  markPromiseHandled(pending.promise);
+  return pending;
+}
+
+// A promise rejected with error, marked handled before it rejects: a
+// promise from PromiseReject would be reported as unhandled first.
+function newHandledRejected(error: unknown): Promise<void> {
+  const pending = newHandledPending();
+  pending.reject(error);
+  return pending.promise;
+}
+
+function slotPromise(slot: PromiseSlot): Promise<void> {
+  return isPromise(slot) ? slot : slot.promise;
+}
+
+// Resolves a pending slot's promise; a settled slot is returned as it is.
+function slotResolved(slot: PromiseSlot): Promise<void> {
+  if (isPromise(slot)) return slot;
+  slot.resolve();
+  return slot.promise;
+}
+
+// Rejects a pending slot's promise with error; a settled slot gives way to
+// a new handled promise rejected with error, as the spec's writer
+// EnsureReadyPromiseRejected and EnsureClosedPromiseRejected do.
+function slotRejected(slot: PromiseSlot, error: unknown): Promise<void> {
+  if (isPromise(slot)) return newHandledRejected(error);
+  slot.reject(error);
+  return slot.promise;
 }
 
 function toStringTagProperty(tag: string): PropertyDescriptor {
@@ -327,6 +372,11 @@ export type CommonHelpers = {
   kEnumerable: typeof kEnumerable;
   toStringTagProperty: typeof toStringTagProperty;
   promiseResolvedWith: typeof promiseResolvedWith;
+  newHandledPending: typeof newHandledPending;
+  newHandledRejected: typeof newHandledRejected;
+  slotPromise: typeof slotPromise;
+  slotResolved: typeof slotResolved;
+  slotRejected: typeof slotRejected;
   convertCallback: typeof convertCallback;
   normalizeExpectedLength: typeof normalizeExpectedLength;
   requireObject: typeof requireObject;
@@ -347,6 +397,11 @@ module.exports = ObjectFreeze({
   kEnumerable,
   toStringTagProperty,
   promiseResolvedWith,
+  newHandledPending,
+  newHandledRejected,
+  slotPromise,
+  slotResolved,
+  slotRejected,
   convertCallback,
   normalizeExpectedLength,
   requireObject,

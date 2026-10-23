@@ -332,7 +332,7 @@ void reportStartupError(kj::StringPtr id,
         } else {
           // We should never get here in production if we've validated scripts before deployment.
           KJ_LOG(WARNING, "script startup exceeded resource limits", id, ex);
-          kj::throwFatalException(ex.clone());
+          kj::throwException(ex.clone());
         }
       }
       KJ_CASE_ONEOF_DEFAULT {
@@ -374,7 +374,7 @@ void reportStartupError(kj::StringPtr id,
                       kj::str("script startup threw exception", id, description, trace)));
               if (isDynamicWorker) {
                 // Rethrow the tunneled JSG exception so it converts back to a JS Error.
-                kj::throwFatalException(KJ_ASSERT_NONNULL(permanentException).clone());
+                kj::throwException(KJ_ASSERT_NONNULL(permanentException).clone());
               } else {
                 KJ_LOG(ERROR, "script startup threw exception", id, description, trace);
                 KJ_FAIL_REQUIRE("script startup threw exception");
@@ -382,10 +382,10 @@ void reportStartupError(kj::StringPtr id,
             }
           });
         } else {
-          kj::throwFatalException(permanentException
-                                      .emplace(KJ_EXCEPTION(FAILED,
-                                          "returned empty handle but didn't throw exception?", id))
-                                      .clone());
+          kj::throwException(permanentException
+                                 .emplace(KJ_EXCEPTION(FAILED,
+                                     "returned empty handle but didn't throw exception?", id))
+                                 .clone());
         }
       }
     }
@@ -669,10 +669,12 @@ struct Worker::Isolate::Impl {
       currentApi = oldCurrentApi;
 
 #ifdef KJ_DEBUG
-      // We lack a KJ_DASSERT_NONNULL because it would have to look a lot like KJ_IF_SOME, thus
-      // we use a pragma around KJ_DEBUG here.
-      auto& implCurrentLock = KJ_ASSERT_NONNULL(impl.currentLock, "Isolate lock released twice");
-      KJ_ASSERT(&implCurrentLock == this, "Isolate lock released recursively");
+      // Debug-only, like the matching check in the constructor.
+      KJ_IF_SOME(implCurrentLock, impl.currentLock) {
+        KJ_DTOR_ASSERT(&implCurrentLock == this, "Isolate lock released recursively");
+      } else {
+        KJ_DTOR_FAIL_ASSERT("Isolate lock released twice");
+      }
 #endif
 
       if (shouldReportIsolateMetrics) {
@@ -997,7 +999,7 @@ struct Worker::Script::Impl {
           } catch (jsg::JsExceptionThrown&) {
             // Handled below...
           } catch (kj::Exception& ex) {
-            kj::throwFatalException(kj::mv(ex));
+            kj::throwException(kj::mv(ex));
           }
 
           KJ_ASSERT(tryCatch.HasCaught());
@@ -1005,10 +1007,10 @@ struct Worker::Script::Impl {
             // There's nothing else we can do here but throw a generic fatal exception.
             KJ_SWITCH_ONEOF(limitErrorOrTime) {
               KJ_CASE_ONEOF(limitError, kj::Exception) {
-                kj::throwFatalException(kj::mv(limitError));
+                kj::throwException(kj::mv(limitError));
               }
               KJ_CASE_ONEOF_DEFAULT {
-                kj::throwFatalException(
+                kj::throwException(
                     JSG_KJ_EXCEPTION(FAILED, Error, "Failed to load dynamic module."));
               }
             }
@@ -1246,42 +1248,7 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
     }
     jsg::isolateRegisterExternalReference(lock->v8Isolate, jsg::getSyntheticModuleEvalRef());
 
-    lock->setCaptureThrowsAsRejections(features.getCaptureThrowsAsRejections());
-    // TODO(cleanup): Now that this list has grown significantly, we should probably
-    // refactor to pass all of the options in a single call instead of one by one.
-    if (features.getSetToStringTag()) {
-      lock->setToStringTag();
-    }
-    if (features.getShouldSetImmutablePrototype() || features.getPythonWorkers()) {
-      lock->setImmutablePrototype();
-    }
-    if (features.getSpecCompliantPropertyAttributes()) {
-      lock->setSpecCompliantPropertyAttributes();
-    }
-    if (features.getNodeJsCompatV2()) {
-      lock->setNodeJsCompatEnabled();
-    }
-    if (features.getEnableNodeJsProcessV2()) {
-      lock->setNodeJsProcessV2Enabled();
-    }
-    if (features.getRequireReturnsDefaultExport()) {
-      lock->setRequireReturnsDefaultExportEnabled();
-    }
-    if (features.getThrowOnUnrecognizedImportAssertion()) {
-      lock->setThrowOnUnrecognizedImportAssertion();
-    }
-    if (features.getNoTopLevelAwaitInRequire()) {
-      lock->disableTopLevelAwait();
-    }
-    if (features.getEnhancedErrorSerialization()) {
-      lock->setUsingEnhancedErrorSerialization();
-    }
-    if (features.getFastJsgStruct()) {
-      lock->setUsingFastJsgStruct();
-    }
-    if (features.getWasmEsmIntegrationBuiltins()) {
-      lock->setWasmEsmIntegrationBuiltinsEnabled();
-    }
+    configureJsgIsolate(*lock, features);
 
     if (impl->inspector != kj::none || ::kj::_::Debug::shouldLog(::kj::LogSeverity::INFO)) {
       lock->setLoggerCallback([this](jsg::Lock& js, kj::StringPtr message) {
@@ -1490,6 +1457,54 @@ Worker::Isolate::Isolate(kj::Own<Api> apiParam,
   });
 }
 
+namespace {
+
+// Closes the isolate's code cache production window without producing anything.
+void discardDeferredCodeCaches(jsg::Lock& js) {
+  KJ_IF_SOME(codeCache, jsg::IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
+    codeCache.discardDeferred();
+  }
+}
+
+// Makes the isolate's code cache forget the addresses of the sources given to
+// prepareCodeCaches(), which are only guaranteed to be alive while the Script is constructed.
+void forgetPreparedCodeCacheSources(jsg::Lock& js) {
+  KJ_IF_SOME(codeCache, jsg::IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
+    codeCache.forgetPreparedSources();
+  }
+}
+
+// Hashes the worker code that a Script and its Worker compile from `source` and looks it up in the
+// code cache store, so that neither is charged to the startup CPU limit, which the validator
+// (which has no store) never pays.
+void prepareCodeCaches(jsg::IsolateCodeCache& codeCache,
+    const Worker::Script::Source& source,
+    kj::Maybe<const jsg::modules::ModuleRegistry&> newModuleRegistry) {
+  using Unit = jsg::CodeCacheKey::Unit;
+  KJ_SWITCH_ONEOF(source.variant) {
+    KJ_CASE_ONEOF(script, Worker::Script::ScriptSource) {
+      codeCache.prepare(Unit::CLASSIC_SCRIPT, script.mainScript);
+    }
+    KJ_CASE_ONEOF(modulesSource, Worker::Script::ModulesSource) {
+      KJ_IF_SOME(registry, newModuleRegistry) {
+        // The registry compiles modules when they are first imported, so this looks up every
+        // bundle module, imported at startup or not.
+        for (auto& key: registry.getBundleCodeCacheKeys()) {
+          codeCache.prepare(key);
+        }
+      } else {
+        for (auto& module: modulesSource.modules) {
+          KJ_IF_SOME(esModule, module.content.tryGet<Worker::Script::EsModule>()) {
+            codeCache.prepare(Unit::LEGACY_REGISTRY_ESM, esModule.body);
+          }
+        }
+      }
+    }
+  }
+}
+
+}  // namespace
+
 Worker::Script::Script(kj::Own<const Isolate> isolateParam,
     kj::StringPtr id,
     const Script::Source& source,
@@ -1540,7 +1555,17 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
       } else {
         // Else block to avoid dangling else clang warning.
       }
+      discardDeferredCodeCaches(lock);
     });
+
+    // Code caches for the code compiled here are produced once the Worker constructor has run
+    // the top level, which compiles the functions that run there.
+    KJ_IF_SOME(codeCache, jsg::IsolateBase::from(lock.v8Isolate).tryGetCodeCache()) {
+      codeCache.deferProduction();
+      prepareCodeCaches(codeCache, source, impl->tryGetNewModuleRegistry());
+    }
+    // `source` is only guaranteed to be alive until this constructor returns.
+    KJ_DEFER(forgetPreparedCodeCacheSources(lock));
 
     lock.withinHandleScope([&] {
       if (isolate->impl->inspector != kj::none || errorReporter != kj::none) {
@@ -1637,8 +1662,8 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
                   // add it to the rollover bank, though.
                   auto limitScope =
                       isolate->getLimitEnforcer().enterStartupJs(lock, limitErrorOrTime);
-                  impl->unboundScriptOrMainModule =
-                      jsg::NonModuleScript::compile(lock, script.mainScript, script.mainScriptName);
+                  impl->unboundScriptOrMainModule = jsg::NonModuleScript::compileWorkerScript(
+                      lock, script.mainScript, script.mainScriptName);
                 }
               }
 
@@ -1759,6 +1784,10 @@ Worker::Script::~Script() noexcept(false) {
       recordedLock.disposeContext(kj::mv(c));
     }
     impl = nullptr;
+    // A Worker closes the code cache production window that the constructor opened. If no
+    // Worker ran this script, close it here, so that the elections it holds do not keep other
+    // isolates from producing those caches.
+    discardDeferredCodeCaches(*recordedLock.lock);
   });
 }
 
@@ -1788,7 +1817,7 @@ void Worker::Isolate::setCpuLimitNearlyExceededCallback(kj::Function<void()> cb)
     *lock = kj::mv(cb);
     return;
   }
-  kj::throwRecoverableException(KJ_EXCEPTION(
+  kj::throwExceptionUnlessUnwinding(KJ_EXCEPTION(
       FAILED, "Python Workers Internal Error: CpuLimitNearlyExceededCallback already set"));
 }
 
@@ -2225,6 +2254,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       } else {
         // Else block to avoid dangling else clang warning.
       }
+      discardDeferredCodeCaches(lock);
     });
 
     auto maybeMakeSpan = [&](auto operationName) -> SpanBuilder {
@@ -2306,6 +2336,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         // Script failed to parse. Act as if the script was empty -- i.e. do nothing.
         impl->permanentException =
             script->impl->permanentException.map([](auto& e) { return e.clone(); });
+        discardDeferredCodeCaches(lock);
         return;
       }
 
@@ -2463,6 +2494,17 @@ Worker::Worker(kj::Own<const Script> scriptParam,
         }
       });
 
+      // Produce the code caches for the code compiled while starting this worker, now that its
+      // top level has run. This is not charged to the startup limits.
+      KJ_IF_SOME(codeCache, jsg::IsolateBase::from(lock.v8Isolate).tryGetCodeCache()) {
+        if (impl->permanentException == kj::none) {
+          codeCache.produceDeferred(
+              lock.v8Isolate, jsg::IsolateBase::from(lock.v8Isolate).getObserver());
+        } else {
+          codeCache.discardDeferred();
+        }
+      }
+
       // Reset this back to its default after startup execution
       // Leaving it on comes at the expense of collecting stack traces for all thrown exceptions
       // Ref: https://github.com/cloudflare/workerd/issues/5332
@@ -2592,7 +2634,7 @@ Worker::Lock::~Lock() noexcept(false) {
 void Worker::Lock::requireNoPermanentException() {
   KJ_IF_SOME(e, worker.impl->permanentException) {
     // Block taking lock when worker failed to start up.
-    kj::throwFatalException(e.clone());
+    kj::throwException(e.clone());
   }
 }
 
@@ -3948,7 +3990,7 @@ struct Worker::Actor::Impl {
           "broken.outputGateBroken; jsg.Error: Durable Object storage operation exceeded "
           "timeout which caused object to be reset.");
       e.setDetail(WALL_TIME_LIMIT_DETAIL_ID, kj::heapArray<kj::byte>(0));
-      kj::throwFatalException(kj::mv(e));
+      kj::throwException(kj::mv(e));
     }
 
     // Implements OutputGate::Hooks.
@@ -4154,7 +4196,7 @@ Worker::Actor::Actor(const Worker& worker,
     } else {
       auto e = KJ_EXCEPTION(FAILED, "broken.ignored; no such actor class", c);
       e.setDetail(jsg::EXCEPTION_IS_USER_ERROR, kj::heapArray<kj::byte>(0));
-      kj::throwFatalException(kj::mv(e));
+      kj::throwException(kj::mv(e));
     }
   } else {
     impl->classInstance = Impl::NoClass();
@@ -4472,7 +4514,7 @@ void Worker::Actor::assertCanSetAlarm() {
     }
     KJ_CASE_ONEOF(exception, kj::Exception) {
       // We've failed in the ctor, might as well just throw that exception for now.
-      kj::throwFatalException(exception.clone());
+      kj::throwException(exception.clone());
     }
   }
   KJ_UNREACHABLE;
@@ -4622,7 +4664,7 @@ kj::Maybe<api::ExportedHandler&> Worker::Actor::getHandler() {
       return handler;
     }
     KJ_CASE_ONEOF(exception, kj::Exception) {
-      kj::throwFatalException(exception.clone());
+      kj::throwException(exception.clone());
     }
   }
   KJ_UNREACHABLE;

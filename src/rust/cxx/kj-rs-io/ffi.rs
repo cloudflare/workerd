@@ -19,7 +19,8 @@
 //! Socket addresses are not a third kind: they cross as the typed [`SocketAddress`] struct
 //! below in both directions, so no `struct sockaddr` bytes are viewed or built on the Rust side
 //! (net.rs, "Typed addresses"). The only other `unsafe` here is the process-wide `SIGPIPE`
-//! disposition ([`ignore_sigpipe_once`], via nix).
+//! disposition ([`ignore_sigpipe_once`], via nix) and registering an owned descriptor with
+//! tokio's I/O driver ([`register_fd`]).
 //!
 //! No bridged future borrows the Rust object it was called on: every opaque type is a handle to
 //! `Arc`-shared state and its operations own a share (lib.rs, "Ownership of in-flight
@@ -302,6 +303,23 @@ unsafe fn own_fd_from_raw(fd: i32) -> Result<std::os::fd::OwnedFd> {
     }
     // Safety: per this function's contract `fd` is open and owned by us from this point on.
     Ok(unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) })
+}
+
+/// Registers an owned descriptor with the calling thread's tokio I/O driver for `interest`.
+///
+/// Safe to call because the returned `AsyncFd` owns `fd`: tokio's registration contract (the
+/// descriptor stays open, and the same one, while registered) holds as long as nobody swaps the
+/// `OwnedFd` out through `AsyncFd::get_mut`, which nothing in this crate does.
+#[cfg(unix)]
+pub fn register_fd(
+    fd: std::os::fd::OwnedFd,
+    interest: tokio::io::Interest,
+) -> std::io::Result<tokio::io::unix::AsyncFd<std::os::fd::OwnedFd>> {
+    // Safety: the `AsyncFd` takes ownership of `fd`, so it stays open and `as_raw_fd()` returns
+    // the same descriptor until the `AsyncFd` is dropped or unwrapped; callers only reach it
+    // through shared references.
+    unsafe { tokio::io::unix::AsyncFd::register_with_interest(fd, interest) }
+        .map_err(std::io::Error::from)
 }
 
 /// A negative (or, on unix, fd-range-exceeding) handle crossed the bridge: KJ's provider hands

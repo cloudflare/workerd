@@ -35,8 +35,8 @@ TokioEventPort::TokioEventPort()
 }
 
 TokioEventPort::~TokioEventPort() noexcept(false) {
-  KJ_ASSERT(ownerThread == kj::ThreadId::current(),
-      "TokioEventPort destroyed on a thread other than its owner") {
+  if (ownerThread != kj::ThreadId::current()) {
+    KJ_LOG(FATAL, "TokioEventPort destroyed on a thread other than its owner");
     std::abort();
   }
   // Cancel spawned tasks while the loop and timer -- our members, destroyed after this body --

@@ -40,9 +40,38 @@ class StaticMethodContainer: public jsg::Object {
     value = value_;
   }
 
+  // On a non-context receiver, so these take the reduced fast callback.
+  int32_t addPrimitive(int32_t a, int32_t b) {
+    return a + b;
+  }
+
+  int32_t throwPrimitive(int32_t code) {
+    if (code > 0) {
+      JSG_FAIL_REQUIRE(TypeError, "Primitive error with code ", code);
+    }
+    return 0;
+  }
+
+  int32_t measure(kj::String s) {
+    return s.size();
+  }
+
+  int32_t measureTwo(kj::String a, kj::String b) {
+    return a.size() + b.size();
+  }
+
+  int32_t measureWithLock(jsg::Lock& js, kj::String s) {
+    return js.str(s).length(js);
+  }
+
   JSG_RESOURCE_TYPE(StaticMethodContainer) {
     JSG_STATIC_METHOD(staticMethod);
     JSG_PROTOTYPE_PROPERTY(value, getValue, setValue);
+    JSG_METHOD(addPrimitive);
+    JSG_METHOD(throwPrimitive);
+    JSG_METHOD(measure);
+    JSG_METHOD(measureTwo);
+    JSG_METHOD(measureWithLock);
   }
 
  private:
@@ -292,6 +321,42 @@ KJ_TEST("Fast methods should work with getters/setters") {
       CallCounter(5, 1));
 }
 
+KJ_TEST("all-primitive fast path on a non-context receiver") {
+  jsg::callCounter.reset();
+  JsgConfig config = {
+    .fastApiEnabled = true,
+  };
+  FastMethodEvaluator e(v8System, config);
+
+  e.expectEval("const t = newContainer();"
+               "function hot(a, b) { return t.addPrimitive(a, b); }"
+               "%PrepareFunctionForOptimization(hot);"
+               "hot(1, 2);"
+               "%OptimizeFunctionOnNextCall(hot);"
+               "hot(3, 4)",
+      "number", "7");
+
+  KJ_EXPECT(jsg::callCounter.fast > 0, jsg::callCounter.fast);
+}
+
+KJ_TEST("all-primitive fast path reports errors") {
+  jsg::callCounter.reset();
+  JsgConfig config = {
+    .fastApiEnabled = true,
+  };
+  FastMethodEvaluator e(v8System, config);
+
+  e.expectEval("const t = newContainer();"
+               "function hotThrow(code) { return t.throwPrimitive(code); }"
+               "%PrepareFunctionForOptimization(hotThrow);"
+               "hotThrow(0);"
+               "%OptimizeFunctionOnNextCall(hotThrow);"
+               "hotThrow(7)",
+      "throws", "TypeError: Primitive error with code 7");
+
+  KJ_EXPECT(jsg::callCounter.fast > 0, jsg::callCounter.fast);
+}
+
 KJ_TEST("Fast methods properly catch JSG_FAIL_REQUIRE errors") {
   jsg::callCounter.reset();
   JsgConfig config = {
@@ -318,6 +383,116 @@ KJ_TEST("Fast methods properly catch JSG_FAIL_REQUIRE errors") {
   // 3 slow path calls (original direct call + non-throwing call + the initial optimization call that didn't throw)
   // 1 fast path call (the optimized call that threw an error)
   KJ_ASSERT(jsg::callCounter == CallCounter(3, 1));
+}
+
+KJ_TEST("two string arguments through the no-scope fast path") {
+  jsg::callCounter.reset();
+  JsgConfig config = {
+    .fastApiEnabled = true,
+  };
+  FastMethodEvaluator e(v8System, config);
+
+  // The first transcode must not invalidate the second argument's pointer (#4625).
+  e.expectEval("const t = newContainer();"
+               "function hot(a, b) { return t.measureTwo(a, b); }"
+               "%PrepareFunctionForOptimization(hot);"
+               "hot('x', 'y');"
+               "%OptimizeFunctionOnNextCall(hot);"
+               "hot('hello', 'worldwide')",
+      "number", "14");
+  KJ_EXPECT(jsg::callCounter.fast > 0, jsg::callCounter.fast);
+}
+
+KJ_TEST("Lock& method with a string argument through the no-scope fast path") {
+  jsg::callCounter.reset();
+  JsgConfig config = {
+    .fastApiEnabled = true,
+  };
+  FastMethodEvaluator e(v8System, config);
+
+  e.expectEval("const t = newContainer();"
+               "function hot(s) {"
+               "  let n = 0;"
+               "  for (let i = 0; i < 1000; i++) n += t.measureWithLock(s);"
+               "  return n;"
+               "}"
+               "%PrepareFunctionForOptimization(hot);"
+               "hot('x');"
+               "%OptimizeFunctionOnNextCall(hot);"
+               "hot('hello')",
+      "number", "5000");
+  KJ_EXPECT(jsg::callCounter.fast > 0, jsg::callCounter.fast);
+}
+
+// Every shape that is not a sequential latin1 string must fall back instead of being reinterpreted.
+KJ_TEST("all string shapes agree between fast and slow paths") {
+  struct Case {
+    kj::LiteralStringConst expr;
+    kj::LiteralStringConst utf8Length;
+    kj::LiteralStringConst description;
+    bool expectFastPath;
+  };
+
+  static constexpr Case cases[] = {
+    {"'abc'"_kjc, "3"_kjc, "ascii"_kjc, true},
+    {"'ab\\u00e9'"_kjc, "4"_kjc, "latin1 needing transcode"_kjc, true},
+    {"'a\\u0000b'"_kjc, "3"_kjc, "embedded NUL must not truncate"_kjc, true},
+    {"('ab' + 'cd')"_kjc, "4"_kjc, "cons string, flattened by V8"_kjc, true},
+    {"'\\u65e5\\u672c\\u8a9e'"_kjc, "9"_kjc, "two-byte CJK"_kjc, false},
+    {"'\\ud83d\\ude00'"_kjc, "4"_kjc, "surrogate pair"_kjc, false},
+    {"'a\\u65e5b'"_kjc, "5"_kjc, "mixed one and two byte"_kjc, false},
+    {"123"_kjc, "3"_kjc, "number coerced"_kjc, false},
+    {"({toString() { return 'xyz'; }})"_kjc, "3"_kjc, "object with toString"_kjc, false},
+    {"null"_kjc, "4"_kjc, "null coerced"_kjc, false},
+  };
+
+  for (auto& c: cases) {
+    JsgConfig fastConfig = {
+      .fastApiEnabled = true,
+    };
+    JsgConfig slowConfig = {
+      .fastApiEnabled = false,
+    };
+
+    auto source = kj::str("const t = newContainer();"
+                          "function hot(s) { return t.measure(s); }"
+                          "%PrepareFunctionForOptimization(hot);"
+                          "hot('seed');"
+                          "%OptimizeFunctionOnNextCall(hot);"
+                          "hot(",
+        c.expr, ")");
+
+    {
+      FastMethodEvaluator e(v8System, slowConfig);
+      e.expectEval(source, "number", c.utf8Length);
+    }
+    {
+      jsg::callCounter.reset();
+      FastMethodEvaluator e(v8System, fastConfig);
+      e.expectEval(source, "number", c.utf8Length);
+      if (c.expectFastPath) {
+        KJ_EXPECT(jsg::callCounter.fast > 0, c.description, "should have used the fast callback");
+      } else {
+        KJ_EXPECT(jsg::callCounter.fast == 0, c.description,
+            "must fall back to the slow callback rather than reinterpreting the argument");
+      }
+    }
+  }
+}
+
+KJ_TEST("isFastApiNoScope Detection") {
+  static_assert(isFastApiNoScope<decltype(&StaticMethodContainer::addPrimitive)>);
+  static_assert(isFastApiNoScope<decltype(&StaticMethodContainer::measure)>);
+  static_assert(isFastApiNoScope<decltype(&StaticMethodContainer::measureTwo)>);
+  static_assert(isFastApiNoScope<decltype(&StaticMethodContainer::measureWithLock)>);
+
+  static_assert(isFastApiNoScope<void (FastMethodContext::*)(jsg::Lock&, kj::String, kj::String)>);
+
+  // Compatible but not no-scope: the argument still needs unwrapping.
+  static_assert(isFastApiCompatible<int32_t (FastMethodContext::*)(v8::Local<v8::Value>)>);
+  static_assert(!isFastApiNoScope<int32_t (FastMethodContext::*)(v8::Local<v8::Value>)>);
+
+  static_assert(!isFastApiNoScope<kj::String (FastMethodContext::*)(int32_t)>);
 }
 
 KJ_TEST("isFastApiCompatible Detection") {

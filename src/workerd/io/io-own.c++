@@ -94,14 +94,18 @@ kj::Promise<void> DeleteQueue::resetCrossThreadSignal() const {
 }
 
 OwnedObjectList::~OwnedObjectList() noexcept(false) {
-  while (head != kj::none) {
+  for (;;) {
     // We want to have the same order of operations as the recursive destructor here. Without this
     // optimization, `~SpecificOwnedObject<T>` is invoked first, then `~OwnedObject()` which
     // destructs the next node which continues the process. The key takeaway is that we destroy each
     // node's `T` before we move onto the next node. This duplicates that behavior by unlinking
     // forward through the list, which hopefully should keep our stack size low no matter how many
     // `OwnedObject` instances we have.
-    unlink(*KJ_ASSERT_NONNULL(head));
+    KJ_IF_SOME(object, head) {
+      unlink(*object);
+    } else {
+      break;
+    }
   }
 }
 
