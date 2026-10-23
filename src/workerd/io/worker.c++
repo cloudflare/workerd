@@ -1919,7 +1919,8 @@ void shimWebAssemblyInstantiate(jsg::Lock& lock, v8::Local<v8::Context> context)
   auto shimFn = KJ_ASSERT_NONNULL(shimScript.runAndReturn(lock).tryCast<jsg::JsFunction>());
 
   // Call the factory — it mutates `WebAssembly` in place.
-  shimFn.call(lock, lock.global(), jsg::JsFunction(registerFn));
+  auto matchNativeInstance = lock.boolean(FeatureFlags::get(lock).getPedanticWpt());
+  shimFn.call(lock, lock.global(), jsg::JsFunction(registerFn), matchNativeInstance);
 }
 
 namespace {

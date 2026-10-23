@@ -263,3 +263,69 @@ export let gcReclaimsModules = {
     // If we get here without OOM, reclamation is working.
   },
 };
+
+// ---------------------------------------------------------------------------
+// Shim shape tests
+//
+// With pedantic_wpt, the WebAssembly.Instance shim matches the native constructor: it throws
+// when called without `new` and has a read-only `prototype`. Without it, the shim keeps its
+// legacy behavior.
+// ---------------------------------------------------------------------------
+
+export let instanceShimMatchesNativeShape = {
+  test(ctrl, env) {
+    const Instance = WebAssembly.Instance;
+    if (Instance.name !== 'Instance' || Instance.length !== 1) {
+      throw new Error(
+        `Unexpected name/length: ${Instance.name}/${Instance.length}`
+      );
+    }
+
+    const desc = Object.getOwnPropertyDescriptor(Instance, 'prototype');
+    if (
+      desc.writable !== !env.pedanticWpt ||
+      desc.enumerable ||
+      desc.configurable
+    ) {
+      throw new Error(
+        `Unexpected prototype descriptor: ${JSON.stringify(desc)}`
+      );
+    }
+    if (Instance.prototype.constructor !== Instance) {
+      throw new Error('Instance.prototype.constructor is not the shim');
+    }
+
+    class SubInstance extends Instance {}
+    const sub = new SubInstance(preinitModule);
+    if (!(sub instanceof SubInstance) || sub.exports.get_signal() !== 0) {
+      throw new Error('Subclass instance was not constructed and registered');
+    }
+  },
+};
+
+export let instanceShimCalledWithoutNew = {
+  test(ctrl, env) {
+    if (env.pedanticWpt) {
+      try {
+        WebAssembly.Instance(preinitModule);
+      } catch (e) {
+        if (e instanceof TypeError) return;
+        throw e;
+      }
+      throw new Error(
+        'Expected calling WebAssembly.Instance without new to throw'
+      );
+    }
+
+    // Legacy behavior: calling without `new` constructs and registers an instance.
+    const instance = WebAssembly.Instance(preinitModule);
+    if (!(instance instanceof WebAssembly.Instance)) {
+      throw new Error('Expected a WebAssembly.Instance');
+    }
+    if (instance.exports.get_signal() !== 0) {
+      throw new Error(
+        'Expected signal to be zeroed, got ' + instance.exports.get_signal()
+      );
+    }
+  },
+};
