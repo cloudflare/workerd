@@ -1516,9 +1516,24 @@ SqliteDatabase::StatementAndEffect& SqliteDatabase::Statement::prepareForExecuti
     stmt.run(StatementOptions{.queryId = queryId});
   }
 
+  KJ_IF_SOME(prepared, stmt.tryGet<StatementAndEffect>()) {
+    // SQLite notices that a prepared statement is stale (the schema changed since it was compiled)
+    // only when executing the program, which EXPLAIN never does: it lists the program's opcodes
+    // instead, dereferencing pointers into the schema as it was at compile time. If a table the
+    // statement refers to has been dropped since, those pointers dangle. So never reuse a compiled
+    // EXPLAIN; recompile it from its SQL below. (If the statement is busy, a Query is still using
+    // it, so leave it alone; Query::checkRequirements() will reject the new execution anyway.)
+    if (sqlite3_stmt_isexplain(prepared.statement) && !sqlite3_stmt_busy(prepared.statement)) {
+      // Finalizing the old statement needs a memory scope.
+      auto memoryScope = db.enterMemoryScope();
+      stmt = kj::str(sqlite3_sql(prepared.statement));
+    }
+  }
+
   KJ_IF_SOME(sqlCode, stmt.tryGet<kj::String>()) {
-    // Database was reset. Recompile the statement against the new database. (This could throw,
-    // of course, if the statement depends on tables that haven't been recreated yet.)
+    // Either the statement was never compiled (prepareMulti()), the database was reset, or this is
+    // an EXPLAIN (see above). Compile the statement against the current database. (This could
+    // throw, of course, if the statement depends on tables that don't exist (anymore).)
     //
     // Move the SQL out of `stmt` before parsing it. This ensures that the StringPtrs used by
     // prepareSql() don't point into the OneOf alternative when that alternative is replaced, and
