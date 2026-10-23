@@ -260,18 +260,14 @@ class R2Bucket: public jsg::Object {
     JSG_STRUCT_TS_OVERRIDE(R2MultipartOptions);
   };
 
-  // Serializable* types: values exchanged with the R2 gateway worker (R2GW) over JSRPC where the
-  // public type cannot be used directly. Most RPC inputs (PutOptions, ListOptions, Conditional)
-  // are sent as their public types; SerializableGetOptions exists only because of `range` (see
-  // below).
+  // Internal JSRPC payload types. SerializableGetOptions is the normalized request shape used
+  // because the public Range type cannot represent the exact object sent to the backing
+  // entrypoint (see below). SerializableChecksums, SerializableHeadResult, and
+  // SerializableGetResult are the payloads used by the custom serializers for the corresponding
+  // native R2 resource types. RPC reconstructs those native resources before a named R2 method's
+  // result is unwrapped.
   //
-  // The R2GW returns results as plain objects. Only a JSG_STRUCT can be unwrapped from a plain
-  // object, so the resource types (Checksums, HeadResult, GetResult) cannot receive them; the
-  // Serializable* result structs receive them instead and are converted into the public types
-  // before being handed to the caller.
-  //
-  // These are NOT customer-facing types and must never be returned to user code, so they carry
-  // no TS overrides.
+  // These are not customer-facing types, so they carry no TS overrides.
 
   struct SerializableGetOptions {
     jsg::Optional<kj::OneOf<Conditional, jsg::Ref<Headers>>> onlyIf;
@@ -283,7 +279,7 @@ class R2Bucket: public jsg::Object {
     JSG_STRUCT(onlyIf, range, ssecKey);
   };
 
-  // Object metadata as returned by the R2GW. HeadResult / Checksums are built from these.
+  // Serialized Checksums payload.
   struct SerializableChecksums {
     jsg::Optional<kj::Array<kj::byte>> md5;
     jsg::Optional<kj::Array<kj::byte>> sha1;
@@ -294,13 +290,8 @@ class R2Bucket: public jsg::Object {
     JSG_STRUCT(md5, sha1, sha256, sha384, sha512);
   };
 
-  // Field names match the gateway's R2ObjectRpc, not HeadResult's members: the
-  // key arrives as `key` where HeadResult stores it as `name`.
-  //
-  // `kj::Maybe` rather than `jsg::Optional` throughout, because jsg::Optional
-  // accepts `undefined` but not `null`, and only kj::Maybe tolerates both. The
-  // gateway omits absent fields today, but that is an unenforced cross-repo
-  // invariant and a null would otherwise be a hard unwrap failure.
+  // The serialized field is `key`, while HeadResult stores it internally as `name`.
+  // `kj::Maybe` accepts both undefined and null for absent optional fields in a payload.
   struct SerializableHeadResult {
     kj::String key;
     kj::String version;
@@ -556,9 +547,8 @@ class R2Bucket: public jsg::Object {
     }
   };
 
-  using HeadBackendResult = kj::OneOf<jsg::Ref<HeadResult>, SerializableHeadResult>;
-  using GetBackendResult =
-      kj::OneOf<jsg::Ref<GetResult>, jsg::Ref<HeadResult>, SerializableGetResult>;
+  using HeadBackendResult = jsg::Ref<HeadResult>;
+  using GetBackendResult = kj::OneOf<jsg::Ref<GetResult>, jsg::Ref<HeadResult>>;
 
   struct ListResult {
     kj::Array<jsg::Ref<HeadResult>> objects;
@@ -574,15 +564,6 @@ class R2Bucket: public jsg::Object {
       | { truncated: true; cursor: string }
       | { truncated: false }
     ));
-  };
-
-  struct ListBackendResult {
-    kj::Array<HeadBackendResult> objects;
-    bool truncated;
-    kj::Maybe<kj::String> cursor;
-    kj::Maybe<kj::Array<kj::String>> delimitedPrefixes;
-
-    JSG_STRUCT(objects, truncated, cursor, delimitedPrefixes);
   };
 
   // The backing entrypoint's createMultipartUpload() reply, which must be `{ uploadId }`. A named
@@ -634,18 +615,11 @@ class R2Bucket: public jsg::Object {
       kj::OneOf<kj::String, kj::Array<kj::String>> keys,
       const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType);
 
-  // JSRPC equivalents of the above, selected by JSG_RESOURCE_TYPE when the r2_binding_jsrpc compatibility flag is
-  // on. It dispatches to the gateway's R2BindingEntrypoint instead of
-  // synthesising an HTTP request, then rebuilds the public result types from the
-  // plain data JSRPC delivers.
-  //
-  // These keep ordinary typed signatures rather than taking a raw
-  // v8::FunctionCallbackInfo the way KvNamespace::deleteBulk does. A raw-args
-  // passthrough cannot work here: it returns the JsRpcPromise directly, so the
-  // caller receives the gateway's plain data and R2Object's methods and sync
-  // accessors are gone. Reconstruction needs the resolved value, which needs a
-  // real promise, which needs a typed return, which needs an injected
-  // TypeHandler -- and TypeHandlers are only injected into typed signatures.
+  // JSRPC equivalents of the above, selected by JSG_RESOURCE_TYPE when the r2_binding_jsrpc
+  // compatibility flag is on. They dispatch to the backing entrypoint instead of synthesizing an
+  // HTTP request. Typed signatures provide the TypeHandlers that validate the entrypoint contract
+  // and unwrap the custom JSRPC thenable. Native R2 results are reconstructed by their custom RPC
+  // deserializers before these handlers receive them.
   jsg::Promise<kj::Maybe<jsg::Ref<HeadResult>>> headRpc(jsg::Lock& js,
       kj::String key,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
@@ -685,7 +659,7 @@ class R2Bucket: public jsg::Object {
       jsg::Optional<ListOptions> options,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
       const jsg::TypeHandler<jsg::Function<jsg::Value(jsg::Optional<ListOptions>)>>& listFnHandler,
-      const jsg::TypeHandler<jsg::Promise<ListBackendResult>>& listResultHandler,
+      const jsg::TypeHandler<jsg::Promise<ListResult>>& listResultHandler,
       CompatibilityFlags::Reader flags);
   jsg::Promise<ListResult> list(jsg::Lock& js,
       jsg::Optional<ListOptions> options,
@@ -815,7 +789,7 @@ class R2Bucket: public jsg::Object {
       kj::LiteralStringConst operation,
       kj::Maybe<kj::StringPtr> key = kj::none);
 
-  // Look up a method on the gateway's entrypoint over this binding's subrequest
+  // Look up a method on the backing entrypoint over this binding's subrequest
   // channel.
   jsg::Ref<JsRpcProperty> getRpcMethod(jsg::Lock& js, kj::StringPtr methodName);
 

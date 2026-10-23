@@ -676,56 +676,23 @@ static uint64_t getResultBodyLength(R2Bucket::HeadResult& object) {
   return static_cast<uint64_t>(bodyLength);
 }
 
-static jsg::Ref<R2Bucket::GetResult> getResultFromSerializable(
-    jsg::Lock& js, R2Bucket::SerializableGetResult rpc) {
-  KJ_ASSERT(rpc.kind == "body", "Malformed R2 get RPC result: expected a body result.");
-  auto body = KJ_ASSERT_NONNULL(
-      kj::mv(rpc.body), "Malformed R2 get RPC result: body result did not have a body.");
-  auto cancelReader = kj::defer(
-      [&] { body.forceCancel(js, js.error("Malformed R2 get RPC result.")).markAsHandled(js); });
-  auto object = headResultFromSerializable(js, kj::mv(rpc.object), MissingMetadataPolicy::EMPTY);
-
-  auto& context = IoContext::current();
-  auto pipe = newIdentityPipe(getResultBodyLength(*object));
-  auto pump = context.waitForDeferredProxy(body.pumpTo(js, kj::mv(pipe.out), EndStream::YES));
-  body = JsReadableStream::create(
-      js, context, kj::heap<R2GetBodyStream>(kj::mv(pipe.in), kj::mv(pump)));
-  cancelReader.cancel();
-
-  auto customMetadata = object->getCustomMetadata();
-  return js.alloc<R2Bucket::GetResult>(kj::str(object->getName()), kj::str(object->getVersion()),
-      object->getSize(), kj::str(object->getEtag()), object->getChecksums(), object->getUploaded(),
-      object->getHttpMetadata(), kj::mv(customMetadata), object->getRange(),
-      kj::str(object->getStorageClass()),
-      object->getSSECKeyMd5().map([](kj::StringPtr s) { return kj::str(s); }), kj::mv(body));
-}
-
 jsg::Ref<R2Bucket::HeadResult> headResultFromBackend(
     jsg::Lock& js, R2Bucket::HeadBackendResult result, MissingMetadataPolicy policy) {
-  KJ_SWITCH_ONEOF(result) {
-    KJ_CASE_ONEOF(native, jsg::Ref<R2Bucket::HeadResult>) {
-      if (dynamic_cast<R2Bucket::GetResult*>(native.get()) != nullptr) {
-        auto body = static_cast<R2Bucket::GetResult*>(native.get())->getBody(js);
-        body.forceCancel(js, js.error("Malformed R2 RPC result: expected object metadata."))
-            .markAsHandled(js);
-        KJ_FAIL_ASSERT(
-            "Malformed R2 RPC result: expected object metadata, received an object body.");
-      }
-      if (policy == MissingMetadataPolicy::EMPTY) {
-        bool hasHttpMetadata = native->getHttpMetadata() != kj::none;
-        bool hasCustomMetadata = native->getCustomMetadata() != kj::none;
-        KJ_ASSERT(hasHttpMetadata,
-            "Malformed R2 RPC result: object metadata did not include HTTP metadata.");
-        KJ_ASSERT(hasCustomMetadata,
-            "Malformed R2 RPC result: object metadata did not include custom metadata.");
-      }
-      return kj::mv(native);
-    }
-    KJ_CASE_ONEOF(rpc, R2Bucket::SerializableHeadResult) {
-      return headResultFromSerializable(js, kj::mv(rpc), policy);
-    }
+  if (dynamic_cast<R2Bucket::GetResult*>(result.get()) != nullptr) {
+    auto body = static_cast<R2Bucket::GetResult*>(result.get())->getBody(js);
+    body.forceCancel(js, js.error("Malformed R2 RPC result: expected object metadata."))
+        .markAsHandled(js);
+    KJ_FAIL_ASSERT("Malformed R2 RPC result: expected object metadata, received an object body.");
   }
-  KJ_UNREACHABLE;
+  if (policy == MissingMetadataPolicy::EMPTY) {
+    bool hasHttpMetadata = result->getHttpMetadata() != kj::none;
+    bool hasCustomMetadata = result->getCustomMetadata() != kj::none;
+    KJ_ASSERT(hasHttpMetadata,
+        "Malformed R2 RPC result: object metadata did not include HTTP metadata.");
+    KJ_ASSERT(hasCustomMetadata,
+        "Malformed R2 RPC result: object metadata did not include custom metadata.");
+  }
+  return kj::mv(result);
 }
 
 jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::headRpc(jsg::Lock& js,
@@ -739,7 +706,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::headRpc(jsg::L
         .then(js,
             [](jsg::Lock& js,
                 kj::Maybe<HeadBackendResult> parsed) -> kj::Maybe<jsg::Ref<HeadResult>> {
-      // A missing object is null, not an error: the gateway maps the 404 that
+      // A missing object is null, not an error: the backing entrypoint maps the 404 that
       // R2Result::objectNotFound() used to represent onto a null return.
       KJ_IF_SOME(backend, parsed) {
         return headResultFromBackend(js, kj::mv(backend));
@@ -765,7 +732,8 @@ R2Bucket::getRpc(jsg::Lock& js,
       KJ_IF_SOME(condition, o.onlyIf) {
         // Parsed only for validation, so callers get the same errors as the non-RPC path (e.g.
         // quoted or malformed ETags, invalid dates). The parsed result is intentionally unused:
-        // the original onlyIf value is forwarded below and the R2GW does its own parsing.
+        // the original onlyIf value is forwarded below and the backing entrypoint does its own
+        // parsing.
         UnwrappedConditional conditional = [&] {
           KJ_SWITCH_ONEOF(condition) {
             KJ_CASE_ONEOF(value, Conditional) {
@@ -844,27 +812,7 @@ R2Bucket::getRpc(jsg::Lock& js,
             return kj::Maybe<jsg::Ref<GetResult>>(kj::mv(native));
           }
           KJ_CASE_ONEOF(native, jsg::Ref<HeadResult>) {
-            return headResultFromBackend(
-                js, HeadBackendResult(kj::mv(native)), MissingMetadataPolicy::EMPTY);
-          }
-          KJ_CASE_ONEOF(rpc, SerializableGetResult) {
-            if (rpc.kind == "metadata") {
-              KJ_IF_SOME(body, rpc.body) {
-                body.forceCancel(
-                    js, js.error("Malformed R2 get RPC result: metadata result had a body."));
-                KJ_FAIL_ASSERT("Malformed R2 get RPC result: metadata result had a body.");
-              }
-              return headResultFromSerializable(
-                  js, kj::mv(rpc.object), MissingMetadataPolicy::EMPTY);
-            }
-            if (rpc.kind == "body") {
-              return kj::Maybe<jsg::Ref<GetResult>>(getResultFromSerializable(js, kj::mv(rpc)));
-            }
-
-            KJ_IF_SOME(body, rpc.body) {
-              body.forceCancel(js, js.error("Malformed R2 get RPC result: unknown result kind."));
-            }
-            KJ_FAIL_ASSERT("Malformed R2 get RPC result: unknown result kind ", rpc.kind, ".");
+            return headResultFromBackend(js, kj::mv(native), MissingMetadataPolicy::EMPTY);
           }
         }
       }
@@ -910,7 +858,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::putRpc(jsg::Lo
     });
 
     // Checksums are validated here so callers get the same errors as the non-RPC path, then
-    // forwarded unchanged; the R2GW decodes hex strings and buffers itself.
+    // forwarded unchanged; the backing entrypoint decodes hex strings and buffers itself.
     bool hashAlreadySpecified = false;
     const auto validateChecksum = [&](auto checksum, kj::StringPtr algorithm, size_t byteLength,
                                       size_t hexLength) -> decltype(checksum) {
@@ -942,7 +890,8 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::putRpc(jsg::Lo
       KJ_IF_SOME(condition, o.onlyIf) {
         // Parsed only for validation, so callers get the same errors as the non-RPC path (e.g.
         // quoted or malformed ETags, invalid dates). The parsed result is intentionally unused:
-        // the original onlyIf value is forwarded below and the R2GW does its own parsing.
+        // the original onlyIf value is forwarded below and the backing entrypoint does its own
+        // parsing.
         UnwrappedConditional conditional = [&] {
           KJ_SWITCH_ONEOF(condition) {
             KJ_CASE_ONEOF(value, Conditional) {
@@ -1603,7 +1552,7 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::listRpc(jsg::Lock& js,
     jsg::Optional<ListOptions> options,
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
     const jsg::TypeHandler<jsg::Function<jsg::Value(jsg::Optional<ListOptions>)>>& listFnHandler,
-    const jsg::TypeHandler<jsg::Promise<ListBackendResult>>& listResultHandler,
+    const jsg::TypeHandler<jsg::Promise<ListResult>>& listResultHandler,
     CompatibilityFlags::Reader flags) {
   return js.evalNow([&] {
     const bool honorsIncludes = flags.getR2ListHonorIncludeFields();
@@ -1647,19 +1596,12 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::listRpc(jsg::Lock& js,
       rpcOptions = kj::mv(normalized);
     }
 
-    return callR2RpcMethod<ListBackendResult>(js, getRpcMethod(js, "list"_kj), rpcPropHandler,
+    return callR2RpcMethod<ListResult>(js, getRpcMethod(js, "list"_kj), rpcPropHandler,
         listFnHandler, listResultHandler, kj::mv(rpcOptions))
-        .then(js, [](jsg::Lock& js, ListBackendResult backend) -> ListResult {
-      ListResult result;
-      result.objects = KJ_MAP(object, backend.objects) {
+        .then(js, [](jsg::Lock& js, ListResult result) -> ListResult {
+      result.objects = KJ_MAP(object, result.objects) {
         return headResultFromBackend(js, kj::mv(object), MissingMetadataPolicy::ABSENT);
       };
-      result.truncated = backend.truncated;
-      KJ_IF_SOME(cursor, backend.cursor) {
-        result.cursor = kj::mv(cursor);
-      }
-      result.delimitedPrefixes =
-          kj::mv(backend.delimitedPrefixes).orDefault(kj::heapArray<kj::String>(0));
       return kj::mv(result);
     });
   });

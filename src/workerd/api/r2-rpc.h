@@ -44,8 +44,8 @@ jsg::Promise<Result> unwrapR2RpcPromise(jsg::Lock& js,
     return KJ_ASSERT_NONNULL(
         resultPromiseHandler.tryUnwrap(js, normalizedPromise.consumeHandle(js)));
   } else {
-    // Decode only fulfilled responses so gateway rejections retain their public API errors.
-    // Failures converting a response into the internal wire types are gateway contract violations.
+    // Decode only fulfilled responses so backing-entrypoint rejections retain their public API
+    // errors. Failures converting a response into the internal wire types are contract violations.
     return normalizedPromise.then(js, [&resultPromiseHandler](jsg::Lock& js, jsg::Value value) {
       auto fulfilled = js.resolvedPromise(kj::mv(value));
       auto parsed =
@@ -127,7 +127,7 @@ struct PreparedR2RpcBody {
 };
 
 // Prepares the transport value and the exact byte length passed alongside it. The length is an
-// internal argument to the gateway's named RPC method, not part of the public R2 API.
+// internal argument to the backing entrypoint's named RPC method, not part of the public R2 API.
 PreparedR2RpcBody prepareR2RpcBody(jsg::Lock& js, R2PutValue& value);
 
 struct R2Result {

@@ -21,7 +21,6 @@ namespace workerd::api::public_beta {
       api::public_beta::R2Bucket::SerializableChecksums,                                           \
       api::public_beta::R2Bucket::SerializableHeadResult,                                          \
       api::public_beta::R2Bucket::SerializableGetOptions,                                          \
-      api::public_beta::R2Bucket::SerializableGetResult,                                           \
-      api::public_beta::R2Bucket::ListBackendResult
+      api::public_beta::R2Bucket::SerializableGetResult
 // The list of r2 types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api::public_beta
