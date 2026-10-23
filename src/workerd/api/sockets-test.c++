@@ -9,6 +9,8 @@
 #include <capnp/message.h>
 #include <kj/test.h>
 
+#include <cerrno>
+
 namespace workerd::api {
 namespace {
 
@@ -283,6 +285,89 @@ KJ_TEST("connectImpl defers connect until output gate clears") {
     KJ_EXPECT(connectCalled, "connect must happen after output gate releases");
   }),
       errorsToIgnore);
+}
+
+kj::StringPtr errnoFor(kj::StringPtr description) {
+  return KJ_ASSERT_NONNULL(connectErrnoName(KJ_EXCEPTION(DISCONNECTED, description)));
+}
+
+KJ_TEST("os error codes map to errno names") {
+#if _WIN32
+  constexpr int refused = 10061, timedOut = 10060, hostUnreach = 10065, netUnreach = 10051;
+  KJ_EXPECT(errnoFor("No such host is known. (os error 11001)") == "ENOTFOUND");
+  KJ_EXPECT(errnoFor("The requested name is valid, but no data of the requested type was found. "
+                     "(os error 11004)") == "ENOTFOUND");
+  KJ_EXPECT(errnoFor("This is usually a temporary error. (os error 11002)") == "EAI_AGAIN");
+#else
+  constexpr int refused = ECONNREFUSED, timedOut = ETIMEDOUT, hostUnreach = EHOSTUNREACH,
+                netUnreach = ENETUNREACH;
+#endif
+  KJ_EXPECT(errnoFor(kj::str("whatever text (os error ", refused, ")")) == "ECONNREFUSED");
+  KJ_EXPECT(errnoFor(kj::str("whatever text (os error ", timedOut, ")")) == "ETIMEDOUT");
+  KJ_EXPECT(errnoFor(kj::str("whatever text (os error ", hostUnreach, ")")) == "EHOSTUNREACH");
+  KJ_EXPECT(errnoFor(kj::str("whatever text (os error ", netUnreach, ")")) == "ENETUNREACH");
+  KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, "Permission denied (os error 13)")) == kj::none);
+  KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, "(os error )")) == kj::none);
+  // Congruent to `refused` modulo 2^32, so wrapping instead of rejecting would misclassify it.
+  auto wrapped = kj::str("(os error ", 4294967296ull + refused, ")");
+  KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, wrapped)) == kj::none);
+}
+
+KJ_TEST("connect failure exceptions map to errno names") {
+  KJ_EXPECT(errnoFor("connect(): Connection refused; address = 127.0.0.1:1") == "ECONNREFUSED");
+  KJ_EXPECT(errnoFor("connect(): Connection timed out") == "ETIMEDOUT");
+  KJ_EXPECT(errnoFor("connect(): Operation timed out") == "ETIMEDOUT");
+  KJ_EXPECT(errnoFor("connect(): No route to host") == "EHOSTUNREACH");
+  KJ_EXPECT(errnoFor("connect(): Network is unreachable") == "ENETUNREACH");
+  KJ_EXPECT(errnoFor("DNS lookup failed.; params.host = nope.invalid; "
+                     "gai_strerror(status) = Name or service not known") == "ENOTFOUND");
+  KJ_EXPECT(
+      errnoFor("failed to lookup address information: Name or service not known") == "ENOTFOUND");
+  KJ_EXPECT(
+      errnoFor("failed to lookup address information: Temporary failure in name resolution") ==
+      "EAI_AGAIN");
+  KJ_EXPECT(errnoFor("DNS lookup failed.; gai_strerror(status) = Try again") == "EAI_AGAIN");
+  KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, "something else went wrong")) == kj::none);
+  KJ_EXPECT(connectErrnoName(KJ_EXCEPTION(FAILED, "TLS handshake timed out")) == kj::none);
+}
+
+kj::Maybe<kj::StringPtr> errnoForProxyStatus(kj::StringPtr proxyStatus) {
+  kj::HttpHeaderTable table;
+  kj::HttpHeaders headers(table);
+  headers.addPtrPtr("Proxy-Status", proxyStatus);
+  return connectErrnoName(headers);
+}
+
+KJ_TEST("Proxy-Status error types map to errno names") {
+  KJ_EXPECT(KJ_ASSERT_NONNULL(errnoForProxyStatus("Cloudflare-Proxy;error=connection_refused")) ==
+      "ECONNREFUSED");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(errnoForProxyStatus(
+                "proxy; error=\"connection_timeout\"; details=x")) == "ETIMEDOUT");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(errnoForProxyStatus("a, b;error=dns_error")) == "ENOTFOUND");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(errnoForProxyStatus("p;error=dns_timeout")) == "ENOTFOUND");
+  KJ_EXPECT(
+      KJ_ASSERT_NONNULL(errnoForProxyStatus("p;error=destination_unavailable")) == "EHOSTUNREACH");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(errnoForProxyStatus("p;error=destination_ip_unroutable")) ==
+      "EHOSTUNREACH");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(errnoForProxyStatus(
+                "p;details=\"x; error=dns_error\";error=connection_refused")) == "ECONNREFUSED");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(errnoForProxyStatus(
+                "p;details=\"upstream error=connection_timeout\";error=connection_refused")) ==
+      "ECONNREFUSED");
+  KJ_EXPECT(errnoForProxyStatus("Cloudflare-Proxy;error=connection_limit_reached") == kj::none);
+  KJ_EXPECT(errnoForProxyStatus("Cloudflare-Proxy") == kj::none);
+  KJ_EXPECT(errnoForProxyStatus("p;noterror=connection_refused") == kj::none);
+  KJ_EXPECT(errnoForProxyStatus("p;details=\"error=connection_refused\"") == kj::none);
+  KJ_EXPECT(errnoForProxyStatus("p;details=\"x;error=connection_refused\"") == kj::none);
+  KJ_EXPECT(errnoForProxyStatus("p;details=\"a\\\"b;error=connection_refused\"") == kj::none);
+  KJ_EXPECT(errnoForProxyStatus("p;rcode=error=connection_refused") == kj::none);
+
+  kj::HttpHeaderTable table;
+  kj::HttpHeaders headers(table);
+  headers.addPtrPtr("proxy-status", "p;error=connection_refused");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(connectErrnoName(headers)) == "ECONNREFUSED");
+  kj::HttpHeaders none(table);
+  KJ_EXPECT(connectErrnoName(none) == kj::none);
 }
 
 }  // namespace

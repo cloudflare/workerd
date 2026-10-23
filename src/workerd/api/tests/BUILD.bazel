@@ -256,6 +256,12 @@ wd_test(
 )
 
 wd_test(
+    src = "sockets-connect-error-test.wd-test",
+    args = ["--experimental"],
+    data = ["sockets-connect-error-test.js"],
+)
+
+wd_test(
     src = "socket-proxy-to-test.wd-test",
     args = ["--experimental"],
     data = ["socket-proxy-to-test.js"],
