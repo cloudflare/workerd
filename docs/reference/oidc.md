@@ -2,7 +2,8 @@
 
 The experimental `workers_oidc` compatibility flag exposes `ctx.oidc.getToken()` on
 `ExecutionContext` and `DurableObjectState`. It has no automatic enable date and requires an
-experimental-enabled runtime. A host signer is required; standalone workerd rejects issuance.
+experimental-enabled runtime. Issuance requires a host signer or an explicitly configured local
+development broker.
 
 ```js
 const token = await ctx.oidc.getToken();
@@ -34,14 +35,14 @@ integration; the API does not create a separate container identity.
 
 Embedding runtimes implement `IoChannelFactory::getOidcToken(OidcTokenRequest)` to issue tokens.
 This is a protected native channel, separate from global fetch and customer bindings. Requests
-contain only an optional audience and a subject mode (`WORKER`, `DURABLE_OBJECT`, or
+contain only an optional audience, whether the subject was explicit, and a subject mode (`WORKER`, `DURABLE_OBJECT`, or
 `DURABLE_OBJECT_NAMESPACE`). The factory belongs to the current incoming request; the signer
 must identify the executing workload, including when another Worker called it.
 
 The host is responsible for:
 
 - Deriving account, Worker, persistent Preview, executing version, namespace, and object IDs from trusted state.
-- Rejecting missing metadata, local/remote development sessions, Version URLs, and Dynamic Workers, invalid subject modes, and workloads
+- Rejecting missing metadata, remote development sessions, Version URLs, Dynamic Workers, invalid subject modes, and workloads
   without issuance permission; enforcing issuance controls and rate limits.
 - Constructing account issuer and workload subject claims, signing five-minute RS256 tokens with
   `typ: "cf-workload+jwt"`, and keeping private keys outside customer code. These are workload
@@ -50,7 +51,33 @@ The host is responsible for:
   and issuance permissions; never extending token expiry during an outage.
 - Auditing issuance without logging tokens and maintaining signing-key provisioning and rotation.
 
-The default implementation rejects with an error explaining that a deployed workload and host
-signer are required. Host errors propagate to the returned promise. workerd does not fall back to
-HTTP, produce unsigned tokens, or cache tokens. Public discovery and JWKS serving are separate
+An unconfigured runtime rejects issuance. Host errors propagate to the returned promise. workerd
+does not produce unsigned tokens or cache tokens. Public discovery and JWKS serving are separate
 services and must remain available independently of issuance.
+
+
+## Local development broker
+
+A trusted development tool can set `Worker.oidcTokenService` to a `ServiceDesignator` for its
+broker. The channel is separate from application bindings and global fetch. Each linked Worker
+gets its own channel; Dynamic Workers do not inherit it. Keep the broker implementation and CLI
+credentials outside customer modules. The `workers_oidc` flag and experimental runtime option
+remain required.
+
+```capnp
+oidcTokenService = (name = "development-broker"),
+```
+
+The native getter sends `POST http://oidc/token`, `Content-Type: application/json`, with `{}` or
+`{"audience":"<exact requested audience>"}`. The broker returns status 200, exactly
+`Content-Type: text/plain`, and a compact JWT as the entire body. workerd bounds the response to
+64 KiB and the operation to 30 seconds. It rejects other status codes, content types, malformed
+compact tokens and oversized bodies without exposing response error bodies. The URL identifies
+the operation on the configured channel; workerd does not resolve it through global fetch.
+
+The broker owns the authenticated Cloudflare API session and the shared token cache. It resolves
+an authorized Worker-development identity through the API, preserves the requested audience, and
+returns only the resulting token. It never substitutes its own deployed workload identity. The
+local Worker and its local Durable Objects share the development identity. Both explicit
+`subject: "object"` and `subject: "namespace"` reject locally. No caller option selects the account,
+Worker, user or development session. Cloud issuance uses the embedding host's native signer.

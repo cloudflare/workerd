@@ -1519,3 +1519,9 @@ sh_test(
         "//conditions:default": [],
     }),
 )
+
+wd_test(
+    src = "oidc-local-test.wd-test",
+    args = ["--experimental"],
+    data = ["oidc-local-test.js"],
+)
