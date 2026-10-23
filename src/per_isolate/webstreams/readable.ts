@@ -538,12 +538,15 @@ function iteratorReturnSteps(
   return PromiseResolve(undefined);
 }
 
-// WebIDL's ongoing promise: a next() or return() made while another's
-// promise is pending runs its steps once that promise settles, either way;
-// one made with none pending runs them at once, so the first next() reads
-// (and pulls) synchronously. Their promise becomes the ongoing one once the
-// steps return, so a next() made inside them (from the pull() they run)
-// runs at once too, reading right behind them.
+// WebIDL's ongoing promise: a next() or return() made while one is set
+// runs its steps once that promise settles, either way, and its own
+// promise becomes the ongoing one at once. One made with none set runs
+// its steps at once, so the first next() reads (and pulls) synchronously,
+// and its promise becomes the ongoing one only once they return: a next()
+// made inside them (from the pull() they run) runs at once too, reading
+// right behind them. Only a next() clears the ongoing promise, when its
+// read settles, so a settled one (a return()'s, or a finished next()'s)
+// can stay set, and later calls still chain on it.
 function runAfterOngoing(
   s: IteratorInternalState,
   steps: (
