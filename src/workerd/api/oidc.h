@@ -12,9 +12,9 @@ namespace workerd::api {
 class OidcContext: public jsg::Object {
  public:
   struct TokenOptions {
-    // Prevent arrays and other values from silently becoming an audience or subject string.
-    jsg::Optional<jsg::NonCoercible<kj::String>> audience;
-    jsg::Optional<jsg::NonCoercible<kj::String>> subject;
+    // Check type and length before copying customer strings into native memory.
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> audience;
+    jsg::Optional<jsg::JsRef<jsg::JsValue>> subject;
 
     JSG_STRUCT(audience, subject);
     JSG_STRUCT_TS_OVERRIDE(CloudflareOidcTokenOptions {

@@ -33,6 +33,10 @@ async function checkOidc(ctx, enabled, isObject = false) {
     async () => ctx.oidc.getToken({ audience: 'a'.repeat(2048) }),
     unsupported
   );
+  await assert.rejects(
+    async () => ctx.oidc.getToken({ audience: '雪'.repeat(682) + 'ab' }),
+    unsupported
+  );
   for (const audience of [
     '',
     ' ',
@@ -46,16 +50,24 @@ async function checkOidc(ctx, enabled, isObject = false) {
     'https://[invalid]/',
     '\ud800',
     'a'.repeat(2049),
+    '雪'.repeat(683),
+    'a'.repeat(1 << 24),
   ]) {
     await assert.rejects(async () => ctx.oidc.getToken({ audience }), {
       name: 'TypeError',
       message: /OIDC audience/,
     });
   }
-  await assert.rejects(
-    async () => ctx.oidc.getToken({ subject: 'worker:forged' }),
-    { name: 'TypeError', message: /OIDC subject/ }
-  );
+  for (const subject of [
+    'worker:forged',
+    'namespace\0',
+    '雪'.repeat(1 << 22),
+  ]) {
+    await assert.rejects(async () => ctx.oidc.getToken({ subject }), {
+      name: 'TypeError',
+      message: /OIDC subject/,
+    });
+  }
   for (const value of [null, 42, ['one', 'two'], {}]) {
     await assert.rejects(
       async () => ctx.oidc.getToken({ audience: value }),
@@ -63,6 +75,17 @@ async function checkOidc(ctx, enabled, isObject = false) {
     );
     await assert.rejects(
       async () => ctx.oidc.getToken({ subject: value }),
+      TypeError
+    );
+  }
+  const uncoercible = {
+    toString() {
+      throw new Error('must not coerce OIDC options');
+    },
+  };
+  for (const name of ['audience', 'subject']) {
+    await assert.rejects(
+      async () => ctx.oidc.getToken({ [name]: uncoercible }),
       TypeError
     );
   }

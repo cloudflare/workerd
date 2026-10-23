@@ -106,9 +106,9 @@ KJ_TEST("OIDC chooses object identity by default and only accepts defined DO sub
     auto token = fixture.runInIoContext([&](const TestFixture::Environment& env) {
       auto oidc = env.js.alloc<OidcContext>();
       OidcContext::TokenOptions options;
-      if (subject.size() > 0) options.subject = jsg::NonCoercible<kj::String>{kj::str(subject)};
+      if (subject.size() > 0) options.subject = jsg::JsValue(env.js.str(subject)).addRef(env.js);
       if (subject == "namespace")
-        options.audience = jsg::NonCoercible<kj::String>{kj::str("https://api.example.com")};
+        options.audience = jsg::JsValue(env.js.str("https://api.example.com"_kj)).addRef(env.js);
       return env.context.awaitJs(env.js, oidc->getToken(env.js, kj::mv(options)));
     });
     KJ_EXPECT(token == "token-for-1");
@@ -131,18 +131,17 @@ KJ_TEST("OIDC validation rejects invalid options before calling the host") {
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
     auto oidc = env.js.alloc<OidcContext>();
     for (auto audience: {""_kj, " "_kj, "\xc2\xa0"_kj, "https://example.com/a b"_kj,
-           "urn:bad:%zz"_kj, ":missing-scheme"_kj, "1bad:scheme"_kj, "\xc0\xaf"_kj,
-           "\xed\xa0\x80"_kj, "\xf4\x90\x80\x80"_kj}) {
+           "urn:bad:%zz"_kj, ":missing-scheme"_kj, "1bad:scheme"_kj}) {
       KJ_EXPECT_THROW_MESSAGE("OIDC audience",
           oidc->getToken(env.js,
               OidcContext::TokenOptions{
-                .audience = jsg::NonCoercible<kj::String>{kj::str(audience)}}));
+                .audience = jsg::JsValue(env.js.str(audience)).addRef(env.js)}));
     }
     for (auto subject: {"object"_kj, "namespace"_kj, "worker:forged"_kj, ""_kj}) {
       KJ_EXPECT_THROW_MESSAGE("OIDC subject",
           oidc->getToken(env.js,
               OidcContext::TokenOptions{
-                .subject = jsg::NonCoercible<kj::String>{kj::str(subject)}}));
+                .subject = jsg::JsValue(env.js.str(subject)).addRef(env.js)}));
     }
     auto oversized = kj::heapArray<char>(2050);
     oversized.asPtr().fill('a');
@@ -150,7 +149,7 @@ KJ_TEST("OIDC validation rejects invalid options before calling the host") {
     KJ_EXPECT_THROW_MESSAGE("OIDC audience",
         oidc->getToken(env.js,
             OidcContext::TokenOptions{
-              .audience = jsg::NonCoercible<kj::String>{kj::String(kj::mv(oversized))}}));
+              .audience = jsg::JsValue(env.js.str(kj::String(kj::mv(oversized)))).addRef(env.js)}));
   });
   KJ_EXPECT(requests.size() == 0);
 }
@@ -171,7 +170,7 @@ KJ_TEST("OIDC preserves accepted StringOrURI audiences exactly on the host chann
           .awaitJs(env.js,
               oidc->getToken(env.js,
                   OidcContext::TokenOptions{
-                    .audience = jsg::NonCoercible<kj::String>{kj::str(audience)}}))
+                    .audience = jsg::JsValue(env.js.str(audience)).addRef(env.js)}))
           .ignoreResult();
     });
     KJ_EXPECT(KJ_ASSERT_NONNULL(requests.back().audience) == audience);
