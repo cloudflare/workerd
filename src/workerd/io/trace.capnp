@@ -12,6 +12,27 @@ $Cxx.namespace("workerd::rpc");
 # it also causes a large amount of code to be generated in the .capnp.h file, which affects header
 # parsing overhead/compile times for every file that depends on the capnp file defining Trace.
 
+struct OptionalString {
+  union {
+    none @0 :Void;
+    value @1 :Text;
+  }
+}
+
+struct OptionalBool {
+  union {
+    none @0 :Void;
+    value @1 :Bool;
+  }
+}
+
+struct OptionalFloat64 {
+  union {
+    none @0 :Void;
+    value @1 :Float64;
+  }
+}
+
 # The value of a span tag.
 struct TagValue {
   union {
@@ -19,6 +40,13 @@ struct TagValue {
     bool @1 :Bool;
     int64 @2 :Int64;
     float64 @3 :Float64;
+
+    # Homogeneous primitive arrays, matching OpenTelemetry attribute arrays. Empty elements
+    # represent null or undefined inputs. A one-element array is distinct from the corresponding
+    # scalar, and an empty array is represented as an empty stringArray.
+    stringArray @4 :List(OptionalString);
+    boolArray @5 :List(OptionalBool);
+    float64Array @6 :List(OptionalFloat64);
   }
 }
 
