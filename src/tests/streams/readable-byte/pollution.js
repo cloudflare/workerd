@@ -416,8 +416,7 @@ export const thenGetterErrorsSourceWhileBranchByteReadsSettle = {
 // first branch's read resolves first, so the close reaches the second
 // branch together with the chunk: the chunk fills that branch's first two
 // autoAllocateChunkSize reads and the close answers the third done. The
-// reads resolve in the order they were made. DIVERGENCE (ledger #44):
-// TypeScript resolves the third read before the other two.
+// reads resolve in the order they were made.
 export const thenGetterClosesSourceWhileBranchByteReadsFill = {
   async test() {
     let controller;
@@ -473,7 +472,7 @@ export const thenGetterClosesSourceWhileBranchByteReadsFill = {
     strictEqual(results[1].done, false);
     deepStrictEqual([...results[1].value], [3, 4]);
     strictEqual(results[2].done, true);
-    deepStrictEqual(order, usingTsImpl ? [2, 0, 1] : [0, 1, 2]);
+    deepStrictEqual(order, [0, 1, 2]);
   },
 };
 
