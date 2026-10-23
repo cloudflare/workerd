@@ -3,8 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 #include "pyodide.h"
 
-#include "requirements.h"
-
 #include <workerd/io/compatibility-date.h>
 #include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
@@ -218,8 +216,6 @@ PyodideMetadataReader::State::State(const State& other)
     : mainModule(kj::str(other.mainModule)),
       moduleInfo(other.moduleInfo.clone()),
       pyodideVersion(kj::str(other.pyodideVersion)),
-      packagesVersion(kj::str(other.packagesVersion)),
-      packagesLock(kj::str(other.packagesLock)),
       isWorkerdFlag(other.isWorkerdFlag),
       isTracingFlag(other.isTracingFlag),
       snapshotToDisk(other.snapshotToDisk),
@@ -254,23 +250,6 @@ void PyodideMetadataReader::State::verifyNoMainModuleInVendor() {
           kj::str("Python module python_modules/", mainModuleBase, ".so clashes with main module"));
     }
   }
-}
-
-kj::Maybe<kj::String> getPyodideLock(PythonSnapshotRelease::Reader pythonSnapshotRelease) {
-  for (auto pkgLock: *PACKAGE_LOCKS) {
-    if (pkgLock.getPackageDate() == pythonSnapshotRelease.getPackages()) {
-      return kj::str(pkgLock.getLock());
-    }
-  }
-
-  // From Pyodide 314 on, we don't use packages inside the lockfile.
-  // All packages used by the worker should come from PyPI and be bundled inside the worker.
-  // To avoid breaking existing workers, we return an empty lockfile if no packages are found.
-  if (pythonSnapshotRelease.getPackages().size() == 0) {
-    return kj::str("{\"packages\":{}}");
-  }
-
-  return kj::none;
 }
 
 const kj::Maybe<kj::Own<const kj::Directory>> DiskCache::NULL_CACHE_ROOT = kj::none;
