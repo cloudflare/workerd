@@ -1,0 +1,59 @@
+src/workerd/io/observer.h
+  s_c77095033a1105::t_9758fc69655b24 195-198,496-499
+src/workerd/api/tests/do-on-hibernate-symbol-test.wd-test
+  s_2e09fb1f684ba0::t_6e693d9e8130de 25-31
+  s_c77095033a1105::t_59ee9866a5f983 12,17
+src/workerd/io/limit-enforcer.h
+  s_c77095033a1105::t_d4ca5785211199 177-188
+src/workerd/api/tests/do-on-hibernate-symbol-unflagged-test.js
+  s_c77095033a1105::t_f7abaff9ab624e 6,9-28,34-40
+src/workerd/io/worker.h
+  s_7eb8791b20e0c2::t_032e282abdacdf 64,921-927,938-949,1086-1108,1250-1252
+  s_7eb8791b20e0c2::t_57f93de09bc418 1248-1249
+src/workerd/io/io-context.c++
+  s_c77095033a1105::t_63334dd2d5b2e8 514-539
+src/workerd/io/incoming-request-test.c++
+  s_2e09fb1f684ba0::t_08b1ad4377cad7 13
+  s_ab4e43acd62623::t_5543051590d9d9 27-33
+  s_c77095033a1105::t_afbebfa7099396 344-490
+src/workerd/util/uncaught-exception-source.h
+  s_c77095033a1105::t_4450f0aa4bfdd6 17,34-35
+src/workerd/io/io-context.h
+  s_c77095033a1105::t_40880963830c36 179-189
+src/workerd/io/worker.c++
+  s_c77095033a1105::t_f96673b36912e9 3934-3936,4239-4265,4326-4328,4824-4959
+src/workerd/api/tests/do-on-hibernate-symbol-test.js
+  s_2e09fb1f684ba0::t_2182e9570b51c2 17-34,49-55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "38e33b0bef123cec1d29f719ab30b1a423d2ae71",
+  "prompts": {},
+  "sessions": {
+    "s_2e09fb1f684ba0": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e9a7b4236ffeOynr2UlCuLiP2Q",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_7eb8791b20e0c2": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e9a7aa26affegWYXpwaIRbe48P",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_c77095033a1105": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e9a984a51ffeLxK55Db4aJKHDK",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
