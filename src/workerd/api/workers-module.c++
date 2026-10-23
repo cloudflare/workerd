@@ -58,7 +58,7 @@ void EntrypointsModule::waitUntil(kj::Promise<void> promise) {
   IoContext::current().addWaitUntil(kj::mv(promise));
 }
 
-jsg::Optional<jsg::Ref<CacheContext>> EntrypointsModule::getCtxCache(jsg::Lock& js) {
+jsg::Optional<jsg::JsObject> EntrypointsModule::getCtxCache(jsg::Lock& js) {
   // Delegate to the embedding application's getCtxCacheProperty() hook, which returns a
   // CacheContext (e.g. CachePurge in edgeworker) when cache is enabled for this pipeline.
   // Returns kj::none when there is no active request or cache is not available.

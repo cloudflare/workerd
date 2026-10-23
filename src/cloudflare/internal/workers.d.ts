@@ -37,9 +37,8 @@ export class ServiceStub {}
 
 export function waitUntil(promise: Promise<unknown>): void;
 
-// Stubs for the C++ CacheContext types (see src/workerd/api/global-scope.h).
-// The full interface is also generated in types/generated-snapshot/ from C++ RTTI.
-// If you change the C++ types, update these to match.
+// Copies of the CacheContext types declared on ExecutionContext in
+// src/workerd/api/global-scope.h. If you change those, update these to match.
 export interface CachePurgeError {
   code: number;
   message: string;

@@ -53,7 +53,6 @@ struct QueueExportedHandler;
 struct BenchExportedHandler;
 class WebSocket;
 class WebSocketRequestResponsePair;
-class CacheContext;
 class ExecutionContext;
 namespace pyodide {
 struct ArtifactBundler_State;
@@ -712,7 +711,7 @@ class Worker::Api {
 
   // Hook for the embedding application to provide a CacheContext for the ctx.cache property.
   // The default implementation returns kj::none (undefined).
-  virtual jsg::Optional<jsg::Ref<api::CacheContext>> getCtxCacheProperty(jsg::Lock& js) const;
+  virtual jsg::Optional<jsg::JsObject> getCtxCacheProperty(jsg::Lock& js) const;
 
   virtual const jsg::IsolateObserver& getObserver() const = 0;
   virtual void setIsolateObserver(IsolateObserver&) = 0;

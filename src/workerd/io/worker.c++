@@ -552,7 +552,7 @@ kj::Maybe<const Worker::Api&> Worker::Api::tryCurrent() {
   return kj::none;
 }
 
-jsg::Optional<jsg::Ref<api::CacheContext>> Worker::Api::getCtxCacheProperty(jsg::Lock& js) const {
+jsg::Optional<jsg::JsObject> Worker::Api::getCtxCacheProperty(jsg::Lock& js) const {
   return kj::none;
 }
 

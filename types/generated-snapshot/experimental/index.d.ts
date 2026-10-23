@@ -484,6 +484,23 @@ declare const Cloudflare: Cloudflare;
 declare const origin: string;
 declare const navigator: Navigator;
 interface TestController {}
+interface CachePurgeError {
+  code: number;
+  message: string;
+}
+interface CachePurgeResult {
+  success: boolean;
+  errors: CachePurgeError[];
+}
+interface CachePurgeOptions {
+  tags?: string[];
+  pathPrefixes?: string[];
+  purgeEverything?: boolean;
+}
+interface CacheContext {
+  purge(options: CachePurgeOptions): Promise<CachePurgeResult>;
+  invalidate(options: CachePurgeOptions): Promise<CachePurgeResult>;
+}
 interface ExecutionContext<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
@@ -590,23 +607,6 @@ interface AlarmInvocationInfo {
 }
 interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;
-}
-interface CachePurgeError {
-  code: number;
-  message: string;
-}
-interface CachePurgeResult {
-  success: boolean;
-  errors: CachePurgeError[];
-}
-interface CachePurgeOptions {
-  tags?: string[];
-  pathPrefixes?: string[];
-  purgeEverything?: boolean;
-}
-interface CacheContext {
-  purge(options: CachePurgeOptions): Promise<CachePurgeResult>;
-  invalidate(options: CachePurgeOptions): Promise<CachePurgeResult>;
 }
 interface CloudflareAccessContext {
   readonly aud: string;
