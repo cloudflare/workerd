@@ -41,22 +41,15 @@ export default {
       'a rejection from underlyingSource.cancel() should be returned by pipeTo()',
       'a rejection from underlyingSink.abort() should be preferred to one from underlyingSource.cancel()',
       'abort should do nothing after the readable is errored, even with pending writes',
-      'abort should do nothing after the writable is errored',
       'pipeTo on a teed readable byte stream should only be aborted when both branches are aborted',
       "(reason: 'null') underlyingSource.cancel() should called when abort, even with pending pull",
       "(reason: 'undefined') underlyingSource.cancel() should called when abort, even with pending pull",
       "(reason: 'error1: error1') underlyingSource.cancel() should called when abort, even with pending pull",
     ],
   },
-  'piping/close-propagation-backward.any.js': {
-    comment: 'A hanging Promise was canceled.',
-    disabledTests: true,
-  },
+  'piping/close-propagation-backward.any.js': {},
   'piping/close-propagation-forward.any.js': {},
-  'piping/error-propagation-backward.any.js': {
-    comment: 'A hanging Promise was canceled.',
-    disabledTests: true,
-  },
+  'piping/error-propagation-backward.any.js': {},
   'piping/error-propagation-forward.any.js': {
     comment: 'To be investigated',
     expectedFailures: [
@@ -197,11 +190,6 @@ export default {
       // TODO(conform): The spec expects the read to fail here. Instead, we end up cancelling
       // it with a zero-length result, with the subsequent read marked as done.
       'ReadableStream with byte source: read(view) with Uint16Array on close()-d stream with 1 byte enqueue()-d must fail',
-      // TODO(conform): Per the spec, desiredSize should be zero here
-      // but since we are handling the backpressure a bit differently
-      // it won't be zero until the actual read is resolved.
-      //desiredSize = controller.desiredSize;
-      'ReadableStream with byte source: enqueue() 3 byte, getReader(), then read(view) with 2-element Uint16Array',
       'ReadableStream with byte source: Throwing in pull in response to read() must be ignored if the stream is errored in it',
       'ReadableStream with byte source: Throwing in pull function must error the stream',
       // TODO(conform): We handle things a bit differently here from the spec. The spec

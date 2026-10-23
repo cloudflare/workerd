@@ -15,10 +15,10 @@ import type {
   ReadableStream as ReadableStreamType,
   WritableStream as WritableStreamType,
 } from './types';
+import type { CommonHelpers } from './common';
 
 const {
   ObjectDefineProperties,
-  ObjectGetOwnPropertyDescriptor,
   StringPrototypeCharCodeAt,
   StringPrototypeSlice,
   SymbolToStringTag,
@@ -30,19 +30,18 @@ const {
   TextEncoderEncode,
   TextDecoderDecode,
   TypeError,
+  getProtoGetter,
   uncurryThis,
 } = primordials;
 
-const { isArrayBuffer, isArrayBufferView } = utils;
+const { isArrayBuffer, isArrayBufferView, isSharedArrayBuffer } = utils;
 
 const {
   TransformStream,
   TransformStreamDefaultController,
 } = require('webstreams/transform');
-
-function isActualObject(value: unknown) {
-  return value != null && typeof value === 'object';
-}
+const { isActualObject, kEnumerable, toStringTagProperty } =
+  require('webstreams/common') as CommonHelpers;
 
 const transformControllerEnqueue = uncurryThis(
   TransformStreamDefaultController.prototype.enqueue
@@ -50,15 +49,6 @@ const transformControllerEnqueue = uncurryThis(
 
 // Capture TransformStream.prototype accessors at bootstrap time so
 // internal reads do not go through the (user-patchable) prototype chain.
-// Uses the same validation guard pattern as getProtoGetter in primordials.ts.
-function getProtoGetter<T>(proto: object, name: string): T {
-  const desc = ObjectGetOwnPropertyDescriptor(proto, name);
-  if (desc === undefined || desc.get === undefined) {
-    throw new TypeError(`Expected accessor property '${name}' on prototype`);
-  }
-  return uncurryThis(desc.get) as T;
-}
-
 const transformStreamReadableGet = getProtoGetter<
   (stream: object) => ReadableStreamType<unknown>
 >(TransformStream.prototype, 'readable');
@@ -193,7 +183,14 @@ class TextDecoderStream {
     this.#transform = new TransformStream({
       __proto__: null,
       transform(chunk: unknown, controller: object) {
-        if (!isArrayBufferView(chunk) && !isArrayBuffer(chunk)) {
+        // The writable accepts an AllowSharedBufferSource (Encoding
+        // Standard), so a bare SharedArrayBuffer decodes like an
+        // ArrayBuffer.
+        if (
+          !isArrayBufferView(chunk) &&
+          !isArrayBuffer(chunk) &&
+          !isSharedArrayBuffer(chunk)
+        ) {
           throw new TypeError(
             'TextDecoderStream: chunk must be a BufferSource'
           );
@@ -247,20 +244,12 @@ class TextDecoderStream {
   }
 }
 
-const kEnumerable = { __proto__: null, enumerable: true };
-
 ObjectDefineProperties(TextEncoderStream.prototype, {
   __proto__: null,
   encoding: kEnumerable,
   readable: kEnumerable,
   writable: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'TextEncoderStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('TextEncoderStream'),
 });
 
 ObjectDefineProperties(TextDecoderStream.prototype, {
@@ -270,13 +259,7 @@ ObjectDefineProperties(TextDecoderStream.prototype, {
   ignoreBOM: kEnumerable,
   readable: kEnumerable,
   writable: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'TextDecoderStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('TextDecoderStream'),
 });
 
 module.exports = {

@@ -182,7 +182,7 @@ DynamicWorkerSource WorkerLoader::toDynamicWorkerSource(jsg::Lock& js,
         " bytes.");
   }
 
-  kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> globalOutbound;
+  kj::Maybe<kj::Rc<IoChannelFactory::SubrequestChannel>> globalOutbound;
   KJ_IF_SOME(maybeOut, code.globalOutbound) {
     KJ_IF_SOME(out, maybeOut) {
       auto channel = out->getSubrequestChannel(ioctx);
@@ -201,7 +201,7 @@ DynamicWorkerSource WorkerLoader::toDynamicWorkerSource(jsg::Lock& js,
         ioctx.getIoChannelFactory().getSubrequestChannel(IoContext::NULL_CLIENT_CHANNEL);
   }
 
-  kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> tailChannels;
+  kj::Array<kj::Rc<IoChannelFactory::SubrequestChannel>> tailChannels;
   KJ_IF_SOME(tails, code.tails) {
     tailChannels = KJ_MAP(tail, tails) {
       auto channel = tail->getSubrequestChannel(ioctx);
@@ -210,7 +210,7 @@ DynamicWorkerSource WorkerLoader::toDynamicWorkerSource(jsg::Lock& js,
     };
   }
 
-  kj::Array<kj::Own<IoChannelFactory::SubrequestChannel>> streamingTailChannels;
+  kj::Array<kj::Rc<IoChannelFactory::SubrequestChannel>> streamingTailChannels;
   KJ_IF_SOME(streamingTails, code.streamingTails) {
     JSG_REQUIRE(code.allowExperimental.orDefault(false), Error,
         "Streaming tail workers are experimental. You must pass the option "
@@ -244,6 +244,7 @@ static Worker::Script::ModuleContent extractWasmModuleContent(
   return Worker::Script::WasmModule{
     .body = kj::arrayPtr(wireBytes.data(), wireBytes.size()),
     .compiledModule = kj::mv(compiled),
+    .compiledWithEsmIntegrationBuiltins = js.isWasmEsmIntegrationBuiltinsEnabled(),
   };
 }
 

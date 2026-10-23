@@ -7,8 +7,10 @@
 
 #include "async-context.h"
 #include "jsg.h"
+#include "snapshot.h"
 #include "v8-platform-wrapper.h"
 
+#include <workerd/jsg/code-cache.h>
 #include <workerd/jsg/observer.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/batch-queue.h>
@@ -20,6 +22,7 @@
 #include <kj/mutex.h>
 #include <kj/vector.h>
 
+#include <atomic>
 #include <typeindex>
 
 namespace workerd::jsg {
@@ -160,6 +163,16 @@ class IsolateBase {
       return moduleFallbackCallback;
     }
     return kj::none;
+  }
+
+  // Makes worker bundle modules and scripts compiled in this isolate use code caches from
+  // `store`. Must be called once, before any of them is compiled.
+  void setCodeCacheStore(kj::Own<const CodeCacheStore> store) {
+    KJ_REQUIRE(codeCache == kj::none, "code cache store already set");
+    codeCache.emplace(kj::mv(store));
+  }
+  kj::Maybe<IsolateCodeCache&> tryGetCodeCache() KJ_LIFETIMEBOUND {
+    return codeCache;
   }
 
   // Requests an extra microtask checkpoint after the current one completes.
@@ -329,6 +342,29 @@ class IsolateBase {
   // so it is safe to hold from objects that may outlive the isolate (e.g. jsg::WeakRef).
   kj::Arc<const IsolateLiveness> getIsolateLiveness();
 
+  // Running totals of code V8 has generated in this isolate, from the JIT code event handler.
+  // Only counts additions; code that V8 later flushes or collects is not subtracted. Zero when
+  // JIT code event tracking is disabled.
+  struct CodeStatistics {
+    // Interpreter bytecode arrays.
+    uint64_t bytecodeCount = 0;
+    uint64_t bytecodeBytes = 0;
+    // Machine code from any JavaScript tier (baseline, Maglev, TurboFan) as well as regexp and
+    // stub code.
+    uint64_t jitCodeCount = 0;
+    uint64_t jitCodeBytes = 0;
+    // Machine code from Wasm compilation, all tiers.
+    uint64_t wasmCodeCount = 0;
+    uint64_t wasmCodeBytes = 0;
+  };
+  CodeStatistics getCodeStatistics() const;
+
+  // V8's histogram callbacks, installed on every isolate. V8 supplies no isolate argument, so
+  // these find the observer through the isolate entered on the calling thread and forward to
+  // IsolateObserver::tryCreateV8HistogramSink().
+  static void* createV8Histogram(const char* name, int min, int max, size_t buckets) noexcept;
+  static void addV8HistogramSample(void* histogram, int sample) noexcept;
+
   // Equivalent to getExternalMemoryTarget()->getAdjustment(amount), but saves an atomic refcount
   // increment and decrement.
   ExternalMemoryAdjustment getExternalMemoryAdjustment(int64_t amount) {
@@ -375,6 +411,14 @@ class IsolateBase {
     usingFastJsgStruct = true;
   }
 
+  void setWasmEsmIntegrationBuiltinsEnabled() {
+    wasmEsmIntegrationBuiltinsEnabled = true;
+  }
+
+  bool isWasmEsmIntegrationBuiltinsEnabled() const {
+    return wasmEsmIntegrationBuiltinsEnabled;
+  }
+
   bool getUsingFastJsgStruct() const {
     return usingFastJsgStruct;
   }
@@ -392,6 +436,63 @@ class IsolateBase {
   v8::Isolate* getIsolate() const {
     return ptr;
   }
+
+  bool isPreparingSnapshot() const {
+    KJ_IF_SOME(c, snapshotConfig) {
+      return c.is<MutableSnapshot>();
+    }
+    return false;
+  }
+
+  bool isStartingFromSnapshot() const {
+    KJ_IF_SOME(c, snapshotConfig) {
+      return c.is<FinalizedSnapshot>();
+    }
+    return false;
+  }
+
+  SnapshotArtifact& mutableSnapshotArtifact() {
+    return *KJ_REQUIRE_NONNULL(snapshotConfig).get<MutableSnapshot>().artifact;
+  }
+
+  const SnapshotArtifact& finalizedSnapshotArtifact() const {
+    return *KJ_REQUIRE_NONNULL(snapshotConfig).get<FinalizedSnapshot>().artifact;
+  }
+
+  kj::Own<SnapshotArtifact> extractSnapshotArtifact() {
+    return kj::mv(KJ_REQUIRE_NONNULL(snapshotConfig).get<MutableSnapshot>().artifact);
+  }
+
+  // Registers the context the snapshot is built around. It takes a v8::Local, so the caller is inside a handle scope.
+  void setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext);
+
+  // Serializes the isolate into the SnapshotArtifact passed at isolate creation.
+  // `extraTemplateHandles` carries template handles drained from embedder-side caches that this
+  // class cannot enumerate itself.
+  void createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
+      kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles);
+
+  void registerExternalReference(intptr_t addr) {
+    if (!isPreparingSnapshot()) return;
+    auto& artifact = mutableSnapshotArtifact();
+    auto& refs = artifact.externalReferences;
+    // The final slot must remain 0: V8 reads the table up to the 0 terminator.
+    KJ_REQUIRE(artifact.externalReferenceCursor < refs.size() - 1,
+        "external_references table is full; bump kExternalReferencesCapacity");
+    refs[artifact.externalReferenceCursor++] = addr;
+  }
+
+  // Enumerates every resource type's constructor-template slots (memoizedConstructor and
+  // contextConstructor, empty or not) for startup-snapshot handling, in a fixed compile-time
+  // order that PREPARE_SNAPSHOT and START_FROM_SNAPSHOT passes rely on to pair slots by
+  // position (see SnapshotArtifact::constructorTemplateIndices). Overridden by
+  // Isolate<TypeWrapper> to fan out over its type wrapper; the base implementation is a no-op.
+  virtual void iterateResourceTypeTemplates(
+      kj::FunctionParam<void(v8::Global<v8::FunctionTemplate>&)> cb) {}
+
+  // Visits every struct type's persistent handles (dictionary template + field-name handles).
+  virtual void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
+      kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictTmpl) {}
 
  private:
   template <typename TypeWrapper>
@@ -439,7 +540,16 @@ class IsolateBase {
   // TODO(cleanup): After v8 13.4 is fully released we can inline this into `newIsolate`
   //                and remove this member.
   std::unique_ptr<class v8::CppHeap> cppHeap;
+
+  kj::Maybe<kj::Own<v8::SnapshotCreator>> snapshotCreator;
+
   v8::Isolate* ptr;
+  // Determines how the isolate was created:
+  //  * kj::none: plain `v8::Isolate::New(params)`, no SnapshotCreator. The default.
+  //  * MutableSnapshot: an isolate constructed via `v8::SnapshotCreator`, which is used later
+  //    to serialize a startup snapshot.
+  //  * FinalizedSnapshot: an isolate initialized from a previously-produced snapshot blob.
+  kj::Maybe<SnapshotConfig> snapshotConfig;
   // When true, evalAllowed is true and switching it to false is a no-op.
   bool alwaysAllowEval = false;
   bool evalAllowed = false;
@@ -467,6 +577,7 @@ class IsolateBase {
   bool usingNewModuleRegistry = false;
   bool usingEnhancedErrorSerialization = false;
   bool usingFastJsgStruct = false;
+  bool wasmEsmIntegrationBuiltinsEnabled = false;
   bool extraMicrotaskCheckpointRequested = false;
 
   uint moduleEvaluationDepth = 0;
@@ -477,6 +588,7 @@ class IsolateBase {
   kj::Maybe<kj::Function<Logger>> maybeLogger;
   kj::Maybe<kj::Function<ErrorReporter>> maybeErrorReporter;
   kj::Maybe<kj::Function<ModuleFallbackCallback>> maybeModuleFallbackCallback;
+  kj::Maybe<IsolateCodeCache> codeCache;
 
   // Registry backing Lock::tryGetTypeHandler(), keyed by typeid(TypeHandler<T>) and
   // populated at isolate construction (see registerTypeHandler()). The values point at
@@ -586,11 +698,24 @@ class IsolateBase {
   // because Wasm code does not appear in JS stack traces.
   kj::TreeMap<uintptr_t, CodeBlockInfo> codeMap;
 
+  // Backs getCodeStatistics(). Atomic because V8 can in principle deliver JIT code events from
+  // background compilation threads (see the comment on codeMap).
+  struct AtomicCodeStatistics {
+    std::atomic<uint64_t> bytecodeCount{0};
+    std::atomic<uint64_t> bytecodeBytes{0};
+    std::atomic<uint64_t> jitCodeCount{0};
+    std::atomic<uint64_t> jitCodeBytes{0};
+    std::atomic<uint64_t> wasmCodeCount{0};
+    std::atomic<uint64_t> wasmCodeBytes{0};
+  };
+  AtomicCodeStatistics codeStatistics;
+
   explicit IsolateBase(V8System& system,
       v8::Isolate::CreateParams&& createParams,
       kj::Own<IsolateObserver> observer,
       kj::Own<ExternalStringAllocator> externalStringAllocator,
-      v8::IsolateGroup group);
+      v8::IsolateGroup group,
+      kj::Maybe<SnapshotConfig> snapshotConfig);
   ~IsolateBase() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(IsolateBase);
 
@@ -617,6 +742,7 @@ class IsolateBase {
   static bool jspiEnabledCallback(v8::Local<v8::Context> context);
 
   static void jitCodeEvent(const v8::JitCodeEvent* event) noexcept;
+  void recordCodeAdded(v8::JitCodeEvent::CodeType type, size_t size);
 
   friend kj::Maybe<kj::StringPtr> getJsStackTrace(void* ucontext, kj::ArrayPtr<char> scratch);
   friend class V8System;
@@ -645,6 +771,13 @@ class IsolateBase {
   // this template.
   static v8::Local<v8::FunctionTemplate> getOpaqueTemplate(v8::Isolate* isolate);
 };
+
+// Free-function form of IsolateBase::registerExternalReference() for call sites that only have a
+// v8::Isolate* and cannot include setup.h (e.g. ResourceTypeBuilder in resource.h, which
+// forward-declares this function).
+inline void isolateRegisterExternalReference(v8::Isolate* isolate, intptr_t addr) {
+  IsolateBase::from(isolate).registerExternalReference(addr);
+}
 
 // If JavaScript frames are currently on the stack, returns a string representing a stack trace
 // through it. The trace is built inside `scratch` without performing any allocation. This is
@@ -722,12 +855,14 @@ class Isolate: public IsolateBase {
       kj::Own<IsolateObserver> observer,
       kj::Own<ExternalStringAllocator> externalStringAllocator = defaultExternalStringAllocator(),
       v8::Isolate::CreateParams createParams = {},
-      bool instantiateTypeWrapper = true)
+      bool instantiateTypeWrapper = true,
+      kj::Maybe<SnapshotConfig> snapshotConfig = kj::none)
       : IsolateBase(system,
             kj::mv(createParams),
             kj::mv(observer),
             kj::mv(externalStringAllocator),
-            group) {
+            group,
+            kj::mv(snapshotConfig)) {
     wrappers.resize(1);
     registerTypeHandlers();
     if (instantiateTypeWrapper) {
@@ -742,12 +877,14 @@ class Isolate: public IsolateBase {
       MetaConfiguration&& configuration,
       kj::Own<IsolateObserver> observer,
       v8::Isolate::CreateParams createParams = {},
-      bool instantiateTypeWrapper = true)
+      bool instantiateTypeWrapper = true,
+      kj::Maybe<SnapshotConfig> snapshotConfig = kj::none)
       : IsolateBase(system,
             kj::mv(createParams),
             kj::mv(observer),
             defaultExternalStringAllocator(),
-            v8::IsolateGroup::Create()) {
+            v8::IsolateGroup::Create(),
+            kj::mv(snapshotConfig)) {
     wrappers.resize(1);
     registerTypeHandlers();
     if (instantiateTypeWrapper) {
@@ -786,6 +923,24 @@ class Isolate: public IsolateBase {
 
   ~Isolate() noexcept(false) {
     dropWrappers([this]() { wrappers.clear(); });
+  }
+
+  void iterateResourceTypeTemplates(
+      kj::FunctionParam<void(v8::Global<v8::FunctionTemplate>&)> cb) override {
+    if (!hasExtraWrappers) {
+      wrappers[0]->iterateResourceTypeTemplates(cb);
+    } else {
+      KJ_FAIL_ASSERT("Not yet implemented");
+    }
+  }
+
+  void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
+      kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictTmpl) override {
+    if (!hasExtraWrappers) {
+      wrappers[0]->visitStructTypeHandles(visitName, visitDictTmpl);
+    } else {
+      KJ_FAIL_ASSERT("Not yet implemented");
+    }
   }
 
   kj::Exception unwrapException(
@@ -916,10 +1071,10 @@ class Isolate: public IsolateBase {
       return jsgIsolate.getWrapperByContext(*this)->wrap(v8Isolate, kj::none, kj::mv(data));
     }
     v8::Local<v8::Function> wrapSimpleFunction(v8::Local<v8::Context> context,
-        jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction)
-        override {
+        jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction,
+        Once once) override {
       return jsgIsolate.getWrapperByContext(context)->wrap(
-          *this, context, kj::none, kj::mv(simpleFunction));
+          *this, context, kj::none, kj::mv(simpleFunction), once);
     }
     v8::Local<v8::Function> wrapReturningFunction(v8::Local<v8::Context> context,
         jsg::Function<v8::Local<v8::Value>(const v8::FunctionCallbackInfo<v8::Value>& info)>

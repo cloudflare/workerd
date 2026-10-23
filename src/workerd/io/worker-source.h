@@ -38,6 +38,10 @@ struct WorkerSource {
     // Module::clone() relies on that invariant to re-point the cloned view at
     // the cloned buffer.
     kj::Maybe<::rust::String> ownBody;
+    // Start positions of functions that V8 should compile together with the module because they
+    // are expected to run; see jsg::ModuleRegistry::ModuleInfo. Points at external data, like
+    // `body`. Currently only honored by the legacy module registry.
+    kj::ArrayPtr<const int> compileHints = nullptr;
   };
   struct CommonJsModule {
     kj::StringPtr body;
@@ -58,6 +62,11 @@ struct WorkerSource {
     // isolate to avoid recompiling. In this case `body` points at the module's wire bytes, which
     // are owned by the compiled module.
     kj::Maybe<v8::CompiledWasmModule> compiledModule;
+
+    // Whether `compiledModule` was compiled with the wasm_esm_integration_builtins compile
+    // options. Compiled code is only shared with a target whose own setting matches, since the
+    // setting is baked into the compiled module; otherwise the target recompiles from `body`.
+    bool compiledWithEsmIntegrationBuiltins = false;
   };
   struct JsonModule {
     // JSON-encoded content; will be parsed automatically when imported.
@@ -111,7 +120,8 @@ struct WorkerSource {
             KJ_DASSERT(content.body.begin() == own.data() && content.body.size() == own.size());
             ::rust::String ownCopy(own);
             kj::ArrayPtr<const char> bodyView(ownCopy.data(), ownCopy.size());
-            result.content = EsModule{.body = bodyView, .ownBody = kj::mv(ownCopy)};
+            result.content = EsModule{
+              .body = bodyView, .ownBody = kj::mv(ownCopy), .compileHints = content.compileHints};
           } else {
             result.content = content;
           }

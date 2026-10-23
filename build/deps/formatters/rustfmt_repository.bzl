@@ -1,10 +1,9 @@
 """
-Repository rule that downloads a standalone rustfmt binary along with the rustc
-shared libraries it depends on.
+Repository rule that downloads a standalone rustfmt binary along with the rustc shared libraries it
+depends on.
 
-This avoids needing `bazel run @rules_rust//:rustfmt`, which triggers C++ toolchain
-resolution and (in edgeworker) the V8 build cache download — a multi-GB fetch that
-is unnecessary for code formatting.
+This avoids needing `bazel run @rules_rust//:rustfmt`, which triggers C++ toolchain resolution and
+(in edgeworker) the V8 build cache download — a large fetch that is unnecessary for code formatting.
 """
 
 load("@@//:build/http_proxy_config.bzl", "PROXY_URL")
@@ -62,6 +61,9 @@ LD_LIBRARY_PATH="{lib_dir}:${{LD_LIBRARY_PATH:-}}" exec "{rustfmt_bin}" "$@"
     ), executable = True)
 
     repository_ctx.file("BUILD.bazel", 'exports_files(["rustfmt"])\n')
+
+    # Not reproducible based on using absolute paths
+    return repository_ctx.repo_metadata(reproducible = False)
 
 rustfmt_standalone_repository = repository_rule(
     doc = "Downloads a standalone rustfmt binary and the rustc shared libraries it needs.",

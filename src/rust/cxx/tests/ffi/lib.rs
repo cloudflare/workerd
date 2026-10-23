@@ -199,8 +199,16 @@ pub mod ffi {
         ) -> SharedWithMultipleKjOwns;
         fn c_return_kj_rc(n: usize) -> KjRc<RcC>;
         fn c_return_non_refcounted_kj_rc(n: usize) -> KjRc<NonRefcountedRcC>;
+        fn c_return_projected_kj_rc(
+            n: usize,
+            drop_count: KjRc<RcC>,
+        ) -> Result<KjRc<NonRefcountedRcC>>;
         fn c_take_non_refcounted_kj_rc_by_ref(rc: &KjRc<NonRefcountedRcC>) -> usize;
         fn c_return_non_atomic_kj_arc(n: usize) -> KjArc<NonAtomicArcC>;
+        fn c_return_projected_kj_arc(
+            n: usize,
+            drop_count: KjArc<ArcC>,
+        ) -> Result<KjArc<NonAtomicArcC>>;
         fn c_take_non_atomic_kj_arc_by_ref(arc: &KjArc<NonAtomicArcC>) -> usize;
         fn c_sizeof_shared_with_kj_rc() -> usize;
         fn c_alignof_shared_with_kj_rc() -> usize;

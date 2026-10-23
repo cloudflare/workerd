@@ -369,7 +369,7 @@ export function pipelineImpl(streams, callback, opts) {
   }
 
   // Internal, for compose(): a destroyed composition fails its pipeline from
-  // the outside with the destroy error, as a failing stage would — every
+  // the outside with the destroy error, as a failing stage would - every
   // stage is destroyed and the callback reports that error. A no-op once the
   // pipeline has completed (its callback is already on its way).
   opts?.onTeardown?.((err) => {

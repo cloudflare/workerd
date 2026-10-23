@@ -1,0 +1,115 @@
+load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+
+package(default_visibility = ["//src/workerd/server:__subpackages__"])
+
+# The declarations the server crate's bridge header needs. Header-only: the bridge library depends
+# on it, and :worker-factory depends on the bridge library, so the two cannot be one target.
+wd_cc_library(
+    name = "worker-factory-hdrs",
+    hdrs = ["worker-factory.h"],
+    deps = [
+        "//src/rust/cxx/kj-rs",
+        "//src/rust/worker:bridge",
+        "//src/workerd/api:memory-cache",
+        "//src/workerd/api:pyodide",
+        "//src/workerd/io",
+        "//src/workerd/server:channel-token",
+        "//src/workerd/server:workerd_capnp",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/kj:kj-async-io",
+        "@capnp-cpp//src/kj/compat:kj-http",
+    ],
+)
+
+# The C++ side of the Rust server: compiles workers, starts requests, builds actors and their
+# storage, serves the capnp RPC protocols, encodes channel tokens, runs the inspector.
+wd_cc_library(
+    name = "worker-factory",
+    srcs = [
+        "worker-factory.c++",
+        "worker-factory-actor.c++",
+        "worker-factory-impl.h",
+        "worker-factory-listen.c++",
+        "worker-factory-rpc.c++",
+    ],
+    linkstatic = CC_LIBRARY_LINKSTATIC,
+    deps = [
+        ":worker-factory-hdrs",
+        "//src/rust/worker:bridge",
+        "//src/workerd/api:memory-cache",
+        "//src/workerd/api:pyodide",
+        "//src/workerd/io",
+        "//src/workerd/io:bundle-fs",
+        "//src/workerd/io:worker-entrypoint",
+        "//src/workerd/jsg",
+        "//src/workerd/server:actor-id-impl",
+        "//src/workerd/server:alarm-scheduler",
+        "//src/workerd/server:channel-token",
+        "//src/workerd/server:compiled-bindings_capnp",
+        "//src/workerd/server:container-client",
+        "//src/workerd/server:facet-tree-index",
+        "//src/workerd/server:fallback-service",
+        "//src/workerd/server:pyodide",
+        "//src/workerd/server:workerd-api",
+        "//src/workerd/server:workerd_capnp",
+        "//src/workerd/server/server:bridge.rs@cxx",
+        "//src/workerd/util:autogate",
+        "//src/workerd/util:perfetto",
+        "//src/workerd/util:sqlite",
+        "//src/workerd/util:websocket-error-handler",
+        "@capnp-cpp//src/capnp:capnp-rpc",
+        "@capnp-cpp//src/capnp/compat:json",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
+        "@capnp-cpp//src/kj/compat:kj-http",
+        "@ssl",
+    ],
+)
+
+# The declarations both bridges (the command line's and the server's) need from :bootstrap.
+# Header-only, since the bridge libraries cannot depend on the C++ that includes their headers.
+wd_cc_library(
+    name = "bootstrap-hdrs",
+    hdrs = ["bootstrap.h"],
+    deps = [
+        "//src/rust/cxx/kj-rs",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+# The C++ half of a command: the process's logging, and the bootstrap that sets up the process and
+# V8 on the Rust-owned event loop and builds the worker factory the Rust server runs.
+wd_cc_library(
+    name = "bootstrap",
+    srcs = ["bootstrap.c++"],
+    linkstatic = CC_LIBRARY_LINKSTATIC,
+    deps = [
+        ":bootstrap-hdrs",
+        ":worker-factory",
+        "//src/pyodide:pyodide_extra_capnp",
+        "//src/rust/cxx/kj-rs",
+        "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
+        "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
+        "//src/workerd/server:json-logger",
+        "//src/workerd/server:v8-platform-impl",
+        "//src/workerd/server:workerd_capnp",
+        "//src/workerd/server/server:bridge.rs@cxx",
+        "//src/workerd/util:autogate",
+        "//src/workerd/util:perfetto",
+        # :bootstrap exists only for the workerd binary, so it links the binary's kj::setupAsyncIo()
+        # (the inspector and fallback-service threads' loops).
+        "//src/workerd/util:setup-async-io",
+        "//src/workerd/util:thread-scopes",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@capnp-cpp//src/kj:kj-async-io",
+    ],
+    # The C++ root of the workerd binary is linked eagerly, as a cc_binary's own sources would be.
+    # Bazel places it ahead of everything it depends on, and from an eager object the linker
+    # resolves the rest of the C++ in that order. Left lazy, the Rust side's references would reach
+    # it only after every library had been registered, and the linker would then find the C++ by a
+    # depth-first walk of symbol references. That walk decides which copy of a template the binary
+    # keeps when two libraries carry different ones: V8 is built without exceptions, and its copy
+    # of libc++'s std::regex parser aborts where workerd's throws.
+    alwayslink = True,
+)

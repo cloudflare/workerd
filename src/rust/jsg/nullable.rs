@@ -10,10 +10,11 @@ use crate::Result;
 
 /// A wrapper type that accepts `null`, `undefined`, or a value of type `T`.
 ///
-/// `Nullable<T>` is similar to `Option<T>` but also accepts `undefined` as a null-ish value.
-/// This is useful for writing flexible JavaScript APIs where we have full control over
-/// behavior depending on the passed value, including easily throwing errors to make an API
-/// conform to Web IDL nullable behavior.
+/// Unlike `Option<T>`, where only `undefined` is `None` and `null` goes to `T`,
+/// `Nullable<T>` tells `null` and `undefined` apart. This is useful for
+/// writing flexible JavaScript APIs where we have full control over behavior
+/// depending on the passed value, including easily throwing errors to make an
+/// API conform to Web IDL nullable behavior.
 ///
 /// # Behavior
 ///
@@ -170,6 +171,10 @@ impl<T> Nullable<T> {
     ///
     /// [`Some`]: Nullable::Some
     #[track_caller]
+    #[expect(
+        clippy::panic,
+        reason = "panicking on a missing value is this method's contract, as with `Option`"
+    )]
     pub fn unwrap(self) -> T {
         match self {
             Self::Some(v) => v,
@@ -191,6 +196,10 @@ impl<T> Nullable<T> {
     ///
     /// [`Some`]: Nullable::Some
     #[track_caller]
+    #[expect(
+        clippy::panic,
+        reason = "panicking on a missing value is this method's contract, as with `Option`"
+    )]
     pub fn expect(self, msg: &str) -> T {
         match self {
             Self::Some(v) => v,

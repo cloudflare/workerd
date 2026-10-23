@@ -1,7 +1,7 @@
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_unpretty")
 load("//:build/linking.bzl", "CC_LIBRARY_LINKSTATIC")
-load("//:build/wd_rust_test.bzl", "wd_rust_test")
+load("//:build/wd_rust_test.bzl", "split_rust_test_srcs", "wd_rust_test")
 
 def rust_cxx_bridge(
         name,
@@ -23,10 +23,6 @@ def rust_cxx_bridge(
         ],
         cmd = "$(location //src/rust/cxx:codegen) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
         tools = ["//src/rust/cxx:codegen"],
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
     )
     cc_library(
         name = name,
@@ -40,10 +36,6 @@ def rust_cxx_bridge(
         deps = deps,
         visibility = visibility,
         tags = tags,
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
     )
 
 def rust_cxx_include_prefix():
@@ -66,24 +58,29 @@ def wd_rust_crate(
         deps = [],
         link_deps = [],
         proc_macro_deps = [],
+        rustc_env = {},
         data = [],
         test_env = {},
         test_tags = [],
         test_deps = [],
         test_proc_macro_deps = [],
+        test_compile_data = [],
         test_size = "medium",
         cxx_bridge_deps = [],
         cxx_bridge_hdrs = None,
         cxx_bridge_tags = [],
         cxx_bridge_local_defines = [],
         cxx_bridge_features = [],
+        cxx_bridge_visibility = [],
+        testonly = False,
         visibility = None):
     """Define rust crate.
 
     Args:
         name: crate name.
         srcs: crate sources; defaults to every .rs file in the package. Name them explicitly when
-            the package also holds other crates or C++.
+            the package also holds other crates or C++. The *-test.rs files among them are the
+            crate's unit tests and are compiled only into <name>_test; see split_rust_test_srcs.
         crate_root: the crate's root module, if not lib.rs or <name>.rs.
         cxx_bridge_src: (optional) .rs source file with cxx ffi bridge definition. The rule will
             generation additional<name>@cxx c++ library with cxx bindings if this is set.
@@ -97,14 +94,21 @@ def wd_rust_crate(
         test_tags: additional test tags.
         test_deps: test-only dependencies.
         test_proc_macro_deps: test-only proc_macro dependencies.
+        test_compile_data: files the unit tests read at compile time (include_str!, include_bytes!),
+            such as test vectors. Like the *-test.rs files, they are inputs of <name>_test only.
         test_size: Bazel test size (default "medium"); affects test timeout. Use "large" for
             crates with many subtests, since RUST_TEST_THREADS=1 forces serial execution.
         cxx_bridge_deps: either a flat dependency list applied to every bridge source, or a dict of
             bridge source => dependency list.
         cxx_bridge_hdrs: headers the bridges include!(); defaults to every .h file in the package.
+        cxx_bridge_visibility: visibility of the generated <bridge>@cxx libraries, for C++ in
+            another package that includes a bridge's header (it must also link the crate).
+        testonly: True for a crate that only tests depend on (a test harness, the Rust half of a
+            C++ test). Like other test code, it is not held to //build/rust:lints.
     """
     if srcs == None:
         srcs = native.glob(["**/*.rs"])
+    srcs, test_srcs = split_rust_test_srcs(srcs)
     crate_name = name.replace("-", "_")
 
     if cxx_bridge_src:
@@ -139,8 +143,9 @@ def wd_rust_crate(
             hdrs = hdrs,
             include_prefix = include_prefix,
             strip_include_prefix = "",
-            # Not applying visibility here – if you import the cxxbridge header, you will likely
-            # also need the rust library itself to avoid linker errors.
+            # Private by default: a C++ library that includes the bridge header also needs the
+            # crate itself at link time.
+            visibility = cxx_bridge_visibility,
             deps = cxx_bridge_deps.get(bridge_src, []) + [
                 "//src/rust/cxx/kj-rs",
                 "//src/rust/cxx:cxx",
@@ -165,24 +170,25 @@ def wd_rust_crate(
         srcs = srcs,
         deps = deps,
         link_deps = link_deps + ["@@//deps:rust_runtime"],
+        rustc_env = rustc_env,
         visibility = visibility,
         data = data,
         proc_macro_deps = proc_macro_deps,
         crate_features = crate_features,
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
+        lint_config = None if testonly else "@workerd//build/rust:lints",
+        testonly = testonly,
         **library_kwargs
     )
 
     wd_rust_test(
         name = name + "_test",
+        compile_data = test_srcs + test_compile_data,
         crate = ":" + name,
         env = test_env,
         size = test_size,
         tags = test_tags,
         crate_features = crate_features,
+        rustc_env = rustc_env,
         deps = test_deps,
         proc_macro_deps = test_proc_macro_deps,
     )
@@ -192,6 +198,7 @@ def wd_rust_crate(
             name = name + "@expand",
             deps = [":" + name],
             tags = ["manual", "off-by-default"],
+            testonly = testonly,
         )
 
     if len(test_proc_macro_deps) > 0:

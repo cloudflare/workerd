@@ -1,3 +1,8 @@
+#![allow(
+    unsafe_code,
+    reason = "constructs and polls the C++ promise awaiter in place"
+)]
+
 use std::mem::MaybeUninit;
 use std::pin::Pin;
 use std::task::Context;
@@ -34,6 +39,10 @@ impl<Data: std::marker::Unpin> PromiseAwaiter<Data> {
     ///
     /// Panics if `node` is None.
     #[must_use]
+    #[expect(
+        clippy::expect_used,
+        reason = "`node` is `Some` until the first call, the only one to reach this, takes it"
+    )]
     pub fn get_awaiter(mut self: Pin<&mut Self>) -> Pin<&mut GuardedRustPromiseAwaiter> {
         // Safety: We never move out of `this`.
         // Safety: the KJ bridge representation and ownership invariants satisfy this operation.

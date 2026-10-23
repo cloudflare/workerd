@@ -66,7 +66,9 @@ function prepareWasmLinearMemory(
 ): void {
   maybeRestoreSnapshot(Module);
   // entropyAfterRuntimeInit adjusts JS state ==> always needs to be called.
-  entropyAfterRuntimeInit(Module);
+  enterJaegerSpan('entropy_after_runtime_init', () => {
+    entropyAfterRuntimeInit(Module);
+  });
   if (!isRestoringSnapshot()) {
     // The effects of these are purely in Python state so they only need to be run
     // if we didn't restore a snapshot.
@@ -250,32 +252,38 @@ export async function loadPyodide(
       prepareWasmLinearMemory(Module, customSerializedObjects);
     });
 
-    maybeCollectBaselineSnapshot(Module, customSerializedObjects);
-    // Mount worker files after doing snapshot upload so we ensure that data from the files is never
-    // present in snapshot memory.
-    mountWorkerFiles(Module);
+    return enterJaegerSpan('finish_python_bootstrap', () => {
+      maybeCollectBaselineSnapshot(Module, customSerializedObjects);
+      // Mount worker files after doing snapshot upload so we ensure that data from the files is never
+      // present in snapshot memory.
+      enterJaegerSpan('mount_worker_files', () => {
+        mountWorkerFiles(Module);
+      });
 
-    if (Module.API.version === PyodideVersion.V0_26_0a2) {
-      // Finish setting up Pyodide's ffi so we can use the nice Python interface
-      // In newer versions we already did this in prepareWasmLinearMemory.
-      finalizeBootstrap(Module, customSerializedObjects);
-    }
-    const pyodide = Module.API.public_api;
-
-    validatePyodideVersion(pyodide);
-    setupPythonSearchPath(pyodide);
-    setupRuntimeSignalHandling(Module);
-    Module.API.on_fatal = (error: unknown): void => {
-      try {
-        FatalReporter.reportFatal(String(error));
-      } catch (_e) {
-        FatalReporter.reportFatal('Internal error reporting fatal error');
+      if (Module.API.version === PyodideVersion.V0_26_0a2) {
+        // Finish setting up Pyodide's ffi so we can use the nice Python interface
+        // In newer versions we already did this in prepareWasmLinearMemory.
+        finalizeBootstrap(Module, customSerializedObjects);
       }
-      cloudflareWorkers.abortIsolate(
-        `Python worker fatal error: ${String(error)}`
-      );
-    };
-    return pyodide;
+      const pyodide = Module.API.public_api;
+
+      validatePyodideVersion(pyodide);
+      enterJaegerSpan('setup_python_search_path', () => {
+        setupPythonSearchPath(pyodide);
+      });
+      setupRuntimeSignalHandling(Module);
+      Module.API.on_fatal = (error: unknown): void => {
+        try {
+          FatalReporter.reportFatal(String(error));
+        } catch (_e) {
+          FatalReporter.reportFatal('Internal error reporting fatal error');
+        }
+        cloudflareWorkers.abortIsolate(
+          `Python worker fatal error: ${String(error)}`
+        );
+      };
+      return pyodide;
+    });
   } catch (e) {
     // In edgeworker test suite, without this we get the file name and line number of the exception
     // but no traceback. This gives us a full traceback.

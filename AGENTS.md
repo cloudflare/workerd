@@ -41,6 +41,8 @@ Subdirectory `AGENTS.md` files provide component-specific context (key classes, 
 - `just build-asan` - Build with AddressSanitizer
 - `just test-asan` - Run tests with AddressSanitizer
 - `just new-test <target>` - Scaffold a new test (e.g., `just new-test //src/workerd/api/tests:my-test`)
+- `just new-bench <target>` - Scaffold a new JavaScript benchmark (`wd_bench()`)
+- `just wd-bench <target> [args]` - Run a `wd_bench()` target in an optimized build (e.g., `just wd-bench //src/workerd/api/tests:text-encoder-bench@`)
 - `just new-wpt-test <name>` - Scaffold a new WPT test
 - `just lint` or `just eslint` - Run ESLint on TypeScript sources
 - `just coverage <path>` - Generate code coverage report (Linux only, defaults to `//...`)
@@ -52,9 +54,10 @@ Subdirectory `AGENTS.md` files provide component-specific context (key classes, 
 
 - **`.wd-test` tests**: Cap'n Proto config files that define a `Workerd.Config` with embedded JS/TS modules. Bazel macro: `wd_test()`. See format details below.
 - **C++ tests**: KJ-based unit tests (`.c++` files). Bazel macro: `kj_test()`.
+- **Rust unit tests**: `<module>-test.rs` beside the module under test, never inline; run by the crate's test target (`<name>_test` for a crate defined with a `wd_rust_*` macro; otherwise see the package's `BUILD.bazel`). See `src/rust/AGENTS.md` §UNIT TEST FILES.
 - **Node.js compatibility tests**: `just node-test <test_name>`
 - **Web Platform Tests**: `just wpt-test <test_name>`
-- **Benchmarks**: `just bench <path>` (e.g., `just bench mimetype`)
+- **Benchmarks**: `just bench <path>` (e.g., `just bench mimetype`) for C++ (`wd_cc_benchmark()`); `wd_bench()` for JavaScript via `workerd bench`, whose `@smoke` tests run in CI. See `docs/benchmarking.md`.
 
 ### Running a Single Test
 
@@ -161,8 +164,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 - **`jsg/`** - JavaScript Glue layer for V8 integration
   - Core JavaScript engine bindings and type wrappers
   - Promise handling, memory management, module system
-- **`server/`** - Main server implementation and configuration
-  - Main binary entry point and Cap'n Proto config handling
+- **`server/`** - The `workerd` binary: the Rust command line (`cli/`) and server (`server/`) over the C++ worker factory (`factory/`), plus the Cap'n Proto config schema; see `src/workerd/server/AGENTS.md`
 - **`util/`** - Utility libraries (SQLite, UUID, threading, etc.)
 
 ### Multi-Language Support
@@ -170,7 +172,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 - **`src/cloudflare/`** - Cloudflare-specific APIs (TypeScript)
 - **`src/node/`** - Node.js compatibility layer (TypeScript)
 - **`src/pyodide/`** - Python runtime support via Pyodide
-- **`src/rust/`** - Rust integration components; see `src/rust/AGENTS.md` for the full macro reference and GC tracing guide
+- **`src/rust/`** - Rust crates without a C++ home of their own and the in-tree cxx fork; see `src/rust/AGENTS.md` for the full macro reference and GC tracing guide (component crates such as the server live beside their C++)
 
 ### Configuration System
 
@@ -189,12 +191,14 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Modify compat flags    | `src/workerd/io/compatibility-date.capnp`                     | ~1400 lines; annotations define flag names + enable dates                                                    |
 | Add autogate           | `src/workerd/util/autogate.h`                                 | Add key to WORKERD_AUTOGATES macro; kebab-case name auto-derived; see header comment                         |
 | Config schema          | `src/workerd/server/workerd.capnp`                            | Cap'n Proto; capability-based security                                                                       |
+| Server / binary        | `src/workerd/server/`                                         | Rust `workerd-server` crate (`server/`) drives the C++ `worker-factory`; see `server/AGENTS.md`              |
 | Worker lifecycle       | `src/workerd/io/worker.{h,c++}`                               | Isolate, Script, Worker, Actor classes                                                                       |
 | Request lifecycle      | `src/workerd/io/io-context.{h,c++}`                           | IoContext: the per-request god object                                                                        |
 | Coroutine cancellation | `docs/reference/detail/async-patterns.md`                     | `CURRENT_INVOCATION` with `KJ_DEFER`; `KJ_ON_SCOPE_FAILURE` is exception-only                                |
 | Durable Object storage | `src/workerd/io/actor-cache.{h,c++}` + `actor-sqlite.{h,c++}` | LRU cache over RPC / SQLite-backed                                                                           |
 | Streams implementation | `src/workerd/api/streams/`                                    | Has 842-line README; dual internal/standard impl                                                             |
 | Bazel build rules      | `build/`                                                      | Custom `wd_*` macros; `wd_test.bzl` generates 3 test variants                                                |
+| JS benchmarks          | `src/workerd/api/bench.{h,c++}`, `build/wd_bench.bzl`         | `bench` handler; runner `BenchController`; report schema `io/bench.capnp`; driver `server/server/bench.rs`   |
 | TypeScript types       | `types/`                                                      | Extracted from C++ RTTI + hand-written `defines/*.d.ts`; see `types/AGENTS.md` for detailed typings guidance |
 | V8 patches             | `patches/v8/`                                                 | 33 patches; see `docs/v8-updates.md`                                                                         |
 
@@ -207,7 +211,8 @@ This project generally follows the [KJ Style Guide](https://github.com/capnproto
 - **Formatting**: `just format` runs clang-format + prettier + ruff + buildifier + rustfmt;
   use `just format <path>...` for specific files or `just format-head` for files changed since
   `HEAD~`
-- **Pre-commit hook**: Blocks `KJ_DBG` in staged code; runs format check
+- **Pre-commit hook**: `githooks/pre-commit`, enabled with `git config core.hooksPath githooks`;
+  blocks `KJ_DBG` in staged code and runs a format check (see `docs/development.md`)
 - **Commit discipline**: Split PRs into small commits; each must compile + pass tests; no fixup commits
 - **TypeScript**: Strict mode, `exactOptionalPropertyTypes`, private `#` syntax enforced, explicit return types
 
@@ -300,6 +305,10 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 - Review additions to the standard API surface exposed to Workers, including
   those introduced by V8 updates. Record the compatibility decision in the
   commit message: use a compatibility flag or explicitly accept the risk.
+- For a V8 update, identify every newly default-enabled standard API and
+  record its disposition. If the update disables all such APIs and the audit
+  finds no others, stating both facts in the commit message satisfies this
+  requirement.
 - Autogates support gradual rollout and fast rollback, but do not preserve
   existing Workers' API surface. Compatibility failures may be invisible to
   runtime metrics or reported late by customers, so a quiet rollout alone

@@ -1,7 +1,3 @@
-#[cfg(test)]
-#[path = "test.rs"]
-mod test;
-
 use std::collections::BTreeMap as Map;
 use std::collections::BTreeSet as Set;
 use std::path::PathBuf;
@@ -233,3 +229,7 @@ fn arg_version() -> Arg {
         .help("Print version information.")
         .action(ArgAction::Version)
 }
+
+#[cfg(test)]
+#[path = "app-test.rs"]
+mod tests;

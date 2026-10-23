@@ -9,8 +9,8 @@
 // byob.js), but one user hook IS reached from inside read processing in
 // both implementations: read results are ordinary objects, so resolving a
 // read promise runs the spec's thenable check against them, and a patched
-// Object.prototype.then getter executes mid-delivery — C++ consults it once
-// per read, TypeScript twice. Whatever such a getter does must not be able
+// Object.prototype.then getter executes mid-delivery, once per read.
+// Whatever such a getter does must not be able
 // to corrupt the stream.
 //
 // The parked-second-read case additionally pins a reader-model divergence
@@ -54,7 +54,7 @@ export const thenInterceptionDuringReadResolution = {
         const r = await readPromise;
         strictEqual(r.done, false);
         deepStrictEqual([...r.value], [97, 98]);
-        strictEqual(fired, usingTsImpl ? 2 : 1);
+        strictEqual(fired, 1);
 
         // BYOB read consults it the same number of times.
         const before = fired;
@@ -65,7 +65,7 @@ export const thenInterceptionDuringReadResolution = {
         await w2.write(new Uint8Array([99, 100]));
         const r2 = await rp2;
         deepStrictEqual([...r2.value], [99, 100]);
-        strictEqual(fired - before, usingTsImpl ? 2 : 1);
+        strictEqual(fired - before, 1);
       }
     );
   },

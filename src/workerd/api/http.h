@@ -26,8 +26,6 @@
 
 namespace workerd::api {
 
-WD_STRONG_BOOL(IsHyperdrive);
-
 // Whether a Fetcher is exempt from the `fetcher_rpc` compatibility gate that Fetcher::getRpcMethod
 // applies, so its JSRPC wildcard resolves regardless of the worker's compatibility date.
 
@@ -264,11 +262,16 @@ class Fetcher: public JsRpcClientProvider {
       return getActorTargetRetryability().orDefault(ActorCallTargetRetryable::NO).toBool();
     }
 
+    // Temporary retry diagnostics: the ActorRetryCandidate this factory's target counts toward.
+    virtual kj::Maybe<ActorRetryCandidate> getActorRetryProbeCandidate() const {
+      return kj::none;
+    }
+
     virtual void onActorCallRetry() {
       KJ_FAIL_REQUIRE("actor call retry requested from an unsupported Fetcher");
     }
 
-    // The retry policy configured on the binding this factory was minted from, if any. None means
+    // The retry policy passed to `get()` when this factory's stub was minted, if any. None means
     // the runtime's default applies.
     virtual kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() const {
       return kj::none;
@@ -284,7 +287,7 @@ class Fetcher: public JsRpcClientProvider {
 
     // Get a `SubrequestChannel` representing this Fetcher. This is used especially when the
     // Fetcher is being passed to another isolate.
-    virtual kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() {
+    virtual kj::Rc<IoChannelFactory::SubrequestChannel> getSubrequestChannel() {
       // TODO(soon): Update all implementations and remove this default implementation.
       KJ_UNIMPLEMENTED("this Fetcher doesn't yet implement getSubrequestChannel()");
     }
@@ -303,7 +306,7 @@ class Fetcher: public JsRpcClientProvider {
     virtual OutgoingFactory::Result newSingleUseClient(
         IoContext& context, kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) = 0;
 
-    virtual kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& context) {
+    virtual kj::Rc<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& context) {
       // TODO(soon): Update all implementations and remove this default implementation.
       KJ_UNIMPLEMENTED("this Fetcher doesn't yet implement getSubrequestChannel()");
     }
@@ -343,6 +346,11 @@ class Fetcher: public JsRpcClientProvider {
   [[nodiscard]] ClientWithTracing getClientWithTracing(
       IoContext& ioContext, kj::Maybe<kj::String> cfStr, kj::ConstString operationName);
 
+  [[nodiscard]] ClientWithTracing getClientWithTracing(IoContext& ioContext,
+      kj::Maybe<kj::String> cfStr,
+      kj::ConstString operationName,
+      MakeUserSpanParent makeUserSpanParent);
+
   [[nodiscard]] ClientWithTracing getClientForActorCallAttempt(IoContext& ioContext,
       kj::Maybe<kj::String> cfStr,
       kj::ConstString operationName,
@@ -355,11 +363,12 @@ class Fetcher: public JsRpcClientProvider {
       MakeUserSpanParent makeUserSpanParent);
 
   kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() override;
+  kj::Maybe<ActorRetryCandidate> getActorRetryProbeCandidate() override;
   kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() override;
   void onActorCallRetry() override;
 
   // Get a SubrequestChannel representing this Fetcher.
-  kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);
+  kj::Rc<IoChannelFactory::SubrequestChannel> getSubrequestChannel(IoContext& ioContext);
 
   // Wraps kj::Url::parse to take into account whether the Fetcher requires a host to be
   // specified on URLs, Fetcher-specific URL decoding options, and error handling.
@@ -538,10 +547,12 @@ class Fetcher: public JsRpcClientProvider {
 
   JSG_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
 
-  // Set up a connection string override for a random host and the given port. isHyperdrive
-  // signifies whether the legacy hostname for hyperdrive should be used (only used with
-  // ExtendedFetcher).
-  void registerOverride(jsg::Lock& js, IsHyperdrive isHyperdrive, uint16_t overridePort);
+  // Set up a connection string override for a random `.workers.alt` host and the given port.
+  void registerOverride(jsg::Lock& js, uint16_t overridePort);
+
+  // Registers the connection string override (if not already registered) and returns the mapped
+  // `host:port`. Shared by ctx.mapVirtualHost() and the internal Hyperdrive binding.
+  kj::String mapVirtualHost(jsg::Lock& js, uint16_t port);
 
   kj::Maybe<uint16_t> getPortInternal() const {
     return port;
@@ -599,11 +610,9 @@ class ExtendedFetcher final: public Fetcher {
   explicit ExtendedFetcher(uint channel,
       RequiresHostAndProtocol requiresHost,
       uint16_t connectionStringOverridePort,
-      IsHyperdrive isHyperdrive,
       bool isInHouse = false,
       RpcCompatGateBypassed rpcCompatGateBypassed = RpcCompatGateBypassed::NO)
-      : Fetcher(channel, requiresHost, isInHouse, rpcCompatGateBypassed),
-        isHyperdrive(isHyperdrive) {
+      : Fetcher(channel, requiresHost, isInHouse, rpcCompatGateBypassed) {
     port = connectionStringOverridePort;
   }
 
@@ -626,9 +635,6 @@ class ExtendedFetcher final: public Fetcher {
   }
 
   JSG_ONEWAY_SERIALIZABLE(rpc::SerializationTag::SERVICE_STUB);
-
- private:
-  IsHyperdrive isHyperdrive;
 };
 
 // Type of the second parameter to Request's constructor. Also the type of the second parameter

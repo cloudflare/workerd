@@ -10,7 +10,6 @@
 #include <workerd/io/io-context.h>
 #include <workerd/io/tracer.h>
 #include <workerd/jsg/ser.h>
-#include <workerd/util/own-util.h>
 #include <workerd/util/thread-scopes.h>
 #include <workerd/util/uncaught-exception-source.h>
 #include <workerd/util/uuid.h>
@@ -209,15 +208,15 @@ TraceItem::TraceItem(jsg::Lock& js, const Trace& trace)
       logs(getTraceLogs(js, trace)),
       exceptions(getTraceExceptions(js, trace)),
       diagnosticChannelEvents(getTraceDiagnosticChannelEvents(js, trace)),
-      scriptName(mapCopyString(trace.scriptName)),
-      entrypoint(mapCopyString(trace.entrypoint)),
+      scriptName(trace.scriptName.clone()),
+      entrypoint(trace.entrypoint.clone()),
       scriptVersion(getTraceScriptVersion(trace)),
-      dispatchNamespace(mapCopyString(trace.dispatchNamespace)),
+      dispatchNamespace(trace.dispatchNamespace.clone()),
       scriptTags(getTraceScriptTags(trace)),
       tailAttributes(trace.tailAttributes.map(
           [](auto& tags) { return KJ_MAP(tag, tags) { return tag.clone(); }; })),
       preview(trace.preview.map([](auto& p) { return TracePreviewInfo(p); })),
-      durableObjectId(mapCopyString(trace.durableObjectId)),
+      durableObjectId(trace.durableObjectId.clone()),
       executionModel(kj::str(trace.executionModel)),
       outcome(kj::str(trace.outcome)),
       cpuTime(trace.cpuTime / kj::MILLISECONDS),
@@ -499,7 +498,7 @@ kj::Array<jsg::Ref<TraceItem::TailEventInfo::TailItem>> TraceItem::TailEventInfo
 }
 
 TraceItem::TailEventInfo::TailItem::TailItem(const tracing::TraceEventInfo::TraceItem& traceItem)
-    : scriptName(mapCopyString(traceItem.scriptName)) {}
+    : scriptName(traceItem.scriptName.clone()) {}
 
 kj::Maybe<kj::StringPtr> TraceItem::TailEventInfo::TailItem::getScriptName() {
   return scriptName;
@@ -544,9 +543,9 @@ ScriptVersion::ScriptVersion(workerd::ScriptVersion::Reader version)
       }()} {}
 
 ScriptVersion::ScriptVersion(const ScriptVersion& other)
-    : id{mapCopyString(other.id)},
-      tag{mapCopyString(other.tag)},
-      message{mapCopyString(other.message)} {}
+    : id{other.id.clone()},
+      tag{other.tag.clone()},
+      message{other.message.clone()} {}
 
 TracePreviewInfo::TracePreviewInfo(const tracing::TracePreview& preview)
     : id(kj::str(preview.id)),
@@ -604,7 +603,7 @@ bool TraceItem::HibernatableWebSocketEventInfo::Close::getWasClean() {
 TraceLogErrorInfo::TraceLogErrorInfo(const tracing::ErrorInfo& info)
     : name(kj::str(info.name)),
       message(kj::str(info.message)),
-      stack(mapCopyString(info.stack)) {}
+      stack(info.stack.clone()) {}
 
 TraceLogErrorInfo::TraceLogErrorInfo(const TraceLogErrorInfo& other)
     : name(kj::str(other.name)),
@@ -666,7 +665,7 @@ TraceException::TraceException(const Trace& trace, const tracing::Exception& exc
     : timestamp(getTraceExceptionTimestamp(exception)),
       name(kj::str(exception.name)),
       message(kj::str(exception.message)),
-      stack(mapCopyString(exception.stack)) {}
+      stack(exception.stack.clone()) {}
 
 double TraceException::getTimestamp() {
   return timestamp;
@@ -699,10 +698,10 @@ void sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest> incomingReq
     bool isDynamicDispatch,
     kj::TaskSet& waitUntilTasks) {
   // Mark the request as delivered because we're about to run some JS.
-  incomingRequest->delivered();
+  incomingRequest->delivered("trace"_kj);
 
   auto& context = incomingRequest->getContext();
-  auto& metrics = incomingRequest->getMetrics();
+  auto& request = *incomingRequest;
 
   auto nonEmptyTraces = kj::Vector<kj::Own<Trace>>(kj::size(traces));
   for (auto& trace: traces) {
@@ -714,7 +713,7 @@ void sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest> incomingReq
   // Add the actual JS as a wait until because the handler may be an event listener which can't
   // wait around for async resolution. We're relying on `drain()` below to persist `incomingRequest`
   // and its members until this task completes.
-  auto entrypointName = mapCopyString(entrypointNamePtr);
+  auto entrypointName = entrypointNamePtr.clone();
   context.addWaitUntil(
       context
           .run([nonEmptyTraces = kj::mv(nonEmptyTraces), entrypointName = kj::mv(entrypointName),
@@ -726,19 +725,19 @@ void sendTracesToExportedHandler(kj::Own<IoContext::IncomingRequest> incomingReq
     auto handler = lock.getExportedHandler(
         entrypointName, kj::mv(versionInfo), kj::mv(props), context.getActor(), isDynamicDispatch);
     return lock.getGlobalScope().sendTraces(nonEmptyTraces, lock, handler);
-  }).catch_([&metrics, &context](kj::Exception&& e) {
+  }).catch_([&request, &context](kj::Exception&& e) {
     // TODO(someday): We only report sendTraces() as failed for metrics/logging if the initial
     //   event handler throws an exception; we do not consider waitUntil(). But all async work done
     //   in a trace handler has to be done using waitUntil(). So, this seems wrong. Should we
     //   change it so any waitUntil() failure counts as an error? For that matter, arguably *all*
     //   event types should report failure if a waitUntil() throws?
-    metrics.reportFailure(e);
+    request.getMetrics().reportFailure(e);
 
     // Log JS exceptions (from the initial sendTraces() call) to the JS console, if inspector is
     // attached. This also has the effect of logging internal errors to syslog. (Note that
     // exceptions that occur asynchronously while waiting for the context to drain will be
     // logged elsewhere.)
-    context.logUncaughtExceptionAsync(UncaughtExceptionSource::TRACE_HANDLER, kj::mv(e));
+    context.logUncaughtExceptionAsync(UncaughtExceptionSource::TRACE_HANDLER, kj::mv(e), request);
   }));
 
   incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest));

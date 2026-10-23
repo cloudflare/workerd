@@ -2,6 +2,9 @@ name: Run internal build
 
 on:
   pull_request_target:
+    # `edited` covers base branch changes: when the parent of a stacked PR merges, GitHub
+    # retargets the child onto the default branch, and the build must run then.
+    types: [opened, synchronize, reopened, edited]
 
 # Read-only permissions are enough
 permissions: read-all
@@ -9,11 +12,19 @@ permissions: read-all
 concurrency:
   # Cancel existing builds for the same PR.
   # Otherwise, all other builds will be allowed to run through.
-  group: internal-build-${{ github.event.pull_request.number || github.run_id }}
+  # Edits that don't change the base branch (title, body) get a unique group so they don't
+  # cancel a build in progress.
+  group: internal-build-${{ (github.event.action != 'edited' || github.event.changes.base) && github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
   changes:
+    # Skip PRs that target anything other than the default branch: a stacked PR can't land
+    # until its parent merges and it is retargeted, which re-triggers this workflow.
+    # Also skip edits that don't change the base branch.
+    if: >-
+      github.event.pull_request.base.ref == github.event.repository.default_branch &&
+      (github.event.action != 'edited' || github.event.changes.base)
     runs-on: ubuntu-latest
     outputs:
       internal_build: ${{ steps.filter.outputs.internal_build }}

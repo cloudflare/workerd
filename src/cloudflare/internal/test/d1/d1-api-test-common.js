@@ -554,7 +554,7 @@ export async function testD1Exec(DB) {
     (e) => {
       assert.notEqual(e.constructor, TypeError);
       assert.ok(
-        e.message.includes('D1_EXEC_ERROR'),
+        e.message.startsWith('D1_EXEC_ERROR:'),
         `Expected D1 error, got: ${e.message}`
       );
       return true;

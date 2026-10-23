@@ -53,10 +53,13 @@ Interface notes:
   `IdentityTransformStream.prototype`.
 - Instances are branded via `Symbol.toStringTag` (under `set_tostring_tag`):
   `[object IdentityTransformStream]` / `[object FixedLengthStream]`.
-- The queuing strategy is consulted for `highWaterMark` **only**. A
-  user-supplied `size` member is never invoked and never affects
-  accounting in either implementation (C++ reads `highWaterMark` alone;
-  TypeScript installs its own internal size callback).
+- The queuing strategy is consulted for `highWaterMark` **only**, read and
+  converted once. A user-supplied `size` member is never invoked and never
+  affects accounting in either implementation (C++ reads `highWaterMark`
+  alone; TypeScript installs its own internal size callback). The strategy
+  argument converts as a WebIDL dictionary: `undefined` and `null` mean
+  none, any other non-object throws `TypeError`. How `highWaterMark`
+  converts diverges (ledger #24).
 
 ## Core semantics
 
@@ -90,10 +93,14 @@ readable's queue, before any read occurs.)
 ### Chunk handling
 
 - Accepted chunk types: `ArrayBufferView` (any, honoring offset/length),
-  `ArrayBuffer`, and strings, which are UTF-8 encoded. Anything else fails
-  with `TypeError`.
+  `ArrayBuffer`, `SharedArrayBuffer`, and strings, which are UTF-8 encoded
+  (C++ stops at the first NUL, ledger #25). Shared memory is copied like
+  any other bytes. Anything else fails with `TypeError`.
 - Zero-length chunks (empty view, empty buffer, empty string) are no-ops:
   they resolve without delivering a chunk and without closing the stream.
+  So is an undefined chunk (`write(undefined)`, `write()`). A detached
+  buffer, and a view whose buffer is detached or out of bounds, is
+  zero-length.
 - Writes **copy** their bytes; the delivered chunk never aliases the
   caller's buffer, and the caller's buffer is never detached by a write.
   The copy is taken synchronously inside `write()` in both
@@ -115,7 +122,8 @@ readable's queue, before any read occurs.)
 - `abort()` is not `close()`: aborting with undelivered bytes is not an
   underwrite error.
 - The effective `highWaterMark` is capped at `expectedLength` (bigint
-  lengths included); a smaller explicit `highWaterMark` is kept.
+  lengths included); a smaller explicit `highWaterMark` is kept. The cap
+  applies to the converted number.
 - The coerced `expectedLength` is observable through that cap:
   `min(expectedLength, highWaterMark)` is the writer's initial
   `desiredSize`.
@@ -235,18 +243,18 @@ pattern; a change to either side fails its cell.
 
 | # | Area | C++ | TypeScript | Pinned in |
 | --- | --- | --- | --- | --- |
-| 1 | FLS invalid-length error type | `TypeError` for every invalid length | `RangeError` (range/non-integer), `TypeError` (wrong type) | `fixedLengthInvalidLengths` |
-| 2 | FLS length coercion | truncates non-integers (`0.5`→0, `2.9`→2), converts numeric strings (`'10'`→10) | rejects both | `fixedLengthCoercionDivergence` |
-| 3 | FLS length range | rejects > 2^53−1 (`TypeError`) | accepts full uint64 | `fixedLengthLengthsAboveMaxSafeInteger` |
+| 1 | (no divergence) FLS invalid lengths: every one is a `TypeError` (missing, negative, `-0.5`, NaN, `Infinity`, a bigint outside the uint64 range, a value that does not convert to a number) | same | same | `fixedLengthInvalidLengths` (parity) |
+| 2 | (no divergence) FLS length coercion, as any `uint64_t` converts: non-integers truncate (`0.5`→0, `2.9`→2); numeric strings (`'10'`→10), `null` (→0), booleans (`true`→1) and objects (`valueOf`, run once) convert through ToNumber | same | same | `fixedLengthLengthCoercion` (parity) |
+| 3 | (no divergence) FLS length range: above 2^53−1 is a `TypeError` ("FixedLengthStream requires an integer expected length less than 2^53."), raised after the strategy has been read | same | same | `fixedLengthLengthsAboveMaxSafeInteger` (parity) |
 | 4 | `TransformStream` inheritance | `its instanceof TransformStream` is true | false (deliberate) | `identityBrandChecks` |
 | 5 | Accessor placement | inherited from `TransformStream.prototype` | own on `IdentityTransformStream.prototype` | `propertyPlacement` |
 | 6 | Invalid chunk aftermath | stream unaffected, remains usable | same — the sink signals the rejection through the non-fatal write-rejection channel; the write rejects, the stream survives (the per-write contract of the internal transforms) | `rejectsNumberChunk` |
-| 7 | String `desiredSize` accounting | exact UTF-8 byte count | `length × 3` upper-bound estimate | `stringWriteDesiredSizeAccounting` |
+| 7 | (no divergence) String `desiredSize` accounting: both count the exact UTF-8 bytes written, a lone surrogate as the 3 bytes of U+FFFD; FixedLengthStream too | same | same | `stringWriteDesiredSizeAccounting` (parity) |
 | 8 | Abort/cancel reason identity | re-created `Error`, same message (crosses kj); exception: `writer.closed` under abort gets the original instance | original instance everywhere | `abort-propagation.js`, `cancel-propagation.js` |
 | 9 | Writes after abort | `TypeError` "This WritableStream has been closed." | original abort reason | `abortRejectsSubsequentWrites` |
 | 10 | Writes after cancel with close in flight | closed `TypeError` | original cancel reason | `cancelRejectsPendingWriteAndClose` |
 | 11 | FLS enforcement | read-side `TypeError`; the offending write/close succeeds | eager write-side `RangeError`; readable errors too | `fixed-length-errors.js` |
-| 12 | Already-detached `ArrayBuffer` chunk | zero-length no-op | rejects `TypeError` (per-write; the stream survives) | `alreadyDetachedBufferAtWrite` |
+| 12 | (no divergence) Already-detached `ArrayBuffer` chunk: a zero-length no-op, as a detached view is, adding nothing toward a `FixedLengthStream`'s length | same | same | `alreadyDetachedBufferAtWrite` (parity) |
 | 13 | Single tee-branch cancel promise | resolves immediately | WHATWG semantics: shared promise, settles when both branches cancel | `cancelOneBranchKeepsWriterFlowing` |
 | 14 | Write after both tee branches cancel | parks forever (composite cancel not propagated to the writable) | rejects `AggregateError` "All readable stream tee branches were canceled" — also a write in flight when the last branch cancels, even if a branch had read it | `writeAfterBothBranchesCancel`, `inFlightWriteRejectsWhenBranchesLeaveAfterRead` |
 | 15 | Piping between identity streams | not implemented: `pipeTo()` takes both locks then rejects `TypeError` ("Inter-TransformStream ReadableStream.pipeTo() is not implemented."); `pipeThrough()` throws it synchronously | fully functional: delivery, completion, and error propagation in both directions with original reason instances; circular `pipeThrough(its)` currently succeeds and locks both sides — `TODO(streams-ts)`: it should fail | `pipe-integration.js` |
@@ -258,20 +266,22 @@ pattern; a change to either side fails its cell.
 | 21 | Reads after an abort that cleared a parked write | reject `Error` "Network connection lost.": cancelling the parked sink write puts the transform into its disconnection error before the abort reason arrives | reject with the original abort reason, as after any abort | `abortParkedWriteErrorsReadable` |
 | 22 | BYOB read with several writes already made | answered with at most one write's bytes (a read with a minimum stops once it is met); the next write waits for another read | fills its view with everything already written, across writes, up to a close — past a read's minimum too; each write settles once a read has its last byte | `byobReadSpansQueuedWrites`, `byobReadSpanningBoundaries`; readAtLeast over 1-byte writes in the r2-patterns suite (its ledger #5) |
 | 23 | Write settlement and BYOB reads across tee branches | a write settles once one branch has read it (the sibling's copy uncounted); a branch's reads are capped at the sizes the first-reading branch requested | a write settles once the slowest branch has read it, or once a branch is starved (pending read, nothing left to take) — never once the writable is erroring, when it rejects instead; each branch's reads are sized independently and span writes | `teeCreatesNoDemand`, `singleBranchReadDrivesWriter`, `writerDesiredSizeAcrossTee`, `abortBeforeStarvedReadRejectsInFlightWrite`, `tee-byob.js` |
+| 24 | `highWaterMark` conversion | to a uint64: non-finite (`'abc'`, NaN, ±Infinity) and negative values throw `TypeError`; fractions truncate (`1.5`→1); a bigint converts (`3n`→3); `desiredSize` narrows to a 32-bit int (`2**32 + 5` reads 5) | the WHATWG writable conversion, the same for ITS and FLS: NaN and negative values throw `RangeError`; Infinity and fractions are kept (FLS caps the converted number at its length); a bigint throws `TypeError` | `highWaterMarkConversionDivergence` |
+| 25 | String chunk containing NUL | written up to the first NUL only (`'a\0b'` delivers `61`); the string branch of `WritableStreamInternalController::write` | every UTF-8 byte (`61 00 62`) | `stringWithNulDivergence` |
 
 ## Assertion catalogue
 
 | Module | Asserts |
 | --- | --- |
 | `api-surface.js` | toStringTag branding; `FixedLengthStream` subclassing; `readable`/`writable` are `ReadableStream`/`WritableStream` instances, stable, enumerable prototype accessors (placement per ledger #5); constructor source text (native code under C++, not under TS); accessor brand checks |
-| `construction.js` | valid lengths (0, 5, −0.0, `MAX_SAFE_INTEGER`, bigints, with strategy); coerced length observable via HWM cap; invalid lengths throw (types per ledger #1–3); inheritance (ledger #4); a user-supplied strategy `size` is never invoked (ITS and FLS, with and without explicit HWM) |
-| `chunk-types.js` | accepted: `Uint8Array`, `ArrayBuffer`, `DataView` subrange, string→UTF-8, subarray offsets; rejected: numbers, plain objects (`TypeError`; per-write — the stream survives, ledger #6); an invalid chunk queued behind valid writes surfaces its error in FIFO order — earlier writes still deliver and later traffic still flows in both implementations |
-| `zero-length-writes.js` | empty view / buffer / string are non-closing no-ops |
+| `construction.js` | valid lengths (0, 5, −0.0, `MAX_SAFE_INTEGER`, bigints, with strategy); coerced length observable via HWM cap; invalid, coerced and above-2^53−1 lengths, the same in both (ledger #1–3); inheritance (ledger #4); a user-supplied strategy `size` is never invoked (ITS and FLS, with and without explicit HWM); the strategy argument converts as a WebIDL dictionary (undefined/null mean none, other non-objects throw `TypeError`); `highWaterMark` read and converted once by both classes (numeric strings, booleans, null, `valueOf`), its conversion per ledger #24 |
+| `chunk-types.js` | accepted: `Uint8Array`, `ArrayBuffer`, `DataView` subrange, shared memory (a `SharedArrayBuffer` and views over one, copied at `write()`; an empty one is a no-op), string→UTF-8 (a NUL truncates under C++, ledger #25), subarray offsets; rejected: numbers, plain objects (`TypeError`; per-write — the stream survives, ledger #6); an invalid chunk queued behind valid writes surfaces its error in FIFO order — earlier writes still deliver and later traffic still flows in both implementations |
+| `zero-length-writes.js` | empty view / buffer / string are non-closing no-ops; so is an undefined chunk (`write(undefined)`, `write()`; ITS, FLS, with a byte highWaterMark) |
 | `copy-semantics.js` | delivered chunk never aliases the source; source mutation after delivery is invisible; source is not detached |
-| `buffer-lifecycle.js` | write-time snapshot survives later resize/detach in both implementations; degenerate write-time inputs (already-detached per ledger #12; detached and out-of-bounds typed-array and DataView views are no-ops); shadowing/throwing metadata getters never consulted |
+| `buffer-lifecycle.js` | write-time snapshot survives later resize/detach in both implementations; degenerate write-time inputs are no-ops (an already-detached buffer, ITS and FLS, ledger #12; detached and out-of-bounds typed-array and DataView views); shadowing/throwing metadata getters never consulted |
 | `ordering.js` | 1:1 write/read correspondence in both interleavings; multi-chunk aggregate integrity; clean EOF tails |
 | `byob.js` | BYOB reader support; partial fills across reads with write completion on full consumption (still pending a macrotask after a partial read); reads spanning queued writes, past zero-length and invalid ones, stopping at a close, through FLS (#22); lying destination extents (at call and after enqueue) with sentinel overwrite guards; read-call validation (zero-length view, non-view, missing argument); input buffer detached by read with non-detachable (SAB-backed) destinations rejected; repeated EOF zero-length views with preserved buffers |
-| `backpressure.js` | writes and close queue unboundedly with settlement on consumption (a write read ahead of its turn settles when the writable reaches it, so recovery is asserted after the writes settle); a partial BYOB read keeps the write pending and its bytes counted in `desiredSize`; advisory overfill (negative `desiredSize`); default HWM 1 with divergent accounting (ledger #17); explicit HWM as initial `desiredSize` (negative-zero HWM normalized to +0); byte-level tracking incl. in-flight bytes; string accounting (ledger #7); `ready` replacement and recovery |
+| `backpressure.js` | writes and close queue unboundedly with settlement on consumption (a write read ahead of its turn settles when the writable reaches it, so recovery is asserted after the writes settle); a partial BYOB read keeps the write pending and its bytes counted in `desiredSize`; advisory overfill (negative `desiredSize`); default HWM 1 with divergent accounting (ledger #17); explicit HWM as initial `desiredSize` (negative-zero HWM normalized to +0); byte-level tracking incl. in-flight bytes; string accounting by exact UTF-8 bytes, ITS and FLS (parity); `ready` replacement and recovery |
 | `close-propagation.js` | pending read resolves done; post-close reads done; buffered data drains before done; `closed` promises settle; writes after a queued close reject (message per impl) without disturbing the close or delivered bytes |
 | `abort-propagation.js` | pending/subsequent reads and both `closed` promises reject (identity per ledger #8); modern abort clears a pending write, rejecting it with the abort reason (undefined or original instance); abort of a write parked in the sink settles without a read (ITS and FLS, after an earlier consumed write, through the stream with the writer released), rejecting the write, the writes and close queued behind it, and `writer.closed` with the original reason; reads afterwards (ledger #21); later writes (ledger #9) |
 | `cancel-propagation.js` | pending write/close reject (ledger #8, #10); canceling reader's later reads resolve done, its `closed` resolves; a read pending at the cancel settles per ledger #20; in C++, cancellation of a pending `pipeTo()` sink write establishes the disconnection error before a later readable cancel reason |
@@ -285,7 +295,7 @@ pattern; a change to either side fails its cell.
 | `body-integration.js` | Response/Request with identity-stream bodies: `text()` drives the rendezvous; `resp.body` is the same stream object (unwrapped, unconsumed, unlocked); FLS happy path and underwrite through body consumption (types per ledger #11); multi-megabyte patterned bodies verified byte-for-byte through `arrayBuffer()` (ITS and FLS Response, Request) |
 | `pipe-integration.js` | `pipeTo`/`pipeThrough` between identity streams (ledger #15): TS delivery (small and multi-megabyte patterned bodies), completion, and both error-propagation directions with original reasons; C++ not-implemented wall (rejection for pipeTo, synchronous throw for pipeThrough); circular `pipeThrough(its)` with the `TODO(streams-ts)` pin |
 | `payload-helpers.js` | shared machinery: continuous prime-modulus byte pattern for large-body generation and byte-exact verification |
-| `reentrancy.js` | user code re-entering mid-processing: `Object.prototype.then` interception during read resolution (consulted once per read in C++, twice in TS) incl. a re-entrant `writer.close()` or `writer.abort()` from inside the getter (an abort rejects the write being answered, in TS); close/write/sibling-cancel from read continuations; second-concurrent-read divergence (ledger #16) |
+| `reentrancy.js` | user code re-entering mid-processing: `Object.prototype.then` interception during read resolution (consulted once per read) incl. a re-entrant `writer.close()` or `writer.abort()` from inside the getter (an abort rejects the write being answered, in TS); close/write/sibling-cancel from read continuations; second-concurrent-read divergence (ledger #16) |
 | `lock-release.js` | `releaseLock()` rejects the released handle's `closed` promise with TypeError ("has been released"); the stream returns to a lockable state |
 | `read-at-least.js` | `readAtLeast(min, view)` parks until min bytes accumulate across writes, EOF yields a zero-length view, unavailable on default readers; argument validation per ledger #18; a `read(view, { min })` spanning two writes settles the first and leaves the second pending until its last byte is read |
 | `reader-writer-acquisition.js` | `WritableStreamDefaultWriter`/`ReadableStreamDefaultReader`/`ReadableStreamBYOBReader` are directly constructible (no streams_enable_constructors needed) and lock the stream; `getReader({mode})` validates and a failed acquisition leaves the stream unlocked |

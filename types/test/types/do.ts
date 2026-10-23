@@ -57,5 +57,23 @@ class TestDOSql extends DurableObject {
     const { value: thirdRow } = cursor.next()
     if (!thirdRow) throw new Error('No value!')
     expectTypeOf<Record<string, Value>>(thirdRow);
+
+    // Verify Iterator.from correctly infers row type without undefined
+    const mapped = Iterator.from(cursor).map((row) => {
+      expectTypeOf<Record<string, Value>>(row);
+      return row;
+    });
+  }
+}
+
+class TestDOSnapshot extends DurableObject {
+  async test() {
+    const snapshot = await this.ctx.storage.snapshot();
+    expectTypeOf<DurableObjectSnapshot>(snapshot);
+    expectTypeOf<Promise<DurableObjectSnapshot>>(
+      this.ctx.storage.snapshot({ bookmark: "bookmark" })
+    );
+    expectTypeOf<Promise<string>>(this.ctx.storage.onNextSessionRestore(snapshot));
+    expectTypeOf<Promise<string>>(this.ctx.storage.onNextSessionRestore("bookmark"));
   }
 }

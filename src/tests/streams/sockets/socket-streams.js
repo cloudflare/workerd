@@ -9,6 +9,12 @@
 //
 // Canceling a pending read diverges: C++ rejects with a re-created Error
 // carrying the cancel reason, while TypeScript resolves the read done.
+//
+// The order in which a startTls() detach settles things diverges: TypeScript
+// rejects the pending writes inside the detach, before the old socket's
+// closed promise resolves; C++ resolves closed first and rejects the writes
+// an event-loop turn later, once the canceled write's I/O reports back
+// (detachRejectsPendingWrites).
 
 import { connect } from 'cloudflare:sockets';
 import { strictEqual, ok, rejects, deepStrictEqual } from 'node:assert';
@@ -94,6 +100,34 @@ export const degenerateViewsWithHighWaterMark = {
       dec.decode(await drainToBytes(socket.readable)),
       'still writable'
     );
+    await socket.close();
+  },
+};
+
+// With a highWaterMark a string counts the UTF-8 bytes written for it:
+// 2-, 3- and 4-byte sequences, and 3 for each lone surrogate (sent as
+// U+FFFD) (parity).
+export const stringSizesWithHighWaterMark = {
+  async test(ctrl, env) {
+    const socket = connect(echoAddress(env), { highWaterMark: 1024 });
+    const writer = socket.writable.getWriter();
+    const strings = [
+      'hello',
+      'h\u00e9llo',
+      '\u20acuro',
+      'a\u{1f600}b',
+      'a\ud800b',
+      '\udc00',
+    ];
+    let expected = '';
+    for (const str of strings) {
+      const write = writer.write(str);
+      strictEqual(writer.desiredSize, 1024 - enc.encode(str).byteLength, str);
+      await write;
+      expected += str.toWellFormed();
+    }
+    await writer.close();
+    strictEqual(dec.decode(await drainToBytes(socket.readable)), expected);
     await socket.close();
   },
 };
@@ -326,6 +360,99 @@ export const cancelReadableSettlesSocket = {
     }
     await socket.close();
     await socket.closed;
+  },
+};
+
+// startTls() detaches the socket's streams once the writable's flush
+// settles. (A plain workerd network has no TLS starter, so the upgraded
+// socket fails to open, but only after the detach.)
+function startTlsIgnoringUpgrade(socket) {
+  const tls = socket.startTls();
+  tls.opened.catch(() => {});
+  tls.closed.catch(() => {});
+  return tls;
+}
+
+// DETACH WITH WRITES PENDING: writes made after startTls() through a
+// writer released before the flush settles are still pending at the
+// detach: one in flight (32 MiB to a server that never reads, well past
+// the loopback socket buffers even on hosts with a raised tcp_wmem) and two
+// queued. The detach closes the writable, leaves it locked, and rejects
+// all three with the same disconnect error; none of them completes on
+// the connection the upgrade takes over. The order of the write
+// rejections relative to the old socket's closed promise diverges (see
+// the file header).
+export const detachRejectsPendingWrites = {
+  async test(ctrl, env) {
+    const socket = connect(
+      `${env.SIDECAR_HOSTNAME}:${env.STREAMS_STALL_PORT}`,
+      {
+        secureTransport: 'starttls',
+      }
+    );
+    await socket.opened;
+    const tls = startTlsIgnoringUpgrade(socket);
+    const order = [];
+    socket.closed.then(() => order.push('closed'));
+    const writer = socket.writable.getWriter();
+    const writes = [
+      writer.write(new Uint8Array(32 * 1024 * 1024)),
+      writer.write(enc.encode('a')),
+      writer.write(enc.encode('b')),
+    ];
+    writer.releaseLock();
+    const reasons = await Promise.race([
+      Promise.all(
+        writes.map((p, i) =>
+          p.then(
+            () => 'fulfilled',
+            (e) => {
+              order.push(`write${i}`);
+              return e;
+            }
+          )
+        )
+      ),
+      scheduler.wait(10_000).then(() => 'unsettled'),
+    ]);
+    ok(Array.isArray(reasons), 'pending writes settle');
+    for (const reason of reasons) {
+      ok(reason instanceof Error, String(reason));
+      strictEqual(reason.message, 'Network connection lost.');
+    }
+    strictEqual(reasons[1], reasons[0]);
+    strictEqual(reasons[2], reasons[0]);
+    await socket.closed;
+    deepStrictEqual(
+      order,
+      usingTsImpl
+        ? ['write0', 'write1', 'write2', 'closed']
+        : ['closed', 'write0', 'write1', 'write2']
+    );
+    strictEqual(socket.writable.locked, true);
+    if (usingTsImpl) {
+      await socket.writable[kIsClosedPromise].promise;
+    }
+    await tls.close();
+  },
+};
+
+// DETACH WITH NOTHING PENDING: the writable is closed and locked.
+export const detachClosesIdleWritable = {
+  async test(ctrl, env) {
+    const socket = connect(echoAddress(env), { secureTransport: 'starttls' });
+    await socket.opened;
+    const tls = startTlsIgnoringUpgrade(socket);
+    await socket.closed;
+    strictEqual(socket.writable.locked, true);
+    if (usingTsImpl) {
+      const closed = await Promise.race([
+        socket.writable[kIsClosedPromise].promise.then(() => 'closed'),
+        scheduler.wait(100).then(() => 'pending'),
+      ]);
+      strictEqual(closed, 'closed');
+    }
+    await tls.close();
   },
 };
 

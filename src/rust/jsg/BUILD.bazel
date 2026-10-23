@@ -3,7 +3,14 @@ load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 wd_rust_crate(
     name = "jsg",
-    cxx_bridge_deps = ["//src/workerd/jsg:jsg-core"],
+    cxx_bridge_deps = {
+        # lib.rs reuses the shared V8 handle structs generated from v8.rs.
+        "lib.rs": [
+            ":v8.rs@cxx",
+            "//src/workerd/jsg:jsg-core",
+        ],
+        "v8.rs": ["//src/workerd/jsg:jsg-core"],
+    },
     cxx_bridge_features = ["-parse_headers"],
     cxx_bridge_local_defines = ["JSG_IMPLEMENTATION"],
     cxx_bridge_srcs = [

@@ -22,16 +22,21 @@ export {
   identityBrandChecks,
   fixedLengthValidLengths,
   fixedLengthInvalidLengths,
-  fixedLengthCoercionDivergence,
+  fixedLengthLengthCoercion,
   fixedLengthLengthsAboveMaxSafeInteger,
   userStrategySizeNeverInvoked,
+  strategyArgumentDictionaryConversion,
+  highWaterMarkReadAndConvertedOnce,
+  highWaterMarkConversionDivergence,
 } from 'construction';
 
 export {
   acceptsUint8Array,
   acceptsArrayBuffer,
   acceptsDataViewSubrange,
+  acceptsSharedMemory,
   acceptsStringAsUtf8,
+  stringWithNulDivergence,
   respectsViewOffsets,
   rejectsNumberChunk,
   invalidChunkAfterQueuedValidWrites,
@@ -42,6 +47,7 @@ export {
   zeroLengthUint8ArrayIsNoop,
   zeroLengthArrayBufferIsNoop,
   zeroLengthStringIsNoop,
+  undefinedChunkIsNoop,
 } from 'zero-length-writes';
 
 export { writeCopiesData } from 'copy-semantics';

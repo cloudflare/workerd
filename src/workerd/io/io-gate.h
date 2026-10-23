@@ -189,6 +189,10 @@ class InputGate::CriticalSection: private InputGate, public kj::Refcounted {
   CriticalSection(InputGate& parent);
   ~CriticalSection() noexcept(false);
 
+  kj::Rc<CriticalSection> clone() {
+    return addRefToThis();
+  }
+
   // Wait for a nested lock in order to continue this CriticalSection.
   //
   // The first call to wait() begins the CriticalSection. After that wait completes, until the
@@ -211,6 +215,10 @@ class InputGate::CriticalSection: private InputGate, public kj::Refcounted {
     return depth;
   }
 
+  // Returns this section until it succeeds, then the nearest enclosing section that has not
+  // succeeded, or none if events are delivered at the actor's root gate again.
+  kj::Maybe<CriticalSection&> getActive() KJ_LIFETIMEBOUND;
+
  private:
   enum State {
     // wait() hasn't been called.
@@ -219,10 +227,10 @@ class InputGate::CriticalSection: private InputGate, public kj::Refcounted {
     // wait() has been called once, and that wait hasn't finished yet.
     INITIAL_WAIT,
 
-    // First lock has been obtained, waiting for success() or failed().
+    // First lock has been obtained; succeeded() has not been called.
     RUNNING,
 
-    // success() or failed() has been called.
+    // succeeded() has been called; remaining waiters belong to the parent gate.
     REPARENTED
   };
 
@@ -346,7 +354,7 @@ kj::Promise<T> OutputGate::lockWhile(kj::Promise<T> promise, SpanParent parentSp
     setBroken(e);
     lockSpan.setTag("error"_kjc, true);
     fulfiller->reject(e.clone());
-    kj::throwFatalException(e.clone());
+    kj::throwException(e.clone());
   }
 }
 

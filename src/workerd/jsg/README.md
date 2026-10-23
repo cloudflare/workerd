@@ -200,6 +200,7 @@ brand, not a secret. Not represented in RTTI/generated types.
 | `JSG_REQUIRE(cond, type, msg...)`          | Throw JS error if condition false             |
 | `JSG_REQUIRE_NONNULL(maybe, type, msg...)` | Unwrap `kj::Maybe`; throw if none             |
 | `JSG_FAIL_REQUIRE(type, msg...)`           | Unconditionally throw JS error                |
+| `JSG_DTOR_REQUIRE(cond, type, msg...)`     | `JSG_REQUIRE` for destructors                 |
 | `JSG_ASSERT(cond, type, msg...)`           | Like `KJ_ASSERT` but produces JSG-style error |
 
 ### Memory and Performance
@@ -510,11 +511,10 @@ Both may take additional `TypeHandler<T>&` trailing parameters.
 | Slot | Enum                       | Purpose                           |
 | ---- | -------------------------- | --------------------------------- |
 | 0    | `RESERVED`                 | **Never use** — reserved by V8    |
-| 1    | `GLOBAL_WRAPPER`           | Pointer to global object wrapper  |
-| 2    | `MODULE_REGISTRY`          | Pointer to module registry        |
-| 3    | `EXTENDED_CONTEXT_WRAPPER` | Extended type wrapper for context |
-| 4    | `VIRTUAL_FILE_SYSTEM`      | Virtual file system               |
-| 5    | `RUST_REALM`               | Rust realm pointer                |
+| 1    | `MODULE_REGISTRY`          | Pointer to module registry        |
+| 2    | `EXTENDED_CONTEXT_WRAPPER` | Extended type wrapper for context |
+| 3    | `VIRTUAL_FILE_SYSTEM`      | Virtual file system               |
+| 4    | `BOOTSTRAP_STATE`          | Pointer to bootstrap state        |
 
 ## Wrappable Lifecycle
 
@@ -556,6 +556,21 @@ Supported template params: `v8::ArrayBuffer`, `v8::Uint8Array`, `v8::Int8Array`,
 `v8::Int32Array`, `v8::Float32Array`, `v8::Float64Array`, `v8::BigInt64Array`,
 `v8::BigUint64Array`, `v8::DataView`.
 
+## Sandbox Byte Views
+
+`sandbox.h` provides `SandboxedBytes`, a non-owning byte view used by Blob. With
+V8's sandbox enabled, it stores a 32-bit offset relative to the JS cage base plus
+4 GiB, and a 32-bit length. Backing-store allocations must fit in that second
+4 GiB cage, with sandbox guard regions disabled. Construction aborts if the range
+cannot be encoded. Decoding uses the current isolate's base without a range check.
+A corrupted offset can only address that isolate group's second cage.
+
+The length bounds overrun distance but does not enforce allocation or cage
+boundaries. Embedders relying on this representation for isolation must protect
+neighboring regions, for example with MPK. Callers must retain the backing owner
+and hold the source isolate lock while accessing bytes. Empty views decode to
+null. Builds without the sandbox store an ordinary pointer.
+
 ## Observer Hooks
 
 | Observer                    | Method                            | When Called                               |
@@ -569,6 +584,7 @@ Supported template params: `v8::ArrayBuffer`, `v8::Uint8Array`, `v8::Int8Array`,
 | `CompilationObserver`       | `onCompileCacheRejected`          | Cached data rejected (version mismatch)   |
 | `CompilationObserver`       | `onCompileCacheGenerated`         | New cache data generated                  |
 | `CompilationObserver`       | `onCompileCacheGenerationFailed`  | Cache generation failed                   |
+| `CompilationObserver`       | `onCompileHintsConsumed`          | Legacy ESM compiled using function hints  |
 | `ResolveObserver`           | `onResolveModule`                 | Module resolution begins                  |
 | `InternalExceptionObserver` | `reportInternalException`         | Internal exception for metrics            |
 | `IsolateObserver`           | `onDynamicEval`                   | `eval()`, `new Function()`, etc. detected |

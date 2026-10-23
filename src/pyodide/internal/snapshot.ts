@@ -987,12 +987,20 @@ export function maybeRestoreSnapshot(Module: Module): void {
     );
   }
 
-  Module.growMemory(snapshotSize);
-  snapshotReader.readMemorySnapshot(snapshotOffset, Module.HEAP8);
-  snapshotReader.disposeMemorySnapshot();
+  enterJaegerSpan(
+    'restore_wasm_linear_memory',
+    () => {
+      Module.growMemory(snapshotSize);
+      snapshotReader.readMemorySnapshot(snapshotOffset, Module.HEAP8);
+      snapshotReader.disposeMemorySnapshot();
+    },
+    () => ({ snapshot_type: settings.snapshotType })
+  );
   // Invalidate caches if we have a snapshot because the contents of site-packages
   // may have changed.
-  invalidateCaches(Module);
+  enterJaegerSpan('invalidate_caches', () => {
+    invalidateCaches(Module);
+  });
 }
 
 function collectSnapshot(

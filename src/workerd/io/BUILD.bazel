@@ -1,5 +1,6 @@
 load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
+load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 load("//:build/wd_cc_embed.bzl", "wd_cc_embed")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_test.bzl", "wd_test")
@@ -33,6 +34,9 @@ wd_cc_library(
     # IoContext -> Worker -> ServiceWorkerGlobalScope -> (various api targets) dependency chain.
     # TODO(cleanup): Fix this.
     srcs = [
+        "async-trace-inspector.c++",
+        "async-trace-promises.c++",
+        "async-trace-stacks.c++",
         "features.c++",
         "hibernation-manager.c++",
         "io-channels.c++",
@@ -40,8 +44,8 @@ wd_cc_library(
         "io-own.c++",
         "io-util.c++",
         "legacy-hibernation-manager.c++",
-        "per-isolate-bootstrap.c++",
         "stored-value.c++",
+        "timer-queue.c++",
         "trace-stream.c++",
         "tracer.c++",
         "worker.c++",
@@ -49,21 +53,26 @@ wd_cc_library(
     ] + ["//src/workerd/api:srcs"],
     hdrs = [
         "access-info.h",
+        "async-trace-inspector.h",
+        "async-trace-promises.h",
+        "async-trace-stacks.h",
         "hibernation-manager.h",
         "io-channels.h",
         "io-context.h",
         "io-own.h",
         "io-util.h",
         "legacy-hibernation-manager.h",
-        "per-isolate-bootstrap.h",
         "stored-value.h",
+        "timer-queue.h",
         "trace-stream.h",
         "tracer.h",
         "worker.h",
         "worker-fs.h",
     ] + ["//src/workerd/api:hdrs"],
     implementation_deps = [
+        ":async-trace-perfetto",
         "//src/per_isolate",
+        "//src/rust/histogram",
         "//src/rust/jsg",
         "//src/workerd/api:compression",
         "//src/workerd/api:crypto-crc-impl",
@@ -86,6 +95,7 @@ wd_cc_library(
         ":actor-id",
         ":actor-storage_capnp",
         ":async-lock-scheduler",
+        ":async-trace",
         ":cdp_capnp",
         ":compatibility-date",
         ":container_capnp",
@@ -99,9 +109,11 @@ wd_cc_library(
         ":observer",
         ":release-version",
         ":trace",
+        ":tracked-wasm-instance",
         ":wasm-instantiate-shim",
         ":worker-interface",
         ":worker-source",
+        ":worker-source-stats",
         "//src/rust/cxx-integration",
         "//src/workerd/api:analytics-engine_capnp",
         "//src/workerd/api:cf-property",
@@ -228,6 +240,22 @@ wd_cc_library(
     ],
 )
 
+wd_cc_library(
+    name = "worker-source-stats",
+    srcs = ["worker-source-stats.c++"],
+    hdrs = ["worker-source-stats.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":observer",
+        ":worker-source",
+    ],
+)
+
+kj_test(
+    src = "worker-source-stats-test.c++",
+    deps = [":worker-source-stats"],
+)
+
 # TODO(cleanup): Split this up further.
 wd_cc_library(
     name = "actor",
@@ -266,7 +294,6 @@ wd_cc_library(
         ":frankenvalue_capnp",
         ":worker-interface_capnp",
         "//src/workerd/jsg",
-        "//src/workerd/util:own-util",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp:capnpc",
     ],
@@ -282,14 +309,36 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":async-trace",
         ":trace_capnp",
         ":worker-interface_capnp",
-        "//src/workerd/util:own-util",
         "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/capnp:capnp-rpc",
         "@capnp-cpp//src/capnp:capnpc",
         "@capnp-cpp//src/kj/compat:kj-http",
         "@ssl",
+    ],
+)
+
+wd_cc_library(
+    name = "async-trace",
+    srcs = ["async-trace.c++"],
+    hdrs = ["async-trace.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/rust/async-trace",
+        "@capnp-cpp//src/kj",
+    ],
+)
+
+wd_cc_library(
+    name = "async-trace-perfetto",
+    srcs = ["async-trace-perfetto.c++"],
+    hdrs = ["async-trace-perfetto.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":async-trace",
+        "//src/workerd/util:perfetto",
     ],
 )
 
@@ -338,15 +387,28 @@ wd_cc_library(
 
 wd_cc_library(
     name = "limit-enforcer",
-    srcs = ["tracked-wasm-instance.c++"],
     hdrs = [
         "limit-enforcer.h",
-        "tracked-wasm-instance.h",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":outcome_capnp",
-        "//src/workerd/jsg",
+        "@capnp-cpp//src/kj",
+        "@capnp-cpp//src/kj:kj-async-core",
+        "@workerd-v8//:v8",
+    ],
+)
+
+wd_cc_library(
+    name = "tracked-wasm-instance",
+    srcs = ["tracked-wasm-instance.c++"],
+    hdrs = [
+        "tracked-wasm-instance.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
     ],
 )
 
@@ -361,6 +423,7 @@ wd_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":io",
+        "//src/workerd/util:strong-bool",
     ],
 )
 
@@ -370,6 +433,7 @@ wd_cc_library(
     hdrs = ["worker-interface.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":bench_capnp",
         ":frankenvalue_capnp",
         ":trace",
         ":worker-interface_capnp",
@@ -447,6 +511,8 @@ wd_capnp_library(
 
 wd_capnp_library(src = "actor-storage.capnp")
 
+wd_capnp_library(src = "bench.capnp")
+
 wd_capnp_library(src = "outcome.capnp")
 
 wd_capnp_library(src = "script-version.capnp")
@@ -478,6 +544,11 @@ kj_test(
     deps = [
         ":io-gate",
     ],
+)
+
+kj_test(
+    src = "async-trace-test.c++",
+    deps = [":async-trace"],
 )
 
 kj_test(
@@ -537,6 +608,15 @@ kj_test(
 )
 
 kj_test(
+    src = "features-test.c++",
+    deps = [
+        ":features",
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/capnp",
+    ],
+)
+
+kj_test(
     src = "observer-test.c++",
     deps = [
         ":observer",
@@ -576,7 +656,7 @@ wd_test(
 kj_test(
     src = "tracked-wasm-instance-test.c++",
     deps = [
-        ":limit-enforcer",
+        ":tracked-wasm-instance",
     ],
 )
 
@@ -610,6 +690,14 @@ kj_test(
 )
 
 kj_test(
+    src = "async-trace-io-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "worker-getexportedhandler-test.c++",
     deps = [
         ":io",
@@ -622,6 +710,7 @@ kj_test(
     deps = [
         ":worker-entrypoint",
         "//src/workerd/tests:test-fixture",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
@@ -644,6 +733,14 @@ kj_test(
 )
 
 kj_test(
+    src = "trace-scope-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "io-own-test.c++",
     deps = [
         ":io",
@@ -660,9 +757,7 @@ kj_test(
 )
 
 kj_test(
-    src = "per-isolate-compile-cache-test.c++",
-    # Downstream users may set their own flags, which breaks this test.
-    tags = ["no-downstream"],
+    src = "worker-code-cache-test.c++",
     deps = [
         ":io",
         "//src/workerd/tests:test-fixture",
@@ -675,4 +770,31 @@ kj_test(
         ":io",
         "//src/workerd/tests:test-fixture",
     ],
+)
+
+kj_test(
+    src = "timer-queue-test.c++",
+    deps = [":io"],
+)
+
+kj_test(
+    src = "io-context-timer-test.c++",
+    deps = [":timer-test-fixture"],
+)
+
+wd_cc_library(
+    name = "timer-test-fixture",
+    testonly = True,
+    hdrs = ["timer-test-fixture.h"],
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+        "@capnp-cpp//src/kj:kj-async-io",
+    ],
+)
+
+wd_cc_benchmark(
+    name = "bench-timer-clock",
+    srcs = ["bench-timer-clock.c++"],
+    deps = [":timer-test-fixture"],
 )

@@ -84,7 +84,7 @@ fn resource_method_callback_receives_correct_self() {
             prefix: "Hello, ".to_owned(),
         });
         let wrapped = resource.to_js(lock);
-        ctx.set_global("echoResource", wrapped);
+        ctx.set_global(lock, "echoResource", wrapped);
 
         // Call the method from JavaScript
         let result: String = ctx.eval(lock, "echoResource.echo('World!')").unwrap();
@@ -102,7 +102,7 @@ fn resource_method_can_be_called_multiple_times() {
             prefix: ">> ".to_owned(),
         });
         let wrapped = resource.to_js(lock);
-        ctx.set_global("echo", wrapped);
+        ctx.set_global(lock, "echo", wrapped);
 
         // First call
         let result: String = ctx.eval(lock, "echo.echo('first')").unwrap();
@@ -124,7 +124,7 @@ fn resource_method_accepts_str_ref_parameter() {
             prefix: "Hello, ".to_owned(),
         });
         let wrapped = resource.to_js(lock);
-        ctx.set_global("echo", wrapped);
+        ctx.set_global(lock, "echo", wrapped);
 
         let result: String = ctx.eval(lock, "echo.greet('World')").unwrap();
         assert_eq!(result, "Hello, World!");
@@ -143,7 +143,7 @@ fn resource_method_returns_non_result_values() {
             counter: counter.clone(),
         });
         let wrapped = resource.to_js(lock);
-        ctx.set_global("resource", wrapped);
+        ctx.set_global(lock, "resource", wrapped);
 
         // Test getString returns string
         let result: String = ctx.eval(lock, "resource.getName()").unwrap();
@@ -203,7 +203,7 @@ fn static_method_callable_on_class() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<MathResource>(lock);
-        ctx.set_global("MathResource", constructor.into());
+        ctx.set_global(lock, "MathResource", constructor);
 
         let result: Number = ctx.eval(lock, "MathResource.add(2, 3)").unwrap();
         assert!((result.value() - 5.0).abs() < f64::EPSILON);
@@ -221,12 +221,12 @@ fn instance_and_static_methods_coexist() {
     harness.run_in_context(|lock, ctx| {
         // Expose the class constructor as a global
         let constructor = jsg::resource::function_template_of::<MathResource>(lock);
-        ctx.set_global("MathResource", constructor.into());
+        ctx.set_global(lock, "MathResource", constructor);
 
         // Allocate and expose an instance as a global
         let resource = jsg::Rc::new(MathResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("math", wrapped);
+        ctx.set_global(lock, "math", wrapped);
 
         // Instance method works on the object
         let result: String = ctx.eval(lock, "math.getPrefix()").unwrap();
@@ -249,7 +249,7 @@ fn static_method_result_return_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<MathResource>(lock);
-        ctx.set_global("MathResource", constructor.into());
+        ctx.set_global(lock, "MathResource", constructor);
 
         let result: String = ctx.eval(lock, "MathResource.greet('Rust')").unwrap();
         assert_eq!(result, "Hello, Rust!");
@@ -263,7 +263,7 @@ fn static_method_throws_exception() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<MathResource>(lock);
-        ctx.set_global("MathResource", constructor.into());
+        ctx.set_global(lock, "MathResource", constructor);
 
         // Valid call succeeds
         let result: Number = ctx.eval(lock, "MathResource.divide(10, 2)").unwrap();
@@ -290,7 +290,7 @@ fn resource_method_returns_null_for_none() {
             counter: Rc::new(Cell::new(0)),
         });
         let wrapped = resource.to_js(lock);
-        ctx.set_global("resource", wrapped);
+        ctx.set_global(lock, "resource", wrapped);
 
         let result: Option<String> = ctx.eval(lock, "resource.maybeName()").unwrap();
         assert!(result.is_none());
@@ -331,7 +331,7 @@ fn static_constant_accessible_on_constructor() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<ConstantResource>(lock);
-        ctx.set_global("ConstantResource", constructor.into());
+        ctx.set_global(lock, "ConstantResource", constructor);
 
         let result: Number = ctx.eval(lock, "ConstantResource.MAX_SIZE").unwrap();
         assert!((result.value() - 1024.0).abs() < f64::EPSILON);
@@ -355,7 +355,7 @@ fn static_constant_accessible_on_instance() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ConstantResource {});
         let wrapped = resource.to_js(lock);
-        ctx.set_global("obj", wrapped);
+        ctx.set_global(lock, "obj", wrapped);
 
         let result: Number = ctx.eval(lock, "obj.MAX_SIZE").unwrap();
         assert!((result.value() - 1024.0).abs() < f64::EPSILON);
@@ -372,7 +372,7 @@ fn static_constant_is_read_only() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<ConstantResource>(lock);
-        ctx.set_global("ConstantResource", constructor.into());
+        ctx.set_global(lock, "ConstantResource", constructor);
 
         // Attempt to overwrite should silently fail (strict mode would throw).
         // The value should remain unchanged.
@@ -395,10 +395,10 @@ fn static_constant_coexists_with_methods() {
         let resource = jsg::Rc::new(ConstantResource {});
 
         let constructor = jsg::resource::function_template_of::<ConstantResource>(lock);
-        ctx.set_global("ConstantResource", constructor.into());
+        ctx.set_global(lock, "ConstantResource", constructor);
 
         let wrapped = resource.to_js(lock);
-        ctx.set_global("obj", wrapped);
+        ctx.set_global(lock, "obj", wrapped);
 
         // Instance method works
         let result: String = ctx.eval(lock, "obj.getName()").unwrap();
@@ -449,13 +449,16 @@ fn panic_in_rust_backed_api_errors_request_and_terminates_isolate() {
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(PanicResource);
         let wrapped = resource.to_js(lock);
-        ctx.set_global("obj", wrapped);
+        ctx.set_global(lock, "obj", wrapped);
 
         // Simulate a fetch-handler that delegates to a Rust-backed binding.
         // The handler calls `obj.panicNow()` — just like real Worker code
         // would call into a Rust-implemented API method.
-        ctx.eval_raw("function handleRequest() { while(true) { obj.panicNow(); } throw null; }")
-            .unwrap();
+        ctx.eval_raw(
+            lock,
+            "function handleRequest() { while(true) { obj.panicNow(); } throw null; }",
+        )
+        .unwrap();
 
         // Invoke the handler — the panic inside panicNow() is caught by
         // catch_panic, which calls throw_internal_error() then
@@ -482,6 +485,51 @@ fn panic_in_rust_backed_api_errors_request_and_terminates_isolate() {
     });
 }
 
+/// A resource whose method runs closures in a nested `CallbackScope` through
+/// `jsg::catch_panic`, as a Rust entry point called from C++ does.
+#[jsg_resource]
+struct CatchPanicResource;
+
+#[jsg_resource]
+impl CatchPanicResource {
+    #[jsg_method]
+    pub fn catch_nested_panic(&self, lock: &mut jsg::Lock) {
+        let isolate = lock.isolate().as_ffi();
+
+        // SAFETY: the callback's scope is open and innermost while `scope` lives, and `lock`
+        // is not used meanwhile.
+        let scope = std::pin::pin!(unsafe { jsg::CallbackScope::new(isolate) });
+        assert_eq!(jsg::catch_panic(scope, |_| 7), Some(7));
+
+        // SAFETY: as above.
+        let scope = std::pin::pin!(unsafe { jsg::CallbackScope::new(isolate) });
+        let result: Option<()> = jsg::catch_panic(scope, |_| panic!("intentional nested panic"));
+        assert_eq!(result, None);
+    }
+}
+
+/// A panic caught by `jsg::catch_panic` leaves an internal error pending, which
+/// reaches JavaScript once the method returns.
+#[test]
+fn catch_panic_returns_none_and_leaves_exception_pending() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let wrapped = jsg::Rc::new(CatchPanicResource).to_js(lock);
+        ctx.set_global(lock, "obj", wrapped);
+        let err = ctx
+            .eval::<bool>(lock, "obj.catchNestedPanic(); true")
+            .unwrap_err()
+            .unwrap_jsg_err(lock);
+        assert!(
+            err.message.contains("internal error"),
+            "unexpected error: {:?}",
+            err.message
+        );
+        assert!(!err.message.contains("intentional nested panic"));
+        Ok(())
+    });
+}
+
 // =============================================================================
 // Receiver guard tests
 // =============================================================================
@@ -499,7 +547,7 @@ fn instance_method_throws_on_missing_receiver() {
             prefix: "Hello, ".to_owned(),
         });
         let wrapped = resource.to_js(lock);
-        ctx.set_global("obj", wrapped);
+        ctx.set_global(lock, "obj", wrapped);
 
         // Destructure the method and call it with no receiver (`this` === global
         // / undefined in strict mode). V8's Signature check must fire before the
@@ -529,7 +577,7 @@ fn instance_method_throws_on_wrong_receiver_via_reflect_apply() {
             prefix: "Hello, ".to_owned(),
         });
         let wrapped = resource.to_js(lock);
-        ctx.set_global("obj", wrapped);
+        ctx.set_global(lock, "obj", wrapped);
 
         let err = ctx
             .eval::<String>(lock, "Reflect.apply(obj.echo, {}, ['world'])")
@@ -556,7 +604,7 @@ fn instance_method_works_on_correct_receiver() {
             prefix: "Hi, ".to_owned(),
         });
         let wrapped = resource.to_js(lock);
-        ctx.set_global("obj", wrapped);
+        ctx.set_global(lock, "obj", wrapped);
 
         // `Function.prototype.call` with the correct `this` must succeed.
         let result: String = ctx.eval(lock, "obj.echo.call(obj, 'world')").unwrap();
@@ -593,7 +641,7 @@ fn resource_without_constructor_throws() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<EchoResource>(lock);
-        ctx.set_global("EchoResource", constructor.into());
+        ctx.set_global(lock, "EchoResource", constructor);
 
         let result: Result<Number, _> = ctx.eval(lock, "new EchoResource('hi')");
         assert!(result.is_err(), "should throw illegal constructor");
@@ -607,7 +655,7 @@ fn constructor_creates_instance() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<Greeting>(lock);
-        ctx.set_global("Greeting", constructor.into());
+        ctx.set_global(lock, "Greeting", constructor);
 
         let result: String = ctx
             .eval(lock, "new Greeting('hello').getMessage()")
@@ -623,7 +671,7 @@ fn constructor_converts_arguments() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<Greeting>(lock);
-        ctx.set_global("Greeting", constructor.into());
+        ctx.set_global(lock, "Greeting", constructor);
 
         // Number is coerced to string by V8
         let result: String = ctx
@@ -640,7 +688,7 @@ fn constructor_creates_distinct_objects() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<Greeting>(lock);
-        ctx.set_global("Greeting", constructor.into());
+        ctx.set_global(lock, "Greeting", constructor);
 
         let result: String = ctx
             .eval(
@@ -660,7 +708,7 @@ fn constructor_instanceof_works() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<Greeting>(lock);
-        ctx.set_global("Greeting", constructor.into());
+        ctx.set_global(lock, "Greeting", constructor);
 
         let result: String = ctx
             .eval(
@@ -700,7 +748,7 @@ fn constructor_with_lock_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<Counter>(lock);
-        ctx.set_global("Counter", constructor.into());
+        ctx.set_global(lock, "Counter", constructor);
 
         let result: Number = ctx.eval(lock, "new Counter(99).getValue()").unwrap();
         assert!((result.value() - 99.0).abs() < f64::EPSILON);
@@ -731,7 +779,7 @@ fn constructor_with_wrong_resource_type_throws_type_error() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let wrapper_ctor = jsg::resource::function_template_of::<Wrapper>(lock);
-        ctx.set_global("Wrapper", wrapper_ctor.into());
+        ctx.set_global(lock, "Wrapper", wrapper_ctor);
 
         let err = ctx
             .eval::<jsg::Rc<Wrapper>>(lock, "new Wrapper(42)")

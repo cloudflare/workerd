@@ -137,3 +137,97 @@ export const readInsideSize = {
     }
   },
 };
+
+// A stream whose size() closes it when it meets `closeOn`, and the
+// source's cancel calls.
+function closingInSize(closeOn) {
+  let controller;
+  const cancels = [];
+  const rs = new ReadableStream(
+    {
+      start(c) {
+        controller = c;
+      },
+      cancel(reason) {
+        cancels.push(reason);
+      },
+    },
+    {
+      size(chunk) {
+        if (chunk === closeOn) controller.close();
+        return 1;
+      },
+      highWaterMark: 10,
+    }
+  );
+  return { rs, controller: () => controller, cancels };
+}
+
+async function readRest(reader) {
+  const items = [];
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return items;
+    items.push(value);
+  }
+}
+
+const PENDING = Symbol('pending');
+async function settledValue(promise) {
+  return Promise.race([promise, scheduler.wait(50).then(() => PENDING)]);
+}
+
+// DIVERGENCE (ledger #30): close() inside size() with a chunk already
+// queued. The close is only requested, so the in-flight chunk is still
+// readable under TypeScript (spec; Node agrees). C++ drops it.
+export const closeInsideSizeWithQueuedChunk = {
+  async test() {
+    const { rs, controller } = closingInSize('y');
+    controller().enqueue('x');
+    controller().enqueue('y');
+    deepStrictEqual(await drainToArray(rs), usingTsImpl ? ['x', 'y'] : ['x']);
+  },
+};
+
+// close() inside size() on a teed stream, one branch drained and closed
+// by the close (parity): the in-flight chunk is dropped for every branch,
+// so the branches see the same chunks, and the other branch's cancel
+// settles at once with undefined, without cancelling the source (the
+// source has closed; Node agrees for the cancel).
+export const closeInsideSizeTeeDrainedBranch = {
+  async test() {
+    for (const cancelSecond of [false, true]) {
+      const { rs, controller, cancels } = closingInSize('y');
+      const [b1, b2] = rs.tee();
+      const r1 = b1.getReader();
+      const r2 = b2.getReader();
+      controller().enqueue('x');
+      strictEqual((await r1.read()).value, 'x');
+      controller().enqueue('y');
+      strictEqual(await settledValue(r1.closed), undefined);
+      if (cancelSecond) {
+        strictEqual(await settledValue(r2.cancel('bye')), undefined);
+      } else {
+        deepStrictEqual(await readRest(r1), []);
+        deepStrictEqual(await readRest(r2), ['x']);
+      }
+      deepStrictEqual(cancels, []);
+    }
+  },
+};
+
+// DIVERGENCE (ledger #30): close() inside size() on a teed stream whose
+// branches are both behind. TypeScript delivers the in-flight chunk to
+// both, as with no tee (close requested, the chunk still readable). C++
+// drops it for both.
+export const closeInsideSizeTeeBranchesBehind = {
+  async test() {
+    const { rs, controller } = closingInSize('y');
+    const [b1, b2] = rs.tee();
+    controller().enqueue('x');
+    controller().enqueue('y');
+    const expected = usingTsImpl ? ['x', 'y'] : ['x'];
+    deepStrictEqual(await drainToArray(b1), expected);
+    deepStrictEqual(await drainToArray(b2), expected);
+  },
+};

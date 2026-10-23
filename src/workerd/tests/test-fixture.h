@@ -78,6 +78,12 @@ struct TestFixture {
     // If set, used as the jsg::IsolateObserver for the worker's isolate instead of a no-op one.
     // Lets tests observe compilation hooks (e.g. onCompileCacheFound / onCompileCacheRejected).
     kj::Maybe<kj::Own<JsgIsolateObserver>> jsgIsolateObserver;
+    // If set, used as the worker isolate's IsolateObserver instead of a no-op one. Lets tests
+    // observe isolate-level hooks, e.g. enable async tracing and register its sinks.
+    kj::Maybe<kj::Own<IsolateObserver>> isolateObserver;
+    // If set, passed to the Script. The feature flags must enable the new module registry,
+    // and the registry must contain the fixture's main module, named "main".
+    kj::Maybe<kj::Arc<jsg::modules::ModuleRegistry>> newModuleRegistry;
   };
 
   TestFixture(SetupParams&& params = {.useRealTimers = false});
@@ -142,6 +148,10 @@ struct TestFixture {
   // Constructs the same WorkerEntrypoint wrapper used in production.
   kj::Own<WorkerInterface> makeWorkerEntrypoint();
 
+  // Whether the calling thread is inside the startup CPU limit scope (enterStartupJs() or
+  // enterStartupPython()) of a fixture's isolate.
+  static bool isInStartupLimitScope();
+
   // Create a new IoContext, owned by the caller. Use this when you need an IoContext that
   // outlives a single IncomingRequest, e.g. to model an actor receiving multiple requests.
   kj::Own<IoContext> newIoContext();
@@ -161,7 +171,7 @@ struct TestFixture {
   // Like newIncomingRequest(IoContext&), but leaves delivery to the caller. This models code paths
   // that report trace onset immediately before delivered().
   kj::Own<IoContext::IncomingRequest> newUndeliveredIncomingRequest(
-      IoContext& context, kj::Maybe<kj::Own<BaseTracer>> workerTracer = kj::none);
+      IoContext& context, kj::Maybe<kj::Rc<BaseTracer>> workerTracer = kj::none);
 
   // Enter an IoContext. Callback receives Environment& and must return void (NOT a
   // Promise — the Worker::Lock is only valid for the synchronous duration of the
@@ -325,13 +335,13 @@ struct TestFixture {
     kj::Own<WorkerInterface> startSubrequest(uint channel, SubrequestMetadata metadata) override {
       KJ_FAIL_ASSERT("no subrequests");
     }
-    kj::Own<SubrequestChannel> getSubrequestChannelResolved(uint channel,
+    kj::Rc<SubrequestChannel> getSubrequestChannelResolved(uint channel,
         kj::Maybe<Frankenvalue> props,
         kj::Maybe<VersionRequest> versionRequest,
         Persistent persistent) override {
       KJ_FAIL_ASSERT("no subrequests");
     }
-    kj::Own<ActorClassChannel> getActorClassResolved(
+    kj::Rc<ActorClassChannel> getActorClassResolved(
         uint channel, kj::Maybe<Frankenvalue> props, Persistent persistent) override {
       KJ_FAIL_ASSERT("no actor classes");
     }
@@ -347,7 +357,7 @@ struct TestFixture {
         uint channel, kj::FunctionParam<void(capnp::AnyPointer::Builder)> buildMessage) override {
       KJ_FAIL_ASSERT("no log channels");
     }
-    kj::Own<ActorChannel> getGlobalActor(uint channel,
+    kj::Rc<ActorChannel> getGlobalActor(uint channel,
         const ActorIdFactory::ActorId& id,
         kj::Maybe<kj::String> locationHint,
         ActorGetMode mode,
@@ -358,7 +368,7 @@ struct TestFixture {
         Persistent persistent) override {
       KJ_FAIL_REQUIRE("no actor channels");
     }
-    kj::Own<ActorChannel> getColoLocalActor(
+    kj::Rc<ActorChannel> getColoLocalActor(
         uint channel, kj::StringPtr id, SpanParent parentSpan) override {
       KJ_FAIL_REQUIRE("no actor channels");
     }

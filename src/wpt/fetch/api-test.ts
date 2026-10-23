@@ -173,6 +173,13 @@ export default {
     comment: 'Referrer is not implemented',
     omittedTests: true,
   },
+  'basic/request-upload-421.any.js': {
+    comment:
+      'fetch() does not retry a request on a 421 Misdirected Request response',
+    expectedFailures: [
+      'Fetch with POST with text body on 421 response should be retried once on new connection.',
+    ],
+  },
   'basic/request-upload.any.js': {
     comment: 'Appears to corrupt the state of workerd',
     disabledTests: true,
@@ -837,10 +844,7 @@ export default {
       'ReadableStream pull() Error propagates to Response.formData() Promise',
     ],
   },
-  'response/response-error.any.js': {
-    comment: 'Likely just missing validation',
-    expectedFailures: ["Throws TypeError when responseInit's statusText is Ā"],
-  },
+  'response/response-error.any.js': {},
   'response/response-from-stream.any.js': {
     comment: 'Missing expected exception (TypeError)',
     expectedFailures: [

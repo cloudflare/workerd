@@ -1,3 +1,8 @@
+#![allow(
+    unsafe_code,
+    reason = "holds a cxx bridge and wraps the C++ objects behind it"
+)]
+
 use std::marker::PhantomData;
 use std::pin::Pin;
 
@@ -12,7 +17,10 @@ use crate::io::AsyncInputStream;
 use crate::io::AsyncIoStream;
 
 #[cxx::bridge(namespace = "kj::rust")]
-#[expect(clippy::missing_safety_doc)]
+#[expect(
+    clippy::missing_safety_doc,
+    reason = "bridge declarations of raw KJ FFI functions; their contracts are KJ's own"
+)]
 pub mod ffi {
     unsafe extern "C++" {
         include!("workerd/rust/kj/ffi.h");
@@ -96,6 +104,7 @@ pub mod ffi {
         type BuiltinIndicesEnum;
         type HttpHeaderTable;
         type HttpHeaders;
+        fn new_http_header_table() -> KjOwn<HttpHeaderTable>;
         fn new_http_headers(table: &HttpHeaderTable) -> KjOwn<HttpHeaders>;
         fn clone_shallow(this_: &HttpHeaders) -> KjOwn<HttpHeaders>;
         fn clear_headers(this_: Pin<&mut HttpHeaders>);
@@ -130,6 +139,8 @@ pub mod ffi {
         type ConnectResponse;
         type HttpServiceResponse;
         type HttpService;
+        /// `kj::WebSocket`, driven from C++; Rust only carries it between kj interfaces.
+        type WebSocket;
 
         fn response_send(
             this_: Pin<&mut HttpServiceResponse>,
@@ -138,6 +149,11 @@ pub mod ffi {
             headers: &HttpHeaders,
             expected_body_size: KjMaybe<u64>,
         ) -> Result<KjOwn<AsyncOutputStream>>;
+
+        fn response_accept_websocket(
+            this_: Pin<&mut HttpServiceResponse>,
+            headers: &HttpHeaders,
+        ) -> Result<KjOwn<WebSocket>>;
 
         fn connect_response_accept(
             this_: Pin<&mut ConnectResponse>,
@@ -201,6 +217,7 @@ pub mod ffi {
     impl Box<DynHttpService> {}
     impl KjOwn<ConnectResponse> {}
     impl KjOwn<HttpService> {}
+    impl KjOwn<HttpServiceResponse> {}
 }
 
 assert_eq_size!(ffi::HttpConnectSettings, [u8; 16]);
@@ -208,6 +225,14 @@ assert_eq_align!(ffi::HttpConnectSettings, u64);
 
 pub type HeaderId = ffi::BuiltinIndicesEnum;
 pub type HeaderTable = ffi::HttpHeaderTable;
+
+impl ffi::HttpHeaderTable {
+    /// A table of kj's builtin headers only (`kj::HttpHeaderTable`'s default constructor).
+    #[must_use]
+    pub fn builtin() -> KjOwn<Self> {
+        ffi::new_http_header_table()
+    }
+}
 pub type CustomHeader = ffi::HttpHeaderId;
 
 // TODO(tewaro) soon: replace by enum HeaderId
@@ -361,6 +386,15 @@ impl<'a> ServiceResponse<'a> {
             expected_body_size.into(),
         )?
         .into())
+    }
+
+    /// `kj::HttpService::Response::acceptWebSocket`: answer a WebSocket upgrade request with the
+    /// server end of the WebSocket. Fails if the request was not a WebSocket upgrade.
+    pub fn accept_websocket<'h>(
+        self,
+        headers: impl Into<HeadersRef<'h>>,
+    ) -> Result<KjOwn<ffi::WebSocket>> {
+        Ok(ffi::response_accept_websocket(self.0, headers.into().0)?)
     }
 
     pub fn into_ffi(self) -> Pin<&'a mut ffi::HttpServiceResponse> {

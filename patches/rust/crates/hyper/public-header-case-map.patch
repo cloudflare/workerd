@@ -1,0 +1,43 @@
+--- a/src/ext/mod.rs
++++ b/src/ext/mod.rs
+@@ -158,7 +158,12 @@
+ /// [`preserve_header_case`]: /client/struct.Client.html#method.preserve_header_case
+ #[cfg(all(any(feature = "client", feature = "server"), feature = "http1"))]
+ #[derive(Clone, Debug)]
+-pub(crate) struct HeaderCaseMap(HeaderMap<Bytes>);
++// workerd: public so kj-hyper can carry header-name spellings both ways. The http crate's
++// HeaderName lowercases names, while kj-http writes names as the application spelled them (and
++// workerd's tests assert the exact raw bytes). hyper's encoder already consults this extension
++// when writing, and its parser fills it with preserve_header_case, but only for hyper's own use;
++// making the type, append() and get_all_internal() public lets kj-hyper populate and read it.
++pub struct HeaderCaseMap(HeaderMap<Bytes>);
+ 
+ #[cfg(all(any(feature = "client", feature = "server"), feature = "http1"))]
+ impl HeaderCaseMap {
+@@ -175,12 +180,14 @@
+     /// Returns a view of all spellings associated with that header name,
+     /// in the order they were found.
+     #[cfg(any(feature = "client", feature = "server"))]
+-    pub(crate) fn get_all_internal(&self, name: &HeaderName) -> ValueIter<'_, Bytes> {
++    // workerd: public (see the type comment).
++    pub fn get_all_internal(&self, name: &HeaderName) -> ValueIter<'_, Bytes> {
+         self.0.get_all(name).into_iter()
+     }
+ 
+     #[cfg(any(feature = "client", feature = "server"))]
+-    pub(crate) fn default() -> Self {
++    // workerd: public (see the type comment).
++    pub fn default() -> Self {
+         Self(HeaderMap::default())
+     }
+ 
+@@ -190,7 +197,8 @@
+     }
+ 
+     #[cfg(any(feature = "client", feature = "server"))]
+-    pub(crate) fn append<N>(&mut self, name: N, orig: Bytes)
++    // workerd: public (see the type comment).
++    pub fn append<N>(&mut self, name: N, orig: Bytes)
+     where
+         N: IntoHeaderName,
+     {

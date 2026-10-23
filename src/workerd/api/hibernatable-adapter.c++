@@ -86,7 +86,7 @@ kj::Promise<DeferredProxy<void>> HibernatableWebSocketAdapter::couple(
 }
 
 void HibernatableWebSocketAdapter::internalAccept(
-    jsg::Lock&, kj::Maybe<kj::Own<InputGate::CriticalSection>>) {
+    jsg::Lock&, kj::Maybe<kj::Rc<InputGate::CriticalSection>>) {
   unimplemented();
 }
 
@@ -161,6 +161,10 @@ bool HibernatableWebSocketAdapter::peerIsAwaitingCoupling(jsg::Lock&) {
 }
 
 void HibernatableWebSocketAdapter::setObserver(kj::Own<WebSocketObserver>) {
+  unimplemented();
+}
+
+kj::Ptr<bool> HibernatableWebSocketAdapter::getDispatchFailed() {
   unimplemented();
 }
 

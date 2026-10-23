@@ -15,10 +15,10 @@ archive_override(
     patches = [
         "//:patches/boringssl/0001-Expose-libdecrepit-so-NodeJS-can-use-it-for-ncrypto.patch",
     ],
-    sha256 = "37ea781c65a67c6d5f41d4b69bc853dd8b735378be2f962025a33d1f6d142495",
-    strip_prefix = "google-boringssl-030986a",
+    sha256 = "218355340f67452cdc340a290f20ccf77c2c1638148fe28997c4f80568d836f4",
+    strip_prefix = "google-boringssl-6b482f5",
     type = "tgz",
-    url = "https://api.github.com/repos/google/boringssl/tarball/0.20260813.0",
+    url = "https://api.github.com/repos/google/boringssl/tarball/0.20261020.0",
 )
 
 # brotli
@@ -27,10 +27,10 @@ bazel_dep(name = "brotli", version = "1.2.0.bcr.3")
 # capnp-cpp
 http.archive(
     name = "capnp-cpp",
-    sha256 = "33cc601ce1d19d5f2cb133821c809ca33c007525f1e5353dbe0779b8efb72b22",
-    strip_prefix = "capnproto-capnproto-fda9aec/c++",
+    sha256 = "ddb13a196340582b1abbcb1ae70bf96d078e580ddb0c92f39168234e37c6c933",
+    strip_prefix = "capnproto-capnproto-5a1e460/c++",
     type = "tgz",
-    url = "https://github.com/capnproto/capnproto/tarball/fda9aecf8120d92f2085c9625330ffd9ddca7c24",
+    url = "https://github.com/capnproto/capnproto/tarball/5a1e4604767965445cecee69289a4ba730df04ae",
 )
 use_repo(http, "capnp-cpp")
 
@@ -38,7 +38,7 @@ use_repo(http, "capnp-cpp")
 git_repository(
     name = "com_googlesource_chromium_icu",
     build_file = "@v8//:bazel/BUILD.icu",
-    commit = "8cc91d9b6ab9991802fd208ee03a69714fd0251c",
+    commit = "19dfb44a62ae60ce6b0060de8c0cef5d5c527177",
     patch_cmds = [
         "find source -name BUILD.bazel | xargs rm",
     ],
@@ -51,7 +51,7 @@ git_repository(
 # dragonbox
 http.archive(
     name = "dragonbox",
-    build_file_content = "cc_library(name = 'dragonbox', hdrs = glob(['include/dragonbox/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/dragonbox/src')",
+    build_file_content = "load(\"@rules_cc//cc:cc_library.bzl\", \"cc_library\")\ncc_library(name = 'dragonbox', hdrs = glob(['include/dragonbox/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/dragonbox/src')",
     sha256 = "4848e8e48f39a36de2ebf67e7f5d6deb6308d4145008f56a305923d2a6df91f0",
     strip_prefix = "jk-jeon-dragonbox-beeeef9",
     type = "tgz",
@@ -63,13 +63,11 @@ use_repo(http, "dragonbox")
 bazel_dep(name = "fast_float")
 archive_override(
     module_name = "fast_float",
-    build_file_content = "cc_library(name = 'fast_float', hdrs = glob(['include/fast_float/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/fast_float/src')",
-    remote_file_integrity = {"MODULE.bazel": "sha256-Q1BGZO/fpMbPE0libIcTXJuHkmMlxyBFjzlu7iVWjto="},
-    remote_file_urls = {"MODULE.bazel": ["https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/refs/heads/main/modules/fast_float/8.0.2/MODULE.bazel"]},
-    sha256 = "9b239eaa54c58fc3a1bb7e1a11030b67211e38ce7f4781b41b004f26f6fd1528",
-    strip_prefix = "fastfloat-fast_float-34164f5",
+    build_file_content = "load(\"@rules_cc//cc:cc_library.bzl\", \"cc_library\")\ncc_library(name = 'fast_float', hdrs = glob(['include/fast_float/*.h']), visibility = ['//visibility:public'], include_prefix = 'third_party/fast_float/src')",
+    sha256 = "d64a4b24e582e28d5d8bd1d91cd048ab28a32f1719903267f225f975a043102b",
+    strip_prefix = "fastfloat-fast_float-42f2548",
     type = "tgz",
-    url = "https://github.com/fastfloat/fast_float/tarball/34164f547b7df3f5d794ff67e9f885c36819ebfc",
+    url = "https://github.com/fastfloat/fast_float/tarball/42f254836ee416ffcf2f4e6576260003ac33d48c",
 )
 
 # fp16
@@ -89,8 +87,6 @@ archive_override(
 bazel_dep(name = "highway")
 archive_override(
     module_name = "highway",
-    remote_file_integrity = {"MODULE.bazel": "sha256-2UVSfmwaox6VsgqN+q+Ci+ofGKIJCDc+psSq2YsurfQ="},
-    remote_file_urls = {"MODULE.bazel": ["https://raw.githubusercontent.com/bazelbuild/bazel-central-registry/refs/heads/main/modules/highway/1.3.0/MODULE.bazel"]},
     sha256 = "4fa8749ccaf7d47c4a9e0ff635d0347eecf432901c92a131f64e30ff5094c2e9",
     strip_prefix = "google-highway-2607d3b",
     type = "tgz",
@@ -126,6 +122,7 @@ archive_override(
     patches = [
         "//:patches/perfetto/0001-Don-t-attempt-to-use-rules_android.patch",
         "//:patches/perfetto/0002-disable-info-level-logging-re2.patch",
+        "//:patches/perfetto/0003-Load-rules-removed-from-Bazel-9-builtins.patch",
     ],
     sha256 = "4fcc98fe4754269a70e297f6caba429420039c89a1c6cb561dffb4057de63abb",
     strip_prefix = "google-perfetto-9e9bdaf",
@@ -137,10 +134,10 @@ archive_override(
 http.archive(
     name = "simdutf",
     build_file = "//:build/BUILD.simdutf",
-    sha256 = "c291c8a698e638ba40e0eae4c6da97a6caa6b96a7abaabfcf2b4b4fe1a85aa43",
+    sha256 = "37a5df90b6e1a1e793d8aa7a2df9cee90c5d585dbbbb5d31afc1e56203c059fb",
     strip_prefix = "",
     type = "zip",
-    url = "https://github.com/simdutf/simdutf/releases/download/v9.2.0/singleheader.zip",
+    url = "https://github.com/simdutf/simdutf/releases/download/v9.3.2/singleheader.zip",
 )
 use_repo(http, "simdutf")
 
@@ -161,4 +158,4 @@ git_override(
 )
 
 # zstd
-bazel_dep(name = "zstd", version = "1.5.7.bcr.2")
+bazel_dep(name = "zstd", version = "1.5.7.bcr.3")

@@ -1,7 +1,78 @@
 load("@aspect_rules_js//js:defs.bzl", "js_binary")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_config", "ts_project")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
-load("//:build/wd_test.bzl", "wd_test")
+load("//:build/wasm_tools_parse.bzl", "wasm_tools_parse")
+load("//:build/wd_bench.bzl", "wd_bench")
+load("//:build/wd_test.bzl", "wd_cli_test", "wd_test")
+
+wasm_tools_parse(
+    name = "compact-imports.wasm",
+    src = "compact-imports.wat",
+)
+
+wasm_tools_parse(
+    name = "js-string-builtins.wasm",
+    src = "js-string-builtins.wat",
+)
+
+exports_files(["starttls-server.pem"])
+
+wd_test(
+    src = "streams-byob-progress-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "streams-byob-progress-test.js",
+        "streams-byob-progress-worker.js",
+    ],
+)
+
+wd_test(
+    src = "streams-terminal-state-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "streams-terminal-state-test.js",
+        "streams-terminal-state-worker.js",
+    ],
+)
+
+wd_test(
+    src = "eventsource-context-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "eventsource-context-test.js",
+        "eventsource-context-worker.js",
+    ],
+)
+
+wd_test(
+    src = "eventsource-lifetime-test.wd-test",
+    args = ["--experimental"],
+    data = ["eventsource-lifetime-test.js"],
+)
+
+wd_test(
+    src = "queue-backing-store-test.wd-test",
+    args = [
+        "--experimental",
+        "queue-backing-store-test",
+    ],
+    data = ["queue-backing-store-test.js"],
+)
+
+wd_test(
+    src = "streams-consumer-reentry-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "streams-consumer-reentry-test.js",
+        "streams-consumer-reentry-worker.js",
+    ],
+)
+
+wd_test(
+    src = "streams-native-read-ownership-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-native-read-ownership-test.js"],
+)
 
 # Compile all ts test sources in one project. This is needed to work around https://github.com/aspect-build/rules_ts/issues/664 –
 # rules_ts transpiles all .ts files for each ts_project where the files are present based on the
@@ -27,6 +98,11 @@ ts_project(
 )
 
 wd_test(
+    src = "exported-handler-proxy-test.wd-test",
+    data = ["exported-handler-proxy-test.js"],
+)
+
+wd_test(
     src = "stdio-writesync-reentry-uaf-test.wd-test",
     args = ["--experimental"],
     data = ["stdio-writesync-reentry-uaf-test.js"],
@@ -36,6 +112,20 @@ wd_test(
     src = "wasm-memory-discard-test.wd-test",
     args = ["--experimental"],
     data = ["wasm-memory-discard-disabled-test.js"],
+)
+
+wd_test(
+    src = "do-on-evict-symbol-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "do-on-evict-symbol-test.js",
+        "do-on-evict-symbol-unflagged-test.js",
+    ],
+)
+
+wd_test(
+    src = "retryable-test.wd-test",
+    data = ["retryable-test.js"],
 )
 
 wd_test(
@@ -66,6 +156,12 @@ wd_test(
     src = "streams-internal-read-buffer-gc-test.wd-test",
     args = ["--experimental"],
     data = ["streams-internal-read-buffer-gc-test.js"],
+)
+
+wd_test(
+    src = "streams-internal-drain-gc-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams-internal-drain-gc-test.js"],
 )
 
 wd_test(
@@ -108,6 +204,12 @@ wd_test(
     src = "delete-all-deletes-alarm-test.wd-test",
     args = ["--experimental"],
     data = ["delete-all-deletes-alarm-test.js"],
+)
+
+wd_test(
+    src = "durable-object-snapshots-flag-test.wd-test",
+    args = ["--experimental"],
+    data = ["durable-object-snapshots-flag-test.js"],
 )
 
 # For tests that listen on fixed TCP ports 8081-8083. The "socket" resource (see .bazelrc) keeps
@@ -163,6 +265,8 @@ wd_test(
 )
 
 wd_test(
+    # Actor eviction has a 30-second deadline, followed by a real-time alarm wait.
+    size = "large",
     src = "actor-alarms-name-test.wd-test",
     args = ["--experimental"],
     data = ["actor-alarms-name-test.js"],
@@ -225,7 +329,6 @@ wd_test(
         "jsrpc-callback-trace-test.js",
         "jsrpc-callback-trace-test-tail.js",
     ],
-    tags = ["no-coverage"],
 )
 
 # Test: a callee invocation is parented to the first caller jsRpcCall, and each dispatch links to
@@ -237,7 +340,6 @@ wd_test(
         "jsrpc-pipelined-trace-test.js",
         "jsrpc-pipelined-trace-test-tail.js",
     ],
-    tags = ["no-coverage"],
 )
 
 # Regression test: jsrpc onset.info emitted into a streaming tail worker must remain
@@ -260,11 +362,24 @@ wd_test(
     ],
 )
 
+# console.* must survive arguments whose formatting throws, including when the formatter's own
+# fallback throws again; the exception has to stop at the console decorator's C++ boundary or it
+# aborts the process.
+wd_test(
+    src = "console-format-throw-test.wd-test",
+    data = ["console-format-throw-test.js"],
+)
+
 # Tests for WO-1390: structured errorInfo on TraceLog entries from console.*(Error, ...).
 # Covers both batched tail (`tail(events)`) and streaming tail (`tailStream`) surfaces.
 wd_test(
     src = "errorinfo-tail-test.wd-test",
     data = ["errorinfo-tail-test.js"],
+)
+
+wd_test(
+    src = "actor-exception-attribution-tail-test.wd-test",
+    data = ["actor-exception-attribution-tail-test.js"],
 )
 
 wd_test(
@@ -322,6 +437,15 @@ wd_test(
         "cache-mock.js",
         "cache-operations-test.js",
         "instrumentation-tail-worker.js",
+    ],
+)
+
+wd_test(
+    src = "cache-span-parent-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "cache-span-parent-test.js",
+        "cache-span-parent-test-tail.js",
     ],
 )
 
@@ -408,6 +532,8 @@ wd_test(
 )
 
 wd_test(
+    # Exporting and comparing complete API schemas needs time in debug builds.
+    size = "large",
     src = "rtti-test.wd-test",
     args = ["--experimental"],
     data = ["rtti-test.js"],
@@ -480,6 +606,20 @@ wd_test(
     src = "actor-block-concurrency-depth-test.wd-test",
     args = ["--experimental"],
     data = ["actor-block-concurrency-depth-test.js"],
+)
+
+wd_test(
+    src = "actor-block-concurrency-timer-test.wd-test",
+    args = ["--experimental"],
+    data = ["actor-block-concurrency-timer-test.js"],
+)
+
+wd_test(
+    # Repeated constructor failures log symbolized stacks in debug builds.
+    size = "large",
+    src = "actor-fetch-rejection-test.wd-test",
+    compat_date = "2025-12-02",
+    data = ["actor-fetch-rejection-test.js"],
 )
 
 wd_test(
@@ -636,6 +776,11 @@ wd_test(
 )
 
 wd_test(
+    src = "queue-microtask-gc-test.wd-test",
+    data = ["queue-microtask-gc-test.js"],
+)
+
+wd_test(
     size = "large",
     src = "unhandled-rejection-test.wd-test",
     args = ["--experimental"],
@@ -674,6 +819,8 @@ wd_test(
 )
 
 wd_test(
+    # The RPC suite includes hang detection and stream transfers across requests.
+    size = "large",
     src = "js-rpc-streams-ts-test.wd-test",
     args = [
         "--experimental",
@@ -739,6 +886,25 @@ wd_test(
 )
 
 wd_test(
+    src = "rpc-stub-gc-foreign-span-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "rpc-stub-gc-foreign-span-tail.js",
+        "rpc-stub-gc-foreign-span-test.js",
+    ],
+)
+
+wd_test(
+    src = "js-rpc-rejected-pipeline-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "js-rpc-rejected-pipeline-test.js",
+        "js-rpc-rejected-pipeline-test-callee.js",
+        "js-rpc-rejected-pipeline-test-tail.js",
+    ],
+)
+
+wd_test(
     src = "js-rpc-params-transfer-ownership-test.wd-test",
     args = ["--experimental"],
     data = ["js-rpc-params-transfer-ownership-test.js"],
@@ -800,6 +966,8 @@ wd_test(
 )
 
 wd_test(
+    # Persistent RPC cases exercise multiple SQLite-backed actors and durable storage flushes.
+    size = "large",
     src = "persistent-stubs-test.wd-test",
     args = ["--experimental"],
     data = ["persistent-stubs-test.js"],
@@ -1003,6 +1171,23 @@ wd_test(
 )
 
 js_binary(
+    name = "websocket-open-error-sidecar",
+    entry_point = "websocket-open-error-sidecar.js",
+)
+
+wd_test(
+    src = "websocket-open-error-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "websocket-open-error-test.js",
+    ],
+    sidecar = "websocket-open-error-sidecar",
+    sidecar_port_bindings = [
+        "OPEN_ERROR_SERVER_PORT",
+    ],
+)
+
+js_binary(
     name = "http-socket-server",
     entry_point = "http-socket-server.js",
 )
@@ -1064,8 +1249,25 @@ wd_test(
     data = [
         "new-module-registry-test.js",
         "test.wasm",
+        ":js-string-builtins.wasm",
     ],
     lint = False,
+)
+
+wd_test(
+    src = "wasm-compact-imports-test.wd-test",
+    data = [
+        "wasm-compact-imports-test.js",
+        ":compact-imports.wasm",
+    ],
+)
+
+wd_test(
+    src = "wasm-js-string-builtins-test.wd-test",
+    data = [
+        "wasm-js-string-builtins-test.js",
+        ":js-string-builtins.wasm",
+    ],
 )
 
 wd_test(
@@ -1127,6 +1329,8 @@ wd_test(
 )
 
 wd_test(
+    # The cyclic and expired-context cases wait for the runtime's hang detection.
+    size = "large",
     src = "cross-context-promise-test.wd-test",
     args = ["--experimental"],
     data = ["cross-context-promise-test.js"],
@@ -1240,7 +1444,9 @@ wd_test(
     args = ["--experimental"],
     data = [
         "test.wasm",
+        "worker-loader-wasm-builtins-test.js",
         "worker-loader-wasm-test.js",
+        ":js-string-builtins.wasm",
     ],
     # The test uses `import source` syntax, which eslint's parser does not yet support.
     lint = False,
@@ -1408,17 +1614,40 @@ sh_test(
     size = "medium",
     srcs = ["abortIsolate.sh"],
     args = [
-        "$(location //src/workerd/server:workerd_cross)",
+        "$(location //src/workerd/server:workerd)",
         "$(location abortIsolate.wd-test)",
         "$(location abortIsolate.js)",
     ],
     data = [
         "abortIsolate.js",
         "abortIsolate.wd-test",
-        "//src/workerd/server:workerd_cross",
+        "//src/workerd/server:workerd",
     ],
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
+)
+
+wd_bench(
+    src = "text-encoder-bench.wd-bench",
+    data = ["text-encoder-bench.js"],
+)
+
+# wd_bench() always passes --compat-date, so this runs `workerd bench` without it, to check that
+# workers that omit compatibilityDate get the newest date.
+wd_cli_test(
+    name = "bench-default-compat-date-test",
+    src = "bench-default-compat-date-test.wd-bench",
+    args = [
+        "$(location //src/workerd/server:workerd)",
+        "bench",
+        "$(location bench-default-compat-date-test.wd-bench)",
+        "--quick",
+    ],
+    data = [
+        "bench-default-compat-date-test.js",
+        "bench-default-compat-date-test.wd-bench",
+        "//src/workerd/server:workerd",
+    ],
 )

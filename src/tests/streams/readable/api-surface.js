@@ -5,6 +5,7 @@
 // Surface shape of ReadableStream and its default reader/controller.
 
 import { strictEqual, throws } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
 
 export const readableGlobalsExist = {
   test() {
@@ -40,6 +41,35 @@ export const defaultStreamNoByobReader = {
     const rs = new ReadableStream();
     throws(() => rs.getReader({ mode: 'byob' }), TypeError);
     strictEqual(rs.locked, false);
+  },
+};
+
+// getReader()'s options convert as a WebIDL dictionary (parity): null
+// means no options, a function's members are read, and every other
+// primitive throws TypeError (messages differ).
+export const getReaderOptionsShapes = {
+  test() {
+    let modeReads = 0;
+    const options = Object.defineProperty(function options() {}, 'mode', {
+      get() {
+        modeReads++;
+        return undefined;
+      },
+    });
+    for (const opts of [null, options]) {
+      const rs = new ReadableStream();
+      rs.getReader(opts);
+      strictEqual(rs.locked, true);
+    }
+    strictEqual(modeReads, 1);
+    for (const opts of [5, 'x', true, 1n, Symbol('s')]) {
+      throws(
+        () => new ReadableStream().getReader(opts),
+        usingTsImpl
+          ? { name: 'TypeError', message: 'Reader options must be an object' }
+          : TypeError
+      );
+    }
   },
 };
 

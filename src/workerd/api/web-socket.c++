@@ -179,7 +179,7 @@ kj::Promise<DeferredProxy<void>> WebSocket::couple(
   return impl->couple(js, kj::mv(other), request);
 }
 
-void WebSocket::internalAccept(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) {
+void WebSocket::internalAccept(jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs) {
   impl->internalAccept(js, kj::mv(cs));
 }
 
@@ -201,6 +201,10 @@ bool WebSocket::isHibernatable() {
 
 void WebSocket::setObserver(kj::Own<WebSocketObserver> observer) {
   impl->setObserver(kj::mv(observer));
+}
+
+kj::Ptr<bool> WebSocket::getDispatchFailed() {
+  return impl->getDispatchFailed();
 }
 
 kj::Rc<kj::WebSocket> WebSocket::acceptAsHibernatable(kj::Array<kj::String> tags) {
@@ -532,7 +536,9 @@ jsg::Ref<WebSocket> WebSocket::constructor(jsg::Lock& js,
     headers.unset(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS);
   }
 
-  auto client = context.getHttpClient(0, false, kj::none, "websocket_open"_kjc);
+  // initConnection() below awaits the open.
+  auto client =
+      context.getHttpClient(0, false, kj::none, "websocket_open"_kjc, SpanAwaitedNext::YES);
   auto prom = ([](auto& context, auto outputLock, auto connUrl, auto headers,
                    auto client) -> kj::Promise<PackedWebSocket> {
     KJ_IF_SOME(lock, outputLock) {
@@ -603,10 +609,17 @@ kj::Promise<DeferredProxy<void>> LegacyWebSocketAdapter::couple(
   KJ_IF_SOME(p, peer) {
     maybePeerRef = p.tryAddRef(js);
   }
+  kj::Maybe<kj::Ptr<bool>> peerDispatchFailed;
+  KJ_IF_SOME(peerRef, maybePeerRef) {
+    if (!peerRef->isHibernatable()) {
+      peerDispatchFailed = peerRef->getDispatchFailed();
+    }
+  }
 
   static const auto coupleImpl =
       [](kj::Own<kj::WebSocket> self, kj::Own<kj::WebSocket> other,
           kj::Maybe<workerd::jsg::Ref<workerd::api::WebSocket>> maybePeerRef,
+          kj::Maybe<kj::Ptr<bool>> peerDispatchFailed,
           RequestObserver& request) -> kj::Promise<DeferredProxy<void>> {
     // Tear down the IoOwn since we now need to extend the WebSocket to a `DeferredProxy` promise.
     // This works because the `DeferredProxy` ends on the same event loop, but after the request
@@ -629,12 +642,6 @@ kj::Promise<DeferredProxy<void>> LegacyWebSocketAdapter::couple(
       }
     }
 
-    // We need to use `eagerlyEvaluate()` on both inputs to `joinPromises` to work around the awkward
-    // behavior of `joinPromises` lazily-evaluating tail continuations.
-    auto promise = kj::joinPromises(
-        kj::arr(upstream.eagerlyEvaluate(nullptr), downstream.eagerlyEvaluate(nullptr)))
-                       .attach(kj::mv(self), kj::mv(other));
-
     KJ_IF_SOME(peerRef, maybePeerRef) {
       // Since the WebSocket is terminated locally, we generally want the request and associated
       // IoContext to stay alive until the WebSocket connection has terminated.
@@ -643,12 +650,73 @@ kj::Promise<DeferredProxy<void>> LegacyWebSocketAdapter::couple(
       // the existence of this connection to prevent the actor from being evicted, so we fall through
       // to deferred proxying in this case.
       if (!peerRef->isHibernatable()) {
-        co_await promise;
+        // Move the Ptr out of the coroutine's parameters and into its body, so that it is destroyed
+        // before the coroutine completes. Parameters are destroyed only with the coroutine frame,
+        // which can outlive the IoContext that owns the Pin this Ptr refers to.
+        auto dispatchFailed = kj::mv(KJ_ASSERT_NONNULL(peerDispatchFailed));
+
+        // One pump completing only closes one direction, so the session continues until both
+        // have. A failure in either direction ends the session, though: the first failure is its
+        // cause, and waiting for the other pump could hold the request open indefinitely.
+        KJ_TRY {
+          co_await kj::joinPromisesFailFast(kj::arr(kj::mv(upstream), kj::mv(downstream)));
+        }
+        KJ_CATCH(exception) {
+          // An abort that has not been delivered yet still takes precedence, as it would have if
+          // the pumps had failed a moment later. A failure rethrown here reaches the request
+          // handler's catch, which waits for output locks before reporting it.
+          KJ_IF_SOME(reason, context.getAbortReason()) {
+            kj::throwFatalException(kj::mv(reason));
+          }
+          // The pumps also fail with DISCONNECTED when the worker's own WebSocket releases its end
+          // after failing, such as when one of its event listeners throws. That is a failure of the
+          // request, so it propagates like any other.
+          if (exception.getType() != kj::Exception::Type::DISCONNECTED || dispatchFailed.asRef()) {
+            kj::throwFatalException(kj::mv(exception));
+          }
+
+          // A transport disconnect ends the session abnormally, but it is not a failure of the
+          // request handler: these pumps run no application code, and the peer's read loop reports
+          // a premature disconnect to JavaScript as a 1006 close event. Now that the session is
+          // over, fail the deferred proxy task instead, which classifies the disconnect the same
+          // way as for a hibernatable or proxied WebSocket.
+          //
+          // A clean close arrives here too: the pipe keeps the incoming pump running after it
+          // delivers a Close, so the session still ends when the worker releases its end. It is
+          // likewise reported as a stream disconnect, as it is for a hibernatable WebSocket.
+          //
+          // TODO(someday): Report a clean close as success for both kinds of WebSocket. Here, that
+          //   means completing normally once the worker has received a Close. A hibernatable
+          //   WebSocket's deferred proxy task would need the HibernationManager's view of the
+          //   session, since the pumps alone cannot tell a clean close from a disconnect.
+          //
+          // Since the disconnect bypasses the request handler's catch, wait for output locks here
+          // as that catch would, so that a failed write takes precedence over the disconnect. An
+          // abort may have been requested while waiting, so check for one again.
+          co_await context.waitForOutputLocks();
+          KJ_IF_SOME(reason, context.getAbortReason()) {
+            kj::throwFatalException(kj::mv(reason));
+          }
+          dispatchFailed = nullptr;
+          maybePeerRef = kj::none;
+          KJ_CO_MAGIC BEGIN_DEFERRED_PROXYING;
+          kj::throwFatalException(kj::mv(exception));
+        }
         co_return;
       }
       // Drop the maybePeerRef before we hit the BEGIN_DEFERRED_PROXYING below.
       maybePeerRef = kj::none;
     }
+
+    // We need to use `eagerlyEvaluate()` on both inputs to `joinPromises` to work around the awkward
+    // behavior of `joinPromises` lazily-evaluating tail continuations.
+    //
+    // TODO(soon): This join waits for both pumps even after one fails, so a failure in one
+    //   direction can leave the proxy task waiting on the other indefinitely. Consider failing fast,
+    //   as for a locally terminated WebSocket above.
+    auto promise = kj::joinPromises(
+        kj::arr(upstream.eagerlyEvaluate(nullptr), downstream.eagerlyEvaluate(nullptr)))
+                       .attach(kj::mv(self), kj::mv(other));
 
     // Either:
     // 1. This websocket is just proxying through, in which case we can allow the IoContext to go
@@ -666,7 +734,8 @@ kj::Promise<DeferredProxy<void>> LegacyWebSocketAdapter::couple(
 
   auto self = kj::mv(KJ_ASSERT_NONNULL(native.state.tryGet<AwaitingAcceptanceOrCoupling>()).ws);
   native.state.init<Released>();
-  return coupleImpl(kj::mv(self), kj::mv(other), kj::mv(maybePeerRef), request);
+  return coupleImpl(
+      kj::mv(self), kj::mv(other), kj::mv(maybePeerRef), kj::mv(peerDispatchFailed), request);
 }
 
 void LegacyWebSocketAdapter::accept(
@@ -696,7 +765,7 @@ void LegacyWebSocketAdapter::accept(
 }
 
 void LegacyWebSocketAdapter::internalAccept(
-    jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) {
+    jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs) {
   auto& native = *farNative;
   auto nativeWs = kj::mv(KJ_ASSERT_NONNULL(native.state.tryGet<AwaitingAcceptanceOrCoupling>()).ws);
   native.state.init<Accepted>(kj::mv(nativeWs), native, IoContext::current());
@@ -777,7 +846,7 @@ LegacyWebSocketAdapter::Accepted::~Accepted() noexcept(false) {
 static constexpr size_t WEBSOCKET_MAX_MESSAGE_SIZE = 32u << 20;
 
 void LegacyWebSocketAdapter::startReadLoop(
-    jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) {
+    jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs) {
   size_t maxMessageSize = WEBSOCKET_MAX_MESSAGE_SIZE;
   if (FeatureFlags::get(js).getIncreaseWebsocketMessageSize()) {
     maxMessageSize = 128u << 20;
@@ -1018,6 +1087,10 @@ void LegacyWebSocketAdapter::setObserver(kj::Own<WebSocketObserver> observer) {
   this->observer = kj::mv(observer);
 }
 
+kj::Ptr<bool> LegacyWebSocketAdapter::getDispatchFailed() {
+  return farNative->dispatchFailed.asPtr();
+}
+
 kj::Maybe<kj::String> LegacyWebSocketAdapter::getPreferredExtensions(
     kj::WebSocket::ExtensionsContext ctx) {
   KJ_SWITCH_ONEOF(farNative->state) {
@@ -1112,8 +1185,10 @@ void LegacyWebSocketAdapter::ensurePumping(jsg::Lock& js) {
       pumpCompletion = kj::mv(completion.fulfiller);
     }
     auto promise = kj::evalNow([&, pumpCompletion = kj::mv(pumpCompletion)]() mutable {
-      return accepted.canceler.wrap(pump(context, *outgoingMessages, *accepted.ws, native,
-          autoResponseStatus, observer, kj::mv(pumpCompletion)));
+      return accepted.wrapIo([&](kj::Rc<kj::WebSocket> socket) {
+        return pump(context, *outgoingMessages, kj::mv(socket), native, autoResponseStatus,
+            observer, kj::mv(pumpCompletion));
+      });
     });
 
     // TODO(cleanup): We use awaitIoLegacy() here because we don't want this to count as a pending
@@ -1221,7 +1296,7 @@ size_t countBytesFromMessage(const kj::WebSocket::Message& message) {
 
 kj::Promise<void> LegacyWebSocketAdapter::pump(IoContext& context,
     OutgoingMessagesMap& outgoingMessages,
-    kj::WebSocket& ws,
+    kj::Rc<kj::WebSocket> ws,
     Native& native,
     AutoResponse& autoResponse,
     kj::Maybe<kj::Own<WebSocketObserver>>& observer,
@@ -1299,20 +1374,20 @@ kj::Promise<void> LegacyWebSocketAdapter::pump(IoContext& context,
         KJ_DEFER(pending.fulfiller->fulfill());
         gatedMessage.pendingAutoResponses--;
         autoResponse.queuedAutoResponses--;
-        co_await ws.send(pending.message);
+        co_await ws->send(pending.message);
       }
 
       KJ_SWITCH_ONEOF(gatedMessage.message) {
         KJ_CASE_ONEOF(text, kj::String) {
-          co_await ws.send(text);
+          co_await ws->send(text);
           break;
         }
         KJ_CASE_ONEOF(data, kj::Array<byte>) {
-          co_await ws.send(data);
+          co_await ws->send(data);
           break;
         }
         KJ_CASE_ONEOF(close, kj::WebSocket::Close) {
-          co_await ws.close(close.code, close.reason);
+          co_await ws->close(close.code, close.reason);
           autoResponse.isClosed = true;
           break;
         }
@@ -1332,7 +1407,7 @@ kj::Promise<void> LegacyWebSocketAdapter::pump(IoContext& context,
     while (!autoResponse.pendingAutoResponseDeque.empty() && !autoResponse.isClosed) {
       auto pending = KJ_ASSERT_NONNULL(autoResponse.pendingAutoResponseDeque.pop());
       KJ_DEFER(pending.fulfiller->fulfill());
-      co_await ws.send(pending.message);
+      co_await ws->send(pending.message);
     }
 
     // While we were `co_await`ing the auto-response send, more messages could have been queued
@@ -1369,14 +1444,30 @@ kj::Array<kj::StringPtr> LegacyWebSocketAdapter::getHibernatableTags() {
 }
 
 kj::Promise<kj::Maybe<kj::Exception>> LegacyWebSocketAdapter::readLoop(
-    kj::Maybe<kj::Own<InputGate::CriticalSection>> cs, size_t maxMessageSize) {
+    kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs, size_t maxMessageSize) {
   try {
-    // Note that we'll throw if the websocket has enabled hibernation.
-    auto& ws = *KJ_REQUIRE_NONNULL(
-        KJ_ASSERT_NONNULL(farNative->state.tryGet<Accepted>()).ws.getIfNotHibernatable());
     auto& context = IoContext::current();
+    // `farNative` is an IoOwn, which can only be dereferenced while an IoContext is current, and
+    // this coroutine resumes from receive() without one. Take a plain reference now, as pump()
+    // does. The Native outlives this coroutine:
+    // * startReadLoop() captures a strong ref to the WebSocket, which owns `farNative`, in the
+    //   continuation of this promise.
+    // * awaitIoLegacy() makes this promise an IoContext task. On teardown the IoContext destroys
+    //   `tasks` before the `ownedObjects` that back IoOwns.
+    // Releasing the native socket only replaces `native.state`; the Native itself stays alive, so
+    // its flags and state can still be read afterwards.
+    auto& native = *farNative;
     while (true) {
-      auto message = co_await ws.receive(maxMessageSize);
+      // Look up the Accepted state on every iteration instead of holding a reference across
+      // `co_await context.run()`. While the run waits for the isolate lock or input gate, an error
+      // path (e.g. a throwing 'open' listener) may set `closedIncoming` and let the native socket
+      // be released; the run callback below then ends the loop. If the release happens while
+      // receive() is pending, the receive is canceled. It holds its own reference to the socket
+      // until then.
+      //
+      // Note that we'll throw if the websocket has enabled hibernation.
+      auto message =
+          co_await KJ_ASSERT_NONNULL(native.state.tryGet<Accepted>()).receive(maxMessageSize);
 
       auto size = countBytesFromMessage(message);
       KJ_IF_SOME(o, observer) {
@@ -1397,9 +1488,20 @@ kj::Promise<kj::Maybe<kj::Exception>> LegacyWebSocketAdapter::readLoop(
       // something like context.run(handleMessage, *this, kj::mv(message)) where the acquired lock,
       // and the additional arguments are passed into handleMessage, avoiding the need for the
       // lambda here entirely.
-      auto result = co_await context.run([this, message = kj::mv(message)](auto& wLock) mutable {
-        auto& native = *farNative;
+      auto result =
+          co_await context.run([this, &native, message = kj::mv(message)](auto& wLock) mutable {
+        // Record the failure's origin here: its exception type cannot tell a listener's exception
+        // from a transport failure, since JSG converts a retryable JavaScript Error to DISCONNECTED.
+        // Nor would an exception detail help. The coupling never sees this exception, only the
+        // pipe's DISCONNECTED when this WebSocket releases its end.
+        KJ_ON_SCOPE_FAILURE(*native.dispatchFailed = true);
         jsg::Lock& js = wLock;
+        if (native.closedIncoming || !native.state.is<Accepted>()) {
+          // The incoming side was closed from outside the read loop while we waited for the lock,
+          // and the native socket may already be gone. The WebSocket has already reported its
+          // error and close, so drop the message and stop reading.
+          return false;
+        }
         // Emit the mark here, in-scope, so it isn't dropped for want of a perf-counter monitor
         // scope. The limiter stamps the time (dispatch time, ~= receive time).
         markWebSocketPerfEvent("ws_received"_kjc);
@@ -1452,7 +1554,7 @@ kj::Promise<kj::Maybe<kj::Exception>> LegacyWebSocketAdapter::readLoop(
         }
 
         return true;
-      }, mapAddRef(cs));
+      }, cs.clone());
 
       if (!result) co_return kj::none;
     }
@@ -1498,24 +1600,27 @@ void LegacyWebSocketAdapter::reportError(jsg::Lock& js, jsg::JsRef<jsg::JsValue>
         js.alloc<ErrorEvent>(
             ErrorEvent::ErrorEventInit{.message = kj::mv(msg), .error = kj::mv(err)}),
         EventTarget::effectiveExceptionPolicy(js, EventTarget::DispatchExceptionPolicy::REPORT));
+  }
 
-    // After an error we don't allow further send()s. If the receive loop has also ended then we
-    // can destroy the connection. Note that we don't set closedOutgoing = true because that flag
-    // is specifically to indicate that `close()` has been called, and it causes `send()` to throw
-    // an exception complaining specifically that `close()` was called, which would be
-    // inappropriate in this case.
-    auto& native = *farNative;
-    native.outgoingAborted = true;
-    if (native.closedIncoming && !native.isPumping) {
-      KJ_IF_SOME(pending, native.state.tryGet<AwaitingConnection>()) {
-        // Nothing worth canceling if we're reporting an error from the connection establishment
-        // continuations.
-        pending.canceler.release();
-      }
-
-      // We're no longer pumping so let's make sure we release the native connection here.
-      native.state.init<Released>();
+  // After an error we don't allow further send()s. If the receive loop has also ended then we
+  // can destroy the connection. Note that we don't set closedOutgoing = true because that flag
+  // is specifically to indicate that `close()` has been called, and it causes `send()` to throw
+  // an exception complaining specifically that `close()` was called, which would be
+  // inappropriate in this case.
+  //
+  // This runs on every call, not just the first: the outgoing pump may have finished since the
+  // error was first reported. Releasing Accepted also cancels any pending receive().
+  auto& native = *farNative;
+  native.outgoingAborted = true;
+  if (native.closedIncoming && !native.isPumping) {
+    KJ_IF_SOME(pending, native.state.tryGet<AwaitingConnection>()) {
+      // Nothing worth canceling if we're reporting an error from the connection establishment
+      // continuations.
+      pending.canceler.release();
     }
+
+    // We're no longer pumping so let's make sure we release the native connection here.
+    native.state.init<Released>();
   }
 }
 
@@ -1612,12 +1717,12 @@ LegacyWebSocketAdapter::Accepted::WrappedWebSocket::WrappedWebSocket(Hibernatabl
 }
 
 LegacyWebSocketAdapter::Accepted::WrappedWebSocket::WrappedWebSocket(kj::Own<kj::WebSocket> ws) {
-  inner.init<kj::Own<kj::WebSocket>>(kj::mv(ws));
+  inner.init<kj::Rc<kj::WebSocket>>(kj::mv(ws));
 }
 
 kj::WebSocket* LegacyWebSocketAdapter::Accepted::WrappedWebSocket::operator->() {
   KJ_SWITCH_ONEOF(inner) {
-    KJ_CASE_ONEOF(owned, kj::Own<kj::WebSocket>) {
+    KJ_CASE_ONEOF(owned, kj::Rc<kj::WebSocket>) {
       return owned.get();
     }
     KJ_CASE_ONEOF(hibernatable, Hibernatable) {
@@ -1627,24 +1732,16 @@ kj::WebSocket* LegacyWebSocketAdapter::Accepted::WrappedWebSocket::operator->() 
   KJ_UNREACHABLE;
 }
 
-kj::WebSocket& LegacyWebSocketAdapter::Accepted::WrappedWebSocket::operator*() {
+kj::Rc<kj::WebSocket> LegacyWebSocketAdapter::Accepted::WrappedWebSocket::addRef() {
   KJ_SWITCH_ONEOF(inner) {
-    KJ_CASE_ONEOF(owned, kj::Own<kj::WebSocket>) {
-      return *owned;
+    KJ_CASE_ONEOF(owned, kj::Rc<kj::WebSocket>) {
+      return owned.addRef();
     }
     KJ_CASE_ONEOF(hibernatable, Hibernatable) {
-      return *hibernatable.ws;
+      return hibernatable.ws.addRef();
     }
   }
   KJ_UNREACHABLE;
-}
-
-kj::Maybe<kj::Own<kj::WebSocket>&> LegacyWebSocketAdapter::Accepted::WrappedWebSocket::
-    getIfNotHibernatable() {
-  // The implication of getting nullptr is that this websocket is hibernatable. This is useful
-  // if the caller only ever expects to get a regular websocket, for example, if they are in
-  // any method that should be inaccessible to hibernatable websockets (ex. readLoop).
-  return inner.tryGet<kj::Own<kj::WebSocket>>();
 }
 
 kj::Maybe<LegacyWebSocketAdapter::Accepted::Hibernatable&> LegacyWebSocketAdapter::Accepted::
@@ -1683,7 +1780,17 @@ bool LegacyWebSocketAdapter::Accepted::WrappedWebSocket::isAwaitingError() {
 }
 
 bool LegacyWebSocketAdapter::Accepted::isHibernatable() {
-  return ws.getIfNotHibernatable() == kj::none;
+  return ws.getIfHibernatable() != kj::none;
+}
+
+kj::Promise<kj::WebSocket::Message> LegacyWebSocketAdapter::Accepted::receive(
+    size_t maxMessageSize) {
+  // Hibernatable websockets are read by the HibernationManager, not by us.
+  KJ_REQUIRE(!isHibernatable());
+  return wrapIo([maxMessageSize](kj::Rc<kj::WebSocket> socket) {
+    auto promise = socket->receive(maxMessageSize);
+    return promise.attach(kj::mv(socket));
+  });
 }
 
 void WebSocketPair::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {

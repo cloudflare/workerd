@@ -67,7 +67,7 @@ public:
 
   // Given a delimiter string `boundary`, serialize all fields in this form data to an array of
   // bytes suitable for use as an HTTP message body.
-  kj::Array<kj::byte> serialize(kj::ArrayPtr<const char> boundary);
+  kj::Array<kj::byte> serialize(jsg::Lock& js, kj::ArrayPtr<const char> boundary);
 
   struct Entry {
     kj::String name;

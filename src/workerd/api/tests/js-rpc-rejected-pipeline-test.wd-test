@@ -1,0 +1,35 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# A rejected RPC promise must not keep its call's pipeline alive. Each test holds a rejected
+# promise while the "results" tail worker reports the outcome of the callee's invocation.
+const unitTests :Workerd.Config = (
+  v8Flags = ["--expose-gc"],
+  services = [
+    ( name = "js-rpc-rejected-pipeline-test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "js-rpc-rejected-pipeline-test.js")],
+        compatibilityFlags = ["nodejs_compat", "rpc"],
+        bindings = [
+          (name = "CALLEE", service = (name = "callee", entrypoint = "Callee")),
+          (name = "RESULTS", service = (name = "results", entrypoint = "Results")),
+          (name = "ACTOR", durableObjectNamespace = (className = "CalleeActor", serviceName = "callee")),
+        ],
+      )
+    ),
+    ( name = "callee",
+      worker = (
+        modules = [(name = "worker", esModule = embed "js-rpc-rejected-pipeline-test-callee.js")],
+        compatibilityFlags = ["nodejs_compat", "rpc"],
+        durableObjectNamespaces = [(className = "CalleeActor", uniqueKey = "callee-actor")],
+        durableObjectStorage = (inMemory = void),
+        tails = ["results"],
+      )
+    ),
+    ( name = "results",
+      worker = (
+        modules = [(name = "worker", esModule = embed "js-rpc-rejected-pipeline-test-tail.js")],
+        compatibilityFlags = ["nodejs_compat", "rpc"],
+      )
+    ),
+  ],
+);

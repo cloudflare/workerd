@@ -54,6 +54,79 @@ class FrozenTimerChannel final: public TimerChannel {
   kj::Date currentTime = kj::UNIX_EPOCH;
 };
 
+SpanParent traceScopeParent(uint64_t id) {
+  return SpanParent::fromSpanContext(
+      tracing::SpanContext(tracing::TraceId(1, 2), tracing::SpanId(id)));
+}
+
+uint64_t traceScopeSpanId(SpanParent parent) {
+  auto context = parent.toSpanContext();
+  return KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(context).getSpanId()).getId();
+}
+
+class TraceScopeRequestObserver final: public RequestObserver {
+ public:
+  SpanParent getSpan() override {
+    return traceScopeParent(11);
+  }
+};
+
+KJ_TEST("request trace scopes capture both roots and restore enclosing tracing and storage") {
+  for (bool observeUser: {false, true}) {
+    TestFixture fixture({
+      .useRealTimers = false,
+      .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
+          []() -> kj::Own<RequestObserver> { return kj::refcounted<TraceScopeRequestObserver>(); }),
+    });
+    auto context = fixture.newIoContext();
+    kj::Maybe<kj::Rc<BaseTracer>> tracer;
+    if (observeUser) {
+      auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+          kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
+      auto workerTracer =
+          kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::NONE, kj::none, kj::none);
+      workerTracer->setMakeUserRequestSpanFunc(
+          [](tracing::TraceId, kj::Maybe<tracing::TraceFlags>) { return traceScopeParent(22); });
+      tracer = kj::Rc<BaseTracer>(kj::mv(workerTracer));
+    }
+    auto request = fixture.newUndeliveredIncomingRequest(*context, kj::mv(tracer));
+    request->delivered();
+    fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+      auto key = kj::arc<jsg::AsyncContextFrame::StorageKey>();
+      jsg::AsyncContextFrame::StorageScope storageScope(
+          env.js, key.addRef(), env.js.v8Ref(v8::Integer::New(env.isolate, 55).As<v8::Value>()));
+      auto internalScope = context->makeAsyncTraceScope(env.lock, traceScopeParent(33));
+      auto userScope = context->makeUserAsyncTraceScope(env.lock, traceScopeParent(44));
+      auto& prior = KJ_ASSERT_NONNULL(jsg::AsyncContextFrame::current(env.js));
+      kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> captured;
+      auto checkRequestScope = [&]() {
+        KJ_EXPECT(traceScopeSpanId(context->getCurrentTraceSpan()) == 11);
+        auto userParent = context->getCurrentUserTraceSpan();
+        KJ_EXPECT(userParent.isObserved() == observeUser);
+        if (observeUser) {
+          KJ_EXPECT(traceScopeSpanId(kj::mv(userParent)) == 22);
+        }
+        auto& current = KJ_ASSERT_NONNULL(jsg::AsyncContextFrame::current(env.js));
+        auto value = KJ_ASSERT_NONNULL(current.get(*key)).getHandle(env.js);
+        KJ_EXPECT(value.As<v8::Int32>()->Value() == 55);
+      };
+      {
+        auto scope = context->makeRequestTraceScope(env.lock);
+        checkRequestScope();
+        captured = jsg::AsyncContextFrame::currentRef(env.js);
+      }
+      KJ_EXPECT(&KJ_ASSERT_NONNULL(jsg::AsyncContextFrame::current(env.js)) == &prior);
+      KJ_EXPECT(traceScopeSpanId(context->getCurrentTraceSpan()) == 33);
+      KJ_EXPECT(traceScopeSpanId(context->getCurrentUserTraceSpan()) == 44);
+      {
+        jsg::AsyncContextFrame::Scope scope(env.js, captured);
+        checkRequestScope();
+      }
+    });
+    fixture.drainAndDestroy(kj::mv(request));
+  }
+}
+
 KJ_TEST("trace onset synchronizes an idle actor's clock before reading it") {
   FrozenTimerChannel timer;
   kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)> makeChannelFactory =
@@ -75,8 +148,8 @@ KJ_TEST("trace onset synchronizes an idle actor's clock before reading it") {
   auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
       kj::Array<kj::String>(), kj::none, ExecutionModel::DURABLE_OBJECT);
   auto traceRef = kj::addRef(*trace);
-  kj::Own<BaseTracer> tracer = kj::refcounted<WorkerTracer>(
-      kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::none);
+  kj::Rc<BaseTracer> tracer =
+      kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::none);
   auto request = fixture.newUndeliveredIncomingRequest(*context, kj::mv(tracer));
 
   KJ_EXPECT(request->now() == kj::UNIX_EPOCH);
@@ -85,6 +158,28 @@ KJ_TEST("trace onset synchronizes an idle actor's clock before reading it") {
 
   request->delivered();
   fixture.drainAndDestroy(kj::mv(request));
+}
+
+KJ_TEST("cloning an incoming request tracer keeps it alive until the clone is dropped") {
+  TestFixture fixture;
+  auto context = fixture.newIoContext();
+  auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+      kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
+  auto tracer =
+      kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::FULL, kj::none, kj::none);
+  auto complete = tracer->onComplete();
+  auto request = fixture.newUndeliveredIncomingRequest(*context, kj::mv(tracer));
+  KJ_ASSERT_NONNULL(request->getWorkerTracer()).setEventInfo(*request, tracing::CustomEventInfo());
+  request->delivered();
+
+  auto clone = request->getWorkerTracer().clone();
+  KJ_ASSERT_NONNULL(clone);
+  fixture.drainAndDestroy(kj::mv(request));
+  KJ_EXPECT(!complete.poll(fixture.getWaitScope()));
+
+  clone = kj::none;
+  KJ_ASSERT(complete.poll(fixture.getWaitScope()));
+  complete.wait(fixture.getWaitScope());
 }
 
 KJ_TEST("final request cancels context tasks before it stops being current") {

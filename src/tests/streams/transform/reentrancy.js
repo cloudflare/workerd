@@ -253,6 +253,56 @@ export const readableCancelInsideSize = {
   },
 };
 
+// readable.cancel() inside a size() that then throws e2, for a write
+// with no hooks, with flush() only (the default transform enqueues) and
+// with a transform() that enqueues. TypeScript follows the spec
+// (TransformStreamDefaultControllerEnqueue step 5) with or without
+// hooks: the write rejects with the closed readable's stored error,
+// undefined, and the writable is errored with e2. DIVERGENCE (#23): C++
+// swallows the throw (#20), so the write fulfills and the writable is
+// errored with the cancel reason.
+export const readableCancelInsideThrowingSize = {
+  async test() {
+    for (const hooks of ['none', 'flush', 'transform']) {
+      const reason = new Error('cancel-reason');
+      const e2 = new Error('e2');
+      let transformer;
+      if (hooks === 'flush') transformer = { flush() {} };
+      if (hooks === 'transform') {
+        transformer = {
+          transform(chunk, c) {
+            c.enqueue(chunk);
+          },
+        };
+      }
+      let cancelPromise;
+      const ts = new TransformStream(transformer, undefined, {
+        size() {
+          cancelPromise ??= ts.readable.cancel(reason);
+          throw e2;
+        },
+        highWaterMark: 1,
+      });
+      await scheduler.wait(1);
+      const writer = ts.writable.getWriter();
+      const [write, closed] = await Promise.allSettled([
+        writer.write('a'),
+        writer.closed,
+      ]);
+      strictEqual(await cancelPromise, undefined, hooks);
+      strictEqual(closed.status, 'rejected', hooks);
+      if (!usingTsImpl) {
+        strictEqual(write.status, 'fulfilled', hooks);
+        strictEqual(closed.reason, reason, hooks);
+      } else {
+        strictEqual(write.status, 'rejected', hooks);
+        strictEqual(write.reason, undefined, hooks);
+        strictEqual(closed.reason, e2, hooks);
+      }
+    }
+  },
+};
+
 // writer.write() inside size() (parity): the outer write's size() issues
 // a nested write whose own size() call is suppressed by the calls guard;
 // the nested chunk is enqueued after the outer one.
@@ -475,5 +525,75 @@ export const writableAbortInsideSize = {
     await reader.read().catch((e) => (readErr = e));
     strictEqual(readErr, reason);
     strictEqual(await abortPromise, undefined);
+  },
+};
+
+// controller.enqueue() whose readable-side size() throws e2 after
+// re-entering the stream throws the readable's stored error, not e2
+// (spec TransformStreamDefaultControllerEnqueue step 5.2; Node agrees):
+// error(e1) gives e1, error(undefined) gives undefined, and a
+// readable.cancel() or terminate(), which close the readable, give
+// undefined (it has no stored error). The writable is errored with e2
+// unless an earlier error got there first. DIVERGENCE (#20): C++
+// swallows the throw, so enqueue() returns; with no re-entry it leaves
+// the write pending forever, so that shape is TS only.
+export const enqueueThrowsReadableStoredError = {
+  async test() {
+    const e1 = new Error('e1');
+    const e2 = new Error('e2');
+    const shapes = [
+      ['error(undefined)', (c) => c.error(undefined), undefined, undefined],
+      ['error(e1)', (c) => c.error(e1), e1, e1],
+      ['cancel', (c, ts) => ts.readable.cancel(new Error('r')), undefined, e2],
+      ['terminate', (c) => c.terminate(), undefined, TypeError],
+    ];
+    if (usingTsImpl) shapes.push(['no re-entry', () => {}, e2, e2]);
+    for (const [name, inSize, expectedThrow, expectedClosed] of shapes) {
+      let outcome = 'not called';
+      let controller;
+      const ts = new TransformStream(
+        {
+          start(c) {
+            controller = c;
+          },
+          transform(chunk, c) {
+            try {
+              c.enqueue(chunk);
+              outcome = 'returned';
+            } catch (e) {
+              outcome = { thrown: e };
+            }
+          },
+        },
+        undefined,
+        {
+          highWaterMark: 1,
+          size() {
+            inSize(controller, ts);
+            throw e2;
+          },
+        }
+      );
+      const writer = ts.writable.getWriter();
+      strictEqual(await writer.write('x'), undefined, name);
+      if (usingTsImpl) {
+        ok(typeof outcome === 'object', name);
+        strictEqual(outcome.thrown, expectedThrow, name);
+      } else {
+        strictEqual(outcome, 'returned', name);
+      }
+      const closedError = await writer.closed.then(
+        () => 'fulfilled',
+        (e) => e
+      );
+      if (expectedClosed === TypeError) {
+        ok(closedError instanceof TypeError, name);
+      } else if (!usingTsImpl && name === 'cancel') {
+        // The cancel reason reaches C++'s writable first.
+        strictEqual(closedError.message, 'r', name);
+      } else {
+        strictEqual(closedError, expectedClosed, name);
+      }
+    }
   },
 };

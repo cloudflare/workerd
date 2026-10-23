@@ -295,6 +295,14 @@ bool Lock::getThrowOnUnrecognizedImportAssertion() const {
   return IsolateBase::from(v8Isolate).getThrowOnUnrecognizedImportAssertion();
 }
 
+void Lock::setWasmEsmIntegrationBuiltinsEnabled() {
+  IsolateBase::from(v8Isolate).setWasmEsmIntegrationBuiltinsEnabled();
+}
+
+bool Lock::isWasmEsmIntegrationBuiltinsEnabled() const {
+  return IsolateBase::from(v8Isolate).isWasmEsmIntegrationBuiltinsEnabled();
+}
+
 void Lock::disableTopLevelAwait() {
   IsolateBase::from(v8Isolate).disableTopLevelAwait();
 }
@@ -407,6 +415,14 @@ Lock::ModuleEvaluationScope::ModuleEvaluationScope(Lock& js): js(js) {
 
 Lock::ModuleEvaluationScope::~ModuleEvaluationScope() noexcept(false) {
   IsolateBase::from(js.v8Isolate).leaveModuleEvaluation({});
+}
+
+bool Lock::isPreparingSnapshot() const {
+  return IsolateBase::from(v8Isolate).isPreparingSnapshot();
+}
+
+bool Lock::isStartingFromSnapshot() const {
+  return IsolateBase::from(v8Isolate).isStartingFromSnapshot();
 }
 
 void Lock::terminateNextExecution() {

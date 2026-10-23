@@ -5,7 +5,8 @@
 // Object.prototype.then pollution while a read settles: the streams
 // machinery must neither invoke the interceptor as a thenable nor leak
 // it into results, and what the interceptor does to the stream while a
-// result settles must not disturb the other consumers of a tee.
+// result settles must not disturb the other consumers of a tee, or the
+// other reads a cancel() or close() answered.
 
 import { deepStrictEqual, strictEqual } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -176,6 +177,42 @@ export const thenGetterCancelsTwoBranchesDuringEnqueue = {
   },
 };
 
+// The getter releases the reader while cancel() or close() settles its
+// pending reads, from the first read's result. Either call answers every
+// read at once, so the next read still resolves done rather than rejecting
+// with the release.
+export const thenGetterReleasesReaderWhileReadsSettle = {
+  async test() {
+    const ends = {
+      cancel: (reader) => reader.cancel('bye'),
+      close: (reader, controller) => controller.close(),
+    };
+    for (const [name, end] of Object.entries(ends)) {
+      const { rs, controller } = pushSource();
+      const reader = rs.getReader();
+      const reads = [reader.read(), reader.read()];
+      let fired = 0;
+      await withThenGetter(
+        (target) => {
+          if (Object.hasOwn(target, 'done') && fired++ === 0) {
+            reader.releaseLock();
+          }
+        },
+        async () => {
+          const ended = end(reader, controller);
+          for (const read of reads) {
+            const result = await settled(read);
+            strictEqual(result.done, true, name);
+            strictEqual(result.value, undefined, name);
+          }
+          strictEqual(fired > 0, true, `${name}: the then getter did not run`);
+          await ended;
+        }
+      );
+    }
+  },
+};
+
 export const thenGetterFireCountOnRead = {
   async test() {
     let fired = 0;
@@ -206,6 +243,236 @@ export const thenGetterFireCountOnRead = {
     strictEqual('then' in {}, false, 'interceptor must be removed');
     // Counts measured in the wd-test harness context (see the transform
     // suite's thenGetterFireCount for the context-sensitivity note).
-    strictEqual(fired, usingTsImpl ? 2 : 1);
+    strictEqual(fired, 1);
+  },
+};
+
+// Counts the then-getter fires on read results while op runs, and checks
+// that every result op returns is an ordinary object. A result is an object
+// with an own `done` (a C++ end-of-stream result has no `value`).
+async function resultThenLookups(op) {
+  let fired = 0;
+  let results;
+  await withThenGetter(
+    (target) => {
+      if (Object.hasOwn(target, 'done')) {
+        fired++;
+      }
+    },
+    async () => {
+      results = await op();
+    }
+  );
+  for (const result of results ?? []) {
+    strictEqual(Object.getPrototypeOf(result), Object.prototype);
+  }
+  return fired;
+}
+
+function pushSource(highWaterMark = 1) {
+  let controller;
+  const rs = new ReadableStream(
+    {
+      start(c) {
+        controller = c;
+      },
+    },
+    { highWaterMark }
+  );
+  return { rs, controller };
+}
+
+// Resolving the promise read() returns looks `then` up on its result once,
+// whether the read is answered from the queue, waits for enqueue() or
+// close(), or finds the stream closed; a tee branch's read too.
+export const thenGetterFiresOncePerRead = {
+  async test() {
+    const cases = {
+      queued() {
+        const { rs, controller } = pushSource();
+        controller.enqueue('x');
+        return async () => [await rs.getReader().read()];
+      },
+      waitsForEnqueue() {
+        const { rs, controller } = pushSource();
+        const reader = rs.getReader();
+        return async () => {
+          const read = reader.read();
+          controller.enqueue('x');
+          return [await read];
+        };
+      },
+      waitsForClose() {
+        const { rs, controller } = pushSource();
+        const reader = rs.getReader();
+        return async () => {
+          const read = reader.read();
+          controller.close();
+          return [await read];
+        };
+      },
+      lastChunkWithCloseRequested() {
+        const { rs, controller } = pushSource();
+        controller.enqueue('x');
+        controller.close();
+        return async () => [await rs.getReader().read()];
+      },
+      closed() {
+        const { rs, controller } = pushSource();
+        controller.close();
+        return async () => [await rs.getReader().read()];
+      },
+      teeBranchWaitsForEnqueue() {
+        const { rs, controller } = pushSource();
+        const [branch] = rs.tee();
+        const reader = branch.getReader();
+        return async () => {
+          const read = reader.read();
+          controller.enqueue('x');
+          return [await read];
+        };
+      },
+    };
+    for (const [name, setup] of Object.entries(cases)) {
+      const op = setup();
+      const fired = await resultThenLookups(op);
+      strictEqual(fired, 1, `${name}: ${fired}`);
+    }
+  },
+};
+
+// When the getter runs for a read waiting on enqueue() or close(): inside
+// the call, as the call resolves the read promise (spec; Node agrees),
+// versus once the call has returned (C++; ledger #16).
+export const thenGetterTimingForWaitingRead = {
+  async test() {
+    for (const end of ['enqueue', 'close']) {
+      const { rs, controller } = pushSource();
+      const reader = rs.getReader();
+      const read = reader.read();
+      const events = [];
+      await withThenGetter(
+        (target) => {
+          if (Object.hasOwn(target, 'done')) events.push('getter');
+        },
+        async () => {
+          if (end === 'enqueue') controller.enqueue('x');
+          else controller.close();
+          events.push('returned');
+          await read;
+        }
+      );
+      deepStrictEqual(
+        events,
+        usingTsImpl ? ['getter', 'returned'] : ['returned', 'getter'],
+        end
+      );
+    }
+  },
+};
+
+// A pipe's reads settle internal promises only: the getter never sees a
+// read result, whether the pipe finds chunks queued or waits for them.
+export const thenGetterNotConsultedByPipeReads = {
+  async test() {
+    const queued = pushSource();
+    for (const chunk of ['a', 'b']) queued.controller.enqueue(chunk);
+    queued.controller.close();
+    const waiting = pushSource();
+    const got = [];
+    const sink = () =>
+      new WritableStream({
+        write(chunk) {
+          got.push(chunk);
+        },
+      });
+    const fired = await resultThenLookups(async () => {
+      await queued.rs.pipeTo(sink());
+      const pipe = waiting.rs.pipeTo(sink());
+      await scheduler.wait(0);
+      waiting.controller.enqueue('c');
+      await scheduler.wait(0);
+      waiting.controller.enqueue('d');
+      waiting.controller.close();
+      await pipe;
+    });
+    deepStrictEqual(got, ['a', 'b', 'c', 'd']);
+    strictEqual(fired, 0);
+  },
+};
+
+// An async-iterator next() made while no other is pending looks `then` up
+// once, answered from the queue or waiting for a chunk. A next() made while
+// another is still pending settles by adopting the promise of the step it
+// waited for, which looks `then` up a second time (WebIDL; Node agrees);
+// C++ looks it up once (ledger #24). The first next() waits for nothing.
+export const thenGetterPerIteratorNext = {
+  async test() {
+    const primed = async (chunks) => {
+      const { rs, controller } = pushSource(chunks.length + 1);
+      for (const chunk of chunks) controller.enqueue(chunk);
+      const it = rs.values();
+      await it.next();
+      return { it, controller };
+    };
+    {
+      const { it } = await primed(['x', 'y']);
+      strictEqual(await resultThenLookups(async () => [await it.next()]), 1);
+    }
+    {
+      const { it, controller } = await primed(['x']);
+      const fired = await resultThenLookups(async () => {
+        const next = it.next();
+        await scheduler.wait(0);
+        controller.enqueue('y');
+        return [await next];
+      });
+      strictEqual(fired, 1);
+    }
+    const chained = usingTsImpl ? 2 : 1;
+    {
+      const { it } = await primed(['x', 'y', 'z']);
+      const fired = await resultThenLookups(async () => {
+        const first = it.next();
+        const second = it.next();
+        return [await first, await second];
+      });
+      strictEqual(fired, 1 + chained);
+    }
+    {
+      const { rs, controller } = pushSource();
+      controller.enqueue('x');
+      const it = rs.values();
+      strictEqual(await resultThenLookups(async () => [await it.next()]), 1);
+    }
+  },
+};
+
+// An async-iterator return() looks `then` up once on a live iterator,
+// whose return steps settle with undefined. On a finished iterator the
+// return steps resolve with a result object of their own before return()
+// builds the caller's, so TS looks it up twice (WebIDL); C++ and Node look
+// it up once (ledger #26).
+export const thenGetterPerIteratorReturn = {
+  async test() {
+    {
+      const { rs } = pushSource();
+      const it = rs.values();
+      const fired = await resultThenLookups(async () => [await it.return('v')]);
+      strictEqual(fired, 1);
+    }
+    {
+      const { rs, controller } = pushSource();
+      controller.close();
+      const it = rs.values();
+      strictEqual((await it.next()).done, true);
+      let result;
+      const fired = await resultThenLookups(async () => {
+        result = await it.return('v');
+        return [result];
+      });
+      deepStrictEqual(result, { value: 'v', done: true });
+      strictEqual(fired, usingTsImpl ? 2 : 1);
+    }
   },
 };

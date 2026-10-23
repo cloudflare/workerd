@@ -30,25 +30,19 @@ export const testDirectQuery = {
     });
 
     assert.deepEqual(response, {
-      success: true,
-      results: {
-        bookmark: response.results.bookmark,
-        queryResults: [
-          {
-            meta: response.results.queryResults[0].meta,
-            data: {
-              kind: 'raw',
-              columns: ['answer'],
-              rows: [[42]],
-            },
+      bookmark: response.bookmark,
+      results: [
+        {
+          meta: response.results[0].meta,
+          data: {
+            kind: 'raw',
+            columns: ['answer'],
+            rows: [[42]],
           },
-        ],
-      },
+        },
+      ],
     });
-    assert.equal(typeof response.results.bookmark, 'string');
-    assert.equal(
-      typeof response.results.queryResults[0].meta.duration,
-      'number'
-    );
+    assert.equal(typeof response.bookmark, 'string');
+    assert.equal(typeof response.results[0].meta.duration, 'number');
   },
 };

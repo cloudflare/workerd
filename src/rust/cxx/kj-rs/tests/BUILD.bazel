@@ -26,10 +26,6 @@ rust_library(
         ":test-own-bridge",
         ":test-promises",
     ],
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         # TODO(cleanup): Why isn't :cxx transitive?
         "//src/rust/cxx",
@@ -142,7 +138,7 @@ kj_test(
     src = "linked-group-test.c++",
     deps = [
         "//src/rust/cxx/kj-rs",
-        "//src/rust/cxx/third-party:runtime",
+        "@@//deps:rust_runtime",
     ],
 )
 
@@ -151,7 +147,7 @@ kj_test(
     deps = [
         ":bridge",
         ":tests",
-        "//src/rust/cxx/third-party:runtime",
+        "@@//deps:rust_runtime",
     ],
 )
 
@@ -160,7 +156,7 @@ kj_test(
     src = "convert-test.c++",
     deps = [
         "//src/rust/cxx/kj-rs",
-        "//src/rust/cxx/third-party:runtime",
+        "@@//deps:rust_runtime",
     ],
 )
 
@@ -170,7 +166,7 @@ kj_test(
     deps = [
         ":tests",
         "//src/rust/cxx/kj-rs",
-        "//src/rust/cxx/third-party:runtime",
+        "@@//deps:rust_runtime",
     ],
 )
 
@@ -179,7 +175,7 @@ kj_test(
     deps = [
         ":bridge",
         ":tests",
-        "//src/rust/cxx/third-party:runtime",
+        "@@//deps:rust_runtime",
     ],
 )
 
@@ -188,6 +184,6 @@ kj_test(
     deps = [
         ":bridge",
         ":tests",
-        "//src/rust/cxx/third-party:runtime",
+        "@@//deps:rust_runtime",
     ],
 )

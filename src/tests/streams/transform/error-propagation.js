@@ -294,3 +294,65 @@ export const errorNoopAfterTransformThrow = {
     strictEqual(closedErr, thrown);
   },
 };
+
+// controller.enqueue() once the readable's close is requested but its
+// queue still holds a chunk: flush() has settled, so the transform has
+// closed the readable, and the writable's close is still in flight for a
+// few microtasks. The enqueue throws a TypeError and leaves the writable
+// alone (spec TransformStreamDefaultControllerEnqueue step 4, Node
+// agrees): its desiredSize is unchanged and ready does not reject. The
+// enqueue is retried at successive microtasks to cover that window
+// whatever its length (parity; C++ keeps it open longer).
+export const enqueueAfterCloseRequestedLeavesWritable = {
+  async test() {
+    let threwInWindow = false;
+    for (let n = 0; n <= 4; n++) {
+      let thrown;
+      let before;
+      let after;
+      let writer;
+      const ts = new TransformStream(
+        {
+          flush(controller) {
+            // Stays queued: no reader yet, readable hwm 0.
+            controller.enqueue('a');
+            let p = Promise.resolve();
+            for (let i = 0; i < n; i++) p = p.then(() => {});
+            p.then(() => {
+              before = writer.desiredSize;
+              try {
+                controller.enqueue('b');
+                thrown = null;
+              } catch (e) {
+                thrown = e;
+              }
+              after = writer.desiredSize;
+            });
+          },
+        },
+        undefined,
+        { highWaterMark: 0 }
+      );
+      writer = ts.writable.getWriter();
+      const close = writer.close();
+      await scheduler.wait(0);
+      const data = await consume(ts.readable);
+      strictEqual(await close, undefined);
+      strictEqual(await writer.closed, undefined);
+      strictEqual(await writer.ready, undefined);
+      if (n === 0) {
+        // Before flush() settles: the enqueue is accepted.
+        strictEqual(thrown, null);
+        strictEqual(data, 'ab');
+        continue;
+      }
+      ok(thrown instanceof TypeError, `tick ${n}`);
+      strictEqual(data, 'a', `tick ${n}`);
+      strictEqual(after, before, `tick ${n}`);
+      if (before !== 0) threwInWindow = true;
+    }
+    // At least one retry landed while the writable's close was still in
+    // flight (desiredSize not yet 0).
+    ok(threwInWindow);
+  },
+};

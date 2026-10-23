@@ -5,19 +5,19 @@ Subject: bind icu to googlesource
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 91ead9e0f732879aee7cbb5b155217a5b7ab9afb..30923227154ac6a928a8938b417c12589f7b005d 100644
+index 9c853cb1c0560f5f577b08a7700d30f669cb4b6c..a157e80e054739d672db5ca7f44630a6a243a1e8 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4720,7 +4720,7 @@ v8_library(
+@@ -4967,7 +4967,7 @@ v8_library(
      copts = ["-Wno-implicit-fallthrough"],
      icu_deps = [
          ":icu/generated_torque_definitions_headers",
 -        "//external:icu",
 +        "@com_googlesource_chromium_icu//:icu",
-     ],
-     icu_srcs = [
-         ":generated_regexp_special_case",
-@@ -4843,7 +4843,7 @@ v8_binary(
+     ] + select({
+         ":is_v8_use_metagen": [
+             ":icu/run_metagen_headers",
+@@ -5106,7 +5106,7 @@ v8_binary(
      ],
      deps = [
          ":v8_libbase",

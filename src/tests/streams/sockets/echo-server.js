@@ -11,6 +11,9 @@
 // GREET (STREAMS_GREET_PORT): writes a fixed greeting immediately and
 // ends its side (client readable delivers the greeting, then EOF); the
 // server keeps reading anything the client sends until close.
+//
+// STALL (STREAMS_STALL_PORT): accepts and never reads, so a client write
+// larger than the socket buffers stays in flight.
 
 import net from 'node:net';
 
@@ -33,4 +36,12 @@ const greet = net.createServer((socket) => {
 });
 greet.listen({ port: 0, host }, () => {
   console.log(`STREAMS_GREET_PORT=${greet.address().port}`);
+});
+
+const stall = net.createServer((socket) => {
+  socket.pause();
+  socket.on('error', () => {});
+});
+stall.listen({ port: 0, host }, () => {
+  console.log(`STREAMS_STALL_PORT=${stall.address().port}`);
 });

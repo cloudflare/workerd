@@ -19,6 +19,7 @@ thread_local uint allowV8BackgroundThreadScopeCount = 0;
 
 bool multiTenantProcess = false;
 bool predictableMode = false;
+bool benchMode = false;
 bool gcStressMode = false;
 
 // This variable is read in signal handlers, so use atomic stores and compiler barriers as
@@ -54,6 +55,18 @@ bool isPredictableModeForTest() {
 
 void setPredictableModeForTest() {
   predictableMode = true;
+}
+
+bool isBenchMode() {
+  return benchMode;
+}
+
+void setBenchMode() {
+  benchMode = true;
+}
+
+void unsetBenchModeForTest() {
+  benchMode = false;
 }
 
 bool isGcStressModeForTest() {
@@ -96,16 +109,18 @@ ThreadProgressCounter::ThreadProgressCounter(uint64_t& counter)
 }
 
 ThreadProgressCounter::~ThreadProgressCounter() noexcept(false) {
-  auto& self = KJ_ASSERT_NONNULL(
-      activeProgressCounter, "~ProgressCounter() with no active progress counter.");
-  if (&self == this) {
-    // Acquire compiler barrier to prevent any teardown from leaking above this nullification.
-    KJ_DEFER({
-      __atomic_store_n(&activeProgressCounter, nullptr, __ATOMIC_RELAXED);
-      std::atomic_signal_fence(std::memory_order_acquire);
-    });
+  KJ_IF_SOME(self, activeProgressCounter) {
+    if (&self == this) {
+      // Acquire compiler barrier to prevent any teardown from leaking above this nullification.
+      KJ_DEFER({
+        __atomic_store_n(&activeProgressCounter, nullptr, __ATOMIC_RELAXED);
+        std::atomic_signal_fence(std::memory_order_acquire);
+      });
+    } else {
+      // Nothing to do, tearing down reentered progress counter.
+    }
   } else {
-    // Nothing to do, tearing down reentered progress counter.
+    KJ_DTOR_FAIL_ASSERT("~ProgressCounter() with no active progress counter.");
   }
 }
 

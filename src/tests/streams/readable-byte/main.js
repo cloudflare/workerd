@@ -6,6 +6,9 @@
 // only. The default export serves the SELF binding used by the
 // integration tests (echo).
 
+// Set by a request to /fail-now: the /failing body errors once it is set.
+let failNow = false;
+
 export default {
   async fetch(request) {
     const url = new URL(request.url);
@@ -41,8 +44,38 @@ export default {
       });
       return new Response(rs);
     }
+    // Chunk foo, then an error once the test requests /fail-now, so a read
+    // of the body stays in flight until the test is ready for the failure.
+    if (url.pathname === '/failing') {
+      failNow = false;
+      let sent = false;
+      const rs = new ReadableStream({
+        async pull(controller) {
+          if (!sent) {
+            sent = true;
+            controller.enqueue(new TextEncoder().encode('foo'));
+            return;
+          }
+          while (!failNow) {
+            await scheduler.wait(1);
+          }
+          controller.error(new Error('the body failed'));
+        },
+      });
+      return new Response(rs);
+    }
+    if (url.pathname === '/fail-now') {
+      failNow = true;
+      return new Response(null);
+    }
     return new Response(request.body, {
-      headers: { 'content-type': 'application/octet-stream' },
+      headers: {
+        'content-type': 'application/octet-stream',
+        // The Content-Length the subrequest carried, for expected-length.js.
+        'observed-content-length': String(
+          request.headers.get('content-length')
+        ),
+      },
     });
   },
 };
@@ -50,6 +83,9 @@ export default {
 export {
   sizeStrategyForBytes,
   autoAllocateChunkSizeValidated,
+  fractionalAutoAllocateChunkSize,
+  argumentConversionOrder,
+  conversionErrorPrecedence,
   byteHwmDefaultIsZero,
   syncStartThrow,
 } from 'construction';
@@ -71,6 +107,7 @@ export {
   readAfterCancelReturnsEmptyView,
   readDetachesCallerBuffer,
   closeWithPendingUnfilledByobRead,
+  closeWithPendingDefaultRead,
   controllerType,
   errorAfterCloseWithQueuedBytes,
   cancelWithPartiallyFilledPull,
@@ -95,6 +132,8 @@ export {
   byobreaderRegression,
   partialViewThenDefaultRead,
   nativeByobMultiByteViews,
+  byobReaderOnSettledBranchOrDetachedBody,
+  byobReaderOnSettledDefaultStream,
 } from 'byob-reader';
 
 export {
@@ -150,14 +189,17 @@ export {
   relockPartialHeadThenEnqueue,
   relockPartialHeadThenEnqueueShapes,
   relockRespondOverflowSecondView,
+  nativeBodyFailureAfterReleaseMidRead,
 } from 'release-relock';
 
 export {
   byobMin,
   readMinStagedFulfillment,
   readMinValidation,
+  byobReadOptionsShapes,
   closeBelowMin,
   closedOrderAtEndOfData,
+  closedOrderAtNativeEndOfData,
   minMetThenClose,
   readAtLeastDefaultReaderThrows,
   byobReaderConstraints,
@@ -181,7 +223,10 @@ export {
   teeKeepsHeldByobRequest,
   teeSoleBranchUsesHeldByobRequest,
   teeHeldByobRequestWithReleasedBytes,
+  teeByobRequestFirstTakenAfterTee,
   teeHeldByobRequestAfterCloseOrError,
+  teeHeldByobRequestFractionalAtClose,
+  teeHeldByobRequestFromBranchFractionalAtClose,
   teeHeldByobRequestAcrossNestedTee,
   teeHeldByobRequestEnqueueFillsByobRead,
   teeHeldByobRequestNewViewAndAutoAllocate,
@@ -189,6 +234,7 @@ export {
   teeClosedNativeBodyLocksOriginal,
   teeBranchFractionalCloseErrorsBranch,
   teeSoleBranchFractionalCloseSkipsSourceCancel,
+  teeBranchesFractionalCloseErrorEach,
 } from 'tee';
 
 export {
@@ -201,6 +247,8 @@ export {
   resizableByobRequestCannotShrink,
   resizableBuffersDeliveredFixedLength,
   sharedBuffersRejected,
+  nonViewArgumentsRejected,
+  viewConvertedBeforeMethodSteps,
   nonDetachableBuffersRejected,
 } from 'buffer-lifecycle';
 
@@ -208,8 +256,10 @@ export {
   teeBranchesCollected,
   teeSurvivorBranchCollected,
   teeBranchesCollectedPullStops,
+  teeHeldByobRequestBranchesCollected,
   pendingByobReadSurvivesGc,
   byobRequestSurvivesGc,
+  sourceReleasedOnceEnded,
 } from 'gc';
 
 export {
@@ -229,6 +279,8 @@ export {
 
 export {
   drainingReaderSweepsByteBacklog,
+  drainingReaderByteMaxSizeEndsAtClose,
+  drainingReaderByteExpectedLengthPassThrough,
   drainingReaderDrivesBytePull,
   drainingReaderByteErrorPropagation,
   drainingReaderByteCancelReachesSource,
@@ -248,4 +300,19 @@ export {
   readAtLeastIgnoresPatchedRead,
   speciesNotConsultedByInternalCopies,
   nativeSourceIgnoresPollutedMembers,
+  thenGetterFiresOncePerByteRead,
+  thenGetterReleasesReaderWhileByteReadsSettle,
+  thenGetterErrorsSourceWhileBranchByteReadsSettle,
+  byobReadThenLookupFollowsItsPull,
 } from 'pollution';
+
+export {
+  byteSourceExpectedLengthAccepted,
+  byteSourceExpectedLengthRejected,
+  byteSourceExpectedLengthCoercion,
+  byteSourceExpectedLengthRange,
+  byteSourceExpectedLengthContract,
+  byteSourceExpectedLengthHeldRequest,
+} from 'expected-length';
+
+export { readerMembersOnOtherReaderClasses } from 'reader-brand-checks';

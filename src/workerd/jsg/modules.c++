@@ -10,6 +10,7 @@
 
 #include <kj/mutex.h>
 
+#include <algorithm>
 #include <span>
 
 namespace workerd::jsg {
@@ -377,13 +378,51 @@ static CompilationObserver::Option convertOption(ModuleInfoCompileOption option)
   KJ_UNREACHABLE;
 }
 
-template <typename GetContent>
+// Answers V8's per-function compile hint queries from a sorted list of function positions.
+// V8 asks once for each function it would otherwise compile lazily, while compiling the module.
+struct CompileHintsLookup {
+  kj::ArrayPtr<const int> positions;
+  size_t eagerFunctionCount = 0;
+
+  // A v8::CompileHintCallback. Must not throw: V8 calls it from inside its parser.
+  static bool shouldCompileEagerly(int position, void* data) {
+    auto& lookup = *static_cast<CompileHintsLookup*>(data);
+    bool hinted = std::binary_search(lookup.positions.begin(), lookup.positions.end(), position);
+    if (hinted) ++lookup.eagerFunctionCount;
+    return hinted;
+  }
+};
+
+v8::Local<v8::Module> compileEsmModuleWithHints(jsg::Lock& js,
+    v8::Local<v8::String> content,
+    const v8::ScriptOrigin& origin,
+    kj::ArrayPtr<const int> compileHints,
+    const CompilationObserver& observer) {
+  kj::Array<int> sortedHints;
+  if (!std::is_sorted(compileHints.begin(), compileHints.end())) {
+    sortedHints = kj::heapArray(compileHints);
+    std::sort(sortedHints.begin(), sortedHints.end());
+    compileHints = sortedHints;
+  }
+
+  // V8 only calls the callback during CompileModule(), so `lookup` can live on the stack.
+  CompileHintsLookup lookup{.positions = compileHints};
+  v8::ScriptCompiler::Source source(
+      content, origin, &CompileHintsLookup::shouldCompileEagerly, &lookup);
+  auto module = jsg::check(v8::ScriptCompiler::CompileModule(
+      js.v8Isolate, &source, v8::ScriptCompiler::kConsumeCompileHints));
+  observer.onCompileHintsConsumed(js.v8Isolate, compileHints.size(), lookup.eagerFunctionCount);
+  return module;
+}
+
+// Compiles an ES module named `name`. `compile` receives the module's origin and does the
+// actual compilation.
+template <typename Compile>
 v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
     kj::StringPtr name,
-    GetContent&& getContent,
-    kj::ArrayPtr<const kj::byte> compileCache,
     ModuleInfoCompileOption option,
-    const CompilationObserver& observer) {
+    const CompilationObserver& observer,
+    Compile&& compile) {
   // destroy the observer after compilation finished to indicate the end of the process.
   auto compilationObserver =
       observer.onEsmCompilationStart(js.v8Isolate, name, convertOption(option));
@@ -398,18 +437,43 @@ v8::Local<v8::Module> compileEsmModule(jsg::Lock& js,
   constexpr bool isModule = true;
   v8::ScriptOrigin origin(v8StrIntern(js.v8Isolate, name), resourceLineOffset, resourceColumnOffset,
       resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, isModule);
-  auto contentStr = getContent();
+  return jsg::check(compile(origin));
+}
 
+// Compiles a module, consuming `compileCache` if it is non-empty.
+v8::MaybeLocal<v8::Module> compileWithStaticCache(jsg::Lock& js,
+    v8::Local<v8::String> contentStr,
+    const v8::ScriptOrigin& origin,
+    kj::ArrayPtr<const kj::byte> compileCache) {
   if (compileCache.size() > 0 && compileCache.begin() != nullptr) {
     auto cached =
         std::make_unique<v8::ScriptCompiler::CachedData>(compileCache.begin(), compileCache.size());
     v8::ScriptCompiler::Source source(contentStr, origin, cached.release());
-    return jsg::check(v8::ScriptCompiler::CompileModule(
-        js.v8Isolate, &source, v8::ScriptCompiler::kConsumeCodeCache));
+    return v8::ScriptCompiler::CompileModule(
+        js.v8Isolate, &source, v8::ScriptCompiler::kConsumeCodeCache);
   }
 
   v8::ScriptCompiler::Source source(contentStr, origin);
-  return jsg::check(v8::ScriptCompiler::CompileModule(js.v8Isolate, &source));
+  return v8::ScriptCompiler::CompileModule(js.v8Isolate, &source);
+}
+
+// Compiles a bundle module from UTF-8 source. The isolate's code cache takes precedence over
+// compile hints when it is installed.
+v8::MaybeLocal<v8::Module> compileBundleModule(jsg::Lock& js,
+    kj::ArrayPtr<const char> content,
+    const v8::ScriptOrigin& origin,
+    const CompilationObserver& observer,
+    kj::ArrayPtr<const int> compileHints) {
+  auto contentStr = jsg::v8Str(js.v8Isolate, content);
+  KJ_IF_SOME(codeCache, IsolateBase::from(js.v8Isolate).tryGetCodeCache()) {
+    auto key = codeCache.keyFor(CodeCacheKey::Unit::LEGACY_REGISTRY_ESM, content);
+    return codeCache.compileModule(js.v8Isolate, key, contentStr, origin, observer);
+  }
+  if (compileHints.size() > 0) {
+    return compileEsmModuleWithHints(js, contentStr, origin, compileHints, observer);
+  }
+  v8::ScriptCompiler::Source source(contentStr, origin);
+  return v8::ScriptCompiler::CompileModule(js.v8Isolate, &source);
 }
 
 v8::Local<v8::Module> createSyntheticModule(
@@ -428,6 +492,10 @@ v8::Local<v8::Module> createSyntheticModule(
 }
 }  // namespace
 
+intptr_t getSyntheticModuleEvalRef() {
+  return reinterpret_cast<intptr_t>(&evaluateSyntheticModuleCallback);
+}
+
 ModuleRegistry::ModuleInfo::ModuleInfo(
     jsg::Lock& js, v8::Local<v8::Module> module, kj::Maybe<SyntheticModuleInfo> maybeSynthetic)
     : module(js.v8Isolate, module),
@@ -436,29 +504,58 @@ ModuleRegistry::ModuleInfo::ModuleInfo(
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::StringPtr name,
     kj::ArrayPtr<const char> content,
+    const CompilationObserver& observer,
+    kj::ArrayPtr<const int> compileHints)
+    : ModuleInfo(js, name, content, nullptr, observer, compileHints) {}
+
+ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
+    kj::StringPtr name,
+    kj::ArrayPtr<const char> content,
     kj::ArrayPtr<const kj::byte> compileCache,
-    const CompilationObserver& observer)
-    : ModuleInfo(js, compileEsmModule(js, name, [&]() {
-        return jsg::v8Str(js.v8Isolate, content);
-      }, compileCache, ModuleInfoCompileOption::BUNDLE, observer)) {}
+    const CompilationObserver& observer,
+    kj::ArrayPtr<const int> compileHints)
+    : ModuleInfo(js,
+          compileEsmModule(js,
+              name,
+              ModuleInfoCompileOption::BUNDLE,
+              observer,
+              [&](const v8::ScriptOrigin& origin) {
+                if (compileCache.size() > 0) {
+                  return compileWithStaticCache(
+                      js, jsg::v8Str(js.v8Isolate, content), origin, compileCache);
+                }
+                return compileBundleModule(js, content, origin, observer, compileHints);
+              })) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::StringPtr name,
     StaticExternalStringSource content,
     kj::ArrayPtr<const kj::byte> compileCache,
     const CompilationObserver& observer)
-    : ModuleInfo(js, compileEsmModule(js, name, [&]() {
-        return jsg::newExternalString(js, content);
-      }, compileCache, ModuleInfoCompileOption::BUILTIN, observer)) {}
+    : ModuleInfo(js,
+          compileEsmModule(js,
+              name,
+              ModuleInfoCompileOption::BUILTIN,
+              observer,
+              [&](const v8::ScriptOrigin& origin) {
+                return compileWithStaticCache(
+                    js, jsg::newExternalString(js, content), origin, compileCache);
+              })) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::StringPtr name,
     kj::Arc<OwnedAscii> content,
     kj::ArrayPtr<const kj::byte> compileCache,
     const CompilationObserver& observer)
-    : ModuleInfo(js, compileEsmModule(js, name, [&]() {
-        return jsg::newExternalOneByteString(js, kj::mv(content));
-      }, compileCache, ModuleInfoCompileOption::BUILTIN, observer)) {}
+    : ModuleInfo(js,
+          compileEsmModule(js,
+              name,
+              ModuleInfoCompileOption::BUILTIN,
+              observer,
+              [&](const v8::ScriptOrigin& origin) {
+                return compileWithStaticCache(
+                    js, jsg::newExternalOneByteString(js, kj::mv(content)), origin, compileCache);
+              })) {}
 
 ModuleRegistry::ModuleInfo::ModuleInfo(jsg::Lock& js,
     kj::StringPtr name,
@@ -484,8 +581,35 @@ v8::Local<v8::WasmModuleObject> compileWasmModule(
   // destroy the observer after compilation finishes to indicate the end of the process.
   auto compilationObserver = observer.onWasmCompilationStart(js.v8Isolate, code.size());
 
+  v8::WasmModuleObject::CompileOptions options;
+  if (js.isWasmEsmIntegrationBuiltinsEnabled()) {
+    options.builtins = v8::WasmModuleObject::CompileOptions::Builtins::kJsString;
+    options.imported_string_constants_module = "wasm:js/string-constants";
+  }
   return jsg::check(v8::WasmModuleObject::Compile(
-      js.v8Isolate, std::span<const uint8_t>(code.begin(), code.size())));
+      js.v8Isolate, std::span<const uint8_t>(code.begin(), code.size()), options));
+}
+
+v8::Local<v8::WasmModuleObject> CompiledWasmModuleHolder::getOrCompile(jsg::Lock& js,
+    kj::ArrayPtr<const kj::byte> wireBytes,
+    const CompilationObserver& observer) const {
+  auto& slot = compiled[js.isWasmEsmIntegrationBuiltinsEnabled() ? 1 : 0];
+  {
+    auto lock = slot.lockShared();
+    KJ_IF_SOME(module, *lock) {
+      auto metrics = observer.onWasmCompilationFromCacheStart(js.v8Isolate);
+      return jsg::check(v8::WasmModuleObject::FromCompiledModule(js.v8Isolate, module));
+    }
+  }
+
+  // Compile without holding the lock, so a thread that finds the holder empty never blocks on
+  // another thread's compile. Concurrent first loads then each compile once.
+  auto module = compileWasmModule(js, wireBytes, observer);
+  auto lock = slot.lockExclusive();
+  if (*lock == kj::none) {
+    *lock = module->GetCompiledModule();
+  }
+  return module;
 }
 
 // ======================================================================================

@@ -16,6 +16,11 @@
 //                  transferEncoding }.
 // /chunked?n=N&delay=MS
 //                  200, then N chunks "chunk-<i>|" MS ms apart, then end.
+// /chunked-controlled?id=ID
+//                  three chunks, each awaiting acknowledgement before the
+//                  next write or end.
+// /chunked-ack?id=ID&index=I
+//                  acknowledges chunk I, replies 204; out of order is 409.
 // /large?bytes=N   200 with N bytes, byte i being i % 251, in 64 KiB writes.
 // /status/CODE     CODE with a "X-Status: CODE" header and no body.
 // /gzip            200 with a gzip-compressed body and Content-Encoding.
@@ -50,6 +55,7 @@ import { gzipSync } from 'node:zlib';
 const host = process.env.SIDECAR_HOSTNAME ?? '127.0.0.1';
 
 const neverEnds = new Map();
+const controlledChunks = new Map();
 
 function summary(req, bytes) {
   return {
@@ -112,6 +118,35 @@ const server = http.createServer(async (req, res) => {
         res.write(`chunk-${i}|`);
         await new Promise((r) => setTimeout(r, delay));
       }
+      res.end();
+      break;
+    }
+    case url.pathname === '/chunked-controlled': {
+      const id = url.searchParams.get('id');
+      if (controlledChunks.has(id)) {
+        res.writeHead(409);
+        res.end();
+        break;
+      }
+      controlledChunks.set(id, { res, index: 0 });
+      res.once('close', () => controlledChunks.delete(id));
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.write('chunk-0|');
+      break;
+    }
+    case url.pathname === '/chunked-ack': {
+      const state = controlledChunks.get(url.searchParams.get('id'));
+      if (!state || state.index !== param('index', -1)) {
+        res.writeHead(409);
+        res.end();
+        break;
+      }
+      if (++state.index === 3) {
+        state.res.end();
+      } else {
+        state.res.write(`chunk-${state.index}|`);
+      }
+      res.writeHead(204);
       res.end();
       break;
     }

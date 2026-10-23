@@ -4,7 +4,7 @@ Per-isolate JavaScript/TypeScript bootstrap: scripts that run synchronously
 at context creation, before any user code. Gated by the
 `per-isolate-javascript-bootstrap` autogate (config:
 `workerd-autogate-per-isolate-javascript-bootstrap`). C++ entry point:
-`src/workerd/io/per-isolate-bootstrap.c++`.
+`src/workerd/api/per-isolate-bootstrap.c++`.
 
 ## EXECUTION MODEL
 
@@ -16,7 +16,8 @@ at context creation, before any user code. Gated by the
   `module.exports = {...}`. The `src/node/` ESM-only rule does NOT apply
   here. Circular requires are a FATAL startup error — keep modules
   acyclic (e.g., `webstreams/ring-buffer` is a leaf, and
-  `webstreams/native` requires nothing else).
+  `webstreams/native` requires only `common`, `ring-buffer`, `queue` and
+  `view-extent`).
 - TypeScript `import type` / `export type` are used freely for type
   plumbing (fully erased; the loader only sees `module.exports`).
 - `main.ts` installs the real stream globals (ReadableStream et al.) when
@@ -50,6 +51,11 @@ at context creation, before any user code. Gated by the
 - Internal class dispatch uses private-brand `in` checks, NEVER
   `instanceof` (classes reachable from the global have user-reachable
   `Symbol.hasInstance`).
+- **ASCII runtime text**: the loader (`per-isolate-bootstrap.c++`) hands V8
+  each script's bytes as a one-byte (Latin-1) string, without transcoding,
+  so a non-ASCII character in a string or template literal reaches users as
+  its UTF-8 bytes, mangled. Error messages use plain ASCII punctuation (no
+  em dashes or other typographic characters); comments are exempt.
 
 ## PRIMORDIALS USAGE
 
@@ -184,9 +190,10 @@ path, and the same pollution breaks the user's own code in every engine:
 - `Promise[Symbol.species]` / `Promise.prototype.constructor` reaching
   `PromisePrototypeThen` on ordinary promises (above).
 - `Object.prototype.then` intercepting a promise resolved with a plain
-  object, notably the spec-mandated `{ value, done }` read results.
-  Internal code that consumes those results through the same promise
-  (pipes, drain fallbacks) is exposed alongside the user's read.
+  object, notably the user's read promise, which the spec resolves with a
+  `{ value, done }` result. Internal reads are not exposed: the backends
+  settle them with results whose prototype chain has no `Object.prototype`
+  (`createReadResult` in `webstreams/queue.ts`).
 
 Internal-only records should still be null-prototype
 (`{ __proto__: null, ... }`) wherever nothing requires the

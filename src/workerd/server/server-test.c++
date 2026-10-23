@@ -2,20 +2,27 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-#include "server.h"
-
 #include <workerd/jsg/jsg-test.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/server/factory/worker-factory.h>
+#include <workerd/server/server/bridge.rs.h>
 #include <workerd/util/autogate.h>
 #include <workerd/util/capnp-mock.h>
+#include <workerd/util/thread-scopes.h>
+
+#include <kj-rs-io/async-io.h>
 
 #include <capnp/compat/http-over-capnp.h>
 #include <capnp/rpc-twoparty.h>
+#include <capnp/serialize.h>
 #include <kj/async-queue.h>
+#include <kj/compat/brotli.h>
+#include <kj/compat/gzip.h>
 #include <kj/encoding.h>
 #include <kj/test.h>
 
 #include <cstdlib>
+#include <filesystem>
 #include <regex>
 
 #if __linux__
@@ -327,34 +334,202 @@ class TestStream {
   }
 };
 
-class TestServer final: private kj::Filesystem, private kj::EntropySource, private kj::Clock {
- public:
-  struct QueuedDatagram {
-    kj::Array<kj::byte> content;
-    bool truncated;
-    kj::Own<kj::NetworkAddress> source;
-  };
+// A fresh directory under the test's temp space, removed with the object: a TestServer's
+// filesystem, or a directory several TestServers share.
+struct TempDir {
+  TempDir()
+      : path(kj::str(getenv("TEST_TMPDIR") == nullptr
+                ? kj::str(std::filesystem::temp_directory_path().string().c_str())
+                : kj::str(getenv("TEST_TMPDIR")),
+            "/server-test-",
+            (kj::systemPreciseMonotonicClock().now() - kj::origin<kj::TimePoint>()) /
+                kj::NANOSECONDS)),
+        dir(disk().getRoot().openSubdir(disk().getCurrentPath().evalNative(path),
+            kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT)) {}
+  ~TempDir() {
+    // Closed first: Windows refuses to remove a directory while a handle to it is open.
+    dir = nullptr;
+    std::filesystem::remove_all(path.cStr());
+  }
+  KJ_DISALLOW_COPY_AND_MOVE(TempDir);
 
+  const kj::Directory* operator->() const {
+    return dir.get();
+  }
+
+  // A link at `link` to the directory `target`. kj's Windows disk filesystem creates no symlinks,
+  // and std::filesystem does on every platform.
+  void symlink(kj::PathPtr link, kj::StringPtr target, kj::WriteMode mode) const {
+    auto linkPath = std::filesystem::path(path.cStr()) / link.toString().cStr();
+    if (kj::has(mode, kj::WriteMode::CREATE_PARENT)) {
+      std::filesystem::create_directories(linkPath.parent_path());
+    }
+    std::filesystem::create_directory_symlink(target.cStr(), linkPath);
+  }
+
+  // The disk, as it was before any test changed the working directory.
+  static kj::Filesystem& disk() {
+    static auto fs = kj::newDiskFilesystem();
+    return *fs;
+  }
+
+  kj::String path;
+  kj::Own<const kj::Directory> dir;
+};
+
+TempDir newSharedDirectory() {
+  return {};
+}
+
+// The server as the tests drive it, over the Rust server (server/in_process.rs): the worker
+// factory is built here, on what the test supplies, and handed to it.
+class Server {
+ public:
+  Server(kj::Filesystem& fs,
+      kj::Timer& timer,
+      const kj::MonotonicClock& monotonicClock,
+      kj::Network& network,
+      kj::EntropySource& entropySource,
+      Worker::LoggingOptions loggingOptions,
+      kj::Function<void(kj::String)> reportConfigError,
+      kj::Function<void(kj::String)> reportConfigWarning)
+      : fs(fs),
+        timer(timer),
+        monotonicClock(monotonicClock),
+        network(network),
+        entropySource(entropySource),
+        reportConfigError(kj::mv(reportConfigError)),
+        reportConfigWarning(kj::mv(reportConfigWarning)) {
+    options->loggingOptions = kj::mv(loggingOptions);
+  }
+
+  void allowExperimental() {
+    options->experimental = true;
+  }
+  void disableTailWorkers() {
+    options->tailWorkers = false;
+  }
+  void setDefaultCompatibilityDate(kj::String date) {
+    options->defaultCompatibilityDate = kj::mv(date);
+  }
+  void enableDebugPort(kj::String addr) {
+    debugPort = kj::str("loopback:", addr);
+  }
+
+  kj::Promise<void> run(jsg::V8System& v8System,
+      config::Config::Reader config,
+      kj::Promise<void> drainWhen = kj::NEVER_DONE) {
+    auto& server = start(v8System, config);
+    auto drain = drainWhen.then([&server]() { server.drain(); }).eagerlyEvaluate(nullptr);
+    return server.run(debugPort.asPtr().as<kj_rs::RustUncheckedUtf8>())
+        .attach(kj::mv(drain), reports(server));
+  }
+
+  kj::Promise<bool> test(jsg::V8System& v8System,
+      config::Config::Reader config,
+      kj::StringPtr servicePattern,
+      kj::StringPtr entrypointPattern) {
+    auto& server = start(v8System, config);
+    return server
+        .test(servicePattern.as<kj_rs::RustUncheckedUtf8>(),
+            entrypointPattern.as<kj_rs::RustUncheckedUtf8>())
+        .attach(reports(server));
+  }
+
+  // `workerd bench`, whose report's groups go to `report`.
+  kj::Promise<bool> bench(jsg::V8System& v8System,
+      config::Config::Reader config,
+      bench::BenchParams::Reader params,
+      bench::BenchReport::Builder report,
+      kj::StringPtr servicePattern,
+      kj::StringPtr entrypointPattern) {
+    auto& server = start(v8System, config);
+    capnp::MallocMessageBuilder paramsMessage;
+    paramsMessage.setRoot(params);
+    auto paramsWords = capnp::messageToFlatArray(paramsMessage);
+    auto outcome = co_await server
+                       .bench(servicePattern.as<kj_rs::RustUncheckedUtf8>(),
+                           entrypointPattern.as<kj_rs::RustUncheckedUtf8>(),
+                           kj::arrayPtr(reinterpret_cast<const uint64_t*>(paramsWords.begin()),
+                               paramsWords.size())
+                               .as<kj_rs::Rust>())
+                       .attach(reports(server));
+    capnp::FlatArrayMessageReader reportMessage(asWords(kj::from<kj_rs::Rust>(outcome.report)));
+    report.setGroups(reportMessage.getRoot<bench::BenchReport>().getGroups());
+    co_return outcome.passed;
+  }
+
+  // The two ends of a connection to `addr`: the server's listener or the test take what the
+  // other makes.
+  kj::Own<kj::AsyncIoStream> connect(kj::StringPtr addr) {
+    return get().connect(addr.as<kj_rs::RustUncheckedUtf8>());
+  }
+  kj::Promise<kj::Own<kj::AsyncIoStream>> accept(kj::StringPtr addr) {
+    return get().accept(addr.as<kj_rs::RustUncheckedUtf8>());
+  }
+
+  // Takes the server apart. A service that still holds the factory afterwards is logged as an
+  // error, which fails the test.
+  kj::Promise<void> close() {
+    KJ_IF_SOME(s, server) {
+      auto closing = close_in_process_server(kj::mv(s));
+      server = kj::none;
+      return closing;
+    }
+    return kj::READY_NOW;
+  }
+
+ private:
+  kj::Filesystem& fs;
+  kj::Timer& timer;
+  const kj::MonotonicClock& monotonicClock;
+  kj::Network& network;
+  kj::EntropySource& entropySource;
+  kj::Own<WorkerFactory::Options> options = kj::heap<WorkerFactory::Options>();
+  kj::String debugPort;
+  kj::Function<void(kj::String)> reportConfigError;
+  kj::Function<void(kj::String)> reportConfigWarning;
+  kj::Maybe<::rust::Box<InProcessServer>> server;
+
+  InProcessServer& get() {
+    return *KJ_REQUIRE_NONNULL(server, "the server was not started");
+  }
+
+  InProcessServer& start(jsg::V8System& v8System, config::Config::Reader config) {
+    capnp::MallocMessageBuilder message;
+    message.setRoot(config);
+    auto words = capnp::messageToFlatArray(message);
+    auto factory = kj::heap<WorkerFactory>(v8System, timer, monotonicClock, network, entropySource,
+        fs, kj::mv(options),
+        kj::arrayPtr(reinterpret_cast<const uint64_t*>(words.begin()), words.size())
+            .as<kj_rs::RustCopy>());
+    return *server.emplace(new_in_process_server(kj::mv(factory)));
+  }
+
+  // Hands the config errors and warnings to the test as the server reports them.
+  kj::Promise<void> reports(InProcessServer& server) {
+    for (;;) {
+      auto report = co_await server.next_report();
+      (report.error ? reportConfigError : reportConfigWarning)(kj::str(report.message));
+    }
+  }
+};
+
+class TestServer final: private kj::EntropySource {
+ public:
   struct SentDatagram {
     kj::Array<kj::byte> content;
     kj::String destination;
   };
 
-  struct DatagramState final: public kj::Refcounted {
-    kj::ProducerConsumerQueue<QueuedDatagram> incoming;
-    kj::ProducerConsumerQueue<SentDatagram> outgoing;
-  };
-
   TestServer(kj::StringPtr configText,
       Worker::ConsoleMode consoleMode = Worker::ConsoleMode::INSPECTOR_ONLY,
       kj::SourceLocation loc = {})
-      : ws(loop),
-        config(parseConfig(configText, loc)),
-        root(kj::newInMemoryDirectory(*this)),
+      : config(rewriteAddresses(*parseConfig(configText, loc))),
         pwd(kj::Path({"current", "dir"})),
         cwd(root->openSubdir(pwd, kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT)),
         timer(kj::origin<kj::TimePoint>()),
-        server(*this,
+        server(TempDir::disk(),
             timer,
             timer,
             mockNetwork,
@@ -375,20 +550,21 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
                 KJ_FAIL_EXPECT(warning, expectedWarnings);
               }
             }),
-        fakeDate(kj::UNIX_EPOCH),
-        mockNetwork(*this, {}, {}) {}
+        mockNetwork(*this) {
+    // The server's disk services resolve their paths against the process's working directory.
+    std::filesystem::current_path(kj::str(root.path, "/current/dir").cStr());
+  }
 
   ~TestServer() noexcept(false) {
-    for (auto& subq: subrequests) {
-      subq.value->rejectAll(KJ_EXCEPTION(FAILED, "test ended"));
-    }
-
     if (!unwindDetector.isUnwinding()) {
       // Make sure any errors are reported.
       KJ_IF_SOME(t, runTask) {
         t.poll(ws);
       }
     }
+    runTask = kj::none;
+    unwindDetector.catchExceptionsIfUnwinding([&]() { server.close().wait(ws); });
+    std::filesystem::current_path(std::filesystem::path(root.path.cStr()).parent_path());
   }
 
   // Declare the warnings the config is expected to produce, one per line. Unlike errors, warnings
@@ -422,42 +598,48 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
   // Connect to the server on the given address. The string just has to match what is in the
   // config; the actual connection is in-memory with no network involved.
   TestStream connect(kj::StringPtr addr) {
-    return TestStream(ws, KJ_REQUIRE_NONNULL(sockets.find(addr), addr)->connect().wait(ws));
+    return TestStream(ws, server.connect(addr));
   }
 
-  void sendUdp(kj::StringPtr addr,
-      kj::StringPtr peer,
-      kj::ArrayPtr<const kj::byte> content,
-      bool truncated = false);
+  // Sets the modification time of a file under `root`: the disk service reports the file's own,
+  // which is the real time it was written at.
+  void setModified(kj::StringPtr path, kj::Date date) {
+    using namespace std::chrono;
+    // The file clock's epoch is unspecified, but whole seconds from the Unix epoch.
+    auto epoch = round<seconds>(
+        file_clock::now().time_since_epoch() - system_clock::now().time_since_epoch());
+    auto sinceUnixEpoch = nanoseconds((date - kj::UNIX_EPOCH) / kj::NANOSECONDS);
+    // Summed in the file clock's own unit: in nanoseconds, Windows' 1601 epoch overflows.
+    std::filesystem::last_write_time(kj::str(root.path, '/', path).cStr(),
+        file_clock::time_point(duration_cast<file_clock::duration>(sinceUnixEpoch) +
+            duration_cast<file_clock::duration>(epoch)));
+  }
 
-  bool hasUdp(kj::StringPtr addr);
+  void sendUdp(kj::StringPtr addr, kj::StringPtr peer, kj::ArrayPtr<const kj::byte> content);
 
   SentDatagram receiveUdp(kj::StringPtr addr);
 
   // Try to connect to the address and return whether or not this connection attempt hangs,
-  // i.e. a listener exists but connections are not being accepted.
+  // i.e. a listener exists but connections are not being accepted. A connection is queued until
+  // the listener takes it, so "hangs" is: a request on it gets no answer.
   bool connectHangs(kj::StringPtr addr) {
-    return !KJ_REQUIRE_NONNULL(sockets.find(addr), addr)->connect().poll(ws);
+    auto conn = connect(addr);
+    conn.sendHttpGet("/");
+    char c;
+    return !conn.getStream().tryRead(&c, 1, 1).poll(ws);
   }
 
   // Expect an incoming connection on the given address and from a network with the given
-  // allowed / denied peer list.
+  // allowed / denied peer list. (The lists document what the config leads the test to expect:
+  // the test stands in for every host, so the server's peer filter is not consulted.)
   TestStream receiveSubrequest(kj::StringPtr addr,
       kj::ArrayPtr<const kj::StringPtr> allowedPeers = nullptr,
       kj::ArrayPtr<const kj::StringPtr> deniedPeers = nullptr,
       kj::SourceLocation loc = {}) {
-    auto expectedFilter = peerFilterToString(allowedPeers, deniedPeers);
-
-    auto promise = getSubrequestQueue(addr).pop();
+    auto promise = server.accept(addr);
     KJ_ASSERT_AT(promise.poll(ws), loc, "never received expected subrequest", addr);
 
-    auto info = promise.wait(ws);
-    auto actualFilter = info.peerFilter;
-    KJ_EXPECT_AT(actualFilter == expectedFilter, loc);
-
-    auto pipe = kj::newTwoWayPipe();
-    info.fulfiller->fulfill(kj::mv(pipe.ends[0]));
-    return TestStream(ws, kj::mv(pipe.ends[1]));
+    return TestStream(ws, promise.wait(ws));
   }
 
   TestStream receiveInternetSubrequest(kj::StringPtr addr, kj::SourceLocation loc = {}) {
@@ -479,11 +661,27 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
     return ws;
   }
 
-  kj::EventLoop loop;
-  kj::WaitScope ws;
+  // The loop the Rust server's tokio I/O runs on. Its timer is not the server's: that is `timer`.
+  kj_rs_tokio::TokioAsyncIoContext io = kj_rs_tokio::setupTokioAsyncIo();
+  kj::WaitScope& ws = io.getWaitScope();
 
+ private:
+  // The sockets the test speaks UDP from. UDP is the one thing here that crosses the kernel.
+  kj_rs_io::TokioAsyncIoProvider udpProvider{io.getTimer()};
+  kj::Network& udpNetwork = udpProvider.getNetwork();
+  // The port of each UDP socket of the config, by its address there.
+  kj::HashMap<kj::String, uint> udpPorts;
+  struct UdpPeer {
+    kj::String name;
+    kj::Own<kj::DatagramPort> port;
+    kj::Own<kj::DatagramReceiver> receiver;
+  };
+  kj::Vector<UdpPeer> udpPeers;
+
+ public:
   kj::Own<config::Config::Reader> config;
-  kj::Own<const kj::Directory> root;
+  // The test's filesystem: a real directory, since the server's disk services read the disk.
+  TempDir root;
   kj::Path pwd;
   kj::Own<const kj::Directory> cwd;
   kj::TimerImpl timer;
@@ -493,145 +691,55 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
   kj::StringPtr expectedErrors;
   kj::StringPtr expectedWarnings;
 
-  kj::Date fakeDate;
-
  private:
   kj::UnwindDetector unwindDetector;
 
-  // ---------------------------------------------------------------------------
-  // implements Filesystem
+  // The config with its addresses as the in-process server takes them: the names the test uses
+  // are loopback names, and a UDP socket gets a loopback port that was free a moment ago.
+  kj::Own<config::Config::Reader> rewriteAddresses(config::Config::Reader original) {
+    capnp::MallocMessageBuilder builder;
+    builder.setRoot(original);
+    auto conf = builder.getRoot<config::Config>();
+    for (auto sock: conf.getSockets()) {
+      if (sock.isUdp()) {
+        auto port = bindUdp()->getPort();
+        udpPorts.insert(kj::str(sock.getAddress()), port);
+        sock.setAddress(kj::str("127.0.0.1:", port));
+      } else {
+        sock.setAddress(kj::str("loopback:", sock.getAddress()));
+      }
+    }
+    for (auto service: conf.getServices()) {
+      if (service.isExternal()) {
+        auto external = service.getExternal();
+        external.setAddress(kj::str("loopback:", external.getAddress()));
+      }
+    }
+    return capnp::clone(conf.asReader());
+  }
 
-  const kj::Directory& getRoot() const override {
-    return *root;
-  }
-  const kj::Directory& getCurrent() const override {
-    return *cwd;
-  }
-  kj::PathPtr getCurrentPath() const override {
-    return pwd;
+  kj::Own<kj::DatagramPort> bindUdp() {
+    return udpNetwork.parseAddress("127.0.0.1").wait(ws)->bindDatagramPort();
   }
 
   // ---------------------------------------------------------------------------
   // implements Network
-
-  // Addresses that the server is listening on.
-  kj::HashMap<kj::String, kj::Own<kj::NetworkAddress>> sockets;
-
-  class MockNetwork;
-
-  class MockDatagramReceiver final: public kj::DatagramReceiver {
-   public:
-    explicit MockDatagramReceiver(kj::Rc<DatagramState> state): state(kj::mv(state)) {}
-
-    kj::Promise<void> receive() override {
-      current = co_await state->incoming.pop();
-    }
-
-    MaybeTruncated<kj::ArrayPtr<const kj::byte>> getContent() override {
-      auto& datagram = KJ_REQUIRE_NONNULL(current);
-      return {datagram.content, datagram.truncated};
-    }
-
-    MaybeTruncated<kj::ArrayPtr<const kj::AncillaryMessage>> getAncillary() override {
-      return {nullptr, false};
-    }
-
-    kj::NetworkAddress& getSource() override {
-      return *KJ_REQUIRE_NONNULL(current).source;
-    }
-
-   private:
-    kj::Rc<DatagramState> state;
-    kj::Maybe<QueuedDatagram> current;
-  };
-
-  class MockDatagramPort final: public kj::DatagramPort {
-   public:
-    explicit MockDatagramPort(kj::Rc<DatagramState> state): state(kj::mv(state)) {}
-
-    kj::Promise<size_t> send(
-        kj::ArrayPtr<const kj::byte> buffer, kj::NetworkAddress& destination) override {
-      state->outgoing.push({kj::heapArray(buffer), destination.toString()});
-      return buffer.size();
-    }
-
-    kj::Promise<size_t> send(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces,
-        kj::NetworkAddress& destination) override {
-      KJ_UNIMPLEMENTED("unused");
-    }
-
-    kj::Own<kj::DatagramReceiver> makeReceiver(kj::DatagramReceiver::Capacity capacity) override {
-      KJ_EXPECT(capacity.content == 65535);
-      return kj::heap<MockDatagramReceiver>(state.addRef());
-    }
-
-    uint getPort() override {
-      return 0;
-    }
-
-   private:
-    kj::Rc<DatagramState> state;
-  };
-
-  struct SubrequestInfo {
-    kj::Own<kj::PromiseFulfiller<kj::Own<kj::AsyncIoStream>>> fulfiller;
-    kj::StringPtr peerFilter;
-  };
-  using SubrequestQueue = kj::ProducerConsumerQueue<SubrequestInfo>;
-  // Expected incoming connections and callbacks that should be used to handle them.
-  kj::HashMap<kj::String, kj::Own<SubrequestQueue>> subrequests;
-
-  SubrequestQueue& getSubrequestQueue(kj::StringPtr addr) {
-    return *subrequests.findOrCreate(addr, [&]() -> decltype(subrequests)::Entry {
-      return {kj::str(addr), kj::heap<SubrequestQueue>()};
-    });
-  }
-
-  static kj::String peerFilterToString(
-      kj::ArrayPtr<const kj::StringPtr> allow, kj::ArrayPtr<const kj::StringPtr> deny) {
-    if (allow == nullptr && deny == nullptr) {
-      return kj::str("(none)");
-    } else {
-      return kj::str("allow: [", kj::strArray(allow, ", "),
-          "], "
-          "deny: [",
-          kj::strArray(deny, ", "), "]");
-    }
-  }
+  //
+  // The network the factory's own clients dial through (Docker, the debug port): every address
+  // is a name the server or the test listens on.
 
   class MockAddress final: public kj::NetworkAddress {
    public:
-    MockAddress(TestServer& test, kj::StringPtr peerFilter, kj::String address)
-        : test(test),
-          peerFilter(peerFilter),
-          address(kj::mv(address)) {}
+    MockAddress(TestServer& test, kj::String address): test(test), address(kj::mv(address)) {}
 
     kj::Promise<kj::Own<kj::AsyncIoStream>> connect() override {
-      KJ_IF_SOME(addr, test.sockets.find(address)) {
-        // If someone is listening on this address, connect directly to them.
-        return addr->connect();
-      }
-
-      auto [promise, fulfiller] = kj::newPromiseAndFulfiller<kj::Own<kj::AsyncIoStream>>();
-
-      test.getSubrequestQueue(address).push({kj::mv(fulfiller), peerFilter});
-
-      return kj::mv(promise);
+      return test.server.connect(address);
     }
     kj::Own<kj::ConnectionReceiver> listen() override {
-      auto pipe = kj::newCapabilityPipe();
-      auto receiver = kj::heap<kj::CapabilityStreamConnectionReceiver>(*pipe.ends[0])
-                          .attach(kj::mv(pipe.ends[0]));
-      auto sender = kj::heap<kj::CapabilityStreamNetworkAddress>(kj::none, *pipe.ends[1])
-                        .attach(kj::mv(pipe.ends[1]));
-      test.sockets.insert(kj::str(address), kj::mv(sender));
-      return receiver;
-    }
-    kj::Own<kj::DatagramPort> bindDatagramPort() override {
-      return kj::heap<MockDatagramPort>(test.getDatagramState(address).addRef());
+      KJ_UNIMPLEMENTED("unused");
     }
     kj::Own<kj::NetworkAddress> clone() override {
-      return kj::heap<MockAddress>(test, peerFilter, kj::str(address));
+      return kj::heap<MockAddress>(test, kj::str(address));
     }
     kj::String toString() override {
       return kj::str(address);
@@ -639,46 +747,30 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
 
    private:
     TestServer& test;
-    kj::StringPtr peerFilter;
     kj::String address;
   };
 
   class MockNetwork final: public kj::Network {
    public:
-    MockNetwork(TestServer& test,
-        kj::ArrayPtr<const kj::StringPtr> allow,
-        kj::ArrayPtr<const kj::StringPtr> deny)
-        : test(test),
-          filter(peerFilterToString(allow, deny)) {}
+    explicit MockNetwork(TestServer& test): test(test) {}
 
     kj::Promise<kj::Own<kj::NetworkAddress>> parseAddress(
         kj::StringPtr addr, uint portHint = 0) override {
-      return kj::Own<kj::NetworkAddress>(kj::heap<MockAddress>(test, filter, kj::str(addr)));
+      return kj::Own<kj::NetworkAddress>(kj::heap<MockAddress>(test, kj::str(addr)));
     }
     kj::Own<kj::NetworkAddress> getSockaddr(const void* sockaddr, uint len) override {
       KJ_UNIMPLEMENTED("unused");
     }
     kj::Own<kj::Network> restrictPeers(
         kj::ArrayPtr<const kj::StringPtr> allow, kj::ArrayPtr<const kj::StringPtr> deny) override {
-      KJ_ASSERT(filter == "(none)", "can't nest restrictPeers()");
-      return kj::heap<MockNetwork>(test, allow, deny);
+      return kj::heap<MockNetwork>(test);
     }
 
    private:
     TestServer& test;
-    kj::String filter;
   };
 
   MockNetwork mockNetwork;
-
-  kj::HashMap<kj::String, kj::Rc<DatagramState>> datagramStates;
-
-  kj::Rc<DatagramState>& getDatagramState(kj::StringPtr addr) {
-    return datagramStates.findOrCreate(addr, [&]() -> decltype(datagramStates)::Entry {
-      auto state = kj::rc<DatagramState>();
-      return {kj::str(addr), kj::mv(state)};
-    });
-  }
 
   // ---------------------------------------------------------------------------
   // implements EntropySource
@@ -688,29 +780,36 @@ class TestServer final: private kj::Filesystem, private kj::EntropySource, priva
                           // guaranteed to be random.
     buffer.fill(random);
   }
-
-  // ---------------------------------------------------------------------------
-  // implements Clock
-
-  kj::Date now() const override {
-    return fakeDate;
-  }
 };
 
 void TestServer::sendUdp(
-    kj::StringPtr addr, kj::StringPtr peer, kj::ArrayPtr<const kj::byte> content, bool truncated) {
-  getDatagramState(addr)->incoming.push(QueuedDatagram{
-    kj::heapArray(content), truncated, kj::heap<MockAddress>(*this, "(none)"_kj, kj::str(peer))});
+    kj::StringPtr addr, kj::StringPtr peer, kj::ArrayPtr<const kj::byte> content) {
+  size_t i = 0;
+  while (i < udpPeers.size() && udpPeers[i].name != peer) ++i;
+  if (i == udpPeers.size()) {
+    auto port = bindUdp();
+    auto receiver = port->makeReceiver();
+    udpPeers.add(UdpPeer{kj::str(peer), kj::mv(port), kj::mv(receiver)});
+  }
+  std::swap(udpPeers[i], udpPeers.back());
+  auto destination =
+      udpNetwork.parseAddress("127.0.0.1", KJ_REQUIRE_NONNULL(udpPorts.find(addr), addr)).wait(ws);
+  udpPeers.back().port->send(content, *destination).wait(ws);
 }
 
-bool TestServer::hasUdp(kj::StringPtr addr) {
-  return getDatagramState(addr)->outgoing.pop().poll(ws);
-}
-
+// The next datagram the server sent to the peer the test last spoke as (the last of `udpPeers`).
+// The kernel delivers a loopback datagram some time after it is sent, so this is the one place
+// the harness waits in real time: a second at most, which only a failing test waits out.
 TestServer::SentDatagram TestServer::receiveUdp(kj::StringPtr addr) {
-  auto datagram = getDatagramState(addr)->outgoing.pop();
-  KJ_REQUIRE(datagram.poll(ws), "No UDP datagram available");
-  return datagram.wait(ws);
+  KJ_REQUIRE(!udpPeers.empty(), "No UDP datagram available");
+  auto& peer = udpPeers.back();
+  auto promise = peer.receiver->receive();
+  auto deadline = kj::systemPreciseMonotonicClock().now() + 1 * kj::SECONDS;
+  while (!promise.poll(ws)) {
+    KJ_REQUIRE(kj::systemPreciseMonotonicClock().now() <= deadline, "No UDP datagram available");
+  }
+  promise.wait(ws);
+  return SentDatagram{kj::heapArray(peer.receiver->getContent().value), kj::str(peer.name)};
 }
 
 // =======================================================================================
@@ -731,42 +830,6 @@ kj::String singleWorker(kj::StringPtr def) {
       )
     ]
   ))"_kj);
-}
-
-KJ_TEST("Server: UDP listener drops truncated datagrams") {
-  TestServer test(R"((
-    services = [(
-      name = "worker",
-      worker = (
-        compatibilityDate = "2024-01-01",
-        compatibilityFlags = ["experimental"],
-        modules = [(
-          name = "worker.js",
-          esModule =
-            `export default {
-            `  async connect(socket) {
-            `    const reader = socket.readable.getReader();
-            `    const writer = socket.writable.getWriter();
-            `    const { value } = await reader.read();
-            `    await writer.write(value);
-            `  }
-            `}
-        )]
-      )
-    )],
-    sockets = [(
-      name = "udp",
-      address = "udp-address",
-      udp = (),
-      service = "worker"
-    )]
-  ))"_kj);
-
-  test.server.allowExperimental();
-  test.start();
-  test.sendUdp("udp-address", "peer:1234", "bad"_kjb, true);
-
-  KJ_EXPECT(!test.hasUdp("udp-address"));
 }
 
 KJ_TEST("Server: TCP listener survives connect() handler exceptions") {
@@ -848,6 +911,50 @@ KJ_TEST("Server: UDP listener survives connect() handler exceptions") {
     KJ_EXPECT(response.destination == "peer:1234");
     test.getWaitScope().poll();
   }
+}
+
+KJ_TEST("Server: client disconnect cancels a JavaScript ReadableStream response body") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-10-01",
+    modules = [
+      ( name = "worker",
+        esModule =
+          `let state = "none";
+          `export default {
+          `  fetch(req) {
+          `    if (new URL(req.url).pathname == "/state") {
+          `      return new Response(state);
+          `    }
+          `    state = "streaming";
+          `    return new Response(new ReadableStream({
+          `      start(c) { c.enqueue(new TextEncoder().encode("first")); },
+          `      // Keep the source waiting on I/O so the request is not considered hung.
+          `      pull(c) { return new Promise(resolve => setTimeout(resolve, 1000000)); },
+          `      cancel(reason) { state = "canceled:" + reason; },
+          `    }));
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+
+  test.start();
+
+  {
+    auto conn = test.connect("test-addr");
+    conn.sendHttpGet("/stream");
+    conn.recv(R"(
+      HTTP/1.1 200 OK
+      Transfer-Encoding: chunked
+
+      5
+      first
+    )"_blockquote);
+    // Dropping the connection here disconnects the client while the body is still open.
+  }
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/state", "canceled:undefined");
 }
 
 KJ_TEST("Server: serve basic Service Worker") {
@@ -1116,6 +1223,60 @@ KJ_TEST("Server: serve basic modular Worker") {
   conn.httpGet200("/", "Hello: http://foo/");
 }
 
+KJ_TEST("Server: Expect: 100-continue is answered when the Worker reads the body") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2022-08-17",
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `export default {
+          `  async fetch(request) {
+          `    if (new URL(request.url).pathname == "/read") {
+          `      return new Response("read: " + await request.text());
+          `    }
+          `    return new Response("unread");
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+  test.start();
+
+  {
+    auto conn = test.connect("test-addr");
+    conn.send(R"(
+      POST /read HTTP/1.1
+      Host: foo
+      Expect: 100-continue
+      Content-Length: 5
+
+    )"_blockquote);
+    conn.recv(R"(
+      HTTP/1.1 100 Continue
+
+    )"_blockquote);
+    conn.send("hello");
+    conn.recvHttp200("read: hello");
+    // The connection stays in sync for the next request.
+    conn.httpGet200("/unread", "unread");
+  }
+
+  {
+    // A Worker that responds without reading the body gets no 100 Continue. The client never
+    // sends the body, so the connection closes after the response.
+    auto conn = test.connect("test-addr");
+    conn.send(R"(
+      POST /unread HTTP/1.1
+      Host: foo
+      Expect: 100-continue
+      Content-Length: 5
+
+    )"_blockquote);
+    conn.recvHttp200("unread");
+    KJ_EXPECT(conn.isEof());
+  }
+}
+
 KJ_TEST("Server: serve modular Worker with imports") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2022-08-17",
@@ -1235,6 +1396,46 @@ KJ_TEST("Server: compatibility dates are required") {
   test.expectErrors(R"(
     service hello: Worker must specify compatibilityDate.
   )"_blockquote);
+}
+
+KJ_TEST("Server: a default compatibility date applies only to workers that omit one") {
+  auto navigatorChecker = [](kj::StringPtr compatProperties) {
+    return singleWorker(kj::str("(", compatProperties, R"(
+      modules = [
+        ( name = "main.js",
+          esModule =
+              `export default {
+              `  async fetch(request) {
+              `    return new Response(!!self.navigator);
+              `  }
+              `}
+        )
+      ]
+    ))"_kj));
+  };
+
+  // global_navigator is enabled on 2022-03-21.
+  {
+    TestServer test(navigatorChecker(""));
+    test.server.setDefaultCompatibilityDate(kj::str("2020-01-01"));
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/", "false");
+  }
+  {
+    TestServer test(navigatorChecker(""));
+    test.server.setDefaultCompatibilityDate(kj::str("2022-08-17"));
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/", "true");
+  }
+  {
+    TestServer test(navigatorChecker("compatibilityDate = \"2020-01-01\","));
+    test.server.setDefaultCompatibilityDate(kj::str("2022-08-17"));
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/", "false");
+  }
 }
 
 KJ_TEST("Server: naming a flag the compatibility date already enables only warns") {
@@ -2705,43 +2906,6 @@ KJ_TEST("Server: named images and directory snapshots are not startup sources") 
   conn.httpGet200("/", "Container failed to start; Docker requests: 0");
 }
 
-KJ_TEST("Server: rejects Durable Object retry policy values outside the system limits") {
-  TestServer test(singleWorker(R"((
-    compatibilityDate = "2024-10-01",
-    modules = [
-      ( name = "worker",
-        esModule = `export default { fetch() { return new Response("ok"); } }
-      )
-    ],
-    bindings = [
-      ( name = "attempts",
-        durableObjectNamespace = (
-          className = "MyActorClass",
-          retryPolicy = (maxAttempts = 11),
-        )
-      ),
-      ( name = "shortTimeout",
-        durableObjectNamespace = (
-          className = "MyActorClass",
-          retryPolicy = (timeoutMs = 499),
-        )
-      ),
-      ( name = "longTimeout",
-        durableObjectNamespace = (
-          className = "MyActorClass",
-          retryPolicy = (timeoutMs = 60001),
-        )
-      ),
-    ],
-  ))"_kj));
-
-  test.expectErrors(R"(
-    service hello: Worker "hello"'s binding "attempts" has a Durable Object retry policy outside the system limits.
-    service hello: Worker "hello"'s binding "shortTimeout" has a Durable Object retry policy outside the system limits.
-    service hello: Worker "hello"'s binding "longTimeout" has a Durable Object retry policy outside the system limits.
-  )"_blockquote);
-}
-
 KJ_TEST("Server: call queue handler on service binding") {
   TestServer test(R"((
     services = [
@@ -3203,15 +3367,14 @@ KJ_TEST("Server: Durable Objects (on disk)") {
   ))"_kj;
 
   // Create a directory outside of the test scope which we can use across multiple TestServers.
-  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  auto dir = newSharedDirectory();
 
   {
     TestServer test(config);
 
     // Link our directory into the test filesystem.
-    test.root->transfer(kj::Path({"var"_kj, "do-storage"_kj}),
-        kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT, *dir, nullptr,
-        kj::TransferMode::LINK);
+    test.root.symlink(kj::Path({"var"_kj, "do-storage"_kj}), dir.path,
+        kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT);
 
     test.start();
     auto conn = test.connect("test-addr");
@@ -3230,13 +3393,11 @@ KJ_TEST("Server: Durable Objects (on disk)") {
     conn.httpGet200("/bar",
         "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79: http://foo/bar 2");
 
-    // The storage directory contains .sqlite and .sqlite-wal files for both objects, plus the
-    // per-namespace metadata.sqlite (alarm scheduler) and its WAL file. Note that the `-shm`
-    // files are missing because SQLite doesn't actually tell the VFS to create these as separate
-    // files, it leaves it up to the VFS to decide how shared memory works, and our KJ-wrapping
-    // VFS currently doesn't put this in SHM files. If we were using a real disk directory,
-    // though, they would be there.
-    KJ_EXPECT(dir->openSubdir(kj::Path({"mykey"}))->listNames().size() == 6);
+    // The storage directory contains .sqlite, .sqlite-wal and .sqlite-shm files for both
+    // objects, plus the per-namespace metadata.sqlite (alarm scheduler) and its WAL and SHM
+    // files. (The `-shm` files exist because this is a real disk directory; SQLite leaves shared
+    // memory to the VFS, and the KJ-wrapping VFS over an in-memory directory kept none.)
+    KJ_EXPECT(dir->openSubdir(kj::Path({"mykey"}))->listNames().size() == 9);
     KJ_EXPECT(dir->exists(kj::Path(
         {"mykey", "02b496f65dd35cbac90e3e72dc5a398ee93926ea4a3821e26677082d2e6f9b79.sqlite"})));
     KJ_EXPECT(dir->exists(kj::Path(
@@ -3261,9 +3422,8 @@ KJ_TEST("Server: Durable Objects (on disk)") {
     TestServer test(config);
 
     // Link our directory into the test filesystem.
-    test.root->transfer(kj::Path({"var"_kj, "do-storage"_kj}),
-        kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT, *dir, nullptr,
-        kj::TransferMode::LINK);
+    test.root.symlink(kj::Path({"var"_kj, "do-storage"_kj}), dir.path,
+        kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT);
 
     test.start();
     auto conn = test.connect("test-addr");
@@ -3337,16 +3497,15 @@ KJ_TEST("Server: Durable Object alarm persistence (on disk)") {
     ]
   ))"_kj;
 
-  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  auto dir = newSharedDirectory();
 
   // A far-future alarm time (won't fire during the test).
   kj::StringPtr alarmTime = "4102444800000";
 
   {
     TestServer test(config);
-    test.root->transfer(kj::Path({"var"_kj, "do-storage"_kj}),
-        kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT, *dir, nullptr,
-        kj::TransferMode::LINK);
+    test.root.symlink(kj::Path({"var"_kj, "do-storage"_kj}), dir.path,
+        kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT);
 
     test.start();
     auto conn = test.connect("test-addr");
@@ -3361,9 +3520,8 @@ KJ_TEST("Server: Durable Object alarm persistence (on disk)") {
   // Start a new server and verify the alarm is still there.
   {
     TestServer test(config);
-    test.root->transfer(kj::Path({"var"_kj, "do-storage"_kj}),
-        kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT, *dir, nullptr,
-        kj::TransferMode::LINK);
+    test.root.symlink(kj::Path({"var"_kj, "do-storage"_kj}), dir.path,
+        kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT);
 
     test.start();
     auto conn = test.connect("test-addr");
@@ -3777,13 +3935,12 @@ KJ_TEST("Server: Durable Object evictions when callback scheduled") {
   ))"_kj;
 
   // Create a directory outside of the test scope which we can use across multiple TestServers.
-  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  auto dir = newSharedDirectory();
   {
     TestServer test(config);
     // Link our directory into the test filesystem.
-    test.root->transfer(kj::Path({"var"_kj, "do-storage"_kj}),
-        kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT, *dir, nullptr,
-        kj::TransferMode::LINK);
+    test.root.symlink(kj::Path({"var"_kj, "do-storage"_kj}), dir.path,
+        kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT);
 
     test.start();
     auto conn = test.connect("test-addr");
@@ -4225,7 +4382,11 @@ KJ_TEST("Server: Durable Objects websocket constructor blockConcurrencyWhile thr
 
   // Wait for a pump loop to finish.
   test.wait(1);
-  // Nothing was sent from the DO, ws is closed now.
+  // The pump's first frame is in the connection's buffer before the pump is canceled, so it
+  // reaches the client ahead of the close. (kj's in-memory pipe holds a write back until it is
+  // read, and would cancel it with the pump.)
+  wsConn.recvWebSocket("pending");
+  // Nothing else was sent from the DO, ws is closed now.
   KJ_ASSERT(wsConn.isEof());
 }
 
@@ -4323,6 +4484,146 @@ KJ_TEST("Server: tail workers") {
     HTTP/1.1 200 OK
     Content-Length: 0
 
+  )"_blockquote);
+}
+
+KJ_TEST("Server: tail workers turned off") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-11-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(req, env, ctx) {
+                `    return new Response("OK");
+                `  }
+                `}
+            )
+          ],
+          tails = ["tail"],
+          streamingTails = ["tail"],
+        )
+      ),
+      ( name = "tail",
+        worker = (
+          compatibilityDate = "2024-11-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async tail(req, env, ctx) {
+                `    await fetch("http://tail");
+                `  },
+                `  tailStream(event, env, ctx) {
+                `    ctx.waitUntil(fetch("http://tail"));
+                `    return {};
+                `  }
+                `}
+            )
+          ],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.server.disableTailWorkers();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+  conn.recvHttp200("OK");
+
+  // Give a tail worker, which runs after the response, time to run.
+  test.wait(1);
+  KJ_EXPECT(!test.server.accept("tail").poll(test.ws), "a tail worker ran");
+}
+
+KJ_TEST("Server: tail workers turned off for a dynamic worker") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2025-01-01",
+          compatibilityFlags = ["enable_ctx_exports", "experimental"],
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import {WorkerEntrypoint} from "cloudflare:workers";
+                `export class Tail extends WorkerEntrypoint {
+                `  async tail(events) {
+                `    await fetch("http://tail");
+                `  }
+                `}
+                `export default {
+                `  async fetch(req, env, ctx) {
+                `    let worker = env.LOADER.get("dynamic", () => ({
+                `      compatibilityDate: "2025-01-01",
+                `      mainModule: "main.js",
+                `      modules: {
+                `        "main.js": "export default { fetch() { return new Response('OK'); } }",
+                `      },
+                `      tails: [ctx.exports.Tail({})],
+                `    }));
+                `    return worker.getEntrypoint().fetch(req);
+                `  }
+                `}
+            )
+          ],
+          bindings = [( name = "LOADER", workerLoader = () )],
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.server.disableTailWorkers();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/");
+  conn.recvHttp200("OK");
+
+  // Give a tail worker, which runs after the response, time to run.
+  test.wait(1);
+  KJ_EXPECT(!test.server.accept("tail").poll(test.ws), "a tail worker ran");
+}
+
+KJ_TEST("Server: tail workers turned off are still looked up") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-11-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  fetch(req, env, ctx) { return new Response("OK"); }
+                `}
+            )
+          ],
+          tails = ["missing"],
+        )
+      ),
+    ]
+  ))"_kj);
+
+  test.server.disableTailWorkers();
+  test.expectErrors(R"(
+    Worker "hello"'s tails refers to a service "missing", but no such service is defined.
   )"_blockquote);
 }
 
@@ -4605,7 +4906,8 @@ KJ_TEST("Server: drain incoming HTTP connections") {
 KJ_TEST("Server: network outbound with allow/deny") {
   TestServer test(R"((
     services = [
-      (name = "hello", network = (allow = ["foo", "bar"], deny = ["baz", "qux"]))
+      (name = "hello", network = (allow = ["10.0.0.0/8", "192.168.0.0/16"],
+                                  deny = ["10.1.0.0/16", "192.168.1.0/24"]))
     ],
     sockets = [
       (name = "main", address = "test-addr", service = "hello")
@@ -4619,7 +4921,8 @@ KJ_TEST("Server: network outbound with allow/deny") {
   conn.sendHttpGet("/path");
 
   {
-    auto subreq = test.receiveSubrequest("foo", {"foo", "bar"}, {"baz", "qux"});
+    auto subreq = test.receiveSubrequest(
+        "foo", {"10.0.0.0/8", "192.168.0.0/16"}, {"10.1.0.0/16", "192.168.1.0/24"});
     subreq.recv(R"(
       GET /path HTTP/1.1
       Host: foo
@@ -4668,6 +4971,51 @@ KJ_TEST("Server: external server") {
   }
 
   conn.recvHttp200("OK");
+}
+
+KJ_TEST("Server: external server reuses its connection") {
+  TestServer test(R"((
+    services = [
+      (name = "hello", external = "ext-addr")
+    ],
+    sockets = [
+      (name = "main", address = "test-addr", service = "hello")
+    ]
+  ))"_kj);
+
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.sendHttpGet("/first");
+
+  auto subreq = test.receiveSubrequest("ext-addr");
+  subreq.recv(R"(
+    GET /first HTTP/1.1
+    Host: foo
+
+  )"_blockquote);
+  subreq.send(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 2
+    Content-Type: text/plain;charset=UTF-8
+
+    OK)"_blockquote);
+  conn.recvHttp200("OK");
+
+  // The second request, an event of its own, goes over the connection the first one opened.
+  conn.sendHttpGet("/second");
+  subreq.recv(R"(
+    GET /second HTTP/1.1
+    Host: foo
+
+  )"_blockquote);
+  subreq.send(R"(
+    HTTP/1.1 200 OK
+    Content-Length: 3
+    Content-Type: text/plain;charset=UTF-8
+
+    OK2)"_blockquote);
+  conn.recvHttp200("OK2");
 }
 
 KJ_TEST("Server: external server proxy style") {
@@ -4867,15 +5215,19 @@ KJ_TEST("Server: disk service") {
 
   auto mode = kj::WriteMode::CREATE | kj::WriteMode::CREATE_PARENT;
   auto dir = test.root->openSubdir(kj::Path({"frob"_kj, "blah"_kj}), mode);
-  test.fakeDate =
-      kj::UNIX_EPOCH + 2 * kj::DAYS + 5 * kj::HOURS + 18 * kj::MINUTES + 23 * kj::SECONDS;
+  // The files are real, so each one's modification time is set rather than read off a mock clock
+  // as it is written.
+  auto date = kj::UNIX_EPOCH + 2 * kj::DAYS + 5 * kj::HOURS + 18 * kj::MINUTES + 23 * kj::SECONDS;
   dir->openFile(kj::Path({"foo.txt"}), mode)->writeAll("hello from foo.txt\n");
+  test.setModified("frob/blah/foo.txt", date);
   dir->openFile(kj::Path({"numbers.txt"}), mode)->writeAll("0123456789\n");
-  test.fakeDate = kj::UNIX_EPOCH + 400 * kj::DAYS + 2 * kj::HOURS + 52 * kj::MINUTES +
-      9 * kj::SECONDS + 163 * kj::MILLISECONDS;
+  test.setModified("frob/blah/numbers.txt", date);
+  date = kj::UNIX_EPOCH + 400 * kj::DAYS + 2 * kj::HOURS + 52 * kj::MINUTES + 9 * kj::SECONDS +
+      163 * kj::MILLISECONDS;
   dir->openFile(kj::Path({"bar.txt"}), mode)->writeAll("hello from bar.txt\n");
-  test.fakeDate = kj::UNIX_EPOCH;
+  test.setModified("frob/blah/bar.txt", date);
   dir->openFile(kj::Path({"baz", "qux.txt"}), mode)->writeAll("hello from qux.txt\n");
+  test.setModified("frob/blah/baz/qux.txt", kj::UNIX_EPOCH);
   dir->openFile(kj::Path({".dot"}), mode)->writeAll("this is a dotfile\n");
   dir->openFile(kj::Path({".dotdir", "foo"}), mode)->writeAll("this is a dotfile\n");
 
@@ -5283,6 +5635,8 @@ KJ_TEST("Server: disk service allow dotfiles") {
     )"_blockquote);
 
   KJ_EXPECT(dir->openFile(kj::Path({".dot"}))->readAllText() == "waldo\n");
+  // The server wrote a real file, at the real time: set the time the next response reports.
+  test.setModified("frob/.dot", kj::UNIX_EPOCH);
 
   conn.sendHttpGet("/.dot");
   conn.recv(R"(
@@ -5329,11 +5683,11 @@ KJ_TEST("Server: disk service allow dotfiles") {
 
     evil
   )"_blockquote);
+  // An encoded ".." is a dot segment as well (the URL standard): this wrote frob/secret again.
   conn.recv(R"(
-    HTTP/1.1 403 Unauthorized
-    Content-Length: 12
+    HTTP/1.1 204 No Content
 
-    Unauthorized)"_blockquote);
+    )"_blockquote);
   // This didn't work.
   KJ_EXPECT(test.root->openFile(kj::Path({"secret"}))->readAllText() == "this is super-secret");
 }
@@ -5479,25 +5833,24 @@ KJ_TEST("Server: re-put of raw cache.match() body resolves") {
 
     seed)"_blockquote);
 
-  {
-    auto putSubreq = test.receiveSubrequest("cache-host");
-    putSubreq.recv(R"(
-      PUT / HTTP/1.1
-      Content-Length: 92
-      Host: foo
+  // The GET's response is complete, so its connection is back in the cache service's pool and
+  // the PUT goes over it.
+  getSubreq.recv(R"(
+    PUT / HTTP/1.1
+    Content-Length: 92
+    Host: foo
 
-      HTTP/1.1 200 OK
-      Content-Length: 4
-      Cache-Control: max-age=300
-      CF-Cache-Status: HIT
+    HTTP/1.1 200 OK
+    Content-Length: 4
+    Cache-Control: max-age=300
+    CF-Cache-Status: HIT
 
-      seed)"_blockquote);
-    putSubreq.send(R"(
-      HTTP/1.1 204 No Content
-      Content-Length: 0
+    seed)"_blockquote);
+  getSubreq.send(R"(
+    HTTP/1.1 204 No Content
+    Content-Length: 0
 
-    )"_blockquote);
-  }
+  )"_blockquote);
 
   // Advance past the 5-second hang-detection race in the worker.
   test.wait(6);
@@ -5667,6 +6020,200 @@ KJ_TEST("Server: cache name is passed through to service") {
     KJ_EXPECT_LOG(INFO, "other test");
     KJ_EXPECT_LOG(DBG, "[ PASS ] another");
     KJ_EXPECT(!test.server.test(v8System, *test.config, "*", "*").wait(test.ws));
+  }
+}
+
+// =======================================================================================
+// Test the bench command
+
+KJ_TEST("Server: bench command") {
+  setBenchMode();
+  KJ_DEFER(unsetBenchModeForTest());
+
+  // With no warmup and a fixed batch, each case's function is called exactly batch * samples
+  // times, which the "verify" case checks.
+  kj::StringPtr config = R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import {WorkerEntrypoint, WorkflowEntrypoint} from "cloudflare:workers";
+                `let calls = {sync: 0, async: 0, setup: 0, teardown: 0, state: 0, bareTeardown: 0,
+                `    asyncTeardown: 0, overlaps: 0};
+                `export default {
+                `  fetch() { return new Response("ok"); },
+                `  bench(b, env, ctx) {
+                `    if (b.options.quick || b.options.filter !== undefined) {
+                `      throw new Error("unexpected options");
+                `    }
+                `    const fixed = {warmup: 0, batch: 3, samples: 4};
+                `    b.run("sync", () => { calls.sync++; return b.blackBox(1); }, fixed);
+                `    b.run("async", async () => { calls.async++; }, {...fixed, warmup: "0ms"});
+                `    b.run("state", (s) => { if (s.n === 7) calls.state++; }, {
+                `      ...fixed,
+                `      setup() { calls.setup++; return Promise.resolve({n: 7}); },
+                `      teardown(s) { if (s.n === 7) calls.teardown++; },
+                `    });
+                `    b.run("bare teardown", () => {}, {
+                `      ...fixed,
+                `      teardown(s) { if (s === undefined) calls.bareTeardown++; },
+                `    });
+                `    // The teardown's subrequest takes several turns of the event loop, so a batch
+                `    // that started before it finished would see tearingDown set.
+                `    let tearingDown = false;
+                `    b.run("async teardown", () => { if (tearingDown) calls.overlaps++; }, {
+                `      ...fixed,
+                `      async teardown() {
+                `        tearingDown = true;
+                `        await (await env.SELF.fetch("http://x/")).text();
+                `        tearingDown = false;
+                `        calls.asyncTeardown++;
+                `      },
+                `    });
+                `    let mixedCalls = 0;
+                `    b.run("mixed", () => (mixedCalls++ === 0 ? Promise.resolve() : undefined), {
+                `      ...fixed,
+                `      batch: 1,
+                `    });
+                `    b.run("skipped", () => { throw new Error("ran"); }, {skip: true});
+                `    b.run("throws", () => { throw new Error("boom"); }, fixed);
+                `    b.run("late", () => { b.run("x", () => {}); }, fixed);
+                `    b.run("verify", () => {
+                `      const expected = {sync: 12, async: 12, setup: 4, teardown: 4, state: 12,
+                `          bareTeardown: 4, asyncTeardown: 4, overlaps: 0};
+                `      if (JSON.stringify(calls) !== JSON.stringify(expected)) {
+                `        throw new Error("wrong call counts: " + JSON.stringify(calls));
+                `      }
+                `    }, {warmup: 0, batch: 1, samples: 1});
+                `  }
+                `}
+                `export let broken = {
+                `  bench(b) { throw new TypeError("not today"); }
+                `}
+                `export let empty = {
+                `  bench(b) {}
+                `}
+                `export let notBench = {
+                `  async fetch(req, env, ctx) { return new Response("ok"); }
+                `}
+                `// Classes' `bench` methods are RPC methods, not handlers.
+                `export class Rpc extends WorkerEntrypoint {
+                `  bench(x) { throw new Error("ran as a handler"); }
+                `}
+                `export class Flow extends WorkflowEntrypoint {
+                `  bench(x) { throw new Error("ran as a handler"); }
+                `}
+            )
+          ],
+          bindings = [( name = "SELF", service = "hello" )]
+        )
+      ),
+    ]
+  ))"_kj;
+
+  auto makeParams = [](capnp::MallocMessageBuilder& message, kj::StringPtr caseFilter) {
+    auto params = message.initRoot<bench::BenchParams>();
+    params.setCaseFilter(caseFilter);
+    return params.asReader();
+  };
+
+  {
+    TestServer test(config);
+    capnp::MallocMessageBuilder paramsMessage;
+    capnp::MallocMessageBuilder reportMessage;
+    auto report = reportMessage.initRoot<bench::BenchReport>();
+    KJ_EXPECT_LOG(DBG, "[ BENCH ] hello");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello/mixed: Error: The function returned a promise from some");
+    KJ_EXPECT_LOG(DBG, "[ SKIP ] hello/skipped");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello/throws: Error: boom");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello/late: Error: BenchController.run() must be called by");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello (");
+    KJ_EXPECT(!test.server
+                   .bench(v8System, *test.config, makeParams(paramsMessage, ""), report, "hello",
+                       "default")
+                   .wait(test.ws));
+
+    auto groups = report.getGroups();
+    KJ_ASSERT(groups.size() == 1);
+    KJ_EXPECT(groups[0].getName() == "hello");
+    KJ_EXPECT(!groups[0].hasError());
+    KJ_ASSERT(groups[0].hasOverhead());
+    auto overhead = groups[0].getOverhead();
+    KJ_EXPECT(overhead.getSyncNs() > 0);
+    KJ_EXPECT(overhead.getAsyncNs() > 0);
+    KJ_EXPECT(overhead.getBlackBoxNs() > 0);
+    auto cases = groups[0].getCases();
+    KJ_ASSERT(cases.size() == 10);
+
+    using Status = bench::BenchReport::Case::Status;
+    kj::StringPtr names[] = {"sync", "async", "state", "bare teardown", "async teardown", "mixed",
+      "skipped", "throws", "late", "verify"};
+    Status statuses[] = {Status::OK, Status::OK, Status::OK, Status::OK, Status::OK, Status::FAILED,
+      Status::SKIPPED, Status::FAILED, Status::FAILED, Status::OK};
+    for (auto i: kj::indices(names)) {
+      KJ_EXPECT(cases[i].getName() == names[i]);
+      KJ_EXPECT(cases[i].getStatus() == statuses[i], names[i], cases[i].getError());
+    }
+
+    for (auto i: kj::zeroTo(3)) {
+      auto c = cases[i];
+      KJ_EXPECT(c.getIterationsPerSample() == 3);
+      KJ_EXPECT(c.getWallNs().getSamples().size() == 4);
+      KJ_EXPECT(c.getCpuNs().getSamples().size() == 4);
+      auto wall = c.getWallNs();
+      // Samples have the runner's measured overhead subtracted and are clamped at zero. The
+      // overhead is measured over long batches, which a loaded machine inflates more than these
+      // 3-call batches, so a sample can be zero.
+      KJ_EXPECT(wall.getMin() >= 0);
+      KJ_EXPECT(wall.getMin() <= wall.getMedian() && wall.getMedian() <= wall.getMax());
+      KJ_EXPECT(wall.getMedianLow() <= wall.getMedian());
+      KJ_EXPECT(wall.getMedian() <= wall.getMedianHigh());
+    }
+    KJ_EXPECT(!cases[6].hasWallNs());
+
+    KJ_EXPECT(kj::StringPtr(cases[7].getError()).startsWith("Error: boom"));
+  }
+
+  {
+    // Handlers that fail or register nothing, and a case filter.
+    TestServer test(config);
+    capnp::MallocMessageBuilder paramsMessage;
+    capnp::MallocMessageBuilder reportMessage;
+    auto report = reportMessage.initRoot<bench::BenchReport>();
+    KJ_EXPECT_LOG(DBG, "[ BENCH ] hello:broken");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello:broken: TypeError: not today");
+    KJ_EXPECT_LOG(DBG, "[ BENCH ] hello:empty");
+    KJ_EXPECT_LOG(DBG, "[ FAIL ] hello:empty: bench() did not register any cases.");
+    KJ_EXPECT(!test.server
+                   .bench(v8System, *test.config, makeParams(paramsMessage, "nothing"), report,
+                       "hello", "*")
+                   .wait(test.ws));
+
+    // The default entrypoint's options check fails because a filter is set. The Rpc and Flow
+    // classes' `bench` methods aren't handlers, so they have no groups.
+    kj::HashMap<kj::StringPtr, kj::StringPtr> errors;
+    for (auto group: report.getGroups()) {
+      KJ_EXPECT(group.getCases().size() == 0, group.getName());
+      errors.insert(group.getName(), group.getError());
+    }
+    KJ_EXPECT(errors.size() == 3);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(errors.find("hello"_kj)).startsWith("Error: unexpected options"));
+  }
+
+  {
+    TestServer test(config);
+    capnp::MallocMessageBuilder paramsMessage;
+    capnp::MallocMessageBuilder reportMessage;
+    auto report = reportMessage.initRoot<bench::BenchReport>();
+    KJ_EXPECT_LOG(ERROR, "No benchmarks found!");
+    KJ_EXPECT(!test.server
+                   .bench(v8System, *test.config, makeParams(paramsMessage, ""), report, "hello",
+                       "notBench")
+                   .wait(test.ws));
+    KJ_EXPECT(report.getGroups().size() == 0);
   }
 }
 
@@ -6521,6 +7068,42 @@ KJ_TEST("Server: Workflow namespace key cannot collide with a Durable Object") {
   )"_blockquote);
 }
 
+KJ_TEST("Server: Workflow engine configuration is checked field by field") {
+  TestServer test(R"((
+    services = [
+      ( name = "app",
+        worker = (
+          compatibilityDate = "2025-02-23",
+          compatibilityFlags = ["enable_ctx_exports"],
+          modules = [(
+            name = "main.js",
+            esModule =
+              `import { WorkflowEntrypoint } from "cloudflare:workers";
+              `export class A extends WorkflowEntrypoint {}
+          )],
+          workflowsEngine = (
+            workflows = [
+              (className = "", name = ""),
+              (className = "A", name = "a"),
+              (className = "A", name = "a", bindingService = (name = "app")),
+            ],
+          )
+        )
+      ),
+    ],
+  ))"_kj);
+
+  test.expectErrors(R"(
+    Worker service "app"'s workflowsEngine is missing actorClass.
+    Worker service "app" configures a Workflow without className.
+    Worker service "app" configures a Workflow without name.
+    Worker service "app"'s Workflow "" is missing bindingService.
+    Worker service "app"'s Workflow "a" is missing bindingService.
+    Worker service "app" configures multiple Workflows for class "A".
+    Worker service "app" configures multiple Workflows named "a".
+  )"_blockquote);
+}
+
 KJ_TEST("Server: loopback binding calls accept version property") {
   TestServer test(R"((
     services = [
@@ -6567,6 +7150,80 @@ KJ_TEST("Server: loopback binding calls accept version property") {
 
 // TODO(beta): Test TLS (send and receive)
 // TODO(beta): Test CLI overrides
+
+KJ_TEST("Server: compressed event streams flush while other responses stay buffered") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2024-04-29",
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `const event = new TextEncoder().encode("data: first\n\n");
+          `export default {
+          `  async fetch(request, env, ctx) {
+          `    const [kind, encoding] = new URL(request.url).pathname.slice(1).split("/");
+          `    const stream = new TransformStream();
+          `    const writer = stream.writable.getWriter();
+          `    ctx.waitUntil((async () => {
+          `      await writer.write(event);
+          `      await fetch("http://sse-gate/release/" + kind + "/" + encoding);
+          `      await writer.close();
+          `    })());
+          `    return new Response(stream.readable, { headers: {
+          `      "Content-Type": kind === "events"
+          `          ? "Text/Event-Stream; charset=utf-8"
+          `          : "text/plain",
+          `      "Content-Encoding": encoding,
+          `    }});
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+
+  test.start();
+  auto& waitScope = test.getWaitScope();
+  enum class ExpectedDelivery { BEFORE_STREAM_END, AFTER_STREAM_END };
+  auto expectDelivery = [&]<typename Decompressor>(kj::StringPtr kind, kj::StringPtr encoding,
+                            ExpectedDelivery expectedDelivery) {
+    auto connection = test.connect("test-addr");
+    kj::HttpHeaderTable headerTable;
+    kj::HttpHeaders headers(headerTable);
+    headers.setPtr(kj::HttpHeaderId::HOST, "foo");
+    auto client = kj::newHttpClient(headerTable, connection.getStream());
+    auto path = kj::str("/", kind, "/", encoding);
+    auto response = client->request(kj::HttpMethod::GET, path, headers).response.wait(waitScope);
+    KJ_ASSERT(response.statusCode == 200);
+
+    auto gate = test.receiveInternetSubrequest("sse-gate");
+    gate.recv(kj::str("GET /release/", kind, "/", encoding, " HTTP/1.1\nHost: sse-gate\n\n"));
+
+    constexpr auto expected = "data: first\n\n"_kj;
+    Decompressor decoded(*response.body);
+    kj::byte buffer[expected.size()]{};
+    auto firstEvent = decoded.tryRead(buffer, expected.size(), expected.size());
+    bool deliveredBeforeEnd = firstEvent.poll(waitScope);
+
+    gate.send(R"(
+      HTTP/1.1 204 No Content
+      Content-Length: 0
+
+    )"_blockquote);
+
+    KJ_EXPECT(deliveredBeforeEnd == (expectedDelivery == ExpectedDelivery::BEFORE_STREAM_END));
+    KJ_EXPECT(firstEvent.wait(waitScope) == expected.size());
+    KJ_EXPECT(kj::arrayPtr(buffer) == expected.asBytes());
+    KJ_EXPECT(decoded.readAllBytes().wait(waitScope).size() == 0);
+  };
+
+  expectDelivery.template operator()<kj::GzipAsyncInputStream>(
+      "events", "gzip", ExpectedDelivery::BEFORE_STREAM_END);
+  expectDelivery.template operator()<kj::BrotliAsyncInputStream>(
+      "events", "br", ExpectedDelivery::BEFORE_STREAM_END);
+  expectDelivery.template operator()<kj::GzipAsyncInputStream>(
+      "text", "gzip", ExpectedDelivery::AFTER_STREAM_END);
+  expectDelivery.template operator()<kj::BrotliAsyncInputStream>(
+      "text", "br", ExpectedDelivery::AFTER_STREAM_END);
+}
 
 KJ_TEST("Server: encodeResponseBody: manual option") {
   TestServer test(R"((
@@ -7011,14 +7668,13 @@ KJ_TEST("Server: Durable Object facets") {
   ))"_kj;
 
   // Create a directory outside of the test scope which we can use across multiple TestServers.
-  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  auto dir = newSharedDirectory();
 
   {
     TestServer test(config);
 
     // Link our directory into the test filesystem.
-    test.root->transfer(
-        kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE, *dir, nullptr, kj::TransferMode::LINK);
+    test.root.symlink(kj::Path({"do-storage"_kj}), dir.path, kj::WriteMode::CREATE);
 
     test.server.allowExperimental();
     test.start();
@@ -7060,8 +7716,7 @@ KJ_TEST("Server: Durable Object facets") {
     TestServer test(config);
 
     // Link our directory into the test filesystem.
-    test.root->transfer(
-        kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE, *dir, nullptr, kj::TransferMode::LINK);
+    test.root.symlink(kj::Path({"do-storage"_kj}), dir.path, kj::WriteMode::CREATE);
 
     test.server.allowExperimental();
     test.start();
@@ -7277,13 +7932,12 @@ KJ_TEST("Server: Durable Object facet cloning") {
   ))"_kj;
 
   // A directory outside of the test scope that can be reused across multiple TestServers.
-  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  auto dir = newSharedDirectory();
 
   {
     TestServer test(config);
 
-    test.root->transfer(
-        kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE, *dir, nullptr, kj::TransferMode::LINK);
+    test.root.symlink(kj::Path({"do-storage"_kj}), dir.path, kj::WriteMode::CREATE);
 
     test.server.allowExperimental();
     test.start();
@@ -7332,8 +7986,7 @@ KJ_TEST("Server: Durable Object facet cloning") {
   {
     TestServer test(config);
 
-    test.root->transfer(
-        kj::Path({"do-storage"_kj}), kj::WriteMode::CREATE, *dir, nullptr, kj::TransferMode::LINK);
+    test.root.symlink(kj::Path({"do-storage"_kj}), dir.path, kj::WriteMode::CREATE);
 
     test.server.allowExperimental();
     test.start();
@@ -7341,6 +7994,38 @@ KJ_TEST("Server: Durable Object facet cloning") {
     // We previously mutated dst to value=999 and dst.a=888, dst.b unchanged at 200.
     conn.httpGet200("/read-restored", "dst=999 dst.a=888 dst.b=200");
   }
+}
+
+KJ_TEST("Server: a durableObjectClass binding without props can be sent over RPC") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2026-04-01",
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
+          `export class MyActorClass extends DurableObject {}
+          `export class Receiver extends WorkerEntrypoint {
+          `  take(cls) {
+          `    return cls === undefined ? "missing" : "received";
+          `  }
+          `}
+          `export default {
+          `  async fetch(request, env, ctx) {
+          `    return new Response(await env.RECEIVER.take(env.CLS));
+          `  }
+          `}
+      )
+    ],
+    bindings = [
+      (name = "CLS", durableObjectClass = (name = "hello", entrypoint = "MyActorClass")),
+      (name = "RECEIVER", service = (name = "hello", entrypoint = "Receiver")),
+    ]
+  ))"_kj));
+
+  test.server.allowExperimental();
+  test.start();
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "received");
 }
 
 KJ_TEST("Server: Durable Object facet limits") {
@@ -7648,7 +8333,7 @@ struct FdPair {
 };
 
 auto makePipeFds() {
-  int pipeFds[2];
+  int pipeFds[2]{};
   KJ_SYSCALL(pipe2(pipeFds, 0));
 
   return FdPair{
@@ -7659,7 +8344,7 @@ auto makePipeFds() {
 
 template <typename Func>
 auto expectLogLine(int fd, Func&& f) {
-  char buffer[4096];
+  char buffer[4096]{};
   int pos = 0;
   char c;
   while (read(fd, &c, 1) == 1) {
@@ -7828,6 +8513,7 @@ KJ_TEST("Server: structured logging with console methods") {
   });
 }
 
+#ifdef WORKERD_USE_TRANSPILER
 KJ_TEST("Server: transpiled typescript") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2025-08-01",
@@ -7872,6 +8558,7 @@ KJ_TEST("Server: transpiled typescript failure") {
 service hello: Uncaught TypeError: Main module must be an ES module.
 )");
 }
+#endif  // defined(WORKERD_USE_TRANSPILER)
 
 #endif  // __linux__
 
@@ -8993,6 +9680,40 @@ KJ_TEST("Server: handler validation does not evaluate unrelated getters") {
   test.start();
   auto conn = test.connect("test-addr");
   conn.httpGet200("/", "ok");
+}
+
+KJ_TEST("Server: a service that fails to start does not leak the services before it") {
+  TestServer test(R"((
+    services = [
+      ( name = "first",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "main.js",
+              esModule = `export class MyActor {}
+            )
+          ],
+          durableObjectNamespaces = [( className = "MyActor", uniqueKey = "key" )],
+          durableObjectStorage = (inMemory = void),
+        )
+      ),
+      ( name = "second",
+        worker = (
+          compatibilityDate = "2024-01-01",
+          modules = [
+            ( name = "main.js",
+              esModule = `export default {}
+            )
+          ],
+          bindings = [( name = "param", parameter = (type = (text = void)) )],
+        )
+      ),
+    ],
+  ))"_kj);
+
+  // `~TestServer` fails the case if "first" still holds the factory.
+  KJ_EXPECT_THROW_MESSAGE(
+      "TODO(beta): parameters", test.server.run(v8System, *test.config).wait(test.ws));
 }
 
 }  // namespace

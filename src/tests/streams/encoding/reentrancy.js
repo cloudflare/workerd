@@ -8,8 +8,7 @@
 // Two user hooks are reachable mid-processing. Read results are ordinary
 // objects, so resolving a read runs the thenable check against them and a
 // patched Object.prototype.then getter executes mid-delivery — consulted
-// once per read under C++, twice under TypeScript (same counts as the
-// identity suite). And the encoder ToString-coerces object chunks, so a
+// once per read (as in the identity suite). And the encoder ToString-coerces object chunks, so a
 // user toString() runs INSIDE the transform — a hook the identity streams
 // do not have.
 //
@@ -51,7 +50,7 @@ export const thenInterceptionDuringReadResolution = {
         const readPromise = reader.read();
         await writer.write('ab');
         deepStrictEqual([...(await readPromise).value], [97, 98]);
-        strictEqual(fired, usingTsImpl ? 2 : 1);
+        strictEqual(fired, 1);
 
         const before = fired;
         const tds = new TextDecoderStream();
@@ -60,7 +59,7 @@ export const thenInterceptionDuringReadResolution = {
         const rp2 = r2.read();
         await w2.write(new TextEncoder().encode('cd'));
         strictEqual((await rp2).value, 'cd');
-        strictEqual(fired - before, usingTsImpl ? 2 : 1);
+        strictEqual(fired - before, 1);
       }
     );
   },

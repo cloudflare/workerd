@@ -111,7 +111,7 @@ side's exact behavior:
 import { usingTsImpl } from 'which-impl';
 
 const expected = usingTsImpl ? RangeError : TypeError;
-throws(() => new FixedLengthStream(-1), expected);
+throws(() => new IdentityTransformStream({ highWaterMark: -1 }), expected);
 ```
 
 `which-impl.js` reads
@@ -123,7 +123,7 @@ of the file that asserts it.
 ## Running
 
 ```
-bazel test //src/tests/streams/... --nocache_test_results
+bazel test //src/tests/streams/...
 ```
 
 Targets per suite: `<name>-cpp@`, `<name>-ts@`, each with `@all-compat-flags`

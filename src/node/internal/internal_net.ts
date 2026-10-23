@@ -729,7 +729,7 @@ export declare class Socket extends _Socket {
     reading: boolean | undefined;
     // Set while startRead's loop is running over this handle, so that the
     // several places that start reading (connect, resume, read, a TLS
-    // upgrade) never run two loops — and thus two BYOB reads — against the
+    // upgrade) never run two loops - and thus two BYOB reads - against the
     // same reader at once.
     readLoopActive?: boolean;
     // Set by a TLS upgrade before it releases this handle's reader and
@@ -927,8 +927,8 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
     }
     this[kBuffer] = true;
     // The read loop's BYOB reads transfer the buffers they are handed, so a
-    // caller reusing one — a fixed buffer, or a generator handing out the
-    // same buffers again — is continued over the store it moved to.
+    // caller reusing one - a fixed buffer, or a generator handing out the
+    // same buffers again - is continued over the store it moved to.
     this[kBufferContinuations] = new WeakMap();
     // eslint-disable-next-line @typescript-eslint/unbound-method
     this[kBufferCb] = onread.callback;
@@ -1974,8 +1974,8 @@ async function startRead(socket: Socket): Promise<void> {
         );
       }
       // A view the loop has read into before was detached by that read's
-      // transfer of its buffer. Handed out again — a fixed onread buffer, or a
-      // generator reusing its buffers, as Node's in-place fills allow — it
+      // transfer of its buffer. Handed out again - a fixed onread buffer, or a
+      // generator reusing its buffers, as Node's in-place fills allow - it
       // means the same range of the store the buffer moved to, which the
       // loop kept as the view's continuation.
       const view =
@@ -2021,7 +2021,7 @@ async function startRead(socket: Socket): Promise<void> {
 
       // The BYOB read transferred the view's buffer. Continue the caller's
       // view over the transferred backing store as a view of the same range
-      // — the caller's offset and capacity, not the whole allocation — so a
+      // - the caller's offset and capacity, not the whole allocation - so a
       // read into it again fills exactly the region the caller handed out. A
       // store the read left too small for that range (detached or shrunk
       // while the read was pending, which only a non-transferring read can
@@ -2068,8 +2068,8 @@ async function startRead(socket: Socket): Promise<void> {
     // A pending read rejects when the socket is destroyed (its stream is
     // closing) or when a TLS upgrade releases this loop's reader (the
     // handle is handed over; the parent socket keeps pointing at it):
-    // neither is news. Anything else — a failing generator or buffer
-    // (above), a read the runtime refuses — destroys the socket with the
+    // neither is news. Anything else - a failing generator or buffer
+    // (above), a read the runtime refuses - destroys the socket with the
     // error rather than leaving it open and silent.
     if (socket._handle === handle && !handle.handedOver && !socket.destroyed) {
       socket.destroy(err as Error);

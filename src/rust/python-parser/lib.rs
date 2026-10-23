@@ -1,7 +1,3 @@
-// Production code must not panic; test code is exempt via clippy.toml allow-*-in-tests.
-#![deny(clippy::expect_used, clippy::panic, clippy::unreachable)]
-#![deny(clippy::todo, clippy::unimplemented)]
-
 use std::collections::HashSet;
 
 use ruff_python_ast::Stmt;
@@ -9,6 +5,7 @@ use ruff_python_ast::StmtImportFrom;
 use ruff_python_parser::parse_module;
 
 #[cxx::bridge(namespace = "edgeworker::rust::python_parser")]
+#[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {
 
     extern "Rust" {

@@ -16,8 +16,10 @@ export {
 
 export {
   initDictionaryIsRequired,
+  initDictionaryShapes,
   missingHighWaterMarkDiverges,
   highWaterMarkIsUnrestrictedDouble,
+  initHighWaterMarkReadOnce,
 } from 'construction';
 
 export {

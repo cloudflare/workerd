@@ -676,9 +676,9 @@ export const timeoutDisarmedByCompletion = {
   async test(ctrl, env) {
     const log = [];
     const req = get(env, '/asd');
-    req.setTimeout(40);
     record(log, 'req', req, ['timeout', 'error']);
     const res = await response(req);
+    req.setTimeout(40);
     strictEqual((await collect(res)).toString(), 'asd');
     await scheduler.wait(100);
     deepStrictEqual(log, []);
@@ -786,9 +786,9 @@ export const responseSetTimeoutZeroClears = {
   async test(ctrl, env) {
     const log = [];
     const req = get(env, '/slow-body?delay=100');
-    req.setTimeout(40);
     record(log, 'req', req, ['timeout', 'error']);
     const res = await response(req);
+    req.setTimeout(40);
     res.setTimeout(0);
     strictEqual((await collect(res)).toString(), 'firstlast');
     deepStrictEqual(log, []);

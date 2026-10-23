@@ -25,6 +25,14 @@ async function getLastSubscribeOptions(env, id) {
   return (await res.json()).result;
 }
 
+async function getLastCreateBatchOptions(env) {
+  const res = await env.mock.fetch('http://placeholder/last-create-batch', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  return (await res.json()).result;
+}
+
 export const workflowsApi = {
   async test(_, env) {
     {
@@ -56,6 +64,38 @@ export const workflowsApi = {
       ]);
       assert.deepStrictEqual(instances[0].id, 'foo');
       assert.deepStrictEqual(instances[1].id, 'bar');
+    }
+
+    {
+      const options = {
+        count: 2,
+        params: { bar: 'baz' },
+        retention: { successRetention: '1 day' },
+        locationHint: 'weur',
+      };
+      const result = await env.workflow.createBatch(options);
+      assert.deepStrictEqual(
+        result.created.map(({ id }) => id),
+        ['generated-0', 'generated-1']
+      );
+      assert.deepStrictEqual(result.errors, []);
+      assert.deepStrictEqual(await getLastCreateBatchOptions(env), options);
+    }
+
+    {
+      const result = await env.workflow.createBatch({
+        instances: [{ id: 'batch-ok' }, { id: 'batch-error' }],
+      });
+      assert.deepStrictEqual(result.created[0].id, 'batch-ok');
+      assert.strictEqual(typeof result.created[0].status, 'function');
+      assert.deepStrictEqual(result.errors, [
+        {
+          index: 1,
+          id: 'batch-error',
+          code: 10405,
+          message: 'Provided instance ID already exists',
+        },
+      ]);
     }
 
     {

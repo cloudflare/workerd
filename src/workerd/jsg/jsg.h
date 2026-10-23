@@ -1581,10 +1581,14 @@ class Ref {
   // typically this should only be called on a newly-allocated object.
   // `tag` is the per-type CppHeapPointerTag for T, computed by the caller via
   // TypeWrapper::wrappableTag<T>() (the caller has the TypeWrapper and thus the full type list
-  // needed to number T; Ref<T> does not).
-  void attachWrapper(
-      v8::Isolate* isolate, v8::Local<v8::Object> object, v8::CppHeapPointerTag tag) {
-    inner->Wrappable::attachWrapper(isolate, object, resourceNeedsGcTracing<T>(), tag);
+  // needed to number T; Ref<T> does not). Context globals pass kContextGlobalWrappableTag and
+  // IsContextGlobal::YES instead; see Wrappable::attachWrapper().
+  void attachWrapper(v8::Isolate* isolate,
+      v8::Local<v8::Object> object,
+      v8::CppHeapPointerTag tag,
+      IsContextGlobal isContextGlobal = IsContextGlobal::NO) {
+    inner->Wrappable::attachWrapper(
+        isolate, object, resourceNeedsGcTracing<T>(), tag, isContextGlobal);
   }
 
   // Obtain a weak reference to the referenced object. The weak reference does not keep the
@@ -1962,6 +1966,15 @@ class Name final {
 template <typename Signature>
 class Function;
 
+// Whether a JavaScript function that wraps a C++ callback will be called at most once.
+//
+// A wrapped callback, and everything it captures, normally lives until the GC collects the
+// function. In practice that means the next full GC: v8::Function::New() allocates a template in
+// old space that references the callback's data, so minor GCs never free it. With Once::YES, the
+// callback is destroyed as soon as its first call returns, and a second call is an internal
+// error. Use it for functions that only ever run once, such as microtasks.
+WD_STRONG_BOOL(Once);
+
 // Use this to unwrap a JavaScript function that should be called as a constructor (with `new`).
 // The return type in this case is the constructed type. `Constructor` is a subclass of `Function`;
 // it can be used in all the same ways.
@@ -2155,6 +2168,13 @@ class JsContext {
     return handle.Get(isolate);
   }
   v8::Local<v8::Context> getHandle(Lock& js) const;
+
+  // Moves out the underlying Global<Context> handle so snapshot preparation can reset it
+  // ahead of CreateBlob. Leaves this JsContext with an empty handle, so this is only valid
+  // in PREPARE_SNAPSHOT mode, where the context is never used again.
+  v8::Global<v8::Context> extractContextGlobalForSnapshot() {
+    return kj::mv(handle);
+  }
 
  private:
   v8::Global<v8::Context> handle;
@@ -3006,8 +3026,11 @@ class Lock {
 
   v8::Local<v8::String> wrapString(kj::StringPtr text);
   virtual v8::Local<v8::ArrayBuffer> wrapBytes(kj::Array<byte> data) = 0;
+  // Wraps a C++ callback as a JavaScript function. Pass Once::YES if the function will be called
+  // at most once; see `Once`.
   virtual v8::Local<v8::Function> wrapSimpleFunction(v8::Local<v8::Context> context,
-      jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction) = 0;
+      jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction,
+      Once once = Once::NO) = 0;
 
   // A variation on wrapSimpleFunction that allows for a return value. While the wrapSimpleFunction
   // implementation passes the FunctionCallbackInfo into the called function, any call to
@@ -3097,6 +3120,8 @@ class Lock {
   void setRequireReturnsDefaultExportEnabled();
   void setThrowOnUnrecognizedImportAssertion();
   bool getThrowOnUnrecognizedImportAssertion() const;
+  void setWasmEsmIntegrationBuiltinsEnabled();
+  bool isWasmEsmIntegrationBuiltinsEnabled() const;
   void setToStringTag();
   void setImmutablePrototype();
   void setSpecCompliantPropertyAttributes();
@@ -3272,6 +3297,10 @@ class Lock {
     Lock& js;
   };
 
+  // True when the underlying isolate was created in the corresponding snapshot mode.
+  bool isPreparingSnapshot() const;
+  bool isStartingFromSnapshot() const;
+
   // Sets the terminate-execution flag on the isolate so that the next time code tries to run, it
   // will be terminated. (But note that V8 only checks the flag at certain times, so it's possible
   // some code will actually execute before termination kicks in.)
@@ -3319,9 +3348,9 @@ class Lock {
   // Returns the capnp::SchemaLoader for this isolate/context
   template <typename T>
   const capnp::SchemaLoader& getCapnpSchemaLoader() const {
-    return KJ_ASSERT_NONNULL(
-        jsg::getAlignedPointerFromEmbedderData<T>(
-            v8Isolate->GetCurrentContext(), ContextPointerSlot::GLOBAL_WRAPPER))
+    auto context = v8Isolate->GetCurrentContext();
+    return extractInternalPointer<T, true>(
+        v8Isolate, context, context->Global(), kNonResourceWrappableTagRange)
         .getSchemaLoader();
   }
 

@@ -59,13 +59,14 @@ class HibernatableWebSocketAdapter final: public WebSocketAdapter {
   void initConnection(jsg::Lock& js, kj::Promise<PackedWebSocket> packedWsPromise) override;
   kj::Promise<DeferredProxy<void>> couple(
       jsg::Lock& js, kj::Own<kj::WebSocket> other, RequestObserver& request) override;
-  void internalAccept(jsg::Lock& js, kj::Maybe<kj::Own<InputGate::CriticalSection>> cs) override;
+  void internalAccept(jsg::Lock& js, kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs) override;
 
   bool isAccepted() override;
   bool isReleased() override;
   bool isAwaitingCoupling() override;
   bool isHibernatable() override;
   void setObserver(kj::Own<WebSocketObserver> observer) override;
+  kj::Ptr<bool> getDispatchFailed() override;
 
   kj::Rc<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags) override;
   void initiateHibernatableRelease(jsg::Lock& js,

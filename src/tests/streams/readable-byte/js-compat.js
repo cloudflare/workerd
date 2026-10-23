@@ -63,15 +63,19 @@ export const closedPromiseByteReaders = {
   },
 };
 
-// reader.cancel() resolves pending reads done=true for default, BYOB,
-// and readAtLeast reads (byte halves of readableStreamCancelReads).
-// DIVERGENCE in the value of a cancelled pending read, for all three
-// read kinds (ledger #22): C++ resolves a zero-length Uint8Array,
+// reader.cancel() resolves pending reads done=true for default (with or
+// without autoAllocateChunkSize), BYOB, and readAtLeast reads (byte
+// halves of readableStreamCancelReads). DIVERGENCE in the value of a
+// cancelled pending read, for every read kind (ledger #22; close() with
+// a pending default read is #43): C++ resolves a zero-length Uint8Array,
 // TypeScript resolves undefined (spec ReadableStreamCancel). WPT's
 // assert_object_equals treats the two as equal, so this pin is the
-// only one guarding it.
+// only one guarding it. On a native body C++ rejects the three reads
+// instead, with "Stream was cancelled." for a bare cancel() (as the
+// identity suite's ledger #20 has it), and TypeScript resolves them as
+// on a JS byte source.
 export const cancelPendingReadsByteReaders = {
-  async test() {
+  async test(ctrl, env) {
     const assertCancelledValue = (value) => {
       if (usingTsImpl) {
         strictEqual(value, undefined);
@@ -80,8 +84,8 @@ export const cancelPendingReadsByteReaders = {
         strictEqual(value.byteLength, 0);
       }
     };
-    {
-      const rs = new ReadableStream({ type: 'bytes' });
+    for (const source of [{}, { autoAllocateChunkSize: 8 }]) {
+      const rs = new ReadableStream({ type: 'bytes', ...source });
       const reader = rs.getReader();
       const read = reader.read();
       reader.cancel();
@@ -106,6 +110,24 @@ export const cancelPendingReadsByteReaders = {
       const { done, value } = await read;
       ok(done);
       assertCancelledValue(value);
+    }
+    const reads = [
+      [undefined, (reader) => reader.read()],
+      ['byob', (reader) => reader.read(new Uint8Array(1))],
+      ['byob', (reader) => reader.readAtLeast(1, new Uint8Array(1))],
+    ];
+    for (const [mode, startRead] of reads) {
+      const { body } = await env.SELF.fetch('http://test/delayed');
+      const reader = body.getReader(mode ? { mode } : undefined);
+      const read = startRead(reader);
+      reader.cancel();
+      if (usingTsImpl) {
+        const { done, value } = await read;
+        ok(done);
+        strictEqual(value, undefined);
+      } else {
+        await rejects(read, { message: 'Stream was cancelled.' });
+      }
     }
   },
 };

@@ -61,6 +61,55 @@ KJ_TEST("ok worker request") {
   KJ_ASSERT(response.body->readAllText().wait(waitScope) == "OK");
 }
 
+KJ_TEST("ok worker customEvent answers with the event's notSupported()") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  // The ok worker does not override Interface::custom_event. The default must call the event's
+  // notSupported() and return its result.
+  class NotSupportedEvent final: public workerd::WorkerInterface::CustomEvent {
+   public:
+    explicit NotSupportedEvent(bool& notSupportedCalled): notSupportedCalled(notSupportedCalled) {}
+
+    kj::Promise<Result> run(kj::Own<workerd::IoContext_IncomingRequest> incomingRequest,
+        kj::Maybe<kj::StringPtr> entrypointName,
+        kj::Maybe<workerd::Worker::VersionInfo> versionInfo,
+        workerd::Frankenvalue props,
+        kj::TaskSet& waitUntilTasks,
+        bool) override {
+      KJ_UNIMPLEMENTED();
+    }
+    kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+        capnp::ByteStreamFactory& byteStreamFactory,
+        workerd::FrankenvalueHandler& frankenvalueHandler,
+        workerd::rpc::EventDispatcher::Client dispatcher) override {
+      KJ_UNIMPLEMENTED();
+    }
+    kj::Promise<Result> notSupported() override {
+      notSupportedCalled = true;
+      return Result{.outcome = workerd::EventOutcome::SCRIPT_NOT_FOUND};
+    }
+    uint16_t getType() override {
+      return 42;
+    }
+    workerd::tracing::EventInfo getEventInfo() const override {
+      return workerd::tracing::CustomEventInfo();
+    }
+
+   private:
+    bool& notSupportedCalled;
+  };
+
+  auto worker = kj::from<Rust>(new_ok_worker());
+  bool notSupportedCalled = false;
+
+  auto result =
+      worker->customEvent(kj::heap<NotSupportedEvent>(notSupportedCalled)).wait(waitScope);
+
+  KJ_ASSERT(notSupportedCalled);
+  KJ_ASSERT(result.outcome == workerd::EventOutcome::SCRIPT_NOT_FOUND);
+}
+
 KJ_TEST("kill_switch worker connect") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
@@ -378,6 +427,16 @@ class StubWorker final: public WorkerInterface {
       .retry = true, .retryCountsAgainstLimit = false, .outcome = workerd::EventOutcome::OK};
   }
 
+  kj::Promise<kj::Maybe<kj::Date>> abandonAlarm(kj::Date scheduledTime) override {
+    abandonAlarmCalled = true;
+    abandonedAlarmTime = scheduledTime;
+    return kj::Maybe<kj::Date>(STORED_ALARM_TIME);
+  }
+
+  bool abandonAlarmCalled = false;
+  kj::Date abandonedAlarmTime = kj::UNIX_EPOCH;
+  static constexpr kj::Date STORED_ALARM_TIME = kj::UNIX_EPOCH + 5000 * kj::SECONDS;
+
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     customEventCalled = true;
     return CustomEvent::Result{.outcome = workerd::EventOutcome::OK};
@@ -415,6 +474,11 @@ KJ_TEST("cxx_worker delegates non-HTTP events to the wrapped C++ worker") {
   KJ_ASSERT(alarm.retry == true);
   KJ_ASSERT(alarm.retryCountsAgainstLimit == false);
   KJ_ASSERT(alarm.outcome == workerd::EventOutcome::OK);
+
+  auto stored = worker->abandonAlarm(kj::UNIX_EPOCH + 3000 * kj::SECONDS).wait(waitScope);
+  KJ_ASSERT(stubRef.abandonAlarmCalled);
+  KJ_ASSERT(stubRef.abandonedAlarmTime == kj::UNIX_EPOCH + 3000 * kj::SECONDS);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(stored) == StubWorker::STORED_ALARM_TIME);
 
   KJ_ASSERT(worker->test().wait(waitScope));
   KJ_ASSERT(stubRef.testCalled);
@@ -491,6 +555,162 @@ KJ_TEST("cxx_worker delegates connect to the wrapped C++ worker") {
   KJ_ASSERT(stubRef.connectCalled);
   KJ_ASSERT(stubRef.connectHost == "example.com:443");
   KJ_ASSERT(response.statusCode == 200);
+}
+
+// ======================================================================================
+// PromisedInterface: a Rust Interface whose C++ target is still being started.
+
+namespace {
+
+// A custom event that passes the exception given to failed() on to `onFailed`.
+class RecordingEvent final: public workerd::WorkerInterface::CustomEvent {
+ public:
+  explicit RecordingEvent(kj::Function<void(const kj::Exception&)> onFailed)
+      : onFailed(kj::mv(onFailed)) {}
+
+  kj::Promise<Result> run(kj::Own<workerd::IoContext_IncomingRequest> incomingRequest,
+      kj::Maybe<kj::StringPtr> entrypointName,
+      kj::Maybe<workerd::Worker::VersionInfo> versionInfo,
+      workerd::Frankenvalue props,
+      kj::TaskSet& waitUntilTasks,
+      bool) override {
+    KJ_UNIMPLEMENTED();
+  }
+  kj::Promise<Result> sendRpc(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
+      capnp::ByteStreamFactory& byteStreamFactory,
+      workerd::FrankenvalueHandler& frankenvalueHandler,
+      workerd::rpc::EventDispatcher::Client dispatcher) override {
+    KJ_UNIMPLEMENTED();
+  }
+  kj::Promise<Result> notSupported() override {
+    KJ_UNIMPLEMENTED();
+  }
+  void failed(const kj::Exception& e) override {
+    onFailed(e);
+  }
+  uint16_t getType() override {
+    return 42;
+  }
+  workerd::tracing::EventInfo getEventInfo() const override {
+    return workerd::tracing::CustomEventInfo();
+  }
+
+ private:
+  kj::Function<void(const kj::Exception&)> onFailed;
+};
+
+constexpr uint64_t START_FAILURE_DETAIL_ID = 0x8f3e1d2c4b5a6978ull;
+
+// Builds a startup failure that uses every part of a kj::Exception: type, description, throw
+// site and a detail record. Detail records are how CPU, memory, wall-time and kill-switch
+// failures are classified.
+kj::Exception startFailure() {
+  kj::Exception e(
+      kj::Exception::Type::OVERLOADED, "start.c++", 123, kj::str("the worker could not start"));
+  e.setDetail(START_FAILURE_DETAIL_ID, kj::heapArray("cpu"_kjb));
+  return e;
+}
+
+void expectStartFailure(const kj::Exception& e) {
+  KJ_EXPECT(e.getType() == kj::Exception::Type::OVERLOADED);
+  KJ_EXPECT(e.getDescription() == "the worker could not start");
+  KJ_EXPECT(kj::StringPtr(e.getFile()) == "start.c++");
+  KJ_EXPECT(e.getLine() == 123);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(e.getDetail(START_FAILURE_DETAIL_ID)) == "cpu"_kjb);
+}
+
+}  // namespace
+
+KJ_TEST("promised interface reports the startup failure in full to every later event") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto worker = newPromisedInterface(startFailure());
+
+  // The first event reports the failure. Every later event must report the same exception in
+  // full, not a copy with only the type and description.
+  for (int attempt = 0; attempt < 2; attempt++) {
+    auto exception = kj::runCatchingExceptions([&]() { worker->test().wait(waitScope); });
+    expectStartFailure(KJ_ASSERT_NONNULL(exception));
+  }
+  auto exception =
+      kj::runCatchingExceptions([&]() { worker->prewarm("/warm"_kj).wait(waitScope); });
+  expectStartFailure(KJ_ASSERT_NONNULL(exception));
+}
+
+KJ_TEST("promised interface tells a customEvent the full startup failure") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto worker = newPromisedInterface(startFailure());
+  bool failedCalled = false;
+
+  auto exception = kj::runCatchingExceptions([&]() {
+    worker
+        ->customEvent(kj::heap<RecordingEvent>([&](const kj::Exception& e) {
+      failedCalled = true;
+      expectStartFailure(e);
+    })).wait(waitScope);
+  });
+
+  expectStartFailure(KJ_ASSERT_NONNULL(exception));
+  KJ_ASSERT(failedCalled);
+}
+
+KJ_TEST("promised interface rejects a customEvent with the exception its failed() throws") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto worker = newPromisedInterface(startFailure());
+
+  // failed() is virtual, so it may throw. When it does, the event's promise rejects with that
+  // exception instead of the startup failure.
+  auto exception = kj::runCatchingExceptions([&]() {
+    worker
+        ->customEvent(kj::heap<RecordingEvent>([](const kj::Exception&) {
+      KJ_FAIL_REQUIRE("the event could not be told");
+    })).wait(waitScope);
+  });
+
+  auto& e = KJ_ASSERT_NONNULL(exception);
+  KJ_EXPECT(e.getType() == kj::Exception::Type::FAILED);
+  KJ_EXPECT(e.getDescription() == "the event could not be told");
+}
+
+KJ_TEST("promised interface delegates abandonAlarm before and after its target starts") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto paf = kj::newPromiseAndFulfiller<kj::Own<WorkerInterface>>();
+  auto worker = newPromisedInterface(kj::mv(paf.promise));
+  auto stub = kj::heap<StubWorker>();
+  auto& stubRef = *stub;
+
+  // Before the target has started, the call must wait for it instead of returning the no-op
+  // default.
+  auto pending = worker->abandonAlarm(kj::UNIX_EPOCH + 1000 * kj::SECONDS);
+  KJ_ASSERT(!pending.poll(waitScope));
+  KJ_ASSERT(!stubRef.abandonAlarmCalled);
+  paf.fulfiller->fulfill(kj::mv(stub));
+  auto stored = pending.wait(waitScope);
+  KJ_ASSERT(stubRef.abandonAlarmCalled);
+  KJ_ASSERT(stubRef.abandonedAlarmTime == kj::UNIX_EPOCH + 1000 * kj::SECONDS);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(stored) == StubWorker::STORED_ALARM_TIME);
+
+  // Once started, calls go straight to the target.
+  stubRef.abandonAlarmCalled = false;
+  stored = worker->abandonAlarm(kj::UNIX_EPOCH + 2000 * kj::SECONDS).wait(waitScope);
+  KJ_ASSERT(stubRef.abandonAlarmCalled);
+  KJ_ASSERT(stubRef.abandonedAlarmTime == kj::UNIX_EPOCH + 2000 * kj::SECONDS);
+  KJ_ASSERT(KJ_ASSERT_NONNULL(stored) == StubWorker::STORED_ALARM_TIME);
+}
+
+KJ_TEST("a Rust interface's default abandonAlarm reports no stored alarm") {
+  kj::EventLoop loop;
+  kj::WaitScope waitScope(loop);
+
+  auto worker = kj::from<Rust>(new_ok_worker());
+  KJ_ASSERT(worker->abandonAlarm(kj::UNIX_EPOCH).wait(waitScope) == kj::none);
 }
 
 }  // namespace

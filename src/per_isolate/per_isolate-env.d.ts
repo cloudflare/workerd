@@ -68,6 +68,17 @@ declare const primordials: {
     ? (thisArg: ThisParameterType<T>, ...args: Parameters<T>) => ReturnType<T>
     : (...args: any[]) => any;
 
+  // Uncurries the getter of `proto`'s own accessor `name`, typed as T; throws
+  // if there is none.
+  readonly getProtoGetter: <T>(proto: object, name: string | symbol) => T;
+
+  // Promise.resolve and Promise.reject, bound to the captured constructor.
+  readonly PromiseResolve: {
+    (): Promise<void>;
+    <T>(value: T): Promise<Awaited<T>>;
+  };
+  readonly PromiseReject: <T = never>(reason?: unknown) => Promise<T>;
+
   // Everything else is loosely typed — add specific entries as needed.
   readonly [key: string]: any;
 };
@@ -100,6 +111,10 @@ declare const utils: {
     signal: AbortSignal,
     algorithm: () => void
   ): AbortAlgorithmHandle;
+  // The exact UTF-8 byte length of a string as TextEncoder encodes it (a lone
+  // surrogate counts the 3 bytes of U+FFFD), without encoding it. Throws a
+  // TypeError for a non-string.
+  utf8Length(str: string): number;
 };
 
 // An abort algorithm registration. Obtained only from

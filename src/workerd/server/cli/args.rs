@@ -8,6 +8,9 @@
 use clap::Args;
 use clap::Parser;
 use clap::Subcommand;
+use clap::ValueEnum;
+use workerd_server::bench;
+use workerd_server::bridge::ffi as server;
 
 use crate::bridge::ffi;
 
@@ -121,6 +124,22 @@ pub enum Command {
         test: TestArgs,
     },
 
+    /// run benchmarks
+    #[command(
+        long_about = "Runs benchmarks based on a config.",
+        after_long_help = BENCH_HELP,
+    )]
+    Bench {
+        #[command(flatten)]
+        config: ConfigFileArgs,
+
+        #[command(flatten)]
+        serve_or_test: ServeOrTestArgs,
+
+        #[command(flatten)]
+        bench: BenchArgs,
+    },
+
     /// outputs the package lock file used by Pyodide
     #[command(long_about = "Outputs the package lock file used by Pyodide.")]
     PyodideLock,
@@ -167,6 +186,25 @@ under different entrypoint names:
         ...
       }
     }
+";
+
+const BENCH_HELP: &str = "\
+Runs benchmarks for services defined in <config-file>. <filter>, if given, has the format of the \
+`test` command's, optionally followed by /<case-pattern>, a glob pattern matching case names:
+    <service-pattern>[/<case-pattern>]
+    <service-pattern>:<entrypoint-pattern>[/<case-pattern>]
+    <const-name>:<service-pattern>:<entrypoint-pattern>[/<case-pattern>]
+
+Benchmarks are defined by exporting a function called `bench`, which registers cases. Each case \
+is timed after `bench` returns:
+    export default {
+      bench(b, env, ctx) {
+        const encoder = new TextEncoder();
+        b.run('encode', () => b.blackBox(encoder.encode('hello')));
+        b.run('fetch', async () => { await env.SERVICE.fetch('http://x/'); }, { minTime: '2s' });
+      }
+    }
+Results are written to stdout as a table, or as JSON with --format=json.
 ";
 
 #[derive(Args, Debug)]
@@ -220,6 +258,24 @@ pub struct ServeOrTestArgs {
         hide = !ffi::perfetto_supported()
     )]
     pub perfetto_trace: Option<Override>,
+
+    /// Write an async activity trace to <path>: one JSON object per line, recording requests,
+    /// turns, timers, I/O and binding operations, and what caused what. The file is overwritten.
+    /// It includes request details such as URLs and storage keys (and, with
+    /// --async-trace-stacks, source locations), so treat it like a log.
+    #[arg(long, value_name = "path")]
+    pub async_trace: Option<String>,
+
+    /// Record up to <frames> frames of the JavaScript stack that created each async resource, in
+    /// the --async-trace file and in the workerd.async category of --perfetto-trace. Slows down
+    /// every resource creation.
+    #[arg(long, value_name = "frames", value_parser = clap::value_parser!(u32).range(1..=64))]
+    pub async_trace_stacks: Option<u32>,
+
+    /// Also trace JavaScript promises, in every async trace output. Installs V8's promise hook,
+    /// which slows down every promise operation.
+    #[arg(long)]
+    pub async_trace_promises: bool,
 
     /// Watch configuration files (and server binary) and reload if they change. Useful for
     /// development, but not recommended in production.
@@ -315,6 +371,61 @@ pub struct TestArgs {
     pub filter: Option<TestFilter>,
 }
 
+#[derive(Args, Debug)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "one bool per command-line flag"
+)]
+pub struct BenchArgs {
+    /// Disable INFO-level logging, which otherwise shows uncaught exceptions.
+    #[arg(long)]
+    pub no_verbose: bool,
+
+    /// Enable all autogates.
+    #[arg(long)]
+    pub all_autogates: bool,
+
+    /// Set the compatibility date for all workers, as for `test`. 'latest' is the newest date that
+    /// this build supports. Without this, workers that don't specify compatibilityDate get that
+    /// date.
+    #[arg(long, value_name = "date")]
+    pub compat_date: Option<String>,
+
+    /// Use short time budgets, to check that benchmarks run rather than to measure them.
+    #[arg(long)]
+    pub quick: bool,
+
+    /// The format of the results.
+    #[arg(long, value_enum, default_value_t = BenchFormat::Text)]
+    pub format: BenchFormat,
+
+    /// Write the results to <path> instead of stdout.
+    #[arg(long, value_name = "path")]
+    pub output: Option<String>,
+
+    /// Run tail workers, which are otherwise skipped since they add their cost to every request.
+    #[arg(long)]
+    pub trace: bool,
+
+    #[arg(value_name = "filter", value_parser = parse_bench_filter)]
+    pub filter: Option<BenchFilter>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum BenchFormat {
+    /// A table for people.
+    Text,
+    /// The full report, including raw samples.
+    Json,
+}
+
+/// `workerd bench`'s `<filter>`: `test`'s `<filter>` and `/<case-pattern>`, each optional.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BenchFilter {
+    pub test: TestFilter,
+    pub case_pattern: Option<String>,
+}
+
 /// `<filter>`: `<service-pattern>`, `<service-pattern>:<entrypoint-pattern>`, or
 /// `<const-name>:<service-pattern>:<entrypoint-pattern>`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -374,45 +485,53 @@ fn parse_test_filter(param: &str) -> Result<TestFilter, &'static str> {
     })
 }
 
+fn parse_bench_filter(param: &str) -> Result<BenchFilter, &'static str> {
+    let (rest, case_pattern) = match param.split_once('/') {
+        Some((rest, case_pattern)) => (rest, Some(case_pattern.to_owned())),
+        None => (param, None),
+    };
+    let test = if rest.is_empty() {
+        TestFilter::default()
+    } else {
+        parse_test_filter(rest)?
+    };
+    Ok(BenchFilter { test, case_pattern })
+}
+
 fn parse_control_fd(param: &str) -> Result<u32, &'static str> {
     param
         .parse()
         .map_err(|_| "Output value must be a file descriptor (non-negative integer).")
 }
 
-impl From<Override> for ffi::Override {
-    fn from(Override { name, value }: Override) -> Self {
-        Self { name, value }
-    }
+/// `<name>=<value>` options as a map, last value per name winning.
+pub fn override_map(overrides: Vec<Override>) -> std::collections::HashMap<String, String> {
+    overrides
+        .into_iter()
+        .map(|Override { name, value }| (name, value))
+        .collect()
 }
 
-impl From<ServeOrTestArgs> for ffi::ServeOrTestOptions {
-    fn from(args: ServeOrTestArgs) -> Self {
+impl From<&ServeOrTestArgs> for server::ServeOrTestOptions {
+    fn from(args: &ServeOrTestArgs) -> Self {
         let (perfetto_trace_path, perfetto_trace_categories) = args
             .perfetto_trace
+            .clone()
             .map(|Override { name, value }| (name, value))
             .unzip();
         Self {
-            directory_overrides: args
-                .directory_overrides
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-            external_overrides: args
-                .external_overrides
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-            inspector_addr: args.inspector_addr.into(),
             perfetto_trace_path: perfetto_trace_path.into(),
             perfetto_trace_categories: perfetto_trace_categories.into(),
+            async_trace_path: args.async_trace.clone().into(),
+            async_trace_stacks: args.async_trace_stacks.into(),
+            async_trace_promises: args.async_trace_promises,
             experimental: args.experimental,
-            pyodide_package_disk_cache_dir: args.pyodide_package_disk_cache_dir.into(),
-            pyodide_bundle_disk_cache_dir: args.pyodide_bundle_disk_cache_dir.into(),
+            pyodide_package_disk_cache_dir: args.pyodide_package_disk_cache_dir.clone().into(),
+            pyodide_bundle_disk_cache_dir: args.pyodide_bundle_disk_cache_dir.clone().into(),
             python_save_snapshot: args.python_save_snapshot,
             python_save_baseline_snapshot: args.python_save_baseline_snapshot,
-            python_load_snapshot: args.python_load_snapshot.into(),
-            python_snapshot_dir: args.python_snapshot_dir.into(),
+            python_load_snapshot: args.python_load_snapshot.clone().into(),
+            python_snapshot_dir: args.python_snapshot_dir.clone().into(),
         }
     }
 }
@@ -432,187 +551,34 @@ pub fn socket_overridden_twice(serve: &ServeArgs) -> Option<&str> {
         })
 }
 
-impl ffi::TestOptions {
-    /// The options for a test run, with the service and entrypoint patterns from `filter`.
-    pub fn new(args: TestArgs, filter: TestFilter) -> Self {
+impl From<&TestArgs> for server::TestOptions {
+    fn from(args: &TestArgs) -> Self {
         Self {
             no_verbose: args.no_verbose,
             predictable: args.predictable,
             gc_stress: args.gc_stress,
             all_autogates: args.all_autogates,
-            compat_date: args.compat_date.into(),
-            service_pattern: filter.service_pattern.into(),
-            entrypoint_pattern: filter.entrypoint_pattern.into(),
+            compat_date: args.compat_date.clone().into(),
+        }
+    }
+}
+
+impl BenchArgs {
+    /// The server's options for the run, with `case_pattern` from the filter.
+    pub fn options(&self, case_pattern: Option<String>) -> bench::Options {
+        bench::Options {
+            no_verbose: self.no_verbose,
+            all_autogates: self.all_autogates,
+            compat_date: self.compat_date.clone(),
+            quick: self.quick,
+            case_pattern,
+            json: self.format == BenchFormat::Json,
+            output: self.output.clone(),
+            trace: self.trace,
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use clap::CommandFactory;
-
-    use super::*;
-
-    fn parse(args: &[&str]) -> Main {
-        Main::try_parse_from(std::iter::once("workerd").chain(args.iter().copied())).unwrap()
-    }
-
-    #[test]
-    fn definitions_are_consistent() {
-        Main::command().debug_assert();
-        CompiledMain::command().debug_assert();
-    }
-
-    #[test]
-    fn wd_test_invocation() {
-        let Command::Test {
-            config,
-            serve_or_test,
-            test,
-        } = parse(&[
-            "test",
-            "--predictable",
-            "foo.wd-test",
-            "--compat-date=2000-01-01",
-            "-dTEST_TMPDIR=/tmp/x",
-        ])
-        .command
-        else {
-            panic!("expected test")
-        };
-        assert_eq!(config.config_file, "foo.wd-test");
-        assert!(test.predictable);
-        assert_eq!(test.compat_date.as_deref(), Some("2000-01-01"));
-        assert_eq!(test.filter, None);
-        assert_eq!(
-            serve_or_test.directory_overrides,
-            [Override {
-                name: "TEST_TMPDIR".into(),
-                value: "/tmp/x".into()
-            }]
-        );
-    }
-
-    #[test]
-    fn serve_options() {
-        let Command::Serve {
-            config,
-            const_name,
-            serve_or_test,
-            serve,
-        } = parse(&[
-            "serve",
-            "--binary",
-            "-",
-            "-I",
-            "inc",
-            "-wb",
-            "--experimental",
-            "--socket-addr",
-            "http=*:8080",
-            "--control-fd=3",
-            "--inspector-addr=127.0.0.1:9229",
-            "--inspector-addr=127.0.0.1:9230",
-        ])
-        .command
-        else {
-            panic!("expected serve")
-        };
-        assert_eq!(config.config_file, "-");
-        assert!(config.binary);
-        assert_eq!(config.import_paths, ["inc"]);
-        assert_eq!(const_name.const_name, None);
-        assert!(serve_or_test.watch);
-        assert!(serve_or_test.experimental);
-        // Later occurrences override earlier ones, as with kj::MainBuilder.
-        assert_eq!(
-            serve_or_test.inspector_addr.as_deref(),
-            Some("127.0.0.1:9230")
-        );
-        assert_eq!(serve.control_fd, Some(3));
-        assert_eq!(
-            serve.socket_addr_overrides,
-            [Override {
-                name: "http".into(),
-                value: "*:8080".into()
-            }]
-        );
-    }
-
-    #[test]
-    fn serve_const_name_and_verbose_after_subcommand() {
-        let main = parse(&["serve", "config.capnp", "myConfig", "--verbose"]);
-        assert!(main.global.verbose);
-        let Command::Serve { const_name, .. } = main.command else {
-            panic!("expected serve")
-        };
-        assert_eq!(const_name.const_name.as_deref(), Some("myConfig"));
-    }
-
-    #[test]
-    fn test_filters() {
-        let filter = |param| parse_test_filter(param);
-        assert_eq!(
-            filter("svc"),
-            Ok(TestFilter {
-                service_pattern: Some("svc".into()),
-                ..TestFilter::default()
-            })
-        );
-        assert_eq!(
-            filter("svc:ep"),
-            Ok(TestFilter {
-                service_pattern: Some("svc".into()),
-                entrypoint_pattern: Some("ep".into()),
-                ..TestFilter::default()
-            })
-        );
-        assert_eq!(
-            filter("cfg:svc:"),
-            Ok(TestFilter {
-                const_name: Some("cfg".into()),
-                service_pattern: Some("svc".into()),
-                entrypoint_pattern: Some(String::new()),
-            })
-        );
-        assert_eq!(filter("a:b:c:d"), Err("Too many colons."));
-    }
-
-    #[test]
-    fn bad_values_are_usage_errors() {
-        for args in [
-            &["serve", "c.capnp", "--socket-addr=noequals"][..],
-            &["serve", "c.capnp", "--socket-fd=http=abc"],
-            &["serve", "c.capnp", "--control-fd=-1"],
-            &["serve"],
-            &["test", "c.capnp", "a", "b"],
-            &["unknown"],
-        ] {
-            let argv = std::iter::once("workerd").chain(args.iter().copied());
-            assert!(Main::try_parse_from(argv).is_err(), "{args:?}");
-        }
-    }
-
-    #[test]
-    fn socket_overridden_twice_finds_the_conflict() {
-        let Command::Serve { serve, .. } =
-            parse(&["serve", "c.capnp", "-shttp=*:8080", "-Sadmin=3", "-Shttp=4"]).command
-        else {
-            panic!("expected serve")
-        };
-        assert_eq!(socket_overridden_twice(&serve), Some("http"));
-        let Command::Serve { serve, .. } =
-            parse(&["serve", "c.capnp", "-shttp=*:8080", "-Sadmin=3"]).command
-        else {
-            panic!("expected serve")
-        };
-        assert_eq!(socket_overridden_twice(&serve), None);
-    }
-
-    #[test]
-    fn compiled_binary_has_no_config_arguments() {
-        let main = CompiledMain::try_parse_from(["workerd", "-s", "http=*:8080"]).unwrap();
-        assert_eq!(main.serve.socket_addr_overrides.len(), 1);
-        assert!(CompiledMain::try_parse_from(["workerd", "config.capnp"]).is_err());
-    }
-}
+#[path = "args-test.rs"]
+mod tests;

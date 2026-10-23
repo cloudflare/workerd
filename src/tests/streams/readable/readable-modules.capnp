@@ -33,4 +33,5 @@ const modules :List(Workerd.Worker.Module) = [
   (name = "backpressure", esModule = embed "backpressure.js"),
   (name = "transfer", esModule = embed "transfer.js"),
   (name = "pollution", esModule = embed "pollution.js"),
+  (name = "unhandled-rejection", esModule = embed "unhandled-rejection.js"),
 ];

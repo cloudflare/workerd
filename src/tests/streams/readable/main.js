@@ -22,6 +22,7 @@ export {
   controllerNotConstructable,
   getReaderBadModeThrows,
   defaultStreamNoByobReader,
+  getReaderOptionsShapes,
   lockedLifecycle,
 } from 'api-surface';
 
@@ -29,6 +30,9 @@ export {
   garbageSourceValidation,
   invalidTypeValidation,
   argumentConversionOrder,
+  strategyArgumentShapes,
+  conversionErrorPrecedence,
+  byteMembersOnDefaultSource,
   highWaterMarkValidated,
   hwmDefaultIsOne,
 } from 'construction';
@@ -85,6 +89,9 @@ export {
   queueMathNearMaxSafeInteger,
   queueMathNearZeroClamped,
   queueMathNearZeroEndsZero,
+  queueMathResidueClampedAtDequeue,
+  queueMathPositiveResidueKept,
+  queueMathResidueClampedPerTeeBranch,
 } from 'queue-math';
 
 export {
@@ -98,6 +105,8 @@ export {
   teeCancelReverseOrder,
   teePullPerRead,
   teeBackpressureFollowsSlowestBranch,
+  teeCancelAfterSiblingDrainedToClose,
+  teeCancelSettlesWhenErroredBranchLeavesAfterClose,
 } from 'tee';
 
 export {
@@ -120,6 +129,14 @@ export {
   readableStreamFromCancelResolvesWhenReturnMissing,
   fromString,
   fromReturnValidationMessages,
+  fromReadsNextOnce,
+  fromSyncResultReadsDoneBeforeValue,
+  fromIteratorLookupsAreGets,
+  fromAcceptsObjectsOnly,
+  fromCancelReturnLookup,
+  fromArrayBufferViewIsOneChunk,
+  fromIteratorProtocolEdges,
+  fromSyncIterableSettlesEarly,
 } from 'from';
 
 export {
@@ -127,12 +144,16 @@ export {
   asyncIteratorReturnMethod,
   asyncIteratorReturnThenNext,
   asyncIteratorPreventCancel,
+  valuesOptionsShapes,
   asyncIteratorOnClosedStream,
   asyncIteratorOnErroredStream,
   asyncIteratorLocksStream,
   returnThenNextNoAwait,
   nextThenReturnNoAwait,
   iteratorPrototypeShape,
+  iteratorMethodsRejectForeignThis,
+  firstNextPullsSynchronously,
+  nextFromPullReadsBehindOuter,
   nextFromEarlierContinuationReadsAhead,
   nextFromEarlierContinuationBeatsReturn,
   nextAfterRejectedNextIsDone,
@@ -141,6 +162,9 @@ export {
 export {
   enqueueInsideSize,
   closeInsideSize,
+  closeInsideSizeWithQueuedChunk,
+  closeInsideSizeTeeDrainedBranch,
+  closeInsideSizeTeeBranchesBehind,
   cancelInsideSize,
   readInsideSize,
 } from 'reentrancy';
@@ -154,6 +178,7 @@ export {
   readAllTextRequestSmall,
   readAllTextRequestBig,
   readAllTextResponseSmall,
+  readAllTextKeepsEmbeddedNul,
   readAllTextResponseBig,
   readAllTextFailedPull,
   readAllTextFailedStart,
@@ -188,6 +213,8 @@ export {
   disturbedStreamIntoResponse,
   lockedStreamIntoResponse,
   bodyIdentityAndLockCoupling,
+  teedStreamIntoResponse,
+  bodyUsedAfterBodyTee,
 } from 'integration-locked-disturbed';
 
 export {
@@ -199,18 +226,27 @@ export {
   teeBranchesCollectedReleaseBacklog,
   teeSurvivorBranchCollected,
   teeBranchesCollectedPullStops,
+  sourceReleasedOnceEnded,
 } from 'gc';
 
 export {
   thenGetterFireCountOnRead,
+  thenGetterFiresOncePerRead,
+  thenGetterTimingForWaitingRead,
+  thenGetterNotConsultedByPipeReads,
+  thenGetterPerIteratorNext,
+  thenGetterPerIteratorReturn,
   thenGetterCancelsBranchDuringEnqueue,
   thenGetterCancelsBranchDuringEnqueueBacklog,
   thenGetterCancelsBranchDuringClose,
   thenGetterCancelsTwoBranchesDuringEnqueue,
+  thenGetterReleasesReaderWhileReadsSettle,
 } from 'then-interceptors';
 
 export {
   drainingReaderSweepsQueuedBacklog,
+  drainingReaderMaxSizeEndsAtClose,
+  drainingReaderSizeOverflowEndsAtClose,
   drainingReaderPullDriven,
   drainingReaderErrorPropagation,
   drainingReaderCancelReachesSource,
@@ -235,7 +271,11 @@ export { structuredCloneReadable } from 'transfer';
 export {
   patchedArrayIteratorKeepsBody,
   replacedNumberKeepsBody,
+  patchedObjectThenKeepsText,
   patchedControllerErrorStillErrors,
   omittedDictionariesReadNothing,
+  fromBuildsNoDictionariesFromObjectPrototype,
   asyncIteratorShape,
 } from 'pollution';
+
+export { readerClosedIsMarkedHandled } from 'unhandled-rejection';

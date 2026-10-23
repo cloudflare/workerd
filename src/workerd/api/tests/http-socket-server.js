@@ -280,7 +280,9 @@ flushHelloServer.listen(0, () => {
   console.log(`FLUSH_HELLO_SOCKET=${flushHelloServer.address().port}`);
 });
 
-// Create a self-signed certificate for TLS with proper SAN extension
+// Create a self-signed certificate for TLS with proper SAN extension. The certificate below is
+// also checked in as starttls-server.pem, which the test's `internet` service embeds as its only
+// trusted certificate.
 function createSelfSignedCert() {
   const key = `-----BEGIN PRIVATE KEY-----
 MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCmi4tGNwMie1Ha

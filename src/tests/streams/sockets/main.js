@@ -8,6 +8,7 @@
 export {
   echoRoundTrip,
   degenerateViewsWithHighWaterMark,
+  stringSizesWithHighWaterMark,
   greetReadsToEof,
   echoByobReads,
   echoReadAtLeast,
@@ -19,6 +20,8 @@ export {
   pipeBehindUnawaitedWrite,
   pipeBehindWriteBeforeStart,
   cancelReadableSettlesSocket,
+  detachRejectsPendingWrites,
+  detachClosesIdleWritable,
   largeEchoVolume,
   closeWithPipeCloseInFlight,
 } from 'socket-streams';

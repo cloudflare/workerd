@@ -68,6 +68,11 @@ jsg::Optional<jsg::Ref<CacheContext>> EntrypointsModule::getCtxCache(jsg::Lock& 
   return kj::none;
 }
 
+kj::String EntrypointsModule::mapVirtualHost(
+    jsg::Lock& js, jsg::Ref<Fetcher> fetcher, uint16_t port) {
+  return fetcher->mapVirtualHost(js, port);
+}
+
 void EntrypointsModule::abortIsolate(jsg::Lock& js, jsg::Optional<kj::String> reason) {
   auto& r = reason.orDefault(nullptr);
   KJ_IF_SOME(context, IoContext::tryCurrent()) {
@@ -76,8 +81,24 @@ void EntrypointsModule::abortIsolate(jsg::Lock& js, jsg::Optional<kj::String> re
   js.terminateExecutionNow();
 }
 
+void EntrypointsModule::retryable(jsg::Lock& js, jsg::Arguments<jsg::Value> methods) {
+  // Check every argument before marking any, so a call that throws marks nothing.
+  for (auto& method: methods) {
+    JSG_REQUIRE(jsg::JsValue(method.getHandle(js)).isFunction(), TypeError,
+        "retryable() accepts only functions.");
+  }
+  for (auto& method: methods) {
+    KJ_ASSERT_NONNULL(jsg::JsValue(method.getHandle(js)).tryCast<jsg::JsObject>())
+        .setPrivate(js, RETRYABLE_METHOD_PRIVATE_KEY, js.boolean(true));
+  }
+}
+
 jsg::JsSymbol EntrypointsModule::getRestoreSymbol(jsg::Lock& js) {
   return js.symbolInternal("cloudflare:workers:restore");
+}
+
+jsg::JsSymbol EntrypointsModule::getOnEvictSymbol(jsg::Lock& js) {
+  return js.symbolInternal(ON_EVICT_SYMBOL_KEY);
 }
 
 }  // namespace workerd::api

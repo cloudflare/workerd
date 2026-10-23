@@ -9,10 +9,6 @@ rust_library(
     link_deps = [
         ":bridge",
     ],
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         "//src/rust/cxx",
         "//src/rust/cxx/kj-rs",
@@ -28,6 +24,7 @@ rust_cxx_bridge(
     include_prefix = "kj-rs-tokio-test",
     deps = [
         "//src/rust/cxx/kj-rs",
+        "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
     ],
 )
 
@@ -41,15 +38,11 @@ cc_test(
         "@platforms//os:windows": True,
         "//conditions:default": False,
     }),
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         ":bridge",
         ":tests",
         "//src/rust/cxx/kj-rs-tokio:kj-rs-tokio-lib",
-        "//src/rust/cxx/third-party:runtime",
+        "@@//deps:rust_runtime",
         "@capnp-cpp//src/kj:kj-test",
     ],
 )

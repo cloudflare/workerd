@@ -492,6 +492,21 @@ class TypeWrapperOps {
   template <typename U>
   auto unwrapFastApi(jsg::Lock& js,
       v8::Local<v8::Context> context,
+      const v8::FastOneByteString& handle,
+      TypeErrorContext errorContext) -> U {
+    auto& self = static_cast<Self&>(*this);
+    auto maybe = self.tryUnwrap(js, context, handle, static_cast<kj::Decay<U>*>(nullptr));
+    KJ_IF_SOME(result, maybe) {
+      return kj::fwd<RemoveMaybe<decltype(maybe)>>(result);
+    } else {
+      throwTypeError(
+          js.v8Isolate, errorContext, Self::getName(static_cast<kj::Decay<U>*>(nullptr)));
+    }
+  }
+
+  template <typename U>
+  auto unwrapFastApi(jsg::Lock& js,
+      v8::Local<v8::Context> context,
       v8::Local<v8::Value>& arg,
       TypeErrorContext errorContext) -> RemoveRvalueRef<U> {
     return static_cast<Self&>(*this).template unwrap<U>(js, context, arg, errorContext);
@@ -677,6 +692,27 @@ class TypeWrapper: public DynamicResourceTypeMap<Self>,
 
   void initTypeWrapper() {
     (TypeWrapperBase<Self, T>::initTypeWrapper(), ...);
+  }
+
+  // Enumerate every resource type's constructor-template slots for startup-snapshot handling.
+  // Fans out over each RESOURCE wrapper; see ResourceWrapper::iterateResourceTypeTemplates.
+  template <typename Cb>
+  void iterateResourceTypeTemplates(Cb&& cb) {
+    ([&] {
+      if constexpr (T::JSG_KIND == JsgKind::RESOURCE) {
+        static_cast<ResourceWrapper<Self, T>*>(this)->iterateResourceTypeTemplates(cb);
+      }
+    }(), ...);
+  }
+
+  void visitStructTypeHandles(kj::FunctionParam<void(v8::Global<v8::Name>&)> visitName,
+      kj::FunctionParam<void(v8::Global<v8::DictionaryTemplate>&)> visitDictionaryTemplate) {
+    ([&] {
+      if constexpr (T::JSG_KIND == JsgKind::STRUCT) {
+        static_cast<TypeWrapperBase<Self, T>*>(this)->visitPersistentHandles(
+            visitName, visitDictionaryTemplate);
+      }
+    }(), ...);
   }
 
   static Self& from(v8::Isolate* isolate) {

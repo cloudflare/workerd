@@ -12,6 +12,7 @@
 #include <workerd/jsg/jsg-test.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/tests/test-fixture.h>
+#include <workerd/util/autogate.h>
 
 #include <openssl/rand.h>
 
@@ -599,6 +600,48 @@ KJ_TEST("WritableStreamInternalController pipeLoop abort during pending read") {
     // If we get here without crashing, the test passes
     KJ_ASSERT(pullCount >= 1);
   });
+}
+
+KJ_TEST("WritableStreamInternalController pipe keeps its source alive across its read") {
+  auto fixture = makeAbortClearsQueueTestFixture();
+  struct Streams {
+    kj::Maybe<jsg::Ref<ReadableStream>> source;
+    kj::Maybe<jsg::Ref<WritableStream>> sink;
+  };
+  Streams streams;
+  int pullCount = 0;
+  bool pipeRejected = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    // The pipe loop's second read runs the source's pull() synchronously. pull() aborts the
+    // destination, which tears the pipe down and drops its reference to the source, and drops
+    // the last other reference too. The source must survive until its read returns.
+    streams.sink = env.js.alloc<WritableStream>(env.context, kj::heap<NoopSink>(), kj::none);
+    streams.source = ReadableStream::constructor(env.js,
+        UnderlyingSource{.pull =
+                             [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+      auto& c = KJ_ASSERT_NONNULL(controller.tryGet<jsg::Ref<ReadableStreamDefaultController>>());
+      if (++pullCount == 1) {
+        c->enqueue(js, jsg::JsUint8Array::create(js, {1, 2, 3, 4}));
+        return js.resolvedPromise();
+      }
+      // Aborting cancels the source, which destroys this lambda, so take what we need first.
+      auto& state = streams;
+      auto sink = kj::mv(KJ_ASSERT_NONNULL(state.sink));
+      state.sink = kj::none;
+      sink->getController().abort(js, js.typeError("abort"_kj)).markAsHandled(js);
+      state.source = kj::none;
+      js.v8Isolate->LowMemoryNotification();
+      return js.resolvedPromise();
+    }},
+        StreamQueuingStrategy{.highWaterMark = 0});
+
+    auto pipe = KJ_ASSERT_NONNULL(streams.source)
+                    ->pipeTo(env.js, KJ_ASSERT_NONNULL(streams.sink).addRef(), PipeToOptions{})
+                    .catch_(env.js, [&](jsg::Lock&, jsg::Value) { pipeRejected = true; });
+    return env.context.awaitJs(env.js, kj::mv(pipe));
+  });
+  KJ_ASSERT(pullCount == 2);
+  KJ_ASSERT(pipeRejected);
 }
 
 // ======================================================================================
@@ -1339,6 +1382,62 @@ KJ_TEST("internal pipe force-cancel drops pending read before destroying source"
     read.fulfiller->fulfill(1);
 
     return env.context.awaitJs(env.js, kj::mv(pipe)).then([&] { KJ_ASSERT(pipeRejected); });
+  });
+}
+
+// Produces `length` zero bytes, as fast as the caller will read them.
+class ZeroFillSource final: public ReadableStreamSource {
+ public:
+  explicit ZeroFillSource(size_t length): length(length) {}
+
+  kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
+    auto amount = kj::min(maxBytes, length);
+    memset(buffer, 0, amount);
+    length -= amount;
+    return amount;
+  }
+
+ private:
+  size_t length;
+};
+
+KJ_TEST("deeply nested tee() chains do not overflow the stack") {
+  static constexpr size_t teeDepth = 200 * 1024 / sizeof(void*);
+  TestFixture testFixture;
+  testFixture.runInIoContext([](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto s = js.alloc<ReadableStream>(env.context, kj::heap<ZeroFillSource>(10 * 1024 * 1024));
+    auto readableStreams = s->tee(js);
+    for (size_t i = 0; i < teeDepth; i++) {
+      readableStreams = readableStreams[0]->tee(js);
+    }
+  });
+}
+
+KJ_TEST("default reader read() auto-allocates a chunk-sized buffer") {
+  static constexpr size_t streamLength = 10 * 1024;
+  TestFixture testFixture;
+
+  testFixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+    auto stream = js.alloc<ReadableStream>(env.context, kj::heap<ZeroFillSource>(streamLength));
+    auto reader = stream->getReader(js, {});
+    KJ_REQUIRE(reader.is<jsg::Ref<ReadableStreamDefaultReader>>());
+    auto& defaultReader = reader.get<jsg::Ref<ReadableStreamDefaultReader>>();
+
+    return env.context.awaitJs(js, defaultReader->read(js).then(js,
+            JSG_VISITABLE_LAMBDA((reader = defaultReader.addRef(), stream = stream.addRef()),
+                (reader, stream), (jsg::Lock& js, ReadResult readResult) {
+      KJ_ASSERT(!readResult.done);
+      auto& value = KJ_REQUIRE_NONNULL(readResult.value);
+      auto u8 = KJ_ASSERT_NONNULL(value.getHandle(js).tryCast<jsg::JsUint8Array>());
+      if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE)) {
+        // The 16KB chunk holds the entire 10KB stream.
+        KJ_ASSERT(u8.size() == streamLength);
+      } else {
+        KJ_ASSERT(u8.size() == 4 * 1024);
+      }
+    })));
   });
 }
 

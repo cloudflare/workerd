@@ -5,7 +5,6 @@
 #include "cf-property.h"
 
 #include <workerd/io/features.h>
-#include <workerd/util/own-util.h>
 
 namespace workerd::api {
 
@@ -41,7 +40,7 @@ static void handleDefaultBotManagement(jsg::Lock& js, jsg::JsObject handle) {
 }
 
 CfProperty::CfProperty(kj::Maybe<kj::StringPtr> unparsed) {
-  value = mapCopyString(unparsed);
+  value = unparsed.clone();
 }
 
 CfProperty::CfProperty(jsg::Lock& js, const jsg::JsObject& object)

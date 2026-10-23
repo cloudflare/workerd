@@ -249,6 +249,56 @@ fn test_non_atomic_kj_arc() {
 }
 
 #[test]
+fn test_projected_kj_rc() {
+    let counter = ffi::SharedWithKjRc {
+        rc: ffi::c_return_kj_rc(0),
+    };
+    let mut rc = ffi::c_return_projected_kj_rc(6060, counter.rc.clone()).unwrap();
+    assert_eq!(6060, ffi::c_take_non_refcounted_kj_rc_by_ref(&rc));
+    assert!(!rc.is_shared());
+    assert!(rc.get_mut().is_some());
+
+    let maybe = kj_rs::KjMaybe::Some(rc.clone());
+    assert!(maybe.is_some());
+    let clone = Option::<kj_rs::KjRc<ffi::NonRefcountedRcC>>::from(maybe).unwrap();
+    assert_eq!(rc.get(), clone.get());
+    assert!(rc.is_shared());
+    assert!(rc.get_mut().is_none());
+
+    drop(rc);
+    assert_eq!(0, ffi::c_take_shared_with_kj_rc_by_ref(&counter));
+    assert!(!clone.is_shared());
+    assert_eq!(6060, ffi::c_take_non_refcounted_kj_rc_by_ref(&clone));
+    drop(clone);
+    assert_eq!(1, ffi::c_take_shared_with_kj_rc_by_ref(&counter));
+}
+
+#[test]
+fn test_projected_kj_arc() {
+    let counter = ffi::SharedWithKjArc {
+        arc: ffi::c_return_kj_arc(0),
+    };
+    let mut arc = ffi::c_return_projected_kj_arc(7070, counter.arc.clone()).unwrap();
+    assert_eq!(7070, ffi::c_take_non_atomic_kj_arc_by_ref(&arc));
+    assert!(!arc.is_shared());
+    assert!(arc.get_mut().is_some());
+
+    let maybe = kj_rs::KjMaybe::Some(arc.clone());
+    assert!(maybe.is_some());
+    let clone = Option::<kj_rs::KjArc<ffi::NonAtomicArcC>>::from(maybe).unwrap();
+    assert_eq!(arc.get(), clone.get());
+    assert!(arc.is_shared());
+    assert!(arc.get_mut().is_none());
+
+    drop(arc);
+    assert_eq!(0, ffi::c_take_shared_with_kj_arc_by_ref(&counter));
+    assert!(!clone.is_shared());
+    assert_eq!(7070, ffi::c_take_non_atomic_kj_arc_by_ref(&clone));
+    drop(clone);
+    assert_eq!(1, ffi::c_take_shared_with_kj_arc_by_ref(&counter));
+}
+
+#[test]
 fn test_kj_arc_shared_struct_abi() {
     assert_eq!(
         size_of::<ffi::SharedWithKjArc>(),

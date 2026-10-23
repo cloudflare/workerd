@@ -8,6 +8,7 @@
 
 #include <workerd/jsg/exception.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/entropy.h>
 #include <workerd/util/sentry.h>
 
 #include <kj/debug.h>
@@ -211,7 +212,7 @@ void appendErrorContext(kj::Exception& e, kj::Maybe<kj::StringPtr> errorContext)
     kj::Exception&& e, kj::StringPtr tag, kj::Maybe<kj::StringPtr> errorContext) {
   appendErrorContext(e, errorContext);
   tagSentry(e, tag);
-  kj::throwFatalException(kj::mv(e));
+  kj::throwException(kj::mv(e));
 }
 
 // Report that in a sqlite VFS callback, an exception was caught, and SQLITE_IOERROR is being
@@ -248,11 +249,11 @@ class SqliteCallScope {
     KJ_IF_SOME(e, error) {
       appendErrorContext(e, errorContext);
       // Slight hack: The exception already has a stack trace attached which should include the
-      // current stack, but `kj::throwFatalException()` would re-append the current stack trace
+      // current stack, but `kj::throwException()` would re-append the current stack trace
       // to the exception. We can avoid that by calling
-      // kj::getExceptionCallback().onFatalException() directly, which is what
-      // `throwFatalException()` does after extending the stack.
-      kj::getExceptionCallback().onFatalException(kj::mv(e));
+      // kj::getExceptionCallback().onException() directly, which is what
+      // `throwException()` does after extending the stack.
+      kj::getExceptionCallback().onException(kj::mv(e));
     }
   }
 
@@ -691,9 +692,7 @@ SqliteDatabase::~SqliteDatabase() noexcept(false) {
     err = sqlite3_close_v2(db);
   }
 
-  KJ_REQUIRE(err == SQLITE_OK, sqlite3_errstr(err)) {
-    break;
-  }
+  KJ_DTOR_REQUIRE(err == SQLITE_OK, sqlite3_errstr(err));
 }
 
 SqliteDatabase::operator sqlite3*() {
@@ -831,13 +830,23 @@ void SqliteDatabase::applyChange(const StateChange& change) {
   }
 }
 
+SqliteQueryId SqliteDatabase::generateQueryId() {
+  SqliteQueryId id = 0;
+  // We wanna avoid zero as 0 can be used as an unset value
+  while (id == 0) {
+    getEntropy(kj::asBytes(id));
+  }
+  return id;
+}
+
 // Set up the regulator that will be used for authorizer callbacks while preparing this
 // statement.
 SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(StaticRegulator regulator,
     kj::StringPtr sqlCode,
     uint prepFlags,
     Multi multi,
-    kj::Maybe<kj::Vector<Statement>&> prelude) {
+    kj::Maybe<kj::Vector<Statement>&> prelude,
+    kj::Maybe<SqliteQueryId> queryId) {
   sqlite3* db = &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
 
   ParseContext parseContext;
@@ -876,12 +885,23 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(StaticRegulator re
       auto prepareResult =
           sqlite3_prepare_v3(db, sqlCode.begin(), sqlCode.size(), prepFlags, &result, &tail);
 
+      // Errors during preparation can happen (like SQLITE_ERROR) before any Query/QueryEvent exists
+      // so report them here or they'll never produce an event
+      if (prepareResult != SQLITE_OK) {
+        int extendedErrorCode = sqlite3_extended_errcode(db);
+        /* TODO: A follow-up for separating planning and execution latency */
+        sqliteObserver.reportQueryEvent(
+            kj::heapString(sqlCode.slice(0, kj::min(RA_MAX_METRICS_QUERY_SIZE, sqlCode.size()))), 0,
+            0, /* Reports queryLatency to be 0 explicitly */ 0 * kj::NANOSECONDS, 0, prepareResult,
+            extendedErrorCode, !regulator->shouldAddQueryStats(), kj::none, queryId);
+      }
+
       // If we had an auth error specifically, check if we recorded a better error message during
       // the authorizer callback.
       if (prepareResult == SQLITE_AUTH) {
         KJ_IF_SOME(error, parseContext.authError) {
           // Throw the tailored auth error.
-          kj::throwFatalException(kj::mv(error));
+          kj::throwException(kj::mv(error));
         }
         // we don't have a better error, so fall back to SQLITE_CALL_FAILED below
       }
@@ -953,7 +973,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(StaticRegulator re
             // Report queryEvent for this statement
             sqliteObserver.reportQueryEvent(kj::mv(queryStatement), rowsRead, rowsWritten,
                 queryLatency, dbWalBytesWritten, err, extendedCode,
-                regulator->shouldAddQueryStats(), kj::mv(queryErrorDescription));
+                regulator->shouldAddQueryStats(), kj::mv(queryErrorDescription), queryId);
 
             if (err == SQLITE_DONE) {
               // good
@@ -1490,9 +1510,10 @@ SqliteDatabase::Statement SqliteDatabase::prepare(
       *this, regulator, prepareSql(regulator, sqlCode, SQLITE_PREPARE_PERSISTENT, SINGLE));
 }
 
-SqliteDatabase::StatementAndEffect& SqliteDatabase::Statement::prepareForExecution() {
+SqliteDatabase::StatementAndEffect& SqliteDatabase::Statement::prepareForExecution(
+    kj::Maybe<SqliteQueryId> queryId) {
   for (auto& stmt: prelude) {
-    stmt.run();
+    stmt.run(StatementOptions{.queryId = queryId});
   }
 
   KJ_IF_SOME(sqlCode, stmt.tryGet<kj::String>()) {
@@ -1507,7 +1528,8 @@ SqliteDatabase::StatementAndEffect& SqliteDatabase::Statement::prepareForExecuti
 
     // We use the MULTI flag here in case this Statement was created by prepareMulti(). If multiple
     // statements are parsed, they'll be added to our `prelude`, and also executed immediately.
-    stmt = db.prepareSql(regulator, sqlCodeToPrepare, SQLITE_PREPARE_PERSISTENT, MULTI, prelude);
+    stmt = db.prepareSql(
+        regulator, sqlCodeToPrepare, SQLITE_PREPARE_PERSISTENT, MULTI, prelude, queryId);
   }
 
   return KJ_ASSERT_NONNULL(stmt.tryGet<StatementAndEffect>());
@@ -1534,10 +1556,11 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
     kj::ArrayPtr<const ValuePtr> bindings)
     : ResetListener(db),
       regulator(options.regulator),
-      maybeStatement(statement.prepareForExecution()),
+      maybeStatement(statement.prepareForExecution(options.queryId)),
       queryEvent(this->db.sqliteObserver) {
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
   KJ_ON_SCOPE_FAILURE(destroy());
+  queryEvent.setQueryId(options.queryId);
   init(bindings);
 }
 
@@ -1547,11 +1570,12 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
     kj::ArrayPtr<const ValuePtr> bindings)
     : ResetListener(db),
       regulator(options.regulator),
-      ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI)),
+      ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI, kj::none, options.queryId)),
       maybeStatement(ownStatement),
       queryEvent(this->db.sqliteObserver) {
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
   KJ_ON_SCOPE_FAILURE(destroy());
+  queryEvent.setQueryId(options.queryId);
   init(bindings);
 }
 

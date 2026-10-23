@@ -195,13 +195,13 @@ class MockActorChannel: public IoChannelFactory::ActorChannel {
 
 class MockWorkerStubChannel final: public WorkerStubChannel {
  public:
-  kj::Own<IoChannelFactory::SubrequestChannel> getEntrypointResolved(
+  kj::Rc<IoChannelFactory::SubrequestChannel> getEntrypointResolved(
       kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) override {
-    return kj::refcounted<MockSubrequestChannel>(
+    return kj::rc<MockSubrequestChannel>(
         ServiceTriplet("outer", kj::none, kj::mv(props)), Persistent::NO);
   }
 
-  kj::Own<IoChannelFactory::ActorClassChannel> getActorClassResolved(
+  kj::Rc<IoChannelFactory::ActorClassChannel> getActorClassResolved(
       kj::Maybe<kj::String> name, Frankenvalue props, kj::Maybe<ResourceLimits> limits) override {
     KJ_UNREACHABLE;
   }
@@ -209,27 +209,27 @@ class MockWorkerStubChannel final: public WorkerStubChannel {
 
 class MockResolver: public ChannelTokenHandler::Resolver {
  public:
-  kj::Own<IoChannelFactory::SubrequestChannel> resolveEntrypoint(kj::StringPtr serviceName,
+  kj::Rc<IoChannelFactory::SubrequestChannel> resolveEntrypoint(kj::StringPtr serviceName,
       kj::Maybe<kj::StringPtr> entrypoint,
       Frankenvalue props,
       Persistent persistent) override {
-    return kj::refcounted<MockSubrequestChannel>(
+    return kj::rc<MockSubrequestChannel>(
         ServiceTriplet(serviceName, entrypoint, kj::mv(props)), persistent);
   }
 
-  kj::Own<IoChannelFactory::ActorClassChannel> resolveActorClass(kj::StringPtr serviceName,
+  kj::Rc<IoChannelFactory::ActorClassChannel> resolveActorClass(kj::StringPtr serviceName,
       kj::Maybe<kj::StringPtr> entrypoint,
       Frankenvalue props,
       Persistent persistent) override {
-    return kj::refcounted<MockActorClassChannel>(
+    return kj::rc<MockActorClassChannel>(
         ServiceTriplet(serviceName, entrypoint, kj::mv(props)), persistent);
   }
 
-  kj::Own<IoChannelFactory::ActorChannel> resolveActor(kj::StringPtr namespaceKey,
+  kj::Rc<IoChannelFactory::ActorChannel> resolveActor(kj::StringPtr namespaceKey,
       kj::ArrayPtr<const byte> id,
       kj::Maybe<kj::StringPtr> name,
       Persistent persistent) override {
-    return kj::refcounted<MockActorChannel>(namespaceKey, id, name, persistent);
+    return kj::rc<MockActorChannel>(namespaceKey, id, name, persistent);
   }
 };
 
@@ -541,18 +541,17 @@ KJ_TEST("resolving channel props keeps promised caps alive") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
-  auto paf = kj::newPromiseAndFulfiller<kj::Own<IoChannelFactory::SubrequestChannel>>();
+  auto paf = kj::newPromiseAndFulfiller<kj::Rc<IoChannelFactory::SubrequestChannel>>();
   kj::Vector<kj::Own<Frankenvalue::CapTableEntry>> caps;
-  caps.add(newPromisedChannel<IoChannelFactory::SubrequestChannel>(kj::mv(paf.promise)));
+  caps.add(newPromisedChannel<IoChannelFactory::SubrequestChannel>(kj::mv(paf.promise)).toOwn());
 
   auto worker = kj::refcounted<MockWorkerStubChannel>();
   auto channel = worker->getEntrypoint(kj::none, propsWithCaps(kj::mv(caps)), kj::none);
   auto resolutionResult = channel->getResolved();
-  auto resolution =
-      KJ_ASSERT_NONNULL(kj::mv(resolutionResult)
-                            .tryGet<kj::Promise<kj::Own<IoChannelFactory::TokenizableChannel>>>());
+  auto resolution = KJ_ASSERT_NONNULL(
+      kj::mv(resolutionResult).tryGet<kj::Promise<kj::Rc<IoChannelFactory::TokenizableChannel>>>());
 
-  paf.fulfiller->fulfill(kj::refcounted<MockSubrequestChannel>(
+  paf.fulfiller->fulfill(kj::rc<MockSubrequestChannel>(
       ServiceTriplet("nested", kj::none, Frankenvalue()), Persistent::NO));
 
   auto resolved = resolution.wait(waitScope).downcast<MockSubrequestChannel>();

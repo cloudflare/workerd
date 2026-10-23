@@ -145,53 +145,49 @@ pub fn is_lock_ref(ty: &syn::Type) -> bool {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use syn::parse_quote;
-
-    use super::*;
-
-    #[test]
-    fn snake_to_camel_cases() {
-        // First char is never uppercased; each `_` capitalises the next letter.
-        assert_eq!(snake_to_camel(""), "");
-        assert_eq!(snake_to_camel("hello"), "hello");
-        assert_eq!(snake_to_camel("get_name"), "getName");
-        assert_eq!(snake_to_camel("parse_caa_record"), "parseCaaRecord");
-        assert_eq!(snake_to_camel("alreadyCamel"), "alreadyCamel");
-        // A leading `_` sets cap_next; the next char is capitalised.
-        assert_eq!(snake_to_camel("_private"), "Private");
-        // Consecutive underscores — the second just re-sets cap_next.
-        assert_eq!(snake_to_camel("a__b"), "aB");
-    }
-
-    #[test]
-    fn is_result_type_cases() {
-        assert!(is_result_type(&parse_quote!(Result<String, Error>)));
-        // Qualified path: last segment is still `Result`.
-        assert!(is_result_type(&parse_quote!(std::result::Result<(), ()>)));
-        assert!(!is_result_type(&parse_quote!(Option<String>)));
-        assert!(!is_result_type(&parse_quote!(String)));
-    }
-
-    #[test]
-    fn is_lock_ref_cases() {
-        assert!(is_lock_ref(&parse_quote!(&mut Lock)));
-        assert!(is_lock_ref(&parse_quote!(&mut jsg::Lock)));
-        // Immutable ref, wrong type, or not a ref at all must all return false.
-        assert!(!is_lock_ref(&parse_quote!(&Lock)));
-        assert!(!is_lock_ref(&parse_quote!(&mut String)));
-        assert!(!is_lock_ref(&parse_quote!(Lock)));
-    }
-
-    #[test]
-    fn is_attr_cases() {
-        let simple: syn::ItemFn = parse_quote! { #[jsg_method] fn foo() {} };
-        let qualified: syn::ItemFn = parse_quote! { #[jsg_macros::jsg_method] fn foo() {} };
-
-        assert!(is_attr(&simple.attrs[0], "jsg_method"));
-        assert!(!is_attr(&simple.attrs[0], "jsg_resource"));
-        // Qualified path (`jsg_macros::jsg_method`) must also match by last segment.
-        assert!(is_attr(&qualified.attrs[0], "jsg_method"));
-    }
+/// Returns true if `ty` is `Option<T>`.
+pub fn is_option_type(ty: &syn::Type) -> bool {
+    matches!(ty, syn::Type::Path(p)
+        if p.path.segments.last().is_some_and(|s| s.ident == "Option"))
 }
+
+/// Returns the tokens of `ty` with every named lifetime other than `'static`
+/// replaced by `'_`.
+///
+/// Callbacks name a parameter's type in a position (`<T as jsg::FromJS<'_>>`) where
+/// the method's own lifetime parameters are not in scope. Eliding them lets the
+/// compiler infer them from the call, which ties them to the callback's scope.
+pub fn elide_named_lifetimes(ty: &syn::Type) -> proc_macro2::TokenStream {
+    fn rewrite(tokens: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+        use proc_macro2::Spacing;
+        use proc_macro2::TokenTree;
+
+        let mut out = Vec::new();
+        let mut after_lifetime_quote = false;
+        for tree in tokens {
+            let tree = match tree {
+                TokenTree::Group(group) => {
+                    let mut rewritten =
+                        proc_macro2::Group::new(group.delimiter(), rewrite(group.stream()));
+                    rewritten.set_span(group.span());
+                    TokenTree::Group(rewritten)
+                }
+                TokenTree::Ident(ident) if after_lifetime_quote && ident != "static" => {
+                    TokenTree::Ident(proc_macro2::Ident::new("_", ident.span()))
+                }
+                other => other,
+            };
+            after_lifetime_quote = matches!(
+                &tree,
+                TokenTree::Punct(punct) if punct.as_char() == '\'' && punct.spacing() == Spacing::Joint
+            );
+            out.push(tree);
+        }
+        out.into_iter().collect()
+    }
+    rewrite(ty.to_token_stream())
+}
+
+#[cfg(test)]
+#[path = "utils-test.rs"]
+mod tests;

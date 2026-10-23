@@ -38,6 +38,8 @@ kj::Own<kj::HttpClient> r2GetClient(
   }
 
   // TODO(o11y): Attach trace context to awaitIo call to match operation lifetime better?
+  // Until then it lives as long as the client, so no awaitIo() may adopt it.
+  traceContext.detachAsync();
   return context.getHttpClient(subrequestChannel, true, kj::none, traceContext)
       .attach(kj::mv(traceContext));
 }
@@ -531,7 +533,7 @@ jsg::Ref<R2Bucket> R2Bucket::deserialize(
   KJ_IF_SOME(channel, kj::tryDowncast<IoChannelFactory::SubrequestChannel>(cap)) {
     // Decoding dynamic ctx.props: the cap is a live subrequest channel.
     return js.alloc<R2Bucket>(FeatureFlags(workerd::FeatureFlags::get(js)),
-        IoContext::current().addObject(kj::addRef(channel)));
+        IoContext::current().addObject(channel.addRef()));
   } else KJ_IF_SOME(channel, kj::tryDowncast<IoChannelCapTableEntry>(cap)) {
     // Decoding dynamic isolate env: the cap is a numbered I/O channel.
     return js.alloc<R2Bucket>(workerd::FeatureFlags::get(js),
@@ -1388,11 +1390,11 @@ R2Bucket::HttpMetadata R2Bucket::HttpMetadata::fromRequestHeaders(jsg::Lock& js,
 
 R2Bucket::HttpMetadata R2Bucket::HttpMetadata::clone() const {
   return {
-    .contentType = mapCopyString(contentType),
-    .contentLanguage = mapCopyString(contentLanguage),
-    .contentDisposition = mapCopyString(contentDisposition),
-    .contentEncoding = mapCopyString(contentEncoding),
-    .cacheControl = mapCopyString(cacheControl),
+    .contentType = contentType.clone(),
+    .contentLanguage = contentLanguage.clone(),
+    .contentDisposition = contentDisposition.clone(),
+    .contentEncoding = contentEncoding.clone(),
+    .cacheControl = cacheControl.clone(),
     .cacheExpiry = cacheExpiry,
   };
 }
@@ -1473,7 +1475,7 @@ jsg::Promise<jsg::Ref<Blob>> R2Bucket::GetResult::blob(jsg::Lock& js) {
     // Note: `self` (jsg::Ref) is captured to prevent GC from collecting this object while
     // the promise continuation is pending. Without it, the bare `this` pointer dangles.
     kj::String contentType =
-        mapCopyString(KJ_REQUIRE_NONNULL(self->httpMetadata).contentType).orDefault(nullptr);
+        KJ_REQUIRE_NONNULL(self->httpMetadata).contentType.clone().orDefault(nullptr);
     return js.alloc<Blob>(js, jsg::JsBufferSource(buffer.getHandle(js)), kj::mv(contentType));
   });
 }

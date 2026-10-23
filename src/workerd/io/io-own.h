@@ -254,6 +254,10 @@ class IoOwn {
   T& operator*() {
     return *operator->();
   }
+  // Returns the object if this IoOwn belongs to the current IoContext, or kj::none otherwise (for
+  // example, when it was created by a different request). A non-throwing alternative to
+  // operator->() for callers that have something else to fall back to.
+  kj::Maybe<T&> tryGet();
   operator kj::Own<T>() &&;
   IoOwn& operator=(IoOwn&& other);
   IoOwn& operator=(decltype(nullptr));
@@ -409,6 +413,14 @@ template <typename T>
 inline T* IoOwn<T>::operator->() {
   DeleteQueue::checkFarGet(*deleteQueue, typeid(T));
   return item->ptr;
+}
+
+template <typename T>
+inline kj::Maybe<T&> IoOwn<T>::tryGet() {
+  if (item != nullptr && deleteQueue->isCurrentIoContext()) {
+    return *item->ptr;
+  }
+  return kj::none;
 }
 
 template <typename T>

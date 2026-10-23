@@ -69,6 +69,16 @@ KJ_TEST("compatibility date parsing") {
   expectNoParse("202-05-07");
 }
 
+KJ_TEST("newest compatibility date") {
+  auto newest = newestCompatDateStr();
+  KJ_EXPECT(normalizeCompatDate(newest) != kj::none, newest);
+  auto today = currentDateStr();
+  kj::StringPtr maximum = MAXIMUM_COMPATIBILITY_DATE;
+  // Dates in this format compare like their strings.
+  kj::StringPtr expected = today.asPtr() < maximum ? today.asPtr() : maximum;
+  KJ_EXPECT(newest == expected, newest, today, maximum);
+}
+
 KJ_TEST("compatibility flag parsing") {
   auto expectCompileCompatibilityFlags =
       [](kj::StringPtr compatDate, kj::ArrayPtr<const kj::StringPtr> featureFlags,
@@ -562,6 +572,20 @@ KJ_TEST("encode to full flag list") {
     KJ_EXPECT(!contains(strings, "no_cots_on_external_fetch"_kj));
     // But other date-enabled flags still appear.
     KJ_EXPECT(contains(strings, "minimal_subrequests"_kj));
+  }
+
+  {
+    // durable_object_io_tasks_prevent_eviction is enabled by date on 2026-10-01 and can be
+    // disabled explicitly.
+    constexpr auto flag = "durable_object_io_tasks_prevent_eviction"_kj;
+    KJ_EXPECT(!contains(
+        decompileCompatibilityFlags(compileOwnFeatureFlags("2026-09-30", {}).get()), flag));
+    KJ_EXPECT(contains(
+        decompileCompatibilityFlags(compileOwnFeatureFlags("2026-10-01", {}).get()), flag));
+    KJ_EXPECT(!contains(decompileCompatibilityFlags(compileOwnFeatureFlags(
+                            "2026-10-01", {"durable_object_io_tasks_do_not_prevent_eviction"_kj})
+                                                        .get()),
+        flag));
   }
 }
 

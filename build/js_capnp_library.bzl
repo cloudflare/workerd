@@ -12,9 +12,9 @@ capnp_provider = provider("Capnproto Provider", fields = {
 })
 
 def _workspace_path(label, path):
-    if label.workspace_root == "":
+    if label.repo_root == "":
         return path
-    return label.workspace_root + "/" + path
+    return label.repo_root + "/" + path
 
 def _capnp_plugin_gen(ctx, output_format, out_dir, inputs, includes, src_prefix, system_include):
     """Generate output files of the given output_format ("js" or "ts")"""

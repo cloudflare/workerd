@@ -7,11 +7,13 @@ load("//:build/wd_test.bzl", "wd_test")
 htmlrewriter_suite_srcs = glob(["*.js"]) + ["htmlrewriter-modules.capnp"]
 
 wd_test(
+    size = "large",
     src = "htmlrewriter-cpp.wd-test",
     data = htmlrewriter_suite_srcs,
 )
 
 wd_test(
+    size = "large",
     src = "htmlrewriter-ts.wd-test",
     args = ["--experimental"],
     data = htmlrewriter_suite_srcs,

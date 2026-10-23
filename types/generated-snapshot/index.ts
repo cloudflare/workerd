@@ -485,9 +485,9 @@ export declare const scheduler: Scheduler;
 export declare const performance: Performance;
 export declare const Cloudflare: Cloudflare;
 export declare const origin: string;
-export declare const Buffer: any;
-export declare const process: any;
-export declare const global: ServiceWorkerGlobalScope;
+export declare var Buffer: any;
+export declare var process: any;
+export declare var global: ServiceWorkerGlobalScope;
 export declare function setImmediate(
   $function: (...param0: any[]) => void,
   ...args: any[]
@@ -611,6 +611,7 @@ export interface CachePurgeOptions {
 }
 export interface CacheContext {
   purge(options: CachePurgeOptions): Promise<CachePurgeResult>;
+  invalidate(options: CachePurgeOptions): Promise<CachePurgeResult>;
 }
 export interface CloudflareAccessContext {
   readonly aud: string;
@@ -3871,15 +3872,7 @@ export type SqlStorageValue = ArrayBuffer | string | number | null;
 export declare abstract class SqlStorageCursor<
   T extends Record<string, SqlStorageValue>,
 > {
-  next():
-    | {
-        done?: false;
-        value: T;
-      }
-    | {
-        done: true;
-        value?: never;
-      };
+  next(): IteratorResult<T, undefined>;
   toArray(): T[];
   one(): T;
   raw<U extends SqlStorageValue[]>(): IterableIterator<U>;
@@ -4046,6 +4039,7 @@ export type ContainerStartupOptions = {
   env?: Record<string, string>;
   instance?:
     | "lite"
+    | "basic"
     | "standard-1"
     | "standard-2"
     | "standard-3"
@@ -4596,6 +4590,7 @@ export interface Tracing {
 }
 export declare abstract class Span {
   get isTraced(): boolean;
+  spanContext(): TracingSpanContext;
   setAttribute(key: string, value: boolean | number | string): this;
   setAttributes(
     attributes: Record<string, boolean | number | string | undefined>,
@@ -4630,6 +4625,11 @@ export type TracingSpanStatusCode = "unset" | "ok" | "error";
 export interface TracingSpanStatus {
   code: TracingSpanStatusCode;
   message?: string;
+}
+export interface TracingSpanContext {
+  traceId: string;
+  spanId: string;
+  traceFlags: number;
 }
 /**
  * Represents the identity of a user authenticated via Cloudflare Access.
@@ -12488,8 +12488,6 @@ export interface ArtifactsCreateRepoResult {
   remote: string;
   /** Plaintext access token (only returned at creation time). */
   token: string;
-  /** ISO 8601 token expiry timestamp. */
-  tokenExpiresAt: string;
 }
 /** Paginated list of repositories. */
 export interface ArtifactsRepoListResult {
@@ -12532,11 +12530,63 @@ export interface ArtifactsTokenListResult {
   total: number;
 }
 /**
- * Handle for a single repository. Returned by Artifacts.get().
+ * Classification of a Git tree entry derived from its mode.
  *
- * Methods may throw `ArtifactsError` with code `INTERNAL_ERROR` if an unexpected service error occurs.
+ * `tree` is a directory, `blob` is a regular file, `symlink` is a symbolic link,
+ * `gitlink` is a submodule reference, and `exec` is an executable file.
  */
-export interface ArtifactsRepo extends ArtifactsRepoInfo {
+export type ArtifactsTreeEntryType =
+  "tree" | "blob" | "symlink" | "gitlink" | "exec";
+/** An immediate child of a Git tree returned by {@link ArtifactsRepo.readTree}. */
+export interface ArtifactsTreeEntry {
+  /** Name relative to the tree being read. */
+  name: string;
+  /** Canonical Git mode, such as `100644` for a file or `40000` for a tree. */
+  mode: string;
+  /** Lowercase, 40-character SHA-1 object ID. */
+  hash: string;
+  /** Classification derived from `mode`. */
+  type: ArtifactsTreeEntryType;
+}
+/** Decoded metadata returned by {@link ArtifactsRepo.readCommit} and {@link ArtifactsRepo.log}. */
+export interface ArtifactsCommitMetadata {
+  /** Lowercase, 40-character SHA-1 commit ID. */
+  hash: string;
+  /** Lowercase, 40-character SHA-1 ID of the commit's root tree. */
+  treeHash: string;
+  /** Commit message with one trailing newline removed, if present. */
+  message: string;
+  /** Author identity from the commit. */
+  author: {
+    /** Author name. */
+    name: string;
+    /** Author email address. */
+    email: string;
+  };
+  /** Committer identity from the commit. */
+  committer: {
+    /** Committer name. */
+    name: string;
+    /** Committer email address. */
+    email: string;
+  };
+  /** Parent commit IDs in Git order; empty for a root commit. */
+  parents: string[];
+  /** Author timestamp in Unix seconds. */
+  authoredAt: number;
+  /** Committer timestamp in Unix seconds. */
+  committedAt: number;
+}
+/**
+ * Repository capability returned by {@link Artifacts.get}.
+ *
+ * Metadata is available through {@link info}, not as properties on the capability.
+ * Methods may throw `ArtifactsError` with code `INTERNAL_ERROR` if an unexpected service error occurs.
+ *
+ * The capability is an RPC stub. Dispose of it when finished, for example with
+ * `using repo = await env.ARTIFACTS.get(name);`, to release it before the request ends.
+ */
+export interface ArtifactsRepo extends Disposable {
   /**
    * Create an access token for this repo.
    * @param scope Token scope: "write" (default) or "read".
@@ -12556,6 +12606,66 @@ export interface ArtifactsRepo extends ArtifactsRepoInfo {
    * @throws {ArtifactsError} with code `INVALID_INPUT` if tokenOrId is empty.
    */
   revokeToken(tokenOrId: string): Promise<boolean>;
+  /**
+   * Retrieve current repository metadata. Each call performs a fresh lookup.
+   * @returns Current public repository metadata.
+   * @throws {ArtifactsError} `NOT_FOUND` if the repository was deleted, or `INTERNAL_ERROR` on
+   * an unexpected lookup failure.
+   */
+  info(): Promise<ArtifactsRepoInfo>;
+  /**
+   * Read the raw bytes of a Git blob by object ID.
+   * @param hash Lowercase, 40-character SHA-1 object ID.
+   * @returns An untyped {@link Blob}, or `null` if the object is missing or is not a Git blob.
+   * @throws {ArtifactsError} `INVALID_INPUT` for a malformed hash, `MEMORY_LIMIT` if the object
+   * cannot be buffered safely, or `INTERNAL_ERROR` on an unexpected read failure.
+   * @see {@link ArtifactsRepo.readFile} to resolve a file by ref and path.
+   */
+  readBlob(hash: string): Promise<Blob | null>;
+  /**
+   * Read the immediate children of a Git tree by object ID.
+   * @param hash Lowercase, 40-character SHA-1 tree ID.
+   * @returns Tree entries, or `null` if the object is missing.
+   * @throws {ArtifactsError} `INVALID_INPUT` for a malformed hash, or `INTERNAL_ERROR` if the
+   * object is not a valid tree or the read fails unexpectedly.
+   * @see {@link ArtifactsTreeEntry}
+   */
+  readTree(hash: string): Promise<ArtifactsTreeEntry[] | null>;
+  /**
+   * Decode a Git commit by object ID.
+   * @param hash Lowercase, 40-character SHA-1 commit ID.
+   * @returns Commit metadata, or `null` if the object is missing.
+   * @throws {ArtifactsError} `INVALID_INPUT` for a malformed hash, or `INTERNAL_ERROR` if the
+   * object is not a valid commit or the read fails unexpectedly.
+   * @see {@link ArtifactsCommitMetadata}
+   */
+  readCommit(hash: string): Promise<ArtifactsCommitMetadata | null>;
+  /**
+   * Resolve a file from a branch, tag, or commit ID and return its bytes with a browser-safe
+   * content type in {@link Blob.type}.
+   * @param args File lookup options.
+   * @param args.ref Branch, tag, or commit ID to resolve.
+   * @param args.path Non-empty repository-relative path.
+   * @returns A MIME-typed {@link Blob}, or `null` if the ref or path cannot resolve to a file.
+   * @throws {ArtifactsError} `INVALID_INPUT` if either argument is empty, `MEMORY_LIMIT` if the
+   * file cannot be buffered safely, or `INTERNAL_ERROR` on an unexpected read failure.
+   */
+  readFile(args: { ref: string; path: string }): Promise<Blob | null>;
+  /**
+   * List commits along the first-parent chain, newest first.
+   * @param opts History options. All fields are optional.
+   * @param opts.ref Branch, tag, or commit ID; defaults to `HEAD`.
+   * @param opts.limit Maximum results; defaults to `50` and is capped at `1000`.
+   * @param opts.offset Number of matching commits to skip; defaults to `0`.
+   * @returns Commit metadata, or an empty array if the ref cannot be resolved.
+   * @throws {ArtifactsError} `INTERNAL_ERROR` on an unexpected traversal failure.
+   * @see {@link ArtifactsCommitMetadata}
+   */
+  log(opts?: {
+    ref?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<ArtifactsCommitMetadata[]>;
   // ── Fork ──
   /**
    * Fork this repo to a new repo.
@@ -12583,6 +12693,7 @@ export interface ArtifactsRepo extends ArtifactsRepoInfo {
 export type ArtifactsErrorCode =
   | "ALREADY_EXISTS"
   | "NOT_FOUND"
+  | "CREATE_IN_PROGRESS"
   | "IMPORT_IN_PROGRESS"
   | "FORK_IN_PROGRESS"
   | "INVALID_INPUT"
@@ -12635,6 +12746,7 @@ export interface Artifacts {
    * @param name Repository name.
    * @returns Repo handle.
    * @throws {ArtifactsError} with code `NOT_FOUND` if the repo does not exist.
+   * @throws {ArtifactsError} with code `CREATE_IN_PROGRESS` if the repo is still being created.
    * @throws {ArtifactsError} with code `IMPORT_IN_PROGRESS` if the repo is still importing.
    * @throws {ArtifactsError} with code `FORK_IN_PROGRESS` if the repo is still forking.
    */
@@ -12941,25 +13053,24 @@ export interface BrowserRunBaseOptions {
    */
   cacheTTL?: number;
 }
-/**
- * Backend selection, mixed into the options of the quick actions that support it.
- * Deliberately not part of `BrowserRunBaseOptions`: `scrape`, `links` and `snapshot`
- * reject an alternate backend, so they must not accept the field.
- */
+/** Backend selection for quick actions. */
 export interface BrowserRunAlternateBackendOptions {
   /** Render with an alternate browser backend instead of the default one. */
   browser?: "kitesurf";
 }
 /** Common options shared by all quick actions. Exactly one of `url` or `html` must be provided.*/
-export type BrowserRunCommonOptions =
-  | (BrowserRunBaseOptions & {
-      /** URL to navigate to, e.g. `"https://example.com"`. */
-      url: string;
-    })
-  | (BrowserRunBaseOptions & {
-      /** Set the HTML content of the page directly. */
-      html: string;
-    });
+export type BrowserRunCommonOptions = BrowserRunBaseOptions &
+  BrowserRunAlternateBackendOptions &
+  (
+    | {
+        /** URL to navigate to, e.g. `"https://example.com"`. */
+        url: string;
+      }
+    | {
+        /** Set the HTML content of the page directly. */
+        html: string;
+      }
+  );
 export type BrowserRunPuppeteerScreenshotOptions = {
   /** @default "png" */
   type?: "png" | "jpeg" | "webp";
@@ -12986,7 +13097,7 @@ export type BrowserRunScreenshotOptions = BrowserRunCommonOptions & {
   scrollPage?: boolean;
   /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
   screenshotOptions?: BrowserRunPuppeteerScreenshotOptions;
-} & BrowserRunAlternateBackendOptions;
+};
 export type BrowserRunPDFOptions = BrowserRunCommonOptions & {
   /** @see https://pptr.dev/api/puppeteer.pdfoptions */
   pdfOptions?: {
@@ -13033,7 +13144,7 @@ export type BrowserRunPDFOptions = BrowserRunCommonOptions & {
     /** @default 30000 */
     timeout?: number;
   };
-} & BrowserRunAlternateBackendOptions;
+};
 export type BrowserRunScrapeOptions = BrowserRunCommonOptions & {
   /** CSS selectors to scrape. At least one element is required. */
   elements: Array<{
@@ -13069,7 +13180,7 @@ export type BrowserRunAccessibilityTreeOptions = BrowserRunCommonOptions & {
    * HTTP 200; a malformed selector is an error.
    */
   root?: string;
-} & BrowserRunAlternateBackendOptions;
+};
 export interface BrowserRunJsonBaseOptions {
   /** Custom AI models to try in order. Max 3. Falls back to next on error. */
   custom_ai?: Array<{
@@ -13084,7 +13195,6 @@ export interface BrowserRunJsonBaseOptions {
  * At least one of `prompt` or `response_format` must be provided.
  */
 export type BrowserRunJsonOptions = BrowserRunCommonOptions &
-  BrowserRunAlternateBackendOptions &
   BrowserRunJsonBaseOptions &
   (
     | {
@@ -13100,10 +13210,8 @@ export type BrowserRunJsonOptions = BrowserRunCommonOptions &
         response_format: AiTextGenerationResponseFormat;
       }
   );
-export type BrowserRunContentOptions = BrowserRunCommonOptions &
-  BrowserRunAlternateBackendOptions;
-export type BrowserRunMarkdownOptions = BrowserRunCommonOptions &
-  BrowserRunAlternateBackendOptions;
+export type BrowserRunContentOptions = BrowserRunCommonOptions;
+export type BrowserRunMarkdownOptions = BrowserRunCommonOptions;
 export type BrowserRunRedirectHop = {
   /** URL that returned the redirect. */
   url: string;
@@ -15133,9 +15241,18 @@ export declare type EmailExportedHandler<Env = unknown, Props = unknown> = (
  * Evaluation context for targeting rules.
  * Keys are attribute names (e.g. "userId", "country"), values are the attribute values.
  */
+export type FlagshipEvaluationContextValue =
+  | string
+  | number
+  | boolean
+  | null
+  | FlagshipEvaluationContextValue[]
+  | {
+      [key: string]: FlagshipEvaluationContextValue;
+    };
 export type FlagshipEvaluationContext = Record<
   string,
-  string | number | boolean
+  FlagshipEvaluationContextValue
 >;
 export interface FlagshipEvaluationDetails<T> {
   flagKey: string;
@@ -15145,6 +15262,13 @@ export interface FlagshipEvaluationDetails<T> {
   errorCode?: string | undefined;
   errorMessage?: string | undefined;
 }
+export type FlagshipWidenedValue<T> = T extends boolean
+  ? boolean
+  : T extends string
+    ? string
+    : T extends number
+      ? number
+      : T;
 export interface FlagshipEvaluationError extends Error {}
 /**
  * Feature flags binding for evaluating feature flags from a Cloudflare Workers script.
@@ -15171,12 +15295,39 @@ export declare abstract class Flagship {
    * @param flagKey The key of the flag to evaluate.
    * @param defaultValue Optional default value returned when evaluation fails.
    * @param context Optional evaluation context for targeting rules.
+   * @deprecated Use getValue() instead.
    */
   get(
     flagKey: string,
     defaultValue?: unknown,
     context?: FlagshipEvaluationContext,
   ): Promise<unknown>;
+  /**
+   * Get a flag value, inferring its expected type from the default value.
+   * @param flagKey The key of the flag to evaluate.
+   * @param defaultValue Default value returned when evaluation fails or the flag type does not match.
+   * @param context Optional evaluation context for targeting rules.
+   */
+  getValue<
+    T extends boolean | string | number | Record<string, unknown> | unknown[],
+  >(
+    flagKey: string,
+    defaultValue: T,
+    context?: FlagshipEvaluationContext,
+  ): Promise<FlagshipWidenedValue<T>>;
+  /**
+   * Get a flag value with full evaluation details, inferring its expected type from the default value.
+   * @param flagKey The key of the flag to evaluate.
+   * @param defaultValue Default value returned when evaluation fails or the flag type does not match.
+   * @param context Optional evaluation context for targeting rules.
+   */
+  getDetails<
+    T extends boolean | string | number | Record<string, unknown> | unknown[],
+  >(
+    flagKey: string,
+    defaultValue: T,
+    context?: FlagshipEvaluationContext,
+  ): Promise<FlagshipEvaluationDetails<FlagshipWidenedValue<T>>>;
   /**
    * Get a boolean flag value.
    * @param flagKey The key of the flag to evaluate.
@@ -16001,6 +16152,11 @@ export declare namespace Rpc {
         T extends Map<unknown, infer U> ? Serializable<U> : never
       >
     | Set<T extends Set<infer U> ? Serializable<U> : never>
+    | ReadonlyMap<
+        T extends ReadonlyMap<infer U, unknown> ? Serializable<U> : never,
+        T extends ReadonlyMap<unknown, infer U> ? Serializable<U> : never
+      >
+    | ReadonlySet<T extends ReadonlySet<infer U> ? Serializable<U> : never>
     | ReadonlyArray<T extends ReadonlyArray<infer U> ? Serializable<U> : never>
     | {
         [K in keyof T]: K extends number | string ? Serializable<T[K]> : never;
@@ -16043,19 +16199,23 @@ export declare namespace Rpc {
       ? Map<Stubify<K>, Stubify<V>>
       : T extends Set<infer V>
         ? Set<Stubify<V>>
-        : T extends Array<infer V>
-          ? Array<Stubify<V>>
-          : T extends ReadonlyArray<infer V>
-            ? ReadonlyArray<Stubify<V>>
-            : T extends BaseType
-              ? T
-              : T extends {
-                    [key: string | number]: any;
-                  }
-                ? {
-                    [K in keyof T]: Stubify<T[K]>;
-                  }
-                : T;
+        : T extends ReadonlyMap<infer K, infer V>
+          ? ReadonlyMap<Stubify<K>, Stubify<V>>
+          : T extends ReadonlySet<infer V>
+            ? ReadonlySet<Stubify<V>>
+            : T extends Array<infer V>
+              ? Array<Stubify<V>>
+              : T extends ReadonlyArray<infer V>
+                ? ReadonlyArray<Stubify<V>>
+                : T extends BaseType
+                  ? T
+                  : T extends {
+                        [key: string | number]: any;
+                      }
+                    ? {
+                        [K in keyof T]: Stubify<T[K]>;
+                      }
+                    : T;
   // Recursively rewrite all `Stub<T>`s with the corresponding `T`s.
   // Note we use `StubBase` instead of `Stub` here to avoid circular dependencies:
   // `Stub` depends on `Provider`, which depends on `Unstubify`, which would depend on `Stub`.
@@ -16066,19 +16226,23 @@ export declare namespace Rpc {
         ? Map<Unstubify<K>, Unstubify<V>>
         : T extends Set<infer V>
           ? Set<Unstubify<V>>
-          : T extends Array<infer V>
-            ? Array<Unstubify<V>>
-            : T extends ReadonlyArray<infer V>
-              ? ReadonlyArray<Unstubify<V>>
-              : T extends BaseType
-                ? T
-                : T extends {
-                      [key: string | number]: unknown;
-                    }
-                  ? {
-                      [K in keyof T]: Unstubify<T[K]>;
-                    }
-                  : T;
+          : T extends ReadonlyMap<infer K, infer V>
+            ? ReadonlyMap<Unstubify<K>, Unstubify<V>>
+            : T extends ReadonlySet<infer V>
+              ? ReadonlySet<Unstubify<V>>
+              : T extends Array<infer V>
+                ? Array<Unstubify<V>>
+                : T extends ReadonlyArray<infer V>
+                  ? ReadonlyArray<Unstubify<V>>
+                  : T extends BaseType
+                    ? T
+                    : T extends {
+                          [key: string | number]: unknown;
+                        }
+                      ? {
+                          [K in keyof T]: Unstubify<T[K]>;
+                        }
+                      : T;
   type UnstubifyAll<A extends any[]> = {
     [I in keyof A]: Unstubify<A[I]>;
   };
@@ -17947,10 +18111,18 @@ export declare abstract class Workflow<PARAMS = unknown> {
     options?: WorkflowInstanceCreateOptions<PARAMS>,
   ): Promise<WorkflowInstance>;
   /**
-   * Create a batch of instances and return handle for all of them. If a provided id exists, an error will be thrown.
+   * Create a batch of instances and return handles for the created instances and any per-instance errors.
    * `createBatch` is limited at 100 instances at a time or when the RPC limit for the batch (1MiB) is reached.
-   * @param batch List of Options when creating an instance including name and params
-   * @returns A promise that resolves with a list of handles for the created instances.
+   * @param options Options for creating instances by count or from a list of instance options
+   * @returns A promise that resolves with the created instance handles and any per-instance errors.
+   */
+  public createBatch(
+    options: WorkflowBatchCreateOptions<PARAMS>,
+  ): Promise<WorkflowBatchCreateResult>;
+  /**
+   * Create a batch of instances and return handles for the ones that were created.
+   * Instances that could not be created, for example because their ID already exists, are omitted from the result without an error.
+   * @deprecated Use the object form of `createBatch` instead of the array form.
    */
   public createBatch(
     batch: WorkflowInstanceCreateOptions<PARAMS>[],
@@ -17964,6 +18136,33 @@ export declare abstract class Workflow<PARAMS = unknown> {
    */
   public deleteBatch(instanceIds: string[]): Promise<WorkflowBatchDeleteResult>;
 }
+export type WorkflowBatchCreateOptions<PARAMS = unknown> =
+  | {
+      count: number;
+      params?: PARAMS;
+      retention?: {
+        successRetention?: WorkflowRetentionDuration;
+        errorRetention?: WorkflowRetentionDuration;
+      };
+      locationHint?: WorkflowInstanceLocationHint;
+      instances?: never;
+    }
+  | {
+      instances: WorkflowInstanceCreateOptions<PARAMS>[];
+      count?: never;
+      params?: never;
+      retention?: never;
+      locationHint?: never;
+    };
+export type WorkflowBatchCreateResult = {
+  created: WorkflowInstance[];
+  errors: {
+    index: number;
+    id?: string;
+    code: number;
+    message: string;
+  }[];
+};
 export type WorkflowBatchDeleteResult = {
   deleted: {
     id: string;

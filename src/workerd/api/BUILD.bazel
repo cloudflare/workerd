@@ -13,6 +13,7 @@ filegroup(
         "actor-call-retry.c++",
         "actor-state.c++",
         "basics.c++",
+        "bench.c++",
         "blob.c++",
         "cache.c++",
         "container.c++",
@@ -31,10 +32,12 @@ filegroup(
         "js-streams-bridge.c++",
         "js-writable-stream.c++",
         "messagechannel.c++",
+        "per-isolate-bootstrap.c++",
         "performance.c++",
         "queue.c++",
         "restore.c++",
         "scheduled.c++",
+        "snapshot.c++",
         "sockets.c++",
         "sql.c++",
         "sync-kv.c++",
@@ -69,6 +72,7 @@ filegroup(
         "actor-call-retry.h",
         "actor-state.h",
         "basics.h",
+        "bench.h",
         "blob.h",
         "cache.h",
         "container.h",
@@ -87,10 +91,12 @@ filegroup(
         "js-streams-bridge.h",
         "js-writable-stream.h",
         "messagechannel.h",
+        "per-isolate-bootstrap.h",
         "performance.h",
         "queue.h",
         "restore.h",
         "scheduled.h",
+        "snapshot.h",
         "sockets.h",
         "sql.h",
         "sync-kv.h",
@@ -194,7 +200,6 @@ wd_cc_library(
     hdrs = ["cf-property.h"],
     implementation_deps = [
         "//src/workerd/io:features",
-        "//src/workerd/util:own-util",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -465,6 +470,16 @@ kj_test(
     deps = [":pyodide"],
 )
 
+kj_test(
+    src = "pyodide/wasm-module-test.c++",
+    local_defines = ["JSG_IMPLEMENTATION"],
+    deps = [
+        ":pyodide",
+        "//src/workerd/io:worker-modules",
+        "//src/workerd/jsg",
+    ],
+)
+
 wd_cc_library(
     name = "util",
     srcs = ["util.c++"],
@@ -560,7 +575,6 @@ wd_cc_library(
     deps = [
         ":url",
         "//src/workerd/jsg",
-        "//src/workerd/util:own-util",
         "@capnp-cpp//src/kj",
     ],
 )
@@ -592,6 +606,7 @@ wd_cc_library(
         "streams/pendingabort-gc-uaf-test.c++",
         "actor-state-test.c++",
         "alarm-retry-test.c++",
+        "bench-test.c++",
         "basics-test.c++",
         "crypto/aes-test.c++",
         "crypto/impl-test.c++",
@@ -612,8 +627,20 @@ wd_cc_library(
         "streams/draining-read-uaf-test.c++",
         "streams/queue-test.c++",
         "streams/standard-test.c++",
+        "streams/streams-native-source-ownership-test.c++",
     ]
 ]
+
+kj_test(
+    # Each injection point drains microtasks and forces a full GC, including under ASan.
+    size = "large",
+    src = "streams/termination-injection-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/io:promise-wrapper",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
 
 kj_test(
     src = "data-url-test.c++",
@@ -647,6 +674,16 @@ kj_test(
 )
 
 kj_test(
+    src = "per-isolate-compile-cache-test.c++",
+    # Downstream users may set their own flags, which breaks this test.
+    tags = ["no-downstream"],
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "streams/internal-test.c++",
     deps = [
         "//src/workerd/io",
@@ -655,7 +692,15 @@ kj_test(
 )
 
 kj_test(
-    src = "streams-test.c++",
+    src = "eventsource-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "blob-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
@@ -683,6 +728,8 @@ kj_test(
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
+        "@capnp-cpp//src/kj/compat:kj-brotli",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
     ],
 )
 
@@ -691,6 +738,8 @@ kj_test(
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",
+        "@capnp-cpp//src/kj/compat:kj-brotli",
+        "@capnp-cpp//src/kj/compat:kj-gzip",
     ],
 )
 
@@ -852,4 +901,10 @@ wd_test(
     src = "streams/streams-test.wd-test",
     args = ["--experimental"],
     data = ["streams/streams-test.js"],
+)
+
+wd_test(
+    src = "streams/body-read-operation-test.wd-test",
+    args = ["--experimental"],
+    data = ["streams/body-read-operation-test.js"],
 )

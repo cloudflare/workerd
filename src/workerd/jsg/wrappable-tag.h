@@ -34,12 +34,18 @@ namespace workerd::jsg {
 constexpr uint16_t kNonResourceWrappableTag =
     static_cast<uint16_t>(v8::CppHeapPointerTag::kFirstObjectWrappableTag);
 
-// The dense id of the first resource type. Resource ids are offset past the non-resource tag so
-// that the two spaces never collide within kObjectWrappableTagRange.
-constexpr uint16_t kFirstResourceTag = kNonResourceWrappableTag + 1;
+// The tag reserved for context globals, which are wrapped via v8::Object::WrapGlobal() on both the
+// JSGlobalProxy and its hidden JSGlobalObject. Distinct from every other tag so that a receiver
+// carrying it is known to be a context global, never an ordinary wrapper. See
+// Wrappable::tryUnwrapGlobalReceiver().
+constexpr uint16_t kContextGlobalWrappableTag = kNonResourceWrappableTag + 1;
 
-// Upper bound on the number of distinct wrappable tags any single isolate type may use: one
-// catch-all tag plus one per registered resource type. It sizes the freelist bucket array in
+// The dense id of the first resource type. Resource ids are offset past the reserved tags so
+// that the spaces never collide within kObjectWrappableTagRange.
+constexpr uint16_t kFirstResourceTag = kContextGlobalWrappableTag + 1;
+
+// Upper bound on the number of distinct wrappable tags any single isolate type may use: the
+// reserved tags above plus one per registered resource type. It sizes the freelist bucket array in
 // HeapTracer (a small fixed array, indexed by tag) and is enforced at compile time by a
 // static_assert in TypeWrapper::wrappableTag<T>().
 //

@@ -32,9 +32,9 @@
 //! This is ordinary tokio code. tokio registers a resource with the runtime *entered* on the
 //! calling thread, and kj-rs-tokio makes a `TokioEventPort` thread a tokio runtime thread for its
 //! whole life (port.rs, `EnteredRuntime`), so `TcpStream::connect`, `UnixListener::bind_addr`,
-//! `AsyncFd::with_interest`, `signal()`, `spawn_blocking` and friends register with the loop's
+//! `AsyncFd::register_with_interest`, `spawn_blocking` and friends register with the loop's
 //! driver as they are. Two checks are added, both cheap (two thread-local reads):
-//! [`ensure_loop_thread`] before every *registration* (connect, listen, wrap, resolve, signals,
+//! [`ensure_loop_thread`] before every *registration* (connect, listen, wrap, resolve,
 //! the hangup watch), so a call on a thread without a port, or under another runtime entered
 //! over the port's, fails with a `kj::Exception` instead of tokio's "no reactor running" panic
 //! (a process abort at the bridge); and [`ensure_owner_loop`] at the point an operation is about
@@ -58,10 +58,8 @@
 //! workerd uses them: `restrictPeers` (KJ's own policy), `connectAuthenticated` /
 //! `acceptAuthenticated` identities, unix peer credentials, `whenWriteDisconnected` (at one
 //! extra descriptor per stream; stream.rs), `getSockaddr`, `wrapListenSocketFd` with KJ's fd
-//! flags, `onSignal`, `getaddrinfo` with KJ's hints and service names, `unix:` and
+//! flags, `getaddrinfo` with KJ's hints and service names, `unix:` and
 //! `unix-abstract:` addresses, `SO_REUSEADDR`, `TCP_NODELAY`, the accept retry set, SIGPIPE.
-//! Added for workerd, with no KJ counterpart: `loopback:` addresses (loopback.rs), which
-//! `workerd test` uses to exercise the network stack end to end inside one process.
 //!
 //! # Objects
 //!
@@ -70,8 +68,8 @@
 //!     ├── kj_rs_tokio::TokioAsyncIoContext   the loop's tokio runtime (kj-rs-tokio)
 //!     ├── TokioLowLevelAsyncIoProvider       wrap*Fd(): an owned fd/SOCKET as i64 -> Rust owns it
 //!     └── TokioAsyncIoProvider
-//!             └── TokioNetwork               kj::Arc<PeerFilter> + Box<LoopbackRegistry>,
-//!                     │                          both shared down the restrictPeers chain:
+//!             └── TokioNetwork               kj::Arc<PeerFilter>, shared down the
+//!                     │                          restrictPeers chain:
 //!                     ├── TokioNetworkAddress    Box<TokioAddress> + filter share
 //!                     │       ├── TokioConnectionReceiver  Box<TokioListener> + filter share
 //!                     │       └── TokioDatagramPort        Box<TokioDatagram> + filter share
@@ -80,8 +78,7 @@
 //! TokioStream    (stream.rs)   Arc<Inner>: the socket, plus a lazily dup'd hangup watch
 //! TokioListener  (net.rs)      Arc<..>: one listening socket per resolved address
 //! TokioDatagram  (net.rs)      Arc<..>: one datagram socket
-//! TokioAddress   (net.rs)      the parsed address: SocketAddr list, a unix name, or a loopback
-//!                              queue (loopback.rs; `loopback:` addresses, workerd test only)
+//! TokioAddress   (net.rs)      the parsed address: SocketAddr list or a unix name
 //! TokioFileWatcher (watcher.rs) Arc<..>: notify watcher + metadata stamps; workerd's --watch
 //!                              (server/cli/watch.rs) uses it from Rust, FileWatcher (async-io.h)
 //!                              wraps it for C++
@@ -96,11 +93,12 @@
 //! carrying dead fallback arms. The Windows arms are built and their tests run by workerd's CI
 //! matrix (`.github/workflows/test.yml` runs `//src/...` on a `windows-2025` runner).
 
-// Unsafe-code boundary. The crate root denies `unsafe_code`; exactly one module, `ffi.rs`,
-// re-allows it and holds the `#[cxx::bridge]` plus every hand-written `unsafe` in the crate:
+// Unsafe-code boundary. Exactly one module, `ffi.rs`, allows `unsafe_code`, and it holds the
+// `#[cxx::bridge]` plus every hand-written `unsafe` in the crate:
 // raw-handle -> owned-fd conversions (as `unsafe fn`s, discharged at the bridge entry points),
-// raw read-buffer pointers -> `&mut [MaybeUninit<u8>]`, and the SIGPIPE disposition. The other
-// modules cannot write `unsafe` at all, and no `unsafe fn` is part of the crate's public surface.
+// raw read-buffer pointers -> `&mut [MaybeUninit<u8>]`, the SIGPIPE disposition, and registering
+// an owned fd with tokio's I/O driver (`AsyncFd::register_with_interest`). The other modules
+// cannot write `unsafe` at all, and no `unsafe fn` is part of the crate's public surface.
 // What this buys is precisely that: the code to audit for memory safety is one file, and its
 // `// Safety:` comments name the C++ contracts (KJ's buffer-validity and fd-ownership rules) it
 // relies on. Concentrating `unsafe` does not by itself make the safe interfaces sound: an
@@ -108,41 +106,22 @@
 // and lifetimes through Rust types alone, so those two contracts stay KJ's documented interface
 // contracts, checked where the crate can (in-flight operations own their socket; every operation
 // checks the loop thread) and named where it cannot.
-#![deny(unsafe_op_in_unsafe_fn)]
-#![deny(unsafe_code)]
-#![deny(clippy::undocumented_unsafe_blocks)]
-#![deny(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic,
-    clippy::unreachable,
-    clippy::todo,
-    clippy::unimplemented
-)]
-#![cfg_attr(
-    test,
-    allow(
-        clippy::unwrap_used,
-        clippy::expect_used,
-        clippy::panic,
-        clippy::unreachable,
-        clippy::todo,
-        clippy::unimplemented
-    )
-)]
 
 #[cfg(not(any(unix, windows)))]
 compile_error!("kj-rs-io supports Unix and Windows targets only");
 
+pub use error::exception_type;
 pub use net::TokioAddress;
+pub use net::TokioListener;
+pub use net::wrap_listener;
+pub use stream::Socket;
 pub use stream::TokioStream;
+pub use stream::when_write_disconnected;
 pub use watcher::TokioFileWatcher;
 
 mod error;
 mod ffi;
-mod loopback;
 mod net;
-mod signal;
 mod stream;
 mod watcher;
 
@@ -198,46 +177,9 @@ const _: () = {
     send_sync::<TokioAddress>();
     send_sync::<net::TokioDatagram>();
     send_sync::<net::TokioListener>();
-    send_sync::<loopback::LoopbackRegistry>();
     send_sync::<watcher::TokioFileWatcher>();
 };
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn description(err: error::KjIoError) -> String {
-        cxx::KjError::from(err).description().to_owned()
-    }
-
-    #[test]
-    fn a_thread_without_a_port_is_refused_not_panicked() {
-        let err = std::thread::spawn(|| ensure_loop_thread().unwrap_err())
-            .join()
-            .unwrap();
-        assert!(description(err).contains("no TokioEventPort"));
-        // A plain tokio runtime is not a TokioEventPort either.
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap();
-        let _entered = runtime.enter();
-        assert!(description(ensure_loop_thread().unwrap_err()).contains("no TokioEventPort"));
-    }
-
-    #[test]
-    fn a_port_thread_passes_unless_another_runtime_is_entered_over_it() {
-        let _port = kj_rs_tokio::TokioPort::new();
-        ensure_loop_thread().unwrap();
-        let auxiliary = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap();
-        {
-            let _entered = auxiliary.enter();
-            assert!(
-                description(ensure_loop_thread().unwrap_err())
-                    .contains("other than this thread's TokioEventPort runtime")
-            );
-        }
-        ensure_loop_thread().unwrap();
-    }
-}
+#[path = "lib-test.rs"]
+mod tests;

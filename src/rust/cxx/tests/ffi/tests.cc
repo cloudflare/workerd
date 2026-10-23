@@ -58,7 +58,7 @@ size_t C::set_succeed(size_t n) { return this->set(n); }
 size_t C::get_fail() { throw std::runtime_error("unimplemented"); }
 
 size_t C::get_fail_infallible() {
-  kj::throwFatalException(KJ_EXCEPTION(FAILED, "infallible method failure"));
+  kj::throwException(KJ_EXCEPTION(FAILED, "infallible method failure"));
 }
 
 RcC::RcC(size_t n) : n(n) {}
@@ -319,10 +319,25 @@ c_roundtrip_shared_with_multiple_kj_owns(SharedWithMultipleKjOwns shared) {
   return shared;
 }
 
+template <typename Target, typename Counter> struct ProjectionOwner {
+  Counter drop_count;
+  mutable Target target;
+
+  ProjectionOwner(size_t n, Counter drop_count)
+      : drop_count(kj::mv(drop_count)), target(n) {}
+  ~ProjectionOwner() { drop_count->set(drop_count->get() + 1); }
+};
+
 kj::Rc<RcC> c_return_kj_rc(size_t n) { return kj::rc<RcC>(n); }
 
 kj::Rc<NonRefcountedRcC> c_return_non_refcounted_kj_rc(size_t n) {
   return kj::rc<NonRefcountedRcC>(n);
+}
+
+kj::Rc<NonRefcountedRcC> c_return_projected_kj_rc(size_t n, kj::Rc<RcC> drop_count) {
+  using Owner = ProjectionOwner<NonRefcountedRcC, kj::Rc<RcC>>;
+  return kj::rc<Owner>(n, kj::mv(drop_count)).project(
+      [](Owner &owner) -> NonRefcountedRcC & { return owner.target; });
 }
 
 size_t c_take_non_refcounted_kj_rc_by_ref(const kj::Rc<NonRefcountedRcC> &rc) {
@@ -384,6 +399,12 @@ kj::Arc<ArcC> c_return_kj_arc(size_t n) { return kj::arc<ArcC>(n); }
 
 kj::Arc<NonAtomicArcC> c_return_non_atomic_kj_arc(size_t n) {
   return kj::arc<NonAtomicArcC>(n);
+}
+
+kj::Arc<NonAtomicArcC> c_return_projected_kj_arc(size_t n, kj::Arc<ArcC> drop_count) {
+  using Owner = ProjectionOwner<NonAtomicArcC, kj::Arc<ArcC>>;
+  return kj::arc<Owner>(n, kj::mv(drop_count)).project(
+      [](const Owner &owner) -> NonAtomicArcC & { return owner.target; });
 }
 
 size_t c_take_non_atomic_kj_arc_by_ref(const kj::Arc<NonAtomicArcC> &arc) {
@@ -783,11 +804,11 @@ size_t c_try_return_primitive() { return 2020; }
 
 size_t c_fail_return_primitive() { throw std::logic_error("logic error"); }
 size_t c_fail_kj_exception_return_primitive() {
-  kj::throwFatalException(KJ_EXCEPTION(FAILED, "logic error"));
+  kj::throwException(KJ_EXCEPTION(FAILED, "logic error"));
 }
 
 size_t c_fail_kj_exception_disconnected_return_primitive() {
-  kj::throwFatalException(KJ_EXCEPTION(DISCONNECTED, "connection lost"));
+  kj::throwException(KJ_EXCEPTION(DISCONNECTED, "connection lost"));
 }
 
 // User-defined literal to create kj::ArrayPtr<const kj::byte> from string literal
@@ -801,7 +822,7 @@ size_t c_fail_kj_exception_with_details_return_primitive() {
   // Add some test details - these will be type_id + data pairs
   ex.setDetail(42, kj::heapArray("test detail 1"_kjb));
   ex.setDetail(999, kj::heapArray("another detail"_kjb));
-  kj::throwFatalException(kj::mv(ex));
+  kj::throwException(kj::mv(ex));
 }
 
 size_t c_cancel_return_primitive() { throw kj::CanceledException{}; }
@@ -824,7 +845,7 @@ size_t c_cancel_roundtrip_return_primitive() {
 // Rust cannot report the exception to its caller, so it panics instead. None of
 // them may terminate the process.
 void c_infallible_fail_void() {
-  kj::throwFatalException(KJ_EXCEPTION(FAILED, "infallible void failure"));
+  kj::throwException(KJ_EXCEPTION(FAILED, "infallible void failure"));
 }
 
 size_t c_infallible_fail_primitive() {
@@ -832,11 +853,11 @@ size_t c_infallible_fail_primitive() {
 }
 
 size_t c_infallible_fail_kj_exception_disconnected() {
-  kj::throwFatalException(KJ_EXCEPTION(DISCONNECTED, "infallible disconnect"));
+  kj::throwException(KJ_EXCEPTION(DISCONNECTED, "infallible disconnect"));
 }
 
 rust::String c_infallible_fail_rust_string() {
-  kj::throwFatalException(KJ_EXCEPTION(FAILED, "infallible string failure"));
+  kj::throwException(KJ_EXCEPTION(FAILED, "infallible string failure"));
 }
 
 // Neither a kj::Exception nor a std::exception. This is the shape of

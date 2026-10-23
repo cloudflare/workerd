@@ -23,10 +23,10 @@ index 4b47483f3998ada2320ed48f44a30b003ed97b6b..4591cbc5f6d721796efa19ecf02ebdc8
      "Immutable prototype object '%' cannot have their prototype set")          \
    T(ImportAttributesDuplicateKey, "Import attribute has duplicate key '%'")    \
 diff --git a/test/cctest/test-api.cc b/test/cctest/test-api.cc
-index 3518564c582d148387ac0bd7785915def22c5f22..8bf9c1800f771d4a98aee6f4878b348f84c1024b 100644
+index 8749b774f891ebc5969933dde548d2e8434c1440..c92035c192f6a3b87fb1c0268108c75de1f1d53d 100644
 --- a/test/cctest/test-api.cc
 +++ b/test/cctest/test-api.cc
-@@ -228,6 +228,17 @@ THREADED_TEST(IsolateOfContext) {
+@@ -230,6 +230,17 @@ THREADED_TEST(IsolateOfContext) {
    CHECK(isolate->IsCurrent());
  }
  
@@ -43,8 +43,8 @@ index 3518564c582d148387ac0bd7785915def22c5f22..8bf9c1800f771d4a98aee6f4878b348f
 +
  static void TestSignatureLooped(const char* operation, Local<Value> receiver,
                                  v8::Isolate* isolate) {
-   auto source = v8::base::OwnedVector<char>::NewForOverwrite(200);
-@@ -245,12 +256,7 @@ static void TestSignatureLooped(const char* operation, Local<Value> receiver,
+   auto source = v8::base::UniqueArray<char>::NewForOverwrite(200);
+@@ -247,12 +258,7 @@ static void TestSignatureLooped(const char* operation, Local<Value> receiver,
    if (!expected_to_throw) {
      CHECK_EQ(10, signature_callback_count);
    } else {
@@ -58,7 +58,7 @@ index 3518564c582d148387ac0bd7785915def22c5f22..8bf9c1800f771d4a98aee6f4878b348f
    }
    signature_expected_receiver_global.Reset();
  }
-@@ -277,12 +283,7 @@ static void TestSignatureOptimized(const char* operation, Local<Value> receiver,
+@@ -279,12 +285,7 @@ static void TestSignatureOptimized(const char* operation, Local<Value> receiver,
    if (!expected_to_throw) {
      CHECK_EQ(3, signature_callback_count);
    } else {

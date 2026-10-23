@@ -6,11 +6,9 @@
 // all resolve with undefined and never do a thenable lookup), the
 // transform's READ side resolves read() promises with fresh plain
 // `{done, value}` objects, so a patched Object.prototype.then getter DOES
-// fire while they settle. The exact count differs per implementation's
-// internal promise plumbing.
+// fire while they settle: once per read in both implementations.
 
 import { strictEqual } from 'node:assert';
-import { usingTsImpl } from 'which-impl';
 
 export const thenGetterFireCount = {
   async test() {
@@ -36,9 +34,9 @@ export const thenGetterFireCount = {
       delete Object.prototype.then;
     }
     strictEqual('then' in {}, false, 'interceptor must be removed');
-    // Counts measured in the wd-test harness context; a fetch-handler
-    // context adds exactly one more fire on each side (Response
-    // plumbing), preserving the one-fire TypeScript/C++ delta.
-    strictEqual(fired, usingTsImpl ? 3 : 2);
+    // Counts measured in the wd-test harness context, where the cycle's
+    // one read accounts for one of the two; a fetch-handler context adds
+    // one more (Response plumbing).
+    strictEqual(fired, 2);
   },
 };

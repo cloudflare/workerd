@@ -4,6 +4,8 @@
 
 // Shared helpers for the readable-byte suite.
 
+import { ok, strictEqual } from 'node:assert';
+
 // Reads a byte stream to completion with a default reader (`reader`, when
 // one is already held), returning all bytes concatenated.
 export async function drainBytes(readable, reader = readable.getReader()) {
@@ -32,4 +34,14 @@ export async function rejectionOf(p) {
   } catch (e) {
     return e;
   }
+}
+
+// The TypeError a fractional element fill at close() errors a byte stream
+// with (ledger #7).
+export function assertFractionalFillError(e) {
+  ok(e instanceof TypeError, `expected a TypeError, got ${String(e)}`);
+  strictEqual(
+    e.message,
+    'Insufficient bytes to fill elements in the given view'
+  );
 }

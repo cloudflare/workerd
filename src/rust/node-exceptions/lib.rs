@@ -13,6 +13,7 @@ use jsg::v8::ToLocalValue;
 use kj_rs::KjMaybe;
 
 #[cxx::bridge(namespace = "workerd::rust::node_exceptions")]
+#[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {
     /// Most Node.js exceptions are represented as either Error, TypeError, or
     /// RangeError. This is a cxx *extern* enum: the C++ `api::node::JsErrorType`
@@ -50,9 +51,10 @@ mod ffi {
 
     extern "Rust" {
         /// Creates a Node.js-style exception: a JS error with a string "code"
-        /// property. Returns a `v8::Local` handle (the reused `jsg::v8::ffi::Local`
-        /// shared struct), which the C++ caller reconstitutes into a
-        /// `jsg::JsValue` via `local_from_ffi`.
+        /// property. Returns a `v8::MaybeLocal` handle (the reused
+        /// `jsg::v8::ffi::MaybeLocal` shared struct), which the C++ caller
+        /// reconstitutes via `maybe_local_from_ffi`. It is empty if the Rust code
+        /// panicked, which leaves an exception pending.
         ///
         /// An absent `message` (`kj::none`) means the default message for the
         /// given `code` is used. `message` is passed as raw bytes because
@@ -63,11 +65,11 @@ mod ffi {
             code: NodeExceptionCode,
             error_type: JsErrorType,
             message: KjMaybe<&[u8]>,
-        ) -> Local;
+        ) -> MaybeLocal;
 
         /// Creates a Node.js-style "UVException": an ordinary Error object with
         /// additional `code`, `syscall`, `path`, and `dest` properties. Returns
-        /// a `v8::Local` handle, as for `create_node_exception`.
+        /// a `v8::MaybeLocal` handle, as for `create_node_exception`.
         ///
         /// The `message`, `path`, and `dest` values map to nullable
         /// `kj::StringPtr` arguments on the C++ side; an absent value is
@@ -82,7 +84,7 @@ mod ffi {
             message: KjMaybe<&[u8]>,
             path: KjMaybe<&[u8]>,
             dest: KjMaybe<&[u8]>,
-        ) -> Local;
+        ) -> MaybeLocal;
     }
 
     #[namespace = "workerd::rust::jsg"]
@@ -92,11 +94,11 @@ mod ffi {
 
         type Isolate = jsg::v8::ffi::Isolate;
 
-        // Reuse the `Local` shared struct defined by the jsg crate's `v8.rs`
+        // Reuse the `MaybeLocal` shared struct defined by the jsg crate's `v8.rs`
         // bridge instead of round-tripping the handle through a bare `usize`.
-        // The alias makes this the same Rust/C++ type as `jsg::v8::ffi::Local`,
+        // The alias makes this the same Rust/C++ type as `jsg::v8::ffi::MaybeLocal`,
         // so the handle can be returned by value across the bridge.
-        type Local = jsg::v8::ffi::Local;
+        type MaybeLocal = jsg::v8::ffi::MaybeLocal;
     }
 }
 
@@ -108,11 +110,11 @@ mod ffi {
 /// `message` is raw UTF-8 bytes: exception messages may embed arbitrary,
 /// potentially non-UTF-8 byte strings (e.g. filesystem paths), which V8
 /// renders lossily (U+FFFD) rather than rejecting.
-fn create_js_error<'a>(
-    lock: &mut Lock,
+fn create_js_error<'s>(
+    lock: &mut Lock<'s>,
     error_type: ffi::JsErrorType,
     message: &[u8],
-) -> v8::Local<'a, v8::Object> {
+) -> v8::Local<'s, v8::Object> {
     match error_type {
         ffi::JsErrorType::TypeError => lock.type_error_from_bytes(message),
         ffi::JsErrorType::RangeError => lock.range_error_from_bytes(message),
@@ -124,8 +126,14 @@ fn create_js_error<'a>(
 /// Creates a V8 string value from raw UTF-8 bytes, used for exception
 /// properties (`path`, `dest`) that may hold arbitrary, potentially non-UTF-8
 /// byte strings. Invalid sequences are replaced with U+FFFD by V8.
-fn bytes_to_value<'a>(lock: &mut Lock, data: &[u8]) -> v8::Local<'a, v8::Value> {
-    v8::String::new_from_utf8(lock, data).unwrap(lock).into()
+#[expect(
+    clippy::expect_used,
+    reason = "V8 fails only for strings longer than its maximum string length"
+)]
+fn bytes_to_value<'s>(lock: &mut Lock<'s>, data: &[u8]) -> v8::Local<'s, v8::Value> {
+    v8::String::new_from_utf8(lock, data)
+        .expect("exception property is too long for a V8 string")
+        .into()
 }
 
 /// Returns the default message for a Node.js exception code.
@@ -154,14 +162,14 @@ fn node_code_name(code: ffi::NodeExceptionCode) -> &'static str {
 }
 
 /// Implements C++ `createNodeException`.
-fn create_node_exception_impl<'a>(
-    lock: &mut Lock,
+fn create_node_exception_impl<'s>(
+    lock: &mut Lock<'s>,
     code: ffi::NodeExceptionCode,
     error_type: ffi::JsErrorType,
     message: Option<&[u8]>,
-) -> v8::Local<'a, v8::Object> {
+) -> v8::Local<'s, v8::Object> {
     let message = message.unwrap_or_else(|| node_default_message(code).as_bytes());
-    let mut err = create_js_error(lock, error_type, message);
+    let err = create_js_error(lock, error_type, message);
     // The "code" value is always a fixed ASCII enumerator name.
     let code_value = node_code_name(code).to_local(lock);
     err.set(lock, "code", code_value);
@@ -231,14 +239,14 @@ fn uv_default_message(errorno: i32) -> String {
 }
 
 /// Implements C++ `createUVException`.
-fn create_uv_exception_impl<'a>(
-    lock: &mut Lock,
+fn create_uv_exception_impl<'s>(
+    lock: &mut Lock<'s>,
     errorno: i32,
     syscall: &str,
     message: Option<&[u8]>,
     path: Option<&[u8]>,
     dest: Option<&[u8]>,
-) -> v8::Local<'a, v8::Object> {
+) -> v8::Local<'s, v8::Object> {
     debug_assert!(!syscall.is_empty(), "syscall must not be null");
 
     // Format the message to match Node.js format:
@@ -261,7 +269,7 @@ fn create_uv_exception_impl<'a>(
         msg
     };
 
-    let mut obj = lock.error_from_bytes(&formatted_message);
+    let obj = lock.error_from_bytes(&formatted_message);
 
     // `syscall` and the `code` name are always fixed ASCII strings.
     let syscall_value = syscall.to_local(lock);
@@ -284,28 +292,41 @@ fn create_uv_exception_impl<'a>(
 // ======================================================================================
 // FFI wrappers
 //
-// These are thin adapters over the `*_impl` functions: they build a `Lock` from
-// the raw isolate pointer, convert the nullable `KjMaybe` arguments to
-// `Option`, and return the `v8::Local` handle for the C++ caller.
+// These are thin adapters over the `*_impl` functions: they convert the nullable
+// `KjMaybe` arguments to `Option` and run the function through
+// `v8::run_ffi_callback`, which enters the caller's current scope and returns the
+// handle for the C++ caller, or an empty one if it panicked.
 
 /// # Safety
-/// `isolate` must be a valid pointer to a locked `v8::Isolate`.
+/// `isolate` must be a valid pointer to a locked `v8::Isolate` with an entered context,
+/// and the caller must have a `v8::HandleScope` open.
+#[expect(
+    unsafe_code,
+    reason = "enters the current scope of the isolate pointer C++ passes in"
+)]
 unsafe fn create_node_exception(
     isolate: *mut ffi::Isolate,
     code: ffi::NodeExceptionCode,
     error_type: ffi::JsErrorType,
     message: KjMaybe<&[u8]>,
-) -> ffi::Local {
-    // SAFETY: isolate is valid and locked — called from C++ exception helpers.
-    let mut lock = unsafe { Lock::from_isolate_ptr(isolate) };
-    let err = create_node_exception_impl(&mut lock, code, error_type, message.into());
-    // SAFETY: the handle is returned synchronously and stays within the caller's
-    // HandleScope; C++ immediately reconstitutes it via local_from_ffi.
-    unsafe { err.into_ffi() }
+) -> ffi::MaybeLocal {
+    // SAFETY: forwarded from the caller (C++ exception helpers).
+    unsafe {
+        v8::run_ffi_callback(isolate, |lock| {
+            let exception: v8::Local<v8::Value> =
+                create_node_exception_impl(lock, code, error_type, message.into()).into();
+            Ok::<_, jsg::Error>(exception)
+        })
+    }
 }
 
 /// # Safety
-/// `isolate` must be a valid pointer to a locked `v8::Isolate`.
+/// `isolate` must be a valid pointer to a locked `v8::Isolate` with an entered context,
+/// and the caller must have a `v8::HandleScope` open.
+#[expect(
+    unsafe_code,
+    reason = "enters the current scope of the isolate pointer C++ passes in"
+)]
 unsafe fn create_uv_exception(
     isolate: *mut ffi::Isolate,
     errorno: i32,
@@ -313,170 +334,24 @@ unsafe fn create_uv_exception(
     message: KjMaybe<&[u8]>,
     path: KjMaybe<&[u8]>,
     dest: KjMaybe<&[u8]>,
-) -> ffi::Local {
-    // SAFETY: isolate is valid and locked — called from C++ exception helpers.
-    let mut lock = unsafe { Lock::from_isolate_ptr(isolate) };
-    let obj = create_uv_exception_impl(
-        &mut lock,
-        errorno,
-        syscall,
-        message.into(),
-        path.into(),
-        dest.into(),
-    );
-    // SAFETY: the handle is returned synchronously and stays within the caller's
-    // HandleScope; C++ immediately reconstitutes it via local_from_ffi.
-    unsafe { obj.into_ffi() }
+) -> ffi::MaybeLocal {
+    // SAFETY: forwarded from the caller (C++ exception helpers).
+    unsafe {
+        v8::run_ffi_callback(isolate, |lock| {
+            let exception: v8::Local<v8::Value> = create_uv_exception_impl(
+                lock,
+                errorno,
+                syscall,
+                message.into(),
+                path.into(),
+                dest.into(),
+            )
+            .into();
+            Ok::<_, jsg::Error>(exception)
+        })
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use jsg::FromJS;
-    use jsg_test::Harness;
-
-    use super::*;
-
-    fn get_string(lock: &mut Lock, obj: &v8::Local<v8::Object>, key: &str) -> Option<String> {
-        obj.get(lock, key)
-            .and_then(|value| String::from_js(lock, value).ok())
-    }
-
-    #[test]
-    fn node_exception_uses_default_message_and_code() {
-        let harness = Harness::new();
-        harness.run_in_context(|lock, _ctx| {
-            let err = create_node_exception_impl(
-                lock,
-                ffi::NodeExceptionCode::ErrFsEisdir,
-                ffi::JsErrorType::Error,
-                None,
-            );
-            let value: v8::Local<v8::Value> = err.clone().into();
-            assert!(value.is_native_error());
-            assert_eq!(
-                get_string(lock, &err, "message").as_deref(),
-                Some("Expected a file but found a directory")
-            );
-            assert_eq!(
-                get_string(lock, &err, "code").as_deref(),
-                Some("ERR_FS_EISDIR")
-            );
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn node_exception_uses_explicit_message() {
-        let harness = Harness::new();
-        harness.run_in_context(|lock, _ctx| {
-            let err = create_node_exception_impl(
-                lock,
-                ffi::NodeExceptionCode::ErrFsCpEexist,
-                ffi::JsErrorType::TypeError,
-                Some(b"custom message".as_slice()),
-            );
-            assert_eq!(
-                get_string(lock, &err, "message").as_deref(),
-                Some("custom message")
-            );
-            assert_eq!(
-                get_string(lock, &err, "code").as_deref(),
-                Some("ERR_FS_CP_EEXIST")
-            );
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn uv_exception_formats_default_message_with_path() {
-        let harness = Harness::new();
-        harness.run_in_context(|lock, _ctx| {
-            let err = create_uv_exception_impl(
-                lock,
-                -libc::ENOENT,
-                "open",
-                None,
-                Some(b"/tmp/missing".as_slice()),
-                None,
-            );
-            assert_eq!(
-                get_string(lock, &err, "message").as_deref(),
-                Some("no such file or directory, open '/tmp/missing'")
-            );
-            assert_eq!(get_string(lock, &err, "code").as_deref(), Some("ENOENT"));
-            assert_eq!(get_string(lock, &err, "syscall").as_deref(), Some("open"));
-            assert_eq!(
-                get_string(lock, &err, "path").as_deref(),
-                Some("/tmp/missing")
-            );
-            assert_eq!(get_string(lock, &err, "dest"), None);
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn uv_exception_uses_explicit_message_and_dest() {
-        let harness = Harness::new();
-        harness.run_in_context(|lock, _ctx| {
-            let err = create_uv_exception_impl(
-                lock,
-                -libc::EEXIST,
-                "link",
-                Some(b"File already exists".as_slice()),
-                Some(b"/a".as_slice()),
-                Some(b"/b".as_slice()),
-            );
-            assert_eq!(
-                get_string(lock, &err, "message").as_deref(),
-                Some("File already exists")
-            );
-            assert_eq!(get_string(lock, &err, "code").as_deref(), Some("EEXIST"));
-            assert_eq!(get_string(lock, &err, "syscall").as_deref(), Some("link"));
-            assert_eq!(get_string(lock, &err, "path").as_deref(), Some("/a"));
-            assert_eq!(get_string(lock, &err, "dest").as_deref(), Some("/b"));
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn uv_exception_unknown_errno() {
-        let harness = Harness::new();
-        harness.run_in_context(|lock, _ctx| {
-            let err = create_uv_exception_impl(lock, 12345, "stat", None, None, None);
-            assert_eq!(
-                get_string(lock, &err, "message").as_deref(),
-                Some("unknown error: 12345")
-            );
-            assert_eq!(get_string(lock, &err, "code").as_deref(), Some("UNKNOWN"));
-            Ok(())
-        });
-    }
-
-    // A non-UTF-8 path (valid on POSIX filesystems) must not throw; V8 renders
-    // the invalid bytes lossily as U+FFFD in both the message and the `path`
-    // property. Regression test for the rust::Str UTF-8-validation hazard: the
-    // arbitrary byte arguments are passed as &[u8], never through a Rust &str.
-    #[test]
-    fn uv_exception_non_utf8_path_is_lossy_not_a_panic() {
-        let harness = Harness::new();
-        harness.run_in_context(|lock, _ctx| {
-            // 0x80 is a lone continuation byte — invalid UTF-8.
-            let bad_path: &[u8] = b"/tmp/\x80bad";
-            let err =
-                create_uv_exception_impl(lock, -libc::ENOENT, "open", None, Some(bad_path), None);
-
-            // U+FFFD (the Unicode replacement character) stands in for 0x80.
-            let expected_path = "/tmp/\u{FFFD}bad";
-            assert_eq!(
-                get_string(lock, &err, "path").as_deref(),
-                Some(expected_path)
-            );
-            assert_eq!(
-                get_string(lock, &err, "message").as_deref(),
-                Some(format!("no such file or directory, open '{expected_path}'").as_str())
-            );
-            assert_eq!(get_string(lock, &err, "code").as_deref(), Some("ENOENT"));
-            Ok(())
-        });
-    }
-}
+#[path = "lib-test.rs"]
+mod tests;

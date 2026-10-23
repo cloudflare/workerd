@@ -7,11 +7,13 @@ load("//:build/wd_test.bzl", "wd_test")
 strategies_suite_srcs = glob(["*.js"]) + ["strategies-modules.capnp"]
 
 wd_test(
+    size = "large",
     src = "strategies-cpp.wd-test",
     data = strategies_suite_srcs,
 )
 
 wd_test(
+    size = "large",
     src = "strategies-ts.wd-test",
     args = ["--experimental"],
     data = strategies_suite_srcs,
@@ -20,6 +22,7 @@ wd_test(
 # The main C++ cell plus the dateless opt-in pedantic_wpt flag, enforcing
 # that pedantic mode changes nothing on this suite's surface.
 wd_test(
+    size = "large",
     src = "strategies-cpp-pedantic.wd-test",
     data = strategies_suite_srcs,
 )

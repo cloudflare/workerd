@@ -14,10 +14,10 @@ method. This patch simply makes it public for embedder use.
 Signed-off-by: Aditya Tewari <adityaatewari@gmail.com>
 
 diff --git a/include/v8-isolate.h b/include/v8-isolate.h
-index 176d0c4dbe1313ac41e46d37a3018a6f19b76f6d..0f5ffcfcf59ff054e7945046034d82b0518f0a5d 100644
+index df17a1a90da7baba93f39a879e16b95ae5c28a06..636fea67edc2099dc43d16b727dfab54ffd11c94 100644
 --- a/include/v8-isolate.h
 +++ b/include/v8-isolate.h
-@@ -1103,6 +1103,14 @@ class V8_EXPORT Isolate {
+@@ -1119,6 +1119,14 @@ class V8_EXPORT Isolate {
     */
    size_t GetHeapSize();
  
@@ -32,7 +32,7 @@ index 176d0c4dbe1313ac41e46d37a3018a6f19b76f6d..0f5ffcfcf59ff054e7945046034d82b0
    /**
     * Returns heap profiler for this isolate. Will return NULL until the isolate
     * is initialized.
-@@ -1918,7 +1926,6 @@ class V8_EXPORT Isolate {
+@@ -1941,7 +1949,6 @@ class V8_EXPORT Isolate {
  
    internal::ValueHelper::InternalRepresentationType GetDataFromSnapshotOnce(
        size_t index);

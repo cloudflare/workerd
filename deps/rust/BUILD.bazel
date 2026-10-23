@@ -11,6 +11,14 @@ cc_library(
     linkopts = select({
         "@platforms//os:windows": [
             "ntdll.lib",
+            # System certificate store APIs behind rustls-platform-verifier.
+            "crypt32.lib",
+        ],
+        "@platforms//os:macos": [
+            "-framework",
+            "Security",
+            "-framework",
+            "CoreFoundation",
         ],
         "//conditions:default": [],
     }),

@@ -29,6 +29,10 @@ class BaseTracer: public kj::Refcounted {
     selfRef->invalidate();
   };
 
+  kj::Rc<BaseTracer> clone() {
+    return addRefToThis();
+  }
+
   // Weak reference to this tracer, used by user-tracing SpanSubmitter implementations so
   // abandoned user promises cannot pin tracer lifetime.
   using WeakRef = workerd::WeakRef<BaseTracer>;
@@ -196,10 +200,11 @@ class WorkerTracer final: public BaseTracer {
   // span context from it.
   void setEventInfo(
       IoContext::IncomingRequest& incomingRequest, tracing::EventInfo&& info) override;
-  // Variant for when we don't have a proper IoContext but instead provide context and timestamp
-  // directly, used internally for RPC-based tracing.
-  void setEventInfoInternal(
-      const tracing::InvocationSpanContext& context, kj::Date timestamp, tracing::EventInfo&& info);
+  // RPC variant; deserialized invocation contexts do not retain their parent.
+  void setEventInfoInternal(const tracing::InvocationSpanContext& context,
+      kj::Maybe<tracing::SpanId> parentSpanId,
+      kj::Date timestamp,
+      tracing::EventInfo&& info);
 
   void setOutcome(EventOutcome outcome, kj::Duration cpuTime, kj::Duration wallTime) override;
   virtual void recordTimestamp(kj::Date timestamp) override;

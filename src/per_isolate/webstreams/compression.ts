@@ -37,23 +37,19 @@ import type {
   RingBuffer as RingBufferType,
   RingBufferConstructor,
 } from './ring-buffer';
+import type { CommonHelpers } from './common';
 import type { ViewExtentHelpers } from './view-extent';
 
 const {
-  ArrayBufferPrototypeByteLengthGet,
-  DataViewPrototypeGetBuffer,
   MathMin,
   ObjectDefineProperties,
   SymbolToStringTag,
   TypeError,
-  TypedArrayPrototypeGetBuffer,
-  TypedArrayPrototypeSet,
   Uint8Array,
   uncurryThis,
 } = primordials;
 
-const { isArrayBuffer, isArrayBufferView, isSharedArrayBuffer, isDataView } =
-  utils;
+const { isSharedArrayBuffer } = utils;
 
 // Captured for primordials discipline — ToString coercion per spec.
 const StringCoerce = String;
@@ -68,7 +64,9 @@ const {
   WritableStreamDefaultController,
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
-const { viewByteExtent } =
+const { isActualObject, kEnumerable, toStringTagProperty } =
+  require('webstreams/common') as CommonHelpers;
+const { bufferSourceExtent, copyExtent } =
   require('webstreams/view-extent') as ViewExtentHelpers;
 const { RingBuffer } = require('webstreams/ring-buffer') as {
   RingBuffer: RingBufferConstructor;
@@ -115,27 +113,6 @@ const newCodec = utils.newCompressionCodec as (
   format: string
 ) => CodecHandle;
 
-function isActualObject(value: unknown): boolean {
-  return value != null && typeof value === 'object';
-}
-
-// True for BufferSource chunks the codec accepts: ArrayBuffers and views,
-// excluding anything SharedArrayBuffer-backed. The Compression Streams
-// spec takes a Web IDL BufferSource without [AllowShared], so shared
-// memory is a TypeError (WPT compression-bad-chunks pins the rejection).
-// This is a standard API, so the spec shape wins over parity with the
-// identity streams, which accept shared views by copying. Captured getters
-// are used for the view's buffer — prototype accessors are user-patchable.
-function isValidChunk(chunk: unknown): boolean {
-  if (isArrayBuffer(chunk)) return true;
-  if (isSharedArrayBuffer(chunk)) return false;
-  if (!isArrayBufferView(chunk)) return false;
-  const buffer = isDataView(chunk)
-    ? DataViewPrototypeGetBuffer(chunk)
-    : TypedArrayPrototypeGetBuffer(chunk);
-  return !isSharedArrayBuffer(buffer);
-}
-
 // Validates a chunk and copies its CURRENT bytes. Runs synchronously
 // inside writer.write() (via the strategy size callback), so resizing,
 // detaching, or mutating the buffer after write() returns cannot change
@@ -143,34 +120,21 @@ function isValidChunk(chunk: unknown): boolean {
 // copies inside write() for exactly these hazards. Detached or
 // out-of-bounds inputs, DataViews included, copy as empty (a codec no-op;
 // see view-extent.ts).
+//
+// The codec accepts ArrayBuffers and views, excluding anything
+// SharedArrayBuffer-backed. The Compression Streams spec takes a Web IDL
+// BufferSource without [AllowShared], so shared memory is a TypeError (WPT
+// compression-bad-chunks pins the rejection). This is a standard API, so
+// the spec shape wins over parity with the identity streams, which accept
+// shared views by copying.
 function snapshotChunk(chunk: unknown): Uint8Array {
-  if (!isValidChunk(chunk)) {
+  const extent = bufferSourceExtent(chunk);
+  if (extent === undefined || isSharedArrayBuffer(extent.buffer)) {
     throw new TypeError(
       'The provided value is not of type (ArrayBuffer or ArrayBufferView)'
     );
   }
-  let buffer: ArrayBuffer;
-  let byteOffset: number;
-  let byteLength: number;
-  if (isArrayBuffer(chunk)) {
-    buffer = chunk as ArrayBuffer;
-    byteOffset = 0;
-    byteLength = ArrayBufferPrototypeByteLengthGet(chunk) as number;
-  } else {
-    const extent = viewByteExtent(chunk as ArrayBufferView);
-    buffer = extent.buffer as ArrayBuffer;
-    byteOffset = extent.byteOffset;
-    byteLength = extent.byteLength;
-  }
-  const copy = new Uint8Array(byteLength);
-  if (byteLength > 0) {
-    TypedArrayPrototypeSet(
-      copy,
-      new Uint8Array(buffer, byteOffset, byteLength),
-      0
-    );
-  }
-  return copy;
+  return copyExtent(extent.buffer, extent.byteOffset, extent.byteLength);
 }
 
 type SnapshotEntry =
@@ -195,12 +159,16 @@ function createCodecPair(
   let readableController: object;
   // Set, with the reason, once the readable takes no more chunks: its
   // reader cancelled it, or the pair errored. Enqueuing runs user code —
-  // resolving a read looks up `then` on the result (createReadResult in
-  // queue.ts), and a getter there can cancel the reader or error the pair
-  // through the Node.js interop hook — so a drain checks this between
-  // pieces rather than enqueue into a stream that would throw.
+  // resolving a user's read looks up `then` on the result (see
+  // defaultReaderRead in readable.ts), and a getter there can cancel the
+  // reader or error the pair through the Node.js interop hook — so a drain
+  // checks this between pieces rather than enqueue into a stream that
+  // would throw, and leaves the rest of the output undelivered.
   let finished = false;
   let finishReason: unknown;
+  // Whether the pair finished by erroring the readable (a codec failure,
+  // an abort, the interop hook) rather than by its reader's cancel.
+  let readableErrored = false;
 
   // The teardown every path that ends the pair shares: queued writes are
   // discarded by the erroring writable without sink steps, so their
@@ -220,6 +188,7 @@ function createCodecPair(
   // exception.
   const failBoth = (reason: unknown): void => {
     finish(reason);
+    readableErrored = true;
     byteControllerError(readableController, reason);
   };
 
@@ -315,10 +284,14 @@ function createCodecPair(
         }
         // Writes never wait for reads (legacy-parity settlement): the
         // output moves into the readable's queue, which buffers it without
-        // bound. A pair torn down during the drain fails the write with
-        // the teardown's reason, as it does a write queued behind it.
+        // bound. A pair torn down during the drain (from user code run by
+        // an enqueue) leaves the rest of the output undelivered, and the
+        // write still succeeds: the spec's transform enqueues its output,
+        // and how it splits it is implementation-defined, so this is a
+        // transform that enqueued it as one chunk before the teardown.
+        // The teardown has errored the writable, which rejects the writes
+        // queued behind this one.
         drainStage();
-        if (finished) throw finishReason;
       },
       close: (): void => {
         // Z_FINISH plus the strict-mode end checks; a throw rejects the
@@ -331,12 +304,18 @@ function createCodecPair(
         }
         // Deliver the flush tail, then close: queued bytes are served to
         // later reads before the close lands (queued byte-stream
-        // semantics). A pair torn down during the drain fails the close
-        // with the teardown's reason instead. When a BYOB read's view is
-        // left holding a partial element, close() errors the readable and
-        // throws, and the throw rejects writer.close() in turn.
+        // semantics). A pair torn down during the drain ends it as in
+        // write above, and then follows the spec's flush: a readable
+        // errored meanwhile rejects the close with its error; one its
+        // reader cancelled is already closed, and the close succeeds.
+        // When a BYOB read's view is left holding a partial element,
+        // close() errors the readable and throws, and the throw rejects
+        // writer.close() in turn.
         drainStage();
-        if (finished) throw finishReason;
+        if (finished) {
+          if (readableErrored) throw finishReason;
+          return;
+        }
         byteControllerClose(readableController);
       },
       abort: (reason: unknown): void => {
@@ -442,32 +421,18 @@ class DecompressionStream {
   }
 }
 
-const kEnumerable = { __proto__: null, enumerable: true };
-
 ObjectDefineProperties(CompressionStream.prototype, {
   __proto__: null,
   readable: kEnumerable,
   writable: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'CompressionStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('CompressionStream'),
 });
 
 ObjectDefineProperties(DecompressionStream.prototype, {
   __proto__: null,
   readable: kEnumerable,
   writable: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'DecompressionStream',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('DecompressionStream'),
 });
 
 module.exports = {

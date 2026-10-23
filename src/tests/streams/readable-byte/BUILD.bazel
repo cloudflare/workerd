@@ -7,11 +7,13 @@ load("//:build/wd_test.bzl", "wd_test")
 readable_byte_suite_srcs = glob(["*.js"]) + ["readable-byte-modules.capnp"]
 
 wd_test(
+    size = "large",
     src = "readable-byte-cpp.wd-test",
     data = readable_byte_suite_srcs,
 )
 
 wd_test(
+    size = "large",
     src = "readable-byte-ts.wd-test",
     args = ["--experimental"],
     data = readable_byte_suite_srcs,
@@ -21,6 +23,7 @@ wd_test(
 # produce no observable deltas on this suite's surface, so the shared
 # modules run unbranched.
 wd_test(
+    size = "large",
     src = "readable-byte-cpp-pedantic.wd-test",
     data = readable_byte_suite_srcs,
 )
@@ -28,6 +31,7 @@ wd_test(
 # The experimental no-auto-allocate flag cell (C++ only; TypeScript has
 # the behavior unconditionally).
 wd_test(
+    size = "large",
     src = "readable-byte-cpp-no-auto-allocate.wd-test",
     args = ["--experimental"],
     data = readable_byte_suite_srcs,
@@ -37,12 +41,14 @@ wd_test(
 # @all-compat-flags variants are disabled: at the 2999-12-31 date the
 # flags these cells deliberately omit would all turn on.
 wd_test(
+    size = "large",
     src = "readable-byte-cpp-legacy.wd-test",
     data = readable_byte_suite_srcs,
     generate_all_compat_flags_variant = False,
 )
 
 wd_test(
+    size = "large",
     src = "readable-byte-cpp-nodetach.wd-test",
     data = readable_byte_suite_srcs,
     generate_all_compat_flags_variant = False,

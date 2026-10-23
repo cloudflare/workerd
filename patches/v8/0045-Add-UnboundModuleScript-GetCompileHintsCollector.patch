@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Florian Loitsch <floitsch@cloudflare.com>
+Date: Thu, 15 Oct 2026 12:00:00 +0000
+Subject: Add UnboundModuleScript::GetCompileHintsCollector
+
+A module compiled with kProduceCompileHints records the positions of
+the lazy functions that are compiled while it runs, just like a
+script: the flag is set on the module's Script, and lazy compilation
+appends to its compiled_lazy_function_positions. But only
+v8::Script exposes a CompileHintsCollector to read them back, and
+Module and UnboundModuleScript have no equivalent, so an embedder
+cannot obtain compile hints for ES modules.
+
+Add UnboundModuleScript::GetCompileHintsCollector(), which returns a
+collector for the Script behind the module's SharedFunctionInfo.
+CompileHintsCollector::GetCompileHints() then works unchanged.
+Module::GetUnboundModuleScript() returns an UnboundModuleScript backed
+by the module's SharedFunctionInfo in every module status, so the
+collector can be obtained after evaluation.
+
+We produce compile hints for the ES modules of uploaded Workers when
+we validate them, and pass them to V8 with kConsumeCompileHints on
+every later first compile of those modules.
+
+diff --git a/include/v8-script.h b/include/v8-script.h
+index 3a67e56cb496e56d271424333b5adc935b8df21d..68fc0fbf4c70fa850f4bba8c38ef3f54080b38a8 100644
+--- a/include/v8-script.h
++++ b/include/v8-script.h
+@@ -97,6 +97,8 @@ class V8_EXPORT UnboundScript : public Data {
+   static const int kNoScriptId = 0;
+ };
+ 
++class CompileHintsCollector;
++
+ /**
+  * A compiled JavaScript module, not yet tied to a Context.
+  */
+@@ -116,6 +118,13 @@ class V8_EXPORT UnboundModuleScript : public Data {
+    */
+   int ScriptId() const;
+ 
++  /**
++   * Get a compile hints collector object which we can use later for retrieving
++   * compile hints (= positions of lazy functions which were compiled and
++   * executed) of a module compiled with kProduceCompileHints.
++   */
++  Local<CompileHintsCollector> GetCompileHintsCollector() const;
++
+   static const int kNoScriptId = 0;
+ };
+ 
+diff --git a/src/api/api.cc b/src/api/api.cc
+index b97ec7a4098781652527ae9b6db463ed01bb89f7..d6545fb2ce0475454fb1c2b46745b5fd90c92d92 100644
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -2042,6 +2042,17 @@ Local<Value> UnboundModuleScript::GetSourceMappingURL() {
+   return Utils::ToLocal(i::direct_handle(url, i_isolate));
+ }
+ 
++Local<CompileHintsCollector> UnboundModuleScript::GetCompileHintsCollector()
++    const {
++  i::DisallowGarbageCollection no_gc;
++  auto obj = Utils::OpenDirectHandle(this);
++  i::Isolate* i_isolate = i::Isolate::Current();
++  CHECK(i::IsScript(obj->script()));
++  i::DirectHandle<i::Script> script(i::Cast<i::Script>(obj->script()),
++                                    i_isolate);
++  return ToApiHandle<CompileHintsCollector>(script);
++}
++
+ MaybeLocal<Value> Script::Run(Local<Context> context) {
+   return Run(context, Local<Data>());
+ }

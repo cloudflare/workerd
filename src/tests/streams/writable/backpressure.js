@@ -370,8 +370,8 @@ export const desiredSizeWhileErroring = {
 // suite's queue-math pins; the WPT writable floating-point file's
 // shapes). Sizes accumulate against the writer's desiredSize while the
 // first write is parked in flight; abort() winds the queue down without
-// processing the outsized chunks. DIVERGENCE family: TypeScript tracks
-// the queue total in exact double precision; C++ pins its own rounding.
+// processing the outsized chunks. DIVERGENCE (ledger #9): TypeScript
+// tracks the queue total as a double, per spec; C++ narrows it.
 export const writableFloatQueueTotal = {
   async test() {
     let release;
@@ -389,16 +389,19 @@ export const writableFloatQueueTotal = {
     const w1 = writer.write(2); // in flight, parked
     strictEqual(writer.desiredSize, 1);
     const w2 = writer.write(Number.MAX_SAFE_INTEGER); // queued
-    // DIVERGENCE (observed, pinned verbatim): the two implementations
-    // account a huge queued size differently — TypeScript lands one
-    // unit off the naive hwm − Σsizes model (in-flight dequeue timing),
-    // C++ reports 2, an accounting anomaly under huge sizes. The WPT
-    // writable floating-point file remains the conformance reference
-    // (TypeScript passes it; C++ carries 3 expectedFailures there).
-    strictEqual(writer.desiredSize, usingTsImpl ? -9007199254740989 : 2);
+    // The in-flight chunk stays in the queue total until its write
+    // completes (spec), so the total is 2 + MAX_SAFE_INTEGER = 2^53 + 1.
+    // TypeScript (spec; Node agrees): that sum is not a double and rounds
+    // to 2^53, so desiredSize is 3 - 2^53 = -9007199254740989, one more
+    // than the exact -9007199254740990. C++: the exact total in uint64,
+    // and the int narrowing of 3 - (2^53 + 1) wraps to 2.
+    const expected = usingTsImpl ? 3 - (2 + Number.MAX_SAFE_INTEGER) : 2;
+    if (usingTsImpl) strictEqual(expected, -9007199254740989);
+    strictEqual(writer.desiredSize, expected);
     const w3 = writer.write(1e-16); // queued
-    // The 1e-16 addition is absorbed: no observable change either way.
-    strictEqual(writer.desiredSize, usingTsImpl ? -9007199254740989 : 2);
+    // TypeScript: 2^53 + 1e-16 rounds back to 2^53. C++: 1e-16 truncates
+    // to 0. No observable change either way.
+    strictEqual(writer.desiredSize, expected);
     // Wind down: abort clears the queue; the parked write settles after
     // release.
     const abortP = writer.abort('wind-down');

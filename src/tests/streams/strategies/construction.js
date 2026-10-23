@@ -35,6 +35,25 @@ export const initDictionaryIsRequired = {
   },
 };
 
+// init converts as a WebIDL dictionary (parity): a function's members are
+// read, and every other primitive throws TypeError (messages differ).
+export const initDictionaryShapes = {
+  test() {
+    for (const Ctor of classes) {
+      const init = Object.assign(function init() {}, { highWaterMark: 3 });
+      strictEqual(new Ctor(init).highWaterMark, 3, Ctor.name);
+      for (const bad of [5, 'x', true, 1n, Symbol('s')]) {
+        throws(
+          () => new Ctor(bad),
+          usingTsImpl
+            ? { name: 'TypeError', message: 'init must be an object' }
+            : TypeError
+        );
+      }
+    }
+  },
+};
+
 export const missingHighWaterMarkDiverges = {
   test() {
     for (const Ctor of classes) {
@@ -71,6 +90,36 @@ export const highWaterMarkIsUnrestrictedDouble = {
         new Ctor({ highWaterMark: { valueOf: () => 3 } }).highWaterMark,
         3
       );
+    }
+  },
+};
+
+// A strategy dictionary whose members count their reads.
+function countingStrategy(highWaterMark) {
+  const reads = { highWaterMark: 0, size: 0 };
+  const strategy = {
+    get highWaterMark() {
+      reads.highWaterMark++;
+      return highWaterMark;
+    },
+    get size() {
+      reads.size++;
+      return undefined;
+    },
+  };
+  return { reads, strategy };
+}
+
+// init.highWaterMark is read once, as WebIDL dictionary conversion does
+// (parity); size is not a member of QueuingStrategyInit.
+export const initHighWaterMarkReadOnce = {
+  test() {
+    for (const Strategy of [CountQueuingStrategy, ByteLengthQueuingStrategy]) {
+      const { reads, strategy } = countingStrategy(4);
+      const qs = new Strategy(strategy);
+      strictEqual(reads.highWaterMark, 1, Strategy.name);
+      strictEqual(reads.size, 0, Strategy.name);
+      strictEqual(qs.highWaterMark, 4, Strategy.name);
     }
   },
 };

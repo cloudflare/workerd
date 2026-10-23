@@ -57,6 +57,11 @@ namespace workerd::jsg {
 // "some message 5" (or JSG_REQUIRE(false, "some message; x = ", x) if you wanted identical output,
 // but then why not use KJ_REQUIRE).
 
+#define JSG_DTOR_REQUIRE(cond, jsErrorType, ...)                                                   \
+  KJ_DTOR_REQUIRE(cond, kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__))
+// JSG_REQUIRE + KJ_DTOR_REQUIRE: for destructors (and code called from destructors). If the stack
+// is already unwinding, a failure is logged instead of thrown. See KJ_DTOR_* in kj/debug.h.
+
 #define JSG_REQUIRE_NONNULL(value, jsErrorType, ...)                                               \
   KJ_REQUIRE_NONNULL(value, kj::str(JSG_EXCEPTION(jsErrorType) ": ", ##__VA_ARGS__))
 // JSG_REQUIRE + KJ_REQUIRE_NONNULL.
@@ -161,6 +166,26 @@ bool isExceptionFromInputGateBroken(kj::StringPtr description);
 
 constexpr kj::Exception::DetailTypeId EXCEPTION_IS_USER_ERROR = 0x82aff7d637c30e47ull;
 
+// Marks a failure as transient, so the operation is worth retrying. isRetryable() already treats
+// every DISCONNECTED failure as transient, so the marker only changes retries for other types. It
+// says nothing about whether a retry is safe: for actor calls, delivery markers such as
+// REQUEST_DELIVERED_TO_ACTOR_DETAIL_ID decide that. Unrelated to `retryable()` in
+// `cloudflare:durable-objects`, which marks a method as safe to run more than once. The payload
+// is a zero-length array (marker only).
+constexpr kj::Exception::DetailTypeId EXCEPTION_IS_TRANSIENT = 0xb9e1d0c9dba8b3bbull;
+
+inline void markTransient(kj::Exception& exception) {
+  exception.setDetail(EXCEPTION_IS_TRANSIENT, kj::heapArray<kj::byte>(0));
+}
+
+// Whether the operation that failed with `exception` is worth retrying. DISCONNECTED exceptions are
+// retryable by convention; EXCEPTION_IS_TRANSIENT extends that to other types. JavaScript sees
+// these errors with `retryable` set to true.
+inline bool isRetryable(const kj::Exception& exception) {
+  return exception.getType() == kj::Exception::Type::DISCONNECTED ||
+      exception.getDetail(EXCEPTION_IS_TRANSIENT) != kj::none;
+}
+
 // Set when a Durable Object execution was terminated by a call to state.abort().
 constexpr kj::Exception::DetailTypeId EXCEPTION_DURABLE_OBJECT_ABORT = 0x2900166d61b404a7ull;
 
@@ -168,18 +193,16 @@ constexpr kj::Exception::DetailTypeId EXCEPTION_DURABLE_OBJECT_ABORT = 0x2900166
 constexpr kj::Exception::DetailTypeId EXCEPTION_DURABLE_OBJECT_ABORT_NO_RETRY =
     0xff8bb5686c6156deull;
 
-// Set on a DISCONNECTED actor-call failure for an attempt that definitely did not enter user code.
-// Such failures are safe to retry; the caller decides whether to reuse the logical call's token
-// based on earlier attempts. Set by edgeworker's pre-delivery routing and getActor failure paths,
-// and by sandbox-side rejections before user code; read by the caller-side actor-call classifier.
-// The payload is a zero-length array (marker only).
+// Set on an actor-call failure for an attempt that definitely did not enter user code. Such
+// failures are safe to retry if they are retryable (see isRetryable()); the caller decides whether
+// to reuse the logical call's token based on earlier attempts. Set by edgeworker's pre-delivery
+// routing and getActor failure paths, and by sandbox-side rejections before user code; read by the
+// caller-side actor-call classifier. The payload is a zero-length array (marker only).
 constexpr kj::Exception::DetailTypeId REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID =
     0x1a07d0b6559baea6ull;
 
 inline void markActorRequestNotDelivered(kj::Exception& exception) {
-  if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
-    exception.setDetail(REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
-  }
+  exception.setDetail(REQUEST_NOT_DELIVERED_TO_ACTOR_DETAIL_ID, kj::heapArray<kj::byte>(0));
 }
 
 // Set on a failure that is known to have occurred AFTER the call reached the actor (user code may

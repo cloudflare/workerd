@@ -323,6 +323,7 @@ JsReadableStream newDatagramReadableStream(jsg::Lock& js, IoOwn<DatagramChannel>
   return JsReadableStream::fromPull(js,
       [channel = kj::mv(channel)](jsg::Lock& js) mutable -> jsg::Promise<kj::Maybe<jsg::Value>> {
     auto& ioContext = IoContext::current();
+    IoContext::AwaitIoOperation traceOperation(ioContext, "datagram_receive"_kj);
     return ioContext.awaitIo(js, channel->receive(),
         [](jsg::Lock& js, kj::Maybe<kj::Array<kj::byte>> datagram) -> kj::Maybe<jsg::Value> {
       KJ_IF_SOME(bytes, datagram) {
@@ -348,7 +349,9 @@ JsWritableStream newDatagramWritableStream(jsg::Lock& js, IoOwn<DatagramChannel>
         "This socket's writable stream only accepts Datagram instances.");
     auto bytes = kj::heapArray<kj::byte>(datagram->getData(js).asArrayPtr());
     auto sendPromise = channel->send(bytes).attach(kj::mv(bytes));
-    return IoContext::current().awaitIo(js, kj::mv(sendPromise));
+    auto& ioContext = IoContext::current();
+    IoContext::AwaitIoOperation traceOperation(ioContext, "datagram_send"_kj);
+    return ioContext.awaitIo(js, kj::mv(sendPromise));
   });
 }
 
@@ -617,7 +620,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::run(
     bool isDynamicDispatch) {
   auto& context = incomingRequest->getContext();
 
-  incomingRequest->delivered();
+  incomingRequest->delivered("udp_connect"_kj);
 
   auto outcome = EventOutcome::OK;
   KJ_TRY {
@@ -633,7 +636,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::run(
     });
   }
   KJ_CATCH(e) {
-    context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER, kj::mv(e));
+    context.logUncaughtExceptionAsync(
+        UncaughtExceptionSource::REQUEST_HANDLER, kj::mv(e), *incomingRequest);
     outcome = EventOutcome::EXCEPTION;
   }
 
@@ -889,11 +893,11 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
           // flush to complete. While it is unlikely to be GC'd while we are waiting because
           // the user code *likely* is holding a active reference to it at this point, we
           // don't want to take any chances. This prevents a possible UAF.
-          JSG_VISITABLE_LAMBDA((self = JSG_THIS, domain = kj::heapString(KJ_ASSERT_NONNULL(domain)),
-                                   tlsOptions = kj::mv(tlsOptions),
-                                   openedResolver = openedPrPair.resolver.addRef(js),
-                                   remoteAddress = mapCopyString(remoteAddress),
-                                   localAddress = mapCopyString(localAddress)),
+          JSG_VISITABLE_LAMBDA(
+              (self = JSG_THIS, domain = kj::heapString(KJ_ASSERT_NONNULL(domain)),
+                  tlsOptions = kj::mv(tlsOptions),
+                  openedResolver = openedPrPair.resolver.addRef(js),
+                  remoteAddress = remoteAddress.clone(), localAddress = localAddress.clone()),
               (self, openedResolver), (jsg::Lock & js) mutable {
                 auto& context = IoContext::current();
 
@@ -914,7 +918,8 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
                 } else {
                 }  // Needed to avoid compiler error/warning
 
-                // All non-secure sockets should have `connectionData` with a `tlsStarter`.
+                // All non-secure sockets should have `connectionData`, which will have a
+                // `tlsStarter` if startTls is supported.
                 // Though since it's inside an IoOwn, if the request's IoContext has ended
                 // then `connectionData` will be null. This can happen if the flush operation is taking
                 // a particularly long time (EW-8538), so we throw a JSG error if that's the case.
@@ -923,12 +928,24 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
 
                 auto& tlsStarter = connData->tlsStarter;
 
+                // The tlsStarter is an output parameter, filled in by whichever layer actually
+                // handled the CONNECT request. That layer leaves it empty when it has no way to
+                // perform a TLS handshake on the connection. There is nothing we can do about it at
+                // this point, so surface it to the application instead of failing an internal
+                // assert.
+                if (*tlsStarter == kj::none) {
+                openedResolver.reject(
+                    js, js.error("startTls() is not supported on this connection."));
+                JSG_FAIL_REQUIRE(Error, "startTls() is not supported on this connection.");
+                }
+
                 // Fork the starter promise because we need to create two separate things waiting
                 // on it below. The first is resolving the openedResolver with a JS promise that
                 // wraps one branch, the second is the kj::Promise that we use to resolve the
                 // secureStream for the promised stream. This keeps us from having to bounce in and
                 // out of the JS isolate lock.
                 auto forkedPromise = KJ_ASSERT_NONNULL(*tlsStarter)(acceptedHostname).fork();
+                IoContext::AwaitIoOperation traceOperation(context, "socket_start_tls"_kj);
 
                 openedResolver.resolve(js,
                     context.awaitIo(js, forkedPromise.addBranch(),
@@ -960,10 +977,9 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
   // The existing tlsStarter gets consumed and we won't need it again. Pass in an empty tlsStarter
   // to `setupSocket`.
   auto newTlsStarter = kj::heap<kj::TlsStarterCallback>();
-  return setupSocket(js, kj::newPromisedStream(kj::mv(secureStreamPromise)),
-      mapCopyString(remoteAddress), mapCopyString(localAddress), kj::mv(options),
-      kj::mv(newTlsStarter), SecureTransportKind::ON, protocol, kj::mv(domain), isDefaultFetchPort,
-      kj::mv(openedPrPair));
+  return setupSocket(js, kj::newPromisedStream(kj::mv(secureStreamPromise)), remoteAddress.clone(),
+      localAddress.clone(), kj::mv(options), kj::mv(newTlsStarter), SecureTransportKind::ON,
+      protocol, kj::mv(domain), isDefaultFetchPort, kj::mv(openedPrPair));
 }
 
 void Socket::handleProxyStatus(
@@ -1010,11 +1026,12 @@ void Socket::handleProxyStatus(
       // authority that the peer targeted.
       self->openedResolver.resolve(js,
           SocketInfo{
-            .remoteAddress = mapCopyString(self->remoteAddress),
-            .localAddress = mapCopyString(self->localAddress),
+            .remoteAddress = self->remoteAddress.clone(),
+            .localAddress = self->localAddress.clone(),
           });
     }
   };
+  IoContext::AwaitIoOperation traceOperation(context, "socket_connect"_kj);
   auto result = context.awaitIo(js, status.catch_(kj::mv(errorHandler)), kj::mv(func));
   result.markAsHandled(js);
 }
@@ -1042,11 +1059,12 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
       // authority that the peer targeted.
       self->openedResolver.resolve(js,
           SocketInfo{
-            .remoteAddress = mapCopyString(self->remoteAddress),
-            .localAddress = mapCopyString(self->localAddress),
+            .remoteAddress = self->remoteAddress.clone(),
+            .localAddress = self->localAddress.clone(),
           });
     }
   };
+  IoContext::AwaitIoOperation traceOperation(context, "socket_connect"_kj);
   auto result = context.awaitIo(js, connectResult.catch_(kj::mv(errorHandler)), kj::mv(func));
   result.markAsHandled(js);
 }
@@ -1082,6 +1100,7 @@ void Socket::wireClosedToDisconnect(jsg::Lock& js, kj::Promise<bool> disconnecte
   // The reference to the Socket must be weak. A strong one would keep the Socket alive until the
   // peer disconnects, which for a long-lived connection means it is never collected and the
   // connection is never closed by GC.
+  IoContext::AwaitIoOperation traceOperation(context, "socket_disconnect"_kj);
   context.awaitIo(js, kj::mv(disconnected))
       .then(js, [self = JSG_THIS_WEAK(js)](jsg::Lock& js, bool canceled) mutable {
     // Silently ignore the canceled case (the Socket was GC'd before disconnect) without resolving
@@ -1167,7 +1186,7 @@ void Socket::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
   // Serialize the socket metadata, referencing the stream externals
   // The call to write is synchronous, so capturing this is safe.
   externalHandler->write(
-      [this, remoteAddr = kj::str(remoteAddress), localAddr = mapCopyString(localAddress),
+      [this, remoteAddr = kj::str(remoteAddress), localAddr = localAddress.clone(),
           transport = toRpcSecureTransport(secureTransport),
           allowHalfOpen = getAllowHalfOpen(options)](
           rpc::JsValue::External::Builder builder) mutable {
@@ -1300,7 +1319,7 @@ jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
   openedPrPair.resolver.resolve(js,
       SocketInfo{
         .remoteAddress = kj::str(remoteAddr),
-        .localAddress = mapCopyString(localAddr),
+        .localAddress = localAddr.clone(),
       });
 
   // Set up disconnection detection now. This part is pure kj and safe under the deserialize scope;
@@ -1345,7 +1364,8 @@ jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
   js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate,
       js.wrapSimpleFunction(js.v8Context(),
           JSG_VISITABLE_LAMBDA((self = socket.addRef(), disconnected = kj::mv(disconnectedOwn)),
-              (self), (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& args) mutable {
+              (self),
+              (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& args) mutable {
                 if (!IoContext::hasCurrent()) return;
                 JSG_TRY(js) {
                 self.get()->wireClosedToDisconnect(js, kj::mv(*disconnected));
@@ -1353,7 +1373,8 @@ jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
                 JSG_CATCH(exception) {
                 js.reportError(jsg::JsValue(exception.getHandle(js)));
                 }
-              })));
+              }),
+          jsg::Once::YES));
   KJ_IF_SOME(p, eofPromise) {
     js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate,
         js.wrapSimpleFunction(js.v8Context(),
@@ -1366,7 +1387,8 @@ jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
                   JSG_CATCH(exception) {
                   js.reportError(jsg::JsValue(exception.getHandle(js)));
                   }
-                })));
+                }),
+            jsg::Once::YES));
   }
 
   // `opened` was resolved synchronously above, so the transferred socket is immediately in the
@@ -1573,7 +1595,7 @@ class NeuterableDatagramChannelImpl final: public NeuterableDatagramChannel {
         return *channel;
       }
       KJ_CASE_ONEOF(exception, kj::Exception) {
-        kj::throwFatalException(exception.clone());
+        kj::throwException(exception.clone());
       }
     }
     KJ_UNREACHABLE;

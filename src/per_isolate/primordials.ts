@@ -285,8 +285,8 @@ const JSONStringify = JSON.stringify;
 
 // Helper: capture a spec-mandated prototype accessor getter, with a
 // validation guard instead of non-null assertions. These accessors are
-// guaranteed by the ECMAScript spec — the guard is a diagnostic safety
-// net, not a recoverable branch.
+// guaranteed by the ECMAScript spec or by the bootstrap's own classes — the
+// guard is a diagnostic safety net, not a recoverable branch.
 function getProtoGetter<T>(proto: object, name: string | symbol): T {
   const desc = ObjectGetOwnPropertyDescriptor(proto, name);
   if (desc === undefined || desc.get === undefined) {
@@ -667,6 +667,7 @@ module.exports = ObjectFreeze({
   // Helpers — exported so other scripts can capture ad-hoc
   uncurryThis,
   applyBind,
+  getProtoGetter,
 
   // Global types
   AbortController: AbortControllerCtor,

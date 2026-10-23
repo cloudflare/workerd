@@ -1,3 +1,8 @@
+#![allow(
+    unsafe_code,
+    reason = "owns C++ promise nodes and pin-projects the awaiter that drives them"
+)]
+
 use std::ffi::c_void;
 use std::future::Future;
 use std::marker::PhantomData;

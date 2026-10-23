@@ -46,12 +46,21 @@ impl InheritedSocket {
         Ok(())
     }
 
-    /// A duplicate for the server to own (kj's `wrapListenSocketFd` with `TAKE_OWNERSHIP`), as
-    /// the raw descriptor that interface takes.
-    pub fn duplicate_for_server(&self) -> io::Result<i64> {
-        use std::os::fd::IntoRawFd;
-        Ok(i64::from(self.0.try_clone()?.into_raw_fd()))
+    /// A duplicate for the server to own.
+    pub fn duplicate_for_server(&self) -> io::Result<socket2::Socket> {
+        Ok(socket2::Socket::from(self.0.try_clone()?))
     }
+}
+
+/// `--control-fd`: a duplicate of the descriptor, as a file the server writes its events to. The
+/// inherited descriptor stays open, as `--socket-fd`'s does.
+pub fn control_file(fd: u32) -> io::Result<std::fs::File> {
+    use std::os::fd::BorrowedFd;
+
+    let raw = i32::try_from(fd).map_err(|_| io::Error::from_raw_os_error(libc::EBADF))?;
+    // SAFETY: borrowed for the duplication only, which fails with EBADF if `raw` is not open.
+    let inherited = unsafe { BorrowedFd::borrow_raw(raw) };
+    inherited.try_clone_to_owned().map(std::fs::File::from)
 }
 
 /// Whether the socket is listening, or `None` where the OS cannot say (macOS has no
@@ -71,45 +80,5 @@ fn is_listener(_socket: &socket2::SockRef<'_>) -> io::Result<Option<bool>> {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::net::TcpListener;
-    use std::os::fd::IntoRawFd;
-
-    use super::*;
-
-    #[test]
-    fn listening_socket_is_taken_and_duplicated() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let fd = listener.into_raw_fd().cast_unsigned();
-        let socket = InheritedSocket::take(fd).unwrap();
-        let duplicate = socket.duplicate_for_server().unwrap();
-        assert_ne!(i64::from(fd), duplicate);
-        // Both name the same listening socket.
-        let bound = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
-        drop(bound);
-        drop(socket);
-    }
-
-    #[cfg(any(target_os = "linux", target_os = "android", target_os = "freebsd"))]
-    #[test]
-    fn connected_socket_is_not_listening() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let stream = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-        let fd = stream.into_raw_fd().cast_unsigned();
-        assert!(matches!(
-            InheritedSocket::take(fd),
-            Err(Error::NotListening)
-        ));
-    }
-
-    #[test]
-    fn regular_file_is_not_a_socket() {
-        // `take()` owns the descriptor from here on and closes it on this error.
-        let fd = std::fs::File::open("/dev/null").unwrap().into_raw_fd();
-        assert!(matches!(
-            InheritedSocket::take(fd.cast_unsigned()),
-            Err(Error::NotSocket)
-        ));
-    }
-}
+#[path = "unix-test.rs"]
+mod tests;

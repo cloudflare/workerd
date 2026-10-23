@@ -7,11 +7,13 @@ load("//:build/wd_test.bzl", "wd_test")
 encoding_suite_srcs = glob(["*.js"]) + ["encoding-modules.capnp"]
 
 wd_test(
+    size = "large",
     src = "encoding-cpp.wd-test",
     data = encoding_suite_srcs,
 )
 
 wd_test(
+    size = "large",
     src = "encoding-ts.wd-test",
     args = ["--experimental"],
     data = encoding_suite_srcs,
@@ -20,6 +22,7 @@ wd_test(
 # The main C++ cell plus the dateless opt-in pedantic_wpt flag, pinning the
 # spec-aligned sides of pedantic-gated behaviors.
 wd_test(
+    size = "large",
     src = "encoding-cpp-pedantic.wd-test",
     data = encoding_suite_srcs,
 )
@@ -28,18 +31,21 @@ wd_test(
 # flag window. The @all-compat-flags variant is disabled: at the 2999-12-31
 # date the flags each cell deliberately omits would all turn on.
 wd_test(
+    size = "large",
     src = "encoding-cpp-legacy.wd-test",
     data = encoding_suite_srcs,
     generate_all_compat_flags_variant = False,
 )
 
 wd_test(
+    size = "large",
     src = "encoding-cpp-legacy-bp.wd-test",
     data = encoding_suite_srcs,
     generate_all_compat_flags_variant = False,
 )
 
 wd_test(
+    size = "large",
     src = "encoding-cpp-legacy-hwm.wd-test",
     data = encoding_suite_srcs,
     generate_all_compat_flags_variant = False,

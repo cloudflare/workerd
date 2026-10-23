@@ -28,6 +28,7 @@
 #include <workerd/api/queue.h>
 #include <workerd/api/r2.h>
 #include <workerd/api/scheduled.h>
+#include <workerd/api/snapshot.h>
 #include <workerd/api/sockets.h>
 #include <workerd/api/sql.h>
 #include <workerd/api/streams.h>
@@ -66,6 +67,7 @@
   F("hyperdrive", EW_HYPERDRIVE_ISOLATE_TYPES)                                                     \
   F("unsafe", EW_UNSAFE_ISOLATE_TYPES)                                                             \
   F("memory-cache", EW_MEMORY_CACHE_ISOLATE_TYPES)                                                 \
+  F("snapshot", EW_SNAPSHOT_ISOLATE_TYPES)                                                         \
   F("pyodide", EW_PYODIDE_ISOLATE_TYPES)                                                           \
   F("kv", EW_KV_ISOLATE_TYPES)                                                                     \
   F("queue", EW_QUEUE_ISOLATE_TYPES)                                                               \
@@ -163,6 +165,14 @@ struct EncoderModuleRegistryImpl {
   kj::Vector<ModuleInfo> modules;
 };
 
+// typescript_implemented_streams replaces the C++ Web Streams globals with TypeScript
+// implementations installed by the per-isolate bootstrap, which RTTI cannot see. The two expose
+// the same API, so types are always generated from the C++ classes; with the flag on, the global
+// scope would omit them and the declarations would lose their constructors.
+void clearImplementationOnlyFlags(CompatibilityFlags::Builder flags) {
+  flags.setTypeScriptImplementedStreams(false);
+}
+
 CompatibilityFlags::Reader compileFlags(capnp::MessageBuilder &message,
     kj::StringPtr compatDate,
     bool experimental,
@@ -186,6 +196,7 @@ CompatibilityFlags::Reader compileFlags(capnp::MessageBuilder &message,
     JSG_FAIL_REQUIRE(Error, errorReporter.errors[0]);
   }
 
+  clearImplementationOnlyFlags(output);
   auto reader = output.asReader();
   return kj::mv(reader);
 }
@@ -210,6 +221,7 @@ CompatibilityFlags::Reader compileAllFlags(capnp::MessageBuilder &message) {
 
     dynamicOutput.set(field, !isNode);
   }
+  clearImplementationOnlyFlags(output);
   auto reader = output.asReader();
   return kj::mv(reader);
 }

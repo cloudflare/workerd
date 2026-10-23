@@ -39,6 +39,7 @@ pub type Error = std::io::Error;
 pub trait JsgStruct {}
 
 #[cxx::bridge(namespace = "kj_rs")]
+#[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
 mod ffi {
 
     /// Representation of a `GuardedRustPromiseAwaiter` in C++. The size of the blob should match.

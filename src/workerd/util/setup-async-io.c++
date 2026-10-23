@@ -15,16 +15,15 @@
 // subclassing; its method *definitions* live in async-unix.c++, which is absent from this link.
 // So we define an inert kj::UnixEventPort here (its ctor/dtor + the EventPort/SleepHooks virtuals)
 // with no ODR competitor, construct one, and bind the reference to it. It is never driven -- the
-// event loop runs on kj_rs_tokio::TokioEventPort; signals use kj_rs_io::onSignal() -- and nothing
-// in workerd reads AsyncIoContext::unixEventPort. Its methods KJ_UNIMPLEMENTED as a backstop: if
+// event loop runs on kj_rs_tokio::TokioEventPort -- and nothing in workerd reads
+// AsyncIoContext::unixEventPort. Its methods KJ_UNIMPLEMENTED as a backstop: if
 // anything ever does drive it, the link/run fails loudly rather than silently.
 //
 // If kj-async-os is ever accidentally linked in, this TU's definitions collide with the native
 // ones, and with static archives the winner is LINK-ORDER-DEPENDENT -- a duplicate-symbol error if
 // you are lucky, the native setupAsyncIo silently winning (wrong event loop) or pairing with this
-// inert UnixEventPort (KJ_UNIMPLEMENTED at runtime) if you are not. The guards against that are
-// build/rust_io_graph_check.sh (the dependency graph) and //src/workerd/server:rust-io-link-check
-// (the linked binary's symbols).
+// inert UnixEventPort (KJ_UNIMPLEMENTED at runtime) if you are not. The guard against that is
+// build/rust_io_graph_check.sh (based on bazel aquery).
 
 #include <kj-rs-io/async-io.h>
 

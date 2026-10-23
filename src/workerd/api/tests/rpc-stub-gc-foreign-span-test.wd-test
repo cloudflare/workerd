@@ -1,0 +1,34 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "rpc-stub-gc-foreign-span-test",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "rpc-stub-gc-foreign-span-test.js" )
+        ],
+        bindings = [
+          ( name = "SELF", service = "rpc-stub-gc-foreign-span-test" ),
+        ],
+        # The test calls an AsyncLocalStorage snapshot from a different request to put that
+        # request's async context frame in place. Newer compat dates forbid this, but workers on
+        # older ones can still do it, so pin the old behavior for the @all-compat-flags variant.
+        compatibilityFlags = [
+          "nodejs_compat",
+          "rpc",
+          "do_not_bind_asynclocalstorage_snapshot_to-request",
+        ],
+        streamingTails = ["tail"],
+      ),
+    ),
+    ( name = "tail",
+      worker = (
+        modules = [
+          ( name = "worker", esModule = embed "rpc-stub-gc-foreign-span-tail.js" )
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+      ),
+    ),
+  ],
+  v8Flags = [ "--expose-gc" ],
+);

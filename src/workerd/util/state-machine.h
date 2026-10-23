@@ -1934,7 +1934,7 @@ class StateMachine {
 //
 //   // Error checking
 //   KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
-//     kj::throwFatalException(kj::cp(exception));
+//     kj::throwException(kj::cp(exception));
 //   }
 //
 // Example 2: Terminal State Enforcement
@@ -1963,12 +1963,12 @@ class StateMachine {
 //
 //   // Old pattern (verbose):
 //   KJ_IF_SOME(err, state.tryGetUnsafe<kj::Exception>()) {
-//     kj::throwFatalException(kj::cp(err));
+//     kj::throwException(kj::cp(err));
 //   }
 //
 //   // New pattern (cleaner):
 //   KJ_IF_SOME(err, state.tryGetErrorUnsafe()) {
-//     kj::throwFatalException(kj::cp(err));
+//     kj::throwException(kj::cp(err));
 //   }
 //
 //   // Or check first:
@@ -2143,7 +2143,7 @@ class StateMachine {
 // -----------------------
 //   KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
 //     output.abort(kj::cp(exception));
-//     kj::throwFatalException(kj::cp(exception));
+//     kj::throwException(kj::cp(exception));
 //   }
 //
 // Simple state checks:

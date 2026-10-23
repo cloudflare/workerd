@@ -22,8 +22,8 @@
 //    setRunnable(true) on the first arm during it, and the port is the kj::TimerImpl's SleepHooks
 //    for the duration of the park (updateNextTimerEvent() on a changed earliest deadline;
 //    kj::Timer::now() reads the live clock). Either report ends the park. The one thing a task
-//    must never do is re-enter `promise.wait()` / `waitScope.poll()` on this thread: that nests
-//    block_on inside block_on, which tokio rejects (the panic surfaces as a kj::Exception).
+//    must never do is re-enter `promise.wait()` / `waitScope.poll()` on this thread: the loop is
+//    already inside a wait(), and KJ refuses the nested one with a kj::Exception.
 //
 // Object relationships (one loop thread):
 //
@@ -56,7 +56,7 @@
 // tasks FIRST (they may own KJ promises whose destructors need the loop and timer), then destroys
 // the loop (asserting its queue is empty), the runtime, and finally the timer.
 
-#include "kj-rs-tokio/ffi.rs.h"
+#include <rust/cxx.h>
 
 #include <kj/async.h>
 #include <kj/exception.h>
@@ -64,6 +64,11 @@
 #include <kj/timer.h>
 
 namespace kj_rs_tokio {
+
+// Rust types (port.rs, runtime.rs), defined by the generated bridge header. That header includes
+// this one, so they are only declared here.
+struct TokioPort;
+struct BlockOnTask;
 
 class TokioEventPort final: public kj::EventPort, private kj::TimerImpl::SleepHooks {
  public:
@@ -147,9 +152,9 @@ class TokioEventPort final: public kj::EventPort, private kj::TimerImpl::SleepHo
 // the port (loop, runtime, timer -- see TokioEventPort). Bridged Rust futures that C++ co_awaits
 // are separate: they are cancelled through KJ promise destruction and never outlive the loop.
 struct TokioAsyncIoContext {
-  TokioAsyncIoContext(kj::Own<TokioEventPort> port, kj::Own<kj::WaitScope> waitScope)
-      : port(kj::mv(port)),
-        waitScope(kj::mv(waitScope)) {}
+  TokioAsyncIoContext()
+      : port(kj::heap<TokioEventPort>()),
+        waitScope(kj::heap<kj::WaitScope>(port->getLoop())) {}
   ~TokioAsyncIoContext() noexcept(false);
   KJ_DISALLOW_COPY_AND_MOVE(TokioAsyncIoContext);
 
@@ -168,8 +173,15 @@ struct TokioAsyncIoContext {
   kj::Timer &getTimer() {
     return port->getTimer();
   }
+
+  // For `kj_rs_tokio::Runtime::block_on` (runtime.rs): blocks in promise.wait() on the WaitScope
+  // until the task block_on spawned on the LocalSet has ended (`task` awaits it).
+  void blockOn(::rust::Box<BlockOnTask> task);
 };
 
 TokioAsyncIoContext setupTokioAsyncIo();
+
+// The same on the heap, for the Rust `kj_rs_tokio::Runtime` to own.
+kj::Own<TokioAsyncIoContext> newTokioAsyncIoContext();
 
 }  // namespace kj_rs_tokio

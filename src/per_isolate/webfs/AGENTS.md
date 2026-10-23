@@ -37,7 +37,7 @@ nothing to replace.
 `writable-file-stream.ts` owns only the stream wiring. The file semantics are a
 native `FileSystemWriteContextHandle` (`src/workerd/api/filesystem.h`), reached
 through `utils.createFileSystemWriteContext(fileHandle, keepExistingData)`,
-registered in `src/workerd/io/per-isolate-bootstrap.c++` via the deliberately
+registered in `src/workerd/api/per-isolate-bootstrap.c++` via the deliberately
 filesystem-free declaration in `src/workerd/api/filesystem-bootstrap.h`.
 
 The same context backs both implementations, so the file semantics are not

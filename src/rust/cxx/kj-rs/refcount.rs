@@ -1,5 +1,10 @@
 //! Module for both [`KjRc`] and [`KjArc`], since they're nearly identical types
 
+#![allow(
+    unsafe_code,
+    reason = "`KjRc` and `KjArc` mirror `kj::Rc<T>` and `kj::Arc<T>`"
+)]
+
 use static_assertions::assert_eq_align;
 use static_assertions::assert_eq_size;
 
@@ -16,25 +21,30 @@ pub mod repr {
     use crate::own::NonNullExceptMaybe;
 
     /// Bindings to the kj type `kj::Rc`. Represents an owned and reference counted type,
-    /// like Rust's [`std::rc::Rc`]. The pointee does not need to inherit `kj::Refcounted`.
+    /// like Rust's [`std::rc::Rc`].
+    ///
+    /// The pointee does not need to inherit `kj::Refcounted`.
+    /// Only ordinary object targets are supported; KJ pointer types are stored inline instead.
     ///
     /// `ptr` is never null in a bare `KjRc<T>`; it is only null as the niche `None`
     /// representation inside a `KjMaybe<KjRc<T>>`, mirroring `kj::MaybeTraits<kj::Rc<T>>`.
     #[repr(C)]
     pub struct KjRc<T> {
-        refcounted: *mut c_void,
         pub(crate) ptr: NonNullExceptMaybe<T>,
+        refcounted: *mut c_void,
     }
 
-    /// Bindings to the kj type `kj::Arc`. Represents and owned and atomically reference
+    /// Bindings to the kj type `kj::Arc`. Represents an owned and atomically reference
     /// counted type, like Rust's [`std::sync::Arc`].
+    ///
+    /// Only ordinary object targets are supported; KJ pointer types are stored inline instead.
     ///
     /// `ptr` is never null in a bare `KjArc<T>`; it is only null as the niche `None`
     /// representation inside a `KjMaybe<KjArc<T>>`, mirroring `kj::MaybeTraits<kj::Arc<T>>`.
     #[repr(C)]
     pub struct KjArc<T> {
-        refcounted: *const c_void,
         pub(crate) ptr: NonNullExceptMaybe<T>,
+        refcounted: *const c_void,
     }
 
     // Safety: the KJ bridge representation and ownership invariants satisfy this operation.

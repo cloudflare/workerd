@@ -9,7 +9,6 @@ use std::cell::Cell;
 use std::cell::RefCell;
 
 use jsg::Number;
-use jsg::ToJS;
 use jsg_macros::jsg_inspect_property;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_property;
@@ -217,7 +216,7 @@ fn prototype_getter_returns_initial_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(42.0, "x"));
-        ctx.set_global("c", r.to_js(lock));
+        ctx.set_global(lock, "c", r);
         let v: Number = ctx.eval(lock, "c.value").unwrap();
         assert!((v.value() - 42.0).abs() < f64::EPSILON);
         Ok(())
@@ -230,7 +229,7 @@ fn prototype_getter_reflects_rust_side_mutation() {
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(1.0, "x"));
         let r2 = r.clone();
-        ctx.set_global("c", r.to_js(lock));
+        ctx.set_global(lock, "c", r);
         r2.value.set(99.0);
         let v: Number = ctx.eval(lock, "c.value").unwrap();
         assert!((v.value() - 99.0).abs() < f64::EPSILON);
@@ -243,7 +242,7 @@ fn prototype_getter_returns_string_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(0.0, "hello"));
-        ctx.set_global("c", r.to_js(lock));
+        ctx.set_global(lock, "c", r);
         let v: String = ctx.eval(lock, "c.label").unwrap();
         assert_eq!(v, "hello");
         Ok(())
@@ -259,8 +258,8 @@ fn prototype_setter_updates_value_visible_via_getter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(0.0, "x"));
-        ctx.set_global("c", r.to_js(lock));
-        ctx.eval_raw("c.value = 77").unwrap();
+        ctx.set_global(lock, "c", r);
+        ctx.eval_raw(lock, "c.value = 77").unwrap();
         let v: Number = ctx.eval(lock, "c.value").unwrap();
         assert!((v.value() - 77.0).abs() < f64::EPSILON);
         Ok(())
@@ -273,8 +272,8 @@ fn prototype_setter_mutation_visible_from_rust() {
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(0.0, "x"));
         let r2 = r.clone();
-        ctx.set_global("c", r.to_js(lock));
-        ctx.eval_raw("c.value = 55").unwrap();
+        ctx.set_global(lock, "c", r);
+        ctx.eval_raw(lock, "c.value = 55").unwrap();
         assert!((r2.value.get() - 55.0).abs() < f64::EPSILON);
         Ok(())
     });
@@ -285,8 +284,8 @@ fn prototype_setter_called_multiple_times() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(0.0, "x"));
-        ctx.set_global("c", r.to_js(lock));
-        ctx.eval_raw("c.value = 1; c.value = 2; c.value = 3")
+        ctx.set_global(lock, "c", r);
+        ctx.eval_raw(lock, "c.value = 1; c.value = 2; c.value = 3")
             .unwrap();
         let v: Number = ctx.eval(lock, "c.value").unwrap();
         assert!((v.value() - 3.0).abs() < f64::EPSILON);
@@ -303,8 +302,8 @@ fn prototype_readonly_property_throws_in_strict_mode() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(1.0, "lbl"));
-        ctx.set_global("c", r.to_js(lock));
-        let result = ctx.eval_raw("'use strict'; c.label = 'changed'");
+        ctx.set_global(lock, "c", r);
+        let result = ctx.eval_raw(lock, "'use strict'; c.label = 'changed'");
         assert!(
             result.is_err(),
             "expected TypeError assigning to read-only prototype property"
@@ -318,9 +317,9 @@ fn prototype_readonly_property_silently_ignored_in_sloppy_mode() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(1.0, "original"));
-        ctx.set_global("c", r.to_js(lock));
+        ctx.set_global(lock, "c", r);
         // In sloppy mode, the assignment is silently ignored; value unchanged.
-        ctx.eval_raw("c.label = 'changed'").unwrap();
+        ctx.eval_raw(lock, "c.label = 'changed'").unwrap();
         let v: String = ctx.eval(lock, "c.label").unwrap();
         assert_eq!(v, "original");
         Ok(())
@@ -336,7 +335,7 @@ fn prototype_property_not_in_object_keys() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(1.0, "x"));
-        ctx.set_global("c", r.to_js(lock));
+        ctx.set_global(lock, "c", r);
         let keys: String = ctx.eval(lock, "Object.keys(c).join(',')").unwrap();
         assert_eq!(
             keys, "",
@@ -351,7 +350,7 @@ fn prototype_property_found_by_in_operator() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(1.0, "x"));
-        ctx.set_global("c", r.to_js(lock));
+        ctx.set_global(lock, "c", r);
         let found: bool = ctx.eval(lock, "'value' in c").unwrap();
         assert!(found, "'in' must find prototype properties");
         Ok(())
@@ -363,7 +362,7 @@ fn prototype_property_not_an_own_property() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(1.0, "x"));
-        ctx.set_global("c", r.to_js(lock));
+        ctx.set_global(lock, "c", r);
         let own: bool = ctx
             .eval(lock, "Object.prototype.hasOwnProperty.call(c, 'value')")
             .unwrap();
@@ -384,7 +383,7 @@ fn prototype_property_is_enumerable() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(1.0, "x"));
-        ctx.set_global("c", r.to_js(lock));
+        ctx.set_global(lock, "c", r);
         // value is a read/write prototype property.
         let enumerable: bool = ctx
             .eval(
@@ -407,7 +406,7 @@ fn prototype_readonly_property_is_enumerable() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(1.0, "x"));
-        ctx.set_global("c", r.to_js(lock));
+        ctx.set_global(lock, "c", r);
         // label is a read-only prototype property.
         let enumerable: bool = ctx
             .eval(
@@ -429,7 +428,7 @@ fn prototype_property_appears_in_for_in() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(1.0, "x"));
-        ctx.set_global("c", r.to_js(lock));
+        ctx.set_global(lock, "c", r);
         let found: bool = ctx
             .eval(
                 lock,
@@ -451,13 +450,13 @@ fn prototype_property_independent_across_instances() {
     harness.run_in_context(|lock, ctx| {
         let a = jsg::Rc::new(Counter::new(10.0, "a"));
         let b = jsg::Rc::new(Counter::new(20.0, "b"));
-        ctx.set_global("a", a.to_js(lock));
-        ctx.set_global("b", b.to_js(lock));
+        ctx.set_global(lock, "a", a);
+        ctx.set_global(lock, "b", b);
         let va: Number = ctx.eval(lock, "a.value").unwrap();
         let vb: Number = ctx.eval(lock, "b.value").unwrap();
         assert!((va.value() - 10.0).abs() < f64::EPSILON);
         assert!((vb.value() - 20.0).abs() < f64::EPSILON);
-        ctx.eval_raw("a.value = 99").unwrap();
+        ctx.eval_raw(lock, "a.value = 99").unwrap();
         let va2: Number = ctx.eval(lock, "a.value").unwrap();
         let vb2: Number = ctx.eval(lock, "b.value").unwrap();
         assert!((va2.value() - 99.0).abs() < f64::EPSILON);
@@ -478,9 +477,9 @@ fn prototype_property_coexists_with_method() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(5.0, "x"));
-        ctx.set_global("c", r.to_js(lock));
-        ctx.eval_raw("c.value = 7").unwrap();
-        ctx.eval_raw("c.reset()").unwrap();
+        ctx.set_global(lock, "c", r);
+        ctx.eval_raw(lock, "c.value = 7").unwrap();
+        ctx.eval_raw(lock, "c.reset()").unwrap();
         let v: Number = ctx.eval(lock, "c.value").unwrap();
         assert!(
             (v.value()).abs() < f64::EPSILON,
@@ -495,9 +494,9 @@ fn prototype_property_coexists_with_static_constant() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let constructor = jsg::resource::function_template_of::<Counter>(lock);
-        ctx.set_global("Counter", constructor.into());
+        ctx.set_global(lock, "Counter", constructor);
         let r = jsg::Rc::new(Counter::new(1.0, "x"));
-        ctx.set_global("c", r.to_js(lock));
+        ctx.set_global(lock, "c", r);
 
         let v: Number = ctx.eval(lock, "c.value").unwrap();
         assert!((v.value() - 1.0).abs() < f64::EPSILON);
@@ -517,7 +516,7 @@ fn prototype_property_multi_word_camel_case() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(MultiWord::new("Alice", "Smith"));
-        ctx.set_global("p", r.to_js(lock));
+        ctx.set_global(lock, "p", r);
         let first: String = ctx.eval(lock, "p.firstName").unwrap();
         let last: String = ctx.eval(lock, "p.lastName").unwrap();
         assert_eq!(first, "Alice");
@@ -531,8 +530,8 @@ fn prototype_property_multi_word_setter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(MultiWord::new("Alice", "Smith"));
-        ctx.set_global("p", r.to_js(lock));
-        ctx.eval_raw("p.firstName = 'Bob'").unwrap();
+        ctx.set_global(lock, "p", r);
+        ctx.eval_raw(lock, "p.firstName = 'Bob'").unwrap();
         let first: String = ctx.eval(lock, "p.firstName").unwrap();
         assert_eq!(first, "Bob");
         Ok(())
@@ -544,7 +543,7 @@ fn prototype_property_original_rust_name_not_exposed() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(MultiWord::new("Alice", "Smith"));
-        ctx.set_global("p", r.to_js(lock));
+        ctx.set_global(lock, "p", r);
         // The raw Rust names (get_first_name, set_first_name) must not be visible.
         let undef: bool = ctx
             .eval(lock, "typeof p.getFirstName === 'undefined'")
@@ -567,7 +566,7 @@ fn explicit_name_override_getter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(ExplicitName::new(42.0));
-        ctx.set_global("obj", r.to_js(lock));
+        ctx.set_global(lock, "obj", r);
         let v: Number = ctx.eval(lock, "obj.myValue").unwrap();
         assert!((v.value() - 42.0).abs() < f64::EPSILON);
         Ok(())
@@ -579,8 +578,8 @@ fn explicit_name_override_setter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(ExplicitName::new(0.0));
-        ctx.set_global("obj", r.to_js(lock));
-        ctx.eval_raw("obj.myValue = 7").unwrap();
+        ctx.set_global(lock, "obj", r);
+        ctx.eval_raw(lock, "obj.myValue = 7").unwrap();
         let v: Number = ctx.eval(lock, "obj.myValue").unwrap();
         assert!((v.value() - 7.0).abs() < f64::EPSILON);
         Ok(())
@@ -592,7 +591,7 @@ fn explicit_name_original_rust_name_not_exposed() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(ExplicitName::new(0.0));
-        ctx.set_global("obj", r.to_js(lock));
+        ctx.set_global(lock, "obj", r);
         let undef: bool = ctx
             .eval(lock, "typeof obj.getSomething === 'undefined'")
             .unwrap();
@@ -610,7 +609,7 @@ fn prototype_option_property_returns_value_when_some() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(MaybeHolder::with_value(std::f64::consts::PI));
-        ctx.set_global("h", r.to_js(lock));
+        ctx.set_global(lock, "h", r);
         let v: Number = ctx.eval(lock, "h.value").unwrap();
         assert!((v.value() - std::f64::consts::PI).abs() < 1e-10);
         Ok(())
@@ -622,7 +621,7 @@ fn prototype_option_property_returns_undefined_when_none() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(MaybeHolder::empty());
-        ctx.set_global("h", r.to_js(lock));
+        ctx.set_global(lock, "h", r);
         // Option<T>::None maps to `undefined` via jsg::ToJS (same as a missing value).
         let is_nullish: bool = ctx.eval(lock, "h.value == null").unwrap();
         assert!(
@@ -638,8 +637,8 @@ fn prototype_option_property_setter_makes_it_some() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(MaybeHolder::empty());
-        ctx.set_global("h", r.to_js(lock));
-        ctx.eval_raw("h.value = 2.5").unwrap();
+        ctx.set_global(lock, "h", r);
+        ctx.eval_raw(lock, "h.value = 2.5").unwrap();
         let v: Number = ctx.eval(lock, "h.value").unwrap();
         assert!((v.value() - 2.5).abs() < f64::EPSILON);
         Ok(())
@@ -655,7 +654,7 @@ fn instance_getter_returns_initial_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Token::new("tok-123", "bearer"));
-        ctx.set_global("t", r.to_js(lock));
+        ctx.set_global(lock, "t", r);
         let id: String = ctx.eval(lock, "t.id").unwrap();
         assert_eq!(id, "tok-123");
         Ok(())
@@ -667,7 +666,7 @@ fn instance_readonly_getter_returns_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Token::new("abc", "jwt"));
-        ctx.set_global("t", r.to_js(lock));
+        ctx.set_global(lock, "t", r);
         let kind: String = ctx.eval(lock, "t.kind").unwrap();
         assert_eq!(kind, "jwt");
         Ok(())
@@ -683,8 +682,8 @@ fn instance_setter_updates_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Token::new("old", "bearer"));
-        ctx.set_global("t", r.to_js(lock));
-        ctx.eval_raw("t.id = 'new-id'").unwrap();
+        ctx.set_global(lock, "t", r);
+        ctx.eval_raw(lock, "t.id = 'new-id'").unwrap();
         let id: String = ctx.eval(lock, "t.id").unwrap();
         assert_eq!(id, "new-id");
         Ok(())
@@ -697,8 +696,8 @@ fn instance_setter_visible_from_rust() {
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Token::new("orig", "bearer"));
         let r2 = r.clone();
-        ctx.set_global("t", r.to_js(lock));
-        ctx.eval_raw("t.id = 'updated'").unwrap();
+        ctx.set_global(lock, "t", r);
+        ctx.eval_raw(lock, "t.id = 'updated'").unwrap();
         assert_eq!(*r2.id.borrow(), "updated");
         Ok(())
     });
@@ -713,7 +712,7 @@ fn instance_property_is_own_property() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Token::new("tok", "bearer"));
-        ctx.set_global("t", r.to_js(lock));
+        ctx.set_global(lock, "t", r);
         let own: bool = ctx
             .eval(lock, "Object.prototype.hasOwnProperty.call(t, 'id')")
             .unwrap();
@@ -723,32 +722,39 @@ fn instance_property_is_own_property() {
 }
 
 #[test]
-fn instance_property_has_accessor_descriptor() {
+fn instance_property_has_data_descriptor() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Token::new("tok", "bearer"));
-        ctx.set_global("t", r.to_js(lock));
-        // An accessor descriptor has `get`/`set` keys, not `value`/`writable`.
-        let has_get: bool = ctx
+        ctx.set_global(lock, "t", r);
+        // Like C++ JSG_INSTANCE_PROPERTY, a native data property: `value` and
+        // `writable`, no `get`/`set`.
+        let desc: String = ctx
             .eval(
                 lock,
-                "typeof Object.getOwnPropertyDescriptor(t, 'id').get === 'function'",
+                "const d = (k) => Object.getOwnPropertyDescriptor(t, k); \
+                 [d('id'), d('kind')].map(x => \
+                   [typeof x.get, typeof x.set, x.value, x.writable].join()).join(';')",
             )
             .unwrap();
-        let has_set: bool = ctx
-            .eval(
-                lock,
-                "typeof Object.getOwnPropertyDescriptor(t, 'id').set === 'function'",
-            )
-            .unwrap();
-        assert!(
-            has_get,
-            "instance property must have a getter in its descriptor"
+        assert_eq!(
+            desc,
+            "undefined,undefined,tok,true;undefined,undefined,bearer,false"
         );
-        assert!(
-            has_set,
-            "read-write instance property must have a setter in its descriptor"
-        );
+        Ok(())
+    });
+}
+
+#[test]
+fn instance_property_key_order() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let r = jsg::Rc::new(Token::new("tok", "bearer"));
+        ctx.set_global(lock, "t", r);
+        // Native data properties enumerate in reverse declaration order, as
+        // C++ JSG_INSTANCE_PROPERTY does.
+        let keys: String = ctx.eval(lock, "Object.keys(t).join()").unwrap();
+        assert_eq!(keys, "kind,id");
         Ok(())
     });
 }
@@ -758,7 +764,7 @@ fn instance_readonly_property_has_no_setter_in_descriptor() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Token::new("tok", "bearer"));
-        ctx.set_global("t", r.to_js(lock));
+        ctx.set_global(lock, "t", r);
         let set_undef: bool = ctx
             .eval(
                 lock,
@@ -775,8 +781,8 @@ fn instance_readonly_property_throws_in_strict_mode() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Token::new("tok", "bearer"));
-        ctx.set_global("t", r.to_js(lock));
-        let result = ctx.eval_raw("'use strict'; t.kind = 'other'");
+        ctx.set_global(lock, "t", r);
+        let result = ctx.eval_raw(lock, "'use strict'; t.kind = 'other'");
         assert!(
             result.is_err(),
             "expected error assigning to read-only instance property"
@@ -791,9 +797,9 @@ fn instance_property_independent_across_instances() {
     harness.run_in_context(|lock, ctx| {
         let a = jsg::Rc::new(Token::new("id-a", "bearer"));
         let b = jsg::Rc::new(Token::new("id-b", "bearer"));
-        ctx.set_global("a", a.to_js(lock));
-        ctx.set_global("b", b.to_js(lock));
-        ctx.eval_raw("a.id = 'changed-a'").unwrap();
+        ctx.set_global(lock, "a", a);
+        ctx.set_global(lock, "b", b);
+        ctx.eval_raw(lock, "a.id = 'changed-a'").unwrap();
         let id_a: String = ctx.eval(lock, "a.id").unwrap();
         let id_b: String = ctx.eval(lock, "b.id").unwrap();
         assert_eq!(id_a, "changed-a");
@@ -811,7 +817,7 @@ fn inspect_property_not_accessible_by_string_key() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(3.0, "dbg"));
-        ctx.set_global("c", r.to_js(lock));
+        ctx.set_global(lock, "c", r);
         let undef: bool = ctx
             .eval(lock, "typeof c.debugInfo === 'undefined'")
             .unwrap();
@@ -828,7 +834,7 @@ fn inspect_property_not_in_object_keys() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(3.0, "dbg"));
-        ctx.set_global("c", r.to_js(lock));
+        ctx.set_global(lock, "c", r);
         let keys: String = ctx.eval(lock, "Object.keys(c).join(',')").unwrap();
         assert!(
             !keys.contains("debugInfo"),
@@ -843,7 +849,7 @@ fn inspect_property_not_in_own_string_names() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(3.0, "dbg"));
-        ctx.set_global("c", r.to_js(lock));
+        ctx.set_global(lock, "c", r);
         let names: String = ctx
             .eval(lock, "Object.getOwnPropertyNames(c).join(',')")
             .unwrap();
@@ -860,7 +866,7 @@ fn inspect_property_registered_under_a_symbol() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(3.0, "dbg"));
-        ctx.set_global("c", r.to_js(lock));
+        ctx.set_global(lock, "c", r);
         // The property is registered under a v8::Symbol; at least one symbol must exist on
         // the prototype chain that has an accessor descriptor.
         let has_symbol_accessor: bool = ctx
@@ -892,7 +898,7 @@ fn inspect_property_getter_returns_correct_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(7.0, "test"));
-        ctx.set_global("c", r.to_js(lock));
+        ctx.set_global(lock, "c", r);
         // Retrieve the symbol-keyed getter from the prototype and call it.
         let result: String = ctx
             .eval(
@@ -929,7 +935,7 @@ fn inspect_explicit_name_override() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(ExplicitName::new(5.0));
-        ctx.set_global("obj", r.to_js(lock));
+        ctx.set_global(lock, "obj", r);
         // The inspect property must not be accessible as a string key "debugX".
         let undef: bool = ctx.eval(lock, "typeof obj.debugX === 'undefined'").unwrap();
         assert!(
@@ -976,8 +982,9 @@ fn inspect_properties_dict_exists_on_prototype() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(3.0, "dbg"));
-        ctx.set_global("c", r.to_js(lock));
-        ctx.set_global("findInspectDict", ctx.eval_raw(FIND_INSPECT_DICT).unwrap());
+        ctx.set_global(lock, "c", r);
+        let find_inspect_dict = ctx.eval_raw(lock, FIND_INSPECT_DICT).unwrap();
+        ctx.set_global(lock, "findInspectDict", find_inspect_dict);
         let found: bool = ctx.eval(lock, "findInspectDict(c) !== null").unwrap();
         assert!(
             found,
@@ -992,8 +999,9 @@ fn inspect_properties_dict_contains_property_name() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(3.0, "dbg"));
-        ctx.set_global("c", r.to_js(lock));
-        ctx.set_global("findInspectDict", ctx.eval_raw(FIND_INSPECT_DICT).unwrap());
+        ctx.set_global(lock, "c", r);
+        let find_inspect_dict = ctx.eval_raw(lock, FIND_INSPECT_DICT).unwrap();
+        ctx.set_global(lock, "findInspectDict", find_inspect_dict);
         let has_key: bool = ctx.eval(lock, "'debugInfo' in findInspectDict(c)").unwrap();
         assert!(
             has_key,
@@ -1008,8 +1016,9 @@ fn inspect_properties_dict_value_is_the_getter_symbol() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(3.0, "dbg"));
-        ctx.set_global("c", r.to_js(lock));
-        ctx.set_global("findInspectDict", ctx.eval_raw(FIND_INSPECT_DICT).unwrap());
+        ctx.set_global(lock, "c", r);
+        let find_inspect_dict = ctx.eval_raw(lock, FIND_INSPECT_DICT).unwrap();
+        ctx.set_global(lock, "findInspectDict", find_inspect_dict);
         // The value in the dictionary must be a symbol, and that same symbol must be the key
         // under which the getter accessor is registered on the prototype.
         let valid: bool = ctx
@@ -1040,8 +1049,9 @@ fn inspect_properties_dict_getter_callable_via_symbol() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(7.0, "test"));
-        ctx.set_global("c", r.to_js(lock));
-        ctx.set_global("findInspectDict", ctx.eval_raw(FIND_INSPECT_DICT).unwrap());
+        ctx.set_global(lock, "c", r);
+        let find_inspect_dict = ctx.eval_raw(lock, FIND_INSPECT_DICT).unwrap();
+        ctx.set_global(lock, "findInspectDict", find_inspect_dict);
         // Invoking the getter via the symbol from the dictionary should return the value.
         let result: String = ctx
             .eval(
@@ -1076,8 +1086,9 @@ fn inspect_properties_dict_present_even_without_inspect_props() {
     harness.run_in_context(|lock, ctx| {
         // Token has only instance properties, no inspect properties.
         let r = jsg::Rc::new(Token::new("abc", "bearer"));
-        ctx.set_global("t", r.to_js(lock));
-        ctx.set_global("findInspectDict", ctx.eval_raw(FIND_INSPECT_DICT).unwrap());
+        ctx.set_global(lock, "t", r);
+        let find_inspect_dict = ctx.eval_raw(lock, FIND_INSPECT_DICT).unwrap();
+        ctx.set_global(lock, "findInspectDict", find_inspect_dict);
         let found: bool = ctx
             .eval(lock, "findInspectDict(t) !== null")
             .unwrap();
@@ -1100,8 +1111,9 @@ fn inspect_properties_dict_explicit_name_override() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(ExplicitName::new(5.0));
-        ctx.set_global("obj", r.to_js(lock));
-        ctx.set_global("findInspectDict", ctx.eval_raw(FIND_INSPECT_DICT).unwrap());
+        ctx.set_global(lock, "obj", r);
+        let find_inspect_dict = ctx.eval_raw(lock, FIND_INSPECT_DICT).unwrap();
+        ctx.set_global(lock, "findInspectDict", find_inspect_dict);
         // Must contain "debugX" (the overridden name), not "internalDebug" (Rust method).
         let has_override: bool = ctx.eval(lock, "'debugX' in findInspectDict(obj)").unwrap();
         let has_raw: bool = ctx
@@ -1128,9 +1140,10 @@ fn prototype_property_getter_throws_on_wrong_receiver() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(1.0, "x"));
-        ctx.set_global("c", r.to_js(lock));
+        ctx.set_global(lock, "c", r);
         // Extract the getter from the descriptor and call it with a plain object receiver.
         let result = ctx.eval_raw(
+            lock,
             r"
             'use strict';
             let proto = Object.getPrototypeOf(c);
@@ -1148,8 +1161,9 @@ fn prototype_property_setter_throws_on_wrong_receiver() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(1.0, "x"));
-        ctx.set_global("c", r.to_js(lock));
+        ctx.set_global(lock, "c", r);
         let result = ctx.eval_raw(
+            lock,
             r"
             'use strict';
             let proto = Object.getPrototypeOf(c);
@@ -1210,7 +1224,7 @@ fn mixed_prototype_not_own_instance_is_own() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Mixed::new(1.0, "hello"));
-        ctx.set_global("m", r.to_js(lock));
+        ctx.set_global(lock, "m", r);
 
         let proto_own: bool = ctx
             .eval(lock, "Object.prototype.hasOwnProperty.call(m, 'protoVal')")
@@ -1233,7 +1247,7 @@ fn mixed_both_properties_readable() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Mixed::new(3.0, "world"));
-        ctx.set_global("m", r.to_js(lock));
+        ctx.set_global(lock, "m", r);
         let pv: Number = ctx.eval(lock, "m.protoVal").unwrap();
         let iv: String = ctx.eval(lock, "m.instanceVal").unwrap();
         assert!((pv.value() - 3.0).abs() < f64::EPSILON);
@@ -1247,8 +1261,8 @@ fn mixed_both_properties_writable() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Mixed::new(0.0, "old"));
-        ctx.set_global("m", r.to_js(lock));
-        ctx.eval_raw("m.protoVal = 9; m.instanceVal = 'new'")
+        ctx.set_global(lock, "m", r);
+        ctx.eval_raw(lock, "m.protoVal = 9; m.instanceVal = 'new'")
             .unwrap();
         let pv: Number = ctx.eval(lock, "m.protoVal").unwrap();
         let iv: String = ctx.eval(lock, "m.instanceVal").unwrap();
@@ -1391,7 +1405,7 @@ fn combo_prototype_noname_rw_get() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         let v: Number = ctx.eval(lock, "o.a").unwrap();
         assert!((v.value() - 1.0).abs() < f64::EPSILON);
         Ok(())
@@ -1403,8 +1417,8 @@ fn combo_prototype_noname_rw_set() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
-        ctx.eval_raw("o.a = 99").unwrap();
+        ctx.set_global(lock, "o", r);
+        ctx.eval_raw(lock, "o.a = 99").unwrap();
         let v: Number = ctx.eval(lock, "o.a").unwrap();
         assert!((v.value() - 99.0).abs() < f64::EPSILON);
         Ok(())
@@ -1416,7 +1430,7 @@ fn combo_prototype_noname_rw_not_own_property() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         let own: bool = ctx
             .eval(lock, "Object.prototype.hasOwnProperty.call(o, 'a')")
             .unwrap();
@@ -1432,7 +1446,7 @@ fn combo_prototype_noname_readonly_get() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         let v: Number = ctx.eval(lock, "o.b").unwrap();
         assert!((v.value() - 2.0).abs() < f64::EPSILON);
         Ok(())
@@ -1444,8 +1458,8 @@ fn combo_prototype_noname_readonly_throws_in_strict() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
-        let result = ctx.eval_raw("'use strict'; o.b = 5");
+        ctx.set_global(lock, "o", r);
+        let result = ctx.eval_raw(lock, "'use strict'; o.b = 5");
         assert!(
             result.is_err(),
             "readonly prototype property must throw in strict mode"
@@ -1459,8 +1473,8 @@ fn combo_prototype_noname_readonly_no_setter_in_descriptor() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
-        let proto = ctx.eval_raw("Object.getPrototypeOf(o)").unwrap();
+        ctx.set_global(lock, "o", r);
+        let proto = ctx.eval_raw(lock, "Object.getPrototypeOf(o)").unwrap();
         let _ = proto;
         let set_undef: bool = ctx
             .eval(
@@ -1480,7 +1494,7 @@ fn combo_prototype_named_rw_get() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         let v: Number = ctx.eval(lock, "o.namedC").unwrap();
         assert!((v.value() - 3.0).abs() < f64::EPSILON);
         Ok(())
@@ -1492,8 +1506,8 @@ fn combo_prototype_named_rw_set() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
-        ctx.eval_raw("o.namedC = 33").unwrap();
+        ctx.set_global(lock, "o", r);
+        ctx.eval_raw(lock, "o.namedC = 33").unwrap();
         let v: Number = ctx.eval(lock, "o.namedC").unwrap();
         assert!((v.value() - 33.0).abs() < f64::EPSILON);
         Ok(())
@@ -1505,7 +1519,7 @@ fn combo_prototype_named_rw_raw_rust_name_hidden() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         // The Rust method name "getC" / "setC" must not be visible.
         let hidden: bool = ctx
             .eval(
@@ -1528,7 +1542,7 @@ fn combo_prototype_named_readonly_get() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         let v: Number = ctx.eval(lock, "o.namedD").unwrap();
         assert!((v.value() - 4.0).abs() < f64::EPSILON);
         Ok(())
@@ -1540,8 +1554,8 @@ fn combo_prototype_named_readonly_throws_in_strict() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
-        let result = ctx.eval_raw("'use strict'; o.namedD = 0");
+        ctx.set_global(lock, "o", r);
+        let result = ctx.eval_raw(lock, "'use strict'; o.namedD = 0");
         assert!(
             result.is_err(),
             "named readonly prototype property must throw in strict mode"
@@ -1557,7 +1571,7 @@ fn combo_instance_noname_rw_get() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         let v: String = ctx.eval(lock, "o.e").unwrap();
         assert_eq!(v, "e");
         Ok(())
@@ -1569,8 +1583,8 @@ fn combo_instance_noname_rw_set() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
-        ctx.eval_raw("o.e = 'updated'").unwrap();
+        ctx.set_global(lock, "o", r);
+        ctx.eval_raw(lock, "o.e = 'updated'").unwrap();
         let v: String = ctx.eval(lock, "o.e").unwrap();
         assert_eq!(v, "updated");
         Ok(())
@@ -1582,7 +1596,7 @@ fn combo_instance_noname_rw_is_own_property() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         let own: bool = ctx
             .eval(lock, "Object.prototype.hasOwnProperty.call(o, 'e')")
             .unwrap();
@@ -1596,7 +1610,7 @@ fn combo_instance_noname_rw_in_object_keys() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         let keys: String = ctx.eval(lock, "Object.keys(o).sort().join(',')").unwrap();
         assert!(
             keys.contains('e'),
@@ -1613,7 +1627,7 @@ fn combo_instance_noname_readonly_get() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         let v: String = ctx.eval(lock, "o.f").unwrap();
         assert_eq!(v, "f");
         Ok(())
@@ -1625,8 +1639,8 @@ fn combo_instance_noname_readonly_throws_in_strict() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
-        let result = ctx.eval_raw("'use strict'; o.f = 'x'");
+        ctx.set_global(lock, "o", r);
+        let result = ctx.eval_raw(lock, "'use strict'; o.f = 'x'");
         assert!(
             result.is_err(),
             "readonly instance property must throw in strict mode"
@@ -1640,7 +1654,7 @@ fn combo_instance_noname_readonly_no_setter_in_descriptor() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         let set_undef: bool = ctx
             .eval(
                 lock,
@@ -1662,7 +1676,7 @@ fn combo_instance_named_rw_get() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         let v: String = ctx.eval(lock, "o.namedG").unwrap();
         assert_eq!(v, "g");
         Ok(())
@@ -1674,8 +1688,8 @@ fn combo_instance_named_rw_set() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
-        ctx.eval_raw("o.namedG = 'ggg'").unwrap();
+        ctx.set_global(lock, "o", r);
+        ctx.eval_raw(lock, "o.namedG = 'ggg'").unwrap();
         let v: String = ctx.eval(lock, "o.namedG").unwrap();
         assert_eq!(v, "ggg");
         Ok(())
@@ -1687,7 +1701,7 @@ fn combo_instance_named_rw_is_own_property() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         let own: bool = ctx
             .eval(lock, "Object.prototype.hasOwnProperty.call(o, 'namedG')")
             .unwrap();
@@ -1701,7 +1715,7 @@ fn combo_instance_named_rw_raw_rust_name_hidden() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         let hidden: bool = ctx
             .eval(
                 lock,
@@ -1723,7 +1737,7 @@ fn combo_instance_named_readonly_get() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         let v: String = ctx.eval(lock, "o.namedH").unwrap();
         assert_eq!(v, "h");
         Ok(())
@@ -1735,8 +1749,8 @@ fn combo_instance_named_readonly_throws_in_strict() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
-        let result = ctx.eval_raw("'use strict'; o.namedH = 'x'");
+        ctx.set_global(lock, "o", r);
+        let result = ctx.eval_raw(lock, "'use strict'; o.namedH = 'x'");
         assert!(
             result.is_err(),
             "named readonly instance property must throw in strict mode"
@@ -1750,7 +1764,7 @@ fn combo_instance_named_readonly_is_own_property() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         let own: bool = ctx
             .eval(lock, "Object.prototype.hasOwnProperty.call(o, 'namedH')")
             .unwrap();
@@ -1769,7 +1783,7 @@ fn combo_attr_order_name_then_readonly_prototype_get() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         // #[jsg_property(prototype, name = "namedI", readonly)]
         let v: Number = ctx.eval(lock, "o.namedI").unwrap();
         assert!((v.value() - 9.0).abs() < f64::EPSILON);
@@ -1782,8 +1796,8 @@ fn combo_attr_order_name_then_readonly_prototype_is_readonly() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
-        let result = ctx.eval_raw("'use strict'; o.namedI = 0");
+        ctx.set_global(lock, "o", r);
+        let result = ctx.eval_raw(lock, "'use strict'; o.namedI = 0");
         assert!(
             result.is_err(),
             "name-before-readonly prototype property must be read-only"
@@ -1799,7 +1813,7 @@ fn combo_attr_order_readonly_then_name_instance_get() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         // #[jsg_property(instance, readonly, name = "namedJ")]
         let v: Number = ctx.eval(lock, "o.namedJ").unwrap();
         assert!((v.value() - 10.0).abs() < f64::EPSILON);
@@ -1812,7 +1826,7 @@ fn combo_attr_order_readonly_then_name_instance_is_own_and_readonly() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
         let own: bool = ctx
             .eval(lock, "Object.prototype.hasOwnProperty.call(o, 'namedJ')")
             .unwrap();
@@ -1820,7 +1834,7 @@ fn combo_attr_order_readonly_then_name_instance_is_own_and_readonly() {
             own,
             "readonly-before-name instance property must be an own property"
         );
-        let result = ctx.eval_raw("'use strict'; o.namedJ = 0");
+        let result = ctx.eval_raw(lock, "'use strict'; o.namedJ = 0");
         assert!(
             result.is_err(),
             "readonly-before-name instance property must be read-only"
@@ -1836,7 +1850,7 @@ fn combo_object_keys_contains_only_instance_props() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("o", r.to_js(lock));
+        ctx.set_global(lock, "o", r);
 
         // Instance props that MUST appear in Object.keys().
         for key in &["e", "f", "namedG", "namedH", "namedJ"] {
@@ -1868,9 +1882,9 @@ fn combo_instance_props_independent_across_instances() {
     harness.run_in_context(|lock, ctx| {
         let a = jsg::Rc::new(AllCombinations::new());
         let b = jsg::Rc::new(AllCombinations::new());
-        ctx.set_global("a", a.to_js(lock));
-        ctx.set_global("b", b.to_js(lock));
-        ctx.eval_raw("a.e = 'alpha'").unwrap();
+        ctx.set_global(lock, "a", a);
+        ctx.set_global(lock, "b", b);
+        ctx.eval_raw(lock, "a.e = 'alpha'").unwrap();
         let ea: String = ctx.eval(lock, "a.e").unwrap();
         let eb: String = ctx.eval(lock, "b.e").unwrap();
         assert_eq!(ea, "alpha");
@@ -1936,7 +1950,7 @@ fn get_prefix_identifies_getter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(PrefixDetection::new(42.0, 0.0));
-        ctx.set_global("obj", r.to_js(lock));
+        ctx.set_global(lock, "obj", r);
         let v: Number = ctx.eval(lock, "obj.count").unwrap();
         assert!(
             (v.value() - 42.0).abs() < f64::EPSILON,
@@ -1953,8 +1967,8 @@ fn set_prefix_identifies_setter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(PrefixDetection::new(0.0, 0.0));
-        ctx.set_global("obj", r.to_js(lock));
-        ctx.eval_raw("obj.count = 99").unwrap();
+        ctx.set_global(lock, "obj", r);
+        ctx.eval_raw(lock, "obj.count = 99").unwrap();
         let v: Number = ctx.eval(lock, "obj.count").unwrap();
         assert!(
             (v.value() - 99.0).abs() < f64::EPSILON,
@@ -1972,7 +1986,7 @@ fn getter_setter_paired_by_matching_stem() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(PrefixDetection::new(5.0, 0.0));
-        ctx.set_global("obj", r.to_js(lock));
+        ctx.set_global(lock, "obj", r);
         // Both getter and setter must share the single JS name.
         let descriptor: bool = ctx
             .eval(
@@ -1997,7 +2011,7 @@ fn getter_raw_rust_name_not_exposed() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(PrefixDetection::new(1.0, 0.0));
-        ctx.set_global("obj", r.to_js(lock));
+        ctx.set_global(lock, "obj", r);
         let undef: bool = ctx
             .eval(lock, "typeof obj.getCount === 'undefined'")
             .unwrap();
@@ -2015,7 +2029,7 @@ fn setter_raw_rust_name_not_exposed() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(PrefixDetection::new(1.0, 0.0));
-        ctx.set_global("obj", r.to_js(lock));
+        ctx.set_global(lock, "obj", r);
         let undef: bool = ctx
             .eval(lock, "typeof obj.setCount === 'undefined'")
             .unwrap();
@@ -2035,7 +2049,7 @@ fn getter_only_method_produces_readonly_property() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(PrefixDetection::new(0.0, 7.0));
-        ctx.set_global("obj", r.to_js(lock));
+        ctx.set_global(lock, "obj", r);
         let v: Number = ctx.eval(lock, "obj.readonlyVal").unwrap();
         assert!(
             (v.value() - 7.0).abs() < f64::EPSILON,
@@ -2062,8 +2076,8 @@ fn getter_only_throws_on_write_in_strict_mode() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(PrefixDetection::new(0.0, 3.0));
-        ctx.set_global("obj", r.to_js(lock));
-        let result = ctx.eval_raw("'use strict'; obj.readonlyVal = 99");
+        ctx.set_global(lock, "obj", r);
+        let result = ctx.eval_raw(lock, "'use strict'; obj.readonlyVal = 99");
         assert!(
             result.is_err(),
             "assigning to getter-only property must throw in strict mode"
@@ -2123,7 +2137,7 @@ fn default_placement_is_prototype_not_instance() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(DefaultPlacement::new("hello", 1.0));
-        ctx.set_global("obj", r.to_js(lock));
+        ctx.set_global(lock, "obj", r);
         // Prototype property → not an own property.
         let own: bool = ctx
             .eval(lock, "Object.prototype.hasOwnProperty.call(obj, 'name')")
@@ -2148,7 +2162,7 @@ fn default_placement_getter_returns_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(DefaultPlacement::new("world", 2.0));
-        ctx.set_global("obj", r.to_js(lock));
+        ctx.set_global(lock, "obj", r);
         let v: String = ctx.eval(lock, "obj.name").unwrap();
         assert_eq!(v, "world");
         Ok(())
@@ -2161,8 +2175,8 @@ fn default_placement_setter_updates_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(DefaultPlacement::new("before", 0.0));
-        ctx.set_global("obj", r.to_js(lock));
-        ctx.eval_raw("obj.name = 'after'").unwrap();
+        ctx.set_global(lock, "obj", r);
+        ctx.eval_raw(lock, "obj.name = 'after'").unwrap();
         let v: String = ctx.eval(lock, "obj.name").unwrap();
         assert_eq!(v, "after");
         Ok(())
@@ -2176,10 +2190,10 @@ fn default_placement_readonly_throws_on_write() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(DefaultPlacement::new("x", 42.0));
-        ctx.set_global("obj", r.to_js(lock));
+        ctx.set_global(lock, "obj", r);
         let v: Number = ctx.eval(lock, "obj.version").unwrap();
         assert!((v.value() - 42.0).abs() < f64::EPSILON);
-        let result = ctx.eval_raw("'use strict'; obj.version = 0");
+        let result = ctx.eval_raw(lock, "'use strict'; obj.version = 0");
         assert!(
             result.is_err(),
             "readonly default-placement property must throw on write"
@@ -2194,7 +2208,7 @@ fn default_placement_found_via_in_operator() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(DefaultPlacement::new("hi", 1.0));
-        ctx.set_global("obj", r.to_js(lock));
+        ctx.set_global(lock, "obj", r);
         let found: bool = ctx.eval(lock, "'name' in obj").unwrap();
         assert!(found, "prototype property must be found by 'in' operator");
         Ok(())

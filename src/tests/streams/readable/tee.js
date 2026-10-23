@@ -338,3 +338,71 @@ export const teeBackpressureFollowsSlowestBranch = {
     await Promise.all([reader1.cancel(), cancel2]);
   },
 };
+
+const PENDING = Symbol('pending');
+async function settledValue(promise) {
+  return Promise.race([promise, scheduler.wait(50).then(() => PENDING)]);
+}
+
+// Once close is requested, a branch that cancels while every other branch
+// has drained to the close gets its cancel settled with undefined, and the
+// source is not cancelled: the source has closed (parity; Node agrees).
+export const teeCancelAfterSiblingDrainedToClose = {
+  async test() {
+    let controller;
+    const cancels = [];
+    const rs = new ReadableStream({
+      start(c) {
+        controller = c;
+      },
+      cancel(reason) {
+        cancels.push(reason);
+      },
+    });
+    const [b1, b2] = rs.tee();
+    const r1 = b1.getReader();
+    const r2 = b2.getReader();
+    controller.enqueue('x');
+    strictEqual((await r1.read()).value, 'x');
+    controller.close();
+    strictEqual(await settledValue(r1.closed), undefined);
+    // b2 still holds 'x'.
+    strictEqual(await settledValue(r2.cancel('bye')), undefined);
+    deepStrictEqual(cancels, []);
+  },
+};
+
+// The same when the branch leaves by being errored through the Node.js
+// interop hook (TypeScript only: C++ has no hook). Three consumers: a
+// branch cancelled before the close waits for the source's end, which
+// comes once the errored branch has left and the third has drained.
+export const teeCancelSettlesWhenErroredBranchLeavesAfterClose = {
+  async test() {
+    if (!usingTsImpl) return;
+    const kErrorHook = Symbol.for('nodejs.webstream.controllerErrorFunction');
+    let controller;
+    const cancels = [];
+    const rs = new ReadableStream({
+      start(c) {
+        controller = c;
+      },
+      cancel(reason) {
+        cancels.push(reason);
+      },
+    });
+    const [a, b] = rs.tee();
+    const [b1, b2] = b.tee();
+    const ra = a.getReader();
+    const r1 = b1.getReader();
+    controller.enqueue('x');
+    const cancelA = ra.cancel('a');
+    strictEqual((await r1.read()).value, 'x');
+    controller.close();
+    strictEqual(await settledValue(r1.closed), undefined);
+    strictEqual(await settledValue(cancelA), PENDING);
+    // b2 still holds 'x'.
+    b2[kErrorHook](new Error('boom'));
+    strictEqual(await settledValue(cancelA), undefined);
+    deepStrictEqual(cancels, []);
+  },
+};

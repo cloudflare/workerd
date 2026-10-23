@@ -70,8 +70,8 @@ class RestoreServiceCustomEvent final: public WorkerInterface::CustomEvent {
   RestoreServiceCustomEvent(uint16_t typeId,
       Frankenvalue restoreParams,
       kj::Maybe<RestoreRehydrateCallback> rehydrateCaps = kj::none,
-      kj::PromiseFulfillerPair<kj::Own<IoChannelFactory::SubrequestChannel>> paf =
-          kj::newPromiseAndFulfiller<kj::Own<IoChannelFactory::SubrequestChannel>>())
+      kj::PromiseFulfillerPair<kj::Rc<IoChannelFactory::SubrequestChannel>> paf =
+          kj::newPromiseAndFulfiller<kj::Rc<IoChannelFactory::SubrequestChannel>>())
       : channelFulfiller(kj::mv(paf.fulfiller)),
         channel(newPromisedChannel<IoChannelFactory::SubrequestChannel>(kj::mv(paf.promise))),
         typeId(typeId),
@@ -105,7 +105,7 @@ class RestoreServiceCustomEvent final: public WorkerInterface::CustomEvent {
 
   // Get the (promised) SubrequestChannel representing the Fetcher that the restore method will
   // return when it runs.
-  kj::Own<IoChannelFactory::SubrequestChannel> getChannel() {
+  kj::Rc<IoChannelFactory::SubrequestChannel> getChannel() {
     auto result = kj::mv(KJ_ASSERT_NONNULL(channel, "can only call getChannel() once"));
     channel = kj::none;
     return result;
@@ -147,8 +147,8 @@ class RestoreServiceCustomEvent final: public WorkerInterface::CustomEvent {
   static constexpr uint16_t RESTORE_SERVICE_EVENT_TYPE = 13;
 
  private:
-  kj::Own<kj::PromiseFulfiller<kj::Own<IoChannelFactory::SubrequestChannel>>> channelFulfiller;
-  kj::Maybe<kj::Own<IoChannelFactory::SubrequestChannel>> channel;
+  kj::Own<kj::PromiseFulfiller<kj::Rc<IoChannelFactory::SubrequestChannel>>> channelFulfiller;
+  kj::Maybe<kj::Rc<IoChannelFactory::SubrequestChannel>> channel;
   uint16_t typeId;
   Frankenvalue restoreParams;
   kj::Maybe<RestoreRehydrateCallback> rehydrateCaps;

@@ -133,3 +133,82 @@ export const sizeReceiverAndArity = {
     strictEqual(argCount, 1);
   },
 };
+
+// A write made from inside sink.close() runs size() before its state
+// checks reject it (WritableStreamDefaultWriterWrite step 4; the close
+// algorithm clears the strategy only after it returns). Parity for the
+// size() call; a throwing size() is ledger #15.
+export const sizeConsultedForWriteInsideSinkClose = {
+  async test() {
+    for (const throws of [false, true]) {
+      let sizeCalls = 0;
+      let inner;
+      let writer;
+      const ws = new WritableStream(
+        {
+          close() {
+            inner = writer.write('x');
+          },
+        },
+        {
+          size() {
+            sizeCalls++;
+            if (throws) throw new Error('size');
+            return 1;
+          },
+          highWaterMark: 1,
+        }
+      );
+      writer = ws.getWriter();
+      const close = writer.close();
+      await scheduler.wait(0);
+      strictEqual(sizeCalls, 1);
+      if (throws && !usingTsImpl) {
+        await rejects(inner, { message: 'size' });
+      } else {
+        // The close in flight is checked before the erroring state, so
+        // the stream that size() began erroring still rejects the write
+        // as closing, and the close completes (spec; Node agrees).
+        await rejects(inner, { name: 'TypeError' });
+      }
+      strictEqual(await close, undefined);
+      strictEqual(await writer.closed, undefined);
+    }
+  },
+};
+
+// The same for a write made from inside sink.abort(): size() runs, then
+// the write rejects with the abort reason (parity). With a throwing
+// size() the write still rejects with the reason (spec; Node agrees);
+// C++ rejects it with an internal error, so that shape is TS-only.
+export const sizeConsultedForWriteInsideSinkAbort = {
+  async test() {
+    for (const throws of usingTsImpl ? [false, true] : [false]) {
+      let sizeCalls = 0;
+      let inner;
+      let writer;
+      const reason = new Error('reason');
+      const ws = new WritableStream(
+        {
+          abort() {
+            inner = writer.write('x');
+          },
+        },
+        {
+          size() {
+            sizeCalls++;
+            if (throws) throw new Error('size');
+            return 1;
+          },
+          highWaterMark: 1,
+        }
+      );
+      writer = ws.getWriter();
+      await scheduler.wait(0);
+      strictEqual(await writer.abort(reason), undefined);
+      strictEqual(sizeCalls, 1);
+      await rejects(inner, (e) => e === reason);
+      await rejects(writer.closed, (e) => e === reason);
+    }
+  },
+};

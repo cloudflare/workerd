@@ -5,6 +5,7 @@
 #pragma once
 
 #include "basics.h"
+#include "bench.h"
 #include "filesystem.h"
 #include "http.h"
 #include "messagechannel.h"
@@ -19,6 +20,7 @@
 
 #include <workerd/io/features.h>
 #include <workerd/io/io-timers.h>
+#include <workerd/io/observer.h>
 #include <workerd/io/worker-interface.h>
 #include <workerd/jsg/jsg.h>
 
@@ -205,7 +207,7 @@ class TestController: public jsg::Object {
   JSG_RESOURCE_TYPE(TestController) {}
 };
 
-// Structured types for the cache purge API (ctx.cache.purge()).
+// Structured types for the cache purge APIs (ctx.cache.purge() and ctx.cache.invalidate()).
 // These match the coreless-purge-ingest WorkersCachePurgeEntrypoint types.
 // NOTE: TypeScript stubs for CachePurgeError, CachePurgeResult, CachePurgeOptions, and
 // CacheContext are manually maintained in src/cloudflare/internal/workers.d.ts. If you change
@@ -242,8 +244,22 @@ class CacheContext: public jsg::Object {
       const jsg::TypeHandler<CachePurgeResult>& resultHandler,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler);
 
+  // Mark cached content matching `options` as stale without deleting it. Accepts the same options
+  // as purge(). The next matching request is revalidated: the Worker receives a conditional
+  // request built from the stored validators (e.g. `If-None-Match` from the cached `ETag`). If
+  // the Worker responds with `304 Not Modified`, the stored body is kept and served; a full
+  // response replaces the cached one.
+  //
+  // The default implementation throws without an overriding IoContext.
+  virtual jsg::Promise<CachePurgeResult> invalidate(jsg::Lock& js,
+      CachePurgeOptions options,
+      const jsg::TypeHandler<CachePurgeOptions>& optionsHandler,
+      const jsg::TypeHandler<CachePurgeResult>& resultHandler,
+      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler);
+
   JSG_RESOURCE_TYPE(CacheContext) {
     JSG_METHOD(purge);
+    JSG_METHOD(invalidate);
   }
 };
 
@@ -610,7 +626,32 @@ struct ExportedHandler {
   }
 
   ExportedHandler clone(jsg::Lock& js);
+
+  // YES if `fetch` was marked with retryable() and DURABLE_OBJECT_RETRIES_USERLAND is enabled.
+  IsRetryableHandler isFetchRetryable(jsg::Lock& js);
 };
+
+// The `bench` handler of an exported object. It isn't a member of ExportedHandler, which is
+// unwrapped from the export for every event, reading each of its handlers: reading another name
+// there would break exports that reject unknown properties, such as a Proxy. Instead,
+// ServiceWorkerGlobalScope::bench() unwraps this from ExportedHandler::self, only when a
+// benchmark runs.
+struct BenchExportedHandler {
+  using BenchHandler = jsg::Promise<void>(jsg::Ref<BenchController> controller,
+      jsg::Value env,
+      jsg::Optional<jsg::Ref<ExecutionContext>> ctx);
+  jsg::LenientOptional<jsg::Function<BenchHandler>> bench;
+
+  JSG_STRUCT(bench);
+};
+
+// V8 private key set on functions marked with retryable() from "cloudflare:durable-objects".
+// Reading it runs no user code, so a claim can check it before the handler or method runs.
+inline constexpr auto RETRYABLE_METHOD_PRIVATE_KEY = "cloudflare:durable-objects:retryable"_kjc;
+
+// Key of the internal symbol exported as `onEvict` from "cloudflare:durable-objects". A Durable
+// Object class defines its eviction handler as the method keyed by this symbol.
+inline constexpr auto ON_EVICT_SYMBOL_KEY = "cloudflare:durable-objects:onEvict"_kjc;
 
 // An approximation of Node.js setImmediate `Immediate` object.
 // This is used only when the `nodejs_compat_v2` compatibility flag is enabled.
@@ -723,10 +764,12 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
-  // Received runAlarm (called from C++, not JS).
+  // Received runAlarm (called from C++, not JS). `incomingRequest` is the alarm's own incoming
+  // request, which must outlive the returned promise.
   kj::Promise<WorkerInterface::AlarmResult> runAlarm(kj::Date scheduledTime,
       kj::Duration timeout,
       uint32_t retryCount,
+      IoContext_IncomingRequest& incomingRequest,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 
@@ -734,6 +777,13 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
   // a jsg::Promise<void>; it fails if an exception is thrown. WorkerEntrypoint will catch these
   // and report them.
   jsg::Promise<void> test(Worker::Lock& lock, kj::Maybe<ExportedHandler&> exportedHandler);
+
+  // Received bench() (called from C++, not JS). See WorkerInterface::bench(). Runs the handler to
+  // register cases, then runs them. Failures, of the handler or of a case, are recorded in the
+  // result rather than rejecting.
+  jsg::Promise<BenchGroupResult> bench(Worker::Lock& lock,
+      kj::Maybe<ExportedHandler&> exportedHandler,
+      bench::BenchParams::Reader params);
 
   kj::Promise<void> eventTimeoutPromise(uint32_t timeoutMs);
   kj::Promise<void> setHibernatableEventTimeout(
@@ -806,7 +856,9 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       jsg::Arguments<jsg::Value> args);
   void clearTimeout(jsg::Lock& js, kj::Maybe<jsg::JsNumber> timeoutId);
 
-  TimeoutId::NumberType setTimeoutInternal(jsg::Function<void()> function, double msDelay);
+  // `asyncTraceName` names the timer's async trace resource (see IoContext::setTimeoutImpl()).
+  TimeoutId::NumberType setTimeoutInternal(
+      jsg::Function<void()> function, double msDelay, kj::StringPtr asyncTraceName);
 
   TimeoutId::NumberType setInterval(jsg::Lock& js,
       jsg::Function<void(jsg::Arguments<jsg::Value>)> function,
@@ -940,14 +992,23 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(ScheduledEvent);
     JSG_NESTED_TYPE(MessageEvent);
     JSG_NESTED_TYPE(CloseEvent);
-    JSG_NESTED_TYPE(ReadableStreamDefaultReader);
-    JSG_NESTED_TYPE(ReadableStreamBYOBReader);
-    JSG_NESTED_TYPE(ReadableStream);
-    JSG_NESTED_TYPE(WritableStream);
-    JSG_NESTED_TYPE(WritableStreamDefaultWriter);
-    JSG_NESTED_TYPE(TransformStream);
-    JSG_NESTED_TYPE(ByteLengthQueuingStrategy);
-    JSG_NESTED_TYPE(CountQueuingStrategy);
+    // Under typescript_implemented_streams, the per-isolate bootstrap (src/per_isolate/main.ts)
+    // installs the TypeScript implementations of every Web Streams global, so the C++ classes
+    // are not exposed here. Type generation forces the flag off (see
+    // clearImplementationOnlyFlags() in api/rtti.c++), so the generated declarations still come
+    // from these C++ classes.
+    // TODO(soon): Since the goal is to remove the C++ implementation, we will eventually need
+    // to replace the type generation with a fixed type definition.
+    if (!flags.getTypeScriptImplementedStreams()) {
+      JSG_NESTED_TYPE(ReadableStreamDefaultReader);
+      JSG_NESTED_TYPE(ReadableStreamBYOBReader);
+      JSG_NESTED_TYPE(ReadableStream);
+      JSG_NESTED_TYPE(WritableStream);
+      JSG_NESTED_TYPE(WritableStreamDefaultWriter);
+      JSG_NESTED_TYPE(TransformStream);
+      JSG_NESTED_TYPE(ByteLengthQueuingStrategy);
+      JSG_NESTED_TYPE(CountQueuingStrategy);
+    }
     JSG_NESTED_TYPE(ErrorEvent);
 
     if (flags.getExposeGlobalMessageChannel()) {
@@ -965,7 +1026,8 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
     JSG_NESTED_TYPE(EventSource);
 
-    if (flags.getStreamsJavaScriptControllers()) {
+    // The bootstrap installs the TypeScript controllers regardless of streams_enable_constructors.
+    if (flags.getStreamsJavaScriptControllers() && !flags.getTypeScriptImplementedStreams()) {
       JSG_NESTED_TYPE(ReadableStreamBYOBRequest);
       JSG_NESTED_TYPE(ReadableStreamDefaultController);
       JSG_NESTED_TYPE(ReadableByteStreamController);
@@ -981,10 +1043,12 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       JSG_METHOD(clearImmediate);
     }
 
-    JSG_NESTED_TYPE(CompressionStream);
-    JSG_NESTED_TYPE(DecompressionStream);
-    JSG_NESTED_TYPE(TextEncoderStream);
-    JSG_NESTED_TYPE(TextDecoderStream);
+    if (!flags.getTypeScriptImplementedStreams()) {
+      JSG_NESTED_TYPE(CompressionStream);
+      JSG_NESTED_TYPE(DecompressionStream);
+      JSG_NESTED_TYPE(TextEncoderStream);
+      JSG_NESTED_TYPE(TextDecoderStream);
+    }
 
     JSG_NESTED_TYPE(Headers);
     JSG_NESTED_TYPE(Body);
@@ -1031,8 +1095,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
     JSG_NESTED_TYPE(Cache);
 
     // Off-spec extensions.
-    JSG_NESTED_TYPE(FixedLengthStream);
-    JSG_NESTED_TYPE(IdentityTransformStream);
+    if (!flags.getTypeScriptImplementedStreams()) {
+      JSG_NESTED_TYPE(FixedLengthStream);
+      JSG_NESTED_TYPE(IdentityTransformStream);
+    }
     JSG_NESTED_TYPE(HTMLRewriter);
     if (flags.getWorkerdExperimental()) {
       JSG_NESTED_TYPE(Datagram);
@@ -1214,9 +1280,10 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
 
 #define EW_GLOBAL_SCOPE_ISOLATE_TYPES                                                              \
   api::WorkerGlobalScope, api::ServiceWorkerGlobalScope, api::TestController,                      \
-      api::ExecutionContext, api::ExportedHandler,                                                 \
-      api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
-      api::AlarmInvocationInfo, api::Immediate, api::Cloudflare, api::CachePurgeError,             \
-      api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext, api::AccessContext
+      EW_BENCH_ISOLATE_TYPES, api::ExecutionContext, api::ExportedHandler,                         \
+      api::BenchExportedHandler, api::ServiceWorkerGlobalScope::StructuredCloneOptions,            \
+      api::Navigator, api::AlarmInvocationInfo, api::Immediate, api::Cloudflare,                   \
+      api::CachePurgeError, api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext,      \
+      api::AccessContext
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

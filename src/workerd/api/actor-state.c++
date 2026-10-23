@@ -7,6 +7,7 @@
 #include "actor.h"
 #include "export-loopback.h"
 #include "restore.h"
+#include "snapshot.h"
 #include "sql.h"
 #include "sync-kv.h"
 #include "util.h"
@@ -227,7 +228,7 @@ kj::Promise<void> updateStorageDeletes(
 DurableObjectStorage::DurableObjectStorage(jsg::Lock& js,
     IoPtr<ActorCacheInterface> cache,
     bool enableSql,
-    kj::Own<IoChannelFactory::ActorChannel> primaryActorChannel,
+    kj::Rc<IoChannelFactory::ActorChannel> primaryActorChannel,
     kj::Own<ActorIdFactory::ActorId> primaryActorId)
     : cache(kj::mv(cache)),
       enableSql(enableSql) {
@@ -903,6 +904,34 @@ kj::Promise<void> DurableObjectStorage::waitForBookmark(kj::String bookmark) {
       .attach(kj::mv(traceContext));
 }
 
+jsg::Promise<jsg::Ref<DurableObjectSnapshot>> DurableObjectStorage::snapshot(
+    jsg::Lock& js, jsg::Optional<SnapshotOptions> options) {
+  auto& context = IoContext::current();
+  auto traceContext = context.makeUserTraceSpan("durable_object_storage_snapshot"_kjc);
+  kj::Maybe<kj::String> bookmark;
+  KJ_IF_SOME(o, options) {
+    bookmark = kj::mv(o.bookmark);
+  }
+  auto bookmarkSnapshot =
+      cache->captureBookmarkSnapshot(kj::mv(bookmark), traceContext.getInternalSpanParent());
+  return context.awaitIo(js, kj::mv(bookmarkSnapshot).attach(kj::mv(traceContext)),
+      [](jsg::Lock& js, capnp::Capability::Client bookmarkSnapshot) {
+    return js.alloc<DurableObjectSnapshot>(kj::mv(bookmarkSnapshot));
+  });
+}
+
+kj::Promise<kj::String> DurableObjectStorage::onNextSessionRestore(RestoreTarget target) {
+  KJ_SWITCH_ONEOF(target) {
+    KJ_CASE_ONEOF(snapshot, jsg::Ref<DurableObjectSnapshot>) {
+      return cache->onNextSessionRestore(snapshot->getClient());
+    }
+    KJ_CASE_ONEOF(bookmark, jsg::NonCoercible<kj::String>) {
+      return cache->onNextSessionRestoreBookmark(bookmark.value);
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
 void DurableObjectStorage::ensureReplicas() {
   if (maybePrimary != kj::none) {
     KJ_FAIL_ASSERT("Replica Durable Objects cannot call ensureReplicas().");
@@ -1019,8 +1048,8 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
     return ActorCallTargetRetryable::NO;
   }
 
-  kj::Own<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override {
-    return kj::addRef(getOrCreateActorChannel());
+  kj::Rc<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override {
+    return getOrCreateActorChannel().addRef();
   }
 
  private:
@@ -1030,7 +1059,7 @@ class FacetOutgoingFactory final: public Fetcher::OutgoingFactory {
   // This is moved away when `actorChannel` is initialized.
   kj::Function<kj::Promise<Worker::Actor::FacetManager::StartInfo>()> getStartInfo;
 
-  kj::Maybe<kj::Own<IoChannelFactory::ActorChannel>> actorChannel;
+  kj::Maybe<kj::Rc<IoChannelFactory::ActorChannel>> actorChannel;
 
   IoChannelFactory::ActorChannel& getOrCreateActorChannel() {
     if (actorChannel == kj::none) {

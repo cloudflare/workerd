@@ -5,10 +5,10 @@ Subject: Modify where to look for dragonbox
 
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index 30e16e4ec102c04a4a4193214b10702e1fd5eb70..91ead9e0f732879aee7cbb5b155217a5b7ab9afb 100644
+index e68c2f7dbe04c4934f88187a1914f9b259df99d0..9c853cb1c0560f5f577b08a7700d30f669cb4b6c 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -4189,13 +4189,8 @@ filegroup(
+@@ -4229,13 +4229,8 @@ filegroup(
  
  v8_library(
      name = "lib_dragonbox",

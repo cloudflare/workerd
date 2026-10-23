@@ -3,19 +3,18 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // Which chunk types the writable side of an IdentityTransformStream accepts:
-// ArrayBufferView (any), ArrayBuffer, and (for historical reasons) strings,
-// which are UTF-8 encoded. Everything else rejects with TypeError. (Both
+// ArrayBufferView (any, shared memory included), ArrayBuffer,
+// SharedArrayBuffer, and (for historical reasons) strings, which are UTF-8
+// encoded. Everything else rejects with TypeError. (Both
 // test configs pin capture_async_api_throws, so the C++ implementation
 // returns a rejected promise here like TypeScript does, rather than its
 // pre-flag synchronous throw. It still emits a console warning.)
 //
-// What happens to the stream afterward deliberately diverges and is asserted
-// per implementation below:
-// - C++: the stream is unaffected by the invalid chunk and remains usable.
-// - TypeScript: the invalid chunk errors the stream — the writer's closed
-//   promise rejects and subsequent writes reject.
+// An invalid chunk rejects only its own write, in both implementations: the
+// stream survives and later writes still flow (ledger #6).
 
 import { strictEqual, deepStrictEqual, rejects } from 'node:assert';
+import { usingTsImpl } from 'which-impl';
 
 export const acceptsUint8Array = {
   async test() {
@@ -63,6 +62,41 @@ export const acceptsDataViewSubrange = {
   },
 };
 
+// Shared memory is accepted like any other bytes, in both implementations:
+// a SharedArrayBuffer, and a typed array or DataView over part of one, are
+// each delivered as a copy taken at write(), and an empty SharedArrayBuffer
+// is a zero-length no-op.
+export const acceptsSharedMemory = {
+  async test() {
+    const sab = new SharedArrayBuffer(4);
+    new Uint8Array(sab).set([1, 2, 3, 4]);
+    const { readable, writable } = new IdentityTransformStream();
+    const writer = writable.getWriter();
+    const reader = readable.getReader();
+    const writes = [
+      writer.write(sab),
+      writer.write(new SharedArrayBuffer(0)),
+      writer.write(new Uint8Array(sab, 1, 2)),
+      writer.write(new DataView(sab, 2, 2)),
+    ];
+    const closePromise = writer.close();
+    new Uint8Array(sab).fill(0);
+    const delivered = [];
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      strictEqual(value.buffer instanceof SharedArrayBuffer, false);
+      delivered.push([...value]);
+    }
+    await Promise.all([...writes, closePromise]);
+    deepStrictEqual(delivered, [
+      [1, 2, 3, 4],
+      [2, 3],
+      [3, 4],
+    ]);
+  },
+};
+
 export const acceptsStringAsUtf8 = {
   async test() {
     const { readable, writable } = new IdentityTransformStream();
@@ -74,6 +108,29 @@ export const acceptsStringAsUtf8 = {
     strictEqual(done, false);
     strictEqual(new TextDecoder().decode(value), 'hello');
     await writer.close();
+  },
+};
+
+// A string containing NUL (ledger #25): TypeScript writes all its UTF-8
+// bytes; C++ (WritableStreamInternalController::write) writes only the bytes
+// before the first NUL.
+export const stringWithNulDivergence = {
+  async test() {
+    const { readable, writable } = new IdentityTransformStream();
+    const writer = writable.getWriter();
+    const reader = readable.getReader();
+    const bytes = [];
+    const drained = (async () => {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) return;
+        bytes.push(...value);
+      }
+    })();
+    await writer.write('a\0b');
+    await writer.close();
+    await drained;
+    deepStrictEqual(bytes, usingTsImpl ? [0x61, 0x00, 0x62] : [0x61]);
   },
 };
 

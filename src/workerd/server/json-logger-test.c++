@@ -149,46 +149,6 @@ KJ_TEST("JsonLogger stdout validation") {
   KJ_EXPECT(kj::StringPtr(source.begin(), source.size()).contains("json-logger-test.c++"));
 }
 
-KJ_TEST("StructuredLoggingProcessContext - plain text mode by default") {
-  StructuredLoggingProcessContext context("test-program");
-
-  KJ_EXPECT(context.getProgramName() == "test-program");
-
-  OutputCapture capture(STDERR_FILENO);
-  context.warning("Test warning message");
-
-  auto output = capture.readOutput();
-
-  KJ_EXPECT(output.contains("Test warning message"));
-  KJ_EXPECT(!output.contains("{"));
-}
-
-KJ_TEST("StructuredLoggingProcessContext - structured logging mode") {
-  StructuredLoggingProcessContext context("test-program");
-  context.enableStructuredLogging();
-
-  OutputCapture capture(STDERR_FILENO);
-  context.warning("Test structured warning");
-
-  auto output = capture.readOutput();
-  auto jsonEntry = KJ_ASSERT_NONNULL(findJsonEntryContaining(output, "Test structured warning"));
-  validateJsonLogEntry(
-      jsonEntry, log_schema::LogEntry::LogLevel::WARNING, "Test structured warning");
-  KJ_EXPECT(jsonEntry.contains("\"level\":\"warn\""), jsonEntry);
-}
-
-KJ_TEST("StructuredLoggingProcessContext - error handling in structured mode") {
-  StructuredLoggingProcessContext context("test-program");
-  context.enableStructuredLogging();
-
-  OutputCapture capture(STDERR_FILENO);
-  context.error("Test structured error");
-
-  auto output = capture.readOutput();
-  auto jsonEntry = KJ_ASSERT_NONNULL(findJsonEntryContaining(output, "Test structured error"));
-  validateJsonLogEntry(jsonEntry, log_schema::LogEntry::LogLevel::ERROR, "Test structured error");
-}
-
 #endif  // __linux__
 
 }  // namespace

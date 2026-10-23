@@ -24,6 +24,7 @@ net_ports = [
 ]
 
 wd_test(
+    size = "large",
     src = "net-cpp.wd-test",
     args = ["--experimental"],
     data = net_suite_srcs,
@@ -32,6 +33,7 @@ wd_test(
 )
 
 wd_test(
+    size = "large",
     src = "net-ts.wd-test",
     args = ["--experimental"],
     data = net_suite_srcs,
@@ -44,6 +46,7 @@ wd_test(
 # flags this config deliberately omits would turn on, contradicting its
 # purpose of asserting the pre-flag behavior.
 wd_test(
+    size = "large",
     src = "net-cpp-legacy.wd-test",
     args = ["--experimental"],
     data = net_suite_srcs,

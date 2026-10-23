@@ -1,5 +1,10 @@
 // This file contains boilerplate which must occur once per crate, rather than once per type.
 
+#![allow(
+    unsafe_code,
+    reason = "C++ polls and drops type-erased futures through raw callbacks"
+)]
+
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;

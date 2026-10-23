@@ -16,9 +16,13 @@ export {
   highWaterMarkValidated,
   sinkTypeValidation,
   argumentConversionOrder,
+  garbageSinkValidation,
+  strategyArgumentShapes,
+  conversionErrorPrecedence,
   readyFulfillTiming,
   nonCallableSizeThrows,
   globalScopePipe,
+  strategyMembersReadOnce,
 } from 'construction';
 
 export {
@@ -107,11 +111,17 @@ export {
   controllerErrorInsideWriteHook,
   sizeNotCalledForDoomedWrite,
   sizeReceiverAndArity,
+  sizeConsultedForWriteInsideSinkClose,
+  sizeConsultedForWriteInsideSinkAbort,
 } from 'reentrancy';
 
 export { thenGetterDoesNotFireOnWriterPromises } from 'then-interceptors';
 
-export { writableStreamGc, writableStreamGcTraceFinishes } from 'gc';
+export {
+  writableStreamGc,
+  writableStreamGcTraceFinishes,
+  sinkReleasedOnceEnded,
+} from 'gc';
 
 export {
   manySmallWrites,
@@ -126,3 +136,5 @@ export {
   pollutedResolversDoNotReachWriterPromises,
   omittedDictionariesReadNothing,
 } from 'pollution';
+
+export { writerPromisesAreMarkedHandled } from 'unhandled-rejection';

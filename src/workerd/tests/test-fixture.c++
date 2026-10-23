@@ -13,6 +13,7 @@
 #include <workerd/io/limit-enforcer.h>
 #include <workerd/io/observer.h>
 #include <workerd/io/tracer.h>
+#include <workerd/io/tracked-wasm-instance.h>
 #include <workerd/io/worker-entrypoint.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
@@ -176,6 +177,14 @@ struct MockLimitEnforcer final: public LimitEnforcer {
   kj::Maybe<TestFixture::ActorCallReplayMemoryReserver>& actorCallReplayMemoryReserver;
 };
 
+// The number of startup limit scopes that the calling thread is in.
+thread_local uint startupLimitScopeDepth = 0;
+
+kj::Own<void> enterStartupLimitScope() {
+  ++startupLimitScopeDepth;
+  return kj::heap(kj::defer([]() { --startupLimitScopeDepth; }));
+}
+
 struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
   v8::Isolate::CreateParams getCreateParams() override {
     return {};
@@ -191,11 +200,11 @@ struct MockIsolateLimitEnforcer final: public IsolateLimitEnforcer {
   }
   kj::Own<void> enterStartupJs(
       jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-    return {};
+    return enterStartupLimitScope();
   }
   kj::Own<void> enterStartupPython(
       jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
-    return {};
+    return enterStartupLimitScope();
   }
   kj::Own<void> enterDynamicImportJs(
       jsg::Lock& lock, kj::OneOf<kj::Exception, kj::Duration>&) const override {
@@ -368,7 +377,7 @@ TestFixture::TestFixture(SetupParams&& params)
           defaultPythonConfig)),
       heapLimitFlag(kj::atomicRefcounted<HeapLimitFlag>()),
       workerIsolate(kj::atomicRefcounted<Worker::Isolate>(kj::mv(api),
-          kj::atomicRefcounted<IsolateObserver>(),
+          kj::mv(params.isolateObserver).orDefault(kj::atomicRefcounted<IsolateObserver>()),
           scriptId,
           kj::rc<MockIsolateLimitEnforcer>(kj::atomicAddRef(*heapLimitFlag)).toOwn(),
           Worker::Isolate::InspectorPolicy::DISALLOW)),
@@ -384,11 +393,7 @@ TestFixture::TestFixture(SetupParams&& params)
           kj::none,
           SpanParent(nullptr),
           newWorkerFileSystem(kj::heap<FsMap>(), getTmpDirectoryImpl()),
-          // TestFixture does not support the new module registry: no registry
-          // is constructed here, and Worker::Script rejects feature flags that
-          // enable it without one. A test that needs the new registry must
-          // build one (see WorkerdApi::newWorkerdModuleRegistry) and pass it.
-          kj::none)),
+          kj::mv(params.newModuleRegistry))),
       worker(kj::atomicRefcounted<Worker>(kj::atomicAddRef(*workerScript),
           kj::atomicRefcounted<WorkerObserver>(),
           [](jsg::Lock&, const Worker::Api&, v8::Local<v8::Object>, v8::Local<v8::Object>) {
@@ -513,7 +518,7 @@ kj::Own<IoContext::IncomingRequest> TestFixture::newIncomingRequest(IoContext& c
 }
 
 kj::Own<IoContext::IncomingRequest> TestFixture::newUndeliveredIncomingRequest(
-    IoContext& context, kj::Maybe<kj::Own<BaseTracer>> workerTracer) {
+    IoContext& context, kj::Maybe<kj::Rc<BaseTracer>> workerTracer) {
   kj::Rc<IoChannelFactory> channelFactory;
   KJ_IF_SOME(factory, ioChannelFactory) {
     channelFactory = factory(*timerChannel);
@@ -573,6 +578,10 @@ kj::Own<WorkerInterface> TestFixture::makeWorkerEntrypoint() {
       kj::mv(actorRef), kj::heap<MockLimitEnforcer>(kj::none, actorCallReplayMemoryReserver),
       kj::Own<void>(), kj::mv(channelFactory), kj::mv(observer), waitUntilTasks, false, kj::none,
       kj::none, kj::none);
+}
+
+bool TestFixture::isInStartupLimitScope() {
+  return startupLimitScopeDepth > 0;
 }
 
 }  // namespace workerd

@@ -15,6 +15,7 @@ use syn::FnArg;
 use syn::ItemImpl;
 
 use crate::trace::generate_trace_statements;
+use crate::utils::elide_named_lifetimes;
 use crate::utils::error;
 use crate::utils::extract_name_attribute;
 use crate::utils::extract_named_fields;
@@ -27,7 +28,7 @@ use crate::utils::snake_to_camel;
 // and emit the correct token streams. Cannot reuse the runtime type directly
 // because proc-macro crates cannot link against CXX-bridge runtime crates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum PropertyKind {
+pub enum PropertyKind {
     Prototype,
     Instance,
     Inspect,
@@ -93,38 +94,39 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         impl jsg::Type for #name {
             fn class_name() -> &'static str { #class_name }
 
-            fn is_exact(value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
+            fn is_exact(value: jsg::v8::Local<'_, jsg::v8::Value>) -> bool {
                 value.is_object()
             }
         }
 
         #[automatically_derived]
-        impl jsg::ToJS for #name {
-            fn to_js<'a, 'b>(self, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
-            where
-                'b: 'a,
-            {
+        impl<'s> jsg::ToJS<'s> for #name {
+            fn to_js(self, lock: &mut jsg::Lock<'s>) -> jsg::v8::Local<'s, jsg::v8::Value> {
                 let r = jsg::Rc::new(self);
-                r.to_js(lock)
+                jsg::ToJS::to_js(r, lock)
             }
         }
 
         #[automatically_derived]
-        impl jsg::FromJS for #name {
+        impl<'s> jsg::FromJS<'s> for #name {
             type ResultType = jsg::Rc<Self>;
 
+            fn type_name() -> String {
+                <Self as jsg::Type>::class_name().to_owned()
+            }
+
             fn from_js(
-                lock: &mut jsg::Lock,
-                value: jsg::v8::Local<jsg::v8::Value>,
+                lock: &mut jsg::Lock<'s>,
+                value: jsg::v8::Local<'s, jsg::v8::Value>,
             ) -> Result<Self::ResultType, jsg::Error> {
-                <jsg::Rc<Self> as jsg::FromJS>::from_js(lock, value)
+                <jsg::Rc<Self> as jsg::FromJS<'s>>::from_js(lock, value)
             }
 
             fn try_from_js(
-                lock: &mut jsg::Lock,
-                value: jsg::v8::Local<jsg::v8::Value>,
+                lock: &mut jsg::Lock<'s>,
+                value: jsg::v8::Local<'s, jsg::v8::Value>,
             ) -> Result<Option<Self::ResultType>, jsg::Error> {
-                <jsg::Rc<Self> as jsg::FromJS>::try_from_js(lock, value)
+                <jsg::Rc<Self> as jsg::FromJS<'s>>::try_from_js(lock, value)
             }
         }
 
@@ -136,7 +138,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
 /// Scans `impl_block` for `#[jsg_method]`-annotated functions and returns a
 /// `Member::Method` / `Member::StaticMethod` token stream for each.
-fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::TokenStream> {
+fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<proc_macro2::TokenStream> {
     impl_block
         .items
         .iter()
@@ -164,9 +166,9 @@ fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::
                 .any(|arg| matches!(arg, FnArg::Receiver(_)));
 
             Some(if has_self {
-                quote! { jsg::Member::Method { name: #js_name.to_owned(), callback: Self::#callback_name } }
+                quote! { jsg::Member::Method { name: #js_name.to_owned(), callback: Self::#callback_name() } }
             } else {
-                quote! { jsg::Member::StaticMethod { name: #js_name.to_owned(), callback: Self::#callback_name } }
+                quote! { jsg::Member::StaticMethod { name: #js_name.to_owned(), callback: Self::#callback_name() } }
             })
         })
         .collect()
@@ -174,7 +176,7 @@ fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::
 
 /// Scans `impl_block` for `#[jsg_static_constant]`-annotated consts and returns
 /// a `Member::StaticConstant` token stream for each.
-fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::TokenStream> {
+fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<proc_macro2::TokenStream> {
     impl_block
         .items
         .iter()
@@ -253,7 +255,7 @@ pub fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
 ///
 /// Returns a `compile_error!` token stream if the method has a `self` receiver
 /// or does not return `Self`; returns `None` if the method is valid.
-fn validate_constructor(method: &syn::ImplItemFn) -> Option<quote::__private::TokenStream> {
+fn validate_constructor(method: &syn::ImplItemFn) -> Option<proc_macro2::TokenStream> {
     let has_self = method
         .sig
         .inputs
@@ -284,8 +286,8 @@ fn extract_constructor_params(
     method: &syn::ImplItemFn,
 ) -> (
     bool,
-    Vec<quote::__private::TokenStream>,
-    Vec<quote::__private::TokenStream>,
+    Vec<proc_macro2::TokenStream>,
+    Vec<proc_macro2::TokenStream>,
 ) {
     let params: Vec<_> = method
         .sig
@@ -310,8 +312,9 @@ fn extract_constructor_params(
         .map(|(i, ty)| {
             let js_index = i - js_arg_offset;
             let var = syn::Ident::new(&format!("arg{js_index}"), method.sig.ident.span());
+            let elided_ty = elide_named_lifetimes(ty);
             let unwrap = quote! {
-                let #var = match <#ty as jsg::FromJS>::from_js(&mut lock, args.get(#js_index)) {
+                let #var = match <#elided_ty as jsg::FromJS<'_>>::from_js(lock, args.get(#js_index)) {
                     Ok(v) => v,
                     Err(err) => {
                         lock.throw_exception(&err);
@@ -333,7 +336,7 @@ fn extract_constructor_params(
 fn generate_constructor_registration(
     impl_block: &ItemImpl,
     self_ty: &syn::Type,
-) -> Option<quote::__private::TokenStream> {
+) -> Option<proc_macro2::TokenStream> {
     let constructors: Vec<_> = impl_block
         .items
         .iter()
@@ -359,39 +362,35 @@ fn generate_constructor_registration(
             }
 
             let rust_method_name = &method.sig.ident;
-            let callback_name = syn::Ident::new(
-                &format!("{rust_method_name}_constructor_callback"),
-                rust_method_name.span(),
-            );
 
             let (has_lock_param, unwraps, arg_exprs) = extract_constructor_params(method);
             let lock_arg = if has_lock_param {
-                quote! { &mut lock, }
+                quote! { &mut *lock, }
             } else {
                 quote! {}
             };
 
             quote! {
                 jsg::Member::Constructor {
-                    callback: {
-                        unsafe extern "C" fn #callback_name(
-                            info: *mut jsg::v8::ffi::FunctionCallbackInfo,
-                        ) {
-                            let mut lock = unsafe { jsg::Lock::from_args(info) };
-                            jsg::catch_panic(&mut lock, || {
-                                // SAFETY: info is a valid V8 FunctionCallbackInfo from the constructor call.
-                                let mut args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(info) };
-                                let mut lock = unsafe { jsg::Lock::from_args(info) };
-
-                                #(#unwraps)*
-
-                                let resource = #self_ty::#rust_method_name(#lock_arg #(#arg_exprs),*);
-                                let rc = jsg::Rc::new(resource);
-                                rc.attach_to_this(&mut args);
-                            });
+                    callback: jsg::function_callback(|lock, args| {
+                        // Without `new`, `this` is an arbitrary receiver with no
+                        // internal fields to attach the resource to. The message
+                        // matches C++ `throwIfConstructorCalledAsFunction`.
+                        if !args.is_construct_call() {
+                            lock.throw_exception(&jsg::Error::new_type_error(format!(
+                                "Failed to construct '{}': Please use the 'new' operator, \
+                                 this object constructor cannot be called as a function.",
+                                <#self_ty as jsg::Type>::class_name(),
+                            )));
+                            return;
                         }
-                        #callback_name
-                    },
+
+                        #(#unwraps)*
+
+                        let resource = #self_ty::#rust_method_name(#lock_arg #(#arg_exprs),*);
+                        let rc = jsg::Rc::new(resource);
+                        rc.attach_to_this(args);
+                    }),
                 }
             }
         })
@@ -409,7 +408,7 @@ fn emit_property_group(
     kind: PropertyKind,
     getter: Option<syn::Ident>,
     setter: Option<syn::Ident>,
-) -> Result<quote::__private::TokenStream, quote::__private::TokenStream> {
+) -> Result<proc_macro2::TokenStream, proc_macro2::TokenStream> {
     let Some(getter_name) = getter else {
         return Err(quote! {
             compile_error!(concat!("no getter found for property \"", #js_name, "\""))
@@ -424,16 +423,25 @@ fn emit_property_group(
     };
     let setter_tokens = if let Some(setter_name) = setter {
         let setter_cb = syn::Ident::new(&format!("{setter_name}_callback"), setter_name.span());
-        quote! { Some(Self::#setter_cb) }
+        quote! { Some(Self::#setter_cb()) }
     } else {
         quote! { None }
     };
 
+    if kind == PropertyKind::Instance {
+        return Ok(quote! {
+            jsg::Member::InstanceProperty {
+                name: #js_name.to_owned(),
+                getter_callback: Self::#getter_cb(),
+                setter_callback: #setter_tokens,
+            }
+        });
+    }
     Ok(quote! {
         jsg::Member::Property {
             name: #js_name.to_owned(),
             kind: #kind_tokens,
-            getter_callback: Self::#getter_cb,
+            getter_callback: Self::#getter_cb(),
             setter_callback: #setter_tokens,
         }
     })
@@ -443,9 +451,9 @@ fn emit_property_group(
 ///
 /// `placement` is optional; when omitted it defaults to `Prototype`.
 /// Returns `(PropertyKind, Option<js_name_override>, is_readonly)`.
-fn parse_jsg_property_args(
+pub fn parse_jsg_property_args(
     tokens: TokenStream,
-) -> Result<(PropertyKind, Option<String>, bool), quote::__private::TokenStream> {
+) -> Result<(PropertyKind, Option<String>, bool), proc_macro2::TokenStream> {
     use syn::parse::Parser as _;
     let metas = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated
         .parse(tokens)
@@ -533,6 +541,7 @@ fn derive_js_name(rust_name: &str) -> String {
 
 /// Find the group for `key` in `groups`, or append a new empty one and return it.
 /// Preserves insertion order so that property registration matches source-code order.
+#[expect(clippy::expect_used, reason = "the entry was pushed on the line above")]
 fn prop_groups_find_or_insert(
     groups: &mut PropGroups,
     key: (String, PropertyKind),
@@ -548,7 +557,7 @@ fn prop_groups_find_or_insert(
 /// and group the annotated methods by `(js_name, PropertyKind)`.
 fn scan_property_annotations(
     impl_block: &ItemImpl,
-) -> Result<PropGroups, quote::__private::TokenStream> {
+) -> Result<PropGroups, proc_macro2::TokenStream> {
     let mut groups: PropGroups = Vec::new();
 
     for item in &impl_block.items {
@@ -614,7 +623,7 @@ fn validate_and_emit_property(
     js_name: &str,
     kind: PropertyKind,
     methods: Vec<PropMethod>,
-) -> Result<quote::__private::TokenStream, quote::__private::TokenStream> {
+) -> Result<proc_macro2::TokenStream, proc_macro2::TokenStream> {
     let has_readonly_getter = methods.iter().any(|m| m.is_readonly && !m.is_setter);
     for m in &methods {
         if m.is_readonly && m.is_setter {
@@ -665,7 +674,7 @@ fn validate_and_emit_property(
 
 /// Scans an impl block for `#[jsg_property]` and `#[jsg_inspect_property]` annotations
 /// and returns a `Member::Property` token stream for each property group.
-fn collect_property_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::TokenStream> {
+fn collect_property_registrations(impl_block: &ItemImpl) -> Vec<proc_macro2::TokenStream> {
     let groups = match scan_property_annotations(impl_block) {
         Ok(g) => g,
         Err(e) => return vec![e],
@@ -684,71 +693,5 @@ fn collect_property_registrations(impl_block: &ItemImpl) -> Vec<quote::__private
 }
 
 #[cfg(test)]
-mod tests {
-    use syn::parse_quote;
-
-    use super::*;
-
-    #[test]
-    fn validate_constructor_valid() {
-        // A valid constructor: static (no self), returns Self.
-        let method: syn::ImplItemFn = parse_quote! {
-            fn constructor(name: String) -> Self { todo!() }
-        };
-        assert!(validate_constructor(&method).is_none());
-    }
-
-    #[test]
-    fn validate_constructor_rejects_self_receiver() {
-        // Instance method — must not have &self.
-        let method: syn::ImplItemFn = parse_quote! {
-            fn constructor(&self) -> Self { todo!() }
-        };
-        assert!(validate_constructor(&method).is_some());
-    }
-
-    #[test]
-    fn validate_constructor_rejects_non_self_return() {
-        // Returns String, not Self.
-        let method: syn::ImplItemFn = parse_quote! {
-            fn constructor() -> String { todo!() }
-        };
-        assert!(validate_constructor(&method).is_some());
-    }
-
-    #[test]
-    fn extract_constructor_params_no_lock() {
-        // Plain constructor — no Lock param, two JS args.
-        let method: syn::ImplItemFn = parse_quote! {
-            fn constructor(name: String, value: u32) -> Self { todo!() }
-        };
-        let (has_lock, unwraps, arg_exprs) = extract_constructor_params(&method);
-        assert!(!has_lock);
-        assert_eq!(unwraps.len(), 2);
-        assert_eq!(arg_exprs.len(), 2);
-    }
-
-    #[test]
-    fn extract_constructor_params_with_lock() {
-        // First param is `&mut jsg::Lock` — skipped from JS args.
-        let method: syn::ImplItemFn = parse_quote! {
-            fn constructor(lock: &mut jsg::Lock, name: String) -> Self { todo!() }
-        };
-        let (has_lock, unwraps, arg_exprs) = extract_constructor_params(&method);
-        assert!(has_lock);
-        // Only one JS arg (name); lock is not counted.
-        assert_eq!(unwraps.len(), 1);
-        assert_eq!(arg_exprs.len(), 1);
-    }
-
-    #[test]
-    fn extract_constructor_params_no_args() {
-        let method: syn::ImplItemFn = parse_quote! {
-            fn constructor() -> Self { todo!() }
-        };
-        let (has_lock, unwraps, arg_exprs) = extract_constructor_params(&method);
-        assert!(!has_lock);
-        assert!(unwraps.is_empty());
-        assert!(arg_exprs.is_empty());
-    }
-}
+#[path = "resource-test.rs"]
+mod tests;
