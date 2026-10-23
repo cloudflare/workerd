@@ -38,14 +38,15 @@ XThreadWaitList<void>::Waiter::~Waiter() noexcept(false) {
   }
 
   if (state->useThreadLocalOptimization) {
-    unwindDetector.catchExceptionsIfUnwinding([&]() {
-      auto& entry = KJ_ASSERT_NONNULL(threadLocalWaiters->findEntry(state.get()));
+    KJ_IF_SOME(entry, threadLocalWaiters->findEntry(state.get())) {
       // Our refcount has reached zero, so the weak reference to us has already expired. Since the
       // map holds exactly one entry per State (in this thread) and we own a reference to that
       // State, this entry must be ours.
-      KJ_ASSERT(entry.value == nullptr);
+      KJ_DTOR_ASSERT(entry.value == nullptr);
       threadLocalWaiters->erase(entry);
-    });
+    } else {
+      KJ_DTOR_FAIL_ASSERT("XThreadWaitList waiter missing from the thread-local waiter map");
+    }
   }
 }
 

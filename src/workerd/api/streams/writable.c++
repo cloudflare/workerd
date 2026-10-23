@@ -336,7 +336,7 @@ class WritableStreamRpcAdapter final: public capnp::ExplicitEndOutputStream {
   bool ended = false;
 
   kj::Ptr<WritableStreamSink> getInner() {
-    return KJ_UNWRAP_OR(inner, { kj::throwFatalException(cancellationException()); })->getPtr();
+    return KJ_UNWRAP_OR(inner, { kj::throwException(cancellationException()); })->getPtr();
   }
 
   // Cancels any in-flight operation and, unless the peer ended the stream cleanly, aborts the sink
@@ -510,7 +510,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
     KJ_IF_SOME(inner, writer) {
       return *inner;
     }
-    kj::throwFatalException(cancellationException());
+    kj::throwException(cancellationException());
   }
 
   // Runs the writer's abort algorithm on the isolate thread, reporting the generic cancellation

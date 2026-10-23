@@ -28,12 +28,12 @@ use crate::error::TranscodeError;
 /// There is no intermediate `Vec` and no copy: [`Transcoder`] reports the
 /// destination size up front, the buffer is allocated at exactly that size,
 /// and the returned view is narrowed to the bytes actually written.
-fn transcode_impl<'a>(
-    lock: &'a mut Lock,
+fn transcode_impl<'s>(
+    lock: &mut Lock<'s>,
     source: &[u8],
     from_encoding: ffi::Encoding,
     to_encoding: ffi::Encoding,
-) -> jsg::Result<v8::Local<'a, v8::Uint8Array>> {
+) -> jsg::Result<v8::Local<'s, v8::Uint8Array>> {
     let transcoder = Transcoder::new(source, from_encoding, to_encoding)?;
     let (buffer, written) = v8::ArrayBuffer::new_zeroed_with(lock, transcoder.dest_len(), |dest| {
         transcoder.transcode_into(dest)

@@ -9,6 +9,27 @@ load("@rules_cc//cc/common:cc_common.bzl", "cc_common")
 load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 load("//build/tools/clang_tidy:check_path_filters.bzl", "CHECK_PATH_FILTERS")
 
+# Canonical name of the capnp-cpp repository (e.g. "+http+capnp-cpp"), as it appears in include
+# paths: `external/<repo>/...` and `bazel-out/<config>/bin/external/<repo>/...`.
+_CAPNP_REPO_DIR = "external/" + Label("@capnp-cpp//:BUILD.bazel").repo_name
+
+def _is_capnp_include(path):
+    return (path == _CAPNP_REPO_DIR or path.startswith(_CAPNP_REPO_DIR + "/") or
+            path.endswith("/" + _CAPNP_REPO_DIR) or ("/" + _CAPNP_REPO_DIR + "/") in path)
+
+def _system_include_flag(path):
+    """Maps a system include dir to compiler flags, demoting capnp-cpp's dirs to regular ones.
+
+    Clang treats every header found through -isystem as a system header and suppresses diagnostics
+    in it and in expansions of macros defined in it (KJ_ASSERT, KJ_IF_SOME, KJ_DEFER, ...), no
+    matter whether KJ_HEADER_WARNINGS is defined. Bazel passes the include dirs of external
+    repositories with -isystem, so KJ and Cap'n Proto dirs must use -I for clang-tidy to report
+    issues in our code that come from KJ macro expansions.
+    """
+    if _is_capnp_include(path):
+        return ["-I", path]
+    return ["-isystem", path]
+
 def _get_disabled_checks_for_file(file_path):
     """Returns checks that should be disabled for this file.
 
@@ -160,10 +181,17 @@ def _clang_tidy_aspect_impl(target, ctx):
         args.add_all(local_defines, before_each = "-D")
         args.add_all(includes, before_each = "-I")
         args.add_all(quote_includes, before_each = "-iquote")
-        args.add_all(system_includes, before_each = "-isystem")
-        args.add_all(external_includes, before_each = "-isystem")
+        args.add_all(system_includes, map_each = _system_include_flag)
+        args.add_all(external_includes, map_each = _system_include_flag)
 
         args.add_all(toolchain_flags)
+
+        # KJ and Cap'n Proto headers (including generated .capnp.h files) mark themselves as system
+        # headers unless these are defined. Clang suppresses diagnostics in system headers and in
+        # expansions of macros defined there (KJ_IF_SOME, KJ_DEFER, ...), which would hide issues in
+        # our code from clang-tidy. See also _system_include_flag().
+        args.add("-DKJ_HEADER_WARNINGS")
+        args.add("-DCAPNP_HEADER_WARNINGS")
 
         # Silence warnings about unused functions or #pragma once being present in header files. For
         # source files, we already cover these warnings in regular compilation

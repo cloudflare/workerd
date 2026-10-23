@@ -149,9 +149,7 @@ void JsRpcCallPlan::copyTo(rpc::JsRpcTarget::CallParams::Builder builder) {
 }
 
 RpcDeserializerExternalHandler::~RpcDeserializerExternalHandler() noexcept(false) {
-  if (!unwindDetector.isUnwinding()) {
-    KJ_ASSERT(i == externals.size(), "deserialization did not consume all of the externals");
-  }
+  KJ_DTOR_ASSERT(i == externals.size(), "deserialization did not consume all of the externals");
 }
 
 rpc::JsValue::External::Reader RpcDeserializerExternalHandler::read() {
@@ -1131,7 +1129,7 @@ JsRpcCallAttemptPromise handleFailedJsRpcCallAttempt(
     } catch (...) {
       auto exception = kj::getCaughtExceptionAsKj();
       state->finishFailure(exception);
-      kj::throwFatalException(kj::mv(exception));
+      kj::throwException(kj::mv(exception));
     }
   });
 }
@@ -1184,7 +1182,7 @@ kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> observeActorRpcCallA
   }
   KJ_CATCH(exception) {
     observerState->recordFailure(kj::mv(observer), exception);
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   }
 }
 
@@ -2114,7 +2112,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
           e.setDescription(kj::str("remote.", description));
         }
       }
-      kj::throwFatalException(kj::mv(e));
+      kj::throwException(kj::mv(e));
     });
   }
 
@@ -2334,7 +2332,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
         return result.then([&ctx]() mutable { return ctx.waitForOutputLocks(); },
             [&ctx](kj::Exception&& e) mutable -> kj::Promise<void> {
           return ctx.waitForOutputLocks().then(
-              [e = kj::mv(e)]() mutable { kj::throwFatalException(kj::mv(e)); });
+              [e = kj::mv(e)]() mutable { kj::throwException(kj::mv(e)); });
         });
       } else {
         return result;
@@ -3306,7 +3304,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       }
     }).catch_([this](kj::Exception&& exception) {
       markJsRpcExceptionAsDelivered(ioCtx, exception);
-      kj::throwFatalException(kj::mv(exception));
+      kj::throwException(kj::mv(exception));
     });
   }
 
@@ -3442,7 +3440,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
       const TargetInfo& targetInfo,
       rpc::JsRpcTarget::CallParams::Reader params) override {
     KJ_IF_SOME(e, retryClaimRejection) {
-      kj::throwFatalException(e.clone());
+      kj::throwException(e.clone());
     }
     KJ_IF_SOME(claim, claimedRetryable) {
       // A retryable claim may have admitted a duplicate, so it does not cover a later call to a
@@ -3460,7 +3458,7 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
         kj::runCatchingExceptions([&]() { metrics->claimRetryTokenBeforeUserCode(retryable); })) {
       auto rejection = disconnectRetryClaimRejection(kj::mv(e));
       retryClaimRejection = rejection.clone();
-      kj::throwFatalException(kj::mv(rejection));
+      kj::throwException(kj::mv(rejection));
     }
   }
 
@@ -3554,7 +3552,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::run(
       KJ_LOG(ERROR, "logUncaughtExceptionAsync() threw an exception?", exc);
     }
     revocableTarget.revoke(e.clone());
-    kj::throwFatalException(kj::mv(e));
+    kj::throwException(kj::mv(e));
   }
 }
 
@@ -3623,7 +3621,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> JsRpcSessionCustomEvent::sendR
     if (revokePaf.fulfiller->isWaiting()) {
       revokePaf.fulfiller->reject(e.clone());
     }
-    kj::throwFatalException(kj::mv(e));
+    kj::throwException(kj::mv(e));
   }
 
   co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};

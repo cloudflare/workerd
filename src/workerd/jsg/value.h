@@ -495,6 +495,23 @@ class StringWrapper {
     return v8Str(js.v8Isolate, value.asPtr());
   }
 
+  // V8 hands over latin1 bytes pointing into its own heap. Nothing here may call into V8: the
+  // bytes must be copied before anything can GC.
+  template <StringLike T>
+  kj::Maybe<T> tryUnwrap(
+      Lock& js, v8::Local<v8::Context> context, const v8::FastOneByteString& handle, T*) {
+    kj::String out = latin1ToUtf8(kj::arrayPtr(handle.data, handle.length));
+
+    if constexpr (kj::isSameType<kj::String, T>()) {
+      return kj::mv(out);
+    } else if constexpr (kj::isSameType<USVString, T>()) {
+      return USVString(kj::mv(out));
+    } else {
+      static_assert(kj::isSameType<DOMString, T>());
+      return DOMString(kj::mv(out));
+    }
+  }
+
   template <typename T>
     requires(kj::isSameType<T, kj::String>() || kj::isSameType<T, USVString>() ||
         kj::isSameType<T, DOMString>())

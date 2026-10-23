@@ -200,6 +200,7 @@ brand, not a secret. Not represented in RTTI/generated types.
 | `JSG_REQUIRE(cond, type, msg...)`          | Throw JS error if condition false             |
 | `JSG_REQUIRE_NONNULL(maybe, type, msg...)` | Unwrap `kj::Maybe`; throw if none             |
 | `JSG_FAIL_REQUIRE(type, msg...)`           | Unconditionally throw JS error                |
+| `JSG_DTOR_REQUIRE(cond, type, msg...)`     | `JSG_REQUIRE` for destructors                 |
 | `JSG_ASSERT(cond, type, msg...)`           | Like `KJ_ASSERT` but produces JSG-style error |
 
 ### Memory and Performance
@@ -583,6 +584,7 @@ null. Builds without the sandbox store an ordinary pointer.
 | `CompilationObserver`       | `onCompileCacheRejected`          | Cached data rejected (version mismatch)   |
 | `CompilationObserver`       | `onCompileCacheGenerated`         | New cache data generated                  |
 | `CompilationObserver`       | `onCompileCacheGenerationFailed`  | Cache generation failed                   |
+| `CompilationObserver`       | `onCompileHintsConsumed`          | Legacy ESM compiled using function hints  |
 | `ResolveObserver`           | `onResolveModule`                 | Module resolution begins                  |
 | `InternalExceptionObserver` | `reportInternalException`         | Internal exception for metrics            |
 | `IsolateObserver`           | `onDynamicEval`                   | `eval()`, `new Function()`, etc. detected |

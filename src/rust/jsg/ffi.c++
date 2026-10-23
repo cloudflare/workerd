@@ -19,6 +19,10 @@
 
 #include <memory>
 
+#if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+#include <sanitizer/lsan_interface.h>
+#endif
+
 #if V8_MAJOR_VERSION >= 15
 #define Utf8LengthV2 Utf8Length
 #define WriteV2 Write
@@ -57,7 +61,7 @@ namespace workerd::rust::jsg {
   }
 
 #define DEFINE_TYPED_ARRAY_GET(name, v8_type, elem_type)                                           \
-  elem_type local_##name##_get(Isolate* isolate, const Local& array, size_t index) {               \
+  elem_type local_##name##_get(const Local& array, size_t index) {                                 \
     auto typed = local_as_ref_from_ffi<v8::v8_type>(array);                                        \
     KJ_REQUIRE(index < typed->Length(), "index out of bounds");                                    \
     auto data = reinterpret_cast<elem_type*>(                                                      \
@@ -142,10 +146,6 @@ Local local_new_undefined(Isolate* isolate) {
 
 bool local_eq(const Local& lhs, const Local& rhs) {
   return local_as_ref_from_ffi<v8::Value>(lhs) == local_as_ref_from_ffi<v8::Value>(rhs);
-}
-
-bool local_has_value(const Local& val) {
-  return *local_as_ref_from_ffi<v8::Value>(val) != nullptr;
 }
 
 bool local_is_string(const Local& val) {
@@ -345,9 +345,10 @@ bool local_string_is_flat(const Local& value) {
   return local_as_ref_from_ffi<v8::String>(value)->IsFlat();
 }
 
-Local local_string_concat(Isolate* isolate, Local left, Local right) {
-  return to_ffi(v8::String::Concat(isolate, local_from_ffi<v8::String>(kj::mv(left)),
-      local_from_ffi<v8::String>(kj::mv(right))));
+MaybeLocal local_string_concat(Isolate* isolate, Local left, Local right) {
+  // `Concat` returns an empty handle when the result would be too long.
+  return maybe_local_to_ffi(v8::MaybeLocal<v8::String>(v8::String::Concat(isolate,
+      local_from_ffi<v8::String>(kj::mv(left)), local_from_ffi<v8::String>(kj::mv(right)))));
 }
 
 Local local_string_internalize(Isolate* isolate, const Local& value) {
@@ -371,11 +372,6 @@ MaybeLocal local_string_new_from_two_byte(
     Isolate* isolate, const uint16_t* data, int32_t length, bool internalized) {
   auto type = internalized ? v8::NewStringType::kInternalized : v8::NewStringType::kNormal;
   return maybe_local_to_ffi(v8::String::NewFromTwoByte(isolate, data, type, length));
-}
-
-bool maybe_local_is_empty(const MaybeLocal& value) {
-  auto ptr_void = reinterpret_cast<const void*>(&value.ptr);
-  return reinterpret_cast<const v8::MaybeLocal<v8::Value>*>(ptr_void)->IsEmpty();
 }
 
 // Local<Name>
@@ -425,22 +421,34 @@ void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key,
   ::workerd::jsg::check(v8_obj->Set(context, v8_key, local_from_ffi<v8::Value>(kj::mv(value))));
 }
 
+// Runs `fn` (returning a v8::MaybeLocal<T> or v8::Maybe<T>) and, on failure, converts the pending
+// JS exception into a `jsg.<Type>:`-prefixed kj::Exception and throws it, so
+// workerd-cxx's Result::run catches it in C++ and hands Rust a catchable error
+// instead of aborting. Termination exceptions are re-thrown unchanged. The
+// TryCatch and termination handling are delegated to jsg::Lock::tryCatch.
+template <typename Func>
+static auto unwrapCoerce(v8::Isolate* isolate, Func&& fn) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  JSG_TRY(js) {
+    return ::workerd::jsg::check(fn());
+  }
+  JSG_CATCH(error) {
+    kj::throwException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
+  };
+}
+
 bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key) {
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   auto v8_key = makeInternedStr(isolate, key);
-  return v8_obj->Has(context, v8_key).FromJust();
+  return unwrapCoerce(isolate, [&] { return v8_obj->Has(context, v8_key); });
 }
 
-kj::Maybe<Local> local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key) {
+Local local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key) {
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   auto v8_key = makeInternedStr(isolate, key);
-  v8::Local<v8::Value> result;
-  if (!v8_obj->Get(context, v8_key).ToLocal(&result)) {
-    return kj::none;
-  }
-  return to_ffi(kj::mv(result));
+  return to_ffi(unwrapCoerce(isolate, [&] { return v8_obj->Get(context, v8_key); }));
 }
 
 // Local<Array>
@@ -448,7 +456,7 @@ Local local_new_array(Isolate* isolate, size_t length) {
   return to_ffi(v8::Array::New(isolate, length));
 }
 
-uint32_t local_array_length(Isolate* isolate, const Local& array) {
+uint32_t local_array_length(const Local& array) {
   return local_as_ref_from_ffi<v8::Array>(array)->Length();
 }
 
@@ -479,12 +487,10 @@ Local local_new_array_buffer_empty(Isolate* isolate, size_t byte_length) {
   return to_ffi(v8::ArrayBuffer::New(isolate, byte_length));
 }
 
-kj::Maybe<Local> array_buffer_new_with_mode(
+MaybeLocal array_buffer_new_with_mode(
     Isolate* isolate, size_t byte_length, BackingStoreInitializationMode mode) {
-  auto maybe = v8::ArrayBuffer::MaybeNew(
-      isolate, byte_length, static_cast<v8::BackingStoreInitializationMode>(mode));
-  if (maybe.IsEmpty()) return kj::none;
-  return to_ffi(maybe.ToLocalChecked());
+  return maybe_local_to_ffi(v8::ArrayBuffer::MaybeNew(
+      isolate, byte_length, static_cast<v8::BackingStoreInitializationMode>(mode)));
 }
 
 Local array_buffer_from_backing_store(Isolate* isolate, size_t ptr) {
@@ -492,29 +498,29 @@ Local array_buffer_from_backing_store(Isolate* isolate, size_t ptr) {
       v8::ArrayBuffer::New(isolate, *reinterpret_cast<std::shared_ptr<v8::BackingStore>*>(ptr)));
 }
 
-size_t local_array_buffer_byte_length(Isolate* isolate, const Local& buffer) {
+size_t local_array_buffer_byte_length(const Local& buffer) {
   return local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->ByteLength();
 }
 
-uint8_t* local_array_buffer_data(Isolate* isolate, const Local& buffer) {
+uint8_t* local_array_buffer_data(const Local& buffer) {
   return static_cast<uint8_t*>(local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->Data());
 }
 
-size_t local_array_buffer_get_backing_store(Isolate* isolate, const Local& buffer) {
+size_t local_array_buffer_get_backing_store(const Local& buffer) {
   return reinterpret_cast<size_t>(new std::shared_ptr<v8::BackingStore>(
       local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->GetBackingStore()));
 }
 
 // Local<ArrayBufferView>
-size_t local_array_buffer_view_byte_offset(Isolate* isolate, const Local& view) {
+size_t local_array_buffer_view_byte_offset(const Local& view) {
   return local_as_ref_from_ffi<v8::ArrayBufferView>(view)->ByteOffset();
 }
 
-size_t local_array_buffer_view_byte_length(Isolate* isolate, const Local& view) {
+size_t local_array_buffer_view_byte_length(const Local& view) {
   return local_as_ref_from_ffi<v8::ArrayBufferView>(view)->ByteLength();
 }
 
-uint8_t* local_array_buffer_view_buffer_data(Isolate* isolate, const Local& view) {
+uint8_t* local_array_buffer_view_buffer_data(const Local& view) {
   return static_cast<uint8_t*>(local_as_ref_from_ffi<v8::ArrayBufferView>(view)->Buffer()->Data());
 }
 
@@ -522,7 +528,7 @@ Local local_array_buffer_view_get_buffer(Isolate* isolate, const Local& view) {
   return to_ffi(local_as_ref_from_ffi<v8::ArrayBufferView>(view)->Buffer());
 }
 
-size_t local_array_buffer_view_element_size(Isolate* isolate, const Local& view) {
+size_t local_array_buffer_view_element_size(const Local& view) {
   auto& v8Val = local_as_ref_from_ffi<v8::Value>(view);
   if (v8Val->IsUint8Array() || v8Val->IsInt8Array() || v8Val->IsUint8ClampedArray()) return 1;
   if (v8Val->IsUint16Array() || v8Val->IsInt16Array()) return 2;
@@ -531,7 +537,7 @@ size_t local_array_buffer_view_element_size(Isolate* isolate, const Local& view)
   return 0;  // DataView — no fixed element size
 }
 
-bool local_array_buffer_view_is_integer_type(Isolate* isolate, const Local& view) {
+bool local_array_buffer_view_is_integer_type(const Local& view) {
   auto& v8Val = local_as_ref_from_ffi<v8::Value>(view);
   // Float32Array, Float64Array, and DataView are not integer types.
   return v8Val->IsTypedArray() && !v8Val->IsFloat32Array() && !v8Val->IsFloat64Array();
@@ -575,11 +581,11 @@ void local_array_buffer_detach(Isolate* isolate, Local& buffer) {
   local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->Detach(v8::Local<v8::Value>()).Check();
 }
 
-bool local_array_buffer_was_detached(Isolate* isolate, const Local& buffer) {
+bool local_array_buffer_was_detached(const Local& buffer) {
   return local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->WasDetached();
 }
 
-bool local_array_buffer_is_detachable(Isolate* isolate, const Local& buffer) {
+bool local_array_buffer_is_detachable(const Local& buffer) {
   return local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->IsDetachable();
 }
 
@@ -601,10 +607,14 @@ DEFINE_TYPED_ARRAY_NEW(bigint64_array, BigInt64Array, int64_t)
 DEFINE_TYPED_ARRAY_NEW(biguint64_array, BigUint64Array, uint64_t)
 
 // Wrappers
-Local wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl) {
+MaybeLocal wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl) {
+  if (wrappable->hasWrapper() && wrappable->getIsolate() != isolate) {
+    return MaybeLocal{.ptr = 0};
+  }
+
   // Check if already wrapped
   KJ_IF_SOME(handle, wrappable->tryGetHandle(isolate)) {
-    return to_ffi(v8::Local<v8::Value>::Cast(handle));
+    return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(handle));
   }
 
   auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
@@ -622,7 +632,7 @@ Local wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global&
       tagAddress,
       static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
 
-  return to_ffi(v8::Local<v8::Value>::Cast(object));
+  return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(object));
 }
 
 void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args) {
@@ -642,22 +652,6 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
 
 // Unwrappers
 
-// Runs `fn` (returning a v8::MaybeLocal<T>) and, on failure, converts the pending
-// JS exception into a `jsg.<Type>:`-prefixed kj::Exception and throws it, so
-// workerd-cxx's Result::run catches it in C++ and hands Rust a catchable error
-// instead of aborting. Termination exceptions are re-thrown unchanged. The
-// TryCatch and termination handling are delegated to jsg::Lock::tryCatch.
-template <typename T, typename Func>
-static v8::Local<T> unwrapCoerce(v8::Isolate* isolate, Func&& fn) {
-  auto& js = ::workerd::jsg::Lock::from(isolate);
-  JSG_TRY(js) {
-    return ::workerd::jsg::check(fn());
-  }
-  JSG_CATCH(error) {
-    kj::throwFatalException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
-  };
-}
-
 ::rust::String unwrap_string(Isolate* isolate, Local value) {
   auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
   // Fast path: a string primitive needs no coercion and can't throw, so skip
@@ -667,7 +661,7 @@ static v8::Local<T> unwrapCoerce(v8::Isolate* isolate, Func&& fn) {
     v8Str = v8Value.As<v8::String>();
   } else {
     auto context = isolate->GetCurrentContext();
-    v8Str = unwrapCoerce<v8::String>(isolate, [&] { return v8Value->ToString(context); });
+    v8Str = unwrapCoerce(isolate, [&] { return v8Value->ToString(context); });
   }
   v8::String::ValueView view(isolate, v8Str);
   if (!view.is_one_byte()) {
@@ -688,8 +682,7 @@ double unwrap_number(Isolate* isolate, Local value) {
     return v8Value.As<v8::Number>()->Value();
   }
   auto context = isolate->GetCurrentContext();
-  v8::Local<v8::Number> number =
-      unwrapCoerce<v8::Number>(isolate, [&] { return v8Value->ToNumber(context); });
+  v8::Local<v8::Number> number = unwrapCoerce(isolate, [&] { return v8Value->ToNumber(context); });
   return number->Value();
 }
 
@@ -772,7 +765,7 @@ DEFINE_TYPED_ARRAY_UNWRAP(biguint64_array, BigUint64Array, uint64_t)
     }
   }
   JSG_CATCH(error) {
-    kj::throwFatalException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
+    kj::throwException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
   };
 
   return result;
@@ -788,20 +781,20 @@ Local uint8_array_from_buffer(
   return to_ffi(v8::Uint8Array::New(arrayBuffer, byte_offset, length));
 }
 
-size_t local_typed_array_length(Isolate* isolate, const Local& array) {
+size_t local_typed_array_length(const Local& array) {
   return local_as_ref_from_ffi<v8::TypedArray>(array)->Length();
 }
 
-uintptr_t local_typed_array_buffer_data(Isolate* isolate, const Local& array) {
+uintptr_t local_typed_array_buffer_data(const Local& array) {
   return reinterpret_cast<uintptr_t>(
       local_as_ref_from_ffi<v8::TypedArray>(array)->Buffer()->Data());
 }
 
-size_t local_typed_array_byte_offset(Isolate* isolate, const Local& array) {
+size_t local_typed_array_byte_offset(const Local& array) {
   return local_as_ref_from_ffi<v8::TypedArray>(array)->ByteOffset();
 }
 
-size_t local_typed_array_byte_length(Isolate* isolate, const Local& array) {
+size_t local_typed_array_byte_length(const Local& array) {
   return local_as_ref_from_ffi<v8::TypedArray>(array)->ByteLength();
 }
 
@@ -921,6 +914,10 @@ Local fci_get_this(FunctionCallbackInfo* args) {
 
 size_t fci_get_length(FunctionCallbackInfo* args) {
   return args->Length();
+}
+
+bool fci_is_construct_call(FunctionCallbackInfo* args) {
+  return args->IsConstructCall();
 }
 
 Local fci_get_arg(FunctionCallbackInfo* args, size_t index) {
@@ -1206,8 +1203,18 @@ void isolate_terminate_execution(Isolate* isolate) {
   ::workerd::jsg::IsolateBase::from(isolate).terminateExecution();
 }
 
+void ignore_leak(size_t ptr) {
+#if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+  __lsan_ignore_object(reinterpret_cast<const void*>(ptr));
+#endif
+}
+
 bool isolate_is_locked(Isolate* isolate) {
   return v8::Locker::IsLocked(isolate);
+}
+
+bool isolate_in_context(Isolate* isolate) {
+  return isolate->InContext();
 }
 
 }  // namespace workerd::rust::jsg

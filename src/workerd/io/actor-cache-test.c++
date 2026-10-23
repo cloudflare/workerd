@@ -27,7 +27,7 @@ kj::Promise<T> eagerlyReportExceptions(kj::Promise<T> promise, kj::SourceLocatio
   // TODO(cleanup): Move to KJ somewhere?
   return promise.eagerlyEvaluate([location](kj::Exception&& e) -> T {
     KJ_LOG_AT(ERROR, location, e);
-    kj::throwFatalException(kj::mv(e));
+    kj::throwException(kj::mv(e));
   });
 }
 

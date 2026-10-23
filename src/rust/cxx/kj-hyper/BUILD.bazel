@@ -21,10 +21,6 @@ rust_library(
     proc_macro_deps = [
         "@crates_vendor//:async-trait",
     ],
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/cxx",

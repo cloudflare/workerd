@@ -522,7 +522,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
         body->neuter(makeNeuterException(NeuterReason::SENT_RESPONSE));
       }, [body = kj::addRef(*ownRequestBody)](kj::Exception&& e) mutable {
         body->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
-        kj::throwFatalException(kj::mv(e));
+        kj::throwException(kj::mv(e));
       }).attach(kj::mv(deferredNeuter));
 
       return deferredProxy;
@@ -531,7 +531,7 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
       // HACK: We depend on the fact that the success-case lambda above hasn't been destroyed yet
       //   so `deferredNeuter` hasn't been destroyed yet.
       body->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION));
-      kj::throwFatalException(kj::mv(e));
+      kj::throwException(kj::mv(e));
     });
   } else {
     // The service worker API says that if default handling is prevented and respondWith() wasn't

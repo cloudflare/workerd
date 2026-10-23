@@ -230,6 +230,8 @@ StoredExternalHandler::Serializer::~Serializer() noexcept(false) {
     pendingWrite.writePromise =
         kj::joinPromisesFailFast(state.tokenPromises.releaseAsArray())
             .then([key = key.clone(), &handler = state.handler](kj::Array<kj::Array<byte>> tokens) {
+      // NOLINTBEGIN(custom-dtor-throw-during-unwind): a continuation, not run by the destructor.
+
       // We can't possibly have a sync transaction open at this point because we're in an async
       // continuation. Hence we can assume `pendingWrites` has the final merged set of writes.
       KJ_ASSERT(handler.currentSyncTxn == kj::none);
@@ -249,6 +251,8 @@ StoredExternalHandler::Serializer::~Serializer() noexcept(false) {
 
       // If that was the last pending write, fulfill the on-empty fulfiller.
       handler.fulfillIfEmpty();
+
+      // NOLINTEND(custom-dtor-throw-during-unwind)
     }).eagerlyEvaluate([&handler = state.handler](kj::Exception&& e) {
       KJ_IF_SOME(f, handler.onEmptyFulfiller) {
         f->reject(e.clone());

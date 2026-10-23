@@ -186,7 +186,7 @@ struct TunneledContext: public ContextGlobalObject {
     JSG_FAIL_REQUIRE(InternalDOMOperationError, "thrown from throwTunneledInternalOperationError");
   }
   void throwRemoteCpuExceededError() {
-    kj::throwFatalException(KJ_EXCEPTION(OVERLOADED,
+    kj::throwException(KJ_EXCEPTION(OVERLOADED,
         "remote exception: remote exception: worker_do_not_log; script exceeded time limit",
         "script exceeded time limit"));
   }
@@ -431,7 +431,7 @@ struct RetryableContext: public ContextGlobalObject {
                                               : kj::Exception::Type::FAILED;
     kj::Exception exception(exceptionType, __FILE__, __LINE__, kj::mv(description));
     if (transient) markTransient(exception);
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   }
   JSG_RESOURCE_TYPE(RetryableContext) {
     JSG_METHOD(throwException);

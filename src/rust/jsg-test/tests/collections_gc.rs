@@ -88,7 +88,7 @@ fn vec_rc_children_kept_alive_through_gc() {
             children: vec![c1.clone(), c2.clone(), c3.clone()],
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         // Drop all Rust refs.
         std::mem::drop(c1);
@@ -121,7 +121,7 @@ fn vec_rc_empty_does_not_crash_during_gc() {
     harness.run_in_context(|lock, ctx| {
         let parent = jsg::Rc::new(VecParent { children: vec![] });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
 
         crate::Harness::request_gc(lock);
@@ -173,7 +173,7 @@ fn hashmap_rc_values_kept_alive_through_gc() {
 
         let parent = jsg::Rc::new(HashMapParent { children: map });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(a);
         std::mem::drop(b);
@@ -204,7 +204,7 @@ fn hashmap_rc_empty_does_not_crash_during_gc() {
             children: HashMap::new(),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
 
         crate::Harness::request_gc(lock);
@@ -256,7 +256,7 @@ fn btreemap_rc_values_kept_alive_through_gc() {
 
         let parent = jsg::Rc::new(BTreeMapParent { children: map });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(x);
         std::mem::drop(y);
@@ -287,7 +287,7 @@ fn btreemap_rc_empty_does_not_crash_during_gc() {
             children: BTreeMap::new(),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
 
         crate::Harness::request_gc(lock);
@@ -346,7 +346,7 @@ fn hashset_rc_elements_kept_alive_through_gc() {
 
         let parent = jsg::Rc::new(HashSetParent { children: set });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(p);
         std::mem::drop(q);
@@ -377,7 +377,7 @@ fn hashset_rc_empty_does_not_crash_during_gc() {
             children: HashSet::new(),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
 
         crate::Harness::request_gc(lock);
@@ -434,7 +434,7 @@ fn btreeset_rc_elements_kept_alive_through_gc() {
 
         let parent = jsg::Rc::new(BTreeSetParent { children: set });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(r);
         std::mem::drop(s);
@@ -465,7 +465,7 @@ fn btreeset_rc_empty_does_not_crash_during_gc() {
             children: BTreeSet::new(),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
 
         crate::Harness::request_gc(lock);
@@ -515,7 +515,7 @@ fn cell_vec_rc_children_kept_alive_through_gc() {
             children: Cell::new(vec![c1.clone(), c2.clone()]),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(c1);
         std::mem::drop(c2);
@@ -546,7 +546,7 @@ fn cell_vec_rc_empty_does_not_crash_during_gc() {
             children: Cell::new(vec![]),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
 
         crate::Harness::request_gc(lock);
@@ -598,7 +598,7 @@ fn cell_hashmap_rc_values_kept_alive_through_gc() {
             children: Cell::new(map),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(m);
         std::mem::drop(parent);
@@ -660,7 +660,7 @@ fn mixed_collection_fields_all_traced() {
             direct: direct_child.clone(),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(vec_child);
         std::mem::drop(map_child);
@@ -761,7 +761,7 @@ fn hashmap_integer_key_rc_values_traced() {
 
         let parent = jsg::Rc::new(IntKeyMapParent { children: map });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(v);
         std::mem::drop(parent);
@@ -836,7 +836,7 @@ fn trace_delegation_child_kept_alive_through_gc() {
             },
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
         std::mem::drop(parent);
@@ -900,7 +900,7 @@ fn custom_trace_child_kept_alive_through_gc() {
             child: child.clone(),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
         std::mem::drop(parent);

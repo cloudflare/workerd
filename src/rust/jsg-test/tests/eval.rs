@@ -2,13 +2,35 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+use jsg::FromJS;
 use jsg::Number;
-use jsg::ToJS;
 use jsg_macros::jsg_constructor;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 
 use crate::EvalError;
+
+/// A panic in a `run_in_context` callback reaches the caller without unwinding through C++,
+/// and the harness stays usable.
+#[test]
+fn run_in_context_resumes_panic_and_stays_usable() {
+    let harness = crate::Harness::new();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        harness.run_in_context(|_lock, _ctx| -> Result<(), jsg::Error> {
+            panic!("intentional panic in run_in_context");
+        });
+    }));
+    let payload = result.expect_err("the panic must reach the caller");
+    assert_eq!(
+        payload.downcast_ref::<&str>(),
+        Some(&"intentional panic in run_in_context")
+    );
+    harness.run_in_context(|lock, ctx| {
+        let result: Number = ctx.eval(lock, "1 + 1").unwrap();
+        assert!((result.value() - 2.0).abs() < f64::EPSILON);
+        Ok(())
+    });
+}
 
 #[test]
 fn eval_returns_correct_type() {
@@ -118,7 +140,7 @@ fn eval_throws_on_error() {
         let result = ctx.eval::<bool>(lock, "throw new Error('test error')");
         match result.unwrap_err() {
             EvalError::Exception(value) => {
-                assert_eq!(value.to_string(), "Error: test error");
+                assert_eq!(String::from_js(lock, value).unwrap(), "Error: test error");
             }
             _ => panic!("Unexpected error type"),
         }
@@ -133,7 +155,7 @@ fn eval_throws_string_preserves_message() {
         let result = ctx.eval::<bool>(lock, "throw 'custom string error'");
         match result.unwrap_err() {
             EvalError::Exception(value) => {
-                assert_eq!(value.to_string(), "custom string error");
+                assert_eq!(String::from_js(lock, value).unwrap(), "custom string error");
             }
             _ => panic!("Unexpected error type"),
         }
@@ -323,7 +345,7 @@ fn lenient_resource_some() {
         let boxed = jsg::Rc::new(NumberBox {
             value: jsg::Number::new(42.0),
         });
-        ctx.set_global("box", boxed.to_js(lock));
+        ctx.set_global(lock, "box", boxed);
         let result: jsg::Number = ctx.eval(lock, "box.takeLenient(box)").unwrap();
         assert!((result.value() - 42.0).abs() < f64::EPSILON);
         Ok(())
@@ -337,7 +359,7 @@ fn lenient_resource_undefined() {
         let boxed = jsg::Rc::new(NumberBox {
             value: jsg::Number::new(42.0),
         });
-        ctx.set_global("box", boxed.to_js(lock));
+        ctx.set_global(lock, "box", boxed);
         let result: jsg::Number = ctx.eval(lock, "box.takeLenient()").unwrap();
         assert!((result.value() - -12.6).abs() < f64::EPSILON);
         Ok(())
@@ -351,7 +373,7 @@ fn lenient_resource_undefined_explicit() {
         let boxed = jsg::Rc::new(NumberBox {
             value: jsg::Number::new(42.0),
         });
-        ctx.set_global("box", boxed.to_js(lock));
+        ctx.set_global(lock, "box", boxed);
         let result: jsg::Number = ctx.eval(lock, "box.takeLenient(undefined)").unwrap();
         assert!((result.value() - -12.6).abs() < f64::EPSILON);
         Ok(())
@@ -365,7 +387,7 @@ fn lenient_resource_null() {
         let boxed = jsg::Rc::new(NumberBox {
             value: jsg::Number::new(42.0),
         });
-        ctx.set_global("box", boxed.to_js(lock));
+        ctx.set_global(lock, "box", boxed);
         let result: jsg::Number = ctx.eval(lock, "box.takeLenient(null)").unwrap();
         assert!((result.value() - 42.97).abs() < f64::EPSILON);
         Ok(())
@@ -379,7 +401,7 @@ fn lenient_resource_wrong_type() {
         let boxed = jsg::Rc::new(NumberBox {
             value: jsg::Number::new(42.0),
         });
-        ctx.set_global("box", boxed.to_js(lock));
+        ctx.set_global(lock, "box", boxed);
         // Passing a function instead of a NumberBox — should be silently treated as absent.
         let result: jsg::Number = ctx.eval(lock, "box.takeLenient(() => {})").unwrap();
         assert!((result.value() - 321.0).abs() < f64::EPSILON);

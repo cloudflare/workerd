@@ -428,7 +428,7 @@ ZlibContext::~ZlibContext() noexcept(false) {
   // per-mode switch.
   auto status = core.end();
 
-  JSG_REQUIRE(
+  JSG_DTOR_REQUIRE(
       status == Z_OK || status == Z_DATA_ERROR, Error, "Uncaught error on closing zlib stream");
 }
 

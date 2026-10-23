@@ -2,6 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
+mod argument_errors;
 mod arrays;
 mod buffer_types;
 mod coercion_safety;
@@ -9,14 +10,20 @@ mod collections_gc;
 mod eval;
 mod function;
 mod gc;
+mod harness;
+mod integer;
+mod isolates;
 mod jsg_oneof;
 mod jsg_struct;
 mod local_cast;
+mod local_handle;
 mod name;
 mod non_coercible;
+mod option;
 mod resource_callback;
 mod resource_conversion;
 mod resource_properties;
+mod resource_template;
 mod string;
 mod symbol;
 mod traceable_gc;

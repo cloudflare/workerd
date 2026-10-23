@@ -47,6 +47,9 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
   `#[jsg_method(name = "jsName")]`.
 - The first typed parameter may be `&mut Lock` / `&mut jsg::Lock` to receive the
   isolate lock directly — it is not exposed as a JavaScript argument.
+- To take or return handles, name the callback's scope:
+  `fn f<'s>(&self, lock: &mut Lock<'s>, v: Local<'s, Value>) -> Local<'s, Value>`. The
+  generated callback ties `'s` to its own scope.
 
 ```rust
 #[jsg_resource]
@@ -122,7 +125,8 @@ impl WebSocket {
 Marks a **static** method (no `self` receiver, returns `Self`) as the JavaScript
 constructor. Only one per impl block is allowed. Without it, `new MyClass()` throws
 `Illegal constructor`. An optional first parameter of `&mut Lock` is passed the
-isolate lock and is not counted as a JavaScript argument.
+isolate lock and is not counted as a JavaScript argument. Calling the constructor without
+`new` (`MyClass()`, `MyClass.call(obj)`) throws a `TypeError`, as in C++ JSG.
 
 ```rust
 #[jsg_resource]

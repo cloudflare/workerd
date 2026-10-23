@@ -15,6 +15,7 @@ use syn::FnArg;
 use syn::ItemImpl;
 
 use crate::trace::generate_trace_statements;
+use crate::utils::elide_named_lifetimes;
 use crate::utils::error;
 use crate::utils::extract_name_attribute;
 use crate::utils::extract_named_fields;
@@ -93,38 +94,39 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         impl jsg::Type for #name {
             fn class_name() -> &'static str { #class_name }
 
-            fn is_exact(value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
+            fn is_exact(value: jsg::v8::Local<'_, jsg::v8::Value>) -> bool {
                 value.is_object()
             }
         }
 
         #[automatically_derived]
-        impl jsg::ToJS for #name {
-            fn to_js<'a, 'b>(self, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
-            where
-                'b: 'a,
-            {
+        impl<'s> jsg::ToJS<'s> for #name {
+            fn to_js(self, lock: &mut jsg::Lock<'s>) -> jsg::v8::Local<'s, jsg::v8::Value> {
                 let r = jsg::Rc::new(self);
-                r.to_js(lock)
+                jsg::ToJS::to_js(r, lock)
             }
         }
 
         #[automatically_derived]
-        impl jsg::FromJS for #name {
+        impl<'s> jsg::FromJS<'s> for #name {
             type ResultType = jsg::Rc<Self>;
 
+            fn type_name() -> String {
+                <Self as jsg::Type>::class_name().to_owned()
+            }
+
             fn from_js(
-                lock: &mut jsg::Lock,
-                value: jsg::v8::Local<jsg::v8::Value>,
+                lock: &mut jsg::Lock<'s>,
+                value: jsg::v8::Local<'s, jsg::v8::Value>,
             ) -> Result<Self::ResultType, jsg::Error> {
-                <jsg::Rc<Self> as jsg::FromJS>::from_js(lock, value)
+                <jsg::Rc<Self> as jsg::FromJS<'s>>::from_js(lock, value)
             }
 
             fn try_from_js(
-                lock: &mut jsg::Lock,
-                value: jsg::v8::Local<jsg::v8::Value>,
+                lock: &mut jsg::Lock<'s>,
+                value: jsg::v8::Local<'s, jsg::v8::Value>,
             ) -> Result<Option<Self::ResultType>, jsg::Error> {
-                <jsg::Rc<Self> as jsg::FromJS>::try_from_js(lock, value)
+                <jsg::Rc<Self> as jsg::FromJS<'s>>::try_from_js(lock, value)
             }
         }
 
@@ -164,9 +166,9 @@ fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<proc_macro2::Token
                 .any(|arg| matches!(arg, FnArg::Receiver(_)));
 
             Some(if has_self {
-                quote! { jsg::Member::Method { name: #js_name.to_owned(), callback: Self::#callback_name } }
+                quote! { jsg::Member::Method { name: #js_name.to_owned(), callback: Self::#callback_name() } }
             } else {
-                quote! { jsg::Member::StaticMethod { name: #js_name.to_owned(), callback: Self::#callback_name } }
+                quote! { jsg::Member::StaticMethod { name: #js_name.to_owned(), callback: Self::#callback_name() } }
             })
         })
         .collect()
@@ -310,8 +312,9 @@ fn extract_constructor_params(
         .map(|(i, ty)| {
             let js_index = i - js_arg_offset;
             let var = syn::Ident::new(&format!("arg{js_index}"), method.sig.ident.span());
+            let elided_ty = elide_named_lifetimes(ty);
             let unwrap = quote! {
-                let #var = match <#ty as jsg::FromJS>::from_js(&mut lock, args.get(#js_index)) {
+                let #var = match <#elided_ty as jsg::FromJS<'_>>::from_js(lock, args.get(#js_index)) {
                     Ok(v) => v,
                     Err(err) => {
                         lock.throw_exception(&err);
@@ -359,39 +362,35 @@ fn generate_constructor_registration(
             }
 
             let rust_method_name = &method.sig.ident;
-            let callback_name = syn::Ident::new(
-                &format!("{rust_method_name}_constructor_callback"),
-                rust_method_name.span(),
-            );
 
             let (has_lock_param, unwraps, arg_exprs) = extract_constructor_params(method);
             let lock_arg = if has_lock_param {
-                quote! { &mut lock, }
+                quote! { &mut *lock, }
             } else {
                 quote! {}
             };
 
             quote! {
                 jsg::Member::Constructor {
-                    callback: {
-                        unsafe extern "C" fn #callback_name(
-                            info: *mut jsg::v8::ffi::FunctionCallbackInfo,
-                        ) {
-                            let mut lock = unsafe { jsg::Lock::from_args(info) };
-                            jsg::catch_panic(&mut lock, || {
-                                // SAFETY: info is a valid V8 FunctionCallbackInfo from the constructor call.
-                                let mut args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(info) };
-                                let mut lock = unsafe { jsg::Lock::from_args(info) };
-
-                                #(#unwraps)*
-
-                                let resource = #self_ty::#rust_method_name(#lock_arg #(#arg_exprs),*);
-                                let rc = jsg::Rc::new(resource);
-                                rc.attach_to_this(&mut args);
-                            });
+                    callback: jsg::function_callback(|lock, args| {
+                        // Without `new`, `this` is an arbitrary receiver with no
+                        // internal fields to attach the resource to. The message
+                        // matches C++ `throwIfConstructorCalledAsFunction`.
+                        if !args.is_construct_call() {
+                            lock.throw_exception(&jsg::Error::new_type_error(format!(
+                                "Failed to construct '{}': Please use the 'new' operator, \
+                                 this object constructor cannot be called as a function.",
+                                <#self_ty as jsg::Type>::class_name(),
+                            )));
+                            return;
                         }
-                        #callback_name
-                    },
+
+                        #(#unwraps)*
+
+                        let resource = #self_ty::#rust_method_name(#lock_arg #(#arg_exprs),*);
+                        let rc = jsg::Rc::new(resource);
+                        rc.attach_to_this(args);
+                    }),
                 }
             }
         })
@@ -424,7 +423,7 @@ fn emit_property_group(
     };
     let setter_tokens = if let Some(setter_name) = setter {
         let setter_cb = syn::Ident::new(&format!("{setter_name}_callback"), setter_name.span());
-        quote! { Some(Self::#setter_cb) }
+        quote! { Some(Self::#setter_cb()) }
     } else {
         quote! { None }
     };
@@ -433,7 +432,7 @@ fn emit_property_group(
         return Ok(quote! {
             jsg::Member::InstanceProperty {
                 name: #js_name.to_owned(),
-                getter_callback: Self::#getter_cb,
+                getter_callback: Self::#getter_cb(),
                 setter_callback: #setter_tokens,
             }
         });
@@ -442,7 +441,7 @@ fn emit_property_group(
         jsg::Member::Property {
             name: #js_name.to_owned(),
             kind: #kind_tokens,
-            getter_callback: Self::#getter_cb,
+            getter_callback: Self::#getter_cb(),
             setter_callback: #setter_tokens,
         }
     })

@@ -102,7 +102,7 @@ class SyncThrowingSource final: public ReadableStreamSource {
   }
 
   kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
-    kj::throwFatalException(KJ_EXCEPTION(FAILED, "jsg.Error: sync read failed"));
+    kj::throwException(KJ_EXCEPTION(FAILED, "jsg.Error: sync read failed"));
   }
 
   kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
@@ -2159,6 +2159,53 @@ KJ_TEST("TypeScript native stream errors when its source ends short of its expec
           'native source closed (via min-read under-delivery) before producing its ' +
             'declared expectedLength',
           `the short answer errored the stream with ${error}`);
+      }
+    )js"_kj);
+  });
+}
+
+KJ_TEST("TypeScript native stream settles every read a cancel or close answers") {
+  auto fixture = makeTsStreamsFixture();
+  fixture.runInIoContext([](const TestFixture::Environment& env) -> kj::Promise<void> {
+    // cancel(), and the source's close(), answer every pending read at once. A then getter
+    // that releases the reader from the first read's result reaches none of the others: the
+    // next read still resolves done rather than rejecting with the release.
+    return runConduitScript(env, R"js(
+      const ends = {
+        cancel: (reader) => reader.cancel('bye'),
+        close: (reader, pulls) => {
+          pulls[0].controller.close();
+          pulls[0].resolve();
+        },
+      };
+      for (const mode of [undefined, 'byob']) {
+        for (const [name, end] of Object.entries(ends)) {
+          const { source, pulls } = scriptedSource();
+          const reader = new ReadableStream(source).getReader({ mode });
+          const read = () => mode === 'byob' ? reader.read(new Uint8Array(4)) : reader.read();
+          const reads = [read(), read()];
+          let fired = 0;
+          Object.defineProperty(Object.prototype, 'then', {
+            get() {
+              if (Object.hasOwn(this, 'done') && fired++ === 0) reader.releaseLock();
+              return undefined;
+            },
+            configurable: true,
+          });
+          const outcomes = [];
+          try {
+            const ended = end(reader, pulls);
+            for (const pending of reads) {
+              outcomes.push(await pending.then((result) => result.done, (e) => `${e}`));
+            }
+            await ended;
+          } finally {
+            delete Object.prototype.then;
+          }
+          assert(fired > 0, `${mode ?? 'default'} reads at ${name}: the then getter did not run`);
+          assert(outcomes.join() === 'true,true',
+            `${mode ?? 'default'} reads at ${name}: ${outcomes.join()}`);
+        }
       }
     )js"_kj);
   });

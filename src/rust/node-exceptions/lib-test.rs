@@ -7,8 +7,14 @@ use jsg_test::Harness;
 
 use super::*;
 
-fn get_string(lock: &mut Lock, obj: &v8::Local<v8::Object>, key: &str) -> Option<String> {
+fn get_string<'s>(
+    lock: &mut Lock<'s>,
+    obj: v8::Local<'s, v8::Object>,
+    key: &str,
+) -> Option<String> {
     obj.get(lock, key)
+        .ok()
+        .filter(|value| !value.is_undefined())
         .and_then(|value| String::from_js(lock, value).ok())
 }
 
@@ -25,11 +31,11 @@ fn node_exception_uses_default_message_and_code() {
         let value: v8::Local<v8::Value> = err.into();
         assert!(value.is_native_error());
         assert_eq!(
-            get_string(lock, &err, "message").as_deref(),
+            get_string(lock, err, "message").as_deref(),
             Some("Expected a file but found a directory")
         );
         assert_eq!(
-            get_string(lock, &err, "code").as_deref(),
+            get_string(lock, err, "code").as_deref(),
             Some("ERR_FS_EISDIR")
         );
         Ok(())
@@ -47,11 +53,11 @@ fn node_exception_uses_explicit_message() {
             Some(b"custom message".as_slice()),
         );
         assert_eq!(
-            get_string(lock, &err, "message").as_deref(),
+            get_string(lock, err, "message").as_deref(),
             Some("custom message")
         );
         assert_eq!(
-            get_string(lock, &err, "code").as_deref(),
+            get_string(lock, err, "code").as_deref(),
             Some("ERR_FS_CP_EEXIST")
         );
         Ok(())
@@ -71,16 +77,16 @@ fn uv_exception_formats_default_message_with_path() {
             None,
         );
         assert_eq!(
-            get_string(lock, &err, "message").as_deref(),
+            get_string(lock, err, "message").as_deref(),
             Some("no such file or directory, open '/tmp/missing'")
         );
-        assert_eq!(get_string(lock, &err, "code").as_deref(), Some("ENOENT"));
-        assert_eq!(get_string(lock, &err, "syscall").as_deref(), Some("open"));
+        assert_eq!(get_string(lock, err, "code").as_deref(), Some("ENOENT"));
+        assert_eq!(get_string(lock, err, "syscall").as_deref(), Some("open"));
         assert_eq!(
-            get_string(lock, &err, "path").as_deref(),
+            get_string(lock, err, "path").as_deref(),
             Some("/tmp/missing")
         );
-        assert_eq!(get_string(lock, &err, "dest"), None);
+        assert_eq!(get_string(lock, err, "dest"), None);
         Ok(())
     });
 }
@@ -98,13 +104,13 @@ fn uv_exception_uses_explicit_message_and_dest() {
             Some(b"/b".as_slice()),
         );
         assert_eq!(
-            get_string(lock, &err, "message").as_deref(),
+            get_string(lock, err, "message").as_deref(),
             Some("File already exists")
         );
-        assert_eq!(get_string(lock, &err, "code").as_deref(), Some("EEXIST"));
-        assert_eq!(get_string(lock, &err, "syscall").as_deref(), Some("link"));
-        assert_eq!(get_string(lock, &err, "path").as_deref(), Some("/a"));
-        assert_eq!(get_string(lock, &err, "dest").as_deref(), Some("/b"));
+        assert_eq!(get_string(lock, err, "code").as_deref(), Some("EEXIST"));
+        assert_eq!(get_string(lock, err, "syscall").as_deref(), Some("link"));
+        assert_eq!(get_string(lock, err, "path").as_deref(), Some("/a"));
+        assert_eq!(get_string(lock, err, "dest").as_deref(), Some("/b"));
         Ok(())
     });
 }
@@ -115,10 +121,10 @@ fn uv_exception_unknown_errno() {
     harness.run_in_context(|lock, _ctx| {
         let err = create_uv_exception_impl(lock, 12345, "stat", None, None, None);
         assert_eq!(
-            get_string(lock, &err, "message").as_deref(),
+            get_string(lock, err, "message").as_deref(),
             Some("unknown error: 12345")
         );
-        assert_eq!(get_string(lock, &err, "code").as_deref(), Some("UNKNOWN"));
+        assert_eq!(get_string(lock, err, "code").as_deref(), Some("UNKNOWN"));
         Ok(())
     });
 }
@@ -138,14 +144,14 @@ fn uv_exception_non_utf8_path_is_lossy_not_a_panic() {
         // U+FFFD (the Unicode replacement character) stands in for 0x80.
         let expected_path = "/tmp/\u{FFFD}bad";
         assert_eq!(
-            get_string(lock, &err, "path").as_deref(),
+            get_string(lock, err, "path").as_deref(),
             Some(expected_path)
         );
         assert_eq!(
-            get_string(lock, &err, "message").as_deref(),
+            get_string(lock, err, "message").as_deref(),
             Some(format!("no such file or directory, open '{expected_path}'").as_str())
         );
-        assert_eq!(get_string(lock, &err, "code").as_deref(), Some("ENOENT"));
+        assert_eq!(get_string(lock, err, "code").as_deref(), Some("ENOENT"));
         Ok(())
     });
 }

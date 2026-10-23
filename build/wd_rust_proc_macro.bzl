@@ -31,10 +31,6 @@ def wd_rust_proc_macro(
         visibility = visibility,
         data = data,
         lint_config = "@workerd//build/rust:lints",
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
     )
 
     rust_test(
@@ -53,8 +49,4 @@ def wd_rust_proc_macro(
         tags = test_tags + ["no-coverage", "cpu:2"],
         deps = test_deps,
         link_deps = ["@@//deps:rust_runtime", "@workerd//build/deps:linkopts_default"],
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
     )

@@ -1049,7 +1049,7 @@ class RpcReadableStreamSource final: public ReadableStreamSource {
     }, [state = state.addRef()](kj::Exception&& exception) mutable -> size_t {
       // The origin's side failed; there is nothing left to tell it.
       state->originDone();
-      kj::throwFatalException(kj::mv(exception));
+      kj::throwException(kj::mv(exception));
     });
   }
 

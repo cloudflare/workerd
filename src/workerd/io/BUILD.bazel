@@ -608,6 +608,15 @@ kj_test(
 )
 
 kj_test(
+    src = "features-test.c++",
+    deps = [
+        ":features",
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/capnp",
+    ],
+)
+
+kj_test(
     src = "observer-test.c++",
     deps = [
         ":observer",
@@ -707,6 +716,7 @@ kj_test(
     deps = [
         ":worker-entrypoint",
         "//src/workerd/tests:test-fixture",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 

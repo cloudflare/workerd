@@ -96,7 +96,6 @@ const {
 const {
   isArrayBuffer,
   isArrayBufferView,
-  isPromise,
   isSharedArrayBuffer,
   markPromiseHandled,
 } = utils;
@@ -108,6 +107,9 @@ const {
   CLOSE_SENTINEL,
   cloneArrayBuffer,
   createReadResult,
+  fractionalFillError,
+  hasFractionalFill,
+  unfilledView,
 } = require('webstreams/queue');
 
 // Internal writable operations for the pipe (never re-exported to users).
@@ -116,13 +118,22 @@ const {
   internalsForPipe: writableInternals,
 } = require('webstreams/writable');
 
-import type { CommonHelpers, UnderlyingSourceDict } from './common';
+import type {
+  CommonHelpers,
+  PromiseSlot,
+  UnderlyingSourceDict,
+} from './common';
 const {
   isActualObject,
   kNullProtoObject,
   kEnumerable,
   toStringTagProperty,
   promiseResolvedWith,
+  newHandledPending,
+  newHandledRejected,
+  slotPromise,
+  slotResolved,
+  slotRejected,
   requireObject,
   toDictionary,
   convertQueuingStrategy,
@@ -607,7 +618,7 @@ ObjectDefineProperty(
 class ReadableStreamReaderBase<R> {
   #stream?: ReadableStream<R> | undefined;
   // @ts-expect-error
-  #closedPromise: Promise<void> | PromiseWithResolversType<void>;
+  #closedPromise: PromiseSlot;
   // NOTE: pending reads live on the stream's cursor (PendingRead entries
   // keyed by reader identity), not on the reader — the cursor outlives
   // reader attach/detach cycles.
@@ -621,10 +632,7 @@ class ReadableStreamReaderBase<R> {
 
       switch (getReadableStreamGetState(stream)) {
         case 'readable': {
-          base.#closedPromise = PromiseWithResolvers();
-          markPromiseHandled(
-            (base.#closedPromise as PromiseWithResolversType<void>).promise
-          );
+          base.#closedPromise = newHandledPending();
           break;
         }
         case 'closed': {
@@ -632,52 +640,25 @@ class ReadableStreamReaderBase<R> {
           break;
         }
         case 'errored': {
-          const stored = getReadableStreamStoredError(stream);
-          // Because we need to mark the promise as handled, and because
-          // Promise.reject does not give us the ability to do so before
-          // the promise is reported as rejected, we need to create the
-          // promise with PromiseWithResolvers and reject it manually.
-          const promise: PromiseWithResolversType<void> =
-            PromiseWithResolvers();
-          markPromiseHandled(promise.promise);
-          promise.reject(stored);
-          base.#closedPromise = promise.promise;
+          base.#closedPromise = newHandledRejected(
+            getReadableStreamStoredError(stream)
+          );
           break;
         }
       }
     };
 
-    getGenericReaderClosedPromise = (reader: object) => {
-      const base = getReaderBase(reader);
-      const promise = base.#closedPromise;
-      if (isPromise(promise)) {
-        return promise as Promise<void>;
-      }
-      if (!isPromise((promise as PromiseWithResolversType<void>).promise)) {
-        throw new TypeError('invalid reader state');
-      }
-      return (promise as PromiseWithResolversType<void>).promise;
-    };
+    getGenericReaderClosedPromise = (reader: object) =>
+      slotPromise(getReaderBase(reader).#closedPromise);
 
-    // #closedPromise holds either a settled Promise or a still-pending
-    // resolvers record, told apart with the native isPromise: a duck-typed
-    // `typeof x.resolve` would read Object.prototype on the Promise.
     resolveGenericReaderPromise = (reader: object) => {
       const base = getReaderBase(reader);
-      const promise = base.#closedPromise;
-      if (!isPromise(promise)) {
-        promise.resolve();
-        base.#closedPromise = promise.promise;
-      }
+      base.#closedPromise = slotResolved(base.#closedPromise);
     };
 
     rejectGenericReaderPromise = (reader: object, reason?: unknown) => {
       const base = getReaderBase(reader);
-      const promise = base.#closedPromise;
-      if (!isPromise(promise)) {
-        promise.reject(reason);
-        base.#closedPromise = promise.promise;
-      }
+      base.#closedPromise = slotRejected(base.#closedPromise, reason);
     };
 
     isReaderBoundToStream = (reader: object) => {
@@ -699,17 +680,11 @@ class ReadableStreamReaderBase<R> {
       const stream = base.#stream;
       if (stream === undefined) return;
       const releaseError = new TypeError('This reader has been released');
-      // Per spec: a still-pending closedPromise is rejected; a settled one
-      // is replaced with a fresh rejected promise. Both are marked handled.
-      if (getReadableStreamGetState(stream) === 'readable') {
-        rejectGenericReaderPromise(reader, releaseError);
-      } else {
-        const replacement: PromiseWithResolversType<void> =
-          PromiseWithResolvers();
-        markPromiseHandled(replacement.promise);
-        replacement.reject(releaseError);
-        base.#closedPromise = replacement.promise;
-      }
+      // Per spec: on a readable stream the pending closedPromise is
+      // rejected; otherwise it is replaced with a fresh rejected promise.
+      // The slot is pending exactly while the stream is readable, so
+      // slotRejected does both.
+      base.#closedPromise = slotRejected(base.#closedPromise, releaseError);
       // Reject THIS reader's pending reads. The consumer itself persists —
       // it is stream-owned, and a future reader resumes where it left off.
       const consumer = getReadableStreamConsumer(stream);
@@ -970,14 +945,27 @@ function toUserReadResult<T>(
   } as ReadableStreamReadResult<T>;
 }
 
+let assertIsReadableStreamDefaultReader: <R>(
+  self: ReadableStreamDefaultReader<R>
+) => void;
+
 class ReadableStreamDefaultReader<
   R,
 > implements ReadableStreamDefaultReaderType<R> {
   #base: ReadableStreamReaderBase<R>;
 
   static {
+    assertIsReadableStreamDefaultReader = function <R>(
+      self: ReadableStreamDefaultReader<R>
+    ): void {
+      if (!isActualObject(self) || !(#base in self))
+        throw new TypeError('Illegal invocation');
+    };
+
     // Wire getReaderBase for the first reader type. The BYOB and draining
-    // readers chain onto this in their own static blocks.
+    // readers chain onto this in their own static blocks. It accepts a
+    // reader of any of the three classes, so each reader's public members
+    // check their own class first.
     const defaultGetBase = <R>(reader: object) => {
       return (reader as ReadableStreamDefaultReader<R>).#base;
     };
@@ -1022,6 +1010,7 @@ class ReadableStreamDefaultReader<
 
   get closed(): Promise<void> {
     try {
+      assertIsReadableStreamDefaultReader(this);
       return getGenericReaderClosedPromise(this);
     } catch (e) {
       return PromiseReject(e);
@@ -1030,6 +1019,7 @@ class ReadableStreamDefaultReader<
 
   cancel(reason: unknown = undefined): Promise<void> {
     try {
+      assertIsReadableStreamDefaultReader(this);
       return cancelReadableStreamGenericReader(this, reason);
     } catch (e) {
       return PromiseReject(e);
@@ -1038,6 +1028,7 @@ class ReadableStreamDefaultReader<
 
   read(): Promise<ReadableStreamReadResult<R>> {
     try {
+      assertIsReadableStreamDefaultReader(this);
       const stream = getReaderStream<R>(this);
       if (stream === undefined) {
         return PromiseReject(new TypeError('This reader has been released'));
@@ -1049,15 +1040,24 @@ class ReadableStreamDefaultReader<
   }
 
   releaseLock(): void {
-    if (!isReaderBoundToStream(this)) return;
+    assertIsReadableStreamDefaultReader(this);
     readableStreamReaderGenericRelease(this);
   }
 }
+
+let assertIsReadableStreamBYOBReader: (self: ReadableStreamBYOBReader) => void;
 
 class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
   #base: ReadableStreamReaderBase<ArrayBufferView>;
 
   static {
+    assertIsReadableStreamBYOBReader = function (
+      self: ReadableStreamBYOBReader
+    ): void {
+      if (!isActualObject(self) || !(#base in self))
+        throw new TypeError('Illegal invocation');
+    };
+
     const prev = getReaderBase;
     getReaderBase = <R>(reader: object) => {
       if (#base in reader) {
@@ -1096,6 +1096,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
 
   get closed(): Promise<void> {
     try {
+      assertIsReadableStreamBYOBReader(this);
       return getGenericReaderClosedPromise(this);
     } catch (e) {
       return PromiseReject(e);
@@ -1104,6 +1105,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
 
   cancel(reason: unknown = undefined): Promise<void> {
     try {
+      assertIsReadableStreamBYOBReader(this);
       return cancelReadableStreamGenericReader(this, reason);
     } catch (e) {
       return PromiseReject(e);
@@ -1115,6 +1117,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     options: ReadableStreamBYOBReaderReadOptions = kNullProtoObject as ReadableStreamBYOBReaderReadOptions
   ): Promise<ReadableStreamReadResult<T>> {
     try {
+      assertIsReadableStreamBYOBReader(this);
       return this.#read(view, options);
     } catch (e) {
       // A foreign `this`: the brand check throws, and promise-returning
@@ -1239,6 +1242,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
     view: T
   ): Promise<ReadableStreamReadResult<T>> {
     try {
+      assertIsReadableStreamBYOBReader(this);
       return this.#read(view, { min: minElements });
     } catch (e) {
       return PromiseReject(e);
@@ -1246,7 +1250,7 @@ class ReadableStreamBYOBReader implements ReadableStreamBYOBReaderType {
   }
 
   releaseLock(): void {
-    if (!isReaderBoundToStream(this)) return;
+    assertIsReadableStreamBYOBReader(this);
     readableStreamReaderGenericRelease(this);
   }
 }
@@ -2220,11 +2224,7 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
         initializeByobRequest(
           request,
           this,
-          new Uint8Array(
-            released.buffer,
-            released.byteOffset + released.bytesFilled,
-            released.byteLength - released.bytesFilled
-          ),
+          unfilledView(released),
           released.minimumFill - released.bytesFilled
         );
         this.#byobRequest = request;
@@ -2358,22 +2358,20 @@ class ReadableByteStreamController implements ReadableByteStreamControllerType {
     // close reaches it, so this close() succeeds and the sibling keeps
     // every byte.
     const released = this.#releasedHead;
-    const hasFractionalFill =
+    const fractional =
       (released !== undefined &&
         this.#releasedHeadErrorsStream &&
-        released.bytesFilled % released.elementSize !== 0) ||
+        hasFractionalFill(released)) ||
       this.#core.queue.someLiveCursor((cursor) => {
         const byteCursor = cursor as unknown as ByteStreamCursorType;
         if (byteCursor.errorStreamCallback === errorTeeBranchFromCursor) {
           return false;
         }
         const head: PullIntoDescriptor | undefined = byteCursor.headPullInto;
-        return head !== undefined && head.bytesFilled % head.elementSize !== 0;
+        return head !== undefined && hasFractionalFill(head);
       });
-    if (hasFractionalFill) {
-      const e = new TypeError(
-        'Insufficient bytes to fill elements in the given view'
-      );
+    if (fractional) {
+      const e = fractionalFillError();
       this.#core.error(e);
       throw e;
     }
@@ -2699,6 +2697,10 @@ async function drainingReaderReadInternal<R>(
   return result;
 }
 
+let assertIsReadableStreamDrainingReader: <R>(
+  self: ReadableStreamDrainingReader<R>
+) => void;
+
 // Bulk reader for pipeTo and the C++ bridge (design doc "Draining Reads").
 // Lock-based exclusivity: while held, no default/BYOB reader can interfere
 // with the cursor. Internal-only for now (not exposed via getReader();
@@ -2707,6 +2709,13 @@ class ReadableStreamDrainingReader<R> {
   #base: ReadableStreamReaderBase<R>;
 
   static {
+    assertIsReadableStreamDrainingReader = function <R>(
+      self: ReadableStreamDrainingReader<R>
+    ): void {
+      if (!isActualObject(self) || !(#base in self))
+        throw new TypeError('Illegal invocation');
+    };
+
     const prev = getReaderBase;
     getReaderBase = <R>(reader: object) => {
       if (#base in reader) {
@@ -2730,6 +2739,7 @@ class ReadableStreamDrainingReader<R> {
 
   get closed(): Promise<void> {
     try {
+      assertIsReadableStreamDrainingReader(this);
       return getGenericReaderClosedPromise(this);
     } catch (e) {
       return PromiseReject(e);
@@ -2744,6 +2754,7 @@ class ReadableStreamDrainingReader<R> {
   // value the TransformStream expectedLength extension installed, if
   // any). Returns undefined after release.
   get expectedLength(): bigint | undefined {
+    assertIsReadableStreamDrainingReader(this);
     const stream = getReaderStream<R>(this);
     if (stream === undefined) return undefined;
     const controller = getReadableStreamController(stream);
@@ -2753,6 +2764,7 @@ class ReadableStreamDrainingReader<R> {
 
   cancel(reason?: unknown): Promise<void> {
     try {
+      assertIsReadableStreamDrainingReader(this);
       return cancelReadableStreamGenericReader(this, reason);
     } catch (e) {
       return PromiseReject(e);
@@ -2765,6 +2777,7 @@ class ReadableStreamDrainingReader<R> {
   async read(
     options: { maxSize?: number } = kNullProtoObject
   ): Promise<DrainingReadResult<R>> {
+    assertIsReadableStreamDrainingReader(this);
     const stream = getReaderStream<R>(this);
     if (stream === undefined) {
       throw new TypeError('This reader has been released');
@@ -2780,7 +2793,7 @@ class ReadableStreamDrainingReader<R> {
   }
 
   releaseLock(): void {
-    if (!isReaderBoundToStream(this)) return;
+    assertIsReadableStreamDrainingReader(this);
     readableStreamReaderGenericRelease(this);
   }
 }
@@ -3612,7 +3625,7 @@ class ReadableStream<R> {
     | ReadableStreamBYOBReaderType
     | undefined;
   // The stream's own CONSUMER — the backend fence (see queue.ts and
-  // native-stream-integration.md §10). A QueueCursor/ByteStreamCursor for
+  // webstreams/AGENTS.md). A QueueCursor/ByteStreamCursor for
   // queued (JS-backed) streams; a NativePullConduit for native streams.
   // The stream owns it (readers only borrow it while locked); created
   // during controller setup, removed on cancel/tee. A queued stream that
@@ -3957,7 +3970,7 @@ class ReadableStream<R> {
     };
 
     // BACKEND-DISPATCH: tee is one of the five sanctioned dispatch points
-    // (native-stream-integration.md §10). The native branch runs first:
+    // (webstreams/AGENTS.md). The native branch runs first:
     // the source's tee hook produces a PAIR of new native source objects
     // (leaving the original source closed), each wrapped in a fresh
     // ReadableStream via ordinary construction. Branches are fully
@@ -4567,8 +4580,7 @@ class ReadableStream<R> {
     assertIsReadableStream(this);
     let closed = this.#closedPromise;
     if (closed === undefined) {
-      closed = PromiseWithResolvers() as PromiseWithResolversType<void>;
-      markPromiseHandled(closed.promise);
+      closed = newHandledPending();
       this.#closedPromise = closed;
       settleReadableStreamClosedPromise(this);
     }

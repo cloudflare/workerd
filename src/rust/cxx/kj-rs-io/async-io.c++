@@ -252,7 +252,7 @@ kj::Promise<PeerStream> connectAny(::rust::Vec<SocketAddress> targets, kj::Arc<P
     }
   }
   KJ_IF_SOME(e, lastError) {
-    kj::throwFatalException(kj::mv(e));
+    kj::throwException(kj::mv(e));
   }
   KJ_FAIL_REQUIRE("connect(): no addresses to connect to");
 }
