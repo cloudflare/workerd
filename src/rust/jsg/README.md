@@ -159,14 +159,17 @@ let global = str_value.to_global(lock);
 ### `Global<T>`
 
 A persistent handle that outlives `HandleScope`s. Must be explicitly managed. Opening or cloning
-it in an isolate other than the one it was created in panics.
+it in an isolate other than the one it was created in panics. A `Global` is `Send`, and not
+`Sync`: every use takes a `Lock` except dropping it and putting it in a new resource
+(`jsg::Rc::new` takes no `Lock`), and both leave its handles alone on a thread that does not hold
+the isolate lock.
 
 Dropping a `Global` resets its V8 handle, which needs the isolate lock; what the drop does
 depends on the state of the isolate, which the `Realm` shares with every `Global` of it:
 
 - Under the isolate lock, the handle is reset at once.
-- Without the lock, the handle is queued and reset the next time the isolate is locked, as C++
-  JSG's deferred destruction queue does. Until then it keeps its value alive.
+- Without the lock, on any thread, the handle is queued and reset the next time the isolate is
+  locked, as C++ JSG's deferred destruction queue does. Until then it keeps its value alive.
 - Once the isolate is being disposed, the handle is left alone: `v8::Isolate::Dispose` frees
   every handle of the isolate in bulk, and a reset after it would touch freed memory. The
   `Realm` is dropped under the lock, before `Dispose`, and closes the state then.

@@ -107,7 +107,7 @@ impl IsolateState {
     }
 
     /// Whether this thread holds the isolate lock. False once the state is closed.
-    fn this_thread_holds_lock(&self) -> bool {
+    pub(crate) fn this_thread_holds_lock(&self) -> bool {
         if self.is_closed() {
             return false;
         }

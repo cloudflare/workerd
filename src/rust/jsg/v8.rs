@@ -2946,8 +2946,12 @@ pub struct Global<T> {
     /// The state of the isolate the handle was created in. Every use checks that the lock
     /// belongs to that isolate, and a drop checks that the isolate is still alive.
     state: Arc<IsolateState>,
-    /// `*const T` makes `Global` neither `Send` nor `Sync`.
-    _marker: PhantomData<*const T>,
+    /// `fn() -> T` leaves `Send` and `Sync` to the other fields: a `Global` is `Send`, since it
+    /// may be dropped on any thread (see [`IsolateState`]), a visit outside GC on a thread
+    /// without the isolate lock leaves it alone (see [`GcVisitor::visit_global`]), and every
+    /// other use takes a `Lock` of its isolate. The `UnsafeCell`s of its slot keep it from
+    /// being `Sync`.
+    _marker: PhantomData<fn() -> T>,
 }
 
 // Common implementations for all Global<T>
@@ -3581,7 +3585,13 @@ impl GcVisitor {
     ///
     /// A visit after the `Global`'s isolate is closed does nothing, and neither does a visit
     /// on behalf of another isolate, which debug builds assert against: a `Global` belongs in
-    /// resources of its own isolate.
+    /// resources of its own isolate. A visit has no isolate when its resource has neither been
+    /// wrapped nor reached by a trace. Such a visit is not part of a GC: it comes from the
+    /// resource's first strong reference, which keeps the handle strong, and `jsg::Rc::new`
+    /// makes that reference without a `Lock`, possibly on a thread without the isolate lock.
+    /// The visit then touches the handles only if this thread holds the lock, and otherwise
+    /// leaves them as they are: a weak handle stays weak until a later visit under the lock,
+    /// so its value can die meanwhile, after which `Global::as_local` panics.
     ///
     /// Accepts `&Global<T>` even though it mutates the handles. This is sound because GC
     /// tracing is always single-threaded within a V8 isolate, and `trace` is never
@@ -3594,7 +3604,13 @@ impl GcVisitor {
         }
         // SAFETY: the visitor is valid for the duration of the visit.
         let visiting = unsafe { ffi::gc_visitor_v8_isolate(&raw mut self.handle) };
-        if !visiting.is_null() {
+        if visiting.is_null() {
+            // Not a GC visit, but the one for a resource's first strong reference, which
+            // `jsg::Rc::new` makes without a `Lock`.
+            if !global.state.this_thread_holds_lock() {
+                return;
+            }
+        } else {
             let foreign = !global.state.belongs_to(visiting);
             debug_assert!(
                 !foreign,
