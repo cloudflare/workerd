@@ -40,7 +40,10 @@ pub struct MyRecord {
 
 Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 
-- **Instance methods** (`&self` / `&mut self`) are placed on the prototype.
+- **Instance methods** (`&self`) are placed on the prototype. JavaScript can call back into
+  a resource while one of its methods runs, so methods never get `&mut self`; keep state
+  they change in `Cell` or `RefCell` fields. Prefer `Cell`: a `RefCell` borrow held across a
+  call that can run JavaScript makes a re-entrant call panic.
 - **Static methods** (no receiver) are placed on the constructor.
 - Return types of `Result<T, E>` automatically throw a JavaScript exception on `Err`.
 - The Rust `snake_case` name is converted to `camelCase` for JavaScript; override with

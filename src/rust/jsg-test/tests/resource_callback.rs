@@ -15,6 +15,7 @@ use std::rc::Rc;
 use jsg::ExceptionType;
 use jsg::Number;
 use jsg::ToJS;
+use jsg::v8;
 use jsg_macros::jsg_constructor;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
@@ -526,6 +527,60 @@ fn catch_panic_returns_none_and_leaves_exception_pending() {
             err.message
         );
         assert!(!err.message.contains("intentional nested panic"));
+        Ok(())
+    });
+}
+
+// =============================================================================
+// Re-entrancy tests
+// =============================================================================
+
+/// A resource whose method calls back into JavaScript, which can call the method again.
+#[jsg_resource]
+struct ReentrantResource {
+    depth: Cell<u32>,
+    max_depth: Cell<u32>,
+}
+
+#[jsg_resource]
+impl ReentrantResource {
+    #[jsg_method]
+    pub fn enter<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        callback: v8::Local<'s, v8::Value>,
+    ) -> Result<(), jsg::Error> {
+        self.depth.set(self.depth.get() + 1);
+        self.max_depth
+            .set(self.max_depth.get().max(self.depth.get()));
+        let callback = callback
+            .try_as::<v8::Function>()
+            .ok_or_else(|| jsg::Error::new_type_error("not a function"))?;
+        callback.call::<v8::Local<v8::Value>>(lock, None, &[])?;
+        self.depth.set(self.depth.get() - 1);
+        Ok(())
+    }
+}
+
+/// A method that calls into JavaScript can be re-entered on the same resource, since
+/// methods share their resource instead of borrowing it exclusively.
+#[test]
+fn method_can_be_reentered() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = jsg::Rc::new(ReentrantResource {
+            depth: Cell::new(0),
+            max_depth: Cell::new(0),
+        });
+        let wrapped = resource.clone().to_js(lock);
+        ctx.set_global(lock, "obj", wrapped);
+        ctx.eval_raw(
+            lock,
+            "obj.enter(() => obj.enter(() => obj.enter(() => {})))",
+        )
+        .unwrap();
+        assert_eq!(resource.depth.get(), 0);
+        assert_eq!(resource.max_depth.get(), 3);
         Ok(())
     });
 }
