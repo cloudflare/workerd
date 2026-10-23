@@ -95,6 +95,9 @@ serde = { version = "1", features = ["derive"] }
 # revision pinned in V8's DEPS.
 temporal_capi = { version = "=0.2.6", features = ["zoneinfo64"] }
 temporal_rs = { version = "=0.2.6", default-features = false, features = ["float64_representable_durations"] }
+# temporal_rs 0.2.6 accepts icu_calendar 2.3, but Chromium builds it with 2.2.1; this pin keeps
+# its ICU4X data on the 2.2 line with the rest of the graph.
+icu_calendar = { version = "=2.2.1", default-features = false }
 thiserror = "2"
 tower-service = "0.3"
 # tokio is huge, let's enable only features when we actually need them.
