@@ -1725,4 +1725,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # bookmark as an opaque handle that can be passed over RPC, and
   # DurableObjectStorage.onNextSessionRestore(), which restores a snapshot or bookmark when the
   # next session starts. The experimental catch-all flag also exposes these methods.
+
+  r2BindingsJsrpc @196 :Bool
+      $compatEnableFlag("r2_binding_jsrpc")
+      $experimental;
+  # When enabled, R2 bindings dispatch to the R2 gateway worker over JSRPC
+  # instead of synthesising an HTTP request and calling `fetch`. Without this
+  # flag, R2 bindings continue to use the HTTP transport.
 }

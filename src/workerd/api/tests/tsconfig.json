@@ -9,5 +9,8 @@
     "allowJs": false,
     "types": ["@types/node"]
   },
-  "include": ["**/*.ts"]
+  "include": ["**/*.ts"],
+  // r2-binding-service has its own project; the other entries repeat the base config's exclude,
+  // which this one replaces.
+  "exclude": ["node_modules", "**/*.mjs", "r2-binding-service"]
 }

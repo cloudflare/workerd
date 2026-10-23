@@ -553,6 +553,15 @@ enum SerializationTag {
   # payload (per `serviceStub`) followed by the wrapper module name. See api/wrapped-binding.{h,c++}.
   durableObjectSnapshot @18;
   # A Durable Object storage snapshot handle transferred over RPC.
+
+  r2Checksums @19;
+  # Checksums attached to an R2 object.
+
+  r2Object @20;
+  # R2 object metadata without a body.
+
+  r2ObjectBody @21;
+  # R2 object metadata with a transferred body stream.
 }
 
 enum StreamEncoding {

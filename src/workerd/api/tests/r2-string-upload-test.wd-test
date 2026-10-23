@@ -1,0 +1,32 @@
+using Workerd = import "/workerd/workerd.capnp";
+using Passthrough = import "r2-jsrpc-passthrough.capnp";
+
+# Both transports upload strings to the same HTTP mock, which verifies the UTF-8 bytes and
+# declared length. The JSRPC route forwards through the native R2 interceptor.
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "http", worker = (
+      modules = .testModules,
+      bindings = [
+        (name = "BUCKET", r2Bucket = "r2-test"),
+        (name = "R2_STRING_UPLOAD_TEST", text = "true"),
+      ],
+      compatibilityFlags = ["nodejs_compat", "streams_enable_constructors"],
+    )),
+    (name = "jsrpc", worker = (
+      modules = .testModules,
+      bindings = [
+        (name = "BUCKET", r2Bucket = (name = "r2-test", entrypoint = "ObservedR2Binding")),
+        (name = "R2_STRING_UPLOAD_TEST", text = "true"),
+      ],
+      compatibilityFlags = ["experimental", "nodejs_compat", "streams_enable_constructors",
+                            "r2_binding_jsrpc"],
+    )),
+    (name = "r2-test", worker = Passthrough.passthroughWorker),
+  ],
+);
+
+const testModules :List(Workerd.Worker.Module) = [
+  (name = "worker", esModule = "export { r2StringPutTests, r2StringUploadPartTests } from './r2-test.js';"),
+  (name = "r2-test.js", esModule = embed "r2-test.js"),
+];

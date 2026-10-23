@@ -1,0 +1,33 @@
+using Workerd = import "/workerd/workerd.capnp";
+using Passthrough = import "r2-jsrpc-passthrough.capnp";
+
+# Runs the canonical R2 binding suite (r2-test.js) and the shared suites with the JSRPC transport
+# enabled, through the passthrough in r2-jsrpc-passthrough.capnp. That passthrough forwards each
+# call to a native R2 binding that reaches the same HTTP mock as r2-test.wd-test, so the suites
+# check that native R2 results and errors survive the JSRPC hop with the same observable behavior
+# as the HTTP transport.
+#
+# Reaching the JSRPC method table needs two things to line up:
+#   - the r2_binding_jsrpc compatibility flag, which is $experimental and so also needs
+#     "experimental" in the flag list here
+#   - a binding that targets the named entrypoint, which is the production shape; a bare-string
+#     designator would target the default export instead
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "user",
+      worker = (
+        modules = Passthrough.userModules,
+        bindings = [
+          ( name = "BUCKET",
+            r2Bucket = (name = "r2-test", entrypoint = "ObservedR2Binding") ),
+          ( name = "R2_TRANSPORT", text = "jsrpc" ),
+          ( name = "R2_LIST_HONOR_INCLUDE", text = "true" ),
+        ],
+        compatibilityFlags = ["experimental", "nodejs_compat", "service_binding_extra_handlers",
+                               "streams_enable_constructors", "r2_list_honor_include",
+                               "r2_binding_jsrpc"],
+      )
+    ),
+    ( name = "r2-test", worker = Passthrough.passthroughWorker ),
+  ],
+);
