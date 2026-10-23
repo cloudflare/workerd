@@ -426,33 +426,13 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
   if (!context->isShared()) {
     // Reentry callbacks may have spans attached to their pending promises. Cancel them while the
     // request is still current so those spans close before the request outcome is reported.
-    while (!context->canceler.isEmpty()) {
-      KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() {
-        KJ_IF_SOME(e, context->abortException) {
-          context->canceler.cancel(e);
-        } else {
-          context->canceler.cancel(JSG_KJ_EXCEPTION(
-              FAILED, Error, "The execution context responding to this call was canceled."));
-        }
-      })) {
-        // Canceler unlinks the callback before destroying its promise, so another attempt makes
-        // progress after a promise destructor throws.
-        if (cancellationException == kj::none) {
-          cancellationException = kj::mv(exception);
-        }
-      }
-    }
-
-    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() { context->tasks.clear(); })) {
-      if (cancellationException == kj::none) {
-        cancellationException = kj::mv(exception);
-      }
-    }
-
-    KJ_IF_SOME(exception, kj::runCatchingExceptions([&]() { context->waitUntilTasks.clear(); })) {
-      if (cancellationException == kj::none) {
-        cancellationException = kj::mv(exception);
-      }
+    KJ_IF_SOME(e, context->abortException) {
+      cancellationException = context->cancelPendingWork(e, ClearTasks::YES);
+    } else {
+      cancellationException = context->cancelPendingWork(
+          JSG_KJ_EXCEPTION(
+              FAILED, Error, "The execution context responding to this call was canceled."),
+          ClearTasks::YES);
     }
   }
 
@@ -491,13 +471,10 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
       //
       // We couldn't do this in abort() because it can be called from inside a task that could
       // be canceled, and a self-cancellation would lead to a crash.
-
-      if (!context->canceler.isEmpty()) {
-        context->canceler.cancel(e);
-      }
-      context->timeoutManager->cancelAll();
-      context->tasks.clear();
-      context->waitUntilTasks.clear();
+      //
+      // The abort has already been reported, so a destructor that throws during this cleanup
+      // adds nothing: it is dropped.
+      context->cancelPendingWork(e, ClearTasks::YES);
     }
   }
 
@@ -509,6 +486,29 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
     unwindDetector.catchExceptionsIfUnwinding(
         [&]() { kj::throwExceptionUnlessUnwinding(kj::mv(exception)); });
   }
+}
+
+kj::Maybe<kj::Exception> IoContext::cancelPendingWork(
+    const kj::Exception& reason, ClearTasks clearTasks) {
+  kj::Maybe<kj::Exception> firstException;
+  auto runStep = [&](auto&& step) {
+    KJ_IF_SOME(exception, kj::runCatchingExceptions(step)) {
+      if (firstException == kj::none) {
+        firstException = kj::mv(exception);
+      }
+    }
+  };
+  // Canceler unlinks each callback before destroying its promise, so retrying makes progress
+  // after a destructor throws.
+  while (!canceler.isEmpty()) {
+    runStep([&]() { canceler.cancel(reason); });
+  }
+  runStep([&]() { timeoutManager->cancelAll(); });
+  if (clearTasks) {
+    runStep([&]() { tasks.clear(); });
+  }
+  runStep([&]() { waitUntilTasks.clear(); });
+  return firstException;
 }
 
 InputGate::Lock IoContext::getInputLock() {

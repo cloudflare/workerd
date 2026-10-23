@@ -23,6 +23,13 @@ class ErrorHandlerImpl: public kj::TaskSet::ErrorHandler {
   }
 };
 
+class ThrowOnDestruction: private kj::UnwindDetector {
+ public:
+  ~ThrowOnDestruction() noexcept(false) {
+    catchExceptionsIfUnwinding([]() { KJ_FAIL_REQUIRE("test cancellation failure"); });
+  }
+};
+
 class FrozenTimerChannel final: public TimerChannel {
  public:
   void syncTime() override {
@@ -262,13 +269,6 @@ KJ_TEST("final request cancels wait-until tasks before it stops being current") 
 }
 
 KJ_TEST("final request completes cleanup after cancellation throws") {
-  class ThrowOnDestruction: private kj::UnwindDetector {
-   public:
-    ~ThrowOnDestruction() noexcept(false) {
-      catchExceptionsIfUnwinding([]() { KJ_FAIL_REQUIRE("test cancellation failure"); });
-    }
-  };
-
   TestFixture fixture;
   auto request = fixture.newIncomingRequest();
   auto& context = request->getContext();
@@ -302,6 +302,47 @@ KJ_TEST("final request completes cleanup after cancellation throws") {
 
   KJ_EXPECT(callbackWasCanceledWhileRequestWasCurrent);
   KJ_EXPECT(taskWasCanceledWhileRequestWasCurrent);
+}
+
+KJ_TEST("request on an aborted shared context completes cleanup after cancellation throws") {
+  TestFixture fixture;
+  auto& waitScope = fixture.getWaitScope();
+  bool callbackCanceled = false;
+  bool taskCanceled = false;
+  bool waitUntilCanceled = false;
+  // The fixture's own reference keeps the context shared after the request is destroyed.
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+
+  kj::Function<kj::Promise<void>()> callback;
+  kj::Function<kj::Promise<void>()> throwingCallback;
+  context
+      ->run([&](Worker::Lock&, IoContext& context) {
+    callback = context.makeReentryCallback([&](Worker::Lock&, IoContext&) {
+      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() {
+        callbackCanceled = true;
+      }));
+    });
+    throwingCallback = context.makeReentryCallback([](Worker::Lock&, IoContext&) {
+      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::heap<ThrowOnDestruction>());
+    });
+  }).wait(waitScope);
+  // The canceler cancels the most recent callback first, so the throwing one goes first.
+  auto pendingTask = callback();
+  auto throwingPendingTask = throwingCallback();
+  KJ_EXPECT(!pendingTask.poll(waitScope));
+  KJ_EXPECT(!throwingPendingTask.poll(waitScope));
+  context->addTask(
+      kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() { taskCanceled = true; })));
+  context->addWaitUntil(
+      kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() { waitUntilCanceled = true; })));
+
+  context->abort(KJ_EXCEPTION(FAILED, "test abort reason"));
+  request = nullptr;
+
+  KJ_EXPECT(callbackCanceled);
+  KJ_EXPECT(taskCanceled);
+  KJ_EXPECT(waitUntilCanceled);
 }
 
 // Regression test: two IncomingRequests share a single actor IoContext, as happens when a Durable
