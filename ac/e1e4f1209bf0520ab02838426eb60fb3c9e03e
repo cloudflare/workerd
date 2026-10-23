@@ -3,11 +3,13 @@ src/workerd/io/io-own.h
 src/workerd/io/io-own.c++
   s_9e291bb5d844d4::t_f82f1c3261117d 72-79,104-111
   s_9e291bb5d844d4::t_02f54e275b5fa6 112
+  s_9e291bb5d844d4::t_8193c18f03ef14 112
 src/workerd/api/tests/actor-cross-context-promise-test.wd-test
   s_9e291bb5d844d4::t_7743922d50ff7d 1-26
 src/workerd/api/tests/BUILD.bazel
   s_9e291bb5d844d4::t_7441999a2701c8 1318-1320
   s_9e291bb5d844d4::t_90ed82d2e0752c 1315-1317
+  s_9e291bb5d844d4::t_20d57f85cbf0d8 1315-1317
 src/workerd/io/io-context.c++
   s_9e291bb5d844d4::t_49250c500e4768 398-401,1990-1991,1993-1994,1996-2015,2017-2019
 src/workerd/api/tests/actor-cross-context-promise-test.js
