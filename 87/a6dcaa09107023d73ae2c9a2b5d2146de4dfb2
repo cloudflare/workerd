@@ -1,0 +1,27 @@
+src/workerd/api/http.h
+  s_1c76ae2bf94860::t_54962e0fe0a73f 358
+src/workerd/api/worker-rpc.h
+  s_1c76ae2bf94860::t_968e2ce63d271f 340-345,511-513
+src/workerd/api/worker-rpc.c++
+  s_1c76ae2bf94860::t_957b4dd6edf2eb 575
+  s_1c76ae2bf94860::t_ff0f3da571fd16 572-573
+  s_1c76ae2bf94860::t_d99e07afe8b4db 568-570
+  s_1c76ae2bf94860::t_f2ee0cb722c2e7 571,574,929-940,942,972-973,982,997,1118-1122,1274-1275
+  s_1c76ae2bf94860::t_5a9682eeb6ed6b 567
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "87a6dcaa09107023d73ae2c9a2b5d2146de4dfb2",
+  "prompts": {},
+  "sessions": {
+    "s_1c76ae2bf94860": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f2d898ceeffeUeaNXVDLn1H391",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

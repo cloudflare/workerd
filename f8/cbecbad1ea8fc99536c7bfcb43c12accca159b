@@ -1,0 +1,19 @@
+src/workerd/api/tests/oidc-local-test.js
+  s_8a31beec700f7c::t_a16d1577301b1d 8,40-44,61-64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "f8cbecbad1ea8fc99536c7bfcb43c12accca159b",
+  "prompts": {},
+  "sessions": {
+    "s_8a31beec700f7c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16664-6675-7a30-bdff-559cd0dc0666",
+        "model": "unknown"
+      },
+      "human_author": "Brendan Irvine-Broque <birvine-broque@cloudflare.com>"
+    }
+  }
+}

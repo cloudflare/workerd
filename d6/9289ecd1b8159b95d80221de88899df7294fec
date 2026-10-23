@@ -1,0 +1,23 @@
+src/workerd/api/actor-call-retry-test.c++
+  s_e6ef9db3485b14::t_d1ccb7ffb8e838 70,312
+src/workerd/api/actor-fetch-retry-test.c++
+  s_e6ef9db3485b14::t_1171710a5977f0 117,200-204,264-266,279-281,1191-1209,1211,1216-1226,1228-1240
+src/workerd/io/io-channels.h
+  s_e6ef9db3485b14::t_c8df0a3b7ac856 91-98
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d69289ecd1b8159b95d80221de88899df7294fec",
+  "prompts": {},
+  "sessions": {
+    "s_e6ef9db3485b14": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f940fb7bdffeOOke2jjtQ9MxFI",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

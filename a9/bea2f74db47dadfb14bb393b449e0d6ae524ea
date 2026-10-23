@@ -1,0 +1,25 @@
+src/workerd/api/http.c++
+  s_af5e71f0073e07::t_c998863d97b57b 336,393,475,525,543,554,723-729,1559-1561
+src/workerd/api/http.h
+  s_af5e71f0073e07::t_0b38516ac65796 679-680,689,721,927
+src/workerd/api/tests/http-test.js
+  s_af5e71f0073e07::t_a3b53b752d8c45 53
+src/workerd/api/tests/tail-worker-test.js
+  s_af5e71f0073e07::t_4edf6afd933e8c 208
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "a9bea2f74db47dadfb14bb393b449e0d6ae524ea",
+  "prompts": {},
+  "sessions": {
+    "s_af5e71f0073e07": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f6b54-790f-7b10-92bf-365de98fe4eb",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Daniel Walsh <walshy@cloudflare.com>"
+    }
+  }
+}

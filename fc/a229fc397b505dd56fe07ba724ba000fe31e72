@@ -1,0 +1,21 @@
+src/workerd/api/worker-rpc.c++
+  s_0d3499d6e9689a::t_57d5b7fa8ee2c3 225-232,241,279-280,699,712,831-832
+src/workerd/api/worker-rpc.h
+  s_0d3499d6e9689a::t_fe338f91c2dd64 267,476,484
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fca229fc397b505dd56fe07ba724ba000fe31e72",
+  "prompts": {},
+  "sessions": {
+    "s_0d3499d6e9689a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fff8840b2ffeODxe4Hp6pv34Ke",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

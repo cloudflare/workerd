@@ -1,0 +1,43 @@
+src/cloudflare/internal/test/tracing/tracing-helpers-instrumentation-test.js
+  s_ebf47686d728a3::t_40160ac595a845 51,128-132
+src/cloudflare/internal/test/tracing/tracing-helpers-test.js
+  s_ebf47686d728a3::t_fd4027c5b492bc 6,9,75,322-325,327-328,330,332-347
+src/cloudflare/internal/tracing.d.ts
+  s_ebf47686d728a3::t_a3fe3f8277ea2e 87-88
+src/workerd/api/tracing.c++
+  s_ebf47686d728a3::t_e78ae9d18687fb 176-179,181-184,187-189,194-207,222,225-227,245-247,249-250,511-517,527,529,558-559,565-573,575-578,581,582-585,587-594,604-612
+src/workerd/api/tracing.h
+  s_ebf47686d728a3::t_7e372f6d79903f 187-192,197,219
+src/workerd/io/tracer.c++
+  s_ebf47686d728a3::t_98c5afd827f44a 606-608,619-637,639-640
+src/workerd/io/tracer.h
+  s_ebf47686d728a3::t_d847a7ebc3a0e6 58-60,174-176
+src/workerd/jsg/setup.c++
+  s_ebf47686d728a3::t_891452ad2c7c4b 398
+src/workerd/jsg/setup.h
+  s_ebf47686d728a3::t_fa7d9448fcec4b 342-345,518-520
+types/generated-snapshot/experimental/index.d.ts
+  s_ebf47686d728a3::t_1fb16a69fd9da9 4851
+types/generated-snapshot/experimental/index.ts
+  s_ebf47686d728a3::t_2c85343fd603bd 4860
+types/generated-snapshot/index.d.ts
+  s_ebf47686d728a3::t_71cd0bff021e78 4574
+types/generated-snapshot/index.ts
+  s_ebf47686d728a3::t_dbfebcd27b8d25 4583
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "25994428c67792613bc189f2f9d14a45d8eec5c0",
+  "prompts": {},
+  "sessions": {
+    "s_ebf47686d728a3": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_fe81e04f4ffegtcU3p2joqak5h",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Jeremy Morrell <jmorrell@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,23 @@
+src/workerd/api/BUILD.bazel
+  s_68959d5fe8e08d::t_7d1e27f3f5a601 760,769
+src/workerd/api/actor-fetch-retry-test.c++
+  s_68959d5fe8e08d::t_f7f6f8d5844286 89-227,287-310,416-435,437-438,440-442,445-482,485-486,488-497,499-503,506-534,537-546,548-551
+src/workerd/api/http.c++
+  s_68959d5fe8e08d::t_e0138982315753 22,37-38,1474-1576,1589-1651,1656-1679,1685-1692,1705-1706,1786,1868,1877-1899,1901-1907
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "0801fce40094f5d93592c1be5ebb7b153de0633d",
+  "prompts": {},
+  "sessions": {
+    "s_68959d5fe8e08d": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ff07ec157ffeC7x2Y13Ir1AaVS",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

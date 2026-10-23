@@ -1,0 +1,47 @@
+.bazelrc
+  s_b96e35e9740ea9::t_c3033e7c5874bb 127-152
+src/workerd/server/BUILD.bazel
+  s_b96e35e9740ea9::t_a253f6e5351693 82-83,88,115,147
+src/workerd/server/cli-main.c++
+  s_b96e35e9740ea9::t_5d2e0f01e9e7e9 13
+src/workerd/server/cli-main.h
+  s_b96e35e9740ea9::t_11390cf2f63cbd 7-8,11
+src/workerd/server/cli/args.rs
+  s_b96e35e9740ea9::t_62a1f33b5232cc 12,97-98,216-221,383,389,435
+src/workerd/server/cli/bridge.rs
+  s_b96e35e9740ea9::t_a6bd5b11b3797e 10-11,14
+src/workerd/server/cli/config.rs
+  s_b96e35e9740ea9::t_686988377b542c 16,113
+src/workerd/server/cli/lib.rs
+  s_b96e35e9740ea9::t_336e62ba79a5bc 6,8-10,13-18,29-34,66,84,93,104,107,115,126,134,142,146,156,160,164,174,178,182-183,186,196,201,227,232,235,240,242,252-254,281,284-285,297,301,329,359,390-391,410-412,419,422,432,435,448,452-457
+src/workerd/server/cli/process.rs
+  s_b96e35e9740ea9::t_19a6695208a947 17-20
+src/workerd/server/cli/socket_fd.rs
+  s_b96e35e9740ea9::t_2ff8614387b1a6 1-41
+src/workerd/server/cli/socket_fd/unix.rs
+  s_b96e35e9740ea9::t_547da79543b77a 1-2,6,64,73
+src/workerd/server/cli/socket_fd/windows.rs
+  s_b96e35e9740ea9::t_d1533a094dfbb4 1-51
+src/workerd/server/config-compiler.c++
+  s_b96e35e9740ea9::t_681f7524af1296 9
+src/workerd/server/config-compiler.h
+  s_b96e35e9740ea9::t_f2fde9255ab831 8-9,11
+src/workerd/server/workerd.rs
+  s_b96e35e9740ea9::t_d07eabb5ffe7fc 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6374747ea337ef44413fc90dcf0fc3f9e3b617d9",
+  "prompts": {},
+  "sessions": {
+    "s_b96e35e9740ea9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "63b5e4a0-0d53-46c5-9b6c-7ba079d63b7d",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

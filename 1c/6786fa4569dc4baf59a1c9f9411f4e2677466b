@@ -1,0 +1,52 @@
+src/workerd/api/tests/BUILD.bazel
+  s_17ea49de39358e::t_d74aee0e37ed34 855-859
+  s_17ea49de39358e::t_20d291fc274450 854
+src/workerd/api/tests/js-rpc-test.js
+  s_17ea49de39358e::t_d74aee0e37ed34 285-303,629-634,906-952
+src/workerd/api/streams/readable.c++
+  s_17ea49de39358e::t_d74aee0e37ed34 681-685,759-760
+src/workerd/api/sockets.c++
+  s_17ea49de39358e::t_d74aee0e37ed34 10,18-19,24-107,153-179,196-246,264-267,294,298,448-449,638-669,709-907
+  s_17ea49de39358e::t_0cb865d217fc9d 908
+src/workerd/api/streams/readable.h
+  s_17ea49de39358e::t_d74aee0e37ed34 558-564
+src/workerd/api/tests/js-rpc-socket-test.wd-test
+  s_17ea49de39358e::t_d74aee0e37ed34 35-37
+src/workerd/api/sockets.h
+  s_17ea49de39358e::t_d74aee0e37ed34 154-169,185-186,243-247
+  s_17ea49de39358e::t_f0bd01ce466c76 248
+src/workerd/api/tests/outbound-interceptor-socket-test.js
+  s_17ea49de39358e::t_d74aee0e37ed34 1-197
+  s_2fecc69ef0ed56::t_08c584ff8107d8 64-74,121-139
+src/workerd/io/worker-interface.capnp
+  s_17ea49de39358e::t_d74aee0e37ed34 496-500,532-538,606-625
+  s_17ea49de39358e::t_6bbfe56c78a29e 626
+src/workerd/api/tests/outbound-interceptor-socket-test.wd-test
+  s_17ea49de39358e::t_d74aee0e37ed34 1-61
+tools/cross/format.py
+  s_17ea49de39358e::t_d74aee0e37ed34 2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1c6786fa4569dc4baf59a1c9f9411f4e2677466b",
+  "prompts": {},
+  "sessions": {
+    "s_17ea49de39358e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_073ddd5c0ffeznqJdf646gs4Le",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "adriangracia <agracia@cloudflare.com>"
+    },
+    "s_2fecc69ef0ed56": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_074f11090ffefNG5a5uACnqHPQ",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "adriangracia <adrian.gracia@icloud.com>"
+    }
+  }
+}

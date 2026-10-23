@@ -1,0 +1,434 @@
+.plan-notes/adversarial-review-2-ffi.md
+  s_b5100e8818a1d4::t_326b9ab9076d16 1-48
+src/rust/cxx/kj-rs-http/tests/BUILD.bazel
+  s_b5100e8818a1d4::t_b8b93628631b09 1-53,55
+  s_b5100e8818a1d4::t_cadb76d743ae38 54
+src/rust/cxx/kj-hyper/peer-filter.c++
+  s_b5100e8818a1d4::t_2dc34cd2b855f9 1-53
+src/rust/cxx/kj-rs-cappy/codegen/fixture/colink_probe.capnp
+  s_b5100e8818a1d4::t_67454f9ebcf8cc 1-11
+src/rust/cxx/kj-hyper/BUILD.bazel
+  s_b5100e8818a1d4::t_a8a7d591ac135c 1-117
+src/rust/cxx/tools/bazel/cappy-build/exports.BUILD
+  s_b5100e8818a1d4::t_b1a41cec7ef79d 1-47
+src/rust/cxx/kj-rs-cappy/codegen/emit.rs
+  s_b5100e8818a1d4::t_4a80eade4050a9 1-74
+src/rust/cxx/kj-rs-cappy/codegen/fixture/kj_iface.capnp
+  s_b5100e8818a1d4::t_68fb5fe9be90e6 1-56
+src/rust/cxx/kj-rs-cappy/rpc/ffi.rs
+  s_b5100e8818a1d4::t_79622aad5895ec 1-565
+src/rust/cxx/kj-hyper/translate.rs
+  s_b5100e8818a1d4::t_c6e35f9328fb54 1-914
+src/rust/cxx/kj-rs-http/ffi.c++
+  s_b5100e8818a1d4::t_2bc68580f259cf 7,19-22,30,37-52
+src/rust/cxx/kj-rs-cappy/capnp-bridge/BUILD.bazel
+  s_b5100e8818a1d4::t_288bc58283b1c8 1-6,8,11-14,19,22-27,29
+src/rust/worker/ffi.h
+  s_b5100e8818a1d4::t_c7aedda6e883a6 8-10
+src/workerd/server/tls-network.h
+  s_b5100e8818a1d4::t_80734d4e390726 1-35
+src/workerd/server/cappy-worker-interface.c++
+  s_b5100e8818a1d4::t_caceb96a2f0bea 1-175
+src/rust/cxx/kj-hyper/upgraded_io.rs
+  s_b5100e8818a1d4::t_37cdd40007134a 1-366
+src/rust/cxx/kj-rs-cappy/colink-probe/lib.rs
+  s_b5100e8818a1d4::t_edc204e7bdad66 1-41
+src/rust/cxx/kj-rs-cappy/colink-probe/BUILD.bazel
+  s_b5100e8818a1d4::t_0a9d11e05cbcbe 1-69
+src/rust/cxx/kj-rs-http/tests/ffi-test.c++
+  s_b5100e8818a1d4::t_3acde9fa942037 5-6,218-219
+.plan-notes/unsafe-reduction-plan.md
+  s_b5100e8818a1d4::t_5c8e328d70bc39 1-367
+src/rust/cxx/kj-hyper/ws_ext.rs
+  s_b5100e8818a1d4::t_29eca8cf5da4f4 1-359
+src/rust/cxx/kj-rs-cappy/codegen/fixture/cpp_fixture.capnp
+  s_b5100e8818a1d4::t_5c13898edbcea2 1-147
+deps/rust/Cargo.lock
+  s_b5100e8818a1d4::t_16b10bd0c82d87 61-66,95-112,125-130,150-172,187,201-209,230-249,339-347,407-416,444-468,479-480,482,484,497-505,529-562,594,599-610,619-630,640-645,650,654-655,659,661-666,671,674,677-680,685-686,693,695,757-766,786,814-822,1005-1093,1096,1098,1110,1112,1123,1125,1137,1139,1143,1145,1147,1158,1160,1164,1166,1177-1182,1247-1295,1331,1333,1400,1434,1436,1466-1471,1612,1614,1634-1664,1754-1767,1845-1926,1939-1956,1969-1991,2082-2094,2103-2112,2119-2134,2166,2192-2203,2393,2399,2605,2607,2634,2638,2640-2662,2706-2711,2739-2744,2751-2756,2779-2784,2825-2843,2895-2903,2910,2919-2927,2937-3000,3003,3005,3080-3085,3088,3090,3099,3101,3110,3112,3116,3119-3124
+src/rust/cxx/kj-rs-cappy/tests/test_helpers.rs
+  s_b5100e8818a1d4::t_a85ac30ad7cca1 1-509
+src/workerd/io/BUILD.bazel
+  s_b5100e8818a1d4::t_6c6d941c5f0776 1,126,128,160,250-251,265,285,317,329,371,442-453
+  s_b5100e8818a1d4::t_5d56c79cc1fd73 635
+.plan-notes/safety-audit-cpp-workerd-cxx.md
+  s_b5100e8818a1d4::t_ca0ae82a34a26a 1-181
+src/rust/cxx/kj-hyper/stall.rs
+  s_b5100e8818a1d4::t_4f76e5ee3d4c75 1-338
+src/rust/cxx/kj-rs-cappy/rpc/lib.rs
+  s_b5100e8818a1d4::t_034eade31001a7 1-208
+patches/rust/http-kj-lenient-header-values.patch
+  s_b5100e8818a1d4::t_67311e1f684f91 1-17
+src/rust/cxx/kj-rs-cappy/core/lib.rs
+  s_b5100e8818a1d4::t_d9390f947660fe 1-71
+prompt.md
+  s_b5100e8818a1d4::t_8aac07f30335fb 1-21
+src/rust/cxx/kj-hyper/tests/hyper-server-test.c++
+  s_b5100e8818a1d4::t_f74eeb996710a4 1-1633
+src/rust/cxx/kj-rs-cappy/rpc/tunnel.rs
+  s_b5100e8818a1d4::t_92069e4800abd6 1-324
+src/rust/cxx/kj-rs-cappy/codegen/snapshot_test.rs
+  s_b5100e8818a1d4::t_0ec8770df38cc1 1-54
+.plan-notes/perf-baseline.md
+  s_b5100e8818a1d4::t_41887639061e32 1-512
+src/workerd/server/workerd-debug-port-client.c++
+  s_b5100e8818a1d4::t_7c54d75f159185 21,23,26-35,42-45,57,59-61
+src/workerd/server/server-test.c++
+  s_b5100e8818a1d4::t_812200dc5c9c68 7-8,11-12,16-18,20-23,25,179-210,372-398,420,467-477,515-518,1283-1294,1337,2179-2183,2199,2202,2225,2309-2312,2330,2333,2369,3775-3778,3823,3825-3827,3845,3870-3873,3910,3926,3929-3930,3945,3954,3975,4251-4261,4295,5336-5339,5561-5563,5591-5592,5594-5595,5609,5635,5653-5654,5656-5657,5671,6842-6854,7162,7164-8549,8615-8624,8811-8814
+.plan-notes/channel-migration-recipe.md
+  s_b5100e8818a1d4::t_26d5470b75266d 1-807
+src/workerd/server/http-client-backend.h
+  s_b5100e8818a1d4::t_b65104f06937bd 1-172
+src/rust/cxx/kj-hyper/tests/BUILD.bazel
+  s_b5100e8818a1d4::t_eef0c3298df577 1-107
+src/workerd/server/tls-network.c++
+  s_b5100e8818a1d4::t_8cd3f95b513634 1-327
+src/rust/cxx/kj-hyper/ffi.rs
+  s_b5100e8818a1d4::t_4211582f23a36c 1-800
+src/rust/cxx/kj-rs-cappy/rpc/cappy-http-ffi.h
+  s_b5100e8818a1d4::t_eacf7a2f320562 1-72
+src/rust/cxx/tools/bazel/cappy-build/rpc.BUILD
+  s_b5100e8818a1d4::t_d1384aff06f315 1-25
+.plan-notes/kj-tokio-fusion-design.md
+  s_b5100e8818a1d4::t_cd618cd6230024 1-493
+.plan-notes/safety-followups-cappy-liveness.md
+  s_b5100e8818a1d4::t_80b04e2a1ff0ab 1-34
+src/rust/cxx/kj-rs-http/service.rs
+  s_b5100e8818a1d4::t_4e017a976d21b6 1-204
+.plan-notes/perf-rust-vs-cxx.md
+  s_b5100e8818a1d4::t_d1280e92621e67 1-201
+src/rust/cxx/kj-hyper/hyper-server-ffi.c++
+  s_b5100e8818a1d4::t_3e8a309d50a550 1-303
+.plan-notes/minimize-workerd-diff.md
+  s_b5100e8818a1d4::t_b75b643cb96bde 1-344
+src/workerd/tests/test-fixture.c++
+  s_b5100e8818a1d4::t_7a45dbc70febfa 329-331,336
+src/rust/cxx/kj-rs-cappy/rpc/BUILD.bazel
+  s_b5100e8818a1d4::t_34e0113be3f778 1-101
+.plan-notes/prof.sh
+  s_b5100e8818a1d4::t_57cb89d5b30b79 1-28
+BUILD.bazel
+  s_b5100e8818a1d4::t_7fe46a5ce9f62a 134-141
+  s_b5100e8818a1d4::t_3762957121fb4a 4,131-133,142-166
+src/rust/cxx/tools/bazel/cappy-build/cappy.BUILD
+  s_b5100e8818a1d4::t_60b4da88aea1b7 1-27
+build/deps/rust.MODULE.bazel
+  s_b5100e8818a1d4::t_adb8e6327d4978 47-101,111-127
+src/rust/cxx/tools/bazel/cappy-build/BUILD.bazel
+  s_b5100e8818a1d4::t_91e5fa3a95e361 1-71
+src/workerd/tests/test-fixture.h
+  s_b5100e8818a1d4::t_9fc88041d34594 94,173,184,241-244,246-253
+.plan-notes/rust-io-violations.md
+  s_b5100e8818a1d4::t_bfc82cb0a6469a 1-622
+src/rust/cxx/kj-rs-cappy/rpc/cappy-client.h
+  s_b5100e8818a1d4::t_954824d58c64b4 1-96
+src/rust/cxx/kj-rs-cappy/rpc/http.rs
+  s_b5100e8818a1d4::t_a46b500739cf15 1-1211
+src/workerd/server/pyodide.c++
+  s_b5100e8818a1d4::t_86477351af3beb 6-7,76,78-81
+.plan-notes/bucket.py
+  s_b5100e8818a1d4::t_3b655bdd53f939 1-76
+deps/rust/Cargo.toml
+  s_b5100e8818a1d4::t_931a17179c5daa 35-38,44-48,50-57,62-63,66-84,87-89,92-98,102-121
+src/workerd/server/cappy-generated/regen/snapshot_test.rs
+  s_b5100e8818a1d4::t_a4f884ae026c36 1-23
+src/rust/cxx/kj-hyper/tests/test-harness.h
+  s_b5100e8818a1d4::t_fa3874d40f301a 1-216
+src/rust/cxx/tools/bazel/cappy-build/exports_schemas_tool.rs
+  s_b5100e8818a1d4::t_262a1fc5f0504d 1-41
+src/workerd/server/cappy-generated/lib.rs
+  s_b5100e8818a1d4::t_d155e9dd50aaec 1-73
+src/workerd/server/server.h
+  s_b5100e8818a1d4::t_cf2a98a76dfe05 20,24,223-244,317-322,326-327,370-375,377
+src/rust/cxx/kj-rs-http/ffi.h
+  s_b5100e8818a1d4::t_950ba92fdda3ca 15,23-31,41-59,67-79,172-227,242-246,261-263
+src/rust/worker/BUILD
+  s_b5100e8818a1d4::t_03355cd57bcd91 10,36
+src/rust/cxx/kj-rs-cappy/fixture-test/harness.cc
+  s_b5100e8818a1d4::t_02920251bfcd56 1-410
+src/rust/cxx/kj-rs-cappy/codegen/cpp.rs
+  s_b5100e8818a1d4::t_8756630a80807f 1-6321
+src/rust/cxx/kj-rs-cappy/codegen/fixture/cross_b.capnp
+  s_b5100e8818a1d4::t_13862241e27758 1-14
+src/workerd/server/cappy-generated/BUILD.bazel
+  s_b5100e8818a1d4::t_1f069978b7f818 1-172
+src/workerd/server/cappy-generated/regen/emit.rs
+  s_b5100e8818a1d4::t_edf78e56650d7a 1-41
+MIGRATION_PLAN.md
+  s_b5100e8818a1d4::t_83fbb3b18be687 1-164
+build/exts/local.bzl
+  s_b5100e8818a1d4::t_c52f4781a4f975 1-115
+.plan-notes/adversarial-review-2-runtime.md
+  s_b5100e8818a1d4::t_f9dd56cc6b1c93 1-131
+src/rust/cxx/kj-rs-http/http.rs
+  s_b5100e8818a1d4::t_fc8d38d6118536 1-20,23-25,28,105-108,117-123,128-131,136-138,140-173,241-254,256-265,267-275,278,280,284,289-290
+.plan-notes/perf-fusion-benchmark.txt
+  s_b5100e8818a1d4::t_a5697148330c0c 1-53
+src/rust/cxx/kj-rs-http/tests/lib.rs
+  s_b5100e8818a1d4::t_b5d6fc99692ef7 10-12,16,20-22,25-26,28-30,34-44,71-86
+src/rust/cxx/kj-rs-cappy/tests/BUILD.bazel
+  s_b5100e8818a1d4::t_08fb764efaa955 1-131
+.plan-notes/capnproto-pr-kj-async-split.md
+  s_b5100e8818a1d4::t_6e5c732b6be6c2 1-75
+.plan-notes/count_syscalls.c
+  s_b5100e8818a1d4::t_c09c783ed0de83 1-70
+.plan-notes/run.sh
+  s_b5100e8818a1d4::t_e6b52a5273825a 1-73
+.plan-notes/sccount.sh
+  s_b5100e8818a1d4::t_fc1171dda4ec99 1-32
+src/rust/cxx/kj-rs-http/own.rs
+  s_b5100e8818a1d4::t_ac6e97f90952fe 3-4
+deps/rust/BUILD.bazel
+  s_b5100e8818a1d4::t_dc98c46ea6239f 12-22
+src/rust/cxx/kj-rs-cappy/tests/cappy-iface-test.c++
+  s_b5100e8818a1d4::t_076ad9a6cdc8a7 1-888
+src/rust/cxx/tools/bazel/cappy-build/cappy-http.BUILD
+  s_b5100e8818a1d4::t_983176c1845a84 1-30
+src/rust/cxx/kj-rs-cappy/rpc/http_client.rs
+  s_b5100e8818a1d4::t_672a1106d14d3e 1-582
+src/workerd/server/server.c++
+  s_b5100e8818a1d4::t_6e5a696e4b245f 9,36,48,54,56-60,62,2031-2036,2041,2043-2047,2063-2065,2069-2074,2092-2093,2096,2106-2107,2121-2125,2190-2194,2203-2218,2222-2223,2229-2239,2253-2257,2273,2281,2294,2321-2326,2328,2331-2333,5860-5870,6088-6111,6123-6124,6131-6135,6139-6150,6161-6166,6176,6195-6295,6300-6319,6340-6342,6344-6348,6351-6354,6357-6364,6369,6438-6440,6442,6524-6528,6542,6552-6583,6585-6586,6588,6591,6593-6598,6600-6601,6603-6605,6607-6619,6623-6629,6655-6660,6723-6731,6885-6889,6891-6895,6922-6926,6934-6938,6988-6996,7008,7010-7033,7039,7049-7050,7070-7071
+src/workerd/server/capnp-session-backend.c++
+  s_b5100e8818a1d4::t_d8df748753ee13 1-1368
+src/rust/cxx/kj-rs-cappy/fixture-test/roundtrip.rs
+  s_b5100e8818a1d4::t_4e65f00d439eee 1-550
+.plan-notes/echo.raw
+  s_b5100e8818a1d4::t_6bdde29ffed0ba 1-135
+src/rust/cxx/kj-rs/own.c++
+  s_b5100e8818a1d4::t_99b13d46c8778d 4-26
+src/rust/cxx/kj-rs-http/lib.rs
+  s_b5100e8818a1d4::t_c6806edf4e95bc 6-41,45-52
+src/rust/cxx/kj-rs-cappy/BUILD.bazel
+  s_b5100e8818a1d4::t_f00e0a53b39010 1-82
+src/rust/cxx/kj-rs-cappy/tests/cappy-dynamic-test.c++
+  s_b5100e8818a1d4::t_68b92a6ac77b82 1-294
+src/rust/cxx/kj-rs-cappy/core/BUILD.bazel
+  s_b5100e8818a1d4::t_44694bfefb50ae 1-81
+src/rust/cxx/kj-rs-cappy/rpc/cappy-http-ffi.c++
+  s_b5100e8818a1d4::t_8e9ce4c749562f 1-3,5,7-10,12-15,17-25,27-33,35-37,41,44-49,51,53-55,57-59,61-62,64-66,69-71,73-74,77-87,89,92-93,96-97,100-101,104-105,108-111,113,115-117,119-120,122-126,128-130,132-134,137-138,140-154,157-163,167,170-253
+src/rust/cxx/tools/bazel/cappy-build/cappy-derive.BUILD
+  s_b5100e8818a1d4::t_921f8edad0d4da 1-18
+src/rust/cxx/kj-hyper/hyper-http.h
+  s_b5100e8818a1d4::t_1cca52199f1cb5 1-244
+src/rust/cxx/kj-rs-cappy/lib.rs
+  s_b5100e8818a1d4::t_43437f40e2c280 1-49
+patches/rust/httparse-kj-lenient-header-values.patch
+  s_b5100e8818a1d4::t_7f388924b7a8ea 1-29
+src/rust/cxx/kj-rs-cappy/capnp-bridge/cappy-capnp-bridge.c++
+  s_b5100e8818a1d4::t_24bef7b30dc3b9 1-648
+src/rust/cxx/kj-rs-cappy/codegen/lib.rs
+  s_b5100e8818a1d4::t_08a5c0decbe7eb 1-254
+build/capnp_request.bzl
+  s_b5100e8818a1d4::t_cb55f1d77f995c 1-52
+.plan-notes/conform-server-cpp.md
+  s_b5100e8818a1d4::t_a54fe92e759324 1-200
+.plan-notes/perf-mimalloc-experiment.txt
+  s_b5100e8818a1d4::t_7339a667dd2f53 1-53
+src/rust/cxx/tools/bazel/cappy-build/cappy-byte-stream.BUILD
+  s_b5100e8818a1d4::t_b663b69d5eabab 1-20
+.plan-notes/analyze.py
+  s_b5100e8818a1d4::t_a27298e7aae240 1-99
+src/workerd/server/fallback-service.c++
+  s_b5100e8818a1d4::t_55c1573e90edc0 129-133,141-151
+src/rust/cxx/kj-hyper/ws.rs
+  s_b5100e8818a1d4::t_b4e63d441e3a28 1-1017
+src/rust/cxx/kj-hyper/peer-filter.h
+  s_b5100e8818a1d4::t_d95c7ceaa33a9e 1-69
+src/rust/cxx/kj-hyper/server.rs
+  s_b5100e8818a1d4::t_a37f37ffa5b507 1-1694
+src/workerd/server/http-client-backend.c++
+  s_b5100e8818a1d4::t_89c93d280412e7 1-769
+src/rust/cxx/kj-rs-cappy/codegen/fixture/cross_a.capnp
+  s_b5100e8818a1d4::t_70a355bf96ede9 1-15
+src/rust/cxx/tools/bazel/cappy-build/cappy-codegen.BUILD
+  s_b5100e8818a1d4::t_8867ed315fb940 1-37
+src/workerd/server/cappy-worker-interface.h
+  s_b5100e8818a1d4::t_efb09beafc55ac 1-50
+src/rust/cxx/tools/bazel/capnp_request.bzl
+  s_b5100e8818a1d4::t_b8c25424267056 1-47
+src/rust/cxx/kj-hyper/tls.rs
+  s_b5100e8818a1d4::t_3999d0d249508c 1-626
+.plan-notes/safety-audit-rust-panics.md
+  s_b5100e8818a1d4::t_9f39dba308a89e 1-400
+src/rust/cxx/kj-rs-cappy/fixture-test/harness.h
+  s_b5100e8818a1d4::t_7b07d48ae46ace 1-33
+src/rust/cxx/kj-hyper/client_tls.rs
+  s_b5100e8818a1d4::t_ef6ede294ca068 1-187
+src/rust/cxx/kj-rs-cappy/tests/test-harness.h
+  s_b5100e8818a1d4::t_e99698e6c0befa 1-47
+src/rust/cxx/kj-hyper/tests/hyper-client-test.c++
+  s_b5100e8818a1d4::t_1594a66735f1d9 1-1055
+src/rust/cxx/tools/bazel/cappy_codegen.bzl
+  s_b5100e8818a1d4::t_f5f1459b95b812 1-32
+.plan-notes/safety-audit-rust-unsafe.md
+  s_b5100e8818a1d4::t_de66e82cd2f567 1-252
+src/rust/cxx/kj-rs-cappy/codegen/BUILD.bazel
+  s_b5100e8818a1d4::t_14a7cf1c104a1b 1-115
+src/rust/cxx/kj-rs-http/BUILD.bazel
+  s_b5100e8818a1d4::t_fab7189ddea9a4 1-115
+build/deps/deps.jsonc
+  s_b5100e8818a1d4::t_fb965561a9771c 39-41
+src/rust/cxx/kj-hyper/hyper-server-ffi.h
+  s_b5100e8818a1d4::t_d7301e30ffd1cc 1-66
+src/rust/cxx/kj-rs-cappy/fixture-test/BUILD.bazel
+  s_b5100e8818a1d4::t_e2ebc8260227fa 1-128
+src/rust/cxx/kj-hyper/lib.rs
+  s_b5100e8818a1d4::t_abd778b97dd11e 1-76
+src/rust/cxx/kj-hyper/client.rs
+  s_b5100e8818a1d4::t_6c8d80709c9606 1-1292
+src/rust/cxx/kj-rs-cappy/tests/cappy-colink-test.c++
+  s_b5100e8818a1d4::t_d76d6784d48543 1-53
+.plan-notes/perf-syscall-counts.txt
+  s_b5100e8818a1d4::t_7e10c26dd73789 1-18
+src/rust/cxx/kj-rs-http/headers.rs
+  s_b5100e8818a1d4::t_39e34a96087a35 1-174
+.plan-notes/test-suite-under-rust.md
+  s_b5100e8818a1d4::t_92677400a17236 1-132
+src/rust/cxx/kj-rs-cappy/fixture-test/lib.rs
+  s_b5100e8818a1d4::t_c994ff2f43b64c 1-171
+.plan-notes/upstreaming-plan.md
+  s_b5100e8818a1d4::t_42ff1b2ebd9d54 1-139
+build/deps/gen/deps.MODULE.bazel
+  s_b5100e8818a1d4::t_31fc0d7f4f5242 30-31,33
+.plan-notes/sanitizer-validation.md
+  s_b5100e8818a1d4::t_37f89845219944 1-274
+.plan-notes/adversarial-review.md
+  s_b5100e8818a1d4::t_9a994fa94bd9b3 1-218
+src/rust/cxx/kj-rs-http/io.rs
+  s_b5100e8818a1d4::t_0f602c697eb690 1-62
+src/rust/cxx/kj-rs-http/streams.rs
+  s_b5100e8818a1d4::t_20521b4a329e2a 1-8,15,17-18,20-33,35-37
+.plan-notes/hello.raw
+  s_b5100e8818a1d4::t_917fb2b592258c 1-135
+build/rust_io_backend.bzl
+  s_b5100e8818a1d4::t_058b77cb289773 18-49
+  s_b5100e8818a1d4::t_a529d4536f48ef 15-17
+  s_b5100e8818a1d4::t_3407a147b33d40 50-52
+  s_b5100e8818a1d4::t_a97be9f8403340 1-14,53-173
+src/rust/cxx/kj-rs-cappy/tests/lib.rs
+  s_b5100e8818a1d4::t_594b6a4850f543 1-121
+src/workerd/server/cappy-generated/regen/codegen.rs
+  s_b5100e8818a1d4::t_fa69d8e4562247 1-60
+.plan-notes/safety-audit-cpp-workerd.md
+  s_b5100e8818a1d4::t_b6494fd8b75634 1-281
+src/workerd/server/capnp-session-backend.h
+  s_b5100e8818a1d4::t_0870bc55f15775 1-131
+src/workerd/server/workerd-debug-port-client.h
+  s_b5100e8818a1d4::t_2449ff4c69961b 10,20-22,26-28,68
+src/rust/cxx/kj-hyper/tests/hyper-tls-test.c++
+  s_b5100e8818a1d4::t_6c34e551bb7841 1-681
+src/workerd/server/BUILD.bazel
+  s_b5100e8818a1d4::t_b5db449baf571e 79-82,89-129,143,167-227,238-241,246,251-304,315-320,395-400,404-409,415-418,424-429,439-448,491,504-507,511-514,516,566
+  s_b5100e8818a1d4::t_3c6a01528c9f85 5,71
+src/rust/cxx/kj-rs-cappy/capnp-bridge/cappy-capnp-bridge.h
+  s_b5100e8818a1d4::t_d7821e3e73f1eb 1-112
+src/rust/clippy.toml
+  s_b5100e8818a1d4::t_ec2512742f99f1 4-5
+src/rust/cxx/third-party/BUILD.bazel
+  s_b5100e8818a1d4::t_354e593b83264e 13-23
+build/kj_test.bzl
+  s_b5100e8818a1d4::t_4d48469cd4c0ae 3,11,23-27
+src/rust/cxx/AGENTS.md
+  s_b5100e8818a1d4::t_78317e820356c2 36-42,46-58
+src/rust/cxx/kj-rs-io/BUILD.bazel
+  s_b5100e8818a1d4::t_b59d05626ba506 1-79
+src/rust/cxx/kj-rs-io/async-io.c++
+  s_b5100e8818a1d4::t_2e4bb0cd15d6b2 1-446
+src/rust/cxx/kj-rs-io/async-io.h
+  s_b5100e8818a1d4::t_60da7787d8b5c7 1-260
+src/rust/cxx/kj-rs-io/error.rs
+  s_b5100e8818a1d4::t_8ae5b1109ce8ce 1-130
+src/rust/cxx/kj-rs-io/ffi.rs
+  s_b5100e8818a1d4::t_5700b10107308d 1-817
+src/rust/cxx/kj-rs-io/lib.rs
+  s_b5100e8818a1d4::t_9ff24166ea026a 1-75
+src/rust/cxx/kj-rs-io/net.rs
+  s_b5100e8818a1d4::t_efed3845f1dc64 1-638
+src/rust/cxx/kj-rs-io/peer-filter.h
+  s_b5100e8818a1d4::t_2f8ce6cd6af832 1-54
+src/rust/cxx/kj-rs-io/runtime.rs
+  s_b5100e8818a1d4::t_2f76379a13c1dd 1-50
+src/rust/cxx/kj-rs-io/serve.rs
+  s_b5100e8818a1d4::t_e1f9fd048309ac 1-422
+src/rust/cxx/kj-rs-io/signal.rs
+  s_b5100e8818a1d4::t_b25e967c96c6f0 1-111
+src/rust/cxx/kj-rs-io/stream.rs
+  s_b5100e8818a1d4::t_215e7a9abbeebd 1-558
+src/rust/cxx/kj-rs-io/tests/lib.rs
+  s_b5100e8818a1d4::t_82aeee8677a326 1-84
+src/rust/cxx/kj-rs-io/tests/serve-test.c++
+  s_b5100e8818a1d4::t_ee9ff1d5d4cefd 1-284
+src/rust/cxx/kj-rs-io/tests/serve_helpers.rs
+  s_b5100e8818a1d4::t_1ec07e535ca438 1-109
+src/rust/cxx/kj-rs-io/unwrap.h
+  s_b5100e8818a1d4::t_152fb60ac32b81 1-78
+src/rust/cxx/kj-rs-tokio/BUILD.bazel
+  s_b5100e8818a1d4::t_c3ed6b4edd7cee 1-71
+src/rust/cxx/kj-rs-tokio/port.rs
+  s_b5100e8818a1d4::t_c468c249d5b165 1-641
+src/rust/cxx/kj-rs-tokio/tokio-event-port.h
+  s_b5100e8818a1d4::t_8de2a708cd92bb 1-109
+src/rust/cxx/kj-rs/awaiter.c++
+  s_b5100e8818a1d4::t_7e2a2bd29ba2cd 3,31-34,38-53,61,64,87,101,104,113,115,124-157,177-189,193-196,198-199,211,213
+src/rust/cxx/kj-rs/awaiter.h
+  s_b5100e8818a1d4::t_307f433520f728 4,8,15-17,50-55,60,88-92,99-110,132-136,154-157,162-164,167,178-202,204,214,267,269
+src/rust/cxx/kj-rs/awaiter.rs
+  s_b5100e8818a1d4::t_b11b93b0671edb 1-5,15,25-34,45,64-69,89,106-115,122-124
+src/rust/cxx/kj-rs/executor-guarded.h
+  s_b5100e8818a1d4::t_c9ff5e0814ce76 7-8,13-20,31-34,44,53,64-72
+src/rust/cxx/kj-rs/ffi.rs
+  s_b5100e8818a1d4::t_87a6817f268167 1-112
+src/rust/cxx/kj-rs/future.h
+  s_b5100e8818a1d4::t_96e1239a3c888d 70,82-96,99-106,126,128
+src/rust/cxx/kj-rs/future.rs
+  s_b5100e8818a1d4::t_d4064a4b29a437 1-5,41-89,91,93,127-138,141,144-145,147-148,150-156,160-161,170-172,176-186,188-189,191,193,195-197,202-208,211,214-215,217,219-225,229-231,235-239,241-242,244,246,248-253,261-262,273-274
+src/rust/cxx/kj-rs/lib.rs
+  s_b5100e8818a1d4::t_2aced7ceeb1769 1-35,50-51,55
+src/rust/cxx/kj-rs/maybe.rs
+  s_b5100e8818a1d4::t_908c4692302343 1-5,39-40,43-44,54,57,67,70-71,82,85,121-122,134-136,173-175,213-214,249-251,278-280,407-409,430-433
+src/rust/cxx/kj-rs/own.rs
+  s_b5100e8818a1d4::t_18b08b28911cfb 2-5,28-31,36-37,124-136,220-221
+src/rust/cxx/kj-rs/promise.rs
+  s_b5100e8818a1d4::t_49af7aa6b156d3 1-5,28-32,144-146,148-149,154-176
+src/rust/cxx/kj-rs/refcount.rs
+  s_b5100e8818a1d4::t_49e0151bb1fea5 2-5,37-56,66-67,97-98,113-114,166-167,186-187,205-206
+src/rust/cxx/kj-rs/tests/awaitables-cc-test.c++
+  s_b5100e8818a1d4::t_f5f3a99f894cc3 11-20,174-224,245,247-249,258-264,268-320,322,335-336,340-344
+src/rust/cxx/kj-rs/tests/lib.rs
+  s_b5100e8818a1d4::t_7cef1a8d3bde73 16,24-26,32,38,40,267-269,277-282,291-299,338-351,395-421
+src/rust/cxx/kj-rs/tests/neutralize-waker-test.c++
+  s_b5100e8818a1d4::t_89f8b2ab4afbb2 1-144
+src/rust/cxx/kj-rs/tests/test_futures.rs
+  s_b5100e8818a1d4::t_87b023fd416420 28-75,96,146-154,157-158,161-164,167,170,173-175,181-191,266-285,330-366
+src/rust/cxx/kj-rs/waker.c++
+  s_b5100e8818a1d4::t_72e76000a28592 3,7-9,12-28,32-38,41-43,45
+src/rust/cxx/kj-rs/waker.h
+  s_b5100e8818a1d4::t_12a83a91feb03e 3,10,12-18,20-21,23-37,39-43,45,47-51,53-65,67-72,74-80,83-87,91,93-95,97-104,106-110,112-113,115-119,121-123,126-129
+src/rust/cxx/kj-rs/waker.rs
+  s_b5100e8818a1d4::t_daae4c5d218a75 1-7,12-14,16-23,25-34,36-39,43-107,111-113,117-123,127,130-136,140-149,153-160,164-168,171-180,182
+src/workerd/jsg/BUILD.bazel
+  s_b5100e8818a1d4::t_0baea70f614072 316,324-336
+src/workerd/server/workerd.c++
+  s_b5100e8818a1d4::t_bd9f69c96d4bf0 12,946,1001-1002,1195,1224,1252-1253,1348,1542
+src/workerd/tests/BUILD.bazel
+  s_b5100e8818a1d4::t_5446c2e65e72ea 42
+src/workerd/util/BUILD.bazel
+  s_b5100e8818a1d4::t_20854786c4b5ca 4,91,139,224,469-498
+src/workerd/util/setup-async-io-tokio.c++
+  s_b5100e8818a1d4::t_1d7837a90babfc 1-114
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d45e0f8e6c83396dec3bd529275ee13b44f8c9f2",
+  "prompts": {},
+  "sessions": {
+    "s_b5100e8818a1d4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "269c6dc8-6085-4412-b5b8-92f18d990985",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}
