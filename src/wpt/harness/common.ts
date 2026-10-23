@@ -170,9 +170,22 @@ export function getHostInfo(): HostInfo {
   };
 }
 
-export function getBindingPath(base: string, rawPath: string): string {
+// Returns the name of the binding holding the file at `rawPath`, relative to `base` within the
+// tested module. Files in the module are bound relative to its root. When `wptPath` (the module's
+// path within the WPT tree) is given, a relative path that leaves the module is resolved to the
+// absolute WPT path that extra_wpt_directories in wpt_test.bzl binds it under.
+export function getBindingPath(
+  base: string,
+  rawPath: string,
+  wptPath?: string
+): string {
   if (path.isAbsolute(rawPath)) {
     return rawPath;
+  }
+
+  const relativePath = path.normalize(path.join(base, rawPath));
+  if (wptPath !== undefined && relativePath.startsWith('../')) {
+    return path.join('/', wptPath, relativePath);
   }
 
   return path.relative('/', path.resolve(base, rawPath));
