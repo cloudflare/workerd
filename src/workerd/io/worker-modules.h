@@ -148,6 +148,10 @@ kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
       KJ_SWITCH_ONEOF(def.content) {
         KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
           jsg::modules::Module::Flags flags = jsg::modules::Module::Flags::ESM;
+          using RegistryOptions = jsg::modules::ModuleRegistry::Builder::Options;
+          if ((options & RegistryOptions::PRODUCE_COMPILE_HINTS) != RegistryOptions::NONE) {
+            flags = flags | jsg::modules::Module::Flags::PRODUCE_COMPILE_HINTS;
+          }
           // The configured entry-point module gets the MAIN flag (import.meta.main).
           // Entry points are required to be ESM (enforced at resolution via
           // RequireOption::REQUIRE_ESM), so a non-ESM main module never receives
