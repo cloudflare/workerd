@@ -218,6 +218,7 @@ pub mod ffi {
     impl KjOwn<ConnectResponse> {}
     impl KjOwn<HttpService> {}
     impl KjOwn<HttpServiceResponse> {}
+    impl KjOwn<TlsStarterCallback> {}
 }
 
 assert_eq_size!(ffi::HttpConnectSettings, [u8; 16]);

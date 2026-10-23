@@ -28,6 +28,9 @@
 //!   kj's (`kj::newWebSocket`) over the upgraded connection, built on the C++ side.
 //! - [`into_kj_stream`] / [`into_kj_stream_with`]: tokio streams handed to C++ as
 //!   `kj::AsyncIoStream`.
+//! - [`StartTlsIo`]: a plain transport that becomes TLS when kj's `TlsStarterCallback` is invoked;
+//!   the client's tunnels upgrade as the client, and [`StartTlsIo::server`] upgrades an accepted
+//!   connection as the server.
 //!
 //! kj-hyper is used from Rust; its C++ (kj-hyper.c++) exists only to implement kj interfaces over
 //! Rust objects, and all of its `unsafe` code lives in `ffi.rs`.
@@ -79,6 +82,7 @@ pub use io::Hangup;
 pub use io::into_kj_stream;
 pub use io::into_kj_stream_with;
 pub use io::io_kj_error;
+pub use starttls::StartTlsIo;
 
 /// `kj::Result` unless an error type is given, so it can stand in for `std::result::Result`.
 pub type Result<T, E = KjError> = result::Result<T, E>;
