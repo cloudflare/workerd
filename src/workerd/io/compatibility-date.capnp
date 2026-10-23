@@ -794,7 +794,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   enableRequestSignal @90 :Bool
     $compatEnableFlag("enable_request_signal")
     $compatDisableFlag("disable_request_signal")
-    $compatEnableDate("2026-11-01");
+    $compatEnableDate("2026-11-08");
   # Enables Request.signal for incoming requests.
 
   connectPassThrough @91 :Bool

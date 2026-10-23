@@ -631,7 +631,7 @@ KJ_TEST("compatibility dates must be Tuesday, Wednesday, or Thursday") {
     "stripAuthorizationOnCrossOriginRedirect"_kj,  // 2025-09-01 (Monday)
     "enableCtxExports"_kj,                         // 2025-11-17 (Monday)
 
-    // Scheduled default enablement on November 1, 2026 (Sunday).
+    // Scheduled default enablement on November 8, 2026 (Sunday).
     "enableRequestSignal"_kj,
 
     // Non-conformant dates via impliedByAfterDate
