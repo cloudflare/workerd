@@ -12,6 +12,7 @@ wd_bench(
 )
 
 wd_bench(
+    size = "large",
     src = "piping-ts.wd-bench",
     args = ["--experimental"],
     data = piping_bench_srcs,

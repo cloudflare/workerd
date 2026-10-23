@@ -12,6 +12,7 @@ wd_bench(
 )
 
 wd_bench(
+    size = "large",
     src = "identity-ts.wd-bench",
     args = ["--experimental"],
     data = identity_bench_srcs,

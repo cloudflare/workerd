@@ -14,6 +14,7 @@ def wd_bench(
         compat_date = "",
         generate_all_compat_flags_variant = True,
         generate_all_autogates_variant = True,
+        size = "medium",
         tags = [],
         **kwargs):
     """Defines benchmarks that run `workerd bench` with a particular config.
@@ -30,6 +31,7 @@ def wd_bench(
         newest that the build supports.
      generate_all_compat_flags_variant: If True (default), generate @all-compat-flags variants.
      generate_all_autogates_variant: If True (default), generate @all-autogates variants.
+     size: The size of the @smoke tests, which sets their timeout.
      tags: Tags for all targets.
 
     The variants are `name@` (`compat_date`), `name@all-compat-flags` (2999-12-31), and
@@ -92,6 +94,7 @@ def wd_bench(
             src = src,
             data = data + [_WORKERD],
             args = workerd_args + variant_args + ["--quick"],
+            size = size,
             tags = tags,
             **kwargs
         )
