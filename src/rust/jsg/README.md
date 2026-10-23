@@ -352,6 +352,10 @@ impl WebSocket {
 
 Constants are set on both the constructor and prototype as read-only, non-configurable properties per Web IDL. The name is used as-is (no camelCase conversion). Only numeric types are supported (`i8`..`i64`, `u8`..`u64`, `f32`, `f64`).
 
+## Fast API
+
+`#[jsg_method]` adds a V8 Fast API callback for the types in `fast_api.rs`; it must not call into V8.
+
 ## FFI Functions with Raw Pointers
 
 Functions exposed to C++ via FFI that receive raw pointers must be marked `unsafe fn`:

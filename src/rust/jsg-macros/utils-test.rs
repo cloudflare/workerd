@@ -84,3 +84,38 @@ fn elide_named_lifetimes_cases() {
         quote::quote!(String).to_string()
     );
 }
+
+#[test]
+fn fast_api_signature_cases() {
+    let fast = |sig: syn::Signature| fast_api_signature(&sig).map(|args| args.len());
+
+    assert_eq!(
+        fast(parse_quote!(fn f(&self, a: i32, b: u32) -> bool)),
+        Some(2)
+    );
+    assert_eq!(
+        fast(parse_quote!(fn f(&self, x: jsg::Number) -> Number)),
+        Some(1)
+    );
+    assert_eq!(fast(parse_quote!(fn f(a: bool))), Some(1));
+    assert_eq!(fast(parse_quote!(fn f(&self) -> ())), Some(0));
+
+    assert_eq!(fast(parse_quote!(fn f(&mut self, a: i32))), None);
+    assert_eq!(fast(parse_quote!(fn f(self, a: i32))), None);
+    assert_eq!(fast(parse_quote!(fn f(&self, s: String))), None);
+    assert_eq!(
+        fast(parse_quote!(fn f(&self, lock: &mut Lock, a: i32))),
+        None
+    );
+    assert_eq!(fast(parse_quote!(fn f(&self, x: f64))), None);
+    assert_eq!(fast(parse_quote!(fn f(&self, x: ::jsg::Number))), Some(1));
+    assert_eq!(fast(parse_quote!(fn f(&self, x: other::Number))), None);
+    assert_eq!(fast(parse_quote!(fn f(&self, x: Option<i32>))), None);
+    assert_eq!(fast(parse_quote!(fn f(&self) -> i32)), None);
+    assert_eq!(
+        fast(parse_quote!(fn f(&self) -> Result<bool, jsg::Error>)),
+        None
+    );
+    assert_eq!(fast(parse_quote!(fn f<T>(&self, a: i32))), None);
+    assert_eq!(fast(parse_quote!(async fn f(&self, a: i32))), None);
+}

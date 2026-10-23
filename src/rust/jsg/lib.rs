@@ -7,6 +7,7 @@ use std::num::ParseIntError;
 use std::ops::Deref;
 use std::pin::Pin;
 
+pub mod fast_api;
 pub mod feature_flags;
 pub mod lenient;
 pub mod macros;
@@ -875,6 +876,7 @@ pub enum Member {
     Method {
         name: String,
         callback: RawFunctionCallback,
+        fast: Option<v8::ffi::FastApiDescriptor>,
     },
     /// A property accessor on the prototype (`Prototype` or `Inspect`; `Instance`
     /// panics). `setter_callback = None` makes the property read-only; `Inspect`
@@ -898,6 +900,7 @@ pub enum Member {
     StaticMethod {
         name: String,
         callback: RawFunctionCallback,
+        fast: Option<v8::ffi::FastApiDescriptor>,
     },
     StaticConstant {
         name: String,
@@ -1023,13 +1026,7 @@ where
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(scope.open()))) {
         Ok(result) => Some(result),
         Err(payload) => {
-            let msg = if let Some(s) = payload.downcast_ref::<&str>() {
-                *s
-            } else if let Some(s) = payload.downcast_ref::<String>() {
-                s.as_str()
-            } else {
-                "<non-string panic payload>"
-            };
+            let msg = panic_message(&*payload);
             // The scope may not have opened, so there may be no lock to throw with.
             // SAFETY: the caller of `CallbackScope::new` keeps the isolate locked, with a
             // context entered and a `HandleScope` open, while `scope` lives. The unwind closed
@@ -1040,6 +1037,16 @@ where
             }
             None
         }
+    }
+}
+
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        s
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.as_str()
+    } else {
+        "<non-string panic payload>"
     }
 }
 

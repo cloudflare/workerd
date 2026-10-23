@@ -68,6 +68,8 @@ impl DnsUtil {
 }
 ```
 
+Eligible methods also get a V8 Fast API callback; see "Fast API" in `src/rust/jsg/README.md`.
+
 ---
 
 ## `#[jsg_resource]`

@@ -35,11 +35,16 @@ class EvalContext {
   v8::Global<v8::Context> v8Context;
 };
 
+// Forward-declared; defined by the CXX-generated lib.rs.h header.
+enum class FastApi : uint8_t;
+
 // Testing harness that provides a simple V8 isolate for Rust JSG testing
 class TestHarness {
  public:
   // Use create_test_harness() instead - it ensures proper V8 stack scope
-  TestHarness(::workerd::jsg::V8StackScope& stackScope, ::rust::Slice<const uint8_t> flags);
+  TestHarness(::workerd::jsg::V8StackScope& stackScope,
+      ::rust::Slice<const uint8_t> flags,
+      FastApi fastApi);
 
   // Runs a callback within a proper V8 context and stack scope
   // The callback receives the data pointer, isolate and a context
@@ -54,7 +59,7 @@ class TestHarness {
 
 // `flags` is a canonical `CompatibilityFlags` message. It sets the Rust realm's flags and, as
 // `Worker::Isolate` does, the isolate-level JSG switches derived from them.
-kj::Own<TestHarness> create_test_harness(::rust::Slice<const uint8_t> flags);
+kj::Own<TestHarness> create_test_harness(::rust::Slice<const uint8_t> flags, FastApi fast_api);
 
 // Forward-declared; defined by the CXX-generated lib.rs.h header.
 enum class GcType : uint8_t;

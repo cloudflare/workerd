@@ -290,6 +290,15 @@ class IsolateBase {
     specCompliantPropertyAttributesFlag = true;
   }
 
+  inline bool isFastApiEnabled() const {
+    return fastApiEnabled;
+  }
+
+  // For test isolates, which are built without a `JsgConfig`. Only affects templates built after.
+  inline void setFastApiEnabledForTest() {
+    fastApiEnabled = true;
+  }
+
   inline void disableTopLevelAwait() {
     allowTopLevelAwait = false;
   }
@@ -573,6 +582,7 @@ class IsolateBase {
   bool setToStringTag = false;
   bool shouldSetImmutablePrototypeFlag = false;
   bool specCompliantPropertyAttributesFlag = false;
+  bool fastApiEnabled = false;
   bool allowTopLevelAwait = true;
   bool usingNewModuleRegistry = false;
   bool usingEnhancedErrorSerialization = false;
@@ -908,6 +918,7 @@ class Isolate: public IsolateBase {
     KJ_DASSERT(wrappers[0].get() == nullptr);
     auto wrapper = wrapperSpace.construct(ptr, kj::fwd<MetaConfiguration>(configuration));
     wrapper->initTypeWrapper();
+    fastApiEnabled = wrapper->isFastApiEnabled();
     wrappers[0] = kj::mv(wrapper);
   }
 

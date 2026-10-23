@@ -40,6 +40,7 @@ use utils::elide_named_lifetimes;
 use utils::error;
 use utils::extract_name_attribute;
 use utils::extract_named_fields;
+use utils::fast_api_signature;
 use utils::is_lock_ref;
 use utils::is_option_type;
 use utils::is_result_type;
@@ -195,7 +196,11 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// conversion of the Rust function name.
 #[proc_macro_attribute]
 pub fn jsg_method(attr: TokenStream, item: TokenStream) -> TokenStream {
-    callback(item, Callback::Function, Some(attr))
+    let input_fn = parse_macro_input!(item as ItemFn);
+    let fast = fast_callback(&input_fn.sig);
+    let mut output = callback(quote! { #input_fn }.into(), Callback::Function, Some(attr));
+    output.extend(TokenStream::from(fast));
+    output
 }
 
 /// The V8 callback shape a generated callback takes.
@@ -339,6 +344,7 @@ fn callback(item: TokenStream, kind: Callback, method_attr: Option<TokenStream>)
                 #result_handling
             })
         }
+
     }
     .into()
 }
@@ -389,6 +395,41 @@ fn unwrap_argument(
                 return;
             }
         };
+    }
+}
+
+/// Generates `{name}_fast_api()`, which returns the V8 Fast API callback of a `#[jsg_method]`
+/// if its signature allows one.
+fn fast_callback(fn_sig: &syn::Signature) -> proc_macro2::TokenStream {
+    let fn_name = &fn_sig.ident;
+    let descriptor_name = syn::Ident::new(&format!("{fn_name}_fast_api"), fn_name.span());
+    let descriptor = fast_api_signature(fn_sig).map_or_else(
+        || quote! { None },
+        |arg_types| {
+            let args: Vec<_> = (0..arg_types.len())
+                .map(|i| syn::Ident::new(&format!("a{i}"), fn_name.span()))
+                .collect();
+            let has_self = fn_sig
+                .inputs
+                .iter()
+                .any(|arg| matches!(arg, FnArg::Receiver(_)));
+            if has_self {
+                quote! {
+                    Some(jsg::fast_api::method(|this: &Self, #(#args: #arg_types),*| this.#fn_name(#(#args),*)))
+                }
+            } else {
+                quote! {
+                    Some(jsg::fast_api::static_method(|#(#args: #arg_types),*| Self::#fn_name(#(#args),*)))
+                }
+            }
+        },
+    );
+    quote! {
+        #[automatically_derived]
+        #[doc(hidden)]
+        fn #descriptor_name() -> Option<jsg::v8::ffi::FastApiDescriptor> {
+            #descriptor
+        }
     }
 }
 

@@ -37,12 +37,21 @@ mod ffi {
         Minor = 1,
     }
 
+    /// Whether resource methods get V8 Fast API callbacks.
+    enum FastApi {
+        Disabled = 0,
+        Enabled = 1,
+    }
+
     unsafe extern "C++" {
         include!("workerd/rust/jsg-test/ffi.h");
         type TestHarness;
         type EvalContext;
 
-        pub unsafe fn create_test_harness(flags: &[u8]) -> Result<KjOwn<TestHarness>>;
+        pub unsafe fn create_test_harness(
+            flags: &[u8],
+            fast_api: FastApi,
+        ) -> Result<KjOwn<TestHarness>>;
         pub unsafe fn run_in_context(
             self: &TestHarness,
             data: usize, /* callback */
@@ -192,6 +201,19 @@ impl Harness {
     ///
     /// Panics if the harness cannot be created.
     pub fn with_flags(set_flags: impl FnOnce(compatibility_flags::Builder<'_>)) -> Self {
+        Self::create(set_flags, ffi::FastApi::Disabled)
+    }
+
+    /// Like [`Harness::new`], with `JsgConfig::fastApiEnabled` set so that resource methods get
+    /// V8 Fast API callbacks.
+    pub fn with_fast_api() -> Self {
+        Self::create(|_| {}, ffi::FastApi::Enabled)
+    }
+
+    fn create(
+        set_flags: impl FnOnce(compatibility_flags::Builder<'_>),
+        fast_api: ffi::FastApi,
+    ) -> Self {
         let mut message = capnp::message::Builder::new_default();
         set_flags(message.init_root::<compatibility_flags::Builder<'_>>());
         let words = message
@@ -200,7 +222,10 @@ impl Harness {
             .expect("canonicalizing a freshly built message cannot fail");
         let bytes = capnp::Word::words_to_bytes(&words);
         // SAFETY: create_test_harness initializes the V8 platform and returns a valid harness.
-        Self(unsafe { ffi::create_test_harness(bytes) }.expect("failed to create test harness"))
+        Self(
+            unsafe { ffi::create_test_harness(bytes, fast_api) }
+                .expect("failed to create test harness"),
+        )
     }
 
     /// Runs a callback within a V8 context.

@@ -145,6 +145,7 @@ pub mod ffi {
 
         type Isolate;
         type FunctionCallbackInfo;
+        type FastApiCallbackOptions;
         type PropertyCallbackInfo;
         type PropertySetterCallbackInfo;
         type Wrappable;
@@ -509,6 +510,22 @@ pub mod ffi {
         pub unsafe fn psci_get_isolate(info: *mut PropertySetterCallbackInfo) -> *mut Isolate;
         pub unsafe fn psci_get_this(info: *mut PropertySetterCallbackInfo) -> Local;
 
+        // FastApiCallbackOptions
+        pub unsafe fn fast_api_unwrap_receiver(
+            options: *mut FastApiCallbackOptions,
+            receiver: Local,
+        ) -> TraitObjectPtr;
+        pub unsafe fn fast_api_throw_exception(
+            options: *mut FastApiCallbackOptions,
+            exception_type: ExceptionType,
+            message: &str,
+        );
+        pub unsafe fn fast_api_throw_internal_error(
+            options: *mut FastApiCallbackOptions,
+            internal_message: &str,
+        );
+        pub unsafe fn fast_api_terminate_execution(options: *mut FastApiCallbackOptions);
+
         // Errors
         pub unsafe fn exception_create_from_bytes(
             isolate: *mut Isolate,
@@ -549,9 +566,23 @@ pub mod ffi {
         callback: usize,
     }
 
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum FastApiType {
+        Void,
+        Bool,
+        Float64,
+    }
+
+    pub struct FastApiDescriptor {
+        callback: usize,
+        return_type: FastApiType,
+        arg_types: Vec<FastApiType>,
+    }
+
     pub struct MethodDescriptor {
         name: String,
         callback: usize,
+        fast: KjMaybe<FastApiDescriptor>,
     }
 
     pub struct StaticConstantDescriptor {
@@ -3348,6 +3379,16 @@ impl ffi::TraitObjectPtr {
         unsafe { std::mem::transmute([self.type_id_lo, self.type_id_hi]) }
     }
 
+    /// Returns the resource as a typed `NonNull<R>`, or `None` if the trait object has been
+    /// cleared or holds a type other than `R`.
+    pub(crate) fn resolve<R: Resource>(&self) -> Option<NonNull<R>> {
+        if self.is_cleared() || self.type_id() != std::any::TypeId::of::<R>() {
+            return None;
+        }
+        // SAFETY: TypeId matched, so data_ptr is a valid Rc::into_raw pointer to R.
+        Some(unsafe { self.data_as::<R>() })
+    }
+
     /// Returns the data pointer as a `NonNull<R>`.
     ///
     /// # Safety
@@ -3777,12 +3818,6 @@ impl WrappableRc {
             let wrappable = &*self.handle.get();
             ffi::TraitObjectPtr::from_wrappable(wrappable)?
         };
-
-        if trait_ptr.type_id() != std::any::TypeId::of::<R>() {
-            return None;
-        }
-
-        // SAFETY: TypeId matched, so data_ptr is a valid Rc::into_raw pointer to R.
-        Some(unsafe { trait_ptr.data_as::<R>() })
+        trait_ptr.resolve::<R>()
     }
 }
