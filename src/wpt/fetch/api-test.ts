@@ -24,8 +24,6 @@ export default {
     ],
     expectedFailures: [
       // The fetch promise still resolves for some reason
-      'Aborting rejects with AbortError',
-      'Aborting rejects with abort reason',
       'Already aborted signal rejects immediately',
 
       // Doesn't reject
@@ -793,11 +791,7 @@ export default {
     ],
   },
 
-  'response/json.any.js': {
-    comment:
-      'UTF-16 test requires /xhr/resources/utf16-bom.json which is in a different test module',
-    expectedFailures: ['Ensure UTF-16 results in an error'],
-  },
+  'response/json.any.js': {},
   'response/response-arraybuffer-realm.window.js': {
     comment: 'Skipped because it involves iframes',
     omittedTests: true,
@@ -851,10 +845,7 @@ export default {
       'Constructing a Response with a stream on which getReader() is called',
     ],
   },
-  'response/response-headers-guard.any.js': {
-    comment: 'Likely just missing validation',
-    expectedFailures: ['Ensure response headers are immutable'],
-  },
+  'response/response-headers-guard.any.js': {},
   'response/response-init-001.any.js': {
     comment: 'statusText should be inited to OK',
     expectedFailures: ['Check default value for statusText attribute'],
