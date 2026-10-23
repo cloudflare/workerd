@@ -57,6 +57,7 @@ Two implementation divergences are pinned:
 | `pipeSocketToSocketClosesSource` | the same native-to-native pipe leaves the source locked and (TS, via the interop closed-promise) closed at the start |
 | `pipeBehindUnawaitedWrite` | header write not awaited, writer released, Response body piped in: echo is header then body; both endpoints unlocked after the pipe |
 | `pipeBehindWriteBeforeStart` | the same within connect()'s turn, with the header still queued before the writable starts |
+| `pipeOptionGetterLocksNativeEndpoint` | an option getter that takes a reader on a Response body, or a writer on the socket writable, fails the native-to-native pipe with a TypeError and leaves both endpoints as they were: the reader still reads the whole body, the body piped toward the locked writable still reads in full, and the writer's write is echoed |
 | `cancelReadableSettlesSocket` | reader.cancel settles a pending peer read (C++ rejects; TS resolves done), then socket.close()/closed settle |
 | `detachRejectsPendingWrites` | writes pending at startTls()'s detach (one in flight to the stall server, two queued) all reject with the same `Network connection lost.` error; the writable stays locked and (TS, via the interop closed-promise) is closed |
 | `detachClosesIdleWritable` | startTls() with nothing pending: the writable is locked and (TS, via the interop closed-promise taken before the detach) closed at the detach |

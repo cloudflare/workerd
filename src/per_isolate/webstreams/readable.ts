@@ -538,10 +538,37 @@ function iteratorReturnSteps(
   return PromiseResolve(undefined);
 }
 
+// WebIDL's ongoing promise: a next() or return() made while one is set
+// runs its steps once that promise settles, either way, and its own
+// promise becomes the ongoing one at once. One made with none set runs
+// its steps at once, so the first next() reads (and pulls) synchronously,
+// and its promise becomes the ongoing one only once they return: a next()
+// made inside them (from the pull() they run) runs at once too, reading
+// right behind them. Only a next() clears the ongoing promise, when its
+// read settles, so a settled one (a return()'s, or a finished next()'s)
+// can stay set, and later calls still chain on it.
+function runAfterOngoing(
+  s: IteratorInternalState,
+  steps: (
+    s: IteratorInternalState,
+    arg: unknown
+  ) => Promise<IteratorResult<unknown> | undefined>,
+  arg?: unknown
+): Promise<IteratorResult<unknown> | undefined> {
+  const ongoing = s.current;
+  let current: Promise<IteratorResult<unknown> | undefined>;
+  if (ongoing === undefined) {
+    current = steps(s, arg);
+  } else {
+    const run = () => steps(s, arg);
+    current = PromisePrototypeThen(ongoing, run, run);
+  }
+  s.current = current;
+  return current;
+}
+
 // WebIDL: next() and return() called on anything but one of these
-// iterators return a rejected promise rather than throwing, and a call with
-// no ongoing promise runs its steps at once, so the first next() reads (and
-// pulls) synchronously.
+// iterators return a rejected promise rather than throwing.
 const ReadableStreamAsyncIteratorPrototype = ObjectSetPrototypeOf(
   {
     next(this: object) {
@@ -549,15 +576,7 @@ const ReadableStreamAsyncIteratorPrototype = ObjectSetPrototypeOf(
       if (s === undefined) {
         return PromiseReject(new TypeError('Illegal invocation'));
       }
-      s.current =
-        s.current !== undefined
-          ? PromisePrototypeThen(
-              s.current,
-              () => iteratorNextSteps(s),
-              () => iteratorNextSteps(s)
-            )
-          : iteratorNextSteps(s);
-      return s.current;
+      return runAfterOngoing(s, iteratorNextSteps);
     },
 
     return(this: object, error: unknown) {
@@ -565,17 +584,12 @@ const ReadableStreamAsyncIteratorPrototype = ObjectSetPrototypeOf(
       if (s === undefined) {
         return PromiseReject(new TypeError('Illegal invocation'));
       }
-      s.current =
-        s.current !== undefined
-          ? PromisePrototypeThen(
-              s.current,
-              () => iteratorReturnSteps(s, error),
-              () => iteratorReturnSteps(s, error)
-            )
-          : iteratorReturnSteps(s, error);
       // Unlike next(), the caller gets a separate promise chained on the
       // ongoing one.
-      return PromisePrototypeThen(s.current, () => userReadResult(error, true));
+      return PromisePrototypeThen(
+        runAfterOngoing(s, iteratorReturnSteps, error),
+        () => userReadResult(error, true)
+      );
     },
 
     [SymbolAsyncIterator](this: object) {
@@ -2758,10 +2772,8 @@ interface ConvertedPipeOptions {
   readonly signal: AbortSignal | undefined;
 }
 
-// WebIDL conversion of StreamPipeOptions. The pipe methods run it before
-// their locked checks, so a getter cannot change a lock after it is checked.
-// Members are read once each in spec order (WPT
-// piping/throwing-options.any.js).
+// WebIDL conversion of StreamPipeOptions. Members are read once each in spec
+// order (WPT piping/throwing-options.any.js).
 function convertPipeOptions(options: unknown): ConvertedPipeOptions {
   const dict = toDictionary(
     options,
@@ -2795,6 +2807,26 @@ function convertPipeOptions(options: unknown): ConvertedPipeOptions {
     preventClose,
     signal,
   } as ConvertedPipeOptions;
+}
+
+// The pipe methods' steps after their brand checks. The options convert
+// before the locked checks, so a getter cannot change a lock after it is
+// checked, and no user code runs between the checks and the pipe taking
+// both endpoints. pipeThrough() throws what this throws; pipeTo() rejects
+// with it.
+function convertAndCheckPipe<R>(
+  source: ReadableStream<R>,
+  destination: WritableStreamType<R>,
+  options: unknown
+): ConvertedPipeOptions {
+  const converted = convertPipeOptions(options);
+  if (isReadableStreamLocked(source)) {
+    throw new TypeError('Cannot pipe a stream that is locked');
+  }
+  if (writableInternals.isWritableStreamLocked(destination)) {
+    throw new TypeError('Cannot pipe to a locked writable stream');
+  }
+  return converted;
 }
 
 // The pipe (spec ReadableStreamPipeTo). Internal operations only on both
@@ -3752,14 +3784,8 @@ class ReadableStream<R> {
             "Failed to execute 'pipeTo': destination is not a WritableStream"
           );
         }
-        const converted = convertPipeOptions(options);
+        const converted = convertAndCheckPipe(source, destination, options);
         const { preventAbort, preventCancel, preventClose } = converted;
-        if (isReadableStreamLocked(source)) {
-          throw new TypeError('Cannot pipe a stream that is locked');
-        }
-        if (writableInternals.isWritableStreamLocked(destination)) {
-          throw new TypeError('Cannot pipe to a locked writable stream');
-        }
         if (source.#pendingClosure) {
           throw pendingClosureError();
         }
@@ -4397,8 +4423,6 @@ class ReadableStream<R> {
     options: StreamPipeOptions = kNullProtoObject as StreamPipeOptions
   ): ReadableStreamType<T> {
     assertIsReadableStream(this);
-    // WebIDL argument conversion precedes the locked checks, so no user
-    // code runs between those checks and pipeToInternal taking the locks.
     // Dictionary members are read in alphabetical order: "readable" is read
     // and brand-checked before "writable" (WPT pipe-through.any.js).
     const readable = transform.readable;
@@ -4413,13 +4437,7 @@ class ReadableStream<R> {
         "Failed to execute 'pipeThrough': writable is not a WritableStream"
       );
     }
-    const converted = convertPipeOptions(options);
-    if (isReadableStreamLocked(this)) {
-      throw new TypeError('Cannot pipe a stream that is locked');
-    }
-    if (writableInternals.isWritableStreamLocked(writable)) {
-      throw new TypeError('Cannot pipe to a locked writable stream');
-    }
+    const converted = convertAndCheckPipe(this, writable, options);
     const promise = readableStreamPipeThroughTo(this, writable, converted);
     markPromiseHandled(promise);
     return readable;

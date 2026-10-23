@@ -49,6 +49,7 @@ export {
   pipeOptionsShapes,
   brandChecks,
   pipeThroughLockedEndpoints,
+  pipeToLockedEndpoints,
   badDestinationLeavesSourceUnlocked,
   optionGetterLocksDestination,
   shadowedWritableLocked,
