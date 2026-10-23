@@ -14,19 +14,37 @@ export default {
     omittedTests: true,
   },
   'constructor/compile.any.js': {
-    comment: 'Hangs until the runtime cancels the request; needs investigation',
-    disabledTests: true,
+    comment:
+      'WebAssembly.compile() and instantiate() of bytes finish on a V8 foreground task, which workerd only runs when other work wakes the isolate, so these promises never settle',
+    disabledTests: [
+      'Branding',
+      'Empty buffer',
+      'Invalid code',
+      'Result type',
+      'Stray argument',
+      'Changing the buffer',
+    ],
   },
   'constructor/instantiate-bad-imports.any.js': {
-    comment: 'Hangs until the runtime cancels the request; needs investigation',
-    disabledTests: true,
+    comment:
+      'WebAssembly.compile() and instantiate() of bytes finish on a V8 foreground task, which workerd only runs when other work wakes the isolate, so these promises never settle',
+    disabledTests: [/^WebAssembly\.instantiate\(buffer\): /],
   },
   'constructor/instantiate.any.js': {
-    comment: 'Hangs until the runtime cancels the request; needs investigation',
-    disabledTests: true,
+    comment:
+      'WebAssembly.compile() and instantiate() of bytes finish on a V8 foreground task, which workerd only runs when other work wakes the isolate, so these promises never settle',
+    disabledTests: [
+      'Branding',
+      /: BufferSource argument$/,
+      'Synchronous options handling: Buffer argument',
+      'Empty buffer',
+      'Invalid code',
+      'Changing the buffer',
+    ],
   },
   'constructor/multi-value.any.js': {
-    comment: 'Hangs until the runtime cancels the request; needs investigation',
+    comment:
+      'WebAssembly.compile() and instantiate() of bytes finish on a V8 foreground task, which workerd only runs when other work wakes the isolate, so these promises never settle',
     disabledTests: true,
   },
   'constructor/toStringTag.any.js': {},
