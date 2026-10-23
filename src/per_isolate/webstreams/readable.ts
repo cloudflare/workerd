@@ -245,10 +245,6 @@ let detachReadableStream: <R>(
   ignoreDisturbed: boolean
 ) => ReadableStream<R>;
 let readableStreamReaderGenericRelease: (reader: object) => void;
-let readableStreamDefaultReaderRead: <R>(
-  reader: ReadableStreamDefaultReaderType<R>,
-  readRequest: ReadableStreamAsyncIteratorReadRequest<R>
-) => void;
 
 // Closes a stream whose data has moved to another stream (extraction, and
 // the tee or detach of a native stream, or of a queued one other than its
@@ -460,45 +456,6 @@ let setReadableStreamReader: <R>(
 let getGenericReaderClosedPromise: (reader: object) => Promise<void>;
 let resolveGenericReaderPromise: (reader: object) => void;
 let rejectGenericReaderPromise: (reader: object, reason?: unknown) => void;
-interface ReadableStreamIteratorState<R> {
-  done: boolean;
-  // The ongoing promise: a next() result, or a return()'s steps.
-  current?: Promise<IteratorResult<R> | undefined> | undefined;
-}
-
-class ReadableStreamAsyncIteratorReadRequest<R> {
-  #reader: ReadableStreamDefaultReaderType;
-  #state: ReadableStreamIteratorState<R>;
-  #promise: PromiseWithResolversType<IteratorResult<R>>;
-  constructor(
-    reader: ReadableStreamDefaultReaderType,
-    state: ReadableStreamIteratorState<R>,
-    promise: PromiseWithResolversType<IteratorResult<R>>
-  ) {
-    this.#reader = reader;
-    this.#state = state;
-    this.#promise = promise;
-  }
-
-  chunk(chunk: R) {
-    this.#state.current = undefined;
-    this.#promise.resolve(userReadResult(chunk, false));
-  }
-
-  close() {
-    this.#state.current = undefined;
-    this.#state.done = true;
-    readableStreamReaderGenericRelease(this.#reader);
-    this.#promise.resolve(userReadResult(undefined, true));
-  }
-
-  error(error: unknown) {
-    this.#state.current = undefined;
-    this.#state.done = true;
-    readableStreamReaderGenericRelease(this.#reader);
-    this.#promise.reject(error);
-  }
-}
 
 // --- ReadableStream async iterator prototype (spec §4.2.4) -----------------
 // Shared prototype with next/return methods; per-instance state stored in a
@@ -507,7 +464,9 @@ class ReadableStreamAsyncIteratorReadRequest<R> {
 interface IteratorInternalState {
   reader: ReadableStreamDefaultReaderType;
   preventCancel: boolean;
-  state: ReadableStreamIteratorState<unknown>;
+  done: boolean;
+  // The ongoing promise: a next() result, or a return()'s steps.
+  current: Promise<IteratorResult<unknown> | undefined> | undefined;
 }
 
 const iteratorStateMap = new SafeWeakMap() as WeakMap<
@@ -515,19 +474,38 @@ const iteratorStateMap = new SafeWeakMap() as WeakMap<
   IteratorInternalState
 >;
 
+// WebIDL's next steps over the streams spec's read request: its chunk,
+// close and error steps settle the promise next() returns, clearing the
+// ongoing promise as WebIDL's fulfill and reject steps do.
 function iteratorNextSteps(s: IteratorInternalState) {
-  if (s.state.done) {
+  if (s.done) {
     return PromiseResolve(userReadResult(undefined, true));
   }
-  if (!isReaderBoundToStream(s.reader)) {
+  const stream = getReaderStream(s.reader);
+  if (stream === undefined) {
     return PromiseReject(
       new TypeError('The reader is not bound to a ReadableStream')
     );
   }
   const promise = PromiseWithResolvers();
-  readableStreamDefaultReaderRead(
-    s.reader,
-    new ReadableStreamAsyncIteratorReadRequest(s.reader, s.state, promise)
+  PromisePrototypeThen(
+    defaultReaderReadInternal(s.reader, stream),
+    (result: ReadableStreamReadResult<unknown>) => {
+      s.current = undefined;
+      if (result.done) {
+        s.done = true;
+        readableStreamReaderGenericRelease(s.reader);
+        promise.resolve(userReadResult(undefined, true));
+      } else {
+        promise.resolve(userReadResult(result.value, false));
+      }
+    },
+    (e: unknown) => {
+      s.current = undefined;
+      s.done = true;
+      readableStreamReaderGenericRelease(s.reader);
+      promise.reject(e);
+    }
   );
   return promise.promise;
 }
@@ -539,10 +517,10 @@ function iteratorReturnSteps(
   s: IteratorInternalState,
   value: unknown
 ): Promise<IteratorResult<unknown> | undefined> {
-  if (s.state.done) {
+  if (s.done) {
     return PromiseResolve(userReadResult(value, true));
   }
-  s.state.done = true;
+  s.done = true;
 
   if (!isReaderBoundToStream(s.reader)) {
     return PromiseReject(
@@ -571,15 +549,15 @@ const ReadableStreamAsyncIteratorPrototype = ObjectSetPrototypeOf(
       if (s === undefined) {
         return PromiseReject(new TypeError('Illegal invocation'));
       }
-      s.state.current =
-        s.state.current !== undefined
+      s.current =
+        s.current !== undefined
           ? PromisePrototypeThen(
-              s.state.current,
+              s.current,
               () => iteratorNextSteps(s),
               () => iteratorNextSteps(s)
             )
           : iteratorNextSteps(s);
-      return s.state.current;
+      return s.current;
     },
 
     return(this: object, error: unknown) {
@@ -587,19 +565,17 @@ const ReadableStreamAsyncIteratorPrototype = ObjectSetPrototypeOf(
       if (s === undefined) {
         return PromiseReject(new TypeError('Illegal invocation'));
       }
-      s.state.current =
-        s.state.current !== undefined
+      s.current =
+        s.current !== undefined
           ? PromisePrototypeThen(
-              s.state.current,
+              s.current,
               () => iteratorReturnSteps(s, error),
               () => iteratorReturnSteps(s, error)
             )
           : iteratorReturnSteps(s, error);
       // Unlike next(), the caller gets a separate promise chained on the
       // ongoing one.
-      return PromisePrototypeThen(s.state.current, () =>
-        userReadResult(error, true)
-      );
+      return PromisePrototypeThen(s.current, () => userReadResult(error, true));
     },
 
     [SymbolAsyncIterator](this: object) {
@@ -970,30 +946,6 @@ class ReadableStreamDefaultReader<
       return (reader as ReadableStreamDefaultReader<R>).#base;
     };
     getReaderBase = defaultGetBase;
-
-    readableStreamDefaultReaderRead = <R>(
-      reader: ReadableStreamDefaultReaderType<R>,
-      readRequest: ReadableStreamAsyncIteratorReadRequest<R>
-    ) => {
-      const stream = getReaderStream<R>(reader);
-      if (stream === undefined) {
-        readRequest.error(new TypeError('This reader has been released'));
-        return;
-      }
-      PromisePrototypeThen(
-        defaultReaderReadInternal<R>(reader, stream),
-        (result: ReadableStreamReadResult<R>) => {
-          if (result.done) {
-            readRequest.close();
-          } else {
-            readRequest.chunk(result.value as R);
-          }
-        },
-        (e: unknown) => {
-          readRequest.error(e);
-        }
-      );
-    };
   }
 
   constructor(stream: ReadableStream<R>) {
@@ -3371,8 +3323,15 @@ function asyncFromSyncContinuation(
   ) as Promise<void>;
 }
 
-// WebIDL "close an async iterator" on the user's async iterator.
-function closeAsyncIterator(iterator: object, reason: unknown): Promise<void> {
+// The steps of WebIDL "close an async iterator" up to calling the
+// iterator's return() with the reason: without a return() the close
+// resolves at once, and a throw from looking it up or calling it rejects
+// the close. `settle` continues from what return() returned.
+function closeIterator(
+  iterator: object,
+  reason: unknown,
+  settle: (returnResult: unknown) => Promise<void>
+): Promise<void> {
   let returnResult: unknown;
   try {
     const returnMethod = getIteratorMethod(
@@ -3387,14 +3346,24 @@ function closeAsyncIterator(iterator: object, reason: unknown): Promise<void> {
   } catch (e) {
     return PromiseReject(e);
   }
-  return PromisePrototypeThen(
-    promiseResolvedWith(returnResult),
-    (iterResult: unknown) => {
-      if (!isObjectLike(iterResult)) {
-        throw new TypeError('The return method must return an object');
-      }
-    }
-  ) as Promise<void>;
+  return settle(returnResult);
+}
+
+// WebIDL "close an async iterator" on the user's async iterator.
+function closeAsyncIterator(iterator: object, reason: unknown): Promise<void> {
+  return closeIterator(
+    iterator,
+    reason,
+    (returnResult) =>
+      PromisePrototypeThen(
+        promiseResolvedWith(returnResult),
+        (iterResult: unknown) => {
+          if (!isObjectLike(iterResult)) {
+            throw new TypeError('The return method must return an object');
+          }
+        }
+      ) as Promise<void>
+  );
 }
 
 // WebIDL "close an async iterator" on the async-from-sync wrapper of the
@@ -3403,24 +3372,11 @@ function closeAsyncIterator(iterator: object, reason: unknown): Promise<void> {
 // `done`); the wrapper's own result is always an object. As for next(), the
 // continuation is reacted to directly (ledger #29).
 function closeSyncIterator(iterator: object, reason: unknown): Promise<void> {
-  let result: unknown;
-  try {
-    const returnMethod = getIteratorMethod(
-      iterator,
-      'return',
-      'Iterator return() is not a function'
-    );
-    if (returnMethod === undefined) {
-      return PromiseResolve(undefined);
-    }
-    result = uncurryThis(returnMethod)(iterator, reason);
-    if (!isObjectLike(result)) {
-      throw new TypeError('The return method must return an object');
-    }
-  } catch (e) {
-    return PromiseReject(e);
-  }
-  return asyncFromSyncContinuation(iterator, result as object, false, () => {});
+  return closeIterator(iterator, reason, (result) =>
+    isObjectLike(result)
+      ? asyncFromSyncContinuation(iterator, result as object, false, () => {})
+      : PromiseReject(new TypeError('The return method must return an object'))
+  );
 }
 
 function readableStreamFromIterable<R>(
@@ -4535,7 +4491,8 @@ class ReadableStream<R> {
     iteratorStateMap.set(iter, {
       reader,
       preventCancel: !!preventCancel,
-      state: { done: false, current: undefined },
+      done: false,
+      current: undefined,
     });
     return iter;
   }
