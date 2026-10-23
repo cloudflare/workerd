@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Divy Srivastava <divy@cloudflare.com>
+Date: Fri, 23 Oct 2026 12:00:00 +0000
+Subject: Forward ThinStrings shortcut by the scavenger
+
+When the scavenger skips over a ThinString, it points the current slot at the
+internalized string but leaves no forwarding address. Weak handles are checked
+after the scavenge and only look at the forwarding address, so a weak handle to
+a ThinString is cleared while its string is still alive.
+
+Mark-compact and the scavenger's own ConsString shortcut both write the
+forwarding address. Do the same here.
+
+diff --git a/src/heap/scavenger.cc b/src/heap/scavenger.cc
+index de706edff12eeb9942695c461af563652add1c99..1f6e1f6d5514d5616ef7349c57e20e56154b7772 100644
+--- a/src/heap/scavenger.cc
++++ b/src/heap/scavenger.cc
+@@ -2157,14 +2157,16 @@ SlotCallbackResult Scavenger::EvacuateThinString(
+                     std::is_same_v<THeapObjectSlot, HeapObjectSlot>,
+                 "Only FullHeapObjectSlot and HeapObjectSlot are expected here");
+   if (shortcut_strings_) {
+-    // The ThinString should die after Scavenge, so avoid writing the proper
+-    // forwarding pointer and instead just signal the actual object as forwarded
+-    // reference.
++    // The ThinString dies after Scavenge, so point the slot at the actual
++    // string.
+     Tagged<String> actual = object->actual();
+     // ThinStrings always refer to internalized strings, which are always in old
+     // space.
+     DCHECK(!HeapLayout::InYoungGeneration(actual));
+     UpdateHeapObjectReferenceSlot(slot, actual);
++    // Record the forwarding address too, so weak handles processed after the
++    // scavenge are updated to the actual string instead of cleared.
++    object->set_map_word_forwarded(actual, kRelaxedStore);
+     return REMOVE_SLOT;
+   }
+ 
