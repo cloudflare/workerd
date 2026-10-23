@@ -81,8 +81,6 @@ namespace workerd::util {
      related plumbing. Gates the refactor of hibernatable-WebSocket internals tracked by           \
      EW-10817. */                                                                                  \
   V(HIBERNATABLE_WEBSOCKET_REFACTOR)                                                               \
-  /* When enabled, turns on per-isolate TypeScript/JavaScript bootstrap */                         \
-  V(PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)                                                              \
   /* Extends observe-only retry-token claiming to Durable Object JSRPC calls: senders attach       \
      tokens and receivers claim them. */                                                           \
   V(DURABLE_OBJECT_RETRIES_JSRPC)                                                                  \
