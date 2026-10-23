@@ -7,10 +7,9 @@ import { type TestRunnerConfig } from 'harness/harness';
 export default {
   'AddEventListenerOptions-once.any.js': {},
   'AddEventListenerOptions-passive.any.js': {
-    comment: 'TODO investigate this',
+    comment:
+      'capture is not relevant outside of the DOM, and Event.returnValue has no setter',
     expectedFailures: [
-      'preventDefault should be ignored if-and-only-if the passive option is true',
-      'passive behavior of one listener should be unaffected by the presence of other listeners',
       'Equivalence of option values',
       'returnValue should be ignored if-and-only-if the passive option is true',
     ],

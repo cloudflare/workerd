@@ -1461,7 +1461,9 @@ kj::Maybe<jsg::Promise<jsg::Ref<Response>>> FetchEvent::getResponsePromise(jsg::
 }
 
 void FetchEvent::respondWith(jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> promise) {
-  preventDefault();
+  // The runtime uses the canceled flag to skip default handling once a response is provided.
+  // A passive listener must still be able to respond, so this bypasses the passive check.
+  forcePreventDefault();
 
   if (IoContext::current().hasOutputGate()) {
     // Once a Response is returned, we need to apply the output lock.
