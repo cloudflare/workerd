@@ -169,7 +169,7 @@ pub mod bridge {
     unsafe extern "C++" {
         type WorkerInterface;
 
-        /// Fails for a `method` name that kj doesn't know.
+        /// Fails for a `method` name that `kj::HttpMethod::tryParse()` refuses.
         async unsafe fn worker_request<'a>(
             worker: Pin<&'a mut WorkerInterface>,
             method: &'a [u8],

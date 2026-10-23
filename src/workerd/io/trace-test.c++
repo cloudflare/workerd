@@ -271,6 +271,22 @@ KJ_TEST("Read/Write FetchEventInfo works") {
   KJ_ASSERT(info3.headers[0].value == "bar"_kj);
 }
 
+KJ_TEST("Read/Write FetchEventInfo works with a method kj doesn't know by name") {
+  capnp::MallocMessageBuilder builder;
+  auto fetchInfoBuilder = builder.initRoot<rpc::Trace::FetchEventInfo>();
+
+  auto block = KJ_ASSERT_NONNULL(kj::HttpMethod::tryParse("BLOCK"_kj));
+  FetchEventInfo info(block, kj::str("https://example.com"), kj::str("{}"), nullptr);
+
+  info.copyTo(fetchInfoBuilder);
+  KJ_ASSERT(fetchInfoBuilder.getMethod() == capnp::HttpMethod::OTHER);
+  KJ_ASSERT(fetchInfoBuilder.getMethodName() == "BLOCK"_kj);
+
+  FetchEventInfo info2(fetchInfoBuilder.asReader());
+  KJ_ASSERT(info2.method == block);
+  KJ_ASSERT(kj::str(info2.method) == "BLOCK"_kj);
+}
+
 KJ_TEST("Read/Write JsRpcEventInfo works") {
   capnp::MallocMessageBuilder builder;
   auto jsRpcInfoBuilder = builder.initRoot<rpc::Trace::JsRpcEventInfo>();

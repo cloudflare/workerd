@@ -8,7 +8,6 @@
 #include <rust/cxx.h>
 
 #include <kj/compat/http.h>
-#include <kj/encoding.h>
 
 namespace kj::rust {
 
@@ -150,16 +149,14 @@ using HttpServiceResponse = kj::HttpService::Response;
 using TlsStarterCallback = kj::TlsStarterCallback;
 using WebSocket = kj::WebSocket;
 
-// Methods cross the bridge as names. C++ passes a method's name to Rust.
+// Methods cross the bridge as names, which can carry any method. C++ passes `method.name()` to
+// Rust; an OTHER method's name is stored inside the kj::HttpMethod, so that object must outlive
+// the Rust call that gets the name.
 //
 // Parses a method name from Rust. Rust's http::Method accepts names that kj refuses (e.g. CONNECT,
-// or a method kj doesn't know), so this throws for those.
+// or one longer than kj::HttpMethod::MAX_NAME_SIZE), so this throws for those.
 inline kj::HttpMethod httpMethodFromRust(::rust::Slice<const kj::byte> name) {
-  auto bytes = kj::from<kj_rs::Rust>(name);
-  KJ_IF_SOME(method, kj::tryParseHttpMethod(kj::str(bytes.asChars()))) {
-    return method;
-  }
-  KJ_FAIL_REQUIRE("invalid HTTP method", kj::encodeCEscape(bytes));
+  return kj::HttpMethod::parse(kj::from<kj_rs::Rust>(name).asChars());
 }
 
 inline kj::Own<AsyncOutputStream> response_send(HttpServiceResponse& response,

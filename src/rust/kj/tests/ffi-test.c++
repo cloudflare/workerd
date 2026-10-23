@@ -254,13 +254,17 @@ KJ_TEST("a request's method crosses to Rust and back by its name") {
   auto body = kj::newOneWayPipe(static_cast<uint64_t>(0));
   UnusedResponse response;
 
-  auto method = kj::HttpMethod::PROPFIND;
-  proxy
-      ->request(kj::toCharSequence(method).asBytes().as<Rust>(), "/"_kj.asBytes().as<Rust>(),
-          headers, *body.in, response)
-      .wait(waitScope);
-  auto& received = KJ_ASSERT_NONNULL(mockRef.requestMethod);
-  KJ_EXPECT(received == method, received);
+  // A method kj knows, and one it doesn't know by name (Known::OTHER), whose name the HttpMethod
+  // holds.
+  for (const auto& name: {"PROPFIND"_kj, "BLOCK"_kj}) {
+    auto method = KJ_ASSERT_NONNULL(kj::HttpMethod::tryParse(name));
+    proxy
+        ->request(method.name().asBytes().as<Rust>(), "/"_kj.asBytes().as<Rust>(), headers,
+            *body.in, response)
+        .wait(waitScope);
+    auto& received = KJ_ASSERT_NONNULL(mockRef.requestMethod);
+    KJ_EXPECT(received == method, received);
+  }
 }
 
 KJ_TEST("a method name from Rust that kj refuses fails the request") {
@@ -275,9 +279,10 @@ KJ_TEST("a method name from Rust that kj refuses fails the request") {
   auto body = kj::newOneWayPipe(static_cast<uint64_t>(0));
   UnusedResponse response;
 
-  // Rust's http::Method takes BLOCK and CONNECT, and C++ refuses them, since kj doesn't know them
-  // as methods; Rust itself refuses "GE T", which is not a token.
-  for (kj::StringPtr name: {"BLOCK"_kj, "CONNECT"_kj, "GE T"_kj}) {
+  auto tooLong = kj::str(kj::repeat('X', kj::HttpMethod::MAX_NAME_SIZE + 1));
+  // Rust's http::Method takes the long name and CONNECT, and C++ refuses them; Rust itself refuses
+  // "GE T", which is not a token.
+  for (kj::StringPtr name: {tooLong.asPtr(), "CONNECT"_kj, "GE T"_kj}) {
     KJ_EXPECT_THROW_MESSAGE("invalid HTTP method",
         proxy
             ->request(

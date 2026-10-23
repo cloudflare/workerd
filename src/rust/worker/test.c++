@@ -542,7 +542,7 @@ KJ_TEST("cxx_worker delegates request to the wrapped C++ worker") {
   KJ_ASSERT(response.body->readAllText().wait(waitScope) == "STUB");
 }
 
-KJ_TEST("cxx_worker passes the request method to the wrapped C++ worker by name") {
+KJ_TEST("cxx_worker passes a method kj doesn't know by name to the wrapped C++ worker") {
   kj::EventLoop loop;
   kj::WaitScope waitScope(loop);
 
@@ -553,11 +553,12 @@ KJ_TEST("cxx_worker passes the request method to the wrapped C++ worker by name"
   kj::HttpHeaderTable headerTable;
   kj::HttpHeaders headers(headerTable);
 
-  auto method = kj::HttpMethod::PROPFIND;
+  auto method = KJ_ASSERT_NONNULL(kj::HttpMethod::tryParse("BLOCK"_kj));
   auto response = client->request(method, "http://test/"_kj, headers).response.wait(waitScope);
   KJ_ASSERT(response.statusCode == 200);
   auto& received = KJ_ASSERT_NONNULL(stubRef.requestMethod);
-  KJ_EXPECT(received == method, received);
+  KJ_EXPECT(received.known() == kj::HttpMethod::Known::OTHER, received);
+  KJ_EXPECT(received.name() == "BLOCK", received);
 }
 
 KJ_TEST("cxx_worker delegates connect to the wrapped C++ worker") {

@@ -263,8 +263,7 @@ class RustClientService final: public kj::HttpService {
       Response& response) override {
     // A coroutine, so that `method`, which holds an OTHER method's name, lives until Rust is done
     // with the name.
-    co_await client->request(
-        slice(kj::toCharSequence(method)), slice(url), headers, requestBody, response);
+    co_await client->request(slice(method.name()), slice(url), headers, requestBody, response);
   }
 
   kj::Promise<void> connect(kj::StringPtr host,
@@ -1302,16 +1301,17 @@ KJ_TEST("client: a response cut short fails the body read") {
 }
 
 // =======================================================================================
-// Methods hyper doesn't know as standard ones, which cross the bridge by name.
+// Methods kj doesn't know by name (kj::HttpMethod::Known::OTHER).
 
-KJ_TEST("client: a method hyper doesn't know is sent by its name") {
+KJ_TEST("client: a method kj doesn't know by name is sent by its name") {
   Fixture f;
   auto [client, peer] = f.pipeClient();
   kj::HttpHeaders headers(*f.table);
   headers.setPtr(kj::HttpHeaderId::HOST, "foo");
-  auto request = client->request(kj::HttpMethod::PURGE, "/p", headers, static_cast<uint64_t>(5));
+  auto request = client->request(KJ_ASSERT_NONNULL(kj::HttpMethod::tryParse("BLOCK"_kj)), "/p",
+      headers, static_cast<uint64_t>(5));
   KJ_EXPECT(
-      readHead(*peer).wait(f.ws) == "PURGE /p HTTP/1.1\r\nContent-Length: 5\r\nHost: foo\r\n\r\n");
+      readHead(*peer).wait(f.ws) == "BLOCK /p HTTP/1.1\r\nContent-Length: 5\r\nHost: foo\r\n\r\n");
 }
 
 // =======================================================================================

@@ -6,6 +6,7 @@
 #include <workerd/util/entropy.h>
 #include <workerd/util/thread-scopes.h>
 
+#include <capnp/compat/http-over-capnp.h>
 #include <capnp/message.h>
 #include <capnp/schema.h>
 #include <kj/compat/http.h>
@@ -434,15 +435,6 @@ kj::String KJ_STRINGIFY(const SpanContext& context) {
   return kj::str(context.getTraceId(), "-", context.getSpanId());
 }
 
-namespace {
-
-static kj::HttpMethod validateMethod(capnp::HttpMethod method) {
-  KJ_REQUIRE(method <= capnp::HttpMethod::BAN, "unknown method", method);
-  return static_cast<kj::HttpMethod>(method);
-}
-
-}  // namespace
-
 ConnectEventInfo::ConnectEventInfo() {}
 
 ConnectEventInfo::ConnectEventInfo(rpc::Trace::ConnectEventInfo::Reader reader) {}
@@ -465,7 +457,7 @@ FetchEventInfo::FetchEventInfo(
       headers(kj::mv(headers)) {}
 
 FetchEventInfo::FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader)
-    : method(validateMethod(reader.getMethod())),
+    : method(capnp::httpMethodFromCapnp(reader.getMethod(), reader.getMethodName())),
       url(kj::str(reader.getUrl())),
       cfJson(kj::str(reader.getCfJson())) {
   kj::Vector<Header> v;
@@ -474,7 +466,11 @@ FetchEventInfo::FetchEventInfo(rpc::Trace::FetchEventInfo::Reader reader)
 }
 
 void FetchEventInfo::copyTo(rpc::Trace::FetchEventInfo::Builder builder) const {
-  builder.setMethod(static_cast<capnp::HttpMethod>(method));
+  auto capnpMethod = capnp::httpMethodToCapnp(method);
+  builder.setMethod(capnpMethod);
+  if (capnpMethod == capnp::HttpMethod::OTHER) {
+    builder.setMethodName(method.name());
+  }
   builder.setUrl(url);
   builder.setCfJson(cfJson);
 

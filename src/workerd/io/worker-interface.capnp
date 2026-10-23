@@ -163,6 +163,8 @@ struct Trace @0x8e8d911203762d34 {
       name @0 :Text;
       value @1 :Text;
     }
+    methodName @4 :Text;
+    # The method's name, if `method` is `other`. Null otherwise.
   }
 
   struct JsRpcEventInfo {

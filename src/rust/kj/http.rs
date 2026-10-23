@@ -132,8 +132,8 @@ pub mod ffi {
             expected_body_size: KjMaybe<u64>,
         ) -> Result<KjOwn<AsyncOutputStream>>;
 
-        /// Corresponds to `kj::HttpService::request`. Fails for a `method` name that kj doesn't
-        /// know.
+        /// Corresponds to `kj::HttpService::request`. Fails for a `method` name that
+        /// `kj::HttpMethod::tryParse()` refuses.
         async fn request(
             this_: Pin<&mut HttpService>,
             method: &[u8],
@@ -329,12 +329,14 @@ impl<'a, 'b> From<&'b Headers<'a>> for HeadersRef<'b> {
 
 /// A request method.
 ///
-/// Methods cross the bridge as names: C++ passes a method's name to Rust, and parses a name from
-/// Rust, refusing names `Method` accepts but kj doesn't know, such as `CONNECT`.
+/// Methods cross the bridge as names, which can carry any method: C++ passes
+/// `kj::HttpMethod::name()` to Rust, and parses a name from Rust with `kj::HttpMethod::tryParse()`,
+/// which refuses some names `Method` accepts, such as `CONNECT` or one longer than
+/// `kj::HttpMethod::MAX_NAME_SIZE`.
 pub type Method = http::Method;
 pub type ConnectSettings<'a> = ffi::HttpConnectSettings<'a>;
 
-/// The method named by `name`, a method's name passed from C++.
+/// The method named by `name`, a `kj::HttpMethod::name()` passed from C++.
 ///
 /// # Errors
 ///
