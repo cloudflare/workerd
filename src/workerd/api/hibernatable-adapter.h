@@ -66,6 +66,7 @@ class HibernatableWebSocketAdapter final: public WebSocketAdapter {
   bool isAwaitingCoupling() override;
   bool isHibernatable() override;
   void setObserver(kj::Own<WebSocketObserver> observer) override;
+  kj::Ptr<bool> getDispatchFailed() override;
 
   kj::Rc<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags) override;
   void initiateHibernatableRelease(jsg::Lock& js,

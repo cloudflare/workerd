@@ -177,9 +177,6 @@ def wd_rust_compile_test(
             tags = ["manual"],
             testonly = True,
             target_compatible_with = select({
-                "@//build/config:no_build": ["@platforms//:incompatible"],
-                "//conditions:default": [],
-            }) + select({
                 # The snippets get the toolchain's rustc flags but not
                 # --@rules_rust//:extra_rustc_flag(s), which rules_rust exposes only through its
                 # private API. Of those, -Zsanitizer has to match across crates. The others can

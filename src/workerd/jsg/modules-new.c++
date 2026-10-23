@@ -318,8 +318,11 @@ class EsModule final: public Module {
     // either case, we try generating it and store it. Multiple threads can end up
     // lining up here to acquire the lock and generate the cache. We'll test to see
     // if the cached data is still empty once the lock is acquired, and if it is
-    // not, we'll skip generation.
-    if (options == v8::ScriptCompiler::CompileOptions::kNoCompileOptions) {
+    // not, we'll skip generation. A startup-snapshot zygote never generates one: V8 forbids
+    // creating a code cache while a snapshot is being created, and the compiled code goes into
+    // the blob itself.
+    if (options == v8::ScriptCompiler::CompileOptions::kNoCompileOptions &&
+        !js.isPreparingSnapshot()) {
       auto lock = cachedData.lockExclusive();
       if (*lock == kj::none) {
         if (auto ptr = v8::ScriptCompiler::CreateCodeCache(module->GetUnboundModuleScript())) {

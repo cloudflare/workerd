@@ -710,6 +710,7 @@ kj_test(
     deps = [
         ":worker-entrypoint",
         "//src/workerd/tests:test-fixture",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 

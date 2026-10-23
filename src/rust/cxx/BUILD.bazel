@@ -20,10 +20,6 @@ rust_library(
     proc_macro_deps = [
         ":cxxbridge-macro",
     ],
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     visibility = ["//visibility:public"],
     deps = [
         "@crates_vendor//:foldhash",
@@ -47,10 +43,6 @@ rust_library(
     srcs = glob(["syntax/*.rs"]),
     crate_root = "syntax/mod.rs",
     edition = "2024",
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         "@crates_vendor//:proc-macro2",
         "@crates_vendor//:quote",
@@ -67,10 +59,6 @@ rust_library(
     compile_data = ["include/cxx.h"],
     crate_root = "gen/src/mod.rs",
     edition = "2024",
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         ":syntax",
         "@crates_vendor//:codespan-reporting",
@@ -96,10 +84,6 @@ rust_binary(
     edition = "2024",
     experimental_use_cc_common_link = 1,
     link_deps = ["@@//deps:rust_runtime"],
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         ":gen",
         ":syntax",
@@ -137,10 +121,6 @@ rust_proc_macro(
     proc_macro_deps = [
         "@crates_vendor//:rustversion",
     ],
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     visibility = ["//src/rust/cxx/tests:__pkg__"],
     deps = [
         ":gen",
@@ -161,10 +141,6 @@ rust_library(
         "include/cxx.h",
     ],
     edition = "2024",
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         ":gen",
         ":syntax",
@@ -187,10 +163,6 @@ rust_library(
     srcs = glob(["gen/lib/src/*.rs"]),
     compile_data = ["include/cxx.h"],
     edition = "2024",
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     visibility = ["//visibility:public"],
     deps = [
         ":gen",

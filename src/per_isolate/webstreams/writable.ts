@@ -44,13 +44,7 @@ const {
   uncurryThis,
 } = primordials;
 
-const {
-  isArrayBuffer,
-  isArrayBufferView,
-  isPromise,
-  markPromiseHandled,
-  utf8Length,
-} = utils;
+const { isArrayBuffer, isArrayBufferView, utf8Length } = utils;
 
 // The native backend (see the fence conventions in native.ts). The cast
 // restores the real shape.
@@ -60,13 +54,18 @@ const { nativeStreamInternals } = require('webstreams/native') as {
 };
 const { kExtractNativeSink, isNativeUnderlyingSink } = nativeStreamInternals;
 
-import type { CommonHelpers, UnderlyingSinkDict } from './common';
+import type { CommonHelpers, PromiseSlot, UnderlyingSinkDict } from './common';
 const {
   isActualObject,
   kNullProtoObject,
   kEnumerable,
   toStringTagProperty,
   promiseResolvedWith,
+  newHandledPending,
+  newHandledRejected,
+  slotPromise,
+  slotResolved,
+  slotRejected,
   requireObject,
   convertQueuingStrategy,
   extractHighWaterMark,
@@ -861,8 +860,7 @@ class WritableStream<W = unknown> {
     assertIsWritableStream(this);
     let closed = this.#closedPromise;
     if (closed === undefined) {
-      closed = PromiseWithResolvers() as PromiseWithResolversType<void>;
-      markPromiseHandled(closed.promise);
+      closed = newHandledPending();
       this.#closedPromise = closed;
       if (this.#state === 'closed') {
         closed.resolve();
@@ -1342,8 +1340,8 @@ class WritableStreamDefaultWriter<
   W = unknown,
 > implements WritableStreamDefaultWriterType<W> {
   #stream: WritableStream<W> | undefined;
-  #readyPromise!: Promise<void> | PromiseWithResolversType<void>;
-  #closedPromise!: Promise<void> | PromiseWithResolversType<void>;
+  #readyPromise!: PromiseSlot;
+  #closedPromise!: PromiseSlot;
 
   static {
     getWriterStream = (writer) => writer.#stream;
@@ -1355,17 +1353,11 @@ class WritableStreamDefaultWriter<
         throw new TypeError('Illegal invocation');
     };
 
-    getWriterReadyPromiseInternal = (writer) => {
-      const promise = writer.#readyPromise;
-      if (isPromise(promise)) return promise as Promise<void>;
-      return (promise as PromiseWithResolversType<void>).promise;
-    };
+    getWriterReadyPromiseInternal = (writer) =>
+      slotPromise(writer.#readyPromise);
 
-    getWriterClosedPromiseInternal = (writer) => {
-      const promise = writer.#closedPromise;
-      if (isPromise(promise)) return promise as Promise<void>;
-      return (promise as PromiseWithResolversType<void>).promise;
-    };
+    getWriterClosedPromiseInternal = (writer) =>
+      slotPromise(writer.#closedPromise);
 
     // WritableStreamDefaultWriterWrite (spec §5.3.4)
     // Step order is critical: size algorithm runs BEFORE state re-checks,
@@ -1461,59 +1453,24 @@ class WritableStreamDefaultWriter<
       writer.#stream = undefined;
     };
 
-    // #readyPromise and #closedPromise hold either a settled Promise or a
-    // still-pending resolvers record, told apart with the native isPromise:
-    // a duck-typed `typeof x.resolve` would read Object.prototype on the
-    // Promise.
     writerResolveReadyPromise = (writer) => {
-      const ready = writer.#readyPromise;
-      if (!isPromise(ready)) {
-        ready.resolve();
-        writer.#readyPromise = ready.promise;
-      }
+      writer.#readyPromise = slotResolved(writer.#readyPromise);
     };
 
     writerResetReadyPromise = (writer) => {
-      const replacement =
-        PromiseWithResolvers() as PromiseWithResolversType<void>;
-      markPromiseHandled(replacement.promise);
-      writer.#readyPromise = replacement;
+      writer.#readyPromise = newHandledPending();
     };
 
     writerEnsureReadyPromiseRejected = (writer, error) => {
-      const ready = writer.#readyPromise;
-      if (!isPromise(ready)) {
-        ready.reject(error);
-        writer.#readyPromise = ready.promise;
-      } else {
-        const replacement =
-          PromiseWithResolvers() as PromiseWithResolversType<void>;
-        markPromiseHandled(replacement.promise);
-        replacement.reject(error);
-        writer.#readyPromise = replacement.promise;
-      }
+      writer.#readyPromise = slotRejected(writer.#readyPromise, error);
     };
 
     writerResolveClosedPromise = (writer) => {
-      const closed = writer.#closedPromise;
-      if (!isPromise(closed)) {
-        closed.resolve();
-        writer.#closedPromise = closed.promise;
-      }
+      writer.#closedPromise = slotResolved(writer.#closedPromise);
     };
 
     writerEnsureClosedPromiseRejected = (writer, error) => {
-      const closed = writer.#closedPromise;
-      if (!isPromise(closed)) {
-        closed.reject(error);
-        writer.#closedPromise = closed.promise;
-      } else {
-        const replacement =
-          PromiseWithResolvers() as PromiseWithResolversType<void>;
-        markPromiseHandled(replacement.promise);
-        replacement.reject(error);
-        writer.#closedPromise = replacement.promise;
-      }
+      writer.#closedPromise = slotRejected(writer.#closedPromise, error);
     };
   }
 
@@ -1533,31 +1490,22 @@ class WritableStreamDefaultWriter<
     const state = getWritableStreamState(stream);
     switch (state) {
       case 'writable': {
-        const closed = PromiseWithResolvers() as PromiseWithResolversType<void>;
-        markPromiseHandled(closed.promise);
-        this.#closedPromise = closed;
+        this.#closedPromise = newHandledPending();
         if (
           !writableStreamCloseQueuedOrInFlight(stream) &&
           writableStreamBackpressureOf(stream)
         ) {
-          const ready =
-            PromiseWithResolvers() as PromiseWithResolversType<void>;
-          markPromiseHandled(ready.promise);
-          this.#readyPromise = ready;
+          this.#readyPromise = newHandledPending();
         } else {
           this.#readyPromise = PromiseResolve();
         }
         break;
       }
       case 'erroring': {
-        const storedError = getWritableStreamStoredError(stream);
-        const ready = PromiseWithResolvers() as PromiseWithResolversType<void>;
-        markPromiseHandled(ready.promise);
-        ready.reject(storedError);
-        this.#readyPromise = ready.promise;
-        const closed = PromiseWithResolvers() as PromiseWithResolversType<void>;
-        markPromiseHandled(closed.promise);
-        this.#closedPromise = closed;
+        this.#readyPromise = newHandledRejected(
+          getWritableStreamStoredError(stream)
+        );
+        this.#closedPromise = newHandledPending();
         break;
       }
       case 'closed': {
@@ -1568,14 +1516,8 @@ class WritableStreamDefaultWriter<
       default: {
         // 'errored'
         const storedError = getWritableStreamStoredError(stream);
-        const ready = PromiseWithResolvers() as PromiseWithResolversType<void>;
-        markPromiseHandled(ready.promise);
-        ready.reject(storedError);
-        this.#readyPromise = ready.promise;
-        const closed = PromiseWithResolvers() as PromiseWithResolversType<void>;
-        markPromiseHandled(closed.promise);
-        closed.reject(storedError);
-        this.#closedPromise = closed.promise;
+        this.#readyPromise = newHandledRejected(storedError);
+        this.#closedPromise = newHandledRejected(storedError);
         break;
       }
     }
@@ -1584,9 +1526,7 @@ class WritableStreamDefaultWriter<
   get closed(): Promise<void> {
     try {
       assertIsWritableStreamDefaultWriter(this);
-      const promise = this.#closedPromise;
-      if (isPromise(promise)) return promise as Promise<void>;
-      return (promise as PromiseWithResolversType<void>).promise;
+      return slotPromise(this.#closedPromise);
     } catch (e) {
       return PromiseReject(e);
     }
@@ -1595,9 +1535,7 @@ class WritableStreamDefaultWriter<
   get ready(): Promise<void> {
     try {
       assertIsWritableStreamDefaultWriter(this);
-      const promise = this.#readyPromise;
-      if (isPromise(promise)) return promise as Promise<void>;
-      return (promise as PromiseWithResolversType<void>).promise;
+      return slotPromise(this.#readyPromise);
     } catch (e) {
       return PromiseReject(e);
     }

@@ -223,6 +223,7 @@ export {
   teeKeepsHeldByobRequest,
   teeSoleBranchUsesHeldByobRequest,
   teeHeldByobRequestWithReleasedBytes,
+  teeByobRequestFirstTakenAfterTee,
   teeHeldByobRequestAfterCloseOrError,
   teeHeldByobRequestFractionalAtClose,
   teeHeldByobRequestFromBranchFractionalAtClose,
@@ -313,3 +314,5 @@ export {
   byteSourceExpectedLengthContract,
   byteSourceExpectedLengthHeldRequest,
 } from 'expected-length';
+
+export { readerMembersOnOtherReaderClasses } from 'reader-brand-checks';

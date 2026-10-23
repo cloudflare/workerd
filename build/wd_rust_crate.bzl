@@ -23,10 +23,6 @@ def rust_cxx_bridge(
         ],
         cmd = "$(location //src/rust/cxx:codegen) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
         tools = ["//src/rust/cxx:codegen"],
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
     )
     cc_library(
         name = name,
@@ -40,10 +36,6 @@ def rust_cxx_bridge(
         deps = deps,
         visibility = visibility,
         tags = tags,
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
     )
 
 def rust_cxx_include_prefix():
@@ -185,10 +177,6 @@ def wd_rust_crate(
         crate_features = crate_features,
         lint_config = None if testonly else "@workerd//build/rust:lints",
         testonly = testonly,
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
         **library_kwargs
     )
 

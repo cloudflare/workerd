@@ -40,7 +40,7 @@ def wd_test(
     """
 
     # Add workerd binary to "data" dependencies.
-    data = data + [src, "//src/workerd/server:workerd_cross"]
+    data = data + [src, "//src/workerd/server:workerd"]
 
     ts_srcs = [src for src in data if src.endswith(".ts")]
 
@@ -72,7 +72,7 @@ def wd_test(
 
     # Add initial arguments for `workerd test` command.
     base_args = [
-        "$(location //src/workerd/server:workerd_cross)",
+        "$(location //src/workerd/server:workerd)",
         "test",
     ] + (["--predictable"] if predictable else []) + [
         "$(location {})".format(src),
@@ -343,7 +343,7 @@ _wd_test = rule(
             allow_single_file = True,
             executable = True,
             cfg = "target",
-            default = "//src/workerd/server:workerd_cross",
+            default = "//src/workerd/server:workerd",
         ),
         # A list of files that this test requires to be present in order to run.
         "data": attr.label_list(allow_files = True),
@@ -399,7 +399,7 @@ _wd_test = rule(
 def wd_cli_test(**kwargs):
     """Defines a test that runs workerd with the given `args`, as wd_test()'s variants do.
 
-    The first argument is usually `$(location //src/workerd/server:workerd_cross)`, which must also
+    The first argument is usually `$(location //src/workerd/server:workerd)`, which must also
     be in `data`. `-dTEST_TMPDIR=<dir>` is appended to the arguments. For macros outside this
     file, such as wd_bench().
     """

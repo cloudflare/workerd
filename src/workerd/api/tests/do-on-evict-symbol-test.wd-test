@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "do-on-evict-symbol-test", worker = (
+      modules = [
+        (name = "worker", esModule = embed "do-on-evict-symbol-test.js"),
+      ],
+      compatibilityFlags = ["experimental", "nodejs_compat"],
+      durableObjectNamespaces = [
+        (className = "OnEvictObject", uniqueKey = "do-on-evict-symbol"),
+      ],
+      durableObjectStorage = (inMemory = void),
+      bindings = [
+        (name = "ns", durableObjectNamespace = "OnEvictObject"),
+      ],
+    )),
+    (name = "do-on-evict-symbol-unflagged-test", worker = (
+      modules = [
+        (name = "worker", esModule = embed "do-on-evict-symbol-unflagged-test.js"),
+      ],
+      compatibilityFlags = ["nodejs_compat"],
+    )),
+  ],
+);

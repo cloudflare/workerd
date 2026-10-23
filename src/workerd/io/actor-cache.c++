@@ -131,7 +131,7 @@ ActorCache::Entry::~Entry() noexcept(false) {
 ActorCache::SharedLru::SharedLru(Options options): options(options) {}
 
 ActorCache::SharedLru::~SharedLru() noexcept(false) {
-  KJ_REQUIRE(cleanList.getWithoutLock().empty(),
+  KJ_DTOR_REQUIRE(cleanList.getWithoutLock().empty(),
       "ActorCache::SharedLru destroyed while an ActorCache still exists?");
   if (size.load(std::memory_order_relaxed) != 0) {
     KJ_LOG(ERROR,
