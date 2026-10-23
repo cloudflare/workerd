@@ -409,9 +409,7 @@ class ExecutionContext: public jsg::Object {
       JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
     }
     JSG_LAZY_INSTANCE_PROPERTY(access, getAccess);
-    if (flags.getWorkerdExperimental()) {
-      JSG_METHOD(mapVirtualHost);
-    }
+    JSG_METHOD(mapVirtualHost);
 
     // ctx.tracing - user tracing API. Always available; the Tracing object is stateless
     // and enterSpan() is a no-op when called outside a traced request.
