@@ -991,6 +991,10 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
       static_cast<v8::PropertyAttribute>(v8::PropertyAttribute::DontEnum |
           v8::PropertyAttribute::DontDelete | v8::PropertyAttribute::ReadOnly));
 
+  if (workerd::jsg::getShouldSetImmutablePrototype(isolate)) {
+    constructor->ReadOnlyPrototype();
+  }
+
   constructor->SetClassName(classname);
 
   for (const auto& method: descriptor.static_methods) {

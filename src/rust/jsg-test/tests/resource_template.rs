@@ -48,6 +48,36 @@ fn to_string_tag_follows_set_to_string_tag() {
 }
 
 #[test]
+fn prototype_is_read_only_with_set_immutable_prototype() {
+    let code = r"
+        const original = Sample.prototype;
+        const { writable } = Object.getOwnPropertyDescriptor(Sample, 'prototype');
+        Sample.prototype = {};
+        JSON.stringify({ writable, unchanged: Sample.prototype === original });
+    ";
+
+    assert_eq!(
+        eval_string(&Harness::new(), code),
+        r#"{"writable":true,"unchanged":false}"#
+    );
+
+    {
+        let harness =
+            Harness::with_flags(|mut flags| flags.set_should_set_immutable_prototype(true));
+        assert_eq!(
+            eval_string(&harness, code),
+            r#"{"writable":false,"unchanged":true}"#
+        );
+    }
+
+    let harness = Harness::with_flags(|mut flags| flags.set_python_workers(true));
+    assert_eq!(
+        eval_string(&harness, code),
+        r#"{"writable":false,"unchanged":true}"#
+    );
+}
+
+#[test]
 fn constant_descriptor_follows_spec_compliant_property_attributes() {
     let code = "JSON.stringify(Object.getOwnPropertyDescriptor(Sample.prototype, 'VALUE'))";
     assert_eq!(
