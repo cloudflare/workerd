@@ -8,6 +8,7 @@
 #include "filesystem.h"
 #include "http.h"
 #include "messagechannel.h"
+#include "oidc.h"
 #include "performance.h"
 
 #include <workerd/api/hibernation-event-params.h>
@@ -385,6 +386,10 @@ class ExecutionContext: public jsg::Object {
 
   jsg::Ref<Tracing> getTracing(jsg::Lock& js);
 
+  jsg::Ref<OidcContext> getOidc(jsg::Lock& js) {
+    return js.alloc<OidcContext>();
+  }
+
   // Returns an AccessContext for the current request, or empty jsg::Optional otherwise.
   // Called by the runtime to provide Cloudflare Access authentication context.
   jsg::Optional<jsg::Ref<AccessContext>> getAccess(jsg::Lock& js);
@@ -408,6 +413,9 @@ class ExecutionContext: public jsg::Object {
       JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
     }
     JSG_LAZY_INSTANCE_PROPERTY(access, getAccess);
+    if (flags.getWorkersOidc()) {
+      JSG_LAZY_INSTANCE_PROPERTY(oidc, getOidc);
+    }
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(mapVirtualHost);
     }
@@ -1255,6 +1263,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       api::ExecutionContext, api::ExportedHandler,                                                 \
       api::ServiceWorkerGlobalScope::StructuredCloneOptions, api::Navigator,                       \
       api::AlarmInvocationInfo, api::Immediate, api::Cloudflare, api::CachePurgeError,             \
-      api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext, api::AccessContext
+      api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext, api::AccessContext,        \
+      api::OidcContext, api::OidcContext::TokenOptions
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api

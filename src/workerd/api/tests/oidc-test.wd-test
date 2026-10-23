@@ -1,0 +1,28 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "enabled", worker = (
+      compatibilityFlags = ["nodejs_compat", "rpc", "unsafe_module", "workers_oidc"],
+      modules = [(name = "worker", esModule = embed "oidc-test.js")],
+      durableObjectNamespaces = [(className = "OidcObject", uniqueKey = "oidc-enabled")],
+      durableObjectStorage = (inMemory = void),
+      bindings = [
+        (name = "enabled", json = "true"),
+        (name = "service", service = (name = "enabled", entrypoint = "OidcService")),
+        (name = "objects", durableObjectNamespace = "OidcObject"),
+      ],
+    )),
+    (name = "disabled", worker = (
+      compatibilityFlags = ["nodejs_compat", "rpc", "unsafe_module"],
+      modules = [(name = "worker", esModule = embed "oidc-test.js")],
+      durableObjectNamespaces = [(className = "OidcObject", uniqueKey = "oidc-disabled")],
+      durableObjectStorage = (inMemory = void),
+      bindings = [
+        (name = "enabled", json = "false"),
+        (name = "service", service = (name = "disabled", entrypoint = "OidcService")),
+        (name = "objects", durableObjectNamespace = "OidcObject"),
+      ],
+    )),
+  ],
+);

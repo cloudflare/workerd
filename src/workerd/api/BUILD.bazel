@@ -31,6 +31,7 @@ filegroup(
         "js-streams-bridge.c++",
         "js-writable-stream.c++",
         "messagechannel.c++",
+        "oidc.c++",
         "per-isolate-bootstrap.c++",
         "performance.c++",
         "queue.c++",
@@ -89,6 +90,7 @@ filegroup(
         "js-streams-bridge.h",
         "js-writable-stream.h",
         "messagechannel.h",
+        "oidc.h",
         "per-isolate-bootstrap.h",
         "performance.h",
         "queue.h",
@@ -661,6 +663,14 @@ kj_test(
 
 kj_test(
     src = "streams/internal-test.c++",
+    deps = [
+        "//src/workerd/io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "oidc-test.c++",
     deps = [
         "//src/workerd/io",
         "//src/workerd/tests:test-fixture",

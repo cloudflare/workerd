@@ -1705,4 +1705,15 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # source fails, once that cancel completes. Previously, a destination that errored or closed
   # while the pipe waited on a read canceled the source but resolved the pipe promise, or left it
   # pending forever with preventCancel, and a failed cancel was not reported.
+
+  cacheOptionPreservesCacheControl @194 :Bool;
+  durableObjectSnapshots @195 :Bool;
+  # Reserved for wire compatibility with upstream workerd. Their compatibility flags are not
+  # exposed because this runtime does not implement these features.
+
+  workersOidc @196 :Bool
+      $compatEnableFlag("workers_oidc")
+      $experimental;
+  # Exposes ctx.oidc.getToken() on ExecutionContext and DurableObjectState. Token issuance
+  # requires a host signer with trusted workload identity metadata. There is no enable date.
 }

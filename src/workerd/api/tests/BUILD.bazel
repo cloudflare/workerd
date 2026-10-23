@@ -35,6 +35,12 @@ ts_project(
 )
 
 wd_test(
+    src = "oidc-test.wd-test",
+    args = ["--experimental"],
+    data = ["oidc-test.js"],
+)
+
+wd_test(
     src = "stdio-writesync-reentry-uaf-test.wd-test",
     args = ["--experimental"],
     data = ["stdio-writesync-reentry-uaf-test.js"],
