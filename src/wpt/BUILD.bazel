@@ -225,3 +225,24 @@ wpt_test(
     config = "webidl-test.ts",
     wpt_directory = "@wpt//:webidl@module",
 )
+
+wpt_test(
+    name = "wasm/jsapi",
+    config = "wasm/jsapi-test.ts",
+    extra_wpt_directories = ["@wpt//:wasm/jsapi@module"],
+    wpt_directory = "@wpt//:wasm/jsapi@module",
+)
+
+wpt_test(
+    name = "wasm/webapi",
+    config = "wasm/webapi-test.ts",
+    extra_wpt_directories = ["@wpt//:wasm/jsapi@module"],
+    start_server = True,
+    target_compatible_with = select({
+        # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
+        # Currently we only have a Unix shell script.
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    wpt_directory = "@wpt//:wasm/webapi@module",
+)
