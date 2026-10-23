@@ -1,0 +1,21 @@
+build/deps/v8.MODULE.bazel
+  s_f45b1e1284761f::t_8a3af16c75c863 71
+patches/v8/0046-Forward-ThinStrings-shortcut-by-the-scavenger.patch
+  s_f45b1e1284761f::t_dcb26d55eb8b41 1-43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "22d62da3e5491aa2d5dbd50f50b0abe585e85718",
+  "prompts": {},
+  "sessions": {
+    "s_f45b1e1284761f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "582c3f8f-8b99-468e-81b4-3b06386332bb",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}
