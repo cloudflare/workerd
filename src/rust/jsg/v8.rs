@@ -2932,8 +2932,7 @@ pub struct Global<T> {
     /// The state of the isolate the handle was created in. Every use checks that the lock
     /// belongs to that isolate, and a drop checks that the isolate is still alive.
     state: Arc<IsolateState>,
-    /// `*const T` makes `Global` neither `Send` nor `Sync`: dropping it resets the V8
-    /// handle, which must happen on the isolate's thread.
+    /// `*const T` makes `Global` neither `Send` nor `Sync`.
     _marker: PhantomData<*const T>,
 }
 
@@ -3041,18 +3040,14 @@ impl<T> Global<T> {
     }
 }
 
+/// Dropping a `Global` resets its strong handle through its isolate's state: at once under the
+/// isolate lock, at the next lock otherwise, and not at all once the isolate is being disposed.
+/// See [`IsolateState`]. The traced reference, if any, is let go of without a reset; see
+/// [`GcVisitor::visit_global`].
 impl<T> Drop for Global<T> {
     fn drop(&mut self) {
-        if self.state.is_closed() {
-            // The isolate is being disposed, or has been: `v8::Isolate::Dispose` frees every
-            // handle of the isolate, and a reset after it would touch freed memory.
-            return;
-        }
-        // The traced reference, if any, is let go of without a reset; see
-        // `GcVisitor::visit_global`.
-        // SAFETY: global handle is valid (guaranteed by construction); Pin is sound because
-        // the handle is not moved.
-        unsafe { ffi::global_reset(Pin::new_unchecked(&mut self.handle)) };
+        let strong = std::mem::replace(&mut self.handle, ffi::Global { ptr: 0 });
+        self.state.drop_handle(strong);
     }
 }
 

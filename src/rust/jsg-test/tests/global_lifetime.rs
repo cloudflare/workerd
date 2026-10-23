@@ -2,8 +2,8 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! Tests for dropping a `Global` after its isolate is gone, and for a `Global` that leaves
-//! the resource that traces it.
+//! Tests for dropping a `Global` without the isolate lock, or after its isolate is gone, and
+//! for a `Global` that leaves the resource that traces it.
 
 use std::cell::Cell;
 use std::sync::atomic::AtomicUsize;
@@ -53,6 +53,21 @@ impl HolderParent {
     #[jsg_method]
     fn set_child_value<'s>(&self, lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) {
         self.child.handle.set(Some(value.to_global(lock)));
+    }
+}
+
+/// A resource whose drops the tests count.
+#[jsg_resource]
+struct Counted;
+
+#[jsg_resource]
+impl Counted {}
+
+static COUNTED_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+impl Drop for Counted {
+    fn drop(&mut self) {
+        COUNTED_DROPS.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -270,4 +285,108 @@ fn global_put_back_into_a_resource_that_gains_a_strong_reference_is_strong() {
         assert!(taken.as_local(lock).is_object());
         Ok(())
     });
+}
+
+/// A `Global` dropped while the isolate is not locked cannot reset its handle; the handle is
+/// queued, keeps its value alive, and is reset the next time the isolate is locked.
+#[test]
+fn unlocked_drop_is_deferred_until_the_next_lock() {
+    COUNTED_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    let mut wrapper: Option<v8::Global<v8::Value>> = None;
+    let mut baseline = 0;
+    harness.run_in_context(|lock, _ctx| {
+        // Created ahead of the measurements below, so that they only see the wrapper's handle.
+        jsg::resource::function_template_of::<Counted>(lock);
+        baseline = crate::Harness::used_global_handles_size(lock);
+
+        let resource = jsg::Rc::new(Counted);
+        wrapper = Some(resource.clone().to_js(lock).to_global(lock));
+        // Only the `Global` keeps the wrapper, and with it the resource, alive now.
+        drop(resource);
+        Ok(())
+    });
+    let wrapper = wrapper.expect("created in the context");
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(
+            COUNTED_DROPS.load(Ordering::SeqCst),
+            0,
+            "the Global roots the wrapper"
+        );
+        let with_wrapper = crate::Harness::used_global_handles_size(lock);
+        assert!(with_wrapper > baseline);
+        assert_eq!(lock.globals_awaiting_lock(), 0);
+
+        crate::Harness::with_isolate_unlocked(lock, || drop(wrapper));
+        assert_eq!(lock.globals_awaiting_lock(), 1);
+
+        crate::Harness::request_gc(lock);
+        assert_eq!(
+            COUNTED_DROPS.load(Ordering::SeqCst),
+            0,
+            "the queued handle still roots the wrapper"
+        );
+        assert_eq!(crate::Harness::used_global_handles_size(lock), with_wrapper);
+        Ok(())
+    });
+
+    // Locking the isolate again resets the queued handle.
+    harness.run_in_context(|lock, _ctx| {
+        assert_eq!(lock.globals_awaiting_lock(), 0);
+        crate::Harness::request_gc(lock);
+        assert_eq!(COUNTED_DROPS.load(Ordering::SeqCst), 1);
+        assert_eq!(crate::Harness::used_global_handles_size(lock), baseline);
+        Ok(())
+    });
+}
+
+/// The size of the handles in use when the isolate is next locked, after the lock has reset
+/// the handles that were queued for it, less what that lock's own context adds: each
+/// `run_in_context` call leaves a handle of its context in use until the next full GC, which
+/// this measures from the call after. Like the count itself, that encodes V8's handle
+/// accounting; see `Harness::used_global_handles_size`.
+fn used_global_handles_size_at_next_lock(harness: &crate::Harness) -> usize {
+    let mut at_next_lock = 0;
+    harness.run_in_context(|lock, _ctx| {
+        assert_eq!(lock.globals_awaiting_lock(), 0);
+        at_next_lock = crate::Harness::used_global_handles_size(lock);
+        Ok(())
+    });
+    let mut at_lock_after = 0;
+    harness.run_in_context(|lock, _ctx| {
+        at_lock_after = crate::Harness::used_global_handles_size(lock);
+        Ok(())
+    });
+    at_next_lock - (at_lock_after - at_next_lock)
+}
+
+/// A traced `Global` dropped without the isolate lock queues its strong handle and lets go of
+/// its traced node, which a full GC frees while the handle waits. The next lock resets the
+/// handle and leaves the freed node alone.
+#[test]
+fn traced_global_dropped_without_the_lock_is_released_at_the_next_lock() {
+    let harness = crate::Harness::new();
+    let mut baseline = 0;
+    let mut holder = None;
+    harness.run_in_context(|lock, ctx| {
+        let (resource, b) = holder_in_traced_mode(lock, ctx);
+        baseline = b;
+        let with_global = crate::Harness::used_global_handles_size(lock);
+        let taken = resource.handle.take().expect("set above");
+        crate::Harness::with_isolate_unlocked(lock, || drop(taken));
+        assert_eq!(lock.globals_awaiting_lock(), 1);
+        crate::Harness::request_gc(lock);
+        assert!(
+            crate::Harness::used_global_handles_size(lock) < with_global,
+            "the GC frees the traced node"
+        );
+        // Kept, so that the release of its own handles does not change the count.
+        holder = Some(resource);
+        Ok(())
+    });
+    assert_eq!(used_global_handles_size_at_next_lock(&harness), baseline);
+    drop(holder);
 }

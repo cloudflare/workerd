@@ -784,8 +784,6 @@ struct Worker::Isolate::Impl {
       auto featureFlagsWords = capnp::canonicalize(featureFlags);
       realm = ::workerd::rust::jsg::realm_create(
           lock->v8Isolate, featureFlagsWords.asBytes().as<kj_rs::Rust>());
-      lock->v8Isolate->SetData(
-          ::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &*KJ_REQUIRE_NONNULL(realm));
 
       limitEnforcer.customizeIsolate(lock->v8Isolate);
 

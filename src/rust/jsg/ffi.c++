@@ -1250,6 +1250,27 @@ Realm* realm_from_isolate(Isolate* isolate) {
   return realm;
 }
 
+namespace {
+// The IsolateBase deferred action hook of an isolate with a Rust Realm.
+void resetGlobalsAwaitingLock(v8::Isolate* isolate) {
+  realm_reset_globals_awaiting_lock(isolate);
+}
+}  // namespace
+
+bool realm_can_attach(Isolate* isolate) {
+  return isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM) == nullptr;
+}
+
+void realm_attach(Isolate* isolate, Realm& realm) {
+  isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &realm);
+  ::workerd::jsg::IsolateBase::from(isolate).setDeferredActionHook(&resetGlobalsAwaitingLock);
+}
+
+void realm_detach(Isolate* isolate) {
+  ::workerd::jsg::IsolateBase::from(isolate).setDeferredActionHook(nullptr);
+  isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, nullptr);
+}
+
 // Errors
 namespace {
 Local exceptionCreateFromMessage(ExceptionType exception_type, v8::Local<v8::String> message) {

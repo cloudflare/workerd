@@ -351,6 +351,15 @@ class IsolateBase {
   // so it is safe to hold from objects that may outlive the isolate (e.g. jsg::WeakRef).
   kj::Arc<const IsolateLiveness> getIsolateLiveness();
 
+  // A function that applyDeferredActions() calls after the destruction queue, so that another
+  // layer with handles of this isolate can release, under the lock, the ones it had to defer.
+  // The Rust JSG Realm, of which an isolate has at most one, installs one while it is attached
+  // to the isolate, and removes it by passing null.
+  using DeferredActionHook = void (*)(v8::Isolate*);
+  void setDeferredActionHook(DeferredActionHook hook) {
+    deferredActionHook = hook;
+  }
+
   // Running totals of code V8 has generated in this isolate, from the JIT code event handler.
   // Only counts additions; code that V8 later flushes or collects is not subtracted. Zero when
   // JIT code event tracking is disabled.
@@ -659,6 +668,8 @@ class IsolateBase {
 
   enum QueueState { ACTIVE, DROPPING, DROPPED };
   QueueState queueState = ACTIVE;
+
+  DeferredActionHook deferredActionHook = nullptr;
 
   struct CodeBlockInfo {
     size_t size = 0;

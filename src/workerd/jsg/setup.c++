@@ -297,6 +297,10 @@ void IsolateBase::applyDeferredActions() {
     auto drop = queue.lockExclusive()->pop();
   }
 
+  if (deferredActionHook != nullptr) {
+    deferredActionHook(ptr);
+  }
+
   externalMemoryTarget->applyDeferredMemoryUpdate();
 }
 

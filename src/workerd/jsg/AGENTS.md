@@ -88,7 +88,7 @@ The legacy `js.tryCatch(fn)` is deprecated and will be eventually removed.
 - **NEVER** unwrap `Ref<Object>` — use `V8Ref<v8::Object>` instead
 - `JSG_CATCH` is NOT a true catch — cannot rethrow with `throw`
 - `NonCoercible<T>` runs counter to Web IDL best practices; avoid in new APIs
-- Rust JSG bindings: see `src/rust/jsg/` and `src/rust/jsg-macros/`; full macro reference in `src/rust/AGENTS.md`; GC tracing (`Traced` + `GarbageCollected`) documented in `src/rust/jsg-macros/README.md`
+- Rust JSG bindings: see `src/rust/jsg/` and `src/rust/jsg-macros/`; full macro reference in `src/rust/AGENTS.md`; GC tracing (`Traced` + `GarbageCollected`) documented in `src/rust/jsg-macros/README.md`. The Rust `Realm` sets `IsolateBase::setDeferredActionHook()`, which `applyDeferredActions()` calls whenever an `IsolateBase::Lock` is taken, to release the handles of Rust `Global`s dropped without the lock
 
 ## INVARIANTS
 

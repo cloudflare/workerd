@@ -52,8 +52,6 @@ TestHarness::TestHarness(
   if (fastApi == FastApi::Enabled) {
     isolate->setFastApiEnabledForTest();
   }
-  auto* v8Isolate = isolate->getIsolate();
-  v8Isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &*realm);
 
   KJ_REQUIRE(
       flags.size() % sizeof(capnp::word) == 0, "flags size must be a multiple of the word size");
@@ -159,6 +157,11 @@ void request_gc(Isolate* isolate, GcType gc_type) {
       }
       break;
   }
+}
+
+void run_unlocked(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback) {
+  v8::Unlocker unlocker(isolate);
+  callback(data);
 }
 
 size_t used_global_handles_size(Isolate* isolate) {

@@ -72,6 +72,15 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn request_gc(isolate: *mut Isolate, gc_type: GcType);
 
+        /// Calls `callback` with the isolate unlocked (`v8::Unlocker`), then locks it again.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn run_unlocked(
+            isolate: *mut Isolate,
+            data: usize, /* callback */
+            callback: unsafe fn(usize /* callback */),
+        );
+
         /// `v8::HeapStatistics::used_global_handles_size()`: the bytes of the isolate's
         /// global and traced handle nodes in use.
         #[expect(clippy::allow_attributes)]
@@ -304,6 +313,53 @@ impl Harness {
     pub fn request_minor_gc(lock: &mut jsg::Lock<'_>) {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe { ffi::request_gc(lock.isolate().as_ffi(), ffi::GcType::Minor) };
+    }
+
+    /// Runs `f` with the isolate unlocked, as code that runs on a thread without the isolate
+    /// lock would, and locks it again afterwards. `lock` is borrowed for the duration, so `f`
+    /// cannot use any handle; it must not touch the isolate in any other way either.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `f` panics, once the isolate is locked again.
+    pub fn with_isolate_unlocked<F: FnOnce() -> R, R>(lock: &mut jsg::Lock<'_>, f: F) -> R {
+        struct Call<F, R> {
+            f: Option<F>,
+            result: Option<Result<R, Box<dyn std::any::Any + Send>>>,
+        }
+
+        fn trampoline<F: FnOnce() -> R, R>(data: usize) {
+            // SAFETY: data was cast from &raw mut Call<F, R> in with_isolate_unlocked below.
+            let call = unsafe { &mut *(data as *mut Call<F, R>) };
+            let Some(f) = call.f.take() else {
+                return;
+            };
+            // The scopes open on this thread stand for the isolate lock, which `f` runs
+            // without, so they are set aside while it runs.
+            // SAFETY: `f` has no handle to use, and opens no scope.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+                jsg::allow_scopes_of_another_isolate(f)
+            }));
+            call.result = Some(result);
+        }
+
+        let mut call = Call::<F, R> {
+            f: Some(f),
+            result: None,
+        };
+        // SAFETY: the isolate is locked (guaranteed by Lock), and `call` is valid for the
+        // duration of run_unlocked.
+        unsafe {
+            ffi::run_unlocked(
+                lock.isolate().as_ffi(),
+                &raw mut call as usize,
+                trampoline::<F, R>,
+            );
+        }
+        match call.result.expect("the callback ran") {
+            Ok(result) => result,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
     }
 
     /// The bytes of the isolate's global and traced handle nodes in use: grows when a `Global`

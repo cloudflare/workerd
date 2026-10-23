@@ -179,6 +179,18 @@ pub mod scope_owner {
         });
     }
 
+    /// Returns the isolate whose scopes are open on this thread, or null if none is.
+    pub fn current() -> *mut v8::ffi::Isolate {
+        STATE.with(|state| {
+            let s = state.get();
+            if s.depth == 0 {
+                ptr::null_mut()
+            } else {
+                s.isolate
+            }
+        })
+    }
+
     /// Records that a scope opened with [`enter`] was closed.
     pub fn exit() {
         STATE.with(|state| {
