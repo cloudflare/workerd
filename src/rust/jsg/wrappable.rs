@@ -97,6 +97,8 @@ use crate::v8;
 /// - **Collections** (`Vec<T>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`,
 ///   `BTreeSet<T>`) — iterates elements/values and traces each.
 /// - **`Cell<T>`** — reads through `as_ptr()` (sound under single-threaded GC).
+/// - **`RefCell<T>`** — traces through `try_borrow()`, so a mutably borrowed cell is skipped;
+///   debug builds abort if it can hold GC references.
 /// - **`jsg::Rc<T>`** — visits the reference via `GcVisitor::visit_rc`.
 /// - **`jsg::Weak<T>`** — no-op (weak refs don't keep targets alive).
 /// - **`jsg::v8::TracedGlobal<T>`** — visits via `GcVisitor::visit_traced_global`.
@@ -296,11 +298,30 @@ impl<T: Traced> Traced for std::cell::RefCell<T> {
     }
 
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
-        // Use `try_borrow()` to avoid panicking across the FFI boundary if a
-        // mutable borrow is active during GC.
-        if let Ok(inner) = self.try_borrow() {
-            inner.trace(visitor);
-        }
+        // A mutable borrow is active here only if the code holding it calls something that visits
+        // the resource: an allocation on the V8 heap, which can start a GC, or wrapping the
+        // resource, or creating its first or dropping its last strong `jsg::Rc` while it has no
+        // wrapper, which switch its references between strong and traced. The contents cannot be
+        // read then, so the visit misses their references. A missed GC visit can cost a weak
+        // `TracedGlobal` its value and a `jsg::Rc` the JS wrapper of its resource; a missed switch
+        // can leave a reference weak that should be strong, for a later GC to free, or strong that
+        // should be weak, which leaks. Debug builds abort when that can happen (a panic cannot
+        // unwind out of a visit made from C++); release builds skip the cell.
+        //
+        // The real fix is a JSG cell type whose mutable borrow takes the lock and makes the
+        // references it holds strong until the borrow ends, so that a visit can skip a borrowed
+        // cell safely. That also covers a `TracedGlobal` taken out of a `Cell`, which nothing
+        // traces.
+        let Ok(inner) = self.try_borrow() else {
+            debug_assert!(
+                !T::holds_gc_references(),
+                "tracing found a mutably borrowed RefCell that can hold GC references, which it \
+                 cannot visit; do not hold a RefCell borrow_mut() across a call that can allocate \
+                 on the V8 heap, wrap the resource, or create or drop a jsg::Rc to it"
+            );
+            return;
+        };
+        inner.trace(visitor);
     }
 }
 
