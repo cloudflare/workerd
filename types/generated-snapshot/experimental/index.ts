@@ -708,7 +708,7 @@ export interface DurableObjectRetryOptions {
   maxRetries?: number;
   timeoutMs?: number;
 }
-export interface DurableObjectEvictionInfo {
+export interface DurableObjectHibernationInfo {
   readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
 }
 export interface DurableObjectState<Props = unknown> {

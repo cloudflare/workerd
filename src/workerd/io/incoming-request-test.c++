@@ -10,6 +10,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/tests/test-fixture.h>
 
+#include <capnp/message.h>
 #include <kj/async.h>
 #include <kj/test.h>
 
@@ -20,6 +21,13 @@ class ErrorHandlerImpl: public kj::TaskSet::ErrorHandler {
  public:
   void taskFailed(kj::Exception&& exception) override {
     KJ_FAIL_EXPECT(exception);
+  }
+};
+
+class ThrowOnDestruction: private kj::UnwindDetector {
+ public:
+  ~ThrowOnDestruction() noexcept(false) {
+    catchExceptionsIfUnwinding([]() { KJ_FAIL_REQUIRE("test cancellation failure"); });
   }
 };
 
@@ -262,13 +270,6 @@ KJ_TEST("final request cancels wait-until tasks before it stops being current") 
 }
 
 KJ_TEST("final request completes cleanup after cancellation throws") {
-  class ThrowOnDestruction: private kj::UnwindDetector {
-   public:
-    ~ThrowOnDestruction() noexcept(false) {
-      catchExceptionsIfUnwinding([]() { KJ_FAIL_REQUIRE("test cancellation failure"); });
-    }
-  };
-
   TestFixture fixture;
   auto request = fixture.newIncomingRequest();
   auto& context = request->getContext();
@@ -302,6 +303,47 @@ KJ_TEST("final request completes cleanup after cancellation throws") {
 
   KJ_EXPECT(callbackWasCanceledWhileRequestWasCurrent);
   KJ_EXPECT(taskWasCanceledWhileRequestWasCurrent);
+}
+
+KJ_TEST("request on an aborted shared context completes cleanup after cancellation throws") {
+  TestFixture fixture;
+  auto& waitScope = fixture.getWaitScope();
+  bool callbackCanceled = false;
+  bool taskCanceled = false;
+  bool waitUntilCanceled = false;
+  // The fixture's own reference keeps the context shared after the request is destroyed.
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+
+  kj::Function<kj::Promise<void>()> callback;
+  kj::Function<kj::Promise<void>()> throwingCallback;
+  context
+      ->run([&](Worker::Lock&, IoContext& context) {
+    callback = context.makeReentryCallback([&](Worker::Lock&, IoContext&) {
+      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() {
+        callbackCanceled = true;
+      }));
+    });
+    throwingCallback = context.makeReentryCallback([](Worker::Lock&, IoContext&) {
+      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::heap<ThrowOnDestruction>());
+    });
+  }).wait(waitScope);
+  // The canceler cancels the most recent callback first, so the throwing one goes first.
+  auto pendingTask = callback();
+  auto throwingPendingTask = throwingCallback();
+  KJ_EXPECT(!pendingTask.poll(waitScope));
+  KJ_EXPECT(!throwingPendingTask.poll(waitScope));
+  context->addTask(
+      kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() { taskCanceled = true; })));
+  context->addWaitUntil(
+      kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() { waitUntilCanceled = true; })));
+
+  context->abort(KJ_EXCEPTION(FAILED, "test abort reason"));
+  request = nullptr;
+
+  KJ_EXPECT(callbackCanceled);
+  KJ_EXPECT(taskCanceled);
+  KJ_EXPECT(waitUntilCanceled);
 }
 
 // Regression test: two IncomingRequests share a single actor IoContext, as happens when a Durable
@@ -338,6 +380,161 @@ KJ_TEST("IoContext::IncomingRequest::drain() releases a superseded (non-front) r
 
   // Tidy up the still-live front request so its destructor doesn't warn about undrained tasks.
   fixture.drainAndDestroy(kj::mv(second));
+}
+
+KJ_TEST("cancelPendingWorkForHibernation() cancels pending work but keeps abort watchers armed") {
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("hibernate-test"))});
+  auto& waitScope = fixture.getWaitScope();
+  // Declared before the context, whose destructor cancels the watcher.
+  bool taskCanceled = false;
+  bool watcherCanceled = false;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+
+  context->addTask(
+      kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() { taskCanceled = true; })));
+
+  kj::Function<kj::Promise<void>()> callback;
+  context
+      ->run([&callback](Worker::Lock&, IoContext& context) {
+    callback = context.makeReentryCallback(
+        [](Worker::Lock&, IoContext&) { return kj::Promise<void>(kj::NEVER_DONE); });
+  }).wait(waitScope);
+  auto pendingCallback = callback();
+  KJ_EXPECT(!pendingCallback.poll(waitScope));
+
+  context->abortWhen(
+      kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() { watcherCanceled = true; })));
+
+  request->cancelPendingWorkForHibernation();
+
+  KJ_EXPECT(taskCanceled);
+  KJ_EXPECT_THROW_MESSAGE("The Durable Object is hibernating.", pendingCallback.wait(waitScope));
+  KJ_EXPECT(!watcherCanceled);
+
+  // A callback that is still held, e.g. by an RPC target, can't start new work either.
+  KJ_EXPECT_THROW_MESSAGE("The Durable Object is hibernating.", callback());
+}
+
+KJ_TEST("cancelPendingWorkForHibernation() logs a throwing destructor and keeps canceling") {
+  TestFixture fixture({.actorId = Worker::Actor::Id(kj::str("hibernate-throw-test"))});
+  auto& waitScope = fixture.getWaitScope();
+  bool callbackCanceled = false;
+  bool waitUntilCanceled = false;
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+
+  kj::Function<kj::Promise<void>()> callback;
+  kj::Function<kj::Promise<void>()> throwingCallback;
+  context
+      ->run([&](Worker::Lock&, IoContext& context) {
+    callback = context.makeReentryCallback([&](Worker::Lock&, IoContext&) {
+      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() {
+        callbackCanceled = true;
+      }));
+    });
+    throwingCallback = context.makeReentryCallback([](Worker::Lock&, IoContext&) {
+      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::heap<ThrowOnDestruction>());
+    });
+  }).wait(waitScope);
+  // The canceler cancels the most recent callback first, so the throwing one goes first.
+  auto pendingCallback = callback();
+  auto throwingPendingCallback = throwingCallback();
+  KJ_EXPECT(!pendingCallback.poll(waitScope));
+  KJ_EXPECT(!throwingPendingCallback.poll(waitScope));
+
+  context->addWaitUntil(
+      kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() { waitUntilCanceled = true; })));
+
+  KJ_EXPECT_LOG(ERROR, "test cancellation failure");
+  request->cancelPendingWorkForHibernation();
+
+  KJ_EXPECT(callbackCanceled);
+  KJ_EXPECT(waitUntilCanceled);
+}
+
+// An actor whose onHibernate handler never settles.
+constexpr kj::StringPtr PENDING_ON_HIBERNATE_SOURCE = R"SCRIPT(
+  import { DurableObject } from "cloudflare:workers";
+  import { onHibernate } from "cloudflare:durable-objects";
+  globalThis.events = "";
+  export default class extends DurableObject {
+    async [onHibernate]() {
+      globalThis.events += "onHibernate;";
+      await new Promise(() => {});
+    }
+  }
+)SCRIPT"_kj;
+
+// Starts the onHibernate handler of an actor running PENDING_ON_HIBERNATE_SOURCE, then calls
+// `body` while the handler is pending.
+void withPendingOnHibernate(kj::StringPtr actorId,
+    kj::FunctionParam<void(TestFixture&, IoContext&, Worker::Actor&, kj::Promise<void>&)> body) {
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setWorkerdExperimental(true);
+  TestFixture fixture({
+    .featureFlags = flags.asReader(),
+    .mainModuleSource = PENDING_ON_HIBERNATE_SOURCE,
+    .actorId = Worker::Actor::Id(kj::str(actorId)),
+    .actorClassName = "default"_kj,
+    .useRealTimers = false,
+  });
+  auto& actor = fixture.getActor();
+  auto context = fixture.newIoContext();
+  actor.setIoContext(kj::addRef(*context));
+
+  // Delivering a request constructs the class instance, which reads the handler.
+  auto constructRequest = fixture.newIncomingRequest(*context);
+  fixture.pollEventLoop();
+  fixture.drainAndDestroy(kj::mv(constructRequest));
+  KJ_ASSERT(actor.hasOnHibernateHandler());
+
+  auto promise = actor.runOnHibernate(Worker::Actor::HibernationReason::INACTIVE,
+      kj::rc<TestFixture::DummyIoChannelFactory>(fixture.getTimerChannel()),
+      kj::refcounted<RequestObserver>(), kj::none);
+  KJ_EXPECT(!promise.poll(fixture.getWaitScope()));
+  kj::String events;
+  fixture.enterWorkerLock([&](Worker::Lock& lock) {
+    jsg::Lock& js = lock;
+    js.withinHandleScope([&]() {
+      v8::Context::Scope contextScope(lock.getContext());
+      events = js.global().get(js, "events"_kj).toString(js);
+    });
+  });
+  KJ_ASSERT(events == "onHibernate;", events);
+
+  body(fixture, *context, actor, promise);
+}
+
+KJ_TEST("canceling runOnHibernate() cancels pending work but keeps abort watchers armed") {
+  // These outlive the fixture, whose actor owns the context that holds the task and watcher.
+  bool taskCanceled = false;
+  bool watcherCanceled = false;
+  withPendingOnHibernate("on-hibernate-cancel-test"_kj,
+      [&](TestFixture&, IoContext& context, Worker::Actor&, kj::Promise<void>& promise) {
+    context.addTask(
+        kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() { taskCanceled = true; })));
+    context.abortWhen(
+        kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() { watcherCanceled = true; })));
+
+    promise = nullptr;
+
+    KJ_EXPECT(taskCanceled);
+    KJ_EXPECT(!watcherCanceled);
+  });
+}
+
+KJ_TEST("aborting the actor cancels a pending runOnHibernate()") {
+  withPendingOnHibernate("on-hibernate-abort-test"_kj,
+      [](TestFixture& fixture, IoContext& context, Worker::Actor& actor,
+          kj::Promise<void>& promise) {
+    actor.abort(KJ_EXCEPTION(FAILED, "test abort"));
+    // abort() destroys the handler's IncomingRequest synchronously, so it can tear down the
+    // IoContext.
+    KJ_EXPECT(!context.hasCurrentIncomingRequest());
+    KJ_EXPECT_THROW_MESSAGE("test abort", promise.wait(fixture.getWaitScope()));
+  });
 }
 
 KJ_TEST("ambient IoContext is hidden while another V8 isolate is entered") {
