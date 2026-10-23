@@ -81,9 +81,16 @@ def parse_log(log_file: Path, options: Options) -> Log:
     if log_file.parent.name in EXCLUDED_TESTS:
         return log
 
-    parser = ElementTree.XMLParser(encoding="utf-8")
-    root = ElementTree.parse(log_file, parser=parser)
-    text = root.find("testsuite").find("system-out").text
+    # Bazel replaces each 4-byte UTF-8 sequence with "????" when it copies
+    # test.log into the test.xml it generates, which corrupts subtest names.
+    # Prefer the original log when it is available.
+    raw_log = log_file.with_name("test.log")
+    if raw_log.exists():
+        text = raw_log.read_text(encoding="utf-8", errors="surrogateescape")
+    else:
+        parser = ElementTree.XMLParser(encoding="utf-8")
+        root = ElementTree.parse(log_file, parser=parser)
+        text = root.find("testsuite").find("system-out").text
 
     start_log = re.search(r"\[ TEST \] .*:zzz_results\n", text)
     if not start_log:

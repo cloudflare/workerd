@@ -127,6 +127,14 @@ class RunnerState {
   // Callbacks to be run once the entire test is done.
   completionCallbacks: UnknownFunc[] = [];
 
+  // Set if the test file itself failed to load or evaluate, as opposed to one of its subtests
+  // failing. Reported as the harness status ERROR.
+  harnessError?: string;
+
+  // Wall-clock time spent running the file, in milliseconds. Timers in workerd only advance
+  // across I/O, so this undercounts CPU-bound files.
+  duration = 0;
+
   constructor(
     testUrl: URL,
     testFileName: string,
@@ -447,22 +455,30 @@ async function runTest(
   }
 
   const meta = parseWptMetadata(String(env[file]));
+  const startTime = Date.now();
 
-  if (options.before) {
-    options.before();
-  }
+  try {
+    if (options.before) {
+      options.before();
+    }
 
-  const files = [];
+    const files = [];
 
-  for (const script of meta.scripts) {
-    files.push(getCodeAtPath(env, path.dirname(file), script));
-  }
+    for (const script of meta.scripts) {
+      files.push(getCodeAtPath(env, path.dirname(file), script));
+    }
 
-  files.push(getCodeAtPath(env, './', file, options.replace));
-  evalAsBlock(env, options.runInGlobalScope ?? false, files);
+    files.push(getCodeAtPath(env, './', file, options.replace));
+    evalAsBlock(env, options.runInGlobalScope ?? false, files);
 
-  if (options.after) {
-    options.after();
+    if (options.after) {
+      options.after();
+    }
+  } catch (err) {
+    globalThis.state.harnessError = sanitize_unpaired_surrogates(String(err));
+    throw err;
+  } finally {
+    globalThis.state.duration = Date.now() - startTime;
   }
 
   // The WPT IDL harness (idlharness.js) uses eval() inside async promise callbacks
@@ -480,6 +496,7 @@ async function runTest(
     await globalThis.state.validate();
   } finally {
     globalThis.eval = originalEval;
+    globalThis.state.duration = Date.now() - startTime;
   }
 }
 
@@ -528,42 +545,54 @@ import { type TestRunnerConfig } from 'harness/harness';
 export default ${JSON.stringify(generatedConfig, null, 2)} satisfies TestRunnerConfig;`;
 }
 
+// One entry of `results` in wptreport format, the format `wpt run --log-wptreport` writes and
+// wpt.fyi ingests. A whole file that is disabled or omitted is reported as SKIP; a file that fails
+// to evaluate is reported as ERROR.
 class WPTTestResult {
   test: string;
-  status: 'OK' | 'ERROR';
+  status: 'OK' | 'ERROR' | 'SKIP';
+  message?: string;
   subtests: WPTSubtestResult[] = [];
-  // TODO(soon): Track elapsed time
-  duration: number = 0;
+  duration: number;
 
   constructor(result: RunnerState, options: TestRunnerOptions) {
     this.test = WPTTestResult.#getTestNameFromUrl(result.testUrl);
-    this.status = options.disabledTests === true ? 'ERROR' : 'OK';
+    this.duration = result.duration;
+    if (options.disabledTests === true || options.omittedTests === true) {
+      this.status = 'SKIP';
+      this.message = options.comment;
+    } else if (result.harnessError !== undefined) {
+      this.status = 'ERROR';
+      this.message = result.harnessError;
+    } else {
+      this.status = 'OK';
+    }
     this.subtests = result.subtests.map((r) => new WPTSubtestResult(r));
   }
 
   static #getTestNameFromUrl(testUrl: URL): string {
     const testNameUrl = new URL(testUrl);
-    testNameUrl.pathname = testNameUrl.pathname.replace('.js', '.html');
+    testNameUrl.pathname = testNameUrl.pathname.replace(/\.js$/, '.html');
     return testNameUrl.href.slice(testNameUrl.origin.length);
   }
 }
 
+// Subtests that were disabled or omitted by the test config never ran, so they are NOTRUN.
 class WPTSubtestResult {
   name: string;
-  status: 'PASS' | 'FAIL';
+  status: 'PASS' | 'FAIL' | 'PRECONDITION_FAILED' | 'NOTRUN';
   message?: string;
-  isExpectedFailure?: true;
 
   constructor(result: Test) {
     this.name = sanitize_unpaired_surrogates(result.name);
     if (result.error instanceof Error) {
-      this.message = result.error.message;
-      // TODO(soon): This is true in main, but not necessarily if you run a report in local dev
-      this.isExpectedFailure = true;
-      this.status = 'FAIL';
-    } else if (result.error === 'DISABLED') {
-      this.isExpectedFailure = true;
-      this.status = 'FAIL';
+      this.message = sanitize_unpaired_surrogates(result.error.message);
+      this.status =
+        result.error instanceof OptionalFeatureUnsupportedError
+          ? 'PRECONDITION_FAILED'
+          : 'FAIL';
+    } else if (result.error === 'DISABLED' || result.error === 'OMITTED') {
+      this.status = 'NOTRUN';
     } else {
       this.status = 'PASS';
     }

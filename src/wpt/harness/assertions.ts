@@ -39,6 +39,7 @@ import { sanitize_unpaired_surrogates } from './common';
 
 declare global {
   var AssertionError: new (message: string) => Error;
+  var OptionalFeatureUnsupportedError: new (message: string) => Error;
 
   function assert_equals(a: unknown, b: unknown, message?: string): void;
   function assert_not_equals(a: unknown, b: unknown, message?: string): void;
@@ -200,6 +201,8 @@ function OptionalFeatureUnsupportedError(
 OptionalFeatureUnsupportedError.prototype = Object.create(
   AssertionError.prototype
 );
+
+globalThis.OptionalFeatureUnsupportedError = OptionalFeatureUnsupportedError;
 
 globalThis.assert_equals = (a, b, message): void => {
   strictEqual(a, b, message);
