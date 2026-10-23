@@ -839,12 +839,7 @@ export default {
     ],
   },
   'response/response-error.any.js': {},
-  'response/response-from-stream.any.js': {
-    comment: 'Missing expected exception (TypeError)',
-    expectedFailures: [
-      'Constructing a Response with a stream on which getReader() is called',
-    ],
-  },
+  'response/response-from-stream.any.js': {},
   'response/response-headers-guard.any.js': {},
   'response/response-init-001.any.js': {
     comment: 'statusText should be inited to OK',

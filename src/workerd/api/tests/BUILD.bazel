@@ -1587,6 +1587,11 @@ wd_test(
 )
 
 wd_test(
+    src = "body-locked-stream-test.wd-test",
+    data = ["body-locked-stream-test.js"],
+)
+
+wd_test(
     src = "buffer-indexof-odd-offset-ucs2-test.wd-test",
     data = ["buffer-indexof-odd-offset-ucs2-test.js"],
 )

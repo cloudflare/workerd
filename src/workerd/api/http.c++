@@ -93,6 +93,10 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
   // rule for data with V8 heap provenance -- lives in JsReadableStream's converting constructors.
   KJ_SWITCH_ONEOF(init) {
     KJ_CASE_ONEOF(stream, JsReadableStream) {
+      // ExtractedBody's constructor rejects a disturbed stream, and its message takes precedence
+      // for a stream that is both, such as one tee() has left behind.
+      JSG_REQUIRE(stream.isDisturbed(js) || !stream.isLocked(js), TypeError,
+          "This ReadableStream is locked to a reader, and cannot be used as a body.");
       return ExtractedBody(js, kj::mv(stream));
     }
     KJ_CASE_ONEOF(gen, jsg::AsyncGeneratorIgnoringStrings<jsg::Value>) {
