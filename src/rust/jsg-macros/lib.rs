@@ -36,11 +36,13 @@ use syn::FnArg;
 use syn::ItemFn;
 use syn::ItemImpl;
 use syn::parse_macro_input;
+use utils::FastMode;
 use utils::elide_named_lifetimes;
 use utils::error;
 use utils::extract_name_attribute;
 use utils::extract_named_fields;
-use utils::fast_api_signature;
+use utils::fast_api_shape;
+use utils::fast_mode;
 use utils::is_lock_ref;
 use utils::is_option_type;
 use utils::is_result_type;
@@ -199,7 +201,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn jsg_method(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input_fn = parse_macro_input!(item as ItemFn);
-    let fast = fast_callback(&input_fn.sig);
+    let fast = fast_callback(&input_fn.sig, attr.clone());
     let mut output = callback(quote! { #input_fn }.into(), Callback::Function, Some(attr));
     output.extend(TokenStream::from(fast));
     output
@@ -428,31 +430,60 @@ fn unwrap_argument(
 }
 
 /// Generates `{name}_fast_api()`, which returns the V8 Fast API callback of a `#[jsg_method]`
-/// if its signature allows one.
-fn fast_callback(fn_sig: &syn::Signature) -> proc_macro2::TokenStream {
+/// if its types allow one, or as `attr`'s `fast` or `nofast` says.
+fn fast_callback(fn_sig: &syn::Signature, attr: TokenStream) -> proc_macro2::TokenStream {
     let fn_name = &fn_sig.ident;
     let descriptor_name = syn::Ident::new(&format!("{fn_name}_fast_api"), fn_name.span());
-    let descriptor = fast_api_signature(fn_sig).map_or_else(
-        || quote! { None },
-        |arg_types| {
-            let args: Vec<_> = (0..arg_types.len())
+    let descriptor = match (fast_mode(attr.into()), fast_api_shape(fn_sig)) {
+        (Err(msg), _) => syn::Error::new_spanned(fn_name, msg).to_compile_error(),
+        (Ok(FastMode::NoFast), _) | (Ok(FastMode::Auto), Err(_)) => quote! { None },
+        (Ok(FastMode::Fast), Err(why)) => syn::Error::new_spanned(
+            fn_name,
+            format!("`#[jsg_method(fast)]` cannot give `{fn_name}` a fast callback: {why}"),
+        )
+        .to_compile_error(),
+        (Ok(mode), Ok(shape)) => {
+            let args: Vec<_> = (0..shape.args.len())
                 .map(|i| syn::Ident::new(&format!("a{i}"), fn_name.span()))
                 .collect();
-            let has_self = fn_sig
-                .inputs
+            let arg_types: Vec<_> = shape
+                .args
                 .iter()
-                .any(|arg| matches!(arg, FnArg::Receiver(_)));
-            if has_self {
-                quote! {
-                    Some(jsg::fast_api::method(|this: &Self, #(#args: #arg_types),*| this.#fn_name(#(#args),*)))
-                }
+                .map(|ty| elide_named_lifetimes(ty))
+                .collect();
+            let (lock_param, lock_arg, args_type) = if shape.lock {
+                (
+                    quote! { lock: &mut jsg::Lock<'_>, },
+                    quote! { lock, },
+                    quote! { jsg::fast_api::WithLock<(#(#arg_types,)*)> },
+                )
+            } else {
+                (quote! {}, quote! {}, quote! { (#(#arg_types,)*) })
+            };
+            let (receiver, closure) = if fn_sig.receiver().is_some() {
+                (
+                    quote! { Self },
+                    quote! { |this: &Self, #lock_param #(#args: #arg_types),*| this.#fn_name(#lock_arg #(#args),*) },
+                )
+            } else {
+                (
+                    quote! { jsg::fast_api::Static },
+                    quote! { |#lock_param #(#args: #arg_types),*| Self::#fn_name(#lock_arg #(#args),*) },
+                )
+            };
+            if mode == FastMode::Fast {
+                quote! { Some(jsg::fast_api::method::<#receiver, #args_type, _>(#closure)) }
             } else {
                 quote! {
-                    Some(jsg::fast_api::static_method(|#(#args: #arg_types),*| Self::#fn_name(#(#args),*)))
+                    let probe = jsg::fast_api::probe::Probe::<#receiver, #args_type, _>::new(#closure);
+                    {
+                        use jsg::fast_api::probe::*;
+                        (&probe).descriptor()
+                    }
                 }
             }
-        },
-    );
+        }
+    };
     quote! {
         #[automatically_derived]
         #[doc(hidden)]

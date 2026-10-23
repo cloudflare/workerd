@@ -996,6 +996,33 @@ void fast_api_terminate_execution(FastApiCallbackOptions* options) {
 }
 
 namespace {
+// Destroyed in reverse order: JavaScript is allowed again before the HandleScope closes.
+struct FastApiScope {
+  explicit FastApiScope(v8::Isolate* isolate)
+      : handles(isolate),
+        noJavascript(isolate, v8::Isolate::DisallowJavascriptExecutionScope::THROW_ON_FAILURE) {}
+
+  v8::HandleScope handles;
+  v8::Isolate::DisallowJavascriptExecutionScope noJavascript;
+};
+static_assert(sizeof(FastApiScope) <= kFastApiScopeSize);
+static_assert(alignof(FastApiScope) <= 8);
+}  // namespace
+
+Isolate* fast_api_scope_open(FastApiCallbackOptions* options, uint8_t* storage) {
+  std::construct_at(reinterpret_cast<FastApiScope*>(storage), options->isolate);
+  return options->isolate;
+}
+
+void fast_api_scope_close(uint8_t* storage) {
+  std::destroy_at(reinterpret_cast<FastApiScope*>(storage));
+}
+
+size_t fast_api_scope_size() {
+  return sizeof(FastApiScope);
+}
+
+namespace {
 v8::CTypeInfo cTypeOf(FastApiType type) {
   switch (type) {
     case FastApiType::Void:

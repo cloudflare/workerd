@@ -541,6 +541,15 @@ pub mod ffi {
             internal_message: &str,
         );
         pub unsafe fn fast_api_terminate_execution(options: *mut FastApiCallbackOptions);
+        /// Opens a `HandleScope` in which JavaScript throws, in `storage`; returns the isolate.
+        pub unsafe fn fast_api_scope_open(
+            options: *mut FastApiCallbackOptions,
+            storage: *mut u8,
+        ) -> *mut Isolate;
+        /// The size of the scopes `fast_api_scope_open` opens.
+        pub fn fast_api_scope_size() -> usize;
+        /// Closes the scopes `fast_api_scope_open` opened.
+        pub unsafe fn fast_api_scope_close(storage: *mut u8);
 
         // Errors
         pub unsafe fn exception_create_from_bytes(

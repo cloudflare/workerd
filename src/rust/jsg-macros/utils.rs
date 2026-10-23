@@ -188,60 +188,88 @@ pub fn elide_named_lifetimes(ty: &syn::Type) -> proc_macro2::TokenStream {
     rewrite(ty.to_token_stream())
 }
 
-/// Types with a `FastApiArg` impl in `jsg/fast_api.rs`.
-const FAST_API_ARG_TYPES: &[&str] = &["bool", "i32", "u32", "Number"];
-/// Types with a `FastApiReturn` impl in `jsg/fast_api.rs`, besides `()`.
-const FAST_API_RETURN_TYPES: &[&str] = &["bool", "Number"];
-
-/// Returns the argument types of `sig` if V8 can call it through a fast callback.
+/// The shape of a `#[jsg_method]` that could have a fast callback.
 ///
-/// Types are matched by name: an alias stays on the slow path, and another type named `Number`
-/// fails to compile.
-pub fn fast_api_signature(sig: &syn::Signature) -> Option<Vec<&syn::Type>> {
-    if sig.asyncness.is_some() || !sig.generics.params.is_empty() || sig.variadic.is_some() {
-        return None;
+pub struct FastShape<'a> {
+    /// Takes a leading `&mut Lock`.
+    pub lock: bool,
+    /// JavaScript argument types.
+    pub args: Vec<&'a syn::Type>,
+}
+
+/// Returns the fast-call shape of `sig`, or why it has none.
+pub fn fast_api_shape(sig: &syn::Signature) -> Result<FastShape<'_>, &'static str> {
+    if sig.asyncness.is_some() {
+        return Err("it is async");
+    }
+    if !sig.generics.params.is_empty() {
+        return Err("it is generic");
+    }
+    if sig.variadic.is_some() {
+        return Err("it is variadic");
     }
     let mut args = Vec::new();
     for input in &sig.inputs {
         match input {
             syn::FnArg::Receiver(receiver) => {
                 if receiver.reference.is_none() || receiver.mutability.is_some() {
-                    return None;
+                    return Err("only methods taking `&self` can have one");
                 }
             }
             syn::FnArg::Typed(pat_type) => {
-                if !is_named_type(&pat_type.ty, FAST_API_ARG_TYPES) {
-                    return None;
+                if matches!(pat_type.ty.as_ref(), syn::Type::ImplTrait(_)) {
+                    return Err("it takes an `impl Trait` argument");
                 }
                 args.push(pat_type.ty.as_ref());
             }
         }
     }
-    let fast_return = match &sig.output {
-        syn::ReturnType::Default => true,
-        syn::ReturnType::Type(_, ty) => match ty.as_ref() {
-            syn::Type::Tuple(tuple) => tuple.elems.is_empty(),
-            ty => is_named_type(ty, FAST_API_RETURN_TYPES),
-        },
-    };
-    fast_return.then_some(args)
+    // As for the slow callback, only a leading `&mut Lock` is the lock.
+    let lock = args.first().is_some_and(|ty| is_lock_ref(ty));
+    if lock {
+        args.remove(0);
+    }
+    Ok(FastShape { lock, args })
 }
 
-/// Whether `ty` is one of `names` written bare, or `jsg::Number`.
-fn is_named_type(ty: &syn::Type, names: &[&str]) -> bool {
-    let syn::Type::Path(type_path) = ty else {
-        return false;
-    };
-    if type_path.qself.is_some() {
-        return false;
+/// Whether `#[jsg_method]` gives a method a fast callback.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FastMode {
+    /// If its types allow one.
+    Auto,
+    /// `#[jsg_method(fast)]`: always, or a compile error.
+    Fast,
+    /// `#[jsg_method(nofast)]`: never.
+    NoFast,
+}
+
+/// Reads `fast` or `nofast` from the arguments of `#[jsg_method]`.
+pub fn fast_mode(attr: proc_macro2::TokenStream) -> Result<FastMode, String> {
+    use syn::Meta;
+    use syn::punctuated::Punctuated;
+
+    let parsed =
+        syn::parse::Parser::parse2(Punctuated::<Meta, syn::Token![,]>::parse_terminated, attr)
+            .map_err(|err| err.to_string())?;
+    let mut mode = FastMode::Auto;
+    for meta in &parsed {
+        let flag = match meta {
+            Meta::Path(path) if path.is_ident("fast") => FastMode::Fast,
+            Meta::Path(path) if path.is_ident("nofast") => FastMode::NoFast,
+            Meta::NameValue(nv) if nv.path.is_ident("name") => continue,
+            other => {
+                return Err(format!(
+                    "unknown `#[jsg_method]` argument `{}`; expected `name = \"...\"`, `fast` or `nofast`",
+                    quote::quote!(#other)
+                ));
+            }
+        };
+        if mode != FastMode::Auto {
+            return Err("`fast` and `nofast` may appear once, and not together".to_owned());
+        }
+        mode = flag;
     }
-    let segments: Vec<_> = type_path.path.segments.iter().collect();
-    let last = match segments.as_slice() {
-        [last] => last,
-        [module, last] if module.ident == "jsg" && last.ident == "Number" => last,
-        _ => return false,
-    };
-    last.arguments.is_none() && names.iter().any(|name| last.ident == name)
+    Ok(mode)
 }
 
 #[cfg(test)]

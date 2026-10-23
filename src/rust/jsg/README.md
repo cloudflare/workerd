@@ -414,7 +414,16 @@ Constants are set on both the constructor and prototype as read-only, non-config
 
 ## Fast API
 
-`#[jsg_method]` adds a V8 Fast API callback for the types in `fast_api.rs`; it must not call into V8.
+`#[jsg_method]` adds a V8 Fast API callback when the arguments implement `FastApiArg` and the return type `FastApiOutput` (see `fast_api.rs`). It may take a leading `&mut Lock` and return `Result`:
+
+```rust
+#[jsg_method]
+pub fn seek(&self, lock: &mut Lock, offset: u32) -> jsg::Result<Number> {
+    // ...
+}
+```
+
+`#[jsg_method(fast)]` makes a missing fast callback a compile error, and `#[jsg_method(nofast)]` opts out. JavaScript can't run in a fast call (it fails as an internal error), so mark a method that may run it `nofast`.
 
 ## FFI Functions with Raw Pointers
 

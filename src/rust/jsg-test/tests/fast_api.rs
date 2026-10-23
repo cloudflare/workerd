@@ -64,6 +64,136 @@ impl FastResource {
     pub fn hypot(a: Number, b: Number) -> Number {
         Number::new(a.value().hypot(b.value()))
     }
+
+    #[jsg_method]
+    pub fn checked_recip(x: Number) -> jsg::Result<Number> {
+        if x.value() == 0.0 {
+            return Err(jsg::Error::new_range_error("zero"));
+        }
+        Ok(Number::new(1.0 / x.value()))
+    }
+
+    #[jsg_method]
+    pub fn checked_sqrt(&self, x: Number) -> Result<Number, jsg::Error> {
+        if x.value() < 0.0 {
+            return Err(jsg::Error::new_range_error("negative"));
+        }
+        Ok(Number::new(x.value().sqrt()))
+    }
+
+    #[jsg_method]
+    pub fn checked_half(&self, x: i32) -> Result<Number, Odd> {
+        if x % 2 != 0 {
+            return Err(Odd);
+        }
+        Ok(Number::new(f64::from(x / 2)))
+    }
+
+    #[jsg_method]
+    pub fn check_even(&self, x: i32) -> jsg::Result<()> {
+        self.checked_half(x).map(|_| ()).map_err(Into::into)
+    }
+
+    #[jsg_method]
+    pub fn add_with_lock(&self, lock: &mut jsg::Lock, a: i32) -> Number {
+        let object = lock.new_object();
+        assert!(object.is_object());
+        Number::new(f64::from(self.base) + f64::from(a))
+    }
+
+    #[jsg_method]
+    pub fn checked_with_lock(&self, lock: &mut jsg::Lock, x: i32) -> jsg::Result<Number> {
+        let _ = lock.new_object();
+        if x < 0 {
+            return Err(jsg::Error::new_type_error("negative"));
+        }
+        Ok(Number::new(f64::from(x)))
+    }
+
+    #[jsg_method]
+    pub fn panic_with_lock(&self, lock: &mut jsg::Lock, code: i32) -> Number {
+        let _ = lock.new_object();
+        assert!(code <= 0, "intentional panic in a fast callback");
+        Number::new(f64::from(code))
+    }
+
+    #[jsg_method]
+    pub fn static_with_lock(lock: &mut jsg::Lock, a: Number) -> jsg::Result<Number> {
+        let _ = lock.new_object();
+        if a.value().is_nan() {
+            return Err(jsg::Error::new_range_error("NaN"));
+        }
+        Ok(Number::new(a.value() * 2.0))
+    }
+}
+
+type Count = u32;
+
+#[jsg_resource]
+struct TypedResource {}
+
+#[jsg_resource]
+impl TypedResource {
+    #[jsg_method]
+    pub fn id_count(&self, x: Count) -> Number {
+        Number::from(x)
+    }
+
+    #[jsg_method]
+    pub fn negate(&self, x: std::primitive::bool) -> std::primitive::bool {
+        !x
+    }
+
+    /// Slow: `String` has no fast type.
+    #[jsg_method]
+    pub fn length(&self, s: String) -> Number {
+        Number::from(u32::try_from(s.len()).unwrap_or(u32::MAX))
+    }
+
+    #[jsg_method(fast)]
+    pub fn double(&self, x: i32) -> Number {
+        Number::new(f64::from(x) * 2.0)
+    }
+
+    #[jsg_method(nofast)]
+    pub fn triple(&self, x: i32) -> Number {
+        Number::new(f64::from(x) * 3.0)
+    }
+}
+
+/// Calls into JavaScript, which a fast call can't.
+#[jsg_resource]
+struct JsCaller {
+    callback: Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Function>>>,
+}
+
+#[jsg_resource]
+impl JsCaller {
+    #[jsg_method]
+    pub fn call_back(&self, lock: &mut jsg::Lock, x: i32) -> jsg::Result<Number> {
+        let callback = self.callback.take();
+        let result = match &callback {
+            Some(callback) => {
+                let x = jsg::ToJS::to_js(Number::from(x), lock);
+                callback.as_local(lock).call::<Number>(
+                    lock,
+                    None::<jsg::v8::Local<jsg::v8::Value>>,
+                    &[x],
+                )
+            }
+            None => Err(jsg::Error::new_type_error("no callback")),
+        };
+        self.callback.set(callback);
+        result
+    }
+}
+
+struct Odd;
+
+impl From<Odd> for jsg::Error {
+    fn from(_: Odd) -> Self {
+        Self::new_range_error("odd")
+    }
 }
 
 /// Defines `hot(...)` with `body`, calls it once with `warmup` so V8 collects feedback, optimizes
@@ -205,6 +335,20 @@ fn fast_and_slow_paths_agree() {
         ("idBool", "true", "0", true),
         ("idBool", "true", "'yes'", true),
         ("idBool", "true", "null", true),
+        ("checkedSqrt", "4", "9", true),
+        ("checkedSqrt", "4", "-1", true),
+        ("checkedSqrt", "4", "'9'", false),
+        ("checkedHalf", "2", "8", true),
+        ("checkedHalf", "2", "7", true),
+        ("checkedHalf", "2", "2 ** 31", true),
+        ("checkEven", "2", "4", true),
+        ("checkEven", "2", "5", true),
+        ("addWithLock", "1", "6", true),
+        ("addWithLock", "1", "1.5", true),
+        ("addWithLock", "1", "'6'", false),
+        ("checkedWithLock", "1", "3", true),
+        ("checkedWithLock", "1", "-3", true),
+        ("checkedWithLock", "1", "2 ** 31", true),
     ];
 
     for (method, warmup, arg, expect_fast) in cases {
@@ -273,26 +417,228 @@ fn wrong_receiver_takes_slow_path_and_throws() {
 
 #[test]
 fn panic_in_fast_callback_is_an_internal_error() {
+    for method in ["panicOn", "panicWithLock"] {
+        let harness = crate::Harness::with_fast_api();
+        harness.run_in_context(|lock, ctx| {
+            set_resource(lock, ctx, 0);
+            let (err, fast_calls) = count_fast_calls(|| {
+                ctx.eval::<Number>(
+                    lock,
+                    &optimized("code", &format!("return r.{method}(code);"), "0", "1"),
+                )
+                .unwrap_err()
+                .unwrap_jsg_err(lock)
+            });
+            assert_ne!(fast_calls, Some(0), "{method}");
+            assert!(
+                err.message.contains("internal error"),
+                "unexpected error message: {:?}",
+                err.message
+            );
+            assert!(
+                !err.message.contains("intentional panic"),
+                "raw panic message must not be exposed to JS, got: {:?}",
+                err.message
+            );
+            Ok(())
+        });
+    }
+}
+
+#[test]
+fn method_with_lock_takes_fast_path() {
+    let harness = crate::Harness::with_fast_api();
+    harness.run_in_context(|lock, ctx| {
+        set_resource(lock, ctx, 100);
+        let (result, fast_calls) = count_fast_calls(|| {
+            ctx.eval::<Number>(lock, &optimized("a", "return r.addWithLock(a);", "1", "7"))
+                .unwrap()
+        });
+        assert!((result.value() - 107.0).abs() < f64::EPSILON);
+        assert_ne!(fast_calls, Some(0));
+        Ok(())
+    });
+}
+
+#[test]
+fn static_method_with_lock_takes_fast_path() {
+    let harness = crate::Harness::with_fast_api();
+    harness.run_in_context(|lock, ctx| {
+        set_resource(lock, ctx, 0);
+        let (result, fast_calls) = count_fast_calls(|| {
+            ctx.eval::<Number>(
+                lock,
+                &optimized("a", "return FastResource.staticWithLock(a);", "1", "21"),
+            )
+            .unwrap()
+        });
+        assert!((result.value() - 42.0).abs() < f64::EPSILON);
+        assert_ne!(fast_calls, Some(0));
+        Ok(())
+    });
+}
+
+/// Each fast call closes its `HandleScope`.
+#[test]
+fn method_with_lock_in_a_loop() {
+    let harness = crate::Harness::with_fast_api();
+    harness.run_in_context(|lock, ctx| {
+        set_resource(lock, ctx, 0);
+        let (result, fast_calls) = count_fast_calls(|| {
+            ctx.eval::<Number>(
+                lock,
+                &optimized(
+                    "n",
+                    "let sum = 0; for (let i = 0; i < n; i++) sum += r.addWithLock(1); return sum;",
+                    "10",
+                    "100000",
+                ),
+            )
+            .unwrap()
+        });
+        assert!((result.value() - 100_000.0).abs() < f64::EPSILON);
+        assert_ne!(fast_calls, Some(0));
+        Ok(())
+    });
+}
+
+#[test]
+fn err_from_fast_callback_is_thrown() {
+    let harness = crate::Harness::with_fast_api();
+    harness.run_in_context(|lock, ctx| {
+        set_resource(lock, ctx, 0);
+        let (err, fast_calls) = count_fast_calls(|| {
+            ctx.eval::<Number>(lock, &optimized("x", "return r.checkedSqrt(x);", "4", "-1"))
+                .unwrap_err()
+                .unwrap_jsg_err(lock)
+        });
+        assert_ne!(fast_calls, Some(0));
+        assert_eq!(err.name, ExceptionType::RangeError);
+        assert_eq!(err.message, "negative");
+        Ok(())
+    });
+}
+
+#[test]
+fn static_fallible_fast_callback() {
+    let harness = crate::Harness::with_fast_api();
+    harness.run_in_context(|lock, ctx| {
+        set_resource(lock, ctx, 0);
+        let source = |arg| optimized("x", "return FastResource.checkedRecip(x);", "1", arg);
+        let (result, fast_calls) =
+            count_fast_calls(|| ctx.eval::<Number>(lock, &source("4")).unwrap());
+        assert!((result.value() - 0.25).abs() < f64::EPSILON);
+        assert_ne!(fast_calls, Some(0));
+
+        let (err, fast_calls) = count_fast_calls(|| {
+            ctx.eval::<Number>(lock, &source("0"))
+                .unwrap_err()
+                .unwrap_jsg_err(lock)
+        });
+        assert_ne!(fast_calls, Some(0));
+        assert_eq!(err.name, ExceptionType::RangeError);
+        assert_eq!(err.message, "zero");
+        Ok(())
+    });
+}
+
+#[test]
+fn err_from_static_fast_callback_with_lock_is_thrown() {
     let harness = crate::Harness::with_fast_api();
     harness.run_in_context(|lock, ctx| {
         set_resource(lock, ctx, 0);
         let (err, fast_calls) = count_fast_calls(|| {
             ctx.eval::<Number>(
                 lock,
-                &optimized("code", "return r.panicOn(code);", "0", "1"),
+                &optimized("a", "return FastResource.staticWithLock(a);", "1", "NaN"),
             )
             .unwrap_err()
             .unwrap_jsg_err(lock)
         });
         assert_ne!(fast_calls, Some(0));
+        assert_eq!(err.name, ExceptionType::RangeError);
+        assert_eq!(err.message, "NaN");
+        Ok(())
+    });
+}
+
+#[test]
+fn err_from_fast_callback_can_be_caught() {
+    let harness = crate::Harness::with_fast_api();
+    harness.run_in_context(|lock, ctx| {
+        set_resource(lock, ctx, 0);
+        let (result, fast_calls) = count_fast_calls(|| {
+            ctx.eval::<String>(
+                lock,
+                &optimized(
+                    "x",
+                    "try { return String(r.checkedWithLock(x)); } catch (e) { return e.name; }",
+                    "1",
+                    "-1",
+                ),
+            )
+            .unwrap()
+        });
+        assert_ne!(fast_calls, Some(0));
+        assert_eq!(result, "TypeError");
+        Ok(())
+    });
+}
+
+/// Calls `t.{method}` optimized and checks the result and, if counted, whether it was fast.
+fn assert_typed(method: &str, warmup: &str, arg: &str, expected: &str, fast: bool) {
+    let harness = crate::Harness::with_fast_api();
+    harness.run_in_context(|lock, ctx| {
+        ctx.set_global(lock, "t", jsg::Rc::new(TypedResource {}));
+        let source = optimized("x", &format!("return String(t.{method}(x));"), warmup, arg);
+        let (result, fast_calls) = count_fast_calls(|| ctx.eval::<String>(lock, &source).unwrap());
+        assert_eq!(result, expected, "{method}");
+        if let Some(fast_calls) = fast_calls {
+            assert_eq!(fast_calls > 0, fast, "{method}");
+        }
+        Ok(())
+    });
+}
+
+#[test]
+fn types_are_resolved_not_matched_by_name() {
+    assert_typed("idCount", "1", "7", "7", true);
+    assert_typed("negate", "true", "false", "true", true);
+    assert_typed("length", "'a'", "'abc'", "3", false);
+}
+
+#[test]
+fn fast_and_nofast_attributes() {
+    assert_typed("double", "1", "21", "42", true);
+    assert_typed("triple", "1", "3", "9", false);
+}
+
+/// Running JavaScript from a fast call is an internal error and doesn't call it.
+#[test]
+fn fast_callback_with_lock_cannot_run_javascript() {
+    let harness = crate::Harness::with_fast_api();
+    harness.run_in_context(|lock, ctx| {
+        let function = ctx
+            .eval_raw(
+                lock,
+                "globalThis.calls = 0; (x) => { calls++; return x * 2; }",
+            )
+            .unwrap();
+        let function = function.try_as::<jsg::v8::Function>().unwrap();
+        let caller = jsg::Rc::new(JsCaller {
+            callback: Cell::new(Some(function.to_traced_global(lock))),
+        });
+        ctx.set_global(lock, "c", caller);
+
+        let (err, fast_calls) = count_fast_calls(|| {
+            ctx.eval::<Number>(lock, &optimized("x", "return c.callBack(x);", "1", "2"))
+                .unwrap_err()
+                .unwrap_jsg_err(lock)
+        });
+        assert_ne!(fast_calls, Some(0));
         assert!(
             err.message.contains("internal error"),
             "unexpected error message: {:?}",
-            err.message
-        );
-        assert!(
-            !err.message.contains("intentional panic"),
-            "raw panic message must not be exposed to JS, got: {:?}",
             err.message
         );
         Ok(())
