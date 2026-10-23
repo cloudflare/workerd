@@ -451,6 +451,32 @@ class IsolateBase {
     return false;
   }
 
+  // Pins `data` into the snapshot of `context` and returns its index, which the restored context
+  // later passes to extractOnceFromSnapshot(). Indices are assigned in call order.
+  // Only valid while preparing a snapshot; the caller is inside a handle scope.
+  size_t pinIntoSnapshot(v8::Local<v8::Context> context, v8::Local<v8::Data> data) {
+    return getSnapshotCreator()->AddData(context, data);
+  }
+
+  // Isolate-level counterpart: pins `data` into the isolate's own snapshot data rather than a
+  // context's, so the restored isolate can read it back with
+  // v8::Isolate::GetDataFromSnapshotOnce() before any context exists.
+  // Same preconditions as above.
+  size_t pinIntoIsolateSnapshot(v8::Local<v8::Data> data) {
+    return getSnapshotCreator()->AddData(data);
+  }
+
+  // Returns the object pinned into the snapshot of `context` under `index` by pinIntoSnapshot().
+  // V8 hands each pinned value out exactly once; asking for the same index again, or for an index
+  // nothing was pinned under, is a fatal error. Only valid when starting from a snapshot; the
+  // caller is inside a handle scope.
+  v8::Local<v8::Object> extractOnceFromSnapshot(v8::Local<v8::Context> context, size_t index) {
+    v8::Local<v8::Object> value;
+    KJ_REQUIRE(context->GetDataFromSnapshotOnce<v8::Object>(index).ToLocal(&value),
+        "no object pinned into the snapshot under this index", index);
+    return value;
+  }
+
   SnapshotArtifact& mutableSnapshotArtifact() {
     return *KJ_REQUIRE_NONNULL(snapshotConfig).get<MutableSnapshot>().artifact;
   }
@@ -463,14 +489,26 @@ class IsolateBase {
     return kj::mv(KJ_REQUIRE_NONNULL(snapshotConfig).get<MutableSnapshot>().artifact);
   }
 
-  // Registers the context the snapshot is built around. It takes a v8::Local, so the caller is inside a handle scope.
-  void setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext);
+  // Registers the context the snapshot is built around. It takes a v8::Local, so the caller is
+  // inside a handle scope. `badTagFieldsCount` and `wrappablesMetadata` are the data of the
+  // serializer callbacks; both must stay alive until createSnapshotBlob() has checked them.
+  void setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext,
+      uint32_t* badTagFieldsCount,
+      WrappablesSerializeMetadata* wrappablesMetadata);
 
   // Serializes the isolate into the SnapshotArtifact passed at isolate creation.
+  // `badTagFieldsCount` and `wrappablesMetadata` are the objects given to
+  // setSnapshotDefaultContext(); the metadata is filled with the live wrappers' clones right
+  // before CreateBlob() and both are checked afterwards.
   // `extraTemplateHandles` carries template handles drained from embedder-side caches that this
   // class cannot enumerate itself.
   void createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
-      kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles);
+      kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles,
+      const uint32_t* badTagFieldsCount,
+      WrappablesSerializeMetadata* wrappablesMetadata);
+
+  void prepareWrappableDeserializeMetadata(WrappableDeserializeMetadata& metadata);
+  void finishWrappableDeserializeMetadata(WrappableDeserializeMetadata& metadata);
 
   void registerExternalReference(intptr_t addr) {
     if (!isPreparingSnapshot()) return;
@@ -497,6 +535,20 @@ class IsolateBase {
  private:
   template <typename TypeWrapper>
   friend class Isolate;
+
+  v8::SnapshotCreator* getSnapshotCreator() {
+    return KJ_ASSERT_NONNULL(snapshotCreator).get();
+  }
+
+  // Bakes every materialized JSG_RESOURCE-type constructor template
+  // into the snapshot and records one index per slot, in enumeration order, in
+  // SnapshotArtifact, so the loading isolate pairs slots by position alone.
+  // Resets each slot in the same pass.
+  void bakeConstructorTemplatesIntoSnapshot();
+
+  // Restore previously baked (by bakeConstructorTemplatesIntoSnapshot)
+  // constructor templates from the snapshot artifact.
+  void restoreConstructorTemplatesFromSnapshot();
 
   static void buildEmbedderGraph(v8::Isolate* isolate, v8::EmbedderGraph* graph, void* data);
 
@@ -867,6 +919,7 @@ class Isolate: public IsolateBase {
     registerTypeHandlers();
     if (instantiateTypeWrapper) {
       instantiateDefaultWrapper(kj::fwd<MetaConfiguration>(configuration));
+      restoreConstructorTemplatesFromSnapshot();
     }
   }
 
@@ -889,6 +942,7 @@ class Isolate: public IsolateBase {
     registerTypeHandlers();
     if (instantiateTypeWrapper) {
       instantiateDefaultWrapper(kj::fwd<MetaConfiguration>(configuration));
+      restoreConstructorTemplatesFromSnapshot();
     }
   }
 
@@ -1120,10 +1174,26 @@ class Isolate: public IsolateBase {
       // TODO(soon): Requiring move semantics for the global object is awkward. This should instead
       //   allocate the object (forwarding arguments to the constructor) and return something like
       //   a Ref.
+      uint32_t badTagFieldsCount = 0;
+      WrappableDeserializeMetadata metadata;
+      if (jsgIsolate.isStartingFromSnapshot()) {
+        jsgIsolate.prepareWrappableDeserializeMetadata(metadata);
+        options.internalFieldsDeserializer =
+            v8::DeserializeInternalFieldsCallback(&deserializeInternalFields, &badTagFieldsCount);
+        options.apiWrapperDeserializer =
+            v8::DeserializeAPIWrapperCallback(&deserializeApiWrapperCallback, &metadata);
+      }
       auto context = wrapper->newContext(*this, options, jsgIsolate.getObserver(),
           static_cast<T*>(nullptr), kj::fwd<Args>(args)...);
       jsg::setAlignedPointerInEmbedderData(
           context.getHandle(v8Isolate), jsg::ContextPointerSlot::EXTENDED_CONTEXT_WRAPPER, wrapper);
+      KJ_REQUIRE(badTagFieldsCount == 0,
+          "START_FROM_SNAPSHOT: internal fields in the deserialized context are not workerd "
+          "wrapper markers",
+          badTagFieldsCount);
+      if (jsgIsolate.isStartingFromSnapshot()) {
+        jsgIsolate.finishWrappableDeserializeMetadata(metadata);
+      }
       return context;
     }
 

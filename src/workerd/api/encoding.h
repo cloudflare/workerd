@@ -151,6 +151,11 @@ class TextEncoder final: public jsg::Object {
     return "utf-8";
   }
 
+  // TextEncoder is stateless, so a fresh instance is indistinguishable from the original.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<TextEncoder>());
+  }
+
   JSG_RESOURCE_TYPE(TextEncoder, CompatibilityFlags::Reader flags) {
     JSG_METHOD(encode);
     JSG_METHOD(encodeInto);

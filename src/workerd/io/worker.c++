@@ -2272,6 +2272,15 @@ Worker::Worker(kj::Own<const Script> scriptParam,
     currentSpan = maybeMakeSpan("lw:new_context"_kjc);
 
     jsg::JsContext<api::ServiceWorkerGlobalScope>* jsContext = nullptr;
+
+    // Data of the snapshot serializer callbacks registered with the zygote context. Both outlive
+    // the handle scope below because createSnapshotBlob() checks them after that scope closes.
+    // Unused unless the isolate is preparing a snapshot.
+    // * The counter serializeInternalFields() writes through while V8 runs CreateBlob().
+    uint32_t snapshotBadTagFieldsCount = 0;
+    // * The API-wrapper serializer's metadata.
+    jsg::WrappablesSerializeMetadata wrappablesMetadata;
+
     // Create a stack-allocated handle scope.
     lock.withinHandleScope([&] {
       bool freshContext = false;
@@ -2295,18 +2304,13 @@ Worker::Worker(kj::Own<const Script> scriptParam,
 
       if (auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
           isolateBase.isPreparingSnapshot()) {
-        isolateBase.setSnapshotDefaultContext(context);
+        isolateBase.setSnapshotDefaultContext(
+            context, &snapshotBadTagFieldsCount, &wrappablesMetadata);
       }
 
-      // The zygote context is never disposed through disposeContext() (see the snapshot step
-      // after this handle scope), so release the per-isolate bootstrap state on the way out,
-      // while the context handle is still valid. Its Globals (require(), the
-      // compatFlags/autogates/utils objects, primordials, the require() cache, the
-      // context-extension template) are not Wrappables and would otherwise be reported as
-      // unserialized by CreateBlob. A worker started from the snapshot re-runs the bootstrap.
       KJ_DEFER({
         if (lock.isPreparingSnapshot()) {
-          cleanupPerIsolateBootstrap(lock, context);
+          stashPerIsolateBootstrapForSnapshot(lock, context);
         }
       });
 
@@ -2349,10 +2353,13 @@ Worker::Worker(kj::Own<const Script> scriptParam,
           try {
             currentSpan = maybeMakeSpan("lw:globals_instantiation"_kjc);
 
+            auto& isolateBase = jsg::IsolateBase::from(lock.v8Isolate);
             v8::Local<v8::Object> bindingsScope;
             if (script->isModular()) {
               // Use `env` variable.
-              bindingsScope = v8::Object::New(lock.v8Isolate);
+              bindingsScope = isolateBase.isStartingFromSnapshot()
+                  ? isolateBase.extractOnceFromSnapshot(context, jsg::BINDINGS_SCOPE_SNAPSHOT_INDEX)
+                  : v8::Object::New(lock.v8Isolate);
               if (!FeatureFlags::get(js).getDisableImportableEnv()) {
                 lock.setWorkerEnv(lock.v8Ref(bindingsScope));
               }
@@ -2405,8 +2412,16 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                 lock.runMicrotasks();
               }
               KJ_CASE_ONEOF(mainModule, kj::Path) {
-                KJ_IF_SOME(ns,
-                    tryResolveMainModule(lock, mainModule, *jsContext, *script, limitErrorOrTime)) {
+                if (lock.isPreparingSnapshot() && script->isModular()) {
+                  auto idx = isolateBase.pinIntoSnapshot(context, bindingsScope);
+                  KJ_REQUIRE(idx == jsg::BINDINGS_SCOPE_SNAPSHOT_INDEX,
+                      "the bindings scope was pinned at an unexpected index", idx);
+                }
+                kj::Maybe<jsg::JsObject> maybeNs = lock.isStartingFromSnapshot()
+                    ? jsg::JsObject(isolateBase.extractOnceFromSnapshot(
+                          context, jsg::MAIN_MODULE_NAMESPACE_SNAPSHOT_INDEX))
+                    : tryResolveMainModule(lock, mainModule, *jsContext, *script, limitErrorOrTime);
+                KJ_IF_SOME(ns, maybeNs) {
                   // To avoid resetting Worker-level C++ handles before snapshotting, we simply do not
                   // create them eagerly. This is safe because the top-level code has already executed,
                   // and the zygote worker will not handle any requests.
@@ -2416,6 +2431,11 @@ Worker::Worker(kj::Own<const Script> scriptParam,
                   //     impl->ctxExports == IsolateBase::workerExportsObj.
                   // A real Worker repopulates these handles in START_FROM_SNAPSHOT mode.
                   if (lock.isPreparingSnapshot()) {
+                    if (script->isModular()) {
+                      auto idx = isolateBase.pinIntoSnapshot(context, v8::Local<v8::Object>(ns));
+                      KJ_REQUIRE(idx == jsg::MAIN_MODULE_NAMESPACE_SNAPSHOT_INDEX,
+                          "the main module namespace was pinned at an unexpected index", idx);
+                    }
                     break;
                   }
                   impl->env = lock.v8Ref(bindingsScope.As<v8::Value>());
@@ -2533,7 +2553,8 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       (*jsContext)->clear();
       const_cast<Script&>(*script).impl->moduleContext = kj::none;
       impl->context = kj::none;
-      isolateBase.createSnapshotBlob(kj::mv(contextGlobal), kj::mv(rustTemplateHandles));
+      isolateBase.createSnapshotBlob(kj::mv(contextGlobal), kj::mv(rustTemplateHandles),
+          &snapshotBadTagFieldsCount, &wrappablesMetadata);
     }
   });
 }

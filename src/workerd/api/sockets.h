@@ -496,6 +496,11 @@ class SocketsModule final: public jsg::Object {
   SocketsModule() = default;
   SocketsModule(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<SocketsModule>());
+  }
+
   jsg::Ref<Socket> connect(
       jsg::Lock& js, AnySocketAddress address, jsg::Optional<SocketOptions> options);
 

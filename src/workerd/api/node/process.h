@@ -15,6 +15,11 @@ class ProcessModule final: public jsg::Object {
   ProcessModule() = default;
   ProcessModule(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<ProcessModule>());
+  }
+
   jsg::JsValue getBuiltinModule(jsg::Lock& js, kj::String specifier);
 
 // This process.platform implementation is always gated behind the

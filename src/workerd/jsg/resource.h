@@ -1367,6 +1367,9 @@ struct ResourceTypeBuilder {
         typeWrapper.template getTemplate<isContext>(isolate, static_cast<Type*>(nullptr)));
     // Propagate wildcard proxy to children. It's a data property, so it should be propagated, but v8 only handles normal data properties.
     auto& parentWrapper = static_cast<ResourceWrapper<TypeWrapper, Type>&>(typeWrapper);
+    // If the parent's template was restored from a startup snapshot, its registerMembers never
+    // ran and wildcardHandler is still unset so run it now.
+    parentWrapper.ensureMembersRegistered(isolate);
     if (parentWrapper.wildcardHandler != kj::none) {
       auto& selfWrapper = static_cast<ResourceWrapper<TypeWrapper, Self>&>(typeWrapper);
       KJ_ASSERT(
@@ -1875,6 +1878,13 @@ struct NewContextOptions {
   // Used by the per-isolate bootstrap, which needs to capture these constructors
   // (runPerIsolateBootstrap performs the deferred deletion).
   bool deferWeakRefDeletion = false;
+
+  // Callback V8 invokes to deserialize the internal fields of a JS object.
+  v8::DeserializeInternalFieldsCallback internalFieldsDeserializer;
+
+  // Same as the internal fields callback, but for objects that reference
+  // cppgc-managed objects.
+  v8::DeserializeAPIWrapperCallback apiWrapperDeserializer{};
 };
 
 void deleteWeakRefGlobals(v8::Isolate* isolate, v8::Local<v8::Context> context);
@@ -2002,7 +2012,10 @@ class ResourceWrapper {
     // a new JavaScript context.
     auto isolate = js.v8Isolate;
     auto tmpl = getTemplate<true>(isolate, nullptr)->InstanceTemplate();
-    v8::Local<v8::Context> context = v8::Context::New(isolate, nullptr, tmpl);
+    v8::Local<v8::Context> context = v8::Context::New(isolate, /*extensions=*/nullptr, tmpl,
+        /*global_object=*/v8::MaybeLocal<v8::Value>(), options.internalFieldsDeserializer,
+        /*microtask_queue=*/nullptr, v8::DeserializeContextDataCallback(),
+        options.apiWrapperDeserializer);
     auto global = context->Global();
 
     auto ptr = js.alloc<T>(kj::fwd<Args>(args)...);
@@ -2178,6 +2191,7 @@ class ResourceWrapper {
       } else {
         T::template registerMembers<decltype(builder), T>(builder);
       }
+      membersRegistered = true;
 
       KJ_IF_SOME(handler, wildcardHandler) {
         instance->SetHandler(handler);
@@ -2193,6 +2207,19 @@ class ResourceWrapper {
 
   kj::Maybe<v8::NamedPropertyHandlerConfiguration> wildcardHandler;
 
+  // Ensure T's registerMembers() has run in this isolate, so that side effects recorded on the
+  // wrapper itself.
+  void ensureMembersRegistered(v8::Isolate* isolate) {
+    if (membersRegistered) return;
+    if (memoizedConstructor.IsEmpty()) {
+      getTemplate(isolate, static_cast<T*>(nullptr));
+      return;
+    }
+    v8::Global<v8::FunctionTemplate> restored = kj::mv(memoizedConstructor);
+    getTemplate(isolate, static_cast<T*>(nullptr));
+    memoizedConstructor = kj::mv(restored);
+  }
+
   // Enumerate this type's two constructor-template slots (empty or not) for startup-snapshot
   // handling. Slots are visited in a fixed compile-time order (parameter-pack order of the
   // TypeWrapper, memoizedConstructor then contextConstructor per type), so the
@@ -2207,6 +2234,10 @@ class ResourceWrapper {
   Configuration configuration;
   v8::Global<v8::FunctionTemplate> memoizedConstructor;
   v8::Global<v8::FunctionTemplate> contextConstructor;
+
+  // Whether registerMembers() has run in this isolate (getTemplate's build branch or
+  // ensureMembersRegistered()). False after a snapshot restore repopulates the slots directly.
+  bool membersRegistered = false;
 
   void setupJavascript(jsg::Lock& js) {
     JsSetup<TypeWrapper, T> setup(js, js.v8Context());

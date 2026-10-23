@@ -106,6 +106,13 @@ public:
   // Treat as private -- needs to be public for js.alloc<T>()...
   explicit URL(kj::Url&& u);
 
+  // Deep copy for workers started from a snapshot: the inner kj::Url is plain C++ data.
+  // `searchParams` is a back-reference into the same inner URL and is deliberately dropped;
+  // it is lazily recreated on first access, same as URL::snapshotClone in url-standard.h.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<URL>(url->clone()));
+  }
+
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
     size_t size = 0;
     size += url->scheme.size();

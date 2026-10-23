@@ -174,6 +174,21 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   // Enable the WebAssembly compact import section encoding.
   v8::V8::SetFlagsFromString("--wasm-compact-imports");
 
+#ifndef V8_COMPRESS_POINTERS_IN_MULTIPLE_CAGES
+  // Custom startup snapshots for the shared cage mode:
+  // Keep the read-only heap sealed for serializer-enabled isolates.
+  // Without multiple pointer-compression cages every isolate lives in the default IsolateGroup
+  // and so shares one read-only heap. By default V8 leaves the read-only
+  // space writable for a SnapshotCreator isolate and CreateBlob() promotes its
+  // AccessorInfo/InterceptorInfo objects (JSG getter/setter/interceptor callback addresses) into
+  // that shared space. The next zygote in the same process then has to serialize that same
+  // read-only space and encode those foreign callback addresses against its own
+  // external_references table, which only holds the callbacks it registered itself ->
+  // "Unknown external reference". With multiple cages each zygote owns its group and read-only
+  // heap, and whatever it promotes travels inside its own blob.
+  v8::V8::SetFlagsFromString("--no-extensible-ro-snapshot");
+#endif
+
 #ifdef __APPLE__
   // On macOS arm64, we find that V8 can be collecting pages that contain compiled code when
   // handling requests in short succession. There are some specific differences for macOS arm64
@@ -544,16 +559,40 @@ IsolateBase::IsolateBase(V8System& system,
   });
 }
 
-void IsolateBase::setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext) {
+void IsolateBase::setSnapshotDefaultContext(v8::Local<v8::Context> defaultContext,
+    uint32_t* badTagFieldsCount,
+    WrappablesSerializeMetadata* wrappablesMetadata) {
   KJ_REQUIRE(isPreparingSnapshot());
-  KJ_ASSERT_NONNULL(snapshotCreator)->SetDefaultContext(defaultContext);
+  *badTagFieldsCount = 0;
+  KJ_ASSERT_NONNULL(snapshotCreator)
+      ->SetDefaultContext(defaultContext,
+          v8::SerializeInternalFieldsCallback(&serializeInternalFields, badTagFieldsCount),
+          v8::SerializeContextDataCallback(),
+          v8::SerializeAPIWrapperCallback(&serializeApiWrapperCallback, wrappablesMetadata));
+}
+
+void IsolateBase::bakeConstructorTemplatesIntoSnapshot() {
+  auto& artifact = mutableSnapshotArtifact();
+  v8::HandleScope scope(ptr);
+  iterateResourceTypeTemplates([&](v8::Global<v8::FunctionTemplate>& slot) {
+    if (slot.IsEmpty()) {
+      artifact.constructorTemplateIndices.add(SnapshotArtifact::kNoConstructorTemplate);
+      return;
+    }
+    artifact.constructorTemplateIndices.add(pinIntoIsolateSnapshot(slot.Get(ptr)));
+    slot.Reset();
+  });
 }
 
 void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandle,
-    kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles) {
+    kj::Vector<v8::Global<v8::FunctionTemplate>> extraTemplateHandles,
+    const uint32_t* badTagFieldsCount,
+    WrappablesSerializeMetadata* wrappablesMetadata) {
   KJ_REQUIRE(isPreparingSnapshot());
   auto& artifact = mutableSnapshotArtifact();
   KJ_DASSERT(artifact.blob.data == nullptr, "snapshot artifact already holds a blob");
+
+  wrappablesMetadata->cloneAndRecordLiveWrappables(heapTracer, artifact);
 
   // We need to reset all C++ handles that point to JavaScript objects before creating
   // the snapshot blob, because V8 does not know how to serialize them.
@@ -591,9 +630,9 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
     h.Reset();
   }
 
-  // 3. Reset resource-type constructor templates: the memoized and context slot per
-  // JSG_RESOURCE type, owned by the TypeWrapper machinery.
-  iterateResourceTypeTemplates([&](v8::Global<v8::FunctionTemplate>& h) { h.Reset(); });
+  // 3. Bake every materialized resource-type constructor template into the snapshot, resetting
+  // each slot in the same pass.
+  bakeConstructorTemplatesIntoSnapshot();
 
   // 4. Reset struct-type handles: dictionary template + field-name handles per JSG_STRUCT.
   visitStructTypeHandles([](v8::Global<v8::Name>& h) { h.Reset(); },
@@ -604,8 +643,53 @@ void IsolateBase::createSnapshotBlob(v8::Global<v8::Context> defaultContextHandl
   // consumes it.
   defaultContextHandle.Reset();
 
-  artifact.blob = KJ_ASSERT_NONNULL(snapshotCreator)
-                      ->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
+  artifact.blob =
+      getSnapshotCreator()->CreateBlob(v8::SnapshotCreator::FunctionCodeHandling::kClear);
+
+  KJ_REQUIRE(*badTagFieldsCount == 0,
+      "PREPARE_SNAPSHOT: aligned-pointer internal fields reachable from the context are not "
+      "workerd wrapper markers",
+      *badTagFieldsCount);
+
+  wrappablesMetadata->verify(artifact);
+}
+
+void IsolateBase::restoreConstructorTemplatesFromSnapshot() {
+  if (!isStartingFromSnapshot()) return;
+  auto& indices = finalizedSnapshotArtifact().constructorTemplateIndices;
+  if (indices.size() == 0) return;
+  jsg::runInV8Stack([&](jsg::V8StackScope&) {
+    v8::Isolate::Scope isolateScope(ptr);
+    v8::HandleScope handleScope(ptr);
+    // Slots are enumerated in the same fixed order as at PREPARE_SNAPSHOT (same binary, same
+    // TypeWrapper), so each slot pairs with the next recorded index by position.
+    size_t cursor = 0;
+    iterateResourceTypeTemplates([&](v8::Global<v8::FunctionTemplate>& slot) {
+      KJ_REQUIRE(cursor < indices.size(),
+          "START_FROM_SNAPSHOT: more template slots than recorded at PREPARE_SNAPSHOT");
+      uint32_t snapshotIndex = indices[cursor++];
+      if (snapshotIndex == SnapshotArtifact::kNoConstructorTemplate) return;
+      v8::Local<v8::FunctionTemplate> functionTemplate;
+      KJ_REQUIRE(ptr->GetDataFromSnapshotOnce<v8::FunctionTemplate>(snapshotIndex)
+                     .ToLocal(&functionTemplate),
+          "START_FROM_SNAPSHOT: constructor template missing from snapshot", snapshotIndex,
+          cursor - 1);
+      slot.Reset(ptr, functionTemplate);
+    });
+    KJ_REQUIRE(cursor == indices.size(),
+        "START_FROM_SNAPSHOT: template slot enumeration drifted vs PREPARE_SNAPSHOT", cursor,
+        indices.size());
+  });
+}
+
+void IsolateBase::prepareWrappableDeserializeMetadata(WrappableDeserializeMetadata& metadata) {
+  KJ_REQUIRE(isStartingFromSnapshot());
+  metadata.preallocateCppgcShims(ptr, heapTracer, finalizedSnapshotArtifact());
+}
+
+void IsolateBase::finishWrappableDeserializeMetadata(WrappableDeserializeMetadata& metadata) {
+  KJ_REQUIRE(isStartingFromSnapshot());
+  metadata.releaseSlotsWithChecks();
 }
 
 IsolateBase::~IsolateBase() noexcept(false) {

@@ -202,6 +202,11 @@ class CryptoImpl final: public jsg::Object {
   CryptoImpl() = default;
   CryptoImpl(jsg::Lock&, const jsg::Url&) {}
 
+  // Stateless module object, safe to recreate for a worker started from a snapshot.
+  kj::Maybe<kj::Own<jsg::Wrappable>> snapshotClone() const override {
+    return ownAsWrappable(kj::refcounted<CryptoImpl>());
+  }
+
   kj::OneOf<kj::String, jsg::JsArrayBuffer, SubtleCrypto::JsonWebKey> exportKey(
       jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Optional<KeyExportOptions> options);
 
