@@ -1134,6 +1134,18 @@ Local function_template_get_function(Isolate* isolate, const Global& tmpl) {
   return to_ffi(kj::mv(function));
 }
 
+// Mirrors registerNestedType() (resource.h): the nested type's constructor is a property of the
+// prototype, so that it is inherited along with the prototype.
+void function_template_set_nested_type(
+    Isolate* isolate, const Global& tmpl, ::rust::Str name, const Global& nested) {
+  v8::HandleScope scope(isolate);
+  auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(
+      isolate, global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl));
+  auto local_nested = v8::Local<v8::FunctionTemplate>::New(
+      isolate, global_as_ref_from_ffi<v8::FunctionTemplate>(nested));
+  local_tmpl->PrototypeTemplate()->Set(makeInternedStr(isolate, name), local_nested);
+}
+
 // Realm
 Realm* realm_from_isolate(Isolate* isolate) {
   auto* realm =

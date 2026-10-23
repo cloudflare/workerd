@@ -426,12 +426,18 @@ fn callback_constructor(kind: Callback) -> (proc_macro2::TokenStream, proc_macro
 /// `#[jsg_method]`, `#[jsg_property]`, `#[jsg_inspect_property]`,
 /// `#[jsg_constructor]`, and `#[jsg_static_constant]` item.
 ///
+/// Use `#[jsg_resource(nested_types(Foo, Name = Bar))]` on the impl block to
+/// expose other resource types' constructors on the prototype, like C++ JSG's
+/// `JSG_NESTED_TYPE(Foo)` and `JSG_NESTED_TYPE_NAMED(Bar, Name)`. A nested type
+/// without a name is named after its JavaScript class name. See
+/// `src/rust/jsg/README.md` for how nested types behave.
+///
 /// Use `#[jsg_resource(name = "JSName")]` on the struct to override the default
 /// JavaScript class name.
 #[proc_macro_attribute]
 pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
     if let Ok(impl_block) = syn::parse::<ItemImpl>(item.clone()) {
-        return generate_resource_impl(&impl_block);
+        return generate_resource_impl(attr, &impl_block);
     }
     let input = parse_macro_input!(item as DeriveInput);
     generate_resource_struct(attr, &input)

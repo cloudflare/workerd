@@ -7,7 +7,7 @@
 //! - On a **struct**: emits `jsg::Type`, `jsg::ToJS`, `jsg::FromJS`,
 //!   `jsg::Traced`, and `jsg::GarbageCollected` implementations.
 //! - On an **impl block**: emits the `jsg::Resource` trait with method, static
-//!   method, static constant, and constructor registrations.
+//!   method, static constant, constructor and nested type registrations.
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -36,6 +36,10 @@ pub enum PropertyKind {
 
 /// Entry point called from `lib.rs` for `#[jsg_resource]` on a struct.
 pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> TokenStream {
+    if let Some(err) = reject_nested_types_on_struct(attr.clone().into()) {
+        return err.to_compile_error().into();
+    }
+
     // Check for `#[jsg_resource(custom_trace)]` before consuming `attr`.
     let custom_trace = has_custom_trace_flag(&attr);
 
@@ -208,8 +212,118 @@ fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<proc_macro2::Tok
         .collect()
 }
 
+/// Returns an error if the arguments of `#[jsg_resource]` on a struct include
+/// `nested_types(...)`, which belongs on the impl block.
+fn reject_nested_types_on_struct(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
+    use syn::punctuated::Punctuated;
+
+    let metas: Punctuated<syn::Meta, syn::Token![,]> =
+        syn::parse::Parser::parse2(Punctuated::parse_terminated, attr).ok()?;
+    metas
+        .iter()
+        .find(|meta| meta.path().is_ident("nested_types"))
+        .map(|meta| {
+            syn::Error::new_spanned(
+                meta.path(),
+                "`nested_types(...)` belongs on the #[jsg_resource] impl block, not the struct",
+            )
+        })
+}
+
+/// One entry of `#[jsg_resource(nested_types(...))]`: `Type` or `Name = Type`.
+struct NestedTypeArg {
+    name: Option<syn::Ident>,
+    ty: syn::Path,
+}
+
+impl syn::parse::Parse for NestedTypeArg {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        if input.peek(syn::Ident) && input.peek2(syn::Token![=]) {
+            let name = input.parse()?;
+            input.parse::<syn::Token![=]>()?;
+            Ok(Self {
+                name: Some(name),
+                ty: input.parse()?,
+            })
+        } else {
+            Ok(Self {
+                name: None,
+                ty: input.parse()?,
+            })
+        }
+    }
+}
+
+/// Parses the arguments of `#[jsg_resource]` on an impl block, which may only
+/// be `nested_types(...)`, and returns the nested types they list.
+///
+/// A type listed twice without a name, or a name given twice, is an error.
+/// Nested types without a name are named after their class names, which are
+/// only known when the macro's output is compiled, so such a nested type can
+/// still clash with another nested type or member.
+fn parse_nested_types(attr: proc_macro2::TokenStream) -> syn::Result<Vec<NestedTypeArg>> {
+    use syn::ext::IdentExt;
+    use syn::punctuated::Punctuated;
+
+    const EXPECTED: &str = "expected `nested_types(...)` on a #[jsg_resource] impl block \
+                            (`name` and `custom_trace` belong on the struct)";
+
+    let metas: Punctuated<syn::Meta, syn::Token![,]> =
+        syn::parse::Parser::parse2(Punctuated::parse_terminated, attr)?;
+    let mut nested_types = Vec::<NestedTypeArg>::new();
+    for meta in metas {
+        let syn::Meta::List(list) = &meta else {
+            return Err(syn::Error::new_spanned(meta, EXPECTED));
+        };
+        if !list.path.is_ident("nested_types") {
+            return Err(syn::Error::new_spanned(&list.path, EXPECTED));
+        }
+        let args =
+            list.parse_args_with(Punctuated::<NestedTypeArg, syn::Token![,]>::parse_terminated)?;
+        for arg in args {
+            let duplicate = nested_types
+                .iter()
+                .any(|other| match (&arg.name, &other.name) {
+                    (Some(name), Some(other)) => name.unraw() == other.unraw(),
+                    (None, None) => {
+                        let (ty, other) = (&arg.ty, &other.ty);
+                        quote! { #ty }.to_string() == quote! { #other }.to_string()
+                    }
+                    _ => false,
+                });
+            if duplicate {
+                return Err(match &arg.name {
+                    Some(name) => syn::Error::new_spanned(name, "duplicate nested type name"),
+                    None => syn::Error::new_spanned(&arg.ty, "duplicate nested type"),
+                });
+            }
+            nested_types.push(arg);
+        }
+    }
+    Ok(nested_types)
+}
+
+/// Returns a `Member::NestedType` token stream for a nested type.
+fn nested_type_registration(arg: &NestedTypeArg) -> proc_macro2::TokenStream {
+    use syn::ext::IdentExt;
+
+    let ty = &arg.ty;
+    let name = if let Some(name) = &arg.name {
+        let name = name.unraw().to_string();
+        quote! { #name.to_owned() }
+    } else {
+        quote! { <#ty as jsg::Type>::class_name().to_owned() }
+    };
+    quote! {
+        jsg::Member::NestedType {
+            name: #name,
+            nested_type: jsg::NestedType::of::<#ty>(),
+        }
+    }
+}
+
 /// Entry point called from `lib.rs` for `#[jsg_resource]` on an impl block.
-pub fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
+pub fn generate_resource_impl(attr: TokenStream, impl_block: &ItemImpl) -> TokenStream {
     let self_ty = &impl_block.self_ty;
 
     if !matches!(&**self_ty, syn::Type::Path(_)) {
@@ -218,6 +332,11 @@ pub fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
             "#[jsg_resource] impl blocks must use a simple path type (e.g., `impl MyResource`)",
         );
     }
+
+    let nested_type_registrations: Vec<_> = match parse_nested_types(attr.into()) {
+        Ok(nested_types) => nested_types.iter().map(nested_type_registration).collect(),
+        Err(err) => return err.to_compile_error().into(),
+    };
 
     let method_registrations = collect_method_registrations(impl_block);
     let property_registrations = collect_property_registrations(impl_block);
@@ -240,6 +359,7 @@ pub fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
                     #(#method_registrations,)*
                     #(#property_registrations,)*
                     #(#constant_registrations,)*
+                    #(#nested_type_registrations,)*
                 ]
             }
         }

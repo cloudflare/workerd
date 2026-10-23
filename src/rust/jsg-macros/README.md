@@ -81,6 +81,9 @@ Use `#[jsg_resource(name = "JSName")]` to override the JavaScript class name.
 
 **On an impl block** — emits `jsg::Resource::members()`, registering every
 `#[jsg_method]`, `#[jsg_constructor]`, and `#[jsg_static_constant]` item.
+Use `#[jsg_resource(nested_types(Foo, Name = Bar))]` to expose other resource types'
+constructors on the prototype (equivalent to `JSG_NESTED_TYPE(Foo)` and
+`JSG_NESTED_TYPE_NAMED(Bar, Name)` in C++ JSG).
 
 ```rust
 #[jsg_resource]
