@@ -32,8 +32,8 @@
 //! isolate's scopes inside the `unsafe` [`allow_scopes_of_another_isolate`].
 //!
 //! Handles that outlive scopes remember their isolate and panic when used in another:
-//! [`v8::TracedGlobal`](crate::v8::TracedGlobal) and the JavaScript wrapper of an
-//! [`Rc`](crate::Rc).
+//! [`v8::Global`](crate::v8::Global), [`v8::TracedGlobal`](crate::v8::TracedGlobal), and the
+//! JavaScript wrapper of an [`Rc`](crate::Rc).
 //!
 use std::marker::PhantomData;
 use std::marker::PhantomPinned;

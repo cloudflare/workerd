@@ -139,7 +139,7 @@ fn global_of_another_isolate_panics() {
     let payload = result.expect_err("opening A's TracedGlobal in B must panic");
     assert_eq!(
         panic_message(&*payload),
-        "attempt to use a TracedGlobal in an isolate other than the one it was created in"
+        "attempt to use a Global or TracedGlobal in an isolate other than the one it was created in"
     );
 
     let result = std::panic::catch_unwind(AssertUnwindSafe(|| {

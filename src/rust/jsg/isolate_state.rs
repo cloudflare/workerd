@@ -4,28 +4,30 @@
 
 //! Dropping persistent handles, and the liveness of their isolate.
 //!
-//! A [`v8::TracedGlobal`](crate::v8::TracedGlobal) outlives every scope, and is dropped wherever
-//! the Rust value owning it goes away. Two things about its isolate decide what the drop may do:
+//! A [`v8::Global`](crate::v8::Global) or [`v8::TracedGlobal`](crate::v8::TracedGlobal)
+//! outlives every scope, and is dropped wherever the Rust value owning it goes away. Two things
+//! about its isolate decide what the drop may do:
 //!
 //! * **Whether this thread holds the isolate lock.** `v8::Global::Reset` edits the isolate's
 //!   free list of handle nodes without synchronization, as does every handle creation on the
 //!   thread holding the lock. A reset without the lock is a data race that can hand a node out
 //!   twice or unlink a block of roots.
-//! * **Whether the isolate is still alive.** Nothing ties a `TracedGlobal` to its isolate's
+//! * **Whether the isolate is still alive.** Nothing ties a persistent handle to its isolate's
 //!   lifetime: one can be dropped after `v8::Isolate::Dispose`, for example when the Rust
 //!   object holding it is owned by something that outlives the worker. `Dispose` frees every
 //!   global and traced handle of the isolate in bulk, so a reset after it touches freed
 //!   memory.
 //!
 //! The [`Realm`](crate::Realm) therefore owns an [`IsolateState`], shared through an `Arc`
-//! with every `TracedGlobal` of its isolate. [`IsolateState::drop_slot`] resets a dropped
-//! `TracedGlobal`'s strong handle at once under the lock, queues it otherwise, and leaves it to
-//! `Dispose` once the state is closed. [`IsolateState::reset_awaiting_lock`] empties the queue; it
-//! runs from the `IsolateBase` deferred action hook, which `IsolateBase::Lock` calls whenever it
-//! locks the isolate, the same point at which C++ JSG applies its own deferred destruction
-//! queue. A bare `v8::Locker`, or relocking after a `v8::Unlocker`, does not empty the queue;
-//! the handles then wait for the next `IsolateBase::Lock`. The `Realm` closes the state when
-//! it is dropped, under the isolate lock, before the isolate is disposed.
+//! with every `Global` and `TracedGlobal` of its isolate. [`IsolateState::drop_global`] and
+//! [`IsolateState::drop_slot`] reset a dropped handle at once under the lock, queue it
+//! otherwise, and leave it to `Dispose` once the state is closed.
+//! [`IsolateState::reset_awaiting_lock`] empties the queue; it runs from the `IsolateBase`
+//! deferred action hook, which `IsolateBase::Lock` calls whenever it locks the isolate, the
+//! same point at which C++ JSG applies its own deferred destruction queue. A bare `v8::Locker`,
+//! or relocking after a `v8::Unlocker`, does not empty the queue; the handles then wait for
+//! the next `IsolateBase::Lock`. The `Realm` closes the state when it is dropped, under the
+//! isolate lock, before the isolate is disposed.
 //!
 //! A `TracedGlobal` keeps its handles in a [`GlobalSlot`], whose address V8 may record to null the
 //! strong handle when it is weak and its value dies, during any GC. GC runs on the thread
@@ -35,7 +37,9 @@
 //! but GC can still run before the isolate is disposed: during `IsolateBase::dropWrappers`,
 //! while `v8::Isolate::Dispose` tears the heap down, or whenever V8 flags ask for it. So the
 //! slot of a `TracedGlobal` dropped then is kept until `~IsolateBase` reports, through a hook the
-//! `Realm` set, that the isolate is disposed.
+//! `Realm` set, that the isolate is disposed. A `Global` is never weak, so V8 never writes
+//! into it: it holds its strong handle inline, and puts it in a slot of its own only to queue
+//! it, while a handle dropped after the state is closed needs no slot at all.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -78,8 +82,8 @@ unsafe impl Sync for IsolateState {}
     reason = "V8 may write into a slot until its handle is reset or the isolate disposed"
 )]
 struct DropQueues {
-    /// Slots of `TracedGlobal`s that were dropped without the isolate lock, waiting for the next
-    /// lock.
+    /// Slots of `Global`s and `TracedGlobal`s that were dropped without the isolate lock,
+    /// waiting for the next lock.
     awaiting_lock: Vec<Box<GlobalSlot>>,
     /// Slots of `TracedGlobal`s that were dropped after the state was closed, waiting for the
     /// isolate to be disposed.
@@ -142,18 +146,40 @@ impl IsolateState {
             reset_and_free(slot);
             return;
         }
+        self.queue(slot, AfterClose::KeepUntilDisposed);
+    }
+
+    /// Takes the strong handle of a dropped `Global`, as [`drop_slot`](Self::drop_slot) takes
+    /// the slot of a `TracedGlobal`. The handle gets a slot only to be queued. Once the state is
+    /// closed nothing is kept: V8 never writes into the slot of a strong handle.
+    pub(crate) fn drop_global(&self, mut handle: ffi::Global) {
+        if self.this_thread_holds_lock() {
+            // SAFETY: this thread holds the isolate lock, and the handle is valid.
+            unsafe { reset(&mut handle) };
+            return;
+        }
+        if self.is_closed() {
+            return;
+        }
+        self.queue(GlobalSlot::new_boxed(handle), AfterClose::Free);
+    }
+
+    /// Queues the slot of a handle dropped without the isolate lock, or, once the state is
+    /// closed, does what `after_close` says.
+    fn queue(&self, slot: Box<GlobalSlot>, after_close: AfterClose) {
         let mut queues = self.lock_drop_queues();
         // `close` takes the queue under the mutex after it sets `closed`, so a slot pushed
         // while the state is open is reset either by the next lock or by `close`.
         if !self.is_closed() {
             queues.awaiting_lock.push(slot);
-        } else if !queues.disposed {
+        } else if after_close == AfterClose::KeepUntilDisposed && !queues.disposed {
             queues.awaiting_dispose.push(slot);
         }
     }
 
-    /// Resets and frees the slots that [`drop_slot`](Self::drop_slot) queued. The deferred
-    /// action hook calls it whenever `IsolateBase::Lock` locks the isolate.
+    /// Resets and frees the slots that [`drop_slot`](Self::drop_slot) and
+    /// [`drop_global`](Self::drop_global) queued. The deferred action hook calls it whenever
+    /// `IsolateBase::Lock` locks the isolate.
     pub(crate) fn reset_awaiting_lock(&self, _isolate: &mut Isolate) {
         // The handles are reset outside the mutex, which only guards the queues themselves.
         let batch = std::mem::take(&mut self.lock_drop_queues().awaiting_lock);
@@ -200,15 +226,33 @@ impl IsolateState {
     }
 }
 
-/// Resets a dropped `TracedGlobal`'s strong handle in place, then frees its slot, which V8 forgets
-/// with the handle. The isolate must be locked by this thread.
+/// What a handle dropped after the state is closed needs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AfterClose {
+    /// V8 may write into the slot of a weak handle until the isolate is disposed.
+    KeepUntilDisposed,
+    /// The handle is strong, so V8 never writes into its slot.
+    Free,
+}
+
+/// Resets the strong handle of a dropped `Global` or `TracedGlobal` in its slot, then frees the
+/// slot, which V8 forgets with the handle. The isolate must be locked by this thread.
 #[expect(unsafe_code, reason = "resets a V8 handle")]
 #[expect(
     clippy::boxed_local,
     reason = "the handle is reset in the box, whose address V8 may have recorded"
 )]
 fn reset_and_free(mut slot: Box<GlobalSlot>) {
-    // SAFETY: the handle is valid and the isolate is locked (guaranteed by caller). The handle
-    // is not moved while pinned.
-    unsafe { ffi::global_reset(Pin::new_unchecked(slot.strong.get_mut())) };
+    // SAFETY: the handle is valid and the isolate is locked (guaranteed by caller).
+    unsafe { reset(slot.strong.get_mut()) };
+}
+
+/// Resets a persistent handle where it is.
+///
+/// # Safety
+/// The handle must be valid or empty, and its isolate locked by this thread.
+#[expect(unsafe_code, reason = "resets a V8 handle")]
+unsafe fn reset(handle: &mut ffi::Global) {
+    // SAFETY: guaranteed by caller. The handle is not moved while pinned.
+    unsafe { ffi::global_reset(Pin::new_unchecked(handle)) };
 }

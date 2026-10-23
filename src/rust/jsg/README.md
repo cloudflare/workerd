@@ -98,6 +98,7 @@ let r: jsg::Rc<MyResource> = jsg::Rc::from_js(&mut lock, js_val)?;
 | `Cell<jsg::v8::TracedGlobal<T>>` | Yes — dual strong/traced | Required when set after construction |
 | `Cell<Option<jsg::v8::TracedGlobal<T>>>` | Yes — when `Some` | |
 | `jsg::Weak<T>` | No | Doesn't keep target alive |
+| `jsg::v8::Global<T>` | Compile error — no `Traced` impl | Use `TracedGlobal<T>` in resource fields |
 | Any `T: Traced` | Depends on `T` | `#[jsg_resource]` calls `Traced::trace` on every field |
 
 - **`Cell<T>` for interior mutability**: `Traced::trace` takes `&self`. Fields that need to be mutated after construction (e.g. a callback set in a method) can use `Cell<T>`. `Cell<T>` implements `Traced` by reading through `as_ptr()` during single-threaded GC tracing.
@@ -136,7 +137,7 @@ All scopes open on a thread at the same time must belong to one isolate: opening
 another isolate while one is open panics, so a handle is never used with another isolate's
 lock. `jsg::allow_scopes_of_another_isolate` (`unsafe`) lifts the rule for code that must open
 scopes of a second isolate. Handles that outlive scopes remember their isolate and panic when
-used in another: `TracedGlobal<T>`, and the JS wrapper of a `jsg::Rc<T>`.
+used in another: `Global<T>`, `TracedGlobal<T>`, and the JS wrapper of a `jsg::Rc<T>`.
 
 ### `Local<'s, T>`
 
@@ -153,23 +154,29 @@ constructors return `None` when V8 cannot create the string.
 ```rust
 let str_value = "hello".to_js(lock);
 let num_value = 42u32.to_local(lock); // `ToLocalValue` also covers integers
-let global = str_value.to_traced_global(lock);
+let global = str_value.to_global(lock);
 ```
 
-### `TracedGlobal<T>`
+### `Global<T>`
 
-A persistent handle that outlives `HandleScope`s. Must be explicitly managed. Opening or cloning
-it in an isolate other than the one it was created in panics. A `TracedGlobal` is `Send`, and not
-`Sync`: every use takes a `Lock` except dropping it and putting it in a new resource
-(`jsg::Rc::new` takes no `Lock`), and both leave its handles alone on a thread that does not hold
-the isolate lock.
+A persistent handle that outlives `HandleScope`s, for handles that Rust code owns outside
+resources, such as the `Realm`'s resource templates. GC never visits it, so it is strong for as
+long as it exists, and a cycle through it is never collected. Opening or cloning it in an isolate
+other than the one it was created in panics. It holds its handle inline, with no box: V8 keeps
+the address of a handle's slot only while the handle is weak. It is `Send` and `Sync`, since
+nothing writes into it through a shared reference.
 
-Dropping a `TracedGlobal` resets its V8 handle, which needs the isolate lock; what the drop does
-depends on the state of the isolate, which the `Realm` shares with every `TracedGlobal` of it:
+A `Global` has no `Traced` impl, so it cannot be a field of a `#[jsg_resource]`. A field holds a
+`TracedGlobal`, which GC traces; `TracedGlobal::from` turns a `Global` into one.
+
+Dropping a `Global` or a `TracedGlobal` resets its V8 handle, which needs the isolate lock; what
+the drop does depends on the state of the isolate, which the `Realm` shares with every persistent
+handle of it:
 
 - Under the isolate lock, the handle is reset at once.
 - Without the lock, on any thread, the handle is queued and reset the next time the isolate is
-  locked, as C++ JSG's deferred destruction queue does. Until then it keeps its value alive.
+  locked, as C++ JSG's deferred destruction queue does. Until then it keeps its value alive. A
+  `Global`'s handle is boxed to be queued.
 - Once the isolate is being disposed, the handle is left alone: `v8::Isolate::Dispose` frees
   every handle of the isolate in bulk, and a reset after it would touch freed memory. The
   `Realm` is dropped under the lock, before `Dispose`, and closes the state then.
@@ -178,6 +185,14 @@ The queue is emptied from `IsolateBase::applyDeferredActions()`, which `IsolateB
 whenever it locks the isolate, as workerd and the test harness do. A bare `v8::Locker`, or
 relocking after a `v8::Unlocker`, does not empty it; the handles wait for the next
 `IsolateBase::Lock`.
+
+### `TracedGlobal<T>`
+
+A persistent handle for a field of a `#[jsg_resource]`, which GC traces so that a cycle through it
+can be collected. Opening or cloning it in an isolate other than the one it was created in panics,
+and it is dropped like a `Global`. A `TracedGlobal` is `Send`, and not `Sync`: every use takes a
+`Lock` except dropping it and putting it in a new resource (`jsg::Rc::new` takes no `Lock`), and
+both leave its handles alone on a thread that does not hold the isolate lock.
 
 A `TracedGlobal` in traced mode also holds a `v8::TracedReference`, which Rust never resets. A
 `TracedGlobal` taken out of its resource, for instance by `Cell::take()`, is traced by nothing, so

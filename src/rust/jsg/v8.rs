@@ -12,7 +12,9 @@
 //! - [`IsolatePtr`] - Non-null wrapper around `v8::Isolate*`; callers must still
 //!   ensure the isolate is alive and the current thread holds the isolate lock
 //! - [`Local<'a, T>`] - Stack-allocated handle to a V8 value, tied to a `HandleScope`
-//! - [`TracedGlobal<T>`] - Persistent handle that outlives `HandleScope`s
+//! - [`Global<T>`] - Persistent handle that outlives `HandleScope`s; GC never visits it
+//! - [`TracedGlobal<T>`] - Persistent handle for a resource field, which GC traces so that a
+//!   cycle through it can be collected
 //! - [`BackingStore`] - Owned handle to the raw memory backing an `ArrayBuffer`;
 //!   keeps the memory alive independently of any JS handle
 //!
@@ -1243,6 +1245,11 @@ impl<'s, T> Local<'s, T> {
     }
 
     /// Creates a persistent handle to this value.
+    pub fn to_global(self, lock: &mut Lock<'s>) -> Global<T> {
+        Global::new(lock, self)
+    }
+
+    /// Creates a persistent handle to this value, for a resource field that GC traces.
     pub fn to_traced_global(self, lock: &mut Lock<'s>) -> TracedGlobal<T> {
         TracedGlobal::new(lock, self)
     }
@@ -2950,7 +2957,8 @@ impl<'s> Local<'s, Object> {
 /// GC may make the strong handle weak, and V8 then keeps the address of the handle's slot to
 /// write a null into it when the value dies, so that address must not change for as long as
 /// the handle exists, however the `TracedGlobal` moves, for example when the `Vec` holding it
-/// grows. This costs one small allocation per `TracedGlobal`.
+/// grows. This costs one small allocation per `TracedGlobal`. A [`Global`], which is never weak,
+/// holds its handle inline, and gets a slot only when a drop without the isolate lock queues it.
 ///
 /// Both fields are written through a shared reference to the `TracedGlobal`: by V8, during any GC,
 /// and by [`GcVisitor::visit_traced_global`]. They are therefore read only under the isolate lock,
@@ -2968,7 +2976,27 @@ pub(crate) struct GlobalSlot {
     traced: UnsafeCell<ffi::TracedReference>,
 }
 
-// Generic TracedGlobal<T> handle without lifetime
+impl GlobalSlot {
+    /// A slot for the strong handle `strong`, which has no traced reference.
+    pub(crate) fn new_boxed(strong: ffi::Global) -> Box<Self> {
+        Box::new(Self {
+            strong: UnsafeCell::new(strong),
+            traced: UnsafeCell::new(ffi::TracedReference { ptr: 0 }),
+        })
+    }
+}
+
+/// A persistent handle for a field of a resource, which GC traces so that a cycle through it
+/// can be collected.
+///
+/// While the resource has a strong reference from Rust the handle is strong. Once only its
+/// JavaScript wrapper keeps the resource alive, GC makes the handle weak and traces its value
+/// instead; see [`GcVisitor::visit_traced_global`]. Its handles therefore live in a box, since
+/// V8 keeps the address of a weak handle's slot. A handle that no resource owns is a
+/// [`Global`], which needs no box; [`TracedGlobal::from`] turns one into a `TracedGlobal`.
+///
+/// Opening or cloning it in an isolate other than the one it was created in panics, and it is
+/// dropped like a `Global`.
 pub struct TracedGlobal<T> {
     /// `ManuallyDrop`, so that the drop can hand the box to the isolate state.
     slot: ManuallyDrop<Box<GlobalSlot>>,
@@ -2987,11 +3015,7 @@ pub struct TracedGlobal<T> {
 impl<T> TracedGlobal<T> {
     /// Creates a persistent handle to `local`.
     pub fn new(lock: &mut Lock<'_>, local: Local<'_, T>) -> Self {
-        local.debug_assert_isolate(lock);
-        // SAFETY: isolate is valid and locked (guaranteed by Lock); the handle is valid, and
-        // belongs to the lock's isolate because all open scopes do.
-        let handle = unsafe { ffi::local_to_global(lock.isolate().as_ffi(), local.into_ffi()) };
-        Self::from_ffi_in(handle, Arc::clone(lock.isolate_state()))
+        Global::new(lock, local).into()
     }
 
     /// Creates a `TracedGlobal` from an FFI handle.
@@ -3005,10 +3029,7 @@ impl<T> TracedGlobal<T> {
 
     pub(crate) fn from_ffi_in(handle: ffi::Global, state: Arc<IsolateState>) -> Self {
         Self {
-            slot: ManuallyDrop::new(Box::new(GlobalSlot {
-                strong: UnsafeCell::new(handle),
-                traced: UnsafeCell::new(ffi::TracedReference { ptr: 0 }),
-            })),
+            slot: ManuallyDrop::new(GlobalSlot::new_boxed(handle)),
             state,
             _marker: PhantomData,
         }
@@ -3024,17 +3045,6 @@ impl<T> TracedGlobal<T> {
         ffi::Global { ptr }
     }
 
-    /// Checks that `lock` belongs to the isolate this handle was created in.
-    ///
-    /// # Panics
-    /// Panics if it does not.
-    fn assert_in_isolate_of(&self, lock: &mut Lock<'_>) {
-        assert!(
-            Arc::ptr_eq(&self.state, lock.isolate_state()),
-            "attempt to use a TracedGlobal in an isolate other than the one it was created in"
-        );
-    }
-
     /// Returns a non-owning copy of the strong FFI handle.
     ///
     /// # Safety
@@ -3047,58 +3057,9 @@ impl<T> TracedGlobal<T> {
 
     /// Materializes this handle as a `Local` in the scope of `lock`.
     pub fn as_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, T> {
-        self.assert_in_isolate_of(lock);
-        // SAFETY: isolate is valid and locked (guaranteed by Lock); global handle is valid.
-        unsafe {
-            Local::from_ffi(ffi::global_to_local(
-                lock.isolate().as_ffi(),
-                &self.strong_handle(),
-            ))
-        }
-    }
-}
-
-impl TracedGlobal<FunctionTemplate> {
-    /// Returns the constructor function for this function template.
-    ///
-    /// This is the V8 `Function` object that can be called as a constructor or
-    /// used to access static methods, analogous to a JavaScript class reference
-    /// (e.g., `URL`, `TextEncoder`).
-    pub fn as_local_function<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Function> {
-        self.assert_in_isolate_of(lock);
-        // SAFETY: `lock` guarantees the isolate is locked and a HandleScope is active.
-        // The handle is a valid `TracedGlobal<FunctionTemplate>` created by
-        // `create_resource_template`. The returned `Local` is tied to the lock's HandleScope via
-        // the `'s` lifetime.
-        unsafe {
-            Local::from_ffi(ffi::function_template_get_function(
-                lock.isolate().as_ffi(),
-                &self.strong_handle(),
-            ))
-        }
-    }
-}
-
-impl<T> TracedGlobal<T> {
-    /// Consumes the `TracedGlobal`, returning its strong FFI handle and transferring ownership to
-    /// the caller, which becomes responsible for disposing the handle. Snapshot-pipeline use
-    /// only.
-    ///
-    /// # Panics
-    ///
-    /// Panics if a traced reference has been installed on this `TracedGlobal`; cached resource
-    /// templates are never GC-traced, so this does not happen for them.
-    pub fn into_ffi_for_snapshot(mut self) -> ffi::Global {
-        // Nothing visits `self`, which is owned here, so the slot changes only if V8 nulls a
-        // weak strong handle, and the strong handle is weak only while `traced` is set.
-        assert_eq!(
-            self.slot.traced.get_mut().ptr,
-            0,
-            "cannot transfer a TracedGlobal with an active traced reference"
-        );
-        // `self` is dropped with an empty handle, whose reset does nothing, and frees its slot
-        // and releases its isolate state.
-        std::mem::replace(self.slot.strong.get_mut(), ffi::Global { ptr: 0 })
+        assert_in_isolate_of(lock, &self.state);
+        // SAFETY: the handle belongs to the lock's isolate, as checked above.
+        unsafe { global_to_local(lock, &self.strong_handle()) }
     }
 }
 
@@ -3137,11 +3098,187 @@ impl<T> TracedGlobal<T> {
     /// next GC cycle.
     #[must_use]
     pub fn clone(&self, lock: &mut Lock) -> Self {
-        self.assert_in_isolate_of(lock);
-        // SAFETY: isolate is valid and locked (guaranteed by Lock); global handle is valid.
-        let handle = unsafe { ffi::global_clone(lock.isolate().as_ffi(), &self.strong_handle()) };
+        assert_in_isolate_of(lock, &self.state);
+        // SAFETY: the handle belongs to the lock's isolate, as checked above.
+        let handle = unsafe { global_clone(lock, &self.strong_handle()) };
         Self::from_ffi_in(handle, Arc::clone(&self.state))
     }
+}
+
+/// A persistent handle that outlives `HandleScope`s, and is always strong: GC never visits it.
+///
+/// It keeps its value alive for as long as it exists, so a cycle through it is never
+/// collected. Use it for handles that Rust code owns outside resources, such as the `Realm`'s
+/// resource templates. It has no [`Traced`](crate::Traced) impl, so it cannot be a field of a
+/// resource that GC traces; such a field is a [`TracedGlobal`], which [`TracedGlobal::from`]
+/// makes of a `Global`. In return a `Global` holds its strong handle inline, with no
+/// allocation: V8 keeps the address of a handle's slot only while the handle is weak, which a
+/// `Global` never is, so it may move like any other value.
+///
+/// Opening or cloning it in an isolate other than the one it was created in panics. A drop
+/// resets the handle at once under the isolate lock, queues it for the next lock otherwise, and
+/// leaves it to `v8::Isolate::Dispose` once the isolate is being disposed.
+pub struct Global<T> {
+    handle: ffi::Global,
+    /// The state of the isolate the handle was created in. Every use checks that the lock
+    /// belongs to that isolate, and a drop checks that the isolate is still alive.
+    state: Arc<IsolateState>,
+    /// `fn() -> T` leaves `Send` and `Sync` to the other fields, which are both. A `Global` is
+    /// `Send`, since it may be dropped on any thread (see [`IsolateState`]) and every other use
+    /// takes a `Lock` of its isolate, and `Sync` because nothing writes into it through a shared
+    /// reference: GC never visits it, and V8 writes into a handle's slot only while the handle
+    /// is weak. A shared reference only reads the handle; every use of the node it points to
+    /// takes a `Lock` of its isolate, which one thread holds at a time.
+    _marker: PhantomData<fn() -> T>,
+}
+
+impl<T> Global<T> {
+    /// Creates a persistent handle to `local`.
+    pub fn new(lock: &mut Lock<'_>, local: Local<'_, T>) -> Self {
+        local.debug_assert_isolate(lock);
+        // SAFETY: isolate is valid and locked (guaranteed by Lock); the handle is valid, and
+        // belongs to the lock's isolate because all open scopes do.
+        let handle = unsafe { ffi::local_to_global(lock.isolate().as_ffi(), local.into_ffi()) };
+        Self::from_ffi_in(handle, Arc::clone(lock.isolate_state()))
+    }
+
+    /// Creates a `Global` from an FFI handle, taking ownership of it.
+    ///
+    /// # Safety
+    /// The caller must ensure that `handle` points to a valid, strong V8 persistent handle of
+    /// the lock's isolate, which nothing else resets.
+    pub unsafe fn from_ffi(lock: &mut Lock<'_>, handle: ffi::Global) -> Self {
+        Self::from_ffi_in(handle, Arc::clone(lock.isolate_state()))
+    }
+
+    pub(crate) const fn from_ffi_in(handle: ffi::Global, state: Arc<IsolateState>) -> Self {
+        Self {
+            handle,
+            state,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Returns a non-owning copy of the FFI handle. The caller must not reset the copy, nor use
+    /// it after this `Global` is dropped.
+    #[must_use]
+    pub const fn as_ffi(&self) -> ffi::Global {
+        ffi::Global {
+            ptr: self.handle.ptr,
+        }
+    }
+
+    /// Materializes this handle as a `Local` in the scope of `lock`.
+    pub fn as_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, T> {
+        assert_in_isolate_of(lock, &self.state);
+        // SAFETY: the handle belongs to the lock's isolate, as checked above.
+        unsafe { global_to_local(lock, &self.handle) }
+    }
+
+    /// Creates an independent copy of this persistent handle.
+    #[must_use]
+    pub fn clone(&self, lock: &mut Lock) -> Self {
+        assert_in_isolate_of(lock, &self.state);
+        // SAFETY: the handle belongs to the lock's isolate, as checked above.
+        let handle = unsafe { global_clone(lock, &self.handle) };
+        Self::from_ffi_in(handle, Arc::clone(&self.state))
+    }
+
+    /// Takes the handle and the isolate state, which the caller becomes responsible for.
+    fn into_parts(self) -> (ffi::Global, Arc<IsolateState>) {
+        let this = ManuallyDrop::new(self);
+        // SAFETY: `this` is never dropped, so the state is moved out of it exactly once.
+        let state = unsafe { std::ptr::read(&raw const this.state) };
+        (this.as_ffi(), state)
+    }
+
+    /// Consumes the `Global`, returning its FFI handle and transferring ownership to the
+    /// caller, which becomes responsible for disposing the handle. Snapshot-pipeline use only.
+    #[must_use]
+    pub fn into_ffi_for_snapshot(self) -> ffi::Global {
+        self.into_parts().0
+    }
+}
+
+impl Global<FunctionTemplate> {
+    /// Returns the constructor function for this function template.
+    ///
+    /// This is the V8 `Function` object that can be called as a constructor or
+    /// used to access static methods, analogous to a JavaScript class reference
+    /// (e.g., `URL`, `TextEncoder`).
+    pub fn as_local_function<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Function> {
+        assert_in_isolate_of(lock, &self.state);
+        // SAFETY: the handle belongs to the lock's isolate, as checked above.
+        unsafe { function_template_get_function(lock, &self.handle) }
+    }
+}
+
+/// Dropping a `Global` hands its handle to its isolate's state, as dropping a [`TracedGlobal`]
+/// does.
+impl<T> Drop for Global<T> {
+    fn drop(&mut self) {
+        let handle = std::mem::replace(&mut self.handle, ffi::Global { ptr: 0 });
+        self.state.drop_global(handle);
+    }
+}
+
+/// Moves the handle of a `Global` into the slot of a new `TracedGlobal`, which GC may visit.
+impl<T> From<Global<T>> for TracedGlobal<T> {
+    fn from(global: Global<T>) -> Self {
+        let (handle, state) = global.into_parts();
+        Self::from_ffi_in(handle, state)
+    }
+}
+
+/// Checks that `lock` belongs to the isolate of `state`, in which a persistent handle was
+/// created.
+///
+/// # Panics
+/// Panics if it does not.
+fn assert_in_isolate_of(lock: &mut Lock<'_>, state: &Arc<IsolateState>) {
+    assert!(
+        Arc::ptr_eq(state, lock.isolate_state()),
+        "attempt to use a Global or TracedGlobal in an isolate other than the one it was created in"
+    );
+}
+
+/// Opens the persistent `handle` in the scope of `lock`.
+///
+/// # Safety
+/// `handle` must be a valid persistent handle of the isolate of `lock`.
+unsafe fn global_to_local<'s, T>(lock: &mut Lock<'s>, handle: &ffi::Global) -> Local<'s, T> {
+    // SAFETY: isolate is valid and locked (guaranteed by Lock); the handle is a valid handle of
+    // its isolate (guaranteed by caller).
+    unsafe { Local::from_ffi(ffi::global_to_local(lock.isolate().as_ffi(), handle)) }
+}
+
+/// Returns the constructor function of the persistent function template `handle`, in the
+/// scope of `lock`.
+///
+/// # Safety
+/// `handle` must be a valid `v8::Global<v8::FunctionTemplate>` of the isolate of `lock`.
+pub(crate) unsafe fn function_template_get_function<'s>(
+    lock: &mut Lock<'s>,
+    handle: &ffi::Global,
+) -> Local<'s, Function> {
+    // SAFETY: isolate is valid and locked, and a HandleScope is open (guaranteed by Lock); the
+    // handle is a valid function template of its isolate (guaranteed by caller).
+    unsafe {
+        Local::from_ffi(ffi::function_template_get_function(
+            lock.isolate().as_ffi(),
+            handle,
+        ))
+    }
+}
+
+/// Creates a new persistent handle to the value of `handle`.
+///
+/// # Safety
+/// `handle` must be a valid persistent handle of the isolate of `lock`.
+unsafe fn global_clone(lock: &mut Lock<'_>, handle: &ffi::Global) -> ffi::Global {
+    // SAFETY: isolate is valid and locked (guaranteed by Lock); the handle is a valid handle of
+    // its isolate (guaranteed by caller).
+    unsafe { ffi::global_clone(lock.isolate().as_ffi(), handle) }
 }
 
 /// Converts a primitive Rust value into a JavaScript value in the scope of `lock`.
@@ -3779,11 +3916,11 @@ impl WrappableRc {
     ///
     /// Returns `None` if the Wrappable already has a JavaScript wrapper in another isolate.
     pub(crate) fn to_js<'s, R: Resource>(&self, lock: &mut Lock<'s>) -> Option<Local<'s, Value>> {
-        let isolate = lock.isolate();
-        let constructor = lock.realm().get_constructor::<R>();
-        // SAFETY: isolate is valid and locked; constructor global handle is valid.
+        let constructor = lock.realm().get_constructor::<R>().as_ffi();
+        // SAFETY: isolate is valid and locked; the constructor is a function template of the
+        // isolate, which the Realm's template cache keeps alive.
         let handle = unsafe {
-            ffi::wrap_resource(isolate.as_ffi(), self.handle.clone(), &constructor.as_ffi())
+            ffi::wrap_resource(lock.isolate().as_ffi(), self.handle.clone(), &constructor)
         };
         // SAFETY: the wrapper is created in (or read into) the scope of `lock`.
         unsafe { Local::from_ffi_maybe(handle) }

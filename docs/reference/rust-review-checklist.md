@@ -40,12 +40,14 @@ Unsafe code is concentrated at FFI boundaries. Review every `unsafe` block and `
 #### Common unsafe patterns in this codebase:
 
 - **V8 handle operations**: `Local::from_ffi()`/`into_ffi()`, isolate pointer dereference. These are
-  safe only when the isolate is locked and the handle scope is active. Dropping a
-  `jsg::v8::TracedGlobal` is the exception: it defers the reset to the next lock when the isolate is
-  not locked, and does nothing once the `Realm` is gone (`src/rust/jsg/isolate_state.rs`). That, and
-  visits outside a GC leaving a `TracedGlobal` alone on a thread without the lock
-  (`GcVisitor::visit_traced_global`), is what makes `jsg::v8::TracedGlobal` `Send` (it is not
-  `Sync`). A shim that resets a handle itself must only run under the lock.
+  safe only when the isolate is locked and the handle scope is active. Dropping a `jsg::v8::Global`
+  or `jsg::v8::TracedGlobal` is the exception: it defers the reset to the next lock when the
+  isolate is not locked, and does nothing once the `Realm` is gone
+  (`src/rust/jsg/isolate_state.rs`). That makes a `Global`, which GC never visits, `Send` and
+  `Sync`. It also makes a `TracedGlobal` `Send` (it is not `Sync`), together with visits outside a
+  GC leaving a `TracedGlobal` alone on a thread without the lock
+  (`GcVisitor::visit_traced_global`). A shim that resets a handle itself must only run under the
+  lock.
 - **Resource wrap/unwrap**: `Ref::into_raw()` leaks a ref-counted pointer as `usize`;
   `Ref::from_raw()` reconstructs it. These must be balanced — every `into_raw` needs exactly one
   `from_raw` to avoid leaks or double-frees.
@@ -94,6 +96,10 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   `String`/`&str` map to JS strings. Integers and `#[jsg_struct]`s convert like C++ JSG's
   integers and dictionaries: out-of-range integers throw, and an absent struct field reads as
   `undefined`.
+- **Persistent handles**: a handle that Rust code owns outside resources is a `jsg::v8::Global`,
+  which GC never visits and which keeps its handle inline. A handle that a resource owns is a
+  `jsg::v8::TracedGlobal`, which GC traces so that a cycle through it can be collected, and which
+  keeps its handles in a box. `Global` has no `Traced` impl, so it cannot be a resource field.
 - **GC tracing**: `Ref<T>`, `Option<Ref<T>>`, and `Nullable<Ref<T>>` fields on `#[jsg_resource]`
   structs are automatically traced during GC. `WeakRef<T>` fields are not traced (no-op). Verify
   that any resource holding a `Ref<T>` or `Nullable<Ref<T>>` to another resource is properly
