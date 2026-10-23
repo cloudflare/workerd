@@ -279,6 +279,29 @@ When `pumpTo()` is called on the adapter:
 4. If the pump promise is dropped first (e.g. client disconnect), cancels the stream
    (undefined reason) from a waitUntil task, so the source's cancel algorithm runs
 
+## RPC stream length
+
+Readable-stream RPC descriptors carry the remaining identity-byte length separately
+from the preferred wire encoding and the pushed byte stream's encoded length. The
+receiver installs this metadata on its system stream before constructing either
+stream implementation, so length queries do not depend on the push resolving.
+Absent metadata preserves the underlying transport's length behavior; known zero
+is distinct from unknown, and the metadata retains the full `UInt64` range.
+
+The system source decrements its identity count after decoded reads and copies the
+remaining count independently to tee branches. This is sender-provided metadata,
+not an exact-total check in the system source: an overrun drops the count, and EOF
+sets a retained count to zero even if the source ended short. The TypeScript native
+conduit separately enforces its `expectedLength` contract on reads through
+that conduit; native pumps bypass it.
+
+Optimized pumps use the underlying transport's length and preserve its length and
+EOF checks. They may bypass decoded reads, including for compressed passthrough: they
+consume the source's identity count and report zero only after successful
+completion, without verifying the advertised decoded length. Identity metadata is
+never used as a compressed-byte length. Disturbed and locked streams remain
+ineligible for RPC transfer.
+
 ## Safety Pattern Catalog
 
 ### Pattern: State Machine (`StateMachine<>`)
@@ -439,7 +462,7 @@ void onConsumerClose(jsg::Lock& js) override {
   writable controller's `queue`
 - **Why**: Once traced, such a handle is weak and stays valid only while it keeps being
   traced through the container. Moving the handle itself makes it strong again
-  (`jsg::Data::moveFromTraced`, `jsg::Ref`'s move constructor). Moving the *container*
+  (`jsg::Data::moveFromTraced`, `jsg::Ref`'s move constructor). Moving the _container_
   (`RingBuffer`, `std::list`) only transfers its storage and leaves every entry weak and
   unreached, so a GC before the entries are settled collects them.
 - **Rule**: Move each handle out individually before the entry leaves the container. A
