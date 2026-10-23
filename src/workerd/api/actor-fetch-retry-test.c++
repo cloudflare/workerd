@@ -215,6 +215,9 @@ struct ReplayState {
   ActorCallRetriesAllowed retriesAllowed = ActorCallRetriesAllowed::YES;
   kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> pauseStartedFulfiller;
   bool acceptWebSocket = false;
+  // Each failing action first sends an empty response, which KJ withholds until the request
+  // completes.
+  bool sendEmptyResponseBeforeFailure = false;
   kj::Maybe<kj::Own<kj::WebSocket>> acceptedWebSocket;
   kj::Vector<IoChannelFactory::ActorRetryRequestMetadata> metadata;
   kj::Vector<kj::Array<kj::byte>> requestBodies;
@@ -305,6 +308,11 @@ class ReplayFetchTarget final: public WorkerInterface {
         case ReplayAction::NON_RETRYABLE_FAILURE:
         case ReplayAction::CLIENT_CREATION_FAILURE:
         case ReplayAction::CLIENT_CREATION_DISCONNECT:
+          if (state.sendEmptyResponseBeforeFailure) {
+            auto responseHeaders = headers.cloneShallow();
+            responseHeaders.clear();
+            response.send(200, "OK"_kj, responseHeaders, static_cast<uint64_t>(0));
+          }
           kj::throwExceptionUnlessUnwinding(makeReplayFailure(action));
           break;
         case ReplayAction::RETRY_DELAY_EXCEEDS_BUDGET:
@@ -861,6 +869,26 @@ KJ_TEST("actor fetch does not retry a delivered disconnect") {
   KJ_EXPECT(state.requestCount == 1);
   KJ_EXPECT(state.retryCount == 0);
   KJ_EXPECT(state.outcomes.size() == 0);
+}
+
+KJ_TEST("actor fetch retries a disconnect after an empty response unless it was delivered") {
+  ReplayState ambiguous{
+    .actions = kj::arr(ReplayAction::AMBIGUOUS),
+    .sendEmptyResponseBeforeFailure = true,
+  };
+  KJ_EXPECT(runActorFetch(ambiguous, kj::none, ActorFetchKind::HTTP) == kj::none);
+  KJ_EXPECT(ambiguous.requestCount == 2);
+  KJ_EXPECT(ambiguous.retryCount == 1);
+  KJ_ASSERT(ambiguous.outcomes.size() == 1);
+  KJ_EXPECT(ambiguous.outcomes[0] == ActorRetryOutcome::RECOVERED);
+
+  ReplayState delivered{
+    .actions = kj::arr(ReplayAction::DELIVERED),
+    .sendEmptyResponseBeforeFailure = true,
+  };
+  KJ_EXPECT(runActorFetch(delivered, kj::none, ActorFetchKind::HTTP) != kj::none);
+  KJ_EXPECT(delivered.requestCount == 1);
+  KJ_EXPECT(delivered.retryCount == 0);
 }
 
 KJ_TEST("actor fetch reports unable to retry after a delivered retry disconnect") {
