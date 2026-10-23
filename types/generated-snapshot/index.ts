@@ -17496,7 +17496,7 @@ export declare namespace TailStream {
     | "exceededWallTime"
     | "aborted";
   interface ScriptVersion {
-    readonly id: string;
+    readonly id?: string;
     readonly tag?: string;
     readonly message?: string;
   }
@@ -17507,7 +17507,7 @@ export declare namespace TailStream {
   }
   interface Onset {
     readonly type: "onset";
-    readonly attributes: Attribute[];
+    readonly attributes?: Attribute[];
     // id for the span being opened by this Onset event.
     readonly spanId: string;
     readonly dispatchNamespace?: string;
