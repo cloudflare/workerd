@@ -1010,8 +1010,10 @@ Response::Response(jsg::Lock& js,
       asyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
 
 jsg::Ref<Response> Response::error(jsg::Lock& js) {
-  return js.alloc<Response>(js, 0, kj::none, js.alloc<Headers>(), CfProperty(), kj::none);
-};
+  auto guard =
+      FeatureFlags::get(js).getPedanticWpt() ? Headers::Guard::IMMUTABLE : Headers::Guard::NONE;
+  return js.alloc<Response>(js, 0, kj::none, js.alloc<Headers>(guard), CfProperty(), kj::none);
+}
 
 jsg::Ref<Response> Response::constructor(jsg::Lock& js,
     jsg::Optional<kj::Maybe<Body::Initializer>> optionalBodyInit,

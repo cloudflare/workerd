@@ -1,0 +1,24 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "response-error-pedantic",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "response-error-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "pedantic_wpt"],
+        bindings = [(name = "pedantic", json = "true")],
+      )
+    ),
+    ( name = "response-error-non-pedantic",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "response-error-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "non_pedantic_wpt"],
+        bindings = [(name = "pedantic", json = "false")],
+      )
+    ),
+  ],
+);

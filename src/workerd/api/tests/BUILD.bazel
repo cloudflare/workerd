@@ -953,6 +953,12 @@ wd_test(
 )
 
 wd_test(
+    src = "response-error-test.wd-test",
+    args = ["--experimental"],
+    data = ["response-error-test.js"],
+)
+
+wd_test(
     size = "large",
     src = "scheduler-test.wd-test",
     args = ["--experimental"],
