@@ -159,7 +159,44 @@ let global = str_value.to_global(lock);
 ### `Global<T>`
 
 A persistent handle that outlives `HandleScope`s. Must be explicitly managed. Opening or cloning
-it in an isolate other than the one it was created in panics.
+it in an isolate other than the one it was created in panics. A `Global` is `Send`, and not
+`Sync`: every use takes a `Lock` except dropping it and putting it in a new resource
+(`jsg::Rc::new` takes no `Lock`), and both leave its handles alone on a thread that does not hold
+the isolate lock.
+
+Dropping a `Global` resets its V8 handle, which needs the isolate lock; what the drop does
+depends on the state of the isolate, which the `Realm` shares with every `Global` of it:
+
+- Under the isolate lock, the handle is reset at once.
+- Without the lock, on any thread, the handle is queued and reset the next time the isolate is
+  locked, as C++ JSG's deferred destruction queue does. Until then it keeps its value alive.
+- Once the isolate is being disposed, the handle is left alone: `v8::Isolate::Dispose` frees
+  every handle of the isolate in bulk, and a reset after it would touch freed memory. The
+  `Realm` is dropped under the lock, before `Dispose`, and closes the state then.
+
+The queue is emptied from `IsolateBase::applyDeferredActions()`, which `IsolateBase::Lock` calls
+whenever it locks the isolate, as workerd and the test harness do. A bare `v8::Locker`, or
+relocking after a `v8::Unlocker`, does not empty it; the handles wait for the next
+`IsolateBase::Lock`.
+
+A `Global` in traced mode also holds a `v8::TracedReference`, which Rust never resets. A `Global`
+taken out of its resource, for instance by `Cell::take()`, is traced by nothing, so the next full
+GC may free its node, and nothing tells the `Global` that it moved, the way C++ JSG's `jsg::Data`
+move constructor re-strengthens its handle. So each GC visit lets go of the old node and makes
+the strong handle strong again before C++ decides afresh whether to install a new node, and a
+drop just lets go of it. V8 frees nodes that nothing traces at the next full GC; see
+`GcVisitor::visit_global` for the cost of this and how to avoid it.
+
+Bitwise moves are also why a `Global` keeps its handles in a box. In traced mode the strong
+handle is weak, and V8 keeps the address of its slot to null it when the value dies; the box
+keeps that address valid however the `Global` itself moves, for example when the `Vec` holding
+it grows. The box lives until the strong handle has been reset. GC can still run after the
+`Realm` is dropped, so the box of a `Global` dropped then is kept until the isolate is disposed.
+
+A `Global` taken out of its resource is still weak, and nothing traces its value: unless
+something else keeps the value alive, any GC from then on may free it, which leaves the
+`Global` empty, and `as_local` on it panics. Put the `Global` back, or hold the value through
+another handle, before a GC can run.
 
 `Global<T>` fields on `#[jsg_resource]` structs participate in GC tracing when visited via `GcVisitor::visit_global`. This enables the garbage collector to detect and collect back-reference cycles — for example, a resource that stores a JS callback which closes over the resource's own JS wrapper:
 

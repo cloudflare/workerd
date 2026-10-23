@@ -36,11 +36,10 @@
 //!
 use std::marker::PhantomData;
 use std::marker::PhantomPinned;
-use std::num::NonZeroU64;
 use std::pin::Pin;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
+use crate::isolate_state::IsolateState;
 use crate::v8;
 
 /// Proof that the V8 isolate is locked by the current thread, that a context is entered,
@@ -71,9 +70,9 @@ impl Lock<'_> {
         self.isolate
     }
 
-    /// Returns the identity of this lock's isolate.
-    pub(crate) fn isolate_id(&mut self) -> IsolateId {
-        self.realm().id()
+    /// Returns the state shared by the handles of this lock's isolate.
+    pub(crate) fn isolate_state(&mut self) -> &Arc<IsolateState> {
+        self.realm().state()
     }
 }
 
@@ -134,17 +133,6 @@ impl std::ops::DerefMut for Lock<'_> {
     }
 }
 
-/// Identifies an isolate. Unlike its address, an `IsolateId` is never reused.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct IsolateId(NonZeroU64);
-
-impl IsolateId {
-    pub fn next() -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        Self(NonZeroU64::MIN.saturating_add(NEXT.fetch_add(1, Ordering::Relaxed)))
-    }
-}
-
 /// Tracks which isolate owns the scopes open on this thread.
 pub mod scope_owner {
     use std::cell::Cell;
@@ -189,6 +177,18 @@ pub mod scope_owner {
             s.depth += 1;
             state.set(s);
         });
+    }
+
+    /// Returns the isolate whose scopes are open on this thread, or null if none is.
+    pub fn current() -> *mut v8::ffi::Isolate {
+        STATE.with(|state| {
+            let s = state.get();
+            if s.depth == 0 {
+                ptr::null_mut()
+            } else {
+                s.isolate
+            }
+        })
     }
 
     /// Records that a scope opened with [`enter`] was closed.
