@@ -7,7 +7,10 @@
 // not quite work since it runs BEFORE instantiation, when the operations we want to do must happen
 // after.
 
-(function (registerShutdown) {
+// `matchNativeInstance` (the pedantic_wpt compatibility flag) makes the WebAssembly.Instance shim
+// throw when called without `new`, and gives it a read-only `prototype`, as the native constructor
+// does.
+(function (registerShutdown, matchNativeInstance) {
   const {
     Instance: originalInstance,
     instantiate: originalInstantiate,
@@ -81,6 +84,9 @@
   // Forward all arguments and new.target so subclassing works correctly.
   // NOTE: Exactly 1 argument defined to match WebAssembly.Instance length
   function Instance(module) {
+    if (matchNativeInstance && new.target === undefined) {
+      throw new TypeError("WebAssembly.Instance must be invoked with 'new'");
+    }
     const instance = Reflect.construct(
       originalInstance,
       arguments,
@@ -93,7 +99,10 @@
     return instance;
   }
   // Point the shim's prototype at the original so instanceof checks continue to work.
-  Instance.prototype = originalInstance.prototype;
+  Object.defineProperty(Instance, 'prototype', {
+    value: originalInstance.prototype,
+    writable: !matchNativeInstance,
+  });
   Object.defineProperty(Instance.prototype, 'constructor', {
     value: Instance,
     writable: true,
