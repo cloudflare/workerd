@@ -107,6 +107,7 @@ export {
   readAfterCancelReturnsEmptyView,
   readDetachesCallerBuffer,
   closeWithPendingUnfilledByobRead,
+  closeWithPendingDefaultRead,
   controllerType,
   errorAfterCloseWithQueuedBytes,
   cancelWithPartiallyFilledPull,
@@ -222,6 +223,7 @@ export {
   teeKeepsHeldByobRequest,
   teeSoleBranchUsesHeldByobRequest,
   teeHeldByobRequestWithReleasedBytes,
+  teeByobRequestFirstTakenAfterTee,
   teeHeldByobRequestAfterCloseOrError,
   teeHeldByobRequestFractionalAtClose,
   teeHeldByobRequestFromBranchFractionalAtClose,
@@ -299,6 +301,8 @@ export {
   speciesNotConsultedByInternalCopies,
   nativeSourceIgnoresPollutedMembers,
   thenGetterFiresOncePerByteRead,
+  thenGetterReleasesReaderWhileByteReadsSettle,
+  thenGetterErrorsSourceWhileBranchByteReadsSettle,
   byobReadThenLookupFollowsItsPull,
 } from 'pollution';
 
@@ -310,3 +314,5 @@ export {
   byteSourceExpectedLengthContract,
   byteSourceExpectedLengthHeldRequest,
 } from 'expected-length';
+
+export { readerMembersOnOtherReaderClasses } from 'reader-brand-checks';

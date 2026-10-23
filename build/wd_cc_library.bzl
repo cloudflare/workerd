@@ -6,10 +6,6 @@ def wd_cc_library(strip_include_prefix = "/src", copts = [], **kwargs):
     """Wrapper for cc_library that sets common attributes
     """
     cc_library(
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
         # global CPU-specific options are inconvenient to specify with bazel – just set the options we
         # need for CRC32C used in in this target for now.
         # TODO(cleanup): Come up with a better approach to specify these options for all C/C++

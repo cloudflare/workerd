@@ -131,7 +131,7 @@ ActorCache::Entry::~Entry() noexcept(false) {
 ActorCache::SharedLru::SharedLru(Options options): options(options) {}
 
 ActorCache::SharedLru::~SharedLru() noexcept(false) {
-  KJ_REQUIRE(cleanList.getWithoutLock().empty(),
+  KJ_DTOR_REQUIRE(cleanList.getWithoutLock().empty(),
       "ActorCache::SharedLru destroyed while an ActorCache still exists?");
   if (size.load(std::memory_order_relaxed) != 0) {
     KJ_LOG(ERROR,
@@ -268,7 +268,7 @@ void ActorCache::requireNotTerminal(SpanParent traceSpan) {
       ensureFlushScheduled({}, kj::mv(traceSpan));
     }
 
-    kj::throwFatalException(e.clone());
+    kj::throwException(e.clone());
   }
 }
 
@@ -306,7 +306,7 @@ void ActorCache::evictOrOomIfNeeded(Lock& lock) {
       ensureFlushScheduled(WriteOptions(), nullptr);
     }
 
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   }
 }
 
@@ -2603,7 +2603,7 @@ kj::Promise<void> ActorCache::flushImpl(uint retryCount) {
     // If we have a terminal exception, throw here to break the output gate and prevent any calls
     // to storage. This does not use `requireNotTerminal()` so that we don't recursively schedule
     // flushes.
-    kj::throwFatalException(e.clone());
+    kj::throwException(e.clone());
   }
 
   auto flushProm = startFlushTransaction();

@@ -380,8 +380,8 @@ kj::Promise<DeferredProxy<void>> pumpOwnedSourceToSink(
 template <typename T>
 kj::Promise<T> rejectWhenWriteDisconnected(WritableStreamSink& sink) {
   return sink.whenWriteDisconnected().then([](kj::Exception&& exception) -> T {
-    kj::throwFatalException(kj::mv(exception));
-  }, [](kj::Exception&& exception) -> T { kj::throwFatalException(kj::mv(exception)); });
+    kj::throwException(kj::mv(exception));
+  }, [](kj::Exception&& exception) -> T { kj::throwException(kj::mv(exception)); });
 }
 
 // A cancellation exception may carry, as this detail, the v8-serialized JavaScript value that the

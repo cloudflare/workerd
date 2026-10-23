@@ -267,7 +267,7 @@ class InspectorService final: public kj::HttpService, public kj::HttpServerError
                 KJ_LOG(INFO, "Inspector client detached"_kj);
                 co_return;
               }
-              kj::throwFatalException(kj::mv(exception));
+              kj::throwException(kj::mv(exception));
             }
           } else {
             isolates.erase(id);

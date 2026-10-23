@@ -213,18 +213,31 @@ class ModuleRegistry {
     // Compiles a bundle (user) module from UTF-8 source. The source is copied into the V8 heap,
     // so it only needs to outlive this call. The isolate's code cache is used if it has one (see
     // IsolateBase::setCodeCacheStore()).
+    //
+    // `compileHints` lists the source positions of functions that V8 should compile together
+    // with the module, because they are expected to run soon, instead of preparsing them now and
+    // compiling them on their first call. A position is where V8 considers a function to start
+    // (SharedFunctionInfo::StartPosition(); for most functions the opening parenthesis of the
+    // parameter list), in UTF-16 code units of the source, as reported by
+    // v8::CompileHintsCollector for a compilation with kProduceCompileHints.
+    // Hints are read only during this call and need not be sorted. Positions at which no function
+    // starts are ignored. The isolate's code cache takes precedence when installed, since V8
+    // cannot consume a code cache and compile hints in one compilation.
     ModuleInfo(jsg::Lock& js,
         kj::StringPtr name,
         kj::ArrayPtr<const char> content,
-        const CompilationObserver& observer);
+        const CompilationObserver& observer,
+        kj::ArrayPtr<const int> compileHints = nullptr);
 
     // Compiles UTF-8 source with an embedded cache, read only during this call. An empty cache
-    // uses the isolate's code cache store, if installed.
+    // uses the isolate's code cache store, if installed. `compileHints` is used only when neither
+    // cache is present, with the same semantics as the bundle constructor above.
     ModuleInfo(jsg::Lock& js,
         kj::StringPtr name,
         kj::ArrayPtr<const char> content,
         kj::ArrayPtr<const kj::byte> compileCache,
-        const CompilationObserver& observer);
+        const CompilationObserver& observer,
+        kj::ArrayPtr<const int> compileHints = nullptr);
 
     // The builtin ESM constructors below only read `compileCache` during the call.
 

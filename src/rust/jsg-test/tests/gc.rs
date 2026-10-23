@@ -587,10 +587,10 @@ fn from_js_creates_strong_reference_from_js_wrapper() {
             name: "unwrap-me".to_owned(),
         });
         let wrapped = resource.clone().to_js(lock);
-        ctx.set_global("obj", wrapped);
+        ctx.set_global(lock, "obj", wrapped);
 
         // Get the JS value back and use FromJS to create a new strong Ref
-        let js_val = ctx.eval_raw("obj").unwrap();
+        let js_val = ctx.eval_raw(lock, "obj").unwrap();
         let new_ref: jsg::Rc<SimpleResource> =
             <jsg::Rc<SimpleResource> as jsg::FromJS>::from_js(lock, js_val)
                 .expect("FromJS should succeed for a wrapped resource");
@@ -625,7 +625,7 @@ fn from_js_creates_strong_reference_from_js_wrapper() {
 fn from_js_returns_err_for_plain_js_object() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let plain_obj = ctx.eval_raw("({})").unwrap();
+        let plain_obj = ctx.eval_raw(lock, "({})").unwrap();
         let result = <jsg::Rc<SimpleResource> as jsg::FromJS>::from_js(lock, plain_obj);
         assert!(
             result.is_err(),
@@ -658,8 +658,8 @@ fn wrap_multiple_instances_of_same_type() {
 
         let w1 = r1.to_js(lock);
         let w2 = r2.to_js(lock);
-        ctx.set_global("r1", w1);
-        ctx.set_global("r2", w2);
+        ctx.set_global(lock, "r1", w1);
+        ctx.set_global(lock, "r2", w2);
 
         // Both should be instances of the same constructor (same prototype chain)
         let same_proto: bool = ctx
@@ -691,9 +691,9 @@ fn wrap_same_resource_twice_returns_same_object() {
         });
 
         let w1 = resource.clone().to_js(lock);
-        ctx.set_global("w1", w1);
+        ctx.set_global(lock, "w1", w1);
         let w2 = resource.to_js(lock);
-        ctx.set_global("w2", w2);
+        ctx.set_global(lock, "w2", w2);
 
         // Both wraps should return the exact same JS object
         let same: bool = ctx.eval(lock, "w1 === w2").unwrap();
@@ -715,7 +715,7 @@ fn resource_data_survives_gc_via_js_global() {
             name: "survivor".to_owned(),
         });
         let wrapped = resource.to_js(lock);
-        ctx.set_global("obj", wrapped);
+        ctx.set_global(lock, "obj", wrapped);
 
         // Force GC — the global reference should keep it alive
         crate::Harness::request_gc(lock);
@@ -746,7 +746,7 @@ fn parent_ref_keeps_child_alive_through_gc() {
             optional_child: None,
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         // Drop all Rust refs
         std::mem::drop(child);
@@ -846,7 +846,7 @@ fn nullable_ref_some_keeps_child_alive_through_gc() {
             child: jsg::Nullable::Some(child.clone()),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         // Drop all Rust refs
         std::mem::drop(child);
@@ -879,7 +879,7 @@ fn nullable_ref_null_does_not_crash_during_gc() {
             child: jsg::Nullable::Null,
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(parent);
 
@@ -907,7 +907,7 @@ fn nullable_ref_undefined_does_not_crash_during_gc() {
             child: jsg::Nullable::Undefined,
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(parent);
 
@@ -1252,7 +1252,7 @@ fn cell_ref_keeps_child_alive_through_gc() {
             child: Cell::new(child.clone()),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         // Drop all Rust refs.
         std::mem::drop(child);
@@ -1286,7 +1286,7 @@ fn cell_option_ref_some_keeps_child_alive_through_gc() {
             child: Cell::new(Some(child.clone())),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
         std::mem::drop(parent);
@@ -1316,7 +1316,7 @@ fn cell_option_ref_none_does_not_crash_during_gc() {
             child: Cell::new(None),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(parent);
 
@@ -1345,7 +1345,7 @@ fn cell_nullable_ref_some_keeps_child_alive_through_gc() {
             child: Cell::new(jsg::Nullable::Some(child.clone())),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
         std::mem::drop(parent);
@@ -1375,7 +1375,7 @@ fn cell_nullable_ref_null_does_not_crash_during_gc() {
             child: Cell::new(jsg::Nullable::Null),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(parent);
 
@@ -1404,7 +1404,7 @@ fn std_cell_ref_keeps_child_alive_through_gc() {
             child: std::cell::Cell::new(child.clone()),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
         std::mem::drop(parent);

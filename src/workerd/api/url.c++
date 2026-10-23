@@ -151,7 +151,7 @@ kj::String kjUrlToString(const kj::Url& url) {
                 "Invalid hostname when stringifying URL."_kj},
               {"invalid name in URL path"_kj, "Invalid pathname when stringifying URL."_kj},
             })) {
-      kj::throwFatalException(kj::mv(e));
+      kj::throwException(kj::mv(e));
     }
 
     // This is either an error we should know about and expect, or an "internal error". Either way,

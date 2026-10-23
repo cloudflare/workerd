@@ -274,6 +274,11 @@ class Wrappable: public kj::Refcounted {
   // zapped handle.
   kj::Maybe<v8::Local<v8::Object>> tryGetHandle(v8::Isolate* isolate);
 
+  // The isolate a wrapper was last attached in, or null if none ever was or that isolate is gone.
+  v8::Isolate* getIsolate() const {
+    return isolate;
+  }
+
   // Visits a Ref<T> pointing at this Wrappable. `refParent` and `refStrong` are the members of
   // `Ref<T>`, and this method is invoked on the object the ref points at. (This avoids the need
   // to templatize the implementation of this method.)

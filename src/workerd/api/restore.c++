@@ -533,7 +533,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreRpcStubCustomEvent::sen
     if (revokePaf.fulfiller->isWaiting()) {
       revokePaf.fulfiller->reject(e.clone());
     }
-    kj::throwFatalException(kj::mv(e));
+    kj::throwException(kj::mv(e));
   }
 
   co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};

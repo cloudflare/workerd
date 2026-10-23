@@ -240,6 +240,7 @@ export {
   thenGetterCancelsBranchDuringEnqueueBacklog,
   thenGetterCancelsBranchDuringClose,
   thenGetterCancelsTwoBranchesDuringEnqueue,
+  thenGetterReleasesReaderWhileReadsSettle,
 } from 'then-interceptors';
 
 export {
@@ -276,3 +277,5 @@ export {
   fromBuildsNoDictionariesFromObjectPrototype,
   asyncIteratorShape,
 } from 'pollution';
+
+export { readerClosedIsMarkedHandled } from 'unhandled-rejection';

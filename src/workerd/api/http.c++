@@ -962,6 +962,32 @@ constexpr bool isRedirectStatusCode(uint statusCode) {
       return false;
   }
 }
+
+// Throws TypeError if `statusText` is not acceptable as a Response's status message.
+void validateStatusText(jsg::Lock& js, kj::StringPtr statusText) {
+  if (FeatureFlags::get(js).getPedanticWpt()) {
+    // ResponseInit.statusText is a WebIDL ByteString, so each UTF-16 code unit must be at most
+    // 0xFF, and the Fetch spec additionally requires it to match the HTTP reason-phrase
+    // production, *( HTAB / SP / VCHAR / obs-text ).
+    // https://fetch.spec.whatwg.org/#initialize-a-response
+    auto utf16 = kj::encodeUtf16(statusText);
+    for (char16_t c: utf16) {
+      JSG_REQUIRE(c <= 0xFF && (c == '\t' || (c >= 0x20 && c != 0x7F)), TypeError,
+          "Invalid statusText");
+    }
+    return;
+  }
+
+  // Disallow control characters (especially \r and \n) in statusText since it could allow
+  // header injection.
+  //
+  // TODO(cleanup): Once this is deployed, update open-source KJ HTTP to do this automatically.
+  for (char c: statusText) {
+    if (static_cast<byte>(c) < 0x20u) {
+      JSG_FAIL_REQUIRE(TypeError, "Invalid statusText");
+    }
+  }
+}
 }  // namespace
 
 Response::Response(jsg::Lock& js,
@@ -1067,15 +1093,7 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
   }
 
   KJ_IF_SOME(s, statusText) {
-    // Disallow control characters (especially \r and \n) in statusText since it could allow
-    // header injection.
-    //
-    // TODO(cleanup): Once this is deployed, update open-source KJ HTTP to do this automatically.
-    for (char c: s) {
-      if (static_cast<byte>(c) < 0x20u) {
-        JSG_FAIL_REQUIRE(TypeError, "Invalid statusText");
-      }
-    }
+    validateStatusText(js, s);
   }
 
   KJ_IF_SOME(bi, bodyInit) {
@@ -1300,9 +1318,20 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     return wsPromise;
   } else KJ_IF_SOME(jsBody, getBody(js)) {
     auto encoding = getContentEncoding(context, outHeaders, bodyEncoding, FeatureFlags::get(js));
+    auto flushAfterWrite = FlushCompressionAfterWrite::NO;
+    if (encoding != StreamEncoding::IDENTITY) {
+      KJ_IF_SOME(contentType, outHeaders.get(kj::HttpHeaderId::CONTENT_TYPE)) {
+        KJ_IF_SOME(mimeType, MimeType::extract(contentType)) {
+          if (mimeType == MimeType::EVENT_STREAM) {
+            flushAfterWrite = FlushCompressionAfterWrite::YES;
+          }
+        }
+      }
+    }
     auto maybeLength = jsBody.tryGetLength(js, encoding);
-    auto stream =
-        newSystemStream(outer.send(statusCode, getStatusText(), outHeaders, maybeLength), encoding);
+    auto stream = newSystemStream(
+        outer.send(statusCode, getStatusText(), outHeaders, maybeLength), encoding, context,
+        flushAfterWrite);
     // We need to enter the AsyncContextFrame that was captured when the
     // Response was created before starting the loop.
     jsg::AsyncContextFrame::Scope scope(js, asyncContext);
@@ -1925,7 +1954,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
         } catch (...) {
           auto exception = kj::getCaughtExceptionAsKj();
           if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
-            kj::throwFatalException(kj::mv(exception));
+            kj::throwException(kj::mv(exception));
           }
           // Ignore DISCONNECTED exceptions thrown by the writePromise, so that we always
           // return the server's response, which should identify if any issue occurred with

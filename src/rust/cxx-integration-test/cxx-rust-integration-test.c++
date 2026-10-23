@@ -63,7 +63,7 @@ KJ_TEST("test crashing callback") {
 
 KJ_TEST("test recoverable exception callback") {
   rust::test::TestCallback callback = [](size_t a, size_t b) -> size_t {
-    kj::throwRecoverableException(KJ_EXCEPTION(DISCONNECTED, "Premature EOF."));
+    kj::throwExceptionUnlessUnwinding(KJ_EXCEPTION(DISCONNECTED, "Premature EOF."));
     KJ_UNREACHABLE;
   };
   // std::terminate is called when c++ throws unhandled recoverable exception

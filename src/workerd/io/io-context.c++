@@ -269,7 +269,7 @@ IoContext::IoContext(ThreadContext& thread,
           worker->runInLockScope(asyncLock, [&](Worker::Lock& lock) {
             lock.logUncaughtException(
                 jsg::extractTunneledExceptionDescription(exception.getDescription()));
-            kj::throwFatalException(kj::mv(exception));
+            kj::throwException(kj::mv(exception));
           });
         }
       }))();
@@ -507,7 +507,7 @@ IoContext::IncomingRequest::~IoContext_IncomingRequest() noexcept(false) {
 
   KJ_IF_SOME(exception, cancellationException) {
     unwindDetector.catchExceptionsIfUnwinding(
-        [&]() { kj::throwRecoverableException(kj::mv(exception)); });
+        [&]() { kj::throwExceptionUnlessUnwinding(kj::mv(exception)); });
   }
 }
 
@@ -934,7 +934,7 @@ kj::Own<void> IoContext::registerPendingEvent() {
     return kj::addRef(pe);
   } else {
     KJ_IF_SOME(e, abortException) {
-      kj::throwFatalException(e.clone());
+      kj::throwException(e.clone());
     }
 
     // Cancel any already-scheduled finalization.
@@ -954,7 +954,7 @@ IoContext::TimeoutManagerImpl::TimeoutState::TimeoutState(
 }
 
 IoContext::TimeoutManagerImpl::TimeoutState::~TimeoutState() {
-  KJ_ASSERT(!isRunning);
+  KJ_DTOR_ASSERT(!isRunning);
   if (!isCanceled) {
     ++manager.timeoutsFinished;
   }
@@ -1776,7 +1776,7 @@ void IoContext::runImpl(Runnable& runnable,
         // Check if we were aborted. TerminateExecution() may be called after abort() in order
         // to prevent any more JavaScript from executing.
         KJ_IF_SOME(e, abortException) {
-          kj::throwFatalException(e.clone());
+          kj::throwException(e.clone());
         }
 
         // That should have thrown, so we shouldn't get here.

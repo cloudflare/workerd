@@ -204,7 +204,7 @@ class TestService final: public kj::HttpService {
     } else if (url == "/unimplemented") {
       KJ_UNIMPLEMENTED("not here");
     } else if (url == "/disconnected") {
-      kj::throwFatalException(KJ_EXCEPTION(DISCONNECTED, "gone"));
+      kj::throwException(KJ_EXCEPTION(DISCONNECTED, "gone"));
     } else if (url == "/fail-mid-body") {
       auto out = response.send(200, "OK", responseHeaders, static_cast<uint64_t>(10));
       co_await out->write("hello"_kj.asBytes());

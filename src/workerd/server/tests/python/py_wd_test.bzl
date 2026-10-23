@@ -164,7 +164,7 @@ def _capnp_bundles_file_group():
     # the Pyodide bundle.
     copy_file(
         name = "pyodide_dev.capnp.bin@rule",
-        src = "//src/pyodide:pyodide.capnp.bin_cross",
+        src = "//src/pyodide:pyodide.capnp.bin",
         out = "pyodide-bundle-cache/pyodide_dev.capnp.bin",
         visibility = ["//visibility:public"],
     )

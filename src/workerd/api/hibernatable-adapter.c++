@@ -164,6 +164,10 @@ void HibernatableWebSocketAdapter::setObserver(kj::Own<WebSocketObserver>) {
   unimplemented();
 }
 
+kj::Ptr<bool> HibernatableWebSocketAdapter::getDispatchFailed() {
+  unimplemented();
+}
+
 void HibernatableWebSocketAdapter::visitForGc(jsg::GcVisitor&) {
   // No-op until the new adapter holds GC-traced state.
 }

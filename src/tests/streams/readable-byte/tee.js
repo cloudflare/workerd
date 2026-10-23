@@ -8,7 +8,7 @@
 
 import { strictEqual, ok, deepStrictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
-import { drainBytes, rejectionOf } from 'helpers';
+import { assertFractionalFillError, drainBytes, rejectionOf } from 'helpers';
 
 // Chunks are CLONED per branch: neither branch's chunk shares a buffer
 // with the other or with the (detached) original, and mutation does not
@@ -508,7 +508,6 @@ export const teeNativeBodyAfterReleaseMidRead = {
 // bytes under { min: 2 }.
 export const teeBranchFractionalCloseErrorsBranch = {
   async test() {
-    const expected = 'Insufficient bytes to fill elements in the given view';
     const makeTee = () => {
       let controller;
       const rs = new ReadableStream({
@@ -532,8 +531,9 @@ export const teeBranchFractionalCloseErrorsBranch = {
       strictEqual(r1.value.length, 1);
       const r2 = reader.read(new Uint16Array(4));
       if (usingTsImpl) {
-        strictEqual((await rejectionOf(r2)).message, expected);
-        strictEqual((await rejectionOf(reader.closed)).message, expected);
+        const error = await rejectionOf(r2);
+        assertFractionalFillError(error);
+        strictEqual(await rejectionOf(reader.closed), error);
       } else {
         const r = await r2;
         strictEqual(r.value.byteLength, 0);
@@ -553,8 +553,9 @@ export const teeBranchFractionalCloseErrorsBranch = {
       controller.enqueue(new Uint8Array(bytes));
       controller.close();
       if (usingTsImpl) {
-        strictEqual((await rejectionOf(read)).message, expected);
-        strictEqual((await rejectionOf(reader.closed)).message, expected);
+        const error = await rejectionOf(read);
+        assertFractionalFillError(error);
+        strictEqual(await rejectionOf(reader.closed), error);
       } else {
         const r = await read;
         strictEqual(r.done, false);
@@ -575,7 +576,6 @@ export const teeBranchFractionalCloseErrorsBranch = {
 // Both shapes of teeBranchFractionalCloseErrorsBranch.
 export const teeSoleBranchFractionalCloseSkipsSourceCancel = {
   async test() {
-    const expected = 'Insufficient bytes to fill elements in the given view';
     for (const pendingAtClose of [true, false]) {
       let controller;
       let cancelled = false;
@@ -598,7 +598,7 @@ export const teeSoleBranchFractionalCloseSkipsSourceCancel = {
       const last = pendingAtClose ? first : reader.read(new Uint16Array(4));
       if (!pendingAtClose) strictEqual((await first).value.length, 1);
       if (usingTsImpl) {
-        strictEqual((await rejectionOf(last)).message, expected);
+        assertFractionalFillError(await rejectionOf(last));
       } else {
         strictEqual((await last).value.byteLength, 0);
       }
@@ -615,7 +615,6 @@ export const teeSoleBranchFractionalCloseSkipsSourceCancel = {
 // ends both cleanly, each read with an empty view.
 export const teeBranchesFractionalCloseErrorEach = {
   async test() {
-    const expected = 'Insufficient bytes to fill elements in the given view';
     let controller;
     let cancelled = false;
     const rs = new ReadableStream({
@@ -636,8 +635,8 @@ export const teeBranchesFractionalCloseErrorEach = {
     controller.close();
     for (let i = 0; i < readers.length; i++) {
       if (usingTsImpl) {
-        strictEqual((await rejectionOf(reads[i])).message, expected);
-        strictEqual((await rejectionOf(readers[i].closed)).message, expected);
+        assertFractionalFillError(await rejectionOf(reads[i]));
+        assertFractionalFillError(await rejectionOf(readers[i].closed));
       } else {
         const { done, value } = await reads[i];
         strictEqual(done, false);
@@ -686,6 +685,41 @@ export const teeHeldByobRequestWithReleasedBytes = {
       deepStrictEqual([...(await drainBytes(a, readerA))], [1, 2, 9]);
       deepStrictEqual([...(await drainBytes(b, readerB))], [1, 2, 9]);
     }
+  },
+};
+
+// Ledger #25 with the request first taken after tee(): the released read
+// holds 3 of its 8 bytes, and the source took no request after filling
+// them. The request is over the rest of the read's buffer (parity), and
+// responding delivers the held bytes with the new ones to both branches
+// under TS (spec); C++ drops the held bytes.
+export const teeByobRequestFirstTakenAfterTee = {
+  async test() {
+    let controller;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        controller = c;
+      },
+    });
+    const reader = rs.getReader({ mode: 'byob' });
+    const read = reader.read(new Uint8Array(8), { min: 8 });
+    await scheduler.wait(5);
+    controller.byobRequest.view.set([1, 2, 3]);
+    controller.byobRequest.respond(3);
+    reader.releaseLock();
+    await rejectionOf(read);
+    const [a, b] = rs.tee();
+    const { view } = controller.byobRequest;
+    strictEqual(view.byteOffset, 3);
+    strictEqual(view.byteLength, 5);
+    strictEqual(view.buffer.byteLength, 8);
+    view.set([4, 5, 6, 7, 8]);
+    controller.byobRequest.respond(5);
+    const expected = usingTsImpl ? [1, 2, 3, 4, 5, 6, 7, 8] : [4, 5, 6, 7, 8];
+    deepStrictEqual([...(await a.getReader().read()).value], expected);
+    deepStrictEqual([...(await b.getReader().read()).value], expected);
+    controller.close();
   },
 };
 
@@ -848,7 +882,7 @@ export const teeHeldByobRequestFractionalAtClose = {
         strictEqual(controller.byobRequest, null);
         for (const branch of live) {
           const result = branch.getReader().read();
-          strictEqual((await rejectionOf(result)).message, expected);
+          assertFractionalFillError(await rejectionOf(result));
         }
       } else {
         controller.close();
@@ -875,7 +909,6 @@ export const teeHeldByobRequestFractionalAtClose = {
 // request stays.
 export const teeHeldByobRequestFromBranchFractionalAtClose = {
   async test() {
-    const expected = 'Insufficient bytes to fill elements in the given view';
     let controller;
     let cancelled = false;
     const rs = new ReadableStream({
@@ -904,7 +937,7 @@ export const teeHeldByobRequestFromBranchFractionalAtClose = {
     for (const branch of branches) {
       const result = branch.getReader().read();
       if (usingTsImpl) {
-        strictEqual((await rejectionOf(result)).message, expected);
+        assertFractionalFillError(await rejectionOf(result));
       } else {
         strictEqual((await result).done, true);
       }

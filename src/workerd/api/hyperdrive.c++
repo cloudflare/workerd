@@ -149,16 +149,16 @@ kj::Promise<kj::Own<kj::AsyncIoStream>> Hyperdrive::connectToDb() {
   KJ_IF_SOME(e, status.errorBody) {
     try {
       auto errorBody = co_await e->readAllText();
-      kj::throwFatalException(
+      kj::throwException(
           KJ_EXCEPTION(FAILED, kj::str("unexpected error connecting to database: ", errorBody)));
     } catch (const kj::Exception& e) {
-      kj::throwFatalException(KJ_EXCEPTION(FAILED,
+      kj::throwException(KJ_EXCEPTION(FAILED,
           kj::str("unexpected error connecting to database "
                   "and couldn't read error details: ",
               e)));
     }
   } else {
-    kj::throwFatalException(KJ_EXCEPTION(
+    kj::throwException(KJ_EXCEPTION(
         FAILED, kj::str("unexpected error connecting to database: ", status.statusText)));
   }
 }

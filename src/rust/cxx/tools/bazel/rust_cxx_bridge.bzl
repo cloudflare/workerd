@@ -39,10 +39,6 @@ def rust_cxx_bridge(name, src, deps = [], hdrs = [], linkstatic = True, include_
             "$(execpath %s.cc)" % src,
         ],
         tool = "//src/rust/cxx:codegen",
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
         **kwargs
     )
 

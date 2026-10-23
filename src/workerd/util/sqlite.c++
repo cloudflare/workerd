@@ -212,7 +212,7 @@ void appendErrorContext(kj::Exception& e, kj::Maybe<kj::StringPtr> errorContext)
     kj::Exception&& e, kj::StringPtr tag, kj::Maybe<kj::StringPtr> errorContext) {
   appendErrorContext(e, errorContext);
   tagSentry(e, tag);
-  kj::throwFatalException(kj::mv(e));
+  kj::throwException(kj::mv(e));
 }
 
 // Report that in a sqlite VFS callback, an exception was caught, and SQLITE_IOERROR is being
@@ -249,11 +249,11 @@ class SqliteCallScope {
     KJ_IF_SOME(e, error) {
       appendErrorContext(e, errorContext);
       // Slight hack: The exception already has a stack trace attached which should include the
-      // current stack, but `kj::throwFatalException()` would re-append the current stack trace
+      // current stack, but `kj::throwException()` would re-append the current stack trace
       // to the exception. We can avoid that by calling
-      // kj::getExceptionCallback().onFatalException() directly, which is what
-      // `throwFatalException()` does after extending the stack.
-      kj::getExceptionCallback().onFatalException(kj::mv(e));
+      // kj::getExceptionCallback().onException() directly, which is what
+      // `throwException()` does after extending the stack.
+      kj::getExceptionCallback().onException(kj::mv(e));
     }
   }
 
@@ -692,9 +692,7 @@ SqliteDatabase::~SqliteDatabase() noexcept(false) {
     err = sqlite3_close_v2(db);
   }
 
-  KJ_REQUIRE(err == SQLITE_OK, sqlite3_errstr(err)) {
-    break;
-  }
+  KJ_DTOR_REQUIRE(err == SQLITE_OK, sqlite3_errstr(err));
 }
 
 SqliteDatabase::operator sqlite3*() {
@@ -903,7 +901,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(StaticRegulator re
       if (prepareResult == SQLITE_AUTH) {
         KJ_IF_SOME(error, parseContext.authError) {
           // Throw the tailored auth error.
-          kj::throwFatalException(kj::mv(error));
+          kj::throwException(kj::mv(error));
         }
         // we don't have a better error, so fall back to SQLITE_CALL_FAILED below
       }

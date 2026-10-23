@@ -21,6 +21,6 @@ def wd_ts_test(src, tsconfig_json, deps = [], eslintrc_json = None, composite = 
         name = name,
         entry_point = js_name(src),
         data = deps + [name + "@compile"],
-        tags = ["no-arm64", "js-test"],
+        tags = ["js-test"],
         **kwargs
     )

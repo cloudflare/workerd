@@ -1217,7 +1217,7 @@ KJ_TEST("SQLite error context is appended to internal errors only") {
   class ReportingRegulator: public SqliteDatabase::Regulator {
    public:
     void onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const override {
-      kj::throwFatalException(KJ_EXCEPTION(FAILED, "reported", message));
+      kj::throwException(KJ_EXCEPTION(FAILED, "reported", message));
     }
   };
   static ReportingRegulator regulator;
@@ -1591,7 +1591,7 @@ class ErrorInjectableFile final: public kj::File, public kj::AtomicRefcounted {
 
   void write(uint64_t offset, kj::ArrayPtr<const byte> data) const override {
     KJ_IF_SOME(e, error) {
-      kj::throwFatalException(e.clone());
+      kj::throwException(e.clone());
     }
     inner->write(offset, data);
   }
@@ -1674,7 +1674,7 @@ class ErrorInjectableDirectory final: public kj::Directory, public kj::AtomicRef
 
   kj::Maybe<kj::Own<const kj::ReadableFile>> tryOpenFile(kj::PathPtr path) const override {
     KJ_IF_SOME(e, error) {
-      kj::throwFatalException(e.clone());
+      kj::throwException(e.clone());
     }
     return getSlot(path).map([](kj::Own<ErrorInjectableFile>& file) { return file->clone(); });
   }

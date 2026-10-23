@@ -17,7 +17,6 @@ sh_test(
     ],
     # Requires curl, which may not be available under remote execution
     tags = [
-        "no-qemu",
         "no-remote-exec",
     ],
 )

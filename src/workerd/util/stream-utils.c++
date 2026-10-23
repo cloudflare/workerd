@@ -131,7 +131,7 @@ class NeuterableInputStreamImpl final: public NeuterableInputStream {
         return *stream;
       }
       KJ_CASE_ONEOF(exception, kj::Exception) {
-        kj::throwFatalException(exception.clone());
+        kj::throwException(exception.clone());
       }
     }
     KJ_UNREACHABLE;
@@ -234,13 +234,13 @@ class NeuterableIoStreamImpl final: public NeuterableIoStream {
     KJ_IF_SOME(stream, inner.tryGet<kj::AsyncIoStream*>()) {
       return *stream;
     }
-    kj::throwFatalException(inner.get<kj::Exception>().clone());
+    kj::throwException(inner.get<kj::Exception>().clone());
   }
   kj::AsyncIoStream& getStream() const {
     KJ_IF_SOME(stream, inner.tryGet<kj::AsyncIoStream*>()) {
       return *stream;
     }
-    kj::throwFatalException(inner.get<kj::Exception>().clone());
+    kj::throwException(inner.get<kj::Exception>().clone());
   }
 };
 

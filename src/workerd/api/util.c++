@@ -91,9 +91,9 @@ namespace {
               "unnecessary calls to Request/Response.clone() and ReadableStream.tee(), and always read "
               "clones/tees in parallel."_kj},
           })) {
-    kj::throwFatalException(kj::mv(e));
+    kj::throwException(kj::mv(e));
   }
-  kj::throwFatalException(kj::mv(exception));
+  kj::throwException(kj::mv(exception));
 }
 
 template <typename Func>
