@@ -383,6 +383,19 @@ wd_cc_library(
 
 exports_files(["autogate.h"])
 
+wd_cc_library(
+    name = "oidc",
+    srcs = ["oidc.c++"],
+    hdrs = ["oidc.h"],
+    visibility = ["//visibility:public"],
+    deps = ["@capnp-cpp//src/kj"],
+)
+
+kj_test(
+    src = "oidc-test.c++",
+    deps = [":oidc"],
+)
+
 [
     kj_test(
         src = f,

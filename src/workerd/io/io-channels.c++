@@ -8,6 +8,12 @@
 
 namespace workerd {
 
+kj::Promise<kj::String> IoChannelFactory::getOidcToken(OidcTokenRequest request) {
+  return JSG_KJ_EXCEPTION(FAILED, Error,
+      "OIDC token issuance is not supported by this runtime. It requires a deployed Worker or "
+      "Durable Object with a configured OIDC host signer.");
+}
+
 IoChannelFactory::ActorRetryRequestMetadata generateActorRetryRequestMetadata(
     kj::Date createdAt, ActorRetryGateEnabled retryGateEnabled) {
   static thread_local auto generator = [] {

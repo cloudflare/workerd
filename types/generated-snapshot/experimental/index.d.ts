@@ -500,6 +500,7 @@ interface ExecutionContext<Props = unknown> {
     readonly override?: string;
   };
   readonly access?: CloudflareAccessContext;
+  oidc: CloudflareOidcContext;
   mapVirtualHost(fetcher: Fetcher, port: number): string;
   tracing: Tracing;
   abort(reason?: any): void;
@@ -612,6 +613,13 @@ interface CloudflareAccessContext {
   readonly aud: string;
   getIdentity(): Promise<CloudflareAccessIdentity | undefined>;
 }
+interface CloudflareOidcContext {
+  getToken(options?: CloudflareOidcTokenOptions): Promise<string>;
+}
+interface CloudflareOidcTokenOptions {
+  audience?: string;
+  subject?: "object" | "namespace";
+}
 declare abstract class ColoLocalActorNamespace {
   get(actorId: string): Fetcher;
 }
@@ -719,6 +727,7 @@ interface DurableObjectState<Props = unknown> {
   readonly id: DurableObjectId;
   readonly storage: DurableObjectStorage;
   container?: Container;
+  oidc: CloudflareOidcContext;
   facets: DurableObjectFacets;
   version?: DurableObjectStateVersion;
   readonly primaryStub?: DurableObjectStub;

@@ -1725,4 +1725,10 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # bookmark as an opaque handle that can be passed over RPC, and
   # DurableObjectStorage.onNextSessionRestore(), which restores a snapshot or bookmark when the
   # next session starts. The experimental catch-all flag also exposes these methods.
+
+  workersOidc @196 :Bool
+      $compatEnableFlag("workers_oidc")
+      $experimental;
+  # Exposes ctx.oidc.getToken() on ExecutionContext and DurableObjectState. Token issuance
+  # requires a host signer with trusted workload identity metadata. There is no enable date.
 }
