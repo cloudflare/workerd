@@ -58,6 +58,15 @@ mod ffi {
             callback: unsafe fn(usize /* callback */, *mut Isolate, Pin<&mut EvalContext>),
         );
 
+        /// Drops the realm, then calls `callback` and runs a full GC, under the isolate lock.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn drop_realm_then_gc(
+            self: &TestHarness,
+            data: usize, /* callback */
+            callback: unsafe fn(usize /* callback */),
+        );
+
         pub unsafe fn eval(
             self: &EvalContext,
             code: &str,
@@ -299,6 +308,45 @@ impl Harness {
         unsafe {
             self.0
                 .run_in_context(&raw mut call as usize, trampoline::<F>);
+        }
+        if let Some(payload) = call.panic {
+            std::panic::resume_unwind(payload);
+        }
+    }
+
+    /// Drops the realm, as the isolate's teardown does before it disposes the isolate, then runs
+    /// `f` and a full GC, all with the isolate locked but no context or scope. `f` therefore
+    /// cannot use any handle. The harness, which cannot run anything without its realm, is
+    /// dropped afterwards.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `f` panics, once the GC has run.
+    pub fn drop_realm_then_gc<F: FnOnce()>(self, f: F) {
+        struct Call<F> {
+            f: Option<F>,
+            panic: Option<Box<dyn std::any::Any + Send>>,
+        }
+
+        fn trampoline<F: FnOnce()>(data: usize) {
+            // SAFETY: data was cast from &raw mut Call<F> in drop_realm_then_gc below.
+            let call = unsafe { &mut *(data as *mut Call<F>) };
+            let Some(f) = call.f.take() else {
+                return;
+            };
+            if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+                call.panic = Some(payload);
+            }
+        }
+
+        let mut call = Call {
+            f: Some(f),
+            panic: None,
+        };
+        // SAFETY: `call` is valid for the duration of drop_realm_then_gc.
+        unsafe {
+            self.0
+                .drop_realm_then_gc(&raw mut call as usize, trampoline::<F>);
         }
         if let Some(payload) = call.panic {
             std::panic::resume_unwind(payload);

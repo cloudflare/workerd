@@ -50,11 +50,16 @@ class TestHarness {
   // The callback receives the data pointer, isolate and a context
   void run_in_context(size_t data, ::rust::Fn<void(size_t, Isolate*, EvalContext&)> callback) const;
 
+  // Drops the realm, as the isolate's teardown does first, then calls the callback with the data
+  // pointer and runs a full GC, all under the isolate lock. Nothing but the harness's destructor
+  // may use the harness afterwards.
+  void drop_realm_then_gc(size_t data, ::rust::Fn<void(size_t)> callback) const;
+
  private:
   mutable kj::Own<TestIsolate> isolate;
   mutable v8::Locker locker;
   mutable v8::Isolate::Scope isolateScope;
-  mutable ::rust::Box<::workerd::rust::jsg::Realm> realm;
+  mutable kj::Maybe<::rust::Box<::workerd::rust::jsg::Realm>> realm;
 };
 
 // `flags` is a canonical `CompatibilityFlags` message. It sets the Rust realm's flags and, as

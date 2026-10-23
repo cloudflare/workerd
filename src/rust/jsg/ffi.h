@@ -29,6 +29,7 @@ struct MaybeLocal;
 struct Global;
 struct TracedReference;
 struct Realm;
+struct IsolateState;
 struct GcVisitor;
 enum class BackingStoreInitializationMode : ::std::uint8_t;
 enum class ExceptionType : ::std::uint8_t;
@@ -362,7 +363,7 @@ Local function_template_get_function(Isolate* isolate, const Global& tmpl);
 Realm* realm_from_isolate(Isolate* isolate);
 bool realm_can_attach(Isolate* isolate);
 void realm_attach(Isolate* isolate, Realm& realm);
-void realm_detach(Isolate* isolate);
+void realm_detach(Isolate* isolate, const IsolateState* state);
 
 // Errors
 // Builds an exception whose message is raw bytes interpreted as UTF-8. Invalid

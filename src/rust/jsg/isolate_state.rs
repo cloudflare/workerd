@@ -18,14 +18,24 @@
 //!   memory.
 //!
 //! The [`Realm`](crate::Realm) therefore owns an [`IsolateState`], shared through an `Arc`
-//! with every `Global` of its isolate. [`IsolateState::drop_handle`] resets a dropped
-//! `Global`'s handle at once under the lock, queues it otherwise, and leaves it to `Dispose`
-//! once the state is closed. [`IsolateState::reset_awaiting_lock`] empties the queue; it runs
+//! with every `Global` of its isolate. [`IsolateState::drop_slot`] resets a dropped `Global`'s
+//! strong handle at once under the lock, queues it otherwise, and leaves it to `Dispose` once
+//! the state is closed. [`IsolateState::reset_awaiting_lock`] empties the queue; it runs
 //! from the `IsolateBase` deferred action hook, which `IsolateBase::Lock` calls whenever it
 //! locks the isolate, the same point at which C++ JSG applies its own deferred destruction
 //! queue. A bare `v8::Locker`, or relocking after a `v8::Unlocker`, does not empty the queue;
 //! the handles then wait for the next `IsolateBase::Lock`. The `Realm` closes the state when
 //! it is dropped, under the isolate lock, before the isolate is disposed.
+//!
+//! A `Global` keeps its handles in a [`GlobalSlot`], whose address V8 may record to null the
+//! strong handle when it is weak and its value dies, during any GC. GC runs on the thread
+//! holding the isolate lock, so a slot is only read under the lock, and freed only once its
+//! strong handle has been reset or the isolate disposed, after which V8 forgets it. A drop
+//! without the lock queues the slot. After the state is closed the handles are no longer reset,
+//! but GC can still run before the isolate is disposed: during `IsolateBase::dropWrappers`,
+//! while `v8::Isolate::Dispose` tears the heap down, or whenever V8 flags ask for it. So the
+//! slot of a `Global` dropped then is kept until `~IsolateBase` reports, through a hook the
+//! `Realm` set, that the isolate is disposed.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -38,6 +48,7 @@ use std::sync::atomic::Ordering;
 use crate::Isolate;
 use crate::scope::scope_owner;
 use crate::v8;
+use crate::v8::GlobalSlot;
 use crate::v8::ffi;
 
 /// What the handles of an isolate need to know about it after their scopes are gone.
@@ -62,10 +73,19 @@ unsafe impl Send for IsolateState {}
 unsafe impl Sync for IsolateState {}
 
 #[derive(Default)]
+#[expect(
+    clippy::vec_box,
+    reason = "V8 may write into a slot until its handle is reset or the isolate disposed"
+)]
 struct DropQueues {
-    /// Strong handles of `Global`s that were dropped without the isolate lock, waiting for the
-    /// next lock.
-    awaiting_lock: Vec<ffi::Global>,
+    /// Slots of `Global`s that were dropped without the isolate lock, waiting for the next
+    /// lock.
+    awaiting_lock: Vec<Box<GlobalSlot>>,
+    /// Slots of `Global`s that were dropped after the state was closed, waiting for the
+    /// isolate to be disposed.
+    awaiting_dispose: Vec<Box<GlobalSlot>>,
+    /// Set once the isolate is disposed, after which slots are freed at once.
+    disposed: bool,
 }
 
 #[expect(
@@ -109,33 +129,35 @@ impl IsolateState {
         self.closed.load(Ordering::Acquire)
     }
 
-    /// Takes the strong handle of a dropped `Global`.
+    /// Takes the slot of a dropped `Global`.
     ///
-    /// Under the isolate lock the handle is reset at once. Without it the handle is queued,
-    /// and [`reset_awaiting_lock`](Self::reset_awaiting_lock) resets it the next time the
-    /// isolate is locked, so until then it keeps its value alive. Once the state is closed the
-    /// handle is left to `v8::Isolate::Dispose`.
-    pub(crate) fn drop_handle(&self, strong: ffi::Global) {
+    /// Under the isolate lock the strong handle is reset at once, and the slot freed. Without
+    /// it the slot is queued, and [`reset_awaiting_lock`](Self::reset_awaiting_lock) resets and
+    /// frees it the next time the isolate is locked, so until then the handle keeps its value
+    /// alive. Once the state is closed the handle is left to `v8::Isolate::Dispose`, and the
+    /// slot is kept until then. The traced reference is let go of without a reset; see
+    /// [`GcVisitor::visit_global`](crate::v8::GcVisitor::visit_global).
+    pub(crate) fn drop_slot(&self, slot: Box<GlobalSlot>) {
         if self.this_thread_holds_lock() {
-            reset_strong(strong);
+            reset_and_free(slot);
             return;
         }
         let mut queues = self.lock_drop_queues();
-        // `close` takes the queue under the mutex after it sets `closed`, so a handle pushed
+        // `close` takes the queue under the mutex after it sets `closed`, so a slot pushed
         // while the state is open is reset either by the next lock or by `close`.
         if !self.is_closed() {
-            queues.awaiting_lock.push(strong);
+            queues.awaiting_lock.push(slot);
+        } else if !queues.disposed {
+            queues.awaiting_dispose.push(slot);
         }
     }
 
-    /// Resets the handles that [`drop_handle`](Self::drop_handle) queued. The deferred action
-    /// hook calls it whenever `IsolateBase::Lock` locks the isolate.
+    /// Resets and frees the slots that [`drop_slot`](Self::drop_slot) queued. The deferred
+    /// action hook calls it whenever `IsolateBase::Lock` locks the isolate.
     pub(crate) fn reset_awaiting_lock(&self, _isolate: &mut Isolate) {
-        // The handles are reset outside the mutex, which only guards the queue itself.
+        // The handles are reset outside the mutex, which only guards the queues themselves.
         let batch = std::mem::take(&mut self.lock_drop_queues().awaiting_lock);
-        for strong in batch {
-            reset_strong(strong);
-        }
+        batch.into_iter().for_each(reset_and_free);
     }
 
     /// The number of handles waiting for the next lock.
@@ -155,9 +177,18 @@ impl IsolateState {
             self.closed.store(true, Ordering::Release);
             std::mem::take(&mut queues.awaiting_lock)
         };
-        for strong in batch {
-            reset_strong(strong);
-        }
+        batch.into_iter().for_each(reset_and_free);
+    }
+
+    /// Records that the isolate has been disposed, and frees the slots kept for it, which V8
+    /// can no longer write into. Slots dropped from now on are freed at once.
+    pub(crate) fn isolate_disposed(&self) {
+        let kept = {
+            let mut queues = self.lock_drop_queues();
+            queues.disposed = true;
+            std::mem::take(&mut queues.awaiting_dispose)
+        };
+        drop(kept);
     }
 
     fn lock_drop_queues(&self) -> MutexGuard<'_, DropQueues> {
@@ -169,10 +200,15 @@ impl IsolateState {
     }
 }
 
-/// Resets a strong handle. The isolate must be locked by this thread.
+/// Resets a dropped `Global`'s strong handle in place, then frees its slot, which V8 forgets
+/// with the handle. The isolate must be locked by this thread.
 #[expect(unsafe_code, reason = "resets a V8 handle")]
-fn reset_strong(mut strong: ffi::Global) {
-    // SAFETY: the handle is valid and the isolate is locked (guaranteed by caller). `strong`
+#[expect(
+    clippy::boxed_local,
+    reason = "the handle is reset in the box, whose address V8 may have recorded"
+)]
+fn reset_and_free(mut slot: Box<GlobalSlot>) {
+    // SAFETY: the handle is valid and the isolate is locked (guaranteed by caller). The handle
     // is not moved while pinned.
-    unsafe { ffi::global_reset(Pin::new_unchecked(&mut strong)) };
+    unsafe { ffi::global_reset(Pin::new_unchecked(slot.strong.get_mut())) };
 }

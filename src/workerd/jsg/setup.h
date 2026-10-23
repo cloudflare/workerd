@@ -360,6 +360,19 @@ class IsolateBase {
     deferredActionHook = hook;
   }
 
+  // A function that ~IsolateBase() calls with `data` once the isolate is disposed, so that
+  // another layer can free memory that V8 may write into until then. The Rust JSG Realm, of which
+  // an isolate has at most one, sets it when it is dropped. Setting it does not allocate, so a
+  // destructor may do it.
+  using DisposeHook = void (*)(void* data);
+  void setDisposeHook(DisposeHook hook, void* data) {
+    disposeHook = hook;
+    disposeHookData = data;
+  }
+  bool hasDisposeHook() const {
+    return disposeHook != nullptr;
+  }
+
   // Running totals of code V8 has generated in this isolate, from the JIT code event handler.
   // Only counts additions; code that V8 later flushes or collects is not subtracted. Zero when
   // JIT code event tracking is disabled.
@@ -670,6 +683,9 @@ class IsolateBase {
   QueueState queueState = ACTIVE;
 
   DeferredActionHook deferredActionHook = nullptr;
+
+  DisposeHook disposeHook = nullptr;
+  void* disposeHookData = nullptr;
 
   struct CodeBlockInfo {
     size_t size = 0;

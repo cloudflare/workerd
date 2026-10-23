@@ -1255,10 +1255,17 @@ namespace {
 void resetGlobalsAwaitingLock(v8::Isolate* isolate) {
   realm_reset_globals_awaiting_lock(isolate);
 }
+
+// The IsolateBase dispose hook that a Realm sets when it is dropped, with the reference to its
+// IsolateState that it hands over as data.
+void isolateDisposed(void* data) {
+  isolate_disposed(static_cast<const IsolateState*>(data));
+}
 }  // namespace
 
 bool realm_can_attach(Isolate* isolate) {
-  return isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM) == nullptr;
+  return isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM) == nullptr &&
+      !::workerd::jsg::IsolateBase::from(isolate).hasDisposeHook();
 }
 
 void realm_attach(Isolate* isolate, Realm& realm) {
@@ -1266,8 +1273,10 @@ void realm_attach(Isolate* isolate, Realm& realm) {
   ::workerd::jsg::IsolateBase::from(isolate).setDeferredActionHook(&resetGlobalsAwaitingLock);
 }
 
-void realm_detach(Isolate* isolate) {
-  ::workerd::jsg::IsolateBase::from(isolate).setDeferredActionHook(nullptr);
+void realm_detach(Isolate* isolate, const IsolateState* state) {
+  auto& isolateBase = ::workerd::jsg::IsolateBase::from(isolate);
+  isolateBase.setDeferredActionHook(nullptr);
+  isolateBase.setDisposeHook(&isolateDisposed, const_cast<IsolateState*>(state));
   isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, nullptr);
 }
 

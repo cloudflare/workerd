@@ -136,6 +136,14 @@ void TestHarness::run_in_context(
   });
 }
 
+void TestHarness::drop_realm_then_gc(size_t data, ::rust::Fn<void(size_t)> callback) const {
+  isolate->runInLockScope([&](TestIsolate::Lock& lock) {
+    realm = kj::none;
+    callback(data);
+    request_gc(lock.v8Isolate, GcType::Full);
+  });
+}
+
 void request_gc(Isolate* isolate, GcType gc_type) {
   switch (gc_type) {
     case GcType::Full:

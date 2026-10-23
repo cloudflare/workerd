@@ -184,6 +184,12 @@ the strong handle strong again before C++ decides afresh whether to install a ne
 drop just lets go of it. V8 frees nodes that nothing traces at the next full GC; see
 `GcVisitor::visit_global` for the cost of this and how to avoid it.
 
+Bitwise moves are also why a `Global` keeps its handles in a box. In traced mode the strong
+handle is weak, and V8 keeps the address of its slot to null it when the value dies; the box
+keeps that address valid however the `Global` itself moves, for example when the `Vec` holding
+it grows. The box lives until the strong handle has been reset. GC can still run after the
+`Realm` is dropped, so the box of a `Global` dropped then is kept until the isolate is disposed.
+
 A `Global` taken out of its resource is still weak, and nothing traces its value: unless
 something else keeps the value alive, any GC from then on may free it, which leaves the
 `Global` empty, and `as_local` on it panics. Put the `Global` back, or hold the value through

@@ -3,9 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 //! Tests for dropping a `Global` without the isolate lock, or after its isolate is gone, and
-//! for a `Global` that leaves the resource that traces it.
+//! for moving one that GC has visited, in and out of the resource that traces it.
 
 use std::cell::Cell;
+use std::cell::RefCell;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -53,6 +54,28 @@ impl HolderParent {
     #[jsg_method]
     fn set_child_value<'s>(&self, lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) {
         self.child.handle.set(Some(value.to_global(lock)));
+    }
+}
+
+/// A resource that collects `Global`s in a `Vec`, which moves them whenever it grows.
+#[jsg_resource]
+struct HandleList {
+    handles: RefCell<Vec<v8::Global<v8::Value>>>,
+}
+
+#[jsg_resource]
+impl HandleList {
+    #[jsg_method]
+    fn push<'s>(&self, lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) {
+        self.handles.borrow_mut().push(value.to_global(lock));
+    }
+}
+
+static HANDLE_LIST_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+impl Drop for HandleList {
+    fn drop(&mut self) {
+        HANDLE_LIST_DROPS.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -389,4 +412,107 @@ fn traced_global_dropped_without_the_lock_is_released_at_the_next_lock() {
     });
     assert_eq!(used_global_handles_size_at_next_lock(&harness), baseline);
     drop(holder);
+}
+
+/// Wraps a new `HandleList` that collects a value, then GCs, which makes the first `Global`'s
+/// strong handle weak, then has the list grow and leaves it unreachable.
+fn fill_and_abandon_handle_list(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
+    let list = jsg::Rc::new(HandleList {
+        handles: RefCell::new(Vec::new()),
+    });
+    ctx.set_global(lock, "list", list);
+    ctx.eval_raw(lock, "list.push({})")
+        .expect("should evaluate");
+    crate::Harness::request_gc(lock);
+    // Growing the `Vec` moves the first `Global`, and frees the buffer it was in.
+    ctx.eval_raw(lock, "for (let i = 0; i < 64; i++) list.push({})")
+        .expect("should evaluate");
+    ctx.eval_raw(lock, "globalThis.list = undefined")
+        .expect("should evaluate");
+}
+
+/// Once GC has visited a `Global`, V8 holds the address of its weak handle's slot, to null it
+/// when the value dies. A `Vec` that grows moves its `Global`s, so the slot must not move with
+/// them. The values must die in the first GC after the move: a GC that visited them would keep
+/// them alive.
+#[test]
+fn visited_globals_survive_being_moved() {
+    HANDLE_LIST_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    // A first run leaves behind what V8 and the realm keep for the scripts and the type,
+    // ahead of the measurement, so that the measurement only sees the second run's handles.
+    harness.run_in_context(|lock, ctx| {
+        fill_and_abandon_handle_list(lock, ctx);
+        Ok(())
+    });
+    let mut baseline = 0;
+    harness.run_in_context(|lock, ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(HANDLE_LIST_DROPS.load(Ordering::SeqCst), 1);
+        baseline = crate::Harness::used_global_handles_size(lock);
+        fill_and_abandon_handle_list(lock, ctx);
+        Ok(())
+    });
+    harness.run_in_context(|lock, _ctx| {
+        // The first value dies with the list, and V8 nulls its weak slot; the list's drop
+        // then resets every handle.
+        crate::Harness::request_gc(lock);
+        assert_eq!(HANDLE_LIST_DROPS.load(Ordering::SeqCst), 2);
+        assert_eq!(crate::Harness::used_global_handles_size(lock), baseline);
+        Ok(())
+    });
+}
+
+/// A `Global` taken out of its resource keeps its weak handle, and V8 nulls that handle's slot
+/// when the value dies, which it does at the next GC when nothing else holds it. The slot must
+/// still be the one V8 knows, although the `Global` has moved, or the `Global` would go on to
+/// reset a node V8 already freed.
+#[test]
+fn visited_global_taken_out_of_its_resource_sees_its_value_die() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = jsg::Rc::new(HandleHolder {
+            handle: Cell::new(None),
+        });
+        ctx.set_global(lock, "holder", resource.clone());
+        crate::Harness::request_gc(lock);
+        let baseline = crate::Harness::used_global_handles_size(lock);
+        // The value is reachable through the resource's `Global` alone.
+        ctx.eval_raw(lock, "holder.set({})")
+            .expect("should evaluate");
+        // Tracing the wrapper puts the handle in traced mode: weak, with a traced node that
+        // the resource's trace keeps alive.
+        crate::Harness::request_gc(lock);
+        let taken = resource.handle.take().expect("set above");
+        // Nothing traces the node now, so the value dies and V8 nulls the weak handle.
+        crate::Harness::request_gc(lock);
+        drop(taken);
+        assert_eq!(crate::Harness::used_global_handles_size(lock), baseline);
+        Ok(())
+    });
+}
+
+/// GC can still run once the `Realm` is dropped, and V8 then still nulls the weak handle slot of
+/// a visited `Global` when its value dies. The slot of a `Global` dropped after the `Realm` must
+/// therefore outlive that GC, or V8 writes into freed memory, which a memory checker reports.
+#[test]
+fn visited_global_dropped_after_its_realm_keeps_its_slot_through_a_gc() {
+    let harness = crate::Harness::new();
+    let mut taken = None;
+    harness.run_in_context(|lock, ctx| {
+        let resource = jsg::Rc::new(HandleHolder {
+            handle: Cell::new(None),
+        });
+        ctx.set_global(lock, "holder", resource.clone());
+        ctx.eval_raw(lock, "holder.set({}); undefined")
+            .expect("should evaluate");
+        // Tracing the wrapper makes the handle weak.
+        crate::Harness::request_gc(lock);
+        taken = resource.handle.take();
+        Ok(())
+    });
+    let taken = taken.expect("set in the context");
+    // The weak handle is all that refers to the value, which dies in the GC.
+    harness.drop_realm_then_gc(|| drop(taken));
 }
