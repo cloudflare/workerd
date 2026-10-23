@@ -302,7 +302,7 @@ export function globToRegex(pattern: string): RegExp {
 // ============================================================================
 
 // Compiles an array of glob patterns into an exclude function.
-// Only accepts string arrays — user-provided functions are handled
+// Only accepts string arrays - user-provided functions are handled
 // separately in globSync to preserve their (string | Dirent) signature.
 export function compileExcludePatterns(
   exclude: readonly string[]
@@ -411,7 +411,7 @@ export function walkGlob(
 
   const seg = segments[segIdx] ?? '';
 
-  // Handle '.' — stay in current directory
+  // Handle '.' - stay in current directory
   if (seg === '.') {
     walkGlob(
       cwd,
@@ -428,7 +428,7 @@ export function walkGlob(
     return;
   }
 
-  // Handle '..' — go up one directory (but don't escape cwd)
+  // Handle '..' - go up one directory (but don't escape cwd)
   if (seg === '..') {
     if (currentAbsPath === cwd || !currentAbsPath.startsWith(cwd + '/')) {
       return;
@@ -456,7 +456,7 @@ export function walkGlob(
     return;
   }
 
-  // Handle '**' — match zero or more directory levels
+  // Handle '**' - match zero or more directory levels
   if (seg === '**') {
     const gsKey = `${currentAbsPath}:${String(segIdx)}`;
     if (visitedGlobstar === undefined) {
@@ -532,12 +532,12 @@ export function walkGlob(
         : entry.name;
 
       if (segIdx + 1 >= segments.length) {
-        // This is the last segment — record match
+        // This is the last segment - record match
         if (!results.has(childRel)) {
           results.set(childRel, { relativePath: childRel, handle: entry });
         }
       } else {
-        // More segments to match — recurse
+        // More segments to match - recurse
         walkGlob(
           cwd,
           segments,

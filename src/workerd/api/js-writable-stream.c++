@@ -237,7 +237,7 @@ class TsWriterSink final: public WritableStreamSink {
   // result.
   jsg::Promise<void> invokeWriter(
       jsg::Lock& js, kj::StringPtr op, kj::Maybe<jsg::JsValue> arg = kj::none) {
-    auto& w = KJ_UNWRAP_OR(writer, { kj::throwFatalException(disconnectedException()); });
+    auto& w = KJ_UNWRAP_OR(writer, { kj::throwException(disconnectedException()); });
     auto result = webstreams::dispatchCall(
         js, op, jsg::JsValue(w.getHandle(js)), arg.orDefault(jsg::JsValue(js.undefined())));
     return js.toVoidPromise(KJ_REQUIRE_NONNULL(

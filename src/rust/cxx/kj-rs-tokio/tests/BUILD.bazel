@@ -9,10 +9,6 @@ rust_library(
     link_deps = [
         ":bridge",
     ],
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         "//src/rust/cxx",
         "//src/rust/cxx/kj-rs",
@@ -41,10 +37,6 @@ cc_test(
     linkstatic = select({
         "@platforms//os:windows": True,
         "//conditions:default": False,
-    }),
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
     }),
     deps = [
         ":bridge",

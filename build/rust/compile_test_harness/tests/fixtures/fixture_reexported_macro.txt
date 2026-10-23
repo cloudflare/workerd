@@ -1,0 +1,1 @@
+Read by fixture_reexported_macro while it expands.

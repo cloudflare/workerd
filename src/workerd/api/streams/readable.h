@@ -27,6 +27,7 @@ public:
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason);
 
   void detach();
+  void release();
 
   jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed();
 
@@ -130,6 +131,7 @@ public:
   void attach(jsg::Ref<ReadableStream> stream, jsg::Promise<void> closedPromise) override;
 
   void detach() override;
+  void release() override;
 
   void lockToStream(jsg::Lock& js, ReadableStream& stream);
 
@@ -206,6 +208,7 @@ public:
       jsg::Promise<void> closedPromise) override;
 
   void detach() override;
+  void release() override;
 
   void lockToStream(jsg::Lock& js, ReadableStream& stream);
 
@@ -250,6 +253,7 @@ class DrainingReader: public ReadableStreamController::Reader {
   // ReadableStreamController::Reader interface
   void attach(jsg::Ref<ReadableStream> stream, jsg::Promise<void> closedPromise) override;
   void detach() override;
+  void release() override;
   bool isByteOriented() const override { return false; }
 
   void visitForGc(jsg::GcVisitor& visitor);

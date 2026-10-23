@@ -16,6 +16,8 @@
 
 #include <kj/encoding.h>
 
+#include <memory>
+
 namespace workerd::api {
 
 namespace {
@@ -80,7 +82,7 @@ kj::StringPtr validateContentType(kj::StringPtr contentType) {
 }
 
 struct Serialized {
-  kj::Maybe<kj::OneOf<kj::String, kj::Array<kj::byte>, jsg::JsRef<jsg::JsArrayBufferView>>> own;
+  kj::Maybe<kj::OneOf<kj::String, kj::Array<kj::byte>, std::shared_ptr<v8::BackingStore>>> own;
   // Holds onto the owner of a given array of serialized data.
   kj::ArrayPtr<kj::byte> data;
   // A pointer into that data that can be directly written into an outgoing queue send, regardless
@@ -106,9 +108,9 @@ Serialized serializeV8(jsg::Lock& js, const jsg::JsValue& body) {
 // Control whether serialize() copies the ArrayBuffer or holds a shallow reference.
 //
 // send() uses DEEP_COPY, which memcpys into a kj-heap allocation.  sendBatch() uses
-// SHALLOW_REFERENCE, which avoids the copy so the caller can reuse the buffer after the
-// call.  Do not change sendBatch() to DEEP_COPY without a compat flag — users may depend
-// on the buffer remaining usable.
+// SHALLOW_REFERENCE, which does not detach the buffer and observes mutations made by later
+// messages' serialization before encoding the batch. DEEP_COPY detaches detachable buffers;
+// sendBatch() callers can reuse their buffers after the call.
 //
 // SHALLOW_REFERENCE holds a raw pointer into the BackingStore.  This is safe for
 // non-resizable buffers (the BackingStore shared_ptr prevents deallocation), but
@@ -156,10 +158,12 @@ Serialized serialize(jsg::Lock& js,
         result.own = kj::mv(bytes);
         return kj::mv(result);
       }
-      // Non-resizable: safe to hold a shallow reference.
+      // Retain the native allocation, not just the JS view: a later message's serialization
+      // can detach the ArrayBuffer. Mutations before batch encoding remain visible.
+      v8::Local<v8::ArrayBufferView> view = source;
       Serialized result;
+      result.own = view->Buffer()->GetBackingStore();
       result.data = source.asArrayPtr();
-      result.own = source.addRef(js);
       return kj::mv(result);
     } else {
       // DEEP_COPY: the data is held across an async boundary and read by I/O code that runs

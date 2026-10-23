@@ -396,17 +396,17 @@ auto onSuccess = [this, ref = addRef(), ...](...) mutable {
   the pipe down, including while the source's cancel algorithm is invoked. The pipe
   promise may stay pending after that, waiting on the cancel's promise. ONLY the
   destination's pipe machinery may release the lock, and only via
-  `ReadableStreamController::releasePipeLock()` *after* dropping every
+  `ReadableStreamController::releasePipeLock()` _after_ dropping every
   `kj::Ptr<PipeController>` it holds (`Pipe::releaseSource()` /
   `WritableLockImpl::PipeLocked::releaseSource()` encapsulate this ordering). No
-  `PipeController` operation releases the lock, and the *source's* `doClose`/`doError`/
+  `PipeController` operation releases the lock, and the _source's_ `doClose`/`doError`/
   `onClose`/`onError` MUST NOT unlock it — they signal the loop, which then releases
   the lock itself. On the destination, every teardown path that destroys the
   write-side pipe lock state (the loop's terminal branches, `drain()`, and the
   controllers' `doClose`/`doError` when they fire mid-pipe) calls `releaseSource()`
   first.
 - **Keep-alive**: The holder of the `kj::Ptr` also holds a GC-visited
-  `jsg::Ref<ReadableStream>` to the source (declared *before* the `kj::Ptr` so the Ptr
+  `jsg::Ref<ReadableStream>` to the source (declared _before_ the `kj::Ptr` so the Ptr
   is destroyed first), guaranteeing the `PipeController` outlives the pointer even if
   user code drops the source stream mid-pipe.
 
@@ -432,6 +432,29 @@ void onConsumerClose(jsg::Lock& js) override {
   references to `Pipe` in the queue, ensures continuations remain safe if the
   pipe is somehow destroyed while operations are pending.
 
+### Pattern: Traced Queue Entries Leave by Move
+
+- **When**: Taking GC-visited entries (promise resolvers, `jsg::Ref`s, `jsg::JsRef`s)
+  out of a container that `visitForGc()` iterates, e.g. `drain()` on the internal
+  writable controller's `queue`
+- **Why**: Once traced, such a handle is weak and stays valid only while it keeps being
+  traced through the container. Moving the handle itself makes it strong again
+  (`jsg::Data::moveFromTraced`, `jsg::Ref`'s move constructor). Moving the *container*
+  (`RingBuffer`, `std::list`) only transfers its storage and leaves every entry weak and
+  unreached, so a GC before the entries are settled collects them.
+- **Rule**: Move each handle out individually before the entry leaves the container. A
+  non-movable heap entry (`kj::Own<Pipe>`) cannot be re-strengthened that way: it must
+  stay in the container, where it is still traced, while any JS can run, with reentrant
+  teardown guarded by a weak ref.
+
+```cpp
+while (!queue.empty()) {
+  auto promise = kj::mv(queue.front().promise);  // The move makes the handle strong.
+  maybeRejectPromise<void>(js, promise, reason);
+  queue.pop_front();
+}
+```
+
 ### Pattern: Generation Counter
 
 - **When**: `writeLoop()` -- detecting queue modification during async operation
@@ -450,6 +473,47 @@ auto check = [expectedGeneration = queue.currentGeneration()]() {
 - **Rule**: Transition state BEFORE resolving promise. Continuations must see
   consistent state.
 
+Settlement can synchronously enter JavaScript, including through cross-request promise
+warnings. Move pending requests into local ownership and remove them from the live queue
+before settling them. When the consumer remains open, extract entries without moving away
+the reusable ring's storage. Cancellation publishes `Closed` first; explicit release publishes
+the released reader/writer and unlocked controller first, after checking release preconditions.
+Keep the old lock's promises local so callbacks cannot make the outer release clear a new lock.
+Destruction without a JS lock clears traced handles in place and leaves the stream locked.
+
+BYOB responses retain their native wrapper while fan-out settles sibling reads. Recheck the
+originating read's weak identity after fan-out, and copy any unaligned tail before resolving
+the read. Invalidate the read's BYOB handle before settlement; a response may only settle a
+request that still occupies its originating queue's front. Do not retain queue, request, or
+wrapper-state references across settlement.
+
+A native BYOB response serializes progress updates through fan-out and settlement. Nested
+responses to the same request throw before transferring a buffer or publishing bytes, rather
+than counting the same destination range twice. The guard clears when the native response
+returns, before the wrapper updates its view and invokes `pull()`, so a follow-up response
+from that callback sees the new offset and remaining minimum.
+
+Byte responses publish their filled count and typed tail before fan-out. A reservation on the
+pending read prevents overlapping enqueue from consuming its destination during fan-out, even
+after the JS wrapper explicitly revokes its native handle. Byte fan-out buffers every branch
+before settling any read. Draining retires entry offsets and read ownership before settlement,
+reacquires consumer state afterwards, and runs again when the response releases its reservation.
+Wrapper revocation does not discard accepted bytes or suppress reconciliation and pulling.
+Replacement views retain the full destination capacity and previously accepted prefix, so a
+short `respondWithNewView()` can be completed by subsequent responses or queued bytes.
+Only a consumer's front read can receive its first native BYOB handle. Enqueue revokes an exposed
+handle without replacing it; the pending read continues through queued bytes. Exposing a handle
+that has not been revoked absorbs older queued bytes before accepting another response.
+
+Closing byte consumers use the same drain in EOF mode, without consuming the close sentinel or
+creating BYOB handles. Whole-element results below the minimum are delivered with `done: false`.
+Legacy short typed EOF completes a read pending at close with its whole-element prefix (possibly
+empty) and `done: false`. A fresh read at a fractional EOF returns an empty done view. A fractional
+queued tail can still follow a read that met its minimum, and a later byte-sized read can consume
+it. Response reservations delay the terminal transition until fan-out releases them, including
+when no queued bytes remain. Cancellation discards partial progress before returning an empty
+done view.
+
 ```cpp
 void doClose(jsg::Lock& js) {
     state.transitionTo<StreamStates::Closed>();           // State changes NOW
@@ -457,18 +521,31 @@ void doClose(jsg::Lock& js) {
 }
 ```
 
-### Pattern: V8Ref Buffer Ownership
+### Pattern: Private Operation Results
 
-- **When**: Async write operations that reference JS heap data
-- **Why**: GC could collect the buffer while kj async write is in flight
-- **How**: Store `jsg::V8Ref<v8::ArrayBuffer>` alongside raw pointer
+- **Reference**: `AllReader` in `standard.c++`
+- **Ownership**: The operation is a `jsg::Wrappable`. Every read, cancel, and completion
+  continuation independently retains a GC-visited `jsg::Ref` to it; the returned promise
+  settling does not imply that the underlying work has finished.
+- **Completion**: `loop()` returns `jsg::Promise<void>`, not the buffered payload. Promise
+  adoption can invoke JavaScript, so buffered parts and their aggregate size remain local to
+  the operation and completion notifications carry no data.
+- **Consumption**: `takeParts()` requires this operation's `Closed` state and rejects repeat
+  consumption. It verifies that the private parts match the recorded total before transferring
+  ownership. Final copying checks both each part's bounds and that the output is filled exactly.
 
-```cpp
-struct Write {
-    jsg::V8Ref<v8::ArrayBuffer> ownBytes;  // Prevents GC
-    kj::ArrayPtr<kj::byte> bytes;          // Raw pointer into ownBytes
-};
-```
+### Pattern: Native Read Ownership
+
+- **When**: An Internal controller starts an asynchronous native read
+- **Why**: A pipe can release its lock and transfer or cancel its source while the read is pending
+- **How**: The KJ read promise owns both a `kj::Rc<ReadableStreamSource>` and its non-sandbox
+  destination buffer until completion or cancellation. JS-heap continuations do not own the
+  pending read's buffer. Copy bytes into JS buffers only under the isolate lock after validating
+  the destination. A retained BackingStore alone does not grant sandbox memory access.
+- **Transfers**: Move the existing shared source claim directly when detaching a controller.
+  Round-tripping it through `Own` and another `Rc` would add a recursively destroyed ownership
+  layer on every transfer. `preventCancel` preserves the native read and source; ownership must
+  not change that behavior.
 
 ## Cross-Request Model
 

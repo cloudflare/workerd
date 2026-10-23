@@ -23,10 +23,6 @@ def rust_cxx_bridge(
         ],
         cmd = "$(location //src/rust/cxx:codegen) $(location %s) -o $(location %s.h) -o $(location %s.cc)" % (src, src, src),
         tools = ["//src/rust/cxx:codegen"],
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
     )
     cc_library(
         name = name,
@@ -40,10 +36,6 @@ def rust_cxx_bridge(
         deps = deps,
         visibility = visibility,
         tags = tags,
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
     )
 
 def rust_cxx_include_prefix():
@@ -66,6 +58,7 @@ def wd_rust_crate(
         deps = [],
         link_deps = [],
         proc_macro_deps = [],
+        rustc_env = {},
         data = [],
         test_env = {},
         test_tags = [],
@@ -177,16 +170,13 @@ def wd_rust_crate(
         srcs = srcs,
         deps = deps,
         link_deps = link_deps + ["@@//deps:rust_runtime"],
+        rustc_env = rustc_env,
         visibility = visibility,
         data = data,
         proc_macro_deps = proc_macro_deps,
         crate_features = crate_features,
         lint_config = None if testonly else "@workerd//build/rust:lints",
         testonly = testonly,
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }),
         **library_kwargs
     )
 
@@ -198,6 +188,7 @@ def wd_rust_crate(
         size = test_size,
         tags = test_tags,
         crate_features = crate_features,
+        rustc_env = rustc_env,
         deps = test_deps,
         proc_macro_deps = test_proc_macro_deps,
     )

@@ -494,7 +494,7 @@ void Deserializer::init(Lock& js,
       LOG_WARNING_PERIODICALLY(message, kj::getStackTrace());
       // Header failures are internal faults. Suppress duplicate reporting when this exception
       // crosses a JavaScript or RPC boundary; the periodic warning above carries the diagnostic.
-      kj::throwFatalException(KJ_EXCEPTION(FAILED, "worker_do_not_log", message));
+      kj::throwException(KJ_EXCEPTION(FAILED, "worker_do_not_log", message));
     }
   }
   preserveStackInErrors = options.preserveStackInErrors;

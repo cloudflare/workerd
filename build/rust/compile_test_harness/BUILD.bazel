@@ -1,0 +1,12 @@
+load("//:build/wd_rust_binary.bzl", "wd_rust_binary")
+
+# Runs rustc on one snippet of a wd_rust_compile_test (//build:wd_rust_compile_test.bzl) and
+# compares the errors with the snippet's annotations.
+wd_rust_binary(
+    name = "checker",
+    srcs = [
+        "checker.rs",
+        "checker-test.rs",
+    ],
+    visibility = ["//visibility:public"],
+)

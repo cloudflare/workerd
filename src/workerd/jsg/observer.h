@@ -143,6 +143,13 @@ struct CompilationObserver {
   virtual void onCompileCacheRejected(v8::Isolate* isolate) const {}
   virtual void onCompileCacheGenerated(v8::Isolate* isolate) const {}
   virtual void onCompileCacheGenerationFailed(v8::Isolate* isolate) const {}
+
+  // Called after a bundle module was compiled with compile hints. `hintCount` is the number of
+  // hinted function positions supplied; `eagerFunctionCount` is the number of functions that V8
+  // would otherwise have compiled lazily and instead compiled with the module because they were
+  // hinted.
+  virtual void onCompileHintsConsumed(
+      v8::Isolate* isolate, size_t hintCount, size_t eagerFunctionCount) const {}
 };
 
 struct InternalExceptionObserver {

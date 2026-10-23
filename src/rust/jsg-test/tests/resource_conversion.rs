@@ -56,7 +56,7 @@ fn to_js_creates_object_with_methods() {
             greeting: "Hello".to_owned(),
         };
         let js_val = greeter.to_js(lock);
-        ctx.set_global("greeter", js_val);
+        ctx.set_global(lock, "greeter", js_val);
 
         let result: String = ctx.eval(lock, "greeter.greet('World')").unwrap();
         assert_eq!(result, "Hello, World!");
@@ -71,7 +71,7 @@ fn to_js_works_for_different_resource_types() {
     harness.run_in_context(|lock, ctx| {
         let counter = Counter { value: 42.0 };
         let js_val = counter.to_js(lock);
-        ctx.set_global("counter", js_val);
+        ctx.set_global(lock, "counter", js_val);
 
         let result: Number = ctx.eval(lock, "counter.getValue()").unwrap();
         assert!((result.value() - 42.0).abs() < f64::EPSILON);
@@ -90,8 +90,8 @@ fn to_js_creates_distinct_objects() {
         let g2 = Greeter {
             greeting: "Hey".to_owned(),
         };
-        ctx.set_global("g1", g1.to_js(lock));
-        ctx.set_global("g2", g2.to_js(lock));
+        ctx.set_global(lock, "g1", g1);
+        ctx.set_global(lock, "g2", g2);
 
         let same: bool = ctx.eval(lock, "g1 === g2").unwrap();
         assert!(
@@ -119,10 +119,10 @@ fn from_js_unwraps_resource() {
         let greeter = Greeter {
             greeting: "Howdy".to_owned(),
         };
-        ctx.set_global("greeter", greeter.to_js(lock));
+        ctx.set_global(lock, "greeter", greeter);
 
         // Get the JS value back and use FromJS to unwrap it.
-        let js_val = ctx.eval_raw("greeter").unwrap();
+        let js_val = ctx.eval_raw(lock, "greeter").unwrap();
         let r = Greeter::from_js(lock, js_val).expect("FromJS should succeed");
         assert_eq!(r.greeting, "Howdy");
         Ok(())
@@ -158,9 +158,9 @@ fn from_js_ref_keeps_resource_alive() {
         let tracked = Tracked {
             tag: "alive".to_owned(),
         };
-        ctx.set_global("obj", tracked.to_js(lock));
+        ctx.set_global(lock, "obj", tracked);
 
-        let js_val = ctx.eval_raw("obj").unwrap();
+        let js_val = ctx.eval_raw(lock, "obj").unwrap();
         let r = Tracked::from_js(lock, js_val).expect("FromJS should succeed");
         assert_eq!(r.tag, "alive");
 
@@ -179,7 +179,7 @@ fn from_js_ref_keeps_resource_alive() {
 fn from_js_rejects_plain_object() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let js_val = ctx.eval_raw("({})").unwrap();
+        let js_val = ctx.eval_raw(lock, "({})").unwrap();
         let err = Greeter::from_js(lock, js_val).unwrap_err();
         assert_eq!(err.name, jsg::ExceptionType::TypeError);
         assert_eq!(err.message, "expected Greeter, got object");
@@ -192,7 +192,7 @@ fn from_js_rejects_plain_object() {
 fn from_js_rejects_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let js_val = ctx.eval_raw("'not a resource'").unwrap();
+        let js_val = ctx.eval_raw(lock, "'not a resource'").unwrap();
         let err = Greeter::from_js(lock, js_val).unwrap_err();
         assert_eq!(err.name, jsg::ExceptionType::TypeError);
         assert_eq!(err.message, "expected Greeter, got string");
@@ -205,7 +205,7 @@ fn from_js_rejects_string() {
 fn from_js_rejects_number() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let js_val = ctx.eval_raw("42").unwrap();
+        let js_val = ctx.eval_raw(lock, "42").unwrap();
         let err = Greeter::from_js(lock, js_val).unwrap_err();
         assert_eq!(err.name, jsg::ExceptionType::TypeError);
         assert_eq!(err.message, "expected Greeter, got number");
@@ -218,7 +218,7 @@ fn from_js_rejects_number() {
 fn from_js_rejects_null() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let js_val = ctx.eval_raw("null").unwrap();
+        let js_val = ctx.eval_raw(lock, "null").unwrap();
         let err = Greeter::from_js(lock, js_val).unwrap_err();
         assert_eq!(err.name, jsg::ExceptionType::TypeError);
         // typeof null === "object" in JavaScript
@@ -232,7 +232,7 @@ fn from_js_rejects_null() {
 fn from_js_rejects_undefined() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let js_val = ctx.eval_raw("undefined").unwrap();
+        let js_val = ctx.eval_raw(lock, "undefined").unwrap();
         let err = Greeter::from_js(lock, js_val).unwrap_err();
         assert_eq!(err.name, jsg::ExceptionType::TypeError);
         assert_eq!(err.message, "expected Greeter, got undefined");
@@ -252,9 +252,9 @@ fn round_trip_preserves_data() {
         let original = Greeter {
             greeting: "Bonjour".to_owned(),
         };
-        ctx.set_global("obj", original.to_js(lock));
+        ctx.set_global(lock, "obj", original);
 
-        let js_val = ctx.eval_raw("obj").unwrap();
+        let js_val = ctx.eval_raw(lock, "obj").unwrap();
         let unwrapped = Greeter::from_js(lock, js_val).expect("round-trip should succeed");
         assert_eq!(unwrapped.greeting, "Bonjour");
         Ok(())
@@ -269,10 +269,10 @@ fn round_trip_through_js_identity_function() {
         let greeter = Greeter {
             greeting: "Hola".to_owned(),
         };
-        ctx.set_global("greeter", greeter.to_js(lock));
+        ctx.set_global(lock, "greeter", greeter);
 
         // Pass through a JS identity function.
-        let js_val = ctx.eval_raw("(x => x)(greeter)").unwrap();
+        let js_val = ctx.eval_raw(lock, "(x => x)(greeter)").unwrap();
         let unwrapped = Greeter::from_js(lock, js_val).expect("identity round-trip should work");
         assert_eq!(unwrapped.greeting, "Hola");
         Ok(())
@@ -287,7 +287,7 @@ fn round_trip_preserves_js_identity() {
         let greeter = Greeter {
             greeting: "Ciao".to_owned(),
         };
-        ctx.set_global("g", greeter.to_js(lock));
+        ctx.set_global(lock, "g", greeter);
 
         let same: bool = ctx.eval(lock, "g === (x => x)(g)").unwrap();
         assert!(
@@ -310,9 +310,9 @@ fn eval_raw_returns_ref_via_from_js() {
         let greeter = Greeter {
             greeting: "Salut".to_owned(),
         };
-        ctx.set_global("g", greeter.to_js(lock));
+        ctx.set_global(lock, "g", greeter);
 
-        let js_val = ctx.eval_raw("g").unwrap();
+        let js_val = ctx.eval_raw(lock, "g").unwrap();
         let r = Greeter::from_js(lock, js_val).expect("FromJS should succeed");
         assert_eq!(r.greeting, "Salut");
         Ok(())
@@ -324,7 +324,7 @@ fn eval_raw_returns_ref_via_from_js() {
 fn eval_raw_with_wrong_type_gives_type_error() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let js_val = ctx.eval_raw("42").unwrap();
+        let js_val = ctx.eval_raw(lock, "42").unwrap();
         let err = Greeter::from_js(lock, js_val).unwrap_err();
         assert_eq!(err.name, jsg::ExceptionType::TypeError);
         assert_eq!(err.message, "expected Greeter, got number");
@@ -343,14 +343,14 @@ fn resource_stored_in_js_array_and_retrieved() {
         let g2 = Greeter {
             greeting: "Two".to_owned(),
         };
-        ctx.set_global("g1", g1.to_js(lock));
-        ctx.set_global("g2", g2.to_js(lock));
+        ctx.set_global(lock, "g1", g1);
+        ctx.set_global(lock, "g2", g2);
 
-        let js_val = ctx.eval_raw("([g1, g2])[0]").unwrap();
+        let js_val = ctx.eval_raw(lock, "([g1, g2])[0]").unwrap();
         let r = Greeter::from_js(lock, js_val).expect("FromJS should succeed for index 0");
         assert_eq!(r.greeting, "One");
 
-        let js_val = ctx.eval_raw("([g1, g2])[1]").unwrap();
+        let js_val = ctx.eval_raw(lock, "([g1, g2])[1]").unwrap();
         let r = Greeter::from_js(lock, js_val).expect("FromJS should succeed for index 1");
         assert_eq!(r.greeting, "Two");
         Ok(())

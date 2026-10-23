@@ -34,6 +34,11 @@ namespace workerd::jsg {
 static bool v8Initialized = false;
 static V8System::FatalErrorCallback* v8FatalErrorCallback = nullptr;
 static void reportV8FatalError(kj::StringPtr location, kj::StringPtr message) {
+  // https://github.com/v8/v8/blob/main/src/base/logging.cc#L205
+  // V8 sometimes outputs error details before a fatal. Providing a custom fatal
+  // handler skips V8's fflushes, so flushing here helps make sure we see that detail.
+  fflush(stdout);
+  fflush(stderr);
   if (v8FatalErrorCallback == nullptr) {
     KJ_LOG(FATAL, "V8 fatal error", location, message);
     abort();
@@ -166,6 +171,9 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   // Enable source phase imports for WebAssembly modules
   v8::V8::SetFlagsFromString("--js-source-phase-imports");
 
+  // Enable the WebAssembly compact import section encoding.
+  v8::V8::SetFlagsFromString("--wasm-compact-imports");
+
 #ifdef __APPLE__
   // On macOS arm64, we find that V8 can be collecting pages that contain compiled code when
   // handling requests in short succession. There are some specific differences for macOS arm64
@@ -247,7 +255,7 @@ void IsolateBase::buildEmbedderGraph(v8::Isolate* isolate, v8::EmbedderGraph* gr
     // throw any exceptions. We'll treat any exception here as fatal, including
     // JsExceptionThrown. Note that we're not entered into any particular v8::Context
     // here so pulling out the details of the exception would be tricky anyway.
-    kj::throwFatalException(kj::getCaughtExceptionAsKj());
+    kj::throwException(kj::getCaughtExceptionAsKj());
   }
 }
 
@@ -638,6 +646,12 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     // We MUST call heapTracer.destroy(), but we can't do it yet because destroying other handles
     // may call into the heap tracer.
     KJ_DEFER(heapTracer.destroy());
+
+    // Release the code caches still waiting to be produced, whose v8::Globals must be destroyed
+    // under lock.
+    KJ_IF_SOME(c, codeCache) {
+      c.discardDeferred();
+    }
 
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(opaqueTemplate.Reset());

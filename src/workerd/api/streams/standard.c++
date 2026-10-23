@@ -323,8 +323,17 @@ bool ReadableLockImpl<Controller>::lockReader(
 template <typename Controller>
 void ReadableLockImpl<Controller>::releaseReader(
     Controller& self, kj::Ptr<Reader> reader, kj::Maybe<jsg::Lock&> maybeJs) {
-  KJ_IF_SOME(locked, state.template tryGetUnsafe<ReaderLocked>()) {
+  KJ_IF_SOME(stored, state.template tryGetUnsafe<ReaderLocked>()) {
+    if (maybeJs == kj::none) {
+      // Traced promise handles cannot be moved without a JSG lock.
+      stored.clear();
+      return;
+    }
+    auto locked = kj::mv(stored);
     KJ_IF_SOME(js, maybeJs) {
+      // Callbacks may acquire another reader or a pipe; only detach this lock.
+      reader->release();
+      state.template transitionTo<Unlocked>();
       auto reason = js.typeError("This ReadableStream reader has been released."_kj);
       KJ_SWITCH_ONEOF(self.state) {
         KJ_CASE_ONEOF(initial, typename Controller::Initial) {}
@@ -340,19 +349,7 @@ void ReadableLockImpl<Controller>::releaseReader(
       maybeRejectPromise<void>(js, locked.getClosedFulfiller(), reason);
     }
 
-    // Keep the locked.clear() after the isolate and hasPendingReadRequests check above.
-    // Clearing will release the references and we don't want to do that if the
-    // hasPendingReadRequests check fails.
     locked.clear();
-
-    // When maybeJs is nullptr, that means releaseReader was called when the reader is
-    // being deconstructed and not as the result of explicitly calling releaseLock and
-    // we do not have an isolate lock. In that case, we don't want to change the lock
-    // state itself. Moving the lock above will free the lock state while keeping the
-    // ReadableStream marked as locked.
-    if (maybeJs != kj::none) {
-      state.template transitionTo<Unlocked>();
-    }
   }
 }
 
@@ -498,14 +495,22 @@ bool WritableLockImpl<Controller>::lockWriter(
 template <typename Controller>
 void WritableLockImpl<Controller>::releaseWriter(
     Controller& self, kj::Ptr<Writer> writer, kj::Maybe<jsg::Lock&> maybeJs) {
-  KJ_IF_SOME(locked, state.template tryGetUnsafe<WriterLocked>()) {
+  KJ_IF_SOME(stored, state.template tryGetUnsafe<WriterLocked>()) {
+    if (maybeJs == kj::none) {
+      // Traced promise handles cannot be moved without a JSG lock.
+      stored.clear();
+      return;
+    }
+    auto locked = kj::mv(stored);
     KJ_IF_SOME(js, maybeJs) {
+      state.template transitionTo<Unlocked>();
       KJ_SWITCH_ONEOF(self.state) {
         KJ_CASE_ONEOF(initial, typename Controller::Initial) {}
         KJ_CASE_ONEOF(closed, StreamStates::Closed) {}
         KJ_CASE_ONEOF(errored, StreamStates::Errored) {}
         KJ_CASE_ONEOF(controller, jsg::Ref<WritableStreamDefaultController>) {
-          controller->cancelPendingWrites(
+          auto ref = controller.addRef();
+          ref->cancelPendingWrites(
               js, js.typeError("This WritableStream writer has been released."_kjc));
         }
       }
@@ -531,15 +536,6 @@ void WritableLockImpl<Controller>::releaseWriter(
       maybeRejectPromise<void>(js, locked.getClosedFulfiller(), releaseReason);
     }
     locked.clear();
-
-    // When maybeJs is nullptr, that means releaseWriter was called when the writer is
-    // being deconstructed and not as the result of explicitly calling releaseLock and
-    // we do not have an isolate lock. In that case, we don't want to change the lock
-    // state itself. Moving the lock above will free the lock state while keeping the
-    // WritableStream marked as locked.
-    if (maybeJs != kj::none) {
-      state.template transitionTo<Unlocked>();
-    }
   }
 }
 
@@ -1263,10 +1259,12 @@ void ReadableImpl<Self>::close(jsg::Lock& js) {
     return;
   }
 
-  queue.close(js);
-
+  // Moving the queue preserves its native identity and owns the whole fan-out independently
+  // of this controller. Settlement can synchronously invoke another terminal operation.
+  auto closingQueue = kj::mv(queue);
   state.template transitionTo<StreamStates::Closed>();
   doClose(js);
+  closingQueue.close(js);
 }
 
 template <typename Self>
@@ -1283,10 +1281,10 @@ void ReadableImpl<Self>::doError(jsg::Lock& js, jsg::JsValue reason) {
     return;
   }
 
-  auto& queue = state.template getUnsafe<Queue>();
-  queue.error(js, reason);
+  auto queue = kj::mv(state.template getUnsafe<Queue>());
   state.template transitionTo<StreamStates::Errored>(reason.addRef(js));
   algorithms.clear();
+  queue.error(js, reason);
 }
 
 template <typename Self>
@@ -1892,10 +1890,19 @@ bool WritableImpl<Self>::isWritable() const {
 
 template <typename Self>
 void WritableImpl<Self>::cancelPendingWrites(jsg::Lock& js, jsg::JsValue reason) {
-  for (auto& write: writeRequests) {
+  // A rejection can acquire a new writer and enqueue unrelated requests.
+  kj::Vector<WriteRequest> pending(writeRequests.size());
+  while (!writeRequests.empty()) {
+    auto write = dequeueWriteRequest();
+    amountBuffered -= write.size;
+    pending.add(kj::mv(write));
+  }
+  if (isWritable() && !isCloseQueuedOrInFlight()) {
+    updateBackpressure(js);
+  }
+  for (auto& write: pending) {
     write.resolver.reject(js, reason);
   }
-  writeRequests.clear();
 }
 
 // ======================================================================================
@@ -2535,32 +2542,43 @@ kj::Maybe<jsg::JsUint8Array> ReadableStreamBYOBRequest::getView(jsg::Lock& js) {
 }
 
 void ReadableStreamBYOBRequest::invalidate(jsg::Lock& js) {
-  KJ_IF_SOME(impl, maybeImpl) {
+  KJ_IF_SOME(stored, maybeImpl) {
+    auto impl = kj::mv(stored);
+    maybeImpl = kj::none;
+    // An active response retains the native object, but not permission to reuse this handle.
+    impl.readRequest->invalidate();
+    impl.controller->runIfAlive([this](ReadableByteStreamController& controller) {
+      KJ_IF_SOME(current, controller.maybeByobRequest) {
+        if (&*current == this) controller.maybeByobRequest = kj::none;
+      }
+    });
     // If the user code happened to have retained a reference to the view or
     // the buffer, we need to detach it so that those references cannot be used
     // to modify or observe modifications.
     impl.view.getHandle(js).detachInPlace(js);
-    impl.controller->runIfAlive(
-        [](ReadableByteStreamController& controller) { controller.maybeByobRequest = kj::none; });
   }
-  maybeImpl = kj::none;
 }
 
 void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
   auto& impl = JSG_REQUIRE_NONNULL(
       maybeImpl, TypeError, "This ReadableStreamBYOBRequest has been invalidated.");
+  JSG_REQUIRE(
+      !impl.readRequest->isResponding(), TypeError, "A BYOB response is already in progress.");
   JSG_REQUIRE(impl.controller->isValid(), Error, "The ReadableStreamBYOBRequest is invalid.");
   JSG_REQUIRE(impl.view.getHandle(js).size() > 0, TypeError,
       "Cannot respond with a zero-length or detached view");
-  impl.controller->runIfAlive([&](ReadableByteStreamController& controller) {
+  auto readRequest = impl.readRequest.addRef();
+  auto weakController = impl.controller.addRef();
+  weakController->runIfAlive([&](ReadableByteStreamController& controller) {
+    auto controllerOwner = controller.getSelf();
     if (!controller.canCloseOrEnqueue()) {
       JSG_REQUIRE(bytesWritten == 0, TypeError,
           "The bytesWritten must be zero after the stream is closed.");
-      KJ_ASSERT(impl.readRequest->isInvalidated());
+      KJ_ASSERT(readRequest->isInvalidated());
       invalidate(js);
     } else {
       bool shouldInvalidate = false;
-      if (impl.readRequest->isInvalidated() && controller.impl.consumerCount() >= 1) {
+      if (readRequest->isInvalidated() && controller.impl.consumerCount() >= 1) {
         // While this particular request may be invalidated, there are still
         // other branches we can push the data to. Forward only the first
         // bytesWritten bytes — not the entire view — to avoid fabricating
@@ -2579,20 +2597,24 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
       } else {
         JSG_REQUIRE(bytesWritten > 0, TypeError,
             "The bytesWritten must be more than zero while the stream is open.");
-        if (impl.readRequest->respond(js, bytesWritten)) {
+        if (readRequest->respond(js, bytesWritten)) {
           // The read request was fulfilled, we need to invalidate.
           shouldInvalidate = true;
         } else {
           // The response did not fulfill the minimum requirements of the read.
           // We do not want to invalidate the read request and we need to update the
           // view so that on the next read the view will be properly adjusted.
-          impl.updateView(js);
+          KJ_IF_SOME(current, maybeImpl) {
+            if (current.readRequest.get() == readRequest.get() && !readRequest->isInvalidated()) {
+              current.updateView(js);
+            }
+          }
         }
       }
-      controller.pull(js);
-      if (shouldInvalidate) {
-        invalidate(js);
+      KJ_IF_SOME(current, maybeImpl) {
+        if (current.readRequest.get() == readRequest.get() && shouldInvalidate) invalidate(js);
       }
+      controllerOwner->pull(js);
     }
   });
 }
@@ -2600,8 +2622,13 @@ void ReadableStreamBYOBRequest::respond(jsg::Lock& js, int bytesWritten) {
 void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::JsBufferSource view) {
   auto& impl = JSG_REQUIRE_NONNULL(
       maybeImpl, TypeError, "This ReadableStreamBYOBRequest has been invalidated.");
+  JSG_REQUIRE(
+      !impl.readRequest->isResponding(), TypeError, "A BYOB response is already in progress.");
   JSG_REQUIRE(impl.controller->isValid(), Error, "The ReadableStreamBYOBRequest is invalid.");
-  impl.controller->runIfAlive([&](ReadableByteStreamController& controller) {
+  auto readRequest = impl.readRequest.addRef();
+  auto weakController = impl.controller.addRef();
+  weakController->runIfAlive([&](ReadableByteStreamController& controller) {
+    auto controllerOwner = controller.getSelf();
     if (!controller.canCloseOrEnqueue()) {
       JSG_REQUIRE(view.size() == 0, TypeError,
           "The view byte length must be zero after the stream is closed.");
@@ -2629,13 +2656,13 @@ void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::JsBufferS
         JSG_REQUIRE(viewByteOffset == impl.originalByteOffsetPlusBytesFilled, RangeError,
             "The view has an invalid byte offset.");
       } else {
-        KJ_ASSERT(impl.readRequest->isInvalidated());
+        KJ_ASSERT(readRequest->isInvalidated());
       }
 
       invalidate(js);
     } else {
       bool shouldInvalidate = false;
-      if (impl.readRequest->isInvalidated() && controller.impl.consumerCount() >= 1) {
+      if (readRequest->isInvalidated() && controller.impl.consumerCount() >= 1) {
         // While this particular request may be invalidated, there are still
         // other branches we can push the data to. Let's do so.
         view = view.detachAndTake(js);
@@ -2644,21 +2671,25 @@ void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::JsBufferS
       } else {
         JSG_REQUIRE(view.size() > 0, TypeError,
             "The view byte length must be more than zero while the stream is open.");
-        if (impl.readRequest->respondWithNewView(js, kj::mv(view))) {
+        if (readRequest->respondWithNewView(js, kj::mv(view))) {
           // The read request was fulfilled, we need to invalidate.
           shouldInvalidate = true;
         } else {
           // The response did not fulfill the minimum requirements of the read.
           // We do not want to invalidate the read request and we need to update the
           // view so that on the next read the view will be properly adjusted.
-          impl.updateView(js);
+          KJ_IF_SOME(current, maybeImpl) {
+            if (current.readRequest.get() == readRequest.get() && !readRequest->isInvalidated()) {
+              current.updateView(js);
+            }
+          }
         }
       }
 
-      controller.pull(js);
-      if (shouldInvalidate) {
-        invalidate(js);
+      KJ_IF_SOME(current, maybeImpl) {
+        if (current.readRequest.get() == readRequest.get() && shouldInvalidate) invalidate(js);
       }
+      controllerOwner->pull(js);
     }
   });
 }
@@ -2666,6 +2697,13 @@ void ReadableStreamBYOBRequest::respondWithNewView(jsg::Lock& js, jsg::JsBufferS
 bool ReadableStreamBYOBRequest::isPartiallyFulfilled() {
   KJ_IF_SOME(impl, maybeImpl) {
     return impl.readRequest->isPartiallyFulfilled();
+  }
+  return false;
+}
+
+bool ReadableStreamBYOBRequest::isResponding() const {
+  KJ_IF_SOME(impl, maybeImpl) {
+    return impl.readRequest->isResponding();
   }
   return false;
 }
@@ -2743,8 +2781,9 @@ void ReadableByteStreamController::enqueue(jsg::Lock& js, jsg::JsBufferSource ch
 
   KJ_IF_SOME(byobRequest, maybeByobRequest) {
     KJ_IF_SOME(view, byobRequest->getView(js)) {
-      JSG_REQUIRE(
-          view.size() > 0, TypeError, "The byobRequest.view is zero-length or was detached");
+      // respondWithNewView() transfers this view before distributing the accepted response.
+      JSG_REQUIRE(view.size() > 0 || byobRequest->isResponding(), TypeError,
+          "The byobRequest.view is zero-length or was detached");
     }
     byobRequest->invalidate(js);
   }
@@ -2758,18 +2797,21 @@ void ReadableByteStreamController::error(jsg::Lock& js, jsg::JsValue reason) {
 
 kj::Maybe<jsg::Ref<ReadableStreamBYOBRequest>> ReadableByteStreamController::getByobRequest(
     jsg::Lock& js) {
+  auto self = JSG_THIS;
   if (maybeByobRequest == kj::none) {
     KJ_IF_SOME(queue, impl.state.tryGetUnsafe<ByteQueue>()) {
-      KJ_IF_SOME(pendingByob, queue.nextPendingByobReadRequest()) {
-        maybeByobRequest =
-            js.alloc<ReadableStreamBYOBRequest>(js, kj::mv(pendingByob), weakSelf.addRef());
+      KJ_IF_SOME(pendingByob, queue.nextPendingByobReadRequest(js)) {
+        if (maybeByobRequest == kj::none) {
+          maybeByobRequest =
+              js.alloc<ReadableStreamBYOBRequest>(js, kj::mv(pendingByob), weakSelf.addRef());
+        }
       }
     } else {
       return kj::none;
     }
   }
 
-  return maybeByobRequest.map(
+  return self->maybeByobRequest.map(
       [&](jsg::Ref<ReadableStreamBYOBRequest>& req) { return req.addRef(); });
 }
 
@@ -3435,46 +3477,59 @@ WD_STRONG_BOOL(StripBom);
 namespace {
 // Consumes all bytes from a stream, buffering in memory, with the purpose
 // of producing either a single concatenated kj::Array<byte> or kj::String.
-class AllReader {
+class AllReader final: public jsg::Wrappable {
  public:
-  using PartList = kj::Array<kj::Array<kj::byte>>;
-
   AllReader(jsg::Ref<ReadableStream> stream, uint64_t limit)
       : state(State::create<jsg::Ref<ReadableStream>>(kj::mv(stream))),
         limit(limit) {}
   KJ_DISALLOW_COPY_AND_MOVE(AllReader);
 
   jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> allBytes(jsg::Lock& js) {
-    return loop(js).then(js, [this](auto& js, PartList partPtrs) -> jsg::JsRef<jsg::JsArrayBuffer> {
-      auto ab = jsg::JsArrayBuffer::create(js, runningTotal);
-      copyInto(ab.asArrayPtr(), partPtrs);
-      return ab.addRef(js);
-    });
+    return loop(js).then(
+        js,
+        JSG_VISITABLE_LAMBDA(
+            (this, self = JSG_THIS), (self), (jsg::Lock & js)->jsg::JsRef<jsg::JsArrayBuffer> {
+              auto partPtrs = takeParts();
+              auto ab = jsg::JsArrayBuffer::create(js, runningTotal);
+              copyInto(ab.asArrayPtr(), partPtrs);
+              return ab.addRef(js);
+            }));
   }
 
   jsg::Promise<kj::String> allText(
       jsg::Lock& js, ReadAllTextOption option = ReadAllTextOption::NULL_TERMINATE) {
-    return loop(js).then(js, [this, option](auto& js, PartList partPtrs) {
-      // Strip UTF-8 BOM if requested
-      bool hadBom = false;
-      if ((option & ReadAllTextOption::STRIP_BOM) && partPtrs.size() > 0 &&
-          hasUtf8Bom(partPtrs[0])) {
-        runningTotal -= UTF8_BOM_SIZE;
-        hadBom = true;
-      }
+    return loop(js).then(js,
+        JSG_VISITABLE_LAMBDA((this, self = JSG_THIS, option), (self), (jsg::Lock& js) {
+          auto partPtrs = takeParts();
+          auto outputSize = runningTotal;
+          // Strip UTF-8 BOM if requested
+          bool hadBom = false;
+          if ((option & ReadAllTextOption::STRIP_BOM) && partPtrs.size() > 0 &&
+              hasUtf8Bom(partPtrs[0])) {
+          outputSize -= UTF8_BOM_SIZE;
+          hadBom = true;
+          }
 
-      JSG_REQUIRE(runningTotal <= v8::String::kMaxLength, RangeError,
-          "String length exceeds v8::String::kMaxLength.");
+          JSG_REQUIRE(outputSize <= v8::String::kMaxLength, RangeError,
+              "String length exceeds v8::String::kMaxLength.");
 
-      auto out = kj::heapArray<char>(runningTotal + 1);
-      copyInto(
-          out.first(out.size() - 1).asBytes(), partPtrs, hadBom ? StripBom::YES : StripBom::NO);
-      out.back() = '\0';
-      return kj::String(kj::mv(out));
-    });
+          auto out = kj::heapArray<char>(outputSize + 1);
+          copyInto(
+              out.first(out.size() - 1).asBytes(), partPtrs, hadBom ? StripBom::YES : StripBom::NO);
+          out.back() = '\0';
+          return kj::String(kj::mv(out));
+        }));
   }
 
-  void visitForGc(jsg::GcVisitor& visitor) {
+  kj::StringPtr jsgGetMemoryName() const override {
+    return "AllReader"_kjc;
+  }
+
+  size_t jsgGetMemorySelfSize() const override {
+    return sizeof(AllReader);
+  }
+
+  void jsgVisitForGc(jsg::GcVisitor& visitor) override {
     state.visitForGc(visitor);
   }
 
@@ -3492,22 +3547,23 @@ class AllReader {
   uint64_t limit;
   kj::Vector<kj::Array<kj::byte>> parts;
   uint64_t runningTotal = 0;
+  bool consumed = false;
 
-  jsg::Promise<PartList> loop(jsg::Lock& js) {
+  // Promise adoption can invoke JavaScript. Keep parts and accounting in this operation;
+  // completion is notification-only, and consumption requires this read to be closed.
+  jsg::Promise<void> loop(jsg::Lock& js) {
     KJ_SWITCH_ONEOF(state) {
       KJ_CASE_ONEOF(closed, StreamStates::Closed) {
-        return js.resolvedPromise(parts.releaseAsArray());
+        return js.resolvedPromise();
       }
       KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-        return js.template rejectedPromise<PartList>(errored.getHandle(js));
+        return js.rejectedPromise<void>(errored.getHandle(js));
       }
       KJ_CASE_ONEOF(readable, jsg::Ref<ReadableStream>) {
-        // Note that these nested lambda retain references to `this` and `readable`
-        // and are passed into to promise returned by this method. It is the responsibility
-        // of the caller to ensure that the AllReader instance is kept alive until the
-        // promise is settled.
-        auto onSuccess = JSG_VISITABLE_LAMBDA((this, readable = readable.addRef()), (readable),
-            (jsg::Lock & js, ReadResult result) mutable->jsg::Promise<PartList> {
+        // Each callback retains the operation until its work finishes, independently of
+        // the returned promise. Trace shared state through one Wrappable.
+        auto onSuccess = JSG_VISITABLE_LAMBDA((this, self = JSG_THIS, readable = readable.addRef()),
+            (self, readable), (jsg::Lock & js, ReadResult result) mutable->jsg::Promise<void> {
               if (result.done) {
               state.template transitionTo<StreamStates::Closed>();
               return loop(js);
@@ -3519,8 +3575,9 @@ class AllReader {
               if (!handle.isArrayBufferView() && !handle.isArrayBuffer()) {
               auto error = js.typeError("This ReadableStream did not return bytes.");
               state.template transitionTo<StreamStates::Errored>(error.addRef(js));
-              return readable->getController().cancel(js, error).then(
-                  js, [&](jsg::Lock& js) { return loop(js); });
+              return readable->getController().cancel(js, error).then(js,
+                  JSG_VISITABLE_LAMBDA(
+                      (this, self = JSG_THIS), (self), (jsg::Lock& js) { return loop(js); }));
               }
 
               auto bufferSource = jsg::JsBufferSource(handle);
@@ -3530,11 +3587,12 @@ class AllReader {
               return loop(js);
               }
 
-              if ((runningTotal + bufferSource.size()) > limit) {
+              if (bufferSource.size() > limit - runningTotal) {
               auto error = js.typeError("Memory limit exceeded before EOF.");
               state.template transitionTo<StreamStates::Errored>(error.addRef(js));
-              return readable->getController().cancel(js, error).then(
-                  js, [&](jsg::Lock& js) { return loop(js); });
+              return readable->getController().cancel(js, error).then(js,
+                  JSG_VISITABLE_LAMBDA(
+                      (this, self = JSG_THIS), (self), (jsg::Lock& js) { return loop(js); }));
               }
 
               runningTotal += bufferSource.size();
@@ -3551,18 +3609,32 @@ class AllReader {
               return loop(js);
             });
 
-        auto onFailure = [this](auto& js, jsg::Value exception) -> jsg::Promise<PartList> {
-          // In this case the stream should already be errored.
-          auto error = jsg::JsValue(exception.getHandle(js));
-          state.template transitionTo<StreamStates::Errored>(error.addRef(js));
-          return loop(js);
-        };
+        auto onFailure = JSG_VISITABLE_LAMBDA((this, self = JSG_THIS), (self),
+            (jsg::Lock & js, jsg::Value exception)->jsg::Promise<void> {
+              // In this case the stream should already be errored.
+              auto error = jsg::JsValue(exception.getHandle(js));
+              state.template transitionTo<StreamStates::Errored>(error.addRef(js));
+              return loop(js);
+            });
 
         return KJ_ASSERT_NONNULL(readable->getController().read(js, kj::none))
             .then(js, kj::mv(onSuccess), kj::mv(onFailure));
       }
     }
     KJ_UNREACHABLE;
+  }
+
+  kj::Array<kj::Array<kj::byte>> takeParts() {
+    JSG_REQUIRE(
+        state.is<StreamStates::Closed>() && !consumed, TypeError, "Invalid stream read result.");
+    uint64_t total = 0;
+    for (auto& part: parts) {
+      KJ_ASSERT(part.size() <= runningTotal - total);
+      total += part.size();
+    }
+    KJ_ASSERT(total == runningTotal);
+    consumed = true;
+    return parts.releaseAsArray();
   }
 
   void copyInto(
@@ -3582,6 +3654,7 @@ class AllReader {
         out.write(part);
       }
     }
+    KJ_ASSERT(out.size() == 0);
   }
 };
 
@@ -3733,8 +3806,12 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
     auto promise = ioContext.run([weakReader = reader->getWeak(), ex = exception.clone()](
                                      jsg::Lock& js) mutable -> kj::Promise<void> {
       auto& ioContext = IoContext::current();
+      if (weakReader.tryGet() == kj::none) {
+        return KJ_EXCEPTION(DISCONNECTED, "The pump was canceled.");
+      }
+      // Reason conversion can run JavaScript that drops the pump. Borrow only afterwards.
+      auto reason = exceptionToCancelReason(js, kj::mv(ex));
       KJ_IF_SOME(reader, weakReader.tryGet()) {
-        auto reason = exceptionToCancelReason(js, kj::mv(ex));
         return ioContext.awaitJs(js, reader.cancel(js, reason));
       } else {
         return KJ_EXCEPTION(DISCONNECTED, "The pump was canceled.");
@@ -3743,7 +3820,7 @@ kj::Promise<void> pumpToImpl(IoContext& ioContext,
     ioContext.addTask(forwardToFulfiller(kj::mv(promise), kj::mv(prp.fulfiller)));
 
     co_await prp.promise;
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   }
 }
 }  // namespace
@@ -3767,26 +3844,18 @@ jsg::Promise<T> ReadableStreamJsController::readAll(jsg::Lock& js, uint64_t limi
   const auto readAll = [this, limit, stripBom](auto& js) -> jsg::Promise<T> {
     KJ_ASSERT(lock.lock());
     // The AllReader will hold a traceable reference to the ReadableStream.
-    auto reader = kj::heap<AllReader>(addRef(), limit);
+    auto reader = js.template alloc<AllReader>(addRef(), limit);
 
-    auto promise = ([&js, &reader, stripBom]() -> jsg::Promise<T> {
-      if constexpr (kj::isSameType<T, jsg::JsRef<jsg::JsArrayBuffer>>()) {
-        (void)stripBom;  // Unused in this branch.
-        return reader->allBytes(js);
-      } else {
-        auto option = ReadAllTextOption::NULL_TERMINATE;
-        if (stripBom) {
-          option |= ReadAllTextOption::STRIP_BOM;
-        }
-        return reader->allText(js, option);
+    if constexpr (kj::isSameType<T, jsg::JsRef<jsg::JsArrayBuffer>>()) {
+      (void)stripBom;  // Unused in this branch.
+      return reader->allBytes(js);
+    } else {
+      auto option = ReadAllTextOption::NULL_TERMINATE;
+      if (stripBom) {
+        option |= ReadAllTextOption::STRIP_BOM;
       }
-    })();
-
-    auto onSuccess = [reader = kj::mv(reader)](jsg::Lock& js, T result) -> jsg::Promise<T> {
-      return js.resolvedPromise(kj::mv(result));
-    };
-
-    return promise.then(js, kj::mv(onSuccess));
+      return reader->allText(js, option);
+    }
   };
 
   KJ_SWITCH_ONEOF(state) {
@@ -4997,7 +5066,7 @@ void ReadableImpl<Self>::jsgGetMemoryInfo(jsg::MemoryTracker& tracker) const {
 
 void ReadableStreamBYOBRequest::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   KJ_IF_SOME(impl, maybeImpl) {
-    tracker.trackField("readRequest", impl.readRequest);
+    tracker.trackField("readRequest", impl.readRequest.get());
     tracker.trackField("view", impl.view);
   }
 }

@@ -28,7 +28,7 @@ static void checkForErrorStatus(kj::StringPtr method, const kj::HttpClient::Resp
   if (response.statusCode < 200 || response.statusCode >= 300) {
     // Manually construct exception so that we can incorporate method and status into the text
     // that JavaScript sees.
-    kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
+    kj::throwException(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
         kj::str(JSG_EXCEPTION(Error) ": KV ", method, " failed: ", response.statusCode, ' ',
             response.statusText)));
   }

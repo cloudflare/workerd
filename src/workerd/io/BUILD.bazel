@@ -608,6 +608,15 @@ kj_test(
 )
 
 kj_test(
+    src = "features-test.c++",
+    deps = [
+        ":features",
+        "//src/workerd/jsg",
+        "@capnp-cpp//src/capnp",
+    ],
+)
+
+kj_test(
     src = "observer-test.c++",
     deps = [
         ":observer",
@@ -701,6 +710,7 @@ kj_test(
     deps = [
         ":worker-entrypoint",
         "//src/workerd/tests:test-fixture",
+        "@capnp-cpp//src/kj:kj-async-io",
     ],
 )
 
@@ -723,6 +733,14 @@ kj_test(
 )
 
 kj_test(
+    src = "trace-scope-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
     src = "io-own-test.c++",
     deps = [
         ":io",
@@ -732,6 +750,14 @@ kj_test(
 
 kj_test(
     src = "io-context-abort-test.c++",
+    deps = [
+        ":io",
+        "//src/workerd/tests:test-fixture",
+    ],
+)
+
+kj_test(
+    src = "worker-code-cache-test.c++",
     deps = [
         ":io",
         "//src/workerd/tests:test-fixture",

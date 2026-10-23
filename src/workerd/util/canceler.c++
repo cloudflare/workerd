@@ -23,7 +23,7 @@ ReleasingCanceler::ReleasingCanceler(kj::Maybe<kj::Exception> reason): reason(kj
 ReleasingCanceler::~ReleasingCanceler() noexcept(false) {
   // `listeners` only contains listeners still awaiting cancellation, and those must not
   // outlive the canceler. (Listeners that already fired were unlinked and may live on.)
-  KJ_ASSERT(listeners.empty());
+  KJ_DTOR_ASSERT(listeners.empty());
 
   // Release rather than cancel any remaining wrapped promises: dropping the canceler
   // without an explicit cancellation must not reject the wrapped work.
@@ -56,7 +56,7 @@ void ReleasingCanceler::cancel(const kj::Exception& exception) {
 
 void ReleasingCanceler::throwIfCanceled() {
   KJ_IF_SOME(ex, reason) {
-    kj::throwFatalException(ex.clone());
+    kj::throwException(ex.clone());
   }
 }
 

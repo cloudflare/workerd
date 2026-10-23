@@ -1,0 +1,17 @@
+// Copyright (c) 2026 Cloudflare, Inc.
+// Licensed under the Apache 2.0 license found in the LICENSE file or at:
+//     https://opensource.org/licenses/Apache-2.0
+
+// A handle cannot be stored in a variable that outlives its scope.
+use jsg::v8;
+pub fn t(isolate: *mut v8::ffi::Isolate) {
+    let mut out = None;
+    {
+        // SAFETY: only type-checked.
+        jsg::callback_scope!(unsafe let lock, isolate);
+        //~^ ERROR E0716
+        //~| ERROR E0716
+        out = Some(lock.new_object());
+    }
+    let _ = out;
+}

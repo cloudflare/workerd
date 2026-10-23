@@ -1,6 +1,8 @@
 load("//:build/wd_test.bzl", "wd_test")
 
 wd_test(
+    # Runs alarm and eviction cases in sequence; eviction has a 30-second deadline.
+    size = "large",
     src = "unsafe-module-test.wd-test",
     args = ["--experimental"],
     data = glob(["*.js"]),

@@ -24,24 +24,34 @@ inline void maybeSetV8ContinuationContext(
 }
 }  // namespace
 
-AsyncContextFrame::AsyncContextFrame(Lock& js, StorageEntry storageEntry) {
+AsyncContextFrame::AsyncContextFrame(Lock& js, StorageEntry storageEntry)
+    : AsyncContextFrame(js, kj::arrayPtr(&storageEntry, 1)) {}
+
+AsyncContextFrame::AsyncContextFrame(Lock& js, kj::ArrayPtr<StorageEntry> storageEntries) {
   KJ_IF_SOME(frame, current(js)) {
     // Propagate the storage context of the current frame (if any).
     // If current(js) returns nullptr, we assume we're in the root
     // frame and there is no storage to propagate.
-    frame.storage.eraseAll([](const auto& entry) { return entry.key->isDead(); });
-    for (auto& entry: frame.storage) {
-      storage.insert(entry.clone(js));
+    frame.eraseDeadStorage();
+    KJ_SWITCH_ONEOF(frame.storage) {
+      KJ_CASE_ONEOF(entries, InlineStorage) {
+        for (auto& slot: entries) {
+          KJ_IF_SOME(entry, slot) {
+            upsertStorageEntry(entry.clone(js));
+          }
+        }
+      }
+      KJ_CASE_ONEOF(table, TableStorage) {
+        for (auto& entry: table) {
+          upsertStorageEntry(entry.clone(js));
+        }
+      }
     }
   }
 
-  // This case is extremely unlikely to happen but let's handle it anyway
-  // just out of an excess of caution.
-  if (storageEntry.key->isDead()) return;
-
-  storage.upsert(kj::mv(storageEntry), [](StorageEntry& existing, StorageEntry&& row) mutable {
-    existing.value = kj::mv(row.value);
-  });
+  for (auto& entry: storageEntries) {
+    upsertStorageEntry(kj::mv(entry));
+  }
 }
 
 AsyncContextFrame::StorageEntry::StorageEntry(kj::Arc<StorageKey> key, Value value)
@@ -76,6 +86,11 @@ kj::Maybe<AsyncContextFrame&> AsyncContextFrame::current(v8::Isolate* isolate) {
 
 Ref<AsyncContextFrame> AsyncContextFrame::create(Lock& js, StorageEntry storageEntry) {
   return js.alloc<AsyncContextFrame>(js, kj::mv(storageEntry));
+}
+
+Ref<AsyncContextFrame> AsyncContextFrame::create(
+    Lock& js, kj::ArrayPtr<StorageEntry> storageEntries) {
+  return js.alloc<AsyncContextFrame>(js, storageEntries);
 }
 
 v8::Local<v8::Function> AsyncContextFrame::wrap(Lock& js,
@@ -152,8 +167,71 @@ v8::Local<v8::Function> AsyncContextFrame::wrapRoot(
 
 kj::Maybe<Value&> AsyncContextFrame::get(const StorageKey& key) {
   KJ_ASSERT(!key.isDead());
-  storage.eraseAll([](const auto& entry) { return entry.key->isDead(); });
-  return storage.find(key).map([](auto& entry) -> Value& { return entry.value; });
+  eraseDeadStorage();
+  KJ_SWITCH_ONEOF(storage) {
+    KJ_CASE_ONEOF(entries, InlineStorage) {
+      for (auto& slot: entries) {
+        KJ_IF_SOME(entry, slot) {
+          if (entry.key.get() == &key) return entry.value;
+        }
+      }
+      return kj::none;
+    }
+    KJ_CASE_ONEOF(table, TableStorage) {
+      return table.find(key).map([](auto& entry) -> Value& { return entry.value; });
+    }
+  }
+  KJ_UNREACHABLE;
+}
+
+void AsyncContextFrame::eraseDeadStorage() {
+  KJ_SWITCH_ONEOF(storage) {
+    KJ_CASE_ONEOF(entries, InlineStorage) {
+      for (auto& slot: entries) {
+        KJ_IF_SOME(entry, slot) {
+          if (entry.key->isDead()) slot = kj::none;
+        }
+      }
+    }
+    KJ_CASE_ONEOF(table, TableStorage) {
+      table.eraseAll([](const auto& entry) { return entry.key->isDead(); });
+    }
+  }
+}
+
+void AsyncContextFrame::upsertStorageEntry(StorageEntry entry) {
+  if (entry.key->isDead()) return;
+  KJ_SWITCH_ONEOF(storage) {
+    KJ_CASE_ONEOF(entries, InlineStorage) {
+      for (auto& slot: entries) {
+        KJ_IF_SOME(existing, slot) {
+          if (existing.key.get() == entry.key.get()) {
+            existing.value = kj::mv(entry.value);
+            return;
+          }
+        }
+      }
+      for (auto& slot: entries) {
+        if (slot == kj::none) {
+          slot = kj::mv(entry);
+          return;
+        }
+      }
+      TableStorage table;
+      table.reserve(entries.size() + 1);
+      for (auto& slot: entries) {
+        table.insert(kj::mv(KJ_ASSERT_NONNULL(slot)));
+      }
+      table.insert(kj::mv(entry));
+      storage = kj::mv(table);
+      return;
+    }
+    KJ_CASE_ONEOF(table, TableStorage) {
+      table.upsert(kj::mv(entry), [](StorageEntry& existing, StorageEntry&& row) mutable {
+        existing.value = kj::mv(row.value);
+      });
+    }
+  }
 }
 
 AsyncContextFrame::Scope::Scope(Lock& js, kj::Maybe<AsyncContextFrame&> resource)
@@ -177,6 +255,10 @@ AsyncContextFrame::Scope::~Scope() noexcept(false) {
 
 AsyncContextFrame::StorageScope::StorageScope(Lock& js, kj::Arc<StorageKey> key, Value store)
     : frame(AsyncContextFrame::create(js, StorageEntry(kj::mv(key), kj::mv(store)))),
+      scope(js, *frame) {}
+
+AsyncContextFrame::StorageScope::StorageScope(Lock& js, kj::ArrayPtr<StorageEntry> storageEntries)
+    : frame(AsyncContextFrame::create(js, storageEntries)),
       scope(js, *frame) {}
 
 v8::Local<v8::Object> AsyncContextFrame::getJSWrapper(v8::Isolate* isolate) {

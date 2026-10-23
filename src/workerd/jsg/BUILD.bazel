@@ -4,6 +4,7 @@ load("//:build/kj_test.bzl", "kj_test")
 load("//:build/wd_cc_benchmark.bzl", "wd_cc_benchmark")
 load("//:build/wd_cc_capnp_library.bzl", "wd_cc_capnp_library")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_js_bundle.bzl", "wd_js_bundle")
 
 exports_files(["modules.capnp"])
 
@@ -34,6 +35,13 @@ wd_cc_library(
 wd_cc_benchmark(
     name = "bench-dispatch",
     srcs = ["bench-dispatch.c++"],
+    local_defines = ["JSG_IMPLEMENTATION"],
+    deps = [":jsg"],
+)
+
+wd_cc_benchmark(
+    name = "bench-async-context",
+    srcs = ["bench-async-context.c++"],
     local_defines = ["JSG_IMPLEMENTATION"],
     deps = [":jsg"],
 )
@@ -134,6 +142,7 @@ wd_cc_library(
         "//src/rust/jsg-test:__pkg__",
     ],
     deps = [
+        ":code-cache",
         ":exception",
         ":exception_metadata_capnp",
         ":macro-meta",
@@ -146,6 +155,20 @@ wd_cc_library(
         "//src/workerd/util:autogate",
         "//src/workerd/util:sentry",
         "//src/workerd/util:thread-scopes",
+        "@capnp-cpp//src/kj",
+        "@workerd-v8//:v8",
+    ],
+)
+
+wd_cc_library(
+    name = "code-cache",
+    srcs = ["code-cache.c++"],
+    hdrs = ["code-cache.h"],
+    implementation_deps = ["@ssl"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":observer",
+        "//src/workerd/util:strong-bool",
         "@capnp-cpp//src/kj",
         "@workerd-v8//:v8",
     ],
@@ -278,7 +301,6 @@ js_capnp_library(
     data = ["//:node_modules/capnp-es"],
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
-        "@//build/config:no_build": ["@platforms//:incompatible"],
         "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],
@@ -335,6 +357,8 @@ wd_cc_library(
     ["*-test.c++"],
     exclude = [
         # defined below
+        "code-cache-test.c++",
+        "compile-cache-test.c++",
         "macro-meta-test.c++",
         "resource-test.c++",
         "rtti-test.c++",
@@ -351,6 +375,38 @@ kj_test(
     src = "tracing-test.c++",
     local_defines = ["JSG_IMPLEMENTATION"],
     deps = [":jsg"],
+)
+
+wd_js_bundle(
+    name = "compile-cache-fixture",
+    builtin_modules = [
+        "testdata/compile-cache/ascii.js",
+        "testdata/compile-cache/latin1.js",
+        "testdata/compile-cache/utf16.js",
+    ],
+    gen_compile_cache = True,
+    import_name = "cacheTest",
+    schema_id = "0xab478e72c91d805f",
+)
+
+kj_test(
+    src = "compile-cache-test.c++",
+    local_defines = ["JSG_IMPLEMENTATION"],
+    # Downstream builds can generate caches with different V8 flags.
+    tags = ["no-downstream"],
+    deps = [
+        ":compile-cache-fixture",
+        ":jsg",
+    ],
+)
+
+kj_test(
+    src = "code-cache-test.c++",
+    local_defines = ["JSG_IMPLEMENTATION"],
+    deps = [
+        ":jsg",
+        ":script",
+    ],
 )
 
 # Moved out as macro-meta-test does not depend on V8 or JSG proper, this makes the test much

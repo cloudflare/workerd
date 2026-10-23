@@ -84,6 +84,13 @@ from the V8 directory.
     figure out what version of the github code V8 depends on. Instead, it should be safe
     to just bump these dependencies to the latest version on github.
 
+    If the new `com_googlesource_chromium_icu` commit changes `U_ICU_VERSION_MAJOR_NUM`
+    (in `source/common/unicode/uvernum.h`), update `RUST_ICU_MAJOR_VERSION_NUMBER` in both
+    `build/deps/rust.MODULE.bazel` and `src/rust/i18n/BUILD.bazel`. A stale value fails the
+    build with undefined `<function>_<version>` ICU symbols, or missing items in
+    `rust_icu_sys` if the two values disagree. If `rust_icu_sys` has no `bindgen/lib_<version>.rs`
+    for the new version, update the crate as well.
+
 11. Check workerd's tests pass with the updated V8.
 
      ```sh
@@ -122,6 +129,10 @@ rebases the patches, regenerates `patches/v8/*.patch`, and updates:
 - the `dragonbox`, `fast_float`, `fp16`, and `highway` commits in
   `build/deps/deps.jsonc`.
 
+It also regenerates `com_googlesource_chromium_icu` in `build/deps/gen/deps.MODULE.bazel`
+and sets `RUST_ICU_MAJOR_VERSION_NUMBER` in `build/deps/rust.MODULE.bazel` and
+`src/rust/i18n/BUILD.bazel` to the major version of the new ICU commit (see step 10).
+
 If the rebase stops because of conflicts, resolve and continue it in the temporary
 checkout:
 
@@ -143,7 +154,7 @@ python3 ci/v8_update.py finish <new_version>
 Do not run `finish` until the rebase has completed. It regenerates the patches and
 updates the pins listed above.
 
-The helper does not run `update-deps.py`. Compare the old and new V8 `DEPS` files for
+The helper runs `update-deps.py` only for ICU. Compare the old and new V8 `DEPS` files for
 changes to `dragonbox`, `fast_float`, `fp16`, `highway`, `perfetto`, and `simdutf`, then
 run the dependency updater for each changed revision:
 

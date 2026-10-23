@@ -844,10 +844,7 @@ export default {
       'ReadableStream pull() Error propagates to Response.formData() Promise',
     ],
   },
-  'response/response-error.any.js': {
-    comment: 'Likely just missing validation',
-    expectedFailures: ["Throws TypeError when responseInit's statusText is Ā"],
-  },
+  'response/response-error.any.js': {},
   'response/response-from-stream.any.js': {
     comment: 'Missing expected exception (TypeError)',
     expectedFailures: [

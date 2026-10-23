@@ -151,6 +151,7 @@ ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite): actorSqlite(act
       {.regulator = SqliteDatabase::TRUSTED}, kj::str("SAVEPOINT _cf_savepoint_", depth));
 }
 ActorSqlite::ExplicitTxn::~ExplicitTxn() noexcept(false) {
+  // NOLINTBEGIN(custom-dtor-throw-during-unwind): the lambda is noexcept, so its checks crash.
   KJ_DEFER([&]() noexcept {
     // We'd better crash if any of this state update fails, otherwise dangling pointers.
 
@@ -167,6 +168,7 @@ ActorSqlite::ExplicitTxn::~ExplicitTxn() noexcept(false) {
       actorSqlite.currentTxn.init<NoTxn>();
     }
   }(););
+  // NOLINTEND(custom-dtor-throw-during-unwind)
 
   if (!committed && actorSqlite.broken == kj::none) {
     // Assume rollback if not committed.
@@ -202,7 +204,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
       if (self->actorSqlite.broken == kj::none) {
         self->rollbackImpl();
       }
-      kj::throwFatalException(kj::mv(e));
+      kj::throwException(kj::mv(e));
     });
   } else {
     commitImpl();
@@ -660,7 +662,7 @@ void ActorSqlite::taskFailed(kj::Exception&& exception) {
 
 void ActorSqlite::requireNotBroken() {
   KJ_IF_SOME(e, broken) {
-    kj::throwFatalException(e.clone());
+    kj::throwException(e.clone());
   }
 }
 

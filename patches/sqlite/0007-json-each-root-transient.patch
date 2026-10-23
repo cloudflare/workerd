@@ -1,0 +1,12 @@
+diff --git a/src/json.c b/src/json.c
+--- a/src/json.c
++++ b/src/json.c
+@@ -5427,7 +5427,7 @@
+       break;
+     }
+     default: {
+-      sqlite3_result_text(ctx, p->path.zBuf, p->nRoot, SQLITE_STATIC);
++      sqlite3_result_text(ctx, p->path.zBuf, p->nRoot, SQLITE_TRANSIENT);
+       break;
+     }
+     case JEACH_JSON: {

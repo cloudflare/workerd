@@ -39,7 +39,7 @@ Key deps: `util/state-machine.h` (stream state FSM), `util/weak-refs.h`, `util/r
 | `readable.{h,c++}`                  | `ReadableStream` public API, `ReaderImpl`, readers                                                  |
 | `writable.{h,c++}`                  | `WritableStream` public API, `WriterImpl`, writer                                                   |
 | `transform.{h,c++}`                 | Standard `TransformStream` (JS algorithms)                                                          |
-| `identity-transform-stream.{h,c++}` | Internal identity transform (byte-only, 1:1 read↔write)                                             |
+| `identity-transform-stream.{h,c++}` | Internal identity transform (byte-only, 1:1 read↔write)                                            |
 | `internal.{h,c++}`                  | `ReadableStreamInternalController`, `WritableStreamInternalController`                              |
 | `standard.{h,c++}`                  | `ReadableStreamJsController`, `WritableStreamJsController` — main complexity (~5400 lines combined) |
 | `common.{h,c++}`                    | Shared types: `ReadResult`, `StreamStates`, controller interfaces                                   |
@@ -55,12 +55,16 @@ These rules MUST be followed when modifying stream code:
    callbacks during a read/write operation
 2. **Always use `snapshot()`** when iterating over consumers if loop body may trigger JS
 3. **Never access `this`** after calling a StateListener callback that may destroy the object
-4. **Always re-check lock state** in lambda continuations that may execute after lock release
+4. **Always re-check operation and lock identity** after calls that may enter JS, including
+   promise settlement; reacquire state references rather than retaining them across callbacks.
+   Serialize responses to the same BYOB request: identity alone does not protect mutable progress.
 5. **Use WeakRef** for any handle that user code may hold longer than the underlying object
-6. **State before promises**: Transition state before resolving promises; pop queue entries
-   only after resolving/rejecting their associated promises
-7. **No dangling captures**: Prefer capturing `this` + re-acquiring refs inside lambdas
-   over capturing raw references that may become dangling
+6. **State before promises**: Publish terminal or released/unlocked state before settlement.
+   Move pending requests to local ownership and remove them from the live queue before resolving
+   or rejecting them. A live ring buffer must retain usable storage for reentrant operations.
+7. **No dangling captures**: Retain an owner or weak identity across callbacks, not raw state
+   references. A pending native read owns its source and non-sandbox buffer in its KJ promise;
+   source transfers move the existing shared claim without nesting ownership adapters.
 
 See `README.md` §Safety Pattern Catalog for detailed When/Why/How for each pattern.
 

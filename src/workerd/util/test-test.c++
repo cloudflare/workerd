@@ -10,20 +10,20 @@ namespace {
 KJ_TEST("can check thrown exception type and message") {
 
   WD_EXPECT_THROW(KJ_EXCEPTION(DISCONNECTED, "foo"),
-      kj::throwRecoverableException(KJ_EXCEPTION(DISCONNECTED, "foo")));
+      kj::throwExceptionUnlessUnwinding(KJ_EXCEPTION(DISCONNECTED, "foo")));
 
   {
     KJ_EXPECT_LOG(ERROR, "exception description didn't match");
 
     WD_EXPECT_THROW(KJ_EXCEPTION(DISCONNECTED, "bar"),
-        kj::throwRecoverableException(KJ_EXCEPTION(DISCONNECTED, "foo")));
+        kj::throwExceptionUnlessUnwinding(KJ_EXCEPTION(DISCONNECTED, "foo")));
   }
 
   {
     KJ_EXPECT_LOG(ERROR, "code threw wrong exception type");
 
     WD_EXPECT_THROW(KJ_EXCEPTION(UNIMPLEMENTED, "foo"),
-        kj::throwRecoverableException(KJ_EXCEPTION(DISCONNECTED, "foo")));
+        kj::throwExceptionUnlessUnwinding(KJ_EXCEPTION(DISCONNECTED, "foo")));
   }
 
   {

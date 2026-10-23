@@ -10,6 +10,8 @@
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
 
+#include <utility>
+
 #if _MSC_VER
 using ssize_t = long long;
 #endif
@@ -378,8 +380,8 @@ kj::Promise<DeferredProxy<void>> pumpOwnedSourceToSink(
 template <typename T>
 kj::Promise<T> rejectWhenWriteDisconnected(WritableStreamSink& sink) {
   return sink.whenWriteDisconnected().then([](kj::Exception&& exception) -> T {
-    kj::throwFatalException(kj::mv(exception));
-  }, [](kj::Exception&& exception) -> T { kj::throwFatalException(kj::mv(exception)); });
+    kj::throwException(kj::mv(exception));
+  }, [](kj::Exception&& exception) -> T { kj::throwException(kj::mv(exception)); });
 }
 
 // A cancellation exception may carry, as this detail, the v8-serialized JavaScript value that the
@@ -479,6 +481,9 @@ class ReadableStreamController {
     // When a Reader lock is released, the controller will signal to the reader that it has been
     // detached.
     virtual void detach() = 0;
+
+    // Publish an explicit release after its preconditions pass, before promise callbacks.
+    virtual void release() = 0;
   };
 
   struct ByobOptions {
@@ -926,7 +931,10 @@ class ReaderLocked {
         closedFulfiller(kj::mv(closedFulfiller)),
         canceler(kj::mv(canceler)) {}
 
-  ReaderLocked(ReaderLocked&&) = default;
+  ReaderLocked(ReaderLocked&& other)
+      : reader(std::exchange(other.reader, kj::none)),
+        closedFulfiller(std::exchange(other.closedFulfiller, kj::none)),
+        canceler(std::exchange(other.canceler, kj::none)) {}
   ~ReaderLocked() noexcept(false) {
     KJ_IF_SOME(r, reader) {
       r->detach();
@@ -979,7 +987,10 @@ class WriterLocked {
         closedFulfiller(kj::mv(closedFulfiller)),
         readyFulfiller(kj::mv(readyFulfiller)) {}
 
-  WriterLocked(WriterLocked&&) = default;
+  WriterLocked(WriterLocked&& other)
+      : writer(std::exchange(other.writer, kj::none)),
+        closedFulfiller(std::exchange(other.closedFulfiller, kj::none)),
+        readyFulfiller(std::exchange(other.readyFulfiller, kj::none)) {}
   ~WriterLocked() noexcept(false) {
     KJ_IF_SOME(w, writer) {
       w->detach();

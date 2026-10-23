@@ -59,10 +59,6 @@ rust_library(
         ":kj-rs-io-lib",
     ],
     lint_config = "//build/rust:lints",
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     visibility = ["//visibility:public"],
     deps = [
         "//src/rust/cxx",

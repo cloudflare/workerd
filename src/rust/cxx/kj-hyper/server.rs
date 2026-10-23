@@ -35,6 +35,11 @@
 //! the error as the body ("invalid HTTP header parsed"; a request line naming HEAD gets the same
 //! head and no body), as RFC 9110 section 15.5 asks and kj did; upstream hyper sends no body
 //! (patches/rust/crates/hyper/parse-error-explanation.patch).
+//!
+//! An HTTP/1.1 request with `Expect: 100-continue` gets hyper's `100 Continue` when the handler
+//! first reads its body, so a client waits for the handler before sending the body. A handler
+//! that responds without reading the body sends no `100 Continue`, and unless the body has
+//! already arrived, the connection closes after the response. kj ignored `Expect`.
 
 use std::cell::Cell;
 use std::cell::RefCell;
