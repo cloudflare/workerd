@@ -77,21 +77,32 @@ globalThis.fetch = async (
   input: RequestInfo | URL,
   init?: RequestInit
 ): Promise<Response> => {
-  if (typeof input === 'string' && input.endsWith('.json')) {
-    const relativePath = getBindingPath(
-      path.dirname(globalThis.state.testFileName),
-      input
-    );
-    // WPT sometimes uses fetch to load a resource file, we "serve" this from the bindings
-    const exports: unknown = globalThis.state.env[relativePath];
-    if (exports === undefined) {
-      throw new Error(`Unable to load resources file ${input} from bindings`);
+  // Without a wptserve sidecar, .json and .wasm resource files are served from the bindings. With
+  // one, the request goes to the sidecar so the test sees a real fetch() response.
+  if (globalThis.state.env.HTTP_PORT == null && typeof input === 'string') {
+    if (input.endsWith('.json')) {
+      return new Response(JSON.stringify(loadResourceBinding(input)));
     }
-
-    return new Response(JSON.stringify(exports));
+    if (input.endsWith('.wasm')) {
+      return new Response(loadResourceBinding(input) as ArrayBuffer, {
+        headers: { 'Content-Type': 'application/wasm' },
+      });
+    }
   }
   return realFetch(relativizeRequest(input, init));
 };
+
+function loadResourceBinding(input: string): unknown {
+  const relativePath = getBindingPath(
+    path.dirname(globalThis.state.testFileName),
+    input
+  );
+  const exports: unknown = globalThis.state.env[relativePath];
+  if (exports === undefined) {
+    throw new Error(`Unable to load resources file ${input} from bindings`);
+  }
+  return exports;
+}
 
 class _Location {
   get ancestorOrigins(): DOMStringList {

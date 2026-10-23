@@ -212,7 +212,7 @@ wd_test(
     data = ["durable-object-snapshots-flag-test.js"],
 )
 
-# For tests that listen on fixed TCP ports 8081-8083. The "socket" resource (see .bazelrc) keeps
+# For tests that listen on fixed TCP ports 8081-8084. The "socket" resource (see .bazelrc) keeps
 # them from running concurrently with each other while still allowing other tests to run alongside.
 # Bazel only accounts for local resources on local execution, so also keep these tests off remote
 # executors, where two of them can otherwise share a network namespace and collide on bind().
@@ -225,6 +225,9 @@ wd_test(
     src = "connect-handler-test.wd-test",
     args = ["--experimental"],
     data = [
+        "connect-handler-server.key",
+        "connect-handler-server.pem",
+        "connect-handler-starttls-test.js",
         "connect-handler-test.js",
         "connect-handler-test-proxy.js",
     ],
@@ -256,6 +259,12 @@ wd_test(
     src = "sockets-connect-error-test.wd-test",
     args = ["--experimental"],
     data = ["sockets-connect-error-test.js"],
+)
+
+wd_test(
+    src = "socket-proxy-to-test.wd-test",
+    args = ["--experimental"],
+    data = ["socket-proxy-to-test.js"],
 )
 
 wd_test(
@@ -717,7 +726,10 @@ wd_test(
 wd_test(
     src = "events-test.wd-test",
     args = ["--experimental"],
-    data = ["events-test.js"],
+    data = [
+        "events-pedantic-test.js",
+        "events-test.js",
+    ],
 )
 
 wd_test(
@@ -956,6 +968,12 @@ wd_test(
     src = "response-json.wd-test",
     args = ["--experimental"],
     data = ["response-json.js"],
+)
+
+wd_test(
+    src = "response-error-test.wd-test",
+    args = ["--experimental"],
+    data = ["response-error-test.js"],
 )
 
 wd_test(
@@ -1587,6 +1605,11 @@ wd_test(
 )
 
 wd_test(
+    src = "body-locked-stream-test.wd-test",
+    data = ["body-locked-stream-test.js"],
+)
+
+wd_test(
     src = "buffer-indexof-odd-offset-ucs2-test.wd-test",
     data = ["buffer-indexof-odd-offset-ucs2-test.js"],
 )
@@ -1620,14 +1643,14 @@ sh_test(
     size = "medium",
     srcs = ["abortIsolate.sh"],
     args = [
-        "$(location //src/workerd/server:workerd_cross)",
+        "$(location //src/workerd/server:workerd)",
         "$(location abortIsolate.wd-test)",
         "$(location abortIsolate.js)",
     ],
     data = [
         "abortIsolate.js",
         "abortIsolate.wd-test",
-        "//src/workerd/server:workerd_cross",
+        "//src/workerd/server:workerd",
     ],
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
@@ -1646,7 +1669,7 @@ wd_cli_test(
     name = "bench-default-compat-date-test",
     src = "bench-default-compat-date-test.wd-bench",
     args = [
-        "$(location //src/workerd/server:workerd_cross)",
+        "$(location //src/workerd/server:workerd)",
         "bench",
         "$(location bench-default-compat-date-test.wd-bench)",
         "--quick",
@@ -1654,6 +1677,6 @@ wd_cli_test(
     data = [
         "bench-default-compat-date-test.js",
         "bench-default-compat-date-test.wd-bench",
-        "//src/workerd/server:workerd_cross",
+        "//src/workerd/server:workerd",
     ],
 )

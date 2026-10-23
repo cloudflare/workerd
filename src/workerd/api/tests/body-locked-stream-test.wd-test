@@ -1,0 +1,12 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "body-locked-stream-test",
+      worker = (
+        modules = [(name = "worker", esModule = embed "body-locked-stream-test.js")],
+        compatibilityFlags = ["nodejs_compat_v2", "streams_enable_constructors"],
+      )
+    ),
+  ],
+);

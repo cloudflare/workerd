@@ -669,10 +669,12 @@ struct Worker::Isolate::Impl {
       currentApi = oldCurrentApi;
 
 #ifdef KJ_DEBUG
-      // We lack a KJ_DASSERT_NONNULL because it would have to look a lot like KJ_IF_SOME, thus
-      // we use a pragma around KJ_DEBUG here.
-      auto& implCurrentLock = KJ_ASSERT_NONNULL(impl.currentLock, "Isolate lock released twice");
-      KJ_ASSERT(&implCurrentLock == this, "Isolate lock released recursively");
+      // Debug-only, like the matching check in the constructor.
+      KJ_IF_SOME(implCurrentLock, impl.currentLock) {
+        KJ_DTOR_ASSERT(&implCurrentLock == this, "Isolate lock released recursively");
+      } else {
+        KJ_DTOR_FAIL_ASSERT("Isolate lock released twice");
+      }
 #endif
 
       if (shouldReportIsolateMetrics) {

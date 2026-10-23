@@ -81,14 +81,12 @@ wd_cc_library(
     srcs = [
         "buffer.c++",
         "i18n.c++",
-        "sqlite.c++",
     ],
     hdrs = [
         "buffer.h",
         "buffer-string-search.h",
         "i18n.h",
         "node-version.h",
-        "sqlite.h",
     ],
     implementation_deps = [
         "//src/rust/i18n",

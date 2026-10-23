@@ -77,8 +77,18 @@ class Event: public jsg::Object {
   inline void stopImmediatePropagation() {
     flags.stopped = true;
   }
+  // Per the spec's "set the canceled flag", this has no effect while a passive listener is
+  // being invoked.
   inline void preventDefault() {
-    flags.preventedDefault = true;
+    if (!flags.inPassiveListener) {
+      flags.preventedDefault = true;
+    }
+  }
+
+  // The spec's "in passive listener flag", set by dispatch while it invokes a listener that
+  // was registered with {passive: true}.
+  inline void setInPassiveListener(bool inPassiveListener) {
+    flags.inPassiveListener = inPassiveListener;
   }
 
   // The only phases we actually use are NONE and AT_TARGET but we provide
@@ -123,6 +133,14 @@ class Event: public jsg::Object {
   inline bool getReturnValue() const {
     return !getDefaultPrevented();
   }
+  // Per the spec, setting returnValue to false sets the canceled flag and setting it to true
+  // does nothing. Unlike preventDefault(), this honors the spec's cancelable check, so it has
+  // no effect on the non-cancelable events the runtime itself dispatches, such as FetchEvent.
+  inline void setReturnValue(bool value) {
+    if (!value && flags.cancelable) {
+      preventDefault();
+    }
+  }
 
   // We provide the timeStamp property for spec compliance but we force
   // the value to 0.0 always because we really don't want users to rely
@@ -165,7 +183,11 @@ class Event: public jsg::Object {
       JSG_READONLY_PROTOTYPE_PROPERTY(bubbles, getBubbles);
       JSG_READONLY_PROTOTYPE_PROPERTY(cancelable, getCancelable);
       JSG_READONLY_PROTOTYPE_PROPERTY(defaultPrevented, getDefaultPrevented);
-      JSG_READONLY_PROTOTYPE_PROPERTY(returnValue, getReturnValue);
+      if (flags.getPedanticWpt()) {
+        JSG_PROTOTYPE_PROPERTY(returnValue, getReturnValue, setReturnValue);
+      } else {
+        JSG_READONLY_PROTOTYPE_PROPERTY(returnValue, getReturnValue);
+      }
       if (flags.getPedanticWpt()) {
         JSG_READONLY_PROTOTYPE_PROPERTY(currentTarget, getCurrentTarget);
       } else {
@@ -192,7 +214,11 @@ class Event: public jsg::Object {
       JSG_READONLY_INSTANCE_PROPERTY(bubbles, getBubbles);
       JSG_READONLY_INSTANCE_PROPERTY(cancelable, getCancelable);
       JSG_READONLY_INSTANCE_PROPERTY(defaultPrevented, getDefaultPrevented);
-      JSG_READONLY_INSTANCE_PROPERTY(returnValue, getReturnValue);
+      if (flags.getPedanticWpt()) {
+        JSG_INSTANCE_PROPERTY(returnValue, getReturnValue, setReturnValue);
+      } else {
+        JSG_READONLY_INSTANCE_PROPERTY(returnValue, getReturnValue);
+      }
       if (flags.getPedanticWpt()) {
         JSG_READONLY_INSTANCE_PROPERTY(currentTarget, getCurrentTarget);
       } else {
@@ -222,6 +248,13 @@ class Event: public jsg::Object {
     tracker.trackField("target", target);
   }
 
+ protected:
+  // Sets the canceled flag even inside a passive listener, for runtime-defined operations
+  // whose effect does not come from the listener canceling the event.
+  inline void forcePreventDefault() {
+    flags.preventedDefault = true;
+  }
+
  private:
   // listing ownType first so type can be initialized with it in constructor
   kj::String ownType;
@@ -237,6 +270,7 @@ class Event: public jsg::Object {
     uint8_t composed : 1 = 0;
     uint8_t bubbles : 1 = 0;
     uint8_t cancelable : 1 = 0;
+    uint8_t inPassiveListener : 1 = 0;
   };
   Flags flags{};
 
@@ -483,6 +517,11 @@ class EventTarget: public jsg::Object {
 
     // When once is true, the handler will be removed after it is invoked one time.
     bool once = false;
+
+    // When passive is true, preventDefault() has no effect while the handler is invoked.
+    // Per the spec, passive is not part of the listener's identity: re-adding a listener
+    // with a different passive value is a no-op that keeps the original registration.
+    bool passive = false;
 
     // If the event handler is registered with an AbortSignal (the {signal} option), this
     // holds the RAII registration for the signal's abort algorithm that removes this

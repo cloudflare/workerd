@@ -133,13 +133,15 @@ export let nonClass = {
       return new Response(stream);
     } else if (req.url.endsWith('/gzip-body-from-rpc')) {
       let resp = await env.MyService.returnResponse();
-      // Waiting on a timer gives the received body time to finish connecting, so that its length
-      // is known by the time the runtime pumps it into the gzip encoder.
-      await scheduler.wait(0);
       return new Response(resp.body, {
         headers: {
           'Content-Encoding': 'gzip',
         },
+      });
+    } else if (req.url.endsWith('/stream-length')) {
+      return Response.json({
+        length: req.headers.get('Content-Length'),
+        text: await req.text(),
       });
     } else {
       throw new Error('unknown route');
@@ -443,6 +445,14 @@ export class MyService extends WorkerEntrypoint {
 
   async readFromStream(stream) {
     return await new Response(stream).text();
+  }
+
+  async inspectStreamLength(stream) {
+    const response = await this.env.self.fetch('http://foo/stream-length', {
+      method: 'POST',
+      body: stream,
+    });
+    return response.json();
   }
 
   async returnReadableStream() {
@@ -1334,8 +1344,8 @@ export let disposal = {
       await env.MyService.leakButReturnPlainObject(counter);
 
       // Give a chance for disposal to happen. When running with a real socket, this involves
-      // non-deterministic scheduling, and it can be relatively slower when running under ASAN,
-      // QEMU, etc. so we'll try to dynamically adjust how much time we wait, up to 10s.
+      // non-deterministic scheduling, and it can be relatively slower when running under ASAN etc.
+      // so we'll try to dynamically adjust how much time we wait, up to 10s.
       for (let i = 0; i < 1000; i++) {
         if (counter.disposed) break;
         await scheduler.wait(10);
@@ -1842,6 +1852,26 @@ export let streams = {
       let resp = await env.self.fetch('http://foo/aborted-stream-from-rpc');
       await resp.text();
     });
+  },
+};
+
+export const rpcStreamLength = {
+  async test(controller, env) {
+    for (const text of ['', 'known remaining bytes']) {
+      assert.deepStrictEqual(
+        await env.MyService.inspectStreamLength(new Response(text).body),
+        { length: String(text.length), text }
+      );
+      const returned = await env.MyService.roundTrip(new Response(text).body);
+      const response = await env.self.fetch('http://foo/stream-length', {
+        method: 'POST',
+        body: returned,
+      });
+      assert.deepStrictEqual(await response.json(), {
+        length: String(text.length),
+        text,
+      });
+    }
   },
 };
 

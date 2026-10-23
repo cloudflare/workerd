@@ -68,6 +68,8 @@ impl DnsUtil {
 }
 ```
 
+Eligible methods also get a V8 Fast API callback; see "Fast API" in `src/rust/jsg/README.md`.
+
 ---
 
 ## `#[jsg_resource]`
@@ -79,8 +81,10 @@ Generates JSG boilerplate for a resource type and its impl block.
 field whose type is or contains a traceable JSG handle (see [Garbage Collection](#garbage-collection) below).
 Use `#[jsg_resource(name = "JSName")]` to override the JavaScript class name.
 
-**On an impl block** — emits `jsg::Resource::members()`, registering every
-`#[jsg_method]`, `#[jsg_constructor]`, and `#[jsg_static_constant]` item.
+**On an impl block** — emits `jsg::Resource::members(flags)`, registering every
+`#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`, and
+`#[jsg_static_constant]` item. It also generates member factories used by both automatic
+and custom registration.
 
 ```rust
 #[jsg_resource]
@@ -98,6 +102,73 @@ impl DnsUtil {
     pub fn create() -> Self { … }
 }
 ```
+
+### Custom member registration
+
+Use `#[jsg_resource(custom_members)]` on the impl block to generate the bindings and member
+factories without an automatic `Resource` implementation. Implement `Resource::members(flags)`
+to choose which members to expose, their order, and property placement using ordinary Rust.
+The flags belong to the realm constructing the template, as in C++ `JSG_RESOURCE_TYPE(T, flags)`.
+Templates are cached per resource type within that realm; registration runs when a template is
+created, not on each property access.
+
+```rust
+use jsg::{Member, PropertyPlacement, Resource};
+use jsg::feature_flags::compatibility_flags;
+use jsg_macros::{jsg_constructor, jsg_property, jsg_resource};
+
+#[jsg_resource]
+struct Example {}
+
+#[jsg_resource(custom_members)]
+impl Example {
+    #[jsg_constructor]
+    fn constructor() -> Self { Self {} }
+
+    #[jsg_property(readonly)]
+    fn get_label(&self) -> String { "example".to_owned() }
+
+    #[jsg_property(readonly)]
+    fn get_cache(&self) -> String { "no-store".to_owned() }
+}
+
+impl Resource for Example {
+    fn members(flags: compatibility_flags::Reader<'_>) -> Vec<Member> {
+        let placement = if flags.get_jsg_property_on_prototype_template() {
+            PropertyPlacement::Prototype
+        } else {
+            PropertyPlacement::Instance
+        };
+        let mut members = vec![
+            Self::constructor_member(),
+            Self::get_label_member(placement),
+        ];
+        if flags.get_cache_option_enabled() && flags.get_jsg_property_on_prototype_template() {
+            members.push(Self::get_cache_member(PropertyPlacement::Prototype));
+        }
+        members
+    }
+}
+```
+
+Factories are private associated functions returning `jsg::Member`. Their names derive from
+the **Rust declaration**, independently of any JavaScript `name = "..."` override:
+
+| Annotated declaration | Factory |
+| --- | --- |
+| Method or constructor `foo` | `Self::foo_member()` |
+| Constant `MAX_SIZE` | `Self::max_size_member()` (constant name lowercased) |
+| Property getter `get_value` with an optional paired setter | `Self::get_value_member(placement)` |
+| Inspect getter `debug_info` | `Self::debug_info_member()` |
+
+An ordinary property factory accepts `jsg::PropertyPlacement::{Prototype, Instance}` and selects
+the matching V8 getter and setter callbacks. The attribute's `prototype` / `instance` argument
+only supplies placement for **automatic** registration; custom registration passes it explicitly.
+Getter/setter pairing, `readonly` checks, name overrides, argument conversion, and exception
+handling apply in both modes. Getter and setter annotations must agree on placement and JS name.
+Inspect properties remain symbol-keyed and do not take a placement argument.
+Property registration follows the returned member list's order. V8 enumerates instance native
+data properties in reverse registration order, as it does for C++ JSG.
 
 ---
 

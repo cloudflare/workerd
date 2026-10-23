@@ -626,6 +626,28 @@ CryptoKeyUsageSet CryptoKey::getUsageSet() const {
   return impl->getUsages();
 }
 
+jsg::MemoizedIdentity<CryptoKey::AlgorithmVariant>& CryptoKey::getAlgorithmProperty(jsg::Lock& js) {
+  KJ_IF_SOME(cached, algorithmProperty) {
+    return cached;
+  }
+  return algorithmProperty.emplace(getAlgorithm(js));
+}
+
+jsg::JsValue CryptoKey::getUsagesProperty(jsg::Lock& js) {
+  KJ_IF_SOME(cached, usagesProperty) {
+    return cached.getHandle(js);
+  }
+  auto usageSet = getUsageSet();
+  v8::LocalVector<v8::Value> names(js.v8Isolate);
+  names.reserve(usageSet.size());
+  for (auto singleton: CryptoKeyUsageSet::singletons()) {
+    if (singleton <= usageSet) names.push_back(js.strIntern(singleton.name()));
+  }
+  jsg::JsValue usages = jsg::JsArray(v8::Array::New(js.v8Isolate, names.data(), names.size()));
+  usagesProperty = usages.addRef(js);
+  return usages;
+}
+
 bool CryptoKey::operator==(const CryptoKey& other) const {
   // We check this first because we don't want any comparison to happen if
   // either key is not extractable, even if they are the same object.
@@ -650,6 +672,7 @@ bool CryptoKey::verifyX509Private(const X509* cert) const {
 }
 
 void CryptoKey::visitForGc(jsg::GcVisitor& visitor) {
+  visitor.visit(algorithmProperty, usagesProperty);
   if (impl.get() == nullptr) return;
   impl->visitForGc(visitor);
 }

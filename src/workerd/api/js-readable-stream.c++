@@ -1364,9 +1364,12 @@ void JsReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       IoContext& ioctx = IoContext::current();
 
       auto encoding = getPreferredEncoding(js);
-      auto expectedLength = tryGetLength(js, encoding);
+      auto identityLength = tryGetLength(js, StreamEncoding::IDENTITY);
+      auto encodedLength =
+          encoding == StreamEncoding::IDENTITY ? identityLength : tryGetLength(js, encoding);
 
-      auto sink = newReadableStreamSerializeSink(externalHandler, encoding, expectedLength);
+      auto sink =
+          newReadableStreamSerializeSink(externalHandler, encoding, encodedLength, identityLength);
 
       ioctx.addTask(ioctx.waitForDeferredProxy(pumpTo(js, kj::mv(sink), EndStream::YES))
                         .catch_([](kj::Exception&& e) {

@@ -318,11 +318,11 @@ export const cancelableListenerAbortPropagation = {
   },
 };
 
-export const passiveCaptureListener = {
+export const captureListener = {
   test() {
     const target = new EventTarget();
-    // capture and passive must be false. We do not support these but
-    // we allow them to be set for code portability reasons.
+    // capture must be false. We do not support it but we allow it to be set
+    // for code portability reasons.
     throws(() => {
       target.addEventListener('foo', () => {}, {
         capture: true,
@@ -332,11 +332,6 @@ export const passiveCaptureListener = {
       target.addEventListener('foo', () => {}, true);
     });
     throws(() => {
-      target.addEventListener('foo', () => {}, {
-        passive: true,
-      });
-    });
-    throws(() => {
       target.removeEventListener('foo', () => {}, {
         capture: true,
       });
@@ -344,6 +339,172 @@ export const passiveCaptureListener = {
     throws(() => {
       target.removeEventListener('foo', () => {}, true);
     });
+  },
+};
+
+export const passiveListener = {
+  test() {
+    const target = new EventTarget();
+    let defaultPrevented;
+    target.addEventListener(
+      'foo',
+      (event) => {
+        event.preventDefault();
+        defaultPrevented = event.defaultPrevented;
+      },
+      { passive: true }
+    );
+    strictEqual(
+      target.dispatchEvent(new Event('foo', { cancelable: true })),
+      true
+    );
+    strictEqual(defaultPrevented, false);
+  },
+};
+
+export const passiveListenerReturnValue = {
+  test() {
+    // Returning true from a listener cancels the event, except from a passive
+    // listener.
+    const target = new EventTarget();
+    target.addEventListener('foo', () => true, { passive: true });
+    const event = new Event('foo', { cancelable: true });
+    strictEqual(target.dispatchEvent(event), true);
+    strictEqual(event.defaultPrevented, false);
+    strictEqual(event.returnValue, true);
+
+    const nonPassive = new EventTarget();
+    nonPassive.addEventListener('foo', () => true, { passive: false });
+    strictEqual(
+      nonPassive.dispatchEvent(new Event('foo', { cancelable: true })),
+      false
+    );
+  },
+};
+
+export const nonPassiveListenerCancels = {
+  test() {
+    for (const options of [undefined, {}, { passive: false }]) {
+      const target = new EventTarget();
+      target.addEventListener(
+        'foo',
+        (event) => event.preventDefault(),
+        options
+      );
+      const event = new Event('foo', { cancelable: true });
+      strictEqual(target.dispatchEvent(event), false);
+      strictEqual(event.defaultPrevented, true);
+    }
+  },
+};
+
+export const mixedPassiveListeners = {
+  test() {
+    const target = new EventTarget();
+    const seen = [];
+    target.addEventListener(
+      'foo',
+      (event) => {
+        event.preventDefault();
+        seen.push(['passive', event.defaultPrevented]);
+      },
+      { passive: true }
+    );
+    target.addEventListener('foo', (event) => {
+      seen.push(['before', event.defaultPrevented]);
+      event.preventDefault();
+      seen.push(['after', event.defaultPrevented]);
+    });
+    target.addEventListener(
+      'foo',
+      (event) => {
+        // A later passive listener sees the cancellation, and cannot undo it.
+        event.preventDefault();
+        seen.push(['passive2', event.defaultPrevented]);
+      },
+      { passive: true }
+    );
+    strictEqual(
+      target.dispatchEvent(new Event('foo', { cancelable: true })),
+      false
+    );
+    deepStrictEqual(seen, [
+      ['passive', false],
+      ['before', false],
+      ['after', true],
+      ['passive2', true],
+    ]);
+
+    // The flag does not outlive the passive listener's invocation.
+    const event = new Event('foo', { cancelable: true });
+    const other = new EventTarget();
+    other.addEventListener('foo', () => {}, { passive: true });
+    other.dispatchEvent(event);
+    event.preventDefault();
+    strictEqual(event.defaultPrevented, true);
+  },
+};
+
+export const passiveListenerThrows = {
+  test() {
+    // The in passive listener flag is cleared even if the listener throws.
+    const target = new EventTarget();
+    target.addEventListener(
+      'foo',
+      () => {
+        throw new Error('boom');
+      },
+      { passive: true }
+    );
+    target.addEventListener('foo', (event) => event.preventDefault());
+
+    let reported = null;
+    const errorHandler = (errEvent) => {
+      reported = errEvent.error;
+      errEvent.preventDefault();
+    };
+    globalThis.addEventListener('error', errorHandler);
+    const event = new Event('foo', { cancelable: true });
+    try {
+      strictEqual(target.dispatchEvent(event), false);
+    } finally {
+      globalThis.removeEventListener('error', errorHandler);
+    }
+    strictEqual(reported?.message, 'boom');
+    strictEqual(event.defaultPrevented, true);
+  },
+};
+
+export const passiveListenerIdentity = {
+  test() {
+    // passive is not part of a listener's identity: the first registration
+    // wins, and removeEventListener() matches regardless of passive.
+    const target = new EventTarget();
+    let calls = 0;
+    const handler = (event) => {
+      calls++;
+      event.preventDefault();
+    };
+    target.addEventListener('foo', handler, { passive: true });
+    target.addEventListener('foo', handler, { passive: false });
+    target.addEventListener('foo', handler);
+    strictEqual(
+      target.dispatchEvent(new Event('foo', { cancelable: true })),
+      true
+    );
+    strictEqual(calls, 1);
+
+    target.removeEventListener('foo', handler);
+    target.dispatchEvent(new Event('foo', { cancelable: true }));
+    strictEqual(calls, 1);
+
+    target.addEventListener('foo', handler, { passive: false });
+    target.addEventListener('foo', handler, { passive: true });
+    strictEqual(
+      target.dispatchEvent(new Event('foo', { cancelable: true })),
+      false
+    );
+    strictEqual(calls, 2);
   },
 };
 

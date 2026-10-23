@@ -351,7 +351,7 @@ sh_test(
     name = "process-stdio-sh-test",
     srcs = ["test_process_stdio.sh"],
     args = [
-        "$(location //src/workerd/server:workerd_cross)",
+        "$(location //src/workerd/server:workerd)",
         "$(location process-stdio-nodejs-test.wd-test)",
         "$(location process-stdio-nodejs-test.expected_stdout)",
         "$(location process-stdio-nodejs-test.expected_stderr)",
@@ -361,7 +361,7 @@ sh_test(
         "process-stdio-nodejs-test.expected_stdout",
         "process-stdio-nodejs-test.js",
         "process-stdio-nodejs-test.wd-test",
-        "//src/workerd/server:workerd_cross",
+        "//src/workerd/server:workerd",
     ],
 )
 
@@ -369,7 +369,7 @@ sh_test(
     name = "process-stdio-fs-sh-test",
     srcs = ["test_process_stdio.sh"],
     args = [
-        "$(location //src/workerd/server:workerd_cross)",
+        "$(location //src/workerd/server:workerd)",
         "$(location process-stdio-fs-nodejs-test.wd-test)",
         "$(location process-stdio-fs-nodejs-test.expected_stdout)",
         "$(location process-stdio-fs-nodejs-test.expected_stderr)",
@@ -379,7 +379,7 @@ sh_test(
         "process-stdio-fs-nodejs-test.expected_stdout",
         "process-stdio-fs-nodejs-test.js",
         "process-stdio-fs-nodejs-test.wd-test",
-        "//src/workerd/server:workerd_cross",
+        "//src/workerd/server:workerd",
     ],
 )
 

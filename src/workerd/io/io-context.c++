@@ -954,7 +954,7 @@ IoContext::TimeoutManagerImpl::TimeoutState::TimeoutState(
 }
 
 IoContext::TimeoutManagerImpl::TimeoutState::~TimeoutState() {
-  KJ_ASSERT(!isRunning);
+  KJ_DTOR_ASSERT(!isRunning);
   if (!isCanceled) {
     ++manager.timeoutsFinished;
   }

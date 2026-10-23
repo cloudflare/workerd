@@ -9,10 +9,6 @@ rust_library(
     link_deps = [
         ":bridge",
     ],
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         "//src/rust/cxx",
         "//src/rust/cxx/kj-rs",
@@ -46,10 +42,6 @@ cc_test(
     # exception thrown in libkj-rs-io-lib.so that unwinds through a frame in libkj-async-io.so
     # (kj's inline owning wrap*Fd overloads) aborts in _Unwind_SetGR. One binary, one unwinder.
     linkstatic = True,
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         ":bridge",
         ":tests",
@@ -66,10 +58,6 @@ cc_test(
     size = "medium",
     srcs = ["file-watcher-test.c++"],
     linkstatic = True,
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         ":tests",
         "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
@@ -85,10 +73,6 @@ cc_test(
     size = "medium",
     srcs = ["http-test.c++"],
     linkstatic = True,
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         ":tests",
         "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",
@@ -103,10 +87,6 @@ cc_test(
     size = "small",
     srcs = ["peer-filter-test.c++"],
     linkstatic = True,
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         "//src/rust/cxx/kj-rs-io:peer-filter-lib",
         "@@//deps:rust_runtime",
@@ -121,10 +101,6 @@ cc_test(
     size = "medium",
     srcs = ["capnp-rpc-test.c++"],
     linkstatic = True,
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         ":tests",
         "//src/rust/cxx/kj-rs-io:kj-rs-io-lib",

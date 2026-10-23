@@ -40,6 +40,7 @@ use crate::listen::BoundSocket;
 use crate::listen::HttpSocket;
 use crate::listen::ListenContext;
 use crate::listen::StreamListener;
+use crate::listen::TcpTls;
 use crate::log;
 use crate::services::network::tls_options;
 use crate::services::rewriter::HttpRewriter;
@@ -254,7 +255,17 @@ fn listener(
         }
         (Ok(socket::Which::Tcp(tcp)), BoundSocket::Stream(listener)) => {
             let tls = if tcp.has_tls_options() {
-                Some(tls(tcp.get_tls_options().map_err(capnp_error)?)?)
+                let config = tls(tcp.get_tls_options().map_err(capnp_error)?)?;
+                Some(match tcp.get_tls_mode() {
+                    Ok(socket::TcpTlsMode::Implicit) => TcpTls::Implicit(config),
+                    Ok(socket::TcpTlsMode::StartTls) => TcpTls::StartTls(config),
+                    Err(capnp::NotInSchema(_)) => {
+                        return Err(kj::failed!(
+                            "Encountered unknown tlsMode in \"{name}\". Was the config compiled \
+                             with a newer version of the schema?"
+                        ));
+                    }
+                })
             } else {
                 None
             };

@@ -93,6 +93,10 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
   // rule for data with V8 heap provenance -- lives in JsReadableStream's converting constructors.
   KJ_SWITCH_ONEOF(init) {
     KJ_CASE_ONEOF(stream, JsReadableStream) {
+      // ExtractedBody's constructor rejects a disturbed stream, and its message takes precedence
+      // for a stream that is both, such as one tee() has left behind.
+      JSG_REQUIRE(stream.isDisturbed(js) || !stream.isLocked(js), TypeError,
+          "This ReadableStream is locked to a reader, and cannot be used as a body.");
       return ExtractedBody(js, kj::mv(stream));
     }
     KJ_CASE_ONEOF(gen, jsg::AsyncGeneratorIgnoringStrings<jsg::Value>) {
@@ -1010,8 +1014,10 @@ Response::Response(jsg::Lock& js,
       asyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
 
 jsg::Ref<Response> Response::error(jsg::Lock& js) {
-  return js.alloc<Response>(js, 0, kj::none, js.alloc<Headers>(), CfProperty(), kj::none);
-};
+  auto guard =
+      FeatureFlags::get(js).getPedanticWpt() ? Headers::Guard::IMMUTABLE : Headers::Guard::NONE;
+  return js.alloc<Response>(js, 0, kj::none, js.alloc<Headers>(guard), CfProperty(), kj::none);
+}
 
 jsg::Ref<Response> Response::constructor(jsg::Lock& js,
     jsg::Optional<kj::Maybe<Body::Initializer>> optionalBodyInit,
@@ -1227,7 +1233,16 @@ jsg::Ref<Response> Response::json_(
     };
   }
 
-  return constructor(js, kj::Maybe(any.toJson(js)), kj::mv(maybeInit));
+  auto json = any.toJson(js);
+  if (FeatureFlags::get(js).getPedanticWpt()) {
+    // JSON.stringify() returns undefined for values that have no JSON representation, such as a
+    // symbol, a function, undefined, or an object whose toJSON() returns one of these. V8's
+    // JSON::Stringify() API converts that result to the string "undefined", which is never valid
+    // JSON text, so it identifies these values unambiguously.
+    JSG_REQUIRE(json != "undefined"_kj, TypeError,
+        "Response.json() requires a value that can be serialized to JSON.");
+  }
+  return constructor(js, kj::Maybe(kj::mv(json)), kj::mv(maybeInit));
 }
 
 jsg::Ref<Response> Response::clone(jsg::Lock& js) {
@@ -1461,7 +1476,9 @@ kj::Maybe<jsg::Promise<jsg::Ref<Response>>> FetchEvent::getResponsePromise(jsg::
 }
 
 void FetchEvent::respondWith(jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> promise) {
-  preventDefault();
+  // The runtime uses the canceled flag to skip default handling once a response is provided.
+  // A passive listener must still be able to respond, so this bypasses the passive check.
+  forcePreventDefault();
 
   if (IoContext::current().hasOutputGate()) {
     // Once a Response is returned, we need to apply the output lock.

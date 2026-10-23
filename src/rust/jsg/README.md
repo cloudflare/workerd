@@ -247,6 +247,13 @@ It does not reproduce worker-specific initialization such as logging, inspectors
 1. During worker initialization, C++ canonicalizes the worker's `CompatibilityFlags` via `capnp::canonicalize()` and passes the bytes to `realm_create()`, which parses them once and stores the result in the per-context `Realm`.
 2. `lock.feature_flags()` reads the cached `FeatureFlags` and returns its capnp reader. No copies or re-parsing on access.
 
+### Compatibility-dependent API surfaces
+
+`#[jsg_resource(custom_members)]` generates member factories while leaving `Resource::members(flags)`
+to the resource author. Use ordinary Rust conditionals to select members and choose property placement
+when the template is built. See [custom member registration](../jsg-macros/README.md#custom-member-registration)
+for the factory naming conventions and a complete example.
+
 ### Key types and files
 
 | Item | Location |
@@ -351,6 +358,10 @@ impl WebSocket {
 ```
 
 Constants are set on both the constructor and prototype as read-only, non-configurable properties per Web IDL. The name is used as-is (no camelCase conversion). Only numeric types are supported (`i8`..`i64`, `u8`..`u64`, `f32`, `f64`).
+
+## Fast API
+
+`#[jsg_method]` adds a V8 Fast API callback for the types in `fast_api.rs`; it must not call into V8.
 
 ## FFI Functions with Raw Pointers
 

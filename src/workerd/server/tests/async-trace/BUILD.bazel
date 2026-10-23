@@ -17,7 +17,6 @@ sh_test(
         "scenario.wd-test",
         "//src/workerd/server:workerd",
     ],
-    tags = ["no-qemu"],
 )
 
 # Checks how the trace ends when a context is still open at shutdown, with and without
@@ -35,7 +34,6 @@ sh_test(
         "shutdown.wd-test",
         "//src/workerd/server:workerd",
     ],
-    tags = ["no-qemu"],
 )
 
 # Runs the same worker under --perfetto-trace, with and without the workerd.async category.
@@ -52,7 +50,6 @@ sh_test(
         "scenario.wd-test",
         "//src/workerd/server:workerd",
     ],
-    tags = ["no-qemu"],
     target_compatible_with = select({
         "//src/workerd/util:really_use_perfetto": [],
         "//conditions:default": ["@platforms//:incompatible"],

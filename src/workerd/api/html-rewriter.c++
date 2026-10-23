@@ -230,7 +230,7 @@ class Rewriter final: public WritableStreamSink {
   lol_html_streaming_handler_t registerReplacer(JsReadableStream content, bool isHtml);
 
   ~Rewriter() {
-    KJ_ASSERT(registeredReplacers.size() == 0, "Some replacers were leaked by lol-html");
+    KJ_DTOR_ASSERT(registeredReplacers.size() == 0, "Some replacers were leaked by lol-html");
   }
 
  private:
