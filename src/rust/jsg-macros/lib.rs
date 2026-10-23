@@ -216,6 +216,15 @@ enum Callback {
 /// `method_attr` is a method's `#[jsg_method]` arguments; argument errors for
 /// methods match C++ JSG's.
 fn callback(item: TokenStream, kind: Callback, method_attr: Option<TokenStream>) -> TokenStream {
+    callback_with_instance(item, kind, None, method_attr)
+}
+
+fn callback_with_instance(
+    item: TokenStream,
+    kind: Callback,
+    instance_kind: Option<Callback>,
+    method_attr: Option<TokenStream>,
+) -> TokenStream {
     let input_fn = parse_macro_input!(item as ItemFn);
     let fn_name = &input_fn.sig.ident;
     let method_name = method_attr.map(|attr| {
@@ -224,14 +233,10 @@ fn callback(item: TokenStream, kind: Callback, method_attr: Option<TokenStream>)
     let fn_vis = &input_fn.vis;
     let fn_sig = &input_fn.sig;
     let fn_block = &input_fn.block;
-    let callback_name = syn::Ident::new(&format!("{fn_name}_callback"), fn_name.span());
 
     // Methods with a receiver (&self, &mut self) become instance methods on the prototype.
     // Methods without a receiver become static methods on the constructor.
-    let has_self = fn_sig
-        .inputs
-        .iter()
-        .any(|arg| matches!(arg, FnArg::Receiver(_)));
+    let has_self = fn_sig.receiver().is_some();
 
     let params: Vec<_> = fn_sig
         .inputs
@@ -245,7 +250,6 @@ fn callback(item: TokenStream, kind: Callback, method_attr: Option<TokenStream>)
     // Check if the first typed parameter is `&mut Lock` — if so, pass `&mut lock`
     // directly instead of extracting it from JS args (like C++ jsg::Lock&).
     let has_lock_param = params.first().is_some_and(|ty| is_lock_ref(ty));
-    let js_arg_offset = usize::from(has_lock_param);
 
     let (unwraps, arg_exprs): (Vec<_>, Vec<_>) = params
         .iter()
@@ -256,7 +260,7 @@ fn callback(item: TokenStream, kind: Callback, method_attr: Option<TokenStream>)
                 return (quote! {}, quote! { &mut *lock });
             }
 
-            let js_index = i - js_arg_offset;
+            let js_index = i - usize::from(has_lock_param);
             let arg = syn::Ident::new(&format!("arg{js_index}"), fn_name.span());
             let unwrap = unwrap_argument(ty, &arg, js_index, method_name.as_deref());
             // For reference types (like &str), FromJS returns an owned type (String),
@@ -330,21 +334,27 @@ fn callback(item: TokenStream, kind: Callback, method_attr: Option<TokenStream>)
     } else {
         quote! {}
     };
-    let (raw_callback, make_callback) = callback_constructor(kind);
+    let callbacks = std::iter::once((kind, "callback"))
+        .chain(instance_kind.map(|kind| (kind, "instance_callback")))
+        .map(|(kind, suffix)| {
+            let callback_name = syn::Ident::new(&format!("{fn_name}_{suffix}"), fn_name.span());
+            let (raw_callback, make_callback) = callback_constructor(kind);
+            quote! {
+                #[automatically_derived]
+                #lint_attr
+                fn #callback_name() -> #raw_callback {
+                    #make_callback(|lock, args| {
+                        #(#unwraps)*
+                        #invocation
+                        #result_handling
+                    })
+                }
+            }
+        });
 
     quote! {
         #fn_vis #fn_sig { #fn_block }
-
-        #[automatically_derived]
-        #lint_attr
-        fn #callback_name() -> #raw_callback {
-            #make_callback(|lock, args| {
-                #(#unwraps)*
-                #invocation
-                #result_handling
-            })
-        }
-
+        #(#callbacks)*
     }
     .into()
 }
@@ -463,16 +473,18 @@ fn callback_constructor(kind: Callback) -> (proc_macro2::TokenStream, proc_macro
 /// The generated `Traced::trace` body simply delegates to `Traced::trace()` on
 /// every named field.
 ///
-/// **On an impl block** — emits `jsg::Resource::members()` registering every
+/// **On an impl block** — emits `jsg::Resource::members(flags)` registering every
 /// `#[jsg_method]`, `#[jsg_property]`, `#[jsg_inspect_property]`,
-/// `#[jsg_constructor]`, and `#[jsg_static_constant]` item.
+/// `#[jsg_constructor]`, and `#[jsg_static_constant]` item, plus member factories.
+/// With `custom_members`, emits only the factories; implement `jsg::Resource` yourself
+/// to select members using ordinary Rust control flow and compatibility flags.
 ///
 /// Use `#[jsg_resource(name = "JSName")]` on the struct to override the default
 /// JavaScript class name.
 #[proc_macro_attribute]
 pub fn jsg_resource(attr: TokenStream, item: TokenStream) -> TokenStream {
     if let Ok(impl_block) = syn::parse::<ItemImpl>(item.clone()) {
-        return generate_resource_impl(&impl_block);
+        return generate_resource_impl(attr, &impl_block);
     }
     let input = parse_macro_input!(item as DeriveInput);
     generate_resource_struct(attr, &input)
@@ -544,21 +556,19 @@ pub fn jsg_constructor(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// omitted, the prefix is stripped and the remainder is converted
 /// `snake_case` -> `camelCase`.
 #[proc_macro_attribute]
-pub fn jsg_property(attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn jsg_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Registration as a Member is handled by #[jsg_resource] on the enclosing
     // impl block, which also reports malformed arguments.
-    let instance = matches!(
-        resource::parse_jsg_property_args(attr),
-        Ok((resource::PropertyKind::Instance, _, _))
-    );
     let setter = syn::parse::<ItemFn>(item.clone())
         .is_ok_and(|f| f.sig.ident.to_string().starts_with("set_"));
-    let kind = match (instance, setter) {
-        (false, _) => Callback::Function,
-        (true, false) => Callback::Getter,
-        (true, true) => Callback::Setter,
+    let instance_kind = if setter {
+        Callback::Setter
+    } else {
+        Callback::Getter
     };
-    callback(item, kind, None)
+    // Member factories select placement at template construction, so both V8 callback
+    // signatures are available regardless of the automatic-registration placement.
+    callback_with_instance(item, Callback::Function, Some(instance_kind), None)
 }
 
 /// Registers a method as a debug-inspect-only property on a `#[jsg_resource]`

@@ -869,6 +869,15 @@ impl From<u64> for ConstantValue {
 ///   surfaced by `node:util` `inspect()`.
 pub use crate::v8::ffi::PropertyKind;
 
+/// Placement of an ordinary resource property registered by a generated member factory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropertyPlacement {
+    /// An accessor on the prototype; preferred for new APIs.
+    Prototype,
+    /// An own native data property on each instance, for compatibility with existing APIs.
+    Instance,
+}
+
 pub enum Member {
     Constructor {
         callback: RawFunctionCallback,
@@ -962,6 +971,13 @@ impl Realm {
 
     pub(crate) fn id(&self) -> scope::IsolateId {
         self.id
+    }
+
+    /// Gets or creates the cached `FunctionTemplate` for a resource type, built against
+    /// this realm's compatibility flags.
+    pub(crate) fn get_constructor<R: Resource>(&mut self) -> &v8::Global<v8::FunctionTemplate> {
+        self.resources
+            .get_constructor::<R>(self.isolate, self.id, self.feature_flags.reader())
     }
 }
 

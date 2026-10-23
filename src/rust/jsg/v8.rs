@@ -3672,11 +3672,7 @@ impl WrappableRc {
     /// Returns `None` if the Wrappable already has a JavaScript wrapper in another isolate.
     pub(crate) fn to_js<'s, R: Resource>(&self, lock: &mut Lock<'s>) -> Option<Local<'s, Value>> {
         let isolate = lock.isolate();
-        let isolate_id = lock.isolate_id();
-        let constructor = lock
-            .realm()
-            .resources
-            .get_constructor::<R>(isolate, isolate_id);
+        let constructor = lock.realm().get_constructor::<R>();
         // SAFETY: isolate is valid and locked; constructor global handle is valid.
         let handle = unsafe {
             ffi::wrap_resource(

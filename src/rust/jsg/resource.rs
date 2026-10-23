@@ -25,6 +25,7 @@ use crate::Member;
 use crate::ToJS;
 use crate::Traced;
 use crate::Type;
+use crate::feature_flags::compatibility_flags;
 use crate::v8;
 use crate::v8::ffi::Wrappable;
 
@@ -361,7 +362,7 @@ impl<R: Resource> Default for Weak<R> {
 ///
 /// **Prototype**: The returned object's prototype is set up from the resource's
 /// [`FunctionTemplate`], which includes all `#[jsg_method]` instance methods and
-/// `#[jsg_static_constant]` values registered via [`Resource::members()`].
+/// `#[jsg_static_constant]` values registered via [`Resource::members(flags)`](Resource::members).
 ///
 /// **Ownership**: The `Rc` is consumed. The JS wrapper keeps the `Wrappable`
 /// alive via `CppgcShim`. When the JS object is garbage collected and all Rust
@@ -398,11 +399,7 @@ pub fn function_template_of<'s, R: Resource + 'static>(
     lock: &mut Lock<'s>,
 ) -> v8::Local<'s, v8::Function> {
     let isolate = lock.isolate();
-    let isolate_id = lock.isolate_id();
-    let constructor = lock
-        .realm()
-        .resources
-        .get_constructor::<R>(isolate, isolate_id);
+    let constructor = lock.realm().get_constructor::<R>();
     // SAFETY: `isolate` is valid and locked (Lock invariant). `constructor` is a valid
     // Global<FunctionTemplate> cached in the Realm. Inlined from `as_local_function` to
     // avoid re-borrowing `self` while `constructor` holds an immutable borrow through `realm()`.
@@ -414,10 +411,12 @@ pub fn function_template_of<'s, R: Resource + 'static>(
     }
 }
 
-/// Builds a [`ResourceDescriptor`] from `R`'s [`Resource::members()`] list.
+/// Builds a [`ResourceDescriptor`] from `R`'s [`Resource::members(flags)`](Resource::members) list.
 /// The descriptor is passed to C++ `create_resource_template` to set up the
 /// V8 `FunctionTemplate` with the correct methods, constants, and constructor.
-fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
+fn get_resource_descriptor<R: Resource>(
+    flags: compatibility_flags::Reader<'_>,
+) -> v8::ffi::ResourceDescriptor {
     let mut descriptor = v8::ffi::ResourceDescriptor {
         name: R::class_name().to_owned(),
         constructor: KjMaybe::None,
@@ -427,7 +426,7 @@ fn get_resource_descriptor<R: Resource>() -> v8::ffi::ResourceDescriptor {
         static_constants: Vec::new(),
     };
 
-    for m in R::members() {
+    for m in R::members(flags) {
         match m {
             Member::Constructor { callback } => {
                 descriptor.constructor = KjMaybe::Some(v8::ffi::ConstructorDescriptor {
@@ -509,24 +508,31 @@ pub struct Resources {
 
 impl Resources {
     /// Gets or creates the cached `FunctionTemplate` for a resource type.
+    ///
+    /// `flags` are only consulted when the template is first created.
     pub(crate) fn get_constructor<R: Resource + 'static>(
         &mut self,
         isolate: v8::IsolatePtr,
         isolate_id: crate::scope::IsolateId,
+        flags: compatibility_flags::Reader<'_>,
     ) -> &v8::Global<v8::FunctionTemplate> {
         self.templates
             .entry(TypeId::of::<R>())
-            .or_insert_with(|| Self::create_resource_constructor::<R>(isolate, isolate_id))
+            .or_insert_with(|| Self::create_resource_constructor::<R>(isolate, isolate_id, flags))
     }
 
     /// Creates a new V8 `FunctionTemplate` for resource type `R` via the C++ FFI.
     fn create_resource_constructor<R: Resource>(
         isolate: v8::IsolatePtr,
         isolate_id: crate::scope::IsolateId,
+        flags: compatibility_flags::Reader<'_>,
     ) -> v8::Global<v8::FunctionTemplate> {
         // SAFETY: Caller guarantees the isolate is valid and locked.
         let handle = unsafe {
-            v8::ffi::create_resource_template(isolate.as_ffi(), &get_resource_descriptor::<R>())
+            v8::ffi::create_resource_template(
+                isolate.as_ffi(),
+                &get_resource_descriptor::<R>(flags),
+            )
         };
         v8::Global::from_ffi_in(handle, isolate_id)
     }
@@ -550,7 +556,13 @@ impl Resources {
 /// member declarations, a cleanup function for GC, and access to their V8 wrapper state.
 pub trait Resource: Type + GarbageCollected + Sized + 'static {
     /// Returns the list of methods, properties, and constructors exposed to JavaScript.
-    fn members() -> Vec<Member>
+    ///
+    /// `flags` are the compatibility flags of the isolate the template is built for, so the
+    /// member list can vary with them, as with the `CompatibilityFlags::Reader flags`
+    /// parameter of C++ `JSG_RESOURCE_TYPE`. Templates are cached per resource type in the realm.
+    /// Use `#[jsg_resource(custom_members)]` to generate member factories while supplying
+    /// this implementation yourself.
+    fn members(flags: compatibility_flags::Reader<'_>) -> Vec<Member>
     where
         Self: Sized;
 }
