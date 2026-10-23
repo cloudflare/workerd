@@ -1,0 +1,29 @@
+src/cloudflare/internal/images.d.ts
+  s_66767b9e401d0e::t_7625aef09636a4 5-16
+  s_66767b9e401d0e::t_75d89085b5195a 26-44
+  s_66767b9e401d0e::t_39471f3228d505 45-49,268-274
+types/defines/images.d.ts
+  s_66767b9e401d0e::t_3172ca214de022 155-157,256,261
+  s_66767b9e401d0e::t_07a5fa001751aa 257-260
+  s_66767b9e401d0e::t_333d215eb84064 262
+src/cloudflare/internal/images-api.ts
+  s_66767b9e401d0e::t_8eb3fedef908f8 20
+  s_66767b9e401d0e::t_53f3492cb0307f 17-19
+  s_66767b9e401d0e::t_9210d8a4711f3b 21-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "802dc0b22a23ff3161561a54b37edc0a81130ff8",
+  "prompts": {},
+  "sessions": {
+    "s_66767b9e401d0e": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_0dcbb83c4ffeQ8K1jA4PhRRlgt",
+        "model": "@cf/moonshotai/kimi-k2.6"
+      },
+      "human_author": "Diretnan Domnan <diretnan@cloudflare.com>"
+    }
+  }
+}

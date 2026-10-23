@@ -1,0 +1,55 @@
+src/workerd/io/io-context.c++
+  s_b27eb293e3a79c::t_086e93b1dec3ff 1257
+  s_b27eb293e3a79c::t_1c7677a0d5fd17 1190-1191
+  s_b27eb293e3a79c::t_af2d66e1d82581 1166,1186,1188,1252-1256
+  s_b27eb293e3a79c::t_07a19f2e5e391b 1193-1195
+  s_b27eb293e3a79c::t_a9daf7f6fe4209 1184
+  s_b27eb293e3a79c::t_e413ab4406e8b6 1225
+src/cloudflare/internal/test/tracing/opentelemetry-context-backend.js
+  s_b27eb293e3a79c::t_4724e69e11d7f4 61-63,71
+  s_b27eb293e3a79c::t_cd1105a95e5f24 17,30,40-41
+  s_b27eb293e3a79c::t_c8f3ec0f2d8f06 48-49,57-60,72-73
+  s_b27eb293e3a79c::t_a0c90ae5751bb9 15-16,47,50-56,64-70,74-77,87-89
+  s_b27eb293e3a79c::t_1c8aca4d227826 42-46
+  s_b27eb293e3a79c::t_6521cd6b724516 90
+src/cloudflare/internal/test/tracing/opentelemetry-context-test.js
+  s_b27eb293e3a79c::t_cd1105a95e5f24 130,136,138-139,143
+  s_b27eb293e3a79c::t_a0c90ae5751bb9 149-161,165-169,172,174-176
+  s_b27eb293e3a79c::t_c8f3ec0f2d8f06 163-164,170-171
+  s_b27eb293e3a79c::t_4724e69e11d7f4 162,173
+src/cloudflare/internal/test/tracing/opentelemetry-context-instrumentation-test.js
+  s_b27eb293e3a79c::t_cd1105a95e5f24 34,38
+src/workerd/api/tracing.c++
+  s_b27eb293e3a79c::t_4724e69e11d7f4 261-266,271-274,277-280,305
+  s_b27eb293e3a79c::t_f67c117ca8b6d0 570,573-576
+  s_b27eb293e3a79c::t_63fbdf34210d09 237
+  s_b27eb293e3a79c::t_a7ffb72b66816e 125-128,282-283
+  s_b27eb293e3a79c::t_10ad463dc76c18 268-270,275,292-294
+  s_b27eb293e3a79c::t_5f46232b450cb5 249,251-260,267,276,281,284,289-291,295-297,538
+  s_b27eb293e3a79c::t_7a542ce2f23919 129-138,140-147,149,153-155,168-170,186-188,200,213-220,222,224,307
+  s_b27eb293e3a79c::t_e413ab4406e8b6 511,521
+  s_b27eb293e3a79c::t_020688d2dbc089 306
+src/workerd/api/tracing.h
+  s_b27eb293e3a79c::t_10ad463dc76c18 129
+  s_b27eb293e3a79c::t_5f46232b450cb5 163,165,173
+  s_b27eb293e3a79c::t_4724e69e11d7f4 175-176
+  s_b27eb293e3a79c::t_066cd2a45cdbf0 85-86,123,126
+  s_b27eb293e3a79c::t_63fbdf34210d09 138
+  s_b27eb293e3a79c::t_1ab367769541de 127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5fd60e0be153d7f34acc1536567e4014cff9868a",
+  "prompts": {},
+  "sessions": {
+    "s_b27eb293e3a79c": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_077f20387ffed8e7iIyvCiLbfx",
+        "model": "gpt-5.6"
+      },
+      "human_author": "Jeremy Morrell <jmorrell@cloudflare.com>"
+    }
+  }
+}

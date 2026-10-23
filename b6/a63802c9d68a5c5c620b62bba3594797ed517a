@@ -1,0 +1,21 @@
+src/rust/cxx/kj-rs-io/error.rs
+  s_dadaf0660bfcbe::t_d5ae8e4bbfd912 213-222,225
+src/rust/cxx/kj-rs-io/lib.rs
+  s_dadaf0660bfcbe::t_8d9bc4e2bfbe27 138
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b6a63802c9d68a5c5c620b62bba3594797ed517a",
+  "prompts": {},
+  "sessions": {
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

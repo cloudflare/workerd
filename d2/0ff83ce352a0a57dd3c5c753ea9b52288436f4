@@ -1,0 +1,25 @@
+types/generated-snapshot/experimental/index.d.ts
+  s_e6ef9db3485b14::t_c587100abe31ab 16141-16152
+types/generated-snapshot/experimental/index.ts
+  s_e6ef9db3485b14::t_c6e5e3231392e9 16109-16120
+types/generated-snapshot/index.d.ts
+  s_e6ef9db3485b14::t_724bc6e96a21b6 15864-15875
+types/generated-snapshot/index.ts
+  s_e6ef9db3485b14::t_48a5d005d15d65 15832-15843
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d20ff83ce352a0a57dd3c5c753ea9b52288436f4",
+  "prompts": {},
+  "sessions": {
+    "s_e6ef9db3485b14": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f940fb7bdffeOOke2jjtQ9MxFI",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

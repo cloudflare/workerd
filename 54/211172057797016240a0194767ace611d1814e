@@ -1,0 +1,19 @@
+src/workerd/api/actor-call-retry.c++
+  s_6beee1a75d6ac7::t_6acdd2e0ce18be 54,65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "54211172057797016240a0194767ace611d1814e",
+  "prompts": {},
+  "sessions": {
+    "s_6beee1a75d6ac7": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f368abe82ffe3TlMhexmBfEZ1y",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}

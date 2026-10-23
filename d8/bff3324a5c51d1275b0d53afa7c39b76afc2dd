@@ -1,0 +1,30 @@
+src/rust/jsg-macros/utils.rs
+  s_3f49822a519de4::t_f0ed8a696cfb51 193-195
+  s_3f49822a519de4::t_4ecd7498bde815 196-246
+  s_3f49822a519de4::t_bbda3bd220807e 191-192
+src/rust/jsg-macros/utils-test.rs
+  s_3f49822a519de4::t_6b7cad6a2587dc 88-121
+  s_3f49822a519de4::t_187fe9550d0461 87
+src/rust/jsg/v8.rs
+  s_3f49822a519de4::t_39045f94e31e39 148,513-528,569-581,585,3382-3391,3821
+src/rust/jsg/README.md
+  s_3f49822a519de4::t_933d0175869ba6 355-358
+src/rust/jsg/ffi.h
+  s_3f49822a519de4::t_a1e0affb91a6f7 12,25,35,318-325
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d8bff3324a5c51d1275b0d53afa7c39b76afc2dd",
+  "prompts": {},
+  "sessions": {
+    "s_3f49822a519de4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a1cfa34767f4488d7",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}

@@ -1,0 +1,113 @@
+build/deps/rust.MODULE.bazel
+  s_dadaf0660bfcbe::t_6b6036cfeae8b5 61-96
+clippy.toml
+  s_dadaf0660bfcbe::t_f5d63247f5e910 5-6
+deps/rust/BUILD.bazel
+  s_dadaf0660bfcbe::t_68519b1d234b1c 14-21
+deps/rust/Cargo.toml
+  s_dadaf0660bfcbe::t_54b3c6cd4f415f 41-42,48-53,61,64-69,74,79-82
+docs/jsg.md
+  s_dadaf0660bfcbe::t_355c451b6fb43e 359,362-365
+docs/reference/detail/new-module-registry.md
+  s_dadaf0660bfcbe::t_c651c7f830bf6f 717
+src/rust/AGENTS.md
+  s_dadaf0660bfcbe::t_8320abc25abf6c 7,24-26,45
+src/rust/cxx/AGENTS.md
+  s_dadaf0660bfcbe::t_5fedff309336ed 39-42,45-46,63-65,111-160
+src/rust/cxx/gen/src/write.rs
+  s_dadaf0660bfcbe::t_6fdf7c105d5a8e 1701-1706,1711,1715,1717-1721,1739-1747
+src/rust/cxx/kj-rs-io/async-io.c++
+  s_dadaf0660bfcbe::t_5e602e7a273a2d 283-284,288-289,302,306,310,314,318,322,329,335
+src/rust/cxx/kj-rs-io/async-io.h
+  s_dadaf0660bfcbe::t_aab829ce63b906 40,85-94,98-102
+src/rust/cxx/kj-rs-io/lib.rs
+  s_dadaf0660bfcbe::t_be02a513cea9cf 138
+src/rust/cxx/kj-rs-io/stream.rs
+  s_dadaf0660bfcbe::t_e0585313cbb673 59,97-100,394-399,417-446,809-835
+src/rust/cxx/kj-rs/README.md
+  s_dadaf0660bfcbe::t_d32edd03bffef0 11-31
+src/rust/cxx/kj-rs/lib.rs
+  s_dadaf0660bfcbe::t_eaba1991b346ed 8
+src/rust/cxx/kj-rs/maybe.rs
+  s_dadaf0660bfcbe::t_0e4b7ffa4348e1 78,145-146,148,150,176-181,225
+src/rust/cxx/kj-rs/own.c++
+  s_dadaf0660bfcbe::t_c43d28c2929e19 3-8,10-22,24-25
+src/rust/cxx/kj-rs/own.h
+  s_dadaf0660bfcbe::t_1e1bf08850eea1 3-4,7-11,13-25
+src/rust/cxx/kj-rs/own.rs
+  s_dadaf0660bfcbe::t_8db9d336645974 9-74,122,125,132,138,178,189,192,194,202,212-213,215,221,230,239,241,250,259,268,270-271
+src/rust/cxx/kj-rs/tests/BUILD.bazel
+  s_dadaf0660bfcbe::t_c4efe3448498f7 26,99-112,177-185
+src/rust/cxx/kj-rs/tests/lib.rs
+  s_dadaf0660bfcbe::t_4ef3656014e897 111-130,188,381-385
+src/rust/cxx/kj-rs/tests/own-test.c++
+  s_dadaf0660bfcbe::t_ba9c22ca0bb0a0 1-18
+src/rust/cxx/kj-rs/tests/test-own.c++
+  s_dadaf0660bfcbe::t_6e7937282471dc 82-122
+src/rust/cxx/kj-rs/tests/test-own.h
+  s_dadaf0660bfcbe::t_242ce597b4a54d 27-62,71-72,89-99
+src/rust/cxx/kj-rs/tests/test_own.rs
+  s_dadaf0660bfcbe::t_c280e704233860 3-16,63-90
+src/rust/cxx/macro/src/expand.rs
+  s_dadaf0660bfcbe::t_5d32339e198079 159,1760-1788
+src/rust/cxx/tests/ffi/lib.rs
+  s_dadaf0660bfcbe::t_ca0364c4ac46b5 38
+src/rust/kj/ffi.c++
+  s_dadaf0660bfcbe::t_da2a143be313a0 33-74
+src/rust/kj/ffi.h
+  s_dadaf0660bfcbe::t_85f91c67d0e4c1 31-39,47-50,122-131,143,157,167-171,204-242
+src/rust/kj/http.rs
+  s_dadaf0660bfcbe::t_ef442c12d2eb96 99,134-135,145-149,186-204,229-230,238-245,401-428,434-451
+src/rust/kj/io.rs
+  s_dadaf0660bfcbe::t_c0127bbda3b97a 25-32,34,37-39,45-61
+src/rust/kj/own.rs
+  s_dadaf0660bfcbe::t_31973009e335d4 16,38,54,59,69,86,95,105,113,121,127,133,139,145
+src/rust/kj/tests/ffi-test.c++
+  s_dadaf0660bfcbe::t_f351d7a7768901 62-164
+src/rust/kj/tests/lib.rs
+  s_dadaf0660bfcbe::t_c8961aa4ff89bf 26,62-75,79-109
+src/rust/worker/BUILD
+  s_dadaf0660bfcbe::t_38fe5b2ac02be9 36,46
+src/rust/worker/bridge.h
+  s_dadaf0660bfcbe::t_e871803b73e1c4 46-80
+src/rust/worker/ffi.c++
+  s_dadaf0660bfcbe::t_3ba39fbcf9d245 7-8,52-70
+src/rust/worker/ffi.h
+  s_dadaf0660bfcbe::t_f5c34994c8422c 30-32,78-80
+src/rust/worker/ffi.rs
+  s_dadaf0660bfcbe::t_0306ec415c8467 139-141,197-205
+src/rust/worker/lib.rs
+  s_dadaf0660bfcbe::t_2953b4c2f82191 22,44,98-103,114-130
+src/rust/worker/test.c++
+  s_dadaf0660bfcbe::t_e5e7a12973f1ac 64-112
+src/workerd/server/AGENTS.md
+  s_627298ebeb3761::t_9bc7bf8defb0fc 5-22,26-61,65-67,69,71,75-86,98-99
+src/workerd/server/BUILD.bazel
+  s_dadaf0660bfcbe::t_4d338dea3aa17c 101,106,113,116-117,124,126,379-513
+src/workerd/server/tests/server-harness.mjs
+  s_dadaf0660bfcbe::t_d2793604159651 66-83,89,101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "33d258cf74f4277037171cf9bcb3f6cb03829146",
+  "prompts": {},
+  "sessions": {
+    "s_627298ebeb3761": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f31a377bbffedkJb9IAymw32gN",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_dadaf0660bfcbe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8d63e3f9-8a77-4e9b-af79-b96d68a8b116",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}

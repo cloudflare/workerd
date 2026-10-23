@@ -1,0 +1,47 @@
+src/workerd/api/worker-rpc.h
+  s_80fd8e845a3525::t_ae4864684262bc 328-332,467-469
+src/workerd/api/http.c++
+  s_80fd8e845a3525::t_ac1f8d6d34f837 2805-2811
+src/workerd/api/jsrpc-call-observation-test.c++
+  s_80fd8e845a3525::t_5af4458510f398 24,33-34,35-38,39-42,44-50,52-58,59-60,61-72,74-81,85,88-108,110-111,113-116,119-147,152-161,163-169,186-189,194,196-228,229-231,232-236,238-247,301-302,311-312,315-316,319,323
+  s_80fd8e845a3525::t_9f18d690528952 1-20,23,25-26,29-32,300,303-310,313-314,317-318,320-322,324-326
+  s_80fd8e845a3525::t_ce39df2519a354 21-22,27-28,43,51,73,82-84,86-87,109,112,117-118,148-151,162,170-185,190-193,195,237,248-299
+src/workerd/api/BUILD.bazel
+  s_80fd8e845a3525::t_e4054782314d0e 844-851
+src/workerd/api/actor.h
+  s_80fd8e845a3525::t_e5f67a8f7d848e 354-356,396-398,428-430
+src/workerd/api/http.h
+  s_80fd8e845a3525::t_8cbca1f45fa523 261-266,346
+src/workerd/api/worker-rpc.c++
+  s_80fd8e845a3525::t_82cc50ad26824f 757-763
+  s_80fd8e845a3525::t_94388649341ddc 593-608,753-756,764-767,779
+src/workerd/io/observer.h
+  s_80fd8e845a3525::t_ea9b19b76e0902 28-29
+  s_80fd8e845a3525::t_2e405bea924b18 86
+src/workerd/api/actor-state.c++
+  s_80fd8e845a3525::t_30839e85515215 1013-1016
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3d54f5b535a65a2ae78bef8a194bddbc34e7d55d",
+  "prompts": {},
+  "sessions": {
+    "s_6ba2030b43c23b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f7fdd34c1ffeJ4joNLMehWneBI",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    },
+    "s_80fd8e845a3525": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_f6e9d45fbffe5iEZ6BSRFX4oBB",
+        "model": "claude-fable-5-1"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
