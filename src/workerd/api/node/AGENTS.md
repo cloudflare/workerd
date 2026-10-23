@@ -1,6 +1,6 @@
 # src/workerd/api/node/
 
-C++ implementations of Node.js built-in modules. Each module = JSG-bound class registered via `NODEJS_MODULES(V)` macro in `node.h`. TypeScript counterpart lives in `src/node/`.
+C++ implementations of Node.js built-in modules. Each module = JSG-bound class registered via `NODEJS_MODULES(V)` macro in `node.h`. TypeScript counterpart lives in `src/node/`. Exception: `diagnostics-channel` only forwards messages to tail workers (`publishToTracer`); the module itself is in `src/node/diagnostics_channel.ts`.
 
 ## BUILD TARGETS
 
