@@ -1729,6 +1729,6 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   workersOidc @196 :Bool
       $compatEnableFlag("workers_oidc")
       $experimental;
-  # Exposes ctx.oidc.getToken() on ExecutionContext and DurableObjectState. Token issuance
-  # requires a host signer with trusted workload identity metadata. There is no enable date.
+  # Enables experimental OIDC identity bindings. Issuance requires an approved assignment and
+  # protected host evidence. There is no implicit ExecutionContext or DurableObjectState identity.
 }

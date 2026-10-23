@@ -8,7 +8,8 @@ const config :Workerd.Config = (
       oidcTokenService = (name = "broker", entrypoint = "Broker"),
       durableObjectNamespaces = [(className = "LocalObject", uniqueKey = "oidc-local")],
       durableObjectStorage = (inMemory = void),
-      bindings = [(name = "objects", durableObjectNamespace = "LocalObject")],
+      bindings = [(name = "objects", durableObjectNamespace = "LocalObject"),
+        (name = "IDENTITY", oidc = "local-orders")],
     )),
     (name = "broker", worker = (
       compatibilityFlags = ["nodejs_compat", "rpc"],

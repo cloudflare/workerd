@@ -131,23 +131,15 @@ struct DynamicWorkerSource;
 // anything in the world except for the client -- this is a useful property for sandboxing!
 class IoChannelFactory: public virtual kj::Refcounted {
  public:
-  enum class OidcSubject { WORKER, DURABLE_OBJECT, DURABLE_OBJECT_NAMESPACE };
-
   struct OidcTokenRequest {
-    // Omission selects https://workers.cloudflare.com/accounts/<public account ID>.
+    kj::String assignment;
     kj::Maybe<kj::String> audience;
-    OidcSubject subject;
-    bool explicitSubject = false;
+    bool fresh = false;
   };
 
-  // Protected host channel, independent of global fetch and customer-configured bindings.
-  // The host must derive account, Worker, executing version, and (for object subjects) namespace
-  // and object IDs from trusted state belonging to the executing workload, never its caller.
-  // Cloud issuance must reject missing identity metadata, development sessions, Version URLs,
-  // dynamic workloads, disallowed subject modes, and unauthorized or rate-limited issuance.
-  // A local development broker must authenticate the developer and issue only local identities. It signs five-minute RS256 tokens without
-  // exposing keys to customer code. Any cache must include the full identity, version, audience,
-  // subject mode, and issuance permissions. The audience must never be fetched.
+  // The host resolves the fixed assignment and verifies its effective policy and current execution
+  // before issuing or returning a cached assertion. Neither config IDs nor application options
+  // establish authority. Local brokers authenticate both the developer and local assignment.
   // The default rejects issuance; embedding runtimes opt in by overriding this method.
   virtual kj::Promise<kj::String> getOidcToken(OidcTokenRequest request);
 

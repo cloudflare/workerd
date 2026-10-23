@@ -787,11 +787,7 @@ class RustIoChannelFactory final: public IoChannelFactory {
   }
 
   kj::Promise<kj::String> getOidcToken(OidcTokenRequest request) override {
-    // Resolve the protected channel before considering subject modes, so an unconfigured
-    // runtime retains its unsupported response for every valid API request.
     auto channel = channels->oidc_token_channel();
-    JSG_REQUIRE(!request.explicitSubject, TypeError,
-        "Local OIDC tokens do not support Durable Object subject selection.");
     auto promise = requestLocalOidcToken(kj::mv(channel), kj::mv(request));
     return worker->factory.getImpl().timer.timeoutAfter(30 * kj::SECONDS, kj::mv(promise));
   }
@@ -805,10 +801,14 @@ class RustIoChannelFactory final: public IoChannelFactory {
     headers.setPtr(kj::HttpHeaderId::CONTENT_TYPE, "application/json");
     capnp::MallocMessageBuilder message;
     auto object = message.initRoot<capnp::JsonValue>();
-    auto fields = object.initObject(request.audience == kj::none ? 0 : 1);
+    auto fields = object.initObject(request.audience == kj::none ? 2 : 3);
+    fields[0].setName("assignment");
+    fields[0].initValue().setString(request.assignment);
+    fields[1].setName("fresh");
+    fields[1].initValue().setBoolean(request.fresh);
     KJ_IF_SOME(audience, request.audience) {
-      fields[0].setName("audience");
-      fields[0].initValue().setString(audience);
+      fields[2].setName("audience");
+      fields[2].initValue().setString(audience);
     }
     auto json = capnp::JsonCodec().encodeRaw(object.asReader());
     auto http = client->request(kj::HttpMethod::POST, "http://oidc/token", headers, json.size());
@@ -853,7 +853,7 @@ class RustIoChannelFactory final: public IoChannelFactory {
             Error, "Local OIDC login required. Sign in again and create a development session.");
       case 403:
         JSG_FAIL_REQUIRE(Error,
-            "Local OIDC access denied. Check account enablement and Worker edit permission.");
+            "Local OIDC access denied. Check account enablement, Worker development permission, and the local identity assignment.");
       case 409:
         JSG_FAIL_REQUIRE(Error,
             "Local OIDC session needs renewal. Create a new development session with the current login.");

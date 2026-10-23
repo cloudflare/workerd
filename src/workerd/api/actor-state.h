@@ -622,9 +622,6 @@ class DurableObjectState: public jsg::Object {
       kj::Maybe<Worker::Actor::FacetManager&> facetManager,
       kj::Maybe<ActorVersion> version = kj::none);
 
-  jsg::Ref<OidcContext> getOidc(jsg::Lock& js) {
-    return js.alloc<OidcContext>();
-  }
 
   void waitUntil(kj::Promise<void> promise);
 
@@ -763,9 +760,6 @@ class DurableObjectState: public jsg::Object {
     JSG_LAZY_INSTANCE_PROPERTY(id, getId);
     JSG_LAZY_INSTANCE_PROPERTY(storage, getStorage);
     JSG_LAZY_INSTANCE_PROPERTY(container, getContainer);
-    if (flags.getWorkersOidc()) {
-      JSG_LAZY_INSTANCE_PROPERTY(oidc, getOidc);
-    }
     JSG_LAZY_INSTANCE_PROPERTY(facets, getFacets);
     if (flags.getEnableVersionApi()) {
       JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);

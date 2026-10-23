@@ -30,8 +30,12 @@ export class Broker extends WorkerEntrypoint {
     const options = await request.json();
     assert.deepEqual(
       Object.keys(options),
-      options.audience === undefined ? [] : ['audience']
+      options.audience === undefined
+        ? ['assignment', 'fresh']
+        : ['assignment', 'fresh', 'audience']
     );
+    assert.equal(options.assignment, 'local-orders');
+    assert.equal(typeof options.fresh, 'boolean');
     if (failures.has(options.audience)) {
       const [status, hint] = failures.get(options.audience);
       return new Response('secret error details', {
@@ -67,26 +71,28 @@ export class Broker extends WorkerEntrypoint {
   }
 }
 
-async function check(ctx) {
-  assert.equal(await ctx.oidc.getToken(), token);
+async function check(env) {
+  assert.equal(await env.IDENTITY.getToken(), token);
   assert.equal(
-    await ctx.oidc.getToken({ audience: 'https://api.example.com/%22exact' }),
+    await env.IDENTITY.getToken({
+      audience: 'https://api.example.com/%22exact',
+    }),
     token
   );
   assert.equal(
-    await ctx.oidc.getToken({ audience: 'quote\"\\newline\n雪' }),
+    await env.IDENTITY.getToken({ audience: 'quote\"\\newline\n雪' }),
     token
   );
   assert.equal(
-    await ctx.oidc.getToken({ audience: maximumEscapedAudience }),
+    await env.IDENTITY.getToken({ audience: maximumEscapedAudience }),
     token
   );
   for (const audience of ['large', 'invalid', 'wrong-type']) {
-    await assert.rejects(async () => ctx.oidc.getToken({ audience }));
+    await assert.rejects(async () => env.IDENTITY.getToken({ audience }));
   }
   for (const [audience, [, , message]] of failures) {
     await assert.rejects(
-      async () => ctx.oidc.getToken({ audience }),
+      async () => env.IDENTITY.getToken({ audience }),
       (error) => {
         assert.match(error.message, message);
         assert.ok(!error.message.includes('secret'));
@@ -95,20 +101,24 @@ async function check(ctx) {
     );
   }
   for (const subject of ['object', 'namespace']) {
-    await assert.rejects(async () => ctx.oidc.getToken({ subject }), TypeError);
+    await assert.rejects(
+      async () => env.IDENTITY.getToken({ subject }),
+      TypeError
+    );
   }
 }
 
 export class LocalObject extends DurableObject {
   async check() {
-    await check(this.ctx);
+    await check(this.env);
   }
 }
 
 export const localOidc = {
   async test(controller, env, ctx) {
-    if (!ctx.oidc) return;
-    await check(ctx);
+    if (!env.IDENTITY) return; // The broker service shares this test module.
+    assert.equal('oidc' in ctx, false);
+    await check(env);
     await env.objects.getByName('one').check();
     await env.objects.getByName('two').check();
     assert.equal('broker' in env, false);

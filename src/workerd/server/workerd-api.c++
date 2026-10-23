@@ -744,6 +744,9 @@ static v8::Local<v8::Value> createBindingValue(JsgWorkerdIsolate::Lock& lock,
               kj::str(hyperdrive.getScheme())));
     }
 
+    case Global::OIDC:
+      return lock.wrap(context, lock.alloc<api::OidcIdentityBinding>(kj::str(global.getOidc())));
+
     case Global::UNSAFE_EVAL:
       return lock.wrap(context, lock.alloc<api::UnsafeEval>());
 
