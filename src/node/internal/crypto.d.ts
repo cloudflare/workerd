@@ -240,6 +240,7 @@ export function exportKey(
 export function equals(key: CryptoKey, otherKey: CryptoKey): boolean;
 export function getAsymmetricKeyDetail(key: CryptoKey): AsymmetricKeyDetails;
 export function getAsymmetricKeyType(key: CryptoKey): AsymmetricKeyType;
+export function getSymmetricKeySize(key: CryptoKey): number;
 export function createSecretKey(key: ArrayBuffer | ArrayBufferView): CryptoKey;
 export function createPrivateKey(
   key: InnerCreateAsymmetricKeyOptions
