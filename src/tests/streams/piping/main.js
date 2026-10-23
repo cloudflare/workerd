@@ -93,6 +93,7 @@ export {
   abortWithBacklogHighWaterMark,
   sourceErrorWithBacklogWritesNoMore,
   invalidChunkWithBacklogEndsPipe,
+  invalidLastChunkFailsClosingPipe,
 } from 'shutdown-backlog';
 
 export {
