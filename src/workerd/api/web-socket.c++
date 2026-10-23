@@ -1191,19 +1191,65 @@ void LegacyWebSocketAdapter::ensurePumping(jsg::Lock& js) {
       });
     });
 
-    // TODO(cleanup): We use awaitIoLegacy() here because we don't want this to count as a pending
-    //   event if this is a WebSocketPair with the other end being handled in the same isolate.
-    //   In that case, the pump can hang if accept() is never called on the other end. Ideally,
-    //   this scenario would be handled in-isolate using jsg::Promise, but that would take some
-    //   refactoring.
+    // A pump ends whenever the queue drains, so a WebSocket that sends a message every frame
+    // starts a pump every frame, and a server that sends to many WebSockets starts one per socket
+    // per frame. awaitPump() therefore waits for the pump on the KJ event loop and enters the
+    // isolate only when the pump's end needs JavaScript. Waiting with a JavaScript promise
+    // (awaitIoLegacy() and then()) would allocate a promise, functions and opaque wrappers on
+    // every start, which V8 frees only in a full GC, and would enter the isolate after every pump.
     //
-    // Note: `this` is transitively owned by `thisHandle`.
+    // TODO(cleanup): addTask() doesn't count the pump as a pending event, on purpose: if this is a
+    //   WebSocketPair with the other end handled in the same isolate, the pump can hang when
+    //   accept() is never called on the other end. Ideally that case would be handled in-isolate,
+    //   but that would take some refactoring.
+    //
+    // The attached reference keeps this adapter, which the pump uses, alive until both the pump
+    // and awaitPump() are done or canceled: KJ destroys a promise's attachments after the promise.
+    // Note: `this` is transitively owned by the shell.
     // TODO(soon): Use a direct strong or weak ref to `this` instead.
-    context.awaitIoLegacy(js, kj::mv(promise))
-        .then(js,
-            [this, thisHandle = jsg::Ref<WebSocket>(kj::addRef(shell))](jsg::Lock& js) {
+    context.addTask(awaitPump(context, native, kj::mv(promise), context.getCriticalSection())
+                        .attach(jsg::Ref<WebSocket>(kj::addRef(shell))));
+  }
+}
+
+kj::Promise<void> LegacyWebSocketAdapter::awaitPump(IoContext& context,
+    Native& native,
+    kj::Promise<void> pumpPromise,
+    kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs) {
+  // `native` is `*farNative`, passed in because an IoOwn can only be dereferenced while an
+  // IoContext is current, and this coroutine resumes without one (as in readLoop()). The Native
+  // lives as long as this adapter, which the caller keeps alive.
+  kj::Maybe<kj::Exception> maybeError;
+  try {
+    co_await pumpPromise;
+  } catch (...) {
+    maybeError = kj::getCaughtExceptionAsKj();
+  }
+
+  if (maybeError == kj::none && !native.outgoingAborted &&
+      !(native.closedIncoming && native.closedOutgoing)) {
+    // The usual end: the queue drained and the WebSocket is still open, so there is nothing to
+    // report or release. Code that later closes the WebSocket or aborts outgoing doesn't rely on
+    // this end entering the isolate: it releases the native WebSocket itself once no pump runs,
+    // or starts another pump whose end does.
+    co_return;
+  }
+
+  // Like the awaitIo() family, run in the critical section that was current when the pump started.
+  co_await context.run([this, maybeError = kj::mv(maybeError)](Worker::Lock& lock) mutable {
+    jsg::Lock& js = lock;
+    // Like a promise continuation, turn an exception thrown here, such as by an 'error' listener,
+    // into an unhandled rejection instead of failing this task.
+    js.tryCatch([&] {
       auto& native = *farNative;
-      if (native.outgoingAborted) {
+      KJ_IF_SOME(e, maybeError) {
+        if (awaitingHibernatableRelease()) {
+          // We have a hibernatable websocket -- we don't want to dispatch a regular error event.
+          tryReleaseNative(js);
+        } else {
+          reportError(js, kj::mv(e));
+        }
+      } else if (native.outgoingAborted) {
         if (awaitingHibernatableRelease()) {
           // We have a hibernatable websocket -- we don't want to dispatch a regular error event.
           tryReleaseNative(js);
@@ -1231,24 +1277,13 @@ void LegacyWebSocketAdapter::ensurePumping(jsg::Lock& js) {
           // Native WebSocket no longer needed; release.
           native.state.init<Released>();
         } else if (native.state.is<Released>()) {
-          // While we were awaiting the jsg::Promise, someone else released our state. That's fine.
+          // Someone else released our state since the pump ended. That's fine.
         } else {
           KJ_FAIL_ASSERT("Unexpected native web socket state", native.state);
         }
       }
-    },
-            // Note: `this` is transitively owned by `thisHandle`.
-            // TODO(soon): Use a direct strong or weak ref to `this` instead.
-            [this, thisHandle = jsg::Ref<WebSocket>(kj::addRef(shell))](
-                jsg::Lock& js, jsg::Value&& exception) mutable {
-      if (awaitingHibernatableRelease()) {
-        // We have a hibernatable websocket -- we don't want to dispatch a regular error event.
-        tryReleaseNative(js);
-      } else {
-        reportError(js, jsg::JsValue(exception.getHandle(js)).addRef(js));
-      }
-    });
-  }
+    }, [&](jsg::Value exception) { js.rejectedPromise<void>(kj::mv(exception)); });
+  }, kj::mv(cs));
 }
 
 kj::Promise<void> LegacyWebSocketAdapter::sendAutoResponse(
