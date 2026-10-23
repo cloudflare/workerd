@@ -1,6 +1,6 @@
 alabaster==1.0.0
 babel==2.16.0
-certifi==2024.12.14
+certifi==2026.10.19
 charset-normalizer==3.4.1
 docutils==0.21.2
 idna==3.10
