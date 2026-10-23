@@ -373,20 +373,21 @@ struct BuildRtti<Configuration, jsg::NonCoercible<T>> {
 
 // Maybe Types
 
-#define DECLARE_MAYBE_TYPE(T)                                                                      \
+#define DECLARE_MAYBE_TYPE(T, SETTER)                                                              \
   template <typename Configuration, typename V>                                                    \
   struct BuildRtti<Configuration, T<V>> {                                                          \
     static void build(Type::Builder builder, Builder<Configuration>& rtti) {                       \
       auto maybe = builder.initMaybe();                                                            \
       BuildRtti<Configuration, V>::build(maybe.initValue(), rtti);                                 \
       maybe.setName(#T);                                                                           \
+      maybe.SETTER(true);                                                                          \
     }                                                                                              \
   };
 
 #define FOR_EACH_MAYBE_TYPE(F)                                                                     \
-  F(kj::Maybe)                                                                                     \
-  F(jsg::Optional)                                                                                 \
-  F(jsg::LenientOptional)
+  F(kj::Maybe, setAllowsNull)                                                                      \
+  F(jsg::Optional, setAllowsUndefined)                                                             \
+  F(jsg::LenientOptional, setAllowsUndefined)
 
 FOR_EACH_MAYBE_TYPE(DECLARE_MAYBE_TYPE)
 
@@ -815,7 +816,11 @@ struct MembersBuilder {
   inline void registerStaticConstant(T value) {
     auto constant = members[memberIndex++].initConstant();
     constant.setName(name);
-    constant.setValue(value);
+    if constexpr (kj::isSameType<kj::Decay<T>, float>() || kj::isSameType<kj::Decay<T>, double>()) {
+      constant.setNumberValue(value);
+    } else {
+      constant.setValue(value);
+    }
     // BuildRtti<Configuration, T>::build(constant.initType());
   }
 
