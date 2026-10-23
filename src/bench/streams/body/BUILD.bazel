@@ -7,11 +7,13 @@ load("//:build/wd_bench.bzl", "wd_bench")
 body_bench_srcs = glob(["*.js"]) + ["body-modules.capnp"]
 
 wd_bench(
+    size = "large",
     src = "body-cpp.wd-bench",
     data = body_bench_srcs,
 )
 
 wd_bench(
+    size = "large",
     src = "body-ts.wd-bench",
     args = ["--experimental"],
     data = body_bench_srcs,
