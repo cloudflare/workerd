@@ -42,10 +42,12 @@ bool ecdsa_verify(Ecdsa algorithm,
     ::rust::Slice<const uint8_t> message,
     ::rust::Slice<const uint8_t> signature);
 
-// The methods kj's HttpServer serves: those kj knows by name.
+// The methods kj's HttpServer serves without allowOtherMethods: those kj knows by name.
 inline bool method_allowed(::rust::Slice<const uint8_t> name) {
-  auto text = kj::str(kj::arrayPtr(name.data(), name.size()).asChars());
-  return kj::tryParseHttpMethod(text) != kj::none;
+  KJ_IF_SOME(method, kj::HttpMethod::tryParse(kj::arrayPtr(name.data(), name.size()).asChars())) {
+    return method.known() != kj::HttpMethod::Known::OTHER;
+  }
+  return false;
 }
 
 // --- Rust objects behind kj interfaces.

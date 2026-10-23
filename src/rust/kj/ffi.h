@@ -9,7 +9,6 @@
 
 #include <kj/compat/http.h>
 #include <kj/debug.h>
-#include <kj/encoding.h>
 
 namespace kj::rust {
 
@@ -152,17 +151,17 @@ using HttpServiceResponse = kj::HttpService::Response;
 using TlsStarterCallback = kj::TlsStarterCallback;
 using WebSocket = kj::WebSocket;
 
-// Methods cross the bridge as names. C++ passes a method's name to Rust.
+// Methods cross the bridge as names, which can carry any method. C++ passes `method.name()` to
+// Rust; an OTHER method's name is stored inside the kj::HttpMethod, so that object must outlive
+// the Rust call that gets the name.
 //
-// Parses a method name from Rust for a request. Rust's http::Method accepts names kj doesn't know,
-// and CONNECT, which a request can't carry, so this throws for those.
+// Parses a method name from Rust for a request. Rust's http::Method accepts names that kj refuses
+// (one longer than kj::HttpMethod::MAX_NAME_SIZE), and CONNECT, which a request can't carry, so
+// this throws for those.
 inline kj::HttpMethod httpMethodFromRust(::rust::Slice<const kj::byte> name) {
-  auto bytes = kj::from<kj_rs::Rust>(name);
-  KJ_IF_SOME(method, kj::tryParseHttpMethod(kj::str(bytes.asChars()))) {
-    KJ_REQUIRE(method != kj::HttpMethod::CONNECT, "use connect() for CONNECT requests");
-    return method;
-  }
-  KJ_FAIL_REQUIRE("invalid HTTP method", kj::encodeCEscape(bytes));
+  auto method = kj::HttpMethod::parse(kj::from<kj_rs::Rust>(name).asChars());
+  KJ_REQUIRE(method != kj::HttpMethod::CONNECT, "use connect() for CONNECT requests");
+  return method;
 }
 
 inline kj::Own<AsyncOutputStream> response_send(HttpServiceResponse& response,

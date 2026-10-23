@@ -334,6 +334,13 @@ Request::CacheMode Request::getCacheMode() {
 
 jsg::Ref<Request> Request::constructor(
     jsg::Lock& js, Request::Info input, jsg::Optional<Request::Initializer> init) {
+  return constructorImpl(js, kj::mv(input), kj::mv(init), false);
+}
+
+jsg::Ref<Request> Request::constructorImpl(jsg::Lock& js,
+    Request::Info input,
+    jsg::Optional<Request::Initializer> init,
+    bool deserializing) {
   kj::String url;
   kj::HttpMethod method = kj::HttpMethod::GET;
   kj::Maybe<jsg::Ref<Headers>> headers;
@@ -430,7 +437,14 @@ jsg::Ref<Request> Request::constructor(
           // The Fetch spec forbids CONNECT, in any case.
           JSG_REQUIRE(
               toUpper(m) != "CONNECT", TypeError, kj::str("Invalid HTTP method string: ", m));
-          KJ_IF_SOME(code, tryParseHttpMethod(m)) {
+          kj::Maybe<kj::HttpMethod> deserialized;
+          if (deserializing) {
+            // Keep it as it is, without normalizing its case: see constructorImpl() in http.h.
+            deserialized = kj::HttpMethod::tryParse(m);
+          }
+          KJ_IF_SOME(d, deserialized) {
+            method = d;
+          } else KJ_IF_SOME(code, tryParseHttpMethod(m)) {
             method = code;
           } else KJ_IF_SOME(code, kj::tryParseHttpMethod(toUpper(m))) {
             method = code;
@@ -440,13 +454,13 @@ jsg::Ref<Request> Request::constructor(
               // Other methods, even if they would be recognized if they were uppercased,
               // are supposed to be rejected.
               // Refs: https://fetch.spec.whatwg.org/#methods
-              switch (method) {
-                case kj::HttpMethod::GET:
-                case kj::HttpMethod::POST:
-                case kj::HttpMethod::PUT:
-                case kj::HttpMethod::DELETE:
-                case kj::HttpMethod::HEAD:
-                case kj::HttpMethod::OPTIONS:
+              switch (method.known()) {
+                case kj::HttpMethod::Known::GET:
+                case kj::HttpMethod::Known::POST:
+                case kj::HttpMethod::Known::PUT:
+                case kj::HttpMethod::Known::DELETE:
+                case kj::HttpMethod::Known::HEAD:
+                case kj::HttpMethod::Known::OPTIONS:
                   break;
                 default:
                   JSG_FAIL_REQUIRE(TypeError, kj::str("Invalid HTTP method string: ", m));
@@ -560,7 +574,7 @@ jsg::Ref<Request> Request::clone(jsg::Lock& js) {
       cacheMode, responseBodyEncoding);
 }
 
-kj::StringPtr Request::getMethod() {
+kj::ArrayPtr<const char> Request::getMethod() {
   return kj::toCharSequence(method);
 }
 kj::StringPtr Request::getUrl() {
@@ -850,7 +864,7 @@ jsg::Ref<Request> Request::deserialize(jsg::Lock& js,
     JSG_FAIL_REQUIRE(DOMDataCloneError,
         "Deserialization failed: could not deserialize Request initializer");
   });
-  return Request::constructor(js, kj::mv(url), kj::mv(init));
+  return constructorImpl(js, kj::mv(url), kj::mv(init), true);
 }
 
 // =======================================================================================

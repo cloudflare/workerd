@@ -114,7 +114,9 @@ class RustWorkerInterface final: public workerd::WorkerInterface {
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override {
-    return impl->request(kj::toCharSequence(method).asBytes().as<kj_rs::Rust>(),
+    // A coroutine, so that `method`, which holds an OTHER method's name, lives until Rust is done
+    // with the name.
+    co_await impl->request(method.name().asBytes().as<kj_rs::Rust>(),
         url.asBytes().as<kj_rs::Rust>(), headers, requestBody, response);
   }
 
