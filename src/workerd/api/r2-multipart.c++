@@ -142,7 +142,7 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPartRpc(j
     jsg::Optional<UploadPartOptions> options,
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
     const jsg::TypeHandler<jsg::Function<jsg::Value(
-        kj::String, kj::String, int, R2PutValue, jsg::Optional<UploadPartOptions>, double)>>&
+        kj::String, kj::String, int, R2PutValue, jsg::Optional<UploadPartOptions>)>>&
         uploadPartFnHandler,
     const jsg::TypeHandler<jsg::Promise<UploadedPart>>& uploadPartResultHandler) {
   return js.evalNow([&] {
@@ -155,11 +155,11 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPartRpc(j
       }
     }
 
-    auto prepared = prepareR2RpcBody(js, value);
+    auto rpcValue = prepareR2RpcBody(js, value);
 
     auto promise = callR2RpcMethod<UploadedPart>(js, bucket->getRpcMethod(js, "uploadPart"_kj),
         rpcPropHandler, uploadPartFnHandler, uploadPartResultHandler, kj::str(key),
-        kj::str(uploadId), partNumber, kj::mv(prepared.value), kj::mv(options), prepared.size);
+        kj::str(uploadId), partNumber, kj::mv(rpcValue), kj::mv(options));
     return promise.then(js, [partNumber](jsg::Lock& js, UploadedPart uploadedPart) {
       return UploadedPart{.partNumber = partNumber, .etag = kj::mv(uploadedPart.etag)};
     });

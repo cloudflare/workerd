@@ -645,7 +645,7 @@ class R2Bucket: public jsg::Object {
       jsg::Optional<PutOptions> options,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
       const jsg::TypeHandler<jsg::Function<jsg::Value(
-          kj::String, kj::Maybe<R2PutValue>, jsg::Optional<PutOptions>, double)>>& putFnHandler,
+          kj::String, kj::Maybe<R2PutValue>, jsg::Optional<PutOptions>)>>& putFnHandler,
       const jsg::TypeHandler<jsg::Promise<kj::Maybe<HeadBackendResult>>>& putResultHandler);
   jsg::Promise<jsg::Ref<R2MultipartUpload>> createMultipartUploadRpc(jsg::Lock& js,
       kj::String key,

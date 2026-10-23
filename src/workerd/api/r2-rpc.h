@@ -121,14 +121,9 @@ class R2Error: public jsg::Object {
 using R2PutValue =
     kj::OneOf<JsReadableStream, kj::Array<kj::byte>, jsg::NonCoercible<kj::String>, jsg::Ref<Blob>>;
 
-struct PreparedR2RpcBody {
-  R2PutValue value;
-  double size;
-};
-
-// Prepares the transport value and the exact byte length passed alongside it. The length is an
-// internal argument to the backing entrypoint's named RPC method, not part of the public R2 API.
-PreparedR2RpcBody prepareR2RpcBody(jsg::Lock& js, R2PutValue& value);
+// Converts bodies that are too large for an inline JSRPC message into streams. Known stream lengths
+// are preserved by the JSRPC stream transport.
+R2PutValue prepareR2RpcBody(jsg::Lock& js, R2PutValue& value);
 
 struct R2Result {
   uint httpStatus;

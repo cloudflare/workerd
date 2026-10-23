@@ -17,20 +17,6 @@ type Env = {
   REAL_BUCKET: R2Bucket;
 };
 
-// JSRPC bodies can arrive as a stream whose length is known only from the separate size argument.
-// The native binding requires a known-length stream, so restore it from that argument.
-function withKnownLength<T extends R2BindingBody | null>(
-  value: T,
-  valueSize: number
-): T | ReadableStream {
-  if (!(value instanceof ReadableStream)) {
-    return value;
-  }
-  const { readable, writable } = new FixedLengthStream(valueSize);
-  value.pipeTo(writable).catch(() => {});
-  return readable;
-}
-
 // Implements the R2 binding's JSRPC methods by forwarding each call to a native R2 binding, in
 // the way a customer Worker can stand in for R2. The JSRPC tests target this entrypoint so the
 // shared suite exercises the serialization of native R2 results and errors, while REAL_BUCKET
@@ -59,14 +45,9 @@ export class ObservedR2Binding
   put(
     key: string,
     value: R2BindingBody | null,
-    options: R2BindingPutOptions | undefined,
-    valueSize: number
+    options: R2BindingPutOptions | undefined
   ): Promise<R2Object | null> {
-    return this.env.REAL_BUCKET.put(
-      key,
-      withKnownLength(value, valueSize),
-      options
-    );
+    return this.env.REAL_BUCKET.put(key, value, options);
   }
 
   delete(keys: string | string[]): Promise<void> {
@@ -93,12 +74,11 @@ export class ObservedR2Binding
     uploadId: string,
     partNumber: number,
     value: R2BindingBody,
-    options: R2BindingUploadPartOptions | undefined,
-    valueSize: number
+    options: R2BindingUploadPartOptions | undefined
   ): Promise<R2UploadedPart> {
     return this.env.REAL_BUCKET.resumeMultipartUpload(key, uploadId).uploadPart(
       partNumber,
-      withKnownLength(value, valueSize),
+      value,
       options
     );
   }

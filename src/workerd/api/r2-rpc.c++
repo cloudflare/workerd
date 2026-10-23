@@ -53,18 +53,10 @@ void requireR2RpcDeserializer(jsg::Deserializer& deserializer) {
       "R2 resources can only be deserialized for RPC.");
 }
 
-PreparedR2RpcBody prepareR2RpcBody(jsg::Lock& js, R2PutValue& value) {
+R2PutValue prepareR2RpcBody(jsg::Lock& js, R2PutValue& value) {
   KJ_SWITCH_ONEOF(value) {
     KJ_CASE_ONEOF(stream, JsReadableStream) {
-      auto size = stream.tryGetLength(js, StreamEncoding::IDENTITY);
-
-      JSG_REQUIRE(size != kj::none, TypeError,
-          "Provided readable stream must have a known length (request/response body or readable "
-          "half of FixedLengthStream)");
-      auto exactSize = KJ_ASSERT_NONNULL(size);
-      JSG_REQUIRE(exactSize <= 9007199254740991ull, RangeError,
-          "Provided readable stream is too large to represent its length exactly");
-      return {.value = kj::mv(stream), .size = static_cast<double>(exactSize)};
+      return R2PutValue(kj::mv(stream));
     }
     KJ_CASE_ONEOF(data, kj::Array<byte>) {
       auto size = data.size();
@@ -72,28 +64,25 @@ PreparedR2RpcBody prepareR2RpcBody(jsg::Lock& js, R2PutValue& value) {
         // Type-wrapper arrays may alias V8 memory, which cannot be pumped without the isolate lock.
         auto owned = kj::heapArray<byte>(data.asPtr());
         auto view = owned.asPtr();
-        return {.value = makeR2RpcMemoryStream(js, view, kj::heap(kj::mv(owned))),
-          .size = static_cast<double>(size)};
+        return R2PutValue(makeR2RpcMemoryStream(js, view, kj::heap(kj::mv(owned))));
       }
-      return {.value = kj::mv(data), .size = static_cast<double>(size)};
+      return R2PutValue(kj::mv(data));
     }
     KJ_CASE_ONEOF(text, jsg::NonCoercible<kj::String>) {
       auto size = text.value.size();
       if (size > R2_RPC_INLINE_STRING_LIMIT) {
         auto bytes = text.value.asBytes();
-        return {.value = makeR2RpcMemoryStream(js, bytes, kj::heap(kj::mv(text.value))),
-          .size = static_cast<double>(size)};
+        return R2PutValue(makeR2RpcMemoryStream(js, bytes, kj::heap(kj::mv(text.value))));
       }
-      return {.value = kj::mv(text), .size = static_cast<double>(size)};
+      return R2PutValue(kj::mv(text));
     }
     KJ_CASE_ONEOF(blob, jsg::Ref<Blob>) {
       auto size = blob->getSize();
       if (size > R2_RPC_INLINE_BODY_LIMIT) {
         // Blob bytes are V8-backed, so newMemorySource() must copy them into native memory.
-        return {
-          .value = makeR2RpcMemoryStream(js, blob->getData(js)), .size = static_cast<double>(size)};
+        return R2PutValue(makeR2RpcMemoryStream(js, blob->getData(js)));
       }
-      return {.value = kj::mv(blob), .size = static_cast<double>(size)};
+      return R2PutValue(kj::mv(blob));
     }
   }
   KJ_UNREACHABLE;

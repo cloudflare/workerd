@@ -687,8 +687,8 @@ jsg::Ref<R2Bucket::HeadResult> headResultFromBackend(
   if (policy == MissingMetadataPolicy::EMPTY) {
     bool hasHttpMetadata = result->getHttpMetadata() != kj::none;
     bool hasCustomMetadata = result->getCustomMetadata() != kj::none;
-    KJ_ASSERT(hasHttpMetadata,
-        "Malformed R2 RPC result: object metadata did not include HTTP metadata.");
+    KJ_ASSERT(
+        hasHttpMetadata, "Malformed R2 RPC result: object metadata did not include HTTP metadata.");
     KJ_ASSERT(hasCustomMetadata,
         "Malformed R2 RPC result: object metadata did not include custom metadata.");
   }
@@ -841,7 +841,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::putRpc(jsg::Lo
     jsg::Optional<PutOptions> options,
     const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
     const jsg::TypeHandler<jsg::Function<jsg::Value(
-        kj::String, kj::Maybe<R2PutValue>, jsg::Optional<PutOptions>, double)>>& putFnHandler,
+        kj::String, kj::Maybe<R2PutValue>, jsg::Optional<PutOptions>)>>& putFnHandler,
     const jsg::TypeHandler<jsg::Promise<kj::Maybe<HeadBackendResult>>>& putResultHandler) {
   return js.evalNow([&] {
     auto cancelReader = kj::defer([&] {
@@ -941,15 +941,12 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::putRpc(jsg::Lo
     auto wrappedMethod = rpcPropHandler.wrap(js, kj::mv(rpcMethod));
     auto putFn = KJ_ASSERT_NONNULL(putFnHandler.tryUnwrap(js, wrappedMethod));
     kj::Maybe<R2PutValue> rpcValue;
-    double valueSize = 0;
     KJ_IF_SOME(v, value) {
-      auto prepared = prepareR2RpcBody(js, v);
-      rpcValue = kj::mv(prepared.value);
-      valueSize = prepared.size;
+      rpcValue = prepareR2RpcBody(js, v);
     }
     cancelReader.cancel();
 
-    auto rpcPromise = putFn(js, kj::mv(key), kj::mv(rpcValue), kj::mv(rpcOptions), valueSize);
+    auto rpcPromise = putFn(js, kj::mv(key), kj::mv(rpcValue), kj::mv(rpcOptions));
     auto promise =
         unwrapR2RpcPromise<kj::Maybe<HeadBackendResult>>(js, kj::mv(rpcPromise), putResultHandler);
     return promise.then(js,

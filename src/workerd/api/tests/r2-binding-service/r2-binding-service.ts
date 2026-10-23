@@ -12,9 +12,8 @@
 // callers; this file describes what they send and what they accept back.
 //
 // Arguments are what the backend receives, which is not always what the caller passed to the
-// public R2Bucket method: workerd validates and normalizes options first, and sends request
-// bodies with their exact byte length as a separate argument. Absent option fields may arrive
-// as explicit `undefined`.
+// public R2Bucket method: workerd validates and normalizes options first. Absent option fields may
+// arrive as explicit `undefined`.
 //
 // Results are the native R2 types, so a backend can return what a native R2 binding returns.
 // Two constraints the types cannot express: an R2ObjectBody is rejected wherever only object
@@ -22,9 +21,8 @@
 // completeMultipartUpload must include httpMetadata and customMetadata.
 
 // Request body passed to put and uploadPart. ArrayBufferViews arrive as ArrayBuffers, and
-// binary, string, and Blob values above an inline size limit arrive as a ReadableStream. A
-// stream's length may not be known on the receiving side; the accompanying valueSize argument
-// gives its exact byte length.
+// binary, string, and Blob values above an inline size limit arrive as a ReadableStream. Known
+// stream lengths are preserved across JSRPC.
 export type R2BindingBody = ReadableStream | ArrayBuffer | string | Blob;
 
 // Range passed to get. Contains only the fields the caller set, so it may be empty.
@@ -91,12 +89,10 @@ export type R2BindingService = {
     options: R2BindingGetOptions | undefined
   ): Promise<R2ObjectBody | R2Object | null>;
 
-  // `value` is null for an empty put, in which case valueSize is 0.
   put(
     key: string,
     value: R2BindingBody | null,
-    options: R2BindingPutOptions | undefined,
-    valueSize: number
+    options: R2BindingPutOptions | undefined
   ): Promise<R2Object | null>;
 
   // The result is ignored.
@@ -115,8 +111,7 @@ export type R2BindingService = {
     uploadId: string,
     partNumber: number,
     value: R2BindingBody,
-    options: R2BindingUploadPartOptions | undefined,
-    valueSize: number
+    options: R2BindingUploadPartOptions | undefined
   ): Promise<R2UploadedPart>;
 
   abortMultipartUpload(key: string, uploadId: string): Promise<void>;

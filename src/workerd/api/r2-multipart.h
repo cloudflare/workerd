@@ -71,7 +71,7 @@ class R2MultipartUpload: public jsg::Object {
       jsg::Optional<UploadPartOptions> options,
       const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler,
       const jsg::TypeHandler<jsg::Function<jsg::Value(
-          kj::String, kj::String, int, R2PutValue, jsg::Optional<UploadPartOptions>, double)>>&
+          kj::String, kj::String, int, R2PutValue, jsg::Optional<UploadPartOptions>)>>&
           uploadPartFnHandler,
       const jsg::TypeHandler<jsg::Promise<UploadedPart>>& uploadPartResultHandler);
   jsg::Promise<void> abortRpc(jsg::Lock& js,

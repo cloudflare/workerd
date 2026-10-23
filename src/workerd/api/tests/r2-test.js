@@ -1629,13 +1629,9 @@ export const r2BindingApiTests = {
           'Provided readable stream must have a known length (request/response body or readable half of FixedLengthStream)',
       }
     );
-    // The JSRPC client cancels a stream it rejects; the HTTP client leaves it to the caller.
-    if (env.R2_TRANSPORT === 'jsrpc') {
-      assert.strictEqual(
-        unknownLengthCancelReason.message,
-        'Stream cancelled because the associated put operation encountered an error.'
-      );
-    } else {
+    // The direct HTTP path leaves a validation-failed stream with its caller. Releasing an
+    // RPC-transferred stream is handled by the RPC transport.
+    if (env.R2_TRANSPORT !== 'jsrpc') {
       assert.strictEqual(unknownLengthCancelReason, undefined);
     }
   },
