@@ -145,9 +145,78 @@ globalThis.add_completion_callback = (func: UnknownFunc): void => {
   globalThis.state.completionCallbacks.push(func);
 };
 
-globalThis.format_value = (val): string => {
-  return JSON.stringify(val, null, 2);
-};
+// Escapes applied to strings by format_value(), matching testharness.js: backslash, double quote,
+// C0 control characters, U+FFFD, U+FFFE and U+FFFF.
+const FORMAT_ESCAPES = new Map<string, string>([
+  ['\\', '\\\\'],
+  ['"', '\\"'],
+  ['\0', '\\0'],
+  ['\b', '\\b'],
+  ['\t', '\\t'],
+  ['\n', '\\n'],
+  ['\v', '\\v'],
+  ['\f', '\\f'],
+  ['\r', '\\r'],
+]);
+for (let code = 1; code < 0x20; code++) {
+  const char = String.fromCharCode(code);
+  if (!FORMAT_ESCAPES.has(char)) {
+    FORMAT_ESCAPES.set(char, `\\x${code.toString(16).padStart(2, '0')}`);
+  }
+}
+for (const code of [0xfffd, 0xfffe, 0xffff]) {
+  FORMAT_ESCAPES.set(String.fromCharCode(code), `\\u${code.toString(16)}`);
+}
+const FORMAT_ESCAPE_PATTERN = new RegExp(
+  `[${[...FORMAT_ESCAPES.keys()].map((c) => (c === '\\' ? '\\\\' : c)).join('')}]`,
+  'g'
+);
+
+function truncate(s: string, len: number): string {
+  return s.length > len ? s.substring(0, len - 3) + '...' : s;
+}
+
+// Port of format_value() from testharness.js, minus its special case for DOM nodes. Test names
+// are built from its output, so it must match upstream to keep them stable and distinct. Apart
+// from array elements, it reads only what String() reads, so it doesn't run getters such as
+// WebAssembly.Memory.prototype.buffer.
+function formatValue(val: unknown, seen: unknown[]): string {
+  if (typeof val === 'object' && val !== null) {
+    if (seen.includes(val)) {
+      return '[...]';
+    }
+    seen.push(val);
+  }
+
+  if (Array.isArray(val)) {
+    return `[${val.map((x: unknown) => formatValue(x, seen)).join(', ')}]`;
+  }
+
+  switch (typeof val) {
+    case 'string':
+      return `"${val.replace(FORMAT_ESCAPE_PATTERN, (c) => FORMAT_ESCAPES.get(c) ?? c)}"`;
+    case 'boolean':
+    case 'undefined':
+      return String(val);
+    case 'number':
+      return Object.is(val, -0) ? '-0' : String(val);
+    case 'bigint':
+      return `${val}n`;
+    default:
+      if (val === null) {
+        return 'null';
+      }
+      try {
+        // As upstream, functions show their source and objects their Symbol.toStringTag.
+        // eslint-disable-next-line @typescript-eslint/no-base-to-string
+        return `${typeof val} "${truncate(String(val), 1000)}"`;
+      } catch (e) {
+        return `[stringifying object threw ${String(e)} with type ${typeof e}]`;
+      }
+  }
+}
+
+globalThis.format_value = (val): string => formatValue(val, []);
 
 globalThis.createBuffer = (
   type,
