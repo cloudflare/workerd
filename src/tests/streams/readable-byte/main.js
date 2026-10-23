@@ -303,6 +303,7 @@ export {
   thenGetterFiresOncePerByteRead,
   thenGetterReleasesReaderWhileByteReadsSettle,
   thenGetterErrorsSourceWhileBranchByteReadsSettle,
+  thenGetterClosesSourceWhileBranchByteReadsFill,
   byobReadThenLookupFollowsItsPull,
 } from 'pollution';
 
