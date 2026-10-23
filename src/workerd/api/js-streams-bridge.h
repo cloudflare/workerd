@@ -14,7 +14,7 @@ namespace workerd::api::webstreams {
 // helpers JsReadableStream / JsWritableStream (and their native source/sink classes) use
 // to call into the implementation in src/per_isolate/webstreams/. The bootstrap module
 // these helpers reach for exists only when the typescript_implemented_streams compat flag
-// (plus the per-isolate bootstrap autogate) is enabled.
+// is enabled.
 //
 // This header is internal to the stream bridge files (and their tests); it is not part of
 // the consumer-facing streams surface and is deliberately not re-exported via
@@ -22,8 +22,7 @@ namespace workerd::api::webstreams {
 
 // Fetches a named function export of the webstreams/cpp_exports bootstrap module. The
 // module is eagerly required by the bootstrap when the typescript_implemented_streams
-// compat flag is enabled, so lookups can only fail on internal errors or gross
-// misconfiguration (e.g. the flag enabled without the bootstrap autogate); the resulting
+// compat flag is enabled, so lookups can only fail on internal errors; the resulting
 // "internal error" surfaced to user code is intended.
 jsg::JsFunction getCppExport(jsg::Lock& js, kj::StringPtr name);
 
