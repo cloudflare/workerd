@@ -23,6 +23,10 @@ class WrappedAbortSignal extends RpcTarget {
   getSignal() {
     return this.ac.signal;
   }
+
+  dropTriggers() {
+    this.ac.signal.dropRpcTriggersForTest();
+  }
 }
 
 // Creating AbortController/AbortSignal (and objects that allocate one, such as a Request's
@@ -1055,19 +1059,29 @@ export const rpcRemoteCanIgnoreSignal = {
   },
 };
 
-export const rpcDestroySignalClean = {
+export const rpcDroppedTriggerDoesNotAbort = {
   async test(ctrl, env, ctx) {
     // wrapper is a RPCTarget that just holds an AbortSignal
     const wrapper = await env.RpcRemoteEnd.getWrappedSignal();
 
-    // Get our clone of the signal
+    // Get our clone of the signal, and arm its RPC subscription with a listener
     const signal = await wrapper.getSignal();
+    let abortFired = false;
+    signal.addEventListener('abort', () => {
+      abortFired = true;
+    });
 
-    // Destroy the wrapper
-    wrapper[Symbol.dispose]();
+    // Have the original signal drop its trigger capability. The capability is released before
+    // this call returns, so the clone's end of it has been destroyed once the await completes.
+    await wrapper.dropTriggers();
 
-    // Dropping the trigger doesn't abort the signal
+    // Let the armed subscription observe the dropped trigger
+    await scheduler.wait(0);
+
     ok(!signal.aborted);
     strictEqual(signal.reason, undefined);
+    strictEqual(abortFired, false);
+
+    wrapper[Symbol.dispose]();
   },
 };

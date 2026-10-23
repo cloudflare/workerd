@@ -1200,6 +1200,10 @@ int AbortSignal::getNativeRegistrationCountForTest() {
   return static_cast<int>(nativeRegistrations.size() + rpcRegistrations.size());
 }
 
+void AbortSignal::dropRpcTriggersForTest() {
+  rpcRegistrations.clear();
+}
+
 bool AbortSignal::isRpcReceiverContextCurrent() {
   KJ_IF_SOME(executor, rpcReceiverContext) {
     return executor.isCurrent();

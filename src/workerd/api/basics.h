@@ -649,8 +649,10 @@ class AbortSignal final: public EventTarget {
 
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(getNativeRegistrationCountForTest);
+      JSG_METHOD(dropRpcTriggersForTest);
       JSG_TS_OVERRIDE({
         getNativeRegistrationCountForTest: never;
+        dropRpcTriggersForTest: never;
       });
     }
   }
@@ -754,6 +756,11 @@ class AbortSignal final: public EventTarget {
   // a sweep) plus RPC registrations currently held by this signal. Lets tests assert that
   // completed registrations are reclaimed rather than accumulating on long-lived signals.
   int getNativeRegistrationCountForTest();
+
+  // Test-only: drops this signal's RPC registrations, releasing the capabilities that let it
+  // abort its clones. Lets tests observe a clone whose trigger is lost without waiting for the
+  // owning IoContext to be torn down.
+  void dropRpcTriggersForTest();
 
   static jsg::Ref<AbortSignal> deserialize(
       jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
@@ -876,8 +883,8 @@ class AbortSignal final: public EventTarget {
   // across requests may hold registrations from several — and abort delivery is routed into
   // that context like a native registration, re-taking the slot on arrival. There is no
   // consumer-side RAII handle: the slot is reclaimed when the signal aborts, when a sweep
-  // finds the owning context destroyed, or when the signal itself is destroyed (either way
-  // the client's own destructor tells the peer that no abort is coming).
+  // finds the owning context destroyed, or when the signal itself is destroyed. Dropping the
+  // client without calling abort() leaves the clone unaborted forever.
   struct RpcRegistration final: public kj::AtomicRefcounted {
     RpcRegistration(IoCrossContextExecutor executor, IoOwn<AbortTriggerRpcClient> client)
         : executor(kj::mv(executor)) {
