@@ -3979,9 +3979,9 @@ export interface ContainerExecPtyOptions {
   rows?: number;
 }
 export interface ExecProcess {
-  readonly stdin: WritableStream | null;
-  readonly stdout: ReadableStream | null;
-  readonly stderr: ReadableStream | null;
+  readonly stdin?: WritableStream;
+  readonly stdout?: ReadableStream;
+  readonly stderr?: ReadableStream;
   readonly pid: number;
   readonly isPty: boolean;
   readonly exitCode: Promise<number>;

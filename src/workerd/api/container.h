@@ -136,9 +136,9 @@ class ExecProcess: public jsg::Object {
     JSG_METHOD(resize);
 
     JSG_TS_OVERRIDE({
-      readonly stdin: WritableStream | null;
-      readonly stdout: ReadableStream | null;
-      readonly stderr: ReadableStream | null;
+      readonly stdin?: WritableStream;
+      readonly stdout?: ReadableStream;
+      readonly stderr?: ReadableStream;
       readonly pid: number;
       readonly isPty: boolean;
       readonly exitCode: Promise<number>;
