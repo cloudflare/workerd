@@ -174,10 +174,12 @@ pub fn write(out: &mut OutFile) {
 
         if builtin.rust_slice {
             out.next_section();
+            writeln!(out, "#ifndef CXXBRIDGE1_LAYOUT");
             writeln!(out, "template <typename T>");
             writeln!(out, "::std::size_t size_of();");
             writeln!(out, "template <typename T>");
             writeln!(out, "::std::size_t align_of();");
+            writeln!(out, "#endif  // CXXBRIDGE1_LAYOUT");
         }
 
         ifndef::write(
