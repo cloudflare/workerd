@@ -88,7 +88,7 @@ use crate::v8;
 /// Every type that can appear as a field in a `#[jsg_resource]` struct must
 /// implement `Traced`. The generated `Traced::trace` body calls
 /// `Traced::trace` on every field — types with no GC-visible references
-/// simply use the default no-op implementation.
+/// use a no-op implementation, such as the one `jsg_traced!` generates.
 ///
 /// # Built-in implementations
 ///
@@ -101,17 +101,33 @@ use crate::v8;
 /// - **`jsg::Weak<T>`** — no-op (weak refs don't keep targets alive).
 /// - **`jsg::v8::TracedGlobal<T>`** — visits via `GcVisitor::visit_traced_global`.
 pub trait Traced {
+    /// Whether a value of this type can hold GC-visible references. Tracing a `RefCell` checks
+    /// it. It defaults to `true`, and wrappers and collections take it from what they hold. A
+    /// type whose `trace` is a no-op should return `false`, as `jsg_traced!` does.
+    fn holds_gc_references() -> bool
+    where
+        Self: Sized,
+    {
+        true
+    }
+
     /// Visit GC-visible references held by this value.
     ///
     /// The default implementation is a no-op, suitable for types with no
-    /// GC-visible references (primitives, plain data structs, etc.).
+    /// GC-visible references (primitives, plain data structs, etc.). Such a type
+    /// should also return `false` from `holds_gc_references`; `jsg_traced!`
+    /// generates both.
     fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
 }
 
 /// Generates no-op `Traced` implementations for types with no GC-visible references.
 macro_rules! impl_traced_noop {
     ($($t:ty),* $(,)?) => {
-        $(impl Traced for $t {})*
+        $(impl Traced for $t {
+            fn holds_gc_references() -> bool {
+                false
+            }
+        })*
     };
 }
 
@@ -150,6 +166,10 @@ impl_traced_noop!(
 );
 
 impl<T: Traced> Traced for Option<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         if let Some(inner) = self {
             inner.trace(visitor);
@@ -158,6 +178,11 @@ impl<T: Traced> Traced for Option<T> {
 }
 
 impl<T: Traced> Traced for Lenient<T> {
+    // An unconvertable value is a `TracedGlobal`, whatever `T` is.
+    fn holds_gc_references() -> bool {
+        true
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         if let Self::Some(inner) = self {
             inner.trace(visitor);
@@ -169,6 +194,10 @@ impl<T: Traced> Traced for Lenient<T> {
 }
 
 impl<T: Traced> Traced for Nullable<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         if let Self::Some(inner) = self {
             inner.trace(visitor);
@@ -177,12 +206,20 @@ impl<T: Traced> Traced for Nullable<T> {
 }
 
 impl<T: Traced> Traced for NonCoercible<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         self.as_ref().trace(visitor);
     }
 }
 
 impl<T: Traced> Traced for Vec<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for item in self {
             item.trace(visitor);
@@ -191,6 +228,10 @@ impl<T: Traced> Traced for Vec<T> {
 }
 
 impl<K, V: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashMap<K, V, S> {
+    fn holds_gc_references() -> bool {
+        V::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for value in self.values() {
             value.trace(visitor);
@@ -199,6 +240,10 @@ impl<K, V: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashM
 }
 
 impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
+    fn holds_gc_references() -> bool {
+        V::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for value in self.values() {
             value.trace(visitor);
@@ -207,6 +252,10 @@ impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
 }
 
 impl<T: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashSet<T, S> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for item in self {
             item.trace(visitor);
@@ -215,6 +264,10 @@ impl<T: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashSet<
 }
 
 impl<T: Traced> Traced for std::collections::BTreeSet<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for item in self {
             item.trace(visitor);
@@ -223,6 +276,10 @@ impl<T: Traced> Traced for std::collections::BTreeSet<T> {
 }
 
 impl<T: Traced> Traced for std::cell::Cell<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         // SAFETY: V8 GC tracing is single-threaded within an isolate and never
         // re-entrant on the same object during a single GC cycle. We only read
@@ -234,6 +291,10 @@ impl<T: Traced> Traced for std::cell::Cell<T> {
 }
 
 impl<T: Traced> Traced for std::cell::RefCell<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         // Use `try_borrow()` to avoid panicking across the FFI boundary if a
         // mutable borrow is active during GC.
@@ -244,6 +305,10 @@ impl<T: Traced> Traced for std::cell::RefCell<T> {
 }
 
 impl<T: Traced> Traced for std::rc::Rc<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         (**self).trace(visitor);
     }
@@ -1074,3 +1139,7 @@ impl<'s> FromJS<'s> for v8::Local<'s, v8::Value> {
         Ok(value)
     }
 }
+
+#[cfg(test)]
+#[path = "wrappable-test.rs"]
+mod tests;
