@@ -225,3 +225,13 @@ wpt_test(
     config = "webidl-test.ts",
     wpt_directory = "@wpt//:webidl@module",
 )
+
+wpt_test(
+    name = "wasm/jsapi",
+    config = "wasm/jsapi-test.ts",
+    extra_wpt_directories = [
+        "@wpt//:wasm/jsapi@module",
+        "@wpt//:wasm/resources@module",
+    ],
+    wpt_directory = "@wpt//:wasm/jsapi@module",
+)
