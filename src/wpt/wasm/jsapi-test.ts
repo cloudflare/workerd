@@ -36,22 +36,10 @@ export default {
     comment: 'Helper script loaded by other tests',
     omittedTests: true,
   },
-  'global/constructor.any.js': {
-    comment:
-      "The harness's format_value() calls JSON.stringify(), which throws on BigInt values",
-    disabledTests: true,
-  },
+  'global/constructor.any.js': {},
   'global/toString.any.js': {},
-  'global/value-get-set.any.js': {
-    comment:
-      "The harness's format_value() calls JSON.stringify(), which runs the prototype's getters and throws",
-    expectedFailures: ['Branding'],
-  },
-  'global/valueOf.any.js': {
-    comment:
-      "The harness's format_value() calls JSON.stringify(), which runs the prototype's getters and throws",
-    expectedFailures: ['Branding'],
-  },
+  'global/value-get-set.any.js': {},
+  'global/valueOf.any.js': {},
   'idlharness.any.js': {
     comment: 'Loads resources/load_wasm.js, which the harness does not bind',
     disabledTests: true,
@@ -63,11 +51,7 @@ export default {
       "workerd's WebAssembly.Instance shim (io/worker.c++) can be called without new",
     expectedFailures: ['Calling'],
   },
-  'instance/exports.any.js': {
-    comment:
-      "The harness's format_value() calls JSON.stringify(), which runs the prototype's getters and throws",
-    expectedFailures: ['Branding'],
-  },
+  'instance/exports.any.js': {},
   'instance/toString.any.js': {},
   'instanceTestFactory.js': {
     comment: 'Helper script loaded by other tests',
@@ -100,29 +84,13 @@ export default {
     comment: 'Helper script loaded by other tests',
     omittedTests: true,
   },
-  'memory/buffer.any.js': {
-    comment:
-      "The harness's format_value() calls JSON.stringify(), which runs the prototype's getters and throws",
-    expectedFailures: ['Branding'],
-  },
+  'memory/buffer.any.js': {},
   'memory/constructor.any.js': {},
-  'memory/grow.any.js': {
-    comment:
-      "The harness's format_value() calls JSON.stringify(), which runs the prototype's getters and throws",
-    expectedFailures: ['Branding'],
-  },
+  'memory/grow.any.js': {},
   'memory/to-fixed-length-buffer-shared.any.js': {},
-  'memory/to-fixed-length-buffer.any.js': {
-    comment:
-      "The harness's format_value() calls JSON.stringify(), which runs the prototype's getters and throws",
-    expectedFailures: ['API surface'],
-  },
+  'memory/to-fixed-length-buffer.any.js': {},
   'memory/to-resizable-buffer-shared.any.js': {},
-  'memory/to-resizable-buffer.any.js': {
-    comment:
-      "The harness's format_value() calls JSON.stringify(), which runs the prototype's getters and throws",
-    expectedFailures: ['API surface'],
-  },
+  'memory/to-resizable-buffer.any.js': {},
   'memory/toString.any.js': {},
   'module/constructor.any.js': {},
   'module/customSections.any.js': {},
@@ -135,21 +103,9 @@ export default {
     omittedTests: true,
   },
   'table/constructor.any.js': {},
-  'table/get-set.any.js': {
-    comment:
-      "The harness's format_value() calls JSON.stringify(), which runs the prototype's getters and throws",
-    expectedFailures: ['Branding: get', 'Branding: set'],
-  },
-  'table/grow.any.js': {
-    comment:
-      "The harness's format_value() calls JSON.stringify(), which runs the prototype's getters and throws",
-    expectedFailures: ['Branding'],
-  },
-  'table/length.any.js': {
-    comment:
-      "The harness's format_value() calls JSON.stringify(), which runs the prototype's getters and throws",
-    expectedFailures: ['Branding'],
-  },
+  'table/get-set.any.js': {},
+  'table/grow.any.js': {},
+  'table/length.any.js': {},
   'table/toString.any.js': {},
   'wasm-module-builder.js': {
     comment: 'Helper script loaded by other tests',
