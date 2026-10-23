@@ -403,7 +403,7 @@ pub fn function_template_of<'s, R: Resource + 'static>(
     let isolate = lock.isolate();
     let constructor = lock.realm().get_constructor::<R>();
     // SAFETY: `isolate` is valid and locked (Lock invariant). `constructor` is a valid
-    // Global<FunctionTemplate> cached in the Realm. Inlined from `as_local_function` to
+    // TracedGlobal<FunctionTemplate> cached in the Realm. Inlined from `as_local_function` to
     // avoid re-borrowing `self` while `constructor` holds an immutable borrow through `realm()`.
     unsafe {
         v8::Local::from_ffi(v8::ffi::function_template_get_function(
@@ -505,7 +505,7 @@ fn get_resource_descriptor<R: Resource>(
 #[derive(Default)]
 pub struct Resources {
     /// Cached V8 `FunctionTemplate`s keyed by resource `TypeId`.
-    templates: HashMap<TypeId, v8::Global<v8::FunctionTemplate>>,
+    templates: HashMap<TypeId, v8::TracedGlobal<v8::FunctionTemplate>>,
 }
 
 impl Resources {
@@ -517,7 +517,7 @@ impl Resources {
         isolate: v8::IsolatePtr,
         state: &Arc<IsolateState>,
         flags: compatibility_flags::Reader<'_>,
-    ) -> &v8::Global<v8::FunctionTemplate> {
+    ) -> &v8::TracedGlobal<v8::FunctionTemplate> {
         self.templates
             .entry(TypeId::of::<R>())
             .or_insert_with(|| Self::create_resource_constructor::<R>(isolate, state, flags))
@@ -528,7 +528,7 @@ impl Resources {
         isolate: v8::IsolatePtr,
         state: &Arc<IsolateState>,
         flags: compatibility_flags::Reader<'_>,
-    ) -> v8::Global<v8::FunctionTemplate> {
+    ) -> v8::TracedGlobal<v8::FunctionTemplate> {
         // SAFETY: Caller guarantees the isolate is valid and locked.
         let handle = unsafe {
             v8::ffi::create_resource_template(
@@ -536,7 +536,7 @@ impl Resources {
                 &get_resource_descriptor::<R>(flags),
             )
         };
-        v8::Global::from_ffi_in(handle, Arc::clone(state))
+        v8::TracedGlobal::from_ffi_in(handle, Arc::clone(state))
     }
 
     /// Drains every cached resource-template handle, transferring ownership of each

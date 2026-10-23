@@ -378,7 +378,7 @@ use no-op `Traced` impls; containers/wrappers recurse to inner values.
 | Field type | Trace behaviour |
 |---|---|
 | `jsg::Rc<T>` | Strong GC edge — `visitor.visit_rc` |
-| `jsg::v8::Global<T>` | Dual strong/traced — `visitor.visit_global` (enables cycle collection) |
+| `jsg::v8::TracedGlobal<T>` | Dual strong/traced — `visitor.visit_traced_global` (enables cycle collection) |
 | `jsg::Weak<T>` | **Not traced** — does not keep the target alive |
 | `Option<T>` / `jsg::Nullable<T>` | Delegates to `T` when present |
 | `Vec<T>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values |
@@ -406,8 +406,8 @@ Example:
 
 ```rust
 struct EventHandlers {
-    on_message: Option<jsg::v8::Global<jsg::v8::Value>>,
-    on_error:   Option<jsg::v8::Global<jsg::v8::Value>>,
+    on_message: Option<jsg::v8::TracedGlobal<jsg::v8::Value>>,
+    on_error:   Option<jsg::v8::TracedGlobal<jsg::v8::Value>>,
 }
 
 impl jsg::Traced for EventHandlers {
@@ -436,9 +436,9 @@ pub struct EventRouter {
     // Conditionally traced.
     fallback: Option<jsg::Rc<Handler>>,
 
-    // Interior-mutable callback set after construction; dual-mode Global enables
+    // Interior-mutable callback set after construction; dual-mode TracedGlobal enables
     // cycle collection if the callback closes over this resource's own JS wrapper.
-    on_error: Cell<Option<jsg::v8::Global<jsg::v8::Value>>>,
+    on_error: Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
 
     // Weak — does not keep target alive.
     parent: jsg::Weak<EventRouter>,
@@ -448,12 +448,12 @@ pub struct EventRouter {
 }
 ```
 
-### `jsg::v8::Global<T>` and cycle collection
+### `jsg::v8::TracedGlobal<T>` and cycle collection
 
-`jsg::v8::Global<T>` uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`.
+`jsg::v8::TracedGlobal<T>` uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`.
 While the parent resource holds at least one strong Rust `Rc`, the V8 handle stays
 strong. Once all `Rc`s are dropped and only the JS wrapper keeps the resource alive,
-`visit_global` downgrades the handle to a `v8::TracedReference` that cppgc can
+`visit_traced_global` downgrades the handle to a `v8::TracedReference` that cppgc can
 follow — allowing back-reference cycles (e.g. a resource that stores a callback
 which closes over its own JS wrapper) to be detected and collected on the next full GC.
 

@@ -95,7 +95,7 @@ void wrappable_visit_ref(
 /// strong↔traced dual-mode switching as `jsg::Data` / `jsg::V8Ref<T>`.
 ///
 /// `global` points to the `ptr` field of `ffi::Global` (the strong handle).
-/// `traced` is the `ffi::TracedReference` slot from `Global<T>` on the Rust side.
+/// `traced` is the `ffi::TracedReference` slot from `TracedGlobal<T>` on the Rust side.
 /// Both are mutated in-place by this function.
 void wrappable_visit_global(GcVisitor* visitor, uintptr_t* global, TracedReference& traced);
 

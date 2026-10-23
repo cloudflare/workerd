@@ -40,11 +40,11 @@ struct MyResource {
     // jsg::Weak<T> fields — weak reference, does not keep the target alive
     observer: jsg::Weak<OtherResource>,
 
-    // jsg::v8::Global<T> fields — JS value traced with strong↔weak dual-mode switching.
+    // jsg::v8::TracedGlobal<T> fields — JS value traced with strong↔weak dual-mode switching.
     // Allows GC to detect and collect back-reference cycles (e.g. a stored callback
     // that closes over the resource's own JS wrapper).
     // Must be wrapped in Cell<_> for interior mutability (trace takes &self).
-    callback: Cell<Option<jsg::v8::Global<jsg::v8::Value>>>,
+    callback: Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
 }
 
 #[jsg_resource]
@@ -91,12 +91,12 @@ let r: jsg::Rc<MyResource> = jsg::Rc::from_js(&mut lock, js_val)?;
 | `BTreeSet<jsg::Rc<T>>` | Yes — each element | Iterates and visits every `Rc` |
 | `Cell<Vec<jsg::Rc<T>>>` | Yes — each element | `Cell` variant of above |
 | `Cell<HashMap<K, jsg::Rc<T>>>` | Yes — each value | `Cell` variant of above |
-| Same patterns with `jsg::v8::Global<T>` | Yes | All collection forms work with `Global<T>` too |
-| `jsg::v8::Global<T>` | Yes — dual strong/traced | Enables cycle collection; see below |
-| `Option<jsg::v8::Global<T>>` | Yes — when `Some` | |
-| `jsg::Nullable<jsg::v8::Global<T>>` | Yes — when `Some` | |
-| `Cell<jsg::v8::Global<T>>` | Yes — dual strong/traced | Required when set after construction |
-| `Cell<Option<jsg::v8::Global<T>>>` | Yes — when `Some` | |
+| Same patterns with `jsg::v8::TracedGlobal<T>` | Yes | All collection forms work with `TracedGlobal<T>` too |
+| `jsg::v8::TracedGlobal<T>` | Yes — dual strong/traced | Enables cycle collection; see below |
+| `Option<jsg::v8::TracedGlobal<T>>` | Yes — when `Some` | |
+| `jsg::Nullable<jsg::v8::TracedGlobal<T>>` | Yes — when `Some` | |
+| `Cell<jsg::v8::TracedGlobal<T>>` | Yes — dual strong/traced | Required when set after construction |
+| `Cell<Option<jsg::v8::TracedGlobal<T>>>` | Yes — when `Some` | |
 | `jsg::Weak<T>` | No | Doesn't keep target alive |
 | Any `T: Traced` | Depends on `T` | `#[jsg_resource]` calls `Traced::trace` on every field |
 
@@ -104,7 +104,7 @@ let r: jsg::Rc<MyResource> = jsg::Rc::from_js(&mut lock, js_val)?;
 - **`Traced` drives field tracing**: `#[jsg_resource]` now traces every named field via `Traced::trace(&self.field, visitor)`. Types with no GC edges use no-op `Traced` impls; wrappers/collections delegate recursively.
 - **Nested wrappers are supported by composition**: `Option<Vec<jsg::Rc<T>>>` works as long as each layer implements `Traced`.
 - **`#[jsg_resource(custom_trace)]`**: suppresses the generated `Traced` impl so you can write your own. `GarbageCollected` (`memory_name`), `Type`, `ToJS`, and `FromJS` are still generated.
-- **`jsg::v8::Global<T>` cycle collection**: Uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`. While the parent resource has strong Rust refs the JS handle stays strong. Once all Rust `Rc`s are dropped, `visit_global` downgrades the handle to a `v8::TracedReference` that cppgc can follow — allowing cycles (e.g. a resource holding a callback that captures its own wrapper) to be detected and collected.
+- **`jsg::v8::TracedGlobal<T>` cycle collection**: Uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`. While the parent resource has strong Rust refs the JS handle stays strong. Once all Rust `Rc`s are dropped, `visit_traced_global` downgrades the handle to a `v8::TracedReference` that cppgc can follow — allowing cycles (e.g. a resource holding a callback that captures its own wrapper) to be detected and collected.
 - **Circular references** through `jsg::Rc<T>` are **not** collected, matching C++ `jsg::Rc<T>` behavior.
 
 ## V8 Handle Types
@@ -136,7 +136,7 @@ All scopes open on a thread at the same time must belong to one isolate: opening
 another isolate while one is open panics, so a handle is never used with another isolate's
 lock. `jsg::allow_scopes_of_another_isolate` (`unsafe`) lifts the rule for code that must open
 scopes of a second isolate. Handles that outlive scopes remember their isolate and panic when
-used in another: `Global<T>`, and the JS wrapper of a `jsg::Rc<T>`.
+used in another: `TracedGlobal<T>`, and the JS wrapper of a `jsg::Rc<T>`.
 
 ### `Local<'s, T>`
 
@@ -153,19 +153,19 @@ constructors return `None` when V8 cannot create the string.
 ```rust
 let str_value = "hello".to_js(lock);
 let num_value = 42u32.to_local(lock); // `ToLocalValue` also covers integers
-let global = str_value.to_global(lock);
+let global = str_value.to_traced_global(lock);
 ```
 
-### `Global<T>`
+### `TracedGlobal<T>`
 
 A persistent handle that outlives `HandleScope`s. Must be explicitly managed. Opening or cloning
-it in an isolate other than the one it was created in panics. A `Global` is `Send`, and not
+it in an isolate other than the one it was created in panics. A `TracedGlobal` is `Send`, and not
 `Sync`: every use takes a `Lock` except dropping it and putting it in a new resource
 (`jsg::Rc::new` takes no `Lock`), and both leave its handles alone on a thread that does not hold
 the isolate lock.
 
-Dropping a `Global` resets its V8 handle, which needs the isolate lock; what the drop does
-depends on the state of the isolate, which the `Realm` shares with every `Global` of it:
+Dropping a `TracedGlobal` resets its V8 handle, which needs the isolate lock; what the drop does
+depends on the state of the isolate, which the `Realm` shares with every `TracedGlobal` of it:
 
 - Under the isolate lock, the handle is reset at once.
 - Without the lock, on any thread, the handle is queued and reset the next time the isolate is
@@ -179,45 +179,46 @@ whenever it locks the isolate, as workerd and the test harness do. A bare `v8::L
 relocking after a `v8::Unlocker`, does not empty it; the handles wait for the next
 `IsolateBase::Lock`.
 
-A `Global` in traced mode also holds a `v8::TracedReference`, which Rust never resets. A `Global`
-taken out of its resource, for instance by `Cell::take()`, is traced by nothing, so the next full
-GC may free its node, and nothing tells the `Global` that it moved, the way C++ JSG's `jsg::Data`
-move constructor re-strengthens its handle. So each GC visit lets go of the old node and makes
-the strong handle strong again before C++ decides afresh whether to install a new node, and a
-drop just lets go of it. V8 frees nodes that nothing traces at the next full GC; see
-`GcVisitor::visit_global` for the cost of this and how to avoid it.
+A `TracedGlobal` in traced mode also holds a `v8::TracedReference`, which Rust never resets. A
+`TracedGlobal` taken out of its resource, for instance by `Cell::take()`, is traced by nothing, so
+the next full GC may free its node, and nothing tells the `TracedGlobal` that it moved, the way C++
+JSG's `jsg::Data` move constructor re-strengthens its handle. So each GC visit lets go of the old
+node and makes the strong handle strong again before C++ decides afresh whether to install a new
+node, and a drop just lets go of it. V8 frees nodes that nothing traces at the next full GC; see
+`GcVisitor::visit_traced_global` for the cost of this and how to avoid it.
 
-Bitwise moves are also why a `Global` keeps its handles in a box. In traced mode the strong
+Bitwise moves are also why a `TracedGlobal` keeps its handles in a box. In traced mode the strong
 handle is weak, and V8 keeps the address of its slot to null it when the value dies; the box
-keeps that address valid however the `Global` itself moves, for example when the `Vec` holding
+keeps that address valid however the `TracedGlobal` itself moves, for example when the `Vec` holding
 it grows. The box lives until the strong handle has been reset. GC can still run after the
-`Realm` is dropped, so the box of a `Global` dropped then is kept until the isolate is disposed.
+`Realm` is dropped, so the box of a `TracedGlobal` dropped then is kept until the isolate is
+disposed.
 
-A `Global` taken out of its resource is still weak, and nothing traces its value: unless
+A `TracedGlobal` taken out of its resource is still weak, and nothing traces its value: unless
 something else keeps the value alive, any GC from then on may free it, which leaves the
-`Global` empty, and `as_local` on it panics. Put the `Global` back, or hold the value through
-another handle, before a GC can run.
+`TracedGlobal` empty, and `as_local` on it panics. Put the `TracedGlobal` back, or hold the value
+through another handle, before a GC can run.
 
-`Global<T>` fields on `#[jsg_resource]` structs participate in GC tracing when visited via `GcVisitor::visit_global`. This enables the garbage collector to detect and collect back-reference cycles — for example, a resource that stores a JS callback which closes over the resource's own JS wrapper:
+`TracedGlobal<T>` fields on `#[jsg_resource]` structs participate in GC tracing when visited via `GcVisitor::visit_traced_global`. This enables the garbage collector to detect and collect back-reference cycles — for example, a resource that stores a JS callback which closes over the resource's own JS wrapper:
 
 ```rust
 #[jsg_resource]
 struct EventEmitter {
     // Cell<Option<_>> for interior mutability: the callback is set after
     // construction, and trace() receives &self.
-    on_event: Cell<Option<jsg::v8::Global<jsg::v8::Value>>>,
+    on_event: Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
 }
 
 #[jsg_resource]
 impl EventEmitter {
     #[jsg_method]
     fn set_callback(&self, lock: &mut jsg::Lock, cb: jsg::v8::Local<jsg::v8::Value>) {
-        self.on_event.set(Some(cb.to_global(lock)));
+        self.on_event.set(Some(cb.to_traced_global(lock)));
     }
 }
 ```
 
-Without tracing, storing a `Global` back to the resource's own wrapper creates an unbreakable reference cycle that leaks until the worker is torn down. With `visit_global` tracing (generated automatically by `#[jsg_resource]`), the cycle is collected by the next full GC after all strong Rust `Rc`s are dropped.
+Without tracing, storing a `TracedGlobal` back to the resource's own wrapper creates an unbreakable reference cycle that leaks until the worker is torn down. With `visit_traced_global` tracing (generated automatically by `#[jsg_resource]`), the cycle is collected by the next full GC after all strong Rust `Rc`s are dropped.
 
 ## Union Types
 

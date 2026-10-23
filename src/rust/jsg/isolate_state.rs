@@ -4,37 +4,37 @@
 
 //! Dropping persistent handles, and the liveness of their isolate.
 //!
-//! A [`v8::Global`](crate::v8::Global) outlives every scope, and is dropped wherever the Rust
-//! value owning it goes away. Two things about its isolate decide what the drop may do:
+//! A [`v8::TracedGlobal`](crate::v8::TracedGlobal) outlives every scope, and is dropped wherever
+//! the Rust value owning it goes away. Two things about its isolate decide what the drop may do:
 //!
 //! * **Whether this thread holds the isolate lock.** `v8::Global::Reset` edits the isolate's
 //!   free list of handle nodes without synchronization, as does every handle creation on the
 //!   thread holding the lock. A reset without the lock is a data race that can hand a node out
 //!   twice or unlink a block of roots.
-//! * **Whether the isolate is still alive.** Nothing ties a `Global` to its isolate's
+//! * **Whether the isolate is still alive.** Nothing ties a `TracedGlobal` to its isolate's
 //!   lifetime: one can be dropped after `v8::Isolate::Dispose`, for example when the Rust
 //!   object holding it is owned by something that outlives the worker. `Dispose` frees every
 //!   global and traced handle of the isolate in bulk, so a reset after it touches freed
 //!   memory.
 //!
 //! The [`Realm`](crate::Realm) therefore owns an [`IsolateState`], shared through an `Arc`
-//! with every `Global` of its isolate. [`IsolateState::drop_slot`] resets a dropped `Global`'s
-//! strong handle at once under the lock, queues it otherwise, and leaves it to `Dispose` once
-//! the state is closed. [`IsolateState::reset_awaiting_lock`] empties the queue; it runs
-//! from the `IsolateBase` deferred action hook, which `IsolateBase::Lock` calls whenever it
+//! with every `TracedGlobal` of its isolate. [`IsolateState::drop_slot`] resets a dropped
+//! `TracedGlobal`'s strong handle at once under the lock, queues it otherwise, and leaves it to
+//! `Dispose` once the state is closed. [`IsolateState::reset_awaiting_lock`] empties the queue; it
+//! runs from the `IsolateBase` deferred action hook, which `IsolateBase::Lock` calls whenever it
 //! locks the isolate, the same point at which C++ JSG applies its own deferred destruction
 //! queue. A bare `v8::Locker`, or relocking after a `v8::Unlocker`, does not empty the queue;
 //! the handles then wait for the next `IsolateBase::Lock`. The `Realm` closes the state when
 //! it is dropped, under the isolate lock, before the isolate is disposed.
 //!
-//! A `Global` keeps its handles in a [`GlobalSlot`], whose address V8 may record to null the
+//! A `TracedGlobal` keeps its handles in a [`GlobalSlot`], whose address V8 may record to null the
 //! strong handle when it is weak and its value dies, during any GC. GC runs on the thread
 //! holding the isolate lock, so a slot is only read under the lock, and freed only once its
 //! strong handle has been reset or the isolate disposed, after which V8 forgets it. A drop
 //! without the lock queues the slot. After the state is closed the handles are no longer reset,
 //! but GC can still run before the isolate is disposed: during `IsolateBase::dropWrappers`,
 //! while `v8::Isolate::Dispose` tears the heap down, or whenever V8 flags ask for it. So the
-//! slot of a `Global` dropped then is kept until `~IsolateBase` reports, through a hook the
+//! slot of a `TracedGlobal` dropped then is kept until `~IsolateBase` reports, through a hook the
 //! `Realm` set, that the isolate is disposed.
 
 use std::pin::Pin;
@@ -78,10 +78,10 @@ unsafe impl Sync for IsolateState {}
     reason = "V8 may write into a slot until its handle is reset or the isolate disposed"
 )]
 struct DropQueues {
-    /// Slots of `Global`s that were dropped without the isolate lock, waiting for the next
+    /// Slots of `TracedGlobal`s that were dropped without the isolate lock, waiting for the next
     /// lock.
     awaiting_lock: Vec<Box<GlobalSlot>>,
-    /// Slots of `Global`s that were dropped after the state was closed, waiting for the
+    /// Slots of `TracedGlobal`s that were dropped after the state was closed, waiting for the
     /// isolate to be disposed.
     awaiting_dispose: Vec<Box<GlobalSlot>>,
     /// Set once the isolate is disposed, after which slots are freed at once.
@@ -129,14 +129,14 @@ impl IsolateState {
         self.closed.load(Ordering::Acquire)
     }
 
-    /// Takes the slot of a dropped `Global`.
+    /// Takes the slot of a dropped `TracedGlobal`.
     ///
     /// Under the isolate lock the strong handle is reset at once, and the slot freed. Without
     /// it the slot is queued, and [`reset_awaiting_lock`](Self::reset_awaiting_lock) resets and
     /// frees it the next time the isolate is locked, so until then the handle keeps its value
     /// alive. Once the state is closed the handle is left to `v8::Isolate::Dispose`, and the
     /// slot is kept until then. The traced reference is let go of without a reset; see
-    /// [`GcVisitor::visit_global`](crate::v8::GcVisitor::visit_global).
+    /// [`GcVisitor::visit_traced_global`](crate::v8::GcVisitor::visit_traced_global).
     pub(crate) fn drop_slot(&self, slot: Box<GlobalSlot>) {
         if self.this_thread_holds_lock() {
             reset_and_free(slot);
@@ -200,7 +200,7 @@ impl IsolateState {
     }
 }
 
-/// Resets a dropped `Global`'s strong handle in place, then frees its slot, which V8 forgets
+/// Resets a dropped `TracedGlobal`'s strong handle in place, then frees its slot, which V8 forgets
 /// with the handle. The isolate must be locked by this thread.
 #[expect(unsafe_code, reason = "resets a V8 handle")]
 #[expect(
