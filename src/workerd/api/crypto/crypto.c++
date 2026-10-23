@@ -104,8 +104,7 @@ namespace {
 //   somewhere in CryptoKey, perhaps implicitly in the default implementations of the
 //   encrypt/decrypt/sign/verify/etc. functions.
 //
-// Note that SubtleCrypto.digest() is special. It is not a key-based operation and we only support
-// one hash family, SHA, so its implementation is non-virtual.
+// SubtleCrypto.digest() is not a key-based operation, so its implementation is non-virtual.
 //
 // NOTE(perf): The SubtleCrypto interface is asynchronous, but all of our implementations perform
 //   the crypto synchronously before returning. In theory, we could be performing bulk crypto in a
@@ -121,12 +120,23 @@ namespace {
 // =======================================================================================
 // Registered algorithms
 
+const EVP_MD* lookupSubtleDigestAlgorithm(kj::StringPtr name) {
+  if (Worker::Api::current().getFeatureFlags().getWebCryptoModernAlgorithms()) {
+    if (strcasecmp(name.cStr(), "SHA3-256") == 0) return EVP_sha3_256();
+    if (strcasecmp(name.cStr(), "SHA3-384") == 0) return EVP_sha3_384();
+    if (strcasecmp(name.cStr(), "SHA3-512") == 0) return EVP_sha3_512();
+  }
+  return lookupDigestAlgorithm(name).second;
+}
+
 static kj::Maybe<const CryptoAlgorithm&> lookupAlgorithm(kj::StringPtr name) {
   static const std::set<CryptoAlgorithm> ALGORITHMS = {
     {"AES-CTR"_kj, &CryptoKey::Impl::importAes, &CryptoKey::Impl::generateAes},
     {"AES-CBC"_kj, &CryptoKey::Impl::importAes, &CryptoKey::Impl::generateAes},
     {"AES-GCM"_kj, &CryptoKey::Impl::importAes, &CryptoKey::Impl::generateAes},
     {"AES-KW"_kj, &CryptoKey::Impl::importAes, &CryptoKey::Impl::generateAes},
+    {"ChaCha20-Poly1305"_kj, &CryptoKey::Impl::importChacha20Poly1305,
+      &CryptoKey::Impl::generateChacha20Poly1305},
     {"HMAC"_kj, &CryptoKey::Impl::importHmac, &CryptoKey::Impl::generateHmac},
     {"PBKDF2"_kj, &CryptoKey::Impl::importPbkdf2},
     {"HKDF"_kj, &CryptoKey::Impl::importHkdf},
@@ -144,6 +154,7 @@ static kj::Maybe<const CryptoAlgorithm&> lookupAlgorithm(kj::StringPtr name) {
     {"ML-DSA-87"_kj, &CryptoKey::Impl::importMlDsa, &CryptoKey::Impl::generateMlDsa},
     {"ML-KEM-768"_kj, &CryptoKey::Impl::importMlKem, &CryptoKey::Impl::generateMlKem},
     {"ML-KEM-1024"_kj, &CryptoKey::Impl::importMlKem, &CryptoKey::Impl::generateMlKem},
+    {"MLKEM768-X25519"_kj, &CryptoKey::Impl::importHybridKem, &CryptoKey::Impl::generateHybridKem},
   };
 
   auto iter = ALGORITHMS.find(CryptoAlgorithm{name});
@@ -152,7 +163,8 @@ static kj::Maybe<const CryptoAlgorithm&> lookupAlgorithm(kj::StringPtr name) {
     // algorithm registered.
     return Worker::Api::current().getCryptoAlgorithm(name);
   } else {
-    if ((iter->name.startsWith("ML-DSA-"_kj) || iter->name.startsWith("ML-KEM-"_kj)) &&
+    if ((iter->name == "ChaCha20-Poly1305"_kj || iter->name.startsWith("ML-DSA-"_kj) ||
+            iter->name.startsWith("ML-KEM-"_kj) || iter->name.startsWith("MLKEM"_kj)) &&
         !Worker::Api::current().getFeatureFlags().getWebCryptoModernAlgorithms()) {
       return kj::none;
     }
@@ -201,19 +213,24 @@ kj::Maybe<uint32_t> getKeyLength(const SubtleCrypto::ImportKeyAlgorithm& derived
     {"AES-CBC"},
     {"AES-GCM"},
     {"AES-KW"},
+    {"ChaCha20-Poly1305"},
     {"HMAC"},
     {"HKDF"},
     {"PBKDF2"},
   };
   auto algIter = registeredAlgorithms.find(algName);
-  JSG_REQUIRE(algIter != registeredAlgorithms.end(), DOMNotSupportedError,
-      "Unrecognized derived key type \"", algName, "\" requested.");
+  JSG_REQUIRE(algIter != registeredAlgorithms.end() &&
+          (*algIter != "ChaCha20-Poly1305" ||
+              Worker::Api::current().getFeatureFlags().getWebCryptoModernAlgorithms()),
+      DOMNotSupportedError, "Unrecognized derived key type \"", algName, "\" requested.");
 
   // We could implement getKeyLength() with the same map-of-strings-to-implementation-functions
   // strategy as the rest of the crypto operations, but this function is so simple that it hardly
-  // seems worth the bother. The spec only identifies three cases: the AES family, HMAC, and the KDF
-  // algorithms.
-  if (algIter->startsWith("AES-")) {
+  // seems worth the bother. AES and HMAC have variable key lengths, ChaCha20-Poly1305 uses 256
+  // bits, and KDF keys have no fixed length.
+  if (*algIter == "ChaCha20-Poly1305") {
+    return 256;
+  } else if (algIter->startsWith("AES-")) {
     int length = JSG_REQUIRE_NONNULL(
         derivedKeyAlgorithm.length, TypeError, "Missing field \"length\" in \"derivedKeyParams\".");
     switch (length) {
@@ -413,7 +430,8 @@ void validateImportKeyAlgorithm(
 }
 
 bool supportsEncryptDecrypt(kj::StringPtr normalizedName) {
-  return isOneOf(normalizedName, {"AES-CTR"_kj, "AES-CBC"_kj, "AES-GCM"_kj, "RSA-OAEP"_kj});
+  return isOneOf(normalizedName,
+      {"AES-CTR"_kj, "AES-CBC"_kj, "AES-GCM"_kj, "RSA-OAEP"_kj, "ChaCha20-Poly1305"_kj});
 }
 
 bool supportsSign(kj::StringPtr normalizedName) {
@@ -437,18 +455,18 @@ bool supportsExportKey(kj::StringPtr normalizedName) {
       {"AES-CTR"_kj, "AES-CBC"_kj, "AES-GCM"_kj, "AES-KW"_kj, "HMAC"_kj, "RSASSA-PKCS1-v1_5"_kj,
         "RSA-PSS"_kj, "RSA-OAEP"_kj, "RSA-RAW"_kj, "ECDSA"_kj, "ECDH"_kj, "NODE-ED25519"_kj,
         "Ed25519"_kj, "X25519"_kj, "ML-DSA-44"_kj, "ML-DSA-65"_kj, "ML-DSA-87"_kj, "ML-KEM-768"_kj,
-        "ML-KEM-1024"_kj});
+        "ML-KEM-1024"_kj, "MLKEM768-X25519"_kj, "ChaCha20-Poly1305"_kj});
 }
 
 bool supportsEncapsulate(kj::StringPtr normalizedName) {
-  return isOneOf(normalizedName, {"ML-KEM-768"_kj, "ML-KEM-1024"_kj});
+  return isOneOf(normalizedName, {"ML-KEM-768"_kj, "ML-KEM-1024"_kj, "MLKEM768-X25519"_kj});
 }
 
 bool supportsGetPublicKey(kj::StringPtr normalizedName) {
   return isOneOf(normalizedName,
       {"RSA-OAEP"_kj, "ECDH"_kj, "X25519"_kj, "ML-KEM-768"_kj, "ML-KEM-1024"_kj, "ECDSA"_kj,
         "Ed25519"_kj, "RSA-PSS"_kj, "RSASSA-PKCS1-v1_5"_kj, "ML-DSA-44"_kj, "ML-DSA-65"_kj,
-        "ML-DSA-87"_kj});
+        "ML-DSA-87"_kj, "MLKEM768-X25519"_kj});
 }
 
 void validateEncryptAlgorithm(
@@ -457,7 +475,7 @@ void validateEncryptAlgorithm(
     auto iv = JSG_REQUIRE_NONNULL(algorithm.iv, TypeError, "Missing field \"iv\" in \"algorithm\".")
                   .getHandle(js);
     JSG_REQUIRE(iv.size() != 0, DOMOperationError, "AES-GCM IV must not be empty.");
-    validateAesGcmTagLength(algorithm.tagLength.orDefault(128));
+    validateAesGcmTagLength(normalizeAesGcmTagLength(algorithm.tagLength.orDefault(128)));
   } else if (normalizedName == "AES-CBC") {
     auto iv = JSG_REQUIRE_NONNULL(algorithm.iv, TypeError, "Missing field \"iv\" in \"algorithm\".")
                   .getHandle(js);
@@ -471,6 +489,11 @@ void validateEncryptAlgorithm(
         algorithm.length, TypeError, "Missing \"length\" member in \"algorithm\".");
     JSG_REQUIRE(counterLength > 0 && counterLength <= 128, DOMOperationError, "Invalid counter of ",
         counterLength, " bits length provided.");
+  } else if (normalizedName == "ChaCha20-Poly1305") {
+    auto iv = JSG_REQUIRE_NONNULL(algorithm.iv, TypeError, "Missing field \"iv\" in \"algorithm\".")
+                  .getHandle(js);
+    JSG_REQUIRE(iv.size() == 12, DOMOperationError, "ChaCha20-Poly1305 IV must be 12 bytes long.");
+    validateChacha20Poly1305TagLength(algorithm.tagLength.orDefault(128));
   }
 }
 
@@ -744,7 +767,7 @@ jsg::Promise<jsg::JsRef<jsg::JsArrayBuffer>> SubtleCrypto::digest(
   auto checkErrorsOnFinish = webCryptoOperationBegin(__func__, algorithm);
 
   return js.evalNow([&] {
-    auto type = lookupDigestAlgorithm(algorithm.name).second;
+    auto type = lookupSubtleDigestAlgorithm(algorithm.name);
 
     auto digestCtx = kj::disposeWith<EVP_MD_CTX_free>(EVP_MD_CTX_new());
     KJ_ASSERT(digestCtx.get() != nullptr);
@@ -1108,7 +1131,8 @@ jsg::Promise<jsg::Ref<CryptoKey>> SubtleCrypto::getPublicKey(
       allowedUsages = CryptoKeyUsageSet::encrypt() | CryptoKeyUsageSet::wrapKey();
     } else if (algorithmName == "ECDH" || algorithmName == "X25519") {
       allowedUsages = CryptoKeyUsageSet();
-    } else if (algorithmName == "ML-KEM-768" || algorithmName == "ML-KEM-1024") {
+    } else if (algorithmName == "ML-KEM-768" || algorithmName == "ML-KEM-1024" ||
+        algorithmName == "MLKEM768-X25519") {
       allowedUsages = CryptoKeyUsageSet::encapsulateKey() | CryptoKeyUsageSet::encapsulateBits();
     } else if (algorithmName == "ECDSA" || algorithmName == "Ed25519" ||
         algorithmName == "RSA-PSS" || algorithmName == "RSASSA-PKCS1-v1_5" ||
@@ -1191,7 +1215,7 @@ bool SubtleCrypto::supports(jsg::Lock& js,
             auto normalizedAlgorithm =
                 normalizeSupportAlgorithm(js, algorithmValue, digestAlgorithmHandler);
             KJ_IF_SOME(exception, kj::runCatchingExceptions([&] {
-              lookupDigestAlgorithm(normalizedAlgorithm.name);
+              lookupSubtleDigestAlgorithm(normalizedAlgorithm.name);
             })) {
               (void)exception;
               return false;
@@ -1313,7 +1337,7 @@ bool SubtleCrypto::supports(jsg::Lock& js,
                 auto name = lookupAlgorithm(additionalAlgorithm.name).orDefault({}).name;
                 if (!isOneOf(name,
                         {"AES-CTR"_kj, "AES-CBC"_kj, "AES-GCM"_kj, "AES-KW"_kj, "HMAC"_kj,
-                          "HKDF"_kj, "PBKDF2"_kj})) {
+                          "HKDF"_kj, "PBKDF2"_kj, "ChaCha20-Poly1305"_kj})) {
                   return false;
                 }
                 if (name == "HMAC") {

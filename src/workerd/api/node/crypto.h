@@ -207,6 +207,8 @@ class CryptoImpl final: public jsg::Object {
 
   bool equals(jsg::Lock& js, jsg::Ref<CryptoKey> key, jsg::Ref<CryptoKey> otherKey);
 
+  double getSymmetricKeySize(jsg::Ref<CryptoKey> key);
+
   CryptoKey::AsymmetricKeyDetails getAsymmetricKeyDetail(jsg::Lock& js, jsg::Ref<CryptoKey> key);
   kj::StringPtr getAsymmetricKeyType(jsg::Lock& js, jsg::Ref<CryptoKey> key);
   // The `length` of a secret key's algorithm, or 0 if it has none. Read from the key itself rather
@@ -564,6 +566,7 @@ class CryptoImpl final: public jsg::Object {
     // Keys
     JSG_METHOD(exportKey);
     JSG_METHOD(equals);
+    JSG_METHOD(getSymmetricKeySize);
     JSG_METHOD(getAsymmetricKeyDetail);
     JSG_METHOD(getAsymmetricKeyType);
     JSG_METHOD(getSymmetricKeySize);

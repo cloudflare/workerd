@@ -238,6 +238,7 @@ export function exportKey(
   options?: InnerExportOptions
 ): KeyExportResult;
 export function equals(key: CryptoKey, otherKey: CryptoKey): boolean;
+export function getSymmetricKeySize(key: CryptoKey): number;
 export function getAsymmetricKeyDetail(key: CryptoKey): AsymmetricKeyDetails;
 export function getAsymmetricKeyType(key: CryptoKey): AsymmetricKeyType;
 export function getSymmetricKeySize(key: CryptoKey): number;
