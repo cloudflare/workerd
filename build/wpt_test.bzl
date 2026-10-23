@@ -119,7 +119,8 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         predictable = False,
         env = env,
         data = data,
-        tags = tags,
+        # The "wptserve" resource (see .bazelrc) runs at most one wptserve sidecar at a time.
+        tags = tags + (["resources:wptserve:1"] if start_server else []),
         **kwargs
     )
 
