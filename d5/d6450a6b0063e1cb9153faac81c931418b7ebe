@@ -1,5 +1,6 @@
 src/workerd/io/io-own-test.c++
-  s_9e291bb5d844d4::t_3325e2d5001b8a 264-286
+  s_9e291bb5d844d4::t_3325e2d5001b8a 264-283,285-286
+  s_9e291bb5d844d4::t_3c7df0d4ca283d 284
 ---
 {
   "schema_version": "authorship/3.0.0",

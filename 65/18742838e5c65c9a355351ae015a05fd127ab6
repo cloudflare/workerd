@@ -9,6 +9,14 @@ src/cloudflare/internal/test/hyperdrive/hyperdrive-test.js
   "base_commit_sha": "6518742838e5c65c9a355351ae015a05fd127ab6",
   "prompts": {},
   "sessions": {
+    "s_9e291bb5d844d4": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_ec5fadbe7ffe5kOVAieds3erCS",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Joaquim Silva <joaquim@cloudflare.com>"
+    },
     "s_c95635740bd55d": {
       "agent_id": {
         "tool": "opencode",
