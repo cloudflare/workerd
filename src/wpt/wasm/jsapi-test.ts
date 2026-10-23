@@ -59,8 +59,16 @@ export default {
   'global/value-get-set.any.js': {},
   'global/valueOf.any.js': {},
   'idlharness.any.js': {
-    comment: 'Loads resources/load_wasm.js, which the harness does not bind',
-    disabledTests: true,
+    comment:
+      'idl_test setup fetches /wasm/incrementer.wasm, which nothing serves, and then compiles it in a promise continuation, where workerd disallows Wasm code generation. ' +
+      'V8 makes WebAssembly.Module extend AbstractModuleSource (source phase imports), which wasm-js-api.idl does not describe. ' +
+      "workerd's WebAssembly.Instance shim (io/worker.c++) has a writable prototype property",
+    expectedFailures: [
+      'idl_test setup',
+      'Module interface: existence and properties of interface object',
+      'Module interface: existence and properties of interface prototype object',
+      'Instance interface: existence and properties of interface prototype object',
+    ],
   },
   'instance/constructor-bad-imports.any.js': {},
   'instance/constructor-caching.any.js': {},
