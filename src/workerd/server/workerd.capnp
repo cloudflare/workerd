@@ -857,6 +857,11 @@ struct Worker {
   # If not set, `ctx.access.getIdentity()` resolves to `undefined` (even when `accessBlobHeader`
   # is configured and `ctx.access.aud` is available).
 
+  oidcTokenService @21 :ServiceDesignator;
+  # Trusted local-development token broker. Receives POST /token with a JSON object containing
+  # an optional audience; returns a compact JWT as text/plain. It is not a Worker binding or
+  # global outbound. Only configure this for authenticated local development, never cloud identity.
+
   workflowsEngine @20 :WorkflowsEngine;
   # the externally-supplied service responsible for running Workflows defined in this worker
 }

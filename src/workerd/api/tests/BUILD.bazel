@@ -1657,3 +1657,9 @@ wd_cli_test(
         "//src/workerd/server:workerd",
     ],
 )
+
+wd_test(
+    src = "oidc-local-test.wd-test",
+    args = ["--experimental"],
+    data = ["oidc-local-test.js"],
+)

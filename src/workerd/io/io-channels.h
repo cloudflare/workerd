@@ -137,13 +137,15 @@ class IoChannelFactory: public virtual kj::Refcounted {
     // Omission selects https://workers.cloudflare.com/accounts/<public account ID>.
     kj::Maybe<kj::String> audience;
     OidcSubject subject;
+    bool explicitSubject = false;
   };
 
   // Protected host channel, independent of global fetch and customer-configured bindings.
   // The host must derive account, Worker, executing version, and (for object subjects) namespace
   // and object IDs from trusted state belonging to the executing workload, never its caller.
-  // It must reject missing identity metadata, local/remote development sessions, Version URLs, and dynamic workloads, disallowed subject
-  // modes, and unauthorized or rate-limited issuance. It signs five-minute RS256 tokens without
+  // Cloud issuance must reject missing identity metadata, development sessions, Version URLs,
+  // dynamic workloads, disallowed subject modes, and unauthorized or rate-limited issuance.
+  // A local development broker must authenticate the developer and issue only local identities. It signs five-minute RS256 tokens without
   // exposing keys to customer code. Any cache must include the full identity, version, audience,
   // subject mode, and issuance permissions. The audience must never be fetched.
   // The default rejects issuance; embedding runtimes opt in by overriding this method.

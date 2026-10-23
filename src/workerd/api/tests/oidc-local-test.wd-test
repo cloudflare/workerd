@@ -1,0 +1,18 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "test", worker = (
+      compatibilityFlags = ["nodejs_compat", "rpc", "workers_oidc"],
+      modules = [(name = "worker", esModule = embed "oidc-local-test.js")],
+      oidcTokenService = (name = "broker", entrypoint = "Broker"),
+      durableObjectNamespaces = [(className = "LocalObject", uniqueKey = "oidc-local")],
+      durableObjectStorage = (inMemory = void),
+      bindings = [(name = "objects", durableObjectNamespace = "LocalObject")],
+    )),
+    (name = "broker", worker = (
+      compatibilityFlags = ["nodejs_compat", "rpc"],
+      modules = [(name = "worker", esModule = embed "oidc-local-test.js")],
+    )),
+  ],
+);

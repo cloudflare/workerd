@@ -14,6 +14,7 @@ jsg::Promise<kj::String> OidcContext::getToken(jsg::Lock& js, jsg::Optional<Toke
   auto subject = context.getActor() == kj::none ? IoChannelFactory::OidcSubject::WORKER
                                                 : IoChannelFactory::OidcSubject::DURABLE_OBJECT;
   kj::Maybe<kj::String> audience;
+  bool explicitSubject = false;
 
   KJ_IF_SOME(opts, options) {
     KJ_IF_SOME(option, opts.audience) {
@@ -29,6 +30,7 @@ jsg::Promise<kj::String> OidcContext::getToken(jsg::Lock& js, jsg::Optional<Toke
       audience = kj::mv(value);
     }
     KJ_IF_SOME(option, opts.subject) {
+      explicitSubject = true;
       auto string = JSG_REQUIRE_NONNULL(option.getHandle(js).tryCast<jsg::JsString>(), TypeError,
           "OIDC subject must be a string.");
       JSG_REQUIRE(
@@ -46,7 +48,7 @@ jsg::Promise<kj::String> OidcContext::getToken(jsg::Lock& js, jsg::Optional<Toke
 
   return context.awaitIo(js,
       context.getIoChannelFactory().getOidcToken(
-          {.audience = kj::mv(audience), .subject = subject}));
+          {.audience = kj::mv(audience), .subject = subject, .explicitSubject = explicitSubject}));
 }
 
 }  // namespace workerd::api

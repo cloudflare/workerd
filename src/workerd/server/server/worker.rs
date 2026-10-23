@@ -75,6 +75,7 @@ pub struct PendingLink {
     pub storage: Option<String>,
     /// `accessBindingService`: the worker whose entrypoint receives the request's Access identity.
     pub access_binding: Option<Designator>,
+    pub oidc_token_service: Option<Designator>,
 }
 
 /// The I/O channel table of a linked worker: what each channel number its bindings hold reaches.
@@ -95,6 +96,7 @@ pub struct LinkedChannels {
     /// Indexed by actor class channel less `first_actor_class`.
     pub actor_class: Vec<Rc<dyn ActorClass>>,
     pub cache: Option<Rc<dyn Channel>>,
+    pub oidc_token_service: Option<Rc<dyn Channel>>,
     pub tails: Vec<Rc<dyn Channel>>,
     pub streaming_tails: Vec<Rc<dyn Channel>>,
     pub worker_loaders: Vec<Rc<WorkerLoaderNamespace>>,
@@ -344,6 +346,7 @@ impl WorkerService {
                 first_actor_class: info.env_actor_classes,
                 actor_class,
                 cache: None,
+                oidc_token_service: None,
                 tails: Vec::new(),
                 streaming_tails: Vec::new(),
                 worker_loaders: Vec::new(),
@@ -415,6 +418,15 @@ fn pending_link(
     } else {
         None
     };
+    let oidc_token_service = if conf.has_oidc_token_service() {
+        Some(Designator::from_reader(
+            conf.get_oidc_token_service()?,
+            "Worker oidcTokenService".to_owned(),
+            &mut errors,
+        )?)
+    } else {
+        None
+    };
     for error in errors {
         report.service_error(name, error);
     }
@@ -427,6 +439,7 @@ fn pending_link(
         streaming_tails,
         storage,
         access_binding,
+        oidc_token_service,
     })
 }
 
@@ -1031,6 +1044,14 @@ impl ChannelFactory {
         Ok(SubrequestChannel::new(cache.ok_or_else(|| {
             kj::failed!("jsg.Error: No Cache was configured")
         })?))
+    }
+
+    pub(crate) fn oidc_token_channel(&self) -> Result<Box<SubrequestChannel>> {
+        Ok(SubrequestChannel::new(
+            self.0.oidc_token_service.clone().ok_or_else(|| {
+                kj::failed!("jsg.Error: OIDC token issuance is not supported by this runtime")
+            })?,
+        ))
     }
 
     pub(crate) fn access_binding_channel(&self) -> KjMaybe<u32> {

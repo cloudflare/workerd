@@ -1144,6 +1144,7 @@ impl Server {
         }
 
         let cache = pending.cache_api_outbound.as_ref().map(lookup);
+        let oidc_token_service = pending.oidc_token_service.as_ref().map(lookup);
 
         let storage_path = self.storage_path(name, pending.storage.as_deref());
 
@@ -1170,6 +1171,7 @@ impl Server {
                 actor,
                 actor_class,
                 cache,
+                oidc_token_service,
                 tails,
                 streaming_tails,
                 worker_loaders,
