@@ -1634,6 +1634,11 @@ wd_bench(
     data = ["text-encoder-bench.js"],
 )
 
+wd_bench(
+    src = "websocket-send-bench.wd-bench",
+    data = ["websocket-send-bench.js"],
+)
+
 # wd_bench() always passes --compat-date, so this runs `workerd bench` without it, to check that
 # workers that omit compatibilityDate get the newest date.
 wd_cli_test(
