@@ -115,9 +115,17 @@ impl SpanBuffer {
         }
     }
 
-    /// Records the status the worker set on an open span.
+    /// Records an explicit status on an open span. UNSET is ignored and OK is final.
     pub fn set_status(&mut self, span_id: u64, code: proto::StatusCode, message: String) {
         if let Some(span) = self.open.get_mut(&span_id) {
+            if code == proto::StatusCode::Unset
+                || span
+                    .status
+                    .as_ref()
+                    .is_some_and(|status| status.code == i32::from(proto::StatusCode::Ok))
+            {
+                return;
+            }
             span.status = Some(proto::Status {
                 message,
                 code: code.into(),
@@ -609,6 +617,81 @@ mod tests {
             Some(&string("exceededCpu"))
         );
         assert!(root.parent_span_id.is_empty());
+    }
+
+    #[test]
+    fn unset_does_not_clear_an_explicit_error() {
+        let mut buffer = buffer();
+        assert!(buffer.open(ROOT, 0, "mine".to_owned(), T0));
+        buffer.set_status(ROOT, StatusCode::Error, "first error".to_owned());
+        buffer.set_status(ROOT, StatusCode::Error, "second error".to_owned());
+        buffer.set_status(ROOT, StatusCode::Unset, String::new());
+
+        let batch = buffer.close(ROOT, T0, Attributes::default()).unwrap();
+        let request = decode(&batch);
+        let span = named(&request, "mine");
+        assert_eq!(status_code(span), StatusCode::Error);
+        assert_eq!(span.status.as_ref().unwrap().message, "second error");
+    }
+
+    #[test]
+    fn ok_is_final_for_explicit_status_updates() {
+        let mut buffer = buffer();
+        assert!(buffer.open(ROOT, 0, "root".to_owned(), T0));
+        for (id, code) in [(1, StatusCode::Error), (2, StatusCode::Unset)] {
+            assert!(buffer.open(id, ROOT, format!("after-ok-{id}"), T0));
+            buffer.set_status(id, StatusCode::Error, "temporary error".to_owned());
+            buffer.set_status(id, StatusCode::Ok, String::new());
+            buffer.set_status(id, code, "ignored".to_owned());
+            assert!(buffer.close(id, T0, Attributes::default()).is_none());
+        }
+
+        let batch = buffer.close(ROOT, T0, Attributes::default()).unwrap();
+        let request = decode(&batch);
+        for name in ["after-ok-1", "after-ok-2"] {
+            let span = named(&request, name);
+            assert_eq!(status_code(span), StatusCode::Ok);
+            assert!(span.status.as_ref().unwrap().message.is_empty());
+        }
+    }
+
+    #[test]
+    fn explicit_error_messages_take_precedence_over_recorded_exceptions() {
+        let mut buffer = buffer();
+        assert!(buffer.open(ROOT, 0, "root".to_owned(), T0));
+        for (id, exception_first) in [(1, false), (2, true)] {
+            assert!(buffer.open(id, ROOT, format!("explicit-error-{id}"), T0));
+            if !exception_first {
+                buffer.set_status(id, StatusCode::Error, "user description".to_owned());
+            }
+            buffer.add_exception(
+                id,
+                T0,
+                "Error".to_owned(),
+                "exception message".to_owned(),
+                None,
+            );
+            if exception_first {
+                buffer.set_status(id, StatusCode::Error, "user description".to_owned());
+            }
+            assert!(buffer.close(id, T0, Attributes::default()).is_none());
+        }
+
+        let batch = buffer.close(ROOT, T0, Attributes::default()).unwrap();
+        let request = decode(&batch);
+        for name in ["explicit-error-1", "explicit-error-2"] {
+            let span = named(&request, name);
+            assert_eq!(status_code(span), StatusCode::Error);
+            assert_eq!(span.status.as_ref().unwrap().message, "user description");
+            let [exception] = span.events.as_slice() else {
+                panic!("expected one exception event");
+            };
+            assert_eq!(exception.name, "exception");
+            assert_eq!(
+                attribute(&exception.attributes, "exception.message"),
+                Some(&string("exception message"))
+            );
+        }
     }
 
     #[test]
