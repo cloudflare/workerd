@@ -34,6 +34,33 @@ fn validate_constructor_rejects_non_self_return() {
 }
 
 #[test]
+fn validate_constructor_accepts_result_of_self() {
+    for method in [
+        parse_quote! { fn constructor() -> Result<Self, jsg::Error> { todo!() } },
+        parse_quote! { fn constructor() -> jsg::Result<Self> { todo!() } },
+        parse_quote! { fn constructor() -> std::result::Result<Self, MyError> { todo!() } },
+    ] {
+        assert!(validate_constructor(&method).is_none());
+        assert_eq!(constructor_return(&method), ConstructorReturn::Fallible);
+    }
+    let method: syn::ImplItemFn = parse_quote! { fn constructor() -> Self { todo!() } };
+    assert_eq!(constructor_return(&method), ConstructorReturn::Infallible);
+}
+
+#[test]
+fn validate_constructor_rejects_result_of_other_type() {
+    for method in [
+        parse_quote! { fn constructor() -> Result<String, jsg::Error> { todo!() } },
+        parse_quote! { fn constructor() -> Option<Self> { todo!() } },
+        parse_quote! { fn constructor() -> Result { todo!() } },
+        parse_quote! { fn constructor() {} },
+    ] {
+        assert_eq!(constructor_return(&method), ConstructorReturn::Invalid);
+        assert!(validate_constructor(&method).is_some());
+    }
+}
+
+#[test]
 fn extract_constructor_params_no_lock() {
     // Plain constructor — no Lock param, two JS args.
     let method: syn::ImplItemFn = parse_quote! {

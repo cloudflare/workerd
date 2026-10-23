@@ -22,6 +22,7 @@ use crate::utils::extract_named_fields;
 use crate::utils::has_custom_trace_flag;
 use crate::utils::is_attr;
 use crate::utils::is_lock_ref;
+use crate::utils::is_result_type;
 use crate::utils::snake_to_camel;
 
 // Compile-time mirror of `jsg::PropertyKind` used to group annotated methods
@@ -267,18 +268,44 @@ fn validate_constructor(method: &syn::ImplItemFn) -> Option<proc_macro2::TokenSt
         });
     }
 
-    let returns_self = matches!(&method.sig.output,
-        syn::ReturnType::Type(_, ty) if matches!(&**ty,
-            syn::Type::Path(p) if p.path.is_ident("Self")
-        )
-    );
-    if !returns_self {
+    if constructor_return(method) == ConstructorReturn::Invalid {
         return Some(quote! {
-            compile_error!("#[jsg_constructor] must return Self");
+            compile_error!("#[jsg_constructor] must return Self or Result<Self, E>");
         });
     }
 
     None
+}
+
+/// What a `#[jsg_constructor]` method returns.
+#[derive(Debug, PartialEq, Eq)]
+enum ConstructorReturn {
+    /// `Self`.
+    Infallible,
+    /// `Result<Self, E>`, under any path ending in `Result`.
+    Fallible,
+    /// Anything else, which is not a valid constructor.
+    Invalid,
+}
+
+fn constructor_return(method: &syn::ImplItemFn) -> ConstructorReturn {
+    let syn::ReturnType::Type(_, ty) = &method.sig.output else {
+        return ConstructorReturn::Invalid;
+    };
+    let is_self = |ty: &syn::Type| matches!(ty, syn::Type::Path(p) if p.path.is_ident("Self"));
+    if is_self(ty) {
+        return ConstructorReturn::Infallible;
+    }
+    if is_result_type(ty)
+        && let syn::Type::Path(p) = &**ty
+        && let Some(segment) = p.path.segments.last()
+        && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+        && let Some(syn::GenericArgument::Type(ok)) = args.args.first()
+        && is_self(ok)
+    {
+        return ConstructorReturn::Fallible;
+    }
+    ConstructorReturn::Invalid
 }
 
 /// Extracts constructor argument unwrap statements and argument expressions.
@@ -362,12 +389,26 @@ fn generate_constructor_registration(
             }
 
             let rust_method_name = &method.sig.ident;
+            let call = quote! { #self_ty::#rust_method_name };
 
             let (has_lock_param, unwraps, arg_exprs) = extract_constructor_params(method);
             let lock_arg = if has_lock_param {
                 quote! { &mut *lock, }
             } else {
                 quote! {}
+            };
+            let construct = if constructor_return(method) == ConstructorReturn::Fallible {
+                quote! {
+                    let resource = match #call(#lock_arg #(#arg_exprs),*) {
+                        Ok(resource) => resource,
+                        Err(err) => {
+                            lock.throw_exception(&err.into());
+                            return;
+                        }
+                    };
+                }
+            } else {
+                quote! { let resource = #call(#lock_arg #(#arg_exprs),*); }
             };
 
             quote! {
@@ -387,7 +428,7 @@ fn generate_constructor_registration(
 
                         #(#unwraps)*
 
-                        let resource = #self_ty::#rust_method_name(#lock_arg #(#arg_exprs),*);
+                        #construct
                         let rc = jsg::Rc::new(resource);
                         rc.attach_to_this(args);
                     }),

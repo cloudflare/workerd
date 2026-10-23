@@ -122,8 +122,9 @@ impl WebSocket {
 
 ## `#[jsg_constructor]`
 
-Marks a **static** method (no `self` receiver, returns `Self`) as the JavaScript
-constructor. Only one per impl block is allowed. Without it, `new MyClass()` throws
+Marks a **static** method (no `self` receiver, returns `Self` or `Result<Self, E>`) as the
+JavaScript constructor. An `Err` is converted with `Into<jsg::Error>` and thrown, as for
+`#[jsg_method]`. Only one per impl block is allowed. Without it, `new MyClass()` throws
 `Illegal constructor`. An optional first parameter of `&mut Lock` is passed the
 isolate lock and is not counted as a JavaScript argument. Calling the constructor without
 `new` (`MyClass()`, `MyClass.call(obj)`) throws a `TypeError`, as in C++ JSG.
