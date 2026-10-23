@@ -200,6 +200,10 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
   return ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(kj::mv(value)).IsEmpty();
 }
 
+bool isolates_share_group(Isolate* a, Isolate* b) {
+  return a->GetGroup() == b->GetGroup();
+}
+
 }  // namespace rust::jsg_test
 
 }  // namespace workerd

@@ -150,6 +150,10 @@ bool local_eq(const Local& lhs, const Local& rhs) {
   return local_as_ref_from_ffi<v8::Value>(lhs) == local_as_ref_from_ffi<v8::Value>(rhs);
 }
 
+bool local_is_compatible_with_isolate(Isolate* isolate, const Local& value) {
+  return local_as_ref_from_ffi<v8::Data>(value)->IsCompatibleWithIsolate(isolate);
+}
+
 bool local_is_string(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsString();
 }
