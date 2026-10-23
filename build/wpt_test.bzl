@@ -108,8 +108,9 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         # blobs emitted by the WPT harness and break tools/cross/wpt_logs.py parsing.
         predictable = False,
         data = data,
-        # WPT tests are not supported in RBE so far
-        tags = tags + ["no-remote-exec"],
+        # WPT tests are not supported in RBE so far. The "wptserve" resource (see .bazelrc) runs
+        # at most one wptserve sidecar at a time.
+        tags = tags + ["no-remote-exec"] + (["resources:wptserve:1"] if start_server else []),
         **kwargs
     )
 

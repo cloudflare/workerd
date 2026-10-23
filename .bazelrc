@@ -14,6 +14,9 @@ build:regenerate-snapshots --//build/config:python_snapshots=false
 # is less restrictive than marking such tests as "exclusive" since we can still run unrelated tests
 # at the same time.
 test --local_resources=socket=1
+# Tests that start a wptserve sidecar (wpt_test with start_server = True) are tagged
+# "resources:wptserve:1", so that at most one wptserve runs at a time.
+test --local_resources=wptserve=1
 
 # use lower test timeouts: https://bazel.build/reference/test-encyclopedia#role-test-runner
 # corresponds to small,medium,large,enormous tests (medium is default)
