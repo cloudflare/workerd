@@ -1604,16 +1604,13 @@ KJ_TEST("ReadableStreamNativeSource instances carry the kNativeSource marker") {
 // =======================================================================================
 // pumpTo of TypeScript-backed streams
 
-// Builds a TestFixture in which the TypeScript streams implementation is active: the
-// typescript_implemented_streams compat flag plus the per-isolate bootstrap autogate.
+// Builds a TestFixture with the typescript_implemented_streams compat flag enabled, so the
+// TypeScript streams implementation is active.
 TestFixture makeTsStreamsFixture() {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setTypeScriptImplementedStreams(true);
-  return TestFixture({
-    .featureFlags = flags.asReader(),
-    .autogates = kj::arr("per-isolate-javascript-bootstrap"_kj),
-  });
+  return TestFixture({.featureFlags = flags.asReader()});
 }
 
 KJ_TEST("RPC readable stream length is available before its push resolves") {
