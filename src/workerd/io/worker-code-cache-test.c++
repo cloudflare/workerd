@@ -9,6 +9,7 @@
 #include <workerd/io/worker.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/setup.h>
+#include <workerd/server/workerd-api.h>
 #include <workerd/tests/test-fixture.h>
 
 #include <kj/map.h>
@@ -256,6 +257,48 @@ KJ_TEST("A Worker with the new registry consumes a lookup prepared outside the s
     KJ_EXPECT(env.claimCount() == 0);
     KJ_EXPECT(observer->generated == initialGenerated + 1);
     KJ_EXPECT(observer->found == initialFound + i);
+  }
+}
+
+KJ_TEST("Worker registry construction forwards the compile hint production option") {
+  using Registry = jsg::modules::ModuleRegistry;
+  using Options = Registry::Builder::Options;
+  constexpr kj::StringPtr code =
+      "function used() { return 1; } used(); export default { fetch() {} };"_kj;
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setNewModuleRegistry(true);
+  api::pyodide::PythonConfig pythonConfig{};
+
+  for (auto options: {Options::NONE, Options::PRODUCE_COMPILE_HINTS}) {
+    Worker::Script::ModulesSource source{
+      .mainModule = "main"_kj,
+      .modules = kj::arr(Worker::Script::Module{
+        .name = "main"_kj,
+        .content = Worker::Script::EsModule{.body = code},
+      }),
+      .isPython = false,
+    };
+    auto registry = server::WorkerdApi::newWorkerdModuleRegistry(
+        source, flags.asReader(), pythonConfig, "file:///"_url, {}, kj::none, kj::none, options);
+    TestFixture fixture({
+      .featureFlags = flags.asReader(),
+      .mainModuleSource = code,
+      .useRealTimers = false,
+      .newModuleRegistry = kj::mv(registry),
+    });
+    fixture.runInIoContext([&](const TestFixture::Environment& env) {
+      auto hints = Registry::getProducedCompileHints(env.js);
+      if (options == Options::NONE) {
+        KJ_EXPECT(hints.size() == 0);
+      } else {
+        KJ_ASSERT(hints.size() == 1, hints.size());
+        KJ_EXPECT(hints[0].specifier.getHref() == "file:///main"_kj);
+        KJ_ASSERT(hints[0].functionPositions.size() == 1);
+        // V8 reports the opening parenthesis of `used`.
+        KJ_EXPECT(hints[0].functionPositions[0] == 13);
+      }
+    });
   }
 }
 

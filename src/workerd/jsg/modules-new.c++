@@ -15,6 +15,7 @@
 #include <kj/mutex.h>
 #include <kj/table.h>
 
+#include <algorithm>
 #include <span>
 
 namespace workerd::jsg::modules {
@@ -228,6 +229,14 @@ class EsModule final: public Module {
     static constexpr bool isWasm = false;
     v8::ScriptOrigin origin(js.str(id().getHref()), resourceLineOffset, resourceColumnOffset,
         resourceIsSharedCrossOrigin, scriptId, {}, resourceIsOpaque, isWasm, true);
+
+    // V8 cannot record hints while consuming a code cache. Keep production separate from both
+    // the isolate's cache and the cache shared by module definitions across isolates.
+    if (producesCompileHints()) {
+      v8::ScriptCompiler::Source source(newExternalString(js, getEncodedSource().repr), origin);
+      return v8::ScriptCompiler::CompileModule(
+          js.v8Isolate, &source, v8::ScriptCompiler::kProduceCompileHints);
+    }
 
     // A module with a code cache key uses the isolate's code cache if there is one, else the slot
     // below.
@@ -1153,6 +1162,29 @@ class IsolateModuleRegistry final {
     return inner.getBundleBase();
   }
 
+  kj::Array<ModuleRegistry::ProducedCompileHints> getProducedCompileHints(Lock& js) {
+    kj::HashMap<const Module*, kj::Vector<int>> hints;
+    for (auto& entry: instantiations) {
+      if (!entry.module.producesCompileHints()) continue;
+      auto& positions = hints.findOrCreate(
+          &entry.module, [&]() -> decltype(hints)::Entry { return {&entry.module, {}}; });
+      positions.addAll(jsg::getProducedCompileHints(js, entry.key.getHandle(js)));
+    }
+    kj::Vector<ModuleRegistry::ProducedCompileHints> result;
+    for (auto& entry: hints) {
+      auto& positions = entry.value;
+      if (positions.size() > 1) {
+        std::sort(positions.begin(), positions.end());
+        positions.truncate(std::unique(positions.begin(), positions.end()) - positions.begin());
+      }
+      result.add(ModuleRegistry::ProducedCompileHints{
+        .specifier = entry.key->id().clone(),
+        .functionPositions = positions.releaseAsArray(),
+      });
+    }
+    return result.releaseAsArray();
+  }
+
  private:
   const ModuleRegistry& inner;
   const CompilationObserver& observer;
@@ -2065,6 +2097,10 @@ const jsg::Url processModuleName(kj::StringPtr name, const jsg::Url& base) {
 
 }  // namespace
 
+Url ModuleRegistry::resolveModuleName(Lock& js, kj::StringPtr name) {
+  return processModuleName(name, IsolateModuleRegistry::from(js.v8Isolate).getBundleBase());
+}
+
 ModuleBundle::BundleBuilder& ModuleBundle::BundleBuilder::addSyntheticModule(kj::StringPtr name,
     EvaluateCallback callback,
     kj::Array<kj::String> namedExports,
@@ -2485,6 +2521,15 @@ bool Module::isMain() const {
 
 bool Module::isWasm() const {
   return (flags_ & Flags::WASM) == Flags::WASM;
+}
+
+bool Module::producesCompileHints() const {
+  return type() == Type::BUNDLE && isEsm() &&
+      (flags_ & Flags::PRODUCE_COMPILE_HINTS) == Flags::PRODUCE_COMPILE_HINTS;
+}
+
+kj::Array<ModuleRegistry::ProducedCompileHints> ModuleRegistry::getProducedCompileHints(Lock& js) {
+  return IsolateModuleRegistry::from(js.v8Isolate).getProducedCompileHints(js);
 }
 
 bool Module::evaluateContext(const ResolveContext& context) const {

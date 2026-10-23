@@ -491,6 +491,87 @@ KJ_TEST("New registry: isolates with separate registries share the store") {
   KJ_EXPECT(observer.generated == 2);
 }
 
+kj::Arc<modules::ModuleRegistry> newLazyModuleRegistry(
+    ProduceCompileHints produceHints, modules::ModuleRegistry::Builder::Options options) {
+  const auto base = "file:///"_url;
+  modules::ModuleRegistry::Builder builder(base, options);
+  modules::ModuleBundle::BundleBuilder bundle(base);
+  auto flags = modules::Module::Flags::ESM;
+  if (produceHints) flags = flags | modules::Module::Flags::PRODUCE_COMPILE_HINTS;
+  bundle.addEsmModule(
+      "main", jsg::copyToArc(LAZY_MODULE), flags, builder.newCodeCacheKey(LAZY_MODULE));
+  return builder.add(bundle.finish()).finish();
+}
+
+void evalNewRegistry(jsg::Lock& js,
+    const modules::ModuleRegistry& registry,
+    const CompilationObserver& observer,
+    ProduceCompileHints produceHints) {
+  auto attached = registry.attachToIsolate(js, observer);
+  auto ns = KJ_ASSERT_NONNULL(modules::ModuleRegistry::tryResolveModuleNamespace(js, "main"));
+  KJ_EXPECT(KJ_ASSERT_NONNULL(ns.tryCast<JsObject>()).get(js, "value").toString(js) == "6");
+  auto hints = modules::ModuleRegistry::getProducedCompileHints(js);
+  if (produceHints) {
+    KJ_ASSERT(hints.size() == 1, hints.size());
+    KJ_EXPECT(hints[0].specifier.getHref() == "file:///main"_kj);
+    KJ_ASSERT(hints[0].functionPositions.size() == 1);
+    // The opening parenthesis of `compute` in LAZY_MODULE.
+    KJ_EXPECT(hints[0].functionPositions[0] == 16);
+  } else {
+    KJ_EXPECT(hints.size() == 0);
+  }
+}
+
+KJ_TEST("New registry: producing hints bypasses an empty or populated code cache store") {
+  using Options = modules::ModuleRegistry::Builder::Options;
+  auto store = newStore();
+  CountingObserver observer;
+  auto registry = newLazyModuleRegistry(ProduceCompileHints::YES, Options::CODE_CACHE_KEYS);
+  KJ_ASSERT(registry->getBundleCodeCacheKeys().size() == 1);
+  auto eval = [&](const modules::ModuleRegistry& registry, ProduceCompileHints produceHints) {
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+      evalNewRegistry(js, registry, observer, produceHints);
+    }, UseNewModuleRegistry::YES);
+  };
+
+  eval(*registry, ProduceCompileHints::YES);
+  KJ_EXPECT(store->state.lockShared()->lookups == 0);
+  KJ_EXPECT(store->state.lockShared()->inserts == 0);
+  KJ_EXPECT(observer.generated == 0);
+
+  // Ordinary compilation populates the same source key before the next production isolate.
+  auto normal = newLazyModuleRegistry(ProduceCompileHints::NO, Options::CODE_CACHE_KEYS);
+  eval(*normal, ProduceCompileHints::NO);
+  KJ_EXPECT(store->state.lockShared()->entries.size() == 1);
+  KJ_EXPECT(observer.generated == 1);
+  eval(*registry, ProduceCompileHints::YES);
+
+  auto lock = store->state.lockShared();
+  KJ_EXPECT(lock->lookups == 1);
+  KJ_EXPECT(lock->hits == 0);
+  KJ_EXPECT(lock->inserts == 1);
+  KJ_EXPECT(lock->claimed.size() == 0);
+  KJ_EXPECT(observer.found == 0);
+  KJ_EXPECT(observer.generated == 1);
+}
+
+KJ_TEST("New registry: producing hints does not populate the shared module cache") {
+  auto store = newStore();
+  CountingObserver observer;
+  auto registry = newLazyModuleRegistry(
+      ProduceCompileHints::YES, modules::ModuleRegistry::Builder::Options::NONE);
+  KJ_ASSERT(registry->getBundleCodeCacheKeys().size() == 0);
+
+  for (auto i KJ_UNUSED: kj::zeroTo(2)) {
+    withIsolate(kj::atomicAddRef(*store), observer, Defer::YES, [&](jsg::Lock& js) {
+      evalNewRegistry(js, *registry, observer, ProduceCompileHints::YES);
+    }, UseNewModuleRegistry::YES);
+  }
+  KJ_EXPECT(store->state.lockShared()->lookups == 0);
+  KJ_EXPECT(observer.found == 0);
+  KJ_EXPECT(observer.generated == 0);
+}
+
 KJ_TEST("New registry: a registry lists the keys of its bundle modules") {
   const auto base = "file:///"_url;
   constexpr auto code = "export default 'abc';"_kj;
