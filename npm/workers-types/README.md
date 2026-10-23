@@ -40,6 +40,11 @@ The Cloudflare Workers runtime manages backwards compatibility through the use o
 
 It's not always possible (or desirable) to modify the `tsconfig.json` settings for a project to include all the Cloudflare Workers types. For use cases like that, this package provides importable versions of its types, which are usable with no additional `tsconfig.json` setup. For example:
 
+These exports are **types only**. Use `import type`, as shown below, so TypeScript
+can remove the import at build time. This package does not export runtime values:
+`import { Response } from "@cloudflare/workers-types"` cannot provide a constructor
+for `new Response()`.
+
 ```ts
 import type { Request as WorkerRequest, ExecutionContext } from "@cloudflare/workers-types"
 
@@ -49,6 +54,12 @@ export default {
   }
 }
 ```
+
+The `Response` constructor in this example is a global supplied by the runtime.
+Type-only imports do not declare that global for the TypeScript compiler. For a
+Worker-only project, use `wrangler types` or the `tsconfig.json` setup above to
+declare the runtime globals. Importable types are useful when combining Workers
+types with another typing environment, such as a project that also uses `lib.dom`.
 
 
 ### Using bindings
