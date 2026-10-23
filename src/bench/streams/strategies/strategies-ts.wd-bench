@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+using StrategiesModules = import "strategies-modules.capnp";
+
+# Runs the queuing strategy benchmarks against the TypeScript implementation
+# (typescript_implemented_streams + the per-isolate bootstrap autogate),
+# with byte-for-byte the same modules as strategies-cpp.wd-bench.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-strategies-ts",
+      worker = (
+        modules = StrategiesModules.modules,
+        compatibilityFlags = ["typescript_implemented_streams"],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);

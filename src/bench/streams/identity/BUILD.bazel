@@ -1,0 +1,18 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# The identity stream benchmarks run the same modules under two configs:
+# identity-cpp against the legacy C++ implementation, identity-ts against
+# the TypeScript implementation.
+
+identity_bench_srcs = glob(["*.js"]) + ["identity-modules.capnp"]
+
+wd_bench(
+    src = "identity-cpp.wd-bench",
+    data = identity_bench_srcs,
+)
+
+wd_bench(
+    src = "identity-ts.wd-bench",
+    args = ["--experimental"],
+    data = identity_bench_srcs,
+)

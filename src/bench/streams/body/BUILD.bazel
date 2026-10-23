@@ -1,0 +1,18 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# The body benchmarks run the same modules under two configs: body-cpp
+# against the legacy C++ implementation, body-ts against the TypeScript
+# implementation.
+
+body_bench_srcs = glob(["*.js"]) + ["body-modules.capnp"]
+
+wd_bench(
+    src = "body-cpp.wd-bench",
+    data = body_bench_srcs,
+)
+
+wd_bench(
+    src = "body-ts.wd-bench",
+    args = ["--experimental"],
+    data = body_bench_srcs,
+)
