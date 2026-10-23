@@ -3,7 +3,7 @@
 load("@workerd//:build/lint_test.bzl", "lint_test")
 load("@workerd//:build/wd_test.bzl", "wd_cli_test")
 
-_WORKERD = "//src/workerd/server:workerd_cross"
+_WORKERD = "//src/workerd/server:workerd"
 
 def wd_bench(
         src,

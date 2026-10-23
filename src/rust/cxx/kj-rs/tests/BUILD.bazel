@@ -26,10 +26,6 @@ rust_library(
         ":test-own-bridge",
         ":test-promises",
     ],
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         # TODO(cleanup): Why isn't :cxx transitive?
         "//src/rust/cxx",

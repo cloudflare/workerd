@@ -1334,8 +1334,8 @@ export let disposal = {
       await env.MyService.leakButReturnPlainObject(counter);
 
       // Give a chance for disposal to happen. When running with a real socket, this involves
-      // non-deterministic scheduling, and it can be relatively slower when running under ASAN,
-      // QEMU, etc. so we'll try to dynamically adjust how much time we wait, up to 10s.
+      // non-deterministic scheduling, and it can be relatively slower when running under ASAN etc.
+      // so we'll try to dynamically adjust how much time we wait, up to 10s.
       for (let i = 0; i < 1000; i++) {
         if (counter.disposed) break;
         await scheduler.wait(10);
