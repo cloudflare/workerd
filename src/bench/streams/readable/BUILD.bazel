@@ -1,0 +1,18 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# The readable benchmarks run the same modules under two configs:
+# readable-cpp against the legacy C++ implementation, readable-ts against
+# the TypeScript implementation.
+
+readable_bench_srcs = glob(["*.js"]) + ["readable-modules.capnp"]
+
+wd_bench(
+    src = "readable-cpp.wd-bench",
+    data = readable_bench_srcs,
+)
+
+wd_bench(
+    src = "readable-ts.wd-bench",
+    args = ["--experimental"],
+    data = readable_bench_srcs,
+)
