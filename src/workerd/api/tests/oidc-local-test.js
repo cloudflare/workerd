@@ -5,6 +5,7 @@
 import { strict as assert } from 'node:assert';
 import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
 
+const maximumEscapedAudience = '\0'.repeat(2048);
 const token = 'eyJhbGciOiJSUzI1NiJ9.eyJleGVjdXRpb24iOiJsb2NhbCJ9.c2ln';
 
 export class Broker extends WorkerEntrypoint {
@@ -36,9 +37,11 @@ export class Broker extends WorkerEntrypoint {
         break;
       default:
         assert.ok(
-          ['https://api.example.com/%22exact', 'quote\"\\newline\n雪'].includes(
-            options.audience
-          )
+          [
+            'https://api.example.com/%22exact',
+            maximumEscapedAudience,
+            'quote\"\\newline\n雪',
+          ].includes(options.audience)
         );
     }
     return new Response(token, { headers: { 'Content-Type': 'text/plain' } });
@@ -53,6 +56,10 @@ async function check(ctx) {
   );
   assert.equal(
     await ctx.oidc.getToken({ audience: 'quote\"\\newline\n雪' }),
+    token
+  );
+  assert.equal(
+    await ctx.oidc.getToken({ audience: maximumEscapedAudience }),
     token
   );
   for (const audience of ['error', 'large', 'invalid', 'wrong-type']) {
