@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-Usage: update-deps.py [dep_name]
+Usage: update-deps.py [dep_name_prefix [commit]]
+
+If commit is specified, it is used as the frozen commit for the dependency matching
+dep_name_prefix (which must match exactly one dependency). This allows updating a
+github_tarball or git_clone dependency to an arbitrary version. For github_tarball
+dependencies the commit may be any git ref (sha, short sha, tag, branch); for git_clone
+dependencies it must be a full commit sha.
 """
 
 import base64
@@ -20,7 +26,8 @@ from pathlib import Path
 
 import jsonc
 
-TARGET_FILTER = None if len(sys.argv) < 2 else sys.argv[1]
+TARGET_FILTER = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else None
+FREEZE_COMMIT = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else None
 
 SCRIPT_DIR = Path(__file__).parent
 if "BUILD_WORKSPACE_DIRECTORY" in os.environ:
@@ -188,11 +195,12 @@ GitHub API requests have a higher rate limit.
         ) from e
 
 
-def github_last_commit(repo):
+def github_last_commit(repo, ref=None):
     owner = repo["owner"]
     github_repo = repo["repo"]
-    branch = repo.get("branch", "master")
-    api_url = f"https://api.github.com/repos/{owner}/{github_repo}/commits/{branch}"
+    if ref is None:
+        ref = repo.get("branch", "master")
+    api_url = f"https://api.github.com/repos/{owner}/{github_repo}/commits/{ref}"
     commits = json.loads(github_urlopen(api_url).read())
     return commits["sha"]
 
@@ -272,6 +280,12 @@ def gen_github_tarball(repo):
 
     commit = github_last_commit(repo)
     if "freeze_commit" in repo:
+        # Resolve the frozen ref (which may be a short sha, tag or branch) to a full sha,
+        # since the strip prefix is derived from it.
+        if not re.fullmatch(r"[0-9a-f]{40}", repo["freeze_commit"]):
+            repo = repo | {
+                "freeze_commit": github_last_commit(repo, repo["freeze_commit"])
+            }
         if repo["freeze_commit"] != commit:
             print(
                 "frozen, update available ",
@@ -454,7 +468,7 @@ def gen_git_clone(repo):
             "sparse_checkout_patterns is not supported with use_bazel_dep"
         )
 
-    if "tag" in repo:
+    if "tag" in repo and "freeze_commit" not in repo:
         tag = repo["tag"]
         tag_ref = f"refs/tags/{tag}"
         ls_remote = subprocess.run(
@@ -480,25 +494,36 @@ def gen_git_clone(repo):
         # We used to clone the repository here to get a shallow_since timestamp, but based
         # on https://github.com/bazelbuild/bazel/issues/12857 it is unclear if this is
         # actually helpful.
-        ls_remote = subprocess.run(
-            ["git", "ls-remote", url, repo["branch"]], capture_output=True, text=True
-        )
-        ls_remote.check_returncode()
-        commit = ls_remote.stdout.strip().split()[0]
+        if "branch" in repo:
+            ls_remote = subprocess.run(
+                ["git", "ls-remote", url, repo["branch"]],
+                capture_output=True,
+                text=True,
+            )
+            ls_remote.check_returncode()
+            commit = ls_remote.stdout.strip().split()[0]
+        else:
+            commit = None
 
         if "freeze_commit" in repo:
             freeze_commit = repo["freeze_commit"]
-            if freeze_commit != commit:
+            if not re.fullmatch(r"[0-9a-f]{40}", freeze_commit):
+                raise UnsupportedException(
+                    f"git_clone freeze_commit must be a full commit sha: {freeze_commit}"
+                )
+            if commit is not None and freeze_commit != commit:
                 print(
                     "frozen, update available ",
-                    repo["freeze_commit"][:7],
+                    freeze_commit[:7],
                     " -> ",
                     commit[:7],
                     end="",
                 )
-                commit = freeze_commit
             else:
-                print(commit[:7], end="")
+                print(freeze_commit[:7], end="")
+            commit = freeze_commit
+        else:
+            print(commit[:7], end="")
 
         attrs = dict(
             remote=url,
@@ -639,6 +664,15 @@ def gen_repo_bzl(repo, current_dep):
         print("skipped")
         return current_dep
 
+    if FREEZE_COMMIT is not None:
+        if repo["type"] not in ("github_tarball", "git_clone"):
+            raise UnsupportedException(
+                f"Cannot freeze commit for repo type: {repo['type']}"
+            )
+        repo = repo | {"freeze_commit": FREEZE_COMMIT}
+        # The frozen sha256 corresponds to the configured commit, not the requested one.
+        repo.pop("freeze_sha256", None)
+
     content = gen_repo_str(repo)
     print()
     return content
@@ -732,8 +766,34 @@ Alternatively, install the gh CLI tool to save time <https://github.com/cli/cli#
         return sys.stdin.readline().strip("\n")
 
 
+def load_config(deps_file):
+    try:
+        with (SCRIPT_DIR / deps_file).open() as fp:
+            return jsonc.load(fp).data
+    except FileNotFoundError:
+        return None
+
+
+def check_freeze_commit_target():
+    """Ensure that the target filter matches exactly one dependency."""
+    if TARGET_FILTER is None:
+        raise SystemExit("A dependency name must be specified together with a commit")
+
+    matches = [
+        repo["name"]
+        for deps_file in ALL_DEPS
+        if (deps := load_config(deps_file)) is not None
+        for repo in deps["repositories"]
+        if repo["name"].startswith(TARGET_FILTER)
+    ]
+    if len(matches) != 1:
+        raise SystemExit(
+            f"'{TARGET_FILTER}' must match exactly one dependency when a commit is "
+            f"specified, matched: {matches}"
+        )
+
+
 def process_config(deps_file):
-    deps_path = SCRIPT_DIR / deps_file
     bzl_path = GEN_DIR / Path(deps_file).with_suffix(".MODULE.bazel").name
 
     # Create output directory if it doesn't exist
@@ -745,14 +805,15 @@ def process_config(deps_file):
     except FileNotFoundError:
         current_deps = {}
 
-    try:
-        with deps_path.open() as fp:
-            process_deps(jsonc.load(fp).data, current_deps, bzl_path)
-    except FileNotFoundError:
-        pass
+    deps = load_config(deps_file)
+    if deps is not None:
+        process_deps(deps, current_deps, bzl_path)
 
 
 def main():
+    if FREEZE_COMMIT is not None:
+        check_freeze_commit_target()
+
     global GITHUB_ACCESS_TOKEN
     GITHUB_ACCESS_TOKEN = read_access_token()
 
