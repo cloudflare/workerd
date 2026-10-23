@@ -1,7 +1,19 @@
+src/workerd/api/actor.h
+  s_c77095033a1105::t_4d6caaeedb4f79 419-428
 ---
 {
   "schema_version": "authorship/3.0.0",
   "git_ai_version": "1.6.10",
   "base_commit_sha": "afcbdc1e69e67248b84caea59f97e7439e145062",
-  "prompts": {}
+  "prompts": {},
+  "sessions": {
+    "s_c77095033a1105": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e9a984a51ffeLxK55Db4aJKHDK",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
 }

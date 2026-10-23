@@ -1,5 +1,5 @@
 src/workerd/api/tests/BUILD.bazel
-  s_9e291bb5d844d4::t_7441999a2701c8 1317-1320
+  s_9e291bb5d844d4::t_7441999a2701c8 1317-1320,1317-1322
   s_9e291bb5d844d4::t_d7cd4c31417715 1315-1316
 src/workerd/io/io-own.c++
   s_9e291bb5d844d4::t_f82f1c3261117d 73-80,83,85,87,91,93,95,138-139,187
@@ -17,14 +17,14 @@ src/workerd/io/io-own.c++
 src/workerd/io/compatibility-date.capnp
   s_9e291bb5d844d4::t_d72f5b62fc8597 601-604
 src/workerd/api/tests/actor-cross-context-promise-test.wd-test
-  s_9e291bb5d844d4::t_7743922d50ff7d 1-27
+  s_9e291bb5d844d4::t_7743922d50ff7d 1-27,1-14,16-27
 src/workerd/io/io-own.h
-  s_9e291bb5d844d4::t_d09e956509622f 95-105,120-122,127,154-158,161-167,169,180-181
+  s_9e291bb5d844d4::t_d09e956509622f 95-105,95-96,120-122,127,154-158,161-167,161-164,169,180-181
 src/workerd/io/io-context.c++
-  s_9e291bb5d844d4::t_49250c500e4768 399-405,1994-1995,1997-1998,2000-2016,2022-2035
+  s_9e291bb5d844d4::t_49250c500e4768 399-405,399,1994-1995,1997-1998,2000-2016,2000-2005,2016,2022-2035
   s_9e291bb5d844d4::t_4bbe36cbe81c04 2036-2038
 src/workerd/api/tests/actor-cross-context-promise-test.js
-  s_9e291bb5d844d4::t_59b67c615bb57a 1-262
+  s_9e291bb5d844d4::t_59b67c615bb57a 1-262,1-79,115-196,248-262
 ---
 {
   "schema_version": "authorship/3.0.0",

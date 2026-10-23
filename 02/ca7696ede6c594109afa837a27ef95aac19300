@@ -1,8 +1,8 @@
 src/workerd/api/BUILD.bazel
-  s_29743b6b20a528::t_8de84c29a766db 773,775-776,778-781
-  s_29743b6b20a528::t_3d5943db5e6ee9 773,775-776,796-799
-  s_6ba2030b43c23b::t_9df6589ed4dba4 773,775-776,796-799
-  s_756328791ab730::t_391b7acb8e0717 791,793-794,796-799
+  s_29743b6b20a528::t_8de84c29a766db 764,766-767,769-772,773,775-776,778-781
+  s_29743b6b20a528::t_3d5943db5e6ee9 764,766-767,773,775-776,796-799
+  s_6ba2030b43c23b::t_9df6589ed4dba4 764,766-767,773,775-776,796-799
+  s_756328791ab730::t_391b7acb8e0717 782,791,793-794,796-799
 patches/v8/0013-Implement-cross-request-context-promise-resolve-hand.patch
   s_7bd60b65ab037d::t_4d2875d8890c8b 55
 patches/v8/0006-Implement-Promise-Context-Tagging.patch
@@ -10,15 +10,15 @@ patches/v8/0006-Implement-Promise-Context-Tagging.patch
 patches/v8/0026-Implement-additional-Exception-construction-methods.patch
   s_7bd60b65ab037d::t_5b900f39d5838c 31
 src/workerd/io/observer.h
-  s_756328791ab730::t_c4e5cd55a6b43f 132-133
-  s_756328791ab730::t_fdaa89e5eb0a82 132-133
+  s_756328791ab730::t_c4e5cd55a6b43f 132-133,133
+  s_756328791ab730::t_fdaa89e5eb0a82 132-133,133
   s_f70c3d9c923e90::t_b3128ec2802e25 145
 src/workerd/api/actor.h
   s_e6ef9db3485b14::t_f3f14d94f350c0 352
 src/workerd/api/http.c++
   s_e6ef9db3485b14::t_3feb91b67196c4 1487
 src/workerd/api/http.h
-  s_1c76ae2bf94860::t_ffa7ca68915740 241-242
+  s_1c76ae2bf94860::t_ffa7ca68915740 238,241-242
 src/workerd/util/sqlite-kv.c++
   s_7d03d8f3981d9e::t_c8a563215ce649 108
 ---
