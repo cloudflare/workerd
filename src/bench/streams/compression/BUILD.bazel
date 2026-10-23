@@ -1,0 +1,18 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# The compression stream benchmarks run the same modules under two configs:
+# compression-cpp against the legacy C++ implementation, compression-ts
+# against the TypeScript implementation.
+
+compression_bench_srcs = glob(["*.js"]) + ["compression-modules.capnp"]
+
+wd_bench(
+    src = "compression-cpp.wd-bench",
+    data = compression_bench_srcs,
+)
+
+wd_bench(
+    src = "compression-ts.wd-bench",
+    args = ["--experimental"],
+    data = compression_bench_srcs,
+)
