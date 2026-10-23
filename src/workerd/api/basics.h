@@ -133,6 +133,14 @@ class Event: public jsg::Object {
   inline bool getReturnValue() const {
     return !getDefaultPrevented();
   }
+  // Per the spec, setting returnValue to false sets the canceled flag and setting it to true
+  // does nothing. Unlike preventDefault(), this honors the spec's cancelable check, so it has
+  // no effect on the non-cancelable events the runtime itself dispatches, such as FetchEvent.
+  inline void setReturnValue(bool value) {
+    if (!value && flags.cancelable) {
+      preventDefault();
+    }
+  }
 
   // We provide the timeStamp property for spec compliance but we force
   // the value to 0.0 always because we really don't want users to rely
@@ -175,7 +183,11 @@ class Event: public jsg::Object {
       JSG_READONLY_PROTOTYPE_PROPERTY(bubbles, getBubbles);
       JSG_READONLY_PROTOTYPE_PROPERTY(cancelable, getCancelable);
       JSG_READONLY_PROTOTYPE_PROPERTY(defaultPrevented, getDefaultPrevented);
-      JSG_READONLY_PROTOTYPE_PROPERTY(returnValue, getReturnValue);
+      if (flags.getPedanticWpt()) {
+        JSG_PROTOTYPE_PROPERTY(returnValue, getReturnValue, setReturnValue);
+      } else {
+        JSG_READONLY_PROTOTYPE_PROPERTY(returnValue, getReturnValue);
+      }
       if (flags.getPedanticWpt()) {
         JSG_READONLY_PROTOTYPE_PROPERTY(currentTarget, getCurrentTarget);
       } else {
@@ -202,7 +214,11 @@ class Event: public jsg::Object {
       JSG_READONLY_INSTANCE_PROPERTY(bubbles, getBubbles);
       JSG_READONLY_INSTANCE_PROPERTY(cancelable, getCancelable);
       JSG_READONLY_INSTANCE_PROPERTY(defaultPrevented, getDefaultPrevented);
-      JSG_READONLY_INSTANCE_PROPERTY(returnValue, getReturnValue);
+      if (flags.getPedanticWpt()) {
+        JSG_INSTANCE_PROPERTY(returnValue, getReturnValue, setReturnValue);
+      } else {
+        JSG_READONLY_INSTANCE_PROPERTY(returnValue, getReturnValue);
+      }
       if (flags.getPedanticWpt()) {
         JSG_READONLY_INSTANCE_PROPERTY(currentTarget, getCurrentTarget);
       } else {

@@ -711,7 +711,10 @@ wd_test(
 wd_test(
     src = "events-test.wd-test",
     args = ["--experimental"],
-    data = ["events-test.js"],
+    data = [
+        "events-pedantic-test.js",
+        "events-test.js",
+    ],
 )
 
 wd_test(
