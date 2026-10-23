@@ -9021,6 +9021,18 @@ MF-Access-Blob: {"app_aud":"test-aud-42"}
   conn.httpGet200("/", "no-access");
 }
 
+KJ_TEST("Server: OIDC binding requires a nonempty approved assignment selector") {
+  TestServer test(singleWorker(R"((
+    compatibilityDate = "2025-08-01",
+    modules = [(name = "main.js", esModule = "export default {}")],
+    bindings = [(name = "IDENTITY", oidc = "")]
+  ))"_kj));
+  test.server.allowExperimental();
+  test.expectErrors(R"(
+    service hello: Worker "hello"'s binding "IDENTITY": OIDC requires an assignment selector of 1–256 bytes.
+  )"_blockquote);
+}
+
 KJ_TEST("Server: ctx.access is undefined without accessBlobHeader config") {
   TestServer test(singleWorker(R"((
     compatibilityDate = "2025-08-01",

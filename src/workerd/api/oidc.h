@@ -8,28 +8,23 @@
 
 namespace workerd::api {
 
-// Resolves identity through the current IoContext at call time, including when a handle is reused.
-class OidcContext: public jsg::Object {
+// The selector identifies one approved assignment. The host checks current execution on each use.
+class OidcIdentityBinding: public jsg::Object {
  public:
-  struct TokenOptions {
-    // Check type and length before copying customer strings into native memory.
-    jsg::Optional<jsg::JsRef<jsg::JsValue>> audience;
-    jsg::Optional<jsg::JsRef<jsg::JsValue>> subject;
+  explicit OidcIdentityBinding(kj::String assignment): assignment(kj::mv(assignment)) {}
 
-    JSG_STRUCT(audience, subject);
-    JSG_STRUCT_TS_OVERRIDE(CloudflareOidcTokenOptions {
-      audience?: string;
-      subject?: "object" | "namespace";
-    });
-  };
+  jsg::Promise<kj::String> getToken(jsg::Lock& js, jsg::Optional<jsg::JsValue> options);
 
-  // The audience is an identifier, never a URL to fetch. Omission selects the account default.
-  jsg::Promise<kj::String> getToken(jsg::Lock& js, jsg::Optional<TokenOptions> options);
-
-  JSG_RESOURCE_TYPE(OidcContext) {
+  JSG_RESOURCE_TYPE(OidcIdentityBinding) {
     JSG_METHOD(getToken);
-    JSG_TS_OVERRIDE(CloudflareOidcContext);
+    JSG_TS_ROOT();
+    JSG_TS_OVERRIDE(OidcIdentityBinding {
+      getToken(options?: { audience?: string; fresh?: boolean }): Promise<string>;
+    });
   }
+
+ private:
+  kj::String assignment;
 };
 
 }  // namespace workerd::api

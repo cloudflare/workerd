@@ -1,34 +1,24 @@
-// Copyright (c) 2026 Cloudflare, Inc.
-// Licensed under the Apache 2.0 license found in the LICENSE file or at:
-//     https://opensource.org/licenses/Apache-2.0
-
 import { expectTypeOf } from 'expect-type';
 import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
-
+interface Env { IDENTITY: OidcIdentityBinding }
+declare const env: Env;
 declare const ctx: ExecutionContext;
 declare const state: DurableObjectState;
-
-expectTypeOf(ctx.oidc.getToken()).toEqualTypeOf<Promise<string>>();
-expectTypeOf(
-  ctx.oidc.getToken({ audience: 'urn:example:recipient' })
-).toEqualTypeOf<Promise<string>>();
-expectTypeOf(state.oidc.getToken()).toEqualTypeOf<Promise<string>>();
-state.oidc.getToken({ subject: 'object' });
-state.oidc.getToken({ subject: 'namespace', audience: 'https://api.example.com' });
-
-// @ts-expect-error Only predefined subject modes may be selected.
-state.oidc.getToken({ subject: 'worker:forged' });
-// @ts-expect-error Workload identity is supplied by the host.
-ctx.oidc.getToken({ workerId: 'forged' });
-
-class IdentityObject extends DurableObject {
-  token(): Promise<string> {
-    return this.ctx.oidc.getToken({ subject: 'namespace' });
-  }
+expectTypeOf(env.IDENTITY.getToken()).toEqualTypeOf<Promise<string>>();
+expectTypeOf(env.IDENTITY.getToken({ audience: 'urn:recipient', fresh: true })).toEqualTypeOf<Promise<string>>();
+// @ts-expect-error Authority comes from an explicit binding.
+ctx.oidc;
+// @ts-expect-error DO state has no implicit authority.
+state.oidc;
+// @ts-expect-error The assignment fixes subject scope.
+env.IDENTITY.getToken({ subject: 'namespace' });
+// @ts-expect-error Callers cannot select an identity.
+env.IDENTITY.getToken({ identityId: 'forged' });
+// @ts-expect-error Freshness is strictly boolean.
+env.IDENTITY.getToken({ fresh: 'true' });
+class IdentityObject extends DurableObject<Env> {
+  token(): Promise<string> { return this.env.IDENTITY.getToken(); }
 }
-
-class IdentityService extends WorkerEntrypoint {
-  token(): Promise<string> {
-    return this.ctx.oidc.getToken();
-  }
+class IdentityService extends WorkerEntrypoint<Env> {
+  token(): Promise<string> { return this.env.IDENTITY.getToken({ fresh: true }); }
 }

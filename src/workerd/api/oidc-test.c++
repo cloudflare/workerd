@@ -30,97 +30,52 @@ class RecordingOidcFactory final: public TestFixture::DummyIoChannelFactory {
   uint identity;
 };
 
-constexpr kj::StringPtr WORKER_SOURCE = R"JS(
-  let saved;
-  export default {
-    async fetch(request, env, ctx) {
-      if (ctx.oidc !== ctx.oidc) throw new Error("unstable OIDC getter");
-      saved ??= ctx.oidc;
-      const options = await request.json();
-      return new Response(await saved.getToken(options));
-    },
-    async scheduled(controller, env, ctx) {
-      await ctx.oidc.getToken();
-    },
-    async queue(batch, env, ctx) {
-      await ctx.oidc.getToken();
-    },
-  };
-)JS"_kj;
-
-KJ_TEST("OIDC uses the current host channel for saved handles, cron, and queues") {
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setWorkersOidc(true);
+KJ_TEST("OIDC binding passes fixed assignment and freshness to the current host") {
   kj::Vector<IoChannelFactory::OidcTokenRequest> requests;
   uint identity = 0;
   TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .mainModuleSource = WORKER_SOURCE,
     .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
         [&](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
     return kj::rc<RecordingOidcFactory>(timer, requests, ++identity);
   }),
   });
-
-  auto first = fixture.runRequest(kj::HttpMethod::POST, "https://example.test", "{}");
-  KJ_EXPECT(first.body == "token-for-1");
-  auto second = fixture.runRequest(kj::HttpMethod::POST, "https://example.test",
-      R"({"audience":"urn:example:recipient","workerId":"forged","subjectId":"forged"})");
-  KJ_EXPECT(second.body == "token-for-2");
-  auto entrypoint = fixture.makeWorkerEntrypoint();
-  entrypoint->runScheduled(kj::UNIX_EPOCH, "* * * * *").wait(fixture.getWaitScope());
-  auto queueEntrypoint = fixture.makeWorkerEntrypoint();
-  queueEntrypoint
-      ->customEvent(kj::refcounted<QueueCustomEvent>(QueueEvent::Params{
-        .queueName = kj::str("oidc-test"),
-        .messages = nullptr,
-        .metadata = {},
-      }))
-      .wait(fixture.getWaitScope());
-
-  KJ_ASSERT(requests.size() == 4);
-  KJ_EXPECT(requests[0].audience == kj::none);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(requests[1].audience) == "urn:example:recipient");
-  KJ_EXPECT(requests[2].audience == kj::none);
-  KJ_EXPECT(requests[3].audience == kj::none);
-  for (auto& request: requests) {
-    KJ_EXPECT(request.subject == IoChannelFactory::OidcSubject::WORKER);
+  for (auto assignment: {"orders"_kj, "inference"_kj}) {
+    fixture.runInIoContext([&](const TestFixture::Environment& env) {
+      auto binding = env.js.alloc<OidcIdentityBinding>(kj::str(assignment));
+      auto options = env.js.obj();
+      options.set(env.js, "fresh", env.js.boolean(true));
+      options.set(env.js, "audience", env.js.str("urn:example:recipient"_kj));
+      return env.context.awaitJs(env.js, binding->getToken(env.js, options)).ignoreResult();
+    });
+    KJ_EXPECT(requests.back().assignment == assignment);
+    KJ_EXPECT(requests.back().fresh);
+    KJ_EXPECT(KJ_ASSERT_NONNULL(requests.back().audience) == "urn:example:recipient");
   }
+  KJ_EXPECT(requests.size() == 2);
 }
 
-KJ_TEST("OIDC chooses object identity by default and only accepts defined DO subject modes") {
-  capnp::MallocMessageBuilder message;
-  auto flags = message.initRoot<CompatibilityFlags>();
-  flags.setWorkersOidc(true);
+KJ_TEST("OIDC saved binding uses the current host on every call") {
   kj::Vector<IoChannelFactory::OidcTokenRequest> requests;
+  uint identity = 0;
   TestFixture fixture({
-    .featureFlags = flags.asReader(),
-    .actorId = Worker::Actor::Id(kj::str("oidc-test-object")),
     .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
         [&](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
-    return kj::rc<RecordingOidcFactory>(timer, requests, 1);
+    return kj::rc<RecordingOidcFactory>(timer, requests, ++identity);
   }),
   });
-  for (auto subject: {""_kj, "object"_kj, "namespace"_kj}) {
+  kj::Maybe<jsg::Ref<OidcIdentityBinding>> saved;
+  for (uint i = 1; i <= 2; ++i) {
     auto token = fixture.runInIoContext([&](const TestFixture::Environment& env) {
-      auto oidc = env.js.alloc<OidcContext>();
-      OidcContext::TokenOptions options;
-      if (subject.size() > 0) options.subject = jsg::JsValue(env.js.str(subject)).addRef(env.js);
-      if (subject == "namespace")
-        options.audience = jsg::JsValue(env.js.str("https://api.example.com"_kj)).addRef(env.js);
-      return env.context.awaitJs(env.js, oidc->getToken(env.js, kj::mv(options)));
+      if (saved == kj::none) saved = env.js.alloc<OidcIdentityBinding>(kj::str("orders"));
+      return env.context.awaitJs(env.js, KJ_ASSERT_NONNULL(saved)->getToken(env.js, kj::none));
     });
-    KJ_EXPECT(token == "token-for-1");
+    KJ_EXPECT(token == kj::str("token-for-", i));
+    KJ_EXPECT(requests.back().assignment == "orders");
   }
-  KJ_ASSERT(requests.size() == 3);
-  KJ_EXPECT(requests[0].subject == IoChannelFactory::OidcSubject::DURABLE_OBJECT);
-  KJ_EXPECT(requests[1].subject == IoChannelFactory::OidcSubject::DURABLE_OBJECT);
-  KJ_EXPECT(requests[2].subject == IoChannelFactory::OidcSubject::DURABLE_OBJECT_NAMESPACE);
-  KJ_EXPECT(KJ_ASSERT_NONNULL(requests[2].audience) == "https://api.example.com");
+  saved = kj::none;
 }
 
-KJ_TEST("OIDC validation rejects invalid options before calling the host") {
+KJ_TEST("OIDC rejects unknown options before calling the host") {
   kj::Vector<IoChannelFactory::OidcTokenRequest> requests;
   TestFixture fixture({
     .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
@@ -129,55 +84,39 @@ KJ_TEST("OIDC validation rejects invalid options before calling the host") {
   }),
   });
   fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto oidc = env.js.alloc<OidcContext>();
-    for (auto audience: {""_kj, " "_kj, "\xc2\xa0"_kj, "https://example.com/a b"_kj,
-           "urn:bad:%zz"_kj, ":missing-scheme"_kj, "1bad:scheme"_kj}) {
-      KJ_EXPECT_THROW_MESSAGE("OIDC audience",
-          oidc->getToken(env.js,
-              OidcContext::TokenOptions{
-                .audience = jsg::JsValue(env.js.str(audience)).addRef(env.js)}));
+    auto binding = env.js.alloc<OidcIdentityBinding>(kj::str("orders"));
+    for (auto name: {"subject"_kj, "identityId"_kj, "issuer"_kj, "claims"_kj, "objectId"_kj}) {
+      auto options = env.js.obj();
+      options.set(env.js, name, env.js.str("forged"_kj));
+      KJ_EXPECT_THROW_MESSAGE("Unknown OIDC option", binding->getToken(env.js, options));
     }
-    for (auto subject: {"object"_kj, "namespace"_kj, "worker:forged"_kj, ""_kj}) {
-      KJ_EXPECT_THROW_MESSAGE("OIDC subject",
-          oidc->getToken(env.js,
-              OidcContext::TokenOptions{
-                .subject = jsg::JsValue(env.js.str(subject)).addRef(env.js)}));
-    }
-    auto oversized = kj::heapArray<char>(2050);
-    oversized.asPtr().fill('a');
-    oversized[2049] = '\0';
-    KJ_EXPECT_THROW_MESSAGE("OIDC audience",
-        oidc->getToken(env.js,
-            OidcContext::TokenOptions{
-              .audience = jsg::JsValue(env.js.str(kj::String(kj::mv(oversized)))).addRef(env.js)}));
+    auto options = env.js.obj();
+    options.set(env.js, "fresh", env.js.str("true"_kj));
+    KJ_EXPECT_THROW_MESSAGE("OIDC fresh must be a boolean", binding->getToken(env.js, options));
   });
   KJ_EXPECT(requests.size() == 0);
 }
 
-KJ_TEST("OIDC preserves accepted StringOrURI audiences exactly on the host channel") {
-  kj::Vector<IoChannelFactory::OidcTokenRequest> requests;
-  TestFixture fixture({
-    .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
-        [&](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
-    return kj::rc<RecordingOidcFactory>(timer, requests, 1);
-  }),
+KJ_TEST("OIDC requires an active I/O context") {
+  TestFixture fixture;
+  fixture.enterWorkerLock([](Worker::Lock& lock) {
+    v8::HandleScope handleScope(lock.getIsolate());
+    v8::Context::Scope contextScope(lock.getContext());
+    auto& js = jsg::Lock::from(lock.getIsolate());
+    auto binding = js.alloc<OidcIdentityBinding>(kj::str("orders"));
+    v8::TryCatch caught(js.v8Isolate);
+    try {
+      binding->getToken(js, kj::none);
+      KJ_FAIL_EXPECT("OIDC call outside I/O context succeeded");
+    } catch (jsg::JsExceptionThrown&) {
+      KJ_EXPECT(caught.HasCaught());
+      v8::String::Utf8Value message(js.v8Isolate, caught.Exception());
+      KJ_EXPECT(kj::StringPtr(*message).contains("perform this operation within a handler"));
+    }
   });
-  for (auto audience: {" two words "_kj, "雪 🔐"_kj, "urn:example:recipient"_kj,
-         "https://EXAMPLE.com:443/a/../b?x=%2f"_kj}) {
-    fixture.runInIoContext([&](const TestFixture::Environment& env) {
-      auto oidc = env.js.alloc<OidcContext>();
-      return env.context
-          .awaitJs(env.js,
-              oidc->getToken(env.js,
-                  OidcContext::TokenOptions{
-                    .audience = jsg::JsValue(env.js.str(audience)).addRef(env.js)}))
-          .ignoreResult();
-    });
-    KJ_EXPECT(KJ_ASSERT_NONNULL(requests.back().audience) == audience);
-  }
 }
 
-KJ_TEST("OIDC propagates signer rejection without falling back to fetch") {
+KJ_TEST("OIDC propagates policy denial") {
   class RejectingFactory final: public TestFixture::DummyIoChannelFactory {
    public:
     using DummyIoChannelFactory::DummyIoChannelFactory;
@@ -193,8 +132,8 @@ KJ_TEST("OIDC propagates signer rejection without falling back to fetch") {
   });
   KJ_EXPECT_THROW_MESSAGE("OIDC issuance denied by host policy",
       fixture.runInIoContext([](const TestFixture::Environment& env) {
-    auto oidc = env.js.alloc<OidcContext>();
-    return env.context.awaitJs(env.js, oidc->getToken(env.js, kj::none)).ignoreResult();
+    auto binding = env.js.alloc<OidcIdentityBinding>(kj::str("orders"));
+    return env.context.awaitJs(env.js, binding->getToken(env.js, kj::none)).ignoreResult();
   }));
 }
 

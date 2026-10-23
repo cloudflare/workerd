@@ -614,6 +614,9 @@ export interface CloudflareAccessContext {
   readonly aud: string;
   getIdentity(): Promise<CloudflareAccessIdentity | undefined>;
 }
+export interface OidcIdentityBinding {
+  getToken(options?: { audience?: string; fresh?: boolean }): Promise<string>;
+}
 export declare abstract class ColoLocalActorNamespace {
   get(actorId: string): Fetcher;
 }

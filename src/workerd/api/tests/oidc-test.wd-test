@@ -9,6 +9,7 @@ const config :Workerd.Config = (
       durableObjectStorage = (inMemory = void),
       bindings = [
         (name = "enabled", json = "true"),
+        (name = "IDENTITY", oidc = "approved-assignment"),
         (name = "service", service = (name = "enabled", entrypoint = "OidcService")),
         (name = "objects", durableObjectNamespace = "OidcObject"),
       ],

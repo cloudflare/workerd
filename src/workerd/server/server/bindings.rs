@@ -463,6 +463,19 @@ impl Compiler<'_> {
                 self.analytics_engine(designator?, error_context, global)?;
             }
             Which::Hyperdrive(hyperdrive) => self.hyperdrive(hyperdrive, error_context, global)?,
+            Which::Oidc(assignment) => {
+                if !self.experimental_feature("OIDC identity") {
+                    return Ok(false);
+                }
+                let assignment = assignment?.to_str()?;
+                if assignment.is_empty() || assignment.len() > 256 {
+                    self.error(format!(
+                        "{error_context}: OIDC requires an assignment selector of 1–256 bytes."
+                    ));
+                    return Ok(false);
+                }
+                global.set_oidc(assignment);
+            }
             Which::UnsafeEval(()) => {
                 if !self.experimental_feature("Unsafe eval") {
                     return Ok(false);
