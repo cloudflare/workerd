@@ -31,11 +31,19 @@ jobs:
   test:
     strategy:
       matrix:
+        # The macOS job runs on the xcode-27-xlarge runner, but keeps macos-15-xlarge as its image so
+        # that the job name, which merge checks require, stays the same.
         os:
           [
             { name: linux, arch: X64, image: ubuntu-22.04-16core },
             { name: linux-arm, arch: ARM64, image: ubuntu-22.04-arm-16core },
-            { name: macOS, arch: ARM64, image: macos-15-xlarge, use_lld: true },
+            {
+              name: macOS,
+              arch: ARM64,
+              image: macos-15-xlarge,
+              runner: xcode-27-xlarge,
+              use_lld: true,
+            },
             { name: windows, arch: X64, image: windows-2025-16core },
           ]
         config: [
@@ -71,7 +79,7 @@ jobs:
     name: test (${{ matrix.os.name }}, ${{ matrix.os.image}}${{matrix.config.suffix != '' && format(', {0}', matrix.config.suffix) || ''}})
     uses: ./.github/workflows/_bazel.yml
     with:
-      image: ${{ matrix.os.image }}
+      image: ${{ matrix.os.runner || matrix.os.image }}
       os_name: ${{ matrix.os.name }}
       arch_name: ${{ matrix.os.arch }}
       suffix: ${{ matrix.config.suffix }}
