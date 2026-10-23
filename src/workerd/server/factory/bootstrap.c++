@@ -325,16 +325,6 @@ bool fuzzilli_supported() {
 #endif
 }
 
-::rust::String pyodide_lock() {
-  capnp::MallocMessageBuilder message;
-  // TODO(EW-8977): Implement option to specify python worker flags.
-  auto features = message.getRoot<CompatibilityFlags>();
-  features.setPythonWorkers(true);
-  auto pythonRelease = KJ_REQUIRE_NONNULL(getPythonSnapshotRelease(features));
-  auto lock = KJ_REQUIRE_NONNULL(api::pyodide::getPyodideLock(pythonRelease));
-  return lock.as<RustCopyUncheckedUtf8>();
-}
-
 int32_t with_process_context(
     bool verbose, ::rust::Vec<uint64_t> config, ::rust::Box<PendingCommand> command) {
   kj::printStackTraceOnCrash();
