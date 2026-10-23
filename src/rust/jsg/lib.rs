@@ -967,7 +967,7 @@ impl Realm {
     pub fn new(isolate: v8::IsolatePtr, feature_flags: FeatureFlags) -> Self {
         Self {
             isolate,
-            state: IsolateState::new(),
+            state: IsolateState::new(isolate),
             resources: resource::Resources::default(),
             feature_flags,
         }

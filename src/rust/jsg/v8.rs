@@ -455,10 +455,14 @@ pub mod ffi {
             global: *mut usize,
             traced: &mut TracedReference,
         );
-        /// Resets a `v8::TracedReference`, releasing the weak GC handle.
-        /// Must be called when a `Global<T>` is dropped in traced mode to avoid
-        /// leaking a live `v8::TracedReference`.
-        pub unsafe fn traced_reference_reset(traced: &mut TracedReference);
+        /// The isolate of the object that `visitor` is visiting: the one its wrapper was
+        /// attached in, or that of the object whose trace reached it. Null if neither has
+        /// happened yet, or the isolate is gone; a visit made by a garbage collection always
+        /// has one.
+        pub unsafe fn gc_visitor_v8_isolate(visitor: *mut GcVisitor) -> *mut Isolate;
+        /// Makes a weak `v8::Global` strong again (`ClearWeak`), if it is not empty. `global`
+        /// points to the `ptr` field of the `ffi::Global`.
+        pub unsafe fn global_clear_weak(global: *mut usize);
 
         // Unwrappers
         //
@@ -2916,9 +2920,9 @@ pub struct Global<T> {
     handle: ffi::Global,
     /// Weak `v8::TracedReference<v8::Data>` handle used during GC tracing.
     ///
-    /// Empty (`ptr == 0`) when the strong handle is active; becomes non-empty
-    /// once the parent `Wrappable` is downgraded to traced mode (all strong Rust
-    /// `Rc`s dropped). Reset to empty when strong refs are re-acquired.
+    /// Empty (`ptr == 0`) while the strong handle is strong. Set by a GC visit that finds the
+    /// parent `Wrappable` reachable only through tracing, which also makes the strong handle
+    /// weak. Rust never resets it; see [`GcVisitor::visit_global`].
     ///
     /// `UnsafeCell` is required because `GcVisitor::visit_global` takes `&Global<T>`
     /// (shared reference) but must mutate this field to install the traced handle.
@@ -2994,24 +2998,6 @@ impl<T> Global<T> {
         // SAFETY: isolate is valid and locked (guaranteed by Lock); global handle is valid.
         unsafe { Local::from_ffi(ffi::global_to_local(lock.isolate().as_ffi(), &self.handle)) }
     }
-
-    /// Resets this global handle, releasing both the strong and traced V8 handles.
-    ///
-    /// # Safety
-    /// The caller must ensure the global handle is valid.
-    pub unsafe fn reset(&mut self) {
-        // Reset the strong handle.
-        // SAFETY: global handle is valid; Pin is sound because ffi::Global is not moved.
-        unsafe {
-            ffi::global_reset(Pin::new_unchecked(&mut self.handle));
-        }
-        // Reset the TracedReference to avoid leaking a live V8 handle when this
-        // Global is dropped while in traced mode.
-        // SAFETY: traced is valid for the lifetime of self.
-        unsafe {
-            ffi::traced_reference_reset(self.traced.get_mut());
-        }
-    }
 }
 
 impl Global<FunctionTemplate> {
@@ -3062,8 +3048,11 @@ impl<T> Drop for Global<T> {
             // handle of the isolate, and a reset after it would touch freed memory.
             return;
         }
-        // SAFETY: global handle is valid (guaranteed by construction).
-        unsafe { self.reset() };
+        // The traced reference, if any, is let go of without a reset; see
+        // `GcVisitor::visit_global`.
+        // SAFETY: global handle is valid (guaranteed by construction); Pin is sound because
+        // the handle is not moved.
+        unsafe { ffi::global_reset(Pin::new_unchecked(&mut self.handle)) };
     }
 }
 
@@ -3545,24 +3534,63 @@ impl GcVisitor {
     /// `v8::TracedReference` that cppgc can follow — allowing GC to detect
     /// and break reference cycles.
     ///
-    /// Accepts `&Global<T>` even though it mutates the `traced` slot inside the
-    /// handle. This is safe because:
-    /// - GC tracing is always single-threaded within a V8 isolate.
-    /// - `trace` is never re-entrant on the same object during a GC cycle.
-    /// - The mutation only touches `traced` (the weak traced handle slot),
-    ///   never `handle` (the strong handle), so the value observed through any
-    ///   other `&Global<T>` reference remains valid.
+    /// # Traced nodes
+    ///
+    /// Rust never resets a traced reference. A `Global` taken out of its resource
+    /// (`Cell::take`, `mem::replace`) is traced by nothing until it is put back, and nothing
+    /// tells it that it moved, as a C++ move constructor would, so the next full GC may free
+    /// its node while it still points to it. Every visit therefore first lets go of the traced
+    /// reference: it clears the pointer without a reset, and makes the strong handle strong
+    /// again, since C++ expects it to be weak exactly while a traced reference is set. C++ then
+    /// treats the `Global` as never traced: it leaves the strong handle strong, or installs a
+    /// new node, makes the strong handle weak and traces the node. A drop lets go of the traced
+    /// reference in the same way.
+    ///
+    /// The cost: every visit of a `Global` in traced mode allocates a new node, and the old
+    /// one, like that of a dropped `Global`, lingers until the next full GC; while its value is
+    /// young, scavenges keep the value alive, as young traced nodes are scavenger roots. To
+    /// avoid that, the isolate could count the GCs that can free traced nodes (full
+    /// mark-compacts, and minor mark-sweeps with cppgc's young generation) in GC prologue and
+    /// epilogue callbacks, each visit could record the count through which its node is known to
+    /// be live, and visits and drops could reuse or reset only the nodes known to be live. A
+    /// node seen live before the collection in progress is still there until its marking
+    /// completes.
+    ///
+    /// A visit after the `Global`'s isolate is closed does nothing, and neither does a visit
+    /// on behalf of another isolate, which debug builds assert against: a `Global` belongs in
+    /// resources of its own isolate.
+    ///
+    /// Accepts `&Global<T>` even though it mutates the handles. This is sound because GC
+    /// tracing is always single-threaded within a V8 isolate, and `trace` is never
+    /// re-entrant on the same object during a GC cycle.
     pub fn visit_global<T>(&mut self, global: &Global<T>) {
-        // SAFETY: `global.traced` is an `UnsafeCell`; accessing it via `get()`
-        // is sound under the single-threaded, non-reentrant GC tracing contract
-        // documented on `Global<T>::traced`.
-        unsafe {
-            ffi::wrappable_visit_global(
-                &raw mut self.handle,
-                (&raw const global.handle.ptr).cast_mut(),
-                &mut *global.traced.get(),
-            );
+        if global.state.is_closed() {
+            // The isolate is being torn down, and its handles are left to `Dispose`, as those
+            // of a dropped `Global` are.
+            return;
         }
+        // SAFETY: the visitor is valid for the duration of the visit.
+        let visiting = unsafe { ffi::gc_visitor_v8_isolate(&raw mut self.handle) };
+        if !visiting.is_null() {
+            let foreign = !global.state.belongs_to(visiting);
+            debug_assert!(
+                !foreign,
+                "a Global was visited on behalf of an isolate other than its own"
+            );
+            if foreign {
+                return;
+            }
+        }
+        let strong = (&raw const global.handle.ptr).cast_mut();
+        // SAFETY: see above.
+        let traced = unsafe { &mut *global.traced.get() };
+        if traced.ptr != 0 {
+            traced.ptr = 0;
+            // SAFETY: the strong handle is valid, and the visit runs under the isolate lock.
+            unsafe { ffi::global_clear_weak(strong) };
+        }
+        // SAFETY: the handles are valid handles of the visitor's isolate.
+        unsafe { ffi::wrappable_visit_global(&raw mut self.handle, strong, traced) };
     }
 }
 

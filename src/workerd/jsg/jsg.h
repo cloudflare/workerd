@@ -2256,6 +2256,13 @@ class GcVisitor {
   /// resources without a full `jsg::Data` wrapper.
   void visit(v8::Global<v8::Value>& strong, v8::TracedReference<v8::Data>& traced);
 
+  // The isolate of the object being visited: the one its wrapper was attached in, or that of the
+  // object whose trace reached it. Null if neither has happened yet, or the isolate is gone; a
+  // visit made by a garbage collection always has one.
+  v8::Isolate* v8Isolate() const {
+    return parent.getIsolate();
+  }
+
   void visit(kj::Maybe<Data>& maybeData) {
     KJ_IF_SOME(data, maybeData) {
       visit(data);

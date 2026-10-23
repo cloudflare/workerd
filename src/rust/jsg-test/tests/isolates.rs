@@ -4,6 +4,8 @@
 
 //! Tests that keep handles of one isolate out of another.
 
+#[cfg(not(debug_assertions))]
+use std::cell::Cell;
 use std::panic::AssertUnwindSafe;
 
 use jsg::FromJS;
@@ -228,6 +230,51 @@ fn resource_wrapped_in_another_isolate_panics() {
         let value = thing.to_js(lock);
         let existing = wrapper.take().expect("set above");
         assert_eq!(value, existing.as_local(lock));
+        Ok(())
+    });
+}
+
+#[cfg(not(debug_assertions))]
+#[jsg_resource]
+struct GlobalHolder {
+    handle: Cell<Option<v8::Global<v8::Value>>>,
+}
+
+#[cfg(not(debug_assertions))]
+#[jsg_resource]
+impl GlobalHolder {}
+
+/// GC of one isolate leaves alone a `Global` of another that a resource of the first holds.
+/// Visiting it would make its strong handle weak, and leave the value to a traced node in the
+/// wrong isolate. Debug builds assert instead, in a visit made from C++, where a panic aborts.
+#[test]
+#[cfg(not(debug_assertions))]
+fn gc_of_another_isolate_leaves_a_global_alone() {
+    let a = crate::Harness::new();
+    let b = crate::Harness::new();
+    let mut global: Option<v8::Global<v8::Value>> = None;
+    a.run_in_context(|lock, _ctx| {
+        // The `Global` is the object's only handle once the scope closes.
+        let object: v8::Local<'_, v8::Value> = lock.new_object().into();
+        global = Some(object.to_global(lock));
+        Ok(())
+    });
+    let holder = jsg::Rc::new(GlobalHolder {
+        handle: Cell::new(global),
+    });
+
+    b.run_in_context(|lock, ctx| {
+        // Wrapping the holder in B visits the `Global`, and so does every GC of B.
+        ctx.set_global(lock, "holder", holder.clone());
+        crate::Harness::request_gc(lock);
+        Ok(())
+    });
+
+    a.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        let global = holder.handle.take().expect("set above");
+        assert!(global.as_local(lock).is_object());
+        drop(global);
         Ok(())
     });
 }

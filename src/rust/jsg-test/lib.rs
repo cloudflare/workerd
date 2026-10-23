@@ -72,6 +72,12 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn request_gc(isolate: *mut Isolate, gc_type: GcType);
 
+        /// `v8::HeapStatistics::used_global_handles_size()`: the bytes of the isolate's
+        /// global and traced handle nodes in use.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn used_global_handles_size(isolate: *mut Isolate) -> usize;
+
         /// Creates a V8 object with the C++ `WORKERD_WRAPPABLE_TAG` in its internal fields.
         /// Used to test that Rust unwrap correctly rejects non-Rust wrappable objects.
         #[expect(clippy::allow_attributes)]
@@ -298,6 +304,19 @@ impl Harness {
     pub fn request_minor_gc(lock: &mut jsg::Lock<'_>) {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe { ffi::request_gc(lock.isolate().as_ffi(), ffi::GcType::Minor) };
+    }
+
+    /// The bytes of the isolate's global and traced handle nodes in use: grows when a `Global`
+    /// is created or GC installs its traced reference, and shrinks when V8 frees a node.
+    ///
+    /// Tests compare it with counts taken earlier, which encodes V8's handle accounting: the
+    /// sizes of global and traced handle nodes, and the handles V8 itself keeps in use, such as
+    /// the one each `run_in_context` call leaves for its context. A comparison that fails after
+    /// a V8 update may mean that this accounting changed rather than that a handle leaked.
+    #[must_use]
+    pub fn used_global_handles_size(lock: &mut jsg::Lock<'_>) -> usize {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::used_global_handles_size(lock.isolate().as_ffi()) }
     }
 
     /// Creates a V8 object tagged with the C++ `WORKERD_WRAPPABLE_TAG`.

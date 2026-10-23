@@ -889,8 +889,15 @@ void wrappable_visit_global(GcVisitor* visitor, uintptr_t* global, TracedReferen
   gcVisitor->visit(strongHandle, tracedHandle);
 }
 
-void traced_reference_reset(TracedReference& traced) {
-  traced_ref_from_ffi(traced).Reset();
+Isolate* gc_visitor_v8_isolate(GcVisitor* visitor) {
+  return gc_visitor_from_ffi(visitor)->v8Isolate();
+}
+
+void global_clear_weak(uintptr_t* global) {
+  auto& handle = *reinterpret_cast<v8::Global<v8::Value>*>(global);
+  if (!handle.IsEmpty()) {
+    handle.ClearWeak<void>();
+  }
 }
 
 void wrappable_visit_ref(

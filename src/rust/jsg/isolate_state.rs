@@ -20,18 +20,36 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 use crate::Isolate;
+use crate::v8;
+use crate::v8::ffi;
 
 /// What the handles of an isolate need to know about it after their scopes are gone.
 pub struct IsolateState {
+    /// Only compared with other isolate pointers.
+    isolate: *mut ffi::Isolate,
     /// Set by [`close`](Self::close), under the isolate lock, before the isolate is disposed.
     closed: AtomicBool,
 }
 
+// SAFETY: `isolate` is a raw pointer that is only compared. The other field synchronizes
+// itself.
+#[expect(unsafe_code, reason = "shares the raw isolate pointer between threads")]
+unsafe impl Send for IsolateState {}
+// SAFETY: as for `Send`.
+#[expect(unsafe_code, reason = "shares the raw isolate pointer between threads")]
+unsafe impl Sync for IsolateState {}
+
 impl IsolateState {
-    pub(crate) fn new() -> Arc<Self> {
+    pub(crate) fn new(isolate: v8::IsolatePtr) -> Arc<Self> {
         Arc::new(Self {
+            isolate: isolate.as_ffi(),
             closed: AtomicBool::new(false),
         })
+    }
+
+    /// Whether `isolate` is the isolate of this state. Only compares the pointers.
+    pub(crate) fn belongs_to(&self, isolate: *mut ffi::Isolate) -> bool {
+        self.isolate == isolate
     }
 
     /// Whether the isolate is about to be disposed, or already has been. Its handles are then

@@ -161,6 +161,12 @@ void request_gc(Isolate* isolate, GcType gc_type) {
   }
 }
 
+size_t used_global_handles_size(Isolate* isolate) {
+  v8::HeapStatistics stats;
+  isolate->GetHeapStatistics(&stats);
+  return stats.used_global_handles_size();
+}
+
 ::workerd::rust::jsg::Local create_cpp_tagged_object(Isolate* isolate) {
   auto tmpl = v8::ObjectTemplate::New(isolate);
   tmpl->SetInternalFieldCount(::workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT);

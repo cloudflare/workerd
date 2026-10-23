@@ -166,6 +166,19 @@ isolate it was created in, and `v8::Isolate::Dispose` frees every handle of the 
 so a drop after that leaves the handle alone. The `Realm` tells the isolate's `Global`s when it
 is dropped, which happens under the isolate lock, before the isolate is disposed.
 
+A `Global` in traced mode also holds a `v8::TracedReference`, which Rust never resets. A `Global`
+taken out of its resource, for instance by `Cell::take()`, is traced by nothing, so the next full
+GC may free its node, and nothing tells the `Global` that it moved, the way C++ JSG's `jsg::Data`
+move constructor re-strengthens its handle. So each GC visit lets go of the old node and makes
+the strong handle strong again before C++ decides afresh whether to install a new node, and a
+drop just lets go of it. V8 frees nodes that nothing traces at the next full GC; see
+`GcVisitor::visit_global` for the cost of this and how to avoid it.
+
+A `Global` taken out of its resource is still weak, and nothing traces its value: unless
+something else keeps the value alive, any GC from then on may free it, which leaves the
+`Global` empty, and `as_local` on it panics. Put the `Global` back, or hold the value through
+another handle, before a GC can run.
+
 `Global<T>` fields on `#[jsg_resource]` structs participate in GC tracing when visited via `GcVisitor::visit_global`. This enables the garbage collector to detect and collect back-reference cycles — for example, a resource that stores a JS callback which closes over the resource's own JS wrapper:
 
 ```rust
