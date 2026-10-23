@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "response-status-text-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "response-status-text-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "pedantic_wpt"],
+        bindings = [
+          (name = "target", service = "response-status-text-target"),
+        ],
+      )
+    ),
+    ( name = "response-status-text-target",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "response-status-text-target.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "pedantic_wpt"],
+      )
+    ),
+  ],
+);

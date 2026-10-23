@@ -1133,7 +1133,11 @@ class Response final: public Body {
       kj::Maybe<const kj::HttpHeaders&> maybeReqHeaders);
 
   int getStatus();
-  kj::StringPtr getStatusText();
+  kj::StringPtr getStatusText(jsg::Lock& js);
+  // The reason phrase for the HTTP status line and for error messages. Unlike getStatusText(), an
+  // unset status message always falls back to the status code's conventional phrase, regardless of
+  // pedantic_wpt.
+  kj::StringPtr getReasonPhrase();
   jsg::Ref<Headers> getHeaders(jsg::Lock& js);
 
   bool getOk();
@@ -1223,8 +1227,8 @@ class Response final: public Body {
 
  private:
   int statusCode;
-  // If the statusText is empty, we will derive it from the statusCode. If there's no
-  // match, it will be empty.
+  // The status message, if one was set. When unset, getStatusText() derives it from the status
+  // code unless pedantic_wpt is enabled, in which case it is empty, as the Fetch spec requires.
   kj::Maybe<kj::String> statusText;
   jsg::Ref<Headers> headers;
   CfProperty cf;
