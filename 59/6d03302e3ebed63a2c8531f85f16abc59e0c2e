@@ -1,0 +1,35 @@
+src/workerd/api/oidc.c++
+  s_8a31beec700f7c::t_0f2c80b1f5ebfb 17,33,51
+src/workerd/api/tests/BUILD.bazel
+  s_8a31beec700f7c::t_5ee1c8d46b9f3c 1660-1665
+src/workerd/api/tests/oidc-local-test.wd-test
+  s_8a31beec700f7c::t_fd47d9fd90010f 1-18
+src/workerd/io/io-channels.h
+  s_8a31beec700f7c::t_13203398972439 140,146-148
+src/workerd/server/factory/worker-factory.c++
+  s_8a31beec700f7c::t_97d361d43c4f95 30,789-839
+src/workerd/server/server/bridge.rs
+  s_8a31beec700f7c::t_c65cb001fecd90 758-759
+src/workerd/server/server/config.rs
+  s_8a31beec700f7c::t_6a6e8858227b84 1147,1174
+src/workerd/server/server/worker.rs
+  s_8a31beec700f7c::t_50965af74319dd 78,99,349,421-429,442,1049-1056
+src/workerd/server/workerd.capnp
+  s_8a31beec700f7c::t_3dfaad2b7f94f7 860-864
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "596d03302e3ebed63a2c8531f85f16abc59e0c2e",
+  "prompts": {},
+  "sessions": {
+    "s_8a31beec700f7c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a16664-6675-7a30-bdff-559cd0dc0666",
+        "model": "unknown"
+      },
+      "human_author": "Brendan Irvine-Broque <birvine-broque@cloudflare.com>"
+    }
+  }
+}
