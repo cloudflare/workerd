@@ -121,6 +121,10 @@ build:ci-release --remote_download_minimal --remote_download_regex=".*src/worker
 build:ci-bazelflare --config=bazelflare
 build:ci-bazelflare --disk_cache=
 build:ci-bazelflare --jobs=400
+# The runner fetches every external repository, about 1300, each mostly waiting on the network or
+# the remote repository cache, and fetches as many at once as it has loading threads, by default
+# one per CPU (four on the small runner).
+build:ci-bazelflare --loading_phase_threads=48
 test:ci-bazelflare --test_size_filters=
 build:ci-bazelflare-asan --config=ci-bazelflare --config=bazelflare-asan
 build:ci-bazelflare-tsan --config=ci-bazelflare --config=bazelflare-tsan
