@@ -80,29 +80,13 @@ jsg::Promise<jsg::Value> ExecutionContext::restore(jsg::Lock& js,
   return restoreCurrentEntrypoint(js, params, fetcherHandler, rpcStubHandler);
 }
 
-jsg::Optional<jsg::Ref<CacheContext>> ExecutionContext::getCache(jsg::Lock& js) {
+jsg::Optional<jsg::JsObject> ExecutionContext::getCache(jsg::Lock& js) {
   // Hook for the embedding application to provide a CacheContext.
   // The default Worker::Api implementation returns kj::none.
   if (IoContext::hasCurrent()) {
     return Worker::Isolate::from(js).getApi().getCtxCacheProperty(js);
   }
   return kj::none;
-}
-
-jsg::Promise<CachePurgeResult> CacheContext::purge(jsg::Lock& js,
-    CachePurgeOptions options,
-    const jsg::TypeHandler<CachePurgeOptions>& optionsHandler,
-    const jsg::TypeHandler<CachePurgeResult>& resultHandler,
-    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler) {
-  JSG_FAIL_REQUIRE(Error, "Cache purge is not available in this context.");
-}
-
-jsg::Promise<CachePurgeResult> CacheContext::invalidate(jsg::Lock& js,
-    CachePurgeOptions options,
-    const jsg::TypeHandler<CachePurgeOptions>& optionsHandler,
-    const jsg::TypeHandler<CachePurgeResult>& resultHandler,
-    const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler) {
-  JSG_FAIL_REQUIRE(Error, "Cache invalidation is not available in this context.");
 }
 
 jsg::Ref<Tracing> ExecutionContext::getTracing(jsg::Lock& js) {

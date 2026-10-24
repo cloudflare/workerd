@@ -9,8 +9,6 @@
 
 namespace workerd::api {
 
-class CacheContext;
-
 // Base class for exported RPC services.
 //
 // When the worker's top-level module exports a class that extends this class, it means that it
@@ -84,7 +82,7 @@ class EntrypointsModule: public jsg::Object {
   // Returns the current request's CacheContext (ctx.cache), or kj::none if there is no active
   // IoContext or cache is not available. Used by the cloudflare:workers TypeScript wrapper to
   // expose an importable `cache` proxy.
-  jsg::Optional<jsg::Ref<CacheContext>> getCtxCache(jsg::Lock& js);
+  jsg::Optional<jsg::JsObject> getCtxCache(jsg::Lock& js);
 
   // Equivalent of ctx.mapVirtualHost() for internal modules, which have no access to ctx. Returns
   // `host:port`. Can be called outside of a request, so bindings can map their host when they are

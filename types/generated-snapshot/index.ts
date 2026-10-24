@@ -495,6 +495,23 @@ export declare function setImmediate(
 export declare function clearImmediate(immediate: Immediate | null): void;
 export declare const navigator: Navigator;
 export interface TestController {}
+export interface CachePurgeError {
+  code: number;
+  message: string;
+}
+export interface CachePurgeResult {
+  success: boolean;
+  errors: CachePurgeError[];
+}
+export interface CachePurgeOptions {
+  tags?: string[];
+  pathPrefixes?: string[];
+  purgeEverything?: boolean;
+}
+export interface CacheContext {
+  purge(options: CachePurgeOptions): Promise<CachePurgeResult>;
+  invalidate(options: CachePurgeOptions): Promise<CachePurgeResult>;
+}
 export interface ExecutionContext<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
   passThroughOnException(): void;
@@ -596,23 +613,6 @@ export interface Immediate {
 }
 export interface Cloudflare {
   readonly compatibilityFlags: Record<string, boolean>;
-}
-export interface CachePurgeError {
-  code: number;
-  message: string;
-}
-export interface CachePurgeResult {
-  success: boolean;
-  errors: CachePurgeError[];
-}
-export interface CachePurgeOptions {
-  tags?: string[];
-  pathPrefixes?: string[];
-  purgeEverything?: boolean;
-}
-export interface CacheContext {
-  purge(options: CachePurgeOptions): Promise<CachePurgeResult>;
-  invalidate(options: CachePurgeOptions): Promise<CachePurgeResult>;
 }
 export interface CloudflareAccessContext {
   readonly aud: string;

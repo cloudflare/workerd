@@ -207,62 +207,6 @@ class TestController: public jsg::Object {
   JSG_RESOURCE_TYPE(TestController) {}
 };
 
-// Structured types for the cache purge APIs (ctx.cache.purge() and ctx.cache.invalidate()).
-// These match the coreless-purge-ingest WorkersCachePurgeEntrypoint types.
-// NOTE: TypeScript stubs for CachePurgeError, CachePurgeResult, CachePurgeOptions, and
-// CacheContext are manually maintained in src/cloudflare/internal/workers.d.ts. If you change
-// these types, update that file to match.
-struct CachePurgeError {
-  int code;
-  kj::String message;
-  JSG_STRUCT(code, message);
-};
-
-struct CachePurgeResult {
-  bool success;
-  kj::Array<CachePurgeError> errors;
-  JSG_STRUCT(success, errors);
-};
-
-struct CachePurgeOptions {
-  jsg::Optional<kj::Array<kj::String>> tags;
-  jsg::Optional<kj::Array<kj::String>> pathPrefixes;
-  jsg::Optional<bool> purgeEverything;
-  JSG_STRUCT(tags, pathPrefixes, purgeEverything);
-};
-
-// Base class for the ctx.cache object on cache enabled Workers.
-// Subclass when embedding to provide an implementation.
-class CacheContext: public jsg::Object {
- public:
-  // Purge cached content.
-  //
-  // The default implementation throws without an overriding IoContext.
-  virtual jsg::Promise<CachePurgeResult> purge(jsg::Lock& js,
-      CachePurgeOptions options,
-      const jsg::TypeHandler<CachePurgeOptions>& optionsHandler,
-      const jsg::TypeHandler<CachePurgeResult>& resultHandler,
-      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler);
-
-  // Mark cached content matching `options` as stale without deleting it. Accepts the same options
-  // as purge(). The next matching request is revalidated: the Worker receives a conditional
-  // request built from the stored validators (e.g. `If-None-Match` from the cached `ETag`). If
-  // the Worker responds with `304 Not Modified`, the stored body is kept and served; a full
-  // response replaces the cached one.
-  //
-  // The default implementation throws without an overriding IoContext.
-  virtual jsg::Promise<CachePurgeResult> invalidate(jsg::Lock& js,
-      CachePurgeOptions options,
-      const jsg::TypeHandler<CachePurgeOptions>& optionsHandler,
-      const jsg::TypeHandler<CachePurgeResult>& resultHandler,
-      const jsg::TypeHandler<jsg::Ref<JsRpcProperty>>& rpcPropHandler);
-
-  JSG_RESOURCE_TYPE(CacheContext) {
-    JSG_METHOD(purge);
-    JSG_METHOD(invalidate);
-  }
-};
-
 // Concrete wrapper exposing per-request Cloudflare Access authentication info to JavaScript
 // as `ctx.access`. The actual auth data is supplied by the embedding application via
 // `workerd::AccessInfo`, which is plumbed through `newWorkerEntrypoint()` onto
@@ -371,7 +315,7 @@ class ExecutionContext: public jsg::Object {
   // Returns a CacheContext for cache-enabled workers, or empty jsg::Optional otherwise.
   // However, by default this always returns undefined unless the embedding application overrides
   // the IoContext.
-  jsg::Optional<jsg::Ref<CacheContext>> getCache(jsg::Lock& js);
+  jsg::Optional<jsg::JsObject> getCache(jsg::Lock& js);
 
   jsg::JsValue getVersion(jsg::Lock& js) {
     // TODO(soon): We should be able to assert for `version != kj::none` in the constructor when the
@@ -417,6 +361,26 @@ class ExecutionContext: public jsg::Object {
 
     JSG_METHOD(abort);
 
+    // These match the coreless-purge-ingest WorkersCachePurgeEntrypoint types.
+    // NOTE: Also maintained in src/cloudflare/internal/workers.d.ts; keep the two in sync.
+    JSG_TS_DEFINE(interface CachePurgeError {
+      code: number;
+      message: string;
+    }
+    interface CachePurgeResult {
+      success: boolean;
+      errors: CachePurgeError[];
+    }
+    interface CachePurgeOptions {
+      tags?: string[];
+      pathPrefixes?: string[];
+      purgeEverything?: boolean;
+    }
+    interface CacheContext {
+      purge(options: CachePurgeOptions): Promise<CachePurgeResult>;
+      invalidate(options: CachePurgeOptions): Promise<CachePurgeResult>;
+    });
+
     // TODO(soon): This is getting unwieldy.
     if (flags.getEnableCtxExports()) {
       if (flags.getEnableVersionApi()) {
@@ -429,12 +393,14 @@ class ExecutionContext: public jsg::Object {
             readonly key?: string;
             readonly override?: string;
           };
+          cache?: CacheContext;
           readonly access?: CloudflareAccessContext;
         });
       } else {
         JSG_TS_OVERRIDE(<Props = unknown> {
           readonly props: Props;
           readonly exports: Cloudflare.Exports;
+          cache?: CacheContext;
           readonly access?: CloudflareAccessContext;
         });
       }
@@ -448,11 +414,13 @@ class ExecutionContext: public jsg::Object {
             readonly key?: string;
             readonly override?: string;
           };
+          cache?: CacheContext;
           readonly access?: CloudflareAccessContext;
         });
       } else {
         JSG_TS_OVERRIDE(<Props = unknown> {
           readonly props: Props;
+          cache?: CacheContext;
           readonly access?: CloudflareAccessContext;
         });
       }
@@ -1282,7 +1250,6 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       EW_BENCH_ISOLATE_TYPES, api::ExecutionContext, api::ExportedHandler,                         \
       api::BenchExportedHandler, api::ServiceWorkerGlobalScope::StructuredCloneOptions,            \
       api::Navigator, api::AlarmInvocationInfo, api::Immediate, api::Cloudflare,                   \
-      api::CachePurgeError, api::CachePurgeResult, api::CachePurgeOptions, api::CacheContext,      \
       api::AccessContext
 // The list of global-scope.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 }  // namespace workerd::api
