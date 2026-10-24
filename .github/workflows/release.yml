@@ -84,17 +84,17 @@ jobs:
             bazel-config: release_linux
             target-arch: ARM64
           # Based on runner availability, we build both Apple Silicon and (cross-compiled) x86
-          # release binaries on the macos-15-xlarge runner.
+          # release binaries on the macos-26-xlarge runner.
           - title: macOS-x64
             os-name: macOS
-            # This configuration is used for cross-compiling – macos-15-xlarge is Apple Silicon-based but
+            # This configuration is used for cross-compiling – macos-26-xlarge is Apple Silicon-based but
             # we use it to compile the x64 release.
-            image: macos-15-xlarge
+            image: macos-26-xlarge
             bazel-config: release_macos_cross_x86_64
             target-arch: X64
           - title: macOS-arm64
             os-name: macOS
-            image: macos-15-xlarge
+            image: macos-26-xlarge
             bazel-config: release_macos
             target-arch: ARM64
           - title: windows
@@ -270,17 +270,17 @@ jobs:
       - run: mkdir -p npm/workerd/lib
       - run: mkdir -p npm/workerd/bin
       - name: Build node-install
-        run: npx esbuild npm/lib/node-install.ts --outfile=npm/workerd/install.js --bundle --target=node22 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
+        run: npx esbuild npm/lib/node-install.ts --outfile=npm/workerd/install.js --bundle --target=node24 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
         env:
           WORKERD_VERSION: ${{ needs.version.outputs.version }}
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
       - name: Build node-shim
-        run: npx esbuild npm/lib/node-shim.ts --outfile=npm/workerd/bin/workerd --bundle --target=node22 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
+        run: npx esbuild npm/lib/node-shim.ts --outfile=npm/workerd/bin/workerd --bundle --target=node24 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
         env:
           WORKERD_VERSION: ${{ needs.version.outputs.version }}
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
       - name: Build node-path
-        run: npx esbuild npm/lib/node-path.ts --outfile=npm/workerd/lib/main.js --bundle --target=node22 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
+        run: npx esbuild npm/lib/node-path.ts --outfile=npm/workerd/lib/main.js --bundle --target=node24 --define:LATEST_COMPATIBILITY_DATE="\"${LATEST_COMPATIBILITY_DATE}\"" --define:WORKERD_VERSION="\"${WORKERD_VERSION}\"" --platform=node --external:workerd --log-level=warning
         env:
           WORKERD_VERSION: ${{ needs.version.outputs.version }}
           LATEST_COMPATIBILITY_DATE: ${{ needs.version.outputs.date }}
