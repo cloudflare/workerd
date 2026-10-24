@@ -37,6 +37,32 @@ sysroot(
     urls = ["https://commondatastorage.googleapis.com/chrome-linux-sysroot/278c36fe3a785d7f89fbe3f46956899a3bd49fe665f68dc667d6f626a951fcd6"],
 )
 
+# libstdc++'s headers alone, for the clang-tidy plugin (//tools/clang-tidy), which must match the
+# prebuilt clang-tidy that loads it. Apart from the main sysroot, so no other action carries them.
+sysroot(
+    name = "libstdcxx_linux_x86_64",
+    cc_includes = [
+        "usr/include/c++/10",
+        "usr/include/x86_64-linux-gnu/c++/10",
+        "usr/include/c++/10/backward",
+    ],
+    packages = ["libstdc++-10-dev"],
+    sha256 = "f851add76bdae472fb6c94b4f920bc4a132d85ac607951391297f636af7e934e",
+    urls = ["https://commondatastorage.googleapis.com/chrome-linux-sysroot/f851add76bdae472fb6c94b4f920bc4a132d85ac607951391297f636af7e934e"],
+)
+
+sysroot(
+    name = "libstdcxx_linux_aarch64",
+    cc_includes = [
+        "usr/include/c++/10",
+        "usr/include/aarch64-linux-gnu/c++/10",
+        "usr/include/c++/10/backward",
+    ],
+    packages = ["libstdc++-10-dev"],
+    sha256 = "278c36fe3a785d7f89fbe3f46956899a3bd49fe665f68dc667d6f626a951fcd6",
+    urls = ["https://commondatastorage.googleapis.com/chrome-linux-sysroot/278c36fe3a785d7f89fbe3f46956899a3bd49fe665f68dc667d6f626a951fcd6"],
+)
+
 # One toolchain per Linux CPU. exec_os and exec_arch make each download the Linux distribution
 # whatever the host is, so a macOS client can build on Linux remote executors (--config=bazelflare).
 llvm = use_extension("@toolchains_llvm//toolchain/extensions:llvm.bzl", "llvm")

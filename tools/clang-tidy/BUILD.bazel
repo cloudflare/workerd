@@ -70,16 +70,31 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# workerd-tools clang-tidy links against libstdc++ on Linux, and the plugin
+# must match. The toolchain builds against its own libc++, so on Linux the
+# plugin turns that off (the toolchain's <config>_nomsan_stdlib feature) and
+# compiles against libstdc++'s headers instead. macOS uses libc++ (Apple
+# default) throughout.
+_LIBSTDCXX = select({
+    "@bazel_tools//src/conditions:linux_aarch64": ["@libstdcxx_linux_aarch64//sysroot:headers"],
+    "@bazel_tools//src/conditions:linux_x86_64": ["@libstdcxx_linux_x86_64//sysroot:headers"],
+    "//conditions:default": [],
+})
+
+_NO_LIBCXX = [
+    "-local-aarch64-linux_nomsan_stdlib",
+    "-local-x86_64-linux_nomsan_stdlib",
+]
+
 cc_library(
     name = "workerd-lint-static",
     srcs = [":srcs"],
     hdrs = [":hdrs"],
     copts = select({
-        # workerd-tools clang-tidy links against libstdc++ on Linux; the
-        # plugin must match. macOS uses libc++ (Apple default).
-        "@platforms//os:linux": ["-stdlib=libstdc++"],
+        "@platforms//os:linux": ["-nostdinc++"],
         "//conditions:default": [],
     }),
+    features = _NO_LIBCXX,
     tags = ["manual"],
     # No clang-tidy is published by workerd-tools for Windows.
     target_compatible_with = select({
@@ -87,28 +102,28 @@ cc_library(
         "@platforms//os:macos": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
-    deps = ["@clang_tidy_dev_headers"],
+    deps = ["@clang_tidy_dev_headers"] + _LIBSTDCXX,
 )
 
 cc_shared_library(
     name = "workerd-lint",
+    features = _NO_LIBCXX,
     tags = ["manual"],
     target_compatible_with = select({
         "@platforms//os:linux": [],
         "@platforms//os:macos": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
+    # A host-loaded plugin resolves clang-tidy's symbols (ClangTidyCheck vtable
+    # etc.) when clang-tidy loads it. On Linux that includes libstdc++'s, from
+    # the copy clang-tidy itself loads; ld64 needs -undefined dynamic_lookup to
+    # allow it.
     user_link_flags = select({
-        # On macOS, a host-loaded plugin must defer resolution of clang-tidy
-        # symbols (ClangTidyCheck vtable etc.) to dlopen() time. ld64 still
-        # supports -undefined dynamic_lookup for this case.
         "@platforms//os:macos": [
             "-undefined",
             "dynamic_lookup",
         ],
-        "//conditions:default": [
-            "-stdlib=libstdc++",
-        ],
+        "//conditions:default": [],
     }),
     visibility = ["//visibility:public"],
     deps = [":workerd-lint-static"],

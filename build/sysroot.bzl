@@ -57,17 +57,30 @@ def _sysroot_impl(rctx):
 
     # Source directories are cheaper than per-file groups: Bazel stages one as a single symlink and
     # memoizes it as one Merkle tree node.
-    rctx.file("sysroot/BUILD.bazel", """filegroup(
+    build = """filegroup(
     name = "sysroot",
     srcs = ["."],
     visibility = ["//visibility:public"],
 )
-""")
+"""
+    if rctx.attr.cc_includes:
+        build = 'load("@rules_cc//cc:cc_library.bzl", "cc_library")\n\n' + build + """
+cc_library(
+    name = "headers",
+    hdrs = glob(["usr/include/**"]),
+    includes = {},
+    visibility = ["//visibility:public"],
+)
+""".format(repr(rctx.attr.cc_includes))
+    rctx.file("sysroot/BUILD.bazel", build)
     return rctx.repo_metadata(reproducible = True)
 
 sysroot = repository_rule(
     implementation = _sysroot_impl,
     attrs = {
+        "cc_includes": attr.string_list(
+            doc = "Directories, relative to the sysroot, that a `headers` cc_library exports.",
+        ),
         "packages": attr.string_list(mandatory = True, doc = "The Debian packages to keep."),
         "sha256": attr.string(mandatory = True),
         "urls": attr.string_list(mandatory = True),
