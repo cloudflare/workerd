@@ -11,18 +11,29 @@ import {
 
 export default testTailHandler;
 
+// Expected status and exceptions of the span of a failed operation.
+function failed(message, name = 'Error') {
+  return {
+    status: { code: 'error', message },
+    exceptions: [{ name, message }],
+  };
+}
+
+function countByName(spans) {
+  return spans.reduce((acc, curr) => {
+    if (!acc[curr.name]) acc[curr.name] = 0;
+    acc[curr.name]++;
+    return acc;
+  }, {});
+}
+
 export const test = {
   async test(ctrl, env, ctx) {
     await Promise.allSettled(invocationPromises);
-    let received = spans.values();
+    let received = [...spans.values()];
 
-    const reduced = received.reduce((acc, curr) => {
-      if (!acc[curr.name]) acc[curr.name] = 0;
-      acc[curr.name]++;
-      return acc;
-    }, {});
-    assert.deepStrictEqual(reduced, {
-      durable_object_storage_exec: 294,
+    assert.deepStrictEqual(countByName(received), {
+      durable_object_storage_exec: 296,
       durable_object_storage_ingest: 1030,
       durable_object_storage_getDatabaseSize: 3,
       durable_object_storage_put: 18,
@@ -50,6 +61,45 @@ export const test = {
       testSessionsAPIBookmark: 20,
       durable_object_storage_getCurrentBookmark: 20,
       durable_object_storage_waitForBookmark: 19,
+    });
+
+    // Failed operations, mostly errors that sql-test.js expects.
+    assert.deepStrictEqual(
+      countByName(received.filter((span) => span.status?.code === 'error')),
+      {
+        durable_object_storage_exec: 39,
+        durable_object_storage_ingest: 3,
+        durable_object_storage_transaction: 1,
+      }
+    );
+
+    const spanForQuery = (query) =>
+      received.find((span) => span['db.query.text'] === query);
+
+    // Fails when exec() starts the query.
+    assert.deepStrictEqual(spanForQuery('SELECT * FROM spanStatusMissing'), {
+      name: 'durable_object_storage_exec',
+      'db.system.name': 'cloudflare-durable-object-sql',
+      'db.operation.name': 'exec',
+      'db.query.text': 'SELECT * FROM spanStatusMissing',
+      'cloudflare.durable_object.query.bindings': 0n,
+      ...failed('no such table: spanStatusMissing: SQLITE_ERROR'),
+      closed: true,
+    });
+
+    // Fails while iterating over the results.
+    const iterationQuery =
+      "SELECT json(column1) AS value FROM (VALUES ('1'), ('not json'))";
+    assert.deepStrictEqual(spanForQuery(iterationQuery), {
+      name: 'durable_object_storage_exec',
+      'db.system.name': 'cloudflare-durable-object-sql',
+      'db.operation.name': 'exec',
+      'db.query.text': iterationQuery,
+      'cloudflare.durable_object.query.bindings': 0n,
+      'cloudflare.durable_object.response.rows_read': 0n,
+      'cloudflare.durable_object.response.rows_written': 0n,
+      ...failed('malformed JSON: SQLITE_ERROR'),
+      closed: true,
     });
   },
 };

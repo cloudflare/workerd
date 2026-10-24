@@ -245,7 +245,7 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   // bookmark will include any writes in the current atomic batch, including writes that are
   // performed after this call begins. It could also include concurrent writes that haven't happened
   // yet, unless blockConcurrencyWhile() is used to prevent them.
-  kj::Promise<kj::String> getCurrentBookmark();
+  jsg::Promise<kj::String> getCurrentBookmark(jsg::Lock& js);
 
   // Get a bookmark representing approximately the given timestamp, which is a time up to 30 days
   // in the past (or whatever the backup retention period is).
@@ -267,7 +267,7 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
   // primary databases, `waitForBookmark` will resolve immediately.  On replica databases,
   // `waitForBookmark` will resolve when the replica has been updated to a point at or after
   // `bookmark`.
-  kj::Promise<void> waitForBookmark(kj::String bookmark);
+  jsg::Promise<void> waitForBookmark(jsg::Lock& js, kj::String bookmark);
 
   struct SnapshotOptions {
     jsg::Optional<kj::String> bookmark;

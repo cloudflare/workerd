@@ -891,12 +891,13 @@ jsg::Ref<SyncKvStorage> DurableObjectStorage::getKv(jsg::Lock& js) {
   return js.alloc<SyncKvStorage>(JSG_THIS);
 }
 
-kj::Promise<kj::String> DurableObjectStorage::getCurrentBookmark() {
+jsg::Promise<kj::String> DurableObjectStorage::getCurrentBookmark(jsg::Lock& js) {
   auto& context = IoContext::current();
   auto traceContext = context.makeUserTraceSpan("durable_object_storage_getCurrentBookmark"_kjc);
 
-  return cache->getCurrentBookmark(traceContext.getInternalSpanParent())
-      .attach(kj::mv(traceContext));
+  return context.withSpan(js, kj::mv(traceContext), [&](TraceContext& traceContext) {
+    return context.awaitIo(js, cache->getCurrentBookmark(traceContext.getInternalSpanParent()));
+  });
 }
 
 kj::Promise<kj::String> DurableObjectStorage::getBookmarkForTime(kj::Date timestamp) {
@@ -907,12 +908,14 @@ kj::Promise<kj::String> DurableObjectStorage::onNextSessionRestoreBookmark(kj::S
   return cache->onNextSessionRestoreBookmark(bookmark);
 }
 
-kj::Promise<void> DurableObjectStorage::waitForBookmark(kj::String bookmark) {
+jsg::Promise<void> DurableObjectStorage::waitForBookmark(jsg::Lock& js, kj::String bookmark) {
   auto& context = IoContext::current();
   auto traceContext = context.makeUserTraceSpan("durable_object_storage_waitForBookmark"_kjc);
 
-  return cache->waitForBookmark(bookmark, traceContext.getInternalSpanParent())
-      .attach(kj::mv(traceContext));
+  return context.withSpan(js, kj::mv(traceContext), [&](TraceContext& traceContext) {
+    return context.awaitIo(
+        js, cache->waitForBookmark(bookmark, traceContext.getInternalSpanParent()));
+  });
 }
 
 jsg::Promise<jsg::Ref<DurableObjectSnapshot>> DurableObjectStorage::snapshot(
@@ -923,11 +926,13 @@ jsg::Promise<jsg::Ref<DurableObjectSnapshot>> DurableObjectStorage::snapshot(
   KJ_IF_SOME(o, options) {
     bookmark = kj::mv(o.bookmark);
   }
-  auto bookmarkSnapshot =
-      cache->captureBookmarkSnapshot(kj::mv(bookmark), traceContext.getInternalSpanParent());
-  return context.awaitIo(js, kj::mv(bookmarkSnapshot).attach(kj::mv(traceContext)),
-      [](jsg::Lock& js, capnp::Capability::Client bookmarkSnapshot) {
-    return js.alloc<DurableObjectSnapshot>(kj::mv(bookmarkSnapshot));
+  return context.withSpan(js, kj::mv(traceContext), [&](TraceContext& traceContext) {
+    auto bookmarkSnapshot =
+        cache->captureBookmarkSnapshot(kj::mv(bookmark), traceContext.getInternalSpanParent());
+    return context.awaitIo(js, kj::mv(bookmarkSnapshot),
+        [](jsg::Lock& js, capnp::Capability::Client bookmarkSnapshot) {
+      return js.alloc<DurableObjectSnapshot>(kj::mv(bookmarkSnapshot));
+    });
   });
 }
 

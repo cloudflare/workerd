@@ -112,10 +112,27 @@ export class MyActor extends DurableObject {
       ]
     );
   }
+
+  // Failed operations, whose spans are expected to have an error status and exception.
+  runFailures() {
+    let kv = this.ctx.storage.kv;
+
+    assert.throws(() => kv.put('fn', () => {}), { name: 'DataCloneError' });
+    assert.throws(() => kv.list({ start: 'a', startAfter: 'b' }), {
+      name: 'TypeError',
+      message: 'list() cannot be called with both start and startAfter values.',
+    });
+  }
 }
 
 export let testAutoRollBackOnCriticalError = {
   async test(ctrl, env, ctx) {
     await ctx.exports.MyActor.getByName('foo').run();
+  },
+};
+
+export let testFailures = {
+  async test(ctrl, env, ctx) {
+    await ctx.exports.MyActor.getByName('foo').runFailures();
   },
 };

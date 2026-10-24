@@ -699,6 +699,14 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::ConstString operationName,
       Func&& func) -> decltype(func(kj::instance<TraceContext&>()));
 
+  // The synchronous counterpart of withSpan(): calls `func()` and returns its result. If it throws,
+  // the error is recorded on the user span of `traceContext` and then propagates unchanged.
+  // Doesn't take ownership of `traceContext`, so `func` may move it elsewhere, after which errors
+  // are no longer recorded.
+  template <typename Func>
+  static auto withSpanSync(
+      jsg::Lock& js, TraceContext& traceContext, Func&& func) -> decltype(func());
+
   // Waits for some background I/O to complete, then executes `func` on the result, returning a
   // JavaScript promise for the result of that. If no `func` is provided, no transformation is
   // applied.
@@ -2048,18 +2056,23 @@ auto IoContext::withSpan(jsg::Lock& js,
   TraceContext& span = *owned;
   auto owner = addObject(kj::mv(owned));
 
-  auto promise = [&]() {
-    if (!span.isObserved()) {
-      return func(span);
-    }
-    return js.tryCatch([&]() { return func(span); }, [&](jsg::Value error) -> decltype(func(span)) {
-      recordSpanError(js, error, span);
-      js.throwException(kj::mv(error));
-    });
-  }();
+  auto promise = withSpanSync(js, span, [&]() { return func(span); });
 
   span.detachAsync();
   return attachSpanOwner(js, kj::mv(promise), kj::mv(owner));
+}
+
+template <typename Func>
+auto IoContext::withSpanSync(
+    jsg::Lock& js, TraceContext& traceContext, Func&& func) -> decltype(func()) {
+  if (!traceContext.isObserved()) {
+    return func();
+  }
+  return js.tryCatch(
+      [&]() -> decltype(func()) { return func(); }, [&](jsg::Value error) -> decltype(func()) {
+    recordSpanError(js, error, traceContext);
+    js.throwException(kj::mv(error));
+  });
 }
 
 template <typename Func>
