@@ -10,6 +10,7 @@ mod collections_gc;
 mod eval;
 mod fast_api;
 mod function;
+mod function_new;
 mod gc;
 mod global;
 mod harness;

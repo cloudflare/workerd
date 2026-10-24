@@ -29,7 +29,9 @@
 //! drops it, which may drop the resource. The Rust `jsg::Rc<R>` smart pointer holds its own
 //! `std::Rc<R>` plus a `WrappableRc` (`KjRc<Wrappable>`) for reference-counted ownership. On
 //! drop, `wrappable_remove_strong_ref()` handles GC cleanup via `maybeDeferDestruction()`,
-//! then the `WrappableRc` drop decrements the `kj::Rc` refcount.
+//! then the `WrappableRc` drop decrements the `kj::Rc` refcount. A function created by
+//! [`Function::new`] owns its data the same way, through a Wrappable whose opaque wrapper is the
+//! function's V8 data.
 
 #![allow(
     unsafe_code,
@@ -53,6 +55,8 @@ use crate::Lock;
 use crate::Nullable;
 use crate::Number;
 use crate::Resource;
+use crate::Traced;
+use crate::UnitType;
 use crate::isolate_state::IsolateState;
 #[expect(
     clippy::missing_safety_doc,
@@ -369,6 +373,13 @@ pub mod ffi {
             recv: &Local,
             args: &[Local],
         ) -> Local;
+        // Fallible: creating the wrapper throws, and creating the function returns empty, when
+        // execution is terminating.
+        pub unsafe fn function_new(
+            isolate: *mut Isolate,
+            callback: usize,
+            wrappable: KjRc<Wrappable>,
+        ) -> Result<MaybeLocal>;
 
         // Local<Object>
         pub unsafe fn local_object_set_property(
@@ -518,6 +529,9 @@ pub mod ffi {
         pub unsafe fn fci_is_construct_call(args: *mut FunctionCallbackInfo) -> bool;
         pub unsafe fn fci_get_arg(args: *mut FunctionCallbackInfo, index: usize) -> Local;
         pub unsafe fn fci_set_return_value(args: *mut FunctionCallbackInfo, value: Local);
+        pub unsafe fn fci_get_data_wrappable(
+            args: *mut FunctionCallbackInfo,
+        ) -> KjMaybe<KjRc<Wrappable>>;
 
         // PropertyCallbackInfo, for native data properties
         pub unsafe fn pci_get_isolate(info: *mut PropertyCallbackInfo) -> *mut Isolate;
@@ -1515,6 +1529,121 @@ impl PartialEq for Local<'_, String> {
 }
 
 impl Eq for Local<'_, String> {}
+
+/// The state of a function created by [`Function::new`], owned by the function's C++
+/// `Wrappable`.
+struct FunctionData<T>(T);
+
+impl<T: Traced> Traced for FunctionData<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
+    fn trace(&self, visitor: &mut GcVisitor) {
+        self.0.trace(visitor);
+    }
+}
+
+impl<T: Traced> GarbageCollected for FunctionData<T> {
+    fn memory_name(&self) -> &'static std::ffi::CStr {
+        // C++ JSG's name for the object that owns a wrapped function.
+        c"WrappableFunction"
+    }
+}
+
+impl Function {
+    /// Creates a JavaScript function that calls `f` with `data`, like C++ JSG's
+    /// `Lock::wrapReturningFunction()`.
+    ///
+    /// The function owns `data`: the garbage collector traces it through the function and drops
+    /// it once the function is unreachable, so the `TracedGlobal`s and `jsg::Rc`s that `data`
+    /// traces may lead back to the function. Two things break this:
+    ///
+    /// - A reference that `T::trace` does not visit, such as a `v8::Global` (`Traced::trace` does
+    ///   nothing by default). If it can reach the function, the cycle is invisible to the garbage
+    ///   collector, and the function and `data` are freed only when the isolate is torn down.
+    /// - Another owner that the garbage collector also traces, such as a resource sharing part of
+    ///   `data` through a `std::rc::Rc`. `data` must be the only owner that traces what it
+    ///   traces: tracing one `jsg::Rc` from two owners fails an assertion.
+    ///
+    /// `f` must capture nothing, which a compile-time assertion checks; whatever it needs comes
+    /// from `data`.
+    ///
+    /// `f`'s `Ok` value is the call's result and an `Err` is thrown. A panic throws an internal
+    /// error and terminates execution, as in a `#[jsg_method]`. As with the functions C++ JSG
+    /// wraps, the function's `name` is empty, its `length` is 0, and it can be called with `new`.
+    ///
+    /// Returns an `Err` if V8 could not create the function, which happens only when execution
+    /// is terminating.
+    ///
+    /// ```ignore
+    /// let greet = v8::Function::new(lock, String::from("hello"), |lock, greeting, args| {
+    ///     let name = String::from_js(lock, args.get(0))?;
+    ///     Ok(format!("{greeting}, {name}").to_js(lock))
+    /// })?;
+    /// ```
+    pub fn new<'s, T, F>(lock: &mut Lock<'s>, data: T, f: F) -> crate::Result<Local<'s, Self>>
+    where
+        T: Traced + 'static,
+        F: UnitType
+            + 'static
+            + for<'a> Fn(
+                &mut Lock<'a>,
+                &T,
+                &mut FunctionCallbackInfo<'a>,
+            ) -> Result<Local<'a, Value>, Error>,
+    {
+        let _ = f;
+        // As in `jsg::Rc::new`, the Wrappable owns a leaked `Rc` of the data, released when the
+        // Wrappable is destroyed.
+        let raw: *const FunctionData<T> = Rc::into_raw(Rc::new(FunctionData(data)));
+        let fat: *mut dyn GarbageCollected = raw as *const dyn GarbageCollected as *mut _;
+        let mut wrappable: WrappableRc =
+            ffi::TraitObjectPtr::from_raw(fat, TypeId::of::<FunctionData<T>>()).into();
+        let function =
+            wrappable.new_function(lock, crate::function_callback(call_function::<T, F>));
+        // A new Wrappable starts with one strong reference, which `jsg::Rc` would hold. Here only
+        // the function owns it, so the reference is dropped and the garbage collector decides.
+        wrappable.remove_strong_ref(true);
+        function
+    }
+}
+
+/// The callback of a function created by [`Function::new`] with data `T` and closure `F`.
+fn call_function<'s, T, F>(lock: &mut Lock<'s>, args: &mut FunctionCallbackInfo<'s>)
+where
+    T: Traced + 'static,
+    F: UnitType
+        + 'static
+        + for<'a> Fn(
+            &mut Lock<'a>,
+            &T,
+            &mut FunctionCallbackInfo<'a>,
+        ) -> Result<Local<'a, Value>, Error>,
+{
+    let Some(data) = WrappableRc::of_function(args) else {
+        unreachable!("a function created by Function::new has a Wrappable as its data");
+    };
+    let Some(data_ptr) = data.resolve::<FunctionData<T>>() else {
+        unreachable!(
+            "a function created by Function::new has data of the type it was created with"
+        );
+    };
+    // SAFETY: `data` keeps the Wrappable, and with it the `FunctionData`, alive for this call.
+    // Only shared references to the `FunctionData` are ever created.
+    let data_ref = unsafe { &data_ptr.as_ref().0 };
+    // SAFETY: `Function::new` was handed a value of `F`.
+    let f = unsafe { crate::scope::unit_value::<F>() };
+    match f(lock, data_ref, args) {
+        Ok(value) => args.set_return_value(value),
+        Err(err) => lock.throw_exception(&err),
+    }
+}
+
+/// The error for an operation that V8 refused because execution is terminating.
+pub(crate) fn terminated() -> Error {
+    Error::new_internal_error("JavaScript execution terminated")
+}
 
 impl<'s> Local<'s, Function> {
     /// Calls this function and converts the result via [`FromJS`].
@@ -3575,9 +3704,9 @@ impl ffi::TraitObjectPtr {
         unsafe { std::mem::transmute([self.type_id_lo, self.type_id_hi]) }
     }
 
-    /// Returns the resource as a typed `NonNull<R>`, or `None` if the trait object has been
+    /// Returns the object as a typed `NonNull<R>`, or `None` if the trait object has been
     /// cleared or holds a type other than `R`.
-    pub(crate) fn resolve<R: Resource>(&self) -> Option<NonNull<R>> {
+    pub(crate) fn resolve<R: 'static>(&self) -> Option<NonNull<R>> {
         if self.is_cleared() || self.type_id() != std::any::TypeId::of::<R>() {
             return None;
         }
@@ -4051,17 +4180,57 @@ impl WrappableRc {
         unsafe { ffi::wrappable_strong_refcount(&*self.handle.get()) }
     }
 
+    /// Creates a JavaScript function that calls `callback`, with an opaque wrapper of this
+    /// Wrappable as its data, which keeps the Wrappable alive while the function is reachable.
+    ///
+    /// Returns [`terminated`]'s error if V8 could not create the function, which happens only
+    /// when execution is terminating.
+    pub(crate) fn new_function<'s>(
+        &self,
+        lock: &mut Lock<'s>,
+        callback: crate::RawFunctionCallback,
+    ) -> crate::Result<Local<'s, Function>> {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock); `callback` is a V8 function
+        // callback.
+        let handle = unsafe {
+            ffi::function_new(
+                lock.isolate().as_ffi(),
+                callback as usize,
+                self.handle.clone(),
+            )
+        }
+        .map_err(|_| terminated())?;
+        // SAFETY: the function is created in the scope of `lock`.
+        unsafe { Local::from_ffi_maybe(handle) }.ok_or_else(terminated)
+    }
+
+    /// Returns the Rust Wrappable whose opaque wrapper is the running function's data, as
+    /// [`new_function`](Self::new_function) attaches it, or `None` if the data is anything else.
+    pub(crate) fn of_function(args: &FunctionCallbackInfo<'_>) -> Option<Self> {
+        // SAFETY: args.0 is the running callback's FunctionCallbackInfo.
+        let handle: Option<kj_rs::KjRc<ffi::Wrappable>> =
+            unsafe { ffi::fci_get_data_wrappable(args.0) }.into();
+        handle.map(|handle| Self { handle })
+    }
+
     /// Resolves the `Rc::into_raw` pointer stored in the Wrappable as a typed `NonNull<R>`.
     ///
-    /// Returns `None` if the trait object has been cleared or the stored `TypeId`
-    /// does not match `R`, preventing type confusion in all builds.
-    #[doc(hidden)]
-    pub fn resolve_resource<R: Resource>(&self) -> Option<NonNull<R>> {
+    /// Returns `None` if the trait object has been cleared or holds a type other than `R`.
+    pub(crate) fn resolve<R: 'static>(&self) -> Option<NonNull<R>> {
         // SAFETY: wrappable pointer is valid (guaranteed by KjRc lifetime).
         let trait_ptr = unsafe {
             let wrappable = &*self.handle.get();
             ffi::TraitObjectPtr::from_wrappable(wrappable)?
         };
         trait_ptr.resolve::<R>()
+    }
+
+    /// Resolves the `Rc::into_raw` pointer stored in the Wrappable as a typed `NonNull<R>`.
+    ///
+    /// Returns `None` if the trait object has been cleared or the stored `TypeId`
+    /// does not match `R`, preventing type confusion in all builds.
+    #[doc(hidden)]
+    pub fn resolve_resource<R: Resource>(&self) -> Option<NonNull<R>> {
+        self.resolve::<R>()
     }
 }
