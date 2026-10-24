@@ -83,7 +83,11 @@
     {
       "name": "rust_nightly",
       "type": "rust_nightly",
-      "freeze_version": "2026-07-16"
+      "freeze_version": "2026-07-16",
+      // Applied to the standard library's sources, for the sanitizer-instrumented std (build/rust).
+      "patches": [
+        "//patches/rust:0001-teach-tsan-about-fcntl-file-descriptor-duplication.patch"
+      ]
     },
     // wasm-tools
     {

@@ -130,6 +130,10 @@ filegroup(
 )
 exports_files(["library/Cargo.toml"])
 """,
+    patch_strip = 1,
+    patches = [
+        "//patches/rust:0001-teach-tsan-about-fcntl-file-descriptor-duplication.patch",
+    ],
     sha256 = "b8bb98533e65cb2468548b20b3575518d01b44e7738045a12de2dbb71a0d6cc2",
     strip_prefix = "rust-src-nightly/rust-src/lib/rustlib/src/rust",
     type = "tar.xz",
