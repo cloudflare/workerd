@@ -413,7 +413,8 @@ impl Harness {
     }
 
     /// The bytes of the isolate's global and traced handle nodes in use: grows when a `Global`
-    /// is created or GC installs its traced reference, and shrinks when V8 frees a node.
+    /// or `TracedGlobal` is created or GC installs a traced reference, and shrinks when V8 frees
+    /// a node.
     ///
     /// Tests compare it with counts taken earlier, which encodes V8's handle accounting: the
     /// sizes of global and traced handle nodes, and the handles V8 itself keeps in use, such as

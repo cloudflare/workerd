@@ -400,17 +400,10 @@ pub fn wrap<'s, R: Resource + 'static>(
 pub fn function_template_of<'s, R: Resource + 'static>(
     lock: &mut Lock<'s>,
 ) -> v8::Local<'s, v8::Function> {
-    let isolate = lock.isolate();
-    let constructor = lock.realm().get_constructor::<R>();
-    // SAFETY: `isolate` is valid and locked (Lock invariant). `constructor` is a valid
-    // Global<FunctionTemplate> cached in the Realm. Inlined from `as_local_function` to
-    // avoid re-borrowing `self` while `constructor` holds an immutable borrow through `realm()`.
-    unsafe {
-        v8::Local::from_ffi(v8::ffi::function_template_get_function(
-            isolate.as_ffi(),
-            &constructor.as_ffi(),
-        ))
-    }
+    let constructor = lock.realm().get_constructor::<R>().as_ffi();
+    // SAFETY: the constructor is a function template of the lock's isolate, which the Realm's
+    // template cache keeps alive.
+    unsafe { v8::function_template_get_function(lock, &constructor) }
 }
 
 /// Builds a [`ResourceDescriptor`] from `R`'s [`Resource::members(flags)`](Resource::members) list.
@@ -504,7 +497,7 @@ fn get_resource_descriptor<R: Resource>(
 
 #[derive(Default)]
 pub struct Resources {
-    /// Cached V8 `FunctionTemplate`s keyed by resource `TypeId`.
+    /// Cached V8 `FunctionTemplate`s keyed by resource `TypeId`, which GC never visits.
     templates: HashMap<TypeId, v8::Global<v8::FunctionTemplate>>,
 }
 

@@ -1073,21 +1073,21 @@ fn rc_native_object_dropped_on_minor_gc() {
 }
 
 // =============================================================================
-// Global<Value> back-reference cycle — collected via visit_global tracing
+// TracedGlobal<Value> back-reference cycle — collected via visit_traced_global tracing
 // =============================================================================
 //
-// `jsg::v8::Global<T>` fields on Rust resources participate in GC tracing via
-// `GcVisitor::visit_global`, which implements the same strong↔traced dual-mode
+// `jsg::v8::TracedGlobal<T>` fields on Rust resources participate in GC tracing via
+// `GcVisitor::visit_traced_global`, which implements the same strong↔traced dual-mode
 // switching as `jsg::Data` / `jsg::V8Ref<T>` in C++.
 //
 // When the parent Wrappable has strong Rust refs the handle stays strong.
 // Once all Rust refs are dropped and only the JS wrapper keeps it alive,
-// `visit_global` downgrades the handle to a `v8::TracedReference` that cppgc
+// `visit_traced_global` downgrades the handle to a `v8::TracedReference` that cppgc
 // can follow — allowing the GC to detect and collect the cycle.
 
 static CYCLIC_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
-/// A resource that stores a `Global<Value>` via `Cell` so the back-reference
+/// A resource that stores a `TracedGlobal<Value>` via `Cell` so the back-reference
 /// to the resource's own JS wrapper can be installed after wrapping.
 ///
 /// `Cell<Option<…>>` provides interior mutability through `&self`, matching
@@ -1096,7 +1096,7 @@ static CYCLIC_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 struct CyclicResource {
     /// The stored "callback". Uses `Cell` so it can be set after `to_js()`
     /// returns the wrapper `Local`, without requiring `&mut self`.
-    callback: std::cell::Cell<Option<jsg::v8::Global<jsg::v8::Value>>>,
+    callback: std::cell::Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
 }
 
 impl Drop for CyclicResource {
@@ -1108,13 +1108,13 @@ impl Drop for CyclicResource {
 #[jsg_resource]
 impl CyclicResource {}
 
-/// Verifies that a `Global<Value>` back-reference cycle is collected by GC.
+/// Verifies that a `TracedGlobal<Value>` back-reference cycle is collected by GC.
 ///
 /// The cycle:
-///   CyclicResource.callback (Global<Value>) → JS wrapper
+///   CyclicResource.callback (`TracedGlobal<Value>`) → JS wrapper
 ///   JS wrapper → `CppgcShim` → `Wrappable` → `CyclicResource` (same object)
 ///
-/// `visit_global` downgrades the `Global` to a `v8::TracedReference` once all
+/// `visit_traced_global` downgrades the `TracedGlobal` to a `v8::TracedReference` once all
 /// strong Rust refs are dropped, making the cycle visible to cppgc so it can
 /// be collected on the next full GC.
 #[test]
@@ -1128,32 +1128,32 @@ fn global_value_back_ref_is_collected_by_gc() {
         });
 
         // Wrap to produce the JS object, then immediately promote to a
-        // Global so we can store it back into the resource's own field.
+        // TracedGlobal so we can store it back into the resource's own field.
         // `to_js` consumes the Rc clone but the original `resource` still
         // holds a strong ref, so the resource stays alive.
         let wrapper_local = resource.clone().to_js(lock);
-        let wrapper_global = wrapper_local.to_global(lock);
+        let wrapper_global = wrapper_local.to_traced_global(lock);
 
-        // Install the back-reference: resource now holds a Global pointing
+        // Install the back-reference: resource now holds a TracedGlobal pointing
         // to its own JS wrapper, closing the cycle.
         resource.callback.set(Some(wrapper_global));
 
-        // Drop the only Rust Rc. The cycle is now closed but the Global
-        // will be downgraded to a TracedReference by visit_global, making
+        // Drop the only Rust Rc. The cycle is now closed but the TracedGlobal
+        // will be downgraded to a TracedReference by visit_traced_global, making
         // it visible to cppgc.
         std::mem::drop(resource);
         assert_eq!(CYCLIC_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
-    // Full GC can now detect and collect the cycle because visit_global
-    // downgrades the Global to a TracedReference during tracing.
+    // Full GC can now detect and collect the cycle because visit_traced_global
+    // downgrades the TracedGlobal to a TracedReference during tracing.
     harness.run_in_context(|lock, _ctx| {
         crate::Harness::request_gc(lock);
         assert_eq!(
             CYCLIC_RESOURCE_DROPS.load(Ordering::SeqCst),
             1,
-            "full GC should collect the cyclic resource via visit_global tracing"
+            "full GC should collect the cyclic resource via visit_traced_global tracing"
         );
         Ok(())
     });

@@ -122,10 +122,10 @@ fn set_aside_scopes_count_as_open_again_after_a_panic() {
 fn global_of_another_isolate_panics() {
     let a = crate::Harness::new();
     let b = crate::Harness::new();
-    let mut global: Option<v8::Global<v8::Value>> = None;
+    let mut global: Option<v8::TracedGlobal<v8::Value>> = None;
     a.run_in_context(|lock, _ctx| {
         let value = "from a".to_js(lock);
-        global = Some(v8::Global::new(lock, value));
+        global = Some(v8::TracedGlobal::new(lock, value));
         Ok(())
     });
     let global = global.expect("created in A");
@@ -136,10 +136,10 @@ fn global_of_another_isolate_panics() {
             Ok(())
         });
     }));
-    let payload = result.expect_err("opening A's Global in B must panic");
+    let payload = result.expect_err("opening A's TracedGlobal in B must panic");
     assert_eq!(
         panic_message(&*payload),
-        "attempt to use a Global in an isolate other than the one it was created in"
+        "attempt to use a Global or TracedGlobal in an isolate other than the one it was created in"
     );
 
     let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
@@ -148,9 +148,9 @@ fn global_of_another_isolate_panics() {
             Ok(())
         });
     }));
-    assert!(result.is_err(), "cloning A's Global in B must panic");
+    assert!(result.is_err(), "cloning A's TracedGlobal in B must panic");
 
-    // The Global still works in its own isolate, and is dropped there.
+    // The TracedGlobal still works in its own isolate, and is dropped there.
     a.run_in_context(move |lock, _ctx| {
         let local = global.as_local(lock);
         assert_eq!(String::from_js(lock, local)?, "from a");
@@ -205,11 +205,11 @@ fn resource_wrapped_in_another_isolate_panics() {
     let a = crate::Harness::new();
     let b = crate::Harness::new();
     let thing = jsg::Rc::new(Thing);
-    let mut wrapper: Option<v8::Global<v8::Value>> = None;
+    let mut wrapper: Option<v8::TracedGlobal<v8::Value>> = None;
     a.run_in_context(|lock, _ctx| {
         let value = thing.clone().to_js(lock);
         // Keep the wrapper alive so it is not collected before B tries to reuse it.
-        wrapper = Some(v8::Global::new(lock, value));
+        wrapper = Some(v8::TracedGlobal::new(lock, value));
         Ok(())
     });
 
@@ -236,15 +236,15 @@ fn resource_wrapped_in_another_isolate_panics() {
 
 #[cfg(not(debug_assertions))]
 #[jsg_resource]
-struct GlobalHolder {
-    handle: Cell<Option<v8::Global<v8::Value>>>,
+struct TracedGlobalHolder {
+    handle: Cell<Option<v8::TracedGlobal<v8::Value>>>,
 }
 
 #[cfg(not(debug_assertions))]
 #[jsg_resource]
-impl GlobalHolder {}
+impl TracedGlobalHolder {}
 
-/// GC of one isolate leaves alone a `Global` of another that a resource of the first holds.
+/// GC of one isolate leaves alone a `TracedGlobal` of another that a resource of the first holds.
 /// Visiting it would make its strong handle weak, and leave the value to a traced node in the
 /// wrong isolate. Debug builds assert instead, in a visit made from C++, where a panic aborts.
 #[test]
@@ -252,19 +252,19 @@ impl GlobalHolder {}
 fn gc_of_another_isolate_leaves_a_global_alone() {
     let a = crate::Harness::new();
     let b = crate::Harness::new();
-    let mut global: Option<v8::Global<v8::Value>> = None;
+    let mut global: Option<v8::TracedGlobal<v8::Value>> = None;
     a.run_in_context(|lock, _ctx| {
-        // The `Global` is the object's only handle once the scope closes.
+        // The `TracedGlobal` is the object's only handle once the scope closes.
         let object: v8::Local<'_, v8::Value> = lock.new_object().into();
-        global = Some(object.to_global(lock));
+        global = Some(object.to_traced_global(lock));
         Ok(())
     });
-    let holder = jsg::Rc::new(GlobalHolder {
+    let holder = jsg::Rc::new(TracedGlobalHolder {
         handle: Cell::new(global),
     });
 
     b.run_in_context(|lock, ctx| {
-        // Wrapping the holder in B visits the `Global`, and so does every GC of B.
+        // Wrapping the holder in B visits the `TracedGlobal`, and so does every GC of B.
         ctx.set_global(lock, "holder", holder.clone());
         crate::Harness::request_gc(lock);
         Ok(())
@@ -305,11 +305,11 @@ fn local_of_another_isolate_panics_in_debug_builds() {
         unsafe {
             jsg::allow_scopes_of_another_isolate(|| {
                 b.run_in_context(|lock_b, _ctx| {
-                    assert_isolate_check_panics("a Global of A's object in B", || {
-                        v8::Global::new(lock_b, object);
+                    assert_isolate_check_panics("a TracedGlobal of A's object in B", || {
+                        v8::TracedGlobal::new(lock_b, object);
                     });
                     // A Smi belongs to no isolate.
-                    let global = v8::Global::new(lock_b, number);
+                    let global = v8::TracedGlobal::new(lock_b, number);
                     let local = global.as_local(lock_b);
                     assert!(
                         (jsg::Number::from_js(lock_b, local)?.value() - 1.0).abs() < f64::EPSILON
@@ -403,14 +403,14 @@ fn read_only_value_of_another_isolate_is_accepted_only_in_its_group() {
                 b.run_in_context(|lock_b, _ctx| {
                     if crate::isolates_share_group(isolate_a, lock_b) {
                         for value in values {
-                            v8::Global::new(lock_b, value);
+                            v8::TracedGlobal::new(lock_b, value);
                         }
                     } else {
                         for value in values {
                             assert_isolate_check_panics(
-                                "a Global of A's read-only value in another group",
+                                "a TracedGlobal of A's read-only value in another group",
                                 || {
-                                    v8::Global::new(lock_b, value);
+                                    v8::TracedGlobal::new(lock_b, value);
                                 },
                             );
                         }
