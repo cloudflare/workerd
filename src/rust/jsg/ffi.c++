@@ -419,6 +419,23 @@ Local local_function_call(
   return to_ffi(::workerd::jsg::check(fn->Call(context, receiver, v8Args.size(), v8Args.data())));
 }
 
+Local function_new(Isolate* isolate, size_t callback, kj::Rc<Wrappable> wrappable) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  auto context = isolate->GetCurrentContext();
+  // As in unwrapCoerce(), a pending JS exception becomes a tunneled kj::Exception, which Rust
+  // receives as an Err.
+  JSG_TRY(js) {
+    // Like the functions C++ JSG wraps (FunctionWrapper::wrap() in jsg/function.h): the wrapper
+    // keeps the Wrappable alive and traced for as long as the function is reachable.
+    auto data = wrappable->attachOpaqueWrapper(context, true);
+    return to_ffi(::workerd::jsg::check(v8::Function::New(
+        context, reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)), data)));
+  }
+  JSG_CATCH(error) {
+    kj::throwException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
+  };
+}
+
 // Local<Object>
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value) {
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
@@ -947,6 +964,19 @@ Local fci_get_arg(FunctionCallbackInfo* args, size_t index) {
 
 void fci_set_return_value(FunctionCallbackInfo* args, Local value) {
   args->GetReturnValue().Set(local_from_ffi<v8::Value>(kj::mv(value)));
+}
+
+kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args) {
+  auto data = args->DataV2().As<v8::Value>();
+  KJ_IF_SOME(wrappable, ::workerd::jsg::Wrappable::tryUnwrapOpaque(args->GetIsolate(), data)) {
+    // C++ JSG's wrapped functions also have an opaque wrapper as their data, so check the type,
+    // as ::workerd::jsg::downcastWrappable() does.
+    const auto& actualType = typeid(wrappable);
+    if (&actualType == &typeid(Wrappable) || actualType == typeid(Wrappable)) {
+      return kj::downcast<Wrappable>(wrappable).toRc();
+    }
+  }
+  return kj::none;
 }
 
 Isolate* pci_get_isolate(PropertyCallbackInfo* info) {

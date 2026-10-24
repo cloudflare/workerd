@@ -82,6 +82,11 @@ size_t used_global_handles_size(Isolate* isolate);
 // Used to test that Rust unwrap correctly rejects non-Rust wrappable objects.
 ::workerd::rust::jsg::Local create_cpp_tagged_object(Isolate* isolate);
 
+// Calls a function that C++ JSG wrapped (Lock::wrapReturningFunction()), whose data is also an
+// opaque wrapper, and returns whether rust::jsg::fci_get_data_wrappable() finds a Rust Wrappable
+// in it.
+bool cpp_wrapped_function_data_is_rust_wrappable(Isolate* isolate);
+
 // Returns an empty v8::MaybeLocal, to test how it reaches Rust.
 ::workerd::rust::jsg::MaybeLocal empty_maybe_local();
 
