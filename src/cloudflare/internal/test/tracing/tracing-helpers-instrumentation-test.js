@@ -76,6 +76,32 @@ export const validateSpans = {
       assert(span.closed, `${test}: Span '${expectedSpan}' should be closed`);
     }
 
+    // withSpan records an error thrown by its callback, synchronously or by rejecting, and leaves
+    // the status of a successful span unset.
+    for (const { test, expectedSpan, error } of [
+      { test: 'syncFunction', expectedSpan: 'sync-op' },
+      { test: 'asyncFunction', expectedSpan: 'async-op' },
+      { test: 'syncError', expectedSpan: 'sync-error-op', error: 'sync error' },
+      {
+        test: 'asyncError',
+        expectedSpan: 'async-error-op',
+        error: 'async error',
+      },
+    ]) {
+      const span = (spansByTest.get(test) || []).find(
+        (s) => s.name === expectedSpan
+      );
+      if (error) {
+        assert.deepStrictEqual(span.status, { code: 'error', message: error });
+        assert.deepStrictEqual(span.exceptions, [
+          { name: 'Error', message: error },
+        ]);
+      } else {
+        assert.strictEqual(span.status, undefined);
+        assert.strictEqual(span.exceptions, undefined);
+      }
+    }
+
     {
       const statusSpans = spansByTest.get('setStatus') || [];
       const errorSpan = statusSpans.find((s) => s.name === 'status-error-op');
