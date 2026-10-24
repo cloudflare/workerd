@@ -1,0 +1,25 @@
+load("//:build/wd_cc_library.bzl", "wd_cc_library")
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_rust_crate(
+    name = "io-context",
+    cxx_bridge_deps = [
+        "//src/rust/jsg",
+        "//src/workerd/io",
+    ],
+    cxx_bridge_src = "ffi.rs",
+    link_deps = [":ffi"],
+    test_deps = ["//src/rust/jsg-test"],
+    visibility = ["//visibility:public"],
+    deps = ["//src/rust/jsg"],
+)
+
+wd_cc_library(
+    name = "ffi",
+    srcs = ["ffi.c++"],
+    hdrs = ["ffi.h"],
+    deps = [
+        "//src/rust/jsg:ffi",
+        "//src/workerd/io",
+    ],
+)
