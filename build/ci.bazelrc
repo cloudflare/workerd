@@ -122,6 +122,8 @@ build:ci-bazelflare --config=bazelflare
 build:ci-bazelflare --disk_cache=
 build:ci-bazelflare --jobs=400
 test:ci-bazelflare --test_size_filters=
+build:ci-bazelflare-asan --config=ci-bazelflare --config=bazelflare-asan
+build:ci-bazelflare-tsan --config=ci-bazelflare --config=bazelflare-tsan
 # Every action's inputs, environment and command line, uploaded with the profiles: diffed against a
 # workstation's log, it shows what made an action miss the cache.
 build:ci-bazelflare --execution_log_compact_file=build.bazel-execlog.zst

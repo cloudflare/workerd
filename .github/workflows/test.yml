@@ -70,7 +70,7 @@ jobs:
       os_name: ${{ matrix.os.name }}
       arch_name: ${{ matrix.os.arch }}
       suffix: ${{ matrix.config.suffix }}
-      extra_bazel_args: '--config=ci-test --config=ci-${{matrix.os.name}}${{matrix.config.suffix}}${{ matrix.os.bazelflare && '' --config=ci-bazelflare'' || '''' }}'
+      extra_bazel_args: '--config=ci-test --config=ci-${{matrix.os.name}}${{matrix.config.suffix}}${{ matrix.os.bazelflare && format('' --config=ci-bazelflare{0}'', matrix.config.suffix) || '''' }}'
       macos_use_lld: ${{ matrix.os.use_lld || false }}
       bazelflare: ${{ matrix.os.bazelflare || false }}
     secrets:
@@ -89,7 +89,7 @@ jobs:
       arch_name: 'X64'
       suffix: -tsan
       bazelflare: true
-      extra_bazel_args: '--config=ci-test --config=ci-linux-tsan --config=ci-bazelflare'
+      extra_bazel_args: '--config=ci-test --config=ci-linux-tsan --config=ci-bazelflare-tsan'
       build_target: >-
         //src/...
       test_target: >-

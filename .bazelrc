@@ -618,6 +618,10 @@ build:bazelflare --jobs=200
 # Bazel otherwise prepares only as many remote actions at once as the client has CPUs, and packs 100
 # streams onto each connection, each served by one bazelflare Worker invocation.
 build:bazelflare --noexperimental_throttle_remote_action_building --remote_max_concurrency_per_connection=8
+# Sanitizer builds: after --config=bazelflare, which replaces the sanitizer configs' platforms, these
+# restore their sanitizer constraint, which selects the sanitizer-built Rust standard library.
+build:bazelflare-asan --platforms=//build/bazelflare:linux_x86_64_asan
+build:bazelflare-tsan --platforms=//build/bazelflare:linux_x86_64_tsan
 
 # Local workstation overrides. /.local/ is gitgnored.
 try-import %workspace%/.local/bazelrc

@@ -17,3 +17,18 @@ platform(
         "idle-ms": "600000",
     },
 )
+
+# The sanitizer configs' platforms inherit the host's cpu and os, and --config=bazelflare replaces
+# them; these add the same sanitizer constraints to this platform (see bazelflare-asan and
+# bazelflare-tsan in .bazelrc).
+platform(
+    name = "linux_x86_64_asan",
+    constraint_values = ["//build/platforms:sanitizer_address"],
+    parents = [":linux_x86_64"],
+)
+
+platform(
+    name = "linux_x86_64_tsan",
+    constraint_values = ["//build/platforms:sanitizer_thread"],
+    parents = [":linux_x86_64"],
+)
