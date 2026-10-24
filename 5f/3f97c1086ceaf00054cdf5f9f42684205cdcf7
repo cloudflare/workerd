@@ -1,0 +1,25 @@
+.github/workflows/release-python-snapshots.yml
+  s_1b9ab9fb100cf8::t_f4eaf4157bb392 21
+.github/workflows/test.yml
+  s_1b9ab9fb100cf8::t_738147870088da 141
+.github/workflows/update-wpt.yml
+  s_1b9ab9fb100cf8::t_b8d241ee8b84be 53
+build/ci.bazelrc
+  s_1b9ab9fb100cf8::t_628cf332a8b191 56-58,66,70,72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5f3f97c1086ceaf00054cdf5f9f42684205cdcf7",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}
