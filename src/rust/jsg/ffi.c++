@@ -422,29 +422,11 @@ double local_date_value_of(const Local& value) {
   return local_as_ref_from_ffi<v8::Date>(value)->ValueOf();
 }
 
-// Call after JavaScript run under `tryCatch` threw. Stores what it threw in `exception`, unless
-// execution is terminating: then rethrows the termination, so that it keeps propagating, and leaves
-// `exception` empty. This is the distinction JSG_CATCH makes: a termination cannot be caught.
-static void catchException(v8::TryCatch& tryCatch, MaybeLocal& exception) {
-  if (tryCatch.CanContinue() && tryCatch.HasCaught() && !tryCatch.Exception().IsEmpty()) {
-    exception = maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(tryCatch.Exception()));
-  } else {
-    tryCatch.ReThrow();
-  }
-}
-
 // Runs `fn`, which returns a v8::MaybeLocal<T> or v8::Maybe<T> that is empty if JavaScript threw,
-// and returns its value. If JavaScript threw, stores what it threw with catchException() and throws
-// JsExceptionThrown, which workerd-cxx's Result hands to Rust as an error.
+// and returns its value, catching what JavaScript threw with catching() (ffi-inl.h).
 template <typename Func>
 static auto checkCatching(v8::Isolate* isolate, MaybeLocal& exception, Func&& fn) {
-  v8::TryCatch tryCatch(isolate);
-  try {
-    return ::workerd::jsg::check(fn());
-  } catch (::workerd::jsg::JsExceptionThrown&) {
-    catchException(tryCatch, exception);
-    throw;
-  }
+  return catching(isolate, exception, [&] { return ::workerd::jsg::check(fn()); });
 }
 
 // Local<Function>

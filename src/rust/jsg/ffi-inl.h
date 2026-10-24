@@ -7,6 +7,7 @@
 // This header contains template implementations that require complete type definitions.
 // It should be included after workerd/rust/jsg/v8.rs.h which defines the complete types.
 
+#include <workerd/jsg/util.h>
 #include <workerd/rust/jsg/ffi.h>
 #include <workerd/rust/jsg/v8.rs.h>
 
@@ -123,6 +124,36 @@ inline GcVisitor to_ffi(::workerd::jsg::GcVisitor* visitor) {
 
 inline ::workerd::jsg::GcVisitor* gc_visitor_from_ffi(GcVisitor* value) {
   return reinterpret_cast<::workerd::jsg::GcVisitor*>(value->ptr);
+}
+
+// Exceptions
+//
+// A shim that can run JavaScript takes a `MaybeLocal& exception`, and Rust calls it through
+// `jsg::v8::catching()`, which turns its failure into a `jsg::Error` holding what JavaScript threw.
+
+// Call after JavaScript run under `tryCatch` threw. Stores what it threw in `exception`, unless
+// execution is terminating: then rethrows the termination, so that it keeps propagating, and leaves
+// `exception` empty. This is the distinction JSG_CATCH makes: a termination cannot be caught.
+inline void catchException(v8::TryCatch& tryCatch, MaybeLocal& exception) {
+  if (tryCatch.CanContinue() && tryCatch.HasCaught() && !tryCatch.Exception().IsEmpty()) {
+    exception = maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(tryCatch.Exception()));
+  } else {
+    tryCatch.ReThrow();
+  }
+}
+
+// Runs `fn` and returns its result. If it throws JsExceptionThrown, which C++ JSG code throws when
+// JavaScript has thrown, stores what JavaScript threw with catchException() and rethrows, so that
+// workerd-cxx's Result hands Rust an error for `jsg::v8::catching()` to convert.
+template <typename Func>
+auto catching(v8::Isolate* isolate, MaybeLocal& exception, Func&& fn) -> decltype(fn()) {
+  v8::TryCatch tryCatch(isolate);
+  try {
+    return fn();
+  } catch (::workerd::jsg::JsExceptionThrown&) {
+    catchException(tryCatch, exception);
+    throw;
+  }
 }
 
 }  // namespace workerd::rust::jsg

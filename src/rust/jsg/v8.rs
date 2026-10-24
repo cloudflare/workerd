@@ -1629,10 +1629,14 @@ impl<'s> Local<'s, Function> {
 }
 
 /// Calls `shim`, an FFI function that can run JavaScript and fails if it throws, with the
-/// `MaybeLocal` that receives what JavaScript threw (see `catchException()` in `ffi.c++`).
-/// Converts the shim's failure to the error [`Error::from_exception`] creates for what JavaScript
-/// threw, to [`Error::terminated`] if execution is terminating, or else to the shim's own error.
-pub(crate) fn catching<'s, T>(
+/// `MaybeLocal` that receives what JavaScript threw. Converts the shim's failure to the error
+/// [`Error::from_exception`] creates for what JavaScript threw, to [`Error::terminated`] if
+/// execution is terminating, or else to the shim's own error.
+///
+/// A C++ shim in another crate gets this behaviour by taking a `MaybeLocal& exception` and running
+/// the code that can throw in `workerd::rust::jsg::catching(isolate, exception, fn)`, from
+/// `workerd/rust/jsg/ffi-inl.h`, and returning a `Result`.
+pub fn catching<'s, T>(
     lock: &mut Lock<'s>,
     shim: impl FnOnce(&mut ffi::MaybeLocal) -> Result<T, cxx::KjException>,
 ) -> Result<T, Error> {
