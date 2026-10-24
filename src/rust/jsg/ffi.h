@@ -367,11 +367,17 @@ void realm_attach(Isolate* isolate, Realm& realm);
 void realm_detach(Isolate* isolate, const IsolateState* state);
 
 // Errors
-// Builds an exception whose message is raw bytes interpreted as UTF-8. Invalid
-// UTF-8 sequences are replaced with U+FFFD by v8::String::NewFromUtf8 rather
-// than rejected, so this accepts arbitrary byte input (e.g. filesystem paths).
+// Builds a JS built-in error whose message is raw bytes interpreted as UTF-8.
+// Invalid UTF-8 sequences are replaced with U+FFFD rather than rejected, so this
+// accepts arbitrary byte input (e.g. filesystem paths). Rust creates the
+// DOM-prefixed exception types with dom_exception_create() instead.
 Local exception_create_from_bytes(
     Isolate* isolate, ExceptionType exception_type, const uint8_t* data, int32_t length);
+Local dom_exception_create(Isolate* isolate, ::rust::Str name, ::rust::Str message);
+// Stores the name and message of a DOMException (or of an object with one on its
+// prototype chain) and returns true; returns false for any other value.
+bool local_try_unwrap_dom_exception(
+    Isolate* isolate, Local value, ::rust::String& name, ::rust::String& message);
 
 // Isolate
 void isolate_throw_exception(Isolate* isolate, Local exception);
