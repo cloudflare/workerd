@@ -429,10 +429,12 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
       return KJ_EXCEPTION(FAILED, "Write after stream has been closed.");
     }
     if (buffer == nullptr) return kj::READY_NOW;
-    return canceler.wrap(context.run([this, buffer](Worker::Lock& lock) mutable {
-      auto& writer = getInner();
+    return canceler.wrap(
+        context.run([weakRef = weakRef->addRef(), buffer](Worker::Lock& lock) mutable {
+      auto& self = KJ_REQUIRE_NONNULL(weakRef->tryGet(), "adapter destroyed before write ran");
+      auto& writer = self.getInner();
       auto ab = jsg::JsArrayBuffer::create(lock, buffer);
-      return context.awaitJs(lock, writer.write(lock, jsg::JsValue(ab)));
+      return self.context.awaitJs(lock, writer.write(lock, jsg::JsValue(ab)));
     }));
   }
 
@@ -445,8 +447,10 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
       amount += piece.size();
     }
     if (amount == 0) return kj::READY_NOW;
-    return canceler.wrap(context.run([this, amount, pieces](Worker::Lock& lock) mutable {
-      auto& writer = getInner();
+    return canceler.wrap(
+        context.run([weakRef = weakRef->addRef(), amount, pieces](Worker::Lock& lock) mutable {
+      auto& self = KJ_REQUIRE_NONNULL(weakRef->tryGet(), "adapter destroyed before write ran");
+      auto& writer = self.getInner();
       // Sadly, we have to allocate and copy here. Our received set of buffers are only
       // guaranteed to live until the returned promise is resolved, but the application code
       // may hold onto the ArrayBuffer for longer. We need to make sure that the backing store
@@ -460,7 +464,7 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
         ptr.write(piece);
       }
 
-      return context.awaitJs(lock, writer.write(lock, jsg::JsValue(ab)));
+      return self.context.awaitJs(lock, writer.write(lock, jsg::JsValue(ab)));
     }));
   }
 
@@ -491,8 +495,9 @@ class WritableStreamJsRpcAdapter final: public capnp::ExplicitEndOutputStream {
       return KJ_EXCEPTION(FAILED, "End after stream has been closed.");
     }
     ended = true;
-    return canceler.wrap(context.run([this](Worker::Lock& lock) mutable {
-      return context.awaitJs(lock, getInner().close(lock));
+    return canceler.wrap(context.run([weakRef = weakRef->addRef()](Worker::Lock& lock) mutable {
+      auto& self = KJ_REQUIRE_NONNULL(weakRef->tryGet(), "adapter destroyed before end ran");
+      return self.context.awaitJs(lock, self.getInner().close(lock));
     }));
   }
 

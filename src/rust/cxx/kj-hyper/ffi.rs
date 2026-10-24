@@ -33,6 +33,7 @@ pub use bridge::for_each_header;
 pub use bridge::new_body_stream;
 pub use bridge::new_connect_response;
 pub use bridge::new_rust_io_stream;
+pub use bridge::new_tls_starter;
 pub use bridge::parse_method;
 pub use bridge::pump_tunnel;
 pub use bridge::tls_starter_set;
@@ -196,6 +197,8 @@ mod bridge {
         ) -> Result<()>;
         /// Fills a connect's `kj::TlsStarterCallback` (an output of `connect()`) with `starter`.
         fn tls_starter_set(starter: Pin<&mut TlsStarterCallback>, start: Box<TlsStarter>);
+        /// A `kj::TlsStarterCallback` holding `starter`, for a connect a server hands to C++.
+        fn new_tls_starter(start: Box<TlsStarter>) -> KjOwn<TlsStarterCallback>;
         /// The permessage-deflate offer a client sends, in the given mode (kj's `HttpClient`).
         fn websocket_offer(headers: &HttpHeaders, mode: WebSocketCompression) -> WsOffer;
         /// What a server's `Sec-WebSocket-Extensions` answer agrees to, checked against the

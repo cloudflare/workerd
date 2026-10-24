@@ -71,12 +71,12 @@ pub fn error(tokens: &impl ToTokens, msg: &str) -> TokenStream {
 /// Handles combined forms like `name = "Foo", custom_trace` by parsing the
 /// token stream as comma-separated `syn::Meta` items and finding the first
 /// `name = "..."` name-value pair.
-pub fn extract_name_attribute(tokens: TokenStream) -> Option<String> {
+pub fn extract_name_attribute(tokens: impl Into<proc_macro2::TokenStream>) -> Option<String> {
     use syn::Meta;
     use syn::punctuated::Punctuated;
 
     let parsed: Punctuated<Meta, syn::Token![,]> =
-        syn::parse::Parser::parse(Punctuated::parse_terminated, tokens).ok()?;
+        syn::parse::Parser::parse2(Punctuated::parse_terminated, tokens.into()).ok()?;
 
     for meta in &parsed {
         if let Meta::NameValue(nv) = meta
@@ -186,6 +186,62 @@ pub fn elide_named_lifetimes(ty: &syn::Type) -> proc_macro2::TokenStream {
         out.into_iter().collect()
     }
     rewrite(ty.to_token_stream())
+}
+
+/// Types with a `FastApiArg` impl in `jsg/fast_api.rs`.
+const FAST_API_ARG_TYPES: &[&str] = &["bool", "i32", "u32", "Number"];
+/// Types with a `FastApiReturn` impl in `jsg/fast_api.rs`, besides `()`.
+const FAST_API_RETURN_TYPES: &[&str] = &["bool", "Number"];
+
+/// Returns the argument types of `sig` if V8 can call it through a fast callback.
+///
+/// Types are matched by name: an alias stays on the slow path, and another type named `Number`
+/// fails to compile.
+pub fn fast_api_signature(sig: &syn::Signature) -> Option<Vec<&syn::Type>> {
+    if sig.asyncness.is_some() || !sig.generics.params.is_empty() || sig.variadic.is_some() {
+        return None;
+    }
+    let mut args = Vec::new();
+    for input in &sig.inputs {
+        match input {
+            syn::FnArg::Receiver(receiver) => {
+                if receiver.reference.is_none() || receiver.mutability.is_some() {
+                    return None;
+                }
+            }
+            syn::FnArg::Typed(pat_type) => {
+                if !is_named_type(&pat_type.ty, FAST_API_ARG_TYPES) {
+                    return None;
+                }
+                args.push(pat_type.ty.as_ref());
+            }
+        }
+    }
+    let fast_return = match &sig.output {
+        syn::ReturnType::Default => true,
+        syn::ReturnType::Type(_, ty) => match ty.as_ref() {
+            syn::Type::Tuple(tuple) => tuple.elems.is_empty(),
+            ty => is_named_type(ty, FAST_API_RETURN_TYPES),
+        },
+    };
+    fast_return.then_some(args)
+}
+
+/// Whether `ty` is one of `names` written bare, or `jsg::Number`.
+fn is_named_type(ty: &syn::Type, names: &[&str]) -> bool {
+    let syn::Type::Path(type_path) = ty else {
+        return false;
+    };
+    if type_path.qself.is_some() {
+        return false;
+    }
+    let segments: Vec<_> = type_path.path.segments.iter().collect();
+    let last = match segments.as_slice() {
+        [last] => last,
+        [module, last] if module.ident == "jsg" && last.ident == "Number" => last,
+        _ => return false,
+    };
+    last.arguments.is_none() && names.iter().any(|name| last.ident == name)
 }
 
 #[cfg(test)]

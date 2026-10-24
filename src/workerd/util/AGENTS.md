@@ -12,7 +12,7 @@ Shared utility library: data structures, SQLite wrapper, feature gating, logging
 | `sqlite.h/c++`    | Full SQLite wrapper with custom VFS over `kj::Directory` | `Regulator` controls allowed SQL; `Statement` for prepared queries                     |
 | `sqlite-kv.h`     | KV abstraction on SQLite                                 | Used by Durable Object storage                                                         |
 | `autogate.h/c++`  | Runtime feature gates                                    | `AutogateKey` enum; `isEnabled()` check                                                |
-| `weak-refs.h`     | `WeakRef<T>` / `AtomicWeakRef<T>`                        | Non-owning refs; `tryAddStrongRef()` or `runIfAlive(fn)` pattern                       |
+| `weak-refs.h`     | `WeakRef<T>` / `AtomicWeakRef<T>` / `WeakOwner<T>`      | Non-owning refs; `tryAddStrongRef()` or `runIfAlive(fn)` pattern                       |
 | `ring-buffer.h`   | Amortized O(1) deque                                     | Replaces `std::list` in streams                                                        |
 | `small-weak-vector.h` | `kj::OneOf`-based weak vector                      | O(1) for 0–2 items, fallback to `kj::Vector`                                           |
 | `batch-queue.h`   | Double-buffered cross-thread queue                       | Producer/consumer with mutex swap                                                      |

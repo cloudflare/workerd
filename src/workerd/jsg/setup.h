@@ -290,6 +290,15 @@ class IsolateBase {
     specCompliantPropertyAttributesFlag = true;
   }
 
+  inline bool isFastApiEnabled() const {
+    return fastApiEnabled;
+  }
+
+  // For test isolates, which are built without a `JsgConfig`. Only affects templates built after.
+  inline void setFastApiEnabledForTest() {
+    fastApiEnabled = true;
+  }
+
   inline void disableTopLevelAwait() {
     allowTopLevelAwait = false;
   }
@@ -341,6 +350,28 @@ class IsolateBase {
   // reference stays valid (and reports the isolate as dead) even after the isolate is destroyed,
   // so it is safe to hold from objects that may outlive the isolate (e.g. jsg::WeakRef).
   kj::Arc<const IsolateLiveness> getIsolateLiveness();
+
+  // A function that applyDeferredActions() calls after the destruction queue, so that another
+  // layer with handles of this isolate can release, under the lock, the ones it had to defer.
+  // The Rust JSG Realm, of which an isolate has at most one, installs one while it is attached
+  // to the isolate, and removes it by passing null.
+  using DeferredActionHook = void (*)(v8::Isolate*);
+  void setDeferredActionHook(DeferredActionHook hook) {
+    deferredActionHook = hook;
+  }
+
+  // A function that ~IsolateBase() calls with `data` once the isolate is disposed, so that
+  // another layer can free memory that V8 may write into until then. The Rust JSG Realm, of which
+  // an isolate has at most one, sets it when it is dropped. Setting it does not allocate, so a
+  // destructor may do it.
+  using DisposeHook = void (*)(void* data);
+  void setDisposeHook(DisposeHook hook, void* data) {
+    disposeHook = hook;
+    disposeHookData = data;
+  }
+  bool hasDisposeHook() const {
+    return disposeHook != nullptr;
+  }
 
   // Running totals of code V8 has generated in this isolate, from the JIT code event handler.
   // Only counts additions; code that V8 later flushes or collects is not subtracted. Zero when
@@ -573,6 +604,7 @@ class IsolateBase {
   bool setToStringTag = false;
   bool shouldSetImmutablePrototypeFlag = false;
   bool specCompliantPropertyAttributesFlag = false;
+  bool fastApiEnabled = false;
   bool allowTopLevelAwait = true;
   bool usingNewModuleRegistry = false;
   bool usingEnhancedErrorSerialization = false;
@@ -649,6 +681,11 @@ class IsolateBase {
 
   enum QueueState { ACTIVE, DROPPING, DROPPED };
   QueueState queueState = ACTIVE;
+
+  DeferredActionHook deferredActionHook = nullptr;
+
+  DisposeHook disposeHook = nullptr;
+  void* disposeHookData = nullptr;
 
   struct CodeBlockInfo {
     size_t size = 0;
@@ -908,6 +945,7 @@ class Isolate: public IsolateBase {
     KJ_DASSERT(wrappers[0].get() == nullptr);
     auto wrapper = wrapperSpace.construct(ptr, kj::fwd<MetaConfiguration>(configuration));
     wrapper->initTypeWrapper();
+    fastApiEnabled = wrapper->isFastApiEnabled();
     wrappers[0] = kj::mv(wrapper);
   }
 

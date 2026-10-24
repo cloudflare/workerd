@@ -68,6 +68,8 @@ PATCHES = [
     "0043-Load-cc_library-in-BUILD.icu.patch",
     "0044-Consider-all-dynamic-functions-code-like.patch",
     "0045-Add-UnboundModuleScript-GetCompileHintsCollector.patch",
+    "0046-Forward-ThinStrings-shortcut-by-the-scavenger.patch",
+    "0047-Add-v8-Data-IsCompatibleWithIsolate.patch",
 ]
 
 http_archive(

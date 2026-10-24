@@ -342,6 +342,50 @@ export const pipeBehindWriteBeforeStart = {
   },
 };
 
+// A pipe reads its options before it checks the locks, so an option
+// getter that locks an endpoint of a native-to-native pipe fails the pipe
+// before it takes either endpoint's native half. That matters most for
+// the destination: the pipe would take the source's native half before
+// finding the sink locked. Both endpoints are left as they were: the
+// reader or writer the getter took keeps working, and the other endpoint
+// reads or writes in full (parity; the piping suite's ledger #18 pins
+// the messages).
+export const pipeOptionGetterLocksNativeEndpoint = {
+  async test(ctrl, env) {
+    const socket = connect(echoAddress(env));
+    const body = new Response('BODY').body;
+    let reader;
+    await rejects(
+      body.pipeTo(socket.writable, {
+        get preventAbort() {
+          reader = body.getReader();
+          return false;
+        },
+      }),
+      { name: 'TypeError' }
+    );
+    reader.releaseLock();
+    strictEqual(dec.decode(await drainToBytes(body)), 'BODY');
+    const next = new Response('NEXT').body;
+    let writer;
+    await rejects(
+      next.pipeTo(socket.writable, {
+        get preventAbort() {
+          writer = socket.writable.getWriter();
+          return false;
+        },
+      }),
+      { name: 'TypeError' }
+    );
+    strictEqual(dec.decode(await drainToBytes(next)), 'NEXT');
+    const echoed = drainToBytes(socket.readable);
+    await writer.write(enc.encode('ECHO'));
+    await writer.close();
+    strictEqual(dec.decode(await echoed), 'ECHO');
+    await socket.close();
+  },
+};
+
 // Cancel a pending socket read while the peer remains open, then close
 // the socket and observe its public closed promise.
 export const cancelReadableSettlesSocket = {

@@ -99,7 +99,7 @@ use crate::v8;
 /// - **`Cell<T>`** — reads through `as_ptr()` (sound under single-threaded GC).
 /// - **`jsg::Rc<T>`** — visits the reference via `GcVisitor::visit_rc`.
 /// - **`jsg::Weak<T>`** — no-op (weak refs don't keep targets alive).
-/// - **`jsg::v8::Global<T>`** — visits via `GcVisitor::visit_global`.
+/// - **`jsg::v8::TracedGlobal<T>`** — visits via `GcVisitor::visit_traced_global`.
 pub trait Traced {
     /// Visit GC-visible references held by this value.
     ///
@@ -533,20 +533,18 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for &[T] {
 // Integer types follow C++ JSG (jsg/value.h): a value out of the type's
 // range, checked before truncation, is a TypeError, and so is a non-finite
 // one, except that i32 reads it as 0. In-range values truncate toward zero.
+/// Converts a JavaScript number to an integer type. Fast callbacks use it too, so that both paths
+/// convert alike.
+pub trait FromNumber: Sized {
+    fn from_number(num: f64) -> Result<Self, Error>;
+}
+
 macro_rules! impl_integer_from_js {
     ($($type:ty => $name:literal, $non_finite:expr, $range:expr);* $(;)?) => {
         $(
-            impl<'s> FromJS<'s> for $type {
-                type ResultType = Self;
-
-                fn type_name() -> String {
-                    $name.to_owned()
-                }
-
+            impl FromNumber for $type {
                 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_lossless, reason = "range is checked first")]
-                fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self::ResultType, Error> {
-                    // SAFETY: The isolate is locked and value is a valid V8 local handle.
-                    let num = unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) }?;
+                fn from_number(num: f64) -> Result<Self, Error> {
                     if !num.is_finite() {
                         return $non_finite;
                     }
@@ -560,6 +558,20 @@ macro_rules! impl_integer_from_js {
                         return Err(Error::new_type_error($range));
                     }
                     Ok(num as $type)
+                }
+            }
+
+            impl<'s> FromJS<'s> for $type {
+                type ResultType = Self;
+
+                fn type_name() -> String {
+                    $name.to_owned()
+                }
+
+                fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self::ResultType, Error> {
+                    // SAFETY: The isolate is locked and value is a valid V8 local handle.
+                    let num = unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) }?;
+                    Self::from_number(num)
                 }
             }
         )*
@@ -756,7 +768,7 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for Lenient<T> {
         } else {
             match T::try_from_js(lock, value)? {
                 Some(v) => Ok(Lenient::Some(v)),
-                None => Ok(Lenient::Unconvertable(v8::Global::new(lock, value))),
+                None => Ok(Lenient::Unconvertable(v8::TracedGlobal::new(lock, value))),
             }
         }
     }

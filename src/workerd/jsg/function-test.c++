@@ -200,9 +200,7 @@ struct FunctionContext: public ContextGlobalObject {
       auto handle = exception.getHandle(js);
       return kj::str("caught: ", handle);
     }
-    else {
-      KJ_UNREACHABLE;
-    }
+    else KJ_UNREACHABLE;
   }
 
   kj::String testTryCatchWithOptions(Lock& js, jsg::Function<void()> thrower) {

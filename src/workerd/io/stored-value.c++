@@ -229,8 +229,11 @@ StoredExternalHandler::Serializer::~Serializer() noexcept(false) {
 
     pendingWrite.writePromise =
         kj::joinPromisesFailFast(state.tokenPromises.releaseAsArray())
-            .then([key = key.clone(), &handler = state.handler](kj::Array<kj::Array<byte>> tokens) {
+            .then([key = key.clone(), weakHandler = state.handler.addWeak()](
+                      kj::Array<kj::Array<byte>> tokens) {
       // NOLINTBEGIN(custom-dtor-throw-during-unwind): a continuation, not run by the destructor.
+      auto& handler = KJ_REQUIRE_NONNULL(
+          weakHandler.tryGet(), "StoredExternalHandler destroyed before externals were written");
 
       // We can't possibly have a sync transaction open at this point because we're in an async
       // continuation. Hence we can assume `pendingWrites` has the final merged set of writes.
@@ -253,7 +256,9 @@ StoredExternalHandler::Serializer::~Serializer() noexcept(false) {
       handler.fulfillIfEmpty();
 
       // NOLINTEND(custom-dtor-throw-during-unwind)
-    }).eagerlyEvaluate([&handler = state.handler](kj::Exception&& e) {
+    }).eagerlyEvaluate([weakHandler = state.handler.addWeak()](kj::Exception&& e) {
+      auto& handler = KJ_REQUIRE_NONNULL(
+          weakHandler.tryGet(), "StoredExternalHandler destroyed before externals were written");
       KJ_IF_SOME(f, handler.onEmptyFulfiller) {
         f->reject(e.clone());
         handler.onEmptyFulfiller = kj::none;

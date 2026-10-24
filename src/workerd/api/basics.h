@@ -133,6 +133,14 @@ class Event: public jsg::Object {
   inline bool getReturnValue() const {
     return !getDefaultPrevented();
   }
+  // Per the spec, setting returnValue to false sets the canceled flag and setting it to true
+  // does nothing. Unlike preventDefault(), this honors the spec's cancelable check, so it has
+  // no effect on the non-cancelable events the runtime itself dispatches, such as FetchEvent.
+  inline void setReturnValue(bool value) {
+    if (!value && flags.cancelable) {
+      preventDefault();
+    }
+  }
 
   // We provide the timeStamp property for spec compliance but we force
   // the value to 0.0 always because we really don't want users to rely
@@ -175,7 +183,11 @@ class Event: public jsg::Object {
       JSG_READONLY_PROTOTYPE_PROPERTY(bubbles, getBubbles);
       JSG_READONLY_PROTOTYPE_PROPERTY(cancelable, getCancelable);
       JSG_READONLY_PROTOTYPE_PROPERTY(defaultPrevented, getDefaultPrevented);
-      JSG_READONLY_PROTOTYPE_PROPERTY(returnValue, getReturnValue);
+      if (flags.getPedanticWpt()) {
+        JSG_PROTOTYPE_PROPERTY(returnValue, getReturnValue, setReturnValue);
+      } else {
+        JSG_READONLY_PROTOTYPE_PROPERTY(returnValue, getReturnValue);
+      }
       if (flags.getPedanticWpt()) {
         JSG_READONLY_PROTOTYPE_PROPERTY(currentTarget, getCurrentTarget);
       } else {
@@ -202,7 +214,11 @@ class Event: public jsg::Object {
       JSG_READONLY_INSTANCE_PROPERTY(bubbles, getBubbles);
       JSG_READONLY_INSTANCE_PROPERTY(cancelable, getCancelable);
       JSG_READONLY_INSTANCE_PROPERTY(defaultPrevented, getDefaultPrevented);
-      JSG_READONLY_INSTANCE_PROPERTY(returnValue, getReturnValue);
+      if (flags.getPedanticWpt()) {
+        JSG_INSTANCE_PROPERTY(returnValue, getReturnValue, setReturnValue);
+      } else {
+        JSG_READONLY_INSTANCE_PROPERTY(returnValue, getReturnValue);
+      }
       if (flags.getPedanticWpt()) {
         JSG_READONLY_INSTANCE_PROPERTY(currentTarget, getCurrentTarget);
       } else {
@@ -671,11 +687,11 @@ class AbortSignal final: public EventTarget {
     JSG_METHOD(throwIfAborted);
 
     if (flags.getWorkerdExperimental()) {
-      JSG_METHOD(skipReleaseForTest);
       JSG_METHOD(getNativeRegistrationCountForTest);
+      JSG_METHOD(dropRpcTriggersForTest);
       JSG_TS_OVERRIDE({
-        skipReleaseForTest: never;
         getNativeRegistrationCountForTest: never;
+        dropRpcTriggersForTest: never;
       });
     }
   }
@@ -775,14 +791,15 @@ class AbortSignal final: public EventTarget {
 
   void serialize(jsg::Lock& js, jsg::Serializer& serializer);
 
-  // To test what happens if a capability is dropped before invoking release on the cloned abort
-  // signal, this method will tell every rpcClient to skip this step before destruction.
-  void skipReleaseForTest();
-
   // Test-only introspection: the number of native registration cells (live or empty awaiting
   // a sweep) plus RPC registrations currently held by this signal. Lets tests assert that
   // completed registrations are reclaimed rather than accumulating on long-lived signals.
   int getNativeRegistrationCountForTest();
+
+  // Test-only: drops this signal's RPC registrations, releasing the capabilities that let it
+  // abort its clones. Lets tests observe a clone whose trigger is lost without waiting for the
+  // owning IoContext to be torn down.
+  void dropRpcTriggersForTest();
 
   static jsg::Ref<AbortSignal> deserialize(
       jsg::Lock& js, rpc::SerializationTag tag, jsg::Deserializer& deserializer);
@@ -905,8 +922,8 @@ class AbortSignal final: public EventTarget {
   // across requests may hold registrations from several — and abort delivery is routed into
   // that context like a native registration, re-taking the slot on arrival. There is no
   // consumer-side RAII handle: the slot is reclaimed when the signal aborts, when a sweep
-  // finds the owning context destroyed, or when the signal itself is destroyed (either way
-  // the client's own destructor tells the peer that no abort is coming).
+  // finds the owning context destroyed, or when the signal itself is destroyed. Dropping the
+  // client without calling abort() leaves the clone unaborted forever.
   struct RpcRegistration final: public kj::AtomicRefcounted {
     RpcRegistration(IoCrossContextExecutor executor, IoOwn<AbortTriggerRpcClient> client)
         : executor(kj::mv(executor)) {

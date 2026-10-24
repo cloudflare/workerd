@@ -842,12 +842,7 @@ export default {
     ],
   },
   'response/response-error.any.js': {},
-  'response/response-from-stream.any.js': {
-    comment: 'Missing expected exception (TypeError)',
-    expectedFailures: [
-      'Constructing a Response with a stream on which getReader() is called',
-    ],
-  },
+  'response/response-from-stream.any.js': {},
   'response/response-headers-guard.any.js': {},
   'response/response-init-001.any.js': {
     comment: 'statusText should be inited to OK',
@@ -855,18 +850,10 @@ export default {
   },
   'response/response-init-002.any.js': {},
   'response/response-init-contenttype.any.js': {},
-  'response/response-static-error.any.js': {
-    comment:
-      'We need to make Headers immutable when constructing Response.error()',
-    expectedFailures: [
-      "the 'guard' of the Headers instance should be immutable",
-    ],
-  },
+  'response/response-static-error.any.js': {},
   'response/response-static-json.any.js': {
     comment: 'statusText does not match the status code',
     expectedFailures: [
-      // For this test specifically: failed to throw on non-encodable data
-      'Check static json() throws when data is not encodable',
       'Check response returned by static json() with init undefined',
       'Check response returned by static json() with init {"status":400}',
       'Check response returned by static json() with init {"headers":{}}',

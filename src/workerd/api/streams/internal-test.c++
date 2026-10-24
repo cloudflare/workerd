@@ -1431,12 +1431,7 @@ KJ_TEST("default reader read() auto-allocates a chunk-sized buffer") {
       KJ_ASSERT(!readResult.done);
       auto& value = KJ_REQUIRE_NONNULL(readResult.value);
       auto u8 = KJ_ASSERT_NONNULL(value.getHandle(js).tryCast<jsg::JsUint8Array>());
-      if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE)) {
-        // The 16KB chunk holds the entire 10KB stream.
-        KJ_ASSERT(u8.size() == streamLength);
-      } else {
-        KJ_ASSERT(u8.size() == 4 * 1024);
-      }
+      KJ_ASSERT(u8.size() == 4 * 1024);
     })));
   });
 }
