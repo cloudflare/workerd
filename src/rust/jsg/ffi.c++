@@ -4,6 +4,7 @@
 
 #include "ffi.h"
 
+#include <workerd/jsg/dom-exception.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/jsg/util.h>
@@ -1297,8 +1298,6 @@ Local exceptionCreateFromMessage(ExceptionType exception_type, v8::Local<v8::Str
     case ExceptionType::TypeError:
       return to_ffi(v8::Exception::TypeError(message));
     default:
-      // DOM-style exceptions (OperationError, DataError, etc.) and Error fall back to Error.
-      // TODO(soon): Use js.domException() to create proper DOMException objects.
       return to_ffi(v8::Exception::Error(message));
   }
 }
@@ -1314,6 +1313,28 @@ Local exception_create_from_bytes(
   auto message = ::workerd::jsg::check(v8::String::NewFromUtf8(
       isolate, reinterpret_cast<const char*>(data), v8::NewStringType::kNormal, length));
   return exceptionCreateFromMessage(exception_type, message);
+}
+
+Local dom_exception_create(Isolate* isolate, ::rust::Str name, ::rust::Str message) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  auto exception = js.domException(
+      kj::heapString(name.data(), name.size()), kj::heapString(message.data(), message.size()));
+  return to_ffi(KJ_ASSERT_NONNULL(exception.tryGetHandle(js)));
+}
+
+bool local_try_unwrap_dom_exception(
+    Isolate* isolate, Local value, ::rust::String& name, ::rust::String& message) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  // DOMException is registered in every isolate (see JSG_DECLARE_ISOLATE_TYPE).
+  auto& handler =
+      KJ_ASSERT_NONNULL(js.tryGetTypeHandler<::workerd::jsg::Ref<::workerd::jsg::DOMException>>());
+  KJ_IF_SOME(exception, handler.tryUnwrap(js, local_from_ffi<v8::Value>(kj::mv(value)))) {
+    name = ::rust::String::lossy(exception->getName().begin(), exception->getName().size());
+    message =
+        ::rust::String::lossy(exception->getMessage().begin(), exception->getMessage().size());
+    return true;
+  }
+  return false;
 }
 
 // Isolate

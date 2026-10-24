@@ -120,26 +120,56 @@ mod ffi {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// Maps a JS error class name (`TypeError`, `SyntaxError`, ...) to its type.
+/// Unrecognized names, including `DOMException` names, map to `Error`; use
+/// [`ExceptionType::from_dom_exception_name`] for those.
 impl From<&str> for ExceptionType {
     fn from(value: &str) -> Self {
         match value {
-            "OperationError" => Self::OperationError,
-            "DataError" => Self::DataError,
-            "DataCloneError" => Self::DataCloneError,
-            "InvalidAccessError" => Self::InvalidAccessError,
-            "InvalidStateError" => Self::InvalidStateError,
-            "InvalidCharacterError" => Self::InvalidCharacterError,
-            "NotSupportedError" => Self::NotSupportedError,
-            "SyntaxError" => Self::SyntaxError,
-            "TimeoutError" => Self::TimeoutError,
-            "TypeMismatchError" => Self::TypeMismatchError,
-            "AbortError" => Self::AbortError,
-            "NotFoundError" => Self::NotFoundError,
             "TypeError" => Self::TypeError,
             "RangeError" => Self::RangeError,
             "ReferenceError" => Self::ReferenceError,
+            "SyntaxError" => Self::SyntaxError,
             _ => Self::Error,
         }
+    }
+}
+
+impl ExceptionType {
+    /// The DOM-prefixed types with the `DOMException` name each is thrown with.
+    const DOM_EXCEPTION_NAMES: [(Self, &'static str); 13] = [
+        (Self::DOMOperationError, "OperationError"),
+        (Self::DOMDataError, "DataError"),
+        (Self::DOMDataCloneError, "DataCloneError"),
+        (Self::DOMInvalidAccessError, "InvalidAccessError"),
+        (Self::DOMInvalidStateError, "InvalidStateError"),
+        (Self::DOMInvalidCharacterError, "InvalidCharacterError"),
+        (Self::DOMNotSupportedError, "NotSupportedError"),
+        (Self::DOMSyntaxError, "SyntaxError"),
+        (Self::DOMTimeoutError, "TimeoutError"),
+        (Self::DOMTypeMismatchError, "TypeMismatchError"),
+        (Self::DOMQuotaExceededError, "QuotaExceededError"),
+        (Self::DOMAbortError, "AbortError"),
+        (Self::DOMNotFoundError, "NotFoundError"),
+    ];
+
+    /// Returns the `DOMException` name this type is thrown with, or `None` for
+    /// a JS error class.
+    pub fn dom_exception_name(self) -> Option<&'static str> {
+        Self::DOM_EXCEPTION_NAMES
+            .iter()
+            .find(|(ty, _)| *ty == self)
+            .map(|(_, name)| *name)
+    }
+
+    /// Maps a `DOMException` name to its DOM-prefixed type, or `None` for a
+    /// name without one (such as the legacy `IndexSizeError` or a name user
+    /// code chose).
+    pub fn from_dom_exception_name(name: &str) -> Option<Self> {
+        Self::DOM_EXCEPTION_NAMES
+            .iter()
+            .find(|(_, dom_name)| *dom_name == name)
+            .map(|(ty, _)| *ty)
     }
 }
 
@@ -185,22 +215,24 @@ macro_rules! impl_error_constructors {
 }
 
 impl_error_constructors! {
-    OperationError => new_operation_error,
-    DataError => new_data_error,
-    DataCloneError => new_data_clone_error,
-    InvalidAccessError => new_invalid_access_error,
-    InvalidStateError => new_invalid_state_error,
-    InvalidCharacterError => new_invalid_character_error,
-    NotSupportedError => new_not_supported_error,
-    SyntaxError => new_syntax_error,
-    TimeoutError => new_timeout_error,
-    TypeMismatchError => new_type_mismatch_error,
-    AbortError => new_abort_error,
-    NotFoundError => new_not_found_error,
+    DOMOperationError => new_dom_operation_error,
+    DOMDataError => new_dom_data_error,
+    DOMDataCloneError => new_dom_data_clone_error,
+    DOMInvalidAccessError => new_dom_invalid_access_error,
+    DOMInvalidStateError => new_dom_invalid_state_error,
+    DOMInvalidCharacterError => new_dom_invalid_character_error,
+    DOMNotSupportedError => new_dom_not_supported_error,
+    DOMSyntaxError => new_dom_syntax_error,
+    DOMTimeoutError => new_dom_timeout_error,
+    DOMTypeMismatchError => new_dom_type_mismatch_error,
+    DOMQuotaExceededError => new_dom_quota_exceeded_error,
+    DOMAbortError => new_dom_abort_error,
+    DOMNotFoundError => new_dom_not_found_error,
     TypeError => new_type_error,
     Error => new_error,
     RangeError => new_range_error,
     ReferenceError => new_reference_error,
+    SyntaxError => new_syntax_error,
 }
 
 impl<'s> FromJS<'s> for Error {
@@ -208,8 +240,11 @@ impl<'s> FromJS<'s> for Error {
 
     /// Creates an Error from a V8 value (typically an exception).
     ///
-    /// If the value is a native error, extracts the name and message properties.
-    /// Otherwise, converts the value to a string for the message.
+    /// A native error contributes its `name` and `message` properties. A
+    /// `DOMException` contributes its name and message as C++ JSG stores them;
+    /// a name without a DOM-prefixed type maps to `Error`. Any other value is
+    /// rejected with a `TypeError`.
+    #[expect(unsafe_code, reason = "unwraps a DOMException through the FFI")]
     fn from_js(
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
@@ -230,14 +265,37 @@ impl<'s> FromJS<'s> for Error {
                 .and_then(|v| String::from_js(lock, v).ok())
                 .unwrap_or_else(|| "Unknown error".to_owned());
 
-            Ok(Self {
+            return Ok(Self {
                 name: name.map_or(ExceptionType::Error, |n| ExceptionType::from(n.as_str())),
                 message,
                 is_internal: false,
-            })
-        } else {
-            Err(Self::new_type_error("Unknown error"))
+            });
         }
+
+        // A DOMException is not a native error: it is a JSG resource whose
+        // prototype chain includes Error.prototype.
+        let mut dom_name = String::new();
+        let mut dom_message = String::new();
+        // SAFETY: Lock guarantees the isolate is valid and locked, and `value`
+        // belongs to it.
+        let is_dom_exception = unsafe {
+            v8::ffi::local_try_unwrap_dom_exception(
+                lock.isolate().as_ffi(),
+                value.into_ffi(),
+                &mut dom_name,
+                &mut dom_message,
+            )
+        }?;
+        if is_dom_exception {
+            return Ok(Self {
+                name: ExceptionType::from_dom_exception_name(&dom_name)
+                    .unwrap_or(ExceptionType::Error),
+                message: dom_message,
+                is_internal: false,
+            });
+        }
+
+        Err(Self::new_type_error("Unknown error"))
     }
 }
 
@@ -271,26 +329,35 @@ impl Error {
     /// This always builds the exception from `self.message` verbatim: it does
     /// not check `is_internal` / redact anything. Prefer `Lock::throw_exception()`,
     /// which does perform that check before falling back to this method.
+    ///
+    /// Fails only if creating a `DOMException` throws in C++.
     #[expect(
         unsafe_code,
         reason = "creates the V8 exception object through the FFI"
     )]
-    pub fn to_local<'s>(&self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+    pub fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>> {
         let isolate = lock.isolate();
+        if let Some(name) = self.name.dom_exception_name() {
+            // SAFETY: isolate is valid and locked (guaranteed by caller).
+            let exception =
+                unsafe { v8::ffi::dom_exception_create(isolate.as_ffi(), name, &self.message) }?;
+            // SAFETY: the exception was created in the caller's handle scope.
+            return Ok(unsafe { v8::Local::from_ffi(exception) });
+        }
         let message = self.message.as_bytes();
         // Strings longer than i32::MAX bytes are truncated to satisfy V8's
         // int-typed length parameter; V8 rejects strings that large anyway.
         let len = i32::try_from(message.len()).unwrap_or(i32::MAX);
         // SAFETY: isolate is valid and locked (guaranteed by caller); message
         // pointer and len describe a valid byte slice.
-        unsafe {
+        Ok(unsafe {
             v8::Local::from_ffi(v8::ffi::exception_create_from_bytes(
                 isolate.as_ffi(),
                 self.name,
                 message.as_ptr(),
                 len,
             ))
-        }
+        })
     }
 }
 
@@ -392,7 +459,7 @@ impl Error {
             && let Some((name, message)) = rest.split_once("): ")
         {
             return Some(Self {
-                name: ExceptionType::from(name),
+                name: ExceptionType::from_dom_exception_name(name).unwrap_or(ExceptionType::Error),
                 message: message.to_owned(),
                 is_internal,
             });
@@ -784,18 +851,19 @@ impl<'s> Lock<'s> {
     ///
     /// If `err.is_internal` is set, the message is redacted (via
     /// `throw_internal_error()`) rather than thrown verbatim, matching how
-    /// C++ `decodeTunneledException()` handles `isInternal` KJ exceptions.
+    /// C++ `decodeTunneledException()` handles `isInternal` KJ exceptions. If
+    /// creating the exception fails, that failure is thrown as an internal error.
     pub fn throw_exception(&mut self, err: &Error) {
         if err.is_internal {
             self.throw_internal_error(&err.message);
             return;
         }
-        // SAFETY: isolate is valid and locked (guaranteed by Lock).
-        unsafe {
-            v8::ffi::isolate_throw_exception(
-                self.isolate().as_ffi(),
-                err.to_local(self).into_ffi(),
-            );
+        match err.to_local(self) {
+            // SAFETY: isolate is valid and locked (guaranteed by Lock).
+            Ok(exception) => unsafe {
+                v8::ffi::isolate_throw_exception(self.isolate().as_ffi(), exception.into_ffi());
+            },
+            Err(failure) => self.throw_internal_error(&failure.message),
         }
     }
 

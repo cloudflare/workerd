@@ -412,6 +412,23 @@ impl WebSocket {
 
 Constants are set on both the constructor and prototype as read-only, non-configurable properties per Web IDL. The name is used as-is (no camelCase conversion). Only numeric types are supported (`i8`..`i64`, `u8`..`u64`, `f32`, `f64`).
 
+## Errors
+
+A method, property or constructor that returns `Err(jsg::Error)` throws it. The error's
+`ExceptionType` picks the class: `Error`, `TypeError`, `RangeError`, `ReferenceError` and
+`SyntaxError` are the JS built-ins, and the `DOM`-prefixed types (`DOMSyntaxError`,
+`DOMAbortError`, `DOMQuotaExceededError`, ...) throw a `DOMException` with the unprefixed
+name, as the C++ `JSG_REQUIRE(..., DOMSyntaxError, ...)` error types do:
+
+```rust
+jsg_require!(valid, DOMSyntaxError, "Invalid base64");
+// JS: DOMException { name: 'SyntaxError', code: 12, message: 'Invalid base64' }
+```
+
+`FromJS` for `jsg::Error` reads a caught native error's `name` and `message`, and a
+`DOMException`'s name and message as C++ JSG stores them; a `DOMException` name without a
+DOM-prefixed type becomes `Error`.
+
 ## Fast API
 
 `#[jsg_method]` adds a V8 Fast API callback for the types in `fast_api.rs`; it must not call into V8.
