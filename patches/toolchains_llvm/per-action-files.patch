@@ -1,3 +1,26 @@
+diff --git a/toolchain/BUILD.llvm_repo.tpl b/toolchain/BUILD.llvm_repo.tpl
+--- a/toolchain/BUILD.llvm_repo.tpl
++++ b/toolchain/BUILD.llvm_repo.tpl
+@@ -42,16 +42,15 @@
+     ),
+ )
+ 
++# Without clang-scan-deps, which only C++20 module dependency scanning runs: every compile action
++# takes this group, and a remote executor fetches each of its files.
+ filegroup(
+     name = "clang",
+     srcs = [
+         "bin/clang",
+         "bin/clang++",
+         "bin/clang-cpp",
+-    ] + glob(
+-        ["bin/clang-scan-deps"],
+-        allow_empty = True,
+-    ),
++    ],
+ )
+ 
+ filegroup(
 diff --git a/toolchain/BUILD.toolchain.tpl b/toolchain/BUILD.toolchain.tpl
 --- a/toolchain/BUILD.toolchain.tpl
 +++ b/toolchain/BUILD.toolchain.tpl
