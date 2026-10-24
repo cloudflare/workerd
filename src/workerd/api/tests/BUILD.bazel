@@ -357,6 +357,17 @@ wd_test(
     ],
 )
 
+# Failed fetches and JS RPC calls record their errors on their spans.
+wd_test(
+    src = "fetch-jsrpc-span-status-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "fetch-jsrpc-span-status-test.js",
+        "fetch-jsrpc-span-status-test-tail.js",
+        "instrumentation-tail-worker.js",
+    ],
+)
+
 # Regression test: jsrpc onset.info emitted into a streaming tail worker must remain
 # serializable when forwarded over service-binding RPC, just like fetch onset.info.
 wd_test(

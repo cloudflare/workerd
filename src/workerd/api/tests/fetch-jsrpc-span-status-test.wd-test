@@ -1,0 +1,39 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+# Failed fetches and JS RPC calls record their errors on their spans, which the tail worker's test()
+# handler checks.
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "fetch-jsrpc-span-status-test", worker = .mainWorker),
+    (name = "tail", worker = .tailWorker),
+    # Nothing listens on port 1, so connecting fails.
+    (name = "unreachable", external = (address = "127.0.0.1:1", http = ())),
+  ],
+  extensions = [ (
+    modules = [
+      ( name = "test:instrumentation-tail", esModule = embed "instrumentation-tail-worker.js" ),
+    ]
+  ) ],
+);
+
+const mainWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "fetch-jsrpc-span-status-test.js")
+  ],
+  # fetch_standard_url makes a malformed Location header fail to parse.
+  compatibilityFlags = ["nodejs_compat", "experimental", "rpc", "fetch_standard_url"],
+  bindings = [
+    (name = "BACKEND", service = (name = "fetch-jsrpc-span-status-test", entrypoint = "Backend")),
+    (name = "CALLER", service = (name = "fetch-jsrpc-span-status-test", entrypoint = "Caller")),
+    (name = "UNREACHABLE", service = "unreachable"),
+  ],
+  streamingTails = ["tail"],
+);
+
+const tailWorker :Workerd.Worker = (
+  modules = [
+    (name = "worker", esModule = embed "fetch-jsrpc-span-status-test-tail.js")
+  ],
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+);
