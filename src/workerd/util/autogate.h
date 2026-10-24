@@ -130,7 +130,10 @@ namespace workerd::util {
      i18n::transcode) is provided by the Rust implementation (src/rust/i18n)                       \
      instead of the C++ implementation. The C++ implementation is retained                         \
      for rollback. */                                                                              \
-  V(NODEJS_I18N_RUST)
+  V(NODEJS_I18N_RUST)                                                                              \
+  /* Cross-context actions queued on an actor between events wait for its next request instead     \
+     of aborting it, and IoContext::run() without a current request fails with a typed error. */   \
+  V(DEFER_CROSS_CONTEXT_ACTIONS)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

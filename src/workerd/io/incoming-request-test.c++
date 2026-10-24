@@ -365,5 +365,98 @@ KJ_TEST("ambient IoContext is hidden while another V8 isolate is entered") {
   });
 }
 
+// run()'s typed failure is behind this autogate.
+kj::Array<kj::StringPtr> deferCrossContextActionsAutogate() {
+  return kj::arr("defer-cross-context-actions"_kj);
+}
+
+// Expects the run() in startRun() to throw for lack of a current request, not return a promise.
+template <typename StartRun>
+void expectThrowsForNoCurrentIncomingRequest(StartRun&& startRun) {
+  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { auto promise = startRun(); })) {
+    KJ_EXPECT(e.getDetail(NO_CURRENT_INCOMING_REQUEST_DETAIL_ID) != kj::none, e);
+  } else {
+    KJ_FAIL_EXPECT("run() returned a promise without a current IncomingRequest");
+  }
+}
+
+// Expects a run() whose request ended while it waited for a lock to reject.
+void expectRejectsForNoCurrentIncomingRequest(kj::WaitScope& waitScope, kj::Promise<void> run) {
+  KJ_IF_SOME(e, kj::runCatchingExceptions([&]() { run.wait(waitScope); })) {
+    KJ_EXPECT(e.getDetail(NO_CURRENT_INCOMING_REQUEST_DETAIL_ID) != kj::none, e);
+  } else {
+    KJ_FAIL_EXPECT("run() succeeded without a current IncomingRequest");
+  }
+}
+
+KJ_TEST("run() fails without running its callback when there is no current request") {
+  TestFixture fixture({.autogates = deferCrossContextActionsAutogate()});
+  auto context = fixture.newIoContext();
+
+  bool ran = false;
+  expectThrowsForNoCurrentIncomingRequest(
+      [&]() { return context->run([&ran](Worker::Lock&) { ran = true; }); });
+  KJ_EXPECT(!ran);
+}
+
+KJ_TEST("run() in a critical section fails when there is no current request") {
+  TestFixture fixture({.autogates = deferCrossContextActionsAutogate(),
+    .actorId = Worker::Actor::Id(kj::str("run-critical-section-test"))});
+  auto& waitScope = fixture.getWaitScope();
+  auto context = fixture.newIoContext();
+
+  auto inputLock = fixture.getActor().getInputGate().wait(nullptr).wait(waitScope);
+  auto criticalSection = inputLock.startCriticalSection();
+  kj::Maybe<kj::Rc<InputGate::CriticalSection>> runIn = criticalSection->clone();
+  bool ran = false;
+  expectThrowsForNoCurrentIncomingRequest(
+      [&]() { return context->run([&ran](Worker::Lock&) { ran = true; }, kj::mv(runIn)); });
+  KJ_EXPECT(!ran);
+}
+
+KJ_TEST("run() fails if the request is gone once the input lock is acquired") {
+  TestFixture fixture({.autogates = deferCrossContextActionsAutogate(),
+    .actorId = Worker::Actor::Id(kj::str("run-input-lock-test"))});
+  auto& waitScope = fixture.getWaitScope();
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+
+  auto inputLock = fixture.getActor().getInputGate().wait(nullptr).wait(waitScope);
+  bool ran = false;
+  auto run = context->run([&ran](Worker::Lock&) { ran = true; });
+  KJ_EXPECT(!run.poll(waitScope));
+
+  fixture.drainAndDestroy(kj::mv(request));
+  { auto released = kj::mv(inputLock); }
+  expectRejectsForNoCurrentIncomingRequest(waitScope, kj::mv(run));
+  KJ_EXPECT(!ran);
+}
+
+KJ_TEST("run() fails if the request is gone once the isolate lock is acquired") {
+  auto io = kj::setupAsyncIo();
+  // Each fixture initializes the process's autogates, so both enable it.
+  TestFixture fixture({.waitScope = io.waitScope,
+    .autogates = deferCrossContextActionsAutogate(),
+    .useRealTimers = false});
+  TestFixture other({.waitScope = io.waitScope,
+    .autogates = deferCrossContextActionsAutogate(),
+    .useRealTimers = false});
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+
+  // Holding another isolate's lock holds up the run, since a thread takes one at a time.
+  auto otherContext = other.newIoContext();
+  auto asyncLock =
+      otherContext->getWorker().takeAsyncLockWithoutRequest(nullptr).wait(io.waitScope);
+  bool ran = false;
+  auto run = context->run([&ran](Worker::Lock&) { ran = true; });
+  KJ_EXPECT(!run.poll(io.waitScope));
+
+  fixture.drainAndDestroy(kj::mv(request));
+  { auto released = kj::mv(asyncLock); }
+  expectRejectsForNoCurrentIncomingRequest(io.waitScope, kj::mv(run));
+  KJ_EXPECT(!ran);
+}
+
 }  // namespace
 }  // namespace workerd

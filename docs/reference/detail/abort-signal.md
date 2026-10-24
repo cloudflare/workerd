@@ -58,10 +58,11 @@ isolate lock, always in the IoContext current at registration time:
 
 - Abort triggered in that context: `fn` runs synchronously during the abort.
 - Abort triggered elsewhere (another request, or no request): delivery is deferred into the
-  owning context via `IoCrossContextExecutor::tryExecute` and runs on its next turn. The
-  deferred task re-takes the registration slot on arrival, so a consumer that went away in
-  the meantime turns the delivery into a guaranteed no-op.
-- Owning context already destroyed: the delivery is silently dropped — everything the action
+  owning context via `IoCrossContextExecutor::tryExecute` and runs on its next turn (with the
+  `DEFER_CROSS_CONTEXT_ACTIONS` autogate, an idle actor's next event). The deferred task
+  re-takes the registration slot on arrival, so a consumer that went away in the meantime
+  turns the delivery into a guaranteed no-op.
+- Owning context destroyed before delivery: the delivery is dropped — everything the action
   wanted to touch died with the context.
 
 Dropping the returned handle (safe from any thread) guarantees `fn` never runs again, so
@@ -110,6 +111,11 @@ registrations (asserted by `crossRequestRegistrationChurn` in
 Cells hold no JS-heap references and need no GC visitation; abort algorithms do, and are
 visited by the signal.
 
+Deferred deliveries of one abort share a single copy of its exception, and its RPC clones share
+one serialized reason. Deliveries can wait in a queue (for an idle actor, until its next
+event), so each copy counts as external memory until its last delivery is done (asserted in
+`src/workerd/api/abort-signal-test.c++`).
+
 ## Signals received over RPC
 
 A deserialized signal's pending abort reason arrives through a mutex-guarded, atomically
@@ -119,11 +125,12 @@ answer correctly even for signals that crossed request boundaries before the abo
 processed. Actually *reacting* to the abort (running `triggerAbort`) requires the
 subscription armed via `subscribeToRpcAbort()`, which happens automatically when an `abort`
 listener, `onabort` handler, or any native registration is added. Only the receiving
-request's context can arm it — the underlying promise belongs to that request — so arming
+request's context can arm it — the underlying promise belongs to that context — so arming
 requested from any other context is routed there through the signal's
-`IoCrossContextExecutor` and takes effect on the receiving request's next turn. If the
-receiving request is already gone, the routing is dropped: no delivery is possible anymore.
-Polling stays accurate regardless: the box holds any abort the peer delivered before the
-receiving request ended, and a signal whose trigger capability is dropped without an abort
-never aborts. Registrations made after that point observe a delivered abort through the
-already-aborted pre-checks instead.
+`IoCrossContextExecutor` and takes effect on that context's next turn (with the
+`DEFER_CROSS_CONTEXT_ACTIONS` autogate, an idle actor's next event; the signal queues at most
+one such request). If the receiving IoContext is destroyed first, the routing is dropped: no
+delivery is possible anymore. Polling stays accurate regardless: the box holds any abort the
+peer delivered before the receiving request ended, and a signal whose trigger capability is
+dropped without an abort never aborts. Registrations made after that point observe a delivered
+abort through the already-aborted pre-checks instead.
