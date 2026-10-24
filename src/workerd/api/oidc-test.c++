@@ -33,11 +33,13 @@ class RecordingOidcFactory final: public TestFixture::DummyIoChannelFactory {
 KJ_TEST("OIDC binding passes fixed assignment and freshness to the current host") {
   kj::Vector<IoChannelFactory::OidcTokenRequest> requests;
   uint identity = 0;
+  uint subrequests = 0;
   TestFixture fixture({
     .ioChannelFactory = kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)>(
         [&](TimerChannel& timer) -> kj::Rc<IoChannelFactory> {
     return kj::rc<RecordingOidcFactory>(timer, requests, ++identity);
   }),
+    .checkedSubrequestCount = subrequests,
   });
   for (auto assignment: {"orders"_kj, "inference"_kj}) {
     fixture.runInIoContext([&](const TestFixture::Environment& env) {
@@ -52,6 +54,7 @@ KJ_TEST("OIDC binding passes fixed assignment and freshness to the current host"
     KJ_EXPECT(KJ_ASSERT_NONNULL(requests.back().audience) == "urn:example:recipient");
   }
   KJ_EXPECT(requests.size() == 2);
+  KJ_EXPECT(subrequests == 2);
 }
 
 KJ_TEST("OIDC saved binding uses the current host on every call") {
