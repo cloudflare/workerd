@@ -1,0 +1,27 @@
+diff --git a/toolchain/BUILD.toolchain.tpl b/toolchain/BUILD.toolchain.tpl
+--- a/toolchain/BUILD.toolchain.tpl
++++ b/toolchain/BUILD.toolchain.tpl
+@@ -25,9 +25,11 @@
+ # between different toolchains.
+ 
+ # Tools wrapped and symlinked through this repo. This target is for internal use in the toolchain only.
++# It holds only the wrappers: each toolchain filegroup lists the distribution binaries its actions
++# run, so an action doesn't carry every wrapped tool (clang-tidy, clangd, ...) to a remote executor.
+ filegroup(
+     name = "internal-use-tools",
+-    srcs = ["%{tools_dir}"] + [%{tool_inputs}],
++    srcs = ["%{tools_dir}"],
+     visibility = ["//visibility:private"],
+ )
+ 
+diff --git a/toolchain/internal/configure.bzl b/toolchain/internal/configure.bzl
+--- a/toolchain/internal/configure.bzl
++++ b/toolchain/internal/configure.bzl
+@@ -898,7 +898,6 @@
+ filegroup(
+     name = "all-components-{suffix}",
+     srcs = [
+-        "{toolchain_root}:bin",
+         ":compiler-components-{suffix}",
+         ":linker-components-{suffix}",
+     ],

@@ -1,0 +1,70 @@
+# The Linux C/C++ toolchain: LLVM's release build of clang, lld and libc++, over Chromium's Debian
+# bullseye sysroot (glibc 2.31), so Linux builds take no compiler, linker, headers or libraries from
+# the host. macOS builds keep Xcode's toolchain (apple_support).
+bazel_dep(name = "toolchains_llvm", version = "1.12.0")
+single_version_override(
+    module_name = "toolchains_llvm",
+    patch_strip = 1,
+    patches = ["//:patches/toolchains_llvm/per-action-files.patch"],
+)
+
+# Chromium's sysroots, pared down to the C library, kernel headers and GCC runtime support.
+# https://chromium.googlesource.com/chromium/src/+/main/build/linux/sysroot_scripts/sysroots.json
+sysroot = use_repo_rule("//:build/sysroot.bzl", "sysroot")
+
+SYSROOT_PACKAGES = [
+    "libatomic1",
+    "libc6",
+    "libc6-dev",
+    "libcrypt-dev",
+    "libcrypt1",
+    "libgcc-10-dev",
+    "libgcc-s1",
+    "linux-libc-dev",
+]
+
+sysroot(
+    name = "sysroot_linux_x86_64",
+    packages = SYSROOT_PACKAGES,
+    sha256 = "f851add76bdae472fb6c94b4f920bc4a132d85ac607951391297f636af7e934e",
+    urls = ["https://commondatastorage.googleapis.com/chrome-linux-sysroot/f851add76bdae472fb6c94b4f920bc4a132d85ac607951391297f636af7e934e"],
+)
+
+sysroot(
+    name = "sysroot_linux_aarch64",
+    packages = SYSROOT_PACKAGES,
+    sha256 = "278c36fe3a785d7f89fbe3f46956899a3bd49fe665f68dc667d6f626a951fcd6",
+    urls = ["https://commondatastorage.googleapis.com/chrome-linux-sysroot/278c36fe3a785d7f89fbe3f46956899a3bd49fe665f68dc667d6f626a951fcd6"],
+)
+
+# One toolchain per Linux CPU. exec_os and exec_arch make each download the Linux distribution
+# whatever the host is, so a macOS client can build on Linux remote executors (--config=bazelflare).
+llvm = use_extension("@toolchains_llvm//toolchain/extensions:llvm.bzl", "llvm")
+llvm.toolchain(
+    name = "llvm_linux_x86_64",
+    exec_arch = "x86_64",
+    exec_os = "linux",
+    llvm_version = "22.1.8",
+)
+llvm.sysroot(
+    name = "llvm_linux_x86_64",
+    label = "@sysroot_linux_x86_64//sysroot",
+    targets = ["linux-x86_64"],
+)
+llvm.toolchain(
+    name = "llvm_linux_aarch64",
+    exec_arch = "aarch64",
+    exec_os = "linux",
+    llvm_version = "22.1.8",
+)
+llvm.sysroot(
+    name = "llvm_linux_aarch64",
+    label = "@sysroot_linux_aarch64//sysroot",
+    targets = ["linux-aarch64"],
+)
+use_repo(llvm, "llvm_linux_aarch64", "llvm_linux_x86_64")
+
+register_toolchains(
+    "@llvm_linux_x86_64//:all",
+    "@llvm_linux_aarch64//:all",
+)

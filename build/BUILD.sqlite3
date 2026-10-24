@@ -42,6 +42,17 @@ GENERATED_SOURCES = []
 # We have not set SQLITE_SMALL_STACK, so this Bazel-build file does
 # not bother with tool/vdbe-compress.tcl.
 
+# The JimTcl bundled with SQLite runs its code generators, as in SQLite's own build (main.mk), so the
+# host needs no Tcl. -DHAVE_REALPATH makes [file normalize] work, which the generators rely on.
+cc_binary(
+    name = "jimsh",
+    srcs = ["autosetup/jimsh0.c"],
+    copts = [
+        "-w",
+        "-DHAVE_REALPATH",
+    ],
+)
+
 cc_binary(
     name = "lemon",
     srcs = ["tool/lemon.c"],
@@ -152,8 +163,9 @@ genrule(
         "&& cp $(location ext/fts5/tool/mkfts5c.tcl) $(RULEDIR)/build/ext/fts5/tool " +
 
         # Okay, go.
+        "&& cp $(execpath :jimsh) $(RULEDIR)/build/jimsh " +
         "&& pushd $(RULEDIR)/build >/dev/null " +
-        "&& tclsh ext/fts5/tool/mkfts5c.tcl " +
+        "&& ./jimsh ext/fts5/tool/mkfts5c.tcl " +
         "&& popd >/dev/null " +
 
         # Put the outputs where Bazel will see them.
@@ -164,6 +176,7 @@ genrule(
     ),
     tools = [
         "ext/fts5/tool/mkfts5c.tcl",
+        ":jimsh",
     ],
 )
 
@@ -179,8 +192,11 @@ genrule(
         "src/vdbe.c",
     ],
     outs = ["opcodes.h"],
-    cmd = "cat $(location parse.h) $(location src/vdbe.c) | tclsh $(location tool/mkopcodeh.tcl) > $(RULEDIR)/opcodes.h",
-    tools = ["tool/mkopcodeh.tcl"],
+    cmd = "cat $(location parse.h) $(location src/vdbe.c) | $(execpath :jimsh) $(location tool/mkopcodeh.tcl) > $(RULEDIR)/opcodes.h",
+    tools = [
+        "tool/mkopcodeh.tcl",
+        ":jimsh",
+    ],
 )
 
 GENERATED_SOURCES += ["opcodes.h"]
@@ -189,8 +205,11 @@ genrule(
     name = "opcodes_c",
     srcs = ["opcodes.h"],
     outs = ["opcodes.c"],
-    cmd = "tclsh $(location tool/mkopcodec.tcl) $(location opcodes.h) > $(RULEDIR)/opcodes.c",
-    tools = ["tool/mkopcodec.tcl"],
+    cmd = "$(execpath :jimsh) $(location tool/mkopcodec.tcl) $(location opcodes.h) > $(RULEDIR)/opcodes.c",
+    tools = [
+        "tool/mkopcodec.tcl",
+        ":jimsh",
+    ],
 )
 
 GENERATED_SOURCES += ["opcodes.c"]
@@ -217,8 +236,11 @@ genrule(
     name = "ctime_c",
     srcs = [],
     outs = ["ctime.c"],
-    cmd = "tclsh $(location tool/mkctimec.tcl) $(RULEDIR)/ctime.c",
-    tools = ["tool/mkctimec.tcl"],
+    cmd = "$(execpath :jimsh) $(location tool/mkctimec.tcl) $(RULEDIR)/ctime.c",
+    tools = [
+        "tool/mkctimec.tcl",
+        ":jimsh",
+    ],
 )
 
 GENERATED_SOURCES += ["ctime.c"]
@@ -230,8 +252,11 @@ genrule(
     name = "pragma_h",
     srcs = [],
     outs = ["pragma.h"],
-    cmd = "tclsh $(location tool/mkpragmatab.tcl) $(RULEDIR)/pragma.h",
-    tools = ["tool/mkpragmatab.tcl"],
+    cmd = "$(execpath :jimsh) $(location tool/mkpragmatab.tcl) $(RULEDIR)/pragma.h",
+    tools = [
+        "tool/mkpragmatab.tcl",
+        ":jimsh",
+    ],
 )
 
 GENERATED_SOURCES += ["pragma.h"]
@@ -284,8 +309,9 @@ genrule(
         "&& cp $(execpath :mksourceid) $(RULEDIR)/build/mksourceid " +
 
         # Okay, go.
+        "&& cp $(execpath :jimsh) $(RULEDIR)/build/jimsh " +
         "&& pushd $(RULEDIR)/build >/dev/null " +
-        "&& tclsh mksqlite3h.tcl . > ../sqlite3.h " +
+        "&& ./jimsh mksqlite3h.tcl . > ../sqlite3.h " +
         "&& popd >/dev/null " +
 
         # Done. Clean up after ourselves.
@@ -293,6 +319,7 @@ genrule(
     ),
     tools = [
         "tool/mksqlite3h.tcl",
+        ":jimsh",
         ":mksourceid",
     ],
 )
@@ -330,8 +357,9 @@ genrule(
         # This step ("make sqlite3c") is where the SQLite Makefile
         # would also construct tclsqlite3.c, but we don't use that
         # file, so we don't bother building it.
+        "&& cp $(execpath :jimsh) $(RULEDIR)/build/jimsh " +
         "&& pushd $(RULEDIR)/build >/dev/null " +
-        "&& tclsh tool/mksqlite3c.tcl " +
+        "&& ./jimsh tool/mksqlite3c.tcl " +
         "&& popd >/dev/null " +
 
         # Copy the outputs somewhere that Bazel will find them.
@@ -342,6 +370,7 @@ genrule(
     ),
     tools = [
         "tool/mksqlite3c.tcl",
+        ":jimsh",
     ],
 )
 # ========================================================================

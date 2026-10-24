@@ -531,19 +531,20 @@ def _wpt_server_entrypoint_impl(ctx):
     We generate a script because Bazel doesn't want arguments in this context, and we use a custom
     rule to do so because we want more control over paths and dependencies than with a genrule.
     """
+    python = ctx.toolchains["@rules_python//python:toolchain_type"].py3_runtime
     start_src = ctx.actions.declare_file("start.sh")
     ctx.actions.write(
         output = start_src,
         is_executable = True,
         content = WPT_ENTRYPOINT_SCRIPT_TEMPLATE.format(
-            python = ctx.file.python.short_path,
+            python = python.interpreter.short_path,
         ),
     )
 
     return DefaultInfo(
         runfiles = ctx.runfiles(
             files = [start_src],
-            transitive_files = depset(ctx.files.srcs + [ctx.file.python]),
+            transitive_files = depset(ctx.files.srcs, transitive = [python.files]),
         ),
         executable = start_src,
     )
@@ -551,11 +552,10 @@ def _wpt_server_entrypoint_impl(ctx):
 wpt_server_entrypoint = rule(
     implementation = _wpt_server_entrypoint_impl,
     attrs = {
-        # Python interpreter to use to run the WPT server
-        "python": attr.label(allow_single_file = True),
         # All the Python code that should be visible
         "srcs": attr.label_list(allow_files = True),
     },
+    toolchains = ["@rules_python//python:toolchain_type"],
 )
 
 ### Path manipulation
