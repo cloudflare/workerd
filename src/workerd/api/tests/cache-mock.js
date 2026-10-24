@@ -39,6 +39,10 @@ export default {
       if (url.pathname.includes('delete-exists')) {
         return new Response(null, { status: 200 });
       }
+      // Simulate rate limiting
+      if (url.pathname.includes('delete-rate-limited')) {
+        return new Response(null, { status: 429 });
+      }
       // Simulate not found
       return new Response(null, { status: 404 });
     }

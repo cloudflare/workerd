@@ -890,5 +890,66 @@ KJ_TEST("SpanContext::toTraceparent is none for zero ids") {
   KJ_EXPECT(zeroSpan.toTraceparent() == kj::none);
 }
 
+// Records the exceptions and statuses reported for a span.
+class ErrorRecordingSpanObserver final: public SpanObserver {
+ public:
+  kj::Rc<SpanObserver> newChild() override {
+    return {};
+  }
+  void onOpen(kj::ConstString operationName, kj::Date startTime) override {}
+  void onClose(kj::Date endTime, Span::TagMap&& tags, kj::Vector<Span::Log>&& logs) override {}
+  void onException(kj::Date timestamp,
+      kj::Maybe<Exception::Code> code,
+      kj::String name,
+      kj::String message,
+      kj::Maybe<kj::String> stack) override {
+    exceptions.add(ErrorInfo(kj::mv(name), kj::mv(message), kj::mv(stack)));
+  }
+  void onUpdateStatus(SpanStatus&& status) override {
+    statuses.add(kj::mv(status));
+  }
+
+  kj::Vector<ErrorInfo> exceptions;
+  kj::Vector<SpanStatus> statuses;
+};
+
+KJ_TEST("SpanBuilder::recordError records an exception and an error status") {
+  auto observer = kj::rc<ErrorRecordingSpanObserver>();
+  SpanBuilder span(observer.addRef(), "operation"_kjc);
+  span.recordError(ErrorInfo(kj::str("TypeError"), kj::str("bad input"), kj::str("at foo")));
+
+  KJ_ASSERT(observer->exceptions.size() == 1);
+  KJ_EXPECT(observer->exceptions[0].name == "TypeError");
+  KJ_EXPECT(observer->exceptions[0].message == "bad input");
+  KJ_EXPECT(KJ_ASSERT_NONNULL(observer->exceptions[0].stack) == "at foo");
+  KJ_ASSERT(observer->statuses.size() == 1);
+  KJ_EXPECT(observer->statuses[0].getCode() == SpanStatusCode::ERROR);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(observer->statuses[0].getMessage()) == "bad input");
+
+  // Ignored once the span has ended.
+  span.end();
+  span.recordError(ErrorInfo(kj::str("Error"), kj::str("too late"), kj::none));
+  KJ_EXPECT(observer->exceptions.size() == 1);
+  KJ_EXPECT(observer->statuses.size() == 1);
+}
+
+KJ_TEST("SpanBuilder::recordError truncates the status message on a UTF-8 boundary") {
+  constexpr size_t limit = SpanBuilder::MAX_ERROR_STATUS_MESSAGE_BYTES;
+  auto prefix = kj::heapString(limit - 1);
+  memset(prefix.begin(), 'a', prefix.size());
+  // The two-byte "é" straddles the limit, so it is dropped entirely.
+  auto message = kj::str(prefix, "é and more");
+
+  auto observer = kj::rc<ErrorRecordingSpanObserver>();
+  SpanBuilder span(observer.addRef(), "operation"_kjc);
+  span.recordError(ErrorInfo(kj::str("Error"), kj::str(message), kj::none));
+
+  KJ_ASSERT(observer->statuses.size() == 1);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(observer->statuses[0].getMessage()) == prefix);
+  // The exception keeps the full message.
+  KJ_ASSERT(observer->exceptions.size() == 1);
+  KJ_EXPECT(observer->exceptions[0].message == message);
+}
+
 }  // namespace
 }  // namespace workerd::tracing

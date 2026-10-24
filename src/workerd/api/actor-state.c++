@@ -254,10 +254,12 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::get(jsg::
   auto options = configureOptions(kj::mv(maybeOptions).orDefault(GetOptions{}));
   KJ_SWITCH_ONEOF(keys) {
     KJ_CASE_ONEOF(s, kj::String) {
-      return context.attachSpans(js, getOne(js, kj::mv(s), options), kj::mv(traceContext));
+      return context.withSpan(
+          js, kj::mv(traceContext), [&](TraceContext&) { return getOne(js, kj::mv(s), options); });
     }
     KJ_CASE_ONEOF(a, kj::Array<kj::String>) {
-      return context.attachSpans(js, getMultiple(js, kj::mv(a), options), kj::mv(traceContext));
+      return context.withSpan(js, kj::mv(traceContext),
+          [&](TraceContext&) { return getMultiple(js, kj::mv(a), options); });
     }
   }
   KJ_UNREACHABLE
@@ -285,23 +287,25 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::getOne(
 jsg::Promise<kj::Maybe<double>> DurableObjectStorageOperations::getAlarm(
     jsg::Lock& js, jsg::Optional<GetAlarmOptions> maybeOptions) {
   auto& context = IoContext::current();
-  auto traceContext =
-      context.addObject(kj::heap(context.makeUserTraceSpan("durable_object_storage_getAlarm"_kjc)));
+  auto traceContext = context.makeUserTraceSpan("durable_object_storage_getAlarm"_kjc);
   // Even if we do not have an alarm handler, we might once have had one. It's fine to return
   // whatever a previous alarm setting or a falsy result.
   auto options = configureOptions(maybeOptions
                                       .map([](auto& o) {
     return GetOptions{.allowConcurrency = o.allowConcurrency, .noCache = false};
   }).orDefault(GetOptions{}));
-  auto result = getCache(OP_GET_ALARM).getAlarm(options);
 
-  return transformCacheResult(js, kj::mv(result), options,
-      [traceContext = kj::mv(traceContext)](jsg::Lock& js, kj::Maybe<kj::Date> date) mutable {
-    return date.map([&](auto& date) {
-      auto scheduledTime = (date - kj::UNIX_EPOCH) / kj::MILLISECONDS;
-      traceContext->setTag(
-          "cloudflare.durable_object.alarm.scheduled_time"_kjc, js.date(date).toISOString(js));
-      return static_cast<double>(scheduledTime);
+  return context.withSpan(js, kj::mv(traceContext), [&](TraceContext& traceContext) {
+    auto result = getCache(OP_GET_ALARM).getAlarm(options);
+
+    return transformCacheResult(
+        js, kj::mv(result), options, [&traceContext](jsg::Lock& js, kj::Maybe<kj::Date> date) {
+      return date.map([&](auto& date) {
+        auto scheduledTime = (date - kj::UNIX_EPOCH) / kj::MILLISECONDS;
+        traceContext.setTag(
+            "cloudflare.durable_object.alarm.scheduled_time"_kjc, js.date(date).toISOString(js));
+        return static_cast<double>(scheduledTime);
+      });
     });
   });
 }
@@ -415,18 +419,19 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorageOperations::list(
     jsg::Lock& js, jsg::Optional<ListOptions> maybeOptions) {
   auto& context = IoContext::current();
   auto traceContext = context.makeUserTraceSpan("durable_object_storage_list"_kjc);
-  auto [start, end, reverse, limit] = KJ_UNWRAP_OR(compileListOptions(maybeOptions),
-      { return js.resolvedPromise(jsg::JsValue(js.map()).addRef(js)); });
+  return context.withSpan(
+      js, kj::mv(traceContext), [&](TraceContext&) -> jsg::Promise<jsg::JsRef<jsg::JsValue>> {
+    auto [start, end, reverse, limit] = KJ_UNWRAP_OR(compileListOptions(maybeOptions),
+        { return js.resolvedPromise(jsg::JsValue(js.map()).addRef(js)); });
 
-  auto options = configureOptions(kj::mv(maybeOptions).orDefault(ListOptions{}));
-  ActorCacheOps::ReadOptions readOptions = options;
+    auto options = configureOptions(kj::mv(maybeOptions).orDefault(ListOptions{}));
+    ActorCacheOps::ReadOptions readOptions = options;
 
-  auto result = reverse
-      ? getCache(OP_LIST).listReverse(kj::mv(start), kj::mv(end), limit, readOptions)
-      : getCache(OP_LIST).list(kj::mv(start), kj::mv(end), limit, readOptions);
-  return context.attachSpans(js,
-      transformCacheResultWithCacheStatus(js, kj::mv(result), options, &listResultsToMap),
-      kj::mv(traceContext));
+    auto result = reverse
+        ? getCache(OP_LIST).listReverse(kj::mv(start), kj::mv(end), limit, readOptions)
+        : getCache(OP_LIST).list(kj::mv(start), kj::mv(end), limit, readOptions);
+    return transformCacheResultWithCacheStatus(js, kj::mv(result), options, &listResultsToMap);
+  });
 }
 
 jsg::Promise<void> DurableObjectStorageOperations::put(jsg::Lock& js,
@@ -436,35 +441,34 @@ jsg::Promise<void> DurableObjectStorageOperations::put(jsg::Lock& js,
     const jsg::TypeHandler<PutOptions>& optionsTypeHandler) {
   auto& context = IoContext::current();
   auto traceContext = context.makeUserTraceSpan("durable_object_storage_put"_kjc);
-  // TODO(soon): Add tests of data generated at current versions to ensure we'll
-  // know before releasing any backwards-incompatible serializer changes,
-  // potentially checking the header in addition to the value.
-  auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
-  KJ_SWITCH_ONEOF(keyOrEntries) {
-    KJ_CASE_ONEOF(k, kj::String) {
-      KJ_IF_SOME(v, value) {
-        return context.attachSpans(js, putOne(js, kj::mv(k), v, options), kj::mv(traceContext));
-      } else {
-        JSG_FAIL_REQUIRE(TypeError, "put() called with undefined value.");
-      }
-    }
-    KJ_CASE_ONEOF(o, jsg::Dict<jsg::JsValue>) {
-      KJ_IF_SOME(v, value) {
-        KJ_IF_SOME(opt, optionsTypeHandler.tryUnwrap(js, v)) {
-          // return putMultiple(js, kj::mv(o), configureOptions(kj::mv(opt)));
-          return context.attachSpans(
-              js, putMultiple(js, kj::mv(o), configureOptions(kj::mv(opt))), kj::mv(traceContext));
+  return context.withSpan(js, kj::mv(traceContext), [&](TraceContext&) -> jsg::Promise<void> {
+    // TODO(soon): Add tests of data generated at current versions to ensure we'll
+    // know before releasing any backwards-incompatible serializer changes,
+    // potentially checking the header in addition to the value.
+    auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
+    KJ_SWITCH_ONEOF(keyOrEntries) {
+      KJ_CASE_ONEOF(k, kj::String) {
+        KJ_IF_SOME(v, value) {
+          return putOne(js, kj::mv(k), v, options);
         } else {
-          JSG_FAIL_REQUIRE(TypeError,
-              "put() may only be called with a single key-value pair and optional options as put(key, value, options) or with multiple key-value pairs and optional options as put(entries, options)");
+          JSG_FAIL_REQUIRE(TypeError, "put() called with undefined value.");
         }
-      } else {
-        // return putMultiple(js, kj::mv(o), options);
-        return context.attachSpans(js, putMultiple(js, kj::mv(o), options), kj::mv(traceContext));
+      }
+      KJ_CASE_ONEOF(o, jsg::Dict<jsg::JsValue>) {
+        KJ_IF_SOME(v, value) {
+          KJ_IF_SOME(opt, optionsTypeHandler.tryUnwrap(js, v)) {
+            return putMultiple(js, kj::mv(o), configureOptions(kj::mv(opt)));
+          } else {
+            JSG_FAIL_REQUIRE(TypeError,
+                "put() may only be called with a single key-value pair and optional options as put(key, value, options) or with multiple key-value pairs and optional options as put(entries, options)");
+          }
+        } else {
+          return putMultiple(js, kj::mv(o), options);
+        }
       }
     }
-  }
-  KJ_UNREACHABLE;
+    KJ_UNREACHABLE;
+  });
 }
 
 jsg::Promise<void> DurableObjectStorageOperations::setAlarm(
@@ -476,34 +480,37 @@ jsg::Promise<void> DurableObjectStorageOperations::setAlarm(
   auto traceContext = context.makeUserTraceSpan("durable_object_storage_setAlarm"_kjc);
   traceContext.setTag(
       "cloudflare.durable_object.alarm.scheduled_time"_kjc, js.date(scheduledTime).toISOString(js));
-  // This doesn't check if we have an alarm handler per say. It checks if we have an initialized
-  // (post-ctor) JS durable object with an alarm handler. Notably, this means this won't throw if
-  // `setAlarm` is invoked in the DO ctor even if the DO class does not have an alarm handler. This
-  // is better than throwing even if we do have an alarm handler.
-  context.getActorOrThrow().assertCanSetAlarm();
+  return context.withSpan(js, kj::mv(traceContext), [&](TraceContext&) {
+    // This doesn't check if we have an alarm handler per say. It checks if we have an initialized
+    // (post-ctor) JS durable object with an alarm handler. Notably, this means this won't throw if
+    // `setAlarm` is invoked in the DO ctor even if the DO class does not have an alarm handler.
+    // This is better than throwing even if we do have an alarm handler.
+    context.getActorOrThrow().assertCanSetAlarm();
 
-  auto options = configureOptions(maybeOptions
-                                      .map([](auto& o) {
-    return PutOptions{.allowConcurrency = o.allowConcurrency,
-      .allowUnconfirmed = o.allowUnconfirmed,
-      .noCache = false};
-  }).orDefault(PutOptions{}));
+    auto options = configureOptions(maybeOptions
+                                        .map([](auto& o) {
+      return PutOptions{.allowConcurrency = o.allowConcurrency,
+        .allowUnconfirmed = o.allowUnconfirmed,
+        .noCache = false};
+    }).orDefault(PutOptions{}));
 
-  // We fudge times set in the past to Date.now() to ensure that any one user can't DDOS the alarm
-  // polling system by putting dates far in the past and therefore getting sorted earlier by the index.
-  // This also ensures uniqueness of alarm times (which is required for correctness),
-  // in the situation where customers use a constant date in the past to indicate
-  // they want immediate execution.
-  kj::Date dateNowKjDate = static_cast<int64_t>(dateNow()) * kj::MILLISECONDS + kj::UNIX_EPOCH;
+    // We fudge times set in the past to Date.now() to ensure that any one user can't DDOS the
+    // alarm polling system by putting dates far in the past and therefore getting sorted earlier
+    // by the index. This also ensures uniqueness of alarm times (which is required for
+    // correctness), in the situation where customers use a constant date in the past to indicate
+    // they want immediate execution.
+    kj::Date dateNowKjDate = static_cast<int64_t>(dateNow()) * kj::MILLISECONDS + kj::UNIX_EPOCH;
 
-  auto maybeBackpressure = transformMaybeBackpressure(js, options,
-      getCache(OP_PUT_ALARM)
-          .setAlarm(kj::max(scheduledTime, dateNowKjDate), options, context.getCurrentTraceSpan()));
+    auto maybeBackpressure = transformMaybeBackpressure(js, options,
+        getCache(OP_PUT_ALARM)
+            .setAlarm(
+                kj::max(scheduledTime, dateNowKjDate), options, context.getCurrentTraceSpan()));
 
-  // setAlarm() is billed as a single write unit.
-  context.addTask(updateStorageWriteUnit(context, currentActorMetrics(), 1));
+    // setAlarm() is billed as a single write unit.
+    context.addTask(updateStorageWriteUnit(context, currentActorMetrics(), 1));
 
-  return context.attachSpans(js, kj::mv(maybeBackpressure), kj::mv(traceContext));
+    return maybeBackpressure;
+  });
 }
 
 jsg::Promise<void> DurableObjectStorageOperations::putOne(
@@ -531,10 +538,12 @@ kj::OneOf<jsg::Promise<bool>, jsg::Promise<int>> DurableObjectStorageOperations:
   auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
   KJ_SWITCH_ONEOF(keys) {
     KJ_CASE_ONEOF(s, kj::String) {
-      return context.attachSpans(js, deleteOne(js, kj::mv(s), options), kj::mv(traceContext));
+      return context.withSpan(js, kj::mv(traceContext),
+          [&](TraceContext&) { return deleteOne(js, kj::mv(s), options); });
     }
     KJ_CASE_ONEOF(a, kj::Array<kj::String>) {
-      return context.attachSpans(js, deleteMultiple(js, kj::mv(a), options), kj::mv(traceContext));
+      return context.withSpan(js, kj::mv(traceContext),
+          [&](TraceContext&) { return deleteMultiple(js, kj::mv(a), options); });
     }
   }
   KJ_UNREACHABLE
@@ -553,10 +562,10 @@ jsg::Promise<void> DurableObjectStorageOperations::deleteAlarm(
       .noCache = false};
   }).orDefault(PutOptions{}));
 
-  return context.attachSpans(js,
-      transformMaybeBackpressure(js, options,
-          getCache(OP_DELETE_ALARM).setAlarm(kj::none, options, context.getCurrentTraceSpan())),
-      kj::mv(traceContext));
+  return context.withSpan(js, kj::mv(traceContext), [&](TraceContext&) {
+    return transformMaybeBackpressure(js, options,
+        getCache(OP_DELETE_ALARM).setAlarm(kj::none, options, context.getCurrentTraceSpan()));
+  });
 }
 
 jsg::Promise<void> DurableObjectStorage::deleteAll(
@@ -565,16 +574,16 @@ jsg::Promise<void> DurableObjectStorage::deleteAll(
   auto traceContext = context.makeUserTraceSpan("durable_object_storage_deleteAll"_kjc);
   auto options = configureOptions(kj::mv(maybeOptions).orDefault(PutOptions{}));
 
-  DeleteAllOptions deleteAllOptions{
-    .deleteAlarm = FeatureFlags::get(js).getDeleteAllDeletesAlarm(),
-  };
-  auto deleteAll = cache->deleteAll(options, context.getCurrentTraceSpan(), deleteAllOptions);
+  return context.withSpan(js, kj::mv(traceContext), [&](TraceContext&) {
+    DeleteAllOptions deleteAllOptions{
+      .deleteAlarm = FeatureFlags::get(js).getDeleteAllDeletesAlarm(),
+    };
+    auto deleteAll = cache->deleteAll(options, context.getCurrentTraceSpan(), deleteAllOptions);
 
-  context.addTask(updateStorageDeletes(context, currentActorMetrics(), kj::mv(deleteAll.count)));
+    context.addTask(updateStorageDeletes(context, currentActorMetrics(), kj::mv(deleteAll.count)));
 
-  return context.attachSpans(js,
-      transformMaybeBackpressure(js, options, kj::mv(deleteAll.backpressure)),
-      kj::mv(traceContext));
+    return transformMaybeBackpressure(js, options, kj::mv(deleteAll.backpressure));
+  });
 }
 
 void DurableObjectTransaction::deleteAll() {
@@ -664,22 +673,20 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorage::transaction(jsg::Lo
   auto& context = IoContext::current();
   auto traceContext = context.makeUserTraceSpan("durable_object_storage_transaction"_kjc);
 
-  return context.attachSpans(js,
-      context
-          .blockConcurrencyWhile(js,
-              [callback = kj::mv(callback), &cache = *cache](
-                  jsg::Lock& js, IoContext& context) mutable -> jsg::Promise<AsyncTxnResult> {
-    return asyncTransactionImpl(js, context, cache, kj::mv(callback));
-  })
-          .then(js,
-              [](jsg::Lock& js, AsyncTxnResult result) -> jsg::JsRef<jsg::JsValue> {
-    if (result.isError) {
-      js.throwException(result.value.getHandle(js));
-    } else {
-      return kj::mv(result.value);
-    }
-  }),
-      kj::mv(traceContext));
+  return context.withSpan(js, kj::mv(traceContext), [&](TraceContext&) {
+    return context
+        .blockConcurrencyWhile(js,
+            [callback = kj::mv(callback), &cache = *cache](
+                jsg::Lock& js, IoContext& context) mutable -> jsg::Promise<AsyncTxnResult> {
+      return asyncTransactionImpl(js, context, cache, kj::mv(callback));
+    }).then(js, [](jsg::Lock& js, AsyncTxnResult result) -> jsg::JsRef<jsg::JsValue> {
+      if (result.isError) {
+        js.throwException(result.value.getHandle(js));
+      } else {
+        return kj::mv(result.value);
+      }
+    });
+  });
 }
 
 jsg::Promise<DurableObjectStorage::AsyncTxnResult> DurableObjectStorage::asyncTransactionImpl(
@@ -786,17 +793,21 @@ jsg::JsRef<jsg::JsValue> DurableObjectStorage::transactionSync(
 jsg::Promise<void> DurableObjectStorage::sync(jsg::Lock& js) {
   auto& context = IoContext::current();
   auto traceContext = context.makeUserTraceSpan("durable_object_storage_sync"_kjc);
-  KJ_IF_SOME(p, cache->onNoPendingFlush(traceContext.getInternalSpanParent())) {
-    // Note that we're not actually flushing since that will happen anyway once we go async. We're
-    // merely checking if we have any pending or in-flight operations, and providing a promise that
-    // resolves when they succeed. This promise only covers operations that were scheduled before
-    // this method was invoked. If the cache has to flush again later from future operations, this
-    // promise will resolve before they complete. If this promise were to reject, then the actor's
-    // output gate will be broken first and the isolate will not resume synchronous execution.
-    return context.attachSpans(js, context.awaitIo(js, kj::mv(p)), kj::mv(traceContext));
-  } else {
-    return js.resolvedPromise();
-  }
+  return context.withSpan(
+      js, kj::mv(traceContext), [&](TraceContext& traceContext) -> jsg::Promise<void> {
+    KJ_IF_SOME(p, cache->onNoPendingFlush(traceContext.getInternalSpanParent())) {
+      // Note that we're not actually flushing since that will happen anyway once we go async.
+      // We're merely checking if we have any pending or in-flight operations, and providing a
+      // promise that resolves when they succeed. This promise only covers operations that were
+      // scheduled before this method was invoked. If the cache has to flush again later from future
+      // operations, this promise will resolve before they complete. If this promise were to reject,
+      // then the actor's output gate will be broken first and the isolate will not resume
+      // synchronous execution.
+      return context.awaitIo(js, kj::mv(p));
+    } else {
+      return js.resolvedPromise();
+    }
+  });
 }
 
 SqliteDatabase& DurableObjectStorage::getSqliteDb(jsg::Lock& js) {
@@ -1399,27 +1410,29 @@ jsg::Promise<void> DurableObjectState::configureReadReplication(
   auto traceContext =
       context.makeUserTraceSpan("durable_object_state_configureReadReplication"_kjc);
 
-  auto& s =
-      JSG_REQUIRE_NONNULL(storage, TypeError, "This actor does not support read replication.");
+  return context.withSpan(js, kj::mv(traceContext), [&](TraceContext&) {
+    auto& s =
+        JSG_REQUIRE_NONNULL(storage, TypeError, "This actor does not support read replication.");
 
-  if (s->isReplica()) {
-    JSG_FAIL_REQUIRE(Error, "Replica Durable Objects cannot call configureReadReplication().");
-  }
-
-  bool enabled = [&]() {
-    if (options.mode == "auto"_kj) {
-      return true;
-    } else if (options.mode == "disabled"_kj) {
-      return false;
+    if (s->isReplica()) {
+      JSG_FAIL_REQUIRE(Error, "Replica Durable Objects cannot call configureReadReplication().");
     }
-    JSG_FAIL_REQUIRE(TypeError,
-        "configureReadReplication() called with unknown mode setting: ", options.mode, ".");
-  }();
 
-  auto promise =
-      s->getActorCacheInterface().configureReadReplication(ReadReplicationIsEnabled(enabled));
+    bool enabled = [&]() {
+      if (options.mode == "auto"_kj) {
+        return true;
+      } else if (options.mode == "disabled"_kj) {
+        return false;
+      }
+      JSG_FAIL_REQUIRE(TypeError,
+          "configureReadReplication() called with unknown mode setting: ", options.mode, ".");
+    }();
 
-  return context.attachSpans(js, context.awaitIo(js, kj::mv(promise)), kj::mv(traceContext));
+    auto promise =
+        s->getActorCacheInterface().configureReadReplication(ReadReplicationIsEnabled(enabled));
+
+    return context.awaitIo(js, kj::mv(promise));
+  });
 }
 
 }  // namespace workerd::api

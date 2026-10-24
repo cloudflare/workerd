@@ -16,6 +16,7 @@ export default class KVTest extends WorkerEntrypoint {
     if (pathname === '/fail-client') {
       return new Response(null, { status: 404 });
     } else if (pathname == '/fail-server') {
+      await request.arrayBuffer();
       return new Response(null, { status: 500 });
     } else if (pathname == '/get-json') {
       result = JSON.stringify({ example: 'values' });
@@ -94,6 +95,9 @@ export default class KVTest extends WorkerEntrypoint {
             keys: [],
             list_complete: true,
           });
+          break;
+        case 'fail-server':
+          return new Response(null, { status: 500 });
       }
     } else {
       // generic success for get key
@@ -360,5 +364,31 @@ export let putTest = {
     //   list_complete: true,
     //   cacheStatus: null,
     // });
+  },
+};
+
+// Failed operations, whose spans are expected to have an error status and exception.
+export let spanStatusTest = {
+  async test(ctrl, env, ctx) {
+    await assert.rejects(env.KV.put('', 'value'), {
+      name: 'TypeError',
+      message: 'Key name cannot be empty.',
+    });
+    await assert.rejects(env.KV.put('fail-server', 'value'), {
+      message: 'KV PUT failed: 500 Internal Server Error',
+    });
+    await assert.rejects(env.KV.delete(''), {
+      name: 'TypeError',
+      message: 'Key name cannot be empty.',
+    });
+    await assert.rejects(env.KV.delete('fail-server'), {
+      message: 'KV DELETE failed: 500 Internal Server Error',
+    });
+    await assert.rejects(env.KV.getWithMetadata('fail-server'), {
+      message: 'KV GET failed: 500 Internal Server Error',
+    });
+    await assert.rejects(env.KV.list({ prefix: 'fail-server' }), {
+      message: 'KV GET failed: 500 Internal Server Error',
+    });
   },
 };

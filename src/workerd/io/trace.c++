@@ -2089,6 +2089,25 @@ void SpanBuilder::recordException(kj::Maybe<tracing::Exception::Code> code,
       observer->getTime(), kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
 }
 
+void SpanBuilder::recordError(const tracing::ErrorInfo& error) {
+  if (span == kj::none) {
+    return;
+  }
+  recordException(kj::none, kj::str(error.name), kj::str(error.message),
+      error.stack.map([](const kj::String& stack) { return kj::str(stack); }));
+
+  kj::ArrayPtr<const char> message = error.message;
+  if (message.size() > MAX_ERROR_STATUS_MESSAGE_BYTES) {
+    // Back up to a code point boundary so we don't split a multi-byte UTF-8 sequence.
+    size_t end = MAX_ERROR_STATUS_MESSAGE_BYTES;
+    while (end > 0 && (static_cast<kj::byte>(message[end]) & 0xc0) == 0x80) {
+      --end;
+    }
+    message = message.first(end);
+  }
+  setStatus(tracing::SpanStatus(tracing::SpanStatusCode::ERROR, kj::ConstString(kj::str(message))));
+}
+
 void TraceContext::setTag(kj::ConstString key, SpanBuilder::TagInitValue value) {
   if (asyncTraceResource.getId() != 0) {
     kj::String text;

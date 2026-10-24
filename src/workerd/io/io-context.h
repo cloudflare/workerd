@@ -648,7 +648,8 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   jsg::PromiseForResult<Func, T, true> awaitIo(jsg::Lock& js, kj::Promise<T> promise, Func&& func);
 
   // Attach the objects to the promise by creating a continuation that holds them.
-  // This ensures the attachments stay alive until the promise resolves.
+  // This ensures the attachments stay alive until the promise settles. If the promise rejects,
+  // the error is recorded on the attached spans (see SpanBuilder::recordError()).
   // This should ONLY be used with TraceContext or SpanBuilder objects.
   //
   // Attached TraceContexts are detached from async trace adoption (TraceContext::detachAsync()):
@@ -672,19 +673,31 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <typename T, typename... Attachments>
   jsg::Promise<T> attachSpansInternalOnly(
       jsg::Lock& js, jsg::Promise<T> promise, Attachments&&... attachments) {
-    auto attachmentTuple = addObject(kj::heap(kj::tuple(kj::fwd<Attachments>(attachments)...)));
-
-    if constexpr (kj::isSameType<T, void>()) {
-      return promise.then(js, [attachmentTuple = kj::mv(attachmentTuple)](jsg::Lock&) {
-        // The attachments are kept alive in this lambda's capture
-      });
-    } else {
-      return promise.then(js, [attachmentTuple = kj::mv(attachmentTuple)](jsg::Lock&, T result) {
-        // The attachments are kept alive in this lambda's capture
-        return result;
-      });
-    }
+    return attachSpanOwner(
+        js, kj::mv(promise), addObject(kj::heap(kj::tuple(kj::fwd<Attachments>(attachments)...))));
   }
+
+  // Runs an operation traced by `traceContext`: calls `func(TraceContext&)`, which returns a
+  // jsg::Promise, and keeps `traceContext` alive until that promise settles. If `func` throws or
+  // the promise rejects, the error is recorded on the user span (see TraceContext::recordError())
+  // and then propagates unchanged.
+  //
+  // The TraceContext passed to `func` stays valid until the returned promise settles, so awaitIo()
+  // callbacks that `func` chains into the promise may capture it by reference, e.g. to tag the span
+  // with response details. As with attachSpans(), an awaitIo() called by `func` may adopt the span
+  // for async tracing, but a later one may not.
+  template <typename Func>
+  auto withSpan(jsg::Lock& js,
+      TraceContext traceContext,
+      Func&& func) -> decltype(func(kj::instance<TraceContext&>()));
+
+  // Like withSpan() with a new user span named `operationName`, but runs inside js.evalNow(),
+  // so errors thrown synchronously (including when there is no current IoContext) are returned as
+  // a rejected promise.
+  template <typename Func>
+  static auto evalNowWithSpan(jsg::Lock& js,
+      kj::ConstString operationName,
+      Func&& func) -> decltype(func(kj::instance<TraceContext&>()));
 
   // Waits for some background I/O to complete, then executes `func` on the result, returning a
   // JavaScript promise for the result of that. If no `func` is provided, no transformation is
@@ -1426,6 +1439,47 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   jsg::PromiseForResult<Func, T, true> awaitIoImpl(
       jsg::Lock& js, kj::Promise<T> promise, InputLockOrMaybeCriticalSection ilOrCs, Func&& func);
 
+  // Keeps `attachments` (a TraceContext, SpanBuilder, or tuple of them) alive until `promise`
+  // settles, and records a rejection on them.
+  template <typename T, typename Attachments>
+  jsg::Promise<T> attachSpanOwner(
+      jsg::Lock& js, jsg::Promise<T> promise, IoOwn<Attachments> attachments);
+
+  // Records `error` on each TraceContext or SpanBuilder among `attachments` (see
+  // SpanBuilder::recordError()), if any is observed. Other attachments, which
+  // attachSpansInternalOnly() accepts for tests, are skipped.
+  template <typename... Attachments>
+  static void recordSpanError(jsg::Lock& js, jsg::Value& error, Attachments&... attachments) {
+    if ((isObservedSpan(attachments) || ...)) {
+      KJ_IF_SOME(info, tryGetSpanErrorInfo(js, error)) {
+        (recordErrorIfSpan(attachments, info), ...);
+      }
+    }
+  }
+
+  template <typename T>
+  static constexpr bool isSpan() {
+    return kj::isSameType<T, TraceContext>() || kj::isSameType<T, SpanBuilder>();
+  }
+  template <typename T>
+  static bool isObservedSpan(T& attachment) {
+    if constexpr (isSpan<T>()) {
+      return attachment.isObserved();
+    } else {
+      return false;
+    }
+  }
+  template <typename T>
+  static void recordErrorIfSpan(T& attachment, const tracing::ErrorInfo& error) {
+    if constexpr (isSpan<T>()) {
+      attachment.recordError(error);
+    }
+  }
+
+  // Returns kj::none if reading the error's properties throws, so that recording an error on a
+  // span never replaces the operation's own error.
+  static kj::Maybe<tracing::ErrorInfo> tryGetSpanErrorInfo(jsg::Lock& js, jsg::Value& error);
+
   // Async trace resources for the awaitIo() and awaitJs() bridges. Inert if the context is not
   // traced.
   AsyncResource makeAwaitIoResource() const {
@@ -1964,6 +2018,59 @@ inline IoPtr<T> IoContext::addObject(T& obj) {
 template <typename T>
 inline IoOwn<T> IoContext::addObject(kj::Rc<T> obj) {
   return addObject(obj.toOwn());
+}
+
+template <typename T, typename Attachments>
+jsg::Promise<T> IoContext::attachSpanOwner(
+    jsg::Lock& js, jsg::Promise<T> promise, IoOwn<Attachments> attachments) {
+  // jsg destroys both continuations once either runs, so capturing the attachments in the error
+  // continuation keeps them alive until the promise settles either way.
+  auto onRejected = [attachments = kj::mv(attachments)](
+                        jsg::Lock& js, jsg::Value error) mutable -> T {
+    KJ_IF_SOME(a, attachments.tryGet()) {
+      kj::apply([&](auto&... attached) { recordSpanError(js, error, attached...); }, a);
+    }
+    js.throwException(kj::mv(error));
+  };
+
+  if constexpr (kj::isSameType<T, void>()) {
+    return promise.then(js, [](jsg::Lock&) {}, kj::mv(onRejected));
+  } else {
+    return promise.then(js, [](jsg::Lock&, T result) { return result; }, kj::mv(onRejected));
+  }
+}
+
+template <typename Func>
+auto IoContext::withSpan(jsg::Lock& js,
+    TraceContext traceContext,
+    Func&& func) -> decltype(func(kj::instance<TraceContext&>())) {
+  auto owned = kj::heap(kj::mv(traceContext));
+  TraceContext& span = *owned;
+  auto owner = addObject(kj::mv(owned));
+
+  auto promise = [&]() {
+    if (!span.isObserved()) {
+      return func(span);
+    }
+    return js.tryCatch([&]() { return func(span); }, [&](jsg::Value error) -> decltype(func(span)) {
+      recordSpanError(js, error, span);
+      js.throwException(kj::mv(error));
+    });
+  }();
+
+  span.detachAsync();
+  return attachSpanOwner(js, kj::mv(promise), kj::mv(owner));
+}
+
+template <typename Func>
+auto IoContext::evalNowWithSpan(jsg::Lock& js,
+    kj::ConstString operationName,
+    Func&& func) -> decltype(func(kj::instance<TraceContext&>())) {
+  return js.evalNow([&]() {
+    auto& context = current();
+    return context.withSpan(
+        js, context.makeUserTraceSpan(kj::mv(operationName)), kj::fwd<Func>(func));
+  });
 }
 
 namespace _ {

@@ -472,6 +472,18 @@ export default {
           case 'basicKey': {
             return buildGetResponse({ body });
           }
+          case 'internalError': {
+            return new Response(null, {
+              status: 500,
+              headers: {
+                'cf-r2-error': JSON.stringify({
+                  version: 0,
+                  v4code: 10001,
+                  message: 'Internal error',
+                }),
+              },
+            });
+          }
           case 'rangeOffLen': {
             assert.deepEqual(jsonRequest.range, {
               offset: '1',
@@ -963,6 +975,12 @@ export default {
       // Also test HEAD operation to verify checksum tags
       const headResp = await env.BUCKET.head('multipleChecksums');
       assert.ok(headResp);
+    }
+    // Errors
+    {
+      await assert.rejects(env.BUCKET.head('internalError'), {
+        message: 'head: Internal error (10001)',
+      });
     }
   },
 };

@@ -1245,6 +1245,10 @@ struct Worker_VersionInfo {
   }
 };
 
+// Extracts {name, message, stack} from a JavaScript error the same way as for uncaught exceptions
+// and errors logged with console.*. Reading the properties may run JavaScript, which may throw.
+tracing::ErrorInfo getErrorInfoForTrace(jsg::Lock& js, const jsg::JsValue& exception);
+
 // =======================================================================================
 // inline implementation details
 

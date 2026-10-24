@@ -11,6 +11,14 @@ import {
 // Use shared instrumentation test tail worker
 export default testTailHandler;
 
+// Expected status and exceptions of the span of a failed operation.
+function failed(message, name = 'Error') {
+  return {
+    status: { code: 'error', message },
+    exceptions: [{ name, message }],
+  };
+}
+
 export const test = {
   async test(ctrl, env, ctx) {
     const expected = [
@@ -52,6 +60,24 @@ export const test = {
       { name: 'durable_object_storage_deleteAlarm', closed: true },
       { name: 'durable_object_storage_transaction', closed: true },
       { name: 'durable_object_storage_sync', closed: true },
+      {
+        name: 'durable_object_storage_put',
+        closed: true,
+        ...failed('put() called with undefined value.', 'TypeError'),
+      },
+      {
+        name: 'durable_object_storage_list',
+        closed: true,
+        ...failed(
+          'list() cannot be called with both start and startAfter values.',
+          'TypeError'
+        ),
+      },
+      {
+        name: 'durable_object_storage_transaction',
+        closed: true,
+        ...failed('Transaction failed'),
+      },
     ];
 
     await Promise.allSettled(invocationPromises);
