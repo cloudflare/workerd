@@ -708,7 +708,7 @@ impl<'s> FromJS<'s> for i64 {
                   which then saturates"
     )]
     fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self, Error> {
-        if let Some(big_int) = value.try_as::<v8::BigInt>() {
+        if let Ok(big_int) = v8::Local::<v8::BigInt>::try_from(value) {
             return big_int.int64_value().ok_or_else(|| {
                 Error::new_type_error(
                     "The value cannot be converted because it would be truncated.",
@@ -753,7 +753,7 @@ impl<'s> FromJS<'s> for std::time::SystemTime {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Option<Self>, Error> {
-        let millis = if let Some(date) = value.try_as::<v8::Date>() {
+        let millis = if let Ok(date) = v8::Local::<v8::Date>::try_from(value) {
             date.value_of()
         } else if value.is_number() {
             Number::from_js(lock, value)?.value()
@@ -1004,7 +1004,7 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Option<Self::ResultType>, Error> {
-        let Some(array) = value.try_as::<v8::Array>() else {
+        let Ok(array) = v8::Local::<v8::Array>::try_from(value) else {
             return Ok(None);
         };
 

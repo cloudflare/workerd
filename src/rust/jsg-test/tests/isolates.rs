@@ -339,10 +339,10 @@ fn function_call_with_argument_of_another_isolate_panics_in_debug_builds() {
             jsg::allow_scopes_of_another_isolate(|| {
                 b.run_in_context(|lock_b, ctx| {
                     let object = v8::Local::from_ffi(object.into_ffi());
-                    let func = ctx
+                    let func: v8::Local<v8::Function> = ctx
                         .eval_raw(lock_b, "(() => 0)")
                         .unwrap()
-                        .try_as::<v8::Function>()
+                        .try_into()
                         .unwrap();
                     assert_isolate_check_panics("calling B's function with A's object", || {
                         let _ = func.call::<jsg::Number>(lock_b, None, &[object]);
