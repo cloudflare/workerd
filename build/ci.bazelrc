@@ -51,11 +51,7 @@ build:ci-limit-storage --copt="-fno-standalone-debug"
 
 # ci-platform dependent configuration
 
-build:ci-linux-common --copt='-Werror'
-build:ci-linux-common --copt='-Wno-error=#warnings'
-build:ci-linux-common --copt='-Wno-error=deprecated-declarations'
-# keep in sync with .github/workflows/test.yml
-build:ci-linux-common --repo_env=CC=/usr/lib/llvm-22/bin/clang
+build:ci-linux-common --config=werror
 
 build:ci-linux --config=ci-linux-common --remote_download_regex=".*src/workerd/server/workerd.*"
 build:ci-linux-arm --config=ci-linux-common
@@ -72,6 +68,8 @@ build:ci-linux-asan --config=asan --copt="-g0" --strip=always
 build:ci-linux-arm-asan --config=ci-linux-asan
 
 build:ci-linux-tsan --config=ci-linux-common --config=ci-limit-storage --config=tsan
+# The tsan config's -g comes after ci-limit-storage's -g1; line tables are enough for its reports.
+build:ci-linux-tsan --copt="-g1"
 test:ci-linux-tsan --test_summary=detailed
 
 # Build container tests on Linux CI
@@ -115,3 +113,24 @@ test:ci-test --test_env=CI=true
 # release CI – use remote_download_minimal, but always fetch the workerd binary so we can add it to
 # the release artifacts.
 build:ci-release --remote_download_minimal --remote_download_regex=".*src/workerd/server/workerd.*"
+
+# CI on bazelflare remote execution: the x64 Linux jobs in .github/workflows/test.yml, after their
+# ci-<platform> config. Every action runs on bazelflare's Linux x86_64 executors and the runner only
+# drives Bazel. The bazelflare config holds every flag that shapes the actions, so this one must add
+# none: it keeps CI's action keys equal to a workstation's, and the two share the cache. The targets
+# the bazelflare config skips (see its tag filters) run in the arm64 Linux jobs. bazelflare is the
+# cache too, so there is no disk cache, and it queues actions it can't run at once.
+build:ci-bazelflare --config=bazelflare
+build:ci-bazelflare --disk_cache=
+build:ci-bazelflare --jobs=400
+# The runner fetches every external repository, about 1300, each mostly waiting on the network or
+# the remote repository cache, and fetches as many at once as it has loading threads, by default
+# one per CPU (four on the small runner).
+build:ci-bazelflare --loading_phase_threads=48
+test:ci-bazelflare --test_size_filters=
+build:ci-bazelflare-asan --config=ci-bazelflare --config=bazelflare-asan
+build:ci-bazelflare-tsan --config=ci-bazelflare --config=bazelflare-tsan
+# Every action's inputs, environment and command line, uploaded with the profiles: diffed against a
+# workstation's log, it shows what made an action miss the cache.
+build:ci-bazelflare --execution_log_compact_file=build.bazel-execlog.zst
+test:ci-bazelflare --execution_log_compact_file=test.bazel-execlog.zst
