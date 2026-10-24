@@ -844,3 +844,112 @@ fn constructor_with_wrong_resource_type_throws_type_error() {
         Ok(())
     });
 }
+
+// =============================================================================
+// Fallible constructor tests
+// =============================================================================
+
+#[jsg_resource]
+struct Positive {
+    value: f64,
+}
+
+#[jsg_resource]
+impl Positive {
+    #[jsg_constructor]
+    fn constructor(value: Number) -> jsg::Result<Self> {
+        if value.value() > 0.0 {
+            Ok(Self {
+                value: value.value(),
+            })
+        } else {
+            Err(jsg::Error::new_range_error("value must be positive"))
+        }
+    }
+
+    #[jsg_method]
+    fn get_value(&self) -> Number {
+        Number::new(self.value)
+    }
+}
+
+/// An error type converted to a `jsg::Error` when thrown.
+struct EmptyLabel;
+
+impl From<EmptyLabel> for jsg::Error {
+    fn from(_: EmptyLabel) -> Self {
+        Self::new_type_error("label must not be empty")
+    }
+}
+
+#[jsg_resource]
+struct Label {
+    text: String,
+}
+
+#[jsg_resource]
+impl Label {
+    #[jsg_constructor]
+    fn constructor(_lock: &mut jsg::Lock, text: String) -> Result<Self, EmptyLabel> {
+        if text.is_empty() {
+            Err(EmptyLabel)
+        } else {
+            Ok(Self { text })
+        }
+    }
+
+    #[jsg_method]
+    fn get_text(&self) -> String {
+        self.text.clone()
+    }
+}
+
+/// A constructor returning `Ok` creates an instance.
+#[test]
+fn fallible_constructor_ok_creates_instance() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let positive = jsg::resource::function_template_of::<Positive>(lock);
+        ctx.set_global(lock, "Positive", positive);
+        let label = jsg::resource::function_template_of::<Label>(lock);
+        ctx.set_global(lock, "Label", label);
+
+        let result: String = ctx
+            .eval(
+                lock,
+                "const p = new Positive(2); const l = new Label('x'); \
+                 [p.getValue(), p instanceof Positive, l.getText()].join()",
+            )
+            .unwrap();
+        assert_eq!(result, "2,true,x");
+        Ok(())
+    });
+}
+
+/// A constructor returning `Err` throws the error, converted with
+/// `Into<jsg::Error>`.
+#[test]
+fn fallible_constructor_err_throws() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let positive = jsg::resource::function_template_of::<Positive>(lock);
+        ctx.set_global(lock, "Positive", positive);
+        let label = jsg::resource::function_template_of::<Label>(lock);
+        ctx.set_global(lock, "Label", label);
+
+        let err = ctx
+            .eval::<Number>(lock, "new Positive(-1)")
+            .unwrap_err()
+            .unwrap_jsg_err(lock);
+        assert_eq!(err.name, ExceptionType::RangeError);
+        assert_eq!(err.message, "value must be positive");
+
+        let err = ctx
+            .eval::<Number>(lock, "new Label('')")
+            .unwrap_err()
+            .unwrap_jsg_err(lock);
+        assert_eq!(err.name, ExceptionType::TypeError);
+        assert_eq!(err.message, "label must not be empty");
+        Ok(())
+    });
+}
