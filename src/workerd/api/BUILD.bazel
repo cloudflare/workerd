@@ -180,21 +180,6 @@ wd_cc_library(
 )
 
 wd_cc_library(
-    name = "base64",
-    srcs = [
-        "base64.c++",
-    ],
-    hdrs = [
-        "base64.h",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//src/workerd/jsg",
-        "@simdutf",
-    ],
-)
-
-wd_cc_library(
     name = "cf-property",
     srcs = ["cf-property.c++"],
     hdrs = ["cf-property.h"],
@@ -395,7 +380,6 @@ wd_cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
-        ":base64",
         ":html-rewriter",
         ":hyperdrive",
         ":memory-cache",
@@ -827,11 +811,6 @@ kj_test(
         ":encoding",
         "//src/workerd/io",
     ],
-)
-
-kj_test(
-    src = "base64-test.c++",
-    deps = ["//src/workerd/tests:test-fixture"],
 )
 
 kj_test(

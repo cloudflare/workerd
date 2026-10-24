@@ -21,7 +21,6 @@ cc_ast_dump(
         "//src/cloudflare",
         "//src/node",
         "//src/workerd/api:analytics-engine",
-        "//src/workerd/api:base64",
         "//src/workerd/api:html-rewriter",
         "//src/workerd/api:hyperdrive",
         "//src/workerd/api:kv",
