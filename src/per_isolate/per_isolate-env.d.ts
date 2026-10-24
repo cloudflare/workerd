@@ -115,6 +115,12 @@ declare const utils: {
   // surrogate counts the 3 bytes of U+FFFD), without encoding it. Throws a
   // TypeError for a non-string.
   utf8Length(str: string): number;
+  // The structured clone of `value` (jsg::structuredClone), transferring the
+  // objects in `transfer`, a dense array the caller built. The native
+  // serializer's rules apply: an ArrayBuffer or a view's buffer is transferred,
+  // any other object throws a TypeError, and an uncloneable value a
+  // DataCloneError. Consumed by structured-clone.
+  structuredClone(value: unknown, transfer: object[] | undefined): unknown;
 };
 
 // An abort algorithm registration. Obtained only from

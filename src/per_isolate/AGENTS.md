@@ -24,6 +24,11 @@ at context creation, before any user code. Gated by the
   the `typescript_implemented_streams` compat flag is enabled, plus the
   internal-testing `ReadableStreamDrainingReader` under
   `expose_draining_reader`.
+  Under `typescript_implemented_structured_clone` it replaces the
+  `structuredClone` method on ServiceWorkerGlobalScope.prototype with
+  `structured-clone.ts`, a WebIDL layer over the native
+  `utils.structuredClone()`; its parity suite and divergence ledger are in
+  `src/tests/structured-clone/`.
 - Files are auto-discovered (`BUILD.bazel` and `tsconfig.json` both glob
   `**/*.ts`). No registration needed for new files.
 - Local convention: no copyright headers in this directory's bootstrap

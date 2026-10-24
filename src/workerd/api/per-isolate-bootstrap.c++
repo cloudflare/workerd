@@ -214,6 +214,27 @@ static void Utf8Length(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// The structured clone of a value, backing the TypeScript structuredClone(). The
+// caller has already converted the options, so the second argument is undefined
+// or a dense array it built itself, whose elements are objects to transfer;
+// reading them cannot run user code. Serialization can run user code (getters)
+// and throws a DataCloneError for an uncloneable value. Plain method: it
+// allocates and can throw.
+static void StructuredClone(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    kj::Maybe<kj::Array<jsg::JsValue>> transfer;
+    KJ_IF_SOME(list, jsg::JsValue(args[1]).tryCast<jsg::JsArray>()) {
+      auto builder = kj::heapArrayBuilder<jsg::JsValue>(list.size());
+      for (auto i: kj::zeroTo(list.size())) {
+        builder.add(list.get(js, i));
+      }
+      transfer = builder.finish();
+    }
+    return jsg::JsValue(args[0]).structuredClone(js, kj::mv(transfer));
+  });
+}
+
 static const v8::CFunction fast_mark_promise_handled_ =
     v8::CFunction::Make(MarkPromiseHandledFastApi);
 
@@ -265,6 +286,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "createFileSystemWriteContext",
     "addAbortAlgorithm",
     "utf8Length",
+    "structuredClone",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
   v8::MaybeLocal<v8::Value> values[] = {
@@ -279,6 +301,7 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateFileSystemWriteContext),
     getMethod(js, AddAbortAlgorithm),
     getMethod(js, Utf8Length),
+    getMethod(js, StructuredClone),
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());

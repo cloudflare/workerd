@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+using StructuredCloneModules = import "structured-clone-modules.capnp";
+
+# Runs the structuredClone suite against the C++ JSG method;
+# structured-clone-ts.wd-test runs the identical modules against the
+# TypeScript implementation.
+#
+# No compatibilityDate: the wd_test variants supply the date axis and the
+# tests must hold at both extremes. structuredClone consults no flags.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "structured-clone-cpp",
+      worker = (
+        modules = StructuredCloneModules.modules,
+        compatibilityFlags = ["nodejs_compat"],
+      )
+    ),
+  ],
+);
