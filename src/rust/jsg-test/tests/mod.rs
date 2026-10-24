@@ -23,6 +23,7 @@ mod local_handle;
 mod name;
 mod non_coercible;
 mod option;
+mod promise;
 mod resource_callback;
 mod resource_conversion;
 mod resource_properties;
