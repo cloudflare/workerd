@@ -88,7 +88,7 @@ use crate::v8;
 /// Every type that can appear as a field in a `#[jsg_resource]` struct must
 /// implement `Traced`. The generated `Traced::trace` body calls
 /// `Traced::trace` on every field — types with no GC-visible references
-/// simply use the default no-op implementation.
+/// use a no-op implementation, such as the one `jsg_traced!` generates.
 ///
 /// # Built-in implementations
 ///
@@ -97,21 +97,39 @@ use crate::v8;
 /// - **Collections** (`Vec<T>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`,
 ///   `BTreeSet<T>`) — iterates elements/values and traces each.
 /// - **`Cell<T>`** — reads through `as_ptr()` (sound under single-threaded GC).
+/// - **`RefCell<T>`** — traces through `try_borrow()`, so a mutably borrowed cell is skipped;
+///   debug builds abort if it can hold GC references.
 /// - **`jsg::Rc<T>`** — visits the reference via `GcVisitor::visit_rc`.
 /// - **`jsg::Weak<T>`** — no-op (weak refs don't keep targets alive).
 /// - **`jsg::v8::TracedGlobal<T>`** — visits via `GcVisitor::visit_traced_global`.
 pub trait Traced {
+    /// Whether a value of this type can hold GC-visible references. Tracing a `RefCell` checks
+    /// it. It defaults to `true`, and wrappers and collections take it from what they hold. A
+    /// type whose `trace` is a no-op should return `false`, as `jsg_traced!` does.
+    fn holds_gc_references() -> bool
+    where
+        Self: Sized,
+    {
+        true
+    }
+
     /// Visit GC-visible references held by this value.
     ///
     /// The default implementation is a no-op, suitable for types with no
-    /// GC-visible references (primitives, plain data structs, etc.).
+    /// GC-visible references (primitives, plain data structs, etc.). Such a type
+    /// should also return `false` from `holds_gc_references`; `jsg_traced!`
+    /// generates both.
     fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
 }
 
 /// Generates no-op `Traced` implementations for types with no GC-visible references.
 macro_rules! impl_traced_noop {
     ($($t:ty),* $(,)?) => {
-        $(impl Traced for $t {})*
+        $(impl Traced for $t {
+            fn holds_gc_references() -> bool {
+                false
+            }
+        })*
     };
 }
 
@@ -150,6 +168,10 @@ impl_traced_noop!(
 );
 
 impl<T: Traced> Traced for Option<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         if let Some(inner) = self {
             inner.trace(visitor);
@@ -158,6 +180,11 @@ impl<T: Traced> Traced for Option<T> {
 }
 
 impl<T: Traced> Traced for Lenient<T> {
+    // An unconvertable value is a `TracedGlobal`, whatever `T` is.
+    fn holds_gc_references() -> bool {
+        true
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         if let Self::Some(inner) = self {
             inner.trace(visitor);
@@ -169,6 +196,10 @@ impl<T: Traced> Traced for Lenient<T> {
 }
 
 impl<T: Traced> Traced for Nullable<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         if let Self::Some(inner) = self {
             inner.trace(visitor);
@@ -177,12 +208,20 @@ impl<T: Traced> Traced for Nullable<T> {
 }
 
 impl<T: Traced> Traced for NonCoercible<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         self.as_ref().trace(visitor);
     }
 }
 
 impl<T: Traced> Traced for Vec<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for item in self {
             item.trace(visitor);
@@ -191,6 +230,10 @@ impl<T: Traced> Traced for Vec<T> {
 }
 
 impl<K, V: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashMap<K, V, S> {
+    fn holds_gc_references() -> bool {
+        V::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for value in self.values() {
             value.trace(visitor);
@@ -199,6 +242,10 @@ impl<K, V: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashM
 }
 
 impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
+    fn holds_gc_references() -> bool {
+        V::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for value in self.values() {
             value.trace(visitor);
@@ -207,6 +254,10 @@ impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
 }
 
 impl<T: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashSet<T, S> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for item in self {
             item.trace(visitor);
@@ -215,6 +266,10 @@ impl<T: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashSet<
 }
 
 impl<T: Traced> Traced for std::collections::BTreeSet<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for item in self {
             item.trace(visitor);
@@ -223,6 +278,10 @@ impl<T: Traced> Traced for std::collections::BTreeSet<T> {
 }
 
 impl<T: Traced> Traced for std::cell::Cell<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         // SAFETY: V8 GC tracing is single-threaded within an isolate and never
         // re-entrant on the same object during a single GC cycle. We only read
@@ -234,16 +293,43 @@ impl<T: Traced> Traced for std::cell::Cell<T> {
 }
 
 impl<T: Traced> Traced for std::cell::RefCell<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
-        // Use `try_borrow()` to avoid panicking across the FFI boundary if a
-        // mutable borrow is active during GC.
-        if let Ok(inner) = self.try_borrow() {
-            inner.trace(visitor);
-        }
+        // A mutable borrow is active here only if the code holding it calls something that visits
+        // the resource: an allocation on the V8 heap, which can start a GC, or wrapping the
+        // resource, or creating its first or dropping its last strong `jsg::Rc` while it has no
+        // wrapper, which switch its references between strong and traced. The contents cannot be
+        // read then, so the visit misses their references. A missed GC visit can cost a weak
+        // `TracedGlobal` its value and a `jsg::Rc` the JS wrapper of its resource; a missed switch
+        // can leave a reference weak that should be strong, for a later GC to free, or strong that
+        // should be weak, which leaks. Debug builds abort when that can happen (a panic cannot
+        // unwind out of a visit made from C++); release builds skip the cell.
+        //
+        // The real fix is a JSG cell type whose mutable borrow takes the lock and makes the
+        // references it holds strong until the borrow ends, so that a visit can skip a borrowed
+        // cell safely. That also covers a `TracedGlobal` taken out of a `Cell`, which nothing
+        // traces.
+        let Ok(inner) = self.try_borrow() else {
+            debug_assert!(
+                !T::holds_gc_references(),
+                "tracing found a mutably borrowed RefCell that can hold GC references, which it \
+                 cannot visit; do not hold a RefCell borrow_mut() across a call that can allocate \
+                 on the V8 heap, wrap the resource, or create or drop a jsg::Rc to it"
+            );
+            return;
+        };
+        inner.trace(visitor);
     }
 }
 
 impl<T: Traced> Traced for std::rc::Rc<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         (**self).trace(visitor);
     }
@@ -1074,3 +1160,7 @@ impl<'s> FromJS<'s> for v8::Local<'s, v8::Value> {
         Ok(value)
     }
 }
+
+#[cfg(test)]
+#[path = "wrappable-test.rs"]
+mod tests;

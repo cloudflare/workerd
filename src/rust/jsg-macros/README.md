@@ -43,7 +43,11 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 - **Instance methods** (`&self`) are placed on the prototype. JavaScript can call back into
   a resource while one of its methods runs, so methods never get `&mut self`; keep state
   they change in `Cell` or `RefCell` fields. Prefer `Cell`: a `RefCell` borrow held across a
-  call that can run JavaScript makes a re-entrant call panic.
+  call that can run JavaScript makes a re-entrant call panic, and tracing skips a mutably borrowed
+  `RefCell`, so while a `borrow_mut()` is held across a call that can allocate on the V8 heap,
+  wrap the resource or create or drop a `jsg::Rc` to it, the values of the `TracedGlobal`s in it
+  and the JS wrappers of the resources its `jsg::Rc`s point to can be collected (debug builds
+  abort instead).
 - **Static methods** (no receiver) are placed on the constructor.
 - Return types of `Result<T, E>` automatically throw a JavaScript exception on `Err`.
 - The Rust `snake_case` name is converted to `camelCase` for JavaScript; override with
@@ -384,6 +388,7 @@ use no-op `Traced` impls; containers/wrappers recurse to inner values.
 | `Option<T>` / `jsg::Nullable<T>` | Delegates to `T` when present |
 | `Vec<T>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values |
 | `Cell<T>` / `std::cell::Cell<T>` | Delegates via `as_ptr()` read (safe under single-threaded, non-reentrant GC tracing) |
+| `RefCell<T>` | Delegates via `try_borrow()`; skipped while mutably borrowed (debug builds abort if `T` can hold GC references) |
 | Plain data / primitives / `#[jsg_struct]` types | No-op `Traced` |
 | Any other `T: Traced` | Uses `T`'s implementation |
 
