@@ -278,6 +278,10 @@ private:
   struct AsyncIteratorState {
     jsg::Ref<ReadableStreamDefaultReader> reader;
     bool preventCancel;
+
+    void visitForGc(jsg::GcVisitor& visitor) {
+      visitor.visit(reader);
+    }
   };
 
   static jsg::Promise<kj::Maybe<jsg::V8Ref<v8::Value>>> nextFunction(
