@@ -22,7 +22,7 @@ PORT_BINDINGS = [
 ### (Invokes wpt_js_test_gen, wpt_wd_test_gen and wd_test to assemble a complete test suite.)
 ### -----------------------------------------------------------------------------------------
 
-def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, include_tentative = False, extra_wpt_directories = [], extra_wpt_files = [], tags = [], **kwargs):
+def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, include_tentative = False, extra_wpt_directories = [], extra_wpt_files = [], exclude_test_dirs = [], tags = [], **kwargs):
     """
     Main entry point.
 
@@ -59,6 +59,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         test_config = test_config_as_js,
         wpt_tsproject = wpt_tsproject,
         include_tentative = include_tentative,
+        exclude_test_dirs = exclude_test_dirs,
     )
 
     wd_test_gen_rule = "{}@_wpt_wd_test_gen".format(name)
@@ -76,6 +77,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         wpt_interfaces = wpt_interfaces,
         extra_wpt_directories = extra_wpt_directories,
         extra_wpt_files = extra_wpt_files,
+        exclude_test_dirs = exclude_test_dirs,
         compat_flags = compat_flags + ["immutable_api_prototypes", "spec_compliant_property_attributes", "pedantic_wpt", "experimental", "nodejs_compat", "unsupported_process_actual_platform"],
     )
 
@@ -108,8 +110,9 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         # blobs emitted by the WPT harness and break tools/cross/wpt_logs.py parsing.
         predictable = False,
         data = data,
-        # WPT tests are not supported in RBE so far
-        tags = tags + ["no-remote-exec"],
+        # WPT tests are not supported in RBE so far. The "wptserve" resource (see .bazelrc) runs
+        # at most one wptserve sidecar at a time.
+        tags = tags + ["no-remote-exec"] + (["resources:wptserve:1"] if start_server else []),
         **kwargs
     )
 
@@ -170,7 +173,12 @@ def _wpt_js_test_gen_impl(ctx):
     src = ctx.actions.declare_file("{}-test.generated.js".format(ctx.attr.test_name))
     base = ctx.attr.wpt_directory[WPTModuleInfo].base
 
-    test_files = [file for file in ctx.files.wpt_directory if is_test_file(file, ctx.attr.include_tentative)]
+    test_files = [
+        file
+        for file in ctx.files.wpt_directory
+        if is_test_file(file, ctx.attr.include_tentative) and
+           not in_excluded_dir(base, file, ctx.attr.exclude_test_dirs)
+    ]
 
     ctx.actions.write(
         output = src,
@@ -200,6 +208,8 @@ _wpt_js_test_gen = rule(
         "wpt_tsproject": attr.label(),
         # Whether to include tentative test files
         "include_tentative": attr.bool(default = False),
+        # Subdirectories of wpt_directory whose tests are not run
+        "exclude_test_dirs": attr.string_list(default = []),
     },
 )
 
@@ -215,6 +225,11 @@ const {{ run, printResults }} = createRunner(config, '{test_name}', '{wpt_path}'
 
 export const zzz_results = printResults();
 """
+
+def in_excluded_dir(base, file, excluded_dirs):
+    """Whether file is under one of excluded_dirs, given relative to the module base."""
+    path = module_relative_path(base, file)
+    return any([path.startswith(d + "/") for d in excluded_dirs])
 
 def is_test_file(file, include_tentative = False):
     if not file.path.endswith(".js"):
@@ -272,7 +287,11 @@ def _wpt_wd_test_gen_impl(ctx):
     base = ctx.attr.wpt_directory[WPTModuleInfo].base
 
     # Generate bindings for test directory files plus common/**/*.js, resources/**/*.js, and interfaces/**/*.idl
-    bindings = generate_external_bindings(src, base, ctx.files.wpt_directory)
+    bindings = generate_external_bindings(src, base, [
+        file
+        for file in ctx.files.wpt_directory
+        if not in_excluded_dir(base, file, ctx.attr.exclude_test_dirs)
+    ])
     common_base = ctx.attr.wpt_common[WPTModuleInfo].base
     common_bindings = generate_common_bindings(src, common_base, ctx.files.wpt_common)
     resources_base = ctx.attr.wpt_resources[WPTModuleInfo].base
@@ -306,6 +325,8 @@ def _wpt_wd_test_gen_impl(ctx):
 _wpt_wd_test_gen = rule(
     implementation = _wpt_wd_test_gen_impl,
     attrs = {
+        # Subdirectories of wpt_directory whose tests and resources are not bound
+        "exclude_test_dirs": attr.string_list(default = []),
         # A string to use as the test name. Used in the wd-test filename and the worker's name
         "test_name": attr.string(),
         # A file group representing a directory of wpt tests. All files in the group will be embedded.
