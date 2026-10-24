@@ -342,9 +342,9 @@ kj::Own<ContainerClient> getContainerClient(WorkerFactory::Impl& factory,
   auto previousCleanup = state.cleanup.addBranch();
   state.canceler.cancel("a new container client took the container over"_kj);
   auto client = kj::refcounted<ContainerClient>(factory.byteStreamFactory, factory.timer,
-      factory.network, kj::str(docker.getSocketPath()), kj::mv(id), kj::mv(imageName),
-      kj::str(docker.getContainerEgressInterceptorImage()), factory.tasks, kj::mv(previousCleanup),
-      [&state, &tasks = factory.tasks](kj::Promise<void> cleanup) {
+      factory.network, factory.weakNetwork.addWeak(), kj::str(docker.getSocketPath()), kj::mv(id),
+      kj::mv(imageName), kj::str(docker.getContainerEgressInterceptorImage()), factory.tasks,
+      kj::mv(previousCleanup), [&state, &tasks = factory.tasks](kj::Promise<void> cleanup) {
     // The client's shutdown began: the next incarnation of the actor gets a new client.
     state.client = kj::none;
     state.cleanup = state.canceler.wrap(kj::mv(cleanup)).catch_([](kj::Exception&&) {}).fork();

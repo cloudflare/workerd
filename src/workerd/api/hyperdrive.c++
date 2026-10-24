@@ -32,16 +32,20 @@ jsg::Ref<Socket> Hyperdrive::connect(jsg::Lock& js) {
   auto connPromise = connectToDb();
 
   auto paf = kj::newPromiseAndFulfiller<kj::Maybe<kj::Exception>>();
-  auto conn =
-      kj::newPromisedStream(connPromise
-                                .then([&f = *paf.fulfiller](kj::Own<kj::AsyncIoStream> stream) {
-    f.fulfill(kj::none);
+  using Fulfiller = kj::PromiseFulfiller<kj::Maybe<kj::Exception>>;
+  auto holder = kj::heap<WeakOwner<kj::Own<Fulfiller>>>(kj::mv(paf.fulfiller));
+  auto conn = kj::newPromisedStream(
+      connPromise
+          .then([weakHolder = holder->addWeak()](kj::Own<kj::AsyncIoStream> stream) {
+    KJ_REQUIRE_NONNULL(weakHolder.tryGet(), "connect fulfiller destroyed").get()->fulfill(kj::none);
     return kj::mv(stream);
-  }, [&f = *paf.fulfiller](kj::Exception e) {
+  }, [weakHolder = holder->addWeak()](kj::Exception e) {
     KJ_LOG(WARNING, "failed to connect to local database", e);
-    f.fulfill(e.clone());
+    KJ_REQUIRE_NONNULL(weakHolder.tryGet(), "connect fulfiller destroyed")
+        .get()
+        ->fulfill(e.clone());
     return kj::mv(e);
-  }).attach(kj::mv(paf.fulfiller)));
+  }).attach(kj::mv(holder)));
 
   // TODO(someday): Support TLS? It's not at all necessary since we're connecting locally, but
   // some users may want it anyway.

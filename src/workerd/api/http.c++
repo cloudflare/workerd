@@ -2674,7 +2674,7 @@ jsg::Ref<Fetcher> Fetcher::deserializeImpl(jsg::Lock& js,
 
 static jsg::Promise<void> throwOnError(
     jsg::Lock& js, kj::StringPtr method, jsg::Promise<jsg::Ref<Response>> promise) {
-  return promise.then(js, [method](jsg::Lock&, jsg::Ref<Response> response) {
+  return promise.then(js, [method = kj::str(method)](jsg::Lock&, jsg::Ref<Response> response) {
     uint status = response->getStatus();
     // TODO(someday): Would be nice to attach the response to the JavaScript error, maybe? Or
     //   should people really use fetch() if they want to inspect error responses?

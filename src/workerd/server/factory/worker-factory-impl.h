@@ -91,6 +91,8 @@ class WorkerFactory::Impl final: private kj::TaskSet::ErrorHandler {
   kj::Timer& timer;
   const kj::MonotonicClock& monotonicClock;
   kj::Network& network;
+  // Expires with this factory, which owns every container cleanup that uses `network`.
+  WeakOwner<kj::Network&> weakNetwork;
   kj::EntropySource& entropySource;
   kj::Filesystem& fs;
   kj::Own<Options> options;
