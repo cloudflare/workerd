@@ -48,6 +48,8 @@ jsg::Promise<kj::String> OidcIdentityBinding::getToken(
       }
     }
   }
+  // Every call reaches the authority, including requests that reuse a signed assertion.
+  context.getLimitEnforcer().newSubrequest(true);
   return context.awaitIo(js,
       context.getIoChannelFactory().getOidcToken(
           {.assignment = kj::str(assignment), .audience = kj::mv(audience), .fresh = fresh}));
