@@ -138,6 +138,16 @@ fn function_shape_matches_cpp_jsg() {
     });
 }
 
+#[test]
+fn data_of_cpp_wrapped_function_is_not_taken_for_rust_data() {
+    crate::Harness::new().run_in_context(|lock, _ctx| {
+        // Functions that C++ JSG wraps also have an opaque wrapper as their data, holding a C++
+        // Wrappable that must not be read as a Rust one.
+        assert!(!crate::Harness::cpp_wrapped_function_data_is_rust_wrappable(lock));
+        Ok(())
+    });
+}
+
 // =============================================================================
 // Garbage collection
 // =============================================================================
