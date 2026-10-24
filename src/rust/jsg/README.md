@@ -227,7 +227,7 @@ struct EventEmitter {
 #[jsg_resource]
 impl EventEmitter {
     #[jsg_method]
-    fn set_callback(&self, lock: &mut jsg::Lock, cb: jsg::v8::Local<jsg::v8::Value>) {
+    fn set_callback<'s>(&self, lock: &mut jsg::Lock<'s>, cb: jsg::v8::Local<'s, jsg::v8::Value>) {
         self.on_event.set(Some(cb.to_traced_global(lock)));
     }
 }
