@@ -2,29 +2,38 @@ Subject: [PATCH] Keep tools that Rustc doesn't run out of its inputs
 
 A Rustc action took the toolchain's all_files: the whole Rust sysroot,
 including cargo, clippy, rustdoc and rustfmt, and the C++ toolchain's
-all_files. A remote executor fetches and stages every input of every
-action, so each crate carried roughly a gigabyte of tools it never runs.
-Rustc now takes the sysroot without those tools; a crate that rustc links
-already takes the C++ toolchain's linker files.
+all_files, plus the C++ linker files whatever the crate type. A remote
+executor fetches and stages every input of every action, so each crate
+carried roughly a gigabyte of tools it never runs. Rustc now takes the
+sysroot without those tools, and only a crate that rustc links takes the
+C++ toolchain's linker files.
 ---
- rust/private/rustc.bzl     |  4 +++-
- rust/private/toolchain.bzl | 10 ++++++++++
- 2 files changed, 13 insertions(+), 1 deletion(-)
 
 diff --git a/rust/private/rustc.bzl b/rust/private/rustc.bzl
 --- a/rust/private/rustc.bzl
 +++ b/rust/private/rustc.bzl
-@@ -799,7 +799,9 @@
+@@ -746,7 +746,8 @@
+     # flattened on each transitive rust_library dependency.
+     libs_from_linker_inputs = []
+     ambiguous_libs = {}
+-    if crate_info.type not in ("lib", "rlib") or include_linker_inputs:
++    links = crate_info.type not in ("lib", "rlib") or include_linker_inputs
++    if links:
+         linker_inputs = dep_info.transitive_noncrates.to_list()
+         ambiguous_libs = _disambiguate_libs(ctx.actions, toolchain, crate_info, dep_info, use_pic)
+         libs_from_linker_inputs = _collect_libs_from_linker_inputs(linker_inputs, use_pic) + [
+@@ -799,8 +800,9 @@
              transitive_crate_outputs,
              crate_info.compile_data,
              dep_info.transitive_proc_macro_data,
 -            toolchain.all_files,
-+            # A crate that rustc links takes the C++ toolchain's linker files below; no other crate
-+            # runs a C++ tool.
+-        ] + ([] if experimental_use_cc_common_link else [
 +            toolchain.compile_files,
-         ] + ([] if experimental_use_cc_common_link else [
++        ] + ([] if experimental_use_cc_common_link or not links else [
++            # Only a crate that rustc links runs a C++ tool.
              runtime_libs,
              linker_depset,
+         ]),
 diff --git a/rust/private/toolchain.bzl b/rust/private/toolchain.bzl
 --- a/rust/private/toolchain.bzl
 +++ b/rust/private/toolchain.bzl
