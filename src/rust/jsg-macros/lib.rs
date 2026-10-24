@@ -581,8 +581,9 @@ pub fn jsg_static_constant(_attr: TokenStream, item: TokenStream) -> TokenStream
 
 /// Marks a static method as the JavaScript constructor for a `#[jsg_resource]`.
 ///
-/// The method must have no `self` receiver and must return `Self`.
-/// An optional first parameter of `&mut Lock` (or `&mut jsg::Lock`) receives
+/// The method must have no `self` receiver and must return `Self` or
+/// `Result<Self, E>`, where `E: Into<jsg::Error>`; an `Err` is thrown to the
+/// JavaScript caller. An optional first parameter of `&mut Lock` (or `&mut jsg::Lock`) receives
 /// the isolate lock and is not exposed as a JavaScript argument.
 ///
 /// Only one `#[jsg_constructor]` is allowed per impl block. Without it,

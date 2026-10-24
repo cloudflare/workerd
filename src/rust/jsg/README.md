@@ -347,7 +347,7 @@ impl Greeting {
 
 **Rules:**
 
-- The method must be static (no `self` receiver) and must return `Self`.
+- The method must be static (no `self` receiver) and must return `Self` or `Result<Self, E>`. An `Err` is converted with `Into<jsg::Error>` and thrown to the caller, as for `#[jsg_method]`.
 - Only one `#[jsg_constructor]` is allowed per impl block.
 - The first parameter may be `&mut Lock` (or `&mut jsg::Lock`) if the constructor needs isolate access; it is not exposed as a JS argument.
 - If no `#[jsg_constructor]` is present, `new MyResource()` throws an `Illegal constructor` error, matching C++ JSG behavior.

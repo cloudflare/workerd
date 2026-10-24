@@ -653,6 +653,12 @@ wd_test(
     data = ["io-context-test.js"],
 )
 
+wd_test(
+    src = "jitless-test.wd-test",
+    args = ["--experimental"],
+    data = ["jitless-test.js"],
+)
+
 kj_test(
     src = "tracked-wasm-instance-test.c++",
     deps = [
