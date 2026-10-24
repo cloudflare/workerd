@@ -4602,7 +4602,7 @@ jsg::Promise<void> TransformStreamDefaultController::write(jsg::Lock& js, jsg::J
     if (backpressure) {
       auto chunkRef = chunk.addRef(js);
       return KJ_ASSERT_NONNULL(maybeBackpressureChange).promise.whenResolved(js).then(js,
-              JSG_VISITABLE_LAMBDA((chunkRef = kj::mv(chunkRef), ref = JSG_THIS),(ref),(
+              JSG_VISITABLE_LAMBDA((chunkRef = kj::mv(chunkRef), ref = JSG_THIS),(ref, chunkRef),(
                   jsg::Lock& js) mutable -> jsg::Promise<void> {
         KJ_IF_SOME(writable, ref->tryGetWritable(js)) {
           auto& writableController =
