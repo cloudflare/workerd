@@ -175,8 +175,8 @@ fn call_returns_thrown_error() {
         assert_eq!(err.message, "boom");
         assert_eq!(err.name, jsg::ExceptionType::RangeError);
         assert!(!err.is_termination());
-        assert!(err.exception(lock).unwrap() == thrown);
-        assert!(err.to_local(lock) == thrown);
+        assert_eq!(err.exception(lock).unwrap(), thrown);
+        assert_eq!(err.to_local(lock), thrown);
         Ok(())
     });
 }
