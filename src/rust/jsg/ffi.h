@@ -377,7 +377,8 @@ void realm_detach(Isolate* isolate, const IsolateState* state);
 // than rejected, so this accepts arbitrary byte input (e.g. filesystem paths).
 Local exception_create_from_bytes(
     Isolate* isolate, ExceptionType exception_type, const uint8_t* data, int32_t length);
-// Describes a thrown value as C++ JSG tunnels it in a kj::Exception (`jsg.<Type>: <message>`).
+// Describes a thrown value without running JavaScript: `<name>: <message>` for an error. Empty if
+// V8 cannot describe it.
 ::rust::String exception_describe(Isolate* isolate, const Local& exception);
 
 // Isolate

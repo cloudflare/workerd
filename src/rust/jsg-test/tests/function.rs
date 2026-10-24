@@ -197,6 +197,40 @@ fn call_returns_thrown_non_error() {
     });
 }
 
+/// Catching a thrown value runs no JavaScript: neither its getters nor proxy traps.
+#[test]
+fn call_does_not_run_thrown_value_accessors() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        for thrown in [
+            "({ get overloaded() { reads++; }, get retryable() { reads++; }, \
+               get message() { reads++; }, get name() { reads++; } })",
+            "new Proxy(new Error('boom'), { get() { reads++; }, has() { reads++; }, \
+               getPrototypeOf() { reads++; return null; } })",
+        ] {
+            let thrown = ctx
+                .eval_raw(
+                    lock,
+                    &format!("globalThis.reads = 0; globalThis.thrown = {thrown}"),
+                )
+                .unwrap();
+            let func = ctx.eval_raw(lock, "(() => { throw thrown; })").unwrap();
+            let func = func.try_as::<v8::Function>().unwrap();
+
+            let err = func
+                .call::<v8::Local<v8::Value>>(lock, None, &[])
+                .unwrap_err();
+            assert_eq!(err.exception(lock).unwrap(), thrown);
+            let reads = ctx.eval::<Number>(lock, "reads").unwrap();
+            assert!(
+                reads.value().abs() < f64::EPSILON,
+                "{thrown:?} ran {reads:?} accessors"
+            );
+        }
+        Ok(())
+    });
+}
+
 /// An error that was not thrown by JavaScript holds no exception.
 #[test]
 fn constructed_error_holds_no_exception() {

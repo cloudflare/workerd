@@ -119,7 +119,6 @@ impl_traced_noop!(
     (),
     bool,
     String,
-    crate::Error,
     u8,
     u16,
     u32,

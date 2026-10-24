@@ -550,10 +550,7 @@ pub mod ffi {
             data: *const u8,
             length: i32,
         ) -> Local;
-        pub unsafe fn exception_describe(
-            isolate: *mut Isolate,
-            exception: &Local,
-        ) -> Result<String>;
+        pub unsafe fn exception_describe(isolate: *mut Isolate, exception: &Local) -> String;
 
         // Isolate
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
@@ -1515,12 +1512,9 @@ impl PartialEq for Local<'_, String> {
 impl Eq for Local<'_, String> {}
 
 impl<'s> Local<'s, Value> {
-    /// Describes this value, thrown as an exception, as C++ JSG does in the `kj::Exception` it
-    /// converts the exception to.
-    pub(crate) fn describe(
-        self,
-        lock: &mut Lock<'s>,
-    ) -> Result<std::string::String, cxx::KjException> {
+    /// Describes this value, thrown as an exception, without running JavaScript: as
+    /// `<name>: <message>` for an error. Empty if V8 cannot describe it.
+    pub(crate) fn describe(self, lock: &mut Lock<'s>) -> std::string::String {
         self.debug_assert_isolate(lock);
         // SAFETY: lock guarantees the isolate is locked and a HandleScope is active; self is a
         // valid handle.
@@ -3208,7 +3202,7 @@ impl<T> Global<T> {
 
     /// Returns whether this handle was created in the isolate of `lock`.
     #[must_use]
-    pub fn belongs_to(&self, lock: &mut Lock<'_>) -> bool {
+    pub(crate) fn belongs_to(&self, lock: &mut Lock<'_>) -> bool {
         Arc::ptr_eq(&self.state, lock.isolate_state())
     }
 

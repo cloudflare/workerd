@@ -292,8 +292,12 @@ impl Error {
     }
 
     /// Creates an `Error` holding `exception`, a value JavaScript threw, which throwing the
-    /// `Error` rethrows unchanged. `name` and `message` describe the value as C++ JSG does when
-    /// it converts an exception to a `kj::Exception`.
+    /// `Error` rethrows unchanged.
+    ///
+    /// `name` and `message` describe the value without running JavaScript, so neither getters
+    /// nor proxy traps on it run: for a native error, its type and message; otherwise `Error`
+    /// and the value as a string. The `Error` keeps a strong handle to the value, which is why
+    /// `Error` is not [`Traced`](crate::Traced) and cannot be a field of a resource.
     ///
     /// Rethrowing throws the value anew, as C++ `jsg::Lock::throwException()` does with a caught
     /// value: V8 reports it at the rethrow, so the location of an uncaught exception is the
@@ -303,9 +307,9 @@ impl Error {
     /// is active, and that ends when the call into JavaScript returns to Rust.
     pub fn from_exception<'s>(lock: &mut Lock<'s>, exception: v8::Local<'s, v8::Value>) -> Self {
         let description = exception.describe(lock);
-        let mut err = match description {
-            Ok(description) => Self::from_kj_description(&description),
-            Err(err) => Self::from(err),
+        let mut err = match description.split_once(": ") {
+            Some((name, message)) if exception.is_native_error() => Self::new(name, message),
+            _ => Self::new_error(description),
         };
         err.thrown = Some(Thrown::Exception(Arc::new(v8::Global::new(
             lock, exception,

@@ -1330,10 +1330,20 @@ Local exception_create_from_bytes(
 }
 
 ::rust::String exception_describe(Isolate* isolate, const Local& exception) {
-  auto tunneled =
-      ::workerd::jsg::createTunneledException(isolate, local_as_ref_from_ffi<v8::Value>(exception));
-  auto description = tunneled.getDescription();
-  return ::rust::String::lossy(description.begin(), description.size());
+  // ToDetailString() is side-effect free: it runs no JavaScript, so neither getters nor proxy
+  // traps on the thrown value. It fails only on, e.g., a stack overflow.
+  v8::TryCatch tryCatch(isolate);
+  v8::Local<v8::String> detail;
+  if (!local_as_ref_from_ffi<v8::Value>(exception)
+           ->ToDetailString(isolate->GetCurrentContext())
+           .ToLocal(&detail)) {
+    if (!tryCatch.CanContinue()) {
+      tryCatch.ReThrow();
+    }
+    return ::rust::String();
+  }
+  v8::String::Utf8Value utf8(isolate, detail);
+  return ::rust::String::lossy(*utf8, utf8.length());
 }
 
 // Isolate
