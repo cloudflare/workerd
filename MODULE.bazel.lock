@@ -1519,7 +1519,7 @@
     },
     "//build/deps/formatters:rustfmt_repository.bzl%rustfmt_standalone": {
       "general": {
-        "bzlTransitiveDigest": "UiKmUe3AzgXQ/tIz4cyKcsMbnQIgDDzAN3oRUHmnLSo=",
+        "bzlTransitiveDigest": "GoT3tx3aG2WQMhOv7ZtuRmb5BPzC2XrI0DCFwI/v2/c=",
         "usagesDigest": "x0djQIecdgW5WllZzOX3szq70ykdYpRdtOddeGMqmcw=",
         "recordedInputs": [],
         "generatedRepoSpecs": {
