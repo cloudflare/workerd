@@ -330,7 +330,11 @@ impl<R: Resource> Traced for Rc<R> {
 }
 
 /// Weak references don't keep the target alive and have no GC edges to trace.
-impl<R: Resource> Traced for Weak<R> {}
+impl<R: Resource> Traced for Weak<R> {
+    fn holds_gc_references() -> bool {
+        false
+    }
+}
 
 impl<R: Resource> GarbageCollected for Weak<R> {
     fn memory_name(&self) -> &'static std::ffi::CStr {

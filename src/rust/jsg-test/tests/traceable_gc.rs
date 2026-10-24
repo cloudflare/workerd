@@ -11,7 +11,9 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 use jsg::ToJS;
+use jsg::Traced;
 use jsg_macros::jsg_resource;
+use jsg_macros::jsg_struct;
 
 // =============================================================================
 // Shared leaf resource
@@ -158,4 +160,23 @@ fn enum_named_variant_child_kept_alive_through_gc() {
         assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 1);
         Ok(())
     });
+}
+
+#[jsg_struct]
+struct PlainStruct {
+    pub label: String,
+}
+
+struct PlainData;
+jsg::jsg_traced!(PlainData);
+
+/// `jsg::Rc` and resources can hold GC references; `jsg::Weak`, `#[jsg_struct]` types and
+/// `jsg_traced!` types cannot.
+#[test]
+fn holds_gc_references_of_jsg_types() {
+    assert!(<jsg::Rc<Leaf>>::holds_gc_references());
+    assert!(Leaf::holds_gc_references());
+    assert!(!<jsg::Weak<Leaf>>::holds_gc_references());
+    assert!(!PlainStruct::holds_gc_references());
+    assert!(!PlainData::holds_gc_references());
 }

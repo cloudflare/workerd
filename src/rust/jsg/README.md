@@ -212,7 +212,9 @@ disposed.
 A `TracedGlobal` taken out of its resource is still weak, and nothing traces its value: unless
 something else keeps the value alive, any GC from then on may free it, which leaves the
 `TracedGlobal` empty, and `as_local` on it panics. Put the `TracedGlobal` back, or hold the value
-through another handle, before a GC can run.
+through another handle, before a GC can run. Tracing likewise skips a `RefCell` while it is
+mutably borrowed, so the `TracedGlobal`s in it are untraced for as long as the borrow lasts; debug
+builds abort when that happens.
 
 `TracedGlobal<T>` fields on `#[jsg_resource]` structs participate in GC tracing when visited via `GcVisitor::visit_traced_global`. This enables the garbage collector to detect and collect back-reference cycles — for example, a resource that stores a JS callback which closes over the resource's own JS wrapper:
 

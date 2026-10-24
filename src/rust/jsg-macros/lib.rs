@@ -174,7 +174,11 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         impl jsg::Struct for #name {}
 
         #[automatically_derived]
-        impl jsg::Traced for #name {}
+        impl jsg::Traced for #name {
+            fn holds_gc_references() -> bool {
+                false
+            }
+        }
     }
     .into()
 }
