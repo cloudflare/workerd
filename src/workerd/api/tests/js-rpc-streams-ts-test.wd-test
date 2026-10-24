@@ -1,8 +1,7 @@
 # The full js-rpc-test suite run with the TypeScript streams implementation enabled
-# (typescript_implemented_streams flag + the per-isolate bootstrap autogate), pinning JS RPC
-# stream transfer -- both directions, error/abort propagation, locked-stream rejection --
-# for TypeScript-backed streams against the same expectations the legacy implementation
-# satisfies.
+# (typescript_implemented_streams flag), pinning JS RPC stream transfer -- both directions,
+# error/abort propagation, locked-stream rejection -- for TypeScript-backed streams against
+# the same expectations the legacy implementation satisfies.
 using Workerd = import "/workerd/workerd.capnp";
 
 # The worker is instantiated twice so that the bindings below cross an isolate boundary. The
@@ -26,7 +25,6 @@ const unitTests :Workerd.Config = (
   ],
   v8Flags = [ "--expose-gc" ],
   autogates = [
-    "workerd-autogate-per-isolate-javascript-bootstrap",
     "workerd-autogate-rpc-externals-hydration",
   ],
 );

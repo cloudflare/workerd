@@ -157,22 +157,11 @@ const capnp::JsonCodec& getCdpJsonCodec() {
   return *codec;
 }
 
-void maybePerIsolateBootstrap(CompatibilityFlags::Reader& featureFlags,
-    jsg::Lock& lock,
-    v8::Local<v8::Context> context,
-    kj::Maybe<ValidationErrorReporter&> errorReporter) {
-  if (util::Autogate::isEnabled(util::AutogateKey::PER_ISOLATE_JAVASCRIPT_BOOTSTRAP)) {
-    TRACE_EVENT("workerd", "Worker::perIsolateBootstrap");
-    JSG_WITHIN_CONTEXT_SCOPE(
-        lock, context, [&](jsg::Lock& js) { runPerIsolateBootstrap(js, featureFlags); });
-  } else if (featureFlags.getTypeScriptImplementedStreams()) {
-    auto err = kj::str("A worker cannot use typescript implemented streams without "
-                       "per-isolate JavaScript bootstrap enabled");
-    KJ_IF_SOME(reporter, errorReporter) {
-      reporter.addError(kj::str(err));
-    }
-    KJ_FAIL_ASSERT(err);
-  }
+void maybePerIsolateBootstrap(
+    CompatibilityFlags::Reader& featureFlags, jsg::Lock& lock, v8::Local<v8::Context> context) {
+  TRACE_EVENT("workerd", "Worker::perIsolateBootstrap");
+  JSG_WITHIN_CONTEXT_SCOPE(
+      lock, context, [&](jsg::Lock& js) { runPerIsolateBootstrap(js, featureFlags); });
 }
 
 }  // namespace
@@ -1583,7 +1572,7 @@ Worker::Script::Script(kj::Own<const Isolate> isolateParam,
         recordedLock.setupContext(context);
 
         auto featureFlags = isolate->getApi().getFeatureFlags();
-        maybePerIsolateBootstrap(featureFlags, lock, context, errorReporter);
+        maybePerIsolateBootstrap(featureFlags, lock, context);
       } else {
         // Although we're going to compile a script independent of context, V8 requires that
         // there be an active context, otherwise it will segfault, I guess. So we create a
@@ -2323,7 +2312,7 @@ Worker::Worker(kj::Own<const Script> scriptParam,
       // (Modular worker contexts already ran bootstrap in the Script constructor.)
       if (freshContext) {
         auto featureFlags = script->isolate->getApi().getFeatureFlags();
-        maybePerIsolateBootstrap(featureFlags, lock, context, errorReporter);
+        maybePerIsolateBootstrap(featureFlags, lock, context);
       }
 
       // Install the virtual file system on the context. Keep in mind that for service
