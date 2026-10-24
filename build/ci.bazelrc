@@ -68,6 +68,8 @@ build:ci-linux-asan --config=asan --copt="-g0" --strip=always
 build:ci-linux-arm-asan --config=ci-linux-asan
 
 build:ci-linux-tsan --config=ci-linux-common --config=ci-limit-storage --config=tsan
+# The tsan config's -g comes after ci-limit-storage's -g1; line tables are enough for its reports.
+build:ci-linux-tsan --copt="-g1"
 test:ci-linux-tsan --test_summary=detailed
 
 # Build container tests on Linux CI
