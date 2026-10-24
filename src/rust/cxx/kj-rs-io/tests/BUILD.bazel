@@ -42,8 +42,6 @@ cc_test(
     # exception thrown in libkj-rs-io-lib.so that unwinds through a frame in libkj-async-io.so
     # (kj's inline owning wrap*Fd overloads) aborts in _Unwind_SetGR. One binary, one unwinder.
     linkstatic = True,
-    # Resolving nonexistent.invalid needs a reachable DNS resolver to answer NXDOMAIN.
-    tags = ["requires-network"],
     deps = [
         ":bridge",
         ":tests",
