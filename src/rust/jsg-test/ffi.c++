@@ -192,6 +192,21 @@ size_t used_global_handles_size(Isolate* isolate) {
   return ::workerd::rust::jsg::to_ffi(v8::Local<v8::Value>::Cast(obj));
 }
 
+bool cpp_wrapped_function_data_is_rust_wrappable(Isolate* isolate) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  auto context = isolate->GetCurrentContext();
+  bool found = false;
+  auto function = js.wrapReturningFunction(context,
+      [&found](::workerd::jsg::Lock& js,
+          const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+    auto& args = const_cast<v8::FunctionCallbackInfo<v8::Value>&>(info);
+    found = ::workerd::rust::jsg::fci_get_data_wrappable(&args) != kj::none;
+    return js.v8Undefined();
+  });
+  ::workerd::jsg::check(function->Call(context, v8::Undefined(isolate), 0, nullptr));
+  return found;
+}
+
 ::workerd::rust::jsg::MaybeLocal empty_maybe_local() {
   return ::workerd::rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
 }
