@@ -873,6 +873,15 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
       kj::Maybe<kj::Own<WebSocketObserver>>& observer,
       kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> pumpCompletion);
 
+  // Waits on the KJ event loop for a pump started by ensurePumping() to end. If it failed, was
+  // aborted, or both directions are now closed, re-enters the IoContext in `cs` to report the
+  // error or release the native WebSocket; otherwise returns without entering the isolate. The
+  // caller must keep this adapter alive until the returned promise is done or canceled.
+  kj::Promise<void> awaitPump(IoContext& context,
+      Native& native,
+      kj::Promise<void> pumpPromise,
+      kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs);
+
   kj::Promise<kj::Maybe<kj::Exception>> readLoop(
       kj::Maybe<kj::Rc<InputGate::CriticalSection>> cs, size_t maxMessageSize);
 
