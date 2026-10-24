@@ -75,6 +75,13 @@ on:
         type: boolean
         required: false
         default: false
+      # Run every action on bazelflare remote execution (see the bazelflare block in .bazelrc) instead
+      # of on the runner, configured by the BAZELFLARE_ENDPOINT and BAZELFLARE_CA_PEM repository
+      # variables and the BAZELFLARE_TOKEN secret. extra_bazel_args should end in --config=ci-bazelflare.
+      bazelflare:
+        type: boolean
+        required: false
+        default: false
     secrets:
       BAZEL_CACHE_KEY:
         required: true
@@ -84,6 +91,8 @@ on:
         required: false
       GOOGLESOURCE_COOKIE:
         required: true
+      BAZELFLARE_TOKEN:
+        required: false
 
 permissions:
   # Read repo
@@ -94,6 +103,9 @@ permissions:
 jobs:
   bazel:
     runs-on: ${{ inputs.image }}
+    env:
+      # bazelflare is cache and executor in one, so it takes no separate remote cache.
+      BAZEL_REMOTE_ARGS: ${{ !inputs.bazelflare && format('--remote_cache=https://bazel:{0}@bazel-remote-cache.devprod.cloudflare.dev', secrets.BAZEL_CACHE_KEY) || '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -101,6 +113,7 @@ jobs:
           fetch-depth: ${{ inputs.fetch_depth }}
       - name: Cache
         id: cache
+        if: ${{ !inputs.bazelflare }}
         uses: actions/cache@v5
         with:
           path: ~/bazel-disk-cache
@@ -129,9 +142,31 @@ jobs:
             # Strip comment in front of WORKERS_MIRROR_URL, then substitute secret to use it.
             sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak build/deps/nodejs.MODULE.bazel
           fi
+      - name: Configure bazelflare
+        if: inputs.bazelflare
+        shell: bash
+        env:
+          BAZELFLARE_ENDPOINT: ${{ vars.BAZELFLARE_ENDPOINT }}
+          BAZELFLARE_CA_PEM: ${{ vars.BAZELFLARE_CA_PEM }}
+          BAZELFLARE_TOKEN: ${{ secrets.BAZELFLARE_TOKEN }}
+        run: |
+          # .bazelrc imports .local/bazelrc, where the bazelflare block there expects the endpoint, the
+          # token and, for an endpoint whose certificate isn't publicly trusted, the CA to pin.
+          : "${BAZELFLARE_ENDPOINT:?set the BAZELFLARE_ENDPOINT repository variable}"
+          : "${BAZELFLARE_TOKEN:?set the BAZELFLARE_TOKEN repository secret}"
+          mkdir -p .local
+          {
+            echo "build:bazelflare --remote_executor=$BAZELFLARE_ENDPOINT"
+            echo "build:bazelflare \"--remote_header=authorization=Bearer $BAZELFLARE_TOKEN\""
+            echo "startup --experimental_remote_repo_contents_cache"
+          } > .local/bazelrc
+          if [ -n "$BAZELFLARE_CA_PEM" ]; then
+            printf '%s\n' "$BAZELFLARE_CA_PEM" > .local/bazelflare-ca.pem
+            echo "build:bazelflare --tls_certificate=$PWD/.local/bazelflare-ca.pem" >> .local/bazelrc
+          fi
       - name: Bazel build
         run: |
-          bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.build_target }}
+          bazel build ${{ env.BAZEL_REMOTE_ARGS }} --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.build_target }}
       - name: Check I/O backend dependency graph
         # One cquery: the workerd binary must not reach kj-async-os (kj's own event loop).
         if: inputs.check_io_backend_graph
@@ -151,15 +186,15 @@ jobs:
           docker info
           echo "Docker version:"
           docker version
-          bazel run --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} //images:load_all
+          bazel run ${{ env.BAZEL_REMOTE_ARGS }} --config=ci ${{ inputs.extra_bazel_args }} //images:load_all
       - name: Bazel test
         if: inputs.run_tests
         run: |
-          bazel test --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
+          bazel test ${{ env.BAZEL_REMOTE_ARGS }} --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
       - name: Bazel coverage
         if: inputs.run_coverage
         run: |
-          bazel coverage --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
+          bazel coverage ${{ env.BAZEL_REMOTE_ARGS }} --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
       - name: Upload coverage to Codecov
         if: inputs.run_coverage
         uses: codecov/codecov-action@v5
@@ -178,7 +213,7 @@ jobs:
         # dependencies of header targets properly).
         if: inputs.parse_headers
         run: |
-          bazel build --config=parse_headers --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} //src/workerd/util
+          bazel build --config=parse_headers ${{ env.BAZEL_REMOTE_ARGS }} --config=ci ${{ inputs.extra_bazel_args }} //src/workerd/util
       - name: Upload test logs
         if: always() && inputs.upload_test_logs
         uses: actions/upload-artifact@v7
@@ -192,6 +227,7 @@ jobs:
           BAZEL_OUTPUT_BASE=$(bazel info output_base)
           BAZEL_REPOSITORY_CACHE=$(bazel info repository_cache)
           echo "Bazel cache usage statistics"
+          shopt -s nullglob  # bazelflare jobs have no disk cache
           du -ms -t 1 ~/bazel-disk-cache/* $BAZEL_REPOSITORY_CACHE
           echo "Bazel output usage statistics"
           du -ms -t 1 $BAZEL_OUTPUT_BASE
@@ -230,7 +266,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.os_name }}${{ inputs.arch_name }}${{ inputs.suffix }}-bazel-profile
-          path: '*.bazel-profile.gz'
+          path: |
+            *.bazel-profile.gz
+            *.bazel-execlog.zst
 
       - name: Drop large Bazel cache files
         if: always()

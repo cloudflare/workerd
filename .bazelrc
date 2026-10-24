@@ -573,10 +573,51 @@ coverage --build_tests_only
 build:rosetta-arm64 --define=rosetta_arm64_no_op=1
 build:native-arm64 --define=native_arm64_no_op=1
 
-# Warnings that fail the build, in CI (build/ci.bazelrc).
+# Warnings that fail the build, in CI (build/ci.bazelrc) and on bazelflare.
 build:werror --copt='-Werror'
 build:werror --copt='-Wno-error=#warnings'
 build:werror --copt='-Wno-error=deprecated-declarations'
+
+#
+# Remote execution on bazelflare (Cloudflare Containers), from a macOS or Linux client. Every
+# action, host tools included, runs on Linux x86_64 executors (build/bazelflare). The endpoint and credentials are per deployment; set them in
+# .local/bazelrc, e.g.
+#   build:bazelflare --remote_executor=grpcs://bazelflare.example.com:8980
+#   build:bazelflare --tls_certificate=/path/to/ca.pem
+#   build:bazelflare "--remote_header=authorization=Bearer <token>"
+#   startup --experimental_remote_repo_contents_cache
+# The startup flag keeps external repositories (toolchains, V8, ...) in the remote cache, so a client
+# fetches only the files Bazel reads itself instead of every action input. It can't be scoped to
+# this config, since startup options apply to every invocation.
+#
+# The Linux build flags apply regardless of the client's OS: platform-specific configs follow the
+# client, so this config turns them off and selects :linux itself.
+#
+# This config holds every flag that shapes the actions, and ci-bazelflare (build/ci.bazelrc) adds only
+# flags that don't, so a workstation's builds and CI's have the same action keys and share the cache.
+# Warnings are errors, as in CI.
+build:bazelflare --noenable_platform_specific_config
+build:bazelflare --config=linux
+build:bazelflare --config=werror
+build:bazelflare --cpu=k8 --host_cpu=k8
+build:bazelflare --platforms=//build/bazelflare:linux_x86_64
+build:bazelflare --host_platform=//build/bazelflare:linux_x86_64
+build:bazelflare --extra_execution_platforms=//build/bazelflare:linux_x86_64
+# Host tools are Linux binaries, so nothing can fall back to running on a macOS client.
+build:bazelflare --spawn_strategy=remote --genrule_strategy=remote --remote_local_fallback=false
+# V8 marks its inspector code generator `local = 1`; it runs fine remotely.
+build:bazelflare --modify_execution_info=Genrule=-local
+build:bazelflare --incompatible_strict_action_env
+# Executors have neither internet nor a container engine, so targets that need them, or that must
+# run on the client, are skipped. Filters don't change action keys.
+build:bazelflare --build_tag_filters=-off-by-default,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
+test:bazelflare --test_tag_filters=-off-by-default,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
+build:bazelflare --remote_download_minimal
+build:bazelflare --remote_cache_compression --remote_timeout=600
+build:bazelflare --jobs=200
+# Bazel otherwise prepares only as many remote actions at once as the client has CPUs, and packs 100
+# streams onto each connection, each served by one bazelflare Worker invocation.
+build:bazelflare --noexperimental_throttle_remote_action_building --remote_max_concurrency_per_connection=8
 
 # Local workstation overrides. /.local/ is gitgnored.
 try-import %workspace%/.local/bazelrc

@@ -1,0 +1,19 @@
+# Remote execution on bazelflare, a Remote Execution API server on Cloudflare Containers; used by
+# --config=bazelflare (see .bazelrc). Every action, host tools included, runs on Linux x86_64
+# executors, so the client may be macOS or Linux. Bazel brings every tool an action uses, so the
+# executors need nothing beyond a shell and coreutils.
+
+package(default_visibility = ["//visibility:public"])
+
+platform(
+    name = "linux_x86_64",
+    constraint_values = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+    exec_properties = {
+        "instance": "standard-4",
+        "slots": "4",
+        "idle-ms": "600000",
+    },
+)

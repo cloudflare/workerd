@@ -1,0 +1,56 @@
+Subject: [PATCH] Keep tools that Rustc doesn't run out of its inputs
+
+A Rustc action took the toolchain's all_files: the whole Rust sysroot,
+including cargo, clippy, rustdoc and rustfmt, and the C++ toolchain's
+all_files. A remote executor fetches and stages every input of every
+action, so each crate carried roughly a gigabyte of tools it never runs.
+Rustc now takes the sysroot without those tools; a crate that rustc links
+already takes the C++ toolchain's linker files.
+---
+ rust/private/rustc.bzl     |  4 +++-
+ rust/private/toolchain.bzl | 10 ++++++++++
+ 2 files changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/rust/private/rustc.bzl b/rust/private/rustc.bzl
+--- a/rust/private/rustc.bzl
++++ b/rust/private/rustc.bzl
+@@ -799,7 +799,9 @@
+             transitive_crate_outputs,
+             crate_info.compile_data,
+             dep_info.transitive_proc_macro_data,
+-            toolchain.all_files,
++            # A crate that rustc links takes the C++ toolchain's linker files below; no other crate
++            # runs a C++ tool.
++            toolchain.compile_files,
+         ] + ([] if experimental_use_cc_common_link else [
+             runtime_libs,
+             linker_depset,
+diff --git a/rust/private/toolchain.bzl b/rust/private/toolchain.bzl
+--- a/rust/private/toolchain.bzl
++++ b/rust/private/toolchain.bzl
+@@ -341,8 +341,17 @@
+     # Create a depset of all sysroot files (symlinks and their real paths)
+     all_files = depset(direct_files, transitive = transitive_file_sets)
+ 
++    # The sysroot files a Rustc action reads: everything but the tools that only other actions run,
++    # which a remote executor would otherwise fetch for every crate.
++    other_tools = [sysroot_rustdoc, sysroot_clippy, sysroot_cargo, sysroot_cargo_clippy, sysroot_rustfmt]
++    compile_files = depset(
++        [file for file in direct_files if file not in other_tools],
++        transitive = transitive_file_sets,
++    )
++
+     return struct(
+         all_files = all_files,
++        compile_files = compile_files,
+         cargo = sysroot_cargo,
+         cargo_clippy = sysroot_cargo_clippy,
+         clippy = sysroot_clippy,
+@@ -598,6 +607,7 @@
+         channel = ctx.attr.channel,
+         clippy_driver = sysroot.clippy,
+         cargo_clippy = sysroot.cargo_clippy,
++        compile_files = sysroot.compile_files,
+         compilation_mode_opts = compilation_mode_opts,
+         default_edition = ctx.attr.default_edition,
+         dylib_ext = ctx.attr.dylib_ext,

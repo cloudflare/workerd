@@ -111,3 +111,18 @@ test:ci-test --test_env=CI=true
 # release CI – use remote_download_minimal, but always fetch the workerd binary so we can add it to
 # the release artifacts.
 build:ci-release --remote_download_minimal --remote_download_regex=".*src/workerd/server/workerd.*"
+
+# CI on bazelflare remote execution: the x64 Linux jobs in .github/workflows/test.yml, after their
+# ci-<platform> config. Every action runs on bazelflare's Linux x86_64 executors and the runner only
+# drives Bazel. The bazelflare config holds every flag that shapes the actions, so this one must add
+# none: it keeps CI's action keys equal to a workstation's, and the two share the cache. The targets
+# the bazelflare config skips (see its tag filters) run in the arm64 Linux jobs. bazelflare is the
+# cache too, so there is no disk cache, and it queues actions it can't run at once.
+build:ci-bazelflare --config=bazelflare
+build:ci-bazelflare --disk_cache=
+build:ci-bazelflare --jobs=400
+test:ci-bazelflare --test_size_filters=
+# Every action's inputs, environment and command line, uploaded with the profiles: diffed against a
+# workstation's log, it shows what made an action miss the cache.
+build:ci-bazelflare --execution_log_compact_file=build.bazel-execlog.zst
+test:ci-bazelflare --execution_log_compact_file=test.bazel-execlog.zst

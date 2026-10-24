@@ -72,7 +72,8 @@
       "name": "rules_rust",
       "type": "bazel_dep",
       "patches": [
-        "//:patches/rules_rust/0001-Propagate-coverage-info-through-link_deps.patch"
+        "//:patches/rules_rust/0001-Propagate-coverage-info-through-link_deps.patch",
+        "//:patches/rules_rust/0002-Keep-tools-that-Rustc-doesnt-run-out-of-its-inputs.patch"
       ]
     },
     {
