@@ -235,6 +235,20 @@ impl EventEmitter {
 
 Without tracing, storing a `TracedGlobal` back to the resource's own wrapper creates an unbreakable reference cycle that leaks until the worker is torn down. With `visit_traced_global` tracing (generated automatically by `#[jsg_resource]`), the cycle is collected by the next full GC after all strong Rust `Rc`s are dropped.
 
+## Type Conversions
+
+The module docs of `wrappable.rs` list every Rust type that converts to or from JavaScript, and
+how. Most convert both ways. Some convert only from JavaScript, so they can be method parameters
+but not return values:
+
+- `u8`, `u16`, `u32`, `i8`, `i16` and `i32`: a value converted to a number, which must be in range.
+  Like C++ JSG's integers.
+- `i64`: a `BigInt` that fits, or any other value converted to a number, which must be finite and
+  in range, and truncates toward zero. Like C++ JSG's `int64_t`.
+- `SystemTime`: a `Date`, or a number of milliseconds since the epoch, within the range of
+  `kj::Date`. Like C++ JSG's `kj::Date`.
+- `&[T]` and typed-array slices such as `&[u8]`.
+
 ## Errors from JavaScript
 
 `Local<Function>::call` returns an `Err` when the function throws. The `jsg::Error` holds the thrown value, and `Lock::throw_exception` (which a callback returning the `Err` reaches) rethrows that value unchanged, as C++ JSG propagates the exception. A termination is not caught: the call returns `Error::terminated()`, which throws nothing, so the termination keeps propagating.
