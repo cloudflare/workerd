@@ -193,6 +193,10 @@ int64_t local_big_int_int64_value(const Local& value, bool& lossless);
 // Local<Date>
 double local_date_value_of(const Local& value);
 
+// Shims that can run JavaScript take a `MaybeLocal& exception`. If JavaScript throws, it receives
+// what JavaScript threw, unless execution is terminating: then the termination is left to
+// propagate, and `exception` stays empty. A shim that returns a Result also fails then.
+
 // Local<Function>
 // Returns the call's result, or none if it threw. Then `exception` receives the exception, unless
 // execution is terminating: the termination is left to propagate, and `exception` stays empty.
@@ -204,15 +208,17 @@ MaybeLocal local_function_call(Isolate* isolate,
 
 // Local<Object>
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);
-bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key);
-Local local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key);
+bool local_object_has_property(
+    Isolate* isolate, const Local& object, ::rust::Str key, MaybeLocal& exception);
+Local local_object_get_property(
+    Isolate* isolate, const Local& object, ::rust::Str key, MaybeLocal& exception);
 
 // Local<Array>
 Local local_new_array(Isolate* isolate, size_t length);
 uint32_t local_array_length(const Local& array);
 Local local_array_get(Isolate* isolate, const Local& array, uint32_t index);
 void local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value);
-::rust::Vec<Global> local_array_iterate(Isolate* isolate, Local value);
+::rust::Vec<Global> local_array_iterate(Isolate* isolate, Local value, MaybeLocal& exception);
 
 // Local<TypedArray>
 Local local_new_uint8_array(Isolate* isolate, const uint8_t* data, size_t length);
@@ -295,9 +301,9 @@ MaybeLocal wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Gl
 void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args);
 
 // Unwrappers
-::rust::String unwrap_string(Isolate* isolate, Local value);
+::rust::String unwrap_string(Isolate* isolate, Local value, MaybeLocal& exception);
 bool unwrap_boolean(Isolate* isolate, Local value);
-double unwrap_number(Isolate* isolate, Local value);
+double unwrap_number(Isolate* isolate, Local value, MaybeLocal& exception);
 kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value);
 ::rust::Vec<uint8_t> unwrap_uint8_array(Isolate* isolate, Local value);
 ::rust::Vec<uint16_t> unwrap_uint16_array(Isolate* isolate, Local value);
@@ -393,6 +399,7 @@ Local exception_create_from_bytes(
 void isolate_throw_exception(Isolate* isolate, Local exception);
 void isolate_throw_error(Isolate* isolate, ::rust::Str message);
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage);
+bool isolate_is_execution_terminating(Isolate* isolate);
 void isolate_terminate_execution(Isolate* isolate);
 bool isolate_is_locked(Isolate* isolate);
 bool isolate_in_context(Isolate* isolate);

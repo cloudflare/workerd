@@ -88,23 +88,38 @@ fn v8_unwrap_number_returns_correct_values() {
     harness.run_in_context(|lock, _ctx| {
         let num = Number::new(2.5).to_local(lock);
         // SAFETY: The isolate is locked and the value is a valid V8 local handle.
-        let unwrapped =
-            unsafe { jsg::v8::ffi::unwrap_number(lock.isolate().as_ffi(), num.into_ffi()) }
-                .unwrap();
+        let unwrapped = unsafe {
+            jsg::v8::ffi::unwrap_number(
+                lock.isolate().as_ffi(),
+                num.into_ffi(),
+                &mut no_exception(),
+            )
+        }
+        .unwrap();
         assert!((unwrapped - 2.5).abs() < f64::EPSILON);
 
         let zero = Number::new(0.0).to_local(lock);
         // SAFETY: The isolate is locked and the value is a valid V8 local handle.
-        let unwrapped_zero =
-            unsafe { jsg::v8::ffi::unwrap_number(lock.isolate().as_ffi(), zero.into_ffi()) }
-                .unwrap();
+        let unwrapped_zero = unsafe {
+            jsg::v8::ffi::unwrap_number(
+                lock.isolate().as_ffi(),
+                zero.into_ffi(),
+                &mut no_exception(),
+            )
+        }
+        .unwrap();
         assert!(unwrapped_zero.abs() < f64::EPSILON);
 
         let negative = Number::new(-42.5).to_local(lock);
         // SAFETY: The isolate is locked and the value is a valid V8 local handle.
-        let unwrapped_neg =
-            unsafe { jsg::v8::ffi::unwrap_number(lock.isolate().as_ffi(), negative.into_ffi()) }
-                .unwrap();
+        let unwrapped_neg = unsafe {
+            jsg::v8::ffi::unwrap_number(
+                lock.isolate().as_ffi(),
+                negative.into_ffi(),
+                &mut no_exception(),
+            )
+        }
+        .unwrap();
         assert!((unwrapped_neg - (-42.5)).abs() < f64::EPSILON);
         Ok(())
     });
@@ -116,25 +131,42 @@ fn v8_unwrap_string_returns_correct_values() {
     harness.run_in_context(|lock, _ctx| {
         let s = "hello world".to_local(lock);
         // SAFETY: The isolate is locked and the value is a valid V8 local handle.
-        let unwrapped =
-            unsafe { jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), s.into_ffi()) }.unwrap();
+        let unwrapped = unsafe {
+            jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), s.into_ffi(), &mut no_exception())
+        }
+        .unwrap();
         assert_eq!(unwrapped.as_str(), "hello world");
 
         let empty = "".to_local(lock);
         // SAFETY: The isolate is locked and the value is a valid V8 local handle.
-        let unwrapped_empty =
-            unsafe { jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), empty.into_ffi()) }
-                .unwrap();
+        let unwrapped_empty = unsafe {
+            jsg::v8::ffi::unwrap_string(
+                lock.isolate().as_ffi(),
+                empty.into_ffi(),
+                &mut no_exception(),
+            )
+        }
+        .unwrap();
         assert_eq!(unwrapped_empty.as_str(), "");
 
         let unicode = "こんにちは".to_local(lock);
         // SAFETY: The isolate is locked and the value is a valid V8 local handle.
-        let unwrapped_unicode =
-            unsafe { jsg::v8::ffi::unwrap_string(lock.isolate().as_ffi(), unicode.into_ffi()) }
-                .unwrap();
+        let unwrapped_unicode = unsafe {
+            jsg::v8::ffi::unwrap_string(
+                lock.isolate().as_ffi(),
+                unicode.into_ffi(),
+                &mut no_exception(),
+            )
+        }
+        .unwrap();
         assert_eq!(unwrapped_unicode.as_str(), "こんにちは");
         Ok(())
     });
+}
+
+/// The out-parameter for what a shim catches, for values whose conversion runs no JavaScript.
+fn no_exception() -> jsg::v8::ffi::MaybeLocal {
+    jsg::v8::ffi::MaybeLocal { ptr: 0 }
 }
 
 /// Tests that `unwrap_resource` rejects a C++ JSG object (tagged with `WORKERD_WRAPPABLE_TAG`).
