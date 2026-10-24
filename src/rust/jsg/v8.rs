@@ -368,7 +368,8 @@ pub mod ffi {
             function: &Local,
             recv: &Local,
             args: &[Local],
-        ) -> Local;
+            exception: &mut MaybeLocal,
+        ) -> MaybeLocal;
 
         // Local<Object>
         pub unsafe fn local_object_set_property(
@@ -549,6 +550,7 @@ pub mod ffi {
             data: *const u8,
             length: i32,
         ) -> Local;
+        pub unsafe fn exception_describe(isolate: *mut Isolate, exception: &Local) -> String;
 
         // Isolate
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
@@ -1509,6 +1511,17 @@ impl PartialEq for Local<'_, String> {
 
 impl Eq for Local<'_, String> {}
 
+impl<'s> Local<'s, Value> {
+    /// Describes this value, thrown as an exception, without running JavaScript: as
+    /// `<name>: <message>` for an error. Empty if V8 cannot describe it.
+    pub(crate) fn describe(self, lock: &mut Lock<'s>) -> std::string::String {
+        self.debug_assert_isolate(lock);
+        // SAFETY: lock guarantees the isolate is locked and a HandleScope is active; self is a
+        // valid handle.
+        unsafe { ffi::exception_describe(lock.isolate().as_ffi(), self.raw()) }
+    }
+}
+
 impl<'s> Local<'s, Function> {
     /// Calls this function and converts the result via [`FromJS`].
     ///
@@ -1516,6 +1529,14 @@ impl<'s> Local<'s, Function> {
     ///
     /// `args` is a slice of `Local<Value>` — use [`ToJS::to_js`](crate::ToJS::to_js) to
     /// convert Rust values, or `.into()` for other `Local<T>` handles.
+    ///
+    /// # Errors
+    ///
+    /// If the function throws, returns an [`Error`] holding the exception, which
+    /// [`Lock::throw_exception`] rethrows unchanged, so that returning the error from a callback
+    /// propagates the exception to its caller as C++ JSG does (but reported at the rethrow; see
+    /// [`Error::from_exception`]). If execution is terminating,
+    /// returns [`Error::terminated`]. Also fails if the result does not convert to `R`.
     ///
     /// # Example
     ///
@@ -1537,17 +1558,28 @@ impl<'s> Local<'s, Function> {
             arg.debug_assert_isolate(lock);
         }
 
+        let mut exception = ffi::MaybeLocal { ptr: 0 };
         // SAFETY: lock guarantees the isolate is locked and a HandleScope is active.
-        // self is a valid Local<Function>; recv and args are valid Local handles.
-        let result = unsafe {
-            Local::from_ffi(ffi::local_function_call(
+        // self is a valid Local<Function>; recv and args are valid Local handles. The handles
+        // the call returns belong to the lock's scope.
+        let (result, exception) = unsafe {
+            let result = ffi::local_function_call(
                 lock.isolate().as_ffi(),
                 self.raw(),
                 recv.raw(),
                 Local::raw_slice(args),
-            ))
+                &mut exception,
+            );
+            (
+                Local::from_ffi_maybe(result),
+                Local::<Value>::from_ffi_maybe(exception),
+            )
         };
-        R::from_js(lock, result)
+        match (result, exception) {
+            (Some(result), _) => R::from_js(lock, result),
+            (None, Some(exception)) => Err(Error::from_exception(lock, exception)),
+            (None, None) => Err(Error::terminated()),
+        }
     }
 }
 
@@ -3166,6 +3198,12 @@ impl<T> Global<T> {
         ffi::Global {
             ptr: self.handle.ptr,
         }
+    }
+
+    /// Returns whether this handle was created in the isolate of `lock`.
+    #[must_use]
+    pub(crate) fn belongs_to(&self, lock: &mut Lock<'_>) -> bool {
+        Arc::ptr_eq(&self.state, lock.isolate_state())
     }
 
     /// Materializes this handle as a `Local` in the scope of `lock`.

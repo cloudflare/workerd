@@ -4,6 +4,7 @@
 
 //! Tests for `Local<Function>::call()`, `As<T>` trait, and `impl_local_cast!` conversions.
 
+use jsg::FromJS;
 use jsg::Number;
 use jsg::ToJS;
 use jsg::v8;
@@ -152,6 +153,93 @@ fn call_with_object_receiver_via_into() {
         // Pass Local<Object> as receiver — the Into<Local<Value>> bound handles conversion.
         let result = func.call::<String>(lock, Some(obj.into()), &[])?;
         assert_eq!(result, "hello world");
+        Ok(())
+    });
+}
+
+/// `Local<Function>::call` returns what the function threw in the error, described like C++ JSG
+/// describes it.
+#[test]
+fn call_returns_thrown_error() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let thrown = ctx
+            .eval_raw(lock, "globalThis.thrown = new RangeError('boom')")
+            .unwrap();
+        let func = ctx.eval_raw(lock, "(() => { throw thrown; })").unwrap();
+        let func = func.try_as::<v8::Function>().unwrap();
+
+        let err = func
+            .call::<v8::Local<v8::Value>>(lock, None, &[])
+            .unwrap_err();
+        assert_eq!(err.message, "boom");
+        assert_eq!(err.name, jsg::ExceptionType::RangeError);
+        assert!(!err.is_termination());
+        assert_eq!(err.exception(lock).unwrap(), thrown);
+        assert_eq!(err.to_local(lock), thrown);
+        Ok(())
+    });
+}
+
+/// A thrown value that is not an `Error` is kept too.
+#[test]
+fn call_returns_thrown_non_error() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let func = ctx.eval_raw(lock, "(() => { throw 42; })").unwrap();
+        let func = func.try_as::<v8::Function>().unwrap();
+
+        let err = func.call::<Number>(lock, None, &[]).unwrap_err();
+        let thrown = err.exception(lock).unwrap();
+        let thrown = Number::from_js(lock, thrown)?;
+        assert!((thrown.value() - 42.0).abs() < f64::EPSILON);
+        Ok(())
+    });
+}
+
+/// Catching a thrown value runs no JavaScript: neither its getters nor proxy traps.
+#[test]
+fn call_does_not_run_thrown_value_accessors() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        for thrown in [
+            "({ get overloaded() { reads++; }, get retryable() { reads++; }, \
+               get message() { reads++; }, get name() { reads++; } })",
+            "new Proxy(new Error('boom'), { get() { reads++; }, has() { reads++; }, \
+               getPrototypeOf() { reads++; return null; } })",
+        ] {
+            let thrown = ctx
+                .eval_raw(
+                    lock,
+                    &format!("globalThis.reads = 0; globalThis.thrown = {thrown}"),
+                )
+                .unwrap();
+            let func = ctx.eval_raw(lock, "(() => { throw thrown; })").unwrap();
+            let func = func.try_as::<v8::Function>().unwrap();
+
+            let err = func
+                .call::<v8::Local<v8::Value>>(lock, None, &[])
+                .unwrap_err();
+            assert_eq!(err.exception(lock).unwrap(), thrown);
+            let reads = ctx.eval::<Number>(lock, "reads").unwrap();
+            assert!(
+                reads.value().abs() < f64::EPSILON,
+                "{thrown:?} ran {reads:?} accessors"
+            );
+        }
+        Ok(())
+    });
+}
+
+/// An error that was not thrown by JavaScript holds no exception.
+#[test]
+fn constructed_error_holds_no_exception() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let err = jsg::Error::new_type_error("constructed");
+        assert!(err.exception(lock).is_none());
+        assert!(!err.is_termination());
+        assert!(jsg::Error::terminated().is_termination());
         Ok(())
     });
 }
