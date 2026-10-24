@@ -43,14 +43,15 @@ GENERATED_SOURCES = []
 # not bother with tool/vdbe-compress.tcl.
 
 # The JimTcl bundled with SQLite runs its code generators, as in SQLite's own build (main.mk), so the
-# host needs no Tcl. -DHAVE_REALPATH makes [file normalize] work, which the generators rely on.
+# host needs no Tcl. The generators rely on [file normalize], which needs realpath() or, on Windows,
+# _fullpath().
 cc_binary(
     name = "jimsh",
     srcs = ["autosetup/jimsh0.c"],
-    copts = [
-        "-w",
-        "-DHAVE_REALPATH",
-    ],
+    copts = ["-w"] + select({
+        "@platforms//os:windows": ["-DHAVE__FULLPATH"],
+        "//conditions:default": ["-DHAVE_REALPATH"],
+    }),
 )
 
 cc_binary(
