@@ -699,6 +699,21 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
       kj::ConstString operationName,
       Func&& func) -> decltype(func(kj::instance<TraceContext&>()));
 
+  // Records `error` on each TraceContext or SpanBuilder among `attachments` (see
+  // SpanBuilder::recordError()), if any is observed. Other attachments, which
+  // attachSpansInternalOnly() accepts for tests, are skipped. Use this for an error that has
+  // already been converted to JavaScript, when withSpan() doesn't apply.
+  template <typename... Attachments>
+  static void recordSpanError(jsg::Lock& js, jsg::Value& error, Attachments&... attachments) {
+    static_assert(!((std::is_const_v<Attachments> && isSpan<kj::Decay<Attachments>>()) || ...),
+        "can't record an error on a const span");
+    if ((isObservedSpan(attachments) || ...)) {
+      KJ_IF_SOME(info, tryGetSpanErrorInfo(js, error)) {
+        (recordErrorIfSpan(attachments, info), ...);
+      }
+    }
+  }
+
   // Waits for some background I/O to complete, then executes `func` on the result, returning a
   // JavaScript promise for the result of that. If no `func` is provided, no transformation is
   // applied.
@@ -1444,18 +1459,6 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   template <typename T, typename Attachments>
   jsg::Promise<T> attachSpanOwner(
       jsg::Lock& js, jsg::Promise<T> promise, IoOwn<Attachments> attachments);
-
-  // Records `error` on each TraceContext or SpanBuilder among `attachments` (see
-  // SpanBuilder::recordError()), if any is observed. Other attachments, which
-  // attachSpansInternalOnly() accepts for tests, are skipped.
-  template <typename... Attachments>
-  static void recordSpanError(jsg::Lock& js, jsg::Value& error, Attachments&... attachments) {
-    if ((isObservedSpan(attachments) || ...)) {
-      KJ_IF_SOME(info, tryGetSpanErrorInfo(js, error)) {
-        (recordErrorIfSpan(attachments, info), ...);
-      }
-    }
-  }
 
   template <typename T>
   static constexpr bool isSpan() {

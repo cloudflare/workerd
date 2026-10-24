@@ -1559,6 +1559,12 @@ class TraceContext {
     userSpan.recordError(error);
   }
 
+  // Sets the status of the user span, for a failure that isn't an exception. Like recordError(),
+  // leaves the internal span unchanged.
+  void setStatus(tracing::SpanStatus status) {
+    userSpan.setStatus(kj::mv(status));
+  }
+
   bool isObserved() {
     return span.isObserved() || userSpan.isObserved();
   }

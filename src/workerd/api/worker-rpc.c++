@@ -1035,6 +1035,9 @@ struct JsRpcCallAttemptSuccess {
 
 struct JsRpcCallAttemptFailure {
   kj::Exception exception;
+  // The span of the failed attempt, which records the error if the call fails with it. Empty if
+  // the call failed between attempts.
+  TraceContext callSpan;
 };
 
 using JsRpcCallAttemptResult = kj::OneOf<JsRpcCallAttemptSuccess, JsRpcCallAttemptFailure>;
@@ -1053,10 +1056,11 @@ kj::Promise<JsRpcCallAttemptResult> captureJsRpcCallAttempt(
   } catch (...) {
     auto exception = kj::getCaughtExceptionAsKj();
     if (state->isCommitted()) {
-      co_return JsRpcCallAttemptFailure{state->handleCommittedFailure(kj::mv(exception))};
+      co_return JsRpcCallAttemptFailure{
+        state->handleCommittedFailure(kj::mv(exception)), kj::mv(callSpan)};
     }
     state->getRetryState().maybeStartRetryLatencyTimer(exception);
-    co_return JsRpcCallAttemptFailure{kj::mv(exception)};
+    co_return JsRpcCallAttemptFailure{kj::mv(exception), kj::mv(callSpan)};
   }
 }
 
@@ -1065,24 +1069,31 @@ JsRpcCallAttemptPromise awaitJsRpcCallAttempt(jsg::Lock& js,
     kj::Promise<capnp::Response<rpc::JsRpcTarget::CallResults>> promise,
     TraceContext callSpan);
 
-JsRpcCallAttemptPromise finishFailedJsRpcCall(
-    jsg::Lock& js, JsRpcCallRetryState& state, kj::Exception exception) {
+JsRpcCallAttemptPromise finishFailedJsRpcCall(jsg::Lock& js,
+    JsRpcCallRetryState& state,
+    kj::Exception exception,
+    TraceContext callSpan = TraceContext()) {
   state.finishFailure(exception);
-  return js.resolvedPromise(IoContext::current().addObject(
-      kj::heap<JsRpcCallAttemptResult>(JsRpcCallAttemptFailure{kj::mv(exception)})));
+  return js.resolvedPromise(IoContext::current().addObject(kj::heap<JsRpcCallAttemptResult>(
+      JsRpcCallAttemptFailure{kj::mv(exception), kj::mv(callSpan)})));
 }
 
 JsRpcCallAttemptPromise handleFailedJsRpcCallAttempt(
     jsg::Lock& js, kj::Rc<JsRpcCallRetryState> state, JsRpcCallAttemptFailure failure) {
   if (state->isCommitted()) {
     auto exception = state->handleCommittedFailure(kj::mv(failure.exception));
-    return finishFailedJsRpcCall(js, *state, kj::mv(exception));
+    return finishFailedJsRpcCall(js, *state, kj::mv(exception), kj::mv(failure.callSpan));
   }
 
   auto delayOrException = state->getRetryState().handleAttemptFailure(kj::mv(failure.exception));
   KJ_IF_SOME(exception, delayOrException.tryGet<kj::Exception>()) {
-    return finishFailedJsRpcCall(js, *state, kj::mv(exception));
+    return finishFailedJsRpcCall(js, *state, kj::mv(exception), kj::mv(failure.callSpan));
   }
+
+  // The attempt failed and will be retried with a span of its own, so this one ends when we
+  // return. Its exception isn't recorded: converting it to JavaScript would also report it,
+  // although it never reaches the application.
+  failure.callSpan.setStatus(tracing::SpanStatus(tracing::SpanStatusCode::ERROR));
 
   auto backoffCommitted = state->beginBackoff();
   state->onRetryAccepted();
@@ -1416,16 +1427,22 @@ JsRpcPromiseAndPipeline callImpl(jsg::Lock& js,
                 return resolveResult(js, success.response, success.callSpan);
               }
               KJ_CASE_ONEOF(failure, JsRpcCallAttemptFailure) {
-                js.throwException(kj::mv(failure.exception));
+                // Convert the exception once, so the span records the error the caller gets.
+                auto error = js.exceptionToJs(kj::mv(failure.exception));
+                IoContext::recordSpanError(js, error, failure.callSpan);
+                js.throwException(kj::mv(error));
               }
             }
             KJ_UNREACHABLE;
           });
         }
-        return ioContext.awaitIo(js, kj::mv(resultPromise),
-            [resolveResult = kj::mv(resolveResult), jsRpcCallSpan = kj::mv(jsRpcCallSpan)](
-                jsg::Lock& js, capnp::Response<rpc::JsRpcTarget::CallResults> response) mutable
-            -> jsg::Value { return resolveResult(js, response, jsRpcCallSpan); });
+        return ioContext.withSpan(js, kj::mv(jsRpcCallSpan), [&](TraceContext& callSpan) {
+          return ioContext.awaitIo(js, kj::mv(resultPromise),
+              [resolveResult = kj::mv(resolveResult), &callSpan](jsg::Lock& js,
+                  capnp::Response<rpc::JsRpcTarget::CallResults> response) mutable -> jsg::Value {
+            return resolveResult(js, response, callSpan);
+          });
+        });
       }().catch_(js, kj::mv(rejectResult));
 
       auto pendingPipeline =
@@ -2002,6 +2019,14 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
     Func makeBuilder,
     rpc::JsValue::ExternalPusher::Client externalPusher);
 
+// The span of a call to a JsRpcTarget, shared with the JavaScript handler that records the call's
+// error on it. The span still ends with the call's dispatch promise (see callImpl()), even if the
+// handler outlives a canceled dispatch.
+struct SharedJsRpcCallSpan final: public kj::Refcounted {
+  explicit SharedJsRpcCallSpan(TraceContext span): span(kj::mv(span)) {}
+  TraceContext span;
+};
+
 // Callee-side implementation of JsRpcTarget.
 //
 // Most of the implementation is in this base class. There are subclasses specializing for the case
@@ -2147,12 +2172,13 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
 
     // Server-side jsRpcCall, nested under an exported capability's origin when available.
     // It stays open through JS invocation and result serialization via the dispatch promise.
-    TraceContext jsRpcCallSpan = [&]() -> TraceContext {
+    auto sharedCallSpan = kj::refcounted<SharedJsRpcCallSpan>([&]() -> TraceContext {
       KJ_IF_SOME(parent, tryGetOriginatingCall()) {
         return parent.newChild("jsRpcCall"_kjc);
       }
       return ctx.makeUserTraceSpan("jsRpcCall"_kjc);
-    }();
+    }());
+    TraceContext& jsRpcCallSpan = sharedCallSpan->span;
     // Its lifetime is the dispatch promise, which is not awaited from JavaScript; the method's own
     // awaits must not adopt it.
     jsRpcCallSpan.detachAsync();
@@ -2210,7 +2236,7 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
       // itself, which fully protects us. So... do that.
       auto ownCallContext = capnp::CallContextHook::from(callContext).addRef();
 
-      auto result = ctx.awaitJs(js,
+      auto promise =
           js.toPromise(invocationResult.returnValue)
               .then(js,
                   ctx.addFunctor(
@@ -2276,7 +2302,21 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
           cpf.reject(js.exceptionToKj(error.addRef(js)));
         }
         js.throwException(kj::mv(error));
-      })));
+      }));
+
+      if (jsRpcCallSpan.isObserved()) {
+        // Record the error of a method that threw, or whose result couldn't be serialized.
+        // Recording needs the current IoContext, which the dispatch promise's KJ continuations
+        // don't have.
+        promise = promise.catch_(js,
+            ctx.addFunctor(
+                [span = kj::addRef(*sharedCallSpan)](jsg::Lock& js, jsg::Value&& error) mutable {
+          IoContext::recordSpanError(js, error, span->span);
+          js.throwException(kj::mv(error));
+        }));
+      }
+
+      auto result = ctx.awaitJs(js, kj::mv(promise));
 
       if (ctx.hasOutputGate()) {
         // Note: If `ctx` is destroyed, the entire call to `callImpl()` will be canceled
@@ -2389,7 +2429,9 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
         ctx.makeAsyncTraceScope(lock, kj::mv(traceParent));
     jsg::AsyncContextFrame::StorageScope userTraceScope =
         ctx.makeUserAsyncTraceScope(lock, kj::mv(userTraceParent));
-    return dispatch().attach(kj::mv(jsRpcCallSpan));
+    return dispatch().attach(kj::defer([sharedCallSpan = kj::mv(sharedCallSpan)]() mutable {
+      sharedCallSpan->span = TraceContext();
+    }));
   }
 
   struct GetPropResult {

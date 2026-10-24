@@ -1656,6 +1656,27 @@ kj::Promise<ActorFetchAttemptResult<T>> captureActorFetchAttempt(jsg::Lock& js,
   });
 }
 
+// Calls `func`, which starts awaiting the response to a fetch attempt, with the attempt's span.
+// The span records an error that rejects the returned promise, unless endFetchSpan() ended it
+// first.
+template <typename Func>
+jsg::Promise<jsg::Ref<Response>> withFetchSpan(
+    jsg::Lock& js, kj::Maybe<TraceContext> traceContext, Func&& func) {
+  KJ_IF_SOME(span, traceContext) {
+    return IoContext::current().withSpan(js, kj::mv(span),
+        [&](TraceContext& ownedSpan) { return func(kj::Maybe<TraceContext&>(ownedSpan)); });
+  }
+  return func(kj::Maybe<TraceContext&>(kj::none));
+}
+
+// Ends the span of a fetch attempt that is done. Call it when the response is ready, or before
+// following a redirect or retrying, whose own span then records any error they end with.
+void endFetchSpan(kj::Maybe<TraceContext&> traceContext) {
+  KJ_IF_SOME(span, traceContext) {
+    span = TraceContext();
+  }
+}
+
 jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest,
@@ -1664,19 +1685,23 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
 
 // `callStart` is the actor call's start, carried so that a redirect shares the call's retry
 // timeout. It is none for fetches that are not actor calls.
+//
+// `traceContext` is the span of the fetch attempt that got `response`, if any.
 jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest,
     kj::Vector<kj::Url> urlList,
     kj::HttpClient::Response&& response,
-    kj::Maybe<kj::TimePoint> callStart);
+    kj::Maybe<kj::TimePoint> callStart,
+    kj::Maybe<TraceContext&> traceContext);
 jsg::Promise<jsg::Ref<Response>> handleHttpRedirectResponse(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
     jsg::Ref<Request> jsRequest,
     kj::Vector<kj::Url> urlList,
     uint status,
     kj::StringPtr location,
-    kj::Maybe<kj::TimePoint> callStart);
+    kj::Maybe<kj::TimePoint> callStart,
+    kj::Maybe<TraceContext&> traceContext);
 
 jsg::Promise<jsg::Ref<Response>> handleWebSocketFetchResponse(jsg::Lock& js,
     jsg::Ref<Fetcher> fetcher,
@@ -1690,7 +1715,8 @@ jsg::Promise<jsg::Ref<Response>> handleWebSocketFetchResponse(jsg::Lock& js,
     KJ_CASE_ONEOF(body, kj::Own<kj::AsyncInputStream>) {
       body = body.attach(kj::mv(client));
       return handleHttpResponse(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
-          {response.statusCode, response.statusText, response.headers, kj::mv(body)}, callStart);
+          {response.statusCode, response.statusText, response.headers, kj::mv(body)}, callStart,
+          kj::none);
     }
     KJ_CASE_ONEOF(webSocket, kj::Own<kj::WebSocket>) {
       KJ_ASSERT(response.statusCode == 101);
@@ -1717,12 +1743,17 @@ jsg::Promise<jsg::Ref<Response>> handleHttpFetchResponse(jsg::Lock& js,
     jsg::Ref<Request> jsRequest,
     kj::Vector<kj::Url> urlList,
     kj::Own<kj::HttpClient> client,
-    kj::Maybe<TraceContext>& traceContext,
+    kj::Maybe<TraceContext&> traceContext,
     kj::HttpClient::Response response,
     kj::Maybe<kj::TimePoint> callStart) {
   response.body = response.body.attach(kj::mv(client));
   KJ_IF_SOME(ctx, traceContext) {
     ctx.setTag("http.response.status_code"_kjc, static_cast<int64_t>(response.statusCode));
+    if (response.statusCode >= 400) {
+      // A client span with an error status code failed. The HTTP semantic conventions say not to
+      // set a status message that can be inferred from the status code.
+      ctx.setStatus(tracing::SpanStatus(tracing::SpanStatusCode::ERROR));
+    }
     KJ_IF_SOME(length, response.body->tryGetLength()) {
       ctx.setTag("http.response.body.size"_kjc, static_cast<int64_t>(length));
     }
@@ -1731,8 +1762,8 @@ jsg::Promise<jsg::Ref<Response>> handleHttpFetchResponse(jsg::Lock& js,
       ctx.setTag("cloudflare.ray_id"_kjc, cfRay);
     }
   }
-  return handleHttpResponse(
-      js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), kj::mv(response), callStart);
+  return handleHttpResponse(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
+      kj::mv(response), callStart, traceContext);
 }
 
 kj::Maybe<jsg::JsValue> getAbortReason(jsg::Lock& js, Request& request) {
@@ -1749,7 +1780,8 @@ jsg::Promise<jsg::Ref<Response>> retryActorFetch(jsg::Lock& js,
     jsg::Ref<Request> jsRequest,
     kj::Vector<kj::Url> urlList,
     kj::Rc<ActorCallRetryState> retryState,
-    kj::Exception exception) {
+    kj::Exception exception,
+    kj::Maybe<TraceContext&> traceContext) {
   KJ_IF_SOME(reason, getAbortReason(js, *jsRequest)) {
     retryState->recordCanceled();
     return js.rejectedPromise<jsg::Ref<Response>>(kj::mv(reason));
@@ -1761,6 +1793,12 @@ jsg::Promise<jsg::Ref<Response>> retryActorFetch(jsg::Lock& js,
     js.throwException(kj::mv(exception));
   }
   auto delay = KJ_ASSERT_NONNULL(delayOrException.tryGet<kj::Duration>());
+  KJ_IF_SOME(span, traceContext) {
+    // The attempt failed. Its exception isn't recorded: converting it to JavaScript would also
+    // report it, although it never reaches the application.
+    span.setStatus(tracing::SpanStatus(tracing::SpanStatusCode::ERROR));
+  }
+  endFetchSpan(traceContext);
   fetcher->onActorCallRetry();
   auto& ioContext = IoContext::current();
   jsRequest->rewindBody(js);
@@ -1812,7 +1850,7 @@ jsg::Promise<jsg::Ref<Response>> awaitWebSocketFetchResponse(jsg::Lock& js,
           KJ_CASE_ONEOF(failure, ActorFetchFailure) {
             return retryActorFetch(js, kj::mv(state.fetcher), kj::mv(state.request),
                 kj::mv(state.urlList), kj::mv(KJ_ASSERT_NONNULL(state.retryState)),
-                kj::mv(failure.exception));
+                kj::mv(failure.exception), kj::none);
           }
         }
         KJ_UNREACHABLE;
@@ -1993,38 +2031,40 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
       }
       return kj::mv(exception);
     });
-    KJ_IF_SOME(state, retryState) {
-      if (state->isRetryEnabled()) {
-        auto resultPromise = captureActorFetchAttempt(
-            js, signal, state->enforceRetryTimeout(kj::mv(responsePromise)), state.addRef());
-        return ioContext.awaitIo(js, kj::mv(resultPromise),
-              [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest),
-                  urlList = kj::mv(urlList), client = kj::mv(client),
-                  traceContext = kj::mv(traceContext), retryState = kj::mv(retryState), callStart](
+    return withFetchSpan(js, kj::mv(traceContext),
+        [&](kj::Maybe<TraceContext&> span) -> jsg::Promise<jsg::Ref<Response>> {
+      KJ_IF_SOME(state, retryState) {
+        if (state->isRetryEnabled()) {
+          auto resultPromise = captureActorFetchAttempt(
+              js, signal, state->enforceRetryTimeout(kj::mv(responsePromise)), state.addRef());
+          return ioContext.awaitIo(js, kj::mv(resultPromise),
+              [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
+                  client = kj::mv(client), span, retryState = kj::mv(retryState), callStart](
                   jsg::Lock& js, ActorFetchAttemptResult<kj::HttpClient::Response>&& result) mutable
               -> jsg::Promise<jsg::Ref<Response>> {
             KJ_SWITCH_ONEOF(result) {
               KJ_CASE_ONEOF(response, kj::HttpClient::Response) {
-              KJ_ASSERT_NONNULL(retryState)->recordRecovered();
-              return handleHttpFetchResponse(js, kj::mv(fetcher), kj::mv(jsRequest),
-                  kj::mv(urlList), kj::mv(client), traceContext, kj::mv(response), callStart);
-            }
-            KJ_CASE_ONEOF(failure, ActorFetchFailure) {
-              return retryActorFetch(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
-                  kj::mv(KJ_ASSERT_NONNULL(retryState)), kj::mv(failure.exception));
-            }
+                KJ_ASSERT_NONNULL(retryState)->recordRecovered();
+                return handleHttpFetchResponse(js, kj::mv(fetcher), kj::mv(jsRequest),
+                    kj::mv(urlList), kj::mv(client), span, kj::mv(response), callStart);
+              }
+              KJ_CASE_ONEOF(failure, ActorFetchFailure) {
+                return retryActorFetch(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
+                    kj::mv(KJ_ASSERT_NONNULL(retryState)), kj::mv(failure.exception), span);
+              }
             }
             KJ_UNREACHABLE;
           });
+        }
       }
-    }
-    responsePromise = AbortSignal::maybeCancelWrap(js, signal, kj::mv(responsePromise));
-    return ioContext.awaitIo(js, kj::mv(responsePromise),
-        [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
-            client = kj::mv(client), traceContext = kj::mv(traceContext), callStart](
-            jsg::Lock& js, kj::HttpClient::Response&& response) mutable {
-      return handleHttpFetchResponse(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
-          kj::mv(client), traceContext, kj::mv(response), callStart);
+      responsePromise = AbortSignal::maybeCancelWrap(js, signal, kj::mv(responsePromise));
+      return ioContext.awaitIo(js, kj::mv(responsePromise),
+          [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
+              client = kj::mv(client), span, callStart](
+              jsg::Lock& js, kj::HttpClient::Response&& response) mutable {
+        return handleHttpFetchResponse(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
+            kj::mv(client), span, kj::mv(response), callStart);
+      });
     });
   }
 }
@@ -2052,7 +2092,8 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
     jsg::Ref<Request> jsRequest,
     kj::Vector<kj::Url> urlList,
     kj::HttpClient::Response&& response,
-    kj::Maybe<kj::TimePoint> callStart) {
+    kj::Maybe<kj::TimePoint> callStart,
+    kj::Maybe<TraceContext&> traceContext) {
   auto signal = jsRequest->getSignal();
 
   KJ_IF_SOME(s, signal) {
@@ -2073,9 +2114,10 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
       return ioContext.awaitIo(js,
           response.body->pumpTo(getGlobalNullOutputStream()).ignoreResult().attach(kj::mv(response.body)),
           [fetcher = kj::mv(fetcher), jsRequest = kj::mv(jsRequest), urlList = kj::mv(urlList),
-           status = response.statusCode, location = kj::str(l), callStart](jsg::Lock& js) mutable {
+           status = response.statusCode, location = kj::str(l), callStart,
+           traceContext](jsg::Lock& js) mutable {
         return handleHttpRedirectResponse(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList),
-            status, kj::mv(location), callStart);
+            status, kj::mv(location), callStart, traceContext);
       });
     } else {
       // No Location header. That's OK, we just return the response as is.
@@ -2087,6 +2129,8 @@ jsg::Promise<jsg::Ref<Response>> handleHttpResponse(jsg::Lock& js,
       response.statusCode, response.statusText, *response.headers, kj::mv(response.body), kj::none,
       jsRequest->getResponseBodyEncoding(), kj::mv(signal));
 
+  // End the span now rather than a microtask later, when the returned promise resolves.
+  endFetchSpan(traceContext);
   return js.resolvedPromise(kj::mv(result));
 }
 
@@ -2096,7 +2140,8 @@ jsg::Promise<jsg::Ref<Response>> handleHttpRedirectResponse(jsg::Lock& js,
     kj::Vector<kj::Url> urlList,
     uint status,
     kj::StringPtr location,
-    kj::Maybe<kj::TimePoint> callStart) {
+    kj::Maybe<kj::TimePoint> callStart,
+    kj::Maybe<TraceContext&> traceContext) {
   // Reconstruct the request body stream for retransmission in the face of a redirect. Before
   // reconstructing the stream, however, this function:
   //
@@ -2220,7 +2265,8 @@ jsg::Promise<jsg::Ref<Response>> handleHttpRedirectResponse(jsg::Lock& js,
   // with the app state in any way.
   //
   // The redirected request is a new actor call with fresh retry state, but it keeps the original
-  // callStart so one retry timeout covers the whole chain.
+  // callStart so one retry timeout covers the whole chain. It also gets its own span.
+  endFetchSpan(traceContext);
   return fetchImplNoOutputLock(js, kj::mv(fetcher), kj::mv(jsRequest), kj::mv(urlList), callStart);
 }
 
