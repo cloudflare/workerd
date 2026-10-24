@@ -7,7 +7,10 @@ load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 CPP_SHIMS = glob([
     "*.c++",
     "*.h",
-])
+]) + [
+    "//src/workerd/io/io-context:ffi.c++",
+    "//src/workerd/io/io-context:ffi.h",
+]
 
 # Fails when a shim adds a use of C++ JSG; see cpp-jsg-allowlist-test.py.
 py_test(

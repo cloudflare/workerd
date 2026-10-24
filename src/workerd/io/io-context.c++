@@ -1826,6 +1826,7 @@ void IoContext::runImpl(Runnable& runnable,
   });
 }
 
+// Copied as NO_REQUEST_MESSAGE in src/workerd/io/io-context/lib.rs; update both together.
 static constexpr auto kAsyncIoErrorMessage =
     "Disallowed operation called within global scope. Asynchronous I/O "
     "(ex: fetch() or connect()), setting a timeout, and generating random "
