@@ -1719,6 +1719,352 @@ KJ_TEST("Server: subrequest to default outbound") {
   )"_blockquote);
 }
 
+constexpr kj::StringPtr STREAMING_UPLOAD_COMPATIBILITY_FLAGS[] = {
+  ""_kj,
+  "compatibilityFlags = [\"typescript_implemented_streams\"],"_kj,
+};
+
+kj::String streamingUploadConfig(kj::StringPtr worker) {
+  return kj::str(R"((
+    autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
+    services = [(name = "hello", worker = )"_kj,
+      worker, R"()],
+    sockets = [(name = "main", address = "test-addr", service = "hello")]
+  ))"_kj);
+}
+
+kj::String streamingUploadWorker(kj::StringPtr compatibilityFlags) {
+  return streamingUploadConfig(kj::str(R"((
+    compatibilityDate = "2024-10-01",
+  )"_kj,
+      compatibilityFlags, R"(
+    modules = [
+      ( name = "main.js",
+        esModule =
+          `let state = "pending";
+          `let canceled = false;
+          `export default {
+          `  async fetch(request) {
+          `    const path = new URL(request.url).pathname;
+          `    if (path === "/state") return new Response(state);
+          `    if (path === "/canceled") return new Response(canceled ? "canceled" : "pending");
+          `    let first = true;
+          `    let sentTail = false;
+          `    let timer;
+          `    const body = new ReadableStream({
+          `      start(controller) {
+          `        if (path === "/pre-error") controller.error(new Error("upload failed"));
+          `      },
+          `      async pull(controller) {
+          `        if (first) {
+          `          first = false;
+          `          controller.enqueue(new TextEncoder().encode("first"));
+          `          return;
+          `        }
+          `        if (path === "/reject" && sentTail) {
+          `          await new Promise(resolve => { timer = setTimeout(resolve, 1000000); });
+          `          return;
+          `        }
+          `        await new Promise(resolve => { timer = setTimeout(resolve, 1000); });
+          `        if (path === "/reject") {
+          `          sentTail = true;
+          `          controller.enqueue(new TextEncoder().encode("later"));
+          `          return;
+          `        }
+          `        if (path === "/close") controller.close();
+          `        else controller.error(new Error("upload failed"));
+          `      },
+          `      cancel() {
+          `        clearTimeout(timer);
+          `        canceled = true;
+          `      }
+          `    });
+          `    let phase = "fetch";
+          `    try {
+          `      const response = await fetch("http://subhost/upload", { method: "PUT", body });
+          `      phase = "response";
+          `      state = "response:" + response.status;
+          `      const text = await response.text();
+          `      return new Response("resolved:" + response.status + ":" + text);
+          `    } catch (error) {
+          `      return new Response(phase + " rejected:" + error.message);
+          `    }
+          `  }
+          `}
+      )
+    ]
+  ))"_kj));
+}
+
+KJ_TEST("Server: already failed upload stream cannot complete an HTTP request") {
+  for (auto compatibilityFlags: STREAMING_UPLOAD_COMPATIBILITY_FLAGS) {
+    TestServer test(streamingUploadWorker(compatibilityFlags));
+    test.server.allowExperimental();
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.httpGet200("/pre-error", "fetch rejected:upload failed");
+
+    // Aborting before the native client dispatches may avoid opening a connection altogether.
+    auto pending = test.server.accept("subhost");
+    if (pending.poll(test.ws)) {
+      auto peer = pending.wait(test.ws);
+      auto received = peer->readAllText();
+      KJ_ASSERT(received.poll(test.ws), "failed upload left the HTTP connection open");
+      auto bytes = received.wait(test.ws);
+      KJ_EXPECT(bytes.size() == 0 ||
+              bytes ==
+                  "PUT /upload HTTP/1.1\r\nTransfer-Encoding: chunked\r\nHost: subhost\r\n\r\n",
+          bytes);
+    }
+  }
+}
+
+KJ_TEST("Server: failed upload stream aborts the HTTP request without a final chunk") {
+  for (auto compatibilityFlags: STREAMING_UPLOAD_COMPATIBILITY_FLAGS) {
+    TestServer test(streamingUploadWorker(compatibilityFlags));
+    test.server.allowExperimental();
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.sendHttpGet("/error");
+
+    auto subreq = test.receiveInternetSubrequest("subhost");
+    subreq.recv(R"(
+      PUT /upload HTTP/1.1
+      Transfer-Encoding: chunked
+      Host: subhost
+
+      5
+      first
+    )"_blockquote);
+
+    // Advance the request-local source timer only after its prefix reaches the HTTP peer.
+    test.wait(1);
+    conn.recvHttp200("fetch rejected:upload failed");
+    // No bytes remain after the prefix: in particular, there is no final zero chunk.
+    KJ_EXPECT(subreq.isEof());
+  }
+}
+
+KJ_TEST("Server: AbortSignal cancels an idle upload without completing HTTP framing") {
+  for (auto compatibilityFlags: STREAMING_UPLOAD_COMPATIBILITY_FLAGS) {
+    TestServer test(streamingUploadConfig(kj::str(R"((
+      compatibilityDate = "2024-10-01",
+    )"_kj,
+        compatibilityFlags, R"(
+      modules = [(name = "main.js", esModule =
+        `let abortUpload;
+        `export default {
+        `  async fetch(request) {
+        `    const path = new URL(request.url).pathname;
+        `    if (path === "/abort") {
+        `      abortUpload();
+        `      return new Response("aborted");
+        `    }
+        `    const controller = new AbortController();
+        `    const reason = new Error("upload canceled");
+        `    abortUpload = () => controller.abort(reason);
+        `    const body = new ReadableStream({
+        `      start(source) { source.enqueue(new TextEncoder().encode("first")); }
+        `    });
+        `    try {
+        `      await fetch("http://subhost/upload", {
+        `        method: "PUT", body, signal: controller.signal
+        `      });
+        `      return new Response("fetch resolved");
+        `    } catch (error) {
+        `      return new Response("fetch rejected:" + error.message);
+        `    }
+        `  }
+        `}
+      )]
+    ))"_kj)));
+    test.server.allowExperimental();
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.sendHttpGet("/upload");
+
+    auto subreq = test.receiveInternetSubrequest("subhost");
+    subreq.recv(R"(
+      PUT /upload HTTP/1.1
+      Transfer-Encoding: chunked
+      Host: subhost
+
+      5
+      first
+    )"_blockquote);
+
+    // The source remains open and idle. Abort only after its prefix reaches the HTTP peer.
+    auto control = test.connect("test-addr");
+    control.httpGet200("/abort", "aborted");
+    conn.recvHttp200("fetch rejected:upload canceled");
+    // EOF immediately after the prefix proves cancellation did not write the final zero chunk.
+    KJ_EXPECT(subreq.isEof());
+  }
+}
+
+KJ_TEST("Server: successful upload stream sends a final chunk and receives the response") {
+  for (auto compatibilityFlags: STREAMING_UPLOAD_COMPATIBILITY_FLAGS) {
+    TestServer test(streamingUploadWorker(compatibilityFlags));
+    test.server.allowExperimental();
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.sendHttpGet("/close");
+
+    auto subreq = test.receiveInternetSubrequest("subhost");
+    subreq.recv(R"(
+      PUT /upload HTTP/1.1
+      Transfer-Encoding: chunked
+      Host: subhost
+
+      5
+      first
+    )"_blockquote);
+
+    test.wait(1);
+    subreq.recv("0\n\n");
+    subreq.send(R"(
+      HTTP/1.1 200 OK
+      Content-Length: 6
+
+      stored)"_blockquote);
+    conn.recvHttp200("resolved:200:stored");
+  }
+}
+
+KJ_TEST("Server: upload failure after response headers errors the response body") {
+  for (auto compatibilityFlags: STREAMING_UPLOAD_COMPATIBILITY_FLAGS) {
+    TestServer test(streamingUploadWorker(compatibilityFlags));
+    test.server.allowExperimental();
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.sendHttpGet("/error");
+
+    auto subreq = test.receiveInternetSubrequest("subhost");
+    subreq.recv(R"(
+      PUT /upload HTTP/1.1
+      Transfer-Encoding: chunked
+      Host: subhost
+
+      5
+      first
+    )"_blockquote);
+    subreq.send("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nreply\r\n");
+
+    // The fetch resolves before the upload finishes, while reading the response stays pending.
+    test.getWaitScope().poll();
+    auto control = test.connect("test-addr");
+    control.httpGet200("/state", "response:200");
+    test.wait(1);
+    conn.recvHttp200("response rejected:upload failed");
+    {
+      kj::byte tail[64];
+      auto tailRead = subreq.getStream().tryRead(tail, 1, sizeof(tail));
+      auto tailReady = tailRead.poll(test.ws);
+      KJ_EXPECT(tailReady, "source failure left the upstream connection open");
+      if (tailReady) {
+        auto tailSize = tailRead.wait(test.ws);
+        auto tailHex = kj::encodeHex(kj::arrayPtr(tail, tailSize));
+        KJ_EXPECT(tailSize == 0, "unexpected upload bytes after source failure", tailHex);
+      }
+    }
+    KJ_EXPECT(subreq.isEof());
+  }
+}
+
+KJ_TEST("Server: upload write disconnect preserves an early rejection response") {
+  for (auto compatibilityFlags: STREAMING_UPLOAD_COMPATIBILITY_FLAGS) {
+    TestServer test(streamingUploadWorker(compatibilityFlags));
+    test.server.allowExperimental();
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.sendHttpGet("/reject");
+
+    {
+      auto subreq = test.receiveInternetSubrequest("subhost");
+      subreq.recv(R"(
+        PUT /upload HTTP/1.1
+        Transfer-Encoding: chunked
+        Host: subhost
+
+        5
+        first
+      )"_blockquote);
+      subreq.send(R"(
+        HTTP/1.1 413 Content Too Large
+        Content-Length: 8
+        Connection: close
+
+        rejected)"_blockquote);
+    }
+
+    // Read the rejection response while the upload remains unfinished, then try another source
+    // chunk after the server has closed its connection. The destination failure cancels the source.
+    conn.recvHttp200("resolved:413:rejected");
+    test.wait(1);
+    auto control = test.connect("test-addr");
+    control.httpGet200("/canceled", "canceled");
+  }
+}
+
+KJ_TEST("Server: incoming upload disconnect aborts its outgoing HTTP request") {
+  for (auto compatibilityFlags: STREAMING_UPLOAD_COMPATIBILITY_FLAGS) {
+    TestServer test(streamingUploadConfig(kj::str(R"((
+      compatibilityDate = "2024-10-01",
+    )"_kj,
+        compatibilityFlags, R"(
+      modules = [
+        ( name = "main.js",
+          esModule =
+            `let result = "pending";
+            `export default {
+            `  async fetch(request, env, ctx) {
+            `    if (new URL(request.url).pathname === "/result") {
+            `      return new Response(result);
+            `    }
+            `    const upload = (async () => {
+            `      try {
+            `        const response = await fetch("http://subhost/upload", {
+            `          method: "PUT", body: request.body
+            `        });
+            `        await response.text();
+            `        result = "resolved";
+            `      } catch (error) {
+            `        result = "fetch rejected";
+            `      }
+            `      return new Response("done");
+            `    })();
+            `    ctx.waitUntil(upload);
+            `    return upload;
+            `  }
+            `}
+        )
+      ]
+    ))"_kj)));
+    test.server.allowExperimental();
+    test.start();
+    auto conn = test.connect("test-addr");
+    conn.send(
+        "PUT /proxy HTTP/1.1\r\nHost: foo\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nfirst\r\n");
+
+    auto subreq = test.receiveInternetSubrequest("subhost");
+    subreq.recv(R"(
+      PUT /upload HTTP/1.1
+      Transfer-Encoding: chunked
+      Host: subhost
+
+      5
+      first
+    )"_blockquote);
+
+    // EOF without a final chunk fails the native incoming body while keeping the response side open.
+    conn.getStream().shutdownWrite();
+    test.getWaitScope().poll();
+    auto control = test.connect("test-addr");
+    control.httpGet200("/result", "fetch rejected");
+    KJ_EXPECT(subreq.isEof());
+  }
+}
+
 KJ_TEST("Server: override 'internet' service") {
   TestServer test(R"((
     services = [

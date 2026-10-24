@@ -59,9 +59,8 @@ class AbortableImpl final {
 // An InputStream that can be disconnected in response to ReleasingCanceler.
 // This is similar to NeuterableInputStream in global-scope.c++ but uses an
 // external kj::Canceler to trigger the disconnect.
-// This is currently only used in fetch() requests that use an AbortSignal.
-// The AbortableInputStream is created using a ReleasingCanceler,
-// which will be triggered when the AbortSignal is triggered.
+// fetch() uses this for response bodies, canceled either by an AbortSignal or by
+// a failure in the outgoing request body stream.
 // TODO(later): It would be good to see if both this and NeuterableInputStream
 // could be combined into a single utility.
 class AbortableInputStream final: public kj::AsyncInputStream, public kj::Refcounted {

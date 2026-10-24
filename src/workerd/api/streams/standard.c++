@@ -3967,7 +3967,9 @@ kj::Promise<DeferredProxy<void>> ReadableStreamJsController::pumpTo(
       return addNoopDeferredProxy(sink->end().attach(kj::mv(sink)));
     }
     KJ_CASE_ONEOF(errored, StreamStates::Errored) {
-      return js.exceptionToKj(errored.addRef(js));
+      auto exception = js.exceptionToKj(errored.addRef(js));
+      sink->abort(exception.clone());
+      return kj::mv(exception);
     }
     KJ_CASE_ONEOF(readable, kj::Own<ValueReadable>) {
       return handlePump();

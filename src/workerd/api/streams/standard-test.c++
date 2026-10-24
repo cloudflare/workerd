@@ -2865,6 +2865,58 @@ KJ_TEST("ReadableStream pumpTo dropped during IoContext teardown does not cancel
   KJ_ASSERT(cancelCount == 0);
 }
 
+KJ_TEST("already errored native pump aborts its sink") {
+  uint abortCount = 0;
+  bool rejected = false;
+  kj::String abortReason;
+
+  struct RecordingSink final: WritableStreamSink {
+    uint& count;
+    kj::String& reason;
+    RecordingSink(uint& count, kj::String& reason): count(count), reason(reason) {}
+    kj::Promise<void> write(kj::ArrayPtr<const byte>) override {
+      KJ_FAIL_ASSERT("unexpected write");
+    }
+    kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>>) override {
+      KJ_FAIL_ASSERT("unexpected write");
+    }
+    kj::Promise<void> end() override {
+      KJ_FAIL_ASSERT("unexpected clean end");
+    }
+    void abort(kj::Exception error) override {
+      ++count;
+      reason = kj::str(error.getDescription());
+    }
+  };
+
+  TestFixture fixture;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto& js = env.js;
+    // Exercise the C++ controller directly to observe the native sink abort.
+    // NOLINTNEXTLINE(workerd-legacy-stream-alloc)
+    auto stream = js.alloc<ReadableStream>(newReadableStreamJsController());
+    stream->getController().setup(js,
+        UnderlyingSource{
+          .start = [](jsg::Lock& js,
+                       auto) { return js.rejectedPromise<void>(js.error("upload failed")); }},
+        StreamQueuingStrategy{.highWaterMark = 0});
+
+    // Settle start() first so pumpTo() encounters an already-errored source.
+    js.runMicrotasks();
+    KJ_ASSERT(stream->getController().isClosedOrErrored());
+    return stream->pumpTo(js, kj::heap<RecordingSink>(abortCount, abortReason), true)
+        .then([](DeferredProxy<void>) { KJ_FAIL_ASSERT("expected rejection"); },
+            [&](kj::Exception&& error) {
+      rejected = true;
+      KJ_EXPECT(error.getDescription().contains("upload failed"));
+    });
+  });
+
+  KJ_EXPECT(rejected);
+  KJ_EXPECT(abortCount == 1);
+  KJ_EXPECT(abortReason.contains("upload failed"));
+}
+
 }  // namespace
 }  // namespace workerd::api
 

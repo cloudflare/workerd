@@ -38,6 +38,52 @@
 namespace workerd::api {
 
 namespace {
+
+// Preserve a failed upload's exception before aborting the native body can produce a less
+// specific transport error. The same canceler also cancels the response body if the response
+// has already arrived.
+class FetchRequestBody final: public kj::AsyncOutputStream {
+ public:
+  FetchRequestBody(kj::Own<kj::AsyncOutputStream> inner, kj::Rc<ReleasingCanceler> canceler)
+      : canceler(kj::mv(canceler)),
+        inner(kj::mv(inner)) {}
+
+  kj::Promise<void> write(kj::ArrayPtr<const kj::byte> buffer) override {
+    return inner->write(buffer);
+  }
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    return inner->write(pieces);
+  }
+  bool tryWriteSync(kj::ArrayPtr<const kj::byte> buffer) override {
+    return inner->tryWriteSync(buffer);
+  }
+  bool tryWriteSync(kj::ArrayPtr<const kj::ArrayPtr<const kj::byte>> pieces) override {
+    return inner->tryWriteSync(pieces);
+  }
+  kj::Maybe<kj::Promise<uint64_t>> tryPumpFrom(
+      kj::AsyncInputStream& input, uint64_t amount) override {
+    return inner->tryPumpFrom(input, amount);
+  }
+  kj::Promise<void> whenWriteDisconnected() override {
+    return inner->whenWriteDisconnected();
+  }
+  void abortWrite(kj::Exception&& exception) override {
+    if (inner.get() == nullptr) return;
+    // Canceling the exchange may destroy its streams. Keep these owners local and avoid
+    // accessing the wrapper after cancellation.
+    auto canceler = this->canceler.addRef();
+    auto inner = kj::mv(this->inner);
+    if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
+      canceler->cancel(exception);
+    }
+    inner->abortWrite(kj::mv(exception));
+  }
+
+ private:
+  kj::Rc<ReleasingCanceler> canceler;
+  kj::Own<kj::AsyncOutputStream> inner;
+};
+
 Request::CacheMode getCacheModeFromName(kj::StringPtr value) {
   if (value == "no-store") return Request::CacheMode::NOSTORE;
   if (value == "no-cache") return Request::CacheMode::NOCACHE;
@@ -1951,7 +1997,21 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, maybeLength);
       setupTrace.startPhase("fetch_promise_setup"_kjc);
       auto& nr = KJ_ASSERT_NONNULL(nativeRequest);
-      auto stream = newSystemStream(kj::mv(nr.body), StreamEncoding::IDENTITY);
+      auto uploadCanceler = kj::rc<ReleasingCanceler>();
+      nr.response = uploadCanceler->wrap(kj::mv(nr.response))
+                        .then([uploadCanceler = uploadCanceler.addRef()](
+                                  kj::HttpClient::Response&& response) mutable {
+        uploadCanceler->throwIfCanceled();
+        // A response can arrive while the upload is still streaming. Keep propagating upload
+        // failures to the response body after fetch() has delivered its headers.
+        auto& canceler = *uploadCanceler;
+        response.body = kj::refcounted<AbortableInputStream>(kj::mv(response.body),
+            kj::attachRef(canceler, kj::mv(uploadCanceler)));
+        return kj::mv(response);
+      });
+      auto stream = newSystemStream(
+          kj::heap<FetchRequestBody>(kj::mv(nr.body), uploadCanceler.addRef()),
+          StreamEncoding::IDENTITY);
 
       // We want to support bidirectional streaming, so we actually don't want to wait for the
       // request to finish before we deliver the response to the app.
@@ -1959,13 +2019,16 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
       // jsBody is not used directly within the function but is passed in so that
       // the coroutine frame keeps it alive.
       static constexpr auto handleCancelablePump = [](kj::Promise<void> promise,
-                                                       auto jsBody) -> kj::Promise<void> {
+                                                       auto jsBody,
+                                                       kj::Rc<ReleasingCanceler> uploadCanceler)
+          -> kj::Promise<void> {
         try {
           co_await promise;
         } catch (...) {
           auto exception = kj::getCaughtExceptionAsKj();
           if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
-            kj::throwException(kj::mv(exception));
+            // The failure belongs to fetch(), rather than an uncaught waitUntil() task.
+            uploadCanceler->cancel(exception);
           }
           // Ignore DISCONNECTED exceptions thrown by the writePromise, so that we always
           // return the server's response, which should identify if any issue occurred with
@@ -1977,7 +2040,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
       ioContext.addWaitUntil(handleCancelablePump(
           AbortSignal::maybeCancelWrap(js, signal,
               ioContext.waitForDeferredProxy(jsBody.pumpTo(js, kj::mv(stream), EndStream::YES))),
-          jsBody.addRef(js)));
+          jsBody.addRef(js), kj::mv(uploadCanceler)));
     } else {
       setupTrace.startPhase("fetch_dispatch"_kjc);
       nativeRequest = client->request(jsRequest->getMethodEnum(), url, headers, static_cast<uint64_t>(0));
