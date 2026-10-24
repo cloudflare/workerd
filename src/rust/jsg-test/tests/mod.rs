@@ -7,6 +7,7 @@ mod arrays;
 mod buffer_types;
 mod coercion_safety;
 mod collections_gc;
+mod date_bigint;
 mod eval;
 mod fast_api;
 mod function;
