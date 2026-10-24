@@ -108,3 +108,8 @@ fn expected_prefix_without_tunneling_tag_is_redacted() {
     assert_eq!(err.message, "expected someCondition; some message");
     assert!(err.is_internal);
 }
+
+#[test]
+fn fast_call_scopes_fit_their_storage() {
+    assert!(v8::ffi::fast_api_scope_size() <= scope::FAST_CALL_SCOPE_SIZE);
+}

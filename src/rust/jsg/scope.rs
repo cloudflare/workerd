@@ -491,6 +491,45 @@ where
     callback::<F>
 }
 
+/// Bytes [`in_fast_call_scope`] reserves for the C++ scopes; `kFastApiScopeSize` in ffi.h.
+pub const FAST_CALL_SCOPE_SIZE: usize = 64;
+
+/// Runs `f` as [`crate::catch_panic`] does, with a lock for a `HandleScope` in which JavaScript
+/// can't run. As in `rusty_v8`, the scopes live on this frame and C++ only builds and destroys them.
+///
+/// # Safety
+/// `options` are the running fast callback's.
+#[expect(unsafe_code, reason = "opens V8 scopes in storage on this frame")]
+pub unsafe fn in_fast_call_scope<R>(
+    options: *mut v8::ffi::FastApiCallbackOptions,
+    f: impl for<'s> FnOnce(&'s mut Lock<'s>) -> R,
+) -> Option<R> {
+    #[repr(C, align(8))]
+    struct Storage([u8; FAST_CALL_SCOPE_SIZE]);
+
+    struct Close(*mut u8);
+    impl Drop for Close {
+        fn drop(&mut self) {
+            // SAFETY: `fast_api_scope_open` built the scopes in this storage.
+            unsafe { v8::ffi::fast_api_scope_close(self.0) };
+        }
+    }
+
+    let mut storage = std::mem::MaybeUninit::<Storage>::uninit();
+    let storage = storage.as_mut_ptr().cast::<u8>();
+    // SAFETY: `options` is from V8; `storage` fits the scopes and stays put until `_close`.
+    let isolate = unsafe { v8::ffi::fast_api_scope_open(options, storage) };
+    let _close = Close(storage);
+    // Dropped before `_close`, so the lock's `HandleScope` stays innermost while it lives.
+    let scope = std::pin::pin!(CallbackScope {
+        // SAFETY: V8 runs a fast callback with the isolate locked and a context entered.
+        lock: Lock::new(unsafe { v8::IsolatePtr::from_ffi(isolate) }),
+        open: false,
+        _pinned: PhantomPinned,
+    });
+    crate::catch_panic(scope, f)
+}
+
 /// Binds to `$lock` a lock for the `HandleScope` that C++ or V8 opened before calling into
 /// Rust; see [`CallbackScope::new`] for what the caller must guarantee.
 ///

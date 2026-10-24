@@ -4,15 +4,15 @@
 
 //! V8 Fast API callbacks for `#[jsg_method]`. See the README.
 //!
-//! To support another type, implement [`FastApiArg`] or [`FastApiReturn`] for it below and add
-//! its name to the lists in `jsg-macros/utils.rs`. If V8 must pass it as a C type not in
-//! [`FastApiType`] yet, add a variant and map it to a `v8::CTypeInfo` in `cTypeOf()` in `ffi.c++`.
+//! A method gets a fast callback when its arguments are [`FastApiArg`]s and it returns a
+//! [`FastApiOutput`]; see [`probe`]. New C types also need a case in `cTypeOf()` in `ffi.c++`.
 
 #![allow(
     unsafe_code,
     reason = "fast callbacks receive raw V8 pointers and resolve resources through them"
 )]
 
+use std::marker::PhantomData;
 use std::panic::AssertUnwindSafe;
 #[cfg(debug_assertions)]
 use std::sync::atomic::AtomicBool;
@@ -22,6 +22,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
 use crate::Error;
+use crate::Lock;
 use crate::Number;
 use crate::Resource;
 use crate::UnitType;
@@ -36,6 +37,10 @@ mod private {
 
 /// An argument type of a fast callback. V8 passes it as the C type `Raw`, and `from_raw` converts
 /// it exactly as the slow callback's `FromJS` does.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be an argument of a V8 Fast API callback",
+    note = "the argument types a fast callback can take are listed in `jsg/fast_api.rs`"
+)]
 pub trait FastApiArg: private::Sealed + Sized {
     type Raw: Copy;
     const TYPE: FastApiType;
@@ -43,6 +48,10 @@ pub trait FastApiArg: private::Sealed + Sized {
 }
 
 /// A return type of a fast callback, handed back to V8 as the C type `Raw`.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be returned from a V8 Fast API callback",
+    note = "the types a fast callback can return are listed in `jsg/fast_api.rs`"
+)]
 pub trait FastApiReturn: private::Sealed {
     type Raw: Default;
     const TYPE: FastApiType;
@@ -114,102 +123,221 @@ impl FastApiReturn for () {
     fn into_raw(self) {}
 }
 
-/// Returns the fast callback of a method of `R`, which `#[jsg_method]` passes as `f`.
+/// A [`FastApiReturn`], or a `Result` of one whose `Err` is thrown.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be returned from a V8 Fast API callback",
+    note = "a fast callback returns a type listed in `jsg/fast_api.rs`, or a `Result` of one"
+)]
+pub trait FastApiOutput: private::Sealed {
+    type Value: FastApiReturn;
+    fn into_result(self) -> Result<Self::Value, Error>;
+}
+
+impl<T: FastApiReturn> FastApiOutput for T {
+    type Value = Self;
+    fn into_result(self) -> Result<Self, Error> {
+        Ok(self)
+    }
+}
+
+impl<T, E> private::Sealed for Result<T, E> {}
+impl<T: FastApiReturn, E: Into<Error>> FastApiOutput for Result<T, E> {
+    type Value = T;
+    fn into_result(self) -> Result<T, Error> {
+        self.map_err(Into::into)
+    }
+}
+
+/// Picks a method's fast callback, or none, by autoref specialization: [`Eligible`] on the probe
+/// wins over [`Ineligible`] on `&probe`.
+#[doc(hidden)]
+pub mod probe {
+    use std::marker::PhantomData;
+
+    use super::FastMethod;
+    use crate::UnitType;
+    use crate::v8::ffi;
+
+    /// A closure `F` that calls a method of `R` (or [`Static`](super::Static)) with `Args`.
+    pub struct Probe<R, Args, F>(PhantomData<fn(&R, Args) -> F>);
+
+    impl<R, Args, F: UnitType> Probe<R, Args, F> {
+        pub const fn new(f: F) -> Self {
+            let _ = f;
+            Self(PhantomData)
+        }
+    }
+
+    pub trait Eligible {
+        fn descriptor(&self) -> Option<ffi::FastApiDescriptor>;
+    }
+
+    impl<R, Args, F: FastMethod<R, Args>> Eligible for Probe<R, Args, F> {
+        fn descriptor(&self) -> Option<ffi::FastApiDescriptor> {
+            Some(F::descriptor())
+        }
+    }
+
+    pub trait Ineligible {
+        fn descriptor(&self) -> Option<ffi::FastApiDescriptor> {
+            None
+        }
+    }
+
+    impl<R, Args, F> Ineligible for &Probe<R, Args, F> {}
+}
+
+/// The fast callback for `#[jsg_method(fast)]`; fails to compile if there is none.
 #[doc(hidden)]
 pub fn method<R, Args, F: FastMethod<R, Args>>(f: F) -> ffi::FastApiDescriptor {
     let _ = f;
     F::descriptor()
 }
 
-/// Returns the fast callback of a static method, which `#[jsg_method]` passes as `f`.
-#[doc(hidden)]
-pub fn static_method<Args, F: FastStaticMethod<Args>>(f: F) -> ffi::FastApiDescriptor {
-    let _ = f;
-    F::descriptor()
-}
+/// The arguments of a method that takes `&mut Lock` before its JavaScript arguments `Args`.
+pub struct WithLock<Args>(PhantomData<Args>);
 
-/// A closure that captures nothing and calls a method of `R` with the arguments `Args`.
+/// The receiver of a static method.
+pub struct Static;
+
+/// A captureless closure calling a method of `R`, or a static one if `R` is [`Static`], with
+/// `Args` (a tuple, or [`WithLock`] of one).
 pub trait FastMethod<R, Args>: UnitType {
     fn descriptor() -> ffi::FastApiDescriptor;
 }
 
-/// A closure that captures nothing and calls a static method with the arguments `Args`.
-pub trait FastStaticMethod<Args>: UnitType {
-    fn descriptor() -> ffi::FastApiDescriptor;
-}
-
-// Implements `FastMethod` and `FastStaticMethod` for closures taking these arguments. V8 calls
-// a fast callback with the receiver, each argument as its C type, then the callback options.
+// `FastMethod` for each arity, instance and static, with and without `&mut Lock`.
 macro_rules! impl_fast_methods {
     ($($arg:ident: $ty:ident),*) => {
-        impl<R, T, F, $($ty),*> FastMethod<R, ($($ty,)*)> for F
+        impl<R, O, F, $($ty),*> FastMethod<R, ($($ty,)*)> for F
         where
             R: Resource,
-            T: FastApiReturn,
-            F: UnitType + Fn(&R, $($ty),*) -> T,
+            O: FastApiOutput,
+            F: UnitType + Fn(&R, $($ty),*) -> O,
             $($ty: FastApiArg,)*
         {
             fn descriptor() -> ffi::FastApiDescriptor {
-                unsafe extern "C" fn callback<R, T, F, $($ty),*>(
+                unsafe extern "C" fn callback<R, O, F, $($ty),*>(
                     receiver: ffi::Local,
                     $($arg: $ty::Raw,)*
                     options: *mut ffi::FastApiCallbackOptions,
-                ) -> T::Raw
+                ) -> <O::Value as FastApiReturn>::Raw
                 where
                     R: Resource,
-                    T: FastApiReturn,
-                    F: UnitType + Fn(&R, $($ty),*) -> T,
+                    O: FastApiOutput,
+                    F: UnitType + Fn(&R, $($ty),*) -> O,
                     $($ty: FastApiArg,)*
                 {
+                    record_call();
                     // SAFETY: V8 passes the call's receiver and options.
                     unsafe {
-                        call_method(options, receiver, |this: &R| {
-                            // SAFETY: `method()` was handed a value of `F`.
-                            let f = unit_value::<F>();
-                            Ok(f(this, $($ty::from_raw($arg)?),*))
+                        with_receiver(options, receiver, |this: &R| {
+                            run(options, || {
+                                // SAFETY: `method()` was handed a value of `F`.
+                                let f = unit_value::<F>();
+                                f(this, $($ty::from_raw($arg)?),*).into_result()
+                            })
                         })
                     }
                 }
-                ffi::FastApiDescriptor {
-                    callback: callback::<R, T, F, $($ty),*> as *const () as usize,
-                    return_type: T::TYPE,
-                    arg_types: vec![$($ty::TYPE),*],
-                }
+                descriptor::<O::Value>(callback::<R, O, F, $($ty),*> as *const () as usize, vec![$($ty::TYPE),*])
             }
         }
 
-        impl<T, F, $($ty),*> FastStaticMethod<($($ty,)*)> for F
+        impl<R, O, F, $($ty),*> FastMethod<R, WithLock<($($ty,)*)>> for F
         where
-            T: FastApiReturn,
-            F: UnitType + Fn($($ty),*) -> T,
+            R: Resource,
+            O: FastApiOutput,
+            F: UnitType + for<'s> Fn(&R, &mut Lock<'s>, $($ty),*) -> O,
             $($ty: FastApiArg,)*
         {
             fn descriptor() -> ffi::FastApiDescriptor {
-                unsafe extern "C" fn callback<T, F, $($ty),*>(
+                unsafe extern "C" fn callback<R, O, F, $($ty),*>(
+                    receiver: ffi::Local,
+                    $($arg: $ty::Raw,)*
+                    options: *mut ffi::FastApiCallbackOptions,
+                ) -> <O::Value as FastApiReturn>::Raw
+                where
+                    R: Resource,
+                    O: FastApiOutput,
+                    F: UnitType + for<'s> Fn(&R, &mut Lock<'s>, $($ty),*) -> O,
+                    $($ty: FastApiArg,)*
+                {
+                    record_call();
+                    // SAFETY: V8 passes the call's receiver and options.
+                    unsafe {
+                        with_receiver(options, receiver, |this: &R| {
+                            with_lock(options, |lock| {
+                                // SAFETY: `method()` was handed a value of `F`.
+                                let f = unit_value::<F>();
+                                f(this, lock, $($ty::from_raw($arg)?),*).into_result()
+                            })
+                        })
+                    }
+                }
+                descriptor::<O::Value>(callback::<R, O, F, $($ty),*> as *const () as usize, vec![$($ty::TYPE),*])
+            }
+        }
+
+        impl<O, F, $($ty),*> FastMethod<Static, ($($ty,)*)> for F
+        where
+            O: FastApiOutput,
+            F: UnitType + Fn($($ty),*) -> O,
+            $($ty: FastApiArg,)*
+        {
+            fn descriptor() -> ffi::FastApiDescriptor {
+                unsafe extern "C" fn callback<O, F, $($ty),*>(
                     _receiver: ffi::Local,
                     $($arg: $ty::Raw,)*
                     options: *mut ffi::FastApiCallbackOptions,
-                ) -> T::Raw
+                ) -> <O::Value as FastApiReturn>::Raw
                 where
-                    T: FastApiReturn,
-                    F: UnitType + Fn($($ty),*) -> T,
+                    O: FastApiOutput,
+                    F: UnitType + Fn($($ty),*) -> O,
                     $($ty: FastApiArg,)*
                 {
                     record_call();
                     // SAFETY: V8 passes the call's options.
                     unsafe {
                         run(options, || {
-                            // SAFETY: `static_method()` was handed a value of `F`.
+                            // SAFETY: `method()` was handed a value of `F`.
                             let f = unit_value::<F>();
-                            Ok(f($($ty::from_raw($arg)?),*))
+                            f($($ty::from_raw($arg)?),*).into_result()
                         })
                     }
                 }
-                ffi::FastApiDescriptor {
-                    callback: callback::<T, F, $($ty),*> as *const () as usize,
-                    return_type: T::TYPE,
-                    arg_types: vec![$($ty::TYPE),*],
+                descriptor::<O::Value>(callback::<O, F, $($ty),*> as *const () as usize, vec![$($ty::TYPE),*])
+            }
+        }
+
+        impl<O, F, $($ty),*> FastMethod<Static, WithLock<($($ty,)*)>> for F
+        where
+            O: FastApiOutput,
+            F: UnitType + for<'s> Fn(&mut Lock<'s>, $($ty),*) -> O,
+            $($ty: FastApiArg,)*
+        {
+            fn descriptor() -> ffi::FastApiDescriptor {
+                unsafe extern "C" fn callback<O, F, $($ty),*>(
+                    _receiver: ffi::Local,
+                    $($arg: $ty::Raw,)*
+                    options: *mut ffi::FastApiCallbackOptions,
+                ) -> <O::Value as FastApiReturn>::Raw
+                where
+                    O: FastApiOutput,
+                    F: UnitType + for<'s> Fn(&mut Lock<'s>, $($ty),*) -> O,
+                    $($ty: FastApiArg,)*
+                {
+                    record_call();
+                    // SAFETY: V8 passes the call's options.
+                    unsafe {
+                        with_lock(options, |lock| {
+                            // SAFETY: `method()` was handed a value of `F`.
+                            let f = unit_value::<F>();
+                            f(lock, $($ty::from_raw($arg)?),*).into_result()
+                        })
+                    }
                 }
+                descriptor::<O::Value>(callback::<O, F, $($ty),*> as *const () as usize, vec![$($ty::TYPE),*])
             }
         }
     };
@@ -225,13 +353,23 @@ impl_fast_methods!(a0: A0, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5);
 impl_fast_methods!(a0: A0, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6);
 impl_fast_methods!(a0: A0, a1: A1, a2: A2, a3: A3, a4: A4, a5: A5, a6: A6, a7: A7);
 
+fn descriptor<T: FastApiReturn>(
+    callback: usize,
+    arg_types: Vec<FastApiType>,
+) -> ffi::FastApiDescriptor {
+    ffi::FastApiDescriptor {
+        callback,
+        return_type: T::TYPE,
+        arg_types,
+    }
+}
+
 /// Calls `f` with the resource `receiver` wraps, or throws if it wraps none of type `R`.
-unsafe fn call_method<R: Resource, T: FastApiReturn>(
+unsafe fn with_receiver<R: Resource, T: Default>(
     options: *mut ffi::FastApiCallbackOptions,
     receiver: ffi::Local,
-    f: impl FnOnce(&R) -> Result<T, Error>,
-) -> T::Raw {
-    record_call();
+    f: impl FnOnce(&R) -> T,
+) -> T {
     // SAFETY: `options` and `receiver` come from V8 (caller contract).
     let trait_ptr = unsafe { ffi::fast_api_unwrap_receiver(options, receiver) };
     let Some(resource) = trait_ptr.resolve::<R>() else {
@@ -240,9 +378,26 @@ unsafe fn call_method<R: Resource, T: FastApiReturn>(
     };
     // SAFETY: The receiver keeps the resource alive for the call. A fast callback cannot run
     // JavaScript, so nothing else can reach the resource while this borrow lives.
-    let resource = unsafe { resource.as_ref() };
-    // SAFETY: as above.
-    unsafe { run(options, || f(resource)) }
+    f(unsafe { resource.as_ref() })
+}
+
+/// Runs `f` with a lock in a `HandleScope` where JavaScript can't run.
+unsafe fn with_lock<T, F>(options: *mut ffi::FastApiCallbackOptions, f: F) -> T::Raw
+where
+    T: FastApiReturn,
+    F: for<'s> FnOnce(&mut Lock<'s>) -> Result<T, Error>,
+{
+    // SAFETY: `options` comes from V8 (caller contract).
+    unsafe {
+        crate::scope::in_fast_call_scope(options, |lock| match f(&mut *lock) {
+            Ok(value) => value.into_raw(),
+            Err(err) => {
+                lock.throw_exception(&err);
+                T::Raw::default()
+            }
+        })
+    }
+    .unwrap_or_default()
 }
 
 /// Mirrors [`crate::catch_panic`]: a panic becomes an internal error and terminates execution.

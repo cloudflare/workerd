@@ -86,36 +86,58 @@ fn elide_named_lifetimes_cases() {
 }
 
 #[test]
-fn fast_api_signature_cases() {
-    let fast = |sig: syn::Signature| fast_api_signature(&sig).map(|args| args.len());
+fn fast_api_shape_cases() {
+    let shape = |sig: syn::Signature| fast_api_shape(&sig).map(|s| (s.lock, s.args.len()));
 
     assert_eq!(
-        fast(parse_quote!(fn f(&self, a: i32, b: u32) -> bool)),
-        Some(2)
+        shape(parse_quote!(fn f(&self, a: i32, s: String) -> Result<Foo, Bar>)),
+        Ok((false, 2))
     );
-    assert_eq!(
-        fast(parse_quote!(fn f(&self, x: jsg::Number) -> Number)),
-        Some(1)
-    );
-    assert_eq!(fast(parse_quote!(fn f(a: bool))), Some(1));
-    assert_eq!(fast(parse_quote!(fn f(&self) -> ())), Some(0));
+    assert_eq!(shape(parse_quote!(fn f(a: other::Number))), Ok((false, 1)));
+    assert_eq!(shape(parse_quote!(fn f(&self))), Ok((false, 0)));
 
-    assert_eq!(fast(parse_quote!(fn f(&mut self, a: i32))), None);
-    assert_eq!(fast(parse_quote!(fn f(self, a: i32))), None);
-    assert_eq!(fast(parse_quote!(fn f(&self, s: String))), None);
+    assert!(shape(parse_quote!(fn f(&mut self, a: i32))).is_err());
+    assert!(shape(parse_quote!(fn f(self, a: i32))).is_err());
+    assert!(shape(parse_quote!(fn f<T>(&self, a: i32))).is_err());
+    assert!(shape(parse_quote!(async fn f(&self, a: i32))).is_err());
+    assert!(shape(parse_quote!(fn f(&self, a: impl Into<i32>))).is_err());
+}
+
+#[test]
+fn fast_api_shape_lock() {
+    let shape = |sig: syn::Signature| fast_api_shape(&sig).map(|s| (s.lock, s.args.len()));
+
     assert_eq!(
-        fast(parse_quote!(fn f(&self, lock: &mut Lock, a: i32))),
-        None
+        shape(parse_quote!(fn f(&self, lock: &mut Lock, a: i32))),
+        Ok((true, 1))
     );
-    assert_eq!(fast(parse_quote!(fn f(&self, x: f64))), None);
-    assert_eq!(fast(parse_quote!(fn f(&self, x: ::jsg::Number))), Some(1));
-    assert_eq!(fast(parse_quote!(fn f(&self, x: other::Number))), None);
-    assert_eq!(fast(parse_quote!(fn f(&self, x: Option<i32>))), None);
-    assert_eq!(fast(parse_quote!(fn f(&self) -> i32)), None);
     assert_eq!(
-        fast(parse_quote!(fn f(&self) -> Result<bool, jsg::Error>)),
-        None
+        shape(parse_quote!(fn f(lock: &mut jsg::Lock<'_>) -> bool)),
+        Ok((true, 0))
     );
-    assert_eq!(fast(parse_quote!(fn f<T>(&self, a: i32))), None);
-    assert_eq!(fast(parse_quote!(async fn f(&self, a: i32))), None);
+
+    // Only a leading `&mut Lock` is the lock.
+    assert_eq!(
+        shape(parse_quote!(fn f(&self, a: i32, lock: &mut Lock))),
+        Ok((false, 2))
+    );
+    assert_eq!(
+        shape(parse_quote!(fn f(&self, lock: &Lock))),
+        Ok((false, 1))
+    );
+}
+
+#[test]
+fn fast_mode_cases() {
+    assert_eq!(fast_mode(quote::quote!()), Ok(FastMode::Auto));
+    assert_eq!(fast_mode(quote::quote!(name = "x")), Ok(FastMode::Auto));
+    assert_eq!(fast_mode(quote::quote!(fast)), Ok(FastMode::Fast));
+    assert_eq!(
+        fast_mode(quote::quote!(name = "x", nofast)),
+        Ok(FastMode::NoFast)
+    );
+    assert!(fast_mode(quote::quote!(fast, nofast)).is_err());
+    assert!(fast_mode(quote::quote!(fast, fast)).is_err());
+    assert!(fast_mode(quote::quote!(nofast = true)).is_err());
+    assert!(fast_mode(quote::quote!(nofsat)).is_err());
 }
