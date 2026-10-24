@@ -25,6 +25,10 @@ ROOT = Path(os.environ["TEST_SRCDIR"]) / os.environ["TEST_WORKSPACE"]
 CLANG_TIDY = ROOT / "tools/clang_tidy"
 PLUGIN = ROOT / "tools/clang-tidy/libworkerd-lint.so"
 FIXTURE = ROOT / "tools/clang-tidy/tests/unsafe-continuation-capture-test.c++"
+# The C++ toolchain's flags, for its standard library headers.
+TOOLCHAIN_FLAGS = (
+    (ROOT / "tools/clang-tidy/toolchain-flags.txt").read_text().splitlines()
+)
 CHECK = "workerd-unsafe-continuation-capture"
 OPTIONS = (
     "{CheckOptions: ["
@@ -43,7 +47,14 @@ def run_check(config):
     if config:
         args.append(f"--config={config}")
     result = subprocess.run(
-        [*args, FIXTURE, "--", "-std=c++23", "-Wno-undefined-internal"],
+        [
+            *args,
+            FIXTURE,
+            "--",
+            *TOOLCHAIN_FLAGS,
+            "-std=c++23",
+            "-Wno-undefined-internal",
+        ],
         capture_output=True,
         text=True,
         check=False,

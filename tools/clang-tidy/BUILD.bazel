@@ -36,7 +36,7 @@ load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_python//python:defs.bzl", "py_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
-load(":test-headers.bzl", "cc_test_headers")
+load(":test-headers.bzl", "cc_test_headers", "cc_test_toolchain_flags")
 
 filegroup(
     name = "srcs",
@@ -152,6 +152,7 @@ sh_test(
     data = [
         ":coroutine-hostile-raii-negative-test.c++",
         ":coroutine-hostile-raii-positive-test.c++",
+        ":toolchain-flags",
         ":workerd-lint",
         "//tools:clang-tidy",
     ],
@@ -182,6 +183,7 @@ sh_test(
     name = "use-after-move-test",
     srcs = ["use-after-move-test.sh"],
     data = [
+        ":toolchain-flags",
         ":use-after-move-kj-headers",
         ":use-after-move-negative-test.c++",
         ":use-after-move-oneof-test.c++",
@@ -201,6 +203,7 @@ py_test(
     srcs = ["unsafe-continuation-capture-test.py"],
     data = [
         "tests/unsafe-continuation-capture-test.c++",
+        ":toolchain-flags",
         ":workerd-lint",
         "//tools:clang-tidy",
     ],
@@ -215,6 +218,12 @@ py_test(
 cc_test_headers(
     name = "use-after-move-kj-headers",
     dep = "@capnp-cpp//src/kj:kj",
+)
+
+# The fixtures include standard headers, which clang-tidy finds through the C++ toolchain's flags.
+cc_test_toolchain_flags(
+    name = "toolchain-flags",
+    tags = ["manual"],
 )
 
 sh_test(
