@@ -15,6 +15,8 @@
 #include <kj-rs/convert.h>
 
 #include <kj/common.h>
+#include <kj/map.h>
+#include <kj/mutex.h>
 #include <kj/string.h>
 
 #include <memory>
@@ -146,6 +148,10 @@ Local local_new_undefined(Isolate* isolate) {
 
 bool local_eq(const Local& lhs, const Local& rhs) {
   return local_as_ref_from_ffi<v8::Value>(lhs) == local_as_ref_from_ffi<v8::Value>(rhs);
+}
+
+bool local_is_compatible_with_isolate(Isolate* isolate, const Local& value) {
+  return local_as_ref_from_ffi<v8::Data>(value)->IsCompatibleWithIsolate(isolate);
 }
 
 bool local_is_string(const Local& val) {
@@ -686,8 +692,9 @@ double unwrap_number(Isolate* isolate, Local value) {
   return number->Value();
 }
 
-kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value) {
-  auto v8_val = local_from_ffi<v8::Value>(kj::mv(value));
+namespace {
+// Creates no handles, so fast callbacks can use it without a HandleScope.
+kj::Maybe<Wrappable&> tryUnwrapRustWrappable(Isolate* isolate, v8::Local<v8::Value> v8_val) {
   // Non-object values (numbers, strings, booleans, etc.) are never wrapped resources.
   if (!v8_val->IsObject()) return kj::none;
   auto v8_obj = v8_val.As<v8::Object>();
@@ -708,8 +715,15 @@ kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value) {
     KJ_LOG(FATAL, "wrapper type mismatch: marked object's CppHeap handle resolves to no wrappable");
     abort();
   }
-  auto* ptr = static_cast<Wrappable*>(reinterpret_cast<::workerd::jsg::Wrappable*>(wrappable));
-  return ptr->toRc();
+  return *static_cast<Wrappable*>(reinterpret_cast<::workerd::jsg::Wrappable*>(wrappable));
+}
+}  // namespace
+
+kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value) {
+  KJ_IF_SOME(wrappable, tryUnwrapRustWrappable(isolate, local_from_ffi<v8::Value>(kj::mv(value)))) {
+    return wrappable.toRc();
+  }
+  return kj::none;
 }
 
 // TypedArray unwrap functions
@@ -879,8 +893,15 @@ void wrappable_visit_global(GcVisitor* visitor, uintptr_t* global, TracedReferen
   gcVisitor->visit(strongHandle, tracedHandle);
 }
 
-void traced_reference_reset(TracedReference& traced) {
-  traced_ref_from_ffi(traced).Reset();
+Isolate* gc_visitor_v8_isolate(GcVisitor* visitor) {
+  return gc_visitor_from_ffi(visitor)->v8Isolate();
+}
+
+void global_clear_weak(uintptr_t* global) {
+  auto& handle = *reinterpret_cast<v8::Global<v8::Value>*>(global);
+  if (!handle.IsEmpty()) {
+    handle.ClearWeak<void>();
+  }
 }
 
 void wrappable_visit_ref(
@@ -948,6 +969,80 @@ Local psci_get_this(PropertySetterCallbackInfo* info) {
   return to_ffi(info->Holder());
 }
 
+// FastApiCallbackOptions
+TraitObjectPtr fast_api_unwrap_receiver(FastApiCallbackOptions* options, Local receiver) {
+  KJ_IF_SOME(wrappable,
+      tryUnwrapRustWrappable(options->isolate, local_from_ffi<v8::Value>(kj::mv(receiver)))) {
+    return wrappable.trait_object;
+  }
+  return {};
+}
+
+void fast_api_throw_exception(
+    FastApiCallbackOptions* options, ExceptionType exceptionType, ::rust::Str message) {
+  v8::HandleScope scope(options->isolate);
+  isolate_throw_exception(options->isolate,
+      exception_create_from_bytes(options->isolate, exceptionType,
+          reinterpret_cast<const uint8_t*>(message.data()), static_cast<int32_t>(message.size())));
+}
+
+void fast_api_throw_internal_error(FastApiCallbackOptions* options, ::rust::Str internalMessage) {
+  v8::HandleScope scope(options->isolate);
+  isolate_throw_internal_error(options->isolate, internalMessage);
+}
+
+void fast_api_terminate_execution(FastApiCallbackOptions* options) {
+  isolate_terminate_execution(options->isolate);
+}
+
+namespace {
+v8::CTypeInfo cTypeOf(FastApiType type) {
+  switch (type) {
+    case FastApiType::Void:
+      return v8::CTypeInfo(v8::CTypeInfo::Type::kVoid);
+    case FastApiType::Bool:
+      return v8::CTypeInfo(v8::CTypeInfo::Type::kBool);
+    case FastApiType::Float64:
+      return v8::CTypeInfo(v8::CTypeInfo::Type::kFloat64);
+  }
+  KJ_UNREACHABLE;
+}
+
+// V8 keeps a pointer to the CFunction, so it lives for the rest of the process.
+struct FastCFunction {
+  FastCFunction(const FastApiDescriptor& descriptor)
+      : returnType(cTypeOf(descriptor.return_type)),
+        argTypes(buildArgTypes(descriptor)),
+        info(returnType, argTypes.size(), argTypes.begin()),
+        function(reinterpret_cast<const void*>(descriptor.callback), &info) {}
+
+  static kj::Array<v8::CTypeInfo> buildArgTypes(const FastApiDescriptor& descriptor) {
+    auto builder = kj::heapArrayBuilder<v8::CTypeInfo>(descriptor.arg_types.size() + 2);
+    builder.add(v8::CTypeInfo(v8::CTypeInfo::Type::kV8Value));
+    for (auto type: descriptor.arg_types) {
+      builder.add(cTypeOf(type));
+    }
+    builder.add(v8::CTypeInfo(v8::CTypeInfo::kCallbackOptionsType));
+    return builder.finish();
+  }
+
+  v8::CTypeInfo returnType;
+  kj::Array<v8::CTypeInfo> argTypes;
+  v8::CFunctionInfo info;
+  v8::CFunction function;
+};
+
+const v8::CFunction& getFastCFunction(const FastApiDescriptor& descriptor) {
+  using Map = kj::HashMap<size_t, kj::Own<FastCFunction>>;
+  static kj::MutexGuarded<Map> functions;
+  auto lock = functions.lockExclusive();
+  return lock
+      ->findOrCreate(descriptor.callback, [&]() -> Map::Entry {
+    return {descriptor.callback, kj::heap<FastCFunction>(descriptor)};
+  })->function;
+}
+}  // namespace
+
 Global create_resource_template(Isolate* isolate, const ResourceDescriptor& descriptor) {
   // Construct lazily.
   v8::EscapableHandleScope scope(isolate);
@@ -991,22 +1086,39 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
       static_cast<v8::PropertyAttribute>(v8::PropertyAttribute::DontEnum |
           v8::PropertyAttribute::DontDelete | v8::PropertyAttribute::ReadOnly));
 
+  if (workerd::jsg::getShouldSetImmutablePrototype(isolate)) {
+    constructor->ReadOnlyPrototype();
+  }
+
   constructor->SetClassName(classname);
 
-  for (const auto& method: descriptor.static_methods) {
-    auto functionTemplate = v8::FunctionTemplate::New(isolate,
-        reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(method.callback)),
-        v8::Local<v8::Value>(), v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow);
+  const bool fastApiEnabled = ::workerd::jsg::IsolateBase::from(isolate).isFastApiEnabled();
+
+  auto makeMethod = [&](const MethodDescriptor& method, v8::Local<v8::Signature> methodSignature) {
     registerExternalRef(method.callback);
+    auto callback =
+        reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(method.callback));
+    if (fastApiEnabled) {
+      KJ_IF_SOME(fast, method.fast) {
+        const auto& cFunction = getFastCFunction(fast);
+        registerExternalRef(reinterpret_cast<size_t>(&cFunction));
+        return v8::FunctionTemplate::NewWithCFunctionOverloads(isolate, callback,
+            v8::Local<v8::Value>(), methodSignature, 0, v8::ConstructorBehavior::kThrow,
+            v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
+      }
+    }
+    return v8::FunctionTemplate::New(isolate, callback, v8::Local<v8::Value>(), methodSignature, 0,
+        v8::ConstructorBehavior::kThrow);
+  };
+
+  for (const auto& method: descriptor.static_methods) {
+    auto functionTemplate = makeMethod(method, v8::Local<v8::Signature>());
     functionTemplate->RemovePrototype();
     constructor->Set(makeInternedStr(isolate, method.name), functionTemplate);
   }
 
   for (const auto& method: descriptor.methods) {
-    auto functionTemplate = v8::FunctionTemplate::New(isolate,
-        reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(method.callback)),
-        v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow);
-    registerExternalRef(method.callback);
+    auto functionTemplate = makeMethod(method, signature);
     auto name = makeInternedStr(isolate, method.name);
     prototype->Set(name, functionTemplate);
   }
@@ -1152,6 +1264,36 @@ Realm* realm_from_isolate(Isolate* isolate) {
       static_cast<Realm*>(isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM));
   KJ_ASSERT(realm != nullptr, "Rust Realm not set on isolate");
   return realm;
+}
+
+namespace {
+// The IsolateBase deferred action hook of an isolate with a Rust Realm.
+void resetGlobalsAwaitingLock(v8::Isolate* isolate) {
+  realm_reset_globals_awaiting_lock(isolate);
+}
+
+// The IsolateBase dispose hook that a Realm sets when it is dropped, with the reference to its
+// IsolateState that it hands over as data.
+void isolateDisposed(void* data) {
+  isolate_disposed(static_cast<const IsolateState*>(data));
+}
+}  // namespace
+
+bool realm_can_attach(Isolate* isolate) {
+  return isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM) == nullptr &&
+      !::workerd::jsg::IsolateBase::from(isolate).hasDisposeHook();
+}
+
+void realm_attach(Isolate* isolate, Realm& realm) {
+  isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &realm);
+  ::workerd::jsg::IsolateBase::from(isolate).setDeferredActionHook(&resetGlobalsAwaitingLock);
+}
+
+void realm_detach(Isolate* isolate, const IsolateState* state) {
+  auto& isolateBase = ::workerd::jsg::IsolateBase::from(isolate);
+  isolateBase.setDeferredActionHook(nullptr);
+  isolateBase.setDisposeHook(&isolateDisposed, const_cast<IsolateState*>(state));
+  isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, nullptr);
 }
 
 // Errors

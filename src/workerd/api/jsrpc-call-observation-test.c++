@@ -43,11 +43,8 @@ enum class Settlement { PENDING, SUCCESS, FAILURE, CANCELED };
 struct Observation {
   ActorCallPayloadReplayable payloadReplayable;
   ActorCallTargetRetryable targetRetryable;
-  kj::Maybe<ActorRetryCandidate> probeCandidate;
   Settlement settlement = Settlement::PENDING;
   bool pipelineCommitted = false;
-  bool awaitedRetryDecision = false;
-  bool outputGateCleared = false;
 };
 
 struct ObservationState {
@@ -72,13 +69,6 @@ class RecordingCallObserver final: public OutgoingActorCallObserver {
   void recordFailure(kj::Exception&) override {
     settle(Settlement::FAILURE);
   }
-  void recordFailureAwaitingRetryDecision(kj::Exception&) override {
-    observation.awaitedRetryDecision = true;
-    settle(Settlement::FAILURE);
-  }
-  void markOutputGateCleared() override {
-    observation.outputGateCleared = true;
-  }
 
  private:
   void settle(Settlement settlement) {
@@ -95,10 +85,9 @@ class RecordingObserver final: public RequestObserver {
 
   kj::Maybe<kj::Own<OutgoingActorCallObserver>> observeOutgoingActorRpcCall(
       ActorCallPayloadReplayable payloadReplayable,
-      ActorCallTargetRetryable targetRetryable,
-      kj::Maybe<ActorRetryCandidate> probeCandidate) override {
-    auto& observation = *state.observations.add(
-        kj::heap<Observation>(payloadReplayable, targetRetryable, probeCandidate));
+      ActorCallTargetRetryable targetRetryable) override {
+    auto& observation =
+        *state.observations.add(kj::heap<Observation>(payloadReplayable, targetRetryable));
     return kj::heap<RecordingCallObserver>(observation);
   }
 
@@ -114,18 +103,11 @@ class RecordingObserver final: public RequestObserver {
 
 class ReceiverOutgoingFactory final: public Fetcher::OutgoingFactory {
  public:
-  ReceiverOutgoingFactory(TestFixture& receiver,
-      ActorCallTargetRetryable retryable,
-      TargetKind targetKind,
-      kj::Maybe<ActorRetryCandidate> probeCandidate)
+  ReceiverOutgoingFactory(
+      TestFixture& receiver, ActorCallTargetRetryable retryable, TargetKind targetKind)
       : receiver(receiver),
         retryable(retryable),
-        targetKind(targetKind),
-        probeCandidate(probeCandidate) {}
-
-  void failNextSession() {
-    failNext = true;
-  }
+        targetKind(targetKind) {}
 
   // The next session opened through this factory reaches the receiver only once the returned
   // fulfiller is fulfilled, so a call started earlier can be made to settle later.
@@ -136,11 +118,6 @@ class ReceiverOutgoingFactory final: public Fetcher::OutgoingFactory {
   }
 
   Result newSingleUseClient(kj::Maybe<kj::String>, MakeUserSpanParent) override {
-    if (failNext) {
-      failNext = false;
-      return {.client = newPromisedWorkerInterface(KJ_EXCEPTION(DISCONNECTED, "session failed")),
-        .spanParents = kj::none};
-    }
     auto destination = receiver.makeWorkerEntrypoint();
     KJ_IF_SOME(hold, pendingHold) {
       auto client = kj::mv(hold).then(
@@ -157,9 +134,6 @@ class ReceiverOutgoingFactory final: public Fetcher::OutgoingFactory {
     }
     return kj::none;
   }
-  kj::Maybe<ActorRetryCandidate> getActorRetryProbeCandidate() const override {
-    return probeCandidate;
-  }
   Result newActorCallAttempt(kj::Maybe<kj::String> cfStr,
       ActorCallRetryState::Attempt,
       MakeUserSpanParent makeUserSpanParent) override {
@@ -170,16 +144,12 @@ class ReceiverOutgoingFactory final: public Fetcher::OutgoingFactory {
   TestFixture& receiver;
   ActorCallTargetRetryable retryable;
   TargetKind targetKind;
-  kj::Maybe<ActorRetryCandidate> probeCandidate;
   kj::Maybe<kj::Promise<void>> pendingHold;
-  bool failNext = false;
 };
-
-enum class SenderKind { WORKER, ACTOR };
 
 class Harness {
  public:
-  explicit Harness(SenderKind senderKind = SenderKind::WORKER): io(kj::setupAsyncIo()) {
+  Harness(): io(kj::setupAsyncIo()) {
     auto flags = flagsMessage.initRoot<CompatibilityFlags>();
     flags.setFetcherRpc(true);
     receiver = kj::heap<TestFixture>(TestFixture::SetupParams{
@@ -187,7 +157,7 @@ class Harness {
       .mainModuleSource = RECEIVER_SOURCE,
       .useRealTimers = false,
     });
-    TestFixture::SetupParams senderParams{
+    sender = kj::heap<TestFixture>(TestFixture::SetupParams{
       .waitScope = io.waitScope,
       .featureFlags = flags.asReader(),
       .autogates = kj::arr("durable-object-retries-jsrpc"_kj),
@@ -197,11 +167,7 @@ class Harness {
           kj::Function<kj::Own<RequestObserver>()>([this]() -> kj::Own<RequestObserver> {
       return kj::refcounted<RecordingObserver>(state);
     }),
-    };
-    if (senderKind == SenderKind::ACTOR) {
-      senderParams.actorId = Worker::Actor::Id(kj::str("observation-sender"));
-    }
-    sender = kj::heap<TestFixture>(kj::mv(senderParams));
+    });
   }
 
   struct FetcherAndFactory {
@@ -211,10 +177,8 @@ class Harness {
 
   FetcherAndFactory makeFetcher(const TestFixture::Environment& env,
       ActorCallTargetRetryable retryable = ActorCallTargetRetryable::YES,
-      TargetKind targetKind = TargetKind::ACTOR,
-      kj::Maybe<ActorRetryCandidate> probeCandidate = kj::none) {
-    auto factory =
-        kj::heap<ReceiverOutgoingFactory>(*receiver, retryable, targetKind, probeCandidate);
+      TargetKind targetKind = TargetKind::ACTOR) {
+    auto factory = kj::heap<ReceiverOutgoingFactory>(*receiver, retryable, targetKind);
     auto& factoryRef = *factory;
     auto fetcher =
         env.js.alloc<Fetcher>(env.context.addObject<Fetcher::OutgoingFactory>(kj::mv(factory)),
@@ -478,49 +442,6 @@ KJ_TEST("an RPC call is observed when its result settles, not when its session e
     });
     return env.context.awaitJs(env.js, kj::mv(checked));
   });
-}
-
-KJ_TEST("a probed disconnect from an actor that cannot retry is classified when JS sees it") {
-  Harness harness;
-  harness.sender->runInIoContext([&](const TestFixture::Environment& env) {
-    auto [fetcher, factory] = harness.makeFetcher(env, ActorCallTargetRetryable::NO,
-        TargetKind::ACTOR, ActorRetryCandidate::UNSUPPORTED_COLO_LOCAL);
-    factory.failNextSession();
-    // Pipeline use after the caller has seen the failure can no longer affect its classification.
-    return Harness::awaitScript(env, kj::mv(fetcher), R"JS(
-      (async () => {
-        const child = fetcher.makeChild();
-        await child.catch(() => {});
-        await child.echo(1).catch(() => {});
-      })()
-    )JS"_kj);
-  });
-
-  auto& observations = harness.state.observations;
-  KJ_ASSERT(observations.size() == 2);
-  KJ_EXPECT(observations[0]->probeCandidate == ActorRetryCandidate::UNSUPPORTED_COLO_LOCAL);
-  KJ_EXPECT(observations[0]->awaitedRetryDecision);
-  KJ_EXPECT(observations[0]->settlement == Settlement::FAILURE);
-  KJ_EXPECT(!observations[0]->pipelineCommitted);
-}
-
-KJ_TEST("an actor RPC call observes when it clears the caller's output gate") {
-  Harness harness(SenderKind::ACTOR);
-  harness.sender->runInIoContext([&](const TestFixture::Environment& env) {
-    auto gate = kj::newPromiseAndFulfiller<void>();
-    auto gateBlocker =
-        env.context.getActorOrThrow().getOutputGate().lockWhile(kj::mv(gate.promise), nullptr);
-    auto fetcher = harness.makeFetcher(env, ActorCallTargetRetryable::NO).fetcher;
-    auto call = Harness::awaitScript(env, kj::mv(fetcher), "fetcher.echo(1)"_kj);
-    KJ_ASSERT(harness.state.observations.size() == 1);
-    KJ_EXPECT(!harness.state.observations[0]->outputGateCleared);
-    gate.fulfiller->fulfill();
-    return kj::mv(call).attach(kj::mv(gateBlocker), kj::mv(gate.fulfiller));
-  });
-
-  KJ_ASSERT(harness.state.observations.size() == 1);
-  KJ_EXPECT(harness.state.observations[0]->outputGateCleared);
-  KJ_EXPECT(harness.state.observations[0]->settlement == Settlement::SUCCESS);
 }
 
 KJ_TEST("tearing down the caller records cancellation rather than a disconnect") {

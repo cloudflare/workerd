@@ -139,7 +139,7 @@ fn global_handle_conversion() {
         let local_str = "global test".to_local(lock);
         assert!(local_str.is_string());
 
-        let global_str = local_str.to_global(lock);
+        let global_str = local_str.to_traced_global(lock);
         let local_again = global_str.as_local(lock);
         assert!(local_again.is_string());
         Ok(())

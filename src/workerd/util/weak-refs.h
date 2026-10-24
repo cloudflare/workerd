@@ -1,5 +1,6 @@
 #pragma once
 
+#include <kj/memory.h>
 #include <kj/mutex.h>
 #include <kj/refcount.h>
 
@@ -114,6 +115,33 @@ class WeakRef final: public kj::Refcounted {
   }
 
   kj::Maybe<T&> maybeThing;
+};
+
+// Heap-allocatable owner of a `T` that hands out `kj::Weak<WeakOwner<T>>` handles. Attach a
+// `kj::Own<WeakOwner<T>>` to a promise chain and give its continuations `addWeak()`. A live
+// handle yields the owner; call `get()` on it to access the value. The handles go null when the
+// attachment is destroyed, so a continuation that outlives the value throws instead of touching
+// freed memory. `kj::Pin` does this for stack and member storage but can't be heap-allocated.
+template <typename T>
+class WeakOwner final: public kj::PtrTarget {
+ public:
+  template <typename... Params>
+  explicit WeakOwner(Params&&... params): value(kj::fwd<Params>(params)...) {}
+  // Like kj::Pin, expire handles before `value` is destroyed, so its destructor can't be reached
+  // through them.
+  ~WeakOwner() noexcept(false) {
+    invalidateWeak();
+  }
+
+  T& get() {
+    return value;
+  }
+  kj::Weak<WeakOwner> addWeak() {
+    return addWeakToThis();
+  }
+
+ private:
+  T value;
 };
 
 }  // namespace workerd

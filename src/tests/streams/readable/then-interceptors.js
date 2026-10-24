@@ -8,7 +8,7 @@
 // result settles must not disturb the other consumers of a tee, or the
 // other reads a cancel() or close() answered.
 
-import { deepStrictEqual, strictEqual } from 'node:assert';
+import { deepStrictEqual, rejects, strictEqual } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 const TIMEOUT = Symbol('timeout');
@@ -449,10 +449,12 @@ export const thenGetterPerIteratorNext = {
 };
 
 // An async-iterator return() looks `then` up once on a live iterator,
-// whose return steps settle with undefined. On a finished iterator the
-// return steps resolve with a result object of their own before return()
-// builds the caller's, so TS looks it up twice (WebIDL); C++ and Node look
-// it up once (ledger #26).
+// whose return steps settle with undefined. On a finished iterator, whose
+// last next() reported done or rejected, the return steps resolve with a
+// result object of their own before return() builds the caller's, so TS
+// looks it up twice (WebIDL); Node looks it up once, as C++ does after
+// done (ledger #26). After a rejected next(), C++ rejects return() with
+// the error (ledger #22).
 export const thenGetterPerIteratorReturn = {
   async test() {
     {
@@ -461,11 +463,7 @@ export const thenGetterPerIteratorReturn = {
       const fired = await resultThenLookups(async () => [await it.return('v')]);
       strictEqual(fired, 1);
     }
-    {
-      const { rs, controller } = pushSource();
-      controller.close();
-      const it = rs.values();
-      strictEqual((await it.next()).done, true);
+    const finished = async (it) => {
       let result;
       const fired = await resultThenLookups(async () => {
         result = await it.return('v');
@@ -473,6 +471,25 @@ export const thenGetterPerIteratorReturn = {
       });
       deepStrictEqual(result, { value: 'v', done: true });
       strictEqual(fired, usingTsImpl ? 2 : 1);
+    };
+    {
+      const { rs, controller } = pushSource();
+      controller.close();
+      const it = rs.values();
+      strictEqual((await it.next()).done, true);
+      await finished(it);
+    }
+    {
+      const { rs, controller } = pushSource();
+      const boom = new Error('boom');
+      controller.error(boom);
+      const it = rs.values();
+      await rejects(it.next(), (e) => e === boom);
+      if (usingTsImpl) {
+        await finished(it);
+      } else {
+        await rejects(it.return('v'), (e) => e === boom);
+      }
     }
   },
 };

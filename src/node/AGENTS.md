@@ -55,7 +55,7 @@ any registration macro are required.
 - **`internal/*.js`** (not `.ts`) = upstream Node.js ports (streams_readable.js, streams_writable.js, etc.); paired with `.d.ts` type declarations
 - **`internal/*.d.ts`** without matching `.ts` = declares C++ JSG module shape (crypto.d.ts → `node-internal:crypto`)
 - **`internal/*.d.ts`** with matching `.js` = types for ported JS (streams_readable.d.ts → streams_readable.js)
-- Top-level files are thin: import from `node-internal:*`, re-export with `export { ... }` / `export * from`
+- Top-level files are thin: import from `node-internal:*`, re-export with `export { ... }` / `export * from`. Exception: `diagnostics_channel.ts` holds the whole implementation; its C++ module only forwards messages to tail workers
 - Feature-gated exports use `if (!flag) { throw ... }` or conditional class assignment patterns
 - Shared validators in `internal/validators.ts`; shared errors in `internal/internal_errors.ts`
 - `_` prefix files (e.g., `_http_agent.ts`, `_stream_readable.ts`) = Node.js legacy internal module aliases

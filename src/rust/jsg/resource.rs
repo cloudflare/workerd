@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::ops::Deref;
 use std::ptr::NonNull;
+use std::sync::Arc;
 
 use kj_rs::KjMaybe;
 
@@ -25,6 +26,8 @@ use crate::Member;
 use crate::ToJS;
 use crate::Traced;
 use crate::Type;
+use crate::feature_flags::compatibility_flags;
+use crate::isolate_state::IsolateState;
 use crate::v8;
 use crate::v8::ffi::Wrappable;
 
@@ -361,7 +364,7 @@ impl<R: Resource> Default for Weak<R> {
 ///
 /// **Prototype**: The returned object's prototype is set up from the resource's
 /// [`FunctionTemplate`], which includes all `#[jsg_method]` instance methods and
-/// `#[jsg_static_constant]` values registered via [`Resource::members()`].
+/// `#[jsg_static_constant]` values registered via [`Resource::members(flags)`](Resource::members).
 ///
 /// **Ownership**: The `Rc` is consumed. The JS wrapper keeps the `Wrappable`
 /// alive via `CppgcShim`. When the JS object is garbage collected and all Rust
@@ -397,29 +400,20 @@ pub fn wrap<'s, R: Resource + 'static>(
 pub fn function_template_of<'s, R: Resource + 'static>(
     lock: &mut Lock<'s>,
 ) -> v8::Local<'s, v8::Function> {
-    let isolate = lock.isolate();
-    let isolate_id = lock.isolate_id();
-    let constructor = lock
-        .realm()
-        .resources
-        .get_constructor::<R>(isolate, isolate_id);
-    // SAFETY: `isolate` is valid and locked (Lock invariant). `constructor` is a valid
-    // Global<FunctionTemplate> cached in the Realm. Inlined from `as_local_function` to
-    // avoid re-borrowing `self` while `constructor` holds an immutable borrow through `realm()`.
-    unsafe {
-        v8::Local::from_ffi(v8::ffi::function_template_get_function(
-            isolate.as_ffi(),
-            constructor.as_ffi_ref(),
-        ))
-    }
+    let constructor = lock.realm().get_constructor::<R>().as_ffi();
+    // SAFETY: the constructor is a function template of the lock's isolate, which the Realm's
+    // template cache keeps alive.
+    unsafe { v8::function_template_get_function(lock, &constructor) }
 }
 
-/// Builds a [`ResourceDescriptor`] from `R`'s [`Resource::members()`] list.
+/// Builds a [`ResourceDescriptor`] from `R`'s [`Resource::members(flags)`](Resource::members) list.
 /// The descriptor is passed to C++ `create_resource_template` to set up the
 /// V8 `FunctionTemplate` with the correct methods, constants, and constructor.
 /// Nested types are returned separately, since their templates are installed
 /// once the template for `R` exists.
-fn get_resource_descriptor<R: Resource>() -> (v8::ffi::ResourceDescriptor, NestedTypes) {
+fn get_resource_descriptor<R: Resource>(
+    flags: compatibility_flags::Reader<'_>,
+) -> (v8::ffi::ResourceDescriptor, NestedTypes) {
     let mut nested_types = Vec::new();
     let mut descriptor = v8::ffi::ResourceDescriptor {
         name: R::class_name().to_owned(),
@@ -430,17 +424,22 @@ fn get_resource_descriptor<R: Resource>() -> (v8::ffi::ResourceDescriptor, Neste
         static_constants: Vec::new(),
     };
 
-    for m in R::members() {
+    for m in R::members(flags) {
         match m {
             Member::Constructor { callback } => {
                 descriptor.constructor = KjMaybe::Some(v8::ffi::ConstructorDescriptor {
                     callback: callback as usize,
                 });
             }
-            Member::Method { name, callback } => {
+            Member::Method {
+                name,
+                callback,
+                fast,
+            } => {
                 descriptor.methods.push(v8::ffi::MethodDescriptor {
                     name,
                     callback: callback as usize,
+                    fast: fast.into(),
                 });
             }
             Member::Property {
@@ -473,10 +472,15 @@ fn get_resource_descriptor<R: Resource>() -> (v8::ffi::ResourceDescriptor, Neste
                     setter_callback: setter_callback.map(|f| f as usize).into(),
                 });
             }
-            Member::StaticMethod { name, callback } => {
+            Member::StaticMethod {
+                name,
+                callback,
+                fast,
+            } => {
                 descriptor.static_methods.push(v8::ffi::MethodDescriptor {
                     name,
                     callback: callback as usize,
+                    fast: fast.into(),
                 });
             }
             Member::StaticConstant { name, value } => {
@@ -508,10 +512,11 @@ type Nesting = Vec<(TypeId, &'static str)>;
 /// A resource type must not nest itself, directly or through other nested
 /// types; creating its template panics.
 pub struct NestedType {
-    template: for<'a> fn(
+    template: for<'a, 'f> fn(
         &'a mut Resources,
         v8::IsolatePtr,
-        crate::scope::IsolateId,
+        &Arc<IsolateState>,
+        compatibility_flags::Reader<'f>,
         &mut Nesting,
     ) -> &'a v8::Global<v8::FunctionTemplate>,
 }
@@ -528,18 +533,21 @@ impl NestedType {
 
 #[derive(Default)]
 pub struct Resources {
-    /// Cached V8 `FunctionTemplate`s keyed by resource `TypeId`.
+    /// Cached V8 `FunctionTemplate`s keyed by resource `TypeId`, which GC never visits.
     templates: HashMap<TypeId, v8::Global<v8::FunctionTemplate>>,
 }
 
 impl Resources {
     /// Gets or creates the cached `FunctionTemplate` for a resource type.
+    ///
+    /// `flags` are only consulted when the template is first created.
     pub(crate) fn get_constructor<R: Resource + 'static>(
         &mut self,
         isolate: v8::IsolatePtr,
-        isolate_id: crate::scope::IsolateId,
+        state: &Arc<IsolateState>,
+        flags: compatibility_flags::Reader<'_>,
     ) -> &v8::Global<v8::FunctionTemplate> {
-        self.get_nested_constructor::<R>(isolate, isolate_id, &mut Vec::new())
+        self.get_nested_constructor::<R>(isolate, state, flags, &mut Vec::new())
     }
 
     /// Gets or creates the cached `FunctionTemplate` for a resource type, while the
@@ -556,7 +564,8 @@ impl Resources {
     fn get_nested_constructor<'a, R: Resource + 'static>(
         &'a mut self,
         isolate: v8::IsolatePtr,
-        isolate_id: crate::scope::IsolateId,
+        state: &Arc<IsolateState>,
+        flags: compatibility_flags::Reader<'_>,
         nesting: &mut Nesting,
     ) -> &'a v8::Global<v8::FunctionTemplate> {
         let type_id = TypeId::of::<R>();
@@ -570,7 +579,7 @@ impl Resources {
                 );
             }
             nesting.push((type_id, name));
-            let template = self.create_resource_constructor::<R>(isolate, isolate_id, nesting);
+            let template = self.create_resource_constructor::<R>(isolate, state, flags, nesting);
             nesting.pop();
             self.templates.insert(type_id, template);
         }
@@ -582,24 +591,25 @@ impl Resources {
     fn create_resource_constructor<R: Resource>(
         &mut self,
         isolate: v8::IsolatePtr,
-        isolate_id: crate::scope::IsolateId,
+        state: &Arc<IsolateState>,
+        flags: compatibility_flags::Reader<'_>,
         nesting: &mut Nesting,
     ) -> v8::Global<v8::FunctionTemplate> {
-        let (descriptor, nested_types) = get_resource_descriptor::<R>();
+        let (descriptor, nested_types) = get_resource_descriptor::<R>(flags);
         // SAFETY: Caller guarantees the isolate is valid and locked.
         let handle = unsafe { v8::ffi::create_resource_template(isolate.as_ffi(), &descriptor) };
-        let template = v8::Global::from_ffi_in(handle, isolate_id);
+        let template = v8::Global::from_ffi_in(handle, Arc::clone(state));
         for (name, nested_type) in nested_types {
-            let nested = (nested_type.template)(self, isolate, isolate_id, nesting);
+            let nested = (nested_type.template)(self, isolate, state, flags, nesting);
             // SAFETY: The caller guarantees the isolate is valid and locked, and both
             // templates are live `Global<FunctionTemplate>`s of this isolate. The template
             // for `R` has not been instantiated yet, so it can still be modified.
             unsafe {
                 v8::ffi::function_template_set_nested_type(
                     isolate.as_ffi(),
-                    template.as_ffi_ref(),
+                    &template.as_ffi(),
                     &name,
-                    nested.as_ffi_ref(),
+                    &nested.as_ffi(),
                 );
             }
         }
@@ -625,7 +635,13 @@ impl Resources {
 /// member declarations, a cleanup function for GC, and access to their V8 wrapper state.
 pub trait Resource: Type + GarbageCollected + Sized + 'static {
     /// Returns the list of methods, properties, and constructors exposed to JavaScript.
-    fn members() -> Vec<Member>
+    ///
+    /// `flags` are the compatibility flags of the isolate the template is built for, so the
+    /// member list can vary with them, as with the `CompatibilityFlags::Reader flags`
+    /// parameter of C++ `JSG_RESOURCE_TYPE`. Templates are cached per resource type in the realm.
+    /// Use `#[jsg_resource(custom_members)]` to generate member factories while supplying
+    /// this implementation yourself.
+    fn members(flags: compatibility_flags::Reader<'_>) -> Vec<Member>
     where
         Self: Sized;
 }

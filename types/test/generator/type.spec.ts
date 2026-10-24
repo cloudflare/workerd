@@ -6,8 +6,45 @@ import assert from 'assert';
 import { test } from 'node:test';
 import { BuiltinType_Type, JsgImplType_Type, Type } from '@workerd/jsg/rtti';
 import { Message } from 'capnp-es';
-import { createTypeNode } from '../../src/generator/type';
+import { factory as f } from 'typescript';
+import { createTypeNode, maybeUnwrapOptional } from '../../src/generator/type';
 import { printNode } from '../../src/print';
+
+test('maybeUnwrapOptional: removes only a trailing undefined union member', () => {
+  for (const { members, expected } of [
+    { members: ['string', 'undefined'], expected: 'string' },
+    { members: ['boolean', 'null', 'undefined'], expected: 'boolean | null' },
+    {
+      members: ['string', 'number', 'boolean', 'undefined'],
+      expected: 'string | number | boolean',
+    },
+  ]) {
+    const union = f.createUnionTypeNode(
+      members.map((name) => f.createTypeReferenceNode(name))
+    );
+    const unwrapped = maybeUnwrapOptional(union);
+    assert(unwrapped !== undefined);
+    assert.strictEqual(printNode(unwrapped), expected);
+  }
+
+  for (const type of [
+    f.createTypeReferenceNode('string'),
+    f.createTypeReferenceNode('undefined'),
+    f.createUnionTypeNode(
+      ['string', 'null'].map((name) => f.createTypeReferenceNode(name))
+    ),
+    f.createUnionTypeNode(
+      ['undefined', 'string'].map((name) => f.createTypeReferenceNode(name))
+    ),
+    f.createUnionTypeNode(
+      ['string', 'undefined', 'number'].map((name) =>
+        f.createTypeReferenceNode(name)
+      )
+    ),
+  ]) {
+    assert.strictEqual(maybeUnwrapOptional(type), undefined);
+  }
+});
 
 test('createTypeNode: primitive types', () => {
   const type = new Message().initRoot(Type);
@@ -59,6 +96,16 @@ test('createTypeNode: builtin types', () => {
   builtin.type = BuiltinType_Type.V8FUNCTION;
   assert.strictEqual(printNode(createTypeNode(type)), 'Function');
 
+  builtin.type = BuiltinType_Type.V8SYMBOL;
+  assert.strictEqual(printNode(createTypeNode(type)), 'symbol');
+  builtin.type = BuiltinType_Type.JSG_ERROR;
+  assert.strictEqual(printNode(createTypeNode(type)), 'Error');
+  builtin.type = BuiltinType_Type.V8TYPED_ARRAY;
+  assert.strictEqual(
+    printNode(createTypeNode(type)),
+    'Uint8Array | Uint8ClampedArray | Uint16Array | Uint32Array | Int8Array | Int16Array | Int32Array | Float16Array | Float32Array | Float64Array | BigInt64Array | BigUint64Array'
+  );
+
   const intrinsic = type._initIntrinsic();
 
   intrinsic.name = 'v8::kErrorPrototype';
@@ -105,6 +152,31 @@ test('createTypeNode: generic types', () => {
   variants.get(1)._initNumber().name = 'unsigned short';
   variants.get(2)._initString().name = 'kj::String';
   assert.strictEqual(printNode(createTypeNode(type)), 'void | number | string');
+});
+
+test('createTypeNode: explicit nullish flags take precedence over native names', () => {
+  const type = new Message().initRoot(Type);
+  const maybe = type._initMaybe();
+  maybe._initValue().boolt = true;
+  maybe.name = 'kj::Maybe';
+  maybe.allowsUndefined = true;
+  assert.strictEqual(printNode(createTypeNode(type)), 'boolean | undefined');
+  maybe.name = 'Option';
+  maybe.allowsUndefined = false;
+  maybe.allowsNull = true;
+  assert.strictEqual(printNode(createTypeNode(type)), 'boolean | null');
+  maybe.name = 'Nullable';
+  maybe.allowsUndefined = true;
+  assert.strictEqual(
+    printNode(createTypeNode(type)),
+    'boolean | null | undefined'
+  );
+  maybe.allowsNull = false;
+  maybe.allowsUndefined = false;
+  maybe.name = 'kj::Maybe';
+  assert.strictEqual(printNode(createTypeNode(type)), 'boolean | null');
+  maybe.name = 'jsg::Optional';
+  assert.strictEqual(printNode(createTypeNode(type)), 'boolean | undefined');
 });
 
 test('createTypeNode: array types', () => {

@@ -27,7 +27,7 @@ impl GarbageCollected for Bad {
 extern "C" fn getter(_args: *mut v8::ffi::FunctionCallbackInfo) {}
 
 impl Resource for Bad {
-    fn members() -> Vec<Member> {
+    fn members(_flags: compatibility_flags::Reader<'_>) -> Vec<Member> {
         vec![Member::Property {
             name: "bad".to_owned(),
             kind: crate::PropertyKind::Instance,
@@ -40,5 +40,6 @@ impl Resource for Bad {
 #[test]
 #[should_panic(expected = "use Member::InstanceProperty")]
 fn instance_kind_property_panics() {
-    get_resource_descriptor::<Bad>();
+    let message = capnp::message::Builder::new_default();
+    get_resource_descriptor::<Bad>(message.get_root_as_reader().unwrap());
 }

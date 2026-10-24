@@ -7,11 +7,14 @@
 #include <workerd/api/js-streams-bridge.h>
 #include <workerd/api/js-writable-stream.h>
 #include <workerd/api/per-isolate-bootstrap.h>
+#include <workerd/api/worker-rpc.h>
+#include <workerd/io/external-pusher.h>
 #include <workerd/jsg/script.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/autogate.h>
 
 #include <capnp/message.h>
+#include <capnp/serialize.h>
 #include <kj/test.h>
 
 namespace workerd::api {
@@ -1377,14 +1380,16 @@ KJ_TEST("ReadableStreamNativeSource tee seeds both branches with stashed bytes")
 // Default-pulls `source` until it closes, recording into `state`.
 jsg::Promise<void> pullUntilClosed(jsg::Lock& js,
     jsg::Ref<ReadableStreamNativeSource> source,
-    MockControllerState& state,
+    kj::Weak<MockControllerState> state,
     jsg::JsRef<jsg::JsObject> controller) {
   auto pull = source->pull(js, controller.getHandle(js), freshSignal(js));
   return pull.then(js,
-      [&state, source = kj::mv(source), controller = kj::mv(controller)](
+      [state = kj::mv(state), source = kj::mv(source), controller = kj::mv(controller)](
           jsg::Lock& js) mutable -> jsg::Promise<void> {
-    if (state.closed) return js.resolvedPromise();
-    return pullUntilClosed(js, kj::mv(source), state, kj::mv(controller));
+    if (KJ_REQUIRE_NONNULL(state.tryGet(), "state destroyed before pull completed").closed) {
+      return js.resolvedPromise();
+    }
+    return pullUntilClosed(js, kj::mv(source), kj::mv(state), kj::mv(controller));
   });
 }
 
@@ -1400,8 +1405,8 @@ KJ_TEST("ReadableStreamNativeSource tee during an in-flight pull hands its bytes
         "branches") {
   TestFixture testFixture;
   MockControllerState state0;
-  MockControllerState state1;
-  MockControllerState state2;
+  kj::Pin<MockControllerState> state1;
+  kj::Pin<MockControllerState> state2;
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
@@ -1430,18 +1435,18 @@ KJ_TEST("ReadableStreamNativeSource tee during an in-flight pull hands its bytes
       KJ_EXPECT(KJ_ASSERT_NONNULL(expectedLengthOf(js, *branches[0])) == kData.size());
       KJ_EXPECT(KJ_ASSERT_NONNULL(expectedLengthOf(js, *branches[1])) == kData.size());
 
-      auto p1 = pullUntilClosed(
-          js, branches[0].addRef(), state1, makeMockController(js, state1, js.null()).addRef(js));
-      auto p2 = pullUntilClosed(
-          js, branches[1].addRef(), state2, makeMockController(js, state2, js.null()).addRef(js));
+      auto p1 = pullUntilClosed(js, branches[0].addRef(), state1.addWeak(),
+          makeMockController(js, *state1, js.null()).addRef(js));
+      auto p2 = pullUntilClosed(js, branches[1].addRef(), state2.addWeak(),
+          makeMockController(js, *state2, js.null()).addRef(js));
       return pull2.then(js, [p1 = kj::mv(p1)](jsg::Lock& js) mutable {
         return kj::mv(p1);
       }).then(js, [p2 = kj::mv(p2)](jsg::Lock& js) mutable { return kj::mv(p2); });
     }).then(js, [&](jsg::Lock& js) {
       KJ_EXPECT(state0.enqueued.size() == 0);
       KJ_EXPECT(state0.responded == kj::none);
-      KJ_EXPECT(enqueuedText(state1) == kData, enqueuedText(state1));
-      KJ_EXPECT(enqueuedText(state2) == kData, enqueuedText(state2));
+      KJ_EXPECT(enqueuedText(*state1) == kData, enqueuedText(*state1));
+      KJ_EXPECT(enqueuedText(*state2) == kData, enqueuedText(*state2));
     });
     return env.context.awaitJs(js, kj::mv(promise));
   });
@@ -1450,8 +1455,8 @@ KJ_TEST("ReadableStreamNativeSource tee during an in-flight pull hands its bytes
 KJ_TEST("ReadableStreamNativeSource tee during an in-flight pull that reaches EOF") {
   TestFixture testFixture;
   MockControllerState state0;
-  MockControllerState state1;
-  MockControllerState state2;
+  kj::Pin<MockControllerState> state1;
+  kj::Pin<MockControllerState> state2;
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
@@ -1475,18 +1480,18 @@ KJ_TEST("ReadableStreamNativeSource tee during an in-flight pull that reaches EO
       auto branches = source->tee(js);
       KJ_EXPECT(KJ_ASSERT_NONNULL(expectedLengthOf(js, *branches[0])) == kData.size());
       KJ_EXPECT(KJ_ASSERT_NONNULL(expectedLengthOf(js, *branches[1])) == kData.size());
-      auto p1 = pullUntilClosed(
-          js, branches[0].addRef(), state1, makeMockController(js, state1, js.null()).addRef(js));
-      auto p2 = pullUntilClosed(
-          js, branches[1].addRef(), state2, makeMockController(js, state2, js.null()).addRef(js));
+      auto p1 = pullUntilClosed(js, branches[0].addRef(), state1.addWeak(),
+          makeMockController(js, *state1, js.null()).addRef(js));
+      auto p2 = pullUntilClosed(js, branches[1].addRef(), state2.addWeak(),
+          makeMockController(js, *state2, js.null()).addRef(js));
       return pull2.then(js, [p1 = kj::mv(p1)](jsg::Lock& js) mutable {
         return kj::mv(p1);
       }).then(js, [p2 = kj::mv(p2)](jsg::Lock& js) mutable { return kj::mv(p2); });
     }).then(js, [&](jsg::Lock& js) {
       KJ_EXPECT(state0.responded == kj::none);
       KJ_EXPECT(!state0.closed);
-      KJ_EXPECT(enqueuedText(state1) == kData, enqueuedText(state1));
-      KJ_EXPECT(enqueuedText(state2) == kData, enqueuedText(state2));
+      KJ_EXPECT(enqueuedText(*state1) == kData, enqueuedText(*state1));
+      KJ_EXPECT(enqueuedText(*state2) == kData, enqueuedText(*state2));
     });
     return env.context.awaitJs(js, kj::mv(promise));
   });
@@ -1611,6 +1616,112 @@ TestFixture makeTsStreamsFixture() {
     .featureFlags = flags.asReader(),
     .autogates = kj::arr("per-isolate-javascript-bootstrap"_kj),
   });
+}
+
+KJ_TEST("RPC readable stream length is available before its push resolves") {
+  for (bool typescript: {false, true}) {
+    auto fixture = typescript ? makeTsStreamsFixture() : TestFixture();
+    for (auto content: {kData, ""_kj}) {
+      for (bool metadata: {false, true}) {
+        fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+          auto& js = env.js;
+          // Holding the pusher unresolved prevents both the push and its pipelined input
+          // capability from settling, regardless of how much work hydration schedules.
+          auto pusher = kj::newPromiseAndFulfiller<rpc::JsValue::ExternalPusher::Client>();
+          RpcSerializerExternalHandler handler(RpcSerializerExternalHandler::TRANSFER,
+              rpc::JsValue::ExternalPusher::Client(kj::mv(pusher.promise)), kj::none);
+          jsg::Serializer serializer(js, {.externalHandler = handler});
+          auto original =
+              JsReadableStream::create(js, env.context, kj::heap<ContentSource>(content));
+          original.serialize(js, serializer);
+          serializer.release();
+
+          capnp::BuilderCapabilityTable builderCaps;
+          capnp::MallocMessageBuilder message;
+          auto value = builderCaps.imbue(message.initRoot<rpc::JsValue>());
+          value.adoptExternals(handler.build(capnp::Orphanage::getForMessageContaining(value)));
+          auto descriptor = value.getExternals()[0].getReadableStream();
+          KJ_EXPECT(descriptor.getIdentityLength().isKnown());
+          KJ_EXPECT(descriptor.getIdentityLength().getKnown() == content.size());
+
+          // The default unknown value models an old sender omitting identityLength.
+          if (!metadata) descriptor.initIdentityLength().setUnknown();
+
+          auto words = capnp::messageToFlatArray(message);
+          capnp::FlatArrayMessageReader wireReader(words);
+          capnp::ReaderCapabilityTable readerCaps(KJ_MAP(cap, builderCaps.getTable()) {
+            return cap.map([](kj::Own<capnp::ClientHook>& hook) { return hook->addRef(); });
+          });
+          auto receivedDescriptor = readerCaps.imbue(wireReader.getRoot<rpc::JsValue>())
+                                        .getExternals()[0]
+                                        .getReadableStream();
+          KJ_EXPECT(receivedDescriptor.getIdentityLength().isKnown() == metadata);
+          if (metadata) {
+            KJ_EXPECT(receivedDescriptor.getIdentityLength().getKnown() == content.size());
+          } else {
+            KJ_EXPECT(receivedDescriptor.getIdentityLength().isUnknown());
+          }
+          auto received = hydrateRpcReadableStream(js, env.context, receivedDescriptor);
+          auto expected = metadata ? kj::Maybe<uint64_t>(content.size()) : kj::none;
+          KJ_EXPECT(received.tryGetLength(js) == expected, typescript, metadata);
+
+          pusher.fulfiller->fulfill(env.context.getExternalPusher());
+          auto consumed =
+              received.text(js, kLimit).then(js, [content](jsg::Lock&, kj::String text) {
+            KJ_EXPECT(text == content);
+          });
+          return env.context.awaitJs(js, kj::mv(consumed));
+        });
+      }
+    }
+  }
+}
+
+class LengthOnlySource final: public ReadableStreamSource {
+ public:
+  explicit LengthOnlySource(uint64_t length): length(length) {}
+
+  kj::Promise<size_t> tryRead(void*, size_t, size_t) override {
+    return kj::NEVER_DONE;
+  }
+
+  kj::Maybe<uint64_t> tryGetLength(StreamEncoding encoding) override {
+    return encoding == StreamEncoding::IDENTITY ? kj::Maybe<uint64_t>(length) : kj::none;
+  }
+
+ private:
+  uint64_t length;
+};
+
+KJ_TEST("RPC readable stream identity length retains the full UInt64 range") {
+  for (bool typescript: {false, true}) {
+    auto fixture = typescript ? makeTsStreamsFixture() : TestFixture();
+    for (uint64_t length: {uint64_t{0}, (uint64_t{1} << 53) + 1, uint64_t{kj::maxValue}}) {
+      fixture.runInIoContext([&](const TestFixture::Environment& env) {
+        RpcSerializerExternalHandler handler(RpcSerializerExternalHandler::TRANSFER,
+            rpc::JsValue::ExternalPusher::Client(
+                kj::Promise<rpc::JsValue::ExternalPusher::Client>(kj::NEVER_DONE)),
+            kj::none);
+        jsg::Serializer serializer(env.js, {.externalHandler = handler});
+        auto original =
+            JsReadableStream::create(env.js, env.context, kj::heap<LengthOnlySource>(length));
+        original.serialize(env.js, serializer);
+        serializer.release();
+        capnp::MallocMessageBuilder message;
+        auto externals = handler.build(message.getOrphanage());
+        auto descriptor = externals.get()[0].getReadableStream();
+        KJ_EXPECT(descriptor.getIdentityLength().getKnown() == length);
+        for (auto encoding:
+            {StreamEncoding::IDENTITY, StreamEncoding::GZIP, StreamEncoding::BROTLI}) {
+          descriptor.setEncoding(encoding);
+          auto received = hydrateRpcReadableStream(env.js, env.context, descriptor.asReader());
+          KJ_EXPECT(
+              received.tryGetLength(env.js) == kj::Maybe<uint64_t>(length), typescript, encoding);
+        }
+        // This fixture only transfers metadata; its source never produces body bytes.
+      });
+    }
+  }
 }
 
 // Settles after n event loop turns.

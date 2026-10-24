@@ -489,7 +489,7 @@ KJ_TEST("the sender serializes a structured-clone argument once per call") {
   });
 
   uint getterCount = 0;
-  uint resultCount = 0;
+  kj::Pin<uint> resultCount{};  // Value-initialized to 0.
   sender.runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = env.js.alloc<Fetcher>(env.context.addObject<Fetcher::OutgoingFactory>(
                                              kj::heap<ReceiverOutgoingFactory>(receiver)),
@@ -511,10 +511,10 @@ KJ_TEST("the sender serializes a structured-clone argument once per call") {
       auto function = wrapMethod(env.js, kj::mv(method));
       auto result =
           jsg::JsFunction(function.getHandle(env.js)).call(env.js, env.js.undefined(), args);
-      auto checked =
-          env.js.toPromise(result).then(env.js, [&resultCount](jsg::Lock& js, jsg::Value value) {
+      auto checked = env.js.toPromise(result).then(
+          env.js, [resultCount = resultCount.addWeak()](jsg::Lock& js, jsg::Value value) {
         KJ_EXPECT(jsg::JsValue(value.getHandle(js)).strictEquals(js.num(42)));
-        ++resultCount;
+        ++KJ_REQUIRE_NONNULL(resultCount.tryGet(), "test counter destroyed");
       });
       return env.context.awaitJs(env.js, kj::mv(checked));
     };
@@ -529,7 +529,7 @@ KJ_TEST("the sender serializes a structured-clone argument once per call") {
     return kj::joinPromises(kj::arr(kj::mv(direct), kj::mv(viaPath))).attach(kj::mv(fetcher));
   });
   KJ_EXPECT(getterCount == 2);
-  KJ_EXPECT(resultCount == 2);
+  KJ_EXPECT(*resultCount == 2);
 }
 
 KJ_TEST("an unresolved retry-capable destination supports promise pipelining") {

@@ -647,6 +647,13 @@ struct JsValue {
         canceler @21 :StreamCanceler;
         # Hosted by the stream's origin. The receiver calls it when its copy of the stream is
         # canceled or released before reaching EOF. Null when the sender does not support it.
+
+        identityLength :union {
+          # Remaining decoded bytes at serialization, independently of `encoding`. Available
+          # before the pushed stream resolves. Old senders leave this unknown.
+          unknown @23 :Void;
+          known @24 :UInt64;
+        }
       }
 
       obsolete7 @7 :Void;
@@ -766,10 +773,6 @@ interface AbortTrigger $Cxx.allowCancellation {
   abort @0 (reason :JsValue) -> ();
   # Allows a cloned abort signal to be triggered over RPC when the original signal is triggered.
   # `reason` is an arbitrary JavaScript value which will appear in the resulting `AbortError`s.
-
-  release @1 () -> ();
-  # Informs a cloned signal that the original signal is being destroyed, and the abort will never
-  # be triggered. Otherwise, the cloned signal will treat a dropped cabability as an abort.
 }
 
 interface StreamCanceler $Cxx.allowCancellation {

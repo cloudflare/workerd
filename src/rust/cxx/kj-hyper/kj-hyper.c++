@@ -4,6 +4,8 @@
 
 #include "kj-hyper.h"
 
+#include <workerd/util/weak-refs.h>
+
 #include <kj-hyper/ffi.rs.h>
 #include <openssl/digest.h>
 #include <openssl/ec.h>
@@ -360,15 +362,26 @@ kj::Promise<void> pump_tunnel(kj::AsyncIoStream& connection, kj::Own<kj::AsyncIo
   return kj::joinPromisesFailFast(promises.finish()).attach(kj::mv(tunnel));
 }
 
-void tls_starter_set(kj::TlsStarterCallback& starter, ::rust::Box<TlsStarter> start) {
-  kj::Function<kj::Promise<void>(kj::StringPtr)> callback =
+namespace {
+
+kj::Function<kj::Promise<void>(kj::StringPtr)> tlsStarterCallback(::rust::Box<TlsStarter> start) {
+  return
       [start = kj::mv(start)](kj::StringPtr expectedServerHostname) mutable -> kj::Promise<void> {
     // The name may be dropped once this returns (kj's contract), so the future gets a copy.
     auto host = kj::str(expectedServerHostname);
     auto promise = start->start(bytes(host.asPtr()));
     return hot(kj::mv(promise)).attach(kj::mv(host));
   };
-  starter = kj::mv(callback);
+}
+
+}  // namespace
+
+void tls_starter_set(kj::TlsStarterCallback& starter, ::rust::Box<TlsStarter> start) {
+  starter = tlsStarterCallback(kj::mv(start));
+}
+
+kj::Own<kj::TlsStarterCallback> new_tls_starter(::rust::Box<TlsStarter> start) {
+  return kj::heap<kj::TlsStarterCallback>(tlsStarterCallback(kj::mv(start)));
 }
 
 // permessage-deflate, offered as kj's HttpClient offers it in each compression mode.

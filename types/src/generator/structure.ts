@@ -40,7 +40,8 @@ export function createMethodPartial(
     fullyQualifiedParentName,
     name,
     method.args.toArray(),
-    /* forMethod */ true
+    /* forMethod */ true,
+    method.argNames.toArray()
   );
   const result = createTypeNode(method.returnType);
   return [modifiers, name, params, result];
@@ -310,7 +311,8 @@ function createClassMemberNode(
         fullyQualifiedClassName,
         'constructor',
         constructor.args.toArray(),
-        /* forMethod */ true
+        /* forMethod */ true,
+        constructor.argNames.toArray()
       );
       return f.createConstructorDeclaration(
         /* modifiers */ undefined,

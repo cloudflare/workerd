@@ -137,6 +137,7 @@ void EventTarget::addEventListener(jsg::Lock& js,
       })();
 
       bool once = false;
+      bool passive = false;
       kj::Maybe<jsg::Ref<AbortSignal>> maybeSignal;
       KJ_IF_SOME(value, maybeOptions) {
         KJ_SWITCH_ONEOF(value) {
@@ -146,9 +147,8 @@ void EventTarget::addEventListener(jsg::Lock& js,
           KJ_CASE_ONEOF(opts, AddEventListenerOptions) {
             JSG_REQUIRE(!opts.capture.orDefault(false), TypeError,
                 "addEventListener(): options.capture must be false.");
-            JSG_REQUIRE(!opts.passive.orDefault(false), TypeError,
-                "addEventListener(): options.passive must be false.");
             once = opts.once.orDefault(false);
+            passive = opts.passive.orDefault(false);
             maybeSignal = kj::mv(opts.signal);
           }
         }
@@ -187,6 +187,7 @@ void EventTarget::addEventListener(jsg::Lock& js,
         .identity = kj::mv(handler.identity),
         .callback = kj::mv(handlerFn),
         .once = once,
+        .passive = passive,
         .abortHandler = kj::mv(maybeAbortHandler),
       });
 
@@ -378,6 +379,7 @@ EventTarget::DispatchResult EventTarget::dispatchEventImpl(
       kj::Maybe<jsg::HashableV8Ref<v8::Object>> identity;
       HandlerFunction callback;
       bool once = false;
+      bool passive = false;
     };
 
     kj::Vector<Callback> callbacks;
@@ -406,6 +408,7 @@ EventTarget::DispatchResult EventTarget::dispatchEventImpl(
           .identity = handler->identity.addRef(js),
           .callback = handler->callback.addRef(js),
           .once = handler->once,
+          .passive = handler->passive,
         });
       }
     }
@@ -442,6 +445,13 @@ EventTarget::DispatchResult EventTarget::dispatchEventImpl(
       }
 
       const auto invoke = [&]() {
+        // Per spec ("inner invoke" steps 9 and 12), the in passive listener flag is set only
+        // for the duration of a passive listener's invocation.
+        if (callback.passive) {
+          event->setInPassiveListener(true);
+        }
+        KJ_DEFER(event->setInPassiveListener(false));
+
         // Per the standard, the event listener is not supposed to return any value, and
         // if it does, that value is ignored. That can be somewhat problematic if the user
         // passes an async function as the event handler. Doing so counts as undefined
@@ -527,8 +537,7 @@ bool EventTarget::dispatchEvent(jsg::Lock& js, jsg::Ref<Event> event) {
       .result;
 }
 
-// A wrapper for the AbortTrigger jsrpc client, that automatically sends a release() message once
-// the client is destroyed, informing the server that an abort will not be triggered in the future.
+// A wrapper for the AbortTrigger jsrpc client.
 class AbortTriggerRpcClient final {
  public:
   AbortTriggerRpcClient(rpc::AbortTrigger::Client&& client): client(kj::mv(client)) {}
@@ -539,26 +548,6 @@ class AbortTriggerRpcClient final {
     field.setV8Serialized(reason);
     return req.sendIgnoringResult();
   }
-
-  ~AbortTriggerRpcClient() noexcept(false) {
-    if (skipReleaseForTest) {
-      return;
-    }
-
-    auto req = client.releaseRequest(capnp::MessageSize{4, 0});
-    // We call detach() on the resulting promise so that we can perform RPC in a destructor
-    req.sendIgnoringResult().detach([](kj::Exception exc) {
-      if (exc.getType() == kj::Exception::Type::DISCONNECTED) {
-        // It's possible we can't send the release message because we're already disconnected.
-        return;
-      };
-
-      // Other exceptions could be more interesting
-      LOG_EXCEPTION("abortTriggerReleaseRpc", exc);
-    });
-  }
-
-  bool skipReleaseForTest = false;
 
  private:
   rpc::AbortTrigger::Client client;
@@ -1221,13 +1210,7 @@ int AbortSignal::getNativeRegistrationCountForTest() {
   return static_cast<int>(nativeRegistrations.size() + rpcRegistrations.size());
 }
 
-void AbortSignal::skipReleaseForTest() {
-  for (auto& reg: rpcRegistrations) {
-    KJ_IF_SOME(client, take(reg->client)) {
-      client->skipReleaseForTest = true;
-    }
-  }
-
+void AbortSignal::dropRpcTriggersForTest() {
   rpcRegistrations.clear();
 }
 

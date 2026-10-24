@@ -29,6 +29,7 @@ class SqliteDatabase;
 class SqliteKv;
 
 WD_STRONG_BOOL(ReadReplicationIsEnabled);
+WD_STRONG_BOOL(FlushingBeforeDeleteAll);
 
 struct ActorCacheReadOptions {
   // If the entry is not already in cache and has to be read from disk, don't store the result in
@@ -185,8 +186,12 @@ class ActorCacheOps {
 //
 // This extends ActorCacheOps and adds some methods that don't make sense as part of
 // ActorCache::Transaction.
-class ActorCacheInterface: public ActorCacheOps {
+class ActorCacheInterface: public ActorCacheOps, public kj::PtrTarget {
  public:
+  kj::Weak<ActorCacheInterface> addWeak() {
+    return addWeakToThis();
+  }
+
   // If the actor's storage is backed by SQLite, return the underlying database.
   virtual kj::Maybe<SqliteDatabase&> getSqliteDatabase() = 0;
 
@@ -920,6 +925,10 @@ class ActorCache final: public ActorCacheInterface {
 
   kj::Promise<void> flushImpl(uint retryCount = 0);
   kj::Promise<void> flushImplDeleteAll(uint retryCount = 0);
+  // Continuations of flushImpl() and flushImplDeleteAll() once their storage RPC succeeds.
+  kj::Promise<void> finishFlush(FlushingBeforeDeleteAll flushingBeforeDeleteAll);
+  kj::Promise<void> finishFlushDeleteAll(
+      capnp::Response<rpc::ActorStorage::Operations::DeleteAllResults> results);
 
   struct FlushBatch {
     size_t pairCount = 0;

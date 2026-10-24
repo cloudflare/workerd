@@ -40,7 +40,10 @@ pub struct MyRecord {
 
 Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 
-- **Instance methods** (`&self` / `&mut self`) are placed on the prototype.
+- **Instance methods** (`&self`) are placed on the prototype. JavaScript can call back into
+  a resource while one of its methods runs, so methods never get `&mut self`; keep state
+  they change in `Cell` or `RefCell` fields. Prefer `Cell`: a `RefCell` borrow held across a
+  call that can run JavaScript makes a re-entrant call panic.
 - **Static methods** (no receiver) are placed on the constructor.
 - Return types of `Result<T, E>` automatically throw a JavaScript exception on `Err`.
 - The Rust `snake_case` name is converted to `camelCase` for JavaScript; override with
@@ -68,6 +71,8 @@ impl DnsUtil {
 }
 ```
 
+Eligible methods also get a V8 Fast API callback; see "Fast API" in `src/rust/jsg/README.md`.
+
 ---
 
 ## `#[jsg_resource]`
@@ -79,8 +84,10 @@ Generates JSG boilerplate for a resource type and its impl block.
 field whose type is or contains a traceable JSG handle (see [Garbage Collection](#garbage-collection) below).
 Use `#[jsg_resource(name = "JSName")]` to override the JavaScript class name.
 
-**On an impl block** — emits `jsg::Resource::members()`, registering every
-`#[jsg_method]`, `#[jsg_constructor]`, and `#[jsg_static_constant]` item.
+**On an impl block** — emits `jsg::Resource::members(flags)`, registering every
+`#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`, and
+`#[jsg_static_constant]` item. It also generates member factories used by both automatic
+and custom registration.
 Use `#[jsg_resource(nested_types(Foo, Name = Bar))]` to expose other resource types'
 constructors on the prototype (equivalent to `JSG_NESTED_TYPE(Foo)` and
 `JSG_NESTED_TYPE_NAMED(Bar, Name)` in C++ JSG).
@@ -101,6 +108,75 @@ impl DnsUtil {
     pub fn create() -> Self { … }
 }
 ```
+
+### Custom member registration
+
+Use `#[jsg_resource(custom_members)]` on the impl block to generate the bindings and member
+factories without an automatic `Resource` implementation. Implement `Resource::members(flags)`
+to choose which members to expose, their order, and property placement using ordinary Rust.
+The flags belong to the realm constructing the template, as in C++ `JSG_RESOURCE_TYPE(T, flags)`.
+Templates are cached per resource type within that realm; registration runs when a template is
+created, not on each property access.
+
+```rust
+use jsg::{Member, PropertyPlacement, Resource};
+use jsg::feature_flags::compatibility_flags;
+use jsg_macros::{jsg_constructor, jsg_property, jsg_resource};
+
+#[jsg_resource]
+struct Example {}
+
+#[jsg_resource(custom_members)]
+impl Example {
+    #[jsg_constructor]
+    fn constructor() -> Self { Self {} }
+
+    #[jsg_property(readonly)]
+    fn get_label(&self) -> String { "example".to_owned() }
+
+    #[jsg_property(readonly)]
+    fn get_cache(&self) -> String { "no-store".to_owned() }
+}
+
+impl Resource for Example {
+    fn members(flags: compatibility_flags::Reader<'_>) -> Vec<Member> {
+        let placement = if flags.get_jsg_property_on_prototype_template() {
+            PropertyPlacement::Prototype
+        } else {
+            PropertyPlacement::Instance
+        };
+        let mut members = vec![
+            Self::constructor_member(),
+            Self::get_label_member(placement),
+        ];
+        if flags.get_cache_option_enabled() && flags.get_jsg_property_on_prototype_template() {
+            members.push(Self::get_cache_member(PropertyPlacement::Prototype));
+        }
+        members
+    }
+}
+```
+
+Factories are private associated functions returning `jsg::Member`. Their names derive from
+the **Rust declaration**, independently of any JavaScript `name = "..."` override:
+
+| Annotated declaration | Factory |
+| --- | --- |
+| Method or constructor `foo` | `Self::foo_member()` |
+| Constant `MAX_SIZE` | `Self::max_size_member()` (constant name lowercased) |
+| Property getter `get_value` with an optional paired setter | `Self::get_value_member(placement)` |
+| Inspect getter `debug_info` | `Self::debug_info_member()` |
+
+An ordinary property factory accepts `jsg::PropertyPlacement::{Prototype, Instance}` and selects
+the matching V8 getter and setter callbacks. The attribute's `prototype` / `instance` argument
+only supplies placement for **automatic** registration; custom registration passes it explicitly.
+Getter/setter pairing, `readonly` checks, name overrides, argument conversion, and exception
+handling apply in both modes. Getter and setter annotations must agree on placement and JS name.
+Inspect properties remain symbol-keyed and do not take a placement argument.
+Property registration follows the returned member list's order. V8 enumerates instance native
+data properties in reverse registration order, as it does for C++ JSG.
+`nested_types(...)` cannot be combined with `custom_members`; a custom `members` lists nested
+types itself, as `jsg::Member::NestedType { name, nested_type: jsg::NestedType::of::<Foo>() }`.
 
 ---
 
@@ -307,8 +383,9 @@ use no-op `Traced` impls; containers/wrappers recurse to inner values.
 | Field type | Trace behaviour |
 |---|---|
 | `jsg::Rc<T>` | Strong GC edge — `visitor.visit_rc` |
-| `jsg::v8::Global<T>` | Dual strong/traced — `visitor.visit_global` (enables cycle collection) |
+| `jsg::v8::TracedGlobal<T>` | Dual strong/traced — `visitor.visit_traced_global` (enables cycle collection) |
 | `jsg::Weak<T>` | **Not traced** — does not keep the target alive |
+| `jsg::v8::Global<T>` | **Not allowed** — no `Traced` impl; use `jsg::v8::TracedGlobal<T>` |
 | `Option<T>` / `jsg::Nullable<T>` | Delegates to `T` when present |
 | `Vec<T>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values |
 | `Cell<T>` / `std::cell::Cell<T>` | Delegates via `as_ptr()` read (safe under single-threaded, non-reentrant GC tracing) |
@@ -335,8 +412,8 @@ Example:
 
 ```rust
 struct EventHandlers {
-    on_message: Option<jsg::v8::Global<jsg::v8::Value>>,
-    on_error:   Option<jsg::v8::Global<jsg::v8::Value>>,
+    on_message: Option<jsg::v8::TracedGlobal<jsg::v8::Value>>,
+    on_error:   Option<jsg::v8::TracedGlobal<jsg::v8::Value>>,
 }
 
 impl jsg::Traced for EventHandlers {
@@ -365,9 +442,9 @@ pub struct EventRouter {
     // Conditionally traced.
     fallback: Option<jsg::Rc<Handler>>,
 
-    // Interior-mutable callback set after construction; dual-mode Global enables
+    // Interior-mutable callback set after construction; dual-mode TracedGlobal enables
     // cycle collection if the callback closes over this resource's own JS wrapper.
-    on_error: Cell<Option<jsg::v8::Global<jsg::v8::Value>>>,
+    on_error: Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
 
     // Weak — does not keep target alive.
     parent: jsg::Weak<EventRouter>,
@@ -377,12 +454,12 @@ pub struct EventRouter {
 }
 ```
 
-### `jsg::v8::Global<T>` and cycle collection
+### `jsg::v8::TracedGlobal<T>` and cycle collection
 
-`jsg::v8::Global<T>` uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`.
+`jsg::v8::TracedGlobal<T>` uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`.
 While the parent resource holds at least one strong Rust `Rc`, the V8 handle stays
 strong. Once all `Rc`s are dropped and only the JS wrapper keeps the resource alive,
-`visit_global` downgrades the handle to a `v8::TracedReference` that cppgc can
+`visit_traced_global` downgrades the handle to a `v8::TracedReference` that cppgc can
 follow — allowing back-reference cycles (e.g. a resource that stores a callback
 which closes over its own JS wrapper) to be detected and collected on the next full GC.
 

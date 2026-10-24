@@ -3,7 +3,7 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 use crate::Nullable;
-use crate::v8::Global;
+use crate::v8::TracedGlobal;
 use crate::v8::Value;
 
 /// [`Lenient<T>`] is a type for lenient conversion from JavaScript, akin to the
@@ -20,7 +20,7 @@ use crate::v8::Value;
 /// code, prefer converting to [`Nullable<T>`].
 pub enum Lenient<T> {
     Some(T),
-    Unconvertable(Global<Value>),
+    Unconvertable(TracedGlobal<Value>),
     Null,
     Undefined,
 }
@@ -59,7 +59,7 @@ impl<T> Lenient<T> {
     /// Converts `self` into a [`crate::Nullable`] while also providing
     /// the value passed to a failed conversion as an optional argument in
     /// the case that it exists.
-    pub fn to_parts(self) -> (Nullable<T>, Option<Global<Value>>) {
+    pub fn to_parts(self) -> (Nullable<T>, Option<TracedGlobal<Value>>) {
         match self {
             Self::Some(v) => (Nullable::Some(v), None),
             Self::Unconvertable(global) => (Nullable::Undefined, Some(global)),

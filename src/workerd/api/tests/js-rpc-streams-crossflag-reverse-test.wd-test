@@ -14,14 +14,17 @@ const unitTests :Workerd.Config = (
           "nodejs_compat",
           "experimental",
           "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
         ],
         bindings = [
           (name = "PEER", service = (name = "peer", entrypoint = "Peer")),
+          (name = "HTTP", service = "runner"),
         ],
       )
     ),
     ( name = "peer",
       worker = (
+        bindings = [(name = "HTTP", service = "runner")],
         modules = [
           (name = "worker", esModule = embed "js-rpc-streams-crossflag-test.js")
         ],
@@ -29,6 +32,7 @@ const unitTests :Workerd.Config = (
           "nodejs_compat",
           "experimental",
           "streams_enable_constructors",
+          "transformstream_enable_standard_constructor",
           "typescript_implemented_streams",
         ],
       )

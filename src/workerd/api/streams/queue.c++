@@ -311,9 +311,10 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
   }
 
   // Transform the ReadResult promise to DrainingReadResult.
-  return prp.promise.then(
-      js, [this](jsg::Lock& js, ReadResult result) mutable -> DrainingReadResult {
-    KJ_IF_SOME(ready, impl.state.tryGetActiveUnsafe()) {
+  return prp.promise.then(js,
+      [weakThis = addWeakToThis()](jsg::Lock& js, ReadResult result) mutable -> DrainingReadResult {
+    auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "consumer destroyed before read completed");
+    KJ_IF_SOME(ready, self.impl.state.tryGetActiveUnsafe()) {
       ready.hasPendingDrainingRead = false;
     }
 
@@ -335,8 +336,11 @@ jsg::Promise<DrainingReadResult> ValueQueue::Consumer::drainingRead(jsg::Lock& j
       .chunks = chunks.releaseAsArray(),
       .done = false,
     };
-  }, [this](jsg::Lock& js, jsg::Value exception) mutable -> DrainingReadResult {
-    KJ_IF_SOME(ready, impl.state.tryGetActiveUnsafe()) {
+  },
+      [weakThis = addWeakToThis()](
+          jsg::Lock& js, jsg::Value exception) mutable -> DrainingReadResult {
+    auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "consumer destroyed before read failed");
+    KJ_IF_SOME(ready, self.impl.state.tryGetActiveUnsafe()) {
       ready.hasPendingDrainingRead = false;
     }
     js.throwException(kj::mv(exception));
@@ -815,9 +819,12 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
     }
 
     // Transform the ReadResult promise to DrainingReadResult.
-    return prp.promise.then(
-        js, [this](jsg::Lock& js, ReadResult result) mutable -> DrainingReadResult {
-      KJ_IF_SOME(ready, impl.state.tryGetActiveUnsafe()) {
+    return prp.promise.then(js,
+        [weakThis = addWeakToThis()](
+            jsg::Lock& js, ReadResult result) mutable -> DrainingReadResult {
+      auto& self =
+          KJ_REQUIRE_NONNULL(weakThis.tryGet(), "consumer destroyed before read completed");
+      KJ_IF_SOME(ready, self.impl.state.tryGetActiveUnsafe()) {
         ready.hasPendingDrainingRead = false;
       }
 
@@ -839,8 +846,11 @@ jsg::Promise<DrainingReadResult> ByteQueue::Consumer::drainingRead(jsg::Lock& js
         .chunks = chunks.releaseAsArray(),
         .done = false,
       };
-    }, [this](jsg::Lock& js, jsg::Value exception) mutable -> DrainingReadResult {
-      KJ_IF_SOME(ready, impl.state.tryGetActiveUnsafe()) {
+    },
+        [weakThis = addWeakToThis()](
+            jsg::Lock& js, jsg::Value exception) mutable -> DrainingReadResult {
+      auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "consumer destroyed before read failed");
+      KJ_IF_SOME(ready, self.impl.state.tryGetActiveUnsafe()) {
         ready.hasPendingDrainingRead = false;
       }
       js.throwException(kj::mv(exception));

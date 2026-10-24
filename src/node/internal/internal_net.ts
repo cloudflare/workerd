@@ -54,6 +54,8 @@ import {
   EADDRNOTAVAIL,
   EPIPE,
   ENOBUFS,
+  ConnectException,
+  GetAddrInfoException,
 } from 'node-internal:internal_errors';
 
 import {
@@ -1705,6 +1707,25 @@ function cleanupAfterDestroy(
   socket.emit('close', isException);
 }
 
+// The platform's connect() error carries no cause; the errno name of a
+// recognized failure is exposed to node:net separately, and reported here the
+// way Node does. An unrecognized failure keeps the platform's error. The
+// platform resolves names itself, so `address` is the host as given, where
+// Node would report the resolved IP.
+function connectFailureError(
+  handle: ReturnType<typeof inner.connect>,
+  address: string,
+  port: number,
+  err: Error
+): Error {
+  const code = inner.getConnectFailureCode(handle);
+  if (code === undefined) return err;
+  if (code === 'ENOTFOUND' || code.startsWith('EAI_')) {
+    return new GetAddrInfoException(code, address);
+  }
+  return new ConnectException(code, address, port);
+}
+
 function initializeConnection(
   socket: Socket,
   options: TcpSocketConnectOpts
@@ -1779,6 +1800,7 @@ function initializeConnection(
       },
     };
 
+    const address = `${host}`;
     if (family === 6) {
       // The host is an IPv6 address. We need to wrap it in square brackets.
       host = `[${host}]`;
@@ -1787,7 +1809,18 @@ function initializeConnection(
     // @ts-expect-error TS2540 Unnecessary error due to using @types/node
     socket.autoSelectFamilyAttemptedAddresses = [`${host}:${port}`];
 
-    socket.emit('connectionAttempt', host, port, addressType);
+    // The platform resolves a host name as part of connecting, and a failed
+    // lookup never starts an attempt in Node, so for a name the attempt is
+    // only reported once its outcome shows one was made.
+    let attemptPending = isIP(address) === 0;
+    const emitConnectionAttempt = (): void => {
+      if (!attemptPending) return;
+      attemptPending = false;
+      socket.emit('connectionAttempt', host, port, addressType);
+    };
+    if (!attemptPending) {
+      socket.emit('connectionAttempt', host, port, addressType);
+    }
 
     socket._host = `${host}`;
 
@@ -1851,10 +1884,33 @@ function initializeConnection(
       // We need to undestroy the stream to connect to it.
       socket._undestroy();
 
-      handle.opened.then(onConnectionOpened.bind(socket), (err: unknown) => {
-        socket.emit('connectionAttemptFailed', host, port, addressType, err);
-        socket.destroy(err as Error);
-      });
+      // A failed connection attempt rejects both `closed` and `opened`, in
+      // that order, so whichever settles first reports it; the other finds
+      // the socket destroyed.
+      const onConnectionFailed = (err: unknown): void => {
+        if (socket.destroyed || socket._handle?.socket !== handle) return;
+        const error = connectFailureError(handle, address, port, err as Error);
+        // A failed lookup never reaches a connection attempt in Node: it is
+        // reported through 'lookup' and the socket is destroyed with it.
+        if (error instanceof GetAddrInfoException) {
+          socket.emit('lookup', error, undefined, undefined, address);
+        } else {
+          emitConnectionAttempt();
+          socket.emit(
+            'connectionAttemptFailed',
+            host,
+            port,
+            addressType,
+            error
+          );
+        }
+        socket.destroy(error);
+      };
+
+      handle.opened.then((): void => {
+        if (!socket.destroyed) emitConnectionAttempt();
+        onConnectionOpened.call(socket);
+      }, onConnectionFailed);
 
       handle.closed.then(
         (): void => {
@@ -1865,6 +1921,10 @@ function initializeConnection(
           }
         },
         (error: unknown): void => {
+          if (socket.connecting) {
+            onConnectionFailed(error);
+            return;
+          }
           // Do not call socket.destroy.bind(socket) since user can override it.
           socket.destroy(error as Error);
         }

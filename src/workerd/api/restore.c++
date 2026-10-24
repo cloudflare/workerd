@@ -329,10 +329,11 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::run
 
       return ioctx.awaitJs(lock,
           invokeRestoreAndCoerce(lock, target, params)
-              .then(lock, [&ioctx](jsg::Lock& js, RestoreResult result) {
+              .then(lock, [weakIoctx = ioctx.getWeakRef()](jsg::Lock& js, RestoreResult result) {
         KJ_SWITCH_ONEOF(result) {
           KJ_CASE_ONEOF(fetcher, jsg::Ref<Fetcher>) {
-            return fetcher->getSubrequestChannel(ioctx);
+            return fetcher->getSubrequestChannel(KJ_REQUIRE_NONNULL(
+                weakIoctx->tryGet(), "IoContext destroyed before [restore]() returned"));
           }
           KJ_CASE_ONEOF(stub, jsg::Ref<JsRpcStub>) {
             // TODO(someday): Arguably we could allow this case and let people "upgrade" an RpcStub

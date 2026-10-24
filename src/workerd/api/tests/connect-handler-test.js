@@ -80,7 +80,7 @@ export default {
   async connect(socket) {
     const { remoteAddress } = await socket.opened;
     const enc = new TextEncoder();
-    let writer = socket.writable.getWriter();
+    const writer = socket.writable.getWriter();
     await writer.write(enc.encode(`hello:${remoteAddress}`));
     await writer.close();
   },

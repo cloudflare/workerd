@@ -667,9 +667,11 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> DurableObjectStorage::transaction(jsg::Lo
   return context.attachSpans(js,
       context
           .blockConcurrencyWhile(js,
-              [callback = kj::mv(callback), &cache = *cache](
+              [callback = kj::mv(callback), weakCache = cache->addWeak()](
                   jsg::Lock& js, IoContext& context) mutable -> jsg::Promise<AsyncTxnResult> {
-    return asyncTransactionImpl(js, context, cache, kj::mv(callback));
+    return asyncTransactionImpl(js, context,
+        KJ_REQUIRE_NONNULL(weakCache.tryGet(), "actor cache destroyed before transaction began"),
+        kj::mv(callback));
   })
           .then(js,
               [](jsg::Lock& js, AsyncTxnResult result) -> jsg::JsRef<jsg::JsValue> {
@@ -699,8 +701,12 @@ jsg::Promise<DurableObjectStorage::AsyncTxnResult> DurableObjectStorage::asyncTr
     KJ_CASE_ONEOF(promise, kj::Promise<void>) {
       // Whoops, we can't start the transaction yet. Wait and try again.
       return context.awaitIoWithInputLock(js, kj::mv(promise),
-          [&context, &cache, callback = kj::mv(callback)](jsg::Lock& js) mutable {
-        return asyncTransactionImpl(js, context, cache, kj::mv(callback));
+          [&context, weakCache = cache.addWeak(), callback = kj::mv(callback)](
+              jsg::Lock& js) mutable {
+        return asyncTransactionImpl(js, context,
+            KJ_REQUIRE_NONNULL(
+                weakCache.tryGet(), "actor cache destroyed before transaction began"),
+            kj::mv(callback));
       });
     }
   }

@@ -204,13 +204,17 @@ KJ_TEST(
   auto& context = request->getContext();
   auto& waitScope = fixture.getWaitScope();
 
-  bool callbackWasCanceledWhileRequestWasCurrent = false;
+  // Value-initialized to false.
+  kj::Pin<bool> callbackWasCanceledWhileRequestWasCurrent;
   kj::Function<kj::Promise<void>()> callback;
   context
       .run([&](Worker::Lock&, IoContext& context) {
-    callback = context.makeReentryCallback([&](Worker::Lock&, IoContext& context) {
-      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() {
-        callbackWasCanceledWhileRequestWasCurrent = context.hasCurrentIncomingRequest();
+    callback = context.makeReentryCallback(
+        [canceled = callbackWasCanceledWhileRequestWasCurrent.addWeak()](
+            Worker::Lock&, IoContext& context) {
+      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&context, canceled]() {
+        KJ_REQUIRE_NONNULL(canceled.tryGet(), "test ended before callback was canceled") =
+            context.hasCurrentIncomingRequest();
       }));
     });
   }).wait(waitScope);
@@ -219,7 +223,7 @@ KJ_TEST(
 
   fixture.drainAndDestroy(kj::mv(request));
 
-  KJ_EXPECT(callbackWasCanceledWhileRequestWasCurrent);
+  KJ_EXPECT(*callbackWasCanceledWhileRequestWasCurrent);
   KJ_EXPECT_THROW_MESSAGE(
       "The execution context responding to this call was canceled", pendingTask.wait(waitScope));
 }
@@ -274,15 +278,19 @@ KJ_TEST("final request completes cleanup after cancellation throws") {
   auto& context = request->getContext();
   auto& waitScope = fixture.getWaitScope();
 
-  bool callbackWasCanceledWhileRequestWasCurrent = false;
+  // Value-initialized to false.
+  kj::Pin<bool> callbackWasCanceledWhileRequestWasCurrent;
   bool taskWasCanceledWhileRequestWasCurrent = false;
   kj::Function<kj::Promise<void>()> callback;
   kj::Function<kj::Promise<void>()> throwingCallback;
   context
       .run([&](Worker::Lock&, IoContext& context) {
-    callback = context.makeReentryCallback([&](Worker::Lock&, IoContext& context) {
-      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() {
-        callbackWasCanceledWhileRequestWasCurrent = context.hasCurrentIncomingRequest();
+    callback = context.makeReentryCallback(
+        [canceled = callbackWasCanceledWhileRequestWasCurrent.addWeak()](
+            Worker::Lock&, IoContext& context) {
+      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&context, canceled]() {
+        KJ_REQUIRE_NONNULL(canceled.tryGet(), "test ended before callback was canceled") =
+            context.hasCurrentIncomingRequest();
       }));
     });
     throwingCallback = context.makeReentryCallback([](Worker::Lock&, IoContext&) {
@@ -300,7 +308,7 @@ KJ_TEST("final request completes cleanup after cancellation throws") {
 
   KJ_EXPECT_THROW_MESSAGE("test cancellation failure", [&]() { request = nullptr; }());
 
-  KJ_EXPECT(callbackWasCanceledWhileRequestWasCurrent);
+  KJ_EXPECT(*callbackWasCanceledWhileRequestWasCurrent);
   KJ_EXPECT(taskWasCanceledWhileRequestWasCurrent);
 }
 

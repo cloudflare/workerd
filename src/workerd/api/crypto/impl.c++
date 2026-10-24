@@ -335,6 +335,8 @@ kj::Own<BIGNUM> newBignum() {
 
 void CryptoKey::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("impl", impl);
+  tracker.trackField("algorithmProperty", algorithmProperty);
+  tracker.trackField("usagesProperty", usagesProperty);
 }
 
 bool CSPRNG(kj::ArrayPtr<kj::byte> buffer) {

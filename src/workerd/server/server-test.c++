@@ -383,7 +383,7 @@ TempDir newSharedDirectory() {
 
 // The server as the tests drive it, over the Rust server (server/in_process.rs): the worker
 // factory is built here, on what the test supplies, and handed to it.
-class Server {
+class Server: public kj::PtrTarget {
  public:
   Server(kj::Filesystem& fs,
       kj::Timer& timer,
@@ -420,7 +420,12 @@ class Server {
       config::Config::Reader config,
       kj::Promise<void> drainWhen = kj::NEVER_DONE) {
     auto& server = start(v8System, config);
-    auto drain = drainWhen.then([&server]() { server.drain(); }).eagerlyEvaluate(nullptr);
+    // `get()` returns the server started above: `start()` isn't called again while `drain` is
+    // pending, and TestServer drops `drain` before `close()`.
+    auto drain = drainWhen
+                     .then([weakThis = addWeakToThis()]() {
+      KJ_REQUIRE_NONNULL(weakThis.tryGet(), "test server destroyed before drain").get().drain();
+    }).eagerlyEvaluate(nullptr);
     return server.run(debugPort.asPtr().as<kj_rs::RustUncheckedUtf8>())
         .attach(kj::mv(drain), reports(server));
   }
@@ -1855,6 +1860,81 @@ KJ_TEST("Server: connect() to default outbound") {
   subreq.send("goodbye");
 
   conn.recvHttp200("OK");
+}
+
+KJ_TEST("Server: Hyperdrive designator resolving to a Worker does not crash the process") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    try {
+                `      const socket = env.hyperdrive.connect();
+                `      await socket.opened;
+                `      const writer = socket.writable.getWriter();
+                `      await writer.write(new TextEncoder().encode("ping"));
+                `      const { value } = await socket.readable.getReader().read();
+                `      await socket.close();
+                `      return new Response("echoed: " + new TextDecoder().decode(value));
+                `    } catch (err) {
+                `      return new Response("caught: " + err.message);
+                `    }
+                `  }
+                `}
+            )
+          ],
+          bindings = [
+            ( name = "hyperdrive",
+              hyperdrive = (
+                designator = "db-worker",
+                database = "test-db",
+                user = "test-user",
+                password = "test-password",
+                scheme = "postgresql"
+              )
+            )
+          ]
+        )
+      ),
+      ( name = "db-worker",
+        worker = (
+          compatibilityDate = "2022-08-17",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request, env) {
+                `    throw new Error("HTTP not expected");
+                `  },
+                `  async connect(socket, env, ctx) {
+                `    await socket.opened;
+                `    const { value } = await socket.readable.getReader().read();
+                `    await socket.writable.getWriter().write(value);
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main",
+        address = "test-addr",
+        service = "hello"
+      )
+    ]
+  ))"_kj);
+
+  test.server.allowExperimental();
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.httpGet200("/", "echoed: ping");
 }
 
 KJ_TEST("Server: connect() with Worker as outbound, no connect_pass_though") {

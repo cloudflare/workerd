@@ -38,17 +38,20 @@ namespace rust::jsg_test {
 
 // Lazy initialization of V8System to avoid static initialization order issues
 static ::workerd::jsg::V8System& getV8System() {
-  static ::workerd::jsg::V8System v8System;
+  // Lets tests optimize functions on demand to reach fast callbacks.
+  static ::workerd::jsg::V8System v8System({"--allow-natives-syntax"});
   return v8System;
 }
 
-TestHarness::TestHarness(::workerd::jsg::V8StackScope&, ::rust::Slice<const uint8_t> flags)
+TestHarness::TestHarness(
+    ::workerd::jsg::V8StackScope&, ::rust::Slice<const uint8_t> flags, FastApi fastApi)
     : isolate(kj::heap<TestIsolate>(getV8System(), kj::heap<::workerd::jsg::IsolateObserver>())),
       locker(isolate->getIsolate()),
       isolateScope(isolate->getIsolate()),
       realm(::workerd::rust::jsg::realm_create(isolate->getIsolate(), flags)) {
-  auto* v8Isolate = isolate->getIsolate();
-  v8Isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &*realm);
+  if (fastApi == FastApi::Enabled) {
+    isolate->setFastApiEnabledForTest();
+  }
 
   KJ_REQUIRE(
       flags.size() % sizeof(capnp::word) == 0, "flags size must be a multiple of the word size");
@@ -62,9 +65,9 @@ TestHarness::TestHarness(::workerd::jsg::V8StackScope&, ::rust::Slice<const uint
   });
 }
 
-kj::Own<TestHarness> create_test_harness(::rust::Slice<const uint8_t> flags) {
-  return ::workerd::jsg::runInV8Stack([flags](::workerd::jsg::V8StackScope& stackScope) {
-    return kj::heap<TestHarness>(stackScope, flags);
+kj::Own<TestHarness> create_test_harness(::rust::Slice<const uint8_t> flags, FastApi fast_api) {
+  return ::workerd::jsg::runInV8Stack([flags, fast_api](::workerd::jsg::V8StackScope& stackScope) {
+    return kj::heap<TestHarness>(stackScope, flags, fast_api);
   });
 }
 
@@ -133,6 +136,14 @@ void TestHarness::run_in_context(
   });
 }
 
+void TestHarness::drop_realm_then_gc(size_t data, ::rust::Fn<void(size_t)> callback) const {
+  isolate->runInLockScope([&](TestIsolate::Lock& lock) {
+    realm = kj::none;
+    callback(data);
+    request_gc(lock.v8Isolate, GcType::Full);
+  });
+}
+
 void request_gc(Isolate* isolate, GcType gc_type) {
   switch (gc_type) {
     case GcType::Full:
@@ -156,6 +167,17 @@ void request_gc(Isolate* isolate, GcType gc_type) {
   }
 }
 
+void run_unlocked(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback) {
+  v8::Unlocker unlocker(isolate);
+  callback(data);
+}
+
+size_t used_global_handles_size(Isolate* isolate) {
+  v8::HeapStatistics stats;
+  isolate->GetHeapStatistics(&stats);
+  return stats.used_global_handles_size();
+}
+
 ::workerd::rust::jsg::Local create_cpp_tagged_object(Isolate* isolate) {
   auto tmpl = v8::ObjectTemplate::New(isolate);
   tmpl->SetInternalFieldCount(::workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT);
@@ -176,6 +198,10 @@ void request_gc(Isolate* isolate, GcType gc_type) {
 
 bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
   return ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(kj::mv(value)).IsEmpty();
+}
+
+bool isolates_share_group(Isolate* a, Isolate* b) {
+  return a->GetGroup() == b->GetGroup();
 }
 
 }  // namespace rust::jsg_test

@@ -409,9 +409,7 @@ class ExecutionContext: public jsg::Object {
       JSG_LAZY_INSTANCE_PROPERTY(version, getVersion);
     }
     JSG_LAZY_INSTANCE_PROPERTY(access, getAccess);
-    if (flags.getWorkerdExperimental()) {
-      JSG_METHOD(mapVirtualHost);
-    }
+    JSG_METHOD(mapVirtualHost);
 
     // ctx.tracing - user tracing API. Always available; the Tracing object is stateless
     // and enterSpan() is a no-op when called outside a traced request.
@@ -739,6 +737,7 @@ class ServiceWorkerGlobalScope: public WorkerGlobalScope {
       const kj::HttpHeaders& headers,
       kj::AsyncIoStream& connection,
       kj::HttpService::ConnectResponse& response,
+      kj::HttpConnectSettings settings,
       Worker::Lock& lock,
       kj::Maybe<ExportedHandler&> exportedHandler);
 

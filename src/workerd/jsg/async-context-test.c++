@@ -232,6 +232,106 @@ KJ_TEST("captured async frames retain storage values until the frame is released
   }
 }
 
+KJ_TEST("async frame storage values survive GC while the frame is current") {
+  Evaluator<AsyncContextTestContext, AsyncContextTestIsolate> evaluator(v8System);
+  evaluator.run([&](auto& js) {
+    auto key = kj::arc<AsyncContextFrame::StorageKey>();
+    v8::Global<v8::Object> weakValue;
+    {
+      v8::HandleScope handleScope(js.v8Isolate);
+      AsyncContextFrame::StorageScope scope = [&]() {
+        v8::HandleScope innerScope(js.v8Isolate);
+        auto value = v8::Object::New(js.v8Isolate);
+        weakValue.Reset(js.v8Isolate, value);
+        weakValue.SetWeak();
+        return AsyncContextFrame::StorageScope(
+            js, key.addRef(), js.v8Ref(value.template As<v8::Value>()));
+      }();
+      collectGarbage(js);
+      KJ_ASSERT(!weakValue.IsEmpty(), "current async frame lost its storage value");
+      auto& frame = KJ_ASSERT_NONNULL(AsyncContextFrame::current(js));
+      auto stored = KJ_ASSERT_NONNULL(frame.get(*key)).getHandle(js);
+      KJ_EXPECT(stored == weakValue.Get(js.v8Isolate));
+    }
+    collectGarbage(js);
+    KJ_EXPECT(weakValue.IsEmpty());
+  });
+}
+
+KJ_TEST("async frame storage keeps an internalized string value while the frame is current") {
+  Evaluator<AsyncContextTestContext, AsyncContextTestIsolate> evaluator(v8System);
+  evaluator.run([&](auto& js) {
+    auto key = kj::arc<AsyncContextFrame::StorageKey>();
+    v8::HandleScope handleScope(js.v8Isolate);
+    auto scope = [&]() {
+      v8::HandleScope innerScope(js.v8Isolate);
+      auto value = v8Str(js.v8Isolate, kj::str("not-yet-internalized-", kj::hashCode(&key)));
+      auto result = kj::heap<AsyncContextFrame::StorageScope>(
+          js, key.addRef(), js.v8Ref(value.template As<v8::Value>()));
+      // Using the string as a property key internalizes it, which can turn the original string
+      // into a ThinString that forwards to the internalized copy.
+      auto obj = v8::Object::New(js.v8Isolate);
+      KJ_ASSERT(obj->Set(js.v8Context(), value, v8::True(js.v8Isolate)).FromJust());
+      return result;
+    }();
+    js.v8Isolate->RequestGarbageCollectionForTesting(
+        v8::Isolate::kMinorGarbageCollection, v8::StackState::kNoHeapPointers);
+    collectGarbage(js);
+    auto& frame = KJ_ASSERT_NONNULL(AsyncContextFrame::current(js));
+    auto stored = KJ_ASSERT_NONNULL(frame.get(*key)).getHandle(js);
+    KJ_EXPECT(!stored.IsEmpty(), "current async frame lost an internalized string value");
+  });
+}
+
+KJ_TEST("async frame storage values that reach the frame are collected") {
+  // A stored value that references its own frame forms a cycle. The frame must trace its values
+  // instead of holding them as strong roots, or the cycle can never be collected.
+  Evaluator<AsyncContextTestContext, AsyncContextTestIsolate> evaluator(v8System);
+  evaluator.run([&](auto& js) {
+    auto key = kj::arc<AsyncContextFrame::StorageKey>();
+    v8::Global<v8::Object> weakValue;
+    {
+      v8::HandleScope handleScope(js.v8Isolate);
+      auto value = v8::Object::New(js.v8Isolate);
+      weakValue.Reset(js.v8Isolate, value);
+      weakValue.SetWeak();
+      AsyncContextFrame::StorageScope scope(
+          js, key.addRef(), js.v8Ref(value.template As<v8::Value>()));
+      auto& frame = KJ_ASSERT_NONNULL(AsyncContextFrame::current(js));
+      KJ_ASSERT(value->Set(js.v8Context(), v8Str(js.v8Isolate, "frame"_kj), frame.getJSWrapper(js))
+                    .FromJust());
+    }
+    collectGarbage(js);
+    KJ_EXPECT(weakValue.IsEmpty(), "async frame storage value was never collected");
+  });
+}
+
+KJ_TEST("async frame table storage values that reach the frame are collected") {
+  // Three entries move the frame from inline storage to table storage.
+  Evaluator<AsyncContextTestContext, AsyncContextTestIsolate> evaluator(v8System);
+  evaluator.run([&](auto& js) {
+    auto key = kj::arc<AsyncContextFrame::StorageKey>();
+    v8::Global<v8::Object> weakValue;
+    {
+      v8::HandleScope handleScope(js.v8Isolate);
+      auto value = v8::Object::New(js.v8Isolate);
+      weakValue.Reset(js.v8Isolate, value);
+      weakValue.SetWeak();
+      AsyncContextFrame::StorageEntry entries[] = {
+        {key.addRef(), js.v8Ref(value.template As<v8::Value>())},
+        numberEntry(js, kj::arc<AsyncContextFrame::StorageKey>(), 1),
+        numberEntry(js, kj::arc<AsyncContextFrame::StorageKey>(), 2),
+      };
+      AsyncContextFrame::StorageScope scope(js, kj::arrayPtr(entries));
+      auto& frame = KJ_ASSERT_NONNULL(AsyncContextFrame::current(js));
+      KJ_ASSERT(value->Set(js.v8Context(), v8Str(js.v8Isolate, "frame"_kj), frame.getJSWrapper(js))
+                    .FromJust());
+    }
+    collectGarbage(js);
+    KJ_EXPECT(weakValue.IsEmpty(), "async frame table storage value was never collected");
+  });
+}
+
 KJ_TEST("AsyncContextFrame::Scope retains its prior frame") {
   Evaluator<AsyncContextTestContext, AsyncContextTestIsolate> evaluator(v8System);
   evaluator.run([&](auto& js) {

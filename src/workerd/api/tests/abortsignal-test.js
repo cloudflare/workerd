@@ -20,12 +20,12 @@ class WrappedAbortSignal extends RpcTarget {
     this.ac = new AbortController();
   }
 
-  forget() {
-    this.ac.signal.skipReleaseForTest();
-  }
-
   getSignal() {
     return this.ac.signal;
+  }
+
+  dropTriggers() {
+    this.ac.signal.dropRpcTriggersForTest();
   }
 }
 
@@ -1059,44 +1059,29 @@ export const rpcRemoteCanIgnoreSignal = {
   },
 };
 
-export const rpcDestroySignalUnclean = {
+export const rpcDroppedTriggerDoesNotAbort = {
   async test(ctrl, env, ctx) {
     // wrapper is a RPCTarget that just holds an AbortSignal
     const wrapper = await env.RpcRemoteEnd.getWrappedSignal();
 
-    // Get our clone of the signal
+    // Get our clone of the signal, and arm its RPC subscription with a listener
     const signal = await wrapper.getSignal();
+    let abortFired = false;
+    signal.addEventListener('abort', () => {
+      abortFired = true;
+    });
 
-    // Tell the AbortSignal not to send a release message on disposal
-    await wrapper.forget();
+    // Have the original signal drop its trigger capability. The capability is released before
+    // this call returns, so the clone's end of it has been destroyed once the await completes.
+    await wrapper.dropTriggers();
 
-    // Destroy the wrapper
-    wrapper[Symbol.dispose]();
+    // Let the armed subscription observe the dropped trigger
+    await scheduler.wait(0);
 
-    // No release message was sent, our clone will provide a message explaining the other side is
-    // gone.
-    ok(signal.aborted);
-    strictEqual(
-      signal.reason.message,
-      'An AbortSignal received over RPC was implicitly aborted because the connection back to its ' +
-        'trigger was lost.'
-    );
-  },
-};
-
-export const rpcDestroySignalClean = {
-  async test(ctrl, env, ctx) {
-    // wrapper is a RPCTarget that just holds an AbortSignal
-    const wrapper = await env.RpcRemoteEnd.getWrappedSignal();
-
-    // Get our clone of the signal
-    const signal = await wrapper.getSignal();
-
-    // Destroy the wrapper
-    wrapper[Symbol.dispose]();
-
-    // A release message was sent, the signal will remain in an unaborted state
     ok(!signal.aborted);
     strictEqual(signal.reason, undefined);
+    strictEqual(abortFired, false);
+
+    wrapper[Symbol.dispose]();
   },
 };
