@@ -1,0 +1,80 @@
+src/rust/jsg/ffi.h
+  s_a55c0a90d37cb7::t_3ac056a09caafa 330-331
+src/rust/jsg-compile-tests/BUILD.bazel
+  s_a55c0a90d37cb7::t_e0ce587d841f75 8
+src/rust/jsg-macros/utils.rs
+  s_995e39f7985b59::t_d915baafd6ce6a 193,195,197-199,201-209,211,213,217,221-227,232,235-239,241,243-264,266
+src/rust/jsg-compile-tests/fast-method-needs-fast-types.rs
+  s_995e39f7985b59::t_5b4845e5cbd885 1-4,6-19
+src/rust/jsg/fast_api.rs
+  s_995e39f7985b59::t_13679fec969cad 386-388
+  s_995e39f7985b59::t_ef8893ac420d3f 389-391
+  s_995e39f7985b59::t_03f437bf47107c 394
+  s_995e39f7985b59::t_e5e32dc927f3f7 414-423
+  s_995e39f7985b59::t_050b4328c168bc 434-437
+  s_995e39f7985b59::t_77a7557abcc6bd 409
+  s_995e39f7985b59::t_80b527f0a82be0 424-425,439
+  s_995e39f7985b59::t_efef19833ed85f 426-428,430
+  s_995e39f7985b59::t_0584c3623a98c9 384-385
+  s_995e39f7985b59::t_4e05d8cfc1e99e 433
+  s_995e39f7985b59::t_6f39355391022f 15-16,25,27,42-45,53-56,129-152,155-209,217,224-226,240,243-244,248,252,255-256,259,262-267,271-304,306,310,312-313,317,321,323-324,333,337-366,368,392-393,442
+  s_995e39f7985b59::t_afa7f4c227df45 431
+  s_995e39f7985b59::t_5ec64a61ac93dd 438
+  s_995e39f7985b59::t_f89a7554502ef9 440-441
+  s_995e39f7985b59::t_bd7956f60de76c 443,445
+src/rust/jsg-macros/utils-test.rs
+  s_995e39f7985b59::t_bb944670e39050 89-90,93-112,115-116,121-122,125-139,141-142
+src/rust/jsg-macros/lib.rs
+  s_995e39f7985b59::t_619bb881132438 39,44-45,204,433-434,437-446,449-450,452-459,461-475,476-489,491-492
+src/rust/jsg/ffi.c++
+  s_a55c0a90d37cb7::t_731db657e91578 1000-1020
+  s_a55c0a90d37cb7::t_32da73deef1a43 998
+src/rust/jsg/v8.rs
+  s_a55c0a90d37cb7::t_6756662008ff2c 545-547
+  s_a55c0a90d37cb7::t_6e9dbc1e26cf25 548,550
+src/rust/jsg-test/tests/fast_api.rs
+  s_995e39f7985b59::t_0243be969dee2d 102
+  s_995e39f7985b59::t_ee0647ab7043ea 75
+  s_995e39f7985b59::t_3194d244a6a42c 83
+  s_995e39f7985b59::t_9d3e588f53c0ff 69-71
+  s_995e39f7985b59::t_c30f51a3d43f18 121
+  s_995e39f7985b59::t_09eecacf4a7231 85-86
+  s_995e39f7985b59::t_f3f3d86dedf473 104
+  s_995e39f7985b59::t_8706ddd07099b2 106-109
+  s_995e39f7985b59::t_1d3da96c3c65b0 73
+  s_995e39f7985b59::t_5d6a1b72a76aeb 81
+  s_995e39f7985b59::t_5e0d3e09ed6837 88
+  s_995e39f7985b59::t_19e7a55a3e4b2f 111
+  s_995e39f7985b59::t_83fe6094830280 118
+  s_995e39f7985b59::t_9308f3c1fa8038 90-93
+  s_995e39f7985b59::t_633cc75b141d4d 67
+  s_995e39f7985b59::t_740f8e21bbf1ec 95
+  s_995e39f7985b59::t_a5e121ceb329c9 97-100
+  s_995e39f7985b59::t_1744072cce8105 77-79
+  s_995e39f7985b59::t_7a4e41f06dce9b 68,72,74,76,80,82,84,87,89,94,96,101,103,105,110,112,117,119-120,122-138,140-155,157-158,160-182,183-188,330-343,437-470,472-531,532-582,584-624,625-638,640-651,653-669
+  s_995e39f7985b59::t_c6518e2b0dd172 113-116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "cce06765a85ffcfb835480ffb943c3c1c374458e",
+  "prompts": {},
+  "sessions": {
+    "s_995e39f7985b59": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "07e74e1e-67a2-423a-9ae1-b6cd2b18c8d0",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    },
+    "s_a55c0a90d37cb7": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "621b9b26-6a6e-418b-a29a-f76846865eaf",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}
