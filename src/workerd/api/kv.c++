@@ -242,8 +242,7 @@ jsg::Promise<jsg::JsRef<jsg::JsMap>> KvNamespace::getBulk(jsg::Lock& js,
       });
     });
 
-    return context.awaitIo(js, kj::mv(promise),
-        [&, traceContext = kj::mv(traceContext)](jsg::Lock& js, kj::String text) mutable {
+    return context.awaitIo(js, kj::mv(promise), [&traceContext](jsg::Lock& js, kj::String text) {
       traceContext.setTag("cloudflare.kv.response.size"_kjc, static_cast<int64_t>(text.size()));
       auto result = jsg::JsValue::fromJson(js, text);
       auto map = js.map();
@@ -315,13 +314,14 @@ kj::OneOf<jsg::Promise<KvNamespace::GetResult>, jsg::Promise<jsg::JsRef<jsg::JsM
 
   KJ_SWITCH_ONEOF(name) {
     KJ_CASE_ONEOF(arr, kj::Array<kj::String>) {
-      return context.attachSpans(js,
-          getBulk(js, context, traceContext, kj::mv(arr), kj::mv(options), false),
-          kj::mv(traceContext));
+      return context.withSpan(js, kj::mv(traceContext), [&](TraceContext& traceContext) {
+        return getBulk(js, context, traceContext, kj::mv(arr), kj::mv(options), false);
+      });
     }
     KJ_CASE_ONEOF(str, kj::String) {
-      return context.attachSpans(js,
-          getSingle(js, context, traceContext, kj::mv(str), kj::mv(options)), kj::mv(traceContext));
+      return context.withSpan(js, kj::mv(traceContext), [&](TraceContext& traceContext) {
+        return getSingle(js, context, traceContext, kj::mv(str), kj::mv(options));
+      });
     }
   }
   KJ_UNREACHABLE;
@@ -349,14 +349,14 @@ KvNamespace::getWithMetadata(jsg::Lock& js,
   traceContext.setTag("cloudflare.binding.type"_kjc, "KV"_kjc);
   KJ_SWITCH_ONEOF(name) {
     KJ_CASE_ONEOF(arr, kj::Array<kj::String>) {
-      return context.attachSpans(js,
-          getBulk(js, context, traceContext, kj::mv(arr), kj::mv(options), true),
-          kj::mv(traceContext));
+      return context.withSpan(js, kj::mv(traceContext), [&](TraceContext& traceContext) {
+        return getBulk(js, context, traceContext, kj::mv(arr), kj::mv(options), true);
+      });
     }
     KJ_CASE_ONEOF(str, kj::String) {
-      return context.attachSpans(js,
-          getWithMetadataSingle(js, context, traceContext, kj::mv(str), kj::mv(options)),
-          kj::mv(traceContext));
+      return context.withSpan(js, kj::mv(traceContext), [&](TraceContext& traceContext) {
+        return getWithMetadataSingle(js, context, traceContext, kj::mv(str), kj::mv(options));
+      });
     }
   }
   KJ_UNREACHABLE;
@@ -406,7 +406,7 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadataImp
 
   auto request = client->request(kj::HttpMethod::GET, urlStr, headers);
   return context.awaitIo(js, kj::mv(request.response),
-      [type = kj::mv(type), &context, client = kj::mv(client), traceContext = kj::mv(traceContext)](
+      [type = kj::mv(type), &context, client = kj::mv(client), &traceContext](
           jsg::Lock& js, kj::HttpClient::Response&& response) mutable
       -> jsg::Promise<KvNamespace::GetWithMetadataResult> {
     auto cacheStatus =
@@ -495,9 +495,8 @@ jsg::Promise<KvNamespace::GetWithMetadataResult> KvNamespace::getWithMetadataImp
 
 jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
     jsg::Lock& js, jsg::Optional<ListOptions> options) {
-  return js.evalNow([&] {
+  return IoContext::evalNowWithSpan(js, "kv_list"_kjc, [&](TraceContext& traceContext) {
     auto& context = IoContext::current();
-    TraceContext traceContext = context.makeUserTraceSpan("kv_list"_kjc);
 
     traceContext.setTag("db.system.name"_kjc, "cloudflare-kv"_kjc);
     traceContext.setTag("db.operation.name"_kjc, "list"_kjc);
@@ -536,7 +535,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
 
     auto request = client->request(kj::HttpMethod::GET, urlStr, headers);
     return context.awaitIo(js, kj::mv(request.response),
-        [&context, client = kj::mv(client), traceContext = kj::mv(traceContext)](jsg::Lock& js,
+        [&context, client = kj::mv(client), &traceContext](jsg::Lock& js,
             kj::HttpClient::Response&& response) mutable -> jsg::Promise<jsg::JsRef<jsg::JsValue>> {
       checkForErrorStatus("GET", response);
 
@@ -560,7 +559,7 @@ jsg::Promise<jsg::JsRef<jsg::JsValue>> KvNamespace::list(
       return context.awaitIo(js,
           stream->readAllText(context.getLimitEnforcer().getBufferingLimit())
               .attach(kj::mv(stream)),
-          [cacheStatus = kj::mv(cacheStatus), traceContext = kj::mv(traceContext)](
+          [cacheStatus = kj::mv(cacheStatus), &traceContext](
               jsg::Lock& js, kj::String text) mutable {
         auto result = jsg::JsValue::fromJson(js, text);
         parseListMetadata(traceContext, js, result,
@@ -577,16 +576,16 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
     KvNamespace::PutBody body,
     jsg::Optional<PutOptions> options,
     const jsg::TypeHandler<KvNamespace::PutSupportedTypes>& putTypeHandler) {
-  return js.evalNow([&] {
-    validateKeyName("PUT", name);
-
+  return IoContext::evalNowWithSpan(js, "kv_put"_kjc, [&](TraceContext& traceContext) {
     auto& context = IoContext::current();
-    TraceContext traceContext = context.makeUserTraceSpan("kv_put"_kjc);
 
     traceContext.setTag("db.system.name"_kjc, "cloudflare-kv"_kjc);
     traceContext.setTag("db.operation.name"_kjc, "put"_kjc);
     traceContext.setTag("cloudflare.binding.name"_kjc, bindingName.asPtr());
     traceContext.setTag("cloudflare.binding.type"_kjc, "KV"_kjc);
+
+    validateKeyName("PUT", name);
+
     traceContext.setTag("cloudflare.kv.query.keys"_kjc, name.asPtr());
     traceContext.setTag("cloudflare.kv.query.keys.count"_kjc, static_cast<int64_t>(1));
 
@@ -702,21 +701,21 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
       });
     });
 
-    return context.attachSpans(js, context.awaitIo(js, kj::mv(promise)), kj::mv(traceContext));
+    return context.awaitIo(js, kj::mv(promise));
   });
 }
 
 jsg::Promise<void> KvNamespace::delete_(jsg::Lock& js, kj::String name) {
-  return js.evalNow([&] {
-    validateKeyName("DELETE", name);
-
+  return IoContext::evalNowWithSpan(js, "kv_delete"_kjc, [&](TraceContext& traceContext) {
     auto& context = IoContext::current();
-    TraceContext traceContext = context.makeUserTraceSpan("kv_delete"_kjc);
 
     traceContext.setTag("db.system.name"_kjc, "cloudflare-kv"_kjc);
     traceContext.setTag("db.operation.name"_kjc, "delete"_kjc);
     traceContext.setTag("cloudflare.binding.name"_kjc, bindingName.asPtr());
     traceContext.setTag("cloudflare.binding.type"_kjc, "KV"_kjc);
+
+    validateKeyName("DELETE", name);
+
     traceContext.setTag("cloudflare.kv.query.keys"_kjc, name.asPtr());
     traceContext.setTag("cloudflare.kv.query.keys.count"_kjc, static_cast<int64_t>(1));
 
@@ -736,7 +735,7 @@ jsg::Promise<void> KvNamespace::delete_(jsg::Lock& js, kj::String name) {
       }).attach(kj::mv(client));
     });
 
-    return context.attachSpans(js, context.awaitIo(js, kj::mv(promise)), kj::mv(traceContext));
+    return context.awaitIo(js, kj::mv(promise));
   });
 }
 

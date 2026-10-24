@@ -1560,6 +1560,12 @@ TraceContext IoContext::makeUserTraceSpan(kj::ConstString operationName) {
   return parents.newChild(kj::mv(operationName), tryGetAsyncTracker());
 }
 
+kj::Maybe<tracing::ErrorInfo> IoContext::tryGetSpanErrorInfo(jsg::Lock& js, jsg::Value& error) {
+  return js.tryCatch([&]() -> kj::Maybe<tracing::ErrorInfo> {
+    return getErrorInfoForTrace(js, jsg::JsValue(error.getHandle(js)));
+  }, [](jsg::Value) -> kj::Maybe<tracing::ErrorInfo> { return kj::none; });
+}
+
 void IoContext::taskFailed(kj::Exception&& exception) {
   if (waitUntilStatusValue == EventOutcome::OK) {
     KJ_IF_SOME(status, limitEnforcer->getLimitsExceeded()) {

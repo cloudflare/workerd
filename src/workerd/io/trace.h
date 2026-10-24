@@ -1321,6 +1321,14 @@ class SpanBuilder {
       kj::String message,
       kj::Maybe<kj::String> stack);
 
+  // Marks the operation covered by this span as failed: records `error` as an exception, then
+  // sets the status to ERROR, described by the error's message. The status message is truncated
+  // to MAX_ERROR_STATUS_MESSAGE_BYTES; the exception keeps the full message. Calls after end()
+  // are ignored.
+  void recordError(const tracing::ErrorInfo& error);
+
+  static constexpr size_t MAX_ERROR_STATUS_MESSAGE_BYTES = 1024;
+
  private:
   kj::Rc<SpanObserver> observer;
   // The under-construction span, or null if the span has ended.
@@ -1544,6 +1552,13 @@ class TraceContext {
 
   // Set a tag on both the internal span and user span.
   void setTag(kj::ConstString key, SpanBuilder::TagInitValue value);
+
+  // Marks the operation as failed on the user span (see SpanBuilder::recordError()). Internal span
+  // observers don't record status or exceptions, so the internal span is left unchanged.
+  void recordError(const tracing::ErrorInfo& error) {
+    userSpan.recordError(error);
+  }
+
   bool isObserved() {
     return span.isObserved() || userSpan.isObserved();
   }

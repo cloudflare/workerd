@@ -67,17 +67,17 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
     jsg::Optional<CacheQueryOptions> options,
     CompatibilityFlags::Reader flags) {
   auto& context = IoContext::current();
-  TraceContext traceContext = context.makeUserTraceSpan("cache_match"_kjc);
-
-  KJ_IF_SOME(o, options) {
-    KJ_IF_SOME(ignoreMethod, o.ignoreMethod) {
-      traceContext.setTag("cache.request.ignore_method"_kjc, ignoreMethod);
-    }
-  }
 
   // This use of evalNow() is obsoleted by the capture_async_api_throws compatibility flag, but
   // we need to keep it here for people who don't have that flag set.
-  return js.evalNow([&]() -> jsg::Promise<jsg::Optional<jsg::Ref<Response>>> {
+  return IoContext::evalNowWithSpan(js, "cache_match"_kjc,
+      [&](TraceContext& traceContext) -> jsg::Promise<jsg::Optional<jsg::Ref<Response>>> {
+    KJ_IF_SOME(o, options) {
+      KJ_IF_SOME(ignoreMethod, o.ignoreMethod) {
+        traceContext.setTag("cache.request.ignore_method"_kjc, ignoreMethod);
+      }
+    }
+
     auto jsRequest = Request::coerce(js, kj::mv(requestOrUrl), kj::none);
 
     traceContext.setTag("cache.request.url"_kjc, jsRequest->getUrl());
@@ -110,8 +110,7 @@ jsg::Promise<jsg::Optional<jsg::Ref<Response>>> Cache::match(jsg::Lock& js,
         requestHeaders, static_cast<uint64_t>(0));
 
     return context.awaitIo(js, kj::mv(nativeRequest.response),
-        [httpClient = kj::mv(httpClient), &context, traceContext = kj::mv(traceContext)](
-            jsg::Lock& js,
+        [httpClient = kj::mv(httpClient), &context, &traceContext](jsg::Lock& js,
             kj::HttpClient::Response&& response) mutable -> jsg::Optional<jsg::Ref<Response>> {
       response.body = response.body.attach(kj::mv(httpClient));
 
@@ -263,11 +262,10 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
 
   // This use of evalNow() is obsoleted by the capture_async_api_throws compatibility flag, but
   // we need to keep it here for people who don't have that flag set.
-  return js.evalNow([&] {
+  return IoContext::evalNowWithSpan(js, "cache_put"_kjc, [&](TraceContext& traceContext) {
     auto jsRequest = Request::coerce(js, kj::mv(requestOrUrl), kj::none);
 
     auto& context = IoContext::current();
-    TraceContext traceContext = context.makeUserTraceSpan("cache_put"_kjc);
 
     traceContext.setTag("cache.request.url"_kjc, jsRequest->getUrl());
     traceContext.setTag("cache.request.method"_kjc, kj::str(jsRequest->getMethodEnum()));
@@ -363,7 +361,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
                 serializePromise = kj::mv(serializePromise),
                 writePayloadHeadersPromise = kj::mv(payload.writeHeadersPromise),
                 enableCompatFlags = flags.getCacheApiCompatFlags(),
-                traceContext = kj::mv(traceContext)](jsg::Lock& js, IoContext& context,
+                &traceContext](jsg::Lock& js, IoContext& context,
                 IoOwn<kj::AsyncInputStream> payloadStream) mutable -> jsg::Promise<void> {
       // Make the PUT request to cache.
       auto httpClient = getHttpClient(
@@ -437,13 +435,16 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
       // `awaitDeferredProxy()` the whole thing.
 
       // Here we handle the promise for the DeferredProxy itself.
+      //
+      // `traceContext` is owned by evalNowWithSpan(), which keeps it alive until the promise
+      // returned by put() settles. That can't happen before this coroutine completes.
       static auto constexpr handleSerialize =
           [](kj::Promise<DeferredProxy<void>> serialize, kj::Own<kj::HttpClient> httpClient,
               kj::Promise<kj::HttpClient::Response> responsePromise,
               kj::Own<kj::AsyncOutputStream> bodyStream, kj::Promise<void> pumpRequestBodyPromise,
               kj::Promise<void> writePayloadHeadersPromise,
               kj::Own<kj::AsyncInputStream> payloadStream,
-              TraceContext traceContext) -> kj::Promise<DeferredProxy<void>> {
+              TraceContext& traceContext) -> kj::Promise<DeferredProxy<void>> {
         // This is extremely odd and a bit annoying but we have to make sure
         // these are destroyed in a particular order due to cross-dependencies
         // for each. If the kj::Promise returned by handleSerialize is dropped
@@ -519,7 +520,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
           handleSerialize(kj::mv(serializePromise), kj::mv(httpClient),
               kj::mv(nativeRequest.response), kj::mv(nativeRequest.body),
               kj::mv(pumpRequestBodyPromise), kj::mv(writePayloadHeadersPromise),
-              kj::mv(payloadStream), kj::mv(traceContext)));
+              kj::mv(payloadStream), traceContext));
     }));
   });
 }
@@ -529,17 +530,17 @@ jsg::Promise<bool> Cache::delete_(jsg::Lock& js,
     jsg::Optional<CacheQueryOptions> options,
     CompatibilityFlags::Reader flags) {
   auto& context = IoContext::current();
-  TraceContext traceContext = context.makeUserTraceSpan("cache_delete"_kjc);
-
-  KJ_IF_SOME(o, options) {
-    KJ_IF_SOME(ignoreMethod, o.ignoreMethod) {
-      traceContext.setTag("cache.request.ignore_method"_kjc, ignoreMethod);
-    }
-  }
 
   // This use of evalNow() is obsoleted by the capture_async_api_throws compatibility flag, but
   // we need to keep it here for people who don't have that flag set.
-  return js.evalNow([&]() -> jsg::Promise<bool> {
+  return IoContext::evalNowWithSpan(
+      js, "cache_delete"_kjc, [&](TraceContext& traceContext) -> jsg::Promise<bool> {
+    KJ_IF_SOME(o, options) {
+      KJ_IF_SOME(ignoreMethod, o.ignoreMethod) {
+        traceContext.setTag("cache.request.ignore_method"_kjc, ignoreMethod);
+      }
+    }
+
     auto jsRequest = Request::coerce(js, kj::mv(requestOrUrl), kj::none);
 
     traceContext.setTag("cache.request.url"_kjc, jsRequest->getUrl());
@@ -566,7 +567,7 @@ jsg::Promise<bool> Cache::delete_(jsg::Lock& js,
         validateUrl(jsRequest->getUrl()), requestHeaders, static_cast<uint64_t>(0));
 
     return context.awaitIo(js, kj::mv(nativeRequest.response),
-        [httpClient = kj::mv(httpClient), traceContext = kj::mv(traceContext)](
+        [httpClient = kj::mv(httpClient), &traceContext](
             jsg::Lock&, kj::HttpClient::Response&& response) mutable -> bool {
       traceContext.setTag(
           "cache.response.status_code"_kjc, static_cast<int64_t>(response.statusCode));
