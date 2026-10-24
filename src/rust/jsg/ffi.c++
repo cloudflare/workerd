@@ -973,7 +973,7 @@ kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args) 
     // as ::workerd::jsg::downcastWrappable() does.
     const auto& actualType = typeid(wrappable);
     if (&actualType == &typeid(Wrappable) || actualType == typeid(Wrappable)) {
-      return static_cast<Wrappable&>(wrappable).toRc();
+      return kj::downcast<Wrappable>(wrappable).toRc();
     }
   }
   return kj::none;
