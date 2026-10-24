@@ -405,8 +405,11 @@ MaybeLocal local_symbol_description(Isolate* isolate, const Local& value) {
 }
 
 // Local<Function>
-Local local_function_call(
-    Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args) {
+MaybeLocal local_function_call(Isolate* isolate,
+    const Local& function,
+    const Local& recv,
+    ::rust::Slice<const Local> args,
+    MaybeLocal& exception) {
   auto context = isolate->GetCurrentContext();
   auto fn = local_as_ref_from_ffi<v8::Function>(function);
   auto receiver = local_as_ref_from_ffi<v8::Value>(recv);
@@ -416,7 +419,17 @@ Local local_function_call(
     v8Args[i] = local_as_ref_from_ffi<v8::Value>(args[i]);
   }
 
-  return to_ffi(::workerd::jsg::check(fn->Call(context, receiver, v8Args.size(), v8Args.data())));
+  v8::TryCatch tryCatch(isolate);
+  auto result = fn->Call(context, receiver, v8Args.size(), v8Args.data());
+  if (result.IsEmpty()) {
+    // The same distinction JSG_CATCH makes: a termination cannot be caught.
+    if (tryCatch.CanContinue() && tryCatch.HasCaught() && !tryCatch.Exception().IsEmpty()) {
+      exception = maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(tryCatch.Exception()));
+    } else {
+      tryCatch.ReThrow();
+    }
+  }
+  return maybe_local_to_ffi(result);
 }
 
 // Local<Object>
@@ -1314,6 +1327,13 @@ Local exception_create_from_bytes(
   auto message = ::workerd::jsg::check(v8::String::NewFromUtf8(
       isolate, reinterpret_cast<const char*>(data), v8::NewStringType::kNormal, length));
   return exceptionCreateFromMessage(exception_type, message);
+}
+
+::rust::String exception_describe(Isolate* isolate, const Local& exception) {
+  auto tunneled =
+      ::workerd::jsg::createTunneledException(isolate, local_as_ref_from_ffi<v8::Value>(exception));
+  auto description = tunneled.getDescription();
+  return ::rust::String::lossy(description.begin(), description.size());
 }
 
 // Isolate

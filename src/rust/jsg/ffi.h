@@ -186,8 +186,13 @@ Local local_symbol_new_with_description(Isolate* isolate, Local description);
 MaybeLocal local_symbol_description(Isolate* isolate, const Local& value);
 
 // Local<Function>
-Local local_function_call(
-    Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args);
+// Returns the call's result, or none if it threw. Then `exception` receives the exception, unless
+// execution is terminating: the termination is left to propagate, and `exception` stays empty.
+MaybeLocal local_function_call(Isolate* isolate,
+    const Local& function,
+    const Local& recv,
+    ::rust::Slice<const Local> args,
+    MaybeLocal& exception);
 
 // Local<Object>
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);
@@ -372,6 +377,8 @@ void realm_detach(Isolate* isolate, const IsolateState* state);
 // than rejected, so this accepts arbitrary byte input (e.g. filesystem paths).
 Local exception_create_from_bytes(
     Isolate* isolate, ExceptionType exception_type, const uint8_t* data, int32_t length);
+// Describes a thrown value as C++ JSG tunnels it in a kj::Exception (`jsg.<Type>: <message>`).
+::rust::String exception_describe(Isolate* isolate, const Local& exception);
 
 // Isolate
 void isolate_throw_exception(Isolate* isolate, Local exception);

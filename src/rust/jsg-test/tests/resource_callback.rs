@@ -585,6 +585,90 @@ fn method_can_be_reentered() {
     });
 }
 
+/// A resource whose method calls a callback and returns what it threw, as C++ JSG does when a
+/// `jsg::Function` throws.
+#[jsg_resource]
+struct CallingResource {
+    /// Set when the call is interrupted by execution terminating.
+    saw_termination: Cell<bool>,
+}
+
+#[jsg_resource]
+impl CallingResource {
+    #[jsg_method]
+    pub fn call<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        callback: v8::Local<'s, v8::Value>,
+    ) -> Result<(), jsg::Error> {
+        let callback = callback
+            .try_as::<v8::Function>()
+            .ok_or_else(|| jsg::Error::new_type_error("not a function"))?;
+        callback
+            .call::<v8::Local<v8::Value>>(lock, None, &[])
+            .inspect_err(|err| self.saw_termination.set(err.is_termination()))?;
+        Ok(())
+    }
+}
+
+/// An exception thrown by a callback propagates unchanged through the method that called it.
+#[test]
+fn exception_from_callback_propagates_through_method() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = jsg::Rc::new(CallingResource {
+            saw_termination: Cell::new(false),
+        });
+        ctx.set_global(lock, "obj", resource.clone());
+        let caught = ctx.eval::<bool>(
+            lock,
+            "const thrown = new Error('boom');
+             thrown.extra = 1;
+             let caught;
+             try { obj.call(() => { throw thrown; }); } catch (e) { caught = e; }
+             caught === thrown && caught.extra === 1",
+        );
+        assert!(caught.unwrap());
+        let caught = ctx.eval::<bool>(
+            lock,
+            "try { obj.call(() => { throw 'a string'; }); false } catch (e) { e === 'a string' }",
+        );
+        assert!(caught.unwrap());
+        assert!(!resource.saw_termination.get());
+        Ok(())
+    });
+}
+
+/// A callback that terminates execution returns `Error::terminated`, and the termination keeps
+/// propagating past the method.
+#[test]
+fn termination_in_callback_propagates_through_method() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = jsg::Rc::new(CallingResource {
+            saw_termination: Cell::new(false),
+        });
+        ctx.set_global(lock, "obj", resource.clone());
+        ctx.set_global(lock, "panicker", jsg::Rc::new(PanicResource));
+        // `panicNow()` throws an internal error and requests termination, which takes effect at
+        // the next interrupt check: in the loop, while `obj.call()` is calling the callback.
+        // JavaScript cannot catch the termination.
+        let result = ctx.eval::<bool>(
+            lock,
+            "try {
+               obj.call(() => {
+                 try { panicker.panicNow(); } catch (e) {}
+                 while (true) {}
+               });
+             } catch (e) {}
+             true",
+        );
+        assert!(result.is_err());
+        assert!(resource.saw_termination.get());
+        Ok(())
+    });
+}
+
 // =============================================================================
 // Receiver guard tests
 // =============================================================================

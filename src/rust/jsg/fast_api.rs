@@ -267,6 +267,9 @@ unsafe fn run<T: FastApiReturn>(
 }
 
 /// Throws `err` as [`crate::Lock::throw_exception`] does, and returns the value V8 ignores.
+///
+/// A fast callback cannot run JavaScript or return a `Result`, so `err` never holds what
+/// JavaScript threw (see [`Error::from_exception`]).
 unsafe fn throw<T: Default>(options: *mut ffi::FastApiCallbackOptions, err: &Error) -> T {
     // SAFETY: `options` comes from V8 (caller contract).
     unsafe {
