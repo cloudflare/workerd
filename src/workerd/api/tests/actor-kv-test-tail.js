@@ -78,6 +78,13 @@ export const test = {
         closed: true,
         ...failed('Transaction failed'),
       },
+      {
+        name: 'durable_object_storage_snapshot',
+        closed: true,
+        ...failed(
+          "This Durable Object's storage back-end does not implement snapshots."
+        ),
+      },
     ];
 
     await Promise.allSettled(invocationPromises);

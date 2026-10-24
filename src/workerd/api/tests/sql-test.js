@@ -1117,6 +1117,18 @@ async function test(state) {
       message: /no such table: explainTest/,
     });
   }
+
+  // Failed queries, whose spans sql-test-tail.js checks. A query can fail when exec() starts it,
+  // or later while iterating over its results.
+  assert.throws(() => sql.exec('SELECT * FROM spanStatusMissing'), {
+    message: /no such table: spanStatusMissing/,
+  });
+  {
+    const cursor = sql.exec(
+      "SELECT json(column1) AS value FROM (VALUES ('1'), ('not json'))"
+    );
+    assert.throws(() => cursor.toArray(), { message: /malformed JSON/ });
+  }
 }
 
 async function testIoStats(storage) {

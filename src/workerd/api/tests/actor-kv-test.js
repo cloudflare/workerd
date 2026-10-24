@@ -49,6 +49,10 @@ async function testKvOperations(state) {
       }),
     { message: 'Transaction failed' }
   );
+  await assert.rejects(async () => storage.snapshot(), {
+    message:
+      "This Durable Object's storage back-end does not implement snapshots.",
+  });
 }
 
 export class ActorKvTest extends DurableObject {

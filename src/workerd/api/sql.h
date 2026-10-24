@@ -184,8 +184,7 @@ class SqlStorage final: public jsg::Object {
 class SqlStorage::Cursor final: public jsg::Object {
  public:
   template <typename... Params>
-  Cursor(jsg::Lock& js, kj::Maybe<kj::Function<void(Cursor&)>> doneCb, Params&&... params)
-      : doneCallback(kj::mv(doneCb)) {
+  Cursor(jsg::Lock& js, Params&&... params) {
     auto stateObj = kj::heap<State>(kj::fwd<Params>(params)...);
     initColumnNames(js, *stateObj);
     if (stateObj->query.isDone()) {
@@ -195,6 +194,11 @@ class SqlStorage::Cursor final: public jsg::Object {
     }
   }
   ~Cursor() noexcept(false);
+
+  // Makes `traceContext`, the span of the exec() call that started the query, end when the query
+  // is done or fails, so that it covers iterating over the results and can be tagged with the
+  // query's row counts.
+  void traceQuery(TraceContext traceContext);
 
   double getRowsRead();
   double getRowsWritten();
@@ -268,8 +272,8 @@ class SqlStorage::Cursor final: public jsg::Object {
   // Nulled out when query is done or canceled.
   kj::Maybe<IoOwn<State>> state;
 
-  // Called when the query is done or canceled.
-  kj::Maybe<kj::Function<void(Cursor&)>> doneCallback;
+  // See traceQuery(). Nulled out when the query is done or fails.
+  kj::Maybe<IoOwn<TraceContext>> span;
 
   // True if the cursor was canceled by a new call to the same statement. This is used only to
   // flag an error if the application tries to reuse the cursor.
@@ -296,6 +300,9 @@ class SqlStorage::Cursor final: public jsg::Object {
   // row counters and then sets `state` to `none` to drop the query and return the prepared
   // statement to the statement cache.
   void endQuery(State& stateRef);
+
+  // Tags `span` with the query's row counts and ends it.
+  void endSpan();
 
   // Initialize `columnNames` from the state object.
   void initColumnNames(jsg::Lock& js, State& stateRef);

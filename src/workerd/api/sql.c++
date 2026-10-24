@@ -40,73 +40,65 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
   traceContext.setTag(
       "cloudflare.durable_object.query.bindings"_kjc, static_cast<int64_t>(bindings.size()));
 
-  // Internalize the string, so that the cache can be keyed by string identity rather than content.
-  // Any string we put into the cache is expected to live there for a while anyway, so even if it
-  // is a one-off, internalizing it (which moves it to the old generation) shouldn't hurt.
-  querySql = querySql.internalize(js);
+  return IoContext::withSpanSync(js, traceContext, [&]() -> jsg::Ref<Cursor> {
+    // Internalize the string, so that the cache can be keyed by string identity rather than
+    // content. Any string we put into the cache is expected to live there for a while anyway, so
+    // even if it is a one-off, internalizing it (which moves it to the old generation) shouldn't
+    // hurt.
+    querySql = querySql.internalize(js);
 
-  auto& db = getDb(js);
-  auto& statementCache = *this->statementCache;
+    auto& db = getDb(js);
+    auto& statementCache = *this->statementCache;
 
-  kj::Rc<CachedStatement>& slot = statementCache.map.findOrCreate(querySql, [&]() {
-    auto result = kj::rc<CachedStatement>(js, *this, db, querySql, js.toString(querySql));
-    statementCache.totalSize += result->statementSize;
+    kj::Rc<CachedStatement>& slot = statementCache.map.findOrCreate(querySql, [&]() {
+      auto result = kj::rc<CachedStatement>(js, *this, db, querySql, js.toString(querySql));
+      statementCache.totalSize += result->statementSize;
+      return result;
+    });
+
+    // Move cached statement to end of LRU queue.
+    if (slot->lruLink.isLinked()) {
+      statementCache.lru.remove(*slot);
+    }
+    statementCache.lru.add(*slot);
+
+    auto queryId = db.generateQueryId();
+
+    if (slot->isShared()) {
+      // Oops, this CachedStatement is currently in-use (presumably by a Cursor).
+      //
+      // SQLite only allows one instance of a statement to run at a time, so we will have to
+      // compile the statement again as a one-off.
+      //
+      // In theory we could try to cache multiple copies of the statement, but as this is probably
+      // exceedingly rare, it is not worth the added code complexity.
+      auto result = js.alloc<Cursor>(js, db, SqliteDatabase::StaticRegulator(regulator),
+          js.toString(querySql), kj::mv(bindings), queryId);
+      result->traceQuery(kj::mv(traceContext));
+      return result;
+    }
+
+    auto result = js.alloc<Cursor>(js, slot.addRef(), kj::mv(bindings), queryId);
+    result->traceQuery(kj::mv(traceContext));
+
+    // If the statement cache grew too big, drop the least-recently-used entry.
+    while (statementCache.totalSize > SQL_STATEMENT_CACHE_MAX_SIZE) {
+      auto& toRemove = *statementCache.lru.begin();
+      auto oldQuery = jsg::JsString(toRemove.query.getHandle(js));
+      statementCache.totalSize -= toRemove.statementSize;
+      statementCache.lru.remove(toRemove);
+      KJ_ASSERT(statementCache.map.eraseMatch(oldQuery));
+    }
+
     return result;
   });
-
-  // Move cached statement to end of LRU queue.
-  if (slot->lruLink.isLinked()) {
-    statementCache.lru.remove(*slot);
-  }
-  statementCache.lru.add(*slot);
-
-  // In order to get accurate statistics, we have to keep the spans around until the query is
-  // actually done, which for read queries that iterate over a cursor won't be until later.
-  kj::Maybe<kj::Function<void(Cursor&)>> doneCallback;
-  if (traceContext.isObserved()) {
-    doneCallback = [traceContext = context.addObject(kj::heap(kj::mv(traceContext)))](
-                       Cursor& cursor) mutable {
-      int64_t rowsRead = cursor.getRowsRead();
-      int64_t rowsWritten = cursor.getRowsWritten();
-      traceContext->setTag("cloudflare.durable_object.response.rows_read"_kjc, rowsRead);
-      traceContext->setTag("cloudflare.durable_object.response.rows_written"_kjc, rowsWritten);
-    };
-  }
-
-  auto queryId = db.generateQueryId();
-
-  if (slot->isShared()) {
-    // Oops, this CachedStatement is currently in-use (presumably by a Cursor).
-    //
-    // SQLite only allows one instance of a statement to run at a time, so we will have to compile
-    // the statement again as a one-off.
-    //
-    // In theory we could try to cache multiple copies of the statement, but as this is probably
-    // exceedingly rare, it is not worth the added code complexity.
-    return js.alloc<Cursor>(js, kj::mv(doneCallback), db,
-        SqliteDatabase::StaticRegulator(regulator), js.toString(querySql), kj::mv(bindings),
-        queryId);
-  }
-
-  auto result =
-      js.alloc<Cursor>(js, kj::mv(doneCallback), slot.addRef(), kj::mv(bindings), queryId);
-
-  // If the statement cache grew too big, drop the least-recently-used entry.
-  while (statementCache.totalSize > SQL_STATEMENT_CACHE_MAX_SIZE) {
-    auto& toRemove = *statementCache.lru.begin();
-    auto oldQuery = jsg::JsString(toRemove.query.getHandle(js));
-    statementCache.totalSize -= toRemove.statementSize;
-    statementCache.lru.remove(toRemove);
-    KJ_ASSERT(statementCache.map.eraseMatch(oldQuery));
-  }
-
-  return result;
 }
 
 SqlStorage::IngestResult SqlStorage::ingest(jsg::Lock& js, kj::String querySql) {
   auto& context = IoContext::current();
   TraceContext traceContext = context.makeUserTraceSpan("durable_object_storage_ingest"_kjc);
-  auto result = getDb(js).ingestSql(regulator, querySql);
+  auto result = IoContext::withSpanSync(
+      js, traceContext, [&]() { return getDb(js).ingestSql(regulator, querySql); });
 
   traceContext.setTag(
       "cloudflare.durable_object.response.rows_read"_kjc, static_cast<int64_t>(result.rowsRead));
@@ -133,11 +125,13 @@ double SqlStorage::getDatabaseSize(jsg::Lock& js) {
   TraceContext traceContext =
       context.makeUserTraceSpan("durable_object_storage_getDatabaseSize"_kjc);
   traceContext.setTag("db.operation.name"_kjc, "getDatabaseSize"_kjc);
-  auto& db = getDb(js);
-  int64_t pages = execMemoized(db, pragmaPageCount,
-      "select (select * from pragma_page_count) - (select * from pragma_freelist_count);")
-                      .getInt64(0);
-  auto dbSize = pages * getPageSize(db);
+  auto dbSize = IoContext::withSpanSync(js, traceContext, [&]() {
+    auto& db = getDb(js);
+    int64_t pages = execMemoized(db, pragmaPageCount,
+        "select (select * from pragma_page_count) - (select * from pragma_freelist_count);")
+                        .getInt64(0);
+    return pages * getPageSize(db);
+  });
   traceContext.setTag(
       "cloudflare.durable_object.response.db_size"_kjc, static_cast<int64_t>(dbSize));
   return dbSize;
@@ -213,6 +207,17 @@ SqlStorage::Cursor::State::State(kj::Rc<CachedStatement> cachedStatementParam,
       query(cachedStatement.emplace(kj::mv(cachedStatementParam))
                 ->statement.run(SqliteDatabase::Statement::StatementOptions{.queryId = queryId},
                     mapBindings(bindings).asPtr())) {}
+
+void SqlStorage::Cursor::traceQuery(TraceContext traceContext) {
+  if (!traceContext.isObserved()) {
+    return;
+  }
+  span = IoContext::current().addObject(kj::heap(kj::mv(traceContext)));
+  if (state == kj::none) {
+    // The query completed when it started.
+    endSpan();
+  }
+}
 
 SqlStorage::Cursor::~Cursor() noexcept(false) {
   // If this Cursor was created from a Statement, clear the Statement's currentCursor weak ref.
@@ -410,7 +415,13 @@ kj::Maybe<v8::LocalVector<v8::Value>> SqlStorage::Cursor::iteratorImpl(
   // Unfortunately, this does not help with the case where the application stops iterating with
   // results still available from the cursor. There's not much we can do about that case since
   // there's no way to know if the app might come back and try to use the cursor again later.
-  query.nextRow();
+  KJ_IF_SOME(span, obj->span) {
+    // The query can fail at any step, not only when exec() starts it.
+    KJ_ON_SCOPE_FAILURE(obj->endSpan());
+    IoContext::withSpanSync(js, *span, [&]() { query.nextRow(); });
+  } else {
+    query.nextRow();
+  }
   if (query.isDone()) {
     obj->endQuery(state);
   }
@@ -423,13 +434,20 @@ void SqlStorage::Cursor::endQuery(State& stateRef) {
   rowsRead = stateRef.query.getRowsRead();
   rowsWritten = stateRef.query.getRowsWritten();
 
-  KJ_IF_SOME(cb, doneCallback) {
-    cb(*this);
-    doneCallback = kj::none;
-  }
+  endSpan();
 
   // Clean up the query proactively.
   state = kj::none;
+}
+
+void SqlStorage::Cursor::endSpan() {
+  KJ_IF_SOME(s, span) {
+    s->setTag(
+        "cloudflare.durable_object.response.rows_read"_kjc, static_cast<int64_t>(getRowsRead()));
+    s->setTag("cloudflare.durable_object.response.rows_written"_kjc,
+        static_cast<int64_t>(getRowsWritten()));
+    span = kj::none;
+  }
 }
 
 kj::Array<const SqliteDatabase::Query::ValuePtr> SqlStorage::Cursor::mapBindings(

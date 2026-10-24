@@ -10,6 +10,14 @@ import {
 
 export default testTailHandler;
 
+// Expected status and exceptions of the span of a failed operation.
+function failed(message, name = 'Error') {
+  return {
+    status: { code: 'error', message },
+    exceptions: [{ name, message }],
+  };
+}
+
 export const test = {
   async test() {
     await Promise.allSettled(invocationPromises);
@@ -180,6 +188,27 @@ const expectedSpans = [
     name: 'durable_object_storage_kv_list',
     'db.system.name': 'cloudflare-durable-object-sql',
     'db.operation.name': 'list',
+    closed: true,
+  },
+  {
+    name: 'durable_object_storage_kv_put',
+    'db.system.name': 'cloudflare-durable-object-sql',
+    'db.operation.name': 'put',
+    'cloudflare.durable_object.kv.query.keys': 'fn',
+    'cloudflare.durable_object.kv.query.keys.count': 1n,
+    ...failed('() => {} could not be cloned.', 'DataCloneError'),
+    closed: true,
+  },
+  {
+    name: 'durable_object_storage_kv_list',
+    'db.system.name': 'cloudflare-durable-object-sql',
+    'db.operation.name': 'list',
+    'cloudflare.durable_object.kv.query.start': 'a',
+    'cloudflare.durable_object.kv.query.startAfter': 'b',
+    ...failed(
+      'list() cannot be called with both start and startAfter values.',
+      'TypeError'
+    ),
     closed: true,
   },
 ];
