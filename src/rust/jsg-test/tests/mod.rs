@@ -26,6 +26,7 @@ mod name;
 mod nested_type;
 mod non_coercible;
 mod option;
+mod promise;
 mod resource_callback;
 mod resource_conversion;
 mod resource_properties;

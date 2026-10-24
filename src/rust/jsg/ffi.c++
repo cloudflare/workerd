@@ -254,6 +254,10 @@ bool local_is_function(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsFunction();
 }
 
+bool local_is_promise(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsPromise();
+}
+
 bool local_is_symbol(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsSymbol();
 }
@@ -486,6 +490,53 @@ Local local_object_get_property(Isolate* isolate, const Local& object, ::rust::S
   auto context = isolate->GetCurrentContext();
   auto v8_key = makeInternedStr(isolate, key);
   return to_ffi(unwrapCoerce(isolate, [&] { return v8_obj->Get(context, v8_key); }));
+}
+
+// Local<Promise>
+static_assert(static_cast<uint8_t>(PromiseState::Pending) == v8::Promise::kPending);
+static_assert(static_cast<uint8_t>(PromiseState::Fulfilled) == v8::Promise::kFulfilled);
+static_assert(static_cast<uint8_t>(PromiseState::Rejected) == v8::Promise::kRejected);
+
+PromiseState local_promise_state(const Local& promise) {
+  return static_cast<PromiseState>(local_as_ref_from_ffi<v8::Promise>(promise)->State());
+}
+
+Local local_promise_result(const Local& promise) {
+  auto v8Promise = local_as_ref_from_ffi<v8::Promise>(promise);
+  KJ_REQUIRE(v8Promise->State() != v8::Promise::kPending, "a pending promise has no result");
+  return to_ffi(v8Promise->Result());
+}
+
+void local_promise_mark_as_handled(const Local& promise) {
+  local_as_ref_from_ffi<v8::Promise>(promise)->MarkAsHandled();
+}
+
+MaybeLocal local_promise_then(
+    Isolate* isolate, const Local& promise, const Local& on_fulfilled, const Local& on_rejected) {
+  return maybe_local_to_ffi(local_as_ref_from_ffi<v8::Promise>(promise)->Then(
+      isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Function>(on_fulfilled),
+      local_as_ref_from_ffi<v8::Function>(on_rejected)));
+}
+
+// Local<PromiseResolver>
+MaybeLocal promise_resolver_new(Isolate* isolate) {
+  return maybe_local_to_ffi(v8::Promise::Resolver::New(isolate->GetCurrentContext()));
+}
+
+Local local_promise_resolver_promise(const Local& resolver) {
+  return to_ffi(local_as_ref_from_ffi<v8::Promise::Resolver>(resolver)->GetPromise());
+}
+
+bool local_promise_resolver_resolve(Isolate* isolate, const Local& resolver, const Local& value) {
+  return local_as_ref_from_ffi<v8::Promise::Resolver>(resolver)
+      ->Resolve(isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Value>(value))
+      .IsJust();
+}
+
+bool local_promise_resolver_reject(Isolate* isolate, const Local& resolver, const Local& reason) {
+  return local_as_ref_from_ffi<v8::Promise::Resolver>(resolver)
+      ->Reject(isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Value>(reason))
+      .IsJust();
 }
 
 // Local<Array>
@@ -1370,6 +1421,12 @@ Local exception_create_from_bytes(
   auto message = ::workerd::jsg::check(v8::String::NewFromUtf8(
       isolate, reinterpret_cast<const char*>(data), v8::NewStringType::kNormal, length));
   return exceptionCreateFromMessage(exception_type, message);
+}
+
+Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage) {
+  // See isolate_throw_internal_error() for why the message is copied.
+  auto message = kj::heapString(internalMessage.data(), internalMessage.size());
+  return to_ffi(::workerd::jsg::makeInternalError(isolate, message));
 }
 
 // TryCatch

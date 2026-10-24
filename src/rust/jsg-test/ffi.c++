@@ -167,6 +167,10 @@ void request_gc(Isolate* isolate, GcType gc_type) {
   }
 }
 
+void run_microtasks(Isolate* isolate) {
+  ::workerd::jsg::Lock::from(isolate).runMicrotasks();
+}
+
 void run_unlocked(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback) {
   v8::Unlocker unlocker(isolate);
   callback(data);

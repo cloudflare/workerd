@@ -133,6 +133,14 @@ pub mod ffi {
         ReferenceError,
     }
 
+    /// Mirrors `v8::Promise::PromiseState`; `ffi.c++` asserts the values match.
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum PromiseState {
+        Pending = 0,
+        Fulfilled = 1,
+        Rejected = 2,
+    }
+
     extern "Rust" {
         /// Called from C++ Wrappable destructor to drop the Rust object.
         /// Reconstructs the `Rc<dyn GarbageCollected>` from `data[0..1]` and drops it.
@@ -295,6 +303,7 @@ pub mod ffi {
         pub unsafe fn local_is_array_buffer_view(value: &Local) -> bool;
         pub unsafe fn local_is_shared_array_buffer(value: &Local) -> bool;
         pub unsafe fn local_is_function(value: &Local) -> bool;
+        pub unsafe fn local_is_promise(value: &Local) -> bool;
         pub unsafe fn local_is_symbol(value: &Local) -> bool;
         pub unsafe fn local_is_name(value: &Local) -> bool;
         pub unsafe fn local_is_big_int(value: &Local) -> bool;
@@ -406,6 +415,32 @@ pub mod ffi {
             object: &Local,
             key: &str,
         ) -> Result<Local>;
+
+        // Local<Promise>
+        pub unsafe fn local_promise_state(promise: &Local) -> PromiseState;
+        // Fallible: requires that the promise is not pending.
+        pub unsafe fn local_promise_result(promise: &Local) -> Result<Local>;
+        pub unsafe fn local_promise_mark_as_handled(promise: &Local);
+        pub unsafe fn local_promise_then(
+            isolate: *mut Isolate,
+            promise: &Local,
+            on_fulfilled: &Local,
+            on_rejected: &Local,
+        ) -> MaybeLocal;
+
+        // Local<PromiseResolver>
+        pub unsafe fn promise_resolver_new(isolate: *mut Isolate) -> MaybeLocal;
+        pub unsafe fn local_promise_resolver_promise(resolver: &Local) -> Local;
+        pub unsafe fn local_promise_resolver_resolve(
+            isolate: *mut Isolate,
+            resolver: &Local,
+            value: &Local,
+        ) -> bool;
+        pub unsafe fn local_promise_resolver_reject(
+            isolate: *mut Isolate,
+            resolver: &Local,
+            reason: &Local,
+        ) -> bool;
 
         // Local<Array>
         pub unsafe fn local_array_length(array: &Local) -> u32;
@@ -570,6 +605,10 @@ pub mod ffi {
             exception_type: ExceptionType,
             data: *const u8,
             length: i32,
+        ) -> Local;
+        pub unsafe fn exception_create_internal(
+            isolate: *mut Isolate,
+            internal_message: &str,
         ) -> Local;
 
         // TryCatch
@@ -1454,6 +1493,12 @@ impl<'s, T> Local<'s, T> {
         unsafe { ffi::local_is_function(self.raw()) }
     }
 
+    /// Returns true if the value is a JavaScript Promise.
+    pub fn is_promise(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_promise(self.raw()) }
+    }
+
     /// Returns true if the value is a JavaScript Symbol.
     ///
     /// Corresponds to `v8::Value::IsSymbol()`.
@@ -1833,6 +1878,13 @@ impl_local_cast!(Float32Array -> ArrayBufferView, is_float32_array);
 impl_local_cast!(Float64Array -> ArrayBufferView, is_float64_array);
 impl_local_cast!(BigInt64Array -> ArrayBufferView, is_bigint64_array);
 impl_local_cast!(BigUint64Array -> ArrayBufferView, is_biguint64_array);
+
+// Declared after `impl_as!` and `impl_local_cast!`, which it uses.
+#[path = "promise.rs"]
+mod promise;
+pub use promise::Promise;
+pub use promise::PromiseResolver;
+pub use promise::PromiseState;
 
 impl Array {
     /// Creates a new JavaScript array with the given length.

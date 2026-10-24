@@ -948,6 +948,24 @@ impl<'s> Lock<'s> {
         }
     }
 
+    /// Returns the exception that [`Lock::throw_exception`] would throw for `err`, without
+    /// throwing it: an internal error is redacted (and its message logged) the same way.
+    ///
+    /// Use it to reject a promise with an `Error`.
+    pub fn exception(&mut self, err: &Error) -> v8::Local<'s, v8::Value> {
+        if err.is_internal {
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); the exception lives in
+            // the lock's scope.
+            return unsafe {
+                v8::Local::from_ffi(v8::ffi::exception_create_internal(
+                    self.isolate().as_ffi(),
+                    &err.message,
+                ))
+            };
+        }
+        err.to_local(self)
+    }
+
     /// Throws an internal error as a V8 exception, matching `makeInternalError()` in C++.
     ///
     /// Generates a unique error reference ID, logs `internal_message` with the ID via
