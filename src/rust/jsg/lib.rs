@@ -24,6 +24,7 @@ pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
 pub use lenient::Lenient;
 pub use nullable::Nullable;
+pub use resource::NestedType;
 pub use resource::Rc;
 pub use resource::Resource;
 pub use resource::Weak;
@@ -949,6 +950,13 @@ pub enum Member {
     StaticConstant {
         name: String,
         value: ConstantValue,
+    },
+    /// Another resource type's constructor, as a property of this type's
+    /// prototype named `name`, like C++ JSG's `JSG_NESTED_TYPE`. Nested types
+    /// are installed after every other member, whatever their position.
+    NestedType {
+        name: String,
+        nested_type: NestedType,
     },
 }
 

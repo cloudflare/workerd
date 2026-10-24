@@ -668,6 +668,13 @@ pub mod ffi {
             constructor: &Global, /* v8::Global<FunctionTemplate> */
         ) -> Local /* v8::Local<Function> */;
 
+        unsafe fn function_template_set_nested_type(
+            isolate: *mut Isolate,
+            constructor: &Global, /* v8::Global<FunctionTemplate> */
+            name: &str,
+            nested: &Global, /* v8::Global<FunctionTemplate> */
+        );
+
         pub unsafe fn utf8_value_new(isolate: *mut Isolate, value: Local) -> Utf8Value;
         pub unsafe fn utf8_value_drop(value: Utf8Value);
         pub unsafe fn utf8_value_length(value: &Utf8Value) -> usize;

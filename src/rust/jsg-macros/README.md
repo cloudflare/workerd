@@ -88,6 +88,9 @@ Use `#[jsg_resource(name = "JSName")]` to override the JavaScript class name.
 `#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`, and
 `#[jsg_static_constant]` item. It also generates member factories used by both automatic
 and custom registration.
+Use `#[jsg_resource(nested_types(Foo, Name = Bar))]` to expose other resource types'
+constructors on the prototype (equivalent to `JSG_NESTED_TYPE(Foo)` and
+`JSG_NESTED_TYPE_NAMED(Bar, Name)` in C++ JSG).
 
 ```rust
 #[jsg_resource]
@@ -172,6 +175,8 @@ handling apply in both modes. Getter and setter annotations must agree on placem
 Inspect properties remain symbol-keyed and do not take a placement argument.
 Property registration follows the returned member list's order. V8 enumerates instance native
 data properties in reverse registration order, as it does for C++ JSG.
+`nested_types(...)` cannot be combined with `custom_members`; a custom `members` lists nested
+types itself, as `jsg::Member::NestedType { name, nested_type: jsg::NestedType::of::<Foo>() }`.
 
 ---
 

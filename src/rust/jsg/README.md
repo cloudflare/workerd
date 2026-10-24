@@ -412,6 +412,23 @@ impl WebSocket {
 
 Constants are set on both the constructor and prototype as read-only, non-configurable properties per Web IDL. The name is used as-is (no camelCase conversion). Only numeric types are supported (`i8`..`i64`, `u8`..`u64`, `f32`, `f64`).
 
+## Nested Types
+
+To expose other resource types' constructors on a resource class (equivalent to `JSG_NESTED_TYPE` and `JSG_NESTED_TYPE_NAMED` in C++), list them in `nested_types(...)` on the `#[jsg_resource]` impl block:
+
+```rust
+#[jsg_resource(nested_types(Database, Stmt = Statement))]
+impl Module {}
+// JS: instance.Database, instance.Stmt
+```
+
+Each nested type's constructor is a property of the prototype, named after the type's JavaScript class name unless given a name. It is the same function as `jsg::resource::function_template_of::<T>()`, so `instanceof` works on instances created from Rust. A nested type without a `#[jsg_constructor]` throws `Illegal constructor` when called with `new`.
+
+- Nested types are added to the prototype after its other members, so they come last in `Object.keys(prototype)`.
+- As in C++ JSG, V8 names a function after the property through which it is first instantiated. The `name` of a renamed nested type's constructor is the property name if the constructor is first reached through that property, for every later access too.
+- A resource type must not nest itself, directly or through other nested types. Creating its template panics, naming the types in the cycle.
+- Listing a type twice without a name, or giving a name twice, does not compile. `nested_types(...)` on the struct, or together with `custom_members`, does not compile either.
+
 ## Fast API
 
 `#[jsg_method]` adds a V8 Fast API callback for the types in `fast_api.rs`; it must not call into V8.

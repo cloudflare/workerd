@@ -533,6 +533,12 @@ fn receiver_error(
 /// With `custom_members`, emits only the factories; implement `jsg::Resource` yourself
 /// to select members using ordinary Rust control flow and compatibility flags.
 ///
+/// Use `#[jsg_resource(nested_types(Foo, Name = Bar))]` on the impl block to
+/// expose other resource types' constructors on the prototype, like C++ JSG's
+/// `JSG_NESTED_TYPE(Foo)` and `JSG_NESTED_TYPE_NAMED(Bar, Name)`. A nested type
+/// without a name is named after its JavaScript class name. See
+/// `src/rust/jsg/README.md` for how nested types behave.
+///
 /// Use `#[jsg_resource(name = "JSName")]` on the struct to override the default
 /// JavaScript class name.
 #[proc_macro_attribute]

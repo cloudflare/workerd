@@ -409,9 +409,12 @@ pub fn function_template_of<'s, R: Resource + 'static>(
 /// Builds a [`ResourceDescriptor`] from `R`'s [`Resource::members(flags)`](Resource::members) list.
 /// The descriptor is passed to C++ `create_resource_template` to set up the
 /// V8 `FunctionTemplate` with the correct methods, constants, and constructor.
+/// Nested types are returned separately, since their templates are installed
+/// once the template for `R` exists.
 fn get_resource_descriptor<R: Resource>(
     flags: compatibility_flags::Reader<'_>,
-) -> v8::ffi::ResourceDescriptor {
+) -> (v8::ffi::ResourceDescriptor, NestedTypes) {
+    let mut nested_types = Vec::new();
     let mut descriptor = v8::ffi::ResourceDescriptor {
         name: R::class_name().to_owned(),
         constructor: KjMaybe::None,
@@ -489,10 +492,43 @@ fn get_resource_descriptor<R: Resource>(
                         value: number_value,
                     });
             }
+            Member::NestedType { name, nested_type } => nested_types.push((name, nested_type)),
         }
     }
 
-    descriptor
+    (descriptor, nested_types)
+}
+
+/// The nested types of a resource type, with their names.
+type NestedTypes = Vec<(String, NestedType)>;
+
+/// The resource types whose templates are being created, each nesting the next,
+/// with their Rust type names.
+type Nesting = Vec<(TypeId, &'static str)>;
+
+/// A resource type that another resource type exposes as a nested type
+/// ([`Member::NestedType`]).
+///
+/// A resource type must not nest itself, directly or through other nested
+/// types; creating its template panics.
+pub struct NestedType {
+    template: for<'a, 'f> fn(
+        &'a mut Resources,
+        v8::IsolatePtr,
+        &Arc<IsolateState>,
+        compatibility_flags::Reader<'f>,
+        &mut Nesting,
+    ) -> &'a v8::Global<v8::FunctionTemplate>,
+}
+
+impl NestedType {
+    /// The nested type `R`.
+    #[must_use]
+    pub fn of<R: Resource>() -> Self {
+        Self {
+            template: Resources::get_nested_constructor::<R>,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -511,25 +547,73 @@ impl Resources {
         state: &Arc<IsolateState>,
         flags: compatibility_flags::Reader<'_>,
     ) -> &v8::Global<v8::FunctionTemplate> {
-        self.templates
-            .entry(TypeId::of::<R>())
-            .or_insert_with(|| Self::create_resource_constructor::<R>(isolate, state, flags))
+        self.get_nested_constructor::<R>(isolate, state, flags, &mut Vec::new())
     }
 
-    /// Creates a new V8 `FunctionTemplate` for resource type `R` via the C++ FFI.
-    fn create_resource_constructor<R: Resource>(
+    /// Gets or creates the cached `FunctionTemplate` for a resource type, while the
+    /// templates of the types in `nesting` are being created, each nesting the next.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `R`'s template is being created already, meaning that `R`
+    /// directly or indirectly nests itself.
+    #[expect(
+        clippy::panic,
+        reason = "a resource type nesting itself is a programming error"
+    )]
+    fn get_nested_constructor<'a, R: Resource + 'static>(
+        &'a mut self,
         isolate: v8::IsolatePtr,
         state: &Arc<IsolateState>,
         flags: compatibility_flags::Reader<'_>,
+        nesting: &mut Nesting,
+    ) -> &'a v8::Global<v8::FunctionTemplate> {
+        let type_id = TypeId::of::<R>();
+        if !self.templates.contains_key(&type_id) {
+            let name = std::any::type_name::<R>();
+            if nesting.iter().any(|&(id, _)| id == type_id) {
+                let path: Vec<_> = nesting.iter().map(|&(_, name)| name).collect();
+                panic!(
+                    "resource type nests itself: {} -> {name}",
+                    path.join(" -> ")
+                );
+            }
+            nesting.push((type_id, name));
+            let template = self.create_resource_constructor::<R>(isolate, state, flags, nesting);
+            nesting.pop();
+            self.templates.insert(type_id, template);
+        }
+        &self.templates[&type_id]
+    }
+
+    /// Creates a new V8 `FunctionTemplate` for resource type `R` via the C++ FFI,
+    /// creating the templates of its nested types as needed.
+    fn create_resource_constructor<R: Resource>(
+        &mut self,
+        isolate: v8::IsolatePtr,
+        state: &Arc<IsolateState>,
+        flags: compatibility_flags::Reader<'_>,
+        nesting: &mut Nesting,
     ) -> v8::Global<v8::FunctionTemplate> {
+        let (descriptor, nested_types) = get_resource_descriptor::<R>(flags);
         // SAFETY: Caller guarantees the isolate is valid and locked.
-        let handle = unsafe {
-            v8::ffi::create_resource_template(
-                isolate.as_ffi(),
-                &get_resource_descriptor::<R>(flags),
-            )
-        };
-        v8::Global::from_ffi_in(handle, Arc::clone(state))
+        let handle = unsafe { v8::ffi::create_resource_template(isolate.as_ffi(), &descriptor) };
+        let template = v8::Global::from_ffi_in(handle, Arc::clone(state));
+        for (name, nested_type) in nested_types {
+            let nested = (nested_type.template)(self, isolate, state, flags, nesting);
+            // SAFETY: The caller guarantees the isolate is valid and locked, and both
+            // templates are live `Global<FunctionTemplate>`s of this isolate. The template
+            // for `R` has not been instantiated yet, so it can still be modified.
+            unsafe {
+                v8::ffi::function_template_set_nested_type(
+                    isolate.as_ffi(),
+                    &template.as_ffi(),
+                    &name,
+                    &nested.as_ffi(),
+                );
+            }
+        }
+        template
     }
 
     /// Drains every cached resource-template handle, transferring ownership of each

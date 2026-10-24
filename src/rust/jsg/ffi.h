@@ -359,6 +359,8 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
 
 // FunctionTemplate
 Local function_template_get_function(Isolate* isolate, const Global& tmpl);
+void function_template_set_nested_type(
+    Isolate* isolate, const Global& tmpl, ::rust::Str name, const Global& nested);
 
 // Realm
 Realm* realm_from_isolate(Isolate* isolate);
