@@ -790,10 +790,14 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
   // We have to await, because PID won't be available until the response resolves
   return ioContext.awaitIo(js, req.send())
       .then(js,
-          [&ioContext, &byteStreamFactory, options = kj::mv(options), ptyEnabled,
+          [weakIoContext = ioContext.getWeakRef(), options = kj::mv(options), ptyEnabled,
               stdoutInput = kj::mv(stdoutInput), stderrInput = kj::mv(stderrInput)](
               jsg::Lock& js, capnp::Response<rpc::Container::ExecResults> results) mutable
           -> jsg::Ref<ExecProcess> {
+    auto& ioContext =
+        KJ_REQUIRE_NONNULL(weakIoContext->tryGet(), "IoContext destroyed before exec() resolved");
+    // The factory belongs to the thread context, so re-taking it here yields the same object.
+    auto& byteStreamFactory = ioContext.getByteStreamFactory();
     auto process = results.getProcess();
     auto handle = process.getHandle();
     auto pid = process.getPid();

@@ -1380,14 +1380,16 @@ KJ_TEST("ReadableStreamNativeSource tee seeds both branches with stashed bytes")
 // Default-pulls `source` until it closes, recording into `state`.
 jsg::Promise<void> pullUntilClosed(jsg::Lock& js,
     jsg::Ref<ReadableStreamNativeSource> source,
-    MockControllerState& state,
+    kj::Weak<MockControllerState> state,
     jsg::JsRef<jsg::JsObject> controller) {
   auto pull = source->pull(js, controller.getHandle(js), freshSignal(js));
   return pull.then(js,
-      [&state, source = kj::mv(source), controller = kj::mv(controller)](
+      [state = kj::mv(state), source = kj::mv(source), controller = kj::mv(controller)](
           jsg::Lock& js) mutable -> jsg::Promise<void> {
-    if (state.closed) return js.resolvedPromise();
-    return pullUntilClosed(js, kj::mv(source), state, kj::mv(controller));
+    if (KJ_REQUIRE_NONNULL(state.tryGet(), "state destroyed before pull completed").closed) {
+      return js.resolvedPromise();
+    }
+    return pullUntilClosed(js, kj::mv(source), kj::mv(state), kj::mv(controller));
   });
 }
 
@@ -1403,8 +1405,8 @@ KJ_TEST("ReadableStreamNativeSource tee during an in-flight pull hands its bytes
         "branches") {
   TestFixture testFixture;
   MockControllerState state0;
-  MockControllerState state1;
-  MockControllerState state2;
+  kj::Pin<MockControllerState> state1;
+  kj::Pin<MockControllerState> state2;
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
@@ -1433,18 +1435,18 @@ KJ_TEST("ReadableStreamNativeSource tee during an in-flight pull hands its bytes
       KJ_EXPECT(KJ_ASSERT_NONNULL(expectedLengthOf(js, *branches[0])) == kData.size());
       KJ_EXPECT(KJ_ASSERT_NONNULL(expectedLengthOf(js, *branches[1])) == kData.size());
 
-      auto p1 = pullUntilClosed(
-          js, branches[0].addRef(), state1, makeMockController(js, state1, js.null()).addRef(js));
-      auto p2 = pullUntilClosed(
-          js, branches[1].addRef(), state2, makeMockController(js, state2, js.null()).addRef(js));
+      auto p1 = pullUntilClosed(js, branches[0].addRef(), state1.addWeak(),
+          makeMockController(js, *state1, js.null()).addRef(js));
+      auto p2 = pullUntilClosed(js, branches[1].addRef(), state2.addWeak(),
+          makeMockController(js, *state2, js.null()).addRef(js));
       return pull2.then(js, [p1 = kj::mv(p1)](jsg::Lock& js) mutable {
         return kj::mv(p1);
       }).then(js, [p2 = kj::mv(p2)](jsg::Lock& js) mutable { return kj::mv(p2); });
     }).then(js, [&](jsg::Lock& js) {
       KJ_EXPECT(state0.enqueued.size() == 0);
       KJ_EXPECT(state0.responded == kj::none);
-      KJ_EXPECT(enqueuedText(state1) == kData, enqueuedText(state1));
-      KJ_EXPECT(enqueuedText(state2) == kData, enqueuedText(state2));
+      KJ_EXPECT(enqueuedText(*state1) == kData, enqueuedText(*state1));
+      KJ_EXPECT(enqueuedText(*state2) == kData, enqueuedText(*state2));
     });
     return env.context.awaitJs(js, kj::mv(promise));
   });
@@ -1453,8 +1455,8 @@ KJ_TEST("ReadableStreamNativeSource tee during an in-flight pull hands its bytes
 KJ_TEST("ReadableStreamNativeSource tee during an in-flight pull that reaches EOF") {
   TestFixture testFixture;
   MockControllerState state0;
-  MockControllerState state1;
-  MockControllerState state2;
+  kj::Pin<MockControllerState> state1;
+  kj::Pin<MockControllerState> state2;
   testFixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
     auto& js = env.js;
 
@@ -1478,18 +1480,18 @@ KJ_TEST("ReadableStreamNativeSource tee during an in-flight pull that reaches EO
       auto branches = source->tee(js);
       KJ_EXPECT(KJ_ASSERT_NONNULL(expectedLengthOf(js, *branches[0])) == kData.size());
       KJ_EXPECT(KJ_ASSERT_NONNULL(expectedLengthOf(js, *branches[1])) == kData.size());
-      auto p1 = pullUntilClosed(
-          js, branches[0].addRef(), state1, makeMockController(js, state1, js.null()).addRef(js));
-      auto p2 = pullUntilClosed(
-          js, branches[1].addRef(), state2, makeMockController(js, state2, js.null()).addRef(js));
+      auto p1 = pullUntilClosed(js, branches[0].addRef(), state1.addWeak(),
+          makeMockController(js, *state1, js.null()).addRef(js));
+      auto p2 = pullUntilClosed(js, branches[1].addRef(), state2.addWeak(),
+          makeMockController(js, *state2, js.null()).addRef(js));
       return pull2.then(js, [p1 = kj::mv(p1)](jsg::Lock& js) mutable {
         return kj::mv(p1);
       }).then(js, [p2 = kj::mv(p2)](jsg::Lock& js) mutable { return kj::mv(p2); });
     }).then(js, [&](jsg::Lock& js) {
       KJ_EXPECT(state0.responded == kj::none);
       KJ_EXPECT(!state0.closed);
-      KJ_EXPECT(enqueuedText(state1) == kData, enqueuedText(state1));
-      KJ_EXPECT(enqueuedText(state2) == kData, enqueuedText(state2));
+      KJ_EXPECT(enqueuedText(*state1) == kData, enqueuedText(*state1));
+      KJ_EXPECT(enqueuedText(*state2) == kData, enqueuedText(*state2));
     });
     return env.context.awaitJs(js, kj::mv(promise));
   });

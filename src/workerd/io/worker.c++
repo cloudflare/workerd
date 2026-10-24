@@ -5015,7 +5015,7 @@ class Worker::Isolate::ResponseStreamWrapper final: public kj::AsyncOutputStream
   }
 };
 
-class Worker::Isolate::SubrequestClient final: public WorkerInterface {
+class Worker::Isolate::SubrequestClient final: public WorkerInterface, public kj::PtrTarget {
  public:
   explicit SubrequestClient(kj::Own<const Isolate> isolate,
       kj::Own<WorkerInterface> inner,
@@ -5177,13 +5177,17 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
 
     // Defer to a later turn of the event loop so that it's safe to take a lock.
     return kj::newPromisedStream(kj::evalLater(
-        [this, responseBody = kj::mv(responseBody), message = kj::mv(message), event, encoding,
+        [weakThis = addWeakToThis(), responseBody = kj::mv(responseBody), message = kj::mv(message),
+            event, encoding,
             requestId = kj::mv(requestId)]() mutable -> kj::Own<kj::AsyncOutputStream> {
+      auto& self = KJ_REQUIRE_NONNULL(
+          weakThis.tryGet(), "SubrequestClient destroyed before response was inspected");
       // Now we know we can lock...
       return jsg::runInV8Stack(
           [&](jsg::V8StackScope& stackScope) mutable -> kj::Own<kj::AsyncOutputStream> {
-        Isolate::Impl::Lock recordedLock(*constIsolate, InspectorLock(*requestMetrics), stackScope);
-        auto& isolate = const_cast<Isolate&>(*constIsolate);
+        Isolate::Impl::Lock recordedLock(
+            *self.constIsolate, InspectorLock(*self.requestMetrics), stackScope);
+        auto& isolate = const_cast<Isolate&>(*self.constIsolate);
 
         // We shouldn't even get here if network inspection isn't active since signalRequest() would
         // have returned null... but double-check anyway.
@@ -5198,8 +5202,8 @@ kj::Promise<void> Worker::Isolate::SubrequestClient::request(kj::HttpMethod meth
 
         i.sendNotification(event);
 
-        return kj::heap<ResponseStreamWrapper>(kj::atomicAddRef(*constIsolate), kj::mv(requestId),
-            kj::mv(responseBody), encoding, *requestMetrics);
+        return kj::heap<ResponseStreamWrapper>(kj::atomicAddRef(*self.constIsolate),
+            kj::mv(requestId), kj::mv(responseBody), encoding, *self.requestMetrics);
       });
     }));
   };

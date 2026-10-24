@@ -81,8 +81,10 @@ class MockSubrequestChannel: public IoChannelFactory::SubrequestChannel {
     KJ_IF_SOME(p, readyPromise) {
       auto promise = kj::mv(p);
       readyPromise = kj::none;
-      return promise.then([&h, usage, self = addWeakToThis()]() mutable -> kj::Array<byte> {
+      return promise.then(
+          [weakHandler = h.addWeak(), usage, self = addWeakToThis()]() mutable -> kj::Array<byte> {
         auto& channel = self.assertLive();
+        auto& h = KJ_REQUIRE_NONNULL(weakHandler.tryGet(), "handler destroyed before token");
         return expectSync(h.encodeSubrequestChannelToken(usage, channel.triplet.serviceName,
             channel.triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }),
             channel.triplet.props, channel.persistent));
@@ -124,8 +126,10 @@ class MockActorClassChannel: public IoChannelFactory::ActorClassChannel {
     KJ_IF_SOME(p, readyPromise) {
       auto promise = kj::mv(p);
       readyPromise = kj::none;
-      return promise.then([&h, usage, self = addWeakToThis()]() mutable -> kj::Array<byte> {
+      return promise.then(
+          [weakHandler = h.addWeak(), usage, self = addWeakToThis()]() mutable -> kj::Array<byte> {
         auto& channel = self.assertLive();
+        auto& h = KJ_REQUIRE_NONNULL(weakHandler.tryGet(), "handler destroyed before token");
         return expectSync(h.encodeActorClassChannelToken(usage, channel.triplet.serviceName,
             channel.triplet.entrypoint.map([](kj::String& s) -> kj::StringPtr { return s; }),
             channel.triplet.props, channel.persistent));
@@ -181,8 +185,10 @@ class MockActorChannel: public IoChannelFactory::ActorChannel {
     KJ_IF_SOME(p, readyPromise) {
       auto promise = kj::mv(p);
       readyPromise = kj::none;
-      return promise.then([&h, usage, self = addWeakToThis()]() mutable -> kj::Array<byte> {
+      return promise.then(
+          [weakHandler = h.addWeak(), usage, self = addWeakToThis()]() mutable -> kj::Array<byte> {
         auto& channel = self.assertLive();
+        auto& h = KJ_REQUIRE_NONNULL(weakHandler.tryGet(), "handler destroyed before token");
         return h.encodeActorChannelToken(usage, channel.namespaceKey, channel.id,
             channel.name.map([](kj::String& s) -> kj::StringPtr { return s; }), channel.persistent);
       });

@@ -41,7 +41,7 @@ static void* getThreadId() {
   return threadId.get();
 }
 
-class IoContext::TimeoutManagerImpl final: public TimeoutManager {
+class IoContext::TimeoutManagerImpl final: public TimeoutManager, public kj::PtrTarget {
  public:
   class TimeoutState;
   using Map = std::map<TimeoutId, TimeoutState>;
@@ -796,8 +796,8 @@ void IoContext::IncomingRequest::drain(
   } else {
     // For non-actor requests, apply the configured soft timeout, typically 30 seconds.
     auto timeoutLogPromise = [this]() -> kj::Promise<void> {
-      return context->run([this](Worker::Lock&) {
-        context->logWarning(
+      return context->run([](Worker::Lock&, IoContext& context) {
+        context.logWarning(
             "waitUntil() tasks did not complete within the allowed time after invocation end and have been cancelled. "
             "See: https://developers.cloudflare.com/workers/runtime-apis/context/#waituntil");
       });
@@ -842,7 +842,10 @@ kj::Promise<WorkerInterface::ScheduledResult> IoContext::IncomingRequest::finish
   auto timeoutPromise = context->limitEnforcer->limitScheduled().then(
       [] { return EventOutcome::EXCEEDED_WALL_TIME; });
   auto outcome = context->waitUntilTasks.onEmpty()
-                     .then([this]() { return context->waitUntilStatus(); })
+                     .then([weakThis = addWeakToThis()]() {
+    return KJ_REQUIRE_NONNULL(weakThis.tryGet(), "IncomingRequest destroyed before tasks finished")
+        .context->waitUntilStatus();
+  })
                      .exclusiveJoin(kj::mv(timeoutPromise))
                      .exclusiveJoin(context->onAbort().then([] {
     // The abort flag should only ever be rejected instead of being fulfilled, return an
@@ -853,9 +856,10 @@ kj::Promise<WorkerInterface::ScheduledResult> IoContext::IncomingRequest::finish
     return RequestObserver::outcomeFromException(e);
   }));
 
-  auto result = outcome.then([this](EventOutcome outcome) {
+  auto result = outcome.then([weakThis = addWeakToThis()](EventOutcome outcome) {
     return WorkerInterface::ScheduledResult{
-      .retry = context->shouldRetryScheduled(),
+      .retry = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "IncomingRequest destroyed before outcome")
+                   .context->shouldRetryScheduled(),
       .outcome = outcome,
     };
   });
@@ -906,8 +910,13 @@ IoContext::PendingEvent::~PendingEvent() noexcept(false) {
   // We can't abort just yet. We need to run the event loop to see if any queued
   // events come back into JavaScript. If registerPendingEvent() is called in the meantime, this
   // will be canceled.
-  context.abortFromHangTask = Worker::AsyncLock::whenThreadIdle()
-                                  .then([&context = context]() noexcept {
+  context.abortFromHangTask =
+      Worker::AsyncLock::whenThreadIdle()
+          .then([weakContext = context.getWeakRef()]() mutable noexcept -> kj::Promise<void> {
+    // Reject rather than throw: a throw would terminate the process from this `noexcept` lambda.
+    auto& ctx = KJ_UNWRAP_OR(weakContext->tryGet(),
+        { return KJ_EXCEPTION(FAILED, "IoContext destroyed before hang abort"); });
+
     // We have nothing left to do and no PendingEvent has been registered. Abort now.
     //
     // By the time the thread goes idle the IncomingRequest may already be gone, even though the
@@ -915,11 +924,13 @@ IoContext::PendingEvent::~PendingEvent() noexcept(false) {
     // current IncomingRequest, and this continuation is `noexcept`, so reaching for it in that
     // state would terminate the process instead of aborting the context. Fall back to the
     // request-less lock, which only costs us the lock-timing metrics.
-    auto lockPromise = context.incomingRequests.empty()
-        ? context.worker->takeAsyncLockWithoutRequest(nullptr)
-        : context.worker->takeAsyncLock(context.getMetrics());
-    return lockPromise.then(
-        [&context](Worker::AsyncLock asyncLock) { context.abortFromHang(asyncLock); });
+    auto lockPromise = ctx.incomingRequests.empty()
+        ? ctx.worker->takeAsyncLockWithoutRequest(nullptr)
+        : ctx.worker->takeAsyncLock(ctx.getMetrics());
+    return lockPromise.then([weakContext = kj::mv(weakContext)](Worker::AsyncLock asyncLock) {
+      KJ_REQUIRE_NONNULL(weakContext->tryGet(), "IoContext destroyed before hang abort")
+          .abortFromHang(asyncLock);
+    });
   }).eagerlyEvaluate(nullptr);
 }
 
@@ -1036,20 +1047,25 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
   // TODO(cleanup): The manual use of run() here (including carrying over the critical section) is
   //   kind of ugly, but using awaitIo() doesn't work here because we need the ability to cancel
   //   the timer, so we don't want to addTask() it, which awaitIo() does implicitly.
-  auto promise =
-      paf.promise.then([this, &context, it, when, cs = context.getCriticalSection()]() mutable {
+  auto promise = paf.promise.then(
+      [weakThis = addWeakToThis(), weakContext = context.getWeakRef(), it, when,
+          cs = context.getCriticalSection()]() mutable {
     auto& firing = it->second;
     if (!firing.params.repeat) {
       firing.asyncTraceResource.settle(AsyncOutcome::OK);
     }
-    return context.run([this, it, when](Worker::Lock& lock, IoContext& context) mutable {
+    auto& liveContext =
+        KJ_REQUIRE_NONNULL(weakContext->tryGet(), "IoContext destroyed before timeout fired");
+    return liveContext.run(
+        [weakThis = kj::mv(weakThis), it, when](Worker::Lock& lock, IoContext& context) mutable {
       auto& state = it->second;
 
       auto stateGuard = kj::defer([&] {
         if (state.maybePromise == kj::none) {
           // At the end of this block, there was no new timeout, so we should remove the state.
           // Note that this can happen from cancelTimeout or a non-repeating timeout.
-          timeouts.erase(it);
+          KJ_REQUIRE_NONNULL(weakThis.tryGet(), "TimeoutManager destroyed before timeout fired")
+              .timeouts.erase(it);
         }
       });
 
@@ -1094,7 +1110,8 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
           // If this is an interval task and the script has CPU time left, reschedule the task;
           // otherwise leave the dead map entry in place.
           if (state.params.repeat && context.limitEnforcer->getLimitsExceeded() == kj::none) {
-            setTimeoutImpl(context, it);
+            KJ_REQUIRE_NONNULL(weakThis.tryGet(), "TimeoutManager destroyed before timeout fired")
+                .setTimeoutImpl(context, it);
           }
         }););
 
@@ -1104,7 +1121,8 @@ void IoContext::TimeoutManagerImpl::setTimeoutImpl(IoContext& context, Iterator 
         state.trigger(lock);
       }
     }, kj::mv(cs));
-  }, [](kj::Exception&&) {});
+  },
+      [](kj::Exception&&) {});
 
   promise = promise.attach(context.registerPendingEvent());
 

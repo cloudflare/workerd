@@ -2007,7 +2007,7 @@ MakeCallPipeline::Result serializeJsValueWithPipeline(jsg::Lock& js,
 // Most of the implementation is in this base class. There are subclasses specializing for the case
 // of a top-level entrypoint vs. a transient object introduced by a previous RPC in the same
 // session.
-class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
+class JsRpcTargetBase: public rpc::JsRpcTarget::Server, public kj::PtrTarget {
  public:
   struct MayOutliveIncomingRequest {};
   struct CantOutliveIncomingRequest {};
@@ -2030,8 +2030,10 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
         enterIsolateAndCall([this, &ctx](CallContext callContext) {
           // Note: No need to topUpActor() since this is the start of a top-level request, so the
           // actor will already have been topped up by IncomingRequest::delivered().
-          return ctx.run([this, callContext](Worker::Lock& lock, IoContext& ctx) mutable {
-            return callImpl(lock, ctx, callContext);
+          return ctx.run([weakThis = addWeakToThis(), callContext](
+                             Worker::Lock& lock, IoContext& ctx) mutable {
+            return KJ_REQUIRE_NONNULL(weakThis.tryGet(), "RPC target destroyed before call ran")
+                .callImpl(lock, ctx, callContext);
           });
         }),
         externalPusher(ctx.getExternalPusher()) {}
@@ -2290,10 +2292,13 @@ class JsRpcTargetBase: public rpc::JsRpcTarget::Server {
         // WorkerEntrypoint::request(), which does not let a fetch handler's exception escape the
         // isolate before the output gate opens. If the gate is broken, its exception replaces
         // the method's, as it does there.
-        return result.then([&ctx]() mutable { return ctx.waitForOutputLocks(); },
-            [&ctx](kj::Exception&& e) mutable -> kj::Promise<void> {
-          return ctx.waitForOutputLocks().then(
-              [e = kj::mv(e)]() mutable { kj::throwException(kj::mv(e)); });
+        return result.then([weakCtx = ctx.getWeakRef()]() mutable {
+          return KJ_REQUIRE_NONNULL(weakCtx->tryGet(), "IoContext destroyed before RPC returned")
+              .waitForOutputLocks();
+        }, [weakCtx = ctx.getWeakRef()](kj::Exception&& e) mutable -> kj::Promise<void> {
+          return KJ_REQUIRE_NONNULL(weakCtx->tryGet(), "IoContext destroyed before RPC threw")
+              .waitForOutputLocks()
+              .then([e = kj::mv(e)]() mutable { kj::throwException(kj::mv(e)); });
         });
       } else {
         return result;
@@ -3259,12 +3264,15 @@ class EntrypointJsRpcTarget final: public JsRpcTargetBase {
   // capabilities released.
   kj::Promise<void> call(CallContext callContext) override {
     return JsRpcTargetBase::call(kj::mv(callContext))
-        .then([this]() {
-      KJ_IF_SOME(t, tracer) {
-        t->setReturn(ioCtx.now());
+        .then([weakThis = addWeakToThis()]() {
+      auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "RPC target destroyed before return");
+      KJ_IF_SOME(t, self.tracer) {
+        t->setReturn(self.ioCtx.now());
       }
-    }).catch_([this](kj::Exception&& exception) {
-      markJsRpcExceptionAsDelivered(ioCtx, exception);
+    }).catch_([weakThis = addWeakToThis()](kj::Exception&& exception) {
+      markJsRpcExceptionAsDelivered(
+          KJ_REQUIRE_NONNULL(weakThis.tryGet(), "RPC target destroyed before exception").ioCtx,
+          exception);
       kj::throwException(kj::mv(exception));
     });
   }

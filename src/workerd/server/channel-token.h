@@ -19,8 +19,12 @@ namespace workerd::server {
 //
 // Note that all `Frankenvalue`s here are expected to contain cap tables holding live instances
 // of `SubrequestChannel`, `ActorClassChannel`, and `RpcChannel`.
-class ChannelTokenHandler {
+class ChannelTokenHandler: public kj::PtrTarget {
  public:
+  kj::Weak<ChannelTokenHandler> addWeak() {
+    return addWeakToThis();
+  }
+
   // Callbacks implemented by `WorkerFactory` to resolve entrypoint designators to live
   // objects.
   //

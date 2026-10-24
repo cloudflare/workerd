@@ -383,7 +383,7 @@ TempDir newSharedDirectory() {
 
 // The server as the tests drive it, over the Rust server (server/in_process.rs): the worker
 // factory is built here, on what the test supplies, and handed to it.
-class Server {
+class Server: public kj::PtrTarget {
  public:
   Server(kj::Filesystem& fs,
       kj::Timer& timer,
@@ -420,7 +420,12 @@ class Server {
       config::Config::Reader config,
       kj::Promise<void> drainWhen = kj::NEVER_DONE) {
     auto& server = start(v8System, config);
-    auto drain = drainWhen.then([&server]() { server.drain(); }).eagerlyEvaluate(nullptr);
+    // `get()` returns the server started above: `start()` isn't called again while `drain` is
+    // pending, and TestServer drops `drain` before `close()`.
+    auto drain = drainWhen
+                     .then([weakThis = addWeakToThis()]() {
+      KJ_REQUIRE_NONNULL(weakThis.tryGet(), "test server destroyed before drain").get().drain();
+    }).eagerlyEvaluate(nullptr);
     return server.run(debugPort.asPtr().as<kj_rs::RustUncheckedUtf8>())
         .attach(kj::mv(drain), reports(server));
   }
