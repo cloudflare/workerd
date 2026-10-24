@@ -64,6 +64,31 @@ export const testTailHandler = {
           span['closed'] = true;
           break;
         }
+        case 'spanUpdate': {
+          // Status set on a runtime span (the top-level span is skipped, as for exceptions).
+          let span = spans.get(spanKey);
+          if (
+            span &&
+            event.spanContext.spanId !== topLevelSpanId &&
+            event.event.info.type === 'status'
+          ) {
+            span['status'] = event.event.info.status;
+          }
+          break;
+        }
+        case 'exception': {
+          // Exception recorded on a runtime span. Uncaught exceptions are reported on the top-level
+          // span, which is skipped. The stack is omitted since it varies.
+          let span = spans.get(spanKey);
+          if (span && event.spanContext.spanId !== topLevelSpanId) {
+            span['exceptions'] ??= [];
+            span['exceptions'].push({
+              name: event.event.name,
+              message: event.event.message,
+            });
+          }
+          break;
+        }
         case 'outcome':
           resolveFn();
           break;

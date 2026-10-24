@@ -189,8 +189,9 @@ void sendExceptionToInspector(jsg::Lock& js,
 }
 
 // Extracts {name, message, stack} from a JS value into a tracing::ErrorInfo. This is shared by the
-// uncaught-exception path (addExceptionToTrace) and the console.* logging path (handleLog), so
-// that an error reported either way produces an identical representation.
+// uncaught-exception path (addExceptionToTrace), the console.* logging path (handleLog), and
+// errors recorded on spans, so that an error reported any of these ways produces an identical
+// representation.
 //
 // `name` defaults to "Error" when absent; `message` falls back to stringifying the whole value;
 // and tracing::ErrorInfo::fromErrorProperties() defines the rest, as it does for an exception
@@ -411,6 +412,11 @@ uint64_t getCurrentThreadId() {
 }
 
 }  // namespace
+
+tracing::ErrorInfo getErrorInfoForTrace(jsg::Lock& js, const jsg::JsValue& exception) {
+  return getErrorInfoForTrace(
+      js, exception, Worker::Api::current().getErrorInterfaceTypeHandler(js));
+}
 
 class Worker::InspectorClient: public v8_inspector::V8InspectorClient {
  public:

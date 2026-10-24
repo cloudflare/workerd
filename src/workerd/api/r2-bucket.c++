@@ -70,10 +70,8 @@ kj::Own<kj::HttpClient> R2Bucket::getHttpClient(IoContext& context, TraceContext
   KJ_UNREACHABLE;
 }
 
-TraceContext R2Bucket::makeR2TraceContext(kj::LiteralStringConst spanName,
-    kj::LiteralStringConst operation,
-    kj::Maybe<kj::StringPtr> key) {
-  TraceContext traceContext = IoContext::current().makeUserTraceSpan(spanName);
+void R2Bucket::setR2SpanTags(
+    TraceContext& traceContext, kj::LiteralStringConst operation, kj::Maybe<kj::StringPtr> key) {
   traceContext.setTag("cloudflare.binding.type"_kjc, "r2"_kjc);
   KJ_IF_SOME(name, bindingName()) {
     traceContext.setTag("cloudflare.binding.name"_kjc, name);
@@ -85,7 +83,6 @@ TraceContext R2Bucket::makeR2TraceContext(kj::LiteralStringConst spanName,
   KJ_IF_SOME(value, key) {
     traceContext.setTag("cloudflare.r2.request.key"_kjc, value);
   }
-  return traceContext;
 }
 
 static bool isWholeNumber(double x) {
@@ -539,9 +536,9 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
     kj::String key,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
     CompatibilityFlags::Reader flags) {
-  return js.evalNow([&] {
+  return IoContext::evalNowWithSpan(js, "r2_head"_kjc, [&](TraceContext& traceContext) {
     auto& context = IoContext::current();
-    TraceContext traceContext = makeR2TraceContext("r2_head"_kjc, "HeadObject"_kjc, key.asPtr());
+    setR2SpanTags(traceContext, "HeadObject"_kjc, key.asPtr());
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -560,9 +557,8 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::head(jsg::Lock
     auto client = getHttpClient(context, traceContext);
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
-    return context.awaitIo(js, kj::mv(promise),
-        [&errorType, traceContext = kj::mv(traceContext)](
-            jsg::Lock& js, R2Result r2Result) mutable {
+    return context.awaitIo(
+        js, kj::mv(promise), [&errorType, &traceContext](jsg::Lock& js, R2Result r2Result) mutable {
       addR2ResponseSpanTags(traceContext, r2Result);
 
       auto result = parseObjectMetadata<HeadResult>(js, "head", r2Result, errorType);
@@ -825,9 +821,9 @@ R2Bucket::get(jsg::Lock& js,
     jsg::Optional<GetOptions> options,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
     CompatibilityFlags::Reader flags) {
-  return js.evalNow([&] {
+  return IoContext::evalNowWithSpan(js, "r2_get"_kjc, [&](TraceContext& traceContext) {
     auto& context = IoContext::current();
-    TraceContext traceContext = makeR2TraceContext("r2_get"_kjc, "GetObject"_kjc, key.asPtr());
+    setR2SpanTags(traceContext, "GetObject"_kjc, key.asPtr());
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -850,8 +846,7 @@ R2Bucket::get(jsg::Lock& js,
     auto promise = doR2HTTPGetRequest(kj::mv(client), kj::mv(requestJson), path, jwt, flags);
 
     return context.awaitIo(js, kj::mv(promise),
-        [&context, &errorType, traceContext = kj::mv(traceContext)](
-            jsg::Lock& js, R2Result r2Result) mutable
+        [&context, &errorType, &traceContext](jsg::Lock& js, R2Result r2Result) mutable
         -> kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> {
       kj::OneOf<kj::Maybe<jsg::Ref<GetResult>>, jsg::Ref<HeadResult>> result;
 
@@ -889,7 +884,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
     kj::Maybe<R2PutValue> value,
     jsg::Optional<PutOptions> options,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
-  return js.evalNow([&] {
+  return IoContext::evalNowWithSpan(js, "r2_put"_kjc, [&](TraceContext& traceContext) {
     auto cancelReader = kj::defer([&] {
       KJ_IF_SOME(v, value) {
         KJ_IF_SOME(stream, v.tryGet<JsReadableStream>()) {
@@ -906,7 +901,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
     });
 
     auto& context = IoContext::current();
-    TraceContext traceContext = makeR2TraceContext("r2_put"_kjc, "PutObject"_kjc, key.asPtr());
+    setR2SpanTags(traceContext, "PutObject"_kjc, key.asPtr());
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -1140,8 +1135,7 @@ jsg::Promise<kj::Maybe<jsg::Ref<R2Bucket::HeadResult>>> R2Bucket::put(jsg::Lock&
 
     return context.awaitIo(js, kj::mv(promise),
         [sentHttpMetadata = kj::mv(sentHttpMetadata),
-            sentCustomMetadata = kj::mv(sentCustomMetadata), &errorType,
-            traceContext = kj::mv(traceContext)](
+            sentCustomMetadata = kj::mv(sentCustomMetadata), &errorType, &traceContext](
             jsg::Lock& js, R2Result r2Result) mutable -> kj::Maybe<jsg::Ref<HeadResult>> {
       addR2ResponseSpanTags(traceContext, r2Result);
       if (r2Result.preconditionFailed()) {
@@ -1163,10 +1157,10 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
     kj::String key,
     jsg::Optional<MultipartOptions> options,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
-  return js.evalNow([&] {
+  return IoContext::evalNowWithSpan(
+      js, "r2_createMultipartUpload"_kjc, [&](TraceContext& traceContext) {
     auto& context = IoContext::current();
-    TraceContext traceContext = makeR2TraceContext(
-        "r2_createMultipartUpload"_kjc, "CreateMultipartUpload"_kjc, key.asPtr());
+    setR2SpanTags(traceContext, "CreateMultipartUpload"_kjc, key.asPtr());
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -1251,8 +1245,8 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
         doR2HTTPPutRequest(js, kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, jwt);
 
     return context.awaitIo(js, kj::mv(promise),
-        [&errorType, key = kj::mv(key), weakThis = JSG_THIS_WEAK(js),
-            traceContext = kj::mv(traceContext)](jsg::Lock& js, R2Result r2Result) mutable {
+        [&errorType, key = kj::mv(key), weakThis = JSG_THIS_WEAK(js), &traceContext](
+            jsg::Lock& js, R2Result r2Result) mutable {
       addR2ResponseSpanTags(traceContext, r2Result);
       r2Result.throwIfError("createMultipartUpload", errorType);
 
@@ -1281,9 +1275,9 @@ jsg::Ref<R2MultipartUpload> R2Bucket::resumeMultipartUpload(jsg::Lock& js,
 jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
     kj::OneOf<kj::String, kj::Array<kj::String>> keys,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
-  return js.evalNow([&] {
+  return IoContext::evalNowWithSpan(js, "r2_delete"_kjc, [&](TraceContext& traceContext) {
     auto& context = IoContext::current();
-    TraceContext traceContext = makeR2TraceContext("r2_delete"_kjc, "DeleteObject"_kjc);
+    setR2SpanTags(traceContext, "DeleteObject"_kjc);
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -1315,9 +1309,8 @@ jsg::Promise<void> R2Bucket::delete_(jsg::Lock& js,
     auto promise =
         doR2HTTPPutRequest(js, kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, jwt);
 
-    return context.awaitIo(js, kj::mv(promise),
-        [&errorType, traceContext = kj::mv(traceContext)](
-            jsg::Lock& js, R2Result r2Result) mutable {
+    return context.awaitIo(
+        js, kj::mv(promise), [&errorType, &traceContext](jsg::Lock& js, R2Result r2Result) mutable {
       addR2ResponseSpanTags(traceContext, r2Result);
       if (r2Result.objectNotFound()) {
         return;
@@ -1376,9 +1369,9 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
     jsg::Optional<ListOptions> options,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType,
     CompatibilityFlags::Reader flags) {
-  return js.evalNow([&] {
+  return IoContext::evalNowWithSpan(js, "r2_list"_kjc, [&](TraceContext& traceContext) {
     auto& context = IoContext::current();
-    TraceContext traceContext = makeR2TraceContext("r2_list"_kjc, "ListObjects"_kjc);
+    setR2SpanTags(traceContext, "ListObjects"_kjc);
 
     capnp::JsonCodec json;
     json.handleByAnnotation<R2BindingRequest>();
@@ -1479,7 +1472,7 @@ jsg::Promise<R2Bucket::ListResult> R2Bucket::list(jsg::Lock& js,
 
     return context.awaitIo(js, kj::mv(promise),
         [expectedOptionalFields = expectedOptionalFields.releaseAsArray(), &errorType,
-            traceContext = kj::mv(traceContext)](jsg::Lock& js, R2Result r2Result) mutable {
+            &traceContext](jsg::Lock& js, R2Result r2Result) mutable {
       addR2ResponseSpanTags(traceContext, r2Result);
       r2Result.throwIfError("list", errorType);
 

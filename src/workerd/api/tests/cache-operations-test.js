@@ -131,6 +131,44 @@ export const deleteOperations = {
   },
 };
 
+export const errorOperations = {
+  async test(ctrl, env, ctx) {
+    const cache = caches.default;
+
+    // Test cache.put() with a non-GET request
+    await assert.rejects(
+      cache.put(
+        new Request('https://example.com/put-post', { method: 'POST' }),
+        new Response('Content')
+      ),
+      {
+        name: 'TypeError',
+        message: 'Cannot cache response to non-GET request.',
+      }
+    );
+
+    // Test cache.put() with a response body that fails while it's being written
+    const { readable, writable } = new TransformStream();
+    writable.getWriter().abort(new Error('Body failed'));
+    await assert.rejects(
+      cache.put(
+        new Request('https://example.com/put-body-error'),
+        new Response(readable)
+      ),
+      { message: 'Body failed' }
+    );
+
+    // Test cache.delete() - rate limited
+    await assert.rejects(
+      cache.delete(new Request('https://example.com/delete-rate-limited')),
+      {
+        message:
+          'Unable to delete cached response. Subrequests are being rate-limited.',
+      }
+    );
+  },
+};
+
 export const headersOperations = {
   async test(ctrl, env, ctx) {
     const cache = caches.default;

@@ -36,12 +36,12 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
     R2PutValue value,
     jsg::Optional<UploadPartOptions> options,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
-  return js.evalNow([&] {
+  return IoContext::evalNowWithSpan(js, "r2_uploadPart"_kjc, [&](TraceContext& traceContext) {
     JSG_REQUIRE(partNumber >= 1 && partNumber <= 10000, TypeError,
         "Part number must be between 1 and 10000 (inclusive). Actual value was: ", partNumber);
 
     auto& context = IoContext::current();
-    TraceContext traceContext = bucket->makeR2TraceContext("r2_uploadPart"_kjc, "UploadPart"_kjc);
+    bucket->setR2SpanTags(traceContext, "UploadPart"_kjc);
     traceContext.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
     traceContext.setTag("cloudflare.r2.request.part_number"_kjc, static_cast<int64_t>(partNumber));
     traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
@@ -110,8 +110,7 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPart(jsg:
         js, kj::mv(client), kj::mv(value), kj::none, kj::mv(requestJson), path, kj::none);
 
     return context.awaitIo(js, kj::mv(promise),
-        [&errorType, partNumber, traceContext = kj::mv(traceContext)](
-            jsg::Lock& js, R2Result r2Result) mutable {
+        [&errorType, partNumber, &traceContext](jsg::Lock& js, R2Result r2Result) mutable {
       addR2ResponseSpanTags(traceContext, r2Result);
       r2Result.throwIfError("uploadPart", errorType);
 
@@ -153,10 +152,10 @@ jsg::Promise<R2MultipartUpload::UploadedPart> R2MultipartUpload::uploadPartRpc(j
 jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lock& js,
     kj::Array<UploadedPart> uploadedParts,
     const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
-  return js.evalNow([&] {
+  return IoContext::evalNowWithSpan(
+      js, "r2_completeMultipartUpload"_kjc, [&](TraceContext& traceContext) {
     auto& context = IoContext::current();
-    TraceContext traceContext =
-        bucket->makeR2TraceContext("r2_completeMultipartUpload"_kjc, "CompleteMultipartUpload"_kjc);
+    bucket->setR2SpanTags(traceContext, "CompleteMultipartUpload"_kjc);
     traceContext.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
     traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
     kj::String partIds =
@@ -194,9 +193,8 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::complete(jsg::Lo
     auto promise = doR2HTTPPutRequest(
         js, kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, kj::none);
 
-    return context.awaitIo(js, kj::mv(promise),
-        [&errorType, traceContext = kj::mv(traceContext)](
-            jsg::Lock& js, R2Result r2Result) mutable {
+    return context.awaitIo(
+        js, kj::mv(promise), [&errorType, &traceContext](jsg::Lock& js, R2Result r2Result) mutable {
       addR2ResponseSpanTags(traceContext, r2Result);
       auto parsedObject =
           parseHeadResultWrapper(js, "completeMultipartUpload", r2Result, errorType);
@@ -229,10 +227,10 @@ jsg::Promise<jsg::Ref<R2Bucket::HeadResult>> R2MultipartUpload::completeRpc(jsg:
 
 jsg::Promise<void> R2MultipartUpload::abort(
     jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<R2Error>>& errorType) {
-  return js.evalNow([&] {
+  return IoContext::evalNowWithSpan(
+      js, "r2_abortMultipartUpload"_kjc, [&](TraceContext& traceContext) {
     auto& context = IoContext::current();
-    TraceContext traceContext =
-        bucket->makeR2TraceContext("r2_abortMultipartUpload"_kjc, "AbortMultipartUpload"_kjc);
+    bucket->setR2SpanTags(traceContext, "AbortMultipartUpload"_kjc);
     traceContext.setTag("cloudflare.r2.request.upload_id"_kjc, uploadId.asPtr());
     traceContext.setTag("cloudflare.r2.request.key"_kjc, key.asPtr());
 
@@ -255,9 +253,8 @@ jsg::Promise<void> R2MultipartUpload::abort(
     auto promise = doR2HTTPPutRequest(
         js, kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, kj::none);
 
-    return context.awaitIo(js, kj::mv(promise),
-        [&errorType, traceContext = kj::mv(traceContext)](
-            jsg::Lock& js, R2Result r2Result) mutable {
+    return context.awaitIo(
+        js, kj::mv(promise), [&errorType, &traceContext](jsg::Lock& js, R2Result r2Result) mutable {
       addR2ResponseSpanTags(traceContext, r2Result);
       if (r2Result.objectNotFound()) {
         return;
