@@ -251,7 +251,7 @@ but not return values:
 
 ## Errors from JavaScript
 
-`Local<Function>::call` returns an `Err` when the function throws. The `jsg::Error` holds the thrown value, and `Lock::throw_exception` (which a callback returning the `Err` reaches) rethrows that value unchanged, as C++ JSG propagates the exception. A termination is not caught: the call returns `Error::terminated()`, which throws nothing, so the termination keeps propagating.
+`Local<Function>::call` returns an `Err` when the function throws. So does anything else that runs JavaScript which throws: converting a value to a string or number (its `toString`, `valueOf` or `Symbol.toPrimitive`), `Object::get` and `Object::has` (a getter or proxy trap), and `Array::iterate` (an element's getter). The `jsg::Error` holds the thrown value, and `Lock::throw_exception` (which a callback returning the `Err` reaches) rethrows that value unchanged, as C++ JSG propagates the exception. A termination is not caught: these return `Error::terminated()`, which throws nothing, so the termination keeps propagating.
 
 The error's `name` and `message` describe the value without running JavaScript (V8's `ToDetailString`), so its getters and proxy traps don't run. The value is held through a strong `Global`, so `Error` is not `Traced` and cannot be a field of a resource: a resource that kept the error of a value referring back to the resource would form a cycle that is never collected. Keep the thrown value as a `TracedGlobal` instead (`err.exception(lock)` returns it).
 
