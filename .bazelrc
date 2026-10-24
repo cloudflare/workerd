@@ -5,6 +5,7 @@ build --build_tag_filters=-off-by-default,-requires-container-engine
 build --nosandbox_default_allow_network
 test --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine
 test:asan --test_tag_filters=-off-by-default,-no-asan,-requires-fuzzilli,-requires-container-engine
+test:tsan-common --test_tag_filters=-off-by-default,-no-tsan,-requires-fuzzilli,-requires-container-engine
 # exclude enormous tests by default
 build --test_size_filters=-enormous
 # Run Python tests without snapshots while snapshot artifacts are being regenerated.
@@ -622,6 +623,9 @@ build:bazelflare --noexperimental_throttle_remote_action_building --remote_max_c
 # restore their sanitizer constraint, which selects the sanitizer-built Rust standard library.
 build:bazelflare-asan --platforms=//build/bazelflare:linux_x86_64_asan
 build:bazelflare-tsan --platforms=//build/bazelflare:linux_x86_64_tsan
+# The bazelflare filters replace the sanitizer configs', so these add their -no-asan and -no-tsan back.
+test:bazelflare-asan --test_tag_filters=-off-by-default,-no-asan,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
+test:bazelflare-tsan --test_tag_filters=-off-by-default,-no-tsan,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
 
 # Local workstation overrides. /.local/ is gitgnored.
 try-import %workspace%/.local/bazelrc
