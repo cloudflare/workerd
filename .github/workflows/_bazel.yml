@@ -142,6 +142,16 @@ jobs:
             # Strip comment in front of WORKERS_MIRROR_URL, then substitute secret to use it.
             sed -e '/WORKERS_MIRROR_URL/ { s@# *@@; s@WORKERS_MIRROR_URL@${{ secrets.WORKERS_MIRROR_URL }}@; }' -i.bak build/deps/nodejs.MODULE.bazel
           fi
+      - name: Keep external repositories in the remote cache
+        # A fresh Linux runner otherwise downloads and extracts every external repository, the LLVM
+        # toolchain's alone taking over two minutes. With this, Bazel takes a repository's contents
+        # from the remote cache, fetching only the files it reads itself. (The bazelflare step below
+        # sets it for bazelflare's cache.)
+        if: ${{ !inputs.bazelflare && runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          mkdir -p .local
+          echo "startup --experimental_remote_repo_contents_cache" >> .local/bazelrc
       - name: Configure bazelflare
         if: inputs.bazelflare
         shell: bash
