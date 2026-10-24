@@ -4352,21 +4352,31 @@ void Worker::Actor::shutdownActorCache(kj::Maybe<const kj::Exception&> error) {
   }
 }
 
-void Worker::Actor::abort(const kj::Exception& error) {
+void Worker::Actor::abort(const kj::Exception& error, uint16_t reasonCode) {
   KJ_IF_SOME(ctx, impl->ioContext) {
-    impl->metrics->shutdown(0, ctx->getLimitEnforcer());
+    impl->metrics->shutdown(reasonCode, ctx->getLimitEnforcer());
+    if (ctx->getAbortReason() != kj::none) {
+      // The actor already aborted its own execution, as when it exceeds a resource limit. Its
+      // in-flight events are failing with their own outcomes, such as an alarm's retry decision,
+      // which canceling them now would replace.
+      return;
+    }
     ctx->abort(error.clone());
   } else {
     shutdownActorCache(error);
   }
   impl->shutdownFlag.signal();
 
-  // Now hard-cancel everything that might be using the actor.
+  // Now hard-cancel everything that might be using the actor. Every event the canceler holds had
+  // entered the actor, so its handler may have run: mark the failure so that callers do not retry
+  // it as one that was never delivered.
   //
   // Canceling tasks can queue more tasks (especially drain() tasks), so keep canceling until
   // nothing more is queued.
+  auto inFlightError = error.clone();
+  jsg::setActorDeliveryPosition(inFlightError, jsg::ActorDeliveryPosition::MAY_HAVE_RUN_USER_CODE);
   while (!impl->abortCanceler.isEmpty()) {
-    impl->abortCanceler.cancel(error);
+    impl->abortCanceler.cancel(inFlightError);
   }
 
   KJ_IF_SOME(ctx, impl->ioContext) {
