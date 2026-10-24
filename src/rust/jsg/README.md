@@ -123,6 +123,7 @@ scope. There is no public constructor; locks come from:
   accessors likewise with `jsg::getter_callback` / `jsg::setter_callback`,
 - `jsg::modules::add_builtin`, whose callback is a closure that captures nothing, of type
   `for<'s> Fn(&mut Lock<'s>) -> Local<'s, Value>`,
+- `v8::Function::new`, whose closure captures nothing and gets a lock per call,
 - `jsg::callback_scope!(unsafe let lock, isolate)` for other Rust code that C++ calls with a
   scope already open; the caller vouches for the isolate's state, hence `unsafe`. A panic
   that reaches C++ aborts, so entry points instead pin a `jsg::CallbackScope` and open it
@@ -234,6 +235,27 @@ impl EventEmitter {
 ```
 
 Without tracing, storing a `TracedGlobal` back to the resource's own wrapper creates an unbreakable reference cycle that leaks until the worker is torn down. With `visit_traced_global` tracing (generated automatically by `#[jsg_resource]`), the cycle is collected by the next full GC after all strong Rust `Rc`s are dropped.
+
+### Functions from Rust closures
+
+`v8::Function::new(lock, data, f)` creates a JavaScript function that calls `f` with `data`,
+the counterpart of C++ JSG's `Lock::wrapReturningFunction()`. `f` captures nothing; its state
+is `data`, which the function owns through a C++ `Wrappable`, as a resource's wrapper owns the
+resource. The garbage collector traces `data` (`T: Traced`) through the function and drops it
+once the function is unreachable, so `data` may hold `TracedGlobal`s and `jsg::Rc`s, including ones
+that lead back to the function.
+
+```rust
+let greet = v8::Function::new(lock, String::from("hello"), |lock, greeting, args| {
+    let name = String::from_js(lock, args.get(0))?;
+    Ok(format!("{greeting}, {name}").to_js(lock))
+})?;
+```
+
+`f` returns `Result<Local<Value>, jsg::Error>`: an `Err` is thrown, and a panic throws an
+internal error and terminates execution, as in a `#[jsg_method]`. `Function::new` itself returns
+an `Err` if V8 cannot create the function, for example because execution is terminating. As with the functions C++ JSG
+wraps, the function's `name` is empty, its `length` is 0, and it can be called with `new`.
 
 ## Union Types
 
