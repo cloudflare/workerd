@@ -1725,4 +1725,13 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # bookmark as an opaque handle that can be passed over RPC, and
   # DurableObjectStorage.onNextSessionRestore(), which restores a snapshot or bookmark when the
   # next session starts. The experimental catch-all flag also exposes these methods.
+
+  connectHandlerStartTls @196 :Bool
+      $compatEnableFlag("connect_handler_starttls")
+      $experimental;
+  # Lets the socket passed to a connect() handler accept a startTls() upgrade when the transport
+  # that delivered the connection offers one: a workerd TCP socket configured with
+  # `tlsMode = startTls`, or another Worker's socket opened with `secureTransport: 'starttls'`.
+  # The handler's socket then has secureTransport "starttls". Without the flag, it has
+  # secureTransport "off" and its startTls() throws.
 }

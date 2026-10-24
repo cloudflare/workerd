@@ -587,10 +587,11 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
                 // Since we had a request set, we must have and response that's sent back using the
                 // same websocket here. The sending of response is managed in web-socket to avoid
                 // possible racing problems with regular websocket messages.
-                hib.maybeWriteBarrier = hib.writeCanceler
-                                            .wrap(apiWs->sendAutoResponse(
-                                                kj::mv(responseCopy), ws, hib.branchWriteBarrier()))
-                                            .fork();
+                hib.maybeWriteBarrier =
+                    hib.writeCanceler
+                        .wrap(apiWs->sendAutoResponse(kj::mv(responseCopy),
+                            KJ_REQUIRE_NONNULL(hib.ws).downgrade(), hib.branchWriteBarrier()))
+                        .fork();
                 auto& promise = KJ_ASSERT_NONNULL(hib.maybeWriteBarrier);
                 apiWs->setAutoResponseStatus(hib.autoResponseTimestamp, promise.addBranch());
                 co_await promise;
@@ -602,8 +603,12 @@ kj::Promise<void> LegacyHibernationManagerImpl::readLoop(HibernatableWebSocket& 
                   // happen if we have a websocket hibernating, that unhibernates and sends a
                   // message while ws.send() for auto-response is also sending.
                   auto response = hib.branchWriteBarrier().then(
-                      [&ws, responseCopy = kj::mv(responseCopy)]() mutable {
-                    return ws.send(responseCopy.asArray()).attach(kj::mv(responseCopy));
+                      [weakWs = KJ_REQUIRE_NONNULL(hib.ws).downgrade(),
+                          responseCopy = kj::mv(responseCopy)]() mutable {
+                    return KJ_REQUIRE_NONNULL(
+                        weakWs.tryGet(), "WebSocket destroyed before auto-response")
+                        .send(responseCopy.asArray())
+                        .attach(kj::mv(responseCopy));
                   });
                   hib.maybeWriteBarrier = hib.writeCanceler.wrap(kj::mv(response)).fork();
                   co_await KJ_ASSERT_NONNULL(hib.maybeWriteBarrier);

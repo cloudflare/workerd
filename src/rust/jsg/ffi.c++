@@ -150,6 +150,10 @@ bool local_eq(const Local& lhs, const Local& rhs) {
   return local_as_ref_from_ffi<v8::Value>(lhs) == local_as_ref_from_ffi<v8::Value>(rhs);
 }
 
+bool local_is_compatible_with_isolate(Isolate* isolate, const Local& value) {
+  return local_as_ref_from_ffi<v8::Data>(value)->IsCompatibleWithIsolate(isolate);
+}
+
 bool local_is_string(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsString();
 }
@@ -889,8 +893,15 @@ void wrappable_visit_global(GcVisitor* visitor, uintptr_t* global, TracedReferen
   gcVisitor->visit(strongHandle, tracedHandle);
 }
 
-void traced_reference_reset(TracedReference& traced) {
-  traced_ref_from_ffi(traced).Reset();
+Isolate* gc_visitor_v8_isolate(GcVisitor* visitor) {
+  return gc_visitor_from_ffi(visitor)->v8Isolate();
+}
+
+void global_clear_weak(uintptr_t* global) {
+  auto& handle = *reinterpret_cast<v8::Global<v8::Value>*>(global);
+  if (!handle.IsEmpty()) {
+    handle.ClearWeak<void>();
+  }
 }
 
 void wrappable_visit_ref(
@@ -1241,6 +1252,36 @@ Realm* realm_from_isolate(Isolate* isolate) {
       static_cast<Realm*>(isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM));
   KJ_ASSERT(realm != nullptr, "Rust Realm not set on isolate");
   return realm;
+}
+
+namespace {
+// The IsolateBase deferred action hook of an isolate with a Rust Realm.
+void resetGlobalsAwaitingLock(v8::Isolate* isolate) {
+  realm_reset_globals_awaiting_lock(isolate);
+}
+
+// The IsolateBase dispose hook that a Realm sets when it is dropped, with the reference to its
+// IsolateState that it hands over as data.
+void isolateDisposed(void* data) {
+  isolate_disposed(static_cast<const IsolateState*>(data));
+}
+}  // namespace
+
+bool realm_can_attach(Isolate* isolate) {
+  return isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM) == nullptr &&
+      !::workerd::jsg::IsolateBase::from(isolate).hasDisposeHook();
+}
+
+void realm_attach(Isolate* isolate, Realm& realm) {
+  isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &realm);
+  ::workerd::jsg::IsolateBase::from(isolate).setDeferredActionHook(&resetGlobalsAwaitingLock);
+}
+
+void realm_detach(Isolate* isolate, const IsolateState* state) {
+  auto& isolateBase = ::workerd::jsg::IsolateBase::from(isolate);
+  isolateBase.setDeferredActionHook(nullptr);
+  isolateBase.setDisposeHook(&isolateDisposed, const_cast<IsolateState*>(state));
+  isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, nullptr);
 }
 
 // Errors

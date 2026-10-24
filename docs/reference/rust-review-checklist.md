@@ -40,7 +40,14 @@ Unsafe code is concentrated at FFI boundaries. Review every `unsafe` block and `
 #### Common unsafe patterns in this codebase:
 
 - **V8 handle operations**: `Local::from_ffi()`/`into_ffi()`, isolate pointer dereference. These are
-  safe only when the isolate is locked and the handle scope is active.
+  safe only when the isolate is locked and the handle scope is active. Dropping a `jsg::v8::Global`
+  or `jsg::v8::TracedGlobal` is the exception: it defers the reset to the next lock when the
+  isolate is not locked, and does nothing once the `Realm` is gone
+  (`src/rust/jsg/isolate_state.rs`). That makes a `Global`, which GC never visits, `Send` and
+  `Sync`. It also makes a `TracedGlobal` `Send` (it is not `Sync`), together with visits outside a
+  GC leaving a `TracedGlobal` alone on a thread without the lock
+  (`GcVisitor::visit_traced_global`). A shim that resets a handle itself must only run under the
+  lock.
 - **Resource wrap/unwrap**: `Ref::into_raw()` leaks a ref-counted pointer as `usize`;
   `Ref::from_raw()` reconstructs it. These must be balanced — every `into_raw` needs exactly one
   `from_raw` to avoid leaks or double-frees.
@@ -72,8 +79,11 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   pointers used by the C++ JSG layer to wrap/unwrap the Rust object.
 - **`#[jsg_resource]`** on the impl block registers the type as a JS-visible resource.
 - **`#[jsg_method]`** auto-converts Rust `snake_case` method names to JavaScript `camelCase`.
-  Methods with a receiver (`&self`/`&mut self`) are registered as instance methods on the prototype;
-  methods without a receiver are registered as static methods on the constructor.
+  Methods with a `&self` receiver are registered as instance methods on the prototype; methods
+  without a receiver are registered as static methods on the constructor. Any other receiver is a
+  compile error, since JavaScript can call back into the resource while a method runs; state that
+  methods change belongs in `Cell` or `RefCell` fields. Flag a `RefCell` borrow held across a call
+  that can run JavaScript: a re-entrant call then panics.
   Verify the converted name is correct and matches the intended API surface.
 - **`#[jsg_static_constant]`** on a `const` item inside a `#[jsg_resource]` impl block exposes it
   as a read-only numeric constant on both the constructor and prototype (Rust equivalent of
@@ -86,6 +96,10 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   `String`/`&str` map to JS strings. Integers and `#[jsg_struct]`s convert like C++ JSG's
   integers and dictionaries: out-of-range integers throw, and an absent struct field reads as
   `undefined`.
+- **Persistent handles**: a handle that Rust code owns outside resources is a `jsg::v8::Global`,
+  which GC never visits and which keeps its handle inline. A handle that a resource owns is a
+  `jsg::v8::TracedGlobal`, which GC traces so that a cycle through it can be collected, and which
+  keeps its handles in a box. `Global` has no `Traced` impl, so it cannot be a resource field.
 - **GC tracing**: `Ref<T>`, `Option<Ref<T>>`, and `Nullable<Ref<T>>` fields on `#[jsg_resource]`
   structs are automatically traced during GC. `WeakRef<T>` fields are not traced (no-op). Verify
   that any resource holding a `Ref<T>` or `Nullable<Ref<T>>` to another resource is properly

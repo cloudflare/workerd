@@ -414,11 +414,6 @@ class GlobalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
   kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
     return ActorCallTargetRetryable(actorCallRetriesAllowed.toBool());
   }
-  // Only multi-replica namespaces disallow retries.
-  kj::Maybe<ActorRetryCandidate> getActorRetryProbeCandidate() const override {
-    if (actorCallRetriesAllowed) return kj::none;
-    return ActorRetryCandidate::UNSUPPORTED_MULTI_REPLICA;
-  }
   kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() const override {
     return userDefinedRetryPolicy;
   }
@@ -467,9 +462,6 @@ class LocalActorOutgoingFactory final: public Fetcher::OutgoingFactory {
   kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
     return ActorCallTargetRetryable::NO;
   }
-  kj::Maybe<ActorRetryCandidate> getActorRetryProbeCandidate() const override {
-    return ActorRetryCandidate::UNSUPPORTED_COLO_LOCAL;
-  }
   kj::Rc<IoChannelFactory::SubrequestChannel> getSubrequestChannel() override;
 
  private:
@@ -498,9 +490,6 @@ class ReplicaActorOutgoingFactory final: public Fetcher::OutgoingFactory {
       kj::Maybe<kj::String> cfStr, MakeUserSpanParent makeUserSpanParent) override;
   kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() const override {
     return ActorCallTargetRetryable::YES;
-  }
-  kj::Maybe<ActorRetryCandidate> getActorRetryProbeCandidate() const override {
-    return ActorRetryCandidate::REPLICA_PRIMARY;
   }
   void onActorCallRetry() override {
     // Keep the pre-resolved primary channel on retries. Reconnecting a broken channel requires

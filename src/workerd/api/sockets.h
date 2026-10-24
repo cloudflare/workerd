@@ -29,7 +29,8 @@ class DatagramChannel {
   // outstanding call at a time.
   virtual kj::Promise<kj::Maybe<kj::Array<kj::byte>>> receive() = 0;
 
-  // Sends one outbound datagram to the peer.
+  // Sends one outbound datagram to the peer. The caller keeps `datagram` alive until the returned
+  // promise resolves.
   virtual kj::Promise<void> send(kj::ArrayPtr<const kj::byte> datagram) = 0;
 };
 
@@ -185,6 +186,12 @@ class Socket: public jsg::Object {
     return openedPromise;
   }
 
+  // The errno name of the failed connection attempt that rejected `opened`, when its cause was
+  // recognized. See connectErrnoName().
+  kj::Maybe<kj::StringPtr> getConnectErrno() {
+    return connectErrno;
+  }
+
   bool getUpgraded() const {
     return upgraded;
   }
@@ -220,6 +227,14 @@ class Socket: public jsg::Object {
   // established through any configured proxy. This method also flushes the writable stream prior to
   // closing.
   jsg::Promise<void> close(jsg::Lock& js);
+
+  // Relays this socket to the other one in both directions. Equivalent to:
+  //   Promise.all([a.readable.pipeTo(b.writable), b.readable.pipeTo(a.writable)])
+  // The result resolves once both directions have finished and rejects as soon as either fails.
+  // A connect() handler that relays its socket should await it: the handler's socket is closed
+  // when the handler returns.
+  jsg::Promise<void> proxyTo(
+      jsg::Lock& js, jsg::Ref<Socket> sock, jsg::Optional<PipeToOptions> options);
 
   // Flushes write buffers then performs a TLS handshake on the current Socket connection.
   // The current `Socket` instance is closed and its readable/writable instances are also closed.
@@ -285,6 +300,9 @@ class Socket: public jsg::Object {
     }
     JSG_METHOD(close);
     JSG_METHOD(startTls);
+    if (flags.getWorkerdExperimental()) {
+      JSG_METHOD(proxyTo);
+    }
   }
 
   JSG_SERIALIZABLE(rpc::SerializationTag::SOCKET);
@@ -312,8 +330,8 @@ class Socket: public jsg::Object {
     kj::Maybe<kj::Promise<void>> watchForDisconnectTask;
     // tlsStarter must be declared after connectionStream so that it is destroyed first, since it
     // holds a reference that keeps the connection alive.
-    kj::Own<kj::TlsStarterCallback> tlsStarter;
-    ConnectionData(kj::Own<kj::TlsStarterCallback> tlsStarter,
+    kj::Rc<kj::TlsStarterCallback> tlsStarter;
+    ConnectionData(kj::Rc<kj::TlsStarterCallback> tlsStarter,
         kj::OneOf<kj::Rc<kj::AsyncIoStream>, kj::Rc<DatagramChannel>> connectionStream,
         kj::Promise<void> disconnectTask)
         : connectionStream(kj::mv(connectionStream)),
@@ -341,6 +359,7 @@ class Socket: public jsg::Object {
   kj::Maybe<kj::String> domain;
   // Whether the port this socket connected to is 80/443. Used for nicer errors.
   bool isDefaultFetchPort;
+  kj::Maybe<kj::StringPtr> connectErrno;
   // This fulfiller is used to resolve the `openedPromise` below.
   jsg::Promise<SocketInfo>::Resolver openedResolver;
   // Copy kept so that it can be used in `close`.
@@ -477,6 +496,24 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     AnySocketAddress address,
     jsg::Optional<SocketOptions> options);
 
+// Wires up startTls() for a tunnel whose transport cannot perform a TLS handshake itself, but
+// whose peer is another Socket reached over one of our internal transports -- that is, a
+// worker-to-worker connect(), whether the two workers share a process (the tunnel is a
+// kj::newTwoWayPipe()) or talk over http-over-capnp.
+//
+// `peerStarter` is the empty callback slot the peer handed us in kj::HttpConnectSettings; filling
+// it in is what makes the peer's startTls() work. The returned slot is for the local connect
+// handler's side of the tunnel.
+//
+// Neither side encrypts anything: these bytes never leave Cloudflare's internal transport, so
+// there is nothing here for TLS to protect. What the two sides actually need from each other is
+// agreement on the point in the byte stream where the upgrade takes effect since the protocol
+// being spoken negotiates the upgrade in-band (SMTP's STARTTLS, Postgres' SSLRequest etc.) and each
+// side hands its stream to a fresh Socket at that point. Thus each side's startTls() completes only
+// once the other side has called startTls() too - the same rule that applies for a real handshake
+// - and fails if the other side can no longer call it: its socket closes or the handler returns.
+kj::Rc<kj::TlsStarterCallback> setupInternalTlsRendezvous(kj::TlsStarterCallback& peerStarter);
+
 // Materializes a socket received over RPC from its three external-table entries (socket
 // metadata, then the readable and writable stream halves, in Socket::serialize()'s order),
 // validating the entry types. Runs during RpcDeserializerExternalHandler::prepare() -- before
@@ -505,6 +542,10 @@ class SocketsModule final: public jsg::Object {
   // Returns the synthetic IP registered for a magic hostname, or undefined. Used by node:dns.
   jsg::Optional<kj::StringPtr> getCallerDnsOverride(jsg::Lock& js, kj::String hostname);
 
+  // Returns the errno name of `socket`'s failed connection attempt, or undefined. Used by node:net
+  // to report connection failures the way Node.js does.
+  jsg::Optional<kj::StringPtr> getConnectFailureCode(jsg::Lock& js, jsg::Ref<Socket> socket);
+
   struct InboundListener {
     kj::String protocol;
     kj::String address;
@@ -517,6 +558,7 @@ class SocketsModule final: public jsg::Object {
   JSG_RESOURCE_TYPE(SocketsModule, CompatibilityFlags::Reader flags) {
     JSG_METHOD(connect);
     JSG_METHOD(getCallerDnsOverride);
+    JSG_METHOD(getConnectFailureCode);
     JSG_METHOD(getInboundListeners);
 
     if (flags.getWorkerdExperimental()) {
@@ -524,6 +566,14 @@ class SocketsModule final: public jsg::Object {
     }
   }
 };
+
+// Classifies a failed connection attempt as the errno name Node.js reports for it (ECONNREFUSED,
+// ETIMEDOUT, EHOSTUNREACH, ENETUNREACH, ENOTFOUND or EAI_AGAIN), or none when the cause is not
+// recognized.
+// A direct connection fails with the connect(2) or getaddrinfo(3) exception; a connection made
+// through a proxy fails with a non-2xx status whose Proxy-Status header (RFC 9209) names the error.
+kj::Maybe<kj::StringPtr> connectErrnoName(const kj::Exception& exception);
+kj::Maybe<kj::StringPtr> connectErrnoName(const kj::HttpHeaders& responseHeaders);
 
 template <class Registry>
 void registerSocketsModule(Registry& registry, auto featureFlags) {

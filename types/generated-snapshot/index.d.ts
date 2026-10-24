@@ -500,6 +500,7 @@ interface ExecutionContext<Props = unknown> {
   readonly props: Props;
   cache?: CacheContext;
   readonly access?: CloudflareAccessContext;
+  mapVirtualHost(fetcher: Fetcher, port: number): string;
   tracing: Tracing;
   abort(reason?: any): void;
 }

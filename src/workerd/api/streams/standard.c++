@@ -3309,9 +3309,6 @@ void ReadableStreamJsController::setup(jsg::Lock& js,
     } else {
       // Legacy behavior: apply a default autoAllocateChunkSize if not provided.
       auto defaultChunkSize = UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE;
-      if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE)) {
-        defaultChunkSize = UnderlyingSource::DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE_2;
-      }
       autoAllocateChunkSize = underlyingSource.autoAllocateChunkSize.orDefault(defaultChunkSize);
     }
 

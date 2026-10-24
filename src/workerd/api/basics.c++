@@ -537,8 +537,7 @@ bool EventTarget::dispatchEvent(jsg::Lock& js, jsg::Ref<Event> event) {
       .result;
 }
 
-// A wrapper for the AbortTrigger jsrpc client, that automatically sends a release() message once
-// the client is destroyed, informing the server that an abort will not be triggered in the future.
+// A wrapper for the AbortTrigger jsrpc client.
 class AbortTriggerRpcClient final {
  public:
   AbortTriggerRpcClient(rpc::AbortTrigger::Client&& client): client(kj::mv(client)) {}
@@ -549,26 +548,6 @@ class AbortTriggerRpcClient final {
     field.setV8Serialized(reason);
     return req.sendIgnoringResult();
   }
-
-  ~AbortTriggerRpcClient() noexcept(false) {
-    if (skipReleaseForTest) {
-      return;
-    }
-
-    auto req = client.releaseRequest(capnp::MessageSize{4, 0});
-    // We call detach() on the resulting promise so that we can perform RPC in a destructor
-    req.sendIgnoringResult().detach([](kj::Exception exc) {
-      if (exc.getType() == kj::Exception::Type::DISCONNECTED) {
-        // It's possible we can't send the release message because we're already disconnected.
-        return;
-      };
-
-      // Other exceptions could be more interesting
-      LOG_EXCEPTION("abortTriggerReleaseRpc", exc);
-    });
-  }
-
-  bool skipReleaseForTest = false;
 
  private:
   rpc::AbortTrigger::Client client;
@@ -1231,13 +1210,7 @@ int AbortSignal::getNativeRegistrationCountForTest() {
   return static_cast<int>(nativeRegistrations.size() + rpcRegistrations.size());
 }
 
-void AbortSignal::skipReleaseForTest() {
-  for (auto& reg: rpcRegistrations) {
-    KJ_IF_SOME(client, take(reg->client)) {
-      client->skipReleaseForTest = true;
-    }
-  }
-
+void AbortSignal::dropRpcTriggersForTest() {
   rpcRegistrations.clear();
 }
 

@@ -6,9 +6,11 @@ use std::future::Future;
 use std::num::ParseIntError;
 use std::ops::Deref;
 use std::pin::Pin;
+use std::sync::Arc;
 
 pub mod fast_api;
 pub mod feature_flags;
+mod isolate_state;
 pub mod lenient;
 pub mod macros;
 pub mod modules;
@@ -19,6 +21,7 @@ pub mod v8;
 mod wrappable;
 
 pub use feature_flags::FeatureFlags;
+use isolate_state::IsolateState;
 pub use lenient::Lenient;
 pub use nullable::Nullable;
 pub use resource::Rc;
@@ -61,6 +64,7 @@ pub use wrappable::Traced;
 mod ffi {
     extern "Rust" {
         type Realm;
+        type IsolateState;
 
         /// Create a fully-initialized Realm with feature flags.
         /// `feature_flags_data` is canonical (single-segment, no segment table) Cap'n Proto
@@ -77,6 +81,19 @@ mod ffi {
         /// dispose the handle before `CreateBlob`. The cache is left empty (templates are
         /// recreated lazily; `START_FROM_SNAPSHOT` isolates start empty anyway).
         fn realm_take_resource_templates(realm: &mut Realm) -> Vec<Global>;
+
+        /// Resets the V8 handles that `Global`s and `TracedGlobal`s dropped without the
+        /// isolate lock left for the next lock. `IsolateBase::applyDeferredActions` calls it
+        /// through the deferred action hook, which `IsolateBase::Lock` does whenever it locks
+        /// the isolate.
+        /// The isolate must be locked by the calling thread, with no Rust `Lock` in use.
+        unsafe fn realm_reset_globals_awaiting_lock(isolate: *mut Isolate);
+
+        /// Frees the slots of `TracedGlobal`s dropped after the Realm; see
+        /// `IsolateState::isolate_disposed`. `~IsolateBase` calls it after
+        /// `v8::Isolate::Dispose`, through the hook that `realm_detach` installs, with the
+        /// reference to the state that `realm_detach` was given.
+        unsafe fn isolate_disposed(state: *const IsolateState);
     }
 
     unsafe extern "C++" {
@@ -88,6 +105,16 @@ mod ffi {
 
         // Realm
         pub unsafe fn realm_from_isolate(isolate: *mut Isolate) -> *mut Realm;
+        /// Whether `realm_attach` may attach a Realm to the isolate: none is attached, and
+        /// none has been detached, which sets the dispose hook.
+        unsafe fn realm_can_attach(isolate: *mut Isolate) -> bool;
+        /// Stores `realm` in the isolate's data slot and installs the deferred action hook
+        /// that calls `realm_reset_globals_awaiting_lock`.
+        pub unsafe fn realm_attach(isolate: *mut Isolate, realm: &mut Realm);
+        /// Undoes `realm_attach`, and sets the `IsolateBase` dispose hook to one that hands
+        /// `state`, a reference to the state from `Arc::into_raw`, to `isolate_disposed` once
+        /// the isolate is disposed.
+        pub unsafe fn realm_detach(isolate: *mut Isolate, state: *const IsolateState);
     }
 }
 
@@ -745,6 +772,14 @@ impl<'s> Lock<'s> {
         self.realm().feature_flags.reader()
     }
 
+    /// The number of `Global`s and `TracedGlobal`s that were dropped without the isolate lock
+    /// and whose handles wait for the next lock to be reset; see [`v8::Global`]. For tests.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn globals_awaiting_lock(&mut self) -> usize {
+        self.realm().state.awaiting_lock_count()
+    }
+
     /// Throws an error as a V8 exception.
     ///
     /// If `err.is_internal` is set, the message is redacted (via
@@ -869,6 +904,15 @@ impl From<u64> for ConstantValue {
 ///   surfaced by `node:util` `inspect()`.
 pub use crate::v8::ffi::PropertyKind;
 
+/// Placement of an ordinary resource property registered by a generated member factory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PropertyPlacement {
+    /// An accessor on the prototype; preferred for new APIs.
+    Prototype,
+    /// An own native data property on each instance, for compatibility with existing APIs.
+    Instance,
+}
+
 pub enum Member {
     Constructor {
         callback: RawFunctionCallback,
@@ -937,10 +981,19 @@ pub trait Struct: Type {}
 /// cached function templates and tracks resource instances. When all Rust `Ref` handles to a
 /// resource are dropped and no JS references remain, V8 GC collects the wrapper and the
 /// `CppgcShim` destruction triggers cleanup of the underlying `Wrappable`.
+///
+/// A Realm attaches itself to its isolate: it is stored in the isolate's data slot, and it
+/// installs the hook through which each `IsolateBase::Lock` resets the persistent handles
+/// dropped without the lock. It must be dropped under the isolate lock, before the isolate is
+/// disposed: dropping it detaches it and closes the isolate's [`IsolateState`], after which the
+/// `Global`s and `TracedGlobal`s of the isolate leave their handles to `v8::Isolate::Dispose`.
+/// The isolate keeps the state alive until it is disposed.
 pub struct Realm {
     isolate: v8::IsolatePtr,
-    id: scope::IsolateId,
-    pub(crate) resources: resource::Resources,
+    /// Shared with every `Global` and `TracedGlobal` of the isolate, which identifies its isolate
+    /// by it.
+    state: Arc<IsolateState>,
+    resources: resource::Resources,
     /// Parsed `CompatibilityFlags` capnp message, initialized at construction.
     feature_flags: FeatureFlags,
 }
@@ -950,7 +1003,7 @@ impl Realm {
     pub fn new(isolate: v8::IsolatePtr, feature_flags: FeatureFlags) -> Self {
         Self {
             isolate,
-            id: scope::IsolateId::next(),
+            state: IsolateState::new(isolate),
             resources: resource::Resources::default(),
             feature_flags,
         }
@@ -960,12 +1013,22 @@ impl Realm {
         self.isolate
     }
 
-    pub(crate) fn id(&self) -> scope::IsolateId {
-        self.id
+    pub(crate) fn state(&self) -> &Arc<IsolateState> {
+        &self.state
+    }
+
+    /// Gets or creates the cached `FunctionTemplate` for a resource type, built against
+    /// this realm's compatibility flags.
+    pub(crate) fn get_constructor<R: Resource>(&mut self) -> &v8::Global<v8::FunctionTemplate> {
+        self.resources
+            .get_constructor::<R>(self.isolate, &self.state, self.feature_flags.reader())
     }
 }
 
-#[expect(unsafe_code, reason = "asks V8 whether the isolate is locked")]
+#[expect(
+    unsafe_code,
+    reason = "detaches from the isolate, which must be locked, and closes its state"
+)]
 impl Drop for Realm {
     fn drop(&mut self) {
         debug_assert!(
@@ -973,6 +1036,17 @@ impl Drop for Realm {
             unsafe { self.isolate.is_locked() },
             "Realm must be dropped while holding the isolate lock"
         );
+        // Dropped before the state is closed, so that their handles are reset rather than
+        // left to `Dispose`.
+        drop(std::mem::take(&mut self.resources));
+        // SAFETY: the Realm is dropped under the isolate lock, while no `Lock` is in use
+        // (guaranteed by the embedder; see the type's documentation).
+        let isolate = unsafe { Isolate::from_raw(self.isolate.as_ffi()) };
+        self.state.close(isolate);
+        // The isolate gives this reference back once it is disposed.
+        let state = Arc::into_raw(Arc::clone(&self.state));
+        // SAFETY: the isolate is valid and locked, and this Realm is the one attached to it.
+        unsafe { ffi::realm_detach(isolate.as_ffi(), state) };
     }
 }
 
@@ -983,8 +1057,51 @@ impl Drop for Realm {
 #[expect(unsafe_code, reason = "wraps the isolate pointer C++ passes in")]
 unsafe fn realm_create(isolate: *mut v8::ffi::Isolate, feature_flags_data: &[u8]) -> Box<Realm> {
     let feature_flags = FeatureFlags::from_bytes(feature_flags_data);
-    // SAFETY: isolate pointer is valid (guaranteed by C++ caller).
-    unsafe { Box::new(Realm::new(v8::IsolatePtr::from_ffi(isolate), feature_flags)) }
+    // SAFETY: isolate pointer is valid and locked (guaranteed by C++ caller).
+    let mut realm =
+        unsafe { Box::new(Realm::new(v8::IsolatePtr::from_ffi(isolate), feature_flags)) };
+    debug_assert!(
+        // SAFETY: as above.
+        unsafe { ffi::realm_can_attach(isolate) },
+        "an isolate has at most one Realm"
+    );
+    // SAFETY: as above; the Realm keeps its address for as long as it is attached, as it
+    // lives in the `Box` until `Realm::drop` detaches it.
+    unsafe { ffi::realm_attach(isolate, &mut realm) };
+    realm
+}
+
+/// See the bridge declaration.
+#[expect(
+    unsafe_code,
+    reason = "takes back the reference to the state that C++ held"
+)]
+unsafe fn isolate_disposed(state: *const IsolateState) {
+    // SAFETY: `state` comes from `Arc::into_raw` in `Realm::drop`, and C++ hands it back once.
+    let state = unsafe { Arc::from_raw(state) };
+    state.isolate_disposed();
+}
+
+/// See the bridge declaration.
+#[expect(unsafe_code, reason = "called by C++ with a raw isolate pointer")]
+unsafe fn realm_reset_globals_awaiting_lock(isolate: *mut v8::ffi::Isolate) {
+    // A Rust scope of the isolate open on this thread means that C++ locked the isolate again
+    // under a `Lock`, which may hold a reference to the Realm. The queue then waits for the
+    // next lock.
+    let nested = scope::scope_owner::current() == isolate;
+    debug_assert!(
+        !nested,
+        "the isolate was locked again while a Rust scope of it is open"
+    );
+    if nested {
+        return;
+    }
+    // SAFETY: the isolate is valid and locked by this thread, and no `Lock` is in use
+    // (guaranteed by the C++ caller, and checked above).
+    let isolate = unsafe { Isolate::from_raw(isolate) };
+    // SAFETY: the Realm is attached while the hook that calls this is installed.
+    let realm = unsafe { &*ffi::realm_from_isolate(isolate.as_ffi()) };
+    realm.state.reset_awaiting_lock(isolate);
 }
 
 /// See the bridge declaration: drains the cached resource-template persistent handles for

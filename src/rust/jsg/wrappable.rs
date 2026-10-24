@@ -99,7 +99,7 @@ use crate::v8;
 /// - **`Cell<T>`** — reads through `as_ptr()` (sound under single-threaded GC).
 /// - **`jsg::Rc<T>`** — visits the reference via `GcVisitor::visit_rc`.
 /// - **`jsg::Weak<T>`** — no-op (weak refs don't keep targets alive).
-/// - **`jsg::v8::Global<T>`** — visits via `GcVisitor::visit_global`.
+/// - **`jsg::v8::TracedGlobal<T>`** — visits via `GcVisitor::visit_traced_global`.
 pub trait Traced {
     /// Visit GC-visible references held by this value.
     ///
@@ -768,7 +768,7 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for Lenient<T> {
         } else {
             match T::try_from_js(lock, value)? {
                 Some(v) => Ok(Lenient::Some(v)),
-                None => Ok(Lenient::Unconvertable(v8::Global::new(lock, value))),
+                None => Ok(Lenient::Unconvertable(v8::TracedGlobal::new(lock, value))),
             }
         }
     }

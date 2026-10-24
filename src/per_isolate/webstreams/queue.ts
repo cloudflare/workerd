@@ -1356,10 +1356,12 @@ class ByteStreamCursor
     // ReadableByteStreamControllerProcessPullIntoDescriptorsUsingQueue:
     // fill ALL ready descriptors first, THEN resolve them. This ensures
     // byobRequest is null by the time any resolve fires (which may trigger
-    // user-observable code via Object.prototype.then interception).
-    let filledPullIntos: AnsweredRead[] | undefined;
+    // user-observable code via Object.prototype.then interception). The
+    // reads answered done at the close sentinel join the same batch, so
+    // every read resolves in list order.
+    let answered: AnsweredRead[] | undefined;
     if (committed !== undefined) {
-      filledPullIntos = [
+      answered = [
         {
           desc: committed,
           result: createReadResult(filledView(committed), false),
@@ -1384,8 +1386,9 @@ class ByteStreamCursor
         }
         // Synthetic descriptors for DEFAULT reads (autoAllocateChunkSize)
         // follow default-read close semantics: ReadableStreamClose drains
-        // read requests with done, so they resolve { done: true } now.
-        this.#resolveDefaultPullIntosAsDone();
+        // read requests with done, so they are answered { done: true } now.
+        if (answered === undefined) answered = [];
+        this.#answerDefaultPullIntosAsDone(answered);
         // TRUE BYOB reads settle via the deferred end-of-data settlement:
         // the source may still call respond(0) in this same turn
         // (RespondInClosedState reaches commitPullIntosOnClose() via the
@@ -1408,8 +1411,8 @@ class ByteStreamCursor
       }
       const prefixView = this.#takePrefixForDefaultPullInto();
       if (prefixView !== undefined) {
-        if (filledPullIntos === undefined) filledPullIntos = [];
-        ArrayPrototypePush(filledPullIntos, {
+        if (answered === undefined) answered = [];
+        ArrayPrototypePush(answered, {
           desc: head,
           result: createReadResult(prefixView, false),
         });
@@ -1418,14 +1421,14 @@ class ByteStreamCursor
       this.#fillFromQueue(head);
       if (head.bytesFilled < head.minimumFill) break; // need more data
       this.#pendingPullIntos.shift();
-      if (filledPullIntos === undefined) filledPullIntos = [];
-      ArrayPrototypePush(filledPullIntos, {
+      if (answered === undefined) answered = [];
+      ArrayPrototypePush(answered, {
         desc: head,
         result: createReadResult(filledView(head), false),
       });
     }
-    // Phase 2: resolve all filled descriptors after the fill loop.
-    if (filledPullIntos !== undefined) resolveAnswered(filledPullIntos);
+    // Phase 2: resolve every answered read, after the fill loop.
+    if (answered !== undefined) resolveAnswered(answered);
     if (errored) return;
     if (this.#prefix !== undefined && super.hasPendingRead) {
       this.fulfillFirstPendingRead(this.#takePrefix());
@@ -1496,13 +1499,13 @@ class ByteStreamCursor
     for (let i = 0; i < pending.length; i++) {
       const desc = pending.get(i) as PullIntoDescriptor;
       // 'none': released reader (or an auto-allocate read already
-      // resolved by #resolveDefaultPullIntosAsDone, or a BYOB read settled
+      // answered by #answerDefaultPullIntosAsDone, or a BYOB read settled
       // by an earlier invocation) — nothing to settle.
       if (desc.readerType === 'none') continue;
       let result: ReadableStreamReadResult<ArrayBufferView>;
       if (desc.readerType === 'default') {
-        // Defensive: auto-allocate default reads normally resolve in
-        // #resolveDefaultPullIntosAsDone before this runs. Default-read
+        // Defensive: auto-allocate default reads are normally answered by
+        // #answerDefaultPullIntosAsDone before this runs. Default-read
         // close semantics: done with value undefined, never a view.
         result = createReadResult(undefined, true);
       } else {
@@ -1522,18 +1525,17 @@ class ByteStreamCursor
     resolveAnswered(answered);
   }
 
-  // Resolve synthetic default-read descriptors (autoAllocateChunkSize) as
-  // done at end-of-stream; true BYOB reads are left for the deferred
-  // end-of-data settlement (or a same-turn respond(0)). In practice the list
-  // is homogeneous (single reader type at a time), so the filtering is
-  // defensive.
+  // Answer synthetic default-read descriptors (autoAllocateChunkSize) done
+  // at end-of-stream, adding them to `answered`, which #processPullIntos
+  // resolves after the reads it filled ahead of them (see AnsweredRead);
+  // true BYOB reads are left for the deferred end-of-data settlement (or a
+  // same-turn respond(0)). In practice the list is homogeneous (single
+  // reader type at a time), so the filtering is defensive.
   //
   // The descriptor is KEPT in the list (not shifted) so that a subsequent
   // respond(0) finds it and doesn't throw; it is marked 'none', which
-  // commitPullIntosOnClose skips. Every read is answered before any
-  // resolves (see AnsweredRead).
-  #resolveDefaultPullIntosAsDone(): void {
-    const answered: AnsweredRead[] = [];
+  // commitPullIntosOnClose skips.
+  #answerDefaultPullIntosAsDone(answered: AnsweredRead[]): void {
     const pending = this.#pendingPullIntos;
     for (let i = 0; i < pending.length; i++) {
       const desc = pending.get(i) as PullIntoDescriptor;
@@ -1545,7 +1547,6 @@ class ByteStreamCursor
         });
       }
     }
-    resolveAnswered(answered);
   }
 
   // byobRequest.respond(bytesWritten) — zero-copy path. The controller has

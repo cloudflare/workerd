@@ -71,12 +71,12 @@ pub fn error(tokens: &impl ToTokens, msg: &str) -> TokenStream {
 /// Handles combined forms like `name = "Foo", custom_trace` by parsing the
 /// token stream as comma-separated `syn::Meta` items and finding the first
 /// `name = "..."` name-value pair.
-pub fn extract_name_attribute(tokens: TokenStream) -> Option<String> {
+pub fn extract_name_attribute(tokens: impl Into<proc_macro2::TokenStream>) -> Option<String> {
     use syn::Meta;
     use syn::punctuated::Punctuated;
 
     let parsed: Punctuated<Meta, syn::Token![,]> =
-        syn::parse::Parser::parse(Punctuated::parse_terminated, tokens).ok()?;
+        syn::parse::Parser::parse2(Punctuated::parse_terminated, tokens.into()).ok()?;
 
     for meta in &parsed {
         if let Meta::NameValue(nv) = meta

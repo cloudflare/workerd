@@ -31,10 +31,18 @@ jobs:
   test:
     strategy:
       matrix:
+        # The macOS job runs on the macos-26-xlarge runner, but keeps macos-15-xlarge as its
+        # description so that the job name, which merge checks require, stays the same.
         os:
           [
             { name: linux-arm, arch: ARM64, image: ubuntu-22.04-arm-16core },
-            { name: macOS, arch: ARM64, image: macos-15-xlarge, use_lld: true },
+            {
+              name: macOS,
+              arch: ARM64,
+              image: macos-26-xlarge,
+              description: macos-15-xlarge,
+              use_lld: true,
+            },
             { name: windows, arch: X64, image: windows-2025-16core },
           ]
         config: [
@@ -60,10 +68,10 @@ jobs:
           # due to resource constraints, exclude the macOS and x64 Linux debug runners for now.
           # linux-asan and arm64 linux-debug should provide sufficient coverage for building in the
           # debug configuration.
-          - os: { name: macOS, arch: ARM64, image: macos-15-xlarge }
+          - os: { name: macOS, arch: ARM64, image: macos-26-xlarge }
             config: { suffix: -debug }
       fail-fast: false
-    name: test (${{ matrix.os.name }}, ${{ matrix.os.image}}${{matrix.config.suffix != '' && format(', {0}', matrix.config.suffix) || ''}})
+    name: test (${{ matrix.os.name }}, ${{ matrix.os.description || matrix.os.image }}${{matrix.config.suffix != '' && format(', {0}', matrix.config.suffix) || ''}})
     uses: ./.github/workflows/_bazel.yml
     with:
       image: ${{ matrix.os.image }}

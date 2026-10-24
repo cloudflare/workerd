@@ -29,6 +29,7 @@ struct MaybeLocal;
 struct Global;
 struct TracedReference;
 struct Realm;
+struct IsolateState;
 struct GcVisitor;
 enum class BackingStoreInitializationMode : ::std::uint8_t;
 enum class ExceptionType : ::std::uint8_t;
@@ -94,14 +95,16 @@ void wrappable_visit_ref(
 /// strong↔traced dual-mode switching as `jsg::Data` / `jsg::V8Ref<T>`.
 ///
 /// `global` points to the `ptr` field of `ffi::Global` (the strong handle).
-/// `traced` is the `ffi::TracedReference` slot from `Global<T>` on the Rust side.
+/// `traced` is the `ffi::TracedReference` slot from `TracedGlobal<T>` on the Rust side.
 /// Both are mutated in-place by this function.
 void wrappable_visit_global(GcVisitor* visitor, uintptr_t* global, TracedReference& traced);
 
-/// Resets a `v8::TracedReference`, releasing the weak GC handle.
-/// Must be called when a `Global<T>` is dropped in traced mode to avoid
-/// leaking a live `v8::TracedReference`.
-void traced_reference_reset(TracedReference& traced);
+/// The isolate of the object that `visitor` is visiting (`jsg::GcVisitor::v8Isolate`), or null.
+Isolate* gc_visitor_v8_isolate(GcVisitor* visitor);
+
+/// Makes a weak `v8::Global` strong again, if it is not empty. `global` points to the `ptr`
+/// field of the `ffi::Global`.
+void global_clear_weak(uintptr_t* global);
 
 // Local<T>
 Global local_to_global(Isolate* isolate, Local value);
@@ -112,6 +115,7 @@ Local local_new_object(Isolate* isolate);
 Local local_new_null(Isolate* isolate);
 Local local_new_undefined(Isolate* isolate);
 bool local_eq(const Local& lhs, const Local& rhs);
+bool local_is_compatible_with_isolate(Isolate* isolate, const Local& value);
 bool local_is_string(const Local& val);
 bool local_is_boolean(const Local& val);
 bool local_is_number(const Local& val);
@@ -358,6 +362,9 @@ Local function_template_get_function(Isolate* isolate, const Global& tmpl);
 
 // Realm
 Realm* realm_from_isolate(Isolate* isolate);
+bool realm_can_attach(Isolate* isolate);
+void realm_attach(Isolate* isolate, Realm& realm);
+void realm_detach(Isolate* isolate, const IsolateState* state);
 
 // Errors
 // Builds an exception whose message is raw bytes interpreted as UTF-8. Invalid

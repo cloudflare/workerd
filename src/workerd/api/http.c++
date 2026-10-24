@@ -1631,7 +1631,6 @@ kj::Maybe<kj::Rc<ActorCallRetryState>> makeActorCallRetryState(
     .callType = ActorRetryCallType::FETCH,
     .enforcementEnabled = ActorRetryGateEnabled::YES,
     .payloadReplayable = ActorCallPayloadReplayable(request.canRewindBody()),
-    .probeCandidate = fetcher.getActorRetryProbeCandidate(),
   };
   return kj::rc<ActorCallRetryState>(
       context.getIoChannelFactory().getTimer(), context.getMetrics(), config, policy, callStart);
@@ -1875,13 +1874,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
   // next call. The set->getClientWithTracing->wrap*SubrequestClient sequence is synchronous.
   auto targetRetryable = fetcher->getActorTargetRetryability()
                              .orDefault(ActorCallTargetRetryable::NO);
-  // A redirect hop's probe could not tell how much of the call's retry timeout earlier hops spent.
-  kj::Maybe<ActorRetryCandidate> probeCandidate;
-  if (urlList.size() == 1) {
-    probeCandidate = fetcher->getActorRetryProbeCandidate();
-  }
   ioContext.getMetrics().setNextSubrequestRetryEligibility(
-      SubrequestBodyRewindable(jsRequest->canRewindBody()), targetRetryable, probeCandidate);
+      SubrequestBodyRewindable(jsRequest->canRewindBody()), targetRetryable);
 
   // Get client and trace context (if needed) in one clean call.
   auto cfBlobJson = jsRequest->serializeCfBlobJson(js);
@@ -2981,13 +2975,6 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
 kj::Maybe<ActorCallTargetRetryable> Fetcher::getActorTargetRetryability() {
   KJ_IF_SOME(outgoingFactory, channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>()) {
     return outgoingFactory->getActorTargetRetryability();
-  }
-  return kj::none;
-}
-
-kj::Maybe<ActorRetryCandidate> Fetcher::getActorRetryProbeCandidate() {
-  KJ_IF_SOME(outgoingFactory, channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>()) {
-    return outgoingFactory->getActorRetryProbeCandidate();
   }
   return kj::none;
 }

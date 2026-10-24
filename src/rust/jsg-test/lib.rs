@@ -58,6 +58,15 @@ mod ffi {
             callback: unsafe fn(usize /* callback */, *mut Isolate, Pin<&mut EvalContext>),
         );
 
+        /// Drops the realm, then calls `callback` and runs a full GC, under the isolate lock.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn drop_realm_then_gc(
+            self: &TestHarness,
+            data: usize, /* callback */
+            callback: unsafe fn(usize /* callback */),
+        );
+
         pub unsafe fn eval(
             self: &EvalContext,
             code: &str,
@@ -71,6 +80,21 @@ mod ffi {
         #[expect(clippy::allow_attributes)] // Only used in tests, but #[expect(dead_code)] fails during test builds
         #[allow(dead_code)]
         pub unsafe fn request_gc(isolate: *mut Isolate, gc_type: GcType);
+
+        /// Calls `callback` with the isolate unlocked (`v8::Unlocker`), then locks it again.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn run_unlocked(
+            isolate: *mut Isolate,
+            data: usize, /* callback */
+            callback: unsafe fn(usize /* callback */),
+        );
+
+        /// `v8::HeapStatistics::used_global_handles_size()`: the bytes of the isolate's
+        /// global and traced handle nodes in use.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn used_global_handles_size(isolate: *mut Isolate) -> usize;
 
         /// Creates a V8 object with the C++ `WORKERD_WRAPPABLE_TAG` in its internal fields.
         /// Used to test that Rust unwrap correctly rejects non-Rust wrappable objects.
@@ -88,6 +112,8 @@ mod ffi {
         #[allow(dead_code)]
         pub fn cpp_sees_empty_maybe_local(value: MaybeLocal) -> bool;
 
+        /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
+        pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
     }
 }
 
@@ -290,6 +316,45 @@ impl Harness {
         }
     }
 
+    /// Drops the realm, as the isolate's teardown does before it disposes the isolate, then runs
+    /// `f` and a full GC, all with the isolate locked but no context or scope. `f` therefore
+    /// cannot use any handle. The harness, which cannot run anything without its realm, is
+    /// dropped afterwards.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `f` panics, once the GC has run.
+    pub fn drop_realm_then_gc<F: FnOnce()>(self, f: F) {
+        struct Call<F> {
+            f: Option<F>,
+            panic: Option<Box<dyn std::any::Any + Send>>,
+        }
+
+        fn trampoline<F: FnOnce()>(data: usize) {
+            // SAFETY: data was cast from &raw mut Call<F> in drop_realm_then_gc below.
+            let call = unsafe { &mut *(data as *mut Call<F>) };
+            let Some(f) = call.f.take() else {
+                return;
+            };
+            if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+                call.panic = Some(payload);
+            }
+        }
+
+        let mut call = Call {
+            f: Some(f),
+            panic: None,
+        };
+        // SAFETY: `call` is valid for the duration of drop_realm_then_gc.
+        unsafe {
+            self.0
+                .drop_realm_then_gc(&raw mut call as usize, trampoline::<F>);
+        }
+        if let Some(payload) = call.panic {
+            std::panic::resume_unwind(payload);
+        }
+    }
+
     pub fn request_gc(lock: &mut jsg::Lock<'_>) {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe { ffi::request_gc(lock.isolate().as_ffi(), ffi::GcType::Full) };
@@ -298,6 +363,67 @@ impl Harness {
     pub fn request_minor_gc(lock: &mut jsg::Lock<'_>) {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe { ffi::request_gc(lock.isolate().as_ffi(), ffi::GcType::Minor) };
+    }
+
+    /// Runs `f` with the isolate unlocked, as code that runs on a thread without the isolate
+    /// lock would, and locks it again afterwards. `lock` is borrowed for the duration, so `f`
+    /// cannot use any handle; it must not touch the isolate in any other way either.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `f` panics, once the isolate is locked again.
+    pub fn with_isolate_unlocked<F: FnOnce() -> R, R>(lock: &mut jsg::Lock<'_>, f: F) -> R {
+        struct Call<F, R> {
+            f: Option<F>,
+            result: Option<Result<R, Box<dyn std::any::Any + Send>>>,
+        }
+
+        fn trampoline<F: FnOnce() -> R, R>(data: usize) {
+            // SAFETY: data was cast from &raw mut Call<F, R> in with_isolate_unlocked below.
+            let call = unsafe { &mut *(data as *mut Call<F, R>) };
+            let Some(f) = call.f.take() else {
+                return;
+            };
+            // The scopes open on this thread stand for the isolate lock, which `f` runs
+            // without, so they are set aside while it runs.
+            // SAFETY: `f` has no handle to use, and opens no scope.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+                jsg::allow_scopes_of_another_isolate(f)
+            }));
+            call.result = Some(result);
+        }
+
+        let mut call = Call::<F, R> {
+            f: Some(f),
+            result: None,
+        };
+        // SAFETY: the isolate is locked (guaranteed by Lock), and `call` is valid for the
+        // duration of run_unlocked.
+        unsafe {
+            ffi::run_unlocked(
+                lock.isolate().as_ffi(),
+                &raw mut call as usize,
+                trampoline::<F, R>,
+            );
+        }
+        match call.result.expect("the callback ran") {
+            Ok(result) => result,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+
+    /// The bytes of the isolate's global and traced handle nodes in use: grows when a `Global`
+    /// or `TracedGlobal` is created or GC installs a traced reference, and shrinks when V8 frees
+    /// a node.
+    ///
+    /// Tests compare it with counts taken earlier, which encodes V8's handle accounting: the
+    /// sizes of global and traced handle nodes, and the handles V8 itself keeps in use, such as
+    /// the one each `run_in_context` call leaves for its context. A comparison that fails after
+    /// a V8 update may mean that this accounting changed rather than that a handle leaked.
+    #[must_use]
+    pub fn used_global_handles_size(lock: &mut jsg::Lock<'_>) -> usize {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::used_global_handles_size(lock.isolate().as_ffi()) }
     }
 
     /// Creates a V8 object tagged with the C++ `WORKERD_WRAPPABLE_TAG`.
@@ -310,6 +436,13 @@ impl Harness {
             v8::Local::from_ffi(local)
         }
     }
+}
+
+/// Whether `a` and `b` belong to the same `v8::IsolateGroup`.
+pub fn isolates_share_group(a: &jsg::Isolate, b: &jsg::Isolate) -> bool {
+    // SAFETY: both references keep their isolates alive; reading an isolate's group needs no
+    // lock.
+    unsafe { ffi::isolates_share_group(a.as_ffi(), b.as_ffi()) }
 }
 
 impl Default for Harness {

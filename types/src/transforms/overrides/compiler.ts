@@ -65,15 +65,32 @@ const definesPath = '/$virtual/defines';
 // Converts and collects all overrides and defines as TypeScript source files.
 // Also returns a set of definitions that should be replaced by their override.
 export function compileOverridesDefines(
-  root: StructureGroups
+  root: StructureGroups,
+  included: ReadonlySet<string>
 ): [sources: SourcesMap, replacements: Set<string>] {
   const sources = new SourcesMap();
   // Types that need their definition completely replaced by their override
   const replacements = new Set<string>();
+  const emittedNames = new Set<string>();
+  root.groups.forEach((group) => {
+    group.structures.forEach((structure) => {
+      if (included.has(structure.fullyQualifiedName)) {
+        emittedNames.add(getTypeName(structure));
+      }
+    });
+  });
 
   root.groups.forEach((group) => {
     group.structures.forEach((structure) => {
       const name = getTypeName(structure);
+      // A compatibility-selected replacement owns its name. Metadata from an
+      // inactive implementation must not override or add defines to that type.
+      if (
+        !included.has(structure.fullyQualifiedName) &&
+        emittedNames.has(name)
+      ) {
+        return;
+      }
       const override = structure.tsOverride.trim();
       const define = structure.tsDefine.trim();
 
