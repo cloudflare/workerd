@@ -1,0 +1,18 @@
+# Existing uses of C++ JSG in Rust JSG's C++ shims, checked by cpp-jsg-allowlist-test.py.
+#
+# C++ JSG will be removed, so these counts may only go down (src/rust/jsg/README.md, "Safety
+# rules", rule 3). Don't raise a count or add a line. When you remove a use, lower its count,
+# and delete the line when it reaches zero.
+#
+# Format: <path from the repository root> <construct> <count>
+
+src/rust/jsg/ffi.c++ jsg::Lock 2
+src/rust/jsg/ffi.c++ JSG_TRY 4
+src/rust/jsg/ffi.c++ jsg::check 11
+src/rust/jsg/ffi.c++ JsExceptionThrown 1
+src/rust/jsg/ffi.c++ createTunneledException 2
+src/rust/jsg/ffi.c++ makeInternalError 1
+src/rust/jsg/ffi.c++ jsg::throw 2
+src/rust/jsg/jsg.h jsg::Lock 3
+src/rust/jsg/jsg.h JsExceptionThrown 1
+src/rust/jsg/jsg.h jsg::Data 1
