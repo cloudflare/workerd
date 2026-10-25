@@ -521,6 +521,7 @@ wd_cc_library(
         "//src/workerd/io:features",
         "//src/workerd/jsg",
         "@capnp-cpp//src/kj",
+        "@com_googlesource_chromium_icu//:icu",
         "@simdutf",
     ],
 )

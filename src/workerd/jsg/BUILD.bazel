@@ -127,6 +127,7 @@ wd_cc_library(
     ],
     implementation_deps = [
         "//src/workerd/util:entropy",
+        "@com_googlesource_chromium_icu//:icu",
         "@simdutf",
         "@ssl",
     ],
@@ -262,6 +263,7 @@ wd_cc_library(
         "//src/workerd/util:sentry",
         "//src/workerd/util:strings",
         "@ada-url",
+        "@com_googlesource_chromium_icu//:icu",
     ],
     visibility = ["//visibility:public"],
     deps = [

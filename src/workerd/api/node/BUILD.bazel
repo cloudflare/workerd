@@ -90,6 +90,7 @@ wd_cc_library(
     ],
     implementation_deps = [
         "//src/rust/i18n",
+        "@com_googlesource_chromium_icu//:icu",
         "@nbytes",
         "@simdutf",
     ],
