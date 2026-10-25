@@ -252,6 +252,20 @@ match lock.try_catch(|lock| callback.call::<Number>(lock, None, &[]))? {
 }
 ```
 
+## Type Conversions
+
+The module docs of `wrappable.rs` list every Rust type that converts to or from JavaScript, and
+how. Most convert both ways. Some convert only from JavaScript, so they can be method parameters
+but not return values:
+
+- `u8`, `u16`, `u32`, `i8`, `i16` and `i32`: a value converted to a number, which must be in range.
+  Like C++ JSG's integers.
+- `i64`: a `BigInt` that fits, or any other value converted to a number, which must be finite and
+  in range, and truncates toward zero. Like C++ JSG's `int64_t`.
+- `SystemTime`: a `Date`, or a number of milliseconds since the epoch, within the range of
+  `kj::Date`. Like C++ JSG's `kj::Date`.
+- `&[T]` and typed-array slices such as `&[u8]`.
+
 ## Union Types
 
 To accept JavaScript values that can be one of several types, define an enum with `#[jsg_oneof]`:

@@ -262,6 +262,14 @@ bool local_is_name(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsName();
 }
 
+bool local_is_big_int(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsBigInt();
+}
+
+bool local_is_date(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsDate();
+}
+
 bool local_is_shared_array_buffer(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsSharedArrayBuffer();
 }
@@ -402,6 +410,16 @@ MaybeLocal local_symbol_description(Isolate* isolate, const Local& value) {
   }
   // Description is always a String when present.
   return maybe_local_to_ffi(v8::MaybeLocal<v8::String>(desc.As<v8::String>()));
+}
+
+// Local<BigInt>
+int64_t local_big_int_int64_value(const Local& value, bool& lossless) {
+  return local_as_ref_from_ffi<v8::BigInt>(value)->Int64Value(&lossless);
+}
+
+// Local<Date>
+double local_date_value_of(const Local& value) {
+  return local_as_ref_from_ffi<v8::Date>(value)->ValueOf();
 }
 
 // Local<Function>
