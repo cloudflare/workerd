@@ -578,6 +578,21 @@ impl TerminatingPromises {
         record("resolve", resolver.resolve(lock, value));
         record("reject", resolver.reject(lock, value));
         record("reject_with_error", resolver.reject_with_error(lock, &err));
+        // An error that isn't pending: creating its exception while execution is terminating
+        // fails a V8 debug check, so none of these creates it.
+        let type_error = jsg::Error::new_type_error("rejected while terminating");
+        record(
+            "exception(TypeError)",
+            lock.exception(&type_error).map(|_| ()),
+        );
+        record(
+            "reject_with_error(TypeError)",
+            resolver.reject_with_error(lock, &type_error),
+        );
+        record(
+            "Promise::rejected_with_error(TypeError)",
+            v8::Promise::rejected_with_error(lock, &type_error).map(|_| ()),
+        );
         self.still_pending
             .set(promise.state() == PromiseState::Pending);
         *self.pending.borrow_mut() = pending;
@@ -587,7 +602,8 @@ impl TerminatingPromises {
 
 /// While execution is terminating, every promise operation creates and settles nothing and
 /// returns a pending error, so that returning it keeps the termination. Entering V8 would clear
-/// the termination, and JavaScript would run on.
+/// the termination, and JavaScript would run on. Neither does `Lock::exception` create the
+/// exception for an error.
 #[test]
 fn promise_operations_while_terminating_keep_the_termination() {
     crate::Harness::new().run_in_context(|lock, ctx| {
@@ -614,6 +630,9 @@ fn promise_operations_while_terminating_keep_the_termination() {
                 "resolve: true",
                 "reject: true",
                 "reject_with_error: true",
+                "exception(TypeError): true",
+                "reject_with_error(TypeError): true",
+                "Promise::rejected_with_error(TypeError): true",
             ]
         );
         assert!(promises.still_pending.get());

@@ -970,10 +970,21 @@ impl<'s> Lock<'s> {
     /// # Errors
     ///
     /// Returns `err` itself if [`Error::is_pending`] is true: the exception it stands for is
-    /// pending in V8, and returning the error propagates it.
+    /// pending in V8, and returning the error propagates it. While execution is terminating,
+    /// creates nothing and returns [`Error::pending`]'s error, so that returning it keeps the
+    /// termination; an internal error's message is still logged.
     pub fn exception(&mut self, err: &Error) -> Result<v8::Local<'s, v8::Value>> {
         if err.is_pending() {
             return Err(err.clone());
+        }
+        if self.is_execution_terminating() {
+            // Creating the exception while execution is terminating fails a V8 debug check, and
+            // nothing could be rejected with it.
+            if err.is_internal {
+                // Logs the message and throws nothing.
+                self.throw_internal_error(&err.message);
+            }
+            return Err(Error::pending());
         }
         if err.is_internal {
             // SAFETY: isolate is valid and locked (guaranteed by Lock); the exception lives in
