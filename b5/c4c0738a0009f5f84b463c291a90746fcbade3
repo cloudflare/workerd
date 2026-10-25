@@ -1,0 +1,29 @@
+build/deps/v8.MODULE.bazel
+  s_1b9ab9fb100cf8::t_e4e31f9fbc7c8b 74
+patches/v8/0049-Keep-v8_libshared-private-to-v8.patch
+  s_1b9ab9fb100cf8::t_e3a76925276cdb 1-56
+src/workerd/api/BUILD.bazel
+  s_1b9ab9fb100cf8::t_a60e541d32c87a 524
+src/workerd/api/node/BUILD.bazel
+  s_1b9ab9fb100cf8::t_0d51cc5be80332 93
+src/workerd/io/BUILD.bazel
+  s_1b9ab9fb100cf8::t_91d520549511d9 89
+src/workerd/jsg/BUILD.bazel
+  s_1b9ab9fb100cf8::t_42ee00fef5ee22 130,266
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b5c4c0738a0009f5f84b463c291a90746fcbade3",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}
