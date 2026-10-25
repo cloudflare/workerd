@@ -390,15 +390,16 @@ pub mod ffi {
         ) -> Result<MaybeLocal>;
 
         // Local<Object>
-        // Fallible: the keys are interned with KJ_REQUIRE and jsg::check, and KJ_REQUIREs as
-        // many keys as values.
+        // Fallible: interning a key fails if it is longer than V8's string length limit or V8
+        // fails to create the string, and there must be as many keys as values.
         pub unsafe fn object_new_with_data_properties(
             isolate: *mut Isolate,
             keys: &[&str],
             values: &[Local],
         ) -> Result<Local>;
         // Leave what a setter, getter or Proxy trap throws pending; see `call_into_js()`.
-        // Fallible: the key is interned with KJ_REQUIRE and jsg::check.
+        // Fallible: interning the key fails if it is longer than V8's string length limit or V8
+        // fails to create the string.
         pub unsafe fn local_object_set_property(
             isolate: *mut Isolate,
             object: &mut Local,

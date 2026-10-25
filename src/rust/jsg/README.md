@@ -41,7 +41,7 @@ keeps running.
   and the fast API error path are safe. A shim that calls `isolate->ThrowException` itself must
   check first.
 - Don't discard a `jsg::Error` from a call that ran JavaScript (`Function::call`, `Object::get`,
-  a coercion). It may be the termination, or a JavaScript exception that is still pending (see
+  `Object::set`, a coercion). It may be the termination, or a JavaScript exception that is still pending (see
   [Errors from JavaScript](#errors-from-javascript)). Pass it on with `?` instead of using
   `.ok()`, `unwrap_or`, or `map_err` to a different error. To handle the exception, use
   `Lock::try_catch`.
