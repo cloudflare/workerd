@@ -51,9 +51,7 @@ build:ci-limit-storage --copt="-fno-standalone-debug"
 
 # ci-platform dependent configuration
 
-build:ci-linux-common --copt='-Werror'
-build:ci-linux-common --copt='-Wno-error=#warnings'
-build:ci-linux-common --copt='-Wno-error=deprecated-declarations'
+build:ci-linux-common --config=werror
 
 build:ci-linux --config=ci-linux-common --remote_download_regex=".*src/workerd/server/workerd.*"
 build:ci-linux-arm --config=ci-linux-common
