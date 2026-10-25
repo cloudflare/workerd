@@ -386,14 +386,14 @@ pub mod ffi {
             keys: &[&str],
             values: &[Local],
         ) -> Result<Local>;
+        // Leave what a setter, getter or Proxy trap throws pending; see `call_into_js()`.
+        // Fallible: the key is interned with KJ_REQUIRE and jsg::check.
         pub unsafe fn local_object_set_property(
             isolate: *mut Isolate,
             object: &mut Local,
             key: &str,
             value: Local,
-        );
-        // Leave what a getter or Proxy trap throws pending; see `call_into_js()`. Fallible:
-        // the key is interned with KJ_REQUIRE and jsg::check.
+        ) -> Result<bool>;
         pub unsafe fn local_object_has_property(
             isolate: *mut Isolate,
             object: &Local,
@@ -409,13 +409,13 @@ pub mod ffi {
         // Local<Array>
         pub unsafe fn local_array_length(array: &Local) -> u32;
         pub unsafe fn array_new_with_elements(isolate: *mut Isolate, elements: &[Local]) -> Local;
-        pub unsafe fn local_array_get(isolate: *mut Isolate, array: &Local, index: u32) -> Local;
+        // Leaves what a setter or Proxy trap throws pending; see `call_into_js()`.
         pub unsafe fn local_array_set(
             isolate: *mut Isolate,
             array: &mut Local,
             index: u32,
             value: Local,
-        );
+        ) -> bool;
         // Leaves what a getter or Proxy trap on an element throws pending; see
         // `call_into_js()`. Fallible: KJ_REQUIREs the value is an array.
         pub unsafe fn local_array_iterate(
@@ -1785,20 +1785,34 @@ impl<'s> Local<'s, Array> {
         self.len() == 0
     }
 
-    /// Sets an element at the given index.
+    /// Sets element `index` to `value`, like JS `array[index] = value`.
     ///
-    /// May run JavaScript (setters on the prototype chain).
-    pub fn set(self, lock: &mut Lock<'s>, index: usize, value: Local<'s, Value>) {
-        let mut handle = *self.raw();
-        // SAFETY: lock guarantees the isolate is locked; both handles are valid in scope 's.
-        unsafe {
-            ffi::local_array_set(
-                lock.isolate().as_ffi(),
-                &mut handle,
-                index as u32,
-                value.into_ffi(),
-            );
-        }
+    /// # Errors
+    ///
+    /// If a setter on the prototype chain or a Proxy trap throws, or execution is terminating,
+    /// the exception stays pending and the error is one for which [`Error::is_pending`] is
+    /// true, as for [`Local::<Function>::call`].
+    pub fn set(
+        self,
+        lock: &mut Lock<'s>,
+        index: u32,
+        value: Local<'s, Value>,
+    ) -> crate::Result<()> {
+        self.debug_assert_isolate(lock);
+        value.debug_assert_isolate(lock);
+        call_into_js(lock, |lock| {
+            let mut handle = *self.raw();
+            // SAFETY: lock guarantees the isolate is locked; both handles are valid in scope 's.
+            let ok = unsafe {
+                ffi::local_array_set(
+                    lock.isolate().as_ffi(),
+                    &mut handle,
+                    index,
+                    value.into_ffi(),
+                )
+            };
+            Ok(ok.then_some(()))
+        })
     }
 
     /// Iterates over array elements using V8's native `Array::Iterate()`.
@@ -3112,20 +3126,29 @@ impl Object {
 }
 
 impl<'s> Local<'s, Object> {
-    /// Sets `key` to `value`. May run JavaScript (setters, proxy traps).
-    pub fn set(self, lock: &mut Lock<'s>, key: &str, value: Local<'s, Value>) {
+    /// Sets `key` to `value`, like JS `obj[key] = value`.
+    ///
+    /// # Errors
+    ///
+    /// If a setter on the prototype chain or a Proxy trap throws, or execution is terminating,
+    /// the exception stays pending and the error is one for which [`Error::is_pending`] is
+    /// true, as for [`Local::<Function>::call`].
+    pub fn set(self, lock: &mut Lock<'s>, key: &str, value: Local<'s, Value>) -> crate::Result<()> {
         self.debug_assert_isolate(lock);
         value.debug_assert_isolate(lock);
-        let mut handle = *self.raw();
-        // SAFETY: isolate is valid and locked (guaranteed by Lock); handles are valid in 's.
-        unsafe {
-            ffi::local_object_set_property(
-                lock.isolate().as_ffi(),
-                &mut handle,
-                key,
-                value.into_ffi(),
-            );
-        }
+        call_into_js(lock, |lock| {
+            let mut handle = *self.raw();
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); handles are valid in 's.
+            let ok = unsafe {
+                ffi::local_object_set_property(
+                    lock.isolate().as_ffi(),
+                    &mut handle,
+                    key,
+                    value.into_ffi(),
+                )
+            }?;
+            Ok(ok.then_some(()))
+        })
     }
 
     /// Whether `key` is in the object or its prototype chain.

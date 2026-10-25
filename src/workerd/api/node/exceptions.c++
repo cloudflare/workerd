@@ -9,7 +9,7 @@ namespace workerd::api::node {
 
 namespace rust_exc = ::workerd::rust::node_exceptions;
 
-// An empty result means the Rust code panicked and threw.
+// An empty result means the Rust code failed or panicked, leaving an exception pending.
 static jsg::JsValue fromRust(::workerd::rust::jsg::MaybeLocal value) {
   v8::Local<v8::Value> local;
   if (!::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(kj::mv(value)).ToLocal(&local)) {

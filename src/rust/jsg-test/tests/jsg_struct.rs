@@ -54,7 +54,7 @@ fn objects_can_be_wrapped_and_unwrapped() {
         assert!(!obj.has(lock, "test").unwrap());
         let value = "value".to_local(lock);
         assert!(value.is_string());
-        obj.set(lock, "test", value);
+        obj.set(lock, "test", value)?;
         assert!(obj.has(lock, "test").unwrap());
         Ok(())
     });
@@ -115,11 +115,11 @@ fn empty_object_and_property_setting() {
         assert!(obj.get(lock, "nonexistent").unwrap().is_undefined());
 
         let str_value = "hello".to_local(lock);
-        obj.set(lock, "key1", str_value);
+        obj.set(lock, "key1", str_value)?;
         assert!(obj.has(lock, "key1").unwrap());
 
         let num_value = 100u32.to_local(lock);
-        obj.set(lock, "key2", num_value);
+        obj.set(lock, "key2", num_value)?;
         assert!(obj.has(lock, "key2").unwrap());
 
         let val1 = obj.get(lock, "key1");
@@ -156,7 +156,7 @@ fn nested_object_properties() {
             inner: "nested value".to_owned(),
         };
         let inner_wrapped = inner_instance.to_js(lock);
-        outer.set(lock, "nested", inner_wrapped);
+        outer.set(lock, "nested", inner_wrapped)?;
 
         assert!(outer.has(lock, "nested").unwrap());
         let nested_val = outer.get(lock, "nested");

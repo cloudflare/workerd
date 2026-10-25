@@ -374,7 +374,7 @@ fn object_set_with_value_of_another_isolate_panics_in_debug_builds() {
                     let object = v8::Local::from_ffi(object.into_ffi());
                     let target = lock_b.new_object();
                     assert_isolate_check_panics("setting A's object on B's object", || {
-                        target.set(lock_b, "value", object);
+                        let _ = target.set(lock_b, "value", object);
                     });
                     Ok(())
                 });

@@ -193,14 +193,11 @@ int64_t local_big_int_int64_value(const Local& value, bool& lossless);
 // Local<Date>
 double local_date_value_of(const Local& value);
 
-// Shims that run JavaScript (a call, a getter or Proxy trap, or a coercion through `toString`,
-// `valueOf` or `Symbol.toPrimitive`) catch nothing: if it throws, they return an empty result or
-// false and leave the exception pending, as C++ JSG's `JsExceptionThrown` does. Rust turns that
-// into an `Error` for which `is_pending()` is true (`call_into_js()` in v8.rs), and doesn't call
-// them while execution is terminating. The exceptions are `local_object_set_property`,
-// `local_array_get` and `local_array_set`, which can also run JavaScript (a setter, getter or
-// Proxy trap) but use `jsg::check()` and are not declared as returning `Result`: what JavaScript
-// throws there becomes a Rust panic, which terminates execution (EW-11138).
+// Shims that run JavaScript (a call, a getter, setter or Proxy trap, or a coercion through
+// `toString`, `valueOf` or `Symbol.toPrimitive`) catch nothing: if it throws, they return an empty
+// result or false and leave the exception pending, as C++ JSG's `JsExceptionThrown` does. Rust
+// turns that into an `Error` for which `is_pending()` is true (`call_into_js()` in v8.rs), and
+// doesn't call them while execution is terminating.
 
 // Local<Function>
 // Returns the call's result, or none if it threw, leaving the exception pending.
@@ -212,7 +209,9 @@ MaybeLocal local_function_call(
 // JavaScript: no setter on Object.prototype is called.
 Local object_new_with_data_properties(
     Isolate* isolate, ::rust::Slice<const ::rust::Str> keys, ::rust::Slice<const Local> values);
-void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);
+// Sets `key` to `value` and returns true, or returns false if a setter or Proxy trap threw,
+// leaving the exception pending.
+bool local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);
 // Stores in `has` whether `key` is in the object, and returns true, or returns false if a Proxy
 // trap threw, leaving the exception pending.
 bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key, bool& has);
@@ -225,8 +224,9 @@ Local local_new_array(Isolate* isolate, size_t length);
 uint32_t local_array_length(const Local& array);
 // Returns a new array of `elements`. Runs no JavaScript: no setter on Array.prototype is called.
 Local array_new_with_elements(Isolate* isolate, ::rust::Slice<const Local> elements);
-Local local_array_get(Isolate* isolate, const Local& array, uint32_t index);
-void local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value);
+// Sets element `index` to `value` and returns true, or returns false if a setter or Proxy trap
+// threw, leaving the exception pending.
+bool local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value);
 // Appends the elements to `result` and returns true, or returns false with `result` empty if a
 // getter or Proxy trap on an element threw, leaving the exception pending.
 bool local_array_iterate(Isolate* isolate, Local value, ::rust::Vec<Global>& result);

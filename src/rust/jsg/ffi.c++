@@ -458,15 +458,15 @@ Local object_new_with_data_properties(
   return to_ffi(kj::mv(object));
 }
 
-void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value) {
+// No TryCatch in the shims below that run JavaScript: what it throws stays pending, as in
+// local_function_call().
+
+bool local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value) {
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   auto v8_key = makeInternedStr(isolate, key);
-  ::workerd::jsg::check(v8_obj->Set(context, v8_key, local_from_ffi<v8::Value>(kj::mv(value))));
+  return v8_obj->Set(context, v8_key, local_from_ffi<v8::Value>(kj::mv(value))).IsJust();
 }
-
-// No TryCatch in the shims below that run JavaScript: what it throws stays pending, as in
-// local_function_call().
 
 bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key, bool& has) {
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
@@ -500,16 +500,10 @@ Local array_new_with_elements(Isolate* isolate, ::rust::Slice<const Local> eleme
   return to_ffi(v8::Array::New(isolate, v8Elements.data(), v8Elements.size()));
 }
 
-Local local_array_get(Isolate* isolate, const Local& array, uint32_t index) {
+bool local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value) {
   auto context = isolate->GetCurrentContext();
   auto v8Array = local_as_ref_from_ffi<v8::Array>(array);
-  return to_ffi(::workerd::jsg::check(v8Array->Get(context, index)));
-}
-
-void local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value) {
-  auto context = isolate->GetCurrentContext();
-  auto v8Array = local_as_ref_from_ffi<v8::Array>(array);
-  ::workerd::jsg::check(v8Array->Set(context, index, local_from_ffi<v8::Value>(kj::mv(value))));
+  return v8Array->Set(context, index, local_from_ffi<v8::Value>(kj::mv(value))).IsJust();
 }
 
 // Local<ArrayBuffer>
