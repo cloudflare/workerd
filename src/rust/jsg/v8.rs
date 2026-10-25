@@ -385,16 +385,19 @@ pub mod ffi {
             key: &str,
             value: Local,
         );
+        // Leave what a getter or Proxy trap throws pending; see `call_into_js()`. Fallible:
+        // the key is interned with KJ_REQUIRE and jsg::check.
         pub unsafe fn local_object_has_property(
             isolate: *mut Isolate,
             object: &Local,
             key: &str,
+            has: &mut bool,
         ) -> Result<bool>;
         pub unsafe fn local_object_get_property(
             isolate: *mut Isolate,
             object: &Local,
             key: &str,
-        ) -> Result<Local>;
+        ) -> Result<MaybeLocal>;
 
         // Local<Array>
         pub unsafe fn local_array_length(array: &Local) -> u32;
@@ -405,13 +408,13 @@ pub mod ffi {
             index: u32,
             value: Local,
         );
-        // Fallible: KJ_REQUIREs the value is an array, and tunnels any JS exception
-        // thrown by a proxy trap/getter encountered while iterating elements. See
-        // "Unwrappers" below.
+        // Leaves what a getter or Proxy trap on an element throws pending; see
+        // `call_into_js()`. Fallible: KJ_REQUIREs the value is an array.
         pub unsafe fn local_array_iterate(
             isolate: *mut Isolate,
             value: Local,
-        ) -> Result<Vec<Global>>;
+            result: &mut Vec<Global>,
+        ) -> Result<bool>;
 
         // Local<TypedArray>
         // Fallible: KJ_REQUIREs the view is within the buffer's bounds.
@@ -484,14 +487,22 @@ pub mod ffi {
 
         // Unwrappers
         //
-        // Shims that can throw (coercion via jsg::check, building rust::String/Vec
-        // from V8 data, or KJ_REQUIRE) MUST return Result<T>: workerd-cxx then
-        // catches the throw in C++ instead of aborting across the nounwind FFI
-        // frame. Shims that provably can't throw stay bare (see unwrap_boolean).
-        pub unsafe fn unwrap_string(isolate: *mut Isolate, value: Local) -> Result<String>;
+        // Shims that can throw a C++ exception (building rust::String/Vec from V8
+        // data, or KJ_REQUIRE) MUST return Result<T>: workerd-cxx then catches the
+        // throw in C++ instead of aborting across the nounwind FFI frame. Shims that
+        // provably can't throw stay bare (see unwrap_boolean, unwrap_number).
+        //
+        // unwrap_string and unwrap_number leave what a coercion throws pending; see
+        // `call_into_js()`.
+        pub unsafe fn unwrap_string(
+            isolate: *mut Isolate,
+            value: Local,
+            result: &mut String,
+        ) -> Result<bool>;
         // Infallible: ToBoolean can't throw and builds no rust::String/Vec.
         pub unsafe fn unwrap_boolean(isolate: *mut Isolate, value: Local) -> bool;
-        pub unsafe fn unwrap_number(isolate: *mut Isolate, value: Local) -> Result<f64>;
+        // Infallible: NumberValue reports what JavaScript threw in its result.
+        pub unsafe fn unwrap_number(isolate: *mut Isolate, value: Local, result: &mut f64) -> bool;
         pub unsafe fn unwrap_uint8_array(isolate: *mut Isolate, value: Local) -> Result<Vec<u8>>;
         pub unsafe fn unwrap_uint16_array(isolate: *mut Isolate, value: Local) -> Result<Vec<u16>>;
         pub unsafe fn unwrap_uint32_array(isolate: *mut Isolate, value: Local) -> Result<Vec<u32>>;
@@ -1597,27 +1608,39 @@ impl<'s> Local<'s, Function> {
             arg.debug_assert_isolate(lock);
         }
 
-        // Calling into V8 while execution is terminating would clear the termination.
-        // SAFETY: lock guarantees the isolate is locked.
-        if unsafe { ffi::isolate_is_execution_terminating(lock.isolate().as_ffi()) } {
-            return Err(Error::pending());
-        }
-        // SAFETY: lock guarantees the isolate is locked and a HandleScope is active.
-        // self is a valid Local<Function>; recv and args are valid Local handles. The result
-        // belongs to the lock's scope.
-        let result = unsafe {
-            Local::from_ffi_maybe(ffi::local_function_call(
-                lock.isolate().as_ffi(),
-                self.raw(),
-                recv.raw(),
-                Local::raw_slice(args),
-            ))
-        };
-        match result {
-            Some(result) => R::from_js(lock, result),
-            None => Err(Error::pending()),
-        }
+        let result = call_into_js(lock, |lock| {
+            // SAFETY: lock guarantees the isolate is locked and a HandleScope is active.
+            // self is a valid Local<Function>; recv and args are valid Local handles. The
+            // result belongs to the lock's scope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_function_call(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    recv.raw(),
+                    Local::raw_slice(args),
+                ))
+            })
+        })?;
+        R::from_js(lock, result)
     }
+}
+
+/// Runs `shim`, a call through the FFI that can run JavaScript, and returns what it returns.
+///
+/// Every such call goes through here, so that all of them handle exceptions and termination
+/// alike. `shim` returns `None` if JavaScript threw, leaving the exception pending (see `ffi.h`);
+/// that becomes an error for which [`Error::is_pending`] is true. While execution is terminating,
+/// `shim` is not run and the error is the same: calling into V8 then would clear the termination.
+/// An error from `shim` itself (a C++ exception, such as a failed `KJ_REQUIRE`) is passed on.
+pub(crate) fn call_into_js<'s, T>(
+    lock: &mut Lock<'s>,
+    shim: impl FnOnce(&mut Lock<'s>) -> Result<Option<T>, Error>,
+) -> Result<T, Error> {
+    // SAFETY: lock guarantees the isolate is locked.
+    if unsafe { ffi::isolate_is_execution_terminating(lock.isolate().as_ffi()) } {
+        return Err(Error::pending());
+    }
+    shim(lock)?.ok_or_else(Error::pending)
 }
 
 /// Implements bidirectional `From` conversions between `Local<$from>` and `Local<$to>`.
@@ -1751,12 +1774,21 @@ impl<'s> Local<'s, Array> {
 
     /// Iterates over array elements using V8's native `Array::Iterate()`.
     /// Returns `TracedGlobal` handles because `Local` handles get reused during iteration.
-    /// Errs (rather than aborting) if the value is not an array, or if a proxy
-    /// trap/getter throws while an element is being read during iteration.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the value is not an array. If a getter or Proxy trap on an element throws, or
+    /// execution is terminating, the exception stays pending and the error is one for which
+    /// [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
     pub fn iterate(self, lock: &mut Lock<'s>) -> crate::Result<Vec<TracedGlobal<Value>>> {
-        // SAFETY: lock guarantees the isolate is locked; handle is valid in scope 's.
-        let globals =
-            unsafe { ffi::local_array_iterate(lock.isolate().as_ffi(), self.into_ffi()) }?;
+        let globals = call_into_js(lock, |lock| {
+            let mut globals = Vec::new();
+            // SAFETY: lock guarantees the isolate is locked; handle is valid in scope 's.
+            let ok = unsafe {
+                ffi::local_array_iterate(lock.isolate().as_ffi(), self.into_ffi(), &mut globals)
+            }?;
+            Ok(ok.then_some(globals))
+        })?;
         let state = lock.isolate_state();
         Ok(globals
             .into_iter()
@@ -3027,21 +3059,43 @@ impl<'s> Local<'s, Object> {
         }
     }
 
-    /// Whether `key` is in the object or its prototype chain. A throwing
-    /// Proxy `has` trap is an `Err`.
+    /// Whether `key` is in the object or its prototype chain.
+    ///
+    /// # Errors
+    ///
+    /// If a Proxy `has` trap throws, or execution is terminating, the exception stays pending
+    /// and the error is one for which [`Error::is_pending`] is true, as for
+    /// [`Local::<Function>::call`].
     pub fn has(self, lock: &mut Lock<'s>, key: &str) -> crate::Result<bool> {
-        // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
-        Ok(unsafe { ffi::local_object_has_property(lock.isolate().as_ffi(), self.raw(), key) }?)
+        call_into_js(lock, |lock| {
+            let mut has = false;
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
+            let ok = unsafe {
+                ffi::local_object_has_property(lock.isolate().as_ffi(), self.raw(), key, &mut has)
+            }?;
+            Ok(ok.then_some(has))
+        })
     }
 
-    /// Reads `key`, like JS `obj[key]`: an absent property is `undefined`,
-    /// and a throwing getter or Proxy trap is an `Err`.
+    /// Reads `key`, like JS `obj[key]`: an absent property is `undefined`.
+    ///
+    /// # Errors
+    ///
+    /// If a getter or Proxy trap throws, or execution is terminating, the exception stays
+    /// pending and the error is one for which [`Error::is_pending`] is true, as for
+    /// [`Local::<Function>::call`].
     pub fn get(self, lock: &mut Lock<'s>, key: &str) -> crate::Result<Local<'s, Value>> {
-        // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
-        let local =
-            unsafe { ffi::local_object_get_property(lock.isolate().as_ffi(), self.raw(), key) }?;
-        // SAFETY: the handle was just created in the current HandleScope.
-        Ok(unsafe { Local::from_ffi(local) })
+        call_into_js(lock, |lock| {
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid. The
+            // result was created in the current HandleScope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_object_get_property(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    key,
+                )?)
+            })
+        })
     }
 }
 
