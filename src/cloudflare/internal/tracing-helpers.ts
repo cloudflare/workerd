@@ -65,7 +65,6 @@ export function withSpan<T>(name: string, fn: (span: Span) => T): T {
 /**
  * Marks the operation covered by `span` as failed: records `error` as an
  * exception, then sets the status to error, described by the error's message.
- * This matches how runtime spans implemented in C++ record errors.
  */
 function recordError(span: Span, error: unknown): void {
   try {
