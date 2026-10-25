@@ -104,6 +104,8 @@ use crate::v8;
 /// - **`Cell<T>`** — reads through `as_ptr()` (sound under single-threaded GC).
 /// - **`RefCell<T>`** — traces through `try_borrow()`, so a mutably borrowed cell is skipped;
 ///   debug builds abort if it can hold GC references.
+/// - **[`jsg::Cell`](crate::Cell)**, **[`jsg::RefCell`](crate::RefCell)** — as the std cells,
+///   and make what leaves them strong; see [`Traced::make_strong`].
 /// - **`jsg::Rc<T>`** — visits the reference via `GcVisitor::visit_rc`.
 /// - **`jsg::Weak<T>`** — no-op (weak refs don't keep targets alive).
 /// - **`jsg::v8::TracedGlobal<T>`** — visits via `GcVisitor::visit_traced_global`.
@@ -132,6 +134,24 @@ pub trait Traced {
     /// `std::rc::Rc`, since a clone held by another GC owner would trace it too; see
     /// `README.md` §Safety rules, rule 2.
     fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
+
+    /// Makes every GC reference this value holds strong, and detaches it from the owner that
+    /// traced it, so that the value stays valid once it is moved out of a traced field.
+    ///
+    /// GC visits a reference in the field where it finds it. Once the field's owner is reachable
+    /// only through its JavaScript wrapper, the visit makes the reference weak and relies on the
+    /// owner's trace instead: a `jsg::Rc` gives up its strong reference, and a `TracedGlobal`
+    /// makes its handle weak and traces a node. Moved out of the field, the reference is neither
+    /// strong nor traced, so the next GC can collect what it refers to. [`crate::Cell`] and
+    /// [`crate::RefCell`] call this on a value before it leaves the cell. A value that is not in
+    /// a traced field is strong already, so calling this on it changes nothing.
+    ///
+    /// Takes the isolate because making a reference strong touches V8 handles.
+    ///
+    /// A hand-written implementation calls `make_strong` on every field its `trace` visits.
+    /// There is no default, so that it cannot be forgotten; a type with no GC references does
+    /// nothing, as the impl `jsg_traced!` generates does.
+    fn make_strong(&self, isolate: &mut crate::Isolate);
 }
 
 /// Generates no-op `Traced` implementations for types with no GC-visible references.
@@ -141,6 +161,8 @@ macro_rules! impl_traced_noop {
             fn holds_gc_references() -> bool {
                 false
             }
+
+            fn make_strong(&self, _isolate: &mut crate::Isolate) {}
         })*
     };
 }
@@ -189,6 +211,12 @@ impl<T: Traced> Traced for Option<T> {
             inner.trace(visitor);
         }
     }
+
+    fn make_strong(&self, isolate: &mut crate::Isolate) {
+        if let Some(inner) = self {
+            inner.make_strong(isolate);
+        }
+    }
 }
 
 impl<T: Traced> Traced for Lenient<T> {
@@ -205,6 +233,15 @@ impl<T: Traced> Traced for Lenient<T> {
             inner.trace(visitor);
         }
     }
+
+    fn make_strong(&self, isolate: &mut crate::Isolate) {
+        if let Self::Some(inner) = self {
+            inner.make_strong(isolate);
+        }
+        if let Self::Unconvertable(inner) = self {
+            inner.make_strong(isolate);
+        }
+    }
 }
 
 impl<T: Traced> Traced for Nullable<T> {
@@ -217,6 +254,12 @@ impl<T: Traced> Traced for Nullable<T> {
             inner.trace(visitor);
         }
     }
+
+    fn make_strong(&self, isolate: &mut crate::Isolate) {
+        if let Self::Some(inner) = self {
+            inner.make_strong(isolate);
+        }
+    }
 }
 
 impl<T: Traced> Traced for NonCoercible<T> {
@@ -226,6 +269,10 @@ impl<T: Traced> Traced for NonCoercible<T> {
 
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         self.as_ref().trace(visitor);
+    }
+
+    fn make_strong(&self, isolate: &mut crate::Isolate) {
+        self.as_ref().make_strong(isolate);
     }
 }
 
@@ -237,6 +284,12 @@ impl<T: Traced> Traced for Vec<T> {
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for item in self {
             item.trace(visitor);
+        }
+    }
+
+    fn make_strong(&self, isolate: &mut crate::Isolate) {
+        for item in self {
+            item.make_strong(isolate);
         }
     }
 }
@@ -251,6 +304,12 @@ impl<K, V: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashM
             value.trace(visitor);
         }
     }
+
+    fn make_strong(&self, isolate: &mut crate::Isolate) {
+        for value in self.values() {
+            value.make_strong(isolate);
+        }
+    }
 }
 
 impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
@@ -261,6 +320,12 @@ impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for value in self.values() {
             value.trace(visitor);
+        }
+    }
+
+    fn make_strong(&self, isolate: &mut crate::Isolate) {
+        for value in self.values() {
+            value.make_strong(isolate);
         }
     }
 }
@@ -275,6 +340,12 @@ impl<T: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashSet<
             item.trace(visitor);
         }
     }
+
+    fn make_strong(&self, isolate: &mut crate::Isolate) {
+        for item in self {
+            item.make_strong(isolate);
+        }
+    }
 }
 
 impl<T: Traced> Traced for std::collections::BTreeSet<T> {
@@ -285,6 +356,12 @@ impl<T: Traced> Traced for std::collections::BTreeSet<T> {
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for item in self {
             item.trace(visitor);
+        }
+    }
+
+    fn make_strong(&self, isolate: &mut crate::Isolate) {
+        for item in self {
+            item.make_strong(isolate);
         }
     }
 }
@@ -302,6 +379,14 @@ impl<T: Traced> Traced for std::cell::Cell<T> {
             (*self.as_ptr()).trace(visitor);
         }
     }
+
+    fn make_strong(&self, isolate: &mut crate::Isolate) {
+        // SAFETY: as in `trace`; `make_strong` writes only through the `Cell`s of the GC
+        // references it reaches.
+        unsafe {
+            (*self.as_ptr()).make_strong(isolate);
+        }
+    }
 }
 
 impl<T: Traced> Traced for std::cell::RefCell<T> {
@@ -315,15 +400,13 @@ impl<T: Traced> Traced for std::cell::RefCell<T> {
         // resource, or creating its first or dropping its last strong `jsg::Rc` while it has no
         // wrapper, which switch its references between strong and traced. The contents cannot be
         // read then, so the visit misses their references. A missed GC visit can cost a weak
-        // `TracedGlobal` its value and a `jsg::Rc` the JS wrapper of its resource; a missed switch
-        // can leave a reference weak that should be strong, for a later GC to free, or strong that
-        // should be weak, which leaks. Debug builds abort when that can happen (a panic cannot
-        // unwind out of a visit made from C++); release builds skip the cell.
+        // `TracedGlobal` its value; a missed switch can leave a reference weak that should be
+        // strong, for a later GC to free, or strong that should be weak, which leaks. Debug builds
+        // abort when that can happen (a panic cannot unwind out of a visit made from C++);
+        // release builds skip the cell.
         //
-        // The real fix is a JSG cell type whose mutable borrow takes the lock and makes the
-        // references it holds strong until the borrow ends, so that a visit can skip a borrowed
-        // cell safely. That also covers a `TracedGlobal` taken out of a `Cell`, which nothing
-        // traces.
+        // `crate::RefCell` has no such problem: its mutable borrow makes everything in the cell
+        // strong, so a visit can skip a borrowed cell safely.
         let Ok(inner) = self.try_borrow() else {
             debug_assert!(
                 !T::holds_gc_references(),
@@ -335,6 +418,12 @@ impl<T: Traced> Traced for std::cell::RefCell<T> {
         };
         inner.trace(visitor);
     }
+
+    fn make_strong(&self, isolate: &mut crate::Isolate) {
+        if let Ok(inner) = self.try_borrow() {
+            inner.make_strong(isolate);
+        }
+    }
 }
 
 impl<T: Traced> Traced for std::rc::Rc<T> {
@@ -344,6 +433,10 @@ impl<T: Traced> Traced for std::rc::Rc<T> {
 
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         (**self).trace(visitor);
+    }
+
+    fn make_strong(&self, isolate: &mut crate::Isolate) {
+        (**self).make_strong(isolate);
     }
 }
 

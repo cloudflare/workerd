@@ -3098,6 +3098,25 @@ impl<T> TracedGlobal<T> {
         // SAFETY: the handle belongs to the lock's isolate, as checked above.
         unsafe { global_to_local(lock, &self.strong_handle()) }
     }
+
+    /// Lets go of the traced node, if there is one, and makes the strong handle strong again:
+    /// the state of a `TracedGlobal` that no trace has reached. Every GC visit starts with this
+    /// (see [`GcVisitor::visit_traced_global`]), and so does [`crate::Traced::make_strong`].
+    ///
+    /// # Safety
+    /// The isolate of this `TracedGlobal` must be locked by the current thread and not closed,
+    /// and no GC may be writing into the slot: this runs from a visit, or under the lock
+    /// outside any GC.
+    unsafe fn let_go_of_traced_node(&self) {
+        // SAFETY: the slot is written only under the isolate lock (guaranteed by caller); see
+        // `GlobalSlot`.
+        let traced = unsafe { &mut *self.slot.traced.get() };
+        if traced.ptr != 0 {
+            traced.ptr = 0;
+            // SAFETY: the strong handle is valid, and the isolate is locked.
+            unsafe { ffi::global_clear_weak(&raw mut (*self.slot.strong.get()).ptr) };
+        }
+    }
 }
 
 /// Dropping a `TracedGlobal` hands its slot to its isolate's state, which resets the strong handle
@@ -3116,6 +3135,27 @@ impl<T> Drop for TracedGlobal<T> {
 impl<T> crate::Traced for TracedGlobal<T> {
     fn trace(&self, visitor: &mut GcVisitor) {
         visitor.visit_traced_global(self);
+    }
+
+    /// Lets go of the traced node and makes the strong handle strong again, so that the value
+    /// stays alive with no trace reaching the `TracedGlobal`. The node, if any, is freed by the
+    /// next full GC, as the node of a dropped `TracedGlobal` is.
+    ///
+    /// # Panics
+    /// Panics if `isolate` is not the isolate the handle was created in.
+    fn make_strong(&self, isolate: &mut crate::Isolate) {
+        assert!(
+            self.state.belongs_to(isolate.as_ffi()),
+            "attempt to use a Global or TracedGlobal in an isolate other than the one it was created in"
+        );
+        if self.state.is_closed() {
+            // The isolate is being torn down, and its handles are left to `Dispose`.
+            return;
+        }
+        // SAFETY: the isolate is locked by this thread (guaranteed by `isolate`) and is the
+        // isolate of the handle, as checked above. This is Rust code running under the lock,
+        // not a visit, so no GC is writing into the slot.
+        unsafe { self.let_go_of_traced_node() };
     }
 }
 
@@ -3834,20 +3874,16 @@ impl GcVisitor {
             }
         }
         // SAFETY: see above, and `GlobalSlot`.
-        let (strong, traced) = unsafe {
-            (
-                &raw mut (*global.slot.strong.get()).ptr,
-                &mut *global.slot.traced.get(),
-            )
-        };
-        if traced.ptr != 0 {
-            traced.ptr = 0;
-            // SAFETY: the strong handle is valid, and the visit runs under the isolate lock.
-            unsafe { ffi::global_clear_weak(strong) };
-        }
+        unsafe { global.let_go_of_traced_node() };
         // SAFETY: the handles are valid handles of the visitor's isolate, which is locked, and
         // stay where they are for as long as they exist.
-        unsafe { ffi::wrappable_visit_global(&raw mut self.handle, strong, traced) };
+        unsafe {
+            ffi::wrappable_visit_global(
+                &raw mut self.handle,
+                &raw mut (*global.slot.strong.get()).ptr,
+                &mut *global.slot.traced.get(),
+            );
+        }
     }
 }
 
@@ -4064,7 +4100,7 @@ impl WrappableRc {
     ///
     /// Called when a new `Rc<R>` is created (clone, unwrap) to inform the GC
     /// that this Wrappable has an additional strong reference from Rust.
-    pub(crate) fn add_strong_ref(&mut self) {
+    pub(crate) fn add_strong_ref(&self) {
         // SAFETY: wrappable is valid (guaranteed by KjRc lifetime).
         unsafe { ffi::wrappable_add_strong_ref(self.as_pin_mut()) };
     }

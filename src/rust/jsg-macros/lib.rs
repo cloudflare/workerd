@@ -180,6 +180,8 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
             fn holds_gc_references() -> bool {
                 false
             }
+
+            fn make_strong(&self, _isolate: &mut jsg::Isolate) {}
         }
     }
     .into()

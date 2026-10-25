@@ -24,6 +24,8 @@ macro_rules! jsg_traced {
             fn holds_gc_references() -> bool {
                 false
             }
+
+            fn make_strong(&self, _isolate: &mut $crate::Isolate) {}
         })*
     };
 }

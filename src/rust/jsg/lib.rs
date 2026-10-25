@@ -8,6 +8,7 @@ use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
+pub mod cell;
 pub mod fast_api;
 pub mod feature_flags;
 mod isolate_state;
@@ -20,6 +21,8 @@ mod scope;
 pub mod v8;
 mod wrappable;
 
+pub use cell::Cell;
+pub use cell::RefCell;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
 pub use lenient::Lenient;

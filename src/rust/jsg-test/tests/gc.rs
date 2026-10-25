@@ -935,7 +935,9 @@ struct NativeState {
     value: u64,
 }
 
-impl jsg::Traced for NativeState {}
+impl jsg::Traced for NativeState {
+    fn make_strong(&self, _isolate: &mut jsg::Isolate) {}
+}
 
 impl Drop for NativeState {
     fn drop(&mut self) {

@@ -55,6 +55,14 @@ impl jsg::Traced for StreamState {
             Self::Readable(inner) => jsg::Traced::trace(inner, visitor),
         }
     }
+
+    fn make_strong(&self, isolate: &mut jsg::Isolate) {
+        match self {
+            Self::Closed => {}
+            Self::Errored { reason } => jsg::Traced::make_strong(reason, isolate),
+            Self::Readable(inner) => jsg::Traced::make_strong(inner, isolate),
+        }
+    }
 }
 
 #[jsg_resource]

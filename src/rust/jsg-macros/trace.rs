@@ -27,3 +27,20 @@ pub fn generate_trace_statements(
         })
         .collect()
 }
+
+/// Generates one `make_strong` delegation statement per named field.
+pub fn generate_make_strong_statements(
+    fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
+) -> Vec<proc_macro2::TokenStream> {
+    use quote::quote;
+
+    fields
+        .iter()
+        .filter_map(|field| {
+            let field_name = field.ident.as_ref()?;
+            Some(quote! {
+                jsg::Traced::make_strong(&self.#field_name, isolate);
+            })
+        })
+        .collect()
+}

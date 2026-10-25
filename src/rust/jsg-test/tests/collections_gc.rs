@@ -801,6 +801,10 @@ impl jsg::Traced for PrivateData {
     fn trace(&self, visitor: &mut jsg::GcVisitor) {
         visitor.visit_rc(&self.child);
     }
+
+    fn make_strong(&self, isolate: &mut jsg::Isolate) {
+        jsg::Traced::make_strong(&self.child, isolate);
+    }
 }
 
 /// Resource with a plain nested field — auto-generated tracing delegates to
@@ -879,6 +883,10 @@ impl Drop for CustomTraceParent {
 impl jsg::Traced for CustomTraceParent {
     fn trace(&self, visitor: &mut jsg::GcVisitor) {
         visitor.visit_rc(&self.child);
+    }
+
+    fn make_strong(&self, isolate: &mut jsg::Isolate) {
+        jsg::Traced::make_strong(&self.child, isolate);
     }
 }
 

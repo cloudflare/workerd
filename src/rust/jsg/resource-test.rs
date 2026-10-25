@@ -16,7 +16,9 @@ impl Type for Bad {
     }
 }
 
-impl crate::Traced for Bad {}
+impl crate::Traced for Bad {
+    fn make_strong(&self, _isolate: &mut crate::Isolate) {}
+}
 
 impl GarbageCollected for Bad {
     fn memory_name(&self) -> &'static std::ffi::CStr {
