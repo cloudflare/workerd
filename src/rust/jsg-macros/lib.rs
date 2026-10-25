@@ -218,7 +218,7 @@ pub fn jsg_method(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[derive(Clone, Copy)]
 enum Callback {
     Function,
-    /// `AccessorNameGetterCallback`, for instance properties.
+    /// `AccessorNameGetterCallback`, for instance and lazy instance properties.
     Getter,
     /// `AccessorNameSetterCallbackV2`, for instance properties.
     Setter,
@@ -699,9 +699,10 @@ pub fn jsg_constructor(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// `#[jsg_resource]` type.
 ///
 /// Supported arguments:
-/// - `prototype` or `instance` (optional, defaults to `prototype`)
+/// - `prototype`, `instance` or `lazy_instance` (optional, defaults to `prototype`)
 /// - `name = "..."` for an explicit JS property name
-/// - `readonly` to require no matching setter
+/// - `readonly` to require no matching setter; on a `lazy_instance` property it
+///   also makes the stored value read-only
 ///
 /// Methods must start with `get_` (getter) or `set_` (setter). If `name` is
 /// omitted, the prefix is stripped and the remainder is converted

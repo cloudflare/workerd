@@ -1220,6 +1220,19 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
         }
         break;
       }
+      case PropertyKind::LazyInstance:
+      case PropertyKind::LazyReadonlyInstance: {
+        // Mirrors registerLazyInstanceProperty in resource.h: V8 runs the getter on first access
+        // and replaces the property with a data property holding its result. The getter is an
+        // AccessorNameGetterCallback, like the Instance kind's (see the static_asserts there).
+        registerExternalRef(prop.getter_callback);
+        auto getter = reinterpret_cast<v8::AccessorNameGetterCallback>(prop.getter_callback);
+        auto attributes = prop.kind == PropertyKind::LazyReadonlyInstance
+            ? v8::PropertyAttribute::ReadOnly
+            : v8::PropertyAttribute::None;
+        instance->SetLazyDataProperty(v8Name, getter, v8::Local<v8::Value>(), attributes);
+        break;
+      }
       case PropertyKind::Inspect: {
         // Mirrors registerInspectProperty in resource.h (lines 1521-1535).
         //

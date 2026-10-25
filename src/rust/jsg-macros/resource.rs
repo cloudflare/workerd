@@ -34,6 +34,7 @@ use crate::utils::this_param;
 pub enum PropertyKind {
     Prototype,
     Instance,
+    LazyInstance,
     Inspect,
 }
 
@@ -727,11 +728,16 @@ fn generate_constructor_registration(
 // ---------------------------------------------------------------------------
 
 /// Emits a member factory for a property group, or an error if the group has no getter.
+///
+/// `is_readonly` only affects the lazy instance placement: other placements are read-only
+/// exactly when there is no setter, but a lazy instance property never has a setter and is
+/// writable unless `readonly` is given, like C++ `JSG_LAZY_INSTANCE_PROPERTY`.
 fn emit_property_group(
     js_name: &str,
     kind: PropertyKind,
     getter: Option<syn::Ident>,
     setter: Option<syn::Ident>,
+    is_readonly: bool,
 ) -> Result<MemberRegistration, proc_macro2::TokenStream> {
     let Some(getter_name) = getter else {
         return Err(quote! {
@@ -768,6 +774,7 @@ fn emit_property_group(
         &format!("{getter_name}_instance_callback"),
         getter_name.span(),
     );
+    let has_setter = setter.is_some();
     let instance_setter = if let Some(setter_name) = setter {
         let setter_cb = syn::Ident::new(
             &format!("{setter_name}_instance_callback"),
@@ -777,11 +784,34 @@ fn emit_property_group(
     } else {
         quote! { None }
     };
-    let factory_name = member_factory_name(&getter_name);
-    let placement = if kind == PropertyKind::Instance {
-        quote! { jsg::PropertyPlacement::Instance }
+    // A property with a setter cannot be lazy. Custom registration can still ask for the lazy
+    // placement, so that arm registers a lazy-kind `Member::Property`, which template creation
+    // rejects with a message naming the problem.
+    let lazy_instance_member = if has_setter {
+        quote! {
+            jsg::Member::Property {
+                name: #js_name.to_owned(),
+                kind: jsg::PropertyKind::LazyInstance,
+                getter_callback: Self::#getter_cb(),
+                setter_callback: #setter_tokens,
+            }
+        }
     } else {
-        quote! { jsg::PropertyPlacement::Prototype }
+        quote! {
+            jsg::Member::LazyInstanceProperty {
+                name: #js_name.to_owned(),
+                getter_callback: Self::#instance_getter_cb(),
+                read_only: #is_readonly,
+            }
+        }
+    };
+    let factory_name = member_factory_name(&getter_name);
+    let placement = match kind {
+        PropertyKind::Instance => quote! { jsg::PropertyPlacement::Instance },
+        PropertyKind::LazyInstance => quote! { jsg::PropertyPlacement::LazyInstance },
+        PropertyKind::Prototype | PropertyKind::Inspect => {
+            quote! { jsg::PropertyPlacement::Prototype }
+        }
     };
     Ok(MemberRegistration {
         factory: quote! {
@@ -795,6 +825,7 @@ fn emit_property_group(
                         getter_callback: Self::#instance_getter_cb(),
                         setter_callback: #instance_setter,
                     },
+                    jsg::PropertyPlacement::LazyInstance => #lazy_instance_member,
                 }
             }
         },
@@ -806,14 +837,15 @@ fn emit_property_group(
 
 /// Parses the argument list of `#[jsg_property([placement,] [name = "..."] [, readonly])]`.
 ///
-/// `placement` is `prototype` or `instance`; when omitted it defaults to `Prototype`.
+/// `placement` is `prototype`, `instance` or `lazy_instance`; when omitted it defaults to
+/// `Prototype`.
 /// Returns `(PropertyKind, Option<js_name_override>, is_readonly)`.
 pub fn parse_jsg_property_args(
     tokens: proc_macro2::TokenStream,
 ) -> Result<(PropertyKind, Option<String>, bool), proc_macro2::TokenStream> {
     use syn::parse::Parser as _;
     const CONFLICTING_PLACEMENT: &str =
-        "conflicting placement: specify either `instance` or `prototype`, not both";
+        "conflicting placement: specify only one of `prototype`, `instance` or `lazy_instance`";
 
     let metas = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated
         .parse2(tokens)
@@ -841,6 +873,14 @@ pub fn parse_jsg_property_args(
                 }
                 kind = Some(PropertyKind::Prototype);
             }
+            syn::Meta::Path(p) if p.is_ident("lazy_instance") => {
+                if kind.is_some() {
+                    return Err(
+                        syn::Error::new_spanned(p, CONFLICTING_PLACEMENT).to_compile_error()
+                    );
+                }
+                kind = Some(PropertyKind::LazyInstance);
+            }
             syn::Meta::Path(p) if p.is_ident("readonly") => {
                 readonly = true;
             }
@@ -862,7 +902,7 @@ pub fn parse_jsg_property_args(
             _ => {
                 return Err(syn::Error::new_spanned(
                     meta,
-                    "unknown argument; expected `instance`, `prototype`, `readonly`, or `name = \"...\"`",
+                    "unknown argument; expected `prototype`, `instance`, `lazy_instance`, `readonly`, or `name = \"...\"`",
                 )
                 .to_compile_error());
             }
@@ -998,6 +1038,16 @@ fn validate_and_emit_property(
         )
         .to_compile_error());
     }
+    if kind == PropertyKind::LazyInstance
+        && let Some(setter) = setters.first()
+    {
+        return Err(syn::Error::new(
+            setter.rust_name.span(),
+            "a `lazy_instance` property cannot have a setter; its value is computed once, \
+             then stored on the instance (writable unless `readonly`)",
+        )
+        .to_compile_error());
+    }
     if kind == PropertyKind::Inspect {
         for m in &methods {
             if m.is_setter {
@@ -1025,7 +1075,7 @@ fn validate_and_emit_property(
             );
         }
     }
-    emit_property_group(js_name, kind, getter, setter)
+    emit_property_group(js_name, kind, getter, setter, has_readonly_getter)
 }
 
 /// Scans an impl block for `#[jsg_property]` and `#[jsg_inspect_property]` annotations

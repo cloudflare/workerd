@@ -317,6 +317,42 @@ fn constant_factory_lowercases_rust_name_without_changing_js_name() {
     );
 }
 
+/// The arms of the `match placement` in a property factory, by pattern.
+fn placement_arms(registration: MemberRegistration) -> Vec<(String, syn::Expr)> {
+    let factory: syn::ImplItemFn = syn::parse2(registration.factory).unwrap();
+    assert_eq!(factory.sig.inputs.len(), 1);
+    let syn::Stmt::Expr(syn::Expr::Match(placement), None) = &factory.block.stmts[0] else {
+        panic!("expected a placement-dependent factory");
+    };
+    placement
+        .arms
+        .iter()
+        .map(|arm| (arm.pat.to_token_stream().to_string(), (*arm.body).clone()))
+        .collect()
+}
+
+fn assert_member(
+    member: &syn::Expr,
+    member_type: &proc_macro2::TokenStream,
+    fields: &[(&str, proc_macro2::TokenStream)],
+) {
+    let syn::Expr::Struct(constructor) = member else {
+        panic!("expected a Member constructor");
+    };
+    assert_eq!(
+        constructor.path.to_token_stream().to_string(),
+        member_type.to_string()
+    );
+    assert_eq!(constructor.fields.len(), fields.len() + 1); // and `name`
+    for (field, expected) in fields {
+        assert_eq!(
+            member_field(member, field).to_token_stream().to_string(),
+            expected.to_string(),
+            "field `{field}`"
+        );
+    }
+}
+
 #[test]
 fn property_factories_select_matching_getter_and_setter_callback_shapes() {
     for (kind, automatic_placement) in [
@@ -334,79 +370,173 @@ fn property_factories_select_matching_getter_and_setter_callback_shapes() {
             kind,
             Some(parse_quote!(get_value)),
             Some(parse_quote!(set_value)),
+            false,
         )
         .unwrap();
         assert_eq!(
             registration.automatic.to_string(),
             quote!(Self::get_value_member(#automatic_placement)).to_string()
         );
-        let factory: syn::ImplItemFn = syn::parse2(registration.factory).unwrap();
-        assert_eq!(factory.sig.inputs.len(), 1);
-        let syn::Stmt::Expr(syn::Expr::Match(placement), None) = &factory.block.stmts[0] else {
-            panic!("expected a placement-dependent factory");
-        };
-        assert_eq!(placement.arms.len(), 2);
-        for (arm, pattern, member_type, getter, setter) in [
-            (
-                &placement.arms[0],
-                quote!(jsg::PropertyPlacement::Prototype),
-                quote!(jsg::Member::Property),
-                quote!(Self::get_value_callback()),
-                quote!(Some(Self::set_value_callback())),
-            ),
-            (
-                &placement.arms[1],
-                quote!(jsg::PropertyPlacement::Instance),
-                quote!(jsg::Member::InstanceProperty),
-                quote!(Self::get_value_instance_callback()),
-                quote!(Some(Self::set_value_instance_callback())),
-            ),
-        ] {
-            assert_eq!(arm.pat.to_token_stream().to_string(), pattern.to_string());
-            let syn::Expr::Struct(member) = arm.body.as_ref() else {
-                panic!("expected a Member constructor");
-            };
-            assert_eq!(
-                member.path.to_token_stream().to_string(),
-                member_type.to_string()
-            );
-            assert_eq!(
-                member_field(&arm.body, "getter_callback")
-                    .to_token_stream()
-                    .to_string(),
-                getter.to_string()
-            );
-            assert_eq!(
-                member_field(&arm.body, "setter_callback")
-                    .to_token_stream()
-                    .to_string(),
-                setter.to_string()
-            );
-        }
+        let arms = placement_arms(registration);
+        assert_eq!(arms.len(), 3);
+        assert_eq!(
+            arms[0].0,
+            quote!(jsg::PropertyPlacement::Prototype).to_string()
+        );
+        assert_member(
+            &arms[0].1,
+            &quote!(jsg::Member::Property),
+            &[
+                ("kind", quote!(jsg::PropertyKind::Prototype)),
+                ("getter_callback", quote!(Self::get_value_callback())),
+                ("setter_callback", quote!(Some(Self::set_value_callback()))),
+            ],
+        );
+        assert_eq!(
+            arms[1].0,
+            quote!(jsg::PropertyPlacement::Instance).to_string()
+        );
+        assert_member(
+            &arms[1].1,
+            &quote!(jsg::Member::InstanceProperty),
+            &[
+                (
+                    "getter_callback",
+                    quote!(Self::get_value_instance_callback()),
+                ),
+                (
+                    "setter_callback",
+                    quote!(Some(Self::set_value_instance_callback())),
+                ),
+            ],
+        );
+        // A setter cannot be lazy: the lazy arm registers a lazy-kind
+        // `Member::Property`, which template creation rejects.
+        assert_eq!(
+            arms[2].0,
+            quote!(jsg::PropertyPlacement::LazyInstance).to_string()
+        );
+        assert_member(
+            &arms[2].1,
+            &quote!(jsg::Member::Property),
+            &[
+                ("kind", quote!(jsg::PropertyKind::LazyInstance)),
+                ("getter_callback", quote!(Self::get_value_callback())),
+                ("setter_callback", quote!(Some(Self::set_value_callback()))),
+            ],
+        );
     }
 }
 
 #[test]
-fn readonly_property_factories_omit_setters_for_both_placements() {
+fn readonly_property_factories_omit_setters_for_every_placement() {
     let registration = emit_property_group(
         "value",
         PropertyKind::Prototype,
         Some(parse_quote!(get_value)),
         None,
+        false,
     )
     .unwrap();
-    let factory: syn::ImplItemFn = syn::parse2(registration.factory).unwrap();
-    let syn::Stmt::Expr(syn::Expr::Match(placement), None) = &factory.block.stmts[0] else {
-        panic!("expected a placement-dependent factory");
-    };
-    for arm in &placement.arms {
+    let arms = placement_arms(registration);
+    assert_eq!(arms.len(), 3);
+    for (_, member) in &arms[..2] {
         assert_eq!(
-            member_field(&arm.body, "setter_callback")
+            member_field(member, "setter_callback")
                 .to_token_stream()
                 .to_string(),
             quote!(None).to_string()
         );
     }
+    assert_member(
+        &arms[2].1,
+        &quote!(jsg::Member::LazyInstanceProperty),
+        &[
+            (
+                "getter_callback",
+                quote!(Self::get_value_instance_callback()),
+            ),
+            ("read_only", quote!(false)),
+        ],
+    );
+}
+
+#[test]
+fn lazy_instance_property_factory_is_writable_unless_readonly() {
+    for is_readonly in [false, true] {
+        let registration = emit_property_group(
+            "value",
+            PropertyKind::LazyInstance,
+            Some(parse_quote!(get_value)),
+            None,
+            is_readonly,
+        )
+        .unwrap();
+        assert_eq!(
+            registration.automatic.to_string(),
+            quote!(Self::get_value_member(jsg::PropertyPlacement::LazyInstance)).to_string()
+        );
+        let arms = placement_arms(registration);
+        assert_eq!(
+            arms[2].0,
+            quote!(jsg::PropertyPlacement::LazyInstance).to_string()
+        );
+        assert_member(
+            &arms[2].1,
+            &quote!(jsg::Member::LazyInstanceProperty),
+            &[
+                (
+                    "getter_callback",
+                    quote!(Self::get_value_instance_callback()),
+                ),
+                ("read_only", quote!(#is_readonly)),
+            ],
+        );
+    }
+}
+
+#[test]
+fn parse_jsg_property_args_accepts_lazy_instance() {
+    let (kind, name, readonly) =
+        parse_jsg_property_args(quote!(lazy_instance, name = "v", readonly)).unwrap();
+    assert_eq!(kind, PropertyKind::LazyInstance);
+    assert_eq!(name.as_deref(), Some("v"));
+    assert!(readonly);
+}
+
+#[test]
+fn parse_jsg_property_args_rejects_conflicting_placements() {
+    for args in [
+        quote!(lazy_instance, instance),
+        quote!(prototype, lazy_instance),
+        quote!(instance, prototype),
+    ] {
+        let error = parse_jsg_property_args(args).unwrap_err().to_string();
+        assert!(
+            error.contains("conflicting placement: specify only one of"),
+            "{error}"
+        );
+    }
+}
+
+#[test]
+fn lazy_instance_property_with_setter_is_rejected() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_property(lazy_instance)]
+            fn get_value(&self) -> u32 { 0 }
+            #[jsg_property(lazy_instance)]
+            fn set_value(&self, v: u32) {}
+        }
+    };
+    let error = collect_property_registrations(&input)
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(
+        error.contains("a `lazy_instance` property cannot have a setter"),
+        "{error}"
+    );
 }
 
 fn parse_registration_mode(attr: proc_macro2::TokenStream) -> syn::Result<RegistrationMode> {

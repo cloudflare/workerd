@@ -186,12 +186,14 @@ the **Rust declaration**, independently of any JavaScript `name = "..."` overrid
 | Property getter `get_value` with an optional paired setter | `Self::get_value_member(placement)` |
 | Inspect getter `debug_info` | `Self::debug_info_member()` |
 
-An ordinary property factory accepts `jsg::PropertyPlacement::{Prototype, Instance}` and selects
-the matching V8 getter and setter callbacks. The attribute's `prototype` / `instance` argument
-only supplies placement for **automatic** registration; custom registration passes it explicitly.
+An ordinary property factory accepts `jsg::PropertyPlacement::{Prototype, Instance, LazyInstance}`
+and selects the matching V8 getter and setter callbacks. The attribute's `prototype` / `instance` /
+`lazy_instance` argument only supplies placement for **automatic** registration; custom registration passes it explicitly.
 Getter/setter pairing, `readonly` checks, name overrides, argument conversion, and exception
 handling apply in both modes. Getter and setter annotations must agree on placement and JS name.
 Inspect properties remain symbol-keyed and do not take a placement argument.
+`LazyInstance` keeps the getter's `readonly` (see `lazy_instance` below); asking for it for a
+property with a setter panics when the template is created.
 Property registration follows the returned member list's order. V8 enumerates instance native
 data properties in reverse registration order, as it does for C++ JSG.
 `nested_types(...)` cannot be combined with `custom_members`; a custom `members` lists nested
@@ -243,7 +245,8 @@ impl Greeting {
 ## `#[jsg_property([placement,] [name = "..."] [, readonly])]`
 
 Registers a method as a getter or setter on a `#[jsg_resource]` type. The `placement` argument
-is optional and must be either `prototype` or `instance`; it defaults to `prototype`.
+is optional and must be one of `prototype`, `instance` or `lazy_instance`; it defaults to
+`prototype`.
 
 **`prototype`** — property lives on the prototype chain. Not directly enumerable (`Object.keys()`
 is empty), but `"prop" in obj` is `true`. Can be overridden by subclasses. Equivalent to C++
@@ -254,6 +257,14 @@ is empty), but `"prop" in obj` is `true`. Can be overridden by subclasses. Equiv
 `Object.keys()` includes it, `hasOwnProperty()` returns `true`, not overridable by subclasses.
 Equivalent to C++ `JSG_INSTANCE_PROPERTY` / `JSG_READONLY_INSTANCE_PROPERTY`.
 
+**`lazy_instance`** — own data property on every instance whose getter runs on first access (V8
+`SetLazyDataProperty`); V8 then stores the result as the property's value, so later reads return
+that same value without calling the getter. A getter that throws leaves the property lazy. The
+property is enumerable, configurable and writable; assigning to it before the first read stores
+the assigned value without running the getter. It cannot have a setter, and `readonly` makes it
+non-writable. Equivalent to C++ `JSG_LAZY_INSTANCE_PROPERTY` /
+`JSG_LAZY_READONLY_INSTANCE_PROPERTY`.
+
 > **Prefer `prototype` in almost all cases.** Own properties prevent minor-GC collection
 > of the object and inhibit some V8 optimisations.
 
@@ -261,16 +272,18 @@ Equivalent to C++ `JSG_INSTANCE_PROPERTY` / `JSG_READONLY_INSTANCE_PROPERTY`.
 from `snake_case` to `camelCase` after stripping a leading `get_` or `set_` prefix.
 
 **`readonly`** — asserts at compile time that no matching `set_*` method is also annotated with
-this property. Omitting a setter already makes the property read-only; `readonly` adds an
-explicit check.
+this property. Omitting a setter already makes a `prototype` or `instance` property read-only;
+`readonly` adds an explicit check. A `lazy_instance` property never has a setter, and `readonly`
+is what makes its stored value read-only.
 
 **Naming** — methods **must** start with `get_` (getter) or `set_` (setter). A method without
 either prefix is a compile error.  The prefix is stripped and the remainder is converted
 `snake_case` → `camelCase`, so `get_foo_bar` / `set_foo_bar` both map to `"fooBar"`.
 
 **Setter detection** — a method whose Rust name starts with `set_` is registered as the setter.
-Omitting a setter (or using `readonly`) makes the property read-only. In
-strict mode, assigning to a read-only property throws a `TypeError`.
+Omitting a setter (or using `readonly`) makes a `prototype` or `instance` property read-only. A
+`lazy_instance` property has no setter and is writable unless marked `readonly`. In strict mode,
+assigning to a read-only property throws a `TypeError`.
 
 **Receiver** — a getter or setter takes `&self`, or `this: jsg::Rc<Self>` as its first
 parameter, like a `#[jsg_method]`. So do `#[jsg_inspect_property]` getters.
@@ -278,7 +291,7 @@ parameter, like a `#[jsg_method]`. So do `#[jsg_inspect_property]` getters.
 **Compat flag** — when `spec_compliant_property_attributes` is enabled, a `prototype` getter's
 `.length` is set to `0`, its setter's `.length` to `1`, the getter's `.name` to `"get <name>"`,
 and the setter's `.name` to `"set <name>"`, per Web IDL §3.7.6. `instance` properties have no
-getter or setter functions.
+getter or setter functions, nor do `lazy_instance` properties.
 
 ```rust
 use std::cell::{Cell, RefCell};
@@ -314,13 +327,18 @@ impl Counter {
     // Instance — read-only with name override
     #[jsg_property(instance, name = "tokenKind", readonly)]
     pub fn get_kind(&self) -> String { self.kind.clone() }
+
+    // Lazy instance — computed on first read, then stored on the instance
+    #[jsg_property(lazy_instance, readonly)]
+    pub fn get_tags(&self) -> Vec<String> { vec![self.kind.clone()] }
 }
 // JS: obj.value = 7; obj.value === 7         // prototype rw
 //     obj.label                               // "counter" (read-only)
 //     obj.myProp                              // "x"
-//     Object.keys(obj)                        // ["id", "tokenKind"]  (instance props)
+//     Object.keys(obj)                        // ["tags", "tokenKind", "id"]  (own props)
+//     obj.tags === obj.tags                   // true (getter ran once)
 //     obj.hasOwnProperty("id")                // true
-//     obj.kind                                // TypeError: read-only
+//     "use strict"; obj.tokenKind = "x"       // TypeError: read-only
 ```
 
 

@@ -1065,6 +1065,9 @@ impl From<u64> for ConstantValue {
 ///   [`Member::InstanceProperty`] registers these.
 /// - `Inspect`   — symbol-keyed on the prototype; hidden from normal enumeration,
 ///   surfaced by `node:util` `inspect()`.
+/// - `LazyInstance` / `LazyReadonlyInstance` — own data property on every
+///   instance, computed once on first access. Only
+///   [`Member::LazyInstanceProperty`] registers these.
 pub use crate::v8::ffi::PropertyKind;
 
 /// Placement of an ordinary resource property registered by a generated member factory.
@@ -1074,6 +1077,9 @@ pub enum PropertyPlacement {
     Prototype,
     /// An own native data property on each instance, for compatibility with existing APIs.
     Instance,
+    /// An own data property on each instance whose getter runs on first access, after which
+    /// the result is stored as the property's value.
+    LazyInstance,
 }
 
 pub enum Member {
@@ -1103,6 +1109,16 @@ pub enum Member {
         getter_callback: RawGetterCallback,
         /// `None` for read-only properties.
         setter_callback: Option<RawSetterCallback>,
+    },
+    /// An own data property on every instance whose getter runs on first access
+    /// (V8's `SetLazyDataProperty`). V8 then replaces it with a data property
+    /// holding the getter's result, so later reads do not call the getter. The
+    /// property is writable unless `read_only`, like C++
+    /// `JSG_LAZY_INSTANCE_PROPERTY` / `JSG_LAZY_READONLY_INSTANCE_PROPERTY`.
+    LazyInstanceProperty {
+        name: String,
+        getter_callback: RawGetterCallback,
+        read_only: bool,
     },
     StaticMethod {
         name: String,

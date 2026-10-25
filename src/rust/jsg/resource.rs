@@ -464,6 +464,11 @@ fn get_resource_descriptor<R: Resource>(
                     kind != v8::ffi::PropertyKind::Instance,
                     "use Member::InstanceProperty"
                 );
+                assert!(
+                    kind != v8::ffi::PropertyKind::LazyInstance
+                        && kind != v8::ffi::PropertyKind::LazyReadonlyInstance,
+                    "use Member::LazyInstanceProperty; a lazy instance property has no setter"
+                );
                 descriptor.properties.push(v8::ffi::PropertyDescriptor {
                     name,
                     kind,
@@ -483,6 +488,17 @@ fn get_resource_descriptor<R: Resource>(
                     setter_callback: setter_callback.map(|f| f as usize).into(),
                 });
             }
+            Member::LazyInstanceProperty {
+                name,
+                getter_callback,
+                read_only,
+            } => descriptor
+                .properties
+                .push(lazy_instance_property_descriptor(
+                    name,
+                    getter_callback,
+                    read_only,
+                )),
             Member::StaticMethod {
                 name,
                 callback,
@@ -508,6 +524,24 @@ fn get_resource_descriptor<R: Resource>(
     }
 
     (descriptor, nested_types)
+}
+
+/// The descriptor of a [`Member::LazyInstanceProperty`].
+fn lazy_instance_property_descriptor(
+    name: String,
+    getter_callback: crate::RawGetterCallback,
+    read_only: bool,
+) -> v8::ffi::PropertyDescriptor {
+    v8::ffi::PropertyDescriptor {
+        name,
+        kind: if read_only {
+            v8::ffi::PropertyKind::LazyReadonlyInstance
+        } else {
+            v8::ffi::PropertyKind::LazyInstance
+        },
+        getter_callback: getter_callback as usize,
+        setter_callback: KjMaybe::None,
+    }
 }
 
 /// The nested types of a resource type, with their names.
