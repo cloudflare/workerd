@@ -124,6 +124,13 @@ pub trait Traced {
     /// GC-visible references (primitives, plain data structs, etc.). Such a type
     /// should also return `false` from `holds_gc_references`; `jsg_traced!`
     /// generates both.
+    ///
+    /// A hand-written implementation must visit every field that can hold a GC reference
+    /// (`TracedGlobal`, `jsg::Rc`, and types holding them). Nothing checks this. The type must
+    /// not hold a [`v8::Global`](crate::v8::Global), which is always strong, so a cycle through
+    /// it is never collected. Don't keep a type that holds GC references behind an
+    /// `std::rc::Rc`, since a clone held by another GC owner would trace it too; see
+    /// `README.md` §Safety rules, rule 2.
     fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
 }
 
