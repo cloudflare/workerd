@@ -190,6 +190,11 @@ jobs:
           bash build/check_ci_flags.sh '--config=bazelflare' --config=ci --config=ci-bazelflare --config=ci-download-types
           # coverage-linux (coverage.yml)
           bash build/check_ci_flags.sh '--config=bazelflare-coverage' --config=ci --config=ci-bazelflare-coverage
+          # build (linux) (release.yml)
+          bash build/check_ci_flags.sh '--config=bazelflare-release' --config=ci --config=ci-release --config=wpt-report --config=ci-bazelflare
+          # the types jobs (release.yml)
+          bash build/check_ci_flags.sh '--config=bazelflare-release' --config=ci --config=ci-bazelflare --config=ci-download-types
+          bash build/check_ci_flags.sh '--config=bazelflare-release' --config=ci --config=ci-bazelflare --config=ci-download-types-worker
 
   check-snapshot:
     runs-on: ubuntu-22.04-16core
