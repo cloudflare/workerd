@@ -12,7 +12,6 @@ CPP_SHIMS = glob([
 # Fails when a shim adds a use of C++ JSG; see cpp-jsg-allowlist-test.py.
 py_test(
     name = "cpp-jsg-allowlist-test",
-    size = "small",
     srcs = ["cpp-jsg-allowlist-test.py"],
     args = ["$(location cpp-jsg-allowlist.txt)"] + ["$(location %s)" % shim for shim in CPP_SHIMS],
     data = ["cpp-jsg-allowlist.txt"] + CPP_SHIMS,
