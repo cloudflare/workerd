@@ -107,6 +107,20 @@ Isolate* gc_visitor_v8_isolate(GcVisitor* visitor);
 /// field of the `ffi::Global`.
 void global_clear_weak(uintptr_t* global);
 
+// Rules for the shims below (details in src/rust/jsg/README.md, "Safety rules"):
+// - Call V8 directly, not C++ JSG (`jsg::Lock`, `JSG_TRY`, `jsg::check`,
+//   `createTunneledException`, `makeInternalError`, `jsg::Data`, ...). cpp-jsg-allowlist-test
+//   fails on a new use. To report a JavaScript exception, leave it pending and return an empty
+//   result (as `local_function_call` does), or catch it with a `v8::TryCatch`, decide with
+//   `catch_exception()` and return it through a `MaybeLocal` out-parameter.
+// - If a shim can throw a C++ exception, declare it as returning `Result<T>` in v8.rs. Otherwise
+//   the exception becomes a Rust panic (src/rust/AGENTS.md, "Error handling across FFI").
+// - An empty result doesn't always mean that execution is terminating. Rust must check
+//   `isolate_is_execution_terminating` or look at the caught exception.
+// - Never throw a JavaScript exception while `isolate->IsExecutionTerminating()` is true.
+//   `ThrowException` would replace the termination with an exception that JavaScript can catch.
+//   The `isolate_throw_*` shims check this; a shim that calls `ThrowException` itself must too.
+
 // Local<T>
 Global local_to_global(Isolate* isolate, Local value);
 Local local_new_number(Isolate* isolate, double value);
@@ -194,22 +208,41 @@ int64_t local_big_int_int64_value(const Local& value, bool& lossless);
 // Local<Date>
 double local_date_value_of(const Local& value);
 
+// Shims that run JavaScript (a call, a getter or Proxy trap, or a coercion through `toString`,
+// `valueOf` or `Symbol.toPrimitive`) catch nothing: if it throws, they return an empty result or
+// false and leave the exception pending, as C++ JSG's `JsExceptionThrown` does. Rust turns that
+// into an `Error` for which `is_pending()` is true (`call_into_js()` in v8.rs), and doesn't call
+// them while execution is terminating. The exceptions are `local_object_set_property`,
+// `local_array_get` and `local_array_set`, which can also run JavaScript (a setter, getter or
+// Proxy trap) but use `jsg::check()` and are not declared as returning `Result`: what JavaScript
+// throws there becomes a Rust panic, which terminates execution (EW-11138).
+
 // Local<Function>
 // Returns the call's result, or none if it threw, leaving the exception pending.
 MaybeLocal local_function_call(
     Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args);
+// Creates a function that calls `callback` with an opaque wrapper of `wrappable` as its data.
+// Throws if V8 could not create the wrapper and returns empty if it could not create the
+// function, both only when execution is terminating.
+MaybeLocal function_new(Isolate* isolate, size_t callback, kj::Rc<Wrappable> wrappable);
 
 // Local<Object>
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);
-bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key);
-Local local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key);
+// Stores in `has` whether `key` is in the object, and returns true, or returns false if a Proxy
+// trap threw, leaving the exception pending.
+bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key, bool& has);
+// Returns the value of `key`, or none if a getter or Proxy trap threw, leaving the exception
+// pending.
+MaybeLocal local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key);
 
 // Local<Array>
 Local local_new_array(Isolate* isolate, size_t length);
 uint32_t local_array_length(const Local& array);
 Local local_array_get(Isolate* isolate, const Local& array, uint32_t index);
 void local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value);
-::rust::Vec<Global> local_array_iterate(Isolate* isolate, Local value);
+// Appends the elements to `result` and returns true, or returns false with `result` empty if a
+// getter or Proxy trap on an element threw, leaving the exception pending.
+bool local_array_iterate(Isolate* isolate, Local value, ::rust::Vec<Global>& result);
 
 // Local<TypedArray>
 Local local_new_uint8_array(Isolate* isolate, const uint8_t* data, size_t length);
@@ -292,9 +325,12 @@ MaybeLocal wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Gl
 void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args);
 
 // Unwrappers
-::rust::String unwrap_string(Isolate* isolate, Local value);
+// Convert with V8's ToString and ToNumber (not JavaScript's String() and Number(), which accept a
+// Symbol and a BigInt): store the result in `result` and return true, or return false if the
+// coercion threw, leaving the exception pending.
+bool unwrap_string(Isolate* isolate, Local value, ::rust::String& result);
 bool unwrap_boolean(Isolate* isolate, Local value);
-double unwrap_number(Isolate* isolate, Local value);
+bool unwrap_number(Isolate* isolate, Local value, double& result);
 kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value);
 ::rust::Vec<uint8_t> unwrap_uint8_array(Isolate* isolate, Local value);
 ::rust::Vec<uint16_t> unwrap_uint16_array(Isolate* isolate, Local value);
@@ -321,6 +357,9 @@ size_t fci_get_length(FunctionCallbackInfo* args);
 bool fci_is_construct_call(FunctionCallbackInfo* args);
 Local fci_get_arg(FunctionCallbackInfo* args, size_t index);
 void fci_set_return_value(FunctionCallbackInfo* args, Local value);
+// The Rust Wrappable whose opaque wrapper is the running function's data, as function_new()
+// attaches it; none if the data is anything else.
+kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args);
 
 // PropertyCallbackInfo, for native data properties
 Isolate* pci_get_isolate(PropertyCallbackInfo* info);

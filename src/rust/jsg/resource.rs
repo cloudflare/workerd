@@ -48,6 +48,13 @@ use crate::v8::ffi::Wrappable;
 /// - On `Drop`, calls `wrappable_remove_strong_ref` with the ref's current
 ///   `strong` flag (C++ `maybeDeferDestruction`), then fields drop in
 ///   declaration order.
+///
+/// **Moving out of a traced field:** once GC has visited an `Rc` in a traced field, the `Rc`
+/// gives up its strong reference and relies on the field's owner to trace it. An `Rc` moved out
+/// of the field (`Cell::take`, `Option::take`, `mem::replace`) is then neither strong nor traced,
+/// unlike a moved C++ `jsg::Ref`. Clone it and use the clone, which starts strong; see
+/// `README.md` §Safety rules, rule 2, and
+/// <https://github.com/cloudflare/workerd/issues/7976>.
 pub struct Rc<R: Resource> {
     /// Shared ownership of the Rust resource.
     handle: std::rc::Rc<R>,
@@ -458,6 +465,11 @@ fn get_resource_descriptor<R: Resource>(
                     kind != v8::ffi::PropertyKind::Instance,
                     "use Member::InstanceProperty"
                 );
+                assert!(
+                    kind != v8::ffi::PropertyKind::LazyInstance
+                        && kind != v8::ffi::PropertyKind::LazyReadonlyInstance,
+                    "use Member::LazyInstanceProperty; a lazy instance property has no setter"
+                );
                 descriptor.properties.push(v8::ffi::PropertyDescriptor {
                     name,
                     kind,
@@ -477,6 +489,17 @@ fn get_resource_descriptor<R: Resource>(
                     setter_callback: setter_callback.map(|f| f as usize).into(),
                 });
             }
+            Member::LazyInstanceProperty {
+                name,
+                getter_callback,
+                read_only,
+            } => descriptor
+                .properties
+                .push(lazy_instance_property_descriptor(
+                    name,
+                    getter_callback,
+                    read_only,
+                )),
             Member::StaticMethod {
                 name,
                 callback,
@@ -516,6 +539,24 @@ fn get_resource_descriptor<R: Resource>(
     }
 
     (descriptor, nested_types)
+}
+
+/// The descriptor of a [`Member::LazyInstanceProperty`].
+fn lazy_instance_property_descriptor(
+    name: String,
+    getter_callback: crate::RawGetterCallback,
+    read_only: bool,
+) -> v8::ffi::PropertyDescriptor {
+    v8::ffi::PropertyDescriptor {
+        name,
+        kind: if read_only {
+            v8::ffi::PropertyKind::LazyReadonlyInstance
+        } else {
+            v8::ffi::PropertyKind::LazyInstance
+        },
+        getter_callback: getter_callback as usize,
+        setter_callback: KjMaybe::None,
+    }
 }
 
 /// The nested types of a resource type, with their names.

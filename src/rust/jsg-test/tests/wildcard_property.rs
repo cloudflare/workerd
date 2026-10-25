@@ -77,9 +77,8 @@ impl Caller {
         lock: &mut jsg::Lock,
         callback: v8::Local<'_, v8::Value>,
     ) -> Result<(), jsg::Error> {
-        let callback = callback
-            .try_as::<v8::Function>()
-            .ok_or_else(|| jsg::Error::new_type_error("not a function"))?;
+        let callback = v8::Local::<v8::Function>::try_from(callback)
+            .map_err(|_| jsg::Error::new_type_error("not a function"))?;
         *self.callback.borrow_mut() = Some(v8::TracedGlobal::new(lock, callback));
         Ok(())
     }

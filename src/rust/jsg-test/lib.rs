@@ -80,6 +80,9 @@ mod ffi {
         #[expect(clippy::allow_attributes)] // Only used in tests, but #[expect(dead_code)] fails during test builds
         #[allow(dead_code)]
         pub unsafe fn request_gc(isolate: *mut Isolate, gc_type: GcType);
+        /// Requests a termination and runs JavaScript until V8 delivers it, so that the
+        /// termination exception is pending on return. See `terminate_and_deliver` in `ffi.h`.
+        pub unsafe fn terminate_and_deliver(isolate: *mut Isolate);
 
         /// Calls `callback` with the isolate unlocked (`v8::Unlocker`), then locks it again.
         #[expect(clippy::allow_attributes)]
@@ -101,6 +104,12 @@ mod ffi {
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
         pub unsafe fn create_cpp_tagged_object(isolate: *mut Isolate) -> Local;
+
+        /// Calls a function that C++ JSG wrapped and returns whether
+        /// `jsg::v8::ffi::fci_get_data_wrappable` finds a Rust Wrappable in its data.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn cpp_wrapped_function_data_is_rust_wrappable(isolate: *mut Isolate) -> bool;
 
         /// Returns an empty `v8::MaybeLocal`.
         #[expect(clippy::allow_attributes)]
@@ -365,6 +374,14 @@ impl Harness {
         unsafe { ffi::request_gc(lock.isolate().as_ffi(), ffi::GcType::Minor) };
     }
 
+    /// Terminates execution the way running out of CPU time does. On return the termination
+    /// exception is pending and `lock.is_execution_terminating()` is true. (`terminate_execution`
+    /// only requests a termination; V8 delivers it the next time JavaScript runs.)
+    pub fn terminate_and_deliver(lock: &mut jsg::Lock<'_>) {
+        // SAFETY: isolate is valid and locked, with a context entered (guaranteed by Lock).
+        unsafe { ffi::terminate_and_deliver(lock.isolate().as_ffi()) };
+    }
+
     /// Runs `f` with the isolate unlocked, as code that runs on a thread without the isolate
     /// lock would, and locks it again afterwards. `lock` is borrowed for the duration, so `f`
     /// cannot use any handle; it must not touch the isolate in any other way either.
@@ -435,6 +452,14 @@ impl Harness {
             let local = ffi::create_cpp_tagged_object(isolate.as_ffi());
             v8::Local::from_ffi(local)
         }
+    }
+
+    /// Calls a function that C++ JSG wrapped, whose data is an opaque wrapper like that of a
+    /// `v8::Function::new` function, and returns whether the data is taken for a Rust Wrappable.
+    pub fn cpp_wrapped_function_data_is_rust_wrappable(lock: &mut jsg::Lock<'_>) -> bool {
+        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
+        // open.
+        unsafe { ffi::cpp_wrapped_function_data_is_rust_wrappable(lock.isolate().as_ffi()) }
     }
 }
 

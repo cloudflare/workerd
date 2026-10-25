@@ -124,6 +124,13 @@ pub trait Traced {
     /// GC-visible references (primitives, plain data structs, etc.). Such a type
     /// should also return `false` from `holds_gc_references`; `jsg_traced!`
     /// generates both.
+    ///
+    /// A hand-written implementation must visit every field that can hold a GC reference
+    /// (`TracedGlobal`, `jsg::Rc`, and types holding them). Nothing checks this. The type must
+    /// not hold a [`v8::Global`](crate::v8::Global), which is always strong, so a cycle through
+    /// it is never collected. Don't keep a type that holds GC references behind an
+    /// `std::rc::Rc`, since a clone held by another GC owner would trace it too; see
+    /// `README.md` §Safety rules, rule 2.
     fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
 }
 
@@ -494,8 +501,7 @@ impl<'s> FromJS<'s> for std::string::String {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        // SAFETY: The isolate is locked and value is a valid V8 local handle.
-        Ok(unsafe { v8::ffi::unwrap_string(lock.isolate().as_ffi(), value.into_ffi()) }?)
+        unwrap_string(lock, value)
     }
 }
 
@@ -529,9 +535,7 @@ impl<'s> FromJS<'s> for Number {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        // SAFETY: The isolate is locked and value is a valid V8 local handle.
-        let f64_value =
-            unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) }?;
+        let f64_value = unwrap_number(lock, value)?;
         Ok(Self::new(f64_value))
     }
 }
@@ -560,8 +564,7 @@ impl<'s> FromJS<'s> for &str {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        // SAFETY: The isolate is locked and value is a valid V8 local handle.
-        Ok(unsafe { v8::ffi::unwrap_string(lock.isolate().as_ffi(), value.into_ffi()) }?)
+        unwrap_string(lock, value)
     }
 }
 
@@ -660,13 +663,43 @@ macro_rules! impl_integer_from_js {
                 }
 
                 fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self::ResultType, Error> {
-                    // SAFETY: The isolate is locked and value is a valid V8 local handle.
-                    let num = unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) }?;
+                    let num = unwrap_number(lock, value)?;
                     Self::from_number(num)
                 }
             }
         )*
     };
+}
+
+/// Converts `value` with V8's `ToString` (which, unlike JavaScript's `String()`, rejects a
+/// Symbol). If the coercion throws, or execution is terminating, fails with an error for which
+/// [`Error::is_pending`] is true.
+fn unwrap_string<'s>(
+    lock: &mut Lock<'s>,
+    value: v8::Local<'s, v8::Value>,
+) -> Result<String, Error> {
+    v8::call_into_js(lock, |lock| {
+        let mut result = String::new();
+        // SAFETY: The isolate is locked and value is a valid V8 local handle.
+        let ok = unsafe {
+            v8::ffi::unwrap_string(lock.isolate().as_ffi(), value.into_ffi(), &mut result)
+        }?;
+        Ok(ok.then_some(result))
+    })
+}
+
+/// Converts `value` with V8's `ToNumber` (which, unlike JavaScript's `Number()`, rejects a
+/// `BigInt`). If the coercion throws, or execution is terminating, fails with an error for which
+/// [`Error::is_pending`] is true.
+fn unwrap_number<'s>(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<f64, Error> {
+    v8::call_into_js(lock, |lock| {
+        let mut result = 0.0;
+        // SAFETY: The isolate is locked and value is a valid V8 local handle.
+        let ok = unsafe {
+            v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi(), &mut result)
+        };
+        Ok(ok.then_some(result))
+    })
 }
 
 fn not_an_integer<T>() -> Result<T, Error> {
@@ -708,15 +741,14 @@ impl<'s> FromJS<'s> for i64 {
                   which then saturates"
     )]
     fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self, Error> {
-        if let Some(big_int) = value.try_as::<v8::BigInt>() {
+        if let Ok(big_int) = v8::Local::<v8::BigInt>::try_from(value) {
             return big_int.int64_value().ok_or_else(|| {
                 Error::new_type_error(
                     "The value cannot be converted because it would be truncated.",
                 )
             });
         }
-        // SAFETY: The isolate is locked and value is a valid V8 local handle.
-        let num = unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) }?;
+        let num = unwrap_number(lock, value)?;
         if !num.is_finite() {
             return not_an_integer();
         }
@@ -753,7 +785,7 @@ impl<'s> FromJS<'s> for std::time::SystemTime {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Option<Self>, Error> {
-        let millis = if let Some(date) = value.try_as::<v8::Date>() {
+        let millis = if let Ok(date) = v8::Local::<v8::Date>::try_from(value) {
             date.value_of()
         } else if value.is_number() {
             Number::from_js(lock, value)?.value()
@@ -1004,7 +1036,7 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Option<Self::ResultType>, Error> {
-        let Some(array) = value.try_as::<v8::Array>() else {
+        let Ok(array) = v8::Local::<v8::Array>::try_from(value) else {
             return Ok(None);
         };
 

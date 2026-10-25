@@ -144,6 +144,17 @@ void TestHarness::drop_realm_then_gc(size_t data, ::rust::Fn<void(size_t)> callb
   });
 }
 
+void terminate_and_deliver(Isolate* isolate) {
+  isolate->TerminateExecution();
+  // The loop's stack check delivers the termination: V8 throws the termination exception and
+  // the script returns empty. No TryCatch here, so the exception stays pending for the caller.
+  auto context = isolate->GetCurrentContext();
+  auto source = v8::String::NewFromUtf8Literal(isolate, "(() => { for (;;) {} })()");
+  auto script = v8::Script::Compile(context, source).ToLocalChecked();
+  KJ_ASSERT(script->Run(context).IsEmpty());
+  KJ_ASSERT(isolate->IsExecutionTerminating());
+}
+
 void request_gc(Isolate* isolate, GcType gc_type) {
   switch (gc_type) {
     case GcType::Full:
@@ -190,6 +201,21 @@ size_t used_global_handles_size(Isolate* isolate) {
       static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
 
   return ::workerd::rust::jsg::to_ffi(v8::Local<v8::Value>::Cast(obj));
+}
+
+bool cpp_wrapped_function_data_is_rust_wrappable(Isolate* isolate) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  auto context = isolate->GetCurrentContext();
+  bool found = false;
+  auto function = js.wrapReturningFunction(context,
+      [&found](::workerd::jsg::Lock& js,
+          const v8::FunctionCallbackInfo<v8::Value>& info) -> v8::Local<v8::Value> {
+    auto& args = const_cast<v8::FunctionCallbackInfo<v8::Value>&>(info);
+    found = ::workerd::rust::jsg::fci_get_data_wrappable(&args) != kj::none;
+    return js.v8Undefined();
+  });
+  ::workerd::jsg::check(function->Call(context, v8::Undefined(isolate), 0, nullptr));
+  return found;
 }
 
 ::workerd::rust::jsg::MaybeLocal empty_maybe_local() {

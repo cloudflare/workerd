@@ -145,6 +145,48 @@ pub fn is_lock_ref(ty: &syn::Type) -> bool {
     }
 }
 
+/// Returns true if the type is `jsg::Rc<Self>` or `Rc<Self>`.
+pub fn is_rc_self(ty: &syn::Type) -> bool {
+    let syn::Type::Path(type_path) = ty else {
+        return false;
+    };
+    if type_path.qself.is_some() {
+        return false;
+    }
+    let segments: Vec<_> = type_path.path.segments.iter().collect();
+    let last = match segments.as_slice() {
+        [last] => last,
+        [module, last] if module.ident == "jsg" => last,
+        _ => return false,
+    };
+    if last.ident != "Rc" {
+        return false;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+        return false;
+    };
+    matches!(args.args.iter().collect::<Vec<_>>().as_slice(),
+        [syn::GenericArgument::Type(syn::Type::Path(p))]
+            if p.qself.is_none() && p.path.is_ident("Self"))
+}
+
+/// Returns true if `arg` is a parameter named `this`.
+pub fn is_named_this(arg: &syn::FnArg) -> bool {
+    matches!(arg, syn::FnArg::Typed(param)
+        if matches!(&*param.pat, syn::Pat::Ident(pat)
+            if pat.ident == "this" && pat.subpat.is_none()))
+}
+
+/// Returns the first parameter of `sig` if it is named `this`. In a method without `&self`, that
+/// parameter stands in for `&self` and receives a `jsg::Rc` of the resource the method was
+/// called on. Whether its type is `jsg::Rc<Self>` is checked separately.
+pub fn this_param(sig: &syn::Signature) -> Option<&syn::PatType> {
+    match sig.inputs.first()? {
+        arg @ syn::FnArg::Typed(param) if is_named_this(arg) => Some(param),
+        _ => None,
+    }
+}
+
 /// Returns true if `ty` is `Option<T>`.
 pub fn is_option_type(ty: &syn::Type) -> bool {
     matches!(ty, syn::Type::Path(p)
@@ -196,7 +238,8 @@ const FAST_API_RETURN_TYPES: &[&str] = &["bool", "Number"];
 /// Returns the argument types of `sig` if V8 can call it through a fast callback.
 ///
 /// Types are matched by name: an alias stays on the slow path, and another type named `Number`
-/// fails to compile.
+/// fails to compile. `jsg::Rc<Self>` is not one of the types, so a method with a `this`
+/// parameter stays on the slow path, which is where the `jsg::Rc` of the receiver is made.
 pub fn fast_api_signature(sig: &syn::Signature) -> Option<Vec<&syn::Type>> {
     if sig.asyncness.is_some() || !sig.generics.params.is_empty() || sig.variadic.is_some() {
         return None;
