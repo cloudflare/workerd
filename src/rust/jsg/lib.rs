@@ -24,6 +24,7 @@ pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
 pub use lenient::Lenient;
 pub use nullable::Nullable;
+pub use resource::NestedType;
 pub use resource::Rc;
 pub use resource::Resource;
 pub use resource::Weak;
@@ -188,6 +189,9 @@ pub struct Error {
     /// `impl_error_constructors!` macro) always set this to `false`; only
     /// `from_kj_description()` sets it to `true`.
     is_internal: bool,
+    /// Whether this error stands for an exception or termination that is pending in V8; see
+    /// [`Error::is_pending`].
+    pending: bool,
 }
 
 impl std::fmt::Display for Error {
@@ -207,6 +211,7 @@ macro_rules! impl_error_constructors {
                         name: ExceptionType::$variant,
                         message: message.into(),
                         is_internal: false,
+                        pending: false,
                     }
                 }
             )*
@@ -269,6 +274,7 @@ impl<'s> FromJS<'s> for Error {
                 name: name.map_or(ExceptionType::Error, |n| ExceptionType::from(n.as_str())),
                 message,
                 is_internal: false,
+                pending: false,
             });
         }
 
@@ -292,6 +298,7 @@ impl<'s> FromJS<'s> for Error {
                     .unwrap_or(ExceptionType::Error),
                 message: dom_message,
                 is_internal: false,
+                pending: false,
             });
         }
 
@@ -305,6 +312,7 @@ impl Error {
             name: ExceptionType::from(name),
             message: message.to_owned(),
             is_internal: false,
+            pending: false,
         }
     }
 
@@ -321,7 +329,33 @@ impl Error {
             name,
             message: message.into(),
             is_internal: false,
+            pending: false,
         }
+    }
+
+    /// Creates an `Error` for a call into JavaScript that threw, or that execution terminating
+    /// interrupted, leaving the exception pending in V8; see [`Error::is_pending`].
+    pub(crate) fn pending() -> Self {
+        Self {
+            pending: true,
+            ..Self::new_internal_error("a JavaScript exception is pending")
+        }
+    }
+
+    /// Returns whether this error stands for an exception or termination that is pending in V8,
+    /// as after a call into JavaScript that threw.
+    ///
+    /// [`Lock::throw_exception`] throws nothing for such an error, so returning it from a
+    /// callback propagates the pending exception to the callback's JavaScript caller unchanged,
+    /// as C++ JSG's `JsExceptionThrown` does. `name` and `message` don't describe the exception;
+    /// to inspect it, catch it with [`Lock::try_catch`]. Code that gets such an error must not
+    /// call into JavaScript, and should return it; converting it to another error and throwing
+    /// that replaces the exception (but never a termination). The error does not track its
+    /// exception: kept after the exception was caught or propagated, as a clone can be, and
+    /// thrown with no exception pending, it becomes an internal error.
+    #[must_use]
+    pub const fn is_pending(&self) -> bool {
+        self.pending
     }
 
     /// Creates a V8 exception from this error.
@@ -462,6 +496,7 @@ impl Error {
                 name: ExceptionType::from_dom_exception_name(name).unwrap_or(ExceptionType::Error),
                 message: message.to_owned(),
                 is_internal,
+                pending: false,
             });
         }
 
@@ -470,6 +505,7 @@ impl Error {
             name: ExceptionType::from(ty),
             message: message.to_owned(),
             is_internal,
+            pending: false,
         })
     }
 
@@ -484,6 +520,7 @@ impl Error {
             name: ExceptionType::TypeError,
             message: message.into(),
             is_internal: true,
+            pending: false,
         }
     }
 }
@@ -849,11 +886,33 @@ impl<'s> Lock<'s> {
 
     /// Throws an error as a V8 exception.
     ///
-    /// If `err.is_internal` is set, the message is redacted (via
+    /// Throws nothing for an error that stands for a pending exception (see
+    /// [`Error::is_pending`]), which then keeps propagating, nor while execution is terminating,
+    /// so that the termination is never replaced by a catchable exception. Such an error can
+    /// outlive its exception, as a clone kept after [`Lock::try_catch`] caught it; with no
+    /// exception pending, it is thrown as an internal error. Otherwise, if
+    /// `err.is_internal` is set, the message is redacted (via
     /// `throw_internal_error()`) rather than thrown verbatim, matching how
     /// C++ `decodeTunneledException()` handles `isInternal` KJ exceptions. If
     /// creating the exception fails, that failure is thrown as an internal error.
     pub fn throw_exception(&mut self, err: &Error) {
+        if err.is_pending() {
+            let isolate = self.isolate().as_ffi();
+            // SAFETY: isolate is valid and locked (guaranteed by Lock).
+            if unsafe {
+                v8::ffi::isolate_is_execution_terminating(isolate)
+                    || v8::ffi::isolate_has_pending_exception(isolate)
+            } {
+                return;
+            }
+            // Throwing nothing would return to JavaScript with neither a result nor an
+            // exception.
+            self.throw_internal_error(
+                "a jsg::Error for a pending JavaScript exception was thrown with no exception \
+                 pending",
+            );
+            return;
+        }
         if err.is_internal {
             self.throw_internal_error(&err.message);
             return;
@@ -867,12 +926,104 @@ impl<'s> Lock<'s> {
         }
     }
 
+    /// Runs `f`, catching what JavaScript throws while it runs, as C++ `jsg::Lock::tryCatch()`
+    /// does.
+    ///
+    /// Returns `Ok(Ok(_))` with what `f` returns, or `Ok(Err(exception))` with the value thrown
+    /// if `f` fails: what JavaScript threw for an error that stands for a pending exception (see
+    /// [`Error::is_pending`]), or the error `f` returned, thrown as [`Lock::throw_exception`]
+    /// throws it. A termination is not caught: it keeps propagating, and this returns `Err` with
+    /// an error for which [`Error::is_pending`] is true, which the caller should return.
+    ///
+    /// # Errors
+    ///
+    /// Fails if execution is terminating.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// match lock.try_catch(|lock| callback.call::<Number>(lock, None, &[]))? {
+    ///     Ok(result) => { /* ... */ }
+    ///     Err(exception) => { /* handle what the callback threw */ }
+    /// }
+    /// ```
+    #[expect(unsafe_code, reason = "runs `f` in a C++ v8::TryCatch through the FFI")]
+    pub fn try_catch<T, F>(&mut self, f: F) -> Result<Result<T, v8::Local<'s, v8::Value>>>
+    where
+        F: FnOnce(&mut Self) -> Result<T>,
+    {
+        struct Call<'a, 's, F, T> {
+            lock: &'a mut Lock<'s>,
+            f: Option<F>,
+            result: Option<std::thread::Result<Result<T>>>,
+        }
+
+        /// Runs the closure, and returns whether it failed: then the `TryCatch` holds what it
+        /// threw. Only `try_catch` passes it, with the address of its `Call`, to C++, so it
+        /// is not an `unsafe fn` (which the bridge does not accept for callbacks).
+        fn trampoline<'s, F, T>(data: usize) -> bool
+        where
+            F: FnOnce(&mut Lock<'s>) -> Result<T>,
+        {
+            // SAFETY: `data` was cast from `&raw mut Call` in `try_catch`, which outlives the
+            // call.
+            let call = unsafe { &mut *(data as *mut Call<'_, 's, F, T>) };
+            let Some(f) = call.f.take() else {
+                unreachable!()
+            };
+            // A panic must not unwind into C++; it is resumed once the `TryCatch` is gone.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let result = f(call.lock);
+                if let Err(err) = &result {
+                    // Thrown in the `TryCatch`, so that it catches what `f` failed with.
+                    call.lock.throw_exception(err);
+                }
+                result
+            }));
+            let failed = !matches!(result, Ok(Ok(_)));
+            call.result = Some(result);
+            failed
+        }
+
+        let isolate = self.isolate().as_ffi();
+        let mut call = Call {
+            lock: self,
+            f: Some(f),
+            result: None,
+        };
+        let mut exception = v8::ffi::MaybeLocal { ptr: 0 };
+        // SAFETY: the lock keeps the isolate locked, with a scope open, for the call; `call`
+        // outlives it; `trampoline` matches its type.
+        unsafe {
+            v8::ffi::isolate_try_catch(
+                isolate,
+                &raw mut call as usize,
+                trampoline::<F, T>,
+                &mut exception,
+            );
+        }
+        let Some(result) = call.result else {
+            unreachable!()
+        };
+        match result {
+            Ok(Ok(value)) => Ok(Ok(value)),
+            Err(payload) => std::panic::resume_unwind(payload),
+            // SAFETY: the exception belongs to the scope of the lock, which `isolate_try_catch`
+            // opened no scope inside.
+            Ok(Err(_)) => match unsafe { v8::Local::from_ffi_maybe(exception) } {
+                Some(exception) => Ok(Err(exception)),
+                None => Err(Error::pending()),
+            },
+        }
+    }
+
     /// Throws an internal error as a V8 exception, matching `makeInternalError()` in C++.
     ///
     /// Generates a unique error reference ID, logs `internal_message` with the ID via
     /// `KJ_LOG(ERROR)` (reaching Sentry), and schedules a generic
     /// `"Error: internal error; reference = <id>"` JS exception on the isolate so the
-    /// internal message is never exposed to JavaScript.
+    /// internal message is never exposed to JavaScript. While execution is terminating, it
+    /// still logs the message but throws nothing.
     pub fn throw_internal_error(&mut self, internal_message: &str) {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe {
@@ -1017,6 +1168,13 @@ pub enum Member {
     StaticConstant {
         name: String,
         value: ConstantValue,
+    },
+    /// Another resource type's constructor, as a property of this type's
+    /// prototype named `name`, like C++ JSG's `JSG_NESTED_TYPE`. Nested types
+    /// are installed after every other member, whatever their position.
+    NestedType {
+        name: String,
+        nested_type: NestedType,
     },
 }
 

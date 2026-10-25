@@ -263,6 +263,14 @@ bool local_is_name(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsName();
 }
 
+bool local_is_big_int(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsBigInt();
+}
+
+bool local_is_date(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsDate();
+}
+
 bool local_is_shared_array_buffer(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsSharedArrayBuffer();
 }
@@ -405,8 +413,18 @@ MaybeLocal local_symbol_description(Isolate* isolate, const Local& value) {
   return maybe_local_to_ffi(v8::MaybeLocal<v8::String>(desc.As<v8::String>()));
 }
 
+// Local<BigInt>
+int64_t local_big_int_int64_value(const Local& value, bool& lossless) {
+  return local_as_ref_from_ffi<v8::BigInt>(value)->Int64Value(&lossless);
+}
+
+// Local<Date>
+double local_date_value_of(const Local& value) {
+  return local_as_ref_from_ffi<v8::Date>(value)->ValueOf();
+}
+
 // Local<Function>
-Local local_function_call(
+MaybeLocal local_function_call(
     Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args) {
   auto context = isolate->GetCurrentContext();
   auto fn = local_as_ref_from_ffi<v8::Function>(function);
@@ -417,7 +435,11 @@ Local local_function_call(
     v8Args[i] = local_as_ref_from_ffi<v8::Value>(args[i]);
   }
 
-  return to_ffi(::workerd::jsg::check(fn->Call(context, receiver, v8Args.size(), v8Args.data())));
+  // No TryCatch: what the function throws stays pending and propagates once the Rust caller
+  // returns to JavaScript, as with C++ JSG. V8 then still reports it where it was thrown, and
+  // predicts whether JavaScript catches it (which DevTools' "pause on uncaught exceptions" uses)
+  // by walking the whole stack.
+  return maybe_local_to_ffi(fn->Call(context, receiver, v8Args.size(), v8Args.data()));
 }
 
 // Local<Object>
@@ -1247,6 +1269,18 @@ Local function_template_get_function(Isolate* isolate, const Global& tmpl) {
   return to_ffi(kj::mv(function));
 }
 
+// Mirrors registerNestedType() (resource.h): the nested type's constructor is a property of the
+// prototype, so that it is inherited along with the prototype.
+void function_template_set_nested_type(
+    Isolate* isolate, const Global& tmpl, ::rust::Str name, const Global& nested) {
+  v8::HandleScope scope(isolate);
+  auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(
+      isolate, global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl));
+  auto local_nested = v8::Local<v8::FunctionTemplate>::New(
+      isolate, global_as_ref_from_ffi<v8::FunctionTemplate>(nested));
+  local_tmpl->PrototypeTemplate()->Set(makeInternedStr(isolate, name), local_nested);
+}
+
 // Realm
 Realm* realm_from_isolate(Isolate* isolate) {
   auto* realm =
@@ -1337,8 +1371,29 @@ bool local_try_unwrap_dom_exception(
   return false;
 }
 
+// TryCatch
+bool catch_exception(v8::TryCatch& tryCatch, MaybeLocal& exception) {
+  // The rule of jsg::Lock::tryCatch(): nothing caught means a termination, which V8 may already
+  // have cleared once all JavaScript frames unwound.
+  if (!tryCatch.CanContinue() || !tryCatch.HasCaught() || tryCatch.Exception().IsEmpty()) {
+    tryCatch.ReThrow();
+    return false;
+  }
+  exception = maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(tryCatch.Exception()));
+  return true;
+}
+
+void isolate_try_catch(
+    Isolate* isolate, size_t data, ::rust::Fn<bool(size_t)> callback, MaybeLocal& exception) {
+  v8::TryCatch tryCatch(isolate);
+  if (callback(data)) {
+    catch_exception(tryCatch, exception);
+  }
+}
+
 // Isolate
 void isolate_throw_exception(Isolate* isolate, Local exception) {
+  if (isolate->IsExecutionTerminating()) return;
   isolate->ThrowException(local_from_ffi<v8::Value>(kj::mv(exception)));
 }
 
@@ -1346,6 +1401,7 @@ void isolate_throw_error(Isolate* isolate, ::rust::Str description) {
   // kNormal (not kInternalized): error messages are arbitrary caller-supplied
   // strings and should not pollute the internalized string table (which is never
   // GC'd), matching C++ jsg::Lock::v8Error() / v8Str() behavior.
+  if (isolate->IsExecutionTerminating()) return;
   auto message = ::workerd::jsg::check(v8::String::NewFromUtf8(
       isolate, description.data(), v8::NewStringType::kNormal, description.size()));
   isolate->ThrowError(message);
@@ -1359,11 +1415,22 @@ void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage)
   // avoiding the out-of-bounds read that kj::StringPtr(data, size) would cause
   // on non-NUL-terminated Rust &str data.
   auto message = kj::heapString(internalMessage.data(), internalMessage.size());
-  isolate->ThrowException(::workerd::jsg::makeInternalError(isolate, message));
+  // Logs the message even when execution is terminating, but then throws nothing.
+  auto error = ::workerd::jsg::makeInternalError(isolate, message);
+  if (isolate->IsExecutionTerminating()) return;
+  isolate->ThrowException(error);
 }
 
 void isolate_terminate_execution(Isolate* isolate) {
   ::workerd::jsg::IsolateBase::from(isolate).terminateExecution();
+}
+
+bool isolate_is_execution_terminating(Isolate* isolate) {
+  return isolate->IsExecutionTerminating();
+}
+
+bool isolate_has_pending_exception(Isolate* isolate) {
+  return isolate->HasPendingException();
 }
 
 void ignore_leak(size_t ptr) {

@@ -7,7 +7,7 @@
 //! - On a **struct**: emits `jsg::Type`, `jsg::ToJS`, `jsg::FromJS`,
 //!   `jsg::Traced`, and `jsg::GarbageCollected` implementations.
 //! - On an **impl block**: emits member factories and, unless `custom_members` is set,
-//!   the `jsg::Resource` trait with automatic member registration.
+//!   the `jsg::Resource` trait with automatic member and nested type registration.
 
 use std::collections::HashMap;
 
@@ -23,6 +23,7 @@ use crate::utils::extract_named_fields;
 use crate::utils::has_custom_trace_flag;
 use crate::utils::is_attr;
 use crate::utils::is_lock_ref;
+use crate::utils::is_result_type;
 use crate::utils::snake_to_camel;
 
 // Compile-time mirror of `jsg::PropertyKind` used to group annotated methods
@@ -37,6 +38,10 @@ pub enum PropertyKind {
 
 /// Entry point called from `lib.rs` for `#[jsg_resource]` on a struct.
 pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> TokenStream {
+    if let Some(err) = reject_nested_types_on_struct(attr.clone().into()) {
+        return err.to_compile_error().into();
+    }
+
     // Check for `#[jsg_resource(custom_trace)]` before consuming `attr`.
     let custom_trace = has_custom_trace_flag(&attr);
 
@@ -255,6 +260,67 @@ fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistrati
         .collect()
 }
 
+/// Returns an error if the arguments of `#[jsg_resource]` on a struct include
+/// `nested_types(...)`, which belongs on the impl block.
+fn reject_nested_types_on_struct(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
+    use syn::punctuated::Punctuated;
+
+    let metas: Punctuated<syn::Meta, syn::Token![,]> =
+        syn::parse::Parser::parse2(Punctuated::parse_terminated, attr).ok()?;
+    metas
+        .iter()
+        .find(|meta| meta.path().is_ident("nested_types"))
+        .map(|meta| {
+            syn::Error::new_spanned(
+                meta.path(),
+                "`nested_types(...)` belongs on the #[jsg_resource] impl block, not the struct",
+            )
+        })
+}
+
+/// One entry of `#[jsg_resource(nested_types(...))]`: `Type` or `Name = Type`.
+struct NestedTypeArg {
+    name: Option<syn::Ident>,
+    ty: syn::Path,
+}
+
+impl syn::parse::Parse for NestedTypeArg {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        if input.peek(syn::Ident) && input.peek2(syn::Token![=]) {
+            let name = input.parse()?;
+            input.parse::<syn::Token![=]>()?;
+            Ok(Self {
+                name: Some(name),
+                ty: input.parse()?,
+            })
+        } else {
+            Ok(Self {
+                name: None,
+                ty: input.parse()?,
+            })
+        }
+    }
+}
+
+/// Returns a `Member::NestedType` token stream for a nested type.
+fn nested_type_registration(arg: &NestedTypeArg) -> proc_macro2::TokenStream {
+    use syn::ext::IdentExt;
+
+    let ty = &arg.ty;
+    let name = if let Some(name) = &arg.name {
+        let name = name.unraw().to_string();
+        quote! { #name.to_owned() }
+    } else {
+        quote! { <#ty as jsg::Type>::class_name().to_owned() }
+    };
+    quote! {
+        jsg::Member::NestedType {
+            name: #name,
+            nested_type: jsg::NestedType::of::<#ty>(),
+        }
+    }
+}
+
 /// Check factory names against each other and the user's value-namespace associated items.
 fn validate_factory_names(
     impl_block: &ItemImpl,
@@ -304,26 +370,90 @@ enum RegistrationMode {
     Custom,
 }
 
-fn parse_registration_mode(attr: proc_macro2::TokenStream) -> syn::Result<RegistrationMode> {
-    use syn::parse::Parser as _;
+/// The arguments of `#[jsg_resource]` on an impl block.
+struct ImplArgs {
+    mode: RegistrationMode,
+    nested_types: Vec<NestedTypeArg>,
+}
 
-    let args =
-        syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated.parse2(attr)?;
-    let mut mode = RegistrationMode::Automatic;
+/// Parses the arguments of `#[jsg_resource]` on an impl block: `custom_members` and any
+/// number of `nested_types(...)` lists.
+///
+/// A nested type listed twice without a name, or a name given twice, is an error. Nested
+/// types without a name are named after their class names, which are only known when the
+/// macro's output is compiled, so such a nested type can still clash with another nested
+/// type or member. `nested_types(...)` cannot be combined with `custom_members`, which
+/// leaves `Resource::members` to the author.
+fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
+    use syn::ext::IdentExt;
+    use syn::parse::Parser as _;
+    use syn::punctuated::Punctuated;
+
+    const EXPECTED: &str = "expected `custom_members` or `nested_types(...)` on a \
+                            #[jsg_resource] impl block (`name` and `custom_trace` belong on \
+                            the struct)";
+
+    let args = Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated.parse2(attr)?;
+    let mut custom_members = None;
+    let mut nested_types = Vec::<NestedTypeArg>::new();
+    let mut first_nested_types = None;
     for arg in args {
-        if matches!(&arg, syn::Meta::Path(path) if path.is_ident("custom_members")) {
-            if mode == RegistrationMode::Custom {
-                return Err(syn::Error::new_spanned(arg, "duplicate `custom_members`"));
+        match &arg {
+            syn::Meta::Path(path) if path.is_ident("custom_members") => {
+                if custom_members.is_some() {
+                    return Err(syn::Error::new_spanned(arg, "duplicate `custom_members`"));
+                }
+                custom_members = Some(path.clone());
             }
-            mode = RegistrationMode::Custom;
-        } else {
-            return Err(syn::Error::new_spanned(
-                arg,
-                "expected `custom_members` on a #[jsg_resource] impl block",
-            ));
+            syn::Meta::List(list) if list.path.is_ident("nested_types") => {
+                first_nested_types.get_or_insert_with(|| list.path.clone());
+                let list_args = list.parse_args_with(
+                    Punctuated::<NestedTypeArg, syn::Token![,]>::parse_terminated,
+                )?;
+                for nested in list_args {
+                    let duplicate =
+                        nested_types
+                            .iter()
+                            .any(|other| match (&nested.name, &other.name) {
+                                (Some(name), Some(other)) => name.unraw() == other.unraw(),
+                                (None, None) => {
+                                    let (ty, other) = (&nested.ty, &other.ty);
+                                    quote! { #ty }.to_string() == quote! { #other }.to_string()
+                                }
+                                _ => false,
+                            });
+                    if duplicate {
+                        return Err(match &nested.name {
+                            Some(name) => {
+                                syn::Error::new_spanned(name, "duplicate nested type name")
+                            }
+                            None => syn::Error::new_spanned(&nested.ty, "duplicate nested type"),
+                        });
+                    }
+                    nested_types.push(nested);
+                }
+            }
+            _ => return Err(syn::Error::new_spanned(arg, EXPECTED)),
         }
     }
-    Ok(mode)
+    let mode = if custom_members.is_some() {
+        RegistrationMode::Custom
+    } else {
+        RegistrationMode::Automatic
+    };
+    if let (Some(custom_members), Some(nested)) = (custom_members, first_nested_types) {
+        let mut error = syn::Error::new_spanned(
+            nested,
+            "`nested_types(...)` cannot be combined with `custom_members`; add \
+             `jsg::Member::NestedType` entries to `Resource::members` instead",
+        );
+        error.combine(syn::Error::new_spanned(
+            custom_members,
+            "`custom_members` given here",
+        ));
+        return Err(error);
+    }
+    Ok(ImplArgs { mode, nested_types })
 }
 
 /// Entry point called from `lib.rs` for `#[jsg_resource]` on an impl block.
@@ -351,7 +481,8 @@ fn generate_resource_bindings(
     attr: proc_macro2::TokenStream,
     impl_block: &ItemImpl,
 ) -> Result<proc_macro2::TokenStream, proc_macro2::TokenStream> {
-    let mode = parse_registration_mode(attr).map_err(|err| err.to_compile_error())?;
+    let ImplArgs { mode, nested_types } =
+        parse_impl_args(attr).map_err(|err| err.to_compile_error())?;
     let self_ty = &impl_block.self_ty;
 
     if !matches!(&**self_ty, syn::Type::Path(_)) {
@@ -371,6 +502,7 @@ fn generate_resource_bindings(
     validate_factory_names(impl_block, &registrations).map_err(|err| err.to_compile_error())?;
     let factories = registrations.iter().map(|r| &r.factory);
     let automatic = registrations.iter().map(|r| &r.automatic);
+    let nested_type_registrations = nested_types.iter().map(nested_type_registration);
 
     let resource_impl = if mode == RegistrationMode::Automatic {
         quote! {
@@ -382,7 +514,7 @@ fn generate_resource_bindings(
                 where
                     Self: Sized,
                 {
-                    vec![#(#automatic,)*]
+                    vec![#(#automatic,)* #(#nested_type_registrations,)*]
                 }
             }
         }
@@ -420,18 +552,44 @@ fn validate_constructor(method: &syn::ImplItemFn) -> Option<proc_macro2::TokenSt
         });
     }
 
-    let returns_self = matches!(&method.sig.output,
-        syn::ReturnType::Type(_, ty) if matches!(&**ty,
-            syn::Type::Path(p) if p.path.is_ident("Self")
-        )
-    );
-    if !returns_self {
+    if constructor_return(method) == ConstructorReturn::Invalid {
         return Some(quote! {
-            compile_error!("#[jsg_constructor] must return Self");
+            compile_error!("#[jsg_constructor] must return Self or Result<Self, E>");
         });
     }
 
     None
+}
+
+/// What a `#[jsg_constructor]` method returns.
+#[derive(Debug, PartialEq, Eq)]
+enum ConstructorReturn {
+    /// `Self`.
+    Infallible,
+    /// `Result<Self, E>`, under any path ending in `Result`.
+    Fallible,
+    /// Anything else, which is not a valid constructor.
+    Invalid,
+}
+
+fn constructor_return(method: &syn::ImplItemFn) -> ConstructorReturn {
+    let syn::ReturnType::Type(_, ty) = &method.sig.output else {
+        return ConstructorReturn::Invalid;
+    };
+    let is_self = |ty: &syn::Type| matches!(ty, syn::Type::Path(p) if p.path.is_ident("Self"));
+    if is_self(ty) {
+        return ConstructorReturn::Infallible;
+    }
+    if is_result_type(ty)
+        && let syn::Type::Path(p) = &**ty
+        && let Some(segment) = p.path.segments.last()
+        && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+        && let Some(syn::GenericArgument::Type(ok)) = args.args.first()
+        && is_self(ok)
+    {
+        return ConstructorReturn::Fallible;
+    }
+    ConstructorReturn::Invalid
 }
 
 /// Extracts constructor argument unwrap statements and argument expressions.
@@ -514,12 +672,26 @@ fn generate_constructor_registration(
     }
 
     let rust_method_name = &method.sig.ident;
+    let call = quote! { #self_ty::#rust_method_name };
 
     let (has_lock_param, unwraps, arg_exprs) = extract_constructor_params(method);
     let lock_arg = if has_lock_param {
         quote! { &mut *lock, }
     } else {
         quote! {}
+    };
+    let construct = if constructor_return(method) == ConstructorReturn::Fallible {
+        quote! {
+            let resource = match #call(#lock_arg #(#arg_exprs),*) {
+                Ok(resource) => resource,
+                Err(err) => {
+                    lock.throw_exception(&err.into());
+                    return;
+                }
+            };
+        }
+    } else {
+        quote! { let resource = #call(#lock_arg #(#arg_exprs),*); }
     };
 
     let member = quote! {
@@ -539,7 +711,7 @@ fn generate_constructor_registration(
 
                 #(#unwraps)*
 
-                let resource = #self_ty::#rust_method_name(#lock_arg #(#arg_exprs),*);
+                #construct
                 let rc = jsg::Rc::new(resource);
                 rc.attach_to_this(args);
             }),

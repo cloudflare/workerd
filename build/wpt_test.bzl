@@ -8,12 +8,16 @@ load("//:build/wd_test.bzl", "wd_test")
 PORT_BINDINGS = [
     "HTTP_PORT",
     "HTTPS_PORT",
-    # The remaining ports are not currently used by tests but need to be assigned to wptserve anyway
+    # The remaining ports are not currently used by tests but need to be assigned to wptserve anyway.
+    # Every server wptserve starts needs one: for a server left out of its config it picks an
+    # "auto" port itself, by binding port 0 and closing the socket, which can hand it a port that
+    # the supervisor has already allocated and closed but wptserve has not bound yet.
     "HTTP_PORT_2",
     "HTTPS_PORT_2",
     "HTTP_PUBLIC_PORT",
     "HTTPS_PUBLIC_PORT",
     "HTTP_LOCAL_PORT",
+    "HTTPS_LOCAL_PORT",
     "WSS_PORT",
     "WS_PORT",
 ]
@@ -564,6 +568,7 @@ cd $(dirname $0)
     "http-public": [$HTTP_PUBLIC_PORT],
     "https-public": [$HTTPS_PUBLIC_PORT],
     "http-local": [$HTTP_LOCAL_PORT],
+    "https-local": [$HTTPS_LOCAL_PORT],
     "wss": [$WSS_PORT],
     "ws": [$WS_PORT]
   }}

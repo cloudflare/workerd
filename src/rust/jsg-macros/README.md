@@ -43,7 +43,11 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 - **Instance methods** (`&self`) are placed on the prototype. JavaScript can call back into
   a resource while one of its methods runs, so methods never get `&mut self`; keep state
   they change in `Cell` or `RefCell` fields. Prefer `Cell`: a `RefCell` borrow held across a
-  call that can run JavaScript makes a re-entrant call panic.
+  call that can run JavaScript makes a re-entrant call panic, and tracing skips a mutably borrowed
+  `RefCell`, so while a `borrow_mut()` is held across a call that can allocate on the V8 heap,
+  wrap the resource or create or drop a `jsg::Rc` to it, the values of the `TracedGlobal`s in it
+  and the JS wrappers of the resources its `jsg::Rc`s point to can be collected (debug builds
+  abort instead).
 - **Static methods** (no receiver) are placed on the constructor.
 - Return types of `Result<T, E>` automatically throw a JavaScript exception on `Err`.
 - The Rust `snake_case` name is converted to `camelCase` for JavaScript; override with
@@ -88,6 +92,9 @@ Use `#[jsg_resource(name = "JSName")]` to override the JavaScript class name.
 `#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`, and
 `#[jsg_static_constant]` item. It also generates member factories used by both automatic
 and custom registration.
+Use `#[jsg_resource(nested_types(Foo, Name = Bar))]` to expose other resource types'
+constructors on the prototype (equivalent to `JSG_NESTED_TYPE(Foo)` and
+`JSG_NESTED_TYPE_NAMED(Bar, Name)` in C++ JSG).
 
 ```rust
 #[jsg_resource]
@@ -172,6 +179,8 @@ handling apply in both modes. Getter and setter annotations must agree on placem
 Inspect properties remain symbol-keyed and do not take a placement argument.
 Property registration follows the returned member list's order. V8 enumerates instance native
 data properties in reverse registration order, as it does for C++ JSG.
+`nested_types(...)` cannot be combined with `custom_members`; a custom `members` lists nested
+types itself, as `jsg::Member::NestedType { name, nested_type: jsg::NestedType::of::<Foo>() }`.
 
 ---
 
@@ -196,8 +205,9 @@ impl WebSocket {
 
 ## `#[jsg_constructor]`
 
-Marks a **static** method (no `self` receiver, returns `Self`) as the JavaScript
-constructor. Only one per impl block is allowed. Without it, `new MyClass()` throws
+Marks a **static** method (no `self` receiver, returns `Self` or `Result<Self, E>`) as the
+JavaScript constructor. An `Err` is converted with `Into<jsg::Error>` and thrown, as for
+`#[jsg_method]`. Only one per impl block is allowed. Without it, `new MyClass()` throws
 `Illegal constructor`. An optional first parameter of `&mut Lock` is passed the
 isolate lock and is not counted as a JavaScript argument. Calling the constructor without
 `new` (`MyClass()`, `MyClass.call(obj)`) throws a `TypeError`, as in C++ JSG.
@@ -384,6 +394,7 @@ use no-op `Traced` impls; containers/wrappers recurse to inner values.
 | `Option<T>` / `jsg::Nullable<T>` | Delegates to `T` when present |
 | `Vec<T>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values |
 | `Cell<T>` / `std::cell::Cell<T>` | Delegates via `as_ptr()` read (safe under single-threaded, non-reentrant GC tracing) |
+| `RefCell<T>` | Delegates via `try_borrow()`; skipped while mutably borrowed (debug builds abort if `T` can hold GC references) |
 | Plain data / primitives / `#[jsg_struct]` types | No-op `Traced` |
 | Any other `T: Traced` | Uses `T`'s implementation |
 

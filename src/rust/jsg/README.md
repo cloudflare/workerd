@@ -212,7 +212,9 @@ disposed.
 A `TracedGlobal` taken out of its resource is still weak, and nothing traces its value: unless
 something else keeps the value alive, any GC from then on may free it, which leaves the
 `TracedGlobal` empty, and `as_local` on it panics. Put the `TracedGlobal` back, or hold the value
-through another handle, before a GC can run.
+through another handle, before a GC can run. Tracing likewise skips a `RefCell` while it is
+mutably borrowed, so the `TracedGlobal`s in it are untraced for as long as the borrow lasts; debug
+builds abort when that happens.
 
 `TracedGlobal<T>` fields on `#[jsg_resource]` structs participate in GC tracing when visited via `GcVisitor::visit_traced_global`. This enables the garbage collector to detect and collect back-reference cycles — for example, a resource that stores a JS callback which closes over the resource's own JS wrapper:
 
@@ -227,13 +229,42 @@ struct EventEmitter {
 #[jsg_resource]
 impl EventEmitter {
     #[jsg_method]
-    fn set_callback(&self, lock: &mut jsg::Lock, cb: jsg::v8::Local<jsg::v8::Value>) {
+    fn set_callback<'s>(&self, lock: &mut jsg::Lock<'s>, cb: jsg::v8::Local<'s, jsg::v8::Value>) {
         self.on_event.set(Some(cb.to_traced_global(lock)));
     }
 }
 ```
 
 Without tracing, storing a `TracedGlobal` back to the resource's own wrapper creates an unbreakable reference cycle that leaks until the worker is torn down. With `visit_traced_global` tracing (generated automatically by `#[jsg_resource]`), the cycle is collected by the next full GC after all strong Rust `Rc`s are dropped.
+
+## Errors from JavaScript
+
+When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
+
+Code that gets a pending error must not call into JavaScript, and should return the error. Converting it to another error and throwing that replaces the exception, as when C++ code throws while a `JsExceptionThrown` unwinds; nothing ever replaces a termination, and `call` refuses to run while execution is terminating. A pending error is only meaningful while its exception is pending: one kept past that, such as a clone stored after `try_catch` caught the exception, is thrown as an internal error when V8 has no exception pending.
+
+To handle an exception instead, run the code in `Lock::try_catch`, which catches as C++ `jsg::Lock::tryCatch()` does: the exception, or an error the closure returns, as a value; a termination keeps propagating.
+
+```rust
+match lock.try_catch(|lock| callback.call::<Number>(lock, None, &[]))? {
+    Ok(result) => { /* ... */ }
+    Err(exception) => { /* handle what the callback threw */ }
+}
+```
+
+## Type Conversions
+
+The module docs of `wrappable.rs` list every Rust type that converts to or from JavaScript, and
+how. Most convert both ways. Some convert only from JavaScript, so they can be method parameters
+but not return values:
+
+- `u8`, `u16`, `u32`, `i8`, `i16` and `i32`: a value converted to a number, which must be in range.
+  Like C++ JSG's integers.
+- `i64`: a `BigInt` that fits, or any other value converted to a number, which must be finite and
+  in range, and truncates toward zero. Like C++ JSG's `int64_t`.
+- `SystemTime`: a `Date`, or a number of milliseconds since the epoch, within the range of
+  `kj::Date`. Like C++ JSG's `kj::Date`.
+- `&[T]` and typed-array slices such as `&[u8]`.
 
 ## Union Types
 
@@ -347,7 +378,7 @@ impl Greeting {
 
 **Rules:**
 
-- The method must be static (no `self` receiver) and must return `Self`.
+- The method must be static (no `self` receiver) and must return `Self` or `Result<Self, E>`. An `Err` is converted with `Into<jsg::Error>` and thrown to the caller, as for `#[jsg_method]`.
 - Only one `#[jsg_constructor]` is allowed per impl block.
 - The first parameter may be `&mut Lock` (or `&mut jsg::Lock`) if the constructor needs isolate access; it is not exposed as a JS argument.
 - If no `#[jsg_constructor]` is present, `new MyResource()` throws an `Illegal constructor` error, matching C++ JSG behavior.
@@ -428,6 +459,23 @@ jsg_require!(valid, DOMSyntaxError, "Invalid base64");
 `FromJS` for `jsg::Error` reads a caught native error's `name` and `message`, and a
 `DOMException`'s name and message as C++ JSG stores them; a `DOMException` name without a
 DOM-prefixed type becomes `Error`.
+
+## Nested Types
+
+To expose other resource types' constructors on a resource class (equivalent to `JSG_NESTED_TYPE` and `JSG_NESTED_TYPE_NAMED` in C++), list them in `nested_types(...)` on the `#[jsg_resource]` impl block:
+
+```rust
+#[jsg_resource(nested_types(Database, Stmt = Statement))]
+impl Module {}
+// JS: instance.Database, instance.Stmt
+```
+
+Each nested type's constructor is a property of the prototype, named after the type's JavaScript class name unless given a name. It is the same function as `jsg::resource::function_template_of::<T>()`, so `instanceof` works on instances created from Rust. A nested type without a `#[jsg_constructor]` throws `Illegal constructor` when called with `new`.
+
+- Nested types are added to the prototype after its other members, so they come last in `Object.keys(prototype)`.
+- As in C++ JSG, V8 names a function after the property through which it is first instantiated. The `name` of a renamed nested type's constructor is the property name if the constructor is first reached through that property, for every later access too.
+- A resource type must not nest itself, directly or through other nested types. Creating its template panics, naming the types in the cycle.
+- Listing a type twice without a name, or giving a name twice, does not compile. `nested_types(...)` on the struct, or together with `custom_members`, does not compile either.
 
 ## Fast API
 
