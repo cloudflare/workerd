@@ -1615,8 +1615,9 @@ impl Function {
     /// error and terminates execution, as in a `#[jsg_method]`. As with the functions C++ JSG
     /// wraps, the function's `name` is empty, its `length` is 0, and it can be called with `new`.
     ///
-    /// Returns an `Err` if V8 could not create the function, which happens only when execution
-    /// is terminating.
+    /// While execution is terminating, or a JavaScript exception is pending, creates nothing and
+    /// returns an error for which [`Error::is_pending`] is true, so that returning it propagates
+    /// the termination or the exception.
     ///
     /// ```ignore
     /// let greet = v8::Function::new(lock, String::from("hello"), |lock, greeting, args| {
@@ -1680,11 +1681,6 @@ where
         Ok(value) => args.set_return_value(value),
         Err(err) => lock.throw_exception(&err),
     }
-}
-
-/// The error for an operation that V8 refused because execution is terminating.
-pub(crate) fn terminated() -> Error {
-    Error::new_internal_error("JavaScript execution terminated")
 }
 
 impl<'s> Local<'s, Function> {
@@ -4269,25 +4265,30 @@ impl WrappableRc {
     /// Creates a JavaScript function that calls `callback`, with an opaque wrapper of this
     /// Wrappable as its data, which keeps the Wrappable alive while the function is reachable.
     ///
-    /// Returns [`terminated`]'s error if V8 could not create the function, which happens only
-    /// when execution is terminating.
+    /// While execution is terminating, or an exception is pending, creates nothing and returns
+    /// [`Error::pending`]'s error, as [`Local::<Function>::call`] does. V8 fails to create a
+    /// function only while execution is terminating.
     pub(crate) fn new_function<'s>(
         &self,
-        lock: &mut Lock<'s>,
+        lock: &Lock<'s>,
         callback: crate::RawFunctionCallback,
     ) -> crate::Result<Local<'s, Function>> {
+        let isolate = lock.isolate().as_ffi();
+        // Creating the wrapper opens V8's `PrepareForExecutionScope`, which clears a pending
+        // exception or termination, so nothing is created while one is pending.
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        if unsafe {
+            ffi::isolate_is_execution_terminating(isolate)
+                || ffi::isolate_has_pending_exception(isolate)
+        } {
+            return Err(Error::pending());
+        }
         // SAFETY: isolate is valid and locked (guaranteed by Lock); `callback` is a V8 function
         // callback.
-        let handle = unsafe {
-            ffi::function_new(
-                lock.isolate().as_ffi(),
-                callback as usize,
-                self.handle.clone(),
-            )
-        }
-        .map_err(|_| terminated())?;
+        let handle = unsafe { ffi::function_new(isolate, callback as usize, self.handle.clone()) }
+            .map_err(|_| Error::pending())?;
         // SAFETY: the function is created in the scope of `lock`.
-        unsafe { Local::from_ffi_maybe(handle) }.ok_or_else(terminated)
+        unsafe { Local::from_ffi_maybe(handle) }.ok_or_else(Error::pending)
     }
 
     /// Returns the Rust Wrappable whose opaque wrapper is the running function's data, as

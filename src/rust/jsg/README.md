@@ -262,10 +262,11 @@ let greet = v8::Function::new(lock, String::from("hello"), |lock, greeting, args
 ```
 
 `f` returns `Result<Local<Value>, jsg::Error>`: an `Err` is thrown, and a panic throws an
-internal error and terminates execution, as in a `#[jsg_method]`. `Function::new` itself returns
-an `Err` if V8 cannot create the function, which happens only when execution is terminating. As
-with the functions C++ JSG wraps, the function's `name` is empty, its `length` is 0, and it can
-be called with `new`.
+internal error and terminates execution, as in a `#[jsg_method]`. While execution is terminating,
+or a JavaScript exception is pending, `Function::new` creates nothing and returns a pending error
+(see "Errors from JavaScript"), as `call` does; return it to keep the termination or the exception
+propagating. As with the functions C++ JSG wraps, the function's `name` is empty, its `length` is
+0, and it can be called with `new`.
 
 ## Errors from JavaScript
 
