@@ -76,6 +76,32 @@ export const validateSpans = {
       assert(span.closed, `${test}: Span '${expectedSpan}' should be closed`);
     }
 
+    // withSpan (through enterSpan) records an error thrown by its callback, synchronously or by
+    // rejecting, and leaves the status of a successful span unset.
+    for (const { test, expectedSpan, error } of [
+      { test: 'syncFunction', expectedSpan: 'sync-op' },
+      { test: 'asyncFunction', expectedSpan: 'async-op' },
+      { test: 'syncError', expectedSpan: 'sync-error-op', error: 'sync error' },
+      {
+        test: 'asyncError',
+        expectedSpan: 'async-error-op',
+        error: 'async error',
+      },
+    ]) {
+      const span = (spansByTest.get(test) || []).find(
+        (s) => s.name === expectedSpan
+      );
+      if (error) {
+        assert.deepStrictEqual(span.status, { code: 'error', message: error });
+        assert.deepStrictEqual(span.exceptions, [
+          { name: 'Error', message: error },
+        ]);
+      } else {
+        assert.strictEqual(span.status, undefined);
+        assert.strictEqual(span.exceptions, undefined);
+      }
+    }
+
     {
       const statusSpans = spansByTest.get('setStatus') || [];
       const errorSpan = statusSpans.find((s) => s.name === 'status-error-op');
@@ -256,6 +282,79 @@ export const validateSpans = {
       assert(inner.closed, `${testName}: inner span should be closed`);
       assert.strictEqual(outer.level, 'outer');
       assert.strictEqual(inner.level, 'inner');
+    }
+
+    // enterSpan records an error that escapes its callback, unless the callback set the status.
+    {
+      const spanNamed = (test, name) => {
+        const span = (spansByTest.get(test) || []).find((s) => s.name === name);
+        assert(span, `${test}: span '${name}' present`);
+        assert(span.closed, `${test}: span '${name}' should be closed`);
+        return span;
+      };
+      const spanKeyOf = (span) =>
+        [...collector.spans.entries()].find(([, s]) => s === span)[0];
+      const errorOf = (span) => ({
+        status: span.status,
+        exceptions: span.exceptions,
+      });
+
+      assert.deepStrictEqual(
+        errorOf(spanNamed('enterSpanRejects', 'enter-span-reject-op')),
+        {
+          status: { code: 'error', message: 'enterSpan rejected' },
+          exceptions: [{ name: 'TypeError', message: 'enterSpan rejected' }],
+        }
+      );
+      assert.deepStrictEqual(
+        errorOf(spanNamed('enterSpanThrowsNonError', 'enter-span-string-op')),
+        {
+          status: { code: 'error', message: 'thrown string' },
+          exceptions: [{ name: '', message: 'thrown string' }],
+        }
+      );
+      // recordException() only takes strings and objects, so a thrown number only sets the
+      // status.
+      assert.deepStrictEqual(
+        errorOf(spanNamed('enterSpanThrowsNonError', 'enter-span-number-op')),
+        { status: { code: 'error', message: '42' }, exceptions: undefined }
+      );
+      assert.deepStrictEqual(
+        errorOf(
+          spanNamed('enterSpanErrorPropertiesThrow', 'enter-span-unreadable-op')
+        ),
+        { status: { code: 'error' }, exceptions: undefined }
+      );
+
+      const handled = spanNamed(
+        'enterSpanStatusSetByCallback',
+        'enter-span-handled-op'
+      );
+      assert.deepStrictEqual(handled.exceptions, [
+        { name: 'Error', message: 'handled' },
+      ]);
+      assert.deepStrictEqual(spanUpdatesFor(spanKeyOf(handled)), [
+        {
+          type: 'status',
+          status: { code: 'error', message: 'handled by callback' },
+        },
+      ]);
+      const ok = spanNamed('enterSpanStatusSetByCallback', 'enter-span-ok-op');
+      assert.strictEqual(ok.exceptions, undefined);
+      assert.deepStrictEqual(spanUpdatesFor(spanKeyOf(ok)), [
+        { type: 'status', status: { code: 'ok' } },
+      ]);
+
+      // Successful spans get neither, and so do startActiveSpan spans, which the callback ends.
+      for (const span of [
+        spanNamed('ctxTracing', 'ctx-tracing-op'),
+        spanNamed('startActiveSpanSyncThrow', 'manual-throw-op'),
+      ]) {
+        assert.deepStrictEqual(errorOf(span), {
+          status: undefined,
+          exceptions: undefined,
+        });
+      }
     }
 
     console.log('All tracing-helpers tests passed!');
