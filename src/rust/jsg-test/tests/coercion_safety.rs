@@ -4,9 +4,13 @@
 
 //! Regression tests for the Rust JSG `unwrap_*` boundary: hostile JS values
 //! must not abort the process (SIGABRT) as they previously did. Specifically:
-//! coercion failures and wrong types must yield a catchable `Err`, while lone
+//! coercion failures and wrong types must yield an `Err`, while lone
 //! surrogates are a deliberate exception -- they decode *lossily* to U+FFFD
 //! (`Ok`), rather than erroring.
+//!
+//! What JavaScript throws during a coercion or property access stays pending, as for
+//! `Local<Function>::call`: the `Err` is one for which `is_pending()` is true, and the tests
+//! catch the thrown value with `Lock::try_catch`.
 //!
 //! `unwrap_string`/`unwrap_number` call V8's `ToString`/`ToNumber`, which run
 //! arbitrary JS whenever the value isn't already a primitive of the right
@@ -23,10 +27,53 @@ use jsg::ExceptionType;
 use jsg::FromJS;
 use jsg::Number;
 use jsg::ToJS;
+use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 
-/// Coercion failures must surface as a catchable error, never abort.
+/// Runs `f` in `try_catch`. `f` must fail with an error for a pending exception; returns what
+/// JavaScript threw.
+fn thrown_by<'s, T: std::fmt::Debug>(
+    lock: &mut jsg::Lock<'s>,
+    f: impl FnOnce(&mut jsg::Lock<'s>) -> jsg::Result<T>,
+) -> v8::Local<'s, v8::Value> {
+    let caught = lock
+        .try_catch(|lock| {
+            let err = f(lock).expect_err("should fail");
+            assert!(err.is_pending(), "not pending: {err}");
+            Err::<(), _>(err)
+        })
+        .expect("execution should not be terminating");
+    caught.expect_err("should have caught an exception")
+}
+
+/// Converts the value of `expr` to `T`, which must throw, and returns what JavaScript threw.
+fn conversion_throws<'s, T: FromJS<'s>>(
+    lock: &mut jsg::Lock<'s>,
+    ctx: &crate::EvalContext<'_>,
+    expr: &str,
+) -> v8::Local<'s, v8::Value>
+where
+    T::ResultType: std::fmt::Debug,
+{
+    let value = ctx
+        .eval_raw(lock, expr)
+        .expect("expression should evaluate");
+    thrown_by(lock, |lock| T::from_js(lock, value))
+}
+
+/// Returns whether `value` is the value of the global `thrown`, by `Object.is()`.
+fn is_thrown<'s>(
+    lock: &mut jsg::Lock<'s>,
+    ctx: &crate::EvalContext<'_>,
+    value: v8::Local<'s, v8::Value>,
+) -> bool {
+    ctx.set_global(lock, "caught", value);
+    ctx.eval::<bool>(lock, "Object.is(caught, thrown)")
+        .expect("should evaluate")
+}
+
+/// Coercion failures must surface as an error, never abort.
 #[test]
 fn string_from_hostile_values_returns_err() {
     let harness = crate::Harness::new();
@@ -40,35 +87,53 @@ fn string_from_hostile_values_returns_err() {
             "new Proxy({}, { get() { throw new Error('trap'); } })",
         ];
         for expr in hostile {
-            let value = ctx
-                .eval_raw(lock, expr)
-                .expect("expression should evaluate");
-            let result = <String as FromJS>::from_js(lock, value);
-            assert!(
-                result.is_err(),
-                "String::from_js({expr}) should be Err, got {result:?}"
-            );
+            conversion_throws::<String>(lock, ctx, expr);
         }
         Ok(())
     });
 }
 
-/// A throwing `toString` preserves the JS error type and message.
+/// Converting to a string or a number throws what `toString`, `valueOf`, `Symbol.toPrimitive`
+/// or a Proxy `get` trap (which `ToPrimitive` runs to look up `Symbol.toPrimitive`) threw,
+/// whether or not it is an `Error`.
 #[test]
-fn string_from_throwing_tostring_maps_to_type_error() {
+fn coercion_throws_thrown_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let value = ctx
-            .eval_raw(lock, "({ toString() { throw new TypeError('boom'); } })")
-            .expect("expression should evaluate");
-        let err = <String as FromJS>::from_js(lock, value)
-            .expect_err("coercion failure should be an Err");
+        for setup in ["new RangeError('boom')", "({ code: 7 })", "42"] {
+            ctx.eval_raw(lock, &format!("globalThis.thrown = {setup}"))
+                .expect("setup should evaluate");
+            for expr in [
+                "({ toString() { throw thrown; } })",
+                "({ [Symbol.toPrimitive]() { throw thrown; } })",
+                "new Proxy({}, { get() { throw thrown; } })",
+            ] {
+                let caught = conversion_throws::<String>(lock, ctx, expr);
+                assert!(is_thrown(lock, ctx, caught), "{setup} {expr}");
+            }
+            for expr in [
+                "({ valueOf() { throw thrown; } })",
+                "new Proxy({}, { get() { throw thrown; } })",
+            ] {
+                let caught = conversion_throws::<Number>(lock, ctx, expr);
+                assert!(is_thrown(lock, ctx, caught), "{setup} {expr}");
+                let caught = conversion_throws::<i32>(lock, ctx, expr);
+                assert!(is_thrown(lock, ctx, caught), "{setup} {expr}");
+            }
+        }
+        Ok(())
+    });
+}
+
+/// A coercion that V8 itself rejects throws V8's `TypeError`.
+#[test]
+fn coercion_throws_v8_type_error() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let caught = conversion_throws::<String>(lock, ctx, "Symbol('s')");
+        let err = jsg::Error::from_js(lock, caught)?;
         assert_eq!(err.name, ExceptionType::TypeError);
-        assert!(
-            err.message.contains("boom"),
-            "message should preserve the original text, got {:?}",
-            err.message
-        );
+        assert_eq!(err.message, "Cannot convert a Symbol value to a string");
         Ok(())
     });
 }
@@ -95,7 +160,7 @@ fn string_from_lone_surrogate_is_lossy_not_abort() {
     });
 }
 
-/// `Number` coercion of a `Symbol`/`BigInt` throws in JS; it must be catchable.
+/// `Number` coercion of a `Symbol`/`BigInt` throws in JS.
 #[test]
 fn number_from_hostile_values_returns_err() {
     let harness = crate::Harness::new();
@@ -106,32 +171,24 @@ fn number_from_hostile_values_returns_err() {
             "({ valueOf() { throw new TypeError('no number'); } })",
         ];
         for expr in hostile {
-            let value = ctx
-                .eval_raw(lock, expr)
-                .expect("expression should evaluate");
-            let result = <Number as FromJS>::from_js(lock, value);
-            assert!(
-                result.is_err(),
-                "Number::from_js({expr}) should be Err, got {result:?}"
-            );
+            conversion_throws::<Number>(lock, ctx, expr);
         }
         Ok(())
     });
 }
 
-/// Integer conversions go through the same fallible `unwrap_number`.
+/// Integer conversions go through the same `unwrap_number`.
 #[test]
 fn integer_from_symbol_returns_err() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let value = ctx.eval_raw(lock, "Symbol('s')").expect("should evaluate");
-        let result = <u32 as FromJS>::from_js(lock, value);
-        assert!(result.is_err(), "u32::from_js(Symbol) should be Err");
+        conversion_throws::<u32>(lock, ctx, "Symbol('s')");
         Ok(())
     });
 }
 
-/// A wrong-typed typed-array argument must be a catchable error, not an abort.
+/// A wrong-typed typed-array argument must be an error, not an abort. No JavaScript runs, so
+/// the error is not pending.
 #[test]
 fn typed_array_from_wrong_type_returns_err() {
     let harness = crate::Harness::new();
@@ -141,8 +198,8 @@ fn typed_array_from_wrong_type_returns_err() {
             let value = ctx.eval_raw(lock, expr).expect("should evaluate");
             let result = <Vec<u8> as FromJS>::from_js(lock, value);
             assert!(
-                result.is_err(),
-                "Vec::<u8>::from_js({expr}) should be Err, got {result:?}"
+                result.as_ref().is_err_and(|err| !err.is_pending()),
+                "Vec::<u8>::from_js({expr}) should be a non-pending Err, got {result:?}"
             );
         }
         Ok(())
@@ -150,32 +207,24 @@ fn typed_array_from_wrong_type_returns_err() {
 }
 
 /// An accessor property that throws while `Vec<T>::from_js`'s underlying
-/// `Array::Iterate()` reads an element must surface as a catchable error
-/// carrying the original JS exception, not a generic KJ failure message, and
-/// must not leave a JS exception pending on the isolate.
+/// `Array::Iterate()` reads an element throws what the accessor threw, and the
+/// isolate stays usable.
 #[test]
 fn array_iterate_throwing_element_getter_returns_err() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let value = ctx
-            .eval_raw(
-                lock,
-                "(() => { \
-                     const arr = [1, 2, 3]; \
-                     Object.defineProperty(arr, 1, { get() { throw new RangeError('trap'); } }); \
-                     return arr; \
-                 })()",
-            )
-            .expect("expression should evaluate");
-
-        let err = <Vec<String> as FromJS>::from_js(lock, value)
-            .expect_err("throwing element getter should be an Err");
-        assert_eq!(err.name, ExceptionType::RangeError);
-        assert!(
-            err.message.contains("trap"),
-            "message should preserve the original JS exception, got {:?}",
-            err.message
+        ctx.eval_raw(lock, "globalThis.thrown = new RangeError('trap')")
+            .expect("setup should evaluate");
+        let caught = conversion_throws::<Vec<String>>(
+            lock,
+            ctx,
+            "(() => { \
+                 const arr = [1, 2, 3]; \
+                 Object.defineProperty(arr, 1, { get() { throw thrown; } }); \
+                 return arr; \
+             })()",
         );
+        assert!(is_thrown(lock, ctx, caught));
 
         // The isolate must still be usable afterwards.
         let ok = ctx.eval_raw(lock, "'still fine'").expect("should evaluate");
@@ -190,8 +239,7 @@ fn array_iterate_throwing_element_getter_returns_err() {
 fn coercion_failure_does_not_poison_isolate() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let hostile = ctx.eval_raw(lock, "Symbol('s')").expect("should evaluate");
-        assert!(<String as FromJS>::from_js(lock, hostile).is_err());
+        conversion_throws::<String>(lock, ctx, "Symbol('s')");
 
         // A subsequent, well-formed coercion still works.
         let ok = ctx.eval_raw(lock, "'still fine'").expect("should evaluate");
@@ -363,8 +411,8 @@ fn number_coercion_reentrant_into_rust_resource_method() {
 }
 
 /// A three-level-deep chain of coercions, each crossing the FFI boundary via
-/// `resource.echo`, to ensure nested `v8::TryCatch`/`unwrapCoerce` scopes
-/// don't corrupt each other or the isolate.
+/// `resource.echo`, to ensure nested coercions don't corrupt each other or the
+/// isolate.
 #[test]
 fn string_coercion_handles_deeply_nested_reentrancy() {
     let harness = crate::Harness::new();
@@ -395,14 +443,12 @@ fn string_coercion_handles_deeply_nested_reentrancy() {
 }
 
 /// A panic triggered by a Rust-backed method called *during* `ToString`
-/// coercion must surface as a catchable `Err` at the `unwrap_string` FFI
-/// boundary, not abort the process. This exercises the "termination
-/// exceptions propagate unchanged through `unwrapCoerce`'s `JSG_TRY`/
-/// `JSG_CATCH`" path described in `ffi.c++`, specifically when the
-/// termination originates from a re-entrant call rather than directly inside
-/// `ToString` itself.
+/// coercion must surface as an `Err` at the `unwrap_string` FFI boundary, not
+/// abort the process. The panic throws an internal error and requests
+/// termination, so the error is pending; `try_catch` either catches the
+/// internal error or fails because execution is terminating.
 #[test]
-fn string_coercion_reentrant_panic_is_catchable_not_abort() {
+fn string_coercion_reentrant_panic_is_err_not_abort() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ReentrantResource {
@@ -418,10 +464,10 @@ fn string_coercion_reentrant_panic_is_catchable_not_abort() {
             )
             .expect("expression should evaluate");
 
-        let result = <String as FromJS>::from_js(lock, value);
+        let result = lock.try_catch(|lock| <String as FromJS>::from_js(lock, value));
         assert!(
-            result.is_err(),
-            "panic during ToString coercion must be a catchable Err, got {result:?}"
+            !matches!(result, Ok(Ok(_))),
+            "panic during ToString coercion must be an Err, got {result:?}"
         );
         Ok(())
     });
@@ -429,7 +475,7 @@ fn string_coercion_reentrant_panic_is_catchable_not_abort() {
 
 /// Same as above, but for `Number`/`valueOf`/`unwrap_number`.
 #[test]
-fn number_coercion_reentrant_panic_is_catchable_not_abort() {
+fn number_coercion_reentrant_panic_is_err_not_abort() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ReentrantResource {
@@ -442,10 +488,10 @@ fn number_coercion_reentrant_panic_is_catchable_not_abort() {
             .eval_raw(lock, "({ valueOf() { resource.panicNow(); return 0; } })")
             .expect("expression should evaluate");
 
-        let result = <Number as FromJS>::from_js(lock, value);
+        let result = lock.try_catch(|lock| <Number as FromJS>::from_js(lock, value));
         assert!(
-            result.is_err(),
-            "panic during ToNumber coercion must be a catchable Err, got {result:?}"
+            !matches!(result, Ok(Ok(_))),
+            "panic during ToNumber coercion must be an Err, got {result:?}"
         );
         Ok(())
     });
@@ -471,7 +517,11 @@ fn reentrant_panic_during_coercion_does_not_poison_isolate() {
                 "({ toString() { resource.panicNow(); return 'unreachable'; } })",
             )
             .expect("expression should evaluate");
-        assert!(<String as FromJS>::from_js(lock, value).is_err());
+        let result = lock.try_catch(|lock| <String as FromJS>::from_js(lock, value));
+        assert!(!matches!(result, Ok(Ok(_))));
+        // The panic requested termination, which takes effect when JavaScript next runs, as it
+        // would when the Rust code that coerced returned to its JavaScript caller.
+        assert!(ctx.eval_raw(lock, "0").is_err());
         Ok(())
     });
 
@@ -484,42 +534,269 @@ fn reentrant_panic_during_coercion_does_not_poison_isolate() {
     });
 }
 
-/// A throwing getter is an `Err` from `Object::get`, with its JS error intact.
+/// `Object::get` throws what a getter or Proxy trap threw; an absent property is `undefined`.
 #[test]
 fn object_get_from_throwing_getter_returns_err() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let value = ctx
-            .eval_raw(lock, "({ get x() { throw new RangeError('getter'); } })")
-            .expect("expression should evaluate");
-        let obj: jsg::v8::Local<'_, jsg::v8::Object> = value.try_into().unwrap();
-        let err = obj
-            .get(lock, "x")
-            .expect_err("a throwing getter should be an Err");
-        assert_eq!(err.name, ExceptionType::RangeError);
-        assert!(err.message.contains("getter"), "got {:?}", err.message);
+        ctx.eval_raw(lock, "globalThis.thrown = new RangeError('getter')")
+            .expect("setup should evaluate");
+        for expr in [
+            "({ get x() { throw thrown; } })",
+            "new Proxy({}, { get() { throw thrown; } })",
+        ] {
+            let value = ctx
+                .eval_raw(lock, expr)
+                .expect("expression should evaluate");
+            let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
+            let caught = thrown_by(lock, |lock| obj.get(lock, "x"));
+            assert!(is_thrown(lock, ctx, caught), "{expr}");
+        }
+        let obj: v8::Local<'_, v8::Object> =
+            ctx.eval_raw(lock, "({})").unwrap().try_into().unwrap();
         assert!(obj.get(lock, "absent").unwrap().is_undefined());
         Ok(())
     });
 }
 
-/// A throwing Proxy `has` trap is an `Err` from `Object::has`, not an abort.
+/// `Object::has` throws what a Proxy `has` trap threw.
 #[test]
 fn object_has_from_throwing_proxy_returns_err() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
+        ctx.eval_raw(lock, "globalThis.thrown = new TypeError('trap')")
+            .expect("setup should evaluate");
         let value = ctx
-            .eval_raw(
-                lock,
-                "new Proxy({}, { has() { throw new TypeError('trap'); } })",
-            )
+            .eval_raw(lock, "new Proxy({}, { has() { throw thrown; } })")
             .expect("expression should evaluate");
-        let obj: jsg::v8::Local<'_, jsg::v8::Object> = value.try_into().unwrap();
-        let err = obj
-            .has(lock, "x")
-            .expect_err("a throwing trap should be an Err");
-        assert_eq!(err.name, ExceptionType::TypeError);
-        assert!(err.message.contains("trap"), "got {:?}", err.message);
+        let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
+        let caught = thrown_by(lock, |lock| obj.has(lock, "x"));
+        assert!(is_thrown(lock, ctx, caught));
+        Ok(())
+    });
+}
+
+/// What an argument's coercion throws reaches the JavaScript caller of a method unchanged.
+#[test]
+fn coercion_exception_propagates_through_method() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = jsg::Rc::new(ReentrantResource {
+            call_count: Cell::new(0),
+        });
+        ctx.set_global(lock, "resource", resource.clone());
+        let caught = ctx.eval::<bool>(
+            lock,
+            "const thrown = new RangeError('boom');
+             let caught;
+             try { resource.echo({ toString() { throw thrown; } }); } catch (e) { caught = e; }
+             let caughtNumber;
+             try { resource.double({ valueOf() { throw 42; } }); } catch (e) { caughtNumber = e; }
+             caught === thrown && caughtNumber === 42",
+        );
+        assert!(caught.unwrap());
+        assert_eq!(resource.call_count.get(), 0);
+        Ok(())
+    });
+}
+
+// =============================================================================
+// Termination during, and before, a conversion or property access.
+// =============================================================================
+
+/// What `ConvertingResource` does with its value.
+#[derive(Clone, Copy, Debug)]
+enum Conversion {
+    String,
+    Number,
+    Get,
+    Has,
+    Iterate,
+}
+
+impl Conversion {
+    const ALL: [Self; 5] = [
+        Self::String,
+        Self::Number,
+        Self::Get,
+        Self::Has,
+        Self::Iterate,
+    ];
+
+    /// Converts `value`, or reads its property `x`.
+    fn run<'s>(self, lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) -> jsg::Result<()> {
+        match self {
+            Self::String => String::from_js(lock, value).map(drop),
+            Self::Number => Number::from_js(lock, value).map(drop),
+            Self::Get => v8::Local::<v8::Object>::try_from(value)
+                .unwrap()
+                .get(lock, "x")
+                .map(drop),
+            Self::Has => v8::Local::<v8::Object>::try_from(value)
+                .unwrap()
+                .has(lock, "x")
+                .map(drop),
+            Self::Iterate => Vec::<Number>::from_js(lock, value).map(drop),
+        }
+    }
+
+    /// A value whose conversion, or whose property `x`, calls `f`.
+    fn value_calling(self, f: &str) -> String {
+        match self {
+            Self::String => format!("({{ toString: {f} }})"),
+            Self::Number => format!("({{ valueOf: {f} }})"),
+            Self::Get => format!("({{ get x() {{ return ({f})(); }} }})"),
+            Self::Has => format!("new Proxy({{}}, {{ has: {f} }})"),
+            Self::Iterate => {
+                format!(
+                    "(() => {{ const a = [0]; Object.defineProperty(a, 0, {{ get: {f} }}); return a; }})()"
+                )
+            }
+        }
+    }
+}
+
+jsg::jsg_traced!(Conversion);
+
+/// A Rust-backed resource that converts values, and records whether a conversion failed with a
+/// pending error.
+#[jsg_resource]
+struct ConvertingResource {
+    conversion: Cell<Option<Conversion>>,
+    saw_pending: Cell<bool>,
+}
+
+#[jsg_resource]
+impl ConvertingResource {
+    /// Converts `value`, and fails as the conversion does.
+    #[jsg_method]
+    pub fn convert<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<(), jsg::Error> {
+        let conversion = self.conversion.get().unwrap();
+        conversion
+            .run(lock, value)
+            .inspect_err(|err| self.saw_pending.set(err.is_pending()))
+    }
+
+    /// Calls `callback`, then converts `value` even if the call failed, and fails as the call
+    /// did.
+    #[jsg_method]
+    pub fn call_then_convert<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        callback: v8::Local<'s, v8::Value>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<(), jsg::Error> {
+        let callback = v8::Local::<v8::Function>::try_from(callback)
+            .map_err(|_| jsg::Error::new_type_error("not a function"))?;
+        let called = callback.call::<v8::Local<v8::Value>>(lock, None, &[]);
+        let conversion = self.conversion.get().unwrap();
+        let converted = conversion.run(lock, value);
+        self.saw_pending
+            .set(converted.is_err_and(|err| err.is_pending()));
+        called.map(drop)
+    }
+}
+
+/// JavaScript that terminates execution: `panicNow()` throws an internal error and requests
+/// termination, which takes effect at the next interrupt check, in the loop.
+const TERMINATE: &str = "() => { try { panicker.panicNow(); } catch (e) {} while (true) {} }";
+
+fn converting_resource(
+    lock: &mut jsg::Lock,
+    ctx: &crate::EvalContext<'_>,
+    conversion: Conversion,
+) -> jsg::Rc<ConvertingResource> {
+    let resource = jsg::Rc::new(ConvertingResource {
+        conversion: Cell::new(Some(conversion)),
+        saw_pending: Cell::new(false),
+    });
+    ctx.set_global(lock, "obj", resource.clone());
+    ctx.set_global(
+        lock,
+        "panicker",
+        jsg::Rc::new(ReentrantResource {
+            call_count: Cell::new(0),
+        }),
+    );
+    resource
+}
+
+/// Execution terminating during a conversion or property access fails it with a pending error,
+/// and the termination keeps propagating past the method: JavaScript cannot catch it.
+#[test]
+fn termination_during_conversion_propagates() {
+    for conversion in Conversion::ALL {
+        let harness = crate::Harness::new();
+        harness.run_in_context(|lock, ctx| {
+            let resource = converting_resource(lock, ctx, conversion);
+            let value = conversion.value_calling(TERMINATE);
+            let result = ctx.eval::<bool>(
+                lock,
+                &format!("try {{ obj.convert({value}); }} catch (e) {{}} true"),
+            );
+            assert!(
+                result.is_err(),
+                "{conversion:?}: not terminated: {result:?}"
+            );
+            assert!(resource.saw_pending.get(), "{conversion:?}");
+            Ok(())
+        });
+    }
+}
+
+/// A conversion or property access while execution is terminating runs no JavaScript and fails
+/// with a pending error, as `Local<Function>::call` does.
+#[test]
+fn conversion_while_terminating_runs_nothing() {
+    for conversion in Conversion::ALL {
+        let harness = crate::Harness::new();
+        harness.run_in_context(|lock, ctx| {
+            let resource = converting_resource(lock, ctx, conversion);
+            let value =
+                conversion.value_calling("() => { globalThis.secondRan = true; return 0; }");
+            let result = ctx.eval::<bool>(
+                lock,
+                &format!(
+                    "globalThis.secondRan = false;
+                     obj.callThenConvert({TERMINATE}, {value});
+                     true"
+                ),
+            );
+            assert!(
+                result.is_err(),
+                "{conversion:?}: not terminated: {result:?}"
+            );
+            assert!(resource.saw_pending.get(), "{conversion:?}");
+            // V8 clears the termination once no JavaScript is running.
+            assert!(
+                !ctx.eval::<bool>(lock, "secondRan").unwrap(),
+                "{conversion:?} ran JavaScript while terminating"
+            );
+            Ok(())
+        });
+    }
+}
+
+/// `Error`'s `FromJS` passes on what reading `name` or `message` throws, rather than discarding
+/// it and running more JavaScript with an exception pending.
+#[test]
+fn error_from_js_passes_on_what_reading_it_throws() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        ctx.eval_raw(lock, "globalThis.thrown = new RangeError('getter')")
+            .expect("setup should evaluate");
+        for expr in [
+            "Object.defineProperty(new Error('x'), 'name', { get() { throw thrown; } })",
+            "Object.defineProperty(new Error('x'), 'message', { get() { throw thrown; } })",
+            "Object.assign(new Error('x'), { message: { toString() { throw thrown; } } })",
+        ] {
+            let caught = conversion_throws::<jsg::Error>(lock, ctx, expr);
+            assert!(is_thrown(lock, ctx, caught), "{expr}");
+        }
         Ok(())
     });
 }

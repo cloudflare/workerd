@@ -25,16 +25,24 @@ fn convert<'s, T: FromJS<'s>>(
     T::from_js(lock, value)
 }
 
-/// Asserts that converting `expr` to `T` is a `TypeError` with `message`.
+/// Asserts that converting `expr` to `T` throws a `TypeError` with `message`: either an error
+/// the conversion fails with, or what V8 threw during the coercion, which stays pending.
 fn assert_type_error<'s, T: FromJS<'s>>(
     lock: &mut jsg::Lock<'s>,
     ctx: &crate::EvalContext<'_>,
     expr: &str,
     message: &str,
 ) {
-    let Err(err) = convert::<T>(lock, ctx, expr) else {
+    let value = ctx
+        .eval_raw(lock, expr)
+        .expect("expression should evaluate");
+    let caught = lock
+        .try_catch(|lock| T::from_js(lock, value).map(drop))
+        .expect("execution should not be terminating");
+    let Err(exception) = caught else {
         panic!("{expr} should not convert");
     };
+    let err = jsg::Error::from_js(lock, exception).unwrap();
     assert_eq!(err.name, ExceptionType::TypeError, "{expr}");
     assert_eq!(err.message, message, "{expr}");
 }

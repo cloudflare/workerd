@@ -215,6 +215,10 @@ impl<'s> FromJS<'s> for Error {
     ///
     /// If the value is a native error, extracts the name and message properties.
     /// Otherwise, converts the value to a string for the message.
+    ///
+    /// Reading `name` and `message` can run JavaScript (a getter, a Proxy trap, or `toString`).
+    /// If it throws, or execution is terminating, this fails with an error for which
+    /// [`Error::is_pending`] is true.
     fn from_js(
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
@@ -222,18 +226,19 @@ impl<'s> FromJS<'s> for Error {
         if value.is_native_error()
             && let Ok(obj) = v8::Local::<v8::Object>::try_from(value)
         {
-            let name = obj
-                .get(lock, "name")
-                .ok()
-                .filter(|v| !v.is_undefined())
-                .and_then(|v| String::from_js(lock, v).ok());
+            let name = obj.get(lock, "name")?;
+            let name = if name.is_undefined() {
+                None
+            } else {
+                Some(String::from_js(lock, name)?)
+            };
 
-            let message = obj
-                .get(lock, "message")
-                .ok()
-                .filter(|v| !v.is_undefined())
-                .and_then(|v| String::from_js(lock, v).ok())
-                .unwrap_or_else(|| "Unknown error".to_owned());
+            let message = obj.get(lock, "message")?;
+            let message = if message.is_undefined() {
+                "Unknown error".to_owned()
+            } else {
+                String::from_js(lock, message)?
+            };
 
             Ok(Self {
                 name: name.map_or(ExceptionType::Error, |n| ExceptionType::from(n.as_str())),

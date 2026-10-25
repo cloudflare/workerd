@@ -279,19 +279,25 @@ fn required_struct_from_null_and_absent_property() {
     });
 }
 
-/// A throwing getter fails the conversion with its own error.
+/// A throwing getter fails the conversion, leaving what it threw pending.
 #[test]
 fn struct_from_throwing_getter_propagates_error() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let err = convert::<OptionalStruct>(
-            lock,
-            ctx,
-            "({ get label() { throw new RangeError('getter'); } })",
-        )
-        .unwrap_err();
-        assert_eq!(err.name, ExceptionType::RangeError);
-        assert!(err.message.contains("getter"), "got {:?}", err.message);
+        let value = ctx
+            .eval_raw(
+                lock,
+                "globalThis.thrown = new RangeError('getter');
+                 ({ get label() { throw thrown; } })",
+            )
+            .unwrap();
+        let caught = lock.try_catch(|lock| {
+            let err = <OptionalStruct as jsg::FromJS>::from_js(lock, value).unwrap_err();
+            assert!(err.is_pending());
+            Err::<(), _>(err)
+        })?;
+        ctx.set_global(lock, "caught", caught.unwrap_err());
+        assert!(ctx.eval::<bool>(lock, "caught === thrown").unwrap());
         Ok(())
     });
 }

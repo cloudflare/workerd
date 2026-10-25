@@ -501,8 +501,7 @@ impl<'s> FromJS<'s> for std::string::String {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        // SAFETY: The isolate is locked and value is a valid V8 local handle.
-        Ok(unsafe { v8::ffi::unwrap_string(lock.isolate().as_ffi(), value.into_ffi()) }?)
+        unwrap_string(lock, value)
     }
 }
 
@@ -536,9 +535,7 @@ impl<'s> FromJS<'s> for Number {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        // SAFETY: The isolate is locked and value is a valid V8 local handle.
-        let f64_value =
-            unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) }?;
+        let f64_value = unwrap_number(lock, value)?;
         Ok(Self::new(f64_value))
     }
 }
@@ -567,8 +564,7 @@ impl<'s> FromJS<'s> for &str {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        // SAFETY: The isolate is locked and value is a valid V8 local handle.
-        Ok(unsafe { v8::ffi::unwrap_string(lock.isolate().as_ffi(), value.into_ffi()) }?)
+        unwrap_string(lock, value)
     }
 }
 
@@ -667,13 +663,43 @@ macro_rules! impl_integer_from_js {
                 }
 
                 fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self::ResultType, Error> {
-                    // SAFETY: The isolate is locked and value is a valid V8 local handle.
-                    let num = unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) }?;
+                    let num = unwrap_number(lock, value)?;
                     Self::from_number(num)
                 }
             }
         )*
     };
+}
+
+/// Converts `value` with V8's `ToString` (which, unlike JavaScript's `String()`, rejects a
+/// Symbol). If the coercion throws, or execution is terminating, fails with an error for which
+/// [`Error::is_pending`] is true.
+fn unwrap_string<'s>(
+    lock: &mut Lock<'s>,
+    value: v8::Local<'s, v8::Value>,
+) -> Result<String, Error> {
+    v8::call_into_js(lock, |lock| {
+        let mut result = String::new();
+        // SAFETY: The isolate is locked and value is a valid V8 local handle.
+        let ok = unsafe {
+            v8::ffi::unwrap_string(lock.isolate().as_ffi(), value.into_ffi(), &mut result)
+        }?;
+        Ok(ok.then_some(result))
+    })
+}
+
+/// Converts `value` with V8's `ToNumber` (which, unlike JavaScript's `Number()`, rejects a
+/// `BigInt`). If the coercion throws, or execution is terminating, fails with an error for which
+/// [`Error::is_pending`] is true.
+fn unwrap_number<'s>(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<f64, Error> {
+    v8::call_into_js(lock, |lock| {
+        let mut result = 0.0;
+        // SAFETY: The isolate is locked and value is a valid V8 local handle.
+        let ok = unsafe {
+            v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi(), &mut result)
+        };
+        Ok(ok.then_some(result))
+    })
 }
 
 fn not_an_integer<T>() -> Result<T, Error> {
@@ -722,8 +748,7 @@ impl<'s> FromJS<'s> for i64 {
                 )
             });
         }
-        // SAFETY: The isolate is locked and value is a valid V8 local handle.
-        let num = unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) }?;
+        let num = unwrap_number(lock, value)?;
         if !num.is_finite() {
             return not_an_integer();
         }
