@@ -13,6 +13,7 @@ use std::sync::atomic::Ordering;
 use jsg::FromJS;
 use jsg::ToJS;
 use jsg::v8;
+use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 
 /// Creates a function whose data is `greeting` and stores it as the global `greet`.
@@ -181,6 +182,58 @@ fn data_is_dropped_once_function_is_unreachable() {
     harness.run_in_context(|lock, _ctx| {
         crate::Harness::request_gc(lock);
         assert_eq!(UNREACHABLE_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+/// Terminates execution, then creates a function.
+#[jsg_resource]
+struct TerminatingCreator {
+    /// Whether `Function::new` failed with a pending error.
+    saw_pending: Cell<bool>,
+}
+
+#[jsg_resource]
+impl TerminatingCreator {
+    /// Requests a termination, which V8 delivers while `spin` runs, then creates a function.
+    #[jsg_method]
+    fn create_after_termination<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        spin: v8::Local<'s, v8::Value>,
+    ) -> Result<(), jsg::Error> {
+        lock.terminate_execution();
+        let spin = spin.try_as::<v8::Function>().unwrap();
+        let err = spin
+            .call::<v8::Local<v8::Value>>(lock, None, &[])
+            .unwrap_err();
+        assert!(err.is_pending());
+        let err = v8::Function::new(lock, (), |lock, (), _args| Ok(lock.undefined())).unwrap_err();
+        self.saw_pending.set(err.is_pending());
+        Err(err)
+    }
+}
+
+/// While execution is terminating, `Function::new` creates nothing and returns a pending error,
+/// and returning it keeps the termination: JavaScript cannot catch it or run on.
+#[test]
+fn function_new_while_terminating_keeps_the_termination() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let creator = jsg::Rc::new(TerminatingCreator {
+            saw_pending: Cell::new(false),
+        });
+        ctx.set_global(lock, "creator", creator.clone());
+        let result = ctx.eval_raw(
+            lock,
+            "globalThis.caught = false; globalThis.after = false;
+             try { creator.createAfterTermination(() => { while (true) {} }); }
+             catch (e) { globalThis.caught = true; }
+             globalThis.after = true;",
+        );
+        assert!(result.is_err(), "the script was not terminated");
+        assert!(creator.saw_pending.get());
+        assert!(!ctx.eval::<bool>(lock, "globalThis.caught").unwrap());
+        assert!(!ctx.eval::<bool>(lock, "globalThis.after").unwrap());
         Ok(())
     });
 }
