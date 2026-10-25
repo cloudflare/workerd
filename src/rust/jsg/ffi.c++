@@ -74,16 +74,33 @@ namespace workerd::rust::jsg {
 // BackingStore — the size_t handle is the address of a heap-allocated
 // std::shared_ptr<v8::BackingStore> allocated with `new`.
 
-// Create an interned V8 string from a Rust identifier name (rust::String or rust::Str).
-// NewFromUtf8 returns an empty MaybeLocal (without scheduling a JS exception) when the
-// string exceeds v8::String::kMaxLength; the KJ_REQUIRE prevents a confusing ICE inside
-// jsg::check() by catching the overlong name early with a clear error message.
+// Creates a V8 string from UTF-8. NewFromUtf8 fails only when the string is longer than
+// v8::String::kMaxLength, and then leaves no JavaScript exception pending, so an overlong string
+// throws a KJ exception instead. The length is checked before the call, which keeps a length
+// above INT_MAX from reaching NewFromUtf8's int parameter, where a negative value means
+// "NUL-terminated". kMaxLength counts UTF-16 code units and the check counts UTF-8 bytes, of
+// which there are never fewer, so it may reject a long multi-byte string that V8 could hold, but
+// never lets through one that V8 would reject.
+static v8::Local<v8::String> newUtf8String(
+    v8::Isolate* isolate, kj::ArrayPtr<const char> utf8, v8::NewStringType type) {
+  KJ_REQUIRE(utf8.size() <= static_cast<size_t>(v8::String::kMaxLength),
+      "string exceeds V8's string length limit", utf8.size());
+  v8::Local<v8::String> result;
+  if (!v8::String::NewFromUtf8(isolate, utf8.begin(), type, static_cast<int>(utf8.size()))
+           .ToLocal(&result)) {
+    KJ_FAIL_REQUIRE("V8 failed to create a string", utf8.size());
+  }
+  return result;
+}
+
+// Creates an interned V8 string from a Rust identifier name (rust::String or rust::Str). An
+// overlong name is checked here too, so that the error names it.
 template <typename Name>
 static v8::Local<v8::String> makeInternedStr(v8::Isolate* isolate, const Name& name) {
   KJ_REQUIRE(name.size() <= static_cast<size_t>(v8::String::kMaxLength),
       "Rust identifier name exceeds V8 string length limit", name);
-  return ::workerd::jsg::check(
-      v8::String::NewFromUtf8(isolate, name.data(), v8::NewStringType::kInternalized, name.size()));
+  return newUtf8String(
+      isolate, kj::arrayPtr(name.data(), name.size()), v8::NewStringType::kInternalized);
 }
 
 // Wrappable implementation - calls into Rust via CXX bridge
@@ -121,8 +138,8 @@ Local local_new_number(Isolate* isolate, double value) {
 }
 
 Local local_new_string(Isolate* isolate, ::rust::Str value) {
-  auto val = ::workerd::jsg::check(
-      v8::String::NewFromUtf8(isolate, value.cbegin(), v8::NewStringType::kNormal, value.size()));
+  auto val =
+      newUtf8String(isolate, kj::arrayPtr(value.data(), value.size()), v8::NewStringType::kNormal);
   return to_ffi(kj::mv(val));
 }
 
@@ -1060,6 +1077,15 @@ const v8::CFunction& getFastCFunction(const FastApiDescriptor& descriptor) {
     return {descriptor.callback, kj::heap<FastCFunction>(descriptor)};
   })->function;
 }
+
+// The constructor of a resource without a #[jsg_constructor], with the error that C++ JSG's
+// throwIllegalConstructor() throws.
+void throwIllegalConstructor(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  auto* isolate = args.GetIsolate();
+  if (isolate->IsExecutionTerminating()) return;
+  isolate->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8Literal(
+      isolate, "Illegal constructor", v8::NewStringType::kInternalized)));
+}
 }  // namespace
 
 Global create_resource_template(Isolate* isolate, const ResourceDescriptor& descriptor) {
@@ -1079,8 +1105,8 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
         reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(descriptor.callback)));
     registerExternalRef(descriptor.callback);
   } else {
-    constructor = v8::FunctionTemplate::New(isolate, &workerd::jsg::throwIllegalConstructor);
-    registerExternalRef(reinterpret_cast<size_t>(&workerd::jsg::throwIllegalConstructor));
+    constructor = v8::FunctionTemplate::New(isolate, &throwIllegalConstructor);
+    registerExternalRef(reinterpret_cast<size_t>(&throwIllegalConstructor));
   }
 
   auto prototype = constructor->PrototypeTemplate();
@@ -1092,8 +1118,8 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
 
   instance->SetInternalFieldCount(workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT);
 
-  auto classname = ::workerd::jsg::check(v8::String::NewFromUtf8(
-      isolate, descriptor.name.data(), v8::NewStringType::kNormal, descriptor.name.size()));
+  auto classname = newUtf8String(isolate,
+      kj::arrayPtr(descriptor.name.data(), descriptor.name.size()), v8::NewStringType::kNormal);
 
   if (workerd::jsg::getShouldSetToStringTag(isolate)) {
     prototype->Set(v8::Symbol::GetToStringTag(isolate), classname, v8::PropertyAttribute::DontEnum);
@@ -1355,8 +1381,9 @@ Local exception_create_from_bytes(
   // internalized string table (which is never GC'd). NewFromUtf8 replaces
   // invalid sequences with U+FFFD, matching the legacy jsg::Lock::error() /
   // js.str() behavior.
-  auto message = ::workerd::jsg::check(v8::String::NewFromUtf8(
-      isolate, reinterpret_cast<const char*>(data), v8::NewStringType::kNormal, length));
+  auto message = newUtf8String(isolate,
+      kj::arrayPtr(reinterpret_cast<const char*>(data), static_cast<size_t>(length)),
+      v8::NewStringType::kNormal);
   return exceptionCreateFromMessage(exception_type, message);
 }
 
@@ -1391,8 +1418,8 @@ void isolate_throw_error(Isolate* isolate, ::rust::Str description) {
   // strings and should not pollute the internalized string table (which is never
   // GC'd), matching C++ jsg::Lock::v8Error() / v8Str() behavior.
   if (isolate->IsExecutionTerminating()) return;
-  auto message = ::workerd::jsg::check(v8::String::NewFromUtf8(
-      isolate, description.data(), v8::NewStringType::kNormal, description.size()));
+  auto message = newUtf8String(
+      isolate, kj::arrayPtr(description.data(), description.size()), v8::NewStringType::kNormal);
   isolate->ThrowError(message);
 }
 
