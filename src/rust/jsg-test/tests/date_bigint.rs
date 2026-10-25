@@ -54,18 +54,18 @@ fn big_int_handles() {
         let value = ctx.eval_raw(lock, "-5n").unwrap();
         assert!(value.is_big_int());
         assert!(!value.is_number());
-        let big_int = value.try_as::<v8::BigInt>().unwrap();
+        let big_int = v8::Local::<v8::BigInt>::try_from(value).unwrap();
         assert_eq!(big_int.int64_value(), Some(-5));
 
         let too_big = ctx.eval_raw(lock, "2n ** 63n").unwrap();
-        assert_eq!(too_big.try_as::<v8::BigInt>().unwrap().int64_value(), None);
-
-        assert!(
-            ctx.eval_raw(lock, "5")
+        assert_eq!(
+            v8::Local::<v8::BigInt>::try_from(too_big)
                 .unwrap()
-                .try_as::<v8::BigInt>()
-                .is_none()
+                .int64_value(),
+            None
         );
+
+        assert!(v8::Local::<v8::BigInt>::try_from(ctx.eval_raw(lock, "5").unwrap()).is_err());
         Ok(())
     });
 }
@@ -77,10 +77,18 @@ fn date_handles() {
         let value = ctx.eval_raw(lock, "new Date(1234.5)").unwrap();
         assert!(value.is_date());
         assert!(value.is_object());
-        assert!((value.try_as::<v8::Date>().unwrap().value_of() - 1234.0).abs() < f64::EPSILON);
+        assert!(
+            (v8::Local::<v8::Date>::try_from(value).unwrap().value_of() - 1234.0).abs()
+                < f64::EPSILON
+        );
 
         let invalid = ctx.eval_raw(lock, "new Date(NaN)").unwrap();
-        assert!(invalid.try_as::<v8::Date>().unwrap().value_of().is_nan());
+        assert!(
+            v8::Local::<v8::Date>::try_from(invalid)
+                .unwrap()
+                .value_of()
+                .is_nan()
+        );
 
         assert!(!ctx.eval_raw(lock, "1234").unwrap().is_date());
         assert!(

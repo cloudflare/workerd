@@ -48,6 +48,13 @@ use crate::v8::ffi::Wrappable;
 /// - On `Drop`, calls `wrappable_remove_strong_ref` with the ref's current
 ///   `strong` flag (C++ `maybeDeferDestruction`), then fields drop in
 ///   declaration order.
+///
+/// **Moving out of a traced field:** once GC has visited an `Rc` in a traced field, the `Rc`
+/// gives up its strong reference and relies on the field's owner to trace it. An `Rc` moved out
+/// of the field (`Cell::take`, `Option::take`, `mem::replace`) is then neither strong nor traced,
+/// unlike a moved C++ `jsg::Ref`. Clone it and use the clone, which starts strong; see
+/// `README.md` §Safety rules, rule 2, and
+/// <https://github.com/cloudflare/workerd/issues/7976>.
 pub struct Rc<R: Resource> {
     /// Shared ownership of the Rust resource.
     handle: std::rc::Rc<R>,

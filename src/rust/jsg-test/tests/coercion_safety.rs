@@ -548,11 +548,12 @@ fn object_get_from_throwing_getter_returns_err() {
             let value = ctx
                 .eval_raw(lock, expr)
                 .expect("expression should evaluate");
-            let obj: v8::Local<'_, v8::Object> = value.into();
+            let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
             let caught = thrown_by(lock, |lock| obj.get(lock, "x"));
             assert!(is_thrown(lock, ctx, caught), "{expr}");
         }
-        let obj: v8::Local<'_, v8::Object> = ctx.eval_raw(lock, "({})").unwrap().into();
+        let obj: v8::Local<'_, v8::Object> =
+            ctx.eval_raw(lock, "({})").unwrap().try_into().unwrap();
         assert!(obj.get(lock, "absent").unwrap().is_undefined());
         Ok(())
     });
@@ -568,7 +569,7 @@ fn object_has_from_throwing_proxy_returns_err() {
         let value = ctx
             .eval_raw(lock, "new Proxy({}, { has() { throw thrown; } })")
             .expect("expression should evaluate");
-        let obj: v8::Local<'_, v8::Object> = value.into();
+        let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
         let caught = thrown_by(lock, |lock| obj.has(lock, "x"));
         assert!(is_thrown(lock, ctx, caught));
         Ok(())
@@ -627,10 +628,12 @@ impl Conversion {
         match self {
             Self::String => String::from_js(lock, value).map(drop),
             Self::Number => Number::from_js(lock, value).map(drop),
-            Self::Get => v8::Local::<v8::Object>::from(value)
+            Self::Get => v8::Local::<v8::Object>::try_from(value)
+                .unwrap()
                 .get(lock, "x")
                 .map(drop),
-            Self::Has => v8::Local::<v8::Object>::from(value)
+            Self::Has => v8::Local::<v8::Object>::try_from(value)
+                .unwrap()
                 .has(lock, "x")
                 .map(drop),
             Self::Iterate => Vec::<Number>::from_js(lock, value).map(drop),
@@ -687,9 +690,8 @@ impl ConvertingResource {
         callback: v8::Local<'s, v8::Value>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<(), jsg::Error> {
-        let callback = callback
-            .try_as::<v8::Function>()
-            .ok_or_else(|| jsg::Error::new_type_error("not a function"))?;
+        let callback = v8::Local::<v8::Function>::try_from(callback)
+            .map_err(|_| jsg::Error::new_type_error("not a function"))?;
         let called = callback.call::<v8::Local<v8::Value>>(lock, None, &[]);
         let conversion = self.conversion.get().unwrap();
         let converted = conversion.run(lock, value);

@@ -441,6 +441,15 @@ MaybeLocal local_function_call(
   return maybe_local_to_ffi(fn->Call(context, receiver, v8Args.size(), v8Args.data()));
 }
 
+MaybeLocal function_new(Isolate* isolate, size_t callback, kj::Rc<Wrappable> wrappable) {
+  auto context = isolate->GetCurrentContext();
+  // Like the functions C++ JSG wraps (FunctionWrapper::wrap() in jsg/function.h): the wrapper
+  // keeps the Wrappable alive and traced for as long as the function is reachable.
+  auto data = wrappable->attachOpaqueWrapper(context, true);
+  return maybe_local_to_ffi(v8::Function::New(
+      context, reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)), data));
+}
+
 // Local<Object>
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value) {
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
@@ -946,6 +955,19 @@ void fci_set_return_value(FunctionCallbackInfo* args, Local value) {
   args->GetReturnValue().Set(local_from_ffi<v8::Value>(kj::mv(value)));
 }
 
+kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args) {
+  auto data = args->DataV2().As<v8::Value>();
+  KJ_IF_SOME(wrappable, ::workerd::jsg::Wrappable::tryUnwrapOpaque(args->GetIsolate(), data)) {
+    // C++ JSG's wrapped functions also have an opaque wrapper as their data, so check the type,
+    // as ::workerd::jsg::downcastWrappable() does.
+    const auto& actualType = typeid(wrappable);
+    if (&actualType == &typeid(Wrappable) || actualType == typeid(Wrappable)) {
+      return kj::downcast<Wrappable>(wrappable).toRc();
+    }
+  }
+  return kj::none;
+}
+
 Isolate* pci_get_isolate(PropertyCallbackInfo* info) {
   return info->GetIsolate();
 }
@@ -1362,17 +1384,19 @@ void isolate_throw_error(Isolate* isolate, ::rust::Str description) {
 }
 
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage) {
-  // Mirrors makeInternalError() from util.c++: generates a unique error ID,
-  // logs the internal message (with ID) to KJ_LOG(ERROR) for Sentry, and
-  // throws a generic "internal error; reference = <id>" JS Error to the caller.
   // kj::heapString(data, size) copies exactly `size` bytes and appends a NUL,
   // avoiding the out-of-bounds read that kj::StringPtr(data, size) would cause
   // on non-NUL-terminated Rust &str data.
   auto message = kj::heapString(internalMessage.data(), internalMessage.size());
-  // Logs the message even when execution is terminating, but then throws nothing.
-  auto error = ::workerd::jsg::makeInternalError(isolate, message);
-  if (isolate->IsExecutionTerminating()) return;
-  isolate->ThrowException(error);
+  if (isolate->IsExecutionTerminating()) {
+    // Logs the message, but creates no error: creating one while execution is terminating fails
+    // a V8 debug check, and it would not be thrown.
+    KJ_LOG(ERROR, message);
+    return;
+  }
+  // makeInternalError() generates a unique error ID, logs the internal message (with ID) to
+  // KJ_LOG(ERROR) for Sentry, and returns a generic "internal error; reference = <id>" JS Error.
+  isolate->ThrowException(::workerd::jsg::makeInternalError(isolate, message));
 }
 
 void isolate_terminate_execution(Isolate* isolate) {
