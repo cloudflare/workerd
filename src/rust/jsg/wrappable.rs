@@ -634,8 +634,8 @@ impl<'s> FromJS<'s> for i64 {
         if !num.is_finite() {
             return not_an_integer();
         }
-        if num < i64::MIN as f64 || num > i64::MAX as f64 {
-            return Err(Error::new_type_error(signed_range(i64::MIN, i64::MAX)));
+        if num < Self::MIN as f64 || num > Self::MAX as f64 {
+            return Err(Error::new_type_error(signed_range(Self::MIN, Self::MAX)));
         }
         Ok(num as Self)
     }
