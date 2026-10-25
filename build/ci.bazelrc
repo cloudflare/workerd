@@ -61,15 +61,6 @@ build:ci-linux-debug --config=debug --config=rust-debug
 
 build:ci-linux-arm-debug --config=ci-linux-debug
 
-build:ci-linux-asan --config=ci-linux-common --config=ci-limit-storage
-# we're really struggling to fit asan build into worker disk size
-# having asan without symbols is better than none
-build:ci-linux-asan --config=asan --copt="-g0" --strip=always
-build:ci-linux-arm-asan --config=ci-linux-asan
-
-build:ci-linux-tsan --config=ci-linux-common --config=ci-limit-storage --config=tsan
-test:ci-linux-tsan --test_summary=detailed
-
 # Build container tests on Linux CI
 build:ci-linux --build_tag_filters=-off-by-default
 build:ci-linux-arm --build_tag_filters=-off-by-default
@@ -106,3 +97,23 @@ common:wpt-report --remote_download_regex=".*src/wpt/.*"
 # release CI – use remote_download_minimal, but always fetch the workerd binary so we can add it to
 # the release artifacts.
 build:ci-release --remote_download_minimal --remote_download_regex=".*src/workerd/server/workerd.*"
+
+# CI on bazelflare remote execution: the x64 Linux jobs in .github/workflows/test.yml run a
+# developer's bazelflare config (bazelflare, bazelflare-asan or bazelflare-tsan in .bazelrc) followed
+# by these, which change how Bazel runs and reports the build, never an action, so CI's action keys
+# equal a workstation's and the two share the cache. build/check_ci_flags.sh, which test.yml's
+# check-ci-flags job runs, fails on any other difference. The targets the bazelflare configs skip
+# (see their tag filters) run on the test-linux job's runner (ci-bazelflare-runner-tests below) and
+# in the arm64 Linux jobs. bazelflare queues actions it can't run at once.
+build:ci-bazelflare --jobs=400
+test:ci-bazelflare --test_size_filters=
+build:ci-bazelflare-tsan --config=ci-bazelflare
+test:ci-bazelflare-tsan --test_summary=detailed
+# The test-linux job uploads the binary for the workers-sdk tests.
+build:ci-download-workerd --remote_download_regex=".*src/workerd/server/workerd.*"
+# The test-linux job also runs, on its runner, the tests that bazelflare's executors can't: those
+# that need the network or the container engine, whose images it loads. A developer's bazelflare
+# config skips them, since it builds for Linux from any workstation.
+build:ci-bazelflare-runner-tests --spawn_strategy=remote,local
+build:ci-bazelflare-runner-tests --build_tag_filters=-off-by-default,-requires-fuzzilli
+test:ci-bazelflare-runner-tests --test_tag_filters=-off-by-default,-requires-fuzzilli
