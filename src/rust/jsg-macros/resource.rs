@@ -16,6 +16,7 @@ use quote::quote;
 use syn::FnArg;
 use syn::ItemImpl;
 
+use crate::trace::generate_make_strong_statements;
 use crate::trace::generate_trace_statements;
 use crate::utils::elide_named_lifetimes;
 use crate::utils::extract_name_attribute;
@@ -61,6 +62,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
     };
 
     let trace_statements = generate_trace_statements(&fields);
+    let make_strong_statements = generate_make_strong_statements(&fields);
     let name_str = name.to_string();
 
     let traced_impl = if custom_trace {
@@ -74,6 +76,11 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
                     // Suppress unused warning when there are no traceable fields.
                     let _ = visitor;
                     #(#trace_statements)*
+                }
+
+                fn make_strong(&self, isolate: &mut jsg::Isolate) {
+                    let _ = isolate;
+                    #(#make_strong_statements)*
                 }
             }
         }

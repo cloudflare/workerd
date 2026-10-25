@@ -7,7 +7,8 @@
 ///
 /// Types that contain only plain data (no `jsg::Rc`, `jsg::v8::TracedGlobal`, etc.) do not
 /// need to participate in GC tracing. This macro produces a `Traced` impl whose
-/// `trace` method is a no-op and whose `holds_gc_references` returns `false`.
+/// `trace` method is a no-op and whose `holds_gc_references` returns `false`, and a
+/// [`HoldsNoGcReferences`](crate::HoldsNoGcReferences) implementation.
 ///
 /// # Example
 ///
@@ -24,7 +25,11 @@ macro_rules! jsg_traced {
             fn holds_gc_references() -> bool {
                 false
             }
-        })*
+
+            fn make_strong(&self, _isolate: &mut $crate::Isolate) {}
+        }
+
+        impl $crate::HoldsNoGcReferences for $t {})*
     };
 }
 

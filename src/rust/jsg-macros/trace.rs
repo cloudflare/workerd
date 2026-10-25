@@ -27,3 +27,40 @@ pub fn generate_trace_statements(
         })
         .collect()
 }
+
+/// Generates one `make_strong` delegation statement per named field.
+pub fn generate_make_strong_statements(
+    fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
+) -> Vec<proc_macro2::TokenStream> {
+    use quote::quote;
+
+    fields
+        .iter()
+        .filter_map(|field| {
+            let field_name = field.ident.as_ref()?;
+            Some(quote! {
+                jsg::Traced::make_strong(&self.#field_name, isolate);
+            })
+        })
+        .collect()
+}
+
+/// Generates the `Traced` and `HoldsNoGcReferences` impls of a type with no GC references,
+/// such as a `#[jsg_struct]`: `trace` and `make_strong` do nothing.
+pub fn generate_no_gc_references_impls(name: &syn::Ident) -> proc_macro2::TokenStream {
+    use quote::quote;
+
+    quote! {
+        #[automatically_derived]
+        impl jsg::Traced for #name {
+            fn holds_gc_references() -> bool {
+                false
+            }
+
+            fn make_strong(&self, _isolate: &mut jsg::Isolate) {}
+        }
+
+        #[automatically_derived]
+        impl jsg::HoldsNoGcReferences for #name {}
+    }
+}

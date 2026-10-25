@@ -82,14 +82,13 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   Methods with a `&self` receiver are registered as instance methods on the prototype; methods
   without a receiver are registered as static methods on the constructor. Any other receiver is a
   compile error, since JavaScript can call back into the resource while a method runs; state that
-  methods change belongs in `Cell` or `RefCell` fields. A method or accessor can take
+  methods change belongs in `Cell` or `RefCell` fields, and in `jsg::Cell` or `jsg::RefCell`
+  fields when it holds a `jsg::Rc` or a `TracedGlobal` (`src/rust/jsg/README.md` §Cells). A
+  method or accessor can take
   `this: jsg::Rc<Self>` instead of `&self` to get a `jsg::Rc` of its resource, for example to
   hand to a callback. Flag state that a method shares with a callback through an `std::rc::Rc`;
   the callback should hold `this` (or `this.downgrade()`) instead. Flag a
   `RefCell` borrow held across a call that can run JavaScript: a re-entrant call then panics.
-  Also flag a `borrow_mut()` of a `RefCell` holding GC references (`TracedGlobal`, `jsg::Rc`)
-  held across a call that can allocate on the V8 heap, wrap the resource or create or drop a
-  `jsg::Rc` to it: tracing skips the cell, so those references can lose their values.
   Verify the converted name is correct and matches the intended API surface.
 - **`#[jsg_static_constant]`** on a `const` item inside a `#[jsg_resource]` impl block exposes it
   as a read-only numeric constant on both the constructor and prototype (Rust equivalent of
@@ -127,9 +126,11 @@ some violations, and the README says which. Reviewers flag these:
 - An `std::rc::Rc` around a `TracedGlobal`, a `jsg::Rc`, or a type holding them, even if it is
   not shared yet. The fix is a `jsg::Rc` or `jsg::Weak` to the resource that owns the state,
   such as a method's `this`.
-- A `jsg::Rc` moved out of a traced field (`Cell::take`, `Option::take`, `mem::replace`, popping
-  a traced `Vec`) and used after a call that can run JavaScript or allocate on the V8 heap,
-  without a `.clone()` first
+- A hand-written `impl Traced` whose `make_strong` skips a field that its `trace` visits, or a
+  `jsg::Rc` or `TracedGlobal` reached through interior mutability other than a `jsg::Cell` or
+  `jsg::RefCell` (`UnsafeCell`, `OnceCell`, a hand-written cell). A `jsg::Rc` or `TracedGlobal`
+  in a `std::cell::Cell` or `RefCell` field does not compile; these are the paths the compiler
+  cannot see
   ([#7976](https://github.com/cloudflare/workerd/issues/7976)).
 - A `jsg::v8::Global` inside a type with a hand-written `impl Traced`.
 - New C++ JSG (`jsg::Lock`, `JSG_TRY`/`JSG_CATCH`, `jsg::check`, `JsExceptionThrown`,
