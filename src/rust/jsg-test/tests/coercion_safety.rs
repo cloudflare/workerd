@@ -778,3 +778,23 @@ fn conversion_while_terminating_runs_nothing() {
         });
     }
 }
+
+/// `Error`'s `FromJS` passes on what reading `name` or `message` throws, rather than discarding
+/// it and running more JavaScript with an exception pending.
+#[test]
+fn error_from_js_passes_on_what_reading_it_throws() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        ctx.eval_raw(lock, "globalThis.thrown = new RangeError('getter')")
+            .expect("setup should evaluate");
+        for expr in [
+            "Object.defineProperty(new Error('x'), 'name', { get() { throw thrown; } })",
+            "Object.defineProperty(new Error('x'), 'message', { get() { throw thrown; } })",
+            "Object.assign(new Error('x'), { message: { toString() { throw thrown; } } })",
+        ] {
+            let caught = conversion_throws::<jsg::Error>(lock, ctx, expr);
+            assert!(is_thrown(lock, ctx, caught), "{expr}");
+        }
+        Ok(())
+    });
+}
