@@ -1,5 +1,6 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("//:build/linking.bzl", "CC_TEST_LINKSTATIC")
+load("//build/bazelflare:exec_properties.bzl", "test_exec_properties")
 load("//build/tools/llvm:coverage.bzl", "COVERAGE_LLVM_TOOLS_ATTR", "coverage_llvm_tools")
 
 def kj_test(
@@ -38,6 +39,7 @@ def kj_test(
         data = data,
         tags = tags,
         size = size,
+        exec_properties = test_exec_properties(size, tags),
         target_compatible_with = target_compatible_with,
     )
 
@@ -49,6 +51,7 @@ def kj_test(
         # Tag with no-coverage to reduce coverage CI time
         tags = tags + ["no-coverage"],
         size = size,
+        exec_properties = test_exec_properties(size, tags),
         target_compatible_with = target_compatible_with,
     )
 

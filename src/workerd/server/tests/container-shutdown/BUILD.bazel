@@ -16,6 +16,7 @@ js_test(
     },
     tags = [
         "js-test",
+        "no-remote-exec",
         "requires-container-engine",
         "requires-network",  # Accesses unix:///var/run/docker.sock
     ],
