@@ -57,6 +57,14 @@ Rust and cxx:
   (owning wrappers, lifetimes, `Pin`, typed handles) over prose, and fewer, smaller `unsafe`
   regions. A comment that states an invariant the types could enforce is worth a `suggestion`.
 
+Rust JSG (`docs/reference/rust-review-checklist.md` "Rust JSG Safety Rules"):
+- Flag a shim that calls `isolate->ThrowException` without checking `IsExecutionTerminating()`
+  (the `isolate_throw_*` shims check), and a `jsg::Error` from a JavaScript call discarded with
+  `.ok()`/`unwrap_or*`/`map_err`. Either one can let a terminated script keep running.
+- Flag a `Lock<'s>` or `Local<'s>` that is stored or passed into a nested callback, a future
+  passed to async I/O that isn't `'static`, and an `std::rc::Rc` around a `TracedGlobal`, a
+  `jsg::Rc`, or a type holding them.
+
 Severity:
 - `blocking`: a live use-after-free, double free, data race, lock held across suspension,
   exception escaping a V8 callback, or panic across FFI, shown by a concrete path.
