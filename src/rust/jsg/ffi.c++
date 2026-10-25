@@ -1060,6 +1060,15 @@ const v8::CFunction& getFastCFunction(const FastApiDescriptor& descriptor) {
     return {descriptor.callback, kj::heap<FastCFunction>(descriptor)};
   })->function;
 }
+
+// The constructor of a resource without a #[jsg_constructor], with the error that C++ JSG's
+// throwIllegalConstructor() throws.
+void throwIllegalConstructor(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  auto* isolate = args.GetIsolate();
+  if (isolate->IsExecutionTerminating()) return;
+  isolate->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8Literal(
+      isolate, "Illegal constructor", v8::NewStringType::kInternalized)));
+}
 }  // namespace
 
 Global create_resource_template(Isolate* isolate, const ResourceDescriptor& descriptor) {
@@ -1079,8 +1088,8 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
         reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(descriptor.callback)));
     registerExternalRef(descriptor.callback);
   } else {
-    constructor = v8::FunctionTemplate::New(isolate, &workerd::jsg::throwIllegalConstructor);
-    registerExternalRef(reinterpret_cast<size_t>(&workerd::jsg::throwIllegalConstructor));
+    constructor = v8::FunctionTemplate::New(isolate, &throwIllegalConstructor);
+    registerExternalRef(reinterpret_cast<size_t>(&throwIllegalConstructor));
   }
 
   auto prototype = constructor->PrototypeTemplate();

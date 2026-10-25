@@ -8,7 +8,6 @@
 
 src/rust/jsg/ffi.c++ jsg::check 10
 src/rust/jsg/ffi.c++ makeInternalError 1
-src/rust/jsg/ffi.c++ jsg::throw 2
 src/rust/jsg/jsg.h jsg::Lock 3
 src/rust/jsg/jsg.h JsExceptionThrown 1
 src/rust/jsg/jsg.h jsg::Data 1
