@@ -22,7 +22,7 @@
 //! | `bool` | `boolean` |
 //! | `Number` | `number` |
 //! | `i64` | `bigint` or `number` (parameter only) |
-//! | `SystemTime` | `Date` or `number` of milliseconds (parameter only) |
+//! | `SystemTime` | `Date`; from a `Date` or `number` of milliseconds |
 //! | `Option<T>` | `T` or `undefined` |
 //! | `Nullable<T>` | `T`, `null`, or `undefined` |
 //! | `Lenient<T>` | `T`, `null`, or `undefined` (shallow type mismatches silently become `undefined`) |
@@ -162,6 +162,7 @@ impl_traced_noop!(
     isize,
     f32,
     f64,
+    std::time::SystemTime,
     crate::v8::ArrayBuffer,
     crate::v8::ArrayBufferView,
     crate::v8::BackingStore,
@@ -815,6 +816,26 @@ impl<'s> FromJS<'s> for std::time::SystemTime {
         } else {
             std::time::UNIX_EPOCH + offset
         }))
+    }
+}
+
+// Like C++ JSG's kj::Date (jsg/value.h), a time converts to a Date of the milliseconds since the
+// epoch, truncated toward zero. A time beyond the range of JavaScript dates, which `kj::Date`
+// cannot hold, gives an invalid date.
+impl<'s> ToJS<'s> for std::time::SystemTime {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a time of more than 2^53 milliseconds is beyond the range of JavaScript dates \
+                  either way"
+    )]
+    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+        let millis = match self.duration_since(std::time::UNIX_EPOCH) {
+            Ok(after) => after.as_millis() as f64,
+            Err(before) => -(before.duration().as_millis() as f64),
+        };
+        // If `Date::new()` fails, an exception or termination is pending, so JavaScript never
+        // sees the value returned in its place, as when C++ JSG's `check()` throws.
+        v8::Date::new(lock, millis).map_or_else(|_| lock.undefined(), Into::into)
     }
 }
 

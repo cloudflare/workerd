@@ -369,9 +369,12 @@ pub mod ffi {
         pub unsafe fn local_symbol_description(isolate: *mut Isolate, value: &Local) -> MaybeLocal;
 
         // Local<BigInt>
+        pub unsafe fn local_big_int_new(isolate: *mut Isolate, value: i64) -> Local;
+        pub unsafe fn local_big_int_new_from_unsigned(isolate: *mut Isolate, value: u64) -> Local;
         pub unsafe fn local_big_int_int64_value(value: &Local, lossless: &mut bool) -> i64;
 
         // Local<Date>
+        pub unsafe fn local_date_new(isolate: *mut Isolate, time: f64) -> MaybeLocal;
         pub unsafe fn local_date_value_of(value: &Local) -> f64;
 
         // Local<Function>
@@ -2995,6 +2998,31 @@ impl<'s> Local<'s, Symbol> {
     }
 }
 
+impl BigInt {
+    /// Creates a `BigInt` with the value of `value`.
+    ///
+    /// Corresponds to `v8::BigInt::New()`.
+    pub fn new<'s>(lock: &mut crate::Lock<'s>, value: i64) -> Local<'s, Self> {
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        unsafe { Local::from_ffi(ffi::local_big_int_new(isolate.as_ffi(), value)) }
+    }
+
+    /// Creates a `BigInt` with the value of `value`.
+    ///
+    /// Corresponds to `v8::BigInt::NewFromUnsigned()`.
+    pub fn from_unsigned<'s>(lock: &mut crate::Lock<'s>, value: u64) -> Local<'s, Self> {
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        unsafe {
+            Local::from_ffi(ffi::local_big_int_new_from_unsigned(
+                isolate.as_ffi(),
+                value,
+            ))
+        }
+    }
+}
+
 impl Local<'_, BigInt> {
     /// Returns the value as an `i64`, or `None` if it is out of the range of `i64`.
     ///
@@ -3004,6 +3032,31 @@ impl Local<'_, BigInt> {
         // SAFETY: the handle is a valid BigInt handle within the current HandleScope.
         let value = unsafe { ffi::local_big_int_int64_value(self.raw(), &mut lossless) };
         lossless.then_some(value)
+    }
+}
+
+impl Date {
+    /// Creates a `Date` in the current context with the time value `time`, in milliseconds
+    /// since the epoch. A time outside the range of JavaScript dates gives an invalid date.
+    ///
+    /// Corresponds to `v8::Date::New()`.
+    ///
+    /// # Errors
+    ///
+    /// If V8 throws while creating it, or execution is terminating, the exception stays pending
+    /// and the error is one for which [`Error::is_pending`] is true, as for
+    /// [`Local::<Function>::call`]. `v8::Date::New()` prepares for executing JavaScript, which
+    /// would clear a pending termination.
+    pub fn new<'s>(lock: &mut Lock<'s>, time: f64) -> crate::Result<Local<'s, Self>> {
+        call_into_js(lock, |lock| {
+            // SAFETY: `lock` proves the isolate is locked, with a context entered and a
+            // HandleScope for `'s` open; a non-empty result is a `Date` V8 created in that scope.
+            Ok(
+                unsafe {
+                    Local::from_ffi_maybe(ffi::local_date_new(lock.isolate().as_ffi(), time))
+                },
+            )
+        })
     }
 }
 

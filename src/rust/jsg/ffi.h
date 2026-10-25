@@ -202,6 +202,8 @@ Local local_symbol_new_with_description(Isolate* isolate, Local description);
 MaybeLocal local_symbol_description(Isolate* isolate, const Local& value);
 
 // Local<BigInt>
+Local local_big_int_new(Isolate* isolate, int64_t value);
+Local local_big_int_new_from_unsigned(Isolate* isolate, uint64_t value);
 int64_t local_big_int_int64_value(const Local& value, bool& lossless);
 
 // Local<Date>
@@ -215,6 +217,10 @@ double local_date_value_of(const Local& value);
 // `local_array_get` and `local_array_set`, which can also run JavaScript (a setter, getter or
 // Proxy trap) but use `jsg::check()` and are not declared as returning `Result`: what JavaScript
 // throws there becomes a Rust panic, which terminates execution (EW-11138).
+
+// Local<Date>
+// Runs no JavaScript, but prepares to, which would clear a pending termination.
+MaybeLocal local_date_new(Isolate* isolate, double time);
 
 // Local<Function>
 // Returns the call's result, or none if it threw, leaving the exception pending.

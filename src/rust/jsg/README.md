@@ -459,9 +459,10 @@ but not return values:
   Like C++ JSG's integers.
 - `i64`: a `BigInt` that fits, or any other value converted to a number, which must be finite and
   in range, and truncates toward zero. Like C++ JSG's `int64_t`.
-- `SystemTime`: a `Date`, or a number of milliseconds since the epoch, within the range of
-  `kj::Date`. Like C++ JSG's `kj::Date`.
 - `&[T]` and typed-array slices such as `&[u8]`.
+
+Like C++ JSG's `kj::Date`, `SystemTime` converts to a `Date` of the milliseconds since the epoch,
+truncated toward zero, and from a `Date` or a number of milliseconds within the range of `kj::Date`.
 
 ## Union Types
 
