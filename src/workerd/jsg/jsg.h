@@ -3197,6 +3197,24 @@ class Lock {
   template <typename T>
   JsObject getPrototypeFor();
 
+  // Get the FunctionTemplate for the given C++ type (which must be a JSG_RESOURCE_TYPE). Its
+  // HasInstance() is the exact receiver check JSG applies to the type's own members: unlike
+  // TypeHandler::tryUnwrap(), it does not accept objects that merely inherit from an instance.
+  // The template is per isolate, so callers on a hot path may cache it.
+  template <typename T>
+  v8::Local<v8::FunctionTemplate> getTemplateFor() {
+    return getTemplateFor(typeid(T));
+  }
+
+  // Get the CppHeapPointerTag range of the given JSG_RESOURCE_TYPE and its subclasses: the range
+  // JSG's own member dispatch passes to Wrappable::unwrapFromShimInRangeOrAbort(). It depends on
+  // every type the isolate's TypeWrapper knows, so code that cannot see the TypeWrapper gets it
+  // here. Like the template, it is fixed per isolate and callers on a hot path may cache it.
+  template <typename T>
+  v8::CppHeapPointerTagRange getWrappableTagRangeFor() {
+    return getWrappableTagRangeFor(typeid(T));
+  }
+
   // ====================================================================================
   JsObject global() KJ_WARN_UNUSED_RESULT;
   JsValue undefined() KJ_WARN_UNUSED_RESULT;
@@ -3403,6 +3421,8 @@ class Lock {
   friend class JsObject;
   virtual kj::Maybe<Object&> getInstance(v8::Local<v8::Object> obj, const std::type_info& type) = 0;
   virtual v8::Local<v8::Object> getPrototypeFor(const std::type_info& type) = 0;
+  virtual v8::Local<v8::FunctionTemplate> getTemplateFor(const std::type_info& type) = 0;
+  virtual v8::CppHeapPointerTagRange getWrappableTagRangeFor(const std::type_info& type) = 0;
 };
 
 template <typename T>
