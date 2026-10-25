@@ -21,6 +21,8 @@
 //! | `&str` | `string` |
 //! | `bool` | `boolean` |
 //! | `Number` | `number` |
+//! | `i64` | `bigint` or `number` (parameter only) |
+//! | `SystemTime` | `Date` or `number` of milliseconds (parameter only) |
 //! | `Option<T>` | `T` or `undefined` |
 //! | `Nullable<T>` | `T`, `null`, or `undefined` |
 //! | `Lenient<T>` | `T`, `null`, or `undefined` (shallow type mismatches silently become `undefined`) |
@@ -69,6 +71,9 @@
 //! - Other values are truncated toward zero (e.g., `3.7` → `3`, `-2.9` → `-2`)
 //!
 //! For strict validation, wrap parameters in `NonCoercible<T>` or validate manually.
+//!
+//! `i64` converts like C++ JSG's `int64_t`: a `BigInt` that does not fit is a
+//! `TypeError`, and any other value converts as above.
 
 use crate::Error;
 use crate::Lenient;
@@ -686,6 +691,100 @@ impl_integer_from_js!(
     i16 => "short integer", not_an_integer(), signed_range(i16::MIN, i16::MAX);
     i32 => "integer", Ok(0), signed_range(i32::MIN, i32::MAX);
 );
+
+// Like C++ JSG's int64_t (jsg/value.h), a BigInt must fit, and any other value is coerced to a
+// number, which must be finite and in range, and truncates toward zero.
+impl<'s> FromJS<'s> for i64 {
+    type ResultType = Self;
+
+    fn type_name() -> String {
+        "bigint".to_owned()
+    }
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+        reason = "like C++ JSG, the range is checked in doubles, where i64::MAX rounds up to 2^63, \
+                  which then saturates"
+    )]
+    fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self, Error> {
+        if let Some(big_int) = value.try_as::<v8::BigInt>() {
+            return big_int.int64_value().ok_or_else(|| {
+                Error::new_type_error(
+                    "The value cannot be converted because it would be truncated.",
+                )
+            });
+        }
+        // SAFETY: The isolate is locked and value is a valid V8 local handle.
+        let num = unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) }?;
+        if !num.is_finite() {
+            return not_an_integer();
+        }
+        if num < Self::MIN as f64 || num > Self::MAX as f64 {
+            return Err(Error::new_type_error(signed_range(Self::MIN, Self::MAX)));
+        }
+        Ok(num as Self)
+    }
+}
+
+// Like C++ JSG's kj::Date (jsg/value.h), a Date or a number of milliseconds since the epoch, which
+// must be finite and within the range of `kj::Date`, `i64` nanoseconds either side of the epoch.
+// Fractions of a millisecond are dropped.
+impl<'s> FromJS<'s> for std::time::SystemTime {
+    type ResultType = Self;
+
+    fn type_name() -> String {
+        "date".to_owned()
+    }
+
+    fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self, Error> {
+        let type_name = value.type_of(lock);
+        Self::try_from_js(lock, value)?
+            .ok_or_else(|| Error::new_type_error(format!("Expected date but got {type_name}")))
+    }
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+        reason = "the bounds are compared in doubles as in C++ JSG, and the milliseconds are then \
+                  in range"
+    )]
+    fn try_from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Option<Self>, Error> {
+        let millis = if let Some(date) = value.try_as::<v8::Date>() {
+            date.value_of()
+        } else if value.is_number() {
+            Number::from_js(lock, value)?.value()
+        } else {
+            return Ok(None);
+        };
+        if !millis.is_finite() {
+            return Err(Error::new_type_error(
+                "The value cannot be converted because it is not a valid Date.",
+            ));
+        }
+        let nanos = millis * 1_000_000.0;
+        if nanos >= i64::MAX as f64 {
+            return Err(Error::new_type_error(
+                "This API doesn't support dates after 2189.",
+            ));
+        }
+        if nanos <= i64::MIN as f64 {
+            return Err(Error::new_type_error(
+                "This API doesn't support dates before 1687.",
+            ));
+        }
+        let millis = millis as i64;
+        let offset = std::time::Duration::from_millis(millis.unsigned_abs());
+        Ok(Some(if millis < 0 {
+            std::time::UNIX_EPOCH - offset
+        } else {
+            std::time::UNIX_EPOCH + offset
+        }))
+    }
+}
 
 // =============================================================================
 // Wrapper type implementations

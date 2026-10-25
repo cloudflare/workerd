@@ -267,6 +267,35 @@ an `Err` if V8 cannot create the function, which happens only when execution is 
 with the functions C++ JSG wraps, the function's `name` is empty, its `length` is 0, and it can
 be called with `new`.
 
+## Errors from JavaScript
+
+When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
+
+Code that gets a pending error must not call into JavaScript, and should return the error. Converting it to another error and throwing that replaces the exception, as when C++ code throws while a `JsExceptionThrown` unwinds; nothing ever replaces a termination, and `call` refuses to run while execution is terminating. A pending error is only meaningful while its exception is pending: one kept past that, such as a clone stored after `try_catch` caught the exception, is thrown as an internal error when V8 has no exception pending.
+
+To handle an exception instead, run the code in `Lock::try_catch`, which catches as C++ `jsg::Lock::tryCatch()` does: the exception, or an error the closure returns, as a value; a termination keeps propagating.
+
+```rust
+match lock.try_catch(|lock| callback.call::<Number>(lock, None, &[]))? {
+    Ok(result) => { /* ... */ }
+    Err(exception) => { /* handle what the callback threw */ }
+}
+```
+
+## Type Conversions
+
+The module docs of `wrappable.rs` list every Rust type that converts to or from JavaScript, and
+how. Most convert both ways. Some convert only from JavaScript, so they can be method parameters
+but not return values:
+
+- `u8`, `u16`, `u32`, `i8`, `i16` and `i32`: a value converted to a number, which must be in range.
+  Like C++ JSG's integers.
+- `i64`: a `BigInt` that fits, or any other value converted to a number, which must be finite and
+  in range, and truncates toward zero. Like C++ JSG's `int64_t`.
+- `SystemTime`: a `Date`, or a number of milliseconds since the epoch, within the range of
+  `kj::Date`. Like C++ JSG's `kj::Date`.
+- `&[T]` and typed-array slices such as `&[u8]`.
+
 ## Union Types
 
 To accept JavaScript values that can be one of several types, define an enum with `#[jsg_oneof]`:

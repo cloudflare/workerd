@@ -297,6 +297,8 @@ pub mod ffi {
         pub unsafe fn local_is_function(value: &Local) -> bool;
         pub unsafe fn local_is_symbol(value: &Local) -> bool;
         pub unsafe fn local_is_name(value: &Local) -> bool;
+        pub unsafe fn local_is_big_int(value: &Local) -> bool;
+        pub unsafe fn local_is_date(value: &Local) -> bool;
         pub unsafe fn local_type_of(isolate: *mut Isolate, value: &Local) -> String;
 
         // Local<String>
@@ -366,13 +368,19 @@ pub mod ffi {
         ) -> Local;
         pub unsafe fn local_symbol_description(isolate: *mut Isolate, value: &Local) -> MaybeLocal;
 
+        // Local<BigInt>
+        pub unsafe fn local_big_int_int64_value(value: &Local, lossless: &mut bool) -> i64;
+
+        // Local<Date>
+        pub unsafe fn local_date_value_of(value: &Local) -> f64;
+
         // Local<Function>
         pub unsafe fn local_function_call(
             isolate: *mut Isolate,
             function: &Local,
             recv: &Local,
             args: &[Local],
-        ) -> Local;
+        ) -> MaybeLocal;
         // Fallible: creating the wrapper throws, and creating the function returns empty, when
         // execution is terminating.
         pub unsafe fn function_new(
@@ -564,11 +572,21 @@ pub mod ffi {
             length: i32,
         ) -> Local;
 
+        // TryCatch
+        pub unsafe fn isolate_try_catch(
+            isolate: *mut Isolate,
+            data: usize,
+            callback: unsafe fn(usize) -> bool,
+            exception: &mut MaybeLocal,
+        );
+
         // Isolate
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
         pub unsafe fn isolate_throw_error(isolate: *mut Isolate, message: &str);
         pub unsafe fn isolate_throw_internal_error(isolate: *mut Isolate, internal_message: &str);
         pub unsafe fn isolate_terminate_execution(isolate: *mut Isolate);
+        pub unsafe fn isolate_is_execution_terminating(isolate: *mut Isolate) -> bool;
+        pub unsafe fn isolate_has_pending_exception(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_is_locked(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_in_context(isolate: *mut Isolate) -> bool;
 
@@ -753,6 +771,12 @@ pub struct String;
 /// Marker for `v8::Symbol` handles.
 #[derive(Debug)]
 pub struct Symbol;
+/// Marker for `v8::BigInt` handles.
+#[derive(Debug)]
+pub struct BigInt;
+/// Marker for `v8::Date` handles.
+#[derive(Debug)]
+pub struct Date;
 
 impl String {
     /// Maximum length of a V8 string in UTF-16 code units.
@@ -1446,6 +1470,22 @@ impl<'s, T> Local<'s, T> {
         unsafe { ffi::local_is_name(self.raw()) }
     }
 
+    /// Returns true if the value is a JavaScript `BigInt`.
+    ///
+    /// Corresponds to `v8::Value::IsBigInt()`.
+    pub fn is_big_int(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_big_int(self.raw()) }
+    }
+
+    /// Returns true if the value is a JavaScript `Date`.
+    ///
+    /// Corresponds to `v8::Value::IsDate()`.
+    pub fn is_date(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_date(self.raw()) }
+    }
+
     /// Returns the JavaScript type of the underlying value as a string.
     ///
     /// Uses V8's native `TypeOf` method which returns the same result as
@@ -1498,6 +1538,8 @@ impl_as!(Array, is_array);
 impl_as!(String, is_string);
 impl_as!(Symbol, is_symbol);
 impl_as!(Name, is_name);
+impl_as!(BigInt, is_big_int);
+impl_as!(Date, is_date);
 impl_as!(ArrayBuffer, is_array_buffer);
 impl_as!(ArrayBufferView, is_array_buffer_view);
 
@@ -1653,6 +1695,17 @@ impl<'s> Local<'s, Function> {
     /// `args` is a slice of `Local<Value>` — use [`ToJS::to_js`](crate::ToJS::to_js) to
     /// convert Rust values, or `.into()` for other `Local<T>` handles.
     ///
+    /// # Errors
+    ///
+    /// If the function throws, or execution is terminating (then without calling it), the
+    /// exception stays pending and this
+    /// returns an error for which [`Error::is_pending`] is true. [`Lock::throw_exception`] throws
+    /// nothing for it, so
+    /// returning it from a callback propagates the exception to the callback's JavaScript caller,
+    /// as C++ JSG does. Don't call into JavaScript after such an error; to handle the exception
+    /// instead, make the call in [`Lock::try_catch`]. Also fails if the result does not convert
+    /// to `R`.
+    ///
     /// # Example
     ///
     /// ```ignore
@@ -1673,17 +1726,26 @@ impl<'s> Local<'s, Function> {
             arg.debug_assert_isolate(lock);
         }
 
+        // Calling into V8 while execution is terminating would clear the termination.
+        // SAFETY: lock guarantees the isolate is locked.
+        if unsafe { ffi::isolate_is_execution_terminating(lock.isolate().as_ffi()) } {
+            return Err(Error::pending());
+        }
         // SAFETY: lock guarantees the isolate is locked and a HandleScope is active.
-        // self is a valid Local<Function>; recv and args are valid Local handles.
+        // self is a valid Local<Function>; recv and args are valid Local handles. The result
+        // belongs to the lock's scope.
         let result = unsafe {
-            Local::from_ffi(ffi::local_function_call(
+            Local::from_ffi_maybe(ffi::local_function_call(
                 lock.isolate().as_ffi(),
                 self.raw(),
                 recv.raw(),
                 Local::raw_slice(args),
             ))
         };
-        R::from_js(lock, result)
+        match result {
+            Some(result) => R::from_js(lock, result),
+            None => Err(Error::pending()),
+        }
     }
 }
 
@@ -1716,6 +1778,8 @@ macro_rules! impl_local_cast {
 impl_local_cast!(String -> Value, is_string);
 impl_local_cast!(Name -> Value, is_name);
 impl_local_cast!(Symbol -> Value, is_symbol);
+impl_local_cast!(BigInt -> Value, is_big_int);
+impl_local_cast!(Date -> Value, is_date);
 impl_local_cast!(Object -> Value, is_object);
 impl_local_cast!(Function -> Value, is_function);
 impl_local_cast!(Array -> Value, is_array);
@@ -2951,6 +3015,28 @@ impl<'s> Local<'s, Symbol> {
         unsafe {
             Local::from_ffi_maybe(ffi::local_symbol_description(isolate.as_ffi(), self.raw()))
         }
+    }
+}
+
+impl Local<'_, BigInt> {
+    /// Returns the value as an `i64`, or `None` if it is out of the range of `i64`.
+    ///
+    /// Corresponds to `v8::BigInt::Int64Value()`.
+    pub fn int64_value(&self) -> Option<i64> {
+        let mut lossless = false;
+        // SAFETY: the handle is a valid BigInt handle within the current HandleScope.
+        let value = unsafe { ffi::local_big_int_int64_value(self.raw(), &mut lossless) };
+        lossless.then_some(value)
+    }
+}
+
+impl Local<'_, Date> {
+    /// Returns the time value: milliseconds since the epoch, or NaN for an invalid date.
+    ///
+    /// Corresponds to `v8::Date::ValueOf()`.
+    pub fn value_of(&self) -> f64 {
+        // SAFETY: the handle is a valid Date handle within the current HandleScope.
+        unsafe { ffi::local_date_value_of(self.raw()) }
     }
 }
 
