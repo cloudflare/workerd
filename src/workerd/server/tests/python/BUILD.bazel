@@ -92,7 +92,12 @@ py_wd_test("nodejs-compat")
 
 py_wd_test("pth-file")
 
-py_wd_test("metadata-read-overflow")
+py_wd_test(
+    "metadata-read-overflow",
+    # Allocates several 2 GiB buffers, which TSan's shadow memory multiplies past the 12 GiB of
+    # CI's bazelflare executors.
+    tags = ["no-tsan"],
+)
 
 js_binary(
     name = "socket-server",

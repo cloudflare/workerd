@@ -1,4 +1,5 @@
 load("@workerd//:build/lint_test.bzl", "lint_test")
+load("@workerd//build/bazelflare:exec_properties.bzl", "test_exec_properties")
 load("@workerd//build/tools/llvm:coverage.bzl", "COVERAGE_TOOLCHAINS", "coverage_llvm_tools")
 
 def wd_test(
@@ -42,6 +43,7 @@ def wd_test(
 
     # Add workerd binary to "data" dependencies.
     data = data + [src, "//src/workerd/server:workerd"]
+    kwargs["exec_properties"] = test_exec_properties(kwargs.get("size", "medium"), kwargs.get("tags", [])) | kwargs.get("exec_properties", {})
 
     ts_srcs = [src for src in data if src.endswith(".ts")]
 
