@@ -78,6 +78,16 @@ fn resolved_returns_promises_unchanged_and_follows_thenables() {
         let same = v8::Promise::resolved(lock, existing).unwrap();
         assert!(v8::Local::<v8::Value>::from(same) == existing);
 
+        // Unlike `Promise.resolve`, which would wrap a subclass instance in a new promise.
+        let subclass = ctx
+            .eval_raw(
+                lock,
+                "class PromiseSubclass extends Promise {}; new PromiseSubclass(() => {})",
+            )
+            .unwrap();
+        let same_subclass = v8::Promise::resolved(lock, subclass).unwrap();
+        assert!(v8::Local::<v8::Value>::from(same_subclass) == subclass);
+
         let thenable = ctx
             .eval_raw(lock, "({ then(resolve) { resolve('from thenable'); } })")
             .unwrap();
@@ -122,6 +132,47 @@ fn promise_argument_accepts_any_value() {
 // =============================================================================
 // then
 // =============================================================================
+
+/// Registering a reaction runs no JavaScript: neither the promise's `then` nor its `constructor`
+/// (for the species) is read, so getters that throw don't stop any of the three.
+#[test]
+fn promise_reactions_bypass_user_properties() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let promise = ctx
+            .eval_raw(
+                lock,
+                "const p = Promise.resolve('kept');
+                 Object.defineProperties(p, {
+                   then: { get() { throw new Error('then read'); } },
+                   constructor: { get() { throw new Error('constructor read'); } },
+                 });
+                 p",
+            )
+            .unwrap();
+        let promise = v8::Local::<v8::Promise>::try_from(promise).unwrap();
+        let fulfilled = promise
+            .then(lock, (), |_lock, (), value| Ok(value))
+            .unwrap();
+        let caught = promise
+            .catch(lock, (), |lock, (), _reason| Ok(lock.undefined()))
+            .unwrap();
+        let either = promise
+            .then_or_catch(
+                lock,
+                (),
+                |_lock, (), value| Ok(value),
+                |lock, (), _reason| Ok(lock.undefined()),
+            )
+            .unwrap();
+        crate::Harness::run_microtasks(lock);
+        for reaction in [fulfilled, caught, either] {
+            assert_eq!(reaction.state(), PromiseState::Fulfilled);
+            let result = reaction.result(lock).unwrap();
+            assert_eq!(String::from_js(lock, result)?, "kept");
+        }
+        Ok(())
+    });
+}
 
 #[test]
 fn then_runs_callbacks_as_microtasks_with_their_data() {
