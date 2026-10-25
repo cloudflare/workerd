@@ -781,14 +781,16 @@ impl<'s> Lock<'s> {
         unsafe { v8::ffi::isolate_throw_error(self.isolate().as_ffi(), message) }
     }
 
+    /// Runs `fut` as I/O and later calls `callback` with its output under a new lock. Both run
+    /// after the current callback has returned, so they must be `'static`.
     #[expect(
         clippy::unimplemented,
         reason = "`await_io` is not implemented for Rust resources yet"
     )]
     pub fn await_io<F, C, I, R>(&mut self, _fut: F, _callback: C) -> Result<R>
     where
-        F: Future<Output = I>,
-        C: for<'t> FnOnce(&mut Lock<'t>, I) -> Result<R>,
+        F: Future<Output = I> + 'static,
+        C: for<'t> FnOnce(&mut Lock<'t>, I) -> Result<R> + 'static,
     {
         unimplemented!("Lock::await_io is not yet implemented for Rust resources")
     }
