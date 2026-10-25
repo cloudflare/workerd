@@ -297,6 +297,8 @@ C++ classes are exposed to JavaScript via JSG macros in `src/workerd/jsg/`. See 
 - **NEVER** use generic names for top-level ambient types in `types/defines/` (e.g., `Identity`, `Preview`, `Config`); always prefix with the product/feature name (e.g., `CloudflareAccessIdentity`, `TracePreviewInfo`, `AiSearchConfig`)
 - **NEVER** use bare `object` as a type in `types/defines/`; use a proper interface with known fields (optionally extending `Record<string, unknown>` for forward-compatibility)
 - **NEVER** edit `types/generated-snapshot/` directly; fix the source layer and run `just generate-types`
+- **NEVER** use C++ JSG in Rust JSG's C++ shims (`jsg::Lock::from`, `JSG_TRY`, `jsg::check`, `createTunneledException`, ...); see `src/rust/jsg/README.md` §Safety rules
+- **NEVER** throw a JS exception while execution is terminating; it replaces the termination and lets the script keep running
 
 ## Backward Compatibility
 
