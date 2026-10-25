@@ -93,9 +93,12 @@ static v8::Local<v8::String> newUtf8String(
   return result;
 }
 
-// Creates an interned V8 string from a Rust identifier name (rust::String or rust::Str).
+// Creates an interned V8 string from a Rust identifier name (rust::String or rust::Str). An
+// overlong name is checked here too, so that the error names it.
 template <typename Name>
 static v8::Local<v8::String> makeInternedStr(v8::Isolate* isolate, const Name& name) {
+  KJ_REQUIRE(name.size() <= static_cast<size_t>(v8::String::kMaxLength),
+      "Rust identifier name exceeds V8 string length limit", name);
   return newUtf8String(
       isolate, kj::arrayPtr(name.data(), name.size()), v8::NewStringType::kInternalized);
 }
