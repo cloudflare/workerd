@@ -89,7 +89,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         // Like C++ JSG, an absent optional field is omitted, not undefined.
         let set = quote! {
             let value = jsg::v8::ToLocalValue::to_local(value, lock);
-            obj.set(lock, #field_name_str, value);
+            properties.push((#field_name_str, value));
         };
         field_assignments.push(if optional {
             quote! { if let Some(value) = &this.#field_name { #set } }
@@ -130,15 +130,16 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         impl<'s> jsg::ToJS<'s> for #name {
             fn to_js(self, lock: &mut jsg::Lock<'s>) -> jsg::v8::Local<'s, jsg::v8::Value> {
+                // The fields are defined as data properties, as C++ JSG's ObjectTemplate does,
+                // so no setter a script put on Object.prototype runs.
                 // TODO(soon): Use a precached ObjectTemplate instance to create the object,
                 // similar to how C++ JSG optimizes object creation. This would avoid recreating
                 // the object shape on every wrap() call and improve performance.
-                {
-                    let this = self;
-                    let obj = lock.new_object();
-                    #(#field_assignments)*
-                    obj.into()
-                }
+                let this = self;
+                #[allow(unused_mut, reason = "a struct without public fields pushes nothing")]
+                let mut properties = ::std::vec::Vec::new();
+                #(#field_assignments)*
+                jsg::v8::Object::with_data_properties(lock, &properties).into()
             }
         }
 

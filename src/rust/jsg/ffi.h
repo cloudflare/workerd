@@ -208,6 +208,10 @@ MaybeLocal local_function_call(
     Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args);
 
 // Local<Object>
+// Returns a new object with `keys[i]` an own data property of value `values[i]`. Runs no
+// JavaScript: no setter on Object.prototype is called.
+Local object_new_with_data_properties(
+    Isolate* isolate, ::rust::Slice<const ::rust::Str> keys, ::rust::Slice<const Local> values);
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);
 // Stores in `has` whether `key` is in the object, and returns true, or returns false if a Proxy
 // trap threw, leaving the exception pending.
@@ -219,6 +223,8 @@ MaybeLocal local_object_get_property(Isolate* isolate, const Local& object, ::ru
 // Local<Array>
 Local local_new_array(Isolate* isolate, size_t length);
 uint32_t local_array_length(const Local& array);
+// Returns a new array of `elements`. Runs no JavaScript: no setter on Array.prototype is called.
+Local array_new_with_elements(Isolate* isolate, ::rust::Slice<const Local> elements);
 Local local_array_get(Isolate* isolate, const Local& array, uint32_t index);
 void local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value);
 // Appends the elements to `result` and returns true, or returns false with `result` empty if a

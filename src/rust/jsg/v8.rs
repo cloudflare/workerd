@@ -379,6 +379,13 @@ pub mod ffi {
         ) -> MaybeLocal;
 
         // Local<Object>
+        // Fallible: the keys are interned with KJ_REQUIRE and jsg::check, and KJ_REQUIREs as
+        // many keys as values.
+        pub unsafe fn object_new_with_data_properties(
+            isolate: *mut Isolate,
+            keys: &[&str],
+            values: &[Local],
+        ) -> Result<Local>;
         pub unsafe fn local_object_set_property(
             isolate: *mut Isolate,
             object: &mut Local,
@@ -401,6 +408,7 @@ pub mod ffi {
 
         // Local<Array>
         pub unsafe fn local_array_length(array: &Local) -> u32;
+        pub unsafe fn array_new_with_elements(isolate: *mut Isolate, elements: &[Local]) -> Local;
         pub unsafe fn local_array_get(isolate: *mut Isolate, array: &Local, index: u32) -> Local;
         pub unsafe fn local_array_set(
             isolate: *mut Isolate,
@@ -1740,6 +1748,27 @@ impl Array {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe { Local::from_ffi(ffi::local_new_array(isolate.as_ffi(), len)) }
     }
+
+    /// Creates a new JavaScript array of `elements`.
+    ///
+    /// Runs no JavaScript: unlike [`Local::<Array>::set`], it calls no setter that a script
+    /// defined on `Array.prototype`. Corresponds to `v8::Array::New(isolate, elements, length)`.
+    pub fn with_elements<'s>(
+        lock: &mut crate::Lock<'s>,
+        elements: &[Local<'s, Value>],
+    ) -> Local<'s, Self> {
+        for element in elements {
+            element.debug_assert_isolate(lock);
+        }
+        // SAFETY: lock guarantees the isolate is locked and a HandleScope is active; the
+        // elements are valid handles in it.
+        unsafe {
+            Local::from_ffi(ffi::array_new_with_elements(
+                lock.isolate().as_ffi(),
+                Local::raw_slice(elements),
+            ))
+        }
+    }
 }
 
 impl<'s> Local<'s, Array> {
@@ -3042,6 +3071,46 @@ impl Drop for Utf8Value {
 }
 
 // Object-specific implementations
+impl Object {
+    /// Creates a new object with `properties` as its own data properties, in that order.
+    ///
+    /// Runs no JavaScript: unlike [`Local::<Object>::set`], it calls no setter that a script
+    /// defined on `Object.prototype`. Each property is defined as by `v8::Object::CreateDataProperty`
+    /// (writable, enumerable and configurable); a later duplicate key replaces the earlier value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a key is longer than [`String::MAX_LENGTH`].
+    #[expect(
+        clippy::expect_used,
+        reason = "fails only for a key longer than V8's maximum string length"
+    )]
+    pub fn with_data_properties<'s>(
+        lock: &mut Lock<'s>,
+        properties: &[(&str, Local<'s, Value>)],
+    ) -> Local<'s, Self> {
+        let (keys, values): (Vec<&str>, Vec<Local<'s, Value>>) = properties
+            .iter()
+            .map(|(key, value)| {
+                value.debug_assert_isolate(lock);
+                (*key, *value)
+            })
+            .unzip();
+        // SAFETY: lock guarantees the isolate is locked, a context is entered and a HandleScope
+        // is active; the values are valid handles in it. The result belongs to that scope.
+        unsafe {
+            Local::from_ffi(
+                ffi::object_new_with_data_properties(
+                    lock.isolate().as_ffi(),
+                    &keys,
+                    Local::raw_slice(&values),
+                )
+                .expect("object property key is too long for a V8 string"),
+            )
+        }
+    }
+}
+
 impl<'s> Local<'s, Object> {
     /// Sets `key` to `value`. May run JavaScript (setters, proxy traps).
     pub fn set(self, lock: &mut Lock<'s>, key: &str, value: Local<'s, Value>) {

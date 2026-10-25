@@ -1455,3 +1455,68 @@ fn is_float16_array_check() {
         Ok(())
     });
 }
+
+/// Converting a `Vec` or a `#[jsg_struct]` to JavaScript defines the elements and fields as own
+/// data properties, as C++ JSG does: it runs no JavaScript, so no setter a script put on
+/// `Array.prototype` or `Object.prototype` is called, not even one that throws.
+#[test]
+fn to_js_calls_no_prototype_setters() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = jsg::Rc::new(ArrayResource);
+        let wrapped = resource.to_js(lock);
+        ctx.set_global(lock, "arr", wrapped);
+        ctx.eval_raw(
+            lock,
+            "globalThis.settersRan = [];
+             for (const [proto, key] of [[Array.prototype, 0], [Array.prototype, 1],
+                                         [Object.prototype, 'name'], [Object.prototype, 'age']]) {
+               Object.defineProperty(proto, key, {
+                 set(v) { settersRan.push(key); throw new Error('setter ran'); },
+                 configurable: true,
+               });
+             }",
+        )
+        .expect("setup should evaluate");
+
+        let people = vec![
+            Person {
+                name: "Alice".to_owned(),
+                age: Number::new(25.0),
+            },
+            Person {
+                name: "Bob".to_owned(),
+                age: Number::new(30.0),
+            },
+        ];
+        let value = people.to_js(lock);
+        ctx.set_global(lock, "people", value);
+        let ok: bool = ctx
+            .eval(
+                lock,
+                "Array.isArray(people) && people.length === 2 &&
+                 Object.hasOwn(people, 0) && Object.hasOwn(people, 1) &&
+                 people.every(p => Object.keys(p).join() === 'name,age') &&
+                 people[0].name === 'Alice' && people[0].age === 25 &&
+                 people[1].name === 'Bob' && people[1].age === 30",
+            )
+            .unwrap();
+        assert!(ok);
+
+        // The same through a method's arguments and return value.
+        let ok: bool = ctx
+            .eval(
+                lock,
+                "const adults = arr.filterAdults([{name: 'Carol', age: 40}, {name: 'Dan', age: 50}]);
+                 const doubled = arr.double([1, 2]);
+                 Object.hasOwn(adults, 0) && Object.hasOwn(adults[0], 'name') &&
+                 adults[1].name === 'Dan' && Object.hasOwn(doubled, 1) && doubled[1] === 4",
+            )
+            .unwrap();
+        assert!(ok);
+
+        let setters_ran: String = ctx.eval(lock, "settersRan.join()").unwrap();
+        assert_eq!(setters_ran, "");
+        Ok(())
+    });
+}
