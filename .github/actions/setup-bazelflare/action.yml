@@ -1,0 +1,81 @@
+name: 'Set up bazelflare'
+description: 'Configures Bazel for bazelflare remote execution, restoring what earlier jobs cached'
+inputs:
+  BAZELFLARE_ENDPOINT:
+    description: 'The bazelflare endpoint'
+    required: true
+  BAZELFLARE_CA_PEM:
+    description: "The CA to pin, for an endpoint whose certificate isn't publicly trusted"
+    required: false
+    default: ''
+  BAZELFLARE_TOKEN:
+    description: 'The bazelflare token'
+    required: true
+  save_cache:
+    description: 'Whether the job saves the cache when its key is new'
+    required: false
+    default: 'true'
+runs:
+  using: 'composite'
+  steps:
+    # bazelflare serves every action from its own cache, but each external repository Bazel reads
+    # from it costs a few round trips, and Bazel loads many of them one after another before it
+    # analyzes anything; from a fresh output base, analysis takes about 4x as long without a disk
+    # cache holding them. The repository cache's downloads are those of the repositories that
+    # bazelflare can't hold, such as the Python toolchain. The output base's lockfile holds the
+    # results of the module extensions that MODULE.bazel.lock leaves out, which Bazel would
+    # otherwise evaluate again; crate_universe's fetches a Rust toolchain to do so. The bazelflare
+    # jobs share one cache, keyed on the files that define the repositories and the extensions'
+    # inputs. When those change, a job starts from the newest cache instead: its entries are
+    # content-addressed, so the stale ones are only unused, and the jobs drop those before saving
+    # (see _bazel.yml).
+    - name: Cache external repositories
+      if: inputs.save_cache == 'true'
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/bazel-disk-cache
+          ~/bazel-repository-cache/content_addressable
+          ~/bazel-output-base/MODULE.bazel.lock
+        key: bazelflare-disk-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', 'MODULE.bazel.lock', 'deps/**', 'build/deps/**', 'pnpm-lock.yaml') }}
+        restore-keys: bazelflare-disk-cache-${{ runner.os }}-${{ runner.arch }}-
+    - name: Restore external repositories
+      if: inputs.save_cache != 'true'
+      uses: actions/cache/restore@v5
+      with:
+        # The same as the cache's.
+        path: |
+          ~/bazel-disk-cache
+          ~/bazel-repository-cache/content_addressable
+          ~/bazel-output-base/MODULE.bazel.lock
+        key: bazelflare-disk-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', 'MODULE.bazel.lock', 'deps/**', 'build/deps/**', 'pnpm-lock.yaml') }}
+        restore-keys: bazelflare-disk-cache-${{ runner.os }}-${{ runner.arch }}-
+    - name: Configure bazelflare
+      shell: bash
+      env:
+        BAZELFLARE_ENDPOINT: ${{ inputs.BAZELFLARE_ENDPOINT }}
+        BAZELFLARE_CA_PEM: ${{ inputs.BAZELFLARE_CA_PEM }}
+        BAZELFLARE_TOKEN: ${{ inputs.BAZELFLARE_TOKEN }}
+      run: |
+        # .bazelrc imports .local/bazelrc, where the bazelflare block there expects the endpoint,
+        # the token and, for an endpoint whose certificate isn't publicly trusted, the CA to pin.
+        # The runner's own settings go there too, as a workstation's would, so that every Bazel
+        # command the job runs shares them: the output base, disk and repository caches that the
+        # cache holds, and enough loading threads to fetch the external repositories, about 1300,
+        # many more at once than the runner has CPUs.
+        : "${BAZELFLARE_ENDPOINT:?set the BAZELFLARE_ENDPOINT repository variable}"
+        : "${BAZELFLARE_TOKEN:?set the BAZELFLARE_TOKEN repository secret}"
+        mkdir -p .local
+        {
+          echo "build:bazelflare --remote_executor=$BAZELFLARE_ENDPOINT"
+          echo "build:bazelflare \"--remote_header=authorization=Bearer $BAZELFLARE_TOKEN\""
+          echo "startup --experimental_remote_repo_contents_cache"
+          echo "startup --output_base=$HOME/bazel-output-base"
+          echo "build:bazelflare --disk_cache=~/bazel-disk-cache"
+          echo "build:bazelflare --repository_cache=~/bazel-repository-cache"
+          echo "build:bazelflare --loading_phase_threads=48"
+        } > .local/bazelrc
+        if [ -n "$BAZELFLARE_CA_PEM" ]; then
+          printf '%s\n' "$BAZELFLARE_CA_PEM" > .local/bazelflare-ca.pem
+          echo "build:bazelflare --tls_certificate=$PWD/.local/bazelflare-ca.pem" >> .local/bazelrc
+        fi

@@ -39,6 +39,13 @@ on:
         type: boolean
         required: false
         default: false
+      # The flags a developer builds this job's configuration with. Every Bazel command passes them
+      # first, then --config=ci and extra_bazel_args, which change how Bazel runs and reports the
+      # build, never an action; the check-ci-flags job in test.yml checks that they don't.
+      developer_flags:
+        type: string
+        required: false
+        default: ''
       extra_bazel_args:
         type: string
         required: false
@@ -75,6 +82,25 @@ on:
         type: boolean
         required: false
         default: false
+      # Run every action on bazelflare remote execution (see the bazelflare block in .bazelrc)
+      # instead of on the runner, configured by the BAZELFLARE_ENDPOINT and BAZELFLARE_CA_PEM
+      # repository variables and the BAZELFLARE_TOKEN secret. developer_flags hold the job's
+      # bazelflare config and extra_bazel_args include --config=ci-bazelflare.
+      bazelflare:
+        type: boolean
+        required: false
+        default: false
+      # The flags a bazelflare job takes instead of developer_flags and extra_bazel_args when it has
+      # no BAZELFLARE_TOKEN, as in a pull request from a fork, which gets no secrets: it then builds
+      # on its runner, reading the remote cache as the other jobs do.
+      runner_developer_flags:
+        type: string
+        required: false
+        default: ''
+      runner_extra_bazel_args:
+        type: string
+        required: false
+        default: ''
     secrets:
       BAZEL_CACHE_KEY:
         required: true
@@ -84,6 +110,8 @@ on:
         required: false
       GOOGLESOURCE_COOKIE:
         required: true
+      BAZELFLARE_TOKEN:
+        required: false
 
 permissions:
   # Read repo
@@ -94,13 +122,36 @@ permissions:
 jobs:
   bazel:
     runs-on: ${{ inputs.image }}
+    env:
+      BAZELFLARE: ${{ inputs.bazelflare && secrets.BAZELFLARE_TOKEN != '' }}
+      # bazelflare is cache and executor in one, so it takes no separate remote cache.
+      BAZEL_REMOTE_ARGS: ${{ !(inputs.bazelflare && secrets.BAZELFLARE_TOKEN != '') && format('--remote_cache=https://bazel:{0}@bazel-remote-cache.devprod.cloudflare.dev', secrets.BAZEL_CACHE_KEY) || '' }}
     steps:
       - uses: actions/checkout@v7
         with:
           show-progress: false
           fetch-depth: ${{ inputs.fetch_depth }}
+      - name: Choose Bazel flags
+        shell: bash
+        env:
+          ON_RUNNER: ${{ inputs.bazelflare && env.BAZELFLARE != 'true' }}
+          DEVELOPER_FLAGS: ${{ inputs.developer_flags }}
+          EXTRA_BAZEL_ARGS: ${{ inputs.extra_bazel_args }}
+          RUNNER_DEVELOPER_FLAGS: ${{ inputs.runner_developer_flags }}
+          RUNNER_EXTRA_BAZEL_ARGS: ${{ inputs.runner_extra_bazel_args }}
+        run: |
+          if [ "$ON_RUNNER" = true ]; then
+            echo "No BAZELFLARE_TOKEN: building on the runner."
+            DEVELOPER_FLAGS=$RUNNER_DEVELOPER_FLAGS
+            EXTRA_BAZEL_ARGS=$RUNNER_EXTRA_BAZEL_ARGS
+          fi
+          echo "DEVELOPER_FLAGS=$DEVELOPER_FLAGS" >> "$GITHUB_ENV"
+          echo "EXTRA_BAZEL_ARGS=$EXTRA_BAZEL_ARGS" >> "$GITHUB_ENV"
       - name: Cache
         id: cache
+        # Not for a bazelflare job building on its runner: its disk cache would take gigabytes of
+        # the repository's GitHub Actions cache for every fork's pull request.
+        if: ${{ !inputs.bazelflare }}
         uses: actions/cache@v5
         with:
           path: ~/bazel-disk-cache
@@ -108,6 +159,13 @@ jobs:
           # Intentionally not reusing an older cache entry using a key prefix, bazel frequently
           # ends up with a larger cache at the end when starting with an available cache entry,
           # resulting in a snowballing cache size and cache download/upload times.
+      - name: Set up bazelflare
+        if: env.BAZELFLARE == 'true'
+        uses: ./.github/actions/setup-bazelflare
+        with:
+          BAZELFLARE_ENDPOINT: ${{ vars.BAZELFLARE_ENDPOINT }}
+          BAZELFLARE_CA_PEM: ${{ vars.BAZELFLARE_CA_PEM }}
+          BAZELFLARE_TOKEN: ${{ secrets.BAZELFLARE_TOKEN }}
       - name: Setup Runner
         uses: ./.github/actions/setup-runner
         with:
@@ -131,12 +189,12 @@ jobs:
           fi
       - name: Bazel build
         run: |
-          bazel build --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev  --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.build_target }}
+          bazel build ${{ env.BAZEL_REMOTE_ARGS }} ${{ env.DEVELOPER_FLAGS }} --config=ci ${{ env.EXTRA_BAZEL_ARGS }} ${{ inputs.build_target }}
       - name: Check I/O backend dependency graph
         # One cquery: the workerd binary must not reach kj-async-os (kj's own event loop).
         if: inputs.check_io_backend_graph
         run: |
-          bash build/rust_io_graph_check.sh --config=ci ${{ inputs.extra_bazel_args }}
+          bash build/rust_io_graph_check.sh ${{ env.DEVELOPER_FLAGS }} --config=ci ${{ env.EXTRA_BAZEL_ARGS }}
       - name: Configure Docker daemon for IPv6
         if: inputs.build_container_images
         run: |
@@ -151,15 +209,16 @@ jobs:
           docker info
           echo "Docker version:"
           docker version
-          bazel run --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} //images:load_all
+          # Its own profile, so that it leaves the build's for the upload below.
+          bazel run ${{ env.BAZEL_REMOTE_ARGS }} ${{ env.DEVELOPER_FLAGS }} --config=ci ${{ env.EXTRA_BAZEL_ARGS }} --profile=images.bazel-profile.gz //images:load_all
       - name: Bazel test
         if: inputs.run_tests
         run: |
-          bazel test --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
+          bazel test ${{ env.BAZEL_REMOTE_ARGS }} ${{ env.DEVELOPER_FLAGS }} --config=ci ${{ env.EXTRA_BAZEL_ARGS }} ${{ inputs.test_target }}
       - name: Bazel coverage
         if: inputs.run_coverage
         run: |
-          bazel coverage --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} ${{ inputs.test_target }}
+          bazel coverage ${{ env.BAZEL_REMOTE_ARGS }} ${{ env.DEVELOPER_FLAGS }} --config=ci ${{ env.EXTRA_BAZEL_ARGS }} ${{ inputs.test_target }}
       - name: Upload coverage to Codecov
         if: inputs.run_coverage
         uses: codecov/codecov-action@v5
@@ -178,7 +237,7 @@ jobs:
         # dependencies of header targets properly).
         if: inputs.parse_headers
         run: |
-          bazel build --config=parse_headers --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci ${{ inputs.extra_bazel_args }} //src/workerd/util
+          bazel build --config=parse_headers ${{ env.BAZEL_REMOTE_ARGS }} ${{ env.DEVELOPER_FLAGS }} --config=ci ${{ env.EXTRA_BAZEL_ARGS }} //src/workerd/util
       - name: Upload test logs
         if: always() && inputs.upload_test_logs
         uses: actions/upload-artifact@v7
@@ -192,6 +251,7 @@ jobs:
           BAZEL_OUTPUT_BASE=$(bazel info output_base)
           BAZEL_REPOSITORY_CACHE=$(bazel info repository_cache)
           echo "Bazel cache usage statistics"
+          shopt -s nullglob  # bazelflare jobs have no disk cache
           du -ms -t 1 ~/bazel-disk-cache/* $BAZEL_REPOSITORY_CACHE
           echo "Bazel output usage statistics"
           du -ms -t 1 $BAZEL_OUTPUT_BASE
@@ -253,3 +313,12 @@ jobs:
         if: always()
         # Check that there are no .bazelrc issues that prevent shutdown.
         run: bazel shutdown
+      - name: Drop unused bazelflare cache entries
+        # Bazel refreshes the mtime of every disk and repository cache entry it stores or reads, and
+        # the cache keeps mtimes, so an entry more than a week old is one that no job saving the
+        # cache has used in that time.
+        if: always() && env.BAZELFLARE == 'true'
+        shell: bash
+        run: |
+          find ~/bazel-disk-cache ~/bazel-repository-cache/content_addressable -type f -mtime +7 -delete 2>/dev/null || true
+          du -ms ~/bazel-disk-cache ~/bazel-repository-cache/content_addressable 2>/dev/null || true
