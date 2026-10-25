@@ -40,6 +40,13 @@ What to look for in added code:
   module and turned into safe typed values there. Errors use `thiserror` in library crates,
   `jsg::Error` in JSG-facing crates, and the `kj::` error macros when the KJ exception type
   matters.
+- **C++ JSG in a Rust JSG shim** (`src/rust/jsg/README.md` "Safety rules", rule 3): C++ JSG will
+  be removed, so C++ files under `src/rust` must not add `jsg::Lock`, `JSG_TRY`/`JSG_CATCH`,
+  `jsg::check`, `JsExceptionThrown`, `createTunneledException`, `makeInternalError` or
+  `jsg::Data`/`jsg::Value`. Suggest catching with a `v8::TryCatch`, returning the exception
+  through a `MaybeLocal` out-parameter, and building the error in Rust. Also flag a new shim file
+  outside `src/rust/jsg` that isn't added to `CPP_SHIMS` in `src/rust/jsg/BUILD.bazel`, since
+  `//src/rust/jsg:cpp-jsg-allowlist-test` checks only those files. This is a `warning`.
 - **Project conventions** that are easy to miss: namespace `workerd::rust::<crate>` (or the
   component's namespace for crates beside C++), `&Lock` first after any `self` receiver, no `get_` prefixes, FFI function
   groups kept in matching order across `v8.rs`/`ffi.h`/`ffi.c++`, `#[expect]` rather than

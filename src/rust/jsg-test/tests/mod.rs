@@ -32,6 +32,7 @@ mod resource_template;
 mod resource_this;
 mod string;
 mod symbol;
+mod termination;
 mod traceable_gc;
 mod traced_global_lifetime;
 mod unwrap;

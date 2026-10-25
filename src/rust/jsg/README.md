@@ -20,6 +20,121 @@ Weak reference that doesn't prevent GC collection. Use `upgrade()` to get a `Rc<
 
 Per-isolate state for Rust resources exposed to JavaScript. Stores cached function templates.
 
+## Safety rules
+
+Every change to Rust JSG, and to the C++ shims under it, must follow these four rules. Each rule
+lists the tests that check it. Reviewers check the rest.
+
+### 1. Never drop or replace a pending termination
+
+When V8 terminates a script (for example because the Worker ran out of CPU time), it throws a
+special termination exception that JavaScript cannot catch. Once that exception is pending
+(`isolate->IsExecutionTerminating()` in C++, `Isolate::is_execution_terminating` in Rust), it must
+reach the C++ code that started the script.
+
+Throwing anything else at that point replaces it: `v8::Isolate::ThrowException` discards the
+pending termination and throws the new exception, which JavaScript can catch. The Worker then
+keeps running.
+
+- Don't throw while execution is terminating. The `isolate_throw_*` shims already check this
+  and throw nothing, so `Lock::throw_exception`, `Lock::throw_error`, `Lock::throw_internal_error`
+  and the fast API error path are safe. A shim that calls `isolate->ThrowException` itself must
+  check first.
+- Don't discard a `jsg::Error` from a call that ran JavaScript (`Function::call`, `Object::get`,
+  a coercion). It may be the termination, or a JavaScript exception that is still pending (see
+  [Errors from JavaScript](#errors-from-javascript)). Pass it on with `?` instead of using
+  `.ok()`, `unwrap_or`, or `map_err` to a different error. To handle the exception, use
+  `Lock::try_catch`.
+- An empty result from an FFI shim doesn't always mean termination. It can also mean a stack
+  overflow or an ordinary exception. Check `IsExecutionTerminating()`, or catch the exception
+  with a `v8::TryCatch` in the shim and decide with `catch_exception()` (`ffi.h`).
+
+Bad: `let name = obj.get(lock, "name").ok();`. If the script is being terminated, the termination
+is lost. Fix: `let name = obj.get(lock, "name")?;`.
+
+Tested by: `src/rust/jsg-test/tests/termination.rs`, and the termination tests in
+`src/rust/jsg-test/tests/resource_callback.rs`.
+
+### 2. Keep traced state with its one GC owner
+
+Traced state is a `TracedGlobal`, a `jsg::Rc`, or a type that holds them. It belongs to the one
+GC owner that traces it: a resource, or a `Wrappable` such as the data of a function created with
+`Function::new`.
+
+- Never put traced state inside an `std::rc::Rc`. A clone of the `Rc` held by a second GC owner
+  traces the same state again. For a `jsg::Rc`, C++ asserts a single owner
+  (`Wrappable::visitRef` in `src/workerd/jsg/wrappable.c++`), so the process aborts. For a
+  `TracedGlobal`, nothing asserts, but whichever owner traces it last decides whether its handle
+  is strong or weak. The value can then be collected while the other owner still uses it. To give
+  a callback or another party access to the state, give it a `jsg::Rc` or `jsg::Weak` to the
+  resource that owns the state. A method gets one with a `this: jsg::Rc<Self>` parameter; see
+  [Reaching the resource from a callback](#reaching-the-resource-from-a-callback).
+- Clone a `jsg::Rc` that you move out of a traced field (with `Cell::take`, `Option::take` or
+  `mem::replace`, or by popping it from a traced `Vec`), and use the clone. Once GC has visited a
+  `jsg::Rc` in a field, the `jsg::Rc` gives up its strong reference and relies on the field's
+  owner to trace it. Moved out of the field, it is neither strong nor traced, so GC can collect
+  the resource's JavaScript wrapper while Rust still holds it. The resource then gets a new
+  wrapper the next time it reaches JavaScript, and nothing traces the `TracedGlobal`s it holds,
+  so they can lose their values. C++ `jsg::Ref` doesn't have this problem because its move
+  constructor makes the reference strong again, but Rust has no hook on moves. A clone always
+  starts strong. Clone it right away, or at least before anything that can run JavaScript or
+  allocate on the V8 heap. See [#7976](https://github.com/cloudflare/workerd/issues/7976).
+- Don't put a `jsg::v8::Global` in anything GC traces. A `Global` is always strong, so if it
+  points back at its owner (for example function data that holds the function itself), neither
+  is ever collected. Use a `TracedGlobal`. The compiler rejects a `Global` field in a resource,
+  but not inside a type with a hand-written `impl Traced`, so check those by hand.
+
+Bad: two `Function::new` callbacks whose data are clones of one `std::rc::Rc<State>`, where
+`State` holds a `TracedGlobal`. Fix: a resource holds `State`, and each callback holds a
+`jsg::Rc` or `jsg::Weak` to that resource.
+
+Bad: `let task = self.pending.take().unwrap();`, then a call into JavaScript before `task` is
+used. Fix: `let task = self.pending.take().unwrap().clone();`.
+
+Tested by: the `global-is-not-traced` compile test, for a `Global` field in a resource. No test
+checks for traced state behind an `std::rc::Rc`, or for a `jsg::Rc` used after it was moved out
+of a field; reviewers check those.
+
+### 3. Don't build on C++ JSG
+
+C++ JSG will be removed, so Rust JSG must not depend on it. New code in the C++ shims in
+`src/rust/jsg` calls V8 directly (`v8::TryCatch`, `v8::MaybeLocal`, `isolate->ThrowException`) and
+leaves decisions to Rust. Some existing shims still use C++ JSG. Those uses are listed in the
+allowlist described below, and are to be removed.
+
+Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from`),
+`JSG_TRY`/`JSG_CATCH`/`tryCatch`, `jsg::check`/`JsExceptionThrown`, `createTunneledException`,
+`makeInternalError`, `jsg::throw*`, `jsg::Data`/`jsg::Value`/`JsValue`/`JsRef`/`V8Ref`,
+`jsg::Ref`/`jsg::Promise`/`jsg::Function`/`jsg::Object`, `JSG_REQUIRE`/`JSG_ASSERT` and `liftKj`.
+`CONSTRUCTS` in `cpp-jsg-allowlist-test.py` has the full list. Using `Wrappable`,
+`GcVisitor`, `IsolateBase` or the module registries is fine for now, since Rust JSG still shares
+them with C++ JSG. So are thin calls into `src/workerd/io`.
+
+Bad: a shim that wraps a V8 call in `JSG_TRY(js) { ... } JSG_CATCH(error) {
+kj::throwException(createTunneledException(...)); }`. Fix: catch with a `v8::TryCatch` in the
+shim, return the exception through a `MaybeLocal` out-parameter, and build the `Error` in Rust.
+
+Tested by: `//src/rust/jsg:cpp-jsg-allowlist-test`. It counts these names in each shim file and
+compares the counts with `src/rust/jsg/cpp-jsg-allowlist.txt`, which lists the uses that exist
+today. A new use fails the test. When you remove a use, lower its count in the allowlist. The
+test only checks the files in `CPP_SHIMS` in `src/rust/jsg/BUILD.bazel`, which lists every `.c++`
+and `.h` file in `src/rust/jsg`. To check a shim file in another package, export it with
+`exports_files` and add it to `CPP_SHIMS`.
+
+### 4. Handles and locks stay in their scope
+
+- A `Local<'s, T>` must not outlive the `Lock<'s>` it came from. A `Lock<'s>`, or anything else
+  with the `'s` lifetime, must not be stored, outlive the callback, or be used inside a nested
+  callback or a later request.
+- A future passed to async I/O, and the callback that runs when it completes, must be
+  `'static`, because they run after the current callback has returned.
+- Use a `Global` for a handle that Rust holds outside a resource, and a `TracedGlobal` for a
+  resource field. Both can be dropped without the lock, and after the isolate is gone.
+
+Tested by: the compile tests in `src/rust/jsg-compile-tests` (`local-*`, `lock-*`, `callback-*`,
+`await-io-*`, `global-*`, `traced-global-*`) and the drop tests in
+`src/rust/jsg-test/tests/global.rs` and `traced_global_lifetime.rs`.
+
 ## Resources
 
 Rust resources integrate with V8's garbage collector through the existing C++ `Wrappable` infrastructure — the same GC system that C++ `jsg::Rc<T>` and `jsg::Object` use.
@@ -96,11 +211,11 @@ impl Task {
 ```
 
 Whatever holds the `jsg::Rc` must visit it in its `Traced::trace`, just as a resource visits
-its `jsg::Rc` fields.
+its `jsg::Rc` fields. When it later moves the `jsg::Rc` out of that field, for example to run
+the task, it must clone it before use.
 
-Don't give the callback the resource's state through an `std::rc::Rc` instead. Traced state
-(`TracedGlobal`, `jsg::Rc`) must have one GC owner, and a `TracedGlobal` that two owners trace
-can lose its value.
+Don't give the callback the resource's state through an `std::rc::Rc` instead. Both rules are
+explained in [Safety rules](#safety-rules), rule 2.
 
 The callback's `jsg::Rc` keeps the resource alive, even after JavaScript drops the resource.
 Cycles are fine if they go through a `TracedGlobal`: if the resource holds the callback in a
@@ -141,6 +256,7 @@ does for `&self` methods. A method that takes `this` has no Fast API callback.
 | `Cell<Option<jsg::v8::TracedGlobal<T>>>` | Yes — when `Some` | |
 | `jsg::Weak<T>` | No | Doesn't keep target alive |
 | `jsg::v8::Global<T>` | Compile error — no `Traced` impl | Use `TracedGlobal<T>` in resource fields |
+| `std::rc::Rc<T>` | Depends on `T` | Only for plain data; never around a `TracedGlobal` or `jsg::Rc` (Safety rules, rule 2) |
 | Any `T: Traced` | Depends on `T` | `#[jsg_resource]` calls `Traced::trace` on every field |
 
 - **`Cell<T>` for interior mutability**: `Traced::trace` takes `&self`. Fields that need to be mutated after construction (e.g. a callback set in a method) can use `Cell<T>`. `Cell<T>` implements `Traced` by reading through `as_ptr()` during single-threaded GC tracing.

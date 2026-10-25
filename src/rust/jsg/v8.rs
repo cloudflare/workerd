@@ -3801,6 +3801,14 @@ impl GcVisitor {
     /// Accepts `&TracedGlobal<T>` even though it mutates the handles. This is sound because GC
     /// tracing is always single-threaded within a V8 isolate, and `trace` is never
     /// re-entrant on the same object during a GC cycle; see also [`GlobalSlot`].
+    ///
+    /// # One owner
+    ///
+    /// The visit makes the handle strong if the parent has strong Rust references, and weak if
+    /// only the parent's wrapper keeps it alive. If two owners visit the same `TracedGlobal`, the
+    /// last visit wins, and the value can be collected while the other owner still uses it. So
+    /// a `TracedGlobal` must have exactly one GC owner, and must not be kept behind an
+    /// `std::rc::Rc`; see `README.md` §Safety rules, rule 2.
     pub fn visit_traced_global<T>(&mut self, global: &TracedGlobal<T>) {
         if global.state.is_closed() {
             // The isolate is being torn down, and its handles are left to `Dispose`, as those

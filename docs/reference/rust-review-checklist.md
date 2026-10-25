@@ -111,6 +111,34 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   that any resource holding a `Ref<T>` or `Nullable<Ref<T>>` to another resource is properly
   traced — missing traces cause use-after-free when the child is collected prematurely.
 
+### Rust JSG Safety Rules
+
+The rules, with reasons and examples, are in `src/rust/jsg/README.md` §Safety rules. Tests catch
+some violations, and the README says which. Reviewers flag these:
+
+- A shim, other than the `isolate_throw_*` shims, that calls `isolate->ThrowException` with no
+  `IsExecutionTerminating()` check first. `isolate_throw_*` already check, and so do
+  `Lock::throw_*` and `fast_api_throw_*`, which call them.
+- A `jsg::Error` from a call that ran JavaScript (`Function::call`, `Object::get`/`has`,
+  `Array::iterate`, a coercion) that is discarded with `.ok()` or `unwrap_or*`, or replaced with
+  `map_err` or a custom `Into<jsg::Error>`. It may be the termination or a pending exception;
+  it should be passed on with `?`, or caught with `Lock::try_catch`.
+- An empty result from an FFI shim that is treated as "terminating" without checking.
+- An `std::rc::Rc` around a `TracedGlobal`, a `jsg::Rc`, or a type holding them, even if it is
+  not shared yet. The fix is a `jsg::Rc` or `jsg::Weak` to the resource that owns the state,
+  such as a method's `this`.
+- A `jsg::Rc` moved out of a traced field (`Cell::take`, `Option::take`, `mem::replace`, popping
+  a traced `Vec`) and used after a call that can run JavaScript or allocate on the V8 heap,
+  without a `.clone()` first
+  ([#7976](https://github.com/cloudflare/workerd/issues/7976)).
+- A `jsg::v8::Global` inside a type with a hand-written `impl Traced`.
+- New C++ JSG (`jsg::Lock`, `JSG_TRY`/`JSG_CATCH`, `jsg::check`, `JsExceptionThrown`,
+  `createTunneledException`, `makeInternalError`, `jsg::Data`/`jsg::Value`) in a `.c++` or `.h`
+  file under `src/rust` that `//src/rust/jsg:cpp-jsg-allowlist-test` doesn't check. The test
+  only checks the files in `CPP_SHIMS` in `src/rust/jsg/BUILD.bazel`.
+- A `Lock<'s>` or `Local<'s>` that is stored or passed into a nested callback, or a future passed
+  to async I/O that isn't `'static`.
+
 ### Linting & Style
 
 - **Clippy** runs with **pedantic + nursery** lint groups. Run `just clippy <crate>` on all

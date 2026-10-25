@@ -80,6 +80,9 @@ mod ffi {
         #[expect(clippy::allow_attributes)] // Only used in tests, but #[expect(dead_code)] fails during test builds
         #[allow(dead_code)]
         pub unsafe fn request_gc(isolate: *mut Isolate, gc_type: GcType);
+        /// Requests a termination and runs JavaScript until V8 delivers it, so that the
+        /// termination exception is pending on return. See `terminate_and_deliver` in `ffi.h`.
+        pub unsafe fn terminate_and_deliver(isolate: *mut Isolate);
 
         /// Calls `callback` with the isolate unlocked (`v8::Unlocker`), then locks it again.
         #[expect(clippy::allow_attributes)]
@@ -363,6 +366,14 @@ impl Harness {
     pub fn request_minor_gc(lock: &mut jsg::Lock<'_>) {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe { ffi::request_gc(lock.isolate().as_ffi(), ffi::GcType::Minor) };
+    }
+
+    /// Terminates execution the way running out of CPU time does. On return the termination
+    /// exception is pending and `lock.is_execution_terminating()` is true. (`terminate_execution`
+    /// only requests a termination; V8 delivers it the next time JavaScript runs.)
+    pub fn terminate_and_deliver(lock: &mut jsg::Lock<'_>) {
+        // SAFETY: isolate is valid and locked, with a context entered (guaranteed by Lock).
+        unsafe { ffi::terminate_and_deliver(lock.isolate().as_ffi()) };
     }
 
     /// Runs `f` with the isolate unlocked, as code that runs on a thread without the isolate
