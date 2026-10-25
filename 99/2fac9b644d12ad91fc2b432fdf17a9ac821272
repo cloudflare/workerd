@@ -1,0 +1,25 @@
+.github/actions/setup-bazelflare/action.yml
+  s_1b9ab9fb100cf8::t_58db5759a16fcb 1-70
+.github/workflows/_bazel.yml
+  s_1b9ab9fb100cf8::t_15242a069c9a4d 44,132,134,136-138
+.github/workflows/test.yml
+  s_1b9ab9fb100cf8::t_b01265a29dee47 158-190
+build/ci.bazelrc
+  s_1b9ab9fb100cf8::t_9b669a8775b24f 104-107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "992fac9b644d12ad91fc2b432fdf17a9ac821272",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}
