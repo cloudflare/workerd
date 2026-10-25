@@ -1,0 +1,19 @@
+# The LLVM tools that Bazel's coverage collector runs over a test's profiles, from the toolchain
+# that built the code, for tests that the C++ toolchain doesn't give them to (see wd_test). A
+# toolchain without them (Xcode's has no llvm-cov) leaves them to the coverage config in .bazelrc,
+# which finds them on PATH.
+filegroup(
+    name = "coverage",
+    srcs = select({
+        "@bazel_tools//src/conditions:linux_x86_64": [
+            "@llvm_linux_x86_64//:llvm-cov",
+            "@llvm_linux_x86_64//:llvm-profdata",
+        ],
+        "@bazel_tools//src/conditions:linux_aarch64": [
+            "@llvm_linux_aarch64//:llvm-cov",
+            "@llvm_linux_aarch64//:llvm-profdata",
+        ],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+)

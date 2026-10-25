@@ -377,15 +377,13 @@ build:macos-cross-x86_64 --cpu=darwin_x86_64 --host_cpu=darwin_arm64 --platforms
 # Test performance is still very much satisfactory considering that emulation is being used here.
 build:macos-cross-x86_64 --test_timeout=1,30,60,240
 
-# On Linux, always link libc++ statically to avoid compatibility issues with different OS versions.
-# macOS links with dynamic libc++ by default, which has good backwards compatibility.
-# Drop default link flags, which include libstdc++ for Linux
-build:linux --features=-default_link_libs --host_features=-default_link_libs
-build:linux --cxxopt='-stdlib=libc++' --host_cxxopt='-stdlib=libc++'
-build:linux --linkopt='-stdlib=libc++' --host_linkopt='-stdlib=libc++'
-build:linux --linkopt='-l:libc++.a' --linkopt='-lm' --linkopt='-static-libgcc'
-# We don't expect to distribute host tools, no need to statically link libgcc or libc++
-build:linux --host_linkopt='-lc++' --host_linkopt='-lm'
+# On Linux, the toolchain is LLVM's own, over a pinned sysroot (build/deps/llvm.MODULE.bazel), and
+# nothing is taken from the host. It links libc++, libc++abi and libunwind statically, so binaries
+# depend only on glibc; macOS links with dynamic libc++, which has good backwards compatibility.
+build:linux --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
+# rules_python's default launcher runs on the host's python3; this one runs on the hermetic
+# interpreter.
+build:linux --@rules_python//python/config_settings:bootstrap_impl=script
 
 # On Linux, enable PIC. In macos pic is the default, and the objc_library rule does not work
 # correctly if we use this flag since it will not find the object files to include
@@ -398,8 +396,6 @@ build:linux --linkopt="-Wl,--gc-sections"
 build:linux --copt="-ffunction-sections" --host_copt="-ffunction-sections"
 build:linux --copt="-fdata-sections" --host_copt="-fdata-sections"
 
-# On Linux, use clang lld.
-build:linux --linkopt="-fuse-ld=lld"
 # Improve link performance by limiting the link stage to 8 threads – LLD link times see little if
 # any improvement beyond 8 threads (see https://reviews.llvm.org/D147493).
 build:linux --linkopt="-Wl,--threads=8"
@@ -539,8 +535,9 @@ build:coverage --experimental_use_llvm_covmap
 # experimental_generate_llvm_lcov tells collect_cc_coverage to use llvm-cov export to generate LCOV
 # format instead of just outputting raw profdata. LLVM_COV specifies the llvm-cov binary to use.
 build:coverage --experimental_generate_llvm_lcov
-# C++ tests get these from the C++ toolchain. A test that only runs an instrumented binary (every
-# wd_test runs workerd) does not, and without them the collector skips the binary's profile.
+# kj_test and wd_test override these with the C++ toolchain's tools (build/tools/llvm), as cc_test
+# gets them; Xcode's toolchain has no llvm-cov, so on macOS they come from PATH. Without them the
+# collector skips the binary's profile.
 build:coverage --test_env=GENERATE_LLVM_LCOV=1
 build:coverage --test_env=LLVM_COV=llvm-cov
 build:coverage --test_env=LLVM_PROFDATA=llvm-profdata

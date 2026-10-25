@@ -1,4 +1,5 @@
 load("@workerd//:build/lint_test.bzl", "lint_test")
+load("@workerd//build/tools/llvm:coverage.bzl", "COVERAGE_LLVM_TOOLS_ATTR", "coverage_llvm_tools")
 
 def wd_test(
         src,
@@ -306,6 +307,7 @@ def _wd_test_impl(ctx):
         if ctx.attr.python_snapshot_test:
             environment["PYTHON_SAVE_SNAPSHOT_ARGS"] = "--python-load-snapshot load_snapshot.bin"
         runfiles = runfiles.merge(ctx.runfiles(symlinks = {"load_snapshot.bin": ctx.file.load_snapshot}))
+    runfiles = runfiles.merge(coverage_llvm_tools(ctx, executable, environment))
 
     return [
         DefaultInfo(
@@ -321,7 +323,7 @@ def _wd_test_impl(ctx):
 _wd_test = rule(
     implementation = _wd_test_impl,
     test = True,
-    attrs = {
+    attrs = COVERAGE_LLVM_TOOLS_ATTR | {
         # Implicit dependencies used by Bazel to generate coverage reports.
         "_lcov_merger": attr.label(
             default = configuration_field(fragment = "coverage", name = "output_generator"),
