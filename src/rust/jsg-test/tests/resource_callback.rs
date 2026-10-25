@@ -591,6 +591,8 @@ fn method_can_be_reentered() {
 struct CallingResource {
     /// Set when a call fails with an error that stands for a pending exception.
     saw_pending: Cell<bool>,
+    /// An error kept by `catch_and_save`.
+    saved: Cell<Option<jsg::Error>>,
 }
 
 impl CallingResource {
@@ -656,6 +658,39 @@ impl CallingResource {
         let _ = Self::function(callback)?.call::<v8::Local<v8::Value>>(lock, None, &[]);
         Err(jsg::Error::new_type_error("replaced"))
     }
+
+    /// Calls `callback` in `try_catch`, keeping the error the call failed with after
+    /// `try_catch` caught its exception.
+    #[jsg_method]
+    pub fn catch_and_save<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        callback: v8::Local<'s, v8::Value>,
+    ) -> Result<(), jsg::Error> {
+        let callback = Self::function(callback)?;
+        let _ = lock.try_catch(|lock| {
+            let result = callback.call::<v8::Local<v8::Value>>(lock, None, &[]);
+            if let Err(err) = &result {
+                self.saved.set(Some(err.clone()));
+            }
+            result
+        })?;
+        Ok(())
+    }
+
+    /// Fails with the error `catch_and_save` kept.
+    #[jsg_method]
+    pub fn throw_saved(&self) -> Result<(), jsg::Error> {
+        Err(self.saved.take().unwrap())
+    }
+
+    /// Fails with the error `catch_and_save` kept in `try_catch`, and returns whether
+    /// `try_catch` caught an exception.
+    #[jsg_method]
+    pub fn catch_saved(&self, lock: &mut jsg::Lock) -> Result<bool, jsg::Error> {
+        let saved = self.saved.take().unwrap();
+        Ok(lock.try_catch(|_| Err::<(), _>(saved))?.is_err())
+    }
 }
 
 fn calling_resource(
@@ -664,6 +699,7 @@ fn calling_resource(
 ) -> jsg::Rc<CallingResource> {
     let resource = jsg::Rc::new(CallingResource {
         saw_pending: Cell::new(false),
+        saved: Cell::new(None),
     });
     ctx.set_global(lock, "obj", resource.clone());
     ctx.set_global(lock, "panicker", jsg::Rc::new(PanicResource));
@@ -816,6 +852,33 @@ fn error_replaces_pending_exception() {
              catch (e) { e.message }",
         );
         assert_eq!(message.unwrap(), "replaced");
+        Ok(())
+    });
+}
+
+/// An error for a pending exception, kept after `try_catch` caught the exception, is thrown
+/// as an internal error rather than as nothing.
+#[test]
+fn pending_error_kept_after_exception_was_caught_throws_internal_error() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = calling_resource(lock, ctx);
+        let message = ctx.eval::<String>(
+            lock,
+            "obj.catchAndSave(() => { throw new Error('boom'); });
+             try { obj.throwSaved(); 'nothing thrown' } catch (e) { e.message }",
+        );
+        assert!(
+            message
+                .as_ref()
+                .is_ok_and(|m| m.starts_with("internal error; reference = ")),
+            "{message:?}"
+        );
+
+        ctx.eval::<bool>(lock, "obj.catchAndSave(() => { throw 'boom'; }); true")
+            .unwrap();
+        assert!(ctx.eval::<bool>(lock, "obj.catchSaved()").unwrap());
+        assert!(resource.saved.take().is_none());
         Ok(())
     });
 }

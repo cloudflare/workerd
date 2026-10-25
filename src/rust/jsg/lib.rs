@@ -291,7 +291,9 @@ impl Error {
     /// as C++ JSG's `JsExceptionThrown` does. `name` and `message` don't describe the exception;
     /// to inspect it, catch it with [`Lock::try_catch`]. Code that gets such an error must not
     /// call into JavaScript, and should return it; converting it to another error and throwing
-    /// that replaces the exception (but never a termination).
+    /// that replaces the exception (but never a termination). The error does not track its
+    /// exception: kept after the exception was caught or propagated, as a clone can be, and
+    /// thrown with no exception pending, it becomes an internal error.
     #[must_use]
     pub const fn is_pending(&self) -> bool {
         self.pending
@@ -818,12 +820,28 @@ impl<'s> Lock<'s> {
     ///
     /// Throws nothing for an error that stands for a pending exception (see
     /// [`Error::is_pending`]), which then keeps propagating, nor while execution is terminating,
-    /// so that the termination is never replaced by a catchable exception. Otherwise, if
+    /// so that the termination is never replaced by a catchable exception. Such an error can
+    /// outlive its exception, as a clone kept after [`Lock::try_catch`] caught it; with no
+    /// exception pending, it is thrown as an internal error. Otherwise, if
     /// `err.is_internal` is set, the message is redacted (via
     /// `throw_internal_error()`) rather than thrown verbatim, matching how
     /// C++ `decodeTunneledException()` handles `isInternal` KJ exceptions.
     pub fn throw_exception(&mut self, err: &Error) {
         if err.is_pending() {
+            let isolate = self.isolate().as_ffi();
+            // SAFETY: isolate is valid and locked (guaranteed by Lock).
+            if unsafe {
+                v8::ffi::isolate_is_execution_terminating(isolate)
+                    || v8::ffi::isolate_has_pending_exception(isolate)
+            } {
+                return;
+            }
+            // Throwing nothing would return to JavaScript with neither a result nor an
+            // exception.
+            self.throw_internal_error(
+                "a jsg::Error for a pending JavaScript exception was thrown with no exception \
+                 pending",
+            );
             return;
         }
         if err.is_internal {

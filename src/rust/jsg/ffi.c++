@@ -1408,6 +1408,10 @@ bool isolate_is_execution_terminating(Isolate* isolate) {
   return isolate->IsExecutionTerminating();
 }
 
+bool isolate_has_pending_exception(Isolate* isolate) {
+  return isolate->HasPendingException();
+}
+
 void ignore_leak(size_t ptr) {
 #if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
   __lsan_ignore_object(reinterpret_cast<const void*>(ptr));
