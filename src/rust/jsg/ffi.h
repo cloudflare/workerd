@@ -211,6 +211,10 @@ double local_date_value_of(const Local& value);
 // Returns the call's result, or none if it threw, leaving the exception pending.
 MaybeLocal local_function_call(
     Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args);
+// Creates a function that calls `callback` with an opaque wrapper of `wrappable` as its data.
+// Throws if V8 could not create the wrapper and returns empty if it could not create the
+// function, both only when execution is terminating.
+MaybeLocal function_new(Isolate* isolate, size_t callback, kj::Rc<Wrappable> wrappable);
 
 // Local<Object>
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);
@@ -334,6 +338,9 @@ size_t fci_get_length(FunctionCallbackInfo* args);
 bool fci_is_construct_call(FunctionCallbackInfo* args);
 Local fci_get_arg(FunctionCallbackInfo* args, size_t index);
 void fci_set_return_value(FunctionCallbackInfo* args, Local value);
+// The Rust Wrappable whose opaque wrapper is the running function's data, as function_new()
+// attaches it; none if the data is anything else.
+kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args);
 
 // PropertyCallbackInfo, for native data properties
 Isolate* pci_get_isolate(PropertyCallbackInfo* info);

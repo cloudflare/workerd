@@ -11,6 +11,7 @@ mod date_bigint;
 mod eval;
 mod fast_api;
 mod function;
+mod function_new;
 mod gc;
 mod global;
 mod harness;

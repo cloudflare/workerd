@@ -105,6 +105,12 @@ mod ffi {
         #[allow(dead_code)]
         pub unsafe fn create_cpp_tagged_object(isolate: *mut Isolate) -> Local;
 
+        /// Calls a function that C++ JSG wrapped and returns whether
+        /// `jsg::v8::ffi::fci_get_data_wrappable` finds a Rust Wrappable in its data.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn cpp_wrapped_function_data_is_rust_wrappable(isolate: *mut Isolate) -> bool;
+
         /// Returns an empty `v8::MaybeLocal`.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
@@ -446,6 +452,14 @@ impl Harness {
             let local = ffi::create_cpp_tagged_object(isolate.as_ffi());
             v8::Local::from_ffi(local)
         }
+    }
+
+    /// Calls a function that C++ JSG wrapped, whose data is an opaque wrapper like that of a
+    /// `v8::Function::new` function, and returns whether the data is taken for a Rust Wrappable.
+    pub fn cpp_wrapped_function_data_is_rust_wrappable(lock: &mut jsg::Lock<'_>) -> bool {
+        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
+        // open.
+        unsafe { ffi::cpp_wrapped_function_data_is_rust_wrappable(lock.isolate().as_ffi()) }
     }
 }
 
