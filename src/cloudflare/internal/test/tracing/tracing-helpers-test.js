@@ -553,3 +553,86 @@ export const startActiveSpanSyncThrow = {
     );
   },
 };
+
+// enterSpan records an error that escapes its callback on the span. These cover what syncError
+// and asyncError (through withSpan) don't: calling ctx.tracing.enterSpan directly, thrown values
+// that aren't Errors, an error whose properties throw, and a callback that set the status itself.
+export const enterSpanRejects = {
+  async test(ctrl, env, ctx) {
+    const error = new TypeError('enterSpan rejected');
+    await assert.rejects(
+      ctx.tracing.enterSpan('enter-span-reject-op', async (span) => {
+        span.setAttribute('test', 'enterSpanRejects');
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        throw error;
+      }),
+      (e) => e === error
+    );
+  },
+};
+
+export const enterSpanThrowsNonError = {
+  async test(ctrl, env, ctx) {
+    for (const [name, value] of [
+      ['enter-span-string-op', 'thrown string'],
+      ['enter-span-number-op', 42],
+    ]) {
+      assert.throws(
+        () =>
+          ctx.tracing.enterSpan(name, (span) => {
+            span.setAttribute('test', 'enterSpanThrowsNonError');
+            throw value;
+          }),
+        (e) => e === value
+      );
+    }
+  },
+};
+
+export const enterSpanErrorPropertiesThrow = {
+  async test(ctrl, env, ctx) {
+    // The span can't describe this error, but the error still propagates unchanged.
+    const error = new Error('unreadable');
+    Object.defineProperty(error, 'message', {
+      get() {
+        throw new Error('message getter failed');
+      },
+    });
+    assert.throws(
+      () =>
+        ctx.tracing.enterSpan('enter-span-unreadable-op', (span) => {
+          span.setAttribute('test', 'enterSpanErrorPropertiesThrow');
+          throw error;
+        }),
+      (e) => e === error
+    );
+  },
+};
+
+export const enterSpanStatusSetByCallback = {
+  async test(ctrl, env, ctx) {
+    // A callback that records its error and sets the status itself, as OpenTelemetry's docs show,
+    // doesn't get a second exception, and keeps its status message.
+    assert.throws(
+      () =>
+        ctx.tracing.enterSpan('enter-span-handled-op', (span) => {
+          span.setAttribute('test', 'enterSpanStatusSetByCallback');
+          const error = new Error('handled');
+          span.recordException(error);
+          span.setStatus({ code: 'error', message: 'handled by callback' });
+          throw error;
+        }),
+      { message: 'handled' }
+    );
+    // An "ok" status is left alone too.
+    assert.throws(
+      () =>
+        ctx.tracing.enterSpan('enter-span-ok-op', (span) => {
+          span.setAttribute('test', 'enterSpanStatusSetByCallback');
+          span.setStatus({ code: 'ok' });
+          throw new Error('after ok');
+        }),
+      { message: 'after ok' }
+    );
+  },
+};
