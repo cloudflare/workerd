@@ -177,9 +177,9 @@ class FastApiPreamble {
 
   // The signature heuristic is advisory, not enforced: a callback that declines `Lock&` but
   // reaches V8 anyway — say through `Lock::current()` — allocates into whatever scope is still
-  // open further out and leaks there quietly. Sealing makes the first such handle a fatal
-  // instead. It costs about what the scope it replaces costs, so it is debug-only. The throwing
-  // path is unaffected: `liftKj` opens its own nested scope.
+  // open further out and leaks there quietly. Sealing makes the first such handle a fatal error.
+  // It costs about what a `HandleScope` would, so it is debug-only. The throwing path is
+  // unaffected: `liftKj` opens its own nested scope.
 #ifdef KJ_DEBUG
   using EmptyScope = v8::SealHandleScope;
 #else
