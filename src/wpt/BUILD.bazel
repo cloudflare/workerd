@@ -61,6 +61,7 @@ wpt_test(
     size = "large",
     compat_flags = ["strip_bom_in_read_all_text"],
     config = "fetch/api-test.ts",
+    served_wpt_files = ["@wpt//:xhr/resources/utf16-bom.json"],
     start_server = True,
     target_compatible_with = select({
         # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
@@ -80,6 +81,7 @@ wpt_test(
         "typescript_implemented_streams",
     ],
     config = "fetch/api-test-ts.ts",
+    served_wpt_files = ["@wpt//:xhr/resources/utf16-bom.json"],
     start_server = True,
     target_compatible_with = select({
         # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
@@ -106,6 +108,7 @@ wpt_test(
 wpt_test(
     name = "compression",
     config = "compression-test.ts",
+    served_wpt_files = ["@wpt//:media/test-av-384k-44100Hz-1ch-320x240-30fps-10kfr.webm"],
     start_server = True,
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],
@@ -145,6 +148,7 @@ wpt_test(
     autogates = ["workerd-autogate-per-isolate-javascript-bootstrap"],
     compat_flags = ["typescript_implemented_streams"],
     config = "compression-test-ts.ts",
+    served_wpt_files = ["@wpt//:media/test-av-384k-44100Hz-1ch-320x240-30fps-10kfr.webm"],
     start_server = True,
     target_compatible_with = select({
         "@platforms//os:windows": ["@platforms//:incompatible"],

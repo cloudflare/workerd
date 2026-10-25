@@ -26,7 +26,7 @@ PORT_BINDINGS = [
 ### (Invokes wpt_js_test_gen, wpt_wd_test_gen and wd_test to assemble a complete test suite.)
 ### -----------------------------------------------------------------------------------------
 
-def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, include_tentative = False, extra_wpt_directories = [], extra_wpt_files = [], tags = [], **kwargs):
+def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, include_tentative = False, extra_wpt_directories = [], extra_wpt_files = [], served_wpt_files = [], tags = [], **kwargs):
     """
     Main entry point.
 
@@ -42,6 +42,9 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
     extra_wpt_files lists individual WPT .wasm resources that tests fetch by absolute path (e.g.
     `fetch('/wasm/incrementer.wasm')`). They are bound under that absolute path as data, which the
     harness's fetch() serves when no wptserve sidecar runs.
+
+    served_wpt_files lists files outside the test's directories that tests fetch from the wptserve
+    sidecar (start_server), which serves the WPT files in the test's runfiles.
     """
 
     js_test_gen_rule = "{}@_wpt_js_test_gen".format(name)
@@ -92,7 +95,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         wpt_common,  # i.e. "wpt/common/**"
         wpt_resources,  # i.e. "wpt/resources/**"
         wpt_interfaces,  # i.e. "wpt/interfaces/**"
-    ] + [d for d in extra_wpt_directories if d != wpt_directory] + extra_wpt_files
+    ] + [d for d in extra_wpt_directories if d != wpt_directory] + extra_wpt_files + served_wpt_files
 
     wd_test(
         name = "{}".format(name),
@@ -112,8 +115,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         # blobs emitted by the WPT harness and break tools/cross/wpt_logs.py parsing.
         predictable = False,
         data = data,
-        # WPT tests are not supported in RBE so far
-        tags = tags + ["no-remote-exec"],
+        tags = tags,
         **kwargs
     )
 
