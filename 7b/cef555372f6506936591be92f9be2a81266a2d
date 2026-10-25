@@ -1,0 +1,21 @@
+.github/workflows/_bazel.yml
+  s_1b9ab9fb100cf8::t_121b94540cbb70 126,128
+.github/workflows/test.yml
+  s_1b9ab9fb100cf8::t_b673287bc4f658 164,202
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7bcef555372f6506936591be92f9be2a81266a2d",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}
