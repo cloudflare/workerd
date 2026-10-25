@@ -125,6 +125,19 @@ mod ffi {
 
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
+
+        /// Calls `callback` in a new C++ `jsg::AsyncContextFrame` that stores `value` under the
+        /// tests' storage key, as `AsyncLocalStorage.run()` does.
+        pub unsafe fn run_in_async_context(
+            isolate: *mut Isolate,
+            value: Local,
+            data: usize, /* callback */
+            callback: unsafe fn(usize /* callback */),
+        );
+
+        /// The value the current async context frame stores under the tests' storage key, or
+        /// empty if it stores none.
+        pub unsafe fn async_context_value(isolate: *mut Isolate) -> MaybeLocal;
     }
 }
 
@@ -461,6 +474,64 @@ impl Harness {
         // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
         // open.
         unsafe { ffi::cpp_wrapped_function_data_is_rust_wrappable(lock.isolate().as_ffi()) }
+    }
+
+    /// Runs `f` in a new C++ `jsg::AsyncContextFrame` that stores `value` under the tests'
+    /// storage key, as `AsyncLocalStorage.run()` does, and makes the previous frame current
+    /// again afterwards. [`Harness::async_context_value`] reads the value back.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `f` panics, once the previous frame is current again.
+    pub fn run_in_async_context<'s, F: FnOnce(&mut jsg::Lock<'s>) -> R, R>(
+        lock: &mut jsg::Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+        f: F,
+    ) -> R {
+        struct Call<'a, 's, F, R> {
+            lock: &'a mut jsg::Lock<'s>,
+            f: Option<F>,
+            result: Option<Result<R, Box<dyn std::any::Any + Send>>>,
+        }
+
+        fn trampoline<'s, F: FnOnce(&mut jsg::Lock<'s>) -> R, R>(data: usize) {
+            // SAFETY: data was cast from &raw mut Call in run_in_async_context below.
+            let call = unsafe { &mut *(data as *mut Call<'_, 's, F, R>) };
+            let Some(f) = call.f.take() else {
+                return;
+            };
+            let lock = &mut *call.lock;
+            call.result = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                || f(lock),
+            )));
+        }
+
+        let isolate = lock.isolate().as_ffi();
+        // SAFETY: `value` is valid in the lock's scope.
+        let value = unsafe { value.into_ffi() };
+        let mut call = Call::<F, R> {
+            lock,
+            f: Some(f),
+            result: None,
+        };
+        // SAFETY: the lock keeps the isolate locked with a context entered and a scope open, and
+        // C++ opens no scope around the callback, so the lock stays valid in it; `call` outlives
+        // the call.
+        unsafe {
+            ffi::run_in_async_context(isolate, value, &raw mut call as usize, trampoline::<F, R>);
+        }
+        match call.result.expect("the callback ran") {
+            Ok(result) => result,
+            Err(payload) => std::panic::resume_unwind(payload),
+        }
+    }
+
+    /// The value that the current async context frame stores under the tests' storage key (see
+    /// [`Harness::run_in_async_context`]), or `None` in the root frame.
+    pub fn async_context_value<'s>(lock: &mut jsg::Lock<'s>) -> Option<v8::Local<'s, v8::Value>> {
+        // SAFETY: the lock keeps the isolate locked with a scope open, which the value belongs
+        // to.
+        unsafe { v8::Local::from_ffi_maybe(ffi::async_context_value(lock.isolate().as_ffi())) }
     }
 }
 

@@ -8,6 +8,7 @@ use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
+mod async_context;
 pub mod fast_api;
 pub mod feature_flags;
 mod isolate_state;
@@ -21,6 +22,8 @@ mod scope;
 pub mod v8;
 mod wrappable;
 
+pub use async_context::AsyncContextFrame;
+pub use async_context::TracedAsyncContextFrame;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
 pub use lenient::Lenient;

@@ -99,6 +99,17 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
 // Returns whether `a` and `b` belong to the same v8::IsolateGroup.
 bool isolates_share_group(Isolate* a, Isolate* b);
 
+// Calls `callback` in a new C++ jsg::AsyncContextFrame that stores `value` under the tests'
+// storage key, as AsyncLocalStorage.run() does, then makes the previous frame current again.
+void run_in_async_context(Isolate* isolate,
+    ::workerd::rust::jsg::Local value,
+    size_t data,
+    ::rust::Fn<void(size_t)> callback);
+
+// The value the current async context frame stores under the tests' storage key, or empty in the
+// root frame or a frame that stores none.
+::workerd::rust::jsg::MaybeLocal async_context_value(Isolate* isolate);
+
 }  // namespace rust::jsg_test
 
 }  // namespace workerd

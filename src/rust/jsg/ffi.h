@@ -445,6 +445,11 @@ void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage)
 void isolate_terminate_execution(Isolate* isolate);
 bool isolate_is_execution_terminating(Isolate* isolate);
 bool isolate_has_pending_exception(Isolate* isolate);
+// The isolate's continuation-preserved embedder data, which holds the current async context
+// frame: `undefined` for the root frame, otherwise the frame's opaque JS wrapper (see
+// workerd/jsg/async-context.h). V8 carries it into promise reactions. Neither runs JavaScript.
+Local isolate_get_continuation_preserved_embedder_data(Isolate* isolate);
+void isolate_set_continuation_preserved_embedder_data(Isolate* isolate, Local value);
 bool isolate_is_locked(Isolate* isolate);
 bool isolate_in_context(Isolate* isolate);
 void ignore_leak(size_t ptr);

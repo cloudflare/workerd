@@ -636,6 +636,13 @@ pub mod ffi {
         pub unsafe fn isolate_terminate_execution(isolate: *mut Isolate);
         pub unsafe fn isolate_is_execution_terminating(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_has_pending_exception(isolate: *mut Isolate) -> bool;
+        pub unsafe fn isolate_get_continuation_preserved_embedder_data(
+            isolate: *mut Isolate,
+        ) -> Local;
+        pub unsafe fn isolate_set_continuation_preserved_embedder_data(
+            isolate: *mut Isolate,
+            value: Local,
+        );
         pub unsafe fn isolate_is_locked(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_in_context(isolate: *mut Isolate) -> bool;
 

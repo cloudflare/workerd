@@ -1522,6 +1522,14 @@ bool isolate_has_pending_exception(Isolate* isolate) {
   return isolate->HasPendingException();
 }
 
+Local isolate_get_continuation_preserved_embedder_data(Isolate* isolate) {
+  return to_ffi(isolate->GetContinuationPreservedEmbedderData().As<v8::Value>());
+}
+
+void isolate_set_continuation_preserved_embedder_data(Isolate* isolate, Local value) {
+  isolate->SetContinuationPreservedEmbedderData(local_from_ffi<v8::Value>(kj::mv(value)));
+}
+
 void ignore_leak(size_t ptr) {
 #if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
   __lsan_ignore_object(reinterpret_cast<const void*>(ptr));

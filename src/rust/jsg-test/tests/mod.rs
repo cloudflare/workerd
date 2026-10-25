@@ -4,6 +4,7 @@
 
 mod argument_errors;
 mod arrays;
+mod async_context;
 mod buffer_types;
 mod coercion_safety;
 mod collections_gc;
