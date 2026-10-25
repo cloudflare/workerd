@@ -1,0 +1,29 @@
+.bazelrc
+  s_1b9ab9fb100cf8::t_512f7a7b941863 538-540,636-639
+build/ci.bazelrc
+  s_1b9ab9fb100cf8::t_55cbf75e125f81 101-108,113-114,117-119
+build/tools/llvm/BUILD.bazel
+  s_1b9ab9fb100cf8::t_42cc07592e7945 1-19
+build/wd_test.bzl
+  s_1b9ab9fb100cf8::t_2b698bbcf1a323 311-316,344-347
+.github/workflows/coverage.yml
+  s_1b9ab9fb100cf8::t_8c78a6c95b57bc 28-30,42
+.github/workflows/test.yml
+  s_1b9ab9fb100cf8::t_8a2fa9e674103c 184-187,195-196,198-200,206-207,209
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b8f3dc6ae57d0f00777c0d3e7a2b35df8fcc3653",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}
