@@ -202,7 +202,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<ExecInspectResponse> inspectExec(kj::StringPtr execId);
   // Resizes the TTY of a running PTY exec to the given dimensions via Docker's resize endpoint.
   kj::Promise<void> resizeExec(kj::StringPtr execId, uint16_t cols, uint16_t rows);
-  kj::Promise<void> runSimpleExec(kj::ArrayPtr<const kj::String> cmd);
+  // Runs `cmd` in the container as a detached helper exec and returns its exit code once it ends.
+  kj::Promise<int32_t> runSimpleExec(kj::ArrayPtr<const kj::String> cmd);
   kj::Promise<void> startContainer();
   kj::Promise<void> stopContainer();
   kj::Promise<void> killContainer(uint32_t signal);
