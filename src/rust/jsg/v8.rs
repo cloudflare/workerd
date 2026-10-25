@@ -293,6 +293,8 @@ pub mod ffi {
         pub unsafe fn local_is_function(value: &Local) -> bool;
         pub unsafe fn local_is_symbol(value: &Local) -> bool;
         pub unsafe fn local_is_name(value: &Local) -> bool;
+        pub unsafe fn local_is_big_int(value: &Local) -> bool;
+        pub unsafe fn local_is_date(value: &Local) -> bool;
         pub unsafe fn local_type_of(isolate: *mut Isolate, value: &Local) -> String;
 
         // Local<String>
@@ -362,13 +364,18 @@ pub mod ffi {
         ) -> Local;
         pub unsafe fn local_symbol_description(isolate: *mut Isolate, value: &Local) -> MaybeLocal;
 
+        // Local<BigInt>
+        pub unsafe fn local_big_int_int64_value(value: &Local, lossless: &mut bool) -> i64;
+
+        // Local<Date>
+        pub unsafe fn local_date_value_of(value: &Local) -> f64;
+
         // Local<Function>
         pub unsafe fn local_function_call(
             isolate: *mut Isolate,
             function: &Local,
             recv: &Local,
             args: &[Local],
-            exception: &mut MaybeLocal,
         ) -> MaybeLocal;
 
         // Local<Object>
@@ -378,18 +385,15 @@ pub mod ffi {
             key: &str,
             value: Local,
         );
-        // Fail if a getter or proxy trap throws. Called through `catching()`.
         pub unsafe fn local_object_has_property(
             isolate: *mut Isolate,
             object: &Local,
             key: &str,
-            exception: &mut MaybeLocal,
         ) -> Result<bool>;
         pub unsafe fn local_object_get_property(
             isolate: *mut Isolate,
             object: &Local,
             key: &str,
-            exception: &mut MaybeLocal,
         ) -> Result<Local>;
 
         // Local<Array>
@@ -401,12 +405,12 @@ pub mod ffi {
             index: u32,
             value: Local,
         );
-        // Fallible: KJ_REQUIREs the value is an array, and fails if a proxy trap or getter
-        // throws while an element is read. Called through `catching()`.
+        // Fallible: KJ_REQUIREs the value is an array, and tunnels any JS exception
+        // thrown by a proxy trap/getter encountered while iterating elements. See
+        // "Unwrappers" below.
         pub unsafe fn local_array_iterate(
             isolate: *mut Isolate,
             value: Local,
-            exception: &mut MaybeLocal,
         ) -> Result<Vec<Global>>;
 
         // Local<TypedArray>
@@ -484,19 +488,10 @@ pub mod ffi {
         // from V8 data, or KJ_REQUIRE) MUST return Result<T>: workerd-cxx then
         // catches the throw in C++ instead of aborting across the nounwind FFI
         // frame. Shims that provably can't throw stay bare (see unwrap_boolean).
-        // Coercion runs JavaScript, so these two are called through `catching()`.
-        pub unsafe fn unwrap_string(
-            isolate: *mut Isolate,
-            value: Local,
-            exception: &mut MaybeLocal,
-        ) -> Result<String>;
+        pub unsafe fn unwrap_string(isolate: *mut Isolate, value: Local) -> Result<String>;
         // Infallible: ToBoolean can't throw and builds no rust::String/Vec.
         pub unsafe fn unwrap_boolean(isolate: *mut Isolate, value: Local) -> bool;
-        pub unsafe fn unwrap_number(
-            isolate: *mut Isolate,
-            value: Local,
-            exception: &mut MaybeLocal,
-        ) -> Result<f64>;
+        pub unsafe fn unwrap_number(isolate: *mut Isolate, value: Local) -> Result<f64>;
         pub unsafe fn unwrap_uint8_array(isolate: *mut Isolate, value: Local) -> Result<Vec<u8>>;
         pub unsafe fn unwrap_uint16_array(isolate: *mut Isolate, value: Local) -> Result<Vec<u16>>;
         pub unsafe fn unwrap_uint32_array(isolate: *mut Isolate, value: Local) -> Result<Vec<u32>>;
@@ -562,14 +557,22 @@ pub mod ffi {
             data: *const u8,
             length: i32,
         ) -> Local;
-        pub unsafe fn exception_describe(isolate: *mut Isolate, exception: &Local) -> String;
+
+        // TryCatch
+        pub unsafe fn isolate_try_catch(
+            isolate: *mut Isolate,
+            data: usize,
+            callback: unsafe fn(usize) -> bool,
+            exception: &mut MaybeLocal,
+        );
 
         // Isolate
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
         pub unsafe fn isolate_throw_error(isolate: *mut Isolate, message: &str);
         pub unsafe fn isolate_throw_internal_error(isolate: *mut Isolate, internal_message: &str);
-        pub unsafe fn isolate_is_execution_terminating(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_terminate_execution(isolate: *mut Isolate);
+        pub unsafe fn isolate_is_execution_terminating(isolate: *mut Isolate) -> bool;
+        pub unsafe fn isolate_has_pending_exception(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_is_locked(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_in_context(isolate: *mut Isolate) -> bool;
 
@@ -683,6 +686,13 @@ pub mod ffi {
             constructor: &Global, /* v8::Global<FunctionTemplate> */
         ) -> Local /* v8::Local<Function> */;
 
+        unsafe fn function_template_set_nested_type(
+            isolate: *mut Isolate,
+            constructor: &Global, /* v8::Global<FunctionTemplate> */
+            name: &str,
+            nested: &Global, /* v8::Global<FunctionTemplate> */
+        );
+
         pub unsafe fn utf8_value_new(isolate: *mut Isolate, value: Local) -> Utf8Value;
         pub unsafe fn utf8_value_drop(value: Utf8Value);
         pub unsafe fn utf8_value_length(value: &Utf8Value) -> usize;
@@ -747,6 +757,12 @@ pub struct String;
 /// Marker for `v8::Symbol` handles.
 #[derive(Debug)]
 pub struct Symbol;
+/// Marker for `v8::BigInt` handles.
+#[derive(Debug)]
+pub struct BigInt;
+/// Marker for `v8::Date` handles.
+#[derive(Debug)]
+pub struct Date;
 
 impl String {
     /// Maximum length of a V8 string in UTF-16 code units.
@@ -1440,6 +1456,22 @@ impl<'s, T> Local<'s, T> {
         unsafe { ffi::local_is_name(self.raw()) }
     }
 
+    /// Returns true if the value is a JavaScript `BigInt`.
+    ///
+    /// Corresponds to `v8::Value::IsBigInt()`.
+    pub fn is_big_int(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_big_int(self.raw()) }
+    }
+
+    /// Returns true if the value is a JavaScript `Date`.
+    ///
+    /// Corresponds to `v8::Value::IsDate()`.
+    pub fn is_date(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_date(self.raw()) }
+    }
+
     /// Returns the JavaScript type of the underlying value as a string.
     ///
     /// Uses V8's native `TypeOf` method which returns the same result as
@@ -1492,6 +1524,8 @@ impl_as!(Array, is_array);
 impl_as!(String, is_string);
 impl_as!(Symbol, is_symbol);
 impl_as!(Name, is_name);
+impl_as!(BigInt, is_big_int);
+impl_as!(Date, is_date);
 impl_as!(ArrayBuffer, is_array_buffer);
 impl_as!(ArrayBufferView, is_array_buffer_view);
 
@@ -1524,17 +1558,6 @@ impl PartialEq for Local<'_, String> {
 
 impl Eq for Local<'_, String> {}
 
-impl<'s> Local<'s, Value> {
-    /// Describes this value, thrown as an exception, without running JavaScript: as
-    /// `<name>: <message>` for an error. Empty if V8 cannot describe it.
-    pub(crate) fn describe(self, lock: &mut Lock<'s>) -> std::string::String {
-        self.debug_assert_isolate(lock);
-        // SAFETY: lock guarantees the isolate is locked and a HandleScope is active; self is a
-        // valid handle.
-        unsafe { ffi::exception_describe(lock.isolate().as_ffi(), self.raw()) }
-    }
-}
-
 impl<'s> Local<'s, Function> {
     /// Calls this function and converts the result via [`FromJS`].
     ///
@@ -1545,11 +1568,14 @@ impl<'s> Local<'s, Function> {
     ///
     /// # Errors
     ///
-    /// If the function throws, returns an [`Error`] holding the exception, which
-    /// [`Lock::throw_exception`] rethrows unchanged, so that returning the error from a callback
-    /// propagates the exception to its caller as C++ JSG does (but reported at the rethrow; see
-    /// [`Error::from_exception`]). If execution is terminating,
-    /// returns [`Error::terminated`]. Also fails if the result does not convert to `R`.
+    /// If the function throws, or execution is terminating (then without calling it), the
+    /// exception stays pending and this
+    /// returns an error for which [`Error::is_pending`] is true. [`Lock::throw_exception`] throws
+    /// nothing for it, so
+    /// returning it from a callback propagates the exception to the callback's JavaScript caller,
+    /// as C++ JSG does. Don't call into JavaScript after such an error; to handle the exception
+    /// instead, make the call in [`Lock::try_catch`]. Also fails if the result does not convert
+    /// to `R`.
     ///
     /// # Example
     ///
@@ -1571,53 +1597,27 @@ impl<'s> Local<'s, Function> {
             arg.debug_assert_isolate(lock);
         }
 
-        let mut exception = ffi::MaybeLocal { ptr: 0 };
+        // Calling into V8 while execution is terminating would clear the termination.
+        // SAFETY: lock guarantees the isolate is locked.
+        if unsafe { ffi::isolate_is_execution_terminating(lock.isolate().as_ffi()) } {
+            return Err(Error::pending());
+        }
         // SAFETY: lock guarantees the isolate is locked and a HandleScope is active.
-        // self is a valid Local<Function>; recv and args are valid Local handles. The handles
-        // the call returns belong to the lock's scope.
-        let (result, exception) = unsafe {
-            let result = ffi::local_function_call(
+        // self is a valid Local<Function>; recv and args are valid Local handles. The result
+        // belongs to the lock's scope.
+        let result = unsafe {
+            Local::from_ffi_maybe(ffi::local_function_call(
                 lock.isolate().as_ffi(),
                 self.raw(),
                 recv.raw(),
                 Local::raw_slice(args),
-                &mut exception,
-            );
-            (
-                Local::from_ffi_maybe(result),
-                Local::<Value>::from_ffi_maybe(exception),
-            )
+            ))
         };
-        match (result, exception) {
-            (Some(result), _) => R::from_js(lock, result),
-            (None, Some(exception)) => Err(Error::from_exception(lock, exception)),
-            (None, None) => Err(Error::terminated()),
+        match result {
+            Some(result) => R::from_js(lock, result),
+            None => Err(Error::pending()),
         }
     }
-}
-
-/// Calls `shim`, an FFI function that can run JavaScript and fails if it throws, with the
-/// `MaybeLocal` that receives what JavaScript threw (see `catchException()` in `ffi.c++`).
-/// Converts the shim's failure to the error [`Error::from_exception`] creates for what JavaScript
-/// threw, to [`Error::terminated`] if execution is terminating, or else to the shim's own error.
-pub(crate) fn catching<'s, T>(
-    lock: &mut Lock<'s>,
-    shim: impl FnOnce(&mut ffi::MaybeLocal) -> Result<T, cxx::KjException>,
-) -> Result<T, Error> {
-    let mut exception = ffi::MaybeLocal { ptr: 0 };
-    let err = match shim(&mut exception) {
-        Ok(value) => return Ok(value),
-        Err(err) => err,
-    };
-    // SAFETY: the shim stores a handle created in the lock's HandleScope.
-    if let Some(exception) = unsafe { Local::<Value>::from_ffi_maybe(exception) } {
-        return Err(Error::from_exception(lock, exception));
-    }
-    // SAFETY: lock guarantees the isolate is locked.
-    if unsafe { ffi::isolate_is_execution_terminating(lock.isolate().as_ffi()) } {
-        return Err(Error::terminated());
-    }
-    Err(err.into())
 }
 
 /// Implements bidirectional `From` conversions between `Local<$from>` and `Local<$to>`.
@@ -1649,6 +1649,8 @@ macro_rules! impl_local_cast {
 impl_local_cast!(String -> Value, is_string);
 impl_local_cast!(Name -> Value, is_name);
 impl_local_cast!(Symbol -> Value, is_symbol);
+impl_local_cast!(BigInt -> Value, is_big_int);
+impl_local_cast!(Date -> Value, is_date);
 impl_local_cast!(Object -> Value, is_object);
 impl_local_cast!(Function -> Value, is_function);
 impl_local_cast!(Array -> Value, is_array);
@@ -1753,10 +1755,8 @@ impl<'s> Local<'s, Array> {
     /// trap/getter throws while an element is being read during iteration.
     pub fn iterate(self, lock: &mut Lock<'s>) -> crate::Result<Vec<TracedGlobal<Value>>> {
         // SAFETY: lock guarantees the isolate is locked; handle is valid in scope 's.
-        let isolate = lock.isolate().as_ffi();
-        let globals = catching(lock, |exception| unsafe {
-            ffi::local_array_iterate(isolate, self.into_ffi(), exception)
-        })?;
+        let globals =
+            unsafe { ffi::local_array_iterate(lock.isolate().as_ffi(), self.into_ffi()) }?;
         let state = lock.isolate_state();
         Ok(globals
             .into_iter()
@@ -2889,6 +2889,28 @@ impl<'s> Local<'s, Symbol> {
     }
 }
 
+impl Local<'_, BigInt> {
+    /// Returns the value as an `i64`, or `None` if it is out of the range of `i64`.
+    ///
+    /// Corresponds to `v8::BigInt::Int64Value()`.
+    pub fn int64_value(&self) -> Option<i64> {
+        let mut lossless = false;
+        // SAFETY: the handle is a valid BigInt handle within the current HandleScope.
+        let value = unsafe { ffi::local_big_int_int64_value(self.raw(), &mut lossless) };
+        lossless.then_some(value)
+    }
+}
+
+impl Local<'_, Date> {
+    /// Returns the time value: milliseconds since the epoch, or NaN for an invalid date.
+    ///
+    /// Corresponds to `v8::Date::ValueOf()`.
+    pub fn value_of(&self) -> f64 {
+        // SAFETY: the handle is a valid Date handle within the current HandleScope.
+        unsafe { ffi::local_date_value_of(self.raw()) }
+    }
+}
+
 // =============================================================================
 // `Utf8Value`
 // =============================================================================
@@ -3008,21 +3030,16 @@ impl<'s> Local<'s, Object> {
     /// Whether `key` is in the object or its prototype chain. A throwing
     /// Proxy `has` trap is an `Err`.
     pub fn has(self, lock: &mut Lock<'s>, key: &str) -> crate::Result<bool> {
-        let isolate = lock.isolate().as_ffi();
         // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
-        catching(lock, |exception| unsafe {
-            ffi::local_object_has_property(isolate, self.raw(), key, exception)
-        })
+        Ok(unsafe { ffi::local_object_has_property(lock.isolate().as_ffi(), self.raw(), key) }?)
     }
 
     /// Reads `key`, like JS `obj[key]`: an absent property is `undefined`,
     /// and a throwing getter or Proxy trap is an `Err`.
     pub fn get(self, lock: &mut Lock<'s>, key: &str) -> crate::Result<Local<'s, Value>> {
-        let isolate = lock.isolate().as_ffi();
         // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
-        let local = catching(lock, |exception| unsafe {
-            ffi::local_object_get_property(isolate, self.raw(), key, exception)
-        })?;
+        let local =
+            unsafe { ffi::local_object_get_property(lock.isolate().as_ffi(), self.raw(), key) }?;
         // SAFETY: the handle was just created in the current HandleScope.
         Ok(unsafe { Local::from_ffi(local) })
     }
@@ -3242,12 +3259,6 @@ impl<T> Global<T> {
         ffi::Global {
             ptr: self.handle.ptr,
         }
-    }
-
-    /// Returns whether this handle was created in the isolate of `lock`.
-    #[must_use]
-    pub(crate) fn belongs_to(&self, lock: &mut Lock<'_>) -> bool {
-        Arc::ptr_eq(&self.state, lock.isolate_state())
     }
 
     /// Materializes this handle as a `Local` in the scope of `lock`.

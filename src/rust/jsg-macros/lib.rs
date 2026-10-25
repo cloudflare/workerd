@@ -174,7 +174,11 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         impl jsg::Struct for #name {}
 
         #[automatically_derived]
-        impl jsg::Traced for #name {}
+        impl jsg::Traced for #name {
+            fn holds_gc_references() -> bool {
+                false
+            }
+        }
     }
     .into()
 }
@@ -533,6 +537,12 @@ fn receiver_error(
 /// With `custom_members`, emits only the factories; implement `jsg::Resource` yourself
 /// to select members using ordinary Rust control flow and compatibility flags.
 ///
+/// Use `#[jsg_resource(nested_types(Foo, Name = Bar))]` on the impl block to
+/// expose other resource types' constructors on the prototype, like C++ JSG's
+/// `JSG_NESTED_TYPE(Foo)` and `JSG_NESTED_TYPE_NAMED(Bar, Name)`. A nested type
+/// without a name is named after its JavaScript class name. See
+/// `src/rust/jsg/README.md` for how nested types behave.
+///
 /// Use `#[jsg_resource(name = "JSName")]` on the struct to override the default
 /// JavaScript class name.
 #[proc_macro_attribute]
@@ -575,8 +585,9 @@ pub fn jsg_static_constant(_attr: TokenStream, item: TokenStream) -> TokenStream
 
 /// Marks a static method as the JavaScript constructor for a `#[jsg_resource]`.
 ///
-/// The method must have no `self` receiver and must return `Self`.
-/// An optional first parameter of `&mut Lock` (or `&mut jsg::Lock`) receives
+/// The method must have no `self` receiver and must return `Self` or
+/// `Result<Self, E>`, where `E: Into<jsg::Error>`; an `Err` is thrown to the
+/// JavaScript caller. An optional first parameter of `&mut Lock` (or `&mut jsg::Lock`) receives
 /// the isolate lock and is not exposed as a JavaScript argument.
 ///
 /// Only one `#[jsg_constructor]` is allowed per impl block. Without it,

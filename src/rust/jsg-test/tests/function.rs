@@ -157,10 +157,9 @@ fn call_with_object_receiver_via_into() {
     });
 }
 
-/// `Local<Function>::call` returns what the function threw in the error, described like C++ JSG
-/// describes it.
+/// `Local<Function>::call` leaves what the function threw pending, which `try_catch` catches.
 #[test]
-fn call_returns_thrown_error() {
+fn call_leaves_thrown_exception_pending() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let thrown = ctx
@@ -169,29 +168,28 @@ fn call_returns_thrown_error() {
         let func = ctx.eval_raw(lock, "(() => { throw thrown; })").unwrap();
         let func = func.try_as::<v8::Function>().unwrap();
 
-        let err = func
-            .call::<v8::Local<v8::Value>>(lock, None, &[])
-            .unwrap_err();
-        assert_eq!(err.message, "boom");
-        assert_eq!(err.name, jsg::ExceptionType::RangeError);
-        assert!(!err.is_termination());
-        assert_eq!(err.exception(lock).unwrap(), thrown);
-        assert_eq!(err.to_local(lock), thrown);
+        let caught = lock.try_catch(|lock| {
+            let err = func
+                .call::<v8::Local<v8::Value>>(lock, None, &[])
+                .unwrap_err();
+            assert!(err.is_pending());
+            Err::<(), _>(err)
+        })?;
+        assert_eq!(caught.unwrap_err(), thrown);
         Ok(())
     });
 }
 
-/// A thrown value that is not an `Error` is kept too.
+/// A thrown value that is not an `Error` is caught as is.
 #[test]
-fn call_returns_thrown_non_error() {
+fn try_catch_catches_thrown_non_error() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let func = ctx.eval_raw(lock, "(() => { throw 42; })").unwrap();
         let func = func.try_as::<v8::Function>().unwrap();
 
-        let err = func.call::<Number>(lock, None, &[]).unwrap_err();
-        let thrown = err.exception(lock).unwrap();
-        let thrown = Number::from_js(lock, thrown)?;
+        let caught = lock.try_catch(|lock| func.call::<Number>(lock, None, &[]))?;
+        let thrown = Number::from_js(lock, caught.unwrap_err())?;
         assert!((thrown.value() - 42.0).abs() < f64::EPSILON);
         Ok(())
     });
@@ -199,7 +197,7 @@ fn call_returns_thrown_non_error() {
 
 /// Catching a thrown value runs no JavaScript: neither its getters nor proxy traps.
 #[test]
-fn call_does_not_run_thrown_value_accessors() {
+fn try_catch_does_not_run_thrown_value_accessors() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         for thrown in [
@@ -217,10 +215,9 @@ fn call_does_not_run_thrown_value_accessors() {
             let func = ctx.eval_raw(lock, "(() => { throw thrown; })").unwrap();
             let func = func.try_as::<v8::Function>().unwrap();
 
-            let err = func
-                .call::<v8::Local<v8::Value>>(lock, None, &[])
-                .unwrap_err();
-            assert_eq!(err.exception(lock).unwrap(), thrown);
+            let caught =
+                lock.try_catch(|lock| func.call::<v8::Local<v8::Value>>(lock, None, &[]))?;
+            assert_eq!(caught.unwrap_err(), thrown);
             let reads = ctx.eval::<Number>(lock, "reads").unwrap();
             assert!(
                 reads.value().abs() < f64::EPSILON,
@@ -231,17 +228,52 @@ fn call_does_not_run_thrown_value_accessors() {
     });
 }
 
-/// An error that was not thrown by JavaScript holds no exception.
+/// `try_catch` returns what the closure returns when it succeeds.
 #[test]
-fn constructed_error_holds_no_exception() {
+fn try_catch_returns_result_on_success() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|lock, _ctx| {
-        let err = jsg::Error::new_type_error("constructed");
-        assert!(err.exception(lock).is_none());
-        assert!(!err.is_termination());
-        assert!(jsg::Error::terminated().is_termination());
+    harness.run_in_context(|lock, ctx| {
+        let func = ctx.eval_raw(lock, "(() => 7)").unwrap();
+        let func = func.try_as::<v8::Function>().unwrap();
+
+        let result = lock.try_catch(|lock| func.call::<Number>(lock, None, &[]))?;
+        assert!((result.unwrap().value() - 7.0).abs() < f64::EPSILON);
         Ok(())
     });
+}
+
+/// An error the closure returns itself is caught as the exception that throwing it creates.
+#[test]
+fn try_catch_catches_returned_error() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let caught = lock.try_catch(|_lock| Err::<(), _>(jsg::Error::new_range_error("nope")))?;
+        let err = jsg::Error::from_js(lock, caught.unwrap_err())?;
+        assert_eq!(err.name, jsg::ExceptionType::RangeError);
+        assert_eq!(err.message, "nope");
+        assert!(!err.is_pending());
+        Ok(())
+    });
+}
+
+/// A panic in the closure unwinds past `try_catch`, which leaves the isolate usable.
+#[test]
+fn try_catch_resumes_panic() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = lock.try_catch(|_lock| -> jsg::Result<()> { panic!("intentional panic") });
+        }));
+        assert!(panic.is_err());
+        assert!(ctx.eval::<bool>(lock, "true").unwrap());
+        Ok(())
+    });
+}
+
+/// An error that did not come from JavaScript is not pending.
+#[test]
+fn constructed_error_is_not_pending() {
+    assert!(!jsg::Error::new_type_error("constructed").is_pending());
 }
 
 /// `impl_local_cast!` conversions: `Local<Object>` → `Local<Value>` via `Into`.

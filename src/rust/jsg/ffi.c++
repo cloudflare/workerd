@@ -262,6 +262,14 @@ bool local_is_name(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsName();
 }
 
+bool local_is_big_int(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsBigInt();
+}
+
+bool local_is_date(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsDate();
+}
+
 bool local_is_shared_array_buffer(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsSharedArrayBuffer();
 }
@@ -404,37 +412,19 @@ MaybeLocal local_symbol_description(Isolate* isolate, const Local& value) {
   return maybe_local_to_ffi(v8::MaybeLocal<v8::String>(desc.As<v8::String>()));
 }
 
-// Call after JavaScript run under `tryCatch` threw. Stores what it threw in `exception`, unless
-// execution is terminating: then rethrows the termination, so that it keeps propagating, and leaves
-// `exception` empty. This is the distinction JSG_CATCH makes: a termination cannot be caught.
-static void catchException(v8::TryCatch& tryCatch, MaybeLocal& exception) {
-  if (tryCatch.CanContinue() && tryCatch.HasCaught() && !tryCatch.Exception().IsEmpty()) {
-    exception = maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(tryCatch.Exception()));
-  } else {
-    tryCatch.ReThrow();
-  }
+// Local<BigInt>
+int64_t local_big_int_int64_value(const Local& value, bool& lossless) {
+  return local_as_ref_from_ffi<v8::BigInt>(value)->Int64Value(&lossless);
 }
 
-// Runs `fn`, which returns a v8::MaybeLocal<T> or v8::Maybe<T> that is empty if JavaScript threw,
-// and returns its value. If JavaScript threw, stores what it threw with catchException() and throws
-// JsExceptionThrown, which workerd-cxx's Result hands to Rust as an error.
-template <typename Func>
-static auto checkCatching(v8::Isolate* isolate, MaybeLocal& exception, Func&& fn) {
-  v8::TryCatch tryCatch(isolate);
-  try {
-    return ::workerd::jsg::check(fn());
-  } catch (::workerd::jsg::JsExceptionThrown&) {
-    catchException(tryCatch, exception);
-    throw;
-  }
+// Local<Date>
+double local_date_value_of(const Local& value) {
+  return local_as_ref_from_ffi<v8::Date>(value)->ValueOf();
 }
 
 // Local<Function>
-MaybeLocal local_function_call(Isolate* isolate,
-    const Local& function,
-    const Local& recv,
-    ::rust::Slice<const Local> args,
-    MaybeLocal& exception) {
+MaybeLocal local_function_call(
+    Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args) {
   auto context = isolate->GetCurrentContext();
   auto fn = local_as_ref_from_ffi<v8::Function>(function);
   auto receiver = local_as_ref_from_ffi<v8::Value>(recv);
@@ -444,12 +434,11 @@ MaybeLocal local_function_call(Isolate* isolate,
     v8Args[i] = local_as_ref_from_ffi<v8::Value>(args[i]);
   }
 
-  v8::TryCatch tryCatch(isolate);
-  auto result = fn->Call(context, receiver, v8Args.size(), v8Args.data());
-  if (result.IsEmpty()) {
-    catchException(tryCatch, exception);
-  }
-  return maybe_local_to_ffi(result);
+  // No TryCatch: what the function throws stays pending and propagates once the Rust caller
+  // returns to JavaScript, as with C++ JSG. V8 then still reports it where it was thrown, and
+  // predicts whether JavaScript catches it (which DevTools' "pause on uncaught exceptions" uses)
+  // by walking the whole stack.
+  return maybe_local_to_ffi(fn->Call(context, receiver, v8Args.size(), v8Args.data()));
 }
 
 // Local<Object>
@@ -460,20 +449,34 @@ void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key,
   ::workerd::jsg::check(v8_obj->Set(context, v8_key, local_from_ffi<v8::Value>(kj::mv(value))));
 }
 
-bool local_object_has_property(
-    Isolate* isolate, const Local& object, ::rust::Str key, MaybeLocal& exception) {
-  auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
-  auto context = isolate->GetCurrentContext();
-  auto v8_key = makeInternedStr(isolate, key);
-  return checkCatching(isolate, exception, [&] { return v8_obj->Has(context, v8_key); });
+// Runs `fn` (returning a v8::MaybeLocal<T> or v8::Maybe<T>) and, on failure, converts the pending
+// JS exception into a `jsg.<Type>:`-prefixed kj::Exception and throws it, so
+// workerd-cxx's Result::run catches it in C++ and hands Rust a catchable error
+// instead of aborting. Termination exceptions are re-thrown unchanged. The
+// TryCatch and termination handling are delegated to jsg::Lock::tryCatch.
+template <typename Func>
+static auto unwrapCoerce(v8::Isolate* isolate, Func&& fn) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  JSG_TRY(js) {
+    return ::workerd::jsg::check(fn());
+  }
+  JSG_CATCH(error) {
+    kj::throwException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
+  };
 }
 
-Local local_object_get_property(
-    Isolate* isolate, const Local& object, ::rust::Str key, MaybeLocal& exception) {
+bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key) {
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   auto v8_key = makeInternedStr(isolate, key);
-  return to_ffi(checkCatching(isolate, exception, [&] { return v8_obj->Get(context, v8_key); }));
+  return unwrapCoerce(isolate, [&] { return v8_obj->Has(context, v8_key); });
+}
+
+Local local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key) {
+  auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
+  auto context = isolate->GetCurrentContext();
+  auto v8_key = makeInternedStr(isolate, key);
+  return to_ffi(unwrapCoerce(isolate, [&] { return v8_obj->Get(context, v8_key); }));
 }
 
 // Local<Array>
@@ -677,7 +680,7 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
 
 // Unwrappers
 
-::rust::String unwrap_string(Isolate* isolate, Local value, MaybeLocal& exception) {
+::rust::String unwrap_string(Isolate* isolate, Local value) {
   auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
   // Fast path: a string primitive needs no coercion and can't throw, so skip
   // the TryCatch/ToString machinery. (String wrapper objects are not IsString.)
@@ -686,7 +689,7 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
     v8Str = v8Value.As<v8::String>();
   } else {
     auto context = isolate->GetCurrentContext();
-    v8Str = checkCatching(isolate, exception, [&] { return v8Value->ToString(context); });
+    v8Str = unwrapCoerce(isolate, [&] { return v8Value->ToString(context); });
   }
   v8::String::ValueView view(isolate, v8Str);
   if (!view.is_one_byte()) {
@@ -700,15 +703,14 @@ bool unwrap_boolean(Isolate* isolate, Local value) {
   return local_from_ffi<v8::Value>(kj::mv(value))->ToBoolean(isolate)->Value();
 }
 
-double unwrap_number(Isolate* isolate, Local value, MaybeLocal& exception) {
+double unwrap_number(Isolate* isolate, Local value) {
   auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
   // Fast path: a number primitive needs no coercion and can't throw.
   if (v8Value->IsNumber()) {
     return v8Value.As<v8::Number>()->Value();
   }
   auto context = isolate->GetCurrentContext();
-  v8::Local<v8::Number> number =
-      checkCatching(isolate, exception, [&] { return v8Value->ToNumber(context); });
+  v8::Local<v8::Number> number = unwrapCoerce(isolate, [&] { return v8Value->ToNumber(context); });
   return number->Value();
 }
 
@@ -761,10 +763,12 @@ DEFINE_TYPED_ARRAY_UNWRAP(biguint64_array, BigUint64Array, uint64_t)
 // Uses V8's Array::Iterate() which is faster than indexed access.
 // Returns Global handles because Local handles get reused during iteration.
 //
-// Iterate() fails if a Proxy trap or getter on one of the array's elements throws. Then
-// `exception` receives what it threw, as with checkCatching() (see above), so that the real error
-// is kept and no exception is left pending on the isolate.
-::rust::Vec<Global> local_array_iterate(Isolate* isolate, Local value, MaybeLocal& exception) {
+// Iterate() can fail with a *pending* V8 exception rather than a KJ one -- e.g. a
+// throwing Proxy trap or getter on one of the array's elements. That must be tunneled
+// through the same `jsg.<Type>:`-prefixed kj::Exception mechanism as `unwrapCoerce`
+// uses (see above), rather than discarded in favor of a generic KJ_REQUIRE failure,
+// or the real error is lost and the pending exception is left dangling on the isolate.
+::rust::Vec<Global> local_array_iterate(Isolate* isolate, Local value) {
   auto context = isolate->GetCurrentContext();
   auto v8Val = local_from_ffi<v8::Value>(kj::mv(value));
 
@@ -779,20 +783,26 @@ DEFINE_TYPED_ARRAY_UNWRAP(biguint64_array, BigUint64Array, uint64_t)
   ::rust::Vec<Global> result;
   Data data{isolate, &result};
 
-  v8::TryCatch tryCatch(isolate);
-  auto iterateResult = arr->Iterate(context,
-      [](uint32_t index, v8::Local<v8::Value> element,
-          void* userData) -> v8::Array::CallbackResult {
-    auto* d = static_cast<Data*>(userData);
-    d->result->push_back(to_ffi(v8::Global<v8::Value>(d->isolate, element)));
-    return v8::Array::CallbackResult::kContinue;
-  },
-      &data);
-  // iterateResult is a v8::Maybe<void>, which jsg::check() and so checkCatching() don't accept.
-  if (iterateResult.IsNothing()) {
-    catchException(tryCatch, exception);
-    throw ::workerd::jsg::JsExceptionThrown();
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  JSG_TRY(js) {
+    auto iterateResult = arr->Iterate(context,
+        [](uint32_t index, v8::Local<v8::Value> element,
+            void* userData) -> v8::Array::CallbackResult {
+      auto* d = static_cast<Data*>(userData);
+      d->result->push_back(to_ffi(v8::Global<v8::Value>(d->isolate, element)));
+      return v8::Array::CallbackResult::kContinue;
+    },
+        &data);
+    // iterateResult is a v8::Maybe<void>, so the v8::Maybe<T> overload of
+    // jsg::check() (which needs a default-constructible T to write into) doesn't
+    // apply; throw JsExceptionThrown() directly, same as check() does internally.
+    if (iterateResult.IsNothing()) {
+      throw ::workerd::jsg::JsExceptionThrown();
+    }
   }
+  JSG_CATCH(error) {
+    kj::throwException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
+  };
 
   return result;
 }
@@ -1258,6 +1268,18 @@ Local function_template_get_function(Isolate* isolate, const Global& tmpl) {
   return to_ffi(kj::mv(function));
 }
 
+// Mirrors registerNestedType() (resource.h): the nested type's constructor is a property of the
+// prototype, so that it is inherited along with the prototype.
+void function_template_set_nested_type(
+    Isolate* isolate, const Global& tmpl, ::rust::Str name, const Global& nested) {
+  v8::HandleScope scope(isolate);
+  auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(
+      isolate, global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl));
+  auto local_nested = v8::Local<v8::FunctionTemplate>::New(
+      isolate, global_as_ref_from_ffi<v8::FunctionTemplate>(nested));
+  local_tmpl->PrototypeTemplate()->Set(makeInternedStr(isolate, name), local_nested);
+}
+
 // Realm
 Realm* realm_from_isolate(Isolate* isolate) {
   auto* realm =
@@ -1328,25 +1350,29 @@ Local exception_create_from_bytes(
   return exceptionCreateFromMessage(exception_type, message);
 }
 
-::rust::String exception_describe(Isolate* isolate, const Local& exception) {
-  // ToDetailString() is side-effect free: it runs no JavaScript, so neither getters nor proxy
-  // traps on the thrown value. It fails only on, e.g., a stack overflow.
-  v8::TryCatch tryCatch(isolate);
-  v8::Local<v8::String> detail;
-  if (!local_as_ref_from_ffi<v8::Value>(exception)
-           ->ToDetailString(isolate->GetCurrentContext())
-           .ToLocal(&detail)) {
-    if (!tryCatch.CanContinue()) {
-      tryCatch.ReThrow();
-    }
-    return ::rust::String();
+// TryCatch
+bool catch_exception(v8::TryCatch& tryCatch, MaybeLocal& exception) {
+  // The rule of jsg::Lock::tryCatch(): nothing caught means a termination, which V8 may already
+  // have cleared once all JavaScript frames unwound.
+  if (!tryCatch.CanContinue() || !tryCatch.HasCaught() || tryCatch.Exception().IsEmpty()) {
+    tryCatch.ReThrow();
+    return false;
   }
-  v8::String::Utf8Value utf8(isolate, detail);
-  return ::rust::String::lossy(*utf8, utf8.length());
+  exception = maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(tryCatch.Exception()));
+  return true;
+}
+
+void isolate_try_catch(
+    Isolate* isolate, size_t data, ::rust::Fn<bool(size_t)> callback, MaybeLocal& exception) {
+  v8::TryCatch tryCatch(isolate);
+  if (callback(data)) {
+    catch_exception(tryCatch, exception);
+  }
 }
 
 // Isolate
 void isolate_throw_exception(Isolate* isolate, Local exception) {
+  if (isolate->IsExecutionTerminating()) return;
   isolate->ThrowException(local_from_ffi<v8::Value>(kj::mv(exception)));
 }
 
@@ -1354,6 +1380,7 @@ void isolate_throw_error(Isolate* isolate, ::rust::Str description) {
   // kNormal (not kInternalized): error messages are arbitrary caller-supplied
   // strings and should not pollute the internalized string table (which is never
   // GC'd), matching C++ jsg::Lock::v8Error() / v8Str() behavior.
+  if (isolate->IsExecutionTerminating()) return;
   auto message = ::workerd::jsg::check(v8::String::NewFromUtf8(
       isolate, description.data(), v8::NewStringType::kNormal, description.size()));
   isolate->ThrowError(message);
@@ -1367,15 +1394,22 @@ void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage)
   // avoiding the out-of-bounds read that kj::StringPtr(data, size) would cause
   // on non-NUL-terminated Rust &str data.
   auto message = kj::heapString(internalMessage.data(), internalMessage.size());
-  isolate->ThrowException(::workerd::jsg::makeInternalError(isolate, message));
+  // Logs the message even when execution is terminating, but then throws nothing.
+  auto error = ::workerd::jsg::makeInternalError(isolate, message);
+  if (isolate->IsExecutionTerminating()) return;
+  isolate->ThrowException(error);
+}
+
+void isolate_terminate_execution(Isolate* isolate) {
+  ::workerd::jsg::IsolateBase::from(isolate).terminateExecution();
 }
 
 bool isolate_is_execution_terminating(Isolate* isolate) {
   return isolate->IsExecutionTerminating();
 }
 
-void isolate_terminate_execution(Isolate* isolate) {
-  ::workerd::jsg::IsolateBase::from(isolate).terminateExecution();
+bool isolate_has_pending_exception(Isolate* isolate) {
+  return isolate->HasPendingException();
 }
 
 void ignore_leak(size_t ptr) {

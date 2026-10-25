@@ -144,6 +144,8 @@ bool local_is_shared_array_buffer(const Local& val);
 bool local_is_function(const Local& val);
 bool local_is_symbol(const Local& val);
 bool local_is_name(const Local& val);
+bool local_is_big_int(const Local& val);
+bool local_is_date(const Local& val);
 ::rust::String local_type_of(Isolate* isolate, const Local& val);
 
 // Local<String>
@@ -185,32 +187,28 @@ Local local_symbol_new(Isolate* isolate);
 Local local_symbol_new_with_description(Isolate* isolate, Local description);
 MaybeLocal local_symbol_description(Isolate* isolate, const Local& value);
 
-// Shims that can run JavaScript take a `MaybeLocal& exception`. If JavaScript throws, it receives
-// what JavaScript threw, unless execution is terminating: then the termination is left to
-// propagate, and `exception` stays empty. A shim that returns a Result also fails then.
+// Local<BigInt>
+int64_t local_big_int_int64_value(const Local& value, bool& lossless);
+
+// Local<Date>
+double local_date_value_of(const Local& value);
 
 // Local<Function>
-// Returns the call's result, or none if it threw. Then `exception` receives the exception, unless
-// execution is terminating: the termination is left to propagate, and `exception` stays empty.
-MaybeLocal local_function_call(Isolate* isolate,
-    const Local& function,
-    const Local& recv,
-    ::rust::Slice<const Local> args,
-    MaybeLocal& exception);
+// Returns the call's result, or none if it threw, leaving the exception pending.
+MaybeLocal local_function_call(
+    Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args);
 
 // Local<Object>
 void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value);
-bool local_object_has_property(
-    Isolate* isolate, const Local& object, ::rust::Str key, MaybeLocal& exception);
-Local local_object_get_property(
-    Isolate* isolate, const Local& object, ::rust::Str key, MaybeLocal& exception);
+bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key);
+Local local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key);
 
 // Local<Array>
 Local local_new_array(Isolate* isolate, size_t length);
 uint32_t local_array_length(const Local& array);
 Local local_array_get(Isolate* isolate, const Local& array, uint32_t index);
 void local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value);
-::rust::Vec<Global> local_array_iterate(Isolate* isolate, Local value, MaybeLocal& exception);
+::rust::Vec<Global> local_array_iterate(Isolate* isolate, Local value);
 
 // Local<TypedArray>
 Local local_new_uint8_array(Isolate* isolate, const uint8_t* data, size_t length);
@@ -293,9 +291,9 @@ MaybeLocal wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Gl
 void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args);
 
 // Unwrappers
-::rust::String unwrap_string(Isolate* isolate, Local value, MaybeLocal& exception);
+::rust::String unwrap_string(Isolate* isolate, Local value);
 bool unwrap_boolean(Isolate* isolate, Local value);
-double unwrap_number(Isolate* isolate, Local value, MaybeLocal& exception);
+double unwrap_number(Isolate* isolate, Local value);
 kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value);
 ::rust::Vec<uint8_t> unwrap_uint8_array(Isolate* isolate, Local value);
 ::rust::Vec<uint16_t> unwrap_uint16_array(Isolate* isolate, Local value);
@@ -370,6 +368,8 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
 
 // FunctionTemplate
 Local function_template_get_function(Isolate* isolate, const Global& tmpl);
+void function_template_set_nested_type(
+    Isolate* isolate, const Global& tmpl, ::rust::Str name, const Global& nested);
 
 // Realm
 Realm* realm_from_isolate(Isolate* isolate);
@@ -383,16 +383,26 @@ void realm_detach(Isolate* isolate, const IsolateState* state);
 // than rejected, so this accepts arbitrary byte input (e.g. filesystem paths).
 Local exception_create_from_bytes(
     Isolate* isolate, ExceptionType exception_type, const uint8_t* data, int32_t length);
-// Describes a thrown value without running JavaScript: `<name>: <message>` for an error. Empty if
-// V8 cannot describe it.
-::rust::String exception_describe(Isolate* isolate, const Local& exception);
+
+// TryCatch
+// Decides what `tryCatch` caught as jsg::Lock::tryCatch() does: stores a catchable exception in
+// `exception` and returns true, or rethrows a termination and returns false. Every shim that
+// catches what JavaScript throws decides with this.
+bool catch_exception(v8::TryCatch& tryCatch, MaybeLocal& exception);
+// Calls `callback(data)` in a TryCatch. If it returns true (it failed), `exception` receives what
+// it threw, as catch_exception() decides.
+void isolate_try_catch(
+    Isolate* isolate, size_t data, ::rust::Fn<bool(size_t)> callback, MaybeLocal& exception);
 
 // Isolate
+// The isolate_throw_*() functions throw nothing while execution is terminating, so that they
+// never replace the termination with a catchable exception.
 void isolate_throw_exception(Isolate* isolate, Local exception);
 void isolate_throw_error(Isolate* isolate, ::rust::Str message);
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage);
-bool isolate_is_execution_terminating(Isolate* isolate);
 void isolate_terminate_execution(Isolate* isolate);
+bool isolate_is_execution_terminating(Isolate* isolate);
+bool isolate_has_pending_exception(Isolate* isolate);
 bool isolate_is_locked(Isolate* isolate);
 bool isolate_in_context(Isolate* isolate);
 void ignore_leak(size_t ptr);

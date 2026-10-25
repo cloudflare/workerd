@@ -363,7 +363,7 @@ fn number_coercion_reentrant_into_rust_resource_method() {
 }
 
 /// A three-level-deep chain of coercions, each crossing the FFI boundary via
-/// `resource.echo`, to ensure nested `v8::TryCatch`/`checkCatching` scopes
+/// `resource.echo`, to ensure nested `v8::TryCatch`/`unwrapCoerce` scopes
 /// don't corrupt each other or the isolate.
 #[test]
 fn string_coercion_handles_deeply_nested_reentrancy() {
@@ -396,10 +396,11 @@ fn string_coercion_handles_deeply_nested_reentrancy() {
 
 /// A panic triggered by a Rust-backed method called *during* `ToString`
 /// coercion must surface as a catchable `Err` at the `unwrap_string` FFI
-/// boundary, not abort the process. This exercises the path where
-/// `catchException()` in `ffi.c++` lets a termination propagate, specifically
-/// when the termination originates from a re-entrant call rather than directly
-/// inside `ToString` itself.
+/// boundary, not abort the process. This exercises the "termination
+/// exceptions propagate unchanged through `unwrapCoerce`'s `JSG_TRY`/
+/// `JSG_CATCH`" path described in `ffi.c++`, specifically when the
+/// termination originates from a re-entrant call rather than directly inside
+/// `ToString` itself.
 #[test]
 fn string_coercion_reentrant_panic_is_catchable_not_abort() {
     let harness = crate::Harness::new();
@@ -471,9 +472,6 @@ fn reentrant_panic_during_coercion_does_not_poison_isolate() {
             )
             .expect("expression should evaluate");
         assert!(<String as FromJS>::from_js(lock, value).is_err());
-        // The panic requested termination, which takes effect when JavaScript next runs, as it
-        // would when the Rust code that coerced returned to its JavaScript caller.
-        assert!(ctx.eval_raw(lock, "0").is_err());
         Ok(())
     });
 
@@ -522,201 +520,6 @@ fn object_has_from_throwing_proxy_returns_err() {
             .expect_err("a throwing trap should be an Err");
         assert_eq!(err.name, ExceptionType::TypeError);
         assert!(err.message.contains("trap"), "got {:?}", err.message);
-        Ok(())
-    });
-}
-
-// =============================================================================
-// What a coercion or property access throws is kept, as C++ JSG keeps it.
-// =============================================================================
-
-/// Evaluates `setup` as `thrown`, then `expr`, and returns the error that converting `expr` to
-/// `T` fails with.
-fn conversion_error<'s, T: FromJS<'s>>(
-    lock: &mut jsg::Lock<'s>,
-    ctx: &crate::EvalContext<'_>,
-    setup: &str,
-    expr: &str,
-) -> jsg::Error {
-    ctx.eval_raw(lock, &format!("globalThis.thrown = {setup}"))
-        .expect("setup should evaluate");
-    let value = ctx
-        .eval_raw(lock, expr)
-        .expect("expression should evaluate");
-    let Err(err) = T::from_js(lock, value) else {
-        panic!("{expr} should not convert");
-    };
-    err
-}
-
-/// Returns whether `err` holds the value of `thrown`, by `Object.is()`.
-fn holds_thrown<'s>(
-    lock: &mut jsg::Lock<'s>,
-    ctx: &crate::EvalContext<'_>,
-    err: &jsg::Error,
-) -> bool {
-    let Some(exception) = err.exception(lock) else {
-        return false;
-    };
-    ctx.set_global(lock, "caught", exception);
-    ctx.eval::<bool>(lock, "Object.is(caught, thrown)")
-        .expect("should evaluate")
-}
-
-/// Converting to a string or a number fails with what `toString`, `valueOf` or
-/// `Symbol.toPrimitive` threw, whether or not it is an `Error`.
-#[test]
-fn coercion_error_holds_thrown_value() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, ctx| {
-        for setup in ["new RangeError('boom')", "({ code: 7 })", "42"] {
-            for expr in [
-                "({ toString() { throw thrown; } })",
-                "({ [Symbol.toPrimitive]() { throw thrown; } })",
-            ] {
-                let err = conversion_error::<String>(lock, ctx, setup, expr);
-                assert!(holds_thrown(lock, ctx, &err), "{setup} {expr}: {err}");
-            }
-            let expr = "({ valueOf() { throw thrown; } })";
-            let err = conversion_error::<Number>(lock, ctx, setup, expr);
-            assert!(holds_thrown(lock, ctx, &err), "{setup}: {err}");
-            let err = conversion_error::<i32>(lock, ctx, setup, expr);
-            assert!(holds_thrown(lock, ctx, &err), "{setup}: {err}");
-        }
-        Ok(())
-    });
-}
-
-/// A coercion that V8 itself rejects fails with the `TypeError` that V8 threw.
-#[test]
-fn coercion_error_holds_v8_type_error() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, ctx| {
-        let value = ctx.eval_raw(lock, "Symbol('s')").expect("should evaluate");
-        let err = <String as FromJS>::from_js(lock, value).expect_err("should not convert");
-        assert_eq!(err.name, ExceptionType::TypeError);
-        assert_eq!(err.message, "Cannot convert a Symbol value to a string");
-        assert!(err.exception(lock).is_some_and(|e| e.is_native_error()));
-        Ok(())
-    });
-}
-
-/// `Object::get`, `Object::has` and `Array::iterate` fail with what a getter or proxy trap
-/// threw.
-#[test]
-fn property_access_error_holds_thrown_value() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, ctx| {
-        ctx.eval_raw(lock, "globalThis.thrown = new RangeError('trap')")
-            .expect("setup should evaluate");
-
-        let value = ctx
-            .eval_raw(lock, "({ get x() { throw thrown; } })")
-            .expect("expression should evaluate");
-        let obj: jsg::v8::Local<'_, jsg::v8::Object> = value.into();
-        let err = obj
-            .get(lock, "x")
-            .expect_err("a throwing getter should be an Err");
-        assert!(holds_thrown(lock, ctx, &err), "{err}");
-
-        let value = ctx
-            .eval_raw(lock, "new Proxy({}, { has() { throw thrown; } })")
-            .expect("expression should evaluate");
-        let obj: jsg::v8::Local<'_, jsg::v8::Object> = value.into();
-        let err = obj
-            .has(lock, "x")
-            .expect_err("a throwing trap should be an Err");
-        assert!(holds_thrown(lock, ctx, &err), "{err}");
-
-        let err = conversion_error::<Vec<String>>(
-            lock,
-            ctx,
-            "new RangeError('element')",
-            "(() => { \
-                 const arr = [1, 2]; \
-                 Object.defineProperty(arr, 1, { get() { throw thrown; } }); \
-                 return arr; \
-             })()",
-        );
-        assert!(holds_thrown(lock, ctx, &err), "{err}");
-        Ok(())
-    });
-}
-
-/// What an argument's coercion throws reaches the JavaScript caller of a method unchanged.
-#[test]
-fn coercion_exception_propagates_through_method() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(ReentrantResource {
-            call_count: Cell::new(0),
-        });
-        ctx.set_global(lock, "resource", resource.clone());
-        let caught = ctx.eval::<bool>(
-            lock,
-            "const thrown = new RangeError('boom');
-             let caught;
-             try { resource.echo({ toString() { throw thrown; } }); } catch (e) { caught = e; }
-             let caughtNumber;
-             try { resource.double({ valueOf() { throw 42; } }); } catch (e) { caughtNumber = e; }
-             caught === thrown && caughtNumber === 42",
-        );
-        assert!(caught.unwrap());
-        assert_eq!(resource.call_count.get(), 0);
-        Ok(())
-    });
-}
-
-/// A Rust-backed resource that coerces a value to a string, and records whether execution
-/// terminating interrupted the coercion.
-#[jsg_resource]
-struct CoercingResource {
-    saw_termination: Cell<bool>,
-}
-
-#[jsg_resource]
-impl CoercingResource {
-    #[jsg_method]
-    pub fn coerce<'s>(
-        &self,
-        lock: &mut jsg::Lock<'s>,
-        value: jsg::v8::Local<'s, jsg::v8::Value>,
-    ) -> Result<(), jsg::Error> {
-        let err = <String as FromJS>::from_js(lock, value).expect_err("coercion should fail");
-        self.saw_termination
-            .set(err.is_termination() && err.exception(lock).is_none());
-        Err(err)
-    }
-}
-
-/// Execution terminating during a coercion is `Error::terminated`, and the termination keeps
-/// propagating past the method.
-#[test]
-fn termination_during_coercion_is_terminated() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, ctx| {
-        let resource = jsg::Rc::new(CoercingResource {
-            saw_termination: Cell::new(false),
-        });
-        ctx.set_global(lock, "obj", resource.clone());
-        ctx.set_global(
-            lock,
-            "panicker",
-            jsg::Rc::new(ReentrantResource {
-                call_count: Cell::new(0),
-            }),
-        );
-        // `panicNow()` requests termination, which takes effect in the loop. JavaScript cannot
-        // catch the termination.
-        let result = ctx.eval::<bool>(
-            lock,
-            "try {
-               obj.coerce({ toString() { try { panicker.panicNow(); } catch (e) {} while (true) {} } });
-             } catch (e) {}
-             true",
-        );
-        assert!(result.is_err());
-        assert!(resource.saw_termination.get());
         Ok(())
     });
 }

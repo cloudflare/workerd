@@ -35,6 +35,33 @@ fn validate_constructor_rejects_non_self_return() {
 }
 
 #[test]
+fn validate_constructor_accepts_result_of_self() {
+    for method in [
+        parse_quote! { fn constructor() -> Result<Self, jsg::Error> { todo!() } },
+        parse_quote! { fn constructor() -> jsg::Result<Self> { todo!() } },
+        parse_quote! { fn constructor() -> std::result::Result<Self, MyError> { todo!() } },
+    ] {
+        assert!(validate_constructor(&method).is_none());
+        assert_eq!(constructor_return(&method), ConstructorReturn::Fallible);
+    }
+    let method: syn::ImplItemFn = parse_quote! { fn constructor() -> Self { todo!() } };
+    assert_eq!(constructor_return(&method), ConstructorReturn::Infallible);
+}
+
+#[test]
+fn validate_constructor_rejects_result_of_other_type() {
+    for method in [
+        parse_quote! { fn constructor() -> Result<String, jsg::Error> { todo!() } },
+        parse_quote! { fn constructor() -> Option<Self> { todo!() } },
+        parse_quote! { fn constructor() -> Result { todo!() } },
+        parse_quote! { fn constructor() {} },
+    ] {
+        assert_eq!(constructor_return(&method), ConstructorReturn::Invalid);
+        assert!(validate_constructor(&method).is_some());
+    }
+}
+
+#[test]
 fn extract_constructor_params_no_lock() {
     // Plain constructor — no Lock param, two JS args.
     let method: syn::ImplItemFn = parse_quote! {
@@ -380,4 +407,132 @@ fn readonly_property_factories_omit_setters_for_both_placements() {
             quote!(None).to_string()
         );
     }
+}
+
+fn parse_registration_mode(attr: proc_macro2::TokenStream) -> syn::Result<RegistrationMode> {
+    parse_impl_args(attr).map(|args| args.mode)
+}
+
+fn parse_nested_types(attr: proc_macro2::TokenStream) -> syn::Result<Vec<NestedTypeArg>> {
+    parse_impl_args(attr).map(|args| args.nested_types)
+}
+
+fn nested_type_names(attr: proc_macro2::TokenStream) -> Vec<(Option<String>, String)> {
+    parse_nested_types(attr)
+        .unwrap()
+        .iter()
+        .map(|arg| {
+            let ty = &arg.ty;
+            (
+                arg.name.as_ref().map(ToString::to_string),
+                quote! { #ty }.to_string().replace(' ', ""),
+            )
+        })
+        .collect()
+}
+
+fn nested_types_error(attr: proc_macro2::TokenStream) -> String {
+    parse_nested_types(attr).err().unwrap().to_string()
+}
+
+#[test]
+fn parse_nested_types_empty() {
+    assert!(nested_type_names(quote! {}).is_empty());
+    assert!(nested_type_names(quote! { nested_types() }).is_empty());
+}
+
+#[test]
+fn parse_nested_types_types_and_names() {
+    assert_eq!(
+        nested_type_names(quote! { nested_types(Foo, Name = Bar, crate::a::Baz, Other = ::x::Y,) }),
+        [
+            (None, "Foo".to_owned()),
+            (Some("Name".to_owned()), "Bar".to_owned()),
+            (None, "crate::a::Baz".to_owned()),
+            (Some("Other".to_owned()), "::x::Y".to_owned()),
+        ]
+    );
+}
+
+#[test]
+fn parse_nested_types_repeated_list() {
+    assert_eq!(
+        nested_type_names(quote! { nested_types(Foo), nested_types(Bar) }),
+        [(None, "Foo".to_owned()), (None, "Bar".to_owned())]
+    );
+}
+
+#[test]
+fn parse_nested_types_registers_unraw_name() {
+    let args = parse_nested_types(quote! { nested_types(r#type = Foo) }).unwrap();
+    let registration = nested_type_registration(&args[0]).to_string();
+    assert!(registration.contains("\"type\""), "{registration}");
+}
+
+#[test]
+fn parse_nested_types_rejects_other_arguments() {
+    for attr in [
+        quote! { name = "Foo" },
+        quote! { custom_trace },
+        quote! { nested(Foo) },
+    ] {
+        assert!(
+            nested_types_error(attr).contains("`nested_types(...)`"),
+            "unexpected error"
+        );
+    }
+}
+
+#[test]
+fn parse_nested_types_rejects_duplicates() {
+    assert_eq!(
+        nested_types_error(quote! { nested_types(Foo, a::Bar, a::Bar) }),
+        "duplicate nested type"
+    );
+    assert_eq!(
+        nested_types_error(quote! { nested_types(Name = Foo, r#Name = Bar) }),
+        "duplicate nested type name"
+    );
+}
+
+#[test]
+fn parse_nested_types_allows_type_under_several_names() {
+    assert_eq!(
+        nested_type_names(quote! { nested_types(Foo, Name = Foo) }).len(),
+        2
+    );
+}
+
+#[test]
+fn reject_nested_types_on_struct_only_rejects_nested_types() {
+    assert!(reject_nested_types_on_struct(quote! { name = "Foo", custom_trace }).is_none());
+    assert!(reject_nested_types_on_struct(quote! {}).is_none());
+    assert!(reject_nested_types_on_struct(quote! { nested_types(Foo) }).is_some());
+}
+
+#[test]
+fn nested_types_and_custom_members_together_are_rejected() {
+    for attr in [
+        quote! { custom_members, nested_types(Foo) },
+        quote! { nested_types(Foo), custom_members },
+    ] {
+        assert!(
+            nested_types_error(attr).starts_with("`nested_types(...)` cannot be combined"),
+            "unexpected error"
+        );
+    }
+}
+
+#[test]
+fn nested_types_are_registered_after_members() {
+    let input: ItemImpl = parse_quote! {
+        impl Sample {
+            #[jsg_method]
+            fn foo(&self) {}
+        }
+    };
+    let expanded = expand_resource_impl(quote! { nested_types(Bar) }, &input).to_string();
+    let method = expanded.find("Self :: foo_member ()").unwrap();
+    let nested = expanded.find("jsg :: NestedType :: of :: < Bar >").unwrap();
+    assert!(method < nested, "{expanded}");
 }
