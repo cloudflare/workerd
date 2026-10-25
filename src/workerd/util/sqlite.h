@@ -108,10 +108,46 @@ class SqliteDatabase {
     const Regulator& regulator;
   };
 
+  // A budget of thread CPU time that a query may consume. A statement that is still stepping when
+  // the budget is spent is interrupted, and the query fails via
+  // `Regulator::onCpuTimeLimitExceeded()`.
+  //
+  // Interrupting a read-only statement affects nothing else. Interrupting a statement that writes
+  // makes SQLite roll back the entire transaction (a write need not have a statement journal from
+  // which its partial effects alone could be undone), including any enclosing savepoints and
+  // everything else written in that transaction. This is reported through
+  // `handleCriticalError()` like any other automatic rollback, so an interrupted write under a
+  // transaction is a critical error: `observedCriticalError()` becomes true and the
+  // `onCriticalError()` callback runs with a message naming the limit.
+  //
+  // The budget is enforced from SQLite's progress handler (see `onProgress()`), which runs every
+  // `PROGRESS_HANDLER_OPCODE_INTERVAL` VDBE opcodes. SQLite counts opcodes across all steps of a
+  // statement, so a cursor that streams many cheap rows is bounded as a whole. A query may overrun
+  // its budget by about the cost of that many opcodes.
+  //
+  // A `CpuTimeBudget` holds absolute deadlines, so it must be created (with `start()`) right
+  // before the query begins. The same budget may be shared by several queries, in which case it
+  // bounds their total.
+  struct CpuTimeBudget {
+    kj::Duration limit;
+
+    // Thread CPU time at which the budget is spent.
+    kj::Duration cpuDeadline;
+
+    // Monotonic time before which the budget cannot be spent. CPU time cannot advance faster than
+    // wall time, so the (expensive) CPU clock is read only once this time has passed.
+    kj::TimePoint wallDeadline;
+
+    static CpuTimeBudget start(kj::Duration limit);
+
+    bool isSpent() const;
+  };
+
   struct QueryOptions {
     StaticRegulator regulator;
     bool allowUnconfirmed = false;
     kj::Maybe<SqliteQueryId> queryId = kj::none;
+    kj::Maybe<CpuTimeBudget> cpuTimeBudget = kj::none;
   };
 
   struct IngestResult {
@@ -200,6 +236,11 @@ class SqliteDatabase {
     virtual bool shouldAddQueryStats() const {
       return false;
     }
+
+    // Report that a query spent its CPU time budget (see `QueryOptions::cpuTimeBudget`). Like
+    // `onError()`, this should typically throw an exception. If it returns, a generic KJ
+    // exception is thrown.
+    virtual void onCpuTimeLimitExceeded(kj::Duration limit) const {}
   };
 
   // Use as the `Regulator&` for queries that are fully trusted. As a general rule, this should
@@ -403,6 +444,31 @@ class SqliteDatabase {
   // Set while a statement is executing.
   kj::Maybe<sqlite3_stmt&> currentStatement;
 
+  // Set while a statement that has a CPU time budget is executing, for `onProgress()`.
+  kj::Maybe<const CpuTimeBudget&> activeCpuTimeBudget;
+
+  // Set by `onProgress()` when it interrupts the executing statement because its budget is spent.
+  // Lets the code that stepped the statement tell this interrupt apart from any other
+  // SQLITE_INTERRUPT. Cleared whenever `activeCpuTimeBudget` is set.
+  bool cpuTimeBudgetSpent = false;
+
+  // How many VDBE opcodes SQLite executes between calls to `onProgress()`. An opcode costs on
+  // the order of 10-50ns, so this is roughly 0.5-2.5ms between checks: coarse enough that the
+  // handler's cost is negligible, fine enough relative to the budgets we expect (tens of
+  // milliseconds and up).
+  static constexpr int PROGRESS_HANDLER_OPCODE_INTERVAL = 50000;
+
+  // Implements the SQLite progress handler, see sqlite3_progress_handler(). Returns true to
+  // interrupt the executing statement.
+  bool onProgress() noexcept;
+
+  // Describes a spent budget, for exception and critical error messages.
+  static kj::String cpuTimeLimitExceededMessage(const CpuTimeBudget& budget);
+
+  // Throws the error for a statement whose CPU time budget was spent, via the regulator.
+  [[noreturn]] static void throwCpuTimeLimitExceeded(
+      StaticRegulator regulator, const CpuTimeBudget& budget);
+
   bool criticalErrorOccurred = false;
   kj::Maybe<kj::Function<void(bool allowUnconfirmed)>> onWriteCallback;
   kj::Maybe<kj::Function<void(kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException)>>
@@ -474,12 +540,14 @@ class SqliteDatabase {
   //
   // If `prelude` is provided, then, in MULTI mode, all statements which are executed immediately
   // are also appended to `prelude`.
+  // `cpuTimeBudget`, if given, applies to the statements that MULTI mode executes immediately.
   StatementAndEffect prepareSql(StaticRegulator regulator,
       kj::StringPtr sqlCode,
       uint prepFlags,
       Multi multi,
       kj::Maybe<kj::Vector<Statement>&> prelude = kj::none,
-      kj::Maybe<SqliteQueryId> queryId = kj::none);
+      kj::Maybe<SqliteQueryId> queryId = kj::none,
+      kj::Maybe<const CpuTimeBudget&> cpuTimeBudget = kj::none);
 
   // Implements SQLite authorizer callback, see sqlite3_set_authorizer().
   bool isAuthorized(int actionCode,
@@ -536,6 +604,7 @@ class SqliteDatabase::Statement final: private ResetListener {
   struct StatementOptions {
     bool allowUnconfirmed = false;
     kj::Maybe<SqliteQueryId> queryId = kj::none;
+    kj::Maybe<CpuTimeBudget> cpuTimeBudget = kj::none;
   };
 
   template <typename... Params>
@@ -563,8 +632,10 @@ class SqliteDatabase::Statement final: private ResetListener {
   void beforeSqliteReset() override;
 
   // Get the underlying StatementAndEffect, which the caller will then execute. If `prelude` is
-  // non-empty, prepareForExecution() actually executes the prelude.
-  StatementAndEffect& prepareForExecution(kj::Maybe<SqliteQueryId> queryId = kj::none);
+  // non-empty, prepareForExecution() actually executes the prelude, under `cpuTimeBudget` if
+  // given.
+  StatementAndEffect& prepareForExecution(kj::Maybe<SqliteQueryId> queryId = kj::none,
+      kj::Maybe<const CpuTimeBudget&> cpuTimeBudget = kj::none);
 
   friend class SqliteDatabase;
 };
@@ -732,6 +803,11 @@ class SqliteDatabase::Query final: private ResetListener {
   };
 
   StaticRegulator regulator;
+
+  // Budget for this query, if any. Declared before the statement members so that it is
+  // initialized first and can be passed to `Statement::prepareForExecution()`.
+  kj::Maybe<CpuTimeBudget> cpuTimeBudget;
+
   StatementAndEffect ownStatement;                // for one-off queries
   kj::Maybe<StatementAndEffect&> maybeStatement;  // null if database was reset
   bool done = false;
@@ -760,7 +836,8 @@ class SqliteDatabase::Query final: private ResetListener {
   Query(SqliteDatabase& db, QueryOptions options, Statement& statement, Params&&... bindings)
       : ResetListener(db),
         regulator(options.regulator),
-        maybeStatement(statement.prepareForExecution(options.queryId)),
+        cpuTimeBudget(options.cpuTimeBudget),
+        maybeStatement(statement.prepareForExecution(options.queryId, cpuTimeBudget)),
         queryEvent(this->db.sqliteObserver),
         allowUnconfirmed(options.allowUnconfirmed) {
     // If we throw from the constructor, the destructor won't run. Need to call destroy()
@@ -773,7 +850,9 @@ class SqliteDatabase::Query final: private ResetListener {
   Query(SqliteDatabase& db, QueryOptions options, kj::StringPtr sqlCode, Params&&... bindings)
       : ResetListener(db),
         regulator(options.regulator),
-        ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI, kj::none, options.queryId)),
+        cpuTimeBudget(options.cpuTimeBudget),
+        ownStatement(
+            db.prepareSql(regulator, sqlCode, 0, MULTI, kj::none, options.queryId, cpuTimeBudget)),
         maybeStatement(ownStatement),
         queryEvent(this->db.sqliteObserver),
         allowUnconfirmed(options.allowUnconfirmed) {
@@ -1093,7 +1172,8 @@ SqliteDatabase::Query SqliteDatabase::Statement::run(StatementOptions options, P
   return Query(db,
       {.regulator = regulator,
         .allowUnconfirmed = options.allowUnconfirmed,
-        .queryId = options.queryId},
+        .queryId = options.queryId,
+        .cpuTimeBudget = options.cpuTimeBudget},
       *this, kj::fwd<Params>(params)...);
 }
 

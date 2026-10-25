@@ -2103,6 +2103,212 @@ KJ_TEST("SQLite prepared EXPLAIN survives its table being dropped and recreated"
 
 // NOTE: This test sets a process-global SQLite hard_heap_limit that is never reset.
 // It must remain the LAST test in this file.
+// Creates table `nums` with 1000 rows, so that cross joins over it are expensive read-only
+// queries. (Recursive CTEs would be simpler, but TRUSTED does not permit them.)
+void createNums(SqliteDatabase& db) {
+  db.run("CREATE TABLE nums (x INTEGER)");
+  db.run("BEGIN TRANSACTION");
+  auto insert = db.prepare("INSERT INTO nums VALUES (?)");
+  for (int i = 0; i < 1000; i++) {
+    insert.run(i);
+  }
+  db.run("COMMIT TRANSACTION");
+}
+
+// A read-only query whose single step burns CPU for far longer than any budget in these tests
+// (a billion-row cross join).
+constexpr kj::StringPtr LONG_READ_SQL = "SELECT count(*) FROM nums a, nums b, nums c"_kj;
+
+// A read-only query returning a billion rows, each cheap to produce.
+constexpr kj::StringPtr MANY_ROWS_SQL = "SELECT a.x FROM nums a, nums b, nums c"_kj;
+
+constexpr kj::Duration SMALL_BUDGET = 20 * kj::MILLISECONDS;
+
+KJ_TEST("SQLite CpuTimeBudget interrupts a long read") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  createNums(db);
+
+  KJ_EXPECT_THROW_MESSAGE("SQL query exceeded its CPU time limit",
+      db.run({.regulator = SqliteDatabase::TRUSTED,
+               .cpuTimeBudget = SqliteDatabase::CpuTimeBudget::start(SMALL_BUDGET)},
+          LONG_READ_SQL));
+
+  // The interrupt is scoped to that statement: the connection is healthy and usable.
+  KJ_EXPECT(!db.observedCriticalError());
+  KJ_EXPECT(db.run("SELECT 1 + 1").getInt(0) == 2);
+
+  // A query that finishes within its budget is unaffected.
+  KJ_EXPECT(db.run({.regulator = SqliteDatabase::TRUSTED,
+                     .cpuTimeBudget = SqliteDatabase::CpuTimeBudget::start(10 * kj::SECONDS)},
+                  "SELECT 2 + 2")
+                .getInt(0) == 4);
+}
+
+KJ_TEST("SQLite CpuTimeBudget spans the whole cursor") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  createNums(db);
+
+  // Each row is cheap, so the first step succeeds, but iterating long enough spends the budget.
+  auto query = db.run({.regulator = SqliteDatabase::TRUSTED,
+                        .cpuTimeBudget = SqliteDatabase::CpuTimeBudget::start(SMALL_BUDGET)},
+      MANY_ROWS_SQL);
+  KJ_EXPECT(query.getInt(0) == 0);
+
+  uint64_t rows = 1;
+  KJ_EXPECT_THROW_MESSAGE("SQL query exceeded its CPU time limit", {
+    for (;;) {
+      query.nextRow();
+      KJ_ASSERT(!query.isDone());
+      ++rows;
+    }
+  });
+  KJ_EXPECT(rows > 1);
+  KJ_EXPECT(!db.observedCriticalError());
+}
+
+KJ_TEST("SQLite CpuTimeBudget leaves the enclosing transaction intact") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  createNums(db);
+
+  db.run("CREATE TABLE things (value INTEGER)");
+
+  db.run("BEGIN TRANSACTION");
+  db.run("INSERT INTO things VALUES (1)");
+  db.run("SAVEPOINT sp");
+  db.run("INSERT INTO things VALUES (2)");
+
+  KJ_EXPECT_THROW_MESSAGE("SQL query exceeded its CPU time limit",
+      db.run({.regulator = SqliteDatabase::TRUSTED,
+               .cpuTimeBudget = SqliteDatabase::CpuTimeBudget::start(SMALL_BUDGET)},
+          LONG_READ_SQL));
+
+  // SQLite only aborted the read; the savepoint and the transaction are still open.
+  KJ_EXPECT(!db.observedCriticalError());
+  db.run("ROLLBACK TO SAVEPOINT sp");
+  db.run("RELEASE SAVEPOINT sp");
+  db.run("COMMIT TRANSACTION");
+
+  auto query = db.run("SELECT value FROM things");
+  KJ_EXPECT(query.getInt(0) == 1);
+  query.nextRow();
+  KJ_EXPECT(query.isDone());
+}
+
+KJ_TEST("SQLite CpuTimeBudget interrupting a write in a transaction is a critical error") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  createNums(db);
+
+  kj::Maybe<kj::String> criticalErrorMessage;
+  db.onCriticalError([&](kj::StringPtr errorMessage, kj::Maybe<kj::Exception> maybeException) {
+    criticalErrorMessage = kj::str(errorMessage);
+  });
+
+  db.run("CREATE TABLE things (value INTEGER)");
+  db.run("BEGIN TRANSACTION");
+  db.run("INSERT INTO things VALUES (1)");
+  db.run("SAVEPOINT sp");
+
+  KJ_EXPECT_THROW_MESSAGE("SQL query exceeded its CPU time limit of 20ms",
+      db.run({.regulator = SqliteDatabase::TRUSTED,
+               .cpuTimeBudget = SqliteDatabase::CpuTimeBudget::start(SMALL_BUDGET)},
+          "INSERT INTO things SELECT a.x FROM nums a, nums b, nums c"));
+
+  // SQLite rolled back the whole transaction, which is reported as a critical error that names
+  // the cause.
+  KJ_EXPECT(db.observedCriticalError());
+  KJ_EXPECT(
+      KJ_ASSERT_NONNULL(criticalErrorMessage) == "SQL query exceeded its CPU time limit of 20ms"_kj,
+      criticalErrorMessage);
+  KJ_EXPECT(sqlite3_get_autocommit(db) != 0);
+  KJ_EXPECT(db.run("SELECT count(*) FROM things").getInt(0) == 0);
+}
+
+KJ_TEST("SQLite CpuTimeBudget interrupting an autocommit write is not a critical error") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  createNums(db);
+
+  db.run("CREATE TABLE things (value INTEGER)");
+  db.run("INSERT INTO things VALUES (1)");
+
+  KJ_EXPECT_THROW_MESSAGE("SQL query exceeded its CPU time limit",
+      db.run({.regulator = SqliteDatabase::TRUSTED,
+               .cpuTimeBudget = SqliteDatabase::CpuTimeBudget::start(SMALL_BUDGET)},
+          "INSERT INTO things SELECT a.x FROM nums a, nums b, nums c"));
+
+  // Only the statement's own transaction was rolled back; nothing else was affected.
+  KJ_EXPECT(!db.observedCriticalError());
+  KJ_EXPECT(db.run("SELECT count(*) FROM things").getInt(0) == 1);
+  db.run("INSERT INTO things VALUES (2)");
+  KJ_EXPECT(db.run("SELECT count(*) FROM things").getInt(0) == 2);
+}
+
+KJ_TEST("SQLite CpuTimeBudget reports through the Regulator") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  createNums(db);
+
+  class RegulatorImpl: public SqliteDatabase::Regulator {
+   public:
+    void onCpuTimeLimitExceeded(kj::Duration limit) const override {
+      KJ_FAIL_REQUIRE("regulator saw the limit", limit / kj::MILLISECONDS);
+    }
+  };
+  static constexpr RegulatorImpl regulator;
+
+  KJ_EXPECT_THROW_MESSAGE("regulator saw the limit; limit / kj::MILLISECONDS = 20",
+      db.run({.regulator = regulator,
+               .cpuTimeBudget = SqliteDatabase::CpuTimeBudget::start(SMALL_BUDGET)},
+          LONG_READ_SQL));
+}
+
+KJ_TEST("SQLite CpuTimeBudget covers statements executed by prepareMulti") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  createNums(db);
+
+  // On the first run of a prepareMulti() statement, the leading statements execute inside
+  // prepareSql(); on later runs they execute as cached prelude Statements. Both paths must be
+  // budgeted.
+  KJ_EXPECT_THROW_MESSAGE("SQL query exceeded its CPU time limit",
+      db.prepareMulti(SqliteDatabase::TRUSTED, kj::str(LONG_READ_SQL, "; SELECT 1"))
+          .run(SqliteDatabase::Statement::StatementOptions{
+            .cpuTimeBudget = SqliteDatabase::CpuTimeBudget::start(SMALL_BUDGET)}));
+
+  // For the cached path, make the leading statement's cost depend on data, so that the first
+  // run (which compiles) is cheap and a later run is long.
+  db.run("CREATE TABLE lim (n INTEGER)");
+  db.run("INSERT INTO lim VALUES (1)");
+  db.run("CREATE TABLE sink (x INTEGER)");
+  auto stmt = db.prepareMulti(SqliteDatabase::TRUSTED,
+      kj::str("INSERT INTO sink SELECT a.x FROM nums a, nums b, nums c LIMIT (SELECT n FROM lim); "
+              "SELECT 2"));
+  KJ_EXPECT(stmt.run(SqliteDatabase::Statement::StatementOptions{
+                       .cpuTimeBudget = SqliteDatabase::CpuTimeBudget::start(10 * kj::SECONDS)})
+                .getInt(0) == 2);
+  KJ_EXPECT(db.run("SELECT count(*) FROM sink").getInt(0) == 1);
+
+  db.run("UPDATE lim SET n = 1000000000");
+  KJ_EXPECT_THROW_MESSAGE("SQL query exceeded its CPU time limit",
+      stmt.run(SqliteDatabase::Statement::StatementOptions{
+        .cpuTimeBudget = SqliteDatabase::CpuTimeBudget::start(SMALL_BUDGET)}));
+
+  // The interrupted write ran in autocommit mode, so only its own effects were rolled back.
+  KJ_EXPECT(db.run("SELECT count(*) FROM sink").getInt(0) == 1);
+  KJ_EXPECT(!db.observedCriticalError());
+}
+
 KJ_TEST("SQLite critical error handling for SQLITE_NOMEM") {
   testCriticalError("out of memory", [](SqliteDatabase& db, SqliteDatabase::Vfs& vfs) {
     db.run("CREATE TABLE test_nomem (id INTEGER PRIMARY KEY, data BLOB)");

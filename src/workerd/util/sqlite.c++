@@ -27,6 +27,7 @@
 #include <fcntl.h>
 #include <sqlite3.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include <kj/map.h>
 #include <kj/mutex.h>
@@ -737,6 +738,67 @@ void SqliteDatabase::handleCriticalError(kj::Maybe<int> errorCode,
   }
 }
 
+namespace {
+
+// CPU time consumed by the calling thread. Unlike the monotonic clock, this is not served from
+// the vDSO on Linux; it is a real system call, so avoid calling it in hot paths unless needed.
+// Returns zero if the clock is unavailable, which makes any CpuTimeBudget unspendable.
+kj::Duration threadCpuTime() {
+#if _WIN32
+  FILETIME creationTime, exitTime, kernelTime, userTime;
+  if (!GetThreadTimes(GetCurrentThread(), &creationTime, &exitTime, &kernelTime, &userTime)) {
+    return 0 * kj::NANOSECONDS;
+  }
+  auto toDuration = [](const FILETIME& ft) {
+    uint64_t ticks = (static_cast<uint64_t>(ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
+    return ticks * 100 * kj::NANOSECONDS;
+  };
+  return toDuration(kernelTime) + toDuration(userTime);
+#else
+  struct timespec ts;
+  if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) != 0) {
+    return 0 * kj::NANOSECONDS;
+  }
+  return ts.tv_sec * kj::SECONDS + ts.tv_nsec * kj::NANOSECONDS;
+#endif
+}
+
+}  // namespace
+
+SqliteDatabase::CpuTimeBudget SqliteDatabase::CpuTimeBudget::start(kj::Duration limit) {
+  return CpuTimeBudget{
+    .limit = limit,
+    .cpuDeadline = threadCpuTime() + limit,
+    .wallDeadline = kj::systemPreciseMonotonicClock().now() + limit,
+  };
+}
+
+bool SqliteDatabase::CpuTimeBudget::isSpent() const {
+  if (kj::systemPreciseMonotonicClock().now() < wallDeadline) return false;
+  return threadCpuTime() >= cpuDeadline;
+}
+
+bool SqliteDatabase::onProgress() noexcept {
+  KJ_IF_SOME(budget, activeCpuTimeBudget) {
+    if (budget.isSpent()) {
+      cpuTimeBudgetSpent = true;
+      return true;
+    }
+  }
+  return false;
+}
+
+kj::String SqliteDatabase::cpuTimeLimitExceededMessage(const CpuTimeBudget& budget) {
+  return kj::str(
+      "SQL query exceeded its CPU time limit of ", budget.limit / kj::MILLISECONDS, "ms");
+}
+
+void SqliteDatabase::throwCpuTimeLimitExceeded(
+    StaticRegulator regulator, const CpuTimeBudget& budget) {
+  regulator->onCpuTimeLimitExceeded(budget.limit);
+  kj::throwFatalException(KJ_EXCEPTION(FAILED, cpuTimeLimitExceededMessage(budget)));
+}
+
 kj::StringPtr SqliteDatabase::getCurrentQueryForDebug() {
   KJ_IF_SOME(s, currentStatement) {
     return sqlite3_normalized_sql(&s);
@@ -846,7 +908,8 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(StaticRegulator re
     uint prepFlags,
     Multi multi,
     kj::Maybe<kj::Vector<Statement>&> prelude,
-    kj::Maybe<SqliteQueryId> queryId) {
+    kj::Maybe<SqliteQueryId> queryId,
+    kj::Maybe<const CpuTimeBudget&> cpuTimeBudget) {
   sqlite3* db = &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
 
   ParseContext parseContext;
@@ -950,6 +1013,12 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(StaticRegulator re
             auto start = sqliteObserver.now();
             auto dbWalSizeBefore = sqliteObserver.getDbWalSize();
 
+            KJ_DEFER(activeCpuTimeBudget = kj::none);
+            KJ_IF_SOME(budget, cpuTimeBudget) {
+              activeCpuTimeBudget = budget;
+              cpuTimeBudgetSpent = false;
+            }
+
             int err = sqlite3_step(result);
             int extendedCode = sqlite3_extended_errcode(db);
 
@@ -979,6 +1048,11 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(StaticRegulator re
               // good
             } else if (err == SQLITE_ROW) {
               // Intermediate statement returned results. We will discard.
+            } else if (err == SQLITE_INTERRUPT && cpuTimeBudgetSpent) {
+              auto& budget = KJ_ASSERT_NONNULL(cpuTimeBudget);
+              handleCriticalError(
+                  err, cpuTimeLimitExceededMessage(budget), sqliteCallScope.getException());
+              throwCpuTimeLimitExceeded(regulator, budget);
             } else {
               SQLITE_CALL_FAILED("sqlite3_step()", err);
             }
@@ -1478,8 +1552,11 @@ void SqliteDatabase::setupSecurity(sqlite3* db) {
   },
       this));
 
-  // 4. Set a progress handler or use interrupt() to limit CPU time.
-  // This happens inside LimitEnforcer.
+  // 4. Set up the progress handler that enforces CpuTimeBudget. (The per-isolate CPU limit is
+  // enforced separately, via sqlite3_interrupt() from another thread.)
+  sqlite3_progress_handler(db, PROGRESS_HANDLER_OPCODE_INTERVAL, [](void* userdata) -> int {
+    return reinterpret_cast<SqliteDatabase*>(userdata)->onProgress() ? 1 : 0;
+  }, this);
 
   // 5. Limit heap size.
   // Set a 128MB "soft" limit so that SQLite will purge the page cache when per-process memory
@@ -1511,9 +1588,10 @@ SqliteDatabase::Statement SqliteDatabase::prepare(
 }
 
 SqliteDatabase::StatementAndEffect& SqliteDatabase::Statement::prepareForExecution(
-    kj::Maybe<SqliteQueryId> queryId) {
+    kj::Maybe<SqliteQueryId> queryId, kj::Maybe<const CpuTimeBudget&> cpuTimeBudget) {
   for (auto& stmt: prelude) {
-    stmt.run(StatementOptions{.queryId = queryId});
+    stmt.run(StatementOptions{.queryId = queryId,
+      .cpuTimeBudget = cpuTimeBudget.map([](const CpuTimeBudget& b) { return b; })});
   }
 
   KJ_IF_SOME(prepared, stmt.tryGet<StatementAndEffect>()) {
@@ -1543,8 +1621,8 @@ SqliteDatabase::StatementAndEffect& SqliteDatabase::Statement::prepareForExecuti
 
     // We use the MULTI flag here in case this Statement was created by prepareMulti(). If multiple
     // statements are parsed, they'll be added to our `prelude`, and also executed immediately.
-    stmt = db.prepareSql(
-        regulator, sqlCodeToPrepare, SQLITE_PREPARE_PERSISTENT, MULTI, prelude, queryId);
+    stmt = db.prepareSql(regulator, sqlCodeToPrepare, SQLITE_PREPARE_PERSISTENT, MULTI, prelude,
+        queryId, cpuTimeBudget);
   }
 
   return KJ_ASSERT_NONNULL(stmt.tryGet<StatementAndEffect>());
@@ -1571,7 +1649,8 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
     kj::ArrayPtr<const ValuePtr> bindings)
     : ResetListener(db),
       regulator(options.regulator),
-      maybeStatement(statement.prepareForExecution(options.queryId)),
+      cpuTimeBudget(options.cpuTimeBudget),
+      maybeStatement(statement.prepareForExecution(options.queryId, cpuTimeBudget)),
       queryEvent(this->db.sqliteObserver) {
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
   KJ_ON_SCOPE_FAILURE(destroy());
@@ -1585,7 +1664,9 @@ SqliteDatabase::Query::Query(SqliteDatabase& db,
     kj::ArrayPtr<const ValuePtr> bindings)
     : ResetListener(db),
       regulator(options.regulator),
-      ownStatement(db.prepareSql(regulator, sqlCode, 0, MULTI, kj::none, options.queryId)),
+      cpuTimeBudget(options.cpuTimeBudget),
+      ownStatement(
+          db.prepareSql(regulator, sqlCode, 0, MULTI, kj::none, options.queryId, cpuTimeBudget)),
       maybeStatement(ownStatement),
       queryEvent(this->db.sqliteObserver) {
   // If we throw from the constructor, the destructor won't run. Need to call destroy() explicitly.
@@ -1752,6 +1833,10 @@ void SqliteDatabase::Query::nextRow(bool first) {
   KJ_DEFER(db.currentRegulator = kj::none);
   db.currentRegulator = regulator;
 
+  KJ_DEFER(db.activeCpuTimeBudget = kj::none);
+  db.activeCpuTimeBudget = cpuTimeBudget;
+  db.cpuTimeBudgetSpent = false;
+
   auto memoryScope = db.enterMemoryScope();
   SQLITE_CALL_SCOPE {
     int err = sqlite3_step(statement);
@@ -1768,6 +1853,12 @@ void SqliteDatabase::Query::nextRow(bool first) {
     rowsWritten = getRowsWritten();
     if (err == SQLITE_DONE) {
       done = true;
+    } else if (err == SQLITE_INTERRUPT && db.cpuTimeBudgetSpent) {
+      // If the statement wrote, SQLite has rolled back the whole transaction (see
+      // CpuTimeBudget); handleCriticalError() detects that and reports it.
+      auto& budget = KJ_ASSERT_NONNULL(cpuTimeBudget);
+      handleCriticalError(err, cpuTimeLimitExceededMessage(budget), sqliteCallScope.getException());
+      throwCpuTimeLimitExceeded(regulator, budget);
     } else if (err != SQLITE_ROW) {
       SQLITE_CALL_FAILED("sqlite3_step()", err);
     }
