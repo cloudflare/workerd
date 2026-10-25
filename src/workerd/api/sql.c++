@@ -6,6 +6,7 @@
 
 #include "actor-state.h"
 
+#include <workerd/io/features.h>
 #include <workerd/io/io-context.h>
 #include <workerd/util/sqlite.h>
 
@@ -30,8 +31,32 @@ SqlStorage::SqlStorage(jsg::Ref<DurableObjectStorage> storage)
 
 SqlStorage::~SqlStorage() {}
 
-jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
-    jsg::Lock& js, jsg::JsString querySql, jsg::Arguments<BindingValue> bindings) {
+jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(jsg::Lock& js,
+    kj::OneOf<jsg::JsString, ExecOptions> query,
+    jsg::Arguments<BindingValue> bindings) {
+  kj::Maybe<SqliteDatabase::CpuTimeBudget> cpuTimeBudget;
+  jsg::JsString querySql = [&]() -> jsg::JsString {
+    KJ_SWITCH_ONEOF(query) {
+      KJ_CASE_ONEOF(str, jsg::JsString) {
+        return str;
+      }
+      KJ_CASE_ONEOF(options, ExecOptions) {
+        JSG_REQUIRE(FeatureFlags::get(js).getWorkerdExperimental(), TypeError,
+            "Passing an options object to sql.exec() requires the 'experimental' compatibility "
+            "flag.");
+        KJ_IF_SOME(ms, options.cpuTimeLimitMs) {
+          // NaN fails this comparison too.
+          JSG_REQUIRE(ms > 0, TypeError, "cpuTimeLimitMs must be a positive number.");
+          // Cap at ~11 days, which is as good as unlimited, to stay within kj::Duration's range.
+          auto limit = static_cast<int64_t>(kj::min(ms, 1e9) * 1e6) * kj::NANOSECONDS;
+          cpuTimeBudget = SqliteDatabase::CpuTimeBudget::start(limit);
+        }
+        return js.str(options.sql);
+      }
+    }
+    KJ_UNREACHABLE;
+  }();
+
   auto& context = IoContext::current();
   TraceContext traceContext = context.makeUserTraceSpan("durable_object_storage_exec"_kjc);
   traceContext.setTag("db.system.name"_kjc, "cloudflare-durable-object-sql"_kjc);
@@ -85,11 +110,11 @@ jsg::Ref<SqlStorage::Cursor> SqlStorage::exec(
     // exceedingly rare, it is not worth the added code complexity.
     return js.alloc<Cursor>(js, kj::mv(doneCallback), db,
         SqliteDatabase::StaticRegulator(regulator), js.toString(querySql), kj::mv(bindings),
-        queryId);
+        queryId, cpuTimeBudget);
   }
 
-  auto result =
-      js.alloc<Cursor>(js, kj::mv(doneCallback), slot.addRef(), kj::mv(bindings), queryId);
+  auto result = js.alloc<Cursor>(
+      js, kj::mv(doneCallback), slot.addRef(), kj::mv(bindings), queryId, cpuTimeBudget);
 
   // If the statement cache grew too big, drop the least-recently-used entry.
   while (statementCache.totalSize > SQL_STATEMENT_CACHE_MAX_SIZE) {
@@ -158,6 +183,11 @@ void SqlStorageRegulator::onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr 
   JSG_ASSERT(false, Error, message);
 }
 
+void SqlStorageRegulator::onCpuTimeLimitExceeded(kj::Duration limit) const {
+  JSG_FAIL_REQUIRE(DOMTimeoutError, "SQL query exceeded its CPU time limit of ",
+      limit / kj::MILLISECONDS, "ms.");
+}
+
 bool SqlStorageRegulator::allowTransactions() const {
   JSG_FAIL_REQUIRE(Error,
       "To execute a transaction, please use the state.storage.transaction() or "
@@ -201,17 +231,21 @@ SqlStorage::Cursor::State::State(SqliteDatabase& db,
     SqliteDatabase::StaticRegulator regulator,
     kj::StringPtr sqlCode,
     kj::Array<BindingValue> bindingsParam,
-    kj::Maybe<SqliteQueryId> queryId)
+    kj::Maybe<SqliteQueryId> queryId,
+    kj::Maybe<SqliteDatabase::CpuTimeBudget> cpuTimeBudget)
     : bindings(kj::mv(bindingsParam)),
-      query(db.run(
-          {.regulator = regulator, .queryId = queryId}, sqlCode, mapBindings(bindings).asPtr())) {}
+      query(db.run({.regulator = regulator, .queryId = queryId, .cpuTimeBudget = cpuTimeBudget},
+          sqlCode,
+          mapBindings(bindings).asPtr())) {}
 
 SqlStorage::Cursor::State::State(kj::Rc<CachedStatement> cachedStatementParam,
     kj::Array<BindingValue> bindingsParam,
-    kj::Maybe<SqliteQueryId> queryId)
+    kj::Maybe<SqliteQueryId> queryId,
+    kj::Maybe<SqliteDatabase::CpuTimeBudget> cpuTimeBudget)
     : bindings(kj::mv(bindingsParam)),
       query(cachedStatement.emplace(kj::mv(cachedStatementParam))
-                ->statement.run(SqliteDatabase::Statement::StatementOptions{.queryId = queryId},
+                ->statement.run(SqliteDatabase::Statement::StatementOptions{.queryId = queryId,
+                                  .cpuTimeBudget = cpuTimeBudget},
                     mapBindings(bindings).asPtr())) {}
 
 SqlStorage::Cursor::~Cursor() noexcept(false) {

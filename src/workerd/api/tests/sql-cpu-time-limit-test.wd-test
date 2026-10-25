@@ -1,0 +1,46 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "main", worker = .mainWorker),
+    (name = "no-experimental", worker = .noExperimentalWorker),
+    (name = "TEST_TMPDIR", disk = (writable = true)),
+  ],
+);
+
+const mainWorker :Workerd.Worker = (
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "sql-cpu-time-limit-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    ( className = "CpuTimeLimitObject",
+      uniqueKey = "3f0a0b7f7a5f4ad59a0e2f2d6b6b5c11",
+      enableSql = true ),
+  ],
+
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "CpuTimeLimitObject"),
+    (name = "noExperimentalNs", durableObjectNamespace = (serviceName = "no-experimental", className = "NoExperimentalObject")),
+  ],
+);
+
+const noExperimentalWorker :Workerd.Worker = (
+  compatibilityFlags = ["nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "sql-cpu-time-limit-no-experimental.js"),
+  ],
+
+  durableObjectNamespaces = [
+    ( className = "NoExperimentalObject",
+      uniqueKey = "0d3c6d4b5e7a4c2f9b1e8d7c6a5b4f22",
+      enableSql = true ),
+  ],
+
+  durableObjectStorage = (localDisk = "TEST_TMPDIR"),
+);

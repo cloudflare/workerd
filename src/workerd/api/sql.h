@@ -19,6 +19,7 @@ class SqlStorageRegulator: public SqliteDatabase::Regulator {
   void onError(kj::Maybe<int> sqliteErrorCode, kj::StringPtr message) const override;
   bool allowTransactions() const override;
   bool shouldAddQueryStats() const override;
+  void onCpuTimeLimitExceeded(kj::Duration limit) const override;
 };
 
 class SqlStorage final: public jsg::Object {
@@ -38,7 +39,22 @@ class SqlStorage final: public jsg::Object {
   // JSG, which does not need to make a copy.
   using SqlValue = kj::Maybe<kj::OneOf<kj::Array<byte>, kj::StringPtr, double>>;
 
-  jsg::Ref<Cursor> exec(jsg::Lock& js, jsg::JsString query, jsg::Arguments<BindingValue> bindings);
+  // The first argument to `exec()`, when it is an object rather than the SQL string itself.
+  // Requires the `experimental` compatibility flag.
+  struct ExecOptions {
+    kj::String sql;
+
+    // Thread CPU time the query may consume before it is interrupted and fails with a
+    // `TimeoutError` DOMException. See `SqliteDatabase::CpuTimeBudget` for what interrupting a
+    // query entails; in particular, interrupting a write resets the Durable Object.
+    jsg::Optional<double> cpuTimeLimitMs;
+
+    JSG_STRUCT(sql, cpuTimeLimitMs);
+  };
+
+  jsg::Ref<Cursor> exec(jsg::Lock& js,
+      kj::OneOf<jsg::JsString, ExecOptions> query,
+      jsg::Arguments<BindingValue> bindings);
   IngestResult ingest(jsg::Lock& js, kj::String query);
   void setMaxPageCountForTest(jsg::Lock& js, int count);
 
@@ -65,9 +81,15 @@ class SqlStorage final: public jsg::Object {
     JSG_NESTED_TYPE(Cursor);
     JSG_NESTED_TYPE(Statement);
 
-    JSG_TS_OVERRIDE({
-      exec<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: any[]): SqlStorageCursor<T>
-    });
+    if (flags.getWorkerdExperimental()) {
+      JSG_TS_OVERRIDE({
+        exec<T extends Record<string, SqlStorageValue>>(query: string | SqlStorageExecOptions, ...bindings: any[]): SqlStorageCursor<T>
+      });
+    } else {
+      JSG_TS_OVERRIDE({
+        exec<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: any[]): SqlStorageCursor<T>
+      });
+    }
   }
 
   void visitForMemoryInfo(jsg::MemoryTracker& tracker) const;
@@ -258,11 +280,13 @@ class SqlStorage::Cursor final: public jsg::Object {
         SqliteDatabase::StaticRegulator regulator,
         kj::StringPtr sqlCode,
         kj::Array<BindingValue> bindings,
-        kj::Maybe<SqliteQueryId> queryId);
+        kj::Maybe<SqliteQueryId> queryId,
+        kj::Maybe<SqliteDatabase::CpuTimeBudget> cpuTimeBudget);
 
     State(kj::Rc<CachedStatement> cachedStatement,
         kj::Array<BindingValue> bindings,
-        kj::Maybe<SqliteQueryId> queryId);
+        kj::Maybe<SqliteQueryId> queryId,
+        kj::Maybe<SqliteDatabase::CpuTimeBudget> cpuTimeBudget);
   };
 
   // Nulled out when query is done or canceled.
@@ -364,10 +388,10 @@ struct SqlStorage::IngestResult {
 };
 
 #define EW_SQL_ISOLATE_TYPES                                                                       \
-  api::SqlStorage, api::SqlStorage::Statement, api::SqlStorage::Cursor,                            \
-      api::SqlStorage::IngestResult, api::SqlStorage::Cursor::RowIterator,                         \
-      api::SqlStorage::Cursor::RowIterator::Next, api::SqlStorage::Cursor::RawIterator,            \
-      api::SqlStorage::Cursor::RawIterator::Next
+  api::SqlStorage, api::SqlStorage::ExecOptions, api::SqlStorage::Statement,                       \
+      api::SqlStorage::Cursor, api::SqlStorage::IngestResult,                                      \
+      api::SqlStorage::Cursor::RowIterator, api::SqlStorage::Cursor::RowIterator::Next,            \
+      api::SqlStorage::Cursor::RawIterator, api::SqlStorage::Cursor::RawIterator::Next
 // The list of sql.h types that are added to worker.c++'s JSG_DECLARE_ISOLATE_TYPE
 
 }  // namespace workerd::api

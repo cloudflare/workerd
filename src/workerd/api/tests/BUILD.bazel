@@ -572,6 +572,15 @@ wd_test(
 )
 
 wd_test(
+    src = "sql-cpu-time-limit-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "sql-cpu-time-limit-no-experimental.js",
+        "sql-cpu-time-limit-test.js",
+    ],
+)
+
+wd_test(
     src = "kv-resizable-arraybuffer-test.wd-test",
     args = [
         "--experimental",

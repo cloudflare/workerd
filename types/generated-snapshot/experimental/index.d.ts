@@ -4011,8 +4011,13 @@ declare const WebSocketPair: {
   };
 };
 interface SqlStorage {
+  /**
+   * Executes SQL and returns a cursor over its results.
+   *
+   * [Cloudflare Docs Reference](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/#exec)
+   */
   exec<T extends Record<string, SqlStorageValue>>(
-    query: string,
+    query: string | SqlStorageExecOptions,
     ...bindings: any[]
   ): SqlStorageCursor<T>;
   prepare(query: string): SqlStorageStatement;
@@ -4021,6 +4026,23 @@ interface SqlStorage {
   get databaseSize(): number;
   Cursor: typeof SqlStorageCursor;
   Statement: typeof SqlStorageStatement;
+}
+/**
+ * The first argument to `SqlStorage.exec()`, when it is an object rather than the SQL string
+ * itself. Requires the `experimental` compatibility flag.
+ */
+interface SqlStorageExecOptions {
+  /** The SQL to execute. May contain several statements; only the last may have bindings. */
+  sql: string;
+  /**
+   * Thread CPU time the query may consume, in milliseconds, before it is interrupted and throws a
+   * `TimeoutError` DOMException. Starts when `exec()` is called and covers compiling the statement
+   * and every row read from the returned cursor.
+   *
+   * Interrupting a read affects nothing else. Interrupting a statement that writes makes SQLite roll
+   * back the whole transaction, which resets the Durable Object.
+   */
+  cpuTimeLimitMs?: number;
 }
 declare abstract class SqlStorageStatement {}
 type SqlStorageValue = ArrayBuffer | string | number | null;
