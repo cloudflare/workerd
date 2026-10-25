@@ -237,6 +237,21 @@ impl EventEmitter {
 
 Without tracing, storing a `TracedGlobal` back to the resource's own wrapper creates an unbreakable reference cycle that leaks until the worker is torn down. With `visit_traced_global` tracing (generated automatically by `#[jsg_resource]`), the cycle is collected by the next full GC after all strong Rust `Rc`s are dropped.
 
+## Errors from JavaScript
+
+When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
+
+Code that gets a pending error must not call into JavaScript, and should return the error. Converting it to another error and throwing that replaces the exception, as when C++ code throws while a `JsExceptionThrown` unwinds; nothing ever replaces a termination, and `call` refuses to run while execution is terminating.
+
+To handle an exception instead, run the code in `Lock::try_catch`, which catches as C++ `jsg::Lock::tryCatch()` does: the exception, or an error the closure returns, as a value; a termination keeps propagating.
+
+```rust
+match lock.try_catch(|lock| callback.call::<Number>(lock, None, &[]))? {
+    Ok(result) => { /* ... */ }
+    Err(exception) => { /* handle what the callback threw */ }
+}
+```
+
 ## Union Types
 
 To accept JavaScript values that can be one of several types, define an enum with `#[jsg_oneof]`:

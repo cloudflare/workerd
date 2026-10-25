@@ -585,6 +585,241 @@ fn method_can_be_reentered() {
     });
 }
 
+/// A resource whose methods call callbacks and return what they threw, as C++ JSG does when a
+/// `jsg::Function` throws.
+#[jsg_resource]
+struct CallingResource {
+    /// Set when a call fails with an error that stands for a pending exception.
+    saw_pending: Cell<bool>,
+}
+
+impl CallingResource {
+    fn function(
+        callback: v8::Local<'_, v8::Value>,
+    ) -> Result<v8::Local<'_, v8::Function>, jsg::Error> {
+        callback
+            .try_as::<v8::Function>()
+            .ok_or_else(|| jsg::Error::new_type_error("not a function"))
+    }
+}
+
+#[jsg_resource]
+impl CallingResource {
+    #[jsg_method]
+    pub fn call<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        callback: v8::Local<'s, v8::Value>,
+    ) -> Result<(), jsg::Error> {
+        Self::function(callback)?
+            .call::<v8::Local<v8::Value>>(lock, None, &[])
+            .inspect_err(|err| self.saw_pending.set(err.is_pending()))?;
+        Ok(())
+    }
+
+    /// Calls `first`, then `second` even if `first` failed, and returns how `first` ended.
+    #[jsg_method]
+    pub fn call_both<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        first: v8::Local<'s, v8::Value>,
+        second: v8::Local<'s, v8::Value>,
+    ) -> Result<(), jsg::Error> {
+        let first = Self::function(first)?.call::<v8::Local<v8::Value>>(lock, None, &[]);
+        let second = Self::function(second)?.call::<v8::Local<v8::Value>>(lock, None, &[]);
+        self.saw_pending
+            .set(second.is_err_and(|err| err.is_pending()));
+        first.map(|_| ())
+    }
+
+    /// Calls `callback` in `try_catch`, and returns how `try_catch` ended.
+    #[jsg_method]
+    pub fn call_catching<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        callback: v8::Local<'s, v8::Value>,
+    ) -> Result<bool, jsg::Error> {
+        let callback = Self::function(callback)?;
+        let caught = lock
+            .try_catch(|lock| callback.call::<v8::Local<v8::Value>>(lock, None, &[]))
+            .inspect_err(|err| self.saw_pending.set(err.is_pending()))?;
+        Ok(caught.is_err())
+    }
+
+    /// Calls `callback`, and fails with a new error whether or not it threw.
+    #[jsg_method]
+    pub fn call_then_fail<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        callback: v8::Local<'s, v8::Value>,
+    ) -> Result<(), jsg::Error> {
+        let _ = Self::function(callback)?.call::<v8::Local<v8::Value>>(lock, None, &[]);
+        Err(jsg::Error::new_type_error("replaced"))
+    }
+}
+
+fn calling_resource(
+    lock: &mut jsg::Lock,
+    ctx: &crate::EvalContext<'_>,
+) -> jsg::Rc<CallingResource> {
+    let resource = jsg::Rc::new(CallingResource {
+        saw_pending: Cell::new(false),
+    });
+    ctx.set_global(lock, "obj", resource.clone());
+    ctx.set_global(lock, "panicker", jsg::Rc::new(PanicResource));
+    resource
+}
+
+/// JavaScript that terminates execution: `panicNow()` throws an internal error and requests
+/// termination, which takes effect at the next interrupt check, in the loop.
+const TERMINATE: &str = "() => { try { panicker.panicNow(); } catch (e) {} while (true) {} }";
+
+/// An exception thrown by a callback propagates unchanged through the method that called it.
+#[test]
+fn exception_from_callback_propagates_through_method() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = calling_resource(lock, ctx);
+        let caught = ctx.eval::<bool>(
+            lock,
+            "const thrown = new Error('boom');
+             thrown.extra = 1;
+             let caught;
+             try { obj.call(() => { throw thrown; }); } catch (e) { caught = e; }
+             caught === thrown && caught.extra === 1",
+        );
+        assert!(caught.unwrap());
+        let caught = ctx.eval::<bool>(
+            lock,
+            "try { obj.call(() => { throw 'a string'; }); false } catch (e) { e === 'a string' }",
+        );
+        assert!(caught.unwrap());
+        assert!(resource.saw_pending.get());
+        Ok(())
+    });
+}
+
+/// An exception propagates through two methods with a JavaScript frame between them that
+/// catches and rethrows it.
+#[test]
+fn exception_propagates_through_nested_methods() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        calling_resource(lock, ctx);
+        let caught = ctx.eval::<bool>(
+            lock,
+            "const thrown = new Error('boom');
+             let caught;
+             try {
+               obj.call(() => {
+                 try {
+                   obj.call(() => { throw thrown; });
+                 } catch (e) {
+                   e.rethrown = true;
+                   throw e;
+                 }
+               });
+             } catch (e) { caught = e; }
+             caught === thrown && caught.rethrown === true",
+        );
+        assert!(caught.unwrap());
+        Ok(())
+    });
+}
+
+/// A callback that terminates execution fails the call, and the termination keeps propagating
+/// past the method.
+#[test]
+fn termination_in_callback_propagates_through_method() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = calling_resource(lock, ctx);
+        let result = ctx.eval::<bool>(
+            lock,
+            &format!("try {{ obj.call({TERMINATE}); }} catch (e) {{}} true"),
+        );
+        assert!(result.is_err());
+        assert!(resource.saw_pending.get());
+        Ok(())
+    });
+}
+
+/// A call made while execution is terminating runs no JavaScript and fails.
+#[test]
+fn call_while_terminating_runs_nothing() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = calling_resource(lock, ctx);
+        let result = ctx.eval::<bool>(
+            lock,
+            &format!(
+                "globalThis.secondRan = false;
+                 obj.callBoth({TERMINATE}, () => {{ globalThis.secondRan = true; }});
+                 true"
+            ),
+        );
+        assert!(result.is_err());
+        assert!(resource.saw_pending.get());
+        // V8 clears the termination once no JavaScript is running.
+        assert!(!ctx.eval::<bool>(lock, "secondRan").unwrap());
+        Ok(())
+    });
+}
+
+/// `try_catch` catches what a callback throws, but not a termination: that fails `try_catch`
+/// with a pending error and keeps propagating past the method.
+#[test]
+fn try_catch_does_not_catch_termination() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = calling_resource(lock, ctx);
+        let caught = ctx.eval::<bool>(lock, "obj.callCatching(() => { throw new Error('boom'); })");
+        assert!(caught.unwrap());
+        assert!(!resource.saw_pending.get());
+
+        let result = ctx.eval::<bool>(
+            lock,
+            &format!("try {{ obj.callCatching({TERMINATE}); false }} catch (e) {{ true }}"),
+        );
+        assert!(result.is_err(), "the termination was caught: {result:?}");
+        assert!(resource.saw_pending.get());
+        Ok(())
+    });
+}
+
+/// An error that replaces a termination is not thrown, so JavaScript cannot catch it and the
+/// termination keeps propagating.
+#[test]
+fn error_does_not_replace_termination() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        calling_resource(lock, ctx);
+        let result = ctx.eval::<bool>(
+            lock,
+            &format!("try {{ obj.callThenFail({TERMINATE}); false }} catch (e) {{ true }}"),
+        );
+        assert!(result.is_err(), "the termination was caught: {result:?}");
+        Ok(())
+    });
+}
+
+/// An error that replaces a pending exception is thrown in its place, as when C++ JSG code
+/// throws while a `JsExceptionThrown` unwinds.
+#[test]
+fn error_replaces_pending_exception() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        calling_resource(lock, ctx);
+        let message = ctx.eval::<String>(
+            lock,
+            "try { obj.callThenFail(() => { throw new Error('boom'); }); '' } \
+             catch (e) { e.message }",
+        );
+        assert_eq!(message.unwrap(), "replaced");
+        Ok(())
+    });
+}
+
 // =============================================================================
 // Receiver guard tests
 // =============================================================================
