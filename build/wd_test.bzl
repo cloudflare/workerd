@@ -188,8 +188,10 @@ fi
 
 # Run supervisor to start sidecar if specified
 if [ ! -z "{sidecar}" ]; then
-    # These environment variables are processed by the supervisor executable
-    PORTS_TO_ASSIGN={port_bindings} RANDOMIZE_IP={randomize_ip} SIDECAR_PORT_MODE={sidecar_port_mode} SIDECAR_COMMAND="{sidecar}" {supervisor} {runtest}
+    # These environment variables are processed by the supervisor executable. The supervisor and
+    # the sidecar aren't instrumented, and under COVERAGE_DIR a js_binary loads a coverage module
+    # that only instrumented ones carry; workerd's profile goes to LLVM_PROFILE_FILE.
+    env -u COVERAGE_DIR PORTS_TO_ASSIGN={port_bindings} RANDOMIZE_IP={randomize_ip} SIDECAR_PORT_MODE={sidecar_port_mode} SIDECAR_COMMAND="{sidecar}" {supervisor} {runtest}
 else
     {runtest}
 fi

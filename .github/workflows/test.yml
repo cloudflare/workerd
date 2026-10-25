@@ -181,6 +181,10 @@ jobs:
           bash build/check_ci_flags.sh '--config=bazelflare-tsan' --config=ci --config=ci-test --config=ci-bazelflare-tsan
           # lint
           bash build/check_ci_flags.sh '--config=bazelflare --config=lint' --config=ci --config=ci-test --config=ci-bazelflare
+          # check-snapshot
+          bash build/check_ci_flags.sh '--config=bazelflare' --config=ci --config=ci-bazelflare --config=ci-download-types
+          # coverage-linux (coverage.yml)
+          bash build/check_ci_flags.sh '--config=bazelflare-coverage' --config=ci --config=ci-bazelflare-coverage
 
   check-snapshot:
     runs-on: ubuntu-22.04-16core
@@ -188,21 +192,21 @@ jobs:
       - uses: actions/checkout@v7
         with:
           show-progress: false
-      - name: Cache
-        id: cache
-        uses: actions/cache@v5
-        # Use same cache and build configuration as release build, this allows us to keep download
-        # sizes small and generate types with optimization enabled, should be slightly faster.
+      - name: Set up bazelflare
+        uses: ./.github/actions/setup-bazelflare
         with:
-          path: ~/bazel-disk-cache
-          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel') }}
+          BAZELFLARE_ENDPOINT: ${{ vars.BAZELFLARE_ENDPOINT }}
+          BAZELFLARE_CA_PEM: ${{ vars.BAZELFLARE_CA_PEM }}
+          BAZELFLARE_TOKEN: ${{ secrets.BAZELFLARE_TOKEN }}
       - name: Setup Runner
         uses: ./.github/actions/setup-runner
         with:
           GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
       - name: build types
+        # The build `just generate-types` makes, on bazelflare, which the test-linux job's build
+        # mostly shares.
         run: |
-          bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types
+          bazel build --config=bazelflare --config=ci --config=ci-bazelflare --config=ci-download-types //types
       - name: Check snapshot diff
         run: |
           diff -r types/generated-snapshot bazel-bin/types/definitions > types.diff

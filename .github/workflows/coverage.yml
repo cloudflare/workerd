@@ -25,11 +25,9 @@ jobs:
       os_name: linux
       arch_name: 'X64'
       suffix: 'coverage'
-      # Don't use ci-test here because it enables --remote_download_minimal which prevents
-      # coverage data from being fetched from cache.
-      # Use ci-linux-common instead of ci-linux to avoid overriding coverage test_tag_filters
-      # (ci-linux sets test_tag_filters that would include container tests which require docker)
-      extra_bazel_args: '--config=ci-linux-common --config=ci-limit-storage --config=coverage'
+      bazelflare: true
+      developer_flags: '--config=bazelflare-coverage'
+      extra_bazel_args: '--config=ci-bazelflare-coverage'
       upload_test_logs: true
       upload_binary: false
       build_container_images: false
@@ -41,3 +39,4 @@ jobs:
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
+      BAZELFLARE_TOKEN: ${{ secrets.BAZELFLARE_TOKEN }}
