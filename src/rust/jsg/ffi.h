@@ -106,6 +106,20 @@ Isolate* gc_visitor_v8_isolate(GcVisitor* visitor);
 /// field of the `ffi::Global`.
 void global_clear_weak(uintptr_t* global);
 
+// Rules for the shims below (details in src/rust/jsg/README.md, "Safety rules"):
+// - Call V8 directly, not C++ JSG (`jsg::Lock`, `JSG_TRY`, `jsg::check`,
+//   `createTunneledException`, `makeInternalError`, `jsg::Data`, ...). cpp-jsg-allowlist-test
+//   fails on a new use. To report a JavaScript exception, leave it pending and return an empty
+//   result (as `local_function_call` does), or catch it with a `v8::TryCatch`, decide with
+//   `catch_exception()` and return it through a `MaybeLocal` out-parameter.
+// - If a shim can throw a C++ exception, declare it as returning `Result<T>` in v8.rs. Otherwise
+//   the exception becomes a Rust panic (src/rust/AGENTS.md, "Error handling across FFI").
+// - An empty result doesn't always mean that execution is terminating. Rust must check
+//   `isolate_is_execution_terminating` or look at the caught exception.
+// - Never throw a JavaScript exception while `isolate->IsExecutionTerminating()` is true.
+//   `ThrowException` would replace the termination with an exception that JavaScript can catch.
+//   The `isolate_throw_*` shims check this; a shim that calls `ThrowException` itself must too.
+
 // Local<T>
 Global local_to_global(Isolate* isolate, Local value);
 Local local_new_number(Isolate* isolate, double value);
@@ -203,6 +217,10 @@ double local_date_value_of(const Local& value);
 // Returns the call's result, or none if it threw, leaving the exception pending.
 MaybeLocal local_function_call(
     Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args);
+// Creates a function that calls `callback` with an opaque wrapper of `wrappable` as its data.
+// Throws if V8 could not create the wrapper and returns empty if it could not create the
+// function, both only when execution is terminating.
+MaybeLocal function_new(Isolate* isolate, size_t callback, kj::Rc<Wrappable> wrappable);
 
 // Local<Object>
 // Returns a new object with `keys[i]` an own data property of value `values[i]`. Runs no
@@ -344,6 +362,9 @@ size_t fci_get_length(FunctionCallbackInfo* args);
 bool fci_is_construct_call(FunctionCallbackInfo* args);
 Local fci_get_arg(FunctionCallbackInfo* args, size_t index);
 void fci_set_return_value(FunctionCallbackInfo* args, Local value);
+// The Rust Wrappable whose opaque wrapper is the running function's data, as function_new()
+// attaches it; none if the data is anything else.
+kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args);
 
 // PropertyCallbackInfo, for native data properties
 Isolate* pci_get_isolate(PropertyCallbackInfo* info);

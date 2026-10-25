@@ -72,6 +72,11 @@ enum class GcType : uint8_t;
 // Triggers garbage collection for testing purposes.
 void request_gc(Isolate* isolate, GcType gc_type);
 
+// Requests a termination and runs JavaScript until V8 delivers it. On return the termination
+// exception is pending and `isolate->IsExecutionTerminating()` is true, as after a script that
+// was terminated.
+void terminate_and_deliver(Isolate* isolate);
+
 // Calls `callback` with the isolate unlocked, then locks it again.
 void run_unlocked(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback);
 
@@ -81,6 +86,11 @@ size_t used_global_handles_size(Isolate* isolate);
 // Creates a V8 object with the C++ WORKERD_WRAPPABLE_TAG set in its internal fields.
 // Used to test that Rust unwrap correctly rejects non-Rust wrappable objects.
 ::workerd::rust::jsg::Local create_cpp_tagged_object(Isolate* isolate);
+
+// Calls a function that C++ JSG wrapped (Lock::wrapReturningFunction()), whose data is also an
+// opaque wrapper, and returns whether rust::jsg::fci_get_data_wrappable() finds a Rust Wrappable
+// in it.
+bool cpp_wrapped_function_data_is_rust_wrappable(Isolate* isolate);
 
 // Returns an empty v8::MaybeLocal, to test how it reaches Rust.
 ::workerd::rust::jsg::MaybeLocal empty_maybe_local();

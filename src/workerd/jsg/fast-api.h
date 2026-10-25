@@ -15,6 +15,7 @@
 // `FastOneByteString` is only used for signatures satisfying `FastApiNoScopeMethod` (#4625, #4628).
 
 #include <v8-fast-api-calls.h>
+#include <v8-isolate.h>
 #include <v8-local-handle.h>
 #include <v8-value.h>
 
@@ -93,7 +94,7 @@ constexpr bool isFastApiCompatible<Ret (Class::*)(Args...)> = FastApiMethod<Ret,
 template <typename Class, typename Ret, typename... Args>
 constexpr bool isFastApiCompatible<Ret (Class::*)(Args...) const> = FastApiMethod<Ret, Args...>;
 
-// A leading `jsg::Lock&` does not disqualify a signature; acquiring the lock creates no handle.
+// Ignores a leading `jsg::Lock&`, though such callbacks still open a HandleScope for the method.
 template <typename Method>
 constexpr bool isFastApiNoScope = false;
 
@@ -148,6 +149,26 @@ template <typename T>
   requires StringLike<kj::RemoveConst<kj::Decay<T>>>
 struct FastApiArgType<true, T> {
   using value = const v8::FastOneByteString&;
+};
+
+// The setup a fast callback does before unwrapping arguments. `noScope` skips the context lookup
+// and, unless the method takes a `Lock&` it may create handles through, the HandleScope.
+// `context` stays empty when skipped; `extractInternalPointer` only reads it for context globals.
+template <bool noScope, bool takesLock>
+class FastApiPreamble {
+ public:
+  explicit FastApiPreamble(v8::Isolate* isolate): scope(isolate) {
+    if constexpr (!noScope) context = isolate->GetCurrentContext();
+  }
+
+  v8::Local<v8::Context> context;
+
+ private:
+  struct NoHandleScope {
+    explicit NoHandleScope(v8::Isolate*) {}
+  };
+  [[no_unique_address]] std::conditional_t<noScope && !takesLock, NoHandleScope, v8::HandleScope>
+      scope;
 };
 
 }  // namespace workerd::jsg
