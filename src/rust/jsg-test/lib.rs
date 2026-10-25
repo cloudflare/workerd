@@ -123,6 +123,15 @@ mod ffi {
 
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
+
+        /// Holds a value the way C++ code holds one that Rust created: calls `create`, keeps
+        /// its result only in a `v8::Global` while a full GC runs, and calls `check` with it.
+        /// Then resets the `Global` and runs a full GC again. See `hold_across_gc` in `ffi.h`.
+        pub unsafe fn hold_across_gc(
+            isolate: *mut Isolate,
+            create: unsafe fn(*mut Isolate) -> MaybeLocal,
+            check: unsafe fn(*mut Isolate, Local),
+        );
     }
 }
 
@@ -460,6 +469,22 @@ impl Harness {
         // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
         // open.
         unsafe { ffi::cpp_wrapped_function_data_is_rust_wrappable(lock.isolate().as_ffi()) }
+    }
+
+    /// Holds a value the way C++ code holds one that Rust created. C++ calls `create`, as it
+    /// would call a crate's `extern "Rust"` constructor, and keeps the result only in a
+    /// `v8::Global` while a full GC runs. It then calls `check` with the value, resets the
+    /// `Global` and runs a full GC again.
+    ///
+    /// `create` and `check` run with the isolate locked, a context entered and a `HandleScope`
+    /// open; `lock` is borrowed for the duration, so they open their own scopes on the isolate.
+    pub fn hold_across_gc(
+        lock: &mut jsg::Lock<'_>,
+        create: fn(*mut v8::ffi::Isolate) -> v8::ffi::MaybeLocal,
+        check: fn(*mut v8::ffi::Isolate, v8::ffi::Local),
+    ) {
+        // SAFETY: the isolate is valid and locked with a context entered (guaranteed by Lock).
+        unsafe { ffi::hold_across_gc(lock.isolate().as_ffi(), create, check) };
     }
 }
 

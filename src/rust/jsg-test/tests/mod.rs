@@ -28,6 +28,7 @@ mod non_coercible;
 mod option;
 mod resource_callback;
 mod resource_conversion;
+mod resource_from_cpp;
 mod resource_lazy_properties;
 mod resource_properties;
 mod resource_template;

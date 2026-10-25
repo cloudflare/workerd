@@ -101,6 +101,13 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
 // Returns whether `a` and `b` belong to the same v8::IsolateGroup.
 bool isolates_share_group(Isolate* a, Isolate* b);
 
+// Holds a value the way C++ code holds one that Rust created: calls `create`, keeps its result
+// only in a v8::Global while a full GC runs, and calls `check` with it. Then resets the Global
+// and runs a full GC again. Neither call's handles outlive the call.
+void hold_across_gc(Isolate* isolate,
+    ::rust::Fn<::workerd::rust::jsg::MaybeLocal(Isolate*)> create,
+    ::rust::Fn<void(Isolate*, ::workerd::rust::jsg::Local)> check);
+
 }  // namespace rust::jsg_test
 
 }  // namespace workerd
