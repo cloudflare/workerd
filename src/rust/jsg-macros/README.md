@@ -42,12 +42,10 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
 
 - **Instance methods** (`&self`) are placed on the prototype. JavaScript can call back into
   a resource while one of its methods runs, so methods never get `&mut self`; keep state
-  they change in `Cell` or `RefCell` fields. Prefer `Cell`: a `RefCell` borrow held across a
-  call that can run JavaScript makes a re-entrant call panic, and tracing skips a mutably borrowed
-  `RefCell`, so while a `borrow_mut()` is held across a call that can allocate on the V8 heap,
-  wrap the resource or create or drop a `jsg::Rc` to it, the values of the `TracedGlobal`s in it
-  and the JS wrappers of the resources its `jsg::Rc`s point to can be collected (debug builds
-  abort instead).
+  they change in `Cell` or `RefCell` fields; state that holds a `jsg::Rc` or a `TracedGlobal`
+  goes in a `jsg::Cell` or `jsg::RefCell`, whose `take`, `replace` and `borrow_mut` take the lock
+  and make the contents strong (see "Cells" in `src/rust/jsg/README.md`). Prefer `Cell`: a
+  `RefCell` borrow held across a call that can run JavaScript makes a re-entrant call panic.
 - **Static methods** (no receiver) are placed on the constructor.
 - **`this: jsg::Rc<Self>`** as the first parameter, instead of `&self`, also makes an instance
   method. `this` is a `jsg::Rc` of the resource the method was called on, like `JSG_THIS` in
@@ -81,7 +79,7 @@ impl DnsUtil {
     // Instance — obj.watch(…); `this` is a jsg::Rc of `obj`'s resource
     #[jsg_method]
     pub fn watch(this: jsg::Rc<Self>, lock: &mut Lock, watcher: jsg::Rc<Watcher>) {
-        watcher.targets.borrow_mut().push(this);
+        watcher.targets.borrow_mut(lock).push(this); // targets: jsg::RefCell<Vec<jsg::Rc<Self>>>
     }
 
     // Static — DnsUtil.create(…)
@@ -387,11 +385,11 @@ impl MyResource {
 
 `#[jsg_resource]` on a struct synthesises:
 
-- `impl jsg::Traced for MyType { fn trace(&self, visitor) { ... } }`
+- `impl jsg::Traced for MyType { fn trace(&self, visitor) { ... } fn make_strong(&self, isolate) { ... } }`
 - `impl jsg::GarbageCollected for MyType { fn memory_name(&self) -> ... }`
 
 The generated `Traced::trace` body simply calls `Traced::trace` on **every named
-field**:
+field**, and `Traced::make_strong` likewise calls `Traced::make_strong` on every field:
 
 ```rust
 jsg::Traced::trace(&self.field_a, visitor);
@@ -411,13 +409,14 @@ use no-op `Traced` impls; containers/wrappers recurse to inner values.
 | `jsg::v8::Global<T>` | **Not allowed** — no `Traced` impl; use `jsg::v8::TracedGlobal<T>` |
 | `Option<T>` / `jsg::Nullable<T>` | Delegates to `T` when present |
 | `Vec<T>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values |
-| `Cell<T>` / `std::cell::Cell<T>` | Delegates via `as_ptr()` read (safe under single-threaded, non-reentrant GC tracing) |
-| `RefCell<T>` | Delegates via `try_borrow()`; skipped while mutably borrowed (debug builds abort if `T` can hold GC references) |
+| `std::cell::Cell<T>` / `std::cell::RefCell<T>` | Only for `T: jsg::HoldsNoGcReferences`: a `jsg::Rc` or a `TracedGlobal` inside is a compile error |
+| `jsg::Cell<T>` / `jsg::RefCell<T>` | Delegates to `T`, for any `T: Traced` (a `Cell` through an `as_ptr()` read, safe under single-threaded, non-reentrant GC tracing; a `RefCell` through `try_borrow()`, skipping a mutably borrowed cell, whose contents are strong); `take`, `replace` and `borrow_mut` make the contents strong first (see "Cells" in `src/rust/jsg/README.md`) |
 | Plain data / primitives / `#[jsg_struct]` types | No-op `Traced` |
 | Any other `T: Traced` | Uses `T`'s implementation |
 
-The `Cell<…>` variants are required whenever a traced field needs to be mutated
-after construction, because `Traced::trace` receives `&self`.
+A cell is required whenever a traced field needs to be mutated after construction,
+because `Traced::trace` receives `&self`. A field that holds a `jsg::Rc` or a
+`TracedGlobal` uses the `jsg::` cells.
 
 ### Manual tracing with `custom_trace`
 
@@ -445,6 +444,12 @@ impl jsg::Traced for EventHandlers {
         self.on_message.trace(visitor);
         self.on_error.trace(visitor);
     }
+
+    // Every field `trace` visits, so that the handlers stay valid when taken out of a `jsg::Cell`.
+    fn make_strong(&self, isolate: &mut jsg::Isolate) {
+        self.on_message.make_strong(isolate);
+        self.on_error.make_strong(isolate);
+    }
 }
 
 #[jsg_resource]
@@ -455,7 +460,6 @@ pub struct MySocket {
 ```
 
 ```rust
-use std::cell::Cell;
 use std::collections::HashMap;
 
 #[jsg_resource]
@@ -468,7 +472,7 @@ pub struct EventRouter {
 
     // Interior-mutable callback set after construction; dual-mode TracedGlobal enables
     // cycle collection if the callback closes over this resource's own JS wrapper.
-    on_error: Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
+    on_error: jsg::Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
 
     // Weak — does not keep target alive.
     parent: jsg::Weak<EventRouter>,

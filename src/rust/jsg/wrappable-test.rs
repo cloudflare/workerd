@@ -8,7 +8,6 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::panic::AssertUnwindSafe;
 
 use super::*;
 
@@ -38,9 +37,9 @@ fn holds_gc_references_follows_the_contents() {
     assert_forwards!(Vec);
     assert_forwards!(HashSet);
     assert_forwards!(BTreeSet);
-    assert_forwards!(Cell);
-    assert_forwards!(RefCell);
     assert_forwards!(std::rc::Rc);
+    assert!(!<Cell<String>>::holds_gc_references());
+    assert!(!<RefCell<String>>::holds_gc_references());
     assert!(<HashMap<String, v8::TracedGlobal<v8::Value>>>::holds_gc_references());
     assert!(!<HashMap<String, String>>::holds_gc_references());
     assert!(<BTreeMap<String, v8::TracedGlobal<v8::Value>>>::holds_gc_references());
@@ -49,26 +48,25 @@ fn holds_gc_references_follows_the_contents() {
     assert!(<Lenient<String>>::holds_gc_references());
 }
 
+/// `HoldsNoGcReferences` follows the contents too. (That a `jsg::Rc`, a `TracedGlobal` or a
+/// `Lenient` does not qualify is checked by the `gc-reference-in-std-cell-is-not-traced`
+/// compile test.)
+#[test]
+fn holds_no_gc_references_follows_the_contents() {
+    fn holds_no_gc_references<T: HoldsNoGcReferences>() {}
+    holds_no_gc_references::<String>();
+    holds_no_gc_references::<Option<String>>();
+    holds_no_gc_references::<Cell<Option<String>>>();
+    holds_no_gc_references::<RefCell<Vec<String>>>();
+    holds_no_gc_references::<HashMap<String, Nullable<String>>>();
+    holds_no_gc_references::<BTreeSet<String>>();
+    holds_no_gc_references::<crate::Cell<NonCoercible<String>>>();
+    holds_no_gc_references::<crate::RefCell<Vec<String>>>();
+}
+
 #[test]
 fn mutably_borrowed_refcell_without_gc_references_is_skipped() {
     let cell = RefCell::new(String::from("label"));
     let _borrow = cell.borrow_mut();
     cell.trace(&mut unused_visitor());
-}
-
-#[test]
-#[cfg_attr(
-    not(debug_assertions),
-    ignore = "the borrow check is a debug assertion"
-)]
-fn mutably_borrowed_refcell_with_gc_references_panics_in_debug_builds() {
-    let cell: RefCell<Vec<v8::TracedGlobal<v8::Value>>> = RefCell::new(Vec::new());
-    let _borrow = cell.borrow_mut();
-    let payload = std::panic::catch_unwind(AssertUnwindSafe(|| {
-        cell.trace(&mut unused_visitor());
-    }))
-    .expect_err("tracing a mutably borrowed RefCell of TracedGlobals must panic");
-    assert!(
-        crate::panic_message(&*payload).starts_with("tracing found a mutably borrowed RefCell")
-    );
 }

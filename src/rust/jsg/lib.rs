@@ -60,6 +60,7 @@ pub use v8::Uint16Array;
 pub use v8::Uint32Array;
 pub use v8::ffi::ExceptionType;
 pub use wrappable::FromJS;
+pub use wrappable::HoldsNoGcReferences;
 pub use wrappable::ToJS;
 pub use wrappable::Traced;
 

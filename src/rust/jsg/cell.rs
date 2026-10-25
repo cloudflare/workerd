@@ -13,17 +13,19 @@
 //! GC visits a `jsg::Rc` or a `TracedGlobal` where it finds it. Once the owner of the field is
 //! reachable only through its JavaScript wrapper, the visit makes the reference weak and relies
 //! on the owner's trace to keep its target alive. Rust moves are bitwise, so a reference moved
-//! out of the field with `std::cell::Cell::take` or through `std::cell::RefCell::borrow_mut`
+//! out of the field, as `std::cell::Cell::take` or `std::cell::RefCell::borrow_mut` would do,
 //! stays weak, and the owner no longer traces it: the next GC can collect the wrapper of a
 //! `jsg::Rc`'s resource, or the value of a `TracedGlobal`. C++ `jsg::Ref` makes a moved
 //! reference strong in its move constructor; these cells do it before a value leaves them
-//! instead, through [`Traced::make_strong`].
+//! instead, through [`Traced::make_strong`]. The std cells are `Traced` only for types that hold
+//! no GC references ([`HoldsNoGcReferences`]), so these cells are the only way out of a field.
 
 use std::cell::BorrowError;
 use std::cell::BorrowMutError;
 use std::cell::Ref;
 use std::cell::RefMut;
 
+use crate::HoldsNoGcReferences;
 use crate::Isolate;
 use crate::Traced;
 use crate::v8::GcVisitor;
@@ -89,6 +91,8 @@ impl<T: Traced> Traced for Cell<T> {
         unsafe { (*self.inner.as_ptr()).make_strong(isolate) }
     }
 }
+
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for Cell<T> {}
 
 impl<T: Traced + Default> Default for Cell<T> {
     fn default() -> Self {
@@ -175,6 +179,8 @@ impl<T: Traced> Traced for RefCell<T> {
         }
     }
 }
+
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for RefCell<T> {}
 
 impl<T: Traced + Default> Default for RefCell<T> {
     fn default() -> Self {

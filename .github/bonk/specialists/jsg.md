@@ -43,11 +43,13 @@ Rust JSG (rules and reasons in `src/rust/jsg/README.md` "Safety rules"; what to 
   data object, or the other reaction function of a promise), a `jsg::Rc` aborts the process and a
   `TracedGlobal` can lose its value. The fix is a `jsg::Rc` or `jsg::Weak` to the resource that
   owns the state, which a method gets as `this: jsg::Rc<Self>`.
-- A `jsg::Rc` moved out of a traced field (`Cell::take`, `Option::take`, `mem::replace`, popping
-  a traced `Vec`) and used after a call that can run JavaScript or allocate, without a `.clone()`
-  first. Once GC has visited it in the field, it is neither strong nor traced after the move, so
-  GC can collect the resource's wrapper and stop tracing its fields (#7976). The fix is to clone
-  it right away.
+- A hand-written `impl Traced` whose `make_strong` skips a field that `trace` visits, or a
+  `jsg::Rc` or `TracedGlobal` kept behind interior mutability other than `jsg::Cell` or
+  `jsg::RefCell` (`UnsafeCell`, `OnceCell`). A reference moved out of a field by a plain Rust
+  move is neither strong nor traced once GC has visited it there, so GC can collect the
+  resource's wrapper, or the `TracedGlobal`'s value (#7976). The `jsg::` cells make it strong on
+  the way out, and a `jsg::Rc` or `TracedGlobal` in a std `Cell` or `RefCell` field does not
+  compile; what is left is what the compiler cannot see.
 - A `jsg::v8::Global` in anything GC traces. It is always strong, so a cycle through it is never
   collected. It should be a `TracedGlobal`.
 - A shim that calls `isolate->ThrowException` without checking `IsExecutionTerminating()` (the

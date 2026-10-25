@@ -101,11 +101,11 @@ use crate::v8;
 /// - **`Option<T>`**, **`Nullable<T>`** — delegates to the inner value if present.
 /// - **Collections** (`Vec<T>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`,
 ///   `BTreeSet<T>`) — iterates elements/values and traces each.
-/// - **`Cell<T>`** — reads through `as_ptr()` (sound under single-threaded GC).
-/// - **`RefCell<T>`** — traces through `try_borrow()`, so a mutably borrowed cell is skipped;
-///   debug builds abort if it can hold GC references.
-/// - **[`jsg::Cell`](crate::Cell)**, **[`jsg::RefCell`](crate::RefCell)** — as the std cells,
-///   and make what leaves them strong; see [`Traced::make_strong`].
+/// - **`std::cell::Cell<T>`**, **`std::cell::RefCell<T>`** — only for
+///   `T: HoldsNoGcReferences`, so there is nothing in them to visit; see
+///   [`HoldsNoGcReferences`].
+/// - **[`jsg::Cell`](crate::Cell)**, **[`jsg::RefCell`](crate::RefCell)** — delegate to the
+///   value, and make a reference strong before it leaves the cell; see [`Traced::make_strong`].
 /// - **`jsg::Rc<T>`** — visits the reference via `GcVisitor::visit_rc`.
 /// - **`jsg::Weak<T>`** — no-op (weak refs don't keep targets alive).
 /// - **`jsg::v8::TracedGlobal<T>`** — visits via `GcVisitor::visit_traced_global`.
@@ -154,6 +154,25 @@ pub trait Traced {
     fn make_strong(&self, isolate: &mut crate::Isolate);
 }
 
+/// Marks a `Traced` type that holds no GC references: no `jsg::Rc` and no `TracedGlobal`,
+/// directly or inside another type. It says at compile time what
+/// [`Traced::holds_gc_references`] says at run time.
+///
+/// `std::cell::Cell<T>` and `std::cell::RefCell<T>` are `Traced` only for
+/// `T: HoldsNoGcReferences`. A reference that GC has visited in a field is weak and depends on
+/// the field's owner to trace it, and a move out of a std cell is bitwise and leaves it that
+/// way; see [`Traced::make_strong`]. A resource is only ever reached through `&self`, so a cell
+/// is the only way to move a reference out of a field. With the std cells closed to them, every
+/// `jsg::Rc` and `TracedGlobal` outside a traced field is strong. A field that holds one and
+/// changes after construction is a [`crate::Cell`] or [`crate::RefCell`], which take any
+/// `Traced` type.
+///
+/// Every built-in `Traced` type other than `jsg::Rc`, `TracedGlobal` and `Lenient` implements
+/// it, and wrappers and collections implement it when their contents do. `jsg_traced!` and
+/// `#[jsg_struct]` implement it for the types they cover. Implement it for a hand-written
+/// `Traced` type only if its `trace` visits nothing.
+pub trait HoldsNoGcReferences: Traced {}
+
 /// Generates no-op `Traced` implementations for types with no GC-visible references.
 macro_rules! impl_traced_noop {
     ($($t:ty),* $(,)?) => {
@@ -163,7 +182,9 @@ macro_rules! impl_traced_noop {
             }
 
             fn make_strong(&self, _isolate: &mut crate::Isolate) {}
-        })*
+        }
+
+        impl HoldsNoGcReferences for $t {})*
     };
 }
 
@@ -219,6 +240,8 @@ impl<T: Traced> Traced for Option<T> {
     }
 }
 
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for Option<T> {}
+
 impl<T: Traced> Traced for Lenient<T> {
     // An unconvertable value is a `TracedGlobal`, whatever `T` is.
     fn holds_gc_references() -> bool {
@@ -262,6 +285,8 @@ impl<T: Traced> Traced for Nullable<T> {
     }
 }
 
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for Nullable<T> {}
+
 impl<T: Traced> Traced for NonCoercible<T> {
     fn holds_gc_references() -> bool {
         T::holds_gc_references()
@@ -275,6 +300,8 @@ impl<T: Traced> Traced for NonCoercible<T> {
         self.as_ref().make_strong(isolate);
     }
 }
+
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for NonCoercible<T> {}
 
 impl<T: Traced> Traced for Vec<T> {
     fn holds_gc_references() -> bool {
@@ -294,6 +321,8 @@ impl<T: Traced> Traced for Vec<T> {
     }
 }
 
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for Vec<T> {}
+
 impl<K, V: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashMap<K, V, S> {
     fn holds_gc_references() -> bool {
         V::holds_gc_references()
@@ -310,6 +339,11 @@ impl<K, V: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashM
             value.make_strong(isolate);
         }
     }
+}
+
+impl<K, V: HoldsNoGcReferences, S: std::hash::BuildHasher> HoldsNoGcReferences
+    for std::collections::HashMap<K, V, S>
+{
 }
 
 impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
@@ -330,6 +364,8 @@ impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
     }
 }
 
+impl<K, V: HoldsNoGcReferences> HoldsNoGcReferences for std::collections::BTreeMap<K, V> {}
+
 impl<T: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashSet<T, S> {
     fn holds_gc_references() -> bool {
         T::holds_gc_references()
@@ -346,6 +382,11 @@ impl<T: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashSet<
             item.make_strong(isolate);
         }
     }
+}
+
+impl<T: HoldsNoGcReferences, S: std::hash::BuildHasher> HoldsNoGcReferences
+    for std::collections::HashSet<T, S>
+{
 }
 
 impl<T: Traced> Traced for std::collections::BTreeSet<T> {
@@ -366,7 +407,11 @@ impl<T: Traced> Traced for std::collections::BTreeSet<T> {
     }
 }
 
-impl<T: Traced> Traced for std::cell::Cell<T> {
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::collections::BTreeSet<T> {}
+
+/// Only for `T: HoldsNoGcReferences`: a `jsg::Rc` or `TracedGlobal` taken out of a std `Cell`
+/// would be neither strong nor traced. A cell that holds one is a [`crate::Cell`].
+impl<T: HoldsNoGcReferences> Traced for std::cell::Cell<T> {
     fn holds_gc_references() -> bool {
         T::holds_gc_references()
     }
@@ -389,34 +434,23 @@ impl<T: Traced> Traced for std::cell::Cell<T> {
     }
 }
 
-impl<T: Traced> Traced for std::cell::RefCell<T> {
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::cell::Cell<T> {}
+
+/// Only for `T: HoldsNoGcReferences`: a `jsg::Rc` or `TracedGlobal` moved out through a std
+/// `RefCell`'s mutable borrow would be neither strong nor traced. A cell that holds one is a
+/// [`crate::RefCell`].
+impl<T: HoldsNoGcReferences> Traced for std::cell::RefCell<T> {
     fn holds_gc_references() -> bool {
         T::holds_gc_references()
     }
 
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
-        // A mutable borrow is active here only if the code holding it calls something that visits
-        // the resource: an allocation on the V8 heap, which can start a GC, or wrapping the
-        // resource, or creating its first or dropping its last strong `jsg::Rc` while it has no
-        // wrapper, which switch its references between strong and traced. The contents cannot be
-        // read then, so the visit misses their references. A missed GC visit can cost a weak
-        // `TracedGlobal` its value; a missed switch can leave a reference weak that should be
-        // strong, for a later GC to free, or strong that should be weak, which leaks. Debug builds
-        // abort when that can happen (a panic cannot unwind out of a visit made from C++);
-        // release builds skip the cell.
-        //
-        // `crate::RefCell` has no such problem: its mutable borrow makes everything in the cell
-        // strong, so a visit can skip a borrowed cell safely.
-        let Ok(inner) = self.try_borrow() else {
-            debug_assert!(
-                !T::holds_gc_references(),
-                "tracing found a mutably borrowed RefCell that can hold GC references, which it \
-                 cannot visit; do not hold a RefCell borrow_mut() across a call that can allocate \
-                 on the V8 heap, wrap the resource, or create or drop a jsg::Rc to it"
-            );
-            return;
-        };
-        inner.trace(visitor);
+        // `T` holds no GC references, so a mutably borrowed cell can be skipped: a visit would
+        // find nothing in it. (`crate::RefCell` holds references, and makes them strong when it
+        // is mutably borrowed, so a visit can skip it too.)
+        if let Ok(inner) = self.try_borrow() {
+            inner.trace(visitor);
+        }
     }
 
     fn make_strong(&self, isolate: &mut crate::Isolate) {
@@ -425,6 +459,8 @@ impl<T: Traced> Traced for std::cell::RefCell<T> {
         }
     }
 }
+
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::cell::RefCell<T> {}
 
 impl<T: Traced> Traced for std::rc::Rc<T> {
     fn holds_gc_references() -> bool {
@@ -439,6 +475,8 @@ impl<T: Traced> Traced for std::rc::Rc<T> {
         (**self).make_strong(isolate);
     }
 }
+
+impl<T: HoldsNoGcReferences> HoldsNoGcReferences for std::rc::Rc<T> {}
 
 // =============================================================================
 // ToJS trait (Rust → JavaScript)

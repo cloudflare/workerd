@@ -358,6 +358,8 @@ impl<R: Resource> Traced for Weak<R> {
     fn make_strong(&self, _isolate: &mut crate::Isolate) {}
 }
 
+impl<R: Resource> crate::HoldsNoGcReferences for Weak<R> {}
+
 impl<R: Resource> GarbageCollected for Weak<R> {
     fn memory_name(&self) -> &'static std::ffi::CStr {
         // jsgGetMemoryName is only called on live Wrappables, never on Weak<R>.

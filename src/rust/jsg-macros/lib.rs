@@ -36,6 +36,7 @@ use syn::FnArg;
 use syn::ItemFn;
 use syn::ItemImpl;
 use syn::parse_macro_input;
+use trace::generate_no_gc_references_impls;
 use utils::elide_named_lifetimes;
 use utils::error;
 use utils::extract_name_attribute;
@@ -64,6 +65,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
     let name = &input.ident;
     let class_name = extract_name_attribute(attr).unwrap_or_else(|| name.to_string());
+    let gc_impls = generate_no_gc_references_impls(name);
 
     let named_fields = match extract_named_fields(&input, "jsg_struct") {
         Ok(fields) => fields,
@@ -175,14 +177,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         impl jsg::Struct for #name {}
 
-        #[automatically_derived]
-        impl jsg::Traced for #name {
-            fn holds_gc_references() -> bool {
-                false
-            }
-
-            fn make_strong(&self, _isolate: &mut jsg::Isolate) {}
-        }
+        #gc_impls
     }
     .into()
 }

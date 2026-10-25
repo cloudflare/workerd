@@ -179,12 +179,16 @@ struct PlainData;
 jsg::jsg_traced!(PlainData);
 
 /// `jsg::Rc` and resources can hold GC references; `jsg::Weak`, `#[jsg_struct]` types and
-/// `jsg_traced!` types cannot.
+/// `jsg_traced!` types cannot, and hold no GC references.
 #[test]
 fn holds_gc_references_of_jsg_types() {
+    fn holds_no_gc_references<T: jsg::HoldsNoGcReferences>() {}
     assert!(<jsg::Rc<Leaf>>::holds_gc_references());
     assert!(Leaf::holds_gc_references());
     assert!(!<jsg::Weak<Leaf>>::holds_gc_references());
+    holds_no_gc_references::<jsg::Weak<Leaf>>();
     assert!(!PlainStruct::holds_gc_references());
+    holds_no_gc_references::<PlainStruct>();
     assert!(!PlainData::holds_gc_references());
+    holds_no_gc_references::<PlainData>();
 }

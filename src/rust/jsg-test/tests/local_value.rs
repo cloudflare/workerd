@@ -5,8 +5,6 @@
 //! `Local<Value>` converts like C++ JSG's `v8::Local<v8::Value>`: any value passes through
 //! unchanged in both directions.
 
-use std::cell::RefCell;
-
 use jsg::FromJS;
 use jsg::ToJS;
 use jsg::v8;
@@ -15,7 +13,7 @@ use jsg_macros::jsg_resource;
 
 #[jsg_resource]
 struct Values {
-    stored: RefCell<Option<v8::TracedGlobal<v8::Value>>>,
+    stored: jsg::RefCell<Option<v8::TracedGlobal<v8::Value>>>,
 }
 
 #[jsg_resource]
@@ -32,7 +30,8 @@ impl Values {
 
     #[jsg_method]
     pub fn store<'s>(&self, lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) {
-        *self.stored.borrow_mut() = Some(value.to_traced_global(lock));
+        let value = value.to_traced_global(lock);
+        *self.stored.borrow_mut(lock) = Some(value);
     }
 
     #[jsg_method]
@@ -50,7 +49,7 @@ impl Values {
 
 fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
     let values = jsg::Rc::new(Values {
-        stored: RefCell::new(None),
+        stored: jsg::RefCell::new(None),
     })
     .to_js(lock);
     ctx.set_global(lock, "values", values);

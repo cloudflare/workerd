@@ -5,7 +5,6 @@
 //! Tests for `Global`: its layout, dropping it under the isolate lock, without it, on
 //! another thread or after its isolate is gone, and turning it into a `TracedGlobal`.
 
-use std::cell::Cell;
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -33,7 +32,7 @@ impl Drop for GlobalCounted {
 /// A resource that owns a `TracedGlobal`, which GC traces.
 #[jsg_resource]
 struct TracedHolder {
-    handle: Cell<Option<v8::TracedGlobal<v8::Value>>>,
+    handle: jsg::Cell<Option<v8::TracedGlobal<v8::Value>>>,
 }
 
 #[jsg_resource]
@@ -263,7 +262,7 @@ fn global_into_traced_global_is_traced() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let resource = jsg::Rc::new(TracedHolder {
-            handle: Cell::new(None),
+            handle: jsg::Cell::new(None),
         });
         let wrapper = resource.clone().to_js(lock);
         let global = v8::Global::new(lock, wrapper);
