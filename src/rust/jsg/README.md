@@ -120,7 +120,8 @@ scope. There is no public constructor; locks come from:
 - `#[jsg_method]` / `#[jsg_constructor]` callbacks, one lock per callback. They are built
   with `jsg::function_callback`, which turns a closure that captures nothing into a V8
   function callback without any `unsafe`, as `rusty_v8` does; `#[jsg_property(instance)]`
-  accessors likewise with `jsg::getter_callback` / `jsg::setter_callback`,
+  accessors likewise with `jsg::getter_callback` / `jsg::setter_callback`, and
+  `#[jsg_property(lazy_instance)]` accessors with `jsg::getter_callback`,
 - `jsg::modules::add_builtin`, whose callback is a closure that captures nothing, of type
   `for<'s> Fn(&mut Lock<'s>) -> Local<'s, Value>`,
 - `jsg::callback_scope!(unsafe let lock, isolate)` for other Rust code that C++ calls with a
@@ -386,8 +387,8 @@ impl Greeting {
 
 ## Properties
 
-Two macros expose properties on resource types: `#[jsg_property]` for prototype accessors and
-instance data properties, and `#[jsg_inspect_property]` for debug-only symbol-keyed properties.
+Two macros expose properties on resource types: `#[jsg_property]` for prototype accessors,
+instance data properties and lazily computed instance data properties, and `#[jsg_inspect_property]` for debug-only symbol-keyed properties.
 
 Full reference documentation (arguments, naming rules, compat-flag behavior, examples) lives in
 **[`jsg-macros/README.md`](../jsg-macros/README.md#jsg_propertyrequired-placement--name---readonly)**.
@@ -414,6 +415,10 @@ impl Counter {
     #[jsg_property(instance)]
     pub fn get_id(&self) -> String { /* ... */ }
 
+    // Own data property computed on first access, then stored (use sparingly, as above)
+    #[jsg_property(lazy_instance)]
+    pub fn get_details(&self) -> Vec<String> { /* ... */ }
+
     // Inspect-only: shown by util.inspect() / console.log, invisible to JS
     #[jsg_inspect_property]
     pub fn debug_info(&self) -> String { /* ... */ }
@@ -421,7 +426,8 @@ impl Counter {
 ```
 
 Methods **must** start with `get_` (getter) or `set_` (setter). The prefix is stripped for the
-JS name. Omitting the setter (or adding `readonly`) makes the property read-only.
+JS name. Omitting the setter (or adding `readonly`) makes a `prototype` or `instance` property
+read-only. A `lazy_instance` property has no setter and is writable unless marked `readonly`.
 
 ## Static Constants
 

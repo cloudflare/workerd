@@ -635,10 +635,15 @@ pub mod ffi {
         /// Registered under a unique symbol on the prototype; invisible to normal
         /// enumeration and string-key lookup; surfaced by `node:util` `inspect()`.
         Inspect = 2,
+        /// Own data property on every instance whose getter runs on first access;
+        /// the result then replaces it as a plain writable data property.
+        LazyInstance = 3,
+        /// As `LazyInstance`, but the property is read-only.
+        LazyReadonlyInstance = 4,
     }
 
     /// Descriptor for a single accessor property. `setter_callback` is `None` for
-    /// read-only properties; ignored entirely for `Inspect`.
+    /// read-only properties; ignored entirely for `Inspect` and the lazy kinds.
     pub struct PropertyDescriptor {
         pub name: String,
         pub kind: PropertyKind,
