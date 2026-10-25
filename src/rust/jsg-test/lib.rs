@@ -114,6 +114,12 @@ mod ffi {
 
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
+
+        /// Throws a `kj::Exception` with `description`, such as a tunneled
+        /// `jsg-internal.DOMException(OperationError): ...`.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub fn throw_kj_exception(description: &str) -> Result<()>;
     }
 }
 

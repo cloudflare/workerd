@@ -118,15 +118,19 @@ fn dom_syntax_error_is_distinct_from_js_syntax_error() {
 }
 
 #[test]
-fn dom_exception_without_dom_type_is_error() {
+fn dom_exception_without_dom_type_keeps_its_name() {
     let err = from_description("jsg.DOMException(IndexSizeError): boom");
     assert_eq!(err.name, ExceptionType::Error);
+    assert_eq!(err.dom_exception_name(), Some("IndexSizeError"));
     assert_eq!(err.message, "boom");
     assert!(!err.is_internal);
 }
 
 /// Every `ExceptionType` variant, found through the variant name the cxx shared
 /// enum's `Debug` prints (`ExceptionType(<repr>)` for values that are not one).
+/// This depends on that `Debug` format; it lets the test below check
+/// `ExceptionType::DOM_EXCEPTION_NAMES` against the enum without listing the
+/// variants a second time.
 fn all_exception_types() -> Vec<(ExceptionType, String)> {
     (0..=u8::MAX)
         .map(|repr| ExceptionType { repr })

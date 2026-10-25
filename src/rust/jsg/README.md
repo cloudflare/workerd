@@ -243,6 +243,8 @@ When a function that `Local<Function>::call` calls throws, the exception stays p
 
 Code that gets a pending error must not call into JavaScript, and should return the error. Converting it to another error and throwing that replaces the exception, as when C++ code throws while a `JsExceptionThrown` unwinds; nothing ever replaces a termination, and `call` refuses to run while execution is terminating. A pending error is only meaningful while its exception is pending: one kept past that, such as a clone stored after `try_catch` caught the exception, is thrown as an internal error when V8 has no exception pending.
 
+For the JavaScript class that an `Err` returned from a callback is thrown as, see [Throwing errors](#throwing-errors).
+
 To handle an exception instead, run the code in `Lock::try_catch`, which catches as C++ `jsg::Lock::tryCatch()` does: the exception, or an error the closure returns, as a value; a termination keeps propagating.
 
 ```rust
@@ -443,7 +445,7 @@ impl WebSocket {
 
 Constants are set on both the constructor and prototype as read-only, non-configurable properties per Web IDL. The name is used as-is (no camelCase conversion). Only numeric types are supported (`i8`..`i64`, `u8`..`u64`, `f32`, `f64`).
 
-## Errors
+## Throwing errors
 
 A method, property or constructor that returns `Err(jsg::Error)` throws it. The error's
 `ExceptionType` picks the class: `Error`, `TypeError`, `RangeError`, `ReferenceError` and
@@ -456,9 +458,16 @@ jsg_require!(valid, DOMSyntaxError, "Invalid base64");
 // JS: DOMException { name: 'SyntaxError', code: 12, message: 'Invalid base64' }
 ```
 
-`FromJS` for `jsg::Error` reads a caught native error's `name` and `message`, and a
-`DOMException`'s name and message as C++ JSG stores them; a `DOMException` name without a
-DOM-prefixed type becomes `Error`.
+`Error::new_dom_exception(name, message)` creates an error for any `DOMException` name, as C++
+`jsg::Lock::domException()` does; a name without a `DOM`-prefixed type, such as the legacy
+`IndexSizeError`, has the type `Error`, and `Error::dom_exception_name()` returns it. `FromJS`
+for `jsg::Error` reads a caught native error's `name` and `message`, and a `DOMException`'s name
+and message as C++ JSG stores them. An internal error from a tunneled
+`jsg-internal.DOMException(<Name>)` is thrown as a `DOMException` with that name and the
+redacted message, as in C++.
+
+Nothing is thrown while execution is terminating, and an error that stands for a pending
+exception throws nothing either; see [Errors from JavaScript](#errors-from-javascript).
 
 ## Nested Types
 

@@ -272,6 +272,9 @@ unsafe fn run<T: FastApiReturn>(
 /// (see [`Error::is_pending`]). The throw functions throw nothing while execution is
 /// terminating.
 unsafe fn throw<T: Default>(options: *mut ffi::FastApiCallbackOptions, err: &Error) -> T {
+    // A fast callback fails only in its receiver and argument checks, with a `TypeError`; the
+    // shim cannot create a `DOMException`.
+    debug_assert!(err.dom_exception_name().is_none(), "{err}");
     // SAFETY: `options` comes from V8 (caller contract).
     unsafe {
         if err.is_internal {

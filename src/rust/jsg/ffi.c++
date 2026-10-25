@@ -12,6 +12,7 @@
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
+#include <workerd/util/sentry.h>
 
 #include <kj-rs/convert.h>
 
@@ -1349,6 +1350,9 @@ Local exception_create_from_bytes(
   return exceptionCreateFromMessage(exception_type, message);
 }
 
+// These two shims use C++ JSG (jsg::Lock, jsg::Ref), because only the DOMException template that
+// C++ JSG registers in the isolate can create a DOMException or recognize one exactly.
+// TODO(cleanup): Create and recognize DOMExceptions without C++ JSG.
 Local dom_exception_create(Isolate* isolate, ::rust::Str name, ::rust::Str message) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
   auto exception = js.domException(
@@ -1419,6 +1423,15 @@ void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage)
   auto error = ::workerd::jsg::makeInternalError(isolate, message);
   if (isolate->IsExecutionTerminating()) return;
   isolate->ThrowException(error);
+}
+
+::rust::String log_internal_error(::rust::Str internalMessage) {
+  // Logs as makeInternalError() does, for an internal error that is thrown as a DOMException.
+  auto message = kj::heapString(internalMessage.data(), internalMessage.size());
+  auto id = ::workerd::makeInternalErrorId();
+  KJ_LOG(ERROR, message, id);
+  auto redacted = kj::str("internal error; reference = ", id);
+  return ::rust::String(redacted.begin(), redacted.size());
 }
 
 void isolate_terminate_execution(Isolate* isolate) {

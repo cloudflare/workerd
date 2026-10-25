@@ -598,6 +598,9 @@ pub mod ffi {
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
         pub unsafe fn isolate_throw_error(isolate: *mut Isolate, message: &str);
         pub unsafe fn isolate_throw_internal_error(isolate: *mut Isolate, internal_message: &str);
+        /// Logs `internal_message` as `isolate_throw_internal_error` does, and returns the
+        /// redacted message, `internal error; reference = <id>`, to throw instead.
+        pub fn log_internal_error(internal_message: &str) -> String;
         pub unsafe fn isolate_terminate_execution(isolate: *mut Isolate);
         pub unsafe fn isolate_is_execution_terminating(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_has_pending_exception(isolate: *mut Isolate) -> bool;

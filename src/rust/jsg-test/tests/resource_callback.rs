@@ -659,6 +659,26 @@ impl CallingResource {
         Err(jsg::Error::new_type_error("replaced"))
     }
 
+    /// Calls `callback`, and fails with a new error that is thrown as a `DOMException` whether
+    /// or not it threw: a `DOMAbortError`, or for `internal`, a tunneled internal one.
+    #[jsg_method]
+    pub fn call_then_fail_with_dom_exception<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        callback: v8::Local<'s, v8::Value>,
+        internal: bool,
+    ) -> Result<(), jsg::Error> {
+        let _ = Self::function(callback)?.call::<v8::Local<v8::Value>>(lock, None, &[]);
+        if internal {
+            let err: jsg::Error =
+                crate::ffi::throw_kj_exception("jsg-internal.DOMException(OperationError): secret")
+                    .unwrap_err()
+                    .into();
+            return Err(err);
+        }
+        Err(jsg::Error::new_dom_abort_error("replaced"))
+    }
+
     /// Calls `callback` in `try_catch`, keeping the error the call failed with after
     /// `try_catch` caught its exception.
     #[jsg_method]
@@ -835,6 +855,34 @@ fn error_does_not_replace_termination() {
             &format!("try {{ obj.callThenFail({TERMINATE}); false }} catch (e) {{ true }}"),
         );
         assert!(result.is_err(), "the termination was caught: {result:?}");
+        Ok(())
+    });
+}
+
+/// Nor is an error that would be thrown as a `DOMException`, whose creation would clear the
+/// termination.
+#[test]
+fn dom_exception_does_not_replace_termination() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        calling_resource(lock, ctx);
+        for internal in [false, true] {
+            let result = ctx.eval::<bool>(
+                lock,
+                &format!(
+                    "globalThis.after = false;
+                     try {{ obj.callThenFailWithDomException({TERMINATE}, {internal}); }}
+                     catch (e) {{ globalThis.caught = true; }}
+                     globalThis.after = true;"
+                ),
+            );
+            assert!(result.is_err(), "the termination was caught: {result:?}");
+            assert!(!ctx.eval::<bool>(lock, "globalThis.after").unwrap());
+            assert!(
+                !ctx.eval::<bool>(lock, "globalThis.caught === true")
+                    .unwrap()
+            );
+        }
         Ok(())
     });
 }

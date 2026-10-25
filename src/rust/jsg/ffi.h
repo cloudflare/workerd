@@ -406,6 +406,7 @@ void isolate_try_catch(
 void isolate_throw_exception(Isolate* isolate, Local exception);
 void isolate_throw_error(Isolate* isolate, ::rust::Str message);
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage);
+::rust::String log_internal_error(::rust::Str internalMessage);
 void isolate_terminate_execution(Isolate* isolate);
 bool isolate_is_execution_terminating(Isolate* isolate);
 bool isolate_has_pending_exception(Isolate* isolate);
