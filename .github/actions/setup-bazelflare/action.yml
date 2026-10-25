@@ -1,16 +1,6 @@
 name: 'Set up bazelflare'
 description: 'Configures Bazel for bazelflare remote execution, restoring what earlier jobs cached'
 inputs:
-  BAZELFLARE_ENDPOINT:
-    description: 'The bazelflare endpoint'
-    required: true
-  BAZELFLARE_CA_PEM:
-    description: "The CA to pin, for an endpoint whose certificate isn't publicly trusted"
-    required: false
-    default: ''
-  BAZELFLARE_TOKEN:
-    description: 'The bazelflare token'
-    required: true
   save_cache:
     description: 'Whether the job saves the cache when its key is new'
     required: false
@@ -52,30 +42,24 @@ runs:
         restore-keys: bazelflare-disk-cache-${{ runner.os }}-${{ runner.arch }}-
     - name: Configure bazelflare
       shell: bash
-      env:
-        BAZELFLARE_ENDPOINT: ${{ inputs.BAZELFLARE_ENDPOINT }}
-        BAZELFLARE_CA_PEM: ${{ inputs.BAZELFLARE_CA_PEM }}
-        BAZELFLARE_TOKEN: ${{ inputs.BAZELFLARE_TOKEN }}
       run: |
-        # .bazelrc imports .local/bazelrc, where the bazelflare block there expects the endpoint,
-        # the token and, for an endpoint whose certificate isn't publicly trusted, the CA to pin.
-        # The runner's own settings go there too, as a workstation's would, so that every Bazel
-        # command the job runs shares them: the output base, disk and repository caches that the
-        # cache holds, and enough loading threads to fetch the external repositories, about 1300,
-        # many more at once than the runner has CPUs.
-        : "${BAZELFLARE_ENDPOINT:?set the BAZELFLARE_ENDPOINT repository variable}"
-        : "${BAZELFLARE_TOKEN:?set the BAZELFLARE_TOKEN repository secret}"
+        # .bazelrc holds the bazelflare config and imports .local/bazelrc, where the runner's own
+        # settings go, as a workstation's would, so that every Bazel command the job runs shares
+        # them: the output base, disk and repository caches that the cache holds, and enough loading
+        # threads to fetch the external repositories, about 1300, many more at once than the runner
+        # has CPUs. The job authenticates with its OIDC token (build/bazelflare/credential-helper),
+        # so it needs `id-token: write`. main's own builds (a push or a dispatch on main) use the
+        # trusted instance, whose cache only they write and every client reads; bazelflare checks
+        # the job's OIDC token for the same and refuses any other job there.
+        : "${ACTIONS_ID_TOKEN_REQUEST_URL:?bazelflare needs the job to have id-token: write}"
         mkdir -p .local
         {
-          echo "build:bazelflare --remote_executor=$BAZELFLARE_ENDPOINT"
-          echo "build:bazelflare \"--remote_header=authorization=Bearer $BAZELFLARE_TOKEN\""
           echo "startup --experimental_remote_repo_contents_cache"
           echo "startup --output_base=$HOME/bazel-output-base"
           echo "build:bazelflare --disk_cache=~/bazel-disk-cache"
           echo "build:bazelflare --repository_cache=~/bazel-repository-cache"
           echo "build:bazelflare --loading_phase_threads=48"
+          if [[ $GITHUB_REF == refs/heads/main && $GITHUB_EVENT_NAME =~ ^(push|workflow_dispatch)$ ]]; then
+            echo "build:bazelflare --remote_instance_name=trusted"
+          fi
         } > .local/bazelrc
-        if [ -n "$BAZELFLARE_CA_PEM" ]; then
-          printf '%s\n' "$BAZELFLARE_CA_PEM" > .local/bazelflare-ca.pem
-          echo "build:bazelflare --tls_certificate=$PWD/.local/bazelflare-ca.pem" >> .local/bazelrc
-        fi

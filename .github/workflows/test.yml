@@ -18,6 +18,8 @@ permissions:
   contents: read
   # Read/write artifacts
   actions: write
+  # Authenticate to bazelflare
+  id-token: write
   # Required for adding comments to PR.
   # Specifically for sticky-pull-request-comment workflow action.
   pull-requests: write
@@ -90,7 +92,6 @@ jobs:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
       GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
-      BAZELFLARE_TOKEN: ${{ secrets.BAZELFLARE_TOKEN }}
 
   # Start TSan coverage with a small set of targets that do not depend on V8. More targets can be
   # added as sanitizer compatibility is verified.
@@ -113,7 +114,6 @@ jobs:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
       GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
-      BAZELFLARE_TOKEN: ${{ secrets.BAZELFLARE_TOKEN }}
 
   # Handled separately from `test` to speed up execution of workers-sdk-test which depends on it.
   test-linux:
@@ -134,7 +134,6 @@ jobs:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
       GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
-      BAZELFLARE_TOKEN: ${{ secrets.BAZELFLARE_TOKEN }}
 
   lint:
     uses: ./.github/workflows/_bazel.yml
@@ -152,7 +151,6 @@ jobs:
       BAZEL_CACHE_KEY: ${{ secrets.BAZEL_CACHE_KEY }}
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
       GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
-      BAZELFLARE_TOKEN: ${{ secrets.BAZELFLARE_TOKEN }}
 
   # Each bazelflare job runs a developer's config (developer_flags) followed by CI flags
   # (extra_bazel_args) that may change how Bazel runs and reports the build, never an action, so
@@ -160,21 +158,18 @@ jobs:
   # and needs to list them as they do.
   check-ci-flags:
     runs-on: ubuntu-22.04
-    env:
-      BAZELFLARE: ${{ secrets.BAZELFLARE_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v7
         with:
           show-progress: false
+      - name: Check for an OIDC token
+        run: echo "BAZELFLARE=$([ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] && echo true || echo false)" >> "$GITHUB_ENV"
       - name: Set up bazelflare
-        # Without the token, as in a pull request from a fork, the check runs without bazelflare's
-        # endpoint and cache, which configure no action.
+        # Without an OIDC token, as in a pull request from a fork, the check runs without
+        # bazelflare's cache, which configures no action.
         if: env.BAZELFLARE == 'true'
         uses: ./.github/actions/setup-bazelflare
         with:
-          BAZELFLARE_ENDPOINT: ${{ vars.BAZELFLARE_ENDPOINT }}
-          BAZELFLARE_CA_PEM: ${{ vars.BAZELFLARE_CA_PEM }}
-          BAZELFLARE_TOKEN: ${{ secrets.BAZELFLARE_TOKEN }}
           # It loads too little of the build to be worth keeping.
           save_cache: 'false'
       - name: Setup Runner
@@ -198,26 +193,22 @@ jobs:
 
   check-snapshot:
     runs-on: ubuntu-22.04-16core
-    env:
-      BAZELFLARE: ${{ secrets.BAZELFLARE_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v7
         with:
           show-progress: false
+      - name: Check for an OIDC token
+        run: echo "BAZELFLARE=$([ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] && echo true || echo false)" >> "$GITHUB_ENV"
       - name: Set up bazelflare
         if: env.BAZELFLARE == 'true'
         uses: ./.github/actions/setup-bazelflare
-        with:
-          BAZELFLARE_ENDPOINT: ${{ vars.BAZELFLARE_ENDPOINT }}
-          BAZELFLARE_CA_PEM: ${{ vars.BAZELFLARE_CA_PEM }}
-          BAZELFLARE_TOKEN: ${{ secrets.BAZELFLARE_TOKEN }}
       - name: Setup Runner
         uses: ./.github/actions/setup-runner
         with:
           GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
       - name: build types
         # The build `just generate-types` makes, on bazelflare, which the test-linux job's build
-        # mostly shares. Without the token, as in a pull request from a fork, it builds on the
+        # mostly shares. Without an OIDC token, as in a pull request from a fork, it builds on the
         # runner.
         run: |
           if [ "$BAZELFLARE" = true ]; then

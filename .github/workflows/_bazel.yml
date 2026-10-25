@@ -83,16 +83,17 @@ on:
         required: false
         default: false
       # Run every action on bazelflare remote execution (see the bazelflare block in .bazelrc)
-      # instead of on the runner, configured by the BAZELFLARE_ENDPOINT and BAZELFLARE_CA_PEM
-      # repository variables and the BAZELFLARE_TOKEN secret. developer_flags hold the job's
-      # bazelflare config and extra_bazel_args include --config=ci-bazelflare.
+      # instead of on the runner, authenticated by the job's OIDC token, so the calling job needs
+      # `id-token: write`. developer_flags hold the job's bazelflare config and extra_bazel_args
+      # include --config=ci-bazelflare. On main, the job builds in bazelflare's trusted instance
+      # (see setup-bazelflare).
       bazelflare:
         type: boolean
         required: false
         default: false
       # The flags a bazelflare job takes instead of developer_flags and extra_bazel_args when it has
-      # no BAZELFLARE_TOKEN, as in a pull request from a fork, which gets no secrets: it then builds
-      # on its runner, reading the remote cache as the other jobs do.
+      # no OIDC token, as in a pull request from a fork: it then builds on its runner, reading the
+      # remote cache as the other jobs do.
       runner_developer_flags:
         type: string
         required: false
@@ -110,22 +111,18 @@ on:
         required: false
       GOOGLESOURCE_COOKIE:
         required: true
-      BAZELFLARE_TOKEN:
-        required: false
 
 permissions:
   # Read repo
   contents: read
   # Read/write artifacts
   actions: write
+  # Authenticate to bazelflare
+  id-token: write
 
 jobs:
   bazel:
     runs-on: ${{ inputs.image }}
-    env:
-      BAZELFLARE: ${{ inputs.bazelflare && secrets.BAZELFLARE_TOKEN != '' }}
-      # bazelflare is cache and executor in one, so it takes no separate remote cache.
-      BAZEL_REMOTE_ARGS: ${{ !(inputs.bazelflare && secrets.BAZELFLARE_TOKEN != '') && format('--remote_cache=https://bazel:{0}@bazel-remote-cache.devprod.cloudflare.dev', secrets.BAZEL_CACHE_KEY) || '' }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -134,19 +131,30 @@ jobs:
       - name: Choose Bazel flags
         shell: bash
         env:
-          ON_RUNNER: ${{ inputs.bazelflare && env.BAZELFLARE != 'true' }}
+          WANTS_BAZELFLARE: ${{ inputs.bazelflare }}
           DEVELOPER_FLAGS: ${{ inputs.developer_flags }}
           EXTRA_BAZEL_ARGS: ${{ inputs.extra_bazel_args }}
           RUNNER_DEVELOPER_FLAGS: ${{ inputs.runner_developer_flags }}
           RUNNER_EXTRA_BAZEL_ARGS: ${{ inputs.runner_extra_bazel_args }}
+          REMOTE_CACHE: https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev
         run: |
-          if [ "$ON_RUNNER" = true ]; then
-            echo "No BAZELFLARE_TOKEN: building on the runner."
-            DEVELOPER_FLAGS=$RUNNER_DEVELOPER_FLAGS
-            EXTRA_BAZEL_ARGS=$RUNNER_EXTRA_BAZEL_ARGS
+          # bazelflare is cache and executor in one, so it takes no separate remote cache.
+          BAZELFLARE=false BAZEL_REMOTE_ARGS=--remote_cache=$REMOTE_CACHE
+          if [ "$WANTS_BAZELFLARE" = true ]; then
+            if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+              BAZELFLARE=true BAZEL_REMOTE_ARGS=
+            else
+              echo "No OIDC token: building on the runner."
+              DEVELOPER_FLAGS=$RUNNER_DEVELOPER_FLAGS
+              EXTRA_BAZEL_ARGS=$RUNNER_EXTRA_BAZEL_ARGS
+            fi
           fi
-          echo "DEVELOPER_FLAGS=$DEVELOPER_FLAGS" >> "$GITHUB_ENV"
-          echo "EXTRA_BAZEL_ARGS=$EXTRA_BAZEL_ARGS" >> "$GITHUB_ENV"
+          {
+            echo "BAZELFLARE=$BAZELFLARE"
+            echo "BAZEL_REMOTE_ARGS=$BAZEL_REMOTE_ARGS"
+            echo "DEVELOPER_FLAGS=$DEVELOPER_FLAGS"
+            echo "EXTRA_BAZEL_ARGS=$EXTRA_BAZEL_ARGS"
+          } >> "$GITHUB_ENV"
       - name: Cache
         id: cache
         # Not for a bazelflare job building on its runner: its disk cache would take gigabytes of
@@ -162,10 +170,6 @@ jobs:
       - name: Set up bazelflare
         if: env.BAZELFLARE == 'true'
         uses: ./.github/actions/setup-bazelflare
-        with:
-          BAZELFLARE_ENDPOINT: ${{ vars.BAZELFLARE_ENDPOINT }}
-          BAZELFLARE_CA_PEM: ${{ vars.BAZELFLARE_CA_PEM }}
-          BAZELFLARE_TOKEN: ${{ secrets.BAZELFLARE_TOKEN }}
       - name: Setup Runner
         uses: ./.github/actions/setup-runner
         with:

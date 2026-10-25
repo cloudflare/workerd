@@ -16,6 +16,8 @@ permissions:
   contents: read
   # Read/write artifacts
   actions: write
+  # Authenticate to bazelflare
+  id-token: write
 
 jobs:
   coverage-linux:
@@ -41,4 +43,3 @@ jobs:
       WORKERS_MIRROR_URL: ${{ secrets.WORKERS_MIRROR_URL }}
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
-      BAZELFLARE_TOKEN: ${{ secrets.BAZELFLARE_TOKEN }}
