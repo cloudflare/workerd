@@ -29,6 +29,7 @@ mod resource_callback;
 mod resource_conversion;
 mod resource_properties;
 mod resource_template;
+mod resource_this;
 mod string;
 mod symbol;
 mod traceable_gc;

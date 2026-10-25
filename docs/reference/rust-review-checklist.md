@@ -82,11 +82,14 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   Methods with a `&self` receiver are registered as instance methods on the prototype; methods
   without a receiver are registered as static methods on the constructor. Any other receiver is a
   compile error, since JavaScript can call back into the resource while a method runs; state that
-  methods change belongs in `Cell` or `RefCell` fields. Flag a `RefCell` borrow held across a call
-  that can run JavaScript: a re-entrant call then panics. Also flag a `borrow_mut()` of a
-  `RefCell` holding GC references (`TracedGlobal`, `jsg::Rc`) held across a call that can
-  allocate on the V8 heap, wrap the resource or create or drop a `jsg::Rc` to it: tracing skips
-  the cell, so those references can lose their values.
+  methods change belongs in `Cell` or `RefCell` fields. A method or accessor can take
+  `this: jsg::Rc<Self>` instead of `&self` to get a `jsg::Rc` of its resource, for example to
+  hand to a callback. Flag state that a method shares with a callback through an `std::rc::Rc`;
+  the callback should hold `this` (or `this.downgrade()`) instead. Flag a
+  `RefCell` borrow held across a call that can run JavaScript: a re-entrant call then panics.
+  Also flag a `borrow_mut()` of a `RefCell` holding GC references (`TracedGlobal`, `jsg::Rc`)
+  held across a call that can allocate on the V8 heap, wrap the resource or create or drop a
+  `jsg::Rc` to it: tracing skips the cell, so those references can lose their values.
   Verify the converted name is correct and matches the intended API surface.
 - **`#[jsg_static_constant]`** on a `const` item inside a `#[jsg_resource]` impl block exposes it
   as a read-only numeric constant on both the constructor and prototype (Rust equivalent of

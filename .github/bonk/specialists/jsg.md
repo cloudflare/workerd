@@ -50,9 +50,9 @@ Allocation and conversion:
   with `throw`.
 - Module evaluation must hold a `Lock::ModuleEvaluationScope` and must not drain microtasks while
   nested (invariant 12).
-- Rust: `&Lock`/`&mut Lock` is the first parameter after any `&self`/`&mut self` receiver.
-  `#[jsg_method]` renames snake_case to camelCase, so check that the resulting JS name is the
-  intended one.
+- Rust: `&Lock`/`&mut Lock` is the first parameter after any `&self`/`&mut self` receiver or
+  `this: jsg::Rc<Self>` parameter. `#[jsg_method]` renames snake_case to camelCase, so check
+  that the resulting JS name is the intended one.
 
 Docs: when the change alters JSG macros, type mappings or invariants, `src/workerd/jsg/README.md`,
 `docs/jsg.md` or `src/workerd/jsg/AGENTS.md` should change with it (the "CODE REVIEW RULE" in

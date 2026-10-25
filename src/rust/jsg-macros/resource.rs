@@ -25,6 +25,7 @@ use crate::utils::is_attr;
 use crate::utils::is_lock_ref;
 use crate::utils::is_result_type;
 use crate::utils::snake_to_camel;
+use crate::utils::this_param;
 
 // Compile-time mirror of `jsg::PropertyKind` used to group annotated methods
 // and emit the correct token streams. Cannot reuse the runtime type directly
@@ -205,7 +206,8 @@ fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistration
                 .sig
                 .inputs
                 .iter()
-                .any(|arg| matches!(arg, FnArg::Receiver(_)));
+                .any(|arg| matches!(arg, FnArg::Receiver(_)))
+                || this_param(&method.sig).is_some();
 
             let fast_api =
                 syn::Ident::new(&format!("{rust_method_name}_fast_api"), rust_method_name.span());

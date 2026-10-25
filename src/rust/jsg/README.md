@@ -69,6 +69,48 @@ let js_obj = resource.to_js(&mut lock);
 let r: jsg::Rc<MyResource> = jsg::Rc::from_js(&mut lock, js_val)?;
 ```
 
+### Reaching the resource from a callback
+
+A method's `&self` is only valid during the call. Code that runs later, such as a promise
+reaction or a function the method creates, needs its own reference to the resource. For that,
+write `this: jsg::Rc<Self>` as the first parameter instead of `&self`. It is a `jsg::Rc` of the
+resource the method was called on, like `JSG_THIS` in C++ JSG. Clone it into whatever runs
+later.
+
+```rust
+#[jsg_resource]
+struct Task {
+    scheduled: Cell<bool>,
+}
+
+#[jsg_resource]
+impl Task {
+    /// Runs the task later: `scheduler` keeps a `jsg::Rc` of it until then.
+    #[jsg_method]
+    fn schedule(this: jsg::Rc<Self>, scheduler: jsg::Rc<Scheduler>) {
+        // `this` dereferences to the resource, like `&self`.
+        this.scheduled.set(true);
+        scheduler.tasks.borrow_mut().push(this);
+    }
+}
+```
+
+Whatever holds the `jsg::Rc` must visit it in its `Traced::trace`, just as a resource visits
+its `jsg::Rc` fields.
+
+Don't give the callback the resource's state through an `std::rc::Rc` instead. Traced state
+(`TracedGlobal`, `jsg::Rc`) must have one GC owner, and a `TracedGlobal` that two owners trace
+can lose its value.
+
+The callback's `jsg::Rc` keeps the resource alive, even after JavaScript drops the resource.
+Cycles are fine if they go through a `TracedGlobal`: if the resource holds the callback in a
+`TracedGlobal`, GC collects both once JavaScript drops them. A cycle through a
+`jsg::v8::Global` is never collected. If the callback shouldn't keep the resource alive, give
+it a `jsg::Weak<Self>` (`this.downgrade()`) instead.
+
+Calling the method on something that isn't a resource of this type throws a `TypeError`, as it
+does for `&self` methods. A method that takes `this` has no Fast API callback.
+
 ### GC Behavior
 
 - **No JS wrapper**: Dropping the last `Rc` immediately destroys the resource (no GC needed).
