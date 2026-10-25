@@ -80,6 +80,9 @@ build:ci-macOS-debug --config=debug
 
 # Unfortunately on macOS, we need to be able to invoke sudo to configure the network for sidecar tests
 test:ci-macOS --strategy=TestRunner=local
+# The sidecar supervisor gives each sidecar a random loopback address on macOS only in CI, where it
+# can use sudo.
+test:ci-macOS --test_env=CI=true
 
 # Windows CI always runs in the release configuration to prevent breaking the release build.
 # build:ci-windows --config=windows_no_dbg
@@ -97,16 +100,8 @@ test:ci-windows --test_size_filters=
 test:ci-linux --test_tag_filters=-off-by-default,-requires-fuzzilli
 test:ci-linux-arm --test_tag_filters=-off-by-default,-requires-fuzzilli
 
-# Enable reporting whenever WPT tests are run
-test:ci-test --config=wpt-test
-common:wpt-test --test_env=GEN_TEST_REPORT=1
-common:wpt-test --test_env=GEN_TEST_STATS=1
-
 # Config to produce a full WPT report. Also ensures that test targets are fetched, even under remote_download_minimal.
 common:wpt-report --remote_download_regex=".*src/wpt/.*"
-
-# Let tests know they're running in CI
-test:ci-test --test_env=CI=true
 
 # release CI – use remote_download_minimal, but always fetch the workerd binary so we can add it to
 # the release artifacts.

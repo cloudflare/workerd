@@ -96,6 +96,9 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         wpt_interfaces,  # i.e. "wpt/interfaces/**"
     ] + [d for d in extra_wpt_directories if d != wpt_directory] + extra_wpt_files + served_wpt_files
 
+    # Every run prints the report and stats that tools/cross/wpt_logs.py collects.
+    env = {"GEN_TEST_REPORT": "1", "GEN_TEST_STATS": "1"} | kwargs.pop("env", {})
+
     wd_test(
         name = "{}".format(name),
         src = wd_test_gen_rule,
@@ -113,6 +116,7 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         # that produce INFO log lines on stdout. Those lines land after the JSON report/stats
         # blobs emitted by the WPT harness and break tools/cross/wpt_logs.py parsing.
         predictable = False,
+        env = env,
         data = data,
         tags = tags,
         **kwargs
