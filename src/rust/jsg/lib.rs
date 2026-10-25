@@ -849,6 +849,11 @@ impl<'s> Lock<'s> {
             self.throw_internal_error(&err.message);
             return;
         }
+        if self.is_execution_terminating() {
+            // `isolate_throw_exception` would throw nothing, and creating the exception while
+            // execution is terminating fails a V8 debug check.
+            return;
+        }
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe {
             v8::ffi::isolate_throw_exception(

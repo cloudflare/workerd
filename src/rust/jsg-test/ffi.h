@@ -72,6 +72,11 @@ enum class GcType : uint8_t;
 // Triggers garbage collection for testing purposes.
 void request_gc(Isolate* isolate, GcType gc_type);
 
+// Requests a termination and runs JavaScript until V8 delivers it. On return the termination
+// exception is pending and `isolate->IsExecutionTerminating()` is true, as after a script that
+// was terminated.
+void terminate_and_deliver(Isolate* isolate);
+
 // Calls `callback` with the isolate unlocked, then locks it again.
 void run_unlocked(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback);
 
