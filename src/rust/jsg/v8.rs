@@ -29,7 +29,9 @@
 //! drops it, which may drop the resource. The Rust `jsg::Rc<R>` smart pointer holds its own
 //! `std::Rc<R>` plus a `WrappableRc` (`KjRc<Wrappable>`) for reference-counted ownership. On
 //! drop, `wrappable_remove_strong_ref()` handles GC cleanup via `maybeDeferDestruction()`,
-//! then the `WrappableRc` drop decrements the `kj::Rc` refcount.
+//! then the `WrappableRc` drop decrements the `kj::Rc` refcount. A function created by
+//! [`Function::new`] owns its data the same way, through a Wrappable whose opaque wrapper is the
+//! function's V8 data.
 
 #![allow(
     unsafe_code,
@@ -53,6 +55,8 @@ use crate::Lock;
 use crate::Nullable;
 use crate::Number;
 use crate::Resource;
+use crate::Traced;
+use crate::UnitType;
 use crate::isolate_state::IsolateState;
 #[expect(
     clippy::missing_safety_doc,
@@ -377,6 +381,13 @@ pub mod ffi {
             recv: &Local,
             args: &[Local],
         ) -> MaybeLocal;
+        // Fallible: creating the wrapper throws, and creating the function returns empty, when
+        // execution is terminating.
+        pub unsafe fn function_new(
+            isolate: *mut Isolate,
+            callback: usize,
+            wrappable: KjRc<Wrappable>,
+        ) -> Result<MaybeLocal>;
 
         // Local<Object>
         pub unsafe fn local_object_set_property(
@@ -526,6 +537,9 @@ pub mod ffi {
         pub unsafe fn fci_is_construct_call(args: *mut FunctionCallbackInfo) -> bool;
         pub unsafe fn fci_get_arg(args: *mut FunctionCallbackInfo, index: usize) -> Local;
         pub unsafe fn fci_set_return_value(args: *mut FunctionCallbackInfo, value: Local);
+        pub unsafe fn fci_get_data_wrappable(
+            args: *mut FunctionCallbackInfo,
+        ) -> KjMaybe<KjRc<Wrappable>>;
 
         // PropertyCallbackInfo, for native data properties
         pub unsafe fn pci_get_isolate(info: *mut PropertyCallbackInfo) -> *mut Isolate;
@@ -1491,62 +1505,6 @@ impl<'s, T> Local<'s, T> {
     }
 }
 
-/// Trait for safe checked casts between V8 `Local` handle types.
-///
-/// Use via the turbofish method on `Local<Value>`:
-/// ```ignore
-/// let func: Local<Function> = value.try_as::<Function>().unwrap();
-/// ```
-pub trait As<T>: Sized {
-    type Output;
-
-    /// Attempts to cast this handle to the target type.
-    /// Returns `None` if the underlying value is not of the target type.
-    fn try_as(self) -> Option<Self::Output>;
-}
-
-/// Implements `As<$target>` for `Local<Value>` using the given type-check method.
-macro_rules! impl_as {
-    ($target:ident, $check:ident) => {
-        impl<'a> As<$target> for Local<'a, Value> {
-            type Output = Local<'a, $target>;
-
-            fn try_as(self) -> Option<Local<'a, $target>> {
-                if self.$check() {
-                    // SAFETY: We verified the type above.
-                    Some(unsafe { Local::from_ffi(self.into_ffi()) })
-                } else {
-                    None
-                }
-            }
-        }
-    };
-}
-
-impl_as!(Function, is_function);
-impl_as!(Object, is_object);
-impl_as!(Array, is_array);
-impl_as!(String, is_string);
-impl_as!(Symbol, is_symbol);
-impl_as!(Name, is_name);
-impl_as!(BigInt, is_big_int);
-impl_as!(Date, is_date);
-impl_as!(ArrayBuffer, is_array_buffer);
-impl_as!(ArrayBufferView, is_array_buffer_view);
-
-// Value-specific implementations
-impl Local<'_, Value> {
-    /// Attempts a checked cast to a more specific `Local<T>` type.
-    ///
-    /// Returns `None` if the value is not of the target type.
-    pub fn try_as<T>(self) -> Option<<Self as As<T>>::Output>
-    where
-        Self: As<T>,
-    {
-        As::<T>::try_as(self)
-    }
-}
-
 impl PartialEq for Local<'_, Value> {
     fn eq(&self, other: &Self) -> bool {
         // SAFETY: both handles are valid within the current HandleScope.
@@ -1562,6 +1520,117 @@ impl PartialEq for Local<'_, String> {
 }
 
 impl Eq for Local<'_, String> {}
+
+/// The state of a function created by [`Function::new`], owned by the function's C++
+/// `Wrappable`.
+struct FunctionData<T>(T);
+
+impl<T: Traced> Traced for FunctionData<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
+    fn trace(&self, visitor: &mut GcVisitor) {
+        self.0.trace(visitor);
+    }
+}
+
+impl<T: Traced> GarbageCollected for FunctionData<T> {
+    fn memory_name(&self) -> &'static std::ffi::CStr {
+        // C++ JSG's name for the object that owns a wrapped function.
+        c"WrappableFunction"
+    }
+}
+
+impl Function {
+    /// Creates a JavaScript function that calls `f` with `data`, like C++ JSG's
+    /// `Lock::wrapReturningFunction()`.
+    ///
+    /// The function owns `data`: the garbage collector traces it through the function and drops
+    /// it once the function is unreachable, so the `TracedGlobal`s and `jsg::Rc`s that `data`
+    /// traces may lead back to the function. Two things break this:
+    ///
+    /// - A reference that `T::trace` does not visit, such as a `v8::Global` (`Traced::trace` does
+    ///   nothing by default). If it can reach the function, the cycle is invisible to the garbage
+    ///   collector, and the function and `data` are freed only when the isolate is torn down.
+    /// - Another owner that the garbage collector also traces, such as a resource sharing part of
+    ///   `data` through a `std::rc::Rc`. `data` must be the only owner that traces what it
+    ///   traces: tracing one `jsg::Rc` from two owners fails an assertion.
+    ///
+    /// `f` must capture nothing, which a compile-time assertion checks; whatever it needs comes
+    /// from `data`.
+    ///
+    /// `f`'s `Ok` value is the call's result and an `Err` is thrown. A panic throws an internal
+    /// error and terminates execution, as in a `#[jsg_method]`. As with the functions C++ JSG
+    /// wraps, the function's `name` is empty, its `length` is 0, and it can be called with `new`.
+    ///
+    /// While execution is terminating, or a JavaScript exception is pending, creates nothing and
+    /// returns an error for which [`Error::is_pending`] is true, so that returning it propagates
+    /// the termination or the exception.
+    ///
+    /// ```ignore
+    /// let greet = v8::Function::new(lock, String::from("hello"), |lock, greeting, args| {
+    ///     let name = String::from_js(lock, args.get(0))?;
+    ///     Ok(format!("{greeting}, {name}").to_js(lock))
+    /// })?;
+    /// ```
+    pub fn new<'s, T, F>(lock: &mut Lock<'s>, data: T, f: F) -> crate::Result<Local<'s, Self>>
+    where
+        T: Traced + 'static,
+        F: UnitType
+            + 'static
+            + for<'a> Fn(
+                &mut Lock<'a>,
+                &T,
+                &mut FunctionCallbackInfo<'a>,
+            ) -> Result<Local<'a, Value>, Error>,
+    {
+        let _ = f;
+        // As in `jsg::Rc::new`, the Wrappable owns a leaked `Rc` of the data, released when the
+        // Wrappable is destroyed.
+        let raw: *const FunctionData<T> = Rc::into_raw(Rc::new(FunctionData(data)));
+        let fat: *mut dyn GarbageCollected = raw as *const dyn GarbageCollected as *mut _;
+        let mut wrappable: WrappableRc =
+            ffi::TraitObjectPtr::from_raw(fat, TypeId::of::<FunctionData<T>>()).into();
+        let function =
+            wrappable.new_function(lock, crate::function_callback(call_function::<T, F>));
+        // A new Wrappable starts with one strong reference, which `jsg::Rc` would hold. Here only
+        // the function owns it, so the reference is dropped and the garbage collector decides.
+        wrappable.remove_strong_ref(true);
+        function
+    }
+}
+
+/// The callback of a function created by [`Function::new`] with data `T` and closure `F`.
+fn call_function<'s, T, F>(lock: &mut Lock<'s>, args: &mut FunctionCallbackInfo<'s>)
+where
+    T: Traced + 'static,
+    F: UnitType
+        + 'static
+        + for<'a> Fn(
+            &mut Lock<'a>,
+            &T,
+            &mut FunctionCallbackInfo<'a>,
+        ) -> Result<Local<'a, Value>, Error>,
+{
+    let Some(data) = WrappableRc::of_function(args) else {
+        unreachable!("a function created by Function::new has a Wrappable as its data");
+    };
+    let Some(data_ptr) = data.resolve::<FunctionData<T>>() else {
+        unreachable!(
+            "a function created by Function::new has data of the type it was created with"
+        );
+    };
+    // SAFETY: `data` keeps the Wrappable, and with it the `FunctionData`, alive for this call.
+    // Only shared references to the `FunctionData` are ever created.
+    let data_ref = unsafe { &data_ptr.as_ref().0 };
+    // SAFETY: `Function::new` was handed a value of `F`.
+    let f = unsafe { crate::scope::unit_value::<F>() };
+    match f(lock, data_ref, args) {
+        Ok(value) => args.set_return_value(value),
+        Err(err) => lock.throw_exception(&err),
+    }
+}
 
 impl<'s> Local<'s, Function> {
     /// Calls this function and converts the result via [`FromJS`].
@@ -1625,95 +1694,95 @@ impl<'s> Local<'s, Function> {
     }
 }
 
-/// Implements bidirectional `From` conversions between `Local<$from>` and `Local<$to>`.
+/// The error a checked downcast between `Local` handle types returns when the value is not
+/// of the target type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DataError {
+    BadType {
+        actual: &'static str,
+        expected: &'static str,
+    },
+}
+
+impl DataError {
+    fn bad_type<E: 'static, A: 'static>() -> Self {
+        Self::BadType {
+            expected: std::any::type_name::<E>(),
+            actual: std::any::type_name::<A>(),
+        }
+    }
+}
+
+impl std::fmt::Display for DataError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BadType { expected, actual } => {
+                write!(f, "expected type `{expected}`, got `{actual}`")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DataError {}
+
+/// Implements the casts between `Local<$from>` and each of its supertypes `Local<$to>`.
 ///
-/// All V8 handle subtypes share the same pointer representation, so these casts
-/// are just reinterpretations of the handle. The `assert!` verifies the type
-/// invariant at runtime — redundant for upcasts (always true) but guards
-/// downcasts against misuse.
+/// All V8 handle subtypes share the same pointer representation, so a cast just
+/// reinterprets the handle. An upcast is a `From` and costs nothing. A downcast is a
+/// `TryFrom` that checks the value with `$check`.
+///
+/// Rust cannot derive the casts through intermediate types, so each type lists every one of
+/// its supertypes. The upcast is unchecked, so each `$to` must be a superclass of `$from` in
+/// V8, and `$check` must be the `Is*` test for `$from`.
 macro_rules! impl_local_cast {
-    ($from:ident -> $to:ident, $check:ident) => {
-        impl<'a> From<Local<'a, $from>> for Local<'a, $to> {
-            fn from(value: Local<'a, $from>) -> Self {
-                assert!(value.$check());
-                // SAFETY: V8 subtypes share handle representation; assert verifies the invariant.
-                unsafe { Self::from_ffi(value.into_ffi()) }
+    ($from:ident: $($to:ident),+; $check:ident) => {
+        $(
+            impl<'a> From<Local<'a, $from>> for Local<'a, $to> {
+                fn from(value: Local<'a, $from>) -> Self {
+                    // SAFETY: V8 subtypes share handle representation, and every `$from` is a
+                    // `$to`.
+                    unsafe { Self::from_ffi(value.into_ffi()) }
+                }
             }
-        }
-        impl<'a> From<Local<'a, $to>> for Local<'a, $from> {
-            fn from(value: Local<'a, $to>) -> Self {
-                assert!(value.$check());
-                // SAFETY: V8 subtypes share handle representation; assert verifies the invariant.
-                unsafe { Self::from_ffi(value.into_ffi()) }
+            impl<'a> TryFrom<Local<'a, $to>> for Local<'a, $from> {
+                type Error = DataError;
+
+                fn try_from(value: Local<'a, $to>) -> Result<Self, Self::Error> {
+                    if value.$check() {
+                        // SAFETY: V8 subtypes share handle representation; `$check` verified
+                        // that the value is a `$from`.
+                        Ok(unsafe { Self::from_ffi(value.into_ffi()) })
+                    } else {
+                        Err(DataError::bad_type::<$from, $to>())
+                    }
+                }
             }
-        }
+        )+
     };
 }
 
-// Upcasts to Value
-impl_local_cast!(String -> Value, is_string);
-impl_local_cast!(Name -> Value, is_name);
-impl_local_cast!(Symbol -> Value, is_symbol);
-impl_local_cast!(BigInt -> Value, is_big_int);
-impl_local_cast!(Date -> Value, is_date);
-impl_local_cast!(Object -> Value, is_object);
-impl_local_cast!(Function -> Value, is_function);
-impl_local_cast!(Array -> Value, is_array);
-
-// String and Symbol are both subtypes of Name
-impl_local_cast!(String -> Name, is_string);
-impl_local_cast!(Symbol -> Name, is_symbol);
-impl_local_cast!(Uint8Array -> Value, is_uint8_array);
-impl_local_cast!(Uint16Array -> Value, is_uint16_array);
-impl_local_cast!(Uint32Array -> Value, is_uint32_array);
-impl_local_cast!(Int8Array -> Value, is_int8_array);
-impl_local_cast!(Int16Array -> Value, is_int16_array);
-impl_local_cast!(Int32Array -> Value, is_int32_array);
-impl_local_cast!(Float32Array -> Value, is_float32_array);
-impl_local_cast!(Float64Array -> Value, is_float64_array);
-impl_local_cast!(BigInt64Array -> Value, is_bigint64_array);
-impl_local_cast!(BigUint64Array -> Value, is_biguint64_array);
-impl_local_cast!(Uint8ClampedArray -> Value, is_uint8clamped_array);
-impl_local_cast!(TypedArray -> Value, is_typed_array);
-
-// Concrete typed arrays to TypedArray base
-impl_local_cast!(Uint8Array -> TypedArray, is_uint8_array);
-impl_local_cast!(Uint16Array -> TypedArray, is_uint16_array);
-impl_local_cast!(Uint32Array -> TypedArray, is_uint32_array);
-impl_local_cast!(Int8Array -> TypedArray, is_int8_array);
-impl_local_cast!(Int16Array -> TypedArray, is_int16_array);
-impl_local_cast!(Int32Array -> TypedArray, is_int32_array);
-impl_local_cast!(Float32Array -> TypedArray, is_float32_array);
-impl_local_cast!(Float64Array -> TypedArray, is_float64_array);
-impl_local_cast!(BigInt64Array -> TypedArray, is_bigint64_array);
-impl_local_cast!(BigUint64Array -> TypedArray, is_biguint64_array);
-impl_local_cast!(Uint8ClampedArray -> TypedArray, is_uint8clamped_array);
-
-// Upcasts to Object (Function, Array, TypedArray are all Object subtypes in V8)
-impl_local_cast!(Function -> Object, is_function);
-impl_local_cast!(Array -> Object, is_array);
-impl_local_cast!(TypedArray -> Object, is_typed_array);
-
-// ArrayBuffer <-> Value, ArrayBuffer <-> Object
-impl_local_cast!(ArrayBuffer -> Value, is_array_buffer);
-impl_local_cast!(ArrayBuffer -> Object, is_array_buffer);
-
-// ArrayBufferView <-> Value, ArrayBufferView <-> Object
-// All concrete TypedArray types and DataView are ArrayBufferViews.
-impl_local_cast!(ArrayBufferView -> Value, is_array_buffer_view);
-impl_local_cast!(ArrayBufferView -> Object, is_array_buffer_view);
-
-// Concrete typed arrays <-> ArrayBufferView base
-impl_local_cast!(Uint8Array -> ArrayBufferView, is_uint8_array);
-impl_local_cast!(Uint16Array -> ArrayBufferView, is_uint16_array);
-impl_local_cast!(Uint32Array -> ArrayBufferView, is_uint32_array);
-impl_local_cast!(Int8Array -> ArrayBufferView, is_int8_array);
-impl_local_cast!(Int16Array -> ArrayBufferView, is_int16_array);
-impl_local_cast!(Int32Array -> ArrayBufferView, is_int32_array);
-impl_local_cast!(Float32Array -> ArrayBufferView, is_float32_array);
-impl_local_cast!(Float64Array -> ArrayBufferView, is_float64_array);
-impl_local_cast!(BigInt64Array -> ArrayBufferView, is_bigint64_array);
-impl_local_cast!(BigUint64Array -> ArrayBufferView, is_biguint64_array);
+impl_local_cast!(Name: Value; is_name);
+impl_local_cast!(String: Name, Value; is_string);
+impl_local_cast!(Symbol: Name, Value; is_symbol);
+impl_local_cast!(BigInt: Value; is_big_int);
+impl_local_cast!(Object: Value; is_object);
+impl_local_cast!(Date: Object, Value; is_date);
+impl_local_cast!(Function: Object, Value; is_function);
+impl_local_cast!(Array: Object, Value; is_array);
+impl_local_cast!(ArrayBuffer: Object, Value; is_array_buffer);
+impl_local_cast!(ArrayBufferView: Object, Value; is_array_buffer_view);
+impl_local_cast!(TypedArray: ArrayBufferView, Object, Value; is_typed_array);
+impl_local_cast!(Uint8Array: TypedArray, ArrayBufferView, Object, Value; is_uint8_array);
+impl_local_cast!(Uint8ClampedArray: TypedArray, ArrayBufferView, Object, Value; is_uint8clamped_array);
+impl_local_cast!(Uint16Array: TypedArray, ArrayBufferView, Object, Value; is_uint16_array);
+impl_local_cast!(Uint32Array: TypedArray, ArrayBufferView, Object, Value; is_uint32_array);
+impl_local_cast!(Int8Array: TypedArray, ArrayBufferView, Object, Value; is_int8_array);
+impl_local_cast!(Int16Array: TypedArray, ArrayBufferView, Object, Value; is_int16_array);
+impl_local_cast!(Int32Array: TypedArray, ArrayBufferView, Object, Value; is_int32_array);
+impl_local_cast!(Float32Array: TypedArray, ArrayBufferView, Object, Value; is_float32_array);
+impl_local_cast!(Float64Array: TypedArray, ArrayBufferView, Object, Value; is_float64_array);
+impl_local_cast!(BigInt64Array: TypedArray, ArrayBufferView, Object, Value; is_bigint64_array);
+impl_local_cast!(BigUint64Array: TypedArray, ArrayBufferView, Object, Value; is_biguint64_array);
 
 impl Array {
     /// Creates a new JavaScript array with the given length.
@@ -3666,9 +3735,9 @@ impl ffi::TraitObjectPtr {
         unsafe { std::mem::transmute([self.type_id_lo, self.type_id_hi]) }
     }
 
-    /// Returns the resource as a typed `NonNull<R>`, or `None` if the trait object has been
+    /// Returns the object as a typed `NonNull<R>`, or `None` if the trait object has been
     /// cleared or holds a type other than `R`.
-    pub(crate) fn resolve<R: Resource>(&self) -> Option<NonNull<R>> {
+    pub(crate) fn resolve<R: 'static>(&self) -> Option<NonNull<R>> {
         if self.is_cleared() || self.type_id() != std::any::TypeId::of::<R>() {
             return None;
         }
@@ -3862,6 +3931,14 @@ impl GcVisitor {
     /// Accepts `&TracedGlobal<T>` even though it mutates the handles. This is sound because GC
     /// tracing is always single-threaded within a V8 isolate, and `trace` is never
     /// re-entrant on the same object during a GC cycle; see also [`GlobalSlot`].
+    ///
+    /// # One owner
+    ///
+    /// The visit makes the handle strong if the parent has strong Rust references, and weak if
+    /// only the parent's wrapper keeps it alive. If two owners visit the same `TracedGlobal`, the
+    /// last visit wins, and the value can be collected while the other owner still uses it. So
+    /// a `TracedGlobal` must have exactly one GC owner, and must not be kept behind an
+    /// `std::rc::Rc`; see `README.md` §Safety rules, rule 2.
     pub fn visit_traced_global<T>(&mut self, global: &TracedGlobal<T>) {
         if global.state.is_closed() {
             // The isolate is being torn down, and its handles are left to `Dispose`, as those
@@ -4142,17 +4219,62 @@ impl WrappableRc {
         unsafe { ffi::wrappable_strong_refcount(&*self.handle.get()) }
     }
 
+    /// Creates a JavaScript function that calls `callback`, with an opaque wrapper of this
+    /// Wrappable as its data, which keeps the Wrappable alive while the function is reachable.
+    ///
+    /// While execution is terminating, or an exception is pending, creates nothing and returns
+    /// [`Error::pending`]'s error, as [`Local::<Function>::call`] does. V8 fails to create a
+    /// function only while execution is terminating.
+    pub(crate) fn new_function<'s>(
+        &self,
+        lock: &Lock<'s>,
+        callback: crate::RawFunctionCallback,
+    ) -> crate::Result<Local<'s, Function>> {
+        let isolate = lock.isolate().as_ffi();
+        // Creating the wrapper opens V8's `PrepareForExecutionScope`, which clears a pending
+        // exception or termination, so nothing is created while one is pending.
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        if unsafe {
+            ffi::isolate_is_execution_terminating(isolate)
+                || ffi::isolate_has_pending_exception(isolate)
+        } {
+            return Err(Error::pending());
+        }
+        // SAFETY: isolate is valid and locked (guaranteed by Lock); `callback` is a V8 function
+        // callback.
+        let handle = unsafe { ffi::function_new(isolate, callback as usize, self.handle.clone()) }
+            .map_err(|_| Error::pending())?;
+        // SAFETY: the function is created in the scope of `lock`.
+        unsafe { Local::from_ffi_maybe(handle) }.ok_or_else(Error::pending)
+    }
+
+    /// Returns the Rust Wrappable whose opaque wrapper is the running function's data, as
+    /// [`new_function`](Self::new_function) attaches it, or `None` if the data is anything else.
+    pub(crate) fn of_function(args: &FunctionCallbackInfo<'_>) -> Option<Self> {
+        // SAFETY: args.0 is the running callback's FunctionCallbackInfo.
+        let handle: Option<kj_rs::KjRc<ffi::Wrappable>> =
+            unsafe { ffi::fci_get_data_wrappable(args.0) }.into();
+        handle.map(|handle| Self { handle })
+    }
+
     /// Resolves the `Rc::into_raw` pointer stored in the Wrappable as a typed `NonNull<R>`.
     ///
-    /// Returns `None` if the trait object has been cleared or the stored `TypeId`
-    /// does not match `R`, preventing type confusion in all builds.
-    #[doc(hidden)]
-    pub fn resolve_resource<R: Resource>(&self) -> Option<NonNull<R>> {
+    /// Returns `None` if the trait object has been cleared or holds a type other than `R`.
+    pub(crate) fn resolve<R: 'static>(&self) -> Option<NonNull<R>> {
         // SAFETY: wrappable pointer is valid (guaranteed by KjRc lifetime).
         let trait_ptr = unsafe {
             let wrappable = &*self.handle.get();
             ffi::TraitObjectPtr::from_wrappable(wrappable)?
         };
         trait_ptr.resolve::<R>()
+    }
+
+    /// Resolves the `Rc::into_raw` pointer stored in the Wrappable as a typed `NonNull<R>`.
+    ///
+    /// Returns `None` if the trait object has been cleared or the stored `TypeId`
+    /// does not match `R`, preventing type confusion in all builds.
+    #[doc(hidden)]
+    pub fn resolve_resource<R: Resource>(&self) -> Option<NonNull<R>> {
+        self.resolve::<R>()
     }
 }

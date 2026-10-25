@@ -49,11 +49,20 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
   and the JS wrappers of the resources its `jsg::Rc`s point to can be collected (debug builds
   abort instead).
 - **Static methods** (no receiver) are placed on the constructor.
+- **`this: jsg::Rc<Self>`** as the first parameter, instead of `&self`, also makes an instance
+  method. `this` is a `jsg::Rc` of the resource the method was called on, like `JSG_THIS` in
+  C++ JSG. Use it when the method gives the resource to something that runs after the call,
+  such as a callback or a promise continuation. See "Reaching the resource from a callback" in
+  `src/rust/jsg/README.md`. A method that takes `this` has no Fast API callback.
+  The macro matches both the name `this` and the type, so a JavaScript argument of type
+  `jsg::Rc<Self>` with another name is still an ordinary argument. A `this` parameter that
+  isn't first, or has another type, is a compile error.
 - Return types of `Result<T, E>` automatically throw a JavaScript exception on `Err`.
 - The Rust `snake_case` name is converted to `camelCase` for JavaScript; override with
   `#[jsg_method(name = "jsName")]`.
 - The first typed parameter may be `&mut Lock` / `&mut jsg::Lock` to receive the
-  isolate lock directly — it is not exposed as a JavaScript argument.
+  isolate lock directly — it is not exposed as a JavaScript argument. In a method that takes
+  `this`, the lock comes right after `this`.
 - To take or return handles, name the callback's scope:
   `fn f<'s>(&self, lock: &mut Lock<'s>, v: Local<'s, Value>) -> Local<'s, Value>`. The
   generated callback ties `'s` to its own scope.
@@ -68,6 +77,12 @@ impl DnsUtil {
     // Instance — obj.getName()
     #[jsg_method]
     pub fn get_name(&self) -> String { … }
+
+    // Instance — obj.watch(…); `this` is a jsg::Rc of `obj`'s resource
+    #[jsg_method]
+    pub fn watch(this: jsg::Rc<Self>, lock: &mut Lock, watcher: jsg::Rc<Watcher>) {
+        watcher.targets.borrow_mut().push(this);
+    }
 
     // Static — DnsUtil.create(…)
     #[jsg_method]
@@ -269,6 +284,9 @@ either prefix is a compile error.  The prefix is stripped and the remainder is c
 Omitting a setter (or using `readonly`) makes a `prototype` or `instance` property read-only. A
 `lazy_instance` property has no setter and is writable unless marked `readonly`. In strict mode,
 assigning to a read-only property throws a `TypeError`.
+
+**Receiver** — a getter or setter takes `&self`, or `this: jsg::Rc<Self>` as its first
+parameter, like a `#[jsg_method]`. So do `#[jsg_inspect_property]` getters.
 
 **Compat flag** — when `spec_compliant_property_attributes` is enabled, a `prototype` getter's
 `.length` is set to `0`, its setter's `.length` to `1`, the getter's `.name` to `"get <name>"`,

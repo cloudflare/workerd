@@ -112,6 +112,15 @@ impl Isolate {
     pub fn as_ffi(&self) -> *mut v8::ffi::Isolate {
         std::ptr::from_ref(self).cast_mut().cast()
     }
+
+    /// Returns true while V8 is terminating execution on this isolate
+    /// (`v8::Isolate::IsExecutionTerminating`). Don't throw a JavaScript exception then; see
+    /// `README.md` §Safety rules, rule 1.
+    #[expect(unsafe_code, reason = "asks V8 about the locked isolate")]
+    pub fn is_execution_terminating(&mut self) -> bool {
+        // SAFETY: the isolate is valid and locked (guaranteed by `&mut self`).
+        unsafe { v8::ffi::isolate_is_execution_terminating(self.as_ffi()) }
+    }
 }
 
 impl std::ops::Deref for Lock<'_> {
