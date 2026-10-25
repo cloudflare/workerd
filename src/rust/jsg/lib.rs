@@ -15,6 +15,7 @@ pub mod lenient;
 pub mod macros;
 pub mod modules;
 pub mod nullable;
+mod promise;
 pub mod resource;
 mod scope;
 pub mod v8;
@@ -952,18 +953,26 @@ impl<'s> Lock<'s> {
     /// throwing it: an internal error is redacted (and its message logged) the same way.
     ///
     /// Use it to reject a promise with an `Error`.
-    pub fn exception(&mut self, err: &Error) -> v8::Local<'s, v8::Value> {
+    ///
+    /// # Errors
+    ///
+    /// Returns `err` itself if [`Error::is_pending`] is true: the exception it stands for is
+    /// pending in V8, and returning the error propagates it.
+    pub fn exception(&mut self, err: &Error) -> Result<v8::Local<'s, v8::Value>> {
+        if err.is_pending() {
+            return Err(err.clone());
+        }
         if err.is_internal {
             // SAFETY: isolate is valid and locked (guaranteed by Lock); the exception lives in
             // the lock's scope.
-            return unsafe {
+            return Ok(unsafe {
                 v8::Local::from_ffi(v8::ffi::exception_create_internal(
                     self.isolate().as_ffi(),
                     &err.message,
                 ))
-            };
+            });
         }
-        err.to_local(self)
+        Ok(err.to_local(self))
     }
 
     /// Throws an internal error as a V8 exception, matching `makeInternalError()` in C++.

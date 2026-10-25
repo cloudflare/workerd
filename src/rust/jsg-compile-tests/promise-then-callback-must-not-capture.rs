@@ -11,13 +11,8 @@ pub fn t<'s>(
     promise: v8::Local<'s, v8::Promise>,
 ) -> jsg::Result<v8::Local<'s, v8::Promise>> {
     let name = String::from("captured");
-    promise.then(
-        lock,
-        (),
-        move |lock, (), _value| {
-            //~^ ERROR E0277
-            Ok(jsg::ToJS::to_js(name.as_str(), lock))
-        },
-        |_lock, (), reason| Ok(reason),
-    )
+    promise.then(lock, (), move |lock, (), _value| {
+        //~^ ERROR E0277
+        Ok(jsg::ToJS::to_js(name.as_str(), lock))
+    })
 }

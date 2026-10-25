@@ -48,6 +48,7 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
 
+pub use self::ffi::PromiseState;
 use crate::Error;
 use crate::FromJS;
 use crate::GarbageCollected;
@@ -58,6 +59,8 @@ use crate::Resource;
 use crate::Traced;
 use crate::UnitType;
 use crate::isolate_state::IsolateState;
+pub use crate::promise::Promise;
+pub use crate::promise::PromiseResolver;
 #[expect(
     clippy::missing_safety_doc,
     reason = "bridge declarations of raw V8 FFI functions; their contracts are V8's own"
@@ -390,13 +393,11 @@ pub mod ffi {
             recv: &Local,
             args: &[Local],
         ) -> MaybeLocal;
-        // Fallible: creating the wrapper throws, and creating the function returns empty, when
-        // execution is terminating.
         pub unsafe fn function_new(
             isolate: *mut Isolate,
             callback: usize,
-            wrappable: KjRc<Wrappable>,
-        ) -> Result<MaybeLocal>;
+            data: &Local,
+        ) -> MaybeLocal;
 
         // Local<Object>
         pub unsafe fn local_object_set_property(
@@ -418,10 +419,19 @@ pub mod ffi {
 
         // Local<Promise>
         pub unsafe fn local_promise_state(promise: &Local) -> PromiseState;
-        // Fallible: requires that the promise is not pending.
-        pub unsafe fn local_promise_result(promise: &Local) -> Result<Local>;
+        pub unsafe fn local_promise_result(promise: &Local) -> Local;
         pub unsafe fn local_promise_mark_as_handled(promise: &Local);
         pub unsafe fn local_promise_then(
+            isolate: *mut Isolate,
+            promise: &Local,
+            on_fulfilled: &Local,
+        ) -> MaybeLocal;
+        pub unsafe fn local_promise_catch(
+            isolate: *mut Isolate,
+            promise: &Local,
+            on_rejected: &Local,
+        ) -> MaybeLocal;
+        pub unsafe fn local_promise_then_or_catch(
             isolate: *mut Isolate,
             promise: &Local,
             on_fulfilled: &Local,
@@ -726,6 +736,13 @@ pub mod ffi {
             wrappable: KjRc<Wrappable>,
             args: Pin<&mut FunctionCallbackInfo>,
         );
+
+        // Fallible: throws if the Wrappable already has a wrapper, or if V8 cannot create one,
+        // which happens only when execution is terminating.
+        pub unsafe fn wrappable_attach_opaque_wrapper(
+            isolate: *mut Isolate,
+            wrappable: KjRc<Wrappable>,
+        ) -> Result<Local>;
 
         // Infallible: only defensive tag checks; returns kj::none for non-Rust
         // wrappables rather than throwing.
@@ -1283,7 +1300,7 @@ impl<'s, T> Local<'s, T> {
     /// The scope rules keep handles in their isolate, except inside
     /// [`allow_scopes_of_another_isolate`](crate::allow_scopes_of_another_isolate); this
     /// catches handles that cross isolates there.
-    fn debug_assert_isolate(&self, lock: &Lock<'_>) {
+    pub(crate) fn debug_assert_isolate(&self, lock: &Lock<'_>) {
         debug_assert!(
             // SAFETY: the lock's isolate is locked, and the check reads only the value's page
             // header, which is valid whichever isolate owns the value.
@@ -1293,7 +1310,7 @@ impl<'s, T> Local<'s, T> {
     }
 
     /// The handle as the FFI type that C++ functions take, without giving up its lifetime.
-    fn raw(&self) -> &ffi::Local {
+    pub(crate) fn raw(&self) -> &ffi::Local {
         // SAFETY: `Local` is a `repr(transparent)` pointer and `ffi::Local` a pointer-sized
         // integer, with the same size and alignment (asserted above).
         unsafe { &*std::ptr::from_ref(self).cast::<ffi::Local>() }
@@ -1578,6 +1595,7 @@ macro_rules! impl_as {
 }
 
 impl_as!(Function, is_function);
+impl_as!(Promise, is_promise);
 impl_as!(Object, is_object);
 impl_as!(Array, is_array);
 impl_as!(String, is_string);
@@ -1651,7 +1669,9 @@ impl Function {
     ///   collector, and the function and `data` are freed only when the isolate is torn down.
     /// - Another owner that the garbage collector also traces, such as a resource sharing part of
     ///   `data` through a `std::rc::Rc`. `data` must be the only owner that traces what it
-    ///   traces: tracing one `jsg::Rc` from two owners fails an assertion.
+    ///   traces: tracing one `jsg::Rc` from two owners fails an assertion, and a `TracedGlobal`
+    ///   traced from two owners can be freed while one of them still uses it. To share state,
+    ///   hold a `jsg::Rc` or `jsg::Weak` to the resource that owns it.
     ///
     /// `f` must capture nothing, which a compile-time assertion checks; whatever it needs comes
     /// from `data`.
@@ -1680,19 +1700,52 @@ impl Function {
                 &mut FunctionCallbackInfo<'a>,
             ) -> Result<Local<'a, Value>, Error>,
     {
-        let _ = f;
+        let [function] = Self::new_sharing_data(lock, data, [Self::callback::<T, F>(f)])?;
+        Ok(function)
+    }
+
+    /// Creates one function per callback, all with the same data: one Wrappable owns `data`,
+    /// and its opaque wrapper is the V8 data of every function, so the garbage collector traces
+    /// `data` once, whichever of the functions are reachable, and drops it once none is.
+    ///
+    /// Each callback comes from [`Function::callback`] with the same `T`. Fails as
+    /// [`Function::new`] does.
+    pub(crate) fn new_sharing_data<'s, T, const N: usize>(
+        lock: &Lock<'s>,
+        data: T,
+        callbacks: [crate::RawFunctionCallback; N],
+    ) -> crate::Result<[Local<'s, Self>; N]>
+    where
+        T: Traced + 'static,
+    {
         // As in `jsg::Rc::new`, the Wrappable owns a leaked `Rc` of the data, released when the
         // Wrappable is destroyed.
         let raw: *const FunctionData<T> = Rc::into_raw(Rc::new(FunctionData(data)));
         let fat: *mut dyn GarbageCollected = raw as *const dyn GarbageCollected as *mut _;
         let mut wrappable: WrappableRc =
             ffi::TraitObjectPtr::from_raw(fat, TypeId::of::<FunctionData<T>>()).into();
-        let function =
-            wrappable.new_function(lock, crate::function_callback(call_function::<T, F>));
+        let functions = wrappable.new_functions(lock, callbacks);
         // A new Wrappable starts with one strong reference, which `jsg::Rc` would hold. Here only
-        // the function owns it, so the reference is dropped and the garbage collector decides.
+        // the functions own it, so the reference is dropped and the garbage collector decides.
         wrappable.remove_strong_ref(true);
-        function
+        functions
+    }
+
+    /// The callback with which a function that [`Function::new_sharing_data`] creates with
+    /// data `T` calls `f`, as [`Function::new`]'s function calls its closure.
+    pub(crate) fn callback<T, F>(f: F) -> crate::RawFunctionCallback
+    where
+        T: Traced + 'static,
+        F: UnitType
+            + 'static
+            + for<'a> Fn(
+                &mut Lock<'a>,
+                &T,
+                &mut FunctionCallbackInfo<'a>,
+            ) -> Result<Local<'a, Value>, Error>,
+    {
+        let _ = f;
+        crate::function_callback(call_function::<T, F>)
     }
 }
 
@@ -1822,6 +1875,7 @@ impl_local_cast!(BigInt -> Value, is_big_int);
 impl_local_cast!(Date -> Value, is_date);
 impl_local_cast!(Object -> Value, is_object);
 impl_local_cast!(Function -> Value, is_function);
+impl_local_cast!(Promise -> Value, is_promise);
 impl_local_cast!(Array -> Value, is_array);
 
 // String and Symbol are both subtypes of Name
@@ -1853,8 +1907,9 @@ impl_local_cast!(BigInt64Array -> TypedArray, is_bigint64_array);
 impl_local_cast!(BigUint64Array -> TypedArray, is_biguint64_array);
 impl_local_cast!(Uint8ClampedArray -> TypedArray, is_uint8clamped_array);
 
-// Upcasts to Object (Function, Array, TypedArray are all Object subtypes in V8)
+// Upcasts to Object (Function, Promise, Array, TypedArray are all Object subtypes in V8)
 impl_local_cast!(Function -> Object, is_function);
+impl_local_cast!(Promise -> Object, is_promise);
 impl_local_cast!(Array -> Object, is_array);
 impl_local_cast!(TypedArray -> Object, is_typed_array);
 
@@ -1878,13 +1933,6 @@ impl_local_cast!(Float32Array -> ArrayBufferView, is_float32_array);
 impl_local_cast!(Float64Array -> ArrayBufferView, is_float64_array);
 impl_local_cast!(BigInt64Array -> ArrayBufferView, is_bigint64_array);
 impl_local_cast!(BigUint64Array -> ArrayBufferView, is_biguint64_array);
-
-// Declared after `impl_as!` and `impl_local_cast!`, which it uses.
-#[path = "promise.rs"]
-mod promise;
-pub use promise::Promise;
-pub use promise::PromiseResolver;
-pub use promise::PromiseState;
 
 impl Array {
     /// Creates a new JavaScript array with the given length.
@@ -4313,36 +4361,49 @@ impl WrappableRc {
         unsafe { ffi::wrappable_strong_refcount(&*self.handle.get()) }
     }
 
-    /// Creates a JavaScript function that calls `callback`, with an opaque wrapper of this
-    /// Wrappable as its data, which keeps the Wrappable alive while the function is reachable.
+    /// Creates one JavaScript function per callback, each with an opaque wrapper of this
+    /// Wrappable as its data, which keeps the Wrappable alive while one of them is reachable.
+    /// The Wrappable must not have a wrapper yet, and gets one wrapper for all of them.
     ///
-    /// While execution is terminating, creates nothing and returns [`Error::pending`]'s error,
-    /// as [`Local::<Function>::call`] does. V8 fails to create a function only then.
-    pub(crate) fn new_function<'s>(
+    /// While execution is terminating, or an exception is pending, creates nothing and returns
+    /// [`Error::pending`]'s error, as [`Local::<Function>::call`] does. V8 fails to create a
+    /// function only while execution is terminating.
+    pub(crate) fn new_functions<'s, const N: usize>(
         &self,
-        lock: &mut Lock<'s>,
-        callback: crate::RawFunctionCallback,
-    ) -> crate::Result<Local<'s, Function>> {
+        lock: &Lock<'s>,
+        callbacks: [crate::RawFunctionCallback; N],
+    ) -> crate::Result<[Local<'s, Function>; N]> {
+        let isolate = lock.isolate().as_ffi();
+        // Creating the wrapper opens V8's `PrepareForExecutionScope`, which clears a pending
+        // exception or termination, so nothing is created while one is pending.
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
-        if unsafe { ffi::isolate_is_execution_terminating(lock.isolate().as_ffi()) } {
+        if unsafe {
+            ffi::isolate_is_execution_terminating(isolate)
+                || ffi::isolate_has_pending_exception(isolate)
+        } {
             return Err(Error::pending());
         }
-        // SAFETY: isolate is valid and locked (guaranteed by Lock); `callback` is a V8 function
-        // callback.
-        let handle = unsafe {
-            ffi::function_new(
-                lock.isolate().as_ffi(),
-                callback as usize,
-                self.handle.clone(),
-            )
+        // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
+        // (guaranteed by Lock).
+        let data = unsafe { ffi::wrappable_attach_opaque_wrapper(isolate, self.handle.clone()) }
+            .map_err(|_| Error::pending())?;
+        let mut functions = Vec::with_capacity(N);
+        for callback in callbacks {
+            // SAFETY: as above; `callback` is a V8 function callback and `data` a handle in the
+            // lock's scope, in which the function is created.
+            let function = unsafe {
+                Local::from_ffi_maybe(ffi::function_new(isolate, callback as usize, &data))
+            };
+            functions.push(function.ok_or_else(Error::pending)?);
         }
-        .map_err(|_| Error::pending())?;
-        // SAFETY: the function is created in the scope of `lock`.
-        unsafe { Local::from_ffi_maybe(handle) }.ok_or_else(Error::pending)
+        let Ok(functions) = functions.try_into() else {
+            unreachable!("one function per callback")
+        };
+        Ok(functions)
     }
 
     /// Returns the Rust Wrappable whose opaque wrapper is the running function's data, as
-    /// [`new_function`](Self::new_function) attaches it, or `None` if the data is anything else.
+    /// [`new_functions`](Self::new_functions) attaches it, or `None` if the data is anything else.
     pub(crate) fn of_function(args: &FunctionCallbackInfo<'_>) -> Option<Self> {
         // SAFETY: args.0 is the running callback's FunctionCallbackInfo.
         let handle: Option<kj_rs::KjRc<ffi::Wrappable>> =
