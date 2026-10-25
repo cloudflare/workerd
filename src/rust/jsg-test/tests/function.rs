@@ -2,75 +2,75 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! Tests for `Local<Function>::call()`, `As<T>` trait, and `impl_local_cast!` conversions.
+//! Tests for `Local<Function>::call()` and the casts between `Local` handle types.
 
 use jsg::FromJS;
 use jsg::Number;
 use jsg::ToJS;
 use jsg::v8;
 
-/// `try_as::<Function>()` succeeds for a JS function value.
+/// `Local<Function>::try_from` succeeds for a JS function value.
 #[test]
-fn try_as_function_succeeds() {
+fn try_from_function_succeeds() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "(x => x * 2)").unwrap();
-        assert!(value.try_as::<v8::Function>().is_some());
+        assert!(v8::Local::<v8::Function>::try_from(value).is_ok());
         Ok(())
     });
 }
 
-/// `try_as::<Function>()` returns `None` for a non-function value.
+/// `Local<Function>::try_from` fails for a non-function value.
 #[test]
-fn try_as_function_fails_for_number() {
+fn try_from_function_fails_for_number() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "42").unwrap();
-        assert!(value.try_as::<v8::Function>().is_none());
+        assert!(v8::Local::<v8::Function>::try_from(value).is_err());
         Ok(())
     });
 }
 
-/// `try_as::<Object>()` succeeds for a plain object.
+/// `Local<Object>::try_from` succeeds for a plain object.
 #[test]
-fn try_as_object_succeeds() {
+fn try_from_object_succeeds() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "({a: 1})").unwrap();
-        assert!(value.try_as::<v8::Object>().is_some());
+        assert!(v8::Local::<v8::Object>::try_from(value).is_ok());
         Ok(())
     });
 }
 
-/// `try_as::<Object>()` returns `None` for a primitive.
+/// `Local<Object>::try_from` fails for a primitive.
 #[test]
-fn try_as_object_fails_for_string() {
+fn try_from_object_fails_for_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "'hello'").unwrap();
-        assert!(value.try_as::<v8::Object>().is_none());
+        assert!(v8::Local::<v8::Object>::try_from(value).is_err());
         Ok(())
     });
 }
 
-/// `try_as::<Array>()` succeeds for an array.
+/// `Local<Array>::try_from` succeeds for an array.
 #[test]
-fn try_as_array_succeeds() {
+fn try_from_array_succeeds() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "[1, 2, 3]").unwrap();
-        assert!(value.try_as::<v8::Array>().is_some());
+        assert!(v8::Local::<v8::Array>::try_from(value).is_ok());
         Ok(())
     });
 }
 
-/// `try_as::<Array>()` returns `None` for a non-array object.
+/// `Local<Array>::try_from` fails for a non-array object.
 #[test]
-fn try_as_array_fails_for_object() {
+fn try_from_array_fails_for_object() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "({length: 3})").unwrap();
-        assert!(value.try_as::<v8::Array>().is_none());
+        assert!(v8::Local::<v8::Array>::try_from(value).is_err());
         Ok(())
     });
 }
@@ -81,7 +81,7 @@ fn call_zero_args() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "(() => 42)").unwrap();
-        let func = value.try_as::<v8::Function>().unwrap();
+        let func = v8::Local::<v8::Function>::try_from(value).unwrap();
         let result = func.call::<Number>(lock, None::<v8::Local<v8::Value>>, &[])?;
         assert!((result.value() - 42.0).abs() < f64::EPSILON);
         Ok(())
@@ -94,7 +94,7 @@ fn call_with_args() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "((a, b) => a - b)").unwrap();
-        let func = value.try_as::<v8::Function>().unwrap();
+        let func = v8::Local::<v8::Function>::try_from(value).unwrap();
 
         let a = Number::new(10.0).to_js(lock);
         let b = Number::new(32.0).to_js(lock);
@@ -110,7 +110,7 @@ fn call_returns_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "(s => s.toUpperCase())").unwrap();
-        let func = value.try_as::<v8::Function>().unwrap();
+        let func = v8::Local::<v8::Function>::try_from(value).unwrap();
 
         let arg = String::from("hello").to_js(lock);
         let result = func.call::<String>(lock, None::<v8::Local<v8::Value>>, &[arg])?;
@@ -129,7 +129,7 @@ fn call_with_receiver() {
         let func_val = ctx
             .eval_raw(lock, "(function() { return this.x; })")
             .unwrap();
-        let func = func_val.try_as::<v8::Function>().unwrap();
+        let func = v8::Local::<v8::Function>::try_from(func_val).unwrap();
 
         let result = func.call::<Number>(lock, Some(obj), &[])?;
         assert!((result.value() - 100.0).abs() < f64::EPSILON);
@@ -143,12 +143,12 @@ fn call_with_object_receiver_via_into() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let obj_val = ctx.eval_raw(lock, "({name: 'world'})").unwrap();
-        let obj = obj_val.try_as::<v8::Object>().unwrap();
+        let obj = v8::Local::<v8::Object>::try_from(obj_val).unwrap();
 
         let func_val = ctx
             .eval_raw(lock, "(function() { return 'hello ' + this.name; })")
             .unwrap();
-        let func = func_val.try_as::<v8::Function>().unwrap();
+        let func = v8::Local::<v8::Function>::try_from(func_val).unwrap();
 
         // Pass Local<Object> as receiver — the Into<Local<Value>> bound handles conversion.
         let result = func.call::<String>(lock, Some(obj.into()), &[])?;
@@ -166,7 +166,7 @@ fn call_leaves_thrown_exception_pending() {
             .eval_raw(lock, "globalThis.thrown = new RangeError('boom')")
             .unwrap();
         let func = ctx.eval_raw(lock, "(() => { throw thrown; })").unwrap();
-        let func = func.try_as::<v8::Function>().unwrap();
+        let func = v8::Local::<v8::Function>::try_from(func).unwrap();
 
         let caught = lock.try_catch(|lock| {
             let err = func
@@ -186,7 +186,7 @@ fn try_catch_catches_thrown_non_error() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let func = ctx.eval_raw(lock, "(() => { throw 42; })").unwrap();
-        let func = func.try_as::<v8::Function>().unwrap();
+        let func = v8::Local::<v8::Function>::try_from(func).unwrap();
 
         let caught = lock.try_catch(|lock| func.call::<Number>(lock, None, &[]))?;
         let thrown = Number::from_js(lock, caught.unwrap_err())?;
@@ -213,7 +213,7 @@ fn try_catch_does_not_run_thrown_value_accessors() {
                 )
                 .unwrap();
             let func = ctx.eval_raw(lock, "(() => { throw thrown; })").unwrap();
-            let func = func.try_as::<v8::Function>().unwrap();
+            let func = v8::Local::<v8::Function>::try_from(func).unwrap();
 
             let caught =
                 lock.try_catch(|lock| func.call::<v8::Local<v8::Value>>(lock, None, &[]))?;
@@ -234,7 +234,7 @@ fn try_catch_returns_result_on_success() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let func = ctx.eval_raw(lock, "(() => 7)").unwrap();
-        let func = func.try_as::<v8::Function>().unwrap();
+        let func = v8::Local::<v8::Function>::try_from(func).unwrap();
 
         let result = lock.try_catch(|lock| func.call::<Number>(lock, None, &[]))?;
         assert!((result.unwrap().value() - 7.0).abs() < f64::EPSILON);
@@ -282,8 +282,7 @@ fn local_object_into_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let obj_val = ctx.eval_raw(lock, "({})").unwrap();
-        let obj = obj_val.try_as::<v8::Object>().unwrap();
-        // Into<Local<Value>> should compile and not panic in debug.
+        let obj = v8::Local::<v8::Object>::try_from(obj_val).unwrap();
         let value: v8::Local<v8::Value> = obj.into();
         assert!(value.is_object());
         Ok(())
@@ -296,7 +295,7 @@ fn local_function_into_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let func_val = ctx.eval_raw(lock, "(() => {})").unwrap();
-        let func = func_val.try_as::<v8::Function>().unwrap();
+        let func = v8::Local::<v8::Function>::try_from(func_val).unwrap();
         let value: v8::Local<v8::Value> = func.into();
         assert!(value.is_object());
         Ok(())
@@ -309,7 +308,7 @@ fn local_array_into_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let arr_val = ctx.eval_raw(lock, "[1, 2]").unwrap();
-        let arr = arr_val.try_as::<v8::Array>().unwrap();
+        let arr = v8::Local::<v8::Array>::try_from(arr_val).unwrap();
         let value: v8::Local<v8::Value> = arr.into();
         assert!(value.is_array());
         Ok(())

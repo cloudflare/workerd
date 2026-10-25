@@ -106,6 +106,20 @@ Isolate* gc_visitor_v8_isolate(GcVisitor* visitor);
 /// field of the `ffi::Global`.
 void global_clear_weak(uintptr_t* global);
 
+// Rules for the shims below (details in src/rust/jsg/README.md, "Safety rules"):
+// - Call V8 directly, not C++ JSG (`jsg::Lock`, `JSG_TRY`, `jsg::check`,
+//   `createTunneledException`, `makeInternalError`, `jsg::Data`, ...). cpp-jsg-allowlist-test
+//   fails on a new use. To report a JavaScript exception, leave it pending and return an empty
+//   result (as `local_function_call` does), or catch it with a `v8::TryCatch`, decide with
+//   `catch_exception()` and return it through a `MaybeLocal` out-parameter.
+// - If a shim can throw a C++ exception, declare it as returning `Result<T>` in v8.rs. Otherwise
+//   the exception becomes a Rust panic (src/rust/AGENTS.md, "Error handling across FFI").
+// - An empty result doesn't always mean that execution is terminating. Rust must check
+//   `isolate_is_execution_terminating` or look at the caught exception.
+// - Never throw a JavaScript exception while `isolate->IsExecutionTerminating()` is true.
+//   `ThrowException` would replace the termination with an exception that JavaScript can catch.
+//   The `isolate_throw_*` shims check this; a shim that calls `ThrowException` itself must too.
+
 // Local<T>
 Global local_to_global(Isolate* isolate, Local value);
 Local local_new_number(Isolate* isolate, double value);

@@ -1,5 +1,23 @@
+load("@rules_python//python:defs.bzl", "py_test")
 load("//:build/wd_cc_library.bzl", "wd_cc_library")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# Rust JSG's C++ shim files. To have cpp-jsg-allowlist-test check a shim file in another
+# package, export it with `exports_files` and add it here.
+CPP_SHIMS = glob([
+    "*.c++",
+    "*.h",
+])
+
+# Fails when a shim adds a use of C++ JSG; see cpp-jsg-allowlist-test.py.
+py_test(
+    name = "cpp-jsg-allowlist-test",
+    size = "small",
+    srcs = ["cpp-jsg-allowlist-test.py"],
+    args = ["$(location cpp-jsg-allowlist.txt)"] + ["$(location %s)" % shim for shim in CPP_SHIMS],
+    data = ["cpp-jsg-allowlist.txt"] + CPP_SHIMS,
+    main = "cpp-jsg-allowlist-test.py",
+)
 
 wd_rust_crate(
     name = "jsg",

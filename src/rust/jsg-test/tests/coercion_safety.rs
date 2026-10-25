@@ -492,7 +492,7 @@ fn object_get_from_throwing_getter_returns_err() {
         let value = ctx
             .eval_raw(lock, "({ get x() { throw new RangeError('getter'); } })")
             .expect("expression should evaluate");
-        let obj: jsg::v8::Local<'_, jsg::v8::Object> = value.into();
+        let obj: jsg::v8::Local<'_, jsg::v8::Object> = value.try_into().unwrap();
         let err = obj
             .get(lock, "x")
             .expect_err("a throwing getter should be an Err");
@@ -514,7 +514,7 @@ fn object_has_from_throwing_proxy_returns_err() {
                 "new Proxy({}, { has() { throw new TypeError('trap'); } })",
             )
             .expect("expression should evaluate");
-        let obj: jsg::v8::Local<'_, jsg::v8::Object> = value.into();
+        let obj: jsg::v8::Local<'_, jsg::v8::Object> = value.try_into().unwrap();
         let err = obj
             .has(lock, "x")
             .expect_err("a throwing trap should be an Err");

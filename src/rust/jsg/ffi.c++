@@ -1409,17 +1409,19 @@ void isolate_throw_error(Isolate* isolate, ::rust::Str description) {
 }
 
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage) {
-  // Mirrors makeInternalError() from util.c++: generates a unique error ID,
-  // logs the internal message (with ID) to KJ_LOG(ERROR) for Sentry, and
-  // throws a generic "internal error; reference = <id>" JS Error to the caller.
   // kj::heapString(data, size) copies exactly `size` bytes and appends a NUL,
   // avoiding the out-of-bounds read that kj::StringPtr(data, size) would cause
   // on non-NUL-terminated Rust &str data.
   auto message = kj::heapString(internalMessage.data(), internalMessage.size());
-  // Logs the message even when execution is terminating, but then throws nothing.
-  auto error = ::workerd::jsg::makeInternalError(isolate, message);
-  if (isolate->IsExecutionTerminating()) return;
-  isolate->ThrowException(error);
+  if (isolate->IsExecutionTerminating()) {
+    // Logs the message, but creates no error: creating one while execution is terminating fails
+    // a V8 debug check, and it would not be thrown.
+    KJ_LOG(ERROR, message);
+    return;
+  }
+  // makeInternalError() generates a unique error ID, logs the internal message (with ID) to
+  // KJ_LOG(ERROR) for Sentry, and returns a generic "internal error; reference = <id>" JS Error.
+  isolate->ThrowException(::workerd::jsg::makeInternalError(isolate, message));
 }
 
 void isolate_terminate_execution(Isolate* isolate) {

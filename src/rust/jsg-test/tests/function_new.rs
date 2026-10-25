@@ -203,7 +203,7 @@ impl TerminatingCreator {
         spin: v8::Local<'s, v8::Value>,
     ) -> Result<(), jsg::Error> {
         lock.terminate_execution();
-        let spin = spin.try_as::<v8::Function>().unwrap();
+        let spin: v8::Local<v8::Function> = spin.try_into().unwrap();
         let err = spin
             .call::<v8::Local<v8::Value>>(lock, None, &[])
             .unwrap_err();
@@ -254,7 +254,7 @@ impl ThrowingCreator {
         lock: &mut jsg::Lock<'s>,
         throws: v8::Local<'s, v8::Value>,
     ) -> Result<(), jsg::Error> {
-        let throws = throws.try_as::<v8::Function>().unwrap();
+        let throws: v8::Local<v8::Function> = throws.try_into().unwrap();
         let err = throws
             .call::<v8::Local<v8::Value>>(lock, None, &[])
             .unwrap_err();
@@ -374,7 +374,7 @@ fn reentrant_call_sees_its_own_data() {
             let depth = jsg::Number::from_js(lock, args.get(0))?.value();
             log.borrow_mut().push(format!("+{depth}"));
             if depth > 0.0 {
-                let again = args.get(1).try_as::<v8::Function>().unwrap();
+                let again: v8::Local<v8::Function> = args.get(1).try_into().unwrap();
                 let next = jsg::Number::from(depth - 1.0).to_js(lock);
                 again.call::<v8::Local<v8::Value>>(lock, None, &[next])?;
             }

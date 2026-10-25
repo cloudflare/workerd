@@ -144,6 +144,17 @@ void TestHarness::drop_realm_then_gc(size_t data, ::rust::Fn<void(size_t)> callb
   });
 }
 
+void terminate_and_deliver(Isolate* isolate) {
+  isolate->TerminateExecution();
+  // The loop's stack check delivers the termination: V8 throws the termination exception and
+  // the script returns empty. No TryCatch here, so the exception stays pending for the caller.
+  auto context = isolate->GetCurrentContext();
+  auto source = v8::String::NewFromUtf8Literal(isolate, "(() => { for (;;) {} })()");
+  auto script = v8::Script::Compile(context, source).ToLocalChecked();
+  KJ_ASSERT(script->Run(context).IsEmpty());
+  KJ_ASSERT(isolate->IsExecutionTerminating());
+}
+
 void request_gc(Isolate* isolate, GcType gc_type) {
   switch (gc_type) {
     case GcType::Full:

@@ -219,9 +219,9 @@ impl<'s> FromJS<'s> for Error {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        if value.is_native_error() {
-            let obj: v8::Local<v8::Object> = value.into();
-
+        if value.is_native_error()
+            && let Ok(obj) = v8::Local::<v8::Object>::try_from(value)
+        {
             let name = obj
                 .get(lock, "name")
                 .ok()
@@ -762,8 +762,9 @@ impl<'s> Lock<'s> {
         // int-typed length parameter; V8 rejects strings that large anyway.
         let len = i32::try_from(message.len()).unwrap_or(i32::MAX);
         // SAFETY: Lock guarantees the isolate is valid and locked; message.as_ptr()
-        // and len describe a valid byte slice.
-        let value: v8::Local<'s, v8::Value> = unsafe {
+        // and len describe a valid byte slice. V8's error constructors always return an
+        // object.
+        let error: v8::Local<'s, v8::Object> = unsafe {
             v8::Local::from_ffi(v8::ffi::exception_create_from_bytes(
                 self.isolate().as_ffi(),
                 exception_type,
@@ -771,8 +772,8 @@ impl<'s> Lock<'s> {
                 len,
             ))
         };
-        // Error, TypeError, and RangeError are all JS objects.
-        value.into()
+        debug_assert!(error.is_object());
+        error
     }
 
     pub fn throw_error(&mut self, message: &str) {
@@ -780,14 +781,16 @@ impl<'s> Lock<'s> {
         unsafe { v8::ffi::isolate_throw_error(self.isolate().as_ffi(), message) }
     }
 
+    /// Runs `fut` as I/O and later calls `callback` with its output under a new lock. Both run
+    /// after the current callback has returned, so they must be `'static`.
     #[expect(
         clippy::unimplemented,
         reason = "`await_io` is not implemented for Rust resources yet"
     )]
     pub fn await_io<F, C, I, R>(&mut self, _fut: F, _callback: C) -> Result<R>
     where
-        F: Future<Output = I>,
-        C: for<'t> FnOnce(&mut Lock<'t>, I) -> Result<R>,
+        F: Future<Output = I> + 'static,
+        C: for<'t> FnOnce(&mut Lock<'t>, I) -> Result<R> + 'static,
     {
         unimplemented!("Lock::await_io is not yet implemented for Rust resources")
     }
@@ -846,6 +849,11 @@ impl<'s> Lock<'s> {
         }
         if err.is_internal {
             self.throw_internal_error(&err.message);
+            return;
+        }
+        if self.is_execution_terminating() {
+            // `isolate_throw_exception` would throw nothing, and creating the exception while
+            // execution is terminating fails a V8 debug check.
             return;
         }
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
