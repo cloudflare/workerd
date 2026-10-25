@@ -153,12 +153,11 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                 if value.is_null() || value.is_undefined() {
                     #empty
                 }
-                if !value.is_object() {
+                let Ok(obj) = jsg::v8::Local::<jsg::v8::Object>::try_from(value) else {
                     return Err(jsg::Error::new_type_error(
                         format!("Expected object but got {}", value.type_of(lock))
                     ));
-                }
-                let obj: jsg::v8::Local<'s, jsg::v8::Object> = value.into();
+                };
                 #(#field_extractions)*
                 Ok(Self { #(#field_names),* })
             }

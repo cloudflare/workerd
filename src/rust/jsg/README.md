@@ -151,10 +151,17 @@ isolate; methods that need the isolate take the lock. A handle that may be empty
 `Option<Local<'s, T>>`, laid out like `v8::MaybeLocal<T>`: for example, the `String`
 constructors return `None` when V8 cannot create the string.
 
+A cast to a supertype, such as `Local<Function>` to `Local<Object>` or `Local<Value>`, is a
+`From` and costs nothing, whichever supertype it targets. A cast to a subtype is a
+`TryFrom`, which checks the value and fails with a `DataError`.
+
 ```rust
 let str_value = "hello".to_js(lock);
 let num_value = 42u32.to_local(lock); // `ToLocalValue` also covers integers
 let global = str_value.to_global(lock);
+
+let name: v8::Local<v8::Name> = v8::Local::<v8::String>::try_from(str_value).unwrap().into();
+assert!(v8::Local::<v8::Function>::try_from(str_value).is_err());
 ```
 
 ### `Global<T>`
