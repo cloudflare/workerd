@@ -635,6 +635,14 @@ build:bazelflare-tsan --copt=-g1
 # back.
 test:bazelflare-asan --test_tag_filters=-off-by-default,-no-asan,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
 test:bazelflare-tsan --test_tag_filters=-off-by-default,-no-tsan,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
+# `bazel coverage` on bazelflare, whose filters replace the coverage config's; this merges the two.
+# The report lands in bazel-out/_coverage/_coverage_report.dat.
+build:bazelflare-coverage --config=coverage --config=bazelflare
+coverage:bazelflare-coverage --test_tag_filters=-off-by-default,-no-coverage,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli,-lint,-benchmark,-workerd-benchmark
+# Each test collects its coverage in its own spawn: the coverage config's split post-processing adds
+# a second spawn per test, with the same inputs, and needs every coverage output fetched.
+build:bazelflare-coverage --noexperimental_split_coverage_postprocessing
+build:bazelflare-coverage --noexperimental_fetch_all_coverage_outputs
 
 # Local workstation overrides. /.local/ is gitgnored.
 try-import %workspace%/.local/bazelrc
