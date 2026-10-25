@@ -376,7 +376,7 @@ pub mod ffi {
             function: &Local,
             recv: &Local,
             args: &[Local],
-        ) -> Local;
+        ) -> MaybeLocal;
 
         // Local<Object>
         pub unsafe fn local_object_set_property(
@@ -558,11 +558,21 @@ pub mod ffi {
             length: i32,
         ) -> Local;
 
+        // TryCatch
+        pub unsafe fn isolate_try_catch(
+            isolate: *mut Isolate,
+            data: usize,
+            callback: unsafe fn(usize) -> bool,
+            exception: &mut MaybeLocal,
+        );
+
         // Isolate
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
         pub unsafe fn isolate_throw_error(isolate: *mut Isolate, message: &str);
         pub unsafe fn isolate_throw_internal_error(isolate: *mut Isolate, internal_message: &str);
         pub unsafe fn isolate_terminate_execution(isolate: *mut Isolate);
+        pub unsafe fn isolate_is_execution_terminating(isolate: *mut Isolate) -> bool;
+        pub unsafe fn isolate_has_pending_exception(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_is_locked(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_in_context(isolate: *mut Isolate) -> bool;
 
@@ -1556,6 +1566,17 @@ impl<'s> Local<'s, Function> {
     /// `args` is a slice of `Local<Value>` — use [`ToJS::to_js`](crate::ToJS::to_js) to
     /// convert Rust values, or `.into()` for other `Local<T>` handles.
     ///
+    /// # Errors
+    ///
+    /// If the function throws, or execution is terminating (then without calling it), the
+    /// exception stays pending and this
+    /// returns an error for which [`Error::is_pending`] is true. [`Lock::throw_exception`] throws
+    /// nothing for it, so
+    /// returning it from a callback propagates the exception to the callback's JavaScript caller,
+    /// as C++ JSG does. Don't call into JavaScript after such an error; to handle the exception
+    /// instead, make the call in [`Lock::try_catch`]. Also fails if the result does not convert
+    /// to `R`.
+    ///
     /// # Example
     ///
     /// ```ignore
@@ -1576,17 +1597,26 @@ impl<'s> Local<'s, Function> {
             arg.debug_assert_isolate(lock);
         }
 
+        // Calling into V8 while execution is terminating would clear the termination.
+        // SAFETY: lock guarantees the isolate is locked.
+        if unsafe { ffi::isolate_is_execution_terminating(lock.isolate().as_ffi()) } {
+            return Err(Error::pending());
+        }
         // SAFETY: lock guarantees the isolate is locked and a HandleScope is active.
-        // self is a valid Local<Function>; recv and args are valid Local handles.
+        // self is a valid Local<Function>; recv and args are valid Local handles. The result
+        // belongs to the lock's scope.
         let result = unsafe {
-            Local::from_ffi(ffi::local_function_call(
+            Local::from_ffi_maybe(ffi::local_function_call(
                 lock.isolate().as_ffi(),
                 self.raw(),
                 recv.raw(),
                 Local::raw_slice(args),
             ))
         };
-        R::from_js(lock, result)
+        match result {
+            Some(result) => R::from_js(lock, result),
+            None => Err(Error::pending()),
+        }
     }
 }
 

@@ -194,7 +194,8 @@ int64_t local_big_int_int64_value(const Local& value, bool& lossless);
 double local_date_value_of(const Local& value);
 
 // Local<Function>
-Local local_function_call(
+// Returns the call's result, or none if it threw, leaving the exception pending.
+MaybeLocal local_function_call(
     Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args);
 
 // Local<Object>
@@ -383,11 +384,25 @@ void realm_detach(Isolate* isolate, const IsolateState* state);
 Local exception_create_from_bytes(
     Isolate* isolate, ExceptionType exception_type, const uint8_t* data, int32_t length);
 
+// TryCatch
+// Decides what `tryCatch` caught as jsg::Lock::tryCatch() does: stores a catchable exception in
+// `exception` and returns true, or rethrows a termination and returns false. Every shim that
+// catches what JavaScript throws decides with this.
+bool catch_exception(v8::TryCatch& tryCatch, MaybeLocal& exception);
+// Calls `callback(data)` in a TryCatch. If it returns true (it failed), `exception` receives what
+// it threw, as catch_exception() decides.
+void isolate_try_catch(
+    Isolate* isolate, size_t data, ::rust::Fn<bool(size_t)> callback, MaybeLocal& exception);
+
 // Isolate
+// The isolate_throw_*() functions throw nothing while execution is terminating, so that they
+// never replace the termination with a catchable exception.
 void isolate_throw_exception(Isolate* isolate, Local exception);
 void isolate_throw_error(Isolate* isolate, ::rust::Str message);
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage);
 void isolate_terminate_execution(Isolate* isolate);
+bool isolate_is_execution_terminating(Isolate* isolate);
+bool isolate_has_pending_exception(Isolate* isolate);
 bool isolate_is_locked(Isolate* isolate);
 bool isolate_in_context(Isolate* isolate);
 void ignore_leak(size_t ptr);
