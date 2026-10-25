@@ -360,8 +360,11 @@ kj::Promise<DeferredProxy<void>> ServiceWorkerGlobalScope::request(kj::HttpMetho
   auto deferredNeuter = kj::defer([ownRequestBody = kj::addRef(*ownRequestBody)]() mutable {
     // Make sure to cancel the request body stream since the native stream is no longer valid once
     // the returned promise completes. Note that the KJ HTTP library deals with the fact that we
-    // haven't consumed the entire request body.
-    ownRequestBody->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
+    // haven't consumed the entire request body. After a normal response the stream is already
+    // neutered, so skip building an exception that would be discarded.
+    if (!ownRequestBody->isNeutered()) {
+      ownRequestBody->neuter(makeNeuterException(NeuterReason::CLIENT_DISCONNECTED));
+    }
   });
   KJ_ON_SCOPE_FAILURE(ownRequestBody->neuter(makeNeuterException(NeuterReason::THREW_EXCEPTION)));
 
