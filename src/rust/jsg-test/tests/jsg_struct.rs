@@ -47,7 +47,7 @@ fn objects_can_be_wrapped_and_unwrapped() {
             str: "test".to_owned(),
         };
         let wrapped = instance.to_js(lock);
-        let obj: v8::Local<'_, v8::Object> = wrapped.into();
+        let obj: v8::Local<'_, v8::Object> = wrapped.try_into().unwrap();
         assert!(obj.has(lock, "str").unwrap());
         let str_value = obj.get(lock, "str");
         assert!(str_value.unwrap().is_string());
@@ -70,7 +70,7 @@ fn struct_with_multiple_properties() {
             active: "true".to_owned(),
         };
         let wrapped = instance.to_js(lock);
-        let obj: v8::Local<'_, v8::Object> = wrapped.into();
+        let obj: v8::Local<'_, v8::Object> = wrapped.try_into().unwrap();
 
         assert!(obj.has(lock, "name").unwrap());
         assert!(obj.has(lock, "age").unwrap());
@@ -162,7 +162,7 @@ fn nested_object_properties() {
         let nested_val = outer.get(lock, "nested");
         assert!(nested_val.is_ok());
 
-        let nested_obj: v8::Local<'_, v8::Object> = nested_val.unwrap().into();
+        let nested_obj: v8::Local<'_, v8::Object> = nested_val.unwrap().try_into().unwrap();
         assert!(nested_obj.has(lock, "inner").unwrap());
 
         let inner_val = nested_obj.get(lock, "inner");
@@ -279,19 +279,25 @@ fn required_struct_from_null_and_absent_property() {
     });
 }
 
-/// A throwing getter fails the conversion with its own error.
+/// A throwing getter fails the conversion, leaving what it threw pending.
 #[test]
 fn struct_from_throwing_getter_propagates_error() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let err = convert::<OptionalStruct>(
-            lock,
-            ctx,
-            "({ get label() { throw new RangeError('getter'); } })",
-        )
-        .unwrap_err();
-        assert_eq!(err.name, ExceptionType::RangeError);
-        assert!(err.message.contains("getter"), "got {:?}", err.message);
+        let value = ctx
+            .eval_raw(
+                lock,
+                "globalThis.thrown = new RangeError('getter');
+                 ({ get label() { throw thrown; } })",
+            )
+            .unwrap();
+        let caught = lock.try_catch(|lock| {
+            let err = <OptionalStruct as jsg::FromJS>::from_js(lock, value).unwrap_err();
+            assert!(err.is_pending());
+            Err::<(), _>(err)
+        })?;
+        ctx.set_global(lock, "caught", caught.unwrap_err());
+        assert!(ctx.eval::<bool>(lock, "caught === thrown").unwrap());
         Ok(())
     });
 }
@@ -306,7 +312,7 @@ fn struct_omits_absent_optional_fields() {
             count: Some(1),
         }
         .to_js(lock);
-        let obj: v8::Local<'_, v8::Object> = value.into();
+        let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
         assert!(!obj.has(lock, "label")?);
         assert!(obj.has(lock, "count")?);
         Ok(())

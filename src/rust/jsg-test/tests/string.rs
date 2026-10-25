@@ -444,22 +444,22 @@ fn utf8_value_coerces_number_to_string() {
 // =============================================================================
 
 #[test]
-fn string_try_as_from_value() {
+fn string_try_from_from_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let val: Local<'_, Value> = "cast me".to_local(lock);
-        let s = val.try_as::<JsString>().expect("should cast to String");
+        let s = Local::<JsString>::try_from(val).expect("should cast to String");
         assert_eq!(s.to_string(lock), "cast me");
         Ok(())
     });
 }
 
 #[test]
-fn string_try_as_fails_for_non_string() {
+fn string_try_from_fails_for_non_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let val: Local<'_, Value> = jsg::Number::new(42.0).to_local(lock);
-        assert!(val.try_as::<JsString>().is_none());
+        assert!(Local::<JsString>::try_from(val).is_err());
         Ok(())
     });
 }
@@ -509,7 +509,7 @@ fn string_concat_over_max_length_is_none() {
     harness.run_in_context(|lock, ctx| {
         // `repeat` builds a cons string, so this allocates little.
         let value = ctx.eval_raw(lock, "'x'.repeat(2 ** 28 + 1)").unwrap();
-        let half = value.try_as::<JsString>().unwrap();
+        let half = Local::<JsString>::try_from(value).unwrap();
         assert!(i64::from(half.length()) * 2 > i64::from(JsString::MAX_LENGTH));
         assert!(JsString::concat(lock, half, half).is_none());
         Ok(())

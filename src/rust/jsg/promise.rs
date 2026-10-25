@@ -133,7 +133,7 @@ impl Promise {
         lock: &mut Lock<'s>,
         value: Local<'s, Value>,
     ) -> crate::Result<Local<'s, Self>> {
-        if let Some(promise) = value.try_as::<Self>() {
+        if let Ok(promise) = Local::<Self>::try_from(value) {
             return Ok(promise);
         }
         let resolver = PromiseResolver::new(lock)?;

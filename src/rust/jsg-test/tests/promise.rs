@@ -127,7 +127,7 @@ fn promise_argument_accepts_any_value() {
 fn then_runs_callbacks_as_microtasks_with_their_data() {
     crate::Harness::new().run_in_context(|lock, ctx| {
         let promise = ctx.eval_raw(lock, "Promise.resolve('world')").unwrap();
-        let promise = promise.try_as::<v8::Promise>().unwrap();
+        let promise = v8::Local::<v8::Promise>::try_from(promise).unwrap();
         let greeted = promise
             .then(lock, "hello".to_owned(), |lock, greeting, value| {
                 let name = String::from_js(lock, value)?;
@@ -147,7 +147,7 @@ fn then_runs_callbacks_as_microtasks_with_their_data() {
 fn then_rejects_with_callback_error_and_handles_rejections() {
     crate::Harness::new().run_in_context(|lock, ctx| {
         let fulfilled = ctx.eval_raw(lock, "Promise.resolve(1)").unwrap();
-        let fulfilled = fulfilled.try_as::<v8::Promise>().unwrap();
+        let fulfilled = v8::Local::<v8::Promise>::try_from(fulfilled).unwrap();
         let failed = fulfilled
             .then(lock, (), |_lock, (), _value| {
                 Err(jsg::Error::new_range_error("out of range"))
@@ -158,7 +158,7 @@ fn then_rejects_with_callback_error_and_handles_rejections() {
         let rejected = ctx
             .eval_raw(lock, "Promise.reject(new TypeError('nope'))")
             .unwrap();
-        let rejected = rejected.try_as::<v8::Promise>().unwrap();
+        let rejected = v8::Local::<v8::Promise>::try_from(rejected).unwrap();
         let recovered = rejected
             .catch(lock, (), |lock, (), reason| {
                 let err = jsg::Error::from_js(lock, reason)?;
@@ -190,7 +190,7 @@ fn then_and_catch_pass_the_other_outcome_through() {
                 "globalThis.error = new TypeError('nope'); Promise.reject(error)",
             )
             .unwrap();
-        let rejected = rejected.try_as::<v8::Promise>().unwrap();
+        let rejected = v8::Local::<v8::Promise>::try_from(rejected).unwrap();
         let skipped = rejected
             .then(lock, (), |_lock, (), _value| {
                 Err(jsg::Error::new_type_error("on_fulfilled ran"))
@@ -199,7 +199,7 @@ fn then_and_catch_pass_the_other_outcome_through() {
         ctx.set_global(lock, "skipped", skipped);
 
         let fulfilled = ctx.eval_raw(lock, "Promise.resolve('kept')").unwrap();
-        let fulfilled = fulfilled.try_as::<v8::Promise>().unwrap();
+        let fulfilled = v8::Local::<v8::Promise>::try_from(fulfilled).unwrap();
         let kept = fulfilled
             .catch(lock, (), |_lock, (), _reason| {
                 Err(jsg::Error::new_type_error("on_rejected ran"))
@@ -229,8 +229,7 @@ fn react_to_outcome<'s>(
     code: &str,
 ) -> v8::Local<'s, v8::Promise> {
     let promise = ctx.eval_raw(lock, code).unwrap();
-    promise
-        .try_as::<v8::Promise>()
+    v8::Local::<v8::Promise>::try_from(promise)
         .unwrap()
         .then_or_catch(
             lock,
@@ -268,7 +267,7 @@ fn then_or_catch_runs_the_callback_for_the_outcome() {
 fn panic_in_then_callback_is_an_internal_error() {
     crate::Harness::new().run_in_context(|lock, ctx| {
         let promise = ctx.eval_raw(lock, "Promise.resolve(1)").unwrap();
-        let promise = promise.try_as::<v8::Promise>().unwrap();
+        let promise = v8::Local::<v8::Promise>::try_from(promise).unwrap();
         let panicked = promise
             .then(
                 lock,
@@ -468,9 +467,8 @@ impl Watcher {
         promise: v8::Local<'s, v8::Promise>,
         callback: v8::Local<'s, v8::Value>,
     ) -> Result<v8::Local<'s, v8::Promise>, jsg::Error> {
-        let callback = callback
-            .try_as::<v8::Function>()
-            .ok_or_else(|| jsg::Error::new_type_error("callback must be a function"))?;
+        let callback = v8::Local::<v8::Function>::try_from(callback)
+            .map_err(|_| jsg::Error::new_type_error("callback must be a function"))?;
         let watch = Watch {
             state: self.state.clone(),
             callback: callback.to_traced_global(lock),
@@ -538,7 +536,7 @@ impl TerminatingPromises {
         let resolver = v8::PromiseResolver::new(lock)?;
         let promise = resolver.promise();
         lock.terminate_execution();
-        let spin = spin.try_as::<v8::Function>().unwrap();
+        let spin = v8::Local::<v8::Function>::try_from(spin).unwrap();
         let err = spin
             .call::<v8::Local<v8::Value>>(lock, None, &[])
             .unwrap_err();
@@ -805,9 +803,8 @@ impl ReadThroughCache {
             return Ok(promise);
         }
 
-        let fallback = fallback
-            .try_as::<v8::Function>()
-            .ok_or_else(|| jsg::Error::new_type_error("fallback must be a function"))?;
+        let fallback = v8::Local::<v8::Function>::try_from(fallback)
+            .map_err(|_| jsg::Error::new_type_error("fallback must be a function"))?;
         let key_js = key.as_str().to_js(lock);
         // No RefCell borrow is held here: the fallback is JavaScript and may call `read` again.
         let produced = fallback.call::<v8::Local<v8::Value>>(lock, None, &[key_js])?;
