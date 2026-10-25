@@ -153,6 +153,7 @@ pub mod ffi {
         type FastApiCallbackOptions;
         type PropertyCallbackInfo;
         type PropertySetterCallbackInfo;
+        type PropertyQueryCallbackInfo;
         type Wrappable;
 
         // BackingStore
@@ -534,6 +535,10 @@ pub mod ffi {
         pub unsafe fn psci_get_isolate(info: *mut PropertySetterCallbackInfo) -> *mut Isolate;
         pub unsafe fn psci_get_this(info: *mut PropertySetterCallbackInfo) -> Local;
 
+        // PropertyCallbackInfo<v8::Integer>, for wildcard property queries
+        pub unsafe fn pqci_get_isolate(info: *mut PropertyQueryCallbackInfo) -> *mut Isolate;
+        pub unsafe fn pqci_get_this(info: *mut PropertyQueryCallbackInfo) -> Local;
+
         // FastApiCallbackOptions
         pub unsafe fn fast_api_unwrap_receiver(
             options: *mut FastApiCallbackOptions,
@@ -647,6 +652,13 @@ pub mod ffi {
         pub setter_callback: KjMaybe<usize>,
     }
 
+    /// The callbacks of a wildcard property: a named-property interceptor on every instance
+    /// (`v8::NamedPropertyGetterCallback` and `v8::NamedPropertyQueryCallback`).
+    pub struct WildcardPropertyDescriptor {
+        pub getter_callback: usize,
+        pub query_callback: usize,
+    }
+
     pub struct ResourceDescriptor {
         pub name: String,
         pub constructor: KjMaybe<ConstructorDescriptor>,
@@ -654,6 +666,7 @@ pub mod ffi {
         pub properties: Vec<PropertyDescriptor>,
         pub static_methods: Vec<MethodDescriptor>,
         pub static_constants: Vec<StaticConstantDescriptor>,
+        pub wildcard_property: KjMaybe<WildcardPropertyDescriptor>,
     }
 
     // Resources
@@ -3491,7 +3504,7 @@ impl<'cb> FunctionCallbackInfo<'cb> {
     }
 }
 
-/// The arguments to a native data property getter.
+/// The arguments to a native data property getter, or to the getter of a wildcard property.
 ///
 /// `'cb` is the brand of the callback's [`Lock`](crate::Lock), as for
 /// [`FunctionCallbackInfo`]. Invariant in `'cb`.
@@ -3524,6 +3537,42 @@ impl<'cb> PropertyCallbackInfo<'cb> {
         // SAFETY: self.0 is valid (guaranteed by constructor), and `value` lives in the
         // callback's scope.
         unsafe { ffi::pci_set_return_value(self.0, value.into_ffi()) }
+    }
+}
+
+/// The `PropertyCallbackInfo` of a wildcard property query, which tells V8 whether the property
+/// exists.
+///
+/// `'cb` is the brand of the callback's [`Lock`](crate::Lock), as for
+/// [`FunctionCallbackInfo`]. Invariant in `'cb`.
+pub struct PropertyQueryCallbackInfo<'cb>(
+    *mut ffi::PropertyQueryCallbackInfo,
+    PhantomData<*mut &'cb ()>,
+);
+
+impl<'cb> PropertyQueryCallbackInfo<'cb> {
+    /// Wraps the `PropertyCallbackInfo` of the running query, whose lock is `lock`.
+    ///
+    /// # Safety
+    /// `info` must be the `PropertyCallbackInfo` V8 passed to the running query, and `lock`
+    /// the lock of the [`CallbackScope`](crate::CallbackScope) opened from it.
+    pub(crate) unsafe fn new(
+        _lock: &crate::Lock<'cb>,
+        info: *mut ffi::PropertyQueryCallbackInfo,
+    ) -> Self {
+        Self(info, PhantomData)
+    }
+
+    pub fn isolate(&self) -> IsolatePtr {
+        // SAFETY: self.0 is valid (guaranteed by constructor).
+        unsafe { IsolatePtr::from_ffi(ffi::pqci_get_isolate(self.0)) }
+    }
+
+    /// The object that has the interceptor (V8's `Holder()`), which may be on the prototype
+    /// chain of the object whose property is looked up.
+    pub fn this(&self) -> Local<'cb, Value> {
+        // SAFETY: self.0 is valid (guaranteed by constructor).
+        unsafe { Local::from_ffi(ffi::pqci_get_this(self.0)) }
     }
 }
 

@@ -30,16 +30,21 @@ pub use resource::Resource;
 pub use resource::Weak;
 pub use scope::CallbackScope;
 pub use scope::CallbackScopeParam;
+pub use scope::Intercepted;
 pub use scope::Isolate;
 pub use scope::Lock;
 pub use scope::RawFunctionCallback;
 pub use scope::RawGetterCallback;
 pub use scope::RawSetterCallback;
+pub use scope::RawWildcardGetterCallback;
+pub use scope::RawWildcardQueryCallback;
 pub use scope::UnitType;
 pub use scope::allow_scopes_of_another_isolate;
 pub use scope::function_callback;
 pub use scope::getter_callback;
 pub use scope::setter_callback;
+pub use scope::wildcard_getter_callback;
+pub use scope::wildcard_query_callback;
 pub use v8::ArrayBuffer;
 pub use v8::ArrayBufferView;
 pub use v8::BackingStore;
@@ -1099,6 +1104,13 @@ pub enum Member {
     StaticConstant {
         name: String,
         value: ConstantValue,
+    },
+    /// A property of every instance with any string name that is not a defined property of the
+    /// instance or its prototypes, like C++ JSG's `JSG_WILDCARD_PROPERTY`. A type has at most
+    /// one. `query_callback` tells V8 whether a property exists, for `in`.
+    WildcardProperty {
+        getter_callback: RawWildcardGetterCallback,
+        query_callback: RawWildcardQueryCallback,
     },
     /// Another resource type's constructor, as a property of this type's
     /// prototype named `name`, like C++ JSG's `JSG_NESTED_TYPE`. Nested types

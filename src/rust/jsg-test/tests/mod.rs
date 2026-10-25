@@ -34,3 +34,4 @@ mod symbol;
 mod traceable_gc;
 mod traced_global_lifetime;
 mod unwrap;
+mod wildcard_property;

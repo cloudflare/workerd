@@ -254,6 +254,7 @@ mod callback_scope_param {
     impl Sealed for *mut crate::v8::ffi::FunctionCallbackInfo {}
     impl Sealed for *mut crate::v8::ffi::PropertyCallbackInfo {}
     impl Sealed for *mut crate::v8::ffi::PropertySetterCallbackInfo {}
+    impl Sealed for *mut crate::v8::ffi::PropertyQueryCallbackInfo {}
 }
 
 #[expect(unsafe_code, reason = "reads the isolate from a raw pointer")]
@@ -300,6 +301,15 @@ impl CallbackScopeParam for *mut v8::ffi::PropertySetterCallbackInfo {
         // SAFETY: V8 passes a valid PropertyCallbackInfo with the isolate locked (guaranteed
         // by caller).
         unsafe { v8::IsolatePtr::from_ffi(v8::ffi::psci_get_isolate(self)) }
+    }
+}
+
+#[expect(unsafe_code, reason = "reads the isolate from a raw pointer")]
+impl CallbackScopeParam for *mut v8::ffi::PropertyQueryCallbackInfo {
+    unsafe fn into_isolate(self) -> v8::IsolatePtr {
+        // SAFETY: V8 passes a valid PropertyCallbackInfo with the isolate locked (guaranteed
+        // by caller).
+        unsafe { v8::IsolatePtr::from_ffi(v8::ffi::pqci_get_isolate(self)) }
     }
 }
 
@@ -485,6 +495,125 @@ where
             let f = unsafe { unit_value::<F>() };
             f(lock, &mut args);
         });
+    }
+
+    let _ = f;
+    callback::<F>
+}
+
+/// Whether an interceptor callback handled a property request, as `v8::Intercepted`.
+///
+/// A callback that throws returns `Yes`, as V8 asks of interceptors that throw.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Intercepted {
+    /// The callback handled the request, or threw.
+    Yes,
+    /// The property is looked up as if there were no interceptor.
+    No,
+}
+
+impl Intercepted {
+    /// The value of the matching `v8::Intercepted`, which `ffi.c++` checks.
+    const fn to_ffi(self) -> u32 {
+        match self {
+            Self::Yes => 0,
+            Self::No => 1,
+        }
+    }
+}
+
+/// The getter of a wildcard property (`v8::NamedPropertyGetterCallback`). The `usize` is the
+/// `v8::Local` of the property name.
+pub type RawWildcardGetterCallback =
+    unsafe extern "C" fn(usize, *mut v8::ffi::PropertyCallbackInfo) -> u32;
+
+/// The query of a wildcard property (`v8::NamedPropertyQueryCallback`), which tells V8 whether
+/// the property exists. The `usize` is the `v8::Local` of the property name.
+pub type RawWildcardQueryCallback =
+    unsafe extern "C" fn(usize, *mut v8::ffi::PropertyQueryCallbackInfo) -> u32;
+
+/// Turns `f` into the getter of a wildcard property, as [`function_callback`] does for
+/// functions.
+///
+/// `f` gets the property name. A panic in `f` throws an internal error to JavaScript
+/// and terminates execution, and the callback returns [`Intercepted::Yes`].
+pub fn wildcard_getter_callback<F>(f: F) -> RawWildcardGetterCallback
+where
+    F: UnitType
+        + for<'s> Fn(
+            &mut Lock<'s>,
+            v8::Local<'s, v8::Name>,
+            &mut v8::PropertyCallbackInfo<'s>,
+        ) -> Intercepted,
+{
+    #[expect(unsafe_code, reason = "V8 calls this with a raw PropertyCallbackInfo")]
+    unsafe extern "C" fn callback<F>(name: usize, info: *mut v8::ffi::PropertyCallbackInfo) -> u32
+    where
+        F: UnitType
+            + for<'s> Fn(
+                &mut Lock<'s>,
+                v8::Local<'s, v8::Name>,
+                &mut v8::PropertyCallbackInfo<'s>,
+            ) -> Intercepted,
+    {
+        // SAFETY: V8 calls an interceptor with its `PropertyCallbackInfo`, with the isolate
+        // locked, a context entered and a `HandleScope` open for the duration of the call.
+        let scope = std::pin::pin!(unsafe { CallbackScope::new(info) });
+        crate::catch_panic(scope, |lock| {
+            // SAFETY: `info` is the running callback's, and `lock` the lock of its scope.
+            let mut args = unsafe { v8::PropertyCallbackInfo::new(lock, info) };
+            // SAFETY: `name` is the handle of the property name that V8 passed, which lives in
+            // the callback's scope.
+            let name = unsafe { v8::Local::from_ffi(v8::ffi::Local { ptr: name }) };
+            // SAFETY: `wildcard_getter_callback` was handed a value of `F`.
+            let f = unsafe { unit_value::<F>() };
+            f(lock, name, &mut args)
+        })
+        .unwrap_or(Intercepted::Yes)
+        .to_ffi()
+    }
+
+    let _ = f;
+    callback::<F>
+}
+
+/// Turns `f` into the query of a wildcard property, as [`wildcard_getter_callback`] does for
+/// its getter.
+pub fn wildcard_query_callback<F>(f: F) -> RawWildcardQueryCallback
+where
+    F: UnitType
+        + for<'s> Fn(
+            &mut Lock<'s>,
+            v8::Local<'s, v8::Name>,
+            &mut v8::PropertyQueryCallbackInfo<'s>,
+        ) -> Intercepted,
+{
+    #[expect(unsafe_code, reason = "V8 calls this with a raw PropertyCallbackInfo")]
+    unsafe extern "C" fn callback<F>(
+        name: usize,
+        info: *mut v8::ffi::PropertyQueryCallbackInfo,
+    ) -> u32
+    where
+        F: UnitType
+            + for<'s> Fn(
+                &mut Lock<'s>,
+                v8::Local<'s, v8::Name>,
+                &mut v8::PropertyQueryCallbackInfo<'s>,
+            ) -> Intercepted,
+    {
+        // SAFETY: as in `wildcard_getter_callback`.
+        let scope = std::pin::pin!(unsafe { CallbackScope::new(info) });
+        crate::catch_panic(scope, |lock| {
+            // SAFETY: `info` is the running callback's, and `lock` the lock of its scope.
+            let mut args = unsafe { v8::PropertyQueryCallbackInfo::new(lock, info) };
+            // SAFETY: as in `wildcard_getter_callback`.
+            let name = unsafe { v8::Local::from_ffi(v8::ffi::Local { ptr: name }) };
+            // SAFETY: `wildcard_query_callback` was handed a value of `F`.
+            let f = unsafe { unit_value::<F>() };
+            f(lock, name, &mut args)
+        })
+        .unwrap_or(Intercepted::Yes)
+        .to_ffi()
     }
 
     let _ = f;
