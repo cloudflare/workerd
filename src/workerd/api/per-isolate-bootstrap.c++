@@ -8,6 +8,7 @@
 #include <workerd/api/compression.h>
 #include <workerd/api/crypto/digest-bootstrap.h>
 #include <workerd/api/filesystem-bootstrap.h>
+#include <workerd/api/performance-bootstrap.h>
 #include <workerd/io/compatibility-date.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/jsvalue.h>
@@ -214,19 +215,73 @@ static void Utf8Length(const v8::FunctionCallbackInfo<v8::Value>& args) {
   });
 }
 
+// performance.now() on the receiver, and the receiver check alone for the
+// timeOrigin getter. V8 checks the receiver against a signature for
+// Performance's template before either runs (see "THE C++ CONTRACT" in
+// src/per_isolate/performance/AGENTS.md), so neither checks it again.
+//
+// PerformanceNow's function data is Performance's wrappable tag range, packed
+// by packTagRange(), so that unwrapping the receiver costs no type lookup.
+static v8::Local<v8::Value> packTagRange(jsg::Lock& js, v8::CppHeapPointerTagRange range) {
+  static_assert(static_cast<uint32_t>(v8::CppHeapPointerTag::kLastTag) <= 0xffff);
+  auto first = static_cast<uint32_t>(range.first);
+  auto last = static_cast<uint32_t>(range.last);
+  return v8::Integer::NewFromUnsigned(js.v8Isolate, first << 16 | last);
+}
+
+static v8::CppHeapPointerTagRange unpackTagRange(v8::Local<v8::Data> data) {
+  uint32_t packed = data.As<v8::Value>().As<v8::Uint32>()->Value();
+  return v8::CppHeapPointerTagRange(static_cast<v8::CppHeapPointerTag>(packed >> 16),
+      static_cast<v8::CppHeapPointerTag>(packed & 0xffff));
+}
+
+static void PerformanceNow(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return js.num(api::performanceNowForBootstrap(js, args.This(), unpackTagRange(args.DataV2())));
+  });
+}
+
+static double PerformanceNowFastApi(
+    v8::Local<v8::Object> receiver, v8::FastApiCallbackOptions& options) {
+  auto isolate = options.isolate;
+  v8::HandleScope handleScope(isolate);
+  auto& js = jsg::Lock::from(isolate);
+  auto tagRange = unpackTagRange(options.DataV2());
+  return jsg::liftKj<double>(
+      isolate, [&] { return api::performanceNowForBootstrap(js, receiver, tagRange); });
+}
+
+static void RequirePerformance(const v8::FunctionCallbackInfo<v8::Value>&) {}
+
+static void RequirePerformanceFastApi(v8::Local<v8::Object>, v8::FastApiCallbackOptions&) {}
+
+static const v8::CFunction fast_performance_now_ = v8::CFunction::Make(PerformanceNowFastApi);
+static const v8::CFunction fast_require_performance_ =
+    v8::CFunction::Make(RequirePerformanceFastApi);
+
+static void GetPerformancePrototype(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  jsg::liftKj(args, [&]() -> v8::Local<v8::Value> {
+    auto& js = jsg::Lock::from(args.GetIsolate());
+    return api::getPerformancePrototypeForBootstrap(js);
+  });
+}
+
 static const v8::CFunction fast_mark_promise_handled_ =
     v8::CFunction::Make(MarkPromiseHandledFastApi);
 
 v8::Local<v8::Value> makeMethod(jsg::Lock& js,
     v8::FunctionCallback callback,
     v8::SideEffectType sideEffect,
-    const v8::CFunction* c_function = nullptr) {
+    const v8::CFunction* c_function = nullptr,
+    v8::Local<v8::Signature> signature = {},
+    v8::Local<v8::Value> data = {}) {
   jsg::isolateRegisterExternalReference(js.v8Isolate, reinterpret_cast<intptr_t>(callback));
   if (c_function != nullptr) {
     jsg::isolateRegisterExternalReference(js.v8Isolate, reinterpret_cast<intptr_t>(c_function));
   }
-  return jsg::check(v8::FunctionTemplate::New(js.v8Isolate, callback, v8::Local<v8::Value>(),
-      v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow, sideEffect, c_function)
+  return jsg::check(v8::FunctionTemplate::New(js.v8Isolate, callback, data, signature, 0,
+      v8::ConstructorBehavior::kThrow, sideEffect, c_function)
                         ->GetFunction(js.v8Context()));
 }
 
@@ -238,6 +293,17 @@ v8::Local<v8::Value> getFastMethodNoSideEffect(
 v8::Local<v8::Value> getFastMethod(
     jsg::Lock& js, v8::FunctionCallback callback, const v8::CFunction* c_function) {
   return makeMethod(js, callback, v8::SideEffectType::kHasSideEffect, c_function);
+}
+
+// A fast method that V8 calls only with a `this` built from `receiverTemplate`
+// (or a subclass of it), throwing "Illegal invocation" for any other receiver.
+v8::Local<v8::Value> getFastReceiverMethod(jsg::Lock& js,
+    v8::FunctionCallback callback,
+    const v8::CFunction* c_function,
+    v8::Local<v8::FunctionTemplate> receiverTemplate,
+    v8::Local<v8::Value> data = {}) {
+  return makeMethod(js, callback, v8::SideEffectType::kHasSideEffect, c_function,
+      v8::Signature::New(js.v8Isolate, receiverTemplate), data);
 }
 
 v8::Local<v8::Value> getMethod(jsg::Lock& js, v8::FunctionCallback callback) {
@@ -265,8 +331,27 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     "createFileSystemWriteContext",
     "addAbortAlgorithm",
     "utf8Length",
+    "performanceNow",
+    "requirePerformance",
+    "getPerformancePrototype",
   };
   auto tmpl = v8::DictionaryTemplate::New(js.v8Isolate, names);
+
+  // The Performance natives exist only for the TypeScript performance.now(),
+  // and building them requires the isolate's TypeWrapper to know Performance.
+  // Without the autogate their properties are left off (empty values).
+  v8::MaybeLocal<v8::Value> performanceNow;
+  v8::MaybeLocal<v8::Value> requirePerformance;
+  v8::MaybeLocal<v8::Value> getPerformancePrototype;
+  if (util::Autogate::isEnabled(util::AutogateKey::TYPESCRIPT_PERFORMANCE_NOW)) {
+    auto performanceTemplate = api::getPerformanceTemplateForBootstrap(js);
+    performanceNow = getFastReceiverMethod(js, PerformanceNow, &fast_performance_now_,
+        performanceTemplate, packTagRange(js, api::getPerformanceTagRangeForBootstrap(js)));
+    requirePerformance = getFastReceiverMethod(
+        js, RequirePerformance, &fast_require_performance_, performanceTemplate);
+    getPerformancePrototype = getMethod(js, GetPerformancePrototype);
+  }
+
   v8::MaybeLocal<v8::Value> values[] = {
 #define V(Name) getFastMethodNoSideEffect(js, Is##Name, &fast_is_##Name##_),
     VALUE_METHOD_MAP(V)
@@ -279,6 +364,9 @@ jsg::JsRef<jsg::JsObject> createUtilsObject(jsg::Lock& js) {
     getMethod(js, CreateFileSystemWriteContext),
     getMethod(js, AddAbortAlgorithm),
     getMethod(js, Utf8Length),
+    performanceNow,
+    requirePerformance,
+    getPerformancePrototype,
   };
 
   static_assert(kj::arrayPtr(names).size() == kj::arrayPtr(values).size());

@@ -4,6 +4,8 @@
 
 #include "performance.h"
 
+#include "performance-bootstrap.h"
+
 #include <workerd/io/io-util.h>
 #include <workerd/io/limit-enforcer.h>
 
@@ -16,6 +18,27 @@ double Performance::now(jsg::Lock& js) {
   // returns exactly what Date.now() returns.
   isolateLimitEnforcer.markPerfEvent("performance_now"_kjc);
   return dateNow();
+}
+
+v8::Local<v8::FunctionTemplate> getPerformanceTemplateForBootstrap(jsg::Lock& js) {
+  return js.getTemplateFor<Performance>();
+}
+
+v8::CppHeapPointerTagRange getPerformanceTagRangeForBootstrap(jsg::Lock& js) {
+  return js.getWrappableTagRangeFor<Performance>();
+}
+
+double performanceNowForBootstrap(
+    jsg::Lock& js, v8::Local<v8::Object> instance, v8::CppHeapPointerTagRange tagRange) {
+  // The signature check accepts exactly the wrappers built from Performance's template, so this
+  // reads the C++ object straight out of the wrapper, as JSG's own method dispatch does.
+  auto& self = jsg::downcastWrappable<Performance>(
+      *jsg::Wrappable::unwrapFromShimInRangeOrAbort(js.v8Isolate, instance, tagRange));
+  return self.now(js);
+}
+
+jsg::JsObject getPerformancePrototypeForBootstrap(jsg::Lock& js) {
+  return js.getPrototypeFor<Performance>();
 }
 
 jsg::Ref<PerformanceMark> PerformanceMark::constructor(

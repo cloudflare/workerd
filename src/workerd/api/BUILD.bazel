@@ -93,6 +93,7 @@ filegroup(
         "messagechannel.h",
         "per-isolate-bootstrap.h",
         "performance.h",
+        "performance-bootstrap.h",
         "queue.h",
         "restore.h",
         "scheduled.h",

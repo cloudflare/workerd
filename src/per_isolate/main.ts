@@ -33,6 +33,13 @@
 //
 const { ObjectDefineProperties } = primordials;
 
+// performance.now() and performance.timeOrigin. Gated by an autogate rather
+// than a compat flag because the swap preserves the observable shape (see
+// performance/AGENTS.md).
+if (autogates['typescript-performance-now']) {
+  require('performance/now').install(utils.getPerformancePrototype());
+}
+
 if (compatFlags['typescript_implemented_streams']) {
   const {
     ReadableStream,
