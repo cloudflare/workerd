@@ -1,0 +1,29 @@
+build/tools/clang_tidy/clang_tidy.bzl
+  s_1b9ab9fb100cf8::t_db59f9b45f1df5 201-203,213
+tools/clang-tidy/BUILD.bazel
+  s_1b9ab9fb100cf8::t_3b0a3e93613da8 39,155,186,206,223-228
+tools/clang-tidy/coroutine-hostile-raii-test.sh
+  s_1b9ab9fb100cf8::t_4e4f418430b3c3 12-14,22,46
+tools/clang-tidy/test-headers.bzl
+  s_1b9ab9fb100cf8::t_b3a294c89ffe4e 3-5,15-47
+tools/clang-tidy/unsafe-continuation-capture-test.py
+  s_1b9ab9fb100cf8::t_586d584eb9f233 28-31,50-57
+tools/clang-tidy/use-after-move-test.sh
+  s_1b9ab9fb100cf8::t_e824a4badeee0e 12-14,22,48,69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "63ae536f7b736d3495d5ec95a290c099c6de7533",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+build/deps/llvm.MODULE.bazel
+  s_1b9ab9fb100cf8::t_eacdebbc3f9da2 96
+build/kj_test.bzl
+  s_1b9ab9fb100cf8::t_96f87025c84ef5 4,78-79
+build/tools/llvm/BUILD.bazel
+  s_1b9ab9fb100cf8::t_25692a746f019e 1-2,4-6,9-40
+build/tools/llvm/coverage.bzl
+  s_1b9ab9fb100cf8::t_424b3cdd4a7a2b 1,3-6,8-26,35,40,42-43,45-46,51-52
+build/wd_test.bzl
+  s_1b9ab9fb100cf8::t_8352c4784e1886 3,330-331
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e7358d476fda52f0fa41c2f5560f8b06dcc4cecc",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}
