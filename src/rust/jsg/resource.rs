@@ -422,6 +422,10 @@ pub fn function_template_of<'s, R: Resource + 'static>(
 /// V8 `FunctionTemplate` with the correct methods, constants, and constructor.
 /// Nested types are returned separately, since their templates are installed
 /// once the template for `R` exists.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one match arm per Member variant, each a field-by-field conversion"
+)]
 fn get_resource_descriptor<R: Resource>(
     flags: compatibility_flags::Reader<'_>,
 ) -> (v8::ffi::ResourceDescriptor, NestedTypes) {
