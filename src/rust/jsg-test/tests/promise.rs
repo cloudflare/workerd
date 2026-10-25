@@ -52,7 +52,10 @@ fn resolver_settles_its_promise_once() {
 
         assert_eq!(promise.state(), PromiseState::Fulfilled);
         let result = promise.result(lock).unwrap();
-        assert_eq!(jsg::Number::from_js(lock, result)?.value(), 42.0);
+        #[expect(clippy::float_cmp, reason = "42 is exactly representable")]
+        {
+            assert_eq!(jsg::Number::from_js(lock, result)?.value(), 42.0);
+        }
         Ok(())
     });
 }
@@ -64,7 +67,7 @@ fn rejected_promise_holds_its_reason() {
         let promise = v8::Promise::rejected(lock, reason.into()).unwrap();
         promise.mark_as_handled();
         assert_eq!(promise.state(), PromiseState::Rejected);
-        assert!(promise.result(lock).unwrap() == reason.into());
+        assert_eq!(promise.result(lock).unwrap(), reason.into());
         Ok(())
     });
 }
@@ -76,7 +79,7 @@ fn resolved_returns_promises_unchanged_and_follows_thenables() {
             .eval_raw(lock, "globalThis.p = Promise.resolve(1); p")
             .unwrap();
         let same = v8::Promise::resolved(lock, existing).unwrap();
-        assert!(v8::Local::<v8::Value>::from(same) == existing);
+        assert_eq!(v8::Local::<v8::Value>::from(same), existing);
 
         // Unlike `Promise.resolve`, which would wrap a subclass instance in a new promise.
         let subclass = ctx
@@ -86,7 +89,7 @@ fn resolved_returns_promises_unchanged_and_follows_thenables() {
             )
             .unwrap();
         let same_subclass = v8::Promise::resolved(lock, subclass).unwrap();
-        assert!(v8::Local::<v8::Value>::from(same_subclass) == subclass);
+        assert_eq!(v8::Local::<v8::Value>::from(same_subclass), subclass);
 
         let thenable = ctx
             .eval_raw(lock, "({ then(resolve) { resolve('from thenable'); } })")
