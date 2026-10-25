@@ -19,6 +19,7 @@ mod jsg_oneof;
 mod jsg_struct;
 mod local_cast;
 mod local_handle;
+mod local_value;
 mod name;
 mod nested_type;
 mod non_coercible;

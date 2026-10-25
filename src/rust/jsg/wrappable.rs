@@ -1156,6 +1156,11 @@ where
 impl<'s> FromJS<'s> for v8::Local<'s, v8::Value> {
     type ResultType = Self;
 
+    fn type_name() -> String {
+        // C++ JSG names `v8::Local<v8::Value>` after `v8::Value`.
+        "Value".to_owned()
+    }
+
     fn from_js(_lock: &mut Lock<'s>, value: Self) -> Result<Self, Error> {
         Ok(value)
     }
