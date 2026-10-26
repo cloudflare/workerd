@@ -285,36 +285,47 @@ bool local_is_shared_array_buffer(const Local& val) {
 ::rust::String local_type_of(Isolate* isolate, const Local& val) {
   auto v8Val = local_as_ref_from_ffi<v8::Value>(val);
   v8::Local<v8::String> typeStr = v8Val->TypeOf(isolate);
+  // No exceptionPending() check: TypeOf takes no context, and `typeStr` is a string, which
+  // Utf8Value's ToString returns as it is, before it prepares to run JavaScript.
   v8::String::Utf8Value utf8(isolate, typeStr);
   return ::rust::String(*utf8, utf8.length());
 }
 
 bool local_value_int32_value(Isolate* isolate, Local value, int32_t& result) {
+  if (exceptionPending(isolate)) return false;
   return local_from_ffi<v8::Value>(kj::mv(value))
       ->Int32Value(isolate->GetCurrentContext())
       .To(&result);
 }
 
 bool local_value_uint32_value(Isolate* isolate, Local value, uint32_t& result) {
+  if (exceptionPending(isolate)) return false;
   return local_from_ffi<v8::Value>(kj::mv(value))
       ->Uint32Value(isolate->GetCurrentContext())
       .To(&result);
 }
 
 bool local_value_integer_value(Isolate* isolate, Local value, int64_t& result) {
+  if (exceptionPending(isolate)) return false;
   return local_from_ffi<v8::Value>(kj::mv(value))
       ->IntegerValue(isolate->GetCurrentContext())
       .To(&result);
 }
 
 MaybeLocal local_value_to_string(Isolate* isolate, Local value) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
   return maybe_local_to_ffi(
       local_from_ffi<v8::Value>(kj::mv(value))->ToString(isolate->GetCurrentContext()));
 }
 
 // Utf8Value
 Utf8Value utf8_value_new(Isolate* isolate, Local value) {
-  auto* v = new v8::String::Utf8Value(isolate, local_from_ffi<v8::Value>(kj::mv(value)));
+  // Utf8Value converts with ToString, which can run JavaScript. While an exception or a
+  // termination is pending, the value is left unconverted, which reads as a failed conversion
+  // (null data, zero length), like a Symbol's.
+  auto v8Value =
+      exceptionPending(isolate) ? v8::Local<v8::Value>() : local_from_ffi<v8::Value>(kj::mv(value));
+  auto* v = new v8::String::Utf8Value(isolate, v8Value);
   return Utf8Value{reinterpret_cast<size_t>(v)};
 }
 
@@ -494,6 +505,7 @@ uint64_t local_big_int_uint64_value(const Local& value, bool& lossless) {
 // Local<Date>
 // Empty, with the exception pending, if creating the object throws.
 MaybeLocal date_new(Isolate* isolate, double time) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
   return maybe_local_to_ffi(v8::Date::New(isolate->GetCurrentContext(), time));
 }
 
@@ -504,6 +516,7 @@ double local_date_value_of(const Local& value) {
 // Local<Function>
 MaybeLocal local_function_call(
     Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
   auto context = isolate->GetCurrentContext();
   auto fn = local_as_ref_from_ffi<v8::Function>(function);
   auto receiver = local_as_ref_from_ffi<v8::Value>(recv);
@@ -521,32 +534,35 @@ MaybeLocal local_function_call(
 }
 
 MaybeLocal function_new(Isolate* isolate, size_t callback, const Local& data) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
   return maybe_local_to_ffi(v8::Function::New(isolate->GetCurrentContext(),
       reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)),
       local_as_ref_from_ffi<v8::Value>(data)));
 }
 
 // Local<Object>
-Local object_new_with_data_properties(
+MaybeLocal object_new_with_data_properties(
     Isolate* isolate, ::rust::Slice<const ::rust::Str> keys, ::rust::Slice<const Local> values) {
   KJ_REQUIRE(keys.size() == values.size());
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Object>());
   auto context = isolate->GetCurrentContext();
   auto object = v8::Object::New(isolate);
   for (size_t i = 0; i < keys.size(); i++) {
     // Unlike Set(), CreateDataProperty() doesn't look up the prototype chain, so no setter runs,
     // and on an ordinary object no Proxy trap runs either: nothing here runs JavaScript, so it
-    // can't throw. V8 doesn't allow it while execution is terminating, which the caller checks.
+    // can't throw.
     auto defined = object->CreateDataProperty(
         context, makeInternedStr(isolate, keys[i]), local_as_ref_from_ffi<v8::Value>(values[i]));
     KJ_ASSERT(defined.FromMaybe(false), "defining a property of a new object failed", keys[i]);
   }
-  return to_ffi(kj::mv(object));
+  return maybe_local_to_ffi(v8::MaybeLocal<v8::Object>(object));
 }
 
 // No TryCatch in the shims below that run JavaScript: what it throws stays pending, as in
 // local_function_call().
 
 bool local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key, Local value) {
+  if (exceptionPending(isolate)) return false;
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   auto v8_key = makeInternedStr(isolate, key);
@@ -554,6 +570,7 @@ bool local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key,
 }
 
 bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key, bool& has) {
+  if (exceptionPending(isolate)) return false;
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   auto v8_key = makeInternedStr(isolate, key);
@@ -561,6 +578,7 @@ bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::St
 }
 
 MaybeLocal local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   auto v8_key = makeInternedStr(isolate, key);
@@ -569,6 +587,7 @@ MaybeLocal local_object_get_property(Isolate* isolate, const Local& object, ::ru
 
 MaybeLocal local_object_get_property_by_name(
     Isolate* isolate, const Local& object, const Local& name) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   return maybe_local_to_ffi(v8_obj->Get(context, local_as_ref_from_ffi<v8::Name>(name)));
@@ -576,6 +595,7 @@ MaybeLocal local_object_get_property_by_name(
 
 bool local_object_get_own_property_names(
     Isolate* isolate, const Local& object, ::rust::Vec<Local>& names) {
+  if (exceptionPending(isolate)) return false;
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   // The filter of GetOwnPropertyNames(context), with the names as strings.
@@ -616,17 +636,6 @@ Local local_promise_result(const Local& promise) {
 void local_promise_mark_as_handled(const Local& promise) {
   local_as_ref_from_ffi<v8::Promise>(promise)->MarkAsHandled();
 }
-
-namespace {
-// Whether an exception or a termination is pending, in which case the promise shims call nothing
-// in V8 and fail, leaving it pending. Promise::Resolver::New() and Then() would clear
-// it: they open a PrepareForExecutionScope, which clears the pending exception, a termination
-// included, so that a terminated script would run on. V8 also requires that embedders don't
-// enter it at all while execution is terminating.
-bool exceptionPending(Isolate* isolate) {
-  return isolate->IsExecutionTerminating() || isolate->HasPendingException();
-}
-}  // namespace
 
 MaybeLocal local_promise_then_or_catch(
     Isolate* isolate, const Local& promise, const Local& on_fulfilled, const Local& on_rejected) {
@@ -679,6 +688,7 @@ Local array_new_with_elements(Isolate* isolate, ::rust::Slice<const Local> eleme
 }
 
 bool local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value) {
+  if (exceptionPending(isolate)) return false;
   auto context = isolate->GetCurrentContext();
   auto v8Array = local_as_ref_from_ffi<v8::Array>(array);
   return v8Array->Set(context, index, local_from_ffi<v8::Value>(kj::mv(value))).IsJust();
@@ -821,15 +831,11 @@ DEFINE_TYPED_ARRAY_NEW(biguint64_array, BigUint64Array, uint64_t)
 // Wrappers
 MaybeLocal wrap_resource(
     Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere) {
-  // Checked here rather than through `call_into_js()`, which would make a second FFI call on
-  // every wrap, though most only read the cached handle.
-  if (isolate->IsExecutionTerminating()) {
-    wrappedElsewhere = false;
-    return MaybeLocal{.ptr = 0};
-  }
-
+  // Checked first, also while an exception is pending: the caller must then leak its reference
+  // rather than release it, which would need the other isolate's lock. Reading the wrapper's
+  // isolate enters nothing in V8.
   wrappedElsewhere = wrappable->hasWrapper() && wrappable->getIsolate() != isolate;
-  if (wrappedElsewhere) {
+  if (wrappedElsewhere || exceptionPending(isolate)) {
     return MaybeLocal{.ptr = 0};
   }
 
@@ -874,14 +880,17 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
       static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
 }
 
-Local wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable) {
+MaybeLocal wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable) {
+  if (exceptionPending(isolate)) return MaybeLocal{.ptr = 0};
   // Like the data of the functions C++ JSG wraps (FunctionWrapper::wrap() in jsg/function.h).
-  return to_ffi(wrappable->attachOpaqueWrapper(isolate->GetCurrentContext(), true));
+  return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(
+      wrappable->attachOpaqueWrapper(isolate->GetCurrentContext(), true)));
 }
 
 // Unwrappers
 
 bool unwrap_string(Isolate* isolate, Local value, ::rust::String& result) {
+  if (exceptionPending(isolate)) return false;
   auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
   // Fast path: a string primitive needs no coercion and can't throw. (String wrapper objects are
   // not IsString.)
@@ -906,6 +915,7 @@ bool unwrap_boolean(Isolate* isolate, Local value) {
 }
 
 bool unwrap_number(Isolate* isolate, Local value, double& result) {
+  if (exceptionPending(isolate)) return false;
   auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
   // Fast path: a number primitive needs no coercion and can't throw.
   if (v8Value->IsNumber()) {
@@ -964,6 +974,7 @@ const TraitObjectPtr* unwrap_method_receiver(Isolate* isolate, Local value) {
 // Uses V8's Array::Iterate() which is faster than indexed access.
 // Returns Global handles because Local handles get reused during iteration.
 bool local_array_iterate(Isolate* isolate, Local value, ::rust::Vec<Global>& result) {
+  if (exceptionPending(isolate)) return false;
   auto context = isolate->GetCurrentContext();
   auto v8Val = local_from_ffi<v8::Value>(kj::mv(value));
 
@@ -1547,11 +1558,11 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
 }
 
 // FunctionTemplate
-Local function_template_get_function(Isolate* isolate, const Global& tmpl) {
+MaybeLocal function_template_get_function(Isolate* isolate, const Global& tmpl) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
   auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
   auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(isolate, global_tmpl);
-  auto function = ::workerd::jsg::check(local_tmpl->GetFunction(isolate->GetCurrentContext()));
-  return to_ffi(kj::mv(function));
+  return maybe_local_to_ffi(local_tmpl->GetFunction(isolate->GetCurrentContext()));
 }
 
 // Mirrors registerNestedType() (resource.h): the nested type's constructor is a property of the
@@ -1695,9 +1706,8 @@ void isolate_throw_exception(Isolate* isolate, Local exception) {
 
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage) {
   if (isolate->IsExecutionTerminating()) {
-    // Logs the message, but creates no error: creating one while execution is terminating fails
-    // a V8 debug check, and it would not be thrown. See createInternalError() for why the message
-    // is copied.
+    // Logs the message, but creates no error, since it would not be thrown. See
+    // createInternalError() for why the message is copied.
     KJ_LOG(ERROR, kj::heapString(internalMessage.data(), internalMessage.size()));
     return;
   }

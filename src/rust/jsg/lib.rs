@@ -238,8 +238,8 @@ impl<'s> FromJS<'s> for Error {
     /// Otherwise, converts the value to a string for the message.
     ///
     /// Reading `name` and `message` can run JavaScript (a getter, a Proxy trap, or `toString`).
-    /// If it throws, or execution is terminating, this fails with an error for which
-    /// [`Error::is_pending`] is true.
+    /// If it throws, or an exception or a termination is already pending, this fails with an
+    /// error for which [`Error::is_pending`] is true.
     fn from_js(
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
@@ -751,8 +751,8 @@ impl<'s> Lock<'s> {
             return;
         }
         if self.is_execution_terminating() {
-            // `isolate_throw_exception` would throw nothing, and creating the exception while
-            // execution is terminating fails a V8 debug check.
+            // `isolate_throw_exception` would throw nothing, so there is no point in creating
+            // the exception.
             return;
         }
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
@@ -874,8 +874,8 @@ impl<'s> Lock<'s> {
             return Err(err.clone());
         }
         if self.is_execution_terminating() {
-            // Creating the exception while execution is terminating fails a V8 debug check, and
-            // nothing could be rejected with it.
+            // Nothing could be rejected with the exception, so it is not created. (Creating it
+            // would be safe: creating an error object takes no context.)
             if err.is_internal {
                 // Logs the message and throws nothing.
                 self.throw_internal_error(&err.message);

@@ -303,6 +303,7 @@ bool local_serialize(Isolate* isolate,
     const Local& value,
     bool errors_are_host_objects,
     ::rust::Vec<uint8_t>& result) {
+  if (exceptionPending(isolate)) return false;
   Serializer serializer(isolate, errors_are_host_objects);
   if (!serializer.write(local_as_ref_from_ffi<v8::Value>(value))) return false;
   result = serializer.release();
@@ -310,6 +311,7 @@ bool local_serialize(Isolate* isolate,
 }
 
 MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data) {
+  if (exceptionPending(isolate)) return {};
   Deserializer deserializer(isolate, data);
   if (!deserializer.readHeader(data)) return {};
   return maybe_local_to_ffi(deserializer.read());
