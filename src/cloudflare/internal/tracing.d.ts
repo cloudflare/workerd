@@ -88,10 +88,10 @@ declare const tracing: {
   // Creates a new child span of the current span, pushes it onto the async context as
   // the active span, invokes `callback(span, ...args)`, and automatically ends the span
   // when the callback returns (sync) or when its returned promise settles (async, either
-  // fulfilled or rejected). If the callback throws or its promise rejects, the error is
-  // recorded on the span (as an exception and an error status) before it ends, unless the
-  // callback set the span's status itself. If no IO context is present the callback runs
-  // with a no-op span.
+  // fulfilled or rejected). If the callback throws or its promise rejects, the span gets an
+  // error status before it ends, plus an exception if `recordException()` accepts the thrown
+  // value, unless the callback set an "ok" or "error" status itself. If no IO context is
+  // present the callback runs with a no-op span.
   enterSpan<T, A extends unknown[]>(
     name: string,
     callback: (span: Span, ...args: A) => T,

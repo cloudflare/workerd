@@ -634,5 +634,31 @@ export const enterSpanStatusSetByCallback = {
         }),
       { message: 'after ok' }
     );
+    // So is one set by user code that runs while the error is recorded.
+    assert.throws(
+      () =>
+        ctx.tracing.enterSpan('enter-span-reentrant-op', (span) => {
+          span.setAttribute('test', 'enterSpanStatusSetByCallback');
+          const error = new Error();
+          Object.defineProperty(error, 'message', {
+            get() {
+              span.setStatus({ code: 'ok' });
+              return 'reentrant';
+            },
+          });
+          throw error;
+        }),
+      { message: 'reentrant' }
+    );
+    // An "unset" status doesn't count, so the error is still recorded.
+    assert.throws(
+      () =>
+        ctx.tracing.enterSpan('enter-span-unset-op', (span) => {
+          span.setAttribute('test', 'enterSpanStatusSetByCallback');
+          span.setStatus({ code: 'unset' });
+          throw new Error('after unset');
+        }),
+      { message: 'after unset' }
+    );
   },
 };

@@ -344,6 +344,30 @@ export const validateSpans = {
       assert.deepStrictEqual(spanUpdatesFor(spanKeyOf(ok)), [
         { type: 'status', status: { code: 'ok' } },
       ]);
+      const reentrant = spanNamed(
+        'enterSpanStatusSetByCallback',
+        'enter-span-reentrant-op'
+      );
+      const reentrantUpdates = spanUpdatesFor(spanKeyOf(reentrant));
+      assert(reentrantUpdates.length > 0);
+      assert.deepStrictEqual(
+        reentrantUpdates.filter(({ status }) => status.code !== 'ok'),
+        []
+      );
+      const unset = spanNamed(
+        'enterSpanStatusSetByCallback',
+        'enter-span-unset-op'
+      );
+      assert.deepStrictEqual(unset.exceptions, [
+        { name: 'Error', message: 'after unset' },
+      ]);
+      assert.deepStrictEqual(spanUpdatesFor(spanKeyOf(unset)), [
+        { type: 'status', status: { code: 'unset' } },
+        {
+          type: 'status',
+          status: { code: 'error', message: 'after unset' },
+        },
+      ]);
 
       // Successful spans get neither, and so do startActiveSpan spans, which the callback ends.
       for (const span of [
