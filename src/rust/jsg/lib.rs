@@ -46,6 +46,8 @@ pub use oneof::concat_union_names;
 pub use oneof::try_union_from_js;
 #[doc(hidden)]
 pub use oneof::validate_union_names;
+pub use resource::MemberDefinition;
+pub use resource::MemberRegistry;
 pub use resource::NestedType;
 pub use resource::Rc;
 pub use resource::Resource;

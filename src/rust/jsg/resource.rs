@@ -397,7 +397,7 @@ impl<R: Resource> Default for Weak<R> {
 ///
 /// **Prototype**: The returned object's prototype is set up from the resource's
 /// [`FunctionTemplate`], which includes all `#[jsg_method]` instance methods and
-/// `#[jsg_static_constant]` values registered via [`Resource::members(flags)`](Resource::members).
+/// `#[jsg_static_constant]` values registered via [`Resource::members`].
 ///
 /// **Ownership**: The `Rc` is consumed. The JS wrapper keeps the `Wrappable`
 /// alive via `CppgcShim`. When the JS object is garbage collected and all Rust
@@ -481,7 +481,17 @@ pub unsafe fn ffi_is<R: Resource + 'static>(
     .into()
 }
 
-/// Builds a [`ResourceDescriptor`] from `R`'s [`Resource::members(flags)`](Resource::members) list.
+/// The registry through which template creation collects the members of a resource type.
+struct TemplateMembers(Vec<Member>);
+
+impl MemberRegistry for TemplateMembers {
+    fn add(&mut self, member: impl MemberDefinition) {
+        self.0.push(member.into_member());
+    }
+}
+
+/// Builds a [`ResourceDescriptor`] from the members that `R`'s
+/// [`Resource::members`] registers under `flags`.
 /// The descriptor is passed to C++ `create_resource_template` to set up the
 /// V8 `FunctionTemplate` with the correct methods, constants, and constructor.
 /// Nested types are returned separately, since their templates are installed
@@ -504,7 +514,9 @@ fn get_resource_descriptor<R: Resource>(
         wildcard_property: KjMaybe::None,
     };
 
-    for m in R::members(flags) {
+    let mut members = TemplateMembers(Vec::new());
+    R::members(&mut members, flags);
+    for m in members.0 {
         match m {
             Member::Constructor { callback, length } => {
                 descriptor.constructor = KjMaybe::Some(v8::ffi::ConstructorDescriptor {
@@ -761,22 +773,39 @@ impl Resources {
     }
 }
 
+/// Receives the members that [`Resource::members`] registers, like the `Registry` parameter of
+/// C++ `registerMembers`.
+pub trait MemberRegistry {
+    fn add(&mut self, member: impl MemberDefinition);
+}
+
+/// A member that [`Resource::members`] can register: either a [`Member`], or the result of a
+/// generated member factory.
+pub trait MemberDefinition {
+    /// Builds the member for template creation.
+    fn into_member(self) -> Member;
+}
+
+impl MemberDefinition for Member {
+    fn into_member(self) -> Member {
+        self
+    }
+}
+
 /// Rust types exposed to JavaScript as resource types.
 ///
 /// Resource types are passed by reference and call back into Rust when JavaScript accesses
 /// their members. This is analogous to `JSG_RESOURCE_TYPE` in C++ JSG. Resources must provide
 /// member declarations, a cleanup function for GC, and access to their V8 wrapper state.
 pub trait Resource: Type + GarbageCollected + Sized + 'static {
-    /// Returns the list of methods, properties, and constructors exposed to JavaScript.
+    /// Registers the methods, properties, and constructors exposed to JavaScript.
     ///
     /// `flags` are the compatibility flags of the isolate the template is built for, so the
-    /// member list can vary with them, as with the `CompatibilityFlags::Reader flags`
-    /// parameter of C++ `JSG_RESOURCE_TYPE`. Templates are cached per resource type in the realm.
-    /// Use `#[jsg_resource(custom_members)]` to generate member factories while supplying
-    /// this implementation yourself.
-    fn members(flags: compatibility_flags::Reader<'_>) -> Vec<Member>
-    where
-        Self: Sized;
+    /// members can vary with them, as with the `CompatibilityFlags::Reader flags` parameter of
+    /// C++ `JSG_RESOURCE_TYPE`. Templates are cached per resource type in the realm. Use
+    /// `#[jsg_resource(custom_members)]` to generate member factories while supplying this
+    /// implementation yourself.
+    fn members(registry: &mut impl MemberRegistry, flags: compatibility_flags::Reader<'_>);
 }
 
 #[cfg(test)]

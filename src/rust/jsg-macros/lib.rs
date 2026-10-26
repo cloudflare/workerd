@@ -709,7 +709,7 @@ fn reject(
 /// The generated `Traced::trace` body simply delegates to `Traced::trace()` on
 /// every named field.
 ///
-/// **On an impl block** — emits `jsg::Resource::members(flags)` registering every
+/// **On an impl block** — emits `jsg::Resource::members(registry, flags)` registering every
 /// `#[jsg_method]`, `#[jsg_property]`, `#[jsg_inspect_property]`, `#[jsg_wildcard_property]`,
 /// `#[jsg_constructor]`, and `#[jsg_static_constant]` item, plus member factories.
 /// With `custom_members`, emits only the factories; implement `jsg::Resource` yourself

@@ -179,7 +179,7 @@ impl MemberRegistration {
             factory: quote! {
                 #[automatically_derived]
                 #[must_use]
-                fn #factory_name() -> jsg::Member {
+                fn #factory_name() -> impl jsg::MemberDefinition {
                     #member
                 }
             },
@@ -602,12 +602,12 @@ fn generate_resource_bindings(
             #[automatically_derived]
             impl jsg::Resource for #self_ty {
                 fn members(
+                    registry: &mut impl jsg::MemberRegistry,
                     _flags: jsg::feature_flags::compatibility_flags::Reader<'_>,
-                ) -> Vec<jsg::Member>
-                where
-                    Self: Sized,
-                {
-                    vec![#(#automatic,)* #(#nested_type_registrations,)*]
+                ) {
+                    let _ = &registry;
+                    #(registry.add(#automatic);)*
+                    #(registry.add(#nested_type_registrations);)*
                 }
             }
         }
@@ -911,7 +911,7 @@ fn emit_property_group(
         factory: quote! {
             #[automatically_derived]
             #[must_use]
-            fn #factory_name(placement: jsg::PropertyPlacement) -> jsg::Member {
+            fn #factory_name(placement: jsg::PropertyPlacement) -> impl jsg::MemberDefinition {
                 match placement {
                     jsg::PropertyPlacement::Prototype => #prototype_member,
                     jsg::PropertyPlacement::Instance => jsg::Member::InstanceProperty {

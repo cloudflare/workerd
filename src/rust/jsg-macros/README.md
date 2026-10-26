@@ -125,7 +125,7 @@ Generates JSG boilerplate for a resource type and its impl block.
 field whose type is or contains a traceable JSG handle (see [Garbage Collection](#garbage-collection) below).
 Use `#[jsg_resource(name = "JSName")]` to override the JavaScript class name.
 
-**On an impl block** — emits `jsg::Resource::members(flags)`, registering every
+**On an impl block** — emits `jsg::Resource::members(registry, flags)`, registering every
 `#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`,
 `#[jsg_wildcard_property]`, and `#[jsg_static_constant]` item. It also generates member factories used by both automatic
 and custom registration.
@@ -153,14 +153,15 @@ impl DnsUtil {
 ### Custom member registration
 
 Use `#[jsg_resource(custom_members)]` on the impl block to generate the bindings and member
-factories without an automatic `Resource` implementation. Implement `Resource::members(flags)`
-to choose which members to expose, their order, and property placement using ordinary Rust.
-The flags belong to the realm constructing the template, as in C++ `JSG_RESOURCE_TYPE(T, flags)`.
-Templates are cached per resource type within that realm; registration runs when a template is
-created, not on each property access.
+factories without an automatic `Resource` implementation. Implement
+`Resource::members(registry, flags)` to choose which members to expose, their order, and property
+placement using ordinary Rust, adding each to `registry`. The flags belong to the realm
+constructing the template, as in C++ `JSG_RESOURCE_TYPE(T, flags)`. Templates are cached per
+resource type within that realm; registration runs when a template is created, not on each
+property access.
 
 ```rust
-use jsg::{Member, PropertyPlacement, Resource};
+use jsg::{MemberRegistry, PropertyPlacement, Resource};
 use jsg::feature_flags::compatibility_flags;
 use jsg_macros::{jsg_constructor, jsg_property, jsg_resource};
 
@@ -180,25 +181,22 @@ impl Example {
 }
 
 impl Resource for Example {
-    fn members(flags: compatibility_flags::Reader<'_>) -> Vec<Member> {
+    fn members(registry: &mut impl MemberRegistry, flags: compatibility_flags::Reader<'_>) {
         let placement = if flags.get_jsg_property_on_prototype_template() {
             PropertyPlacement::Prototype
         } else {
             PropertyPlacement::Instance
         };
-        let mut members = vec![
-            Self::constructor_member(),
-            Self::get_label_member(placement),
-        ];
+        registry.add(Self::constructor_member());
+        registry.add(Self::get_label_member(placement));
         if flags.get_cache_option_enabled() && flags.get_jsg_property_on_prototype_template() {
-            members.push(Self::get_cache_member(PropertyPlacement::Prototype));
+            registry.add(Self::get_cache_member(PropertyPlacement::Prototype));
         }
-        members
     }
 }
 ```
 
-Factories are private associated functions returning `jsg::Member`. Their names derive from
+Factories are private associated functions returning `impl jsg::MemberDefinition`. Their names derive from
 the **Rust declaration**, independently of any JavaScript `name = "..."` override:
 
 | Annotated declaration | Factory |
@@ -217,7 +215,7 @@ handling apply in both modes. Getter and setter annotations must agree on placem
 Inspect properties remain symbol-keyed and do not take a placement argument.
 `LazyInstance` keeps the getter's `readonly` (see `lazy_instance` below); asking for it for a
 property with a setter panics when the template is created.
-Property registration follows the returned member list's order. V8 enumerates instance native
+Properties are registered in the order they are added to `registry`. V8 enumerates instance native
 data properties in reverse registration order, as it does for C++ JSG.
 `nested_types(...)` cannot be combined with `custom_members`; a custom `members` lists nested
 types itself, as `jsg::Member::NestedType { name, nested_type: jsg::NestedType::of::<Foo>() }`.

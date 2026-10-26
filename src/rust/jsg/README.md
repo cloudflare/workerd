@@ -858,9 +858,9 @@ It does not reproduce worker-specific initialization such as logging, inspectors
 
 ### Compatibility-dependent API surfaces
 
-`#[jsg_resource(custom_members)]` generates member factories while leaving `Resource::members(flags)`
-to the resource author. Use ordinary Rust conditionals to select members and choose property placement
-when the template is built. See [custom member registration](../jsg-macros/README.md#custom-member-registration)
+`#[jsg_resource(custom_members)]` generates member factories while leaving
+`Resource::members(registry, flags)` to the resource author. Use ordinary Rust conditionals to select
+members and choose property placement when the template is built. See [custom member registration](../jsg-macros/README.md#custom-member-registration)
 for the factory naming conventions and a complete example.
 
 ### Key types and files
