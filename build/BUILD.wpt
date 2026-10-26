@@ -11,11 +11,19 @@ load("@workerd//:build/wpt_test.bzl", "wpt_module", "wpt_server_entrypoint")
 
 wpt_server_entrypoint(
     name = "entrypoint",
-    srcs = ["wpt"] + glob(["**/*.py"]),
+    # The server reads these, besides its Python, from the runfiles tree.
+    srcs = ["wpt"] + glob([
+        "**/*.py",
+        "**/commands.json",
+        "tools/certs/**",
+        "tools/wpt/paths",
+    ]),
     visibility = ["//visibility:public"],
 )
 
 exports_files([
+    "media/test-av-384k-44100Hz-1ch-320x240-30fps-10kfr.webm",
     "tools/certs/cacert.pem",
     "wasm/incrementer.wasm",
+    "xhr/resources/utf16-bom.json",
 ])
