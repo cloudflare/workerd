@@ -22,7 +22,7 @@ archive_override(
 )
 
 # brotli
-bazel_dep(name = "brotli", version = "1.2.0.bcr.3")
+bazel_dep(name = "brotli", version = "1.2.1")
 
 # capnp-cpp
 http.archive(
@@ -149,7 +149,7 @@ bazel_dep(name = "zlib")
 git_override(
     module_name = "zlib",
     build_file = "//:build/BUILD.zlib",
-    commit = "456ae730017b9b4bd3371927abc82627fd51feef",
+    commit = "9f9f52c60a14e8e772fb561029ae0a121fef7609",
     patch_strip = 1,
     patches = [
         "//:patches/zlib/0001-Add-dummy-MODULE.bazel.patch",
