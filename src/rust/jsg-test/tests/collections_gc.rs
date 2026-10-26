@@ -4,10 +4,10 @@
 
 //! GC tracing tests for collection fields in `#[jsg_resource]` structs.
 //!
-//! Verifies that `Vec<jsg::Rc<T>>`, `HashMap<K, jsg::Rc<T>>`, `BTreeMap<K, jsg::Rc<T>>`,
-//! `HashSet<jsg::Rc<T>>`, `BTreeSet<jsg::Rc<T>>`, and their `Cell<…>` variants all produce
-//! correct GC trace edges so that children are kept alive as long as the parent is reachable,
-//! and collected once the parent is collected.
+//! Verifies that `Vec<jsg::Rc<T>>`, `jsg::Dict<jsg::Rc<T>>`, `HashMap<K, jsg::Rc<T>>`,
+//! `BTreeMap<K, jsg::Rc<T>>`, `HashSet<jsg::Rc<T>>`, `BTreeSet<jsg::Rc<T>>`, and their `Cell<…>`
+//! variants all produce correct GC trace edges so that children are kept alive as long as the
+//! parent is reachable, and collected once the parent is collected.
 //!
 //! A `jsg::Rc` is strong until a GC visit makes it traced, so a field that is not traced only
 //! leaks: it never frees a child early. Each child therefore keeps its parent's wrapper, which
@@ -509,6 +509,65 @@ fn btreeset_rc_empty_does_not_crash_during_gc() {
     harness.run_in_context(|lock, _ctx| {
         crate::Harness::request_gc(lock);
         assert_eq!(BTREESET_PARENT_DROPS.load(Ordering::SeqCst), 1);
+        Ok(())
+    });
+}
+
+// =============================================================================
+// jsg::Dict<jsg::Rc<T>>
+// =============================================================================
+
+static DICT_PARENT_DROPS: AtomicUsize = AtomicUsize::new(0);
+
+#[jsg_resource]
+struct DictParent {
+    pub children: jsg::Dict<jsg::Rc<Leaf>>,
+}
+
+impl Drop for DictParent {
+    fn drop(&mut self) {
+        DICT_PARENT_DROPS.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[jsg_resource]
+impl DictParent {}
+
+/// `jsg::Dict<jsg::Rc<T>>` values are kept alive while parent JS wrapper is reachable.
+#[test]
+fn dict_rc_values_kept_alive_through_gc() {
+    LEAF_DROPS.store(0, Ordering::SeqCst);
+    DICT_PARENT_DROPS.store(0, Ordering::SeqCst);
+
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let a = leaf(1);
+        let b = leaf(2);
+
+        let parent = jsg::Rc::new(DictParent {
+            children: jsg::Dict::from(vec![
+                ("a".to_owned(), a.clone()),
+                ("b".to_owned(), b.clone()),
+            ]),
+        });
+        let wrapped = parent.clone().to_js(lock);
+        keep_owner(lock, wrapped, [&a, &b]);
+        ctx.set_global(lock, "parent", wrapped);
+
+        std::mem::drop(a);
+        std::mem::drop(b);
+        std::mem::drop(parent);
+
+        crate::Harness::request_gc(lock);
+        assert_eq!(DICT_PARENT_DROPS.load(Ordering::SeqCst), 0);
+        assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 0);
+        Ok(())
+    });
+
+    harness.run_in_context(|lock, _ctx| {
+        crate::Harness::request_gc(lock);
+        assert_eq!(DICT_PARENT_DROPS.load(Ordering::SeqCst), 1);
+        assert_eq!(LEAF_DROPS.load(Ordering::SeqCst), 2);
         Ok(())
     });
 }

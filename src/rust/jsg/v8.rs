@@ -417,6 +417,17 @@ pub mod ffi {
             object: &Local,
             key: &str,
         ) -> Result<MaybeLocal>;
+        // Like the three above, but infallible: they neither intern nor check.
+        pub unsafe fn local_object_get_property_by_name(
+            isolate: *mut Isolate,
+            object: &Local,
+            name: &Local,
+        ) -> MaybeLocal;
+        pub unsafe fn local_object_get_own_property_names(
+            isolate: *mut Isolate,
+            object: &Local,
+            names: &mut Vec<Local>,
+        ) -> bool;
 
         // Local<Array>
         pub unsafe fn local_array_length(array: &Local) -> u32;
@@ -3263,6 +3274,63 @@ impl<'s> Local<'s, Object> {
                 )?)
             })
         })
+    }
+
+    /// Reads the property named `name`, like [`get`](Self::get) but with the key as a handle,
+    /// so that any string or symbol can be the key.
+    ///
+    /// # Errors
+    ///
+    /// As for [`get`](Self::get).
+    pub fn get_by_name(
+        self,
+        lock: &mut Lock<'s>,
+        name: Local<'s, Name>,
+    ) -> crate::Result<Local<'s, Value>> {
+        name.debug_assert_isolate(lock);
+        call_into_js(lock, |lock| {
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); both handles are valid.
+            // The result was created in the current HandleScope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_object_get_property_by_name(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    name.raw(),
+                ))
+            })
+        })
+    }
+
+    /// Returns the names of the object's own enumerable properties that are not symbols, in
+    /// property order, like JS `Object.keys(obj)`. An integer-like name comes as a string.
+    ///
+    /// # Errors
+    ///
+    /// If a Proxy `ownKeys` or `getOwnPropertyDescriptor` trap throws, or execution is
+    /// terminating, the exception stays pending and the error is one for which
+    /// [`Error::is_pending`] is true, as for [`Local::<Function>::call`].
+    pub fn keys(self, lock: &mut Lock<'s>) -> crate::Result<Vec<Local<'s, String>>> {
+        let names = call_into_js(lock, |lock| {
+            let mut names = Vec::new();
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); handle is valid.
+            let ok = unsafe {
+                ffi::local_object_get_own_property_names(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                    &mut names,
+                )
+            };
+            Ok(ok.then_some(names))
+        })?;
+        Ok(names
+            .into_iter()
+            .map(|name| {
+                // SAFETY: V8 created the names in the current HandleScope, as strings.
+                let name: Local<'s, String> = unsafe { Local::from_ffi(name) };
+                debug_assert!(Local::<Value>::from(name).is_string());
+                name
+            })
+            .collect())
     }
 }
 

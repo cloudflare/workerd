@@ -463,6 +463,13 @@ but not return values:
   `kj::Date`. Like C++ JSG's `kj::Date`.
 - `&[T]` and typed-array slices such as `&[u8]`.
 
+`jsg::Dict<V>` is C++ JSG's `jsg::Dict<V>`, Web IDL's `record<DOMString, V>`: a plain object used
+as a map from strings to values. It holds its entries in order, in a `Vec<(String, V)>`. From
+JavaScript, it takes any object other than an array, and reads its own enumerable properties
+that are not symbols, as `Object.keys()` lists them; a value that is not a `V` is a `TypeError`
+naming its key. To JavaScript, it is a new plain object. `Local<Object>::keys()` and
+`get_by_name()` list and read properties the same way.
+
 ## Union Types
 
 To accept JavaScript values that can be one of several types, define an enum with `#[jsg_oneof]`:

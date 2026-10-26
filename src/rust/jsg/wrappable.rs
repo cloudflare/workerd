@@ -31,6 +31,7 @@
 //! | `T: Struct` | `object` |
 //! | `Vec<T>` | `Array<T>` |
 //! | `&[T]` | `Array<T>` (parameter only) |
+//! | `Dict<V>` | `Record<string, V>`: an object other than an array |
 //!
 //! ## `TypedArray` Types
 //!
@@ -75,6 +76,7 @@
 //! `i64` converts like C++ JSG's `int64_t`: a `BigInt` that does not fit is a
 //! `TypeError`, and any other value converts as above.
 
+use crate::Dict;
 use crate::Error;
 use crate::Lenient;
 use crate::Lock;
@@ -99,7 +101,7 @@ use crate::v8;
 ///
 /// - **Primitives** (`bool`, `String`, integers, floats, `()`) — no-op.
 /// - **`Option<T>`**, **`Nullable<T>`** — delegates to the inner value if present.
-/// - **Collections** (`Vec<T>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`,
+/// - **Collections** (`Vec<T>`, `Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`,
 ///   `BTreeSet<T>`) — iterates elements/values and traces each.
 /// - **`Cell<T>`** — reads through `as_ptr()` (sound under single-threaded GC).
 /// - **`RefCell<T>`** — traces through `try_borrow()`, so a mutably borrowed cell is skipped;
@@ -237,6 +239,18 @@ impl<T: Traced> Traced for Vec<T> {
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for item in self {
             item.trace(visitor);
+        }
+    }
+}
+
+impl<V: Traced> Traced for Dict<V> {
+    fn holds_gc_references() -> bool {
+        V::holds_gc_references()
+    }
+
+    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
+        for (_, value) in &self.entries {
+            value.trace(visitor);
         }
     }
 }
@@ -1045,6 +1059,94 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
             result.push(T::from_js(lock, local)?);
         }
         Ok(Some(result))
+    }
+}
+
+// =============================================================================
+// Record type implementations (Dict<V>)
+// =============================================================================
+
+// Like C++ JSG's DictWrapper (jsg/value.h): any object other than an array.
+impl<V> Type for Dict<V> {
+    fn class_name() -> &'static str {
+        "object"
+    }
+
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+        value.is_object() && !value.is_array()
+    }
+}
+
+impl<'s, V: ToJS<'s>> ToJS<'s> for Dict<V> {
+    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+        let object = lock.new_object();
+        for (key, value) in self.entries {
+            let value = value.to_js(lock);
+            // Like C++ JSG's, this runs a setter that `Object.prototype` has for the key. If it
+            // throws, or execution is terminating, that stays pending, and any other error is
+            // thrown, so JavaScript never sees the value returned in place of the object.
+            if let Err(err) = object.set(lock, &key, value) {
+                lock.throw_exception(&err);
+                return lock.undefined();
+            }
+        }
+        object.into()
+    }
+}
+
+impl<'s, V: FromJS<'s, ResultType = V>> FromJS<'s> for Dict<V> {
+    type ResultType = Self;
+
+    fn type_name() -> String {
+        "object".to_owned()
+    }
+
+    fn from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self::ResultType, Error> {
+        if let Some(dict) = Self::try_from_js(lock, value)? {
+            return Ok(dict);
+        }
+        let type_name = if value.is_array() {
+            "array".to_owned()
+        } else {
+            value.type_of(lock)
+        };
+        Err(Error::new_type_error(format!(
+            "Expected object but got {type_name}"
+        )))
+    }
+
+    // As C++ JSG's DictWrapper does, reads and converts the values one at a time, and reports
+    // a value that is not a `V` as the value of its entry, while an error from converting one
+    // passes through.
+    fn try_from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Option<Self::ResultType>, Error> {
+        let Ok(object) = v8::Local::<v8::Object>::try_from(value) else {
+            return Ok(None);
+        };
+        if value.is_array() {
+            return Ok(None);
+        }
+        let keys = object.keys(lock)?;
+        let mut entries = Vec::with_capacity(keys.len());
+        for key in keys {
+            let value = object.get_by_name(lock, key.into())?;
+            // Like a string argument: the name is a string, so this runs no JavaScript.
+            let name = String::from_js(lock, key.into())?;
+            let Some(value) = V::try_from_js(lock, value)? else {
+                return Err(Error::new_type_error(format!(
+                    "Incorrect type for map entry '{name}': the provided value is not of type \
+                     '{}'.",
+                    V::type_name()
+                )));
+            };
+            entries.push((name, value));
+        }
+        Ok(Some(Self { entries }))
     }
 }
 

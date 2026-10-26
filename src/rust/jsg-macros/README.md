@@ -428,7 +428,7 @@ use no-op `Traced` impls; containers/wrappers recurse to inner values.
 | `jsg::Weak<T>` | **Not traced** — does not keep the target alive |
 | `jsg::v8::Global<T>` | **Not allowed** — no `Traced` impl; use `jsg::v8::TracedGlobal<T>` |
 | `Option<T>` / `jsg::Nullable<T>` | Delegates to `T` when present |
-| `Vec<T>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values |
+| `Vec<T>`, `jsg::Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`, `BTreeSet<T>` | Delegates recursively to contained values |
 | `Cell<T>` / `std::cell::Cell<T>` | Delegates via `as_ptr()` read (safe under single-threaded, non-reentrant GC tracing) |
 | `RefCell<T>` | Delegates via `try_borrow()`; skipped while mutably borrowed (debug builds abort if `T` can hold GC references) |
 | Plain data / primitives / `#[jsg_struct]` types | No-op `Traced` |
