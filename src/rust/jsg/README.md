@@ -178,7 +178,7 @@ impl MyResource {
 let resource = jsg::Rc::new(MyResource { ... });
 
 // Convert to a JS object (uses cached FunctionTemplate)
-let js_obj = resource.to_js(&mut lock);
+let js_obj = resource.to_js(&mut lock)?;
 
 // Convert from JS back to a Ref
 let r: jsg::Rc<MyResource> = jsg::Rc::from_js(&mut lock, js_val)?;
@@ -301,7 +301,7 @@ unsafe fn my_resource_new(isolate: *mut ffi::Isolate, label: &str) -> ffi::Maybe
     unsafe {
         jsg::v8::run_ffi_callback(isolate, |lock| {
             let resource = jsg::Rc::new(MyResource { label: label.to_owned() });
-            Ok::<_, jsg::Error>(resource.to_js(lock))
+            resource.to_js(lock)
         })
     }
 }
@@ -354,7 +354,7 @@ scope. There is no public constructor; locks come from:
   accessors likewise with `jsg::getter_callback` / `jsg::setter_callback`, and
   `#[jsg_property(lazy_instance)]` accessors with `jsg::getter_callback`,
 - `jsg::modules::add_builtin`, whose callback is a closure that captures nothing, of type
-  `for<'s> Fn(&mut Lock<'s>) -> Local<'s, Value>`,
+  `for<'s> Fn(&mut Lock<'s>) -> Result<Local<'s, Value>, jsg::Error>`,
 - `v8::Function::new`, whose closure captures nothing and gets a lock per call,
 - `jsg::callback_scope!(unsafe let lock, isolate)` for other Rust code that C++ calls with a
   scope already open; the caller vouches for the isolate's state, hence `unsafe`. A panic
@@ -389,7 +389,7 @@ A cast to a supertype, such as `Local<Function>` to `Local<Object>` or `Local<Va
 `TryFrom`, which checks the value and fails with a `DataError`.
 
 ```rust
-let str_value = "hello".to_js(lock);
+let str_value = "hello".to_js(lock)?;
 let num_value = 42u32.to_local(lock); // `ToLocalValue` also covers integers
 let global = str_value.to_global(lock);
 
@@ -491,12 +491,14 @@ lead back to the function. Two things break this:
   collector, and the function and `data` are freed only when the isolate is torn down.
 - Another owner that the garbage collector also traces, such as a resource sharing part of
   `data` through a `std::rc::Rc`. `data` must be the only owner that traces what it traces:
-  tracing one `jsg::Rc` from two owners fails an assertion.
+  tracing one `jsg::Rc` from two owners fails an assertion, and a `TracedGlobal` traced from
+  two owners can be freed while one of them still uses it. To share state, hold a `jsg::Rc` or
+  `jsg::Weak` to the resource that owns it.
 
 ```rust
 let greet = v8::Function::new(lock, String::from("hello"), |lock, greeting, args| {
     let name = String::from_js(lock, args.get(0))?;
-    Ok(format!("{greeting}, {name}").to_js(lock))
+    format!("{greeting}, {name}").to_js(lock)
 })?;
 ```
 
@@ -511,7 +513,9 @@ propagating. As with the functions C++ JSG wraps, the function's `name` is empty
 
 When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), `Object::get` and `Object::has` (a getter or Proxy trap), and `Array::iterate` and so converting to a `Vec` (an element's getter). `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way. `Object::set`, `Array::get` and `Array::set` don't yet work this way: they still turn what JavaScript throws into a panic.
 
-Code that gets a pending error must not call into JavaScript, and should return the error. Converting it to another error and throwing that replaces the exception, as when C++ code throws while a `JsExceptionThrown` unwinds; nothing ever replaces a termination, and none of these run while execution is terminating: they fail with a pending error without calling into V8, even for a value that would convert without running JavaScript. A pending error is only meaningful while its exception is pending: one kept past that, such as a clone stored after `try_catch` caught the exception, is thrown as an internal error when V8 has no exception pending.
+Converting a value to JavaScript can fail too, as C++ JSG's `wrap()` can throw, so `ToJS::to_js` returns a `Result`: creating a `Date` or a resource's wrapper fails, leaving the exception pending, when V8 throws or execution is terminating, and a container passes on the error from converting an element. These conversions fail only with pending errors. A `#[jsg_method]`, property getter or wildcard property throws an error from converting its return value as it throws one the method returns, with `Lock::throw_exception`: for a pending error the original exception, or the termination, keeps propagating, and any other error is thrown as a new JavaScript error of its type. The method has already run by then; only its return value is lost.
+
+Code that gets a pending error must not call into JavaScript, and should return the error. Converting it to another error and throwing that replaces the exception, as when C++ code throws while a `JsExceptionThrown` unwinds; nothing ever replaces a termination, and none of these run while execution is terminating: they fail with a pending error without preparing V8 to run JavaScript, which would clear the termination, even for a value that would convert without running JavaScript. A pending error is only meaningful while its exception is pending: one kept past that, such as a clone stored after `try_catch` caught the exception, is thrown as an internal error when V8 has no exception pending.
 
 To handle an exception instead, run the code in `Lock::try_catch`, which catches as C++ `jsg::Lock::tryCatch()` does: the exception, or an error the closure returns, as a value; a termination keeps propagating.
 
@@ -532,9 +536,10 @@ but not return values:
   Like C++ JSG's integers.
 - `i64`: a `BigInt` that fits, or any other value converted to a number, which must be finite and
   in range, and truncates toward zero. Like C++ JSG's `int64_t`.
-- `SystemTime`: a `Date`, or a number of milliseconds since the epoch, within the range of
-  `kj::Date`. Like C++ JSG's `kj::Date`.
 - `&[T]` and typed-array slices such as `&[u8]`.
+
+Like C++ JSG's `kj::Date`, `SystemTime` converts to a `Date` of the milliseconds since the epoch,
+truncated toward zero, and from a `Date` or a number of milliseconds within the range of `kj::Date`.
 
 ## Union Types
 
@@ -656,8 +661,10 @@ impl Greeting {
 
 ## Properties
 
-Two macros expose properties on resource types: `#[jsg_property]` for prototype accessors,
-instance data properties and lazily computed instance data properties, and `#[jsg_inspect_property]` for debug-only symbol-keyed properties.
+Three macros expose properties on resource types: `#[jsg_property]` for prototype accessors,
+instance data properties and lazily computed instance data properties, `#[jsg_inspect_property]`
+for debug-only symbol-keyed properties, and `#[jsg_wildcard_property]` for properties of any name
+(see [Wildcard properties](#wildcard-properties)).
 
 Full reference documentation (arguments, naming rules, compat-flag behavior, examples) lives in
 **[`jsg-macros/README.md`](../jsg-macros/README.md#jsg_propertyrequired-placement--name---readonly)**.
@@ -697,6 +704,43 @@ impl Counter {
 Methods **must** start with `get_` (getter) or `set_` (setter). The prefix is stripped for the
 JS name. Omitting the setter (or adding `readonly`) makes a `prototype` or `instance` property
 read-only. A `lazy_instance` property has no setter and is writable unless marked `readonly`.
+
+### Wildcard properties
+
+`#[jsg_wildcard_property]`, the equivalent of C++ JSG's `JSG_WILDCARD_PROPERTY`, answers reads
+of string-named properties that neither the object nor its prototypes have:
+
+```rust
+#[jsg_resource]
+impl Headers {
+    // `None` if there is no such property.
+    #[jsg_wildcard_property]
+    pub fn get_named(&self, name: String) -> Option<String> { /* ... */ }
+}
+```
+
+A wildcard property behaves as in C++ JSG:
+
+- The method takes `&self`, optionally `lock: &mut jsg::Lock`, and the name as a `String` or
+  `&str`, and returns `Option<T>` or `Result<Option<T>, E>`. A type has at most one, though
+  `custom_members` may choose between several by compatibility flag.
+- Properties of the object and its prototypes, such as methods and `toString`, take precedence;
+  the method is called only for names that neither has.
+- Only string names reach it. A symbol, or an integer key such as `obj[1]`, is looked up as
+  usual.
+- Besides reads, `name in obj`, `Reflect.has()`, `propertyIsEnumerable()` and assignment ask
+  V8 whether the property exists, which calls the method too. So the method must not have side
+  effects, and an error it returns is thrown from those as well.
+- A read throws an error from converting the value with `ToJS` as it throws one the method
+  returns. Only reads convert the value; `name in obj` and the other existence checks don't.
+- Assignment and `Object.defineProperty()` define an own property, which then takes precedence.
+- Wildcard properties are not own properties: `hasOwnProperty()` is false,
+  `Object.getOwnPropertyDescriptor()` is undefined, `delete` has no effect on them, and
+  `Object.keys()`, `for...in` and spreading omit them. `propertyIsEnumerable()` is true for them
+  all the same.
+- An object that inherits from the resource, as `Object.create(obj)` does, reads them too.
+- A wildcard property named `then` makes the object a thenable, which `await` would call.
+  Return `None` for `then` unless that is intended.
 
 ## Static Constants
 

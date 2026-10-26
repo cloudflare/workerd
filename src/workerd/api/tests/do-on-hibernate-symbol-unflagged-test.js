@@ -3,10 +3,10 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 import { strictEqual } from 'node:assert';
-import { onEvict } from 'cloudflare:durable-objects';
+import { onHibernate } from 'cloudflare:durable-objects';
 
 export const symbolRequiresExperimental = {
   test() {
-    strictEqual(onEvict, undefined);
+    strictEqual(onHibernate, undefined);
   },
 };

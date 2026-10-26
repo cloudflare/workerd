@@ -115,11 +115,11 @@ wd_test(
 )
 
 wd_test(
-    src = "do-on-evict-symbol-test.wd-test",
+    src = "do-on-hibernate-symbol-test.wd-test",
     args = ["--experimental"],
     data = [
-        "do-on-evict-symbol-test.js",
-        "do-on-evict-symbol-unflagged-test.js",
+        "do-on-hibernate-symbol-test.js",
+        "do-on-hibernate-symbol-unflagged-test.js",
     ],
 )
 
@@ -204,6 +204,12 @@ wd_test(
     src = "delete-all-deletes-alarm-test.wd-test",
     args = ["--experimental"],
     data = ["delete-all-deletes-alarm-test.js"],
+)
+
+wd_test(
+    src = "durable-object-offpeak-hint-test.wd-test",
+    args = ["--experimental"],
+    data = ["durable-object-offpeak-hint-test.js"],
 )
 
 wd_test(
