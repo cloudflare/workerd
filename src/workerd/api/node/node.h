@@ -13,6 +13,7 @@
 #include <workerd/api/node/timers.h>
 #include <workerd/api/node/util.h>
 #include <workerd/io/compatibility-date.capnp.h>
+#include <workerd/io/io-context.h>
 #include <workerd/jsg/jsg.h>
 #include <workerd/jsg/modules-new.h>
 #include <workerd/jsg/url.h>
@@ -234,7 +235,7 @@ void registerNodeJsCompatModules(
     }
   }
 
-  ::workerd::rust::jsg::RustModuleRegistry r(registry);
+  ::workerd::rust::jsg::RustModuleRegistry<Registry, SuppressIoContextScope> r(registry);
   ::workerd::rust::api::register_nodejs_modules(r);
 }
 
@@ -267,7 +268,7 @@ kj::Own<jsg::modules::ModuleBundle> getInternalNodeJsCompatModuleBundle(
   // by the same registration functions run in
   // getExternalNodeJsCompatModuleBundle().
   {
-    ::workerd::rust::jsg::RustBuiltinModuleAdapter adapter(builder);
+    ::workerd::rust::jsg::RustBuiltinModuleAdapter<SuppressIoContextScope> adapter(builder);
     ::workerd::rust::api::register_nodejs_modules(adapter);
   }
 
@@ -386,7 +387,7 @@ kj::Own<jsg::modules::ModuleBundle> getExternalNodeJsCompatModuleBundle(
   // legacy path registers Rust modules unconditionally with their declared
   // type).
   {
-    ::workerd::rust::jsg::RustBuiltinModuleAdapter adapter(builder);
+    ::workerd::rust::jsg::RustBuiltinModuleAdapter<SuppressIoContextScope> adapter(builder);
     ::workerd::rust::api::register_nodejs_modules(adapter);
   }
   return builder.finish();

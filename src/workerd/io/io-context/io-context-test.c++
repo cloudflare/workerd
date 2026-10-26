@@ -7,6 +7,9 @@
 
 #include <workerd/io/io-context/ffi.h>
 #include <workerd/io/io-context/test_bridge.rs.h>
+#include <workerd/jsg/modules-new.h>
+#include <workerd/jsg/modules.h>
+#include <workerd/rust/jsg/jsg.h>
 #include <workerd/tests/test-fixture.h>
 
 #include <capnp/message.h>
@@ -174,6 +177,54 @@ KJ_TEST("an IoContext id works only while its IoContext is current") {
 
   fixture.drainAndDestroy(kj::mv(second));
   fixture.drainAndDestroy(kj::mv(first));
+}
+
+constexpr kj::StringPtr PROBE_SPECIFIER = "test:io-context-probe"_kj;
+
+KJ_TEST("the legacy registry creates a Rust module's exports outside the request resolving it") {
+  // The type wrapper is used only to register C++ resources, which this test doesn't.
+  struct UnusedTypeWrapper {};
+  jsg::CompilationObserver observer;
+  jsg::ModuleRegistryImpl<UnusedTypeWrapper> registry(observer);
+  ::workerd::rust::jsg::RustModuleRegistry<decltype(registry), SuppressIoContextScope> adapter(
+      registry);
+  register_probe_module(adapter);
+
+  TestFixture fixture;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    KJ_EXPECT(registry.resolve(env.js, kj::Path::parse(PROBE_SPECIFIER), kj::none,
+                  jsg::ModuleRegistry::ResolveOption::INTERNAL_ONLY) != kj::none);
+    KJ_EXPECT(IoContext::hasCurrent());
+  });
+  KJ_EXPECT(take_probe_observation() == ProbeObservation::NoRequest);
+}
+
+KJ_TEST("the new registry creates a Rust module's exports outside the request resolving it") {
+  constexpr auto mainModule = "export default {};"_kjc;
+  const auto base = "file:///"_url;
+  jsg::modules::ModuleRegistry::Builder registryBuilder(base);
+  jsg::modules::ModuleBundle::BundleBuilder bundleBuilder(base);
+  bundleBuilder.addEsmModule("main"_kj, jsg::copyToArc(mainModule));
+  jsg::modules::ModuleBundle::BuiltinBuilder builtinBuilder(
+      jsg::modules::ModuleBundle::BuiltinBuilder::Type::BUILTIN_ONLY);
+  ::workerd::rust::jsg::RustBuiltinModuleAdapter<SuppressIoContextScope> adapter(builtinBuilder);
+  register_probe_module(adapter);
+  registryBuilder.add(bundleBuilder.finish()).add(builtinBuilder.finish());
+
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setNewModuleRegistry(true);
+  TestFixture fixture({
+    .featureFlags = flags.asReader(),
+    .mainModuleSource = mainModule,
+    .useRealTimers = false,
+    .newModuleRegistry = registryBuilder.finish(),
+  });
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    KJ_EXPECT(env.js.resolveInternalModule(PROBE_SPECIFIER) != kj::none);
+    KJ_EXPECT(IoContext::hasCurrent());
+  });
+  KJ_EXPECT(take_probe_observation() == ProbeObservation::NoRequest);
 }
 
 }  // namespace

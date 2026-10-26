@@ -39,6 +39,7 @@ wd_rust_crate(
     testonly = True,
     srcs = ["test_bridge.rs"],
     crate_root = "test_bridge.rs",
+    cxx_bridge_deps = ["//src/rust/jsg"],
     cxx_bridge_hdrs = [],
     cxx_bridge_src = "test_bridge.rs",
     deps = [
@@ -47,12 +48,14 @@ wd_rust_crate(
     ],
 )
 
-# io-context inside a request of a real worker, and in a Durable Object.
+# io-context inside a request of a real worker and in a Durable Object, and the IoContext that
+# Rust builtin modules see when a request resolves them.
 kj_test(
     src = "io-context-test.c++",
     deps = [
         ":ffi",
         ":io-context-test-bridge",
+        "//src/rust/jsg:bridge",
         "//src/workerd/tests:test-fixture",
     ],
 )
