@@ -338,7 +338,7 @@ pub struct ServeArgs {
     /// Bind the cluster's peer port to <addr> instead of the config's `cluster.address`. The
     /// port gives full access to every service in the process to holders of the cluster key, and
     /// its traffic is not encrypted: only the cluster's instances should reach it, on a private
-    /// network (a VPC, WireGuard, Tailscale). A public IP is refused unless the config sets
+    /// network (a VPC or Tailscale). A public IP is refused unless the config sets
     /// `cluster.unsafePublicAddress`; a wildcard (0.0.0.0) listens on every interface, so
     /// firewall the port.
     #[arg(long = "cluster-addr", value_name = "addr")]

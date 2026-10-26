@@ -18,8 +18,9 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
 use std::io::Write;
-use std::os::unix::fs::FileExt;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -150,13 +151,14 @@ impl Capture {
             Ok(wal) if wal.metadata().is_ok_and(|m| m.len() == 0) => None,
             wal => Some(wal.map_err(crate::ltx::Error::from)?),
         };
-        if let Some(wal) = wal.filter(|_| !self.pages.is_empty()) {
+        if let Some(mut wal) = wal.filter(|_| !self.pages.is_empty()) {
             for (&pgno, &offset) in &self.pages {
                 let at = (pgno as usize - 1) * page_size;
                 if image.len() < at + page_size {
                     image.resize(at + page_size, 0);
                 }
-                wal.read_exact_at(&mut image[at..at + page_size], offset)
+                wal.seek(SeekFrom::Start(offset))
+                    .and_then(|_| wal.read_exact(&mut image[at..at + page_size]))
                     .map_err(crate::ltx::Error::from)?;
             }
             image.truncate(self.commit as usize * page_size);

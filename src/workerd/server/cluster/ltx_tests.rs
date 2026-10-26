@@ -42,7 +42,7 @@ struct Vfs {
     rest: [*const c_void; 15],
 }
 
-/// `sqlite3_io_methods`, likewise, followed by the method it replaces.
+/// `sqlite3_io_methods`, likewise.
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct Methods {
@@ -51,7 +51,15 @@ struct Methods {
     read: *const c_void,
     write: unsafe extern "C" fn(*mut File, *const c_void, c_int, i64) -> c_int,
     rest: [*const c_void; 15],
+}
+
+/// A file's own method table, followed by the method it replaces and
+/// whether the file is a WAL. It sits past the wrapped file's state.
+#[repr(C)]
+struct Patched {
+    methods: Methods,
     wrapped_write: unsafe extern "C" fn(*mut File, *const c_void, c_int, i64) -> c_int,
+    is_wal: bool,
 }
 
 #[repr(C)]
@@ -155,11 +163,10 @@ thread_local! {
     static CAPTURE: RefCell<Option<Capture>> = const { RefCell::new(None) };
 }
 
-/// The wrapped VFS, and where a file's "is a WAL" flag sits past the
-/// wrapped file's own state.
+/// The wrapped VFS, and where a file's `Patched` sits.
 struct Wrapped {
     vfs: usize,
-    flag_at: usize,
+    patched_at: usize,
 }
 
 fn wrapped() -> &'static Wrapped {
@@ -168,24 +175,19 @@ fn wrapped() -> &'static Wrapped {
     // registered here is leaked, as `SQLite` requires.
     WRAPPED.get_or_init(|| unsafe {
         let native = sqlite3_vfs_find(std::ptr::null());
-        let flag_at = usize::try_from((*native).file_size)
+        let patched_at = usize::try_from((*native).file_size)
             .unwrap()
             .next_multiple_of(8);
         let mut vfs = *native;
         vfs.name = c"capture-test".as_ptr();
-        vfs.file_size = c_int::try_from(flag_at + 8).unwrap();
+        vfs.file_size = c_int::try_from(patched_at + size_of::<Patched>()).unwrap();
         vfs.open = open;
         assert_eq!(sqlite3_vfs_register(Box::leak(Box::new(vfs)), 0), 0);
         Wrapped {
             vfs: native as usize,
-            flag_at,
+            patched_at,
         }
     })
-}
-
-unsafe fn is_wal(file: *mut File) -> *mut bool {
-    // SAFETY: the flag is within the `file_size` bytes `SQLite` allocated.
-    unsafe { file.cast::<u8>().add(wrapped().flag_at).cast() }
 }
 
 unsafe extern "C" fn open(
@@ -195,17 +197,20 @@ unsafe extern "C" fn open(
     flags: c_int,
     out: *mut c_int,
 ) -> c_int {
-    // SAFETY: `SQLite` passes a file of the wrapper's size; the patched
-    // method table is leaked, so it outlives the file.
+    // SAFETY: `SQLite` passes a file of the wrapper's size, so the
+    // patched table lives as long as the file.
     unsafe {
         let native = wrapped().vfs as *mut Vfs;
         let rc = ((*native).open)(native, name, file, flags, out);
         if rc == 0 && !(*file).methods.is_null() {
-            *is_wal(file) = flags & SQLITE_OPEN_WAL != 0;
-            let mut methods = *(*file).methods;
-            methods.wrapped_write = methods.write;
-            methods.write = write;
-            (*file).methods = Box::leak(Box::new(methods));
+            let methods = *(*file).methods;
+            let patched: *mut Patched = file.cast::<u8>().add(wrapped().patched_at).cast();
+            patched.write(Patched {
+                methods: Methods { write, ..methods },
+                wrapped_write: methods.write,
+                is_wal: flags & SQLITE_OPEN_WAL != 0,
+            });
+            (*file).methods = patched.cast_const().cast();
         }
         rc
     }
@@ -214,8 +219,9 @@ unsafe extern "C" fn open(
 unsafe extern "C" fn write(file: *mut File, data: *const c_void, n: c_int, offset: i64) -> c_int {
     // SAFETY: `data` holds `n` bytes, and the file was opened by `open`.
     unsafe {
-        let rc = ((*(*file).methods).wrapped_write)(file, data, n, offset);
-        if rc == 0 && *is_wal(file) {
+        let patched = &*(*file).methods.cast::<Patched>();
+        let rc = (patched.wrapped_write)(file, data, n, offset);
+        if rc == 0 && patched.is_wal {
             let data = std::slice::from_raw_parts(data.cast::<u8>(), usize::try_from(n).unwrap());
             let offset = u64::try_from(offset).unwrap();
             CAPTURE.with_borrow_mut(|c| c.as_mut().unwrap().write(offset, data));
