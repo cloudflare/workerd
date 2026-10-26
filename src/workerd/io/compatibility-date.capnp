@@ -1752,7 +1752,8 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
 
   wasmSourceUrlSupport @199 :Bool
       $compatEnableFlag("wasm_source_url_support")
-      $experimental;
+      $compatDisableFlag("no_wasm_source_url_support")
+      $compatEnableDate("2026-12-01");
   # Compiles each Wasm module in the Worker's bundle with its module name as its source URL, so
   # its stack frames read `<module>:wasm-function[<index>]:<offset>` and can be matched to the
   # module's source map. Without it, V8 names a module `wasm://wasm/<hash>`, after a hash of its
