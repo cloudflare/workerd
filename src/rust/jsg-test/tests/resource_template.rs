@@ -6,7 +6,7 @@
 
 use std::cell::RefCell;
 
-use jsg::Member;
+use jsg::MemberRegistry;
 use jsg::PropertyPlacement;
 use jsg::Resource;
 use jsg::feature_flags::compatibility_flags;
@@ -124,32 +124,27 @@ impl Sample {
 }
 
 impl Resource for Sample {
-    fn members(flags: compatibility_flags::Reader<'_>) -> Vec<Member> {
+    fn members(registry: &mut impl MemberRegistry, flags: compatibility_flags::Reader<'_>) {
         let placement = if flags.get_jsg_property_on_prototype_template() {
             PropertyPlacement::Prototype
         } else {
             PropertyPlacement::Instance
         };
-        let mut members = vec![
-            Self::constructor_member(),
-            Self::two_member(),
-            Self::with_lock_member(),
-            Self::add_member(),
-            Self::custom_optional_member(),
-            Self::value_member(),
-            Self::get_kind_member(placement),
-            Self::get_label_member(placement),
-        ];
+        registry.add(Self::constructor_member());
+        registry.add(Self::two_member());
+        registry.add(Self::with_lock_member());
+        registry.add(Self::add_member());
+        registry.add(Self::custom_optional_member());
+        registry.add(Self::value_member());
+        registry.add(Self::get_kind_member(placement));
+        registry.add(Self::get_label_member(placement));
         if flags.get_cache_option_enabled() && flags.get_jsg_property_on_prototype_template() {
-            members.extend([
-                Self::get_cache_member(placement),
-                Self::format_label_member(),
-                Self::describe_member(),
-                Self::debug_label_member(),
-                Self::extra_value_member(),
-            ]);
+            registry.add(Self::get_cache_member(placement));
+            registry.add(Self::format_label_member());
+            registry.add(Self::describe_member());
+            registry.add(Self::debug_label_member());
+            registry.add(Self::extra_value_member());
         }
-        members
     }
 }
 

@@ -27,13 +27,13 @@ impl GarbageCollected for Bad {
 extern "C" fn getter(_args: *mut v8::ffi::FunctionCallbackInfo) {}
 
 impl Resource for Bad {
-    fn members(_flags: compatibility_flags::Reader<'_>) -> Vec<Member> {
-        vec![Member::Property {
+    fn members(registry: &mut impl MemberRegistry, _flags: compatibility_flags::Reader<'_>) {
+        registry.add(Member::Property {
             name: "bad".to_owned(),
             kind: crate::PropertyKind::Instance,
             getter_callback: getter,
             setter_callback: None,
-        }]
+        });
     }
 }
 
@@ -65,13 +65,13 @@ impl GarbageCollected for BadLazy {
 }
 
 impl Resource for BadLazy {
-    fn members(_flags: compatibility_flags::Reader<'_>) -> Vec<Member> {
-        vec![Member::Property {
+    fn members(registry: &mut impl MemberRegistry, _flags: compatibility_flags::Reader<'_>) {
+        registry.add(Member::Property {
             name: "bad".to_owned(),
             kind: crate::PropertyKind::LazyInstance,
             getter_callback: getter,
             setter_callback: None,
-        }]
+        });
     }
 }
 
@@ -103,13 +103,13 @@ impl GarbageCollected for BadLazyReadonly {
 }
 
 impl Resource for BadLazyReadonly {
-    fn members(_flags: compatibility_flags::Reader<'_>) -> Vec<Member> {
-        vec![Member::Property {
+    fn members(registry: &mut impl MemberRegistry, _flags: compatibility_flags::Reader<'_>) {
+        registry.add(Member::Property {
             name: "bad".to_owned(),
             kind: crate::PropertyKind::LazyReadonlyInstance,
             getter_callback: getter,
             setter_callback: None,
-        }]
+        });
     }
 }
 
