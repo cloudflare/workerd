@@ -13,7 +13,7 @@ const unitTests :Workerd.Config = (
           (name = "require-process",
            commonJsModule = "module.exports = { bare: require('process'), prefixed: require('node:process') };")
         ],
-        compatibilityFlags = ["nodejs_compat"],
+        compatibilityFlags = ["nodejs_compat", "nodejs_compat_v2"],
       )
     ),
   ],
