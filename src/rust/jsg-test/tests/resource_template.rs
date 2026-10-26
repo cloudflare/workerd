@@ -23,6 +23,12 @@ type OptionalNumber = Option<u32>;
 
 struct OptionalValue;
 
+impl jsg::TypeInfo for OptionalValue {
+    fn describe(_cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
+        jsg::rtti::Type::Unknown
+    }
+}
+
 impl<'s> jsg::FromJS<'s> for OptionalValue {
     type ResultType = Self;
 
