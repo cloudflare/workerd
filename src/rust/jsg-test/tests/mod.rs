@@ -5,6 +5,7 @@
 mod argument_errors;
 mod arrays;
 mod buffer_types;
+mod builtin_module;
 mod coercion_safety;
 mod collections_gc;
 mod date_bigint;

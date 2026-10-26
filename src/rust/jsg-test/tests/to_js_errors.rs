@@ -48,6 +48,9 @@ impl Converter {
         lock: &mut jsg::Lock,
         callback: v8::Local<v8::Value>,
     ) -> jsg::Result<CallsWhenConverted> {
+        if !callback.is_function() {
+            return Err(jsg::Error::new_type_error("expected a function"));
+        }
         Ok(Self::later(lock, callback))
     }
 
@@ -57,7 +60,7 @@ impl Converter {
         lock: &mut jsg::Lock,
         callback: v8::Local<v8::Value>,
     ) -> Option<CallsWhenConverted> {
-        Some(Self::later(lock, callback))
+        (!callback.is_undefined()).then(|| Self::later(lock, callback))
     }
 
     /// Converts to an array of what each callback returns.

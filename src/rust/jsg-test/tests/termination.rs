@@ -12,6 +12,12 @@
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
 
+thread_local! {
+    /// Whether converting the array in `terminate_then_return_dates` failed with a pending error.
+    static DATES_CONVERSION_PENDING: std::cell::Cell<Option<bool>> =
+        const { std::cell::Cell::new(None) };
+}
+
 #[jsg_resource]
 struct Terminator;
 
@@ -47,12 +53,17 @@ impl Terminator {
         std::time::UNIX_EPOCH
     }
 
-    /// As `terminate_then_return_date`, with the time in an array, whose conversion passes on
-    /// the error from converting it.
+    /// Is terminated and then converts an array of times, whose conversion passes on the
+    /// pending error from converting the time.
     #[jsg_method]
-    fn terminate_then_return_dates(&self, lock: &mut jsg::Lock) -> Vec<std::time::SystemTime> {
+    fn terminate_then_return_dates<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+    ) -> jsg::Result<jsg::v8::Local<'s, jsg::v8::Value>> {
         crate::Harness::terminate_and_deliver(lock);
-        vec![std::time::UNIX_EPOCH]
+        let result = jsg::ToJS::to_js(vec![std::time::UNIX_EPOCH], lock);
+        DATES_CONVERSION_PENDING.set(Some(result.as_ref().is_err_and(jsg::Error::is_pending)));
+        result
     }
 
     /// Is terminated and then creates and returns a `BigInt`, which V8 creates without
@@ -137,7 +148,9 @@ fn returning_a_date_while_terminating_keeps_the_termination() {
 
 #[test]
 fn returning_dates_while_terminating_keeps_the_termination() {
+    DATES_CONVERSION_PENDING.set(None);
     termination_survives("terminateThenReturnDates");
+    assert_eq!(DATES_CONVERSION_PENDING.get(), Some(true));
 }
 
 #[test]

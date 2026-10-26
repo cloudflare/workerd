@@ -356,9 +356,8 @@ impl<T: Traced> Traced for std::rc::Rc<T> {
 /// Trait for converting Rust values to JavaScript.
 ///
 /// Provides Rust → JavaScript conversion. As C++ JSG's `wrap()` can throw, a conversion can
-/// fail: creating a `Date` fails while execution is terminating, and a conversion that runs
-/// JavaScript (a setter) passes on what it throws. Pass the error on with `?`; see the README's
-/// safety rules.
+/// fail: creating a `Date` fails while execution is terminating, and a container passes on the
+/// error from converting an element. Pass the error on with `?`; see the README's safety rules.
 pub trait ToJS<'s>: Sized {
     /// Converts this Rust value into a JavaScript value in the scope of `lock`.
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error>;

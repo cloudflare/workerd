@@ -20,6 +20,7 @@ mod ffi {
         type Isolate = jsg::v8::ffi::Isolate;
         type Local = jsg::v8::ffi::Local;
         type MaybeLocal = jsg::v8::ffi::MaybeLocal;
+        type ModuleRegistry = jsg::v8::ffi::ModuleRegistry;
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -73,6 +74,13 @@ mod ffi {
             resource_name: KjMaybe<&str>,
         ) -> EvalResult;
         pub unsafe fn set_global(self: &EvalContext, name: &str, value: Local);
+        /// Has `register_modules` add builtin modules, then calls the callback of the one named
+        /// `specifier`, as importing it does. See `call_builtin_module` in `ffi.h`.
+        pub unsafe fn call_builtin_module(
+            self: &EvalContext,
+            register_modules: fn(Pin<&mut ModuleRegistry>),
+            specifier: &str,
+        ) -> Result<EvalResult>;
 
         /// Triggers garbage collection for testing purposes.
         /// Note: For GC to actually collect objects, they must not be reachable from the
@@ -219,6 +227,24 @@ impl EvalContext<'_> {
             (false, Some(exception)) => Err(EvalError::Exception(exception)),
             (false, None) => Err(EvalError::EvalFailed),
         }
+    }
+
+    /// Has `register` add builtin modules with `jsg::modules::add_builtin`, then produces the
+    /// exports of the one named `specifier`, as importing it does.
+    ///
+    /// # Panics
+    ///
+    /// If `register` adds no module named `specifier`.
+    pub fn import_builtin<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        register: fn(Pin<&mut v8::ffi::ModuleRegistry>),
+        specifier: &str,
+    ) -> Result<v8::Local<'s, v8::Value>, EvalError<'s>> {
+        // SAFETY: self.inner is a valid EvalContext, and the callback runs in `lock`'s scope.
+        let result = unsafe { self.inner.call_builtin_module(register, specifier) }
+            .expect("no such builtin module");
+        Self::raw_result(lock, result)
     }
 
     /// Converts `value` to JavaScript and stores it as the global `name`.
