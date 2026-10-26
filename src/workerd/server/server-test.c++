@@ -579,6 +579,11 @@ class TestServer final: private kj::EntropySource {
     expectedWarnings = expected;
   }
 
+  // Tracing needs distinct span IDs even when the entropy is deterministic.
+  void useUniqueEntropy() {
+    nextEntropy = 1;
+  }
+
   // Start the server. Call before connect().
   void start(kj::Promise<void> drainWhen = kj::NEVER_DONE) {
     KJ_REQUIRE(runTask == kj::none);
@@ -780,7 +785,17 @@ class TestServer final: private kj::EntropySource {
   // ---------------------------------------------------------------------------
   // implements EntropySource
 
+  kj::Maybe<uint64_t> nextEntropy;
+
   void generate(kj::ArrayPtr<kj::byte> buffer) override {
+    KJ_IF_SOME(sequence, nextEntropy) {
+      uint64_t value = sequence++;
+      for (auto& byte: buffer) {
+        byte = value & 0xff;
+        value >>= 8;
+      }
+      return;
+    }
     kj::byte random = 4;  // chosen by fair die roll by Randall Munroe in 2007.
                           // guaranteed to be random.
     buffer.fill(random);
@@ -4794,7 +4809,8 @@ KJ_TEST("Server: OTLP exports dynamic workers and excludes every collector entry
             `        req.headers.get("content-type") !== "application/x-protobuf") {
             `      throw new Error("invalid OTLP request");
             `    }
-            `    dynamic ||= (await req.text()).includes("dynamic-operation");
+            `    const body = new TextDecoder().decode(await req.arrayBuffer());
+            `    dynamic ||= body.includes("dynamic-operation");
             `    if (++count > 2) throw new Error("collector was traced recursively");
             `    return new Response(null, {status: 204});
             `  }
@@ -4814,6 +4830,7 @@ KJ_TEST("Server: OTLP exports dynamic workers and excludes every collector entry
   ))"_kj);
 
   test.server.allowExperimental();
+  test.useUniqueEntropy();
   test.start();
   auto conn = test.connect("test-addr");
   conn.httpGet200("/", "OK");
@@ -4848,7 +4865,8 @@ KJ_TEST("Server: OTLP shutdown cancels an unanswered collector request") {
   auto pending = test.server.accept("collector-addr");
   KJ_ASSERT(pending.poll(test.ws), "no export reached the collector");
   auto collector = pending.wait(test.ws);
-  auto input = kj::newHttpInputStream(*collector, kj::HttpHeaderTable::getBuiltinTable());
+  kj::HttpHeaderTable headerTable;
+  auto input = kj::newHttpInputStream(*collector, headerTable);
   auto request = input->readRequest().wait(test.ws);
   KJ_EXPECT(request.method == kj::HttpMethod::POST);
   KJ_EXPECT(request.url == "/v1/traces"_kj);
