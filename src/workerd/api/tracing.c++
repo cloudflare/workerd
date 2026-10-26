@@ -683,6 +683,8 @@ v8::Local<v8::Value> runSpan(jsg::Lock& js,
         },
                                [jsSpan = jsSpan.addRef(), exceptionHandler](
                                    jsg::Lock& js, jsg::Value exception) mutable -> jsg::Value {
+          // Injected TypeHandlers are static singletons (TYPE_HANDLER_INSTANCE in
+          // jsg/type-wrapper.h), so this one is still valid after enterSpan() returns.
           jsSpan->recordCallbackError(js, exception, *exceptionHandler);
           jsSpan->end();
           js.throwException(kj::mv(exception));
