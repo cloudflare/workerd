@@ -33,7 +33,7 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "wasm-source-url-test.js"),
           (name = "trap.wasm", wasm = embed "wasm-source-url.wasm"),
         ],
-        compatibilityFlags = ["nodejs_compat"],
+        compatibilityFlags = ["nodejs_compat", "no_wasm_source_url_support"],
         bindings = [(name = "expectedFrame", text = "at wasm://wasm/")],
       ),
     ),
