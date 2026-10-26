@@ -430,11 +430,24 @@ MaybeLocal local_symbol_description(Isolate* isolate, const Local& value) {
 }
 
 // Local<BigInt>
+Local big_int_new(Isolate* isolate, int64_t value) {
+  return to_ffi(v8::BigInt::New(isolate, value));
+}
+
+Local big_int_new_from_unsigned(Isolate* isolate, uint64_t value) {
+  return to_ffi(v8::BigInt::NewFromUnsigned(isolate, value));
+}
+
 int64_t local_big_int_int64_value(const Local& value, bool& lossless) {
   return local_as_ref_from_ffi<v8::BigInt>(value)->Int64Value(&lossless);
 }
 
 // Local<Date>
+// Empty, with the exception pending, if creating the object throws.
+MaybeLocal date_new(Isolate* isolate, double time) {
+  return maybe_local_to_ffi(v8::Date::New(isolate->GetCurrentContext(), time));
+}
+
 double local_date_value_of(const Local& value) {
   return local_as_ref_from_ffi<v8::Date>(value)->ValueOf();
 }

@@ -202,9 +202,14 @@ Local local_symbol_new_with_description(Isolate* isolate, Local description);
 MaybeLocal local_symbol_description(Isolate* isolate, const Local& value);
 
 // Local<BigInt>
+Local big_int_new(Isolate* isolate, int64_t value);
+Local big_int_new_from_unsigned(Isolate* isolate, uint64_t value);
 int64_t local_big_int_int64_value(const Local& value, bool& lossless);
 
 // Local<Date>
+// Runs no JavaScript, but prepares to, which would clear a pending termination, so Rust doesn't
+// call it while execution is terminating (`call_into_js()` in v8.rs).
+MaybeLocal date_new(Isolate* isolate, double time);
 double local_date_value_of(const Local& value);
 
 // Shims that run JavaScript (a call, a getter or Proxy trap, or a coercion through `toString`,

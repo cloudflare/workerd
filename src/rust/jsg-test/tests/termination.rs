@@ -39,6 +39,25 @@ impl Terminator {
         lock.throw_error("thrown while terminating");
     }
 
+    /// Is terminated and then returns a time, which is converted to a `Date` after the
+    /// termination.
+    #[jsg_method]
+    fn terminate_then_return_date(&self, lock: &mut jsg::Lock) -> std::time::SystemTime {
+        crate::Harness::terminate_and_deliver(lock);
+        std::time::UNIX_EPOCH
+    }
+
+    /// Is terminated and then creates and returns a `BigInt`, which V8 creates without
+    /// preparing to run JavaScript.
+    #[jsg_method]
+    fn terminate_then_return_big_int<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+    ) -> jsg::v8::Local<'s, jsg::v8::BigInt> {
+        crate::Harness::terminate_and_deliver(lock);
+        jsg::v8::BigInt::new(lock, 1)
+    }
+
     #[jsg_method]
     fn terminate_then_throw_internal_error(&self, lock: &mut jsg::Lock) {
         crate::Harness::terminate_and_deliver(lock);
@@ -101,4 +120,14 @@ fn throw_error_while_terminating_keeps_the_termination() {
 #[test]
 fn throw_internal_error_while_terminating_keeps_the_termination() {
     termination_survives("terminateThenThrowInternalError");
+}
+
+#[test]
+fn returning_a_date_while_terminating_keeps_the_termination() {
+    termination_survives("terminateThenReturnDate");
+}
+
+#[test]
+fn returning_a_big_int_while_terminating_keeps_the_termination() {
+    termination_survives("terminateThenReturnBigInt");
 }
