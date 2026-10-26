@@ -20,7 +20,7 @@ use jsg_macros::jsg_resource;
 fn install_greet(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>, greeting: &str) {
     let greet = v8::Function::new(lock, greeting.to_owned(), |lock, greeting, args| {
         let name = String::from_js(lock, args.get(0))?;
-        Ok(format!("{greeting}, {name}").to_js(lock))
+        Ok(format!("{greeting}, {name}").to_js(lock)?)
     })
     .unwrap();
     ctx.set_global(lock, "greet", v8::Local::<v8::Value>::from(greet));
@@ -48,12 +48,12 @@ fn function_calls_closure_with_its_data_and_arguments() {
 fn functions_keep_their_own_data() {
     crate::Harness::new().run_in_context(|lock, ctx| {
         let hello = v8::Function::new(lock, "hello".to_owned(), |lock, data, _args| {
-            Ok(data.clone().to_js(lock))
+            Ok(data.clone().to_js(lock)?)
         })
         .unwrap();
         let count = v8::Function::new(lock, Cell::new(0u32), |lock, calls, _args| {
             calls.set(calls.get() + 1);
-            Ok(jsg::Number::from(calls.get()).to_js(lock))
+            Ok(jsg::Number::from(calls.get()).to_js(lock)?)
         })
         .unwrap();
         ctx.set_global(lock, "hello", v8::Local::<v8::Value>::from(hello));
@@ -309,7 +309,7 @@ fn data_keeps_traced_resources_alive() {
             _drops: DropCounter(&LEAF_DROPS),
         });
         let function =
-            v8::Function::new(lock, leaf, |lock, leaf, _| Ok(leaf.clone().to_js(lock))).unwrap();
+            v8::Function::new(lock, leaf, |lock, leaf, _| Ok(leaf.clone().to_js(lock)?)).unwrap();
         ctx.set_global(lock, "getLeaf", v8::Local::<v8::Value>::from(function));
         // Only the function's data holds the resource now.
         crate::Harness::request_gc(lock);
@@ -375,11 +375,11 @@ fn reentrant_call_sees_its_own_data() {
             log.borrow_mut().push(format!("+{depth}"));
             if depth > 0.0 {
                 let again: v8::Local<v8::Function> = args.get(1).try_into().unwrap();
-                let next = jsg::Number::from(depth - 1.0).to_js(lock);
+                let next = jsg::Number::from(depth - 1.0).to_js(lock)?;
                 again.call::<v8::Local<v8::Value>>(lock, None, &[next])?;
             }
             log.borrow_mut().push(format!("-{depth}"));
-            Ok(log.borrow().join(" ").to_js(lock))
+            Ok(log.borrow().join(" ").to_js(lock)?)
         })
         .unwrap();
         ctx.set_global(lock, "f", v8::Local::<v8::Value>::from(f));

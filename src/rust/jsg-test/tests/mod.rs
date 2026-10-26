@@ -36,6 +36,7 @@ mod resource_this;
 mod string;
 mod symbol;
 mod termination;
+mod to_js_errors;
 mod traceable_gc;
 mod traced_global_lifetime;
 mod unwrap;

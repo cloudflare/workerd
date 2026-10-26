@@ -10,6 +10,6 @@ pub fn t<'s>(lock: &mut jsg::Lock<'s>) -> jsg::Result<v8::Local<'s, v8::Function
     let name = String::from("captured");
     v8::Function::new(lock, (), move |lock, (), _args| {
         //~^ ERROR E0277
-        Ok(jsg::ToJS::to_js(name.as_str(), lock))
+        jsg::ToJS::to_js(name.as_str(), lock)
     })
 }

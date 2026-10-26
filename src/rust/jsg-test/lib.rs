@@ -222,8 +222,14 @@ impl EvalContext<'_> {
     }
 
     /// Converts `value` to JavaScript and stores it as the global `name`.
+    ///
+    /// # Panics
+    ///
+    /// If the conversion fails.
     pub fn set_global<'s>(&self, lock: &mut jsg::Lock<'s>, name: &str, value: impl jsg::ToJS<'s>) {
-        let value = value.to_js(lock);
+        let value = value
+            .to_js(lock)
+            .expect("converting a global's value failed");
         // SAFETY: self.inner is a valid EvalContext and value is a valid Local handle.
         unsafe { self.inner.set_global(name, value.into_ffi()) }
     }

@@ -725,7 +725,7 @@ fn typed_arrays_cast_to_array_buffer_view() {
     harness.run_in_context(|lock, _ctx| {
         // Uint8Array -> ArrayBufferView
         let u8_data: Vec<u8> = vec![1, 2, 3];
-        let js = u8_data.to_js(lock);
+        let js = u8_data.to_js(lock)?;
         let typed: v8::Local<v8::Uint8Array> =
             // SAFETY: js was just created by to_js within the current HandleScope.
             unsafe { v8::Local::from_ffi(js.into_ffi()) };
@@ -734,7 +734,7 @@ fn typed_arrays_cast_to_array_buffer_view() {
 
         // Float64Array -> ArrayBufferView
         let f64_data: Vec<f64> = vec![1.0, 2.0];
-        let js2 = f64_data.to_js(lock);
+        let js2 = f64_data.to_js(lock)?;
         let typed2: v8::Local<v8::Float64Array> =
             // SAFETY: js2 was just created by to_js within the current HandleScope.
             unsafe { v8::Local::from_ffi(js2.into_ffi()) };
@@ -750,7 +750,7 @@ fn array_buffer_view_back_to_typed_array() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<u8> = vec![10, 20, 30];
-        let js = data.to_js(lock);
+        let js = data.to_js(lock)?;
         let typed: v8::Local<v8::Uint8Array> =
             // SAFETY: js was just created by to_js within the current HandleScope.
             unsafe { v8::Local::from_ffi(js.into_ffi()) };

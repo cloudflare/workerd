@@ -175,8 +175,8 @@ impl<R: Resource> Drop for Rc<R> {
 }
 
 impl<'s, R: Resource + 'static> ToJS<'s> for Rc<R> {
-    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
-        wrap(lock, self)
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        Ok(wrap(lock, self))
     }
 }
 
@@ -368,8 +368,8 @@ impl<R: Resource> Default for Weak<R> {
 /// wrapper on the `Wrappable` via `CppgcShim`. This means:
 ///
 /// ```text
-/// let a = resource.clone().to_js(lock);
-/// let b = resource.to_js(lock);
+/// let a = resource.clone().to_js(lock)?;
+/// let b = resource.to_js(lock)?;
 /// // a === b in JavaScript (same object identity)
 /// ```
 ///

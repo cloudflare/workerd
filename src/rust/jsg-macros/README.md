@@ -57,7 +57,8 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
   The macro matches both the name `this` and the type, so a JavaScript argument of type
   `jsg::Rc<Self>` with another name is still an ordinary argument. A `this` parameter that
   isn't first, or has another type, is a compile error.
-- Return types of `Result<T, E>` automatically throw a JavaScript exception on `Err`.
+- Return types of `Result<T, E>` automatically throw a JavaScript exception on `Err`, and so
+  does an error from converting the return value with `jsg::ToJS`.
 - The Rust `snake_case` name is converted to `camelCase` for JavaScript; override with
   `#[jsg_method(name = "jsName")]`.
 - The first typed parameter may be `&mut Lock` / `&mut jsg::Lock` to receive the

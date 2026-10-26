@@ -178,7 +178,7 @@ impl MyResource {
 let resource = jsg::Rc::new(MyResource { ... });
 
 // Convert to a JS object (uses cached FunctionTemplate)
-let js_obj = resource.to_js(&mut lock);
+let js_obj = resource.to_js(&mut lock)?;
 
 // Convert from JS back to a Ref
 let r: jsg::Rc<MyResource> = jsg::Rc::from_js(&mut lock, js_val)?;
@@ -301,7 +301,7 @@ unsafe fn my_resource_new(isolate: *mut ffi::Isolate, label: &str) -> ffi::Maybe
     unsafe {
         jsg::v8::run_ffi_callback(isolate, |lock| {
             let resource = jsg::Rc::new(MyResource { label: label.to_owned() });
-            Ok::<_, jsg::Error>(resource.to_js(lock))
+            resource.to_js(lock)
         })
     }
 }
@@ -389,7 +389,7 @@ A cast to a supertype, such as `Local<Function>` to `Local<Object>` or `Local<Va
 `TryFrom`, which checks the value and fails with a `DataError`.
 
 ```rust
-let str_value = "hello".to_js(lock);
+let str_value = "hello".to_js(lock)?;
 let num_value = 42u32.to_local(lock); // `ToLocalValue` also covers integers
 let global = str_value.to_global(lock);
 
@@ -496,7 +496,7 @@ lead back to the function. Two things break this:
 ```rust
 let greet = v8::Function::new(lock, String::from("hello"), |lock, greeting, args| {
     let name = String::from_js(lock, args.get(0))?;
-    Ok(format!("{greeting}, {name}").to_js(lock))
+    format!("{greeting}, {name}").to_js(lock)
 })?;
 ```
 
@@ -510,6 +510,8 @@ propagating. As with the functions C++ JSG wraps, the function's `name` is empty
 ## Errors from JavaScript
 
 When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), `Object::get` and `Object::has` (a getter or Proxy trap), and `Array::iterate` and so converting to a `Vec` (an element's getter). `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way. `Object::set`, `Array::get` and `Array::set` don't yet work this way: they still turn what JavaScript throws into a panic.
+
+Converting a value to JavaScript can fail too, as C++ JSG's `wrap()` can throw, so `ToJS::to_js` returns a `Result`: creating a `Date` can fail, and a conversion that runs JavaScript passes on what it throws. A `#[jsg_method]` throws an error from converting its return value as it throws one the method returns.
 
 Code that gets a pending error must not call into JavaScript, and should return the error. Converting it to another error and throwing that replaces the exception, as when C++ code throws while a `JsExceptionThrown` unwinds; nothing ever replaces a termination, and none of these run while execution is terminating: they fail with a pending error without calling into V8, even for a value that would convert without running JavaScript. A pending error is only meaningful while its exception is pending: one kept past that, such as a clone stored after `try_catch` caught the exception, is thrown as an internal error when V8 has no exception pending.
 

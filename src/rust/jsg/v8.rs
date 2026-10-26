@@ -1585,7 +1585,7 @@ impl Function {
     /// ```ignore
     /// let greet = v8::Function::new(lock, String::from("hello"), |lock, greeting, args| {
     ///     let name = String::from_js(lock, args.get(0))?;
-    ///     Ok(format!("{greeting}, {name}").to_js(lock))
+    ///     format!("{greeting}, {name}").to_js(lock)
     /// })?;
     /// ```
     pub fn new<'s, T, F>(lock: &mut Lock<'s>, data: T, f: F) -> crate::Result<Local<'s, Self>>
@@ -1668,8 +1668,8 @@ impl<'s> Local<'s, Function> {
     /// # Example
     ///
     /// ```ignore
-    /// let x = x.to_js(lock);
-    /// let y = y.to_js(lock);
+    /// let x = x.to_js(lock)?;
+    /// let y = y.to_js(lock)?;
     /// let result: Number = func.call(lock, None, &[x, y])?;
     /// ```
     pub fn call<R: FromJS<'s>>(
@@ -3548,10 +3548,10 @@ unsafe fn global_clone(lock: &mut Lock<'_>, handle: &ffi::Global) -> ffi::Global
 
 /// Converts a primitive Rust value into a JavaScript value in the scope of `lock`.
 ///
-/// Unlike [`ToJS`](crate::ToJS), this borrows `self` and also covers the integer types,
-/// which `ToJS` cannot: `ToJS` maps `Vec<u8>` (and the other integer vectors) to typed
-/// arrays, which would conflict with its generic `Vec<T: ToJS>` impl if the element
-/// types were themselves `ToJS`. `#[jsg_struct]` uses it for fields.
+/// Unlike [`ToJS`](crate::ToJS), this borrows `self`, can't fail, and also covers the integer
+/// types, which `ToJS` cannot: `ToJS` maps `Vec<u8>` (and the other integer vectors) to typed
+/// arrays, which would conflict with its generic `Vec<T: ToJS>` impl if the element types were
+/// themselves `ToJS`. `#[jsg_struct]` uses it for fields.
 pub trait ToLocalValue {
     fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value>;
 }
@@ -3578,19 +3578,25 @@ impl ToLocalValue for std::string::String {
 
 impl ToLocalValue for &str {
     fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
-        crate::ToJS::to_js(*self, lock)
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        unsafe { Local::from_ffi(ffi::local_new_string(isolate.as_ffi(), self)) }
     }
 }
 
 impl ToLocalValue for bool {
     fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
-        crate::ToJS::to_js(*self, lock)
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        unsafe { Local::from_ffi(ffi::local_new_boolean(isolate.as_ffi(), *self)) }
     }
 }
 
 impl ToLocalValue for Number {
     fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
-        crate::ToJS::to_js(*self, lock)
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        unsafe { Local::from_ffi(ffi::local_new_number(isolate.as_ffi(), self.value())) }
     }
 }
 

@@ -83,6 +83,7 @@ use crate::Nullable;
 use crate::Number;
 use crate::Type;
 use crate::v8;
+use crate::v8::ToLocalValue;
 
 // =============================================================================
 // Traced trait — GC tracing for field types
@@ -354,10 +355,13 @@ impl<T: Traced> Traced for std::rc::Rc<T> {
 
 /// Trait for converting Rust values to JavaScript.
 ///
-/// Provides Rust → JavaScript conversion.
+/// Provides Rust → JavaScript conversion. As C++ JSG's `wrap()` can throw, a conversion can
+/// fail: creating a `Date` fails while execution is terminating, and a conversion that runs
+/// JavaScript (a setter) passes on what it throws. Pass the error on with `?`; see the README's
+/// safety rules.
 pub trait ToJS<'s>: Sized {
     /// Converts this Rust value into a JavaScript value in the scope of `lock`.
-    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value>;
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error>;
 }
 
 // =============================================================================
@@ -444,10 +448,8 @@ impl Type for bool {
 }
 
 impl<'s> ToJS<'s> for bool {
-    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
-        let isolate = lock.isolate();
-        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
-        unsafe { v8::Local::from_ffi(v8::ffi::local_new_boolean(isolate.as_ffi(), self)) }
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        Ok(self.to_local(lock))
     }
 }
 
@@ -478,16 +480,14 @@ impl Type for std::string::String {
 }
 
 impl<'s> ToJS<'s> for std::string::String {
-    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
-        self.as_str().to_js(lock)
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        Ok(self.to_local(lock))
     }
 }
 
 impl<'s> ToJS<'s> for &str {
-    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
-        let isolate = lock.isolate();
-        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
-        unsafe { v8::Local::from_ffi(v8::ffi::local_new_string(isolate.as_ffi(), self)) }
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        Ok(self.to_local(lock))
     }
 }
 
@@ -518,10 +518,8 @@ impl Type for Number {
 }
 
 impl<'s> ToJS<'s> for Number {
-    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
-        let isolate = lock.isolate();
-        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
-        unsafe { v8::Local::from_ffi(v8::ffi::local_new_number(isolate.as_ffi(), self.value())) }
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        Ok(self.to_local(lock))
     }
 }
 
@@ -828,14 +826,12 @@ impl<'s> ToJS<'s> for std::time::SystemTime {
         reason = "a time of more than 2^53 milliseconds is beyond the range of JavaScript dates \
                   either way"
     )]
-    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         let millis = match self.duration_since(std::time::UNIX_EPOCH) {
             Ok(after) => after.as_millis() as f64,
             Err(before) => -(before.duration().as_millis() as f64),
         };
-        // If `Date::new()` fails, an exception or termination is pending, so JavaScript never
-        // sees the value returned in its place, as when C++ JSG's `check()` throws.
-        v8::Date::new(lock, millis).map_or_else(|_| lock.undefined(), Into::into)
+        Ok(v8::Date::new(lock, millis)?.into())
     }
 }
 
@@ -844,42 +840,42 @@ impl<'s> ToJS<'s> for std::time::SystemTime {
 // =============================================================================
 
 impl<'s> ToJS<'s> for () {
-    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
-        lock.undefined()
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        Ok(lock.undefined())
     }
 }
 
 impl<'s, T: ToJS<'s>> ToJS<'s> for Option<T> {
-    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         match self {
             Some(value) => value.to_js(lock),
-            None => lock.undefined(),
+            None => Ok(lock.undefined()),
         }
     }
 }
 
 impl<'s, T: Type + ToJS<'s>> ToJS<'s> for NonCoercible<T> {
-    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         self.into_inner().to_js(lock)
     }
 }
 
 impl<'s, T: ToJS<'s>> ToJS<'s> for Nullable<T> {
-    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         match self {
             Self::Some(value) => value.to_js(lock),
-            Self::Null => lock.null(),
-            Self::Undefined => lock.undefined(),
+            Self::Null => Ok(lock.null()),
+            Self::Undefined => Ok(lock.undefined()),
         }
     }
 }
 
 impl<'s, T: ToJS<'s>> ToJS<'s> for Lenient<T> {
-    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         match self {
             Self::Some(value) => value.to_js(lock),
-            Self::Null => lock.null(),
-            Self::Undefined | Self::Unconvertable(_) => lock.undefined(),
+            Self::Null => Ok(lock.null()),
+            Self::Undefined | Self::Unconvertable(_) => Ok(lock.undefined()),
         }
     }
 }
@@ -1027,13 +1023,13 @@ impl<T: Type> Type for Vec<T> {
 }
 
 impl<'s, T: ToJS<'s>> ToJS<'s> for Vec<T> {
-    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         let array = v8::Array::new(lock, self.len());
         for (i, item) in self.into_iter().enumerate() {
-            let value = item.to_js(lock);
+            let value = item.to_js(lock)?;
             array.set(lock, i, value);
         }
-        array.into()
+        Ok(array.into())
     }
 }
 
@@ -1122,16 +1118,16 @@ macro_rules! impl_typed_array {
         }
 
         impl<'s> ToJS<'s> for Vec<$elem> {
-            fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+            fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
                 let isolate = lock.isolate();
                 // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
-                unsafe {
+                Ok(unsafe {
                     v8::Local::from_ffi(v8::ffi::$new_fn(
                         isolate.as_ffi(),
                         self.as_ptr(),
                         self.len(),
                     ))
-                }
+                })
             }
         }
 
@@ -1300,8 +1296,8 @@ impl<'s, T> ToJS<'s> for v8::Local<'s, T>
 where
     Self: Into<v8::Local<'s, v8::Value>>,
 {
-    fn to_js(self, _lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
-        self.into()
+    fn to_js(self, _lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        Ok(self.into())
     }
 }
 

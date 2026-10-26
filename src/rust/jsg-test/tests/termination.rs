@@ -47,6 +47,14 @@ impl Terminator {
         std::time::UNIX_EPOCH
     }
 
+    /// As `terminate_then_return_date`, with the time in an array, whose conversion passes on
+    /// the error from converting it.
+    #[jsg_method]
+    fn terminate_then_return_dates(&self, lock: &mut jsg::Lock) -> Vec<std::time::SystemTime> {
+        crate::Harness::terminate_and_deliver(lock);
+        vec![std::time::UNIX_EPOCH]
+    }
+
     /// Is terminated and then creates and returns a `BigInt`, which V8 creates without
     /// preparing to run JavaScript.
     #[jsg_method]
@@ -125,6 +133,11 @@ fn throw_internal_error_while_terminating_keeps_the_termination() {
 #[test]
 fn returning_a_date_while_terminating_keeps_the_termination() {
     termination_survives("terminateThenReturnDate");
+}
+
+#[test]
+fn returning_dates_while_terminating_keeps_the_termination() {
+    termination_survives("terminateThenReturnDates");
 }
 
 #[test]
