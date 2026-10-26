@@ -334,7 +334,7 @@ class WebSocket: public EventTarget {
   kj::Maybe<kj::Date> getAutoResponseTimestamp();
 
   kj::Promise<void> sendAutoResponse(
-      kj::String message, kj::WebSocket& ws, kj::Promise<void> writeBarrier);
+      kj::String message, kj::WeakRc<kj::WebSocket> ws, kj::Promise<void> writeBarrier);
 
   int getReadyState();
 
@@ -350,6 +350,9 @@ class WebSocket: public EventTarget {
   // Attach an observer that records traffic on this WebSocket. Used by `couple()` when
   // the local end terminates in this worker.
   void setObserver(kj::Own<WebSocketObserver> observer);
+
+  // See WebSocketAdapter::getDispatchFailed().
+  kj::Ptr<bool> getDispatchFailed();
 
   // For internal use only.
   // We need to access the underlying KJ WebSocket so we can determine the compression configuration
@@ -523,6 +526,16 @@ class WebSocketAdapter {
   // peer end when the local end is terminating in this worker.
   virtual void setObserver(kj::Own<WebSocketObserver> observer) = 0;
 
+  // Returns a flag that becomes true if dispatching a received message into JavaScript fails, such
+  // as when one of this WebSocket's event listeners throws. The pointer is valid while both this
+  // WebSocket and the IoContext it was accepted in are alive. `couple()` on the other end of a
+  // WebSocketPair reads it without the isolate lock, to tell a session that failed in this worker
+  // from one whose client disconnected.
+  //
+  // Callers should only read the flag. The type cannot say so: KJ does not convert a Pin<bool> to
+  // a Ptr<const bool>, because const there means an object shared between threads.
+  virtual kj::Ptr<bool> getDispatchFailed() = 0;
+
   // Hibernation transitions: shares ownership of the kj::WebSocket with the HibernationManager.
   virtual kj::Rc<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags) = 0;
 
@@ -546,7 +559,7 @@ class WebSocketAdapter {
       kj::Maybe<kj::Date> time, kj::Promise<void> autoResponsePromise) = 0;
   virtual kj::Maybe<kj::Date> getAutoResponseTimestamp() = 0;
   virtual kj::Promise<void> sendAutoResponse(
-      kj::String message, kj::WebSocket& ws, kj::Promise<void> writeBarrier) = 0;
+      kj::String message, kj::WeakRc<kj::WebSocket> ws, kj::Promise<void> writeBarrier) = 0;
 
   // -------------------------------------------------------------------------
   // Peer tracking (the other end of a WebSocketPair).
@@ -621,6 +634,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
   bool isAwaitingCoupling() override;
   bool isHibernatable() override;
   void setObserver(kj::Own<WebSocketObserver> observer) override;
+  kj::Ptr<bool> getDispatchFailed() override;
 
   kj::Rc<kj::WebSocket> acceptAsHibernatable(kj::Array<kj::String> tags) override;
   void initiateHibernatableRelease(jsg::Lock& js,
@@ -637,7 +651,7 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
       kj::Maybe<kj::Date> time, kj::Promise<void> autoResponsePromise) override;
   kj::Maybe<kj::Date> getAutoResponseTimestamp() override;
   kj::Promise<void> sendAutoResponse(
-      kj::String message, kj::WebSocket& ws, kj::Promise<void> writeBarrier) override;
+      kj::String message, kj::WeakRc<kj::WebSocket> ws, kj::Promise<void> writeBarrier) override;
 
   void setPeer(jsg::WeakRef<WebSocket> peer) override;
   bool peerIsAwaitingCoupling(jsg::Lock& js) override;
@@ -769,6 +783,14 @@ class LegacyWebSocketAdapter final: public WebSocketAdapter {
 
     // Have we detected that the peer has stopped accepting messages?
     bool outgoingAborted = false;
+
+    // Did dispatching a received message into JavaScript fail? See getDispatchFailed().
+    //
+    // TODO(someday): Instead of this flag, reject a promise that couple() joins with its pumps,
+    //   passing the dispatch failure tagged with an exception detail that marks its origin. (The
+    //   type alone cannot, since JSG converts a retryable Error to DISCONNECTED.) The request would
+    //   then fail with the listener's own exception rather than the pipe's DISCONNECTED.
+    kj::Pin<bool> dispatchFailed;
   };
 
   struct GatedMessage {

@@ -182,6 +182,7 @@ export {
 
 export {
   interopHooksPresence,
+  isClosedPromiseIsMarkedHandled,
   finishedObservesReadableClose,
   finishedObservesReadableError,
   finishedObservesWritable,
@@ -206,6 +207,7 @@ export {
   addAbortSignalOnResponseBody,
   finishedOnHandedOffStreamSettlesAtHandoff,
   finishedOnDetachedQueuedBodyFollowsSource,
+  finishedOnDetachedNonOwnQueuedBody,
 } from 'finished-and-abort';
 
 export {

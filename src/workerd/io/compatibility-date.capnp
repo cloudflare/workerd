@@ -1686,4 +1686,52 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # key encapsulation helpers, getPublicKey(), SubtleCrypto.supports(), and AKP JWK support. It is
   # explicitly gated because the draft is still changing and workerd does not implement the full
   # proposal. The API may change as the draft evolves.
+
+  wasmEsmIntegrationBuiltins @192 :Bool
+      $compatEnableFlag("wasm_esm_integration_builtins");
+  # Compiles Wasm modules with the js-string builtins and imported string constants enabled,
+  # equivalent to `new WebAssembly.Module(src, { builtins: ['js-string'],
+  # importedStringConstants: 'wasm:js/string-constants' })`. The proposal is still in the
+  # implementation phase, so the feature is opt-in. Modules that don't import the `wasm:*`
+  # namespaces are unaffected.
+
+  pipeToBackwardPropagation @193 :Bool
+      $compatEnableFlag("pipe_to_backward_propagation")
+      $compatDisableFlag("no_pipe_to_backward_propagation")
+      $compatEnableDate("2026-11-17");
+  # Makes pipeTo() and pipeThrough() on JavaScript-backed WritableStreams propagate the
+  # destination's errors and closure backward as the Streams spec requires: the pipe promise
+  # rejects with the destination's error, or with the source's cancel error if canceling the
+  # source fails, once that cancel completes. Previously, a destination that errored or closed
+  # while the pipe waited on a read canceled the source but resolved the pipe promise, or left it
+  # pending forever with preventCancel, and a failed cancel was not reported.
+
+  cacheOptionPreservesCacheControl @194 :Bool
+      $compatEnableFlag("cache_option_preserves_cache_control")
+      $compatDisableFlag("cache_option_overrides_cache_control")
+      $compatEnableDate("2026-11-17");
+  # Per the Fetch spec, a request's cache mode describes how the cache may use a stored response
+  # ("no-cache": revalidate it with the origin; "no-store": act as if there is no cache); it says
+  # nothing about how the response may be cached. Without this flag, `cache: 'no-cache'` and
+  # `cache: 'no-store'` also set `cf.cacheControl` to "no-cache" and "no-store", which overrides
+  # the origin's Cache-Control (for example, an origin `no-store` gets cached as `no-cache`). When
+  # enabled, the cache option no longer sets `cf.cacheControl`. To override the origin's
+  # Cache-Control, omit the `cache` option and use `cf.cacheControl` instead.
+
+  durableObjectSnapshots @195 :Bool
+      $compatEnableFlag("durable_object_snapshots")
+      $experimental;
+  # Exposes DurableObjectStorage.snapshot(), which captures a Durable Object's storage at a
+  # bookmark as an opaque handle that can be passed over RPC, and
+  # DurableObjectStorage.onNextSessionRestore(), which restores a snapshot or bookmark when the
+  # next session starts. The experimental catch-all flag also exposes these methods.
+
+  connectHandlerStartTls @196 :Bool
+      $compatEnableFlag("connect_handler_starttls")
+      $experimental;
+  # Lets the socket passed to a connect() handler accept a startTls() upgrade when the transport
+  # that delivered the connection offers one: a workerd TCP socket configured with
+  # `tlsMode = startTls`, or another Worker's socket opened with `secureTransport: 'starttls'`.
+  # The handler's socket then has secureTransport "starttls". Without the flag, it has
+  # secureTransport "off" and its startTls() throws.
 }

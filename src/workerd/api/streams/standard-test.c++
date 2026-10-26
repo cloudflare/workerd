@@ -1973,6 +1973,107 @@ KJ_TEST("ReadableStream handles execution termination during read") {
   });
 }
 
+// Erroring the destination of a pipe while its read is pending cancels the source. If execution
+// is terminated inside the source's cancel algorithm, the exception escapes after the source has
+// been released but before the destination's pipe lock is. Canceling the source has already
+// closed it, so the pending read then resolves done and re-enters the pipe loop, which must not
+// touch the released source.
+KJ_TEST("WritableStream pipe survives termination in the source's cancel algorithm") {
+  preamble([](jsg::Lock& js) {
+    v8::TryCatch outerTryCatch(js.v8Isolate);
+
+    auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+    // clang-format off
+    rs->getController().setup(js, UnderlyingSource{
+      .cancel = [](jsg::Lock& js, jsg::JsValue reason) -> jsg::Promise<void> {
+        js.terminateNextExecution();
+        // V8 only notices the termination while running JS.
+        jsg::check(v8::JSON::Stringify(js.v8Context(), js.str("test"_kj)));
+        return js.resolvedPromise();
+      },
+    }, StreamQueuingStrategy{.highWaterMark = 0});
+    // clang-format on
+
+    kj::Maybe<jsg::Ref<WritableStreamDefaultController>> sinkController;
+    auto ws = js.alloc<WritableStream>(newWritableStreamJsController());
+    // clang-format off
+    ws->getController().setup(js, UnderlyingSink{
+      .start = [&](jsg::Lock& js, UnderlyingSink::Controller controller) -> jsg::Promise<void> {
+        sinkController = kj::mv(controller);
+        return js.resolvedPromise();
+      },
+    }, StreamQueuingStrategy{});
+    // clang-format on
+
+    bool pipeRejected = false;
+    auto pipe = rs->pipeTo(js, ws.addRef(), PipeToOptions{}).then(js, [](jsg::Lock& js) {
+    }, [&](jsg::Lock& js, jsg::Value reason) { pipeRejected = true; });
+    // Let the pipe loop issue its read, which stays pending since the source never enqueues.
+    js.runMicrotasks();
+    KJ_ASSERT(!pipeRejected);
+
+    try {
+      KJ_ASSERT_NONNULL(sinkController)->error(js, js.str("sink error"_kj));
+      KJ_FAIL_ASSERT("expected the source's cancel algorithm to terminate execution");
+    } catch (jsg::JsExceptionThrown&) {}
+    js.v8Isolate->CancelTerminateExecution();
+
+    js.runMicrotasks();
+    KJ_ASSERT(pipeRejected);
+    KJ_ASSERT(!ws->isLocked());
+  });
+}
+
+KJ_TEST("ReadableStream survives its pipe being released during pull") {
+  preamble([](jsg::Lock& js) {
+    kj::Maybe<jsg::Ref<WritableStreamDefaultController>> sinkController;
+    auto ws = js.alloc<WritableStream>(newWritableStreamJsController());
+    // clang-format off
+    ws->getController().setup(js, UnderlyingSink{
+      .start = [&](jsg::Lock& js, UnderlyingSink::Controller controller) -> jsg::Promise<void> {
+        sinkController = kj::mv(controller);
+        return js.resolvedPromise();
+      },
+    }, StreamQueuingStrategy{});
+    // clang-format on
+    // Let the sink start, so that erroring it below tears the pipe down synchronously.
+    js.runMicrotasks();
+
+    uint pulls = 0;
+    bool released = false;
+    bool pipeSettled = false;
+    kj::Maybe<jsg::Promise<void>> pipe;
+    {
+      auto rs = js.alloc<ReadableStream>(newReadableStreamJsController());
+      // clang-format off
+      rs->getController().setup(js, UnderlyingSource{
+        .pull = [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+          if (pulls++ == 0) {
+            KJ_ASSERT_NONNULL(controller.tryGet<jsg::Ref<ReadableStreamDefaultController>>())
+                ->enqueue(js, js.str("chunk"_kj));
+          } else {
+            // Erroring the destination releases the pipe, dropping the pipe's reference to this
+            // stream: the only one left.
+            KJ_ASSERT_NONNULL(sinkController)->error(js, js.str("sink error"_kj));
+            released = !ws->isLocked();
+            js.v8Isolate->LowMemoryNotification();
+          }
+          return js.resolvedPromise();
+        },
+      }, StreamQueuingStrategy{.highWaterMark = 0});
+      // clang-format on
+      pipe = rs->pipeTo(js, ws.addRef(), PipeToOptions{}).then(js, [&](jsg::Lock& js) {
+        pipeSettled = true;
+      }, [&](jsg::Lock& js, jsg::Value reason) { pipeSettled = true; });
+    }
+
+    js.runMicrotasks();
+    KJ_ASSERT(pulls == 2);
+    KJ_ASSERT(released);
+    KJ_ASSERT(pipeSettled);
+  });
+}
+
 // ======================================================================================
 // WritableStream re-entrancy tests
 
@@ -2602,6 +2703,166 @@ KJ_TEST("ReadableStream pumpTo cancels a pending sink write when the pump is dro
   KJ_ASSERT(events[0] == "got the write");
   KJ_ASSERT(events[1] == "write promise was dropped");
   KJ_ASSERT(events[2] == "sink was destroyed");
+}
+
+struct NoopSink final: public WritableStreamSink {
+  kj::Maybe<kj::Own<kj::PromiseFulfiller<void>>> onWrite;
+
+  void signalWrite() {
+    KJ_IF_SOME(f, onWrite) {
+      f->fulfill();
+      onWrite = kj::none;
+    }
+  }
+  kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) override {
+    signalWrite();
+    return kj::READY_NOW;
+  }
+  kj::Promise<void> write(kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) override {
+    signalWrite();
+    return kj::READY_NOW;
+  }
+  kj::Promise<void> end() override {
+    return kj::READY_NOW;
+  }
+  void abort(kj::Exception reason) override {}
+};
+
+kj::Own<TestFixture> makeJsStreamsFixture(capnp::MallocMessageBuilder& flagsBuilder) {
+  auto featureFlags = flagsBuilder.initRoot<CompatibilityFlags>();
+  featureFlags.setStreamsJavaScriptControllers(true);
+  return kj::heap<TestFixture>(TestFixture::SetupParams{.featureFlags = featureFlags.asReader()});
+}
+
+KJ_TEST("ReadableStream pumpTo cancels the source when the pump is dropped mid-stream") {
+  // When the consumer of a pump goes away (e.g. the client disconnects and the HTTP layer drops
+  // the response-body pump) while the source is idle, the source's cancel algorithm must run so
+  // that it stops producing data.
+  capnp::MallocMessageBuilder flagsBuilder;
+  auto fixture = makeJsStreamsFixture(flagsBuilder);
+
+  uint cancelCount = 0;
+  bool reasonWasUndefined = false;
+  auto firstWrite = kj::newPromiseAndFulfiller<void>();
+  kj::Maybe<kj::Promise<DeferredProxy<void>>> pump;
+
+  auto request = fixture->newIncomingRequest();
+  fixture->enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto stream = ReadableStream::constructor(js,
+        UnderlyingSource{
+          .start =
+              [](jsg::Lock& js, auto controller) {
+      auto& c = KJ_REQUIRE_NONNULL(
+          controller.template tryGet<jsg::Ref<ReadableStreamDefaultController>>());
+      // One chunk so the pump makes progress; the stream stays open afterwards.
+      c->enqueue(js, jsg::JsValue(v8::ArrayBuffer::New(js.v8Isolate, 10)));
+      return js.resolvedPromise();
+    },
+          // Never enqueues, so after the first chunk the pump's read stays pending.
+          .pull = [](jsg::Lock& js, auto controller) { return js.resolvedPromise(); },
+          .cancel = [&](jsg::Lock& js, jsg::JsValue reason) -> jsg::Promise<void> {
+      ++cancelCount;
+      reasonWasUndefined = reason.isUndefined();
+      return js.resolvedPromise();
+    },
+        },
+        kj::none);
+
+    auto sink = kj::heap<NoopSink>();
+    sink->onWrite = kj::mv(firstWrite.fulfiller);
+    pump = stream->pumpTo(js, kj::mv(sink), true);
+  });
+
+  firstWrite.promise.wait(fixture->getWaitScope());
+  KJ_ASSERT(cancelCount == 0);
+
+  // Drop the pump while it is suspended waiting for more data.
+  pump = kj::none;
+
+  fixture->drainAndDestroy(kj::mv(request));
+  KJ_ASSERT(cancelCount == 1);
+  KJ_ASSERT(reasonWasUndefined);
+}
+
+KJ_TEST("ReadableStream pumpTo does not cancel the source after the pump completes") {
+  capnp::MallocMessageBuilder flagsBuilder;
+  auto fixture = makeJsStreamsFixture(flagsBuilder);
+
+  uint cancelCount = 0;
+  kj::Maybe<kj::Promise<DeferredProxy<void>>> pump;
+
+  auto request = fixture->newIncomingRequest();
+  fixture->enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto stream = ReadableStream::constructor(js,
+        UnderlyingSource{
+          .start =
+              [](jsg::Lock& js, auto controller) {
+      auto& c = KJ_REQUIRE_NONNULL(
+          controller.template tryGet<jsg::Ref<ReadableStreamDefaultController>>());
+      c->enqueue(js, jsg::JsValue(v8::ArrayBuffer::New(js.v8Isolate, 10)));
+      c->close(js);
+      return js.resolvedPromise();
+    },
+          .cancel = [&](jsg::Lock& js, jsg::JsValue) -> jsg::Promise<void> {
+      ++cancelCount;
+      return js.resolvedPromise();
+    },
+        },
+        kj::none);
+    pump = stream->pumpTo(js, kj::heap<NoopSink>(), true);
+  });
+
+  KJ_ASSERT_NONNULL(pump).wait(fixture->getWaitScope());
+  pump = kj::none;
+
+  fixture->drainAndDestroy(kj::mv(request));
+  KJ_ASSERT(cancelCount == 0);
+}
+
+KJ_TEST("ReadableStream pumpTo dropped during IoContext teardown does not cancel") {
+  // A pump can be owned by the IoContext's own task sets, in which case it is dropped while the
+  // IoContext is being destroyed. There is nothing left to run the cancel algorithm in, so the
+  // drop must be a safe no-op.
+  capnp::MallocMessageBuilder flagsBuilder;
+  auto fixture = makeJsStreamsFixture(flagsBuilder);
+
+  uint cancelCount = 0;
+  auto firstWrite = kj::newPromiseAndFulfiller<void>();
+
+  auto request = fixture->newIncomingRequest();
+  fixture->enterContext(*request, [&](const TestFixture::Environment& env) {
+    auto& js = env.js;
+    auto stream = ReadableStream::constructor(js,
+        UnderlyingSource{
+          .start =
+              [](jsg::Lock& js, auto controller) {
+      auto& c = KJ_REQUIRE_NONNULL(
+          controller.template tryGet<jsg::Ref<ReadableStreamDefaultController>>());
+      c->enqueue(js, jsg::JsValue(v8::ArrayBuffer::New(js.v8Isolate, 10)));
+      return js.resolvedPromise();
+    },
+          .pull = [](jsg::Lock& js, auto controller) { return js.resolvedPromise(); },
+          .cancel = [&](jsg::Lock& js, jsg::JsValue) -> jsg::Promise<void> {
+      ++cancelCount;
+      return js.resolvedPromise();
+    },
+        },
+        kj::none);
+
+    auto sink = kj::heap<NoopSink>();
+    sink->onWrite = kj::mv(firstWrite.fulfiller);
+    env.context.addTask(stream->pumpTo(js, kj::mv(sink), true).then([](DeferredProxy<void> p) {
+      return kj::mv(p.proxyTask);
+    }));
+  });
+
+  firstWrite.promise.wait(fixture->getWaitScope());
+
+  // Destroying the request destroys the IoContext, and with it the task that owns the pump.
+  fixture->drainAndDestroy(kj::mv(request));
+  KJ_ASSERT(cancelCount == 0);
 }
 
 }  // namespace

@@ -332,9 +332,14 @@ class DurableObjectStorage: public jsg::Object, public DurableObjectStorageOpera
 
     if (flags.getWorkerdExperimental()) {
       JSG_METHOD(waitForBookmark);
+      JSG_READONLY_INSTANCE_PROPERTY(primary, getPrimary);
+    }
+
+    // TODO(cleanup): Stop accepting workerdExperimental once existing users have migrated to
+    //   durable_object_snapshots.
+    if (flags.getWorkerdExperimental() || flags.getDurableObjectSnapshots()) {
       JSG_METHOD(snapshot);
       JSG_METHOD(onNextSessionRestore);
-      JSG_READONLY_INSTANCE_PROPERTY(primary, getPrimary);
     }
 
     if (flags.getReplicaRouting()) {
@@ -760,6 +765,30 @@ class DurableObjectState: public jsg::Object {
 
     if (flags.getWorkerdExperimental()) {
       JSG_LAZY_READONLY_INSTANCE_PROPERTY(primaryStub, getPrimaryStub);
+
+      // Types for the `onEvict` export of "cloudflare:durable-objects", which is experimental
+      // (see EntrypointsModule). JSG_TS_DEFINE_LITERAL because Clang rejects the `module`
+      // keyword inside macro arguments.
+      JSG_TS_DEFINE_LITERAL(R"(
+        /** Passed to a Durable Object's `[onEvict]` handler. */
+        interface DurableObjectEvictionInfo {
+          /** Why the object is being evicted. More reasons may be added later. */
+          readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
+        }
+        declare module "cloudflare:durable-objects" {
+          /**
+           * Key of a Durable Object's eviction handler, a best-effort hook that runs before the
+           * runtime evicts the object:
+           *
+           * ```ts
+           * class MyObject extends DurableObject {
+           *   async [onEvict](info: DurableObjectEvictionInfo) {}
+           * }
+           * ```
+           */
+          export const onEvict: unique symbol;
+        }
+      )");
     }
 
     JSG_METHOD(blockConcurrencyWhile);

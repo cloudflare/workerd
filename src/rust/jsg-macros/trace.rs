@@ -14,7 +14,7 @@
 /// types implement as a no-op.
 pub fn generate_trace_statements(
     fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
-) -> Vec<quote::__private::TokenStream> {
+) -> Vec<proc_macro2::TokenStream> {
     use quote::quote;
 
     fields

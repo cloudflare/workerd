@@ -23,11 +23,13 @@
 
 import * as assert from 'node:assert';
 
-// invocationId -> { onset, rootSpanId, spans: Map(spanId -> {name, parentId, attrs}) }
+// invocationId -> { onset, rootSpanId, spans: Map(spanId -> {name, parentId, attrs}), ended }
+// ended settles once the invocation's tail stream delivers its outcome, the stream's last event.
 let invocations = new Map();
 
 export default {
   tailStream(onsetEvent, env, ctx) {
+    const { promise: ended, resolve: end } = Promise.withResolvers();
     const data = {
       onset: {
         info: onsetEvent.event.info?.type,
@@ -36,6 +38,7 @@ export default {
       },
       rootSpanId: onsetEvent.event.spanId,
       spans: new Map(),
+      ended,
     };
     invocations.set(onsetEvent.invocationId, data);
 
@@ -54,6 +57,8 @@ export default {
             span.attrs[name] = value;
           }
         }
+      } else if (type === 'outcome') {
+        end();
       }
     };
   },
@@ -65,8 +70,7 @@ function spansNamed(data, name) {
     .map(([spanId, s]) => ({ spanId, ...s }));
 }
 
-// Returns the caller and callee invocations once both have reported the spans we need, else nulls.
-// Tail events arrive asynchronously, so callers poll.
+// Finds the caller and callee invocations.
 function findInvocations() {
   let callee = null;
   let caller = null;
@@ -80,44 +84,20 @@ function findInvocations() {
       caller = data;
     }
   }
-  if (!caller || !callee) return { caller: null, callee: null };
-
-  // Wait for the exact method set and callee links, since attributes can follow spanOpen.
-  // This prevents span counts from making partially attributed data look complete.
-  const expectedMethods = new Set([
-    'getCounter',
-    'increment',
-    'incrementDuplicate',
-  ]);
-  const callerCalls = spansNamed(caller, 'jsRpcCall');
-  const calleeCalls = spansNamed(callee, 'jsRpcCall');
-  const hasExpectedMethods = (calls) => {
-    const methods = new Set(calls.map((span) => span.attrs['jsrpc.method']));
-    return (
-      calls.length === expectedMethods.size &&
-      methods.size === expectedMethods.size &&
-      [...expectedMethods].every((method) => methods.has(method))
-    );
-  };
-  if (!hasExpectedMethods(callerCalls) || !hasExpectedMethods(calleeCalls)) {
-    return { caller: null, callee: null };
-  }
-  if (!calleeCalls.every((span) => span.attrs['jsrpc.caller_span_id'])) {
-    return { caller: null, callee: null };
-  }
   return { caller, callee };
 }
 
 export const test = {
   async test() {
-    const deadline = Date.now() + 5000;
-    let found = findInvocations();
-    while (!found.callee && Date.now() < deadline) {
-      await scheduler.wait(10);
-      found = findInvocations();
-    }
+    // Tail events can still be in flight when the caller's test() returns. Wait until every tail
+    // stream has delivered its outcome, including streams that start while waiting.
+    let count;
+    do {
+      count = invocations.size;
+      await Promise.all([...invocations.values()].map((data) => data.ended));
+    } while (invocations.size > count);
 
-    const { caller, callee } = found;
+    const { caller, callee } = findInvocations();
     assert.ok(caller, 'Could not find the caller invocation in tail events');
     assert.ok(
       callee,
@@ -126,6 +106,14 @@ export const test = {
 
     const callerCalls = spansNamed(caller, 'jsRpcCall');
     const calleeCalls = spansNamed(callee, 'jsRpcCall');
+
+    // Each of the three calls has one jsRpcCall span on each side.
+    const expectedMethods = ['getCounter', 'increment', 'incrementDuplicate'];
+    const methodsOf = (calls) =>
+      calls.map((span) => span.attrs['jsrpc.method']).sort();
+    assert.deepStrictEqual(methodsOf(callerCalls), expectedMethods);
+    assert.deepStrictEqual(methodsOf(calleeCalls), expectedMethods);
+
     const callerCallIds = new Set(callerCalls.map((s) => s.spanId));
     const callerCallsByMethod = new Map(
       callerCalls.map((span) => [span.attrs['jsrpc.method'], span])

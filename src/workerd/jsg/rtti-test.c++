@@ -123,11 +123,11 @@ KJ_TEST("generic types") {
       "(array = (element = (number = (name = \"int\")), name = \"jsg::Sequence\"))");
 
   KJ_EXPECT(tType<kj::Maybe<int>>() ==
-      "(maybe = (value = (number = (name = \"int\")), name = \"kj::Maybe\"))");
+      "(maybe = (value = (number = (name = \"int\")), name = \"kj::Maybe\", allowsNull = true, allowsUndefined = false))");
   KJ_EXPECT(tType<jsg::Optional<int>>() ==
-      "(maybe = (value = (number = (name = \"int\")), name = \"jsg::Optional\"))");
+      "(maybe = (value = (number = (name = \"int\")), name = \"jsg::Optional\", allowsNull = false, allowsUndefined = true))");
   KJ_EXPECT(tType<jsg::LenientOptional<int>>() ==
-      "(maybe = (value = (number = (name = \"int\")), name = \"jsg::LenientOptional\"))");
+      "(maybe = (value = (number = (name = \"int\")), name = \"jsg::LenientOptional\", allowsNull = false, allowsUndefined = true))");
 
   KJ_EXPECT(tType<jsg::Dict<int>>() ==
       "(dict = (key = (string = (name = \"kj::String\")), value = (number = (name = \"int\"))))");
@@ -236,7 +236,7 @@ KJ_TEST("resource structure") {
       "(property = (name = \"lazyReadonlySize\", type = (number = (name = \"int\")), readonly = true, lazy = true, prototype = false, getterFastApiCompatible = false, setterFastApiCompatible = false)), "
       "(property = (name = \"protoSize\", type = (number = (name = \"int\")), readonly = false, lazy = false, prototype = true, getterFastApiCompatible = true, setterFastApiCompatible = true)), "
       "(property = (name = \"protoReadonlySize\", type = (number = (name = \"int\")), readonly = true, lazy = false, prototype = true, getterFastApiCompatible = false, setterFastApiCompatible = false)), "
-      "(constructor = (args = [(maybe = (value = (string = (name = \"kj::String\")), name = \"jsg::Optional\"))]))], "
+      "(constructor = (args = [(maybe = (value = (string = (name = \"kj::String\")), name = \"jsg::Optional\", allowsNull = false, allowsUndefined = true))]))], "
       "extends = (structure = (name = \"Base\", fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::Base\")), "
       "iterable = false, asyncIterable = false, "
       "fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestResource\", tsRoot = false, "
@@ -288,6 +288,27 @@ KJ_TEST("constant members") {
       "iterable = false, asyncIterable = false, "
       "fullyQualifiedName = \"workerd::jsg::rtti::(anonymous namespace)::TestConstant\", "
       "tsRoot = false, disposable = false, asyncDisposable = false)");
+}
+
+struct TestFloatingConstant: jsg::Object {
+  static constexpr float FLOAT = -0.25f;
+  static constexpr double DOUBLE = 1.5;
+
+  JSG_RESOURCE_TYPE(TestFloatingConstant) {
+    JSG_STATIC_CONSTANT(FLOAT);
+    JSG_STATIC_CONSTANT(DOUBLE);
+  };
+};
+
+KJ_TEST("floating-point constants retain their fractional values") {
+  Builder<MockConfig> builder((MockConfig()));
+  auto members = builder.structure<TestFloatingConstant>().getMembers();
+  auto floatConstant = members[0].getConstant();
+  KJ_ASSERT(floatConstant.isNumberValue());
+  KJ_EXPECT(floatConstant.getNumberValue() == -0.25);
+  auto doubleConstant = members[1].getConstant();
+  KJ_ASSERT(doubleConstant.isNumberValue());
+  KJ_EXPECT(doubleConstant.getNumberValue() == 1.5);
 }
 
 struct TestStruct {

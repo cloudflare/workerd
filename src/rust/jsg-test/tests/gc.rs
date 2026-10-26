@@ -587,10 +587,10 @@ fn from_js_creates_strong_reference_from_js_wrapper() {
             name: "unwrap-me".to_owned(),
         });
         let wrapped = resource.clone().to_js(lock);
-        ctx.set_global("obj", wrapped);
+        ctx.set_global(lock, "obj", wrapped);
 
         // Get the JS value back and use FromJS to create a new strong Ref
-        let js_val = ctx.eval_raw("obj").unwrap();
+        let js_val = ctx.eval_raw(lock, "obj").unwrap();
         let new_ref: jsg::Rc<SimpleResource> =
             <jsg::Rc<SimpleResource> as jsg::FromJS>::from_js(lock, js_val)
                 .expect("FromJS should succeed for a wrapped resource");
@@ -625,7 +625,7 @@ fn from_js_creates_strong_reference_from_js_wrapper() {
 fn from_js_returns_err_for_plain_js_object() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let plain_obj = ctx.eval_raw("({})").unwrap();
+        let plain_obj = ctx.eval_raw(lock, "({})").unwrap();
         let result = <jsg::Rc<SimpleResource> as jsg::FromJS>::from_js(lock, plain_obj);
         assert!(
             result.is_err(),
@@ -658,8 +658,8 @@ fn wrap_multiple_instances_of_same_type() {
 
         let w1 = r1.to_js(lock);
         let w2 = r2.to_js(lock);
-        ctx.set_global("r1", w1);
-        ctx.set_global("r2", w2);
+        ctx.set_global(lock, "r1", w1);
+        ctx.set_global(lock, "r2", w2);
 
         // Both should be instances of the same constructor (same prototype chain)
         let same_proto: bool = ctx
@@ -691,9 +691,9 @@ fn wrap_same_resource_twice_returns_same_object() {
         });
 
         let w1 = resource.clone().to_js(lock);
-        ctx.set_global("w1", w1);
+        ctx.set_global(lock, "w1", w1);
         let w2 = resource.to_js(lock);
-        ctx.set_global("w2", w2);
+        ctx.set_global(lock, "w2", w2);
 
         // Both wraps should return the exact same JS object
         let same: bool = ctx.eval(lock, "w1 === w2").unwrap();
@@ -715,7 +715,7 @@ fn resource_data_survives_gc_via_js_global() {
             name: "survivor".to_owned(),
         });
         let wrapped = resource.to_js(lock);
-        ctx.set_global("obj", wrapped);
+        ctx.set_global(lock, "obj", wrapped);
 
         // Force GC — the global reference should keep it alive
         crate::Harness::request_gc(lock);
@@ -746,7 +746,7 @@ fn parent_ref_keeps_child_alive_through_gc() {
             optional_child: None,
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         // Drop all Rust refs
         std::mem::drop(child);
@@ -846,7 +846,7 @@ fn nullable_ref_some_keeps_child_alive_through_gc() {
             child: jsg::Nullable::Some(child.clone()),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         // Drop all Rust refs
         std::mem::drop(child);
@@ -879,7 +879,7 @@ fn nullable_ref_null_does_not_crash_during_gc() {
             child: jsg::Nullable::Null,
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(parent);
 
@@ -907,7 +907,7 @@ fn nullable_ref_undefined_does_not_crash_during_gc() {
             child: jsg::Nullable::Undefined,
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(parent);
 
@@ -1073,21 +1073,21 @@ fn rc_native_object_dropped_on_minor_gc() {
 }
 
 // =============================================================================
-// Global<Value> back-reference cycle — collected via visit_global tracing
+// TracedGlobal<Value> back-reference cycle — collected via visit_traced_global tracing
 // =============================================================================
 //
-// `jsg::v8::Global<T>` fields on Rust resources participate in GC tracing via
-// `GcVisitor::visit_global`, which implements the same strong↔traced dual-mode
+// `jsg::v8::TracedGlobal<T>` fields on Rust resources participate in GC tracing via
+// `GcVisitor::visit_traced_global`, which implements the same strong↔traced dual-mode
 // switching as `jsg::Data` / `jsg::V8Ref<T>` in C++.
 //
 // When the parent Wrappable has strong Rust refs the handle stays strong.
 // Once all Rust refs are dropped and only the JS wrapper keeps it alive,
-// `visit_global` downgrades the handle to a `v8::TracedReference` that cppgc
+// `visit_traced_global` downgrades the handle to a `v8::TracedReference` that cppgc
 // can follow — allowing the GC to detect and collect the cycle.
 
 static CYCLIC_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
-/// A resource that stores a `Global<Value>` via `Cell` so the back-reference
+/// A resource that stores a `TracedGlobal<Value>` via `Cell` so the back-reference
 /// to the resource's own JS wrapper can be installed after wrapping.
 ///
 /// `Cell<Option<…>>` provides interior mutability through `&self`, matching
@@ -1096,7 +1096,7 @@ static CYCLIC_RESOURCE_DROPS: AtomicUsize = AtomicUsize::new(0);
 struct CyclicResource {
     /// The stored "callback". Uses `Cell` so it can be set after `to_js()`
     /// returns the wrapper `Local`, without requiring `&mut self`.
-    callback: std::cell::Cell<Option<jsg::v8::Global<jsg::v8::Value>>>,
+    callback: std::cell::Cell<Option<jsg::v8::TracedGlobal<jsg::v8::Value>>>,
 }
 
 impl Drop for CyclicResource {
@@ -1108,13 +1108,13 @@ impl Drop for CyclicResource {
 #[jsg_resource]
 impl CyclicResource {}
 
-/// Verifies that a `Global<Value>` back-reference cycle is collected by GC.
+/// Verifies that a `TracedGlobal<Value>` back-reference cycle is collected by GC.
 ///
 /// The cycle:
-///   CyclicResource.callback (Global<Value>) → JS wrapper
+///   CyclicResource.callback (`TracedGlobal<Value>`) → JS wrapper
 ///   JS wrapper → `CppgcShim` → `Wrappable` → `CyclicResource` (same object)
 ///
-/// `visit_global` downgrades the `Global` to a `v8::TracedReference` once all
+/// `visit_traced_global` downgrades the `TracedGlobal` to a `v8::TracedReference` once all
 /// strong Rust refs are dropped, making the cycle visible to cppgc so it can
 /// be collected on the next full GC.
 #[test]
@@ -1128,32 +1128,32 @@ fn global_value_back_ref_is_collected_by_gc() {
         });
 
         // Wrap to produce the JS object, then immediately promote to a
-        // Global so we can store it back into the resource's own field.
+        // TracedGlobal so we can store it back into the resource's own field.
         // `to_js` consumes the Rc clone but the original `resource` still
         // holds a strong ref, so the resource stays alive.
         let wrapper_local = resource.clone().to_js(lock);
-        let wrapper_global = wrapper_local.to_global(lock);
+        let wrapper_global = wrapper_local.to_traced_global(lock);
 
-        // Install the back-reference: resource now holds a Global pointing
+        // Install the back-reference: resource now holds a TracedGlobal pointing
         // to its own JS wrapper, closing the cycle.
         resource.callback.set(Some(wrapper_global));
 
-        // Drop the only Rust Rc. The cycle is now closed but the Global
-        // will be downgraded to a TracedReference by visit_global, making
+        // Drop the only Rust Rc. The cycle is now closed but the TracedGlobal
+        // will be downgraded to a TracedReference by visit_traced_global, making
         // it visible to cppgc.
         std::mem::drop(resource);
         assert_eq!(CYCLIC_RESOURCE_DROPS.load(Ordering::SeqCst), 0);
         Ok(())
     });
 
-    // Full GC can now detect and collect the cycle because visit_global
-    // downgrades the Global to a TracedReference during tracing.
+    // Full GC can now detect and collect the cycle because visit_traced_global
+    // downgrades the TracedGlobal to a TracedReference during tracing.
     harness.run_in_context(|lock, _ctx| {
         crate::Harness::request_gc(lock);
         assert_eq!(
             CYCLIC_RESOURCE_DROPS.load(Ordering::SeqCst),
             1,
-            "full GC should collect the cyclic resource via visit_global tracing"
+            "full GC should collect the cyclic resource via visit_traced_global tracing"
         );
         Ok(())
     });
@@ -1252,7 +1252,7 @@ fn cell_ref_keeps_child_alive_through_gc() {
             child: Cell::new(child.clone()),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         // Drop all Rust refs.
         std::mem::drop(child);
@@ -1286,7 +1286,7 @@ fn cell_option_ref_some_keeps_child_alive_through_gc() {
             child: Cell::new(Some(child.clone())),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
         std::mem::drop(parent);
@@ -1316,7 +1316,7 @@ fn cell_option_ref_none_does_not_crash_during_gc() {
             child: Cell::new(None),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(parent);
 
@@ -1345,7 +1345,7 @@ fn cell_nullable_ref_some_keeps_child_alive_through_gc() {
             child: Cell::new(jsg::Nullable::Some(child.clone())),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
         std::mem::drop(parent);
@@ -1375,7 +1375,7 @@ fn cell_nullable_ref_null_does_not_crash_during_gc() {
             child: Cell::new(jsg::Nullable::Null),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(parent);
 
@@ -1404,7 +1404,7 @@ fn std_cell_ref_keeps_child_alive_through_gc() {
             child: std::cell::Cell::new(child.clone()),
         });
         let wrapped = parent.clone().to_js(lock);
-        ctx.set_global("parent", wrapped);
+        ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
         std::mem::drop(parent);

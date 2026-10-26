@@ -54,6 +54,79 @@ class FrozenTimerChannel final: public TimerChannel {
   kj::Date currentTime = kj::UNIX_EPOCH;
 };
 
+SpanParent traceScopeParent(uint64_t id) {
+  return SpanParent::fromSpanContext(
+      tracing::SpanContext(tracing::TraceId(1, 2), tracing::SpanId(id)));
+}
+
+uint64_t traceScopeSpanId(SpanParent parent) {
+  auto context = parent.toSpanContext();
+  return KJ_ASSERT_NONNULL(KJ_ASSERT_NONNULL(context).getSpanId()).getId();
+}
+
+class TraceScopeRequestObserver final: public RequestObserver {
+ public:
+  SpanParent getSpan() override {
+    return traceScopeParent(11);
+  }
+};
+
+KJ_TEST("request trace scopes capture both roots and restore enclosing tracing and storage") {
+  for (bool observeUser: {false, true}) {
+    TestFixture fixture({
+      .useRealTimers = false,
+      .requestObserverFactory = kj::Function<kj::Own<RequestObserver>()>(
+          []() -> kj::Own<RequestObserver> { return kj::refcounted<TraceScopeRequestObserver>(); }),
+    });
+    auto context = fixture.newIoContext();
+    kj::Maybe<kj::Rc<BaseTracer>> tracer;
+    if (observeUser) {
+      auto trace = kj::refcounted<Trace>(kj::none, kj::none, kj::none, kj::none, kj::none,
+          kj::Array<kj::String>(), kj::none, ExecutionModel::STATELESS);
+      auto workerTracer =
+          kj::rc<WorkerTracer>(kj::none, kj::mv(trace), PipelineLogLevel::NONE, kj::none, kj::none);
+      workerTracer->setMakeUserRequestSpanFunc(
+          [](tracing::TraceId, kj::Maybe<tracing::TraceFlags>) { return traceScopeParent(22); });
+      tracer = kj::Rc<BaseTracer>(kj::mv(workerTracer));
+    }
+    auto request = fixture.newUndeliveredIncomingRequest(*context, kj::mv(tracer));
+    request->delivered();
+    fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+      auto key = kj::arc<jsg::AsyncContextFrame::StorageKey>();
+      jsg::AsyncContextFrame::StorageScope storageScope(
+          env.js, key.addRef(), env.js.v8Ref(v8::Integer::New(env.isolate, 55).As<v8::Value>()));
+      auto internalScope = context->makeAsyncTraceScope(env.lock, traceScopeParent(33));
+      auto userScope = context->makeUserAsyncTraceScope(env.lock, traceScopeParent(44));
+      auto& prior = KJ_ASSERT_NONNULL(jsg::AsyncContextFrame::current(env.js));
+      kj::Maybe<jsg::Ref<jsg::AsyncContextFrame>> captured;
+      auto checkRequestScope = [&]() {
+        KJ_EXPECT(traceScopeSpanId(context->getCurrentTraceSpan()) == 11);
+        auto userParent = context->getCurrentUserTraceSpan();
+        KJ_EXPECT(userParent.isObserved() == observeUser);
+        if (observeUser) {
+          KJ_EXPECT(traceScopeSpanId(kj::mv(userParent)) == 22);
+        }
+        auto& current = KJ_ASSERT_NONNULL(jsg::AsyncContextFrame::current(env.js));
+        auto value = KJ_ASSERT_NONNULL(current.get(*key)).getHandle(env.js);
+        KJ_EXPECT(value.As<v8::Int32>()->Value() == 55);
+      };
+      {
+        auto scope = context->makeRequestTraceScope(env.lock);
+        checkRequestScope();
+        captured = jsg::AsyncContextFrame::currentRef(env.js);
+      }
+      KJ_EXPECT(&KJ_ASSERT_NONNULL(jsg::AsyncContextFrame::current(env.js)) == &prior);
+      KJ_EXPECT(traceScopeSpanId(context->getCurrentTraceSpan()) == 33);
+      KJ_EXPECT(traceScopeSpanId(context->getCurrentUserTraceSpan()) == 44);
+      {
+        jsg::AsyncContextFrame::Scope scope(env.js, captured);
+        checkRequestScope();
+      }
+    });
+    fixture.drainAndDestroy(kj::mv(request));
+  }
+}
+
 KJ_TEST("trace onset synchronizes an idle actor's clock before reading it") {
   FrozenTimerChannel timer;
   kj::Function<kj::Rc<IoChannelFactory>(TimerChannel&)> makeChannelFactory =
@@ -131,13 +204,17 @@ KJ_TEST(
   auto& context = request->getContext();
   auto& waitScope = fixture.getWaitScope();
 
-  bool callbackWasCanceledWhileRequestWasCurrent = false;
+  // Value-initialized to false.
+  kj::Pin<bool> callbackWasCanceledWhileRequestWasCurrent;
   kj::Function<kj::Promise<void>()> callback;
   context
       .run([&](Worker::Lock&, IoContext& context) {
-    callback = context.makeReentryCallback([&](Worker::Lock&, IoContext& context) {
-      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() {
-        callbackWasCanceledWhileRequestWasCurrent = context.hasCurrentIncomingRequest();
+    callback = context.makeReentryCallback(
+        [canceled = callbackWasCanceledWhileRequestWasCurrent.addWeak()](
+            Worker::Lock&, IoContext& context) {
+      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&context, canceled]() {
+        KJ_REQUIRE_NONNULL(canceled.tryGet(), "test ended before callback was canceled") =
+            context.hasCurrentIncomingRequest();
       }));
     });
   }).wait(waitScope);
@@ -146,7 +223,7 @@ KJ_TEST(
 
   fixture.drainAndDestroy(kj::mv(request));
 
-  KJ_EXPECT(callbackWasCanceledWhileRequestWasCurrent);
+  KJ_EXPECT(*callbackWasCanceledWhileRequestWasCurrent);
   KJ_EXPECT_THROW_MESSAGE(
       "The execution context responding to this call was canceled", pendingTask.wait(waitScope));
 }
@@ -201,15 +278,19 @@ KJ_TEST("final request completes cleanup after cancellation throws") {
   auto& context = request->getContext();
   auto& waitScope = fixture.getWaitScope();
 
-  bool callbackWasCanceledWhileRequestWasCurrent = false;
+  // Value-initialized to false.
+  kj::Pin<bool> callbackWasCanceledWhileRequestWasCurrent;
   bool taskWasCanceledWhileRequestWasCurrent = false;
   kj::Function<kj::Promise<void>()> callback;
   kj::Function<kj::Promise<void>()> throwingCallback;
   context
       .run([&](Worker::Lock&, IoContext& context) {
-    callback = context.makeReentryCallback([&](Worker::Lock&, IoContext& context) {
-      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&]() {
-        callbackWasCanceledWhileRequestWasCurrent = context.hasCurrentIncomingRequest();
+    callback = context.makeReentryCallback(
+        [canceled = callbackWasCanceledWhileRequestWasCurrent.addWeak()](
+            Worker::Lock&, IoContext& context) {
+      return kj::Promise<void>(kj::NEVER_DONE).attach(kj::defer([&context, canceled]() {
+        KJ_REQUIRE_NONNULL(canceled.tryGet(), "test ended before callback was canceled") =
+            context.hasCurrentIncomingRequest();
       }));
     });
     throwingCallback = context.makeReentryCallback([](Worker::Lock&, IoContext&) {
@@ -227,7 +308,7 @@ KJ_TEST("final request completes cleanup after cancellation throws") {
 
   KJ_EXPECT_THROW_MESSAGE("test cancellation failure", [&]() { request = nullptr; }());
 
-  KJ_EXPECT(callbackWasCanceledWhileRequestWasCurrent);
+  KJ_EXPECT(*callbackWasCanceledWhileRequestWasCurrent);
   KJ_EXPECT(taskWasCanceledWhileRequestWasCurrent);
 }
 

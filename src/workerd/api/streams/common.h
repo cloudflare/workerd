@@ -10,6 +10,8 @@
 #include <workerd/io/worker-interface.capnp.h>
 #include <workerd/jsg/jsg.h>
 
+#include <utility>
+
 #if _MSC_VER
 using ssize_t = long long;
 #endif
@@ -104,11 +106,6 @@ struct UnderlyingSource {
   // if user code does not provide an explicit autoAllocateChunkSize, we'll assume
   // this default.
   static constexpr int DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE = 4096;
-
-  // We want to increase the default auto allocate chunk size but we need to do
-  // so carefully to avoid introducing memory regressions and causing workers to
-  // hit OOM errors. We'll use an autogate to roll out the new default.
-  static constexpr int DEFAULT_AUTO_ALLOCATE_CHUNK_SIZE_2 = 16 * 1024;
 
   // Per the spec, the type property for the UnderlyingSource should be either
   // undefined, the empty string, or "bytes". When undefined, the empty string is
@@ -234,6 +231,12 @@ class WritableStreamSink: public kj::PtrTarget {
     return addPtrToThis();
   }
 
+  kj::Weak<WritableStreamSink> addWeak() {
+    return addWeakToThis();
+  }
+
+  // As with kj::AsyncOutputStream, the caller keeps `buffer` / `pieces` alive until the returned
+  // promise resolves.
   virtual kj::Promise<void> write(kj::ArrayPtr<const byte> buffer) KJ_WARN_UNUSED_RESULT = 0;
   virtual kj::Promise<void> write(
       kj::ArrayPtr<const kj::ArrayPtr<const byte>> pieces) KJ_WARN_UNUSED_RESULT = 0;
@@ -378,8 +381,8 @@ kj::Promise<DeferredProxy<void>> pumpOwnedSourceToSink(
 template <typename T>
 kj::Promise<T> rejectWhenWriteDisconnected(WritableStreamSink& sink) {
   return sink.whenWriteDisconnected().then([](kj::Exception&& exception) -> T {
-    kj::throwFatalException(kj::mv(exception));
-  }, [](kj::Exception&& exception) -> T { kj::throwFatalException(kj::mv(exception)); });
+    kj::throwException(kj::mv(exception));
+  }, [](kj::Exception&& exception) -> T { kj::throwException(kj::mv(exception)); });
 }
 
 // A cancellation exception may carry, as this detail, the v8-serialized JavaScript value that the
@@ -479,6 +482,9 @@ class ReadableStreamController {
     // When a Reader lock is released, the controller will signal to the reader that it has been
     // detached.
     virtual void detach() = 0;
+
+    // Publish an explicit release after its preconditions pass, before promise callbacks.
+    virtual void release() = 0;
   };
 
   struct ByobOptions {
@@ -926,7 +932,10 @@ class ReaderLocked {
         closedFulfiller(kj::mv(closedFulfiller)),
         canceler(kj::mv(canceler)) {}
 
-  ReaderLocked(ReaderLocked&&) = default;
+  ReaderLocked(ReaderLocked&& other)
+      : reader(std::exchange(other.reader, kj::none)),
+        closedFulfiller(std::exchange(other.closedFulfiller, kj::none)),
+        canceler(std::exchange(other.canceler, kj::none)) {}
   ~ReaderLocked() noexcept(false) {
     KJ_IF_SOME(r, reader) {
       r->detach();
@@ -979,7 +988,10 @@ class WriterLocked {
         closedFulfiller(kj::mv(closedFulfiller)),
         readyFulfiller(kj::mv(readyFulfiller)) {}
 
-  WriterLocked(WriterLocked&&) = default;
+  WriterLocked(WriterLocked&& other)
+      : writer(std::exchange(other.writer, kj::none)),
+        closedFulfiller(std::exchange(other.closedFulfiller, kj::none)),
+        readyFulfiller(std::exchange(other.readyFulfiller, kj::none)) {}
   ~WriterLocked() noexcept(false) {
     KJ_IF_SOME(w, writer) {
       w->detach();

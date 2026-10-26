@@ -172,11 +172,12 @@ class TsWriterSink final: public WritableStreamSink {
       return KJ_EXCEPTION(FAILED, "Write after stream has been closed.");
     }
     if (buffer == nullptr) return kj::READY_NOW;
-    return context.run([this, buffer](Worker::Lock& lock) mutable {
+    return context.run([weakThis = addWeakToThis(), buffer](Worker::Lock& lock) mutable {
       jsg::Lock& js = lock;
       auto ab = jsg::JsArrayBuffer::create(js, buffer);
-      return context.awaitJs(
-          lock, invokeWriter(js, "writableStreamWriterWrite"_kj, jsg::JsValue(ab)));
+      auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "sink destroyed before write ran");
+      return self.context.awaitJs(
+          lock, self.invokeWriter(js, "writableStreamWriterWrite"_kj, jsg::JsValue(ab)));
     });
   }
 
@@ -189,7 +190,7 @@ class TsWriterSink final: public WritableStreamSink {
       amount += piece.size();
     }
     if (amount == 0) return kj::READY_NOW;
-    return context.run([this, amount, pieces](Worker::Lock& lock) mutable {
+    return context.run([weakThis = addWeakToThis(), amount, pieces](Worker::Lock& lock) mutable {
       jsg::Lock& js = lock;
       // The received buffers are only guaranteed to live until the returned promise
       // resolves, but the application may hold the delivered ArrayBuffer longer, so the
@@ -200,8 +201,9 @@ class TsWriterSink final: public WritableStreamSink {
         if (piece.size() == 0) continue;
         ptr.write(piece);
       }
-      return context.awaitJs(
-          lock, invokeWriter(js, "writableStreamWriterWrite"_kj, jsg::JsValue(ab)));
+      auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "sink destroyed before write ran");
+      return self.context.awaitJs(
+          lock, self.invokeWriter(js, "writableStreamWriterWrite"_kj, jsg::JsValue(ab)));
     });
   }
 
@@ -210,9 +212,10 @@ class TsWriterSink final: public WritableStreamSink {
       return KJ_EXCEPTION(FAILED, "End after stream has been closed.");
     }
     ended = true;
-    return context.run([this](Worker::Lock& lock) mutable {
+    return context.run([weakThis = addWeakToThis()](Worker::Lock& lock) mutable {
       jsg::Lock& js = lock;
-      return context.awaitJs(lock, invokeWriter(js, "writableStreamWriterClose"_kj));
+      auto& self = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "sink destroyed before end ran");
+      return self.context.awaitJs(lock, self.invokeWriter(js, "writableStreamWriterClose"_kj));
     });
   }
 
@@ -237,7 +240,7 @@ class TsWriterSink final: public WritableStreamSink {
   // result.
   jsg::Promise<void> invokeWriter(
       jsg::Lock& js, kj::StringPtr op, kj::Maybe<jsg::JsValue> arg = kj::none) {
-    auto& w = KJ_UNWRAP_OR(writer, { kj::throwFatalException(disconnectedException()); });
+    auto& w = KJ_UNWRAP_OR(writer, { kj::throwException(disconnectedException()); });
     auto result = webstreams::dispatchCall(
         js, op, jsg::JsValue(w.getHandle(js)), arg.orDefault(jsg::JsValue(js.undefined())));
     return js.toVoidPromise(KJ_REQUIRE_NONNULL(
@@ -741,8 +744,10 @@ jsg::Promise<void> WritableStreamNativeSink::write(
       auto& canceler = *active.canceler;
       kj::Promise<void> promise = nullptr;
       KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
-        promise = lock.then([&sink, data = kj::mv(data)]() mutable {
-          return sink.write(data.asPtr()).attach(kj::mv(data));
+        promise = lock.then([weakSink = sink.addWeak(), data = kj::mv(data)]() mutable {
+          return KJ_REQUIRE_NONNULL(weakSink.tryGet(), "sink released before write ran")
+              .write(data.asPtr())
+              .attach(kj::mv(data));
         });
       } else {
         promise = sink.write(data.asPtr()).attach(kj::mv(data));
@@ -819,7 +824,9 @@ jsg::Promise<void> WritableStreamNativeSink::closeImpl(jsg::Lock& js) {
     closeInFlight = true;
     kj::Promise<void> endPromise = nullptr;
     KJ_IF_SOME(lock, ioContext.waitForOutputLocksIfNecessary()) {
-      endPromise = lock.then([&sink = *active.sink]() { return sink.end(); });
+      endPromise = lock.then([weakSink = active.sink->addWeak()]() {
+        return KJ_REQUIRE_NONNULL(weakSink.tryGet(), "sink released before end ran").end();
+      });
     } else {
       endPromise = active.sink->end();
     }

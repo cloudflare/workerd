@@ -75,6 +75,19 @@ jsg::ModuleRegistry::ModuleInfo addCapnpModule(
 }
 }  // namespace modules::capnp
 
+// The compiled code of a Wasm module provided by another isolate, if that isolate compiled it
+// with the same compile options this one would use.
+inline kj::Maybe<v8::CompiledWasmModule> sharedCompiledWasmModule(
+    const Worker::Script::WasmModule& content, const CompatibilityFlags::Reader& featureFlags) {
+  KJ_IF_SOME(compiled, content.compiledModule) {
+    if (content.compiledWithEsmIntegrationBuiltins ==
+        featureFlags.getWasmEsmIntegrationBuiltins()) {
+      return compiled;
+    }
+  }
+  return kj::none;
+}
+
 // Creates an instance of the (new) ModuleRegistry. This method provides the
 // initialization logic that is agnostic to the Worker::Api implementation,
 // but accepts a callback parameter to handle the Worker::Api-specific details.
@@ -146,7 +159,8 @@ kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           // can be backed by a temporary rust::String, and edgeworker source is
           // backed by a script-fetcher response. Copy it once into shared storage
           // so V8 external strings can safely outlive the registry.
-          bundleBuilder.addEsmModule(def.name, jsg::copyToArc(content.body), flags);
+          bundleBuilder.addEsmModule(
+              def.name, jsg::copyToArc(content.body), flags, builder.newCodeCacheKey(content.body));
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::TextModule) {
@@ -172,7 +186,8 @@ kj::Arc<jsg::modules::ModuleRegistry> newWorkerModuleRegistry(
           // (see the ESM comment above for the ownership details). If the module was
           // already compiled in another isolate, the compiled code is passed along to
           // avoid recompilation.
-          bundleBuilder.addWasmModule(def.name, content.body, content.compiledModule);
+          bundleBuilder.addWasmModule(
+              def.name, content.body, sharedCompiledWasmModule(content, featureFlags));
           break;
         }
         KJ_CASE_ONEOF(content, Worker::Script::JsonModule) {
@@ -337,7 +352,7 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
     }
     KJ_CASE_ONEOF(content, Worker::Script::WasmModule) {
       v8::Local<v8::WasmModuleObject> wasmModule;
-      KJ_IF_SOME(compiled, content.compiledModule) {
+      KJ_IF_SOME(compiled, sharedCompiledWasmModule(content, featureFlags)) {
         // The module was already compiled in another isolate; share the compiled code rather
         // than recompiling the wire bytes.
         auto metrics = observer.onWasmCompilationFromCacheStart(js.v8Isolate);
@@ -356,9 +371,8 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
               js, modules::legacy::compileJsonGlobal<JsgIsolate>(lock, content.body)));
     }
     KJ_CASE_ONEOF(content, Worker::Script::EsModule) {
-      // TODO(soon): Make sure passing nullptr to compile cache is desired.
       return jsg::ModuleRegistry::ModuleInfo(
-          js, name, content.body, nullptr /* compile cache */, observer);
+          js, name, content.body, observer, content.compileHints);
     }
     KJ_CASE_ONEOF(content, Worker::Script::CommonJsModule) {
       return jsg::ModuleRegistry::ModuleInfo(js, name, content.namedExports,
@@ -466,6 +480,10 @@ jsg::Bundle::Reader retrievePyodideBundle(
 // variants.
 //
 // This function is used by both workerd and edgeworker.
+//
+// `pyodideWasmModuleHolder`, if given, must outlive the registry. Pyodide's pyodide.asm.wasm is
+// then instantiated from it: once a Python isolate has stored a compilation there, later Python
+// isolates with the same Wasm compile setting reuse it instead of compiling again.
 template <typename TracerApi, class Registry>
 void registerPythonCommonModules(jsg::Lock& lock,
     Registry& modules,
@@ -480,7 +498,8 @@ void registerPythonCommonModules(jsg::Lock& lock,
     kj::Maybe<kj::Own<api::pyodide::ArtifactBundler_State>> artifacts,
     kj::Maybe<jsg::Ref<api::pyodide::DiskCache>> diskCache,
     kj::Maybe<jsg::Ref<TracerApi>> internalJaeger,
-    kj::Maybe<jsg::ModuleRegistry::ModuleCallback> maybeLimiter) {
+    kj::Maybe<jsg::ModuleRegistry::ModuleCallback> maybeLimiter,
+    kj::Maybe<const jsg::CompiledWasmModuleHolder&> pyodideWasmModuleHolder = kj::none) {
   KJ_REQUIRE(featureFlags.getPythonWorkers(),
       "The python_workers compatibility flag is required to use Python.");
 
@@ -491,7 +510,11 @@ void registerPythonCommonModules(jsg::Lock& lock,
   auto pythonRelease = KJ_REQUIRE_NONNULL(getPythonSnapshotRelease(featureFlags));
 
   // Inject pyodide bundle.
-  modules.addBuiltinBundle(pyodideBundle);
+  KJ_IF_SOME(holder, pyodideWasmModuleHolder) {
+    modules.addBuiltinBundle(pyodideBundle, holder);
+  } else {
+    modules.addBuiltinBundle(pyodideBundle);
+  }
 
   modules.addBuiltinModule("pyodide-internal:runtime-generated/metadata",
       lock.alloc<PyodideMetadataReader>(workerd::modules::python::createPyodideMetadataState(source,
@@ -554,6 +577,8 @@ void registerPythonWorkerdModules(jsg::Lock& lockParam,
   auto pythonRelease = KJ_ASSERT_NONNULL(getPythonSnapshotRelease(featureFlags));
   auto version = getPythonBundleName(pythonRelease);
   auto bundle = retrievePyodideBundle(pythonConfig, version);
+  auto& wasmModuleHolder =
+      KJ_ASSERT_NONNULL(pythonConfig.pyodideBundleManager.getPyodideWasmModuleHolder(version));
 
   // Inject pyodide bootstrap module (TODO: load this from the capnproto bundle?)
   {
@@ -590,7 +615,7 @@ void registerPythonWorkerdModules(jsg::Lock& lockParam,
   modules::python::registerPythonCommonModules<api::pyodide::DisabledInternalJaeger>(lockParam,
       modules, featureFlags, bundle, source, kj::mv(snapshot), api::pyodide::IsWorkerd::YES,
       api::pyodide::IsTracing::NO, snapshotToDisk, createBaselineSnapshot, kj::mv(artifacts),
-      kj::mv(diskCache), kj::none /* internalJaeger */, kj::none /* limiter */);
+      kj::mv(diskCache), kj::none /* internalJaeger */, kj::none /* limiter */, wasmModuleHolder);
 }
 }  // namespace modules::python
 

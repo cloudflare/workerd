@@ -244,6 +244,7 @@ static Worker::Script::ModuleContent extractWasmModuleContent(
   return Worker::Script::WasmModule{
     .body = kj::arrayPtr(wireBytes.data(), wireBytes.size()),
     .compiledModule = kj::mv(compiled),
+    .compiledWithEsmIntegrationBuiltins = js.isWasmEsmIntegrationBuiltinsEnabled(),
   };
 }
 

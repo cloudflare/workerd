@@ -73,45 +73,13 @@ class ExplicitEndInputPipeAdapter final: public kj::AsyncInputStream {
 
   kj::Promise<size_t> tryRead(void* buffer, size_t minBytes, size_t maxBytes) override {
     size_t result = co_await inner->tryRead(buffer, minBytes, maxBytes);
-
-    KJ_IF_SOME(l, expectedLength) {
-      KJ_ASSERT(result <= l);
-      l -= result;
-      if (l == 0) {
-        // If we got all the bytes we expected, we treat this as a successful end, because the
-        // underlying KJ pipe is not actually going to wait for the other side to drop. This is
-        // consistent with the behavior of Content-Length in HTTP anyway.
-        *ended = true;
-      }
-    }
-
-    if (result < minBytes) {
-      // Verify that end() was called.
-      if (!*ended) {
-        JSG_FAIL_REQUIRE(Error, "ReadableStream received over RPC disconnected prematurely.");
-      }
-    }
+    accountForRead(result, minBytes);
     co_return result;
   }
 
   kj::Maybe<size_t> tryReadSync(kj::ArrayPtr<kj::byte> buffer, size_t minBytes) override {
     KJ_IF_SOME(result, inner->tryReadSync(buffer, minBytes)) {
-      // Mirror the bookkeeping in tryRead().
-      KJ_IF_SOME(l, expectedLength) {
-        KJ_ASSERT(result <= l);
-        l -= result;
-        if (l == 0) {
-          *ended = true;
-        }
-      }
-
-      if (result < minBytes) {
-        // Verify that end() was called. (A synchronous read was possible but the stream
-        // disconnected prematurely; throw exactly as the async path would.)
-        if (!*ended) {
-          JSG_FAIL_REQUIRE(Error, "ReadableStream received over RPC disconnected prematurely.");
-        }
-      }
+      accountForRead(result, minBytes);
       return result;
     }
     return kj::none;
@@ -122,13 +90,36 @@ class ExplicitEndInputPipeAdapter final: public kj::AsyncInputStream {
   }
 
   kj::Promise<uint64_t> pumpTo(kj::AsyncOutputStream& output, uint64_t amount) override {
-    return inner->pumpTo(output, amount);
+    uint64_t result = co_await inner->pumpTo(output, amount);
+    accountForRead(result, amount);
+    co_return result;
   }
 
  private:
   kj::Own<kj::AsyncInputStream> inner;
   kj::Rc<bool> ended;
   kj::Maybe<uint64_t> expectedLength;
+
+  // Records that `amount` bytes were consumed by an operation that returns fewer than `minBytes`
+  // only at EOF. Every way of consuming the stream must report here, since callers may mix them,
+  // e.g. pumping the advertised length and then reading to confirm EOF.
+  void accountForRead(uint64_t amount, uint64_t minBytes) {
+    KJ_IF_SOME(l, expectedLength) {
+      KJ_ASSERT(amount <= l);
+      l -= amount;
+      if (l == 0) {
+        // If we got all the bytes we expected, we treat this as a successful end, because the
+        // underlying KJ pipe is not actually going to wait for the other side to drop. This is
+        // consistent with the behavior of Content-Length in HTTP anyway.
+        *ended = true;
+      }
+    }
+
+    if (amount < minBytes && !*ended) {
+      // EOF without end() means the writer went away mid-stream.
+      JSG_FAIL_REQUIRE(Error, "ReadableStream received over RPC disconnected prematurely.");
+    }
+  }
 };
 
 }  // namespace
@@ -197,34 +188,15 @@ class AbortTriggerRpcServer final: public rpc::AbortTrigger::Server {
     return kj::READY_NOW;
   }
 
-  kj::Promise<void> release(ReleaseContext releaseCtx) override {
-    released = true;
-    return kj::READY_NOW;
-  }
-
   ~AbortTriggerRpcServer() noexcept(false) {
-    {
-      auto lock = pendingReason->value.lockExclusive();
-      if (*lock != nullptr) {
-        // Already triggered
-        return;
-      }
-
-      if (!released) {
-        *lock = JSG_KJ_EXCEPTION(FAILED, DOMAbortError,
-            "An AbortSignal received over RPC was implicitly aborted because the connection back "
-            "to its trigger was lost.");
-      }
-    }
-
-    // Always fulfill the promise in case the AbortSignal was waiting
+    // Losing the capability means the signal will never be triggered, so this leaves the pending
+    // reason empty and only unblocks an AbortSignal that is waiting.
     fulfiller->fulfill();
   }
 
  private:
   kj::Own<kj::PromiseFulfiller<void>> fulfiller;
   kj::Arc<ExternalPusherImpl::PendingAbortReasonBox> pendingReason;
-  bool released = false;
 };
 
 }  // namespace

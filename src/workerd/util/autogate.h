@@ -73,7 +73,6 @@ namespace workerd::util {
   V(TAIL_STREAM_REFACTOR)                                                                          \
   /* Enable fast TextEncoder implementation using simdutf */                                       \
   V(ENABLE_FAST_TEXTENCODER)                                                                       \
-  V(UPDATED_AUTO_ALLOCATE_CHUNK_SIZE)                                                              \
   /* When enabled, reject startTls calls that pass the expectedServerHostname option,              \
     which is not currently supported. When disabled, log the usage instead. */                     \
   V(STARTTLS_REJECT_EXPECTED_SERVER_HOSTNAME)                                                      \
@@ -126,7 +125,12 @@ namespace workerd::util {
   V(JSRPC_READABLE_CANCEL_PROPAGATION)                                                             \
   /* Enables the V8 startup-snapshot pipeline: a throwaway zygote Worker is built to produce a     \
      startup snapshot, and the real Worker's isolate is then created from it. */                   \
-  V(STARTUP_SNAPSHOT)
+  V(STARTUP_SNAPSHOT)                                                                              \
+  /* When enabled, the Node.js `i18n` transcode implementation (api::node                          \
+     i18n::transcode) is provided by the Rust implementation (src/rust/i18n)                       \
+     instead of the C++ implementation. The C++ implementation is retained                         \
+     for rollback. */                                                                              \
+  V(NODEJS_I18N_RUST)
 // clang-format on
 // --------------------------------------------------------------------------------------
 

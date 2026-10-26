@@ -9,6 +9,7 @@
 
 import { strictEqual, ok, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
+import { rejectionOf } from 'helpers';
 
 async function collectGarbage() {
   for (let i = 0; i < 3; i++) {
@@ -126,6 +127,42 @@ export const teeBranchesCollectedPullStops = {
   },
 };
 
+// A byobRequest the source holds across tee() (ledger #25), with both
+// branches collected: no consumer is left to read what a respond() would
+// deliver. TypeScript retires the request once the controller's queries
+// notice the collected branches, and mints none over the held read
+// again. C++ keeps the request.
+export const teeHeldByobRequestBranchesCollected = {
+  async test() {
+    let controller;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      start(c) {
+        controller = c;
+      },
+    });
+    const reader = rs.getReader({ mode: 'byob' });
+    const read = reader.read(new Uint8Array(4));
+    await scheduler.wait(5);
+    const request = controller.byobRequest;
+    reader.releaseLock();
+    await rejectionOf(read);
+    (() => {
+      rs.tee();
+    })();
+    strictEqual(controller.byobRequest, request);
+    await collectGarbage();
+    strictEqual(controller.desiredSize, 0);
+    if (usingTsImpl) {
+      strictEqual(request.view, null);
+      strictEqual(controller.byobRequest, null);
+    } else {
+      strictEqual(request.view.byteLength, 4);
+      strictEqual(controller.byobRequest, request);
+    }
+  },
+};
+
 // A pending BYOB read whose stream and reader references are dropped
 // still completes when the controller responds.
 export const pendingByobReadSurvivesGc = {
@@ -188,5 +225,49 @@ export const byobRequestSurvivesGc = {
     req.respond(1);
     const { value } = await read;
     strictEqual(value[0], 7);
+  },
+};
+
+// A byte stream that has closed, been cancelled or errored releases its
+// underlying source (the readable suite's sourceReleasedOnceEnded), while
+// the stream and its controller stay reachable; a stream still open keeps
+// it, unless the source has only start(), which leaves no algorithm to
+// keep it by (parity).
+export const sourceReleasedOnceEnded = {
+  async test() {
+    for (const startOnly of [false, true]) {
+      for (const end of ['open', 'close', 'cancel', 'error']) {
+        const label = startOnly ? `${end}, start only` : end;
+        let controller;
+        let ref;
+        const stream = (() => {
+          const source = {
+            type: 'bytes',
+            start(c) {
+              controller = c;
+            },
+            ...(startOnly ? {} : { pull() {}, cancel() {} }),
+          };
+          ref = new WeakRef(source);
+          return new ReadableStream(source, { highWaterMark: 4 });
+        })();
+        await scheduler.wait(1);
+        if (end === 'close') controller.close();
+        if (end === 'cancel') await stream.cancel();
+        if (end === 'error') controller.error(new Error('boom'));
+        await collectGarbage();
+        strictEqual(
+          ref.deref() !== undefined,
+          end === 'open' && !startOnly,
+          label
+        );
+        strictEqual(
+          controller.desiredSize,
+          { open: 4, close: 0, cancel: 0, error: null }[end],
+          label
+        );
+        strictEqual(stream.locked, false, label);
+      }
+    }
   },
 };

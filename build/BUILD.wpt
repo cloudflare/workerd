@@ -18,4 +18,5 @@ wpt_server_entrypoint(
 
 exports_files([
     "tools/certs/cacert.pem",
+    "wasm/incrementer.wasm",
 ])

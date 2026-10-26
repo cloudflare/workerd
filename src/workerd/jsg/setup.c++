@@ -34,6 +34,11 @@ namespace workerd::jsg {
 static bool v8Initialized = false;
 static V8System::FatalErrorCallback* v8FatalErrorCallback = nullptr;
 static void reportV8FatalError(kj::StringPtr location, kj::StringPtr message) {
+  // https://github.com/v8/v8/blob/main/src/base/logging.cc#L205
+  // V8 sometimes outputs error details before a fatal. Providing a custom fatal
+  // handler skips V8's fflushes, so flushing here helps make sure we see that detail.
+  fflush(stdout);
+  fflush(stderr);
   if (v8FatalErrorCallback == nullptr) {
     KJ_LOG(FATAL, "V8 fatal error", location, message);
     abort();
@@ -166,6 +171,9 @@ void V8System::init(kj::Own<v8::Platform> platformParam,
   // Enable source phase imports for WebAssembly modules
   v8::V8::SetFlagsFromString("--js-source-phase-imports");
 
+  // Enable the WebAssembly compact import section encoding.
+  v8::V8::SetFlagsFromString("--wasm-compact-imports");
+
 #ifdef __APPLE__
   // On macOS arm64, we find that V8 can be collecting pages that contain compiled code when
   // handling requests in short succession. There are some specific differences for macOS arm64
@@ -247,7 +255,7 @@ void IsolateBase::buildEmbedderGraph(v8::Isolate* isolate, v8::EmbedderGraph* gr
     // throw any exceptions. We'll treat any exception here as fatal, including
     // JsExceptionThrown. Note that we're not entered into any particular v8::Context
     // here so pulling out the details of the exception would be tricky anyway.
-    kj::throwFatalException(kj::getCaughtExceptionAsKj());
+    kj::throwException(kj::getCaughtExceptionAsKj());
   }
 }
 
@@ -287,6 +295,10 @@ void IsolateBase::applyDeferredActions() {
     // to guard the push buffer.
     DISALLOW_KJ_IO_DESTRUCTORS_SCOPE;
     auto drop = queue.lockExclusive()->pop();
+  }
+
+  if (deferredActionHook != nullptr) {
+    deferredActionHook(ptr);
   }
 
   externalMemoryTarget->applyDeferredMemoryUpdate();
@@ -614,6 +626,9 @@ IsolateBase::~IsolateBase() noexcept(false) {
     snapshotCreator = kj::none;
     ptr->Dispose();
     ptr = nullptr;
+    if (disposeHook != nullptr) {
+      disposeHook(disposeHookData);
+    }
     // TODO(cleanup): meaningless after V8 13.4 is released.
     cppHeap.reset();
   });
@@ -638,6 +653,12 @@ void IsolateBase::dropWrappers(kj::FunctionParam<void()> drop) {
     // We MUST call heapTracer.destroy(), but we can't do it yet because destroying other handles
     // may call into the heap tracer.
     KJ_DEFER(heapTracer.destroy());
+
+    // Release the code caches still waiting to be produced, whose v8::Globals must be destroyed
+    // under lock.
+    KJ_IF_SOME(c, codeCache) {
+      c.discardDeferred();
+    }
 
     // Make sure v8::Globals are destroyed under lock (but not until later).
     KJ_DEFER(opaqueTemplate.Reset());
@@ -687,25 +708,17 @@ v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
   // no arguments (argc == 0), the source is the exact V8-constructed string below,
   // which contains no user-provided code. Compiling it produces only an empty function.
   //
-  // Note that `new Function('')` also produces this exact source, so it is allowed too.
-  // On V8 15.6, `eval()` of this exact string would also match, since the callback
-  // can no longer distinguish Function-constructor calls from eval() (see below).
-  //
-  // The version bridge:
-  //   - V8 <= 15.5: `new Function()` sets isCodeLike = true; `eval()` and string-
-  //     argument calls set isCodeLike = false. We guard on isCodeLike to prevent
-  //     `eval('(function anonymous(\\n) {\\n\\n})')` from matching.
-  //   - V8 >= 15.6: `new Function()` with no arguments sets isCodeLike = false (the
-  //     same as eval), so isCodeLike no longer distinguishes the two paths. We rely on
-  //     the exact string match alone. The `eval()` path can reach this check, but can
-  //     only compile the fixed empty function.
+  // isCodeLike is true for `new Function()` and false for `eval()` and calls with string
+  // arguments (edgeworker patches V8 to restore this for V8 >= 15.6, where upstream sets
+  // isCodeLike = false for no-argument calls). We guard on isCodeLike to prevent
+  // `eval('(function anonymous(\\n) {\\n\\n})')` and `new Function('')` from matching.
   //
   // Additional security notes:
   //   - The exact string match ensures no user content (parameters or body) is present.
   //   - Calls like new Function('a', 'b') or new Function('a', 'b', undefined) are
   //     always blocked, since the last argument becomes the body via ToString(),
   //     producing a non-matching source string.
-  //   - On V8 >= 15.6, V8 also calls this callback with each object argument before
+  //   - V8 also calls this callback with each object argument before
   //     converting it to a string. Such a source is neither undefined nor a string, so
   //     it falls through to the evalAllowed check below.
   //
@@ -714,21 +727,14 @@ v8::ModifyCodeGenerationFromStringsResult IsolateBase::modifyCodeGenCallback(
   // changes, the setup-test and worker-test will fail, signaling that this constant
   // needs updating.
   static constexpr auto kEmptyFunctionSource = "(function anonymous(\n) {\n\n})"_kj;
-#if V8_MINOR_VERSION >= 6
-  // V8 15.6+: isCodeLike is false for no-argument Function constructor calls, so we
-  // cannot use it as a guard. Match only on the source string.
-  if (source->IsString() && kj::str(source.As<v8::String>()) == kEmptyFunctionSource) {
-    return {.codegen_allowed = true, .modified_source = {}};
-  }
-#else
-  // V8 <= 15.5: isCodeLike is true for Function constructor calls and false for eval().
+  // isCodeLike is true for no-argument Function constructor calls and false for eval()
+  // and string-argument calls.
   // We require isCodeLike to prevent eval() of the exact empty-function source from
   // being silently allowed.
   if (isCodeLike && source->IsString() &&
       kj::str(source.As<v8::String>()) == kEmptyFunctionSource) {
     return {.codegen_allowed = true, .modified_source = {}};
   }
-#endif
 
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
   auto& base = IsolateBase::from(isolate);

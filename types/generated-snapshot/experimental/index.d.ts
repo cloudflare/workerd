@@ -674,6 +674,12 @@ type DurableObjectJurisdiction = "eu" | "fedramp" | "fedramp-high" | "us";
 interface DurableObjectNamespaceNewUniqueIdOptions {
   jurisdiction?: DurableObjectJurisdiction;
 }
+interface DurableObjectClass<
+  _T extends Rpc.DurableObjectBranded | undefined = undefined,
+> {}
+interface DurableObjectNamespaceGetDurableObjectOptionsVersionOptions {
+  cohort?: string;
+}
 type DurableObjectLocationHint =
   | "wnam"
   | "enam"
@@ -693,12 +699,17 @@ interface DurableObjectNamespaceGetDurableObjectOptions {
   version?: {
     cohort?: string;
   };
+  retry?: DurableObjectRetryOptions;
 }
-interface DurableObjectClass<
-  _T extends Rpc.DurableObjectBranded | undefined = undefined,
-> {}
-interface DurableObjectNamespaceGetDurableObjectOptionsVersionOptions {
-  cohort?: string;
+interface DurableObjectRetryOptions {
+  maxRetries?: number;
+  timeoutMs?: number;
+}
+interface DurableObjectEvictionInfo {
+  readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
+}
+declare module "cloudflare:durable-objects" {
+  export const onEvict: unique symbol;
 }
 interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
@@ -797,12 +808,12 @@ interface DurableObjectStorage {
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
   onNextSessionRestoreBookmark(bookmark: string): Promise<string>;
   waitForBookmark(bookmark: string): Promise<void>;
+  /** @deprecated Use `ctx.primaryStub` instead. */
+  readonly primary?: DurableObjectStub;
   snapshot(
     options?: DurableObjectSnapshotOptions,
   ): Promise<DurableObjectSnapshot>;
   onNextSessionRestore(target: DurableObjectSnapshot | string): Promise<string>;
-  /** @deprecated Use `ctx.primaryStub` instead. */
-  readonly primary?: DurableObjectStub;
   /** @deprecated Use `ctx.configureReadReplication()` instead. */
   ensureReplicas(): void;
   /** @deprecated Use `ctx.configureReadReplication()` instead. */
@@ -925,6 +936,13 @@ declare class Event {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/returnValue)
    */
   get returnValue(): boolean;
+  /**
+   * The Event property **`returnValue`** indicates whether the default action for this event has been prevented or not.
+   * @deprecated
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/returnValue)
+   */
+  set returnValue(value: boolean);
   /**
    * The **`currentTarget`** read-only property of the Event interface identifies the element to which the event handler has been attached.
    *
@@ -4035,6 +4053,7 @@ interface Socket {
   get protocol(): "tcp" | "udp";
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
+  proxyTo(sock: Socket, options?: StreamPipeOptions): Promise<void>;
 }
 interface SocketOptions {
   secureTransport?: string;
@@ -4198,6 +4217,7 @@ type ContainerStartupOptions = {
   hardTimeout?: number | bigint;
   instance?:
     | "lite"
+    | "basic"
     | "standard-1"
     | "standard-2"
     | "standard-3"
@@ -13385,25 +13405,24 @@ interface BrowserRunBaseOptions {
    */
   cacheTTL?: number;
 }
-/**
- * Backend selection, mixed into the options of the quick actions that support it.
- * Deliberately not part of `BrowserRunBaseOptions`: `scrape`, `links` and `snapshot`
- * reject an alternate backend, so they must not accept the field.
- */
+/** Backend selection for quick actions. */
 interface BrowserRunAlternateBackendOptions {
   /** Render with an alternate browser backend instead of the default one. */
   browser?: "kitesurf";
 }
 /** Common options shared by all quick actions. Exactly one of `url` or `html` must be provided.*/
-type BrowserRunCommonOptions =
-  | (BrowserRunBaseOptions & {
-      /** URL to navigate to, e.g. `"https://example.com"`. */
-      url: string;
-    })
-  | (BrowserRunBaseOptions & {
-      /** Set the HTML content of the page directly. */
-      html: string;
-    });
+type BrowserRunCommonOptions = BrowserRunBaseOptions &
+  BrowserRunAlternateBackendOptions &
+  (
+    | {
+        /** URL to navigate to, e.g. `"https://example.com"`. */
+        url: string;
+      }
+    | {
+        /** Set the HTML content of the page directly. */
+        html: string;
+      }
+  );
 type BrowserRunPuppeteerScreenshotOptions = {
   /** @default "png" */
   type?: "png" | "jpeg" | "webp";
@@ -13430,7 +13449,7 @@ type BrowserRunScreenshotOptions = BrowserRunCommonOptions & {
   scrollPage?: boolean;
   /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
   screenshotOptions?: BrowserRunPuppeteerScreenshotOptions;
-} & BrowserRunAlternateBackendOptions;
+};
 type BrowserRunPDFOptions = BrowserRunCommonOptions & {
   /** @see https://pptr.dev/api/puppeteer.pdfoptions */
   pdfOptions?: {
@@ -13477,7 +13496,7 @@ type BrowserRunPDFOptions = BrowserRunCommonOptions & {
     /** @default 30000 */
     timeout?: number;
   };
-} & BrowserRunAlternateBackendOptions;
+};
 type BrowserRunScrapeOptions = BrowserRunCommonOptions & {
   /** CSS selectors to scrape. At least one element is required. */
   elements: Array<{
@@ -13513,7 +13532,7 @@ type BrowserRunAccessibilityTreeOptions = BrowserRunCommonOptions & {
    * HTTP 200; a malformed selector is an error.
    */
   root?: string;
-} & BrowserRunAlternateBackendOptions;
+};
 interface BrowserRunJsonBaseOptions {
   /** Custom AI models to try in order. Max 3. Falls back to next on error. */
   custom_ai?: Array<{
@@ -13528,7 +13547,6 @@ interface BrowserRunJsonBaseOptions {
  * At least one of `prompt` or `response_format` must be provided.
  */
 type BrowserRunJsonOptions = BrowserRunCommonOptions &
-  BrowserRunAlternateBackendOptions &
   BrowserRunJsonBaseOptions &
   (
     | {
@@ -13544,10 +13562,8 @@ type BrowserRunJsonOptions = BrowserRunCommonOptions &
         response_format: AiTextGenerationResponseFormat;
       }
   );
-type BrowserRunContentOptions = BrowserRunCommonOptions &
-  BrowserRunAlternateBackendOptions;
-type BrowserRunMarkdownOptions = BrowserRunCommonOptions &
-  BrowserRunAlternateBackendOptions;
+type BrowserRunContentOptions = BrowserRunCommonOptions;
+type BrowserRunMarkdownOptions = BrowserRunCommonOptions;
 type BrowserRunRedirectHop = {
   /** URL that returned the redirect. */
   url: string;
@@ -17944,7 +17960,7 @@ declare namespace TailStream {
     | "exceededWallTime"
     | "aborted";
   interface ScriptVersion {
-    readonly id: string;
+    readonly id?: string;
     readonly tag?: string;
     readonly message?: string;
   }
@@ -17955,7 +17971,7 @@ declare namespace TailStream {
   }
   interface Onset {
     readonly type: "onset";
-    readonly attributes: Attribute[];
+    readonly attributes?: Attribute[];
     // id for the span being opened by this Onset event.
     readonly spanId: string;
     readonly dispatchNamespace?: string;

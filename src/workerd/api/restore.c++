@@ -181,11 +181,11 @@ class LifetimeExtendedSubrequestChannel final: public IoChannelFactory::Subreque
 };
 
 // EventDispatcher server that forwards events to a restored service channel. This is a minimal
-// duplicate of the (private) `Server::WorkerdBootstrapImpl::EventDispatcherImpl` in workerd's
-// server.c++, used to implement the `service :WorkerdBootstrap` result of `restoreService()` when
-// the restore event is received over RPC. A restored ServiceStub is only ever used to make HTTP
-// requests, make JS-RPC calls, or receive the next hop of a restore chain, so other event types
-// are unsupported.
+// duplicate of the (private) `WorkerdBootstrapImpl::EventDispatcherImpl` in workerd's
+// worker-factory-rpc.c++, used to implement the `service :WorkerdBootstrap` result of
+// `restoreService()` when the restore event is received over RPC. A restored ServiceStub is only
+// ever used to make HTTP requests, make JS-RPC calls, or receive the next hop of a restore chain,
+// so other event types are unsupported.
 class RestoredServiceEventDispatcher final: public rpc::EventDispatcher::Server {
  public:
   RestoredServiceEventDispatcher(capnp::HttpOverCapnpFactory& httpOverCapnpFactory,
@@ -300,7 +300,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::run
     bool isDynamicDispatch) {
   IoContext& ioctx = incomingRequest->getContext();
 
-  incomingRequest->delivered();
+  incomingRequest->delivered("restore"_kj);
 
   KJ_DEFER({ incomingRequest->drain(waitUntilTasks, kj::mv(incomingRequest)); });
 
@@ -329,10 +329,11 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreServiceCustomEvent::run
 
       return ioctx.awaitJs(lock,
           invokeRestoreAndCoerce(lock, target, params)
-              .then(lock, [&ioctx](jsg::Lock& js, RestoreResult result) {
+              .then(lock, [weakIoctx = ioctx.getWeakRef()](jsg::Lock& js, RestoreResult result) {
         KJ_SWITCH_ONEOF(result) {
           KJ_CASE_ONEOF(fetcher, jsg::Ref<Fetcher>) {
-            return fetcher->getSubrequestChannel(ioctx);
+            return fetcher->getSubrequestChannel(KJ_REQUIRE_NONNULL(
+                weakIoctx->tryGet(), "IoContext destroyed before [restore]() returned"));
           }
           KJ_CASE_ONEOF(stub, jsg::Ref<JsRpcStub>) {
             // TODO(someday): Arguably we could allow this case and let people "upgrade" an RpcStub
@@ -423,7 +424,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreRpcStubCustomEvent::run
     bool isDynamicDispatch) {
   IoContext& ioctx = incomingRequest->getContext();
 
-  incomingRequest->delivered();
+  incomingRequest->delivered("restore_rpc_stub"_kj);
 
   KJ_DEFER({
     // waitUntil() should allow extending execution on the server side even when the client
@@ -533,7 +534,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> RestoreRpcStubCustomEvent::sen
     if (revokePaf.fulfiller->isWaiting()) {
       revokePaf.fulfiller->reject(e.clone());
     }
-    kj::throwFatalException(kj::mv(e));
+    kj::throwException(kj::mv(e));
   }
 
   co_return WorkerInterface::CustomEvent::Result{.outcome = EventOutcome::OK};

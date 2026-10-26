@@ -16,6 +16,9 @@ export {
   highWaterMarkValidated,
   sinkTypeValidation,
   argumentConversionOrder,
+  garbageSinkValidation,
+  strategyArgumentShapes,
+  conversionErrorPrecedence,
   readyFulfillTiming,
   nonCallableSizeThrows,
   globalScopePipe,
@@ -56,6 +59,7 @@ export {
 export {
   writableStreamCloseThrowRejectsPromises,
   writerDoubleClose,
+  closeWhileQueuedCloseAwaitsAbort,
 } from 'close-semantics';
 
 export {
@@ -114,7 +118,11 @@ export {
 
 export { thenGetterDoesNotFireOnWriterPromises } from 'then-interceptors';
 
-export { writableStreamGc, writableStreamGcTraceFinishes } from 'gc';
+export {
+  writableStreamGc,
+  writableStreamGcTraceFinishes,
+  sinkReleasedOnceEnded,
+} from 'gc';
 
 export {
   manySmallWrites,
@@ -129,3 +137,7 @@ export {
   pollutedResolversDoNotReachWriterPromises,
   omittedDictionariesReadNothing,
 } from 'pollution';
+
+export { writerPromisesAreMarkedHandled } from 'unhandled-rejection';
+
+export { releasedWriterMembers } from 'released-writer';

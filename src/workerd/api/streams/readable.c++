@@ -41,6 +41,12 @@ void ReaderImpl::detach() {
   }
 }
 
+void ReaderImpl::release() {
+  if (state.isActive()) {
+    state.transitionTo<Released>();
+  }
+}
+
 jsg::Promise<void> ReaderImpl::cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason) {
   assertAttachedOrTerminal();
   if (state.is<Released>()) {
@@ -137,8 +143,6 @@ jsg::Promise<ReadResult> ReaderImpl::read(
 }
 
 void ReaderImpl::releaseLock(jsg::Lock& js) {
-  // TODO(soon): Releasing the lock should cancel any pending reads. This is a recent
-  // modification to the spec that we have not yet implemented.
   assertAttachedOrTerminal();
   // Closed and Released states are no-ops.
   KJ_IF_SOME(attached, state.tryGetActiveUnsafe()) {
@@ -147,8 +151,7 @@ void ReaderImpl::releaseLock(jsg::Lock& js) {
     // reference to be cleared, so let's make sure we keep a reference to
     // the stream at least until the call to releaseLock completes.
     auto ref = attached.stream.addRef();
-    attached.stream->getController().releaseReader(reader, js);
-    state.transitionTo<Released>();
+    ref->getController().releaseReader(reader, js);
   }
 }
 
@@ -184,6 +187,10 @@ jsg::Promise<void> ReadableStreamDefaultReader::cancel(
 
 void ReadableStreamDefaultReader::detach() {
   impl.detach();
+}
+
+void ReadableStreamDefaultReader::release() {
+  impl.release();
 }
 
 jsg::MemoizedIdentity<jsg::Promise<void>>& ReadableStreamDefaultReader::getClosed() {
@@ -237,6 +244,10 @@ jsg::Promise<void> ReadableStreamBYOBReader::cancel(
 
 void ReadableStreamBYOBReader::detach() {
   impl.detach();
+}
+
+void ReadableStreamBYOBReader::release() {
+  impl.release();
 }
 
 jsg::MemoizedIdentity<jsg::Promise<void>>& ReadableStreamBYOBReader::getClosed() {
@@ -371,6 +382,12 @@ jsg::Promise<void> DrainingReader::cancel(jsg::Lock& js, jsg::Optional<jsg::JsVa
   KJ_UNREACHABLE;
 }
 
+void DrainingReader::release() {
+  if (state.is<Attached>()) {
+    state.init<Released>();
+  }
+}
+
 void DrainingReader::releaseLock(jsg::Lock& js) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(i, Initial) {
@@ -378,8 +395,7 @@ void DrainingReader::releaseLock(jsg::Lock& js) {
     }
     KJ_CASE_ONEOF(stream, Attached) {
       auto ref = stream.addRef();
-      stream->getController().releaseReader(addPtrToThis(), js);
-      state.init<Released>();
+      ref->getController().releaseReader(addPtrToThis(), js);
       return;
     }
     KJ_CASE_ONEOF(c, StreamStates::Closed) {
@@ -850,7 +866,8 @@ class RpcReadableStreamSink final: public WritableStreamSink {
 kj::Own<WritableStreamSink> newReadableStreamSerializeSink(
     RpcSerializerExternalHandler& externalHandler,
     StreamEncoding encoding,
-    kj::Maybe<uint64_t> expectedLength) {
+    kj::Maybe<uint64_t> encodedLength,
+    kj::Maybe<uint64_t> identityLength) {
   // Serialize by effectively creating a `JsRpcStub` around the stream and serializing that.
   // Except we don't actually want to do _exactly_ that, because we do not want to actually create
   // a `JsRpcStub` locally. So do the important parts of `JsRpcStub::constructor()` followed by
@@ -870,17 +887,20 @@ kj::Own<WritableStreamSink> newReadableStreamSerializeSink(
 
   capnp::ByteStream::Client streamCap = [&]() {
     auto req = externalHandler.getExternalPusher().pushByteStreamRequest(capnp::MessageSize{2, 0});
-    KJ_IF_SOME(el, expectedLength) {
+    KJ_IF_SOME(el, encodedLength) {
       req.setLengthPlusOne(el + 1);
     }
     auto pipeline = req.sendForPipeline();
 
     externalHandler.write(
-        [encoding, expectedLength, source = pipeline.getSource(), canceler = kj::mv(canceler)](
+        [encoding, identityLength, source = pipeline.getSource(), canceler = kj::mv(canceler)](
             rpc::JsValue::External::Builder builder) mutable {
       auto rs = builder.initReadableStream();
       rs.setStream(kj::mv(source));
       rs.setEncoding(encoding);
+      KJ_IF_SOME(length, identityLength) {
+        rs.initIdentityLength().setKnown(length);
+      }
       KJ_IF_SOME(c, canceler) {
         rs.setCanceler(kj::mv(c));
       }
@@ -910,9 +930,12 @@ void ReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
 
   auto& controller = getController();
   StreamEncoding encoding = controller.getPreferredEncoding();
-  auto expectedLength = controller.tryGetLength(encoding);
+  auto identityLength = controller.tryGetLength(StreamEncoding::IDENTITY);
+  auto encodedLength =
+      encoding == StreamEncoding::IDENTITY ? identityLength : controller.tryGetLength(encoding);
 
-  auto sink = newReadableStreamSerializeSink(externalHandler, encoding, expectedLength);
+  auto sink =
+      newReadableStreamSerializeSink(externalHandler, encoding, encodedLength, identityLength);
 
   ioctx.addTask(
       ioctx.waitForDeferredProxy(pumpTo(js, kj::mv(sink), true)).catch_([](kj::Exception&& e) {
@@ -1033,7 +1056,7 @@ class RpcReadableStreamSource final: public ReadableStreamSource {
     }, [state = state.addRef()](kj::Exception&& exception) mutable -> size_t {
       // The origin's side failed; there is nothing left to tell it.
       state->originDone();
-      kj::throwFatalException(kj::mv(exception));
+      kj::throwException(kj::mv(exception));
     });
   }
 
@@ -1108,8 +1131,12 @@ kj::Own<ReadableStreamSource> newRpcReadableStreamSource(
 
   kj::Own<kj::AsyncInputStream> in = ioctx.getExternalPusher()->unwrapStream(reader.getStream());
 
-  kj::Own<ReadableStreamSource> source =
-      kj::heap<NoDeferredProxyReadableStream>(newSystemStream(kj::mv(in), encoding, ioctx), ioctx);
+  kj::Maybe<uint64_t> identityLength;
+  if (reader.getIdentityLength().isKnown()) {
+    identityLength = reader.getIdentityLength().getKnown();
+  }
+  kj::Own<ReadableStreamSource> source = kj::heap<NoDeferredProxyReadableStream>(
+      newSystemStream(kj::mv(in), encoding, ioctx, identityLength), ioctx);
 
   if (reader.hasCanceler() &&
       util::Autogate::isEnabled(util::AutogateKey::JSRPC_READABLE_CANCEL_PROPAGATION)) {

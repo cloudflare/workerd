@@ -489,7 +489,7 @@ KJ_TEST("the sender serializes a structured-clone argument once per call") {
   });
 
   uint getterCount = 0;
-  uint resultCount = 0;
+  kj::Pin<uint> resultCount{};  // Value-initialized to 0.
   sender.runInIoContext([&](const TestFixture::Environment& env) {
     auto fetcher = env.js.alloc<Fetcher>(env.context.addObject<Fetcher::OutgoingFactory>(
                                              kj::heap<ReceiverOutgoingFactory>(receiver)),
@@ -511,10 +511,10 @@ KJ_TEST("the sender serializes a structured-clone argument once per call") {
       auto function = wrapMethod(env.js, kj::mv(method));
       auto result =
           jsg::JsFunction(function.getHandle(env.js)).call(env.js, env.js.undefined(), args);
-      auto checked =
-          env.js.toPromise(result).then(env.js, [&resultCount](jsg::Lock& js, jsg::Value value) {
+      auto checked = env.js.toPromise(result).then(
+          env.js, [resultCount = resultCount.addWeak()](jsg::Lock& js, jsg::Value value) {
         KJ_EXPECT(jsg::JsValue(value.getHandle(js)).strictEquals(js.num(42)));
-        ++resultCount;
+        ++KJ_REQUIRE_NONNULL(resultCount.tryGet(), "test counter destroyed");
       });
       return env.context.awaitJs(env.js, kj::mv(checked));
     };
@@ -529,7 +529,7 @@ KJ_TEST("the sender serializes a structured-clone argument once per call") {
     return kj::joinPromises(kj::arr(kj::mv(direct), kj::mv(viaPath))).attach(kj::mv(fetcher));
   });
   KJ_EXPECT(getterCount == 2);
-  KJ_EXPECT(resultCount == 2);
+  KJ_EXPECT(*resultCount == 2);
 }
 
 KJ_TEST("an unresolved retry-capable destination supports promise pipelining") {
@@ -783,7 +783,7 @@ class RetryClaimObserver final: public RequestObserver {
     retryableAtClaim = retryable;
     jsEventsAtClaim = getJsEvents(jsg::Lock::current());
     KJ_IF_SOME(e, rejection) {
-      kj::throwFatalException(e.clone());
+      kj::throwException(e.clone());
     }
   }
 
@@ -1213,6 +1213,38 @@ KJ_TEST("a disconnect rethrown by an actor JSRPC method stays DISCONNECTED and d
   session.wait(fixture.getWaitScope());
 }
 
+KJ_TEST("a KJ exception decoding an actor's RPC arguments propagates unchanged") {
+  TestFixture fixture(TestFixture::SetupParams{
+    .mainModuleSource = ACTOR_SOURCE,
+    .actorId = Worker::Actor::Id(kj::str("jsrpc-bad-args-test")),
+    .actorClassName = "default"_kj,
+  });
+  auto entrypoint = fixture.makeWorkerEntrypoint();
+  auto [cap, session] = startSession(*entrypoint);
+
+  // Arguments must decode to an array. A number fails a KJ_REQUIRE before the method runs, so
+  // the exception is not the method's and must not round-trip through JavaScript, which would
+  // reduce it to a tunneled internal error.
+  kj::Array<kj::byte> notAnArray;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    jsg::Serializer serializer(env.js);
+    serializer.write(env.js, jsg::JsValue(env.js.num(1)));
+    notAnArray = kj::heapArray(serializer.release().data.asPtr());
+  });
+  auto request = cap.callRequest();
+  request.setMethodName("fail");
+  request.getOperation().initCallWithArgs().setV8Serialized(notAnArray);
+  auto e = KJ_ASSERT_NONNULL(
+      kj::runCatchingExceptions([&]() { request.send().wait(fixture.getWaitScope()); }));
+
+  KJ_EXPECT(e.getType() == kj::Exception::Type::FAILED, e);
+  KJ_EXPECT(e.getDescription().contains("expected JsArray when deserializing arguments"), e);
+  KJ_EXPECT(!jsg::isTunneledException(e.getDescription()), e);
+
+  cap = nullptr;
+  session.wait(fixture.getWaitScope());
+}
+
 KJ_TEST("actor JSRPC session abort marks in-flight calls delivered") {
   TestFixture fixture(TestFixture::SetupParams{
     .mainModuleSource = ACTOR_SOURCE,
@@ -1343,6 +1375,77 @@ KJ_TEST("terminal abort signals mark RPC serialization ineligible") {
         env.js.alloc<AbortSignal>(kj::none, kj::none, AbortSignal::Flag::NEVER_ABORTS);
     expectIneligible(*neverAborts);
   });
+}
+
+constexpr kj::StringPtr GATED_RECEIVER_SOURCE = R"JS(
+  import { WorkerEntrypoint } from "cloudflare:workers";
+
+  export default class extends WorkerEntrypoint {
+    succeed() { return "ok"; }
+    fail() { throw new Error("method failed"); }
+    async failLater() {
+      await null;
+      throw new Error("method failed");
+    }
+  }
+)JS"_kj;
+
+// An actor's reply to an RPC call must not leave while its output gate is locked, whether the
+// method returned or threw: a thrown error can carry unconfirmed state as well as a result can.
+void expectReplyWaitsForOutputGate(kj::StringPtr method, bool succeeds) {
+  auto io = kj::setupAsyncIo();
+  capnp::MallocMessageBuilder flagsMessage;
+  auto flags = flagsMessage.initRoot<CompatibilityFlags>();
+  flags.setFetcherRpc(true);
+  TestFixture receiver(TestFixture::SetupParams{
+    .waitScope = io.waitScope,
+    .mainModuleSource = GATED_RECEIVER_SOURCE,
+    .actorId = Worker::Actor::Id(kj::str("gated-receiver")),
+    .useRealTimers = false,
+  });
+  TestFixture sender(TestFixture::SetupParams{
+    .waitScope = io.waitScope,
+    .featureFlags = flags.asReader(),
+    .useRealTimers = false,
+  });
+
+  auto gate = kj::newPromiseAndFulfiller<void>();
+  auto blocker = receiver.getActor().getOutputGate().lockWhile(kj::mv(gate.promise), nullptr);
+
+  kj::Maybe<bool> settled;
+  sender.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    auto fetcher = env.js.alloc<Fetcher>(env.context.addObject<Fetcher::OutgoingFactory>(
+                                             kj::heap<ReceiverOutgoingFactory>(receiver)),
+        Fetcher::RequiresHostAndProtocol::YES);
+    auto function = wrapMethod(env.js, *fetcher, method);
+    v8::LocalVector<v8::Value> args(env.js.v8Isolate);
+    auto result =
+        jsg::JsFunction(function.getHandle(env.js)).call(env.js, env.js.undefined(), args);
+    auto reply = env.context.awaitJs(
+        env.js, env.js.toPromise(result).then(env.js, [&settled](jsg::Lock&, jsg::Value) {
+      settled = true;
+    }, [&settled](jsg::Lock&, jsg::Value) { settled = false; }));
+
+    co_await kj::yieldUntilWouldSleep();
+    KJ_EXPECT(settled == kj::none, "the reply left while the output gate was locked", method);
+
+    gate.fulfiller->fulfill();
+    co_await reply;
+    KJ_EXPECT(settled == succeeds, method);
+  });
+  blocker.wait(io.waitScope);
+}
+
+KJ_TEST("an actor's RPC result waits for its output gate") {
+  expectReplyWaitsForOutputGate("succeed"_kj, true);
+}
+
+KJ_TEST("an actor's synchronous RPC exception waits for its output gate") {
+  expectReplyWaitsForOutputGate("fail"_kj, false);
+}
+
+KJ_TEST("an actor's asynchronous RPC exception waits for its output gate") {
+  expectReplyWaitsForOutputGate("failLater"_kj, false);
 }
 
 }  // namespace

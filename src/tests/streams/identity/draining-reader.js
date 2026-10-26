@@ -62,7 +62,7 @@ export const drainingReaderExpectedLengthPassThrough = {
       strictEqual(reader.expectedLength, 42n);
       await reader.cancel();
     }
-    // Zero and full-uint64-range bigints pass through as-is.
+    // Zero and the largest length, 2^53 - 1, pass through as-is.
     {
       const fls = new FixedLengthStream(0);
       const reader = new ReadableStreamDrainingReader(fls.readable);
@@ -70,9 +70,9 @@ export const drainingReaderExpectedLengthPassThrough = {
       await reader.cancel();
     }
     {
-      const fls = new FixedLengthStream(9007199254740993n);
+      const fls = new FixedLengthStream(9007199254740991n);
       const reader = new ReadableStreamDrainingReader(fls.readable);
-      strictEqual(reader.expectedLength, 9007199254740993n);
+      strictEqual(reader.expectedLength, 9007199254740991n);
       await reader.cancel();
     }
     // A plain IdentityTransformStream has no declared total (undefined →

@@ -148,6 +148,9 @@ struct Socket {
     }
     tcp :group {
       tlsOptions @6 :TlsOptions;
+
+      tlsMode @9 :TcpTlsMode = implicit;
+      # How `tlsOptions` is applied to accepted connections. Ignored if `tlsOptions` is not set.
     }
 
     udp :group {
@@ -178,6 +181,17 @@ struct Socket {
 
   # TODO(someday): Support mapping different hostnames to different services? Or should that be
   #   done strictly via JavaScript?
+
+  enum TcpTlsMode {
+    implicit @0;
+    # Perform the TLS handshake as soon as a connection is accepted. The `connect()` handler sees
+    # only the decrypted stream, and its socket does not support `startTls()`.
+
+    startTls @1;
+    # Accept connections in plaintext. The `connect()` handler's socket has secureTransport set to
+    # "starttls" and the handler performs the TLS handshake as the server by calling `startTls()` at
+    # the point in its protocol where the upgrade belongs.
+  }
 }
 
 # ========================================================================================
@@ -570,24 +584,7 @@ struct Worker {
       # (This is intentionally not a ServiceDesignator because you cannot choose an alternate
       # entrypoint here; the class name IS the entrypoint.)
 
-      retryPolicy @2 :RetryPolicy;
-      # Limits on how the runtime retries calls through stubs minted from this binding. When
-      # absent, the runtime's default retry behavior applies.
-
-      struct RetryPolicy {
-        maxAttempts @0 :UInt32 = 4;
-        # Maximum number of retries after the initial attempt. Zero disables retries, and one
-        # allows a single retry. The default matches the runtime's default of five attempts in
-        # total.
-
-        timeoutMs @1 :UInt32 = 10000;
-        # Time in milliseconds, measured from the start of the call, after which no retry may
-        # start. A retry still running when it expires is cancelled, and the caller gets the
-        # error that caused the first retry. The initial request, and the first request after each
-        # redirect, always run to completion. The clock starts after any output-gate wait, and a
-        # redirect shares the original call's timeout. Must be between 500 and 60,000. The default
-        # matches the runtime's default.
-      }
+      obsolete2 @2 :AnyPointer;
     }
 
     struct CryptoKey {

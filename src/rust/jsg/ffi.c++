@@ -15,9 +15,15 @@
 #include <kj-rs/convert.h>
 
 #include <kj/common.h>
+#include <kj/map.h>
+#include <kj/mutex.h>
 #include <kj/string.h>
 
 #include <memory>
+
+#if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+#include <sanitizer/lsan_interface.h>
+#endif
 
 #if V8_MAJOR_VERSION >= 15
 #define Utf8LengthV2 Utf8Length
@@ -57,7 +63,7 @@ namespace workerd::rust::jsg {
   }
 
 #define DEFINE_TYPED_ARRAY_GET(name, v8_type, elem_type)                                           \
-  elem_type local_##name##_get(Isolate* isolate, const Local& array, size_t index) {               \
+  elem_type local_##name##_get(const Local& array, size_t index) {                                 \
     auto typed = local_as_ref_from_ffi<v8::v8_type>(array);                                        \
     KJ_REQUIRE(index < typed->Length(), "index out of bounds");                                    \
     auto data = reinterpret_cast<elem_type*>(                                                      \
@@ -68,16 +74,33 @@ namespace workerd::rust::jsg {
 // BackingStore — the size_t handle is the address of a heap-allocated
 // std::shared_ptr<v8::BackingStore> allocated with `new`.
 
-// Create an interned V8 string from a Rust identifier name (rust::String or rust::Str).
-// NewFromUtf8 returns an empty MaybeLocal (without scheduling a JS exception) when the
-// string exceeds v8::String::kMaxLength; the KJ_REQUIRE prevents a confusing ICE inside
-// jsg::check() by catching the overlong name early with a clear error message.
+// Creates a V8 string from UTF-8. NewFromUtf8 fails only when the string is longer than
+// v8::String::kMaxLength, and then leaves no JavaScript exception pending, so an overlong string
+// throws a KJ exception instead. The length is checked before the call, which keeps a length
+// above INT_MAX from reaching NewFromUtf8's int parameter, where a negative value means
+// "NUL-terminated". kMaxLength counts UTF-16 code units and the check counts UTF-8 bytes, of
+// which there are never fewer, so it may reject a long multi-byte string that V8 could hold, but
+// never lets through one that V8 would reject.
+static v8::Local<v8::String> newUtf8String(
+    v8::Isolate* isolate, kj::ArrayPtr<const char> utf8, v8::NewStringType type) {
+  KJ_REQUIRE(utf8.size() <= static_cast<size_t>(v8::String::kMaxLength),
+      "string exceeds V8's string length limit", utf8.size());
+  v8::Local<v8::String> result;
+  if (!v8::String::NewFromUtf8(isolate, utf8.begin(), type, static_cast<int>(utf8.size()))
+           .ToLocal(&result)) {
+    KJ_FAIL_REQUIRE("V8 failed to create a string", utf8.size());
+  }
+  return result;
+}
+
+// Creates an interned V8 string from a Rust identifier name (rust::String or rust::Str). An
+// overlong name is checked here too, so that the error names it.
 template <typename Name>
 static v8::Local<v8::String> makeInternedStr(v8::Isolate* isolate, const Name& name) {
   KJ_REQUIRE(name.size() <= static_cast<size_t>(v8::String::kMaxLength),
       "Rust identifier name exceeds V8 string length limit", name);
-  return ::workerd::jsg::check(
-      v8::String::NewFromUtf8(isolate, name.data(), v8::NewStringType::kInternalized, name.size()));
+  return newUtf8String(
+      isolate, kj::arrayPtr(name.data(), name.size()), v8::NewStringType::kInternalized);
 }
 
 // Wrappable implementation - calls into Rust via CXX bridge
@@ -104,15 +127,6 @@ size_t Wrappable::jsgGetMemorySelfSize() const {
 }
 
 // Local<T>
-void local_drop(Local value) {
-  // Convert from FFI representation and let v8::Local destructor handle cleanup
-  local_from_ffi<v8::Value>(kj::mv(value));
-}
-
-Local local_clone(const Local& value) {
-  return Local{.ptr = value.ptr};
-}
-
 Global local_to_global(Isolate* isolate, Local value) {
   v8::Global<v8::Value> global(isolate, local_from_ffi<v8::Value>(kj::mv(value)));
   return to_ffi(kj::mv(global));
@@ -124,8 +138,8 @@ Local local_new_number(Isolate* isolate, double value) {
 }
 
 Local local_new_string(Isolate* isolate, ::rust::Str value) {
-  auto val = ::workerd::jsg::check(
-      v8::String::NewFromUtf8(isolate, value.cbegin(), v8::NewStringType::kNormal, value.size()));
+  auto val =
+      newUtf8String(isolate, kj::arrayPtr(value.data(), value.size()), v8::NewStringType::kNormal);
   return to_ffi(kj::mv(val));
 }
 
@@ -153,8 +167,8 @@ bool local_eq(const Local& lhs, const Local& rhs) {
   return local_as_ref_from_ffi<v8::Value>(lhs) == local_as_ref_from_ffi<v8::Value>(rhs);
 }
 
-bool local_has_value(const Local& val) {
-  return *local_as_ref_from_ffi<v8::Value>(val) != nullptr;
+bool local_is_compatible_with_isolate(Isolate* isolate, const Local& value) {
+  return local_as_ref_from_ffi<v8::Data>(value)->IsCompatibleWithIsolate(isolate);
 }
 
 bool local_is_string(const Local& val) {
@@ -265,6 +279,14 @@ bool local_is_name(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsName();
 }
 
+bool local_is_big_int(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsBigInt();
+}
+
+bool local_is_date(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsDate();
+}
+
 bool local_is_shared_array_buffer(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsSharedArrayBuffer();
 }
@@ -354,9 +376,10 @@ bool local_string_is_flat(const Local& value) {
   return local_as_ref_from_ffi<v8::String>(value)->IsFlat();
 }
 
-Local local_string_concat(Isolate* isolate, Local left, Local right) {
-  return to_ffi(v8::String::Concat(isolate, local_from_ffi<v8::String>(kj::mv(left)),
-      local_from_ffi<v8::String>(kj::mv(right))));
+MaybeLocal local_string_concat(Isolate* isolate, Local left, Local right) {
+  // `Concat` returns an empty handle when the result would be too long.
+  return maybe_local_to_ffi(v8::MaybeLocal<v8::String>(v8::String::Concat(isolate,
+      local_from_ffi<v8::String>(kj::mv(left)), local_from_ffi<v8::String>(kj::mv(right)))));
 }
 
 Local local_string_internalize(Isolate* isolate, const Local& value) {
@@ -380,11 +403,6 @@ MaybeLocal local_string_new_from_two_byte(
     Isolate* isolate, const uint16_t* data, int32_t length, bool internalized) {
   auto type = internalized ? v8::NewStringType::kInternalized : v8::NewStringType::kNormal;
   return maybe_local_to_ffi(v8::String::NewFromTwoByte(isolate, data, type, length));
-}
-
-bool maybe_local_is_empty(const MaybeLocal& value) {
-  auto ptr_void = reinterpret_cast<const void*>(&value.ptr);
-  return reinterpret_cast<const v8::MaybeLocal<v8::Value>*>(ptr_void)->IsEmpty();
 }
 
 // Local<Name>
@@ -411,8 +429,31 @@ MaybeLocal local_symbol_description(Isolate* isolate, const Local& value) {
   return maybe_local_to_ffi(v8::MaybeLocal<v8::String>(desc.As<v8::String>()));
 }
 
+// Local<BigInt>
+Local big_int_new(Isolate* isolate, int64_t value) {
+  return to_ffi(v8::BigInt::New(isolate, value));
+}
+
+Local big_int_new_from_unsigned(Isolate* isolate, uint64_t value) {
+  return to_ffi(v8::BigInt::NewFromUnsigned(isolate, value));
+}
+
+int64_t local_big_int_int64_value(const Local& value, bool& lossless) {
+  return local_as_ref_from_ffi<v8::BigInt>(value)->Int64Value(&lossless);
+}
+
+// Local<Date>
+// Empty, with the exception pending, if creating the object throws.
+MaybeLocal date_new(Isolate* isolate, double time) {
+  return maybe_local_to_ffi(v8::Date::New(isolate->GetCurrentContext(), time));
+}
+
+double local_date_value_of(const Local& value) {
+  return local_as_ref_from_ffi<v8::Date>(value)->ValueOf();
+}
+
 // Local<Function>
-Local local_function_call(
+MaybeLocal local_function_call(
     Isolate* isolate, const Local& function, const Local& recv, ::rust::Slice<const Local> args) {
   auto context = isolate->GetCurrentContext();
   auto fn = local_as_ref_from_ffi<v8::Function>(function);
@@ -423,7 +464,20 @@ Local local_function_call(
     v8Args[i] = local_as_ref_from_ffi<v8::Value>(args[i]);
   }
 
-  return to_ffi(::workerd::jsg::check(fn->Call(context, receiver, v8Args.size(), v8Args.data())));
+  // No TryCatch: what the function throws stays pending and propagates once the Rust caller
+  // returns to JavaScript, as with C++ JSG. V8 then still reports it where it was thrown, and
+  // predicts whether JavaScript catches it (which DevTools' "pause on uncaught exceptions" uses)
+  // by walking the whole stack.
+  return maybe_local_to_ffi(fn->Call(context, receiver, v8Args.size(), v8Args.data()));
+}
+
+MaybeLocal function_new(Isolate* isolate, size_t callback, kj::Rc<Wrappable> wrappable) {
+  auto context = isolate->GetCurrentContext();
+  // Like the functions C++ JSG wraps (FunctionWrapper::wrap() in jsg/function.h): the wrapper
+  // keeps the Wrappable alive and traced for as long as the function is reachable.
+  auto data = wrappable->attachOpaqueWrapper(context, true);
+  return maybe_local_to_ffi(v8::Function::New(
+      context, reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)), data));
 }
 
 // Local<Object>
@@ -434,22 +488,21 @@ void local_object_set_property(Isolate* isolate, Local& object, ::rust::Str key,
   ::workerd::jsg::check(v8_obj->Set(context, v8_key, local_from_ffi<v8::Value>(kj::mv(value))));
 }
 
-bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key) {
+// No TryCatch in the shims below that run JavaScript: what it throws stays pending, as in
+// local_function_call().
+
+bool local_object_has_property(Isolate* isolate, const Local& object, ::rust::Str key, bool& has) {
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   auto v8_key = makeInternedStr(isolate, key);
-  return v8_obj->Has(context, v8_key).FromJust();
+  return v8_obj->Has(context, v8_key).To(&has);
 }
 
-kj::Maybe<Local> local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key) {
+MaybeLocal local_object_get_property(Isolate* isolate, const Local& object, ::rust::Str key) {
   auto v8_obj = local_as_ref_from_ffi<v8::Object>(object);
   auto context = isolate->GetCurrentContext();
   auto v8_key = makeInternedStr(isolate, key);
-  v8::Local<v8::Value> result;
-  if (!v8_obj->Get(context, v8_key).ToLocal(&result)) {
-    return kj::none;
-  }
-  return to_ffi(kj::mv(result));
+  return maybe_local_to_ffi(v8_obj->Get(context, v8_key));
 }
 
 // Local<Array>
@@ -457,7 +510,7 @@ Local local_new_array(Isolate* isolate, size_t length) {
   return to_ffi(v8::Array::New(isolate, length));
 }
 
-uint32_t local_array_length(Isolate* isolate, const Local& array) {
+uint32_t local_array_length(const Local& array) {
   return local_as_ref_from_ffi<v8::Array>(array)->Length();
 }
 
@@ -488,12 +541,10 @@ Local local_new_array_buffer_empty(Isolate* isolate, size_t byte_length) {
   return to_ffi(v8::ArrayBuffer::New(isolate, byte_length));
 }
 
-kj::Maybe<Local> array_buffer_new_with_mode(
+MaybeLocal array_buffer_new_with_mode(
     Isolate* isolate, size_t byte_length, BackingStoreInitializationMode mode) {
-  auto maybe = v8::ArrayBuffer::MaybeNew(
-      isolate, byte_length, static_cast<v8::BackingStoreInitializationMode>(mode));
-  if (maybe.IsEmpty()) return kj::none;
-  return to_ffi(maybe.ToLocalChecked());
+  return maybe_local_to_ffi(v8::ArrayBuffer::MaybeNew(
+      isolate, byte_length, static_cast<v8::BackingStoreInitializationMode>(mode)));
 }
 
 Local array_buffer_from_backing_store(Isolate* isolate, size_t ptr) {
@@ -501,29 +552,29 @@ Local array_buffer_from_backing_store(Isolate* isolate, size_t ptr) {
       v8::ArrayBuffer::New(isolate, *reinterpret_cast<std::shared_ptr<v8::BackingStore>*>(ptr)));
 }
 
-size_t local_array_buffer_byte_length(Isolate* isolate, const Local& buffer) {
+size_t local_array_buffer_byte_length(const Local& buffer) {
   return local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->ByteLength();
 }
 
-uint8_t* local_array_buffer_data(Isolate* isolate, const Local& buffer) {
+uint8_t* local_array_buffer_data(const Local& buffer) {
   return static_cast<uint8_t*>(local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->Data());
 }
 
-size_t local_array_buffer_get_backing_store(Isolate* isolate, const Local& buffer) {
+size_t local_array_buffer_get_backing_store(const Local& buffer) {
   return reinterpret_cast<size_t>(new std::shared_ptr<v8::BackingStore>(
       local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->GetBackingStore()));
 }
 
 // Local<ArrayBufferView>
-size_t local_array_buffer_view_byte_offset(Isolate* isolate, const Local& view) {
+size_t local_array_buffer_view_byte_offset(const Local& view) {
   return local_as_ref_from_ffi<v8::ArrayBufferView>(view)->ByteOffset();
 }
 
-size_t local_array_buffer_view_byte_length(Isolate* isolate, const Local& view) {
+size_t local_array_buffer_view_byte_length(const Local& view) {
   return local_as_ref_from_ffi<v8::ArrayBufferView>(view)->ByteLength();
 }
 
-uint8_t* local_array_buffer_view_buffer_data(Isolate* isolate, const Local& view) {
+uint8_t* local_array_buffer_view_buffer_data(const Local& view) {
   return static_cast<uint8_t*>(local_as_ref_from_ffi<v8::ArrayBufferView>(view)->Buffer()->Data());
 }
 
@@ -531,7 +582,7 @@ Local local_array_buffer_view_get_buffer(Isolate* isolate, const Local& view) {
   return to_ffi(local_as_ref_from_ffi<v8::ArrayBufferView>(view)->Buffer());
 }
 
-size_t local_array_buffer_view_element_size(Isolate* isolate, const Local& view) {
+size_t local_array_buffer_view_element_size(const Local& view) {
   auto& v8Val = local_as_ref_from_ffi<v8::Value>(view);
   if (v8Val->IsUint8Array() || v8Val->IsInt8Array() || v8Val->IsUint8ClampedArray()) return 1;
   if (v8Val->IsUint16Array() || v8Val->IsInt16Array()) return 2;
@@ -540,7 +591,7 @@ size_t local_array_buffer_view_element_size(Isolate* isolate, const Local& view)
   return 0;  // DataView — no fixed element size
 }
 
-bool local_array_buffer_view_is_integer_type(Isolate* isolate, const Local& view) {
+bool local_array_buffer_view_is_integer_type(const Local& view) {
   auto& v8Val = local_as_ref_from_ffi<v8::Value>(view);
   // Float32Array, Float64Array, and DataView are not integer types.
   return v8Val->IsTypedArray() && !v8Val->IsFloat32Array() && !v8Val->IsFloat64Array();
@@ -584,11 +635,11 @@ void local_array_buffer_detach(Isolate* isolate, Local& buffer) {
   local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->Detach(v8::Local<v8::Value>()).Check();
 }
 
-bool local_array_buffer_was_detached(Isolate* isolate, const Local& buffer) {
+bool local_array_buffer_was_detached(const Local& buffer) {
   return local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->WasDetached();
 }
 
-bool local_array_buffer_is_detachable(Isolate* isolate, const Local& buffer) {
+bool local_array_buffer_is_detachable(const Local& buffer) {
   return local_as_ref_from_ffi<v8::ArrayBuffer>(buffer)->IsDetachable();
 }
 
@@ -610,10 +661,14 @@ DEFINE_TYPED_ARRAY_NEW(bigint64_array, BigInt64Array, int64_t)
 DEFINE_TYPED_ARRAY_NEW(biguint64_array, BigUint64Array, uint64_t)
 
 // Wrappers
-Local wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl) {
+MaybeLocal wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl) {
+  if (wrappable->hasWrapper() && wrappable->getIsolate() != isolate) {
+    return MaybeLocal{.ptr = 0};
+  }
+
   // Check if already wrapped
   KJ_IF_SOME(handle, wrappable->tryGetHandle(isolate)) {
-    return to_ffi(v8::Local<v8::Value>::Cast(handle));
+    return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(handle));
   }
 
   auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
@@ -631,7 +686,7 @@ Local wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global&
       tagAddress,
       static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
 
-  return to_ffi(v8::Local<v8::Value>::Cast(object));
+  return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(object));
 }
 
 void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args) {
@@ -651,59 +706,43 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
 
 // Unwrappers
 
-// Runs `fn` (returning a v8::MaybeLocal<T>) and, on failure, converts the pending
-// JS exception into a `jsg.<Type>:`-prefixed kj::Exception and throws it, so
-// workerd-cxx's Result::run catches it in C++ and hands Rust a catchable error
-// instead of aborting. Termination exceptions are re-thrown unchanged. The
-// TryCatch and termination handling are delegated to jsg::Lock::tryCatch.
-template <typename T, typename Func>
-static v8::Local<T> unwrapCoerce(v8::Isolate* isolate, Func&& fn) {
-  auto& js = ::workerd::jsg::Lock::from(isolate);
-  JSG_TRY(js) {
-    return ::workerd::jsg::check(fn());
-  }
-  JSG_CATCH(error) {
-    kj::throwFatalException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
-  };
-}
-
-::rust::String unwrap_string(Isolate* isolate, Local value) {
+bool unwrap_string(Isolate* isolate, Local value, ::rust::String& result) {
   auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
-  // Fast path: a string primitive needs no coercion and can't throw, so skip
-  // the TryCatch/ToString machinery. (String wrapper objects are not IsString.)
+  // Fast path: a string primitive needs no coercion and can't throw. (String wrapper objects are
+  // not IsString.)
   v8::Local<v8::String> v8Str;
   if (v8Value->IsString()) {
     v8Str = v8Value.As<v8::String>();
-  } else {
-    auto context = isolate->GetCurrentContext();
-    v8Str = unwrapCoerce<v8::String>(isolate, [&] { return v8Value->ToString(context); });
+  } else if (!v8Value->ToString(isolate->GetCurrentContext()).ToLocal(&v8Str)) {
+    return false;
   }
   v8::String::ValueView view(isolate, v8Str);
   if (!view.is_one_byte()) {
     // lossy(): lone surrogates become U+FFFD instead of throwing (which aborts).
-    return ::rust::String::lossy(reinterpret_cast<const char16_t*>(view.data16()), view.length());
+    result = ::rust::String::lossy(reinterpret_cast<const char16_t*>(view.data16()), view.length());
+  } else {
+    result = ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
   }
-  return ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
+  return true;
 }
 
 bool unwrap_boolean(Isolate* isolate, Local value) {
   return local_from_ffi<v8::Value>(kj::mv(value))->ToBoolean(isolate)->Value();
 }
 
-double unwrap_number(Isolate* isolate, Local value) {
+bool unwrap_number(Isolate* isolate, Local value, double& result) {
   auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
   // Fast path: a number primitive needs no coercion and can't throw.
   if (v8Value->IsNumber()) {
-    return v8Value.As<v8::Number>()->Value();
+    result = v8Value.As<v8::Number>()->Value();
+    return true;
   }
-  auto context = isolate->GetCurrentContext();
-  v8::Local<v8::Number> number =
-      unwrapCoerce<v8::Number>(isolate, [&] { return v8Value->ToNumber(context); });
-  return number->Value();
+  return v8Value->NumberValue(isolate->GetCurrentContext()).To(&result);
 }
 
-kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value) {
-  auto v8_val = local_from_ffi<v8::Value>(kj::mv(value));
+namespace {
+// Creates no handles, so fast callbacks can use it without a HandleScope.
+kj::Maybe<Wrappable&> tryUnwrapRustWrappable(Isolate* isolate, v8::Local<v8::Value> v8_val) {
   // Non-object values (numbers, strings, booleans, etc.) are never wrapped resources.
   if (!v8_val->IsObject()) return kj::none;
   auto v8_obj = v8_val.As<v8::Object>();
@@ -724,8 +763,15 @@ kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value) {
     KJ_LOG(FATAL, "wrapper type mismatch: marked object's CppHeap handle resolves to no wrappable");
     abort();
   }
-  auto* ptr = static_cast<Wrappable*>(reinterpret_cast<::workerd::jsg::Wrappable*>(wrappable));
-  return ptr->toRc();
+  return *static_cast<Wrappable*>(reinterpret_cast<::workerd::jsg::Wrappable*>(wrappable));
+}
+}  // namespace
+
+kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value) {
+  KJ_IF_SOME(wrappable, tryUnwrapRustWrappable(isolate, local_from_ffi<v8::Value>(kj::mv(value)))) {
+    return wrappable.toRc();
+  }
+  return kj::none;
 }
 
 // TypedArray unwrap functions
@@ -742,13 +788,7 @@ DEFINE_TYPED_ARRAY_UNWRAP(biguint64_array, BigUint64Array, uint64_t)
 
 // Uses V8's Array::Iterate() which is faster than indexed access.
 // Returns Global handles because Local handles get reused during iteration.
-//
-// Iterate() can fail with a *pending* V8 exception rather than a KJ one -- e.g. a
-// throwing Proxy trap or getter on one of the array's elements. That must be tunneled
-// through the same `jsg.<Type>:`-prefixed kj::Exception mechanism as `unwrapCoerce`
-// uses (see above), rather than discarded in favor of a generic KJ_REQUIRE failure,
-// or the real error is lost and the pending exception is left dangling on the isolate.
-::rust::Vec<Global> local_array_iterate(Isolate* isolate, Local value) {
+bool local_array_iterate(Isolate* isolate, Local value, ::rust::Vec<Global>& result) {
   auto context = isolate->GetCurrentContext();
   auto v8Val = local_from_ffi<v8::Value>(kj::mv(value));
 
@@ -759,49 +799,52 @@ DEFINE_TYPED_ARRAY_UNWRAP(biguint64_array, BigUint64Array, uint64_t)
     Isolate* isolate;
     ::rust::Vec<Global>* result;
   };
-
-  ::rust::Vec<Global> result;
   Data data{isolate, &result};
 
-  auto& js = ::workerd::jsg::Lock::from(isolate);
-  JSG_TRY(js) {
-    auto iterateResult = arr->Iterate(context,
-        [](uint32_t index, v8::Local<v8::Value> element,
-            void* userData) -> v8::Array::CallbackResult {
-      auto* d = static_cast<Data*>(userData);
-      d->result->push_back(to_ffi(v8::Global<v8::Value>(d->isolate, element)));
-      return v8::Array::CallbackResult::kContinue;
-    },
-        &data);
-    // iterateResult is a v8::Maybe<void>, so the v8::Maybe<T> overload of
-    // jsg::check() (which needs a default-constructible T to write into) doesn't
-    // apply; throw JsExceptionThrown() directly, same as check() does internally.
-    if (iterateResult.IsNothing()) {
-      throw ::workerd::jsg::JsExceptionThrown();
+  auto iterateResult = arr->Iterate(context,
+      [](uint32_t index, v8::Local<v8::Value> element,
+          void* userData) -> v8::Array::CallbackResult {
+    auto* d = static_cast<Data*>(userData);
+    d->result->push_back(to_ffi(v8::Global<v8::Value>(d->isolate, element)));
+    return v8::Array::CallbackResult::kContinue;
+  },
+      &data);
+  if (iterateResult.IsNothing()) {
+    // A getter or Proxy trap on an element threw. ffi::Global has no destructor in Rust, so the
+    // handles collected so far would stay strong roots until the isolate is disposed.
+    for (auto& global: result) {
+      global_reset(global);
     }
+    result.clear();
+    return false;
   }
-  JSG_CATCH(error) {
-    kj::throwFatalException(::workerd::jsg::createTunneledException(isolate, error.getHandle(js)));
-  };
-
-  return result;
+  return true;
 }
 
 // Local<TypedArray>
-size_t local_typed_array_length(Isolate* isolate, const Local& array) {
+Local uint8_array_from_buffer(
+    Isolate* isolate, const Local& buffer, size_t byte_offset, size_t length) {
+  auto arrayBuffer = local_as_ref_from_ffi<v8::ArrayBuffer>(buffer);
+  KJ_REQUIRE(
+      byte_offset <= arrayBuffer->ByteLength() && length <= arrayBuffer->ByteLength() - byte_offset,
+      "Uint8Array view is out of bounds of its ArrayBuffer");
+  return to_ffi(v8::Uint8Array::New(arrayBuffer, byte_offset, length));
+}
+
+size_t local_typed_array_length(const Local& array) {
   return local_as_ref_from_ffi<v8::TypedArray>(array)->Length();
 }
 
-uintptr_t local_typed_array_buffer_data(Isolate* isolate, const Local& array) {
+uintptr_t local_typed_array_buffer_data(const Local& array) {
   return reinterpret_cast<uintptr_t>(
       local_as_ref_from_ffi<v8::TypedArray>(array)->Buffer()->Data());
 }
 
-size_t local_typed_array_byte_offset(Isolate* isolate, const Local& array) {
+size_t local_typed_array_byte_offset(const Local& array) {
   return local_as_ref_from_ffi<v8::TypedArray>(array)->ByteOffset();
 }
 
-size_t local_typed_array_byte_length(Isolate* isolate, const Local& array) {
+size_t local_typed_array_byte_length(const Local& array) {
   return local_as_ref_from_ffi<v8::TypedArray>(array)->ByteLength();
 }
 
@@ -886,8 +929,15 @@ void wrappable_visit_global(GcVisitor* visitor, uintptr_t* global, TracedReferen
   gcVisitor->visit(strongHandle, tracedHandle);
 }
 
-void traced_reference_reset(TracedReference& traced) {
-  traced_ref_from_ffi(traced).Reset();
+Isolate* gc_visitor_v8_isolate(GcVisitor* visitor) {
+  return gc_visitor_from_ffi(visitor)->v8Isolate();
+}
+
+void global_clear_weak(uintptr_t* global) {
+  auto& handle = *reinterpret_cast<v8::Global<v8::Value>*>(global);
+  if (!handle.IsEmpty()) {
+    handle.ClearWeak<void>();
+  }
 }
 
 void wrappable_visit_ref(
@@ -923,6 +973,10 @@ size_t fci_get_length(FunctionCallbackInfo* args) {
   return args->Length();
 }
 
+bool fci_is_construct_call(FunctionCallbackInfo* args) {
+  return args->IsConstructCall();
+}
+
 Local fci_get_arg(FunctionCallbackInfo* args, size_t index) {
   return to_ffi((*args)[index]);
 }
@@ -930,6 +984,167 @@ Local fci_get_arg(FunctionCallbackInfo* args, size_t index) {
 void fci_set_return_value(FunctionCallbackInfo* args, Local value) {
   args->GetReturnValue().Set(local_from_ffi<v8::Value>(kj::mv(value)));
 }
+
+kj::Maybe<kj::Rc<Wrappable>> fci_get_data_wrappable(FunctionCallbackInfo* args) {
+  auto data = args->DataV2().As<v8::Value>();
+  KJ_IF_SOME(wrappable, ::workerd::jsg::Wrappable::tryUnwrapOpaque(args->GetIsolate(), data)) {
+    // C++ JSG's wrapped functions also have an opaque wrapper as their data, so check the type,
+    // as ::workerd::jsg::downcastWrappable() does.
+    const auto& actualType = typeid(wrappable);
+    if (&actualType == &typeid(Wrappable) || actualType == typeid(Wrappable)) {
+      return kj::downcast<Wrappable>(wrappable).toRc();
+    }
+  }
+  return kj::none;
+}
+
+Isolate* pci_get_isolate(PropertyCallbackInfo* info) {
+  return info->GetIsolate();
+}
+
+Local pci_get_this(PropertyCallbackInfo* info) {
+  return to_ffi(info->Holder());
+}
+
+void pci_set_return_value(PropertyCallbackInfo* info, Local value) {
+  info->GetReturnValue().Set(local_from_ffi<v8::Value>(kj::mv(value)));
+}
+
+Isolate* psci_get_isolate(PropertySetterCallbackInfo* info) {
+  return info->GetIsolate();
+}
+
+Local psci_get_this(PropertySetterCallbackInfo* info) {
+  return to_ffi(info->Holder());
+}
+
+Isolate* pqci_get_isolate(PropertyQueryCallbackInfo* info) {
+  return info->GetIsolate();
+}
+
+Local pqci_get_this(PropertyQueryCallbackInfo* info) {
+  return to_ffi(info->Holder());
+}
+
+// FastApiCallbackOptions
+TraitObjectPtr fast_api_unwrap_receiver(FastApiCallbackOptions* options, Local receiver) {
+  KJ_IF_SOME(wrappable,
+      tryUnwrapRustWrappable(options->isolate, local_from_ffi<v8::Value>(kj::mv(receiver)))) {
+    return wrappable.trait_object;
+  }
+  return {};
+}
+
+void fast_api_throw_exception(
+    FastApiCallbackOptions* options, ExceptionType exceptionType, ::rust::Str message) {
+  v8::HandleScope scope(options->isolate);
+  isolate_throw_exception(options->isolate,
+      exception_create_from_bytes(options->isolate, exceptionType,
+          reinterpret_cast<const uint8_t*>(message.data()), static_cast<int32_t>(message.size())));
+}
+
+void fast_api_throw_internal_error(FastApiCallbackOptions* options, ::rust::Str internalMessage) {
+  v8::HandleScope scope(options->isolate);
+  isolate_throw_internal_error(options->isolate, internalMessage);
+}
+
+void fast_api_terminate_execution(FastApiCallbackOptions* options) {
+  isolate_terminate_execution(options->isolate);
+}
+
+namespace {
+v8::CTypeInfo cTypeOf(FastApiType type) {
+  switch (type) {
+    case FastApiType::Void:
+      return v8::CTypeInfo(v8::CTypeInfo::Type::kVoid);
+    case FastApiType::Bool:
+      return v8::CTypeInfo(v8::CTypeInfo::Type::kBool);
+    case FastApiType::Float64:
+      return v8::CTypeInfo(v8::CTypeInfo::Type::kFloat64);
+  }
+  KJ_UNREACHABLE;
+}
+
+// V8 keeps a pointer to the CFunction, so it lives for the rest of the process.
+struct FastCFunction {
+  FastCFunction(const FastApiDescriptor& descriptor)
+      : returnType(cTypeOf(descriptor.return_type)),
+        argTypes(buildArgTypes(descriptor)),
+        info(returnType, argTypes.size(), argTypes.begin()),
+        function(reinterpret_cast<const void*>(descriptor.callback), &info) {}
+
+  static kj::Array<v8::CTypeInfo> buildArgTypes(const FastApiDescriptor& descriptor) {
+    auto builder = kj::heapArrayBuilder<v8::CTypeInfo>(descriptor.arg_types.size() + 2);
+    builder.add(v8::CTypeInfo(v8::CTypeInfo::Type::kV8Value));
+    for (auto type: descriptor.arg_types) {
+      builder.add(cTypeOf(type));
+    }
+    builder.add(v8::CTypeInfo(v8::CTypeInfo::kCallbackOptionsType));
+    return builder.finish();
+  }
+
+  v8::CTypeInfo returnType;
+  kj::Array<v8::CTypeInfo> argTypes;
+  v8::CFunctionInfo info;
+  v8::CFunction function;
+};
+
+const v8::CFunction& getFastCFunction(const FastApiDescriptor& descriptor) {
+  using Map = kj::HashMap<size_t, kj::Own<FastCFunction>>;
+  static kj::MutexGuarded<Map> functions;
+  auto lock = functions.lockExclusive();
+  return lock
+      ->findOrCreate(descriptor.callback, [&]() -> Map::Entry {
+    return {descriptor.callback, kj::heap<FastCFunction>(descriptor)};
+  })->function;
+}
+
+// The descriptor callback of a wildcard property, as in C++ JSG's WildcardPropertyCallbacks
+// (resource.h): a wildcard property is never an own property, so `hasOwnProperty()` is false
+// and `Object.getOwnPropertyDescriptor()` is undefined for it.
+v8::Intercepted wildcardPropertyDescriptor(
+    v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
+  return v8::Intercepted::kNo;
+}
+
+// The Rust callbacks of a wildcard property return the `v8::Intercepted` as a `u32`, and take
+// the `v8::Local<v8::Name>` as a `usize` and the `PropertyCallbackInfo` by pointer.
+static_assert(std::is_same_v<std::underlying_type_t<v8::Intercepted>, uint32_t>);
+static_assert(static_cast<uint32_t>(v8::Intercepted::kYes) == 0);
+static_assert(static_cast<uint32_t>(v8::Intercepted::kNo) == 1);
+static_assert(std::is_trivially_copyable_v<v8::Local<v8::Name>>);
+static_assert(sizeof(v8::Local<v8::Name>) == sizeof(size_t));
+
+// Installs the wildcard property on `instance`, with the flags of C++ JSG's
+// WildcardPropertyCallbacks: properties of the object or its prototypes take precedence
+// (`kNonMasking`), symbols are not intercepted (`kOnlyInterceptStrings`), and the debugger may
+// call the callbacks while evaluating without side effects (`kHasNoSideEffect`).
+template <typename RegisterExternalRef>
+void setWildcardProperty(v8::Local<v8::ObjectTemplate> instance,
+    const WildcardPropertyDescriptor& wildcard,
+    RegisterExternalRef& registerExternalRef) {
+  registerExternalRef(wildcard.getter_callback);
+  registerExternalRef(wildcard.query_callback);
+  registerExternalRef(reinterpret_cast<size_t>(&wildcardPropertyDescriptor));
+  instance->SetHandler(v8::NamedPropertyHandlerConfiguration(
+      reinterpret_cast<v8::NamedPropertyGetterCallback>(wildcard.getter_callback), nullptr,
+      reinterpret_cast<v8::NamedPropertyQueryCallback>(wildcard.query_callback), nullptr, nullptr,
+      nullptr, &wildcardPropertyDescriptor, v8::Local<v8::Value>(),
+      static_cast<v8::PropertyHandlerFlags>(
+          static_cast<int>(v8::PropertyHandlerFlags::kNonMasking) |
+          static_cast<int>(v8::PropertyHandlerFlags::kHasNoSideEffect) |
+          static_cast<int>(v8::PropertyHandlerFlags::kOnlyInterceptStrings))));
+}
+
+// The constructor of a resource without a #[jsg_constructor], with the error that C++ JSG's
+// throwIllegalConstructor() throws.
+void throwIllegalConstructor(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  auto* isolate = args.GetIsolate();
+  if (isolate->IsExecutionTerminating()) return;
+  isolate->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8Literal(
+      isolate, "Illegal constructor", v8::NewStringType::kInternalized)));
+}
+}  // namespace
 
 Global create_resource_template(Isolate* isolate, const ResourceDescriptor& descriptor) {
   // Construct lazily.
@@ -948,8 +1163,8 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
         reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(descriptor.callback)));
     registerExternalRef(descriptor.callback);
   } else {
-    constructor = v8::FunctionTemplate::New(isolate, &workerd::jsg::throwIllegalConstructor);
-    registerExternalRef(reinterpret_cast<size_t>(&workerd::jsg::throwIllegalConstructor));
+    constructor = v8::FunctionTemplate::New(isolate, &throwIllegalConstructor);
+    registerExternalRef(reinterpret_cast<size_t>(&throwIllegalConstructor));
   }
 
   auto prototype = constructor->PrototypeTemplate();
@@ -961,8 +1176,8 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
 
   instance->SetInternalFieldCount(workerd::jsg::Wrappable::INTERNAL_FIELD_COUNT);
 
-  auto classname = ::workerd::jsg::check(v8::String::NewFromUtf8(
-      isolate, descriptor.name.data(), v8::NewStringType::kNormal, descriptor.name.size()));
+  auto classname = newUtf8String(isolate,
+      kj::arrayPtr(descriptor.name.data(), descriptor.name.size()), v8::NewStringType::kNormal);
 
   if (workerd::jsg::getShouldSetToStringTag(isolate)) {
     prototype->Set(v8::Symbol::GetToStringTag(isolate), classname, v8::PropertyAttribute::DontEnum);
@@ -974,22 +1189,39 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
       static_cast<v8::PropertyAttribute>(v8::PropertyAttribute::DontEnum |
           v8::PropertyAttribute::DontDelete | v8::PropertyAttribute::ReadOnly));
 
+  if (workerd::jsg::getShouldSetImmutablePrototype(isolate)) {
+    constructor->ReadOnlyPrototype();
+  }
+
   constructor->SetClassName(classname);
 
-  for (const auto& method: descriptor.static_methods) {
-    auto functionTemplate = v8::FunctionTemplate::New(isolate,
-        reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(method.callback)),
-        v8::Local<v8::Value>(), v8::Local<v8::Signature>(), 0, v8::ConstructorBehavior::kThrow);
+  const bool fastApiEnabled = ::workerd::jsg::IsolateBase::from(isolate).isFastApiEnabled();
+
+  auto makeMethod = [&](const MethodDescriptor& method, v8::Local<v8::Signature> methodSignature) {
     registerExternalRef(method.callback);
+    auto callback =
+        reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(method.callback));
+    if (fastApiEnabled) {
+      KJ_IF_SOME(fast, method.fast) {
+        const auto& cFunction = getFastCFunction(fast);
+        registerExternalRef(reinterpret_cast<size_t>(&cFunction));
+        return v8::FunctionTemplate::NewWithCFunctionOverloads(isolate, callback,
+            v8::Local<v8::Value>(), methodSignature, 0, v8::ConstructorBehavior::kThrow,
+            v8::SideEffectType::kHasSideEffect, {&cFunction, 1});
+      }
+    }
+    return v8::FunctionTemplate::New(isolate, callback, v8::Local<v8::Value>(), methodSignature, 0,
+        v8::ConstructorBehavior::kThrow);
+  };
+
+  for (const auto& method: descriptor.static_methods) {
+    auto functionTemplate = makeMethod(method, v8::Local<v8::Signature>());
     functionTemplate->RemovePrototype();
     constructor->Set(makeInternedStr(isolate, method.name), functionTemplate);
   }
 
   for (const auto& method: descriptor.methods) {
-    auto functionTemplate = v8::FunctionTemplate::New(isolate,
-        reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(method.callback)),
-        v8::Local<v8::Value>(), signature, 0, v8::ConstructorBehavior::kThrow);
-    registerExternalRef(method.callback);
+    auto functionTemplate = makeMethod(method, signature);
     auto name = makeInternedStr(isolate, method.name);
     prototype->Set(name, functionTemplate);
   }
@@ -1053,21 +1285,36 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
         break;
       }
       case PropertyKind::Instance: {
-        // Mirrors registerInstanceProperty / registerReadonlyInstanceProperty in resource.h.
-        //
-        // We use ObjectTemplate::SetAccessorProperty with FunctionTemplates rather than
-        // SetNativeDataProperty because our Rust callbacks are FunctionCallbackInfo-style
-        // (matching #[jsg_method]), not PropertyCallbackInfo-style.
-        // SetAccessorProperty on the InstanceTemplate installs the accessor as an own
-        // property on every instance, matching JSG_INSTANCE_PROPERTY semantics.
-        auto getterFn = makePropFn(prop.getter_callback, true /* isGetter */);
+        // Mirrors registerInstanceProperty / registerReadonlyInstanceProperty in resource.h: a
+        // native data property, which reads as a plain data property from JS.
+        // The Rust callbacks take each v8::Local as a usize. That matches the C++ signature on
+        // every ABI we target because v8::Local is one trivially copyable pointer.
+        static_assert(std::is_trivially_copyable_v<v8::Local<v8::Value>>);
+        static_assert(sizeof(v8::Local<v8::Value>) == sizeof(size_t));
+        registerExternalRef(prop.getter_callback);
+        auto getter = reinterpret_cast<v8::AccessorNameGetterCallback>(prop.getter_callback);
         KJ_IF_SOME(setterCb, prop.setter_callback) {
-          auto setterFn = makePropFn(setterCb, false /* isGetter */);
-          instance->SetAccessorProperty(v8Name, getterFn, setterFn, v8::PropertyAttribute::None);
+          registerExternalRef(setterCb);
+          instance->SetNativeDataProperty(v8Name, getter,
+              reinterpret_cast<v8::AccessorNameSetterCallbackV2>(setterCb), v8::Local<v8::Value>(),
+              v8::PropertyAttribute::None);
         } else {
-          instance->SetAccessorProperty(
-              v8Name, getterFn, v8::Local<v8::FunctionTemplate>(), v8::PropertyAttribute::ReadOnly);
+          instance->SetNativeDataProperty(
+              v8Name, getter, nullptr, v8::Local<v8::Value>(), v8::PropertyAttribute::ReadOnly);
         }
+        break;
+      }
+      case PropertyKind::LazyInstance:
+      case PropertyKind::LazyReadonlyInstance: {
+        // Mirrors registerLazyInstanceProperty in resource.h: V8 runs the getter on first access
+        // and replaces the property with a data property holding its result. The getter is an
+        // AccessorNameGetterCallback, like the Instance kind's (see the static_asserts there).
+        registerExternalRef(prop.getter_callback);
+        auto getter = reinterpret_cast<v8::AccessorNameGetterCallback>(prop.getter_callback);
+        auto attributes = prop.kind == PropertyKind::LazyReadonlyInstance
+            ? v8::PropertyAttribute::ReadOnly
+            : v8::PropertyAttribute::None;
+        instance->SetLazyDataProperty(v8Name, getter, v8::Local<v8::Value>(), attributes);
         break;
       }
       case PropertyKind::Inspect: {
@@ -1103,6 +1350,10 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
     prototype->Set(name, value, attrs);
   }
 
+  KJ_IF_SOME(wildcard, descriptor.wildcard_property) {
+    setWildcardProperty(instance, wildcard, registerExternalRef);
+  }
+
   auto result = scope.Escape(constructor);
   return to_ffi(v8::Global<v8::FunctionTemplate>(isolate, result));
 }
@@ -1115,12 +1366,54 @@ Local function_template_get_function(Isolate* isolate, const Global& tmpl) {
   return to_ffi(kj::mv(function));
 }
 
+// Mirrors registerNestedType() (resource.h): the nested type's constructor is a property of the
+// prototype, so that it is inherited along with the prototype.
+void function_template_set_nested_type(
+    Isolate* isolate, const Global& tmpl, ::rust::Str name, const Global& nested) {
+  v8::HandleScope scope(isolate);
+  auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(
+      isolate, global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl));
+  auto local_nested = v8::Local<v8::FunctionTemplate>::New(
+      isolate, global_as_ref_from_ffi<v8::FunctionTemplate>(nested));
+  local_tmpl->PrototypeTemplate()->Set(makeInternedStr(isolate, name), local_nested);
+}
+
 // Realm
 Realm* realm_from_isolate(Isolate* isolate) {
   auto* realm =
       static_cast<Realm*>(isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM));
   KJ_ASSERT(realm != nullptr, "Rust Realm not set on isolate");
   return realm;
+}
+
+namespace {
+// The IsolateBase deferred action hook of an isolate with a Rust Realm.
+void resetGlobalsAwaitingLock(v8::Isolate* isolate) {
+  realm_reset_globals_awaiting_lock(isolate);
+}
+
+// The IsolateBase dispose hook that a Realm sets when it is dropped, with the reference to its
+// IsolateState that it hands over as data.
+void isolateDisposed(void* data) {
+  isolate_disposed(static_cast<const IsolateState*>(data));
+}
+}  // namespace
+
+bool realm_can_attach(Isolate* isolate) {
+  return isolate->GetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM) == nullptr &&
+      !::workerd::jsg::IsolateBase::from(isolate).hasDisposeHook();
+}
+
+void realm_attach(Isolate* isolate, Realm& realm) {
+  isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, &realm);
+  ::workerd::jsg::IsolateBase::from(isolate).setDeferredActionHook(&resetGlobalsAwaitingLock);
+}
+
+void realm_detach(Isolate* isolate, const IsolateState* state) {
+  auto& isolateBase = ::workerd::jsg::IsolateBase::from(isolate);
+  isolateBase.setDeferredActionHook(nullptr);
+  isolateBase.setDisposeHook(&isolateDisposed, const_cast<IsolateState*>(state));
+  isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, nullptr);
 }
 
 // Errors
@@ -1150,13 +1443,35 @@ Local exception_create_from_bytes(
   // internalized string table (which is never GC'd). NewFromUtf8 replaces
   // invalid sequences with U+FFFD, matching the legacy jsg::Lock::error() /
   // js.str() behavior.
-  auto message = ::workerd::jsg::check(v8::String::NewFromUtf8(
-      isolate, reinterpret_cast<const char*>(data), v8::NewStringType::kNormal, length));
+  auto message = newUtf8String(isolate,
+      kj::arrayPtr(reinterpret_cast<const char*>(data), static_cast<size_t>(length)),
+      v8::NewStringType::kNormal);
   return exceptionCreateFromMessage(exception_type, message);
+}
+
+// TryCatch
+bool catch_exception(v8::TryCatch& tryCatch, MaybeLocal& exception) {
+  // The rule of jsg::Lock::tryCatch(): nothing caught means a termination, which V8 may already
+  // have cleared once all JavaScript frames unwound.
+  if (!tryCatch.CanContinue() || !tryCatch.HasCaught() || tryCatch.Exception().IsEmpty()) {
+    tryCatch.ReThrow();
+    return false;
+  }
+  exception = maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(tryCatch.Exception()));
+  return true;
+}
+
+void isolate_try_catch(
+    Isolate* isolate, size_t data, ::rust::Fn<bool(size_t)> callback, MaybeLocal& exception) {
+  v8::TryCatch tryCatch(isolate);
+  if (callback(data)) {
+    catch_exception(tryCatch, exception);
+  }
 }
 
 // Isolate
 void isolate_throw_exception(Isolate* isolate, Local exception) {
+  if (isolate->IsExecutionTerminating()) return;
   isolate->ThrowException(local_from_ffi<v8::Value>(kj::mv(exception)));
 }
 
@@ -1164,19 +1479,25 @@ void isolate_throw_error(Isolate* isolate, ::rust::Str description) {
   // kNormal (not kInternalized): error messages are arbitrary caller-supplied
   // strings and should not pollute the internalized string table (which is never
   // GC'd), matching C++ jsg::Lock::v8Error() / v8Str() behavior.
-  auto message = ::workerd::jsg::check(v8::String::NewFromUtf8(
-      isolate, description.data(), v8::NewStringType::kNormal, description.size()));
+  if (isolate->IsExecutionTerminating()) return;
+  auto message = newUtf8String(
+      isolate, kj::arrayPtr(description.data(), description.size()), v8::NewStringType::kNormal);
   isolate->ThrowError(message);
 }
 
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage) {
-  // Mirrors makeInternalError() from util.c++: generates a unique error ID,
-  // logs the internal message (with ID) to KJ_LOG(ERROR) for Sentry, and
-  // throws a generic "internal error; reference = <id>" JS Error to the caller.
   // kj::heapString(data, size) copies exactly `size` bytes and appends a NUL,
   // avoiding the out-of-bounds read that kj::StringPtr(data, size) would cause
   // on non-NUL-terminated Rust &str data.
   auto message = kj::heapString(internalMessage.data(), internalMessage.size());
+  if (isolate->IsExecutionTerminating()) {
+    // Logs the message, but creates no error: creating one while execution is terminating fails
+    // a V8 debug check, and it would not be thrown.
+    KJ_LOG(ERROR, message);
+    return;
+  }
+  // makeInternalError() generates a unique error ID, logs the internal message (with ID) to
+  // KJ_LOG(ERROR) for Sentry, and returns a generic "internal error; reference = <id>" JS Error.
   isolate->ThrowException(::workerd::jsg::makeInternalError(isolate, message));
 }
 
@@ -1184,8 +1505,26 @@ void isolate_terminate_execution(Isolate* isolate) {
   ::workerd::jsg::IsolateBase::from(isolate).terminateExecution();
 }
 
+bool isolate_is_execution_terminating(Isolate* isolate) {
+  return isolate->IsExecutionTerminating();
+}
+
+bool isolate_has_pending_exception(Isolate* isolate) {
+  return isolate->HasPendingException();
+}
+
+void ignore_leak(size_t ptr) {
+#if KJ_HAS_COMPILER_FEATURE(address_sanitizer) || defined(__SANITIZE_ADDRESS__)
+  __lsan_ignore_object(reinterpret_cast<const void*>(ptr));
+#endif
+}
+
 bool isolate_is_locked(Isolate* isolate) {
   return v8::Locker::IsLocked(isolate);
+}
+
+bool isolate_in_context(Isolate* isolate) {
+  return isolate->InContext();
 }
 
 }  // namespace workerd::rust::jsg

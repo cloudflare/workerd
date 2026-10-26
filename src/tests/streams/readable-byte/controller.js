@@ -8,15 +8,13 @@
 
 import { strictEqual, ok, throws, deepStrictEqual } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
-import { drainBytes, rejectionOf } from 'helpers';
+import { assertFractionalFillError, drainBytes, rejectionOf } from 'helpers';
 
 // DIVERGENCE (the subject of the streams_no_default_auto_allocate_
 // chunk_size flag): with a DEFAULT reader and no autoAllocateChunkSize,
 // C++ auto-allocates anyway — pull() sees a byobRequest with a real
 // view; TypeScript follows the spec and reports byobRequest null. The
-// C++ default allocation is 4096 bytes, or 16384 with the
-// UPDATED_AUTO_ALLOCATE_CHUNK_SIZE autogate on (the @all-autogates
-// variant), so both exact sizes are pinned.
+// C++ default allocation is 4096 bytes.
 export const byobRequestOnDefaultRead = {
   async test() {
     let seen = 'not-pulled';
@@ -34,10 +32,7 @@ export const byobRequestOnDefaultRead = {
     if (usingTsImpl) {
       strictEqual(seen, 'null');
     } else {
-      ok(
-        seen === 'view(4096)' || seen === 'view(16384)',
-        `unexpected allocation: ${seen}`
-      );
+      ok(seen === 'view(4096)', `unexpected allocation: ${seen}`);
     }
   },
 };
@@ -86,10 +81,8 @@ export const closeWithPartiallyFilledView = {
         message: 'Insufficient bytes to fill elements in the given view',
       };
       throws(() => controller.close(), expected);
-      const readErr = await rejectionOf(readP);
-      strictEqual(readErr.message, expected.message);
-      const closedErr = await rejectionOf(reader.closed);
-      strictEqual(closedErr.message, expected.message);
+      assertFractionalFillError(await rejectionOf(readP));
+      assertFractionalFillError(await rejectionOf(reader.closed));
     } else {
       controller.close();
       const r = await readP;
@@ -151,8 +144,9 @@ export const closeWithPartiallyFilledViewDetached = {
           last = reader.read(new Uint16Array(4));
         }
         if (usingTsImpl) {
-          strictEqual((await rejectionOf(last)).message, expected);
-          strictEqual((await rejectionOf(reader.closed)).message, expected);
+          const error = await rejectionOf(last);
+          assertFractionalFillError(error);
+          strictEqual(await rejectionOf(reader.closed), error);
         } else {
           const r = await last;
           // A read pending at close() settles with the tail shape; one
@@ -278,6 +272,42 @@ export const closeWithPendingUnfilledByobRead = {
     strictEqual(outcome.r.done, true);
     strictEqual(outcome.r.value.byteLength, 0);
     await reader.closed;
+  },
+};
+
+// DIVERGENCE (ledger #43, the close() half of #22's default reads):
+// close() while a default read is pending, with or without
+// autoAllocateChunkSize. TypeScript resolves the read done with value
+// undefined (spec: ReadableStreamClose runs the read request's close
+// steps); C++ resolves it done with a zero-length Uint8Array.
+export const closeWithPendingDefaultRead = {
+  async test() {
+    const sources = {
+      default: {},
+      autoAllocate: { autoAllocateChunkSize: 8 },
+    };
+    for (const [name, source] of Object.entries(sources)) {
+      let controller;
+      const rs = new ReadableStream({
+        type: 'bytes',
+        ...source,
+        start(c) {
+          controller = c;
+        },
+      });
+      const reader = rs.getReader();
+      const read = reader.read();
+      controller.close();
+      const { done, value } = await read;
+      strictEqual(done, true, name);
+      if (usingTsImpl) {
+        strictEqual(value, undefined, name);
+      } else {
+        ok(value instanceof Uint8Array, name);
+        strictEqual(value.byteLength, 0, name);
+      }
+      await reader.closed;
+    }
   },
 };
 

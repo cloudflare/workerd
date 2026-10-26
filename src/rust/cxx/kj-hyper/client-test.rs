@@ -8,6 +8,8 @@ use tokio::io::duplex;
 use tokio::net::TcpListener;
 use tokio::runtime::Builder;
 use tokio::runtime::Runtime;
+use tokio::time::Instant;
+use tokio::time::timeout;
 
 use super::*;
 
@@ -33,11 +35,12 @@ fn a_fixed_client_dials_through_its_dialer_and_sends_the_url_as_given() {
     runtime().block_on(async {
         let (ours, theirs) = duplex(1 << 16);
         let dialed = Mutex::new(Some(ours));
-        let client = Client::new(&table, ClientSettings::default(), Peer::Origin, move || {
+        let pool = ClientPool::new(ClientSettings::default(), Peer::Origin, move || {
             let io = dialed.lock().unwrap().take();
             let io = io.map(|io| Dialed::with_hangup(io, Box::pin(pending())));
             async move { io.ok_or_else(|| io::Error::other("dialed twice")) }
         });
+        let client = pool.client(&table);
         let mut head = Head::empty();
         head.set(Builtin::Host, http::HeaderValue::from_static("example.com"));
         let (uri, host) = client.target(b"/path?q=1").unwrap();
@@ -66,10 +69,46 @@ fn a_fixed_client_dials_through_its_dialer_and_sends_the_url_as_given() {
 }
 
 #[test]
+fn an_idle_connection_is_closed_after_the_idle_timeout() {
+    let table = HeaderTable::builtin();
+    runtime().block_on(async {
+        let (ours, mut theirs) = duplex(1 << 16);
+        let dialed = Mutex::new(Some(ours));
+        let idle_timeout = Duration::from_millis(100);
+        let settings = ClientSettings {
+            idle_timeout,
+            ..ClientSettings::default()
+        };
+        let pool = ClientPool::new(settings, Peer::Origin, move || {
+            let io = dialed.lock().unwrap().take();
+            let io = io.map(|io| Dialed::with_hangup(io, Box::pin(pending())));
+            async move { io.ok_or_else(|| io::Error::other("dialed twice")) }
+        });
+        let client = pool.client(&table);
+        let (uri, _) = client.target(b"/").unwrap();
+        let request =
+            Client::request_of(http::Method::GET, uri, Head::empty(), ChannelBody::empty());
+        let (response, _) = futures::join!(
+            client.send(request),
+            peer(&mut theirs, "HTTP/1.1 204 No Content\r\n\r\n"),
+        );
+        assert_eq!(response.unwrap().status(), http::StatusCode::NO_CONTENT);
+        let idle_since = Instant::now();
+        let mut rest = Vec::new();
+        timeout(idle_timeout * 10, theirs.read_to_end(&mut rest))
+            .await
+            .expect("the idle connection was never closed")
+            .unwrap();
+        assert!(rest.is_empty());
+        assert!(idle_since.elapsed() >= idle_timeout);
+    });
+}
+
+#[test]
 fn an_internet_client_sets_the_host_from_the_url() {
     let table = HeaderTable::builtin();
     let connect = |host: String, port| async move { connect_allowed(&host, port, |_| true).await };
-    let client = Client::internet(&table, ClientSettings::default(), None, connect);
+    let client = ClientPool::internet(ClientSettings::default(), None, connect).client(&table);
     let (uri, host) = client.target(b"https://example.com:8443/p").unwrap();
     assert_eq!(uri.scheme_str(), Some("https"));
     assert_eq!(host.unwrap(), "example.com:8443");
@@ -90,7 +129,7 @@ fn an_internet_client_connects_to_the_urls_host_through_its_connect() {
                 TcpStream::connect(address)
             }
         };
-        let client = Client::internet(&table, ClientSettings::default(), None, connect);
+        let client = ClientPool::internet(ClientSettings::default(), None, connect).client(&table);
         let (uri, _) = client.target(b"http://example.com:8080/p").unwrap();
         let request =
             Client::request_of(http::Method::GET, uri, Head::empty(), ChannelBody::empty());

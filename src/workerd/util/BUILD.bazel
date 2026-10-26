@@ -244,6 +244,7 @@ wd_cc_library(
     ],
     implementation_deps = [
         ":autogate",
+        ":entropy",
         ":strings",
         "//src/workerd/jsg:exception",
         "@sqlite3",
@@ -413,6 +414,13 @@ kj_test(
 
 kj_test(
     src = "canceler-test.c++",
+    deps = [
+        ":util",
+    ],
+)
+
+kj_test(
+    src = "weak-refs-test.c++",
     deps = [
         ":util",
     ],

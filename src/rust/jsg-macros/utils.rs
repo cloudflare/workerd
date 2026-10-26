@@ -71,12 +71,12 @@ pub fn error(tokens: &impl ToTokens, msg: &str) -> TokenStream {
 /// Handles combined forms like `name = "Foo", custom_trace` by parsing the
 /// token stream as comma-separated `syn::Meta` items and finding the first
 /// `name = "..."` name-value pair.
-pub fn extract_name_attribute(tokens: TokenStream) -> Option<String> {
+pub fn extract_name_attribute(tokens: impl Into<proc_macro2::TokenStream>) -> Option<String> {
     use syn::Meta;
     use syn::punctuated::Punctuated;
 
     let parsed: Punctuated<Meta, syn::Token![,]> =
-        syn::parse::Parser::parse(Punctuated::parse_terminated, tokens).ok()?;
+        syn::parse::Parser::parse2(Punctuated::parse_terminated, tokens.into()).ok()?;
 
     for meta in &parsed {
         if let Meta::NameValue(nv) = meta
@@ -143,6 +143,148 @@ pub fn is_lock_ref(ty: &syn::Type) -> bool {
         2 => segments[0].ident == "jsg" && segments[1].ident == "Lock",
         _ => false,
     }
+}
+
+/// Returns true if the type is `jsg::Rc<Self>` or `Rc<Self>`.
+pub fn is_rc_self(ty: &syn::Type) -> bool {
+    let syn::Type::Path(type_path) = ty else {
+        return false;
+    };
+    if type_path.qself.is_some() {
+        return false;
+    }
+    let segments: Vec<_> = type_path.path.segments.iter().collect();
+    let last = match segments.as_slice() {
+        [last] => last,
+        [module, last] if module.ident == "jsg" => last,
+        _ => return false,
+    };
+    if last.ident != "Rc" {
+        return false;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+        return false;
+    };
+    matches!(args.args.iter().collect::<Vec<_>>().as_slice(),
+        [syn::GenericArgument::Type(syn::Type::Path(p))]
+            if p.qself.is_none() && p.path.is_ident("Self"))
+}
+
+/// Returns true if `arg` is a parameter named `this`.
+pub fn is_named_this(arg: &syn::FnArg) -> bool {
+    matches!(arg, syn::FnArg::Typed(param)
+        if matches!(&*param.pat, syn::Pat::Ident(pat)
+            if pat.ident == "this" && pat.subpat.is_none()))
+}
+
+/// Returns the first parameter of `sig` if it is named `this`. In a method without `&self`, that
+/// parameter stands in for `&self` and receives a `jsg::Rc` of the resource the method was
+/// called on. Whether its type is `jsg::Rc<Self>` is checked separately.
+pub fn this_param(sig: &syn::Signature) -> Option<&syn::PatType> {
+    match sig.inputs.first()? {
+        arg @ syn::FnArg::Typed(param) if is_named_this(arg) => Some(param),
+        _ => None,
+    }
+}
+
+/// Returns true if `ty` is `Option<T>`.
+pub fn is_option_type(ty: &syn::Type) -> bool {
+    matches!(ty, syn::Type::Path(p)
+        if p.path.segments.last().is_some_and(|s| s.ident == "Option"))
+}
+
+/// Returns the tokens of `ty` with every named lifetime other than `'static`
+/// replaced by `'_`.
+///
+/// Callbacks name a parameter's type in a position (`<T as jsg::FromJS<'_>>`) where
+/// the method's own lifetime parameters are not in scope. Eliding them lets the
+/// compiler infer them from the call, which ties them to the callback's scope.
+pub fn elide_named_lifetimes(ty: &syn::Type) -> proc_macro2::TokenStream {
+    fn rewrite(tokens: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+        use proc_macro2::Spacing;
+        use proc_macro2::TokenTree;
+
+        let mut out = Vec::new();
+        let mut after_lifetime_quote = false;
+        for tree in tokens {
+            let tree = match tree {
+                TokenTree::Group(group) => {
+                    let mut rewritten =
+                        proc_macro2::Group::new(group.delimiter(), rewrite(group.stream()));
+                    rewritten.set_span(group.span());
+                    TokenTree::Group(rewritten)
+                }
+                TokenTree::Ident(ident) if after_lifetime_quote && ident != "static" => {
+                    TokenTree::Ident(proc_macro2::Ident::new("_", ident.span()))
+                }
+                other => other,
+            };
+            after_lifetime_quote = matches!(
+                &tree,
+                TokenTree::Punct(punct) if punct.as_char() == '\'' && punct.spacing() == Spacing::Joint
+            );
+            out.push(tree);
+        }
+        out.into_iter().collect()
+    }
+    rewrite(ty.to_token_stream())
+}
+
+/// Types with a `FastApiArg` impl in `jsg/fast_api.rs`.
+const FAST_API_ARG_TYPES: &[&str] = &["bool", "i32", "u32", "Number"];
+/// Types with a `FastApiReturn` impl in `jsg/fast_api.rs`, besides `()`.
+const FAST_API_RETURN_TYPES: &[&str] = &["bool", "Number"];
+
+/// Returns the argument types of `sig` if V8 can call it through a fast callback.
+///
+/// Types are matched by name: an alias stays on the slow path, and another type named `Number`
+/// fails to compile. `jsg::Rc<Self>` is not one of the types, so a method with a `this`
+/// parameter stays on the slow path, which is where the `jsg::Rc` of the receiver is made.
+pub fn fast_api_signature(sig: &syn::Signature) -> Option<Vec<&syn::Type>> {
+    if sig.asyncness.is_some() || !sig.generics.params.is_empty() || sig.variadic.is_some() {
+        return None;
+    }
+    let mut args = Vec::new();
+    for input in &sig.inputs {
+        match input {
+            syn::FnArg::Receiver(receiver) => {
+                if receiver.reference.is_none() || receiver.mutability.is_some() {
+                    return None;
+                }
+            }
+            syn::FnArg::Typed(pat_type) => {
+                if !is_named_type(&pat_type.ty, FAST_API_ARG_TYPES) {
+                    return None;
+                }
+                args.push(pat_type.ty.as_ref());
+            }
+        }
+    }
+    let fast_return = match &sig.output {
+        syn::ReturnType::Default => true,
+        syn::ReturnType::Type(_, ty) => match ty.as_ref() {
+            syn::Type::Tuple(tuple) => tuple.elems.is_empty(),
+            ty => is_named_type(ty, FAST_API_RETURN_TYPES),
+        },
+    };
+    fast_return.then_some(args)
+}
+
+/// Whether `ty` is one of `names` written bare, or `jsg::Number`.
+fn is_named_type(ty: &syn::Type, names: &[&str]) -> bool {
+    let syn::Type::Path(type_path) = ty else {
+        return false;
+    };
+    if type_path.qself.is_some() {
+        return false;
+    }
+    let segments: Vec<_> = type_path.path.segments.iter().collect();
+    let last = match segments.as_slice() {
+        [last] => last,
+        [module, last] if module.ident == "jsg" && last.ident == "Number" => last,
+        _ => return false,
+    };
+    last.arguments.is_none() && names.iter().any(|name| last.ident == name)
 }
 
 #[cfg(test)]

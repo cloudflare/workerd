@@ -130,3 +130,27 @@ export const transformerCollectedAfterFinish = {
     }
   },
 };
+
+// Held alone, the writable side keeps the readable side alive while it is
+// open, and lets it go once closed or aborted (parity).
+export const settledWritableReleasesReadable = {
+  async test() {
+    const results = {};
+    for (const end of ['open', 'close', 'abort']) {
+      let ref;
+      const writable = (() => {
+        const ts = new TransformStream();
+        ref = new WeakRef(ts.readable);
+        return ts.writable;
+      })();
+      await scheduler.wait(1);
+      if (end === 'close') await writable.close();
+      if (end === 'abort') await writable.abort(new Error('abort'));
+      await collectGarbage();
+      results[end] = ref.deref() === undefined;
+      // Keep the writable itself alive across the collection.
+      strictEqual(typeof writable.locked, 'boolean');
+    }
+    deepStrictEqual(results, { open: false, close: true, abort: true });
+  },
+};

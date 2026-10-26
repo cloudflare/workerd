@@ -42,10 +42,6 @@ rust_library(
     proc_macro_deps = [
         "//src/rust/cxx:cxxbridge-macro",
     ],
-    target_compatible_with = select({
-        "@//build/config:no_build": ["@platforms//:incompatible"],
-        "//conditions:default": [],
-    }),
     deps = [
         "//src/rust/cxx",
         "//src/rust/cxx/kj-rs",

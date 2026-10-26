@@ -2661,6 +2661,45 @@ KJ_TEST("Wasm compile cache is reused across isolates") {
   KJ_ASSERT(second.wasmFromCache == 1);
 }
 
+KJ_TEST("CompiledWasmModuleHolder keeps compiled code after its isolate is gone") {
+  CountingCompilationObserver observer;
+  auto wasm = makeTestWasm();
+  CompiledWasmModuleHolder holder;
+
+  // Each PREAMBLE creates and destroys its own isolate, so V8 holds no reference to the module
+  // between them; only the holder keeps the compiled code alive.
+  auto load = [&](bool withEsmIntegrationBuiltins) {
+    PREAMBLE([&](Lock& js) {
+      if (withEsmIntegrationBuiltins) {
+        js.setWasmEsmIntegrationBuiltinsEnabled();
+      }
+      KJ_ASSERT(!holder.getOrCompile(js, wasm.asPtr(), observer).IsEmpty());
+    });
+  };
+
+  load(false);
+  auto first = observer.getCounts();
+  KJ_ASSERT(first.wasmCompiled == 1);
+  KJ_ASSERT(first.wasmFromCache == 0);
+
+  load(false);
+  auto second = observer.getCounts();
+  KJ_ASSERT(second.wasmCompiled == 1);
+  KJ_ASSERT(second.wasmFromCache == 1);
+
+  // Compiled code bakes in its compile-time imports, so an isolate with the Wasm ESM integration
+  // builtins compiles its own copy, which later isolates with the same setting then reuse.
+  load(true);
+  auto third = observer.getCounts();
+  KJ_ASSERT(third.wasmCompiled == 2);
+  KJ_ASSERT(third.wasmFromCache == 1);
+
+  load(true);
+  auto fourth = observer.getCounts();
+  KJ_ASSERT(fourth.wasmCompiled == 2);
+  KJ_ASSERT(fourth.wasmFromCache == 2);
+}
+
 // ======================================================================================
 
 KJ_TEST("Using a registry from multiple threads works") {

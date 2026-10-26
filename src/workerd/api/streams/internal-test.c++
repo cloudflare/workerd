@@ -602,6 +602,48 @@ KJ_TEST("WritableStreamInternalController pipeLoop abort during pending read") {
   });
 }
 
+KJ_TEST("WritableStreamInternalController pipe keeps its source alive across its read") {
+  auto fixture = makeAbortClearsQueueTestFixture();
+  struct Streams {
+    kj::Maybe<jsg::Ref<ReadableStream>> source;
+    kj::Maybe<jsg::Ref<WritableStream>> sink;
+  };
+  Streams streams;
+  int pullCount = 0;
+  bool pipeRejected = false;
+  fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+    // The pipe loop's second read runs the source's pull() synchronously. pull() aborts the
+    // destination, which tears the pipe down and drops its reference to the source, and drops
+    // the last other reference too. The source must survive until its read returns.
+    streams.sink = env.js.alloc<WritableStream>(env.context, kj::heap<NoopSink>(), kj::none);
+    streams.source = ReadableStream::constructor(env.js,
+        UnderlyingSource{.pull =
+                             [&](jsg::Lock& js, UnderlyingSource::Controller controller) {
+      auto& c = KJ_ASSERT_NONNULL(controller.tryGet<jsg::Ref<ReadableStreamDefaultController>>());
+      if (++pullCount == 1) {
+        c->enqueue(js, jsg::JsUint8Array::create(js, {1, 2, 3, 4}));
+        return js.resolvedPromise();
+      }
+      // Aborting cancels the source, which destroys this lambda, so take what we need first.
+      auto& state = streams;
+      auto sink = kj::mv(KJ_ASSERT_NONNULL(state.sink));
+      state.sink = kj::none;
+      sink->getController().abort(js, js.typeError("abort"_kj)).markAsHandled(js);
+      state.source = kj::none;
+      js.v8Isolate->LowMemoryNotification();
+      return js.resolvedPromise();
+    }},
+        StreamQueuingStrategy{.highWaterMark = 0});
+
+    auto pipe = KJ_ASSERT_NONNULL(streams.source)
+                    ->pipeTo(env.js, KJ_ASSERT_NONNULL(streams.sink).addRef(), PipeToOptions{})
+                    .catch_(env.js, [&](jsg::Lock&, jsg::Value) { pipeRejected = true; });
+    return env.context.awaitJs(env.js, kj::mv(pipe));
+  });
+  KJ_ASSERT(pullCount == 2);
+  KJ_ASSERT(pipeRejected);
+}
+
 // ======================================================================================
 // DrainingReader tests for internal streams
 //
@@ -1389,12 +1431,7 @@ KJ_TEST("default reader read() auto-allocates a chunk-sized buffer") {
       KJ_ASSERT(!readResult.done);
       auto& value = KJ_REQUIRE_NONNULL(readResult.value);
       auto u8 = KJ_ASSERT_NONNULL(value.getHandle(js).tryCast<jsg::JsUint8Array>());
-      if (util::Autogate::isEnabled(util::AutogateKey::UPDATED_AUTO_ALLOCATE_CHUNK_SIZE)) {
-        // The 16KB chunk holds the entire 10KB stream.
-        KJ_ASSERT(u8.size() == streamLength);
-      } else {
-        KJ_ASSERT(u8.size() == 4 * 1024);
-      }
+      KJ_ASSERT(u8.size() == 4 * 1024);
     })));
   });
 }

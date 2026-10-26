@@ -40,7 +40,7 @@ def wd_test(
     """
 
     # Add workerd binary to "data" dependencies.
-    data = data + [src, "//src/workerd/server:workerd_cross"]
+    data = data + [src, "//src/workerd/server:workerd"]
 
     ts_srcs = [src for src in data if src.endswith(".ts")]
 
@@ -72,7 +72,7 @@ def wd_test(
 
     # Add initial arguments for `workerd test` command.
     base_args = [
-        "$(location //src/workerd/server:workerd_cross)",
+        "$(location //src/workerd/server:workerd)",
         "test",
     ] + (["--predictable"] if predictable else []) + [
         "$(location {})".format(src),
@@ -156,6 +156,22 @@ if not "{sidecar}" == "" (
 
 set TEST_EXIT=!ERRORLEVEL!
 exit /b !TEST_EXIT!
+
+:run_workerd
+REM cmd requires a quoted native path for Bazel's slash-separated executable name.
+setlocal DisableDelayedExpansion
+set "WORKERD_BINARY=%~1"
+set "WORKERD_BINARY=%WORKERD_BINARY:/=\\%"
+set "WORKERD_ARGUMENTS="
+shift
+:next_workerd_argument
+if [%1]==[] goto launch_workerd
+set WORKERD_ARGUMENTS=%WORKERD_ARGUMENTS% %1
+shift
+goto next_workerd_argument
+:launch_workerd
+"%WORKERD_BINARY%" %WORKERD_ARGUMENTS% "-dTEST_TMPDIR=%TEST_TMPDIR%"
+exit /b %ERRORLEVEL%
 """
 
 SH_TEMPLATE = """#!/bin/bash
@@ -176,7 +192,9 @@ else
 fi
 """
 
-WINDOWS_RUNTEST_NORMAL = """powershell -Command \"%*\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR"""
+WINDOWS_RUNTEST_NORMAL = "goto run_workerd"
+
+WINDOWS_RUNTEST_SIDECAR = """powershell -Command \"%*\" `-dTEST_TMPDIR=$ENV:TEST_TMPDIR"""
 
 SH_RUNTEST_NORMAL = """"$@" -dTEST_TMPDIR=$TEST_TMPDIR"""
 
@@ -224,7 +242,12 @@ def _wd_test_impl(ctx):
         # Batch script executables must end with ".bat"
         executable = ctx.actions.declare_file("%s_wd_test.bat" % ctx.label.name)
         template = WINDOWS_TEMPLATE
-        runtest = WINDOWS_RUNTEST_SNAPSHOT if ctx.attr.python_snapshot_test else WINDOWS_RUNTEST_NORMAL
+        if ctx.attr.python_snapshot_test:
+            runtest = WINDOWS_RUNTEST_SNAPSHOT
+        elif ctx.file.sidecar:
+            runtest = WINDOWS_RUNTEST_SIDECAR
+        else:
+            runtest = WINDOWS_RUNTEST_NORMAL
     else:
         executable = ctx.outputs.executable
         template = SH_TEMPLATE
@@ -282,8 +305,7 @@ def _wd_test_impl(ctx):
     if ctx.attr.load_snapshot:
         if ctx.attr.python_snapshot_test:
             environment["PYTHON_SAVE_SNAPSHOT_ARGS"] = "--python-load-snapshot load_snapshot.bin"
-        f = ctx.attr.load_snapshot.files.to_list()[0]
-        runfiles = runfiles.merge(ctx.runfiles(symlinks = {"load_snapshot.bin": f}))
+        runfiles = runfiles.merge(ctx.runfiles(symlinks = {"load_snapshot.bin": ctx.file.load_snapshot}))
 
     return [
         DefaultInfo(
@@ -321,7 +343,7 @@ _wd_test = rule(
             allow_single_file = True,
             executable = True,
             cfg = "target",
-            default = "//src/workerd/server:workerd_cross",
+            default = "//src/workerd/server:workerd",
         ),
         # A list of files that this test requires to be present in order to run.
         "data": attr.label_list(allow_files = True),
@@ -373,3 +395,12 @@ _wd_test = rule(
         "_platforms_os_windows": attr.label(default = "@platforms//os:windows"),
     },
 )
+
+def wd_cli_test(**kwargs):
+    """Defines a test that runs workerd with the given `args`, as wd_test()'s variants do.
+
+    The first argument is usually `$(location //src/workerd/server:workerd)`, which must also
+    be in `data`. `-dTEST_TMPDIR=<dir>` is appended to the arguments. For macros outside this
+    file, such as wd_bench().
+    """
+    _wd_test(**kwargs)

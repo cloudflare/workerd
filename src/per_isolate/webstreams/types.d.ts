@@ -45,11 +45,12 @@ export interface UnderlyingByteSource {
   type: 'bytes';
   autoAllocateChunkSize?: number;
   // Non-standard workerd extension: the TOTAL bytes this source promises
-  // to produce over its lifetime (undefined = unknown). Accepts a
-  // non-negative bigint or integer number (normalized to bigint). The
-  // stream errors on overflow (delivering past it) or underflow (closing
-  // short of it); consumer-initiated cancel is exempt. Used by the C++
-  // bridge to set Content-Length instead of chunked encoding.
+  // to produce over its lifetime (undefined = unknown). Converted to a
+  // bigint as the C++ implementation converts a uint64_t
+  // (normalizeExpectedLength in common.ts). The stream errors on overflow
+  // (delivering past it) or underflow (closing short of it);
+  // consumer-initiated cancel is exempt. Used by the C++ bridge to set
+  // Content-Length instead of chunked encoding.
   expectedLength?: bigint | number;
 }
 

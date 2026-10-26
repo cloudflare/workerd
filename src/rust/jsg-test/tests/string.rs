@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 use jsg::v8::Local;
-use jsg::v8::MaybeLocal;
 use jsg::v8::String as JsString;
 use jsg::v8::ToLocalValue;
 use jsg::v8::Utf8Value;
@@ -11,8 +10,8 @@ use jsg::v8::Value;
 use jsg::v8::WriteFlags;
 
 // Convenience: create a Local<String> from a UTF-8 str literal.
-fn from_utf8<'a>(lock: &mut jsg::Lock, s: &str) -> Local<'a, JsString> {
-    JsString::new_from_utf8(lock, s.as_bytes()).unwrap(lock)
+fn from_utf8<'a>(lock: &mut jsg::Lock<'a>, s: &str) -> Local<'a, JsString> {
+    JsString::new_from_utf8(lock, s.as_bytes()).unwrap()
 }
 
 // =============================================================================
@@ -35,8 +34,8 @@ fn string_new_from_utf8_roundtrips_ascii() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let maybe = JsString::new_from_utf8(lock, b"hello");
-        assert!(!maybe.is_empty());
-        let s = maybe.unwrap(lock);
+        assert!(maybe.is_some());
+        let s = maybe.unwrap();
         assert_eq!(s.length(), 5);
         assert_eq!(s.to_string(lock), "hello");
         Ok(())
@@ -59,8 +58,8 @@ fn string_new_from_utf8_empty_slice() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let maybe = JsString::new_from_utf8(lock, b"");
-        assert!(!maybe.is_empty());
-        let s = maybe.unwrap(lock);
+        assert!(maybe.is_some());
+        let s = maybe.unwrap();
         assert_eq!(s.length(), 0);
         Ok(())
     });
@@ -71,8 +70,8 @@ fn string_new_from_one_byte_roundtrips() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let maybe = JsString::new_from_one_byte(lock, b"latin1");
-        assert!(!maybe.is_empty());
-        let s = maybe.unwrap(lock);
+        assert!(maybe.is_some());
+        let s = maybe.unwrap();
         assert_eq!(s.length(), 6);
         assert!(s.is_one_byte());
         assert_eq!(s.to_string(lock), "latin1");
@@ -86,8 +85,8 @@ fn string_new_from_two_byte_roundtrips() {
     harness.run_in_context(|lock, _ctx| {
         let utf16: Vec<u16> = "hello".encode_utf16().collect();
         let maybe = JsString::new_from_two_byte(lock, &utf16);
-        assert!(!maybe.is_empty());
-        let s = maybe.unwrap(lock);
+        assert!(maybe.is_some());
+        let s = maybe.unwrap();
         assert_eq!(s.length(), 5);
         assert_eq!(s.to_string(lock), "hello");
         Ok(())
@@ -100,7 +99,7 @@ fn string_new_from_two_byte_unicode() {
     harness.run_in_context(|lock, _ctx| {
         let input = "日本語";
         let utf16: Vec<u16> = input.encode_utf16().collect();
-        let s = JsString::new_from_two_byte(lock, &utf16).unwrap(lock);
+        let s = JsString::new_from_two_byte(lock, &utf16).unwrap();
         assert_eq!(s.to_string(lock), input);
         Ok(())
     });
@@ -110,8 +109,8 @@ fn string_new_from_two_byte_unicode() {
 fn string_new_from_utf8_internalized_roundtrips() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let s1 = JsString::new_internalized_from_utf8(lock, b"intern_me").unwrap(lock);
-        let s2 = JsString::new_internalized_from_utf8(lock, b"intern_me").unwrap(lock);
+        let s1 = JsString::new_internalized_from_utf8(lock, b"intern_me").unwrap();
+        let s2 = JsString::new_internalized_from_utf8(lock, b"intern_me").unwrap();
         // Both strings should have the same content.
         assert_eq!(s1.to_string(lock), "intern_me");
         assert_eq!(s2.to_string(lock), "intern_me");
@@ -125,7 +124,7 @@ fn string_new_from_utf8_internalized_roundtrips() {
 fn string_new_from_one_byte_internalized_roundtrips() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let s = JsString::new_internalized_from_one_byte(lock, b"latin1_intern").unwrap(lock);
+        let s = JsString::new_internalized_from_one_byte(lock, b"latin1_intern").unwrap();
         assert_eq!(s.to_string(lock), "latin1_intern");
         assert!(s.is_one_byte());
         Ok(())
@@ -137,7 +136,7 @@ fn string_new_from_two_byte_internalized_roundtrips() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let utf16: Vec<u16> = "two_byte_intern".encode_utf16().collect();
-        let s = JsString::new_internalized_from_two_byte(lock, &utf16).unwrap(lock);
+        let s = JsString::new_internalized_from_two_byte(lock, &utf16).unwrap();
         assert_eq!(s.to_string(lock), "two_byte_intern");
         Ok(())
     });
@@ -320,54 +319,6 @@ fn string_empty_eq_empty() {
 }
 
 // =============================================================================
-// MaybeLocal
-// =============================================================================
-
-#[test]
-fn maybe_local_is_not_empty_on_success() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, _ctx| {
-        let maybe = JsString::new_from_utf8(lock, b"hello");
-        assert!(!maybe.is_empty());
-        Ok(())
-    });
-}
-
-#[test]
-fn maybe_local_into_option_some() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, _ctx| {
-        let maybe = JsString::new_from_utf8(lock, b"test");
-        let opt = maybe.into_option(lock);
-        assert!(opt.is_some());
-        Ok(())
-    });
-}
-
-#[test]
-fn maybe_local_from_none_is_empty() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, _ctx| {
-        let _ = lock; // ensure we're inside the context
-        let maybe: MaybeLocal<'_, JsString> = None::<Local<'_, JsString>>.into();
-        assert!(maybe.is_empty());
-        Ok(())
-    });
-}
-
-#[test]
-fn maybe_local_unwrap_or_returns_default_when_empty() {
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, _ctx| {
-        let default = JsString::empty(lock);
-        let maybe: MaybeLocal<'_, JsString> = None::<Local<'_, JsString>>.into();
-        let result = maybe.unwrap_or(lock, default);
-        assert_eq!(result.length(), 0);
-        Ok(())
-    });
-}
-
-// =============================================================================
 // WriteFlags
 // =============================================================================
 
@@ -479,7 +430,9 @@ fn utf8_value_as_ptr_is_non_null() {
 fn utf8_value_coerces_number_to_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let val = ctx.eval_raw("42").map_err(|e| e.unwrap_jsg_err(lock))?;
+        let val = ctx
+            .eval_raw(lock, "42")
+            .map_err(|e| e.unwrap_jsg_err(lock))?;
         let utf8 = Utf8Value::new(lock, &val);
         assert_eq!(utf8.as_str(), Some("42"));
         Ok(())
@@ -491,22 +444,22 @@ fn utf8_value_coerces_number_to_string() {
 // =============================================================================
 
 #[test]
-fn string_try_as_from_value() {
+fn string_try_from_from_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let val: Local<'_, Value> = "cast me".to_local(lock);
-        let s = val.try_as::<JsString>().expect("should cast to String");
+        let s = Local::<JsString>::try_from(val).expect("should cast to String");
         assert_eq!(s.to_string(lock), "cast me");
         Ok(())
     });
 }
 
 #[test]
-fn string_try_as_fails_for_non_string() {
+fn string_try_from_fails_for_non_string() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let val: Local<'_, Value> = jsg::Number::new(42.0).to_local(lock);
-        assert!(val.try_as::<JsString>().is_none());
+        assert!(Local::<JsString>::try_from(val).is_err());
         Ok(())
     });
 }
@@ -532,7 +485,7 @@ fn string_concat_produces_concatenated_string() {
     harness.run_in_context(|lock, _ctx| {
         let left = from_utf8(lock, "hello, ");
         let right = from_utf8(lock, "world");
-        let result = JsString::concat(lock, left, right);
+        let result = JsString::concat(lock, left, right).unwrap();
         assert_eq!(result.to_string(lock), "hello, world");
         Ok(())
     });
@@ -544,8 +497,21 @@ fn string_concat_with_empty_string() {
     harness.run_in_context(|lock, _ctx| {
         let s = from_utf8(lock, "abc");
         let empty = JsString::empty(lock);
-        let result = JsString::concat(lock, s, empty);
+        let result = JsString::concat(lock, s, empty).unwrap();
         assert_eq!(result.to_string(lock), "abc");
+        Ok(())
+    });
+}
+
+#[test]
+fn string_concat_over_max_length_is_none() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        // `repeat` builds a cons string, so this allocates little.
+        let value = ctx.eval_raw(lock, "'x'.repeat(2 ** 28 + 1)").unwrap();
+        let half = Local::<JsString>::try_from(value).unwrap();
+        assert!(i64::from(half.length()) * 2 > i64::from(JsString::MAX_LENGTH));
+        assert!(JsString::concat(lock, half, half).is_none());
         Ok(())
     });
 }

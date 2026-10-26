@@ -271,7 +271,6 @@ class RpcDeserializerExternalHandler final: public jsg::Deserializer::ExternalHa
   template <typename T>
   kj::Maybe<T> claimPrebuilt();
 
-  kj::UnwindDetector unwindDetector;
   RpcStubDisposalGroup& disposalGroup;
   kj::Maybe<TraceContextParent> originatingCall;
 };
@@ -329,17 +328,12 @@ class JsRpcClientProvider: public jsg::Object {
     return getActorTargetRetryability().orDefault(ActorCallTargetRetryable::NO).toBool();
   }
 
-  // Temporary retry diagnostics: the ActorRetryCandidate this provider's target counts toward.
-  virtual kj::Maybe<ActorRetryCandidate> getActorRetryProbeCandidate() {
-    return kj::none;
-  }
-
   virtual void onActorCallRetry() {
     KJ_FAIL_REQUIRE("actor call retry requested from an unsupported RPC target");
   }
 
-  // The retry policy configured on the binding this provider dispatches through, if any. None means
-  // the runtime's default applies. Only called on providers that support actor call retries.
+  // The retry policy of the stub this provider dispatches through, if any. None means the
+  // runtime's default applies. Only called on providers that support actor call retries.
   virtual kj::Maybe<UserDefinedRetryPolicy> getUserDefinedRetryPolicy() {
     return kj::none;
   }
@@ -517,9 +511,6 @@ class JsRpcProperty: public JsRpcClientProvider {
   void appendPath(kj::Vector<kj::StringPtr>& path) override;
   kj::Maybe<ActorCallTargetRetryable> getActorTargetRetryability() override {
     return parent->getActorTargetRetryability();
-  }
-  kj::Maybe<ActorRetryCandidate> getActorRetryProbeCandidate() override {
-    return parent->getActorRetryProbeCandidate();
   }
   void onActorCallRetry() override {
     parent->onActorCallRetry();

@@ -1,0 +1,16 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+wd_rust_crate(
+    name = "histogram",
+    cxx_bridge_src = "ffi.rs",
+    test_compile_data = ["testdata/node-golden.json"],
+    test_deps = ["@crates_vendor//:serde_json"],
+    # The Node.js parity tests check every query on every dataset and layout: about 10 seconds in
+    # an unoptimized build.
+    test_size = "large",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@crates_vendor//:libm",
+        "@crates_vendor//:thiserror",
+    ],
+)

@@ -574,7 +574,8 @@ JsReadableStream::Buffer::Buffer(kj::Array<const kj::byte> data)
 // kj event loop, where the isolate's MPK-protected sandbox pages are unreadable, so take a
 // kj-heap copy.  It is shared by every stream derived from this Buffer -- rewinds and tee
 // branches alike.
-JsReadableStream::Buffer::Buffer(jsg::Ref<Blob> data): Buffer(kj::heapArray(data->getData())) {}
+JsReadableStream::Buffer::Buffer(jsg::Lock& js, jsg::Ref<Blob> data)
+    : Buffer(kj::heapArray(data->getData(js))) {}
 
 namespace {
 
@@ -634,7 +635,7 @@ JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::JsRef<jsg::JsBufferSource
     : JsReadableStream(js, view.getHandle(js).copy()) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::Ref<Blob> blob)
-    : impl(bufferBackedImpl(js, kj::rc<Buffer>(kj::mv(blob)))) {}
+    : impl(bufferBackedImpl(js, kj::rc<Buffer>(js, kj::mv(blob)))) {}
 
 JsReadableStream::JsReadableStream(jsg::Lock& js, jsg::Ref<api::URLSearchParams> urlSearchParams)
     : JsReadableStream(js, urlSearchParams->toString()) {}
@@ -1363,9 +1364,12 @@ void JsReadableStream::serialize(jsg::Lock& js, jsg::Serializer& serializer) {
       IoContext& ioctx = IoContext::current();
 
       auto encoding = getPreferredEncoding(js);
-      auto expectedLength = tryGetLength(js, encoding);
+      auto identityLength = tryGetLength(js, StreamEncoding::IDENTITY);
+      auto encodedLength =
+          encoding == StreamEncoding::IDENTITY ? identityLength : tryGetLength(js, encoding);
 
-      auto sink = newReadableStreamSerializeSink(externalHandler, encoding, expectedLength);
+      auto sink =
+          newReadableStreamSerializeSink(externalHandler, encoding, encodedLength, identityLength);
 
       ioctx.addTask(ioctx.waitForDeferredProxy(pumpTo(js, kj::mv(sink), EndStream::YES))
                         .catch_([](kj::Exception&& e) {
@@ -1433,8 +1437,8 @@ jsg::Promise<void> ReadableStreamNativeSource::pull(
     return pullDefault(js, controller, kj::mv(signal), active);
   }
 
-  // The source already reached EOF or was canceled. The conduit stops pulling once it
-  // observes close/error, so this is unreachable in practice; tolerate it defensively.
+  // The source already reached EOF, was canceled, or failed. The conduit stops pulling once
+  // it observes close/error, so this is unreachable in practice; tolerate it defensively.
   return js.resolvedPromise();
 }
 
@@ -1456,9 +1460,8 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
 
   // Fast path: complete the read synchronously when data is already available (e.g.
   // buffered tee or decompressed data), settling the pull without an event-loop round
-  // trip. Skipped when the read has already been abandoned: the asynchronous path's
-  // settlement is inert in that case (the bytes are stashed for redelivery), and there
-  // is no reason to hurry it.
+  // trip. Skipped when the read has already been abandoned: the asynchronous path stashes
+  // the bytes for redelivery in that case, and there is no reason to hurry it.
   if (!signal->getAborted(js) &&
       util::Autogate::isEnabled(util::AutogateKey::STREAM_CONTROLLER_SYNC_FAST_PATHS)) {
     kj::Maybe<size_t> maybeSyncAmount;
@@ -1526,8 +1529,8 @@ jsg::Promise<void> ReadableStreamNativeSource::pullDefault(
         js, controller.getHandle(js), "enqueue"_kj, jsg::JsUint8Array::create(js, data));
   }).catch_(js, [self = JSG_THIS](jsg::Lock& js, jsg::Value exception) mutable {
     // The read failed; the source is no longer usable. Rethrow to reject the pull promise
-    // -- the conduit errors the stream (or ignores the settlement if this pull was already
-    // abandoned). A waiting tee's branches fail with the same error.
+    // -- the conduit errors the stream with the failure, even if this pull was abandoned. A
+    // waiting tee's branches fail with the same error.
     self->pullInFlight = false;
     self->pendingCancel = false;
     self->state = kj::none;
@@ -1862,7 +1865,7 @@ kj::Maybe<uint64_t> ReadableStreamNativeSource::tryGetLength(StreamEncoding enco
     }
     return active.source->tryGetLength(encoding);
   }
-  // EOF'd, canceled, or consumed: nothing more will be produced, but distinguishing
+  // EOF'd, canceled, consumed, or failed: nothing more will be produced, but distinguishing
   // "closed, hence zero" from "unknown" is the stream layer's business, not the
   // source's; report unknown.
   return kj::none;
@@ -1878,7 +1881,7 @@ StreamEncoding ReadableStreamNativeSource::getPreferredEncoding() {
     }
     return active.source->getPreferredEncoding();
   }
-  // EOF'd, canceled, or consumed: nothing more will be produced; IDENTITY trivially
+  // EOF'd, canceled, consumed, or failed: nothing more will be produced; IDENTITY trivially
   // describes the empty remainder.
   return StreamEncoding::IDENTITY;
 }

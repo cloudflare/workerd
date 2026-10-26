@@ -10,6 +10,7 @@
 #include "snapshot.h"
 #include "v8-platform-wrapper.h"
 
+#include <workerd/jsg/code-cache.h>
 #include <workerd/jsg/observer.h>
 #include <workerd/jsg/util.h>
 #include <workerd/util/batch-queue.h>
@@ -164,6 +165,16 @@ class IsolateBase {
     return kj::none;
   }
 
+  // Makes worker bundle modules and scripts compiled in this isolate use code caches from
+  // `store`. Must be called once, before any of them is compiled.
+  void setCodeCacheStore(kj::Own<const CodeCacheStore> store) {
+    KJ_REQUIRE(codeCache == kj::none, "code cache store already set");
+    codeCache.emplace(kj::mv(store));
+  }
+  kj::Maybe<IsolateCodeCache&> tryGetCodeCache() KJ_LIFETIMEBOUND {
+    return codeCache;
+  }
+
   // Requests an extra microtask checkpoint after the current one completes.
   inline void requestExtraMicrotaskCheckpoint(kj::Badge<Lock>) {
     extraMicrotaskCheckpointRequested = true;
@@ -279,6 +290,15 @@ class IsolateBase {
     specCompliantPropertyAttributesFlag = true;
   }
 
+  inline bool isFastApiEnabled() const {
+    return fastApiEnabled;
+  }
+
+  // For test isolates, which are built without a `JsgConfig`. Only affects templates built after.
+  inline void setFastApiEnabledForTest() {
+    fastApiEnabled = true;
+  }
+
   inline void disableTopLevelAwait() {
     allowTopLevelAwait = false;
   }
@@ -330,6 +350,28 @@ class IsolateBase {
   // reference stays valid (and reports the isolate as dead) even after the isolate is destroyed,
   // so it is safe to hold from objects that may outlive the isolate (e.g. jsg::WeakRef).
   kj::Arc<const IsolateLiveness> getIsolateLiveness();
+
+  // A function that applyDeferredActions() calls after the destruction queue, so that another
+  // layer with handles of this isolate can release, under the lock, the ones it had to defer.
+  // The Rust JSG Realm, of which an isolate has at most one, installs one while it is attached
+  // to the isolate, and removes it by passing null.
+  using DeferredActionHook = void (*)(v8::Isolate*);
+  void setDeferredActionHook(DeferredActionHook hook) {
+    deferredActionHook = hook;
+  }
+
+  // A function that ~IsolateBase() calls with `data` once the isolate is disposed, so that
+  // another layer can free memory that V8 may write into until then. The Rust JSG Realm, of which
+  // an isolate has at most one, sets it when it is dropped. Setting it does not allocate, so a
+  // destructor may do it.
+  using DisposeHook = void (*)(void* data);
+  void setDisposeHook(DisposeHook hook, void* data) {
+    disposeHook = hook;
+    disposeHookData = data;
+  }
+  bool hasDisposeHook() const {
+    return disposeHook != nullptr;
+  }
 
   // Running totals of code V8 has generated in this isolate, from the JIT code event handler.
   // Only counts additions; code that V8 later flushes or collects is not subtracted. Zero when
@@ -398,6 +440,14 @@ class IsolateBase {
 
   void setUsingFastJsgStruct() {
     usingFastJsgStruct = true;
+  }
+
+  void setWasmEsmIntegrationBuiltinsEnabled() {
+    wasmEsmIntegrationBuiltinsEnabled = true;
+  }
+
+  bool isWasmEsmIntegrationBuiltinsEnabled() const {
+    return wasmEsmIntegrationBuiltinsEnabled;
   }
 
   bool getUsingFastJsgStruct() const {
@@ -554,10 +604,12 @@ class IsolateBase {
   bool setToStringTag = false;
   bool shouldSetImmutablePrototypeFlag = false;
   bool specCompliantPropertyAttributesFlag = false;
+  bool fastApiEnabled = false;
   bool allowTopLevelAwait = true;
   bool usingNewModuleRegistry = false;
   bool usingEnhancedErrorSerialization = false;
   bool usingFastJsgStruct = false;
+  bool wasmEsmIntegrationBuiltinsEnabled = false;
   bool extraMicrotaskCheckpointRequested = false;
 
   uint moduleEvaluationDepth = 0;
@@ -568,6 +620,7 @@ class IsolateBase {
   kj::Maybe<kj::Function<Logger>> maybeLogger;
   kj::Maybe<kj::Function<ErrorReporter>> maybeErrorReporter;
   kj::Maybe<kj::Function<ModuleFallbackCallback>> maybeModuleFallbackCallback;
+  kj::Maybe<IsolateCodeCache> codeCache;
 
   // Registry backing Lock::tryGetTypeHandler(), keyed by typeid(TypeHandler<T>) and
   // populated at isolate construction (see registerTypeHandler()). The values point at
@@ -628,6 +681,11 @@ class IsolateBase {
 
   enum QueueState { ACTIVE, DROPPING, DROPPED };
   QueueState queueState = ACTIVE;
+
+  DeferredActionHook deferredActionHook = nullptr;
+
+  DisposeHook disposeHook = nullptr;
+  void* disposeHookData = nullptr;
 
   struct CodeBlockInfo {
     size_t size = 0;
@@ -887,6 +945,7 @@ class Isolate: public IsolateBase {
     KJ_DASSERT(wrappers[0].get() == nullptr);
     auto wrapper = wrapperSpace.construct(ptr, kj::fwd<MetaConfiguration>(configuration));
     wrapper->initTypeWrapper();
+    fastApiEnabled = wrapper->isFastApiEnabled();
     wrappers[0] = kj::mv(wrapper);
   }
 
@@ -1050,10 +1109,10 @@ class Isolate: public IsolateBase {
       return jsgIsolate.getWrapperByContext(*this)->wrap(v8Isolate, kj::none, kj::mv(data));
     }
     v8::Local<v8::Function> wrapSimpleFunction(v8::Local<v8::Context> context,
-        jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction)
-        override {
+        jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction,
+        Once once) override {
       return jsgIsolate.getWrapperByContext(context)->wrap(
-          *this, context, kj::none, kj::mv(simpleFunction));
+          *this, context, kj::none, kj::mv(simpleFunction), once);
     }
     v8::Local<v8::Function> wrapReturningFunction(v8::Local<v8::Context> context,
         jsg::Function<v8::Local<v8::Value>(const v8::FunctionCallbackInfo<v8::Value>& info)>

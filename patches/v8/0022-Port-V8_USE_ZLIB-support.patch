@@ -6,10 +6,10 @@ Subject: Port V8_USE_ZLIB support
 Change-Id: Icfedf3e90522f1ff5037517a39a5f0e3d44abace
 
 diff --git a/BUILD.bazel b/BUILD.bazel
-index e2c2ce554123b29fd69f648e052dc44a7f2b2cea..eb0124cc974928f6ac1baba7ea6e12173b4d069a 100644
+index f95c164c629b8c9a9077b2821d14afe2920e8015..e68c2f7dbe04c4934f88187a1914f9b259df99d0 100644
 --- a/BUILD.bazel
 +++ b/BUILD.bazel
-@@ -170,6 +170,11 @@ v8_flag(name = "v8_enable_verify_predictable")
+@@ -169,6 +169,11 @@ v8_flag(name = "v8_enable_verify_predictable")
  
  v8_flag(name = "v8_enable_test_features")
  
@@ -21,15 +21,15 @@ index e2c2ce554123b29fd69f648e052dc44a7f2b2cea..eb0124cc974928f6ac1baba7ea6e1217
  v8_flag(name = "v8_wasm_random_fuzzers")
  
  v8_flag(
-@@ -551,6 +556,7 @@ v8_config(
-         "v8_enable_vtunejit": "ENABLE_VTUNE_JIT_INTERFACE",
-         "v8_enable_undefined_double": "V8_ENABLE_UNDEFINED_DOUBLE",
+@@ -565,6 +570,7 @@ v8_config(
          "v8_use_host_cpu_arm_features": "V8_USE_HOST_CPU_ARM_FEATURES",
+         "v8_x64_16byte_stack_alignment": "V8_X64_16BYTE_STACK_ALIGNMENT",
+         "v8_support_la57": "V8_SUPPORT_LA57",
 +        "v8_use_zlib": "V8_USE_ZLIB",
      },
      defines = [
          "GOOGLE3",
-@@ -4953,6 +4959,8 @@ v8_library(
+@@ -5006,6 +5012,8 @@ v8_library(
          "@highway//:hwy",
          "@fast_float",
          "@simdutf",

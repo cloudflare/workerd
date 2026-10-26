@@ -28,7 +28,7 @@ static void checkForErrorStatus(kj::StringPtr method, const kj::HttpClient::Resp
   if (response.statusCode < 200 || response.statusCode >= 300) {
     // Manually construct exception so that we can incorporate method and status into the text
     // that JavaScript sees.
-    kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
+    kj::throwException(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
         kj::str(JSG_EXCEPTION(Error) ": KV ", method, " failed: ", response.statusCode, ' ',
             response.statusText)));
   }
@@ -669,8 +669,9 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
         getHttpClient(context, headers, LimitEnforcer::KvOpType::PUT, urlStr, traceContext);
 
     auto promise = context.waitForOutputLocks().then(
-        [&context, client = kj::mv(client), urlStr = kj::mv(urlStr), headers = kj::mv(headers),
-            expectedBodySize, supportedBody = kj::mv(supportedBody)]() mutable {
+        [weakContext = context.getWeakRef(), client = kj::mv(client), urlStr = kj::mv(urlStr),
+            headers = kj::mv(headers), expectedBodySize,
+            supportedBody = kj::mv(supportedBody)]() mutable {
       auto innerReq = client->request(kj::HttpMethod::PUT, urlStr, headers, expectedBodySize);
       auto req = attachToRequest(kj::mv(innerReq), kj::Rc<kj::HttpClient>(kj::mv(client)));
 
@@ -683,6 +684,8 @@ jsg::Promise<void> KvNamespace::put(jsg::Lock& js,
           writePromise = req.body->write(data).attach(kj::mv(data));
         }
         KJ_CASE_ONEOF(stream, JsReadableStream) {
+          auto& context = KJ_REQUIRE_NONNULL(
+              weakContext->tryGet(), "IoContext destroyed before KV put body was written");
           writePromise = context.run(
               [dest = newSystemStream(kj::mv(req.body), StreamEncoding::IDENTITY, context),
                   stream = kj::mv(stream)](jsg::Lock& js) mutable {

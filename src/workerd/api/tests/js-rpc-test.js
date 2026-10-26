@@ -128,6 +128,21 @@ export let nonClass = {
     } else if (req.url.endsWith('/stream-from-rpc')) {
       let stream = await env.MyService.returnReadableStream();
       return new Response(stream);
+    } else if (req.url.endsWith('/aborted-stream-from-rpc')) {
+      let stream = await env.MyService.returnAbortedReadableStream();
+      return new Response(stream);
+    } else if (req.url.endsWith('/gzip-body-from-rpc')) {
+      let resp = await env.MyService.returnResponse();
+      return new Response(resp.body, {
+        headers: {
+          'Content-Encoding': 'gzip',
+        },
+      });
+    } else if (req.url.endsWith('/stream-length')) {
+      return Response.json({
+        length: req.headers.get('Content-Length'),
+        text: await req.text(),
+      });
     } else {
       throw new Error('unknown route');
     }
@@ -432,9 +447,29 @@ export class MyService extends WorkerEntrypoint {
     return await new Response(stream).text();
   }
 
+  async inspectStreamLength(stream) {
+    const response = await this.env.self.fetch('http://foo/stream-length', {
+      method: 'POST',
+      body: stream,
+    });
+    return response.json();
+  }
+
   async returnReadableStream() {
     let { readable, writable } = new IdentityTransformStream();
     this.ctx.waitUntil(this.writeToStream(writable));
+    return readable;
+  }
+
+  async returnAbortedReadableStream() {
+    let { readable, writable } = new IdentityTransformStream();
+    this.ctx.waitUntil(
+      (async () => {
+        let writer = writable.getWriter();
+        await writer.write(new TextEncoder().encode('foo, '));
+        await writer.abort(new Error('boom'));
+      })()
+    );
     return readable;
   }
 
@@ -1309,8 +1344,8 @@ export let disposal = {
       await env.MyService.leakButReturnPlainObject(counter);
 
       // Give a chance for disposal to happen. When running with a real socket, this involves
-      // non-deterministic scheduling, and it can be relatively slower when running under ASAN,
-      // QEMU, etc. so we'll try to dynamically adjust how much time we wait, up to 10s.
+      // non-deterministic scheduling, and it can be relatively slower when running under ASAN etc.
+      // so we'll try to dynamically adjust how much time we wait, up to 10s.
       for (let i = 0; i < 1000; i++) {
         if (counter.disposed) break;
         await scheduler.wait(10);
@@ -1799,6 +1834,43 @@ export let streams = {
       let resp = await env.self.fetch('http://foo/stream-from-rpc');
 
       assert.strictEqual(await resp.text(), 'foo, bar, baz!');
+    }
+
+    // Same, but the stream has a known length and the response is gzip-encoded, so the body is
+    // pumped by length into an encoder that must still be ended afterwards.
+    {
+      let resp = await env.self.fetch('http://foo/gzip-body-from-rpc');
+
+      assert.strictEqual(resp.headers.get('Content-Encoding'), 'gzip');
+      assert.strictEqual(await resp.text(), 'Response body!');
+    }
+
+    // When the producer of a stream obtained over RPC fails partway through, the response must
+    // fail rather than end cleanly with truncated content. Depending on the transport, the failure
+    // surfaces either from fetch() or from reading the body.
+    await assert.rejects(async () => {
+      let resp = await env.self.fetch('http://foo/aborted-stream-from-rpc');
+      await resp.text();
+    });
+  },
+};
+
+export const rpcStreamLength = {
+  async test(controller, env) {
+    for (const text of ['', 'known remaining bytes']) {
+      assert.deepStrictEqual(
+        await env.MyService.inspectStreamLength(new Response(text).body),
+        { length: String(text.length), text }
+      );
+      const returned = await env.MyService.roundTrip(new Response(text).body);
+      const response = await env.self.fetch('http://foo/stream-length', {
+        method: 'POST',
+        body: returned,
+      });
+      assert.deepStrictEqual(await response.json(), {
+        length: String(text.length),
+        text,
+      });
     }
   },
 };
@@ -2387,7 +2459,6 @@ export let mapVirtualHostIdempotent = {
   async test(controller, env, ctx) {
     let host1 = ctx.mapVirtualHost(env.MyService, 5432);
     assert.ok(typeof host1 === 'string');
-    // Overrides that are first created using mapVirtualHost() always use .workers.alt.
     assert.match(host1, /^[0-9a-f]{32}\.workers\.alt:5432$/);
 
     // Once the override is installed, it doesn't change in future calls.

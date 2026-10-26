@@ -89,7 +89,7 @@ void throwOpensslError(const char* file, int line, kj::StringPtr code) {
 #define MAP_ERROR(CODE, TEXT)                                                                      \
   case CODE: {                                                                                     \
     ClearErrorOnReturn clearErrorOnReturn;                                                         \
-    kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, file, line,                 \
+    kj::throwException(kj::Exception(kj::Exception::Type::FAILED, file, line,                      \
         kj::str(JSG_EXCEPTION(DOMOperationError) ": ", TEXT)));                                    \
   }
 
@@ -133,7 +133,7 @@ void throwOpensslError(const char* file, int line, kj::StringPtr code) {
     ERR_error_string_n(error, message, sizeof(message));
     lines.add(kj::heapString(message));
   }
-  kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, file, line,
+  kj::throwException(kj::Exception(kj::Exception::Type::FAILED, file, line,
       kj::str("OpenSSL call failed: ", code, "; ",
           lines.empty() ? "but ERR_get_error() returned 0"_kj : kj::strArray(lines, "; "))));
 }
@@ -335,6 +335,8 @@ kj::Own<BIGNUM> newBignum() {
 
 void CryptoKey::visitForMemoryInfo(jsg::MemoryTracker& tracker) const {
   tracker.trackField("impl", impl);
+  tracker.trackField("algorithmProperty", algorithmProperty);
+  tracker.trackField("usagesProperty", usagesProperty);
 }
 
 bool CSPRNG(kj::ArrayPtr<kj::byte> buffer) {

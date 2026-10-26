@@ -58,7 +58,7 @@ size_t C::set_succeed(size_t n) { return this->set(n); }
 size_t C::get_fail() { throw std::runtime_error("unimplemented"); }
 
 size_t C::get_fail_infallible() {
-  kj::throwFatalException(KJ_EXCEPTION(FAILED, "infallible method failure"));
+  kj::throwException(KJ_EXCEPTION(FAILED, "infallible method failure"));
 }
 
 RcC::RcC(size_t n) : n(n) {}
@@ -804,11 +804,11 @@ size_t c_try_return_primitive() { return 2020; }
 
 size_t c_fail_return_primitive() { throw std::logic_error("logic error"); }
 size_t c_fail_kj_exception_return_primitive() {
-  kj::throwFatalException(KJ_EXCEPTION(FAILED, "logic error"));
+  kj::throwException(KJ_EXCEPTION(FAILED, "logic error"));
 }
 
 size_t c_fail_kj_exception_disconnected_return_primitive() {
-  kj::throwFatalException(KJ_EXCEPTION(DISCONNECTED, "connection lost"));
+  kj::throwException(KJ_EXCEPTION(DISCONNECTED, "connection lost"));
 }
 
 // User-defined literal to create kj::ArrayPtr<const kj::byte> from string literal
@@ -822,7 +822,7 @@ size_t c_fail_kj_exception_with_details_return_primitive() {
   // Add some test details - these will be type_id + data pairs
   ex.setDetail(42, kj::heapArray("test detail 1"_kjb));
   ex.setDetail(999, kj::heapArray("another detail"_kjb));
-  kj::throwFatalException(kj::mv(ex));
+  kj::throwException(kj::mv(ex));
 }
 
 size_t c_cancel_return_primitive() { throw kj::CanceledException{}; }
@@ -845,7 +845,7 @@ size_t c_cancel_roundtrip_return_primitive() {
 // Rust cannot report the exception to its caller, so it panics instead. None of
 // them may terminate the process.
 void c_infallible_fail_void() {
-  kj::throwFatalException(KJ_EXCEPTION(FAILED, "infallible void failure"));
+  kj::throwException(KJ_EXCEPTION(FAILED, "infallible void failure"));
 }
 
 size_t c_infallible_fail_primitive() {
@@ -853,11 +853,11 @@ size_t c_infallible_fail_primitive() {
 }
 
 size_t c_infallible_fail_kj_exception_disconnected() {
-  kj::throwFatalException(KJ_EXCEPTION(DISCONNECTED, "infallible disconnect"));
+  kj::throwException(KJ_EXCEPTION(DISCONNECTED, "infallible disconnect"));
 }
 
 rust::String c_infallible_fail_rust_string() {
-  kj::throwFatalException(KJ_EXCEPTION(FAILED, "infallible string failure"));
+  kj::throwException(KJ_EXCEPTION(FAILED, "infallible string failure"));
 }
 
 // Neither a kj::Exception nor a std::exception. This is the shape of

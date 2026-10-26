@@ -140,7 +140,7 @@ class CompressionStreamImpl final: public kj::Refcounted,
   void runCodec(Func&& func) {
     KJ_IF_SOME(exception, kj::runCatchingExceptions(kj::fwd<Func>(func))) {
       cancelInternal(exception.clone());
-      kj::throwFatalException(kj::mv(exception));
+      kj::throwException(kj::mv(exception));
     }
   }
 
@@ -208,12 +208,12 @@ class CompressionStreamImpl final: public kj::Refcounted,
         if (pending.filled > 0) {
           auto ex = JSG_KJ_EXCEPTION(FAILED, Error, "A partially fulfilled read was canceled.");
           cancelInternal(ex.clone());
-          kj::throwFatalException(kj::mv(ex));
+          kj::throwException(kj::mv(ex));
         }
 
         auto ex = JSG_KJ_EXCEPTION(FAILED, Error, "The pending read was canceled.");
         cancelInternal(ex.clone());
-        kj::throwFatalException(kj::mv(ex));
+        kj::throwException(kj::mv(ex));
       }
 
       // The pending read is still viable so copy in as much as we can.
@@ -254,7 +254,7 @@ class CompressionStreamImpl final: public kj::Refcounted,
 
   void requireActive(kj::StringPtr errorMessage) {
     KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
-      kj::throwFatalException(exception.clone());
+      kj::throwException(exception.clone());
     }
     // isActive() returns true only if in Open state (the ActiveState)
     JSG_REQUIRE(state.isActive(), Error, errorMessage);
@@ -276,7 +276,7 @@ class CompressionStreamImpl final: public kj::Refcounted,
 
   void throwIfException() {
     KJ_IF_SOME(exception, state.tryGetErrorUnsafe()) {
-      kj::throwFatalException(exception.clone());
+      kj::throwException(exception.clone());
     }
   }
 

@@ -13,8 +13,17 @@
 namespace workerd::rust::jsg {
 
 // Local<T>
+// Rust's `jsg::v8::Local` is a non-null pointer with this layout, and `Option<Local>` a
+// nullable one, which matches `v8::MaybeLocal<T>` below.
 static_assert(sizeof(v8::Local<v8::Value>) == 8, "Size should match");
 static_assert(alignof(v8::Local<v8::Value>) == 8, "Alignment should match");
+static_assert(sizeof(v8::Local<v8::Value>) == sizeof(Local), "Size should match");
+static_assert(alignof(v8::Local<v8::Value>) == alignof(Local), "Alignment should match");
+// Rust reads an empty handle as null (`None`). With direct handles V8 uses a non-null empty
+// value instead, which Rust would take for a real handle.
+static_assert(
+    v8::internal::ValueHelper::kEmpty == v8::internal::ValueHelper::InternalRepresentationType{},
+    "an empty v8::Local must be a null pointer");
 
 template <typename T>
 inline Local to_ffi(v8::Local<T>&& value) {
@@ -50,12 +59,18 @@ inline MaybeLocal maybe_local_to_ffi(v8::MaybeLocal<T> value) {
   return MaybeLocal{result};
 }
 
+template <typename T>
+inline v8::MaybeLocal<T> maybe_local_from_ffi(MaybeLocal&& value) {
+  auto ptr_void = reinterpret_cast<void*>(&value.ptr);
+  return *reinterpret_cast<v8::MaybeLocal<T>*>(ptr_void);
+}
+
 // Global<T>
 //
 // ffi::Global stores only the strong v8::Global<v8::Value> in `ptr`.
-// The traced v8::TracedReference<v8::Data> slot lives in Global<T>::traced_ptr
-// on the Rust side (as UnsafeCell<usize>), passed by raw pointer to
-// wrappable_visit_global and wrappable_global_reset.
+// The traced v8::TracedReference<v8::Data> slot lives next to it in the
+// GlobalSlot of a TracedGlobal<T> on the Rust side, passed by reference to
+// wrappable_visit_global.
 static_assert(sizeof(v8::Global<v8::Value>) == sizeof(size_t), "Global must be pointer-sized");
 static_assert(sizeof(v8::TracedReference<v8::Data>) == sizeof(size_t),
     "TracedReference must be pointer-sized");

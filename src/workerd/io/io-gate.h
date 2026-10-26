@@ -24,6 +24,7 @@
 
 #include <kj/async.h>
 #include <kj/list.h>
+#include <kj/memory.h>
 #include <kj/one-of.h>
 #include <kj/sticky-flag.h>
 
@@ -215,6 +216,10 @@ class InputGate::CriticalSection: private InputGate, public kj::Refcounted {
     return depth;
   }
 
+  // Returns this section until it succeeds, then the nearest enclosing section that has not
+  // succeeded, or none if events are delivered at the actor's root gate again.
+  kj::Maybe<CriticalSection&> getActive() KJ_LIFETIMEBOUND;
+
  private:
   enum State {
     // wait() hasn't been called.
@@ -223,10 +228,10 @@ class InputGate::CriticalSection: private InputGate, public kj::Refcounted {
     // wait() has been called once, and that wait hasn't finished yet.
     INITIAL_WAIT,
 
-    // First lock has been obtained, waiting for success() or failed().
+    // First lock has been obtained; succeeded() has not been called.
     RUNNING,
 
-    // success() or failed() has been called.
+    // succeeded() has been called; remaining waiters belong to the parent gate.
     REPARENTED
   };
 
@@ -249,7 +254,7 @@ class InputGate::CriticalSection: private InputGate, public kj::Refcounted {
 
 // An OutputGate blocks outgoing messages from an Actor until writes which they might depend on
 // are confirmed.
-class OutputGate {
+class OutputGate: public kj::PtrTarget {
  public:
   // Hooks that can be used to customize OutputGate behavior.
   //
@@ -281,6 +286,10 @@ class OutputGate {
   // Hooks has no member variables, so const_cast is acceptable.
   OutputGate(Hooks& hooks = const_cast<Hooks&>(Hooks::DEFAULT));
   ~OutputGate() noexcept(false);
+
+  kj::Weak<OutputGate> addWeak() {
+    return addWeakToThis();
+  }
 
   // Block all future `wait()` calls until `promise` completes. Returns a wrapper around `promise`.
   // If `promise` rejects, the exception will propagate to all future `wait()`s. If the returned
@@ -350,7 +359,7 @@ kj::Promise<T> OutputGate::lockWhile(kj::Promise<T> promise, SpanParent parentSp
     setBroken(e);
     lockSpan.setTag("error"_kjc, true);
     fulfiller->reject(e.clone());
-    kj::throwFatalException(e.clone());
+    kj::throwException(e.clone());
   }
 }
 

@@ -875,7 +875,7 @@ kj::Promise<void> demuxDockerExecOutput(kj::AsyncInputStream& input,
     KJ_IF_SOME(err, stderrWriter) {
       err->abortWrite(exception.clone());
     }
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   }
 }
 
@@ -903,7 +903,7 @@ kj::Promise<void> copyRawExecOutput(
     KJ_IF_SOME(out, stdoutWriter) {
       out->abortWrite(exception.clone());
     }
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   }
 }
 
@@ -1008,6 +1008,17 @@ kj::String killTokenPidFile(kj::StringPtr killToken) {
   return kj::str("/tmp/.workerd-exec-", killToken, ".pid");
 }
 
+// Exit code of the kill helper exec when the PID file is still empty. `kill` itself exits with 1
+// or 2 when it fails, so this can't be confused with a failed signal.
+constexpr int32_t PID_NOT_RECORDED_EXIT_CODE = 3;
+
+// How long kill() waits for an exec's wrapper shell to record its PID, and the backoff between
+// its attempts: the first retry comes after PID_RETRY_INITIAL_DELAY, and each later one waits
+// twice as long as the one before, up to PID_RETRY_MAX_DELAY.
+constexpr kj::Duration PID_RECORD_TIMEOUT = 5 * kj::SECONDS;
+constexpr kj::Duration PID_RETRY_INITIAL_DELAY = 10 * kj::MILLISECONDS;
+constexpr kj::Duration PID_RETRY_MAX_DELAY = 500 * kj::MILLISECONDS;
+
 kj::Promise<void> ensureSystemImageAvailable(
     kj::Network& network, kj::StringPtr dockerPath, kj::StringPtr requestedImage) {
   KJ_IF_SOME(image, tryResolveContainerImage(requestedImage)) {
@@ -1073,7 +1084,7 @@ void configureContainerPrivileges(
 // Represents a parsed egress mapping. IP/CIDR mappings match destination IPs,
 // while hostnameGlob mappings match either HTTP hostnames or TLS SNI depending on protocol.
 // Defined here (not in the header) to avoid pulling kj::OneOf, kj::CidrRange, and
-// kj::Vector into server.c++ which includes container-client.h.
+// kj::Vector into the factory, which includes container-client.h.
 struct ContainerClient::EgressMapping {
   kj::OneOf<kj::CidrRange, kj::String> destination;
   uint16_t port;  // 0 means match all ports
@@ -1328,10 +1339,32 @@ class ContainerClient::DockerProcessHandle final: public rpc::Container::Process
     // (see createExec). Read that PID inside the container and signal it. This works regardless of
     // whether the container shares the host PID namespace, unlike signalling by the host PID that
     // Docker's exec-inspect reports.
+    //
+    // exec() returns once Docker has started the exec, which can be before the wrapper shell has
+    // written the PID, so a kill that finds the file empty is retried, with exponential backoff,
+    // until the deadline. The shell creates the file empty and then writes the PID with one
+    // write(), so a non-empty file holds the whole PID.
     auto pidFile = killTokenPidFile(killToken);
-    auto killCmd = kj::str("kill -", context.getParams().getSigno(), " \"$(cat ", pidFile, ")\"");
+    auto killCmd = kj::str("[ -s ", pidFile, " ] || exit ", PID_NOT_RECORDED_EXIT_CODE, "; kill -",
+        context.getParams().getSigno(), " \"$(cat ", pidFile, ")\"");
     auto cmd = kj::arr(kj::str("/bin/sh"), kj::str("-c"), kj::mv(killCmd));
-    co_await containerClient->runSimpleExec(cmd.asPtr());
+
+    auto& timer = containerClient->timer;
+    auto deadline = timer.now() + PID_RECORD_TIMEOUT;
+    auto delay = PID_RETRY_INITIAL_DELAY;
+    while (true) {
+      auto exitCode = co_await containerClient->runSimpleExec(cmd.asPtr());
+      if (exitCode == 0) {
+        co_return;
+      }
+      JSG_REQUIRE(exitCode == PID_NOT_RECORDED_EXIT_CODE, Error,
+          "Helper Docker exec failed with exit code ", exitCode);
+      auto now = timer.now();
+      JSG_REQUIRE(now < deadline, Error,
+          "Cannot signal the process: it did not record its PID within ", PID_RECORD_TIMEOUT, ".");
+      co_await timer.afterDelay(kj::min(delay, deadline - now));
+      delay = kj::min(delay * 2, PID_RETRY_MAX_DELAY);
+    }
   }
 
   kj::Promise<void> resize(ResizeContext context) override {
@@ -2082,7 +2115,7 @@ kj::Promise<ContainerClient::ExecInspectResponse> ContainerClient::inspectExec(
   };
 }
 
-kj::Promise<void> ContainerClient::runSimpleExec(kj::ArrayPtr<const kj::String> cmd) {
+kj::Promise<int32_t> ContainerClient::runSimpleExec(kj::ArrayPtr<const kj::String> cmd) {
   capnp::JsonCodec codec;
   codec.handleByAnnotation<docker_api::Docker::ExecCreateRequest>();
 
@@ -2124,9 +2157,7 @@ kj::Promise<void> ContainerClient::runSimpleExec(kj::ArrayPtr<const kj::String> 
   while (true) {
     auto inspect = co_await inspectExec(execId);
     if (!inspect.running) {
-      JSG_REQUIRE(inspect.exitCode == 0, Error, "Helper Docker exec failed with exit code ",
-          inspect.exitCode);
-      co_return;
+      co_return inspect.exitCode;
     }
     co_await timer.afterDelay(50 * kj::MILLISECONDS);
   }
@@ -2657,7 +2688,7 @@ kj::Promise<void> ContainerClient::monitor(MonitorContext context) {
   }
 
   KJ_IF_SOME(exception, maybeError) {
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   }
 
   results.setExitCode(KJ_REQUIRE_NONNULL(maybeExitCode));
@@ -3036,7 +3067,7 @@ kj::Promise<void> ContainerClient::ensureSidecarStarted() {
 
     if (maybeError == kj::none) break;
     if (attempt >= MAX_READY_RETRIES - 1)
-      kj::throwFatalException(kj::mv(KJ_REQUIRE_NONNULL(maybeError)));
+      kj::throwException(kj::mv(KJ_REQUIRE_NONNULL(maybeError)));
     co_await timer.afterDelay(READY_RETRY_DELAY);
   }
 

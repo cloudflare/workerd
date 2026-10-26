@@ -26,6 +26,10 @@ export {
   readableWritableTypeValidation,
   highWaterMarkValidated,
   hwmInfinityRejected,
+  argumentConversionOrder,
+  garbageTransformerValidation,
+  strategyArgumentShapes,
+  conversionErrorPrecedence,
   strategyMembersReadOnce,
 } from 'construction';
 
@@ -72,6 +76,7 @@ export {
   enqueueInsideSize,
   terminateInsideSize,
   readableCancelInsideSize,
+  readableCancelInsideThrowingSize,
   writerWriteInsideSize,
   syncWriterWriteInsideSize,
   sizeCallbackErrorIdentity,
@@ -90,7 +95,11 @@ export {
   detachWhileQueuedObservedByReader,
 } from 'buffer-lifecycle';
 
-export { transformStreamGc, transformerCollectedAfterFinish } from 'gc';
+export {
+  transformStreamGc,
+  transformerCollectedAfterFinish,
+  settledWritableReleasesReadable,
+} from 'gc';
 
 export {
   drainingReaderThroughTransform,
@@ -110,9 +119,16 @@ export {
   transformExpectedLengthRequestBody,
 } from 'roundtrip';
 
-// Echo handler for the expectedLength fetch-body tests: reports the
-// Content-Length the subrequest actually carried (the implementations
-// diverge) and echoes the body.
+export {
+  transformExpectedLengthAccepted,
+  transformExpectedLengthRejected,
+  transformExpectedLengthCoercion,
+  transformExpectedLengthRange,
+} from 'expected-length';
+
+// Echo handler for the expectedLength fetch-body tests (roundtrip.js,
+// expected-length.js): reports the Content-Length the subrequest actually
+// carried and echoes the body.
 export default {
   async fetch(request) {
     return new Response(request.body, {
@@ -135,4 +151,5 @@ export {
   cancelAfterWritableSizeError,
   cancelThenCloseSameTurn,
   writeReachesSinkAfterCancelClearedAlgorithms,
+  writeAfterCancelSameTurn,
 } from 'cancel-outcomes';

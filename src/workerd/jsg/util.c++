@@ -9,6 +9,8 @@
 
 #include <workerd/jsg/exception-metadata.capnp.h>
 
+#include <simdutf.h>
+
 #include <capnp/message.h>
 #include <capnp/serialize.h>
 #include <kj/debug.h>
@@ -99,6 +101,20 @@ kj::String typeName(const std::type_info& type) {
   }
 
   return kj::mv(result);
+}
+
+kj::String latin1ToUtf8(kj::ArrayPtr<const char> latin1) {
+  size_t utf8Length = simdutf::utf8_length_from_latin1(latin1.begin(), latin1.size());
+  kj::String out = kj::heapString(utf8Length);
+  if (utf8Length == latin1.size()) {
+    // Pure ASCII, so latin1 and UTF-8 match.
+    out.asArray().copyFrom(latin1);
+  } else {
+    [[maybe_unused]] size_t actualLength =
+        simdutf::convert_latin1_to_utf8(latin1.begin(), latin1.size(), out.begin());
+    KJ_DASSERT(actualLength == utf8Length);
+  }
+  return out;
 }
 
 namespace {
@@ -224,9 +240,13 @@ DecodedException decodeTunneledException(
       setRemoteError(isolate, result.handle);
     }
 
-    if (exception.getType() == kj::Exception::Type::DISCONNECTED) {
+    // A transient OVERLOADED failure gets both properties. Converting the error back to a
+    // kj::Exception keeps OVERLOADED and drops the transient marker, so it is not retried after
+    // passing through JavaScript, which avoids adding load to an overloaded service.
+    if (isRetryable(exception)) {
       setRetryableError(isolate, result.handle);
-    } else if (exception.getType() == kj::Exception::Type::OVERLOADED) {
+    }
+    if (exception.getType() == kj::Exception::Type::OVERLOADED) {
       setOverloadedError(isolate, result.handle);
     }
 
@@ -443,12 +463,13 @@ void addExceptionDetail(Lock& js, kj::Exception& exception, v8::Local<v8::Value>
     ser.write(js, JsValue(handle));
     exception.setDetail(TUNNELED_EXCEPTION_DETAIL_ID, ser.release().data);
   } catch (JsExceptionThrown&) {
-    // Either:
-    // a. The exception is not serializable, and we caught the exception. We will just ignore it
-    //    and proceed without annotating.
-    // b. The isolate's execution is being terminated, and so tryCatch.CanContinue() is false. In
-    //    this case we cannot serialize the exception, but again we'll just move on without the
-    //    annotation.
+    if (tryCatch.HasTerminated()) {
+      // Execution is being terminated. Let it continue to unwind: swallowing it here would let
+      // the caller carry on running as if execution could continue. The TryCatch's destructor
+      // hands the termination back to V8 if JavaScript is on the stack.
+      throw;
+    }
+    // The exception is not serializable. Proceed without annotating.
   }
 }
 
@@ -623,7 +644,7 @@ void throwIllegalConstructor(const v8::FunctionCallbackInfo<v8::Value>& args) {
 }
 
 void throwTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception) {
-  kj::throwFatalException(createTunneledException(isolate, exception));
+  kj::throwException(createTunneledException(isolate, exception));
 }
 
 kj::Exception createTunneledException(v8::Isolate* isolate, v8::Local<v8::Value> exception) {

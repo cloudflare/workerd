@@ -8,7 +8,9 @@
 // body's C++ source, and an Object.prototype.then getter beyond the one
 // lookup the user's read promise makes. The C++ implementation reads none
 // of these; the TypeScript one must not either. Every mutation is undone
-// before any assertion runs.
+// before any assertion runs. What that getter does to the stream must not
+// reach the other reads a cancel() or close() answered, nor change the
+// order in which reads resolve.
 
 import { strictEqual, deepStrictEqual, rejects } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -284,6 +286,193 @@ export const thenGetterFiresOncePerByteRead = {
         strictEqual(Object.getPrototypeOf(result), Object.prototype, name);
       }
     }
+  },
+};
+
+// A then getter that releases the reader from the first read's result,
+// while cancel() or close() settles the reader's pending reads: either call
+// answers every read at once, so the next read still resolves done rather
+// than rejecting with the release. Default, autoAllocateChunkSize and BYOB
+// reads, at cancel() and close(); BYOB reads at a close() the source
+// answers with respond(0) as well (C++ settles them at close(), and has no
+// byobRequest after it).
+export const thenGetterReleasesReaderWhileByteReadsSettle = {
+  async test() {
+    const cancel = (reader) => reader.cancel('bye');
+    const close = (reader, controller) => controller.close();
+    const cases = {
+      defaultCancel: { end: cancel },
+      defaultClose: { end: close },
+      autoAllocateCancel: { source: { autoAllocateChunkSize: 8 }, end: cancel },
+      autoAllocateClose: { source: { autoAllocateChunkSize: 8 }, end: close },
+      byobCancel: { mode: 'byob', end: cancel },
+      byobClose: { mode: 'byob', end: close },
+      byobCloseAndRespond: {
+        mode: 'byob',
+        end: (reader, controller) => {
+          controller.close();
+          controller.byobRequest?.respond(0);
+        },
+      },
+    };
+    for (const [name, { mode, source, end }] of Object.entries(cases)) {
+      let controller;
+      const rs = new ReadableStream({
+        type: 'bytes',
+        ...source,
+        start(c) {
+          controller = c;
+        },
+      });
+      const reader = rs.getReader({ mode });
+      const read = () =>
+        mode === 'byob' ? reader.read(new Uint8Array(4)) : reader.read();
+      const reads = [read(), read()];
+      let fired = 0;
+      Object.defineProperty(Object.prototype, 'then', {
+        get() {
+          if (Object.hasOwn(this, 'done') && fired++ === 0) {
+            reader.releaseLock();
+          }
+          return undefined;
+        },
+        configurable: true,
+      });
+      try {
+        const ended = end(reader, controller);
+        for (const pending of reads) {
+          const result = await Promise.race([
+            pending,
+            scheduler.wait(250).then(() => 'pending'),
+          ]);
+          strictEqual(result.done, true, name);
+        }
+        strictEqual(fired > 0, true, `${name}: the then getter did not run`);
+        await ended;
+      } finally {
+        delete Object.prototype.then;
+      }
+    }
+  },
+};
+
+// A then getter that errors the source from the first result of a tee
+// branch's pending reads, while close() settles them: the close answers
+// them all, so the next read still resolves done. The other branch still
+// holds a chunk, so in TypeScript the error reaches it (ledger #23, on a
+// tee branch). autoAllocateChunkSize and BYOB reads.
+export const thenGetterErrorsSourceWhileBranchByteReadsSettle = {
+  async test() {
+    const cases = {
+      autoAllocate: { source: { autoAllocateChunkSize: 8 } },
+      byob: { mode: 'byob' },
+    };
+    for (const [name, { mode, source }] of Object.entries(cases)) {
+      let controller;
+      const rs = new ReadableStream({
+        type: 'bytes',
+        ...source,
+        start(c) {
+          controller = c;
+        },
+      });
+      const [branch] = rs.tee();
+      controller.enqueue(new Uint8Array([1]));
+      const reader = branch.getReader({ mode });
+      const read = () =>
+        mode === 'byob' ? reader.read(new Uint8Array(4)) : reader.read();
+      strictEqual((await read()).done, false, name);
+      const reads = [read(), read()];
+      const error = new Error('boom');
+      let fired = 0;
+      Object.defineProperty(Object.prototype, 'then', {
+        get() {
+          if (Object.hasOwn(this, 'done') && fired++ === 0) {
+            controller.error(error);
+          }
+          return undefined;
+        },
+        configurable: true,
+      });
+      try {
+        controller.close();
+        for (const pending of reads) {
+          const result = await Promise.race([
+            pending,
+            scheduler.wait(250).then(() => 'pending'),
+          ]);
+          strictEqual(result.done, true, name);
+        }
+        strictEqual(fired > 0, true, `${name}: the then getter did not run`);
+      } finally {
+        delete Object.prototype.then;
+      }
+    }
+  },
+};
+
+// A then getter that closes the source from the first result of an
+// enqueue() that answers reads on both tee branches. In TypeScript the
+// first branch's read resolves first, so the close reaches the second
+// branch together with the chunk: the chunk fills that branch's first two
+// autoAllocateChunkSize reads and the close answers the third done. The
+// reads resolve in the order they were made.
+export const thenGetterClosesSourceWhileBranchByteReadsFill = {
+  async test() {
+    let controller;
+    const rs = new ReadableStream({
+      type: 'bytes',
+      autoAllocateChunkSize: 2,
+      start(c) {
+        controller = c;
+      },
+    });
+    const [first, second] = rs.tee();
+    const firstRead = first.getReader().read();
+    const reader = second.getReader();
+    const order = [];
+    const results = [];
+    const reads = [0, 1, 2].map((i) =>
+      reader.read().then((result) => {
+        order.push(i);
+        results[i] = result;
+      })
+    );
+    let fired = 0;
+    let closeError;
+    Object.defineProperty(Object.prototype, 'then', {
+      get() {
+        if (Object.hasOwn(this, 'done') && fired++ === 0) {
+          try {
+            controller.close();
+          } catch (e) {
+            closeError = e;
+          }
+        }
+        return undefined;
+      },
+      configurable: true,
+    });
+    try {
+      controller.enqueue(new Uint8Array([1, 2, 3, 4]));
+      const settled = await Promise.race([
+        Promise.all(reads),
+        scheduler.wait(250).then(() => 'pending'),
+      ]);
+      strictEqual(settled === 'pending', false, 'a read is still pending');
+      strictEqual(fired > 0, true, 'the then getter did not run');
+    } finally {
+      delete Object.prototype.then;
+    }
+    strictEqual(closeError, undefined);
+    const firstResult = await firstRead;
+    deepStrictEqual([...firstResult.value], [1, 2]);
+    strictEqual(results[0].done, false);
+    deepStrictEqual([...results[0].value], [1, 2]);
+    strictEqual(results[1].done, false);
+    deepStrictEqual([...results[1].value], [3, 4]);
+    strictEqual(results[2].done, true);
+    deepStrictEqual(order, [0, 1, 2]);
   },
 };
 

@@ -152,7 +152,10 @@ struct Project {
     //
     // This is *not* used for an #include path, only as a debugging convenience.
     // Normally available at target/cxxbridge/ if we are able to know where the
-    // target dir is, otherwise under a common scratch dir.
+    // target dir is, otherwise at $OUT_DIR/cxxbridge/shared/. Upstream falls
+    // back to the `scratch` crate, which embeds the absolute OUT_DIR of its own
+    // build in its code; under Bazel that path is a sandbox directory that
+    // differs on every build, making this crate's metadata nondeterministic.
     //
     // The reason this isn't the #include dir is that we do not want builds to
     // have access to headers from arbitrary other parts of the dependency
@@ -176,7 +179,7 @@ impl Project {
 
         let shared_dir = match target::find_target_dir(&out_dir) {
             TargetDir::Path(target_dir) => target_dir.join("cxxbridge"),
-            TargetDir::Unknown => scratch::path("cxxbridge"),
+            TargetDir::Unknown => out_dir.join("cxxbridge").join("shared"),
         };
 
         Ok(Self {

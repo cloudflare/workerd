@@ -93,6 +93,10 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
   // rule for data with V8 heap provenance -- lives in JsReadableStream's converting constructors.
   KJ_SWITCH_ONEOF(init) {
     KJ_CASE_ONEOF(stream, JsReadableStream) {
+      // ExtractedBody's constructor rejects a disturbed stream, and its message takes precedence
+      // for a stream that is both, such as one tee() has left behind.
+      JSG_REQUIRE(stream.isDisturbed(js) || !stream.isLocked(js), TypeError,
+          "This ReadableStream is locked to a reader, and cannot be used as a body.");
       return ExtractedBody(js, kj::mv(stream));
     }
     KJ_CASE_ONEOF(gen, jsg::AsyncGeneratorIgnoringStrings<jsg::Value>) {
@@ -127,7 +131,7 @@ Body::ExtractedBody Body::extractBody(jsg::Lock& js, Initializer init) {
       auto boundary = kj::encodeHex(boundaryBuffer);
       auto contentType = MimeType::formDataWithBoundary(boundary);
       return ExtractedBody(
-          js, JsReadableStream(js, formData->serialize(boundary)), kj::mv(contentType));
+          js, JsReadableStream(js, formData->serialize(js, boundary)), kj::mv(contentType));
     }
     KJ_CASE_ONEOF(searchParams, jsg::Ref<URLSearchParams>) {
       return ExtractedBody(js, JsReadableStream(js, kj::mv(searchParams)),
@@ -689,17 +693,19 @@ kj::Maybe<kj::String> Request::serializeCfBlobJson(jsg::Lock& js) {
   if (!obj.has(js, "cacheControl")) {
     if (hasCacheMode) {
       // Synthesize from the cache request option.
-      switch (cacheMode) {
-        case CacheMode::NOSTORE:
-          obj.set(js, "cacheControl", js.str("no-store"_kjc));
-          break;
-        case CacheMode::NOCACHE:
-          obj.set(js, "cacheControl", js.str("no-cache"_kjc));
-          break;
-        case CacheMode::RELOAD:
-          break;
-        case CacheMode::NONE:
-          KJ_UNREACHABLE;
+      if (!FeatureFlags::get(js).getCacheOptionPreservesCacheControl()) {
+        switch (cacheMode) {
+          case CacheMode::NOSTORE:
+            obj.set(js, "cacheControl", js.str("no-store"_kjc));
+            break;
+          case CacheMode::NOCACHE:
+            obj.set(js, "cacheControl", js.str("no-cache"_kjc));
+            break;
+          case CacheMode::RELOAD:
+            break;
+          case CacheMode::NONE:
+            KJ_UNREACHABLE;
+        }
       }
     } else if (obj.has(js, "cacheTtl")) {
       // Synthesize from cacheTtl value: positive/zero → max-age=N, -1 → no-store.
@@ -960,6 +966,32 @@ constexpr bool isRedirectStatusCode(uint statusCode) {
       return false;
   }
 }
+
+// Throws TypeError if `statusText` is not acceptable as a Response's status message.
+void validateStatusText(jsg::Lock& js, kj::StringPtr statusText) {
+  if (FeatureFlags::get(js).getPedanticWpt()) {
+    // ResponseInit.statusText is a WebIDL ByteString, so each UTF-16 code unit must be at most
+    // 0xFF, and the Fetch spec additionally requires it to match the HTTP reason-phrase
+    // production, *( HTAB / SP / VCHAR / obs-text ).
+    // https://fetch.spec.whatwg.org/#initialize-a-response
+    auto utf16 = kj::encodeUtf16(statusText);
+    for (char16_t c: utf16) {
+      JSG_REQUIRE(c <= 0xFF && (c == '\t' || (c >= 0x20 && c != 0x7F)), TypeError,
+          "Invalid statusText");
+    }
+    return;
+  }
+
+  // Disallow control characters (especially \r and \n) in statusText since it could allow
+  // header injection.
+  //
+  // TODO(cleanup): Once this is deployed, update open-source KJ HTTP to do this automatically.
+  for (char c: statusText) {
+    if (static_cast<byte>(c) < 0x20u) {
+      JSG_FAIL_REQUIRE(TypeError, "Invalid statusText");
+    }
+  }
+}
 }  // namespace
 
 Response::Response(jsg::Lock& js,
@@ -982,8 +1014,10 @@ Response::Response(jsg::Lock& js,
       asyncContext(jsg::AsyncContextFrame::currentRef(js)) {}
 
 jsg::Ref<Response> Response::error(jsg::Lock& js) {
-  return js.alloc<Response>(js, 0, kj::none, js.alloc<Headers>(), CfProperty(), kj::none);
-};
+  auto guard =
+      FeatureFlags::get(js).getPedanticWpt() ? Headers::Guard::IMMUTABLE : Headers::Guard::NONE;
+  return js.alloc<Response>(js, 0, kj::none, js.alloc<Headers>(guard), CfProperty(), kj::none);
+}
 
 jsg::Ref<Response> Response::constructor(jsg::Lock& js,
     jsg::Optional<kj::Maybe<Body::Initializer>> optionalBodyInit,
@@ -1065,15 +1099,7 @@ jsg::Ref<Response> Response::constructor(jsg::Lock& js,
   }
 
   KJ_IF_SOME(s, statusText) {
-    // Disallow control characters (especially \r and \n) in statusText since it could allow
-    // header injection.
-    //
-    // TODO(cleanup): Once this is deployed, update open-source KJ HTTP to do this automatically.
-    for (char c: s) {
-      if (static_cast<byte>(c) < 0x20u) {
-        JSG_FAIL_REQUIRE(TypeError, "Invalid statusText");
-      }
-    }
+    validateStatusText(js, s);
   }
 
   KJ_IF_SOME(bi, bodyInit) {
@@ -1207,7 +1233,16 @@ jsg::Ref<Response> Response::json_(
     };
   }
 
-  return constructor(js, kj::Maybe(any.toJson(js)), kj::mv(maybeInit));
+  auto json = any.toJson(js);
+  if (FeatureFlags::get(js).getPedanticWpt()) {
+    // JSON.stringify() returns undefined for values that have no JSON representation, such as a
+    // symbol, a function, undefined, or an object whose toJSON() returns one of these. V8's
+    // JSON::Stringify() API converts that result to the string "undefined", which is never valid
+    // JSON text, so it identifies these values unambiguously.
+    JSG_REQUIRE(json != "undefined"_kj, TypeError,
+        "Response.json() requires a value that can be serialized to JSON.");
+  }
+  return constructor(js, kj::Maybe(kj::mv(json)), kj::mv(maybeInit));
 }
 
 jsg::Ref<Response> Response::clone(jsg::Lock& js) {
@@ -1298,9 +1333,20 @@ kj::Promise<DeferredProxy<void>> Response::send(jsg::Lock& js,
     return wsPromise;
   } else KJ_IF_SOME(jsBody, getBody(js)) {
     auto encoding = getContentEncoding(context, outHeaders, bodyEncoding, FeatureFlags::get(js));
+    auto flushAfterWrite = FlushCompressionAfterWrite::NO;
+    if (encoding != StreamEncoding::IDENTITY) {
+      KJ_IF_SOME(contentType, outHeaders.get(kj::HttpHeaderId::CONTENT_TYPE)) {
+        KJ_IF_SOME(mimeType, MimeType::extract(contentType)) {
+          if (mimeType == MimeType::EVENT_STREAM) {
+            flushAfterWrite = FlushCompressionAfterWrite::YES;
+          }
+        }
+      }
+    }
     auto maybeLength = jsBody.tryGetLength(js, encoding);
-    auto stream =
-        newSystemStream(outer.send(statusCode, getStatusText(), outHeaders, maybeLength), encoding);
+    auto stream = newSystemStream(
+        outer.send(statusCode, getStatusText(), outHeaders, maybeLength), encoding, context,
+        flushAfterWrite);
     // We need to enter the AsyncContextFrame that was captured when the
     // Response was created before starting the loop.
     jsg::AsyncContextFrame::Scope scope(js, asyncContext);
@@ -1430,7 +1476,9 @@ kj::Maybe<jsg::Promise<jsg::Ref<Response>>> FetchEvent::getResponsePromise(jsg::
 }
 
 void FetchEvent::respondWith(jsg::Lock& js, jsg::Promise<jsg::Ref<Response>> promise) {
-  preventDefault();
+  // The runtime uses the canceled flag to skip default handling once a response is provided.
+  // A passive listener must still be able to respond, so this bypasses the passive check.
+  forcePreventDefault();
 
   if (IoContext::current().hasOutputGate()) {
     // Once a Response is returned, we need to apply the output lock.
@@ -1561,7 +1609,7 @@ template <typename T>
 using ActorFetchAttemptResult = kj::OneOf<T, ActorFetchFailure>;
 
 // The retry policy a fetch through `fetcher` runs under, or none if the target does not support
-// actor call retries. A binding's own policy applies only when it configured one and the userland
+// actor call retries. A stub's own policy applies only when it was given one and the userland
 // retry gate is on. Otherwise the runtime's default applies. The gate is checked before touching
 // the stub. Its I/O objects belong to the context that created it, so reaching them can throw, and
 // a disabled rollout must never get that far.
@@ -1583,7 +1631,6 @@ kj::Maybe<kj::Rc<ActorCallRetryState>> makeActorCallRetryState(
     .callType = ActorRetryCallType::FETCH,
     .enforcementEnabled = ActorRetryGateEnabled::YES,
     .payloadReplayable = ActorCallPayloadReplayable(request.canRewindBody()),
-    .probeCandidate = fetcher.getActorRetryProbeCandidate(),
   };
   return kj::rc<ActorCallRetryState>(
       context.getIoChannelFactory().getTimer(), context.getMetrics(), config, policy, callStart);
@@ -1827,13 +1874,8 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
   // next call. The set->getClientWithTracing->wrap*SubrequestClient sequence is synchronous.
   auto targetRetryable = fetcher->getActorTargetRetryability()
                              .orDefault(ActorCallTargetRetryable::NO);
-  // A redirect hop's probe could not tell how much of the call's retry timeout earlier hops spent.
-  kj::Maybe<ActorRetryCandidate> probeCandidate;
-  if (urlList.size() == 1) {
-    probeCandidate = fetcher->getActorRetryProbeCandidate();
-  }
   ioContext.getMetrics().setNextSubrequestRetryEligibility(
-      SubrequestBodyRewindable(jsRequest->canRewindBody()), targetRetryable, probeCandidate);
+      SubrequestBodyRewindable(jsRequest->canRewindBody()), targetRetryable);
 
   // Get client and trace context (if needed) in one clean call.
   auto cfBlobJson = jsRequest->serializeCfBlobJson(js);
@@ -1923,7 +1965,7 @@ jsg::Promise<jsg::Ref<Response>> fetchImplNoOutputLockAttempt(jsg::Lock& js,
         } catch (...) {
           auto exception = kj::getCaughtExceptionAsKj();
           if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
-            kj::throwFatalException(kj::mv(exception));
+            kj::throwException(kj::mv(exception));
           }
           // Ignore DISCONNECTED exceptions thrown by the writePromise, so that we always
           // return the server's response, which should identify if any issue occurred with
@@ -2327,18 +2369,21 @@ jsg::Ref<Socket> Fetcher::connect(
   return connectImpl(js, JSG_THIS, kj::mv(address), kj::mv(options));
 }
 
-void Fetcher::registerOverride(jsg::Lock& js, IsHyperdrive isHyperdrive, uint16_t overridePort) {
+void Fetcher::registerOverride(jsg::Lock& js, uint16_t overridePort) {
   if (registeredConnectOverride) {
     return;
   }
   KJ_DASSERT(host == kj::none);
   kj::FixedArray<kj::byte, 16> randomBytes;
   workerd::getEntropy(randomBytes);
-  host = kj::str(kj::encodeHex(randomBytes), isHyperdrive ? ".hyperdrive.local" : ".workers.alt");
+  host = kj::str(kj::encodeHex(randomBytes), ".workers.alt");
 
   // Register an entry in the global scope connectOverrides HashMap so that cloudflare:sockets's
-  // connect() will route connections to this magic hostname through the fetcher.
-  auto& globalScope = IoContext::current().getCurrentLock().getGlobalScope();
+  // connect() will route connections to this magic hostname through the fetcher. The global scope
+  // is per-isolate, so this also works outside of a request, e.g. while constructing bindings.
+  auto context = js.v8Context();
+  auto& globalScope = jsg::extractInternalPointer<ServiceWorkerGlobalScope, true>(
+      js.v8Isolate, context, context->Global(), jsg::kNonResourceWrappableTagRange);
   globalScope.setConnectOverride(
     kj::str(KJ_ASSERT_NONNULL(host), ":", overridePort),
     [self = JSG_THIS](jsg::Lock& js) mutable {
@@ -2352,10 +2397,15 @@ void Fetcher::registerOverride(jsg::Lock& js, IsHyperdrive isHyperdrive, uint16_
   registeredConnectOverride = true;
 }
 
+kj::String Fetcher::mapVirtualHost(jsg::Lock& js, uint16_t port) {
+  registerOverride(js, port);
+  return kj::str(KJ_ASSERT_NONNULL(host), ":", KJ_ASSERT_NONNULL(this->port));
+}
+
 kj::StringPtr ExtendedFetcher::getHost(jsg::Lock& js) {
   // Ensures the connect override is registered on the global scope using registerOverride(), then
   // returns the random hostname.
-  registerOverride(js, isHyperdrive, KJ_ASSERT_NONNULL(port));
+  registerOverride(js, KJ_ASSERT_NONNULL(port));
   return KJ_ASSERT_NONNULL(host);
 }
 
@@ -2440,6 +2490,11 @@ JsRpcClientProvider::ClientForOneCall Fetcher::getClientForOneCall(
   } else {
     clientWithTracing =
         buildClient(ioContext, kj::none, "jsRpcSession"_kjc, kj::mv(makeUserSpanParent));
+  }
+  KJ_IF_SOME(sessionSpan, clientWithTracing.traceContext) {
+    // The session span covers the session task, not any one awaitIo(); the jsRpcCall span is the
+    // one the call's awaitIo() should adopt.
+    sessionSpan.detachAsync();
   }
   auto callSpanParents =
       clientWithTracing.traceContext.map([](TraceContext& tc) { return tc.getSpanParents(); });
@@ -2920,13 +2975,6 @@ Fetcher::ClientWithTracing Fetcher::buildClient(IoContext& ioContext,
 kj::Maybe<ActorCallTargetRetryable> Fetcher::getActorTargetRetryability() {
   KJ_IF_SOME(outgoingFactory, channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>()) {
     return outgoingFactory->getActorTargetRetryability();
-  }
-  return kj::none;
-}
-
-kj::Maybe<ActorRetryCandidate> Fetcher::getActorRetryProbeCandidate() {
-  KJ_IF_SOME(outgoingFactory, channelOrClientFactory.tryGet<IoOwn<OutgoingFactory>>()) {
-    return outgoingFactory->getActorRetryProbeCandidate();
   }
   return kj::none;
 }

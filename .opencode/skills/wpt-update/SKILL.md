@@ -19,11 +19,43 @@ unless the user explicitly requests a bump-only change.
 
 ## Scope
 
-Allowed edits are dependency metadata produced by the updater and WPT config
-files under `src/wpt`. Do not fix runtime conformance bugs during a WPT update.
-If correct triage requires runtime, harness, build-rule, patch, or upstream
-changes, report the required follow-up but don't make changes unless the user
-expands the scope.
+Allowed edits are dependency metadata produced by the updater, WPT config
+files under `src/wpt`, and the WPT patches described in
+[WPT patches](#wpt-patches). Do not fix runtime conformance bugs during a WPT
+update. If correct triage requires runtime, harness, build-rule, upstream, or
+other dependency patch changes, report the required follow-up but don't make
+changes unless the user expands the scope.
+
+## WPT patches
+
+workerd applies the patches under `patches/wpt` to the WPT archive. They are
+listed in the `patches` of the `wpt` entry in `build/deps/shared_deps.jsonc`.
+Unlike patches to other dependencies, maintaining these is in scope for every
+WPT update: they target WPT's own files, so upstream changes can stop them from
+applying or leave them incomplete.
+
+If most WPT targets fail during analysis with `Build did NOT complete
+successfully`, run `bazel build` on a single suite to see the root error. A
+patch that no longer applies to the new archive reports
+`CONTENT_DOES_NOT_MATCH_TARGET`. Rebase it onto the new upstream file and keep
+its intent. If you add, remove, or rename a patch, update the patch list and
+regenerate `build/deps/gen/shared_deps.MODULE.bazel` with
+`./build/deps/update-deps.py wpt`, which keeps the pinned `freeze_version`.
+
+Bazel deletes the extracted repository when a patch fails, but the archive
+remains in the repository cache at
+`$(bazel info repository_cache)/content_addressable/sha256/<sha256>/file`,
+using the `sha256` values from the old and new dependency metadata. Extract the
+old and new archives into separate empty directories under `$TMPDIR` to rebase
+patches and to compare the mapped WPT directories with `diff -rq`.
+
+The `serve` patch keeps `tools/serve/commands.json` from requesting a
+virtualenv. `tools/wpt/wpt.py` asserts that any command declaring
+`requirements` or `conditional_requirements` uses a virtualenv, so the patch
+must also remove any such keys that upstream adds to the `serve` entry.
+
+Describe each patch change and the upstream commit that required it in the
+final report.
 
 ## Preflight
 
@@ -101,6 +133,8 @@ bazel test @workerd//src/wpt/... --test_size_filters=
 Clearing `test_size_filters` ensures that enormous WPT targets are included.
 The complete pattern runs default and all-autogates variants plus ESLint and
 TypeScript checks.
+
+If most WPT targets fail during analysis, see [WPT patches](#wpt-patches).
 
 Use an affected suite target while iterating. Include the required `@` suffix.
 For standalone workerd:
@@ -216,7 +250,10 @@ missing.
   coverage.
 
 Each property accepts `true` for a whole suite or an array of exact strings and
-regular expressions. Prefer exact subtest names. Use a regex only when it is
+regular expressions. Prefer exact subtest names. Copy non-ASCII names with
+`\u` escapes when they contain decomposed or otherwise non-NFC text, because
+copying them through a terminal or editor can normalize them into different
+strings. Use a regex only when it is
 narrow, anchored where practical, and checked against every intended name. Do
 not use broad regexes or whole-suite `true` merely to make a target pass.
 
@@ -249,6 +286,9 @@ python3 tools/cross/format.py --check git
 git diff --check
 ```
 
+Running `python3 tools/cross/format.py git` without `--check` applies the
+formatting to the reported files. Rerun the affected targets afterwards.
+
 ### Continuous improvement
 
 Re-read the SKILL.md file. If there are any details that weren't clear or that
@@ -263,13 +303,12 @@ updates.
 Report:
 
 * The old and new WPT tags and pinned upstream comparison URL.
+* WPT patch changes and the upstream commits that required them.
 * Added, removed, and renamed suites.
 * Expectations added or removed.
 * Each classification and its durable technical reason.
 * Relevant upstream and workerd source locations.
 * Proposed out-of-scope fixes and unresolved items.
-* Exact validation commands and final executed counts.
-* Final Git state.
 
 ### Git handoff
 

@@ -151,6 +151,7 @@ ActorSqlite::ExplicitTxn::ExplicitTxn(ActorSqlite& actorSqlite): actorSqlite(act
       {.regulator = SqliteDatabase::TRUSTED}, kj::str("SAVEPOINT _cf_savepoint_", depth));
 }
 ActorSqlite::ExplicitTxn::~ExplicitTxn() noexcept(false) {
+  // NOLINTBEGIN(custom-dtor-throw-during-unwind): the lambda is noexcept, so its checks crash.
   KJ_DEFER([&]() noexcept {
     // We'd better crash if any of this state update fails, otherwise dangling pointers.
 
@@ -167,6 +168,7 @@ ActorSqlite::ExplicitTxn::~ExplicitTxn() noexcept(false) {
       actorSqlite.currentTxn.init<NoTxn>();
     }
   }(););
+  // NOLINTEND(custom-dtor-throw-during-unwind)
 
   if (!committed && actorSqlite.broken == kj::none) {
     // Assume rollback if not committed.
@@ -202,7 +204,7 @@ kj::Maybe<kj::Promise<void>> ActorSqlite::ExplicitTxn::commit() {
       if (self->actorSqlite.broken == kj::none) {
         self->rollbackImpl();
       }
-      kj::throwFatalException(kj::mv(e));
+      kj::throwException(kj::mv(e));
     });
   } else {
     commitImpl();
@@ -250,12 +252,13 @@ void ActorSqlite::ExplicitTxn::commitImpl() {
       return actorSqlite.commitImpl(
           kj::mv(KJ_ASSERT_NONNULL(precommitAlarmState)), actorSqlite.currentCommitSpan.addRef());
     })
-                             .catch_([outputGate = &actorSqlite.outputGate,
+                             .catch_([outputGate = actorSqlite.outputGate.addWeak(),
                                          spanParent = actorSqlite.currentCommitSpan.addRef()](
                                          kj::Exception&& e) mutable {
       // Unconditionally break the output gate if commit threw an error, no matter whether the
       // commit was confirmed or unconfirmed.
-      return outputGate->lockWhile(kj::Promise<void>(kj::mv(e)), kj::mv(spanParent));
+      return KJ_REQUIRE_NONNULL(outputGate.tryGet(), "OutputGate destroyed before commit failed")
+          .lockWhile(kj::Promise<void>(kj::mv(e)), kj::mv(spanParent));
     });
     if (someWriteConfirmed) {
       commitPromise = actorSqlite.outputGate.lockWhile(
@@ -438,9 +441,10 @@ kj::Promise<void> ActorSqlite::requestScheduledAlarm(
   }
 
   return hooks.scheduleRun(requestedTime, kj::mv(priorTask))
-      .then([this, movingAlarmLater, requestedTime]() {
+      .then([weakThis = addWeakToThis(), movingAlarmLater, requestedTime]() {
     if (!movingAlarmLater) {
-      alarmScheduledNoLaterThan = requestedTime;
+      KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ActorSqlite destroyed before alarm was scheduled")
+          .alarmScheduledNoLaterThan = requestedTime;
     }
   });
 }
@@ -660,7 +664,7 @@ void ActorSqlite::taskFailed(kj::Exception&& exception) {
 
 void ActorSqlite::requireNotBroken() {
   KJ_IF_SOME(e, broken) {
-    kj::throwFatalException(e.clone());
+    kj::throwException(e.clone());
   }
 }
 
@@ -904,12 +908,15 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(
 
   if (!deleteAllCommitScheduled) {
     // Make sure a commit callback is queued for the deleteAll().
-    commitTasks.add(outputGate.lockWhile(kj::evalLater([this]() mutable -> kj::Promise<void> {
+    commitTasks.add(outputGate.lockWhile(
+        kj::evalLater([weakThis = addWeakToThis()]() mutable -> kj::Promise<void> {
+      auto& self =
+          KJ_REQUIRE_NONNULL(weakThis.tryGet(), "ActorSqlite destroyed before deleteAll() commit");
       // Don't commit if shutdown() has been called.
-      requireNotBroken();
+      self.requireNotBroken();
 
-      deleteAllCommitScheduled = false;
-      if (currentTxn.is<ImplicitTxn*>()) {
+      self.deleteAllCommitScheduled = false;
+      if (self.currentTxn.is<ImplicitTxn*>()) {
         // An implicit transaction is already scheduled, so we'll count on it to perform a commit when it's
         // done. This is particularly important for the case where deleteAll() was called while an alarm
         // is outstanding; resetting the alarm state (below) starts an implicit transaction.
@@ -920,8 +927,8 @@ ActorCacheInterface::DeleteAllResults ActorSqlite::deleteAll(
         // This is important when deleteAll() deletes an alarm: commitImpl() detects that
         // metadata.getAlarm() moved to kj::none and notifies the scheduler via
         // requestScheduledAlarm(kj::none, ...).
-        auto precommitAlarmState = startPrecommitAlarmScheduling();
-        return commitImpl(kj::mv(precommitAlarmState), currentCommitSpan.addRef());
+        auto precommitAlarmState = self.startPrecommitAlarmScheduling();
+        return self.commitImpl(kj::mv(precommitAlarmState), self.currentCommitSpan.addRef());
       }
     }),
         currentCommitSpan.addRef()));

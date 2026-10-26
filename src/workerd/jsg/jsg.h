@@ -1966,6 +1966,15 @@ class Name final {
 template <typename Signature>
 class Function;
 
+// Whether a JavaScript function that wraps a C++ callback will be called at most once.
+//
+// A wrapped callback, and everything it captures, normally lives until the GC collects the
+// function. In practice that means the next full GC: v8::Function::New() allocates a template in
+// old space that references the callback's data, so minor GCs never free it. With Once::YES, the
+// callback is destroyed as soon as its first call returns, and a second call is an internal
+// error. Use it for functions that only ever run once, such as microtasks.
+WD_STRONG_BOOL(Once);
+
 // Use this to unwrap a JavaScript function that should be called as a constructor (with `new`).
 // The return type in this case is the constructed type. `Constructor` is a subclass of `Function`;
 // it can be used in all the same ways.
@@ -2203,10 +2212,18 @@ consteval bool hasPublicVisitForGc() {
 // also give the function a `visitForGc()` method. In this case, `visitForGc()` must be public.
 //
 // GC visitation is optional. If your type owns no `Ref`s, it can skip implementing
-// `visitForGc()`. You can also omit `visitForGc()` if you don't care about the possibility of
-// reference cycles. Any `Ref` which is not explicitly visited will not be eligible for
-// garbage collection at all. Hence, failure to implement proper visitation may lead to memory
-// leaks, but NOT to use-after-free.
+// `visitForGc()`. A handle (`Ref`, `V8Ref`, `JsRef`, etc.) that is never visited stays strong:
+// it keeps its target alive and is not eligible for garbage collection. Missing visitation can
+// therefore cause leaks, for example when the handle is part of a cycle through JavaScript, but
+// not use-after-free.
+//
+// Visiting a handle switches it to traced mode. From then on, the target is kept alive only
+// because the GC reaches the handle by tracing its holder. So only visit handles held by objects
+// that the GC traverses on every cycle, such as a Resource Type with a live wrapper. Moving a
+// single handle is safe, because the destination becomes strong again. Moving a container of
+// visited handles without moving each element (for example `auto list = kj::mv(pending)` on a
+// `kj::Vector`) is not: the elements are still traced, but nothing visits them anymore, so the
+// GC can free their targets while they are still in use.
 //
 // Note that GC visitation technically only collects JavaScript objects, including wrapper
 // objects. C++ objects will not be collected if they contain reference cycles entirely in C++
@@ -2238,6 +2255,13 @@ class GcVisitor {
   /// Used by the Rust JSG FFI to support `v8::Global<T>` fields on Rust
   /// resources without a full `jsg::Data` wrapper.
   void visit(v8::Global<v8::Value>& strong, v8::TracedReference<v8::Data>& traced);
+
+  // The isolate of the object being visited: the one its wrapper was attached in, or that of the
+  // object whose trace reached it. Null if neither has happened yet, or the isolate is gone; a
+  // visit made by a garbage collection always has one.
+  v8::Isolate* v8Isolate() const {
+    return parent.getIsolate();
+  }
 
   void visit(kj::Maybe<Data>& maybeData) {
     KJ_IF_SOME(data, maybeData) {
@@ -3017,8 +3041,11 @@ class Lock {
 
   v8::Local<v8::String> wrapString(kj::StringPtr text);
   virtual v8::Local<v8::ArrayBuffer> wrapBytes(kj::Array<byte> data) = 0;
+  // Wraps a C++ callback as a JavaScript function. Pass Once::YES if the function will be called
+  // at most once; see `Once`.
   virtual v8::Local<v8::Function> wrapSimpleFunction(v8::Local<v8::Context> context,
-      jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction) = 0;
+      jsg::Function<void(const v8::FunctionCallbackInfo<v8::Value>& info)> simpleFunction,
+      Once once = Once::NO) = 0;
 
   // A variation on wrapSimpleFunction that allows for a return value. While the wrapSimpleFunction
   // implementation passes the FunctionCallbackInfo into the called function, any call to
@@ -3108,6 +3135,8 @@ class Lock {
   void setRequireReturnsDefaultExportEnabled();
   void setThrowOnUnrecognizedImportAssertion();
   bool getThrowOnUnrecognizedImportAssertion() const;
+  void setWasmEsmIntegrationBuiltinsEnabled();
+  bool isWasmEsmIntegrationBuiltinsEnabled() const;
   void setToStringTag();
   void setImmutablePrototype();
   void setSpecCompliantPropertyAttributes();

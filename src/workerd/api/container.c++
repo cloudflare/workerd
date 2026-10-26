@@ -31,7 +31,7 @@ constexpr size_t MAX_CACHED_TCP_PORTS = 4;
 
 constexpr size_t MAX_IMAGE_REFERENCE_SIZE = 4096;
 constexpr kj::StringPtr VALID_CONTAINER_INSTANCE_TYPES[] = {
-  "lite"_kj, "standard-1"_kj, "standard-2"_kj, "standard-3"_kj, "standard-4"_kj};
+  "lite"_kj, "basic"_kj, "standard-1"_kj, "standard-2"_kj, "standard-3"_kj, "standard-4"_kj};
 
 // JS numbers are doubles, but the wire format is UInt64.
 uint64_t requireResourceAmount(double value, kj::StringPtr name) {
@@ -790,10 +790,14 @@ jsg::Promise<jsg::Ref<ExecProcess>> Container::exec(
   // We have to await, because PID won't be available until the response resolves
   return ioContext.awaitIo(js, req.send())
       .then(js,
-          [&ioContext, &byteStreamFactory, options = kj::mv(options), ptyEnabled,
+          [weakIoContext = ioContext.getWeakRef(), options = kj::mv(options), ptyEnabled,
               stdoutInput = kj::mv(stdoutInput), stderrInput = kj::mv(stderrInput)](
               jsg::Lock& js, capnp::Response<rpc::Container::ExecResults> results) mutable
           -> jsg::Ref<ExecProcess> {
+    auto& ioContext =
+        KJ_REQUIRE_NONNULL(weakIoContext->tryGet(), "IoContext destroyed before exec() resolved");
+    // The factory belongs to the thread context, so re-taking it here yields the same object.
+    auto& byteStreamFactory = ioContext.getByteStreamFactory();
     auto process = results.getProcess();
     auto handle = process.getHandle();
     auto pid = process.getPid();

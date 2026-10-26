@@ -23,7 +23,7 @@ fn array_buffer_new_copies_data() {
         // Mutate the source after creation — must not affect the ArrayBuffer.
         src.fill(0xFF);
 
-        ctx.set_global("buf", buf.into());
+        ctx.set_global(lock, "buf", buf);
 
         let is_ab: bool = ctx.eval(lock, "buf instanceof ArrayBuffer").unwrap();
         assert!(is_ab);
@@ -47,7 +47,7 @@ fn array_buffer_new_zeroed_is_zeroed() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let buf = v8::ArrayBuffer::new_zeroed(lock, 8);
-        ctx.set_global("buf", buf.into());
+        ctx.set_global(lock, "buf", buf);
 
         let len: jsg::Number = ctx.eval(lock, "buf.byteLength").unwrap();
         assert!((len.value() - 8.0).abs() < f64::EPSILON);
@@ -58,6 +58,79 @@ fn array_buffer_new_zeroed_is_zeroed() {
             .unwrap();
         assert!(all_zero);
 
+        Ok(())
+    });
+}
+
+#[test]
+fn array_buffer_new_zeroed_with_fills_before_js_sees_it() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let (buf, result) = v8::ArrayBuffer::new_zeroed_with(lock, 4, |bytes| {
+            assert_eq!(bytes, &[0, 0, 0, 0], "must be zeroed before fill runs");
+            bytes[1..3].copy_from_slice(&[10, 20]);
+            "done"
+        })
+        .unwrap();
+        assert_eq!(result, "done");
+        assert_eq!(buf.as_slice(lock), &[0, 10, 20, 0]);
+
+        // The written bytes are visible to JavaScript and the rest stay zero.
+        ctx.set_global(lock, "buf", buf);
+        let contents: String = ctx.eval(lock, "new Uint8Array(buf).join(',')").unwrap();
+        assert_eq!(contents, "0,10,20,0");
+
+        Ok(())
+    });
+}
+
+#[test]
+fn array_buffer_new_zeroed_with_empty() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let (buf, len) = v8::ArrayBuffer::new_zeroed_with(lock, 0, |bytes| bytes.len()).unwrap();
+        assert_eq!(len, 0);
+        assert!(buf.is_empty());
+        Ok(())
+    });
+}
+
+#[test]
+fn array_buffer_new_zeroed_with_allocation_failure_skips_fill() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let mut called = false;
+        let result = v8::ArrayBuffer::new_zeroed_with(lock, usize::MAX, |_| called = true);
+        assert!(result.is_none());
+        assert!(!called);
+        Ok(())
+    });
+}
+
+#[test]
+fn uint8_array_from_buffer_views_a_range() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let buf = v8::ArrayBuffer::new(lock, &[1, 2, 3, 4]);
+        let view = v8::Uint8Array::from_buffer(lock, &buf, 1, 2).unwrap();
+        assert_eq!(view.as_slice(lock), &[2, 3]);
+        let whole = v8::Uint8Array::from_buffer(lock, &buf, 0, 4).unwrap();
+        assert_eq!(whole.as_slice(lock), &[1, 2, 3, 4]);
+        let empty_at_end = v8::Uint8Array::from_buffer(lock, &buf, 4, 0).unwrap();
+        assert!(empty_at_end.is_empty());
+        Ok(())
+    });
+}
+
+#[test]
+fn uint8_array_from_buffer_out_of_bounds_is_an_error() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, _ctx| {
+        let buf = v8::ArrayBuffer::new(lock, &[1, 2, 3, 4]);
+        assert!(v8::Uint8Array::from_buffer(lock, &buf, 0, 5).is_err());
+        assert!(v8::Uint8Array::from_buffer(lock, &buf, 5, 0).is_err());
+        assert!(v8::Uint8Array::from_buffer(lock, &buf, 3, 2).is_err());
+        assert!(v8::Uint8Array::from_buffer(lock, &buf, 1, usize::MAX).is_err());
         Ok(())
     });
 }
@@ -93,7 +166,7 @@ fn array_buffer_as_slice_reads_data() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new(lock, &[1u8, 2, 3, 4]);
-        assert_eq!(buf.as_slice(), &[1u8, 2, 3, 4]);
+        assert_eq!(buf.as_slice(lock), &[1u8, 2, 3, 4]);
         Ok(())
     });
 }
@@ -103,7 +176,7 @@ fn array_buffer_as_slice_empty() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let buf = v8::ArrayBuffer::new_zeroed(lock, 0);
-        assert_eq!(buf.as_slice(), &[] as &[u8]);
+        assert_eq!(buf.as_slice(lock), &[] as &[u8]);
         Ok(())
     });
 }
@@ -115,7 +188,7 @@ fn array_buffer_as_mut_slice_mutations_visible_in_js() {
         let mut buf = v8::ArrayBuffer::new(lock, &[0u8, 0, 0]);
         // SAFETY: no other reference into this buffer is live during this call.
         unsafe { buf.as_mut_slice(lock) }.copy_from_slice(&[10, 20, 30]);
-        ctx.set_global("buf", buf.into());
+        ctx.set_global(lock, "buf", buf);
 
         let v1: jsg::Number = ctx.eval(lock, "new Uint8Array(buf)[1]").unwrap();
         assert!((v1.value() - 20.0).abs() < f64::EPSILON);
@@ -142,12 +215,12 @@ fn array_buffer_to_vec() {
 fn array_buffer_detach() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let mut buf = v8::ArrayBuffer::new(lock, &[1u8, 2, 3]);
+        let buf = v8::ArrayBuffer::new(lock, &[1u8, 2, 3]);
         assert!(buf.is_detachable());
         assert!(!buf.was_detached());
         assert_eq!(buf.byte_length(), 3);
 
-        buf.detach();
+        buf.detach(lock);
         assert!(buf.was_detached());
         assert_eq!(buf.byte_length(), 0);
 
@@ -177,33 +250,31 @@ fn array_buffer_into_value_and_back() {
         let val: v8::Local<v8::Value> = buf.into();
         assert!(val.is_array_buffer());
         assert!(!val.is_array_buffer_view());
-        let back: v8::Local<v8::ArrayBuffer> = val.into();
+        let back: v8::Local<v8::ArrayBuffer> = val.try_into().unwrap();
         assert_eq!(back.byte_length(), 2);
-        assert_eq!(back.as_slice(), &[1u8, 2]);
+        assert_eq!(back.as_slice(lock), &[1u8, 2]);
         Ok(())
     });
 }
 
 #[test]
-fn array_buffer_try_as_from_value() {
+fn array_buffer_try_from_from_value() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("new ArrayBuffer(4)").unwrap();
-        let buf = val
-            .try_as::<v8::ArrayBuffer>()
-            .expect("should cast to ArrayBuffer");
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "new ArrayBuffer(4)").unwrap();
+        let buf: v8::Local<v8::ArrayBuffer> = val.try_into().expect("should cast to ArrayBuffer");
         assert_eq!(buf.byte_length(), 4);
         Ok(())
     });
 }
 
 #[test]
-fn array_buffer_try_as_fails_for_typed_array() {
+fn array_buffer_try_from_fails_for_typed_array() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("new Uint8Array([1,2,3])").unwrap();
-        let result = val.try_as::<v8::ArrayBuffer>();
-        assert!(result.is_none());
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "new Uint8Array([1,2,3])").unwrap();
+        let result = v8::Local::<v8::ArrayBuffer>::try_from(val);
+        assert!(result.is_err());
         Ok(())
     });
 }
@@ -245,7 +316,7 @@ fn array_buffer_from_js_rejects_typed_array() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let res = jsg::Rc::new(AbResource);
-        ctx.set_global("r", res.to_js(lock));
+        ctx.set_global(lock, "r", res);
 
         let ok: jsg::Number = ctx.eval(lock, "r.byteLen(new ArrayBuffer(5))").unwrap();
         assert!((ok.value() - 5.0).abs() < f64::EPSILON);
@@ -320,7 +391,7 @@ fn backing_store_as_mut_slice_mutations_visible_via_local() {
         // SAFETY: single-threaded test; no concurrent access to this non-shared backing store.
         unsafe { bs.as_mut_slice(lock) }.copy_from_slice(&[7, 8, 9]);
         // The Local<ArrayBuffer> shares the same backing store
-        ctx.set_global("buf", buf.into());
+        ctx.set_global(lock, "buf", buf);
         let v: jsg::Number = ctx.eval(lock, "new Uint8Array(buf)[0]").unwrap();
         assert!((v.value() - 7.0).abs() < f64::EPSILON);
         Ok(())
@@ -353,14 +424,13 @@ fn backing_store_outlives_local() {
 #[test]
 fn array_buffer_view_from_typed_array() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("new Uint8Array([10, 20, 30])").unwrap();
-        let view: v8::Local<v8::ArrayBufferView> = val
-            .try_as::<v8::ArrayBufferView>()
-            .expect("Uint8Array is ArrayBufferView");
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "new Uint8Array([10, 20, 30])").unwrap();
+        let view: v8::Local<v8::ArrayBufferView> =
+            val.try_into().expect("Uint8Array is ArrayBufferView");
         assert_eq!(view.byte_length(), 3);
         assert_eq!(view.byte_offset(), 0);
-        assert_eq!(view.as_slice(), &[10u8, 20, 30]);
+        assert_eq!(view.as_slice(lock), &[10u8, 20, 30]);
         Ok(())
     });
 }
@@ -368,9 +438,10 @@ fn array_buffer_view_from_typed_array() {
 #[test]
 fn array_buffer_view_with_byte_offset() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
+    harness.run_in_context(|lock, ctx| {
         let val = ctx
             .eval_raw(
+                lock,
                 r"
                     const buf = new ArrayBuffer(12);
                     const all = new Uint8Array(buf);
@@ -379,10 +450,10 @@ fn array_buffer_view_with_byte_offset() {
                 ",
             )
             .unwrap();
-        let view: v8::Local<v8::ArrayBufferView> = val.try_as::<v8::ArrayBufferView>().unwrap();
+        let view: v8::Local<v8::ArrayBufferView> = val.try_into().unwrap();
         assert_eq!(view.byte_offset(), 4);
         assert_eq!(view.byte_length(), 4);
-        assert_eq!(view.as_slice(), &[4u8, 5, 6, 7]);
+        assert_eq!(view.as_slice(lock), &[4u8, 5, 6, 7]);
         Ok(())
     });
 }
@@ -391,11 +462,11 @@ fn array_buffer_view_with_byte_offset() {
 fn array_buffer_view_as_mut_slice() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let val = ctx.eval_raw("new Uint8Array([1, 2, 3])").unwrap();
-        let mut view: v8::Local<v8::ArrayBufferView> = val.try_as::<v8::ArrayBufferView>().unwrap();
+        let val = ctx.eval_raw(lock, "new Uint8Array([1, 2, 3])").unwrap();
+        let mut view: v8::Local<v8::ArrayBufferView> = val.try_into().unwrap();
         // SAFETY: no other reference into this buffer is live during this call.
         unsafe { view.as_mut_slice(lock) }.fill(0xFF);
-        ctx.set_global("arr", view.into());
+        ctx.set_global(lock, "arr", view);
         let v: jsg::Number = ctx.eval(lock, "arr[0]").unwrap();
         assert!((v.value() - 255.0).abs() < f64::EPSILON);
         Ok(())
@@ -405,10 +476,10 @@ fn array_buffer_view_as_mut_slice() {
 #[test]
 fn array_buffer_view_buffer() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("new Uint16Array([100, 200])").unwrap();
-        let view: v8::Local<v8::ArrayBufferView> = val.try_as::<v8::ArrayBufferView>().unwrap();
-        let backing = view.buffer();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "new Uint16Array([100, 200])").unwrap();
+        let view: v8::Local<v8::ArrayBufferView> = val.try_into().unwrap();
+        let backing = view.buffer(lock);
         // Uint16Array([100,200]) → 4 bytes
         assert_eq!(backing.byte_length(), 4);
         Ok(())
@@ -418,9 +489,9 @@ fn array_buffer_view_buffer() {
 #[test]
 fn array_buffer_view_to_vec() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("new Uint8Array([7, 8, 9])").unwrap();
-        let view: v8::Local<v8::ArrayBufferView> = val.try_as::<v8::ArrayBufferView>().unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "new Uint8Array([7, 8, 9])").unwrap();
+        let view: v8::Local<v8::ArrayBufferView> = val.try_into().unwrap();
         assert_eq!(view.to_vec(), vec![7u8, 8, 9]);
         Ok(())
     });
@@ -429,9 +500,9 @@ fn array_buffer_view_to_vec() {
 #[test]
 fn array_buffer_view_is_empty() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("new Uint8Array([])").unwrap();
-        let view: v8::Local<v8::ArrayBufferView> = val.try_as::<v8::ArrayBufferView>().unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "new Uint8Array([])").unwrap();
+        let view: v8::Local<v8::ArrayBufferView> = val.try_into().unwrap();
         assert!(view.is_empty());
         assert_eq!(view.byte_length(), 0);
         Ok(())
@@ -441,9 +512,9 @@ fn array_buffer_view_is_empty() {
 #[test]
 fn array_buffer_view_into_value_and_back() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("new Int32Array([1, 2, 3])").unwrap();
-        let view: v8::Local<v8::ArrayBufferView> = val.try_as::<v8::ArrayBufferView>().unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "new Int32Array([1, 2, 3])").unwrap();
+        let view: v8::Local<v8::ArrayBufferView> = val.try_into().unwrap();
         let val2: v8::Local<v8::Value> = view.into();
         assert!(val2.is_array_buffer_view());
         Ok(())
@@ -454,8 +525,8 @@ fn array_buffer_view_into_value_and_back() {
 fn array_buffer_view_into_object() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let val = ctx.eval_raw("new Uint8Array([1])").unwrap();
-        let view: v8::Local<v8::ArrayBufferView> = val.try_as::<v8::ArrayBufferView>().unwrap();
+        let val = ctx.eval_raw(lock, "new Uint8Array([1])").unwrap();
+        let view: v8::Local<v8::ArrayBufferView> = val.try_into().unwrap();
         let obj: v8::Local<v8::Object> = view.into();
         let bl = obj.get(lock, "byteLength").unwrap();
         let n: jsg::Number = <jsg::Number as jsg::FromJS>::from_js(lock, bl)?;
@@ -465,11 +536,11 @@ fn array_buffer_view_into_object() {
 }
 
 #[test]
-fn array_buffer_view_try_as_fails_for_array_buffer() {
+fn array_buffer_view_try_from_fails_for_array_buffer() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("new ArrayBuffer(4)").unwrap();
-        assert!(val.try_as::<v8::ArrayBufferView>().is_none());
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "new ArrayBuffer(4)").unwrap();
+        assert!(v8::Local::<v8::ArrayBufferView>::try_from(val).is_err());
         Ok(())
     });
 }
@@ -493,7 +564,7 @@ fn array_buffer_view_from_js_rejects_array_buffer() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let res = jsg::Rc::new(ViewResource);
-        ctx.set_global("r", res.to_js(lock));
+        ctx.set_global(lock, "r", res);
 
         let ok: jsg::Number = ctx
             .eval(lock, "r.byteLen(new Uint8Array([1,2,3]))")
@@ -515,9 +586,9 @@ fn array_buffer_view_from_js_rejects_array_buffer() {
 #[test]
 fn array_buffer_view_element_size_uint8() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("new Uint8Array([1, 2])").unwrap();
-        let view = val.try_as::<v8::ArrayBufferView>().unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "new Uint8Array([1, 2])").unwrap();
+        let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
         assert_eq!(view.element_size(), 1);
         Ok(())
     });
@@ -526,9 +597,9 @@ fn array_buffer_view_element_size_uint8() {
 #[test]
 fn array_buffer_view_element_size_uint16() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("new Uint16Array([1])").unwrap();
-        let view = val.try_as::<v8::ArrayBufferView>().unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "new Uint16Array([1])").unwrap();
+        let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
         assert_eq!(view.element_size(), 2);
         Ok(())
     });
@@ -537,9 +608,9 @@ fn array_buffer_view_element_size_uint16() {
 #[test]
 fn array_buffer_view_element_size_int32() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("new Int32Array([1])").unwrap();
-        let view = val.try_as::<v8::ArrayBufferView>().unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "new Int32Array([1])").unwrap();
+        let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
         assert_eq!(view.element_size(), 4);
         Ok(())
     });
@@ -548,9 +619,9 @@ fn array_buffer_view_element_size_int32() {
 #[test]
 fn array_buffer_view_element_size_float32() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("new Float32Array([1.0])").unwrap();
-        let view = val.try_as::<v8::ArrayBufferView>().unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "new Float32Array([1.0])").unwrap();
+        let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
         assert_eq!(view.element_size(), 4);
         Ok(())
     });
@@ -559,9 +630,9 @@ fn array_buffer_view_element_size_float32() {
 #[test]
 fn array_buffer_view_element_size_float64() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("new Float64Array([1.0])").unwrap();
-        let view = val.try_as::<v8::ArrayBufferView>().unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "new Float64Array([1.0])").unwrap();
+        let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
         assert_eq!(view.element_size(), 8);
         Ok(())
     });
@@ -570,9 +641,9 @@ fn array_buffer_view_element_size_float64() {
 #[test]
 fn array_buffer_view_element_size_bigint64() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("new BigInt64Array([1n])").unwrap();
-        let view = val.try_as::<v8::ArrayBufferView>().unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "new BigInt64Array([1n])").unwrap();
+        let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
         assert_eq!(view.element_size(), 8);
         Ok(())
     });
@@ -581,9 +652,11 @@ fn array_buffer_view_element_size_bigint64() {
 #[test]
 fn array_buffer_view_element_size_data_view() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("new DataView(new ArrayBuffer(8))").unwrap();
-        let view = val.try_as::<v8::ArrayBufferView>().unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx
+            .eval_raw(lock, "new DataView(new ArrayBuffer(8))")
+            .unwrap();
+        let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
         assert_eq!(view.element_size(), 0); // DataView has no fixed element size
         Ok(())
     });
@@ -597,10 +670,10 @@ fn array_buffer_view_element_size_data_view() {
 fn array_buffer_detach_zeroes_slices() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let mut buf = v8::ArrayBuffer::new(lock, &[1u8, 2, 3]);
-        assert_eq!(buf.as_slice(), &[1, 2, 3]);
-        buf.detach();
-        assert!(buf.as_slice().is_empty());
+        let buf = v8::ArrayBuffer::new(lock, &[1u8, 2, 3]);
+        assert_eq!(buf.as_slice(lock), &[1, 2, 3]);
+        buf.detach(lock);
+        assert!(buf.as_slice(lock).is_empty());
         assert!(buf.to_vec().is_empty());
         Ok(())
     });
@@ -613,10 +686,10 @@ fn array_buffer_detach_zeroes_slices() {
 #[test]
 fn array_buffer_view_to_vec_uint32() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
+    harness.run_in_context(|lock, ctx| {
         // Uint32Array([1]) is 4 bytes: 0x01 0x00 0x00 0x00 on little-endian
-        let val = ctx.eval_raw("new Uint32Array([1])").unwrap();
-        let view = val.try_as::<v8::ArrayBufferView>().unwrap();
+        let val = ctx.eval_raw(lock, "new Uint32Array([1])").unwrap();
+        let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
         let bytes = view.to_vec();
         assert_eq!(bytes.len(), 4);
         // Verify it's the raw bytes (little-endian u32 value 1)
@@ -631,9 +704,9 @@ fn array_buffer_view_to_vec_uint32() {
 #[test]
 fn array_buffer_view_to_vec_float64() {
     let harness = crate::Harness::new();
-    harness.run_in_context(|_lock, ctx| {
-        let val = ctx.eval_raw("new Float64Array([1.5])").unwrap();
-        let view = val.try_as::<v8::ArrayBufferView>().unwrap();
+    harness.run_in_context(|lock, ctx| {
+        let val = ctx.eval_raw(lock, "new Float64Array([1.5])").unwrap();
+        let view = v8::Local::<v8::ArrayBufferView>::try_from(val).unwrap();
         let bytes = view.to_vec();
         assert_eq!(bytes.len(), 8);
         let reconstructed = f64::from_le_bytes(bytes.try_into().unwrap());
@@ -655,7 +728,7 @@ fn typed_arrays_cast_to_array_buffer_view() {
         let js = u8_data.to_js(lock);
         let typed: v8::Local<v8::Uint8Array> =
             // SAFETY: js was just created by to_js within the current HandleScope.
-            unsafe { v8::Local::from_ffi(lock.isolate(), js.into_ffi()) };
+            unsafe { v8::Local::from_ffi(js.into_ffi()) };
         let view: v8::Local<v8::ArrayBufferView> = typed.into();
         assert_eq!(view.byte_length(), 3);
 
@@ -664,7 +737,7 @@ fn typed_arrays_cast_to_array_buffer_view() {
         let js2 = f64_data.to_js(lock);
         let typed2: v8::Local<v8::Float64Array> =
             // SAFETY: js2 was just created by to_js within the current HandleScope.
-            unsafe { v8::Local::from_ffi(lock.isolate(), js2.into_ffi()) };
+            unsafe { v8::Local::from_ffi(js2.into_ffi()) };
         let view2: v8::Local<v8::ArrayBufferView> = typed2.into();
         assert_eq!(view2.byte_length(), 16); // 2 × 8 bytes
 
@@ -680,11 +753,11 @@ fn array_buffer_view_back_to_typed_array() {
         let js = data.to_js(lock);
         let typed: v8::Local<v8::Uint8Array> =
             // SAFETY: js was just created by to_js within the current HandleScope.
-            unsafe { v8::Local::from_ffi(lock.isolate(), js.into_ffi()) };
+            unsafe { v8::Local::from_ffi(js.into_ffi()) };
         let view: v8::Local<v8::ArrayBufferView> = typed.into();
         // Cast back to Uint8Array
-        let back: v8::Local<v8::Uint8Array> = view.into();
-        assert_eq!(back.as_slice(), &[10u8, 20, 30]);
+        let back: v8::Local<v8::Uint8Array> = view.try_into().unwrap();
+        assert_eq!(back.as_slice(lock), &[10u8, 20, 30]);
         Ok(())
     });
 }

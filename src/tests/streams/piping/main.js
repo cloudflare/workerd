@@ -46,8 +46,10 @@ export {
   optionGetterReadOrder,
   throwingOptionGetter,
   invalidSignalRejected,
+  pipeOptionsShapes,
   brandChecks,
   pipeThroughLockedEndpoints,
+  pipeToLockedEndpoints,
   badDestinationLeavesSourceUnlocked,
   optionGetterLocksDestination,
   shadowedWritableLocked,
@@ -92,6 +94,7 @@ export {
   abortWithBacklogHighWaterMark,
   sourceErrorWithBacklogWritesNoMore,
   invalidChunkWithBacklogEndsPipe,
+  invalidLastChunkFailsClosingPipe,
 } from 'shutdown-backlog';
 
 export {

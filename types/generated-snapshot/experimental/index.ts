@@ -677,6 +677,12 @@ export type DurableObjectJurisdiction =
 export interface DurableObjectNamespaceNewUniqueIdOptions {
   jurisdiction?: DurableObjectJurisdiction;
 }
+export interface DurableObjectClass<
+  _T extends Rpc.DurableObjectBranded | undefined = undefined,
+> {}
+export interface DurableObjectNamespaceGetDurableObjectOptionsVersionOptions {
+  cohort?: string;
+}
 export type DurableObjectLocationHint =
   | "wnam"
   | "enam"
@@ -696,12 +702,14 @@ export interface DurableObjectNamespaceGetDurableObjectOptions {
   version?: {
     cohort?: string;
   };
+  retry?: DurableObjectRetryOptions;
 }
-export interface DurableObjectClass<
-  _T extends Rpc.DurableObjectBranded | undefined = undefined,
-> {}
-export interface DurableObjectNamespaceGetDurableObjectOptionsVersionOptions {
-  cohort?: string;
+export interface DurableObjectRetryOptions {
+  maxRetries?: number;
+  timeoutMs?: number;
+}
+export interface DurableObjectEvictionInfo {
+  readonly reason: "inactive" | "codeUpdated" | "system" | (string & {});
 }
 export interface DurableObjectState<Props = unknown> {
   waitUntil(promise: Promise<any>): void;
@@ -800,12 +808,12 @@ export interface DurableObjectStorage {
   getBookmarkForTime(timestamp: number | Date): Promise<string>;
   onNextSessionRestoreBookmark(bookmark: string): Promise<string>;
   waitForBookmark(bookmark: string): Promise<void>;
+  /** @deprecated Use `ctx.primaryStub` instead. */
+  readonly primary?: DurableObjectStub;
   snapshot(
     options?: DurableObjectSnapshotOptions,
   ): Promise<DurableObjectSnapshot>;
   onNextSessionRestore(target: DurableObjectSnapshot | string): Promise<string>;
-  /** @deprecated Use `ctx.primaryStub` instead. */
-  readonly primary?: DurableObjectStub;
   /** @deprecated Use `ctx.configureReadReplication()` instead. */
   ensureReplicas(): void;
   /** @deprecated Use `ctx.configureReadReplication()` instead. */
@@ -928,6 +936,13 @@ export declare class Event {
    * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/returnValue)
    */
   get returnValue(): boolean;
+  /**
+   * The Event property **`returnValue`** indicates whether the default action for this event has been prevented or not.
+   * @deprecated
+   *
+   * [MDN Reference](https://developer.mozilla.org/docs/Web/API/Event/returnValue)
+   */
+  set returnValue(value: boolean);
   /**
    * The **`currentTarget`** read-only property of the Event interface identifies the element to which the event handler has been attached.
    *
@@ -4044,6 +4059,7 @@ export interface Socket {
   get protocol(): "tcp" | "udp";
   close(): Promise<void>;
   startTls(options?: TlsOptions): Socket;
+  proxyTo(sock: Socket, options?: StreamPipeOptions): Promise<void>;
 }
 export interface SocketOptions {
   secureTransport?: string;
@@ -4207,6 +4223,7 @@ export type ContainerStartupOptions = {
   hardTimeout?: number | bigint;
   instance?:
     | "lite"
+    | "basic"
     | "standard-1"
     | "standard-2"
     | "standard-3"
@@ -13400,25 +13417,24 @@ export interface BrowserRunBaseOptions {
    */
   cacheTTL?: number;
 }
-/**
- * Backend selection, mixed into the options of the quick actions that support it.
- * Deliberately not part of `BrowserRunBaseOptions`: `scrape`, `links` and `snapshot`
- * reject an alternate backend, so they must not accept the field.
- */
+/** Backend selection for quick actions. */
 export interface BrowserRunAlternateBackendOptions {
   /** Render with an alternate browser backend instead of the default one. */
   browser?: "kitesurf";
 }
 /** Common options shared by all quick actions. Exactly one of `url` or `html` must be provided.*/
-export type BrowserRunCommonOptions =
-  | (BrowserRunBaseOptions & {
-      /** URL to navigate to, e.g. `"https://example.com"`. */
-      url: string;
-    })
-  | (BrowserRunBaseOptions & {
-      /** Set the HTML content of the page directly. */
-      html: string;
-    });
+export type BrowserRunCommonOptions = BrowserRunBaseOptions &
+  BrowserRunAlternateBackendOptions &
+  (
+    | {
+        /** URL to navigate to, e.g. `"https://example.com"`. */
+        url: string;
+      }
+    | {
+        /** Set the HTML content of the page directly. */
+        html: string;
+      }
+  );
 export type BrowserRunPuppeteerScreenshotOptions = {
   /** @default "png" */
   type?: "png" | "jpeg" | "webp";
@@ -13445,7 +13461,7 @@ export type BrowserRunScreenshotOptions = BrowserRunCommonOptions & {
   scrollPage?: boolean;
   /** @see https://pptr.dev/api/puppeteer.screenshotoptions */
   screenshotOptions?: BrowserRunPuppeteerScreenshotOptions;
-} & BrowserRunAlternateBackendOptions;
+};
 export type BrowserRunPDFOptions = BrowserRunCommonOptions & {
   /** @see https://pptr.dev/api/puppeteer.pdfoptions */
   pdfOptions?: {
@@ -13492,7 +13508,7 @@ export type BrowserRunPDFOptions = BrowserRunCommonOptions & {
     /** @default 30000 */
     timeout?: number;
   };
-} & BrowserRunAlternateBackendOptions;
+};
 export type BrowserRunScrapeOptions = BrowserRunCommonOptions & {
   /** CSS selectors to scrape. At least one element is required. */
   elements: Array<{
@@ -13528,7 +13544,7 @@ export type BrowserRunAccessibilityTreeOptions = BrowserRunCommonOptions & {
    * HTTP 200; a malformed selector is an error.
    */
   root?: string;
-} & BrowserRunAlternateBackendOptions;
+};
 export interface BrowserRunJsonBaseOptions {
   /** Custom AI models to try in order. Max 3. Falls back to next on error. */
   custom_ai?: Array<{
@@ -13543,7 +13559,6 @@ export interface BrowserRunJsonBaseOptions {
  * At least one of `prompt` or `response_format` must be provided.
  */
 export type BrowserRunJsonOptions = BrowserRunCommonOptions &
-  BrowserRunAlternateBackendOptions &
   BrowserRunJsonBaseOptions &
   (
     | {
@@ -13559,10 +13574,8 @@ export type BrowserRunJsonOptions = BrowserRunCommonOptions &
         response_format: AiTextGenerationResponseFormat;
       }
   );
-export type BrowserRunContentOptions = BrowserRunCommonOptions &
-  BrowserRunAlternateBackendOptions;
-export type BrowserRunMarkdownOptions = BrowserRunCommonOptions &
-  BrowserRunAlternateBackendOptions;
+export type BrowserRunContentOptions = BrowserRunCommonOptions;
+export type BrowserRunMarkdownOptions = BrowserRunCommonOptions;
 export type BrowserRunRedirectHop = {
   /** URL that returned the redirect. */
   url: string;
@@ -17847,7 +17860,7 @@ export declare namespace TailStream {
     | "exceededWallTime"
     | "aborted";
   interface ScriptVersion {
-    readonly id: string;
+    readonly id?: string;
     readonly tag?: string;
     readonly message?: string;
   }
@@ -17858,7 +17871,7 @@ export declare namespace TailStream {
   }
   interface Onset {
     readonly type: "onset";
-    readonly attributes: Attribute[];
+    readonly attributes?: Attribute[];
     // id for the span being opened by this Onset event.
     readonly spanId: string;
     readonly dispatchNamespace?: string;

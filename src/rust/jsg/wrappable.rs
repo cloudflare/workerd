@@ -21,6 +21,8 @@
 //! | `&str` | `string` |
 //! | `bool` | `boolean` |
 //! | `Number` | `number` |
+//! | `i64` | `bigint` or `number` (parameter only) |
+//! | `SystemTime` | `Date`; from a `Date` or `number` of milliseconds |
 //! | `Option<T>` | `T` or `undefined` |
 //! | `Nullable<T>` | `T`, `null`, or `undefined` |
 //! | `Lenient<T>` | `T`, `null`, or `undefined` (shallow type mismatches silently become `undefined`) |
@@ -61,13 +63,17 @@
 //! ## Integer Parameter Types
 //!
 //! Integer types (`u8`, `u16`, `u32`, `i8`, `i16`, `i32`) can be used as method
-//! parameters. JavaScript numbers are converted via truncation:
+//! parameters. They convert like C++ JSG's integers:
 //!
-//! - Values are truncated toward zero (e.g., `3.7` → `3`, `-2.9` → `-2`)
-//! - Out-of-range values wrap (e.g., `256.0` → `0` for `u8`)
-//! - `NaN` becomes `0`
+//! - Values out of the type's range, checked before truncation, are a
+//!   `TypeError` (e.g., `256` or `255.5` for `u8`)
+//! - Non-finite values are a `TypeError`, except that `i32` reads them as `0`
+//! - Other values are truncated toward zero (e.g., `3.7` → `3`, `-2.9` → `-2`)
 //!
 //! For strict validation, wrap parameters in `NonCoercible<T>` or validate manually.
+//!
+//! `i64` converts like C++ JSG's `int64_t`: a `BigInt` that does not fit is a
+//! `TypeError`, and any other value converts as above.
 
 use crate::Error;
 use crate::Lenient;
@@ -77,7 +83,6 @@ use crate::Nullable;
 use crate::Number;
 use crate::Type;
 use crate::v8;
-use crate::v8::ToLocalValue;
 
 // =============================================================================
 // Traced trait — GC tracing for field types
@@ -88,7 +93,7 @@ use crate::v8::ToLocalValue;
 /// Every type that can appear as a field in a `#[jsg_resource]` struct must
 /// implement `Traced`. The generated `Traced::trace` body calls
 /// `Traced::trace` on every field — types with no GC-visible references
-/// simply use the default no-op implementation.
+/// use a no-op implementation, such as the one `jsg_traced!` generates.
 ///
 /// # Built-in implementations
 ///
@@ -97,21 +102,46 @@ use crate::v8::ToLocalValue;
 /// - **Collections** (`Vec<T>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`,
 ///   `BTreeSet<T>`) — iterates elements/values and traces each.
 /// - **`Cell<T>`** — reads through `as_ptr()` (sound under single-threaded GC).
+/// - **`RefCell<T>`** — traces through `try_borrow()`, so a mutably borrowed cell is skipped;
+///   debug builds abort if it can hold GC references.
 /// - **`jsg::Rc<T>`** — visits the reference via `GcVisitor::visit_rc`.
 /// - **`jsg::Weak<T>`** — no-op (weak refs don't keep targets alive).
-/// - **`jsg::v8::Global<T>`** — visits via `GcVisitor::visit_global`.
+/// - **`jsg::v8::TracedGlobal<T>`** — visits via `GcVisitor::visit_traced_global`.
 pub trait Traced {
+    /// Whether a value of this type can hold GC-visible references. Tracing a `RefCell` checks
+    /// it. It defaults to `true`, and wrappers and collections take it from what they hold. A
+    /// type whose `trace` is a no-op should return `false`, as `jsg_traced!` does.
+    fn holds_gc_references() -> bool
+    where
+        Self: Sized,
+    {
+        true
+    }
+
     /// Visit GC-visible references held by this value.
     ///
     /// The default implementation is a no-op, suitable for types with no
-    /// GC-visible references (primitives, plain data structs, etc.).
+    /// GC-visible references (primitives, plain data structs, etc.). Such a type
+    /// should also return `false` from `holds_gc_references`; `jsg_traced!`
+    /// generates both.
+    ///
+    /// A hand-written implementation must visit every field that can hold a GC reference
+    /// (`TracedGlobal`, `jsg::Rc`, and types holding them). Nothing checks this. The type must
+    /// not hold a [`v8::Global`](crate::v8::Global), which is always strong, so a cycle through
+    /// it is never collected. Don't keep a type that holds GC references behind an
+    /// `std::rc::Rc`, since a clone held by another GC owner would trace it too; see
+    /// `README.md` §Safety rules, rule 2.
     fn trace(&self, _visitor: &mut crate::v8::GcVisitor) {}
 }
 
 /// Generates no-op `Traced` implementations for types with no GC-visible references.
 macro_rules! impl_traced_noop {
     ($($t:ty),* $(,)?) => {
-        $(impl Traced for $t {})*
+        $(impl Traced for $t {
+            fn holds_gc_references() -> bool {
+                false
+            }
+        })*
     };
 }
 
@@ -132,6 +162,7 @@ impl_traced_noop!(
     isize,
     f32,
     f64,
+    std::time::SystemTime,
     crate::v8::ArrayBuffer,
     crate::v8::ArrayBufferView,
     crate::v8::BackingStore,
@@ -150,6 +181,10 @@ impl_traced_noop!(
 );
 
 impl<T: Traced> Traced for Option<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         if let Some(inner) = self {
             inner.trace(visitor);
@@ -158,6 +193,11 @@ impl<T: Traced> Traced for Option<T> {
 }
 
 impl<T: Traced> Traced for Lenient<T> {
+    // An unconvertable value is a `TracedGlobal`, whatever `T` is.
+    fn holds_gc_references() -> bool {
+        true
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         if let Self::Some(inner) = self {
             inner.trace(visitor);
@@ -169,6 +209,10 @@ impl<T: Traced> Traced for Lenient<T> {
 }
 
 impl<T: Traced> Traced for Nullable<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         if let Self::Some(inner) = self {
             inner.trace(visitor);
@@ -177,12 +221,20 @@ impl<T: Traced> Traced for Nullable<T> {
 }
 
 impl<T: Traced> Traced for NonCoercible<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         self.as_ref().trace(visitor);
     }
 }
 
 impl<T: Traced> Traced for Vec<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for item in self {
             item.trace(visitor);
@@ -191,6 +243,10 @@ impl<T: Traced> Traced for Vec<T> {
 }
 
 impl<K, V: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashMap<K, V, S> {
+    fn holds_gc_references() -> bool {
+        V::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for value in self.values() {
             value.trace(visitor);
@@ -199,6 +255,10 @@ impl<K, V: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashM
 }
 
 impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
+    fn holds_gc_references() -> bool {
+        V::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for value in self.values() {
             value.trace(visitor);
@@ -207,6 +267,10 @@ impl<K, V: Traced> Traced for std::collections::BTreeMap<K, V> {
 }
 
 impl<T: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashSet<T, S> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for item in self {
             item.trace(visitor);
@@ -215,6 +279,10 @@ impl<T: Traced, S: std::hash::BuildHasher> Traced for std::collections::HashSet<
 }
 
 impl<T: Traced> Traced for std::collections::BTreeSet<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for item in self {
             item.trace(visitor);
@@ -223,6 +291,10 @@ impl<T: Traced> Traced for std::collections::BTreeSet<T> {
 }
 
 impl<T: Traced> Traced for std::cell::Cell<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         // SAFETY: V8 GC tracing is single-threaded within an isolate and never
         // re-entrant on the same object during a single GC cycle. We only read
@@ -234,16 +306,43 @@ impl<T: Traced> Traced for std::cell::Cell<T> {
 }
 
 impl<T: Traced> Traced for std::cell::RefCell<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
-        // Use `try_borrow()` to avoid panicking across the FFI boundary if a
-        // mutable borrow is active during GC.
-        if let Ok(inner) = self.try_borrow() {
-            inner.trace(visitor);
-        }
+        // A mutable borrow is active here only if the code holding it calls something that visits
+        // the resource: an allocation on the V8 heap, which can start a GC, or wrapping the
+        // resource, or creating its first or dropping its last strong `jsg::Rc` while it has no
+        // wrapper, which switch its references between strong and traced. The contents cannot be
+        // read then, so the visit misses their references. A missed GC visit can cost a weak
+        // `TracedGlobal` its value and a `jsg::Rc` the JS wrapper of its resource; a missed switch
+        // can leave a reference weak that should be strong, for a later GC to free, or strong that
+        // should be weak, which leaks. Debug builds abort when that can happen (a panic cannot
+        // unwind out of a visit made from C++); release builds skip the cell.
+        //
+        // The real fix is a JSG cell type whose mutable borrow takes the lock and makes the
+        // references it holds strong until the borrow ends, so that a visit can skip a borrowed
+        // cell safely. That also covers a `TracedGlobal` taken out of a `Cell`, which nothing
+        // traces.
+        let Ok(inner) = self.try_borrow() else {
+            debug_assert!(
+                !T::holds_gc_references(),
+                "tracing found a mutably borrowed RefCell that can hold GC references, which it \
+                 cannot visit; do not hold a RefCell borrow_mut() across a call that can allocate \
+                 on the V8 heap, wrap the resource, or create or drop a jsg::Rc to it"
+            );
+            return;
+        };
+        inner.trace(visitor);
     }
 }
 
 impl<T: Traced> Traced for std::rc::Rc<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         (**self).trace(visitor);
     }
@@ -256,11 +355,9 @@ impl<T: Traced> Traced for std::rc::Rc<T> {
 /// Trait for converting Rust values to JavaScript.
 ///
 /// Provides Rust → JavaScript conversion.
-pub trait ToJS: Sized {
-    /// Converts this Rust value into a JavaScript value.
-    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a;
+pub trait ToJS<'s>: Sized {
+    /// Converts this Rust value into a JavaScript value in the scope of `lock`.
+    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value>;
 }
 
 // =============================================================================
@@ -272,11 +369,29 @@ pub trait ToJS: Sized {
 /// `from_js()` is the normal, required conversion path. `try_from_js()` is an
 /// internal shallow-probing path used by [`Lenient`]. Implementations only need
 /// to override `try_from_js()` when their top-level type can fail to match.
-pub trait FromJS: Sized {
+pub trait FromJS<'s>: Sized {
     type ResultType;
 
     /// Converts a JavaScript value into this Rust type.
-    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error>;
+    fn from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self::ResultType, Error>;
+
+    /// The type's name in argument errors, as C++ JSG's `getName()` reports
+    /// it. Defaults to the Rust type's name without its path or generics.
+    #[doc(hidden)]
+    fn type_name() -> String {
+        let name = std::any::type_name::<Self>();
+        let name = name.split('<').next().unwrap_or(name);
+        name.rsplit("::").next().unwrap_or(name).to_owned()
+    }
+
+    /// Whether a method may omit this argument, like C++ JSG's optional types.
+    #[doc(hidden)]
+    fn is_optional() -> bool {
+        false
+    }
 
     /// Performs a shallow conversion probe.
     ///
@@ -285,8 +400,8 @@ pub trait FromJS: Sized {
     /// remain hard errors.
     #[doc(hidden)]
     fn try_from_js(
-        lock: &mut Lock,
-        value: v8::Local<v8::Value>,
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
     ) -> Result<Option<Self::ResultType>, Error> {
         Self::from_js(lock, value).map(Some)
     }
@@ -295,8 +410,8 @@ pub trait FromJS: Sized {
     /// Returns `None` if the type doesn't match, `Some(result)` if conversion was attempted.
     /// Used by `#[jsg_oneof]` macro to try each variant without coercion.
     fn try_from_js_exact(
-        lock: &mut Lock,
-        value: &v8::Local<v8::Value>,
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
     ) -> Option<Result<Self::ResultType, Error>>
     where
         Self: Type,
@@ -305,7 +420,7 @@ pub trait FromJS: Sized {
             return None;
         }
 
-        match Self::try_from_js(lock, value.clone()) {
+        match Self::try_from_js(lock, value) {
             Ok(Some(result)) => Some(Ok(result)),
             Ok(None) => None,
             Err(err) => Some(Err(err)),
@@ -323,24 +438,30 @@ impl Type for bool {
         "boolean"
     }
 
-    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
         value.is_boolean()
     }
 }
 
-impl ToJS for bool {
-    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
-        self.to_local(lock)
+impl<'s> ToJS<'s> for bool {
+    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        unsafe { v8::Local::from_ffi(v8::ffi::local_new_boolean(isolate.as_ffi(), self)) }
     }
 }
 
-impl FromJS for bool {
+impl<'s> FromJS<'s> for bool {
     type ResultType = Self;
 
-    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+    fn type_name() -> String {
+        "boolean".to_owned()
+    }
+
+    fn from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self::ResultType, Error> {
         // SAFETY: The isolate is locked and value is a valid V8 local handle.
         Ok(unsafe { v8::ffi::unwrap_boolean(lock.isolate().as_ffi(), value.into_ffi()) })
     }
@@ -351,26 +472,37 @@ impl Type for std::string::String {
         "string"
     }
 
-    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
         value.is_string()
     }
 }
 
-impl ToJS for std::string::String {
-    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
-        self.to_local(lock)
+impl<'s> ToJS<'s> for std::string::String {
+    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+        self.as_str().to_js(lock)
     }
 }
 
-impl FromJS for std::string::String {
+impl<'s> ToJS<'s> for &str {
+    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        unsafe { v8::Local::from_ffi(v8::ffi::local_new_string(isolate.as_ffi(), self)) }
+    }
+}
+
+impl<'s> FromJS<'s> for std::string::String {
     type ResultType = Self;
 
-    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
-        // SAFETY: The isolate is locked and value is a valid V8 local handle.
-        Ok(unsafe { v8::ffi::unwrap_string(lock.isolate().as_ffi(), value.into_ffi()) }?)
+    fn type_name() -> String {
+        "string".to_owned()
+    }
+
+    fn from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self::ResultType, Error> {
+        unwrap_string(lock, value)
     }
 }
 
@@ -380,27 +512,31 @@ impl Type for Number {
         "number"
     }
 
-    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
         value.is_number()
     }
 }
 
-impl ToJS for Number {
-    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
-        self.to_local(lock)
+impl<'s> ToJS<'s> for Number {
+    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        unsafe { v8::Local::from_ffi(v8::ffi::local_new_number(isolate.as_ffi(), self.value())) }
     }
 }
 
-impl FromJS for Number {
+impl<'s> FromJS<'s> for Number {
     type ResultType = Self;
 
-    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
-        // SAFETY: The isolate is locked and value is a valid V8 local handle.
-        let f64_value =
-            unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) }?;
+    fn type_name() -> String {
+        "number".to_owned()
+    }
+
+    fn from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self::ResultType, Error> {
+        let f64_value = unwrap_number(lock, value)?;
         Ok(Self::new(f64_value))
     }
 }
@@ -413,30 +549,43 @@ impl Type for &str {
         "string"
     }
 
-    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
         value.is_string()
     }
 }
 
-impl FromJS for &str {
+impl<'s> FromJS<'s> for &str {
     type ResultType = String;
 
-    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
-        // SAFETY: The isolate is locked and value is a valid V8 local handle.
-        Ok(unsafe { v8::ffi::unwrap_string(lock.isolate().as_ffi(), value.into_ffi()) }?)
+    fn type_name() -> String {
+        "string".to_owned()
+    }
+
+    fn from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self::ResultType, Error> {
+        unwrap_string(lock, value)
     }
 }
 
-impl<T: FromJS<ResultType = T>> FromJS for &T {
+impl<'s, T: FromJS<'s, ResultType = T>> FromJS<'s> for &T {
     type ResultType = T;
 
-    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+    fn type_name() -> String {
+        T::type_name()
+    }
+
+    fn from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self::ResultType, Error> {
         T::from_js(lock, value)
     }
 
     fn try_from_js(
-        lock: &mut Lock,
-        value: v8::Local<v8::Value>,
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
     ) -> Result<Option<Self::ResultType>, Error> {
         T::try_from_js(lock, value)
     }
@@ -449,153 +598,341 @@ impl<T: Type> Type for &[T] {
         "Array"
     }
 
-    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
         value.is_array()
     }
 }
 
-impl<T: Type + FromJS<ResultType = T>> FromJS for &[T] {
+impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for &[T] {
     type ResultType = Vec<T>;
 
-    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+    fn type_name() -> String {
+        "Array".to_owned()
+    }
+
+    fn from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self::ResultType, Error> {
         Vec::<T>::from_js(lock, value)
     }
 
     fn try_from_js(
-        lock: &mut Lock,
-        value: v8::Local<v8::Value>,
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
     ) -> Result<Option<Self::ResultType>, Error> {
         Vec::<T>::try_from_js(lock, value)
     }
 }
 
-// Integer types - JavaScript numbers are IEEE 754 doubles (f64)
-//
-// Conversion behavior:
-// - Values are truncated toward zero (e.g., 3.7 → 3, -2.9 → -2)
-// - Values outside the target type's range wrap around (e.g., 256.0 → 0 for u8)
-// - NaN becomes 0
-// - Infinity wraps to 0 for unsigned types, or type MIN/MAX for signed types
-//
-// This matches JavaScript's behavior for TypedArray element assignment.
-// For strict validation, use `NonCoercible<T>` or validate in your method.
+// Integer types follow C++ JSG (jsg/value.h): a value out of the type's
+// range, checked before truncation, is a TypeError, and so is a non-finite
+// one, except that i32 reads it as 0. In-range values truncate toward zero.
+/// Converts a JavaScript number to an integer type. Fast callbacks use it too, so that both paths
+/// convert alike.
+pub trait FromNumber: Sized {
+    fn from_number(num: f64) -> Result<Self, Error>;
+}
+
 macro_rules! impl_integer_from_js {
-    ($($type:ty),*) => {
+    ($($type:ty => $name:literal, $non_finite:expr, $range:expr);* $(;)?) => {
         $(
-            impl FromJS for $type {
+            impl FromNumber for $type {
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_lossless, reason = "range is checked first")]
+                fn from_number(num: f64) -> Result<Self, Error> {
+                    if !num.is_finite() {
+                        return $non_finite;
+                    }
+                    if <$type>::MIN == 0 && num < 0.0 {
+                        return Err(Error::new_type_error(
+                            "The value cannot be converted because it is negative and this API \
+                             expects a positive number.",
+                        ));
+                    }
+                    if num < <$type>::MIN as f64 || num > <$type>::MAX as f64 {
+                        return Err(Error::new_type_error($range));
+                    }
+                    Ok(num as $type)
+                }
+            }
+
+            impl<'s> FromJS<'s> for $type {
                 type ResultType = Self;
 
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "wrapping conversion is intended, matching TypedArray element assignment")]
-                fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
-                    // SAFETY: The isolate is locked and value is a valid V8 local handle.
-                    let num = unsafe { v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi()) }?;
-                    Ok(num as $type)
+                fn type_name() -> String {
+                    $name.to_owned()
+                }
+
+                fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self::ResultType, Error> {
+                    let num = unwrap_number(lock, value)?;
+                    Self::from_number(num)
                 }
             }
         )*
     };
 }
 
-impl_integer_from_js!(u8, u16, u32, i8, i16, i32);
+/// Converts `value` with V8's `ToString` (which, unlike JavaScript's `String()`, rejects a
+/// Symbol). If the coercion throws, or execution is terminating, fails with an error for which
+/// [`Error::is_pending`] is true.
+fn unwrap_string<'s>(
+    lock: &mut Lock<'s>,
+    value: v8::Local<'s, v8::Value>,
+) -> Result<String, Error> {
+    v8::call_into_js(lock, |lock| {
+        let mut result = String::new();
+        // SAFETY: The isolate is locked and value is a valid V8 local handle.
+        let ok = unsafe {
+            v8::ffi::unwrap_string(lock.isolate().as_ffi(), value.into_ffi(), &mut result)
+        }?;
+        Ok(ok.then_some(result))
+    })
+}
+
+/// Converts `value` with V8's `ToNumber` (which, unlike JavaScript's `Number()`, rejects a
+/// `BigInt`). If the coercion throws, or execution is terminating, fails with an error for which
+/// [`Error::is_pending`] is true.
+fn unwrap_number<'s>(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<f64, Error> {
+    v8::call_into_js(lock, |lock| {
+        let mut result = 0.0;
+        // SAFETY: The isolate is locked and value is a valid V8 local handle.
+        let ok = unsafe {
+            v8::ffi::unwrap_number(lock.isolate().as_ffi(), value.into_ffi(), &mut result)
+        };
+        Ok(ok.then_some(result))
+    })
+}
+
+fn not_an_integer<T>() -> Result<T, Error> {
+    Err(Error::new_type_error(
+        "The value cannot be converted because it is not an integer.",
+    ))
+}
+
+fn unsigned_range<T: std::fmt::Display>(max: T) -> String {
+    format!("Value out of range. Must be less than or equal to {max}.")
+}
+
+fn signed_range<T: std::fmt::Display>(min: T, max: T) -> String {
+    format!("Value out of range. Must be between {min} and {max} (inclusive).")
+}
+
+impl_integer_from_js!(
+    u8 => "octet", not_an_integer(), unsigned_range(u8::MAX);
+    u16 => "unsigned short integer", not_an_integer(), unsigned_range(u16::MAX);
+    u32 => "unsigned integer", not_an_integer(), unsigned_range(u32::MAX);
+    i8 => "byte", not_an_integer(), signed_range(i8::MIN, i8::MAX);
+    i16 => "short integer", not_an_integer(), signed_range(i16::MIN, i16::MAX);
+    i32 => "integer", Ok(0), signed_range(i32::MIN, i32::MAX);
+);
+
+// Like C++ JSG's int64_t (jsg/value.h), a BigInt must fit, and any other value is coerced to a
+// number, which must be finite and in range, and truncates toward zero.
+impl<'s> FromJS<'s> for i64 {
+    type ResultType = Self;
+
+    fn type_name() -> String {
+        "bigint".to_owned()
+    }
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+        reason = "like C++ JSG, the range is checked in doubles, where i64::MAX rounds up to 2^63, \
+                  which then saturates"
+    )]
+    fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self, Error> {
+        if let Ok(big_int) = v8::Local::<v8::BigInt>::try_from(value) {
+            return big_int.int64_value().ok_or_else(|| {
+                Error::new_type_error(
+                    "The value cannot be converted because it would be truncated.",
+                )
+            });
+        }
+        let num = unwrap_number(lock, value)?;
+        if !num.is_finite() {
+            return not_an_integer();
+        }
+        if num < Self::MIN as f64 || num > Self::MAX as f64 {
+            return Err(Error::new_type_error(signed_range(Self::MIN, Self::MAX)));
+        }
+        Ok(num as Self)
+    }
+}
+
+// Like C++ JSG's kj::Date (jsg/value.h), a Date or a number of milliseconds since the epoch, which
+// must be finite and within the range of `kj::Date`, `i64` nanoseconds either side of the epoch.
+// Fractions of a millisecond are dropped.
+impl<'s> FromJS<'s> for std::time::SystemTime {
+    type ResultType = Self;
+
+    fn type_name() -> String {
+        "date".to_owned()
+    }
+
+    fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self, Error> {
+        let type_name = value.type_of(lock);
+        Self::try_from_js(lock, value)?
+            .ok_or_else(|| Error::new_type_error(format!("Expected date but got {type_name}")))
+    }
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+        reason = "the bounds are compared in doubles as in C++ JSG, and the milliseconds are then \
+                  in range"
+    )]
+    fn try_from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Option<Self>, Error> {
+        let millis = if let Ok(date) = v8::Local::<v8::Date>::try_from(value) {
+            date.value_of()
+        } else if value.is_number() {
+            Number::from_js(lock, value)?.value()
+        } else {
+            return Ok(None);
+        };
+        if !millis.is_finite() {
+            return Err(Error::new_type_error(
+                "The value cannot be converted because it is not a valid Date.",
+            ));
+        }
+        let nanos = millis * 1_000_000.0;
+        if nanos >= i64::MAX as f64 {
+            return Err(Error::new_type_error(
+                "This API doesn't support dates after 2189.",
+            ));
+        }
+        if nanos <= i64::MIN as f64 {
+            return Err(Error::new_type_error(
+                "This API doesn't support dates before 1687.",
+            ));
+        }
+        let millis = millis as i64;
+        let offset = std::time::Duration::from_millis(millis.unsigned_abs());
+        Ok(Some(if millis < 0 {
+            std::time::UNIX_EPOCH - offset
+        } else {
+            std::time::UNIX_EPOCH + offset
+        }))
+    }
+}
+
+// Like C++ JSG's kj::Date (jsg/value.h), a time converts to a Date of the milliseconds since the
+// epoch, truncated toward zero. A time beyond the range of JavaScript dates, which `kj::Date`
+// cannot hold, gives an invalid date.
+impl<'s> ToJS<'s> for std::time::SystemTime {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a time of more than 2^53 milliseconds is beyond the range of JavaScript dates \
+                  either way"
+    )]
+    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+        let millis = match self.duration_since(std::time::UNIX_EPOCH) {
+            Ok(after) => after.as_millis() as f64,
+            Err(before) => -(before.duration().as_millis() as f64),
+        };
+        // If `Date::new()` fails, an exception or termination is pending, so JavaScript never
+        // sees the value returned in its place, as when C++ JSG's `check()` throws.
+        v8::Date::new(lock, millis).map_or_else(|_| lock.undefined(), Into::into)
+    }
+}
 
 // =============================================================================
 // Wrapper type implementations
 // =============================================================================
 
-impl ToJS for () {
-    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
-        v8::Local::<v8::Value>::undefined(lock)
+impl<'s> ToJS<'s> for () {
+    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+        lock.undefined()
     }
 }
 
-impl<T: ToJS> ToJS for Option<T> {
-    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
+impl<'s, T: ToJS<'s>> ToJS<'s> for Option<T> {
+    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
         match self {
             Some(value) => value.to_js(lock),
-            None => v8::Local::<v8::Value>::undefined(lock),
+            None => lock.undefined(),
         }
     }
 }
 
-impl<T: Type + ToJS> ToJS for NonCoercible<T> {
-    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
+impl<'s, T: Type + ToJS<'s>> ToJS<'s> for NonCoercible<T> {
+    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
         self.into_inner().to_js(lock)
     }
 }
 
-impl<T: ToJS> ToJS for Nullable<T> {
-    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
+impl<'s, T: ToJS<'s>> ToJS<'s> for Nullable<T> {
+    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
         match self {
             Self::Some(value) => value.to_js(lock),
-            Self::Null => v8::Local::<v8::Value>::null(lock),
-            Self::Undefined => v8::Local::<v8::Value>::undefined(lock),
+            Self::Null => lock.null(),
+            Self::Undefined => lock.undefined(),
         }
     }
 }
 
-impl<T: ToJS> ToJS for Lenient<T> {
-    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
+impl<'s, T: ToJS<'s>> ToJS<'s> for Lenient<T> {
+    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
         match self {
             Self::Some(value) => value.to_js(lock),
-            Self::Null => v8::Local::<v8::Value>::null(lock),
-            Self::Undefined | Self::Unconvertable(_) => v8::Local::<v8::Value>::undefined(lock),
+            Self::Null => lock.null(),
+            Self::Undefined | Self::Unconvertable(_) => lock.undefined(),
         }
     }
 }
 
-impl<T: Type + FromJS> FromJS for Option<T> {
+// Like C++ `jsg::Optional<T>`, only `undefined` is absent; `null` goes to `T`.
+impl<'s, T: FromJS<'s>> FromJS<'s> for Option<T> {
     type ResultType = Option<T::ResultType>;
 
-    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
-        if value.is_null() {
-            let msg = format!("Expected {} or undefined but got null", T::class_name());
-            Err(Error::new_type_error(msg))
-        } else if value.is_undefined() {
-            Ok(None)
-        } else {
-            Ok(Some(T::from_js(lock, value)?))
+    fn type_name() -> String {
+        T::type_name()
+    }
+
+    fn is_optional() -> bool {
+        true
+    }
+
+    fn from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self::ResultType, Error> {
+        if value.is_undefined() {
+            return Ok(None);
         }
+        Ok(Some(T::from_js(lock, value)?))
     }
 
     fn try_from_js(
-        lock: &mut Lock,
-        value: v8::Local<v8::Value>,
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
     ) -> Result<Option<Self::ResultType>, Error> {
-        if value.is_null() {
-            let msg = format!("Expected {} or undefined but got null", T::class_name());
-            Err(Error::new_type_error(msg))
-        } else if value.is_undefined() {
-            Ok(Some(None))
-        } else {
-            Ok(T::try_from_js(lock, value)?.map(Some))
+        if value.is_undefined() {
+            return Ok(Some(None));
         }
+        Ok(T::try_from_js(lock, value)?.map(Some))
     }
 }
 
-impl<T: Type + FromJS> FromJS for NonCoercible<T> {
+impl<'s, T: Type + FromJS<'s>> FromJS<'s> for NonCoercible<T> {
     type ResultType = NonCoercible<T::ResultType>;
 
-    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
-        if !T::is_exact(&value) {
+    fn type_name() -> String {
+        T::type_name()
+    }
+
+    fn from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self::ResultType, Error> {
+        if !T::is_exact(value) {
             let error_msg = format!(
                 "Expected a {} value but got {}",
                 T::class_name(),
-                value.type_of()
+                value.type_of(lock)
             );
             return Err(Error::new_type_error(error_msg));
         }
@@ -603,20 +940,27 @@ impl<T: Type + FromJS> FromJS for NonCoercible<T> {
     }
 
     fn try_from_js(
-        lock: &mut Lock,
-        value: v8::Local<v8::Value>,
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
     ) -> Result<Option<Self::ResultType>, Error> {
-        if !T::is_exact(&value) {
+        if !T::is_exact(value) {
             return Ok(None);
         }
         Ok(T::try_from_js(lock, value)?.map(<Self::ResultType>::new))
     }
 }
 
-impl<T: FromJS> FromJS for Nullable<T> {
+impl<'s, T: FromJS<'s>> FromJS<'s> for Nullable<T> {
     type ResultType = Nullable<T::ResultType>;
 
-    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+    fn type_name() -> String {
+        T::type_name()
+    }
+
+    fn from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self::ResultType, Error> {
         if value.is_null() {
             Ok(Nullable::Null)
         } else if value.is_undefined() {
@@ -627,8 +971,8 @@ impl<T: FromJS> FromJS for Nullable<T> {
     }
 
     fn try_from_js(
-        lock: &mut Lock,
-        value: v8::Local<v8::Value>,
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
     ) -> Result<Option<Self::ResultType>, Error> {
         if value.is_null() {
             Ok(Some(Nullable::Null))
@@ -640,18 +984,29 @@ impl<T: FromJS> FromJS for Nullable<T> {
     }
 }
 
-impl<T: FromJS> FromJS for Lenient<T> {
+impl<'s, T: FromJS<'s>> FromJS<'s> for Lenient<T> {
     type ResultType = Lenient<T::ResultType>;
 
-    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
+    fn type_name() -> String {
+        T::type_name()
+    }
+
+    fn is_optional() -> bool {
+        true
+    }
+
+    fn from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self::ResultType, Error> {
         if value.is_null() {
             Ok(Lenient::Null)
         } else if value.is_undefined() {
             Ok(Lenient::Undefined)
         } else {
-            match T::try_from_js(lock, value.clone())? {
+            match T::try_from_js(lock, value)? {
                 Some(v) => Ok(Lenient::Some(v)),
-                None => Ok(Lenient::Unconvertable(value.into())),
+                None => Ok(Lenient::Unconvertable(v8::TracedGlobal::new(lock, value))),
             }
         }
     }
@@ -666,42 +1021,47 @@ impl<T: Type> Type for Vec<T> {
         "Array"
     }
 
-    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
         value.is_array()
     }
 }
 
-impl<T: ToJS> ToJS for Vec<T> {
-    fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-    where
-        'b: 'a,
-    {
-        let mut array = v8::Array::new(lock, self.len());
+impl<'s, T: ToJS<'s>> ToJS<'s> for Vec<T> {
+    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+        let array = v8::Array::new(lock, self.len());
         for (i, item) in self.into_iter().enumerate() {
-            array.set(i, item.to_js(lock));
+            let value = item.to_js(lock);
+            array.set(lock, i, value);
         }
         array.into()
     }
 }
 
-impl<T: Type + FromJS<ResultType = T>> FromJS for Vec<T> {
+impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
     type ResultType = Self;
 
-    fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self::ResultType, Error> {
-        let type_name = value.type_of();
+    fn type_name() -> String {
+        "Array".to_owned()
+    }
+
+    fn from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self::ResultType, Error> {
+        let type_name = value.type_of(lock);
         Self::try_from_js(lock, value)?
             .ok_or_else(|| Error::new_type_error(format!("Expected Array but got {type_name}")))
     }
 
     fn try_from_js(
-        lock: &mut Lock,
-        value: v8::Local<v8::Value>,
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
     ) -> Result<Option<Self::ResultType>, Error> {
-        let Some(array) = value.try_as::<v8::Array>() else {
+        let Ok(array) = v8::Local::<v8::Array>::try_from(value) else {
             return Ok(None);
         };
 
-        let globals = array.iterate()?;
+        let globals = array.iterate(lock)?;
         let mut result = Self::with_capacity(globals.len());
         for global in globals {
             let local = global.as_local(lock);
@@ -738,7 +1098,7 @@ macro_rules! impl_typed_array {
             fn class_name() -> &'static str {
                 stringify!($marker)
             }
-            fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+            fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
                 value.$is_check()
             }
         }
@@ -747,7 +1107,7 @@ macro_rules! impl_typed_array {
             fn class_name() -> &'static str {
                 stringify!($marker)
             }
-            fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+            fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
                 value.$is_check()
             }
         }
@@ -756,36 +1116,41 @@ macro_rules! impl_typed_array {
             fn class_name() -> &'static str {
                 stringify!($marker)
             }
-            fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+            fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
                 value.$is_check()
             }
         }
 
-        impl ToJS for Vec<$elem> {
-            fn to_js<'a, 'b>(self, lock: &'a mut Lock) -> v8::Local<'b, v8::Value>
-            where
-                'b: 'a,
-            {
+        impl<'s> ToJS<'s> for Vec<$elem> {
+            fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
                 let isolate = lock.isolate();
                 // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
                 unsafe {
-                    v8::Local::from_ffi(
-                        isolate,
-                        v8::ffi::$new_fn(isolate.as_ffi(), self.as_ptr(), self.len()),
-                    )
+                    v8::Local::from_ffi(v8::ffi::$new_fn(
+                        isolate.as_ffi(),
+                        self.as_ptr(),
+                        self.len(),
+                    ))
                 }
             }
         }
 
-        impl FromJS for Vec<$elem> {
+        impl<'s> FromJS<'s> for Vec<$elem> {
             type ResultType = Self;
 
-            fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Self, Error> {
+            fn type_name() -> String {
+                stringify!($marker).to_owned()
+            }
+
+            fn from_js(
+                lock: &mut Lock<'s>,
+                value: v8::Local<'s, v8::Value>,
+            ) -> Result<Self, Error> {
                 if !value.$is_check() {
                     return Err(Error::new_type_error(format!(
                         "Expected {} but got {}",
                         stringify!($marker),
-                        value.type_of()
+                        value.type_of(lock)
                     )));
                 }
                 // SAFETY: The isolate is locked and value is a valid V8 local handle of the correct TypedArray type.
@@ -793,8 +1158,8 @@ macro_rules! impl_typed_array {
             }
 
             fn try_from_js(
-                lock: &mut Lock,
-                value: v8::Local<v8::Value>,
+                lock: &mut Lock<'s>,
+                value: v8::Local<'s, v8::Value>,
             ) -> Result<Option<Self>, Error> {
                 if !value.$is_check() {
                     return Ok(None);
@@ -806,16 +1171,23 @@ macro_rules! impl_typed_array {
             }
         }
 
-        impl FromJS for &[$elem] {
+        impl<'s> FromJS<'s> for &[$elem] {
             type ResultType = Vec<$elem>;
 
-            fn from_js(lock: &mut Lock, value: v8::Local<v8::Value>) -> Result<Vec<$elem>, Error> {
+            fn type_name() -> String {
+                stringify!($marker).to_owned()
+            }
+
+            fn from_js(
+                lock: &mut Lock<'s>,
+                value: v8::Local<'s, v8::Value>,
+            ) -> Result<Vec<$elem>, Error> {
                 Vec::<$elem>::from_js(lock, value)
             }
 
             fn try_from_js(
-                lock: &mut Lock,
-                value: v8::Local<v8::Value>,
+                lock: &mut Lock<'s>,
+                value: v8::Local<'s, v8::Value>,
             ) -> Result<Option<Vec<$elem>>, Error> {
                 Vec::<$elem>::try_from_js(lock, value)
             }
@@ -906,7 +1278,7 @@ impl Type for v8::ArrayBuffer {
     fn class_name() -> &'static str {
         "ArrayBuffer"
     }
-    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
         value.is_array_buffer()
     }
 }
@@ -915,7 +1287,37 @@ impl Type for v8::ArrayBufferView {
     fn class_name() -> &'static str {
         "ArrayBufferView"
     }
-    fn is_exact(value: &v8::Local<v8::Value>) -> bool {
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
         value.is_array_buffer_view()
     }
 }
+
+// =============================================================================
+// Handle pass-through
+// =============================================================================
+
+impl<'s, T> ToJS<'s> for v8::Local<'s, T>
+where
+    Self: Into<v8::Local<'s, v8::Value>>,
+{
+    fn to_js(self, _lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+        self.into()
+    }
+}
+
+impl<'s> FromJS<'s> for v8::Local<'s, v8::Value> {
+    type ResultType = Self;
+
+    fn type_name() -> String {
+        // C++ JSG names `v8::Local<v8::Value>` after `v8::Value`.
+        "Value".to_owned()
+    }
+
+    fn from_js(_lock: &mut Lock<'s>, value: Self) -> Result<Self, Error> {
+        Ok(value)
+    }
+}
+
+#[cfg(test)]
+#[path = "wrappable-test.rs"]
+mod tests;

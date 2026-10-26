@@ -341,6 +341,10 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
       traceContext.setTag("cache.request.payload.size"_kjc, static_cast<int64_t>(length));
     }
 
+    // The span is awaited after the output locks and inside a continuation, so neither the
+    // output-lock awaitIo() below nor an unrelated one later in this turn may adopt it.
+    traceContext.detachAsync();
+
     // Wait for output locks, trying to avoid returning to the KJ event loop in the common case
     // where no waits are needed.
     jsg::Promise<IoOwn<kj::AsyncInputStream>> startStreamPromise = nullptr;
@@ -355,15 +359,16 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
 
     return startStreamPromise.then(js,
         context.addFunctor(
-            [this, jsRequest = kj::mv(jsRequest), cacheControl = kj::mv(cacheControl),
-                serializePromise = kj::mv(serializePromise),
+            [weakThis = JSG_THIS_WEAK(js), jsRequest = kj::mv(jsRequest),
+                cacheControl = kj::mv(cacheControl), serializePromise = kj::mv(serializePromise),
                 writePayloadHeadersPromise = kj::mv(payload.writeHeadersPromise),
                 enableCompatFlags = flags.getCacheApiCompatFlags(),
                 traceContext = kj::mv(traceContext)](jsg::Lock& js, IoContext& context,
                 IoOwn<kj::AsyncInputStream> payloadStream) mutable -> jsg::Promise<void> {
       // Make the PUT request to cache.
-      auto httpClient = getHttpClient(
-          context, jsRequest->serializeCfBlobJson(js), traceContext, enableCompatFlags);
+      auto httpClient = KJ_REQUIRE_NONNULL(weakThis.tryGet(), "Cache destroyed before put ran")
+                            .getHttpClient(context, jsRequest->serializeCfBlobJson(js),
+                                traceContext, enableCompatFlags);
       auto requestHeaders = kj::HttpHeaders(context.getHeaderTable());
       jsRequest->shallowCopyHeadersTo(requestHeaders);
       auto nativeRequest = httpClient->request(kj::HttpMethod::PUT,
@@ -497,7 +502,7 @@ jsg::Promise<void> Cache::put(jsg::Lock& js,
           traceContext.setTag("cache.response.success"_kjc, false);
           auto exception = kj::getCaughtExceptionAsKj();
           if (exception.getType() != kj::Exception::Type::DISCONNECTED) {
-            kj::throwFatalException(kj::mv(exception));
+            kj::throwException(kj::mv(exception));
           }
           // If the origin or the cache disconnected, we don't treat this as an error, as put()
           // doesn't guarantee that it stores anything anyway.
@@ -593,6 +598,7 @@ kj::Own<kj::HttpClient> Cache::getHttpClient(IoContext& context,
     .cfBlobJson = kj::mv(cfBlobJson),
     .parentSpan = traceContext.getInternalSpanParent(),
     .featureFlagsForFl = kj::none,
+    .userSpanParent = traceContext.getUserSpanParent(),
   };
   if (enableCompatFlags) {
     metadata.featureFlagsForFl = context.getWorker().getIsolate().getFeatureFlagsForFl().clone();

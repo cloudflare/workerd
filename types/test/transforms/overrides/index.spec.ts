@@ -17,9 +17,9 @@ import {
 } from '../../../src/transforms';
 
 function printDefinitionsWithOverrides(root: StructureGroups): string {
-  const { nodes } = generateDefinitions(root);
+  const { nodes, included } = generateDefinitions(root);
 
-  const [sources, replacements] = compileOverridesDefines(root);
+  const [sources, replacements] = compileOverridesDefines(root, included);
   const sourcePath = path.resolve(__dirname, 'source.ts');
   const source = printNodeList(nodes);
   sources.set(sourcePath, source);

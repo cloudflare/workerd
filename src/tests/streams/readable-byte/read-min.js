@@ -10,7 +10,7 @@
 // resolves done with an empty view. The WPT read-min.any suite stays disabled on the C++
 // side for its own hangs; the TypeScript side runs it.
 
-import { strictEqual, ok, throws, rejects } from 'node:assert';
+import { strictEqual, deepStrictEqual, ok, throws, rejects } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 const enc = new TextEncoder();
@@ -105,6 +105,42 @@ export const readMinValidation = {
   },
 };
 
+// read(view, options) converts its options as a WebIDL dictionary
+// (parity): null means no options (min 1), a function's members are read
+// (here a min of 0, rejected as in readMinValidation), and every other
+// primitive rejects with TypeError (messages differ).
+export const byobReadOptionsShapes = {
+  async test() {
+    const { rs, controller } = byteStream();
+    const reader = rs.getReader({ mode: 'byob' });
+    const read = reader.read(new Uint8Array(4), null);
+    controller().enqueue(new Uint8Array([1, 2]));
+    const { value, done } = await read;
+    strictEqual(done, false);
+    deepStrictEqual([...value], [1, 2]);
+    await rejects(
+      reader.read(
+        new Uint8Array(4),
+        Object.assign(function options() {}, { min: 0 })
+      ),
+      {
+        name: 'TypeError',
+        message: usingTsImpl
+          ? 'options.min must be greater than 0'
+          : 'Requested invalid minimum number of bytes to read (0).',
+      }
+    );
+    for (const options of [5, 'x', true, 1n, Symbol('s')]) {
+      await rejects(
+        reader.read(new Uint8Array(4), options),
+        usingTsImpl
+          ? { name: 'TypeError', message: 'options must be an object' }
+          : TypeError
+      );
+    }
+  },
+};
+
 // close() while a min-read holds SOME bytes (2 of 3): the read fulfills
 // with the partial bytes, done=false, and a subsequent read resolves
 // done with an empty view — the readAtLeast tail contract, parity on
@@ -178,6 +214,64 @@ export const closedOrderAtEndOfData = {
     });
     await Promise.all(observed);
     strictEqual(tail.join(), usingTsImpl ? 'closed,read:2' : 'read:2,closed');
+  },
+};
+
+// DIVERGENCE (ledger #38): where closed settles relative to a readAtLeast()
+// that gets fewer bytes than its minimum at a native body's end. C++
+// fulfills the read and leaves closed pending until the next read, which
+// closes the stream; TypeScript closes the stream, then fulfills the read,
+// as at a JS byte source's close() below min (#27). At a zero-byte end
+// both resolve closed first, for read() and read(view) alike, and the
+// read(view) gets its buffer back in an empty view; that parity is
+// asserted first.
+export const closedOrderAtNativeEndOfData = {
+  async test() {
+    for (const mode of [undefined, 'byob']) {
+      const reader = new Response('abc').body.getReader(
+        mode ? { mode } : undefined
+      );
+      const read = () =>
+        mode ? reader.read(new Uint8Array(8)) : reader.read();
+      strictEqual((await read()).value.byteLength, 3);
+      const log = [];
+      await Promise.all([
+        reader.closed.then(() => log.push('closed')),
+        read().then((r) => {
+          ok(r.done);
+          if (mode) {
+            ok(r.value instanceof Uint8Array);
+            strictEqual(r.value.byteLength, 0);
+            strictEqual(r.value.buffer.byteLength, 8);
+          } else {
+            strictEqual(r.value, undefined);
+          }
+          log.push('end');
+        }),
+      ]);
+      strictEqual(log.join(), 'closed,end', `mode ${mode}`);
+    }
+
+    const reader = new Response('abc').body.getReader({ mode: 'byob' });
+    const log = [];
+    reader.closed.then(() => log.push('closed'));
+    const partial = await reader.readAtLeast(4, new Uint8Array(8)).then((r) => {
+      log.push('partial');
+      return r;
+    });
+    strictEqual(partial.done, false);
+    strictEqual(partial.value.byteLength, 3);
+    await scheduler.wait(5);
+    strictEqual(log.join(), usingTsImpl ? 'closed,partial' : 'partial');
+    const next = await reader.read(new Uint8Array(8)).then((r) => {
+      log.push('next');
+      return r;
+    });
+    strictEqual(next.done, true);
+    strictEqual(
+      log.join(),
+      usingTsImpl ? 'closed,partial,next' : 'partial,closed,next'
+    );
   },
 };
 

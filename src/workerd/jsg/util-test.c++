@@ -186,7 +186,7 @@ struct TunneledContext: public ContextGlobalObject {
     JSG_FAIL_REQUIRE(InternalDOMOperationError, "thrown from throwTunneledInternalOperationError");
   }
   void throwRemoteCpuExceededError() {
-    kj::throwFatalException(KJ_EXCEPTION(OVERLOADED,
+    kj::throwException(KJ_EXCEPTION(OVERLOADED,
         "remote exception: remote exception: worker_do_not_log; script exceeded time limit",
         "script exceeded time limit"));
   }
@@ -419,6 +419,39 @@ KJ_TEST("isTunneledException") {
     KJ_UNREACHABLE;
   } catch (kj::Exception& e) {
     KJ_EXPECT(!isTunneledException(e.getDescription()), e.getDescription());
+  }
+}
+
+// ========================================================================================
+
+struct RetryableContext: public ContextGlobalObject {
+  void throwException(kj::String type, kj::String description, bool transient) {
+    auto exceptionType = type == "overloaded" ? kj::Exception::Type::OVERLOADED
+        : type == "disconnected"              ? kj::Exception::Type::DISCONNECTED
+                                              : kj::Exception::Type::FAILED;
+    kj::Exception exception(exceptionType, __FILE__, __LINE__, kj::mv(description));
+    if (transient) markTransient(exception);
+    kj::throwException(kj::mv(exception));
+  }
+  JSG_RESOURCE_TYPE(RetryableContext) {
+    JSG_METHOD(throwException);
+  }
+};
+JSG_DECLARE_ISOLATE_TYPE(RetryableIsolate, RetryableContext);
+
+KJ_TEST("retryable reflects DISCONNECTED and the transient marker") {
+  Evaluator<RetryableContext, RetryableIsolate> e(v8System);
+  auto flags = [&](kj::StringPtr args) {
+    return kj::str("try { throwException(", args,
+        "); } catch (e) { `${e.retryable === true} ${e.overloaded === true}` }");
+  };
+  e.expectEval(flags("'failed', 'jsg.Error: unmarked', false"), "string", "false false");
+  e.expectEval(flags("'disconnected', 'jsg.Error: disconnected', false"), "string", "true false");
+  e.expectEval(flags("'failed', 'jsg.Error: marked', true"), "string", "true false");
+  e.expectEval(flags("'overloaded', 'jsg.Error: marked', true"), "string", "true true");
+  {
+    KJ_EXPECT_LOG(ERROR, "marked internal failure");
+    e.expectEval(flags("'failed', 'marked internal failure', true"), "string", "true false");
   }
 }
 

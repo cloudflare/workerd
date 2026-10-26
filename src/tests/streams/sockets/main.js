@@ -19,6 +19,7 @@ export {
   pipeSocketToSocketClosesSource,
   pipeBehindUnawaitedWrite,
   pipeBehindWriteBeforeStart,
+  pipeOptionGetterLocksNativeEndpoint,
   cancelReadableSettlesSocket,
   detachRejectsPendingWrites,
   detachClosesIdleWritable,

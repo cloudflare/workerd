@@ -13,6 +13,7 @@ def _http_ext_impl(ctx):
 
         for file in mod.tags.file:
             _http_ext_delegate(http_file, file)
+    return ctx.extension_metadata()
 
 def _http_ext_delegate(repo_rule, tag_struct):
     tag_dict = _struct_to_dict(tag_struct)

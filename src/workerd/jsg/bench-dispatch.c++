@@ -19,9 +19,23 @@ class DispatchTarget final: public Object {
     return value += increment;
   }
 
+  static uint32_t staticCall(uint32_t x) {
+    return x + 1;
+  }
+
+  uint32_t getCount() const {
+    return value;
+  }
+
+  void setCount(uint32_t count) {
+    value = count;
+  }
+
   JSG_RESOURCE_TYPE(DispatchTarget) {
     JSG_METHOD(call);
     JSG_METHOD(callWith);
+    JSG_STATIC_METHOD(staticCall);
+    JSG_PROTOTYPE_PROPERTY(count, getCount, setCount);
   }
 
  private:
@@ -40,29 +54,31 @@ class DispatchContext final: public Object, public ContextGlobal {
   }
 };
 
+// `Evaluator` keeps one isolate per type, configured by its first use.
 JSG_DECLARE_DEBUG_ISOLATE_TYPE(SlowDispatchIsolate, DispatchContext, DispatchTarget);
-JSG_DECLARE_DEBUG_ISOLATE_TYPE(SlowArgDispatchIsolate, DispatchContext, DispatchTarget);
 JSG_DECLARE_DEBUG_ISOLATE_TYPE(FastDispatchIsolate, DispatchContext, DispatchTarget);
-JSG_DECLARE_DEBUG_ISOLATE_TYPE(FastArgDispatchIsolate, DispatchContext, DispatchTarget);
 
 V8System v8System({"--allow-natives-syntax"_kj});
 
 constexpr uint32_t CALLS_PER_BATCH = 10000;
 
-template <typename Isolate, bool WITH_ARGUMENT = false>
-void runDispatchBenchmark(benchmark::State& state, bool fastApiEnabled) {
+template <typename Isolate>
+void runDispatchBenchmark(benchmark::State& state, kj::StringPtr call) {
+  constexpr bool fastApiEnabled = kj::isSameType<Isolate, FastDispatchIsolate>();
   JsgConfig config = {
     .fastApiEnabled = fastApiEnabled,
   };
   Evaluator<DispatchContext, Isolate, JsgConfig> evaluator(v8System, config);
 
   evaluator.run([&](auto& js) {
-    auto source = WITH_ARGUMENT ? R"(
+    auto source = kj::str(R"(
       const target = makeTarget();
+      const Target = target.constructor;
       function dispatchBatch(count) {
         let result;
         for (let i = 0; i < count; ++i) {
-          result = target.callWith(1);
+          result = )",
+        call, R"(;
         }
         return result;
       }
@@ -71,22 +87,7 @@ void runDispatchBenchmark(benchmark::State& state, bool fastApiEnabled) {
       %OptimizeFunctionOnNextCall(dispatchBatch);
       dispatchBatch(10000);
       dispatchBatch;
-    )"_kj
-                                : R"(
-      const target = makeTarget();
-      function dispatchBatch(count) {
-        let result;
-        for (let i = 0; i < count; ++i) {
-          result = target.call();
-        }
-        return result;
-      }
-      %PrepareFunctionForOptimization(dispatchBatch);
-      dispatchBatch(10000);
-      %OptimizeFunctionOnNextCall(dispatchBatch);
-      dispatchBatch(10000);
-      dispatchBatch;
-    )"_kj;
+    )");
     auto script = check(v8::Script::Compile(js.v8Context(), js.str(source)));
     auto function = check(script->Run(js.v8Context())).template As<v8::Function>();
     auto count = v8::Integer::NewFromUnsigned(js.v8Isolate, CALLS_PER_BATCH);
@@ -99,32 +100,27 @@ void runDispatchBenchmark(benchmark::State& state, bool fastApiEnabled) {
     }
 
     state.SetItemsProcessed(state.iterations() * CALLS_PER_BATCH);
-    if (fastApiEnabled && callCounter.fast == 0) {
-      state.SkipWithError("V8 did not use the Fast API callback");
+    if (fastApiEnabled && (callCounter.fast == 0 || callCounter.slow != 0)) {
+      state.SkipWithError("V8 did not stay on the Fast API callback");
     }
   });
 }
 
-void NativeDispatchSlow(benchmark::State& state) {
-  runDispatchBenchmark<SlowDispatchIsolate>(state, false);
-}
+#define DISPATCH_BENCHMARKS(name, call)                                                            \
+  void NativeDispatchSlow##name(benchmark::State& state) {                                         \
+    runDispatchBenchmark<SlowDispatchIsolate>(state, call);                                        \
+  }                                                                                                \
+  void NativeDispatchFast##name(benchmark::State& state) {                                         \
+    runDispatchBenchmark<FastDispatchIsolate>(state, call);                                        \
+  }                                                                                                \
+  WD_BENCHMARK(NativeDispatchSlow##name);                                                          \
+  WD_BENCHMARK(NativeDispatchFast##name)
 
-void NativeDispatchSlowArg(benchmark::State& state) {
-  runDispatchBenchmark<SlowArgDispatchIsolate, true>(state, false);
-}
-
-void NativeDispatchFast(benchmark::State& state) {
-  runDispatchBenchmark<FastDispatchIsolate>(state, true);
-}
-
-void NativeDispatchFastArg(benchmark::State& state) {
-  runDispatchBenchmark<FastArgDispatchIsolate, true>(state, true);
-}
-
-WD_BENCHMARK(NativeDispatchSlow);
-WD_BENCHMARK(NativeDispatchSlowArg);
-WD_BENCHMARK(NativeDispatchFast);
-WD_BENCHMARK(NativeDispatchFastArg);
+DISPATCH_BENCHMARKS(, "target.call()");
+DISPATCH_BENCHMARKS(Arg, "target.callWith(1)");
+DISPATCH_BENCHMARKS(Static, "Target.staticCall(i)");
+DISPATCH_BENCHMARKS(Getter, "target.count");
+DISPATCH_BENCHMARKS(Setter, "(target.count = i)");
 
 }  // namespace
 }  // namespace workerd::jsg::test

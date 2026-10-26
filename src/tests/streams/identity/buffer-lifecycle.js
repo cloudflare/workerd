@@ -12,12 +12,11 @@
 // size callback — the one hook the writable machinery runs synchronously
 // inside write() — for the same reasons.
 //
-// Degenerate inputs that are already unusable at write() time (detached
-// buffer, view made out-of-bounds by a shrink) are a separate matter and
-// partly diverge; see the individual tests at the bottom.
+// Inputs already unusable at write() time (a detached buffer, a view made
+// out-of-bounds by a shrink) have no bytes, so both implementations treat
+// them as zero-length no-ops; see the individual tests at the bottom.
 
-import { strictEqual, deepStrictEqual, rejects } from 'node:assert';
-import { usingTsImpl } from 'which-impl';
+import { strictEqual, deepStrictEqual } from 'node:assert';
 
 // Writes chunk, synchronously runs mutate (before any await, exactly as a
 // misbehaving caller would), and asserts the reader receives expectedBytes.
@@ -87,26 +86,17 @@ export const bufferDetachedAfterWrite = {
 
 export const alreadyDetachedBufferAtWrite = {
   async test() {
-    // Writing a buffer that is already detached diverges:
-    // - C++ observes byteLength 0 and treats it as a zero-length no-op.
-    // - TypeScript rejects the write with TypeError (the chunk cannot be
-    //   read at all); like any other invalid chunk the rejection is
-    //   per-write — the stream survives it.
-    const ab = new ArrayBuffer(4);
-    ab.transfer();
-    const { readable, writable } = new IdentityTransformStream();
-    const writer = writable.getWriter();
-    const reader = readable.getReader();
-    if (usingTsImpl) {
-      await rejects(writer.write(ab), TypeError);
-      // The stream is usable after the rejection.
-      const writePromise = writer.write(new Uint8Array([9]));
-      const { value, done } = await reader.read();
-      strictEqual(done, false);
-      strictEqual(value[0], 9);
-      await writePromise;
-      await writer.close();
-    } else {
+    // A buffer that is already detached has byteLength 0, so both
+    // implementations treat it as a zero-length no-op, as they do a
+    // detached view. It adds nothing toward a FixedLengthStream's length.
+    for (const stream of [
+      new IdentityTransformStream(),
+      new FixedLengthStream(0),
+    ]) {
+      const ab = new ArrayBuffer(4);
+      ab.transfer();
+      const writer = stream.writable.getWriter();
+      const reader = stream.readable.getReader();
       await writer.write(ab);
       const closePromise = writer.close();
       strictEqual((await reader.read()).done, true);

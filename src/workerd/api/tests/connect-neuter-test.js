@@ -6,9 +6,11 @@
 // connect() handler must neuter the NeuterableIoStream when
 // the handler promise resolves, preventing use-after-free.
 
-import { strictEqual, rejects } from 'assert';
+import { rejects } from 'assert';
 
-let writeRejected = false;
+// Set by the connect handler's waitUntil() task once its late write has been attempted: true if
+// the write was rejected as expected, otherwise the assertion error.
+let lateWriteResult;
 
 export default {
   async connect(socket, env, ctx) {
@@ -20,16 +22,19 @@ export default {
         // being neutered.
         await scheduler.wait(0);
 
-        await rejects(
-          async () => await writer.write(new Uint8Array([0x41, 0x42])),
-          {
-            name: 'TypeError',
-            message:
-              "Can't read from request stream because client disconnected.",
-          }
-        );
-
-        writeRejected = true;
+        try {
+          await rejects(
+            async () => await writer.write(new Uint8Array([0x41, 0x42])),
+            {
+              name: 'TypeError',
+              message:
+                "Can't read from request stream because client disconnected.",
+            }
+          );
+          lateWriteResult = true;
+        } catch (e) {
+          lateWriteResult = e;
+        }
       })()
     );
 
@@ -44,9 +49,18 @@ export const connectNeuterRegression = {
     // The destination will close the socket when its `connect` returns.
     await socket.closed;
 
-    // Give time for the late-write to be attempted.
-    await scheduler.wait(10);
-
-    strictEqual(writeRejected, true, 'write must throw on a neutered stream');
+    // The late write runs in the connect handler's waitUntil() task, which under load can finish
+    // well after the socket closes, so wait for its result rather than for a fixed time. The bound
+    // is far beyond what the task needs; it only turns a write that never completes into a clear
+    // failure before the test target's own timeout.
+    for (let i = 0; lateWriteResult === undefined && i < 10_000; ++i) {
+      await scheduler.wait(1);
+    }
+    if (lateWriteResult === undefined) {
+      throw new Error('timed out waiting for the late write to be attempted');
+    }
+    if (lateWriteResult !== true) {
+      throw lateWriteResult;
+    }
   },
 };

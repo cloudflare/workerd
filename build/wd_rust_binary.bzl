@@ -52,7 +52,7 @@ def wd_rust_binary(
         cxx_bridge_src = None,
         cxx_bridge_deps = [],
         cxx_bridge_hdrs = None,
-        target_compatible_with = [],
+        target_compatible_with = None,
         test_size = "small"):
     """Define rust binary.
 
@@ -68,9 +68,8 @@ def wd_rust_binary(
         proc_macro_deps: proc_macro dependencies.
         rustc_env: additional rustc environment variables,
         malloc: the malloc implementation to link, if not the default.
-        tool: True for a binary where performance matters: linked with linkopts_tool and given a
-            <name>_cross alias, as wd_cc_binary does. False for development tools and tests
-            (linkopts_default).
+        tool: True for a binary where performance matters: linked with linkopts_tool, as
+            wd_cc_binary does. False for development tools and tests (linkopts_default).
         test: whether to define a <name>_test target for the binary's own tests.
         tags: rule tags
         cxx_bridge_hdrs: headers the bridge include!()s; defaults to every .h file in the package.
@@ -133,28 +132,11 @@ def wd_rust_binary(
         lint_config = "@workerd//build/rust:lints",
         # linkopts_tool links with full optimization, so it is given more CPUs.
         tags = tags + ["cpu:4" if tool else "cpu:2"],
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }) + target_compatible_with,
+        target_compatible_with = target_compatible_with,
         # Use dedicated high-CPU runner if available
         exec_properties = {"runner": "high-cpu"},
         **binary_kwargs
     )
-
-    # Same as wd_cc_binary: lets cross builds substitute a prebuilt binary. Only production
-    # binaries have prebuilts (the substitute target must exist in the root repository of the
-    # cross build), so only they get the alias; build-time tools run on the host.
-    if tool:
-        pkg = native.package_name().removeprefix("src/")
-        native.alias(
-            name = name + "_cross",
-            visibility = visibility,
-            actual = select({
-                "@//build/config:prebuilt_binaries_arm64": "@//:bin.arm64/tmp/{}/{}.aarch64-linux-gnu".format(pkg, name),
-                "//conditions:default": name,
-            }),
-        )
 
     if not test:
         return
@@ -170,10 +152,7 @@ def wd_rust_binary(
             # our tests are usually very heavy and do not support concurrent invocation
             "RUST_TEST_THREADS": "1",
         },
-        target_compatible_with = select({
-            "@//build/config:no_build": ["@platforms//:incompatible"],
-            "//conditions:default": [],
-        }) + target_compatible_with,
+        target_compatible_with = target_compatible_with,
         experimental_use_cc_common_link = 1,
         link_deps = ["//build/deps:linkopts_default", "@@//deps:rust_runtime"],
         size = test_size,

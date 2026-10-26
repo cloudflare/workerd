@@ -133,6 +133,45 @@ export const asyncIteratorPreventCancel = {
   },
 };
 
+// values()'s options convert as a WebIDL dictionary (parity): null means
+// no options, so return() cancels; a function's members are read, here
+// preventCancel; every other primitive throws TypeError (messages
+// differ).
+export const valuesOptionsShapes = {
+  async test() {
+    const cancelled = [];
+    const returnAfterOneChunk = async (name, options) => {
+      const rs = new ReadableStream({
+        pull(controller) {
+          controller.enqueue('chunk');
+        },
+        cancel() {
+          cancelled.push(name);
+        },
+      });
+      const iterator = rs.values(options);
+      strictEqual((await iterator.next()).value, 'chunk');
+      await iterator.return();
+      return rs;
+    };
+    await returnAfterOneChunk('null', null);
+    const rs = await returnAfterOneChunk(
+      'function',
+      Object.assign(function options() {}, { preventCancel: true })
+    );
+    deepStrictEqual(cancelled, ['null']);
+    strictEqual(rs.locked, false);
+    for (const options of [5, 'x', true, 1n, Symbol('s')]) {
+      throws(
+        () => new ReadableStream().values(options),
+        usingTsImpl
+          ? { name: 'TypeError', message: 'Options must be an object' }
+          : TypeError
+      );
+    }
+  },
+};
+
 // Test iterating over an already-closed stream
 // Inspired by: Deno tests/unit/streams_test.ts
 export const asyncIteratorOnClosedStream = {

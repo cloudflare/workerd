@@ -38,6 +38,8 @@ kj::Own<kj::HttpClient> r2GetClient(
   }
 
   // TODO(o11y): Attach trace context to awaitIo call to match operation lifetime better?
+  // Until then it lives as long as the client, so no awaitIo() may adopt it.
+  traceContext.detachAsync();
   return context.getHttpClient(subrequestChannel, true, kj::none, traceContext)
       .attach(kj::mv(traceContext));
 }
@@ -1000,8 +1002,8 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
         doR2HTTPPutRequest(js, kj::mv(client), kj::none, kj::none, kj::mv(requestJson), path, jwt);
 
     return context.awaitIo(js, kj::mv(promise),
-        [&errorType, key = kj::mv(key), this, traceContext = kj::mv(traceContext)](
-            jsg::Lock& js, R2Result r2Result) mutable {
+        [&errorType, key = kj::mv(key), weakThis = JSG_THIS_WEAK(js),
+            traceContext = kj::mv(traceContext)](jsg::Lock& js, R2Result r2Result) mutable {
       addR2ResponseSpanTags(traceContext, r2Result);
       r2Result.throwIfError("createMultipartUpload", errorType);
 
@@ -1013,7 +1015,9 @@ jsg::Promise<jsg::Ref<R2MultipartUpload>> R2Bucket::createMultipartUpload(jsg::L
       json.decode(KJ_ASSERT_NONNULL(r2Result.metadataPayload), responseBuilder);
       kj::StringPtr uploadId = responseBuilder.getUploadId();
       traceContext.setTag("cloudflare.r2.response.upload_id"_kjc, uploadId);
-      return js.alloc<R2MultipartUpload>(kj::mv(key), kj::str(uploadId), JSG_THIS);
+      return js.alloc<R2MultipartUpload>(kj::mv(key), kj::str(uploadId),
+          KJ_REQUIRE_NONNULL(
+              weakThis.tryAddRef(js), "R2Bucket destroyed before createMultipartUpload returned"));
     });
   });
 }

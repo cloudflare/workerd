@@ -7,7 +7,9 @@
 #include "sockets.h"
 
 #include <workerd/api/global-scope.h>
+#include <workerd/io/worker-interface.h>
 #include <workerd/util/entropy.h>
+#include <workerd/util/weak-refs.h>
 
 #include <kj/compat/http.h>
 #include <kj/encoding.h>
@@ -135,28 +137,29 @@ kj::Promise<kj::Own<kj::AsyncIoStream>> Hyperdrive::connectToDb() {
   kj::HttpHeaderTable headerTable;
   kj::HttpHeaders headers(headerTable);
 
-  auto connectReq = kj::newHttpClient(*service)->connect(
-      kj::str(getHost(), ":", getPort()), headers, kj::HttpConnectSettings{});
+  auto client = asHttpClient(kj::mv(service));
+  auto connectReq =
+      client->connect(kj::str(getHost(), ":", getPort()), headers, kj::HttpConnectSettings{});
 
   auto status = co_await connectReq.status;
 
   if (status.statusCode >= 200 && status.statusCode < 300) {
-    co_return kj::mv(connectReq.connection);
+    co_return kj::mv(connectReq.connection).attach(kj::mv(client));
   }
 
   KJ_IF_SOME(e, status.errorBody) {
     try {
       auto errorBody = co_await e->readAllText();
-      kj::throwFatalException(
+      kj::throwException(
           KJ_EXCEPTION(FAILED, kj::str("unexpected error connecting to database: ", errorBody)));
     } catch (const kj::Exception& e) {
-      kj::throwFatalException(KJ_EXCEPTION(FAILED,
+      kj::throwException(KJ_EXCEPTION(FAILED,
           kj::str("unexpected error connecting to database "
                   "and couldn't read error details: ",
               e)));
     }
   } else {
-    kj::throwFatalException(KJ_EXCEPTION(
+    kj::throwException(KJ_EXCEPTION(
         FAILED, kj::str("unexpected error connecting to database: ", status.statusText)));
   }
 }

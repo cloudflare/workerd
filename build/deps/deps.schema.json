@@ -195,6 +195,9 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "strip_prefix": {
+                "type": "string"
               }
             },
             "required": ["type", "name", "url"],

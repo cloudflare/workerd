@@ -144,6 +144,84 @@ test('createStructureNode: property members', () => {
   );
 });
 
+test('createStructureNode: optional nullable properties and non-Maybe unions', () => {
+  const structure = new Message().initRoot(Structure);
+  structure.fullyQualifiedName = 'workerd::api::Properties';
+  const members = structure._initMembers(3);
+
+  const optional = members.get(0)._initProperty();
+  optional.name = 'optional';
+  const optionalType = optional._initType()._initMaybe();
+  optionalType.allowsNull = true;
+  optionalType.allowsUndefined = true;
+  optionalType._initValue().boolt = true;
+
+  const nullable = members.get(1)._initProperty();
+  nullable.name = 'nullable';
+  const nullableType = nullable._initType()._initMaybe();
+  nullableType.allowsNull = true;
+  nullableType._initValue().boolt = true;
+
+  const union = members.get(2)._initProperty();
+  union.name = 'union';
+  const variants = union._initType()._initOneOf()._initVariants(3);
+  variants.get(0)._initString().name = 'kj::String';
+  variants.get(1).boolt = true;
+  const nestedOptional = variants.get(2)._initMaybe();
+  nestedOptional.allowsUndefined = true;
+  nestedOptional._initValue()._initNumber().name = 'int';
+
+  const source = printNode(createStructureNode(structure, { asClass: false }));
+  assert.match(source, /optional\?: boolean \| null;/);
+  assert.match(source, /nullable: boolean \| null;/);
+  assert.match(source, /union:.*undefined/);
+  assert.doesNotMatch(source, /union\?/);
+});
+
+test('createStructureNode: explicit declaration, reference, and argument names', () => {
+  const structure = new Message().initRoot(Structure);
+  structure.name = 'NativeRoot';
+  structure.fullyQualifiedName = 'rust::module::NativeRoot';
+  structure.tsName = 'PublicRoot';
+  const members = structure._initMembers(2);
+
+  const constructor = members.get(0)._initConstructor();
+  const constructorArgs = constructor._initArgs(2);
+  constructorArgs.get(0)._initString();
+  const count = constructorArgs.get(1)._initMaybe();
+  count.allowsUndefined = true;
+  count._initValue()._initNumber().name = 'int';
+  const constructorNames = constructor._initArgNames(2);
+  constructorNames.set(0, 'label');
+  constructorNames.set(1, 'count');
+
+  const method = members.get(1)._initMethod();
+  method.name = 'lookup';
+  const args = method._initArgs(3);
+  args.get(0)._initJsgImpl().type = JsgImplType_Type.JSG_LOCK;
+  const options = args.get(1)._initStructure();
+  options.fullyQualifiedName = 'rust::module::NativeOptions';
+  options.tsName = 'PublicOptions';
+  const hint = args.get(2)._initMaybe();
+  hint.allowsUndefined = true;
+  hint._initValue()._initString();
+  const names = method._initArgNames(3);
+  names.set(0, 'lock');
+  names.set(1, 'options');
+  names.set(2, 'hint');
+  const result = method._initReturnType()._initStructure();
+  result.fullyQualifiedName = 'rust::module::NativeResult';
+  result.tsName = 'PublicResult';
+
+  assert.strictEqual(
+    printNode(createStructureNode(structure, { asClass: true })),
+    `declare class PublicRoot {
+    constructor(label: string, count?: number);
+    lookup(options: PublicOptions, hint?: string): PublicResult;
+}`
+  );
+});
+
 test('createStructureNode: nested type members', () => {
   const structure = new Message().initRoot(Structure);
   structure.name = 'Nested';
@@ -183,16 +261,27 @@ test('createStructureNode: constant members', () => {
   structure.name = 'Constants';
   structure.fullyQualifiedName = 'workerd::api::Constants';
 
-  const members = structure._initMembers(1);
+  const members = structure._initMembers(2);
 
   const constant = members.get(0)._initConstant();
   constant.name = 'THING';
   constant.value = BigInt(42);
+  const fraction = members.get(1)._initConstant();
+  fraction.name = 'FRACTION';
+  fraction.numberValue = 1.5;
 
   assert.strictEqual(
     printNode(createStructureNode(structure, { asClass: true })),
     `declare abstract class Constants {
     static readonly THING: number;
+    static readonly FRACTION: number;
+}`
+  );
+  assert.strictEqual(
+    printNode(createStructureNode(structure, { asClass: false })),
+    `interface Constants {
+    readonly THING: number;
+    readonly FRACTION: number;
 }`
   );
 });

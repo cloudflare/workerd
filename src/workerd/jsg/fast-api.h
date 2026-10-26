@@ -12,11 +12,10 @@
 // are compatible with Fast API, handling both primitive types that can be passed directly
 // and wrapped objects that require conversion between JavaScript and C++.
 //
-// We don't add FastOneByteString because any GC call before FastOneByteString being copied
-// will corrupt the string data and cause catastrophic failures with almost zero stack trace.
-// For more information, see https://github.com/cloudflare/workerd/pull/4625.
+// `FastOneByteString` is only used for signatures satisfying `FastApiNoScopeMethod` (#4625, #4628).
 
 #include <v8-fast-api-calls.h>
+#include <v8-isolate.h>
 #include <v8-local-handle.h>
 #include <v8-value.h>
 
@@ -69,6 +68,20 @@ concept FastApiReturnParam = FastApiPrimitive<T>;
 template <typename Ret, typename... Args>
 concept FastApiMethod = FastApiReturnParam<Ret> && (FastApiParam<Args> && ...);
 
+// Update this list whenever a new string type is added.
+// TODO(soon): Merge this with webidl::isStringType once NonCoercible is supported.
+template <typename T>
+concept StringLike = kj::isSameType<kj::String, T>() || kj::isSameType<USVString, T>() ||
+    kj::isSameType<DOMString, T>();
+
+// A method whose arguments all cross without touching V8, so no argument unwrap can GC. This is
+// what lets `fastCallback` skip its preamble and makes `FastOneByteString` safe to borrow.
+template <typename Ret, typename... Args>
+concept FastApiNoScopeMethod = FastApiReturnParam<Ret> &&
+    ((FastApiPrimitive<kj::RemoveConst<kj::Decay<Args>>> ||
+         StringLike<kj::RemoveConst<kj::Decay<Args>>>) &&
+        ...);
+
 // Helper to determine if a method pointer type is compatible with Fast API
 template <typename Method>
 constexpr bool isFastApiCompatible = false;
@@ -80,6 +93,24 @@ constexpr bool isFastApiCompatible<Ret (Class::*)(Args...)> = FastApiMethod<Ret,
 // Specialization for const non-static member functions
 template <typename Class, typename Ret, typename... Args>
 constexpr bool isFastApiCompatible<Ret (Class::*)(Args...) const> = FastApiMethod<Ret, Args...>;
+
+// Ignores a leading `jsg::Lock&`, though such callbacks still open a HandleScope for the method.
+template <typename Method>
+constexpr bool isFastApiNoScope = false;
+
+template <typename Class, typename Ret, typename... Args>
+constexpr bool isFastApiNoScope<Ret (Class::*)(Args...)> = FastApiNoScopeMethod<Ret, Args...>;
+
+template <typename Class, typename Ret, typename... Args>
+constexpr bool isFastApiNoScope<Ret (Class::*)(Args...) const> = FastApiNoScopeMethod<Ret, Args...>;
+
+template <typename Class, typename Ret, typename... Args>
+constexpr bool isFastApiNoScope<Ret (Class::*)(jsg::Lock&, Args...)> =
+    FastApiNoScopeMethod<Ret, Args...>;
+
+template <typename Class, typename Ret, typename... Args>
+constexpr bool isFastApiNoScope<Ret (Class::*)(jsg::Lock&, Args...) const> =
+    FastApiNoScopeMethod<Ret, Args...>;
 
 template <typename Class, typename Ret, typename... Args>
 constexpr bool isFastApiCompatible<Ret (Class::*)(jsg::Lock&, Args...)> =
@@ -105,6 +136,39 @@ template <typename T>
   requires FastApiPrimitive<kj::RemoveConst<kj::Decay<T>>>
 struct FastApiJSGToV8<T> {
   using value = kj::RemoveConst<kj::Decay<T>>;
+};
+
+// `allowFastString` must be `FastApiNoScopeMethod` for the enclosing method. Mixed signatures keep
+// passing strings as `v8::Local`.
+template <bool allowFastString, typename T>
+struct FastApiArgType {
+  using value = FastApiJSGToV8<T>::value;
+};
+
+template <typename T>
+  requires StringLike<kj::RemoveConst<kj::Decay<T>>>
+struct FastApiArgType<true, T> {
+  using value = const v8::FastOneByteString&;
+};
+
+// The setup a fast callback does before unwrapping arguments. `noScope` skips the context lookup
+// and, unless the method takes a `Lock&` it may create handles through, the HandleScope.
+// `context` stays empty when skipped; `extractInternalPointer` only reads it for context globals.
+template <bool noScope, bool takesLock>
+class FastApiPreamble {
+ public:
+  explicit FastApiPreamble(v8::Isolate* isolate): scope(isolate) {
+    if constexpr (!noScope) context = isolate->GetCurrentContext();
+  }
+
+  v8::Local<v8::Context> context;
+
+ private:
+  struct NoHandleScope {
+    explicit NoHandleScope(v8::Isolate*) {}
+  };
+  [[no_unique_address]] std::conditional_t<noScope && !takesLock, NoHandleScope, v8::HandleScope>
+      scope;
 };
 
 }  // namespace workerd::jsg

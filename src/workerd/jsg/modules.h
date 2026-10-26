@@ -12,9 +12,11 @@
 #include <workerd/util/thread-scopes.h>
 
 #include <v8-json.h>
+#include <v8-wasm.h>
 
 #include <kj/filesystem.h>
 #include <kj/map.h>
+#include <kj/mutex.h>
 
 namespace workerd::jsg {
 
@@ -63,6 +65,37 @@ enum class ModuleInfoCompileOption {
 
 v8::Local<v8::WasmModuleObject> compileWasmModule(
     jsg::Lock& js, kj::ArrayPtr<const uint8_t> code, const CompilationObserver& observer);
+
+// Holds the compiled code of one Wasm module so that any isolate in the process can instantiate
+// it without recompiling. V8 shares compiled modules between isolates on its own, but only while
+// some isolate still references the module; the holder keeps the module alive for its own
+// lifetime instead. That retains V8's copy of the wire bytes plus the generated machine code
+// even while no isolate uses the module.
+//
+// Compiled code bakes in its compile-time imports, which depend on whether the isolate enables
+// the Wasm ESM integration builtins (Lock::isWasmEsmIntegrationBuiltinsEnabled()). The holder
+// therefore keeps up to two compiled modules, one per setting, and an isolate only reuses the one
+// compiled with its own setting.
+//
+// Isolates on different threads may call getOrCompile() concurrently. Isolates that find the
+// slot for their setting empty at the same time each compile, and the holder keeps the first
+// result.
+class CompiledWasmModuleHolder {
+ public:
+  CompiledWasmModuleHolder() = default;
+  KJ_DISALLOW_COPY_AND_MOVE(CompiledWasmModuleHolder);
+
+  // Returns a module object for `wireBytes` in the current isolate, compiling them only if no
+  // module compiled with this isolate's setting is held yet. Every call on one holder must pass
+  // the same bytes.
+  v8::Local<v8::WasmModuleObject> getOrCompile(jsg::Lock& js,
+      kj::ArrayPtr<const kj::byte> wireBytes,
+      const CompilationObserver& observer) const;
+
+ private:
+  // Indexed by Lock::isWasmEsmIntegrationBuiltinsEnabled().
+  kj::MutexGuarded<kj::Maybe<v8::CompiledWasmModule>> compiled[2];
+};
 
 // The ModuleRegistry maintains the collection of modules known to a script that can be
 // required or imported.
@@ -177,15 +210,36 @@ class ModuleRegistry {
         v8::Local<v8::Module> module,
         kj::Maybe<SyntheticModuleInfo> maybeSynthetic = kj::none);
 
-    // The ESM constructors below only read `compileCache` during the call.
-
     // Compiles a bundle (user) module from UTF-8 source. The source is copied into the V8 heap,
-    // so it only needs to outlive this call.
+    // so it only needs to outlive this call. The isolate's code cache is used if it has one (see
+    // IsolateBase::setCodeCacheStore()).
+    //
+    // `compileHints` lists the source positions of functions that V8 should compile together
+    // with the module, because they are expected to run soon, instead of preparsing them now and
+    // compiling them on their first call. A position is where V8 considers a function to start
+    // (SharedFunctionInfo::StartPosition(); for most functions the opening parenthesis of the
+    // parameter list), in UTF-16 code units of the source, as reported by
+    // v8::CompileHintsCollector for a compilation with kProduceCompileHints.
+    // Hints are read only during this call and need not be sorted. Positions at which no function
+    // starts are ignored. The isolate's code cache takes precedence when installed, since V8
+    // cannot consume a code cache and compile hints in one compilation.
+    ModuleInfo(jsg::Lock& js,
+        kj::StringPtr name,
+        kj::ArrayPtr<const char> content,
+        const CompilationObserver& observer,
+        kj::ArrayPtr<const int> compileHints = nullptr);
+
+    // Compiles UTF-8 source with an embedded cache, read only during this call. An empty cache
+    // uses the isolate's code cache store, if installed. `compileHints` is used only when neither
+    // cache is present, with the same semantics as the bundle constructor above.
     ModuleInfo(jsg::Lock& js,
         kj::StringPtr name,
         kj::ArrayPtr<const char> content,
         kj::ArrayPtr<const kj::byte> compileCache,
-        const CompilationObserver& observer);
+        const CompilationObserver& observer,
+        kj::ArrayPtr<const int> compileHints = nullptr);
+
+    // The builtin ESM constructors below only read `compileCache` during the call.
 
     // Compiles a builtin module whose source V8 references without copying.
     ModuleInfo(jsg::Lock& js,
@@ -347,7 +401,10 @@ class ModuleRegistryImpl final: public ModuleRegistry {
     entries.insert(kj::heap<Entry>(specifier, Type::BUNDLE, kj::fwd<ModuleInfo>(info)));
   }
 
-  void addBuiltinModule(Module::Reader module) {
+  // If `wasmHolder` is given and `module` is a Wasm module, the module is instantiated from the
+  // holder, so it is compiled only if no earlier registry using the holder has compiled it.
+  void addBuiltinModule(
+      Module::Reader module, kj::Maybe<const CompiledWasmModuleHolder&> wasmHolder = kj::none) {
     if (module.which() != Module::SRC) {
       auto specifier = module.getName();
       switch (module.which()) {
@@ -355,7 +412,7 @@ class ModuleRegistryImpl final: public ModuleRegistry {
           // The body of this callback is copied from `compileWasmGlobal` in
           // src/workerd/server/workerd-api.c++.
           addBuiltinModule(specifier,
-              [specifier, module, this](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
+              [module, wasmHolder, this](Lock& lock, ResolveMethod, kj::Maybe<const kj::Path&>&) {
             // Wasm compilation requires code-generation permission. The scope
             // restores the prior setting on exit: builtin modules resolve
             // lazily, potentially inside a window where eval is already
@@ -367,10 +424,15 @@ class ModuleRegistryImpl final: public ModuleRegistry {
             // is way too slow. Until tier-up finishes, requests will be handled using
             // Liftoff-generated code, which compiles fast but runs slower.
             AllowV8BackgroundThreadsScope scope;
-            auto wasmModule =
-                jsg::compileWasmModule(lock, module.getWasm().asBytes(), this->observer);
-            auto moduleInfo = jsg::ModuleRegistry::ModuleInfo(
-                lock, specifier, kj::none, jsg::ModuleRegistry::WasmModuleInfo(lock, wasmModule));
+            auto wireBytes = module.getWasm().asBytes();
+            v8::Local<v8::WasmModuleObject> wasmModule;
+            KJ_IF_SOME(holder, wasmHolder) {
+              wasmModule = holder.getOrCompile(lock, wireBytes, this->observer);
+            } else {
+              wasmModule = jsg::compileWasmModule(lock, wireBytes, this->observer);
+            }
+            auto moduleInfo = jsg::ModuleRegistry::ModuleInfo(lock, module.getName(), kj::none,
+                jsg::ModuleRegistry::WasmModuleInfo(lock, wasmModule));
             // Uncomment iff we want to permit source phase imports for builtin Wasm modules
             // moduleInfo.setModuleSourceObject(lock, wasmModule.template As<v8::Object>());
             return moduleInfo;
@@ -406,6 +468,20 @@ class ModuleRegistryImpl final: public ModuleRegistry {
   void addBuiltinBundle(Bundle::Reader bundle, kj::Maybe<Type> maybeFilter = kj::none) {
     for (auto module: bundle.getModules()) {
       if (module.getType() == maybeFilter.orDefault(module.getType())) addBuiltinModule(module);
+    }
+  }
+
+  // Like addBuiltinBundle() above, but instantiates the bundle's Wasm module from `wasmHolder`.
+  // The holder must outlive this registry. The bundle may contain at most one Wasm module, since
+  // a holder holds one.
+  void addBuiltinBundle(Bundle::Reader bundle, const CompiledWasmModuleHolder& wasmHolder) {
+    bool sawWasm = false;
+    for (auto module: bundle.getModules()) {
+      if (module.which() == Module::WASM) {
+        KJ_REQUIRE(!sawWasm, "bundle has more than one Wasm module", module.getName());
+        sawWasm = true;
+      }
+      addBuiltinModule(module, wasmHolder);
     }
   }
 

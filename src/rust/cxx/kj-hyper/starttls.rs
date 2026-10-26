@@ -1,9 +1,10 @@
-//! A CONNECT tunnel's transport that starts as plain TCP and becomes TLS when kj's
-//! `TlsStarterCallback` is invoked (opportunistic TLS: a worker's `socket.startTls()`).
+//! A transport that starts as plain TCP and becomes TLS when kj's `TlsStarterCallback` is invoked
+//! (opportunistic TLS: a worker's `socket.startTls()`). The client's CONNECT tunnel upgrades as
+//! the client; a TCP listener's connection, offered to a `connect()` handler, as the server.
 //!
 //! The kj stream C++ pumps ([`StartTlsIo`]) and the starter handed to kj ([`TlsStarter`]) share
 //! one [`Transport`]. The handshake is driven by whichever task polls it: the starter awaiting
-//! it, or a read parked on the tunnel when it began (kj allows one). Once it settles, every
+//! it, or a read parked on the stream when it began (kj allows one). Once it settles, every
 //! parked task is woken and I/O continues over TLS.
 
 use std::cell::Cell;
@@ -22,36 +23,74 @@ use std::task::Waker;
 
 use cxx::KjError;
 use cxx::KjExceptionType;
+use kj_rs::KjOwn;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::io::ReadBuf;
-use tokio_rustls::client::TlsStream;
 
 use crate::Result;
 use crate::client::Dialed;
+use crate::ffi::TlsStarterCallback;
+use crate::ffi::new_tls_starter;
+use crate::io::BoxIo;
 use crate::io::Io;
 use crate::tls;
 
-type Handshake = Pin<Box<dyn Future<Output = Result<TlsStream<Dialed>>>>>;
+type Handshake = Pin<Box<dyn Future<Output = Result<BoxIo>>>>;
 
 enum Transport {
     /// The dial has not finished; only a starter invoked early observes this.
     Dialing,
-    Plain(Dialed),
+    Plain(BoxIo),
     Handshaking(Handshake),
-    Tls(Box<TlsStream<Dialed>>),
+    Tls(BoxIo),
     /// The handshake failed; every operation reports why.
     Failed(String),
 }
 
 impl Transport {
     /// The plain connection, leaving the dial-in-progress state behind.
-    fn take_plain(&mut self) -> Option<Dialed> {
+    fn take_plain(&mut self) -> Option<BoxIo> {
         match mem::replace(self, Self::Dialing) {
             Self::Plain(stream) => Some(stream),
             other => {
                 *self = other;
                 None
+            }
+        }
+    }
+}
+
+/// Which end of the handshake this transport takes.
+enum Role {
+    /// Verifies the server as the name the starter is given, or as `host` (the connect host) when
+    /// it names none.
+    Client {
+        config: Arc<rustls::ClientConfig>,
+        host: String,
+    },
+    /// Presents the configured certificate. The name the starter is given is for verifying a
+    /// server, so it is ignored.
+    Server(Arc<rustls::ServerConfig>),
+}
+
+impl Role {
+    fn handshake(&self, stream: BoxIo, name: &str) -> Handshake {
+        match self {
+            Self::Client { config, host } => {
+                let config = Arc::clone(config);
+                let name = if name.is_empty() { host } else { name }.to_owned();
+                Box::pin(async move {
+                    let stream = tls::connect(stream, config, &name).await?;
+                    Ok(Box::new(stream) as BoxIo)
+                })
+            }
+            Self::Server(config) => {
+                let config = Arc::clone(config);
+                Box::pin(async move {
+                    let stream = tls::accept(stream, config).await?;
+                    Ok(Box::new(stream) as BoxIo)
+                })
             }
         }
     }
@@ -63,20 +102,10 @@ impl Transport {
 /// `RefCell`s.
 struct Shared {
     transport: RefCell<Transport>,
-    config: Arc<rustls::ClientConfig>,
-    /// The server name when the starter names none: the connect host.
-    host: String,
+    role: Role,
     started: Cell<bool>,
     /// Tasks parked on a state change: the dial finishing or the handshake settling.
     waiters: RefCell<Vec<Waker>>,
-}
-
-async fn handshake(
-    stream: Dialed,
-    config: Arc<rustls::ClientConfig>,
-    name: String,
-) -> Result<TlsStream<Dialed>> {
-    tls::connect(stream, config, &name).await
 }
 
 impl Shared {
@@ -104,7 +133,7 @@ impl Shared {
             return Poll::Pending;
         };
         *transport = match result {
-            Ok(tls) => Transport::Tls(Box::new(tls)),
+            Ok(tls) => Transport::Tls(tls),
             Err(e) => Transport::Failed(e.description().to_owned()),
         };
         drop(transport);
@@ -121,9 +150,7 @@ impl Shared {
             return Poll::Pending;
         }
         if let Some(stream) = transport.take_plain() {
-            let config = Arc::clone(&self.config);
-            *transport =
-                Transport::Handshaking(Box::pin(handshake(stream, config, name.to_owned())));
+            *transport = Transport::Handshaking(self.role.handshake(stream, name));
         }
         drop(transport);
         std::task::ready!(self.poll_settled(cx));
@@ -142,21 +169,36 @@ fn failed(what: impl Display) -> KjError {
     KjError::new(KjExceptionType::Failed, what.to_string())
 }
 
-/// The tunnel's transport, as the kj stream reads and writes it.
+/// The upgradable transport, as the kj stream reads and writes it.
 pub struct StartTlsIo(Rc<Shared>);
 
 impl StartTlsIo {
-    /// A transport awaiting its dial, upgradable to TLS with `config` to `host` (or the name the
-    /// starter is given).
-    #[must_use]
-    pub fn new(config: Arc<rustls::ClientConfig>, host: String) -> Self {
+    fn with(transport: Transport, role: Role) -> Self {
         Self(Rc::new(Shared {
-            transport: RefCell::new(Transport::Dialing),
-            config,
-            host,
+            transport: RefCell::new(transport),
+            role,
             started: Cell::new(false),
             waiters: RefCell::new(Vec::new()),
         }))
+    }
+
+    /// A client transport awaiting its dial, upgradable to TLS with `config` to `host` (or the
+    /// name the starter is given).
+    #[must_use]
+    pub fn new(config: Arc<rustls::ClientConfig>, host: String) -> Self {
+        Self::with(Transport::Dialing, Role::Client { config, host })
+    }
+
+    /// An accepted connection served in plaintext, and the `kj::TlsStarterCallback` that
+    /// upgrades it to TLS as the server with `config` (a `connect()` handler's
+    /// `socket.startTls()`). The callback is for a connect's `HttpConnectSettings`.
+    pub fn server(
+        io: impl AsyncRead + AsyncWrite + Unpin + 'static,
+        config: Arc<rustls::ServerConfig>,
+    ) -> (Self, KjOwn<TlsStarterCallback>) {
+        let io = Self::with(Transport::Plain(Box::new(io)), Role::Server(config));
+        let starter = new_tls_starter(Box::new(io.starter()));
+        (io, starter)
     }
 
     /// The starter kj's `TlsStarterCallback` invokes.
@@ -167,7 +209,7 @@ impl StartTlsIo {
 
     /// The dialed connection; I/O and a starter invoked early proceed from here.
     pub fn dialed(&self, stream: Dialed) {
-        *self.0.transport.borrow_mut() = Transport::Plain(stream);
+        *self.0.transport.borrow_mut() = Transport::Plain(Box::new(stream));
         self.0.wake_all();
     }
 
@@ -179,8 +221,7 @@ impl StartTlsIo {
         std::task::ready!(self.0.poll_settled(cx));
         let mut transport = self.0.transport.borrow_mut();
         match &mut *transport {
-            Transport::Plain(stream) => op(Pin::new(stream), cx),
-            Transport::Tls(stream) => op(Pin::new(stream.as_mut()), cx),
+            Transport::Plain(stream) | Transport::Tls(stream) => op(Pin::new(stream.as_mut()), cx),
             Transport::Failed(why) => Poll::Ready(Err(io::Error::other(why.clone()))),
             Transport::Dialing | Transport::Handshaking(_) => {
                 drop(transport);
@@ -229,8 +270,8 @@ impl AsyncWrite for StartTlsIo {
 pub struct TlsStarter(Rc<Shared>);
 
 impl TlsStarter {
-    /// Upgrades the tunnel to TLS, verifying the server as `expected_server_hostname` (the
-    /// connect host when empty). Resolves once the handshake is complete; kj permits writes
+    /// Upgrades the transport to TLS. A client verifies the server as `expected_server_hostname`
+    /// (the connect host when empty). Resolves once the handshake is complete; kj permits writes
     /// again from then on.
     pub fn start(
         &self,
@@ -242,11 +283,7 @@ impl TlsStarter {
             if shared.started.replace(true) {
                 return Err(failed("TLS was already started on this connection"));
             }
-            let name = match name {
-                Ok(name) if !name.is_empty() => name,
-                Ok(_) => shared.host.clone(),
-                Err(e) => return Err(failed(e)),
-            };
+            let name = name.map_err(failed)?;
             poll_fn(|cx| shared.poll_start(cx, &name)).await
         }
     }

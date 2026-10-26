@@ -98,7 +98,7 @@ class PromisedWorkerInterface final: public WorkerInterface {
         // particular, as it needs to resolve the RPC client to the correct error.
         auto exception = kj::getCaughtExceptionAsKj();
         event->failed(exception);
-        kj::throwFatalException(kj::mv(exception));
+        kj::throwException(kj::mv(exception));
       }
       co_return co_await KJ_ASSERT_NONNULL(worker)->customEvent(kj::mv(event));
     }
@@ -196,7 +196,7 @@ class RevocableWebSocket final: public kj::WebSocket {
   kj::WebSocket& getInner() {
     KJ_SWITCH_ONEOF(ws) {
       KJ_CASE_ONEOF(e, kj::Exception) {
-        kj::throwFatalException(e.clone());
+        kj::throwException(e.clone());
       }
       KJ_CASE_ONEOF(ws, kj::Own<kj::WebSocket>) {
         return *ws.get();
@@ -278,11 +278,13 @@ kj::Promise<void> RevocableWebSocketWorkerInterface::connect(kj::StringPtr host,
   // disconnect long-running connections, e.g. on a code update for a Durable Object, and that
   // applies equally to TCP sockets.
   auto wrappedConnection = newNeuterableIoStream(connection);
-  auto* wrappedConnectionPtr = wrappedConnection.get();
   auto revokeTask =
       revokeProm.addBranch()
-          .catch_([&connection, wrappedConnectionPtr](kj::Exception&& e) -> kj::Promise<void> {
-    wrappedConnectionPtr->neuter(e.clone());
+          .catch_([&connection, weakWrappedConnection = wrappedConnection.downgrade()](
+                      kj::Exception&& e) -> kj::Promise<void> {
+    KJ_REQUIRE_NONNULL(
+        weakWrappedConnection.tryGet(), "connection wrapper destroyed before revocation")
+        .neuter(e.clone());
     connection.abortWrite(kj::mv(e));
     connection.abortRead();
     return kj::READY_NOW;
@@ -337,7 +339,7 @@ class ErrorWorkerInterface final: public WorkerInterface {
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override {
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   }
 
   kj::Promise<void> connect(kj::StringPtr host,
@@ -345,7 +347,7 @@ class ErrorWorkerInterface final: public WorkerInterface {
       kj::AsyncIoStream& connection,
       ConnectResponse& response,
       kj::HttpConnectSettings settings) override {
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   }
 
   kj::Promise<void> prewarm(kj::StringPtr url) override {
@@ -354,16 +356,16 @@ class ErrorWorkerInterface final: public WorkerInterface {
   }
 
   kj::Promise<ScheduledResult> runScheduled(kj::Date scheduledTime, kj::StringPtr cron) override {
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   }
 
   kj::Promise<AlarmResult> runAlarm(kj::Date scheduledTime, uint32_t retryCount) override {
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   }
 
   kj::Promise<CustomEvent::Result> customEvent(kj::Own<CustomEvent> event) override {
     event->failed(exception);
-    kj::throwFatalException(kj::mv(exception));
+    kj::throwException(kj::mv(exception));
   }
 
  private:

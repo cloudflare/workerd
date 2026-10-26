@@ -5,9 +5,10 @@
 // Object.prototype.then pollution while a read settles: the streams
 // machinery must neither invoke the interceptor as a thenable nor leak
 // it into results, and what the interceptor does to the stream while a
-// result settles must not disturb the other consumers of a tee.
+// result settles must not disturb the other consumers of a tee, or the
+// other reads a cancel() or close() answered.
 
-import { deepStrictEqual, strictEqual } from 'node:assert';
+import { deepStrictEqual, rejects, strictEqual } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 const TIMEOUT = Symbol('timeout');
@@ -173,6 +174,42 @@ export const thenGetterCancelsTwoBranchesDuringEnqueue = {
         deepStrictEqual(await settled(readD), { value: 'x', done: false });
       }
     );
+  },
+};
+
+// The getter releases the reader while cancel() or close() settles its
+// pending reads, from the first read's result. Either call answers every
+// read at once, so the next read still resolves done rather than rejecting
+// with the release.
+export const thenGetterReleasesReaderWhileReadsSettle = {
+  async test() {
+    const ends = {
+      cancel: (reader) => reader.cancel('bye'),
+      close: (reader, controller) => controller.close(),
+    };
+    for (const [name, end] of Object.entries(ends)) {
+      const { rs, controller } = pushSource();
+      const reader = rs.getReader();
+      const reads = [reader.read(), reader.read()];
+      let fired = 0;
+      await withThenGetter(
+        (target) => {
+          if (Object.hasOwn(target, 'done') && fired++ === 0) {
+            reader.releaseLock();
+          }
+        },
+        async () => {
+          const ended = end(reader, controller);
+          for (const read of reads) {
+            const result = await settled(read);
+            strictEqual(result.done, true, name);
+            strictEqual(result.value, undefined, name);
+          }
+          strictEqual(fired > 0, true, `${name}: the then getter did not run`);
+          await ended;
+        }
+      );
+    }
   },
 };
 
@@ -412,10 +449,12 @@ export const thenGetterPerIteratorNext = {
 };
 
 // An async-iterator return() looks `then` up once on a live iterator,
-// whose return steps settle with undefined. On a finished iterator the
-// return steps resolve with a result object of their own before return()
-// builds the caller's, so TS looks it up twice (WebIDL); C++ and Node look
-// it up once (ledger #26).
+// whose return steps settle with undefined. On a finished iterator, whose
+// last next() reported done or rejected, the return steps resolve with a
+// result object of their own before return() builds the caller's, so TS
+// looks it up twice (WebIDL); Node looks it up once, as C++ does after
+// done (ledger #26). After a rejected next(), C++ rejects return() with
+// the error (ledger #22).
 export const thenGetterPerIteratorReturn = {
   async test() {
     {
@@ -424,11 +463,7 @@ export const thenGetterPerIteratorReturn = {
       const fired = await resultThenLookups(async () => [await it.return('v')]);
       strictEqual(fired, 1);
     }
-    {
-      const { rs, controller } = pushSource();
-      controller.close();
-      const it = rs.values();
-      strictEqual((await it.next()).done, true);
+    const finished = async (it) => {
       let result;
       const fired = await resultThenLookups(async () => {
         result = await it.return('v');
@@ -436,6 +471,25 @@ export const thenGetterPerIteratorReturn = {
       });
       deepStrictEqual(result, { value: 'v', done: true });
       strictEqual(fired, usingTsImpl ? 2 : 1);
+    };
+    {
+      const { rs, controller } = pushSource();
+      controller.close();
+      const it = rs.values();
+      strictEqual((await it.next()).done, true);
+      await finished(it);
+    }
+    {
+      const { rs, controller } = pushSource();
+      const boom = new Error('boom');
+      controller.error(boom);
+      const it = rs.values();
+      await rejects(it.next(), (e) => e === boom);
+      if (usingTsImpl) {
+        await finished(it);
+      } else {
+        await rejects(it.return('v'), (e) => e === boom);
+      }
     }
   },
 };

@@ -6,8 +6,10 @@
 //!
 //! - On a **struct**: emits `jsg::Type`, `jsg::ToJS`, `jsg::FromJS`,
 //!   `jsg::Traced`, and `jsg::GarbageCollected` implementations.
-//! - On an **impl block**: emits the `jsg::Resource` trait with method, static
-//!   method, static constant, and constructor registrations.
+//! - On an **impl block**: emits member factories and, unless `custom_members` is set,
+//!   the `jsg::Resource` trait with automatic member and nested type registration.
+
+use std::collections::HashMap;
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -15,26 +17,33 @@ use syn::FnArg;
 use syn::ItemImpl;
 
 use crate::trace::generate_trace_statements;
-use crate::utils::error;
+use crate::utils::elide_named_lifetimes;
 use crate::utils::extract_name_attribute;
 use crate::utils::extract_named_fields;
 use crate::utils::has_custom_trace_flag;
 use crate::utils::is_attr;
 use crate::utils::is_lock_ref;
+use crate::utils::is_result_type;
 use crate::utils::snake_to_camel;
+use crate::utils::this_param;
 
 // Compile-time mirror of `jsg::PropertyKind` used to group annotated methods
 // and emit the correct token streams. Cannot reuse the runtime type directly
 // because proc-macro crates cannot link against CXX-bridge runtime crates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum PropertyKind {
+pub enum PropertyKind {
     Prototype,
     Instance,
+    LazyInstance,
     Inspect,
 }
 
 /// Entry point called from `lib.rs` for `#[jsg_resource]` on a struct.
 pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> TokenStream {
+    if let Some(err) = reject_nested_types_on_struct(attr.clone().into()) {
+        return err.to_compile_error().into();
+    }
+
     // Check for `#[jsg_resource(custom_trace)]` before consuming `attr`.
     let custom_trace = has_custom_trace_flag(&attr);
 
@@ -93,38 +102,39 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         impl jsg::Type for #name {
             fn class_name() -> &'static str { #class_name }
 
-            fn is_exact(value: &jsg::v8::Local<jsg::v8::Value>) -> bool {
+            fn is_exact(value: jsg::v8::Local<'_, jsg::v8::Value>) -> bool {
                 value.is_object()
             }
         }
 
         #[automatically_derived]
-        impl jsg::ToJS for #name {
-            fn to_js<'a, 'b>(self, lock: &'a mut jsg::Lock) -> jsg::v8::Local<'b, jsg::v8::Value>
-            where
-                'b: 'a,
-            {
+        impl<'s> jsg::ToJS<'s> for #name {
+            fn to_js(self, lock: &mut jsg::Lock<'s>) -> jsg::v8::Local<'s, jsg::v8::Value> {
                 let r = jsg::Rc::new(self);
-                r.to_js(lock)
+                jsg::ToJS::to_js(r, lock)
             }
         }
 
         #[automatically_derived]
-        impl jsg::FromJS for #name {
+        impl<'s> jsg::FromJS<'s> for #name {
             type ResultType = jsg::Rc<Self>;
 
+            fn type_name() -> String {
+                <Self as jsg::Type>::class_name().to_owned()
+            }
+
             fn from_js(
-                lock: &mut jsg::Lock,
-                value: jsg::v8::Local<jsg::v8::Value>,
+                lock: &mut jsg::Lock<'s>,
+                value: jsg::v8::Local<'s, jsg::v8::Value>,
             ) -> Result<Self::ResultType, jsg::Error> {
-                <jsg::Rc<Self> as jsg::FromJS>::from_js(lock, value)
+                <jsg::Rc<Self> as jsg::FromJS<'s>>::from_js(lock, value)
             }
 
             fn try_from_js(
-                lock: &mut jsg::Lock,
-                value: jsg::v8::Local<jsg::v8::Value>,
+                lock: &mut jsg::Lock<'s>,
+                value: jsg::v8::Local<'s, jsg::v8::Value>,
             ) -> Result<Option<Self::ResultType>, jsg::Error> {
-                <jsg::Rc<Self> as jsg::FromJS>::try_from_js(lock, value)
+                <jsg::Rc<Self> as jsg::FromJS<'s>>::try_from_js(lock, value)
             }
         }
 
@@ -134,9 +144,45 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
     .into()
 }
 
-/// Scans `impl_block` for `#[jsg_method]`-annotated functions and returns a
-/// `Member::Method` / `Member::StaticMethod` token stream for each.
-fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::TokenStream> {
+/// A generated member factory and its invocation for automatic registration.
+struct MemberRegistration {
+    source_name: syn::Ident,
+    factory_name: syn::Ident,
+    factory: proc_macro2::TokenStream,
+    automatic: proc_macro2::TokenStream,
+}
+
+fn member_factory_name(rust_name: &syn::Ident) -> syn::Ident {
+    syn::Ident::new(&format!("{rust_name}_member"), rust_name.span())
+}
+
+impl MemberRegistration {
+    fn new(rust_name: &syn::Ident, member: &proc_macro2::TokenStream) -> Self {
+        Self::with_factory_name(rust_name, member_factory_name(rust_name), member)
+    }
+
+    fn with_factory_name(
+        rust_name: &syn::Ident,
+        factory_name: syn::Ident,
+        member: &proc_macro2::TokenStream,
+    ) -> Self {
+        Self {
+            factory: quote! {
+                #[automatically_derived]
+                #[must_use]
+                fn #factory_name() -> jsg::Member {
+                    #member
+                }
+            },
+            automatic: quote! { Self::#factory_name() },
+            source_name: rust_name.clone(),
+            factory_name,
+        }
+    }
+}
+
+/// Scans `impl_block` for `#[jsg_method]`-annotated functions.
+fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistration> {
     impl_block
         .items
         .iter()
@@ -151,7 +197,7 @@ fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::
                 .meta
                 .require_list()
                 .ok()
-                .map(|list| list.tokens.clone().into())
+                .map(|list| list.tokens.clone())
                 .and_then(extract_name_attribute)
                 .unwrap_or_else(|| snake_to_camel(&rust_method_name.to_string()));
             let callback_name =
@@ -161,20 +207,78 @@ fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::
                 .sig
                 .inputs
                 .iter()
-                .any(|arg| matches!(arg, FnArg::Receiver(_)));
+                .any(|arg| matches!(arg, FnArg::Receiver(_)))
+                || this_param(&method.sig).is_some();
 
-            Some(if has_self {
-                quote! { jsg::Member::Method { name: #js_name.to_owned(), callback: Self::#callback_name } }
+            let fast_api =
+                syn::Ident::new(&format!("{rust_method_name}_fast_api"), rust_method_name.span());
+            let fast = quote! { Self::#fast_api() };
+
+            let member = if has_self {
+                quote! { jsg::Member::Method { name: #js_name.to_owned(), callback: Self::#callback_name(), fast: #fast } }
             } else {
-                quote! { jsg::Member::StaticMethod { name: #js_name.to_owned(), callback: Self::#callback_name } }
-            })
+                quote! { jsg::Member::StaticMethod { name: #js_name.to_owned(), callback: Self::#callback_name(), fast: #fast } }
+            };
+            Some(MemberRegistration::new(rust_method_name, &member))
         })
         .collect()
 }
 
-/// Scans `impl_block` for `#[jsg_static_constant]`-annotated consts and returns
-/// a `Member::StaticConstant` token stream for each.
-fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::TokenStream> {
+/// Scans `impl_block` for `#[jsg_wildcard_property]` methods. A resource type has at most one
+/// wildcard property, so with automatic registration a second method is a compile error, which
+/// is returned alongside the registrations so that the type is still registered and adds no
+/// errors of its own. Custom registration may choose between several by compatibility flag;
+/// registering more than one at once fails at runtime.
+fn collect_wildcard_registrations(
+    impl_block: &ItemImpl,
+    mode: RegistrationMode,
+) -> (Vec<MemberRegistration>, Option<proc_macro2::TokenStream>) {
+    let methods: Vec<_> = impl_block
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syn::ImplItem::Fn(method)
+                if method
+                    .attrs
+                    .iter()
+                    .any(|a| is_attr(a, "jsg_wildcard_property")) =>
+            {
+                Some(method)
+            }
+            _ => None,
+        })
+        .collect();
+    let error = methods
+        .get(1)
+        .filter(|_| mode == RegistrationMode::Automatic)
+        .map(|second| {
+            syn::Error::new_spanned(
+                &second.sig.ident,
+                "a resource type has at most one #[jsg_wildcard_property]; use \
+                 `custom_members` to choose between several by compatibility flag",
+            )
+            .to_compile_error()
+        });
+    let registrations = methods
+        .iter()
+        .map(|method| {
+            let rust_name = &method.sig.ident;
+            let getter_callback = crate::wildcard::getter_callback_name(rust_name);
+            let query_callback = crate::wildcard::query_callback_name(rust_name);
+            let member = quote! {
+                jsg::Member::WildcardProperty {
+                    getter_callback: Self::#getter_callback(),
+                    query_callback: Self::#query_callback(),
+                }
+            };
+            MemberRegistration::new(rust_name, &member)
+        })
+        .collect();
+    (registrations, error)
+}
+
+/// Scans `impl_block` for `#[jsg_static_constant]`-annotated consts.
+fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistration> {
     impl_block
         .items
         .iter()
@@ -192,57 +296,300 @@ fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<quote::__private
                 .meta
                 .require_list()
                 .ok()
-                .map(|list| list.tokens.clone().into())
+                .map(|list| list.tokens.clone())
                 .and_then(extract_name_attribute)
                 .unwrap_or_else(|| rust_name.to_string());
 
-            Some(quote! {
-                jsg::Member::StaticConstant {
-                    name: #js_name.to_owned(),
-                    value: jsg::ConstantValue::from(Self::#rust_name),
-                }
-            })
+            let factory_base =
+                syn::Ident::new(&rust_name.to_string().to_lowercase(), rust_name.span());
+            Some(MemberRegistration::with_factory_name(
+                rust_name,
+                member_factory_name(&factory_base),
+                &quote! {
+                    jsg::Member::StaticConstant {
+                        name: #js_name.to_owned(),
+                        value: jsg::ConstantValue::from(Self::#rust_name),
+                    }
+                },
+            ))
         })
         .collect()
 }
 
+/// Returns an error if the arguments of `#[jsg_resource]` on a struct include
+/// `nested_types(...)`, which belongs on the impl block.
+fn reject_nested_types_on_struct(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
+    use syn::punctuated::Punctuated;
+
+    let metas: Punctuated<syn::Meta, syn::Token![,]> =
+        syn::parse::Parser::parse2(Punctuated::parse_terminated, attr).ok()?;
+    metas
+        .iter()
+        .find(|meta| meta.path().is_ident("nested_types"))
+        .map(|meta| {
+            syn::Error::new_spanned(
+                meta.path(),
+                "`nested_types(...)` belongs on the #[jsg_resource] impl block, not the struct",
+            )
+        })
+}
+
+/// One entry of `#[jsg_resource(nested_types(...))]`: `Type` or `Name = Type`.
+struct NestedTypeArg {
+    name: Option<syn::Ident>,
+    ty: syn::Path,
+}
+
+impl syn::parse::Parse for NestedTypeArg {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        if input.peek(syn::Ident) && input.peek2(syn::Token![=]) {
+            let name = input.parse()?;
+            input.parse::<syn::Token![=]>()?;
+            Ok(Self {
+                name: Some(name),
+                ty: input.parse()?,
+            })
+        } else {
+            Ok(Self {
+                name: None,
+                ty: input.parse()?,
+            })
+        }
+    }
+}
+
+/// Returns a `Member::NestedType` token stream for a nested type.
+fn nested_type_registration(arg: &NestedTypeArg) -> proc_macro2::TokenStream {
+    use syn::ext::IdentExt;
+
+    let ty = &arg.ty;
+    let name = if let Some(name) = &arg.name {
+        let name = name.unraw().to_string();
+        quote! { #name.to_owned() }
+    } else {
+        quote! { <#ty as jsg::Type>::class_name().to_owned() }
+    };
+    quote! {
+        jsg::Member::NestedType {
+            name: #name,
+            nested_type: jsg::NestedType::of::<#ty>(),
+        }
+    }
+}
+
+/// Check factory names against each other and the user's value-namespace associated items.
+fn validate_factory_names(
+    impl_block: &ItemImpl,
+    registrations: &[MemberRegistration],
+) -> syn::Result<()> {
+    let declared_names: HashMap<_, _> = impl_block
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syn::ImplItem::Fn(method) => Some(&method.sig.ident),
+            syn::ImplItem::Const(constant) => Some(&constant.ident),
+            _ => None,
+        })
+        .map(|name| (name.to_string(), name))
+        .collect();
+    let mut factory_sources = HashMap::new();
+    for registration in registrations {
+        let name = &registration.factory_name;
+        let source = &registration.source_name;
+        let conflict = if let Some(other) = factory_sources.insert(name.to_string(), source) {
+            Some((other, "the factory generated by"))
+        } else {
+            declared_names
+                .get(&name.to_string())
+                .map(|other| (*other, "associated item"))
+        };
+        if let Some((other, kind)) = conflict {
+            let mut error = syn::Error::new_spanned(
+                source,
+                format!(
+                    "member factory `{name}` generated by `{source}` conflicts with {kind} `{other}`"
+                ),
+            );
+            error.combine(syn::Error::new_spanned(
+                other,
+                format!("`{other}` declared here"),
+            ));
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RegistrationMode {
+    Automatic,
+    Custom,
+}
+
+/// The arguments of `#[jsg_resource]` on an impl block.
+struct ImplArgs {
+    mode: RegistrationMode,
+    nested_types: Vec<NestedTypeArg>,
+}
+
+/// Parses the arguments of `#[jsg_resource]` on an impl block: `custom_members` and any
+/// number of `nested_types(...)` lists.
+///
+/// A nested type listed twice without a name, or a name given twice, is an error. Nested
+/// types without a name are named after their class names, which are only known when the
+/// macro's output is compiled, so such a nested type can still clash with another nested
+/// type or member. `nested_types(...)` cannot be combined with `custom_members`, which
+/// leaves `Resource::members` to the author.
+fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
+    use syn::ext::IdentExt;
+    use syn::parse::Parser as _;
+    use syn::punctuated::Punctuated;
+
+    const EXPECTED: &str = "expected `custom_members` or `nested_types(...)` on a \
+                            #[jsg_resource] impl block (`name` and `custom_trace` belong on \
+                            the struct)";
+
+    let args = Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated.parse2(attr)?;
+    let mut custom_members = None;
+    let mut nested_types = Vec::<NestedTypeArg>::new();
+    let mut first_nested_types = None;
+    for arg in args {
+        match &arg {
+            syn::Meta::Path(path) if path.is_ident("custom_members") => {
+                if custom_members.is_some() {
+                    return Err(syn::Error::new_spanned(arg, "duplicate `custom_members`"));
+                }
+                custom_members = Some(path.clone());
+            }
+            syn::Meta::List(list) if list.path.is_ident("nested_types") => {
+                first_nested_types.get_or_insert_with(|| list.path.clone());
+                let list_args = list.parse_args_with(
+                    Punctuated::<NestedTypeArg, syn::Token![,]>::parse_terminated,
+                )?;
+                for nested in list_args {
+                    let duplicate =
+                        nested_types
+                            .iter()
+                            .any(|other| match (&nested.name, &other.name) {
+                                (Some(name), Some(other)) => name.unraw() == other.unraw(),
+                                (None, None) => {
+                                    let (ty, other) = (&nested.ty, &other.ty);
+                                    quote! { #ty }.to_string() == quote! { #other }.to_string()
+                                }
+                                _ => false,
+                            });
+                    if duplicate {
+                        return Err(match &nested.name {
+                            Some(name) => {
+                                syn::Error::new_spanned(name, "duplicate nested type name")
+                            }
+                            None => syn::Error::new_spanned(&nested.ty, "duplicate nested type"),
+                        });
+                    }
+                    nested_types.push(nested);
+                }
+            }
+            _ => return Err(syn::Error::new_spanned(arg, EXPECTED)),
+        }
+    }
+    let mode = if custom_members.is_some() {
+        RegistrationMode::Custom
+    } else {
+        RegistrationMode::Automatic
+    };
+    if let (Some(custom_members), Some(nested)) = (custom_members, first_nested_types) {
+        let mut error = syn::Error::new_spanned(
+            nested,
+            "`nested_types(...)` cannot be combined with `custom_members`; add \
+             `jsg::Member::NestedType` entries to `Resource::members` instead",
+        );
+        error.combine(syn::Error::new_spanned(
+            custom_members,
+            "`custom_members` given here",
+        ));
+        return Err(error);
+    }
+    Ok(ImplArgs { mode, nested_types })
+}
+
 /// Entry point called from `lib.rs` for `#[jsg_resource]` on an impl block.
-pub fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
+pub fn generate_resource_impl(attr: TokenStream, impl_block: &ItemImpl) -> TokenStream {
+    expand_resource_impl(attr.into(), impl_block).into()
+}
+
+fn expand_resource_impl(
+    attr: proc_macro2::TokenStream,
+    impl_block: &ItemImpl,
+) -> proc_macro2::TokenStream {
+    let bindings = match generate_resource_bindings(attr, impl_block) {
+        Ok(bindings) => bindings,
+        Err(error) => error,
+    };
+    // Retain the user's methods even when registration is invalid, so references to them
+    // do not produce missing-associated-item errors alongside the registration diagnostic.
+    quote! {
+        #impl_block
+        #bindings
+    }
+}
+
+fn generate_resource_bindings(
+    attr: proc_macro2::TokenStream,
+    impl_block: &ItemImpl,
+) -> Result<proc_macro2::TokenStream, proc_macro2::TokenStream> {
+    let ImplArgs { mode, nested_types } =
+        parse_impl_args(attr).map_err(|err| err.to_compile_error())?;
     let self_ty = &impl_block.self_ty;
 
     if !matches!(&**self_ty, syn::Type::Path(_)) {
-        return error(
+        return Err(syn::Error::new_spanned(
             self_ty,
             "#[jsg_resource] impl blocks must use a simple path type (e.g., `impl MyResource`)",
-        );
+        )
+        .to_compile_error());
     }
 
-    let method_registrations = collect_method_registrations(impl_block);
-    let property_registrations = collect_property_registrations(impl_block);
-    let constant_registrations = collect_constant_registrations(impl_block);
+    let mut registrations = generate_constructor_registration(impl_block, self_ty)?
+        .into_iter()
+        .collect::<Vec<_>>();
+    registrations.extend(collect_method_registrations(impl_block));
+    registrations.extend(collect_property_registrations(impl_block)?);
+    registrations.extend(collect_constant_registrations(impl_block));
+    let (wildcard, wildcard_error) = collect_wildcard_registrations(impl_block, mode);
+    registrations.extend(wildcard);
+    validate_factory_names(impl_block, &registrations).map_err(|err| err.to_compile_error())?;
+    let factories = registrations.iter().map(|r| &r.factory);
+    let automatic = registrations.iter().map(|r| &r.automatic);
+    let nested_type_registrations = nested_types.iter().map(nested_type_registration);
 
-    let constructor_registration = generate_constructor_registration(impl_block, self_ty);
-    let constructor_vec: Vec<_> = constructor_registration.into_iter().collect();
-
-    quote! {
-        #impl_block
-
-        #[automatically_derived]
-        impl jsg::Resource for #self_ty {
-            fn members() -> Vec<jsg::Member>
-            where
-                Self: Sized,
-            {
-                vec![
-                    #(#constructor_vec,)*
-                    #(#method_registrations,)*
-                    #(#property_registrations,)*
-                    #(#constant_registrations,)*
-                ]
+    let resource_impl = if mode == RegistrationMode::Automatic {
+        quote! {
+            #[automatically_derived]
+            impl jsg::Resource for #self_ty {
+                fn members(
+                    _flags: jsg::feature_flags::compatibility_flags::Reader<'_>,
+                ) -> Vec<jsg::Member>
+                where
+                    Self: Sized,
+                {
+                    vec![#(#automatic,)* #(#nested_type_registrations,)*]
+                }
             }
         }
-    }
-    .into()
+    } else {
+        quote! {}
+    };
+
+    Ok(quote! {
+        #wildcard_error
+
+        #[automatically_derived]
+        impl #self_ty {
+            #(#factories)*
+        }
+
+        #resource_impl
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -253,7 +600,7 @@ pub fn generate_resource_impl(impl_block: &ItemImpl) -> TokenStream {
 ///
 /// Returns a `compile_error!` token stream if the method has a `self` receiver
 /// or does not return `Self`; returns `None` if the method is valid.
-fn validate_constructor(method: &syn::ImplItemFn) -> Option<quote::__private::TokenStream> {
+fn validate_constructor(method: &syn::ImplItemFn) -> Option<proc_macro2::TokenStream> {
     let has_self = method
         .sig
         .inputs
@@ -265,18 +612,44 @@ fn validate_constructor(method: &syn::ImplItemFn) -> Option<quote::__private::To
         });
     }
 
-    let returns_self = matches!(&method.sig.output,
-        syn::ReturnType::Type(_, ty) if matches!(&**ty,
-            syn::Type::Path(p) if p.path.is_ident("Self")
-        )
-    );
-    if !returns_self {
+    if constructor_return(method) == ConstructorReturn::Invalid {
         return Some(quote! {
-            compile_error!("#[jsg_constructor] must return Self");
+            compile_error!("#[jsg_constructor] must return Self or Result<Self, E>");
         });
     }
 
     None
+}
+
+/// What a `#[jsg_constructor]` method returns.
+#[derive(Debug, PartialEq, Eq)]
+enum ConstructorReturn {
+    /// `Self`.
+    Infallible,
+    /// `Result<Self, E>`, under any path ending in `Result`.
+    Fallible,
+    /// Anything else, which is not a valid constructor.
+    Invalid,
+}
+
+fn constructor_return(method: &syn::ImplItemFn) -> ConstructorReturn {
+    let syn::ReturnType::Type(_, ty) = &method.sig.output else {
+        return ConstructorReturn::Invalid;
+    };
+    let is_self = |ty: &syn::Type| matches!(ty, syn::Type::Path(p) if p.path.is_ident("Self"));
+    if is_self(ty) {
+        return ConstructorReturn::Infallible;
+    }
+    if is_result_type(ty)
+        && let syn::Type::Path(p) = &**ty
+        && let Some(segment) = p.path.segments.last()
+        && let syn::PathArguments::AngleBracketed(args) = &segment.arguments
+        && let Some(syn::GenericArgument::Type(ok)) = args.args.first()
+        && is_self(ok)
+    {
+        return ConstructorReturn::Fallible;
+    }
+    ConstructorReturn::Invalid
 }
 
 /// Extracts constructor argument unwrap statements and argument expressions.
@@ -284,8 +657,8 @@ fn extract_constructor_params(
     method: &syn::ImplItemFn,
 ) -> (
     bool,
-    Vec<quote::__private::TokenStream>,
-    Vec<quote::__private::TokenStream>,
+    Vec<proc_macro2::TokenStream>,
+    Vec<proc_macro2::TokenStream>,
 ) {
     let params: Vec<_> = method
         .sig
@@ -310,8 +683,9 @@ fn extract_constructor_params(
         .map(|(i, ty)| {
             let js_index = i - js_arg_offset;
             let var = syn::Ident::new(&format!("arg{js_index}"), method.sig.ident.span());
+            let elided_ty = elide_named_lifetimes(ty);
             let unwrap = quote! {
-                let #var = match <#ty as jsg::FromJS>::from_js(&mut lock, args.get(#js_index)) {
+                let #var = match <#elided_ty as jsg::FromJS<'_>>::from_js(lock, args.get(#js_index)) {
                     Ok(v) => v,
                     Err(err) => {
                         lock.throw_exception(&err);
@@ -327,13 +701,12 @@ fn extract_constructor_params(
 }
 
 /// Scans an impl block for a `#[jsg_constructor]` attribute and generates the
-/// constructor callback registration. Returns `None` if no constructor is defined.
-/// Validates that a `#[jsg_constructor]` method has the right shape and returns
-/// a compile-error token stream if it doesn't.
+/// constructor member factory. Returns `None` if no constructor is defined.
+/// Validates that a `#[jsg_constructor]` method has the right shape.
 fn generate_constructor_registration(
     impl_block: &ItemImpl,
     self_ty: &syn::Type,
-) -> Option<quote::__private::TokenStream> {
+) -> Result<Option<MemberRegistration>, proc_macro2::TokenStream> {
     let constructors: Vec<_> = impl_block
         .items
         .iter()
@@ -346,109 +719,193 @@ fn generate_constructor_registration(
         .collect();
 
     if constructors.len() > 1 {
-        return Some(quote! {
+        return Err(quote! {
             compile_error!("only one #[jsg_constructor] is allowed per impl block");
         });
     }
 
-    constructors
-        .into_iter()
-        .map(|method| {
-            if let Some(err) = validate_constructor(method) {
-                return err;
-            }
+    let Some(method) = constructors.first() else {
+        return Ok(None);
+    };
+    if let Some(err) = validate_constructor(method) {
+        return Err(err);
+    }
 
-            let rust_method_name = &method.sig.ident;
-            let callback_name = syn::Ident::new(
-                &format!("{rust_method_name}_constructor_callback"),
-                rust_method_name.span(),
-            );
+    let rust_method_name = &method.sig.ident;
+    let call = quote! { #self_ty::#rust_method_name };
 
-            let (has_lock_param, unwraps, arg_exprs) = extract_constructor_params(method);
-            let lock_arg = if has_lock_param {
-                quote! { &mut lock, }
-            } else {
-                quote! {}
-            };
-
-            quote! {
-                jsg::Member::Constructor {
-                    callback: {
-                        unsafe extern "C" fn #callback_name(
-                            info: *mut jsg::v8::ffi::FunctionCallbackInfo,
-                        ) {
-                            let mut lock = unsafe { jsg::Lock::from_args(info) };
-                            jsg::catch_panic(&mut lock, || {
-                                // SAFETY: info is a valid V8 FunctionCallbackInfo from the constructor call.
-                                let mut args = unsafe { jsg::v8::FunctionCallbackInfo::from_ffi(info) };
-                                let mut lock = unsafe { jsg::Lock::from_args(info) };
-
-                                #(#unwraps)*
-
-                                let resource = #self_ty::#rust_method_name(#lock_arg #(#arg_exprs),*);
-                                let rc = jsg::Rc::new(resource);
-                                rc.attach_to_this(&mut args);
-                            });
-                        }
-                        #callback_name
-                    },
+    let (has_lock_param, unwraps, arg_exprs) = extract_constructor_params(method);
+    let lock_arg = if has_lock_param {
+        quote! { &mut *lock, }
+    } else {
+        quote! {}
+    };
+    let construct = if constructor_return(method) == ConstructorReturn::Fallible {
+        quote! {
+            let resource = match #call(#lock_arg #(#arg_exprs),*) {
+                Ok(resource) => resource,
+                Err(err) => {
+                    lock.throw_exception(&err.into());
+                    return;
                 }
-            }
-        })
-        .next()
+            };
+        }
+    } else {
+        quote! { let resource = #call(#lock_arg #(#arg_exprs),*); }
+    };
+
+    let member = quote! {
+        jsg::Member::Constructor {
+            callback: jsg::function_callback(|lock, args| {
+                // Without `new`, `this` is an arbitrary receiver with no
+                // internal fields to attach the resource to. The message
+                // matches C++ `throwIfConstructorCalledAsFunction`.
+                if !args.is_construct_call() {
+                    lock.throw_exception(&jsg::Error::new_type_error(format!(
+                        "Failed to construct '{}': Please use the 'new' operator, \
+                         this object constructor cannot be called as a function.",
+                        <#self_ty as jsg::Type>::class_name(),
+                    )));
+                    return;
+                }
+
+                #(#unwraps)*
+
+                #construct
+                let rc = jsg::Rc::new(resource);
+                rc.attach_to_this(args);
+            }),
+        }
+    };
+    Ok(Some(MemberRegistration::new(rust_method_name, &member)))
 }
 
 // ---------------------------------------------------------------------------
 // Property helpers
 // ---------------------------------------------------------------------------
 
-/// Emits one `Member::Property { .. }` token stream for a single property group,
-/// or an `Err` compile-error stream if the group has no getter.
+/// Emits a member factory for a property group, or an error if the group has no getter.
+///
+/// `is_readonly` only affects the lazy instance placement: other placements are read-only
+/// exactly when there is no setter, but a lazy instance property never has a setter and is
+/// writable unless `readonly` is given, like C++ `JSG_LAZY_INSTANCE_PROPERTY`.
 fn emit_property_group(
     js_name: &str,
     kind: PropertyKind,
     getter: Option<syn::Ident>,
     setter: Option<syn::Ident>,
-) -> Result<quote::__private::TokenStream, quote::__private::TokenStream> {
+    is_readonly: bool,
+) -> Result<MemberRegistration, proc_macro2::TokenStream> {
     let Some(getter_name) = getter else {
         return Err(quote! {
-            compile_error!(concat!("no getter found for property \"", #js_name, "\""))
+            compile_error!(concat!("no getter found for property \"", #js_name, "\""));
         });
     };
 
     let getter_cb = syn::Ident::new(&format!("{getter_name}_callback"), getter_name.span());
-    let kind_tokens = match kind {
-        PropertyKind::Prototype => quote! { jsg::PropertyKind::Prototype },
-        PropertyKind::Instance => quote! { jsg::PropertyKind::Instance },
-        PropertyKind::Inspect => quote! { jsg::PropertyKind::Inspect },
-    };
-    let setter_tokens = if let Some(setter_name) = setter {
+    let setter_tokens = if let Some(setter_name) = &setter {
         let setter_cb = syn::Ident::new(&format!("{setter_name}_callback"), setter_name.span());
-        quote! { Some(Self::#setter_cb) }
+        quote! { Some(Self::#setter_cb()) }
     } else {
         quote! { None }
     };
 
-    Ok(quote! {
+    let kind_tokens = if kind == PropertyKind::Inspect {
+        quote! { jsg::PropertyKind::Inspect }
+    } else {
+        quote! { jsg::PropertyKind::Prototype }
+    };
+    let prototype_member = quote! {
         jsg::Member::Property {
             name: #js_name.to_owned(),
             kind: #kind_tokens,
-            getter_callback: Self::#getter_cb,
+            getter_callback: Self::#getter_cb(),
             setter_callback: #setter_tokens,
         }
+    };
+    if kind == PropertyKind::Inspect {
+        return Ok(MemberRegistration::new(&getter_name, &prototype_member));
+    }
+
+    let instance_getter_cb = syn::Ident::new(
+        &format!("{getter_name}_instance_callback"),
+        getter_name.span(),
+    );
+    let has_setter = setter.is_some();
+    let instance_setter = if let Some(setter_name) = setter {
+        let setter_cb = syn::Ident::new(
+            &format!("{setter_name}_instance_callback"),
+            setter_name.span(),
+        );
+        quote! { Some(Self::#setter_cb()) }
+    } else {
+        quote! { None }
+    };
+    // A property with a setter cannot be lazy. Custom registration can still ask for the lazy
+    // placement, so that arm registers a lazy-kind `Member::Property`, which template creation
+    // rejects with a message naming the problem.
+    let lazy_instance_member = if has_setter {
+        quote! {
+            jsg::Member::Property {
+                name: #js_name.to_owned(),
+                kind: jsg::PropertyKind::LazyInstance,
+                getter_callback: Self::#getter_cb(),
+                setter_callback: #setter_tokens,
+            }
+        }
+    } else {
+        quote! {
+            jsg::Member::LazyInstanceProperty {
+                name: #js_name.to_owned(),
+                getter_callback: Self::#instance_getter_cb(),
+                read_only: #is_readonly,
+            }
+        }
+    };
+    let factory_name = member_factory_name(&getter_name);
+    let placement = match kind {
+        PropertyKind::Instance => quote! { jsg::PropertyPlacement::Instance },
+        PropertyKind::LazyInstance => quote! { jsg::PropertyPlacement::LazyInstance },
+        PropertyKind::Prototype | PropertyKind::Inspect => {
+            quote! { jsg::PropertyPlacement::Prototype }
+        }
+    };
+    Ok(MemberRegistration {
+        factory: quote! {
+            #[automatically_derived]
+            #[must_use]
+            fn #factory_name(placement: jsg::PropertyPlacement) -> jsg::Member {
+                match placement {
+                    jsg::PropertyPlacement::Prototype => #prototype_member,
+                    jsg::PropertyPlacement::Instance => jsg::Member::InstanceProperty {
+                        name: #js_name.to_owned(),
+                        getter_callback: Self::#instance_getter_cb(),
+                        setter_callback: #instance_setter,
+                    },
+                    jsg::PropertyPlacement::LazyInstance => #lazy_instance_member,
+                }
+            }
+        },
+        automatic: quote! { Self::#factory_name(#placement) },
+        source_name: getter_name,
+        factory_name,
     })
 }
 
 /// Parses the argument list of `#[jsg_property([placement,] [name = "..."] [, readonly])]`.
 ///
-/// `placement` is optional; when omitted it defaults to `Prototype`.
+/// `placement` is `prototype`, `instance` or `lazy_instance`; when omitted it defaults to
+/// `Prototype`.
 /// Returns `(PropertyKind, Option<js_name_override>, is_readonly)`.
-fn parse_jsg_property_args(
-    tokens: TokenStream,
-) -> Result<(PropertyKind, Option<String>, bool), quote::__private::TokenStream> {
+pub fn parse_jsg_property_args(
+    tokens: proc_macro2::TokenStream,
+) -> Result<(PropertyKind, Option<String>, bool), proc_macro2::TokenStream> {
     use syn::parse::Parser as _;
+    const CONFLICTING_PLACEMENT: &str =
+        "conflicting placement: specify only one of `prototype`, `instance` or `lazy_instance`";
+
     let metas = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated
-        .parse(tokens)
+        .parse2(tokens)
         .map_err(|e| e.to_compile_error())?;
 
     let mut kind: Option<PropertyKind> = None;
@@ -459,23 +916,27 @@ fn parse_jsg_property_args(
         match meta {
             syn::Meta::Path(p) if p.is_ident("instance") => {
                 if kind.is_some() {
-                    return Err(syn::Error::new_spanned(
-                        p,
-                        "conflicting placement: specify either `instance` or `prototype`, not both",
-                    )
-                    .to_compile_error());
+                    return Err(
+                        syn::Error::new_spanned(p, CONFLICTING_PLACEMENT).to_compile_error()
+                    );
                 }
                 kind = Some(PropertyKind::Instance);
             }
             syn::Meta::Path(p) if p.is_ident("prototype") => {
                 if kind.is_some() {
-                    return Err(syn::Error::new_spanned(
-                        p,
-                        "conflicting placement: specify either `instance` or `prototype`, not both",
-                    )
-                    .to_compile_error());
+                    return Err(
+                        syn::Error::new_spanned(p, CONFLICTING_PLACEMENT).to_compile_error()
+                    );
                 }
                 kind = Some(PropertyKind::Prototype);
+            }
+            syn::Meta::Path(p) if p.is_ident("lazy_instance") => {
+                if kind.is_some() {
+                    return Err(
+                        syn::Error::new_spanned(p, CONFLICTING_PLACEMENT).to_compile_error()
+                    );
+                }
+                kind = Some(PropertyKind::LazyInstance);
             }
             syn::Meta::Path(p) if p.is_ident("readonly") => {
                 readonly = true;
@@ -498,7 +959,7 @@ fn parse_jsg_property_args(
             _ => {
                 return Err(syn::Error::new_spanned(
                     meta,
-                    "unknown argument; expected `instance`, `prototype`, `readonly`, or `name = \"...\"`",
+                    "unknown argument; expected `prototype`, `instance`, `lazy_instance`, `readonly`, or `name = \"...\"`",
                 )
                 .to_compile_error());
             }
@@ -549,7 +1010,7 @@ fn prop_groups_find_or_insert(
 /// and group the annotated methods by `(js_name, PropertyKind)`.
 fn scan_property_annotations(
     impl_block: &ItemImpl,
-) -> Result<PropGroups, quote::__private::TokenStream> {
+) -> Result<PropGroups, proc_macro2::TokenStream> {
     let mut groups: PropGroups = Vec::new();
 
     for item in &impl_block.items {
@@ -570,10 +1031,10 @@ fn scan_property_annotations(
                 .to_compile_error());
             }
 
-            let tokens: TokenStream = attr
+            let tokens = attr
                 .meta
                 .require_list()
-                .map(|list| list.tokens.clone().into())
+                .map(|list| list.tokens.clone())
                 .unwrap_or_default();
             let (kind, js_name_opt, is_readonly) = parse_jsg_property_args(tokens)?;
             let js_name = js_name_opt.unwrap_or_else(|| derive_js_name(&rust_name_str));
@@ -590,11 +1051,11 @@ fn scan_property_annotations(
             .iter()
             .find(|a| is_attr(a, "jsg_inspect_property"))
         {
-            let attr_tokens: Option<TokenStream> = attr
+            let attr_tokens = attr
                 .meta
                 .require_list()
                 .ok()
-                .map(|list| list.tokens.clone().into());
+                .map(|list| list.tokens.clone());
             let js_name = attr_tokens
                 .and_then(extract_name_attribute)
                 .unwrap_or_else(|| derive_js_name(&rust_name_str));
@@ -610,12 +1071,12 @@ fn scan_property_annotations(
     Ok(groups)
 }
 
-/// Phase 2 (per group): validate constraints and emit one `Member::Property`.
+/// Phase 2 (per group): validate constraints and emit a member factory.
 fn validate_and_emit_property(
     js_name: &str,
     kind: PropertyKind,
     methods: Vec<PropMethod>,
-) -> Result<quote::__private::TokenStream, quote::__private::TokenStream> {
+) -> Result<MemberRegistration, proc_macro2::TokenStream> {
     let has_readonly_getter = methods.iter().any(|m| m.is_readonly && !m.is_setter);
     for m in &methods {
         if m.is_readonly && m.is_setter {
@@ -631,6 +1092,16 @@ fn validate_and_emit_property(
         return Err(syn::Error::new(
             setters[0].rust_name.span(),
             "read-only property cannot have a setter; remove the setter or drop the `readonly` attribute",
+        )
+        .to_compile_error());
+    }
+    if kind == PropertyKind::LazyInstance
+        && let Some(setter) = setters.first()
+    {
+        return Err(syn::Error::new(
+            setter.rust_name.span(),
+            "a `lazy_instance` property cannot have a setter; its value is computed once, \
+             then stored on the instance (writable unless `readonly`)",
         )
         .to_compile_error());
     }
@@ -652,36 +1123,27 @@ fn validate_and_emit_property(
         if m.is_setter {
             if setter.replace(m.rust_name).is_some() {
                 return Err(
-                    quote! { compile_error!(concat!("duplicate setter for property \"", #js_name, "\"")) },
+                    quote! { compile_error!(concat!("duplicate setter for property \"", #js_name, "\"")); },
                 );
             }
         } else if getter.replace(m.rust_name).is_some() {
             return Err(
-                quote! { compile_error!(concat!("duplicate getter for property \"", #js_name, "\"")) },
+                quote! { compile_error!(concat!("duplicate getter for property \"", #js_name, "\"")); },
             );
         }
     }
-    emit_property_group(js_name, kind, getter, setter)
+    emit_property_group(js_name, kind, getter, setter, has_readonly_getter)
 }
 
 /// Scans an impl block for `#[jsg_property]` and `#[jsg_inspect_property]` annotations
-/// and returns a `Member::Property` token stream for each property group.
-fn collect_property_registrations(impl_block: &ItemImpl) -> Vec<quote::__private::TokenStream> {
-    let groups = match scan_property_annotations(impl_block) {
-        Ok(g) => g,
-        Err(e) => return vec![e],
-    };
-    let mut registrations = Vec::new();
-    for ((js_name, kind), methods) in groups {
-        match validate_and_emit_property(&js_name, kind, methods) {
-            Ok(ts) => registrations.push(ts),
-            Err(ts) => {
-                registrations.push(ts);
-                return registrations;
-            }
-        }
-    }
-    registrations
+/// and returns a member factory for each property group.
+fn collect_property_registrations(
+    impl_block: &ItemImpl,
+) -> Result<Vec<MemberRegistration>, proc_macro2::TokenStream> {
+    scan_property_annotations(impl_block)?
+        .into_iter()
+        .map(|((js_name, kind), methods)| validate_and_emit_property(&js_name, kind, methods))
+        .collect()
 }
 
 #[cfg(test)]

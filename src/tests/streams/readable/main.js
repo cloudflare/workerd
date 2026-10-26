@@ -22,6 +22,7 @@ export {
   controllerNotConstructable,
   getReaderBadModeThrows,
   defaultStreamNoByobReader,
+  getReaderOptionsShapes,
   lockedLifecycle,
 } from 'api-surface';
 
@@ -29,6 +30,9 @@ export {
   garbageSourceValidation,
   invalidTypeValidation,
   argumentConversionOrder,
+  strategyArgumentShapes,
+  conversionErrorPrecedence,
+  byteMembersOnDefaultSource,
   highWaterMarkValidated,
   hwmDefaultIsOne,
 } from 'construction';
@@ -140,6 +144,7 @@ export {
   asyncIteratorReturnMethod,
   asyncIteratorReturnThenNext,
   asyncIteratorPreventCancel,
+  valuesOptionsShapes,
   asyncIteratorOnClosedStream,
   asyncIteratorOnErroredStream,
   asyncIteratorLocksStream,
@@ -208,6 +213,8 @@ export {
   disturbedStreamIntoResponse,
   lockedStreamIntoResponse,
   bodyIdentityAndLockCoupling,
+  teedStreamIntoResponse,
+  bodyUsedAfterBodyTee,
 } from 'integration-locked-disturbed';
 
 export {
@@ -219,6 +226,7 @@ export {
   teeBranchesCollectedReleaseBacklog,
   teeSurvivorBranchCollected,
   teeBranchesCollectedPullStops,
+  sourceReleasedOnceEnded,
 } from 'gc';
 
 export {
@@ -232,10 +240,13 @@ export {
   thenGetterCancelsBranchDuringEnqueueBacklog,
   thenGetterCancelsBranchDuringClose,
   thenGetterCancelsTwoBranchesDuringEnqueue,
+  thenGetterReleasesReaderWhileReadsSettle,
 } from 'then-interceptors';
 
 export {
   drainingReaderSweepsQueuedBacklog,
+  drainingReaderMaxSizeEndsAtClose,
+  drainingReaderSizeOverflowEndsAtClose,
   drainingReaderPullDriven,
   drainingReaderErrorPropagation,
   drainingReaderCancelReachesSource,
@@ -266,3 +277,5 @@ export {
   fromBuildsNoDictionariesFromObjectPrototype,
   asyncIteratorShape,
 } from 'pollution';
+
+export { readerClosedIsMarkedHandled } from 'unhandled-rejection';

@@ -214,7 +214,7 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait(SpanParent parentS
         KJ_IF_SOME(e, target.brokenException) {
           // Oops, we're broken.
           setBroken(e);
-          kj::throwFatalException(e.clone());
+          kj::throwException(e.clone());
         }
 
         // Add ourselves to this parent's child waiter list.
@@ -232,7 +232,7 @@ kj::Promise<InputGate::Lock> InputGate::CriticalSection::wait(SpanParent parentS
             auto exception = kj::getCaughtExceptionAsKj();
             state = RUNNING;
             setBroken(exception);
-            kj::throwFatalException(kj::mv(exception));
+            kj::throwException(kj::mv(exception));
           }
         }
       }
@@ -337,6 +337,13 @@ void InputGate::setBroken(const kj::Exception& e) {
     brokenFlag.reject(e.clone());
   }
   brokenException = e.clone();
+}
+
+kj::Maybe<InputGate::CriticalSection&> InputGate::CriticalSection::getActive() {
+  if (state != REPARENTED) return *this;
+  auto& parentGate = parentAsInputGate();
+  if (!parentGate.isCriticalSection) return kj::none;
+  return static_cast<CriticalSection&>(parentGate);
 }
 
 InputGate& InputGate::CriticalSection::parentAsInputGate() {

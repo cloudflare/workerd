@@ -99,6 +99,12 @@ kj::String currentDateStr() {
   return CompatDate::today().toString();
 }
 
+kj::String newestCompatDateStr() {
+  auto maximum = KJ_ASSERT_NONNULL(CompatDate::parse(MAXIMUM_COMPATIBILITY_DATE));
+  auto today = CompatDate::today();
+  return (today < maximum ? today : maximum).toString();
+}
+
 static void compileCompatibilityFlags(kj::StringPtr compatDate,
     kj::HashSet<kj::String> flagSet,
     CompatibilityFlags::Builder output,
@@ -181,7 +187,7 @@ static void compileCompatibilityFlags(kj::StringPtr compatDate,
         enableByDate = parsedCompatDate >= parsedDate;
       } else if (annotation.getId() == COMPAT_ENABLE_ALL_DATES_ANNOTATION_ID) {
         enableByDate = true;
-      } else if (annotation.getId() == EXPERIMENTAl_ANNOTATION_ID) {
+      } else if (annotation.getId() == EXPERIMENTAL_ANNOTATION_ID) {
         isExperimental = true;
       } else if (annotation.getId() == IMPLIED_BY_AFTER_DATE_ANNOTATION_ID) {
         auto value = annotation.getValue();

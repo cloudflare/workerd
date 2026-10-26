@@ -506,6 +506,8 @@ def gen_git_clone(repo):
         )
     if "sparse_checkout_patterns" in repo:
         attrs["sparse_checkout_patterns"] = repo["sparse_checkout_patterns"]
+    if "strip_prefix" in repo:
+        attrs["strip_prefix"] = repo["strip_prefix"]
 
     if repo.get("use_bazel_dep"):
         return format_bazel_dep_with_override(

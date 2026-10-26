@@ -63,8 +63,12 @@ export interface CacheContext {
 
 export function getCtxCache(): CacheContext | undefined;
 
+// Like ctx.mapVirtualHost(). Returns `host:port`.
+export function mapVirtualHost(fetcher: ServiceStub, port: number): string;
+
 export function abortIsolate(reason?: string): never;
 
 export function retryable(...methods: ((...args: never[]) => unknown)[]): void;
 
 export const restore: symbol;
+export const onEvict: symbol | undefined;

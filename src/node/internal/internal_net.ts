@@ -54,6 +54,8 @@ import {
   EADDRNOTAVAIL,
   EPIPE,
   ENOBUFS,
+  ConnectException,
+  GetAddrInfoException,
 } from 'node-internal:internal_errors';
 
 import {
@@ -729,7 +731,7 @@ export declare class Socket extends _Socket {
     reading: boolean | undefined;
     // Set while startRead's loop is running over this handle, so that the
     // several places that start reading (connect, resume, read, a TLS
-    // upgrade) never run two loops — and thus two BYOB reads — against the
+    // upgrade) never run two loops - and thus two BYOB reads - against the
     // same reader at once.
     readLoopActive?: boolean;
     // Set by a TLS upgrade before it releases this handle's reader and
@@ -927,8 +929,8 @@ export function Socket(this: Socket, options?: SocketOptions): Socket {
     }
     this[kBuffer] = true;
     // The read loop's BYOB reads transfer the buffers they are handed, so a
-    // caller reusing one — a fixed buffer, or a generator handing out the
-    // same buffers again — is continued over the store it moved to.
+    // caller reusing one - a fixed buffer, or a generator handing out the
+    // same buffers again - is continued over the store it moved to.
     this[kBufferContinuations] = new WeakMap();
     // eslint-disable-next-line @typescript-eslint/unbound-method
     this[kBufferCb] = onread.callback;
@@ -1705,6 +1707,25 @@ function cleanupAfterDestroy(
   socket.emit('close', isException);
 }
 
+// The platform's connect() error carries no cause; the errno name of a
+// recognized failure is exposed to node:net separately, and reported here the
+// way Node does. An unrecognized failure keeps the platform's error. The
+// platform resolves names itself, so `address` is the host as given, where
+// Node would report the resolved IP.
+function connectFailureError(
+  handle: ReturnType<typeof inner.connect>,
+  address: string,
+  port: number,
+  err: Error
+): Error {
+  const code = inner.getConnectFailureCode(handle);
+  if (code === undefined) return err;
+  if (code === 'ENOTFOUND' || code.startsWith('EAI_')) {
+    return new GetAddrInfoException(code, address);
+  }
+  return new ConnectException(code, address, port);
+}
+
 function initializeConnection(
   socket: Socket,
   options: TcpSocketConnectOpts
@@ -1779,6 +1800,7 @@ function initializeConnection(
       },
     };
 
+    const address = `${host}`;
     if (family === 6) {
       // The host is an IPv6 address. We need to wrap it in square brackets.
       host = `[${host}]`;
@@ -1787,7 +1809,18 @@ function initializeConnection(
     // @ts-expect-error TS2540 Unnecessary error due to using @types/node
     socket.autoSelectFamilyAttemptedAddresses = [`${host}:${port}`];
 
-    socket.emit('connectionAttempt', host, port, addressType);
+    // The platform resolves a host name as part of connecting, and a failed
+    // lookup never starts an attempt in Node, so for a name the attempt is
+    // only reported once its outcome shows one was made.
+    let attemptPending = isIP(address) === 0;
+    const emitConnectionAttempt = (): void => {
+      if (!attemptPending) return;
+      attemptPending = false;
+      socket.emit('connectionAttempt', host, port, addressType);
+    };
+    if (!attemptPending) {
+      socket.emit('connectionAttempt', host, port, addressType);
+    }
 
     socket._host = `${host}`;
 
@@ -1851,10 +1884,33 @@ function initializeConnection(
       // We need to undestroy the stream to connect to it.
       socket._undestroy();
 
-      handle.opened.then(onConnectionOpened.bind(socket), (err: unknown) => {
-        socket.emit('connectionAttemptFailed', host, port, addressType, err);
-        socket.destroy(err as Error);
-      });
+      // A failed connection attempt rejects both `closed` and `opened`, in
+      // that order, so whichever settles first reports it; the other finds
+      // the socket destroyed.
+      const onConnectionFailed = (err: unknown): void => {
+        if (socket.destroyed || socket._handle?.socket !== handle) return;
+        const error = connectFailureError(handle, address, port, err as Error);
+        // A failed lookup never reaches a connection attempt in Node: it is
+        // reported through 'lookup' and the socket is destroyed with it.
+        if (error instanceof GetAddrInfoException) {
+          socket.emit('lookup', error, undefined, undefined, address);
+        } else {
+          emitConnectionAttempt();
+          socket.emit(
+            'connectionAttemptFailed',
+            host,
+            port,
+            addressType,
+            error
+          );
+        }
+        socket.destroy(error);
+      };
+
+      handle.opened.then((): void => {
+        if (!socket.destroyed) emitConnectionAttempt();
+        onConnectionOpened.call(socket);
+      }, onConnectionFailed);
 
       handle.closed.then(
         (): void => {
@@ -1865,6 +1921,10 @@ function initializeConnection(
           }
         },
         (error: unknown): void => {
+          if (socket.connecting) {
+            onConnectionFailed(error);
+            return;
+          }
           // Do not call socket.destroy.bind(socket) since user can override it.
           socket.destroy(error as Error);
         }
@@ -1974,8 +2034,8 @@ async function startRead(socket: Socket): Promise<void> {
         );
       }
       // A view the loop has read into before was detached by that read's
-      // transfer of its buffer. Handed out again — a fixed onread buffer, or a
-      // generator reusing its buffers, as Node's in-place fills allow — it
+      // transfer of its buffer. Handed out again - a fixed onread buffer, or a
+      // generator reusing its buffers, as Node's in-place fills allow - it
       // means the same range of the store the buffer moved to, which the
       // loop kept as the view's continuation.
       const view =
@@ -2021,7 +2081,7 @@ async function startRead(socket: Socket): Promise<void> {
 
       // The BYOB read transferred the view's buffer. Continue the caller's
       // view over the transferred backing store as a view of the same range
-      // — the caller's offset and capacity, not the whole allocation — so a
+      // - the caller's offset and capacity, not the whole allocation - so a
       // read into it again fills exactly the region the caller handed out. A
       // store the read left too small for that range (detached or shrunk
       // while the read was pending, which only a non-transferring read can
@@ -2068,8 +2128,8 @@ async function startRead(socket: Socket): Promise<void> {
     // A pending read rejects when the socket is destroyed (its stream is
     // closing) or when a TLS upgrade releases this loop's reader (the
     // handle is handed over; the parent socket keeps pointing at it):
-    // neither is news. Anything else — a failing generator or buffer
-    // (above), a read the runtime refuses — destroys the socket with the
+    // neither is news. Anything else - a failing generator or buffer
+    // (above), a read the runtime refuses - destroys the socket with the
     // error rather than leaving it open and silent.
     if (socket._handle === handle && !handle.handedOver && !socket.destroyed) {
       socket.destroy(err as Error);

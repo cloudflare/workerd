@@ -2,11 +2,12 @@
 
 // ByteLengthQueuingStrategy and CountQueuingStrategy (WHATWG Streams §7).
 
+import type { CommonHelpers } from './common';
+
 const { ObjectDefineProperties, SymbolToStringTag, TypeError } = primordials;
 
-function isActualObject(value: unknown): boolean {
-  return value != null && typeof value === 'object';
-}
+const { isActualObject, kEnumerable, requireObject, toStringTagProperty } =
+  require('webstreams/common') as CommonHelpers;
 
 // Per spec, the size function is the SAME function object for every
 // strategy instance in the realm, and its name is 'size' (method shorthand
@@ -25,6 +26,23 @@ const countSize = {
   },
 }.size;
 
+// Converts init as WebIDL converts a QueuingStrategyInit dictionary, to its
+// one member. The type is optional-shaped because user input is arbitrary;
+// the required-member check is the explicit TypeError below. A dictionary
+// with a required member cannot be converted from undefined or null.
+function convertQueuingStrategyInit(init: { highWaterMark?: number }): number {
+  requireObject(init, 'init must be an object');
+  // Read once, as WebIDL dictionary conversion reads each member once.
+  const highWaterMark = init.highWaterMark;
+  if (highWaterMark === undefined) {
+    throw new TypeError('init.highWaterMark is required');
+  }
+  // No range validation: per spec (and WPT), bogus values like NaN or -1
+  // are accepted here and only rejected by ExtractHighWaterMark at stream
+  // construction time.
+  return +highWaterMark;
+}
+
 let assertIsByteLengthQueuingStrategy: (
   value: ByteLengthQueuingStrategy
 ) => void;
@@ -42,21 +60,8 @@ class ByteLengthQueuingStrategy {
     };
   }
 
-  // The init type is optional-shaped because user input is arbitrary; the
-  // required-member check is the explicit TypeError below.
   constructor(init: { highWaterMark?: number }) {
-    if (!isActualObject(init)) {
-      throw new TypeError('init must be an object');
-    }
-    // Read once, as WebIDL dictionary conversion reads each member once.
-    const highWaterMark = init.highWaterMark;
-    if (highWaterMark === undefined) {
-      throw new TypeError('init.highWaterMark is required');
-    }
-    // Stored as-converted WITHOUT range validation: per spec (and WPT),
-    // bogus values like NaN or -1 are accepted here and only rejected by
-    // ExtractHighWaterMark at stream construction time.
-    this.#highWaterMark = +highWaterMark;
+    this.#highWaterMark = convertQueuingStrategyInit(init);
   }
 
   get highWaterMark(): number {
@@ -81,15 +86,7 @@ class CountQueuingStrategy {
   }
 
   constructor(init: { highWaterMark?: number }) {
-    if (!isActualObject(init)) {
-      throw new TypeError('init must be an object');
-    }
-    // Read once, as WebIDL dictionary conversion reads each member once.
-    const highWaterMark = init.highWaterMark;
-    if (highWaterMark === undefined) {
-      throw new TypeError('init.highWaterMark is required');
-    }
-    this.#highWaterMark = +highWaterMark;
+    this.#highWaterMark = convertQueuingStrategyInit(init);
   }
 
   get highWaterMark(): number {
@@ -103,32 +100,18 @@ class CountQueuingStrategy {
   }
 }
 
-const kEnumerable = { __proto__: null, enumerable: true };
-
 ObjectDefineProperties(ByteLengthQueuingStrategy.prototype, {
   __proto__: null,
   highWaterMark: kEnumerable,
   size: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'ByteLengthQueuingStrategy',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('ByteLengthQueuingStrategy'),
 });
 
 ObjectDefineProperties(CountQueuingStrategy.prototype, {
   __proto__: null,
   highWaterMark: kEnumerable,
   size: kEnumerable,
-  [SymbolToStringTag]: {
-    __proto__: null,
-    value: 'CountQueuingStrategy',
-    writable: false,
-    enumerable: false,
-    configurable: true,
-  },
+  [SymbolToStringTag]: toStringTagProperty('CountQueuingStrategy'),
 });
 
 module.exports = {

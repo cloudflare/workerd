@@ -140,9 +140,9 @@ class TeeErrorAdapter final: public kj::AsyncInputStream {
                   "Request/Response.clone() and ReadableStream.tee(), and always read "
                   "clones/tees in parallel."_kj},
               })) {
-        kj::throwFatalException(kj::mv(translated));
+        kj::throwException(kj::mv(translated));
       } else {
-        kj::throwFatalException(kj::mv(exception));
+        kj::throwException(kj::mv(exception));
       }
     }
   }

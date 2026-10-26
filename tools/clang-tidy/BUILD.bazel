@@ -34,6 +34,7 @@ LLVM_ENABLE_RTTI=ON; the binary published by cloudflare/workerd-tools
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
+load("@rules_python//python:defs.bzl", "py_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load(":test-headers.bzl", "cc_test_headers")
 
@@ -173,6 +174,22 @@ sh_test(
         ":workerd-lint",
         "//tools:clang-tidy",
     ],
+    tags = ["no-asan"],
+    target_compatible_with = [
+        "@platforms//os:linux",
+        "@platforms//cpu:x86_64",
+    ],
+)
+
+py_test(
+    name = "unsafe-continuation-capture-test",
+    srcs = ["unsafe-continuation-capture-test.py"],
+    data = [
+        "tests/unsafe-continuation-capture-test.c++",
+        ":workerd-lint",
+        "//tools:clang-tidy",
+    ],
+    main = "unsafe-continuation-capture-test.py",
     tags = ["no-asan"],
     target_compatible_with = [
         "@platforms//os:linux",

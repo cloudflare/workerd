@@ -18,10 +18,13 @@
 #include <workerd/jsg/exception.h>
 #include <workerd/jsg/url.h>
 #include <workerd/util/autogate.h>
+#include <workerd/util/strings.h>
 #include <workerd/util/uncaught-exception-source.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <kj/async-queue.h>
+
+#include <cerrno>
 
 namespace workerd::api {
 
@@ -323,6 +326,7 @@ JsReadableStream newDatagramReadableStream(jsg::Lock& js, IoOwn<DatagramChannel>
   return JsReadableStream::fromPull(js,
       [channel = kj::mv(channel)](jsg::Lock& js) mutable -> jsg::Promise<kj::Maybe<jsg::Value>> {
     auto& ioContext = IoContext::current();
+    IoContext::AwaitIoOperation traceOperation(ioContext, "datagram_receive"_kj);
     return ioContext.awaitIo(js, channel->receive(),
         [](jsg::Lock& js, kj::Maybe<kj::Array<kj::byte>> datagram) -> kj::Maybe<jsg::Value> {
       KJ_IF_SOME(bytes, datagram) {
@@ -348,7 +352,9 @@ JsWritableStream newDatagramWritableStream(jsg::Lock& js, IoOwn<DatagramChannel>
         "This socket's writable stream only accepts Datagram instances.");
     auto bytes = kj::heapArray<kj::byte>(datagram->getData(js).asArrayPtr());
     auto sendPromise = channel->send(bytes).attach(kj::mv(bytes));
-    return IoContext::current().awaitIo(js, kj::mv(sendPromise));
+    auto& ioContext = IoContext::current();
+    IoContext::AwaitIoOperation traceOperation(ioContext, "datagram_send"_kj);
+    return ioContext.awaitIo(js, kj::mv(sendPromise));
   });
 }
 
@@ -500,6 +506,117 @@ kj::Promise<void> pumpDatagramsToRpc(
   }
 }
 
+// Joins up the two ends of a startTls() upgrade on a tunnel where neither end can perform a TLS
+// handshake because the tunnel is one of our internal transports. See
+// setupInternalTlsRendezvous(), which is the only thing that creates one of these.
+class TlsRendezvous {
+ public:
+  enum class Side {
+    // The socket held by the worker that opened the tunnel by calling connect().
+    PEER,
+    // The socket handed to the connect() handler on the receiving end of that call.
+    HANDLER,
+  };
+
+  // One side's participation in the rendezvous, shaped the way kj::TlsStarterCallback wants it.
+  // Calling it is that side's startTls(); destroying it without having called it reports that the
+  // side is gone and no upgrade is coming.
+  class Claim {
+   public:
+    Claim(kj::Rc<TlsRendezvous> rendezvous, Side side)
+        : rendezvous(kj::mv(rendezvous)),
+          side(side) {}
+    KJ_DISALLOW_COPY(Claim);
+    Claim(Claim&& other) = default;
+    Claim& operator=(Claim&& other) = default;
+    ~Claim() noexcept(false) {
+      // A moved-from Claim holds a null Own and no longer speaks for its side.
+      if (rendezvous.get() != nullptr) {
+        rendezvous->abandon(side);
+      }
+    }
+
+    kj::Promise<void> operator()(kj::StringPtr expectedServerHostname) {
+      // There is no handshake here to point at a hostname: the certificate check that the name
+      // exists for belongs to whatever real connection lies beyond the worker at either end.
+      return rendezvous->upgrade(side);
+    }
+
+   private:
+    kj::Rc<TlsRendezvous> rendezvous;
+    Side side;
+  };
+
+  // Records that `side` called startTls(). The result resolves once the other side has called it
+  // too, and rejects if the other side is abandoned first.
+  kj::Promise<void> upgrade(Side side) {
+    halfFor(side).arrived->fulfill();
+    return halfFor(otherSide(side)).arrivedPromise.addBranch();
+  }
+
+  // Records that `side`'s socket went away without ever calling startTls(), so that the other side
+  // stops waiting for it. Harmless if that side already upgraded, since fulfillers ignore a second
+  // resolution.
+  void abandon(Side side) {
+    halfFor(side).arrived->reject(KJ_EXCEPTION(
+        DISCONNECTED, "jsg.Error: The peer disconnected before agreeing to start TLS."));
+  }
+
+ private:
+  struct Half {
+    kj::Own<kj::PromiseFulfiller<void>> arrived;
+    kj::ForkedPromise<void> arrivedPromise;
+  };
+
+  Half peer = makeHalf();
+  Half handler = makeHalf();
+
+  static Half makeHalf() {
+    auto paf = kj::newPromiseAndFulfiller<void>();
+    return Half{.arrived = kj::mv(paf.fulfiller), .arrivedPromise = kj::mv(paf.promise).fork()};
+  }
+
+  static Side otherSide(Side side) {
+    return side == Side::PEER ? Side::HANDLER : Side::PEER;
+  }
+
+  Half& halfFor(Side side) {
+    return side == Side::PEER ? peer : handler;
+  }
+};
+
+// Behaves like Promise.all([first, second]): resolves once both have resolved, and rejects with
+// the first rejection as soon as it happens, without waiting for the other promise to settle.
+jsg::Promise<void> whenBothResolved(
+    jsg::Lock& js, jsg::Promise<void> first, jsg::Promise<void> second) {
+  struct Countdown {
+    uint pending = 2;
+  };
+  auto countdown = kj::rc<Countdown>();
+  auto paf = js.newPromiseAndResolver<void>();
+
+  auto settle = [&](jsg::Promise<void>& promise) {
+    promise.then(js,
+        JSG_VISITABLE_LAMBDA((resolver = paf.resolver.addRef(js), countdown = countdown.addRef()),
+            (resolver),
+            (jsg::Lock& js) {
+              if (--countdown->pending == 0) {
+              resolver.resolve(js);
+              }
+            }),
+        JSG_VISITABLE_LAMBDA(
+            (resolver = paf.resolver.addRef(js)), (resolver), (jsg::Lock& js, jsg::Value error) {
+              // Rejecting an already-settled promise is a no-op, so only the first rejection
+              // counts.
+              resolver.reject(js, error.getHandle(js));
+            }));
+  };
+  settle(first);
+  settle(second);
+
+  return kj::mv(paf.promise);
+}
+
 }  // namespace
 
 // Forward declarations
@@ -617,7 +734,7 @@ kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::run(
     bool isDynamicDispatch) {
   auto& context = incomingRequest->getContext();
 
-  incomingRequest->delivered();
+  incomingRequest->delivered("udp_connect"_kj);
 
   auto outcome = EventOutcome::OK;
   KJ_TRY {
@@ -633,7 +750,8 @@ kj::Promise<WorkerInterface::CustomEvent::Result> UdpConnectCustomEvent::run(
     });
   }
   KJ_CATCH(e) {
-    context.logUncaughtExceptionAsync(UncaughtExceptionSource::REQUEST_HANDLER, kj::mv(e));
+    context.logUncaughtExceptionAsync(
+        UncaughtExceptionSource::REQUEST_HANDLER, kj::mv(e), *incomingRequest);
     outcome = EventOutcome::EXCEPTION;
   }
 
@@ -688,6 +806,20 @@ kj::Promise<void> UdpConnectCustomEvent::receiveRpc(
 
 tracing::EventInfo UdpConnectCustomEvent::getEventInfo() const {
   return tracing::ConnectEventInfo();
+}
+
+kj::Rc<kj::TlsStarterCallback> setupInternalTlsRendezvous(kj::TlsStarterCallback& peerStarter) {
+  auto rendezvous = kj::rc<TlsRendezvous>();
+
+  kj::Function<kj::Promise<void>(kj::StringPtr)> peerClaim =
+      TlsRendezvous::Claim(rendezvous.addRef(), TlsRendezvous::Side::PEER);
+  peerStarter = kj::mv(peerClaim);
+
+  kj::Function<kj::Promise<void>(kj::StringPtr)> handlerClaim =
+      TlsRendezvous::Claim(kj::mv(rendezvous), TlsRendezvous::Side::HANDLER);
+  auto handlerStarter = kj::heap<kj::TlsStarterCallback>();
+  *handlerStarter = kj::mv(handlerClaim);
+  return handlerStarter;
 }
 
 jsg::Ref<Socket> connectImpl(jsg::Lock& js,
@@ -779,7 +911,12 @@ jsg::Ref<Socket> connectImpl(jsg::Lock& js,
     httpConnectSettings.useTls = secureTransport == SecureTransportKind::ON;
   }
   kj::Own<kj::TlsStarterCallback> tlsStarter = kj::heap<kj::TlsStarterCallback>();
-  httpConnectSettings.tlsStarter = tlsStarter;
+  if (secureTransport == SecureTransportKind::STARTTLS) {
+    // Offer the slot only on a socket that can actually act on it: startTls() insists on
+    // 'starttls'. Whoever serves the CONNECT reads the slot's presence as a promise that this
+    // socket is prepared to upgrade, and may wait to be told that it has.
+    httpConnectSettings.tlsStarter = tlsStarter;
+  }
 
   KJ_IF_SOME(promise, ioContext.waitForOutputLocksIfNecessary()) {
     // Wrap the real WorkerInterface in a promised interface that defers connect
@@ -848,11 +985,33 @@ jsg::Promise<void> Socket::close(jsg::Lock& js) {
   });
 }
 
+jsg::Promise<void> Socket::proxyTo(
+    jsg::Lock& js, jsg::Ref<Socket> sock, jsg::Optional<PipeToOptions> options) {
+  jsg::Optional<PipeToOptions> optionsCopy = kj::none;
+  KJ_IF_SOME(o, options) {
+    optionsCopy = PipeToOptions{
+      .preventAbort = o.preventAbort,
+      .preventCancel = o.preventCancel,
+      .preventClose = o.preventClose,
+      .signal = kj::none,
+    };
+    KJ_IF_SOME(s, o.signal) {
+      KJ_ASSERT_NONNULL(optionsCopy).signal = s.addRef();
+    }
+  }
+  auto fromThem = sock->readable.pipeTo(js, writable, kj::mv(options).orDefault({}));
+  auto toThem = readable.pipeTo(js, sock->writable, kj::mv(optionsCopy).orDefault({}));
+  return whenBothResolved(js, kj::mv(fromThem), kj::mv(toThem));
+}
+
 jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOptions) {
   JSG_REQUIRE(
       secureTransport != SecureTransportKind::ON, TypeError, "Cannot startTls on a TLS socket.");
   JSG_REQUIRE(connectionData != kj::none, TypeError,
       "The connection was closed before startTls could be started.");
+  // TODO(cleanup): Error message is misleading when startTls() is used in the connect handler as
+  // its socket is passed in and no starttls option can be set there - provide more descriptive
+  // error message.
   auto invalidOptKindMsg =
       "The `secureTransport` socket option must be set to 'starttls' for startTls to be used.";
   JSG_REQUIRE(secureTransport == SecureTransportKind::STARTTLS, TypeError, invalidOptKindMsg);
@@ -941,6 +1100,7 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
                 // secureStream for the promised stream. This keeps us from having to bounce in and
                 // out of the JS isolate lock.
                 auto forkedPromise = KJ_ASSERT_NONNULL(*tlsStarter)(acceptedHostname).fork();
+                IoContext::AwaitIoOperation traceOperation(context, "socket_start_tls"_kj);
 
                 openedResolver.resolve(js,
                     context.awaitIo(js, forkedPromise.addBranch(),
@@ -977,10 +1137,161 @@ jsg::Ref<Socket> Socket::startTls(jsg::Lock& js, jsg::Optional<TlsOptions> tlsOp
       protocol, kj::mv(domain), isDefaultFetchPort, kj::mv(openedPrPair));
 }
 
+namespace {
+
+kj::Maybe<kj::StringPtr> proxyErrorTypeErrno(kj::ArrayPtr<const char> type) {
+  if (type == "connection_refused"_kj.asArray()) return "ECONNREFUSED"_kj;
+  if (type == "connection_timeout"_kj.asArray()) return "ETIMEDOUT"_kj;
+  if (type == "dns_error"_kj.asArray() || type == "dns_timeout"_kj.asArray()) {
+    return "ENOTFOUND"_kj;
+  }
+  if (type == "destination_unavailable"_kj.asArray() ||
+      type == "destination_ip_unroutable"_kj.asArray()) {
+    return "EHOSTUNREACH"_kj;
+  }
+  return kj::none;
+}
+
+kj::Maybe<kj::StringPtr> proxyStatusErrno(kj::StringPtr proxyStatus) {
+  // Proxy-Status is a structured-field list of proxies, each with parameters, e.g.
+  // `Cloudflare-Proxy;error=connection_refused`. Only a top-level `error` parameter counts, so
+  // quoted strings (such as a `details` value) are skipped rather than searched.
+  size_t start = 0;
+  bool quoted = false;
+  for (size_t i = 0; i <= proxyStatus.size(); i++) {
+    if (i < proxyStatus.size()) {
+      char c = proxyStatus[i];
+      if (quoted) {
+        if (c == '\\') {
+          i++;
+        } else if (c == '"') {
+          quoted = false;
+        }
+        continue;
+      }
+      if (c == '"') {
+        quoted = true;
+        continue;
+      }
+      if (c != ';' && c != ',') continue;
+    }
+    auto item = proxyStatus.slice(start, i);
+    start = i + 1;
+    while (item.size() > 0 && (item.front() == ' ' || item.front() == '\t')) {
+      item = item.slice(1);
+    }
+    while (item.size() > 0 && (item.back() == ' ' || item.back() == '\t')) {
+      item = item.first(item.size() - 1);
+    }
+    if (!item.startsWith("error="_kj.asArray())) continue;
+    auto value = item.slice("error="_kj.size());
+    if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+      value = value.slice(1, value.size() - 1);
+    }
+    return proxyErrorTypeErrno(value);
+  }
+  return kj::none;
+}
+
+}  // namespace
+
+namespace {
+
+// The errno name for an OS error code of the platform this process runs on, which is the one
+// that produced the failure.
+kj::Maybe<kj::StringPtr> osErrorErrnoName(int code) {
+#if _WIN32
+  switch (code) {
+    case 10061:  // WSAECONNREFUSED
+      return "ECONNREFUSED"_kj;
+    case 10060:  // WSAETIMEDOUT
+      return "ETIMEDOUT"_kj;
+    case 10065:  // WSAEHOSTUNREACH
+      return "EHOSTUNREACH"_kj;
+    case 10051:  // WSAENETUNREACH
+      return "ENETUNREACH"_kj;
+    case 11001:  // WSAHOST_NOT_FOUND
+    case 11004:  // WSANO_DATA
+      return "ENOTFOUND"_kj;
+    case 11002:  // WSATRY_AGAIN
+      return "EAI_AGAIN"_kj;
+  }
+#else
+  switch (code) {
+    case ECONNREFUSED:
+      return "ECONNREFUSED"_kj;
+    case ETIMEDOUT:
+      return "ETIMEDOUT"_kj;
+    case EHOSTUNREACH:
+      return "EHOSTUNREACH"_kj;
+    case ENETUNREACH:
+      return "ENETUNREACH"_kj;
+  }
+#endif
+  return kj::none;
+}
+
+}  // namespace
+
+kj::Maybe<kj::StringPtr> connectErrnoName(const kj::Exception& exception) {
+  auto description = exception.getDescription();
+  // A failure raised through Rust's std::io::Error ends in "(os error N)" with the platform's
+  // error code, which is classified by number. Otherwise the description carries the
+  // strerror()/gai_strerror() text, from KJ ("connect(): ...", "DNS lookup failed.") or from
+  // Rust's resolver ("failed to lookup address information: ...").
+  KJ_IF_SOME(pos, description.find("(os error "_kj)) {
+    auto digits = description.slice(pos + "(os error "_kj.size());
+    size_t i = 0;
+    while (i < digits.size() && digits[i] >= '0' && digits[i] <= '9') {
+      i++;
+    }
+    if (i > 0 && i < digits.size() && digits[i] == ')') {
+      KJ_IF_SOME(code, kj::str(digits.first(i)).tryParseAs<int>()) {
+        KJ_IF_SOME(name, osErrorErrnoName(code)) return name;
+      }
+    }
+  }
+  if (description.contains("Connection refused"_kj)) return "ECONNREFUSED"_kj;
+  // Linux and macOS spellings of strerror(ETIMEDOUT).
+  if (description.contains("Connection timed out"_kj) ||
+      description.contains("Operation timed out"_kj)) {
+    return "ETIMEDOUT"_kj;
+  }
+  if (description.contains("No route to host"_kj)) return "EHOSTUNREACH"_kj;
+  if (description.contains("Network is unreachable"_kj)) return "ENETUNREACH"_kj;
+  if (description.contains("DNS lookup failed"_kj) || description.contains("getaddrinfo"_kj) ||
+      description.contains("failed to lookup address information"_kj)) {
+    // gai_strerror(EAI_AGAIN) on glibc and musl respectively.
+    if (description.contains("Temporary failure in name resolution"_kj) ||
+        description.contains("Try again"_kj)) {
+      return "EAI_AGAIN"_kj;
+    }
+    return "ENOTFOUND"_kj;
+  }
+  return kj::none;
+}
+
+kj::Maybe<kj::StringPtr> connectErrnoName(const kj::HttpHeaders& responseHeaders) {
+  kj::Maybe<kj::StringPtr> result;
+  responseHeaders.forEach([&](kj::StringPtr name, kj::StringPtr value) {
+    if (result == kj::none && strcaseeq(name, "proxy-status"_kj)) {
+      result = proxyStatusErrno(value);
+    }
+  });
+  return result;
+}
+
 void Socket::handleProxyStatus(
     jsg::Lock& js, kj::Promise<kj::HttpClient::ConnectRequest::Status> status) {
   auto& context = IoContext::current();
-  auto errorHandler = [](kj::Exception&& e) {
+  using Status = kj::HttpClient::ConnectRequest::Status;
+  // A rejected status becomes a synthetic 500; only the errno name of its cause is kept.
+  struct Outcome {
+    Status status;
+    kj::Maybe<kj::StringPtr> errnoName;
+  };
+  auto outcome = status.then(
+      [](Status&& status) { return Outcome{kj::mv(status), kj::none}; }, [](kj::Exception&& e) {
     // Let's not log errors when we have a disconnected exception.
     // If we don't filter this out, whenever connect() fails, we'll
     // have noisy errors even though the user catches the error on JS side.
@@ -988,10 +1299,10 @@ void Socket::handleProxyStatus(
         e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) == kj::none) {
       LOG_ERROR_PERIODICALLY("Socket proxy disconnected abruptly", e);
     }
-    return kj::HttpClient::ConnectRequest::Status(500, nullptr, kj::Own<kj::HttpHeaders>());
-  };
-  auto func = [self = JSG_THIS](
-                  jsg::Lock& js, kj::HttpClient::ConnectRequest::Status&& status) mutable -> void {
+    return Outcome{Status(500, nullptr, kj::Own<kj::HttpHeaders>()), connectErrnoName(e)};
+  });
+  auto func = [self = JSG_THIS](jsg::Lock& js, Outcome&& outcome) mutable -> void {
+    auto& status = outcome.status;
     if (status.statusCode < 200 || status.statusCode >= 300) {
       // If the status indicates an unsuccessful connection we need to reject the `closeFulfiller`
       // with an exception. This will reject the socket's `closed` promise.
@@ -1014,6 +1325,10 @@ void Socket::handleProxyStatus(
             "attempt to use connectionStringOverride failed to trigger connectOverride",
             self->remoteAddress, status.statusCode, status.statusText);
       }
+      self->connectErrno = outcome.errnoName;
+      if (self->connectErrno == kj::none && status.headers.get() != nullptr) {
+        self->connectErrno = connectErrnoName(*status.headers);
+      }
       self->handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, msg));
     } else {
       // For outbound sockets we have no useful local address to expose. Inbound sockets (produced
@@ -1026,7 +1341,8 @@ void Socket::handleProxyStatus(
           });
     }
   };
-  auto result = context.awaitIo(js, status.catch_(kj::mv(errorHandler)), kj::mv(func));
+  IoContext::AwaitIoOperation traceOperation(context, "socket_connect"_kj);
+  auto result = context.awaitIo(js, kj::mv(outcome), kj::mv(func));
   result.markAsHandled(js);
 }
 
@@ -1042,10 +1358,11 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
         e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) == kj::none) {
       LOG_ERROR_PERIODICALLY("Socket proxy disconnected abruptly", e);
     }
-    return KJ_EXCEPTION(FAILED, "connectResult raised an error");
+    return kj::mv(e);
   };
   auto func = [self = JSG_THIS](jsg::Lock& js, kj::Maybe<kj::Exception> result) mutable -> void {
-    if (result != kj::none) {
+    KJ_IF_SOME(e, result) {
+      self->connectErrno = connectErrnoName(e);
       self->handleProxyError(js, JSG_KJ_EXCEPTION(FAILED, Error, "connection attempt failed"));
     } else {
       // For outbound sockets we have no useful local address to expose. Inbound sockets (produced
@@ -1058,6 +1375,7 @@ void Socket::handleProxyStatus(jsg::Lock& js, kj::Promise<kj::Maybe<kj::Exceptio
           });
     }
   };
+  IoContext::AwaitIoOperation traceOperation(context, "socket_connect"_kj);
   auto result = context.awaitIo(js, connectResult.catch_(kj::mv(errorHandler)), kj::mv(func));
   result.markAsHandled(js);
 }
@@ -1093,6 +1411,7 @@ void Socket::wireClosedToDisconnect(jsg::Lock& js, kj::Promise<bool> disconnecte
   // The reference to the Socket must be weak. A strong one would keep the Socket alive until the
   // peer disconnects, which for a long-lived connection means it is never collected and the
   // connection is never closed by GC.
+  IoContext::AwaitIoOperation traceOperation(context, "socket_disconnect"_kj);
   context.awaitIo(js, kj::mv(disconnected))
       .then(js, [self = JSG_THIS_WEAK(js)](jsg::Lock& js, bool canceled) mutable {
     // Silently ignore the canceled case (the Socket was GC'd before disconnect) without resolving
@@ -1356,7 +1675,8 @@ jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
   js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate,
       js.wrapSimpleFunction(js.v8Context(),
           JSG_VISITABLE_LAMBDA((self = socket.addRef(), disconnected = kj::mv(disconnectedOwn)),
-              (self), (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& args) mutable {
+              (self),
+              (jsg::Lock & js, const v8::FunctionCallbackInfo<v8::Value>& args) mutable {
                 if (!IoContext::hasCurrent()) return;
                 JSG_TRY(js) {
                 self.get()->wireClosedToDisconnect(js, kj::mv(*disconnected));
@@ -1364,7 +1684,8 @@ jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
                 JSG_CATCH(exception) {
                 js.reportError(jsg::JsValue(exception.getHandle(js)));
                 }
-              })));
+              }),
+          jsg::Once::YES));
   KJ_IF_SOME(p, eofPromise) {
     js.v8Context()->GetMicrotaskQueue()->EnqueueMicrotask(js.v8Isolate,
         js.wrapSimpleFunction(js.v8Context(),
@@ -1377,7 +1698,8 @@ jsg::Ref<Socket> hydrateRpcSocket(jsg::Lock& js,
                   JSG_CATCH(exception) {
                   js.reportError(jsg::JsValue(exception.getHandle(js)));
                   }
-                })));
+                }),
+            jsg::Once::YES));
   }
 
   // `opened` was resolved synchronously above, so the transferred socket is immediately in the
@@ -1395,6 +1717,11 @@ jsg::Optional<kj::StringPtr> SocketsModule::getCallerDnsOverride(
     jsg::Lock& js, kj::String hostname) {
   auto& ioContext = IoContext::current();
   return ioContext.getCurrentLock().getGlobalScope().getDnsOverride(hostname);
+}
+
+jsg::Optional<kj::StringPtr> SocketsModule::getConnectFailureCode(
+    jsg::Lock& js, jsg::Ref<Socket> socket) {
+  return socket->getConnectErrno();
 }
 
 kj::Array<SocketsModule::InboundListener> SocketsModule::getInboundListeners(jsg::Lock& js) {
@@ -1584,7 +1911,7 @@ class NeuterableDatagramChannelImpl final: public NeuterableDatagramChannel {
         return *channel;
       }
       KJ_CASE_ONEOF(exception, kj::Exception) {
-        kj::throwFatalException(exception.clone());
+        kj::throwException(exception.clone());
       }
     }
     KJ_UNREACHABLE;

@@ -27,6 +27,7 @@ public:
   jsg::Promise<void> cancel(jsg::Lock& js, jsg::Optional<jsg::JsValue> maybeReason);
 
   void detach();
+  void release();
 
   jsg::MemoizedIdentity<jsg::Promise<void>>& getClosed();
 
@@ -130,6 +131,7 @@ public:
   void attach(jsg::Ref<ReadableStream> stream, jsg::Promise<void> closedPromise) override;
 
   void detach() override;
+  void release() override;
 
   void lockToStream(jsg::Lock& js, ReadableStream& stream);
 
@@ -206,6 +208,7 @@ public:
       jsg::Promise<void> closedPromise) override;
 
   void detach() override;
+  void release() override;
 
   void lockToStream(jsg::Lock& js, ReadableStream& stream);
 
@@ -250,6 +253,7 @@ class DrainingReader: public ReadableStreamController::Reader {
   // ReadableStreamController::Reader interface
   void attach(jsg::Ref<ReadableStream> stream, jsg::Promise<void> closedPromise) override;
   void detach() override;
+  void release() override;
   bool isByteOriented() const override { return false; }
 
   void visitForGc(jsg::GcVisitor& visitor);
@@ -579,15 +583,23 @@ kj::Own<ReadableStreamSource> newNoDeferredProxyReadableStream(
 RpcSerializerExternalHandler& requireReadableStreamRpcSerializer(jsg::Serializer& serializer);
 
 // Builds the wire plumbing for transferring a readable stream over RPC: pushes a ByteStream to
-// the peer, writes the external-table entry describing it (encoding plus expected length, when
+// the peer, writes the external-table entry describing it (encoding plus identity length, when
 // known), and returns the local sink the stream's remaining content must be pumped into (ending
 // the sink when the stream ends). Shared by ReadableStream::serialize() and JsReadableStream's
 // TypeScript arm, which differ only in how the encoding/length are obtained and how the pump is
 // driven.
+//
+// `encodedLength` is the exact remaining byte count in `encoding`, used to size the RPC transport.
+// `identityLength` is the remaining decoded byte count advertised to consumers. Pass kj::none for
+// either unknown count, not an estimate. Both may be supplied; they must agree for IDENTITY.
+// Omitting `identityLength` can leave the decoded length unknown even when `encodedLength` is
+// known, so consumers requiring a known length may reject the stream. Incorrect lengths can cause
+// stream errors or truncation; this helper does not validate `identityLength` against the content.
 kj::Own<WritableStreamSink> newReadableStreamSerializeSink(
     RpcSerializerExternalHandler& externalHandler,
     StreamEncoding encoding,
-    kj::Maybe<uint64_t> expectedLength);
+    kj::Maybe<uint64_t> encodedLength,
+    kj::Maybe<uint64_t> identityLength);
 
 // Materializes a readable stream received over RPC from its external-table entry: adopts the
 // pushed ByteStream, wraps it as a system stream of the peer's declared encoding (with deferred

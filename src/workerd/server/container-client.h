@@ -8,6 +8,7 @@
 #include <workerd/io/io-channels.h>
 #include <workerd/server/channel-token.h>
 #include <workerd/server/docker-api.capnp.h>
+#include <workerd/util/weak-refs.h>
 
 #include <capnp/compat/byte-stream.h>
 #include <capnp/compat/json.h>
@@ -201,7 +202,8 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   kj::Promise<ExecInspectResponse> inspectExec(kj::StringPtr execId);
   // Resizes the TTY of a running PTY exec to the given dimensions via Docker's resize endpoint.
   kj::Promise<void> resizeExec(kj::StringPtr execId, uint16_t cols, uint16_t rows);
-  kj::Promise<void> runSimpleExec(kj::ArrayPtr<const kj::String> cmd);
+  // Runs `cmd` in the container as a detached helper exec and returns its exit code once it ends.
+  kj::Promise<int32_t> runSimpleExec(kj::ArrayPtr<const kj::String> cmd);
   kj::Promise<void> startContainer();
   kj::Promise<void> stopContainer();
   kj::Promise<void> killContainer(uint32_t signal);
@@ -239,7 +241,7 @@ class ContainerClient final: public rpc::Container::Server, public kj::Refcounte
   ChannelTokenHandler& channelTokenHandler;
 
   // Opaque implementation struct holding egress mappings. Defined in container-client.c++ to
-  // avoid pulling heavy types (kj::OneOf, kj::CidrRange, kj::Vector) into server.c++ which
+  // avoid pulling heavy types (kj::OneOf, kj::CidrRange, kj::Vector) into the factory, which
   // includes this header.
   struct EgressState;
   kj::Own<EgressState> egressState;

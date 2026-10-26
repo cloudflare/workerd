@@ -23,6 +23,7 @@ use kj::io::AsyncIoStream;
 use kj_hyper::Hangup;
 use kj_hyper::WebSocketCompression;
 use kj_hyper::client::Client;
+use kj_hyper::client::ClientPool;
 use kj_hyper::client::ClientSettings;
 use kj_hyper::client::Dialed;
 use kj_hyper::client::Peer;
@@ -334,12 +335,10 @@ pub unsafe fn new_client(
 ) -> Box<TestClient> {
     // SAFETY: the caller's contract.
     let table: &'static HeaderTable = unsafe { &*table };
-    let client = Client::new(
-        table,
-        settings(manual_compression),
-        Peer::Origin,
-        move || tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port)),
-    );
+    let client = ClientPool::new(settings(manual_compression), Peer::Origin, move || {
+        tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port))
+    })
+    .client(table);
     Box::new(TestClient {
         client,
         peer: RefCell::new(None),
@@ -371,7 +370,7 @@ pub unsafe fn new_pipe_client(
     } else {
         Peer::Origin
     };
-    let client = Client::new(table, settings(manual_compression), peer_kind, dial);
+    let client = ClientPool::new(settings(manual_compression), peer_kind, dial).client(table);
     Box::new(TestClient {
         client,
         peer: RefCell::new(Some(kj_hyper::into_kj_stream(peer))),

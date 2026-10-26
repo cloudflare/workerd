@@ -11,20 +11,26 @@
 //!   [`server::Connect::reject`]) or handed to C++ ([`server::Connect::into_kj`]). A call that
 //!   fails unanswered gets a bare 500.
 //! - [`client`]: [`client::Client`], a pooled HTTP/1.1 client over hyper-util's legacy client
-//!   implementing `kj::http::Service`, so C++ can make outbound requests through it.
-//!   `Client::new(table, settings, peer, dial)` pools connections to one peer through a dialer
+//!   implementing `kj::http::Service`, so C++ can make outbound requests through it. Its
+//!   connections are a [`client::ClientPool`], which owns no header table, so a caller keeps one
+//!   for good and lends it to a `Client` per call (`pool.client(table)`).
+//!   `ClientPool::new(settings, peer, dial)` pools connections to one peer through a dialer
 //!   and asks it for paths ([`client::Peer::Origin`]) or, of an HTTP proxy, for absolute URLs
-//!   sent whole ([`client::Peer::Proxy`]), and its `tunnel(host)` is an HTTP CONNECT through that
-//!   peer, handed to C++ as a `kj::AsyncIoStream`; `Client::internet(table, settings, tls,
-//!   connect)` reaches whatever authority a request's URL names through `connect(host, port)`,
-//!   the caller's connection to it (`connect_allowed(host, port, allow)` is the usual one:
-//!   resolve, then the first address `allow` admits that accepts).
+//!   sent whole ([`client::Peer::Proxy`]); `pool.client(table).tunnel(host)` is an HTTP CONNECT
+//!   through that peer, handed to C++ as a `kj::AsyncIoStream`;
+//!   `ClientPool::internet(settings, tls, connect)` reaches whatever authority a request's URL
+//!   names through `connect(host, port)`, the caller's connection to it
+//!   (`connect_allowed(host, port, allow)` is the usual one: resolve, then the first address
+//!   `allow` admits that accepts).
 //! - `body`: message bodies in both directions, and outgoing headers laid out as kj writes them.
 //! - [`tls`]: rustls configurations from workerd's `TlsOptions`, and the handshakes.
 //! - `handshake`: the WebSocket handshake's computed header values. The `WebSocket` itself is
 //!   kj's (`kj::newWebSocket`) over the upgraded connection, built on the C++ side.
 //! - [`into_kj_stream`] / [`into_kj_stream_with`]: tokio streams handed to C++ as
 //!   `kj::AsyncIoStream`.
+//! - [`StartTlsIo`]: a plain transport that becomes TLS when kj's `TlsStarterCallback` is invoked;
+//!   the client's tunnels upgrade as the client, and [`StartTlsIo::server`] upgrades an accepted
+//!   connection as the server.
 //!
 //! kj-hyper is used from Rust; its C++ (kj-hyper.c++) exists only to implement kj interfaces over
 //! Rust objects, and all of its `unsafe` code lives in `ffi.rs`.
@@ -76,6 +82,7 @@ pub use io::Hangup;
 pub use io::into_kj_stream;
 pub use io::into_kj_stream_with;
 pub use io::io_kj_error;
+pub use starttls::StartTlsIo;
 
 /// `kj::Result` unless an error type is given, so it can stand in for `std::result::Result`.
 pub type Result<T, E = KjError> = result::Result<T, E>;

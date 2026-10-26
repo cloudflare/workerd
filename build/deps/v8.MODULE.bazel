@@ -18,9 +18,9 @@ http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "ht
 
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 
-VERSION = "15.6.75"
+VERSION = "15.7.112.5"
 
-INTEGRITY = "sha256-XnqZSOkB22CsG/fXWcxu8zMvCWz48V7LGLaM4TA/kig="
+INTEGRITY = "sha256-75cdFxzDnZQ3t5FG1zp57TVdT/dpu++dd5ASvCKsSzQ="
 
 PATCHES = [
     "0001-Allow-manually-setting-ValueDeserializer-format-vers.patch",
@@ -54,19 +54,22 @@ PATCHES = [
     "0029-Add-v8-String-IsFlat-API.patch",
     "0030-Expose-AdjustAmountOfExternalAllocatedMemoryImpl-as-.patch",
     "0031-Add-verify_write_barriers-flag-in-V8-s-bazel-config.patch",
-    "0032-Change-lamba-signature-to-get-around-windows-build-f.patch",
-    "0033-Return-false-on-Object.hasOwnProperty-with-intercept.patch",
-    "0034-Remove-V8-MODULE.bazel-llvm-toolchain-and-libcxx-rep.patch",
-    "0035-Remove-libcxx-dep-from-defs.bzl-not-resolvable-via-h.patch",
-    "0036-Fix-ExtendedMap-layout-on-Windows.patch",
-    "0037-Fix-CFunction-MemorySpan-declarations-on-Windows.patch",
-    "0038-Properly-depend-on-llvm-libc.patch",
-    "0039-Fix-TSan-build-without-the-V8-sandbox.patch",
-    "0040-Enable-Perfetto-support-in-the-V8-Bazel-build.patch",
-    "0041-Disable-preserve_most-on-Windows-x64-before-Clang-22.patch",
-    "0042-cppgc-Sweep-cppgc-eagerly-with-non-incremental-GC.patch",
-    "0043-Build-V8-release-archives-without-metagen.patch",
-    "0044-Load-cc_library-in-BUILD.icu.patch",
+    "0032-Return-false-on-Object.hasOwnProperty-with-intercept.patch",
+    "0033-Remove-V8-MODULE.bazel-llvm-toolchain-and-libcxx-rep.patch",
+    "0034-Remove-libcxx-dep-from-defs.bzl-not-resolvable-via-h.patch",
+    "0035-Fix-ExtendedMap-layout-on-Windows.patch",
+    "0036-Fix-CFunction-MemorySpan-declarations-on-Windows.patch",
+    "0037-Properly-depend-on-llvm-libc.patch",
+    "0038-Fix-TSan-build-without-the-V8-sandbox.patch",
+    "0039-Enable-Perfetto-support-in-the-V8-Bazel-build.patch",
+    "0040-Disable-preserve_most-on-Windows-x64-before-Clang-22.patch",
+    "0041-cppgc-Sweep-cppgc-eagerly-with-non-incremental-GC.patch",
+    "0042-Build-V8-release-archives-without-metagen.patch",
+    "0043-Load-cc_library-in-BUILD.icu.patch",
+    "0044-Consider-all-dynamic-functions-code-like.patch",
+    "0045-Add-UnboundModuleScript-GetCompileHintsCollector.patch",
+    "0046-Forward-ThinStrings-shortcut-by-the-scavenger.patch",
+    "0047-Add-v8-Data-IsCompatibleWithIsolate.patch",
 ]
 
 http_archive(
