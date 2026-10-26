@@ -405,11 +405,18 @@ void Span::recordException(
     return;
   }
 
+  KJ_IF_SOME(fields, readException(js, exception.getHandle(js), exceptionHandler)) {
+    recordExceptionFields(kj::mv(fields));
+  }
+}
+
+kj::Maybe<Span::ExceptionFields> Span::readException(jsg::Lock& js,
+    v8::Local<v8::Value> handle,
+    const jsg::TypeHandler<ExceptionData>& exceptionHandler) {
   kj::String name;
   kj::String message;
   kj::Maybe<kj::String> stack;
   kj::Maybe<tracing::Exception::Code> code;
-  auto handle = exception.getHandle(js);
   if (handle->IsString()) {
     message = jsg::JsValue(handle).toString(js);
   } else if (handle->IsObject()) {
@@ -417,7 +424,7 @@ void Span::recordException(
     bool hasRequiredField =
         data.code != kj::none || data.name != kj::none || data.message != kj::none;
     if (!hasRequiredField) {
-      return;
+      return kj::none;
     }
     KJ_IF_SOME(c, data.code) {
       KJ_SWITCH_ONEOF(c) {
@@ -439,15 +446,26 @@ void Span::recordException(
       stack = kj::mv(s);
     }
   } else {
-    return;
+    return kj::none;
   }
 
+  return ExceptionFields{
+    .code = kj::mv(code),
+    .name = kj::mv(name),
+    .message = kj::mv(message),
+    .stack = kj::mv(stack),
+  };
+}
+
+void Span::recordExceptionFields(ExceptionFields fields) {
   KJ_SWITCH_ONEOF(state) {
     KJ_CASE_ONEOF(s, kj::Own<SpanState>) {
-      s->recordException(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
+      s->recordException(
+          kj::mv(fields.code), kj::mv(fields.name), kj::mv(fields.message), kj::mv(fields.stack));
     }
     KJ_CASE_ONEOF(s, IoOwn<SpanState>) {
-      s->recordException(kj::mv(code), kj::mv(name), kj::mv(message), kj::mv(stack));
+      s->recordException(
+          kj::mv(fields.code), kj::mv(fields.name), kj::mv(fields.message), kj::mv(fields.stack));
     }
   }
 }
@@ -513,8 +531,9 @@ void Span::recordCallbackError(
 
   // Reading the error's properties can run user code that throws. That must never replace the
   // callback's own error, so it only leaves out the exception or the status message.
+  kj::Maybe<ExceptionFields> fields;
   JSG_TRY(js) {
-    recordException(js, error.addRef(js), exceptionHandler);
+    fields = readException(js, error.getHandle(js), exceptionHandler);
   }
   JSG_CATCH(exception KJ_UNUSED) {}
 
@@ -530,10 +549,15 @@ void Span::recordCallbackError(
   }
   JSG_CATCH(exception KJ_UNUSED) {}
 
-  // That user code may have set the status, too.
-  if (!statusSet) {
-    setStatus(js, TracingSpanStatus{.code = kj::str("error"), .message = kj::mv(message)});
+  // That user code can also set the status. If it did, record neither the exception nor the
+  // error status.
+  if (statusSet) {
+    return;
   }
+  KJ_IF_SOME(f, fields) {
+    recordExceptionFields(kj::mv(f));
+  }
+  setStatus(js, TracingSpanStatus{.code = kj::str("error"), .message = kj::mv(message)});
 }
 
 void Span::end() {
