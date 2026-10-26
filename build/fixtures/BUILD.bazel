@@ -1,0 +1,8 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+# A test with no dependencies, which build/check_ci_flags.sh configures under different flags.
+sh_test(
+    name = "flags-probe",
+    srcs = ["flags-probe.sh"],
+    tags = ["manual"],
+)
