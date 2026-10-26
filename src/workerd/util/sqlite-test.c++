@@ -985,6 +985,43 @@ KJ_TEST("SQLite observer addQueryStats") {
   KJ_EXPECT(sqliteObserver.rowsWritten - rowsWrittenBefore == 1);
 }
 
+KJ_TEST("SQLite observer addQueryStats counts prelude statements once per run") {
+  class TestQueryStatsRegulator: public SqliteDatabase::Regulator {
+   public:
+    bool shouldAddQueryStats() const override {
+      return true;
+    }
+  };
+
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  MockSqliteObserver sqliteObserver = MockSqliteObserver();
+  static TestQueryStatsRegulator regulator;
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY,
+      /*sqliteMaxMemoryBytes=*/kj::maxValue, /*sqliteMaxMemoryPerProcessBytes=*/kj::maxValue,
+      sqliteObserver);
+
+  db.run("CREATE TABLE things (id INTEGER PRIMARY KEY)");
+  db.run("INSERT INTO things (id) VALUES (1), (2), (3)");
+
+  // The first run executes the leading statements while it compiles them. Later runs execute them
+  // from the prelude, and each of these runs must count only its own rows.
+  auto stmt = db.prepareMulti(
+      regulator, kj::str("SELECT id FROM things; INSERT INTO things (id) VALUES (NULL); SELECT 1"));
+  stmt.run();
+
+  for (auto i KJ_UNUSED: kj::zeroTo(2)) {
+    uint64_t rowsReadBefore = sqliteObserver.rowsRead;
+    uint64_t rowsWrittenBefore = sqliteObserver.rowsWritten;
+    stmt.run();
+    // The leading SELECT steps one time, so it reads one row. The INSERT reads and writes one row.
+    KJ_EXPECT(
+        sqliteObserver.rowsRead - rowsReadBefore == 2, sqliteObserver.rowsRead - rowsReadBefore);
+    KJ_EXPECT(sqliteObserver.rowsWritten - rowsWrittenBefore == 1,
+        sqliteObserver.rowsWritten - rowsWrittenBefore);
+  }
+}
+
 KJ_TEST("SQLite observer reportQueryEvent") {
   class TestSqliteObserver: public SqliteObserver {
    public:

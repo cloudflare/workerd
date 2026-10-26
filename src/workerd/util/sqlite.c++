@@ -994,6 +994,11 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(StaticRegulator re
             int resetResult = sqlite3_reset(result);
             KJ_ASSERT(resetResult == SQLITE_OK, sqlite3_errstr(resetResult));
 
+            // sqlite3_reset() does not clear the row counters. Clear them so that the next run
+            // reports only its own rows, as Query::destroy() does after each run.
+            sqlite3_stmt_status(result, LIBSQL_STMTSTATUS_ROWS_READ, 1);
+            sqlite3_stmt_status(result, LIBSQL_STMTSTATUS_ROWS_WRITTEN, 1);
+
             p.add(Statement(*this, regulator,
                 StatementAndEffect{.statement = kj::mv(ownResult),
                   .stateChange = kj::mv(parseContext.stateChange)}));
