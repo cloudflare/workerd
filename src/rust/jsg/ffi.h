@@ -385,16 +385,7 @@ bool unwrap_string(Isolate* isolate, Local value, ::rust::String& result);
 bool unwrap_boolean(Isolate* isolate, Local value);
 bool unwrap_number(Isolate* isolate, Local value, double& result);
 kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value);
-::rust::Vec<uint8_t> unwrap_uint8_array(Isolate* isolate, Local value);
-::rust::Vec<uint16_t> unwrap_uint16_array(Isolate* isolate, Local value);
-::rust::Vec<uint32_t> unwrap_uint32_array(Isolate* isolate, Local value);
-::rust::Vec<int8_t> unwrap_int8_array(Isolate* isolate, Local value);
-::rust::Vec<int16_t> unwrap_int16_array(Isolate* isolate, Local value);
-::rust::Vec<int32_t> unwrap_int32_array(Isolate* isolate, Local value);
-::rust::Vec<float> unwrap_float32_array(Isolate* isolate, Local value);
-::rust::Vec<double> unwrap_float64_array(Isolate* isolate, Local value);
-::rust::Vec<int64_t> unwrap_bigint64_array(Isolate* isolate, Local value);
-::rust::Vec<uint64_t> unwrap_biguint64_array(Isolate* isolate, Local value);
+
 // ArrayBuffer detach/detachable/was-detached
 void local_array_buffer_detach(Isolate* isolate, Local& buffer);
 bool local_array_buffer_was_detached(const Local& buffer);

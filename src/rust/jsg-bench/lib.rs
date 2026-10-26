@@ -239,7 +239,8 @@ impl Target {
     }
 
     #[jsg_method]
-    fn bytes_copy(&self, a: Vec<u8>) -> Number {
+    fn bytes_copy<'s>(&self, lock: &mut jsg::Lock<'s>, a: v8::Local<'s, v8::Uint8Array>) -> Number {
+        let a = a.as_slice(lock).to_vec();
         black_box(&a);
         (a.len() as u32).into()
     }

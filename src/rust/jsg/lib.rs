@@ -8,6 +8,7 @@ use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
+mod buffer;
 pub mod fast_api;
 pub mod feature_flags;
 mod isolate_state;
@@ -22,6 +23,8 @@ pub mod ser;
 pub mod v8;
 mod wrappable;
 
+pub use buffer::ToJsArrayBuffer;
+pub use buffer::ToJsTypedArray;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
 pub use lenient::Lenient;
@@ -571,8 +574,7 @@ impl<T> Deref for NonCoercible<T> {
 /// | Rust Type | JavaScript Type |
 /// |-----------|-----------------|
 /// | `jsg::Number` | `number` |
-/// | `f64` | Used for `Float64Array` elements |
-/// | `Vec<f64>` | `Float64Array` |
+/// | `f64` | an element of a `Float64Array` (see `ToJsTypedArray`), not a value by itself |
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct Number {
     value: f64,

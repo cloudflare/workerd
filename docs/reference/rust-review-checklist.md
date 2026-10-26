@@ -96,12 +96,15 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   `JSG_STATIC_CONSTANT`). The name is used as-is (no camelCase conversion).
 - **`#[jsg_struct]`** is for value types (passed by value across the JS boundary).
 - **`#[jsg_oneof]`** is for union/variant types (mapped from JS values by trying each variant).
-- **Type mappings**: `jsg::Number` wraps JS numbers (distinct from `f64`). `Vec<u8>` maps to
-  `Uint8Array`, not a regular JS `Array`. `Option<T>` maps to `T | undefined`; like
-  `jsg::Optional<T>`, `null` converts as `T`. `Nullable<T>` maps to `T | null` and, like
-  `kj::Maybe<T>`, coerces `undefined` to `null` on input, but a method argument is still
-  required. Use `Option<Nullable<T>>` for an optional `T | null | undefined` that keeps
-  `undefined` distinct from `null`.
+- **Type mappings**: `jsg::Number` wraps JS numbers (distinct from `f64`). `Vec<T>` converts to a
+  JS `Array`. A typed array comes from `to_js_typed_array` on a slice, and an `ArrayBuffer` from
+  `to_js_array_buffer` on a byte slice (what C++ JSG returns for `kj::Array<kj::byte>`). From
+  JS, `Vec<T>` reads an `Array`, and a typed array or `ArrayBuffer` is a handle such as
+  `v8::Local<v8::Uint8Array>`.
+  `Option<T>` maps to `T | undefined`; like `jsg::Optional<T>`, `null` converts as `T`.
+  `Nullable<T>` maps to `T | null` and, like `kj::Maybe<T>`, coerces `undefined` to `null` on
+  input, but a method argument is still required. Use `Option<Nullable<T>>` for an optional
+  `T | null | undefined` that keeps `undefined` distinct from `null`.
   `String`/`&str` map to JS strings. Integers and `#[jsg_struct]`s convert like C++ JSG's
   integers and dictionaries: out-of-range integers throw, and an absent struct field reads as
   `undefined`.

@@ -550,10 +550,59 @@ but not return values:
   Like C++ JSG's integers.
 - `i64`: a `BigInt` that fits, or any other value converted to a number, which must be finite and
   in range, and truncates toward zero. Like C++ JSG's `int64_t`.
-- `&[T]` and typed-array slices such as `&[u8]`.
+- `&[T]`.
 
 Like C++ JSG's `kj::Date`, `SystemTime` converts to a `Date` of the milliseconds since the epoch,
 truncated toward zero, and from a `Date` or a number of milliseconds within the range of `kj::Date`.
+
+### Arrays, typed arrays and `ArrayBuffer`s
+
+A `Vec<T>` converts to a JavaScript `Array` of the converted elements. A typed array or an
+`ArrayBuffer` is an explicit conversion of a slice:
+
+```rust
+use jsg::ToJsArrayBuffer;
+use jsg::ToJsTypedArray;
+
+let bytes: Vec<u8> = encode(input);
+let typed: v8::Local<v8::Uint8Array> = bytes.to_js_typed_array(lock); // Uint8Array
+let buffer: v8::Local<v8::ArrayBuffer> = bytes.to_js_array_buffer(lock); // ArrayBuffer
+```
+
+`to_js_typed_array` makes the typed array of the element type, from `Uint8Array` for `[u8]` to
+`BigUint64Array` for `[u64]`. `to_js_array_buffer` makes an `ArrayBuffer` holding the bytes, which
+is what C++ JSG returns for a `kj::Array<kj::byte>`; only `[u8]` has it. A method returns the
+handle, and so takes `lock: &mut Lock<'s>` and names the scope:
+
+```rust
+#[jsg_method]
+pub fn digest<'s>(
+    &self,
+    lock: &mut jsg::Lock<'s>,
+    data: v8::Local<'s, v8::Uint8Array>,
+) -> v8::Local<'s, v8::Uint8Array> {
+    hash(data.as_slice(lock)).to_js_typed_array(lock)
+}
+```
+
+From JavaScript, a `Vec<T>` or `&[T]` parameter reads an `Array`. A typed array parameter is a
+handle, whose `as_slice(lock)` reads its memory in place; copy it out with `to_vec()` if the
+method keeps it. An `ArrayBuffer` parameter is a `v8::Local<'s, v8::ArrayBuffer>`, and a
+`v8::Local<'s, v8::ArrayBufferView>` accepts any typed array or `DataView`. To return an
+`ArrayBuffer` of bytes computed in Rust, call `to_js_array_buffer(lock)` on them; to fill one in
+place, allocate it with `ArrayBuffer::new_zeroed_with` and view it with `Uint8Array::from_buffer`.
+
+To port a C++ JSG signature:
+
+| C++ JSG | Rust JSG |
+| --- | --- |
+| `kj::Array<kj::byte>` returned | `v8::Local<'s, v8::ArrayBuffer>`, from `to_js_array_buffer` |
+| `kj::Array<kj::byte>` parameter | `v8::Local<'s, v8::ArrayBufferView>`; C++ JSG also accepts a bare `ArrayBuffer`, for which take a `v8::Local<'s, v8::Value>` and `try_into()` each |
+| `jsg::BufferSource` | `v8::Local<'s, v8::Value>`; check `is_array_buffer()` / `is_array_buffer_view()` and `try_into()` each |
+| `v8::Local<v8::Uint8Array>` returned | `v8::Local<'s, v8::Uint8Array>`, from `to_js_typed_array` |
+| `kj::Array<double>` | `Vec<Number>` |
+| `kj::Array<bool>` | `Vec<bool>` |
+| `kj::Array<T>` of anything else | `Vec<T>` |
 
 ## Union Types
 

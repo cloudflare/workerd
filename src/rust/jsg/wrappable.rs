@@ -33,33 +33,20 @@
 //! | `Vec<T>` | `Array<T>` |
 //! | `&[T]` | `Array<T>` (parameter only) |
 //!
-//! ## `TypedArray` Types
+//! ## Arrays, Typed Arrays and `ArrayBuffer`s
 //!
-//! These specialized `Vec` and slice types map directly to JavaScript `TypedArray`s
-//! for efficient binary data transfer:
+//! A `Vec<T>` converts to an `Array` of the converted elements. A typed array or an `ArrayBuffer`
+//! is an explicit conversion of a slice:
 //!
-//! | Rust Type | JavaScript Type |
-//! |-----------|-----------------|
-//! | `Vec<u8>` | `Uint8Array` |
-//! | `Vec<u16>` | `Uint16Array` |
-//! | `Vec<u32>` | `Uint32Array` |
-//! | `Vec<i8>` | `Int8Array` |
-//! | `Vec<i16>` | `Int16Array` |
-//! | `Vec<i32>` | `Int32Array` |
-//! | `Vec<f32>` | `Float32Array` |
-//! | `Vec<f64>` | `Float64Array` |
-//! | `Vec<i64>` | `BigInt64Array` |
-//! | `Vec<u64>` | `BigUint64Array` |
-//! | `&[u8]` | `Uint8Array` (parameter only) |
-//! | `&[u16]` | `Uint16Array` (parameter only) |
-//! | `&[u32]` | `Uint32Array` (parameter only) |
-//! | `&[i8]` | `Int8Array` (parameter only) |
-//! | `&[i16]` | `Int16Array` (parameter only) |
-//! | `&[i32]` | `Int32Array` (parameter only) |
-//! | `&[f32]` | `Float32Array` (parameter only) |
-//! | `&[f64]` | `Float64Array` (parameter only) |
-//! | `&[i64]` | `BigInt64Array` (parameter only) |
-//! | `&[u64]` | `BigUint64Array` (parameter only) |
+//! | Call | JavaScript Type |
+//! |------|-----------------|
+//! | `numbers.to_js_typed_array(lock)` ([`ToJsTypedArray`](crate::ToJsTypedArray)) | the typed array of the element type: `Uint8Array` for `[u8]`, `Float64Array` for `[f64]`, `BigInt64Array` for `[i64]`, ... |
+//! | `bytes.to_js_array_buffer(lock)` ([`ToJsArrayBuffer`](crate::ToJsArrayBuffer)) | `ArrayBuffer` holding the bytes; `[u8]` only |
+//!
+//! From JavaScript, a `Vec<T>` or `&[T]` parameter reads an `Array` whose elements convert to
+//! `T`. A typed array parameter is a handle, `v8::Local<'s, v8::Uint8Array>` and so on, which
+//! reads its memory in place with `as_slice(lock)`. An `ArrayBuffer` is a
+//! `v8::Local<'s, v8::ArrayBuffer>`, and `v8::Local<'s, v8::ArrayBufferView>` accepts any view.
 //!
 //! ## Integer Parameter Types
 //!
@@ -1091,205 +1078,43 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
 // TypedArray implementations
 // =============================================================================
 //
-// This macro generates implementations for TypedArray types:
-// - `v8::*Array` marker types: `Type` trait for type-safe V8 handles
-// - `Vec<T>`: `Type`, `ToJS`, `FromJS` for bidirectional conversion
-// - `&[T]`: `Type`, `FromJS` for parameter-only conversion (delegates to Vec<T>)
-//
-// Supported mappings:
-// - `Vec<u8>` / `&[u8]`   <-> `Uint8Array`
-// - `Vec<u16>` / `&[u16]` <-> `Uint16Array`
-// - `Vec<u32>` / `&[u32]` <-> `Uint32Array`
-// - `Vec<i8>` / `&[i8]`   <-> `Int8Array`
-// - `Vec<i16>` / `&[i16]` <-> `Int16Array`
-// - `Vec<i32>` / `&[i32]` <-> `Int32Array`
-// - `Vec<f32>` / `&[f32]` <-> `Float32Array`
-// - `Vec<f64>` / `&[f64]` <-> `Float64Array`
-// - `Vec<i64>` / `&[i64]` <-> `BigInt64Array`
-// - `Vec<u64>` / `&[u64]` <-> `BigUint64Array`
+// The conversions of typed arrays are those of their handles, `Local<'s, T>`, in `v8.rs`. The
+// marker types implement `Type`, which names their JavaScript class.
 
-macro_rules! impl_typed_array {
-    ($elem:ty, $marker:ident, $is_check:ident, $new_fn:ident, $unwrap_fn:ident) => {
-        impl Type for v8::$marker {
-            fn class_name() -> &'static str {
-                stringify!($marker)
-            }
-            fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-                value.$is_check()
-            }
-        }
-
-        impl Type for Vec<$elem> {
-            fn class_name() -> &'static str {
-                stringify!($marker)
-            }
-            fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-                value.$is_check()
-            }
-        }
-
-        impl Type for &[$elem] {
-            fn class_name() -> &'static str {
-                stringify!($marker)
-            }
-            fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-                value.$is_check()
-            }
-        }
-
-        impl<'s> ToJS<'s> for Vec<$elem> {
-            #[inline]
-            fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-                let isolate = lock.isolate();
-                // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.
-                Ok(unsafe {
-                    v8::Local::from_ffi(v8::ffi::$new_fn(
-                        isolate.as_ffi(),
-                        self.as_ptr(),
-                        self.len(),
-                    ))
-                })
-            }
-        }
-
-        impl<'s> FromJS<'s> for Vec<$elem> {
-            type ResultType = Self;
-
-            fn type_name() -> String {
-                stringify!($marker).to_owned()
-            }
-
-            fn from_js(
-                lock: &mut Lock<'s>,
-                value: v8::Local<'s, v8::Value>,
-            ) -> Result<Self, Error> {
-                if !value.$is_check() {
-                    return Err(Error::new_type_error(format!(
-                        "Expected {} but got {}",
-                        stringify!($marker),
-                        value.type_of(lock)
-                    )));
+macro_rules! impl_typed_array_type {
+    ($($marker:ident => $is_check:ident),* $(,)?) => {
+        $(
+            impl Type for v8::$marker {
+                fn class_name() -> &'static str {
+                    stringify!($marker)
                 }
-                // SAFETY: The isolate is locked and value is a valid V8 local handle of the correct TypedArray type.
-                Ok(unsafe { v8::ffi::$unwrap_fn(lock.isolate().as_ffi(), value.into_ffi()) }?)
-            }
-
-            fn try_from_js(
-                lock: &mut Lock<'s>,
-                value: v8::Local<'s, v8::Value>,
-            ) -> Result<Option<Self>, Error> {
-                if !value.$is_check() {
-                    return Ok(None);
+                fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+                    value.$is_check()
                 }
-                // SAFETY: The isolate is locked and value is a valid V8 local handle of the correct TypedArray type.
-                Ok(Some(unsafe {
-                    v8::ffi::$unwrap_fn(lock.isolate().as_ffi(), value.into_ffi())
-                }?))
             }
-        }
-
-        impl<'s> FromJS<'s> for &[$elem] {
-            type ResultType = Vec<$elem>;
-
-            fn type_name() -> String {
-                stringify!($marker).to_owned()
-            }
-
-            fn from_js(
-                lock: &mut Lock<'s>,
-                value: v8::Local<'s, v8::Value>,
-            ) -> Result<Vec<$elem>, Error> {
-                Vec::<$elem>::from_js(lock, value)
-            }
-
-            fn try_from_js(
-                lock: &mut Lock<'s>,
-                value: v8::Local<'s, v8::Value>,
-            ) -> Result<Option<Vec<$elem>>, Error> {
-                Vec::<$elem>::try_from_js(lock, value)
-            }
-        }
+        )*
     };
 }
 
-impl_typed_array!(
-    u8,
-    Uint8Array,
-    is_uint8_array,
-    local_new_uint8_array,
-    unwrap_uint8_array
-);
-impl_typed_array!(
-    u16,
-    Uint16Array,
-    is_uint16_array,
-    local_new_uint16_array,
-    unwrap_uint16_array
-);
-impl_typed_array!(
-    u32,
-    Uint32Array,
-    is_uint32_array,
-    local_new_uint32_array,
-    unwrap_uint32_array
-);
-impl_typed_array!(
-    i8,
-    Int8Array,
-    is_int8_array,
-    local_new_int8_array,
-    unwrap_int8_array
-);
-impl_typed_array!(
-    i16,
-    Int16Array,
-    is_int16_array,
-    local_new_int16_array,
-    unwrap_int16_array
-);
-impl_typed_array!(
-    i32,
-    Int32Array,
-    is_int32_array,
-    local_new_int32_array,
-    unwrap_int32_array
-);
-impl_typed_array!(
-    f32,
-    Float32Array,
-    is_float32_array,
-    local_new_float32_array,
-    unwrap_float32_array
-);
-impl_typed_array!(
-    f64,
-    Float64Array,
-    is_float64_array,
-    local_new_float64_array,
-    unwrap_float64_array
-);
-impl_typed_array!(
-    i64,
-    BigInt64Array,
-    is_bigint64_array,
-    local_new_bigint64_array,
-    unwrap_bigint64_array
-);
-impl_typed_array!(
-    u64,
-    BigUint64Array,
-    is_biguint64_array,
-    local_new_biguint64_array,
-    unwrap_biguint64_array
+impl_typed_array_type!(
+    Uint8Array => is_uint8_array,
+    Uint16Array => is_uint16_array,
+    Uint32Array => is_uint32_array,
+    Int8Array => is_int8_array,
+    Int16Array => is_int16_array,
+    Int32Array => is_int32_array,
+    Float32Array => is_float32_array,
+    Float64Array => is_float64_array,
+    BigInt64Array => is_bigint64_array,
+    BigUint64Array => is_biguint64_array,
 );
 
 // =============================================================================
 // ArrayBuffer, ArrayBufferView, SharedArrayBuffer
 // =============================================================================
 //
-// These three types only implement `Type` (used by `NonCoercible<T>` for type
-// checking).  They do not have element-typed `ToJS`/`FromJS` conversions and
-// do not fit the `impl_typed_array!` macro.
+// These types only implement `Type` (used by `NonCoercible<T>` for type checking); their
+// conversions are those of their handles, in `v8.rs`.
 
 impl Type for v8::ArrayBuffer {
     fn class_name() -> &'static str {
