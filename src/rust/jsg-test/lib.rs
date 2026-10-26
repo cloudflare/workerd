@@ -84,6 +84,11 @@ mod ffi {
         /// termination exception is pending on return. See `terminate_and_deliver` in `ffi.h`.
         pub unsafe fn terminate_and_deliver(isolate: *mut Isolate);
 
+        /// Runs the isolate's pending microtasks.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn run_microtasks(isolate: *mut Isolate);
+
         /// Calls `callback` with the isolate unlocked (`v8::Unlocker`), then locks it again.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
@@ -387,6 +392,13 @@ impl Harness {
     pub fn request_gc(lock: &mut jsg::Lock<'_>) {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe { ffi::request_gc(lock.isolate().as_ffi(), ffi::GcType::Full) };
+    }
+
+    /// Runs the pending microtasks, such as promise reactions, as the event loop does after
+    /// each task. The isolate's microtask policy is explicit, so nothing else runs them.
+    pub fn run_microtasks(lock: &mut jsg::Lock<'_>) {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::run_microtasks(lock.isolate().as_ffi()) };
     }
 
     pub fn request_minor_gc(lock: &mut jsg::Lock<'_>) {

@@ -1734,4 +1734,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # `tlsMode = startTls`, or another Worker's socket opened with `secureTransport: 'starttls'`.
   # The handler's socket then has secureTransport "starttls". Without the flag, it has
   # secureTransport "off" and its startTls() throws.
+
+  offpeakLocationHint @197 :Bool
+      $compatEnableFlag("offpeak_location_hint")
+      $experimental;
+  # Allows `locationHint: "offpeak"` when getting a Durable Object stub. In production, a new object
+  # created with this hint is placed in a region that is off-peak at the current UTC time. The
+  # experimental catch-all flag also allows it. Without either flag, the hint is rejected as
+  # unsupported.
 }
