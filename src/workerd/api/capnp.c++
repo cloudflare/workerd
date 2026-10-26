@@ -120,7 +120,11 @@ struct JsCapnpConverter {
                 reinterpret_cast<const kj::byte*>(backing->Data()), backing->ByteLength())));
           } else if (jsValue->IsArrayBufferView()) {
             auto arrayBufferView = jsValue.As<v8::ArrayBufferView>();
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+            auto backing = arrayBufferView->GetBuffer()->GetBackingStore();
+#else
             auto backing = arrayBufferView->Buffer()->GetBackingStore();
+#endif
             kj::ArrayPtr buffer(static_cast<kj::byte*>(backing->Data()), backing->ByteLength());
             auto sliceStart = arrayBufferView->ByteOffset();
             auto sliceEnd = sliceStart + arrayBufferView->ByteLength();

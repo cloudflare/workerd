@@ -1189,7 +1189,11 @@ KJ_TEST("BYOB read into an offset view fills only the view's region, returns a U
       // The result is a Uint8Array over the same buffer, covering the view's region.
       v8::Local<v8::Uint8Array> u8 = KJ_ASSERT_NONNULL(handle.tryCast<jsg::JsUint8Array>());
       auto buffer = bufferRef.getHandle(js);
+#if V8_MAJOR_VERSION > 15 || V8_MINOR_VERSION >= 8
+      KJ_ASSERT(u8->GetBuffer() == static_cast<v8::Local<v8::ArrayBuffer>>(buffer));
+#else
       KJ_ASSERT(u8->Buffer() == static_cast<v8::Local<v8::ArrayBuffer>>(buffer));
+#endif
       KJ_ASSERT(u8->ByteOffset() == kViewOffset);
       KJ_ASSERT(u8->ByteLength() == kViewLength);
 

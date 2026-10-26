@@ -1628,7 +1628,7 @@ JsUint8Array JsUint8Array::detachAndTake(Lock& js) {
   v8::Local<v8::Uint8Array> inner = *this;
   auto length = inner->ByteLength();
   auto offset = inner->ByteOffset();
-  auto ab = getBuffer().detachAndTake(js);
+  v8::Local<v8::ArrayBuffer> ab = getBuffer().detachAndTake(js);
   return JsUint8Array(v8::Uint8Array::New(ab, offset, length));
 }
 
@@ -1661,7 +1661,7 @@ JsUint8Array JsUint8Array::clone(jsg::Lock& js) {
   // "shallow clone". Intentionally does not copy the data.
   auto buf = inner->Buffer();
   auto backing = buf->GetBackingStore();
-  auto ab = jsg::JsArrayBuffer::create(js, kj::mv(backing));
+  v8::Local<v8::ArrayBuffer> ab = jsg::JsArrayBuffer::create(js, kj::mv(backing));
   return JsUint8Array(v8::Uint8Array::New(ab, inner->ByteOffset(), inner->ByteLength()));
 }
 
