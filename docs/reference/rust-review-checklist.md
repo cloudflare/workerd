@@ -98,7 +98,8 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
 - **`#[jsg_oneof]`** is for union/variant types (mapped from JS values by trying each variant).
 - **Type mappings**: `jsg::Number` wraps JS numbers (distinct from `f64`). `Vec<u8>` maps to
   `Uint8Array`, not a regular JS `Array`. `Option<T>` maps to `T | undefined`; like
-  `jsg::Optional<T>`, `null` converts as `T`. `Nullable<T>` maps to `T | null | undefined`.
+  `jsg::Optional<T>`, `null` converts as `T`. `Nullable<T>` maps to `T | null`;
+  use `Option<Nullable<T>>` for `T | null | undefined`.
   `String`/`&str` map to JS strings. Integers and `#[jsg_struct]`s convert like C++ JSG's
   integers and dictionaries: out-of-range integers throw, and an absent struct field reads as
   `undefined`.

@@ -116,8 +116,10 @@ fn eval_null() {
 fn eval_undefined() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let result: jsg::Nullable<bool> = ctx.eval(lock, "undefined").unwrap();
-        assert!(result.is_undefined());
+        let result: Option<jsg::Nullable<bool>> = ctx.eval(lock, "undefined").unwrap();
+        assert!(result.is_none());
+        let result = ctx.eval::<jsg::Nullable<bool>>(lock, "undefined");
+        assert!(matches!(result, Err(EvalError::UncoercibleResult { .. })));
         Ok(())
     });
 }
@@ -312,8 +314,8 @@ fn lenient_string_number() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let result: jsg::Lenient<String> = ctx.eval(lock, "42").unwrap();
-        let result: jsg::Nullable<String> = result.into();
-        assert_eq!(&result.unwrap(), "42");
+        let result: Option<jsg::Nullable<String>> = result.into();
+        assert_eq!(result, Some(jsg::Nullable::Some("42".to_owned())));
         Ok(())
     });
 }

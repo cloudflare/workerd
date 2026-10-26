@@ -3723,7 +3723,6 @@ impl<T: ToLocalValue> ToLocalValue for Nullable<T> {
         match self {
             Self::Some(v) => v.to_local(lock),
             Self::Null => lock.null(),
-            Self::Undefined => lock.undefined(),
         }
     }
 }
