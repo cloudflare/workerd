@@ -38,6 +38,20 @@ impl FeatureFlags {
         Self { message }
     }
 
+    /// Creates flags from a message built in Rust, such as for an RTTI export.
+    pub(crate) fn from_message(
+        message: &capnp::message::Builder<capnp::message::HeapAllocator>,
+    ) -> Self {
+        let segments = message
+            .get_segments_for_output()
+            .iter()
+            .map(|segment| segment.to_vec())
+            .collect();
+        Self {
+            message: capnp::message::Reader::new(segments, ReaderOptions::new()),
+        }
+    }
+
     /// Returns the `CompatibilityFlags` reader.
     ///
     /// The reader has a getter for each flag defined in `compatibility-date.capnp`

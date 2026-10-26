@@ -16,7 +16,7 @@ boilerplate when implementing the JSG type system for Rust-backed JavaScript API
 
 ## `#[jsg_struct]`
 
-Generates `jsg::Struct`, `jsg::Type`, `jsg::ToJS`, and `jsg::FromJS` for a plain data
+Generates `jsg::Struct`, `jsg::Type`, `jsg::TypeInfo`, `jsg::ToJS`, and `jsg::FromJS` for a plain data
 struct. Only `pub` fields are projected into the JavaScript object. Use
 `#[jsg_struct(name = "MyName")]` to override the JavaScript class name.
 
@@ -31,6 +31,9 @@ when a field must distinguish `null` from `undefined`; its `Null` state always
 produces a property whose value is `null`. An absent input property becomes `None`
 or `Undefined`, respectively. If all public fields are optional, a `null` or
 `undefined` input is accepted as an empty dictionary.
+
+`ts_root` marks a TypeScript generation root; it can be combined with `name`.
+RTTI describes the public fields using their types' `TypeInfo` implementations.
 
 ```rust
 #[jsg_struct]
@@ -120,10 +123,11 @@ Eligible methods also get a V8 Fast API callback; see "Fast API" in `src/rust/js
 
 Generates JSG boilerplate for a resource type and its impl block.
 
-**On a struct** — emits `jsg::Type`, `jsg::ToJS`, `jsg::FromJS`, and
+**On a struct** — emits `jsg::Type`, `jsg::TypeInfo`, `jsg::ToJS`, `jsg::FromJS`, and
 `jsg::GarbageCollected`. The `trace()` body is synthesised automatically for every
 field whose type is or contains a traceable JSG handle (see [Garbage Collection](#garbage-collection) below).
 Use `#[jsg_resource(name = "JSName")]` to override the JavaScript class name.
+The optional `ts_root` argument marks a TypeScript generation root.
 
 **On an impl block** — emits `jsg::Resource::members(registry, flags)`, registering every
 `#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`,
@@ -132,6 +136,11 @@ and custom registration.
 Use `#[jsg_resource(nested_types(Foo, Name = Bar))]` to expose other resource types'
 constructors on the prototype (equivalent to `JSG_NESTED_TYPE(Foo)` and
 `JSG_NESTED_TYPE_NAMED(Bar, Name)` in C++ JSG).
+Each factory also describes its member for RTTI, which describes a resource type with the
+members its `Resource::members` registers, in registration order. Methods, properties,
+constructors, and constants are described; inspect and wildcard properties are not. Parameter
+names are retained, injected `this` and lock parameters are excluded, and fallible return types
+describe their success value. See [RTTI](../jsg/README.md#rtti-and-typescript-declarations).
 
 ```rust
 #[jsg_resource]
@@ -159,6 +168,13 @@ placement using ordinary Rust, adding each to `registry`. The flags belong to th
 constructing the template, as in C++ `JSG_RESOURCE_TYPE(T, flags)`. Templates are cached per
 resource type within that realm; registration runs when a template is created, not on each
 property access.
+
+RTTI export runs the same function with its own registry and the flags of the export, so the
+TypeScript declarations follow the same choices, like the `Registry` parameter of C++
+`registerMembers`. Template creation never runs the type descriptions, and RTTI export never
+builds callbacks. A hand-built `jsg::Member` can also be added. RTTI describes a hand-built
+`Member::NestedType` through its nested type, and omits other hand-built members, which carry no
+type description.
 
 ```rust
 use jsg::{MemberRegistry, PropertyPlacement, Resource};
@@ -424,10 +440,10 @@ impl Env {
 
 ## `#[jsg_oneof]`
 
-Generates `jsg::Type`, `jsg::FromJS` and `jsg::Traced` for a union enum — the Rust
-equivalent of `kj::OneOf<…>` — and `jsg::ToJS` when every variant implements it. Each
-variant must be a single-field tuple whose inner type converts from JavaScript and is
-`jsg::Type`. A union that holds handles has one lifetime parameter,
+Generates `jsg::Type`, `jsg::FromJS`, `jsg::Traced` and `jsg::TypeInfo` for a union enum —
+the Rust equivalent of `kj::OneOf<…>` — and `jsg::ToJS` when every variant implements it.
+Each variant must be a single-field tuple whose inner type converts from JavaScript and is
+`jsg::Type` and `jsg::TypeInfo`; RTTI describes the union as its variants' types. A union that holds handles has one lifetime parameter,
 their scope, and no `jsg::Traced` that can be used; a union has no other generic
 parameters. A value converts as it would to the equivalent `kj::OneOf`: variants are
 tried in passes that leave coercion for last, in declaration order within a pass. If no

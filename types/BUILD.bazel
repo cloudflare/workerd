@@ -90,8 +90,21 @@ js_run_binary(
         tsconfig_json = "//types:tsconfig.json",
         deps = [":types_lib"],
     )
-    for src in glob(["test/**/*.spec.ts"])
+    for src in glob(
+        ["test/**/*.spec.ts"],
+        exclude = ["test/generator/rust.spec.ts"],
+    )
 ]
+
+wd_ts_test(
+    src = "test/generator/rust.spec.ts",
+    composite = True,
+    data = ["//types/rtti-fixture"],
+    env = {"RUST_RTTI_FIXTURE_BINARY": "$(rootpath //types/rtti-fixture:rtti-fixture)"},
+    node_options = ["--enable-source-maps"],
+    tsconfig_json = "//types:tsconfig.json",
+    deps = [":types_lib"],
+)
 
 [
     wd_ts_type_test(src = src)

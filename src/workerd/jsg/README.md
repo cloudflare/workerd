@@ -604,6 +604,12 @@ Resolve `Source`: `STATIC_IMPORT`, `DYNAMIC_IMPORT`, `REQUIRE`, `INTERNAL`.
 
 ## RTTI Type Mapping
 
+Rust JSG emits the same `rtti.capnp` schema through trait-based descriptions;
+see [Rust RTTI](../../rust/jsg/README.md#rtti-and-typescript-declarations).
+`MaybeType.allowsNull` and `MaybeType.allowsUndefined` describe which alternatives
+the wrapped type accepts. When both are false, the generator uses the native name
+to decode descriptions from legacy producers.
+
 | C++ Type                  | RTTI Kind   |
 | ------------------------- | ----------- |
 | `void`                    | `voidt`     |

@@ -165,6 +165,12 @@ impl jsg::Type for FromJsOnly {
     }
 }
 
+impl jsg::TypeInfo for FromJsOnly {
+    fn describe(_cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
+        jsg::rtti::Type::String
+    }
+}
+
 impl<'s> jsg::FromJS<'s> for FromJsOnly {
     type ResultType = Self;
 

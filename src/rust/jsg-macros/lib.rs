@@ -42,6 +42,7 @@ use utils::elide_named_lifetimes;
 use utils::extract_name_attribute;
 use utils::extract_named_fields;
 use utils::fast_api_signature;
+use utils::has_flag;
 use utils::is_lock_ref;
 use utils::is_named_this;
 use utils::is_null_or_undefined_type;
@@ -64,17 +65,18 @@ use utils::this_param;
 /// Optional fields use `Option<T>` or `jsg::NullOrUndefined<T>`; prefer the latter to
 /// `Option<jsg::Nullable<T>>` to distinguish `null` from `undefined`.
 /// Use `#[jsg_struct(name = "MyName")]` to override `Type::class_name()`
-/// metadata (used in diagnostics/type reporting), not to define a JS class.
+/// metadata and the TypeScript declaration name; it does not define a JS class.
 #[proc_macro_attribute]
 pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as DeriveInput);
     let name = &input.ident;
-    let class_name = extract_name_attribute(attr).unwrap_or_else(|| name.to_string());
+    let class_name = extract_name_attribute(attr.clone()).unwrap_or_else(|| name.to_string());
 
     let named_fields = match extract_named_fields(&input, "jsg_struct") {
         Ok(fields) => fields,
         Err(err) => return err,
     };
+    let rtti = describe_struct(name, &class_name, has_flag(&attr, "ts_root"), &named_fields);
 
     let mut to_js_fields = Vec::new();
     let mut field_extractions = Vec::new();
@@ -176,6 +178,8 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         impl jsg::Struct for #name {}
 
+        #rtti
+
         #traced_impl
     }
     .into()
@@ -250,6 +254,41 @@ fn to_js_fn_body(
             let obj = lock.new_object();
             #(#field_sets)*
             Ok(obj.into())
+        }
+    }
+}
+
+fn describe_struct(
+    name: &syn::Ident,
+    class_name: &str,
+    ts_root: bool,
+    fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
+) -> proc_macro2::TokenStream {
+    let members = fields.iter().filter_map(|field| {
+        if !matches!(field.vis, syn::Visibility::Public(_)) {
+            return None;
+        }
+        let name = field.ident.as_ref()?.to_string();
+        let ty = &field.ty;
+        Some(quote! {
+            jsg::rtti::Member::Property {
+                name: #name,
+                ty: <#ty as jsg::TypeInfo>::describe(cx),
+                readonly: false,
+                prototype: false,
+                lazy: false,
+            }
+        })
+    });
+    quote! {
+        #[automatically_derived]
+        impl jsg::TypeInfo for #name {
+            fn describe(cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
+                cx.structure::<Self>(#class_name, #ts_root, |cx| {
+                    let _ = &cx;
+                    vec![#(#members),*]
+                })
+            }
         }
     }
 }
@@ -711,7 +750,8 @@ fn reject(
 ///
 /// **On an impl block** — emits `jsg::Resource::members(registry, flags)` registering every
 /// `#[jsg_method]`, `#[jsg_property]`, `#[jsg_inspect_property]`, `#[jsg_wildcard_property]`,
-/// `#[jsg_constructor]`, and `#[jsg_static_constant]` item, plus member factories.
+/// `#[jsg_constructor]`, and `#[jsg_static_constant]` item, plus member factories, which also
+/// describe their members for RTTI.
 /// With `custom_members`, emits only the factories; implement `jsg::Resource` yourself
 /// to select members using ordinary Rust control flow and compatibility flags.
 ///
