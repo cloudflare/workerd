@@ -18,7 +18,8 @@ use std::time::UNIX_EPOCH;
 use ffi::bridge;
 
 /// The message of the error C++ `IoContext::current()` throws outside a request.
-// A copy of `kAsyncIoErrorMessage` in src/workerd/io/io-context.c++; update both together.
+// A copy of `kAsyncIoErrorMessage` in src/workerd/io/io-context.c++. When changing this message,
+// also change that one. io-context-test.c++ checks that the two match.
 const NO_REQUEST_MESSAGE: &str = "Disallowed operation called within global scope. Asynchronous \
      I/O (ex: fetch() or connect()), setting a timeout, and generating random values are not \
      allowed within global scope. To fix this error, perform this operation within a handler. \
@@ -40,9 +41,7 @@ impl<'s> IoContext<'s> {
     /// Returns the `IoContext` of the current request.
     ///
     /// The closure that `jsg::modules::add_builtin` runs to create a builtin module's exports
-    /// should not call it. That closure normally runs outside any request, but the legacy module
-    /// registry can run it during one (for example, the first time a request reads the `process`
-    /// global), and the closure would then see that request's `IoContext`.
+    /// never sees a request, even when a request triggers it, so this fails there.
     ///
     /// # Errors
     /// Outside a request, such as in a Worker's global scope, fails with the error that C++
