@@ -271,6 +271,10 @@ bool local_is_function(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsFunction();
 }
 
+bool local_is_promise(const Local& val) {
+  return local_as_ref_from_ffi<v8::Value>(val)->IsPromise();
+}
+
 bool local_is_symbol(const Local& val) {
   return local_as_ref_from_ffi<v8::Value>(val)->IsSymbol();
 }
@@ -471,13 +475,10 @@ MaybeLocal local_function_call(
   return maybe_local_to_ffi(fn->Call(context, receiver, v8Args.size(), v8Args.data()));
 }
 
-MaybeLocal function_new(Isolate* isolate, size_t callback, kj::Rc<Wrappable> wrappable) {
-  auto context = isolate->GetCurrentContext();
-  // Like the functions C++ JSG wraps (FunctionWrapper::wrap() in jsg/function.h): the wrapper
-  // keeps the Wrappable alive and traced for as long as the function is reachable.
-  auto data = wrappable->attachOpaqueWrapper(context, true);
-  return maybe_local_to_ffi(v8::Function::New(
-      context, reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)), data));
+MaybeLocal function_new(Isolate* isolate, size_t callback, const Local& data) {
+  return maybe_local_to_ffi(v8::Function::New(isolate->GetCurrentContext(),
+      reinterpret_cast<v8::FunctionCallback>(reinterpret_cast<void*>(callback)),
+      local_as_ref_from_ffi<v8::Value>(data)));
 }
 
 // Local<Object>
@@ -503,6 +504,78 @@ MaybeLocal local_object_get_property(Isolate* isolate, const Local& object, ::ru
   auto context = isolate->GetCurrentContext();
   auto v8_key = makeInternedStr(isolate, key);
   return maybe_local_to_ffi(v8_obj->Get(context, v8_key));
+}
+
+// Local<Promise>
+static_assert(static_cast<uint8_t>(PromiseState::Pending) == v8::Promise::kPending);
+static_assert(static_cast<uint8_t>(PromiseState::Fulfilled) == v8::Promise::kFulfilled);
+static_assert(static_cast<uint8_t>(PromiseState::Rejected) == v8::Promise::kRejected);
+
+PromiseState local_promise_state(const Local& promise) {
+  return static_cast<PromiseState>(local_as_ref_from_ffi<v8::Promise>(promise)->State());
+}
+
+Local local_promise_result(const Local& promise) {
+  return to_ffi(local_as_ref_from_ffi<v8::Promise>(promise)->Result());
+}
+
+void local_promise_mark_as_handled(const Local& promise) {
+  local_as_ref_from_ffi<v8::Promise>(promise)->MarkAsHandled();
+}
+
+namespace {
+// Whether an exception or a termination is pending, in which case the promise shims call nothing
+// in V8 and fail, leaving it pending. Promise::Resolver::New(), Then() and Catch() would clear
+// it: they open a PrepareForExecutionScope, which clears the pending exception, a termination
+// included, so that a terminated script would run on. V8 also requires that embedders don't
+// enter it at all while execution is terminating.
+bool exceptionPending(Isolate* isolate) {
+  return isolate->IsExecutionTerminating() || isolate->HasPendingException();
+}
+}  // namespace
+
+MaybeLocal local_promise_then(Isolate* isolate, const Local& promise, const Local& on_fulfilled) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  return maybe_local_to_ffi(local_as_ref_from_ffi<v8::Promise>(promise)->Then(
+      isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Function>(on_fulfilled)));
+}
+
+MaybeLocal local_promise_catch(Isolate* isolate, const Local& promise, const Local& on_rejected) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  return maybe_local_to_ffi(local_as_ref_from_ffi<v8::Promise>(promise)->Catch(
+      isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Function>(on_rejected)));
+}
+
+MaybeLocal local_promise_then_or_catch(
+    Isolate* isolate, const Local& promise, const Local& on_fulfilled, const Local& on_rejected) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  return maybe_local_to_ffi(local_as_ref_from_ffi<v8::Promise>(promise)->Then(
+      isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Function>(on_fulfilled),
+      local_as_ref_from_ffi<v8::Function>(on_rejected)));
+}
+
+// Local<PromiseResolver>
+MaybeLocal promise_resolver_new(Isolate* isolate) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  return maybe_local_to_ffi(v8::Promise::Resolver::New(isolate->GetCurrentContext()));
+}
+
+Local local_promise_resolver_promise(const Local& resolver) {
+  return to_ffi(local_as_ref_from_ffi<v8::Promise::Resolver>(resolver)->GetPromise());
+}
+
+bool local_promise_resolver_resolve(Isolate* isolate, const Local& resolver, const Local& value) {
+  if (exceptionPending(isolate)) return false;
+  return local_as_ref_from_ffi<v8::Promise::Resolver>(resolver)
+      ->Resolve(isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Value>(value))
+      .IsJust();
+}
+
+bool local_promise_resolver_reject(Isolate* isolate, const Local& resolver, const Local& reason) {
+  if (exceptionPending(isolate)) return false;
+  return local_as_ref_from_ffi<v8::Promise::Resolver>(resolver)
+      ->Reject(isolate->GetCurrentContext(), local_as_ref_from_ffi<v8::Value>(reason))
+      .IsJust();
 }
 
 // Local<Array>
@@ -702,6 +775,11 @@ void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo&
   object->SetAlignedPointerInInternalField(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX,
       tagAddress,
       static_cast<v8::EmbedderDataTypeTag>(::workerd::jsg::Wrappable::WRAPPABLE_TAG_FIELD_INDEX));
+}
+
+Local wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappable) {
+  // Like the data of the functions C++ JSG wraps (FunctionWrapper::wrap() in jsg/function.h).
+  return to_ffi(wrappable->attachOpaqueWrapper(isolate->GetCurrentContext(), true));
 }
 
 // Unwrappers
@@ -1449,6 +1527,23 @@ Local exception_create_from_bytes(
   return exceptionCreateFromMessage(exception_type, message);
 }
 
+namespace {
+// Mirrors makeInternalError() from util.c++, which it calls: generates a unique error ID, logs
+// the internal message (with ID) to KJ_LOG(ERROR) for Sentry, and returns a generic
+// "internal error; reference = <id>" JS Error.
+v8::Local<v8::Value> createInternalError(Isolate* isolate, ::rust::Str internalMessage) {
+  // kj::heapString(data, size) copies exactly `size` bytes and appends a NUL,
+  // avoiding the out-of-bounds read that kj::StringPtr(data, size) would cause
+  // on non-NUL-terminated Rust &str data.
+  auto message = kj::heapString(internalMessage.data(), internalMessage.size());
+  return ::workerd::jsg::makeInternalError(isolate, message);
+}
+}  // namespace
+
+Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage) {
+  return to_ffi(createInternalError(isolate, internalMessage));
+}
+
 // TryCatch
 bool catch_exception(v8::TryCatch& tryCatch, MaybeLocal& exception) {
   // The rule of jsg::Lock::tryCatch(): nothing caught means a termination, which V8 may already
@@ -1486,19 +1581,14 @@ void isolate_throw_error(Isolate* isolate, ::rust::Str description) {
 }
 
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage) {
-  // kj::heapString(data, size) copies exactly `size` bytes and appends a NUL,
-  // avoiding the out-of-bounds read that kj::StringPtr(data, size) would cause
-  // on non-NUL-terminated Rust &str data.
-  auto message = kj::heapString(internalMessage.data(), internalMessage.size());
   if (isolate->IsExecutionTerminating()) {
     // Logs the message, but creates no error: creating one while execution is terminating fails
-    // a V8 debug check, and it would not be thrown.
-    KJ_LOG(ERROR, message);
+    // a V8 debug check, and it would not be thrown. See createInternalError() for why the message
+    // is copied.
+    KJ_LOG(ERROR, kj::heapString(internalMessage.data(), internalMessage.size()));
     return;
   }
-  // makeInternalError() generates a unique error ID, logs the internal message (with ID) to
-  // KJ_LOG(ERROR) for Sentry, and returns a generic "internal error; reference = <id>" JS Error.
-  isolate->ThrowException(::workerd::jsg::makeInternalError(isolate, message));
+  isolate->ThrowException(createInternalError(isolate, internalMessage));
 }
 
 void isolate_terminate_execution(Isolate* isolate) {

@@ -491,7 +491,9 @@ lead back to the function. Two things break this:
   collector, and the function and `data` are freed only when the isolate is torn down.
 - Another owner that the garbage collector also traces, such as a resource sharing part of
   `data` through a `std::rc::Rc`. `data` must be the only owner that traces what it traces:
-  tracing one `jsg::Rc` from two owners fails an assertion.
+  tracing one `jsg::Rc` from two owners fails an assertion, and a `TracedGlobal` traced from
+  two owners can be freed while one of them still uses it. To share state, hold a `jsg::Rc` or
+  `jsg::Weak` to the resource that owns it.
 
 ```rust
 let greet = v8::Function::new(lock, String::from("hello"), |lock, greeting, args| {
