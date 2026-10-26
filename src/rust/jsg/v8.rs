@@ -58,6 +58,8 @@ use crate::UnitType;
 use crate::isolate_state::IsolateState;
 pub use crate::promise::Promise;
 pub use crate::promise::PromiseResolver;
+use crate::rtti::Context as RttiContext;
+use crate::rtti::new_rtti_context;
 #[expect(
     clippy::missing_safety_doc,
     reason = "bridge declarations of raw V8 FFI functions; their contracts are V8's own"
@@ -878,13 +880,27 @@ pub mod ffi {
         Internal = 2,
     }
 
+    extern "Rust" {
+        type RttiContext;
+
+        /// Creates a context that describes resource members as registered under the
+        /// compatibility flags in `feature_flags_data`, canonical `CompatibilityFlags` bytes as
+        /// for `realm_create`.
+        fn new_rtti_context(feature_flags_data: &[u8]) -> Box<RttiContext>;
+        fn encode(self: &RttiContext, group: &str) -> Vec<u8>;
+    }
+
     unsafe extern "C++" {
         type ModuleRegistry;
 
+        /// Registers a builtin module. The registry calls `callback` to instantiate the
+        /// module, while a metadata registry (the RTTI encoder) calls `describe` instead, to
+        /// describe the module's exports without instantiating it.
         pub unsafe fn register_add_builtin_module(
             registry: Pin<&mut ModuleRegistry>,
             specifier: &str,
             callback: unsafe fn(*mut Isolate) -> MaybeLocal,
+            describe: fn(&mut RttiContext, &str),
             module_type: ModuleType,
         );
     }

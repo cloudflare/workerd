@@ -2,7 +2,7 @@
 
 ## OVERVIEW
 
-Generates `@cloudflare/workers-types` `.d.ts` files from C++ and Rust JSG RTTI (via `jsg/rtti.capnp`) + hand-written `defines/*.d.ts`. Rust descriptions come from `TypeInfo` in `src/rust/jsg/`; internal module registration does not make a type an ambient root. A workerd-hosted Worker extracts RTTI at runtime per compat-date; TypeScript transforms post-process into ambient and importable outputs. CI validates `generated-snapshot/` matches.
+Generates `@cloudflare/workers-types` `.d.ts` files from C++ and Rust JSG RTTI (via `jsg/rtti.capnp`) + hand-written `defines/*.d.ts`. Rust descriptions come from `TypeInfo` and typed module registration in `src/rust/jsg/`; internal module registration does not make a type an ambient root. A workerd-hosted Worker extracts RTTI at runtime per compat-date; TypeScript transforms post-process into ambient and importable outputs. CI validates `generated-snapshot/` matches.
 
 ## PIPELINE
 

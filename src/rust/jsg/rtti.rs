@@ -263,6 +263,10 @@ pub fn resource_members<R: Resource>(cx: &mut Context) -> Vec<Member> {
     registry.members
 }
 
+pub(crate) fn new_rtti_context(feature_flags_data: &[u8]) -> Box<Context> {
+    Box::new(Context::new(FeatureFlags::from_bytes(feature_flags_data)))
+}
+
 #[expect(
     clippy::expect_used,
     reason = "binding metadata cannot contain more than u32::MAX entries"

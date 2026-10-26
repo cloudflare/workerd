@@ -351,3 +351,19 @@ fn types_with_one_type_name_are_rejected() {
 fn type_name_of<T>(_value: &T) -> &'static str {
     type_name::<T>()
 }
+
+#[test]
+fn bridge_contexts_take_canonical_flags() {
+    let mut message = capnp::message::Builder::new_default();
+    message
+        .init_root::<compatibility_flags::Builder<'_>>()
+        .set_cache_option_enabled(true);
+    let words = message.into_reader().canonicalize().unwrap();
+    assert_eq!(
+        flagged_members(*new_rtti_context(capnp::Word::words_to_bytes(&words))),
+        [
+            ("always".to_owned(), None),
+            ("cache".to_owned(), Some(false))
+        ]
+    );
+}

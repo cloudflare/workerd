@@ -35,7 +35,16 @@ through trait dispatch. Custom conversion types implement `TypeInfo` explicitly.
 
 Both C++ and Rust emit `src/workerd/jsg/rtti.capnp` for the `types/` generator.
 Resources are described with the members they register under the context's
-compatibility flags.
+compatibility flags; in `workerd:rtti`, these are the flags `jsg::rtti::Builder`
+gives C++ resources.
+
+Register modules with a callback receiving `&mut Lock<'s>` and returning
+`jsg::Result<Rc<Exports>>`, for example `jsg::modules::add_builtin(registry,
+"node-internal:dns", |_lock| Ok(DnsUtil::new()), ModuleType::Internal)`. The return
+type determines both runtime wrapping and RTTI. `workerd:rtti` collects each module's
+export type and reachable definitions without invoking the callback, using the same
+context for every module. Registration-time compatibility gates also govern RTTI
+discovery.
 
 Definitions are emitted into ambient TypeScript only when reachable from a
 TypeScript root. Use `#[jsg_resource(ts_root)]` or `#[jsg_struct(ts_root)]` on a
@@ -430,7 +439,8 @@ scope. There is no public constructor; locks come from:
   accessors likewise with `jsg::getter_callback` / `jsg::setter_callback`, and
   `#[jsg_property(lazy_instance)]` accessors with `jsg::getter_callback`,
 - `jsg::modules::add_builtin`, whose callback is a closure that captures nothing, of type
-  `for<'s> Fn(&mut Lock<'s>) -> Result<Local<'s, Value>, jsg::Error>`,
+  `for<'s> Fn(&mut Lock<'s>) -> Result<Rc<Exports>, jsg::Error>`; registration wraps its
+  result in the caller's scope and derives RTTI from the resource type,
 - `v8::Function::new`, whose closure captures nothing and gets a lock per call,
 - `jsg::callback_scope!(unsafe let lock, isolate)` for other Rust code that C++ calls with a
   scope already open; the caller vouches for the isolate's state, hence `unsafe`. A panic

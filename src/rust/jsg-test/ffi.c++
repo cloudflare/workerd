@@ -134,6 +134,7 @@ struct RecordingModuleRegistry final: public ::workerd::rust::jsg::ModuleRegistr
 
   void addBuiltinModule(::rust::Str specifier,
       ::workerd::rust::jsg::ModuleCallback callback,
+      ::workerd::rust::jsg::ModuleDescribeCallback,
       ::workerd::rust::jsg::ModuleType) override {
     modules.insert(kj::str(specifier), callback);
   }
