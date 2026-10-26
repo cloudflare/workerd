@@ -829,8 +829,9 @@ struct CacheStore {
 impl CacheStore {}
 
 /// `read(key, fallback)` returns a promise for the cached value. On a miss it calls
-/// `fallback(key)` once, however many reads wait for it, caches what its promise fulfills with,
-/// and passes a rejection through to every waiting read without caching it.
+/// `fallback(key)` once, however many reads wait for it, even reads the fallback makes itself,
+/// caches what its promise fulfills with, and passes a rejection through to every waiting read
+/// without caching it. As in `MemoryCache`, a fallback that throws rejects the promise.
 #[jsg_resource]
 struct ReadThroughCache {
     store: jsg::Rc<CacheStore>,
@@ -878,10 +879,11 @@ impl ReadThroughCache {
 
         let fallback = v8::Local::<v8::Function>::try_from(fallback)
             .map_err(|_| jsg::Error::new_type_error("fallback must be a function"))?;
-        let key_js = key.as_str().to_js(lock);
-        // No RefCell borrow is held here: the fallback is JavaScript and may call `read` again.
-        let produced = fallback.call::<v8::Local<v8::Value>>(lock, None, &[key_js])?;
-        let produced = v8::Local::<v8::Promise>::from_js(lock, produced)?;
+        // The promise is in flight before the fallback runs, so that a read the fallback makes
+        // of the same key waits for it rather than calling its own fallback. Only the fill's own
+        // reactions remove it, so no other fill's can.
+        let resolver = v8::PromiseResolver::new(lock)?;
+        let produced = resolver.promise();
         // A rejection passes through `filled` unchanged. The `catch` reaction only forgets the
         // fallback; the promise it returns is dropped, and fulfilled, so nothing reports it.
         let filled = produced.then(
@@ -912,7 +914,25 @@ impl ReadThroughCache {
             },
         )?;
         let in_flight = filled.to_traced_global(lock);
-        self.store.in_flight.borrow_mut().insert(key, in_flight);
+        self.store
+            .in_flight
+            .borrow_mut()
+            .insert(key.clone(), in_flight);
+
+        let key_js = key.as_str().to_js(lock);
+        // No RefCell borrow is held here: the fallback is JavaScript and may call `read` again.
+        let called =
+            lock.try_catch(|lock| fallback.call::<v8::Local<v8::Value>>(lock, None, &[key_js]));
+        match called {
+            // Resolving with a promise follows it, and with any other value fulfills.
+            Ok(Ok(produced)) => resolver.resolve(lock, produced)?,
+            Ok(Err(exception)) => resolver.reject(lock, exception)?,
+            Err(err) => {
+                // Execution is terminating, so nothing will settle the fill.
+                self.store.in_flight.borrow_mut().remove(&key);
+                return Err(err);
+            }
+        }
         Ok(filled)
     }
 }
@@ -996,6 +1016,64 @@ fn cache_passes_rejection_through_without_caching_it() {
         assert_eq!(
             log_after_microtasks(lock, ctx, &code),
             "same error: true|fulfilled: recovered|calls: 2"
+        );
+        Ok(())
+    });
+}
+
+/// A fallback that reads its own key waits for itself rather than running a second fallback,
+/// whose rejection would otherwise forget the first fill.
+#[test]
+fn cache_fallback_that_reads_the_same_key() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        install_cache(lock, ctx);
+        let code = format!(
+            "{RECORD}
+            globalThis.calls = 0;
+            const outer = cache.read('k', () => {{
+                calls++;
+                globalThis.inner = cache.read('k', () => {{
+                    calls++;
+                    return Promise.reject(new Error('inner'));
+                }});
+                return new Promise(() => {{}});
+            }});
+            log.push(`inner waits for outer: ${{inner === outer}}`, `after first read: ${{calls}}`);
+            Promise.resolve().then(() => {{}}).then(() => {{
+                cache.read('k', () => {{ calls++; return 'third'; }});
+                log.push(`after third read: ${{calls}}`);
+            }});"
+        );
+        assert_eq!(
+            log_after_microtasks(lock, ctx, &code),
+            "inner waits for outer: true|after first read: 1|after third read: 1"
+        );
+        Ok(())
+    });
+}
+
+/// As in `MemoryCache`, a fallback that throws rejects the read, and every read waiting for it,
+/// with what it threw, and is not cached.
+#[test]
+fn cache_fallback_that_throws_rejects_the_read() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        install_cache(lock, ctx);
+        let code = format!(
+            "{RECORD}
+            globalThis.error = new TypeError('thrown');
+            let waiting;
+            const read = cache.read('k', () => {{
+                waiting = cache.read('k', () => 'unexpected');
+                throw error;
+            }});
+            Promise.allSettled([read, waiting]).then((results) => {{
+                log.push(results.map((r) => `${{r.status}} ${{r.reason === error}}`).join(', '));
+                record(cache.read('k', () => 'recovered'));
+            }});"
+        );
+        assert_eq!(
+            log_after_microtasks(lock, ctx, &code),
+            "rejected true, rejected true|fulfilled: recovered"
         );
         Ok(())
     });
