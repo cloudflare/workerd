@@ -126,8 +126,9 @@ build:ci-bazelflare-coverage --jobs=400 --strategy=CoverageReport=local
 # The test-linux job uploads the binary for the workers-sdk tests.
 build:ci-download-workerd --remote_download_regex=".*src/workerd/server/workerd.*"
 # The check-snapshot job compares the generated types with the snapshot, and uploads them for the
-# workers-sdk tests.
+# workers-sdk tests; releases publish them, and the type generating Worker.
 build:ci-download-types --remote_download_regex=".*/bin/types/definitions/.*"
+build:ci-download-types-worker --remote_download_regex=".*/bin/types/dist/.*"
 # The test-linux job also runs, on its runner, the tests that bazelflare's executors can't: those
 # that need the network or the container engine, whose images it loads. A developer's bazelflare
 # config skips them, since it builds for Linux from any workstation.

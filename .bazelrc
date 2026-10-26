@@ -650,6 +650,8 @@ build:bazelflare-tsan --copt=-g1
 # back.
 test:bazelflare-asan --test_tag_filters=-off-by-default,-no-asan,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
 test:bazelflare-tsan --test_tag_filters=-off-by-default,-no-tsan,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
+# The release build of the Linux x64 binary and the types, on bazelflare.
+build:bazelflare-release --config=release_linux --config=bazelflare --strip=always
 # `bazel coverage` on bazelflare, whose filters replace the coverage config's; this merges the two.
 # The report lands in bazel-out/_coverage/_coverage_report.dat.
 build:bazelflare-coverage --config=coverage --config=bazelflare
