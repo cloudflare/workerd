@@ -355,9 +355,24 @@ impl<T: Traced> Traced for std::rc::Rc<T> {
 
 /// Trait for converting Rust values to JavaScript.
 ///
-/// Provides Rust → JavaScript conversion. As C++ JSG's `wrap()` can throw, a conversion can
-/// fail: creating a `Date` or a resource's wrapper fails while execution is terminating, and a
-/// container passes on the error from converting an element. Pass the error on with `?`; see the README's safety rules.
+/// As C++ JSG's `wrap()` can throw, a conversion can fail. Pass its error on with `?`; see the
+/// README's safety rules.
+///
+/// # Errors
+///
+/// The conversions in this crate fail only with an error for which [`Error::is_pending`] is
+/// true. Creating a `Date` or a resource's wrapper fails, leaving the exception pending, when V8
+/// throws or execution is terminating, and a container passes on the first error from converting
+/// an element. A conversion implemented elsewhere may return any `Error`.
+///
+/// A `#[jsg_method]` or property getter throws an error from converting its return value with
+/// [`Lock::throw_exception`], as it throws an `Err` the method returns. The method has already
+/// run by then, so only its return value is lost. JavaScript sees:
+///
+/// - for a pending error, the exception V8 left pending, unchanged. While execution is
+///   terminating, nothing is thrown, and the termination keeps propagating.
+/// - for an internal error, an internal error with its message redacted.
+/// - for any other error, a new JavaScript error of its type, with its message.
 pub trait ToJS<'s>: Sized {
     /// Converts this Rust value into a JavaScript value in the scope of `lock`.
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error>;

@@ -4195,7 +4195,9 @@ impl WrappableRc {
     /// Wraps this Wrappable as a JavaScript object of resource type `R`, using (and on first
     /// use creating) `R`'s cached constructor template.
     ///
-    /// Returns `None` if the Wrappable already has a JavaScript wrapper in another isolate.
+    /// Returns `None` if the Wrappable already has a JavaScript wrapper in another isolate. That
+    /// is a bug in the caller, which [`resource::wrap`](crate::resource::wrap) turns into a
+    /// panic.
     ///
     /// # Errors
     ///
