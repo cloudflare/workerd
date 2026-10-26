@@ -146,9 +146,10 @@ class Span: public jsg::Object {
   // for errors.
   jsg::Ref<Span> setStatus(jsg::Lock& js, TracingSpanStatus status);
 
-  // Records `error`, which escaped an enterSpan() callback, as an exception, then sets an error
-  // status described by the error's message. Does nothing if the span isn't traced, or if the
-  // callback has set an "ok" or "error" status itself.
+  // Records `error`, which escaped an enterSpan() callback: an exception, if recordException()
+  // accepts `error` (a string, or an object with a code, name or message), then an error status
+  // described by the error's message. Does nothing if the span isn't traced, or if the callback
+  // has set an "ok" or "error" status itself.
   void recordCallbackError(
       jsg::Lock& js, jsg::Value& error, const jsg::TypeHandler<ExceptionData>& exceptionHandler);
 

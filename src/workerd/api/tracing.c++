@@ -513,20 +513,27 @@ void Span::recordCallbackError(
 
   // Reading the error's properties can run user code that throws. That must never replace the
   // callback's own error, so it only leaves out the exception or the status message.
-  js.tryCatch(
-      [&]() { recordException(js, error.addRef(js), exceptionHandler); }, [](jsg::Value) {});
+  JSG_TRY(js) {
+    recordException(js, error.addRef(js), exceptionHandler);
+  }
+  JSG_CATCH(exception KJ_UNUSED) {}
 
-  jsg::Optional<kj::String> message = js.tryCatch([&]() -> jsg::Optional<kj::String> {
+  jsg::Optional<kj::String> message;
+  JSG_TRY(js) {
     auto value = jsg::JsValue(error.getHandle(js));
     KJ_IF_SOME(object, value.tryCast<jsg::JsObject>()) {
       if (object.has(js, "message"_kj)) {
-        return object.get(js, "message"_kj).toString(js);
+        value = object.get(js, "message"_kj);
       }
     }
-    return value.toString(js);
-  }, [](jsg::Value) -> jsg::Optional<kj::String> { return kj::none; });
+    message = value.toString(js);
+  }
+  JSG_CATCH(exception KJ_UNUSED) {}
 
-  setStatus(js, TracingSpanStatus{.code = kj::str("error"), .message = kj::mv(message)});
+  // That user code may have set the status, too.
+  if (!statusSet) {
+    setStatus(js, TracingSpanStatus{.code = kj::str("error"), .message = kj::mv(message)});
+  }
 }
 
 void Span::end() {
