@@ -104,8 +104,8 @@ field whose type is or contains a traceable JSG handle (see [Garbage Collection]
 Use `#[jsg_resource(name = "JSName")]` to override the JavaScript class name.
 
 **On an impl block** — emits `jsg::Resource::members(flags)`, registering every
-`#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`, and
-`#[jsg_static_constant]` item. It also generates member factories used by both automatic
+`#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`,
+`#[jsg_wildcard_property]`, and `#[jsg_static_constant]` item. It also generates member factories used by both automatic
 and custom registration.
 Use `#[jsg_resource(nested_types(Foo, Name = Bar))]` to expose other resource types'
 constructors on the prototype (equivalent to `JSG_NESTED_TYPE(Foo)` and
@@ -185,6 +185,7 @@ the **Rust declaration**, independently of any JavaScript `name = "..."` overrid
 | Constant `MAX_SIZE` | `Self::max_size_member()` (constant name lowercased) |
 | Property getter `get_value` with an optional paired setter | `Self::get_value_member(placement)` |
 | Inspect getter `debug_info` | `Self::debug_info_member()` |
+| Wildcard property `get_var` | `Self::get_var_member()` |
 
 An ordinary property factory accepts `jsg::PropertyPlacement::{Prototype, Instance, LazyInstance}`
 and selects the matching V8 getter and setter callbacks. The attribute's `prototype` / `instance` /
@@ -369,6 +370,35 @@ impl ReadableStream {
 // JS: typeof stream.state           // "undefined" (invisible to string key lookup)
 //     Object.keys(stream)           // []
 //     // util.inspect(stream) shows the property via its symbol
+```
+
+## `#[jsg_wildcard_property]`
+
+Registers a method as the wildcard property of a `#[jsg_resource]` type. Equivalent to C++
+`JSG_WILDCARD_PROPERTY`. Reading a string-named property that neither the object nor its
+prototypes have calls the method with the name; `None` means there is no such property.
+
+The method takes `&self`, optionally `lock: &mut jsg::Lock`, and the name as a `String` or
+`&str`, and returns `Option<T>` or `Result<Option<T>, E>` with `T: ToJS`. The attribute takes
+no arguments. A type has at most one; with automatic registration a second is a compile error,
+and a custom `members` list that includes two fails at runtime. `name in obj` and assignment
+call the method as well, so it must not have side effects. See [Wildcard properties](../jsg/README.md#wildcard-properties) for how they
+behave.
+
+```rust
+use jsg_macros::{jsg_resource, jsg_wildcard_property};
+
+#[jsg_resource]
+struct Env { vars: std::collections::HashMap<String, String> }
+
+#[jsg_resource]
+impl Env {
+    #[jsg_wildcard_property]
+    pub fn get_var(&self, name: &str) -> Option<String> { self.vars.get(name).cloned() }
+}
+// JS: env.HOME        // "/home/user"
+//     env.MISSING     // undefined
+//     'HOME' in env   // true
 ```
 
 ## `#[jsg_oneof]`

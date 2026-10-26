@@ -563,20 +563,26 @@ jsg::Optional<uint64_t> ReadableStream::inspectLength() {
 
 jsg::Promise<kj::Maybe<jsg::V8Ref<v8::Value>>> ReadableStream::nextFunction(
     jsg::Lock& js, AsyncIteratorState& state) {
-  return state.reader->read(js).then(
-      js, [reader = state.reader.addRef()](jsg::Lock& js, ReadResult result) mutable {
-    if (result.done) {
-      reader->releaseLock(js);
-      return js.resolvedPromise(kj::Maybe<jsg::V8Ref<v8::Value>>(kj::none));
-    }
-    return js.resolvedPromise<kj::Maybe<jsg::V8Ref<v8::Value>>>(kj::mv(result.value));
-  });
+  KJ_IF_SOME(r, state.reader) {
+    // read() can run pull(), which can call return() and clear state.reader.
+    auto reader = r.addRef();
+    return reader->read(js).then(
+        js, [reader = reader.addRef()](jsg::Lock& js, ReadResult result) mutable {
+      if (result.done) {
+        reader->releaseLock(js);
+        return js.resolvedPromise(kj::Maybe<jsg::V8Ref<v8::Value>>(kj::none));
+      }
+      return js.resolvedPromise<kj::Maybe<jsg::V8Ref<v8::Value>>>(kj::mv(result.value));
+    });
+  }
+  return js.resolvedPromise(kj::Maybe<jsg::V8Ref<v8::Value>>(kj::none));
 }
 
 jsg::Promise<void> ReadableStream::returnFunction(
     jsg::Lock& js, AsyncIteratorState& state, jsg::Optional<jsg::V8Ref<v8::Value>>& value) {
-  if (state.reader.get() != nullptr) {
-    auto reader = kj::mv(state.reader);
+  KJ_IF_SOME(r, state.reader) {
+    auto reader = kj::mv(r);
+    state.reader = kj::none;
     if (!state.preventCancel) {
       auto promise =
           reader->cancel(js, value.map([&](jsg::V8Ref<v8::Value>& v) { return v.getHandle(js); }));

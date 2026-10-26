@@ -48,6 +48,7 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
 
+pub use self::ffi::PromiseState;
 use crate::Error;
 use crate::FromJS;
 use crate::GarbageCollected;
@@ -58,6 +59,8 @@ use crate::Resource;
 use crate::Traced;
 use crate::UnitType;
 use crate::isolate_state::IsolateState;
+pub use crate::promise::Promise;
+pub use crate::promise::PromiseResolver;
 #[expect(
     clippy::missing_safety_doc,
     reason = "bridge declarations of raw V8 FFI functions; their contracts are V8's own"
@@ -133,6 +136,14 @@ pub mod ffi {
         ReferenceError,
     }
 
+    /// Mirrors `v8::Promise::PromiseState`; `ffi.c++` asserts the values match.
+    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
+    pub enum PromiseState {
+        Pending = 0,
+        Fulfilled = 1,
+        Rejected = 2,
+    }
+
     extern "Rust" {
         /// Called from C++ Wrappable destructor to drop the Rust object.
         /// Reconstructs the `Rc<dyn GarbageCollected>` from `data[0..1]` and drops it.
@@ -157,6 +168,7 @@ pub mod ffi {
         type FastApiCallbackOptions;
         type PropertyCallbackInfo;
         type PropertySetterCallbackInfo;
+        type PropertyQueryCallbackInfo;
         type Wrappable;
 
         // BackingStore
@@ -295,6 +307,7 @@ pub mod ffi {
         pub unsafe fn local_is_array_buffer_view(value: &Local) -> bool;
         pub unsafe fn local_is_shared_array_buffer(value: &Local) -> bool;
         pub unsafe fn local_is_function(value: &Local) -> bool;
+        pub unsafe fn local_is_promise(value: &Local) -> bool;
         pub unsafe fn local_is_symbol(value: &Local) -> bool;
         pub unsafe fn local_is_name(value: &Local) -> bool;
         pub unsafe fn local_is_big_int(value: &Local) -> bool;
@@ -369,9 +382,12 @@ pub mod ffi {
         pub unsafe fn local_symbol_description(isolate: *mut Isolate, value: &Local) -> MaybeLocal;
 
         // Local<BigInt>
+        pub unsafe fn big_int_new(isolate: *mut Isolate, value: i64) -> Local;
+        pub unsafe fn big_int_new_from_unsigned(isolate: *mut Isolate, value: u64) -> Local;
         pub unsafe fn local_big_int_int64_value(value: &Local, lossless: &mut bool) -> i64;
 
         // Local<Date>
+        pub unsafe fn date_new(isolate: *mut Isolate, time: f64) -> MaybeLocal;
         pub unsafe fn local_date_value_of(value: &Local) -> f64;
 
         // Local<Function>
@@ -381,13 +397,11 @@ pub mod ffi {
             recv: &Local,
             args: &[Local],
         ) -> MaybeLocal;
-        // Fallible: creating the wrapper throws, and creating the function returns empty, when
-        // execution is terminating.
         pub unsafe fn function_new(
             isolate: *mut Isolate,
             callback: usize,
-            wrappable: KjRc<Wrappable>,
-        ) -> Result<MaybeLocal>;
+            data: &Local,
+        ) -> MaybeLocal;
 
         // Local<Object>
         pub unsafe fn local_object_set_property(
@@ -409,6 +423,41 @@ pub mod ffi {
             object: &Local,
             key: &str,
         ) -> Result<MaybeLocal>;
+
+        // Local<Promise>
+        pub unsafe fn local_promise_state(promise: &Local) -> PromiseState;
+        pub unsafe fn local_promise_result(promise: &Local) -> Local;
+        pub unsafe fn local_promise_mark_as_handled(promise: &Local);
+        pub unsafe fn local_promise_then(
+            isolate: *mut Isolate,
+            promise: &Local,
+            on_fulfilled: &Local,
+        ) -> MaybeLocal;
+        pub unsafe fn local_promise_catch(
+            isolate: *mut Isolate,
+            promise: &Local,
+            on_rejected: &Local,
+        ) -> MaybeLocal;
+        pub unsafe fn local_promise_then_or_catch(
+            isolate: *mut Isolate,
+            promise: &Local,
+            on_fulfilled: &Local,
+            on_rejected: &Local,
+        ) -> MaybeLocal;
+
+        // Local<PromiseResolver>
+        pub unsafe fn promise_resolver_new(isolate: *mut Isolate) -> MaybeLocal;
+        pub unsafe fn local_promise_resolver_promise(resolver: &Local) -> Local;
+        pub unsafe fn local_promise_resolver_resolve(
+            isolate: *mut Isolate,
+            resolver: &Local,
+            value: &Local,
+        ) -> bool;
+        pub unsafe fn local_promise_resolver_reject(
+            isolate: *mut Isolate,
+            resolver: &Local,
+            reason: &Local,
+        ) -> bool;
 
         // Local<Array>
         pub unsafe fn local_array_length(array: &Local) -> u32;
@@ -559,6 +608,10 @@ pub mod ffi {
         pub unsafe fn psci_get_isolate(info: *mut PropertySetterCallbackInfo) -> *mut Isolate;
         pub unsafe fn psci_get_this(info: *mut PropertySetterCallbackInfo) -> Local;
 
+        // PropertyCallbackInfo<v8::Integer>, for wildcard property queries
+        pub unsafe fn pqci_get_isolate(info: *mut PropertyQueryCallbackInfo) -> *mut Isolate;
+        pub unsafe fn pqci_get_this(info: *mut PropertyQueryCallbackInfo) -> Local;
+
         // FastApiCallbackOptions
         pub unsafe fn fast_api_unwrap_receiver(
             options: *mut FastApiCallbackOptions,
@@ -581,6 +634,10 @@ pub mod ffi {
             exception_type: ExceptionType,
             data: *const u8,
             length: i32,
+        ) -> Local;
+        pub unsafe fn exception_create_internal(
+            isolate: *mut Isolate,
+            internal_message: &str,
         ) -> Local;
 
         // TryCatch
@@ -677,6 +734,13 @@ pub mod ffi {
         pub setter_callback: KjMaybe<usize>,
     }
 
+    /// The callbacks of a wildcard property: a named-property interceptor on every instance
+    /// (`v8::NamedPropertyGetterCallback` and `v8::NamedPropertyQueryCallback`).
+    pub struct WildcardPropertyDescriptor {
+        pub getter_callback: usize,
+        pub query_callback: usize,
+    }
+
     pub struct ResourceDescriptor {
         pub name: String,
         pub constructor: KjMaybe<ConstructorDescriptor>,
@@ -684,6 +748,7 @@ pub mod ffi {
         pub properties: Vec<PropertyDescriptor>,
         pub static_methods: Vec<MethodDescriptor>,
         pub static_constants: Vec<StaticConstantDescriptor>,
+        pub wildcard_property: KjMaybe<WildcardPropertyDescriptor>,
     }
 
     // Resources
@@ -703,6 +768,13 @@ pub mod ffi {
             wrappable: KjRc<Wrappable>,
             args: Pin<&mut FunctionCallbackInfo>,
         );
+
+        // Fallible: throws if the Wrappable already has a wrapper, or if V8 cannot create one,
+        // which happens only when execution is terminating.
+        pub unsafe fn wrappable_attach_opaque_wrapper(
+            isolate: *mut Isolate,
+            wrappable: KjRc<Wrappable>,
+        ) -> Result<Local>;
 
         // Infallible: only defensive tag checks; returns kj::none for non-Rust
         // wrappables rather than throwing.
@@ -1260,7 +1332,7 @@ impl<'s, T> Local<'s, T> {
     /// The scope rules keep handles in their isolate, except inside
     /// [`allow_scopes_of_another_isolate`](crate::allow_scopes_of_another_isolate); this
     /// catches handles that cross isolates there.
-    fn debug_assert_isolate(&self, lock: &Lock<'_>) {
+    pub(crate) fn debug_assert_isolate(&self, lock: &Lock<'_>) {
         debug_assert!(
             // SAFETY: the lock's isolate is locked, and the check reads only the value's page
             // header, which is valid whichever isolate owns the value.
@@ -1270,7 +1342,7 @@ impl<'s, T> Local<'s, T> {
     }
 
     /// The handle as the FFI type that C++ functions take, without giving up its lifetime.
-    fn raw(&self) -> &ffi::Local {
+    pub(crate) fn raw(&self) -> &ffi::Local {
         // SAFETY: `Local` is a `repr(transparent)` pointer and `ffi::Local` a pointer-sized
         // integer, with the same size and alignment (asserted above).
         unsafe { &*std::ptr::from_ref(self).cast::<ffi::Local>() }
@@ -1470,6 +1542,12 @@ impl<'s, T> Local<'s, T> {
         unsafe { ffi::local_is_function(self.raw()) }
     }
 
+    /// Returns true if the value is a JavaScript Promise.
+    pub fn is_promise(&self) -> bool {
+        // SAFETY: handle is valid within the current HandleScope.
+        unsafe { ffi::local_is_promise(self.raw()) }
+    }
+
     /// Returns true if the value is a JavaScript Symbol.
     ///
     /// Corresponds to `v8::Value::IsSymbol()`.
@@ -1566,7 +1644,9 @@ impl Function {
     ///   collector, and the function and `data` are freed only when the isolate is torn down.
     /// - Another owner that the garbage collector also traces, such as a resource sharing part of
     ///   `data` through a `std::rc::Rc`. `data` must be the only owner that traces what it
-    ///   traces: tracing one `jsg::Rc` from two owners fails an assertion.
+    ///   traces: tracing one `jsg::Rc` from two owners fails an assertion, and a `TracedGlobal`
+    ///   traced from two owners can be freed while one of them still uses it. To share state,
+    ///   hold a `jsg::Rc` or `jsg::Weak` to the resource that owns it.
     ///
     /// `f` must capture nothing, which a compile-time assertion checks; whatever it needs comes
     /// from `data`.
@@ -1596,19 +1676,52 @@ impl Function {
                 &mut FunctionCallbackInfo<'a>,
             ) -> Result<Local<'a, Value>, Error>,
     {
-        let _ = f;
+        let [function] = Self::new_sharing_data(lock, data, [Self::callback::<T, F>(f)])?;
+        Ok(function)
+    }
+
+    /// Creates one function per callback, all with the same data: one Wrappable owns `data`,
+    /// and its opaque wrapper is the V8 data of every function, so the garbage collector traces
+    /// `data` once, whichever of the functions are reachable, and drops it once none is.
+    ///
+    /// Each callback comes from [`Function::callback`] with the same `T`. Fails as
+    /// [`Function::new`] does.
+    pub(crate) fn new_sharing_data<'s, T, const N: usize>(
+        lock: &Lock<'s>,
+        data: T,
+        callbacks: [crate::RawFunctionCallback; N],
+    ) -> crate::Result<[Local<'s, Self>; N]>
+    where
+        T: Traced + 'static,
+    {
         // As in `jsg::Rc::new`, the Wrappable owns a leaked `Rc` of the data, released when the
         // Wrappable is destroyed.
         let raw: *const FunctionData<T> = Rc::into_raw(Rc::new(FunctionData(data)));
         let fat: *mut dyn GarbageCollected = raw as *const dyn GarbageCollected as *mut _;
         let mut wrappable: WrappableRc =
             ffi::TraitObjectPtr::from_raw(fat, TypeId::of::<FunctionData<T>>()).into();
-        let function =
-            wrappable.new_function(lock, crate::function_callback(call_function::<T, F>));
+        let functions = wrappable.new_functions(lock, callbacks);
         // A new Wrappable starts with one strong reference, which `jsg::Rc` would hold. Here only
-        // the function owns it, so the reference is dropped and the garbage collector decides.
+        // the functions own it, so the reference is dropped and the garbage collector decides.
         wrappable.remove_strong_ref(true);
-        function
+        functions
+    }
+
+    /// The callback with which a function that [`Function::new_sharing_data`] creates with
+    /// data `T` calls `f`, as [`Function::new`]'s function calls its closure.
+    pub(crate) fn callback<T, F>(f: F) -> crate::RawFunctionCallback
+    where
+        T: Traced + 'static,
+        F: UnitType
+            + 'static
+            + for<'a> Fn(
+                &mut Lock<'a>,
+                &T,
+                &mut FunctionCallbackInfo<'a>,
+            ) -> Result<Local<'a, Value>, Error>,
+    {
+        let _ = f;
+        crate::function_callback(call_function::<T, F>)
     }
 }
 
@@ -1791,6 +1904,7 @@ impl_local_cast!(BigInt: Value; is_big_int);
 impl_local_cast!(Object: Value; is_object);
 impl_local_cast!(Date: Object, Value; is_date);
 impl_local_cast!(Function: Object, Value; is_function);
+impl_local_cast!(Promise: Object, Value; is_promise);
 impl_local_cast!(Array: Object, Value; is_array);
 impl_local_cast!(ArrayBuffer: Object, Value; is_array_buffer);
 impl_local_cast!(ArrayBufferView: Object, Value; is_array_buffer_view);
@@ -2995,6 +3109,26 @@ impl<'s> Local<'s, Symbol> {
     }
 }
 
+impl BigInt {
+    /// Creates a `BigInt` with the value of `value`.
+    ///
+    /// Corresponds to `v8::BigInt::New()`.
+    pub fn new<'s>(lock: &mut crate::Lock<'s>, value: i64) -> Local<'s, Self> {
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        unsafe { Local::from_ffi(ffi::big_int_new(isolate.as_ffi(), value)) }
+    }
+
+    /// Creates a `BigInt` with the value of `value`.
+    ///
+    /// Corresponds to `v8::BigInt::NewFromUnsigned()`.
+    pub fn from_unsigned<'s>(lock: &mut crate::Lock<'s>, value: u64) -> Local<'s, Self> {
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        unsafe { Local::from_ffi(ffi::big_int_new_from_unsigned(isolate.as_ffi(), value)) }
+    }
+}
+
 impl Local<'_, BigInt> {
     /// Returns the value as an `i64`, or `None` if it is out of the range of `i64`.
     ///
@@ -3004,6 +3138,27 @@ impl Local<'_, BigInt> {
         // SAFETY: the handle is a valid BigInt handle within the current HandleScope.
         let value = unsafe { ffi::local_big_int_int64_value(self.raw(), &mut lossless) };
         lossless.then_some(value)
+    }
+}
+
+impl Date {
+    /// Creates a `Date` in the current context with the time value `time`, in milliseconds
+    /// since the epoch. A time outside the range of JavaScript dates gives an invalid date.
+    ///
+    /// Corresponds to `v8::Date::New()`.
+    ///
+    /// # Errors
+    ///
+    /// If V8 throws while creating it, or execution is terminating, the exception stays pending
+    /// and the error is one for which [`Error::is_pending`] is true, as for
+    /// [`Local::<Function>::call`]. `v8::Date::New()` prepares for executing JavaScript, which
+    /// would clear a pending termination.
+    pub fn new<'s>(lock: &mut Lock<'s>, time: f64) -> crate::Result<Local<'s, Self>> {
+        call_into_js(lock, |lock| {
+            // SAFETY: `lock` proves the isolate is locked, with a context entered and a
+            // HandleScope for `'s` open; a non-empty result is a `Date` V8 created in that scope.
+            Ok(unsafe { Local::from_ffi_maybe(ffi::date_new(lock.isolate().as_ffi(), time)) })
+        })
     }
 }
 
@@ -3619,7 +3774,7 @@ impl<'cb> FunctionCallbackInfo<'cb> {
     }
 }
 
-/// The arguments to a native data property getter.
+/// The arguments to a native data property getter, or to the getter of a wildcard property.
 ///
 /// `'cb` is the brand of the callback's [`Lock`](crate::Lock), as for
 /// [`FunctionCallbackInfo`]. Invariant in `'cb`.
@@ -3652,6 +3807,42 @@ impl<'cb> PropertyCallbackInfo<'cb> {
         // SAFETY: self.0 is valid (guaranteed by constructor), and `value` lives in the
         // callback's scope.
         unsafe { ffi::pci_set_return_value(self.0, value.into_ffi()) }
+    }
+}
+
+/// The `PropertyCallbackInfo` of a wildcard property query, which tells V8 whether the property
+/// exists.
+///
+/// `'cb` is the brand of the callback's [`Lock`](crate::Lock), as for
+/// [`FunctionCallbackInfo`]. Invariant in `'cb`.
+pub struct PropertyQueryCallbackInfo<'cb>(
+    *mut ffi::PropertyQueryCallbackInfo,
+    PhantomData<*mut &'cb ()>,
+);
+
+impl<'cb> PropertyQueryCallbackInfo<'cb> {
+    /// Wraps the `PropertyCallbackInfo` of the running query, whose lock is `lock`.
+    ///
+    /// # Safety
+    /// `info` must be the `PropertyCallbackInfo` V8 passed to the running query, and `lock`
+    /// the lock of the [`CallbackScope`](crate::CallbackScope) opened from it.
+    pub(crate) unsafe fn new(
+        _lock: &crate::Lock<'cb>,
+        info: *mut ffi::PropertyQueryCallbackInfo,
+    ) -> Self {
+        Self(info, PhantomData)
+    }
+
+    pub fn isolate(&self) -> IsolatePtr {
+        // SAFETY: self.0 is valid (guaranteed by constructor).
+        unsafe { IsolatePtr::from_ffi(ffi::pqci_get_isolate(self.0)) }
+    }
+
+    /// The object that has the interceptor (V8's `Holder()`), which may be on the prototype
+    /// chain of the object whose property is looked up.
+    pub fn this(&self) -> Local<'cb, Value> {
+        // SAFETY: self.0 is valid (guaranteed by constructor).
+        unsafe { Local::from_ffi(ffi::pqci_get_this(self.0)) }
     }
 }
 
@@ -4273,17 +4464,18 @@ impl WrappableRc {
         unsafe { ffi::wrappable_strong_refcount(&*self.handle.get()) }
     }
 
-    /// Creates a JavaScript function that calls `callback`, with an opaque wrapper of this
-    /// Wrappable as its data, which keeps the Wrappable alive while the function is reachable.
+    /// Creates one JavaScript function per callback, each with an opaque wrapper of this
+    /// Wrappable as its data, which keeps the Wrappable alive while one of them is reachable.
+    /// The Wrappable must not have a wrapper yet, and gets one wrapper for all of them.
     ///
     /// While execution is terminating, or an exception is pending, creates nothing and returns
     /// [`Error::pending`]'s error, as [`Local::<Function>::call`] does. V8 fails to create a
     /// function only while execution is terminating.
-    pub(crate) fn new_function<'s>(
+    pub(crate) fn new_functions<'s, const N: usize>(
         &self,
         lock: &Lock<'s>,
-        callback: crate::RawFunctionCallback,
-    ) -> crate::Result<Local<'s, Function>> {
+        callbacks: [crate::RawFunctionCallback; N],
+    ) -> crate::Result<[Local<'s, Function>; N]> {
         let isolate = lock.isolate().as_ffi();
         // Creating the wrapper opens V8's `PrepareForExecutionScope`, which clears a pending
         // exception or termination, so nothing is created while one is pending.
@@ -4294,16 +4486,27 @@ impl WrappableRc {
         } {
             return Err(Error::pending());
         }
-        // SAFETY: isolate is valid and locked (guaranteed by Lock); `callback` is a V8 function
-        // callback.
-        let handle = unsafe { ffi::function_new(isolate, callback as usize, self.handle.clone()) }
+        // SAFETY: isolate is valid and locked, with a context entered and a HandleScope open
+        // (guaranteed by Lock).
+        let data = unsafe { ffi::wrappable_attach_opaque_wrapper(isolate, self.handle.clone()) }
             .map_err(|_| Error::pending())?;
-        // SAFETY: the function is created in the scope of `lock`.
-        unsafe { Local::from_ffi_maybe(handle) }.ok_or_else(Error::pending)
+        let mut functions = Vec::with_capacity(N);
+        for callback in callbacks {
+            // SAFETY: as above; `callback` is a V8 function callback and `data` a handle in the
+            // lock's scope, in which the function is created.
+            let function = unsafe {
+                Local::from_ffi_maybe(ffi::function_new(isolate, callback as usize, &data))
+            };
+            functions.push(function.ok_or_else(Error::pending)?);
+        }
+        let Ok(functions) = functions.try_into() else {
+            unreachable!("one function per callback")
+        };
+        Ok(functions)
     }
 
     /// Returns the Rust Wrappable whose opaque wrapper is the running function's data, as
-    /// [`new_function`](Self::new_function) attaches it, or `None` if the data is anything else.
+    /// [`new_functions`](Self::new_functions) attaches it, or `None` if the data is anything else.
     pub(crate) fn of_function(args: &FunctionCallbackInfo<'_>) -> Option<Self> {
         // SAFETY: args.0 is the running callback's FunctionCallbackInfo.
         let handle: Option<kj_rs::KjRc<ffi::Wrappable>> =
