@@ -219,8 +219,11 @@ class ActorStorage::Impl final: public kj::Refcounted {
   ::rust::Box<ActorNamespaceHandle> actors;
   kj::Maybe<kj::Own<const kj::Directory>> directory;
   kj::Own<const kj::Directory> vfsDirectory;  // the in-memory directory when there is none
+  // What actors' SQLite opens files through: `vfsDirectory`, or in a cluster a wrapper that
+  // fences opens on the lease and reports WAL writes.
+  kj::Own<const kj::Directory> sqliteDirectory;
   SqliteDatabase::Vfs vfs;
-  // The scheduler's database is no actor's, so it opens without the cluster's VFS hooks.
+  // The scheduler's database is no actor's, so it opens outside the cluster's wrapper.
   SqliteDatabase::Vfs schedulerVfs;
   kj::String uniqueKey;
   kj::Own<AlarmScheduler> alarmScheduler;
@@ -231,7 +234,6 @@ class ActorStorage::Impl final: public kj::Refcounted {
       const kj::Directory& dir, kj::StringPtr rootKey);
 
   kj::Path getSqlitePath(kj::StringPtr rootKey, uint facetId, kj::StringPtr suffix = ""_kj);
-  SqliteDatabase::VfsOptions vfsOptions();
   void deleteFacet(
       const kj::Directory& dir, kj::StringPtr rootKey, FacetTreeIndex& index, uint facetId);
   void deleteDescendantStorage(const kj::Directory& dir, kj::StringPtr rootKey, uint parentId);

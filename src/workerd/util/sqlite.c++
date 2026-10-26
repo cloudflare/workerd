@@ -2002,11 +2002,6 @@ struct SqliteDatabase::Vfs::WrappedNativeFileImpl: public sqlite3_file {
   const Vfs* vfs;
   int rootFd;
 
-  // Set for a WAL file when the VFS reports WAL writes (see VfsOptions::walWrite). SQLite keeps
-  // `walName` valid until the file closes.
-  kj::Function<void(kj::StringPtr, uint64_t, kj::ArrayPtr<const kj::byte>)>* walWrite;
-  const char* walName;
-
   // It's expected that the wrapped sqlite_file begins in memory immediately after this object.
   sqlite3_file* getWrapped() {
     return reinterpret_cast<sqlite3_file*>(this + 1);
@@ -2066,17 +2061,7 @@ const sqlite3_io_methods SqliteDatabase::Vfs::WrappedNativeFileImpl::METHOD_TABL
 
   WRAP(xClose),
   WRAP(xRead),
-  .xWrite = [](sqlite3_file* file, const void* data, int amount, sqlite3_int64 offset)
-      noexcept -> int {
-    int result = MethodWrapperHack<decltype(&sqlite3_io_methods::xWrite),
-        &sqlite3_io_methods::xWrite>::wrapper(file, data, amount, offset);
-    auto wrapper = static_cast<WrappedNativeFileImpl*>(file);
-    if (result == SQLITE_OK && wrapper->walWrite != nullptr) {
-      (*wrapper->walWrite)(wrapper->walName, offset,
-          kj::arrayPtr(static_cast<const kj::byte*>(data), amount));
-    }
-    return result;
-  },
+  WRAP(xWrite),
   WRAP(xTruncate),
   WRAP(xSync),
   WRAP(xFileSize),
@@ -2157,7 +2142,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
       file->pMethods = nullptr;
 
       // Set up currentVfsRoot.
-      auto& self = *reinterpret_cast<SqliteDatabase::Vfs*>(vfs->pAppData);
+      auto& self = *reinterpret_cast<const SqliteDatabase::Vfs*>(vfs->pAppData);
       KJ_ASSERT(currentVfsRoot == AT_FDCWD);
       currentVfsRoot = self.rootFd;
       KJ_DEFER(currentVfsRoot = AT_FDCWD);
@@ -2169,26 +2154,9 @@ sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
       if (file->pMethods == nullptr) {
         wrapper->pMethods = nullptr;
       } else {
-        KJ_IF_SOME(afterOpen, self.options.afterOpen) {
-          try {
-            afterOpen();
-          } catch (kj::Exception& e) {
-            reportVfsErrorCaught(kj::mv(e));
-            file->pMethods->xClose(file);
-            wrapper->pMethods = nullptr;
-            return SQLITE_CANTOPEN;
-          }
-        }
         wrapper->pMethods = &WrappedNativeFileImpl::METHOD_TABLE;
         wrapper->vfs = &self;
         wrapper->rootFd = self.rootFd;
-        wrapper->walWrite = nullptr;
-        KJ_IF_SOME(walWrite, self.options.walWrite) {
-          if (flags & SQLITE_OPEN_WAL) {
-            wrapper->walWrite = &walWrite;
-            wrapper->walName = zName;
-          }
-        }
       }
 
       return result;
@@ -2490,7 +2458,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
     .pAppData = this,
 
 #define WRAP_METHOD(errorCode, block)                                                              \
-  auto& self KJ_UNUSED = *static_cast<SqliteDatabase::Vfs*>(vfs->pAppData);                        \
+  auto& self KJ_UNUSED = *static_cast<const SqliteDatabase::Vfs*>(vfs->pAppData);                  \
   try block catch (kj::Exception& e) {                                                             \
     reportVfsErrorCaught(kj::mv(e));                                                               \
     return errorCode;                                                                              \
@@ -2507,11 +2475,6 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
 
           auto path = kj::Path::parse(zName);
           auto kjFile = KJ_UNWRAP_OR(self.directory.tryOpenFile(path), { return SQLITE_CANTOPEN; });
-          KJ_IF_SOME(afterOpen, self.options.afterOpen) {
-            afterOpen();
-          } else {
-            // squelch spurious "dangling else" warning from clang
-          }
           kj::Maybe<kj::Own<Lock>> lock;
           if (flags & SQLITE_OPEN_MAIN_DB) {
             lock = self.lockManager.lock(path, *kjFile);
@@ -2527,11 +2490,6 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
             KJ_ASSERT(flags & SQLITE_OPEN_DELETEONCLOSE);
             KJ_ASSERT(!(flags & SQLITE_OPEN_MAIN_DB), "main DB can't be a temporary file");
             kjFile = self.directory.createTemporary();
-            KJ_IF_SOME(afterOpen, self.options.afterOpen) {
-              afterOpen();
-            } else {
-              // squelch spurious "dangling else" warning from clang
-            }
           } else {
             kj::WriteMode mode;
             if (flags & SQLITE_OPEN_CREATE) {
@@ -2544,18 +2502,9 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
               mode = kj::WriteMode::MODIFY;
             }
 
-            // Only the native VFS reports WAL writes; a WAL a caller asked to hear from but cannot
-            // would commit transactions it never sees.
-            KJ_REQUIRE(self.options.walWrite == kj::none || !(flags & SQLITE_OPEN_WAL),
-                "walWrite needs a disk directory");
             auto path = kj::Path::parse(zName);
             kjFile =
                 KJ_UNWRAP_OR(self.directory.tryOpenFile(path, mode), { return SQLITE_CANTOPEN; });
-            KJ_IF_SOME(afterOpen, self.options.afterOpen) {
-              afterOpen();
-            } else {
-              // squelch spurious "dangling else" warning from clang
-            }
             if (flags & SQLITE_OPEN_MAIN_DB) {
               lock = self.lockManager.lock(path, *kjFile);
             }
@@ -2863,8 +2812,6 @@ SqliteDatabase::Vfs::Vfs(const kj::Directory& directory, Options options)
       options(kj::mv(options)),
       native(*sqlite3_vfs_find(nullptr)) {
 #if _WIN32
-  // Only the native VFS reports WAL writes, and Windows uses the KJ VFS.
-  KJ_REQUIRE(this->options.walWrite == kj::none, "walWrite is not supported on Windows");
   vfs = kj::heap(makeKjVfs());
 #else
   KJ_IF_SOME(fd, directory.getFd()) {

@@ -896,16 +896,6 @@ struct SqliteDatabase::VfsOptions {
   // will fall back to the native VFS implementation. In that case, the options you set here will
   // be ORed with the ones set by the underlying VFS.
   int deviceCharacteristics = 0x00001000;  // = SQLITE_FCNTL_POWERSAFE_OVERWRITE
-
-  // Called immediately after SQLite opens any file through this VFS. Clustered Durable Object
-  // storage uses it to refuse opening a file once this instance's cluster lease has lapsed.
-  kj::Maybe<kj::Function<void()>> afterOpen;
-
-  // Called after each successful write to a WAL file, with the file's name as SQLite gave it.
-  // Bucket-backed Durable Objects replicate by cutting each committed transaction's frames from
-  // these writes. Only the native VFS (a disk directory) reports them.
-  kj::Maybe<kj::Function<void(kj::StringPtr file, uint64_t offset, kj::ArrayPtr<const kj::byte>)>>
-      walWrite;
 };
 
 // Implements a SQLite VFS based on a KJ directory.
