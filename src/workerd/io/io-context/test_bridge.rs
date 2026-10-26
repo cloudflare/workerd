@@ -17,7 +17,7 @@ use jsg::v8;
 /// message.
 type Result<T> = std::io::Result<T>;
 
-fn to_io(err: jsg::Error) -> std::io::Error {
+fn to_io(err: &jsg::Error) -> std::io::Error {
     std::io::Error::other(err.to_string())
 }
 
@@ -54,9 +54,12 @@ unsafe fn now_nanos(isolate: usize) -> Result<i64> {
     jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
     let now = IoContext::current(lock)
         .and_then(|context| context.now())
-        .map_err(to_io)?;
-    let nanos = now.duration_since(UNIX_EPOCH).unwrap().as_nanos();
-    Ok(i64::try_from(nanos).unwrap())
+        .map_err(|err| to_io(&err))?;
+    let nanos = now
+        .duration_since(UNIX_EPOCH)
+        .map_err(std::io::Error::other)?
+        .as_nanos();
+    i64::try_from(nanos).map_err(std::io::Error::other)
 }
 
 /// `IoContext::current()?.write_logfwdr(channel, message)`.
@@ -65,5 +68,5 @@ unsafe fn write_logfwdr(isolate: usize, channel: u32, message: &[u8]) -> Result<
     jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
     IoContext::current(lock)
         .and_then(|context| context.write_logfwdr(channel, message))
-        .map_err(to_io)
+        .map_err(|err| to_io(&err))
 }
