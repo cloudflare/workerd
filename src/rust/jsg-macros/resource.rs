@@ -23,13 +23,13 @@ use crate::utils::elide_named_lifetimes;
 use crate::utils::extract_name_attribute;
 use crate::utils::extract_named_fields;
 use crate::utils::has_custom_trace_flag;
-use crate::utils::has_flag;
 use crate::utils::is_attr;
 use crate::utils::is_lock_ref;
 use crate::utils::is_result_type;
 use crate::utils::required_argument_count;
 use crate::utils::snake_to_camel;
 use crate::utils::this_param;
+use crate::utils::typescript_options;
 
 // Compile-time mirror of `jsg::PropertyKind` used to group annotated methods
 // and emit the correct token streams. Cannot reuse the runtime type directly
@@ -50,7 +50,7 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
 
     // Read the flags before consuming `attr`.
     let custom_trace = has_custom_trace_flag(&attr);
-    let ts_root = has_flag(&attr, "ts_root");
+    let typescript = typescript_options(attr.clone());
     let (input, memory_info) = match crate::memory_info::generate_for(attr.clone().into(), input) {
         Ok(generated) => generated,
         Err(err) => return err.to_compile_error().into(),
@@ -111,7 +111,11 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         #[automatically_derived]
         impl jsg::TypeInfo for #name {
             fn describe(cx: &mut jsg::rtti::Context) -> jsg::rtti::Type {
-                cx.structure::<Self>(#class_name, #ts_root, jsg::rtti::resource_members::<Self>)
+                cx.structure::<Self>(
+                    #class_name,
+                    #typescript,
+                    jsg::rtti::resource_members::<Self>,
+                )
             }
         }
 
@@ -592,7 +596,8 @@ fn validate_struct_args(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
     use syn::punctuated::Punctuated;
 
     const EXPECTED: &str = "expected `name = \"...\"`, `custom_trace`, `memory_info`, \
-                            `custom_memory_info` or `ts_root` on a #[jsg_resource] struct";
+                            `custom_memory_info`, `ts_root`, `ts_override = \"...\"` or \
+                            `ts_define = \"...\"` on a #[jsg_resource] struct";
 
     let metas: Punctuated<syn::Meta, syn::Token![,]> =
         match syn::parse::Parser::parse2(Punctuated::parse_terminated, attr) {
@@ -640,6 +645,12 @@ fn validate_struct_args(attr: proc_macro2::TokenStream) -> Option<syn::Error> {
                     }),
                 ..
             }) if path.is_ident("name") => None,
+            // `typescript_options` reports a value that is not a string literal.
+            syn::Meta::NameValue(syn::MetaNameValue { path, .. })
+                if path.is_ident("ts_override") || path.is_ident("ts_define") =>
+            {
+                None
+            }
             _ => Some(syn::Error::new_spanned(meta, EXPECTED)),
         }
     })
@@ -752,8 +763,9 @@ fn parse_impl_args(attr: proc_macro2::TokenStream) -> syn::Result<ImplArgs> {
     use syn::punctuated::Punctuated;
 
     const EXPECTED: &str = "expected `custom_members` or `nested_types(...)` on a \
-                            #[jsg_resource] impl block (`name`, `custom_trace`, `memory_info` \
-                            and `custom_memory_info` belong on the struct)";
+                            #[jsg_resource] impl block (`name`, `custom_trace`, `memory_info`, \
+                            `custom_memory_info`, `ts_root`, `ts_override` and `ts_define` \
+                            belong on the struct)";
 
     let args = Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated.parse2(attr)?;
     let mut custom_members = None;

@@ -41,7 +41,8 @@ construction keeps it in a `jsg::Cell` or `jsg::RefCell`, which make the handle 
 before the struct can leave; a `std::cell::Cell` or `RefCell` of it doesn't compile. See "Cells"
 in `src/rust/jsg/README.md`.
 
-`ts_root` marks a TypeScript generation root; it can be combined with `name`.
+`ts_root`, `ts_override` and `ts_define` customize the TypeScript declaration, as on a
+resource struct (see `#[jsg_resource]`), and can be combined with `name`.
 RTTI describes the public fields using their types' `TypeInfo` implementations.
 
 The struct implements `jsg::HoldsNoGcReferences`, which lets it into a `std::cell::Cell`,
@@ -160,6 +161,11 @@ Generates JSG boilerplate for a resource type and its impl block.
 field whose type is or contains a traceable JSG handle (see [Garbage Collection](#garbage-collection) below).
 Use `#[jsg_resource(name = "JSName")]` to override the JavaScript class name.
 The optional `ts_root` argument marks a TypeScript generation root.
+`ts_override = "..."` and `ts_define = "..."` customize the generated TypeScript declaration
+and add declarations next to it, like C++ `JSG_TS_OVERRIDE` and `JSG_TS_DEFINE`, using the
+override syntax described in the `## JSG_TS_OVERRIDE Rules` section of `src/workerd/jsg/README.md`.
+For example, `#[jsg_resource(ts_override = "{ json<T>(): Promise<T> }")]` replaces the
+generated `json()` method.
 
 **On an impl block** — emits `jsg::Resource::members(registry, flags)`, registering every
 `#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`,
@@ -269,6 +275,11 @@ Properties are registered in the order they are added to `registry`. V8 enumerat
 data properties in reverse registration order, as it does for C++ JSG.
 `nested_types(...)` cannot be combined with `custom_members`; a custom `members` registers nested
 types itself, as `jsg::nested_type::<Foo>(name)`.
+
+A custom `members` can also choose the TypeScript customizations by compatibility flag, as C++
+does by calling `JSG_TS_OVERRIDE` conditionally in `JSG_RESOURCE_TYPE`.
+`registry.ts_override("...")` and `registry.ts_define("...")` replace the struct's
+`ts_override` and `ts_define` and any earlier call; template creation ignores them.
 
 ---
 
@@ -795,6 +806,6 @@ rules in `jsg::MemoryInfo`'s docs:
   data does; hold a retainer in a `jsg::Cell` instead.
 - It must not call into JavaScript.
 
-`memory_info` or `custom_memory_info` (not both) can be combined with `name`, `custom_trace` and
-`ts_root`. Any other flag on the struct, or one given twice, is a compile error, so a misspelled
+`memory_info` or `custom_memory_info` (not both) can be combined with `name`, `custom_trace`,
+`ts_root`, `ts_override` and `ts_define`. Any other flag on the struct, or one given twice, is a compile error, so a misspelled
 `memory_info` is not silently off.

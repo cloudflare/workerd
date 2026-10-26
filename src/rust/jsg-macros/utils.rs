@@ -6,6 +6,7 @@
 
 use proc_macro::TokenStream;
 use quote::ToTokens;
+use quote::quote;
 use syn::Data;
 use syn::DeriveInput;
 use syn::Fields;
@@ -97,6 +98,87 @@ pub fn extract_name_attribute(tokens: impl Into<proc_macro2::TokenStream>) -> Op
     }
 
     None
+}
+
+/// Builds a `jsg::rtti::TypeScript` expression from the `ts_root` flag and the
+/// `ts_override = "..."` and `ts_define = "..."` arguments of `#[jsg_struct]` or of
+/// `#[jsg_resource]` on a struct.
+///
+/// An invalid argument becomes a `compile_error!` inside the expression, which then
+/// evaluates to the default customizations, so the struct's `TypeInfo` implementation is
+/// still generated and the argument is the only error reported.
+pub fn typescript_options(tokens: impl Into<proc_macro2::TokenStream>) -> proc_macro2::TokenStream {
+    match parse_typescript_options(tokens.into()) {
+        Ok((ts_root, ts_override, ts_define)) => {
+            let ts_override = optional_str(ts_override.as_ref());
+            let ts_define = optional_str(ts_define.as_ref());
+            quote! {
+                jsg::rtti::TypeScript {
+                    ts_root: #ts_root,
+                    ts_override: #ts_override,
+                    ts_define: #ts_define,
+                }
+            }
+        }
+        Err(error) => {
+            let error = error.to_compile_error();
+            quote! {{
+                #error
+                jsg::rtti::TypeScript::default()
+            }}
+        }
+    }
+}
+
+fn parse_typescript_options(
+    tokens: proc_macro2::TokenStream,
+) -> syn::Result<(bool, Option<syn::LitStr>, Option<syn::LitStr>)> {
+    use syn::Meta;
+    use syn::punctuated::Punctuated;
+
+    let parsed: Punctuated<Meta, syn::Token![,]> =
+        syn::parse::Parser::parse2(Punctuated::parse_terminated, tokens)?;
+    let mut ts_root = false;
+    let mut ts_override = None;
+    let mut ts_define = None;
+    for meta in &parsed {
+        let slot = match meta {
+            Meta::Path(path) if path.is_ident("ts_root") => {
+                ts_root = true;
+                continue;
+            }
+            Meta::NameValue(nv) if nv.path.is_ident("ts_override") => &mut ts_override,
+            Meta::NameValue(nv) if nv.path.is_ident("ts_define") => &mut ts_define,
+            _ => continue,
+        };
+        let Meta::NameValue(nv) = meta else {
+            unreachable!("only name-value arguments select a slot");
+        };
+        let syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(value),
+            ..
+        }) = &nv.value
+        else {
+            return Err(syn::Error::new_spanned(
+                &nv.value,
+                "expected a string literal of TypeScript",
+            ));
+        };
+        if slot.replace(value.clone()).is_some() {
+            return Err(syn::Error::new_spanned(
+                &nv.path,
+                format!("duplicate `{}`", nv.path.to_token_stream()),
+            ));
+        }
+    }
+    Ok((ts_root, ts_override, ts_define))
+}
+
+fn optional_str(value: Option<&syn::LitStr>) -> proc_macro2::TokenStream {
+    value.map_or_else(
+        || quote! { ::core::option::Option::None },
+        |value| quote! { ::core::option::Option::Some(#value) },
+    )
 }
 
 /// Converts a `snake_case` identifier to `camelCase`.
