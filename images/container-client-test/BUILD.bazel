@@ -48,6 +48,11 @@ oci_load(
         # building a separate image.
         "cloudflare/workerd/container-client-test:override",
     ],
+    # Like :image, whose actions run where the container engine is.
+    tags = [
+        "no-remote-exec",
+        "requires-container-engine",
+    ],
     visibility = ["//visibility:public"],
 )
 
@@ -55,5 +60,9 @@ oci_load(
     name = "load-proxy-everything",
     image = "@proxy_everything",
     repo_tags = ["cloudflare/proxy-everything:main"],
+    tags = [
+        "no-remote-exec",
+        "requires-container-engine",
+    ],
     visibility = ["//visibility:public"],
 )
