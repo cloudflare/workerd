@@ -108,7 +108,9 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `jsg::Ref`/`jsg::Promise`/`jsg::Function`/`jsg::Object`, `JSG_REQUIRE`/`JSG_ASSERT` and `liftKj`.
 `CONSTRUCTS` in `cpp-jsg-allowlist-test.py` has the full list. Using `Wrappable`,
 `GcVisitor`, `IsolateBase` or the module registries is fine for now, since Rust JSG still shares
-them with C++ JSG. So are thin calls into `src/workerd/io`.
+them with C++ JSG. So are thin calls into `src/workerd/io`, and the serialization hooks in
+`workerd/jsg/ser.h` (`writeApiObject`, `readApiObject` and `newDataCloneError`), through which
+workerd's API objects serialize, since their serializers are written against C++ JSG.
 
 Bad: a shim that wraps a V8 call in `JSG_TRY(js) { ... } JSG_CATCH(error) {
 kj::throwException(createTunneledException(...)); }`. Fix: catch with a `v8::TryCatch` in the
@@ -509,7 +511,8 @@ propagating. As with the functions C++ JSG wraps, the function's `name` is empty
 
 ## Errors from JavaScript
 
-When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), `Object::get` and `Object::has` (a getter or Proxy trap), and `Array::iterate` and so converting to a `Vec` (an element's getter). `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way. `Object::set`, `Array::get` and `Array::set` don't yet work this way: they still turn what JavaScript throws into a panic.
+When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), `Object::get` and `Object::has` (a getter or Proxy trap), and `Array::iterate` and so converting to a `Vec` (an element's getter), and `ser::serialize` (a
+getter or Proxy trap, or a `DataCloneError`). `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way. `Object::set`, `Array::get` and `Array::set` don't yet work this way: they still turn what JavaScript throws into a panic.
 
 Code that gets a pending error must not call into JavaScript, and should return the error. Converting it to another error and throwing that replaces the exception, as when C++ code throws while a `JsExceptionThrown` unwinds; nothing ever replaces a termination, and none of these run while execution is terminating: they fail with a pending error without calling into V8, even for a value that would convert without running JavaScript. A pending error is only meaningful while its exception is pending: one kept past that, such as a clone stored after `try_catch` caught the exception, is thrown as an internal error when V8 has no exception pending.
 
@@ -521,6 +524,16 @@ match lock.try_catch(|lock| callback.call::<Number>(lock, None, &[]))? {
     Err(exception) => { /* handle what the callback threw */ }
 }
 ```
+
+## Serialization
+
+`jsg::ser::serialize` and `jsg::ser::deserialize` convert a value to and from bytes in the format
+of C++ JSG's `jsg::Serializer` and `jsg::Deserializer`, with their default options: the bytes are
+the same, and each reads what the other writes, so the two can share stored data. Native errors
+are written as host objects when the `enhanced_error_serialization` flag is on, and workerd API
+objects such as `Blob` and `Headers` through their C++ serializers; Rust resources can't be
+serialized. Deserialization runs no JavaScript. Transfer lists, externals and the other options
+are not supported. The C++ side is `src/rust/jsg/ser.c++`.
 
 ## Type Conversions
 

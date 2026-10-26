@@ -121,6 +121,17 @@ mod ffi {
         #[allow(dead_code)]
         pub fn cpp_sees_empty_maybe_local(value: MaybeLocal) -> bool;
 
+        /// Serializes `value` with C++ JSG's `jsg::Serializer`. Fails if serialization throws.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn cpp_serialize(isolate: *mut Isolate, value: Local) -> Result<Vec<u8>>;
+
+        /// Deserializes `data` with C++ JSG's `jsg::Deserializer`. Fails if deserialization
+        /// throws.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn cpp_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<Local>;
+
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
 
@@ -469,6 +480,35 @@ impl Harness {
         // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
         // open.
         unsafe { ffi::cpp_wrapped_function_data_is_rust_wrappable(lock.isolate().as_ffi()) }
+    }
+
+    /// Serializes `value` with C++ JSG's `jsg::Serializer`, to compare with
+    /// [`jsg::ser::serialize`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if serialization throws.
+    pub fn cpp_serialize<'s>(lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) -> Vec<u8> {
+        // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
+        // open, which `value` belongs to.
+        unsafe { ffi::cpp_serialize(lock.isolate().as_ffi(), value.into_ffi()) }
+            .expect("C++ JSG should serialize the value")
+    }
+
+    /// Deserializes `data` with C++ JSG's `jsg::Deserializer`, to compare with
+    /// [`jsg::ser::deserialize`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if deserialization throws.
+    pub fn cpp_deserialize<'s>(lock: &mut jsg::Lock<'s>, data: &[u8]) -> v8::Local<'s, v8::Value> {
+        // SAFETY: as for `cpp_serialize`; the result belongs to the lock's scope.
+        unsafe {
+            v8::Local::from_ffi(
+                ffi::cpp_deserialize(lock.isolate().as_ffi(), data)
+                    .expect("C++ JSG should deserialize the data"),
+            )
+        }
     }
 
     /// Holds a value the way C++ code holds one that Rust created. C++ calls `create`, as it

@@ -5,6 +5,7 @@
 #include "ffi.h"
 
 #include <workerd/io/features.h>
+#include <workerd/jsg/ser.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/rust/jsg-test/lib.rs.h>
 #include <workerd/rust/jsg/ffi-inl.h>
@@ -224,6 +225,25 @@ bool cpp_wrapped_function_data_is_rust_wrappable(Isolate* isolate) {
 
 bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
   return ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(kj::mv(value)).IsEmpty();
+}
+
+::rust::Vec<uint8_t> cpp_serialize(Isolate* isolate, ::workerd::rust::jsg::Local value) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  ::workerd::jsg::Serializer serializer(js);
+  serializer.write(
+      js, ::workerd::jsg::JsValue(::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value))));
+  ::rust::Vec<uint8_t> result;
+  for (auto byte: serializer.release().data) {
+    result.push_back(byte);
+  }
+  return result;
+}
+
+::workerd::rust::jsg::Local cpp_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  ::workerd::jsg::Deserializer deserializer(js, kj::arrayPtr(data.data(), data.size()));
+  v8::Local<v8::Value> result = deserializer.readValue(js);
+  return ::workerd::rust::jsg::to_ffi(kj::mv(result));
 }
 
 bool isolates_share_group(Isolate* a, Isolate* b) {

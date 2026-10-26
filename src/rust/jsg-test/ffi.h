@@ -77,6 +77,13 @@ void request_gc(Isolate* isolate, GcType gc_type);
 // was terminated.
 void terminate_and_deliver(Isolate* isolate);
 
+// Serializes `value` with C++ JSG's jsg::Serializer, for comparison with Rust JSG's. Throws a KJ
+// exception if serialization throws.
+::rust::Vec<uint8_t> cpp_serialize(Isolate* isolate, ::workerd::rust::jsg::Local value);
+// Deserializes `data` with C++ JSG's jsg::Deserializer. Throws a KJ exception if
+// deserialization throws.
+::workerd::rust::jsg::Local cpp_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
+
 // Calls `callback` with the isolate unlocked, then locks it again.
 void run_unlocked(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback);
 

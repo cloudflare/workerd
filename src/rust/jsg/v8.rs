@@ -583,6 +583,19 @@ pub mod ffi {
         );
         pub unsafe fn fast_api_terminate_execution(options: *mut FastApiCallbackOptions);
 
+        // Serialization
+        // Leaves what serialization throws pending; see `call_into_js()`. Fallible: the result
+        // is a rust::Vec.
+        pub unsafe fn local_serialize(
+            isolate: *mut Isolate,
+            value: &Local,
+            errors_are_host_objects: bool,
+            result: &mut Vec<u8>,
+        ) -> Result<bool>;
+        // Leaves what deserialization throws pending. Fallible: a missing or unsupported header
+        // throws.
+        pub unsafe fn value_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<MaybeLocal>;
+
         // Errors
         pub unsafe fn exception_create_from_bytes(
             isolate: *mut Isolate,
@@ -1276,7 +1289,7 @@ impl<'s, T> Local<'s, T> {
     /// The scope rules keep handles in their isolate, except inside
     /// [`allow_scopes_of_another_isolate`](crate::allow_scopes_of_another_isolate); this
     /// catches handles that cross isolates there.
-    fn debug_assert_isolate(&self, lock: &Lock<'_>) {
+    pub(crate) fn debug_assert_isolate(&self, lock: &Lock<'_>) {
         debug_assert!(
             // SAFETY: the lock's isolate is locked, and the check reads only the value's page
             // header, which is valid whichever isolate owns the value.
