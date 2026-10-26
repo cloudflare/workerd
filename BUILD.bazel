@@ -27,6 +27,14 @@ alias(
     visibility = ["//visibility:public"],
 )
 
+# And ICU itself, whose headers workerd includes and V8 keeps to itself.
+alias(
+    name = "icu",
+    actual = "@com_googlesource_chromium_icu//:icu",
+    tags = ["manual"],
+    visibility = ["//visibility:public"],
+)
+
 npm_link_all_packages(name = "node_modules")
 
 # Tools that locate the workspace root by searching upward for a lockfile (OpenNext, which
