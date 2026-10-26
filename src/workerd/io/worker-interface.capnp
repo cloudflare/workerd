@@ -553,6 +553,11 @@ enum SerializationTag {
   # payload (per `serviceStub`) followed by the wrapper module name. See api/wrapped-binding.{h,c++}.
   durableObjectSnapshot @18;
   # A Durable Object storage snapshot handle transferred over RPC.
+
+  emailMessage @19;
+  # An EmailMessage (the `cloudflare:email` class): envelope sender and recipient followed by the
+  # raw message body as a readableStream. Implemented upstream of workerd; the tag is allocated here
+  # so that every embedder agrees on the wire value.
 }
 
 enum StreamEncoding {
