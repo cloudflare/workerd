@@ -1,0 +1,67 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    (name = "flag-enabled", worker = .flagEnabledWorker),
+    (name = "experimental", worker = .experimentalWorker),
+    (name = "flag-disabled", worker = .flagDisabledWorker),
+  ],
+);
+
+const flagEnabledWorker :Workerd.Worker = (
+  compatibilityFlags = ["offpeak_location_hint", "nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "durable-object-offpeak-hint-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "OffpeakHintObject", uniqueKey = "810bd0cbd803ef7883a1ee9d86cce06f"),
+  ],
+
+  durableObjectStorage = (inMemory = void),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "OffpeakHintObject"),
+    (name = "offpeakAllowed", json = "true"),
+  ],
+);
+
+const experimentalWorker :Workerd.Worker = (
+  # The catch-all "experimental" flag also allows the hint.
+  compatibilityFlags = ["experimental", "nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "durable-object-offpeak-hint-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "OffpeakHintObject", uniqueKey = "a10bd0cbd803ef7883a1ee9d86cce06f"),
+  ],
+
+  durableObjectStorage = (inMemory = void),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "OffpeakHintObject"),
+    (name = "offpeakAllowed", json = "true"),
+  ],
+);
+
+const flagDisabledWorker :Workerd.Worker = (
+  compatibilityFlags = ["nodejs_compat"],
+
+  modules = [
+    (name = "worker", esModule = embed "durable-object-offpeak-hint-test.js"),
+  ],
+
+  durableObjectNamespaces = [
+    (className = "OffpeakHintObject", uniqueKey = "910bd0cbd803ef7883a1ee9d86cce06f"),
+  ],
+
+  durableObjectStorage = (inMemory = void),
+
+  bindings = [
+    (name = "ns", durableObjectNamespace = "OffpeakHintObject"),
+    (name = "offpeakAllowed", json = "false"),
+  ],
+);

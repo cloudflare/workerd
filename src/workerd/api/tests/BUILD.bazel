@@ -207,6 +207,12 @@ wd_test(
 )
 
 wd_test(
+    src = "durable-object-offpeak-hint-test.wd-test",
+    args = ["--experimental"],
+    data = ["durable-object-offpeak-hint-test.js"],
+)
+
+wd_test(
     src = "durable-object-snapshots-flag-test.wd-test",
     args = ["--experimental"],
     data = ["durable-object-snapshots-flag-test.js"],
