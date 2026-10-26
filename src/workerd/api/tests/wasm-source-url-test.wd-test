@@ -1,0 +1,41 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    # With the flag, the module's frames name it by its module name.
+    ( name = "wasm-source-url-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "wasm-source-url-test.js"),
+          (name = "trap.wasm", wasm = embed "wasm-source-url.wasm"),
+        ],
+        compatibilityFlags = ["nodejs_compat", "wasm_source_url_support"],
+        bindings = [(name = "expectedFrame", text = "at trap.wasm:wasm-function[0]:0x")],
+      ),
+    ),
+    # The new module registry names modules by URL, and the module's frames use that URL.
+    ( name = "wasm-source-url-new-registry-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "wasm-source-url-test.js"),
+          (name = "trap.wasm", wasm = embed "wasm-source-url.wasm"),
+        ],
+        compatibilityFlags = ["nodejs_compat", "wasm_source_url_support", "new_module_registry"],
+        bindings = [
+          (name = "expectedFrame", text = "at file:///bundle/trap.wasm:wasm-function[0]:0x"),
+        ],
+      ),
+    ),
+    # Without the flag, V8 names the module after a hash of its bytes.
+    ( name = "wasm-source-url-disabled-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "wasm-source-url-test.js"),
+          (name = "trap.wasm", wasm = embed "wasm-source-url.wasm"),
+        ],
+        compatibilityFlags = ["nodejs_compat"],
+        bindings = [(name = "expectedFrame", text = "at wasm://wasm/")],
+      ),
+    ),
+  ],
+);

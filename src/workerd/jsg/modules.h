@@ -63,8 +63,12 @@ enum class ModuleInfoCompileOption {
   BUILTIN,
 };
 
-v8::Local<v8::WasmModuleObject> compileWasmModule(
-    jsg::Lock& js, kj::ArrayPtr<const uint8_t> code, const CompilationObserver& observer);
+// `sourceUrl` names the module in stack traces when the `wasm_source_url_support` compatibility
+// flag is enabled. Otherwise V8 names it after a hash of its bytes.
+v8::Local<v8::WasmModuleObject> compileWasmModule(jsg::Lock& js,
+    kj::ArrayPtr<const uint8_t> code,
+    const CompilationObserver& observer,
+    kj::Maybe<kj::ArrayPtr<const char>> sourceUrl = kj::none);
 
 // Holds the compiled code of one Wasm module so that any isolate in the process can instantiate
 // it without recompiling. V8 shares compiled modules between isolates on its own, but only while

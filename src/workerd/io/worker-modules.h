@@ -308,7 +308,8 @@ v8::Local<v8::ArrayBuffer> compileDataGlobal(
 template <typename JsgIsolate>
 v8::Local<v8::WasmModuleObject> compileWasmGlobal(typename JsgIsolate::Lock& lock,
     ::capnp::Data::Reader reader,
-    const jsg::CompilationObserver& observer) {
+    const jsg::CompilationObserver& observer,
+    kj::Maybe<kj::ArrayPtr<const char>> sourceUrl = kj::none) {
   // Wasm compilation requires code-generation permission. The scope restores
   // the prior setting on exit: this helper also runs lazily (e.g. for modules
   // served by the fallback service), potentially inside a window where eval is
@@ -321,7 +322,7 @@ v8::Local<v8::WasmModuleObject> compileWasmGlobal(typename JsgIsolate::Lock& loc
   // compiles fast but runs slower.
   AllowV8BackgroundThreadsScope scope;
 
-  return jsg::compileWasmModule(lock, reader, observer);
+  return jsg::compileWasmModule(lock, reader, observer, sourceUrl);
 };
 
 template <typename JsgIsolate>
@@ -358,7 +359,8 @@ kj::Maybe<jsg::ModuleRegistry::ModuleInfo> tryCompileLegacyModule(jsg::Lock& js,
         auto metrics = observer.onWasmCompilationFromCacheStart(js.v8Isolate);
         wasmModule = jsg::check(v8::WasmModuleObject::FromCompiledModule(js.v8Isolate, compiled));
       } else {
-        wasmModule = modules::legacy::compileWasmGlobal<JsgIsolate>(lock, content.body, observer);
+        wasmModule = modules::legacy::compileWasmGlobal<JsgIsolate>(
+            lock, content.body, observer, name.asArray());
       }
       auto moduleInfo = jsg::ModuleRegistry::ModuleInfo(
           js, name, kj::none, jsg::ModuleRegistry::WasmModuleInfo(js, wasmModule));

@@ -1742,4 +1742,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # created with this hint is placed in a region that is off-peak at the current UTC time. The
   # experimental catch-all flag also allows it. Without either flag, the hint is rejected as
   # unsupported.
+
+  wasmSourceUrlSupport @198 :Bool
+      $compatEnableFlag("wasm_source_url_support")
+      $experimental;
+  # Compiles each Wasm module in the Worker's bundle with its module name as its source URL, so
+  # its stack frames read `<module>:wasm-function[<index>]:<offset>` and can be matched to the
+  # module's source map. Without it, V8 names a module `wasm://wasm/<hash>`, after a hash of its
+  # bytes. Modules compiled at runtime, for example with `WebAssembly.compile()`, keep that URL.
 }

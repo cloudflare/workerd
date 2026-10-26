@@ -134,9 +134,12 @@ These rules MUST be followed when writing or modifying JSG code:
     in the slot key used by `CompiledWasmModuleHolder::getOrCompile()` in
     `modules.c++`. Keep its slot selection and `compiled` storage in `modules.h`
     consistent with `compileWasmModule()`. The current key is
-    `Lock::isWasmEsmIntegrationBuiltinsEnabled()`. Extend the reuse tests in
-    `modules-new-test.c++` and `api/pyodide/wasm-module-test.c++` when adding a
-    setting, including isolate destruction and a distinct compilation per setting.
+    `Lock::isWasmEsmIntegrationBuiltinsEnabled()`. The source URL that
+    `Lock::isWasmSourceUrlSupportEnabled()` controls is not part of the key: it
+    changes no generated code, and the holder compiles without one. Extend the
+    reuse tests in `modules-new-test.c++` and `api/pyodide/wasm-module-test.c++`
+    when adding a setting, including isolate destruction and a distinct
+    compilation per setting.
 
 The `jsg-visit-for-gc` clang-tidy check (`//tools/clang-tidy:workerd-lint`)
 automatically detects missing `visitForGc` implementations and unvisited fields
