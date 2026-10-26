@@ -634,7 +634,7 @@ export const enterSpanStatusSetByCallback = {
         }),
       { message: 'after ok' }
     );
-    // So is one set by user code that runs while the error is recorded.
+    // So is one set by user code that runs while the error is read, and there's no exception.
     assert.throws(
       () =>
         ctx.tracing.enterSpan('enter-span-reentrant-op', (span) => {

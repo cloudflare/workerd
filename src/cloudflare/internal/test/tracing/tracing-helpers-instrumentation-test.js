@@ -348,6 +348,7 @@ export const validateSpans = {
         'enterSpanStatusSetByCallback',
         'enter-span-reentrant-op'
       );
+      assert.strictEqual(reentrant.exceptions, undefined);
       const reentrantUpdates = spanUpdatesFor(spanKeyOf(reentrant));
       assert(reentrantUpdates.length > 0);
       assert.deepStrictEqual(

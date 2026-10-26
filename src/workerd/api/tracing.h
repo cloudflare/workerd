@@ -149,7 +149,7 @@ class Span: public jsg::Object {
   // Records `error`, which escaped an enterSpan() callback: an exception, if recordException()
   // accepts `error` (a string, or an object with a code, name or message), then an error status
   // described by the error's message. Does nothing if the span isn't traced, or if the callback
-  // has set an "ok" or "error" status itself.
+  // has set an "ok" or "error" status itself, before throwing or while the error is read.
   void recordCallbackError(
       jsg::Lock& js, jsg::Value& error, const jsg::TypeHandler<ExceptionData>& exceptionHandler);
 
@@ -186,6 +186,22 @@ class Span: public jsg::Object {
 
   // Whether setStatus() set an "ok" or "error" status, which recordCallbackError() leaves alone.
   bool statusSet = false;
+
+  // What recordException() records about an exception.
+  struct ExceptionFields {
+    kj::Maybe<tracing::Exception::Code> code;
+    kj::String name;
+    kj::String message;
+    kj::Maybe<kj::String> stack;
+  };
+
+  // Reads `exception` the way recordException() does, which can run user code. Returns kj::none
+  // for a value recordException() ignores.
+  static kj::Maybe<ExceptionFields> readException(jsg::Lock& js,
+      v8::Local<v8::Value> exception,
+      const jsg::TypeHandler<ExceptionData>& exceptionHandler);
+
+  void recordExceptionFields(ExceptionFields fields);
 
   friend class ::workerd::api::Tracing;
 };
