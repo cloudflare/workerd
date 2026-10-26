@@ -284,6 +284,10 @@ void run_in_async_context(Isolate* isolate,
   return ::workerd::rust::jsg::maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
 }
 
+bool cpp_sees_root_frame(Isolate* isolate) {
+  return ::workerd::jsg::AsyncContextFrame::current(isolate) == kj::none;
+}
+
 }  // namespace rust::jsg_test
 
 }  // namespace workerd

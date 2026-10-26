@@ -150,6 +150,9 @@ mod ffi {
         /// The value the current async context frame stores under the tests' storage key, or
         /// empty if it stores none.
         pub unsafe fn async_context_value(isolate: *mut Isolate) -> MaybeLocal;
+
+        /// Whether C++ `jsg::AsyncContextFrame::current()` finds no frame.
+        pub unsafe fn cpp_sees_root_frame(isolate: *mut Isolate) -> bool;
     }
 }
 
@@ -568,6 +571,13 @@ impl Harness {
         // SAFETY: the lock keeps the isolate locked with a scope open, which the value belongs
         // to.
         unsafe { v8::Local::from_ffi_maybe(ffi::async_context_value(lock.isolate().as_ffi())) }
+    }
+
+    /// Whether C++ `jsg::AsyncContextFrame::current()` sees the root frame, to compare with
+    /// Rust's [`jsg::AsyncContextFrame::is_root`].
+    pub fn cpp_sees_root_frame(lock: &mut jsg::Lock<'_>) -> bool {
+        // SAFETY: the lock keeps the isolate locked.
+        unsafe { ffi::cpp_sees_root_frame(lock.isolate().as_ffi()) }
     }
 }
 

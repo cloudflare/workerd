@@ -148,6 +148,37 @@ fn frame_captured_in_root_is_root() {
     });
 }
 
+/// Rust treats any embedder data but `undefined` as a frame, while C++ recognizes a frame by its
+/// wrapper. Since Rust sets only `undefined` and values it read, the two agree on whether the
+/// current frame is the root in every state Rust can leave the isolate in.
+#[test]
+fn rust_and_cpp_agree_on_root_frame() {
+    /// Asserts that Rust and C++ agree on whether the current frame is the root, and returns it.
+    fn is_root(lock: &mut jsg::Lock<'_>) -> bool {
+        let rust = AsyncContextFrame::current(lock).is_root();
+        assert_eq!(rust, Harness::cpp_sees_root_frame(lock));
+        rust
+    }
+
+    Harness::new().run_in_context(|lock, _ctx| {
+        assert!(is_root(lock));
+        let frame = frame_storing(lock, "a");
+        frame.enter(lock, |lock| assert!(!is_root(lock)));
+        assert!(is_root(lock));
+
+        let value = "outer".to_js(lock);
+        Harness::run_in_async_context(lock, value, |lock| {
+            assert!(!is_root(lock));
+            AsyncContextFrame::root().enter(lock, |lock| assert!(is_root(lock)));
+            TracedAsyncContextFrame::root().enter(lock, |lock| assert!(is_root(lock)));
+            frame.enter(lock, |lock| assert!(!is_root(lock)));
+            assert!(!is_root(lock));
+        });
+        assert!(is_root(lock));
+        Ok(())
+    });
+}
+
 #[test]
 fn entering_root_frame_leaves_frame_for_its_duration() {
     Harness::new().run_in_context(|lock, _ctx| {

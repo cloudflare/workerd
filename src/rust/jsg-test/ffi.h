@@ -122,6 +122,9 @@ void run_in_async_context(Isolate* isolate,
 // root frame or a frame that stores none.
 ::workerd::rust::jsg::MaybeLocal async_context_value(Isolate* isolate);
 
+// Returns whether C++ jsg::AsyncContextFrame::current() finds no frame, i.e. sees the root frame.
+bool cpp_sees_root_frame(Isolate* isolate);
+
 }  // namespace rust::jsg_test
 
 }  // namespace workerd
