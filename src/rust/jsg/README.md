@@ -266,6 +266,79 @@ does for `&self` methods. A method that takes `this` has no Fast API callback.
 - **`jsg::v8::TracedGlobal<T>` cycle collection**: Uses the same strong↔traced dual-mode as C++ `jsg::V8Ref<T>`. While the parent resource has strong Rust refs the JS handle stays strong. Once all Rust `Rc`s are dropped, `visit_traced_global` downgrades the handle to a `v8::TracedReference` that cppgc can follow — allowing cycles (e.g. a resource holding a callback that captures its own wrapper) to be detected and collected.
 - **Circular references** through `jsg::Rc<T>` are **not** collected, matching C++ `jsg::Rc<T>` behavior.
 
+### Creating resources from C++
+
+C++ code that creates a Rust resource, for example to pass it to JavaScript as a handler argument,
+calls an `extern "Rust"` function in the crate that defines the resource. The function returns the
+resource's wrapper through `jsg::v8::run_ffi_callback`, which enters the caller's scope. If the
+closure fails or panics, it returns an empty handle with an exception pending, which C++
+propagates:
+
+```rust
+#[cxx::bridge(namespace = "workerd::rust::my_api")]
+mod ffi {
+    #[namespace = "workerd::rust::jsg"]
+    unsafe extern "C++" {
+        include!("workerd/rust/jsg/ffi.h");
+        type Isolate = jsg::v8::ffi::Isolate;
+        type Local = jsg::v8::ffi::Local;
+        type MaybeLocal = jsg::v8::ffi::MaybeLocal;
+    }
+
+    extern "Rust" {
+        unsafe fn my_resource_new(isolate: *mut Isolate, label: &str) -> MaybeLocal;
+        unsafe fn is_my_resource(isolate: *mut Isolate, value: Local) -> KjMaybe<bool>;
+    }
+}
+
+use kj_rs::KjMaybe;
+
+/// # Safety
+/// C++ calls this with the isolate locked, a context entered and a `HandleScope` open.
+unsafe fn my_resource_new(isolate: *mut ffi::Isolate, label: &str) -> ffi::MaybeLocal {
+    use jsg::ToJS as _;
+    // SAFETY: forwarded from the caller.
+    unsafe {
+        jsg::v8::run_ffi_callback(isolate, |lock| {
+            let resource = jsg::Rc::new(MyResource { label: label.to_owned() });
+            Ok::<_, jsg::Error>(resource.to_js(lock))
+        })
+    }
+}
+
+/// # Safety
+/// As for `my_resource_new`, and `value` is a handle in the caller's scope.
+unsafe fn is_my_resource(isolate: *mut ffi::Isolate, value: ffi::Local) -> KjMaybe<bool> {
+    // SAFETY: forwarded from the caller.
+    unsafe { jsg::resource::ffi_is::<MyResource>(isolate, value) }
+}
+```
+
+- The wrapper owns the resource. C++ keeps it alive by holding the wrapper, in a `jsg::JsRef` (or a
+  `v8::Global`). C++ has no typed reference to a Rust resource, such as a `jsg::Ref<T>`, so a C++
+  JSG signature that takes one takes a JavaScript value, and C++ checks its type with a function
+  like `is_my_resource`.
+- `jsg::resource::ffi_is::<R>` returns `kj::none`, as `v8::Maybe<bool>` returns `Nothing`, when an
+  exception is pending: the check panicked, leaving an internal error pending and execution
+  terminating. C++ propagates it as `jsg::JsExceptionThrown`; throwing a `TypeError` for a
+  mismatch instead would replace the termination:
+
+  ```c++
+  KJ_IF_SOME(isMine, rust::my_api::is_my_resource(isolate, value)) {
+    JSG_REQUIRE(isMine, TypeError, "expected a MyResource");
+  } else {
+    throw jsg::JsExceptionThrown();
+  }
+  ```
+
+- `jsg::resource::is::<R>` creates no `jsg::Rc`, so use it rather than a conversion to `jsg::Rc`
+  when only the type matters.
+- The resource's template comes from the isolate's Rust `Realm`, which `Worker::Isolate` creates
+  for every worker isolate.
+
+Tested by `src/rust/jsg-test/tests/resource_from_cpp.rs`, through a C++ helper that holds the
+wrapper only in a `v8::Global` across a full GC.
+
 ## V8 Handle Types
 
 ### `Lock<'s>` and handle scopes
@@ -459,9 +532,10 @@ but not return values:
   Like C++ JSG's integers.
 - `i64`: a `BigInt` that fits, or any other value converted to a number, which must be finite and
   in range, and truncates toward zero. Like C++ JSG's `int64_t`.
-- `SystemTime`: a `Date`, or a number of milliseconds since the epoch, within the range of
-  `kj::Date`. Like C++ JSG's `kj::Date`.
 - `&[T]` and typed-array slices such as `&[u8]`.
+
+Like C++ JSG's `kj::Date`, `SystemTime` converts to a `Date` of the milliseconds since the epoch,
+truncated toward zero, and from a `Date` or a number of milliseconds within the range of `kj::Date`.
 
 ## Union Types
 

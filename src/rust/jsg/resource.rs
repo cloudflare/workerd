@@ -417,6 +417,43 @@ pub fn function_template_of<'s, R: Resource + 'static>(
     unsafe { v8::function_template_get_function(lock, &constructor) }
 }
 
+/// Returns whether `value` is the JavaScript wrapper of a resource of type `R`.
+///
+/// Unlike converting `value` with [`FromJS`], this creates no [`Rc<R>`](Rc), so it is the check
+/// to use when only the type matters: for example, in a function that C++ calls to check a value
+/// it holds (`README.md` §Creating resources from C++).
+pub fn is<R: Resource + 'static>(lock: &mut Lock<'_>, value: v8::Local<'_, v8::Value>) -> bool {
+    v8::WrappableRc::from_js(lock, value)
+        .is_some_and(|wrappable| wrappable.resolve_resource::<R>().is_some())
+}
+
+/// [`is`] for a function that C++ calls, as [`v8::run_ffi_callback`] is for one that returns a
+/// handle: opens the caller's scope and runs [`is`] through [`catch_panic`](crate::catch_panic).
+///
+/// Like `v8::Maybe<bool>`, the result is none when an exception is pending: here, when the check
+/// panicked, which leaves an internal error pending and execution terminating. C++ propagates it
+/// as `jsg::JsExceptionThrown` rather than treating it as a mismatch, since throwing another
+/// exception would replace the termination.
+///
+/// # Safety
+///
+/// `isolate` must point to a live V8 isolate locked by the current thread with a context entered
+/// and a `HandleScope` open, and `value` must be a handle in that scope.
+pub unsafe fn ffi_is<R: Resource + 'static>(
+    isolate: *mut v8::ffi::Isolate,
+    value: v8::ffi::Local,
+) -> KjMaybe<bool> {
+    // SAFETY: forwarded from this function's safety contract.
+    let scope = std::pin::pin!(unsafe { crate::CallbackScope::new(isolate) });
+    crate::catch_panic(scope, |lock| {
+        // SAFETY: `value` is a handle in the scope that `lock` stands for, per this function's
+        // safety contract.
+        let value = unsafe { v8::Local::from_ffi(value) };
+        is::<R>(lock, value)
+    })
+    .into()
+}
+
 /// Builds a [`ResourceDescriptor`] from `R`'s [`Resource::members(flags)`](Resource::members) list.
 /// The descriptor is passed to C++ `create_resource_template` to set up the
 /// V8 `FunctionTemplate` with the correct methods, constants, and constructor.
