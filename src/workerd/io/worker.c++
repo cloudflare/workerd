@@ -165,13 +165,21 @@ void maybePerIsolateBootstrap(CompatibilityFlags::Reader& featureFlags,
     TRACE_EVENT("workerd", "Worker::perIsolateBootstrap");
     JSG_WITHIN_CONTEXT_SCOPE(
         lock, context, [&](jsg::Lock& js) { runPerIsolateBootstrap(js, featureFlags); });
-  } else if (featureFlags.getTypeScriptImplementedStreams()) {
-    auto err = kj::str("A worker cannot use typescript implemented streams without "
-                       "per-isolate JavaScript bootstrap enabled");
-    KJ_IF_SOME(reporter, errorReporter) {
-      reporter.addError(kj::str(err));
+  } else {
+    auto fail = [&](kj::StringPtr feature) {
+      auto err = kj::str(
+          "A worker cannot use ", feature, " without per-isolate JavaScript bootstrap enabled");
+      KJ_IF_SOME(reporter, errorReporter) {
+        reporter.addError(kj::str(err));
+      }
+      KJ_FAIL_ASSERT(err);
+    };
+    if (featureFlags.getTypeScriptImplementedStreams()) {
+      fail("typescript implemented streams"_kj);
     }
-    KJ_FAIL_ASSERT(err);
+    if (featureFlags.getTypeScriptImplementedStructuredClone()) {
+      fail("typescript implemented structuredClone"_kj);
+    }
   }
 }
 

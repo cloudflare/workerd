@@ -1734,4 +1734,12 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # `tlsMode = startTls`, or another Worker's socket opened with `secureTransport: 'starttls'`.
   # The handler's socket then has secureTransport "starttls". Without the flag, it has
   # secureTransport "off" and its startTls() throws.
+
+  typeScriptImplementedStructuredClone @197 :Bool
+      $compatEnableFlag("typescript_implemented_structured_clone")
+      $experimental;
+  # When enabled, the global structuredClone() is the TypeScript implementation from the
+  # per-isolate bootstrap, which converts its arguments in TypeScript and calls the native
+  # serializer. Requires the per-isolate-javascript-bootstrap autogate; without it the C++
+  # implementation remains.
 }

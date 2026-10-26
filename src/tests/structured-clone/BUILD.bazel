@@ -1,0 +1,18 @@
+load("//:build/wd_test.bzl", "wd_test")
+
+# The structuredClone suite runs the same test modules under two configs:
+# structured-clone-cpp against the C++ JSG method, structured-clone-ts against
+# the TypeScript implementation.
+
+structured_clone_suite_srcs = glob(["*.js"]) + ["structured-clone-modules.capnp"]
+
+wd_test(
+    src = "structured-clone-cpp.wd-test",
+    data = structured_clone_suite_srcs,
+)
+
+wd_test(
+    src = "structured-clone-ts.wd-test",
+    args = ["--experimental"],
+    data = structured_clone_suite_srcs,
+)

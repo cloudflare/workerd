@@ -31,7 +31,7 @@
 // const foo = require('./foo');
 // (globalThis as any).Foo = foo.bootstrapFoo(compatFlags);
 //
-const { ObjectDefineProperties } = primordials;
+const { ObjectDefineProperties, ObjectGetPrototypeOf } = primordials;
 
 if (compatFlags['typescript_implemented_streams']) {
   const {
@@ -277,4 +277,24 @@ if (compatFlags['typescript_implemented_streams']) {
       },
     });
   }
+}
+
+if (compatFlags['typescript_implemented_structured_clone']) {
+  const { structuredClone } = require('structured-clone');
+
+  // JSG installs global methods on the global object's prototype,
+  // ServiceWorkerGlobalScope.prototype, so the replacement goes there with the
+  // attributes JSG_METHOD gives it (all three true). Shadowing it with an own
+  // property of globalThis would leave the C++ method reachable through the
+  // prototype.
+  ObjectDefineProperties(ObjectGetPrototypeOf(globalThis), {
+    __proto__: null,
+    structuredClone: {
+      __proto__: null,
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: structuredClone,
+    },
+  });
 }
