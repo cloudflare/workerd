@@ -768,7 +768,7 @@ static kj::Array<kj::byte> syncProcessBuffer(Context& ctx, GrowableBuffer& resul
       JSG_REQUIRE(ctx.isStreamEnd(), RangeError, "Memory limit exceeded");
       break;
     }
-  } while (ctx.getAvailOut() == 0);
+  } while (ctx.getAvailOut() == 0 || ctx.hasPendingInput() || ctx.hasPendingOutput());
 
   return result.releaseAsArray();
 }

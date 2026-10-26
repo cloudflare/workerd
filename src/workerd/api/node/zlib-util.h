@@ -102,6 +102,14 @@ class ZlibContext final {
     return err == Z_STREAM_END;
   }
 
+  bool hasPendingOutput() const {
+    return false;
+  }
+
+  bool hasPendingInput() const {
+    return false;
+  }
+
   uint getAvailIn() const {
     return core.availIn();
   };
