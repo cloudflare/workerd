@@ -20,4 +20,9 @@ js_test(
         "FAKE_S3_CONFIG": "$(rootpath :fake-s3.wd-test)",
     },
     tags = ["js-test"],
+    # SQLite on Windows cannot report WAL writes, which cluster mode needs.
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
 )

@@ -2863,6 +2863,8 @@ SqliteDatabase::Vfs::Vfs(const kj::Directory& directory, Options options)
       options(kj::mv(options)),
       native(*sqlite3_vfs_find(nullptr)) {
 #if _WIN32
+  // Only the native VFS reports WAL writes, and Windows uses the KJ VFS.
+  KJ_REQUIRE(this->options.walWrite == kj::none, "walWrite is not supported on Windows");
   vfs = kj::heap(makeKjVfs());
 #else
   KJ_IF_SOME(fd, directory.getFd()) {

@@ -292,6 +292,7 @@ KJ_TEST("SQLite backed by real disk") {
   }
 }
 
+#if !_WIN32
 KJ_TEST("SQLite VFS reports WAL writes") {
   TempDirOnDisk dir;
   uint headers = 0, frames = 0;
@@ -324,6 +325,7 @@ KJ_TEST("SQLite VFS refuses a WAL it cannot report") {
   // The VFS reports the refusal to SQLite as a failure to open the WAL.
   KJ_EXPECT_THROW_MESSAGE("SQLITE_CANTOPEN", setupSql(db));
 }
+#endif
 
 // Tests that a read-only database client picks up changes made to the database by a read/write
 // client.
