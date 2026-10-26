@@ -4218,7 +4218,7 @@ export interface ContainerSnapshotOptions {
 }
 export type ContainerStartupOptions = {
   entrypoint?: string[];
-  enableInternet: boolean;
+  enableInternet?: boolean;
   env?: Record<string, string>;
   hardTimeout?: number | bigint;
   instance?:

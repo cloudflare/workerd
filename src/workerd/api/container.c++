@@ -371,7 +371,7 @@ void Container::start(jsg::Lock& js, jsg::Optional<StartupOptions> maybeOptions)
       list.set(i, entrypoint[i]);
     }
   }
-  req.setEnableInternet(options.enableInternet);
+  req.setEnableInternet(options.enableInternet.orDefault(false));
 
   KJ_IF_SOME(env, options.env) {
     auto list = req.initEnvironmentVariables(env.fields.size());
