@@ -295,3 +295,33 @@ export function beforeRequest(Module: Module): void {
   entropyBeforeRequest(Module);
   Module.setSetTimeout(setTimeout, clearTimeout, setInterval, clearInterval);
 }
+
+const NESTED_PROMISING_TASK_ERROR =
+  'Cannot enter a promising task from inside another running promising task';
+
+// Pyodide creates this device to capture the stderr of a Python exception,
+// then removes it within a single synchronous conversion of a Python exception,
+// so it should never exist between calls into Python.
+// However, if an exception is thrown while converting an exception, the device
+// may still exist.
+const CAPTURE_STDERR_DEVICE = 'capture_stderr';
+
+/**
+ * Aborts the isolate if `error`, thrown by a call into Python, shows that Pyodide's global state
+ * is broken so that no later call can succeed.
+ */
+export function abortIfGlobalStateIsBroken(
+  Module: Module,
+  error: unknown
+): void {
+  const cannotEnterPython =
+    error instanceof Error &&
+    error.name === 'PythonError' &&
+    error.message.includes(NESTED_PROMISING_TASK_ERROR);
+  if (
+    cannotEnterPython ||
+    Module.FS.readdir('/dev').includes(CAPTURE_STDERR_DEVICE)
+  ) {
+    Module.API.on_fatal?.(error);
+  }
+}

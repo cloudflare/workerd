@@ -18,6 +18,7 @@ import {
   WORKFLOWS_ENABLED,
 } from 'pyodide-internal:metadata';
 import {
+  abortIfGlobalStateIsBroken,
   beforeRequest,
   clearSignals,
   loadPyodide,
@@ -372,6 +373,7 @@ async function doPyCallHelper(
     return await pyfunc(...args);
   } catch (e: any) {
     const pyodide = await getPyodide();
+    abortIfGlobalStateIsBroken(pyodide._module, e);
     handleSrcImport(pyodide, e);
   }
 }
