@@ -18,25 +18,42 @@ namespace workerd::server {
 ActorStorage::Impl::Impl(const WorkerFactory& factory,
     kj::Maybe<kj::Own<const kj::Directory>> directoryParam,
     kj::String uniqueKey,
-    ::rust::Box<ActorNamespaceHandle> actors)
-    : directory(kj::mv(directoryParam)),
+    ::rust::Box<ActorNamespaceHandle> actorsParam)
+    : actors(kj::mv(actorsParam)),
+      directory(kj::mv(directoryParam)),
       vfsDirectory(directory.map([](kj::Own<const kj::Directory>& d) { return d->clone(); })
                        .orDefault([&]() {
                          return kj::newInMemoryDirectory(kj::systemPreciseCalendarClock());
                        })),
-      vfs(*vfsDirectory),
+      vfs(*vfsDirectory, vfsOptions()),
+      schedulerVfs(*vfsDirectory),
       uniqueKey(kj::mv(uniqueKey)),
       alarmScheduler(kj::heap<AlarmScheduler>(kj::systemPreciseCalendarClock(),
           factory.getImpl().timer,
-          vfs,
+          schedulerVfs,
           kj::Path({"metadata.sqlite"}),
-          [uniqueKey = this->uniqueKey.asPtr(), actors = kj::mv(actors)](
-              const ActorKey& actor) mutable -> kj::Own<WorkerInterface> {
+          [this](const ActorKey& actor) -> kj::Own<WorkerInterface> {
             // The id carries the persisted name so that `ctx.id.name` is set when the alarm runs.
-            auto id = ActorIdFactoryImpl(uniqueKey).idFromStringNamed(
-                kj::str(actor.actorId), actor.name.map([](kj::StringPtr n) { return kj::str(n); }));
+            auto id = ActorIdFactoryImpl(this->uniqueKey)
+                          .idFromStringNamed(kj::str(actor.actorId),
+                              actor.name.map([](kj::StringPtr n) { return kj::str(n); }));
             return actors->actor_for_alarm(kj::heap<ActorIdHandle>(kj::mv(id)));
           })) {}
+
+SqliteDatabase::VfsOptions ActorStorage::Impl::vfsOptions() {
+  SqliteDatabase::VfsOptions options;
+  if (actors->replicated()) {
+    // A clustered namespace's files open only while this instance's lease holds, and their WAL
+    // writes are how the cluster captures commits.
+    options.afterOpen = [this]() { actors->check_open(); };
+    options.walWrite = [this](
+                           kj::StringPtr file, uint64_t offset, kj::ArrayPtr<const kj::byte> data) {
+      actors->wal_write(
+          toRust(file), offset, ::rust::Slice<const uint8_t>(data.begin(), data.size()));
+    };
+  }
+  return options;
+}
 
 kj::Maybe<kj::Own<FacetTreeIndex>> ActorStorage::Impl::getFacetTreeIndexIfNotEmpty(
     const kj::Directory& dir, kj::StringPtr rootKey) {
@@ -234,6 +251,9 @@ class ActorSqliteHooks final: public ActorSqlite::Hooks {
   kj::Promise<void> scheduleRun(
       kj::Maybe<kj::Date> newAlarmTime, kj::Promise<void> priorTask) override {
     KJ_IF_SOME(scheduledTime, newAlarmTime) {
+      // TODO(cluster): an alarm must follow its object between instances.
+      JSG_REQUIRE(
+          !storage->actors->replicated(), Error, "Alarms are not yet supported in cluster mode.");
       storage->alarmScheduler->setAlarm(actor, scheduledTime);
     } else {
       storage->alarmScheduler->deleteAlarm(actor);
@@ -261,10 +281,11 @@ class FacetAlarmHooks final: public ActorSqlite::Hooks {
 Worker::Actor::MakeActorCacheFunc makeActorCacheFunc(kj::Own<ActorStorage::Impl> storage,
     const ActorStorageSpec& spec,
     kj::String rootKey,
-    kj::Maybe<kj::String> actorName) {
+    kj::Maybe<kj::String> actorName,
+    kj::Maybe<::rust::Box<Committer>> committer) {
   return [storage = kj::mv(storage), durable = spec.durable, facetId = spec.facet_id,
-             rootKey = kj::mv(rootKey),
-             actorName = kj::mv(actorName)](const ActorCache::SharedLru& sharedLru,
+             rootKey = kj::mv(rootKey), actorName = kj::mv(actorName),
+             committer = kj::mv(committer)](const ActorCache::SharedLru& sharedLru,
              OutputGate& outputGate, ActorCache::Hooks& hooks,
              SqliteObserver& sqliteObserver) mutable -> kj::Maybe<kj::Own<ActorCacheInterface>> {
     if (!durable) return kj::none;
@@ -290,12 +311,20 @@ Worker::Actor::MakeActorCacheFunc makeActorCacheFunc(kj::Own<ActorStorage::Impl>
     db->run("PRAGMA journal_mode=WAL;");
     db->afterReset([storage = kj::addRef(*storage), rootKey = kj::str(rootKey), selfId](
                        SqliteDatabase& db) mutable {
+      storage->actors->database_reset(toRust(rootKey));
       db.run("PRAGMA journal_mode=WAL;");
       storage->deleteDescendantStorage(*KJ_ASSERT_NONNULL(storage->directory), rootKey, selfId);
     });
-    return kj::heap<ActorSqlite>(kj::mv(db), outputGate,
-        [](SpanParent) -> kj::Promise<void> { return kj::READY_NOW; }, *sqliteHooks)
-        .attach(kj::mv(sqliteHooks));
+    kj::Function<kj::Promise<void>(SpanParent)> commit = [](SpanParent) -> kj::Promise<void> {
+      return kj::READY_NOW;
+    };
+    KJ_IF_SOME(c, committer) {
+      commit = [c = kj::mv(c)](
+                   SpanParent) -> kj::Promise<void> { return result_task_run(c->commit()); };
+      committer = kj::none;
+    }
+    auto sqlite = kj::heap<ActorSqlite>(kj::mv(db), outputGate, kj::mv(commit), *sqliteHooks);
+    return sqlite.attach(kj::mv(sqliteHooks));
   };
 }
 
@@ -390,8 +419,10 @@ kj::Own<ActorHandle> worker_new_actor(const CompiledWorker& worker,
   KJ_IF_SOME(doId, actorId.tryGet<kj::Own<ActorIdFactory::ActorId>>()) {
     actorName = doId->getName().map([](kj::StringPtr n) { return kj::str(n); });
   }
-  auto makeActorCache = makeActorCacheFunc(
-      kj::addRef(storage.getImpl()), spec, kj::str(spec.root_key), kj::mv(actorName));
+  kj::Maybe<::rust::Box<Committer>> committer;
+  if (spec.replicated) committer = hooks->committer();
+  auto makeActorCache = makeActorCacheFunc(kj::addRef(storage.getImpl()), spec,
+      kj::str(spec.root_key), kj::mv(actorName), kj::mv(committer));
 
   auto makeStorage = [enableSql = spec.enable_sql](jsg::Lock& js, const Worker::Api& api,
                          ActorCacheInterface& actorCache) -> jsg::Ref<api::DurableObjectStorage> {
@@ -471,6 +502,14 @@ void actor_reset_storage(const ActorHandle& actor) {
   KJ_IF_SOME(cache, actor.getActor().getPersistent()) {
     KJ_IF_SOME(db, cache.getSqliteDatabase()) {
       kj::runCatchingExceptions([&]() { db.reset(); });
+    }
+  }
+}
+
+void actor_close_storage(const ActorHandle& actor) {
+  KJ_IF_SOME(cache, actor.getActor().getPersistent()) {
+    KJ_IF_SOME(db, cache.getSqliteDatabase()) {
+      db.close();
     }
   }
 }

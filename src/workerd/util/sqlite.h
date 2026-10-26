@@ -307,7 +307,31 @@ class SqliteDatabase {
   // may throw if they depend on tables that haven't been recreated yet).
   void reset();
 
-  // Objects that need to be notified when reset() is called may inherit `ResetListener`.
+  // Closes the underlying SQLite connection without reopening it. Every subsequent attempt to
+  // use the database, including through existing Statements and Queries, throws. Any open
+  // transaction is rolled back (never committed). Idempotent.
+  //
+  // This exists so that an actor's storage can be severed at the moment the actor is shut down,
+  // even if references to the SqliteDatabase live on: closing the last connection checkpoints and
+  // deletes the WAL and releases any file locks, which the next opener of the same file needs.
+  //
+  // This is declared noexcept because it is expected to be used in shutdown paths which are not
+  // prepared to catch further errors and strongly depend on the database actually becoming closed
+  // (so that they can safely release file locks). If close() is unable to complete (e.g. because
+  // a sqlite statement is currently being executed) then we have no choice but to abort the
+  // process.
+  void close() noexcept;
+
+  // Why a connection is being closed. Passed to `ResetListener::beforeSqliteClose()`.
+  enum class CloseReason {
+    // reset(): the database file is deleted and a fresh connection opened.
+    RESET,
+    // close(): the connection is gone for good.
+    CLOSE,
+  };
+
+  // Objects that need to be notified when reset() or close() is called may inherit
+  // `ResetListener`.
   class ResetListener {
    public:
     ResetListener(SqliteDatabase& db): db(db) {
@@ -321,9 +345,16 @@ class SqliteDatabase {
       db.resetListeners.add(*this);
     }
 
-    // When the database's `reset()` method is called, all listeners' `beforeSqliteReset()` will be
-    // called before actually resetting the database.
-    virtual void beforeSqliteReset() = 0;
+    // When the database's `reset()` or `close()` method is called, all listeners'
+    // `beforeSqliteClose()` will be called before actually closing the connection. Any prepared
+    // statements must be finalized here so that `sqlite3_close()` can succeed.
+    //
+    // The `reason` matters for listeners that cache facts about the database's contents: after
+    // RESET the database is empty and will be reopened, so such caches must be cleared; after
+    // CLOSE nothing may read the database again, so such caches should be left alone so that
+    // attempted reads reach the closed connection and throw rather than reporting an empty
+    // database.
+    virtual void beforeSqliteClose(CloseReason reason) = 0;
 
    protected:  // so that subclasses don't have to store their own copy of the `db` reference
     SqliteDatabase& db;
@@ -357,6 +388,11 @@ class SqliteDatabase {
   // When a rollback occurs, callbacks are invoked in the reverse of the order in which they were
   // registered. The database content is rolled back first, before invoking any callbacks.
   // Callbacks may read from the database, but must not write to it.
+  //
+  // NOTE: close() technically rolls back all outstanding transactions, but does NOT call rollback
+  //   callbacks. Instead, callers who need to handle the close() case should register a
+  //   ResetListener. In practices, in-memory caches are generally moot after close() since the
+  //   actor has shut down anyway.
   void onRollback(kj::Function<void()> callback) {
     if (inTransaction || !savepoints.empty()) {
       rollbackCallbacks.add(kj::mv(callback));
@@ -388,8 +424,11 @@ class SqliteDatabase {
 
   kj::Maybe<const ActorAccountLimits&> actorAccountLimits;
 
-  // This pointer can be left null if a call to reset() failed to re-open the database.
+  // Null after a call to reset() failed to re-open the database, or after close().
   kj::Maybe<sqlite3&> maybeDb;
+
+  // Set by close(). Distinguishes the closed state from a failed reset() in error messages.
+  bool closed = false;
 
   // Set while a query is compiling.
   kj::Maybe<StaticRegulator> currentRegulator;
@@ -560,7 +599,7 @@ class SqliteDatabase::Statement final: private ResetListener {
         regulator(regulator),
         stmt(kj::mv(sqlCode)) {}
 
-  void beforeSqliteReset() override;
+  void beforeSqliteClose(CloseReason reason) override;
 
   // Get the underlying StatementAndEffect, which the caller will then execute. If `prelude` is
   // non-empty, prepareForExecution() actually executes the prelude.
@@ -833,7 +872,7 @@ class SqliteDatabase::Query final: private ResetListener {
     return getStatementAndEffect().statement;
   }
 
-  void beforeSqliteReset() override;
+  void beforeSqliteClose(CloseReason reason) override;
 
   void nextRow(bool first);
 };
@@ -857,6 +896,16 @@ struct SqliteDatabase::VfsOptions {
   // will fall back to the native VFS implementation. In that case, the options you set here will
   // be ORed with the ones set by the underlying VFS.
   int deviceCharacteristics = 0x00001000;  // = SQLITE_FCNTL_POWERSAFE_OVERWRITE
+
+  // Called immediately after SQLite opens any file through this VFS. Clustered Durable Object
+  // storage uses it to refuse opening a file once this instance's cluster lease has lapsed.
+  kj::Maybe<kj::Function<void()>> afterOpen;
+
+  // Called after each successful write to a WAL file, with the file's name as SQLite gave it.
+  // Bucket-backed Durable Objects replicate by cutting each committed transaction's frames from
+  // these writes. Only the native VFS (a disk directory) reports them.
+  kj::Maybe<kj::Function<void(kj::StringPtr file, uint64_t offset, kj::ArrayPtr<const kj::byte>)>>
+      walWrite;
 };
 
 // Implements a SQLite VFS based on a KJ directory.

@@ -696,7 +696,11 @@ SqliteDatabase::~SqliteDatabase() noexcept(false) {
 }
 
 SqliteDatabase::operator sqlite3*() {
-  return &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
+  KJ_IF_SOME(db, maybeDb) {
+    return &db;
+  }
+  KJ_REQUIRE(!closed, "database has been closed");
+  KJ_FAIL_ASSERT("previous reset() failed");
 }
 
 SqliteMemoryScope SqliteDatabase::enterMemoryScope() {
@@ -722,7 +726,7 @@ void SqliteDatabase::handleCriticalError(kj::Maybe<int> errorCode,
     if (code == SQLITE_FULL || code == SQLITE_IOERR || code == SQLITE_NOMEM ||
         code == SQLITE_INTERRUPT) {
 
-      sqlite3* db = &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
+      sqlite3* db = *this;
       // We are in a transaction
       if (inTransaction || !savepoints.empty()) {
         // The transaction was auto-rolledback, re-enabling the auto commit mode, so we should fail
@@ -847,7 +851,7 @@ SqliteDatabase::StatementAndEffect SqliteDatabase::prepareSql(StaticRegulator re
     Multi multi,
     kj::Maybe<kj::Vector<Statement>&> prelude,
     kj::Maybe<SqliteQueryId> queryId) {
-  sqlite3* db = &KJ_ASSERT_NONNULL(maybeDb, "previous reset() failed");
+  sqlite3* db = *this;
 
   ParseContext parseContext;
   KJ_ASSERT(currentParseContext == kj::none, "recursive prepareSql()?");
@@ -1054,6 +1058,7 @@ void SqliteDatabase::executeWithRegulator(
 
 void SqliteDatabase::reset() {
   KJ_REQUIRE(!readOnly, "can't reset() read-only database");
+  KJ_REQUIRE(!closed, "can't reset() a database that has been closed");
 
   // If transactions are open during reset(), whatever had the transaction open is going to get
   // confused at best, or lose data at worst. Let's just not allow this.
@@ -1067,7 +1072,7 @@ void SqliteDatabase::reset() {
 
   KJ_IF_SOME(db, maybeDb) {
     for (auto& listener: resetListeners) {
-      listener.beforeSqliteReset();
+      listener.beforeSqliteClose(CloseReason::RESET);
     }
 
     auto err = sqlite3_close(&db);
@@ -1084,6 +1089,44 @@ void SqliteDatabase::reset() {
   KJ_IF_SOME(resetCb, afterResetCallback) {
     resetCb(*this);
   }
+}
+
+void SqliteDatabase::close() noexcept {
+  if (closed) return;
+
+  // If we're currently executing a SQLite statement, there's no safe way for us to close the DB.
+  // But, callers of close() rely on the fact that the DB will in fact be closed, and they often
+  // sit on error-handling paths that cannot tolerate further exceptions. These asserts, if they
+  // fail, will abort the process, due to close() being noexcept. As of this writing it is believed
+  // that no real code path is likely to hit these, so these are just safety checks / internal
+  // invariants.
+  KJ_ASSERT(currentStatement == kj::none, "close() called while a query is executing");
+  KJ_ASSERT(currentRegulator == kj::none, "close() called while a query is compiling");
+
+  auto memoryScope = enterMemoryScope();
+
+  KJ_IF_SOME(db, maybeDb) {
+    for (auto& listener: resetListeners) {
+      listener.beforeSqliteClose(CloseReason::CLOSE);
+    }
+
+    // Every prepared statement was finalized by the listener walk above, so SQLITE_BUSY here
+    // indicates a statement that isn't tracked by a ResetListener. Do not fall back to
+    // sqlite3_close_v2(): a lazily-closed handle keeps the file open, which is exactly what this
+    // method exists to prevent.
+    auto err = sqlite3_close(&db);
+    KJ_ASSERT(
+        err == SQLITE_OK, "close() found dependent objects that still exist", sqlite3_errstr(err));
+
+    maybeDb = kj::none;
+  }
+
+  // sqlite3_close() rolled back any open transaction. Nothing may read the database again, so the
+  // rollback callbacks (which exist to keep in-memory caches in sync with it) are simply dropped.
+  inTransaction = false;
+  savepoints.clear();
+  rollbackCallbacks.clear();
+  closed = true;
 }
 
 bool SqliteDatabase::isAuthorized(int actionCode,
@@ -1550,10 +1593,22 @@ SqliteDatabase::StatementAndEffect& SqliteDatabase::Statement::prepareForExecuti
   return KJ_ASSERT_NONNULL(stmt.tryGet<StatementAndEffect>());
 }
 
-void SqliteDatabase::Statement::beforeSqliteReset() {
+void SqliteDatabase::Statement::beforeSqliteClose(CloseReason reason) {
+  // Regardless of `reason`, the prepared statement must be finalized (by destroying the
+  // StatementAndEffect) so that the connection can be closed.
   KJ_IF_SOME(prepared, stmt.tryGet<StatementAndEffect>()) {
-    // Pull the original SQL code out of the statement and store it.
-    stmt = kj::str(sqlite3_sql(prepared.statement));
+    switch (reason) {
+      case CloseReason::RESET:
+        // Keep the SQL text so that the statement can be reprepared against the new database.
+        stmt = kj::str(sqlite3_sql(prepared.statement));
+        break;
+      case CloseReason::CLOSE:
+        // The statement can never be reprepared, so don't bother copying the SQL. An empty string
+        // (no allocation) suffices: prepareForExecution() will attempt to prepare it and fail
+        // with "database has been closed" before ever looking at the text.
+        stmt = kj::String();
+        break;
+    }
   }
 }
 
@@ -1856,15 +1911,20 @@ bool SqliteDatabase::Query::isNull(uint column) {
 
 SqliteDatabase::StatementAndEffect& SqliteDatabase::Query::getStatementAndEffect() {
   return KJ_UNWRAP_OR(maybeStatement, {
-    regulator->onError(kj::none, "SQLite query was canceled because the database was deleted.");
-    KJ_FAIL_REQUIRE("query canceled because reset() was called on the database");
+    if (db.closed) {
+      regulator->onError(kj::none, "SQLite query was canceled because the database was closed.");
+      KJ_FAIL_REQUIRE("query canceled because the database has been closed");
+    } else {
+      regulator->onError(kj::none, "SQLite query was canceled because the database was deleted.");
+      KJ_FAIL_REQUIRE("query canceled because reset() was called on the database");
+    }
   });
 }
 
-void SqliteDatabase::Query::beforeSqliteReset() {
+void SqliteDatabase::Query::beforeSqliteClose(CloseReason reason) {
   // Note that if we don't own the statement, then `maybeStatement` is probably already dangling
   // here. Luckily, we don't need to reset it or anything because the statement will be destroyed
-  // by Statement::beforeSqliteReset().
+  // by Statement::beforeSqliteClose().
   maybeStatement = kj::none;
   ownStatement = {};
 }
@@ -1942,6 +2002,11 @@ struct SqliteDatabase::Vfs::WrappedNativeFileImpl: public sqlite3_file {
   const Vfs* vfs;
   int rootFd;
 
+  // Set for a WAL file when the VFS reports WAL writes (see VfsOptions::walWrite). SQLite keeps
+  // `walName` valid until the file closes.
+  kj::Function<void(kj::StringPtr, uint64_t, kj::ArrayPtr<const kj::byte>)>* walWrite;
+  const char* walName;
+
   // It's expected that the wrapped sqlite_file begins in memory immediately after this object.
   sqlite3_file* getWrapped() {
     return reinterpret_cast<sqlite3_file*>(this + 1);
@@ -2001,7 +2066,17 @@ const sqlite3_io_methods SqliteDatabase::Vfs::WrappedNativeFileImpl::METHOD_TABL
 
   WRAP(xClose),
   WRAP(xRead),
-  WRAP(xWrite),
+  .xWrite = [](sqlite3_file* file, const void* data, int amount, sqlite3_int64 offset)
+      noexcept -> int {
+    int result = MethodWrapperHack<decltype(&sqlite3_io_methods::xWrite),
+        &sqlite3_io_methods::xWrite>::wrapper(file, data, amount, offset);
+    auto wrapper = static_cast<WrappedNativeFileImpl*>(file);
+    if (result == SQLITE_OK && wrapper->walWrite != nullptr) {
+      (*wrapper->walWrite)(wrapper->walName, offset,
+          kj::arrayPtr(static_cast<const kj::byte*>(data), amount));
+    }
+    return result;
+  },
   WRAP(xTruncate),
   WRAP(xSync),
   WRAP(xFileSize),
@@ -2082,7 +2157,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
       file->pMethods = nullptr;
 
       // Set up currentVfsRoot.
-      auto& self = *reinterpret_cast<const SqliteDatabase::Vfs*>(vfs->pAppData);
+      auto& self = *reinterpret_cast<SqliteDatabase::Vfs*>(vfs->pAppData);
       KJ_ASSERT(currentVfsRoot == AT_FDCWD);
       currentVfsRoot = self.rootFd;
       KJ_DEFER(currentVfsRoot = AT_FDCWD);
@@ -2094,9 +2169,26 @@ sqlite3_vfs SqliteDatabase::Vfs::makeWrappedNativeVfs() {
       if (file->pMethods == nullptr) {
         wrapper->pMethods = nullptr;
       } else {
+        KJ_IF_SOME(afterOpen, self.options.afterOpen) {
+          try {
+            afterOpen();
+          } catch (kj::Exception& e) {
+            reportVfsErrorCaught(kj::mv(e));
+            file->pMethods->xClose(file);
+            wrapper->pMethods = nullptr;
+            return SQLITE_CANTOPEN;
+          }
+        }
         wrapper->pMethods = &WrappedNativeFileImpl::METHOD_TABLE;
         wrapper->vfs = &self;
         wrapper->rootFd = self.rootFd;
+        wrapper->walWrite = nullptr;
+        KJ_IF_SOME(walWrite, self.options.walWrite) {
+          if (flags & SQLITE_OPEN_WAL) {
+            wrapper->walWrite = &walWrite;
+            wrapper->walName = zName;
+          }
+        }
       }
 
       return result;
@@ -2398,7 +2490,7 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
     .pAppData = this,
 
 #define WRAP_METHOD(errorCode, block)                                                              \
-  auto& self KJ_UNUSED = *static_cast<const SqliteDatabase::Vfs*>(vfs->pAppData);                  \
+  auto& self KJ_UNUSED = *static_cast<SqliteDatabase::Vfs*>(vfs->pAppData);                        \
   try block catch (kj::Exception& e) {                                                             \
     reportVfsErrorCaught(kj::mv(e));                                                               \
     return errorCode;                                                                              \
@@ -2415,6 +2507,11 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
 
           auto path = kj::Path::parse(zName);
           auto kjFile = KJ_UNWRAP_OR(self.directory.tryOpenFile(path), { return SQLITE_CANTOPEN; });
+          KJ_IF_SOME(afterOpen, self.options.afterOpen) {
+            afterOpen();
+          } else {
+            // squelch spurious "dangling else" warning from clang
+          }
           kj::Maybe<kj::Own<Lock>> lock;
           if (flags & SQLITE_OPEN_MAIN_DB) {
             lock = self.lockManager.lock(path, *kjFile);
@@ -2430,6 +2527,11 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
             KJ_ASSERT(flags & SQLITE_OPEN_DELETEONCLOSE);
             KJ_ASSERT(!(flags & SQLITE_OPEN_MAIN_DB), "main DB can't be a temporary file");
             kjFile = self.directory.createTemporary();
+            KJ_IF_SOME(afterOpen, self.options.afterOpen) {
+              afterOpen();
+            } else {
+              // squelch spurious "dangling else" warning from clang
+            }
           } else {
             kj::WriteMode mode;
             if (flags & SQLITE_OPEN_CREATE) {
@@ -2442,9 +2544,18 @@ sqlite3_vfs SqliteDatabase::Vfs::makeKjVfs() {
               mode = kj::WriteMode::MODIFY;
             }
 
+            // Only the native VFS reports WAL writes; a WAL a caller asked to hear from but cannot
+            // would commit transactions it never sees.
+            KJ_REQUIRE(self.options.walWrite == kj::none || !(flags & SQLITE_OPEN_WAL),
+                "walWrite needs a disk directory");
             auto path = kj::Path::parse(zName);
             kjFile =
                 KJ_UNWRAP_OR(self.directory.tryOpenFile(path, mode), { return SQLITE_CANTOPEN; });
+            KJ_IF_SOME(afterOpen, self.options.afterOpen) {
+              afterOpen();
+            } else {
+              // squelch spurious "dangling else" warning from clang
+            }
             if (flags & SQLITE_OPEN_MAIN_DB) {
               lock = self.lockManager.lock(path, *kjFile);
             }

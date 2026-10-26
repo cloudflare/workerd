@@ -292,6 +292,39 @@ KJ_TEST("SQLite backed by real disk") {
   }
 }
 
+KJ_TEST("SQLite VFS reports WAL writes") {
+  TempDirOnDisk dir;
+  uint headers = 0, frames = 0;
+  SqliteDatabase::Vfs vfs(*dir,
+      {.walWrite = kj::Function<void(kj::StringPtr, uint64_t, kj::ArrayPtr<const kj::byte>)>(
+           [&](kj::StringPtr file, uint64_t offset, kj::ArrayPtr<const kj::byte> data) {
+    KJ_EXPECT(file.endsWith("foo-wal"), file);
+    // The 32-byte WAL header at offset 0, then each frame's header and page.
+    if (offset == 0) {
+      KJ_EXPECT(data.size() == 32);
+      ++headers;
+    } else {
+      ++frames;
+    }
+  })});
+
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  setupSql(db);
+  checkSql(db);
+  KJ_EXPECT(headers >= 1);
+  KJ_EXPECT(frames >= 2);
+}
+
+KJ_TEST("SQLite VFS refuses a WAL it cannot report") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir,
+      {.walWrite = kj::Function<void(kj::StringPtr, uint64_t, kj::ArrayPtr<const kj::byte>)>(
+           [](kj::StringPtr, uint64_t, kj::ArrayPtr<const kj::byte>) {})});
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+  // The VFS reports the refusal to SQLite as a failure to open the WAL.
+  KJ_EXPECT_THROW_MESSAGE("SQLITE_CANTOPEN", setupSql(db));
+}
+
 // Tests that a read-only database client picks up changes made to the database by a read/write
 // client.
 void doReadOnlyUpdateTest(const kj::Directory& dir) {

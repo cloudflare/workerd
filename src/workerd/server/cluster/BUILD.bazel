@@ -1,0 +1,32 @@
+load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
+
+# Durable Objects whose shared state is an S3-compatible bucket. Pure Rust:
+# the server (//src/workerd/server/server) drives it.
+wd_rust_crate(
+    name = "cluster",
+    proc_macro_deps = ["@crates_vendor//:async-trait"],
+    # The capture's tests drive a real SQLite.
+    test_deps = ["@sqlite3"],
+    visibility = ["//src/workerd/server:__subpackages__"],
+    deps = [
+        "//src/workerd/server/cluster/logic:cluster-logic",
+        "@crates_vendor//:bytes",
+        "@crates_vendor//:futures",
+        "@crates_vendor//:http",
+        "@crates_vendor//:http-body",
+        "@crates_vendor//:httpdate",
+        "@crates_vendor//:hyper-util",
+        "@crates_vendor//:lz4_flex",
+        "@crates_vendor//:nix",
+        "@crates_vendor//:ring",
+        "@crates_vendor//:rustls",
+        "@crates_vendor//:rustls-platform-verifier",
+        "@crates_vendor//:serde",
+        "@crates_vendor//:serde_json",
+        "@crates_vendor//:thiserror",
+        "@crates_vendor//:tokio",
+        "@crates_vendor//:tokio-rustls",
+        "@crates_vendor//:tower-service",
+        "@crates_vendor//:tracing",
+    ],
+)

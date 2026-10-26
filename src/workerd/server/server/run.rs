@@ -29,6 +29,8 @@ use crate::bindings::Designator;
 use crate::bindings::len_u32;
 use crate::bridge::ffi;
 use crate::channels::Channel;
+use crate::cluster;
+use crate::cluster::ClusterNode;
 use crate::config::Factory;
 use crate::config::Overrides;
 use crate::config::Reporter;
@@ -61,6 +63,9 @@ pub struct RunOptions {
     pub control: Option<std::fs::File>,
     /// `--debug-port`.
     pub debug_port: Option<String>,
+    /// `--cluster-addr` and `--cluster-advertise`.
+    pub cluster_address: Option<String>,
+    pub cluster_advertise: Option<String>,
 }
 
 /// The control channel (`--control-fd`), written line by line; a failed write is logged. The
@@ -139,11 +144,21 @@ async fn start(
         control.listen_inspector(port);
     }
 
+    // The cluster port is bound before the services, like the sockets: its address goes in the
+    // lease record.
+    let cluster_port = if config.has_cluster() {
+        let conf = config.get_cluster().map_err(capnp_error)?;
+        let (address, advertise) = (&options.cluster_address, &options.cluster_advertise);
+        Some(cluster::bind(conf, address.as_deref(), advertise.as_deref()).await?)
+    } else {
+        None
+    };
     let server = Server::start(
         Rc::clone(&factory),
         &options.overrides,
         report,
         bound.inbound,
+        cluster_port.as_ref().map(|(_, address)| address.clone()),
     )
     .await?;
     report_unmatched_overrides(&server, &options.overrides, config, for_test)?;
@@ -187,6 +202,9 @@ async fn start(
     for (name, port) in ports {
         control.listen(&name, port);
     }
+    if let (Some(node), Some((listener, _))) = (server.cluster(), cluster_port) {
+        start_cluster(&factory, node, listener);
+    }
 
     if let Some(address) = &options.debug_port {
         let listener = listen::listen(address, 0, factory.loopback()).await?;
@@ -202,6 +220,22 @@ async fn start(
         listeners,
         drain,
     }))
+}
+
+/// Runs this instance's part in the cluster: the peer port, the lease, and compaction. They run for
+/// the life of the process; a lease the instance cannot keep ends it.
+fn start_cluster(factory: &Rc<Factory>, node: &Rc<ClusterNode>, listener: tokio::net::TcpListener) {
+    factory.spawn_detached(cluster::serve(listener, Rc::clone(node)));
+    let cluster = Rc::clone(&node.cluster);
+    factory.spawn_detached(async move {
+        let reason = cluster.maintain().await;
+        // Peers may take this instance's objects over once its lease lapses: it must stop
+        // serving first.
+        tracing::error!("leaving the cluster: {reason}");
+        std::process::exit(1);
+    });
+    let cluster = Rc::clone(&node.cluster);
+    factory.spawn_detached(async move { cluster.tier_loop().await });
 }
 
 /// The listener for one bound socket, or none for a socket whose type is unknown (reported).
@@ -371,8 +405,19 @@ pub async fn run(
     match futures::future::select(serving, drain).await {
         Either::Left((result, _)) => result?,
         Either::Right(((), serving)) => {
+            // A draining instance claims nothing more and lets its objects go, so peers take
+            // them over while its connections finish.
+            if let Some(node) = server.cluster() {
+                node.cluster.start_draining();
+                server.abort_all_actors(None);
+            }
             draining.send_replace(true);
             serving.await?;
+            if let Some(node) = server.cluster()
+                && let Err(e) = node.cluster.deregister().await
+            {
+                tracing::warn!("leaving the cluster: {e}");
+            }
         }
     }
 

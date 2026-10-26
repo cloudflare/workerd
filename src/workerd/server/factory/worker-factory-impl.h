@@ -215,9 +215,13 @@ class ActorStorage::Impl final: public kj::Refcounted {
       kj::String uniqueKey,
       ::rust::Box<ActorNamespaceHandle> actors);
 
+  // Declared first: the VFS's hooks and the alarm scheduler call into it.
+  ::rust::Box<ActorNamespaceHandle> actors;
   kj::Maybe<kj::Own<const kj::Directory>> directory;
   kj::Own<const kj::Directory> vfsDirectory;  // the in-memory directory when there is none
   SqliteDatabase::Vfs vfs;
+  // The scheduler's database is no actor's, so it opens without the cluster's VFS hooks.
+  SqliteDatabase::Vfs schedulerVfs;
   kj::String uniqueKey;
   kj::Own<AlarmScheduler> alarmScheduler;
 
@@ -227,6 +231,7 @@ class ActorStorage::Impl final: public kj::Refcounted {
       const kj::Directory& dir, kj::StringPtr rootKey);
 
   kj::Path getSqlitePath(kj::StringPtr rootKey, uint facetId, kj::StringPtr suffix = ""_kj);
+  SqliteDatabase::VfsOptions vfsOptions();
   void deleteFacet(
       const kj::Directory& dir, kj::StringPtr rootKey, FacetTreeIndex& index, uint facetId);
   void deleteDescendantStorage(const kj::Directory& dir, kj::StringPtr rootKey, uint parentId);
@@ -239,14 +244,24 @@ class ActorStorage::Impl final: public kj::Refcounted {
 
 class RpcClient::Impl final {
  public:
-  Impl(const WorkerFactory& factory, kj::Own<kj::AsyncIoStream> connection)
+  // A connection and its RPC system, shared by the capabilities obtained over it.
+  struct Session: public kj::Refcounted {
+    explicit Session(kj::Own<kj::AsyncIoStream> connection)
+        : connection(kj::mv(connection)),
+          rpcSystem(*this->connection) {}
+    kj::Own<kj::AsyncIoStream> connection;
+    capnp::TwoPartyClient rpcSystem;
+  };
+
+  Impl(const WorkerFactory& factory, kj::Own<Session> session, rpc::WorkerdBootstrap::Client target)
       : factory(factory),
-        connection(kj::mv(connection)),
-        rpcSystem(*this->connection) {}
+        session(kj::mv(session)),
+        target(kj::mv(target)) {}
 
   const WorkerFactory& factory;
-  kj::Own<kj::AsyncIoStream> connection;
-  capnp::TwoPartyClient rpcSystem;
+  kj::Own<Session> session;
+  // Where events go: the session's bootstrap, or an actor obtained over it.
+  rpc::WorkerdBootstrap::Client target;
 };
 
 // The `WorkerdBootstrap` a peer sees over capnp: every event it starts goes to `service`.

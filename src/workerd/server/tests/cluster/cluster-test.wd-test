@@ -1,0 +1,53 @@
+# Copyright (c) 2026 Cloudflare, Inc.
+# Licensed under the Apache 2.0 license found in the LICENSE file or at:
+#     https://opensource.org/licenses/Apache-2.0
+
+# Each instance keeps its SQLite files on its own disk ("local", one directory per instance), and
+# membership and Durable Object ownership live in a bucket: a fake S3 (fake-s3.wd-test) that the
+# test starts, whose address it passes in AWS_ENDPOINT_URL.
+
+using Workerd = import "/workerd/workerd.capnp";
+
+const config :Workerd.Config = (
+  services = [
+    ( name = "local",
+      disk = (
+        writable = true,
+        allowDotfiles = true,
+      )
+    ),
+
+    ( name = "main",
+      worker = (
+        modules = [
+          ( name = "cluster-worker.js", esModule = embed "cluster-worker.js" ),
+        ],
+        compatibilityDate = "2026-01-01",
+        compatibilityFlags = ["nodejs_compat", "allow_irrevocable_stub_storage"],
+        bindings = [
+          ( name = "COUNTER", durableObjectNamespace = "Counter" ),
+          ( name = "NODE_ID", fromEnvironment = "NODE_ID" ),
+        ],
+        durableObjectNamespaces = [
+          ( className = "Counter", uniqueKey = "counter-test-namespace" ),
+        ],
+        durableObjectStorage = ( localDisk = "local" ),
+      )
+    ),
+  ],
+
+  sockets = [
+    ( name = "http", address = "*:0", http = (), service = "main" ),
+  ],
+
+  cluster = (
+    bucket = "s3://wdtest/cluster",
+    bucketOptions = [
+      "aws_region=us-east-1",
+      "aws_access_key_id=wdtest",
+      "aws_secret_access_key=wdtest-secret",
+    ],
+    address = "127.0.0.1:0",
+    key = "test-cluster-shared-secret",
+  ),
+);

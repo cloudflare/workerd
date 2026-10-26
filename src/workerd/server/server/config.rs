@@ -51,6 +51,7 @@ use crate::channels::ServerHandle;
 use crate::channels::SubrequestChannel;
 use crate::channels::TokenUsage;
 use crate::channels::WorkerInterface;
+use crate::cluster::ClusterNode;
 use crate::listen::loopback::Loopback;
 use crate::loader::WorkerLoaderNamespace;
 use crate::services::DiskDirectoryService;
@@ -312,6 +313,8 @@ pub struct Server {
     /// Durable namespaces by `uniqueKey`, for actor tokens.
     namespaces_by_unique_key: HashMap<String, Rc<ActorNamespace>>,
     worker_loaders: RefCell<WorkerLoaders>,
+    /// This instance's cluster, in cluster mode.
+    cluster: Option<Rc<ClusterNode>>,
     /// Declared last, so that it is dropped last: the services (and their isolates) refer to it.
     factory: Rc<Factory>,
 }
@@ -330,6 +333,11 @@ impl Server {
     /// What a `ServiceDesignator` resolves to; see [`lookup_service`].
     pub fn lookup(&self, designator: &Designator) -> Rc<dyn Channel> {
         lookup_service(&self.services.0, &self.report, designator)
+    }
+
+    #[must_use]
+    pub fn cluster(&self) -> Option<&Rc<ClusterNode>> {
+        self.cluster.as_ref()
     }
 
     /// Every service, in config order.
@@ -1007,6 +1015,7 @@ impl Server {
         overrides: &Overrides,
         report: Reporter,
         mut inbound_listeners: HashMap<String, Vec<ffi::InboundListener>>,
+        cluster_address: Option<String>,
     ) -> Result<Rc<Self>> {
         let message = factory.config()?;
         let config = message.get_root::<config::Reader>().map_err(capnp_error)?;
@@ -1062,11 +1071,30 @@ impl Server {
             &mut namespaces_by_unique_key,
         )?;
 
+        let cluster = match cluster_address {
+            Some(address) if config.has_cluster() => {
+                make_cluster(&factory, config, address, &report)?
+            }
+            _ => None,
+        };
+        if let Some(cluster) = &cluster {
+            // Actor databases open only under a lease.
+            cluster
+                .cluster
+                .join()
+                .await
+                .map_err(|e| kj::failed!("joining the cluster: {e}"))?;
+            for namespace in namespaces_by_unique_key.values() {
+                namespace.set_cluster(Rc::clone(cluster));
+            }
+        }
+
         let server = Rc::new(Self {
             report,
             services,
             namespaces_by_unique_key,
             worker_loaders: RefCell::new(WorkerLoaders::default()),
+            cluster,
             factory,
         });
         let handle = Box::new(ServerHandle(Rc::downgrade(&server)));
@@ -1475,3 +1503,18 @@ impl Server {
 #[cfg(test)]
 #[path = "config-test.rs"]
 mod tests;
+
+/// The cluster of `Config.cluster`, joined at `address`. `None` after reporting a config error.
+fn make_cluster(
+    factory: &Rc<Factory>,
+    config: config::Reader<'_>,
+    address: String,
+    report: &Reporter,
+) -> Result<Option<Rc<ClusterNode>>> {
+    if !factory.experimental() {
+        report.error("Cluster mode is experimental; it requires --experimental.".to_owned());
+        return Ok(None);
+    }
+    let conf = config.get_cluster().map_err(capnp_error)?;
+    Ok(Some(ClusterNode::new(Rc::clone(factory), conf, address)?))
+}

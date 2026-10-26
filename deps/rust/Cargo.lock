@@ -587,6 +587,7 @@ dependencies = [
  "libm",
  "libz-rs-sys",
  "lol_html_c_api",
+ "lz4_flex",
  "nix",
  "notify",
  "percent-encoding",
@@ -594,6 +595,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rand 0.9.5",
+ "ring",
  "ruff_python_ast",
  "ruff_python_parser",
  "rust_icu_sys",
@@ -1394,6 +1396,15 @@ dependencies = [
  "libc",
  "lol_html",
  "thiserror",
+]
+
+[[package]]
+name = "lz4_flex"
+version = "0.11.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "373f5eceeeab7925e0c1098212f2fbc4d416adec9d35051a6ab251e824c1854a"
+dependencies = [
+ "twox-hash",
 ]
 
 [[package]]
@@ -2782,6 +2793,12 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
+
+[[package]]
+name = "twox-hash"
+version = "2.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86a801b3cea342a06d468c8710662aa29e5e05e4f5c0d62f00bbb7f2ad7941c2"
 
 [[package]]
 name = "typenum"

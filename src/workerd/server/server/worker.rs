@@ -462,6 +462,7 @@ impl WorkerService {
             });
             let namespace = ActorNamespace::new(
                 Rc::clone(&self.factory),
+                self.service_name.clone().unwrap_or_default(),
                 class_name.clone(),
                 config.clone(),
                 actor_class,
@@ -485,6 +486,7 @@ impl WorkerService {
     ) -> Result<Rc<ActorNamespace>> {
         let namespace = ActorNamespace::new(
             Rc::clone(&self.factory),
+            self.service_name.clone().unwrap_or_default(),
             key.to_owned(),
             config,
             actor_class,

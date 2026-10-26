@@ -471,6 +471,8 @@ fn serve_options<T: CommandFactory>(
         socket_fds,
         control,
         debug_port: serve.debug_port,
+        cluster_address: serve.cluster_address,
+        cluster_advertise: serve.cluster_advertise,
         ..run_options(serve_or_test)
     };
     (options, inherited)

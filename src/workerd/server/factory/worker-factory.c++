@@ -85,7 +85,9 @@ WorkerFactory::Impl::Impl(WorkerFactory& factory,
           timer, entropySource, headerTableBuilder, httpOverCapnpFactory, byteStreamFactory),
       headerTable(buildHeaderTable(headerTableBuilder, this->config)),
       memoryCacheProvider(kj::heap<api::MemoryCacheProvider>()),
-      channelTokenHandler(factory),
+      channelTokenHandler(factory,
+          this->config.hasCluster() ? kj::Maybe<kj::StringPtr>(this->config.getCluster().getKey())
+                                    : kj::none),
       tasks(*this) {
   // The config's logging settings go on top of the caller's.
   auto& logging = this->options->loggingOptions;
@@ -1403,10 +1405,13 @@ MainModuleIsPython isPythonMainModule(config::Worker::Reader conf) {
 
 // Compiles a config worker's compatibility flags into `arena`, as the worker's errors.
 CompatibilityFlags::Reader compileFlags(const WorkerFactory::Options& options,
+    kj::StringPtr name,
     config::Worker::Reader conf,
     capnp::MallocMessageBuilder& arena,
     ErrorReporter& errorReporter) {
   auto flags = arena.initRoot<CompatibilityFlags>();
+  // Built-in services' Workers need `experimental`, as under Miniflare (`sql.prepare()`).
+  bool experimental = options.experimental || name.startsWith("workerd:");
   KJ_IF_SOME(overrideDate, options.testCompatibilityDateOverride) {
     if (conf.hasCompatibilityDate()) {
       errorReporter.addError(
@@ -1416,11 +1421,11 @@ CompatibilityFlags::Reader compileFlags(const WorkerFactory::Options& options,
     }
     // FUTURE_FOR_TEST admits any valid date, such as 2999-12-31.
     compileCompatibilityFlags(overrideDate, conf.getCompatibilityFlags(), flags, errorReporter,
-        options.experimental, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr,
+        experimental, CompatibilityDateValidation::FUTURE_FOR_TEST, nullptr,
         isPythonMainModule(conf));
   } else if (conf.hasCompatibilityDate()) {
     compileCompatibilityFlags(conf.getCompatibilityDate(), conf.getCompatibilityFlags(), flags,
-        errorReporter, options.experimental, CompatibilityDateValidation::CODE_VERSION, nullptr,
+        errorReporter, experimental, CompatibilityDateValidation::CODE_VERSION, nullptr,
         isPythonMainModule(conf));
   } else KJ_IF_SOME(defaultDate, options.defaultCompatibilityDate) {
     compileCompatibilityFlags(defaultDate, conf.getCompatibilityFlags(), flags, errorReporter,
@@ -1533,7 +1538,7 @@ kj::Promise<kj::Own<CompiledWorker>> factory_new_worker(const WorkerFactory& con
     auto conf = factory.config.getServices()[index].getWorker();
     extensions = factory.config.getExtensions();
     impl->flagsArena = kj::heap<capnp::MallocMessageBuilder>();
-    featureFlags = compileFlags(options, conf, *impl->flagsArena, errorReporter);
+    featureFlags = compileFlags(options, impl->name, conf, *impl->flagsArena, errorReporter);
     source = WorkerdApi::extractSource(impl->name, conf, featureFlags, errorReporter);
     if (conf.hasModuleFallback()) moduleFallback = conf.getModuleFallback();
     compileBindings = [globals = kj::heapArray(kj::from<Rust>(spec.globals))](
