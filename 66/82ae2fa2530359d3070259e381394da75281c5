@@ -1,0 +1,19 @@
+src/workerd/io/incoming-request-test.c++
+  s_11fa28ca60720a::t_3204b78c4fd136 276-321
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "6682ae2fa2530359d3070259e381394da75281c5",
+  "prompts": {},
+  "sessions": {
+    "s_11fa28ca60720a": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_e874acb74ffeFypQ2IOOqckruA",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ashley Peacock <apeacock@cloudflare.com>"
+    }
+  }
+}
