@@ -22,6 +22,7 @@ using Isolate = v8::Isolate;
 using FunctionCallbackInfo = v8::FunctionCallbackInfo<v8::Value>;
 using PropertyCallbackInfo = v8::PropertyCallbackInfo<v8::Value>;
 using PropertySetterCallbackInfo = v8::PropertyCallbackInfo<v8::Boolean>;
+using PropertyQueryCallbackInfo = v8::PropertyCallbackInfo<v8::Integer>;
 using FastApiCallbackOptions = v8::FastApiCallbackOptions;
 struct ModuleRegistry;
 struct Local;
@@ -371,6 +372,10 @@ Local pci_get_this(PropertyCallbackInfo* info);
 void pci_set_return_value(PropertyCallbackInfo* info, Local value);
 Isolate* psci_get_isolate(PropertySetterCallbackInfo* info);
 Local psci_get_this(PropertySetterCallbackInfo* info);
+
+// PropertyCallbackInfo<v8::Integer>, for wildcard property queries
+Isolate* pqci_get_isolate(PropertyQueryCallbackInfo* info);
+Local pqci_get_this(PropertyQueryCallbackInfo* info);
 
 // FastApiCallbackOptions
 // Fast callbacks run without a HandleScope; none of these leak a handle.

@@ -657,8 +657,10 @@ impl Greeting {
 
 ## Properties
 
-Two macros expose properties on resource types: `#[jsg_property]` for prototype accessors,
-instance data properties and lazily computed instance data properties, and `#[jsg_inspect_property]` for debug-only symbol-keyed properties.
+Three macros expose properties on resource types: `#[jsg_property]` for prototype accessors,
+instance data properties and lazily computed instance data properties, `#[jsg_inspect_property]`
+for debug-only symbol-keyed properties, and `#[jsg_wildcard_property]` for properties of any name
+(see [Wildcard properties](#wildcard-properties)).
 
 Full reference documentation (arguments, naming rules, compat-flag behavior, examples) lives in
 **[`jsg-macros/README.md`](../jsg-macros/README.md#jsg_propertyrequired-placement--name---readonly)**.
@@ -698,6 +700,41 @@ impl Counter {
 Methods **must** start with `get_` (getter) or `set_` (setter). The prefix is stripped for the
 JS name. Omitting the setter (or adding `readonly`) makes a `prototype` or `instance` property
 read-only. A `lazy_instance` property has no setter and is writable unless marked `readonly`.
+
+### Wildcard properties
+
+`#[jsg_wildcard_property]`, the equivalent of C++ JSG's `JSG_WILDCARD_PROPERTY`, answers reads
+of string-named properties that neither the object nor its prototypes have:
+
+```rust
+#[jsg_resource]
+impl Headers {
+    // `None` if there is no such property.
+    #[jsg_wildcard_property]
+    pub fn get_named(&self, name: String) -> Option<String> { /* ... */ }
+}
+```
+
+A wildcard property behaves as in C++ JSG:
+
+- The method takes `&self`, optionally `lock: &mut jsg::Lock`, and the name as a `String` or
+  `&str`, and returns `Option<T>` or `Result<Option<T>, E>`. A type has at most one, though
+  `custom_members` may choose between several by compatibility flag.
+- Properties of the object and its prototypes, such as methods and `toString`, take precedence;
+  the method is called only for names that neither has.
+- Only string names reach it. A symbol, or an integer key such as `obj[1]`, is looked up as
+  usual.
+- Besides reads, `name in obj`, `Reflect.has()`, `propertyIsEnumerable()` and assignment ask
+  V8 whether the property exists, which calls the method too. So the method must not have side
+  effects, and an error it returns is thrown from those as well.
+- Assignment and `Object.defineProperty()` define an own property, which then takes precedence.
+- Wildcard properties are not own properties: `hasOwnProperty()` is false,
+  `Object.getOwnPropertyDescriptor()` is undefined, `delete` has no effect on them, and
+  `Object.keys()`, `for...in` and spreading omit them. `propertyIsEnumerable()` is true for them
+  all the same.
+- An object that inherits from the resource, as `Object.create(obj)` does, reads them too.
+- A wildcard property named `then` makes the object a thenable, which `await` would call.
+  Return `None` for `then` unless that is intended.
 
 ## Static Constants
 

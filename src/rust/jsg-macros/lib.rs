@@ -14,6 +14,7 @@
 //! | `#[jsg_static_constant]` | const inside impl | Expose a numeric constant on both constructor and prototype  |
 //! | `#[jsg_property]`        | fn inside impl   | Register a resource accessor property (getter/setter)          |
 //! | `#[jsg_inspect_property]` | fn inside impl  | Register a debug-inspect-only symbol property                  |
+//! | `#[jsg_wildcard_property]` | fn inside impl | Answer reads of any property the object does not have          |
 //! | `#[jsg_struct]`          | struct           | Expose a Rust struct as a plain JavaScript object              |
 //! | `#[jsg_oneof]`           | enum             | Accept one of several JavaScript types (`kj::OneOf`)           |
 //!
@@ -24,6 +25,7 @@
 mod resource;
 mod trace;
 mod utils;
+mod wildcard;
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -618,7 +620,7 @@ fn reject(
 /// every named field.
 ///
 /// **On an impl block** — emits `jsg::Resource::members(flags)` registering every
-/// `#[jsg_method]`, `#[jsg_property]`, `#[jsg_inspect_property]`,
+/// `#[jsg_method]`, `#[jsg_property]`, `#[jsg_inspect_property]`, `#[jsg_wildcard_property]`,
 /// `#[jsg_constructor]`, and `#[jsg_static_constant]` item, plus member factories.
 /// With `custom_members`, emits only the factories; implement `jsg::Resource` yourself
 /// to select members using ordinary Rust control flow and compatibility flags.
@@ -739,6 +741,24 @@ pub fn jsg_inspect_property(_attr: TokenStream, item: TokenStream) -> TokenStrea
     // Reuse jsg_method callback generation; registration as Member::Property is
     // handled by #[jsg_resource] on the enclosing impl block.
     jsg_method(TokenStream::new(), item)
+}
+
+/// Registers a method as the wildcard property of a `#[jsg_resource]` type.
+///
+/// Equivalent to C++ JSG's `JSG_WILDCARD_PROPERTY`: reading a string-named property that
+/// neither the object nor its prototypes have calls the method with the name, and returns what
+/// it returns.
+///
+/// The method takes `&self`, optionally `lock: &mut jsg::Lock`, and the name as a `String` or
+/// `&str`, and returns `Option<T>` or `Result<Option<T>, E>` with `T: ToJS`. `None` means there
+/// is no such property, so the read gives `undefined`. The method also answers `name in obj`
+/// and assignment, so it must not have side effects. A type has at most one wildcard property.
+/// See `src/rust/jsg/README.md` for how wildcard properties behave.
+#[proc_macro_attribute]
+pub fn jsg_wildcard_property(attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Registration as Member::WildcardProperty is handled by #[jsg_resource] on the enclosing
+    // impl block.
+    wildcard::expand(attr, item)
 }
 
 // =============================================================================

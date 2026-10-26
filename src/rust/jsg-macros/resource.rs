@@ -224,6 +224,59 @@ fn collect_method_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistration
         .collect()
 }
 
+/// Scans `impl_block` for `#[jsg_wildcard_property]` methods. A resource type has at most one
+/// wildcard property, so with automatic registration a second method is a compile error, which
+/// is returned alongside the registrations so that the type is still registered and adds no
+/// errors of its own. Custom registration may choose between several by compatibility flag;
+/// registering more than one at once fails at runtime.
+fn collect_wildcard_registrations(
+    impl_block: &ItemImpl,
+    mode: RegistrationMode,
+) -> (Vec<MemberRegistration>, Option<proc_macro2::TokenStream>) {
+    let methods: Vec<_> = impl_block
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syn::ImplItem::Fn(method)
+                if method
+                    .attrs
+                    .iter()
+                    .any(|a| is_attr(a, "jsg_wildcard_property")) =>
+            {
+                Some(method)
+            }
+            _ => None,
+        })
+        .collect();
+    let error = methods
+        .get(1)
+        .filter(|_| mode == RegistrationMode::Automatic)
+        .map(|second| {
+            syn::Error::new_spanned(
+                &second.sig.ident,
+                "a resource type has at most one #[jsg_wildcard_property]; use \
+                 `custom_members` to choose between several by compatibility flag",
+            )
+            .to_compile_error()
+        });
+    let registrations = methods
+        .iter()
+        .map(|method| {
+            let rust_name = &method.sig.ident;
+            let getter_callback = crate::wildcard::getter_callback_name(rust_name);
+            let query_callback = crate::wildcard::query_callback_name(rust_name);
+            let member = quote! {
+                jsg::Member::WildcardProperty {
+                    getter_callback: Self::#getter_callback(),
+                    query_callback: Self::#query_callback(),
+                }
+            };
+            MemberRegistration::new(rust_name, &member)
+        })
+        .collect();
+    (registrations, error)
+}
+
 /// Scans `impl_block` for `#[jsg_static_constant]`-annotated consts.
 fn collect_constant_registrations(impl_block: &ItemImpl) -> Vec<MemberRegistration> {
     impl_block
@@ -502,6 +555,8 @@ fn generate_resource_bindings(
     registrations.extend(collect_method_registrations(impl_block));
     registrations.extend(collect_property_registrations(impl_block)?);
     registrations.extend(collect_constant_registrations(impl_block));
+    let (wildcard, wildcard_error) = collect_wildcard_registrations(impl_block, mode);
+    registrations.extend(wildcard);
     validate_factory_names(impl_block, &registrations).map_err(|err| err.to_compile_error())?;
     let factories = registrations.iter().map(|r| &r.factory);
     let automatic = registrations.iter().map(|r| &r.automatic);
@@ -526,6 +581,8 @@ fn generate_resource_bindings(
     };
 
     Ok(quote! {
+        #wildcard_error
+
         #[automatically_derived]
         impl #self_ty {
             #(#factories)*

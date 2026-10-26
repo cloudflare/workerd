@@ -1018,6 +1018,14 @@ Local psci_get_this(PropertySetterCallbackInfo* info) {
   return to_ffi(info->Holder());
 }
 
+Isolate* pqci_get_isolate(PropertyQueryCallbackInfo* info) {
+  return info->GetIsolate();
+}
+
+Local pqci_get_this(PropertyQueryCallbackInfo* info) {
+  return to_ffi(info->Holder());
+}
+
 // FastApiCallbackOptions
 TraitObjectPtr fast_api_unwrap_receiver(FastApiCallbackOptions* options, Local receiver) {
   KJ_IF_SOME(wrappable,
@@ -1089,6 +1097,43 @@ const v8::CFunction& getFastCFunction(const FastApiDescriptor& descriptor) {
       ->findOrCreate(descriptor.callback, [&]() -> Map::Entry {
     return {descriptor.callback, kj::heap<FastCFunction>(descriptor)};
   })->function;
+}
+
+// The descriptor callback of a wildcard property, as in C++ JSG's WildcardPropertyCallbacks
+// (resource.h): a wildcard property is never an own property, so `hasOwnProperty()` is false
+// and `Object.getOwnPropertyDescriptor()` is undefined for it.
+v8::Intercepted wildcardPropertyDescriptor(
+    v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info) {
+  return v8::Intercepted::kNo;
+}
+
+// The Rust callbacks of a wildcard property return the `v8::Intercepted` as a `u32`, and take
+// the `v8::Local<v8::Name>` as a `usize` and the `PropertyCallbackInfo` by pointer.
+static_assert(std::is_same_v<std::underlying_type_t<v8::Intercepted>, uint32_t>);
+static_assert(static_cast<uint32_t>(v8::Intercepted::kYes) == 0);
+static_assert(static_cast<uint32_t>(v8::Intercepted::kNo) == 1);
+static_assert(std::is_trivially_copyable_v<v8::Local<v8::Name>>);
+static_assert(sizeof(v8::Local<v8::Name>) == sizeof(size_t));
+
+// Installs the wildcard property on `instance`, with the flags of C++ JSG's
+// WildcardPropertyCallbacks: properties of the object or its prototypes take precedence
+// (`kNonMasking`), symbols are not intercepted (`kOnlyInterceptStrings`), and the debugger may
+// call the callbacks while evaluating without side effects (`kHasNoSideEffect`).
+template <typename RegisterExternalRef>
+void setWildcardProperty(v8::Local<v8::ObjectTemplate> instance,
+    const WildcardPropertyDescriptor& wildcard,
+    RegisterExternalRef& registerExternalRef) {
+  registerExternalRef(wildcard.getter_callback);
+  registerExternalRef(wildcard.query_callback);
+  registerExternalRef(reinterpret_cast<size_t>(&wildcardPropertyDescriptor));
+  instance->SetHandler(v8::NamedPropertyHandlerConfiguration(
+      reinterpret_cast<v8::NamedPropertyGetterCallback>(wildcard.getter_callback), nullptr,
+      reinterpret_cast<v8::NamedPropertyQueryCallback>(wildcard.query_callback), nullptr, nullptr,
+      nullptr, &wildcardPropertyDescriptor, v8::Local<v8::Value>(),
+      static_cast<v8::PropertyHandlerFlags>(
+          static_cast<int>(v8::PropertyHandlerFlags::kNonMasking) |
+          static_cast<int>(v8::PropertyHandlerFlags::kHasNoSideEffect) |
+          static_cast<int>(v8::PropertyHandlerFlags::kOnlyInterceptStrings))));
 }
 
 // The constructor of a resource without a #[jsg_constructor], with the error that C++ JSG's
@@ -1303,6 +1348,10 @@ Global create_resource_template(Isolate* isolate, const ResourceDescriptor& desc
         : v8::PropertyAttribute::ReadOnly;
     constructor->Set(name, value, attrs);
     prototype->Set(name, value, attrs);
+  }
+
+  KJ_IF_SOME(wildcard, descriptor.wildcard_property) {
+    setWildcardProperty(instance, wildcard, registerExternalRef);
   }
 
   auto result = scope.Escape(constructor);

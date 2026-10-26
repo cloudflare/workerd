@@ -459,6 +459,10 @@ pub unsafe fn ffi_is<R: Resource + 'static>(
 /// V8 `FunctionTemplate` with the correct methods, constants, and constructor.
 /// Nested types are returned separately, since their templates are installed
 /// once the template for `R` exists.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one match arm per Member variant, each a field-by-field conversion"
+)]
 fn get_resource_descriptor<R: Resource>(
     flags: compatibility_flags::Reader<'_>,
 ) -> (v8::ffi::ResourceDescriptor, NestedTypes) {
@@ -470,6 +474,7 @@ fn get_resource_descriptor<R: Resource>(
         properties: Vec::new(),
         static_methods: Vec::new(),
         static_constants: Vec::new(),
+        wildcard_property: KjMaybe::None,
     };
 
     for m in R::members(flags) {
@@ -555,6 +560,20 @@ fn get_resource_descriptor<R: Resource>(
                         name,
                         value: number_value,
                     });
+            }
+            Member::WildcardProperty {
+                getter_callback,
+                query_callback,
+            } => {
+                assert!(
+                    descriptor.wildcard_property.is_none(),
+                    "{} has more than one wildcard property",
+                    R::class_name()
+                );
+                descriptor.wildcard_property = KjMaybe::Some(v8::ffi::WildcardPropertyDescriptor {
+                    getter_callback: getter_callback as usize,
+                    query_callback: query_callback as usize,
+                });
             }
             Member::NestedType { name, nested_type } => nested_types.push((name, nested_type)),
         }
