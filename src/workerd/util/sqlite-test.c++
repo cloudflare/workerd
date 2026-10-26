@@ -1503,6 +1503,21 @@ KJ_TEST("SQLite prepareMulti with failure") {
   KJ_EXPECT(query.getInt(0) == 3);
 }
 
+KJ_TEST("SQLite prepareMulti re-executes leading statements that returned rows") {
+  auto dir = kj::newInMemoryDirectory(kj::nullClock());
+  SqliteDatabase::Vfs vfs(*dir);
+  SqliteDatabase db(vfs, kj::Path({"foo"}), kj::WriteMode::CREATE | kj::WriteMode::MODIFY);
+
+  // The rows returned by a leading statement are discarded, but the statement is kept in the
+  // prelude, so every later run of `stmt` executes it again.
+  auto stmt = db.prepareMulti(SqliteDatabase::TRUSTED, kj::str("SELECT 1; SELECT 2"));
+  for (auto i KJ_UNUSED: kj::zeroTo(3)) {
+    auto query = stmt.run();
+    KJ_ASSERT(!query.isDone());
+    KJ_EXPECT(query.getInt(0) == 2);
+  }
+}
+
 KJ_TEST("SQLite prepareMulti w/BEGIN TRANSACTION") {
   // Test running a multi-line prepared statement where a transaction state change statement
   // appears in the middle. At one point, there was a bug causing the state not to be tracked

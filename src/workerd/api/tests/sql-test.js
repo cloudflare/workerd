@@ -1438,6 +1438,23 @@ export class DurableObjectExample extends DurableObject {
     `);
 
     assert.deepEqual([...cursor], [{ i: 123 }]);
+
+    // exec() caches the compiled statement, so running the same SQL again re-executes the leading
+    // statements. A leading statement that returns rows must be runnable again.
+    for (let i = 0; i < 3; i++) {
+      assert.deepEqual(
+        [...this.state.storage.sql.exec('SELECT 1; SELECT 2 AS two')],
+        [{ two: 2 }]
+      );
+      assert.deepEqual(
+        [
+          ...this.state.storage.sql.exec(
+            'SELECT i FROM items; SELECT COUNT(*) AS n FROM items'
+          ),
+        ],
+        [{ n: 2 }]
+      );
+    }
   }
 
   async testSessionsAPIBookmark(previousBookmark) {
