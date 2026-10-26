@@ -13,6 +13,6 @@ pub fn t<'s>(
     let name = String::from("captured");
     promise.then(lock, (), move |lock, (), _value| {
         //~^ ERROR E0277
-        Ok(jsg::ToJS::to_js(name.as_str(), lock))
+        jsg::ToJS::to_js(name.as_str(), lock)
     })
 }

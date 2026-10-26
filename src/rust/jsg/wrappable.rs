@@ -365,9 +365,9 @@ impl<T: Traced> Traced for std::rc::Rc<T> {
 /// throws or execution is terminating, and a container passes on the first error from converting
 /// an element. A conversion implemented elsewhere may return any `Error`.
 ///
-/// A `#[jsg_method]` or property getter throws an error from converting its return value with
-/// [`Lock::throw_exception`], as it throws an `Err` the method returns. The method has already
-/// run by then, so only its return value is lost. JavaScript sees:
+/// A `#[jsg_method]`, property getter or wildcard property throws an error from converting its
+/// return value with [`Lock::throw_exception`], as it throws an `Err` the method returns. The
+/// method has already run by then, so only its return value is lost. JavaScript sees:
 ///
 /// - for a pending error, the exception V8 left pending, unchanged. While execution is
 ///   terminating, nothing is thrown, and the termination keeps propagating.

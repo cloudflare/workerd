@@ -3,13 +3,16 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 //! A conversion to JavaScript that fails passes on its error: through the containers that hold
-//! the value, and from a method's return value to the method's JavaScript caller, which catches
-//! what JavaScript threw during the conversion.
+//! the value, and from the return value of a method or a wildcard property to the JavaScript
+//! caller, which catches what JavaScript threw during the conversion.
+
+use std::cell::RefCell;
 
 use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
+use jsg_macros::jsg_wildcard_property;
 
 /// Converts to what calling `callback` returns, so its conversion runs JavaScript.
 struct CallsWhenConverted {
@@ -80,8 +83,45 @@ impl Converter {
     }
 }
 
+/// Answers its `value` property with what calling its callback returns.
+#[jsg_resource]
+struct WildcardConverter {
+    callback: RefCell<Option<v8::TracedGlobal<v8::Function>>>,
+}
+
+#[jsg_resource]
+impl WildcardConverter {
+    #[jsg_method]
+    fn set_callback(
+        &self,
+        lock: &mut jsg::Lock,
+        callback: v8::Local<v8::Value>,
+    ) -> jsg::Result<()> {
+        let callback = v8::Local::<v8::Function>::try_from(callback)
+            .map_err(|_| jsg::Error::new_type_error("expected a function"))?;
+        *self.callback.borrow_mut() = Some(v8::TracedGlobal::new(lock, callback));
+        Ok(())
+    }
+
+    #[jsg_wildcard_property]
+    fn get(&self, lock: &mut jsg::Lock, name: &str) -> Option<CallsWhenConverted> {
+        if name != "value" {
+            return None;
+        }
+        let callback = self.callback.borrow().as_ref().map(|f| f.as_local(lock))?;
+        Some(Converter::later(lock, callback.into()))
+    }
+}
+
 fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
     ctx.set_global(lock, "converter", jsg::Rc::new(Converter));
+    ctx.set_global(
+        lock,
+        "wildcard",
+        jsg::Rc::new(WildcardConverter {
+            callback: RefCell::new(None),
+        }),
+    );
 }
 
 #[test]
@@ -111,12 +151,20 @@ fn converting_a_return_value_runs_javascript() {
             .unwrap(),
             "a,b,c"
         );
+        assert_eq!(
+            ctx.eval::<String>(
+                lock,
+                "wildcard.setCallback(() => 'wildcard'); wildcard.value"
+            )
+            .unwrap(),
+            "wildcard"
+        );
         Ok(())
     });
 }
 
-/// What JavaScript throws while a method's return value is converted reaches the method's
-/// caller unchanged, whichever container holds the value.
+/// What JavaScript throws while the return value of a method or a wildcard property is
+/// converted reaches the caller unchanged, whichever container holds the value.
 #[test]
 fn what_a_return_value_conversion_throws_reaches_the_caller() {
     crate::Harness::new().run_in_context(|lock, ctx| {
@@ -126,6 +174,7 @@ fn what_a_return_value_conversion_throws_reaches_the_caller() {
             "converter.fallible(thrower)",
             "converter.optional(thrower)",
             "converter.many(() => 'a', thrower, () => 'c')",
+            "wildcard.setCallback(thrower); wildcard.value",
         ] {
             let script = format!(
                 "const sentinel = {{ sentinel: true }};
