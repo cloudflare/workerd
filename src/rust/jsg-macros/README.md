@@ -49,11 +49,20 @@ Generates a V8 `FunctionCallback` for a method on a `#[jsg_resource]` type.
   and the JS wrappers of the resources its `jsg::Rc`s point to can be collected (debug builds
   abort instead).
 - **Static methods** (no receiver) are placed on the constructor.
+- **`this: jsg::Rc<Self>`** as the first parameter, instead of `&self`, also makes an instance
+  method. `this` is a `jsg::Rc` of the resource the method was called on, like `JSG_THIS` in
+  C++ JSG. Use it when the method gives the resource to something that runs after the call,
+  such as a callback or a promise continuation. See "Reaching the resource from a callback" in
+  `src/rust/jsg/README.md`. A method that takes `this` has no Fast API callback.
+  The macro matches both the name `this` and the type, so a JavaScript argument of type
+  `jsg::Rc<Self>` with another name is still an ordinary argument. A `this` parameter that
+  isn't first, or has another type, is a compile error.
 - Return types of `Result<T, E>` automatically throw a JavaScript exception on `Err`.
 - The Rust `snake_case` name is converted to `camelCase` for JavaScript; override with
   `#[jsg_method(name = "jsName")]`.
 - The first typed parameter may be `&mut Lock` / `&mut jsg::Lock` to receive the
-  isolate lock directly — it is not exposed as a JavaScript argument.
+  isolate lock directly — it is not exposed as a JavaScript argument. In a method that takes
+  `this`, the lock comes right after `this`.
 - To take or return handles, name the callback's scope:
   `fn f<'s>(&self, lock: &mut Lock<'s>, v: Local<'s, Value>) -> Local<'s, Value>`. The
   generated callback ties `'s` to its own scope.
@@ -68,6 +77,12 @@ impl DnsUtil {
     // Instance — obj.getName()
     #[jsg_method]
     pub fn get_name(&self) -> String { … }
+
+    // Instance — obj.watch(…); `this` is a jsg::Rc of `obj`'s resource
+    #[jsg_method]
+    pub fn watch(this: jsg::Rc<Self>, lock: &mut Lock, watcher: jsg::Rc<Watcher>) {
+        watcher.targets.borrow_mut().push(this);
+    }
 
     // Static — DnsUtil.create(…)
     #[jsg_method]
@@ -89,8 +104,8 @@ field whose type is or contains a traceable JSG handle (see [Garbage Collection]
 Use `#[jsg_resource(name = "JSName")]` to override the JavaScript class name.
 
 **On an impl block** — emits `jsg::Resource::members(flags)`, registering every
-`#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`, and
-`#[jsg_static_constant]` item. It also generates member factories used by both automatic
+`#[jsg_method]`, `#[jsg_constructor]`, `#[jsg_property]`, `#[jsg_inspect_property]`,
+`#[jsg_wildcard_property]`, and `#[jsg_static_constant]` item. It also generates member factories used by both automatic
 and custom registration.
 Use `#[jsg_resource(nested_types(Foo, Name = Bar))]` to expose other resource types'
 constructors on the prototype (equivalent to `JSG_NESTED_TYPE(Foo)` and
@@ -170,13 +185,16 @@ the **Rust declaration**, independently of any JavaScript `name = "..."` overrid
 | Constant `MAX_SIZE` | `Self::max_size_member()` (constant name lowercased) |
 | Property getter `get_value` with an optional paired setter | `Self::get_value_member(placement)` |
 | Inspect getter `debug_info` | `Self::debug_info_member()` |
+| Wildcard property `get_var` | `Self::get_var_member()` |
 
-An ordinary property factory accepts `jsg::PropertyPlacement::{Prototype, Instance}` and selects
-the matching V8 getter and setter callbacks. The attribute's `prototype` / `instance` argument
-only supplies placement for **automatic** registration; custom registration passes it explicitly.
+An ordinary property factory accepts `jsg::PropertyPlacement::{Prototype, Instance, LazyInstance}`
+and selects the matching V8 getter and setter callbacks. The attribute's `prototype` / `instance` /
+`lazy_instance` argument only supplies placement for **automatic** registration; custom registration passes it explicitly.
 Getter/setter pairing, `readonly` checks, name overrides, argument conversion, and exception
 handling apply in both modes. Getter and setter annotations must agree on placement and JS name.
 Inspect properties remain symbol-keyed and do not take a placement argument.
+`LazyInstance` keeps the getter's `readonly` (see `lazy_instance` below); asking for it for a
+property with a setter panics when the template is created.
 Property registration follows the returned member list's order. V8 enumerates instance native
 data properties in reverse registration order, as it does for C++ JSG.
 `nested_types(...)` cannot be combined with `custom_members`; a custom `members` lists nested
@@ -228,7 +246,8 @@ impl Greeting {
 ## `#[jsg_property([placement,] [name = "..."] [, readonly])]`
 
 Registers a method as a getter or setter on a `#[jsg_resource]` type. The `placement` argument
-is optional and must be either `prototype` or `instance`; it defaults to `prototype`.
+is optional and must be one of `prototype`, `instance` or `lazy_instance`; it defaults to
+`prototype`.
 
 **`prototype`** — property lives on the prototype chain. Not directly enumerable (`Object.keys()`
 is empty), but `"prop" in obj` is `true`. Can be overridden by subclasses. Equivalent to C++
@@ -239,6 +258,14 @@ is empty), but `"prop" in obj` is `true`. Can be overridden by subclasses. Equiv
 `Object.keys()` includes it, `hasOwnProperty()` returns `true`, not overridable by subclasses.
 Equivalent to C++ `JSG_INSTANCE_PROPERTY` / `JSG_READONLY_INSTANCE_PROPERTY`.
 
+**`lazy_instance`** — own data property on every instance whose getter runs on first access (V8
+`SetLazyDataProperty`); V8 then stores the result as the property's value, so later reads return
+that same value without calling the getter. A getter that throws leaves the property lazy. The
+property is enumerable, configurable and writable; assigning to it before the first read stores
+the assigned value without running the getter. It cannot have a setter, and `readonly` makes it
+non-writable. Equivalent to C++ `JSG_LAZY_INSTANCE_PROPERTY` /
+`JSG_LAZY_READONLY_INSTANCE_PROPERTY`.
+
 > **Prefer `prototype` in almost all cases.** Own properties prevent minor-GC collection
 > of the object and inhibit some V8 optimisations.
 
@@ -246,21 +273,26 @@ Equivalent to C++ `JSG_INSTANCE_PROPERTY` / `JSG_READONLY_INSTANCE_PROPERTY`.
 from `snake_case` to `camelCase` after stripping a leading `get_` or `set_` prefix.
 
 **`readonly`** — asserts at compile time that no matching `set_*` method is also annotated with
-this property. Omitting a setter already makes the property read-only; `readonly` adds an
-explicit check.
+this property. Omitting a setter already makes a `prototype` or `instance` property read-only;
+`readonly` adds an explicit check. A `lazy_instance` property never has a setter, and `readonly`
+is what makes its stored value read-only.
 
 **Naming** — methods **must** start with `get_` (getter) or `set_` (setter). A method without
 either prefix is a compile error.  The prefix is stripped and the remainder is converted
 `snake_case` → `camelCase`, so `get_foo_bar` / `set_foo_bar` both map to `"fooBar"`.
 
 **Setter detection** — a method whose Rust name starts with `set_` is registered as the setter.
-Omitting a setter (or using `readonly`) makes the property read-only. In
-strict mode, assigning to a read-only property throws a `TypeError`.
+Omitting a setter (or using `readonly`) makes a `prototype` or `instance` property read-only. A
+`lazy_instance` property has no setter and is writable unless marked `readonly`. In strict mode,
+assigning to a read-only property throws a `TypeError`.
+
+**Receiver** — a getter or setter takes `&self`, or `this: jsg::Rc<Self>` as its first
+parameter, like a `#[jsg_method]`. So do `#[jsg_inspect_property]` getters.
 
 **Compat flag** — when `spec_compliant_property_attributes` is enabled, a `prototype` getter's
 `.length` is set to `0`, its setter's `.length` to `1`, the getter's `.name` to `"get <name>"`,
 and the setter's `.name` to `"set <name>"`, per Web IDL §3.7.6. `instance` properties have no
-getter or setter functions.
+getter or setter functions, nor do `lazy_instance` properties.
 
 ```rust
 use std::cell::{Cell, RefCell};
@@ -296,13 +328,18 @@ impl Counter {
     // Instance — read-only with name override
     #[jsg_property(instance, name = "tokenKind", readonly)]
     pub fn get_kind(&self) -> String { self.kind.clone() }
+
+    // Lazy instance — computed on first read, then stored on the instance
+    #[jsg_property(lazy_instance, readonly)]
+    pub fn get_tags(&self) -> Vec<String> { vec![self.kind.clone()] }
 }
 // JS: obj.value = 7; obj.value === 7         // prototype rw
 //     obj.label                               // "counter" (read-only)
 //     obj.myProp                              // "x"
-//     Object.keys(obj)                        // ["id", "tokenKind"]  (instance props)
+//     Object.keys(obj)                        // ["tags", "tokenKind", "id"]  (own props)
+//     obj.tags === obj.tags                   // true (getter ran once)
 //     obj.hasOwnProperty("id")                // true
-//     obj.kind                                // TypeError: read-only
+//     "use strict"; obj.tokenKind = "x"       // TypeError: read-only
 ```
 
 
@@ -333,6 +370,35 @@ impl ReadableStream {
 // JS: typeof stream.state           // "undefined" (invisible to string key lookup)
 //     Object.keys(stream)           // []
 //     // util.inspect(stream) shows the property via its symbol
+```
+
+## `#[jsg_wildcard_property]`
+
+Registers a method as the wildcard property of a `#[jsg_resource]` type. Equivalent to C++
+`JSG_WILDCARD_PROPERTY`. Reading a string-named property that neither the object nor its
+prototypes have calls the method with the name; `None` means there is no such property.
+
+The method takes `&self`, optionally `lock: &mut jsg::Lock`, and the name as a `String` or
+`&str`, and returns `Option<T>` or `Result<Option<T>, E>` with `T: ToJS`. The attribute takes
+no arguments. A type has at most one; with automatic registration a second is a compile error,
+and a custom `members` list that includes two fails at runtime. `name in obj` and assignment
+call the method as well, so it must not have side effects. See [Wildcard properties](../jsg/README.md#wildcard-properties) for how they
+behave.
+
+```rust
+use jsg_macros::{jsg_resource, jsg_wildcard_property};
+
+#[jsg_resource]
+struct Env { vars: std::collections::HashMap<String, String> }
+
+#[jsg_resource]
+impl Env {
+    #[jsg_wildcard_property]
+    pub fn get_var(&self, name: &str) -> Option<String> { self.vars.get(name).cloned() }
+}
+// JS: env.HOME        // "/home/user"
+//     env.MISSING     // undefined
+//     'HOME' in env   // true
 ```
 
 ## `#[jsg_oneof]`

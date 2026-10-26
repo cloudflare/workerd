@@ -34,16 +34,21 @@ pub use resource::Resource;
 pub use resource::Weak;
 pub use scope::CallbackScope;
 pub use scope::CallbackScopeParam;
+pub use scope::Intercepted;
 pub use scope::Isolate;
 pub use scope::Lock;
 pub use scope::RawFunctionCallback;
 pub use scope::RawGetterCallback;
 pub use scope::RawSetterCallback;
+pub use scope::RawWildcardGetterCallback;
+pub use scope::RawWildcardQueryCallback;
 pub use scope::UnitType;
 pub use scope::allow_scopes_of_another_isolate;
 pub use scope::function_callback;
 pub use scope::getter_callback;
 pub use scope::setter_callback;
+pub use scope::wildcard_getter_callback;
+pub use scope::wildcard_query_callback;
 pub use v8::ArrayBuffer;
 pub use v8::ArrayBufferView;
 pub use v8::BackingStore;
@@ -219,25 +224,30 @@ impl<'s> FromJS<'s> for Error {
     ///
     /// If the value is a native error, extracts the name and message properties.
     /// Otherwise, converts the value to a string for the message.
+    ///
+    /// Reading `name` and `message` can run JavaScript (a getter, a Proxy trap, or `toString`).
+    /// If it throws, or execution is terminating, this fails with an error for which
+    /// [`Error::is_pending`] is true.
     fn from_js(
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        if value.is_native_error() {
-            let obj: v8::Local<v8::Object> = value.into();
+        if value.is_native_error()
+            && let Ok(obj) = v8::Local::<v8::Object>::try_from(value)
+        {
+            let name = obj.get(lock, "name")?;
+            let name = if name.is_undefined() {
+                None
+            } else {
+                Some(String::from_js(lock, name)?)
+            };
 
-            let name = obj
-                .get(lock, "name")
-                .ok()
-                .filter(|v| !v.is_undefined())
-                .and_then(|v| String::from_js(lock, v).ok());
-
-            let message = obj
-                .get(lock, "message")
-                .ok()
-                .filter(|v| !v.is_undefined())
-                .and_then(|v| String::from_js(lock, v).ok())
-                .unwrap_or_else(|| "Unknown error".to_owned());
+            let message = obj.get(lock, "message")?;
+            let message = if message.is_undefined() {
+                "Unknown error".to_owned()
+            } else {
+                String::from_js(lock, message)?
+            };
 
             Ok(Self {
                 name: name.map_or(ExceptionType::Error, |n| ExceptionType::from(n.as_str())),
@@ -766,8 +776,9 @@ impl<'s> Lock<'s> {
         // int-typed length parameter; V8 rejects strings that large anyway.
         let len = i32::try_from(message.len()).unwrap_or(i32::MAX);
         // SAFETY: Lock guarantees the isolate is valid and locked; message.as_ptr()
-        // and len describe a valid byte slice.
-        let value: v8::Local<'s, v8::Value> = unsafe {
+        // and len describe a valid byte slice. V8's error constructors always return an
+        // object.
+        let error: v8::Local<'s, v8::Object> = unsafe {
             v8::Local::from_ffi(v8::ffi::exception_create_from_bytes(
                 self.isolate().as_ffi(),
                 exception_type,
@@ -775,8 +786,8 @@ impl<'s> Lock<'s> {
                 len,
             ))
         };
-        // Error, TypeError, and RangeError are all JS objects.
-        value.into()
+        debug_assert!(error.is_object());
+        error
     }
 
     pub fn throw_error(&mut self, message: &str) {
@@ -784,14 +795,16 @@ impl<'s> Lock<'s> {
         unsafe { v8::ffi::isolate_throw_error(self.isolate().as_ffi(), message) }
     }
 
+    /// Runs `fut` as I/O and later calls `callback` with its output under a new lock. Both run
+    /// after the current callback has returned, so they must be `'static`.
     #[expect(
         clippy::unimplemented,
         reason = "`await_io` is not implemented for Rust resources yet"
     )]
     pub fn await_io<F, C, I, R>(&mut self, _fut: F, _callback: C) -> Result<R>
     where
-        F: Future<Output = I>,
-        C: for<'t> FnOnce(&mut Lock<'t>, I) -> Result<R>,
+        F: Future<Output = I> + 'static,
+        C: for<'t> FnOnce(&mut Lock<'t>, I) -> Result<R> + 'static,
     {
         unimplemented!("Lock::await_io is not yet implemented for Rust resources")
     }
@@ -850,6 +863,11 @@ impl<'s> Lock<'s> {
         }
         if err.is_internal {
             self.throw_internal_error(&err.message);
+            return;
+        }
+        if self.is_execution_terminating() {
+            // `isolate_throw_exception` would throw nothing, and creating the exception while
+            // execution is terminating fails a V8 debug check.
             return;
         }
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
@@ -960,10 +978,21 @@ impl<'s> Lock<'s> {
     /// # Errors
     ///
     /// Returns `err` itself if [`Error::is_pending`] is true: the exception it stands for is
-    /// pending in V8, and returning the error propagates it.
+    /// pending in V8, and returning the error propagates it. While execution is terminating,
+    /// creates nothing and returns [`Error::pending`]'s error, so that returning it keeps the
+    /// termination; an internal error's message is still logged.
     pub fn exception(&mut self, err: &Error) -> Result<v8::Local<'s, v8::Value>> {
         if err.is_pending() {
             return Err(err.clone());
+        }
+        if self.is_execution_terminating() {
+            // Creating the exception while execution is terminating fails a V8 debug check, and
+            // nothing could be rejected with it.
+            if err.is_internal {
+                // Logs the message and throws nothing.
+                self.throw_internal_error(&err.message);
+            }
+            return Err(Error::pending());
         }
         if err.is_internal {
             // SAFETY: isolate is valid and locked (guaranteed by Lock); the exception lives in
@@ -1082,6 +1111,9 @@ impl From<u64> for ConstantValue {
 ///   [`Member::InstanceProperty`] registers these.
 /// - `Inspect`   — symbol-keyed on the prototype; hidden from normal enumeration,
 ///   surfaced by `node:util` `inspect()`.
+/// - `LazyInstance` / `LazyReadonlyInstance` — own data property on every
+///   instance, computed once on first access. Only
+///   [`Member::LazyInstanceProperty`] registers these.
 pub use crate::v8::ffi::PropertyKind;
 
 /// Placement of an ordinary resource property registered by a generated member factory.
@@ -1091,6 +1123,9 @@ pub enum PropertyPlacement {
     Prototype,
     /// An own native data property on each instance, for compatibility with existing APIs.
     Instance,
+    /// An own data property on each instance whose getter runs on first access, after which
+    /// the result is stored as the property's value.
+    LazyInstance,
 }
 
 pub enum Member {
@@ -1121,6 +1156,16 @@ pub enum Member {
         /// `None` for read-only properties.
         setter_callback: Option<RawSetterCallback>,
     },
+    /// An own data property on every instance whose getter runs on first access
+    /// (V8's `SetLazyDataProperty`). V8 then replaces it with a data property
+    /// holding the getter's result, so later reads do not call the getter. The
+    /// property is writable unless `read_only`, like C++
+    /// `JSG_LAZY_INSTANCE_PROPERTY` / `JSG_LAZY_READONLY_INSTANCE_PROPERTY`.
+    LazyInstanceProperty {
+        name: String,
+        getter_callback: RawGetterCallback,
+        read_only: bool,
+    },
     StaticMethod {
         name: String,
         callback: RawFunctionCallback,
@@ -1129,6 +1174,13 @@ pub enum Member {
     StaticConstant {
         name: String,
         value: ConstantValue,
+    },
+    /// A property of every instance with any string name that is not a defined property of the
+    /// instance or its prototypes, like C++ JSG's `JSG_WILDCARD_PROPERTY`. A type has at most
+    /// one. `query_callback` tells V8 whether a property exists, for `in`.
+    WildcardProperty {
+        getter_callback: RawWildcardGetterCallback,
+        query_callback: RawWildcardQueryCallback,
     },
     /// Another resource type's constructor, as a property of this type's
     /// prototype named `name`, like C++ JSG's `JSG_NESTED_TYPE`. Nested types

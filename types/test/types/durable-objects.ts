@@ -2,7 +2,7 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-import { onEvict, retryable } from 'cloudflare:durable-objects';
+import { onHibernate, retryable } from 'cloudflare:durable-objects';
 import { DurableObject } from 'cloudflare:workers';
 import { expectTypeOf } from 'expect-type';
 
@@ -38,15 +38,15 @@ expectTypeOf(
 // @ts-expect-error retry fields are numbers.
 ns.get(ns.idFromName('a'), { retry: { maxRetries: '2' } });
 
-class EvictableDurableObject extends DurableObject {
-  async [onEvict](_info: DurableObjectEvictionInfo): Promise<void> {}
+class HibernatingDurableObject extends DurableObject {
+  async [onHibernate](_info: DurableObjectHibernationInfo): Promise<void> {}
 }
 
-expectTypeOf(onEvict).toBeSymbol();
+expectTypeOf(onHibernate).toBeSymbol();
 // An open set of reasons that still lists the known ones, for autocomplete.
-expectTypeOf<DurableObjectEvictionInfo['reason']>().toEqualTypeOf<
+expectTypeOf<DurableObjectHibernationInfo['reason']>().toEqualTypeOf<
   'inactive' | 'codeUpdated' | 'system' | (string & {})
 >();
-expectTypeOf<EvictableDurableObject[typeof onEvict]>().toEqualTypeOf<
-  (info: DurableObjectEvictionInfo) => Promise<void>
+expectTypeOf<HibernatingDurableObject[typeof onHibernate]>().toEqualTypeOf<
+  (info: DurableObjectHibernationInfo) => Promise<void>
 >();

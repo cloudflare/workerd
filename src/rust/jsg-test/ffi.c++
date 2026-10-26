@@ -145,6 +145,17 @@ void TestHarness::drop_realm_then_gc(size_t data, ::rust::Fn<void(size_t)> callb
   });
 }
 
+void terminate_and_deliver(Isolate* isolate) {
+  isolate->TerminateExecution();
+  // The loop's stack check delivers the termination: V8 throws the termination exception and
+  // the script returns empty. No TryCatch here, so the exception stays pending for the caller.
+  auto context = isolate->GetCurrentContext();
+  auto source = v8::String::NewFromUtf8Literal(isolate, "(() => { for (;;) {} })()");
+  auto script = v8::Script::Compile(context, source).ToLocalChecked();
+  KJ_ASSERT(script->Run(context).IsEmpty());
+  KJ_ASSERT(isolate->IsExecutionTerminating());
+}
+
 void request_gc(Isolate* isolate, GcType gc_type) {
   switch (gc_type) {
     case GcType::Full:
@@ -222,6 +233,26 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
 
 bool isolates_share_group(Isolate* a, Isolate* b) {
   return a->GetGroup() == b->GetGroup();
+}
+
+void hold_across_gc(Isolate* isolate,
+    ::rust::Fn<::workerd::rust::jsg::MaybeLocal(Isolate*)> create,
+    ::rust::Fn<void(Isolate*, ::workerd::rust::jsg::Local)> check) {
+  v8::Global<v8::Value> held;
+  {
+    v8::HandleScope scope(isolate);
+    v8::Local<v8::Value> value;
+    KJ_ASSERT(
+        ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(create(isolate)).ToLocal(&value));
+    held.Reset(isolate, value);
+  }
+  request_gc(isolate, GcType::Full);
+  {
+    v8::HandleScope scope(isolate);
+    check(isolate, ::workerd::rust::jsg::to_ffi(held.Get(isolate)));
+  }
+  held.Reset();
+  request_gc(isolate, GcType::Full);
 }
 
 namespace {

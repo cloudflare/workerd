@@ -52,7 +52,10 @@ fn resolver_settles_its_promise_once() {
 
         assert_eq!(promise.state(), PromiseState::Fulfilled);
         let result = promise.result(lock).unwrap();
-        assert_eq!(jsg::Number::from_js(lock, result)?.value(), 42.0);
+        #[expect(clippy::float_cmp, reason = "42 is exactly representable")]
+        {
+            assert_eq!(jsg::Number::from_js(lock, result)?.value(), 42.0);
+        }
         Ok(())
     });
 }
@@ -64,7 +67,7 @@ fn rejected_promise_holds_its_reason() {
         let promise = v8::Promise::rejected(lock, reason.into()).unwrap();
         promise.mark_as_handled();
         assert_eq!(promise.state(), PromiseState::Rejected);
-        assert!(promise.result(lock).unwrap() == reason.into());
+        assert_eq!(promise.result(lock).unwrap(), reason.into());
         Ok(())
     });
 }
@@ -76,7 +79,17 @@ fn resolved_returns_promises_unchanged_and_follows_thenables() {
             .eval_raw(lock, "globalThis.p = Promise.resolve(1); p")
             .unwrap();
         let same = v8::Promise::resolved(lock, existing).unwrap();
-        assert!(v8::Local::<v8::Value>::from(same) == existing);
+        assert_eq!(v8::Local::<v8::Value>::from(same), existing);
+
+        // Unlike `Promise.resolve`, which would wrap a subclass instance in a new promise.
+        let subclass = ctx
+            .eval_raw(
+                lock,
+                "class PromiseSubclass extends Promise {}; new PromiseSubclass(() => {})",
+            )
+            .unwrap();
+        let same_subclass = v8::Promise::resolved(lock, subclass).unwrap();
+        assert_eq!(v8::Local::<v8::Value>::from(same_subclass), subclass);
 
         let thenable = ctx
             .eval_raw(lock, "({ then(resolve) { resolve('from thenable'); } })")
@@ -123,11 +136,52 @@ fn promise_argument_accepts_any_value() {
 // then
 // =============================================================================
 
+/// Registering a reaction runs no JavaScript: neither the promise's `then` nor its `constructor`
+/// (for the species) is read, so getters that throw don't stop any of the three.
+#[test]
+fn promise_reactions_bypass_user_properties() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        let promise = ctx
+            .eval_raw(
+                lock,
+                "const p = Promise.resolve('kept');
+                 Object.defineProperties(p, {
+                   then: { get() { throw new Error('then read'); } },
+                   constructor: { get() { throw new Error('constructor read'); } },
+                 });
+                 p",
+            )
+            .unwrap();
+        let promise = v8::Local::<v8::Promise>::try_from(promise).unwrap();
+        let fulfilled = promise
+            .then(lock, (), |_lock, (), value| Ok(value))
+            .unwrap();
+        let caught = promise
+            .catch(lock, (), |lock, (), _reason| Ok(lock.undefined()))
+            .unwrap();
+        let either = promise
+            .then_or_catch(
+                lock,
+                (),
+                |_lock, (), value| Ok(value),
+                |lock, (), _reason| Ok(lock.undefined()),
+            )
+            .unwrap();
+        crate::Harness::run_microtasks(lock);
+        for reaction in [fulfilled, caught, either] {
+            assert_eq!(reaction.state(), PromiseState::Fulfilled);
+            let result = reaction.result(lock).unwrap();
+            assert_eq!(String::from_js(lock, result)?, "kept");
+        }
+        Ok(())
+    });
+}
+
 #[test]
 fn then_runs_callbacks_as_microtasks_with_their_data() {
     crate::Harness::new().run_in_context(|lock, ctx| {
         let promise = ctx.eval_raw(lock, "Promise.resolve('world')").unwrap();
-        let promise = promise.try_as::<v8::Promise>().unwrap();
+        let promise = v8::Local::<v8::Promise>::try_from(promise).unwrap();
         let greeted = promise
             .then(lock, "hello".to_owned(), |lock, greeting, value| {
                 let name = String::from_js(lock, value)?;
@@ -147,7 +201,7 @@ fn then_runs_callbacks_as_microtasks_with_their_data() {
 fn then_rejects_with_callback_error_and_handles_rejections() {
     crate::Harness::new().run_in_context(|lock, ctx| {
         let fulfilled = ctx.eval_raw(lock, "Promise.resolve(1)").unwrap();
-        let fulfilled = fulfilled.try_as::<v8::Promise>().unwrap();
+        let fulfilled = v8::Local::<v8::Promise>::try_from(fulfilled).unwrap();
         let failed = fulfilled
             .then(lock, (), |_lock, (), _value| {
                 Err(jsg::Error::new_range_error("out of range"))
@@ -158,7 +212,7 @@ fn then_rejects_with_callback_error_and_handles_rejections() {
         let rejected = ctx
             .eval_raw(lock, "Promise.reject(new TypeError('nope'))")
             .unwrap();
-        let rejected = rejected.try_as::<v8::Promise>().unwrap();
+        let rejected = v8::Local::<v8::Promise>::try_from(rejected).unwrap();
         let recovered = rejected
             .catch(lock, (), |lock, (), reason| {
                 let err = jsg::Error::from_js(lock, reason)?;
@@ -190,7 +244,7 @@ fn then_and_catch_pass_the_other_outcome_through() {
                 "globalThis.error = new TypeError('nope'); Promise.reject(error)",
             )
             .unwrap();
-        let rejected = rejected.try_as::<v8::Promise>().unwrap();
+        let rejected = v8::Local::<v8::Promise>::try_from(rejected).unwrap();
         let skipped = rejected
             .then(lock, (), |_lock, (), _value| {
                 Err(jsg::Error::new_type_error("on_fulfilled ran"))
@@ -199,7 +253,7 @@ fn then_and_catch_pass_the_other_outcome_through() {
         ctx.set_global(lock, "skipped", skipped);
 
         let fulfilled = ctx.eval_raw(lock, "Promise.resolve('kept')").unwrap();
-        let fulfilled = fulfilled.try_as::<v8::Promise>().unwrap();
+        let fulfilled = v8::Local::<v8::Promise>::try_from(fulfilled).unwrap();
         let kept = fulfilled
             .catch(lock, (), |_lock, (), _reason| {
                 Err(jsg::Error::new_type_error("on_rejected ran"))
@@ -229,8 +283,7 @@ fn react_to_outcome<'s>(
     code: &str,
 ) -> v8::Local<'s, v8::Promise> {
     let promise = ctx.eval_raw(lock, code).unwrap();
-    promise
-        .try_as::<v8::Promise>()
+    v8::Local::<v8::Promise>::try_from(promise)
         .unwrap()
         .then_or_catch(
             lock,
@@ -268,7 +321,7 @@ fn then_or_catch_runs_the_callback_for_the_outcome() {
 fn panic_in_then_callback_is_an_internal_error() {
     crate::Harness::new().run_in_context(|lock, ctx| {
         let promise = ctx.eval_raw(lock, "Promise.resolve(1)").unwrap();
-        let promise = promise.try_as::<v8::Promise>().unwrap();
+        let promise = v8::Local::<v8::Promise>::try_from(promise).unwrap();
         let panicked = promise
             .then(
                 lock,
@@ -468,9 +521,8 @@ impl Watcher {
         promise: v8::Local<'s, v8::Promise>,
         callback: v8::Local<'s, v8::Value>,
     ) -> Result<v8::Local<'s, v8::Promise>, jsg::Error> {
-        let callback = callback
-            .try_as::<v8::Function>()
-            .ok_or_else(|| jsg::Error::new_type_error("callback must be a function"))?;
+        let callback = v8::Local::<v8::Function>::try_from(callback)
+            .map_err(|_| jsg::Error::new_type_error("callback must be a function"))?;
         let watch = Watch {
             state: self.state.clone(),
             callback: callback.to_traced_global(lock),
@@ -538,7 +590,7 @@ impl TerminatingPromises {
         let resolver = v8::PromiseResolver::new(lock)?;
         let promise = resolver.promise();
         lock.terminate_execution();
-        let spin = spin.try_as::<v8::Function>().unwrap();
+        let spin = v8::Local::<v8::Function>::try_from(spin).unwrap();
         let err = spin
             .call::<v8::Local<v8::Value>>(lock, None, &[])
             .unwrap_err();
@@ -580,6 +632,21 @@ impl TerminatingPromises {
         record("resolve", resolver.resolve(lock, value));
         record("reject", resolver.reject(lock, value));
         record("reject_with_error", resolver.reject_with_error(lock, &err));
+        // An error that isn't pending: creating its exception while execution is terminating
+        // fails a V8 debug check, so none of these creates it.
+        let type_error = jsg::Error::new_type_error("rejected while terminating");
+        record(
+            "exception(TypeError)",
+            lock.exception(&type_error).map(|_| ()),
+        );
+        record(
+            "reject_with_error(TypeError)",
+            resolver.reject_with_error(lock, &type_error),
+        );
+        record(
+            "Promise::rejected_with_error(TypeError)",
+            v8::Promise::rejected_with_error(lock, &type_error).map(|_| ()),
+        );
         self.still_pending
             .set(promise.state() == PromiseState::Pending);
         *self.pending.borrow_mut() = pending;
@@ -589,7 +656,8 @@ impl TerminatingPromises {
 
 /// While execution is terminating, every promise operation creates and settles nothing and
 /// returns a pending error, so that returning it keeps the termination. Entering V8 would clear
-/// the termination, and JavaScript would run on.
+/// the termination, and JavaScript would run on. Neither does `Lock::exception` create the
+/// exception for an error.
 #[test]
 fn promise_operations_while_terminating_keep_the_termination() {
     crate::Harness::new().run_in_context(|lock, ctx| {
@@ -616,6 +684,9 @@ fn promise_operations_while_terminating_keep_the_termination() {
                 "resolve: true",
                 "reject: true",
                 "reject_with_error: true",
+                "exception(TypeError): true",
+                "reject_with_error(TypeError): true",
+                "Promise::rejected_with_error(TypeError): true",
             ]
         );
         assert!(promises.still_pending.get());
@@ -758,8 +829,9 @@ struct CacheStore {
 impl CacheStore {}
 
 /// `read(key, fallback)` returns a promise for the cached value. On a miss it calls
-/// `fallback(key)` once, however many reads wait for it, caches what its promise fulfills with,
-/// and passes a rejection through to every waiting read without caching it.
+/// `fallback(key)` once, however many reads wait for it, even reads the fallback makes itself,
+/// caches what its promise fulfills with, and passes a rejection through to every waiting read
+/// without caching it. As in `MemoryCache`, a fallback that throws rejects the promise.
 #[jsg_resource]
 struct ReadThroughCache {
     store: jsg::Rc<CacheStore>,
@@ -805,13 +877,13 @@ impl ReadThroughCache {
             return Ok(promise);
         }
 
-        let fallback = fallback
-            .try_as::<v8::Function>()
-            .ok_or_else(|| jsg::Error::new_type_error("fallback must be a function"))?;
-        let key_js = key.as_str().to_js(lock);
-        // No RefCell borrow is held here: the fallback is JavaScript and may call `read` again.
-        let produced = fallback.call::<v8::Local<v8::Value>>(lock, None, &[key_js])?;
-        let produced = v8::Local::<v8::Promise>::from_js(lock, produced)?;
+        let fallback = v8::Local::<v8::Function>::try_from(fallback)
+            .map_err(|_| jsg::Error::new_type_error("fallback must be a function"))?;
+        // The promise is in flight before the fallback runs, so that a read the fallback makes
+        // of the same key waits for it rather than calling its own fallback. Only the fill's own
+        // reactions remove it, so no other fill's can.
+        let resolver = v8::PromiseResolver::new(lock)?;
+        let produced = resolver.promise();
         // A rejection passes through `filled` unchanged. The `catch` reaction only forgets the
         // fallback; the promise it returns is dropped, and fulfilled, so nothing reports it.
         let filled = produced.then(
@@ -842,7 +914,25 @@ impl ReadThroughCache {
             },
         )?;
         let in_flight = filled.to_traced_global(lock);
-        self.store.in_flight.borrow_mut().insert(key, in_flight);
+        self.store
+            .in_flight
+            .borrow_mut()
+            .insert(key.clone(), in_flight);
+
+        let key_js = key.as_str().to_js(lock);
+        // No RefCell borrow is held here: the fallback is JavaScript and may call `read` again.
+        let called =
+            lock.try_catch(|lock| fallback.call::<v8::Local<v8::Value>>(lock, None, &[key_js]));
+        match called {
+            // Resolving with a promise follows it, and with any other value fulfills.
+            Ok(Ok(produced)) => resolver.resolve(lock, produced)?,
+            Ok(Err(exception)) => resolver.reject(lock, exception)?,
+            Err(err) => {
+                // Execution is terminating, so nothing will settle the fill.
+                self.store.in_flight.borrow_mut().remove(&key);
+                return Err(err);
+            }
+        }
         Ok(filled)
     }
 }
@@ -926,6 +1016,92 @@ fn cache_passes_rejection_through_without_caching_it() {
         assert_eq!(
             log_after_microtasks(lock, ctx, &code),
             "same error: true|fulfilled: recovered|calls: 2"
+        );
+        Ok(())
+    });
+}
+
+/// A fallback that reads its own key waits for itself rather than running a second fallback,
+/// whose rejection would otherwise forget the first fill.
+#[test]
+fn cache_fallback_that_reads_the_same_key() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        install_cache(lock, ctx);
+        let code = format!(
+            "{RECORD}
+            globalThis.calls = 0;
+            const outer = cache.read('k', () => {{
+                calls++;
+                globalThis.inner = cache.read('k', () => {{
+                    calls++;
+                    return Promise.reject(new Error('inner'));
+                }});
+                return new Promise(() => {{}});
+            }});
+            log.push(`inner waits for outer: ${{inner === outer}}`, `after first read: ${{calls}}`);
+            Promise.resolve().then(() => {{}}).then(() => {{
+                cache.read('k', () => {{ calls++; return 'third'; }});
+                log.push(`after third read: ${{calls}}`);
+            }});"
+        );
+        assert_eq!(
+            log_after_microtasks(lock, ctx, &code),
+            "inner waits for outer: true|after first read: 1|after third read: 1"
+        );
+        Ok(())
+    });
+}
+
+/// As in `MemoryCache`, a fallback that throws rejects the read, and every read waiting for it,
+/// with what it threw, and is not cached.
+#[test]
+fn cache_fallback_that_throws_rejects_the_read() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        install_cache(lock, ctx);
+        let code = format!(
+            "{RECORD}
+            globalThis.error = new TypeError('thrown');
+            let waiting;
+            const read = cache.read('k', () => {{
+                waiting = cache.read('k', () => 'unexpected');
+                throw error;
+            }});
+            Promise.allSettled([read, waiting]).then((results) => {{
+                log.push(results.map((r) => `${{r.status}} ${{r.reason === error}}`).join(', '));
+                record(cache.read('k', () => 'recovered'));
+            }});"
+        );
+        assert_eq!(
+            log_after_microtasks(lock, ctx, &code),
+            "rejected true, rejected true|fulfilled: recovered"
+        );
+        Ok(())
+    });
+}
+
+/// A fallback that terminates execution leaves no fill in flight, so a later read runs its own
+/// fallback rather than waiting for one that never settles.
+#[test]
+fn cache_removes_in_flight_fill_when_fallback_terminates() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        install_cache(lock, ctx);
+        let promises = jsg::Rc::new(TerminatingPromises {
+            pending: RefCell::new(Vec::new()),
+            still_pending: Cell::new(false),
+        });
+        ctx.set_global(lock, "promises", promises);
+        let result = ctx.eval_raw(
+            lock,
+            "cache.read('k', () => promises.run(() => { while (true) {} }));",
+        );
+        assert!(result.is_err(), "the script was not terminated");
+        assert_eq!(
+            log_after_microtasks(
+                lock,
+                ctx,
+                &format!("{RECORD} record(cache.read('k', () => 'recovered'));"),
+            ),
+            "fulfilled: recovered"
         );
         Ok(())
     });

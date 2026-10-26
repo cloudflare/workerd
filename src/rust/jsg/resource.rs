@@ -48,6 +48,13 @@ use crate::v8::ffi::Wrappable;
 /// - On `Drop`, calls `wrappable_remove_strong_ref` with the ref's current
 ///   `strong` flag (C++ `maybeDeferDestruction`), then fields drop in
 ///   declaration order.
+///
+/// **Moving out of a traced field:** once GC has visited an `Rc` in a traced field, the `Rc`
+/// gives up its strong reference and relies on the field's owner to trace it. An `Rc` moved out
+/// of the field (`Cell::take`, `Option::take`, `mem::replace`) is then neither strong nor traced,
+/// unlike a moved C++ `jsg::Ref`. Clone it and use the clone, which starts strong; see
+/// `README.md` §Safety rules, rule 2, and
+/// <https://github.com/cloudflare/workerd/issues/7976>.
 pub struct Rc<R: Resource> {
     /// Shared ownership of the Rust resource.
     handle: std::rc::Rc<R>,
@@ -410,11 +417,52 @@ pub fn function_template_of<'s, R: Resource + 'static>(
     unsafe { v8::function_template_get_function(lock, &constructor) }
 }
 
+/// Returns whether `value` is the JavaScript wrapper of a resource of type `R`.
+///
+/// Unlike converting `value` with [`FromJS`], this creates no [`Rc<R>`](Rc), so it is the check
+/// to use when only the type matters: for example, in a function that C++ calls to check a value
+/// it holds (`README.md` §Creating resources from C++).
+pub fn is<R: Resource + 'static>(lock: &mut Lock<'_>, value: v8::Local<'_, v8::Value>) -> bool {
+    v8::WrappableRc::from_js(lock, value)
+        .is_some_and(|wrappable| wrappable.resolve_resource::<R>().is_some())
+}
+
+/// [`is`] for a function that C++ calls, as [`v8::run_ffi_callback`] is for one that returns a
+/// handle: opens the caller's scope and runs [`is`] through [`catch_panic`](crate::catch_panic).
+///
+/// Like `v8::Maybe<bool>`, the result is none when an exception is pending: here, when the check
+/// panicked, which leaves an internal error pending and execution terminating. C++ propagates it
+/// as `jsg::JsExceptionThrown` rather than treating it as a mismatch, since throwing another
+/// exception would replace the termination.
+///
+/// # Safety
+///
+/// `isolate` must point to a live V8 isolate locked by the current thread with a context entered
+/// and a `HandleScope` open, and `value` must be a handle in that scope.
+pub unsafe fn ffi_is<R: Resource + 'static>(
+    isolate: *mut v8::ffi::Isolate,
+    value: v8::ffi::Local,
+) -> KjMaybe<bool> {
+    // SAFETY: forwarded from this function's safety contract.
+    let scope = std::pin::pin!(unsafe { crate::CallbackScope::new(isolate) });
+    crate::catch_panic(scope, |lock| {
+        // SAFETY: `value` is a handle in the scope that `lock` stands for, per this function's
+        // safety contract.
+        let value = unsafe { v8::Local::from_ffi(value) };
+        is::<R>(lock, value)
+    })
+    .into()
+}
+
 /// Builds a [`ResourceDescriptor`] from `R`'s [`Resource::members(flags)`](Resource::members) list.
 /// The descriptor is passed to C++ `create_resource_template` to set up the
 /// V8 `FunctionTemplate` with the correct methods, constants, and constructor.
 /// Nested types are returned separately, since their templates are installed
 /// once the template for `R` exists.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one match arm per Member variant, each a field-by-field conversion"
+)]
 fn get_resource_descriptor<R: Resource>(
     flags: compatibility_flags::Reader<'_>,
 ) -> (v8::ffi::ResourceDescriptor, NestedTypes) {
@@ -426,6 +474,7 @@ fn get_resource_descriptor<R: Resource>(
         properties: Vec::new(),
         static_methods: Vec::new(),
         static_constants: Vec::new(),
+        wildcard_property: KjMaybe::None,
     };
 
     for m in R::members(flags) {
@@ -457,6 +506,11 @@ fn get_resource_descriptor<R: Resource>(
                     kind != v8::ffi::PropertyKind::Instance,
                     "use Member::InstanceProperty"
                 );
+                assert!(
+                    kind != v8::ffi::PropertyKind::LazyInstance
+                        && kind != v8::ffi::PropertyKind::LazyReadonlyInstance,
+                    "use Member::LazyInstanceProperty; a lazy instance property has no setter"
+                );
                 descriptor.properties.push(v8::ffi::PropertyDescriptor {
                     name,
                     kind,
@@ -476,6 +530,17 @@ fn get_resource_descriptor<R: Resource>(
                     setter_callback: setter_callback.map(|f| f as usize).into(),
                 });
             }
+            Member::LazyInstanceProperty {
+                name,
+                getter_callback,
+                read_only,
+            } => descriptor
+                .properties
+                .push(lazy_instance_property_descriptor(
+                    name,
+                    getter_callback,
+                    read_only,
+                )),
             Member::StaticMethod {
                 name,
                 callback,
@@ -496,11 +561,43 @@ fn get_resource_descriptor<R: Resource>(
                         value: number_value,
                     });
             }
+            Member::WildcardProperty {
+                getter_callback,
+                query_callback,
+            } => {
+                assert!(
+                    descriptor.wildcard_property.is_none(),
+                    "{} has more than one wildcard property",
+                    R::class_name()
+                );
+                descriptor.wildcard_property = KjMaybe::Some(v8::ffi::WildcardPropertyDescriptor {
+                    getter_callback: getter_callback as usize,
+                    query_callback: query_callback as usize,
+                });
+            }
             Member::NestedType { name, nested_type } => nested_types.push((name, nested_type)),
         }
     }
 
     (descriptor, nested_types)
+}
+
+/// The descriptor of a [`Member::LazyInstanceProperty`].
+fn lazy_instance_property_descriptor(
+    name: String,
+    getter_callback: crate::RawGetterCallback,
+    read_only: bool,
+) -> v8::ffi::PropertyDescriptor {
+    v8::ffi::PropertyDescriptor {
+        name,
+        kind: if read_only {
+            v8::ffi::PropertyKind::LazyReadonlyInstance
+        } else {
+            v8::ffi::PropertyKind::LazyInstance
+        },
+        getter_callback: getter_callback as usize,
+        setter_callback: KjMaybe::None,
+    }
 }
 
 /// The nested types of a resource type, with their names.

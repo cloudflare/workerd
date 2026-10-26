@@ -1,0 +1,25 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    (name = "do-on-hibernate-symbol-test", worker = (
+      modules = [
+        (name = "worker", esModule = embed "do-on-hibernate-symbol-test.js"),
+      ],
+      compatibilityFlags = ["experimental", "nodejs_compat"],
+      durableObjectNamespaces = [
+        (className = "OnHibernateObject", uniqueKey = "do-on-hibernate-symbol"),
+      ],
+      durableObjectStorage = (inMemory = void),
+      bindings = [
+        (name = "ns", durableObjectNamespace = "OnHibernateObject"),
+      ],
+    )),
+    (name = "do-on-hibernate-symbol-unflagged-test", worker = (
+      modules = [
+        (name = "worker", esModule = embed "do-on-hibernate-symbol-unflagged-test.js"),
+      ],
+      compatibilityFlags = ["nodejs_compat"],
+    )),
+  ],
+);

@@ -87,7 +87,7 @@ impl Probe {
         lock: &mut jsg::Lock<'s>,
         callback: v8::Local<'s, v8::Value>,
     ) -> Result<(), jsg::Error> {
-        let callback = callback.try_as::<v8::Function>().unwrap();
+        let callback = v8::Local::<v8::Function>::try_from(callback).unwrap();
         let frame = self.frame(lock);
         // Compared as handles, since converting them could run JavaScript, which must not run
         // while execution is terminating.
@@ -256,28 +256,24 @@ fn enter_restores_while_terminating() {
 /// by Rust, which run in that frame after `enter` has returned.
 #[test]
 fn promise_reactions_registered_in_entered_frame_run_in_it() {
-    fn record<'a>(
-        lock: &mut jsg::Lock<'a>,
-        _data: &(),
-        _value: v8::Local<'a, v8::Value>,
-    ) -> Result<v8::Local<'a, v8::Value>, jsg::Error> {
-        Ok(Harness::async_context_value(lock).unwrap_or_else(|| lock.undefined()))
-    }
-
     Harness::new().run_in_context(|lock, ctx| {
         install_probe(lock, ctx);
         let a = frame_storing(lock, "a");
         let resolver = v8::PromiseResolver::new(lock)?;
         let promise = resolver.promise();
         ctx.set_global(lock, "pending", v8::Local::<v8::Value>::from(promise));
-        let in_root = promise.then(lock, (), record)?;
+        let in_root = promise.then(lock, (), |lock, (), _value| {
+            Ok(Harness::async_context_value(lock).unwrap_or_else(|| lock.undefined()))
+        })?;
         let in_a = a.enter(lock, |lock| {
             ctx.eval_raw(
                 lock,
                 "globalThis.seen = []; pending.then(() => seen.push(probe.value()))",
             )
             .unwrap();
-            promise.then(lock, (), record)
+            promise.then(lock, (), |lock, (), _value| {
+                Ok(Harness::async_context_value(lock).unwrap_or_else(|| lock.undefined()))
+            })
         })?;
         let undefined = lock.undefined();
         resolver.resolve(lock, undefined)?;
@@ -421,7 +417,7 @@ fn frame_in_function_data_lives_as_long_as_function() {
         let marker = jsg::Rc::new(Marker).to_js(lock);
         let frame = Harness::run_in_async_context(lock, marker, TracedAsyncContextFrame::current);
         let run_in_frame = v8::Function::new(lock, frame, |lock, frame, args| {
-            let callback = args.get(0).try_as::<v8::Function>().unwrap();
+            let callback = v8::Local::<v8::Function>::try_from(args.get(0)).unwrap();
             frame.enter(lock, |lock| {
                 callback.call::<v8::Local<v8::Value>>(lock, None, &[])
             })

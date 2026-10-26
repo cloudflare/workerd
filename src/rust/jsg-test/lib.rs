@@ -80,6 +80,9 @@ mod ffi {
         #[expect(clippy::allow_attributes)] // Only used in tests, but #[expect(dead_code)] fails during test builds
         #[allow(dead_code)]
         pub unsafe fn request_gc(isolate: *mut Isolate, gc_type: GcType);
+        /// Requests a termination and runs JavaScript until V8 delivers it, so that the
+        /// termination exception is pending on return. See `terminate_and_deliver` in `ffi.h`.
+        pub unsafe fn terminate_and_deliver(isolate: *mut Isolate);
 
         /// Runs the isolate's pending microtasks.
         #[expect(clippy::allow_attributes)]
@@ -125,6 +128,15 @@ mod ffi {
 
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
+
+        /// Holds a value the way C++ code holds one that Rust created: calls `create`, keeps
+        /// its result only in a `v8::Global` while a full GC runs, and calls `check` with it.
+        /// Then resets the `Global` and runs a full GC again. See `hold_across_gc` in `ffi.h`.
+        pub unsafe fn hold_across_gc(
+            isolate: *mut Isolate,
+            create: unsafe fn(*mut Isolate) -> MaybeLocal,
+            check: unsafe fn(*mut Isolate, Local),
+        );
 
         /// Calls `callback` in a new C++ `jsg::AsyncContextFrame` that stores `value` under the
         /// tests' storage key, as `AsyncLocalStorage.run()` does.
@@ -396,6 +408,14 @@ impl Harness {
         unsafe { ffi::request_gc(lock.isolate().as_ffi(), ffi::GcType::Minor) };
     }
 
+    /// Terminates execution the way running out of CPU time does. On return the termination
+    /// exception is pending and `lock.is_execution_terminating()` is true. (`terminate_execution`
+    /// only requests a termination; V8 delivers it the next time JavaScript runs.)
+    pub fn terminate_and_deliver(lock: &mut jsg::Lock<'_>) {
+        // SAFETY: isolate is valid and locked, with a context entered (guaranteed by Lock).
+        unsafe { ffi::terminate_and_deliver(lock.isolate().as_ffi()) };
+    }
+
     /// Runs `f` with the isolate unlocked, as code that runs on a thread without the isolate
     /// lock would, and locks it again afterwards. `lock` is borrowed for the duration, so `f`
     /// cannot use any handle; it must not touch the isolate in any other way either.
@@ -474,6 +494,22 @@ impl Harness {
         // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
         // open.
         unsafe { ffi::cpp_wrapped_function_data_is_rust_wrappable(lock.isolate().as_ffi()) }
+    }
+
+    /// Holds a value the way C++ code holds one that Rust created. C++ calls `create`, as it
+    /// would call a crate's `extern "Rust"` constructor, and keeps the result only in a
+    /// `v8::Global` while a full GC runs. It then calls `check` with the value, resets the
+    /// `Global` and runs a full GC again.
+    ///
+    /// `create` and `check` run with the isolate locked, a context entered and a `HandleScope`
+    /// open; `lock` is borrowed for the duration, so they open their own scopes on the isolate.
+    pub fn hold_across_gc(
+        lock: &mut jsg::Lock<'_>,
+        create: fn(*mut v8::ffi::Isolate) -> v8::ffi::MaybeLocal,
+        check: fn(*mut v8::ffi::Isolate, v8::ffi::Local),
+    ) {
+        // SAFETY: the isolate is valid and locked with a context entered (guaranteed by Lock).
+        unsafe { ffi::hold_across_gc(lock.isolate().as_ffi(), create, check) };
     }
 
     /// Runs `f` in a new C++ `jsg::AsyncContextFrame` that stores `value` under the tests'

@@ -72,6 +72,11 @@ enum class GcType : uint8_t;
 // Triggers garbage collection for testing purposes.
 void request_gc(Isolate* isolate, GcType gc_type);
 
+// Requests a termination and runs JavaScript until V8 delivers it. On return the termination
+// exception is pending and `isolate->IsExecutionTerminating()` is true, as after a script that
+// was terminated.
+void terminate_and_deliver(Isolate* isolate);
+
 // Runs the isolate's pending microtasks, as the event loop does after each task.
 void run_microtasks(Isolate* isolate);
 
@@ -98,6 +103,13 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
 
 // Returns whether `a` and `b` belong to the same v8::IsolateGroup.
 bool isolates_share_group(Isolate* a, Isolate* b);
+
+// Holds a value the way C++ code holds one that Rust created: calls `create`, keeps its result
+// only in a v8::Global while a full GC runs, and calls `check` with it. Then resets the Global
+// and runs a full GC again. Neither call's handles outlive the call.
+void hold_across_gc(Isolate* isolate,
+    ::rust::Fn<::workerd::rust::jsg::MaybeLocal(Isolate*)> create,
+    ::rust::Fn<void(Isolate*, ::workerd::rust::jsg::Local)> check);
 
 // Calls `callback` in a new C++ jsg::AsyncContextFrame that stores `value` under the tests'
 // storage key, as AsyncLocalStorage.run() does, then makes the previous frame current again.

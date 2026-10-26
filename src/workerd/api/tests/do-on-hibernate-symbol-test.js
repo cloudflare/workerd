@@ -4,27 +4,27 @@
 
 import { strictEqual } from 'node:assert';
 import { DurableObject } from 'cloudflare:workers';
-import { onEvict } from 'cloudflare:durable-objects';
+import { onHibernate } from 'cloudflare:durable-objects';
 
-export class OnEvictObject extends DurableObject {
-  async [onEvict]() {}
+export class OnHibernateObject extends DurableObject {
+  async [onHibernate]() {}
 
-  async onEvict() {
-    return 'onEvict';
+  async onHibernate() {
+    return 'onHibernate';
   }
 }
 
 export const exportsSymbol = {
   test() {
-    strictEqual(typeof onEvict, 'symbol');
+    strictEqual(typeof onHibernate, 'symbol');
   },
 };
 
 export const symbolHandlerIsNotRpcMethod = {
   async test(ctrl, env) {
     const stub = env.ns.getByName('rpc');
-    strictEqual(stub[onEvict], undefined);
+    strictEqual(stub[onHibernate], undefined);
     // A string-named method with the same name is still an ordinary RPC method.
-    strictEqual(await stub.onEvict(), 'onEvict');
+    strictEqual(await stub.onHibernate(), 'onHibernate');
   },
 };

@@ -553,9 +553,9 @@ impl ReentrantResource {
         self.depth.set(self.depth.get() + 1);
         self.max_depth
             .set(self.max_depth.get().max(self.depth.get()));
-        let callback = callback
-            .try_as::<v8::Function>()
-            .ok_or_else(|| jsg::Error::new_type_error("not a function"))?;
+        let callback: v8::Local<v8::Function> = callback
+            .try_into()
+            .map_err(|_| jsg::Error::new_type_error("not a function"))?;
         callback.call::<v8::Local<v8::Value>>(lock, None, &[])?;
         self.depth.set(self.depth.get() - 1);
         Ok(())
@@ -599,9 +599,8 @@ impl CallingResource {
     fn function(
         callback: v8::Local<'_, v8::Value>,
     ) -> Result<v8::Local<'_, v8::Function>, jsg::Error> {
-        callback
-            .try_as::<v8::Function>()
-            .ok_or_else(|| jsg::Error::new_type_error("not a function"))
+        v8::Local::<v8::Function>::try_from(callback)
+            .map_err(|_| jsg::Error::new_type_error("not a function"))
     }
 }
 
