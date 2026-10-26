@@ -60,9 +60,13 @@ class Node final: public Object {
   void setChild(Ref<Node> node) {
     child = kj::mv(node);
   }
+  kj::Maybe<Ref<Node>> getChild() {
+    return child.map([](Ref<Node>& node) { return node.addRef(); });
+  }
 
   JSG_RESOURCE_TYPE(Node) {
     JSG_READONLY_PROTOTYPE_PROPERTY(value, getJsValue);
+    JSG_READONLY_PROTOTYPE_PROPERTY(child, getChild);
     JSG_METHOD(setChild);
   }
 
@@ -534,8 +538,9 @@ int registerCases() {
   }
   add("gc/live-chain/1000",
       "let live=new C(0);for(let j=1;j<1000;++j){const n=new C(j);n.setChild(live);live=n;}",
-      "(gc(),live.value)", "live.value===999", "999", 1, {Binding::CPP, Binding::RUST},
-      CpuTime::PROCESS);
+      "(gc(),live.value)",
+      "(()=>{gc();let n=live,k=999;for(;n;n=n.child)if(n.value!==k--)return false;return k===-1;})()",
+      "999", 1, {Binding::CPP, Binding::RUST}, CpuTime::PROCESS);
 
   for (auto size: {16, 1024, 65536}) {
     for (auto encoding: {"ascii"_kj, "latin1"_kj, "utf16"_kj}) {

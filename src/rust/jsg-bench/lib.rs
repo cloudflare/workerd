@@ -89,6 +89,13 @@ impl Node {
     fn set_child(&self, child: jsg::Rc<Node>) {
         self.child.set(Some(child));
     }
+
+    #[jsg_property(prototype)]
+    fn get_child(&self) -> Option<jsg::Rc<Node>> {
+        let child = self.child.take();
+        self.child.set(child.clone());
+        child
+    }
 }
 
 #[jsg_resource]
