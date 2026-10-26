@@ -386,3 +386,19 @@ fn cpp_resources_are_referred_to_by_their_cpp_name() {
     );
     assert_eq!(reference.get_ts_name().unwrap(), "");
 }
+
+#[test]
+fn bridge_contexts_take_canonical_flags() {
+    let mut message = capnp::message::Builder::new_default();
+    message
+        .init_root::<compatibility_flags::Builder<'_>>()
+        .set_cache_option_enabled(true);
+    let words = message.into_reader().canonicalize().unwrap();
+    assert_eq!(
+        flagged_members(*new_rtti_context(capnp::Word::words_to_bytes(&words))),
+        [
+            ("always".to_owned(), None),
+            ("cache".to_owned(), Some(false))
+        ]
+    );
+}

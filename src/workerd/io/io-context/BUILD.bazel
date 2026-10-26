@@ -60,6 +60,7 @@ wd_rust_crate(
     cxx_bridge_hdrs = ["test-bridge.h"],
     cxx_bridge_src = "test_bridge.rs",
     link_deps = [":test-bridge"],
+    proc_macro_deps = ["//src/rust/jsg-macros"],
     deps = [
         ":io-context",
         "//src/rust/jsg",
