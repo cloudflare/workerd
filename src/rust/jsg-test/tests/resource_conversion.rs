@@ -55,7 +55,7 @@ fn to_js_creates_object_with_methods() {
         let greeter = Greeter {
             greeting: "Hello".to_owned(),
         };
-        let js_val = greeter.to_js(lock);
+        let js_val = greeter.to_js(lock)?;
         ctx.set_global(lock, "greeter", js_val);
 
         let result: String = ctx.eval(lock, "greeter.greet('World')").unwrap();
@@ -70,7 +70,7 @@ fn to_js_works_for_different_resource_types() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let counter = Counter { value: 42.0 };
-        let js_val = counter.to_js(lock);
+        let js_val = counter.to_js(lock)?;
         ctx.set_global(lock, "counter", js_val);
 
         let result: Number = ctx.eval(lock, "counter.getValue()").unwrap();

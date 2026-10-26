@@ -7,6 +7,6 @@ use jsg::v8;
 
 pub fn t<'s>(lock: &mut jsg::Lock<'s>) -> jsg::Result<v8::Local<'s, v8::Value>> {
     let resolver = v8::PromiseResolver::new(lock)?;
-    Ok(jsg::ToJS::to_js(resolver, lock))
+    jsg::ToJS::to_js(resolver, lock)
     //~^ ERROR E0277
 }

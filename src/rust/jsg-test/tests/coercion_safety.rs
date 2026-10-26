@@ -360,7 +360,7 @@ fn string_coercion_reentrant_into_rust_resource_method() {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
@@ -389,7 +389,7 @@ fn number_coercion_reentrant_into_rust_resource_method() {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
@@ -420,7 +420,7 @@ fn string_coercion_handles_deeply_nested_reentrancy() {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
@@ -454,7 +454,7 @@ fn string_coercion_reentrant_panic_is_err_not_abort() {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
@@ -481,7 +481,7 @@ fn number_coercion_reentrant_panic_is_err_not_abort() {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
@@ -508,7 +508,7 @@ fn reentrant_panic_during_coercion_does_not_poison_isolate() {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx

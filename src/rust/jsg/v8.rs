@@ -758,11 +758,14 @@ pub mod ffi {
             descriptor: &ResourceDescriptor,
         ) -> Global /* v8::Global<FunctionTemplate> */;
 
+        // Leaves what creating the wrapper throws pending, and checks for termination itself,
+        // rather than through `call_into_js()`; see `ffi.h`.
         pub unsafe fn wrap_resource(
             isolate: *mut Isolate,
             wrappable: KjRc<Wrappable>,
             constructor: &Global, /* v8::Global<FunctionTemplate> */
-        ) -> MaybeLocal /* v8::Local<Value>, empty if wrapped in another isolate */;
+            wrapped_elsewhere: &mut bool,
+        ) -> MaybeLocal /* v8::Local<Value> */;
 
         pub unsafe fn wrappable_attach_wrapper(
             wrappable: KjRc<Wrappable>,
@@ -1662,7 +1665,7 @@ impl Function {
     /// ```ignore
     /// let greet = v8::Function::new(lock, String::from("hello"), |lock, greeting, args| {
     ///     let name = String::from_js(lock, args.get(0))?;
-    ///     Ok(format!("{greeting}, {name}").to_js(lock))
+    ///     format!("{greeting}, {name}").to_js(lock)
     /// })?;
     /// ```
     pub fn new<'s, T, F>(lock: &mut Lock<'s>, data: T, f: F) -> crate::Result<Local<'s, Self>>
@@ -1778,8 +1781,8 @@ impl<'s> Local<'s, Function> {
     /// # Example
     ///
     /// ```ignore
-    /// let x = x.to_js(lock);
-    /// let y = y.to_js(lock);
+    /// let x = x.to_js(lock)?;
+    /// let y = y.to_js(lock)?;
     /// let result: Number = func.call(lock, None, &[x, y])?;
     /// ```
     pub fn call<R: FromJS<'s>>(
@@ -1819,6 +1822,9 @@ impl<'s> Local<'s, Function> {
 /// that becomes an error for which [`Error::is_pending`] is true. While execution is terminating,
 /// `shim` is not run and the error is the same: calling into V8 then would clear the termination.
 /// An error from `shim` itself (a C++ exception, such as a failed `KJ_REQUIRE`) is passed on.
+///
+/// The one exception is `wrap_resource`, which checks for termination itself, so that its common
+/// case, reading a wrapper that already exists, takes one FFI call rather than two.
 pub(crate) fn call_into_js<'s, T>(
     lock: &mut Lock<'s>,
     shim: impl FnOnce(&mut Lock<'s>) -> Result<Option<T>, Error>,
@@ -3153,6 +3159,7 @@ impl Date {
     /// and the error is one for which [`Error::is_pending`] is true, as for
     /// [`Local::<Function>::call`]. `v8::Date::New()` prepares for executing JavaScript, which
     /// would clear a pending termination.
+    #[inline]
     pub fn new<'s>(lock: &mut Lock<'s>, time: f64) -> crate::Result<Local<'s, Self>> {
         call_into_js(lock, |lock| {
             // SAFETY: `lock` proves the isolate is locked, with a context entered and a
@@ -3659,10 +3666,10 @@ unsafe fn global_clone(lock: &mut Lock<'_>, handle: &ffi::Global) -> ffi::Global
 
 /// Converts a primitive Rust value into a JavaScript value in the scope of `lock`.
 ///
-/// Unlike [`ToJS`](crate::ToJS), this borrows `self` and also covers the integer types,
-/// which `ToJS` cannot: `ToJS` maps `Vec<u8>` (and the other integer vectors) to typed
-/// arrays, which would conflict with its generic `Vec<T: ToJS>` impl if the element
-/// types were themselves `ToJS`. `#[jsg_struct]` uses it for fields.
+/// Unlike [`ToJS`](crate::ToJS), this borrows `self`, can't fail, and also covers the integer
+/// types, which `ToJS` cannot: `ToJS` maps `Vec<u8>` (and the other integer vectors) to typed
+/// arrays, which would conflict with its generic `Vec<T: ToJS>` impl if the element types were
+/// themselves `ToJS`. `#[jsg_struct]` uses it for fields.
 pub trait ToLocalValue {
     fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value>;
 }
@@ -3689,19 +3696,25 @@ impl ToLocalValue for std::string::String {
 
 impl ToLocalValue for &str {
     fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
-        crate::ToJS::to_js(*self, lock)
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        unsafe { Local::from_ffi(ffi::local_new_string(isolate.as_ffi(), self)) }
     }
 }
 
 impl ToLocalValue for bool {
     fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
-        crate::ToJS::to_js(*self, lock)
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        unsafe { Local::from_ffi(ffi::local_new_boolean(isolate.as_ffi(), *self)) }
     }
 }
 
 impl ToLocalValue for Number {
     fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
-        crate::ToJS::to_js(*self, lock)
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        unsafe { Local::from_ffi(ffi::local_new_number(isolate.as_ffi(), self.value())) }
     }
 }
 
@@ -4334,16 +4347,38 @@ impl WrappableRc {
     /// Wraps this Wrappable as a JavaScript object of resource type `R`, using (and on first
     /// use creating) `R`'s cached constructor template.
     ///
-    /// Returns `None` if the Wrappable already has a JavaScript wrapper in another isolate.
-    pub(crate) fn to_js<'s, R: Resource>(&self, lock: &mut Lock<'s>) -> Option<Local<'s, Value>> {
+    /// Returns `None` if the Wrappable already has a JavaScript wrapper in another isolate. That
+    /// is a bug in the caller, which [`resource::wrap`](crate::resource::wrap) turns into a
+    /// panic.
+    ///
+    /// # Errors
+    ///
+    /// If V8 fails to create the wrapper, or execution is terminating, the exception stays
+    /// pending and the error is one for which [`Error::is_pending`] is true, as for
+    /// [`Local::<Function>::call`].
+    pub(crate) fn to_js<'s, R: Resource>(
+        &self,
+        lock: &mut Lock<'s>,
+    ) -> crate::Result<Option<Local<'s, Value>>> {
         let constructor = lock.realm().get_constructor::<R>().as_ffi();
+        let mut wrapped_elsewhere = false;
         // SAFETY: isolate is valid and locked; the constructor is a function template of the
-        // isolate, which the Realm's template cache keeps alive.
+        // isolate, which the Realm's template cache keeps alive. The shim checks for termination
+        // itself, as `call_into_js()` would.
         let handle = unsafe {
-            ffi::wrap_resource(lock.isolate().as_ffi(), self.handle.clone(), &constructor)
+            ffi::wrap_resource(
+                lock.isolate().as_ffi(),
+                self.handle.clone(),
+                &constructor,
+                &mut wrapped_elsewhere,
+            )
         };
+        if wrapped_elsewhere {
+            return Ok(None);
+        }
         // SAFETY: the wrapper is created in (or read into) the scope of `lock`.
-        unsafe { Local::from_ffi_maybe(handle) }
+        let wrapper = unsafe { Local::from_ffi_maybe(handle) }.ok_or_else(Error::pending)?;
+        Ok(Some(wrapper))
     }
 
     /// Attaches this Wrappable to the `this` object in a V8 constructor callback.

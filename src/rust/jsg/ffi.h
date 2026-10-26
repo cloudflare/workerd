@@ -352,8 +352,17 @@ void wrappable_clear_trait_object(Wrappable& wrappable);
 kj::uint wrappable_strong_refcount(const Wrappable& wrappable);
 
 // Wrappers
-// Returns an empty handle if the Wrappable has a live wrapper in another isolate.
-MaybeLocal wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl);
+// Returns the Wrappable's wrapper in `isolate`, creating it if needed, or an empty handle in one
+// of two cases, which `wrappedElsewhere` tells apart:
+//
+// - true: the Wrappable already has a wrapper in another isolate. That is a bug in the caller,
+//   which panics. This does not assert, because unwinding would drop the caller's reference to
+//   the Wrappable, and releasing it needs the other isolate's lock.
+// - false: execution is terminating, or creating the wrapper failed and the exception is left
+//   pending. Like `call_into_js()` in v8.rs, this creates and reads nothing while execution is
+//   terminating, even a wrapper that already exists.
+MaybeLocal wrap_resource(
+    Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere);
 void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args);
 // Attaches an opaque wrapper to `wrappable` and returns it, to be the data of the functions that
 // function_new() creates: the wrapper keeps the Wrappable alive and traced for as long as one of

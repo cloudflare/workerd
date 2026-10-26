@@ -52,7 +52,8 @@ fn install(lock: &mut jsg::Lock<'_>, ctx: &crate::EvalContext<'_>) {
     let values = jsg::Rc::new(Values {
         stored: RefCell::new(None),
     })
-    .to_js(lock);
+    .to_js(lock)
+    .unwrap();
     ctx.set_global(lock, "values", values);
 }
 
@@ -64,7 +65,7 @@ fn conversions_return_the_same_handle() {
             v8::Local::<v8::Value>::from_js(lock, object).unwrap(),
             object
         );
-        assert_eq!(object.to_js(lock), object);
+        assert_eq!(object.to_js(lock)?, object);
         Ok(())
     });
 }

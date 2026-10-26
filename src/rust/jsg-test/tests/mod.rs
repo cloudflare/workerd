@@ -5,6 +5,7 @@
 mod argument_errors;
 mod arrays;
 mod buffer_types;
+mod builtin_module;
 mod coercion_safety;
 mod collections_gc;
 mod date_bigint;
@@ -37,6 +38,7 @@ mod resource_this;
 mod string;
 mod symbol;
 mod termination;
+mod to_js_errors;
 mod traceable_gc;
 mod traced_global_lifetime;
 mod unwrap;
