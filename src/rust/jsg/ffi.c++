@@ -661,8 +661,10 @@ DEFINE_TYPED_ARRAY_NEW(bigint64_array, BigInt64Array, int64_t)
 DEFINE_TYPED_ARRAY_NEW(biguint64_array, BigUint64Array, uint64_t)
 
 // Wrappers
-MaybeLocal wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl) {
-  if (wrappable->hasWrapper() && wrappable->getIsolate() != isolate) {
+MaybeLocal wrap_resource(
+    Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere) {
+  wrappedElsewhere = wrappable->hasWrapper() && wrappable->getIsolate() != isolate;
+  if (wrappedElsewhere) {
     return MaybeLocal{.ptr = 0};
   }
 
@@ -673,8 +675,11 @@ MaybeLocal wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Gl
 
   auto& global_tmpl = global_as_ref_from_ffi<v8::FunctionTemplate>(tmpl);
   auto local_tmpl = v8::Local<v8::FunctionTemplate>::New(isolate, global_tmpl);
-  v8::Local<v8::Object> object = ::workerd::jsg::check(
-      local_tmpl->InstanceTemplate()->NewInstance(isolate->GetCurrentContext()));
+  v8::Local<v8::Object> object;
+  if (!local_tmpl->InstanceTemplate()->NewInstance(isolate->GetCurrentContext()).ToLocal(&object)) {
+    // Leave the exception pending; see `call_into_js()`.
+    return MaybeLocal{.ptr = 0};
+  }
 
   // attachWrapper sets up CppgcShim, TracedReference, internal fields, etc.
   wrappable->attachWrapper(isolate, object, true,

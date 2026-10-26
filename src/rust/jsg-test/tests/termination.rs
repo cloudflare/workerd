@@ -16,6 +16,10 @@ thread_local! {
     /// Whether converting the array in `terminate_then_return_dates` failed with a pending error.
     static DATES_CONVERSION_PENDING: std::cell::Cell<Option<bool>> =
         const { std::cell::Cell::new(None) };
+    /// Whether wrapping the resource in `terminate_then_return_resource` failed with a pending
+    /// error.
+    static RESOURCE_CONVERSION_PENDING: std::cell::Cell<Option<bool>> =
+        const { std::cell::Cell::new(None) };
 }
 
 #[jsg_resource]
@@ -63,6 +67,18 @@ impl Terminator {
         crate::Harness::terminate_and_deliver(lock);
         let result = jsg::ToJS::to_js(vec![std::time::UNIX_EPOCH], lock);
         DATES_CONVERSION_PENDING.set(Some(result.as_ref().is_err_and(jsg::Error::is_pending)));
+        result
+    }
+
+    /// Is terminated and then wraps a new resource, which creates its wrapper.
+    #[jsg_method]
+    fn terminate_then_return_resource<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+    ) -> jsg::Result<jsg::v8::Local<'s, jsg::v8::Value>> {
+        crate::Harness::terminate_and_deliver(lock);
+        let result = jsg::ToJS::to_js(jsg::Rc::new(Self), lock);
+        RESOURCE_CONVERSION_PENDING.set(Some(result.as_ref().is_err_and(jsg::Error::is_pending)));
         result
     }
 
@@ -151,6 +167,13 @@ fn returning_dates_while_terminating_keeps_the_termination() {
     DATES_CONVERSION_PENDING.set(None);
     termination_survives("terminateThenReturnDates");
     assert_eq!(DATES_CONVERSION_PENDING.get(), Some(true));
+}
+
+#[test]
+fn returning_a_resource_while_terminating_keeps_the_termination() {
+    RESOURCE_CONVERSION_PENDING.set(None);
+    termination_survives("terminateThenReturnResource");
+    assert_eq!(RESOURCE_CONVERSION_PENDING.get(), Some(true));
 }
 
 #[test]

@@ -696,11 +696,13 @@ pub mod ffi {
             descriptor: &ResourceDescriptor,
         ) -> Global /* v8::Global<FunctionTemplate> */;
 
+        // Leaves what creating the wrapper throws pending; see `call_into_js()`.
         pub unsafe fn wrap_resource(
             isolate: *mut Isolate,
             wrappable: KjRc<Wrappable>,
             constructor: &Global, /* v8::Global<FunctionTemplate> */
-        ) -> MaybeLocal /* v8::Local<Value>, empty if wrapped in another isolate */;
+            wrapped_elsewhere: &mut bool,
+        ) -> MaybeLocal /* v8::Local<Value> */;
 
         pub unsafe fn wrappable_attach_wrapper(
             wrappable: KjRc<Wrappable>,
@@ -4194,15 +4196,35 @@ impl WrappableRc {
     /// use creating) `R`'s cached constructor template.
     ///
     /// Returns `None` if the Wrappable already has a JavaScript wrapper in another isolate.
-    pub(crate) fn to_js<'s, R: Resource>(&self, lock: &mut Lock<'s>) -> Option<Local<'s, Value>> {
+    ///
+    /// # Errors
+    ///
+    /// If V8 fails to create the wrapper, or execution is terminating, the exception stays
+    /// pending and the error is one for which [`Error::is_pending`] is true, as for
+    /// [`Local::<Function>::call`].
+    pub(crate) fn to_js<'s, R: Resource>(
+        &self,
+        lock: &mut Lock<'s>,
+    ) -> crate::Result<Option<Local<'s, Value>>> {
         let constructor = lock.realm().get_constructor::<R>().as_ffi();
-        // SAFETY: isolate is valid and locked; the constructor is a function template of the
-        // isolate, which the Realm's template cache keeps alive.
-        let handle = unsafe {
-            ffi::wrap_resource(lock.isolate().as_ffi(), self.handle.clone(), &constructor)
-        };
-        // SAFETY: the wrapper is created in (or read into) the scope of `lock`.
-        unsafe { Local::from_ffi_maybe(handle) }
+        call_into_js(lock, |lock| {
+            let mut wrapped_elsewhere = false;
+            // SAFETY: isolate is valid and locked; the constructor is a function template of
+            // the isolate, which the Realm's template cache keeps alive.
+            let handle = unsafe {
+                ffi::wrap_resource(
+                    lock.isolate().as_ffi(),
+                    self.handle.clone(),
+                    &constructor,
+                    &mut wrapped_elsewhere,
+                )
+            };
+            if wrapped_elsewhere {
+                return Ok(Some(None));
+            }
+            // SAFETY: the wrapper is created in (or read into) the scope of `lock`.
+            Ok(unsafe { Local::from_ffi_maybe(handle) }.map(Some))
+        })
     }
 
     /// Attaches this Wrappable to the `this` object in a V8 constructor callback.
