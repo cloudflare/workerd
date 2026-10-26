@@ -54,25 +54,53 @@ Errors from nested conversions or JavaScript execution still propagate.
 Every change to Rust JSG, and to the C++ shims under it, must follow these four rules. Each rule
 lists the tests that check it. Reviewers check the rest.
 
-### 1. Never drop or replace a pending termination
+### 1. Don't enter V8 while an exception or a termination is pending
 
-When V8 terminates a script (for example because the Worker ran out of CPU time), it throws a
-special termination exception that JavaScript cannot catch. Once that exception is pending
-(`isolate->IsExecutionTerminating()` in C++, `Isolate::is_execution_terminating` in Rust), it must
-reach the C++ code that started the script.
+When JavaScript that Rust called throws, V8 leaves the exception pending. Rust returns, and the
+exception propagates to the JavaScript that catches it. When V8 terminates a script (for example
+because the Worker ran out of CPU time), it throws a special termination exception, which
+JavaScript cannot catch. It must reach the C++ code that started the script.
 
-Throwing anything else at that point replaces it: `v8::Isolate::ThrowException` discards the
-pending termination and throws the new exception, which JavaScript can catch. The Worker then
-keeps running.
+Two things break this:
 
-- Don't throw while execution is terminating. The `isolate_throw_*` shims already check this
-  and throw nothing, so `Lock::throw_exception`, `Lock::throw_error`, `Lock::throw_internal_error`
-  and the fast API error path are safe. A shim that calls `isolate->ThrowException` itself must
-  check first.
-- Don't discard a `jsg::Error` from a call that ran JavaScript (`Function::call`, `Object::get`,
-  `Object::set`, a coercion). It may be the termination, or a JavaScript exception that is still
-  pending (see [Errors from JavaScript](#errors-from-javascript)). Pass it on with `?` instead of
-  using `.ok()`, `unwrap_or`, or `map_err` to a different error. To handle the exception, use
+- Calling a V8 API that takes a `v8::Local<v8::Context>` while an exception or a termination is
+  pending: a call, a property read or write, a coercion, `Array::Iterate`,
+  `ObjectTemplate::NewInstance`, `Function::New`, `FunctionTemplate::GetFunction`, `Date::New`,
+  `ArrayBuffer::Detach` (which uses the current context itself) and the promise APIs. Some of
+  these APIs clear the pending exception on entry, a termination included, so it is lost and
+  JavaScript runs on as if nothing had happened. Others fail a V8 debug check, and in a release
+  build run on with the exception still pending.
+- Throwing while execution is terminating. `v8::Isolate::ThrowException` replaces the pending
+  termination with the new exception, which JavaScript can catch. The Worker then keeps running.
+
+Creating strings, numbers, BigInts, symbols, plain objects and arrays, typed arrays, error objects
+and templates takes no context. It is fine at any time, also while execution is terminating.
+
+How the code keeps the rule:
+
+- Every C++ shim that passes a context to V8 first checks
+  `if (exceptionPending(isolate)) return ...;` (`ffi.c++`). While an exception or a termination
+  is pending, it calls nothing in V8 and fails, leaving the exception pending. Rust turns that
+  into an error for which `Error::is_pending()` is true, as it does when the call itself throws
+  (see [Errors from JavaScript](#errors-from-javascript)). So while an exception is pending,
+  every operation that would pass a context to V8 fails, even one that wouldn't run JavaScript
+  for this value, such as converting a string primitive or wrapping a resource that already has
+  a wrapper. A new shim follows the same pattern, or says in a comment why it doesn't need to
+  (`local_type_of`).
+- "Pending" includes an exception that the innermost `v8::TryCatch` has caught but not yet
+  reset, as `v8::Isolate::HasPendingException()` reports it. Inside `Lock::try_catch`, once
+  JavaScript has thrown, the closure should return the error rather than go on. C++ code that
+  catches with its own `v8::TryCatch` resets it before calling into Rust JSG or running
+  JavaScript that might. The `custom-raw-v8-trycatch` clang-tidy check flags every raw
+  `v8::TryCatch`; each one has a `NOLINT` comment that says why it is safe.
+- The `isolate_throw_*` shims throw nothing while execution is terminating, so
+  `Lock::throw_exception`, `Lock::throw_error`, `Lock::throw_internal_error` and the fast API
+  error path are safe. A shim that calls `isolate->ThrowException` itself must check first.
+- Don't discard a `jsg::Error` from an operation that can fail with a pending error
+  (`Function::call`, `Object::get`, `Object::set`, a coercion, `ToJS::to_js`). It may be the
+  termination, or a JavaScript exception that is still pending (see
+  [Errors from JavaScript](#errors-from-javascript)). Pass it on with `?` instead of using
+  `.ok()`, `unwrap_or`, or `map_err` to a different error. To handle the exception, use
   `Lock::try_catch`.
 - An empty result from an FFI shim doesn't always mean termination. It can also mean a stack
   overflow or an ordinary exception. Check `IsExecutionTerminating()`, or catch the exception
@@ -81,8 +109,9 @@ keeps running.
 Bad: `let name = obj.get(lock, "name").ok();`. If the script is being terminated, the termination
 is lost. Fix: `let name = obj.get(lock, "name")?;`.
 
-Tested by: `src/rust/jsg-test/tests/termination.rs`, and the termination tests in
-`src/rust/jsg-test/tests/resource_callback.rs`.
+Tested by: `src/rust/jsg-test/tests/termination.rs` and `pending_exception.rs`, the
+termination and pending-exception tests in `src/rust/jsg-test/tests/coercion_safety.rs`,
+`function_new.rs` and `resource_callback.rs`, and the termination test in `promise.rs`.
 
 ### 2. Keep traced state with its one GC owner
 
