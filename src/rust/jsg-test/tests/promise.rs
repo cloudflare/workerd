@@ -1079,6 +1079,34 @@ fn cache_fallback_that_throws_rejects_the_read() {
     });
 }
 
+/// A fallback that terminates execution leaves no fill in flight, so a later read runs its own
+/// fallback rather than waiting for one that never settles.
+#[test]
+fn cache_removes_in_flight_fill_when_fallback_terminates() {
+    crate::Harness::new().run_in_context(|lock, ctx| {
+        install_cache(lock, ctx);
+        let promises = jsg::Rc::new(TerminatingPromises {
+            pending: RefCell::new(Vec::new()),
+            still_pending: Cell::new(false),
+        });
+        ctx.set_global(lock, "promises", promises);
+        let result = ctx.eval_raw(
+            lock,
+            "cache.read('k', () => promises.run(() => { while (true) {} }));",
+        );
+        assert!(result.is_err(), "the script was not terminated");
+        assert_eq!(
+            log_after_microtasks(
+                lock,
+                ctx,
+                &format!("{RECORD} record(cache.read('k', () => 'recovered'));"),
+            ),
+            "fulfilled: recovered"
+        );
+        Ok(())
+    });
+}
+
 #[test]
 fn cache_rejects_non_function_fallback() {
     crate::Harness::new().run_in_context(|lock, ctx| {
