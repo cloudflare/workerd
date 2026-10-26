@@ -169,6 +169,53 @@ fn errors_with_enhanced_error_serialization() {
     });
 }
 
+/// Where `jsg::Serializer` loses part of an error, the Rust serializer loses the same part, so
+/// that the bytes stay the same.
+#[test]
+fn errors_lose_what_cpp_jsg_loses() {
+    let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
+    harness.run_in_context(|lock, ctx| {
+        // The name is compared with the known types' names up to its first NUL, so this one is
+        // taken for `Error` and not written.
+        assert_round_trip(
+            lock,
+            ctx,
+            "Object.assign(new Error('m'), { name: 'Error\\0custom' })",
+            "v.name === 'Error' && !Object.hasOwn(v, 'name') && v.message === 'm'",
+        );
+
+        // The other own properties are copied with an assignment, which runs a setter that
+        // `Object.prototype` has for the property instead of copying it.
+        ctx.eval_raw(
+            lock,
+            "globalThis.setterRuns = 0;
+             Object.defineProperty(Object.prototype, 'x', {
+               set(value) { globalThis.setterRuns++; },
+               configurable: true,
+             });",
+        )
+        .unwrap();
+        assert_round_trip(
+            lock,
+            ctx,
+            "Object.defineProperty(new Error('e'), 'x', { value: 1, enumerable: true })",
+            "!Object.hasOwn(v, 'x')",
+        );
+        // Once for each serializer.
+        assert!(ctx.eval::<bool>(lock, "globalThis.setterRuns === 2").unwrap());
+        ctx.eval_raw(lock, "delete Object.prototype.x").unwrap();
+
+        // An own `__proto__` sets the prototype of the object it is copied to, and is lost.
+        assert_round_trip(
+            lock,
+            ctx,
+            "Object.defineProperty(new Error('e'), '__proto__', { value: { y: 1 }, enumerable: true })",
+            "!Object.hasOwn(v, '__proto__') && v.y === undefined && v.message === 'e'",
+        );
+        Ok(())
+    });
+}
+
 #[test]
 fn workerd_api_objects_round_trip() {
     Harness::new().run_in_context(|lock, ctx| {
