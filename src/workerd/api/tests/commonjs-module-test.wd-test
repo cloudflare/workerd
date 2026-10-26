@@ -9,7 +9,9 @@ const unitTests :Workerd.Config = (
           (name = "foo",
            commonJsModule = "exports.foo = 1",
            namedExports = ["foo", "bar"]),
-          (name = "bad-require", commonJsModule = "require('../dep')")
+          (name = "bad-require", commonJsModule = "require('../dep')"),
+          (name = "require-process",
+           commonJsModule = "module.exports = { bare: require('process'), prefixed: require('node:process') };")
         ],
         compatibilityFlags = ["nodejs_compat"],
       )
