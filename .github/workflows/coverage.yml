@@ -16,6 +16,8 @@ permissions:
   contents: read
   # Read/write artifacts
   actions: write
+  # Authenticate to bazelflare
+  id-token: write
 
 jobs:
   coverage-linux:
@@ -25,11 +27,11 @@ jobs:
       os_name: linux
       arch_name: 'X64'
       suffix: 'coverage'
-      # Don't use ci-test here because it enables --remote_download_minimal which prevents
-      # coverage data from being fetched from cache.
-      # Use ci-linux-common instead of ci-linux to avoid overriding coverage test_tag_filters
-      # (ci-linux sets test_tag_filters that would include container tests which require docker)
-      extra_bazel_args: '--config=ci-linux-common --config=ci-limit-storage --config=coverage'
+      bazelflare: true
+      developer_flags: '--config=bazelflare-coverage'
+      extra_bazel_args: '--config=ci-bazelflare-coverage'
+      runner_developer_flags: '--config=coverage'
+      runner_extra_bazel_args: '--config=ci-linux-common'
       upload_test_logs: true
       upload_binary: false
       build_container_images: false
