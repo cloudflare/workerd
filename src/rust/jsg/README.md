@@ -392,7 +392,7 @@ A cast to a supertype, such as `Local<Function>` to `Local<Object>` or `Local<Va
 
 ```rust
 let str_value = "hello".to_js(lock)?;
-let num_value = 42u32.to_local(lock); // `ToLocalValue` also covers integers
+let num_value = 42u32.to_js(lock)?;
 let global = str_value.to_global(lock);
 
 let name: v8::Local<v8::Name> = v8::Local::<v8::String>::try_from(str_value).unwrap().into();
@@ -608,6 +608,10 @@ To port a C++ JSG signature:
 | `kj::Array<double>` parameter | `Vec<Number>` |
 | `kj::Array<bool>` | `Vec<bool>` |
 | `kj::Array<T>` of anything else | `Vec<T>` |
+
+A `#[jsg_struct]` field converts with its `ToJS` impl like any other value, so a `Vec<u8>` field
+becomes an `Array` of numbers. A field has no way to choose a typed array or an `ArrayBuffer`, so
+a `JSG_STRUCT` with a `kj::Array<kj::byte>` field has no direct port.
 
 ## Union Types
 

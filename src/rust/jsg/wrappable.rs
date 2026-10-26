@@ -75,7 +75,6 @@ use crate::Nullable;
 use crate::Number;
 use crate::Type;
 use crate::v8;
-use crate::v8::ToLocalValue;
 
 // =============================================================================
 // Traced trait — GC tracing for field types
@@ -456,7 +455,9 @@ impl Type for bool {
 impl<'s> ToJS<'s> for bool {
     #[inline]
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-        Ok(self.to_local(lock))
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        Ok(unsafe { v8::Local::from_ffi(v8::ffi::local_new_boolean(isolate.as_ffi(), self)) })
     }
 }
 
@@ -489,14 +490,16 @@ impl Type for std::string::String {
 impl<'s> ToJS<'s> for std::string::String {
     #[inline]
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-        Ok(self.to_local(lock))
+        self.as_str().to_js(lock)
     }
 }
 
 impl<'s> ToJS<'s> for &str {
     #[inline]
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-        Ok(self.to_local(lock))
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        Ok(unsafe { v8::Local::from_ffi(v8::ffi::local_new_string(isolate.as_ffi(), self)) })
     }
 }
 
@@ -529,7 +532,11 @@ impl Type for Number {
 impl<'s> ToJS<'s> for Number {
     #[inline]
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-        Ok(self.to_local(lock))
+        let isolate = lock.isolate();
+        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
+        Ok(unsafe {
+            v8::Local::from_ffi(v8::ffi::local_new_number(isolate.as_ffi(), self.value()))
+        })
     }
 }
 

@@ -38,6 +38,7 @@ use syn::FnArg;
 use syn::ItemFn;
 use syn::ItemImpl;
 use syn::parse_macro_input;
+use trace::generate_trace_statements;
 use utils::elide_named_lifetimes;
 use utils::error;
 use utils::extract_name_attribute;
@@ -55,10 +56,12 @@ use utils::this_param;
 // #[jsg_struct]
 // =============================================================================
 
-/// Generates `jsg::Struct`, `jsg::Type`, `jsg::ToJS`, and `jsg::FromJS`
+/// Generates `jsg::Struct`, `jsg::Type`, `jsg::ToJS`, `jsg::FromJS` and `jsg::Traced`
 /// implementations for a plain data struct.
 ///
-/// Only `pub` fields are projected into the JavaScript object.
+/// Only `pub` fields are projected into the JavaScript object. Each converts with its `ToJS`
+/// impl, and a field whose conversion fails fails the struct's conversion with that error.
+/// The generated `Traced` impl visits every field, so a field can be a `jsg::Rc<R>`.
 /// Use `#[jsg_struct(name = "MyName")]` to override `Type::class_name()`
 /// metadata (used in diagnostics/type reporting), not to define a JS class.
 #[proc_macro_attribute]
@@ -76,6 +79,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut field_extractions = Vec::new();
     let mut field_names = Vec::new();
     let mut all_optional = true;
+    let traced_impl = struct_traced_impl(name, &named_fields);
 
     for field in &named_fields {
         // Only public fields are projected into JavaScript objects.
@@ -162,14 +166,32 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         impl jsg::Struct for #name {}
 
+        #traced_impl
+    }
+    .into()
+}
+
+/// Generates the `Traced` impl of a `#[jsg_struct]`, which visits every field and holds GC
+/// references when a field does.
+fn struct_traced_impl(
+    name: &syn::Ident,
+    fields: &syn::punctuated::Punctuated<syn::Field, syn::token::Comma>,
+) -> proc_macro2::TokenStream {
+    let field_types = fields.iter().map(|field| &field.ty);
+    let trace_statements = generate_trace_statements(fields);
+    quote! {
         #[automatically_derived]
         impl jsg::Traced for #name {
             fn holds_gc_references() -> bool {
-                false
+                false #(|| <#field_types as jsg::Traced>::holds_gc_references())*
+            }
+
+            fn trace(&self, visitor: &mut jsg::GcVisitor) {
+                let _ = visitor;
+                #(#trace_statements)*
             }
         }
     }
-    .into()
 }
 
 /// The body of a `#[jsg_struct]`'s `ToJS::to_js`, given each public field's name, its
@@ -180,26 +202,26 @@ fn to_js_fn_body(fields: &[(&syn::Ident, String, bool)]) -> proc_macro2::TokenSt
     let data_properties = fields.iter().map(|(field_name, js_name, optional)| {
         let value = if *optional {
             quote! {
-                match &this.#field_name {
-                    Some(value) => jsg::v8::ToLocalValue::to_local(value, lock),
+                match this.#field_name {
+                    Some(value) => jsg::ToJS::to_js(value, lock)?,
                     None => lock.undefined(),
                 }
             }
         } else {
-            quote! { jsg::v8::ToLocalValue::to_local(&this.#field_name, lock) }
+            quote! { jsg::ToJS::to_js(this.#field_name, lock)? }
         };
         quote! { properties.push((#js_name, #value)); }
     });
     // Set() skips an absent optional field rather than setting it to undefined.
     let field_sets = fields.iter().map(|(field_name, js_name, optional)| {
         let set = quote! {
-            let value = jsg::v8::ToLocalValue::to_local(value, lock);
+            let value = jsg::ToJS::to_js(value, lock)?;
             obj.set(lock, #js_name, value)?;
         };
         if *optional {
-            quote! { if let Some(value) = &this.#field_name { #set } }
+            quote! { if let Some(value) = this.#field_name { #set } }
         } else {
-            quote! { { let value = &this.#field_name; #set } }
+            quote! { { let value = this.#field_name; #set } }
         }
     });
     quote! {
