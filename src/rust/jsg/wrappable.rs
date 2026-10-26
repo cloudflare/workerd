@@ -462,6 +462,7 @@ impl Type for bool {
 }
 
 impl<'s> ToJS<'s> for bool {
+    #[inline]
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         Ok(self.to_local(lock))
     }
@@ -494,12 +495,14 @@ impl Type for std::string::String {
 }
 
 impl<'s> ToJS<'s> for std::string::String {
+    #[inline]
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         Ok(self.to_local(lock))
     }
 }
 
 impl<'s> ToJS<'s> for &str {
+    #[inline]
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         Ok(self.to_local(lock))
     }
@@ -532,6 +535,7 @@ impl Type for Number {
 }
 
 impl<'s> ToJS<'s> for Number {
+    #[inline]
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         Ok(self.to_local(lock))
     }
@@ -840,6 +844,7 @@ impl<'s> ToJS<'s> for std::time::SystemTime {
         reason = "a time of more than 2^53 milliseconds is beyond the range of JavaScript dates \
                   either way"
     )]
+    #[inline]
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         let millis = match self.duration_since(std::time::UNIX_EPOCH) {
             Ok(after) => after.as_millis() as f64,
@@ -854,6 +859,7 @@ impl<'s> ToJS<'s> for std::time::SystemTime {
 // =============================================================================
 
 impl<'s> ToJS<'s> for () {
+    #[inline]
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         Ok(lock.undefined())
     }
@@ -1132,6 +1138,7 @@ macro_rules! impl_typed_array {
         }
 
         impl<'s> ToJS<'s> for Vec<$elem> {
+            #[inline]
             fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
                 let isolate = lock.isolate();
                 // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active.

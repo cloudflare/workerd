@@ -663,6 +663,13 @@ DEFINE_TYPED_ARRAY_NEW(biguint64_array, BigUint64Array, uint64_t)
 // Wrappers
 MaybeLocal wrap_resource(
     Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere) {
+  // Checked here rather than through `call_into_js()`, which would make a second FFI call on
+  // every wrap, though most only read the cached handle.
+  if (isolate->IsExecutionTerminating()) {
+    wrappedElsewhere = false;
+    return MaybeLocal{.ptr = 0};
+  }
+
   wrappedElsewhere = wrappable->hasWrapper() && wrappable->getIsolate() != isolate;
   if (wrappedElsewhere) {
     return MaybeLocal{.ptr = 0};

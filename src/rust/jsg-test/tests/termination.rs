@@ -20,6 +20,9 @@ thread_local! {
     /// error.
     static RESOURCE_CONVERSION_PENDING: std::cell::Cell<Option<bool>> =
         const { std::cell::Cell::new(None) };
+    /// Whether wrapping the resource in `terminate_then_return_this` failed with a pending error.
+    static THIS_CONVERSION_PENDING: std::cell::Cell<Option<bool>> =
+        const { std::cell::Cell::new(None) };
 }
 
 #[jsg_resource]
@@ -79,6 +82,19 @@ impl Terminator {
         crate::Harness::terminate_and_deliver(lock);
         let result = jsg::ToJS::to_js(jsg::Rc::new(Self), lock);
         RESOURCE_CONVERSION_PENDING.set(Some(result.as_ref().is_err_and(jsg::Error::is_pending)));
+        result
+    }
+
+    /// Is terminated and then wraps its own resource, whose wrapper already exists, so that
+    /// wrapping it only reads the wrapper.
+    #[jsg_method]
+    fn terminate_then_return_this<'s>(
+        this: jsg::Rc<Self>,
+        lock: &mut jsg::Lock<'s>,
+    ) -> jsg::Result<jsg::v8::Local<'s, jsg::v8::Value>> {
+        crate::Harness::terminate_and_deliver(lock);
+        let result = jsg::ToJS::to_js(this, lock);
+        THIS_CONVERSION_PENDING.set(Some(result.as_ref().is_err_and(jsg::Error::is_pending)));
         result
     }
 
@@ -174,6 +190,13 @@ fn returning_a_resource_while_terminating_keeps_the_termination() {
     RESOURCE_CONVERSION_PENDING.set(None);
     termination_survives("terminateThenReturnResource");
     assert_eq!(RESOURCE_CONVERSION_PENDING.get(), Some(true));
+}
+
+#[test]
+fn returning_a_wrapped_resource_while_terminating_keeps_the_termination() {
+    THIS_CONVERSION_PENDING.set(None);
+    termination_survives("terminateThenReturnThis");
+    assert_eq!(THIS_CONVERSION_PENDING.get(), Some(true));
 }
 
 #[test]
