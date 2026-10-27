@@ -1,0 +1,19 @@
+build/wpt_test.bzl
+  s_1b9ab9fb100cf8::t_ab1e74c897bb0a 11-12,18,575
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "978c9ce841119b6f6a89c51c195e5f6db79b00bb",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

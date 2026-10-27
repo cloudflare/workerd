@@ -1,0 +1,31 @@
+.github/actions/setup-bazelflare/action.yml
+  s_1b9ab9fb100cf8::t_a62528a7c26e84 46-54,62-64
+.github/workflows/_bazel.yml
+  s_1b9ab9fb100cf8::t_3539bf3789973e 86-89,95-96,120-121,134,139,141-150,152-157
+.github/workflows/coverage.yml
+  s_1b9ab9fb100cf8::t_49b36fd326cd96 19-20
+build/bazelflare/ca.pem
+  s_1b9ab9fb100cf8::t_d4e6ca062596bf 1-11
+build/bazelflare/credential-helper
+  s_1b9ab9fb100cf8::t_35043cf4e46a05 1-39
+.bazelrc
+  s_1b9ab9fb100cf8::t_4342f4efb9e6dc 586-592,594-596,604-608
+.github/workflows/test.yml
+  s_1b9ab9fb100cf8::t_2996c2e5142319 21-22,165-166,168-169,200-201,211
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "edf9105f3a774dbf8def5f4ebe1a6016aed3ed09",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}

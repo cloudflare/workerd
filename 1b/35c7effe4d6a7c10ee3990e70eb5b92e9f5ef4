@@ -1,0 +1,21 @@
+.github/actions/setup-bazelflare/action.yml
+  s_1b9ab9fb100cf8::t_2a7b6407a260bd 63-64
+.github/workflows/test.yml
+  s_1b9ab9fb100cf8::t_11bf387829557d 56-59,99,120,139
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1b35c7effe4d6a7c10ee3990e70eb5b92e9f5ef4",
+  "prompts": {},
+  "sessions": {
+    "s_1b9ab9fb100cf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8a94acb6-2359-44ca-a907-87a6005136ac",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dan.lapid@gmail.com>"
+    }
+  }
+}
