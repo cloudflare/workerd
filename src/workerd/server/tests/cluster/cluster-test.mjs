@@ -45,6 +45,11 @@ assert(
 
 const CONTROL_FD = 3;
 
+// Node's SIGTERM is TerminateProcess on Windows, so a node cannot drain there.
+const SIGTERM_DRAINS = {
+  skip: process.platform === 'win32' && 'SIGTERM does not drain on Windows',
+};
+
 // A minimal harness specialized for the cluster test. Unlike server-harness.mjs
 // it:
 //   - allows overriding bindings via process environment (NODE_ID),
@@ -502,86 +507,103 @@ test('cluster: killing the owner allows another node to take over', async () => 
   });
 });
 
-test('cluster: draining node still routes in-flight requests to a remote owner', async () => {
-  await withCluster(2, async ({ nodes }) => {
-    // Prime the DO so that exactly one node owns it.
-    const initial = await fetchJson(nodes[0].httpPort, '/increment?name=drain');
-    assert.strictEqual(initial.status, 200);
-    assert.strictEqual(initial.body.count, 1);
-    const owner = nodes.find((n) => n.nodeId === initial.body.nodeId);
-    const nonOwner = nodes.find((n) => n.nodeId !== initial.body.nodeId);
-    assert(owner !== undefined && nonOwner !== undefined);
+test(
+  'cluster: draining node still routes in-flight requests to a remote owner',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(2, async ({ nodes }) => {
+      // Prime the DO so that exactly one node owns it.
+      const initial = await fetchJson(
+        nodes[0].httpPort,
+        '/increment?name=drain'
+      );
+      assert.strictEqual(initial.status, 200);
+      assert.strictEqual(initial.body.count, 1);
+      const owner = nodes.find((n) => n.nodeId === initial.body.nodeId);
+      const nonOwner = nodes.find((n) => n.nodeId !== initial.body.nodeId);
+      assert(owner !== undefined && nonOwner !== undefined);
 
-    // Put a request in flight on the non-owner whose stateless handler waits
-    // before calling the DO, then SIGTERM the non-owner while it is waiting.
-    // Draining lets in-flight requests finish, so this request must still be
-    // able to route to the owner over cluster RPC after draining began.
-    const requestPromise = fetchJson(
-      nonOwner.httpPort,
-      '/increment?name=drain&delay=1000',
-      { timeoutMs: 10_000 }
-    );
-    await sleep(250);
-    const exitPromise = nonOwner.stop({ signal: 'SIGTERM', timeoutMs: 10_000 });
+      // Put a request in flight on the non-owner whose stateless handler waits
+      // before calling the DO, then SIGTERM the non-owner while it is waiting.
+      // Draining lets in-flight requests finish, so this request must still be
+      // able to route to the owner over cluster RPC after draining began.
+      const requestPromise = fetchJson(
+        nonOwner.httpPort,
+        '/increment?name=drain&delay=1000',
+        { timeoutMs: 10_000 }
+      );
+      await sleep(250);
+      const exitPromise = nonOwner.stop({
+        signal: 'SIGTERM',
+        timeoutMs: 10_000,
+      });
 
-    const response = await requestPromise;
-    assert.strictEqual(
-      response.status,
-      200,
-      `in-flight request on draining node failed: ${JSON.stringify(response.body)}`
-    );
-    assert.strictEqual(response.body.nodeId, owner.nodeId);
-    assert.strictEqual(response.body.count, 2);
+      const response = await requestPromise;
+      assert.strictEqual(
+        response.status,
+        200,
+        `in-flight request on draining node failed: ${JSON.stringify(response.body)}`
+      );
+      assert.strictEqual(response.body.nodeId, owner.nodeId);
+      assert.strictEqual(response.body.count, 2);
 
-    // The draining node must have exited cleanly once the request finished.
-    const exit = await exitPromise;
-    assert.deepStrictEqual(exit, { code: 0, signal: null });
-  });
-});
+      // The draining node must have exited cleanly once the request finished.
+      const exit = await exitPromise;
+      assert.deepStrictEqual(exit, { code: 0, signal: null });
+    });
+  }
+);
 
-test('cluster: draining node refuses to claim an unowned DO', async () => {
-  await withCluster(2, async ({ nodes, bucket, nodeKeys }) => {
-    // Put a request in flight on node 0 for a DO that nobody owns yet, then
-    // SIGTERM node 0 while its stateless handler is still waiting. By the time
-    // the handler calls the DO, node 0 is draining: its cluster listener no
-    // longer accepts connections, so claiming the DO there would leave it
-    // unreachable from the rest of the cluster until node 0 exits. The claim
-    // must be refused instead.
-    const requestPromise = fetchJson(
-      nodes[0].httpPort,
-      '/increment?name=lame-duck&delay=1000',
-      { timeoutMs: 10_000 }
-    );
-    await sleep(250);
-    const exitPromise = nodes[0].stop({ signal: 'SIGTERM', timeoutMs: 10_000 });
+test(
+  'cluster: draining node refuses to claim an unowned DO',
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(2, async ({ nodes, bucket, nodeKeys }) => {
+      // Put a request in flight on node 0 for a DO that nobody owns yet, then
+      // SIGTERM node 0 while its stateless handler is still waiting. By the time
+      // the handler calls the DO, node 0 is draining: its cluster listener no
+      // longer accepts connections, so claiming the DO there would leave it
+      // unreachable from the rest of the cluster until node 0 exits. The claim
+      // must be refused instead.
+      const requestPromise = fetchJson(
+        nodes[0].httpPort,
+        '/increment?name=lame-duck&delay=1000',
+        { timeoutMs: 10_000 }
+      );
+      await sleep(250);
+      const exitPromise = nodes[0].stop({
+        signal: 'SIGTERM',
+        timeoutMs: 10_000,
+      });
 
-    const response = await requestPromise;
-    assert.strictEqual(
-      response.status,
-      500,
-      `draining node must not claim the DO: ${JSON.stringify(response.body)}`
-    );
-    // The refusal is a DISCONNECTED exception, which JS sees as a generic
-    // connection-loss error.
-    assert.match(response.body.error, /Network connection lost/);
+      const response = await requestPromise;
+      assert.strictEqual(
+        response.status,
+        500,
+        `draining node must not claim the DO: ${JSON.stringify(response.body)}`
+      );
+      // The refusal is a DISCONNECTED exception, which JS sees as a generic
+      // connection-loss error.
+      assert.match(response.body.error, /Network connection lost/);
 
-    const exit = await exitPromise;
-    assert.deepStrictEqual(exit, { code: 0, signal: null });
+      const exit = await exitPromise;
+      assert.deepStrictEqual(exit, { code: 0, signal: null });
 
-    // The DO was never instantiated anywhere: the survivor claims it fresh.
-    const survivor = await fetchJson(
-      nodes[1].httpPort,
-      '/increment?name=lame-duck'
-    );
-    assert.strictEqual(survivor.status, 200, JSON.stringify(survivor.body));
-    assert.strictEqual(survivor.body.count, 1);
-    assert.strictEqual(survivor.body.nodeId, nodes[1].nodeId);
-    assert.strictEqual(
-      await bucket.owner(survivor.body.id),
-      nodeKeys.get(nodes[1].nodeId)
-    );
-  });
-});
+      // The DO was never instantiated anywhere: the survivor claims it fresh.
+      const survivor = await fetchJson(
+        nodes[1].httpPort,
+        '/increment?name=lame-duck'
+      );
+      assert.strictEqual(survivor.status, 200, JSON.stringify(survivor.body));
+      assert.strictEqual(survivor.body.count, 1);
+      assert.strictEqual(survivor.body.nodeId, nodes[1].nodeId);
+      assert.strictEqual(
+        await bucket.owner(survivor.body.id),
+        nodeKeys.get(nodes[1].nodeId)
+      );
+    });
+  }
+);
 
 test('cluster: concurrent first requests to a DO read its owner record once per node', async () => {
   await withCluster(2, async ({ nodes, bucket }) => {
