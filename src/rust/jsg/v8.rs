@@ -628,6 +628,19 @@ pub mod ffi {
         );
         pub unsafe fn fast_api_terminate_execution(options: *mut FastApiCallbackOptions);
 
+        // Serialization
+        // Leaves what serialization throws pending; see `call_into_js()`. Fallible: the result
+        // is a rust::Vec.
+        pub unsafe fn local_serialize(
+            isolate: *mut Isolate,
+            value: &Local,
+            errors_are_host_objects: bool,
+            result: &mut Vec<u8>,
+        ) -> Result<bool>;
+        // Leaves what deserialization throws pending. Fallible: a missing or unsupported header
+        // throws.
+        pub unsafe fn value_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<MaybeLocal>;
+
         // Errors
         pub unsafe fn exception_create_from_bytes(
             isolate: *mut Isolate,

@@ -467,6 +467,24 @@ bool realm_can_attach(Isolate* isolate);
 void realm_attach(Isolate* isolate, Realm& realm);
 void realm_detach(Isolate* isolate, const IsolateState* state);
 
+// Serialization
+// In the format of C++ JSG's jsg::Serializer and jsg::Deserializer, which read what these write
+// and the other way round; see ser.c++.
+//
+// Writes `value`, after a header, as jsg::Serializer does: native errors as host objects if
+// `errors_are_host_objects` (jsg::Lock::isUsingEnhancedErrorSerialization()), and workerd API
+// objects through their serializers. Stores the bytes in `result` and returns true, or returns
+// false if serialization threw, leaving the exception pending: a DataCloneError, or what a getter,
+// Proxy trap or serializer threw.
+bool local_serialize(Isolate* isolate,
+    const Local& value,
+    bool errors_are_host_objects,
+    ::rust::Vec<uint8_t>& result);
+// Reads a value as jsg::Deserializer does with its default options, and returns it, or
+// none if deserialization threw, leaving the exception pending. Runs no JavaScript. Throws a KJ
+// exception if the header is missing or of an unsupported version.
+MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
+
 // Errors
 // Builds an exception whose message is raw bytes interpreted as UTF-8. Invalid
 // UTF-8 sequences are replaced with U+FFFD by v8::String::NewFromUtf8 rather
