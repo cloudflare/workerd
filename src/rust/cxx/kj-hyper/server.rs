@@ -127,6 +127,9 @@ pub struct ServerSettings {
     /// Turns a WebSocket protocol error into the exception `receive()` fails with; kj's default
     /// when `None`.
     pub websocket_errors: Option<KjOwn<WebSocketErrorHandler>>,
+    /// Whether a request whose method is outside kj's list, but one `kj::HttpMethod::tryParse()`
+    /// accepts, reaches the handler (kj's `allowOtherMethods`); otherwise it gets kj's 501.
+    pub allow_other_methods: bool,
 }
 
 impl Default for ServerSettings {
@@ -135,6 +138,7 @@ impl Default for ServerSettings {
             header_timeout: Duration::from_secs(15),
             websocket_compression: WebSocketCompression::NONE,
             websocket_errors: None,
+            allow_other_methods: false,
         }
     }
 }
@@ -416,7 +420,7 @@ async fn handle(
             .await
     } else {
         let name = parts.method.as_str().as_bytes();
-        if !method_allowed(name) {
+        if !method_allowed(name, conn.settings.allow_other_methods) {
             let _ = sender.send_error(
                 501,
                 b"Not Implemented",

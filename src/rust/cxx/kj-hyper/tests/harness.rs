@@ -202,6 +202,8 @@ pub unsafe fn start_server(
         table,
         settings: Rc::new(ServerSettings {
             websocket_compression: compression(manual_compression),
+            // The tests also send methods outside kj's list.
+            allow_other_methods: true,
             ..ServerSettings::default()
         }),
         handler: Rc::new(Forwarding { service }),

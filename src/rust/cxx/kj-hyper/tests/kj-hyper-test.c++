@@ -138,6 +138,13 @@ class TestService final: public kj::HttpService {
       // Echoes the request body, with the response length unknown.
       auto out = response.send(200, "OK", responseHeaders, kj::none);
       co_await requestBody.pumpTo(*out);
+    } else if (url == "/method") {
+      // Reports the method as the service received it, and the body it came with.
+      auto text = co_await requestBody.readAllText();
+      auto report = kj::str(
+          method, method.known() == kj::HttpMethod::Known::OTHER ? " other " : " known ", text);
+      auto out = response.send(200, "OK", responseHeaders, report.size());
+      co_await out->write(report.asBytes());
     } else if (url == "/framing") {
       // Reports how the request body was framed and how long it was.
       auto text = co_await requestBody.readAllText();
@@ -1303,6 +1310,40 @@ KJ_TEST("client: a response cut short fails the body read") {
 // =======================================================================================
 // Methods kj doesn't know by name (kj::HttpMethod::Known::OTHER).
 
+KJ_TEST("server: a method kj doesn't know by name reaches the service") {
+  Fixture f;
+  auto conn = f.connect();
+  conn->write("BLOCK /method HTTP/1.1\r\nHost: foo\r\nContent-Length: 5\r\n\r\nhello"_kjb)
+      .wait(f.ws);
+  // Framed as any other request: the body by its Content-Length, and a response with a body.
+  KJ_EXPECT(readHead(*conn).wait(f.ws) == "HTTP/1.1 200 OK\r\nContent-Length: 17\r\n\r\n");
+  KJ_EXPECT(readBytes(f.ws, *conn, 17) == "BLOCK other hello");
+}
+
+KJ_TEST("server: a method name kj refuses gets kj's 501") {
+  // Longer than any name kj takes.
+  auto method = kj::str(kj::repeat('X', kj::HttpMethod::MAX_NAME_SIZE + 1));
+  Fixture f;
+  auto conn = f.connect();
+  conn->write(kj::str(method, " /method HTTP/1.1\r\nHost: foo\r\n\r\n").asBytes()).wait(f.ws);
+  auto response = conn->readAllText().wait(f.ws);
+  KJ_EXPECT(response.startsWith("HTTP/1.1 501 Not Implemented\r\n"), response);
+  KJ_EXPECT(response.endsWith("ERROR: Unrecognized request method."), response);
+  KJ_EXPECT(f.service.requestCount == 0);
+}
+
+KJ_TEST("server: a WebSocket handshake with a method kj doesn't know by name gets a 400") {
+  Fixture f;
+  auto conn = f.connect();
+  conn->write("BLOCK /ws HTTP/1.1\r\nHost: foo\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+              "Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==\r\nSec-WebSocket-Version: 13\r\n"
+              "Content-Length: 0\r\n\r\n"_kjb)
+      .wait(f.ws);
+  auto response = conn->readAllText().wait(f.ws);
+  KJ_EXPECT(response.startsWith("HTTP/1.1 400 Bad Request\r\n"), response);
+  KJ_EXPECT(response.endsWith("WebSocket must be initiated with a GET request."), response);
+}
+
 KJ_TEST("client: a method kj doesn't know by name is sent by its name") {
   Fixture f;
   auto [client, peer] = f.pipeClient();
@@ -1312,6 +1353,20 @@ KJ_TEST("client: a method kj doesn't know by name is sent by its name") {
       headers, static_cast<uint64_t>(5));
   KJ_EXPECT(
       readHead(*peer).wait(f.ws) == "BLOCK /p HTTP/1.1\r\nContent-Length: 5\r\nHost: foo\r\n\r\n");
+}
+
+KJ_TEST("client and server carry a method kj doesn't know by name to the service") {
+  Fixture f;
+  auto client = f.client();
+  kj::HttpHeaders headers(*f.table);
+  headers.setPtr(kj::HttpHeaderId::HOST, "foo");
+  auto request = client->request(KJ_ASSERT_NONNULL(kj::HttpMethod::tryParse("BLOCK"_kj)), "/method",
+      headers, static_cast<uint64_t>(5));
+  request.body->write("hello"_kjb).wait(f.ws);
+  request.body = nullptr;
+  auto response = request.response.wait(f.ws);
+  KJ_EXPECT(response.statusCode == 200);
+  KJ_EXPECT(response.body->readAllText().wait(f.ws) == "BLOCK other hello");
 }
 
 // =======================================================================================

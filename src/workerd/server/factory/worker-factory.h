@@ -410,6 +410,7 @@ kj::Own<kj::HttpService::Response> new_rewriting_response(kj::HttpService::Respo
     ::rust::Slice<const HeaderEdit> edits);
 kj::Own<kj::HttpService::ConnectResponse> new_null_connect_response();
 kj::Own<kj::WebSocketErrorHandler> new_jsgify_websocket_errors();
+bool other_http_methods_enabled();
 kj::Own<WorkerInterface::CustomEvent> new_udp_connect_event(
     ::rust::Str address, ::rust::Box<UdpFlow> flow);
 

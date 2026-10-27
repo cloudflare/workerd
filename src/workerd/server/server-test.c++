@@ -6384,6 +6384,58 @@ KJ_TEST("Server: JS RPC over HTTP connections") {
   conn.httpGet200("/", "got: 35");
 }
 
+KJ_TEST("Server: a Request with a method outside kj's list can be sent over JS RPC") {
+  // With the OTHER_HTTP_METHODS autogate enabled, workerd's server passes the method to the
+  // Worker, and Request::deserialize() must accept it.
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-04-03",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `import {WorkerEntrypoint} from "cloudflare:workers";
+                `export default {
+                `  async fetch(request, env) {
+                `    return new Response(await env.ECHO.methodOf(request));
+                `  }
+                `}
+                `export class MethodEcho extends WorkerEntrypoint {
+                `  methodOf(request) { return request.method; }
+                `}
+            )
+          ],
+          bindings = [( name = "ECHO", service = (name = "hello", entrypoint = "MethodEcho") )]
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" ),
+    ],
+    autogates = [ "workerd-autogate-other-http-methods" ]
+  ))"_kj);
+
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.send(R"(
+    BLOCK / HTTP/1.1
+    Host: foo
+
+  )"_blockquote);
+  conn.recvHttp200("BLOCK");
+
+  // Even TRACK, which new Request() refuses even with the gate enabled: deserializing doesn't
+  // apply its checks.
+  conn.send(R"(
+    TRACK / HTTP/1.1
+    Host: foo
+
+  )"_blockquote);
+  conn.recvHttp200("TRACK");
+}
+
 KJ_TEST("Server: UDP RPC over HTTP connections") {
   TestServer test(R"((
     services = [
@@ -6419,6 +6471,47 @@ KJ_TEST("Server: UDP RPC over HTTP connections") {
   auto response = test.receiveUdp("udp-address");
   KJ_EXPECT(response.content.asPtr() == "hello"_kjb);
   KJ_EXPECT(response.destination == "peer:1234");
+}
+
+KJ_TEST("Server: a method outside kj's list reaches the Worker only with OTHER_HTTP_METHODS") {
+  TestServer test(R"((
+    services = [
+      ( name = "hello",
+        worker = (
+          compatibilityDate = "2024-04-03",
+          modules = [
+            ( name = "main.js",
+              esModule =
+                `export default {
+                `  async fetch(request) {
+                `    return new Response(request.method);
+                `  }
+                `}
+            )
+          ]
+        )
+      ),
+    ],
+    sockets = [
+      ( name = "main", address = "test-addr", service = "hello" ),
+    ]
+  ))"_kj);
+
+  test.start();
+
+  auto conn = test.connect("test-addr");
+  conn.send(R"(
+    BLOCK / HTTP/1.1
+    Host: foo
+
+  )"_blockquote);
+  // The config enables no autogates, so the gate is on only in the all-autogates variant.
+  if (util::Autogate::isEnabled(util::AutogateKey::OTHER_HTTP_METHODS)) {
+    conn.recvHttp200("BLOCK");
+  } else {
+    // (The connection's reader strips \r.)
+    conn.recvRegex("HTTP/1\\.1 501 Not Implemented\n[\\s\\S]*");
+  }
 }
 
 KJ_TEST("Server: Entrypoint binding with props") {

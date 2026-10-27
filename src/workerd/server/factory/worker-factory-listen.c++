@@ -3,12 +3,14 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 // The listeners' shims: the Rust rewriter's edits applied to kj headers, a response whose
-// headers are edited on the way out, the `ConnectResponse` of a raw TCP socket, and a UDP flow as
-// a `DatagramChannel` for `connect()` events.
+// headers are edited on the way out, the `ConnectResponse` of a raw TCP socket, a UDP flow as a
+// `DatagramChannel` for `connect()` events, and whether listeners pass methods outside kj's list
+// (the OTHER_HTTP_METHODS autogate).
 
 #include "worker-factory-impl.h"
 
 #include <workerd/api/sockets.h>
+#include <workerd/util/autogate.h>
 #include <workerd/util/stream-utils.h>
 #include <workerd/util/websocket-error-handler.h>
 
@@ -133,6 +135,10 @@ kj::Own<kj::HttpService::ConnectResponse> new_null_connect_response() {
 
 kj::Own<kj::WebSocketErrorHandler> new_jsgify_websocket_errors() {
   return kj::heap<JsgifyWebSocketErrors>();
+}
+
+bool other_http_methods_enabled() {
+  return util::Autogate::isEnabled(util::AutogateKey::OTHER_HTTP_METHODS);
 }
 
 kj::Own<WorkerInterface::CustomEvent> new_udp_connect_event(

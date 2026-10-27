@@ -616,6 +616,9 @@ pub mod ffi {
         /// `JsgifyWebSocketErrors`: the WebSocket error handler whose exceptions reach JS as
         /// `Error`s, for every server and client the Rust server runs.
         fn new_jsgify_websocket_errors() -> KjOwn<WebSocketErrorHandler>;
+        /// Whether the `OTHER_HTTP_METHODS` autogate is enabled, so that listeners pass a request
+        /// whose method is outside kj's list to the socket's service.
+        fn other_http_methods_enabled() -> bool;
         /// A `connect()` event delivering one UDP flow, addressed as `address`.
         fn new_udp_connect_event(address: &str, flow: Box<UdpFlow>) -> KjOwn<CustomEvent>;
 

@@ -442,10 +442,12 @@ pub async fn listen_http(
     listener: StreamListener,
     socket: Rc<HttpSocket>,
 ) -> Result<()> {
-    // The application negotiates WebSocket compression itself.
+    // The application negotiates WebSocket compression itself, and methods outside kj's list
+    // reach it only with the OTHER_HTTP_METHODS autogate.
     let settings = Rc::new(ServerSettings {
         websocket_errors: Some(ffi::new_jsgify_websocket_errors()),
         websocket_compression: kj_hyper::WebSocketCompression::MANUAL,
+        allow_other_methods: ffi::other_http_methods_enabled(),
         ..ServerSettings::default()
     });
     let shutdown = Rc::new(Shutdown::new());

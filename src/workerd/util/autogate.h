@@ -136,7 +136,13 @@ namespace workerd::util {
      arguments do, so that a fraction just past a range limit (2 ** 31 - 0.5 as int, -0.5 as       \
      uint32_t) converts. When disabled, the range check runs on the untruncated value and such a   \
      fraction is a TypeError. Applies to C++ JSG and Rust JSG alike. */                            \
-  V(JSG_INTEGER_ENFORCE_RANGE)
+  V(JSG_INTEGER_ENFORCE_RANGE)                                                                     \
+  /* Lets workerd's own HTTP sockets pass a request whose method is outside kj's list, but one     \
+     that kj::HttpMethod::tryParse() accepts, such as BLOCK, to the socket's service instead of    \
+     answering 501. Method names are case-sensitive there, so a request for "get" is a method of   \
+     its own, not GET. Servers that embed workerd can gate kj's                                    \
+     HttpServerSettings::allowOtherMethods on it too. */                                           \
+  V(OTHER_HTTP_METHODS)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
