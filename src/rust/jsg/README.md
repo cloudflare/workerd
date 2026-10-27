@@ -536,8 +536,9 @@ of C++ JSG's `jsg::Serializer` and `jsg::Deserializer`, with their default optio
 the same, and each reads what the other writes, so the two can share stored data.
 `ser::serialize_with` and `ser::deserialize_with` take the options of `jsg::Serializer::Options`
 and `jsg::Deserializer::Options` as `ser::SerializeOptions` and `ser::DeserializeOptions`: the
-format version, whether there is a header, whether errors get back their `stack`, and the label
-for header errors. Native errors are written as host objects when the
+format version, whether there is a header, whether class instances are written as plain objects
+or rejected (as RPC rejects them), whether errors get back their `stack`, and the label for
+header errors. Native errors are written as host objects when the
 `enhanced_error_serialization` flag is on, and workerd API objects such as `Blob` and `Headers`
 through their C++ serializers; Rust resources can't be serialized. A `SharedArrayBuffer` is
 written as a reference to a buffer that is not part of the bytes, which neither

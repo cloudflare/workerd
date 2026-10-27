@@ -114,6 +114,8 @@ pub mod ffi {
         has_version: bool,
         version: u32,
         omit_header: bool,
+        /// `jsg::Serializer::Options::treatClassInstancesAsPlainObjects`.
+        class_instances_as_plain_objects: bool,
         /// `jsg::Lock::isUsingEnhancedErrorSerialization()`.
         errors_are_host_objects: bool,
     }

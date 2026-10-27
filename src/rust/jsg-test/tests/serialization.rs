@@ -444,6 +444,7 @@ fn versions_and_headers_are_written_and_read_as_cpp_jsg_does() {
             let options = jsg::ser::SerializeOptions {
                 version: Some(version.unwrap_or(15)),
                 omit_header: true,
+                ..Default::default()
             };
             let read = jsg::ser::DeserializeOptions {
                 version: options.version,
@@ -564,6 +565,95 @@ fn header_errors_name_the_diagnostic_context() {
         assert!(ctx.eval::<bool>(lock, "v === 1").unwrap());
         Ok(())
     });
+}
+
+#[test]
+fn class_instances_are_plain_objects_or_rejected() {
+    let reject = jsg::ser::SerializeOptions {
+        class_instances: jsg::ser::ClassInstances::Reject,
+        ..Default::default()
+    };
+    let read = jsg::ser::DeserializeOptions::default();
+    for enhanced_errors in [false, true] {
+        let harness = Harness::with_flags(|mut flags| {
+            flags.set_enhanced_error_serialization(enhanced_errors);
+        });
+        harness.run_in_context(|lock, ctx| {
+            ctx.eval_raw(
+                lock,
+                "globalThis.Point = class Point { constructor() { this.x = 1; } }",
+            )
+            .unwrap();
+
+            // By default a class instance is written as a plain object.
+            assert_round_trip_with(
+                lock,
+                ctx,
+                "new Point()",
+                &jsg::ser::SerializeOptions::default(),
+                &read,
+                "Object.getPrototypeOf(v) === Object.prototype && v.x === 1",
+            );
+
+            // Rejecting class instances leaves plain objects, built-in types, errors and API
+            // objects alone.
+            assert_round_trip_with(
+                lock,
+                ctx,
+                "({ a: [1], m: new Map([[1, 2]]), d: new Date(3), e: new RangeError('r') })",
+                &reject,
+                &read,
+                "v.a[0] === 1 && v.m.get(1) === 2 && v.d.getTime() === 3 && \
+                 v.e instanceof RangeError",
+            );
+            let exception = serialize_exception(lock, ctx, "() => 1");
+            ctx.set_global(lock, "exception", exception);
+            assert_round_trip_with(
+                lock,
+                ctx,
+                "[exception]",
+                &reject,
+                &read,
+                "v[0].name === 'DataCloneError'",
+            );
+
+            // V8 writes an instance of a subclass of a built-in type as the built-in type.
+            assert_round_trip_with(
+                lock,
+                ctx,
+                "new (class extends Map {})([[1, 2]])",
+                &reject,
+                &read,
+                "Object.getPrototypeOf(v) === Map.prototype && v.get(1) === 2",
+            );
+
+            // writeApiObject() rejects these with the DataCloneError jsg::Serializer throws.
+            for (expr, type_name) in [
+                ("({ p: new Point() })", "Point"),
+                ("[Object.create(null)]", "Object"),
+            ] {
+                let value = eval(lock, ctx, expr);
+                let caught = lock
+                    .try_catch(|lock| {
+                        let result = jsg::ser::serialize_with(lock, value, &reject);
+                        assert!(result.as_ref().is_err_and(jsg::Error::is_pending), "{expr}");
+                        result
+                    })
+                    .unwrap();
+                assert_error(
+                    lock,
+                    ctx,
+                    caught.unwrap_err(),
+                    "DataCloneError",
+                    &format!(
+                        "Could not serialize object of type \"{type_name}\". This type does not \
+                         support serialization."
+                    ),
+                );
+            }
+            Ok(())
+        });
+    }
 }
 
 static CHECKED_WHILE_TERMINATING: AtomicBool = AtomicBool::new(false);

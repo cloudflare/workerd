@@ -562,6 +562,8 @@ impl Harness {
             has_version: options.version.is_some(),
             version: options.version.unwrap_or_default(),
             omit_header: options.omit_header,
+            class_instances_as_plain_objects: options.class_instances
+                == jsg::ser::ClassInstances::AsPlainObjects,
             errors_are_host_objects: false,
         };
         // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is

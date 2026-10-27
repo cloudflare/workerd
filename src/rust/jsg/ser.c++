@@ -54,6 +54,9 @@ class Serializer final: public v8::ValueSerializer::Delegate {
     if (!options.omit_header) {
       ser.WriteHeader();
     }
+    if (!options.class_instances_as_plain_objects) {
+      prototypeOfObject = v8::Object::New(isolate)->GetPrototype();
+    }
     return true;
   }
 
@@ -79,11 +82,17 @@ class Serializer final: public v8::ValueSerializer::Delegate {
 
   bool HasCustomHostObject(v8::Isolate*) override {
     // V8 already treats objects with internal fields, such as API objects, as host objects.
-    return options.errors_are_host_objects;
+    return !options.class_instances_as_plain_objects || options.errors_are_host_objects;
   }
 
+  // Decides as jsg::Serializer::IsHostObject() does.
   v8::Maybe<bool> IsHostObject(v8::Isolate*, v8::Local<v8::Object> object) override {
-    return v8::Just(object->InternalFieldCount() > 0 || object->IsNativeError());
+    if (object->InternalFieldCount() > 0) return v8::Just(true);
+    if (object->IsNativeError()) return v8::Just(options.errors_are_host_objects);
+    if (options.class_instances_as_plain_objects) return v8::Just(false);
+    // A class instance, whose prototype is not Object.prototype, is a host object, which
+    // writeApiObject() rejects with a DataCloneError.
+    return v8::Just(object->GetPrototype() != prototypeOfObject);
   }
 
   v8::Maybe<bool> WriteHostObject(v8::Isolate*, v8::Local<v8::Object> object) override {
@@ -107,6 +116,8 @@ class Serializer final: public v8::ValueSerializer::Delegate {
  private:
   v8::Isolate* isolate;
   SerializeOptions options;
+  // Object.prototype, if `options.class_instances_as_plain_objects` is false.
+  v8::Local<v8::Value> prototypeOfObject;
   v8::LocalVector<v8::SharedArrayBuffer> sharedArrayBuffers;
   v8::ValueSerializer ser;
 };

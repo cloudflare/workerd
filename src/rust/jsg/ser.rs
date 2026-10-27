@@ -22,6 +22,19 @@ use crate::Error;
 use crate::Lock;
 use crate::v8;
 
+/// What [`serialize_with`] does with a class instance: an object whose prototype is not
+/// `Object.prototype` and that is not a workerd API object or a native error.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ClassInstances {
+    /// Writes its own properties, as for a plain object, and drops its prototype, as the
+    /// structured clone algorithm does.
+    #[default]
+    AsPlainObjects,
+    /// Throws a `DataCloneError`, as RPC does, so that a class instance is not read back as a
+    /// plain object without its methods.
+    Reject,
+}
+
 /// How [`serialize_with`] writes a value, as `jsg::Serializer::Options`. The default is
 /// `jsg::Serializer`'s.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -32,6 +45,9 @@ pub struct SerializeOptions {
     /// Whether to leave out the header, which holds the version. Data without one is read with
     /// [`DeserializeOptions::read_header`] false and the version it was written in.
     pub omit_header: bool,
+    /// What to do with a class instance, as
+    /// `jsg::Serializer::Options::treatClassInstancesAsPlainObjects`.
+    pub class_instances: ClassInstances,
 }
 
 /// How [`deserialize_with`] reads data, as `jsg::Deserializer::Options`. The default is
@@ -79,7 +95,7 @@ pub fn serialize<'s>(
 /// # Errors
 ///
 /// Serialization runs JavaScript (getters and Proxy traps). If it throws, or `value` can't be
-/// serialized (a `DataCloneError`), or `options.version` is newer than V8's (a
+/// serialized (a `DataCloneError`, as for a class instance with [`ClassInstances::Reject`]), or `options.version` is newer than V8's (a
 /// `DataCloneError`), or execution is terminating, the exception stays pending and the error is
 /// one for which [`Error::is_pending`] is true. Return it, as for
 /// [`v8::Local::<v8::Function>::call`]. A version older than 13 is an internal error.
@@ -93,6 +109,7 @@ pub fn serialize_with<'s>(
         has_version: options.version.is_some(),
         version: options.version.unwrap_or_default(),
         omit_header: options.omit_header,
+        class_instances_as_plain_objects: options.class_instances == ClassInstances::AsPlainObjects,
         errors_are_host_objects: lock.feature_flags().get_enhanced_error_serialization(),
     };
     v8::call_into_js(lock, |lock| {

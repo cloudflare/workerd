@@ -273,7 +273,10 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
     ::workerd::rust::jsg::Local value,
     const ::workerd::rust::jsg::SerializeOptions& options) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
-  ::workerd::jsg::Serializer::Options cppOptions{.omitHeader = options.omit_header};
+  ::workerd::jsg::Serializer::Options cppOptions{
+    .omitHeader = options.omit_header,
+    .treatClassInstancesAsPlainObjects = options.class_instances_as_plain_objects,
+  };
   if (options.has_version) cppOptions.version = options.version;
   ::workerd::jsg::Serializer serializer(js, kj::mv(cppOptions));
   serializer.write(
