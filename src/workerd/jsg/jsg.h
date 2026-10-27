@@ -3647,8 +3647,12 @@ class JsgCatchScope {
 // Since we have two macros -- JSG_TRY and JSG_CATCH -- which must both access the same state,
 // we use a hard-coded variable name. This causes benign shadowing in nested JSG_TRY/JSG_CATCHes,
 // so we disable shadowing warnings. The `_jsg` prefix makes name collision unlikely.
+//
+// The `if` that holds the catch scope has an unbraced `try` statement as its body and an `else`
+// supplied by JSG_CATCH, so clang-tidy sees inconsistent braces in every JSG_TRY expansion.
 #define JSG_TRY(js)                                                                                \
   KJ_SILENCE_SHADOWING_BEGIN                                                                       \
+  /* NOLINTNEXTLINE(readability-inconsistent-ifelse-braces) */                                     \
   if (::workerd::jsg::_::JsgCatchScope _jsgTryCatch(js); true) try KJ_SILENCE_SHADOWING_END
 
 #define JSG_CATCH(exception, ...)                                                                  \
