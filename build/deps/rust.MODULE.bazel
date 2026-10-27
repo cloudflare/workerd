@@ -110,6 +110,10 @@ crate.from_cargo(
     # followup.
     name = "crates_vendor",
     cargo_lockfile = "//deps/rust:Cargo.lock",
+    # The resolved crate graph, which `just update-rust` updates along with Cargo.lock. After
+    # editing Cargo.toml or Cargo.lock by hand, regenerate it with
+    # `bazel fetch --repo_env=CARGO_BAZEL_REPIN=1 --repo=@crates_vendor`.
+    lockfile = "//deps/rust:cargo-bazel-lock.json",
     manifests = ["//deps/rust:Cargo.toml"],
     supported_platform_triples = RUST_TARGET_TRIPLES,
 )

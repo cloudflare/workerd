@@ -24,7 +24,7 @@ BASELINE_FOLDER = "baseline-snapshot"
 DEDICATED_FOLDER = "dedicated-snapshot"
 
 VENDOR_PKG_TESTS_DIR = (
-    Path(__file__).parent.parent
+    Path(__file__).parents[2]
     / "workerd"
     / "server"
     / "tests"
@@ -318,9 +318,7 @@ def make_snapshots(
 
 def update_python_metadata_bzl(res: list[tuple[str, list[tuple[str, str]]]]):
     """Update python_metadata.bzl file with new snapshot values."""
-    metadata_path = (
-        Path(__file__).parent.parent.parent / "build" / "python_metadata.bzl"
-    )
+    metadata_path = Path(__file__).parents[3] / "build" / "python_metadata.bzl"
     content = metadata_path.read_text()
 
     for ver, kvs in res:
