@@ -1,4 +1,5 @@
 load("@rules_rust//rust:defs.bzl", "rust_test")
+load("//build/platforms:sanitizers.bzl", "sanitizer_compatible_with")
 
 def split_rust_test_srcs(srcs):
     """Partitions a crate's sources into (production sources, unit test sources).
@@ -17,6 +18,7 @@ def wd_rust_test(
         link_deps = [],
         tags = [],
         **kwargs):
+    kwargs["target_compatible_with"] = sanitizer_compatible_with(tags, kwargs.get("target_compatible_with"))
     rust_test(
         name = name,
         env = {

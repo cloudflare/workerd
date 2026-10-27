@@ -1,11 +1,13 @@
 common --enable_platform_specific_config
 build --verbose_failures
-build --build_tag_filters=-off-by-default,-requires-container-engine
+# The tag filters are common, so that a config enabled by a later rc line of any command, such as
+# `build --config=bazelflare` in .local/bazelrc, replaces them. The no-asan and no-tsan tags make a
+# target incompatible with the sanitizer (//build/platforms:sanitizers.bzl) instead of filtering it,
+# so that the sanitizer configs leave the filters to other configs.
+common --build_tag_filters=-off-by-default,-requires-container-engine
 # block network access by default
 build --nosandbox_default_allow_network
-test --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine
-test:asan --test_tag_filters=-off-by-default,-no-asan,-requires-fuzzilli,-requires-container-engine
-test:tsan-common --test_tag_filters=-off-by-default,-no-tsan,-requires-fuzzilli,-requires-container-engine
+common --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine
 # exclude enormous tests by default
 build --test_size_filters=-enormous
 # Run Python tests without snapshots while snapshot artifacts are being regenerated.
@@ -238,7 +240,9 @@ build:thin-lto --@rules_rust//:extra_rustc_flag=-Ccodegen-units=1
 build:sanitizer-common --@workerd//src/workerd/server:use_tcmalloc=False
 build:sanitizer-common --copt="-fsanitize-link-c++-runtime" --linkopt="-fsanitize-link-c++-runtime"
 build:sanitizer-common --copt="-Og"
-build:sanitizer-common --copt="-g" --strip=never
+# Sanitizer reports need only line tables, and full debug info makes each statically linked TSan
+# test 1.5 GB. Add --copt=-g for a debugger.
+build:sanitizer-common --copt="-g1" --strip=never
 build:sanitizer-common --copt="-fno-optimize-sibling-calls"
 build:sanitizer-common --copt="-fno-omit-frame-pointer" --copt="-mno-omit-leaf-frame-pointer"
 # Rust's sanitizer support requires nightly
@@ -256,7 +260,7 @@ build:sanitizer-common --@rules_rust//:extra_rustc_flag=-Zexternal-clangrt
 # needing its own CI lane. It instruments C++ only: rustc has no UBSan, and safe Rust already checks
 # bounds and (in debug builds) integer overflow.
 build:asan --config=sanitizer-common
-build:asan --platforms=//build/platforms:sanitizer_address_platform
+build:asan --//build/platforms:sanitizer=address
 build:asan --copt="-fsanitize=address,undefined" --linkopt="-fsanitize=address,undefined"
 build:asan --test_env=ASAN_OPTIONS=abort_on_error=true
 build:asan --test_env=UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
@@ -264,7 +268,7 @@ build:asan --test_env=KJ_CLEAN_SHUTDOWN=1
 # Enable ASan, LSan support in V8
 build:asan --copt="-DV8_USE_ADDRESS_SANITIZER"
 build:asan --per_file_copt='external/.*v8@-DADDRESS_SANITIZER,-DLEAK_SANITIZER'
-# One toolchain per host; resolution picks the one matching the (host-parented) asan platform.
+# One toolchain per host; resolution picks the one matching the target platform.
 build:asan --extra_toolchains=//build/rust:asan_toolchain_linux_x86_64,//build/rust:asan_toolchain_linux_aarch64,//build/rust:asan_toolchain_macos_aarch64
 build:asan --@rules_rust//:extra_rustc_flag=-Zsanitizer=address
 
@@ -277,7 +281,7 @@ build:asan --@rules_rust//:extra_rustc_flag=-Zsanitizer=address
 # `tsan-common`.
 build:tsan-common --config=sanitizer-common
 build:tsan-common --copt="-fsanitize=thread" --linkopt="-fsanitize=thread"
-build:tsan-common --platforms=//build/platforms:sanitizer_thread_platform
+build:tsan-common --//build/platforms:sanitizer=thread
 # handle_sigabrt=0 lets death tests observe SIGABRT directly instead of routing it through TSan's
 # signal handler. history_size=7 (the maximum) keeps 10 trace parts of memory-access history per
 # thread instead of the default 3. TSan silently drops a race report when it can no longer
@@ -296,7 +300,7 @@ build:tsan-common --copt="-DV8_IS_TSAN"
 build:tsan-common --per_file_copt='external/.*v8@-DTHREAD_SANITIZER'
 # Perfetto also requires this define to enable its shared-memory scraping annotations.
 build:tsan-common --per_file_copt='external/.*perfetto@-DTHREAD_SANITIZER'
-# One toolchain per host; resolution picks the one matching the (host-parented) tsan platform.
+# One toolchain per host; resolution picks the one matching the target platform.
 build:tsan-common --extra_toolchains=//build/rust:tsan_toolchain_linux_x86_64,//build/rust:tsan_toolchain_macos_aarch64
 build:tsan-common --@rules_rust//:extra_rustc_flag=-Zsanitizer=thread
 
@@ -317,7 +321,7 @@ build:fuzzilli --linkopt="-static-libasan"
 # Set ASan/UBSan options globally to abort on error (raise SIGABRT) for proper Fuzzilli crash detection
 build:fuzzilli --action_env=ASAN_OPTIONS=abort_on_error=1:symbolize=false
 build:fuzzilli --action_env=UBSAN_OPTIONS=abort_on_error=1:symbolize=false
-# Override test filters to include requires-fuzzilli tests (inherits asan's -no-asan filter)
+# Override test filters to include requires-fuzzilli tests
 test:fuzzilli --test_tag_filters=-off-by-default
 
 #
@@ -605,6 +609,14 @@ startup --experimental_remote_repo_contents_cache
 # doesn't have. The lines that expand the linux and werror configs, which only building commands
 # define, are build's. Bazel expands a config's common lines before its build lines, which none of
 # them override.
+#
+# Configs that follow this one build on bazelflare: `--config=bazelflare --config=asan`, and likewise
+# tsan, opt, release_linux or debug, for none of them sets the platform or the tag filters. To build
+# on bazelflare by default, add `build --config=bazelflare` to .local/bazelrc (and
+# `query --config=bazelflare`, for query to fetch repositories from the cache). Bazel then expands
+# it after this file's build lines, as from CI's command line, so the two have the same action keys.
+# `common --config=bazelflare` would expand it before them, putting the flags they accumulate in a
+# different order.
 # TODO(soon): move with the deployment to a production account.
 common:bazelflare --remote_executor=grpcs://bazelflare.workers-runtime-playground.cloudflareworkers.com:8980
 common:bazelflare --tls_certificate=build/bazelflare/ca.pem
@@ -638,22 +650,8 @@ common:bazelflare --jobs=200
 # Bazel otherwise prepares only as many remote actions at once as the client has CPUs, and packs 100
 # streams onto each connection, each served by one bazelflare Worker invocation.
 common:bazelflare --noexperimental_throttle_remote_action_building --remote_max_concurrency_per_connection=8
-# Sanitizer builds on bazelflare, in place of --config=bazelflare: each applies its sanitizer config
-# and then bazelflare, whose platform replaces the sanitizer config's, so it restores the sanitizer
-# constraint, which selects the sanitizer-built Rust standard library. Sanitizer reports need only
-# line tables, and full debug info makes each statically linked TSan test 1.5 GB to stage.
-build:bazelflare-asan --config=asan --config=bazelflare
-build:bazelflare-asan --platforms=//build/bazelflare:linux_x86_64_asan
-build:bazelflare-asan --copt=-g1
-build:bazelflare-tsan --config=tsan --config=bazelflare
-build:bazelflare-tsan --platforms=//build/bazelflare:linux_x86_64_tsan
-build:bazelflare-tsan --copt=-g1
-# The bazelflare filters replace the sanitizer configs', so these add their -no-asan and -no-tsan
-# back.
-test:bazelflare-asan --test_tag_filters=-off-by-default,-no-asan,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
-test:bazelflare-tsan --test_tag_filters=-off-by-default,-no-tsan,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
 # The release build of the Linux x64 binary and the types, on bazelflare.
-build:bazelflare-release --config=release_linux --config=bazelflare --strip=always
+build:bazelflare-release --config=bazelflare --config=release_linux --strip=always
 # `bazel coverage` on bazelflare, whose filters replace the coverage config's; this merges the two.
 # The report lands in bazel-out/_coverage/_coverage_report.dat.
 build:bazelflare-coverage --config=coverage --config=bazelflare

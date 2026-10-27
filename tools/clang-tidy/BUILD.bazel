@@ -34,8 +34,7 @@ LLVM_ENABLE_RTTI=ON; the binary published by cloudflare/workerd-tools
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
-load("@rules_python//python:defs.bzl", "py_test")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//build/platforms:sanitizers.bzl", "py_test", "sh_test")
 load(":test-headers.bzl", "cc_test_headers", "cc_test_toolchain_flags")
 
 filegroup(

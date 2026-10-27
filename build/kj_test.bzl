@@ -1,6 +1,7 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
 load("//:build/linking.bzl", "CC_TEST_LINKSTATIC")
 load("//build/bazelflare:exec_properties.bzl", "test_exec_properties")
+load("//build/platforms:sanitizers.bzl", "sanitizer_compatible_with")
 load("//build/tools/llvm:coverage.bzl", "COVERAGE_TOOLCHAINS", "coverage_llvm_tools")
 
 def kj_test(
@@ -11,6 +12,7 @@ def kj_test(
         size = "medium",
         target_compatible_with = None,
         **kwargs):
+    target_compatible_with = sanitizer_compatible_with(tags, target_compatible_with)
     test_name = src.removesuffix(".c++")
     binary_name = test_name + "_binary"
     cc_binary(

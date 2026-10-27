@@ -35,7 +35,7 @@ rust_lint_config(
 
 # One toolchain per sanitizer and supported host. `--config=asan` and `--config=tsan` /
 # `--config=tsan-macos` (.bazelrc) list all of a sanitizer's toolchains in --extra_toolchains;
-# toolchain resolution picks the one matching the host.
+# toolchain resolution picks the one matching the target platform's cpu and os.
 
 sanitizer_rust_toolchain(
     name = "asan_toolchain_linux_aarch64",

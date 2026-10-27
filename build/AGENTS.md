@@ -25,7 +25,12 @@ Custom Bazel rules (`wd_*` macros) for C++, TypeScript, Rust, Cap'n Proto, and t
 
 **Conventions:**
 
-- Test tags: `off-by-default`, `requires-container-engine`, `no-asan`, `no-coverage`
+- Test tags: `off-by-default`, `requires-container-engine`, `no-asan`, `no-tsan`, `no-coverage`
+- `no-asan` / `no-tsan` make a test incompatible with the sanitizer rather than filtering it, so
+  they work only through `wd_test`, `kj_test`, `wd_rust_test`, or `sh_test` / `py_test` loaded from
+  `//build/platforms:sanitizers.bzl`
+- Select on a sanitizer with `//build/platforms:sanitizer_address` / `sanitizer_thread`, which
+  follow the `//build/platforms:sanitizer` flag rather than a platform constraint
 - Variant generation controllable per-test via `generate_*_variant` booleans
 - `BUILD.*` files: overlay build files for third-party deps (sqlite3, zlib, simdutf, pyodide, wpt)
 

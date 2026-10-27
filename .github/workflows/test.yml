@@ -59,7 +59,7 @@ jobs:
           # with every action cached, Bazel's own analysis and cache checks keep a 4-core runner
           # busy for the whole build.
           - os: { name: linux, arch: X64, image: ubuntu-22.04-16core, bazelflare: true }
-            config: { suffix: -asan }
+            config: { suffix: -asan, developer_flags: '--config=bazelflare --config=asan' }
           # TODO (later): The custom Windows-debug configuration consistently runs out of disk
           # space on CI, disable it for now. Once https://github.com/bazelbuild/bazel/issues/21615
           # has been resolved we can likely re-enable it and possibly fold up the custom
@@ -82,8 +82,8 @@ jobs:
       os_name: ${{ matrix.os.name }}
       arch_name: ${{ matrix.os.arch }}
       suffix: ${{ matrix.config.suffix }}
-      # A bazelflare job builds a developer's bazelflare config, with CI's flags for bazelflare.
-      developer_flags: ${{ matrix.os.bazelflare && format('--config=bazelflare{0}', matrix.config.suffix) || '' }}
+      # A bazelflare job builds a developer's bazelflare configs, with CI's flags for bazelflare.
+      developer_flags: ${{ matrix.config.developer_flags || '' }}
       extra_bazel_args: '--config=ci-test ${{ matrix.os.bazelflare && ''--config=ci-bazelflare'' || format(''--config=ci-{0}{1}'', matrix.os.name, matrix.config.suffix) }}'
       runner_extra_bazel_args: '--config=ci-test --config=ci-${{ matrix.os.name }}${{ matrix.config.suffix }}'
       macos_use_lld: ${{ matrix.os.use_lld || false }}
@@ -103,7 +103,7 @@ jobs:
       arch_name: 'X64'
       suffix: -tsan
       bazelflare: true
-      developer_flags: '--config=bazelflare-tsan'
+      developer_flags: '--config=bazelflare --config=tsan'
       extra_bazel_args: '--config=ci-test --config=ci-bazelflare-tsan'
       runner_extra_bazel_args: '--config=ci-test --config=ci-linux-tsan'
       build_target: >-
@@ -181,9 +181,9 @@ jobs:
           # test-linux
           bash build/check_ci_flags.sh '--config=bazelflare' --config=ci --config=ci-test --config=ci-download-workerd --config=wpt-report --config=ci-bazelflare --config=ci-bazelflare-runner-tests
           # test (linux, -asan)
-          bash build/check_ci_flags.sh '--config=bazelflare-asan' --config=ci --config=ci-test --config=ci-bazelflare
+          bash build/check_ci_flags.sh '--config=bazelflare --config=asan' --config=ci --config=ci-test --config=ci-bazelflare
           # test-tsan
-          bash build/check_ci_flags.sh '--config=bazelflare-tsan' --config=ci --config=ci-test --config=ci-bazelflare-tsan
+          bash build/check_ci_flags.sh '--config=bazelflare --config=tsan' --config=ci --config=ci-test --config=ci-bazelflare-tsan
           # lint
           bash build/check_ci_flags.sh '--config=bazelflare --config=lint' --config=ci --config=ci-test --config=ci-bazelflare
           # check-snapshot

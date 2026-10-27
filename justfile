@@ -219,7 +219,7 @@ test-gc-stress *args="//src/...":
 # Like test-gc-stress but with AddressSanitizer to detect use-after-free.
 # Leak detection is disabled to avoid masking more serious issues.
 test-gc-stress-asan *args="//src/...":
-  bazel test $(bazel query 'attr(tags, gc-stress, kind("_wd_test rule", {{args}}))' 2>/dev/null) --config=asan --test_tag_filters=gc-stress,-no-asan --test_timeout=300 --test_env=ASAN_OPTIONS=detect_leaks=0
+  bazel test $(bazel query 'attr(tags, gc-stress, kind("_wd_test rule", {{args}}))' 2>/dev/null) --config=asan --test_tag_filters=gc-stress --skip_incompatible_explicit_targets --test_timeout=300 --test_env=ASAN_OPTIONS=detect_leaks=0
 
 # "Super" GC stress mode: forces a full GC before *every* js.alloc<>(), catching
 # collectible-but-still-used-within-a-synchronous-task use-after-frees that the turn-boundary
