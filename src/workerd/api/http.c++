@@ -1621,7 +1621,7 @@ bool isInternalBindingFetch(const kj::Url& url) {
   KJ_IF_SOME(colon, url.host.findFirst(':')) {
     host = host.first(colon);
   }
-  for (auto internalHost: INTERNAL_HOSTS) {
+  for (const auto& internalHost: INTERNAL_HOSTS) {
     if (host == internalHost.asArray()) return true;
   }
   return false;

@@ -152,8 +152,13 @@ void setFetchTags(SpanBuilder& span, const tracing::FetchEventInfo& fetch) {
 kj::String isoDateString(kj::Date date) {
   int64_t millis = (date - kj::UNIX_EPOCH) / kj::MILLISECONDS;
   time_t seconds = millis / 1000;
+#if _MSC_VER
+  // gmtime() uses thread-local storage on Windows.
+  auto t = *gmtime(&seconds);
+#else
   struct tm t;
   KJ_ASSERT(gmtime_r(&seconds, &t) == &t);
+#endif
   char buffer[32]{};
   size_t size = strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S", &t);
   size += snprintf(buffer + size, sizeof(buffer) - size, ".%03dZ", static_cast<int>(millis % 1000));

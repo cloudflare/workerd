@@ -70,13 +70,13 @@ template <typename Tags>
   auto traceId = context.getTraceId().toProtobuf();
   uint32_t traceFlags = 0;
   KJ_IF_SOME(flags, context.getTraceFlags()) {
-    traceFlags = uint8_t(flags);
+    traceFlags = static_cast<uint8_t>(flags);
   }
   return rust::otlp::new_span_buffer(traceId.as<kj_rs::Rust>(),
       {
         .trace_flags = traceFlags,
         .root_span_id = rootSpanId.getId(),
-        .redact_query_string = bool(options.redactQueryString),
+        .redact_query_string = static_cast<bool>(options.redactQueryString),
         // As for Jaeger spans, so tests can compare whole spans.
         .omit_timestamps = isPredictableModeForTest(),
       },
@@ -190,7 +190,7 @@ OtlpSpanSubmitter::OtlpSpanSubmitter(kj::EntropySource& entropySource,
     Options options,
     tracing::SpanId rootSpan)
     : entropySource(entropySource),
-      predictableSpanId((uint64_t(options.predictableSpanSpace) << 56) + 1),
+      predictableSpanId((static_cast<uint64_t>(options.predictableSpanSpace) << 56) + 1),
       exporter(kj::mv(exporter)),
       rootSpanId(rootSpan == tracing::SpanId::nullId ? makeSpanId() : rootSpan),
       buffer(newSpanBuffer(context, rootSpanId, options)) {}
