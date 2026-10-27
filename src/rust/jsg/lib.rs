@@ -16,6 +16,7 @@ pub mod lenient;
 pub mod macros;
 pub mod modules;
 pub mod nullable;
+mod promise;
 pub mod resource;
 mod scope;
 pub mod v8;
@@ -32,16 +33,21 @@ pub use resource::Resource;
 pub use resource::Weak;
 pub use scope::CallbackScope;
 pub use scope::CallbackScopeParam;
+pub use scope::Intercepted;
 pub use scope::Isolate;
 pub use scope::Lock;
 pub use scope::RawFunctionCallback;
 pub use scope::RawGetterCallback;
 pub use scope::RawSetterCallback;
+pub use scope::RawWildcardGetterCallback;
+pub use scope::RawWildcardQueryCallback;
 pub use scope::UnitType;
 pub use scope::allow_scopes_of_another_isolate;
 pub use scope::function_callback;
 pub use scope::getter_callback;
 pub use scope::setter_callback;
+pub use scope::wildcard_getter_callback;
+pub use scope::wildcard_query_callback;
 pub use v8::ArrayBuffer;
 pub use v8::ArrayBufferView;
 pub use v8::BackingStore;
@@ -963,6 +969,43 @@ impl<'s> Lock<'s> {
         }
     }
 
+    /// Returns the exception that [`Lock::throw_exception`] would throw for `err`, without
+    /// throwing it: an internal error is redacted (and its message logged) the same way.
+    ///
+    /// Use it to reject a promise with an `Error`.
+    ///
+    /// # Errors
+    ///
+    /// Returns `err` itself if [`Error::is_pending`] is true: the exception it stands for is
+    /// pending in V8, and returning the error propagates it. While execution is terminating,
+    /// creates nothing and returns [`Error::pending`]'s error, so that returning it keeps the
+    /// termination; an internal error's message is still logged.
+    pub fn exception(&mut self, err: &Error) -> Result<v8::Local<'s, v8::Value>> {
+        if err.is_pending() {
+            return Err(err.clone());
+        }
+        if self.is_execution_terminating() {
+            // Creating the exception while execution is terminating fails a V8 debug check, and
+            // nothing could be rejected with it.
+            if err.is_internal {
+                // Logs the message and throws nothing.
+                self.throw_internal_error(&err.message);
+            }
+            return Err(Error::pending());
+        }
+        if err.is_internal {
+            // SAFETY: isolate is valid and locked (guaranteed by Lock); the exception lives in
+            // the lock's scope.
+            return Ok(unsafe {
+                v8::Local::from_ffi(v8::ffi::exception_create_internal(
+                    self.isolate().as_ffi(),
+                    &err.message,
+                ))
+            });
+        }
+        Ok(err.to_local(self))
+    }
+
     /// Throws an internal error as a V8 exception, matching `makeInternalError()` in C++.
     ///
     /// Generates a unique error reference ID, logs `internal_message` with the ID via
@@ -1130,6 +1173,13 @@ pub enum Member {
     StaticConstant {
         name: String,
         value: ConstantValue,
+    },
+    /// A property of every instance with any string name that is not a defined property of the
+    /// instance or its prototypes, like C++ JSG's `JSG_WILDCARD_PROPERTY`. A type has at most
+    /// one. `query_callback` tells V8 whether a property exists, for `in`.
+    WildcardProperty {
+        getter_callback: RawWildcardGetterCallback,
+        query_callback: RawWildcardQueryCallback,
     },
     /// Another resource type's constructor, as a property of this type's
     /// prototype named `name`, like C++ JSG's `JSG_NESTED_TYPE`. Nested types

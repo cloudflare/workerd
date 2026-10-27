@@ -8,6 +8,6 @@
 #[jsg_macros::jsg_struct]
 pub struct Empty {}
 
-pub fn t<'s>(lock: &mut jsg::Lock<'s>) -> jsg::v8::Local<'s, jsg::v8::Value> {
+pub fn t<'s>(lock: &mut jsg::Lock<'s>) -> jsg::Result<jsg::v8::Local<'s, jsg::v8::Value>> {
     jsg::ToJS::to_js(Empty {}, lock)
 }

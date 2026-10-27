@@ -360,7 +360,7 @@ fn string_coercion_reentrant_into_rust_resource_method() {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
@@ -389,7 +389,7 @@ fn number_coercion_reentrant_into_rust_resource_method() {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
@@ -420,7 +420,7 @@ fn string_coercion_handles_deeply_nested_reentrancy() {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
@@ -454,7 +454,7 @@ fn string_coercion_reentrant_panic_is_err_not_abort() {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
@@ -481,7 +481,7 @@ fn number_coercion_reentrant_panic_is_err_not_abort() {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
@@ -508,7 +508,7 @@ fn reentrant_panic_during_coercion_does_not_poison_isolate() {
         let resource = jsg::Rc::new(ReentrantResource {
             call_count: Cell::new(0),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let value = ctx
@@ -593,13 +593,13 @@ fn object_set_from_throwing_setter_returns_err() {
                 .eval_raw(lock, expr)
                 .expect("expression should evaluate");
             let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
-            let one = Number::new(1.0).to_js(lock);
+            let one = Number::new(1.0).to_js(lock)?;
             let caught = thrown_by(lock, |lock| obj.set(lock, "x", one));
             assert!(is_thrown(lock, ctx, caught), "{expr}");
         }
         let obj: v8::Local<'_, v8::Object> =
             ctx.eval_raw(lock, "({})").unwrap().try_into().unwrap();
-        let one = Number::new(1.0).to_js(lock);
+        let one = Number::new(1.0).to_js(lock)?;
         obj.set(lock, "x", one)?;
         let x = obj.get(lock, "x")?;
         assert!((Number::from_js(lock, x)?.value() - 1.0).abs() < f64::EPSILON);
@@ -623,12 +623,12 @@ fn array_set_from_throwing_setter_returns_err() {
                 .eval_raw(lock, expr)
                 .expect("expression should evaluate");
             let array: v8::Local<'_, v8::Array> = value.try_into().unwrap();
-            let one = Number::new(1.0).to_js(lock);
+            let one = Number::new(1.0).to_js(lock)?;
             let caught = thrown_by(lock, |lock| array.set(lock, 0, one));
             assert!(is_thrown(lock, ctx, caught), "{expr}");
         }
         let array: v8::Local<'_, v8::Array> = ctx.eval_raw(lock, "[]").unwrap().try_into().unwrap();
-        let one = Number::new(1.0).to_js(lock);
+        let one = Number::new(1.0).to_js(lock)?;
         array.set(lock, 2, one)?;
         assert_eq!(array.len(), 3);
         Ok(())

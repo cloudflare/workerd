@@ -35,7 +35,7 @@ impl Counter {
         this: jsg::Rc<Self>,
         lock: &mut jsg::Lock<'s>,
         by: u32,
-    ) -> v8::Local<'s, v8::Value> {
+    ) -> jsg::Result<v8::Local<'s, v8::Value>> {
         this.count.set(this.count.get() + by);
         jsg::Number::from(this.count.get()).to_js(lock)
     }

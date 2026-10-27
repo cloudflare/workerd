@@ -18,6 +18,7 @@
 
 #include <capnp/message.h>
 #include <kj/common.h>
+#include <kj/map.h>
 
 using namespace kj_rs;
 
@@ -124,6 +125,43 @@ EvalResult EvalContext::eval(::rust::Str code, kj::Maybe<::rust::Str> maybeResou
   return runScript(v8Isolate, ctx, script);
 }
 
+namespace {
+// Keeps the callbacks of the builtin modules Rust registers.
+struct RecordingModuleRegistry final: public ::workerd::rust::jsg::ModuleRegistry {
+  ~RecordingModuleRegistry() noexcept override = default;
+
+  void addBuiltinModule(::rust::Str specifier,
+      ::workerd::rust::jsg::ModuleCallback callback,
+      ::workerd::rust::jsg::ModuleType) override {
+    modules.insert(kj::str(specifier), callback);
+  }
+
+  kj::HashMap<kj::String, ::workerd::rust::jsg::ModuleCallback> modules;
+};
+}  // namespace
+
+EvalResult EvalContext::call_builtin_module(
+    ::rust::Fn<void(::workerd::rust::jsg::ModuleRegistry&)> registerModules,
+    ::rust::Str specifier) const {
+  RecordingModuleRegistry registry;
+  registerModules(registry);
+  auto name = kj::str(specifier);
+  auto& callback = KJ_REQUIRE_NONNULL(registry.modules.find(name), "no such builtin module", name);
+
+  v8::Isolate::Scope isolateScope(v8Isolate);
+  v8::Context::Scope contextScope(v8Context.Get(v8Isolate));
+  v8::TryCatch catcher(v8Isolate);
+  auto value = ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(callback(v8Isolate));
+  bool success = !value.IsEmpty();
+  if (!success && catcher.HasCaught()) {
+    value = catcher.Exception();
+  }
+  return EvalResult{
+    .success = success,
+    .value = ::workerd::rust::jsg::maybe_local_to_ffi(value),
+  };
+}
+
 void TestHarness::run_in_context(
     size_t data, ::rust::Fn<void(size_t, Isolate*, EvalContext&)> callback) const {
   isolate->runInLockScope([&](TestIsolate::Lock& lock) {
@@ -178,6 +216,10 @@ void request_gc(Isolate* isolate, GcType gc_type) {
   }
 }
 
+void run_microtasks(Isolate* isolate) {
+  isolate->PerformMicrotaskCheckpoint();
+}
+
 void run_unlocked(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback) {
   v8::Unlocker unlocker(isolate);
   callback(data);
@@ -228,6 +270,26 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
 
 bool isolates_share_group(Isolate* a, Isolate* b) {
   return a->GetGroup() == b->GetGroup();
+}
+
+void hold_across_gc(Isolate* isolate,
+    ::rust::Fn<::workerd::rust::jsg::MaybeLocal(Isolate*)> create,
+    ::rust::Fn<void(Isolate*, ::workerd::rust::jsg::Local)> check) {
+  v8::Global<v8::Value> held;
+  {
+    v8::HandleScope scope(isolate);
+    v8::Local<v8::Value> value;
+    KJ_ASSERT(
+        ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(create(isolate)).ToLocal(&value));
+    held.Reset(isolate, value);
+  }
+  request_gc(isolate, GcType::Full);
+  {
+    v8::HandleScope scope(isolate);
+    check(isolate, ::workerd::rust::jsg::to_ffi(held.Get(isolate)));
+  }
+  held.Reset();
+  request_gc(isolate, GcType::Full);
 }
 
 }  // namespace rust::jsg_test

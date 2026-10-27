@@ -57,7 +57,7 @@ fn scope_of_another_isolate_panics() {
     });
     // Both isolates are usable once the other's scopes are closed.
     b.run_in_context(|lock, _ctx| {
-        let s = "b".to_js(lock);
+        let s = "b".to_js(lock)?;
         assert_eq!(String::from_js(lock, s)?, "b");
         Ok(())
     });
@@ -72,7 +72,7 @@ fn scope_of_another_isolate_is_allowed_when_set_aside() {
         unsafe {
             jsg::allow_scopes_of_another_isolate(|| {
                 b.run_in_context(|lock_b, _ctx| {
-                    let s = "b".to_js(lock_b);
+                    let s = "b".to_js(lock_b)?;
                     assert_eq!(String::from_js(lock_b, s)?, "b");
                     Ok(())
                 });
@@ -86,7 +86,7 @@ fn scope_of_another_isolate_is_allowed_when_set_aside() {
             result.is_err(),
             "entering B after the escape hatch returned must panic"
         );
-        let s = "a".to_js(lock_a);
+        let s = "a".to_js(lock_a)?;
         assert_eq!(String::from_js(lock_a, s)?, "a");
         Ok(())
     });
@@ -112,7 +112,7 @@ fn set_aside_scopes_count_as_open_again_after_a_panic() {
             result.is_err(),
             "entering B after the escape hatch panicked must panic"
         );
-        let s = "a".to_js(lock_a);
+        let s = "a".to_js(lock_a)?;
         assert_eq!(String::from_js(lock_a, s)?, "a");
         Ok(())
     });
@@ -124,7 +124,7 @@ fn global_of_another_isolate_panics() {
     let b = crate::Harness::new();
     let mut global: Option<v8::TracedGlobal<v8::Value>> = None;
     a.run_in_context(|lock, _ctx| {
-        let value = "from a".to_js(lock);
+        let value = "from a".to_js(lock)?;
         global = Some(v8::TracedGlobal::new(lock, value));
         Ok(())
     });
@@ -164,7 +164,7 @@ fn callback_entered_while_another_isolate_has_scopes_throws() {
     let a = crate::Harness::new();
     let b = crate::Harness::new();
     b.run_in_context(|lock_b, ctx_b| {
-        let thing = jsg::Rc::new(Thing).to_js(lock_b);
+        let thing = jsg::Rc::new(Thing).to_js(lock_b)?;
         ctx_b.set_global(lock_b, "thing", thing);
         let mut result = None;
         // SAFETY: B's code runs while A's scope is open, but no handle crosses between them.
@@ -207,7 +207,7 @@ fn resource_wrapped_in_another_isolate_panics() {
     let thing = jsg::Rc::new(Thing);
     let mut wrapper: Option<v8::TracedGlobal<v8::Value>> = None;
     a.run_in_context(|lock, _ctx| {
-        let value = thing.clone().to_js(lock);
+        let value = thing.clone().to_js(lock)?;
         // Keep the wrapper alive so it is not collected before B tries to reuse it.
         wrapper = Some(v8::TracedGlobal::new(lock, value));
         Ok(())
@@ -215,7 +215,7 @@ fn resource_wrapped_in_another_isolate_panics() {
 
     let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
         b.run_in_context(|lock, _ctx| {
-            let _value = thing.clone().to_js(lock);
+            let _value = thing.clone().to_js(lock)?;
             Ok(())
         });
     }));
@@ -227,7 +227,7 @@ fn resource_wrapped_in_another_isolate_panics() {
 
     a.run_in_context(move |lock, _ctx| {
         // Wrapping it again in A returns the existing wrapper.
-        let value = thing.to_js(lock);
+        let value = thing.to_js(lock)?;
         let existing = wrapper.take().expect("set above");
         assert_eq!(value, existing.as_local(lock));
         Ok(())
@@ -299,7 +299,7 @@ fn local_of_another_isolate_panics_in_debug_builds() {
     let b = crate::Harness::new();
     a.run_in_context(|lock_a, _ctx| {
         let object: v8::Local<v8::Value> = lock_a.new_object().into();
-        let number = jsg::Number::new(1.0).to_js(lock_a);
+        let number = jsg::Number::new(1.0).to_js(lock_a)?;
         // SAFETY: deliberately breaks the rule to check that debug builds catch it; the
         // handle of A is rejected before it reaches V8.
         unsafe {
@@ -393,7 +393,7 @@ fn read_only_value_of_another_isolate_is_accepted_only_in_its_group() {
     let a = crate::Harness::new();
     let b = crate::Harness::new();
     a.run_in_context(|lock_a, _ctx| {
-        let values = [lock_a.undefined(), true.to_js(lock_a), "".to_js(lock_a)];
+        let values = [lock_a.undefined(), true.to_js(lock_a)?, "".to_js(lock_a)?];
         let isolate_a: &jsg::Isolate = lock_a;
         // SAFETY: the read-only values of A reach B only when both isolates share a group,
         // whose isolates share the read-only heap; otherwise the check rejects them before

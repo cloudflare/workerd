@@ -14,6 +14,7 @@
 //! | `#[jsg_static_constant]` | const inside impl | Expose a numeric constant on both constructor and prototype  |
 //! | `#[jsg_property]`        | fn inside impl   | Register a resource accessor property (getter/setter)          |
 //! | `#[jsg_inspect_property]` | fn inside impl  | Register a debug-inspect-only symbol property                  |
+//! | `#[jsg_wildcard_property]` | fn inside impl | Answer reads of any property the object does not have          |
 //! | `#[jsg_struct]`          | struct           | Expose a Rust struct as a plain JavaScript object              |
 //! | `#[jsg_oneof]`           | enum             | Accept one of several JavaScript types (`kj::OneOf`)           |
 //!
@@ -24,6 +25,7 @@
 mod resource;
 mod trace;
 mod utils;
+mod wildcard;
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -70,7 +72,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         Err(err) => return err,
     };
 
-    let mut field_assignments = Vec::new();
+    let mut to_js_fields = Vec::new();
     let mut field_extractions = Vec::new();
     let mut field_names = Vec::new();
     let mut all_optional = true;
@@ -89,16 +91,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         let optional = is_option_type(field_type);
         all_optional &= optional;
 
-        // Like C++ JSG, an absent optional field is omitted, not undefined.
-        let set = quote! {
-            let value = jsg::v8::ToLocalValue::to_local(value, lock);
-            properties.push((#field_name_str, value));
-        };
-        field_assignments.push(if optional {
-            quote! { if let Some(value) = &this.#field_name { #set } }
-        } else {
-            quote! { { let value = &this.#field_name; #set } }
-        });
+        to_js_fields.push((field_name, field_name_str.clone(), optional));
         // Like C++ JSG, an absent property reads as undefined.
         field_extractions.push(quote! {
             let prop = obj.get(lock, #field_name_str)?;
@@ -120,6 +113,8 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
+    let to_js_body = struct_to_js_body(&to_js_fields);
+
     quote! {
         #input
 
@@ -132,17 +127,8 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         impl<'s> jsg::ToJS<'s> for #name {
-            fn to_js(self, lock: &mut jsg::Lock<'s>) -> jsg::v8::Local<'s, jsg::v8::Value> {
-                // The fields are defined as data properties, as C++ JSG's ObjectTemplate does,
-                // so no setter a script put on Object.prototype runs.
-                // TODO(soon): Use a precached ObjectTemplate instance to create the object,
-                // similar to how C++ JSG optimizes object creation. This would avoid recreating
-                // the object shape on every wrap() call and improve performance.
-                let this = self;
-                #[allow(unused_mut, reason = "a struct without public fields pushes nothing")]
-                let mut properties = ::std::vec::Vec::new();
-                #(#field_assignments)*
-                jsg::v8::Object::with_data_properties(lock, &properties).into()
+            fn to_js(self, lock: &mut jsg::Lock<'s>) -> Result<jsg::v8::Local<'s, jsg::v8::Value>, jsg::Error> {
+                #to_js_body
             }
         }
 
@@ -184,6 +170,57 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
     .into()
+}
+
+/// The body of a `#[jsg_struct]`'s `ToJS::to_js`, given each public field's name, its
+/// JavaScript name and whether it is an `Option`. Like C++ JSG's `JSG_STRUCT`, it follows the
+/// `fast_jsg_struct` flag.
+fn struct_to_js_body(fields: &[(&syn::Ident, String, bool)]) -> proc_macro2::TokenStream {
+    // Like C++ JSG, an absent optional field is omitted rather than set to undefined.
+    let for_each_field = |body: fn(&str) -> proc_macro2::TokenStream| -> Vec<_> {
+        fields
+            .iter()
+            .map(|(field_name, js_name, optional)| {
+                let body = body(js_name);
+                if *optional {
+                    quote! { if let Some(value) = &this.#field_name { #body } }
+                } else {
+                    quote! { { let value = &this.#field_name; #body } }
+                }
+            })
+            .collect()
+    };
+    let data_properties = for_each_field(|js_name| {
+        quote! {
+            let value = jsg::v8::ToLocalValue::to_local(value, lock);
+            properties.push((#js_name, value));
+        }
+    });
+    let field_sets = for_each_field(|js_name| {
+        quote! {
+            let value = jsg::v8::ToLocalValue::to_local(value, lock);
+            obj.set(lock, #js_name, value)?;
+        }
+    });
+    quote! {
+        let this = self;
+        if lock.feature_flags().get_fast_jsg_struct() {
+            // The fields are defined as data properties, as C++ JSG's DictionaryTemplate does, so
+            // no setter a script put on Object.prototype runs.
+            // TODO(soon): Use a precached template to create the object, as C++ JSG does, rather
+            // than recreating its shape on every conversion.
+            #[allow(unused_mut, reason = "a struct without public fields pushes nothing")]
+            let mut properties = ::std::vec::Vec::new();
+            #(#data_properties)*
+            Ok(jsg::v8::Object::with_data_properties(lock, &properties).into())
+        } else {
+            // Without fast_jsg_struct, C++ JSG sets the fields one by one, which runs a setter on
+            // Object.prototype; what it throws is passed on.
+            let obj = lock.new_object();
+            #(#field_sets)*
+            Ok(obj.into())
+        }
+    }
 }
 
 // =============================================================================
@@ -310,16 +347,21 @@ fn callback_with_instance(
     // Check if return type is Result<T, E>
     let is_result = matches!(&fn_sig.output, syn::ReturnType::Type(_, ty) if is_result_type(ty));
 
-    let result_handling = if is_result {
+    let conversion = if is_result {
         quote! {
             match result {
-                Ok(value) => args.set_return_value(jsg::ToJS::to_js(value, lock)),
-                Err(err) => lock.throw_exception(&err.into()),
+                Ok(value) => jsg::ToJS::to_js(value, lock),
+                Err(err) => Err(err.into()),
             }
         }
     } else {
-        quote! {
-            args.set_return_value(jsg::ToJS::to_js(result, lock));
+        quote! { jsg::ToJS::to_js(result, lock) }
+    };
+    let result_handling = quote! {
+        let converted: ::std::result::Result<_, jsg::Error> = #conversion;
+        match converted {
+            Ok(value) => args.set_return_value(value),
+            Err(err) => lock.throw_exception(&err),
         }
     };
 
@@ -619,7 +661,7 @@ fn reject(
 /// every named field.
 ///
 /// **On an impl block** — emits `jsg::Resource::members(flags)` registering every
-/// `#[jsg_method]`, `#[jsg_property]`, `#[jsg_inspect_property]`,
+/// `#[jsg_method]`, `#[jsg_property]`, `#[jsg_inspect_property]`, `#[jsg_wildcard_property]`,
 /// `#[jsg_constructor]`, and `#[jsg_static_constant]` item, plus member factories.
 /// With `custom_members`, emits only the factories; implement `jsg::Resource` yourself
 /// to select members using ordinary Rust control flow and compatibility flags.
@@ -740,6 +782,24 @@ pub fn jsg_inspect_property(_attr: TokenStream, item: TokenStream) -> TokenStrea
     // Reuse jsg_method callback generation; registration as Member::Property is
     // handled by #[jsg_resource] on the enclosing impl block.
     jsg_method(TokenStream::new(), item)
+}
+
+/// Registers a method as the wildcard property of a `#[jsg_resource]` type.
+///
+/// Equivalent to C++ JSG's `JSG_WILDCARD_PROPERTY`: reading a string-named property that
+/// neither the object nor its prototypes have calls the method with the name, and returns what
+/// it returns.
+///
+/// The method takes `&self`, optionally `lock: &mut jsg::Lock`, and the name as a `String` or
+/// `&str`, and returns `Option<T>` or `Result<Option<T>, E>` with `T: ToJS`. `None` means there
+/// is no such property, so the read gives `undefined`. The method also answers `name in obj`
+/// and assignment, so it must not have side effects. A type has at most one wildcard property.
+/// See `src/rust/jsg/README.md` for how wildcard properties behave.
+#[proc_macro_attribute]
+pub fn jsg_wildcard_property(attr: TokenStream, item: TokenStream) -> TokenStream {
+    // Registration as Member::WildcardProperty is handled by #[jsg_resource] on the enclosing
+    // impl block.
+    wildcard::expand(attr, item)
 }
 
 // =============================================================================

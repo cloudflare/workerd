@@ -1,0 +1,20 @@
+using Workerd = import "/workerd/workerd.capnp";
+using PipingModules = import "piping-modules.capnp";
+
+# Runs the piping benchmarks against the TypeScript implementation
+# (typescript_implemented_streams + the per-isolate bootstrap autogate),
+# with byte-for-byte the same modules as piping-cpp.wd-bench.
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "streams-piping-ts",
+      worker = (
+        modules = PipingModules.modules,
+        compatibilityFlags = ["typescript_implemented_streams"],
+      )
+    ),
+  ],
+  autogates = [
+    "workerd-autogate-per-isolate-javascript-bootstrap",
+  ],
+);

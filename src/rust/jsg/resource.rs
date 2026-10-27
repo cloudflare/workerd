@@ -175,7 +175,7 @@ impl<R: Resource> Drop for Rc<R> {
 }
 
 impl<'s, R: Resource + 'static> ToJS<'s> for Rc<R> {
-    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         wrap(lock, self)
     }
 }
@@ -368,8 +368,8 @@ impl<R: Resource> Default for Weak<R> {
 /// wrapper on the `Wrappable` via `CppgcShim`. This means:
 ///
 /// ```text
-/// let a = resource.clone().to_js(lock);
-/// let b = resource.to_js(lock);
+/// let a = resource.clone().to_js(lock)?;
+/// let b = resource.to_js(lock)?;
 /// // a === b in JavaScript (same object identity)
 /// ```
 ///
@@ -381,6 +381,11 @@ impl<R: Resource> Default for Weak<R> {
 /// alive via `CppgcShim`. When the JS object is garbage collected and all Rust
 /// `Rc`s are dropped, the resource is destroyed.
 ///
+/// # Errors
+///
+/// If V8 fails to create the wrapper, or execution is terminating, the exception stays pending
+/// and the error is one for which [`Error::is_pending`] is true.
+///
 /// # Panics
 /// Panics if the resource already has a JavaScript wrapper in another isolate. The `Rc` is
 /// leaked in that case.
@@ -391,9 +396,9 @@ impl<R: Resource> Default for Weak<R> {
 pub fn wrap<'s, R: Resource + 'static>(
     lock: &mut Lock<'s>,
     resource: Rc<R>,
-) -> v8::Local<'s, v8::Value> {
-    if let Some(wrapper) = resource.wrappable.to_js::<R>(lock) {
-        return wrapper;
+) -> Result<v8::Local<'s, v8::Value>, Error> {
+    if let Some(wrapper) = resource.wrappable.to_js::<R>(lock)? {
+        return Ok(wrapper);
     }
     // Dropping `resource` here would release its strong reference on a wrapper of another
     // isolate, which needs that isolate's lock. It is leaked in a box instead, which keeps
@@ -417,11 +422,52 @@ pub fn function_template_of<'s, R: Resource + 'static>(
     unsafe { v8::function_template_get_function(lock, &constructor) }
 }
 
+/// Returns whether `value` is the JavaScript wrapper of a resource of type `R`.
+///
+/// Unlike converting `value` with [`FromJS`], this creates no [`Rc<R>`](Rc), so it is the check
+/// to use when only the type matters: for example, in a function that C++ calls to check a value
+/// it holds (`README.md` §Creating resources from C++).
+pub fn is<R: Resource + 'static>(lock: &mut Lock<'_>, value: v8::Local<'_, v8::Value>) -> bool {
+    v8::WrappableRc::from_js(lock, value)
+        .is_some_and(|wrappable| wrappable.resolve_resource::<R>().is_some())
+}
+
+/// [`is`] for a function that C++ calls, as [`v8::run_ffi_callback`] is for one that returns a
+/// handle: opens the caller's scope and runs [`is`] through [`catch_panic`](crate::catch_panic).
+///
+/// Like `v8::Maybe<bool>`, the result is none when an exception is pending: here, when the check
+/// panicked, which leaves an internal error pending and execution terminating. C++ propagates it
+/// as `jsg::JsExceptionThrown` rather than treating it as a mismatch, since throwing another
+/// exception would replace the termination.
+///
+/// # Safety
+///
+/// `isolate` must point to a live V8 isolate locked by the current thread with a context entered
+/// and a `HandleScope` open, and `value` must be a handle in that scope.
+pub unsafe fn ffi_is<R: Resource + 'static>(
+    isolate: *mut v8::ffi::Isolate,
+    value: v8::ffi::Local,
+) -> KjMaybe<bool> {
+    // SAFETY: forwarded from this function's safety contract.
+    let scope = std::pin::pin!(unsafe { crate::CallbackScope::new(isolate) });
+    crate::catch_panic(scope, |lock| {
+        // SAFETY: `value` is a handle in the scope that `lock` stands for, per this function's
+        // safety contract.
+        let value = unsafe { v8::Local::from_ffi(value) };
+        is::<R>(lock, value)
+    })
+    .into()
+}
+
 /// Builds a [`ResourceDescriptor`] from `R`'s [`Resource::members(flags)`](Resource::members) list.
 /// The descriptor is passed to C++ `create_resource_template` to set up the
 /// V8 `FunctionTemplate` with the correct methods, constants, and constructor.
 /// Nested types are returned separately, since their templates are installed
 /// once the template for `R` exists.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one match arm per Member variant, each a field-by-field conversion"
+)]
 fn get_resource_descriptor<R: Resource>(
     flags: compatibility_flags::Reader<'_>,
 ) -> (v8::ffi::ResourceDescriptor, NestedTypes) {
@@ -433,6 +479,7 @@ fn get_resource_descriptor<R: Resource>(
         properties: Vec::new(),
         static_methods: Vec::new(),
         static_constants: Vec::new(),
+        wildcard_property: KjMaybe::None,
     };
 
     for m in R::members(flags) {
@@ -518,6 +565,20 @@ fn get_resource_descriptor<R: Resource>(
                         name,
                         value: number_value,
                     });
+            }
+            Member::WildcardProperty {
+                getter_callback,
+                query_callback,
+            } => {
+                assert!(
+                    descriptor.wildcard_property.is_none(),
+                    "{} has more than one wildcard property",
+                    R::class_name()
+                );
+                descriptor.wildcard_property = KjMaybe::Some(v8::ffi::WildcardPropertyDescriptor {
+                    getter_callback: getter_callback as usize,
+                    query_callback: query_callback as usize,
+                });
             }
             Member::NestedType { name, nested_type } => nested_types.push((name, nested_type)),
         }
