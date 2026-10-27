@@ -158,6 +158,18 @@ pub mod ffi {
         /// into a `'static` string literal. The C++ side constructs a `kj::StringPtr`
         /// directly from `.data()` / `.size()` — no allocation needed.
         unsafe fn wrappable_invoke_get_name(wrappable: &Wrappable) -> &'static str;
+
+        // Unwrappers: bulk copies into Rust-owned typed vectors.
+        fn copy_uint8_array(data: &[u8]) -> Vec<u8>;
+        fn copy_uint16_array(data: &[u16]) -> Vec<u16>;
+        fn copy_uint32_array(data: &[u32]) -> Vec<u32>;
+        fn copy_int8_array(data: &[i8]) -> Vec<i8>;
+        fn copy_int16_array(data: &[i16]) -> Vec<i16>;
+        fn copy_int32_array(data: &[i32]) -> Vec<i32>;
+        fn copy_float32_array(data: &[f32]) -> Vec<f32>;
+        fn copy_float64_array(data: &[f64]) -> Vec<f64>;
+        fn copy_bigint64_array(data: &[i64]) -> Vec<i64>;
+        fn copy_biguint64_array(data: &[u64]) -> Vec<u64>;
     }
 
     unsafe extern "C++" {
@@ -4084,6 +4096,25 @@ impl From<ffi::TraitObjectPtr> for WrappableRc {
         }
     }
 }
+
+macro_rules! copy_typed_array {
+    ($name:ident, $elem:ty) => {
+        fn $name(data: &[$elem]) -> Vec<$elem> {
+            data.to_vec()
+        }
+    };
+}
+
+copy_typed_array!(copy_uint8_array, u8);
+copy_typed_array!(copy_uint16_array, u16);
+copy_typed_array!(copy_uint32_array, u32);
+copy_typed_array!(copy_int8_array, i8);
+copy_typed_array!(copy_int16_array, i16);
+copy_typed_array!(copy_int32_array, i32);
+copy_typed_array!(copy_float32_array, f32);
+copy_typed_array!(copy_float64_array, f64);
+copy_typed_array!(copy_bigint64_array, i64);
+copy_typed_array!(copy_biguint64_array, u64);
 
 unsafe fn wrappable_invoke_drop(wrappable: Pin<&mut ffi::Wrappable>) {
     // SAFETY: wrappable is valid and exclusively accessed (Pin<&mut>).

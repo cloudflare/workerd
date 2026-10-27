@@ -27,6 +27,7 @@ mod name;
 mod nested_type;
 mod non_coercible;
 mod option;
+mod owned_typed_arrays;
 mod promise;
 mod resource_callback;
 mod resource_conversion;
