@@ -124,7 +124,13 @@ namespace workerd::util {
   /* Counts the outgoing messages a WebSocket has queued but not yet written as the isolate's      \
      external memory, so that the isolate's memory limit applies to them. See                      \
      LegacyWebSocketAdapter::chargeOutgoing(). */                                                  \
-  V(WEBSOCKET_OUTGOING_QUEUE_MEMORY)
+  V(WEBSOCKET_OUTGOING_QUEUE_MEMORY)                                                               \
+  /* Lets workerd's own HTTP sockets pass a request whose method is outside kj's list, but one     \
+     that kj::HttpMethod::tryParse() accepts, such as BLOCK, to the socket's service instead of    \
+     answering 501. Method names are case-sensitive there, so a request for "get" is a method of   \
+     its own, not GET. Servers that embed workerd can gate kj's                                    \
+     HttpServerSettings::allowOtherMethods on it too. */                                           \
+  V(OTHER_HTTP_METHODS)
 // clang-format on
 // --------------------------------------------------------------------------------------
 
