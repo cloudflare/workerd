@@ -184,7 +184,6 @@ pub mod ffi {
         // Local<T>
         pub unsafe fn local_to_global(isolate: *mut Isolate, value: Local) -> Global;
         pub unsafe fn local_new_number(isolate: *mut Isolate, value: f64) -> Local;
-        pub unsafe fn local_new_string(isolate: *mut Isolate, value: &str) -> Local;
         pub unsafe fn local_new_boolean(isolate: *mut Isolate, value: bool) -> Local;
         pub unsafe fn local_new_object(isolate: *mut Isolate) -> Local;
         pub unsafe fn local_new_null(isolate: *mut Isolate) -> Local;
@@ -654,7 +653,7 @@ pub mod ffi {
         pub unsafe fn fast_api_throw_exception(
             options: *mut FastApiCallbackOptions,
             exception_type: ExceptionType,
-            message: &str,
+            message: &[u8],
         );
         pub unsafe fn fast_api_throw_internal_error(
             options: *mut FastApiCallbackOptions,
@@ -676,11 +675,11 @@ pub mod ffi {
         pub unsafe fn value_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<MaybeLocal>;
 
         // Errors
+        // Infallible: a message longer than V8's string limit is cut to fit (see ffi.h).
         pub unsafe fn exception_create_from_bytes(
             isolate: *mut Isolate,
             exception_type: ExceptionType,
-            data: *const u8,
-            length: i32,
+            message: &[u8],
         ) -> Local;
         pub unsafe fn exception_create_internal(
             isolate: *mut Isolate,
@@ -697,7 +696,6 @@ pub mod ffi {
 
         // Isolate
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
-        pub unsafe fn isolate_throw_error(isolate: *mut Isolate, message: &str);
         pub unsafe fn isolate_throw_internal_error(isolate: *mut Isolate, internal_message: &str);
         pub unsafe fn isolate_terminate_execution(isolate: *mut Isolate);
         pub unsafe fn isolate_is_execution_terminating(isolate: *mut Isolate) -> bool;
@@ -960,13 +958,26 @@ pub struct Date;
 impl String {
     /// Maximum length of a V8 string in UTF-16 code units.
     ///
-    /// Matches `v8::String::kMaxLength`. Attempting to create a string longer than
-    /// this will cause V8 to return `None`.
+    /// Matches `v8::String::kMaxLength`. The constructors return `None` for input longer than
+    /// this, and [`ToJS`](crate::ToJS) for `&str` and `String` fails with a `RangeError`.
     pub const MAX_LENGTH: i32 = if cfg!(target_pointer_width = "32") {
         (1 << 28) - 16
     } else {
         (1 << 29) - 24
     };
+
+    /// The length V8 takes for input of `len` units (bytes or UTF-16 code units), or `None` if
+    /// the input is longer than [`Self::MAX_LENGTH`], which V8 refuses with no exception pending.
+    ///
+    /// For UTF-8 input the units are bytes, of which a string never has fewer than UTF-16 code
+    /// units, so the input fits whenever the check passes. Checking here keeps a length above
+    /// `i32::MAX` from reaching V8's `int` parameter, where a negative value means
+    /// "NUL-terminated".
+    fn v8_length(len: usize) -> Option<i32> {
+        i32::try_from(len)
+            .ok()
+            .filter(|&len| len <= Self::MAX_LENGTH)
+    }
 
     /// Returns the empty string singleton.
     ///
@@ -978,6 +989,8 @@ impl String {
     }
 
     /// Creates a new string from a `&str`.
+    ///
+    /// Returns `None` if `data` is longer than [`Self::MAX_LENGTH`] bytes.
     ///
     /// Corresponds to `v8::String::NewFromUtf8`.
     pub fn new_from_str<'s>(lock: &mut crate::Lock<'s>, data: &str) -> Option<Local<'s, Self>> {
@@ -1020,16 +1033,13 @@ impl String {
 
     /// Creates a new string from UTF-8 data.
     ///
-    /// Returns `None` if V8 cannot allocate the string.
-    ///
-    /// Strings longer than `i32::MAX` bytes are silently truncated to `i32::MAX` bytes
-    /// to satisfy V8's `int`-typed length parameter; in practice V8 will reject strings
-    /// that large anyway due to heap limits.
+    /// Returns `None`, with no exception pending, if `data` is longer than
+    /// [`Self::MAX_LENGTH`] bytes. Invalid sequences become U+FFFD.
     ///
     /// Corresponds to `v8::String::NewFromUtf8`.
     pub fn new_from_utf8<'s>(lock: &mut crate::Lock<'s>, data: &[u8]) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
-        let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
+        let len = Self::v8_length(data.len())?;
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active;
         // data.as_ptr() and len describe a valid byte slice.
         let handle =
@@ -1043,7 +1053,7 @@ impl String {
     /// Equal strings will be pointer-equal after internalization, which speeds up
     /// property-key lookups at the cost of a hash-table probe on creation.
     ///
-    /// Strings longer than `i32::MAX` bytes are silently truncated to `i32::MAX` bytes.
+    /// Returns `None` if `data` is longer than [`Self::MAX_LENGTH`] bytes.
     ///
     /// Corresponds to `v8::String::NewFromUtf8` with `kInternalized`.
     pub fn new_internalized_from_utf8<'s>(
@@ -1051,7 +1061,7 @@ impl String {
         data: &[u8],
     ) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
-        let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
+        let len = Self::v8_length(data.len())?;
         // SAFETY: Lock guarantees the isolate is locked and a HandleScope is active;
         // data.as_ptr() and len describe a valid byte slice.
         let handle =
@@ -1063,9 +1073,7 @@ impl String {
     /// Creates a new string from Latin-1 (one-byte) data.
     ///
     /// Each byte is mapped to the Unicode code point with the same value.
-    /// Returns `None` if V8 cannot allocate the string.
-    ///
-    /// Strings longer than `i32::MAX` bytes are silently truncated to `i32::MAX` bytes.
+    /// Returns `None` if `data` is longer than [`Self::MAX_LENGTH`] bytes.
     ///
     /// Corresponds to `v8::String::NewFromOneByte`.
     pub fn new_from_one_byte<'s>(
@@ -1073,7 +1081,7 @@ impl String {
         data: &[u8],
     ) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
-        let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
+        let len = Self::v8_length(data.len())?;
         // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
         let handle = unsafe {
             ffi::local_string_new_from_one_byte(isolate.as_ffi(), data.as_ptr(), len, false)
@@ -1085,7 +1093,7 @@ impl String {
     /// Creates an internalized string from Latin-1 (one-byte) data.
     ///
     /// Equal strings will be pointer-equal after internalization.
-    /// Strings longer than `i32::MAX` bytes are silently truncated to `i32::MAX` bytes.
+    /// Returns `None` if `data` is longer than [`Self::MAX_LENGTH`] bytes.
     ///
     /// Corresponds to `v8::String::NewFromOneByte` with `kInternalized`.
     pub fn new_internalized_from_one_byte<'s>(
@@ -1093,7 +1101,7 @@ impl String {
         data: &[u8],
     ) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
-        let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
+        let len = Self::v8_length(data.len())?;
         // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
         let handle = unsafe {
             ffi::local_string_new_from_one_byte(isolate.as_ffi(), data.as_ptr(), len, true)
@@ -1104,9 +1112,7 @@ impl String {
 
     /// Creates a new string from UTF-16 data.
     ///
-    /// Returns `None` if V8 cannot allocate the string.
-    ///
-    /// Strings longer than `i32::MAX` code units are silently truncated to `i32::MAX` code units.
+    /// Returns `None` if `data` is longer than [`Self::MAX_LENGTH`] code units.
     ///
     /// Corresponds to `v8::String::NewFromTwoByte`.
     pub fn new_from_two_byte<'s>(
@@ -1114,7 +1120,7 @@ impl String {
         data: &[u16],
     ) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
-        let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
+        let len = Self::v8_length(data.len())?;
         // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
         let handle = unsafe {
             ffi::local_string_new_from_two_byte(isolate.as_ffi(), data.as_ptr(), len, false)
@@ -1126,7 +1132,7 @@ impl String {
     /// Creates an internalized string from UTF-16 data.
     ///
     /// Equal strings will be pointer-equal after internalization.
-    /// Strings longer than `i32::MAX` code units are silently truncated to `i32::MAX` code units.
+    /// Returns `None` if `data` is longer than [`Self::MAX_LENGTH`] code units.
     ///
     /// Corresponds to `v8::String::NewFromTwoByte` with `kInternalized`.
     pub fn new_internalized_from_two_byte<'s>(
@@ -1134,7 +1140,7 @@ impl String {
         data: &[u16],
     ) -> Option<Local<'s, Self>> {
         let isolate = lock.isolate();
-        let len = i32::try_from(data.len()).unwrap_or(i32::MAX);
+        let len = Self::v8_length(data.len())?;
         // SAFETY: Lock guarantees the isolate is locked; data.as_ptr() and len are valid.
         let handle = unsafe {
             ffi::local_string_new_from_two_byte(isolate.as_ffi(), data.as_ptr(), len, true)
@@ -4955,3 +4961,7 @@ impl WrappableRc {
         self.resolve::<R>()
     }
 }
+
+#[cfg(test)]
+#[path = "v8-test.rs"]
+mod tests;

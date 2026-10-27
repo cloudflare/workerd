@@ -125,7 +125,6 @@ void global_clear_weak(uintptr_t* global);
 // Local<T>
 Global local_to_global(Isolate* isolate, Local value);
 Local local_new_number(Isolate* isolate, double value);
-Local local_new_string(Isolate* isolate, ::rust::Str value);
 Local local_new_boolean(Isolate* isolate, bool value);
 Local local_new_object(Isolate* isolate);
 Local local_new_null(Isolate* isolate);
@@ -449,8 +448,9 @@ Local pqci_get_this(PropertyQueryCallbackInfo* info);
 // FastApiCallbackOptions
 // Fast callbacks run without a HandleScope; none of these leak a handle.
 TraitObjectPtr fast_api_unwrap_receiver(FastApiCallbackOptions* options, Local receiver);
-void fast_api_throw_exception(
-    FastApiCallbackOptions* options, ExceptionType exceptionType, ::rust::Str message);
+void fast_api_throw_exception(FastApiCallbackOptions* options,
+    ExceptionType exceptionType,
+    ::rust::Slice<const uint8_t> message);
 void fast_api_throw_internal_error(FastApiCallbackOptions* options, ::rust::Str internalMessage);
 void fast_api_terminate_execution(FastApiCallbackOptions* options);
 
@@ -521,8 +521,9 @@ MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data
 // Builds an exception whose message is raw bytes interpreted as UTF-8. Invalid
 // UTF-8 sequences are replaced with U+FFFD by v8::String::NewFromUtf8 rather
 // than rejected, so this accepts arbitrary byte input (e.g. filesystem paths).
+// A message longer than V8's string limit is cut to fit, so this never fails.
 Local exception_create_from_bytes(
-    Isolate* isolate, ExceptionType exception_type, const uint8_t* data, int32_t length);
+    Isolate* isolate, ExceptionType exception_type, ::rust::Slice<const uint8_t> message);
 // The exception `isolate_throw_internal_error` throws, without throwing it: logs
 // `internalMessage` with a new reference ID and returns a generic error carrying only the ID.
 Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage);
@@ -541,7 +542,6 @@ void isolate_try_catch(
 // The isolate_throw_*() functions throw nothing while execution is terminating, so that they
 // never replace the termination with a catchable exception.
 void isolate_throw_exception(Isolate* isolate, Local exception);
-void isolate_throw_error(Isolate* isolate, ::rust::Str message);
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage);
 void isolate_terminate_execution(Isolate* isolate);
 bool isolate_is_execution_terminating(Isolate* isolate);
