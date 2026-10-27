@@ -445,11 +445,21 @@ kj::Promise<void> queuedWriteStep(
 }
 
 struct QueuedPumpState {
+  QueuedPumpState(jsg::JsRef<jsg::JsObject> reader, IoOwn<WritableStreamSink> sink)
+      : reader(kj::mv(reader)),
+        sink(kj::mv(sink)) {}
+
   jsg::JsRef<jsg::JsObject> reader;
   IoOwn<WritableStreamSink> sink;
+  // Wraps each sink operation so that dropping the pump can cancel the one in flight. Declared
+  // after `sink` so that it is destroyed first.
+  kj::Canceler writeCanceler;
   // Cancels the reader if the sink disconnects while the pump is running; see
   // pumpQueuedTsStream(). Declared after `sink` so that it is destroyed first.
   kj::Maybe<IoOwn<kj::Promise<void>>> sinkDisconnectWatch;
+  // Set once the pump is dropped; see awaitQueuedPump(). The loop then winds down without
+  // touching the sink again.
+  bool dropped = false;
 };
 
 // Cancels `reader` (a ReadableStreamDrainingReader) with `exception` as the reason, from outside
@@ -470,6 +480,53 @@ void cancelReaderFromKj(
   });
 }
 
+// Called from awaitQueuedPump()'s frame teardown when the pump is dropped before settling. Like
+// the legacy implementation's cancelSourceOfDroppedPump(), the cancel runs in a waitUntil task,
+// which keeps the IoContext alive until the source's cancel algorithm has run; nothing waits for
+// plain tasks once the request is done. If the IoContext is gone or being destroyed, or no
+// incoming request is left to run the task, the source is left alone.
+//
+// Cancellation here is best-effort cleanup. It rejects if the source errored the stream before
+// the drop, and that must not surface as a failed waitUntil task.
+void cancelReaderOfDroppedPump(IoContext::WeakRef& weakContext, jsg::JsRef<jsg::JsObject> reader) {
+  weakContext.runIfAlive([&](IoContext& context) {
+    if (!context.hasCurrentIncomingRequest()) return;
+    context.addWaitUntil(
+        context
+            .run([reader = kj::mv(reader)](Worker::Lock& lock) mutable -> kj::Promise<void> {
+      jsg::Lock& js = lock;
+      auto result = webstreams::invokeMethod(js, reader.getHandle(js), "cancel"_kj, js.undefined());
+      KJ_IF_SOME(promise, JSG_TRY_CAST_PROMISE(result)) {
+        return IoContext::current().awaitJs(js, js.toVoidPromise(promise));
+      }
+      return kj::READY_NOW;
+    }).catch_([](kj::Exception&&) {}));
+  });
+}
+
+// Awaits the queued pump's JS loop. Dropping the returned promise before the loop settles (for
+// example, because the client disconnected and the HTTP layer dropped the response body) cancels
+// the sink operation in flight, stops the loop from writing to or ending the sink, and cancels the
+// reader with an undefined reason, so that the source's cancel algorithm runs and it stops
+// producing data. Dropping the promise alone would do none of this: the JS loop, which owns the
+// pump state, would stay parked on its pending read, or go on writing to a sink nothing consumes.
+//
+// `reader` is the state's reader, passed separately because taking a reference to it requires the
+// isolate lock, which the frame teardown does not hold.
+kj::Promise<void> awaitQueuedPump(IoContext& context,
+    kj::Promise<void> loop,
+    kj::Rc<QueuedPumpState> state,
+    jsg::JsRef<jsg::JsObject> reader) {
+  auto invocation = KJ_CO_MAGIC kj::CURRENT_INVOCATION;
+  auto weakContext = context.getWeakRef();
+  KJ_DEFER(if (invocation.isCanceling()) {
+    state->dropped = true;
+    state->writeCanceler.cancel(KJ_EXCEPTION(DISCONNECTED, "The pump was canceled."));
+    cancelReaderOfDroppedPump(*weakContext, kj::mv(reader));
+  });
+  co_await loop;
+}
+
 // One iteration of the queued-backend pump: collect everything the draining reader has
 // buffered (one isolate-lock trip per batch), copy it to KJ-owned memory, perform a
 // vectored write, and recurse until done. All JS state (the reader) travels through the
@@ -483,6 +540,9 @@ jsg::Promise<void> queuedPumpStep(jsg::Lock& js, kj::Rc<QueuedPumpState> state, 
       .then(js,
           context.addFunctor([state = kj::mv(state), end](jsg::Lock& js, IoContext& context,
                                  jsg::Value value) mutable -> jsg::Promise<void> {
+    if (state->dropped) {
+      return js.resolvedPromise();
+    }
     auto result = JSG_REQUIRE_NONNULL(JSG_TRY_CAST_OBJECT(jsg::JsValue(value.getHandle(js))),
         TypeError, "ReadableStreamDrainingReader.read() promise did not resolve to an object.");
     bool done = result.get(js, "done"_kj).isTrue();
@@ -505,26 +565,26 @@ jsg::Promise<void> queuedPumpStep(jsg::Lock& js, kj::Rc<QueuedPumpState> state, 
       }
     }
 
-    auto writeStep =
-        queuedWriteStep(state->sink->getPtr(), pieces.releaseAsArray(), done ? end : EndStream::NO);
+    auto writeStep = state->writeCanceler.wrap(queuedWriteStep(
+        state->sink->getPtr(), pieces.releaseAsArray(), done ? end : EndStream::NO));
     return context.awaitIo(js, kj::mv(writeStep),
         context.addFunctor([state = kj::mv(state), end, done](jsg::Lock& js, IoContext&) mutable {
-      return done ? js.resolvedPromise() : queuedPumpStep(js, kj::mv(state), end);
+      return done || state->dropped ? js.resolvedPromise() : queuedPumpStep(js, kj::mv(state), end);
     }));
   }));
 }
 
 // Pumps a queued-backed (JS underlying source) TypeScript stream into the sink by
 // driving the internal ReadableStreamDrainingReader. Isolate-bound (the JS conduit is in
-// the data path), so the deferred-proxy phase is a no-op.
+// the data path), so the deferred-proxy phase is a no-op. Dropping the pump before it settles
+// cancels the source; see awaitQueuedPump().
 kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
     IoContext& context,
     jsg::JsObject reader,
     kj::Own<WritableStreamSink> sink,
     EndStream end) {
 
-  auto state = kj::rc<QueuedPumpState>(
-      QueuedPumpState{.reader = reader.addRef(js), .sink = context.addObject(kj::mv(sink))});
+  auto state = kj::rc<QueuedPumpState>(reader.addRef(js), context.addObject(kj::mv(sink)));
 
   // Should the sink report that its writes can no longer succeed (for example, the peer of an
   // RPC-transferred stream canceled it), cancel the reader with the sink's reason rather than
@@ -543,8 +603,12 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
 
   auto loop = queuedPumpStep(js, state.addRef(), end)
                   .catch_(js,
-                      context.addFunctor([state = kj::mv(state)](jsg::Lock& js, IoContext&,
+                      context.addFunctor([state = state.addRef()](jsg::Lock& js, IoContext&,
                                              jsg::Value exception) mutable {
+    if (state->dropped) {
+      // Nothing awaits the result any more, and the drop cancels the reader itself.
+      return;
+    }
     // The pump failed: abort the sink, cancel the reader, then propagate the failure.
     auto reason = jsg::JsValue(exception.getHandle(js));
     state->sink->abort(js.exceptionToKj(reason));
@@ -556,7 +620,8 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
     }
     js.throwException(kj::mv(exception));
   }));
-  return addNoopDeferredProxy(context.awaitJs(js, kj::mv(loop)));
+  return addNoopDeferredProxy(awaitQueuedPump(
+      context, context.awaitJs(js, kj::mv(loop)), kj::mv(state), reader.addRef(js)));
 }
 }  // namespace
 
