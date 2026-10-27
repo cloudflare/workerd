@@ -74,3 +74,7 @@ impl<V> IntoIterator for Dict<V> {
         self.entries.into_iter()
     }
 }
+
+#[cfg(test)]
+#[path = "dict-test.rs"]
+mod tests;
