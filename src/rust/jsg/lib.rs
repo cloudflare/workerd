@@ -453,13 +453,14 @@ impl Error {
         })
     }
 
-    /// Like `new_type_error()`, but marks the resulting `Error` `is_internal`, so
-    /// `Lock::throw_exception()` redacts `message` instead of exposing it to guest JS.
-    /// The JS-visible error type ends up as plain `Error` regardless of the type set
-    /// here (`Lock::throw_internal_error()` -> C++ `makeInternalError()` always throws
-    /// a plain `Error`), so `name` only matters if something inspects the `Error`
-    /// value directly without throwing it (e.g. in tests).
-    fn new_internal_error(message: impl Into<String>) -> Self {
+    /// An error that only a bug causes, like a failed C++ `KJ_ASSERT`. Throwing it
+    /// (`Lock::throw_exception()`) redacts `message`: JavaScript gets a generic
+    /// `"internal error; reference = <id>"` `Error`, and `message` is logged with that ID.
+    /// The JS-visible error type is plain `Error` regardless of the type set here
+    /// (`Lock::throw_internal_error()` -> C++ `makeInternalError()` always throws a plain
+    /// `Error`), so `name` only matters if something inspects the `Error` value directly
+    /// without throwing it (e.g. in tests).
+    pub fn new_internal_error(message: impl Into<String>) -> Self {
         Self {
             name: ExceptionType::TypeError,
             message: message.into(),
