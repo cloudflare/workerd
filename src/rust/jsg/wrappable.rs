@@ -251,7 +251,7 @@ impl<V: Traced> Traced for Dict<V> {
     }
 
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
-        for (_, value) in &self.entries {
+        for (_, value) in self.iter() {
             value.trace(visitor);
         }
     }
@@ -1121,7 +1121,7 @@ impl<V> Type for Dict<V> {
 impl<'s, V: ToJS<'s>> ToJS<'s> for Dict<V> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         let object = lock.new_object();
-        for (key, value) in self.entries {
+        for (key, value) in self {
             let value = value.to_js(lock)?;
             // Like C++ JSG's, this runs a setter that `Object.prototype` has for the key, and
             // stops at the first entry that fails, including when the setter throws.
@@ -1183,7 +1183,7 @@ impl<'s, V: FromJS<'s, ResultType = V>> FromJS<'s> for Dict<V> {
             };
             entries.push((name, value));
         }
-        Ok(Some(Self { entries }))
+        Ok(Some(Self::from(entries)))
     }
 }
 

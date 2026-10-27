@@ -65,7 +65,7 @@ impl Records {
 
     #[jsg_method]
     pub fn lookup(&self, dict: Dict<String>, key: String) -> Option<String> {
-        dict.get(&key).cloned()
+        dict.find(&key).cloned()
     }
 
     #[jsg_method]

@@ -34,13 +34,30 @@
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Dict<V> {
     /// The entries, in order.
-    pub entries: Vec<(String, V)>,
+    entries: Vec<(String, V)>,
 }
 
 impl<V> Dict<V> {
-    /// Returns the value of the first entry with `key`.
-    pub fn get(&self, key: &str) -> Option<&V> {
+    /// Returns the value of the first entry with `key`, searching the entries in order.
+    pub fn find(&self, key: &str) -> Option<&V> {
         self.entries.iter().find(|(k, _)| k == key).map(|(_, v)| v)
+    }
+
+    /// Returns an iterator over the entries' keys and values, in order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &V)> {
+        self.entries.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
+    /// Returns the number of entries, counting each entry of a duplicate key.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Returns whether there are no entries.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 }
 
