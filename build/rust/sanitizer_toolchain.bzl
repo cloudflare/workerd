@@ -8,7 +8,7 @@ load("@rules_rust//rust:toolchain.bzl", "rust_toolchain")
 load("//build/deps:gen/build_deps.bzl", "RUST_NIGHTLY_DATE", "RUST_NIGHTLY_VERSION")
 load(":build_std.bzl", "compiler_runtime_files", "instrumented_rust_std")
 
-# rustc -Zsanitizer value => (runtime library stem, platform constraint).
+# rustc -Zsanitizer value => (runtime library stem, config_setting of //build/platforms:sanitizer).
 _SANITIZERS = {
     "address": ("asan", "//build/platforms:sanitizer_address"),
     "thread": ("tsan", "//build/platforms:sanitizer_thread"),
@@ -74,16 +74,20 @@ def sanitizer_rust_toolchain(name, sanitizer, host):
 
     Defines `<name>_rustc_lib`, `<name>_std` (the instrumented standard library),
     `<name>_impl` (the rust_toolchain) and `<name>` (the registrable toolchain),
-    all constrained to the host's cpu/os plus the sanitizer's platform constraint.
+    all constrained to the host's cpu/os and to builds that select the sanitizer.
 
     Args:
         name: toolchain name.
         sanitizer: rustc -Zsanitizer value, "address" or "thread".
         host: key of _HOSTS.
     """
-    runtime, constraint = _SANITIZERS[sanitizer]
+    runtime, setting = _SANITIZERS[sanitizer]
     h = _HOSTS[host]
     host_constraints = [h.cpu, h.os]
+    sanitizer_constraints = host_constraints + select({
+        setting: [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    })
     sanitizer_rustc_flags = h.sanitizer_rustc_flags.get(sanitizer, [])
 
     compiler_runtime_files(
@@ -101,7 +105,7 @@ def sanitizer_rust_toolchain(name, sanitizer, host):
         rustflags = sanitizer_rustc_flags,
         sanitizer = sanitizer,
         tags = ["manual"],
-        target_compatible_with = host_constraints + [constraint],
+        target_compatible_with = sanitizer_constraints,
         target_triple = h.target_triple,
     )
 
@@ -133,7 +137,7 @@ def sanitizer_rust_toolchain(name, sanitizer, host):
         staticlib_ext = ".a",
         stdlib_linkflags = h.stdlib_linkflags,
         tags = ["manual"],
-        target_compatible_with = host_constraints + [constraint],
+        target_compatible_with = sanitizer_constraints,
         target_triple = h.target_triple,
         version = RUST_NIGHTLY_VERSION,
     )
@@ -142,8 +146,11 @@ def sanitizer_rust_toolchain(name, sanitizer, host):
         name = name,
         exec_compatible_with = host_constraints,
         tags = ["manual"],
-        target_compatible_with = host_constraints + [constraint],
-        target_settings = ["@rules_rust//rust/toolchain/channel:nightly"],
+        target_compatible_with = host_constraints,
+        target_settings = [
+            "@rules_rust//rust/toolchain/channel:nightly",
+            setting,
+        ],
         toolchain = ":" + name + "_impl",
         toolchain_type = "@rules_rust//rust:toolchain",
     )

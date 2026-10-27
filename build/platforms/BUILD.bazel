@@ -1,35 +1,34 @@
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
+
 package(default_visibility = ["//visibility:public"])
 
-constraint_setting(name = "sanitizer")
-
-constraint_value(
-    name = "sanitizer_address",
-    constraint_setting = ":sanitizer",
+# The sanitizer that instruments the build, set by --config=asan and --config=tsan (.bazelrc). It
+# is a flag rather than a constraint of the target platform so that it composes with configs that
+# choose the platform, such as bazelflare's. The exec configuration resets it, as it would a
+# platform constraint: host tools stay uninstrumented.
+string_flag(
+    name = "sanitizer",
+    build_setting_default = "none",
+    scope = "target",
+    values = [
+        "none",
+        "address",
+        "thread",
+    ],
 )
 
-constraint_value(
+config_setting(
+    name = "sanitizer_address",
+    flag_values = {":sanitizer": "address"},
+)
+
+config_setting(
     name = "sanitizer_thread",
-    constraint_setting = ":sanitizer",
+    flag_values = {":sanitizer": "thread"},
 )
 
 config_setting(
     name = "sanitizer_thread_linux",
-    constraint_values = [
-        ":sanitizer_thread",
-        "@platforms//os:linux",
-    ],
-)
-
-platform(
-    name = "sanitizer_address_platform",
-    constraint_values = [":sanitizer_address"],
-    parents = ["@platforms//host"],
-)
-
-# Like the address platform, inherits the host's cpu/os: the TSan Rust toolchains in //build/rust
-# are defined per host (Linux x86_64, macOS arm64) and selected by toolchain resolution.
-platform(
-    name = "sanitizer_thread_platform",
-    constraint_values = [":sanitizer_thread"],
-    parents = ["@platforms//host"],
+    constraint_values = ["@platforms//os:linux"],
+    flag_values = {":sanitizer": "thread"},
 )

@@ -31,6 +31,8 @@ wd_cc_benchmark(
 sh_test(
     name = "smoke-test",
     size = "large",
+    # Runs every case in its own isolate, which takes longer than the large size's 60 s under ASan.
+    timeout = "eternal",
     srcs = ["smoke-test.sh"],
     args = ["$(location :bench-jsg)"],
     data = [":bench-jsg"],

@@ -181,7 +181,7 @@ def wd_rust_compile_test(
                 # --@rules_rust//:extra_rustc_flag(s), which rules_rust exposes only through its
                 # private API. Of those, -Zsanitizer has to match across crates. The others can
                 # affect a snippet only through the cfgs they set (-Cdebug-assertions sets
-                # cfg(debug_assertions)), which snippets should not depend on. The constraints are
+                # cfg(debug_assertions)), which snippets should not depend on. The settings are
                 # the root repository's, which must define them as workerd does.
                 "@//build/platforms:sanitizer_address": ["@platforms//:incompatible"],
                 "@//build/platforms:sanitizer_thread": ["@platforms//:incompatible"],

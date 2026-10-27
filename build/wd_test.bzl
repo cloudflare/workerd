@@ -1,5 +1,6 @@
 load("@workerd//:build/lint_test.bzl", "lint_test")
 load("@workerd//build/bazelflare:exec_properties.bzl", "test_exec_properties")
+load("@workerd//build/platforms:sanitizers.bzl", "sanitizer_compatible_with")
 load("@workerd//build/tools/llvm:coverage.bzl", "COVERAGE_TOOLCHAINS", "coverage_llvm_tools")
 
 def wd_test(
@@ -44,6 +45,7 @@ def wd_test(
     # Add workerd binary to "data" dependencies.
     data = data + [src, "//src/workerd/server:workerd"]
     kwargs["exec_properties"] = test_exec_properties(kwargs.get("size", "medium"), kwargs.get("tags", [])) | kwargs.get("exec_properties", {})
+    kwargs["target_compatible_with"] = sanitizer_compatible_with(kwargs.get("tags", []), kwargs.get("target_compatible_with"))
 
     ts_srcs = [src for src in data if src.endswith(".ts")]
 

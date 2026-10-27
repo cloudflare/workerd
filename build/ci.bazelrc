@@ -109,8 +109,8 @@ common:wpt-report --remote_download_regex=".*src/wpt/.*"
 build:ci-release --remote_download_minimal --remote_download_regex=".*src/workerd/server/workerd.*"
 
 # CI on bazelflare remote execution: the x64 Linux jobs in .github/workflows/test.yml and
-# coverage.yml run a developer's bazelflare config (bazelflare, bazelflare-asan, bazelflare-tsan or
-# bazelflare-coverage in .bazelrc) followed by these, which change how Bazel runs and reports the
+# coverage.yml run a developer's bazelflare configs (bazelflare, alone or followed by asan or tsan,
+# or bazelflare-coverage in .bazelrc) followed by these, which change how Bazel runs and reports the
 # build, never an action, so CI's action keys equal a workstation's and the two share the cache.
 # build/check_ci_flags.sh, which test.yml's check-ci-flags job runs, fails on any other difference.
 # The targets the bazelflare configs skip (see their tag filters) run on the test-linux job's runner

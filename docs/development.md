@@ -37,9 +37,10 @@ just prepare-ubuntu
 Cloudflare employees can build and test on bazelflare, which runs every action on Linux x86_64
 executors and shares its cache with CI. Log in once with
 `cloudflared access login https://bazelflare-workerd.runtime-playground.workers.dev`, then add
-`--config=bazelflare` (or `bazelflare-asan`, `bazelflare-tsan`) to a `bazel build` or `bazel test`
-command, from macOS or Linux. Tests that need the network or a container engine are skipped; see
-the bazelflare section of `.bazelrc`.
+`--config=bazelflare` to a `bazel build` or `bazel test` command, from macOS or Linux, followed by
+any other config, such as `--config=asan`, `--config=tsan` or `--config=opt`. To use bazelflare
+by default, add `build --config=bazelflare` to `.local/bazelrc`. Tests that need the network or a
+container engine are skipped; see the bazelflare section of `.bazelrc`.
 
 ## Formatting and Linting
 
