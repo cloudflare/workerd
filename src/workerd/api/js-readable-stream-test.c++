@@ -2109,6 +2109,140 @@ KJ_TEST("JsReadableStream pumpTo writes a queued stream's string chunks as UTF-8
   KJ_EXPECT(ended);
 }
 
+// Internal JS-to-C++ rejections reach the INFO log even when tail traces filter them.
+class UncaughtExceptionCapture final: public kj::ExceptionCallback {
+ public:
+  UncaughtExceptionCapture() {
+    while (!kj::_::Debug::shouldLog(previousLogLevel)) {
+      previousLogLevel = static_cast<kj::LogSeverity>(static_cast<int>(previousLogLevel) + 1);
+    }
+    kj::_::Debug::setLogLevel(kj::LogSeverity::INFO);
+  }
+
+  ~UncaughtExceptionCapture() noexcept(false) override {
+    kj::_::Debug::setLogLevel(previousLogLevel);
+  }
+
+  void logMessage(kj::LogSeverity severity,
+      const char* file,
+      int line,
+      int contextDepth,
+      kj::String&& text) override {
+    if (text.contains("uncaught exception")) {
+      messages.add(kj::mv(text));
+    } else {
+      kj::ExceptionCallback::logMessage(severity, file, line, contextDepth, kj::mv(text));
+    }
+  }
+
+  kj::Vector<kj::String> messages;
+
+ private:
+  kj::LogSeverity previousLogLevel = kj::LogSeverity::INFO;
+};
+
+KJ_TEST("HTMLRewriter cancellation does not report a handled stream error") {
+  for (bool useTsStreams: {false, true}) {
+    capnp::MallocMessageBuilder message;
+    auto flags = message.initRoot<CompatibilityFlags>();
+    flags.setStreamsJavaScriptControllers(true);
+    flags.setFixupTransformStreamBackpressure(true);
+    flags.setTypeScriptImplementedStreams(useTsStreams);
+    TestFixture fixture({
+      .featureFlags = flags.asReader(),
+      .autogates = kj::arr("per-isolate-javascript-bootstrap"_kj),
+      .mainModuleSource = R"JS(
+        globalThis.unhandledReadErrors = [];
+        addEventListener('unhandledrejection', (event) => {
+          unhandledReadErrors.push(event.reason.message);
+        });
+        globalThis.cancelRewriter = async () => {
+          const encoder = new TextEncoder();
+          let controller;
+          let cancelReason;
+          let pulls = 0;
+          const parked = Promise.withResolvers();
+          const canceled = Promise.withResolvers();
+          const source = new ReadableStream({
+            start(c) { controller = c; },
+            pull() {
+              if (++pulls === 3) parked.resolve();
+            },
+            cancel(reason) {
+              cancelReason = String(reason);
+              canceled.resolve();
+            },
+          });
+          const reader = new HTMLRewriter().transform(new Response(source)).body.getReader();
+          controller.enqueue(encoder.encode('<p>first</p>'));
+          await reader.read();
+          await parked.promise;
+          await reader.cancel('done early');
+          if (cancelReason !== undefined) throw new Error('source canceled before next chunk');
+          controller.enqueue(encoder.encode('<p>second</p>'));
+          await canceled.promise;
+          if (cancelReason !== 'Error: done early') throw new Error('cancellation did not reach source');
+        };
+        globalThis.unhandledStreamRead = () => {
+          const reader = new ReadableStream({
+            start(c) { c.error(new Error('unhandled stream failure')); },
+          }).getReader();
+          reader.closed.catch(() => {});
+          return reader.read();
+        };
+        export default {};
+      )JS"_kj,
+    });
+
+    UncaughtExceptionCapture capture;
+    auto request = fixture.newIncomingRequest();
+    // Polling background completion must not trigger idle-request hang detection.
+    auto pendingEvent = request->getContext().registerPendingEvent();
+    KJ_DEFER(fixture.drainAndDestroy(kj::mv(request)));
+
+    request->getContext()
+        .run([](Worker::Lock& lock, IoContext& context) {
+      jsg::Lock& js = lock;
+      auto result = webstreams::invokeMethod(js, js.global(), "cancelRewriter"_kj);
+      auto promise = js.toPromise(KJ_ASSERT_NONNULL(JSG_TRY_CAST_PROMISE(result)));
+      return context.awaitJs(js, kj::mv(promise)).ignoreResult();
+    }).wait(fixture.getWaitScope());
+    fixture.pollEventLoop();
+    KJ_EXPECT(capture.messages.size() == 0, useTsStreams);
+    capture.messages.clear();
+
+    // A rejected stream read that the caller ignores must still dispatch unhandledrejection.
+    fixture.enterContext(*request, [](const TestFixture::Environment& env) {
+      auto errors = KJ_ASSERT_NONNULL(
+          env.js.global().get(env.js, "unhandledReadErrors"_kj).tryCast<jsg::JsArray>());
+      KJ_EXPECT(errors.size() == 0);
+      webstreams::invokeMethod(env.js, env.js.global(), "unhandledStreamRead"_kj);
+    });
+    fixture.pollEventLoop();
+    fixture.enterContext(*request, [](const TestFixture::Environment& env) {
+      auto errors = KJ_ASSERT_NONNULL(
+          env.js.global().get(env.js, "unhandledReadErrors"_kj).tryCast<jsg::JsArray>());
+      KJ_ASSERT(errors.size() == 1, errors.size());
+      KJ_EXPECT(errors.get(env.js, 0).strictEquals(env.js.str("unhandled stream failure"_kj)));
+    });
+
+    // An uncaught rejection crossing the generic JS-to-C++ bridge still reports its error.
+    request->getContext()
+        .run([](Worker::Lock& lock, IoContext& context) {
+      jsg::Lock& js = lock;
+      auto result = webstreams::invokeMethod(js, js.global(), "unhandledStreamRead"_kj);
+      auto promise = js.toPromise(KJ_ASSERT_NONNULL(JSG_TRY_CAST_PROMISE(result)));
+      return context.awaitJs(js, kj::mv(promise)).ignoreResult();
+    })
+        .then([]() { KJ_FAIL_EXPECT("expected the stream read to reject"); },
+            [](kj::Exception&& exception) {
+      KJ_EXPECT(exception.getDescription().contains("unhandled stream failure"));
+    }).wait(fixture.getWaitScope());
+    KJ_ASSERT(capture.messages.size() == 1, capture.messages.size(), useTsStreams);
+    KJ_EXPECT(capture.messages[0].contains("unhandled stream failure"), capture.messages[0]);
+  }
+}
+
 KJ_TEST("JsReadableStream text() over the limit cancels a queued TypeScript stream") {
   auto fixture = makeTsStreamsFixture();
   kj::Maybe<kj::String> cancelReason;

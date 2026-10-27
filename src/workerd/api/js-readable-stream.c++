@@ -599,13 +599,14 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
     cancelReaderFromKj(*weakContext, kj::mv(reader), kj::mv(exception));
   }).eagerlyEvaluate(nullptr)));
 
-  auto loop = queuedPumpStep(js, state.addRef(), end)
-                  .catch_(js,
-                      context.addFunctor([state = state.addRef()](jsg::Lock& js, IoContext&,
-                                             jsg::Value exception) mutable {
+  auto loop =
+      queuedPumpStep(js, state.addRef(), end)
+          .then(js, [](jsg::Lock&) -> kj::Maybe<kj::Exception> { return kj::none; },
+              context.addFunctor([state = state.addRef()](jsg::Lock& js, IoContext&,
+                                     jsg::Value exception) mutable -> kj::Maybe<kj::Exception> {
     if (state->dropped) {
       // Nothing awaits the result any more, and the drop cancels the reader itself.
-      return;
+      return kj::none;
     }
     // The pump failed: abort the sink, cancel the reader, then propagate the failure.
     auto reason = jsg::JsValue(exception.getHandle(js));
@@ -616,10 +617,19 @@ kj::Promise<DeferredProxy<void>> pumpQueuedTsStream(jsg::Lock& js,
     KJ_IF_SOME(promise, JSG_TRY_CAST_PROMISE(cancelResult)) {
       promise.markAsHandled(js);
     }
-    js.throwException(kj::mv(exception));
+    return js.exceptionToKj(kj::mv(exception));
   }));
-  return addNoopDeferredProxy(awaitQueuedPump(
-      context, context.awaitJs(js, kj::mv(loop)), kj::mv(state), reader.addRef(js)));
+  // awaitJs() reports rejected JS promises as uncaught. The caller owns this pump's failures,
+  // so carry them across the bridge as fulfilled values and restore the rejection in KJ.
+  auto completion = context.awaitJs(js, kj::mv(loop))
+                        .then([](kj::Maybe<kj::Exception> failure) -> kj::Promise<void> {
+    KJ_IF_SOME(exception, failure) {
+      return kj::mv(exception);
+    }
+    return kj::READY_NOW;
+  });
+  return addNoopDeferredProxy(
+      awaitQueuedPump(context, kj::mv(completion), kj::mv(state), reader.addRef(js)));
 }
 }  // namespace
 
