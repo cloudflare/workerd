@@ -72,7 +72,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         Err(err) => return err,
     };
 
-    let mut field_assignments = Vec::new();
+    let mut to_js_fields = Vec::new();
     let mut field_extractions = Vec::new();
     let mut field_names = Vec::new();
     let mut all_optional = true;
@@ -91,16 +91,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         let optional = is_option_type(field_type);
         all_optional &= optional;
 
-        // Like C++ JSG, an absent optional field is omitted, not undefined.
-        let set = quote! {
-            let value = jsg::v8::ToLocalValue::to_local(value, lock);
-            properties.push((#field_name_str, value));
-        };
-        field_assignments.push(if optional {
-            quote! { if let Some(value) = &this.#field_name { #set } }
-        } else {
-            quote! { { let value = &this.#field_name; #set } }
-        });
+        to_js_fields.push((field_name, field_name_str.clone(), optional));
         // Like C++ JSG, an absent property reads as undefined.
         field_extractions.push(quote! {
             let prop = obj.get(lock, #field_name_str)?;
@@ -122,6 +113,8 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
+    let to_js_body = struct_to_js_body(&to_js_fields);
+
     quote! {
         #input
 
@@ -135,16 +128,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         impl<'s> jsg::ToJS<'s> for #name {
             fn to_js(self, lock: &mut jsg::Lock<'s>) -> Result<jsg::v8::Local<'s, jsg::v8::Value>, jsg::Error> {
-                // The fields are defined as data properties, as C++ JSG's ObjectTemplate does,
-                // so no setter a script put on Object.prototype runs.
-                // TODO(soon): Use a precached ObjectTemplate instance to create the object,
-                // similar to how C++ JSG optimizes object creation. This would avoid recreating
-                // the object shape on every wrap() call and improve performance.
-                let this = self;
-                #[allow(unused_mut, reason = "a struct without public fields pushes nothing")]
-                let mut properties = ::std::vec::Vec::new();
-                #(#field_assignments)*
-                Ok(jsg::v8::Object::with_data_properties(lock, &properties).into())
+                #to_js_body
             }
         }
 
@@ -186,6 +170,57 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
     .into()
+}
+
+/// The body of a `#[jsg_struct]`'s `ToJS::to_js`, given each public field's name, its
+/// JavaScript name and whether it is an `Option`. Like C++ JSG's `JSG_STRUCT`, it follows the
+/// `fast_jsg_struct` flag.
+fn struct_to_js_body(fields: &[(&syn::Ident, String, bool)]) -> proc_macro2::TokenStream {
+    // Like C++ JSG, an absent optional field is omitted rather than set to undefined.
+    let for_each_field = |body: fn(&str) -> proc_macro2::TokenStream| -> Vec<_> {
+        fields
+            .iter()
+            .map(|(field_name, js_name, optional)| {
+                let body = body(js_name);
+                if *optional {
+                    quote! { if let Some(value) = &this.#field_name { #body } }
+                } else {
+                    quote! { { let value = &this.#field_name; #body } }
+                }
+            })
+            .collect()
+    };
+    let data_properties = for_each_field(|js_name| {
+        quote! {
+            let value = jsg::v8::ToLocalValue::to_local(value, lock);
+            properties.push((#js_name, value));
+        }
+    });
+    let field_sets = for_each_field(|js_name| {
+        quote! {
+            let value = jsg::v8::ToLocalValue::to_local(value, lock);
+            obj.set(lock, #js_name, value)?;
+        }
+    });
+    quote! {
+        let this = self;
+        if lock.feature_flags().get_fast_jsg_struct() {
+            // The fields are defined as data properties, as C++ JSG's DictionaryTemplate does, so
+            // no setter a script put on Object.prototype runs.
+            // TODO(soon): Use a precached template to create the object, as C++ JSG does, rather
+            // than recreating its shape on every conversion.
+            #[allow(unused_mut, reason = "a struct without public fields pushes nothing")]
+            let mut properties = ::std::vec::Vec::new();
+            #(#data_properties)*
+            Ok(jsg::v8::Object::with_data_properties(lock, &properties).into())
+        } else {
+            // Without fast_jsg_struct, C++ JSG sets the fields one by one, which runs a setter on
+            // Object.prototype; what it throws is passed on.
+            let obj = lock.new_object();
+            #(#field_sets)*
+            Ok(obj.into())
+        }
+    }
 }
 
 // =============================================================================
