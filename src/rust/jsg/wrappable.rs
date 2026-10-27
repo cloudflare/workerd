@@ -20,7 +20,7 @@
 //! | `String` | `string` |
 //! | `&str` | `string` |
 //! | `bool` | `boolean` |
-//! | `f64`, `Number` | `number`; from any value, with `ToNumber` |
+//! | `f64` | `number`; from any value, with `ToNumber` |
 //! | `f32` | `number` (to JavaScript only) |
 //! | `u8`, `u16`, `u32`, `i8`, `i16`, `i32` | `number` |
 //! | `i64`, `u64` | `bigint`; from a `bigint` or a `number` |
@@ -72,7 +72,6 @@ use crate::Lenient;
 use crate::Lock;
 use crate::NonCoercible;
 use crate::Nullable;
-use crate::Number;
 use crate::Type;
 use crate::v8;
 
@@ -171,7 +170,6 @@ impl_traced_noop!(
     crate::v8::Uint16Array,
     crate::v8::Uint32Array,
     &str,
-    Number,
 );
 
 impl<T: Traced> Traced for Option<T> {
@@ -558,38 +556,6 @@ impl<'s> ToJS<'s> for f32 {
     #[inline]
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         f64::from(self).to_js(lock)
-    }
-}
-
-impl Type for Number {
-    fn class_name() -> &'static str {
-        f64::class_name()
-    }
-
-    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
-        f64::is_exact(value)
-    }
-}
-
-impl<'s> ToJS<'s> for Number {
-    #[inline]
-    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-        self.value().to_js(lock)
-    }
-}
-
-impl<'s> FromJS<'s> for Number {
-    type ResultType = Self;
-
-    fn type_name() -> String {
-        f64::type_name()
-    }
-
-    fn from_js(
-        lock: &mut Lock<'s>,
-        value: v8::Local<'s, v8::Value>,
-    ) -> Result<Self::ResultType, Error> {
-        Ok(Self::new(f64::from_js(lock, value)?))
     }
 }
 

@@ -22,7 +22,6 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
 use crate::Error;
-use crate::Number;
 use crate::Resource;
 use crate::UnitType;
 use crate::scope::unit_value;
@@ -69,15 +68,6 @@ impl FastApiArg for f64 {
     }
 }
 
-impl private::Sealed for Number {}
-impl FastApiArg for Number {
-    type Raw = f64;
-    const TYPE: FastApiType = FastApiType::Float64;
-    fn from_raw(raw: f64) -> Result<Self, Error> {
-        Ok(Self::new(raw))
-    }
-}
-
 // Integers come from V8 as doubles, so that their range checks and truncation are the slow path's.
 
 impl private::Sealed for i32 {}
@@ -113,14 +103,6 @@ impl FastApiReturn for f64 {
     const TYPE: FastApiType = FastApiType::Float64;
     fn into_raw(self) -> Self {
         self
-    }
-}
-
-impl FastApiReturn for Number {
-    type Raw = f64;
-    const TYPE: FastApiType = FastApiType::Float64;
-    fn into_raw(self) -> f64 {
-        self.value()
     }
 }
 

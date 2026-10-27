@@ -5,7 +5,6 @@
 //! Tests for `Local<Function>::call()` and the casts between `Local` handle types.
 
 use jsg::FromJS;
-use jsg::Number;
 use jsg::ToJS;
 use jsg::v8;
 
@@ -82,8 +81,8 @@ fn call_zero_args() {
     harness.run_in_context(|lock, ctx| {
         let value = ctx.eval_raw(lock, "(() => 42)").unwrap();
         let func = v8::Local::<v8::Function>::try_from(value).unwrap();
-        let result = func.call::<Number>(lock, None::<v8::Local<v8::Value>>, &[])?;
-        assert!((result.value() - 42.0).abs() < f64::EPSILON);
+        let result = func.call::<f64>(lock, None::<v8::Local<v8::Value>>, &[])?;
+        assert!((result - 42.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -96,10 +95,10 @@ fn call_with_args() {
         let value = ctx.eval_raw(lock, "((a, b) => a - b)").unwrap();
         let func = v8::Local::<v8::Function>::try_from(value).unwrap();
 
-        let a = Number::new(10.0).to_js(lock)?;
-        let b = Number::new(32.0).to_js(lock)?;
-        let result = func.call::<Number>(lock, None::<v8::Local<v8::Value>>, &[a, b])?;
-        assert!((result.value() + 22.0).abs() < f64::EPSILON);
+        let a = 10.0_f64.to_js(lock)?;
+        let b = 32.0_f64.to_js(lock)?;
+        let result = func.call::<f64>(lock, None::<v8::Local<v8::Value>>, &[a, b])?;
+        assert!((result + 22.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -131,8 +130,8 @@ fn call_with_receiver() {
             .unwrap();
         let func = v8::Local::<v8::Function>::try_from(func_val).unwrap();
 
-        let result = func.call::<Number>(lock, Some(obj), &[])?;
-        assert!((result.value() - 100.0).abs() < f64::EPSILON);
+        let result = func.call::<f64>(lock, Some(obj), &[])?;
+        assert!((result - 100.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -188,9 +187,9 @@ fn try_catch_catches_thrown_non_error() {
         let func = ctx.eval_raw(lock, "(() => { throw 42; })").unwrap();
         let func = v8::Local::<v8::Function>::try_from(func).unwrap();
 
-        let caught = lock.try_catch(|lock| func.call::<Number>(lock, None, &[]))?;
-        let thrown = Number::from_js(lock, caught.unwrap_err())?;
-        assert!((thrown.value() - 42.0).abs() < f64::EPSILON);
+        let caught = lock.try_catch(|lock| func.call::<f64>(lock, None, &[]))?;
+        let thrown = f64::from_js(lock, caught.unwrap_err())?;
+        assert!((thrown - 42.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -218,9 +217,9 @@ fn try_catch_does_not_run_thrown_value_accessors() {
             let caught =
                 lock.try_catch(|lock| func.call::<v8::Local<v8::Value>>(lock, None, &[]))?;
             assert_eq!(caught.unwrap_err(), thrown);
-            let reads = ctx.eval::<Number>(lock, "reads").unwrap();
+            let reads = ctx.eval::<f64>(lock, "reads").unwrap();
             assert!(
-                reads.value().abs() < f64::EPSILON,
+                reads.abs() < f64::EPSILON,
                 "{thrown:?} ran {reads:?} accessors"
             );
         }
@@ -236,8 +235,8 @@ fn try_catch_returns_result_on_success() {
         let func = ctx.eval_raw(lock, "(() => 7)").unwrap();
         let func = v8::Local::<v8::Function>::try_from(func).unwrap();
 
-        let result = lock.try_catch(|lock| func.call::<Number>(lock, None, &[]))?;
-        assert!((result.unwrap().value() - 7.0).abs() < f64::EPSILON);
+        let result = lock.try_catch(|lock| func.call::<f64>(lock, None, &[]))?;
+        assert!((result.unwrap() - 7.0).abs() < f64::EPSILON);
         Ok(())
     });
 }

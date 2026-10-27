@@ -522,7 +522,7 @@ Code that gets a pending error must not call into JavaScript, and should return 
 To handle an exception instead, run the code in `Lock::try_catch`, which catches as C++ `jsg::Lock::tryCatch()` does: the exception, or an error the closure returns, as a value; a termination keeps propagating.
 
 ```rust
-match lock.try_catch(|lock| callback.call::<Number>(lock, None, &[]))? {
+match lock.try_catch(|lock| callback.call::<f64>(lock, None, &[]))? {
     Ok(result) => { /* ... */ }
     Err(exception) => { /* handle what the callback threw */ }
 }
@@ -544,8 +544,9 @@ lists, externals and the other options are not supported. The C++ side is `src/r
 
 The module docs of `wrappable.rs` list every Rust type that converts to or from JavaScript, and
 how. Most convert both ways. `&[T]` converts only from JavaScript, so it can be a method parameter
-but not a return value. `f64` and `f32` convert only to JavaScript, to a number; a number parameter
-is a `Number`.
+but not a return value. A number is an `f64`, which converts like C++ JSG's `double`: to a number,
+and from any value with JavaScript's `ToNumber`. An `f32` converts only to JavaScript. A number
+that stays on the V8 heap is a `v8::Local<'s, v8::Number>`, which accepts only a number.
 
 Integers convert like C++ JSG's. `u8`, `u16`, `u32`, `i8`, `i16` and `i32` convert to a number,
 and from a value converted to a number, which must be in range. `i64` and `u64` convert to a
@@ -605,7 +606,7 @@ To port a C++ JSG signature:
 | `v8::Local<v8::Uint8Array>` returned | `v8::Local<'s, v8::Uint8Array>`, from `to_js_typed_array` |
 | `kj::Array<T>` of other numbers returned | `Vec<T>`, an `Array` |
 | `kj::Array<T>` of integers parameter | `Vec<T>` |
-| `kj::Array<double>` parameter | `Vec<Number>` |
+| `kj::Array<double>` parameter | `Vec<f64>` |
 | `kj::Array<bool>` | `Vec<bool>` |
 | `kj::Array<T>` of anything else | `Vec<T>` |
 
@@ -750,10 +751,10 @@ use jsg_macros::{jsg_resource, jsg_property, jsg_inspect_property};
 impl Counter {
     // Prototype property (on the proto chain; use this in almost all cases)
     #[jsg_property(prototype)]
-    pub fn get_value(&self) -> jsg::Number { /* ... */ }
+    pub fn get_value(&self) -> f64 { /* ... */ }
 
     #[jsg_property(prototype)]
-    pub fn set_value(&self, v: jsg::Number) { /* ... */ }
+    pub fn set_value(&self, v: f64) { /* ... */ }
 
     // Read-only prototype property (no paired `set_value`)
     #[jsg_property(prototype, readonly)]

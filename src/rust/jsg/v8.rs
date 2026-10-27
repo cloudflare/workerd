@@ -1810,7 +1810,7 @@ impl<'s> Local<'s, Function> {
     /// ```ignore
     /// let x = x.to_js(lock)?;
     /// let y = y.to_js(lock)?;
-    /// let result: Number = func.call(lock, None, &[x, y])?;
+    /// let result: f64 = func.call(lock, None, &[x, y])?;
     /// ```
     pub fn call<R: FromJS<'s>>(
         self,

@@ -138,16 +138,11 @@ fn number_handle_parameter_does_not_coerce() {
         let resource = jsg::Rc::new(Numbers).to_js(lock)?;
         ctx.set_global(lock, "r", resource);
 
-        assert_eq!(
-            ctx.eval::<jsg::Number>(lock, "r.double(21)")
-                .unwrap()
-                .value(),
-            42.0
-        );
+        assert_eq!(ctx.eval::<f64>(lock, "r.double(21)").unwrap(), 42.0);
 
         for expr in ["r.double('21')", "r.double({ valueOf() { return 21; } })"] {
             let err = ctx
-                .eval::<jsg::Number>(lock, expr)
+                .eval::<f64>(lock, expr)
                 .unwrap_err()
                 .unwrap_jsg_err(lock);
             assert_eq!(err.name, ExceptionType::TypeError, "{expr}");
