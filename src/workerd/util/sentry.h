@@ -70,8 +70,10 @@ inline bool isInterestingException(const kj::Exception& e) {
       e.getType() != kj::Exception::Type::OVERLOADED;
 }
 
+// Instances are declared `static const` by LOG_PERIODICALLY; the state is an atomic, so it is safe
+// to mutate through a const reference from any thread.
 struct LogPeriodically {
-  bool shouldLog() {
+  bool shouldLog() const {
     const auto now = kj::systemCoarseMonotonicClock().now();
     const auto nowNanos = (now - kj::origin<kj::TimePoint>()) / kj::NANOSECONDS;
     const auto lastLogged = lastLoggedNanos.load(std::memory_order_relaxed);
@@ -84,7 +86,7 @@ struct LogPeriodically {
   }
 
  private:
-  std::atomic<int64_t> lastLoggedNanos{-(1 * kj::HOURS / kj::NANOSECONDS)};
+  mutable std::atomic<int64_t> lastLoggedNanos{-(1 * kj::HOURS / kj::NANOSECONDS)};
 };
 
 #define LOG_NOSENTRY(severity, ...) KJ_LOG(severity, "NOSENTRY " __VA_ARGS__);
@@ -116,7 +118,7 @@ struct LogPeriodically {
 // be prohibitive.
 #define LOG_PERIODICALLY(severity, ...)                                                            \
   do {                                                                                             \
-    static ::workerd::LogPeriodically KJ_UNIQUE_NAME(logPeriodically);                             \
+    static const ::workerd::LogPeriodically KJ_UNIQUE_NAME(logPeriodically);                       \
     if (KJ_UNLIKELY(KJ_UNIQUE_NAME(logPeriodically).shouldLog())) {                                \
       KJ_LOG(severity, __VA_ARGS__);                                                               \
     }                                                                                              \
