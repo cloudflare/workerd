@@ -21,6 +21,7 @@ use std::time::UNIX_EPOCH;
 use futures::channel::oneshot;
 use io_context::IoContext;
 use io_context::IoOwned;
+use io_context::SpanBuilder;
 use jsg::ToJS;
 use jsg::v8;
 
@@ -94,6 +95,10 @@ mod ffi {
         fn owned_value_dropped() -> bool;
         unsafe fn take_owned_value(isolate: usize) -> Result<bool>;
         fn drop_owned_handle();
+        unsafe fn record_trace_spans(isolate: usize) -> Result<()>;
+        unsafe fn hold_trace_span(isolate: usize) -> Result<()>;
+        fn drop_held_trace_span();
+        unsafe fn await_in_user_trace_span(isolate: usize) -> Result<()>;
 
         unsafe fn has_current(isolate: usize) -> bool;
         unsafe fn now_nanos(isolate: usize) -> Result<i64>;
@@ -270,6 +275,7 @@ fn awaited_future_dropped() -> bool {
 
 thread_local! {
     static OWNED: RefCell<Option<IoOwned<DropFlag>>> = const { RefCell::new(None) };
+    static HELD_SPAN: RefCell<Option<SpanBuilder>> = const { RefCell::new(None) };
 }
 
 static OWNED_DROPPED: AtomicBool = AtomicBool::new(false);
@@ -317,6 +323,67 @@ unsafe fn take_owned_value(isolate: usize) -> Result<bool> {
 /// Drops the handle `add_owned_value()` kept, without taking its value.
 fn drop_owned_handle() {
     OWNED.with(|cell| cell.borrow_mut().take());
+}
+
+/// In a request, makes the spans `io-context-test.c++` expects, with a tag of each kind, and ends
+/// them.
+unsafe fn record_trace_spans(isolate: usize) -> Result<()> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    let context = IoContext::current(lock).map_err(|err| to_io(&err))?;
+    let mut span = context
+        .make_trace_span(c"rust_span")
+        .map_err(|err| to_io(&err))?;
+    span.set_tag(c"bool", true);
+    span.set_tag(c"int", 42_i64);
+    span.set_tag(c"float", 1.5);
+    let dynamic = String::from("dynamic");
+    span.set_tag(c"str", &dynamic);
+    span.set_tag(c"literal", c"literal");
+    let mut child = span.new_child(c"rust_child");
+    child.set_tag(c"replaced", 1_i64);
+    child.set_tag(c"replaced", 2_i64);
+    let mut user = context
+        .make_user_trace_span(c"rust_user_span")
+        .map_err(|err| to_io(&err))?;
+    user.set_tag(c"bool", false);
+    user.set_tag(c"int", 7_i64);
+    user.set_tag(c"float", 0.5);
+    user.set_tag(c"str", "user");
+    user.set_tag(c"literal", c"user_literal");
+    Ok(())
+}
+
+/// In a request, starts a span that this thread keeps until `drop_held_trace_span()`.
+unsafe fn hold_trace_span(isolate: usize) -> Result<()> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    let span = IoContext::current(lock)
+        .and_then(|context| context.make_trace_span(c"held_span"))
+        .map_err(|err| to_io(&err))?;
+    HELD_SPAN.with(|cell| *cell.borrow_mut() = Some(span));
+    Ok(())
+}
+
+/// Drops the span `hold_trace_span()` started.
+fn drop_held_trace_span() {
+    HELD_SPAN.with(|cell| cell.borrow_mut().take());
+}
+
+/// In a request, starts a user trace span, then awaits a future that is already complete, ending
+/// the span in the callback.
+unsafe fn await_in_user_trace_span(isolate: usize) -> Result<()> {
+    // SAFETY: see the module documentation.
+    jsg::callback_scope!(unsafe let lock, isolate as *mut v8::ffi::Isolate);
+    IoContext::current(lock)
+        .and_then(|context| {
+            let span = context.make_user_trace_span(c"rust_operation")?;
+            context.await_io_and_run(std::future::ready(()), move |_lock, ()| {
+                drop(span);
+                Ok(())
+            })
+        })
+        .map_err(|err| to_io(&err))
 }
 
 /// In a request, awaits a future that is already complete, and from its callback has C++ record
