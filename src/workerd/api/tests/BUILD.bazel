@@ -1421,6 +1421,21 @@ wd_test(
     data = ["fetch-test.js"],
 )
 
+# Enables the OTHER_HTTP_METHODS autogate in its config, so every variant has it.
+wd_test(
+    src = "request-other-methods-test.wd-test",
+    args = ["--experimental"],
+    data = ["request-other-methods-test.js"],
+)
+
+# Covers OTHER_HTTP_METHODS disabled, so it has no @all-autogates variant
+wd_test(
+    src = "request-other-methods-disabled-test.wd-test",
+    args = ["--experimental"],
+    data = ["request-other-methods-disabled-test.js"],
+    generate_all_autogates_variant = False,
+)
+
 wd_test(
     src = "importable-env-test.wd-test",
     args = ["--experimental"],

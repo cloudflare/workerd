@@ -18,10 +18,12 @@ export const test = {
     const req = new Request('https://example.com', { method: 'patch' });
     strictEqual(req.method, 'PATCH');
 
-    // Unrecognized methods error as expected, with the error message
-    // showing the original-cased method name.
-    throws(() => new Request('http://example.org', { method: 'patchy' }), {
-      message: /^Invalid HTTP method string: patchy$/,
+    // Invalid methods error as expected, with the error message showing the
+    // original-cased method name. (A valid method outside kj's list, such as
+    // "patchy", is accepted when OTHER_HTTP_METHODS is enabled; see
+    // request-other-methods-test.js.)
+    throws(() => new Request('http://example.org', { method: 'patchy?' }), {
+      message: /^Invalid HTTP method string: patchy\?$/,
     });
   },
 };

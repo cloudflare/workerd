@@ -329,6 +329,24 @@ Request::CacheMode Request::getCacheMode() {
   return cacheMode;
 }
 
+namespace {
+
+// The method that new Request() and fetch() use for `name`, which they keep exactly as written: a
+// method outside kj's list (KJ_HTTP_FOR_EACH_METHOD) such as BLOCK, or, without
+// upper_case_all_http_methods, a spelling of a listed method other than the six names the Fetch
+// spec uppercases, such as "patch". That needs the OTHER_HTTP_METHODS autogate and a name that
+// kj::HttpMethod::tryParse() accepts, and the method must not be CONNECT, TRACE or TRACK, in any
+// letter case, which the Fetch spec forbids. (TRACE as listed, or in any spelling with
+// upper_case_all_http_methods, is accepted before getting here, as it always has been.)
+kj::Maybe<kj::HttpMethod> acceptOtherMethod(kj::StringPtr name) {
+  if (!util::Autogate::isEnabled(util::AutogateKey::OTHER_HTTP_METHODS)) return kj::none;
+  auto upper = toUpper(name);
+  if (upper == "CONNECT"_kj || upper == "TRACE"_kj || upper == "TRACK"_kj) return kj::none;
+  return kj::HttpMethod::tryParse(name);
+}
+
+}  // namespace
+
 jsg::Ref<Request> Request::constructor(
     jsg::Lock& js, Request::Info input, jsg::Optional<Request::Initializer> init) {
   return constructorImpl(js, kj::mv(input), kj::mv(init), false);
@@ -446,7 +464,10 @@ jsg::Ref<Request> Request::constructorImpl(jsg::Lock& js,
               // This is actually the spec defined behavior. We're expected to only
               // upper case get, post, put, delete, head, and options per the spec.
               // Other methods, even if they would be recognized if they were uppercased,
-              // are supposed to be rejected.
+              // are not uppercased: acceptOtherMethod() keeps them as written when methods
+              // outside kj's list are enabled, and otherwise they're rejected. Keeping them
+              // means that adding a method to kj's list doesn't change how its other spellings
+              // behave.
               // Refs: https://fetch.spec.whatwg.org/#methods
               switch (method.known()) {
                 case kj::HttpMethod::Known::GET:
@@ -457,9 +478,15 @@ jsg::Ref<Request> Request::constructorImpl(jsg::Lock& js,
                 case kj::HttpMethod::Known::OPTIONS:
                   break;
                 default:
-                  JSG_FAIL_REQUIRE(TypeError, kj::str("Invalid HTTP method string: ", m));
+                  KJ_IF_SOME(other, acceptOtherMethod(m)) {
+                    method = other;
+                  } else {
+                    JSG_FAIL_REQUIRE(TypeError, kj::str("Invalid HTTP method string: ", m));
+                  }
               }
             }
+          } else KJ_IF_SOME(other, acceptOtherMethod(m)) {
+            method = other;
           } else {
             JSG_FAIL_REQUIRE(TypeError, kj::str("Invalid HTTP method string: ", m));
           }

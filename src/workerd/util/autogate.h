@@ -137,11 +137,15 @@ namespace workerd::util {
      uint32_t) converts. When disabled, the range check runs on the untruncated value and such a   \
      fraction is a TypeError. Applies to C++ JSG and Rust JSG alike. */                            \
   V(JSG_INTEGER_ENFORCE_RANGE)                                                                     \
-  /* Lets workerd's own HTTP sockets pass a request whose method is outside kj's list, but one     \
-     that kj::HttpMethod::tryParse() accepts, such as BLOCK, to the socket's service instead of    \
-     answering 501. Method names are case-sensitive there, so a request for "get" is a method of   \
-     its own, not GET. Servers that embed workerd can gate kj's                                    \
-     HttpServerSettings::allowOtherMethods on it too. */                                           \
+  /* Lets HTTP methods outside kj's list that kj::HttpMethod::tryParse() accepts, such as BLOCK,   \
+     into workerd. Its own HTTP sockets pass such requests to their services instead of answering  \
+     501; names are case-sensitive there, so a request for "get" is a method of its own, not GET.  \
+     `new Request()` and `fetch()` accept such methods as written, except the Fetch spec's         \
+     forbidden CONNECT, TRACE and TRACK, once the existing uppercasing has applied (the six names  \
+     the spec normalizes, or every listed name with upper_case_all_http_methods), so exactly       \
+     "TRACE" stays accepted. Request::deserialize() accepts such methods either way, so that every \
+     receiver accepts such Requests before this is enabled. Servers that embed workerd can gate    \
+     kj's HttpServerSettings::allowOtherMethods on it too. */                                      \
   V(OTHER_HTTP_METHODS)
 // clang-format on
 // --------------------------------------------------------------------------------------
