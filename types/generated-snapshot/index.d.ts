@@ -4027,7 +4027,7 @@ interface ContainerSnapshotOptions {
 }
 type ContainerStartupOptions = {
   entrypoint?: string[];
-  enableInternet: boolean;
+  enableInternet?: boolean;
   env?: Record<string, string>;
   instance?:
     | "lite"
