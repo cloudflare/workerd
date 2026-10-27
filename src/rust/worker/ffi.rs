@@ -28,7 +28,6 @@ use crate::ffi::bridge::ScheduledResult;
 pub mod bridge {
     #[namespace = "kj::rust"]
     unsafe extern "C++" {
-        type HttpMethod = kj::http::ffi::HttpMethod;
         type HttpHeaders = kj::http::ffi::HttpHeaders;
         type HttpServiceResponse = kj::http::ffi::HttpServiceResponse;
         type AsyncInputStream = kj::io::ffi::AsyncInputStream;
@@ -109,7 +108,7 @@ pub mod bridge {
 
         async unsafe fn request<'a>(
             self: &'a mut Wrapper,
-            method: HttpMethod,
+            method: &'a [u8],
             url: &'a [u8],
             headers: &'a HttpHeaders,
             request_body: Pin<&'a mut AsyncInputStream>,
@@ -170,9 +169,10 @@ pub mod bridge {
     unsafe extern "C++" {
         type WorkerInterface;
 
+        /// Fails for a `method` name that kj doesn't know.
         async unsafe fn worker_request<'a>(
             worker: Pin<&'a mut WorkerInterface>,
-            method: HttpMethod,
+            method: &'a [u8],
             url: &'a [u8],
             headers: &'a HttpHeaders,
             request_body: Pin<&'a mut AsyncInputStream>,
@@ -290,12 +290,13 @@ impl Wrapper {
 
     async fn request<'a>(
         &'a mut self,
-        method: bridge::HttpMethod,
+        method: &'a [u8],
         url: &'a [u8],
         headers: &'a bridge::HttpHeaders,
         request_body: Pin<&'a mut bridge::AsyncInputStream>,
         response: Pin<&'a mut bridge::HttpServiceResponse>,
     ) -> Result<()> {
+        let method = kj::http::method_from_name(method)?;
         let response = crate::ServiceResponse::from(response);
         self.worker
             .request(method, url, headers.into(), request_body, response)

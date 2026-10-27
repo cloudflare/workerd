@@ -170,8 +170,10 @@ struct Refusal {
   kj::StringPtr message;
 };
 
-kj::Maybe<Refusal> websocketRefusal(kj::HttpMethod method, const kj::HttpHeaders& headers) {
-  if (method != kj::HttpMethod::GET) {
+// `method` is the request method's name, and "GET" is GET's only name.
+kj::Maybe<Refusal> websocketRefusal(
+    kj::ArrayPtr<const kj::byte> method, const kj::HttpHeaders& headers) {
+  if (method != "GET"_kjb) {
     return Refusal{400, "Bad Request", "WebSocket must be initiated with a GET request."};
   }
   if (headers.get(kj::HttpHeaderId::SEC_WEBSOCKET_VERSION).orDefault(nullptr) != "13") {
@@ -316,14 +318,14 @@ kj::Own<kj::AsyncInputStream> new_body_stream(::rust::Box<RustBody> body) {
 }
 
 kj::Own<kj::HttpService::Response> new_server_response(::rust::Box<ServerResponse> response,
-    kj::HttpMethod method,
+    ::rust::Slice<const uint8_t> method,
     const kj::HttpHeaders& headers,
     WebSocketCompression compression,
     kj::Maybe<const kj::WebSocketErrorHandler&> errors) {
   kj::Maybe<WebSocketRequest> webSocketRequest;
   if (headers.isWebSocket()) {
     webSocketRequest = WebSocketRequest{
-      .refusal = websocketRefusal(method, headers),
+      .refusal = websocketRefusal(kj::arrayPtr(method.data(), method.size()), headers),
       .offers =
           headers.get(kj::HttpHeaderId::SEC_WEBSOCKET_EXTENSIONS).map([](kj::StringPtr offers) {
       return kj::str(offers);

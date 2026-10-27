@@ -709,7 +709,6 @@ impl Service for Client<'_> {
             return self.websocket(uri, head, headers, response).await;
         }
         head.claim(Protocol::Message);
-        let method = http::Method::from_bytes(format!("{method:?}").as_bytes()).map_err(failed)?;
         let length = request_body.as_mut().try_get_length();
         // As kj: an empty GET or HEAD carries no Content-Length. One of unknown length is not
         // framed either: hyper sends it without a body.

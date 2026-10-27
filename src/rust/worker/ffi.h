@@ -14,7 +14,6 @@
 
 namespace workerd::rust::worker {
 
-using HttpMethod = kj::HttpMethod;
 using HttpHeaders = kj::HttpHeaders;
 using HttpServiceResponse = kj::HttpService::Response;
 using AsyncInputStream = kj::AsyncInputStream;
@@ -40,11 +39,12 @@ kj::Own<WorkerInterface> wrapper_into_kj(::rust::Box<Wrapper> wrapper);
 // ffi.c++, since those structs are only complete in the generated bridge header.
 
 inline kj::Promise<void> worker_request(WorkerInterface& worker,
-    HttpMethod method,
+    ::rust::Slice<const kj::byte> methodName,
     ::rust::Slice<const kj::byte> url,
     const HttpHeaders& headers,
     AsyncInputStream& requestBody,
     HttpServiceResponse& response) {
+  auto method = kj::rust::httpMethodFromRust(methodName);
   auto urlStr = kj::str(kj::from<kj_rs::Rust>(url).asChars());
   co_await worker.request(method, urlStr, headers, requestBody, response);
 }

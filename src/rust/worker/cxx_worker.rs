@@ -62,7 +62,7 @@ impl Service for CxxWorkerInterface {
         unsafe {
             bridge::worker_request(
                 self.inner.as_mut(),
-                method,
+                method.as_str().as_bytes(),
                 url,
                 headers.as_ffi(),
                 request_body,

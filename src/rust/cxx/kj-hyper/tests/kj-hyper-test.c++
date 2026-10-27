@@ -261,7 +261,10 @@ class RustClientService final: public kj::HttpService {
       const kj::HttpHeaders& headers,
       kj::AsyncInputStream& requestBody,
       Response& response) override {
-    return client->request(method, slice(url), headers, requestBody, response);
+    // A coroutine, so that `method`, which holds an OTHER method's name, lives until Rust is done
+    // with the name.
+    co_await client->request(
+        slice(kj::toCharSequence(method)), slice(url), headers, requestBody, response);
   }
 
   kj::Promise<void> connect(kj::StringPtr host,
@@ -1296,6 +1299,19 @@ KJ_TEST("client: a response cut short fails the body read") {
   serving.wait(f.ws);
   peer = nullptr;
   KJ_EXPECT_THROW(DISCONNECTED, response.body->readAllText().wait(f.ws));
+}
+
+// =======================================================================================
+// Methods hyper doesn't know as standard ones, which cross the bridge by name.
+
+KJ_TEST("client: a method hyper doesn't know is sent by its name") {
+  Fixture f;
+  auto [client, peer] = f.pipeClient();
+  kj::HttpHeaders headers(*f.table);
+  headers.setPtr(kj::HttpHeaderId::HOST, "foo");
+  auto request = client->request(kj::HttpMethod::PURGE, "/p", headers, static_cast<uint64_t>(5));
+  KJ_EXPECT(
+      readHead(*peer).wait(f.ws) == "PURGE /p HTTP/1.1\r\nContent-Length: 5\r\nHost: foo\r\n\r\n");
 }
 
 // =======================================================================================

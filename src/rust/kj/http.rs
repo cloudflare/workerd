@@ -26,44 +26,6 @@ pub mod ffi {
         include!("workerd/rust/kj/ffi.h");
     }
 
-    /// Corresponds to `kj::HttpMethod`.
-    /// Values are automatically assigned by `cxx` because of extern declaration below.
-    #[derive(Debug, PartialEq, Eq, Copy, Clone)]
-    #[repr(u32)]
-    enum HttpMethod {
-        GET,
-        HEAD,
-        POST,
-        PUT,
-        DELETE,
-        PATCH,
-        PURGE,
-        OPTIONS,
-        TRACE,
-        COPY,
-        LOCK,
-        MKCOL,
-        MOVE,
-        PROPFIND,
-        PROPPATCH,
-        SEARCH,
-        UNLOCK,
-        ACL,
-        REPORT,
-        MKACTIVITY,
-        CHECKOUT,
-        MERGE,
-        MSEARCH,
-        NOTIFY,
-        SUBSCRIBE,
-        UNSUBSCRIBE,
-        QUERY,
-        BAN,
-    }
-    unsafe extern "C++" {
-        type HttpMethod;
-    }
-
     // --- HttpHeaderId
     // Opaque handle to a kj::HttpHeaderId, which identifies a header by numeric index in an
     // HttpHeaderTable. This supports both builtin headers and custom headers registered via
@@ -170,10 +132,11 @@ pub mod ffi {
             expected_body_size: KjMaybe<u64>,
         ) -> Result<KjOwn<AsyncOutputStream>>;
 
-        /// Corresponds to `kj::HttpService::request`.
+        /// Corresponds to `kj::HttpService::request`. Fails for a `method` name that kj doesn't
+        /// know.
         async fn request(
             this_: Pin<&mut HttpService>,
-            method: HttpMethod,
+            method: &[u8],
             url: &[u8],
             headers: &HttpHeaders,
             request_body: Pin<&mut AsyncInputStream>,
@@ -197,7 +160,7 @@ pub mod ffi {
 
         async unsafe fn request<'a>(
             self: &'a mut DynHttpService,
-            method: HttpMethod,
+            method: &'a [u8],
             url: &'a [u8],
             headers: &'a HttpHeaders,
             request_body: Pin<&'a mut AsyncInputStream>,
@@ -364,8 +327,22 @@ impl<'a, 'b> From<&'b Headers<'a>> for HeadersRef<'b> {
     }
 }
 
-pub type Method = ffi::HttpMethod;
+/// A request method.
+///
+/// Methods cross the bridge as names: C++ passes a method's name to Rust, and parses a name from
+/// Rust, refusing names `Method` accepts but kj doesn't know, such as `CONNECT`.
+pub type Method = http::Method;
 pub type ConnectSettings<'a> = ffi::HttpConnectSettings<'a>;
+
+/// The method named by `name`, a method's name passed from C++.
+///
+/// # Errors
+///
+/// A name that is not an HTTP token, which no `kj::HttpMethod` has.
+pub fn method_from_name(name: &[u8]) -> Result<Method> {
+    Method::from_bytes(name)
+        .map_err(|_| crate::failed!("invalid HTTP method: {}", name.escape_ascii()))
+}
 
 /// Non-owning mutable reference to `kj::HttpService::Response`.
 pub struct ServiceResponse<'a>(Pin<&'a mut ffi::HttpServiceResponse>);
@@ -510,7 +487,7 @@ impl Service for CxxService<'_> {
         let service = self.0.as_mut();
         ffi::request(
             service,
-            method,
+            method.as_str().as_bytes(),
             url,
             headers.0,
             request_body,
@@ -558,12 +535,13 @@ pub struct DynHttpService(Box<dyn Service>);
 impl DynHttpService {
     async fn request<'a>(
         &'a mut self,
-        method: Method,
+        method: &'a [u8],
         url: &'a [u8],
         headers: &'a ffi::HttpHeaders,
         request_body: Pin<&'a mut AsyncInputStream>,
         response: Pin<&'a mut ffi::HttpServiceResponse>,
     ) -> Result<()> {
+        let method = method_from_name(method)?;
         let response = ServiceResponse::from(response);
         self.0
             .request(method, url, HeadersRef(headers), request_body, response)

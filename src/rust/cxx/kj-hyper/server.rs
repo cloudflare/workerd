@@ -101,10 +101,10 @@ use crate::ffi::ConnectResponse;
 use crate::ffi::HttpHeaders;
 use crate::ffi::WebSocketCompression;
 use crate::ffi::WebSocketErrorHandler;
+use crate::ffi::method_allowed;
 use crate::ffi::new_body_stream;
 use crate::ffi::new_connect_response;
 use crate::ffi::new_server_response;
-use crate::ffi::parse_method;
 use crate::handshake::accept_key;
 use crate::io::Hangup;
 use crate::io::RustIo;
@@ -415,8 +415,8 @@ async fn handle(
             .connect(host.as_bytes(), HeadersRef::from(&*headers), connect)
             .await
     } else {
-        let mut method = Method::GET;
-        if !parse_method(parts.method.as_str().as_bytes(), &mut method) {
+        let name = parts.method.as_str().as_bytes();
+        if !method_allowed(name) {
             let _ = sender.send_error(
                 501,
                 b"Not Implemented",
@@ -428,14 +428,14 @@ async fn handle(
         let mut body = new_body_stream(Box::new(RustBody::new(body)));
         let mut response = new_server_response(
             Box::new(ServerResponse(Rc::clone(&sender))),
-            method,
+            name,
             &headers,
             conn.settings.websocket_compression,
             conn.settings.websocket_errors(),
         );
         conn.handler
             .request(
-                method,
+                parts.method,
                 url.as_bytes(),
                 HeadersRef::from(&*headers),
                 body.as_mut(),

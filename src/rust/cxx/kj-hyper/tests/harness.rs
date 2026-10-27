@@ -18,6 +18,7 @@ use kj::http::HeadersRef;
 use kj::http::Method;
 use kj::http::Service;
 use kj::http::ServiceResponse;
+use kj::http::method_from_name;
 use kj::io::AsyncInputStream;
 use kj::io::AsyncIoStream;
 use kj_hyper::Hangup;
@@ -384,7 +385,7 @@ impl TestClient {
 
     pub async fn request(
         &self,
-        method: Method,
+        method: &[u8],
         url: &[u8],
         headers: &ffi::HttpHeaders,
         request_body: Pin<&mut AsyncInputStream>,
@@ -393,7 +394,7 @@ impl TestClient {
         self.client
             .clone()
             .request(
-                method,
+                method_from_name(method)?,
                 url,
                 HeadersRef::from(headers),
                 request_body,

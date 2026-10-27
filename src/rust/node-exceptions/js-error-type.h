@@ -7,7 +7,8 @@
 // generated correspondence checks reference the enum by the bridge namespace
 // (`workerd::rust::node_exceptions`), so the real type must be visible there;
 // this alias provides it without duplicating the definition. Mirrors the
-// `using HttpMethod = kj::HttpMethod;` pattern in `src/rust/kj/ffi.h`.
+// `using BuiltinIndicesEnum = kj::HttpHeaders::BuiltinIndicesEnum;` alias in
+// `src/rust/kj/ffi.h`.
 namespace workerd::rust::node_exceptions {
 using JsErrorType = ::workerd::api::node::JsErrorType;
 }  // namespace workerd::rust::node_exceptions

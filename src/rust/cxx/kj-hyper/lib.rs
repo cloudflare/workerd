@@ -55,7 +55,8 @@
 //!
 //! # Dropped kj settings
 //!
-//! No `HttpServerErrorHandler` or `HttpClientErrorHandler`, no caller-supplied `EntropySource`
+//! No `HttpServerErrorHandler` or `HttpClientErrorHandler`, no `allowOtherMethods` (the server
+//! answers a method kj doesn't know by name with kj's 501), no caller-supplied `EntropySource`
 //! (handshake keys and frame masks come from `rand`), no pipeline timeout or cancelled-upload
 //! grace period, and no cipher list (`TlsOptions.cipherList` is not applied; see [`tls`]); hyper
 //! answers unparsable requests itself (see [`server`]).

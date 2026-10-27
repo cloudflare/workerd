@@ -114,7 +114,7 @@ Mark an `extern "C++"` function `async` to wrap a C++ function returning `kj::Pr
 unsafe extern "C++" {
     async fn request(
         this_: Pin<&mut HttpService>,
-        method: HttpMethod,
+        method: &[u8],
         url: &[u8],
     ) -> Result<()>;
 }
