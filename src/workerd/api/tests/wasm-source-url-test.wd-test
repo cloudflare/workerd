@@ -1,5 +1,7 @@
 using Workerd = import "/workerd/workerd.capnp";
 
+# Each worker also passes its compiled module to a loaded Worker with the other setting, which
+# must recompile it rather than keep this worker's URL.
 const unitTests :Workerd.Config = (
   services = [
     # With the flag, the module's frames name it by its module name.
@@ -9,8 +11,13 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "wasm-source-url-test.js"),
           (name = "trap.wasm", wasm = embed "wasm-source-url.wasm"),
         ],
-        compatibilityFlags = ["nodejs_compat", "wasm_source_url_support"],
-        bindings = [(name = "expectedFrame", text = "at trap.wasm:wasm-function[0]:0x")],
+        compatibilityFlags = ["nodejs_compat", "experimental", "wasm_source_url_support"],
+        bindings = [
+          (name = "expectedFrame", text = "at trap.wasm:wasm-function[0]:0x"),
+          (name = "childFlag", text = "no_wasm_source_url_support"),
+          (name = "childFrame", text = "at wasm://wasm/"),
+          (name = "loader", workerLoader = ()),
+        ],
       ),
     ),
     # The new module registry names modules by URL, and the module's frames use that URL.
@@ -20,9 +27,14 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "wasm-source-url-test.js"),
           (name = "trap.wasm", wasm = embed "wasm-source-url.wasm"),
         ],
-        compatibilityFlags = ["nodejs_compat", "wasm_source_url_support", "new_module_registry"],
+        compatibilityFlags = [
+          "nodejs_compat", "experimental", "wasm_source_url_support", "new_module_registry",
+        ],
         bindings = [
           (name = "expectedFrame", text = "at file:///bundle/trap.wasm:wasm-function[0]:0x"),
+          (name = "childFlag", text = "wasm_source_url_support"),
+          (name = "childFrame", text = "at lib/trap.wasm:wasm-function[0]:0x"),
+          (name = "loader", workerLoader = ()),
         ],
       ),
     ),
@@ -33,8 +45,13 @@ const unitTests :Workerd.Config = (
           (name = "worker", esModule = embed "wasm-source-url-test.js"),
           (name = "trap.wasm", wasm = embed "wasm-source-url.wasm"),
         ],
-        compatibilityFlags = ["nodejs_compat", "no_wasm_source_url_support"],
-        bindings = [(name = "expectedFrame", text = "at wasm://wasm/")],
+        compatibilityFlags = ["nodejs_compat", "experimental", "no_wasm_source_url_support"],
+        bindings = [
+          (name = "expectedFrame", text = "at wasm://wasm/"),
+          (name = "childFlag", text = "wasm_source_url_support"),
+          (name = "childFrame", text = "at lib/trap.wasm:wasm-function[0]:0x"),
+          (name = "loader", workerLoader = ()),
+        ],
       ),
     ),
   ],

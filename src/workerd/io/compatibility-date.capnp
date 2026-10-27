@@ -1758,4 +1758,7 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # its stack frames read `<module>:wasm-function[<index>]:<offset>` and can be matched to the
   # module's source map. Without it, V8 names a module `wasm://wasm/<hash>`, after a hash of its
   # bytes. Modules compiled at runtime, for example with `WebAssembly.compile()`, keep that URL.
+  # A compiled `WebAssembly.Module` passed to the Worker Loader is recompiled when the loaded Worker
+  # or the Worker that compiled it has this flag, so its frames follow the loaded Worker's setting
+  # and module name.
 }

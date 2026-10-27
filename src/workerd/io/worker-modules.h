@@ -77,8 +77,16 @@ jsg::ModuleRegistry::ModuleInfo addCapnpModule(
 
 // The compiled code of a Wasm module provided by another isolate, if that isolate compiled it
 // with the same compile options this one would use.
+//
+// A compiled module keeps the source URL it was compiled with. With wasm_source_url_support, that
+// URL must be the module's name in this isolate's bundle, which the other isolate can't know, so
+// the module is recompiled. If the other isolate had the flag, the module may carry that isolate's
+// module name, so an isolate without the flag recompiles too, to get V8's hash URL.
 inline kj::Maybe<v8::CompiledWasmModule> sharedCompiledWasmModule(
     const Worker::Script::WasmModule& content, const CompatibilityFlags::Reader& featureFlags) {
+  if (featureFlags.getWasmSourceUrlSupport() || content.compiledWithWasmSourceUrlSupport) {
+    return kj::none;
+  }
   KJ_IF_SOME(compiled, content.compiledModule) {
     if (content.compiledWithEsmIntegrationBuiltins ==
         featureFlags.getWasmEsmIntegrationBuiltins()) {
