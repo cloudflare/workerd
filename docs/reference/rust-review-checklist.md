@@ -108,6 +108,11 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
   `String`/`&str` map to JS strings. Integers and `#[jsg_struct]`s convert like C++ JSG's
   integers and dictionaries: out-of-range integers throw, and an absent struct field reads as
   `undefined`.
+- **Numeric `Vec`s**: a `Vec<u8>`, or a `Vec` of another Rust numeric type, converted through
+  `ToJS` (a `.to_js(lock)` call, a `#[jsg_method]` return value, or a `#[jsg_struct]` field)
+  becomes a JS `Array` of numbers. Check that an `Array` is intended: a port of C++ that returned
+  `kj::Array<kj::byte>` (an `ArrayBuffer`) or a typed array should use `to_js_array_buffer` or
+  `to_js_typed_array` instead. Ask the author; don't block on it.
 - **Persistent handles**: a handle that Rust code owns outside resources is a `jsg::v8::Global`,
   which GC never visits and which keeps its handle inline. A handle that a resource owns is a
   `jsg::v8::TracedGlobal`, which GC traces so that a cycle through it can be collected, and which
