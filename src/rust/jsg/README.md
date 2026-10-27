@@ -556,6 +556,38 @@ or a JavaScript exception is pending, `Function::new` creates nothing and return
 propagating. As with the functions C++ JSG wraps, the function's `name` is empty, its `length` is
 0, and it can be called with `new`.
 
+### Conventions of the `v8` module
+
+The `v8` module takes handles and returns handles. Converting between a Rust value and a
+JavaScript value is the job of `FromJS` and `ToJS`, not of a `v8` method.
+
+- A method returns a Rust value only where V8 itself returns a C scalar, or copies memory out
+  (`to_vec`, `to_string`). The scalar comes from a typed handle (`value`, `length`, `value_of`,
+  `int64_value`, `is_*`, `byte_length`), or from one of V8's own coercions of any value
+  (`int32_value`, `uint32_value`, `integer_value`). `Function::call` and `Object::get` return a
+  `Local<Value>`; convert it where a Rust value is wanted:
+
+  ```rust
+  let result = func.call(lock, None, &[x, y])?;
+  let sum = f64::from_js(lock, result)?;
+  ```
+
+- A method takes raw Rust data only where V8 takes C data: a constructor's input
+  (`String::new_from_str`, `Number::new`, `Integer::new`), an index, a time, and a `&str`
+  property key as a convenience (`obj.get(lock, "name")`).
+- A method that can run JavaScript, or that needs a context, returns a `Result`, as the
+  coercions do; its error is usually pending (see
+  [Errors from JavaScript](#errors-from-javascript)). It returns an `Option` only for "absent",
+  as `int64_value` does for a `BigInt` that does not fit, or for "V8 refused, with nothing
+  pending", as the `String` constructors do for input longer than `String::MAX_LENGTH`. The
+  exception is `String::new_from_utf8_literal`, which panics for an overlong literal, as V8's
+  `NewFromUtf8Literal` fails a `static_assert`. A method never has an infallible signature over
+  a C++ shim that can throw: the shim is declared `Result` in the bridge, or Rust decides before
+  calling it, as `String::new_from_utf8` checks the length.
+- Naming: `as_*` is free and borrows (`as_slice`, `as_local`); `to_*` costs a copy or an
+  allocation (`to_vec`, `to_string`, `to_global`); `value` and `*_value` read a scalar under
+  the name V8 gives it (`Local<Number>::value`, `int64_value`, `int32_value`).
+
 ## Errors from JavaScript
 
 When a function that `Local<Function>::call` calls throws, the exception stays pending in V8, as with C++ JSG's `JsExceptionThrown`, and `call` returns an error for which `Error::is_pending()` is true. The same goes for these other operations that run JavaScript: converting a value to a string or a number (its `toString`, `valueOf` or `Symbol.toPrimitive`, or a Proxy trap), `Object::get` and `Object::has` (a getter or Proxy trap), `Object::set` (a setter, also one on the prototype chain, or a Proxy trap) and `Array::set` (a setter, also one on the prototype chain), `Array::iterate` and so converting to a `Vec` (an element's getter), and `ser::serialize` (a getter or Proxy trap, or a `DataCloneError`). Building the array when converting a `Vec` to JavaScript runs no JavaScript: like C++ JSG, it defines the elements as data properties (`Array::with_elements`), so no setter on `Array.prototype` runs. Nor does converting a `jsg::Dict` to JavaScript, which defines its entries as data properties. A `#[jsg_struct]` follows C++ JSG's `fast_jsg_struct` flag: with it, the fields are defined as data properties (`Object::with_data_properties`), an absent optional field as `undefined`, and no JavaScript runs; without it, they are set one by one with `Object::set`, an absent optional field is omitted, so a setter on `Object.prototype` runs, and what it throws is passed on. `Error`'s own `FromJS`, which reads `name` and `message`, passes such an error on too. `Lock::throw_exception` throws nothing for that error, so a callback that returns it propagates the original exception to its JavaScript caller. V8 keeps reporting the exception where it was thrown, and DevTools' "pause on uncaught exceptions" still sees whether JavaScript further up catches it. A termination is handled the same way.
