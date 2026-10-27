@@ -23,6 +23,7 @@ Subdirectory `AGENTS.md` files provide component-specific context (key classes, 
 
 - Main build command: `bazel build //src/workerd/server:workerd`
 - Binary output: `bazel-bin/src/workerd/server/workerd`
+- Remote execution: if `cloudflared access token -app=https://bazelflare-workerd.runtime-playground.workers.dev` prints a token, pass `--config=bazelflare` to Bazel, directly or through a `just` recipe that forwards its arguments to Bazel (`just build`, `just test`, `just stream-test`, `just node-test`); otherwise build locally. See `docs/development.md`
 
 ### Just Commands (recommended for development)
 

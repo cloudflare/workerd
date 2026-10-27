@@ -5,6 +5,7 @@ cc_library(
     defines = ["WORKERD_ICU_DATA_EMBED"],
     visibility = ["//visibility:public"],
     deps = [
+        "@workerd//:icu",
         "@workerd//:icudata-embed",
         "@workerd//:v8_icu",
     ],
