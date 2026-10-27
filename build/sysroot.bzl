@@ -27,6 +27,15 @@ def _sysroot_impl(rctx):
         for line in rctx.read(md5sums).splitlines():
             keep[line.split("  ", 1)[1]] = True
 
+    # A few kernel headers differ only in case (netfilter's xt_CONNMARK.h and xt_connmark.h, ...).
+    # On a case-insensitive file system, such as macOS's, one overwrites the other, so the sysroot's
+    # tree, and with it the key of every action that takes it, would differ from Linux's, and a Mac
+    # would miss every cache entry that CI wrote. Nothing we build includes them, so all go.
+    lowered = {}
+    for path in keep:
+        lowered[path.lower()] = lowered.get(path.lower(), 0) + 1
+    keep = {path: True for path in keep if lowered[path.lower()] == 1}
+
     # Starlark has neither recursion nor while loops, so this walks the tree from an explicit stack.
     # A directory is visited after its parent, so walking the visit order backwards reaches children
     # first, which lets directories left empty go too.
