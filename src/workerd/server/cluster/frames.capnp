@@ -11,6 +11,19 @@
 using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("workerd::server::cluster");
 
+struct FileHeader {
+  # The first message of every file in the bucket. A file's level and
+  # range are in its key, not here.
+
+  union {
+    log @0 :Void;
+    # Frames follow.
+
+    snapshot @1 :SnapshotHeader;
+    # Each lane's content follows.
+  }
+}
+
 struct Frame {
   # A batch of frames in the bucket starts and ends at a commit, and is
   # applied whole.

@@ -7,7 +7,7 @@
 //! wrote.
 //!
 //! An epoch's log is a chain of files under its prefix, each one LZ4
-//! frame: `0000/<first>-<last>.log`, the frames of commits `first..=last`,
+//! frame that starts with a `FileHeader`: `0000/<first>-<last>.log`, the frames of commits `first..=last`,
 //! and `0009/0000000000000001-<last>.log`, a snapshot through `last`. A
 //! restore is the newest snapshot and the files that extend it; a frame a
 //! file before already applied is skipped by its sequence.
@@ -21,6 +21,7 @@ use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
+use frames_capnp::file_header;
 use frames_capnp::frame;
 use frames_capnp::snapshot_header;
 use futures::StreamExt;
@@ -88,8 +89,8 @@ fn frame_at(out: &mut Vec<u8>, session: u32, sequence: u32, body: Body) {
     let _ = capnp::serialize::write_message(&mut *out, &message);
 }
 
-/// Merges the frames of `entries`, consecutive commits, so each run of
-/// page frames becomes one with the newest version of each page.
+/// The log file of `entries`, consecutive commits: each run of page frames
+/// becomes one with the newest version of each page.
 pub fn merge(entries: &[Vec<u8>]) -> Result<Vec<u8>> {
     let mut messages = Vec::new();
     for entry in entries {
@@ -99,6 +100,9 @@ pub fn merge(entries: &[Vec<u8>]) -> Result<Vec<u8>> {
         }
     }
     let mut out = Vec::new();
+    let mut header = capnp::message::Builder::new_default();
+    header.init_root::<file_header::Builder>().set_log(());
+    capnp::serialize::write_message(&mut out, &header)?;
     let mut run: Option<(u32, u32, Pages)> = None;
     let flush = |out: &mut Vec<u8>, run: &mut Option<(u32, u32, Pages)>| {
         if let Some((session, sequence, (commit, mut pages))) = run.take() {
@@ -166,14 +170,19 @@ impl Replay {
         })
     }
 
-    /// Applies the file `path` of the chain at `level`.
-    pub fn apply(&mut self, level: i32, path: &Path) -> Result<()> {
+    /// Applies the file `path` of the chain.
+    pub fn apply(&mut self, path: &Path) -> Result<()> {
         let file = std::fs::File::open(path)?;
         let mut r = BufReader::new(lz4_flex::frame::FrameDecoder::new(file));
-        if level == SNAPSHOT_LEVEL {
-            return self.snapshot(&mut r);
+        let message = capnp::serialize::read_message(&mut r, options())?;
+        match message.get_root::<file_header::Reader>()?.which()? {
+            file_header::Log(()) => self.log(&mut r),
+            file_header::Snapshot(header) => self.snapshot(header?, &mut r),
         }
-        while let Some(message) = capnp::serialize::try_read_message(&mut r, options())? {
+    }
+
+    fn log(&mut self, r: &mut impl Read) -> Result<()> {
+        while let Some(message) = capnp::serialize::try_read_message(&mut *r, options())? {
             let f = message.get_root::<frame::Reader>()?;
             let at = (f.get_session(), f.get_sequence());
             if self.next.is_some_and(|next| at < next) {
@@ -185,9 +194,7 @@ impl Replay {
         Ok(())
     }
 
-    fn snapshot(&mut self, r: &mut impl Read) -> Result<()> {
-        let message = capnp::serialize::read_message(&mut *r, options())?;
-        let header = message.get_root::<snapshot_header::Reader>()?;
+    fn snapshot(&mut self, header: snapshot_header::Reader, r: &mut impl Read) -> Result<()> {
         self.next = Some((header.get_session(), header.get_frame()));
         self.live = false;
         self.db.set_len(0)?;
@@ -258,7 +265,7 @@ fn write_snapshot(
     payload: impl FnOnce(&mut dyn Write) -> Result<()>,
 ) -> Result<u64> {
     let mut message = capnp::message::Builder::new_default();
-    let mut header = message.init_root::<snapshot_header::Builder>();
+    let mut header = message.init_root::<file_header::Builder>().init_snapshot();
     header.set_session(session);
     header.set_frame(frame);
     let mut lanes = header.init_lanes(u32::from(size.is_some()));
@@ -304,8 +311,8 @@ pub fn snapshot_file(path: &Path, out: &Path, session: u32) -> Result<Option<u64
 pub fn compact(files: &[(File, PathBuf)], out: &Path) -> Result<u64> {
     let db = with_suffix(out, ".db");
     let mut replay = Replay::new(&db)?;
-    for (f, path) in files {
-        replay.apply(f.level, path)?;
+    for (_, path) in files {
+        replay.apply(path)?;
     }
     let size = replay.write_snapshot(out);
     let _ = std::fs::remove_file(&db);
@@ -438,8 +445,8 @@ pub async fn restore(log: &Log, output: &Path) -> Result<Txid> {
         Ok(()) => {
             crate::owner::blocking(move || {
                 let mut replay = Replay::new(&output)?;
-                for (f, path) in &files {
-                    replay.apply(f.level, path)?;
+                for (_, path) in &files {
+                    replay.apply(path)?;
                 }
                 replay.finish()
             })
