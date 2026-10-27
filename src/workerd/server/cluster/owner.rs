@@ -393,20 +393,29 @@ impl Owners {
     /// upload. The snapshot merges the chain's files, never the live
     /// database, so the merge runs off the event loop.
     async fn compact(&self, slot: &Slot) {
-        let (replica, epoch, chain) = {
+        let (replica, epoch, chain, key) = {
             let guard = slot.object.lock().await;
             let chain = chain(&guard.files);
             if chain.is_empty() {
                 return;
             }
-            (guard.replica.clone(), guard.epoch, chain)
+            // A gap strands every file past it: say so, since the chain's
+            // prefix still compacts and nothing else would show it.
+            let end = guard.files.iter().map(|f| f.last).max();
+            let key = format!("{}/{}", guard.ns, guard.actor);
+            if end > chain.last().map(|f| f.last) {
+                tracing::warn!("cluster: {key} chain has a gap before {end:?}");
+            }
+            (guard.replica.clone(), guard.epoch, chain, key)
         };
-        let Ok(snapshot) = merged(&replica, &chain).await else {
-            return;
+        let snapshot = match merged(&replica, &chain).await {
+            Ok(snapshot) => snapshot,
+            Err(e) => return tracing::warn!("cluster: {key} compaction failed: {e}"),
         };
         let last = snapshot.last;
-        let Ok(snapshot) = upload(&replica, snapshot).await else {
-            return;
+        let snapshot = match upload(&replica, snapshot).await {
+            Ok(snapshot) => snapshot,
+            Err(e) => return tracing::warn!("cluster: {key} snapshot upload failed: {e}"),
         };
         let replaced: Vec<File> = {
             let mut guard = slot.object.lock().await;
