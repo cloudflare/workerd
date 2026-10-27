@@ -7,12 +7,18 @@
 //
 // The default export serves the SELF binding used by the integration
 // tests: it echoes the request body back, letting tests round-trip a
-// ReadableStream through the fetch machinery in both directions.
+// ReadableStream through the fetch machinery in both directions, and
+// reports the Content-Length the request carried.
 
 export default {
   async fetch(request) {
     return new Response(request.body, {
-      headers: { 'content-type': 'application/octet-stream' },
+      headers: {
+        'content-type': 'application/octet-stream',
+        'observed-content-length': String(
+          request.headers.get('content-length')
+        ),
+      },
     });
   },
 };
@@ -200,6 +206,7 @@ export {
   nonBytesChunkInClosingBatch,
   transformExpectedLengthOverflow,
   transformExpectedLengthMet,
+  sourceExpectedLengthOverflow,
 } from 'integration-body-failures';
 
 export {
@@ -252,6 +259,7 @@ export {
   drainingReaderErrorPropagation,
   drainingReaderCancelReachesSource,
   drainingReaderLockExclusivity,
+  drainingReaderReportsDeclaredLength,
 } from 'draining-reader';
 
 export {

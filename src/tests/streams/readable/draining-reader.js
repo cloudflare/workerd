@@ -17,9 +17,10 @@
 // as the C++ bridge's, can meet), reaches the close all the same: it
 // reports done and closes the stream in that call, as a default read
 // closes it as it takes the last chunk; value chunks pass through the
-// conduit UNTOUCHED (object identity included); a JS stream never
-// declares an expectedLength; cancel and error propagate through the
-// conduit like a default reader's.
+// conduit UNTOUCHED (object identity included); a JS stream's
+// expectedLength is its source's declaration, undefined if it declares
+// none; cancel and error propagate through the conduit like a default
+// reader's.
 
 /* global ReadableStreamDrainingReader */
 
@@ -217,5 +218,20 @@ export const drainingReaderLockExclusivity = {
     reader.releaseLock();
     strictEqual(rs.locked, false);
     ok(rs.getReader());
+  },
+};
+
+export const drainingReaderReportsDeclaredLength = {
+  test() {
+    if (!usingTsImpl) {
+      strictEqual(typeof ReadableStreamDrainingReader, 'undefined');
+      return;
+    }
+    // The source's declaration, as a bigint, until the reader is released.
+    const rs = new ReadableStream({ expectedLength: 5 });
+    const reader = new ReadableStreamDrainingReader(rs);
+    strictEqual(reader.expectedLength, 5n);
+    reader.releaseLock();
+    strictEqual(reader.expectedLength, undefined);
   },
 };

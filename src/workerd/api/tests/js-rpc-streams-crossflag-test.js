@@ -248,7 +248,8 @@ export const readableLength = {
       assert.deepStrictEqual(await inspectLength(returned, env.HTTP), expected);
     }
 
-    // Native HTTP bodies and the two queued controller types supply lengths differently.
+    // Native HTTP bodies, a TransformStream's readable, and default and byte sources each
+    // declare their length.
     const text = 'known length';
     const bytes = enc.encode(text);
     const expected = { length: String(bytes.byteLength), text };
@@ -266,6 +267,16 @@ export const readableLength = {
           .body,
       ],
       ['value', valueStream.readable],
+      [
+        'source',
+        new ReadableStream({
+          expectedLength: bytes.byteLength,
+          start(c) {
+            c.enqueue(bytes.slice());
+            c.close();
+          },
+        }),
+      ],
       [
         'bytes',
         new ReadableStream({

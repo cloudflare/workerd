@@ -5,9 +5,10 @@
 // What body consumption (text/arrayBuffer/bytes/json) does when it fails
 // on the consumer's side rather than the source's: the stream is cancelled
 // with the failure, so the source's cancel() runs and pulls stop, and the
-// stream stays locked (PARITY). DIVERGENCE (ledger #21): a TransformStream
-// readable declaring `expectedLength` and delivering more is such a
-// failure in TypeScript; C++ consumption ignores the declaration.
+// stream stays locked (PARITY). DIVERGENCE (ledger #21): a default source
+// or a TransformStream readable declaring `expectedLength` and delivering
+// more is such a failure in TypeScript; C++ consumption ignores the
+// declaration.
 
 import { strictEqual, deepStrictEqual, ok, rejects, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -181,5 +182,44 @@ export const transformExpectedLengthMet = {
     await writer.write(enc.encode('hello'));
     await writer.close();
     strictEqual(await consumed, 'hello');
+  },
+};
+
+// Ledger #21 for a default source declaring expectedLength: TypeScript
+// rejects the consumer with the same RangeError and cancels the source
+// with it; C++ returns everything. The source's second pull closes it
+// only after a timer, so the stream is still open when TypeScript finds
+// the overflow.
+export const sourceExpectedLengthOverflow = {
+  async test() {
+    let pulls = 0;
+    let cancelReason;
+    const rs = new ReadableStream({
+      expectedLength: 3,
+      async pull(c) {
+        if (++pulls === 1) {
+          c.enqueue(enc.encode('hello'));
+          return;
+        }
+        await scheduler.wait(1);
+        if (cancelReason === undefined) c.close();
+      },
+      cancel(reason) {
+        cancelReason = reason;
+      },
+    });
+    const consumed = new Response(rs).text();
+    if (usingTsImpl) {
+      const expected = {
+        name: 'RangeError',
+        message: 'stream delivered more bytes than its declared expectedLength',
+      };
+      await rejects(consumed, expected);
+      ok(cancelReason instanceof RangeError);
+      strictEqual(cancelReason.message, expected.message);
+    } else {
+      strictEqual(await consumed, 'hello');
+      strictEqual(cancelReason, undefined);
+    }
   },
 };
