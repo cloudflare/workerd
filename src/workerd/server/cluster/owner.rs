@@ -3,13 +3,12 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 //! The owner's side of an object: taking it over, the commit path, and
-//! keeping its chain in the bucket compact.
+//! keeping its log in the bucket compact.
 //!
 //! A commit is acknowledged once the bucket holds it and own.json still
-//! names the epoch after the upload. Each epoch's commits form a chain of
-//! log files under `do/<ns>/<actor>/log/e<epoch>`, starting with a snapshot
-//! of the state the epoch inherited; a takeover restores the last opened
-//! epoch's chain.
+//! names the epoch after the upload. Each epoch writes its own session of
+//! the object's log, starting with a snapshot of the state it inherited; a
+//! takeover restores the last opened epoch's session.
 
 use std::cell::Cell;
 use std::cell::RefCell;
@@ -26,13 +25,12 @@ use crate::Epoch;
 use crate::Error;
 use crate::Ownership;
 use crate::Result;
-use crate::Txid;
+use crate::Sequence;
 use crate::capture::Capture;
 use crate::log::Cursor;
 use crate::log::File;
 use crate::log::Log;
-use crate::log::SNAPSHOT_LEVEL;
-use crate::log::chain;
+use crate::log::plan;
 use crate::ownership::Owned;
 
 /// Objects compacting at once, and deletes in flight for one compaction.
@@ -48,8 +46,8 @@ struct Slot {
     /// Outside the lock: `SQLite` reports WAL writes synchronously, and may
     /// while an upload holds the lock.
     capture: RefCell<Capture>,
-    /// Through where commits are in the bucket, by epoch, then txid.
-    acked: tokio::sync::watch::Sender<(Epoch, Txid)>,
+    /// Up to where commits are in the bucket, by epoch, then frame.
+    acked: tokio::sync::watch::Sender<(Epoch, Sequence)>,
     /// Whether a commit is uploading on behalf of the others.
     pushing: Cell<bool>,
 }
@@ -65,14 +63,14 @@ impl Slot {
         })
     }
 
-    /// The bucket holds everything through `through`.
-    fn tiered(&self, object: &mut Object, through: Txid, file: Option<File>) {
+    /// The bucket holds everything up to `through`.
+    fn tiered(&self, object: &mut Object, through: Sequence, file: Option<File>) {
         object.tiered = object.tiered.max(through);
         object.files.extend(file);
         self.capture.borrow_mut().forget(through);
     }
 
-    fn ack(&self, epoch: Epoch, through: Txid) {
+    fn ack(&self, epoch: Epoch, through: Sequence) {
         self.acked.send_if_modified(|acked| {
             let more = (epoch, through) > *acked;
             *acked = (*acked).max((epoch, through));
@@ -99,12 +97,12 @@ struct Object {
     actor: String,
     epoch: Epoch,
     replica: Replica,
-    /// How far the epoch's chain in the bucket is contiguous.
-    tiered: Txid,
+    /// How far the epoch's session in the bucket is contiguous.
+    tiered: Sequence,
     /// Where the capture was at eviction.
     cursor: Cursor,
-    /// The files of this epoch's chain. Only this owner writes the epoch's
-    /// prefix, so compaction deletes from here rather than listing it.
+    /// The files of this epoch's session. Only this owner writes it, so
+    /// compaction deletes from here rather than listing it.
     files: Vec<File>,
 }
 
@@ -119,8 +117,8 @@ pub struct Owners {
     /// Evictions in flight. Objects written together go idle together, and
     /// a node's lease renewals must not wait behind all their uploads.
     evictions: tokio::sync::Semaphore,
-    /// Objects evicted with the bucket holding their epoch's chain: this
-    /// node's database file is that chain's state.
+    /// Objects evicted with the bucket holding their epoch's session: this
+    /// node's database file is that session's state.
     dormant: RefCell<HashMap<String, Object>>,
 }
 
@@ -140,8 +138,12 @@ impl Owners {
         }
     }
 
-    fn client(&self, ns: &str, actor: &str, epoch: Epoch) -> Log {
-        let path = format!("{}do/{ns}/{actor}/log/e{epoch}", self.bucket.prefix());
+    fn client(&self, ns: &str, actor: &str) -> Log {
+        let path = format!(
+            "{}{}",
+            self.bucket.prefix(),
+            crate::object_prefix(ns, actor)
+        );
         Log::new(self.bucket.at(&path))
     }
 
@@ -161,7 +163,7 @@ impl Owners {
                 return Ok(());
             }
             // Woken where it was evicted, own.json unchanged: continue the
-            // epoch's chain over the file, with no write to the bucket. A
+            // epoch's session over the file, with no write to the bucket. A
             // dormant entry forgotten since the claim fails this attempt;
             // the retry recovers at the next epoch.
             let dormant = self.dormant.borrow_mut().remove(&key);
@@ -170,7 +172,7 @@ impl Owners {
                     "{key}: not open here, nor dormant"
                 )));
             };
-            let capture = Capture::resume(path, object.tiered, object.cursor);
+            let capture = Capture::resume(path, object.cursor);
             tracing::info!(
                 "cluster: {ns}/{actor} epoch {} resumes at {}",
                 object.epoch,
@@ -192,35 +194,31 @@ impl Owners {
             remove_database(path)?;
             if let Some(recover) = recover {
                 // Nothing in the bucket: an object that committed nothing.
-                let end = crate::log::restore(&self.client(ns, actor, recover), path).await?;
+                let log = self.client(ns, actor);
+                let end = crate::log::restore(&log, recover as u32, path).await?;
                 tracing::info!(
-                    "cluster: {ns}/{actor} epoch {} recovers {recover}: bucket through {end}",
+                    "cluster: {ns}/{actor} epoch {} recovers {recover}: bucket up to {end}",
                     owned.epoch
                 );
             }
         }
-        // The state the epoch inherits is its snapshot at txid 1, written
-        // from the file on the blocking pool; a new object has none.
+        // The state the epoch inherits is its session's snapshot at frame
+        // 0, written from the file on the blocking pool; a new object has
+        // none.
         let cache = open_cache(path, owned.epoch)?;
-        let snapshot = File {
-            level: SNAPSHOT_LEVEL,
-            first: 1,
-            last: 1,
-            size: 0,
-        };
         let session = owned.epoch as u32;
-        let size = if self.opened.borrow().contains_key(&key) {
+        let snapshot = if self.opened.borrow().contains_key(&key) {
             None
         } else {
-            let (path, out) = (path.to_owned(), cache.join(snapshot.name()));
-            blocking(move || crate::log::snapshot_file(&path, &out, session)).await?
+            let (path, cache) = (path.to_owned(), cache.clone());
+            blocking(move || crate::log::snapshot_file(&path, &cache, session)).await?
         };
-        let snapshot = size.map(|size| File { size, ..snapshot });
         let cursor = Cursor {
             session,
+            lane: snapshot.is_some(),
             ..Cursor::default()
         };
-        let capture = Capture::resume(path, snapshot.map_or(0, |f| f.last), cursor);
+        let capture = Capture::resume(path, cursor);
         let object = self
             .open_epoch(ownership, ns, actor, owned, cache, snapshot)
             .await?;
@@ -253,9 +251,9 @@ impl Owners {
         Ok(true)
     }
 
-    /// Open a claimed epoch over the recovered state. Its chain starts with
-    /// the state's snapshot at txid 1 (none for an empty database), which
-    /// the bucket holds before the epoch opens.
+    /// Open a claimed epoch over the recovered state. Its session starts
+    /// with the state's snapshot (none for an empty database), which the
+    /// bucket holds before the epoch opens.
     async fn open_epoch(
         &self,
         ownership: &Ownership,
@@ -270,8 +268,9 @@ impl Owners {
             actor: actor.to_owned(),
             epoch: owned.epoch,
             replica: Replica {
-                client: self.client(ns, actor, owned.epoch),
+                client: self.client(ns, actor),
                 cache,
+                session: owned.epoch as u32,
             },
             tiered: 0,
             cursor: Cursor::default(),
@@ -288,7 +287,6 @@ impl Owners {
         }
         if let Some(snapshot) = snapshot {
             object.files.push(upload(&object.replica, snapshot).await?);
-            object.tiered = 1;
         }
         if !ownership.open(ns, actor, owned.epoch).await? {
             return Err(Error::Contended(format!(
@@ -335,11 +333,11 @@ impl Owners {
         let (ns, actor, epoch, round, staged, replica) = {
             let guard = slot.object.lock().await;
             let round = slot.capture.borrow().last()?;
-            let staged = stage(|t| slot.capture.borrow().entry(t), guard.tiered, round)?;
+            let staged = stage(&slot.capture.borrow(), guard.tiered, round)?;
             let (ns, actor) = (guard.ns.clone(), guard.actor.clone());
             (ns, actor, guard.epoch, round, staged, guard.replica.clone())
         };
-        let file = put(&replica, 0, staged).await?;
+        let file = put(&replica, round, staged).await?;
         {
             let mut guard = slot.object.lock().await;
             if guard.epoch == epoch {
@@ -355,7 +353,7 @@ impl Owners {
         Ok(())
     }
 
-    /// Compact every owned object's chain that grew long enough. Runs off
+    /// Snapshot every owned object whose log outgrew its database. Runs off
     /// the commit path.
     pub async fn tier(&self) {
         let objects: Vec<_> = self.objects.borrow().values().cloned().collect();
@@ -375,44 +373,37 @@ impl Owners {
         let Ok(through) = object.capture.borrow().last() else {
             return;
         };
-        let staged = stage(|t| object.capture.borrow().entry(t), guard.tiered, through);
+        let staged = stage(&object.capture.borrow(), guard.tiered, through);
         let Ok(Some(staged)) = staged else {
             return;
         };
         let replica = guard.replica.clone();
         drop(guard);
-        let Ok(file) = put(&replica, 0, Some(staged)).await else {
+        let Ok(file) = put(&replica, through, Some(staged)).await else {
             return;
         };
         let mut guard = object.object.lock().await;
         object.tiered(&mut guard, through, file);
     }
 
-    /// Write a snapshot of an epoch's chain at `SNAPSHOT_LEVEL` and delete
-    /// what it covers, so a takeover's restore reads one file, not one per
-    /// upload. The snapshot merges the chain's files, never the live
-    /// database, so the merge runs off the event loop.
+    /// Snapshot an epoch's session from its newest snapshot and the batches
+    /// past it, and delete what the new one covers, so a takeover's restore
+    /// reads one file, not one per upload. The snapshot replays the log,
+    /// never the live database, so it runs off the event loop.
     async fn compact(&self, slot: &Slot) {
-        let (replica, epoch, chain, key) = {
+        let (replica, epoch, plan, key) = {
             let guard = slot.object.lock().await;
-            let chain = chain(&guard.files);
-            if chain.is_empty() {
-                return;
-            }
-            // A gap strands every file past it: say so, since the chain's
-            // prefix still compacts and nothing else would show it.
-            let end = guard.files.iter().map(|f| f.last).max();
             let key = format!("{}/{}", guard.ns, guard.actor);
-            if end > chain.last().map(|f| f.last) {
-                tracing::warn!("cluster: {key} chain has a gap before {end:?}");
-            }
-            (guard.replica.clone(), guard.epoch, chain, key)
+            (guard.replica.clone(), guard.epoch, plan(&guard.files), key)
         };
-        let snapshot = match merged(&replica, &chain).await {
+        let snapshot = match merged(&replica, &plan).await {
             Ok(snapshot) => snapshot,
             Err(e) => return tracing::warn!("cluster: {key} compaction failed: {e}"),
         };
-        let last = snapshot.last;
+        let from = plan.first().filter(|f| f.snapshot).map_or(0, |f| f.frame);
+        if snapshot.frame <= from {
+            return tracing::warn!("cluster: {key} log has a gap after {from}");
+        }
         let snapshot = match upload(&replica, snapshot).await {
             Ok(snapshot) => snapshot,
             Err(e) => return tracing::warn!("cluster: {key} snapshot upload failed: {e}"),
@@ -422,10 +413,10 @@ impl Owners {
             if guard.epoch != epoch {
                 return;
             }
-            slot.tiered(&mut guard, last, Some(snapshot));
+            slot.tiered(&mut guard, snapshot.frame, Some(snapshot));
             let (replaced, kept) = std::mem::take(&mut guard.files)
                 .into_iter()
-                .partition(|f| f.last <= last && *f != snapshot);
+                .partition(|f| f.frame <= snapshot.frame && *f != snapshot);
             guard.files = kept;
             replaced
         };
@@ -490,8 +481,8 @@ impl Owners {
         self.opened.borrow_mut().remove(&key);
     }
 
-    /// An owned object's database was deleted: its chain continues with an
-    /// empty database, which the next commit makes durable.
+    /// An owned object's database was deleted: its session continues with
+    /// an empty database, which the next commit makes durable.
     pub fn database_reset(&self, ns: &str, actor: &str) {
         if let Some(slot) = self.objects.borrow().get(&object_key(ns, actor)) {
             slot.capture.borrow_mut().reset();
@@ -506,54 +497,28 @@ impl Owners {
     }
 }
 
-/// One log file covering txids `first..=last`, ready to upload.
-struct Staged {
-    first: Txid,
-    last: Txid,
-    bytes: Vec<u8>,
-}
-
-/// The capture's entries after `from` through `through`, as one log file.
-fn stage(
-    entry: impl Fn(Txid) -> Result<Vec<u8>>,
-    from: Txid,
-    through: Txid,
-) -> Result<Option<Staged>> {
-    if through <= from {
+/// The capture's frames from `from` up to `to`, as one batch.
+fn stage(capture: &Capture, from: Sequence, to: Sequence) -> Result<Option<Vec<u8>>> {
+    if to <= from {
         return Ok(None);
     }
-    let files = (from + 1..=through)
-        .map(entry)
-        .collect::<Result<Vec<_>>>()?;
-    Ok(Some(Staged {
-        first: from + 1,
-        last: through,
-        bytes: crate::log::compress(&crate::log::merge(&files)?)?,
-    }))
+    Ok(Some(crate::log::compress(&capture.batch(from, to)?)?))
 }
 
-/// `chain`'s files replayed into this node's copy of a snapshot covering
-/// txid 1 through the chain's end, on the blocking pool. A missing copy is
-/// fetched from the bucket first.
-async fn merged(replica: &Replica, chain: &[File]) -> Result<File> {
-    let paths: Vec<_> = chain.iter().map(|f| replica.cache.join(f.name())).collect();
-    for (f, path) in chain.iter().zip(&paths) {
+/// `plan`'s files replayed into this node's copy of a snapshot, on the
+/// blocking pool. A missing copy is fetched from the bucket first.
+async fn merged(replica: &Replica, plan: &[File]) -> Result<File> {
+    let paths: Vec<_> = plan.iter().map(|f| replica.cache.join(f.name())).collect();
+    for (f, path) in plan.iter().zip(&paths) {
         if !path.exists() {
             let tmp = tmp_path(path);
             replica.client.get(f, &tmp).await?;
             std::fs::rename(&tmp, path)?;
         }
     }
-    let snapshot = File {
-        level: SNAPSHOT_LEVEL,
-        first: 1,
-        last: chain.last().map_or(0, |f| f.last),
-        size: 0,
-    };
-    let out = replica.cache.join(snapshot.name());
-    let files: Vec<_> = chain.iter().copied().zip(paths).collect();
-    let size = blocking(move || crate::log::compact(&files, &out)).await?;
-    Ok(File { size, ..snapshot })
+    let files: Vec<_> = plan.iter().copied().zip(paths).collect();
+    let cache = replica.cache.clone();
+    blocking(move || crate::log::compact(&files, &cache)).await
 }
 
 /// Writes a copy whole and renames it into place, so a reader never sees
@@ -582,17 +547,17 @@ pub async fn blocking<T: Send + 'static>(
         .map_err(|e| Error::Replica(format!("blocking task: {e}")))?
 }
 
-/// Where an epoch's chain is: the bucket, and this node's copy of it.
+/// Where an epoch's session is: the bucket, and this node's copy of it.
 #[derive(Clone)]
 struct Replica {
     client: Log,
     /// `<database>.log/e<epoch>`.
     cache: PathBuf,
+    session: u32,
 }
 
 /// The copies' directory for `epoch` of the database at `path`, created
-/// empty. Other epochs' copies are removed: a file name repeats in every
-/// epoch's chain.
+/// empty. Other epochs' copies are removed.
 fn open_cache(path: &Path, epoch: Epoch) -> Result<PathBuf> {
     let root = cache_root(path);
     remove_dir(&root)?;
@@ -614,22 +579,18 @@ fn remove_dir(path: &Path) -> Result<()> {
     }
 }
 
-/// L0 files a snapshot waits for, so a small object does not snapshot on
-/// nearly every commit.
-const SNAPSHOT_MIN_FILES: usize = 32;
-
-/// Whether `files` call for a snapshot: the L0 bytes since the last one
-/// reach its size, so bucket writes stay within about twice
-/// the log whatever the database's size.
+/// Whether `files`, a session's, call for a snapshot: the log since the
+/// last one reached its size, so bucket writes stay within about twice the
+/// log whatever the database's size.
 fn snapshot_due(files: &[File]) -> bool {
-    let image: u64 = files
-        .iter()
-        .filter(|f| f.level == SNAPSHOT_LEVEL)
-        .map(|f| f.size)
-        .max()
-        .unwrap_or(0);
-    let l0: Vec<_> = files.iter().filter(|f| f.level == 0).collect();
-    l0.len() >= SNAPSHOT_MIN_FILES && l0.iter().map(|f| f.size).sum::<u64>() >= image
+    let (image, log) = plan(files).iter().fold((0, 0), |(image, log), f| {
+        if f.snapshot {
+            (f.size, log)
+        } else {
+            (image, log + f.size)
+        }
+    });
+    log > 0 && log >= image
 }
 
 /// Uploads this node's copy of `file`.
@@ -639,15 +600,16 @@ async fn upload(replica: &Replica, file: File) -> Result<File> {
     Ok(file)
 }
 
-/// Keeps `staged`, if any, as this node's copy at `level`, then uploads it.
-async fn put(replica: &Replica, level: i32, staged: Option<Staged>) -> Result<Option<File>> {
-    let Some(Staged { first, last, bytes }) = staged else {
+/// Keeps `staged`, if any, as this node's copy of the batch up to `to`,
+/// then uploads it.
+async fn put(replica: &Replica, to: Sequence, staged: Option<Vec<u8>>) -> Result<Option<File>> {
+    let Some(bytes) = staged else {
         return Ok(None);
     };
     let file = File {
-        level,
-        first,
-        last,
+        snapshot: false,
+        session: replica.session,
+        frame: to,
         size: bytes.len() as u64,
     };
     let path = replica.cache.join(file.name());
@@ -677,48 +639,24 @@ fn remove_database(path: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn file(level: i32, size: u64) -> File {
+    fn file(snapshot: bool, frame: Sequence, size: u64) -> File {
         File {
-            level,
-            first: 1,
-            last: 1,
+            snapshot,
+            session: 1,
+            frame,
             size,
         }
     }
 
-    fn span(level: i32, first: Txid, last: Txid) -> File {
-        File {
-            level,
-            first,
-            last,
-            size: 0,
-        }
-    }
-
-    #[test]
-    fn a_chain_is_what_a_restore_reads() {
-        let snapshot = span(SNAPSHOT_LEVEL, 1, 4);
-        let (narrow, wide) = (span(0, 5, 6), span(0, 5, 8));
-        let chain = chain(&[span(0, 9, 9), narrow, snapshot, wide]);
-        assert_eq!(chain, vec![snapshot, wide, span(0, 9, 9)]);
-        let gap = super::chain(&[snapshot, span(0, 6, 6)]);
-        assert_eq!(gap, vec![snapshot], "through the gap");
-        assert_eq!(super::chain(&[]), vec![]);
-    }
-
     #[test]
     fn a_snapshot_is_due_when_the_log_reaches_its_size() {
-        let mut files = vec![file(SNAPSHOT_LEVEL, 1000)];
-        files.extend((0..SNAPSHOT_MIN_FILES).map(|_| file(0, 30)));
-        assert!(
-            !snapshot_due(&files),
-            "960 bytes of log under a 1000-byte image"
-        );
-        files.push(file(0, 40));
+        let mut files = vec![file(true, 0, 1000), file(false, 3, 960)];
+        assert!(!snapshot_due(&files), "960 bytes of log, a 1000-byte image");
+        files.push(file(false, 5, 40));
         assert!(snapshot_due(&files));
-        let few: Vec<_> = (0..SNAPSHOT_MIN_FILES - 1)
-            .map(|_| file(0, 1 << 20))
-            .collect();
-        assert!(!snapshot_due(&few), "fewer files than the floor");
+        files.push(file(true, 5, 1000));
+        assert!(!snapshot_due(&files), "a snapshot covers the log");
+        assert!(snapshot_due(&[file(false, 2, 1)]), "no snapshot yet");
+        assert!(!snapshot_due(&[]));
     }
 }

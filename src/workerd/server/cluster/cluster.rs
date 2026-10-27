@@ -217,7 +217,7 @@ impl Cluster {
         }
     }
 
-    /// Compact owned objects' chains in the bucket.
+    /// Compact owned objects' logs in the bucket.
     pub async fn tier(&self) {
         self.owners.tier().await;
     }
@@ -278,7 +278,7 @@ impl Cluster {
         }
     }
 
-    /// Compacts owned objects' chains. Never returns.
+    /// Compacts owned objects' logs. Never returns.
     pub async fn tier_loop(&self) {
         loop {
             tokio::time::sleep(TIER_INTERVAL).await;
@@ -308,7 +308,7 @@ impl Cluster {
     }
 }
 
-/// How often owned objects' chains are checked for compaction.
+/// How often owned objects' logs are checked for compaction.
 const TIER_INTERVAL: Duration = Duration::from_secs(2);
 
 const fn ms(ms: u64) -> Duration {

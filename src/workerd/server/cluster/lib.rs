@@ -6,16 +6,20 @@
 //! (S3, R2, `MinIO`) instead of a shared filesystem.
 //!
 //! Everything lives under `v1/` in the configured prefix, so a later format
-//! can tell an old bucket from its own. Two records:
+//! can tell an old bucket from its own:
 //!
 //! - `nodes/<node>.json`: one per running instance, with its address and a
 //!   lease expiry the instance renews. A peer is live while its lease is.
 //! - `do/<namespace>/<actor>/own.json`: one per Durable Object, naming its
 //!   owner and an ownership epoch. A claim is a conditional write; taking an
-//!   object over from an owner whose lease expired bumps the epoch, and
-//!   everything the new owner writes is keyed by that epoch, under
-//!   `do/<namespace>/<actor>/log/e<epoch>/`, so a late write from the old
-//!   owner lands where nothing reads it.
+//!   object over from an owner whose lease expired bumps the epoch.
+//! - `do/<namespace>/<actor>/{log,snapshot}/<epoch>/..`: the object's log
+//!   (`log.rs`), a session per epoch. A takeover restores the last opened
+//!   epoch's session and starts the next from a snapshot of it, so a late
+//!   write from the old owner lands where nothing reads it.
+//!
+//! `<namespace>` is a hash of the namespace's `uniqueKey`, and `<actor>` the
+//! actor ID's hex, so no key's length depends on a name.
 //!
 //! The clock is an argument everywhere (`now_ms`), so a test decides time.
 
@@ -85,8 +89,23 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 /// An ownership epoch: each takeover of an object bumps it.
 pub type Epoch = u64;
-/// A transaction id within one epoch's chain, from 1.
-pub type Txid = u64;
+/// A position in an epoch's session of the log: the sequence of the frame
+/// after it.
+pub type Sequence = u32;
+
+/// Where an object's records are: `do/<namespace>/<actor>`, the namespace
+/// as the first 16 bytes of a labelled SHA-256 of its tenant, empty for
+/// now, and `uniqueKey`, in base64url.
+pub(crate) fn object_prefix(ns: &str, actor: &str) -> String {
+    use base64::Engine;
+    let mut data = Vec::new();
+    for part in ["workerd cluster namespace v1", "", ns] {
+        data.extend((part.len() as u64).to_be_bytes());
+        data.extend(part.as_bytes());
+    }
+    let hash = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&sha256(&data)[..16]);
+    format!("do/{hash}/{actor}")
+}
 
 pub(crate) fn sha256(data: &[u8]) -> Vec<u8> {
     ring::digest::digest(&ring::digest::SHA256, data)

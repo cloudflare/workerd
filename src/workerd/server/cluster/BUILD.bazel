@@ -15,6 +15,7 @@ wd_rust_crate(
     deps = [
         ":frames_capnp_rust",
         "//src/workerd/server/cluster/logic:cluster-logic",
+        "@crates_vendor//:base64",
         "@crates_vendor//:bytes",
         "@crates_vendor//:capnp",
         "@crates_vendor//:futures",

@@ -18,10 +18,10 @@ use std::sync::OnceLock;
 
 use crate::Bucket;
 use crate::Error;
+use crate::Sequence;
 use crate::capture::Capture;
 use crate::log::File as LogFile;
 use crate::log::Log;
-use crate::log::SNAPSHOT_LEVEL;
 use crate::log::restore;
 use crate::owner::Owners;
 use crate::ownership::Claim;
@@ -276,52 +276,49 @@ fn runtime() -> tokio::runtime::Runtime {
         .unwrap()
 }
 
-/// The last captured txid.
-fn last() -> u64 {
+/// The frame after the capture's last commit.
+fn last() -> Sequence {
     CAPTURE.with_borrow(|c| c.as_ref().unwrap().last().unwrap())
 }
 
-/// Upload the captured entries `first..=last` merged into one file, as
-/// tiering does.
-fn upload(store: &Bucket, first: u64, last: u64) {
-    upload_at(store, 0, first, last);
-}
-
-/// The captured entries `first..=last` as one log file in `dir`.
-fn entries(dir: &Path, first: u64, last: u64) -> (LogFile, PathBuf) {
-    let files: Vec<Vec<u8>> = CAPTURE.with_borrow(|c| {
-        let c = c.as_ref().unwrap();
-        (first..=last).map(|t| c.entry(t).unwrap()).collect()
-    });
-    let from = dir.join(format!("{first}-{last}"));
-    let merged = crate::log::merge(&files).unwrap();
-    std::fs::write(&from, crate::log::compress(&merged).unwrap()).unwrap();
+/// The captured frames `from..to` as one batch in `dir`.
+fn batch(dir: &Path, from: Sequence, to: Sequence) -> (LogFile, PathBuf) {
+    let bytes = CAPTURE.with_borrow(|c| c.as_ref().unwrap().batch(from, to).unwrap());
+    let path = dir.join(format!("{from}-{to}"));
+    std::fs::write(&path, crate::log::compress(&bytes).unwrap()).unwrap();
     let file = LogFile {
-        level: 0,
-        first,
-        last,
+        snapshot: false,
+        session: 0,
+        frame: to,
         size: 0,
     };
-    (file, from)
+    (file, path)
 }
 
-fn upload_at(store: &Bucket, level: i32, first: u64, last: u64) {
-    let dir = scratch(&format!("upload-{level}-{first}-{last}"));
-    let (file, mut from) = entries(&dir, first, last);
-    if level == SNAPSHOT_LEVEL {
-        // A compaction of the entries.
-        let out = dir.join("snapshot");
-        crate::log::compact(&[(file, from)], &out).unwrap();
-        from = out;
-    }
-    let file = LogFile { level, ..file };
-    let log = Log::new(store.at("cell"));
-    runtime().block_on(log.put(&file, &from)).unwrap();
+fn log(store: &Bucket) -> Log {
+    Log::new(store.at("cell"))
+}
+
+/// Upload the captured frames `from..to` as one batch, as a commit does.
+fn upload(store: &Bucket, from: Sequence, to: Sequence) {
+    let dir = scratch(&format!("upload-{from}-{to}"));
+    let (file, path) = batch(&dir, from, to);
+    runtime().block_on(log(store).put(&file, &path)).unwrap();
+}
+
+/// Upload a snapshot at `to` of the captured frames, as compaction does.
+fn upload_snapshot(store: &Bucket, to: Sequence) {
+    let dir = scratch(&format!("snapshot-{to}"));
+    let files = [batch(&dir, 0, to)];
+    let snapshot = crate::log::compact(&files, &dir).unwrap();
+    let path = dir.join(snapshot.name());
+    runtime()
+        .block_on(log(store).put(&snapshot, &path))
+        .unwrap();
 }
 
 fn restored_rows(store: &Bucket, out: &Path) -> (i64, i64, i64) {
-    let log = Log::new(store.at("cell"));
-    runtime().block_on(restore(&log, out)).unwrap();
+    runtime().block_on(restore(&log(store), 0, out)).unwrap();
     rows(&Connection::open(out.to_str().unwrap()))
 }
 
@@ -332,10 +329,10 @@ fn restore_reproduces_the_application_rows() {
     let store = Bucket::memory("");
     insert(&app, 0, 100);
     let shipped = last();
-    upload(&store, 1, shipped);
+    upload(&store, 0, shipped);
     insert(&app, 100, 250);
     app.execute("DELETE FROM t WHERE id % 7 = 0");
-    upload(&store, shipped + 1, last());
+    upload(&store, shipped, last());
     let want = rows(&app);
     assert_eq!(want.0, 250 - 36);
     assert_eq!(restored_rows(&store, &dir.join("restored.db")), want);
@@ -348,21 +345,20 @@ fn restore_reads_the_newest_snapshot_and_what_extends_it() {
     let store = Bucket::memory("");
     insert(&app, 0, 100);
     let a = last();
-    upload(&store, 1, a);
-    upload_at(&store, SNAPSHOT_LEVEL, 1, a);
+    upload(&store, 0, a);
+    upload_snapshot(&store, a);
     insert(&app, 100, 200);
     let b = last();
-    upload(&store, a + 1, b);
-    upload_at(&store, SNAPSHOT_LEVEL, 1, b);
+    upload(&store, a, b);
+    upload_snapshot(&store, b);
     app.execute("DELETE FROM t WHERE id % 3 = 0");
-    upload(&store, b + 1, last());
-    let log = Log::new(store.at("cell"));
-    let files = runtime().block_on(log.files()).unwrap();
-    let plan: Vec<_> = crate::log::chain(&files)
+    upload(&store, b, last());
+    let files = runtime().block_on(log(&store).files(0)).unwrap();
+    let plan: Vec<_> = crate::log::plan(&files)
         .iter()
-        .map(|f| (f.level, f.first, f.last))
+        .map(|f| (f.snapshot, f.frame))
         .collect();
-    assert_eq!(plan, [(SNAPSHOT_LEVEL, 1, b), (0, b + 1, last())]);
+    assert_eq!(plan, [(true, b), (false, last())]);
     assert_eq!(restored_rows(&store, &dir.join("restored.db")), rows(&app));
 }
 
@@ -376,11 +372,35 @@ fn a_snapshot_inside_a_wal_carries_it_across_checkpoints() {
         insert(&app, from, from + 10);
     }
     let a = last();
-    upload_at(&store, SNAPSHOT_LEVEL, 1, a);
+    upload_snapshot(&store, a);
     for from in (400..800).step_by(10) {
         insert(&app, from, from + 10);
     }
-    upload(&store, a + 1, last());
+    upload(&store, a, last());
+    assert_eq!(restored_rows(&store, &dir.join("restored.db")), rows(&app));
+}
+
+#[test]
+fn a_snapshot_compacts_from_the_last_one_inside_a_wal() {
+    // No checkpoint: the second snapshot checkpoints a WAL that continues
+    // past the first, from a frame, not a WAL header.
+    let dir = scratch("resnapshot");
+    let app = open_app(&dir.join("app.db"));
+    let store = Bucket::memory("");
+    insert(&app, 0, 100);
+    let a = last();
+    let files = [batch(&dir, 0, a)];
+    let first = crate::log::compact(&files, &dir).unwrap();
+    insert(&app, 100, 200);
+    let b = last();
+    let files = [(first, dir.join(first.name())), batch(&dir, a, b)];
+    let second = crate::log::compact(&files, &dir).unwrap();
+    assert_eq!(second.frame, b);
+    runtime()
+        .block_on(log(&store).put(&second, &dir.join(second.name())))
+        .unwrap();
+    insert(&app, 200, 300);
+    upload(&store, b, last());
     assert_eq!(restored_rows(&store, &dir.join("restored.db")), rows(&app));
 }
 
@@ -390,14 +410,13 @@ fn a_corrupt_file_fails_to_restore() {
     let app = open_app(&dir.join("app.db"));
     let store = Bucket::memory("");
     insert(&app, 0, 100);
-    let (file, path) = entries(&dir, 1, last());
+    let (file, path) = batch(&dir, 0, last());
     let mut bytes = std::fs::read(&path).unwrap();
     let mid = bytes.len() / 2;
     bytes[mid] ^= 1;
     std::fs::write(&path, bytes).unwrap();
-    let log = Log::new(store.at("cell"));
-    runtime().block_on(log.put(&file, &path)).unwrap();
-    let restored = runtime().block_on(restore(&log, &dir.join("restored.db")));
+    runtime().block_on(log(&store).put(&file, &path)).unwrap();
+    let restored = runtime().block_on(restore(&log(&store), 0, &dir.join("restored.db")));
     assert!(restored.is_err(), "{restored:?}");
 }
 
@@ -418,13 +437,13 @@ fn a_rolled_back_transaction_leaves_nothing() {
     assert!(wal() > before + 100 * 4096, "no frames spilled");
     app.execute("ROLLBACK;");
     insert(&app, 10, 20);
-    upload(&store, 1, last());
+    upload(&store, 0, last());
     assert_eq!(rows(&app).0, 20);
     assert_eq!(restored_rows(&store, &dir.join("restored.db")), rows(&app));
 }
 
 #[test]
-fn checkpoints_and_a_restart_keep_the_chain_whole() {
+fn checkpoints_and_a_restart_keep_the_log_whole() {
     let dir = scratch("checkpoint");
     let app = open_app(&dir.join("app.db"));
     let store = Bucket::memory("");
@@ -435,10 +454,10 @@ fn checkpoints_and_a_restart_keep_the_chain_whole() {
     }
     app.execute("PRAGMA wal_checkpoint(TRUNCATE)");
     insert(&app, 600, 650);
-    upload(&store, 1, last());
+    upload(&store, 0, last());
     assert_eq!(restored_rows(&store, &dir.join("one.db")), rows(&app));
 
-    // A new chain from the live database, then more commits, shrinking at
+    // A new log from the live database, then more commits, shrinking at
     // the end.
     app.execute("PRAGMA wal_checkpoint(TRUNCATE)");
     CAPTURE.with_borrow_mut(|c| c.as_mut().unwrap().restart().unwrap());
@@ -446,7 +465,7 @@ fn checkpoints_and_a_restart_keep_the_chain_whole() {
     app.execute("DELETE FROM t WHERE id > 20; VACUUM;");
     insert(&app, 5000, 5010);
     let store = Bucket::memory("");
-    upload(&store, 1, last());
+    upload(&store, 0, last());
     assert_eq!(rows(&app).0, 31);
     assert_eq!(restored_rows(&store, &dir.join("two.db")), rows(&app));
 }
@@ -471,25 +490,27 @@ fn a_restart_after_the_database_closed_reads_the_file() {
     assert_eq!(std::fs::metadata(dir.join("app.db-wal")).unwrap().len(), 0);
     CAPTURE.with_borrow_mut(|c| c.as_mut().unwrap().restart().unwrap());
     let store = Bucket::memory("");
-    upload(&store, 1, last());
+    upload(&store, 0, last());
     assert_eq!(restored_rows(&store, &dir.join("restored.db")), want);
 }
 
 #[test]
-fn a_file_the_chain_already_covers_is_not_applied() {
+fn a_batch_the_log_already_covers_is_not_applied() {
     // Tiering and a bucket-acknowledged commit upload concurrently, so a
     // stale range can land beside a newer, wider one (lost writes on the
-    // fleet): 3..=last-4 is inside 2..=last, and must not override it.
+    // fleet): the third batch is inside the second, and must not override
+    // it.
     let dir = scratch("covered");
     let app = open_app(&dir.join("app.db"));
     let store = Bucket::memory("");
+    let mut ends = Vec::new();
     for from in (0..120).step_by(10) {
         insert(&app, from, from + 10);
+        ends.push(last());
     }
-    let last = last();
-    upload(&store, 1, 1);
-    upload(&store, 2, last);
-    upload(&store, 3, last - 4);
+    upload(&store, 0, ends[0]);
+    upload(&store, ends[0], ends[11]);
+    upload(&store, ends[1], ends[7]);
     assert_eq!(restored_rows(&store, &dir.join("restored.db")), rows(&app));
 }
 
@@ -506,21 +527,20 @@ fn a_deleted_database_restores_empty_then_as_recreated() {
     CAPTURE.with_borrow_mut(|c| c.as_mut().unwrap().reset());
     let deleted = last();
     let store = Bucket::memory("");
-    upload(&store, 1, deleted);
-    let log = Log::new(store.at("cell"));
+    upload(&store, 0, deleted);
     let out = dir.join("empty.db");
-    runtime().block_on(restore(&log, &out)).unwrap();
+    runtime().block_on(restore(&log(&store), 0, &out)).unwrap();
     assert_eq!(std::fs::metadata(&out).unwrap().len(), 0);
 
     let app = Connection::open(&format!("file:{}?vfs=capture-test", path.display()));
     app.execute("PRAGMA journal_mode=WAL; CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
     insert(&app, 100, 110);
-    upload(&store, deleted + 1, last());
+    upload(&store, deleted, last());
     assert_eq!(rows(&app).0, 10);
     assert_eq!(restored_rows(&store, &dir.join("split.db")), rows(&app));
-    // Merged into one range, as tiering merges.
+    // As one batch.
     let store = Bucket::memory("");
-    upload(&store, 1, last());
+    upload(&store, 0, last());
     assert_eq!(restored_rows(&store, &dir.join("merged.db")), rows(&app));
 }
 

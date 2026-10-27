@@ -23,7 +23,7 @@ use crate::registry::NodeRecord;
 struct OwnerRecord {
     /// The owning instance (`NodeRecord::node`); empty for none.
     node: String,
-    /// The owner's epoch: its log is `log/e<epoch>/`.
+    /// The owner's epoch: its session of the log.
     epoch: u64,
     /// The last epoch that opened. A claim writes the next `epoch` and
     /// copies `from` from the record it replaced; the opening write sets it
@@ -106,7 +106,7 @@ const ROUTE_REFRESH_MS: u64 = 5_000;
 const ATTEMPTS: usize = 8;
 
 fn owner_key(namespace: &str, actor: &str) -> String {
-    format!("do/{namespace}/{actor}/own.json")
+    format!("{}/own.json", crate::object_prefix(namespace, actor))
 }
 
 impl Ownership {

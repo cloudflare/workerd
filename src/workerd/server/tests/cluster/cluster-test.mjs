@@ -23,7 +23,7 @@ import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { connect, createServer } from 'node:net';
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { env } from 'node:process';
 import { test } from 'node:test';
@@ -280,7 +280,7 @@ class FakeS3 {
   // The key of the node that owns the Counter with this ID, or null when no
   // owner record exists.
   async owner(id) {
-    const record = await this.get(`do/counter-test-namespace/${id}/own.json`);
+    const record = await this.get(`${objectPrefix(id)}/own.json`);
     return record === null ? null : JSON.parse(record).node;
   }
 
@@ -622,11 +622,23 @@ test('cluster: concurrent first requests to a DO read its owner record once per 
       Array.from({ length: 64 }, (_, i) => i + 1)
     );
     const requests = await bucket.requests(
-      `do/counter-test-namespace/${results[0].body.id}/own.json`
+      `${objectPrefix(results[0].body.id)}/own.json`
     );
     assert(requests <= 8, `${requests} owner record requests for one cold DO`);
   });
 });
+
+// Where a Durable Object's records are in the bucket: a hash of its
+// namespace's uniqueKey, then its ID.
+function objectPrefix(id, uniqueKey = 'counter-test-namespace') {
+  const hash = createHash('sha256');
+  for (const part of ['workerd cluster namespace v1', '', uniqueKey]) {
+    const length = Buffer.alloc(8);
+    length.writeBigUInt64BE(BigInt(Buffer.byteLength(part)));
+    hash.update(length).update(part);
+  }
+  return `do/${hash.digest().subarray(0, 16).toString('base64url')}/${id}`;
+}
 
 // A port that was free a moment ago.
 async function freePort() {
@@ -778,11 +790,12 @@ test('cluster: a DO reopened where it was closed resumes its epoch', async () =>
     await sleep(500);
     const after = await fetchJson(node.httpPort, '/increment?name=dormant');
     assert.strictEqual(after.body.count, 3, JSON.stringify(after.body));
-    const prefix = `do/counter-test-namespace/${id}`;
+    const prefix = objectPrefix(id);
     const record = JSON.parse(await bucket.get(`${prefix}/own.json`));
     assert.strictEqual(record.epoch, 1, JSON.stringify(record));
-    assert.deepStrictEqual(await bucket.list(`${prefix}/ltx/e2/`), []);
-    assert.match(node.stderr, /epoch 1 resumes at 2/);
+    // No session 2, whose name is `zd`.
+    assert.deepStrictEqual(await bucket.list(`${prefix}/snapshot/zd/`), []);
+    assert.match(node.stderr, /epoch 1 resumes at \d+/);
   });
 });
 
