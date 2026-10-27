@@ -17,9 +17,9 @@ use crate::Version;
 /// One instance's record in `nodes/<node>.json`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NodeRecord {
-    /// The instance's identity: its cluster public key, hex.
+    /// The instance's identity: 16 random bytes, hex, new each start.
     pub node: String,
-    /// Where peers reach it: its sockaddr's bytes, hex.
+    /// Where peers reach it, `host:port`.
     pub address: String,
     /// The instance is live until this time and must renew before it.
     pub expires_ms: u64,

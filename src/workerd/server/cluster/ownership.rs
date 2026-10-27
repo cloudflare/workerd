@@ -19,22 +19,17 @@ use crate::registry::NodeRecord;
 
 /// One Durable Object's record in `do/<namespace>/<actor>/own.json`, the only
 /// authority for who owns it and whose log holds its latest commits.
-///
-/// `from` is the last epoch that opened. A claim writes the next `epoch`
-/// and copies `from` from the record it replaced; the opening write sets
-/// `from` to `epoch`. So an epoch is recovering while `from != epoch`, and
-/// recovers `from`'s log (none when 0).
-///
-/// `facets` is the object's facet tree index, `(parent, name)` by id from 1:
-/// each facet's database is a log of its own under the object's epoch.
-/// Every epoch carries the index forward, and an owner adds to it before a
-/// new facet's log opens.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct OwnerRecord {
+    /// The owning instance (`NodeRecord::node`); empty for none.
     node: String,
+    /// The owner's epoch: its log is `log/e<epoch>/`.
     epoch: u64,
+    /// The last epoch that opened. A claim writes the next `epoch` and
+    /// copies `from` from the record it replaced; the opening write sets it
+    /// to `epoch`. So an epoch is recovering while `from != epoch`, and
+    /// recovers `from`'s log (none when 0).
     from: u64,
-    facets: Vec<(u32, String)>,
 }
 
 impl OwnerRecord {
@@ -45,7 +40,6 @@ impl OwnerRecord {
             node: node.to_owned(),
             epoch: self.epoch + 1,
             from: self.from,
-            facets: self.facets.clone(),
         }
     }
 
@@ -53,7 +47,6 @@ impl OwnerRecord {
         Owned {
             recover: (self.from != self.epoch).then_some(self.from),
             epoch: self.epoch,
-            facets: self.facets,
         }
     }
 }
@@ -65,8 +58,6 @@ pub struct Owned {
     /// The epoch whose log a new owner recovers (0: none). `None` when this
     /// instance already opened the epoch.
     pub recover: Option<u64>,
-    /// The facet tree index, as own.json holds it.
-    pub facets: Vec<(u32, String)>,
 }
 
 /// Who serves an object.
@@ -294,43 +285,6 @@ impl Ownership {
             .borrow_mut()
             .insert(key, (record.clone(), Guard::Match(version)));
         Ok(Some(record.owned()))
-    }
-
-    /// Record a longer facet index for this instance's open epoch, before a
-    /// new facet's log opens: a takeover restores the facets own.json names.
-    /// `false` when the record no longer names this open epoch.
-    pub async fn set_facets(
-        &self,
-        namespace: &str,
-        actor: &str,
-        epoch: u64,
-        facets: &[(u32, String)],
-    ) -> Result<bool> {
-        let key = owner_key(namespace, actor);
-        for _ in 0..ATTEMPTS {
-            let Some((body, version)) = self.bucket.get(&key).await? else {
-                return Ok(false);
-            };
-            let mut record: OwnerRecord = serde_json::from_slice(&body)?;
-            if record.node != self.registry.node() || record.epoch != epoch || record.from != epoch
-            {
-                return Ok(false);
-            }
-            if record.facets.len() >= facets.len() {
-                return Ok(true);
-            }
-            record.facets = facets.to_vec();
-            let body = serde_json::to_vec(&record)?;
-            if self
-                .bucket
-                .put_if(&key, body, Guard::Match(version))
-                .await?
-                .is_some()
-            {
-                return Ok(true);
-            }
-        }
-        Err(Error::Contended(key))
     }
 
     /// The epoch own.json names now: the re-read after a bucket upload that
