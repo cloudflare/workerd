@@ -24,7 +24,8 @@
 //! | `i64` | `bigint` or `number` (parameter only) |
 //! | `SystemTime` | `Date`; from a `Date` or `number` of milliseconds |
 //! | `Option<T>` | `T` or `undefined` |
-//! | `Nullable<T>` | `T`, `null`, or `undefined` |
+//! | `Nullable<T>` | `T` or `null` (`undefined` coerces to `null` on input) |
+//! | `Option<Nullable<T>>` | `T`, `null`, or `undefined` |
 //! | `Lenient<T>` | `T`, `null`, or `undefined` (shallow type mismatches silently become `undefined`) |
 //! | `Result<T, E>` | `T` or throws |
 //! | `NonCoercible<T>` | `T` (strict type checking) |
@@ -885,7 +886,6 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for Nullable<T> {
         match self {
             Self::Some(value) => value.to_js(lock),
             Self::Null => Ok(lock.null()),
-            Self::Undefined => Ok(lock.undefined()),
         }
     }
 }
@@ -966,6 +966,8 @@ impl<'s, T: Type + FromJS<'s>> FromJS<'s> for NonCoercible<T> {
     }
 }
 
+// Like C++ `kj::Maybe<T>`, Web IDL nullable conversion reads `undefined` as `null`.
+// Nullable arguments remain required; only an outer `Option` permits omission.
 impl<'s, T: FromJS<'s>> FromJS<'s> for Nullable<T> {
     type ResultType = Nullable<T::ResultType>;
 
@@ -977,10 +979,8 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for Nullable<T> {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        if value.is_null() {
+        if value.is_null_or_undefined() {
             Ok(Nullable::Null)
-        } else if value.is_undefined() {
-            Ok(Nullable::Undefined)
         } else {
             Ok(Nullable::Some(T::from_js(lock, value)?))
         }
@@ -990,10 +990,8 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for Nullable<T> {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Option<Self::ResultType>, Error> {
-        if value.is_null() {
+        if value.is_null_or_undefined() {
             Ok(Some(Nullable::Null))
-        } else if value.is_undefined() {
-            Ok(Some(Nullable::Undefined))
         } else {
             Ok(T::try_from_js(lock, value)?.map(Nullable::Some))
         }
