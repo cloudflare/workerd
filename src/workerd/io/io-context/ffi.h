@@ -29,4 +29,29 @@ int64_t io_context_now(uint64_t id);
 // write waits for the output gate, as AnalyticsEngine::writeDataPoint() does.
 void io_context_write_logfwdr(uint64_t id, uint32_t channel, ::rust::Slice<const uint8_t> message);
 
+// Rust types, defined in ffi.rs.
+struct IoFuture;
+struct IoCallback;
+struct IoOwnedSlot;
+
+// IoContext::awaitIoAndRun(): waits for `future` as a task of the IoContext, holding a pending
+// event, then runs `callback` with its output in IoContext::run(), in the critical section and
+// async context frame that are current when this is called. Both are dropped if the IoContext is
+// destroyed first.
+void io_context_await_io(
+    uint64_t id, ::rust::Box<IoFuture> future, ::rust::Box<IoCallback> callback);
+
+// Holds what IoContext::addObject() returns for a Rust value, which the IoContext then destroys
+// when it is destroyed, unless this is destroyed first.
+class IoOwnedObject {
+ public:
+  explicit IoOwnedObject(kj::Own<void> object): object(kj::mv(object)) {}
+
+ private:
+  kj::Own<void> object;
+};
+
+// IoContext::addObject() for `slot`.
+kj::Own<IoOwnedObject> io_context_add_object(uint64_t id, ::rust::Box<IoOwnedSlot> slot);
+
 }  // namespace workerd::io_context
