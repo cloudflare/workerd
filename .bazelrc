@@ -583,9 +583,9 @@ build:werror --copt='-Wno-error=deprecated-declarations'
 
 #
 # Remote execution on bazelflare (Cloudflare Containers), from a macOS or Linux client. Every
-# action, host tools included, runs on Linux x86_64 executors (build/bazelflare). Log in once with
-# `cloudflared access login https://bazelflare-workerd.runtime-playground.workers.dev`; the
-# credential helper then sends your Cloudflare Access token, or in CI the job's GitHub OIDC token.
+# action, host tools included, runs on Linux x86_64 executors (build/bazelflare). The credential
+# helper sends your Cloudflare Access token, opening the login in a browser the first time, or in
+# CI the job's GitHub OIDC token.
 # Only main's CI writes the cache that every client reads (bazelflare's "trusted" instance),
 # and no client can upload results of its own.
 #
@@ -609,6 +609,8 @@ startup --experimental_remote_repo_contents_cache
 common:bazelflare --remote_executor=grpcs://bazelflare.workers-runtime-playground.cloudflareworkers.com:8980
 common:bazelflare --tls_certificate=build/bazelflare/ca.pem
 common:bazelflare --credential_helper=bazelflare.workers-runtime-playground.cloudflareworkers.com=%workspace%/build/bazelflare/credential-helper
+# Long enough to approve a login in the browser, which the helper opens without a saved token.
+common:bazelflare --credential_helper_timeout=2m
 common:bazelflare --noremote_upload_local_results
 common:bazelflare --noenable_platform_specific_config
 build:bazelflare --config=linux
