@@ -4,6 +4,7 @@
 
 mod argument_errors;
 mod arrays;
+mod boolean;
 mod buffer_types;
 mod builtin_module;
 mod coercion_safety;
@@ -27,6 +28,7 @@ mod name;
 mod nested_type;
 mod non_coercible;
 mod nullable;
+mod number;
 mod option;
 mod promise;
 mod resource_callback;
