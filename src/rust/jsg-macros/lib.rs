@@ -277,7 +277,12 @@ fn to_js_fn_body(
 pub fn jsg_method(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input_fn = parse_macro_input!(item as ItemFn);
     let fast = fast_callback(&input_fn.sig);
-    let mut output = callback(quote! { #input_fn }.into(), Callback::Function, Some(attr));
+    let mut output = callback(
+        quote! { #input_fn }.into(),
+        Callback::Function,
+        Some(attr),
+        ReceiverCheck::Signature,
+    );
     output.extend(TokenStream::from(fast));
     output
 }
@@ -292,10 +297,25 @@ enum Callback {
     Setter,
 }
 
+/// How a `&self` callback finds its receiver's resource.
+#[derive(Clone, Copy)]
+enum ReceiverCheck {
+    /// The callback is registered with the type's `v8::Signature`, which V8 checks before
+    /// calling it.
+    Signature,
+    /// The callback has no signature, so the receiver can be any value.
+    Marker,
+}
+
 /// `method_attr` is a method's `#[jsg_method]` arguments; argument errors for
 /// methods match C++ JSG's.
-fn callback(item: TokenStream, kind: Callback, method_attr: Option<TokenStream>) -> TokenStream {
-    callback_with_instance(item, kind, None, method_attr)
+fn callback(
+    item: TokenStream,
+    kind: Callback,
+    method_attr: Option<TokenStream>,
+    receiver_check: ReceiverCheck,
+) -> TokenStream {
+    callback_with_instance(item, kind, None, method_attr, receiver_check)
 }
 
 fn callback_with_instance(
@@ -303,6 +323,7 @@ fn callback_with_instance(
     kind: Callback,
     instance_kind: Option<Callback>,
     method_attr: Option<TokenStream>,
+    receiver_check: ReceiverCheck,
 ) -> TokenStream {
     let input_fn = parse_macro_input!(item as ItemFn);
     let fn_name = &input_fn.sig.ident;
@@ -395,7 +416,7 @@ fn callback_with_instance(
         }
     };
 
-    let invocation = invocation(fn_name, receiver, &arg_exprs);
+    let invocation = invocation(fn_name, receiver, receiver_check, &arg_exprs);
 
     // Comments do not survive into the expansion, so the SAFETY comment on the `unsafe` block
     // that borrows the resource cannot satisfy the lint.
@@ -432,28 +453,25 @@ fn callback_with_instance(
 fn invocation(
     fn_name: &syn::Ident,
     receiver: Receiver,
+    receiver_check: ReceiverCheck,
     arg_exprs: &[proc_macro2::TokenStream],
 ) -> proc_macro2::TokenStream {
+    // `resolve_method_receiver` is sound only for callbacks registered with a signature.
+    let resolve = match receiver_check {
+        ReceiverCheck::Signature => {
+            quote! { unsafe { jsg::v8::WrappableRc::resolve_method_receiver::<Self>(lock, this) } }
+        }
+        ReceiverCheck::Marker => {
+            quote! { jsg::v8::WrappableRc::resolve_receiver::<Self>(lock, this) }
+        }
+    };
     match receiver {
         Receiver::SelfRef => quote! {
             let this = args.this();
-            // For instance methods, `v8::Signature` (applied in
-            // `create_resource_template`, ffi.c++) makes V8 throw
-            // `TypeError: Illegal invocation` *before* this callback runs on a
-            // wrong receiver, so the mismatch below is unreachable for them.
-            // Property getters/setters (`#[jsg_property]` /
-            // `#[jsg_inspect_property]`) reuse this same code but are registered
-            // WITHOUT a signature, so a wrong receiver (e.g.
-            // `Object.getOwnPropertyDescriptor(proto, p).get.call({})`) *can*
-            // reach here. Surface that as a JS `TypeError` — matching V8's own
-            // "Illegal invocation" — instead of panicking (a panic here is
-            // caught by `catch_panic`, but as an *internal* error + execution
-            // termination, which is the wrong shape for tenant-triggerable input).
-            let Some(wrappable) = jsg::v8::WrappableRc::from_js(lock, this) else {
-                lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
-                return;
-            };
-            let Some(resource) = wrappable.resolve_resource::<Self>() else {
+            // A callback without a signature may receive a wrong receiver. Throw V8's
+            // "Illegal invocation" rather than panic, which would terminate execution.
+            let resource = #resolve;
+            let Some(resource) = resource else {
                 lock.throw_exception(&jsg::Error::new_type_error("Illegal invocation"));
                 return;
             };
@@ -796,7 +814,13 @@ pub fn jsg_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     // Member factories select placement at template construction, so both V8 callback
     // signatures are available regardless of the automatic-registration placement.
-    callback_with_instance(item, Callback::Function, Some(instance_kind), None)
+    callback_with_instance(
+        item,
+        Callback::Function,
+        Some(instance_kind),
+        None,
+        ReceiverCheck::Marker,
+    )
 }
 
 /// Registers a method as a debug-inspect-only property on a `#[jsg_resource]`
@@ -809,9 +833,14 @@ pub fn jsg_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// it; any other receiver is a compile error.
 #[proc_macro_attribute]
 pub fn jsg_inspect_property(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    // Reuse jsg_method callback generation; registration as Member::Property is
-    // handled by #[jsg_resource] on the enclosing impl block.
-    jsg_method(TokenStream::new(), item)
+    // Reuse jsg_method callback generation, without a signature: registration as
+    // Member::Property is handled by #[jsg_resource] on the enclosing impl block.
+    callback(
+        item,
+        Callback::Function,
+        Some(TokenStream::new()),
+        ReceiverCheck::Marker,
+    )
 }
 
 /// Registers a method as the wildcard property of a `#[jsg_resource]` type.

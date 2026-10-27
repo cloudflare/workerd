@@ -415,6 +415,8 @@ bool unwrap_string(Isolate* isolate, Local value, ::rust::String& result);
 bool unwrap_boolean(Isolate* isolate, Local value);
 bool unwrap_number(Isolate* isolate, Local value, double& result);
 kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value);
+const TraitObjectPtr* unwrap_resource_trait_object(Isolate* isolate, Local value);
+const TraitObjectPtr* unwrap_method_receiver(Isolate* isolate, Local value);
 
 // ArrayBuffer detach/detachable/was-detached
 void local_array_buffer_detach(Isolate* isolate, Local& buffer);

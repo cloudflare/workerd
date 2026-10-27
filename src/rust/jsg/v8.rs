@@ -841,6 +841,17 @@ pub mod ffi {
             isolate: *mut Isolate,
             value: Local, /* v8::LocalValue */
         ) -> KjMaybe<KjRc<Wrappable>>;
+        // Like `unwrap_resource`, but borrows: the pointer is into the Wrappable of `value`'s
+        // wrapper, or null when `value` is not a Rust resource.
+        pub unsafe fn unwrap_resource_trait_object(
+            isolate: *mut Isolate,
+            value: Local, /* v8::LocalValue */
+        ) -> *const TraitObjectPtr;
+        // For the receiver of a method registered with a `v8::Signature`, which V8 has checked.
+        pub unsafe fn unwrap_method_receiver(
+            isolate: *mut Isolate,
+            value: Local, /* v8::LocalObject */
+        ) -> *const TraitObjectPtr;
 
         pub unsafe fn function_template_get_function(
             isolate: *mut Isolate,
@@ -4714,6 +4725,45 @@ pub struct WrappableRc {
 }
 
 impl WrappableRc {
+    /// Resolves the receiver `value` of a callback registered without a `v8::Signature`
+    /// (an accessor, inspect property or wildcard interceptor) to the resource `R` without taking
+    /// a reference.
+    ///
+    /// Returns `None` when `value` is not a wrapper of an `R`. The pointer is only valid while
+    /// `value` is reachable, which a callback's `this` is for the duration of the call.
+    #[doc(hidden)]
+    pub fn resolve_receiver<R: 'static>(
+        lock: &mut Lock<'_>,
+        value: Local<'_, Value>,
+    ) -> Option<NonNull<R>> {
+        // SAFETY: the isolate is locked and `value` is a valid handle. The returned pointer, when
+        // not null, points into the Wrappable of `value`'s wrapper, which `value` keeps alive.
+        let ptr = unsafe {
+            ffi::unwrap_resource_trait_object(lock.isolate().as_ffi(), value.into_ffi()).as_ref()
+        };
+        ptr?.resolve::<R>()
+    }
+
+    /// Like [`Self::resolve_receiver`], for the receiver of a method registered with a
+    /// `v8::Signature`.
+    ///
+    /// # Safety
+    ///
+    /// V8 must have checked `value` against the signature of a method of a resource type.
+    #[doc(hidden)]
+    pub unsafe fn resolve_method_receiver<R: 'static>(
+        lock: &mut Lock<'_>,
+        value: Local<'_, Value>,
+    ) -> Option<NonNull<R>> {
+        // SAFETY: the isolate is locked, and the caller guarantees `value` passed a method's
+        // signature check. The pointer is into the Wrappable of `value`'s wrapper, which `value`
+        // keeps alive.
+        let ptr = unsafe {
+            ffi::unwrap_method_receiver(lock.isolate().as_ffi(), value.into_ffi()).as_ref()
+        };
+        ptr?.resolve::<R>()
+    }
+
     /// Unwraps a JavaScript value to get an owned Wrappable handle.
     ///
     /// Returns `None` if the value is not a Rust-tagged Wrappable

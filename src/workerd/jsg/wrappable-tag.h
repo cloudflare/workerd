@@ -25,7 +25,7 @@ namespace workerd::jsg {
 
 // The tag reserved for wrappables that are not JSG resource types: WrappableFunction<Sig> (the
 // backing object of a jsg::Function) and opaque wrappers. Resource types receive their own
-// per-type tags, numbered starting immediately after this one.
+// per-type tags, numbered from kFirstResourceTag.
 //
 // This single shared tag does not by itself pin down a concrete C++ type -- it
 // only distinguishes "non-resource wrappable" from "resource". Polymorphic
@@ -40,9 +40,13 @@ constexpr uint16_t kNonResourceWrappableTag =
 // Wrappable::tryUnwrapGlobalReceiver().
 constexpr uint16_t kContextGlobalWrappableTag = kNonResourceWrappableTag + 1;
 
+// The tag reserved for the wrappers of Rust JSG resources, so that a Rust wrapper can be told
+// apart from every other wrappable by its CppHeap pointer tag alone.
+constexpr uint16_t kRustResourceWrappableTag = kContextGlobalWrappableTag + 1;
+
 // The dense id of the first resource type. Resource ids are offset past the reserved tags so
 // that the spaces never collide within kObjectWrappableTagRange.
-constexpr uint16_t kFirstResourceTag = kContextGlobalWrappableTag + 1;
+constexpr uint16_t kFirstResourceTag = kRustResourceWrappableTag + 1;
 
 // Upper bound on the number of distinct wrappable tags any single isolate type may use: the
 // reserved tags above plus one per registered resource type. It sizes the freelist bucket array in
@@ -71,5 +75,10 @@ constexpr uint16_t wrappableTagBucketIndex(uint16_t tag) {
 constexpr v8::CppHeapPointerTagRange kNonResourceWrappableTagRange(
     static_cast<v8::CppHeapPointerTag>(kNonResourceWrappableTag),
     static_cast<v8::CppHeapPointerTag>(kNonResourceWrappableTag));
+
+// The single-tag range used to unwrap Rust JSG resources.
+constexpr v8::CppHeapPointerTagRange kRustResourceWrappableTagRange(
+    static_cast<v8::CppHeapPointerTag>(kRustResourceWrappableTag),
+    static_cast<v8::CppHeapPointerTag>(kRustResourceWrappableTag));
 
 }  // namespace workerd::jsg
