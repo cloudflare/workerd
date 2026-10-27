@@ -26,8 +26,10 @@ Rust JSG counts fast calls only in builds with debug assertions: the `RustFast/`
 with `--config=rust-debug`, and other builds log a warning and check only the C++ cases. With
 `JSG_BENCH_NATURAL_JIT` set, V8 decides when to optimize the JavaScript instead of being told to.
 
-The `smoke-test` target runs the verification command above. It is tagged `workerd-benchmark`, so
-CI configurations that skip benchmarks skip it too.
+The `smoke-test` target also sets `JSG_BENCH_SMOKE=1` to use small inputs and one operation per
+batch, without timed warmup. It retains result, optimization, and Fast API checks. Performance
+runs use the full input sizes and warmup. The target is tagged `workerd-benchmark`, so CI
+configurations that skip benchmarks skip it too.
 
 ## Compare Rust with C++
 
