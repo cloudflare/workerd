@@ -474,7 +474,11 @@ kj::String Deserializer::readLengthDelimitedString() {
 v8::MaybeLocal<v8::SharedArrayBuffer> Deserializer::GetSharedArrayBufferFromId(
     v8::Isolate* isolate, uint32_t clone_id) {
   KJ_IF_SOME(backingStores, sharedBackingStores) {
-    KJ_ASSERT(clone_id < backingStores.size());
+    // V8 calls this, so it must throw a JavaScript exception, not a KJ one.
+    if (clone_id >= backingStores.size()) {
+      throwCorrupt(isolate);
+      return {};
+    }
     return v8::SharedArrayBuffer::New(isolate, backingStores[clone_id]);
   }
   return v8::MaybeLocal<v8::SharedArrayBuffer>();

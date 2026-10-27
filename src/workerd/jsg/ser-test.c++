@@ -232,6 +232,19 @@ struct SerTestContext: public ContextGlobalObject {
     return jsg::structuredClone(js, value, kj::mv(maybeTransfer));
   }
 
+  // The bytes Serializer writes for `value`.
+  kj::Array<kj::byte> serializeBytes(Lock& js, JsValue value) {
+    Serializer ser(js);
+    ser.write(js, value);
+    return ser.release().data;
+  }
+
+  // Reads `data` with Deserializer, given an empty list of SharedArrayBuffers.
+  JsValue deserializeWithoutSharedArrayBuffers(Lock& js, kj::Array<kj::byte> data) {
+    Deserializer deser(js, data, kj::none, kj::ArrayPtr<std::shared_ptr<v8::BackingStore>>());
+    return deser.readValue(js);
+  }
+
   // Reads `data` with Deserializer.
   JsValue deserializeBytes(Lock& js, kj::Array<kj::byte> data) {
     Deserializer deser(js, data);
@@ -250,6 +263,8 @@ struct SerTestContext: public ContextGlobalObject {
     JSG_METHOD(serializerToForeign);
     JSG_METHOD(structuredCloneWithTransfer);
     JSG_METHOD(deserializeBytes);
+    JSG_METHOD(serializeBytes);
+    JSG_METHOD(deserializeWithoutSharedArrayBuffers);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(SerTestIsolate,
@@ -523,6 +538,16 @@ KJ_TEST("malformed native errors throw") {
                    "try { deserializeBytes(new Uint8Array([...prefix, 0x01, 0x5f])); }\n"
                    "catch (e) { `${e.name}: ${e.message}` }"),
       "string", "DataCloneError: Deserialization failed: error message is not a string");
+}
+
+KJ_TEST("a SharedArrayBuffer beyond the given list is corrupt data") {
+  Evaluator<SerTestContext, SerTestIsolate> e(v8System);
+  KJ_EXPECT_LOG(ERROR, "deserialization failure, possible corruption");
+  e.expectEval("const data = serializeBytes(new SharedArrayBuffer(1));\n"
+               "try { deserializeWithoutSharedArrayBuffers(data); } catch (e) {\n"
+               "  e.message.startsWith('internal error; reference = ')\n"
+               "}",
+      "boolean", "true");
 }
 }  // namespace
 }  // namespace workerd::jsg::test
