@@ -15,6 +15,11 @@ wasm_tools_parse(
     src = "js-string-builtins.wat",
 )
 
+wasm_tools_parse(
+    name = "wasm-source-url.wasm",
+    src = "wasm-source-url.wat",
+)
+
 exports_files(["starttls-server.pem"])
 
 wd_test(
@@ -1295,6 +1300,15 @@ wd_test(
     data = [
         "wasm-js-string-builtins-test.js",
         ":js-string-builtins.wasm",
+    ],
+)
+
+wd_test(
+    src = "wasm-source-url-test.wd-test",
+    args = ["--experimental"],
+    data = [
+        "wasm-source-url-test.js",
+        ":wasm-source-url.wasm",
     ],
 )
 

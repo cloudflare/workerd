@@ -2632,7 +2632,7 @@ Module::EvaluateCallback Module::newWasmModuleHandler(
         }
       }
 
-      auto module = jsg::compileWasmModule(js, data, observer);
+      auto module = jsg::compileWasmModule(js, data, observer, id.getHref());
       auto lock = cache->mutex.lockExclusive();
       *lock = module->GetCompiledModule();
       auto result = JsValue(module);
