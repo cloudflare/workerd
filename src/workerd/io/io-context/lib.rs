@@ -10,12 +10,19 @@
 
 mod ffi;
 
+use std::any::Any;
+use std::future::Future;
 use std::marker::PhantomData;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
+use std::sync::PoisonError;
 use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use ffi::bridge;
+use kj_rs::KjOwn;
 
 /// The `IoContext` of the current request.
 ///
@@ -81,6 +88,114 @@ impl<'s> IoContext<'s> {
     pub fn write_logfwdr(&self, channel: u32, message: &[u8]) -> jsg::Result<()> {
         Ok(bridge::io_context_write_logfwdr(self.id, channel, message)?)
     }
+
+    /// Waits for `future` as part of this request, then calls `callback` with its output, in
+    /// this `IoContext`, with a new lock. `future` may complete on any thread; `callback` runs on
+    /// this `IoContext`'s thread. As for C++ `IoContext::awaitIo()`, which shares its
+    /// implementation, `callback` runs in the async context frame that was current when
+    /// `await_io` was called, the one the I/O was started in, rather than whichever is current
+    /// when `future` completes. In a Durable Object it likewise runs in the critical section, if
+    /// any, of that call. The wait is recorded for async tracing.
+    ///
+    /// If the request is canceled first, both are dropped without `callback` running. `callback`
+    /// returns nothing: what it settles, such as a promise, it settles itself, and an exception
+    /// it leaves pending is a termination.
+    ///
+    /// # Errors
+    /// Fails with an internal error if this `IoContext` is no longer the current one.
+    pub fn await_io<T, F, C>(&self, future: F, callback: C) -> jsg::Result<()>
+    where
+        T: Send + 'static,
+        F: Future<Output = T> + Send + 'static,
+        C: for<'t> FnOnce(&mut jsg::Lock<'t>, T) + 'static,
+    {
+        let future = ffi::IoFuture(Box::pin(async move {
+            let output: Box<dyn Any + Send> = Box::new(future.await);
+            output
+        }));
+        let callback = ffi::IoCallback(Box::new(move |lock, output| {
+            // `io_future_wait()` produced `output` from this `F`.
+            let output = output
+                .downcast::<T>()
+                .unwrap_or_else(|_| unreachable!("the output of await_io()'s future"));
+            callback(lock, *output);
+        }));
+        Ok(bridge::io_context_await_io(
+            self.id,
+            Box::new(future),
+            Box::new(callback),
+        )?)
+    }
+
+    /// Gives this `IoContext` ownership of `value`, as C++ `IoContext::addObject()` does: it is
+    /// dropped when the `IoContext` is destroyed, or when the returned handle is dropped, unless
+    /// [`IoOwned::take`] has taken it. How the value is reached differs from C++; see
+    /// [`IoOwned`].
+    ///
+    /// `value` should hold no JavaScript handles: nothing traces it.
+    ///
+    /// # Errors
+    /// Fails with an internal error if this `IoContext` is no longer the current one.
+    pub fn add_object<T: Send + 'static>(&self, value: T) -> jsg::Result<IoOwned<T>> {
+        let slot = Arc::new(Mutex::new(Some(value)));
+        let object = bridge::io_context_add_object(
+            self.id,
+            Box::new(ffi::IoOwnedSlot(Box::new(SlotRef(Arc::clone(&slot))))),
+        )?;
+        Ok(IoOwned {
+            slot,
+            _object: object,
+        })
+    }
+}
+
+/// A value an `IoContext` owns, from [`IoContext::add_object`].
+///
+/// Like C++ `IoOwn<T>`, which `IoContext::addObject()` returns, it ties the value to its
+/// `IoContext`, but the value can only be taken out, not used in place. Compared with `IoOwn`:
+///
+/// - **When the value is dropped:** the same, when the handle is dropped or the `IoContext` is
+///   destroyed, unless [`take`](Self::take) took it first. As with `IoOwn`, dropping the handle
+///   while its `IoContext` is not current leaves the value to be dropped later, by the
+///   `IoContext`.
+/// - **Access:** `IoOwn` is dereferenced in place, and only while its `IoContext` is current.
+///   Here the value is moved out with [`take`](Self::take), whichever `IoContext`, if any, is
+///   current.
+/// - **After the `IoContext` is destroyed:** dereferencing an `IoOwn` throws; here
+///   [`take`](Self::take) returns `None`.
+/// - **Threads:** an `IoOwn` is used on its `IoContext`'s thread, but may be dropped on any; the
+///   value is then dropped on the `IoContext`'s thread. `IoOwned` is neither `Send` nor `Sync`,
+///   so it stays on the thread that created it, which is the `IoContext`'s.
+pub struct IoOwned<T> {
+    slot: Arc<Mutex<Option<T>>>,
+    // Dropping it drops the value, if the IoContext has not already.
+    _object: KjOwn<bridge::IoOwnedObject>,
+}
+
+impl<T> IoOwned<T> {
+    /// Takes the value, or returns `None` if it was taken, or its `IoContext` has been
+    /// destroyed.
+    pub fn take(&self) -> Option<T> {
+        lock_slot(&self.slot).take()
+    }
+}
+
+/// Holds no JavaScript handles; see [`IoContext::add_object`].
+impl<T> jsg::Traced for IoOwned<T> {}
+
+/// The reference to an [`IoOwned`]'s value that its `IoContext` holds.
+struct SlotRef<T>(Arc<Mutex<Option<T>>>);
+
+impl<T> Drop for SlotRef<T> {
+    fn drop(&mut self) {
+        let value = lock_slot(&self.0).take();
+        drop(value);
+    }
+}
+
+fn lock_slot<T>(slot: &Mutex<Option<T>>) -> MutexGuard<'_, Option<T>> {
+    // Nothing panics while holding the lock: the value is taken out of it and dropped after.
+    slot.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 #[cfg(test)]

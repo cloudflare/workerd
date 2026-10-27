@@ -24,7 +24,10 @@ wd_cc_library(
     name = "ffi",
     srcs = ["ffi.c++"],
     hdrs = ["ffi.h"],
-    deps = ["//src/workerd/io"],
+    deps = [
+        ":ffi.rs@cxx",
+        "//src/workerd/io",
+    ],
 )
 
 # Checked by //src/rust/jsg:cpp-jsg-allowlist-test.
@@ -40,11 +43,12 @@ wd_rust_crate(
     srcs = ["test_bridge.rs"],
     crate_root = "test_bridge.rs",
     cxx_bridge_deps = ["//src/rust/jsg"],
-    cxx_bridge_hdrs = [],
+    cxx_bridge_hdrs = ["test-bridge.h"],
     cxx_bridge_src = "test_bridge.rs",
     deps = [
         ":io-context",
         "//src/rust/jsg",
+        "@crates_vendor//:futures",
     ],
 )
 
