@@ -57,6 +57,9 @@ WD_STRONG_BOOL(IoContext_Runnable_Exceptional);
 // Whether the caller awaits a subrequest with its next awaitIo(), so that the subrequest span's
 // async trace operation may be adopted by it. See SubrequestOptions::spanAwaitedNext.
 WD_STRONG_BOOL(SpanAwaitedNext);
+// Whether IoContext::cancelPendingWork() also clears `tasks`, which in an actor holds the
+// abortWhen() watchers.
+WD_STRONG_BOOL(ClearTasks);
 
 [[noreturn]] void throwExceededMemoryLimit(bool isActor);
 
@@ -179,6 +182,20 @@ class IoContext_IncomingRequest final: public kj::PtrTarget {
   // in certain situations (such as when an Actor is aborted).
   kj::Promise<WorkerInterface::ScheduledResult> finishScheduled(
       kj::Own<IoContext_IncomingRequest>&& self);
+
+  // Cancels all work that could still run JavaScript in this actor: timers, reentry callbacks and
+  // wait-until tasks, including those started by other requests. Reentry callbacks invoked
+  // afterwards reject, and cross-context promise reactions are dropped. Used by the onHibernate
+  // hook (see Worker::Actor::runOnHibernate()), which can't use drain(): for actors, drain() waits
+  // for the shutdown that the hook precedes. Also suppresses the destructor's warning that drain()
+  // was never called.
+  //
+  // Never throws: a cancellation failure is logged, since the actor isn't broken and the caller
+  // still has to flush storage.
+  //
+  // `tasks` is left alone. In an actor it holds only abortWhen() watchers, such as the CPU limit
+  // and output gate breaks, which must stay armed until the actor shuts down.
+  void cancelPendingWorkForHibernation();
 
   // Access the event loop's current time point. This will remain constant between ticks. This is
   // used to implement IoContext::now(), which should be preferred so that time can be adjusted
@@ -1353,6 +1370,19 @@ class IoContext final: public kj::Refcounted, private kj::TaskSet::ErrorHandler 
   // for `makeReentryCallback()` in particular.
   kj::Canceler canceler;
 
+  // Cancels the work that could still run JavaScript: reentry callbacks, timers, wait-until tasks
+  // and, if `clearTasks`, `tasks`. A canceled promise's destructor may throw; this keeps canceling
+  // and returns the first exception, so the caller decides whether to rethrow, log or ignore it.
+  // `makeReason` is only called if there are reentry callbacks to cancel, so that the common case
+  // doesn't allocate an exception.
+  kj::Maybe<kj::Exception> cancelPendingWork(
+      kj::FunctionParam<kj::Exception()> makeReason, ClearTasks clearTasks);
+
+  // Set by IncomingRequest::cancelPendingWorkForHibernation(). Reentry callbacks created earlier
+  // may still be held, e.g. by RPC targets; once this is set, invoking one rejects instead of
+  // running JavaScript.
+  bool reentryDisabled = false;
+
   kj::Own<WorkerInterface> getSubrequestChannelImpl(uint channel,
       bool isInHouse,
       kj::Maybe<kj::String> cfBlobJson,
@@ -1929,6 +1959,7 @@ auto IoContext::makeReentryCallbackImpl(Func func, kj::Own<void> attachment) {
              ioFunc = kj::mv(ioFunc)](auto&&... params) mutable {
     auto& ctx = JSG_REQUIRE_NONNULL(self->tryGet(), Error,
         "The execution context which hosts this callback is no longer running.");
+    JSG_REQUIRE(!ctx.reentryDisabled, Error, "The Durable Object is hibernating.");
 
     if constexpr (topUp == TOP_UP) {
       ctx.getLimitEnforcer().topUpActor();
