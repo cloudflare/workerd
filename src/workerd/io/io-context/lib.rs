@@ -89,3 +89,7 @@ impl<'s> IoContext<'s> {
         Ok(bridge::io_context_write_logfwdr(self.id, channel, message)?)
     }
 }
+
+#[cfg(test)]
+#[path = "lib-test.rs"]
+mod tests;
