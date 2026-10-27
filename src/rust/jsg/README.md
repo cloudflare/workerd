@@ -381,6 +381,16 @@ creates a handle takes `&mut Lock<'s>` and returns `Local<'s, _>`; methods that 
 JavaScript take `&mut Lock<'s>` as well, and borrowed views into V8 memory
 (`as_slice(&lock)`) borrow the lock, so no JavaScript can run while they are alive.
 
+`T` is a marker type that mirrors the V8 class of the same name: `v8::Value`, `v8::Boolean`,
+`v8::Number`, `v8::String`, `v8::Object`, `v8::Function`, `v8::Uint8Array` and so on, all in
+`jsg::v8` and nowhere else, so that `v8::String` reads as it does in C++ and never collides with
+`std::string::String`. A marker's `Local<T>` methods are named after the methods of its V8 class,
+in snake case (`Local<Number>::value()`, `Local<String>::length()`), and a marker has a
+constructor where V8 has one (`v8::Number::new(lock, 1.5)`). The markers are defined in `v8.rs`
+(promises in `promise.rs`); the comment above `Value` lists the V8 classes that have no marker
+yet. Other V8 classes that Rust JSG wraps, such as `v8::BackingStore`, are also only in
+`jsg::v8`.
+
 A `Local` is one non-null pointer, laid out like `v8::Local<T>`. It does not record its
 isolate; methods that need the isolate take the lock. A handle that may be empty is an
 `Option<Local<'s, T>>`, laid out like `v8::MaybeLocal<T>`: for example, the `String`
