@@ -92,6 +92,8 @@ wd_rust_crate(
         "//src/workerd/server/server:workerd-server",
         "@crates_vendor//:capnp",
         "@crates_vendor//:clap",
+        "@crates_vendor//:serde",
+        "@crates_vendor//:serde_json",
         "@crates_vendor//:socket2",
         "@crates_vendor//:tokio",
     ] + select({

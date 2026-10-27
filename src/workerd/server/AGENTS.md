@@ -57,6 +57,7 @@ Bazel labels: `//src/workerd/server:workerd`, `//src/workerd/server:workerd-cli`
 | `process.rs`   | Executable discovery, the compiled-binary format, `Process` (the files to watch, re-exec)                                                                           |
 | `socket_fd.rs` | `--socket-fd` / `--control-fd` descriptors, made owned; the platform halves are `socket_fd/{unix,windows}.rs`                                                        |
 | `watch.rs`     | `--watch`: the file watcher                                                                                                                                         |
+| `wrangler.rs`  | A `wrangler.json(c)` config: the supported fields translated into a `Config`, `main` bundled with esbuild (or scanned under `no_bundle`)                            |
 | `bridge.rs`    | The cxx bridge (`workerd::server::cli`) to `config-compiler.h` and the build facts in `factory/bootstrap.h`; header `<workerd/server/cli/bridge.rs.h>`             |
 
 ### `server/` (`workerd-server`)
