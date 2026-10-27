@@ -60,7 +60,10 @@ wd_cc_library(
 
 wd_cc_library(
     name = "ffi",
-    srcs = ["ffi.c++"],
+    srcs = [
+        "ffi.c++",
+        "ser.c++",
+    ],
     hdrs = [
         "ffi.h",
     ],

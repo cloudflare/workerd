@@ -352,8 +352,17 @@ void wrappable_clear_trait_object(Wrappable& wrappable);
 kj::uint wrappable_strong_refcount(const Wrappable& wrappable);
 
 // Wrappers
-// Returns an empty handle if the Wrappable has a live wrapper in another isolate.
-MaybeLocal wrap_resource(Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl);
+// Returns the Wrappable's wrapper in `isolate`, creating it if needed, or an empty handle in one
+// of two cases, which `wrappedElsewhere` tells apart:
+//
+// - true: the Wrappable already has a wrapper in another isolate. That is a bug in the caller,
+//   which panics. This does not assert, because unwinding would drop the caller's reference to
+//   the Wrappable, and releasing it needs the other isolate's lock.
+// - false: execution is terminating, or creating the wrapper failed and the exception is left
+//   pending. Like `call_into_js()` in v8.rs, this creates and reads nothing while execution is
+//   terminating, even a wrapper that already exists.
+MaybeLocal wrap_resource(
+    Isolate* isolate, kj::Rc<Wrappable> wrappable, const Global& tmpl, bool& wrappedElsewhere);
 void wrappable_attach_wrapper(kj::Rc<Wrappable> wrappable, FunctionCallbackInfo& args);
 // Attaches an opaque wrapper to `wrappable` and returns it, to be the data of the functions that
 // function_new() creates: the wrapper keeps the Wrappable alive and traced for as long as one of
@@ -457,6 +466,24 @@ Realm* realm_from_isolate(Isolate* isolate);
 bool realm_can_attach(Isolate* isolate);
 void realm_attach(Isolate* isolate, Realm& realm);
 void realm_detach(Isolate* isolate, const IsolateState* state);
+
+// Serialization
+// In the format of C++ JSG's jsg::Serializer and jsg::Deserializer, which read what these write
+// and the other way round; see ser.c++.
+//
+// Writes `value`, after a header, as jsg::Serializer does: native errors as host objects if
+// `errors_are_host_objects` (jsg::Lock::isUsingEnhancedErrorSerialization()), and workerd API
+// objects through their serializers. Stores the bytes in `result` and returns true, or returns
+// false if serialization threw, leaving the exception pending: a DataCloneError, or what a getter,
+// Proxy trap or serializer threw.
+bool local_serialize(Isolate* isolate,
+    const Local& value,
+    bool errors_are_host_objects,
+    ::rust::Vec<uint8_t>& result);
+// Reads a value as jsg::Deserializer does with its default options, and returns it, or
+// none if deserialization threw, leaving the exception pending. Runs no JavaScript. Throws a KJ
+// exception if the header is missing or of an unsupported version.
+MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
 
 // Errors
 // Builds an exception whose message is raw bytes interpreted as UTF-8. Invalid

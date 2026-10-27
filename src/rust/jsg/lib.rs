@@ -18,6 +18,7 @@ pub mod nullable;
 mod promise;
 pub mod resource;
 mod scope;
+pub mod ser;
 pub mod v8;
 mod wrappable;
 

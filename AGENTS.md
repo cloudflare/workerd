@@ -23,6 +23,7 @@ Subdirectory `AGENTS.md` files provide component-specific context (key classes, 
 
 - Main build command: `bazel build //src/workerd/server:workerd`
 - Binary output: `bazel-bin/src/workerd/server/workerd`
+- Remote execution: if `cloudflared access token -app=https://bazelflare-workerd.runtime-playground.workers.dev` prints a token, pass `--config=bazelflare` to Bazel, directly or through a `just` recipe that forwards its arguments to Bazel (`just build`, `just test`, `just stream-test`, `just node-test`); otherwise build locally. See `docs/development.md`
 
 ### Just Commands (recommended for development)
 
@@ -199,6 +200,7 @@ Be aware that workerd uses tcmalloc for memory allocation in the typical case. W
 | Streams implementation | `src/workerd/api/streams/`                                    | Has 842-line README; dual internal/standard impl                                                             |
 | Bazel build rules      | `build/`                                                      | Custom `wd_*` macros; `wd_test.bzl` generates 3 test variants                                                |
 | JS benchmarks          | `src/workerd/api/bench.{h,c++}`, `build/wd_bench.bzl`         | `bench` handler; runner `BenchController`; report schema `io/bench.capnp`; driver `server/server/bench.rs`   |
+| Streams benchmarks     | `src/bench/streams/`                                          | C++ vs TS streams: the same modules under a cell per implementation; see its `AGENTS.md`                     |
 | TypeScript types       | `types/`                                                      | Extracted from C++ RTTI + hand-written `defines/*.d.ts`; see `types/AGENTS.md` for detailed typings guidance |
 | V8 patches             | `patches/v8/`                                                 | See `docs/v8-updates.md`                                                                                     |
 

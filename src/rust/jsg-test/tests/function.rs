@@ -96,8 +96,8 @@ fn call_with_args() {
         let value = ctx.eval_raw(lock, "((a, b) => a - b)").unwrap();
         let func = v8::Local::<v8::Function>::try_from(value).unwrap();
 
-        let a = Number::new(10.0).to_js(lock);
-        let b = Number::new(32.0).to_js(lock);
+        let a = Number::new(10.0).to_js(lock)?;
+        let b = Number::new(32.0).to_js(lock)?;
         let result = func.call::<Number>(lock, None::<v8::Local<v8::Value>>, &[a, b])?;
         assert!((result.value() + 22.0).abs() < f64::EPSILON);
         Ok(())
@@ -112,7 +112,7 @@ fn call_returns_string() {
         let value = ctx.eval_raw(lock, "(s => s.toUpperCase())").unwrap();
         let func = v8::Local::<v8::Function>::try_from(value).unwrap();
 
-        let arg = String::from("hello").to_js(lock);
+        let arg = String::from("hello").to_js(lock)?;
         let result = func.call::<String>(lock, None::<v8::Local<v8::Value>>, &[arg])?;
         assert_eq!(result, "HELLO");
         Ok(())

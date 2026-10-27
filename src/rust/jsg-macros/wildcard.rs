@@ -73,9 +73,15 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> TokenStream {
             jsg::wildcard_getter_callback(|lock, name, args| {
                 let this = args.this();
                 #lookup
-                match result {
+                // An error from converting the value is thrown as one the method returns.
+                let converted = match result {
+                    Ok(Some(value)) => jsg::ToJS::to_js(value, lock).map(Some),
+                    Ok(None) => Ok(None),
+                    Err(err) => Err(err),
+                };
+                match converted {
                     Ok(Some(value)) => {
-                        args.set_return_value(jsg::ToJS::to_js(value, lock));
+                        args.set_return_value(value);
                         jsg::Intercepted::Yes
                     }
                     Ok(None) => jsg::Intercepted::No,

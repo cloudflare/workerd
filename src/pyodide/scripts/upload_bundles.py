@@ -97,9 +97,7 @@ class BundleInfo:
 
 def update_python_metadata_bzl(bundles: list[BundleInfo]) -> None:
     """Update python_metadata.bzl file with new backport and integrity values."""
-    metadata_path = (
-        Path(__file__).parent.parent.parent / "build" / "python_metadata.bzl"
-    )
+    metadata_path = Path(__file__).parents[3] / "build" / "python_metadata.bzl"
     content = metadata_path.read_text()
 
     for info in bundles:

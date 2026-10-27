@@ -1742,4 +1742,11 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # created with this hint is placed in a region that is off-peak at the current UTC time. The
   # experimental catch-all flag also allows it. Without either flag, the hint is rejected as
   # unsupported.
+
+  pythonSharedStandardLibrary @198 :Bool
+      $compatEnableFlag("python_shared_standard_library");
+  # When enabled, a Python Worker's stdlib archive `/lib/pythonXY.zip` is a symlink to a read-only
+  # file served from the Pyodide bundle, which every isolate in the process shares, rather than a
+  # writable copy held by each isolate. This saves a few MiB of memory per isolate. Opening the
+  # archive for writing fails with this flag.
 }

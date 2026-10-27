@@ -20,32 +20,40 @@ pub use crate::v8::ffi::ModuleType;
 ///
 /// `callback` produces the module's exports when JavaScript imports it. It runs in the module
 /// registry's current scope, so it receives a [`Lock`] for that scope and returns a handle
-/// branded with the same scope. It sees no request, even when a request imports the module: the
-/// C++ registration runs it with no current `IoContext`. It must capture nothing: C++ calls it through a plain function
-/// pointer, so there is nowhere to keep captured state (see [`UnitType`]).
+/// branded with the same scope; an error it returns is thrown to the importer. It sees no
+/// request, even when a request imports the module: the C++ registration runs it with no current
+/// `IoContext`. It must capture nothing: C++ calls it through a plain function pointer, so there
+/// is nowhere to keep captured state (see [`UnitType`]).
 pub fn add_builtin<F>(
     registry: Pin<&mut ffi::ModuleRegistry>,
     specifier: &str,
     callback: F,
     module_type: ModuleType,
 ) where
-    F: UnitType + for<'s> Fn(&mut Lock<'s>) -> v8::Local<'s, v8::Value>,
+    F: UnitType + for<'s> Fn(&mut Lock<'s>) -> crate::Result<v8::Local<'s, v8::Value>>,
 {
     // Called only by the C++ module registry, while `isolate` is locked, a context is entered
     // and a `HandleScope` is open that outlives the call. It is not an `unsafe fn` because cxx
     // passes function pointers as safe `fn`s, and no other code can name it. Returns an empty
-    // handle if `F` panicked, with the exception pending.
+    // handle if `F` failed or panicked, with the exception pending.
     fn trampoline<F>(isolate: *mut ffi::Isolate) -> ffi::MaybeLocal
     where
-        F: UnitType + for<'s> Fn(&mut Lock<'s>) -> v8::Local<'s, v8::Value>,
+        F: UnitType + for<'s> Fn(&mut Lock<'s>) -> crate::Result<v8::Local<'s, v8::Value>>,
     {
         // SAFETY: see above.
         let scope = std::pin::pin!(unsafe { CallbackScope::new(isolate) });
         crate::catch_panic(scope, |lock| {
             // SAFETY: `add_builtin` was handed a value of `F`.
             let callback = unsafe { crate::scope::unit_value::<F>() };
+            let exports = match callback(lock) {
+                Ok(exports) => Some(exports),
+                Err(err) => {
+                    lock.throw_exception(&err);
+                    None
+                }
+            };
             // SAFETY: the handle lives in the registry's HandleScope, which outlives this call.
-            unsafe { v8::Local::into_ffi_maybe(Some(callback(lock))) }
+            unsafe { v8::Local::into_ffi_maybe(exports) }
         })
         .unwrap_or_default()
     }

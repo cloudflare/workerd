@@ -270,7 +270,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, 
     # the bundle so that the runtime no longer has to download or unpack them at request time. The
     # wheels listed in the (pre-filtered) lock file are extracted at build time into a single
     # PythonPackages capnp message (one entry per file, keyed by install_dir + path; see
-    # python_packages.capnp / pack_python_packages.py) which is embedded as the `python_packages`
+    # python_packages.capnp / tools/pack_python_packages.py) which is embedded as the `python_packages`
     # data module. Newer Pyodide versions bundle the stdlib directly and have no wheels to embed.
     packages_tag = _packages_tag_for_version(version)
     internal_data_modules = [
@@ -286,7 +286,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, 
             srcs = [wheels, lockfile, "python_packages.capnp"],
             outs = [_out_path("python_packages.bin", version)],
             cmd = " ".join([
-                "$(execpath :pack_python_packages)",
+                "$(execpath //src/pyodide/tools:pack_python_packages)",
                 "--capnp $(execpath @capnp-cpp//src/capnp:capnp_tool)",
                 "--schema $(location python_packages.capnp)",
                 "--lock $(location %s)" % lockfile,
@@ -294,7 +294,7 @@ def _python_bundle(version, *, pyodide_asm_wasm = None, pyodide_asm_mjs = None, 
                 "$(locations %s)" % wheels,
             ]),
             tools = [
-                ":pack_python_packages",
+                "//src/pyodide/tools:pack_python_packages",
                 "@capnp-cpp//src/capnp:capnp_tool",
             ],
         )

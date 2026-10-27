@@ -134,7 +134,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         impl<'s> jsg::ToJS<'s> for #name {
-            fn to_js(self, lock: &mut jsg::Lock<'s>) -> jsg::v8::Local<'s, jsg::v8::Value> {
+            fn to_js(self, lock: &mut jsg::Lock<'s>) -> Result<jsg::v8::Local<'s, jsg::v8::Value>, jsg::Error> {
                 // TODO(soon): Use a precached ObjectTemplate instance to create the object,
                 // similar to how C++ JSG optimizes object creation. This would avoid recreating
                 // the object shape on every wrap() call and improve performance.
@@ -142,7 +142,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
                     let this = self;
                     let obj = lock.new_object();
                     #(#field_assignments)*
-                    obj.into()
+                    Ok(obj.into())
                 }
             }
         }
@@ -311,16 +311,21 @@ fn callback_with_instance(
     // Check if return type is Result<T, E>
     let is_result = matches!(&fn_sig.output, syn::ReturnType::Type(_, ty) if is_result_type(ty));
 
-    let result_handling = if is_result {
+    let conversion = if is_result {
         quote! {
             match result {
-                Ok(value) => args.set_return_value(jsg::ToJS::to_js(value, lock)),
-                Err(err) => lock.throw_exception(&err.into()),
+                Ok(value) => jsg::ToJS::to_js(value, lock),
+                Err(err) => Err(err.into()),
             }
         }
     } else {
-        quote! {
-            args.set_return_value(jsg::ToJS::to_js(result, lock));
+        quote! { jsg::ToJS::to_js(result, lock) }
+    };
+    let result_handling = quote! {
+        let converted: ::std::result::Result<_, jsg::Error> = #conversion;
+        match converted {
+            Ok(value) => args.set_return_value(value),
+            Err(err) => lock.throw_exception(&err),
         }
     };
 

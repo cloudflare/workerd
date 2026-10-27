@@ -74,10 +74,17 @@ class ReadOnlyBuffer: public jsg::Object {
  public:
   ReadOnlyBuffer(kj::ArrayPtr<const kj::byte> src): source(src) {};
 
+  // Returns a reader over the bytes of the data module named `name` in a Pyodide bundle. The bytes
+  // stay in the process-wide bundle message, so every isolate shares them.
+  static jsg::Ref<ReadOnlyBuffer> fromBundleDataModule(
+      jsg::Lock& js, jsg::Bundle::Reader bundle, kj::StringPtr name);
+
   uint32_t read(jsg::Lock& js, uint64_t offset, kj::Array<kj::byte> buf);
+  uint32_t getSize();
 
   JSG_RESOURCE_TYPE(ReadOnlyBuffer) {
     JSG_METHOD(read);
+    JSG_METHOD(getSize);
   }
 };
 
@@ -98,7 +105,7 @@ struct PythonPackageFileMetadata {
 };
 
 // Exposes the Python stdlib package files that are extracted and embedded directly in the Pyodide
-// bundle as a PythonPackages capnp message (see python_packages.capnp / pack_python_packages.py).
+// bundle as a PythonPackages capnp message (see python_packages.capnp / tools/pack_python_packages.py).
 // The runtime reads `getFiles()` to learn the file layout; each returned entry carries a `reader`
 // for the (already-decompressed) bytes of that file. This is a single bulk call (rather than a
 // per-file accessor) to avoid a JS<->C++ round-trip per file.

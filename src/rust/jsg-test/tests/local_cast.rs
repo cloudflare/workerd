@@ -18,7 +18,7 @@ fn float32_array_into_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<f32> = vec![1.0, 2.0, 3.0];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         // SAFETY: The isolate is locked and the FFI handle is from a valid eval result.
         let typed: v8::Local<'_, v8::Float32Array> =
             unsafe { v8::Local::from_ffi(js_val.into_ffi()) };
@@ -37,7 +37,7 @@ fn float64_array_into_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<f64> = vec![1.0, 2.0, 3.0];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         // SAFETY: The isolate is locked and the FFI handle is from a valid eval result.
         let typed: v8::Local<'_, v8::Float64Array> =
             unsafe { v8::Local::from_ffi(js_val.into_ffi()) };
@@ -56,7 +56,7 @@ fn bigint64_array_into_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<i64> = vec![1, 2, 3];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         // SAFETY: The isolate is locked and the FFI handle is from a valid eval result.
         let typed: v8::Local<'_, v8::BigInt64Array> =
             unsafe { v8::Local::from_ffi(js_val.into_ffi()) };
@@ -75,7 +75,7 @@ fn biguint64_array_into_value() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<u64> = vec![1, 2, 3];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         // SAFETY: The isolate is locked and the FFI handle is from a valid eval result.
         let typed: v8::Local<'_, v8::BigUint64Array> =
             unsafe { v8::Local::from_ffi(js_val.into_ffi()) };
@@ -98,7 +98,7 @@ fn float32_array_into_typed_array() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<f32> = vec![1.5, 2.5];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         // SAFETY: The isolate is locked and the FFI handle is from a valid eval result.
         let typed: v8::Local<'_, v8::Float32Array> =
             unsafe { v8::Local::from_ffi(js_val.into_ffi()) };
@@ -120,7 +120,7 @@ fn float64_array_into_typed_array() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<f64> = vec![1.5, 2.5];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         // SAFETY: The isolate is locked and the FFI handle is from a valid eval result.
         let typed: v8::Local<'_, v8::Float64Array> =
             unsafe { v8::Local::from_ffi(js_val.into_ffi()) };
@@ -142,7 +142,7 @@ fn bigint64_array_into_typed_array() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<i64> = vec![10, -20];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         // SAFETY: The isolate is locked and the FFI handle is from a valid eval result.
         let typed: v8::Local<'_, v8::BigInt64Array> =
             unsafe { v8::Local::from_ffi(js_val.into_ffi()) };
@@ -164,7 +164,7 @@ fn biguint64_array_into_typed_array() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<u64> = vec![10, 20];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         // SAFETY: The isolate is locked and the FFI handle is from a valid eval result.
         let typed: v8::Local<'_, v8::BigUint64Array> =
             unsafe { v8::Local::from_ffi(js_val.into_ffi()) };
@@ -226,7 +226,7 @@ fn typed_array_into_object() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<u8> = vec![1, 2, 3];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         // SAFETY: The isolate is locked and the FFI handle is from a valid eval result.
         let typed: v8::Local<'_, v8::Uint8Array> =
             unsafe { v8::Local::from_ffi(js_val.into_ffi()) };
@@ -290,7 +290,7 @@ fn typed_array_as_object_property_access() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<u8> = vec![1, 2, 3, 4, 5];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         // SAFETY: The isolate is locked and the FFI handle is from a valid eval result.
         let typed: v8::Local<'_, v8::Uint8Array> =
             unsafe { v8::Local::from_ffi(js_val.into_ffi()) };
@@ -319,7 +319,7 @@ fn float32_array_value_roundtrip() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<f32> = vec![1.5, 2.5, 3.5];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         // SAFETY: The isolate is locked and the FFI handle is from a valid eval result.
         let typed: v8::Local<'_, v8::Float32Array> =
             unsafe { v8::Local::from_ffi(js_val.into_ffi()) };
@@ -341,7 +341,7 @@ fn float64_array_value_roundtrip() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<f64> = vec![1.1, 2.2, 3.3];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         // SAFETY: The isolate is locked and the FFI handle is from a valid eval result.
         let typed: v8::Local<'_, v8::Float64Array> =
             unsafe { v8::Local::from_ffi(js_val.into_ffi()) };
@@ -363,7 +363,7 @@ fn bigint64_array_value_roundtrip() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<i64> = vec![-100, 0, 100];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         // SAFETY: The isolate is locked and the FFI handle is from a valid eval result.
         let typed: v8::Local<'_, v8::BigInt64Array> =
             unsafe { v8::Local::from_ffi(js_val.into_ffi()) };
@@ -385,7 +385,7 @@ fn biguint64_array_value_roundtrip() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<u64> = vec![0, 42, 999];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         // SAFETY: The isolate is locked and the FFI handle is from a valid eval result.
         let typed: v8::Local<'_, v8::BigUint64Array> =
             unsafe { v8::Local::from_ffi(js_val.into_ffi()) };

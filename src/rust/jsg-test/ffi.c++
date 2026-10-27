@@ -5,6 +5,7 @@
 #include "ffi.h"
 
 #include <workerd/io/features.h>
+#include <workerd/jsg/ser.h>
 #include <workerd/jsg/setup.h>
 #include <workerd/rust/jsg-test/lib.rs.h>
 #include <workerd/rust/jsg/ffi-inl.h>
@@ -18,6 +19,7 @@
 
 #include <capnp/message.h>
 #include <kj/common.h>
+#include <kj/map.h>
 
 using namespace kj_rs;
 
@@ -124,6 +126,43 @@ EvalResult EvalContext::eval(::rust::Str code, kj::Maybe<::rust::Str> maybeResou
   return runScript(v8Isolate, ctx, script);
 }
 
+namespace {
+// Keeps the callbacks of the builtin modules Rust registers.
+struct RecordingModuleRegistry final: public ::workerd::rust::jsg::ModuleRegistry {
+  ~RecordingModuleRegistry() noexcept override = default;
+
+  void addBuiltinModule(::rust::Str specifier,
+      ::workerd::rust::jsg::ModuleCallback callback,
+      ::workerd::rust::jsg::ModuleType) override {
+    modules.insert(kj::str(specifier), callback);
+  }
+
+  kj::HashMap<kj::String, ::workerd::rust::jsg::ModuleCallback> modules;
+};
+}  // namespace
+
+EvalResult EvalContext::call_builtin_module(
+    ::rust::Fn<void(::workerd::rust::jsg::ModuleRegistry&)> registerModules,
+    ::rust::Str specifier) const {
+  RecordingModuleRegistry registry;
+  registerModules(registry);
+  auto name = kj::str(specifier);
+  auto& callback = KJ_REQUIRE_NONNULL(registry.modules.find(name), "no such builtin module", name);
+
+  v8::Isolate::Scope isolateScope(v8Isolate);
+  v8::Context::Scope contextScope(v8Context.Get(v8Isolate));
+  v8::TryCatch catcher(v8Isolate);
+  auto value = ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(callback(v8Isolate));
+  bool success = !value.IsEmpty();
+  if (!success && catcher.HasCaught()) {
+    value = catcher.Exception();
+  }
+  return EvalResult{
+    .success = success,
+    .value = ::workerd::rust::jsg::maybe_local_to_ffi(value),
+  };
+}
+
 void TestHarness::run_in_context(
     size_t data, ::rust::Fn<void(size_t, Isolate*, EvalContext&)> callback) const {
   isolate->runInLockScope([&](TestIsolate::Lock& lock) {
@@ -228,6 +267,25 @@ bool cpp_wrapped_function_data_is_rust_wrappable(Isolate* isolate) {
 
 bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
   return ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(kj::mv(value)).IsEmpty();
+}
+
+::rust::Vec<uint8_t> cpp_serialize(Isolate* isolate, ::workerd::rust::jsg::Local value) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  ::workerd::jsg::Serializer serializer(js);
+  serializer.write(
+      js, ::workerd::jsg::JsValue(::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value))));
+  ::rust::Vec<uint8_t> result;
+  for (auto byte: serializer.release().data) {
+    result.push_back(byte);
+  }
+  return result;
+}
+
+::workerd::rust::jsg::Local cpp_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data) {
+  auto& js = ::workerd::jsg::Lock::from(isolate);
+  ::workerd::jsg::Deserializer deserializer(js, kj::arrayPtr(data.data(), data.size()));
+  v8::Local<v8::Value> result = deserializer.readValue(js);
+  return ::workerd::rust::jsg::to_ffi(kj::mv(result));
 }
 
 bool isolates_share_group(Isolate* a, Isolate* b) {

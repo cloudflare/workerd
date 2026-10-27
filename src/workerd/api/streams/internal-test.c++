@@ -127,7 +127,7 @@ KJ_TEST("IdentityTransformStream releases a partially-consumed write buffer on c
   kj::WaitScope ws(loop);
 
   auto pipe = newIdentityPipe();
-  kj::byte destination[2];
+  kj::byte destination[2]{};
   auto readPromise = pipe.in->tryRead(destination, 1, sizeof(destination));
 
   auto buffer = kj::heapArray<kj::byte>(4);

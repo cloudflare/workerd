@@ -1,0 +1,32 @@
+Subject: [PATCH] Place sysroot symlinks by each file's repository
+
+_symlink_sysroot_tree strips the repository path from each file using the
+target's repository, so a file that a target forwards from another
+repository, such as a filegroup in the main repository selecting part of
+a toolchain, kept its external/<repo> prefix in the sysroot. rustc_lib's
+libraries then weren't in the sysroot's lib directory, where rustc's
+RUNPATH looks for them; rustc only found them when its symlink resolved
+into the toolchain repository, as it does locally but not on a remote
+executor. Each file's own repository is stripped instead.
+---
+
+diff --git a/rust/private/toolchain.bzl b/rust/private/toolchain.bzl
+--- a/rust/private/toolchain.bzl
++++ b/rust/private/toolchain.bzl
+@@ -150,9 +150,13 @@
+         # symlink matching this path can be created within the sysroot.
+ 
+         # The code blow attempts to parse any workspace names out of the
+-        # path. For local targets, this code is a noop.
+-        if target.label.workspace_root:
+-            file_path = file.path.split(target.label.workspace_root, 1)[-1]
++        # path. For local targets, this code is a noop. The file's own
++        # repository counts, not the target's: a target may forward files
++        # from another repository, as a filegroup selecting part of a
++        # toolchain does.
++        workspace_root = file.owner.workspace_root if file.owner else target.label.workspace_root
++        if workspace_root:
++            file_path = file.path.split(workspace_root, 1)[-1]
+         else:
+             file_path = file.path
+ 
