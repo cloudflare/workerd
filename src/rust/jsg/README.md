@@ -546,8 +546,11 @@ JavaScript.
 `serialize_with` returns `ser::Serialized`, as `jsg::Serializer::release()` returns `Released`:
 the bytes, and the backing stores of the value's `SharedArrayBuffer`s and of the `ArrayBuffer`s
 in `SerializeOptions::transfer`, which are detached once the value is written. The data refers
-to these buffers by number, so a reader needs their backing stores, which
-`Serialized::deserialize_options()` hands it; `ser::serialize` drops them.
+to these buffers by number, so only `Serialized::deserialize` reads it with them, as
+`jsg::Deserializer` reads a `Released`. Safe code has no other way to hand a reader backing stores
+(the hidden hooks for C++ comparison tests give their addresses, which only `unsafe` code can
+use), so a reader can't be given another serialization's buffers. `Serialized::data()` and `into_data()`
+give the bytes alone, which `ser::deserialize_with` reads when they refer to no buffer.
 
 Externals are not supported: without a `jsg::Serializer::ExternalHandler`, functions, `Proxy`s
 and API objects that serialize only for RPC (stubs, streams, sockets) throw a `DataCloneError`,

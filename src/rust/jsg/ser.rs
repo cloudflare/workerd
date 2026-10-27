@@ -15,9 +15,11 @@
 //! - Workerd API objects whose C++ type is serializable, such as `Blob`, `Headers` and
 //!   `DOMException`, through their own serializers. Rust resources are not serializable.
 //!
-//! A `SharedArrayBuffer` is written as a reference to its backing store, which [`Serialized`]
-//! holds alongside the bytes, and is shared by a deserializer given it; so is an `ArrayBuffer` in
-//! [`SerializeOptions::transfer`], whose contents move to the deserializer.
+//! The data refers to a `SharedArrayBuffer`, and to an `ArrayBuffer` in
+//! [`SerializeOptions::transfer`], by number. Their backing stores stay in the [`Serialized`]
+//! that [`serialize_with`] returns, and only [`Serialized::deserialize`] hands them to a reader,
+//! so a reader always gets the buffers of the data it reads, as `jsg::Deserializer` does when
+//! given a serializer's `Released`.
 //!
 //! Externals are not supported: there is no `jsg::Serializer::ExternalHandler` to write an object
 //! as a reference to something outside the data, so serializing a function, a `Proxy` or an API
@@ -54,41 +56,94 @@ pub struct SerializeOptions<'a, 's> {
     /// What to do with a class instance, as
     /// `jsg::Serializer::Options::treatClassInstancesAsPlainObjects`.
     pub class_instances: ClassInstances,
-    /// `ArrayBuffer`s, or views of them, whose contents move to the deserializer rather than
-    /// being copied, as `structuredClone`'s `transfer` option and `jsg::Serializer::transfer()`:
-    /// the data refers to each by number, and each is detached once the value is written. Their
-    /// backing stores are in [`Serialized::transferred_array_buffers`].
+    /// `ArrayBuffer`s, or views of them, whose contents move to the reader rather than being
+    /// copied, as with `structuredClone`'s `transfer` option and `jsg::Serializer::transfer()`.
+    /// A value listed twice is transferred once. Each buffer is detached once the value is
+    /// written.
     pub transfer: &'a [v8::Local<'s, v8::Value>],
 }
 
-/// What [`serialize_with`] writes, as `jsg::Serializer::Released`.
-#[derive(Debug, Default)]
+/// What [`serialize_with`] writes, as `jsg::Serializer::Released`: the bytes, and the backing
+/// stores of the buffers they refer to by number.
+#[derive(Debug)]
 pub struct Serialized {
-    /// The bytes.
-    pub data: Vec<u8>,
-    /// The backing store of each `SharedArrayBuffer` in the value, in the order the data numbers
-    /// them. Pass them to [`DeserializeOptions::shared_array_buffers`] to share the buffers.
-    pub shared_array_buffers: Vec<v8::BackingStore>,
-    /// The backing store of each value in [`SerializeOptions::transfer`], in order. Pass them to
-    /// [`DeserializeOptions::transferred_array_buffers`].
-    pub transferred_array_buffers: Vec<v8::BackingStore>,
+    data: Vec<u8>,
+    shared_array_buffers: Vec<v8::BackingStore>,
+    transferred_array_buffers: Vec<v8::BackingStore>,
 }
 
 impl Serialized {
-    /// The default options with this data's buffers, to read it back as
-    /// `jsg::Deserializer(js, released)` does.
-    pub fn deserialize_options(&self) -> DeserializeOptions<'_> {
-        DeserializeOptions {
-            transferred_array_buffers: &self.transferred_array_buffers,
-            shared_array_buffers: Some(&self.shared_array_buffers),
-            ..Default::default()
+    /// The bytes.
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    /// The bytes, without the buffers. Data that refers to a buffer can then not be read back.
+    pub fn into_data(self) -> Vec<u8> {
+        self.data
+    }
+
+    /// Deserializes the value, as `jsg::Deserializer(js, released, options)` does: each
+    /// `SharedArrayBuffer` is read as a new one that shares the original's memory, and each
+    /// transferred `ArrayBuffer` as a new one that holds its contents. Runs no JavaScript.
+    ///
+    /// # Errors
+    ///
+    /// As for [`deserialize_with`].
+    pub fn deserialize<'s>(
+        self,
+        lock: &mut Lock<'s>,
+        options: &DeserializeOptions<'_>,
+    ) -> Result<v8::Local<'s, v8::Value>, Error> {
+        let (transferred, shared) = self.backing_store_addresses();
+        deserialize_impl(lock, &self.data, options, &transferred, Some(&shared))
+    }
+
+    /// Takes ownership of what C++ wrote, normally what one `jsg::Serializer` released. Data that
+    /// names a `SharedArrayBuffer` beyond the list is read as corrupt.
+    ///
+    /// # Safety
+    ///
+    /// Each backing store must be the address of a heap-allocated
+    /// `std::shared_ptr<v8::BackingStore>` that nothing else owns, those in
+    /// `shared_array_buffers` shared and those in `transferred_array_buffers` not, as V8 requires
+    /// of the buffers it creates over them.
+    #[doc(hidden)]
+    pub unsafe fn from_ffi(serialized: v8::ffi::Serialized) -> Self {
+        let take = |addresses: Vec<usize>| {
+            addresses
+                .into_iter()
+                // SAFETY: the caller hands over each std::shared_ptr.
+                .map(|address| unsafe { v8::BackingStore::from_ffi(address) })
+                .collect()
+        };
+        Self {
+            data: serialized.data,
+            shared_array_buffers: take(serialized.shared_array_buffers),
+            transferred_array_buffers: take(serialized.transferred_array_buffers),
         }
+    }
+
+    /// The addresses of the transferred and the shared backing stores, for C++ to borrow, in the
+    /// order the data numbers them.
+    #[doc(hidden)]
+    pub fn backing_store_addresses(&self) -> (Vec<usize>, Vec<usize>) {
+        let addresses = |stores: &[v8::BackingStore]| {
+            stores
+                .iter()
+                .map(v8::BackingStore::as_ffi)
+                .collect::<Vec<_>>()
+        };
+        (
+            addresses(&self.transferred_array_buffers),
+            addresses(&self.shared_array_buffers),
+        )
     }
 }
 
-/// How [`deserialize_with`] reads data, as `jsg::Deserializer::Options`. The default is
-/// `jsg::Deserializer`'s.
-#[derive(Clone, Copy, Debug)]
+/// How [`deserialize_with`] and [`Serialized::deserialize`] read data, as
+/// `jsg::Deserializer::Options`. The default is `jsg::Deserializer`'s.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DeserializeOptions<'a> {
     /// The format version to read in, at least 13, or `None` for the one the header holds. Set
     /// it for data written without a header.
@@ -101,14 +156,6 @@ pub struct DeserializeOptions<'a> {
     /// What the data is, such as `"RPC result"`, to tell apart the internal errors reported for
     /// a missing or unsupported header. A fixed label, never user data: it is logged.
     pub diagnostic_context: Option<&'a str>,
-    /// The backing stores of the transferred `ArrayBuffer`s, as
-    /// [`Serialized::transferred_array_buffers`]. Each becomes a new `ArrayBuffer` that shares
-    /// it. A shared one is an internal error.
-    pub transferred_array_buffers: &'a [v8::BackingStore],
-    /// The backing stores of the `SharedArrayBuffer`s, as [`Serialized::shared_array_buffers`],
-    /// or `None` to throw for data that has one. Each becomes a new `SharedArrayBuffer` that
-    /// shares it. One that is not shared is an internal error.
-    pub shared_array_buffers: Option<&'a [v8::BackingStore]>,
 }
 
 impl Default for DeserializeOptions<'_> {
@@ -118,38 +165,36 @@ impl Default for DeserializeOptions<'_> {
             read_header: true,
             preserve_stack_in_errors: true,
             diagnostic_context: None,
-            transferred_array_buffers: &[],
-            shared_array_buffers: None,
         }
     }
 }
 
-/// Serializes `value`, with a header, as `jsg::Serializer` does.
+/// Serializes `value`, with a header, as `jsg::Serializer` does, and returns the bytes. Data that
+/// refers to a `SharedArrayBuffer` can't be read back from them; [`serialize_with`] keeps the
+/// buffers.
 ///
 /// # Errors
 ///
 /// As for [`serialize_with`].
-/// The data refers to a `SharedArrayBuffer` in `value` by number, without its backing store, so
-/// it can't be read back; use [`serialize_with`] to get the backing stores.
 pub fn serialize<'s>(
     lock: &mut Lock<'s>,
     value: v8::Local<'s, v8::Value>,
 ) -> Result<Vec<u8>, Error> {
-    Ok(serialize_with(lock, value, &SerializeOptions::default())?.data)
+    Ok(serialize_with(lock, value, &SerializeOptions::default())?.into_data())
 }
 
-/// Serializes `value` as `jsg::Serializer` does with `options`, transferring
-/// `options.transfer` first.
+/// Serializes `value` as `jsg::Serializer` does with `options`, transferring `options.transfer`
+/// first.
 ///
 /// # Errors
 ///
 /// A value in `options.transfer` that is not an `ArrayBuffer` or a view of one throws a
 /// `TypeError`, and a view of a `SharedArrayBuffer` a `DataCloneError`; nothing is detached.
 /// Serialization runs JavaScript (getters and Proxy traps). If it throws, or `value` can't be
-/// serialized (a `DataCloneError`, as for a class instance with [`ClassInstances::Reject`]), or `options.version` is newer than V8's (a
-/// `DataCloneError`), or execution is terminating, the exception stays pending and the error is
-/// one for which [`Error::is_pending`] is true. Return it, as for
-/// [`v8::Local::<v8::Function>::call`]. A version older than 13 is an internal error.
+/// serialized (a `DataCloneError`, as for a class instance with [`ClassInstances::Reject`]), or
+/// `options.version` is newer than V8's (a `DataCloneError`), or execution is terminating, the
+/// exception stays pending and the error is one for which [`Error::is_pending`] is true. Return
+/// it, as for [`v8::Local::<v8::Function>::call`]. A version older than 13 is an internal error.
 pub fn serialize_with<'s>(
     lock: &mut Lock<'s>,
     value: v8::Local<'s, v8::Value>,
@@ -179,22 +224,8 @@ pub fn serialize_with<'s>(
                 &mut result,
             )
         }?;
-        if !ok {
-            return Ok(None);
-        }
-        let take = |addresses: Vec<usize>| {
-            addresses
-                .into_iter()
-                // SAFETY: each is a heap-allocated std::shared_ptr<v8::BackingStore> that C++
-                // handed over and nothing else owns.
-                .map(|address| unsafe { v8::BackingStore::from_ffi(address) })
-                .collect()
-        };
-        Ok(Some(Serialized {
-            data: result.data,
-            shared_array_buffers: take(result.shared_array_buffers),
-            transferred_array_buffers: take(result.transferred_array_buffers),
-        }))
+        // SAFETY: on success the shim hands over the data and the backing stores it wrote.
+        Ok(ok.then(|| unsafe { Serialized::from_ffi(result) }))
     })
 }
 
@@ -212,48 +243,50 @@ pub fn deserialize<'s>(
 }
 
 /// Deserializes a value that [`serialize_with`] or `jsg::Serializer` wrote, as
-/// `jsg::Deserializer` does with `options`. Runs no JavaScript.
+/// `jsg::Deserializer` does with `options` and no buffers. Runs no JavaScript.
+///
+/// Data that refers to a buffer throws; read it with [`Serialized::deserialize`].
 ///
 /// # Errors
 ///
 /// If `data` is malformed or names an unknown API type or buffer, or a type's deserializer
-/// throws, or
-/// execution is terminating, the exception stays pending and the error is one for which
-/// [`Error::is_pending`] is true. If the header is read and is missing or of an unsupported
-/// version, or `options.version` is older than 13, or a backing store is of the wrong kind, the
-/// error is an internal one.
+/// throws, or execution is terminating, the exception stays pending and the error is one for
+/// which [`Error::is_pending`] is true. If the header is read and is missing or of an unsupported
+/// version, or `options.version` is older than 13, the error is an internal one.
 pub fn deserialize_with<'s>(
     lock: &mut Lock<'s>,
     data: &[u8],
     options: &DeserializeOptions<'_>,
+) -> Result<v8::Local<'s, v8::Value>, Error> {
+    deserialize_impl(lock, data, options, &[], None)
+}
+
+fn deserialize_impl<'s>(
+    lock: &mut Lock<'s>,
+    data: &[u8],
+    options: &DeserializeOptions<'_>,
+    transferred_array_buffers: &[usize],
+    shared_array_buffers: Option<&[usize]>,
 ) -> Result<v8::Local<'s, v8::Value>, Error> {
     let ffi_options = v8::ffi::DeserializeOptions {
         has_version: options.version.is_some(),
         version: options.version.unwrap_or_default(),
         read_header: options.read_header,
         preserve_stack_in_errors: options.preserve_stack_in_errors,
-        has_shared_array_buffers: options.shared_array_buffers.is_some(),
+        has_shared_array_buffers: shared_array_buffers.is_some(),
     };
-    let addresses = |stores: &[v8::BackingStore]| {
-        stores
-            .iter()
-            .map(v8::BackingStore::as_ffi)
-            .collect::<Vec<_>>()
-    };
-    let transferred_array_buffers = addresses(options.transferred_array_buffers);
-    let shared_array_buffers = addresses(options.shared_array_buffers.unwrap_or_default());
     let diagnostic_context = options.diagnostic_context.unwrap_or("unknown");
     v8::call_into_js(lock, |lock| {
-        // SAFETY: the lock guarantees the isolate is locked and a HandleScope is active. The
-        // result belongs to the lock's scope.
+        // SAFETY: the lock guarantees the isolate is locked and a HandleScope is active, and the
+        // backing stores outlive the call. The result belongs to the lock's scope.
         let value = unsafe {
             v8::ffi::value_deserialize(
                 lock.isolate().as_ffi(),
                 data,
                 &ffi_options,
                 diagnostic_context,
-                &transferred_array_buffers,
-                &shared_array_buffers,
+                transferred_array_buffers,
+                shared_array_buffers.unwrap_or_default(),
             )
         }?;
         // SAFETY: as above.

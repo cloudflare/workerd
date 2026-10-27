@@ -667,8 +667,8 @@ pub mod ffi {
             result: &mut Serialized,
         ) -> Result<bool>;
         // Leaves what deserialization throws pending. Fallible: a missing or unsupported header,
-        // a version older than 13, or a backing store of the wrong kind throws. The backing
-        // stores are borrowed `BackingStore` addresses.
+        // or a version older than 13, throws. The backing stores are borrowed `BackingStore`
+        // addresses, released with the data.
         pub unsafe fn value_deserialize(
             isolate: *mut Isolate,
             data: &[u8],

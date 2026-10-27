@@ -549,7 +549,7 @@ impl Harness {
     ///
     /// Panics if serialization throws.
     pub fn cpp_serialize<'s>(lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) -> Vec<u8> {
-        Self::cpp_serialize_with(lock, value, &jsg::ser::SerializeOptions::default()).data
+        Self::cpp_serialize_with(lock, value, &jsg::ser::SerializeOptions::default()).into_data()
     }
 
     /// Serializes `value` with C++ JSG's `jsg::Serializer` and the same options, to compare with
@@ -590,18 +590,9 @@ impl Harness {
             )
         }
         .expect("C++ JSG should serialize the value");
-        let take = |addresses: Vec<usize>| {
-            addresses
-                .into_iter()
-                // SAFETY: C++ handed over each heap-allocated std::shared_ptr.
-                .map(|address| unsafe { v8::BackingStore::from_ffi(address) })
-                .collect()
-        };
-        jsg::ser::Serialized {
-            data: result.data,
-            shared_array_buffers: take(result.shared_array_buffers),
-            transferred_array_buffers: take(result.transferred_array_buffers),
-        }
+        // SAFETY: `jsg::Serializer` released the data and the backing stores, and C++ handed over
+        // each std::shared_ptr.
+        unsafe { jsg::ser::Serialized::from_ffi(result) }
     }
 
     /// Deserializes `data` with C++ JSG's `jsg::Deserializer`, to compare with
@@ -625,30 +616,55 @@ impl Harness {
         data: &[u8],
         options: &jsg::ser::DeserializeOptions<'_>,
     ) -> v8::Local<'s, v8::Value> {
+        Self::cpp_deserialize_impl(lock, data, options, &[], None)
+    }
+
+    /// Deserializes what `serialized` holds with C++ JSG's `jsg::Deserializer`, `options` and its
+    /// buffers, as `jsg::Deserializer(js, released, options)` does, to compare with
+    /// [`jsg::ser::Serialized::deserialize`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if deserialization throws.
+    pub fn cpp_deserialize_serialized<'s>(
+        lock: &mut jsg::Lock<'s>,
+        serialized: &jsg::ser::Serialized,
+        options: &jsg::ser::DeserializeOptions<'_>,
+    ) -> v8::Local<'s, v8::Value> {
+        let (transferred, shared) = serialized.backing_store_addresses();
+        Self::cpp_deserialize_impl(
+            lock,
+            serialized.data(),
+            options,
+            &transferred,
+            Some(&shared),
+        )
+    }
+
+    fn cpp_deserialize_impl<'s>(
+        lock: &mut jsg::Lock<'s>,
+        data: &[u8],
+        options: &jsg::ser::DeserializeOptions<'_>,
+        transferred: &[usize],
+        shared: Option<&[usize]>,
+    ) -> v8::Local<'s, v8::Value> {
         let ffi_options = jsg::v8::ffi::DeserializeOptions {
             has_version: options.version.is_some(),
             version: options.version.unwrap_or_default(),
             read_header: options.read_header,
             preserve_stack_in_errors: options.preserve_stack_in_errors,
-            has_shared_array_buffers: options.shared_array_buffers.is_some(),
+            has_shared_array_buffers: shared.is_some(),
         };
-        let addresses = |stores: &[v8::BackingStore]| {
-            stores
-                .iter()
-                .map(v8::BackingStore::as_ffi)
-                .collect::<Vec<_>>()
-        };
-        let transferred = addresses(options.transferred_array_buffers);
-        let shared = addresses(options.shared_array_buffers.unwrap_or_default());
-        // SAFETY: as for `cpp_serialize_with`; the result belongs to the lock's scope.
+        // SAFETY: as for `cpp_serialize_with`; the backing stores outlive the call, and the
+        // result belongs to the lock's scope.
         unsafe {
             v8::Local::from_ffi(
                 ffi::cpp_deserialize(
                     lock.isolate().as_ffi(),
                     data,
                     &ffi_options,
-                    &transferred,
-                    &shared,
+                    transferred,
+                    shared.unwrap_or_default(),
                 )
                 .expect("C++ JSG should deserialize the data"),
             )

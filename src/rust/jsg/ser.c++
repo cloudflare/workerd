@@ -221,19 +221,10 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
   // Applies the options and hands over the transferred buffers as jsg::Deserializer's constructor
   // does, reading the header unless `options.read_header` is false. Throws a KJ exception, which
   // reaches JavaScript as an internal error, if the header is missing or of an unsupported
-  // version, the version is older than 13, or a backing store is of the wrong kind; if execution
-  // is terminating, returns false.
+  // version, or the version is older than 13; if execution is terminating, returns false.
   bool init(::rust::Slice<const uint8_t> data,
       ::rust::Str diagnosticContext,
       ::rust::Slice<const size_t> transferredArrayBuffers) {
-    for (auto address: sharedArrayBuffers) {
-      KJ_REQUIRE(backingStoreAt(address)->IsShared(),
-          "A SharedArrayBuffer's backing store must be shared.");
-    }
-    for (auto address: transferredArrayBuffers) {
-      KJ_REQUIRE(!backingStoreAt(address)->IsShared(),
-          "A transferred ArrayBuffer's backing store must not be shared.");
-    }
     if (options.read_header && !readHeader(data, diagnosticContext)) return false;
     if (options.has_version) {
       KJ_REQUIRE(
@@ -271,6 +262,7 @@ class Deserializer final: public v8::ValueDeserializer::Delegate {
       // jsg::Deserializer.
       return v8::ValueDeserializer::Delegate::GetSharedArrayBufferFromId(isolate, id);
     }
+    // The buffers are the data's own, so only corrupt data names one beyond them.
     if (id >= sharedArrayBuffers.size()) {
       throwCorrupt();
       return {};

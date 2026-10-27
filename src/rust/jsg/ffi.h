@@ -487,12 +487,12 @@ bool local_serialize(Isolate* isolate,
     const SerializeOptions& options,
     ::rust::Slice<const Local> transfer,
     Serialized& result);
-// Reads a value as jsg::Deserializer does with `options` and the given backing stores (borrowed
-// `std::shared_ptr<v8::BackingStore>` addresses), and returns it, or none if deserialization threw,
-// leaving the exception pending. Runs no JavaScript. Throws a KJ exception, labeled with
-// `diagnostic_context`, if the header is to be read and is missing or of an unsupported version,
-// for a version older than 13, and for a transferred backing store that is shared or a shared one
-// that is not.
+// Reads a value as jsg::Deserializer does with `options` and the backing stores of the
+// SharedArrayBuffers and transferred ArrayBuffers that the serializer released with the data
+// (borrowed `std::shared_ptr<v8::BackingStore>` addresses), and returns it, or none if
+// deserialization threw, leaving the exception pending. Runs no JavaScript. Throws a KJ exception,
+// labeled with `diagnostic_context`, if the header is to be read and is missing or of an
+// unsupported version, and for a version older than 13.
 MaybeLocal value_deserialize(Isolate* isolate,
     ::rust::Slice<const uint8_t> data,
     const DeserializeOptions& options,
