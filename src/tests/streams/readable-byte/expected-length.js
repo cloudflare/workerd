@@ -31,6 +31,13 @@
 // been read before a fork, the fork and its own forks go out chunked in
 // both (PARITY). A partly read stream itself (ledger #45) is pinned in
 // js-rpc-streams-crossflag-test.js, as no consumer here accepts one.
+//
+// DIVERGENCE (ledger #46): a response whose byte source declares
+// expectedLength and is compressed on the way out by Content-Encoding:
+// gzip. TypeScript reports no length for an encoded body, so it goes out
+// chunked and decodes in full. C++ keeps the uncompressed length as the
+// Content-Length, so the compressed body falls short of it and the reader
+// fails with 'Network connection lost.'
 
 import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -324,6 +331,37 @@ export const byteSourceForkBeforeReadKeepsLength = {
       new Request(requestWith(d)),
     ]) {
       deepStrictEqual(await post(env, request), [expected, '0123456789']);
+    }
+  },
+};
+
+const PAYLOAD = 'compress me please '.repeat(2000);
+
+// Served by main.js at /gzip: a byte source declaring its uncompressed
+// length, sent with Content-Encoding: gzip, which compresses it on the way
+// out.
+export function compressedByteResponse() {
+  const bytes = new TextEncoder().encode(PAYLOAD);
+  const body = new ReadableStream({
+    type: 'bytes',
+    expectedLength: bytes.length,
+    start(c) {
+      c.enqueue(bytes);
+      c.close();
+    },
+  });
+  return new Response(body, { headers: { 'content-encoding': 'gzip' } });
+}
+
+// DIVERGENCE (ledger #46)
+export const byteSourceCompressedResponseDropsLength = {
+  async test(ctrl, env) {
+    const resp = await env.SELF.fetch('http://example.org/gzip');
+    strictEqual(resp.headers.get('content-encoding'), 'gzip');
+    if (usingTsImpl) {
+      strictEqual(await resp.text(), PAYLOAD);
+    } else {
+      await rejects(resp.text(), { message: 'Network connection lost.' });
     }
   },
 };

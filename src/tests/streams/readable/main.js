@@ -8,10 +8,17 @@
 // The default export serves the SELF binding used by the integration
 // tests: it echoes the request body back, letting tests round-trip a
 // ReadableStream through the fetch machinery in both directions, and
-// reports the Content-Length the request carried.
+// reports the Content-Length the request carried. /gzip serves
+// expected-length.js's compressed response instead.
+
+import { compressedResponse } from 'expected-length';
 
 export default {
   async fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname === '/gzip') {
+      return compressedResponse(url);
+    }
     return new Response(request.body, {
       headers: {
         'content-type': 'application/octet-stream',
@@ -219,6 +226,7 @@ export {
 export {
   forkBeforeReadKeepsDeclaredLength,
   forkAfterReadSendsChunked,
+  compressedResponseDropsDeclaredLength,
 } from 'expected-length';
 
 export {
