@@ -333,13 +333,15 @@ export default {
   'http-cache/http-cache.js': {},
   'http-cache/invalidate.any.js': {
     comment:
-      'fetch() has no HTTP cache, and workerd rejects the custom request method (#3453)',
+      'fetch() has no HTTP cache, so the unknown-method cases could only pass trivially, and only with the OTHER_HTTP_METHODS autogate',
     expectedFailures: [
       'HTTP cache does not invalidate after a failed response from an unsafe request',
-      'HTTP cache invalidates after a successful response from an unknown method',
       'HTTP cache does not invalidate Location URL after a failed response from an unsafe request',
-      'HTTP cache invalidates Location URL after a successful response from an unknown method',
       'HTTP cache does not invalidate Content-Location URL after a failed response from an unsafe request',
+    ],
+    omittedTests: [
+      'HTTP cache invalidates after a successful response from an unknown method',
+      'HTTP cache invalidates Location URL after a successful response from an unknown method',
       'HTTP cache invalidates Content-Location URL after a successful response from an unknown method',
     ],
   },
