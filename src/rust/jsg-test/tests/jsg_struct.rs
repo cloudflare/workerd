@@ -321,7 +321,7 @@ fn struct_without_fast_jsg_struct_omits_absent_optional_fields() {
 }
 
 /// With `fast_jsg_struct`, an absent optional field is an own property whose value is undefined,
-/// as C++ JSG's DictionaryTemplate gives every field a value.
+/// as C++ JSG's `DictionaryTemplate` gives every field a value.
 #[test]
 fn struct_with_fast_jsg_struct_has_absent_optional_fields_as_undefined() {
     let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(true));
