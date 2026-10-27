@@ -99,6 +99,8 @@ py_wd_test(
     tags = ["no-tsan"],
 )
 
+py_wd_test("stdlib-zip")
+
 js_binary(
     name = "socket-server",
     entry_point = "sockets/socket-server.js",

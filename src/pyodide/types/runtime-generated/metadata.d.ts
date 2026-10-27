@@ -13,6 +13,7 @@ declare namespace MetadataReader {
     python_check_rng_state?: boolean;
     python_workflows_implicit_dependencies?: boolean;
     python_process_pth_files?: boolean;
+    python_shared_standard_library?: boolean;
   }
 
   const isWorkerd: () => boolean;
