@@ -106,10 +106,6 @@ impl Cluster {
         self.registry.node()
     }
 
-    pub fn key(&self) -> &[u8] {
-        &self.key
-    }
-
     pub async fn renew(&self, now_ms: u64) -> Result<u64> {
         self.registry.renew(now_ms).await
     }
@@ -231,7 +227,9 @@ impl Cluster {
         self.ownership.refresh_route(ns, actor, now_ms).await
     }
 
-    /// The MAC a peer call carries.
+    /// The MAC a peer call carries. The cluster key is used only through
+    /// labelled derivations, so no two uses share a key: this, with each
+    /// message labelled, and the channel token key.
     pub fn mac(&self, data: &[u8]) -> Vec<u8> {
         hmac_sha256(&self.key, data)
     }
