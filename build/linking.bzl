@@ -7,6 +7,11 @@ CC_LIBRARY_LINKSTATIC = select({
     "//conditions:default": False,
 })
 
+# C++ toolchain features for binaries that link with //build/deps:linkopts_default. Downstream
+# toolchains use reduced_lto_backend_optimization to also reduce the optimization level of ThinLTO
+# backend actions; toolchains that don't define a feature ignore it.
+LINKOPTS_DEFAULT_FEATURES = ["reduced_lto_backend_optimization"]
+
 # Tests use dynamic linkage on Linux, where Bazel supports it, to reduce link time and binary size.
 # TSan instead links statically so every object uses the instrumented static libc++ and libc++abi.
 CC_TEST_LINKSTATIC = select({
