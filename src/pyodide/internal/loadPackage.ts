@@ -7,7 +7,7 @@
  * the stdlib packages (and the shared libraries they depend on).
  *
  * The packages are extracted at build time and embedded directly in the Pyodide bundle as
- * individual files (see src/pyodide/pack_python_packages.py and python_packages.capnp), so there is
+ * individual files (see src/pyodide/tools/pack_python_packages.py and python_packages.capnp), so there is
  * no gzip/tar work and no download at runtime: we simply overlay each embedded file onto
  * site-packages or /usr/lib according to its install_dir.
  *

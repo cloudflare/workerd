@@ -105,7 +105,7 @@ struct PythonPackageFileMetadata {
 };
 
 // Exposes the Python stdlib package files that are extracted and embedded directly in the Pyodide
-// bundle as a PythonPackages capnp message (see python_packages.capnp / pack_python_packages.py).
+// bundle as a PythonPackages capnp message (see python_packages.capnp / tools/pack_python_packages.py).
 // The runtime reads `getFiles()` to learn the file layout; each returned entry carries a `reader`
 // for the (already-decompressed) bytes of that file. This is a single bulk call (rather than a
 // per-file accessor) to avoid a JS<->C++ round-trip per file.
