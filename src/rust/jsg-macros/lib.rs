@@ -113,7 +113,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     };
 
-    let to_js_body = struct_to_js_body(&to_js_fields);
+    let to_js_body = to_js_fn_body(&to_js_fields);
 
     quote! {
         #input
@@ -175,7 +175,7 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// The body of a `#[jsg_struct]`'s `ToJS::to_js`, given each public field's name, its
 /// JavaScript name and whether it is an `Option`. Like C++ JSG's `JSG_STRUCT`, it follows the
 /// `fast_jsg_struct` flag.
-fn struct_to_js_body(fields: &[(&syn::Ident, String, bool)]) -> proc_macro2::TokenStream {
+fn to_js_fn_body(fields: &[(&syn::Ident, String, bool)]) -> proc_macro2::TokenStream {
     // A DictionaryTemplate instance has every field, so an absent optional field is undefined.
     let data_properties = fields.iter().map(|(field_name, js_name, optional)| {
         let value = if *optional {
