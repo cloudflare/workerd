@@ -1042,12 +1042,14 @@ impl<T: Type> Type for Vec<T> {
 
 impl<'s, T: ToJS<'s>> ToJS<'s> for Vec<T> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-        let array = v8::Array::new(lock, self.len());
-        for (i, item) in self.into_iter().enumerate() {
-            let value = item.to_js(lock)?;
-            array.set(lock, i, value);
-        }
-        Ok(array.into())
+        // As C++ JSG does, this builds the array from its elements instead of setting them
+        // one by one, so no setter a script put on Array.prototype runs. Converting stops at
+        // the first element that fails.
+        let elements = self
+            .into_iter()
+            .map(|item| item.to_js(lock))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(v8::Array::with_elements(lock, &elements).into())
     }
 }
 

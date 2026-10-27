@@ -54,7 +54,7 @@ fn objects_can_be_wrapped_and_unwrapped() {
         assert!(!obj.has(lock, "test").unwrap());
         let value = "value".to_local(lock);
         assert!(value.is_string());
-        obj.set(lock, "test", value);
+        obj.set(lock, "test", value)?;
         assert!(obj.has(lock, "test").unwrap());
         Ok(())
     });
@@ -115,11 +115,11 @@ fn empty_object_and_property_setting() {
         assert!(obj.get(lock, "nonexistent").unwrap().is_undefined());
 
         let str_value = "hello".to_local(lock);
-        obj.set(lock, "key1", str_value);
+        obj.set(lock, "key1", str_value)?;
         assert!(obj.has(lock, "key1").unwrap());
 
         let num_value = 100u32.to_local(lock);
-        obj.set(lock, "key2", num_value);
+        obj.set(lock, "key2", num_value)?;
         assert!(obj.has(lock, "key2").unwrap());
 
         let val1 = obj.get(lock, "key1");
@@ -156,7 +156,7 @@ fn nested_object_properties() {
             inner: "nested value".to_owned(),
         };
         let inner_wrapped = inner_instance.to_js(lock)?;
-        outer.set(lock, "nested", inner_wrapped);
+        outer.set(lock, "nested", inner_wrapped)?;
 
         assert!(outer.has(lock, "nested").unwrap());
         let nested_val = outer.get(lock, "nested");
@@ -302,9 +302,10 @@ fn struct_from_throwing_getter_propagates_error() {
     });
 }
 
-/// Like C++ JSG, an absent optional field is omitted from the JS object.
+/// Without `fast_jsg_struct`, an absent optional field is omitted from the JS object, as C++
+/// JSG's `Set()` path omits it.
 #[test]
-fn struct_omits_absent_optional_fields() {
+fn struct_without_fast_jsg_struct_omits_absent_optional_fields() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let value = OptionalStruct {
@@ -315,6 +316,30 @@ fn struct_omits_absent_optional_fields() {
         let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
         assert!(!obj.has(lock, "label")?);
         assert!(obj.has(lock, "count")?);
+        Ok(())
+    });
+}
+
+/// With `fast_jsg_struct`, an absent optional field is an own property whose value is undefined,
+/// as C++ JSG's `DictionaryTemplate` gives every field a value.
+#[test]
+fn struct_with_fast_jsg_struct_has_absent_optional_fields_as_undefined() {
+    let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(true));
+    harness.run_in_context(|lock, ctx| {
+        let value = OptionalStruct {
+            label: None,
+            count: Some(1),
+        }
+        .to_js(lock)?;
+        ctx.set_global(lock, "value", value);
+        let ok: bool = ctx
+            .eval(
+                lock,
+                "Object.keys(value).join() === 'label,count' && value.label === undefined &&
+                 value.count === 1",
+            )
+            .unwrap();
+        assert!(ok);
         Ok(())
     });
 }

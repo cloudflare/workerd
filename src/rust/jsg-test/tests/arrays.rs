@@ -1455,3 +1455,200 @@ fn is_float16_array_check() {
         Ok(())
     });
 }
+
+/// With `fast_jsg_struct`, converting a `Vec` or a `#[jsg_struct]` to JavaScript defines the
+/// elements and fields as own data properties, as C++ JSG does: it runs no JavaScript, so no
+/// setter a script put on `Array.prototype` or `Object.prototype` is called, not even one that
+/// throws.
+#[test]
+fn to_js_with_fast_jsg_struct_calls_no_prototype_setters() {
+    let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(true));
+    harness.run_in_context(|lock, ctx| {
+        let resource = jsg::Rc::new(ArrayResource);
+        let wrapped = resource.to_js(lock)?;
+        ctx.set_global(lock, "arr", wrapped);
+        ctx.eval_raw(
+            lock,
+            // A string, since pushing to an array would run the setters on Array.prototype.
+            "globalThis.settersRan = '';
+             for (const [proto, key] of [[Array.prototype, 0], [Array.prototype, 1],
+                                         [Object.prototype, 'name'], [Object.prototype, 'age']]) {
+               Object.defineProperty(proto, key, {
+                 set(v) { settersRan += `${key};`; throw new Error('setter ran'); },
+                 configurable: true,
+               });
+             }",
+        )
+        .expect("setup should evaluate");
+
+        let people = vec![
+            Person {
+                name: "Alice".to_owned(),
+                age: Number::new(25.0),
+            },
+            Person {
+                name: "Bob".to_owned(),
+                age: Number::new(30.0),
+            },
+        ];
+        let value = people.to_js(lock)?;
+        ctx.set_global(lock, "people", value);
+        let ok: bool = ctx
+            .eval(
+                lock,
+                "Array.isArray(people) && people.length === 2 &&
+                 Object.hasOwn(people, 0) && Object.hasOwn(people, 1) &&
+                 people.every(p => Object.keys(p).join() === 'name,age') &&
+                 people[0].name === 'Alice' && people[0].age === 25 &&
+                 people[1].name === 'Bob' && people[1].age === 30",
+            )
+            .unwrap();
+        assert!(ok);
+
+        // The same through a method's arguments and return value.
+        let ok: bool = ctx
+            .eval(
+                lock,
+                "const adults = arr.filterAdults([{name: 'Carol', age: 40}, {name: 'Dan', age: 50}]);
+                 const doubled = arr.double([1, 2]);
+                 Object.hasOwn(adults, 0) && Object.hasOwn(adults[0], 'name') &&
+                 adults[1].name === 'Dan' && Object.hasOwn(doubled, 1) && doubled[1] === 4",
+            )
+            .unwrap();
+        assert!(ok);
+
+        let setters_ran: String = ctx.eval(lock, "settersRan").unwrap();
+        assert_eq!(setters_ran, "");
+        Ok(())
+    });
+}
+
+/// Without `fast_jsg_struct`, a `#[jsg_struct]`'s fields are set one by one, as C++ JSG sets
+/// them with `Set()`, so a setter on `Object.prototype` runs and takes the field's value. A
+/// `Vec`'s elements are still defined as data properties, as C++ JSG defines them at every
+/// compatibility date.
+#[test]
+fn struct_to_js_without_fast_jsg_struct_runs_object_prototype_setters() {
+    // `Harness::new()` starts with every flag off, `fast_jsg_struct` included.
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        ctx.eval_raw(
+            lock,
+            // A string, since pushing to an array would run the setters on Array.prototype.
+            "globalThis.settersRan = '';
+             for (const key of [0, 1]) {
+               Object.defineProperty(Array.prototype, key, {
+                 set(v) { settersRan += `[${key}]`; throw new Error('setter ran'); },
+                 configurable: true,
+               });
+             }
+             Object.defineProperty(Object.prototype, 'name', {
+               set(v) { settersRan += `${v};`; },
+               configurable: true,
+             });",
+        )
+        .expect("setup should evaluate");
+
+        let people = vec![
+            Person {
+                name: "Alice".to_owned(),
+                age: Number::new(25.0),
+            },
+            Person {
+                name: "Bob".to_owned(),
+                age: Number::new(30.0),
+            },
+        ];
+        let value = people.to_js(lock)?;
+        ctx.set_global(lock, "people", value);
+        let ok: bool = ctx
+            .eval(
+                lock,
+                "Object.hasOwn(people, 0) && Object.hasOwn(people, 1) &&
+                 people.every(p => Object.keys(p).join() === 'age') &&
+                 people[0].age === 25 && people[1].age === 30",
+            )
+            .unwrap();
+        assert!(ok, "the setter did not take the name");
+        let setters_ran: String = ctx.eval(lock, "settersRan").unwrap();
+        assert_eq!(setters_ran, "Alice;Bob;");
+        Ok(())
+    });
+}
+
+/// Without `fast_jsg_struct`, what a setter on `Object.prototype` throws while a `#[jsg_struct]`
+/// is converted reaches the caller unchanged, from Rust and from a method's return value.
+#[test]
+fn struct_to_js_without_fast_jsg_struct_passes_on_what_a_setter_throws() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let resource = jsg::Rc::new(ArrayResource);
+        let wrapped = resource.to_js(lock)?;
+        ctx.set_global(lock, "arr", wrapped);
+        ctx.eval_raw(
+            lock,
+            "globalThis.thrown = new RangeError('setter');
+             Object.defineProperty(Object.prototype, 'age', {
+               set(v) { throw thrown; },
+               configurable: true,
+             });",
+        )
+        .expect("setup should evaluate");
+
+        let person = Person {
+            name: "Alice".to_owned(),
+            age: Number::new(25.0),
+        };
+        let caught = lock.try_catch(|lock| person.to_js(lock))?;
+        let Err(exception) = caught else {
+            panic!("converting the struct did not throw");
+        };
+        ctx.set_global(lock, "caught", exception);
+        assert!(ctx.eval::<bool>(lock, "caught === thrown").unwrap());
+
+        let ok: bool = ctx
+            .eval(
+                lock,
+                "let fromMethod;
+                 try { arr.filterAdults([{name: 'Carol', age: 40}]); }
+                 catch (e) { fromMethod = e; }
+                 fromMethod === thrown",
+            )
+            .unwrap();
+        assert!(
+            ok,
+            "the method's caller did not catch what the setter threw"
+        );
+        Ok(())
+    });
+}
+
+/// Converting a `Vec` stops at the first element whose conversion fails: without
+/// `fast_jsg_struct`, a struct after the one whose setter threw is not converted.
+#[test]
+fn vec_to_js_stops_at_the_first_element_that_fails() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        ctx.eval_raw(
+            lock,
+            "globalThis.names = '';
+             Object.defineProperty(Object.prototype, 'name', {
+               set(v) { names += `${v};`; if (v === 'Bob') throw new Error('Bob'); },
+               configurable: true,
+             });",
+        )
+        .expect("setup should evaluate");
+        let people = ["Alice", "Bob", "Carol"]
+            .into_iter()
+            .map(|name| Person {
+                name: name.to_owned(),
+                age: Number::new(30.0),
+            })
+            .collect::<Vec<_>>();
+        let caught = lock.try_catch(|lock| people.to_js(lock))?;
+        assert!(caught.is_err(), "converting the Vec did not throw");
+        let names: String = ctx.eval(lock, "names").unwrap();
+        assert_eq!(names, "Alice;Bob;");
+        Ok(())
+    });
+}

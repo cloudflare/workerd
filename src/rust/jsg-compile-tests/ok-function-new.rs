@@ -9,7 +9,7 @@ use jsg::v8;
 pub fn t<'s>(lock: &mut jsg::Lock<'s>) -> jsg::Result<v8::Local<'s, v8::Function>> {
     v8::Function::new(lock, String::from("data"), |lock, data, args| {
         let object = lock.new_object();
-        object.set(lock, data, args.get(0));
+        object.set(lock, data, args.get(0))?;
         Ok(object.into())
     })
 }

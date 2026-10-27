@@ -20,6 +20,11 @@ Generates `jsg::Struct`, `jsg::Type`, `jsg::ToJS`, and `jsg::FromJS` for a plain
 struct. Only `pub` fields are projected into the JavaScript object. Use
 `#[jsg_struct(name = "MyName")]` to override the JavaScript class name.
 
+Like C++ JSG's `JSG_STRUCT`, converting to JavaScript follows the `fast_jsg_struct` flag: with
+it, the fields are defined as data properties, an absent optional field as `undefined`, and no
+JavaScript runs; without it, they are set one by one, an absent optional field is omitted, and a
+setter on `Object.prototype` runs, and what it throws is passed on.
+
 ```rust
 #[jsg_struct]
 pub struct CaaRecord {
