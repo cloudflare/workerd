@@ -27,7 +27,7 @@
 //! | `SystemTime` | `Date`; from a `Date` or `number` of milliseconds |
 //! | `Option<T>` | `T` or `undefined` |
 //! | `Nullable<T>` | `T` or `null` (`undefined` coerces to `null` on input) |
-//! | `Option<Nullable<T>>` | `T`, `null`, or `undefined` |
+//! | `NullOrUndefined<T>` | `T`, `null`, or `undefined` |
 //! | `Lenient<T>` | `T`, `null`, or `undefined` (shallow type mismatches silently become `undefined`) |
 //! | `Result<T, E>` | `T` or throws |
 //! | `NonCoercible<T>` | `T` (strict type checking) |
@@ -35,6 +35,10 @@
 //! | `Vec<T>` | `Array<T>` |
 //! | `&[T]` | `Array<T>` (parameter only) |
 //! | `Dict<V>` | `Record<string, V>`: an object other than an array |
+//!
+//! [`Option`], [`NullOrUndefined`], and [`Lenient`] method arguments may be omitted.
+//! [`Nullable`] arguments remain required even though explicitly passing `undefined` converts to `Null`.
+//! Prefer [`NullOrUndefined<T>`] to `Option<Nullable<T>>` to preserve all three states.
 //!
 //! ## Arrays, Typed Arrays and `ArrayBuffer`s
 //!
@@ -73,6 +77,7 @@ use crate::Error;
 use crate::Lenient;
 use crate::Lock;
 use crate::NonCoercible;
+use crate::NullOrUndefined;
 use crate::Nullable;
 use crate::Type;
 use crate::v8;
@@ -91,7 +96,7 @@ use crate::v8;
 /// # Built-in implementations
 ///
 /// - **Primitives** (`bool`, `String`, integers, floats, `()`) — no-op.
-/// - **`Option<T>`**, **`Nullable<T>`** — delegates to the inner value if present.
+/// - **`Option<T>`**, **`Nullable<T>`**, **`NullOrUndefined<T>`** — delegates to the inner value if present.
 /// - **Collections** (`Vec<T>`, `Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`,
 ///   `BTreeSet<T>`) — iterates elements/values and traces each.
 /// - **`Cell<T>`** — reads through `as_ptr()` (sound under single-threaded GC).
@@ -206,6 +211,18 @@ impl<T: Traced> Traced for Lenient<T> {
 }
 
 impl<T: Traced> Traced for Nullable<T> {
+    fn holds_gc_references() -> bool {
+        T::holds_gc_references()
+    }
+
+    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
+        if let Self::Some(inner) = self {
+            inner.trace(visitor);
+        }
+    }
+}
+
+impl<T: Traced> Traced for NullOrUndefined<T> {
     fn holds_gc_references() -> bool {
         T::holds_gc_references()
     }
@@ -1005,6 +1022,16 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for Nullable<T> {
     }
 }
 
+impl<'s, T: ToJS<'s>> ToJS<'s> for NullOrUndefined<T> {
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        match self {
+            Self::Some(value) => value.to_js(lock),
+            Self::Null => Ok(lock.null()),
+            Self::Undefined => Ok(lock.undefined()),
+        }
+    }
+}
+
 impl<'s, T: ToJS<'s>> ToJS<'s> for Lenient<T> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         match self {
@@ -1082,7 +1109,7 @@ impl<'s, T: Type + FromJS<'s>> FromJS<'s> for NonCoercible<T> {
 }
 
 // Like C++ `kj::Maybe<T>`, Web IDL nullable conversion reads `undefined` as `null`.
-// Nullable arguments remain required; only an outer `Option` permits omission.
+// Nullable arguments remain required; use `NullOrUndefined` to permit omission.
 impl<'s, T: FromJS<'s>> FromJS<'s> for Nullable<T> {
     type ResultType = Nullable<T::ResultType>;
 
@@ -1109,6 +1136,44 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for Nullable<T> {
             Ok(Some(Nullable::Null))
         } else {
             Ok(T::try_from_js(lock, value)?.map(Nullable::Some))
+        }
+    }
+}
+
+impl<'s, T: FromJS<'s>> FromJS<'s> for NullOrUndefined<T> {
+    type ResultType = NullOrUndefined<T::ResultType>;
+
+    fn type_name() -> String {
+        T::type_name()
+    }
+
+    fn is_optional() -> bool {
+        true
+    }
+
+    fn from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self::ResultType, Error> {
+        if value.is_null() {
+            Ok(NullOrUndefined::Null)
+        } else if value.is_undefined() {
+            Ok(NullOrUndefined::Undefined)
+        } else {
+            Ok(NullOrUndefined::Some(T::from_js(lock, value)?))
+        }
+    }
+
+    fn try_from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Option<Self::ResultType>, Error> {
+        if value.is_null() {
+            Ok(Some(NullOrUndefined::Null))
+        } else if value.is_undefined() {
+            Ok(Some(NullOrUndefined::Undefined))
+        } else {
+            Ok(T::try_from_js(lock, value)?.map(NullOrUndefined::Some))
         }
     }
 }
