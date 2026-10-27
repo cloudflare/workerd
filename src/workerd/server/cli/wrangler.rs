@@ -2,7 +2,7 @@
 //!
 //! As wrangler does, `main` is bundled with esbuild (`WORKERD_ESBUILD`, else the project's
 //! `node_modules/.bin/esbuild`, else `esbuild` on `PATH`), with the same platform, conditions and
-//! externals; every input esbuild read is watched. Under `no_bundle: true`, `main` must be an ES
+//! externals; every input esbuild read outside `node_modules` is watched. Under `no_bundle: true`, `main` must be an ES
 //! module and the modules it imports are found by scanning its directory with wrangler's default
 //! module rules. Supported fields: `name`, `main`, `compatibility_date`, `compatibility_flags`,
 //! `vars`, `durable_objects`, `migrations` and `no_bundle`. Any other field is an error rather
@@ -187,10 +187,10 @@ pub fn load(path: &str, process: &Process) -> Result<Config, String> {
         let mut ns = worker
             .reborrow()
             .init_durable_object_namespaces(classes.len() as u32);
-        for (i, (class, sql)) in classes.iter().enumerate() {
+        for (i, (class, key, sql)) in classes.iter().enumerate() {
             let mut n = ns.reborrow().get(i as u32);
             n.set_class_name(class);
-            n.set_unique_key(format!("{name}-{class}"));
+            n.set_unique_key(format!("{name}-{key}"));
             n.set_enable_sql(*sql);
         }
         worker
@@ -283,11 +283,13 @@ fn bundle(esbuild: &Path, root: &Path, main: &str, watch: Watch) -> Result<Vec<S
     use std::sync::atomic::Ordering;
 
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
-    let out = std::env::temp_dir().join(format!(
-        "workerd-esbuild-{}-{}",
+    let out = root.join(format!(
+        ".wrangler/tmp/bundle-{}-{}",
         std::process::id(),
         COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
+    let _ = fs::remove_dir_all(&out);
+    fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
     let result = run_esbuild(esbuild, root, main, &out, watch);
     let _ = fs::remove_dir_all(&out);
     result
@@ -399,38 +401,45 @@ fn files(dir: &Path) -> Vec<PathBuf> {
         .into_iter()
         .flatten()
         .filter_map(Result::ok)
-        .map(|e| e.path())
-        .filter(|p| {
-            let name = p.file_name().unwrap_or_default().to_string_lossy();
+        .filter(|e| {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
             !name.starts_with('.') && name != "node_modules"
         })
+        // `file_type` does not follow symlinks, so a symlink cycle cannot recurse.
+        .map(|e| (e.path(), e.file_type().is_ok_and(|t| t.is_dir())))
         .collect();
     entries.sort();
     entries
         .into_iter()
-        .flat_map(|p| if p.is_dir() { files(&p) } else { vec![p] })
+        .flat_map(|(p, dir)| if dir { files(&p) } else { vec![p] })
         .collect()
 }
 
-/// The Durable Object classes and whether each is SQLite-backed, from `migrations` applied in
-/// order, plus any bound class the migrations never mention (not SQLite-backed, as in wrangler).
-fn do_classes(w: &Wrangler) -> Result<Vec<(String, bool)>, String> {
-    let mut classes: Vec<(String, bool)> = Vec::new();
+/// The Durable Object classes, each with the name it was created under (its storage key, kept
+/// across renames) and whether it is SQLite-backed, from `migrations` applied in order, plus any
+/// bound class the migrations never mention (not SQLite-backed, as in wrangler).
+fn do_classes(w: &Wrangler) -> Result<Vec<(String, String, bool)>, String> {
+    let mut classes: Vec<(String, String, bool)> = Vec::new();
     for m in &w.migrations {
-        classes.extend(m.new_classes.iter().map(|c| (c.clone(), false)));
-        classes.extend(m.new_sqlite_classes.iter().map(|c| (c.clone(), true)));
+        classes.extend(m.new_classes.iter().map(|c| (c.clone(), c.clone(), false)));
+        classes.extend(
+            m.new_sqlite_classes
+                .iter()
+                .map(|c| (c.clone(), c.clone(), true)),
+        );
         for r in &m.renamed_classes {
             let entry = classes
                 .iter_mut()
-                .find(|(c, _)| *c == r.from)
+                .find(|(c, _, _)| *c == r.from)
                 .ok_or_else(|| format!("migrations: renamed class {} was never created", r.from))?;
             entry.0.clone_from(&r.to);
         }
-        classes.retain(|(c, _)| !m.deleted_classes.contains(c));
+        classes.retain(|(c, _, _)| !m.deleted_classes.contains(c));
     }
     for b in w.durable_objects.iter().flat_map(|d| &d.bindings) {
-        if !classes.iter().any(|(c, _)| *c == b.class_name) {
-            classes.push((b.class_name.clone(), false));
+        if !classes.iter().any(|(c, _, _)| *c == b.class_name) {
+            classes.push((b.class_name.clone(), b.class_name.clone(), false));
         }
     }
     Ok(classes)

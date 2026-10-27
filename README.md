@@ -108,6 +108,11 @@ bazel build --config=thin-lto //src/workerd/server:workerd
 
 `workerd` is configured using a config file written in Cap'n Proto text format.
 
+For simple projects, `workerd serve wrangler.jsonc` also accepts a Wrangler
+config. `main` is bundled with esbuild, as Wrangler does. The supported fields
+are `name`, `main`, `compatibility_date`, `compatibility_flags`, `vars`,
+`durable_objects`, `migrations` and `no_bundle`; any other field is an error.
+
 A simple "Hello World!" config file might look like:
 
 ```capnp

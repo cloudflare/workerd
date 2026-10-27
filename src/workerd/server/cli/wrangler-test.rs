@@ -145,9 +145,9 @@ fn migrations_rename_and_delete() {
     assert_eq!(
         do_classes(&w).unwrap(),
         [
-            ("A2".to_owned(), false),
-            ("S".to_owned(), true),
-            ("Bound".to_owned(), false)
+            ("A2".to_owned(), "A".to_owned(), false),
+            ("S".to_owned(), "S".to_owned(), true),
+            ("Bound".to_owned(), "Bound".to_owned(), false)
         ]
     );
 }
@@ -191,4 +191,68 @@ fn missing_esbuild_is_explained() {
     .unwrap();
     assert!(error.contains("esbuild not found"), "{error}");
     assert!(error.contains("no_bundle"), "{error}");
+}
+
+/// A stand-in for esbuild: a shell script running `body` with `$out` and `$meta` set from
+/// `--outdir=` and `--metafile=`, and its arguments in `args.txt`.
+#[cfg(unix)]
+fn stub_esbuild(dir: &Path, body: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let path = dir.join("esbuild.sh");
+    let script = format!(
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > {args}\nfor a; do case $a in \
+         --outdir=*) out=${{a#*=}};; --metafile=*) meta=${{a#*=}};; esac; done\n{body}\n",
+        args = dir.join("args.txt").display()
+    );
+    fs::write(&path, script).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    path
+}
+
+#[cfg(unix)]
+#[test]
+fn bundle_reads_esbuild_output_and_watches_inputs() {
+    let dir = project(&[("index.ts", ""), ("node_modules/x/index.js", "")]);
+    let esbuild = stub_esbuild(
+        &dir,
+        r#"echo 'export default {}' > "$out/index.js"; echo wasm > "$out/a.wasm"
+echo '{"inputs":{"index.ts":{},"node_modules/x/index.js":{}}}' > "$meta""#,
+    );
+    let watched = std::cell::RefCell::new(Vec::new());
+    let sources = bundle(&esbuild, &dir, "index.ts", &|p| {
+        watched.borrow_mut().push(p.to_owned());
+        Ok(())
+    })
+    .unwrap();
+    let names: Vec<_> = sources.iter().map(|(n, _, _)| n.as_str()).collect();
+    assert_eq!(names, ["index.js", "a.wasm"]);
+    assert_eq!(*watched.borrow(), [dir.join("index.ts")]);
+    let args = fs::read_to_string(dir.join("args.txt")).unwrap();
+    for arg in [
+        "index.ts",
+        "--bundle",
+        "--external:node:*",
+        "--external:fs/*",
+    ] {
+        assert!(args.lines().any(|l| l == arg), "{arg} not in {args}");
+    }
+    assert!(args.contains("--banner:js=var require"), "{args}");
+    assert!(!dir.join(".wrangler/tmp").read_dir().unwrap().any(|_| true));
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_bundle_watches_sources() {
+    let dir = project(&[("index.ts", ""), ("README.md", "")]);
+    let esbuild = stub_esbuild(&dir, "echo 'syntax error' >&2; exit 1");
+    let watched = std::cell::RefCell::new(Vec::new());
+    let error = bundle(&esbuild, &dir, "index.ts", &|p| {
+        watched.borrow_mut().push(p.to_owned());
+        Ok(())
+    })
+    .err()
+    .unwrap();
+    assert!(error.contains("syntax error"), "{error}");
+    assert_eq!(*watched.borrow(), [dir.join("index.ts")]);
 }
