@@ -76,7 +76,7 @@ pull() it runs reading right behind it; async-iterator
 protocol interleavings (return/next no-await; the WebIDL
 ongoing-promise shapes are #22); chunks held BY REFERENCE
 (mutation visible, identity) + detach-while-queued observed; and the
-ENTIRE integration surface except #15, #21 and #35: body chunk normalization
+ENTIRE integration surface except #15, #21, #35 and #37: body chunk normalization
 (messages included: 'This ReadableStream did not return bytes.'), a
 failing consumer cancelling the source with its error (the cancel's own
 rejection then wins) and leaving the stream locked, chunks collectible
@@ -87,7 +87,10 @@ clone-both-read, cancel-body-then-consume 'Body has already been used',
 readAll small/big/failed paths, SELF fetch round-trips (fetch body +
 Request body, the workerd#5113 shapes, and a Request copied by
 `new Request(request)`) with a default source's declared
-`expectedLength` as the subrequest's Content-Length.
+`expectedLength` as the subrequest's Content-Length, and a default
+source or TransformStream readable delivering less than it declared
+failing the transfer with 'Network connection lost.', as a request body
+and as a response body.
 
 The ts cell additionally sets the internal-testing
 `expose_draining_reader` flag, installing the
@@ -127,7 +130,7 @@ C++ implementation; `draining-reader.js` asserts both sides.
 | `integration-body-failures.js` | consumer-side failures cancel the source with the error (every consumer; the cancel's rejection replaces it; nothing to cancel once the closing batch is in), leave the stream locked and stop pulls; `expectedLength` overflow from a TransformStream readable and a default source (#21), and a TransformStream's exact delivery |
 | `integration-body-memory.js` | body consumption copies bytes out as they arrive: chunk buffers are collectible mid-consumption (WeakRef + gc()), ~2.5 MiB of pseudo-random chunk sizes assembles exactly as bytes and as text, one chunk wider than a 1 MiB collection block assembles exactly, a declared-length byte body is exact |
 | `integration-locked-disturbed.js` | disturbed and locked rejected, body identity + lock coupling (#15), the stream tee() leaves behind into Response and bodyUsed after a body's tee() or clone() (#33) |
-| `expected-length.js` | the Content-Length of forks of a default source declaring `expectedLength` (#35): a tee branch, a branch teed again and a `new Request()` copy, made before any read (the declared length in TS) and after one (chunked in both, the unread sibling unaffected); a declared length on a gzip-encoded response from a default source and a TransformStream readable, served by SELF at `/gzip` (#37) |
+| `expected-length.js` | the Content-Length of forks of a default source declaring `expectedLength` (#35): a tee branch, a branch teed again and a `new Request()` copy, made before any read (the declared length in TS) and after one (chunked in both, the unread sibling unaffected); a declared length on a gzip-encoded response from a default source and a TransformStream readable, served by SELF at `/gzip` (#37); a body delivering less than it declared failing the transfer, as a request body and as a response body served by SELF at `/short` (parity) |
 | `gc.js` | pending read + async iteration survive gc(); a controller held with its stream collected (ledger #19); both tee branches collected while the controller is held: enqueue() drops without retaining (WeakRef-checked, backlog included), desiredSize at the high-water mark, close() then enqueue() as ever, and pull() stops (ledger #20); one branch cancelled and the other collected, observed in the gc()'s own job (before finalization callbacks): the controller's queries drop the consumer themselves; a closed, cancelled or errored stream releases its underlying source, and a source with only start() is released while its stream is still open (WeakRef-checked; parity) |
 | `then-interceptors.js` | one then-getter fire per read, on an ordinary result object, whether the read is answered from the queue, waits for enqueue() or close(), or finds the stream closed (a tee branch's too), and when it fires for a waiting read (ledger #16); none for a pipe's reads; per async-iterator next() (ledger #24) and return() (ledger #26); a then getter that cancels tee branches while a read result settles (during enqueue() and close(), one branch or two of three): the other branches' pending reads still resolve and their backlog still counts toward desiredSize; a then getter that releases the reader while cancel() or close() settles its reads: the next read still resolves done (parity); a self-removing patched Object.prototype.then intercepts a body consumption's result (arrayBuffer, bytes, blob, json, formData; text resolves with a string), never its internal steps, for native and queued bodies (parity) |
 | `legacy-constructors.js` | the unflagged cell (see flags table) |

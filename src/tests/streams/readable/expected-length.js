@@ -21,6 +21,11 @@
 // an encoded body, so it goes out chunked and decodes in full. C++ keeps
 // the uncompressed length as the Content-Length, so the compressed body
 // falls short of it and the reader fails with 'Network connection lost.'
+//
+// PARITY: a body (a default source or a TransformStream readable) that
+// delivers less than its declared expectedLength fails the transfer with
+// 'Network connection lost.', as a request body and as a response body:
+// the declaration is the Content-Length, which the transport enforces.
 
 import { deepStrictEqual, rejects, strictEqual } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
@@ -75,21 +80,22 @@ export const forkBeforeReadKeepsDeclaredLength = {
 
 const PAYLOAD = 'compress me please '.repeat(2000);
 
-// A body declaring PAYLOAD's uncompressed length: a default source, or a
-// TransformStream's readable through its transformer's expectedLength.
-function declaredPayloadBody(kind) {
-  const bytes = enc.encode(PAYLOAD);
+const BODY_KINDS = ['default', 'transform'];
+
+// A body that declares expectedLength and delivers text: a default
+// source, or a TransformStream's readable through its transformer's
+// expectedLength.
+function declaredBody(kind, expectedLength, text) {
+  const bytes = enc.encode(text);
   if (kind === 'transform') {
-    const { readable, writable } = new TransformStream({
-      expectedLength: bytes.length,
-    });
+    const { readable, writable } = new TransformStream({ expectedLength });
     const writer = writable.getWriter();
     writer.write(bytes);
     writer.close();
     return readable;
   }
   return new ReadableStream({
-    expectedLength: bytes.length,
+    expectedLength,
     start(c) {
       c.enqueue(bytes);
       c.close();
@@ -97,17 +103,47 @@ function declaredPayloadBody(kind) {
   });
 }
 
-// Served by main.js at /gzip?body=<kind>: the body sent with
-// Content-Encoding: gzip, which compresses it on the way out.
+// Declares 10 bytes and delivers 5.
+function shortBody(kind) {
+  return declaredBody(kind, 10, '01234');
+}
+
+// Served by main.js at /gzip?body=<kind>: a body declaring PAYLOAD's
+// uncompressed length, sent with Content-Encoding: gzip, which compresses
+// it on the way out.
 export function compressedResponse(url) {
-  const body = declaredPayloadBody(url.searchParams.get('body'));
+  const body = declaredBody(
+    url.searchParams.get('body'),
+    enc.encode(PAYLOAD).length,
+    PAYLOAD
+  );
   return new Response(body, { headers: { 'content-encoding': 'gzip' } });
 }
+
+// Served by main.js at /short?body=<kind>.
+export function shortResponse(url) {
+  return new Response(shortBody(url.searchParams.get('body')));
+}
+
+// PARITY: the declared length is the Content-Length, so a body that falls
+// short of it fails the transfer rather than going out complete.
+export const shortBodyFailsTransfer = {
+  async test(ctrl, env) {
+    const lost = { message: 'Network connection lost.' };
+    for (const kind of BODY_KINDS) {
+      await rejects(post(env, requestWith(shortBody(kind))), lost, kind);
+      const resp = await env.SELF.fetch(
+        `http://example.org/short?body=${kind}`
+      );
+      await rejects(resp.text(), lost, kind);
+    }
+  },
+};
 
 // DIVERGENCE (ledger #37)
 export const compressedResponseDropsDeclaredLength = {
   async test(ctrl, env) {
-    for (const kind of ['default', 'transform']) {
+    for (const kind of BODY_KINDS) {
       const resp = await env.SELF.fetch(`http://example.org/gzip?body=${kind}`);
       strictEqual(resp.headers.get('content-encoding'), 'gzip', kind);
       if (usingTsImpl) {
