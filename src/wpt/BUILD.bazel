@@ -92,6 +92,27 @@ wpt_test(
 )
 
 wpt_test(
+    name = "fetch/misc",
+    size = "large",
+    config = "fetch/misc-test.ts",
+    exclude_test_dirs = [
+        # Runs as its own targets
+        "api",
+        # Opaque Response Blocking is browser-only, and its resources include deliberately invalid
+        # .json files, which cannot be bound as JSON modules
+        "orb",
+    ],
+    start_server = True,
+    target_compatible_with = select({
+        # TODO(later): Provide a Windows version of the sidecar script we wrote to invoke wptserve.
+        # Currently we only have a Unix shell script.
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    wpt_directory = "@wpt//:fetch@module",
+)
+
+wpt_test(
     name = "encoding",
     size = "large",
     compat_flags = [
