@@ -1,0 +1,42 @@
+src/rust/jsg/ffi.h
+  s_144e1c38c83f9e::t_8e19640799ca2b 381
+  s_144e1c38c83f9e::t_31e5eb89bd5819 382
+src/rust/jsg/ffi.c++
+  s_144e1c38c83f9e::t_07cda2b9784bc0 766,783,834-840,855,873-878
+  s_144e1c38c83f9e::t_2da7d597a489aa 866-872
+src/rust/jsg-macros/lib.rs
+  s_144e1c38c83f9e::t_82b804d3893ca4 216,250,260,353,390,393-401,405-408,751-757,770-777
+  s_144e1c38c83f9e::t_a1fd1180ceb2a0 214-215
+  s_144e1c38c83f9e::t_f4c966cda01e6b 217-219
+  s_144e1c38c83f9e::t_26e9cd9af2b0ea 247-249
+  s_144e1c38c83f9e::t_1c22aa531111dc 251-252
+  s_144e1c38c83f9e::t_d7520278b21683 234-243,246
+src/workerd/jsg/wrappable-tag.h
+  s_144e1c38c83f9e::t_e5fe51ba386145 43-46,49,79-83
+  s_144e1c38c83f9e::t_1221bbf72cefd8 28
+src/rust/jsg/v8.rs
+  s_144e1c38c83f9e::t_578c35e3cf9880 807-811,4373-4392
+  s_144e1c38c83f9e::t_021c85f65fb293 801-806,4356-4372
+src/rust/jsg-test/tests/resource_callback.rs
+  s_144e1c38c83f9e::t_f660fabc5b1617 968-1034
+src/rust/jsg-macros/wildcard.rs
+  s_144e1c38c83f9e::t_f590e1f6d7a2fd 205-206
+src/rust/jsg/lib.rs
+  s_144e1c38c83f9e::t_233817940994e8 1135-1136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "d7db75f86834e3dd00536e94361143f81e1aebe7",
+  "prompts": {},
+  "sessions": {
+    "s_144e1c38c83f9e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9602bf15-7ee5-4904-b77b-bae931c031c9",
+        "model": "unknown"
+      },
+      "human_author": "Divy Srivastava <divy@cloudflare.com>"
+    }
+  }
+}
