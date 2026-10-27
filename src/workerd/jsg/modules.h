@@ -85,15 +85,21 @@ v8::Local<v8::WasmModuleObject> compileWasmModule(jsg::Lock& js,
 // Isolates on different threads may call getOrCompile() concurrently. Isolates that find the
 // slot for their setting empty at the same time each compile, and the holder keeps the first
 // result.
+//
+// An embedder may subclass the holder and override getOrCompile() to keep the compiled code
+// elsewhere, e.g. in a process-wide store shared with other modules. An override must keep the
+// contract above: it may be called concurrently from any thread, and it returns a module compiled
+// with the calling isolate's setting.
 class CompiledWasmModuleHolder {
  public:
   CompiledWasmModuleHolder() = default;
+  virtual ~CompiledWasmModuleHolder() noexcept(false) = default;
   KJ_DISALLOW_COPY_AND_MOVE(CompiledWasmModuleHolder);
 
   // Returns a module object for `wireBytes` in the current isolate, compiling them only if no
   // module compiled with this isolate's setting is held yet. Every call on one holder must pass
   // the same bytes.
-  v8::Local<v8::WasmModuleObject> getOrCompile(jsg::Lock& js,
+  virtual v8::Local<v8::WasmModuleObject> getOrCompile(jsg::Lock& js,
       kj::ArrayPtr<const kj::byte> wireBytes,
       const CompilationObserver& observer) const;
 
