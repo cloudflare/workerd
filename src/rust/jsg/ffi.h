@@ -208,6 +208,7 @@ MaybeLocal local_symbol_description(Isolate* isolate, const Local& value);
 Local big_int_new(Isolate* isolate, int64_t value);
 Local big_int_new_from_unsigned(Isolate* isolate, uint64_t value);
 int64_t local_big_int_int64_value(const Local& value, bool& lossless);
+uint64_t local_big_int_uint64_value(const Local& value, bool& lossless);
 
 // Local<Date>
 // Runs no JavaScript, but prepares to, which would clear a pending termination, so Rust doesn't

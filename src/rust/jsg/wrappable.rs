@@ -5,7 +5,7 @@
 #![allow(unsafe_code, reason = "converts values through the V8 FFI")]
 #![allow(
     clippy::allow_attributes,
-    reason = "`impl_integer_from_js!` uses `allow`, since its cast lints fire for only some integer types"
+    reason = "`impl_integer!` uses `allow`, since its cast lints fire for only some integer types"
 )]
 
 //! Traits for converting between Rust and JavaScript values.
@@ -21,7 +21,9 @@
 //! | `&str` | `string` |
 //! | `bool` | `boolean` |
 //! | `Number` | `number` |
-//! | `i64` | `bigint` or `number` (parameter only) |
+//! | `u8`, `u16`, `u32`, `i8`, `i16`, `i32` | `number` |
+//! | `i64`, `u64` | `bigint`; from a `bigint` or a `number` |
+//! | `f64`, `f32` | `number` (to JavaScript only; a parameter is a `Number`) |
 //! | `SystemTime` | `Date`; from a `Date` or `number` of milliseconds |
 //! | `Option<T>` | `T` or `undefined` |
 //! | `Nullable<T>` | `T` or `null` (`undefined` coerces to `null` on input) |
@@ -35,8 +37,9 @@
 //!
 //! ## Arrays, Typed Arrays and `ArrayBuffer`s
 //!
-//! A `Vec<T>` converts to an `Array` of the converted elements. A typed array or an `ArrayBuffer`
-//! is an explicit conversion of a slice:
+//! A `Vec<T>` converts to an `Array` of the converted elements, numbers included:
+//! `vec![1u8, 2, 3]` becomes `[1, 2, 3]`, and a `Vec<i64>` an `Array` of `BigInt`s. A typed array
+//! or an `ArrayBuffer` is an explicit conversion of a slice:
 //!
 //! | Call | JavaScript Type |
 //! |------|-----------------|
@@ -48,10 +51,10 @@
 //! reads its memory in place with `as_slice(lock)`. An `ArrayBuffer` is a
 //! `v8::Local<'s, v8::ArrayBuffer>`, and `v8::Local<'s, v8::ArrayBufferView>` accepts any view.
 //!
-//! ## Integer Parameter Types
+//! ## Integers
 //!
-//! Integer types (`u8`, `u16`, `u32`, `i8`, `i16`, `i32`) can be used as method
-//! parameters. They convert like C++ JSG's integers:
+//! The integer types (`u8`, `u16`, `u32`, `i8`, `i16`, `i32`) convert to a `number`, and from
+//! JavaScript like C++ JSG's integers:
 //!
 //! - Values out of the type's range, checked before truncation, are a
 //!   `TypeError` (e.g., `256` or `255.5` for `u8`)
@@ -60,8 +63,9 @@
 //!
 //! For strict validation, wrap parameters in `NonCoercible<T>` or validate manually.
 //!
-//! `i64` converts like C++ JSG's `int64_t`: a `BigInt` that does not fit is a
-//! `TypeError`, and any other value converts as above.
+//! `i64` and `u64` convert to a `BigInt`, and from JavaScript like C++ JSG's `int64_t` and
+//! `uint64_t`: a `BigInt` that does not fit is a `TypeError`, and any other value converts as
+//! above.
 
 use crate::Error;
 use crate::Lenient;
@@ -529,6 +533,21 @@ impl<'s> ToJS<'s> for Number {
     }
 }
 
+// Like C++ JSG's double, an f64 or f32 is a number. From JavaScript, a parameter is a `Number`.
+impl<'s> ToJS<'s> for f64 {
+    #[inline]
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        Number::new(self).to_js(lock)
+    }
+}
+
+impl<'s> ToJS<'s> for f32 {
+    #[inline]
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        Number::new(f64::from(self)).to_js(lock)
+    }
+}
+
 impl<'s> FromJS<'s> for Number {
     type ResultType = Self;
 
@@ -629,18 +648,37 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for &[T] {
     }
 }
 
-// Integer types follow C++ JSG (jsg/value.h): a value out of the type's
-// range, checked before truncation, is a TypeError, and so is a non-finite
-// one, except that i32 reads it as 0. In-range values truncate toward zero.
+// Integer types follow C++ JSG (jsg/value.h). To JavaScript, an integer of up
+// to 32 bits is a number, and an i64 or u64 is a BigInt. From JavaScript, a value out
+// of the type's range, checked before truncation, is a TypeError, and so is a
+// non-finite one, except that i32 reads it as 0. In-range values truncate
+// toward zero.
 /// Converts a JavaScript number to an integer type. Fast callbacks use it too, so that both paths
 /// convert alike.
 pub trait FromNumber: Sized {
     fn from_number(num: f64) -> Result<Self, Error>;
 }
 
-macro_rules! impl_integer_from_js {
+macro_rules! impl_integer {
     ($($type:ty => $name:literal, $non_finite:expr, $range:expr);* $(;)?) => {
         $(
+            impl Type for $type {
+                fn class_name() -> &'static str {
+                    "number"
+                }
+
+                fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+                    value.is_number()
+                }
+            }
+
+            impl<'s> ToJS<'s> for $type {
+                #[inline]
+                fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+                    Number::new(f64::from(self)).to_js(lock)
+                }
+            }
+
             impl FromNumber for $type {
                 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_lossless, reason = "range is checked first")]
                 fn from_number(num: f64) -> Result<Self, Error> {
@@ -721,7 +759,7 @@ fn signed_range<T: std::fmt::Display>(min: T, max: T) -> String {
     format!("Value out of range. Must be between {min} and {max} (inclusive).")
 }
 
-impl_integer_from_js!(
+impl_integer!(
     u8 => "octet", not_an_integer(), unsigned_range(u8::MAX);
     u16 => "unsigned short integer", not_an_integer(), unsigned_range(u16::MAX);
     u32 => "unsigned integer", not_an_integer(), unsigned_range(u32::MAX);
@@ -729,6 +767,24 @@ impl_integer_from_js!(
     i16 => "short integer", not_an_integer(), signed_range(i16::MIN, i16::MAX);
     i32 => "integer", Ok(0), signed_range(i32::MIN, i32::MAX);
 );
+
+impl Type for i64 {
+    fn class_name() -> &'static str {
+        "bigint"
+    }
+
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+        value.is_big_int()
+    }
+}
+
+// Like C++ JSG's int64_t (jsg/value.h), an i64 is a BigInt.
+impl<'s> ToJS<'s> for i64 {
+    #[inline]
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        Ok(v8::BigInt::new(lock, self).into())
+    }
+}
 
 // Like C++ JSG's int64_t (jsg/value.h), a BigInt must fit, and any other value is coerced to a
 // number, which must be finite and in range, and truncates toward zero.
@@ -759,6 +815,66 @@ impl<'s> FromJS<'s> for i64 {
         }
         if num < Self::MIN as f64 || num > Self::MAX as f64 {
             return Err(Error::new_type_error(signed_range(Self::MIN, Self::MAX)));
+        }
+        Ok(num as Self)
+    }
+}
+
+impl Type for u64 {
+    fn class_name() -> &'static str {
+        "bigint"
+    }
+
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+        value.is_big_int()
+    }
+}
+
+// Like C++ JSG's uint64_t (jsg/value.h), a u64 is a BigInt.
+impl<'s> ToJS<'s> for u64 {
+    #[inline]
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        Ok(v8::BigInt::from_unsigned(lock, self).into())
+    }
+}
+
+// Like C++ JSG's uint64_t (jsg/value.h), a BigInt must fit, and any other value is coerced to a
+// number, which must be finite, not negative and in range, and truncates toward zero.
+impl<'s> FromJS<'s> for u64 {
+    type ResultType = Self;
+
+    fn type_name() -> String {
+        "bigint".to_owned()
+    }
+
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_precision_loss,
+        clippy::cast_sign_loss,
+        reason = "like C++ JSG, the range is checked in doubles, where u64::MAX rounds up to 2^64, \
+                  which then saturates"
+    )]
+    fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self, Error> {
+        if let Ok(big_int) = v8::Local::<v8::BigInt>::try_from(value) {
+            return big_int.uint64_value().ok_or_else(|| {
+                Error::new_type_error(
+                    "The value cannot be converted because it is either negative and this API \
+                     expects a positive bigint, or the value would be truncated.",
+                )
+            });
+        }
+        let num = unwrap_number(lock, value)?;
+        if !num.is_finite() {
+            return not_an_integer();
+        }
+        if num < 0.0 {
+            return Err(Error::new_type_error(
+                "The value cannot be converted because it is negative and this API expects a \
+                 positive bigint.",
+            ));
+        }
+        if num > Self::MAX as f64 {
+            return Err(Error::new_type_error(unsigned_range(Self::MAX)));
         }
         Ok(num as Self)
     }

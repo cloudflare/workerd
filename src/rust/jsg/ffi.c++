@@ -431,6 +431,10 @@ int64_t local_big_int_int64_value(const Local& value, bool& lossless) {
   return local_as_ref_from_ffi<v8::BigInt>(value)->Int64Value(&lossless);
 }
 
+uint64_t local_big_int_uint64_value(const Local& value, bool& lossless) {
+  return local_as_ref_from_ffi<v8::BigInt>(value)->Uint64Value(&lossless);
+}
+
 // Local<Date>
 // Empty, with the exception pending, if creating the object throws.
 MaybeLocal date_new(Isolate* isolate, double time) {

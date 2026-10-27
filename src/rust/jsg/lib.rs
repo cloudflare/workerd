@@ -491,6 +491,9 @@ impl Error {
 /// - `NonCoercible<String>` - only accepts JavaScript strings
 /// - `NonCoercible<bool>` - only accepts JavaScript booleans
 /// - `NonCoercible<Number>` - only accepts JavaScript numbers
+/// - `NonCoercible<u32>` and the other integers of up to 32 bits - only accept JavaScript
+///   numbers, which must be in range
+/// - `NonCoercible<i64>` and `NonCoercible<u64>` - only accept JavaScript `BigInt`s
 ///
 /// # Example
 ///
@@ -549,12 +552,12 @@ impl<T> Deref for NonCoercible<T> {
     }
 }
 
-/// A wrapper type for JavaScript numbers (IEEE 754 double-precision floats).
+/// A JavaScript number (an IEEE 754 double-precision float).
 ///
-/// `Number` represents JavaScript's `number` type, which is always a 64-bit
-/// floating-point value. This wrapper type is used instead of raw `f64` to
-/// distinguish between JavaScript numbers and Rust's `f64` type used for
-/// `Float64Array` elements.
+/// `Number` is a plain value, not a V8 handle, so it needs no `Lock` until it converts to
+/// JavaScript. It is the type of a number parameter: it converts from any value with JavaScript's
+/// `ToNumber`, like C++ JSG's `double`, and `NonCoercible<Number>` accepts only a number. An `f64`
+/// or `f32` converts to a number too, but only to JavaScript.
 ///
 /// # Usage
 ///
@@ -574,7 +577,7 @@ impl<T> Deref for NonCoercible<T> {
 /// | Rust Type | JavaScript Type |
 /// |-----------|-----------------|
 /// | `jsg::Number` | `number` |
-/// | `f64` | an element of a `Float64Array` (see `ToJsTypedArray`), not a value by itself |
+/// | `f64` | `number`, to JavaScript only |
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct Number {
     value: f64,

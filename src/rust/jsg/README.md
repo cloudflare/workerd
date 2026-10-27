@@ -543,30 +543,33 @@ lists, externals and the other options are not supported. The C++ side is `src/r
 ## Type Conversions
 
 The module docs of `wrappable.rs` list every Rust type that converts to or from JavaScript, and
-how. Most convert both ways. Some convert only from JavaScript, so they can be method parameters
-but not return values:
+how. Most convert both ways. `&[T]` converts only from JavaScript, so it can be a method parameter
+but not a return value. `f64` and `f32` convert only to JavaScript, to a number; a number parameter
+is a `Number`.
 
-- `u8`, `u16`, `u32`, `i8`, `i16` and `i32`: a value converted to a number, which must be in range.
-  Like C++ JSG's integers.
-- `i64`: a `BigInt` that fits, or any other value converted to a number, which must be finite and
-  in range, and truncates toward zero. Like C++ JSG's `int64_t`.
-- `&[T]`.
+Integers convert like C++ JSG's. `u8`, `u16`, `u32`, `i8`, `i16` and `i32` convert to a number,
+and from a value converted to a number, which must be in range. `i64` and `u64` convert to a
+`BigInt`, like `int64_t` and `uint64_t`, and from a `BigInt` that fits, or any other value converted
+to a number, which must be finite and in range, and truncates toward zero.
 
 Like C++ JSG's `kj::Date`, `SystemTime` converts to a `Date` of the milliseconds since the epoch,
 truncated toward zero, and from a `Date` or a number of milliseconds within the range of `kj::Date`.
 
 ### Arrays, typed arrays and `ArrayBuffer`s
 
-A `Vec<T>` converts to a JavaScript `Array` of the converted elements. A typed array or an
-`ArrayBuffer` is an explicit conversion of a slice:
+A `Vec<T>` converts to a JavaScript `Array` of the converted elements, numbers included:
+`vec![1u8, 2, 3].to_js(lock)` makes `[1, 2, 3]`, and a `Vec<i64>` makes an `Array` of `BigInt`s.
+A typed array or an `ArrayBuffer` is an explicit conversion of a slice:
 
 ```rust
+use jsg::ToJS;
 use jsg::ToJsArrayBuffer;
 use jsg::ToJsTypedArray;
 
 let bytes: Vec<u8> = encode(input);
 let typed: v8::Local<v8::Uint8Array> = bytes.to_js_typed_array(lock); // Uint8Array
 let buffer: v8::Local<v8::ArrayBuffer> = bytes.to_js_array_buffer(lock); // ArrayBuffer
+let array: v8::Local<v8::Value> = bytes.to_js(lock)?; // Array of numbers
 ```
 
 `to_js_typed_array` makes the typed array of the element type, from `Uint8Array` for `[u8]` to
@@ -600,7 +603,9 @@ To port a C++ JSG signature:
 | `kj::Array<kj::byte>` parameter | `v8::Local<'s, v8::ArrayBufferView>`; C++ JSG also accepts a bare `ArrayBuffer`, for which take a `v8::Local<'s, v8::Value>` and `try_into()` each |
 | `jsg::BufferSource` | `v8::Local<'s, v8::Value>`; check `is_array_buffer()` / `is_array_buffer_view()` and `try_into()` each |
 | `v8::Local<v8::Uint8Array>` returned | `v8::Local<'s, v8::Uint8Array>`, from `to_js_typed_array` |
-| `kj::Array<double>` | `Vec<Number>` |
+| `kj::Array<T>` of other numbers returned | `Vec<T>`, an `Array` |
+| `kj::Array<T>` of integers parameter | `Vec<T>` |
+| `kj::Array<double>` parameter | `Vec<Number>` |
 | `kj::Array<bool>` | `Vec<bool>` |
 | `kj::Array<T>` of anything else | `Vec<T>` |
 

@@ -97,7 +97,7 @@ Rust types exposed to JavaScript via the JSG bindings follow these patterns:
 - **`#[jsg_struct]`** is for value types (passed by value across the JS boundary).
 - **`#[jsg_oneof]`** is for union/variant types (mapped from JS values by trying each variant).
 - **Type mappings**: `jsg::Number` wraps JS numbers (distinct from `f64`). `Vec<T>` converts to a
-  JS `Array`. A typed array comes from `to_js_typed_array` on a slice, and an `ArrayBuffer` from
+  JS `Array`, numbers included. A typed array comes from `to_js_typed_array` on a slice, and an `ArrayBuffer` from
   `to_js_array_buffer` on a byte slice (what C++ JSG returns for `kj::Array<kj::byte>`). From
   JS, `Vec<T>` reads an `Array`, and a typed array or `ArrayBuffer` is a handle such as
   `v8::Local<v8::Uint8Array>`.

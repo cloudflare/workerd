@@ -385,6 +385,7 @@ pub mod ffi {
         pub unsafe fn big_int_new(isolate: *mut Isolate, value: i64) -> Local;
         pub unsafe fn big_int_new_from_unsigned(isolate: *mut Isolate, value: u64) -> Local;
         pub unsafe fn local_big_int_int64_value(value: &Local, lossless: &mut bool) -> i64;
+        pub unsafe fn local_big_int_uint64_value(value: &Local, lossless: &mut bool) -> u64;
 
         // Local<Date>
         pub unsafe fn date_new(isolate: *mut Isolate, time: f64) -> MaybeLocal;
@@ -3186,6 +3187,16 @@ impl Local<'_, BigInt> {
         let mut lossless = false;
         // SAFETY: the handle is a valid BigInt handle within the current HandleScope.
         let value = unsafe { ffi::local_big_int_int64_value(self.raw(), &mut lossless) };
+        lossless.then_some(value)
+    }
+
+    /// Returns the value as a `u64`, or `None` if it is out of the range of `u64`.
+    ///
+    /// Corresponds to `v8::BigInt::Uint64Value()`.
+    pub fn uint64_value(&self) -> Option<u64> {
+        let mut lossless = false;
+        // SAFETY: the handle is a valid BigInt handle within the current HandleScope.
+        let value = unsafe { ffi::local_big_int_uint64_value(self.raw(), &mut lossless) };
         lossless.then_some(value)
     }
 }

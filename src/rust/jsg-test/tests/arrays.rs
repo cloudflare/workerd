@@ -66,6 +66,11 @@ impl ArrayResource {
     }
 
     #[jsg_method]
+    pub fn bytes_of(&self, s: &str) -> Vec<u8> {
+        s.as_bytes().to_vec()
+    }
+
+    #[jsg_method]
     pub fn reverse_bytes<'s>(
         &self,
         lock: &mut jsg::Lock<'s>,
@@ -372,6 +377,56 @@ fn vec_of_bool_and_number_converts_to_an_array() {
                  const n = arr.negateAll([true, false]); \
                  Array.isArray(d) && d.length === 2 && d[0] === 2 && d[1] === 5 && \
                  Array.isArray(n) && n.length === 2 && n[0] === false && n[1] === true",
+            )
+            .unwrap();
+        assert!(ok);
+        Ok(())
+    });
+}
+
+/// A `Vec` of Rust numbers converts to an `Array` of numbers, or of `BigInt`s for `i64`, and not
+/// to a typed array, as does one that a method returns.
+#[test]
+fn vec_of_numbers_converts_to_an_array() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        let bytes = vec![0u8, 7, 255].to_js(lock)?;
+        ctx.set_global(lock, "bytes", bytes);
+        let words = vec![1u32, u32::MAX].to_js(lock)?;
+        ctx.set_global(lock, "words", words);
+        let doubles = vec![0.5f64, -0.0, f64::INFINITY].to_js(lock)?;
+        ctx.set_global(lock, "doubles", doubles);
+        let floats = vec![0.25f32].to_js(lock)?;
+        ctx.set_global(lock, "floats", floats);
+        let bigints = vec![-1i64, i64::MAX].to_js(lock)?;
+        ctx.set_global(lock, "bigints", bigints);
+        let empty = Vec::<u8>::new().to_js(lock)?;
+        ctx.set_global(lock, "empty", empty);
+
+        let ok: bool = ctx
+            .eval(
+                lock,
+                "Array.isArray(bytes) && bytes.length === 3 && \
+                 bytes[0] === 0 && bytes[1] === 7 && bytes[2] === 255 && \
+                 Array.isArray(words) && words.length === 2 && \
+                 words[0] === 1 && words[1] === 4294967295 && \
+                 Array.isArray(doubles) && doubles.length === 3 && doubles[0] === 0.5 && \
+                 Object.is(doubles[1], -0) && doubles[2] === Infinity && \
+                 Array.isArray(floats) && floats.length === 1 && floats[0] === 0.25 && \
+                 Array.isArray(bigints) && bigints.length === 2 && \
+                 bigints[0] === -1n && bigints[1] === 2n ** 63n - 1n && \
+                 Array.isArray(empty) && empty.length === 0",
+            )
+            .unwrap();
+        assert!(ok);
+
+        let wrapped = jsg::Rc::new(ArrayResource).to_js(lock)?;
+        ctx.set_global(lock, "arr", wrapped);
+        let ok: bool = ctx
+            .eval(
+                lock,
+                "const b = arr.bytesOf('hi'); \
+                 Array.isArray(b) && b.length === 2 && b[0] === 104 && b[1] === 105",
             )
             .unwrap();
         assert!(ok);
