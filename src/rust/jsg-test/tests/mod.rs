@@ -19,6 +19,7 @@ mod gc;
 mod global;
 mod harness;
 mod integer;
+mod internal_error;
 mod isolates;
 mod jsg_oneof;
 mod jsg_struct;
