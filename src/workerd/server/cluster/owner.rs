@@ -497,12 +497,13 @@ impl Owners {
     }
 }
 
-/// The capture's frames from `from` up to `to`, as one batch.
+/// The capture's frames from `from` up to `to`, merged into one batch.
 fn stage(capture: &Capture, from: Sequence, to: Sequence) -> Result<Option<Vec<u8>>> {
     if to <= from {
         return Ok(None);
     }
-    Ok(Some(crate::log::compress(&capture.batch(from, to)?)?))
+    let batch = crate::log::merge(&capture.batch(from, to)?)?;
+    Ok(Some(crate::log::compress(&batch)?))
 }
 
 /// `plan`'s files replayed into this node's copy of a snapshot, on the

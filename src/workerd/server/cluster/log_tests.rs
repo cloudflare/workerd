@@ -281,9 +281,15 @@ fn last() -> Sequence {
     CAPTURE.with_borrow(|c| c.as_ref().unwrap().last().unwrap())
 }
 
+/// The captured frames `from..to`, merged.
+fn merged(from: Sequence, to: Sequence) -> Vec<u8> {
+    let bytes = CAPTURE.with_borrow(|c| c.as_ref().unwrap().batch(from, to).unwrap());
+    crate::log::merge(&bytes).unwrap()
+}
+
 /// The captured frames `from..to` as one batch in `dir`.
 fn batch(dir: &Path, from: Sequence, to: Sequence) -> (LogFile, PathBuf) {
-    let bytes = CAPTURE.with_borrow(|c| c.as_ref().unwrap().batch(from, to).unwrap());
+    let bytes = merged(from, to);
     let path = dir.join(format!("{from}-{to}"));
     std::fs::write(&path, crate::log::compress(&bytes).unwrap()).unwrap();
     let file = LogFile {
@@ -401,6 +407,29 @@ fn a_snapshot_compacts_from_the_last_one_inside_a_wal() {
         .unwrap();
     insert(&app, 200, 300);
     upload(&store, b, last());
+    assert_eq!(restored_rows(&store, &dir.join("restored.db")), rows(&app));
+}
+
+#[test]
+fn a_batch_keeps_one_copy_of_a_page_its_commits_rewrote() {
+    let dir = scratch("dedup");
+    let app = open_app(&dir.join("app.db"));
+    let store = Bucket::memory("");
+    insert(&app, 0, 10);
+    let a = last();
+    for i in 0..100 {
+        app.execute(&format!("UPDATE t SET v = '{i}' WHERE id = 1"));
+    }
+    let raw = CAPTURE.with_borrow(|c| c.as_ref().unwrap().batch(a, last()).unwrap());
+    let merged = merged(a, last());
+    assert!(
+        merged.len() * 20 < raw.len(),
+        "{} of {}",
+        merged.len(),
+        raw.len()
+    );
+    upload(&store, 0, a);
+    upload(&store, a, last());
     assert_eq!(restored_rows(&store, &dir.join("restored.db")), rows(&app));
 }
 

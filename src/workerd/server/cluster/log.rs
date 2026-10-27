@@ -3,13 +3,13 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 //! An object's log in the bucket (`frames.capnp`), laid out as the storage
-//! relay's: one `sqlite` lane, the database, whose frames are the bytes
-//! each commit wrote to the WAL.
+//! relay's: one `sqlitePages` lane, the database, whose frames are the
+//! pages each commit wrote.
 //!
 //! Under `do/<namespace>/<actor>/`, each file one LZ4 frame:
 //!
-//! - `log/<session>/<end>`: a batch, the frames of a run of commits, up to
-//!   frame `end`.
+//! - `log/<session>/<end>`: a batch, the frames of a run of commits up to
+//!   frame `end`, each run of page frames merged to one.
 //! - `snapshot/<session>/<frame>`: a snapshot, the log continuing from
 //!   `frame`.
 //!
@@ -18,6 +18,7 @@
 //! newest snapshot and the batches after it; a frame a batch before
 //! already applied is skipped by its sequence.
 
+use std::collections::BTreeMap;
 use std::io::BufReader;
 use std::io::Read;
 use std::io::Seek;
@@ -42,63 +43,110 @@ use crate::Sequence;
 const LANE: &str = "db";
 /// Downloads in flight during a restore, to hide the store's round trips.
 const RESTORE_CONCURRENCY: usize = 16;
-const WAL_HEADER: usize = 32;
-const FRAME_HEADER: usize = 24;
 
-/// Where a session's next frame goes, and the database lane's state.
+/// Where a session's next frame goes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Cursor {
     pub session: u32,
     pub sequence: Sequence,
-    /// Whether the lane exists.
+    /// Whether the database lane exists.
     pub lane: bool,
-    /// Where the lane's next write goes.
-    pub end: u64,
-    /// Where the current WAL starts.
-    pub base: u64,
 }
+
+/// Pages by number.
+pub type Pages<'a> = BTreeMap<u32, &'a [u8]>;
 
 #[derive(Clone, Copy)]
 pub enum Body<'a> {
     NewLane,
     DeleteLane,
     Initialize(&'a [u8]),
-    Write(u64, &'a [u8]),
-    /// A checkpoint consumed everything written so far.
-    Consume,
+    /// A commit's pages, and the database's size after, in pages.
+    Pages(u32, &'a Pages<'a>),
 }
 
 /// Appends a frame to `out` at `cursor`, and moves it past.
 pub fn push(out: &mut Vec<u8>, cursor: &mut Cursor, body: Body) {
+    match body {
+        Body::NewLane => cursor.lane = true,
+        Body::DeleteLane => cursor.lane = false,
+        _ => {}
+    }
+    let (session, sequence) = (cursor.session, cursor.sequence);
+    frame_at(out, session, sequence..=sequence, body);
+    cursor.sequence += 1;
+}
+
+/// Appends a frame covering `sequences` to `out`.
+fn frame_at(
+    out: &mut Vec<u8>,
+    session: u32,
+    sequences: std::ops::RangeInclusive<Sequence>,
+    body: Body,
+) {
     let mut message = capnp::message::Builder::new_default();
     let mut f = message.init_root::<frame::Builder>();
-    f.set_session(cursor.session);
-    f.set_sequence(cursor.sequence);
+    f.set_session(session);
+    f.set_sequence(*sequences.end());
     match body {
         Body::NewLane => {
             let mut lane = f.init_new_lane();
             lane.set_name(LANE);
-            lane.set_sqlite(());
-            cursor.lane = true;
+            lane.set_sqlite_pages(());
         }
-        Body::DeleteLane => {
-            f.set_delete_lane(());
-            (cursor.lane, cursor.end, cursor.base) = (false, 0, 0);
-        }
+        Body::DeleteLane => f.set_delete_lane(()),
         Body::Initialize(image) => f.set_initialize(image),
-        Body::Write(offset, data) => {
-            let mut write = f.init_write();
-            write.set_offset(offset);
-            write.set_data(data);
-            cursor.end = offset + data.len() as u64;
-        }
-        Body::Consume => {
-            f.init_consume().set_offset(cursor.end);
-            cursor.base = cursor.end;
+        Body::Pages(commit, pages) => {
+            let mut group = f.init_pages();
+            group.set_first(*sequences.start());
+            group.set_commit(commit);
+            let mut list = group.init_list(pages.len() as u32);
+            for (i, (&number, data)) in pages.iter().enumerate() {
+                let mut page = list.reborrow().get(i as u32);
+                page.set_number(number);
+                page.set_data(data);
+            }
         }
     }
     let _ = capnp::serialize::write_message(&mut *out, &message);
-    cursor.sequence += 1;
+}
+
+/// `batch`, a run of frames, with each run of page frames merged to one
+/// with the newest version of each page.
+pub fn merge(batch: &[u8]) -> Result<Vec<u8>> {
+    let mut messages = Vec::new();
+    let mut r = batch;
+    while let Some(message) = capnp::serialize::try_read_message(&mut r, options())? {
+        messages.push(message);
+    }
+    let mut out = Vec::new();
+    // The run's session, first and last sequence, size, and pages.
+    let mut run: Option<(u32, Sequence, Sequence, u32, Pages)> = None;
+    let flush = |out: &mut Vec<u8>, run: &mut Option<(u32, Sequence, Sequence, u32, Pages)>| {
+        if let Some((session, first, last, commit, mut pages)) = run.take() {
+            pages.retain(|&number, _| number <= commit);
+            frame_at(out, session, first..=last, Body::Pages(commit, &pages));
+        }
+    };
+    for message in &messages {
+        let f = message.get_root::<frame::Reader>()?;
+        let (session, sequence) = (f.get_session(), f.get_sequence());
+        if let frame::Pages(group) = f.which()? {
+            let first = group.get_first();
+            let r = run.get_or_insert_with(|| (session, first, sequence, 0, BTreeMap::new()));
+            (r.2, r.3) = (sequence, group.get_commit());
+            for page in group.get_list()? {
+                r.4.insert(page.get_number(), page.get_data()?);
+            }
+        } else {
+            flush(&mut out, &mut run);
+            let mut copy = capnp::message::Builder::new_default();
+            copy.set_root(f)?;
+            capnp::serialize::write_message(&mut out, &copy)?;
+        }
+    }
+    flush(&mut out, &mut run);
+    Ok(out)
 }
 
 /// LZ4-frames `bytes`, as every file in the bucket is.
@@ -119,20 +167,10 @@ fn options() -> capnp::message::ReaderOptions {
     *capnp::message::ReaderOptions::new().traversal_limit_in_words(None)
 }
 
-fn be32(b: &[u8]) -> u32 {
-    u32::from_be_bytes([b[0], b[1], b[2], b[3]])
-}
-
 /// The database lane, replayed into a file.
 pub struct Replay {
     db: std::fs::File,
     live: bool,
-    /// The WAL bytes not yet checkpointed, from `base` on.
-    wal: Vec<u8>,
-    base: u64,
-    /// Whether `wal` starts with a WAL header, rather than a frame past a
-    /// snapshot.
-    header: bool,
     /// The next frame, by session and sequence.
     next: Option<(u32, Sequence)>,
     log_bytes: u64,
@@ -148,9 +186,6 @@ impl Replay {
                 .truncate(true)
                 .open(db)?,
             live: false,
-            wal: Vec::new(),
-            base: 0,
-            header: true,
             next: None,
             log_bytes: 0,
         })
@@ -167,12 +202,21 @@ impl Replay {
         }
         while let Some(message) = capnp::serialize::try_read_message(&mut r, options())? {
             let f = message.get_root::<frame::Reader>()?;
-            let at = (f.get_session(), f.get_sequence());
-            match self.next.unwrap_or((at.0, 0)) {
-                next if at < next => continue,
-                next if at > next => return Ok(()),
-                _ => self.next = Some((at.0, at.1 + 1)),
+            let (session, last) = (f.get_session(), f.get_sequence());
+            let first = match f.which()? {
+                frame::Pages(group) => group.get_first(),
+                _ => last,
+            };
+            let next = self.next.unwrap_or((session, 0));
+            if (session, last) < next {
+                continue;
             }
+            if (session, first) > next {
+                return Ok(());
+            }
+            // Pages a frame before already applied are rewritten with the
+            // same or newer versions.
+            self.next = Some((session, last + 1));
             self.frame(f)?;
         }
         self.log_bytes += size;
@@ -183,7 +227,7 @@ impl Replay {
         let message = capnp::serialize::read_message(&mut *r, options())?;
         let header = message.get_root::<snapshot_header::Reader>()?;
         self.next = Some((header.get_session(), header.get_frame()));
-        (self.wal, self.base, self.live, self.log_bytes) = (Vec::new(), 0, false, 0);
+        (self.live, self.log_bytes) = (false, 0);
         self.db.set_len(0)?;
         self.db.seek(SeekFrom::Start(0))?;
         let lanes = header.get_lanes()?;
@@ -193,9 +237,7 @@ impl Replay {
         for lane in lanes {
             if let snapshot_header::lane::Sqlite(sqlite) = lane.which()? {
                 std::io::copy(&mut r.take(sqlite.get_database_size()), &mut self.db)?;
-                r.take(sqlite.get_wal_size()).read_to_end(&mut self.wal)?;
-                (self.base, self.live) = (sqlite.get_wal_base_offset(), true);
-                self.header = !self.wal.is_empty();
+                self.live = true;
             }
         }
         Ok(())
@@ -208,7 +250,6 @@ impl Replay {
         match f.which()? {
             frame::NewLane(_) | frame::DeleteLane(()) => {
                 self.db.set_len(0)?;
-                (self.wal, self.base, self.header) = (Vec::new(), 0, true);
                 self.live = matches!(f.which()?, frame::NewLane(_));
             }
             frame::Initialize(image) => {
@@ -216,74 +257,42 @@ impl Replay {
                 self.db.seek(SeekFrom::Start(0))?;
                 self.db.write_all(image?)?;
             }
-            frame::Write(w) => {
-                if w.get_offset() != self.base + self.wal.len() as u64 {
-                    return Err(Error::Replica(format!("a write at {}", w.get_offset())));
+            frame::Pages(group) => {
+                let mut page_size = 0;
+                for page in group.get_list()? {
+                    let data = page.get_data()?;
+                    page_size = data.len() as u64;
+                    let at = u64::from(page.get_number() - 1) * page_size;
+                    self.db.seek(SeekFrom::Start(at))?;
+                    self.db.write_all(data)?;
                 }
-                self.wal.extend_from_slice(w.get_data()?);
-            }
-            frame::Consume(c) => {
-                self.checkpoint()?;
-                (self.base, self.header) = (c.get_offset(), true);
+                if page_size > 0 {
+                    self.db.set_len(u64::from(group.get_commit()) * page_size)?;
+                }
             }
             _ => return Err(Error::Replica("an unsupported frame".into())),
         }
         Ok(())
     }
 
-    /// Copies the WAL's committed pages into the database.
-    fn checkpoint(&mut self) -> Result<()> {
-        let wal = std::mem::take(&mut self.wal);
-        self.base += wal.len() as u64;
-        let (page_size, frames) = if std::mem::replace(&mut self.header, false) {
-            let Some(size) = wal.get(8..12) else {
-                return Ok(());
-            };
-            (be32(size) as usize, &wal[WAL_HEADER..])
-        } else if wal.is_empty() {
-            return Ok(());
-        } else {
-            // Past a snapshot, the database's header has the page size.
-            let mut size = [0; 2];
-            self.db.seek(SeekFrom::Start(16))?;
-            self.db.read_exact(&mut size)?;
-            let size = usize::from(u16::from_be_bytes(size));
-            (if size == 1 { 1 << 16 } else { size }, &wal[..])
-        };
-        let frames: Vec<_> = frames.chunks_exact(FRAME_HEADER + page_size).collect();
-        let Some(last) = frames.iter().rposition(|f| be32(&f[4..]) != 0) else {
-            return Ok(());
-        };
-        for f in &frames[..=last] {
-            let at = u64::from(be32(f) - 1) * page_size as u64;
-            self.db.seek(SeekFrom::Start(at))?;
-            self.db.write_all(&f[FRAME_HEADER..])?;
-        }
-        let pages = u64::from(be32(&frames[last][4..]));
-        Ok(self.db.set_len(pages * page_size as u64)?)
-    }
-
     /// The replayed database, whole, and the frame the log continues from.
-    pub fn finish(mut self) -> Result<Sequence> {
-        self.checkpoint()?;
+    pub fn finish(self) -> Result<Sequence> {
         self.db.sync_data()?;
         Ok(self.next.map_or(0, |n| n.1))
     }
 
     /// Writes the replayed state as a snapshot into `dir`.
     pub fn write_snapshot(mut self, dir: &Path) -> Result<File> {
-        self.checkpoint()?;
         let (session, frame) = self.next.unwrap_or_default();
         let size = self.db.seek(SeekFrom::End(0))?;
         self.db.seek(SeekFrom::Start(0))?;
-        let lane = self.live.then_some((size, self.base));
         let header = Header {
             session,
             frame,
             justification: SnapshotJustification::ClientRequested,
             log_bytes: self.log_bytes,
         };
-        write_snapshot(dir, &header, lane, |w| {
+        write_snapshot(dir, &header, self.live.then_some(size), |w| {
             Ok(std::io::copy(&mut self.db, w).map(drop)?)
         })
     }
@@ -296,12 +305,12 @@ struct Header {
     log_bytes: u64,
 }
 
-/// Writes a snapshot into `dir`: the database lane, if it exists, as its
-/// size and where the log's next write goes, with content `payload` writes.
+/// Writes a snapshot into `dir`: the database lane, if it exists, of `size`
+/// bytes that `payload` writes.
 fn write_snapshot(
     dir: &Path,
     h: &Header,
-    lane: Option<(u64, u64)>,
+    size: Option<u64>,
     payload: impl FnOnce(&mut dyn Write) -> Result<()>,
 ) -> Result<File> {
     let mut message = capnp::message::Builder::new_default();
@@ -310,13 +319,11 @@ fn write_snapshot(
     header.set_frame(h.frame);
     header.set_justification(h.justification);
     header.set_log_bytes_since_last_snapshot(h.log_bytes);
-    let mut lanes = header.init_lanes(u32::from(lane.is_some()));
-    if let Some((size, base)) = lane {
-        let mut l = lanes.reborrow().get(0);
-        l.set_name(LANE);
-        let mut sqlite = l.init_sqlite();
-        sqlite.set_database_size(size);
-        sqlite.set_wal_base_offset(base);
+    let mut lanes = header.init_lanes(u32::from(size.is_some()));
+    if let Some(size) = size {
+        let mut lane = lanes.reborrow().get(0);
+        lane.set_name(LANE);
+        lane.init_sqlite().set_database_size(size);
     }
     let file = File {
         snapshot: true,
@@ -358,7 +365,7 @@ pub fn snapshot_file(path: &Path, dir: &Path, session: u32) -> Result<Option<Fil
         justification: SnapshotJustification::ColdStartMitigation,
         log_bytes: 0,
     };
-    let file = write_snapshot(dir, &header, Some((size, 0)), |w| {
+    let file = write_snapshot(dir, &header, Some(size), |w| {
         Ok(std::io::copy(&mut db, w).map(drop)?)
     })?;
     Ok(Some(file))

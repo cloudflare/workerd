@@ -4,9 +4,10 @@
 
 @0xf699edadaece33b7;
 # The format of a Durable Object's log in the bucket: the storage relay's
-# (SRS's), field for field, so the two stay wire-compatible. Workerd writes
-# one `sqlite` lane and leaves unset what it has no use for, noted below.
-# Compression and encryption are not part of it.
+# (SRS's), field for field, so the two stay wire-compatible, and one lane
+# type of workerd's own, `sqlitePages`, at new ordinals. Workerd leaves
+# unset what it has no use for, noted below. Compression and encryption are
+# not part of it.
 #
 # A log batch is a run of frames, each one message, that starts and ends at
 # a commit. A snapshot is a `SnapshotHeader` and then each lane's content in
@@ -50,7 +51,7 @@ struct Frame {
     write :group {
       # For a `sqlite` lane, bytes SQLite wrote to the WAL, at an offset
       # that keeps growing across checkpoints, though SQLite sees each WAL
-      # start over at zero.
+      # start over at zero. Unused by workerd.
       offset @5 :UInt64;
       data @6 :Data;
     }
@@ -59,17 +60,34 @@ struct Frame {
 
     consume :group {
       # For a `sqlite` lane, a checkpoint copied the WAL's committed pages
-      # into the database: data before `offset` is not needed again.
+      # into the database: data before `offset` is not needed again. Unused
+      # by workerd.
       offset @8 :UInt64;
     }
 
     initialize @9 :Data;
-    # For a `sqlite` lane, the whole database file, written before the WAL
-    # is in use.
+    # For a `sqlite` or `sqlitePages` lane, the whole database file,
+    # written before the WAL is in use.
 
     setReplicaInformation @12 :AnyPointer;
     # Unused by workerd.
+
+    pages :group {
+      # For a `sqlitePages` lane, the newest version of each page that the
+      # commits `first..=sequence` wrote, and the database's size after, in
+      # pages. A batch's commits merge to one such frame between other
+      # frames, so a page a hot object rewrites is in the log once per
+      # upload, not once per commit.
+      first @15 :UInt32;
+      commit @16 :UInt32;
+      list @17 :List(Page);
+    }
   }
+}
+
+struct Page {
+  number @0 :UInt32;
+  data @1 :Data;
 }
 
 struct LaneDescription {
@@ -82,6 +100,8 @@ struct LaneDescription {
     # Unused by workerd.
     replicaInformation @3 :Void;
     # Unused by workerd.
+    sqlitePages @4 :Void;
+    # Workerd's: a SQLite database whose writes are pages (`Frame.pages`).
   }
 }
 
@@ -121,18 +141,12 @@ struct SnapshotHeader {
       # A lane number freed while later ones are in use.
 
       sqlite :group {
+        # Also a `sqlitePages` lane's, with only `databaseSize` set: the
+        # database file, every committed page in it.
         databaseSize @2 :UInt64;
         walSize @3 :UInt64;
-        # The WAL bytes after the database's. Always 0 in the bucket: a
-        # snapshot's database has every committed page.
-
         walBaseOffset @6 :UInt64;
-        # Where the log's next write continues. Workerd snapshots from the
-        # log, not the live database, so that write can continue a WAL
-        # past its header, at a frame.
-
         walShiftOffset @7 :UInt64;
-        # Always 0: workerd keeps no lane files of its own to shift.
       }
 
       journal :group {

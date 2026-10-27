@@ -3,19 +3,17 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 //! A Durable Object's commits, cut from the writes `SQLite` makes to its WAL
-//! as workerd's VFS reports them: per transaction, the frames of
-//! `frames.capnp` that write its bytes to the database lane.
+//! as workerd's VFS reports them: per transaction, a frame of
+//! `frames.capnp` with the pages it wrote.
 //!
 //! `SQLite` writes a frame as its 24-byte header and then its page, at offsets
 //! that follow the 32-byte WAL header, and the header of a transaction's
 //! last frame carries the database's size, which marks the commit. A write
 //! at offset 0 starts a new WAL, after a checkpoint has copied every
-//! earlier frame into the database file. So the bytes since the last commit
-//! are buffered, and the write that completes a commit frame completes one
-//! transaction: a write of those bytes at the lane's next offset, which
-//! keeps growing across checkpoints, each marked by a consume. A
-//! rolled-back transaction's frames start where the next one's do, which
-//! overwrites them.
+//! earlier frame into the database file. So the frames since the last
+//! commit are buffered, and the write that completes a commit frame
+//! completes one transaction. A rolled-back transaction's frames start
+//! where the next one's do, which overwrites them.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -29,7 +27,7 @@ use crate::log::Cursor;
 use crate::log::push;
 
 const WAL_HEADER: u64 = 32;
-const FRAME_HEADER: u64 = 24;
+const FRAME_HEADER: usize = 24;
 
 pub struct Capture {
     /// The database file.
@@ -38,14 +36,11 @@ pub struct Capture {
     /// frame after it.
     entries: BTreeMap<Sequence, Vec<u8>>,
     cursor: Cursor,
-    page_size: u64,
-    /// Where in the WAL the next transaction's bytes start; `None` before a
-    /// WAL header.
-    start: Option<u64>,
+    page_size: usize,
+    /// Where the next transaction's first frame goes: 0 before a WAL header.
+    start: u64,
     /// What was written from `start` on.
-    pending: Vec<u8>,
-    /// A checkpoint consumed the lane's WAL since the last commit.
-    consumed: bool,
+    frames: Vec<u8>,
     /// Why the capture can no longer be trusted, if it cannot.
     lost: Option<String>,
 }
@@ -70,9 +65,8 @@ impl Capture {
             entries: BTreeMap::new(),
             cursor,
             page_size: 0,
-            start: None,
-            pending: Vec::new(),
-            consumed: false,
+            start: 0,
+            frames: Vec::new(),
             lost: None,
         }
     }
@@ -82,7 +76,6 @@ impl Capture {
     #[cfg(test)]
     pub fn restart(&mut self) -> Result<()> {
         self.entries.clear();
-        self.start = None;
         self.cursor = Cursor {
             session: self.cursor.session,
             ..Cursor::default()
@@ -103,9 +96,8 @@ impl Capture {
     /// The database's files were deleted: the session continues without the
     /// lane, and the next commit creates it.
     pub fn reset(&mut self) {
-        self.start = None;
-        self.pending.clear();
-        self.consumed = false;
+        self.start = 0;
+        self.frames.clear();
         if !self.cursor.lane {
             return;
         }
@@ -119,36 +111,35 @@ impl Capture {
         if offset == 0 {
             // A new WAL: a checkpoint copied the last one into the file.
             if let Some(size) = data.get(8..12) {
-                self.page_size =
-                    u64::from(u32::from_be_bytes([size[0], size[1], size[2], size[3]]));
-                self.consumed |= self.cursor.end > self.cursor.base;
-                self.start = Some(0);
-                self.pending.clear();
+                self.page_size = u32::from_be_bytes([size[0], size[1], size[2], size[3]]) as usize;
+                self.start = WAL_HEADER;
+                self.frames.clear();
             }
-        }
-        let Some(start) = self.start.filter(|&s| offset >= s) else {
-            self.lost = Some(format!("a WAL write at {offset}, before {:?}", self.start));
             return;
-        };
-        let at = usize::try_from(offset - start).unwrap_or(usize::MAX);
+        }
+        if self.start == 0 || offset < self.start {
+            self.lost = Some(format!("a WAL write at {offset}, before {}", self.start));
+            return;
+        }
+        let at = usize::try_from(offset - self.start).unwrap_or(usize::MAX);
         let end = at.saturating_add(data.len());
-        if self.pending.len() < end {
-            self.pending.resize(end, 0);
+        if self.frames.len() < end {
+            self.frames.resize(end, 0);
         }
-        self.pending[at..end].copy_from_slice(data);
+        self.frames[at..end].copy_from_slice(data);
         let size = FRAME_HEADER + self.page_size;
-        let wal_end = start + end as u64;
-        if wal_end <= WAL_HEADER || !(wal_end - WAL_HEADER).is_multiple_of(size) {
+        if !end.is_multiple_of(size) {
             return;
         }
-        let header = &self.pending[end - size as usize..];
-        if u32::from_be_bytes([header[4], header[5], header[6], header[7]]) != 0 {
-            self.commit(start, end);
+        let header = &self.frames[end - size..end - size + FRAME_HEADER];
+        let commit = u32::from_be_bytes([header[4], header[5], header[6], header[7]]);
+        if commit != 0 {
+            self.commit(end, commit);
         }
     }
 
-    /// The bytes before `end` are one committed transaction.
-    fn commit(&mut self, start: u64, end: usize) {
+    /// The frames before `end` are one committed transaction.
+    fn commit(&mut self, end: usize, commit: u32) {
         let mut entry = Vec::new();
         if !self.cursor.lane {
             match std::fs::read(&self.path) {
@@ -159,14 +150,15 @@ impl Capture {
                 Err(e) => self.lost = Some(format!("the new database: {e}")),
             }
         }
-        if std::mem::take(&mut self.consumed) {
-            push(&mut entry, &mut self.cursor, Body::Consume);
+        let mut pages = BTreeMap::new();
+        for frame in self.frames[..end].chunks_exact(FRAME_HEADER + self.page_size) {
+            let pgno = u32::from_be_bytes([frame[0], frame[1], frame[2], frame[3]]);
+            pages.insert(pgno, &frame[FRAME_HEADER..]);
         }
-        let at = self.cursor.base + start;
-        let bytes = &self.pending[..end];
-        push(&mut entry, &mut self.cursor, Body::Write(at, bytes));
-        self.start = Some(start + end as u64);
-        self.pending.drain(..end);
+        pages.retain(|&pgno, _| pgno <= commit);
+        push(&mut entry, &mut self.cursor, Body::Pages(commit, &pages));
+        self.start += end as u64;
+        self.frames.drain(..end);
         self.entries.insert(self.cursor.sequence, entry);
     }
 
