@@ -19,10 +19,10 @@ use std::sync::OnceLock;
 use crate::Bucket;
 use crate::Error;
 use crate::capture::Capture;
-use crate::ltx::BucketClient;
-use crate::ltx::TXID;
-use crate::ltx::client::ReplicaClient;
-use crate::ltx::restore;
+use crate::log::File as LogFile;
+use crate::log::Log;
+use crate::log::SNAPSHOT_LEVEL;
+use crate::log::restore;
 use crate::owner::Owners;
 use crate::ownership::Claim;
 use crate::ownership::Ownership;
@@ -287,22 +287,41 @@ fn upload(store: &Bucket, first: u64, last: u64) {
     upload_at(store, 0, first, last);
 }
 
-fn upload_at(store: &Bucket, level: i32, first: u64, last: u64) {
+/// The captured entries `first..=last` as one log file in `dir`.
+fn entries(dir: &Path, first: u64, last: u64) -> (LogFile, PathBuf) {
     let files: Vec<Vec<u8>> = CAPTURE.with_borrow(|c| {
         let c = c.as_ref().unwrap();
         (first..=last).map(|t| c.entry(t).unwrap()).collect()
     });
-    let from = scratch(&format!("upload-{level}-{first}-{last}")).join("ltx");
-    std::fs::write(&from, crate::ltx::ltx::merge_files(&files).unwrap()).unwrap();
-    let client = BucketClient::new(store.at("cell"));
-    runtime()
-        .block_on(client.write_ltx_file(level, TXID(first), TXID(last), &from))
-        .unwrap();
+    let from = dir.join(format!("{first}-{last}"));
+    let merged = crate::log::merge(&files).unwrap();
+    std::fs::write(&from, crate::log::compress(&merged).unwrap()).unwrap();
+    let file = LogFile {
+        level: 0,
+        first,
+        last,
+        size: 0,
+    };
+    (file, from)
+}
+
+fn upload_at(store: &Bucket, level: i32, first: u64, last: u64) {
+    let dir = scratch(&format!("upload-{level}-{first}-{last}"));
+    let (file, mut from) = entries(&dir, first, last);
+    if level == SNAPSHOT_LEVEL {
+        // A compaction of the entries.
+        let out = dir.join("snapshot");
+        crate::log::compact(&[(file, from)], &out).unwrap();
+        from = out;
+    }
+    let file = LogFile { level, ..file };
+    let log = Log::new(store.at("cell"));
+    runtime().block_on(log.put(&file, &from)).unwrap();
 }
 
 fn restored_rows(store: &Bucket, out: &Path) -> (i64, i64, i64) {
-    let client = BucketClient::new(store.at("cell"));
-    runtime().block_on(restore(&client, out, TXID(0))).unwrap();
+    let log = Log::new(store.at("cell"));
+    runtime().block_on(restore(&log, out)).unwrap();
     rows(&Connection::open(out.to_str().unwrap()))
 }
 
@@ -330,26 +349,56 @@ fn restore_reads_the_newest_snapshot_and_what_extends_it() {
     insert(&app, 0, 100);
     let a = last();
     upload(&store, 1, a);
-    upload_at(&store, crate::ltx::SNAPSHOT_LEVEL, 1, a);
+    upload_at(&store, SNAPSHOT_LEVEL, 1, a);
     insert(&app, 100, 200);
     let b = last();
     upload(&store, a + 1, b);
-    upload_at(&store, crate::ltx::SNAPSHOT_LEVEL, 1, b);
+    upload_at(&store, SNAPSHOT_LEVEL, 1, b);
     app.execute("DELETE FROM t WHERE id % 3 = 0");
     upload(&store, b + 1, last());
-    let client = BucketClient::new(store.at("cell"));
-    let plan = runtime()
-        .block_on(crate::ltx::plan(&client, TXID(0)))
-        .unwrap();
-    let plan: Vec<_> = plan
+    let log = Log::new(store.at("cell"));
+    let files = runtime().block_on(log.files()).unwrap();
+    let plan: Vec<_> = crate::log::chain(&files)
         .iter()
-        .map(|f| (f.level, f.min_txid.0, f.max_txid.0))
+        .map(|f| (f.level, f.first, f.last))
         .collect();
-    assert_eq!(
-        plan,
-        [(crate::ltx::SNAPSHOT_LEVEL, 1, b), (0, b + 1, last())]
-    );
+    assert_eq!(plan, [(SNAPSHOT_LEVEL, 1, b), (0, b + 1, last())]);
     assert_eq!(restored_rows(&store, &dir.join("restored.db")), rows(&app));
+}
+
+#[test]
+fn a_snapshot_inside_a_wal_carries_it_across_checkpoints() {
+    let dir = scratch("snapshot-wal");
+    let app = open_app(&dir.join("app.db"));
+    let store = Bucket::memory("");
+    app.execute("PRAGMA wal_autocheckpoint=8");
+    for from in (0..400).step_by(10) {
+        insert(&app, from, from + 10);
+    }
+    let a = last();
+    upload_at(&store, SNAPSHOT_LEVEL, 1, a);
+    for from in (400..800).step_by(10) {
+        insert(&app, from, from + 10);
+    }
+    upload(&store, a + 1, last());
+    assert_eq!(restored_rows(&store, &dir.join("restored.db")), rows(&app));
+}
+
+#[test]
+fn a_corrupt_file_fails_to_restore() {
+    let dir = scratch("corrupt");
+    let app = open_app(&dir.join("app.db"));
+    let store = Bucket::memory("");
+    insert(&app, 0, 100);
+    let (file, path) = entries(&dir, 1, last());
+    let mut bytes = std::fs::read(&path).unwrap();
+    let mid = bytes.len() / 2;
+    bytes[mid] ^= 1;
+    std::fs::write(&path, bytes).unwrap();
+    let log = Log::new(store.at("cell"));
+    runtime().block_on(log.put(&file, &path)).unwrap();
+    let restored = runtime().block_on(restore(&log, &dir.join("restored.db")));
+    assert!(restored.is_err(), "{restored:?}");
 }
 
 #[test]
@@ -389,8 +438,9 @@ fn checkpoints_and_a_restart_keep_the_chain_whole() {
     upload(&store, 1, last());
     assert_eq!(restored_rows(&store, &dir.join("one.db")), rows(&app));
 
-    // A new chain from a snapshot of the live database (reclaim), after
-    // commits still in the WAL, then more commits, shrinking at the end.
+    // A new chain from the live database, then more commits, shrinking at
+    // the end.
+    app.execute("PRAGMA wal_checkpoint(TRUNCATE)");
     CAPTURE.with_borrow_mut(|c| c.as_mut().unwrap().restart().unwrap());
     insert(&app, 650, 700);
     app.execute("DELETE FROM t WHERE id > 20; VACUUM;");
@@ -457,9 +507,9 @@ fn a_deleted_database_restores_empty_then_as_recreated() {
     let deleted = last();
     let store = Bucket::memory("");
     upload(&store, 1, deleted);
-    let client = BucketClient::new(store.at("cell"));
+    let log = Log::new(store.at("cell"));
     let out = dir.join("empty.db");
-    runtime().block_on(restore(&client, &out, TXID(0))).unwrap();
+    runtime().block_on(restore(&log, &out)).unwrap();
     assert_eq!(std::fs::metadata(&out).unwrap().len(), 0);
 
     let app = Connection::open(&format!("file:{}?vfs=capture-test", path.display()));

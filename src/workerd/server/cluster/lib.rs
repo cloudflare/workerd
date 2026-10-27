@@ -14,7 +14,7 @@
 //!   owner and an ownership epoch. A claim is a conditional write; taking an
 //!   object over from an owner whose lease expired bumps the epoch, and
 //!   everything the new owner writes is keyed by that epoch, under
-//!   `do/<namespace>/<actor>/ltx/e<epoch>/`, so a late write from the old
+//!   `do/<namespace>/<actor>/log/e<epoch>/`, so a late write from the old
 //!   owner lands where nothing reads it.
 //!
 //! The clock is an argument everywhere (`now_ms`), so a test decides time.
@@ -30,9 +30,9 @@ mod bucket;
 mod capture;
 pub mod cluster;
 mod http;
-mod ltx;
+mod log;
 #[cfg(test)]
-mod ltx_tests;
+mod log_tests;
 mod owner;
 mod ownership;
 mod registry;
@@ -72,9 +72,13 @@ pub enum Error {
     /// holds its identity and must stop serving.
     #[error("node record {0} was rewritten by another writer")]
     Fenced(String),
-    /// Capturing, uploading or restoring a database failed.
-    #[error("replication: {0}")]
-    Replication(#[from] crate::ltx::Error),
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
+    /// A log or snapshot does not decode.
+    #[error("log: {0}")]
+    Log(#[from] capnp::Error),
+    #[error("log: {0}")]
+    Schema(#[from] capnp::NotInSchema),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

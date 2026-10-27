@@ -185,7 +185,7 @@ pub mod memory {
             let got = self.objects.borrow().get(key).cloned();
             match (got, to) {
                 (Some((body, version)), Some(to)) => {
-                    std::fs::write(to, body).map_err(crate::ltx::Error::from)?;
+                    std::fs::write(to, body)?;
                     Ok(Some((Vec::new(), version)))
                 }
                 (got, _) => Ok(got),
@@ -201,7 +201,7 @@ pub mod memory {
         ) -> Result<Option<Version>> {
             let body = match body {
                 Payload::Bytes(bytes) => bytes.to_vec(),
-                Payload::File(path) => std::fs::read(path).map_err(crate::ltx::Error::from)?,
+                Payload::File(path) => std::fs::read(path)?,
             };
             let mut objects = self.objects.borrow_mut();
             let current = objects.get(key).map(|(_, version)| version);

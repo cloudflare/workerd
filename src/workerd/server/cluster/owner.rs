@@ -7,7 +7,7 @@
 //!
 //! A commit is acknowledged once the bucket holds it and own.json still
 //! names the epoch after the upload. Each epoch's commits form a chain of
-//! LTX files under `do/<ns>/<actor>/ltx/e<epoch>`, starting with a snapshot
+//! log files under `do/<ns>/<actor>/log/e<epoch>`, starting with a snapshot
 //! of the state the epoch inherited; a takeover restores the last opened
 //! epoch's chain.
 
@@ -28,10 +28,11 @@ use crate::Ownership;
 use crate::Result;
 use crate::Txid;
 use crate::capture::Capture;
-use crate::ltx::BucketClient;
-use crate::ltx::SNAPSHOT_LEVEL;
-use crate::ltx::TXID;
-use crate::ltx::client::ReplicaClient;
+use crate::log::Cursor;
+use crate::log::File;
+use crate::log::Log;
+use crate::log::SNAPSHOT_LEVEL;
+use crate::log::chain;
 use crate::ownership::Owned;
 
 /// Objects compacting at once, and deletes in flight for one compaction.
@@ -100,6 +101,8 @@ struct Object {
     replica: Replica,
     /// How far the epoch's chain in the bucket is contiguous.
     tiered: Txid,
+    /// Where the capture was at eviction.
+    cursor: Cursor,
     /// The files of this epoch's chain. Only this owner writes the epoch's
     /// prefix, so compaction deletes from here rather than listing it.
     files: Vec<File>,
@@ -137,9 +140,9 @@ impl Owners {
         }
     }
 
-    fn client(&self, ns: &str, actor: &str, epoch: Epoch) -> BucketClient {
-        let path = format!("{}do/{ns}/{actor}/ltx/e{epoch}", self.bucket.prefix());
-        BucketClient::new(self.bucket.at(&path))
+    fn client(&self, ns: &str, actor: &str, epoch: Epoch) -> Log {
+        let path = format!("{}do/{ns}/{actor}/log/e{epoch}", self.bucket.prefix());
+        Log::new(self.bucket.at(&path))
     }
 
     /// Take the object over at `owned.epoch` and open the epoch, leaving its
@@ -167,7 +170,7 @@ impl Owners {
                     "{key}: not open here, nor dormant"
                 )));
             };
-            let capture = Capture::resume(path, object.tiered);
+            let capture = Capture::resume(path, object.tiered, object.cursor);
             tracing::info!(
                 "cluster: {ns}/{actor} epoch {} resumes at {}",
                 object.epoch,
@@ -188,35 +191,36 @@ impl Owners {
         if !local {
             remove_database(path)?;
             if let Some(recover) = recover {
-                let from = self.client(ns, actor, recover);
-                let end = end_of(&from).await?;
+                // Nothing in the bucket: an object that committed nothing.
+                let end = crate::log::restore(&self.client(ns, actor, recover), path).await?;
                 tracing::info!(
                     "cluster: {ns}/{actor} epoch {} recovers {recover}: bucket through {end}",
                     owned.epoch
                 );
-                // Nothing in the bucket: an object that committed nothing.
-                if end > 0 {
-                    crate::ltx::restore(&from, path, TXID(end)).await?;
-                }
             }
         }
-        // The state the epoch inherits is its snapshot at txid 1, encoded
+        // The state the epoch inherits is its snapshot at txid 1, written
         // from the file on the blocking pool; a new object has none.
         let cache = open_cache(path, owned.epoch)?;
         let snapshot = File {
-            level: 0,
+            level: SNAPSHOT_LEVEL,
             first: 1,
             last: 1,
             size: 0,
         };
+        let session = owned.epoch as u32;
         let size = if self.opened.borrow().contains_key(&key) {
             None
         } else {
             let (path, out) = (path.to_owned(), cache.join(snapshot.name()));
-            blocking(move || crate::capture::snapshot_file(&path, &out)).await?
+            blocking(move || crate::log::snapshot_file(&path, &out, session)).await?
         };
         let snapshot = size.map(|size| File { size, ..snapshot });
-        let capture = Capture::resume(path, snapshot.map_or(0, |f| f.last));
+        let cursor = Cursor {
+            session,
+            ..Cursor::default()
+        };
+        let capture = Capture::resume(path, snapshot.map_or(0, |f| f.last), cursor);
         let object = self
             .open_epoch(ownership, ns, actor, owned, cache, snapshot)
             .await?;
@@ -270,6 +274,7 @@ impl Owners {
                 cache,
             },
             tiered: 0,
+            cursor: Cursor::default(),
             files: Vec::new(),
         };
         if self
@@ -390,9 +395,10 @@ impl Owners {
     async fn compact(&self, slot: &Slot) {
         let (replica, epoch, chain) = {
             let guard = slot.object.lock().await;
-            let Some(chain) = chain(&guard.files) else {
+            let chain = chain(&guard.files);
+            if chain.is_empty() {
                 return;
-            };
+            }
             (guard.replica.clone(), guard.epoch, chain)
         };
         let Ok(snapshot) = merged(&replica, &chain).await else {
@@ -418,10 +424,7 @@ impl Owners {
         stream::iter(replaced)
             .for_each_concurrent(TIER_CONCURRENCY, |f| async move {
                 let _ = std::fs::remove_file(replica.cache.join(f.name()));
-                let _ = replica
-                    .client
-                    .delete_ltx_file(f.level, TXID(f.first), TXID(f.last))
-                    .await;
+                let _ = replica.client.delete(&f).await;
             })
             .await;
     }
@@ -452,8 +455,9 @@ impl Owners {
             return;
         };
         self.tier_one(&slot).await;
-        let guard = slot.object.lock().await;
+        let mut guard = slot.object.lock().await;
         let last = slot.capture.borrow().last();
+        guard.cursor = slot.capture.borrow().cursor();
         if guard.epoch == epoch && last.is_ok_and(|last| guard.tiered >= last) {
             // Bounded: a forgotten entry costs its object a restore.
             let mut map = self.dormant.borrow_mut();
@@ -493,28 +497,14 @@ impl Owners {
     }
 }
 
-/// Where an epoch's chain in the bucket is contiguous from its start
-/// through.
-async fn end_of(client: &BucketClient) -> Result<Txid> {
-    let mut end = 0;
-    for info in crate::ltx::plan(client, TXID(0)).await? {
-        if info.min_txid.0 > end + 1 {
-            break;
-        }
-        end = end.max(info.max_txid.0);
-    }
-    Ok(end)
-}
-
-/// One LTX file covering txids `first..=last`, ready to upload.
+/// One log file covering txids `first..=last`, ready to upload.
 struct Staged {
     first: Txid,
     last: Txid,
     bytes: Vec<u8>,
 }
 
-/// The capture's entries after `from` through `through`, merged into one
-/// LTX file, as litestream compacts.
+/// The capture's entries after `from` through `through`, as one log file.
 fn stage(
     entry: impl Fn(Txid) -> Result<Vec<u8>>,
     from: Txid,
@@ -529,42 +519,20 @@ fn stage(
     Ok(Some(Staged {
         first: from + 1,
         last: through,
-        bytes: crate::ltx::ltx::merge_files(&files)?,
+        bytes: crate::log::compress(&crate::log::merge(&files)?)?,
     }))
 }
 
-/// The files a restore reads, in order, as `ltx::plan` picks them; `None`
-/// unless they run unbroken from txid 1.
-fn chain(files: &[File]) -> Option<Vec<File>> {
-    let mut files = files.to_vec();
-    files.sort_by_key(|f| (f.first, std::cmp::Reverse(f.last)));
-    let mut reached = 0;
-    let mut chain = Vec::new();
-    for f in files {
-        if f.first > reached + 1 {
-            return None;
-        }
-        if f.last > reached {
-            reached = f.last;
-            chain.push(f);
-        }
-    }
-    (!chain.is_empty()).then_some(chain)
-}
-
-/// `chain`'s files merged into this node's copy of a snapshot covering
-/// txid 1 through the chain's end, a page at a time on the blocking pool.
-/// A missing copy is fetched from the bucket first.
+/// `chain`'s files replayed into this node's copy of a snapshot covering
+/// txid 1 through the chain's end, on the blocking pool. A missing copy is
+/// fetched from the bucket first.
 async fn merged(replica: &Replica, chain: &[File]) -> Result<File> {
     let paths: Vec<_> = chain.iter().map(|f| replica.cache.join(f.name())).collect();
     for (f, path) in chain.iter().zip(&paths) {
         if !path.exists() {
-            let (first, last, tmp) = (TXID(f.first), TXID(f.last), tmp_path(path));
-            replica
-                .client
-                .open_ltx_file(f.level, first, last, &tmp)
-                .await?;
-            std::fs::rename(&tmp, path).map_err(crate::ltx::Error::from)?;
+            let tmp = tmp_path(path);
+            replica.client.get(f, &tmp).await?;
+            std::fs::rename(&tmp, path)?;
         }
     }
     let snapshot = File {
@@ -574,21 +542,8 @@ async fn merged(replica: &Replica, chain: &[File]) -> Result<File> {
         size: 0,
     };
     let out = replica.cache.join(snapshot.name());
-    let size = blocking(move || {
-        let io = |e| crate::Error::from(crate::ltx::Error::from(e));
-        let files = paths.iter().map(std::fs::File::open);
-        let readers: Vec<_> = files
-            .map(|f| f.map(std::io::BufReader::new))
-            .collect::<std::io::Result<_>>()
-            .map_err(io)?;
-        let tmp = tmp_path(&out);
-        let mut writer = std::io::BufWriter::new(std::fs::File::create(&tmp).map_err(io)?);
-        crate::ltx::ltx::merge_into(readers, &mut writer)?;
-        std::io::Write::flush(&mut writer).map_err(io)?;
-        std::fs::rename(&tmp, &out).map_err(io)?;
-        Ok(std::fs::metadata(&out).map_err(io)?.len())
-    })
-    .await?;
+    let files: Vec<_> = chain.iter().copied().zip(paths).collect();
+    let size = blocking(move || crate::log::compact(&files, &out)).await?;
     Ok(File { size, ..snapshot })
 }
 
@@ -610,7 +565,9 @@ fn tmp_path(path: &Path) -> PathBuf {
     tmp.into()
 }
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
+pub async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
     tokio::task::spawn_blocking(f)
         .await
         .map_err(|e| Error::Replica(format!("blocking task: {e}")))?
@@ -619,8 +576,8 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'sta
 /// Where an epoch's chain is: the bucket, and this node's copy of it.
 #[derive(Clone)]
 struct Replica {
-    client: BucketClient,
-    /// `<database>.ltx/e<epoch>`.
+    client: Log,
+    /// `<database>.log/e<epoch>`.
     cache: PathBuf,
 }
 
@@ -631,40 +588,20 @@ fn open_cache(path: &Path, epoch: Epoch) -> Result<PathBuf> {
     let root = cache_root(path);
     remove_dir(&root)?;
     let cache = root.join(format!("e{epoch}"));
-    std::fs::create_dir_all(&cache).map_err(crate::ltx::Error::from)?;
+    std::fs::create_dir_all(&cache)?;
     Ok(cache)
 }
 
 fn cache_root(path: &Path) -> PathBuf {
     let mut root = path.as_os_str().to_owned();
-    root.push(".ltx");
+    root.push(".log");
     root.into()
 }
 
 fn remove_dir(path: &Path) -> Result<()> {
     match std::fs::remove_dir_all(path) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-            Err(crate::ltx::Error::from(e).into())
-        }
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(crate::Error::from(e)),
         _ => Ok(()),
-    }
-}
-
-/// One LTX file in an epoch's chain.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct File {
-    level: i32,
-    first: Txid,
-    last: Txid,
-    size: u64,
-}
-
-impl File {
-    fn name(&self) -> String {
-        format!(
-            "{:04x}-{:016x}-{:016x}.ltx",
-            self.level, self.first, self.last
-        )
     }
 }
 
@@ -688,12 +625,8 @@ fn snapshot_due(files: &[File]) -> bool {
 
 /// Uploads this node's copy of `file`.
 async fn upload(replica: &Replica, file: File) -> Result<File> {
-    let (first, last) = (TXID(file.first), TXID(file.last));
     let path = replica.cache.join(file.name());
-    replica
-        .client
-        .write_ltx_file(file.level, first, last, &path)
-        .await?;
+    replica.client.put(&file, &path).await?;
     Ok(file)
 }
 
@@ -709,15 +642,13 @@ async fn put(replica: &Replica, level: i32, staged: Option<Staged>) -> Result<Op
         size: bytes.len() as u64,
     };
     let path = replica.cache.join(file.name());
-    blocking(move || Ok(keep(&path, &bytes).map_err(crate::ltx::Error::from)?)).await?;
+    blocking(move || Ok(keep(&path, &bytes)?)).await?;
     upload(replica, file).await.map(Some)
 }
 
 fn remove_file(path: &Path) -> Result<()> {
     match std::fs::remove_file(path) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-            Err(crate::ltx::Error::from(e).into())
-        }
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(crate::Error::from(e)),
         _ => Ok(()),
     }
 }
@@ -760,65 +691,10 @@ mod tests {
         let snapshot = span(SNAPSHOT_LEVEL, 1, 4);
         let (narrow, wide) = (span(0, 5, 6), span(0, 5, 8));
         let chain = chain(&[span(0, 9, 9), narrow, snapshot, wide]);
-        assert_eq!(chain, Some(vec![snapshot, wide, span(0, 9, 9)]));
-        assert_eq!(super::chain(&[snapshot, span(0, 6, 6)]), None, "a gap");
-        assert_eq!(super::chain(&[]), None);
-    }
-
-    #[test]
-    fn a_compaction_merges_the_chain() {
-        let ltx = |first: Txid, last: Txid, commit: u32, pages: &[(u32, u8)]| {
-            let header = crate::ltx::ltx::Header {
-                version: crate::ltx::ltx::VERSION,
-                flags: crate::ltx::ltx::HEADER_FLAG_NO_CHECKSUM,
-                page_size: 512,
-                commit,
-                min_txid: TXID(first),
-                max_txid: TXID(last),
-                ..Default::default()
-            };
-            let pages: Vec<_> = pages.iter().map(|&(p, b)| (p, vec![b; 512])).collect();
-            crate::ltx::ltx::encode_file(&header, &pages, 0).unwrap()
-        };
-        let dir = std::env::temp_dir().join(format!("owner-test-{}", std::process::id()));
-        let replica = Replica {
-            client: BucketClient::new(Bucket::memory("e1")),
-            cache: open_cache(&dir.join("a.sqlite"), 1).unwrap(),
-        };
-        let files = [
-            (span(0, 1, 1), ltx(1, 1, 3, &[(1, 1), (2, 1), (3, 1)])),
-            (span(0, 2, 3), ltx(2, 3, 3, &[(2, 2)])),
-            (span(0, 4, 4), ltx(4, 4, 2, &[(1, 4)])),
-        ];
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .unwrap();
-        let snapshot = runtime.block_on(async {
-            // The first two only here, the last only in the bucket.
-            for (f, bytes) in &files[..2] {
-                std::fs::write(replica.cache.join(f.name()), bytes).unwrap();
-            }
-            let (f, bytes) = &files[2];
-            let (first, last, from) = (TXID(f.first), TXID(f.last), dir.join("up"));
-            std::fs::write(&from, bytes).unwrap();
-            replica
-                .client
-                .write_ltx_file(f.level, first, last, &from)
-                .await
-                .unwrap();
-            let chain: Vec<_> = files.iter().map(|(f, _)| *f).collect();
-            merged(&replica, &chain).await.unwrap()
-        });
-        let bytes = std::fs::read(replica.cache.join(snapshot.name())).unwrap();
-        std::fs::remove_dir_all(&dir).unwrap();
-        assert_eq!((snapshot.first, snapshot.last), (1, 4));
-        let mut merge = crate::ltx::ltx::Merge::new(vec![bytes.as_slice()]).unwrap();
-        assert_eq!(merge.header.commit, 2, "truncated by the last commit");
-        let mut firsts = Vec::new();
-        while let Some((pgno, page)) = merge.next().unwrap() {
-            firsts.push((pgno, page[0]));
-        }
-        assert_eq!(firsts, [(1, 4), (2, 2)]);
+        assert_eq!(chain, vec![snapshot, wide, span(0, 9, 9)]);
+        let gap = super::chain(&[snapshot, span(0, 6, 6)]);
+        assert_eq!(gap, vec![snapshot], "through the gap");
+        assert_eq!(super::chain(&[]), vec![]);
     }
 
     #[test]

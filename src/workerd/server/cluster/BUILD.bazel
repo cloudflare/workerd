@@ -1,3 +1,4 @@
+load("//:build/wd_capnp_library.bzl", "wd_capnp_library")
 load("//:build/wd_rust_crate.bzl", "wd_rust_crate")
 
 # Durable Objects whose shared state is an S3-compatible bucket. Pure Rust:
@@ -12,8 +13,10 @@ wd_rust_crate(
     test_tags = ["no-downstream"],
     visibility = ["//src/workerd/server:__subpackages__"],
     deps = [
+        ":frames_capnp_rust",
         "//src/workerd/server/cluster/logic:cluster-logic",
         "@crates_vendor//:bytes",
+        "@crates_vendor//:capnp",
         "@crates_vendor//:futures",
         "@crates_vendor//:http",
         "@crates_vendor//:http-body",
@@ -33,3 +36,6 @@ wd_rust_crate(
         "@crates_vendor//:tracing",
     ],
 )
+
+# The format of an object's log in the bucket.
+wd_capnp_library(src = "frames.capnp")
