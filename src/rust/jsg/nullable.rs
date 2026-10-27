@@ -10,20 +10,22 @@ use crate::Result;
 
 /// A value of type `T` or `null`: the JavaScript type `T | null`.
 ///
-/// `Nullable<T>` does not accept `undefined`, so a parameter of this type must
-/// be given `null` or a `T`. Unlike C++ `kj::Maybe<T>`, which also reads
-/// `undefined` as empty, converting `undefined` to a `Nullable<T>` is a
-/// `TypeError`. Where `undefined` is allowed too, use `Option<Nullable<T>>`,
-/// which keeps all three apart, since [`Option<T>`] is `T | undefined`:
+/// Like C++ `kj::Maybe<T>` and Web IDL's `T?`, input conversion coerces
+/// `undefined` to `null`. A method parameter of this type is still required:
+/// passing `undefined` produces `Nullable::Null`, but omitting the argument
+/// is a `TypeError`.
+///
+/// Use `Option<Nullable<T>>` for an optional nullable that keeps `undefined`
+/// distinct from `null`, since [`Option<T>`] is `T | undefined`:
 ///
 /// | JavaScript  | `Nullable<T>`       | `Option<Nullable<T>>`     |
 /// |-------------|---------------------|---------------------------|
 /// | a `T`       | `Nullable::Some(v)` | `Some(Nullable::Some(v))` |
 /// | `null`      | `Nullable::Null`    | `Some(Nullable::Null)`    |
-/// | `undefined` | `TypeError`         | `None`                    |
+/// | `undefined` | `Nullable::Null`    | `None`                    |
 ///
-/// For Web IDL's `T?`, which reads `undefined` as `null`, take an
-/// `Option<Nullable<T>>` and call `unwrap_or(Nullable::Null)` on it.
+/// Output conversion produces only `T` or `null`. The TypeScript type is
+/// `T | null`; `Option<Nullable<T>>` adds `undefined` and permits omission.
 ///
 /// # Examples
 ///

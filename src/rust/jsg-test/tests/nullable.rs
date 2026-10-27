@@ -2,10 +2,9 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-//! `Nullable<T>` is `T | null`: converting `undefined` to it is a `TypeError`.
+//! `Nullable<T>` is `T | null`, with Web IDL's `undefined`-to-`null` coercion.
 //! `Option<Nullable<T>>` is `T | null | undefined`, and keeps the three apart.
 
-use jsg::ExceptionType;
 use jsg::FromJS;
 use jsg::Nullable;
 use jsg::ToJS;
@@ -100,19 +99,19 @@ fn nullable_reads_null_and_values() {
 }
 
 #[test]
-fn nullable_rejects_undefined() {
+fn nullable_coerces_undefined_to_null() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let err = convert::<Nullable<String>>(lock, ctx, "undefined").unwrap_err();
-        assert_eq!(err.name, ExceptionType::TypeError);
-        assert_eq!(err.message, "Expected string or null but got undefined");
-        // For `try_from_js()`, `undefined` is a top-level mismatch, not an error.
+        let value = convert::<Nullable<String>>(lock, ctx, "undefined")?;
+        assert_eq!(value, Nullable::Null);
+        assert!(value.to_js(lock)?.is_null());
+
         let undefined = ctx
             .eval_raw(lock, "undefined")
             .expect("expression should evaluate");
         assert_eq!(
             <Nullable<String> as FromJS>::try_from_js(lock, undefined)?,
-            None
+            Some(Nullable::Null)
         );
         Ok(())
     });
@@ -151,7 +150,7 @@ fn nullable_to_js() {
 }
 
 #[test]
-fn nullable_argument_requires_null_or_a_value() {
+fn nullable_argument_is_required_but_accepts_undefined() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let args = jsg::Rc::new(Args {}).to_js(lock)?;
@@ -159,7 +158,7 @@ fn nullable_argument_requires_null_or_a_value() {
         let not_of_type = "TypeError: Failed to execute 'takeNullable' on 'Args': parameter 1 \
                            is not of type 'string'.";
         assert_eq!(call(lock, ctx, "args.takeNullable()"), not_of_type);
-        assert_eq!(call(lock, ctx, "args.takeNullable(undefined)"), not_of_type);
+        assert_eq!(call(lock, ctx, "args.takeNullable(undefined)"), "null");
         assert_eq!(call(lock, ctx, "args.takeNullable(null)"), "null");
         assert_eq!(call(lock, ctx, "args.takeNullable('x')"), "some x");
 
@@ -200,8 +199,15 @@ fn nullable_struct_fields() {
                 optional: Some(Nullable::Null),
             }
         );
-        let err = convert::<Fields>(lock, ctx, "({})").unwrap_err();
-        assert_eq!(err.message, "Expected string or null but got undefined");
+        for expr in ["({})", "({ required: undefined, optional: undefined })"] {
+            assert_eq!(
+                convert::<Fields>(lock, ctx, expr)?,
+                Fields {
+                    required: Nullable::Null,
+                    optional: None,
+                }
+            );
+        }
 
         let value = Fields {
             required: Nullable::Null,

@@ -118,8 +118,8 @@ fn eval_undefined() {
     harness.run_in_context(|lock, ctx| {
         let result: Option<jsg::Nullable<bool>> = ctx.eval(lock, "undefined").unwrap();
         assert!(result.is_none());
-        let result = ctx.eval::<jsg::Nullable<bool>>(lock, "undefined");
-        assert!(matches!(result, Err(EvalError::UncoercibleResult { .. })));
+        let result: jsg::Nullable<bool> = ctx.eval(lock, "undefined").unwrap();
+        assert!(result.is_null());
         Ok(())
     });
 }
