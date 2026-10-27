@@ -1,5 +1,5 @@
 load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
-load("//:build/linking.bzl", "CC_TEST_LINKSTATIC")
+load("//:build/linking.bzl", "CC_TEST_LINKSTATIC", "LINKOPTS_DEFAULT_FEATURES")
 load("//build/bazelflare:exec_properties.bzl", "test_exec_properties")
 load("//build/tools/llvm:coverage.bzl", "COVERAGE_TOOLCHAINS", "coverage_llvm_tools")
 
@@ -10,6 +10,7 @@ def kj_test(
         tags = [],
         size = "medium",
         target_compatible_with = None,
+        features = [],
         **kwargs):
     test_name = src.removesuffix(".c++")
     binary_name = test_name + "_binary"
@@ -25,10 +26,10 @@ def kj_test(
             # implementations in its link.
             "//src/workerd/util:setup-async-io",
         ] + deps,
+        features = features + LINKOPTS_DEFAULT_FEATURES,
         linkstatic = CC_TEST_LINKSTATIC,
         data = data,
-        # Tag with cpu:2 since this target depends on linkopts_default.
-        tags = tags + ["cpu:2"],
+        tags = tags,
         target_compatible_with = target_compatible_with,
         **kwargs
     )
