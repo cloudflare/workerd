@@ -1769,4 +1769,9 @@ struct CompatibilityFlags @0x8f8c1b68151b6cef {
   # Exposes the Temporal date/time API: the `Temporal` global and
   # `Date.prototype.toTemporalInstant`. Without the flag both are deleted from the
   # context before user code runs.
+
+  pythonZstdSnapshot @201 :Bool
+      $compatEnableFlag("python_zstd_snapshot")
+      $experimental;
+  # Compresses the memory snapshot of a Python Worker with zstd.
 }
