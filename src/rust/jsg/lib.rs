@@ -753,7 +753,10 @@ impl<'s> Lock<'s> {
     /// # Example
     ///
     /// ```ignore
-    /// match lock.try_catch(|lock| callback.call::<f64>(lock, None, &[]))? {
+    /// match lock.try_catch(|lock| {
+    ///     let result = callback.call(lock, None, &[])?;
+    ///     f64::from_js(lock, result)
+    /// })? {
     ///     Ok(result) => { /* ... */ }
     ///     Err(exception) => { /* handle what the callback threw */ }
     /// }

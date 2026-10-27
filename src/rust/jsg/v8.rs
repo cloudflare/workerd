@@ -50,7 +50,6 @@ use std::sync::Arc;
 
 pub use self::ffi::PromiseState;
 use crate::Error;
-use crate::FromJS;
 use crate::GarbageCollected;
 use crate::Lock;
 use crate::Resource;
@@ -1934,37 +1933,37 @@ where
 }
 
 impl<'s> Local<'s, Function> {
-    /// Calls this function and converts the result via [`FromJS`].
+    /// Calls this function and returns what it returns, as a handle.
     ///
     /// `receiver` is the `this` value; pass `None` for `undefined`.
     ///
-    /// `args` is a slice of `Local<Value>` — use [`ToJS::to_js`](crate::ToJS::to_js) to
-    /// convert Rust values, or `.into()` for other `Local<T>` handles.
+    /// `args` is a slice of `Local<Value>`: use [`ToJS::to_js`](crate::ToJS::to_js) to convert
+    /// Rust values, or `.into()` for other `Local<T>` handles. To get a Rust value back, convert
+    /// the result with [`FromJS::from_js`](crate::FromJS::from_js), as the example does.
     ///
     /// # Errors
     ///
     /// If the function throws, or execution is terminating (then without calling it), the
-    /// exception stays pending and this
-    /// returns an error for which [`Error::is_pending`] is true. [`Lock::throw_exception`] throws
-    /// nothing for it, so
-    /// returning it from a callback propagates the exception to the callback's JavaScript caller,
-    /// as C++ JSG does. Don't call into JavaScript after such an error; to handle the exception
-    /// instead, make the call in [`Lock::try_catch`]. Also fails if the result does not convert
-    /// to `R`.
+    /// exception stays pending and this returns an error for which [`Error::is_pending`] is
+    /// true. [`Lock::throw_exception`] throws nothing for it, so returning it from a callback
+    /// propagates the exception to the callback's JavaScript caller, as C++ JSG does. Don't call
+    /// into JavaScript after such an error; to handle the exception instead, make the call in
+    /// [`Lock::try_catch`].
     ///
     /// # Example
     ///
     /// ```ignore
     /// let x = x.to_js(lock)?;
     /// let y = y.to_js(lock)?;
-    /// let result: f64 = func.call(lock, None, &[x, y])?;
+    /// let result = func.call(lock, None, &[x, y])?;
+    /// let sum = f64::from_js(lock, result)?;
     /// ```
-    pub fn call<R: FromJS<'s>>(
+    pub fn call(
         self,
         lock: &mut Lock<'s>,
         receiver: Option<Local<'s, Value>>,
         args: &[Local<'s, Value>],
-    ) -> Result<R::ResultType, Error> {
+    ) -> Result<Local<'s, Value>, Error> {
         let recv = receiver.unwrap_or_else(|| lock.undefined());
         self.debug_assert_isolate(lock);
         recv.debug_assert_isolate(lock);
@@ -1972,7 +1971,7 @@ impl<'s> Local<'s, Function> {
             arg.debug_assert_isolate(lock);
         }
 
-        let result = call_into_js(lock, |lock| {
+        call_into_js(lock, |lock| {
             // SAFETY: lock guarantees the isolate is locked and a HandleScope is active.
             // self is a valid Local<Function>; recv and args are valid Local handles. The
             // result belongs to the lock's scope.
@@ -1984,8 +1983,7 @@ impl<'s> Local<'s, Function> {
                     Local::raw_slice(args),
                 ))
             })
-        })?;
-        R::from_js(lock, result)
+        })
     }
 }
 

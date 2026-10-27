@@ -567,7 +567,10 @@ Code that gets a pending error must not call into JavaScript, and should return 
 To handle an exception instead, run the code in `Lock::try_catch`, which catches as C++ `jsg::Lock::tryCatch()` does: the exception, or an error the closure returns, as a value; a termination keeps propagating.
 
 ```rust
-match lock.try_catch(|lock| callback.call::<f64>(lock, None, &[]))? {
+match lock.try_catch(|lock| {
+    let result = callback.call(lock, None, &[])?;
+    f64::from_js(lock, result)
+})? {
     Ok(result) => { /* ... */ }
     Err(exception) => { /* handle what the callback threw */ }
 }

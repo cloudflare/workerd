@@ -5,6 +5,7 @@
 use std::cell::Cell;
 use std::hint::black_box;
 
+use jsg::FromJS;
 use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_constructor;
@@ -266,7 +267,8 @@ impl Target {
             .try_into()
             .map_err(|_| jsg::Error::new_type_error("expected a function"))?;
         let n = n.to_js(lock)?;
-        a.call::<f64>(lock, None, &[n])
+        let result = a.call(lock, None, &[n])?;
+        f64::from_js(lock, result)
     }
 
     #[jsg_method]

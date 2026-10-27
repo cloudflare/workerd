@@ -5,6 +5,7 @@
 //! Tests for `impl_local_cast!` conversions added for Float/BigInt typed arrays,
 //! and upcasts to Object (Function -> Object, Array -> Object, `TypedArray` -> Object).
 
+use jsg::FromJS;
 use jsg::ToJsTypedArray;
 use jsg::v8;
 
@@ -358,7 +359,8 @@ fn function_object_roundtrip() {
         assert_eq!(name, "namedFn");
         // Roundtrip back and verify it's still callable
         let back: v8::Local<v8::Function> = obj.try_into().unwrap();
-        assert_eq!(back.call::<u32>(lock, None, &[])?, 42);
+        let result = back.call(lock, None, &[])?;
+        assert_eq!(u32::from_js(lock, result)?, 42);
         Ok(())
     });
 }
