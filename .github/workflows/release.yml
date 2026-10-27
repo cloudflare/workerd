@@ -73,11 +73,13 @@ jobs:
     strategy:
       matrix:
         include:
+          # Built on bazelflare, in its trusted instance (see _bazel.yml).
           - title: linux
             os-name: Linux
             image: ubuntu-22.04-16core
             bazel-config: release_linux
             target-arch: X64
+            bazelflare: true
           - title: linux-arm64
             os-name: Linux
             image: ubuntu-22.04-arm-16core
@@ -108,7 +110,10 @@ jobs:
       image: ${{ matrix.image }}
       os_name: ${{ matrix.os-name }}
       phase: '-release'
-      extra_bazel_args: '--strip=always --config=${{matrix.bazel-config}} --config=ci-release --config=wpt-report --config=wpt-test'
+      developer_flags: ${{ matrix.bazelflare && '--config=bazelflare-release' || '' }}
+      extra_bazel_args: ${{ matrix.bazelflare && '--config=ci-release --config=wpt-report --config=ci-bazelflare' || format('--strip=always --config={0} --config=ci-release --config=wpt-report', matrix.bazel-config) }}
+      bazelflare: ${{ matrix.bazelflare || false }}
+      runner_extra_bazel_args: ${{ format('--strip=always --config={0} --config=ci-release --config=wpt-report', matrix.bazel-config) }}
       arch_name: ${{ matrix.target-arch }}
       upload_binary: true
       macos_use_lld: true
@@ -246,21 +251,18 @@ jobs:
         with:
           node-version: 24
 
-      - name: Cache
-        id: cache
-        uses: actions/cache@v5
-        # Use same cache and build configuration as release build, this allows us to keep download
-        # sizes small and generate types with optimization enabled, should be slightly faster.
+      - name: Set up bazelflare
+        uses: ./.github/actions/setup-bazelflare
         with:
-          path: ~/bazel-disk-cache
-          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel') }}
+          save_cache: 'false'
       - name: Setup Runner
         uses: ./.github/actions/setup-runner
         with:
           GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
       - name: Build type generating Worker
+        # In the release build's configuration, which builds it too.
         run: |
-          bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types:types_worker
+          bazel build --config=bazelflare-release --config=ci --config=ci-bazelflare --config=ci-download-types-worker //types:types_worker
 
       - name: Modify package.json version
         run: node npm/scripts/bump-version.mjs npm/workerd/package.json
@@ -303,21 +305,17 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 24 # needed for a version of npm that supports "trusted publishing".
-      - name: Cache
-        id: cache
-        uses: actions/cache@v5
-        # Use same cache and build configuration as release build, this allows us to keep download
-        # sizes small and generate types with optimization enabled, should be slightly faster.
+      - name: Set up bazelflare
+        uses: ./.github/actions/setup-bazelflare
         with:
-          path: ~/bazel-disk-cache
-          key: bazel-disk-cache-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.bazelversion', '.bazelrc', 'MODULE.bazel') }}
+          save_cache: 'false'
       - name: Setup Runner
         uses: ./.github/actions/setup-runner
         with:
           GOOGLESOURCE_COOKIE: ${{ secrets.GOOGLESOURCE_COOKIE }}
       - name: build types
         run: |
-          bazel build --strip=always --remote_cache=https://bazel:${{ secrets.BAZEL_CACHE_KEY }}@bazel-remote-cache.devprod.cloudflare.dev --config=ci --config=release_linux //types
+          bazel build --config=bazelflare-release --config=ci --config=ci-bazelflare --config=ci-download-types //types
       - name: Build package
         run: node npm/scripts/build-types-package.mjs
         env:

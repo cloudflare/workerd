@@ -559,7 +559,7 @@ kj::Array<kj::byte> createTarWithFile(
   writeTarField(header.slice(116, 124), "0000000"_kj);
 
   {
-    char sizeBuf[12];
+    char sizeBuf[12]{};
     snprintf(sizeBuf, sizeof(sizeBuf), "%011" PRIo64, static_cast<uint64_t>(content.size()));
     writeTarField(header.slice(124, 136), kj::StringPtr(sizeBuf));
   }
@@ -574,7 +574,7 @@ kj::Array<kj::byte> createTarWithFile(
   for (auto byte: header) checksum += byte;
 
   {
-    char checksumBuf[8];
+    char checksumBuf[8]{};
     snprintf(checksumBuf, sizeof(checksumBuf), "%06o ", checksum);
     writeTarField(header.slice(148, 155), kj::StringPtr(checksumBuf));
   }
@@ -884,7 +884,7 @@ kj::Promise<void> demuxDockerExecOutput(kj::AsyncInputStream& input,
 // stdout and stderr rather than the 8-byte multiplexed framing used for non-TTY execs.
 kj::Promise<void> copyRawExecOutput(
     kj::AsyncInputStream& input, kj::Maybe<kj::Own<capnp::ExplicitEndOutputStream>> stdoutWriter) {
-  kj::byte scratch[16384];
+  kj::byte scratch[16384]{};
   KJ_TRY {
     for (;;) {
       auto amount = co_await input.tryRead(scratch, 1, sizeof(scratch));

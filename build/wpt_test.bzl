@@ -26,7 +26,7 @@ PORT_BINDINGS = [
 ### (Invokes wpt_js_test_gen, wpt_wd_test_gen and wd_test to assemble a complete test suite.)
 ### -----------------------------------------------------------------------------------------
 
-def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, include_tentative = False, extra_wpt_directories = [], extra_wpt_files = [], tags = [], **kwargs):
+def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], autogates = [], start_server = False, include_tentative = False, extra_wpt_directories = [], extra_wpt_files = [], served_wpt_files = [], tags = [], **kwargs):
     """
     Main entry point.
 
@@ -42,6 +42,9 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
     extra_wpt_files lists individual WPT .wasm resources that tests fetch by absolute path (e.g.
     `fetch('/wasm/incrementer.wasm')`). They are bound under that absolute path as data, which the
     harness's fetch() serves when no wptserve sidecar runs.
+
+    served_wpt_files lists files outside the test's directories that tests fetch from the wptserve
+    sidecar (start_server), which serves the WPT files in the test's runfiles.
     """
 
     js_test_gen_rule = "{}@_wpt_js_test_gen".format(name)
@@ -92,7 +95,10 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         wpt_common,  # i.e. "wpt/common/**"
         wpt_resources,  # i.e. "wpt/resources/**"
         wpt_interfaces,  # i.e. "wpt/interfaces/**"
-    ] + [d for d in extra_wpt_directories if d != wpt_directory] + extra_wpt_files
+    ] + [d for d in extra_wpt_directories if d != wpt_directory] + extra_wpt_files + served_wpt_files
+
+    # Every run prints the report and stats that tools/cross/wpt_logs.py collects.
+    env = {"GEN_TEST_REPORT": "1", "GEN_TEST_STATS": "1"} | kwargs.pop("env", {})
 
     wd_test(
         name = "{}".format(name),
@@ -111,9 +117,9 @@ def wpt_test(name, wpt_directory, config, compat_date = "", compat_flags = [], a
         # that produce INFO log lines on stdout. Those lines land after the JSON report/stats
         # blobs emitted by the WPT harness and break tools/cross/wpt_logs.py parsing.
         predictable = False,
+        env = env,
         data = data,
-        # WPT tests are not supported in RBE so far
-        tags = tags + ["no-remote-exec"],
+        tags = tags,
         **kwargs
     )
 
@@ -584,19 +590,20 @@ def _wpt_server_entrypoint_impl(ctx):
     We generate a script because Bazel doesn't want arguments in this context, and we use a custom
     rule to do so because we want more control over paths and dependencies than with a genrule.
     """
+    python = ctx.toolchains["@rules_python//python:toolchain_type"].py3_runtime
     start_src = ctx.actions.declare_file("start.sh")
     ctx.actions.write(
         output = start_src,
         is_executable = True,
         content = WPT_ENTRYPOINT_SCRIPT_TEMPLATE.format(
-            python = ctx.file.python.short_path,
+            python = python.interpreter.short_path,
         ),
     )
 
     return DefaultInfo(
         runfiles = ctx.runfiles(
             files = [start_src],
-            transitive_files = depset(ctx.files.srcs + [ctx.file.python]),
+            transitive_files = depset(ctx.files.srcs, transitive = [python.files]),
         ),
         executable = start_src,
     )
@@ -604,11 +611,10 @@ def _wpt_server_entrypoint_impl(ctx):
 wpt_server_entrypoint = rule(
     implementation = _wpt_server_entrypoint_impl,
     attrs = {
-        # Python interpreter to use to run the WPT server
-        "python": attr.label(allow_single_file = True),
         # All the Python code that should be visible
         "srcs": attr.label_list(allow_files = True),
     },
+    toolchains = ["@rules_python//python:toolchain_type"],
 )
 
 ### Path manipulation

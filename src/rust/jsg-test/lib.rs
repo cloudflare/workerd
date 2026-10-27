@@ -20,6 +20,7 @@ mod ffi {
         type Isolate = jsg::v8::ffi::Isolate;
         type Local = jsg::v8::ffi::Local;
         type MaybeLocal = jsg::v8::ffi::MaybeLocal;
+        type ModuleRegistry = jsg::v8::ffi::ModuleRegistry;
     }
 
     #[derive(Debug, Clone, Copy)]
@@ -73,6 +74,13 @@ mod ffi {
             resource_name: KjMaybe<&str>,
         ) -> EvalResult;
         pub unsafe fn set_global(self: &EvalContext, name: &str, value: Local);
+        /// Has `register_modules` add builtin modules, then calls the callback of the one named
+        /// `specifier`, as importing it does. See `call_builtin_module` in `ffi.h`.
+        pub unsafe fn call_builtin_module(
+            self: &EvalContext,
+            register_modules: fn(Pin<&mut ModuleRegistry>),
+            specifier: &str,
+        ) -> Result<EvalResult>;
 
         /// Triggers garbage collection for testing purposes.
         /// Note: For GC to actually collect objects, they must not be reachable from the
@@ -83,6 +91,11 @@ mod ffi {
         /// Requests a termination and runs JavaScript until V8 delivers it, so that the
         /// termination exception is pending on return. See `terminate_and_deliver` in `ffi.h`.
         pub unsafe fn terminate_and_deliver(isolate: *mut Isolate);
+
+        /// Runs the isolate's pending microtasks.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub unsafe fn run_microtasks(isolate: *mut Isolate);
 
         /// Calls `callback` with the isolate unlocked (`v8::Unlocker`), then locks it again.
         #[expect(clippy::allow_attributes)]
@@ -221,9 +234,33 @@ impl EvalContext<'_> {
         }
     }
 
+    /// Has `register` add builtin modules with `jsg::modules::add_builtin`, then produces the
+    /// exports of the one named `specifier`, as importing it does.
+    ///
+    /// # Panics
+    ///
+    /// If `register` adds no module named `specifier`.
+    pub fn import_builtin<'s>(
+        &self,
+        lock: &mut jsg::Lock<'s>,
+        register: fn(Pin<&mut v8::ffi::ModuleRegistry>),
+        specifier: &str,
+    ) -> Result<v8::Local<'s, v8::Value>, EvalError<'s>> {
+        // SAFETY: self.inner is a valid EvalContext, and the callback runs in `lock`'s scope.
+        let result = unsafe { self.inner.call_builtin_module(register, specifier) }
+            .expect("no such builtin module");
+        Self::raw_result(lock, result)
+    }
+
     /// Converts `value` to JavaScript and stores it as the global `name`.
+    ///
+    /// # Panics
+    ///
+    /// If the conversion fails.
     pub fn set_global<'s>(&self, lock: &mut jsg::Lock<'s>, name: &str, value: impl jsg::ToJS<'s>) {
-        let value = value.to_js(lock);
+        let value = value
+            .to_js(lock)
+            .expect("converting a global's value failed");
         // SAFETY: self.inner is a valid EvalContext and value is a valid Local handle.
         unsafe { self.inner.set_global(name, value.into_ffi()) }
     }
@@ -376,6 +413,13 @@ impl Harness {
     pub fn request_gc(lock: &mut jsg::Lock<'_>) {
         // SAFETY: isolate is valid and locked (guaranteed by Lock).
         unsafe { ffi::request_gc(lock.isolate().as_ffi(), ffi::GcType::Full) };
+    }
+
+    /// Runs the pending microtasks, such as promise reactions, as the event loop does after
+    /// each task. The isolate's microtask policy is explicit, so nothing else runs them.
+    pub fn run_microtasks(lock: &mut jsg::Lock<'_>) {
+        // SAFETY: isolate is valid and locked (guaranteed by Lock).
+        unsafe { ffi::run_microtasks(lock.isolate().as_ffi()) };
     }
 
     pub fn request_minor_gc(lock: &mut jsg::Lock<'_>) {

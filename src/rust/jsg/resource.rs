@@ -175,7 +175,7 @@ impl<R: Resource> Drop for Rc<R> {
 }
 
 impl<'s, R: Resource + 'static> ToJS<'s> for Rc<R> {
-    fn to_js(self, lock: &mut Lock<'s>) -> v8::Local<'s, v8::Value> {
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         wrap(lock, self)
     }
 }
@@ -368,8 +368,8 @@ impl<R: Resource> Default for Weak<R> {
 /// wrapper on the `Wrappable` via `CppgcShim`. This means:
 ///
 /// ```text
-/// let a = resource.clone().to_js(lock);
-/// let b = resource.to_js(lock);
+/// let a = resource.clone().to_js(lock)?;
+/// let b = resource.to_js(lock)?;
 /// // a === b in JavaScript (same object identity)
 /// ```
 ///
@@ -381,6 +381,11 @@ impl<R: Resource> Default for Weak<R> {
 /// alive via `CppgcShim`. When the JS object is garbage collected and all Rust
 /// `Rc`s are dropped, the resource is destroyed.
 ///
+/// # Errors
+///
+/// If V8 fails to create the wrapper, or execution is terminating, the exception stays pending
+/// and the error is one for which [`Error::is_pending`] is true.
+///
 /// # Panics
 /// Panics if the resource already has a JavaScript wrapper in another isolate. The `Rc` is
 /// leaked in that case.
@@ -391,9 +396,9 @@ impl<R: Resource> Default for Weak<R> {
 pub fn wrap<'s, R: Resource + 'static>(
     lock: &mut Lock<'s>,
     resource: Rc<R>,
-) -> v8::Local<'s, v8::Value> {
-    if let Some(wrapper) = resource.wrappable.to_js::<R>(lock) {
-        return wrapper;
+) -> Result<v8::Local<'s, v8::Value>, Error> {
+    if let Some(wrapper) = resource.wrappable.to_js::<R>(lock)? {
+        return Ok(wrapper);
     }
     // Dropping `resource` here would release its strong reference on a wrapper of another
     // isolate, which needs that isolate's lock. It is leaked in a box instead, which keeps
@@ -459,6 +464,10 @@ pub unsafe fn ffi_is<R: Resource + 'static>(
 /// V8 `FunctionTemplate` with the correct methods, constants, and constructor.
 /// Nested types are returned separately, since their templates are installed
 /// once the template for `R` exists.
+#[expect(
+    clippy::too_many_lines,
+    reason = "one match arm per Member variant, each a field-by-field conversion"
+)]
 fn get_resource_descriptor<R: Resource>(
     flags: compatibility_flags::Reader<'_>,
 ) -> (v8::ffi::ResourceDescriptor, NestedTypes) {
@@ -470,6 +479,7 @@ fn get_resource_descriptor<R: Resource>(
         properties: Vec::new(),
         static_methods: Vec::new(),
         static_constants: Vec::new(),
+        wildcard_property: KjMaybe::None,
     };
 
     for m in R::members(flags) {
@@ -555,6 +565,20 @@ fn get_resource_descriptor<R: Resource>(
                         name,
                         value: number_value,
                     });
+            }
+            Member::WildcardProperty {
+                getter_callback,
+                query_callback,
+            } => {
+                assert!(
+                    descriptor.wildcard_property.is_none(),
+                    "{} has more than one wildcard property",
+                    R::class_name()
+                );
+                descriptor.wildcard_property = KjMaybe::Some(v8::ffi::WildcardPropertyDescriptor {
+                    getter_callback: getter_callback as usize,
+                    query_callback: query_callback as usize,
+                });
             }
             Member::NestedType { name, nested_type } => nested_types.push((name, nested_type)),
         }

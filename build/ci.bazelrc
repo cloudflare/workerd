@@ -51,11 +51,7 @@ build:ci-limit-storage --copt="-fno-standalone-debug"
 
 # ci-platform dependent configuration
 
-build:ci-linux-common --copt='-Werror'
-build:ci-linux-common --copt='-Wno-error=#warnings'
-build:ci-linux-common --copt='-Wno-error=deprecated-declarations'
-# keep in sync with .github/workflows/test.yml
-build:ci-linux-common --repo_env=CC=/usr/lib/llvm-22/bin/clang
+build:ci-linux-common --config=werror
 
 build:ci-linux --config=ci-linux-common --remote_download_regex=".*src/workerd/server/workerd.*"
 build:ci-linux-arm --config=ci-linux-common
@@ -65,11 +61,12 @@ build:ci-linux-debug --config=debug --config=rust-debug
 
 build:ci-linux-arm-debug --config=ci-linux-debug
 
+# The sanitizer jobs build on their runners for pull requests from forks, which can't use
+# bazelflare (see _bazel.yml).
 build:ci-linux-asan --config=ci-linux-common --config=ci-limit-storage
 # we're really struggling to fit asan build into worker disk size
 # having asan without symbols is better than none
 build:ci-linux-asan --config=asan --copt="-g0" --strip=always
-build:ci-linux-arm-asan --config=ci-linux-asan
 
 build:ci-linux-tsan --config=ci-linux-common --config=ci-limit-storage --config=tsan
 test:ci-linux-tsan --test_summary=detailed
@@ -84,6 +81,9 @@ build:ci-macOS-debug --config=debug
 
 # Unfortunately on macOS, we need to be able to invoke sudo to configure the network for sidecar tests
 test:ci-macOS --strategy=TestRunner=local
+# The sidecar supervisor gives each sidecar a random loopback address on macOS only in CI, where it
+# can use sudo.
+test:ci-macOS --test_env=CI=true
 
 # Windows CI always runs in the release configuration to prevent breaking the release build.
 # build:ci-windows --config=windows_no_dbg
@@ -101,17 +101,37 @@ test:ci-windows --test_size_filters=
 test:ci-linux --test_tag_filters=-off-by-default,-requires-fuzzilli
 test:ci-linux-arm --test_tag_filters=-off-by-default,-requires-fuzzilli
 
-# Enable reporting whenever WPT tests are run
-test:ci-test --config=wpt-test
-common:wpt-test --test_env=GEN_TEST_REPORT=1
-common:wpt-test --test_env=GEN_TEST_STATS=1
-
 # Config to produce a full WPT report. Also ensures that test targets are fetched, even under remote_download_minimal.
 common:wpt-report --remote_download_regex=".*src/wpt/.*"
-
-# Let tests know they're running in CI
-test:ci-test --test_env=CI=true
 
 # release CI – use remote_download_minimal, but always fetch the workerd binary so we can add it to
 # the release artifacts.
 build:ci-release --remote_download_minimal --remote_download_regex=".*src/workerd/server/workerd.*"
+
+# CI on bazelflare remote execution: the x64 Linux jobs in .github/workflows/test.yml and
+# coverage.yml run a developer's bazelflare config (bazelflare, bazelflare-asan, bazelflare-tsan or
+# bazelflare-coverage in .bazelrc) followed by these, which change how Bazel runs and reports the
+# build, never an action, so CI's action keys equal a workstation's and the two share the cache.
+# build/check_ci_flags.sh, which test.yml's check-ci-flags job runs, fails on any other difference.
+# The targets the bazelflare configs skip (see their tag filters) run on the test-linux job's runner
+# (ci-bazelflare-runner-tests below) and in the arm64 Linux jobs. bazelflare queues actions it can't
+# run at once.
+build:ci-bazelflare --jobs=400
+test:ci-bazelflare --test_size_filters=
+build:ci-bazelflare-tsan --config=ci-bazelflare
+test:ci-bazelflare-tsan --test_summary=detailed
+# The coverage job keeps the coverage config's size filter. It merges the report on its runner, which
+# already has every test's coverage, rather than staging them all (72 GB) on an executor.
+build:ci-bazelflare-coverage --jobs=400 --strategy=CoverageReport=local
+# The test-linux job uploads the binary for the workers-sdk tests.
+build:ci-download-workerd --remote_download_regex=".*src/workerd/server/workerd.*"
+# The check-snapshot job compares the generated types with the snapshot, and uploads them for the
+# workers-sdk tests; releases publish them, and the type generating Worker.
+build:ci-download-types --remote_download_regex=".*/bin/types/definitions/.*"
+build:ci-download-types-worker --remote_download_regex=".*/bin/types/dist/.*"
+# The test-linux job also runs, on its runner, the tests that bazelflare's executors can't: those
+# that need the network or the container engine, whose images it loads. A developer's bazelflare
+# config skips them, since it builds for Linux from any workstation.
+build:ci-bazelflare-runner-tests --spawn_strategy=remote,worker,sandboxed,local
+build:ci-bazelflare-runner-tests --build_tag_filters=-off-by-default,-requires-fuzzilli
+test:ci-bazelflare-runner-tests --test_tag_filters=-off-by-default,-requires-fuzzilli

@@ -1,4 +1,6 @@
 load("@workerd//:build/lint_test.bzl", "lint_test")
+load("@workerd//build/bazelflare:exec_properties.bzl", "test_exec_properties")
+load("@workerd//build/tools/llvm:coverage.bzl", "COVERAGE_TOOLCHAINS", "coverage_llvm_tools")
 
 def wd_test(
         src,
@@ -41,6 +43,7 @@ def wd_test(
 
     # Add workerd binary to "data" dependencies.
     data = data + [src, "//src/workerd/server:workerd"]
+    kwargs["exec_properties"] = test_exec_properties(kwargs.get("size", "medium"), kwargs.get("tags", [])) | kwargs.get("exec_properties", {})
 
     ts_srcs = [src for src in data if src.endswith(".ts")]
 
@@ -185,8 +188,10 @@ fi
 
 # Run supervisor to start sidecar if specified
 if [ ! -z "{sidecar}" ]; then
-    # These environment variables are processed by the supervisor executable
-    PORTS_TO_ASSIGN={port_bindings} RANDOMIZE_IP={randomize_ip} SIDECAR_PORT_MODE={sidecar_port_mode} SIDECAR_COMMAND="{sidecar}" {supervisor} {runtest}
+    # These environment variables are processed by the supervisor executable. The supervisor and
+    # the sidecar aren't instrumented, and under COVERAGE_DIR a js_binary loads a coverage module
+    # that only instrumented ones carry; workerd's profile goes to LLVM_PROFILE_FILE.
+    env -u COVERAGE_DIR PORTS_TO_ASSIGN={port_bindings} RANDOMIZE_IP={randomize_ip} SIDECAR_PORT_MODE={sidecar_port_mode} SIDECAR_COMMAND="{sidecar}" {supervisor} {runtest}
 else
     {runtest}
 fi
@@ -306,6 +311,7 @@ def _wd_test_impl(ctx):
         if ctx.attr.python_snapshot_test:
             environment["PYTHON_SAVE_SNAPSHOT_ARGS"] = "--python-load-snapshot load_snapshot.bin"
         runfiles = runfiles.merge(ctx.runfiles(symlinks = {"load_snapshot.bin": ctx.file.load_snapshot}))
+    runfiles = runfiles.merge(coverage_llvm_tools(ctx, executable, environment))
 
     return [
         DefaultInfo(
@@ -321,6 +327,7 @@ def _wd_test_impl(ctx):
 _wd_test = rule(
     implementation = _wd_test_impl,
     test = True,
+    toolchains = COVERAGE_TOOLCHAINS,
     attrs = {
         # Implicit dependencies used by Bazel to generate coverage reports.
         "_lcov_merger": attr.label(

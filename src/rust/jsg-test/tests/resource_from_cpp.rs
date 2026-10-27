@@ -68,7 +68,7 @@ unsafe fn new_held(isolate: *mut v8::ffi::Isolate) -> v8::ffi::MaybeLocal {
             let held = jsg::Rc::new(Held {
                 name: "made for C++".to_owned(),
             });
-            Ok::<_, jsg::Error>(held.to_js(lock))
+            held.to_js(lock)
         })
     }
 }
@@ -79,11 +79,7 @@ unsafe fn new_held(isolate: *mut v8::ffi::Isolate) -> v8::ffi::MaybeLocal {
 /// As for [`new_held`].
 unsafe fn new_other(isolate: *mut v8::ffi::Isolate) -> v8::ffi::MaybeLocal {
     // SAFETY: forwarded from the caller.
-    unsafe {
-        v8::run_ffi_callback(isolate, |lock| {
-            Ok::<_, jsg::Error>(jsg::Rc::new(Other {}).to_js(lock))
-        })
-    }
+    unsafe { v8::run_ffi_callback(isolate, |lock| jsg::Rc::new(Other {}).to_js(lock)) }
 }
 
 /// A constructor for C++ that returns a plain object.
@@ -201,7 +197,7 @@ fn is_does_not_keep_the_resource_alive() {
         let held = jsg::Rc::new(Held {
             name: "checked".to_owned(),
         });
-        let value = held.to_js(lock);
+        let value = held.to_js(lock)?;
         assert!(jsg::resource::is::<Held>(lock, value));
         Ok(())
     });

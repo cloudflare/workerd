@@ -1,0 +1,19 @@
+load("//:build/wd_bench.bzl", "wd_bench")
+
+# The piping benchmarks run the same modules under two configs: piping-cpp
+# against the legacy C++ implementation, piping-ts against the TypeScript
+# implementation.
+
+piping_bench_srcs = glob(["*.js"]) + ["piping-modules.capnp"]
+
+wd_bench(
+    src = "piping-cpp.wd-bench",
+    data = piping_bench_srcs,
+)
+
+wd_bench(
+    size = "large",
+    src = "piping-ts.wd-bench",
+    args = ["--experimental"],
+    data = piping_bench_srcs,
+)

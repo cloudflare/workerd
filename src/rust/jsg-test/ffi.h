@@ -29,6 +29,11 @@ class EvalContext {
   EvalContext(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
   EvalResult eval(::rust::Str code, kj::Maybe<::rust::Str> resourceName) const;
+  // Has `registerModules` add builtin modules, then calls the callback of the one named
+  // `specifier`, as importing it does. Returns its exports, or the exception it threw.
+  EvalResult call_builtin_module(
+      ::rust::Fn<void(::workerd::rust::jsg::ModuleRegistry&)> registerModules,
+      ::rust::Str specifier) const;
   void set_global(::rust::Str name, ::workerd::rust::jsg::Local value) const;
 
   v8::Isolate* v8Isolate;
@@ -76,6 +81,9 @@ void request_gc(Isolate* isolate, GcType gc_type);
 // exception is pending and `isolate->IsExecutionTerminating()` is true, as after a script that
 // was terminated.
 void terminate_and_deliver(Isolate* isolate);
+
+// Runs the isolate's pending microtasks, as the event loop does after each task.
+void run_microtasks(Isolate* isolate);
 
 // Calls `callback` with the isolate unlocked, then locks it again.
 void run_unlocked(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback);

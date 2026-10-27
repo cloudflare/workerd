@@ -61,33 +61,23 @@ export default {
   'idlharness.any.js': {
     comment:
       'idl_test setup compiles /wasm/incrementer.wasm in a promise continuation, where workerd disallows Wasm code generation; where allowed, the compile would never settle (https://github.com/cloudflare/workerd/issues/7930). ' +
-      'V8 makes WebAssembly.Module extend AbstractModuleSource (source phase imports), which wasm-js-api.idl does not describe (https://github.com/cloudflare/workerd/issues/7931). ' +
-      "workerd's WebAssembly.Instance shim (io/worker.c++) has a writable prototype property",
+      'V8 makes WebAssembly.Module extend AbstractModuleSource (source phase imports), which wasm-js-api.idl does not describe (https://github.com/cloudflare/workerd/issues/7931)',
     expectedFailures: [
       'idl_test setup',
       'Module interface: existence and properties of interface object',
       'Module interface: existence and properties of interface prototype object',
-      'Instance interface: existence and properties of interface prototype object',
     ],
   },
   'instance/constructor-bad-imports.any.js': {},
   'instance/constructor-caching.any.js': {},
-  'instance/constructor.any.js': {
-    comment:
-      "workerd's WebAssembly.Instance shim (io/worker.c++) can be called without new",
-    expectedFailures: ['Calling'],
-  },
+  'instance/constructor.any.js': {},
   'instance/exports.any.js': {},
   'instance/toString.any.js': {},
   'instanceTestFactory.js': {
     comment: 'Helper script loaded by other tests',
     omittedTests: true,
   },
-  'interface.any.js': {
-    comment:
-      "workerd's WebAssembly.Instance shim (io/worker.c++) has a writable prototype property",
-    expectedFailures: ['WebAssembly.Instance: prototype'],
-  },
+  'interface.any.js': {},
   'js-string/basic.any.js': {},
   'js-string/constants.any.js': {},
   'js-string/imports.any.js': {},

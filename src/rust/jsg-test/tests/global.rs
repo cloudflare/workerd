@@ -50,7 +50,7 @@ impl Drop for TracedHolder {
 /// A strong handle to the wrapper of a new `GlobalCounted`. Once the lock's scope closes, only
 /// the handle keeps the wrapper, and with it the resource, alive.
 fn counted_wrapper(lock: &mut jsg::Lock<'_>) -> v8::Global<v8::Value> {
-    let wrapper = jsg::Rc::new(GlobalCounted).to_js(lock);
+    let wrapper = jsg::Rc::new(GlobalCounted).to_js(lock).unwrap();
     v8::Global::new(lock, wrapper)
 }
 
@@ -194,7 +194,7 @@ fn global_dropped_after_its_isolate_is_disposed() {
     let harness = crate::Harness::new();
     let mut global = None;
     harness.run_in_context(|lock, _ctx| {
-        let value = "escaped".to_js(lock);
+        let value = "escaped".to_js(lock)?;
         global = Some(v8::Global::new(lock, value));
         Ok(())
     });
@@ -224,7 +224,7 @@ fn global_of_another_isolate_panics() {
     let b = crate::Harness::new();
     let mut global = None;
     a.run_in_context(|lock, _ctx| {
-        let value = "from a".to_js(lock);
+        let value = "from a".to_js(lock)?;
         global = Some(v8::Global::new(lock, value));
         Ok(())
     });
@@ -265,7 +265,7 @@ fn global_into_traced_global_is_traced() {
         let resource = jsg::Rc::new(TracedHolder {
             handle: Cell::new(None),
         });
-        let wrapper = resource.clone().to_js(lock);
+        let wrapper = resource.clone().to_js(lock)?;
         let global = v8::Global::new(lock, wrapper);
         let traced = v8::TracedGlobal::from(global);
         assert!(traced.as_local(lock).is_object());

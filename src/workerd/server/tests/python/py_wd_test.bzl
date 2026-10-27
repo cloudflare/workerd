@@ -61,7 +61,7 @@ def _py_wd_test_helper(
         # The test exists only to load this specific pre-existing snapshot, so it is meaningless
         # without one.
         if not BUNDLE_VERSION_INFO[python_flag][use_snapshot + "_snapshot"]:
-            fail("%s: no %s_snapshot in python_metadata.bzl for version %s (generate it with src/pyodide/make_snapshots.py)" % (name, use_snapshot, python_flag))
+            fail("%s: no %s_snapshot in python_metadata.bzl for version %s (generate it with src/pyodide/scripts/make_snapshots.py)" % (name, use_snapshot, python_flag))
     if use_snapshot:
         version_info = BUNDLE_VERSION_INFO[python_flag]
 

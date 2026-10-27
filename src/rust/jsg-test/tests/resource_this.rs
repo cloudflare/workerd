@@ -69,7 +69,10 @@ impl Task {
 
     /// `this` comes before the lock, as `&self` does.
     #[jsg_method]
-    fn name_value<'s>(this: jsg::Rc<Self>, lock: &mut jsg::Lock<'s>) -> v8::Local<'s, v8::Value> {
+    fn name_value<'s>(
+        this: jsg::Rc<Self>,
+        lock: &mut jsg::Lock<'s>,
+    ) -> jsg::Result<v8::Local<'s, v8::Value>> {
         this.name.as_str().to_js(lock)
     }
 
@@ -83,8 +86,9 @@ impl Task {
     /// wrapper in return.
     #[jsg_method]
     fn schedule(this: jsg::Rc<Self>, lock: &mut jsg::Lock<'_>, queue: jsg::Rc<Queue>) {
-        this.queue
-            .set(Some(queue.clone().to_js(lock).to_traced_global(lock)));
+        this.queue.set(Some(
+            queue.clone().to_js(lock).unwrap().to_traced_global(lock),
+        ));
         queue.tasks.borrow_mut().push(this);
     }
 
