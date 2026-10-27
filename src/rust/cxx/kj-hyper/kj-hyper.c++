@@ -354,12 +354,19 @@ kj::Promise<void> pump_websockets(kj::Own<kj::WebSocket> a, kj::Own<kj::WebSocke
 }
 
 kj::Promise<void> pump_tunnel(kj::AsyncIoStream& connection, kj::Own<kj::AsyncIoStream> tunnel) {
+  // Boxed so the first continuation can refer to the tunnel weakly.
+  auto ownTunnel = kj::heap<workerd::WeakOwner<kj::Own<kj::AsyncIoStream>>>(kj::mv(tunnel));
+  kj::AsyncIoStream& tunnelStream = *ownTunnel->get();
   auto promises = kj::heapArrayBuilder<kj::Promise<void>>(2);
-  promises.add(
-      connection.pumpTo(*tunnel).then([&tunnel = *tunnel](uint64_t) { tunnel.shutdownWrite(); }));
-  promises.add(
-      tunnel->pumpTo(connection).then([&connection](uint64_t) { connection.shutdownWrite(); }));
-  return kj::joinPromisesFailFast(promises.finish()).attach(kj::mv(tunnel));
+  promises.add(connection.pumpTo(tunnelStream).then([weakTunnel = ownTunnel->addWeak()](uint64_t) {
+    KJ_REQUIRE_NONNULL(weakTunnel.tryGet(), "tunnel destroyed before pump finished")
+        .get()
+        ->shutdownWrite();
+  }));
+  promises.add(tunnelStream.pumpTo(connection).then([&connection](uint64_t) {
+    connection.shutdownWrite();
+  }));
+  return kj::joinPromisesFailFast(promises.finish()).attach(kj::mv(ownTunnel));
 }
 
 namespace {

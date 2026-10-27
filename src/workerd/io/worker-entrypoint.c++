@@ -1045,8 +1045,10 @@ kj::Promise<WorkerInterface::AlarmResult> WorkerEntrypoint::runAlarmImpl(
 
           auto handler = lock.getExportedHandler(
               asPtr(entrypointName), kj::mv(versionInfo), kj::mv(props), context.getActor());
-          return lock.getGlobalScope().runAlarm(
-              scheduledTime, timeout, retryCount, incomingRequest, lock, handler);
+          // runAlarm()'s continuation refers to the handler, which may be a per-event heap copy.
+          return lock.getGlobalScope()
+              .runAlarm(scheduledTime, timeout, retryCount, incomingRequest, lock, handler)
+              .attach(kj::mv(handler));
         });
 
         // The alarm handler was successfully complete. We must guarantee this same alarm does not
