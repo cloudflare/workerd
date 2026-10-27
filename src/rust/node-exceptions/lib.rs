@@ -9,7 +9,6 @@
 
 use jsg::Lock;
 use jsg::v8;
-use jsg::v8::ToLocalValue;
 use kj_rs::KjMaybe;
 
 #[cxx::bridge(namespace = "workerd::rust::node_exceptions")]
@@ -124,9 +123,10 @@ fn create_js_error<'s>(
     }
 }
 
-/// Creates a V8 string value from raw UTF-8 bytes, used for exception
-/// properties (`path`, `dest`) that may hold arbitrary, potentially non-UTF-8
-/// byte strings. Invalid sequences are replaced with U+FFFD by V8.
+/// Creates a V8 string value from raw UTF-8 bytes, used for the exception
+/// properties: `path` and `dest` may hold arbitrary, potentially non-UTF-8
+/// byte strings, and the others are fixed ASCII names. Invalid sequences
+/// are replaced with U+FFFD by V8.
 #[expect(
     clippy::expect_used,
     reason = "V8 fails only for strings longer than its maximum string length"
@@ -171,8 +171,7 @@ fn create_node_exception_impl<'s>(
 ) -> jsg::Result<v8::Local<'s, v8::Object>> {
     let message = message.unwrap_or_else(|| node_default_message(code).as_bytes());
     let err = create_js_error(lock, error_type, message);
-    // The "code" value is always a fixed ASCII enumerator name.
-    let code_value = node_code_name(code).to_local(lock);
+    let code_value = bytes_to_value(lock, node_code_name(code).as_bytes());
     err.set(lock, "code", code_value)?;
     Ok(err)
 }
@@ -272,10 +271,9 @@ fn create_uv_exception_impl<'s>(
 
     let obj = lock.error_from_bytes(&formatted_message);
 
-    // `syscall` and the `code` name are always fixed ASCII strings.
-    let syscall_value = syscall.to_local(lock);
+    let syscall_value = bytes_to_value(lock, syscall.as_bytes());
     obj.set(lock, "syscall", syscall_value)?;
-    let code_value = uv_err_name(errorno).to_local(lock);
+    let code_value = bytes_to_value(lock, uv_err_name(errorno).as_bytes());
     obj.set(lock, "code", code_value)?;
 
     if let Some(path) = path {

@@ -90,8 +90,7 @@ are ignored.
   comparison for the other GC cases.
 - Both buffer-copy implementations allocate new storage and copy the bytes. The length and sum
   cases read existing storage. String sizes are in UTF-16 code units; native strings are UTF-8.
-  Ordinary numeric arrays use Rust `Vec<Number>` and C++ `kj::Array<double>`; `Vec<f64>` uses a
-  typed array instead.
+  Ordinary numeric arrays use Rust `Vec<Number>` and C++ `kj::Array<double>`.
 - Numeric results use Rust `Number` and C++ `double`; integer inputs, storage, and arithmetic
   remain integer-typed in both. The Rust callback checks and casts `Local<Value>` to `Function`.
   The C++ callback benchmark calls V8 directly, not through `jsg::Function`.

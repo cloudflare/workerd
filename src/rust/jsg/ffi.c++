@@ -47,21 +47,6 @@ namespace workerd::rust::jsg {
     return to_ffi(v8::v8_type::New(arrayBuffer, 0, length));                                       \
   }
 
-#define DEFINE_TYPED_ARRAY_UNWRAP(name, v8_type, elem_type)                                        \
-  ::rust::Vec<elem_type> unwrap_##name(Isolate* isolate, Local value) {                            \
-    auto v8Val = local_from_ffi<v8::Value>(kj::mv(value));                                         \
-    KJ_REQUIRE(v8Val->Is##v8_type(), "Expected a " #v8_type);                                      \
-    auto typed = v8Val.As<v8::v8_type>();                                                          \
-    ::rust::Vec<elem_type> result;                                                                 \
-    result.reserve(typed->Length());                                                               \
-    auto data = reinterpret_cast<elem_type*>(                                                      \
-        static_cast<uint8_t*>(typed->Buffer()->Data()) + typed->ByteOffset());                     \
-    for (size_t i = 0; i < typed->Length(); i++) {                                                 \
-      result.push_back(data[i]);                                                                   \
-    }                                                                                              \
-    return result;                                                                                 \
-  }
-
 #define DEFINE_TYPED_ARRAY_GET(name, v8_type, elem_type)                                           \
   elem_type local_##name##_get(const Local& array, size_t index) {                                 \
     auto typed = local_as_ref_from_ffi<v8::v8_type>(array);                                        \
@@ -444,6 +429,10 @@ Local big_int_new_from_unsigned(Isolate* isolate, uint64_t value) {
 
 int64_t local_big_int_int64_value(const Local& value, bool& lossless) {
   return local_as_ref_from_ffi<v8::BigInt>(value)->Int64Value(&lossless);
+}
+
+uint64_t local_big_int_uint64_value(const Local& value, bool& lossless) {
+  return local_as_ref_from_ffi<v8::BigInt>(value)->Uint64Value(&lossless);
 }
 
 // Local<Date>
@@ -882,18 +871,6 @@ kj::Maybe<kj::Rc<Wrappable>> unwrap_resource(Isolate* isolate, Local value) {
   }
   return kj::none;
 }
-
-// TypedArray unwrap functions
-DEFINE_TYPED_ARRAY_UNWRAP(uint8_array, Uint8Array, uint8_t)
-DEFINE_TYPED_ARRAY_UNWRAP(uint16_array, Uint16Array, uint16_t)
-DEFINE_TYPED_ARRAY_UNWRAP(uint32_array, Uint32Array, uint32_t)
-DEFINE_TYPED_ARRAY_UNWRAP(int8_array, Int8Array, int8_t)
-DEFINE_TYPED_ARRAY_UNWRAP(int16_array, Int16Array, int16_t)
-DEFINE_TYPED_ARRAY_UNWRAP(int32_array, Int32Array, int32_t)
-DEFINE_TYPED_ARRAY_UNWRAP(float32_array, Float32Array, float)
-DEFINE_TYPED_ARRAY_UNWRAP(float64_array, Float64Array, double)
-DEFINE_TYPED_ARRAY_UNWRAP(bigint64_array, BigInt64Array, int64_t)
-DEFINE_TYPED_ARRAY_UNWRAP(biguint64_array, BigUint64Array, uint64_t)
 
 // Uses V8's Array::Iterate() which is faster than indexed access.
 // Returns Global handles because Local handles get reused during iteration.
