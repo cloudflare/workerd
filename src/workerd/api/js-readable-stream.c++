@@ -126,17 +126,21 @@ jsg::Promise<jsg::JsRef<jsg::JsUint8Array>> getReadableStreamBytes(
 }
 
 jsg::Promise<kj::String> getReadableStreamText(jsg::Lock& js, jsg::JsObject obj, uint64_t limit) {
-  jsg::JsValue result =
-      webstreams::dispatchCall(js, "consumeReadableStreamAsText", obj, js.bigInt(limit));
-  // The result must be a promise for a String
+  // Collects bytes rather than decoded text, matching the legacy readAllText(): see
+  // JsReadableStream::text().
+  jsg::JsValue result = webstreams::dispatchCall(
+      js, "consumeReadableStreamAsArrayBufferRecord", obj, js.bigInt(limit));
+  // The result must be a promise for a record holding an ArrayBuffer
   jsg::JsPromise promise = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_PROMISE(result));
   return js.toPromise(promise).then(js, [](jsg::Lock& js, jsg::Value ref) {
-    auto value = jsg::JsValue(ref.getHandle(js));
-    // JsString::toString() is sized by the string's UTF-8 length, so embedded NULs survive;
-    // JsValue::toString() stringifies through a NUL-terminated buffer and would truncate.
     // If it throws, it manifests as an internal error. That's intended.
-    auto str = KJ_REQUIRE_NONNULL(value.tryCast<jsg::JsString>());
-    return str.toString(js);
+    auto record = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_OBJECT(jsg::JsValue(ref.getHandle(js))));
+    auto ab = KJ_REQUIRE_NONNULL(JSG_TRY_CAST_ARRAYBUFFER(record.get(js, "buffer"_kj)));
+    kj::ArrayPtr<const kj::byte> bytes = ab.asArrayPtr();
+    if (hasUtf8Bom(bytes)) {
+      bytes = bytes.slice(UTF8_BOM_SIZE);
+    }
+    return kj::heapString(bytes.asChars());
   });
 }
 

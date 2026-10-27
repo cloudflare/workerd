@@ -15,6 +15,7 @@
 
 #include <capnp/message.h>
 #include <capnp/serialize.h>
+#include <kj/encoding.h>
 #include <kj/test.h>
 
 namespace workerd::api {
@@ -2608,6 +2609,27 @@ KJ_TEST("JsReadableStream tee of a TypeScript-backed buffer stream carries the b
                        .then(js, [](jsg::Lock& js, kj::String text) { KJ_EXPECT(text == kData); });
     return env.context.awaitJs(js, kj::mv(promise));
   });
+}
+
+// Invalid UTF-8 (a stray continuation byte, a byte that never appears in UTF-8, and a truncated
+// sequence) around valid UTF-8 and an embedded NUL.
+constexpr kj::StringPtr kNotUtf8 = "\x80\xff\xe2\x82 caf\xc3\xa9\0end"_kj;
+
+KJ_TEST("JsReadableStream text() returns the stream's bytes undecoded") {
+  // Body::formData() parses text()'s result as bytes, so a UTF-8 decode, which replaces each
+  // invalid sequence with U+FFFD, would corrupt binary file parts.
+  for (bool typescript: {false, true}) {
+    auto fixture = typescript ? makeTsStreamsFixture() : TestFixture();
+    fixture.runInIoContext([&](const TestFixture::Environment& env) -> kj::Promise<void> {
+      auto& js = env.js;
+
+      JsReadableStream stream(js, kj::str(kNotUtf8));
+      auto promise = stream.text(js, kLimit).then(js, [typescript](jsg::Lock&, kj::String text) {
+        KJ_EXPECT(text == kNotUtf8, typescript, kj::encodeHex(text.asBytes()));
+      });
+      return env.context.awaitJs(js, kj::mv(promise));
+    });
+  }
 }
 
 KJ_TEST("JsReadableStream pumpTo drains a TypeScript-backed buffer stream") {

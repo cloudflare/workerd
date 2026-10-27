@@ -4789,6 +4789,18 @@ async function consumeReadableStreamAsUint8Array<R>(
   );
 }
 
+// The bytes behind the C++ bridge's text(), which hands them back undecoded.
+// They resolve in a null-prototype record: resolving with the ArrayBuffer
+// itself would look up its then, which a patched Object.prototype.then
+// supplies.
+async function consumeReadableStreamAsArrayBufferRecord<R>(
+  stream: ReadableStream<R>,
+  limit: bigint
+): Promise<{ buffer: ArrayBuffer }> {
+  const buffer = (await collectChunks(stream, limit)).toArrayBuffer();
+  return { __proto__: null, buffer } as { buffer: ArrayBuffer };
+}
+
 async function consumeReadableStreamAsText<R>(
   stream: ReadableStream<R>,
   limit: bigint
@@ -4913,8 +4925,8 @@ const cppExports = ObjectFreeze({
   readableControllerClose: (controller: object): void =>
     defaultControllerClose(controller),
   consumeReadableStreamAsArrayBuffer,
+  consumeReadableStreamAsArrayBufferRecord,
   consumeReadableStreamAsJSON,
-  consumeReadableStreamAsText,
   consumeReadableStreamAsUint8Array,
   detachReadableStream,
   getReadableStreamExpectedLength,
