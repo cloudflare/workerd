@@ -257,6 +257,11 @@ impl Cluster {
                     Ok(Err(e)) => Err(e.to_string()),
                     Err(_) => Err("renewal timed out".into()),
                 };
+                // A drain began meanwhile, and its deregistration may have
+                // failed this renewal: what it found no longer matters.
+                if self.lease.borrow().draining {
+                    continue;
+                }
                 step = self.lease.borrow_mut().renewed(now_ms(), result);
             }
             let delay = match step {

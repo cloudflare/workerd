@@ -405,19 +405,18 @@ pub async fn run(
     match futures::future::select(serving, drain).await {
         Either::Left((result, _)) => result?,
         Either::Right(((), serving)) => {
-            // A draining instance claims nothing more and lets its objects go, so peers take
-            // them over while its connections finish.
+            // A draining instance claims nothing more, lets its objects go, and leaves the
+            // cluster, so peers take them over at their next listing while its connections
+            // finish.
             if let Some(node) = server.cluster() {
                 node.cluster.start_draining();
                 server.abort_all_actors(None);
+                if let Err(e) = node.cluster.deregister().await {
+                    tracing::warn!("leaving the cluster: {e}");
+                }
             }
             draining.send_replace(true);
             serving.await?;
-            if let Some(node) = server.cluster()
-                && let Err(e) = node.cluster.deregister().await
-            {
-                tracing::warn!("leaving the cluster: {e}");
-            }
         }
     }
 

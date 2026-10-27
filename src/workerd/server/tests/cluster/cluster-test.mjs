@@ -605,6 +605,49 @@ test(
   }
 );
 
+test(
+  "cluster: a peer takes over a draining owner's DO before its lease ends",
+  SIGTERM_DRAINS,
+  async () => {
+    await withCluster(2, async ({ nodes }) => {
+      const initial = await fetchJson(
+        nodes[0].httpPort,
+        '/increment?name=handoff'
+      );
+      assert.strictEqual(initial.status, 200);
+      const owner = nodes.find((n) => n.nodeId === initial.body.nodeId);
+      const peer = nodes.find((n) => n.nodeId !== initial.body.nodeId);
+
+      // A slow request holds the owner draining for longer than a peer
+      // needs to see it leave, but within its lease.
+      const holding = fetchJson(
+        owner.httpPort,
+        '/increment?name=hold&delay=12000',
+        { timeoutMs: 20_000 }
+      );
+      await sleep(250);
+      const drainedAt = Date.now();
+      const exitPromise = owner.stop({ signal: 'SIGTERM', timeoutMs: 20_000 });
+
+      // A request waits on the owner until the peer's next listing drops
+      // it, then the peer claims. One timed out would still increment.
+      let response = null;
+      while (Date.now() < drainedAt + 10_000) {
+        response = await fetchJson(peer.httpPort, '/increment?name=handoff', {
+          timeoutMs: drainedAt + 10_000 - Date.now(),
+        }).catch(() => null);
+        if (response?.status === 200) break;
+        await sleep(200);
+      }
+      assert.strictEqual(response?.status, 200, JSON.stringify(response?.body));
+      assert.strictEqual(response.body.nodeId, peer.nodeId);
+      assert.strictEqual(response.body.count, 2);
+      await holding.catch(() => {});
+      assert.deepStrictEqual(await exitPromise, { code: 0, signal: null });
+    });
+  }
+);
+
 test('cluster: concurrent first requests to a DO read its owner record once per node', async () => {
   await withCluster(2, async ({ nodes, bucket }) => {
     // Without coalescing, each of these reads own.json and the losers retry

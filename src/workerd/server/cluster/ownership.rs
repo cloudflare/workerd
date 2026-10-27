@@ -105,6 +105,10 @@ const ROUTE_REFRESH_MS: u64 = 5_000;
 /// How many times a claim retries when another instance keeps winning.
 const ATTEMPTS: usize = 8;
 
+fn draining(key: &str) -> Error {
+    Error::Replica(format!("{key}: this node is draining"))
+}
+
 fn owner_key(namespace: &str, actor: &str) -> String {
     format!("{}/own.json", crate::object_prefix(namespace, actor))
 }
@@ -159,6 +163,10 @@ impl Ownership {
                 Some((body, version)) => {
                     let record: OwnerRecord = serde_json::from_slice(&body)?;
                     if record.node == me {
+                        // A draining node lets its objects go, its own too.
+                        if !self.may_claim.get() {
+                            return Err(draining(&key));
+                        }
                         return Ok(Claim::Owned(record.owned()));
                     }
                     if !record.node.is_empty()
@@ -178,7 +186,7 @@ impl Ownership {
                 }
             };
             if !self.may_claim.get() {
-                return Err(Error::Replica(format!("{key}: this node is draining")));
+                return Err(draining(&key));
             }
             let record = previous.successor(me);
             // A new object opens at its claim, where a loser still routes
