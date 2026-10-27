@@ -120,8 +120,8 @@ some violations, and the README says which. Reviewers flag these:
   `IsExecutionTerminating()` check first. `isolate_throw_*` already check, and so do
   `Lock::throw_*` and `fast_api_throw_*`, which call them.
 - A `jsg::Error` from a call that ran JavaScript (`Function::call`, `Object::get`/`has`/`set`,
-  `Array::set`/`iterate`, a coercion) that is discarded with `.ok()` or `unwrap_or*`, or replaced with
-  `map_err` or a custom `Into<jsg::Error>`. It may be the termination or a pending exception;
+  `Array::set`/`iterate`, a coercion) that is discarded with `.ok()`, `.is_ok()` or `unwrap_or*`,
+  or replaced with `map_err` or a custom `Into<jsg::Error>`. It may be the termination or a pending exception;
   it should be passed on with `?`, or caught with `Lock::try_catch`.
 - An empty result from an FFI shim that is treated as "terminating" without checking.
 - An `std::rc::Rc` around a `TracedGlobal`, a `jsg::Rc`, or a type holding them, even if it is

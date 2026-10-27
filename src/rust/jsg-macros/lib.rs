@@ -176,30 +176,30 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// JavaScript name and whether it is an `Option`. Like C++ JSG's `JSG_STRUCT`, it follows the
 /// `fast_jsg_struct` flag.
 fn struct_to_js_body(fields: &[(&syn::Ident, String, bool)]) -> proc_macro2::TokenStream {
-    // Like C++ JSG, an absent optional field is omitted rather than set to undefined.
-    let for_each_field = |body: fn(&str) -> proc_macro2::TokenStream| -> Vec<_> {
-        fields
-            .iter()
-            .map(|(field_name, js_name, optional)| {
-                let body = body(js_name);
-                if *optional {
-                    quote! { if let Some(value) = &this.#field_name { #body } }
-                } else {
-                    quote! { { let value = &this.#field_name; #body } }
+    // A DictionaryTemplate instance has every field, so an absent optional field is undefined.
+    let data_properties = fields.iter().map(|(field_name, js_name, optional)| {
+        let value = if *optional {
+            quote! {
+                match &this.#field_name {
+                    Some(value) => jsg::v8::ToLocalValue::to_local(value, lock),
+                    None => lock.undefined(),
                 }
-            })
-            .collect()
-    };
-    let data_properties = for_each_field(|js_name| {
-        quote! {
-            let value = jsg::v8::ToLocalValue::to_local(value, lock);
-            properties.push((#js_name, value));
-        }
+            }
+        } else {
+            quote! { jsg::v8::ToLocalValue::to_local(&this.#field_name, lock) }
+        };
+        quote! { properties.push((#js_name, #value)); }
     });
-    let field_sets = for_each_field(|js_name| {
-        quote! {
+    // Set() skips an absent optional field rather than setting it to undefined.
+    let field_sets = fields.iter().map(|(field_name, js_name, optional)| {
+        let set = quote! {
             let value = jsg::v8::ToLocalValue::to_local(value, lock);
             obj.set(lock, #js_name, value)?;
+        };
+        if *optional {
+            quote! { if let Some(value) = &this.#field_name { #set } }
+        } else {
+            quote! { { let value = &this.#field_name; #set } }
         }
     });
     quote! {
@@ -212,7 +212,7 @@ fn struct_to_js_body(fields: &[(&syn::Ident, String, bool)]) -> proc_macro2::Tok
             #[allow(unused_mut, reason = "a struct without public fields pushes nothing")]
             let mut properties = ::std::vec::Vec::new();
             #(#data_properties)*
-            Ok(jsg::v8::Object::with_data_properties(lock, &properties).into())
+            Ok(jsg::v8::Object::with_data_properties(lock, &properties)?.into())
         } else {
             // Without fast_jsg_struct, C++ JSG sets the fields one by one, which runs a setter on
             // Object.prototype; what it throws is passed on.

@@ -156,3 +156,56 @@ fn uv_exception_non_utf8_path_is_lossy_not_a_panic() {
         Ok(())
     });
 }
+
+/// What a setter on `Error.prototype` throws while an exception's properties are set reaches
+/// the caller as a pending error, for `code`, `syscall`, `path` and `dest`.
+#[test]
+fn a_throwing_prototype_setter_reaches_the_caller() {
+    for key in ["code", "syscall", "path", "dest"] {
+        let harness = Harness::new();
+        harness.run_in_context(|lock, ctx| {
+            ctx.eval_raw(
+                lock,
+                &format!(
+                    "globalThis.thrown = new RangeError('setter');
+                     Object.defineProperty(Error.prototype, '{key}', {{
+                       set(v) {{ throw thrown; }},
+                       configurable: true,
+                     }});"
+                ),
+            )
+            .expect("setup should evaluate");
+            let caught = lock.try_catch(|lock| {
+                let result = if key == "code" {
+                    create_node_exception_impl(
+                        lock,
+                        ffi::NodeExceptionCode::ErrFsEisdir,
+                        ffi::JsErrorType::Error,
+                        None,
+                    )
+                } else {
+                    create_uv_exception_impl(
+                        lock,
+                        -libc::ENOENT,
+                        "open",
+                        None,
+                        Some(b"/from"),
+                        Some(b"/to"),
+                    )
+                };
+                let err = result.expect_err("setting the property did not fail");
+                assert!(err.is_pending(), "{key}: the error is not pending");
+                Err::<(), _>(err)
+            })?;
+            let Err(exception) = caught else {
+                unreachable!("the closure always fails");
+            };
+            ctx.set_global(lock, "caught", exception);
+            assert!(
+                ctx.eval::<bool>(lock, "caught === thrown").unwrap(),
+                "{key}: the caller did not catch what the setter threw"
+            );
+            Ok(())
+        });
+    }
+}
