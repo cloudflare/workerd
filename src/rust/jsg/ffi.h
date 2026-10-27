@@ -232,7 +232,8 @@ MaybeLocal function_new(Isolate* isolate, size_t callback, const Local& data);
 
 // Local<Object>
 // Returns a new object with `keys[i]` an own data property of value `values[i]`. Runs no
-// JavaScript: no setter on Object.prototype is called.
+// JavaScript: no setter on Object.prototype is called. Throws a KJ exception if a key is too
+// long for a V8 string, V8 fails to create one, or there are not as many keys as values.
 Local object_new_with_data_properties(
     Isolate* isolate, ::rust::Slice<const ::rust::Str> keys, ::rust::Slice<const Local> values);
 // Sets `key` to `value` and returns true, or returns false if a setter or Proxy trap threw,
@@ -283,8 +284,8 @@ Local local_new_array(Isolate* isolate, size_t length);
 uint32_t local_array_length(const Local& array);
 // Returns a new array of `elements`. Runs no JavaScript: no setter on Array.prototype is called.
 Local array_new_with_elements(Isolate* isolate, ::rust::Slice<const Local> elements);
-// Sets element `index` to `value` and returns true, or returns false if a setter or Proxy trap
-// threw, leaving the exception pending.
+// Sets element `index` to `value` and returns true, or returns false if a setter threw, leaving
+// the exception pending.
 bool local_array_set(Isolate* isolate, Local& array, uint32_t index, Local value);
 // Appends the elements to `result` and returns true, or returns false with `result` empty if a
 // getter or Proxy trap on an element threw, leaving the exception pending.
@@ -480,6 +481,24 @@ Realm* realm_from_isolate(Isolate* isolate);
 bool realm_can_attach(Isolate* isolate);
 void realm_attach(Isolate* isolate, Realm& realm);
 void realm_detach(Isolate* isolate, const IsolateState* state);
+
+// Serialization
+// In the format of C++ JSG's jsg::Serializer and jsg::Deserializer, which read what these write
+// and the other way round; see ser.c++.
+//
+// Writes `value`, after a header, as jsg::Serializer does: native errors as host objects if
+// `errors_are_host_objects` (jsg::Lock::isUsingEnhancedErrorSerialization()), and workerd API
+// objects through their serializers. Stores the bytes in `result` and returns true, or returns
+// false if serialization threw, leaving the exception pending: a DataCloneError, or what a getter,
+// Proxy trap or serializer threw.
+bool local_serialize(Isolate* isolate,
+    const Local& value,
+    bool errors_are_host_objects,
+    ::rust::Vec<uint8_t>& result);
+// Reads a value as jsg::Deserializer does with its default options, and returns it, or
+// none if deserialization threw, leaving the exception pending. Runs no JavaScript. Throws a KJ
+// exception if the header is missing or of an unsupported version.
+MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
 
 // Errors
 // Builds an exception whose message is raw bytes interpreted as UTF-8. Invalid

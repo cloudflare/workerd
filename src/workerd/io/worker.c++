@@ -3942,6 +3942,9 @@ struct Worker::Actor::Impl {
 
   kj::Maybe<jsg::JsRef<jsg::JsObject>> ctxObject;
 
+  // The class instance's onHibernate handler, read once when the instance is constructed.
+  kj::Maybe<jsg::JsRef<jsg::JsFunction>> onHibernateHandler;
+
   kj::Maybe<rpc::Container::Client> container;
   jsg::Dict<kj::String> containerImages;
   kj::Maybe<FacetManager&> facetManager;
@@ -4244,6 +4247,33 @@ void Worker::Actor::ensureConstructed(IoContext& context) {
   }
 }
 
+namespace {
+
+// Reads the onHibernate handler from an actor's class instance. If the read throws, e.g. from a
+// Proxy trap, the error is reported to the user and the instance is treated as having no handler,
+// so that construction still succeeds.
+//
+// Workers without the experimental flag can't import the symbol, so they can't define a handler.
+// Skipping the read keeps it from running their Proxy traps.
+kj::Maybe<jsg::JsRef<jsg::JsFunction>> readOnHibernateHandler(
+    Worker::Lock& lock, jsg::JsObject instance) {
+  jsg::Lock& js = lock;
+  if (!FeatureFlags::get(js).getWorkerdExperimental()) {
+    return kj::none;
+  }
+  return js.tryCatch([&]() -> kj::Maybe<jsg::JsRef<jsg::JsFunction>> {
+    auto value = instance.get(js, js.symbolInternal(api::ON_HIBERNATE_SYMBOL_KEY));
+    return value.tryCast<jsg::JsFunction>().map(
+        [&](jsg::JsFunction handler) { return jsg::JsRef<jsg::JsFunction>(js, handler); });
+  }, [&](jsg::Value exception) -> kj::Maybe<jsg::JsRef<jsg::JsFunction>> {
+    lock.logUncaughtException(
+        UncaughtExceptionSource::ON_HIBERNATE_HANDLER, jsg::JsValue(exception.getHandle(js)));
+    return kj::none;
+  });
+}
+
+}  // namespace
+
 kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, ActorClassInfo& info) {
   InputGate::Lock inputLock = co_await impl->inputGate.wait(context.getCurrentTraceSpan());
 
@@ -4303,6 +4333,9 @@ kj::Promise<void> Worker::Actor::ensureConstructedImpl(IoContext& context, Actor
       handler.env = js.v8Ref(js.v8Undefined());
       handler.ctx = kj::none;
       handler.missingSuperclass = info.missingSuperclass;
+
+      impl->onHibernateHandler =
+          readOnHibernateHandler(lock, jsg::JsObject(handler.self.getHandle(js)));
 
       context.setEntrypointHandler(js, jsg::JsObject(handler.self.getHandle(js)));
 
@@ -4796,6 +4829,142 @@ kj::Own<Worker::Actor> Worker::Actor::addRef() {
     return kj::addRef(*this).attachToThisReference(t.get()->startRequest());
   } else {
     return kj::addRef(*this);
+  }
+}
+
+namespace {
+
+kj::StringPtr hibernationReasonName(Worker::Actor::HibernationReason reason) {
+  switch (reason) {
+    case Worker::Actor::HibernationReason::INACTIVE:
+      return "inactive"_kj;
+    case Worker::Actor::HibernationReason::CODE_UPDATED:
+      return "codeUpdated"_kj;
+    case Worker::Actor::HibernationReason::SYSTEM:
+      return "system"_kj;
+  }
+  KJ_UNREACHABLE;
+}
+
+// Calls the actor's onHibernate handler and waits for it to settle, up to the handler's budget.
+kj::Promise<EventOutcome> callOnHibernateHandler(Worker::Lock& lock,
+    IoContext& context,
+    jsg::JsFunction handler,
+    jsg::JsValue instance,
+    Worker::Actor::HibernationReason reason) {
+  jsg::Lock& js = lock;
+  auto info = js.obj();
+  info.set(js, "reason", js.str(hibernationReasonName(reason)));
+  info.recursivelyFreeze(js);
+
+  // Unlike an alarm timeout, this doesn't abort the IoContext. The caller then cancels whatever
+  // the handler left running and flushes the writes it made.
+  auto timeout =
+      context.afterLimitTimeout(context.getLimitEnforcer().getOnHibernateLimit()).then([]() {
+    LOG_NOSENTRY(WARNING, "onHibernate handler exceeded its allowed execution time");
+    return EventOutcome::EXCEEDED_WALL_TIME;
+  });
+
+  auto promise = js.toVoidPromise(handler.call(js, instance, info));
+  return context.awaitJs(js, kj::mv(promise)).then([]() {
+    return EventOutcome::OK;
+  }).exclusiveJoin(kj::mv(timeout));
+}
+
+// Classifies a failed handler run like a failed alarm: a limit the handler exceeded, otherwise
+// EXCEPTION for an error attributable to the handler and CANCELED for an internal one.
+EventOutcome onHibernateFailureOutcome(
+    IoContext& context, IoContext::IncomingRequest& request, kj::Exception&& e) {
+  request.getMetrics().reportFailure(e);
+  bool isUserError = jsg::isTunneledException(e.getDescription()) ||
+      e.getDetail(jsg::EXCEPTION_IS_USER_ERROR) != kj::none;
+  context.logUncaughtExceptionAsync(
+      UncaughtExceptionSource::ON_HIBERNATE_HANDLER, kj::mv(e), request);
+
+  KJ_IF_SOME(outcome, context.getLimitEnforcer().getLimitsExceeded()) {
+    return outcome;
+  }
+  return isUserError ? EventOutcome::EXCEPTION : EventOutcome::CANCELED;
+}
+
+}  // namespace
+
+bool Worker::Actor::hasOnHibernateHandler() {
+  return impl->onHibernateHandler != kj::none;
+}
+
+kj::Promise<void> Worker::Actor::runOnHibernate(HibernationReason reason,
+    kj::Rc<IoChannelFactory> ioChannelFactory,
+    kj::Own<RequestObserver> observer,
+    kj::Maybe<kj::Rc<BaseTracer>> workerTracer) {
+  // abort() relies on this canceler to destroy every IncomingRequest, including the handler's.
+  return impl->abortCanceler.wrap(
+      runOnHibernateImpl(reason, kj::mv(ioChannelFactory), kj::mv(observer), kj::mv(workerTracer)));
+}
+
+kj::Promise<void> Worker::Actor::runOnHibernateImpl(HibernationReason reason,
+    kj::Rc<IoChannelFactory> ioChannelFactory,
+    kj::Own<RequestObserver> observer,
+    kj::Maybe<kj::Rc<BaseTracer>> workerTracer) {
+  // The embedder can drop its reference to the actor while the handler runs. This keeps it alive,
+  // without the request tracking that addRef() adds.
+  auto self = kj::addRef(*this);
+
+  // A handler implies the instance was constructed in an IoContext, so if there is none, the
+  // actor has already been shut down, e.g. by an abort.
+  IoContext& context = KJ_UNWRAP_OR(getIoContext(), {
+    observer->reportOnHibernateOutcome(EventOutcome::CANCELED);
+    impl->metrics->onHibernateFinished(EventOutcome::CANCELED);
+    kj::throwFatalException(
+        KJ_EXCEPTION(DISCONNECTED, "actor was shut down before its onHibernate handler could run"));
+  });
+
+  RequestObserver& observerRef = *observer;
+  auto incomingRequest =
+      kj::heap<IoContext::IncomingRequest>(kj::addRef(context), kj::mv(ioChannelFactory),
+          kj::mv(observer), kj::mv(workerTracer), kj::none /* maybeTriggerInvocationSpan */);
+  incomingRequest->delivered("onHibernate"_kj);
+  context.getLimitEnforcer().limitOnHibernateCpu();
+
+  {
+    // Nothing may run in the actor after its handler, including during the flush below. The
+    // cleanup also runs if the caller cancels this call while the handler is pending.
+    KJ_DEFER(incomingRequest->cancelPendingWorkForHibernation());
+
+    EventOutcome outcome;
+    KJ_TRY {
+      outcome = co_await context.run(
+          [reason](Worker::Lock& lock, IoContext& context) -> kj::Promise<EventOutcome> {
+        auto traceScope = context.makeRequestTraceScope(lock);
+        jsg::Lock& js = lock;
+        auto& actor = KJ_ASSERT_NONNULL(context.getActor());
+        auto& handler = KJ_ASSERT_NONNULL(actor.impl->onHibernateHandler);
+        auto& instance =
+            KJ_ASSERT_NONNULL(actor.impl->classInstance.tryGet<api::ExportedHandler>());
+        return callOnHibernateHandler(lock, context, handler.getHandle(js),
+            jsg::JsValue(instance.self.getHandle(js)), reason);
+      });
+    }
+    KJ_CATCH(e) {
+      outcome = onHibernateFailureOutcome(context, *incomingRequest, kj::mv(e));
+    }
+    observerRef.reportOnHibernateOutcome(outcome);
+    impl->metrics->onHibernateFinished(outcome);
+  }
+
+  // The writes the handler made must be flushed before a successor can read storage. A failed
+  // flush rejects, as does a broken output gate or an aborted IoContext: each leaves the actor
+  // broken. The IncomingRequest is destroyed on the way out, before `self` releases the actor.
+  KJ_IF_SOME(persistent, getPersistent()) {
+    KJ_IF_SOME(flush, persistent.onNoPendingFlush(SpanParent(nullptr))) {
+      co_await flush;
+    }
+  }
+  if (impl->outputGate.isBroken()) {
+    co_await impl->outputGate.onBroken();
+  }
+  KJ_IF_SOME(e, context.getAbortReason()) {
+    kj::throwFatalException(kj::mv(e));
   }
 }
 

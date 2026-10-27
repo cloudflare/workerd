@@ -5,6 +5,7 @@ build --build_tag_filters=-off-by-default,-requires-container-engine
 build --nosandbox_default_allow_network
 test --test_tag_filters=-off-by-default,-requires-fuzzilli,-requires-container-engine
 test:asan --test_tag_filters=-off-by-default,-no-asan,-requires-fuzzilli,-requires-container-engine
+test:tsan-common --test_tag_filters=-off-by-default,-no-tsan,-requires-fuzzilli,-requires-container-engine
 # exclude enormous tests by default
 build --test_size_filters=-enormous
 # Run Python tests without snapshots while snapshot artifacts are being regenerated.
@@ -377,15 +378,13 @@ build:macos-cross-x86_64 --cpu=darwin_x86_64 --host_cpu=darwin_arm64 --platforms
 # Test performance is still very much satisfactory considering that emulation is being used here.
 build:macos-cross-x86_64 --test_timeout=1,30,60,240
 
-# On Linux, always link libc++ statically to avoid compatibility issues with different OS versions.
-# macOS links with dynamic libc++ by default, which has good backwards compatibility.
-# Drop default link flags, which include libstdc++ for Linux
-build:linux --features=-default_link_libs --host_features=-default_link_libs
-build:linux --cxxopt='-stdlib=libc++' --host_cxxopt='-stdlib=libc++'
-build:linux --linkopt='-stdlib=libc++' --host_linkopt='-stdlib=libc++'
-build:linux --linkopt='-l:libc++.a' --linkopt='-lm' --linkopt='-static-libgcc'
-# We don't expect to distribute host tools, no need to statically link libgcc or libc++
-build:linux --host_linkopt='-lc++' --host_linkopt='-lm'
+# On Linux, the toolchain is LLVM's own, over a pinned sysroot (build/deps/llvm.MODULE.bazel), and
+# nothing is taken from the host. It links libc++, libc++abi and libunwind statically, so binaries
+# depend only on glibc; macOS links with dynamic libc++, which has good backwards compatibility.
+build:linux --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
+# rules_python's default launcher runs on the host's python3; this one runs on the hermetic
+# interpreter.
+build:linux --@rules_python//python/config_settings:bootstrap_impl=script
 
 # On Linux, enable PIC. In macos pic is the default, and the objc_library rule does not work
 # correctly if we use this flag since it will not find the object files to include
@@ -398,8 +397,6 @@ build:linux --linkopt="-Wl,--gc-sections"
 build:linux --copt="-ffunction-sections" --host_copt="-ffunction-sections"
 build:linux --copt="-fdata-sections" --host_copt="-fdata-sections"
 
-# On Linux, use clang lld.
-build:linux --linkopt="-fuse-ld=lld"
 # Improve link performance by limiting the link stage to 8 threads – LLD link times see little if
 # any improvement beyond 8 threads (see https://reviews.llvm.org/D147493).
 build:linux --linkopt="-Wl,--threads=8"
@@ -539,8 +536,9 @@ build:coverage --experimental_use_llvm_covmap
 # experimental_generate_llvm_lcov tells collect_cc_coverage to use llvm-cov export to generate LCOV
 # format instead of just outputting raw profdata. LLVM_COV specifies the llvm-cov binary to use.
 build:coverage --experimental_generate_llvm_lcov
-# C++ tests get these from the C++ toolchain. A test that only runs an instrumented binary (every
-# wd_test runs workerd) does not, and without them the collector skips the binary's profile.
+# kj_test and wd_test override these with the C++ toolchain's tools (build/tools/llvm), as cc_test
+# gets them; Xcode's toolchain has no llvm-cov, so on macOS they come from PATH. Without them the
+# collector skips the binary's profile.
 build:coverage --test_env=GENERATE_LLVM_LCOV=1
 build:coverage --test_env=LLVM_COV=llvm-cov
 build:coverage --test_env=LLVM_PROFDATA=llvm-profdata
@@ -577,6 +575,93 @@ coverage --build_tests_only
 # Defining them as empty just so these machines can run build commands from the workerd repo
 build:rosetta-arm64 --define=rosetta_arm64_no_op=1
 build:native-arm64 --define=native_arm64_no_op=1
+
+# Warnings that fail the build, in CI (build/ci.bazelrc) and on bazelflare.
+build:werror --copt='-Werror'
+build:werror --copt='-Wno-error=#warnings'
+build:werror --copt='-Wno-error=deprecated-declarations'
+
+#
+# Remote execution on bazelflare (Cloudflare Containers), from a macOS or Linux client. Every
+# action, host tools included, runs on Linux x86_64 executors (build/bazelflare). The credential
+# helper sends your Cloudflare Access token, opening the login in a browser the first time, or in
+# CI the job's GitHub OIDC token.
+# Only main's CI writes the cache that every client reads (bazelflare's "trusted" instance),
+# and no client can upload results of its own.
+#
+# The next line keeps external repositories (toolchains, V8, ...) in the remote cache, so a client
+# fetches only the files Bazel reads itself instead of every action input. Startup options can't be
+# scoped to a config, so it applies to every invocation, not only bazelflare's.
+startup --experimental_remote_repo_contents_cache
+#
+# The Linux build flags apply regardless of the client's OS: platform-specific configs follow the
+# client, so this config turns them off and selects :linux itself.
+#
+# CI runs these configs as they are, adding only ci-bazelflare (build/ci.bazelrc) and flags that
+# can't change an action, so a workstation's builds and CI's have the same action keys and share the
+# cache; build/check_ci_flags.sh holds CI to that. Warnings are errors, as in CI.
+#
+# The config is common, so that every command takes it, query included; each ignores the options it
+# doesn't have. The lines that expand the linux and werror configs, which only building commands
+# define, are build's. Bazel expands a config's common lines before its build lines, which none of
+# them override.
+# TODO(soon): move with the deployment to a production account.
+common:bazelflare --remote_executor=grpcs://bazelflare.workers-runtime-playground.cloudflareworkers.com:8980
+common:bazelflare --tls_certificate=build/bazelflare/ca.pem
+common:bazelflare --credential_helper=bazelflare.workers-runtime-playground.cloudflareworkers.com=%workspace%/build/bazelflare/credential-helper
+# Long enough to approve a login in the browser, which the helper opens without a saved token.
+common:bazelflare --credential_helper_timeout=2m
+common:bazelflare --noremote_upload_local_results
+common:bazelflare --noenable_platform_specific_config
+build:bazelflare --config=linux
+build:bazelflare --config=werror
+common:bazelflare --cpu=k8 --host_cpu=k8
+common:bazelflare --platforms=//build/bazelflare:linux_x86_64
+common:bazelflare --host_platform=//build/bazelflare:linux_x86_64
+common:bazelflare --extra_execution_platforms=//build/bazelflare:linux_x86_64
+# Host tools are Linux binaries, so actions don't fall back to the client, where most of them
+# couldn't run. One that could, such as a shell script's, can be allowed to run on the client with
+# --strategy=<Mnemonic>=remote,sandboxed.
+common:bazelflare --spawn_strategy=remote --remote_local_fallback=false
+# V8 marks its inspector code generator `local = 1`; it runs fine remotely.
+common:bazelflare --modify_execution_info=Genrule=-local
+# Executors have neither internet nor a container engine, so targets that need them, or that must
+# run on the client, are skipped. Filters don't change action keys.
+common:bazelflare --build_tag_filters=-off-by-default,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
+test:bazelflare --test_tag_filters=-off-by-default,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
+common:bazelflare --remote_download_minimal
+common:bazelflare --remote_cache_compression --remote_timeout=600
+# bazelflare sends nothing while an action runs, so only pings notice a connection that died
+# without closing; Bazel then retries on a new one instead of waiting forever.
+common:bazelflare --grpc_keepalive_time=30s --grpc_keepalive_timeout=20s
+common:bazelflare --jobs=200
+# Bazel otherwise prepares only as many remote actions at once as the client has CPUs, and packs 100
+# streams onto each connection, each served by one bazelflare Worker invocation.
+common:bazelflare --noexperimental_throttle_remote_action_building --remote_max_concurrency_per_connection=8
+# Sanitizer builds on bazelflare, in place of --config=bazelflare: each applies its sanitizer config
+# and then bazelflare, whose platform replaces the sanitizer config's, so it restores the sanitizer
+# constraint, which selects the sanitizer-built Rust standard library. Sanitizer reports need only
+# line tables, and full debug info makes each statically linked TSan test 1.5 GB to stage.
+build:bazelflare-asan --config=asan --config=bazelflare
+build:bazelflare-asan --platforms=//build/bazelflare:linux_x86_64_asan
+build:bazelflare-asan --copt=-g1
+build:bazelflare-tsan --config=tsan --config=bazelflare
+build:bazelflare-tsan --platforms=//build/bazelflare:linux_x86_64_tsan
+build:bazelflare-tsan --copt=-g1
+# The bazelflare filters replace the sanitizer configs', so these add their -no-asan and -no-tsan
+# back.
+test:bazelflare-asan --test_tag_filters=-off-by-default,-no-asan,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
+test:bazelflare-tsan --test_tag_filters=-off-by-default,-no-tsan,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli
+# The release build of the Linux x64 binary and the types, on bazelflare.
+build:bazelflare-release --config=release_linux --config=bazelflare --strip=always
+# `bazel coverage` on bazelflare, whose filters replace the coverage config's; this merges the two.
+# The report lands in bazel-out/_coverage/_coverage_report.dat.
+build:bazelflare-coverage --config=coverage --config=bazelflare
+coverage:bazelflare-coverage --test_tag_filters=-off-by-default,-no-coverage,-no-remote-exec,-requires-network,-requires-container-engine,-requires-fuzzilli,-lint,-benchmark,-workerd-benchmark
+# Each test collects its coverage in its own spawn: the coverage config's split post-processing adds
+# a second spawn per test, with the same inputs, and needs every coverage output fetched.
+build:bazelflare-coverage --noexperimental_split_coverage_postprocessing
+build:bazelflare-coverage --noexperimental_fetch_all_coverage_outputs
 
 # Local workstation overrides. /.local/ is gitgnored.
 try-import %workspace%/.local/bazelrc

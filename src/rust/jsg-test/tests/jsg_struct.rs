@@ -302,9 +302,10 @@ fn struct_from_throwing_getter_propagates_error() {
     });
 }
 
-/// Like C++ JSG, an absent optional field is omitted from the JS object.
+/// Without `fast_jsg_struct`, an absent optional field is omitted from the JS object, as C++
+/// JSG's `Set()` path omits it.
 #[test]
-fn struct_omits_absent_optional_fields() {
+fn struct_without_fast_jsg_struct_omits_absent_optional_fields() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let value = OptionalStruct {
@@ -315,6 +316,30 @@ fn struct_omits_absent_optional_fields() {
         let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
         assert!(!obj.has(lock, "label")?);
         assert!(obj.has(lock, "count")?);
+        Ok(())
+    });
+}
+
+/// With `fast_jsg_struct`, an absent optional field is an own property whose value is undefined,
+/// as C++ JSG's `DictionaryTemplate` gives every field a value.
+#[test]
+fn struct_with_fast_jsg_struct_has_absent_optional_fields_as_undefined() {
+    let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(true));
+    harness.run_in_context(|lock, ctx| {
+        let value = OptionalStruct {
+            label: None,
+            count: Some(1),
+        }
+        .to_js(lock)?;
+        ctx.set_global(lock, "value", value);
+        let ok: bool = ctx
+            .eval(
+                lock,
+                "Object.keys(value).join() === 'label,count' && value.label === undefined &&
+                 value.count === 1",
+            )
+            .unwrap();
+        assert!(ok);
         Ok(())
     });
 }

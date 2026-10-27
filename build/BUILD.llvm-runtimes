@@ -12,6 +12,10 @@ filegroup(
 )
 
 _CACHE_ENTRIES = {
+    # The toolchain's static libunwind is off (see features below), so CMake's test programs, which
+    # link the TSan runtime, take GCC's shared unwinder from the sysroot instead.
+    "CMAKE_EXE_LINKER_FLAGS": "-unwindlib=libgcc",
+    "CMAKE_SHARED_LINKER_FLAGS": "-unwindlib=libgcc",
     "LIBCXX_ENABLE_ABI_LINKER_SCRIPT": "OFF",
     "LIBCXX_ENABLE_SHARED": "OFF",
     "LIBCXX_ENABLE_STATIC": "ON",
@@ -28,10 +32,14 @@ _CACHE_ENTRIES = {
     "LIBUNWIND_INCLUDE_TESTS": "OFF",
     "LLVM_ENABLE_RUNTIMES": "libcxx;libcxxabi;libunwind",
     "LLVM_INCLUDE_TESTS": "OFF",
+    "Python3_EXECUTABLE": "$(execpath @workerd//build/tools/python:python3)",
 }
 
 cmake(
     name = "libcxx",
+    # The runtimes' build requires Python, which the action takes from the Python toolchain rather
+    # than the host.
+    build_data = ["@workerd//build/tools/python:python3"],
     cache_entries = select({
         # TSan must observe synchronization in out-of-line libc++ functions such as shared_ptr's
         # weak-count release.
@@ -45,6 +53,15 @@ cmake(
         "CFLAGS": "-Wno-error",
         "CXXFLAGS": "-Wno-error",
     },
+    # Without the C++ toolchain's own runtimes: its libc++ (its <config>_nomsan_stdlib feature),
+    # whose headers would otherwise come before those of the libc++ being built, and the libraries
+    # it links into everything (default_link_libs), whose static libunwind clashes with the shared
+    # one built here.
+    features = [
+        "-default_link_libs",
+        "-local-aarch64-linux_nomsan_stdlib",
+        "-local-x86_64-linux_nomsan_stdlib",
+    ],
     lib_source = ":srcs",
     out_shared_libs = ["libunwind.so.1"],
     out_static_libs = [

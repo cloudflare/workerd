@@ -1469,11 +1469,12 @@ fn to_js_with_fast_jsg_struct_calls_no_prototype_setters() {
         ctx.set_global(lock, "arr", wrapped);
         ctx.eval_raw(
             lock,
-            "globalThis.settersRan = [];
+            // A string, since pushing to an array would run the setters on Array.prototype.
+            "globalThis.settersRan = '';
              for (const [proto, key] of [[Array.prototype, 0], [Array.prototype, 1],
                                          [Object.prototype, 'name'], [Object.prototype, 'age']]) {
                Object.defineProperty(proto, key, {
-                 set(v) { settersRan.push(key); throw new Error('setter ran'); },
+                 set(v) { settersRan += `${key};`; throw new Error('setter ran'); },
                  configurable: true,
                });
              }",
@@ -1516,7 +1517,7 @@ fn to_js_with_fast_jsg_struct_calls_no_prototype_setters() {
             .unwrap();
         assert!(ok);
 
-        let setters_ran: String = ctx.eval(lock, "settersRan.join()").unwrap();
+        let setters_ran: String = ctx.eval(lock, "settersRan").unwrap();
         assert_eq!(setters_ran, "");
         Ok(())
     });
@@ -1618,6 +1619,36 @@ fn struct_to_js_without_fast_jsg_struct_passes_on_what_a_setter_throws() {
             ok,
             "the method's caller did not catch what the setter threw"
         );
+        Ok(())
+    });
+}
+
+/// Converting a `Vec` stops at the first element whose conversion fails: without
+/// `fast_jsg_struct`, a struct after the one whose setter threw is not converted.
+#[test]
+fn vec_to_js_stops_at_the_first_element_that_fails() {
+    let harness = crate::Harness::new();
+    harness.run_in_context(|lock, ctx| {
+        ctx.eval_raw(
+            lock,
+            "globalThis.names = '';
+             Object.defineProperty(Object.prototype, 'name', {
+               set(v) { names += `${v};`; if (v === 'Bob') throw new Error('Bob'); },
+               configurable: true,
+             });",
+        )
+        .expect("setup should evaluate");
+        let people = ["Alice", "Bob", "Carol"]
+            .into_iter()
+            .map(|name| Person {
+                name: name.to_owned(),
+                age: Number::new(30.0),
+            })
+            .collect::<Vec<_>>();
+        let caught = lock.try_catch(|lock| people.to_js(lock))?;
+        assert!(caught.is_err(), "converting the Vec did not throw");
+        let names: String = ctx.eval(lock, "names").unwrap();
+        assert_eq!(names, "Alice;Bob;");
         Ok(())
     });
 }

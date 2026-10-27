@@ -116,7 +116,7 @@ def _snapshot_http_files_version(
         dedicated_numpy_vendor_snapshot_hash = None,
         dedicated_numpy_vendor_snapshot_integrity = None,
         **_kwds):
-    # Snapshots produced by src/pyodide/make_snapshots.py live in the pyodide-capnp-bin bucket, keyed
+    # Snapshots produced by src/pyodide/scripts/make_snapshots.py live in the pyodide-capnp-bin bucket, keyed
     # by their sha256 digest. The fastapi dedicated snapshot was produced by the production validator
     # and lives in the vendor bucket under its file name.
     return (_snapshot_http_file(name, baseline_snapshot, baseline_snapshot_integrity, PYODIDE_CAPN_BIN + "baseline-snapshot/", baseline_snapshot_hash) +

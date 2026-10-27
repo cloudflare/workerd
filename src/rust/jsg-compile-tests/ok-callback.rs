@@ -7,8 +7,9 @@
 pub fn t() -> jsg::RawFunctionCallback {
     jsg::function_callback(|lock, args| {
         let object = lock.new_object();
-        if object.set(lock, "this", args.this()).is_ok() {
-            args.set_return_value(object.into());
+        match object.set(lock, "this", args.this()) {
+            Ok(()) => args.set_return_value(object.into()),
+            Err(err) => lock.throw_exception(&err),
         }
     })
 }

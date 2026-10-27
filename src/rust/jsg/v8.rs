@@ -481,7 +481,7 @@ pub mod ffi {
         // Local<Array>
         pub unsafe fn local_array_length(array: &Local) -> u32;
         pub unsafe fn array_new_with_elements(isolate: *mut Isolate, elements: &[Local]) -> Local;
-        // Leaves what a setter or Proxy trap throws pending; see `call_into_js()`.
+        // Leaves what a setter throws pending; see `call_into_js()`.
         pub unsafe fn local_array_set(
             isolate: *mut Isolate,
             array: &mut Local,
@@ -647,6 +647,19 @@ pub mod ffi {
             internal_message: &str,
         );
         pub unsafe fn fast_api_terminate_execution(options: *mut FastApiCallbackOptions);
+
+        // Serialization
+        // Leaves what serialization throws pending; see `call_into_js()`. Fallible: the result
+        // is a rust::Vec.
+        pub unsafe fn local_serialize(
+            isolate: *mut Isolate,
+            value: &Local,
+            errors_are_host_objects: bool,
+            result: &mut Vec<u8>,
+        ) -> Result<bool>;
+        // Leaves what deserialization throws pending. Fallible: a missing or unsupported header
+        // throws.
+        pub unsafe fn value_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<MaybeLocal>;
 
         // Errors
         pub unsafe fn exception_create_from_bytes(
@@ -1995,7 +2008,7 @@ impl<'s> Local<'s, Array> {
     ///
     /// # Errors
     ///
-    /// If a setter on the prototype chain or a Proxy trap throws, or execution is terminating,
+    /// If a setter, on the array or its prototype chain, throws, or execution is terminating,
     /// the exception stays pending and the error is one for which [`Error::is_pending`] is
     /// true, as for [`Local::<Function>::call`].
     pub fn set(
@@ -3337,20 +3350,17 @@ impl Object {
     /// Creates a new object with `properties` as its own data properties, in that order.
     ///
     /// Runs no JavaScript: unlike [`Local::<Object>::set`], it calls no setter that a script
-    /// defined on `Object.prototype`. Each property is defined as by `v8::Object::CreateDataProperty`
-    /// (writable, enumerable and configurable); a later duplicate key replaces the earlier value.
+    /// defined on `Object.prototype`. Each property is defined as by
+    /// `v8::Object::CreateDataProperty` (writable, enumerable and configurable); a later duplicate
+    /// key replaces the earlier value.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if a key is longer than [`String::MAX_LENGTH`].
-    #[expect(
-        clippy::expect_used,
-        reason = "fails only for a key longer than V8's maximum string length"
-    )]
+    /// If a key is longer than [`String::MAX_LENGTH`], or V8 fails to create it.
     pub fn with_data_properties<'s>(
         lock: &mut Lock<'s>,
         properties: &[(&str, Local<'s, Value>)],
-    ) -> Local<'s, Self> {
+    ) -> crate::Result<Local<'s, Self>> {
         let (keys, values): (Vec<&str>, Vec<Local<'s, Value>>) = properties
             .iter()
             .map(|(key, value)| {
@@ -3360,16 +3370,15 @@ impl Object {
             .unzip();
         // SAFETY: lock guarantees the isolate is locked, a context is entered and a HandleScope
         // is active; the values are valid handles in it. The result belongs to that scope.
-        unsafe {
-            Local::from_ffi(
-                ffi::object_new_with_data_properties(
-                    lock.isolate().as_ffi(),
-                    &keys,
-                    Local::raw_slice(&values),
-                )
-                .expect("object property key is too long for a V8 string"),
+        let object = unsafe {
+            ffi::object_new_with_data_properties(
+                lock.isolate().as_ffi(),
+                &keys,
+                Local::raw_slice(&values),
             )
-        }
+        }?;
+        // SAFETY: as above.
+        Ok(unsafe { Local::from_ffi(object) })
     }
 }
 
