@@ -223,6 +223,7 @@ class Serializer final: v8::ValueSerializer::Delegate {
   kj::Maybe<ExternalHandler&> externalHandler;
 
   kj::Vector<jsg::JsRef<JsValue>> sharedArrayBuffers;
+  // The buffers passed to transfer(), or of the views passed to it, in the order they are numbered.
   kj::Vector<jsg::JsRef<JsValue>> arrayBuffers;
   // ArrayBuffers passed to transfer() that still need to be detached. We defer detaching until
   // release() (i.e. after write()) -- see transfer() for why.

@@ -69,8 +69,7 @@ class Serializer final: public v8::ValueSerializer::Delegate {
       : isolate(isolate),
         options(options),
         sharedArrayBuffers(isolate),
-        transferredValues(isolate),
-        buffersToDetach(isolate),
+        transferredBuffers(isolate),
         ser(isolate, this) {}
   // noexcept(true), as the Delegate's destructor is, though kj::Vector's is not.
   ~Serializer() noexcept(true) {}
@@ -111,19 +110,18 @@ class Serializer final: public v8::ValueSerializer::Delegate {
           isolate, v8::String::NewFromUtf8Literal(isolate, "Object is not transferable."));
       return false;
     }
-    // A value given twice is transferred once. Values are compared, not their buffers, as
-    // jsg::Serializer compares them, so that the numbers are the same.
-    for (auto transferred: transferredValues) {
-      if (transferred == value) return true;
+    // Each buffer is transferred once, however many times it or views of it are listed, as
+    // jsg::Serializer transfers it: V8 must be told about a buffer only once.
+    for (auto transferred: transferredBuffers) {
+      if (transferred == buffer) return true;
     }
-    auto id = static_cast<uint32_t>(transferredValues.size());
-    transferredValues.push_back(value);
-    transferredBackingStores.add(buffer->GetBackingStore());
-    ser.TransferArrayBuffer(id, buffer);
+    auto id = static_cast<uint32_t>(transferredBuffers.size());
     // Detached once the value is written, as the structured clone algorithm does, so that a getter
     // that serialization runs sees the buffer intact, and so that V8 still finds the buffer of a
     // view written after it.
-    buffersToDetach.push_back(buffer);
+    transferredBuffers.push_back(buffer);
+    transferredBackingStores.add(buffer->GetBackingStore());
+    ser.TransferArrayBuffer(id, buffer);
     return true;
   }
 
@@ -136,7 +134,7 @@ class Serializer final: public v8::ValueSerializer::Delegate {
   // jsg::Serializer::release() does. Returns false if detaching threw, leaving the exception
   // pending.
   bool release(Serialized& result) {
-    for (auto buffer: buffersToDetach) {
+    for (auto buffer: transferredBuffers) {
       // JavaScript that serialization ran may have detached it already, as a nested
       // structuredClone() that transfers it does.
       if (buffer->IsDetachable() && !buffer->WasDetached() &&
@@ -200,10 +198,9 @@ class Serializer final: public v8::ValueSerializer::Delegate {
   v8::Local<v8::Value> prototypeOfObject;
   v8::LocalVector<v8::SharedArrayBuffer> sharedArrayBuffers;
   kj::Vector<std::shared_ptr<v8::BackingStore>> sharedBackingStores;
-  // The values given to transfer(), the backing stores of their buffers, and the buffers.
-  v8::LocalVector<v8::Value> transferredValues;
+  // The buffers transfer() transferred, in the order they are numbered, and their backing stores.
+  v8::LocalVector<v8::ArrayBuffer> transferredBuffers;
   kj::Vector<std::shared_ptr<v8::BackingStore>> transferredBackingStores;
-  v8::LocalVector<v8::ArrayBuffer> buffersToDetach;
   v8::ValueSerializer ser;
 };
 

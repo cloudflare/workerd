@@ -251,6 +251,16 @@ struct SerTestContext: public ContextGlobalObject {
     return deser.readValue(js);
   }
 
+  // How many buffers Serializer transfers when it writes `value` with `transfer`.
+  uint32_t transferredBufferCount(Lock& js, JsValue value, kj::Array<JsValue> transfer) {
+    Serializer ser(js);
+    for (auto& item: transfer) {
+      ser.transfer(js, item);
+    }
+    ser.write(js, value);
+    return ser.release().transferredArrayBuffers.size();
+  }
+
   JSG_RESOURCE_TYPE(SerTestContext) {
     JSG_NESTED_TYPE(Foo);
     JSG_NESTED_TYPE(Bar);
@@ -262,6 +272,7 @@ struct SerTestContext: public ContextGlobalObject {
     JSG_METHOD(foreignToSerializer);
     JSG_METHOD(serializerToForeign);
     JSG_METHOD(structuredCloneWithTransfer);
+    JSG_METHOD(transferredBufferCount);
     JSG_METHOD(deserializeBytes);
     JSG_METHOD(serializeBytes);
     JSG_METHOD(deserializeWithoutSharedArrayBuffers);
@@ -540,6 +551,28 @@ KJ_TEST("malformed native errors throw") {
       "string", "DataCloneError: Deserialization failed: error message is not a string");
 }
 
+KJ_TEST("transfer transfers each buffer once") {
+  Evaluator<SerTestContext, SerTestIsolate> e(v8System);
+
+  // A view and its buffer, and two views of one buffer, each transfer the buffer once.
+  e.expectEval("const b = new ArrayBuffer(8);\n"
+               "const u = new Uint8Array(b); u[0] = 7;\n"
+               "transferredBufferCount({ u, b }, [u, b])",
+      "number", "1");
+  e.expectEval("const b = new ArrayBuffer(8);\n"
+               "transferredBufferCount([], [new Uint8Array(b), new Uint8Array(b, 4)])",
+      "number", "1");
+  e.expectEval(
+      "transferredBufferCount([], [new ArrayBuffer(1), new ArrayBuffer(1)])", "number", "2");
+
+  // The clone keeps the view on the buffer.
+  e.expectEval("const b = new ArrayBuffer(8);\n"
+               "const u = new Uint8Array(b, 4); u[0] = 7;\n"
+               "const out = structuredCloneWithTransfer({ u, b }, [u, b]);\n"
+               "`${b.byteLength},${out.u[0]},${out.u.buffer === out.b}`",
+      "string", "0,7,true");
+}
+
 KJ_TEST("a SharedArrayBuffer beyond the given list is corrupt data") {
   Evaluator<SerTestContext, SerTestIsolate> e(v8System);
   KJ_EXPECT_LOG(ERROR, "deserialization failure, possible corruption");
@@ -549,5 +582,6 @@ KJ_TEST("a SharedArrayBuffer beyond the given list is corrupt data") {
                "}",
       "boolean", "true");
 }
+
 }  // namespace
 }  // namespace workerd::jsg::test

@@ -324,13 +324,15 @@ void Serializer::transfer(Lock& js, const JsValue& value) {
   JSG_REQUIRE(arrayBuffer->IsDetachable(), DOMDataCloneError, "Object is not transferable.");
 
   uint32_t n;
+  // Each buffer is transferred once, however many times it or views of it are listed: V8 must
+  // be told about a buffer only once.
+  JsValue buffer(arrayBuffer);
   for (n = 0; n < arrayBuffers.size(); n++) {
-    // If the ArrayBuffer has already been added, we do not want to try adding it again.
-    if (arrayBuffers[n].getHandle(js) == value) {
+    if (arrayBuffers[n].getHandle(js) == buffer) {
       return;
     }
   }
-  arrayBuffers.add(jsg::JsRef(js, value));
+  arrayBuffers.add(jsg::JsRef(js, buffer));
 
   backingStores.add(arrayBuffer->GetBackingStore());
   ser.TransferArrayBuffer(n, arrayBuffer);

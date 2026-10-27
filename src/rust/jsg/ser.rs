@@ -60,8 +60,8 @@ pub struct SerializeOptions<'a, 's> {
     pub class_instances: ClassInstances,
     /// `ArrayBuffer`s, or views of them, whose contents move to the reader rather than being
     /// copied, as with `structuredClone`'s `transfer` option and `jsg::Serializer::transfer()`.
-    /// A value listed twice is transferred once. Each buffer is detached once the value is
-    /// written.
+    /// Each buffer is transferred once, however many times it or views of it are listed, and is
+    /// detached once the value is written.
     pub transfer: &'a [v8::Local<'s, v8::Value>],
 }
 

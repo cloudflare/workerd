@@ -777,6 +777,18 @@ fn transferred_array_buffers_move_to_the_deserializer() {
             "b.byteLength === 0 && u.length === 0",
             "v[0][0] === 3 && v[0].buffer.byteLength === 2",
         );
+        // A view and its buffer, and two views of one buffer, transfer the buffer once.
+        assert_transfer(
+            lock,
+            ctx,
+            "globalThis.b = new ArrayBuffer(8); globalThis.u = new Uint8Array(b, 4); u[0] = 7;
+             globalThis.w = new Uint8Array(b);
+             globalThis.value = { u, b }; globalThis.transfer = [u, b, w];",
+            3,
+            1,
+            "b.byteLength === 0 && u.length === 0 && w.length === 0",
+            "v.u[0] === 7 && v.u.buffer === v.b && v.b.byteLength === 8",
+        );
         // A getter that serialization runs sees the buffer intact: it is detached afterwards.
         assert_transfer(
             lock,
