@@ -94,7 +94,7 @@ jobs:
           echo "Found open PR for branch $BRANCH_NAME"
 
           # Commit and push the changes
-          git add build/python_metadata.bzl
+          git add build/python_metadata.bzl build/deps/pyodide.MODULE.bazel MODULE.bazel.lock
           git commit --fixup HEAD -m "Update python_metadata.bzl with new snapshot info
 
           This commit updates the snapshot values in python_metadata.bzl based on the latest
