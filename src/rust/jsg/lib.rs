@@ -71,6 +71,10 @@ pub use v8::ffi::ExceptionType;
 pub use wrappable::FromJS;
 pub use wrappable::ToJS;
 pub use wrappable::Traced;
+#[doc(hidden)]
+pub use wrappable::UnionMember;
+#[doc(hidden)]
+pub use wrappable::try_union_from_js;
 
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
 #[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
@@ -487,8 +491,8 @@ impl Error {
 ///
 /// # Supported Types
 ///
-/// Any type implementing the [`Type`] trait can be used with `NonCoercible<T>`. Built-in
-/// implementations include:
+/// `T` is one of the types a value is otherwise coerced to, those that implement
+/// [`Coercible`]:
 ///
 /// - `NonCoercible<String>` - only accepts JavaScript strings
 /// - `NonCoercible<bool>` - only accepts JavaScript booleans
@@ -553,6 +557,33 @@ impl<T> Deref for NonCoercible<T> {
         &self.value
     }
 }
+
+/// A type that [`NonCoercible<T>`] can wrap: one that JavaScript values are coerced to.
+///
+/// These are `String`, `bool`, [`Number`] and the integer types. C++ JSG's `CoercibleType`
+/// (jsg/jsg.h) is the first three; Rust JSG adds the integers.
+///
+/// For these, [`Type::is_exact`] is a precise test of the JavaScript type. Other types, such as
+/// resources and unions, have no coercion of their own to disable, and their `is_exact` is only
+/// a coarse test. The trait is sealed.
+#[diagnostic::on_unimplemented(
+    message = "`NonCoercible<{Self}>` is not supported",
+    note = "`NonCoercible<T>` takes only `String`, `bool`, `jsg::Number` or an integer type"
+)]
+pub trait Coercible: Type + coercible::Sealed {}
+
+mod coercible {
+    pub trait Sealed {}
+}
+
+macro_rules! impl_coercible {
+    ($($t:ty),* $(,)?) => {
+        $(impl coercible::Sealed for $t {}
+        impl Coercible for $t {})*
+    };
+}
+
+impl_coercible!(String, bool, Number, u8, u16, u32, i8, i16, i32, i64, u64);
 
 /// A JavaScript number (an IEEE 754 double-precision float).
 ///
@@ -1061,6 +1092,10 @@ pub trait Type: Sized {
 
     /// Returns true if the V8 value is exactly this type (no coercion).
     /// Used by `NonCoercible<T>` to reject values that would require coercion.
+    ///
+    /// It is precise only for the [`Coercible`] types that `NonCoercible<T>` takes. For other
+    /// types it can only check the JavaScript type, without a lock: a resource's accepts any
+    /// object, and a union's any value that one of its variants' accepts.
     fn is_exact(value: v8::Local<'_, v8::Value>) -> bool;
 }
 

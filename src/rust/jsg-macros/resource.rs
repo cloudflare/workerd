@@ -122,6 +122,8 @@ pub fn generate_resource_struct(attr: TokenStream, input: &syn::DeriveInput) -> 
         impl<'s> jsg::FromJS<'s> for #name {
             type ResultType = jsg::Rc<Self>;
 
+            const UNION_MEMBER: jsg::UnionMember = jsg::UnionMember::Resource;
+
             fn type_name() -> String {
                 <Self as jsg::Type>::class_name().to_owned()
             }

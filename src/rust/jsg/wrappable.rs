@@ -32,6 +32,8 @@
 //! | `Result<T, E>` | `T` or throws |
 //! | `NonCoercible<T>` | `T` (strict type checking) |
 //! | `T: Struct` | `object` |
+//! | `#[jsg_oneof]` enum | any of its variants' types (see `src/rust/jsg/README.md`) |
+//! | `jsg::Rc<R>` | the resource's JavaScript object |
 //! | `Vec<T>` | `Array<T>` |
 //! | `&[T]` | `Array<T>` (parameter only) |
 //! | `Dict<V>` | `Record<string, V>`: an object other than an array |
@@ -68,6 +70,7 @@
 //! `uint64_t`: a `BigInt` that does not fit is a `TypeError`, and any other value converts as
 //! above.
 
+use crate::Coercible;
 use crate::Dict;
 use crate::Error;
 use crate::Lenient;
@@ -390,8 +393,11 @@ pub trait ToJS<'s>: Sized {
 /// Trait for converting JavaScript values to Rust.
 ///
 /// `from_js()` is the normal, required conversion path. `try_from_js()` is an
-/// internal shallow-probing path used by [`Lenient`]. Implementations only need
-/// to override `try_from_js()` when their top-level type can fail to match.
+/// internal shallow-probing path used by [`Lenient`] and by `#[jsg_oneof]`
+/// unions. Implementations only need to override `try_from_js()` when their
+/// top-level type can fail to match, and the override must return `Ok(None)`
+/// rather than an error for a value of the wrong type, so that a union can go
+/// on to its other variants.
 pub trait FromJS<'s>: Sized {
     type ResultType;
 
@@ -429,26 +435,109 @@ pub trait FromJS<'s>: Sized {
         Self::from_js(lock, value).map(Some)
     }
 
-    /// Tries to convert only if the JavaScript type matches exactly.
-    /// Returns `None` if the type doesn't match, `Some(result)` if conversion was attempted.
-    /// Used by `#[jsg_oneof]` macro to try each variant without coercion.
-    fn try_from_js_exact(
+    /// The type's kind in the union conversion algorithm; see [`UnionMember`].
+    #[doc(hidden)]
+    const UNION_MEMBER: UnionMember = UnionMember::Fallible;
+
+    /// Converts `value` during `pass` of a union conversion, or returns
+    /// `Ok(None)` if this type does not take part in `pass` or does not match.
+    /// A union overrides this to try its own variants, which flattens nested
+    /// unions into the enclosing union's passes.
+    #[doc(hidden)]
+    fn try_from_js_in_union_pass(
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
-    ) -> Option<Result<Self::ResultType, Error>>
-    where
-        Self: Type,
-    {
-        if !Self::is_exact(value) {
-            return None;
-        }
-
-        match Self::try_from_js(lock, value) {
-            Ok(Some(result)) => Some(Ok(result)),
-            Ok(None) => None,
-            Err(err) => Some(Err(err)),
+        pass: UnionMember,
+    ) -> Result<Option<Self::ResultType>, Error> {
+        if Self::UNION_MEMBER.takes_part_in(pass) {
+            Self::try_from_js(lock, value)
+        } else {
+            Ok(None)
         }
     }
+}
+
+// =============================================================================
+// Unions (`#[jsg_oneof]`)
+// =============================================================================
+
+/// The kind of a `#[jsg_oneof]` variant, which decides the passes in which the
+/// variant is tried.
+///
+/// A union converts a value as C++ JSG's `OneOfWrapper::tryUnwrap()`
+/// (jsg/value.h) does, following Web IDL's union conversion: it makes a series
+/// of passes over its variants and takes the first one that converts, trying
+/// in order
+///
+/// 1. resource types,
+/// 2. every type that is not a string, numeric or boolean type,
+/// 3. boolean types, if the value is a boolean,
+/// 4. numeric types, if the value is a number or a `BigInt`,
+/// 5. string types,
+/// 6. numeric types,
+/// 7. boolean types.
+///
+/// Passes 5 to 7 coerce, so a value becomes a string only if no other variant
+/// takes it, and becomes a number or boolean only if no string variant
+/// converts it either. An error from a variant's conversion, such as a
+/// `Symbol` that cannot become a string, ends the conversion with that error
+/// rather than trying another variant.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnionMember {
+    /// A resource type (`jsg::Rc<R>`).
+    Resource,
+    /// Any other type that is not a string, numeric or boolean type, such as
+    /// an array, a typed array or a struct (C++ JSG's `IsFallibleType`).
+    Fallible,
+    /// A string type.
+    String,
+    /// A numeric type.
+    Numeric,
+    /// A boolean type.
+    Boolean,
+}
+
+impl UnionMember {
+    /// Whether a variant of this kind is tried in `pass`.
+    const fn takes_part_in(self, pass: Self) -> bool {
+        matches!(
+            (self, pass),
+            (Self::Resource, Self::Resource | Self::Fallible)
+                | (Self::Fallible, Self::Fallible)
+                | (Self::String, Self::String)
+                | (Self::Numeric, Self::Numeric)
+                | (Self::Boolean, Self::Boolean)
+        )
+    }
+}
+
+/// Converts `value` to a union by running `try_pass` for each pass of the
+/// union conversion algorithm (see [`UnionMember`]) until one converts it.
+#[doc(hidden)]
+pub fn try_union_from_js<'s, R>(
+    lock: &mut Lock<'s>,
+    value: v8::Local<'s, v8::Value>,
+    try_pass: impl Fn(&mut Lock<'s>, v8::Local<'s, v8::Value>, UnionMember) -> Result<Option<R>, Error>,
+) -> Result<Option<R>, Error> {
+    let passes = [
+        (true, UnionMember::Resource),
+        (true, UnionMember::Fallible),
+        (value.is_boolean(), UnionMember::Boolean),
+        (
+            value.is_number() || value.is_big_int(),
+            UnionMember::Numeric,
+        ),
+        (true, UnionMember::String),
+        (true, UnionMember::Numeric),
+        (true, UnionMember::Boolean),
+    ];
+    for (applies, pass) in passes {
+        if applies && let Some(result) = try_pass(lock, value, pass)? {
+            return Ok(Some(result));
+        }
+    }
+    Ok(None)
 }
 
 // =============================================================================
@@ -477,6 +566,8 @@ impl<'s> ToJS<'s> for bool {
 
 impl<'s> FromJS<'s> for bool {
     type ResultType = Self;
+
+    const UNION_MEMBER: UnionMember = UnionMember::Boolean;
 
     fn type_name() -> String {
         "boolean".to_owned()
@@ -519,6 +610,8 @@ impl<'s> ToJS<'s> for &str {
 
 impl<'s> FromJS<'s> for std::string::String {
     type ResultType = Self;
+
+    const UNION_MEMBER: UnionMember = UnionMember::String;
 
     fn type_name() -> String {
         "string".to_owned()
@@ -572,6 +665,8 @@ impl<'s> ToJS<'s> for f32 {
 impl<'s> FromJS<'s> for Number {
     type ResultType = Self;
 
+    const UNION_MEMBER: UnionMember = UnionMember::Numeric;
+
     fn type_name() -> String {
         "number".to_owned()
     }
@@ -601,6 +696,8 @@ impl Type for &str {
 impl<'s> FromJS<'s> for &str {
     type ResultType = String;
 
+    const UNION_MEMBER: UnionMember = UnionMember::String;
+
     fn type_name() -> String {
         "string".to_owned()
     }
@@ -615,6 +712,8 @@ impl<'s> FromJS<'s> for &str {
 
 impl<'s, T: FromJS<'s, ResultType = T>> FromJS<'s> for &T {
     type ResultType = T;
+
+    const UNION_MEMBER: UnionMember = T::UNION_MEMBER;
 
     fn type_name() -> String {
         T::type_name()
@@ -632,6 +731,14 @@ impl<'s, T: FromJS<'s, ResultType = T>> FromJS<'s> for &T {
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Option<Self::ResultType>, Error> {
         T::try_from_js(lock, value)
+    }
+
+    fn try_from_js_in_union_pass(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+        pass: UnionMember,
+    ) -> Result<Option<Self::ResultType>, Error> {
+        T::try_from_js_in_union_pass(lock, value, pass)
     }
 }
 
@@ -722,6 +829,8 @@ macro_rules! impl_integer {
             impl<'s> FromJS<'s> for $type {
                 type ResultType = Self;
 
+                const UNION_MEMBER: UnionMember = UnionMember::Numeric;
+
                 fn type_name() -> String {
                     $name.to_owned()
                 }
@@ -811,6 +920,8 @@ impl<'s> ToJS<'s> for i64 {
 // number, which must be finite and in range, and truncates toward zero.
 impl<'s> FromJS<'s> for i64 {
     type ResultType = Self;
+
+    const UNION_MEMBER: UnionMember = UnionMember::Numeric;
 
     fn type_name() -> String {
         "bigint".to_owned()
@@ -999,7 +1110,7 @@ impl<'s, T: ToJS<'s>> ToJS<'s> for Option<T> {
     }
 }
 
-impl<'s, T: Type + ToJS<'s>> ToJS<'s> for NonCoercible<T> {
+impl<'s, T: Coercible + ToJS<'s>> ToJS<'s> for NonCoercible<T> {
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
         self.into_inner().to_js(lock)
     }
@@ -1057,8 +1168,22 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for Option<T> {
     }
 }
 
-impl<'s, T: Type + FromJS<'s>> FromJS<'s> for NonCoercible<T> {
+impl<T: Coercible> Type for NonCoercible<T> {
+    fn class_name() -> &'static str {
+        T::class_name()
+    }
+
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+        T::is_exact(value)
+    }
+}
+
+// Like C++ `NonCoercible<T>` (jsg/web-idl.h), this is the same kind of union
+// member as `T`, but converts only a value of exactly that type.
+impl<'s, T: Coercible + FromJS<'s>> FromJS<'s> for NonCoercible<T> {
     type ResultType = NonCoercible<T::ResultType>;
+
+    const UNION_MEMBER: UnionMember = T::UNION_MEMBER;
 
     fn type_name() -> String {
         T::type_name()

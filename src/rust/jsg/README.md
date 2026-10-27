@@ -636,7 +636,7 @@ use jsg_macros::jsg_oneof;
 #[derive(Debug, Clone)]
 enum StringOrNumber {
     String(String),
-    Number(f64),
+    Number(jsg::Number),
 }
 
 // In a jsg_method:
@@ -648,7 +648,40 @@ pub fn process(&self, value: StringOrNumber) -> Result<String, jsg::Error> {
 }
 ```
 
-This is similar to `kj::OneOf<>` in C++ JSG.
+A union converts a value as the equivalent `kj::OneOf<>` does in C++ JSG, following
+Web IDL's union conversion. It tries its variants in passes, in declaration order
+within each pass, and takes the first that converts:
+
+1. resource types (`jsg::Rc<R>`);
+2. every type that is not a string, numeric or boolean type, such as resources, arrays,
+   typed arrays and structs;
+3. boolean types, if the value is a boolean;
+4. numeric types, if the value is a number or a `BigInt`;
+5. string types;
+6. numeric types;
+7. boolean types.
+
+So a value is coerced only when no variant takes it as it is, and coerced to a string
+in preference to a number or boolean: `StringOrNumber` takes `true` as `"true"`, and
+`null` as `"null"`. An error from a variant's conversion, such as a `Symbol` that
+cannot become a string, or an exception thrown by `toString()`, is thrown rather than
+trying another variant. A `NonCoercible<T>` variant, where `T` is `String`, `bool`,
+`jsg::Number` or an integer type, takes part in `T`'s passes but converts only a value of
+exactly that type. A variant that is itself a union takes part
+in each pass with its own variants, as a nested `kj::OneOf` does.
+
+The union traces the variant it holds, so a union with a `jsg::Rc<R>` variant can be a
+resource field. It implements `jsg::ToJS` when every variant does.
+
+Two differences from `kj::OneOf<>`:
+
+- Variants must implement `jsg::Type`, which the integer types, `i64`, `SystemTime` and
+  `Nullable<T>` don't, so they can't be variants yet.
+- C++ checks at compile time that a union follows Web IDL's rules, for example at most
+  one string, numeric, boolean, dictionary-like or sequence-like type, and no duplicate
+  types (`webidl::UnionTypeValidator` in `src/workerd/jsg/web-idl.h`). Rust doesn't
+  check them; in a union that breaks them, the first variant that converts the value, in
+  pass and declaration order, wins.
 
 ## Feature Flags (Compatibility Flags)
 

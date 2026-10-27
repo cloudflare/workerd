@@ -409,11 +409,14 @@ impl Env {
 
 ## `#[jsg_oneof]`
 
-Generates `jsg::Type` and `jsg::FromJS` for a union enum — the Rust equivalent of
-`kj::OneOf<…>`. Each variant must be a single-field tuple whose inner type implements
-`jsg::Type` + `jsg::FromJS`. Variants are tried in declaration order using
-exact-type matching; if none matches, a `TypeError` is thrown listing all expected
-types.
+Generates `jsg::Type`, `jsg::FromJS` and `jsg::Traced` for a union enum — the Rust
+equivalent of `kj::OneOf<…>` — and `jsg::ToJS` when every variant implements it. Each
+variant must be a single-field tuple whose inner type implements `jsg::Type`,
+`jsg::FromJS` and `jsg::Traced`. A value converts as it would to the equivalent
+`kj::OneOf`: variants are tried in passes that leave coercion for last, in declaration
+order within a pass (see [Union Types](../jsg/README.md#union-types), which also lists
+the differences from `kj::OneOf`). If no variant converts the value, a `TypeError` is
+thrown naming the expected types, such as `Expected string or number but got symbol`.
 
 ```rust
 #[jsg_oneof]
