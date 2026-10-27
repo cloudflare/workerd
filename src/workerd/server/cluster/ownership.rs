@@ -173,6 +173,14 @@ impl Ownership {
                     if !record.node.is_empty()
                         && let Some(peer) = self.registry.live(&record.node, now_ms).await?
                     {
+                        // An earlier process at our address, restarted
+                        // before its lease ran out: a route there loops back
+                        // here. Its lease, not a route, ends this.
+                        if peer.address == self.registry.advertise() {
+                            return Err(Error::Replica(format!(
+                                "{key}: owned by this address's previous instance"
+                            )));
+                        }
                         return Ok(self.route(key, peer, now_ms));
                     }
                     (record, Guard::Match(version))
@@ -402,6 +410,27 @@ mod tests {
             assert_eq!(names(a.peers(12_000).await.unwrap()), ["b"]);
             b.deregister().await.unwrap();
             assert!(a.peers(12_000).await.unwrap().is_empty());
+        });
+    }
+
+    #[test]
+    fn a_restart_never_routes_to_its_previous_instance() {
+        block_on(async {
+            let store = Bucket::memory("");
+            let (a, a_own) = node(&store, "a");
+            a.renew(0).await.unwrap();
+            open_x(&a_own).await;
+            // The process restarts at a's address with a fresh node id while
+            // a's record is still live: routing there would reach itself.
+            let bucket = store.at("cluster");
+            let a_ = Rc::new(Registry::new(bucket.clone(), "a_", "a:1", TTL));
+            a_.renew(1_000).await.unwrap();
+            let a_own_ = Ownership::new(bucket, a_);
+            let claim = a_own_.acquire_or_route("ns", "x", 1_000).await;
+            assert!(matches!(claim, Err(Error::Replica(_))), "{claim:?}");
+            // Once a's lease ends, the restart takes it over.
+            let claim = a_own_.acquire_or_route("ns", "x", 11_000).await;
+            assert_eq!(claim.unwrap(), owned(2));
         });
     }
 

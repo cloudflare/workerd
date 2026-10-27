@@ -69,6 +69,11 @@ impl Registry {
         &self.node
     }
 
+    /// Where this instance listens.
+    pub fn advertise(&self) -> &str {
+        &self.address
+    }
+
     /// Where peer `node` listens, as of the last listing.
     pub fn address(&self, node: &str) -> Option<String> {
         self.listed.borrow().get(node).map(|r| r.address.clone())
