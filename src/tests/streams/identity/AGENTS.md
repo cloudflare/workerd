@@ -203,6 +203,10 @@ The readable side supports `getReader({ mode: 'byob' })` (unlike a standard
 - Canceling one branch leaves the writer flowing to the survivor. The
   cancel promise semantics and the fate of writes after **both** branches
   cancel diverge (ledger).
+- A FixedLengthStream's branches teed before any read carry its length as
+  their Content-Length, as the readable does. Teed after a read, they carry
+  what each has left under C++ and go out chunked under TypeScript
+  (ledger #26).
 
 ## Compatibility flags
 
@@ -268,6 +272,7 @@ pattern; a change to either side fails its cell.
 | 23 | Write settlement and BYOB reads across tee branches | a write settles once one branch has read it (the sibling's copy uncounted); a branch's reads are capped at the sizes the first-reading branch requested | a write settles once the slowest branch has read it, or once a branch is starved (pending read, nothing left to take) — never once the writable is erroring, when it rejects instead; each branch's reads are sized independently and span writes | `teeCreatesNoDemand`, `singleBranchReadDrivesWriter`, `writerDesiredSizeAcrossTee`, `abortBeforeStarvedReadRejectsInFlightWrite`, `tee-byob.js` |
 | 24 | `highWaterMark` conversion | to a uint64: non-finite (`'abc'`, NaN, ±Infinity) and negative values throw `TypeError`; fractions truncate (`1.5`→1); a bigint converts (`3n`→3); `desiredSize` narrows to a 32-bit int (`2**32 + 5` reads 5) | the WHATWG writable conversion, the same for ITS and FLS: NaN and negative values throw `RangeError`; Infinity and fractions are kept (FLS caps the converted number at its length); a bigint throws `TypeError` | `highWaterMarkConversionDivergence` |
 | 25 | String chunk containing NUL | written up to the first NUL only (`'a\0b'` delivers `61`); the string branch of `WritableStreamInternalController::write` | every UTF-8 byte (`61 00 62`) | `stringWithNulDivergence` |
+| 26 | the Content-Length of a FixedLengthStream's tee branches made after a read (the readable, and branches teed before any read, carry the full length in both) | what each branch has left (5 of 10 after a 5-byte read) | none, so they go out chunked: the branches share the readable's controller, which knows the total but not what is left once something has been read (the readable suite's ledger #35) | `fixedLengthTeeAfterReadContentLength`, `fixedLengthBodyContentLength` (parity) |
 
 ## Assertion catalogue
 
@@ -293,6 +298,7 @@ pattern; a change to either side fails its cell.
 | `tee-nested.js` | nested tee delivers to all leaves in order; single-leaf read does not hang |
 | `draining-reader.js` | TS only (C++ cell asserts the global's absence): `expectedLength` pass-through (bigint for FLS, undefined for ITS, undefined after release); a single read drains every synchronously buffered chunk plus the close sentinel in one batch (tee-sibling backlog), and over a rendezvous stream the first read sweeps every write made before it, one chunk per write (the close sentinel with them or in its own read); write/close settlement through the conduit; lock exclusivity and release |
 | `body-integration.js` | Response/Request with identity-stream bodies: `text()` drives the rendezvous; `resp.body` is the same stream object (unwrapped, unconsumed, unlocked); FLS happy path and underwrite through body consumption (types per ledger #11); multi-megabyte patterned bodies verified byte-for-byte through `arrayBuffer()` (ITS and FLS Response, Request) |
+| `content-length.js` | the Content-Length a FixedLengthStream body carries through the SELF echo: the readable and branches teed before any read carry the full length (parity); branches teed after a read (ledger #26) |
 | `pipe-integration.js` | `pipeTo`/`pipeThrough` between identity streams (ledger #15): TS delivery (small and multi-megabyte patterned bodies), completion, and both error-propagation directions with original reasons; C++ not-implemented wall (rejection for pipeTo, synchronous throw for pipeThrough); circular `pipeThrough(its)` with the `TODO(streams-ts)` pin |
 | `payload-helpers.js` | shared machinery: continuous prime-modulus byte pattern for large-body generation and byte-exact verification |
 | `reentrancy.js` | user code re-entering mid-processing: `Object.prototype.then` interception during read resolution (consulted once per read) incl. a re-entrant `writer.close()` or `writer.abort()` from inside the getter (an abort rejects the write being answered, in TS); close/write/sibling-cancel from read continuations; second-concurrent-read divergence (ledger #16) |

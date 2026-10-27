@@ -314,6 +314,8 @@ export {
   byteSourceExpectedLengthRange,
   byteSourceExpectedLengthContract,
   byteSourceExpectedLengthHeldRequest,
+  byteSourceForkBeforeReadKeepsLength,
+  byteSourceForkAfterReadSendsChunked,
 } from 'expected-length';
 
 export { readerMembersOnOtherReaderClasses } from 'reader-brand-checks';

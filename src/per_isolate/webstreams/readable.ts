@@ -2703,11 +2703,11 @@ class ReadableStreamDrainingReader<R> {
     }
   }
 
-  // The non-standard expectedLength pass-through for the C++ bridge: the
-  // TOTAL bytes the underlying source declared it will produce
-  // (undefined = unknown → chunked encoding). A construction-time value,
-  // cached on the controller; backend-blind via the chained helper.
-  // Returns undefined after release.
+  // The non-standard expectedLength the underlying source declared: the
+  // TOTAL bytes it will produce (undefined = unknown). A construction-time
+  // value, cached on the controller; backend-blind via the chained helper.
+  // The C++ bridge asks the stream instead (getReadableStreamExpectedLength),
+  // which also accounts for reads. Returns undefined after release.
   get expectedLength(): bigint | undefined {
     assertIsReadableStreamDrainingReader(this);
     const stream = getReaderStream<R>(this);
@@ -3580,6 +3580,10 @@ class ReadableStream<R> {
   // teed again is closed at the tee (see readableStreamTee).
   #consumer?: StreamConsumerType<R> | undefined;
   #disturbed: boolean = false;
+  // Whether this stream is a tee branch or detached copy (makeShell) of a
+  // stream that had been read from, or was itself such a copy, before the
+  // fork (see getReadableStreamExpectedLength).
+  #forkedAfterRead: boolean = false;
   #state: ReadableStreamState = 'readable';
   #storedError?: unknown;
   // The Node.js interop closed-promise (see kIsClosedPromise), created on
@@ -3649,9 +3653,23 @@ class ReadableStream<R> {
       return promise;
     };
 
+    // The total the stream still has to deliver, if known: the C++ bridge's
+    // length query (a body's Content-Length). A queued source's declaration
+    // is its stream's total, and the controller, shared by every tee branch,
+    // does not count what a stream has already passed. So a queued stream
+    // reports it only while nothing has been read from it, nor, for a tee
+    // branch or detached copy, before the fork. A native stream's forks are
+    // fresh streams over sources that count what is left, and a disturbed
+    // native stream cannot be pumped (extraction rejects it).
     getReadableStreamExpectedLength = <R>(stream: ReadableStream<R>) => {
       const controller = stream.#controller;
       if (controller === undefined) return undefined;
+      if (
+        !isNativeController(controller) &&
+        (stream.#disturbed || stream.#forkedAfterRead)
+      ) {
+        return undefined;
+      }
       return getControllerExpectedLength(controller);
     };
 
@@ -3893,8 +3911,10 @@ class ReadableStream<R> {
 
     // A shell carries another stream's state forward: a tee branch, or the
     // stream detach() moves a body to. It copies the state, stored error and
-    // pending closure, and shares `controller`, if any; the caller gives it a
-    // consumer when it has data to read.
+    // pending closure, records whether anything was read before the fork,
+    // and shares `controller`, if any; the caller gives it a consumer when
+    // it has data to read. Callers make shells before handing `from` off,
+    // which disturbs it.
     const makeShell = <R>(
       from: ReadableStream<R>,
       controller?: AnyReadableController
@@ -3903,6 +3923,7 @@ class ReadableStream<R> {
       shell.#state = from.#state;
       shell.#storedError = from.#storedError;
       shell.#pendingClosure = from.#pendingClosure;
+      shell.#forkedAfterRead = from.#disturbed || from.#forkedAfterRead;
       shell.#controller = controller;
       return shell;
     };

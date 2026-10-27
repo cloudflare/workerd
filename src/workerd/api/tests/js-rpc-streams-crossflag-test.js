@@ -320,6 +320,42 @@ export const readableLength = {
       length: null,
       text: 'unsized',
     });
+
+    // A stream read from before the transfer has only part of its declared total left. A
+    // TypeScript origin sends it with no length. A C++ origin still declares the total, so the
+    // body the peer forwards falls short and reading it fails.
+    for (const type of [undefined, 'bytes']) {
+      const partlyRead = new ReadableStream({
+        type,
+        expectedLength: bytes.byteLength,
+        start(c) {
+          c.enqueue(bytes.slice(0, 5));
+          c.enqueue(bytes.slice(5));
+          c.close();
+        },
+      });
+      // The byte stream is read through a BYOB reader, as a default read of a C++ byte stream
+      // takes every queued chunk.
+      const byob = type === 'bytes';
+      const reader = partlyRead.getReader(byob ? { mode: 'byob' } : {});
+      const { value } = await reader.read(byob ? new Uint8Array(5) : undefined);
+      assert.strictEqual(new TextDecoder().decode(value), 'known');
+      reader.releaseLock();
+      const inspected = env.PEER.inspectLength(partlyRead);
+      if (usingTsImpl) {
+        assert.deepStrictEqual(
+          await inspected,
+          { length: null, text: ' length' },
+          String(type)
+        );
+      } else {
+        await assert.rejects(
+          inspected,
+          { message: 'Network connection lost.' },
+          String(type)
+        );
+      }
+    }
   },
 };
 

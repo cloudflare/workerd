@@ -22,8 +22,17 @@
 // and so does a close() short of it; either errors the stream with that
 // error. C++ enforces neither: every delivery reaches the reader, and
 // close() closes the stream.
+//
+// DIVERGENCE (ledger #44): the forks of a byte source declaring
+// expectedLength (a tee branch, a branch teed again, the copy
+// new Request() makes) carry the declared length in TypeScript when made
+// before any read; C++ gives tee branches no length, so they go out
+// chunked. The declaration is the stream's total, so once anything has
+// been read before a fork, the fork and its own forks go out chunked in
+// both (PARITY). A partly read stream itself (ledger #45) is pinned in
+// js-rpc-streams-crossflag-test.js, as no consumer here accepts one.
 
-import { ok, rejects, strictEqual, throws } from 'node:assert';
+import { deepStrictEqual, ok, rejects, strictEqual, throws } from 'node:assert';
 import { usingTsImpl } from 'which-impl';
 
 function byteSource(expectedLength, byteCount = 0) {
@@ -264,6 +273,93 @@ export const byteSourceExpectedLengthHeldRequest = {
           strictEqual((await reader.read()).done, true);
         }
       }
+    }
+  },
+};
+
+// A byte source that declares the 10 bytes it delivers, in two chunks.
+function tenByteSource() {
+  const enc = new TextEncoder();
+  return new ReadableStream({
+    type: 'bytes',
+    expectedLength: 10,
+    start(c) {
+      c.enqueue(enc.encode('01234'));
+      c.enqueue(enc.encode('56789'));
+      c.close();
+    },
+  });
+}
+
+// Reads the first five bytes and releases the reader. A BYOB read, as a
+// default read of a C++ byte stream takes every queued chunk (ledger #17).
+async function readFive(stream) {
+  const reader = stream.getReader({ mode: 'byob' });
+  const { value } = await reader.read(new Uint8Array(5));
+  reader.releaseLock();
+  return new TextDecoder().decode(value);
+}
+
+// Posts the request through SELF, and returns the Content-Length it carried
+// and the body echoed back.
+async function post(env, request) {
+  const resp = await env.SELF.fetch(request);
+  const text = await resp.text();
+  return [resp.headers.get('observed-content-length'), text];
+}
+
+function requestWith(body) {
+  return new Request('http://example.org', { method: 'POST', body });
+}
+
+// DIVERGENCE (ledger #44)
+export const byteSourceForkBeforeReadKeepsLength = {
+  async test(ctrl, env) {
+    const expected = usingTsImpl ? '10' : 'null';
+    const [a, b] = tenByteSource().tee();
+    const [c, d] = a.tee();
+    for (const request of [
+      requestWith(b),
+      requestWith(c),
+      new Request(requestWith(d)),
+    ]) {
+      deepStrictEqual(await post(env, request), [expected, '0123456789']);
+    }
+  },
+};
+
+// PARITY, except for the unread sibling (ledger #44)
+export const byteSourceForkAfterReadSendsChunked = {
+  async test(ctrl, env) {
+    // Read before the tee: both branches, a branch teed again, and the
+    // copy new Request() makes.
+    {
+      const rs = tenByteSource();
+      strictEqual(await readFive(rs), '01234');
+      const [a, b] = rs.tee();
+      const [c, d] = a.tee();
+      for (const request of [
+        requestWith(b),
+        requestWith(c),
+        new Request(requestWith(d)),
+      ]) {
+        deepStrictEqual(await post(env, request), ['null', '56789']);
+      }
+    }
+
+    // A branch read, then teed again: its branches go out chunked, while
+    // its unread sibling keeps the declared length in TypeScript.
+    {
+      const [a, b] = tenByteSource().tee();
+      strictEqual(await readFive(a), '01234');
+      const [c, d] = a.tee();
+      for (const request of [requestWith(c), new Request(requestWith(d))]) {
+        deepStrictEqual(await post(env, request), ['null', '56789']);
+      }
+      deepStrictEqual(await post(env, requestWith(b)), [
+        usingTsImpl ? '10' : 'null',
+        '0123456789',
+      ]);
     }
   },
 };

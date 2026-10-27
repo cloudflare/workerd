@@ -217,6 +217,11 @@ export {
 } from 'integration-body-memory';
 
 export {
+  forkBeforeReadKeepsDeclaredLength,
+  forkAfterReadSendsChunked,
+} from 'expected-length';
+
+export {
   disturbedStreamIntoResponse,
   lockedStreamIntoResponse,
   bodyIdentityAndLockCoupling,
