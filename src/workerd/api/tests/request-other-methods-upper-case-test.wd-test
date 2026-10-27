@@ -1,0 +1,15 @@
+using Workerd = import "/workerd/workerd.capnp";
+
+const unitTests :Workerd.Config = (
+  services = [
+    ( name = "request-other-methods-upper-case-test",
+      worker = (
+        modules = [
+          (name = "worker", esModule = embed "request-other-methods-upper-case-test.js")
+        ],
+        compatibilityFlags = ["nodejs_compat", "upper_case_all_http_methods"],
+      )
+    ),
+  ],
+  autogates = ["workerd-autogate-other-http-methods"],
+);
