@@ -40,7 +40,8 @@ patch that no longer applies to the new archive reports
 `CONTENT_DOES_NOT_MATCH_TARGET`. Rebase it onto the new upstream file and keep
 its intent. If you add, remove, or rename a patch, update the patch list and
 regenerate `build/deps/gen/shared_deps.MODULE.bazel` with
-`./build/deps/update-deps.py wpt`, which keeps the pinned `freeze_version`.
+`./build/deps/update-deps.py wpt`, which keeps the pinned `freeze_version`,
+then refresh `MODULE.bazel.lock` with `just update-lockfile`.
 
 Bazel deletes the extracted repository when a patch fails, but the archive
 remains in the repository cache at
@@ -72,11 +73,18 @@ From the workerd root, run:
 ./build/deps/update_wpt.py
 ```
 
+Then refresh the lockfile, which Bazel otherwise rejects as stale:
+
+```bash
+just update-lockfile
+```
+
 The updater selects the newest published `wpt-*` release from
 `cloudflare/workerd-tools`. A normal update changes only:
 
 * `build/deps/shared_deps.jsonc`
 * `build/deps/gen/shared_deps.MODULE.bazel`
+* `MODULE.bazel.lock`
 
 Verify that the new tag appears consistently in `freeze_version`,
 `strip_prefix`, and the archive URL, and that a new SHA-256 was generated. Do

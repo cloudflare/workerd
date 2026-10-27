@@ -45,6 +45,13 @@ build --incompatible_remote_local_fallback_for_remote_cache
 # Require custom module extensions to return metadata
 common --incompatible_require_repo_extension_metadata=root
 
+# Fail instead of rewriting MODULE.bazel.lock when it is out of date or lacks an extension a
+# command needs, so that a change to a MODULE.bazel file or to a module extension's inputs (e.g.
+# build/python_metadata.bzl) has to commit the refreshed lockfile with it. Regenerate it with
+# `just update-lockfile`, not `bazel mod deps`: that evaluates every extension in the module
+# graph, and protobuf's crate_universe one fails.
+common --lockfile_mode=error
+
 # Use -isystem for cc_library includes attribute – this prevents warnings for misbehaving external
 # code. Applies to both Linux and macOS via the shared `:unix` config (see the
 # `build:linux --config=unix` / `build:macos --config=unix` lines below).

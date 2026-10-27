@@ -1,4 +1,4 @@
-# After updating this file, make sure to run "bazel mod tidy"
+# After updating this file, make sure to run "just update-lockfile"
 load("@bazel_lib//lib:base64.bzl", "base64")
 load("@bazel_lib//lib:strings.bzl", "chr")
 

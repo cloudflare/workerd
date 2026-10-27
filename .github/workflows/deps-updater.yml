@@ -35,7 +35,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Update rust dependencies
-        run: bazel fetch --repo_env=CARGO_BAZEL_REPIN=all --repo=@crates_vendor
+        run: bazel fetch --lockfile_mode=update --repo_env=CARGO_BAZEL_REPIN=all --repo=@crates_vendor
+      - name: Update MODULE.bazel.lock
+        # The same as `just update-lockfile`.
+        run: bazel build --lockfile_mode=update --nobuild //... //build/deps/formatters:rustfmt@rule
       - name: Reformat changed files
         run: ./tools/cross/format.py git
       - name: Open pull request

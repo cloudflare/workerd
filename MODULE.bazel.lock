@@ -1056,7 +1056,7 @@
     },
     "//build/deps:pyodide.bzl%pyodide": {
       "general": {
-        "bzlTransitiveDigest": "x0hizSFn3RuZD5g2sVAROCrLWqgtQ4LudX4OZourhCk=",
+        "bzlTransitiveDigest": "regD5rtwbx4YVkWH0gl19fBAloJyfXWEYt1mYn1gw3g=",
         "usagesDigest": "D34wPmZYfmECvOxNBPDzjLSxn305F92xp6ZX7mjGPnk=",
         "recordedInputs": [
           "REPO_MAPPING:,bazel_lib bazel_lib+",

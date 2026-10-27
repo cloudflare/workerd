@@ -1,0 +1,7 @@
+# Check out Bazel files with LF line endings on every platform, regardless of core.autocrlf (true by
+# default in Git for Windows and on GitHub's Windows runners). MODULE.bazel.lock records digests of
+# the bytes of each module extension's .bzl files and of the tag values in MODULE.bazel files,
+# multi-line strings included, so a CRLF checkout fails `--lockfile_mode=error` (see .bazelrc).
+*.bzl text eol=lf
+*.bazel text eol=lf
+MODULE.bazel.lock text eol=lf
