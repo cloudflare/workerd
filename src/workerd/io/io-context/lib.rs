@@ -9,8 +9,10 @@
 //! `jsg`.
 
 mod ffi;
+mod trace;
 
 use std::any::Any;
+use std::ffi::CStr;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -23,6 +25,9 @@ use std::time::UNIX_EPOCH;
 
 use ffi::bridge;
 use kj_rs::KjOwn;
+pub use trace::SpanBuilder;
+pub use trace::TagValue;
+pub use trace::TraceContext;
 
 /// The message of the error C++ `IoContext::current()` throws outside a request.
 // A copy of `kAsyncIoErrorMessage` in src/workerd/io/io-context.c++. When changing this message,
@@ -153,6 +158,27 @@ impl<'s> IoContext<'s> {
             slot,
             _object: object,
         })
+    }
+
+    /// Starts a span of internal tracing, as C++ `IoContext::makeTraceSpan()` does. It is a child
+    /// of the span current in the async context frame, or of the request's span, and ends when
+    /// the returned [`SpanBuilder`] is dropped. If the request is not traced, it records nothing.
+    ///
+    /// # Errors
+    /// Fails with an internal error if this `IoContext` is no longer the current one.
+    pub fn make_trace_span(&self, name: &'static CStr) -> jsg::Result<SpanBuilder> {
+        SpanBuilder::start(self.id, name)
+    }
+
+    /// Starts a span of both internal and user tracing, as C++ `IoContext::makeUserTraceSpan()`
+    /// does, which ends when the returned [`TraceContext`] is dropped. If the request has async
+    /// tracing, the span is an operation, which the next [`IoContext::await_io`] in the same turn
+    /// reports its wait under.
+    ///
+    /// # Errors
+    /// Fails with an internal error if this `IoContext` is no longer the current one.
+    pub fn make_user_trace_span(&self, name: &'static CStr) -> jsg::Result<TraceContext> {
+        TraceContext::start(self.id, name)
     }
 }
 

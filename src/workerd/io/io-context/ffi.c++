@@ -27,6 +27,27 @@ IoContext& currentWithId(uint64_t id) {
   return context;
 }
 
+// Wraps a `Literal` (see ffi.h) without copying it.
+kj::ConstString wrapLiteral(Literal bytes) {
+  KJ_ASSERT(bytes.size() > 0 && bytes.back() == '\0', "the literal is not NUL-terminated");
+  return kj::ConstString(reinterpret_cast<const char*>(bytes.data()), bytes.size() - 1,
+      kj::NullArrayDisposer::instance);
+}
+
+// Sets a tag on a SpanBuilder or TraceContext, if the span is observed; see ffi.h for which
+// strings are copied.
+template <typename Span, typename Value>
+void setTag(Span& span, Literal key, Value value) {
+  if (!span.isObserved()) return;
+  if constexpr (kj::isSameType<Value, ::rust::Str>()) {
+    span.setTag(wrapLiteral(key), kj::str(kj::arrayPtr(value.data(), value.size())));
+  } else if constexpr (kj::isSameType<Value, Literal>()) {
+    span.setTag(wrapLiteral(key), wrapLiteral(value));
+  } else {
+    span.setTag(wrapLiteral(key), value);
+  }
+}
+
 }  // namespace
 
 kj::Maybe<IoContext&> io_context_try_current() {
@@ -96,6 +117,58 @@ kj::Own<IoOwnedObject> io_context_add_object(uint64_t id, ::rust::Box<IoOwnedSlo
   auto& context = currentWithId(id);
   auto object = context.addObject(kj::heap<::rust::Box<IoOwnedSlot>>(kj::mv(slot)));
   return kj::heap<IoOwnedObject>(kj::heap(kj::mv(object)));
+}
+
+kj::Own<SpanBuilder> io_context_make_trace_span(uint64_t id, Literal name) {
+  return kj::heap(currentWithId(id).makeTraceSpan(wrapLiteral(name)));
+}
+
+kj::Own<TraceContext> io_context_make_user_trace_span(uint64_t id, Literal name) {
+  return kj::heap(currentWithId(id).makeUserTraceSpan(wrapLiteral(name)));
+}
+
+kj::Own<SpanBuilder> span_builder_new_child(SpanBuilder& span, Literal name) {
+  return kj::heap(span.newChild(wrapLiteral(name)));
+}
+
+void span_builder_set_tag_bool(SpanBuilder& span, Literal key, bool value) {
+  setTag(span, key, value);
+}
+
+void span_builder_set_tag_int(SpanBuilder& span, Literal key, int64_t value) {
+  setTag(span, key, value);
+}
+
+void span_builder_set_tag_float(SpanBuilder& span, Literal key, double value) {
+  setTag(span, key, value);
+}
+
+void span_builder_set_tag_str(SpanBuilder& span, Literal key, ::rust::Str value) {
+  setTag(span, key, value);
+}
+
+void span_builder_set_tag_literal(SpanBuilder& span, Literal key, Literal value) {
+  setTag(span, key, value);
+}
+
+void trace_context_set_tag_bool(TraceContext& context, Literal key, bool value) {
+  setTag(context, key, value);
+}
+
+void trace_context_set_tag_int(TraceContext& context, Literal key, int64_t value) {
+  setTag(context, key, value);
+}
+
+void trace_context_set_tag_float(TraceContext& context, Literal key, double value) {
+  setTag(context, key, value);
+}
+
+void trace_context_set_tag_str(TraceContext& context, Literal key, ::rust::Str value) {
+  setTag(context, key, value);
+}
+
+void trace_context_set_tag_literal(TraceContext& context, Literal key, Literal value) {
+  setTag(context, key, value);
 }
 
 }  // namespace workerd::io_context

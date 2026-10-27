@@ -10,6 +10,7 @@ wd_rust_crate(
         "ffi.rs",
         "lib.rs",
         "lib-test.rs",
+        "trace.rs",
     ],
     cxx_bridge_deps = ["//src/workerd/io"],
     cxx_bridge_hdrs = ["ffi.h"],

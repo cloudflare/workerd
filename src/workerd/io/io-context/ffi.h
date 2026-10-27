@@ -54,4 +54,30 @@ class IoOwnedObject {
 // IoContext::addObject() for `slot`.
 kj::Own<IoOwnedObject> io_context_add_object(uint64_t id, ::rust::Box<IoOwnedSlot> slot);
 
+// Span names, tag keys and literal tag values below are passed as `literal` bytes: a
+// NUL-terminated string including its NUL, which must outlive the span, as a string literal
+// does. They are not copied.
+using Literal = ::rust::Slice<const uint8_t>;
+
+// IoContext::makeTraceSpan() and makeUserTraceSpan(), in the current async context frame.
+kj::Own<SpanBuilder> io_context_make_trace_span(uint64_t id, Literal name);
+kj::Own<TraceContext> io_context_make_user_trace_span(uint64_t id, Literal name);
+
+// SpanBuilder::newChild().
+kj::Own<SpanBuilder> span_builder_new_child(SpanBuilder& span, Literal name);
+
+// SpanBuilder::setTag() and TraceContext::setTag(). On a span that is not observed, these do
+// nothing. On one that is, a `::rust::Str` value is copied, since it is not NUL-terminated and
+// may not outlive the call; the key and a `Literal` value are not.
+void span_builder_set_tag_bool(SpanBuilder& span, Literal key, bool value);
+void span_builder_set_tag_int(SpanBuilder& span, Literal key, int64_t value);
+void span_builder_set_tag_float(SpanBuilder& span, Literal key, double value);
+void span_builder_set_tag_str(SpanBuilder& span, Literal key, ::rust::Str value);
+void span_builder_set_tag_literal(SpanBuilder& span, Literal key, Literal value);
+void trace_context_set_tag_bool(TraceContext& context, Literal key, bool value);
+void trace_context_set_tag_int(TraceContext& context, Literal key, int64_t value);
+void trace_context_set_tag_float(TraceContext& context, Literal key, double value);
+void trace_context_set_tag_str(TraceContext& context, Literal key, ::rust::Str value);
+void trace_context_set_tag_literal(TraceContext& context, Literal key, Literal value);
+
 }  // namespace workerd::io_context

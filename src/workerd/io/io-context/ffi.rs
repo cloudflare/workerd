@@ -7,7 +7,8 @@
 #![allow(
     unsafe_code,
     reason = "the cxx bridge expands to unsafe FFI glue, current_id() reads through the \
-              IoContext reference it returns, and io_callback_run() opens a scope C++ has set up"
+              IoContext reference it returns, io_callback_run() opens a scope C++ has set up, and \
+              the trace span calls take literals that C++ does not copy"
 )]
 
 use std::any::Any;
@@ -23,6 +24,8 @@ pub mod bridge {
         include!("workerd/io/io-context.h");
 
         type IoContext;
+        type SpanBuilder;
+        type TraceContext;
     }
 
     unsafe extern "C++" {
@@ -41,6 +44,53 @@ pub mod bridge {
             callback: Box<IoCallback>,
         ) -> Result<()>;
         fn io_context_add_object(id: u64, slot: Box<IoOwnedSlot>) -> Result<KjOwn<IoOwnedObject>>;
+
+        // The `&[u8]` names, keys and literal values below are NUL-terminated strings with the
+        // NUL, which C++ requires and does not copy, so they must outlive the spans: the
+        // `&'static CStr`s that `trace.rs` passes.
+        unsafe fn io_context_make_trace_span(id: u64, name: &[u8]) -> Result<KjOwn<SpanBuilder>>;
+        unsafe fn io_context_make_user_trace_span(
+            id: u64,
+            name: &[u8],
+        ) -> Result<KjOwn<TraceContext>>;
+        unsafe fn span_builder_new_child(
+            span: Pin<&mut SpanBuilder>,
+            name: &[u8],
+        ) -> KjOwn<SpanBuilder>;
+        unsafe fn span_builder_set_tag_bool(span: Pin<&mut SpanBuilder>, key: &[u8], value: bool);
+        unsafe fn span_builder_set_tag_int(span: Pin<&mut SpanBuilder>, key: &[u8], value: i64);
+        unsafe fn span_builder_set_tag_float(span: Pin<&mut SpanBuilder>, key: &[u8], value: f64);
+        unsafe fn span_builder_set_tag_str(span: Pin<&mut SpanBuilder>, key: &[u8], value: &str);
+        unsafe fn span_builder_set_tag_literal(
+            span: Pin<&mut SpanBuilder>,
+            key: &[u8],
+            value: &[u8],
+        );
+        unsafe fn trace_context_set_tag_bool(
+            context: Pin<&mut TraceContext>,
+            key: &[u8],
+            value: bool,
+        );
+        unsafe fn trace_context_set_tag_int(
+            context: Pin<&mut TraceContext>,
+            key: &[u8],
+            value: i64,
+        );
+        unsafe fn trace_context_set_tag_float(
+            context: Pin<&mut TraceContext>,
+            key: &[u8],
+            value: f64,
+        );
+        unsafe fn trace_context_set_tag_str(
+            context: Pin<&mut TraceContext>,
+            key: &[u8],
+            value: &str,
+        );
+        unsafe fn trace_context_set_tag_literal(
+            context: Pin<&mut TraceContext>,
+            key: &[u8],
+            value: &[u8],
+        );
     }
 
     extern "Rust" {
