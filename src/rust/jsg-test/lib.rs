@@ -22,6 +22,7 @@ mod ffi {
         type MaybeLocal = jsg::v8::ffi::MaybeLocal;
         type SerializeOptions = jsg::v8::ffi::SerializeOptions;
         type DeserializeOptions = jsg::v8::ffi::DeserializeOptions;
+        type Serialized = jsg::v8::ffi::Serialized;
         type ModuleRegistry = jsg::v8::ffi::ModuleRegistry;
     }
 
@@ -136,24 +137,28 @@ mod ffi {
         #[allow(dead_code)]
         pub fn cpp_sees_empty_maybe_local(value: MaybeLocal) -> bool;
 
-        /// Serializes `value` with C++ JSG's `jsg::Serializer` and `options`. Fails if
-        /// serialization throws.
+        /// Serializes `value` with C++ JSG's `jsg::Serializer` and `options`, after transferring
+        /// `transfer`. Fails if serialization throws.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
         pub unsafe fn cpp_serialize(
             isolate: *mut Isolate,
             value: Local,
             options: &SerializeOptions,
-        ) -> Result<Vec<u8>>;
+            transfer: &[Local],
+            result: &mut Serialized,
+        ) -> Result<()>;
 
-        /// Deserializes `data` with C++ JSG's `jsg::Deserializer` and `options`. Fails if
-        /// deserialization throws.
+        /// Deserializes `data` with C++ JSG's `jsg::Deserializer`, `options` and the given
+        /// backing stores. Fails if deserialization throws.
         #[expect(clippy::allow_attributes)]
         #[allow(dead_code)]
         pub unsafe fn cpp_deserialize(
             isolate: *mut Isolate,
             data: &[u8],
             options: &DeserializeOptions,
+            transferred_array_buffers: &[usize],
+            shared_array_buffers: &[usize],
         ) -> Result<Local>;
 
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
@@ -544,7 +549,7 @@ impl Harness {
     ///
     /// Panics if serialization throws.
     pub fn cpp_serialize<'s>(lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) -> Vec<u8> {
-        Self::cpp_serialize_with(lock, value, &jsg::ser::SerializeOptions::default())
+        Self::cpp_serialize_with(lock, value, &jsg::ser::SerializeOptions::default()).data
     }
 
     /// Serializes `value` with C++ JSG's `jsg::Serializer` and the same options, to compare with
@@ -556,8 +561,14 @@ impl Harness {
     pub fn cpp_serialize_with<'s>(
         lock: &mut jsg::Lock<'s>,
         value: v8::Local<'s, v8::Value>,
-        options: &jsg::ser::SerializeOptions,
-    ) -> Vec<u8> {
+        options: &jsg::ser::SerializeOptions<'_, 's>,
+    ) -> jsg::ser::Serialized {
+        let transfer: Vec<_> = options
+            .transfer
+            .iter()
+            // SAFETY: the handles are used only in the call below, while their scope is open.
+            .map(|item| unsafe { item.into_ffi() })
+            .collect();
         let options = jsg::v8::ffi::SerializeOptions {
             has_version: options.version.is_some(),
             version: options.version.unwrap_or_default(),
@@ -566,10 +577,31 @@ impl Harness {
                 == jsg::ser::ClassInstances::AsPlainObjects,
             errors_are_host_objects: false,
         };
+        let mut result = jsg::v8::ffi::Serialized::default();
         // SAFETY: `lock` proves the isolate is locked, a context is entered and a HandleScope is
-        // open, which `value` belongs to.
-        unsafe { ffi::cpp_serialize(lock.isolate().as_ffi(), value.into_ffi(), &options) }
-            .expect("C++ JSG should serialize the value")
+        // open, which `value` and the values to transfer belong to.
+        unsafe {
+            ffi::cpp_serialize(
+                lock.isolate().as_ffi(),
+                value.into_ffi(),
+                &options,
+                &transfer,
+                &mut result,
+            )
+        }
+        .expect("C++ JSG should serialize the value");
+        let take = |addresses: Vec<usize>| {
+            addresses
+                .into_iter()
+                // SAFETY: C++ handed over each heap-allocated std::shared_ptr.
+                .map(|address| unsafe { v8::BackingStore::from_ffi(address) })
+                .collect()
+        };
+        jsg::ser::Serialized {
+            data: result.data,
+            shared_array_buffers: take(result.shared_array_buffers),
+            transferred_array_buffers: take(result.transferred_array_buffers),
+        }
     }
 
     /// Deserializes `data` with C++ JSG's `jsg::Deserializer`, to compare with
@@ -593,17 +625,32 @@ impl Harness {
         data: &[u8],
         options: &jsg::ser::DeserializeOptions<'_>,
     ) -> v8::Local<'s, v8::Value> {
-        let options = jsg::v8::ffi::DeserializeOptions {
+        let ffi_options = jsg::v8::ffi::DeserializeOptions {
             has_version: options.version.is_some(),
             version: options.version.unwrap_or_default(),
             read_header: options.read_header,
             preserve_stack_in_errors: options.preserve_stack_in_errors,
+            has_shared_array_buffers: options.shared_array_buffers.is_some(),
         };
+        let addresses = |stores: &[v8::BackingStore]| {
+            stores
+                .iter()
+                .map(v8::BackingStore::as_ffi)
+                .collect::<Vec<_>>()
+        };
+        let transferred = addresses(options.transferred_array_buffers);
+        let shared = addresses(options.shared_array_buffers.unwrap_or_default());
         // SAFETY: as for `cpp_serialize_with`; the result belongs to the lock's scope.
         unsafe {
             v8::Local::from_ffi(
-                ffi::cpp_deserialize(lock.isolate().as_ffi(), data, &options)
-                    .expect("C++ JSG should deserialize the data"),
+                ffi::cpp_deserialize(
+                    lock.isolate().as_ffi(),
+                    data,
+                    &ffi_options,
+                    &transferred,
+                    &shared,
+                )
+                .expect("C++ JSG should deserialize the data"),
             )
         }
     }

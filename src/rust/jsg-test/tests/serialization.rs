@@ -371,17 +371,41 @@ fn missing_or_unsupported_header_is_an_internal_error() {
 }
 
 #[test]
-fn shared_array_buffers_are_written_as_cpp_jsg_writes_them() {
+fn shared_array_buffers_are_shared_with_the_deserializer() {
     Harness::new().run_in_context(|lock, ctx| {
         let value = eval(
             lock,
             ctx,
-            "(() => { const b = new SharedArrayBuffer(1); return [b, new SharedArrayBuffer(2), b]; })()",
+            "globalThis.b = new SharedArrayBuffer(1); [b, new SharedArrayBuffer(2), b]",
         );
-        let data = jsg::ser::serialize(lock, value).unwrap();
-        assert_eq!(data, Harness::cpp_serialize(lock, value));
-        // No deserializer is given the buffers.
-        deserialize_exception(lock, &data);
+        let serialized =
+            jsg::ser::serialize_with(lock, value, &jsg::ser::SerializeOptions::default()).unwrap();
+        let cpp = Harness::cpp_serialize_with(lock, value, &jsg::ser::SerializeOptions::default());
+        assert_eq!(serialized.data, cpp.data);
+        assert_eq!(serialized.shared_array_buffers.len(), 2);
+        assert!(
+            serialized
+                .shared_array_buffers
+                .iter()
+                .all(v8::BackingStore::is_shared)
+        );
+
+        // Each reader reads the other's data with its backing stores, and shares the buffers.
+        let check = "v[0] === v[2] && v[0] !== b && v[1].byteLength === 2 && \
+                     (new Uint8Array(b)[0] = 5, new Uint8Array(v[0])[0] === 5)";
+        let copy = jsg::ser::deserialize_with(lock, &cpp.data, &cpp.deserialize_options()).unwrap();
+        ctx.set_global(lock, "v", copy);
+        assert!(ctx.eval::<bool>(lock, check).unwrap(), "Rust JSG read");
+        let copy = Harness::cpp_deserialize_with(
+            lock,
+            &serialized.data,
+            &serialized.deserialize_options(),
+        );
+        ctx.set_global(lock, "v", copy);
+        assert!(ctx.eval::<bool>(lock, check).unwrap(), "C++ JSG read");
+
+        // Without the backing stores, the data can't be read.
+        deserialize_exception(lock, &serialized.data);
         Ok(())
     });
 }
@@ -389,19 +413,19 @@ fn shared_array_buffers_are_written_as_cpp_jsg_writes_them() {
 /// Serializes the value of `expr` with `options` and checks that the bytes are those C++ JSG writes
 /// with the same options, and that what Rust JSG and C++ JSG read from them with `read` satisfies
 /// `check`, a JavaScript expression of `v`.
-fn assert_round_trip_with(
-    lock: &mut jsg::Lock<'_>,
+fn assert_round_trip_with<'s>(
+    lock: &mut jsg::Lock<'s>,
     ctx: &EvalContext<'_>,
     expr: &str,
-    options: &jsg::ser::SerializeOptions,
+    options: &jsg::ser::SerializeOptions<'_, 's>,
     read: &jsg::ser::DeserializeOptions<'_>,
     check: &str,
 ) {
     let value = eval(lock, ctx, expr);
-    let data = jsg::ser::serialize_with(lock, value, options).unwrap();
+    let data = jsg::ser::serialize_with(lock, value, options).unwrap().data;
     assert_eq!(
         data,
-        Harness::cpp_serialize_with(lock, value, options),
+        Harness::cpp_serialize_with(lock, value, options).data,
         "{expr}: {options:?}"
     );
 
@@ -654,6 +678,225 @@ fn class_instances_are_plain_objects_or_rejected() {
             Ok(())
         });
     }
+}
+
+/// Runs `setup`, which sets the globals `value` and `transfer`, an array of `count` values, and
+/// returns them.
+fn transfer_setup<'s>(
+    lock: &mut jsg::Lock<'s>,
+    ctx: &EvalContext<'_>,
+    setup: &str,
+    count: usize,
+) -> (v8::Local<'s, v8::Value>, Vec<v8::Local<'s, v8::Value>>) {
+    ctx.eval_raw(lock, setup).unwrap();
+    let value = eval(lock, ctx, "value");
+    let transfer = (0..count)
+        .map(|i| eval(lock, ctx, &format!("transfer[{i}]")))
+        .collect();
+    (value, transfer)
+}
+
+/// Serializes with each serializer what `setup` sets up, transferring `count` buffers, and checks
+/// that the bytes are the same, that `detached` holds after each, and that each reader reads with
+/// the other's buffers a value for which `check` holds.
+fn assert_transfer(
+    lock: &mut jsg::Lock<'_>,
+    ctx: &EvalContext<'_>,
+    setup: &str,
+    count: usize,
+    detached: &str,
+    check: &str,
+) {
+    let (value, transfer) = transfer_setup(lock, ctx, setup, count);
+    let options = jsg::ser::SerializeOptions {
+        transfer: &transfer,
+        ..Default::default()
+    };
+    let serialized = jsg::ser::serialize_with(lock, value, &options).unwrap();
+    assert!(
+        ctx.eval::<bool>(lock, detached).unwrap(),
+        "{setup}: Rust JSG detached"
+    );
+
+    let (value, transfer) = transfer_setup(lock, ctx, setup, count);
+    let options = jsg::ser::SerializeOptions {
+        transfer: &transfer,
+        ..Default::default()
+    };
+    let cpp = Harness::cpp_serialize_with(lock, value, &options);
+    assert!(
+        ctx.eval::<bool>(lock, detached).unwrap(),
+        "{setup}: C++ JSG detached"
+    );
+    assert_eq!(serialized.data, cpp.data, "{setup}");
+    assert_eq!(
+        serialized.transferred_array_buffers.len(),
+        cpp.transferred_array_buffers.len(),
+        "{setup}"
+    );
+
+    let copy = jsg::ser::deserialize_with(lock, &cpp.data, &cpp.deserialize_options()).unwrap();
+    ctx.set_global(lock, "v", copy);
+    assert!(
+        ctx.eval::<bool>(lock, check).unwrap(),
+        "{setup}: Rust JSG read: {check}"
+    );
+    let copy =
+        Harness::cpp_deserialize_with(lock, &serialized.data, &serialized.deserialize_options());
+    ctx.set_global(lock, "v", copy);
+    assert!(
+        ctx.eval::<bool>(lock, check).unwrap(),
+        "{setup}: C++ JSG read: {check}"
+    );
+}
+
+#[test]
+fn transferred_array_buffers_move_to_the_deserializer() {
+    Harness::new().run_in_context(|lock, ctx| {
+        // A buffer and a view of it written after it.
+        assert_transfer(
+            lock,
+            ctx,
+            "globalThis.b = new ArrayBuffer(4); new Uint8Array(b)[1] = 9;
+             globalThis.value = { b, v: new Uint8Array(b, 1) }; globalThis.transfer = [b];",
+            1,
+            "b.byteLength === 0",
+            "v.b.byteLength === 4 && v.v.buffer === v.b && v.v[0] === 9",
+        );
+        // A view given for its buffer, and a value given twice, which is transferred once.
+        assert_transfer(
+            lock,
+            ctx,
+            "globalThis.b = new ArrayBuffer(2); globalThis.u = new Uint8Array(b); u[0] = 3;
+             globalThis.value = [u]; globalThis.transfer = [u, u];",
+            2,
+            "b.byteLength === 0 && u.length === 0",
+            "v[0][0] === 3 && v[0].buffer.byteLength === 2",
+        );
+        // A getter that serialization runs sees the buffer intact: it is detached afterwards.
+        assert_transfer(
+            lock,
+            ctx,
+            "globalThis.b = new ArrayBuffer(8);
+             globalThis.value = { get size() { return b.byteLength; }, b };
+             globalThis.transfer = [b];",
+            1,
+            "b.byteLength === 0",
+            "v.size === 8 && v.b.byteLength === 8",
+        );
+        // A buffer that the value doesn't hold is still detached, and passed on.
+        assert_transfer(
+            lock,
+            ctx,
+            "globalThis.b = new ArrayBuffer(1); globalThis.value = 1; globalThis.transfer = [b];",
+            1,
+            "b.byteLength === 0",
+            "v === 1",
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn values_that_cannot_be_transferred_throw() {
+    Harness::new().run_in_context(|lock, ctx| {
+        for (setup, name, message) in [
+            (
+                "globalThis.b = new ArrayBuffer(1); globalThis.transfer = [b, {}];",
+                "TypeError",
+                "Object is not transferable",
+            ),
+            (
+                "globalThis.b = new ArrayBuffer(1);
+                 globalThis.transfer = [b, new Uint8Array(new SharedArrayBuffer(1))];",
+                "DataCloneError",
+                "Object is not transferable.",
+            ),
+            (
+                "globalThis.b = new ArrayBuffer(1);
+                 globalThis.transfer = [b, new SharedArrayBuffer(1)];",
+                "TypeError",
+                "Object is not transferable",
+            ),
+        ] {
+            let (value, transfer) =
+                transfer_setup(lock, ctx, &format!("{setup} globalThis.value = b;"), 2);
+            let caught = lock
+                .try_catch(|lock| {
+                    let options = jsg::ser::SerializeOptions {
+                        transfer: &transfer,
+                        ..Default::default()
+                    };
+                    let result = jsg::ser::serialize_with(lock, value, &options);
+                    assert!(
+                        result.as_ref().is_err_and(jsg::Error::is_pending),
+                        "{setup}"
+                    );
+                    result.map(drop)
+                })
+                .unwrap();
+            assert_error(lock, ctx, caught.unwrap_err(), name, message);
+            // Nothing is detached.
+            assert!(
+                ctx.eval::<bool>(lock, "b.byteLength === 1").unwrap(),
+                "{setup}"
+            );
+        }
+        Ok(())
+    });
+}
+
+#[test]
+fn buffers_must_match_the_data() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let (value, transfer) = transfer_setup(
+            lock,
+            ctx,
+            "globalThis.value = new ArrayBuffer(1); globalThis.transfer = [value];",
+            1,
+        );
+        let options = jsg::ser::SerializeOptions {
+            transfer: &transfer,
+            ..Default::default()
+        };
+        let transferred = jsg::ser::serialize_with(lock, value, &options).unwrap();
+        let value = eval(lock, ctx, "new SharedArrayBuffer(1)");
+        let shared =
+            jsg::ser::serialize_with(lock, value, &jsg::ser::SerializeOptions::default()).unwrap();
+
+        // Data that refers to buffers the reader isn't given.
+        deserialize_exception(lock, &transferred.data);
+        let read = jsg::ser::DeserializeOptions {
+            shared_array_buffers: Some(&[]),
+            ..Default::default()
+        };
+        let caught = lock
+            .try_catch(|lock| jsg::ser::deserialize_with(lock, &shared.data, &read))
+            .unwrap();
+        let err = jsg::Error::from_js(lock, caught.unwrap_err()).unwrap();
+        assert!(err.message.starts_with("internal error"), "{}", err.message);
+
+        // Backing stores of the wrong kind.
+        for read in [
+            jsg::ser::DeserializeOptions {
+                transferred_array_buffers: &shared.shared_array_buffers,
+                ..Default::default()
+            },
+            jsg::ser::DeserializeOptions {
+                shared_array_buffers: Some(&transferred.transferred_array_buffers),
+                ..Default::default()
+            },
+        ] {
+            let err = jsg::ser::deserialize_with(lock, &shared.data, &read).unwrap_err();
+            assert!(!err.is_pending());
+            assert!(
+                err.message.contains("backing store must"),
+                "{}",
+                err.message
+            );
+        }
+        Ok(())
+    });
 }
 
 static CHECKED_WHILE_TERMINATING: AtomicBool = AtomicBool::new(false);

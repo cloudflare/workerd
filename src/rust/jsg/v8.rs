@@ -129,6 +129,19 @@ pub mod ffi {
         version: u32,
         read_header: bool,
         preserve_stack_in_errors: bool,
+        /// Whether the data's `SharedArrayBuffer`s are given, as `jsg::Deserializer`'s
+        /// `sharedArrayBuffers` is not none.
+        has_shared_array_buffers: bool,
+    }
+
+    /// What `ser::serialize_with` writes, as `jsg::Serializer::Released`. Each backing store is
+    /// the address of a heap-allocated `std::shared_ptr<v8::BackingStore>` that the receiver
+    /// owns.
+    #[derive(Debug, Default)]
+    struct Serialized {
+        data: Vec<u8>,
+        shared_array_buffers: Vec<usize>,
+        transferred_array_buffers: Vec<usize>,
     }
 
     /// Mirrors `v8::BackingStoreInitializationMode`. Must be kept in sync with
@@ -645,20 +658,24 @@ pub mod ffi {
 
         // Serialization
         // Leaves what serialization throws pending; see `call_into_js()`. Fallible: the result
-        // is a rust::Vec, and a version older than 13 throws.
+        // holds rust::Vecs, and a version older than 13 throws.
         pub unsafe fn local_serialize(
             isolate: *mut Isolate,
             value: &Local,
             options: &SerializeOptions,
-            result: &mut Vec<u8>,
+            transfer: &[Local],
+            result: &mut Serialized,
         ) -> Result<bool>;
         // Leaves what deserialization throws pending. Fallible: a missing or unsupported header,
-        // or a version older than 13, throws.
+        // a version older than 13, or a backing store of the wrong kind throws. The backing
+        // stores are borrowed `BackingStore` addresses.
         pub unsafe fn value_deserialize(
             isolate: *mut Isolate,
             data: &[u8],
             options: &DeserializeOptions,
             diagnostic_context: &str,
+            transferred_array_buffers: &[usize],
+            shared_array_buffers: &[usize],
         ) -> Result<MaybeLocal>;
 
         // Errors
@@ -1150,6 +1167,15 @@ pub struct BackingStore {
     ptr: NonZeroUsize,
 }
 
+impl std::fmt::Debug for BackingStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BackingStore")
+            .field("byte_length", &self.byte_length())
+            .field("is_shared", &self.is_shared())
+            .finish()
+    }
+}
+
 impl Drop for BackingStore {
     fn drop(&mut self) {
         // SAFETY: ptr was obtained from a `local_*_get_backing_store` FFI call
@@ -1182,6 +1208,23 @@ impl BackingStore {
         Self {
             ptr: NonZeroUsize::new(ptr).expect("backing_store pointer must be non-null"),
         }
+    }
+
+    /// The address of the `std::shared_ptr<v8::BackingStore>` this owns, for C++ to borrow.
+    #[doc(hidden)]
+    pub fn as_ffi(&self) -> usize {
+        self.ptr.get()
+    }
+
+    /// Takes ownership of the heap-allocated `std::shared_ptr<v8::BackingStore>` at `ptr`.
+    ///
+    /// # Safety
+    /// `ptr` must be the non-zero address of a heap-allocated `std::shared_ptr<v8::BackingStore>`
+    /// that nothing else owns or frees.
+    #[doc(hidden)]
+    pub unsafe fn from_ffi(ptr: usize) -> Self {
+        // SAFETY: the caller's guarantees are `from_raw`'s.
+        unsafe { Self::from_raw(ptr) }
     }
 
     /// Returns a raw pointer to the backing store's data.
@@ -1408,7 +1451,7 @@ impl<'s, T> Local<'s, T> {
     }
 
     /// Views `locals` as the FFI handles C++ functions take, without copying.
-    fn raw_slice(locals: &[Self]) -> &[ffi::Local] {
+    pub(crate) fn raw_slice(locals: &[Self]) -> &[ffi::Local] {
         // SAFETY: as for `raw`, element by element.
         unsafe { std::slice::from_raw_parts(locals.as_ptr().cast::<ffi::Local>(), locals.len()) }
     }
