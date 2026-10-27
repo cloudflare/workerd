@@ -141,9 +141,11 @@ mod bridge {
             lens: &[u32],
         ) -> Result<KjOwn<HttpHeaders>>;
         /// Whether the server hands a request with the method `name` to its handler rather than
-        /// answering kj's 501: only for a method kj knows by name, as kj's `HttpServer` does
-        /// without `allowOtherMethods`.
-        fn method_allowed(name: &[u8]) -> bool;
+        /// answering kj's 501: for a method kj knows by name, and with `allow_other_methods`, for
+        /// any method `kj::HttpMethod::tryParse()` accepts, as kj's `HttpServer` does with
+        /// `allowOtherMethods`. `tryParse()` refuses, for example, a name longer than
+        /// `kj::HttpMethod::MAX_NAME_SIZE`.
+        fn method_allowed(name: &[u8], allow_other_methods: bool) -> bool;
         /// `BoringSSL`'s check of a DER `signature` over `message` by `public_key`, an encoded
         /// point on the algorithm's curve (a `subjectPublicKey`'s contents).
         fn ecdsa_verify(

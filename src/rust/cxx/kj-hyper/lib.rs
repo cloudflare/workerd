@@ -53,10 +53,15 @@
 //! Rust objects behind kj interfaces (`RustIo`, `RustBody`) are `Rc`s whose operations own a
 //! share, so a `kj::Own` dropped mid-operation dangles nothing.
 //!
+//! # Methods
+//!
+//! With `ServerSettings::allow_other_methods` the server serves any method
+//! `kj::HttpMethod::tryParse()` accepts, as kj's `HttpServer` does with `allowOtherMethods`;
+//! otherwise only the methods kj knows by name.
+//!
 //! # Dropped kj settings
 //!
-//! No `HttpServerErrorHandler` or `HttpClientErrorHandler`, no `allowOtherMethods` (the server
-//! answers a method kj doesn't know by name with kj's 501), no caller-supplied `EntropySource`
+//! No `HttpServerErrorHandler` or `HttpClientErrorHandler`, no caller-supplied `EntropySource`
 //! (handshake keys and frame masks come from `rand`), no pipeline timeout or cancelled-upload
 //! grace period, and no cipher list (`TlsOptions.cipherList` is not applied; see [`tls`]); hyper
 //! answers unparsable requests itself (see [`server`]).
