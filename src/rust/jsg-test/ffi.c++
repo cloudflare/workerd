@@ -269,9 +269,13 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
   return ::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(kj::mv(value)).IsEmpty();
 }
 
-::rust::Vec<uint8_t> cpp_serialize(Isolate* isolate, ::workerd::rust::jsg::Local value) {
+::rust::Vec<uint8_t> cpp_serialize(Isolate* isolate,
+    ::workerd::rust::jsg::Local value,
+    const ::workerd::rust::jsg::SerializeOptions& options) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
-  ::workerd::jsg::Serializer serializer(js);
+  ::workerd::jsg::Serializer::Options cppOptions{.omitHeader = options.omit_header};
+  if (options.has_version) cppOptions.version = options.version;
+  ::workerd::jsg::Serializer serializer(js, kj::mv(cppOptions));
   serializer.write(
       js, ::workerd::jsg::JsValue(::workerd::rust::jsg::local_from_ffi<v8::Value>(kj::mv(value))));
   ::rust::Vec<uint8_t> result;
@@ -281,9 +285,17 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value) {
   return result;
 }
 
-::workerd::rust::jsg::Local cpp_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data) {
+::workerd::rust::jsg::Local cpp_deserialize(Isolate* isolate,
+    ::rust::Slice<const uint8_t> data,
+    const ::workerd::rust::jsg::DeserializeOptions& options) {
   auto& js = ::workerd::jsg::Lock::from(isolate);
-  ::workerd::jsg::Deserializer deserializer(js, kj::arrayPtr(data.data(), data.size()));
+  ::workerd::jsg::Deserializer::Options cppOptions{
+    .readHeader = options.read_header,
+    .preserveStackInErrors = options.preserve_stack_in_errors,
+  };
+  if (options.has_version) cppOptions.version = options.version;
+  ::workerd::jsg::Deserializer deserializer(
+      js, kj::arrayPtr(data.data(), data.size()), kj::none, kj::none, kj::mv(cppOptions));
   v8::Local<v8::Value> result = deserializer.readValue(js);
   return ::workerd::rust::jsg::to_ffi(kj::mv(result));
 }

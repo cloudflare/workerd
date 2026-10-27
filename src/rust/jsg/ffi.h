@@ -32,6 +32,8 @@ struct TracedReference;
 struct Realm;
 struct IsolateState;
 struct GcVisitor;
+struct SerializeOptions;
+struct DeserializeOptions;
 enum class BackingStoreInitializationMode : ::std::uint8_t;
 enum class ExceptionType : ::std::uint8_t;
 enum class PromiseState : ::std::uint8_t;
@@ -470,19 +472,23 @@ void realm_detach(Isolate* isolate, const IsolateState* state);
 // In the format of C++ JSG's jsg::Serializer and jsg::Deserializer, which read what these write
 // and the other way round; see ser.c++.
 //
-// Writes `value`, after a header, as jsg::Serializer does: native errors as host objects if
-// `errors_are_host_objects` (jsg::Lock::isUsingEnhancedErrorSerialization()), and workerd API
-// objects through their serializers. Stores the bytes in `result` and returns true, or returns
+// Writes `value` as jsg::Serializer does with `options`: native errors as host objects if
+// `options.errors_are_host_objects` (jsg::Lock::isUsingEnhancedErrorSerialization()), and workerd
+// API objects through their serializers. Stores the bytes in `result` and returns true, or returns
 // false if serialization threw, leaving the exception pending: a DataCloneError, or what a getter,
-// Proxy trap or serializer threw.
+// Proxy trap or serializer threw. Throws a KJ exception for a version older than 13.
 bool local_serialize(Isolate* isolate,
     const Local& value,
-    bool errors_are_host_objects,
+    const SerializeOptions& options,
     ::rust::Vec<uint8_t>& result);
-// Reads a value as jsg::Deserializer does with its default options, and returns it, or
-// none if deserialization threw, leaving the exception pending. Runs no JavaScript. Throws a KJ
-// exception if the header is missing or of an unsupported version.
-MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
+// Reads a value as jsg::Deserializer does with `options`, and returns it, or none if
+// deserialization threw, leaving the exception pending. Runs no JavaScript. Throws a KJ exception,
+// labeled with `diagnostic_context`, if the header is to be read and is missing or of an
+// unsupported version, and for a version older than 13.
+MaybeLocal value_deserialize(Isolate* isolate,
+    ::rust::Slice<const uint8_t> data,
+    const DeserializeOptions& options,
+    ::rust::Str diagnostic_context);
 
 // Errors
 // Builds an exception whose message is raw bytes interpreted as UTF-8. Invalid

@@ -386,6 +386,186 @@ fn shared_array_buffers_are_written_as_cpp_jsg_writes_them() {
     });
 }
 
+/// Serializes the value of `expr` with `options` and checks that the bytes are those C++ JSG writes
+/// with the same options, and that what Rust JSG and C++ JSG read from them with `read` satisfies
+/// `check`, a JavaScript expression of `v`.
+fn assert_round_trip_with(
+    lock: &mut jsg::Lock<'_>,
+    ctx: &EvalContext<'_>,
+    expr: &str,
+    options: &jsg::ser::SerializeOptions,
+    read: &jsg::ser::DeserializeOptions<'_>,
+    check: &str,
+) {
+    let value = eval(lock, ctx, expr);
+    let data = jsg::ser::serialize_with(lock, value, options).unwrap();
+    assert_eq!(
+        data,
+        Harness::cpp_serialize_with(lock, value, options),
+        "{expr}: {options:?}"
+    );
+
+    let copy = jsg::ser::deserialize_with(lock, &data, read).unwrap();
+    ctx.set_global(lock, "v", copy);
+    assert!(
+        ctx.eval::<bool>(lock, check).unwrap(),
+        "{expr}: {options:?}: Rust JSG read: {check}"
+    );
+
+    let copy = Harness::cpp_deserialize_with(lock, &data, read);
+    ctx.set_global(lock, "v", copy);
+    assert!(
+        ctx.eval::<bool>(lock, check).unwrap(),
+        "{expr}: {options:?}: C++ JSG read: {check}"
+    );
+}
+
+#[test]
+fn versions_and_headers_are_written_and_read_as_cpp_jsg_does() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let expr = "({ a: [1, 'x'], m: new Map([[1, 2]]), d: new Date(7) })";
+        let check = "v.a[1] === 'x' && v.m.get(1) === 2 && v.d.getTime() === 7";
+        for version in [None, Some(13), Some(14), Some(15)] {
+            let options = jsg::ser::SerializeOptions {
+                version,
+                ..Default::default()
+            };
+            assert_round_trip_with(
+                lock,
+                ctx,
+                expr,
+                &options,
+                &jsg::ser::DeserializeOptions::default(),
+                check,
+            );
+
+            // Without a header, the reader is told the version, as storage reads data it wrote
+            // before it wrote headers.
+            let options = jsg::ser::SerializeOptions {
+                version: Some(version.unwrap_or(15)),
+                omit_header: true,
+            };
+            let read = jsg::ser::DeserializeOptions {
+                version: options.version,
+                read_header: false,
+                ..Default::default()
+            };
+            assert_round_trip_with(lock, ctx, expr, &options, &read, check);
+        }
+
+        // The header says the data is version 13, and the version given overrides it, as in C++.
+        let options = jsg::ser::SerializeOptions {
+            version: Some(13),
+            ..Default::default()
+        };
+        let read = jsg::ser::DeserializeOptions {
+            version: Some(13),
+            ..Default::default()
+        };
+        assert_round_trip_with(lock, ctx, expr, &options, &read, check);
+        Ok(())
+    });
+}
+
+#[test]
+fn versions_out_of_range_are_rejected() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let value = lock.undefined();
+        for version in [0, 12] {
+            let options = jsg::ser::SerializeOptions {
+                version: Some(version),
+                ..Default::default()
+            };
+            let err = jsg::ser::serialize_with(lock, value, &options).unwrap_err();
+            assert!(!err.is_pending(), "{version}");
+            assert!(
+                err.message
+                    .contains("The minimum serialization version is 13."),
+                "{version}: {}",
+                err.message
+            );
+
+            let read = jsg::ser::DeserializeOptions {
+                version: Some(version),
+                read_header: false,
+                ..Default::default()
+            };
+            let err = jsg::ser::deserialize_with(lock, b"_", &read).unwrap_err();
+            assert!(!err.is_pending(), "{version}");
+            assert!(
+                err.message
+                    .contains("The minimum serialization version is 13."),
+                "{version}: {}",
+                err.message
+            );
+        }
+
+        // V8 throws for a version newer than its own.
+        let caught = lock
+            .try_catch(|lock| {
+                let options = jsg::ser::SerializeOptions {
+                    version: Some(1000),
+                    ..Default::default()
+                };
+                let result = jsg::ser::serialize_with(lock, value, &options);
+                assert!(result.as_ref().is_err_and(jsg::Error::is_pending));
+                result
+            })
+            .unwrap();
+        ctx.set_global(lock, "e", caught.unwrap_err());
+        assert!(
+            ctx.eval::<bool>(lock, "e.name === 'DataCloneError'")
+                .unwrap()
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn errors_can_be_read_without_their_stack() {
+    let harness = Harness::with_flags(|mut flags| flags.set_enhanced_error_serialization(true));
+    harness.run_in_context(|lock, ctx| {
+        let read = jsg::ser::DeserializeOptions {
+            preserve_stack_in_errors: false,
+            ..Default::default()
+        };
+        assert_round_trip_with(
+            lock,
+            ctx,
+            "Object.assign(new TypeError('t'), { stack: 'original', code: 1 })",
+            &jsg::ser::SerializeOptions::default(),
+            &read,
+            "v instanceof TypeError && v.code === 1 && typeof v.stack === 'string' && \
+             v.stack !== 'original'",
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn header_errors_name_the_diagnostic_context() {
+    Harness::new().run_in_context(|lock, ctx| {
+        let read = jsg::ser::DeserializeOptions {
+            diagnostic_context: Some("RPC result"),
+            ..Default::default()
+        };
+        let err = jsg::ser::deserialize_with(lock, b"\x49\x02", &read).unwrap_err();
+        assert!(!err.is_pending());
+        assert!(err.message.contains("RPC result"), "{}", err.message);
+
+        // Without a header to read, the same bytes are a value.
+        let read = jsg::ser::DeserializeOptions {
+            version: Some(15),
+            read_header: false,
+            ..Default::default()
+        };
+        let value = jsg::ser::deserialize_with(lock, b"\x49\x02", &read).unwrap();
+        ctx.set_global(lock, "v", value);
+        assert!(ctx.eval::<bool>(lock, "v === 1").unwrap());
+        Ok(())
+    });
+}
+
 static CHECKED_WHILE_TERMINATING: AtomicBool = AtomicBool::new(false);
 
 #[jsg_resource]
