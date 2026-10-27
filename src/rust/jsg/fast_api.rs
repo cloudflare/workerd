@@ -60,6 +60,15 @@ impl FastApiArg for bool {
     }
 }
 
+impl private::Sealed for f64 {}
+impl FastApiArg for f64 {
+    type Raw = Self;
+    const TYPE: FastApiType = FastApiType::Float64;
+    fn from_raw(raw: Self) -> Result<Self, Error> {
+        Ok(raw)
+    }
+}
+
 impl private::Sealed for Number {}
 impl FastApiArg for Number {
     type Raw = f64;
@@ -94,6 +103,14 @@ impl FastApiArg for u32 {
 impl FastApiReturn for bool {
     type Raw = Self;
     const TYPE: FastApiType = FastApiType::Bool;
+    fn into_raw(self) -> Self {
+        self
+    }
+}
+
+impl FastApiReturn for f64 {
+    type Raw = Self;
+    const TYPE: FastApiType = FastApiType::Float64;
     fn into_raw(self) -> Self {
         self
     }

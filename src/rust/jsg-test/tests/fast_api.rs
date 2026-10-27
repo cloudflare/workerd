@@ -40,6 +40,11 @@ impl FastResource {
     }
 
     #[jsg_method]
+    pub fn id_f64(&self, x: f64) -> f64 {
+        x
+    }
+
+    #[jsg_method]
     pub fn id_bool(&self, x: bool) -> bool {
         x
     }
@@ -201,6 +206,11 @@ fn fast_and_slow_paths_agree() {
         ("idNumber", "0.5", "NaN", true),
         ("idNumber", "0.5", "-Infinity", true),
         ("idNumber", "0.5", "'2.5'", false),
+        ("idF64", "0.5", "-2.25", true),
+        ("idF64", "0.5", "NaN", true),
+        ("idF64", "0.5", "-Infinity", true),
+        ("idF64", "0.5", "'2.5'", false),
+        ("idF64", "0.5", "undefined", false),
         ("idBool", "true", "false", true),
         ("idBool", "true", "0", true),
         ("idBool", "true", "'yes'", true),
@@ -238,6 +248,25 @@ fn fast_and_slow_paths_agree() {
             Ok(())
         });
     }
+}
+
+/// A fast callback passes an `f64` through as V8's `double`, so `-0` keeps its sign.
+#[test]
+fn f64_keeps_negative_zero_on_the_fast_path() {
+    let harness = crate::Harness::with_fast_api();
+    harness.run_in_context(|lock, ctx| {
+        set_resource(lock, ctx, 0);
+        let (negative, fast_calls) = count_fast_calls(|| {
+            ctx.eval::<bool>(
+                lock,
+                &optimized("x", "return Object.is(r.idF64(x), -0);", "1", "-0"),
+            )
+            .unwrap()
+        });
+        assert!(negative);
+        assert_ne!(fast_calls, Some(0));
+        Ok(())
+    });
 }
 
 /// V8 checks the receiver against the method's signature before a fast call, so a wrong receiver

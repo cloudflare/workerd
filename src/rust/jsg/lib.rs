@@ -490,7 +490,7 @@ impl Error {
 ///
 /// - `NonCoercible<String>` - only accepts JavaScript strings
 /// - `NonCoercible<bool>` - only accepts JavaScript booleans
-/// - `NonCoercible<Number>` - only accepts JavaScript numbers
+/// - `NonCoercible<f64>` and `NonCoercible<Number>` - only accept JavaScript numbers
 /// - `NonCoercible<u32>` and the other integers of up to 32 bits - only accept JavaScript
 ///   numbers, which must be in range
 /// - `NonCoercible<i64>` and `NonCoercible<u64>` - only accept JavaScript `BigInt`s
@@ -555,9 +555,8 @@ impl<T> Deref for NonCoercible<T> {
 /// A JavaScript number (an IEEE 754 double-precision float).
 ///
 /// `Number` is a plain value, not a V8 handle, so it needs no `Lock` until it converts to
-/// JavaScript. It is the type of a number parameter: it converts from any value with JavaScript's
-/// `ToNumber`, like C++ JSG's `double`, and `NonCoercible<Number>` accepts only a number. An `f64`
-/// or `f32` converts to a number too, but only to JavaScript.
+/// JavaScript. It converts exactly as an `f64` does: from any value with JavaScript's `ToNumber`,
+/// like C++ JSG's `double`, and `NonCoercible<Number>` accepts only a number.
 ///
 /// # Usage
 ///
@@ -577,7 +576,7 @@ impl<T> Deref for NonCoercible<T> {
 /// | Rust Type | JavaScript Type |
 /// |-----------|-----------------|
 /// | `jsg::Number` | `number` |
-/// | `f64` | `number`, to JavaScript only |
+/// | `f64` | `number` |
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct Number {
     value: f64,

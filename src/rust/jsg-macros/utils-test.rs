@@ -107,7 +107,8 @@ fn fast_api_signature_cases() {
         fast(parse_quote!(fn f(&self, lock: &mut Lock, a: i32))),
         None
     );
-    assert_eq!(fast(parse_quote!(fn f(&self, x: f64))), None);
+    assert_eq!(fast(parse_quote!(fn f(&self, x: f64) -> f64)), Some(1));
+    assert_eq!(fast(parse_quote!(fn f(&self, x: f32))), None);
     assert_eq!(fast(parse_quote!(fn f(&self, x: ::jsg::Number))), Some(1));
     assert_eq!(fast(parse_quote!(fn f(&self, x: other::Number))), None);
     assert_eq!(fast(parse_quote!(fn f(&self, x: Option<i32>))), None);
