@@ -159,7 +159,7 @@ fn resource_accepts_array_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         let result: Number = ctx.eval(lock, "arr.sum([1, 2, 3, 4, 5])").unwrap();
@@ -178,7 +178,7 @@ fn resource_accepts_slice_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         let result: Number = ctx.eval(lock, "arr.sumSlice([1, 2, 3, 4, 5])").unwrap();
@@ -198,7 +198,7 @@ fn resource_returns_array() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         let result: Vec<Number> = ctx.eval(lock, "arr.double([1, 2, 3])").unwrap();
@@ -222,7 +222,7 @@ fn resource_accepts_typed_array_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         let result: Vec<u8> = ctx
@@ -243,7 +243,7 @@ fn resource_returns_typed_array() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         let is_u8: bool = ctx
@@ -262,7 +262,7 @@ fn resource_accepts_typed_array_slice_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         // Test &[u8] accepts Uint8Array
@@ -292,7 +292,7 @@ fn typed_array_slice_rejects_wrong_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         // &[u8] should reject Int8Array
@@ -322,7 +322,7 @@ fn resource_accepts_and_returns_struct_array() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         let result: Vec<Person> = ctx
@@ -343,7 +343,7 @@ fn vec_to_js_creates_array() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let vec = vec!["hello".to_owned(), "world".to_owned()];
-        let js_val = vec.to_js(lock);
+        let js_val = vec.to_js(lock)?;
         ctx.set_global(lock, "arr", js_val);
 
         let is_array: bool = ctx.eval(lock, "Array.isArray(arr)").unwrap();
@@ -354,14 +354,14 @@ fn vec_to_js_creates_array() {
         assert_eq!(first, "hello");
 
         let vec = vec![Number::new(1.5), Number::new(2.5), Number::new(3.5)];
-        let js_val = vec.to_js(lock);
+        let js_val = vec.to_js(lock)?;
         ctx.set_global(lock, "nums", js_val);
 
         let sum: Number = ctx.eval(lock, "nums[0] + nums[1] + nums[2]").unwrap();
         assert!((sum.value() - 7.5).abs() < f64::EPSILON);
 
         let vec = vec![true, false, true];
-        let js_val = vec.to_js(lock);
+        let js_val = vec.to_js(lock)?;
         ctx.set_global(lock, "bools", js_val);
 
         let result: Vec<bool> = ctx.eval(lock, "bools").unwrap();
@@ -389,7 +389,7 @@ fn vec_empty_roundtrip() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let vec: Vec<String> = vec![];
-        let js_val = vec.to_js(lock);
+        let js_val = vec.to_js(lock)?;
         ctx.set_global(lock, "arr", js_val);
 
         let length: Number = ctx.eval(lock, "arr.length").unwrap();
@@ -409,7 +409,7 @@ fn vec_nested_arrays() {
             vec![Number::new(1.0), Number::new(2.0)],
             vec![Number::new(3.0), Number::new(4.0)],
         ];
-        let js_val = nested.to_js(lock);
+        let js_val = nested.to_js(lock)?;
         ctx.set_global(lock, "matrix", js_val);
 
         let first_row_sum: Number = ctx.eval(lock, "matrix[0][0] + matrix[0][1]").unwrap();
@@ -572,7 +572,7 @@ fn typed_array_iter_uint8() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<u8> = vec![10, 20, 30];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         let typed: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
             // SAFETY: isolate is valid and locked, js_val is a valid Local.
             unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
@@ -599,7 +599,7 @@ fn typed_array_into_iter_uint8() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<u8> = vec![1, 2, 3, 4, 5];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         let typed: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
             // SAFETY: isolate is valid and locked, js_val is a valid Local.
             unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
@@ -616,7 +616,7 @@ fn typed_array_iter_int32() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<i32> = vec![-100, 0, 100];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         let typed: jsg::v8::Local<'_, jsg::v8::Int32Array> =
             // SAFETY: isolate is valid and locked, js_val is a valid Local.
             unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
@@ -638,7 +638,7 @@ fn typed_array_iter_reverse() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<u8> = vec![1, 2, 3, 4];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         let typed: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
             // SAFETY: isolate is valid and locked, js_val is a valid Local.
             unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
@@ -655,7 +655,7 @@ fn typed_array_empty() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<u8> = vec![];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         let typed: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
             // SAFETY: isolate is valid and locked, js_val is a valid Local.
             unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
@@ -677,7 +677,7 @@ fn float32_array_parameter_and_return() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         // Test Vec<f32> parameter
@@ -709,7 +709,7 @@ fn float32_array_slice_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         // Test &[f32] parameter
@@ -733,7 +733,7 @@ fn float32_array_rejects_wrong_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         // Float32Array should reject Float64Array
@@ -755,7 +755,7 @@ fn float32_array_to_js_and_from_js() {
     harness.run_in_context(|lock, ctx| {
         // Test ToJS: Vec<f32> -> Float32Array
         let data: Vec<f32> = vec![1.5, 2.5, 3.5, 4.5];
-        let js_value = data.to_js(lock);
+        let js_value = data.to_js(lock)?;
         ctx.set_global(lock, "f32arr", js_value);
 
         let is_f32: bool = ctx.eval(lock, "f32arr instanceof Float32Array").unwrap();
@@ -776,7 +776,7 @@ fn float32_array_to_js_and_from_js() {
 
         // Test roundtrip with special values
         let special: Vec<f32> = vec![f32::MIN, f32::MAX, 0.0, -0.0];
-        let js_special = special.to_js(lock);
+        let js_special = special.to_js(lock)?;
         ctx.set_global(lock, "special", js_special);
         let roundtrip: Vec<f32> = ctx.eval(lock, "special").unwrap();
         #[expect(clippy::float_cmp)]
@@ -798,7 +798,7 @@ fn float64_array_parameter_and_return() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         // Test Vec<f64> parameter
@@ -830,7 +830,7 @@ fn float64_array_slice_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         // Test &[f64] parameter
@@ -854,7 +854,7 @@ fn float64_array_rejects_wrong_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         // Float64Array should reject Float32Array
@@ -906,7 +906,7 @@ fn bigint64_array_parameter_and_return() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         // Test Vec<i64> parameter
@@ -944,7 +944,7 @@ fn bigint64_array_slice_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         // Test &[i64] parameter
@@ -968,7 +968,7 @@ fn bigint64_array_rejects_wrong_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         // BigInt64Array should reject BigUint64Array
@@ -1099,7 +1099,7 @@ fn typed_array_as_slice_empty() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<u8> = vec![];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         let typed: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
             // SAFETY: isolate valid, js_val is a Uint8Array Local.
             unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
@@ -1201,7 +1201,7 @@ fn typed_array_data_pointer_and_byte_offset() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let data: Vec<u8> = vec![10, 20, 30, 40];
-        let js_val = data.to_js(lock);
+        let js_val = data.to_js(lock)?;
         let typed: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
             // SAFETY: isolate valid; js_val is a Uint8Array Local.
             unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
@@ -1255,7 +1255,7 @@ fn typed_array_element_size_and_is_integer_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         // u8 / Uint8Array: 1 byte per element, integer type.
-        let js_val = vec![0u8, 0].to_js(lock);
+        let js_val = vec![0u8, 0].to_js(lock)?;
         let arr: jsg::v8::Local<'_, jsg::v8::Uint8Array> =
             // SAFETY: isolate valid; js_val is a Uint8Array Local.
             unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
@@ -1263,7 +1263,7 @@ fn typed_array_element_size_and_is_integer_type() {
         assert!(arr.is_integer_type());
 
         // u32 / Uint32Array: 4 bytes per element, integer type.
-        let js_val = vec![0u32, 0].to_js(lock);
+        let js_val = vec![0u32, 0].to_js(lock)?;
         let arr: jsg::v8::Local<'_, jsg::v8::Uint32Array> =
             // SAFETY: isolate valid; js_val is a Uint32Array Local.
             unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
@@ -1271,7 +1271,7 @@ fn typed_array_element_size_and_is_integer_type() {
         assert!(arr.is_integer_type());
 
         // f32 / Float32Array: 4 bytes per element, NOT an integer type.
-        let js_val = vec![0f32, 0.0].to_js(lock);
+        let js_val = vec![0f32, 0.0].to_js(lock)?;
         let arr: jsg::v8::Local<'_, jsg::v8::Float32Array> =
             // SAFETY: isolate valid; js_val is a Float32Array Local.
             unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
@@ -1279,7 +1279,7 @@ fn typed_array_element_size_and_is_integer_type() {
         assert!(!arr.is_integer_type());
 
         // f64 / Float64Array: 8 bytes per element, NOT an integer type.
-        let js_val = vec![0f64, 0.0].to_js(lock);
+        let js_val = vec![0f64, 0.0].to_js(lock)?;
         let arr: jsg::v8::Local<'_, jsg::v8::Float64Array> =
             // SAFETY: isolate valid; js_val is a Float64Array Local.
             unsafe { jsg::v8::Local::from_ffi(js_val.into_ffi()) };
@@ -1299,7 +1299,7 @@ fn biguint64_array_parameter_and_return() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         // Test Vec<u64> parameter
@@ -1331,7 +1331,7 @@ fn biguint64_array_slice_parameter() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         // Test &[u64] parameter
@@ -1355,7 +1355,7 @@ fn biguint64_array_rejects_wrong_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
         // BigUint64Array should reject BigInt64Array
@@ -1464,7 +1464,7 @@ fn to_js_calls_no_prototype_setters() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ArrayResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
         ctx.eval_raw(
             lock,
@@ -1489,7 +1489,7 @@ fn to_js_calls_no_prototype_setters() {
                 age: Number::new(30.0),
             },
         ];
-        let value = people.to_js(lock);
+        let value = people.to_js(lock)?;
         ctx.set_global(lock, "people", value);
         let ok: bool = ctx
             .eval(

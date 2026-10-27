@@ -29,6 +29,11 @@ class EvalContext {
   EvalContext(v8::Isolate* isolate, v8::Local<v8::Context> context);
 
   EvalResult eval(::rust::Str code, kj::Maybe<::rust::Str> resourceName) const;
+  // Has `registerModules` add builtin modules, then calls the callback of the one named
+  // `specifier`, as importing it does. Returns its exports, or the exception it threw.
+  EvalResult call_builtin_module(
+      ::rust::Fn<void(::workerd::rust::jsg::ModuleRegistry&)> registerModules,
+      ::rust::Str specifier) const;
   void set_global(::rust::Str name, ::workerd::rust::jsg::Local value) const;
 
   v8::Isolate* v8Isolate;
@@ -77,6 +82,9 @@ void request_gc(Isolate* isolate, GcType gc_type);
 // was terminated.
 void terminate_and_deliver(Isolate* isolate);
 
+// Runs the isolate's pending microtasks, as the event loop does after each task.
+void run_microtasks(Isolate* isolate);
+
 // Calls `callback` with the isolate unlocked, then locks it again.
 void run_unlocked(Isolate* isolate, size_t data, ::rust::Fn<void(size_t)> callback);
 
@@ -100,6 +108,13 @@ bool cpp_sees_empty_maybe_local(::workerd::rust::jsg::MaybeLocal value);
 
 // Returns whether `a` and `b` belong to the same v8::IsolateGroup.
 bool isolates_share_group(Isolate* a, Isolate* b);
+
+// Holds a value the way C++ code holds one that Rust created: calls `create`, keeps its result
+// only in a v8::Global while a full GC runs, and calls `check` with it. Then resets the Global
+// and runs a full GC again. Neither call's handles outlive the call.
+void hold_across_gc(Isolate* isolate,
+    ::rust::Fn<::workerd::rust::jsg::MaybeLocal(Isolate*)> create,
+    ::rust::Fn<void(Isolate*, ::workerd::rust::jsg::Local)> check);
 
 }  // namespace rust::jsg_test
 

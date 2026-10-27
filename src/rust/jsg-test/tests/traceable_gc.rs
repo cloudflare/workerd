@@ -80,7 +80,7 @@ fn enum_unit_variant_does_not_crash_during_gc() {
         let parent = jsg::Rc::new(StreamController {
             state: StreamState::Closed,
         });
-        let wrapped = parent.clone().to_js(lock);
+        let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
         std::mem::drop(parent);
 
@@ -108,7 +108,7 @@ fn enum_variant_child_kept_alive_through_gc() {
         let parent = jsg::Rc::new(StreamController {
             state: StreamState::Readable(child.clone()),
         });
-        let wrapped = parent.clone().to_js(lock);
+        let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);
@@ -142,7 +142,7 @@ fn enum_named_variant_child_kept_alive_through_gc() {
                 reason: child.clone(),
             },
         });
-        let wrapped = parent.clone().to_js(lock);
+        let wrapped = parent.clone().to_js(lock)?;
         ctx.set_global(lock, "parent", wrapped);
 
         std::mem::drop(child);

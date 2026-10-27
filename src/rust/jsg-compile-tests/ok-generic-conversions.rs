@@ -10,7 +10,7 @@ pub fn round_trip<'s, T>(lock: &mut jsg::Lock<'s>, value: T) -> Result<T, jsg::E
 where
     T: ToJS<'s> + FromJS<'s, ResultType = T>,
 {
-    let js = value.to_js(lock);
+    let js = value.to_js(lock)?;
     T::from_js(lock, js)
 }
 

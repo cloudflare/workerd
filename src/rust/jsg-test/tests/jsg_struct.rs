@@ -46,7 +46,7 @@ fn objects_can_be_wrapped_and_unwrapped() {
         let instance = TestStruct {
             str: "test".to_owned(),
         };
-        let wrapped = instance.to_js(lock);
+        let wrapped = instance.to_js(lock)?;
         let obj: v8::Local<'_, v8::Object> = wrapped.try_into().unwrap();
         assert!(obj.has(lock, "str").unwrap());
         let str_value = obj.get(lock, "str");
@@ -69,7 +69,7 @@ fn struct_with_multiple_properties() {
             age: 30,
             active: "true".to_owned(),
         };
-        let wrapped = instance.to_js(lock);
+        let wrapped = instance.to_js(lock)?;
         let obj: v8::Local<'_, v8::Object> = wrapped.try_into().unwrap();
 
         assert!(obj.has(lock, "name").unwrap());
@@ -155,7 +155,7 @@ fn nested_object_properties() {
         let inner_instance = NestedStruct {
             inner: "nested value".to_owned(),
         };
-        let inner_wrapped = inner_instance.to_js(lock);
+        let inner_wrapped = inner_instance.to_js(lock)?;
         outer.set(lock, "nested", inner_wrapped)?;
 
         assert!(outer.has(lock, "nested").unwrap());
@@ -311,7 +311,7 @@ fn struct_omits_absent_optional_fields() {
             label: None,
             count: Some(1),
         }
-        .to_js(lock);
+        .to_js(lock)?;
         let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
         assert!(!obj.has(lock, "label")?);
         assert!(obj.has(lock, "count")?);

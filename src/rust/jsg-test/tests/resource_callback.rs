@@ -84,7 +84,7 @@ fn resource_method_callback_receives_correct_self() {
         let resource = jsg::Rc::new(EchoResource {
             prefix: "Hello, ".to_owned(),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "echoResource", wrapped);
 
         // Call the method from JavaScript
@@ -102,7 +102,7 @@ fn resource_method_can_be_called_multiple_times() {
         let resource = jsg::Rc::new(EchoResource {
             prefix: ">> ".to_owned(),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "echo", wrapped);
 
         // First call
@@ -124,7 +124,7 @@ fn resource_method_accepts_str_ref_parameter() {
         let resource = jsg::Rc::new(EchoResource {
             prefix: "Hello, ".to_owned(),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "echo", wrapped);
 
         let result: String = ctx.eval(lock, "echo.greet('World')").unwrap();
@@ -143,7 +143,7 @@ fn resource_method_returns_non_result_values() {
             name: "TestResource".to_owned(),
             counter: counter.clone(),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         // Test getString returns string
@@ -226,7 +226,7 @@ fn instance_and_static_methods_coexist() {
 
         // Allocate and expose an instance as a global
         let resource = jsg::Rc::new(MathResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "math", wrapped);
 
         // Instance method works on the object
@@ -290,7 +290,7 @@ fn resource_method_returns_null_for_none() {
             name: String::new(),
             counter: Rc::new(Cell::new(0)),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "resource", wrapped);
 
         let result: Option<String> = ctx.eval(lock, "resource.maybeName()").unwrap();
@@ -355,7 +355,7 @@ fn static_constant_accessible_on_instance() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(ConstantResource {});
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
 
         let result: Number = ctx.eval(lock, "obj.MAX_SIZE").unwrap();
@@ -398,7 +398,7 @@ fn static_constant_coexists_with_methods() {
         let constructor = jsg::resource::function_template_of::<ConstantResource>(lock);
         ctx.set_global(lock, "ConstantResource", constructor);
 
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
 
         // Instance method works
@@ -449,7 +449,7 @@ fn panic_in_rust_backed_api_errors_request_and_terminates_isolate() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(PanicResource);
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
 
         // Simulate a fetch-handler that delegates to a Rust-backed binding.
@@ -515,7 +515,7 @@ impl CatchPanicResource {
 fn catch_panic_returns_none_and_leaves_exception_pending() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let wrapped = jsg::Rc::new(CatchPanicResource).to_js(lock);
+        let wrapped = jsg::Rc::new(CatchPanicResource).to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
         let err = ctx
             .eval::<bool>(lock, "obj.catchNestedPanic(); true")
@@ -572,7 +572,7 @@ fn method_can_be_reentered() {
             depth: Cell::new(0),
             max_depth: Cell::new(0),
         });
-        let wrapped = resource.clone().to_js(lock);
+        let wrapped = resource.clone().to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
         ctx.eval_raw(
             lock,
@@ -898,7 +898,7 @@ fn instance_method_throws_on_missing_receiver() {
         let resource = jsg::Rc::new(EchoResource {
             prefix: "Hello, ".to_owned(),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
 
         // Destructure the method and call it with no receiver (`this` === global
@@ -928,7 +928,7 @@ fn instance_method_throws_on_wrong_receiver_via_reflect_apply() {
         let resource = jsg::Rc::new(EchoResource {
             prefix: "Hello, ".to_owned(),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
 
         let err = ctx
@@ -955,7 +955,7 @@ fn instance_method_works_on_correct_receiver() {
         let resource = jsg::Rc::new(EchoResource {
             prefix: "Hi, ".to_owned(),
         });
-        let wrapped = resource.to_js(lock);
+        let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "obj", wrapped);
 
         // `Function.prototype.call` with the correct `this` must succeed.

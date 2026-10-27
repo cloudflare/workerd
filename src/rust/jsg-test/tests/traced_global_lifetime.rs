@@ -108,7 +108,7 @@ fn global_dropped_after_its_isolate_is_disposed() {
     let harness = crate::Harness::new();
     let mut global: Option<v8::TracedGlobal<v8::Value>> = None;
     harness.run_in_context(|lock, _ctx| {
-        global = Some("escaped".to_js(lock).to_traced_global(lock));
+        global = Some("escaped".to_js(lock).unwrap().to_traced_global(lock));
         Ok(())
     });
     drop(harness);
@@ -130,7 +130,7 @@ fn wrapped_resource_dropped_after_its_isolate_is_disposed() {
         });
         resource
             .handle
-            .set(Some("held".to_js(lock).to_traced_global(lock)));
+            .set(Some("held".to_js(lock).unwrap().to_traced_global(lock)));
         // Wrapping the resource ties its `Wrappable` to the isolate, which the isolate undoes
         // when it is torn down.
         ctx.set_global(lock, "holder", resource.clone());
@@ -156,7 +156,7 @@ fn wrapped_resource_in_traced_mode_is_dropped_with_its_isolate() {
         let resource = jsg::Rc::new(HandleHolder {
             handle: Cell::new(None),
         });
-        let wrapper = resource.clone().to_js(lock);
+        let wrapper = resource.clone().to_js(lock)?;
         // The resource holds its own wrapper, and JavaScript holds it too.
         resource.handle.set(Some(wrapper.to_traced_global(lock)));
         ctx.set_global(lock, "holder", wrapper);
@@ -332,7 +332,7 @@ fn unlocked_drop_is_deferred_until_the_next_lock() {
         baseline = crate::Harness::used_global_handles_size(lock);
 
         let resource = jsg::Rc::new(Counted);
-        wrapper = Some(resource.clone().to_js(lock).to_traced_global(lock));
+        wrapper = Some(resource.clone().to_js(lock).unwrap().to_traced_global(lock));
         // Only the `TracedGlobal` keeps the wrapper, and with it the resource, alive now.
         drop(resource);
         Ok(())
@@ -538,7 +538,7 @@ fn drop_on_another_thread_is_deferred_until_the_next_lock() {
     let mut holder = None;
     harness.run_in_context(|lock, ctx| {
         let resource = jsg::Rc::new(Counted);
-        wrapper = Some(resource.clone().to_js(lock).to_traced_global(lock));
+        wrapper = Some(resource.clone().to_js(lock).unwrap().to_traced_global(lock));
         drop(resource);
 
         let (resource, _) = holder_in_traced_mode(lock, ctx);
