@@ -232,6 +232,12 @@ struct SerTestContext: public ContextGlobalObject {
     return jsg::structuredClone(js, value, kj::mv(maybeTransfer));
   }
 
+  // Reads `data` with Deserializer.
+  JsValue deserializeBytes(Lock& js, kj::Array<kj::byte> data) {
+    Deserializer deser(js, data);
+    return deser.readValue(js);
+  }
+
   JSG_RESOURCE_TYPE(SerTestContext) {
     JSG_NESTED_TYPE(Foo);
     JSG_NESTED_TYPE(Bar);
@@ -243,6 +249,7 @@ struct SerTestContext: public ContextGlobalObject {
     JSG_METHOD(foreignToSerializer);
     JSG_METHOD(serializerToForeign);
     JSG_METHOD(structuredCloneWithTransfer);
+    JSG_METHOD(deserializeBytes);
   }
 };
 JSG_DECLARE_ISOLATE_TYPE(SerTestIsolate,
@@ -493,6 +500,29 @@ KJ_TEST("recursive structuredClone with transfer") {
                "const outer = structuredCloneWithTransfer(obj, [buf]);\n"
                "`${buf.byteLength},${outer.nested[0]}`",
       "string", "0,42");
+}
+
+KJ_TEST("malformed native errors throw") {
+  Evaluator<SerTestContext, SerTestIsolate> e(v8System);
+
+  // A header, V8's tag for a host object, and the native error tag.
+  constexpr auto prefix = "const prefix = [0xff, 0x0f, 0x5c, 0x0a];\n"_kj;
+
+  // Cut short before its type: an internal error.
+  {
+    KJ_EXPECT_LOG(ERROR, "deserialization failure, possible corruption");
+    e.expectEval(kj::str(prefix,
+                     "try { deserializeBytes(new Uint8Array(prefix)); } catch (e) {\n"
+                     "  e.message.startsWith('internal error; reference = ')\n"
+                     "}"),
+        "boolean", "true");
+  }
+
+  // A message that is not a string: a DataCloneError.
+  e.expectEval(kj::str(prefix,
+                   "try { deserializeBytes(new Uint8Array([...prefix, 0x01, 0x5f])); }\n"
+                   "catch (e) { `${e.name}: ${e.message}` }"),
+      "string", "DataCloneError: Deserialization failed: error message is not a string");
 }
 }  // namespace
 }  // namespace workerd::jsg::test

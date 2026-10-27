@@ -14,114 +14,80 @@
 
 namespace workerd::jsg {
 namespace {
-// Keep in sync with the nativeError serialization tag defined in
-// worker-interface.capnp
-constexpr uint32_t SERIALIZATION_TAG_NATIVE_ERROR = 10;
 
-// The error tag is serialized as a uint32_t immediately following
-// the SERIALIZATION_TAG_NATIVE_ERROR tag in order to more efficiently
-// determine the type of error when deserializing so that we can
-// construct the appropriate v8::Exception type on deserialization
-// without having to expensive string comparison on the error name.
-enum class ErrorTag : uint32_t {
-  // The UNKNOWN tag is used when the error name is not recognized.
-  // When this occurs, we will serialize the name of the error, and
-  // when it is deserialized, we will create a generic Error and then
-  // set the name to the stored name.
-  UNKNOWN,
-  ERROR,
-  TYPE_ERROR,
-  RANGE_ERROR,
-  REFERENCE_ERROR,
-  SYNTAX_ERROR,
-  WASM_COMPILE_ERROR,
-  WASM_LINK_ERROR,
-  WASM_RUNTIME_ERROR,
-  WASM_SUSPEND_ERROR,
-  EVAL_ERROR,
-  URI_ERROR,
-  AGGREGATE_ERROR,
-  SUPPRESSED_ERROR,
+// The error tag is serialized as a uint32_t immediately following SERIALIZATION_TAG_NATIVE_ERROR,
+// so that the deserializer can construct the appropriate v8::Exception type without comparing
+// the error name. It is 0 (ERROR_TAG_UNKNOWN) for an error whose name is not one of
+// NATIVE_ERROR_TYPES; that name is then written out, and the error is deserialized as a generic
+// Error with the name set on it. Otherwise it is the 1-based index of the name in
+// NATIVE_ERROR_TYPES.
+constexpr uint32_t ERROR_TAG_UNKNOWN = 0;
+
+struct NativeErrorType {
+  kj::StringPtr name;
+  v8::Local<v8::Value> (*create)(v8::Local<v8::String> message, v8::Local<v8::Value> options);
 };
 
-constexpr ErrorTag getErrorTagFromName(jsg::Lock& js, kj::StringPtr str) {
-  if (str == "Error"_kj) {
-    return ErrorTag::ERROR;
-  } else if (str == "TypeError"_kj) {
-    return ErrorTag::TYPE_ERROR;
-  } else if (str == "RangeError"_kj) {
-    return ErrorTag::RANGE_ERROR;
-  } else if (str == "ReferenceError"_kj) {
-    return ErrorTag::REFERENCE_ERROR;
-  } else if (str == "SyntaxError"_kj) {
-    return ErrorTag::SYNTAX_ERROR;
-  } else if (str == "WasmCompileError"_kj) {
-    return ErrorTag::WASM_COMPILE_ERROR;
-  } else if (str == "WasmLinkError"_kj) {
-    return ErrorTag::WASM_LINK_ERROR;
-  } else if (str == "WasmRuntimeError"_kj) {
-    return ErrorTag::WASM_RUNTIME_ERROR;
-  } else if (str == "WasmSuspendError"_kj) {
-    return ErrorTag::WASM_SUSPEND_ERROR;
-  } else if (str == "EvalError"_kj) {
-    return ErrorTag::EVAL_ERROR;
-  } else if (str == "URIError"_kj) {
-    return ErrorTag::URI_ERROR;
-  } else if (str == "AggregateError"_kj) {
-    return ErrorTag::AGGREGATE_ERROR;
-  } else if (str == "SuppressedError"_kj) {
-    return ErrorTag::SUPPRESSED_ERROR;
+// The order is part of the format: never reorder, insert or remove entries; only append.
+const NativeErrorType NATIVE_ERROR_TYPES[] = {
+  {"Error"_kj, v8::Exception::Error},
+  {"TypeError"_kj, v8::Exception::TypeError},
+  {"RangeError"_kj, v8::Exception::RangeError},
+  {"ReferenceError"_kj, v8::Exception::ReferenceError},
+  {"SyntaxError"_kj, v8::Exception::SyntaxError},
+  {"WasmCompileError"_kj, v8::Exception::WasmCompileError},
+  {"WasmLinkError"_kj, v8::Exception::WasmLinkError},
+  {"WasmRuntimeError"_kj, v8::Exception::WasmRuntimeError},
+  {"WasmSuspendError"_kj, v8::Exception::WasmSuspendError},
+  {"EvalError"_kj, v8::Exception::EvalError},
+  {"URIError"_kj, v8::Exception::URIError},
+  {"AggregateError"_kj, v8::Exception::AggregateError},
+  {"SuppressedError"_kj, v8::Exception::SuppressedError},
+};
+
+// The tag of the error type named `name`, compared as UTF-8 up to the first NUL.
+uint32_t errorTagOf(v8::Isolate* isolate, v8::Local<v8::String> name) {
+  v8::String::Utf8Value utf8(isolate, name);
+  if (*utf8 == nullptr) return ERROR_TAG_UNKNOWN;
+  kj::StringPtr str(*utf8);
+  for (auto i: kj::indices(NATIVE_ERROR_TYPES)) {
+    if (NATIVE_ERROR_TYPES[i].name == str) return i + 1;
   }
-  return ErrorTag::UNKNOWN;
+  return ERROR_TAG_UNKNOWN;
 }
 
-JsObject toJsError(Lock& js, ErrorTag tag, JsString message) {
-  switch (tag) {
-    case ErrorTag::ERROR: {
-      return JsObject(v8::Exception::Error(message).As<v8::Object>());
-    }
-    case ErrorTag::TYPE_ERROR: {
-      return JsObject(v8::Exception::TypeError(message).As<v8::Object>());
-    }
-    case ErrorTag::RANGE_ERROR: {
-      return JsObject(v8::Exception::RangeError(message).As<v8::Object>());
-    }
-    case ErrorTag::REFERENCE_ERROR: {
-      return JsObject(v8::Exception::ReferenceError(message).As<v8::Object>());
-    }
-    case ErrorTag::SYNTAX_ERROR: {
-      return JsObject(v8::Exception::SyntaxError(message).As<v8::Object>());
-    }
-    case ErrorTag::WASM_COMPILE_ERROR: {
-      return JsObject(v8::Exception::WasmCompileError(message).As<v8::Object>());
-    }
-    case ErrorTag::WASM_LINK_ERROR: {
-      return JsObject(v8::Exception::WasmLinkError(message).As<v8::Object>());
-    }
-    case ErrorTag::WASM_RUNTIME_ERROR: {
-      return JsObject(v8::Exception::WasmRuntimeError(message).As<v8::Object>());
-    }
-    case ErrorTag::WASM_SUSPEND_ERROR: {
-      return JsObject(v8::Exception::WasmSuspendError(message).As<v8::Object>());
-    }
-    case ErrorTag::EVAL_ERROR: {
-      return JsObject(v8::Exception::EvalError(message).As<v8::Object>());
-    }
-    case ErrorTag::URI_ERROR: {
-      return JsObject(v8::Exception::URIError(message).As<v8::Object>());
-    }
-    case ErrorTag::AGGREGATE_ERROR: {
-      return JsObject(v8::Exception::AggregateError(message).As<v8::Object>());
-    }
-    case ErrorTag::SUPPRESSED_ERROR: {
-      return JsObject(v8::Exception::SuppressedError(message).As<v8::Object>());
-    }
-    case ErrorTag::UNKNOWN: {
-      return JsObject(v8::Exception::Error(message).As<v8::Object>());
-    }
-  }
-  return JsObject(v8::Exception::Error(message).As<v8::Object>());
+// A new error of the type `tag` names, or a generic Error for a tag that names no type.
+v8::Local<v8::Object> newNativeError(uint32_t tag, v8::Local<v8::String> message) {
+  auto create = tag >= 1 && tag <= kj::size(NATIVE_ERROR_TYPES) ? NATIVE_ERROR_TYPES[tag - 1].create
+                                                                : v8::Exception::Error;
+  return create(message, {}).As<v8::Object>();
 }
+
+v8::Local<v8::String> newInternalizedString(v8::Isolate* isolate, kj::StringPtr str) {
+  return v8::String::NewFromUtf8(
+      isolate, str.begin(), v8::NewStringType::kInternalized, static_cast<int>(str.size()))
+      .ToLocalChecked();
+}
+
+// Throws what Serializer's ThrowDataCloneError() throws, unless execution is terminating.
+void throwDataCloneError(v8::Isolate* isolate, kj::StringPtr message) {
+  if (isolate->IsExecutionTerminating()) return;
+  auto messageStr = v8::String::NewFromUtf8(
+      isolate, message.begin(), v8::NewStringType::kNormal, static_cast<int>(message.size()))
+                        .ToLocalChecked();
+  v8::Local<v8::Value> exception;
+  if (newDataCloneError(isolate, messageStr).ToLocal(&exception)) {
+    isolate->ThrowException(exception);
+  }
+}
+
+// Throws the internal error that a failed read of the format throws, unless execution is
+// terminating.
+void throwCorrupt(v8::Isolate* isolate) {
+  if (isolate->IsExecutionTerminating()) return;
+  throwInternalError(isolate, "deserialization failure, possible corruption"_kj);
+}
+
 }  // namespace
 
 void Serializer::ExternalHandler::serializeFunction(
@@ -245,51 +211,7 @@ v8::Maybe<bool> Serializer::WriteHostObject(v8::Isolate* isolate, v8::Local<v8::
     jsg::Lock& js = jsg::Lock::from(isolate);
 
     if (object->IsNativeError()) {
-      auto nameStr = js.str("name"_kj);
-      auto messageStr = js.str("message"_kj);
-
-      // Get the standard name, message, stack, cause, error, errors properties from
-      // the error object.
-      writeRawUint32(SERIALIZATION_TAG_NATIVE_ERROR);
-
-      // A mix of ad-hoc and regular serialization. We first serialize
-      // the error tag, which is an enum that identifies the type of error
-      // for faster/easier deserialization. Then we serialize the message which
-      // usually come from the prototype. Then we grab the own properties,
-      // serializing the number of them followed by each name and value in
-      // sequence.
-
-      jsg::JsObject errorObj(object);
-      auto name = errorObj.get(js, nameStr);
-      auto nameKjStr = name.toString(js);
-      auto tag = getErrorTagFromName(js, nameKjStr);
-      writeRawUint32(static_cast<uint32_t>(tag));
-      // We only write the name if it is not one of the known error types.
-      if (tag == ErrorTag::UNKNOWN) {
-        write(js, name);
-      }
-
-      write(js, errorObj.get(js, messageStr));
-
-      auto names = errorObj.getPropertyNames(js, KeyCollectionFilter::OWN_ONLY,
-          PropertyFilter::ALL_PROPERTIES, IndexFilter::SKIP_INDICES);
-
-      auto obj = js.obj();
-      for (size_t n = 0; n < names.size(); n++) {
-        auto name = names.get(js, n);
-        // The name typically comes from the prototype and therefore
-        // do not show up in the own properties of the error object, and the
-        // message we want to treat specially since we need it early in the
-        // deserialization.
-        // Since we already have them serialized above, we can filter them
-        // out here.
-        if (name.strictEquals(nameStr) || name.strictEquals(messageStr)) continue;
-
-        obj.set(js, name, errorObj.get(js, name));
-      }
-      write(js, obj);
-
-      return v8::Just(true);
+      return writeNativeError(isolate, ser, object);
     }
 
     writeApiObject(js, object);
@@ -563,64 +485,7 @@ v8::MaybeLocal<v8::Object> Deserializer::ReadHostObject(v8::Isolate* isolate) {
     uint tag = readRawUint32();
 
     if (tag == SERIALIZATION_TAG_NATIVE_ERROR) {
-      auto& js = Lock::from(isolate);
-      auto stack = js.str("stack"_kj);
-
-      // The first uint32_t is the error tag, which identifies the type of error.
-      auto errorTag = static_cast<ErrorTag>(readRawUint32());
-      // If The error tag is UNKNOWN, we will read the name of the error next.
-      // If the error is known, we don't both serializing the name.
-      kj::Maybe<JsValue> maybeName;
-      if (errorTag == ErrorTag::UNKNOWN) {
-        maybeName = readValue(js);
-      }
-
-      // The next value is the message, which is always present.
-      auto messageValue = readValue(js);
-      auto messageStr = KJ_UNWRAP_OR(messageValue.tryCast<JsString>(), {
-        JSG_FAIL_REQUIRE(
-            DOMDataCloneError, "Deserialization failed: error message is not a string");
-      });
-      // Now let's create the error object based on the tag and message.
-      auto obj = toJsError(js, errorTag, messageStr);
-
-      // If we have a name, we set it on the error object. This is not
-      // perfect but it gets close enough. Specifically, when the error
-      // was serialized, if the user has modified the name or created
-      // their own subclass, then we end up having to create just a
-      // regular error here and change the name. It is not possible
-      // for us here to clone the exact error class that was used,
-      // so instanceof checks will not work as expected. But, that's ok.
-      KJ_IF_SOME(name, maybeName) {
-        // We use defineProperty here since the name is not typically
-        // modifiable with set() on error objects.
-        obj.defineProperty(js, "name"_kj, name);
-      }
-
-      // Now let's read the remaining properties... They were serialized as
-      // a plain object with some own properties.
-      KJ_IF_SOME(serObj, readValue(js).tryCast<JsObject>()) {
-        auto names = serObj.getPropertyNames(js, KeyCollectionFilter::OWN_ONLY,
-            PropertyFilter::ALL_PROPERTIES, IndexFilter::SKIP_INDICES);
-        for (size_t n = 0; n < names.size(); n++) {
-          auto name = names.get(js, n);
-          // If the preserveStackInErrors option is false, then we will not
-          // restore the serialized stack property if it is included in the
-          // serialized output.
-          if (!preserveStackInErrors && name.strictEquals(stack)) continue;
-          auto value = serObj.get(js, name);
-          // Use createDataProperty instead of ordinary set to avoid
-          // invoking prototype-chain setters. This code runs inside V8's
-          // DisallowJavascriptExecution scope; an ordinary Set() that hits
-          // a tenant-installed Error.prototype setter would trigger
-          // V8_Fatal -> abort(). CreateDataProperty defines an own data
-          // property directly, matching the HTML structured-clone spec.
-          obj.createDataProperty(js, name, value);
-        }
-      }
-
-      v8::Local<v8::Object> ret = obj;
-      return ret;
+      return readNativeError(isolate, deser, PreserveStack(preserveStackInErrors));
     }
 
     return readApiObject(Lock::from(isolate), tag);
@@ -670,6 +535,115 @@ v8::MaybeLocal<v8::Object> readApiObject(
     throwInternalError(isolate, kj::getCaughtExceptionAsKj());
     return {};
   }
+}
+
+v8::Maybe<bool> writeNativeError(
+    v8::Isolate* isolate, v8::ValueSerializer& ser, v8::Local<v8::Object> error) {
+  auto context = isolate->GetCurrentContext();
+  auto nameKey = newInternalizedString(isolate, "name"_kj);
+  auto messageKey = newInternalizedString(isolate, "message"_kj);
+
+  ser.WriteUint32(SERIALIZATION_TAG_NATIVE_ERROR);
+
+  v8::Local<v8::Value> name;
+  v8::Local<v8::String> nameString;
+  if (!error->Get(context, nameKey).ToLocal(&name) ||
+      !name->ToDetailString(context).ToLocal(&nameString)) {
+    return v8::Nothing<bool>();
+  }
+  auto tag = errorTagOf(isolate, nameString);
+  ser.WriteUint32(tag);
+  // The name of a known type is implied by the tag.
+  if (tag == ERROR_TAG_UNKNOWN && ser.WriteValue(context, name).IsNothing()) {
+    return v8::Nothing<bool>();
+  }
+
+  // The message comes before the other properties, since the deserializer needs it to create
+  // the error.
+  v8::Local<v8::Value> message;
+  if (!error->Get(context, messageKey).ToLocal(&message) ||
+      ser.WriteValue(context, message).IsNothing()) {
+    return v8::Nothing<bool>();
+  }
+
+  v8::Local<v8::Array> keys;
+  if (!error
+           ->GetPropertyNames(context, v8::KeyCollectionMode::kOwnOnly,
+               v8::PropertyFilter::ALL_PROPERTIES, v8::IndexFilter::kSkipIndices)
+           .ToLocal(&keys)) {
+    return v8::Nothing<bool>();
+  }
+  auto properties = v8::Object::New(isolate);
+  for (uint32_t i = 0; i < keys->Length(); i++) {
+    v8::Local<v8::Value> key;
+    if (!keys->Get(context, i).ToLocal(&key)) return v8::Nothing<bool>();
+    // The name and message are written above.
+    if (key->StrictEquals(nameKey) || key->StrictEquals(messageKey)) continue;
+    v8::Local<v8::Value> value;
+    if (!error->Get(context, key).ToLocal(&value) ||
+        properties->Set(context, key, value).IsNothing()) {
+      return v8::Nothing<bool>();
+    }
+  }
+  return ser.WriteValue(context, properties);
+}
+
+v8::MaybeLocal<v8::Object> readNativeError(
+    v8::Isolate* isolate, v8::ValueDeserializer& deser, PreserveStack preserveStack) {
+  auto context = isolate->GetCurrentContext();
+
+  uint32_t tag;
+  if (!deser.ReadUint32(&tag)) {
+    throwCorrupt(isolate);
+    return {};
+  }
+  v8::Local<v8::Value> name;
+  if (tag == ERROR_TAG_UNKNOWN && !deser.ReadValue(context).ToLocal(&name)) return {};
+
+  v8::Local<v8::Value> message;
+  if (!deser.ReadValue(context).ToLocal(&message)) return {};
+  if (!message->IsString()) {
+    throwDataCloneError(isolate, "Deserialization failed: error message is not a string"_kj);
+    return {};
+  }
+  auto error = newNativeError(tag, message.As<v8::String>());
+
+  // An error of an unknown type is created as a generic Error with the name it was written
+  // with, so it is not an instance of the class it was created from. The name is defined as an
+  // own property, since an error's `name` usually comes from its prototype.
+  if (!name.IsEmpty() &&
+      error->DefineOwnProperty(context, newInternalizedString(isolate, "name"_kj), name)
+          .IsNothing()) {
+    return {};
+  }
+
+  v8::Local<v8::Value> properties;
+  if (!deser.ReadValue(context).ToLocal(&properties)) return {};
+  if (properties->IsObject()) {
+    auto object = properties.As<v8::Object>();
+    auto stackKey = newInternalizedString(isolate, "stack"_kj);
+    v8::Local<v8::Array> keys;
+    if (!object
+             ->GetPropertyNames(context, v8::KeyCollectionMode::kOwnOnly,
+                 v8::PropertyFilter::ALL_PROPERTIES, v8::IndexFilter::kSkipIndices)
+             .ToLocal(&keys)) {
+      return {};
+    }
+    for (uint32_t i = 0; i < keys->Length(); i++) {
+      v8::Local<v8::Value> key;
+      v8::Local<v8::Value> value;
+      if (!keys->Get(context, i).ToLocal(&key)) return {};
+      if (!preserveStack && key->StrictEquals(stackKey)) continue;
+      // A data property rather than Set(), so that no setter on the error's prototype chain runs:
+      // deserialization runs with JavaScript execution disallowed, where calling one is fatal,
+      // and the structured clone spec defines own data properties.
+      if (!object->Get(context, key).ToLocal(&value) ||
+          error->CreateDataProperty(context, key.As<v8::Name>(), value).IsNothing()) {
+        return {};
+      }
+    }
+  }
+  return error;
 }
 
 v8::MaybeLocal<v8::Value> newDataCloneError(v8::Isolate* isolate, v8::Local<v8::String> message) {

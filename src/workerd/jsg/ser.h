@@ -347,9 +347,30 @@ class Deserializer final: v8::ValueDeserializer::Delegate {
 };
 
 // For serializers implemented outside C++ JSG, which drive a v8::ValueSerializer or
-// v8::ValueDeserializer with a delegate of their own but write workerd API objects in the same
-// format as Serializer and Deserializer. Each returns an empty result, leaving the exception
-// pending, if what it runs throws.
+// v8::ValueDeserializer with a delegate of their own but write native errors and workerd API
+// objects in the same format as Serializer and Deserializer. Each returns an empty result, leaving
+// the exception pending, if what it runs throws.
+
+// The tag with which a native error written as a host object begins. Keep in sync with the
+// nativeError serialization tag defined in worker-interface.capnp.
+constexpr uint32_t SERIALIZATION_TAG_NATIVE_ERROR = 10;
+
+// Writes the native error `error` as a host object, as Serializer does when
+// Lock::isUsingEnhancedErrorSerialization() is true: SERIALIZATION_TAG_NATIVE_ERROR, its type, its
+// name if the type is not a known one, its message, and its other own properties as a plain
+// object. The values go through `ser`, and so through its delegate. Reading the properties can run
+// JavaScript. Serializer writes native errors through this too, so the format has one definition.
+v8::Maybe<bool> writeNativeError(
+    v8::Isolate* isolate, v8::ValueSerializer& ser, v8::Local<v8::Object> error);
+
+// Whether readNativeError() restores the `stack` property that was written with an error, or
+// leaves the error with the stack captured as it is created.
+WD_STRONG_BOOL(PreserveStack);
+
+// Reads an error that writeNativeError() wrote, once its SERIALIZATION_TAG_NATIVE_ERROR has been
+// read, as Deserializer does. Runs no JavaScript beyond what reading values through `deser` runs.
+v8::MaybeLocal<v8::Object> readNativeError(
+    v8::Isolate* isolate, v8::ValueDeserializer& deser, PreserveStack preserveStack);
 
 // Writes `object` as Serializer's WriteHostObject() writes an object that is not a native error:
 // through its type's serializer if it is a serializable workerd API object, or else throws a

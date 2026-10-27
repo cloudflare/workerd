@@ -109,8 +109,9 @@ Don't add C++ JSG to the shims. This includes `jsg::Lock` (including `Lock::from
 `CONSTRUCTS` in `cpp-jsg-allowlist-test.py` has the full list. Using `Wrappable`,
 `GcVisitor`, `IsolateBase` or the module registries is fine for now, since Rust JSG still shares
 them with C++ JSG. So are thin calls into `src/workerd/io`, and the serialization hooks in
-`workerd/jsg/ser.h` (`writeApiObject`, `readApiObject` and `newDataCloneError`), through which
-workerd's API objects serialize, since their serializers are written against C++ JSG.
+`workerd/jsg/ser.h`: `writeApiObject`, `readApiObject` and `newDataCloneError`, through which
+workerd's API objects serialize, since their serializers are written against C++ JSG, and
+`writeNativeError` and `readNativeError`, which give native errors one format for both.
 
 Bad: a shim that wraps a V8 call in `JSG_TRY(js) { ... } JSG_CATCH(error) {
 kj::throwException(createTunneledException(...)); }`. Fix: catch with a `v8::TryCatch` in the
