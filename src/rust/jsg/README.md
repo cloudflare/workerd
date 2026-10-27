@@ -549,7 +549,8 @@ in `SerializeOptions::transfer`, which are detached once the value is written. T
 to these buffers by number, so only `Serialized::deserialize` reads it with them, as
 `jsg::Deserializer` reads a `Released`. Safe code has no other way to hand a reader backing stores
 (the hidden hooks for C++ comparison tests give their addresses, which only `unsafe` code can
-use), so a reader can't be given another serialization's buffers. `Serialized::data()` and `into_data()`
+use), so a reader can't be given another serialization's buffers. Like `Released`, `Serialized`
+is not `Send`: its buffers are read in the isolate that wrote them. `Serialized::data()` and `into_data()`
 give the bytes alone, which `ser::deserialize_with` reads when they refer to no buffer.
 
 Externals are not supported: without a `jsg::Serializer::ExternalHandler`, functions, `Proxy`s

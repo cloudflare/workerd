@@ -26,6 +26,8 @@
 //! object that needs one (an RPC stub, a `ReadableStream`) throws a `DataCloneError`, as
 //! `jsg::Serializer` does without a handler.
 
+use std::marker::PhantomData;
+
 use crate::Error;
 use crate::Lock;
 use crate::v8;
@@ -65,11 +67,15 @@ pub struct SerializeOptions<'a, 's> {
 
 /// What [`serialize_with`] writes, as `jsg::Serializer::Released`: the bytes, and the backing
 /// stores of the buffers they refer to by number.
+///
+/// `Serialized` is neither `Send` nor `Sync`: its buffers are read in the isolate that wrote them,
+/// as with `Released`, so that memory that isn't shared is never reached from two threads.
 #[derive(Debug)]
 pub struct Serialized {
     data: Vec<u8>,
     shared_array_buffers: Vec<v8::BackingStore>,
     transferred_array_buffers: Vec<v8::BackingStore>,
+    _not_send: PhantomData<*mut ()>,
 }
 
 impl Serialized {
@@ -121,6 +127,7 @@ impl Serialized {
             data: serialized.data,
             shared_array_buffers: take(serialized.shared_array_buffers),
             transferred_array_buffers: take(serialized.transferred_array_buffers),
+            _not_send: PhantomData,
         }
     }
 
