@@ -286,6 +286,8 @@ build:tsan-common --platforms=//build/platforms:sanitizer_thread_platform
 # makes detection robust to scheduling. Costs ~2.5MB of trace memory per live thread.
 build:tsan-common --action_env=TSAN_OPTIONS=halt_on_error=true:handle_sigabrt=0:history_size=7
 build:tsan-common --test_env=TSAN_OPTIONS=halt_on_error=true:handle_sigabrt=0:history_size=7
+# Run runtime destructors before TSan checks for thread leaks at process exit.
+build:tsan-common --test_env=KJ_CLEAN_SHUTDOWN=1
 # Clang-tidy loads this shared object into an unsanitized process, which cannot resolve TSan hooks.
 build:tsan-common --per_file_copt='tools/clang-tidy@-fno-sanitize=thread'
 # TSan significantly increases test runtime.
