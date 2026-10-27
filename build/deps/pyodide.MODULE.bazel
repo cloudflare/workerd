@@ -1,5 +1,5 @@
 # The repos below are derived from //:build/python_metadata.bzl, so this list is maintained by
-# `bazel mod tidy` rather than by hand.
+# `bazel mod tidy --lockfile_mode=update` rather than by hand.
 
 pyodide = use_extension("@//build/deps:pyodide.bzl", "pyodide")
 use_repo(

@@ -42,6 +42,7 @@ Subdirectory `AGENTS.md` files provide component-specific context (key classes, 
 - `just node-test <name>` - Run specific Node.js compatibility tests (e.g., `just node-test zlib`)
 - `just wpt-test <name>` - Run Web Platform Tests (e.g., `just wpt-test urlpattern`)
 - `just generate-types` - Generate TypeScript definitions
+- `just update-lockfile` - Regenerate `MODULE.bazel.lock` after editing a MODULE.bazel file or a module extension's inputs by hand; Bazel runs with `--lockfile_mode=error`
 - `just compile-commands` - Generate compile_commands.json for clangd support
 - `just build-asan` - Build with AddressSanitizer
 - `just test-asan` - Run tests with AddressSanitizer
