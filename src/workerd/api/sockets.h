@@ -101,6 +101,9 @@ struct SocketOptions {
   JSG_MEMORY_INFO(SocketOptions) {
     tracker.trackField("secureTransport", secureTransport);
   }
+  JSG_STRUCT_TS_OVERRIDE({
+    secureTransport?: "off" | "on" | "starttls";
+  });
 };
 
 struct TlsOptions {
