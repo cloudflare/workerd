@@ -1,10 +1,13 @@
 // Tests for the C++ side of the memory cache: binding lifetime, singleflight
-// leader/waiter handoff, and the FallbackDoneCallback contract. The storage and
-// coordination logic itself is covered by the Rust crate's own tests.
+// leader/waiter handoff, the FallbackDoneCallback contract, and the trace spans of
+// MemoryCache.read(), which the Rust MemoryCache must record as the C++ one does. The
+// storage and coordination logic itself is covered by the Rust crate's own tests.
 
 #include "memory-cache.h"
 
+#include <workerd/api/memory-cache-api/ffi.rs.h>
 #include <workerd/io/trace.h>
+#include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/tests/test-fixture.h>
 #include <workerd/util/thread-scopes.h>
 
@@ -212,8 +215,9 @@ KJ_TEST("fallback callback stores the value and survives binding destruction") {
   });
 }
 
-// Records the spans of a request as they end, each as "name <- parent: key=type:value ...", with
-// its tags in key order.
+// Records the spans of a request in the order they open, each as "name <- parent: key=type:value
+// ...", with its tags, which a span delivers when it ends, in key order. The order spans end in
+// depends on when each implementation of MemoryCache releases them, so it is not recorded.
 class SpanRecorder final: public SpanObserver {
  public:
   SpanRecorder(kj::Vector<kj::String>& spans, kj::StringPtr parent)
@@ -225,6 +229,8 @@ class SpanRecorder final: public SpanObserver {
   }
   void onOpen(kj::ConstString operationName, kj::Date) override {
     name = kj::str(operationName);
+    index = spans.size();
+    spans.add(kj::str(name, " <- ", parent, ": (open)"));
   }
   void onClose(kj::Date, Span::TagMap&& tags, kj::Vector<Span::Log>&&) override {
     auto entries = KJ_MAP(entry, tags) {
@@ -245,13 +251,14 @@ class SpanRecorder final: public SpanObserver {
       KJ_UNREACHABLE;
     };
     std::sort(entries.begin(), entries.end());
-    spans.add(kj::str(name, " <- ", parent, ": ", kj::strArray(entries, " ")));
+    spans[index] = kj::str(name, " <- ", parent, ": ", kj::strArray(entries, " "));
   }
 
  private:
   kj::Vector<kj::String>& spans;
   kj::String parent;
   kj::String name;
+  size_t index = 0;
 };
 
 class SpanRequestObserver final: public RequestObserver {
@@ -267,14 +274,50 @@ class SpanRequestObserver final: public RequestObserver {
   SpanBuilder span;
 };
 
-KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwriting a tag") {
-  // In predictable mode, overwriting a span's tag logs an error, which fails this test. It logs
-  // only the first overwrite in the process, so no other test here may overwrite one.
+// Makes the MemoryCache that a test's script reads as `globalThis.CACHE`.
+using MakeCache = kj::Function<v8::Local<v8::Value>(const TestFixture::Environment&)>;
+
+// Runs a request of `script`, which reads `globalThis.CACHE`, and returns the spans it records.
+// Runs in predictable mode, in which overwriting a span's tag logs an error, which fails the
+// test. It logs only the first overwrite in the process.
+kj::Array<kj::String> recordSpans(kj::StringPtr script, MakeCache makeCache) {
   setPredictableModeForTest();
-  MemoryCacheProvider provider;
   kj::Vector<kj::String> spans;
   TestFixture fixture({
-    .mainModuleSource = R"SCRIPT(
+    .mainModuleSource = script,
+    .requestObserverFactory =
+        kj::Function<kj::Own<RequestObserver>()>([&spans]() -> kj::Own<RequestObserver> {
+    return kj::refcounted<SpanRequestObserver>(spans);
+  }),
+  });
+  fixture.runInIoContext([&](const TestFixture::Environment& env) {
+    jsg::check(env.js.v8Context()->Global()->Set(
+        env.js.v8Context(), env.js.str("CACHE"_kj), makeCache(env)));
+  });
+  auto response = fixture.runRequest(kj::HttpMethod::GET, "http://worker/"_kj, ""_kj);
+  KJ_EXPECT(response.statusCode == 200, response.body);
+  return spans.releaseAsArray();
+}
+
+// A C++ MemoryCache over `provider`.
+MakeCache cppCache(MemoryCacheProvider& provider, MemoryCacheLimits limits) {
+  return [&provider, limits](const TestFixture::Environment& env) -> v8::Local<v8::Value> {
+    auto& handler = KJ_REQUIRE_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<MemoryCache>>());
+    return handler.wrap(env.js, env.js.alloc<MemoryCache>(provider.getUse(kj::none, limits)));
+  };
+}
+
+// A Rust MemoryCache over `provider`.
+MakeCache rustCache(MemoryCacheProvider& provider, MemoryCacheLimits limits) {
+  return [&provider, limits](const TestFixture::Environment& env) -> v8::Local<v8::Value> {
+    return jsg::check(::workerd::rust::jsg::maybe_local_from_ffi<v8::Value>(
+        memory_cache_new(env.isolate, provider.bindForRust(kj::none, limits))));
+  };
+}
+
+KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwriting a tag") {
+  MemoryCacheProvider provider;
+  auto spans = recordSpans(R"SCRIPT(
       export default {
         async fetch() {
           const settle = (promise) => promise.then(() => {}, () => {});
@@ -284,20 +327,7 @@ KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwr
         }
       };
     )SCRIPT"_kj,
-    .requestObserverFactory =
-        kj::Function<kj::Own<RequestObserver>()>([&spans]() -> kj::Own<RequestObserver> {
-    return kj::refcounted<SpanRequestObserver>(spans);
-  }),
-  });
-  fixture.runInIoContext([&](const TestFixture::Environment& env) {
-    auto& handler = KJ_REQUIRE_NONNULL(env.js.tryGetTypeHandler<jsg::Ref<MemoryCache>>());
-    auto cache =
-        handler.wrap(env.js, env.js.alloc<MemoryCache>(provider.getUse(kj::none, testLimits())));
-    jsg::check(
-        env.js.v8Context()->Global()->Set(env.js.v8Context(), env.js.str("CACHE"_kj), cache));
-  });
-  auto response = fixture.runRequest(kj::HttpMethod::GET, "http://worker/"_kj, ""_kj);
-  KJ_EXPECT(response.statusCode == 200, response.body);
+      cppCache(provider, testLimits()));
 
   kj::Vector<kj::StringPtr> fallbacks;
   for (auto& span: spans) {
@@ -314,6 +344,86 @@ KJ_TEST("a fallback whose result is rejected is tagged as failed, without overwr
           "memory_cache_fallback <- memory_cache_read: fallback_error=str: "
           "fallback_success=bool:false key=str:function",
       fallbacks[1]);
+}
+
+// Reads that take every path of read(), with and without a fallback, and fill the cache past
+// its limits. The fallbacks of a key's reads are coalesced: the second read of "b" waits for the
+// first, and the second of "c" runs its own once the first's fails.
+// TODO(#7951): Add a value that cannot be serialized, once Rust JSG throws DOMExceptions. Rust
+// throws a plain Error, so its fallback_error tag differs from that of C++'s DataCloneError.
+constexpr auto PARITY_SCENARIO = R"SCRIPT(
+  export default {
+    async fetch() {
+      const cache = globalThis.CACHE;
+      const settle = (promise) => promise.then(() => {}, () => {});
+
+      await cache.read("missing");
+      await cache.read("a", async () => ({ value: "x".repeat(10) }));
+      await cache.read("a");
+      await cache.read("a", () => { throw new Error("unused"); });
+
+      const leader = cache.read("b", async () => ({ value: 1, expiration: Date.now() + 1e6 }));
+      const waiter = cache.read("b", () => ({ value: 2 }));
+      await Promise.all([leader, waiter]);
+
+      const failing = cache.read("c", async () => { throw new Error("boom"); });
+      const promoted = cache.read("c", () => ({ value: "second" }));
+      await settle(failing);
+      await promoted;
+
+      await settle(cache.read("d", () => { throw new TypeError("sync"); }));
+      await settle(cache.read("e", () => ({ value: 1, expiration: NaN })));
+      await settle(cache.read("f", () => Promise.reject("not an error")));
+      await settle(cache.read("g", () => ({ value: "y".repeat(100) })));
+      await settle(cache.read("h", () => ({ value: 1, expiration: 0 })));
+      await cache.read("i", () => ({ value: "evicts a" }));
+      return new Response("ok");
+    }
+  };
+)SCRIPT"_kj;
+
+constexpr MemoryCacheLimits PARITY_LIMITS{
+  .maxKeys = 3,
+  .maxValueSize = 64,
+  .maxTotalValueSize = 1024,
+};
+
+// The memory_cache_* spans of PARITY_SCENARIO.
+kj::Array<kj::String> parityScenarioSpans(
+    MakeCache (*makeCache)(MemoryCacheProvider&, MemoryCacheLimits)) {
+  MemoryCacheProvider provider;
+  kj::Vector<kj::String> result;
+  for (auto& span: recordSpans(PARITY_SCENARIO, makeCache(provider, PARITY_LIMITS))) {
+    if (span.startsWith("memory_cache")) result.add(kj::mv(span));
+  }
+  return result.releaseAsArray();
+}
+
+KJ_TEST("the Rust MemoryCache records the spans the C++ one does") {
+  auto cpp = parityScenarioSpans(cppCache);
+  auto rust = parityScenarioSpans(rustCache);
+  auto describe = [&]() {
+    return kj::str("C++:\n", kj::strArray(cpp, "\n"), "\nRust:\n", kj::strArray(rust, "\n"));
+  };
+  KJ_EXPECT(cpp.size() == rust.size(), describe());
+  for (auto i: kj::zeroTo(kj::min(cpp.size(), rust.size()))) {
+    KJ_EXPECT(cpp[i] == rust[i], i, describe());
+  }
+
+  // The comparison means something only if C++ records what it should.
+  auto contains = [&](kj::StringPtr expected) {
+    for (auto& span: cpp) {
+      if (span == expected) return true;
+    }
+    return false;
+  };
+  KJ_EXPECT(contains("memory_cache_read <- request: cache_entry_count=float:0 "
+                     "cache_hit=bool:false cache_total_size=float:0 "
+                     "memory_cache_lock_wait_time_ns=int:0"_kj),
+      describe());
+  KJ_EXPECT(contains("memory_cache_fallback <- memory_cache_read: fallback_error=str:Error: boom "
+                     "fallback_success=bool:false key=str:c"_kj),
+      describe());
 }
 
 }  // namespace

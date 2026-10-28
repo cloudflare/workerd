@@ -3,9 +3,15 @@
 #include <workerd/io/compatibility-date.capnp.h>
 #include <workerd/jsg/jsg.h>
 
+#include <rust/cxx.h>
+
 namespace workerd {
 class SpanBuilder;
 }
+
+namespace workerd::rust::memory_cache {
+struct Binding;
+}  // namespace workerd::rust::memory_cache
 
 namespace workerd::api {
 
@@ -165,6 +171,9 @@ class MemoryCacheProvider {
   ~MemoryCacheProvider() noexcept(false);
 
   kj::Own<MemoryCacheUse> getUse(kj::Maybe<kj::StringPtr> cacheId, MemoryCacheLimits limits) const;
+
+  ::rust::Box<::workerd::rust::memory_cache::Binding> bindForRust(
+      kj::Maybe<kj::StringPtr> cacheId, MemoryCacheLimits limits) const;
 
  private:
   struct Impl;
