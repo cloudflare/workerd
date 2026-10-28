@@ -4,6 +4,7 @@
 #include <capnp/message.h>
 #include <kj/async-io.h>
 #include <kj/test.h>
+#include <kj/thread.h>
 
 namespace workerd {
 namespace {
@@ -566,6 +567,80 @@ KJ_TEST("an idle actor's next request doesn't finish draining before a promise s
     KJ_EXPECT(readEvents(fixture) == "reaction;stored:value;", readEvents(fixture));
     KJ_EXPECT(!context.hasCurrentIncomingRequest());
   });
+}
+
+KJ_TEST("IoOwn::tryGetWithoutCurrentContext() refuses other contexts and a destroyed one") {
+  TestFixture fixture;
+  uint destructionCount = 0;
+  IoOwn<TrackedObject> object = nullptr;
+
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    object = env.context.addObject(kj::heap<TrackedObject>(destructionCount, 123));
+    KJ_EXPECT(KJ_ASSERT_NONNULL(object.tryGetWithoutCurrentContext()).value == 123);
+  });
+  fixture.drainAndDestroy(kj::mv(request));
+
+  KJ_EXPECT(KJ_ASSERT_NONNULL(object.tryGetWithoutCurrentContext()).value == 123);
+
+  auto otherRequest = fixture.newIncomingRequest();
+  fixture.enterContext(*otherRequest, [&](const TestFixture::Environment&) {
+    KJ_EXPECT(object.tryGetWithoutCurrentContext() == kj::none);
+  });
+  fixture.drainAndDestroy(kj::mv(otherRequest));
+
+  kj::Maybe<kj::Exception> otherThreadException;
+  {
+    // Joins the thread at the end of the block.
+    kj::Thread thread([&]() {
+      otherThreadException =
+          kj::runCatchingExceptions([&]() { object.tryGetWithoutCurrentContext(); });
+    });
+  }
+  KJ_EXPECT(KJ_ASSERT_NONNULL(otherThreadException)
+                .getDescription()
+                .contains("outside its IoContext's thread"));
+
+  context = nullptr;
+  KJ_EXPECT(destructionCount == 1);
+  KJ_EXPECT(object.tryGetWithoutCurrentContext() == kj::none);
+}
+
+// Reads `sibling`, owned by the same IoContext, when destroyed.
+class SiblingObserver {
+ public:
+  SiblingObserver(IoOwn<TrackedObject>& sibling, kj::Maybe<bool>& sawSibling)
+      : sibling(sibling),
+        sawSibling(sawSibling) {}
+  ~SiblingObserver() noexcept(false) {
+    sawSibling = sibling.tryGetWithoutCurrentContext() != kj::none;
+  }
+
+ private:
+  IoOwn<TrackedObject>& sibling;
+  kj::Maybe<bool>& sawSibling;
+};
+
+KJ_TEST("IoOwn::tryGetWithoutCurrentContext() refuses while its IoContext destroys objects") {
+  TestFixture fixture;
+  uint destructionCount = 0;
+  kj::Maybe<bool> sawSibling;
+  IoOwn<TrackedObject> sibling = nullptr;
+  IoOwn<SiblingObserver> observer = nullptr;
+
+  auto context = fixture.newIoContext();
+  auto request = fixture.newIncomingRequest(*context);
+  fixture.enterContext(*request, [&](const TestFixture::Environment& env) {
+    observer = env.context.addObject(kj::heap<SiblingObserver>(sibling, sawSibling));
+    // Owned objects are destroyed newest first, so `sibling` is freed before the observer runs.
+    sibling = env.context.addObject(kj::heap<TrackedObject>(destructionCount, 123));
+  });
+  fixture.drainAndDestroy(kj::mv(request));
+
+  context = nullptr;
+  KJ_EXPECT(destructionCount == 1);
+  KJ_EXPECT(KJ_ASSERT_NONNULL(sawSibling) == false);
 }
 
 }  // namespace
