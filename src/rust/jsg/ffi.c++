@@ -418,6 +418,16 @@ MaybeLocal local_symbol_description(Isolate* isolate, const Local& value) {
   return maybe_local_to_ffi(v8::MaybeLocal<v8::String>(desc.As<v8::String>()));
 }
 
+// Local<Boolean>
+bool local_boolean_value(const Local& value) {
+  return local_as_ref_from_ffi<v8::Boolean>(value)->Value();
+}
+
+// Local<Number>
+double local_number_value(const Local& value) {
+  return local_as_ref_from_ffi<v8::Number>(value)->Value();
+}
+
 // Local<BigInt>
 Local big_int_new(Isolate* isolate, int64_t value) {
   return to_ffi(v8::BigInt::New(isolate, value));

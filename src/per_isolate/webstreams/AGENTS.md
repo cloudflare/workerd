@@ -163,6 +163,16 @@ connection.
   read's completion steps: one `then` lookup per read, at the spec's
   moment. Suite guard: `then-interceptors.js` (readable), `pollution.js`
   (readable-byte).
+- Every promise the C++ bridge awaits resolves with a primitive,
+  `undefined` or a null-prototype record, never an object on the
+  `Object.prototype` chain, whose `then` a patched
+  `Object.prototype.then` would supply. Body consumption resolves
+  `consumeReadableStreamAsArrayBufferRecord`'s `{ buffer }`, from which
+  C++ builds every result (`arrayBuffer()`, `bytes()`, `blob()`,
+  `text()`, `json()`), as the legacy implementation builds them from
+  its own reads. Suite guard: `thenPatchOnlyInterceptsConsumptionResult`
+  (readable), plus the patched-`then` consumption test in
+  `js-readable-stream-test.c++`.
 - Do not port logic across the fence without checking BOTH invariant
   lists (`queue.ts` and `native.ts` headers).
 - The native source contract (marker symbol, standard pull/cancel hooks,

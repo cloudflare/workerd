@@ -381,6 +381,16 @@ creates a handle takes `&mut Lock<'s>` and returns `Local<'s, _>`; methods that 
 JavaScript take `&mut Lock<'s>` as well, and borrowed views into V8 memory
 (`as_slice(&lock)`) borrow the lock, so no JavaScript can run while they are alive.
 
+`T` is a marker type that mirrors the V8 class of the same name: `v8::Value`, `v8::Boolean`,
+`v8::Number`, `v8::String`, `v8::Object`, `v8::Function`, `v8::Uint8Array` and so on, all in
+`jsg::v8` and nowhere else, so that `v8::String` reads as it does in C++ and never collides with
+`std::string::String`. A marker's `Local<T>` methods are named after the methods of its V8 class,
+in snake case (`Local<Number>::value()`, `Local<String>::length()`), and a marker has a
+constructor where V8 has one (`v8::Number::new(lock, 1.5)`). The markers are defined in `v8.rs`
+(promises in `promise.rs`); the comment above `Value` lists the V8 classes that have no marker
+yet. Other V8 classes that Rust JSG wraps, such as `v8::BackingStore`, are also only in
+`jsg::v8`.
+
 A `Local` is one non-null pointer, laid out like `v8::Local<T>`. It does not record its
 isolate; methods that need the isolate take the lock. A handle that may be empty is an
 `Option<Local<'s, T>>`, laid out like `v8::MaybeLocal<T>`: for example, the `String`
@@ -522,7 +532,7 @@ Code that gets a pending error must not call into JavaScript, and should return 
 To handle an exception instead, run the code in `Lock::try_catch`, which catches as C++ `jsg::Lock::tryCatch()` does: the exception, or an error the closure returns, as a value; a termination keeps propagating.
 
 ```rust
-match lock.try_catch(|lock| callback.call::<Number>(lock, None, &[]))? {
+match lock.try_catch(|lock| callback.call::<f64>(lock, None, &[]))? {
     Ok(result) => { /* ... */ }
     Err(exception) => { /* handle what the callback threw */ }
 }
@@ -544,8 +554,9 @@ lists, externals and the other options are not supported. The C++ side is `src/r
 
 The module docs of `wrappable.rs` list every Rust type that converts to or from JavaScript, and
 how. Most convert both ways. `&[T]` converts only from JavaScript, so it can be a method parameter
-but not a return value. `f64` and `f32` convert only to JavaScript, to a number; a number parameter
-is a `Number`.
+but not a return value. A number is an `f64`, which converts like C++ JSG's `double`: to a number,
+and from any value with JavaScript's `ToNumber`. An `f32` converts only to JavaScript. A number
+that stays on the V8 heap is a `v8::Local<'s, v8::Number>`, which accepts only a number.
 
 Integers convert like C++ JSG's. `u8`, `u16`, `u32`, `i8`, `i16` and `i32` convert to a number,
 and from a value converted to a number, which must be in range. `i64` and `u64` convert to a
@@ -605,7 +616,7 @@ To port a C++ JSG signature:
 | `v8::Local<v8::Uint8Array>` returned | `v8::Local<'s, v8::Uint8Array>`, from `to_js_typed_array` |
 | `kj::Array<T>` of other numbers returned | `Vec<T>`, an `Array` |
 | `kj::Array<T>` of integers parameter | `Vec<T>` |
-| `kj::Array<double>` parameter | `Vec<Number>` |
+| `kj::Array<double>` parameter | `Vec<f64>` |
 | `kj::Array<bool>` | `Vec<bool>` |
 | `kj::Array<T>` of anything else | `Vec<T>` |
 
@@ -750,10 +761,10 @@ use jsg_macros::{jsg_resource, jsg_property, jsg_inspect_property};
 impl Counter {
     // Prototype property (on the proto chain; use this in almost all cases)
     #[jsg_property(prototype)]
-    pub fn get_value(&self) -> jsg::Number { /* ... */ }
+    pub fn get_value(&self) -> f64 { /* ... */ }
 
     #[jsg_property(prototype)]
-    pub fn set_value(&self, v: jsg::Number) { /* ... */ }
+    pub fn set_value(&self, v: f64) { /* ... */ }
 
     // Read-only prototype property (no paired `set_value`)
     #[jsg_property(prototype, readonly)]

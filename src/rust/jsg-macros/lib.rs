@@ -840,7 +840,7 @@ pub fn jsg_wildcard_property(attr: TokenStream, item: TokenStream) -> TokenStrea
 /// #[derive(Debug, Clone)]
 /// enum StringOrNumber {
 ///     String(String),
-///     Number(jsg::Number),
+///     Number(f64),
 /// }
 /// ```
 #[proc_macro_attribute]

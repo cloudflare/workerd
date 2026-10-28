@@ -7,7 +7,6 @@
 use std::cell::RefCell;
 
 use jsg::Member;
-use jsg::Number;
 use jsg::PropertyPlacement;
 use jsg::Resource;
 use jsg::feature_flags::compatibility_flags;
@@ -181,7 +180,7 @@ fn constructor_called_without_new_throws_type_error() {
 
         for code in ["Sample('x')", "Sample.call({}, 'x')"] {
             let err = ctx
-                .eval::<Number>(lock, code)
+                .eval::<f64>(lock, code)
                 .unwrap_err()
                 .unwrap_jsg_err(lock);
             assert_eq!(err.name, jsg::ExceptionType::TypeError, "{code}");

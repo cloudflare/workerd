@@ -241,6 +241,7 @@ export {
   thenGetterCancelsBranchDuringClose,
   thenGetterCancelsTwoBranchesDuringEnqueue,
   thenGetterReleasesReaderWhileReadsSettle,
+  thenPatchOnlyInterceptsConsumptionResult,
 } from 'then-interceptors';
 
 export {

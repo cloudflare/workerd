@@ -2,7 +2,6 @@
 // Licensed under the Apache 2.0 license found in the LICENSE file or at:
 //     https://opensource.org/licenses/Apache-2.0
 
-use jsg::Number;
 use jsg::ToJS;
 use jsg::ToJsArrayBuffer;
 use jsg::ToJsTypedArray;
@@ -14,7 +13,7 @@ use jsg_macros::jsg_struct;
 #[jsg_struct]
 struct Person {
     pub name: String,
-    pub age: Number,
+    pub age: f64,
 }
 
 #[jsg_resource]
@@ -23,13 +22,13 @@ struct ArrayResource;
 #[jsg_resource]
 impl ArrayResource {
     #[jsg_method]
-    pub fn sum(&self, numbers: Vec<Number>) -> Number {
-        Number::new(numbers.iter().map(jsg::Number::value).sum())
+    pub fn sum(&self, numbers: Vec<f64>) -> f64 {
+        numbers.iter().copied().sum()
     }
 
     #[jsg_method]
-    pub fn sum_slice(&self, numbers: &[Number]) -> Number {
-        Number::new(numbers.iter().map(jsg::Number::value).sum())
+    pub fn sum_slice(&self, numbers: &[f64]) -> f64 {
+        numbers.iter().copied().sum()
     }
 
     #[jsg_method]
@@ -38,11 +37,8 @@ impl ArrayResource {
     }
 
     #[jsg_method]
-    pub fn double(&self, numbers: Vec<Number>) -> Vec<Number> {
-        numbers
-            .into_iter()
-            .map(|n| Number::new(n.value() * 2.0))
-            .collect()
+    pub fn double(&self, numbers: Vec<f64>) -> Vec<f64> {
+        numbers.into_iter().map(|n| n * 2.0).collect()
     }
 
     #[jsg_method]
@@ -56,8 +52,8 @@ impl ArrayResource {
     }
 
     #[jsg_method]
-    pub fn filter_positive(&self, numbers: Vec<Number>) -> Vec<Number> {
-        numbers.into_iter().filter(|n| n.value() > 0.0).collect()
+    pub fn filter_positive(&self, numbers: Vec<f64>) -> Vec<f64> {
+        numbers.into_iter().filter(|&n| n > 0.0).collect()
     }
 
     #[jsg_method]
@@ -97,16 +93,13 @@ impl ArrayResource {
         &self,
         lock: &mut jsg::Lock<'s>,
         numbers: v8::Local<'s, v8::Int32Array>,
-    ) -> Number {
-        Number::new(numbers.as_slice(lock).iter().map(|&n| f64::from(n)).sum())
+    ) -> f64 {
+        numbers.as_slice(lock).iter().map(|&n| f64::from(n)).sum()
     }
 
     #[jsg_method]
     pub fn filter_adults(&self, people: Vec<Person>) -> Vec<Person> {
-        people
-            .into_iter()
-            .filter(|p| p.age.value() >= 18.0)
-            .collect()
+        people.into_iter().filter(|p| p.age >= 18.0).collect()
     }
 
     #[jsg_method]
@@ -158,8 +151,8 @@ fn resource_accepts_array_parameter() {
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
-        let result: Number = ctx.eval(lock, "arr.sum([1, 2, 3, 4, 5])").unwrap();
-        assert!((result.value() - 15.0).abs() < f64::EPSILON);
+        let result: f64 = ctx.eval(lock, "arr.sum([1, 2, 3, 4, 5])").unwrap();
+        assert!((result - 15.0).abs() < f64::EPSILON);
 
         let result: String = ctx
             .eval(lock, "arr.concatStrings(['hello', 'world'])")
@@ -177,14 +170,14 @@ fn resource_accepts_slice_parameter() {
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
-        let result: Number = ctx.eval(lock, "arr.sumSlice([1, 2, 3, 4, 5])").unwrap();
-        assert!((result.value() - 15.0).abs() < f64::EPSILON);
+        let result: f64 = ctx.eval(lock, "arr.sumSlice([1, 2, 3, 4, 5])").unwrap();
+        assert!((result - 15.0).abs() < f64::EPSILON);
 
         let result: String = ctx.eval(lock, "arr.joinStrings(['a', 'b', 'c'])").unwrap();
         assert_eq!(result, "a-b-c");
 
-        let result: Number = ctx.eval(lock, "arr.sumSlice([])").unwrap();
-        assert!((result.value() - 0.0).abs() < f64::EPSILON);
+        let result: f64 = ctx.eval(lock, "arr.sumSlice([])").unwrap();
+        assert!((result - 0.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -197,18 +190,16 @@ fn resource_returns_array() {
         let wrapped = resource.to_js(lock)?;
         ctx.set_global(lock, "arr", wrapped);
 
-        let result: Vec<Number> = ctx.eval(lock, "arr.double([1, 2, 3])").unwrap();
-        let values: Vec<f64> = result.iter().map(jsg::Number::value).collect();
-        assert_eq!(values, vec![2.0, 4.0, 6.0]);
+        let result: Vec<f64> = ctx.eval(lock, "arr.double([1, 2, 3])").unwrap();
+        assert_eq!(result, vec![2.0, 4.0, 6.0]);
 
         let result: Vec<String> = ctx.eval(lock, "arr.splitString('a, b, c')").unwrap();
         assert_eq!(result, vec!["a", "b", "c"]);
 
-        let result: Vec<Number> = ctx
+        let result: Vec<f64> = ctx
             .eval(lock, "arr.filterPositive([-1, 2, -3, 4, 0])")
             .unwrap();
-        let values: Vec<f64> = result.iter().map(jsg::Number::value).collect();
-        assert_eq!(values, vec![2.0, 4.0]);
+        assert_eq!(result, vec![2.0, 4.0]);
         Ok(())
     });
 }
@@ -226,10 +217,10 @@ fn resource_accepts_typed_array_parameter() {
             .unwrap();
         assert_eq!(result.as_slice(lock), &[3, 2, 1]);
 
-        let result: Number = ctx
+        let result: f64 = ctx
             .eval(lock, "arr.sumI32(new Int32Array([-10, 20, -5]))")
             .unwrap();
-        assert!((result.value() - 5.0).abs() < f64::EPSILON);
+        assert!((result - 5.0).abs() < f64::EPSILON);
 
         let result: v8::Local<v8::Uint8Array> = ctx
             .eval(lock, "arr.reverseBytes(new Uint8Array([]))")
@@ -282,10 +273,10 @@ fn typed_array_parameter_rejects_wrong_type() {
             ctx.eval(lock, "arr.reverseBytes([1, 2, 3])");
         assert!(result.is_err());
 
-        let result: Result<Number, _> = ctx.eval(lock, "arr.sumI32(new Uint32Array([1, 2, 3]))");
+        let result: Result<f64, _> = ctx.eval(lock, "arr.sumI32(new Uint32Array([1, 2, 3]))");
         assert!(result.is_err());
 
-        let result: Result<Number, _> = ctx.eval(lock, "arr.sumI32([1, 2, 3])");
+        let result: Result<f64, _> = ctx.eval(lock, "arr.sumI32([1, 2, 3])");
         assert!(result.is_err());
 
         Ok(())
@@ -323,8 +314,8 @@ fn vec_to_js_creates_array() {
 
         let is_array: bool = ctx.eval(lock, "Array.isArray(arr)").unwrap();
         assert!(is_array);
-        let length: Number = ctx.eval(lock, "arr.length").unwrap();
-        assert!((length.value() - 2.0).abs() < f64::EPSILON);
+        let length: f64 = ctx.eval(lock, "arr.length").unwrap();
+        assert!((length - 2.0).abs() < f64::EPSILON);
         let first: String = ctx.eval(lock, "arr[0]").unwrap();
         assert_eq!(first, "hello");
 
@@ -337,7 +328,7 @@ fn vec_to_js_creates_array() {
     });
 }
 
-/// A `Vec` of `bool`s or `Number`s, or of `Option`s or `Nullable`s of them, converts to an
+/// A `Vec` of `bool`s or `f64`s, or of `Option`s or `Nullable`s of them, converts to an
 /// `Array` of the converted elements.
 #[test]
 fn vec_of_bool_and_number_converts_to_an_array() {
@@ -345,10 +336,9 @@ fn vec_of_bool_and_number_converts_to_an_array() {
     harness.run_in_context(|lock, ctx| {
         let bools = vec![true, false, true].to_js(lock)?;
         ctx.set_global(lock, "bools", bools);
-        let numbers =
-            vec![Number::new(1.5), Number::new(-0.0), Number::new(f64::NAN)].to_js(lock)?;
+        let numbers = vec![1.5, -0.0, f64::NAN].to_js(lock)?;
         ctx.set_global(lock, "nums", numbers);
-        let options = vec![Some(Number::new(2.0)), None].to_js(lock)?;
+        let options = vec![Some(2.0_f64), None].to_js(lock)?;
         ctx.set_global(lock, "options", options);
         let nullables = vec![jsg::Nullable::Some(false), jsg::Nullable::Null].to_js(lock)?;
         ctx.set_global(lock, "nullables", nullables);
@@ -473,7 +463,7 @@ fn array_conversion_runs_no_prototype_setter() {
         )
         .unwrap();
 
-        let numbers = vec![Number::new(1.5), Number::new(2.5)].to_js(lock);
+        let numbers = vec![1.5_f64, 2.5].to_js(lock);
         let strings = vec!["a".to_owned(), "b".to_owned()].to_js(lock);
 
         ctx.eval::<bool>(lock, "delete Array.prototype[0]").unwrap();
@@ -501,9 +491,8 @@ fn vec_from_js_parses_array() {
         let strings: Vec<String> = ctx.eval(lock, "['a', 'b', 'c']").unwrap();
         assert_eq!(strings, vec!["a", "b", "c"]);
 
-        let numbers: Vec<Number> = ctx.eval(lock, "[1, 2, 3]").unwrap();
-        let values: Vec<f64> = numbers.iter().map(jsg::Number::value).collect();
-        assert_eq!(values, vec![1.0, 2.0, 3.0]);
+        let numbers: Vec<f64> = ctx.eval(lock, "[1, 2, 3]").unwrap();
+        assert_eq!(numbers, vec![1.0, 2.0, 3.0]);
         Ok(())
     });
 }
@@ -516,8 +505,8 @@ fn vec_empty_roundtrip() {
         let js_val = vec.to_js(lock)?;
         ctx.set_global(lock, "arr", js_val);
 
-        let length: Number = ctx.eval(lock, "arr.length").unwrap();
-        assert!(length.value().abs() < f64::EPSILON);
+        let length: f64 = ctx.eval(lock, "arr.length").unwrap();
+        assert!(length.abs() < f64::EPSILON);
 
         let result: Vec<String> = ctx.eval(lock, "arr").unwrap();
         assert!(result.is_empty());
@@ -529,18 +518,15 @@ fn vec_empty_roundtrip() {
 fn vec_nested_arrays() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let nested = vec![
-            vec![Number::new(1.0), Number::new(2.0)],
-            vec![Number::new(3.0), Number::new(4.0)],
-        ];
+        let nested = vec![vec![1.0_f64, 2.0], vec![3.0, 4.0]];
         let js_val = nested.to_js(lock)?;
         ctx.set_global(lock, "matrix", js_val);
 
-        let first_row_sum: Number = ctx.eval(lock, "matrix[0][0] + matrix[0][1]").unwrap();
-        assert!((first_row_sum.value() - 3.0).abs() < f64::EPSILON);
+        let first_row_sum: f64 = ctx.eval(lock, "matrix[0][0] + matrix[0][1]").unwrap();
+        assert!((first_row_sum - 3.0).abs() < f64::EPSILON);
 
-        let second_row_sum: Number = ctx.eval(lock, "matrix[1][0] + matrix[1][1]").unwrap();
-        assert!((second_row_sum.value() - 7.0).abs() < f64::EPSILON);
+        let second_row_sum: f64 = ctx.eval(lock, "matrix[1][0] + matrix[1][1]").unwrap();
+        assert!((second_row_sum - 7.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -572,8 +558,8 @@ fn to_js_typed_array_creates_each_typed_array() {
                 assert!(is_instance, $name);
                 let is_array: bool = ctx.eval(lock, "Array.isArray(typed)").unwrap();
                 assert!(!is_array, $name);
-                let length: Number = ctx.eval(lock, "typed.length").unwrap();
-                assert!((length.value() - 3.0).abs() < f64::EPSILON, $name);
+                let length: f64 = ctx.eval(lock, "typed.length").unwrap();
+                assert!((length - 3.0).abs() < f64::EPSILON, $name);
             }};
         }
         check!("Uint8Array", [1u8, 2, 255]);
@@ -588,8 +574,8 @@ fn to_js_typed_array_creates_each_typed_array() {
         check!("BigUint64Array", [0u64, 42, u64::MAX]);
 
         // The elements are what JavaScript sees.
-        let val: Number = ctx.eval(lock, "new Uint8Array([1, 2, 255])[2]").unwrap();
-        assert!((val.value() - 255.0).abs() < f64::EPSILON);
+        let val: f64 = ctx.eval(lock, "new Uint8Array([1, 2, 255])[2]").unwrap();
+        assert!((val - 255.0).abs() < f64::EPSILON);
         let typed = [100i64, -200].to_js_typed_array(lock);
         ctx.set_global(lock, "typed", typed);
         let val: String = ctx.eval(lock, "String(typed[1])").unwrap();
@@ -719,8 +705,8 @@ fn typed_array_empty_roundtrip() {
         assert!(typed.is_empty());
         ctx.set_global(lock, "arr", typed);
 
-        let length: Number = ctx.eval(lock, "arr.length").unwrap();
-        assert!(length.value().abs() < f64::EPSILON);
+        let length: f64 = ctx.eval(lock, "arr.length").unwrap();
+        assert!(length.abs() < f64::EPSILON);
 
         let result: v8::Local<v8::Uint8Array> = ctx.eval(lock, "arr").unwrap();
         assert!(result.as_slice(lock).is_empty());
@@ -766,8 +752,8 @@ fn large_typed_array_roundtrip() {
         let typed = data.to_js_typed_array(lock);
         ctx.set_global(lock, "arr", typed);
 
-        let length: Number = ctx.eval(lock, "arr.length").unwrap();
-        assert!((length.value() - 65536.0).abs() < f64::EPSILON);
+        let length: f64 = ctx.eval(lock, "arr.length").unwrap();
+        assert!((length - 65536.0).abs() < f64::EPSILON);
 
         let result: v8::Local<v8::Uint8Array> = ctx.eval(lock, "arr").unwrap();
         assert_eq!(result.as_slice(lock), data.as_slice());
@@ -1013,8 +999,8 @@ impl SliceResource {
         &self,
         lock: &mut jsg::Lock<'s>,
         arr: jsg::v8::Local<'s, jsg::v8::Uint8Array>,
-    ) -> jsg::Number {
-        jsg::Number::new(arr.as_slice(lock).iter().map(|&x| f64::from(x)).sum())
+    ) -> f64 {
+        arr.as_slice(lock).iter().map(|&x| f64::from(x)).sum()
     }
 
     /// Accepts a `Local<Int32Array>` directly and sums its elements via `as_slice`.
@@ -1023,8 +1009,8 @@ impl SliceResource {
         &self,
         lock: &mut jsg::Lock<'s>,
         arr: jsg::v8::Local<'s, jsg::v8::Int32Array>,
-    ) -> jsg::Number {
-        jsg::Number::new(arr.as_slice(lock).iter().map(|&x| f64::from(x)).sum())
+    ) -> f64 {
+        arr.as_slice(lock).iter().map(|&x| f64::from(x)).sum()
     }
 
     /// Accepts a `Local<Float64Array>` directly and sums its elements via `as_slice`.
@@ -1033,8 +1019,8 @@ impl SliceResource {
         &self,
         lock: &mut jsg::Lock<'s>,
         arr: jsg::v8::Local<'s, jsg::v8::Float64Array>,
-    ) -> jsg::Number {
-        jsg::Number::new(arr.as_slice(lock).iter().copied().sum())
+    ) -> f64 {
+        arr.as_slice(lock).iter().copied().sum()
     }
 
     /// Writes `0xFF` into every byte via `as_mut_slice` and returns the length.
@@ -1043,12 +1029,13 @@ impl SliceResource {
         &self,
         lock: &mut jsg::Lock<'s>,
         mut arr: jsg::v8::Local<'s, jsg::v8::Uint8Array>,
-    ) -> jsg::Number {
+    ) -> f64 {
         // SAFETY: no other reference into this buffer is live during this call;
         // lock borrow prevents JS from running.
         unsafe { arr.as_mut_slice(lock) }.fill(0xFF);
-        #[expect(clippy::cast_precision_loss)]
-        jsg::Number::new(arr.len() as f64)
+        #[expect(clippy::cast_precision_loss, reason = "test arrays are small")]
+        let len = arr.len() as f64;
+        len
     }
 }
 
@@ -1060,22 +1047,22 @@ fn typed_array_as_slice_zero_copy_sum() {
         ctx.set_global(lock, "r", res);
 
         // Uint8Array
-        let result: jsg::Number = ctx
+        let result: f64 = ctx
             .eval(lock, "r.sumU8Local(new Uint8Array([10, 20, 30]))")
             .unwrap();
-        assert!((result.value() - 60.0).abs() < f64::EPSILON);
+        assert!((result - 60.0).abs() < f64::EPSILON);
 
         // Int32Array
-        let result: jsg::Number = ctx
+        let result: f64 = ctx
             .eval(lock, "r.sumI32Local(new Int32Array([-1, 0, 1]))")
             .unwrap();
-        assert!((result.value() - 0.0).abs() < f64::EPSILON);
+        assert!((result - 0.0).abs() < f64::EPSILON);
 
         // Float64Array
-        let result: jsg::Number = ctx
+        let result: f64 = ctx
             .eval(lock, "r.sumF64Local(new Float64Array([1.5, 2.5]))")
             .unwrap();
-        assert!((result.value() - 4.0).abs() < f64::EPSILON);
+        assert!((result - 4.0).abs() < f64::EPSILON);
 
         Ok(())
     });
@@ -1101,14 +1088,14 @@ fn typed_array_as_mut_slice_mutations_visible_in_js() {
 
         // fill_ff writes 0xFF into every element in-place.
         // The returned length tells us how many bytes were written.
-        let len: jsg::Number = ctx
+        let len: f64 = ctx
             .eval(lock, "r.fillFf(new Uint8Array([1, 2, 3]))")
             .unwrap();
-        assert!((len.value() - 3.0).abs() < f64::EPSILON);
+        assert!((len - 3.0).abs() < f64::EPSILON);
 
         // Independently verify with a captured reference: create an array in JS,
         // pass it in, then read back the same object.
-        let check: jsg::Number = ctx
+        let check: f64 = ctx
             .eval(
                 lock,
                 r"
@@ -1118,7 +1105,7 @@ fn typed_array_as_mut_slice_mutations_visible_in_js() {
                 ",
             )
             .unwrap();
-        assert!((check.value() - 1.0).abs() < f64::EPSILON);
+        assert!((check - 1.0).abs() < f64::EPSILON);
 
         Ok(())
     });
@@ -1212,17 +1199,15 @@ fn typed_array_from_js_local_rejects_wrong_type() {
         ctx.set_global(lock, "r", res);
 
         // sumU8Local expects Uint8Array — Int8Array must be rejected.
-        let result: Result<jsg::Number, _> =
-            ctx.eval(lock, "r.sumU8Local(new Int8Array([1, 2, 3]))");
+        let result: Result<f64, _> = ctx.eval(lock, "r.sumU8Local(new Int8Array([1, 2, 3]))");
         assert!(result.is_err());
 
         // Regular Array must also be rejected.
-        let result: Result<jsg::Number, _> = ctx.eval(lock, "r.sumU8Local([1, 2, 3])");
+        let result: Result<f64, _> = ctx.eval(lock, "r.sumU8Local([1, 2, 3])");
         assert!(result.is_err());
 
         // sumI32Local expects Int32Array — Uint32Array must be rejected.
-        let result: Result<jsg::Number, _> =
-            ctx.eval(lock, "r.sumI32Local(new Uint32Array([1, 2, 3]))");
+        let result: Result<f64, _> = ctx.eval(lock, "r.sumI32Local(new Uint32Array([1, 2, 3]))");
         assert!(result.is_err());
 
         Ok(())
@@ -1344,11 +1329,11 @@ fn to_js_with_fast_jsg_struct_calls_no_prototype_setters() {
         let people = vec![
             Person {
                 name: "Alice".to_owned(),
-                age: Number::new(25.0),
+                age: 25.0,
             },
             Person {
                 name: "Bob".to_owned(),
-                age: Number::new(30.0),
+                age: 30.0,
             },
         ];
         let value = people.to_js(lock)?;
@@ -1412,11 +1397,11 @@ fn struct_to_js_without_fast_jsg_struct_runs_object_prototype_setters() {
         let people = vec![
             Person {
                 name: "Alice".to_owned(),
-                age: Number::new(25.0),
+                age: 25.0,
             },
             Person {
                 name: "Bob".to_owned(),
-                age: Number::new(30.0),
+                age: 30.0,
             },
         ];
         let value = people.to_js(lock)?;
@@ -1457,7 +1442,7 @@ fn struct_to_js_without_fast_jsg_struct_passes_on_what_a_setter_throws() {
 
         let person = Person {
             name: "Alice".to_owned(),
-            age: Number::new(25.0),
+            age: 25.0,
         };
         let caught = lock.try_catch(|lock| person.to_js(lock))?;
         let Err(exception) = caught else {
@@ -1502,7 +1487,7 @@ fn vec_to_js_stops_at_the_first_element_that_fails() {
             .into_iter()
             .map(|name| Person {
                 name: name.to_owned(),
-                age: Number::new(30.0),
+                age: 30.0,
             })
             .collect::<Vec<_>>();
         let caught = lock.try_catch(|lock| people.to_js(lock))?;

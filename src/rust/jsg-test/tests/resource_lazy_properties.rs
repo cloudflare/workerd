@@ -273,13 +273,13 @@ struct Settable {
 #[jsg_resource(custom_members)]
 impl Settable {
     #[jsg_property]
-    pub fn get_value(&self) -> jsg::Number {
-        jsg::Number::new(self.value.get())
+    pub fn get_value(&self) -> f64 {
+        self.value.get()
     }
 
     #[jsg_property]
-    pub fn set_value(&self, value: jsg::Number) {
-        self.value.set(value.value());
+    pub fn set_value(&self, value: f64) {
+        self.value.set(value);
     }
 }
 

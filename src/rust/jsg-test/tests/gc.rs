@@ -923,9 +923,10 @@ struct NativeOwnerResource {
 #[jsg_resource]
 impl NativeOwnerResource {
     #[jsg_method]
-    fn get_value(&self) -> jsg::Number {
-        #[expect(clippy::cast_precision_loss)]
-        jsg::Number::new(self.state.value as f64)
+    fn get_value(&self) -> f64 {
+        #[expect(clippy::cast_precision_loss, reason = "test values are small")]
+        let value = self.state.value as f64;
+        value
     }
 }
 

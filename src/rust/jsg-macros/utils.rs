@@ -231,14 +231,14 @@ pub fn elide_named_lifetimes(ty: &syn::Type) -> proc_macro2::TokenStream {
 }
 
 /// Types with a `FastApiArg` impl in `jsg/fast_api.rs`.
-const FAST_API_ARG_TYPES: &[&str] = &["bool", "i32", "u32", "Number"];
+const FAST_API_ARG_TYPES: &[&str] = &["bool", "i32", "u32", "f64"];
 /// Types with a `FastApiReturn` impl in `jsg/fast_api.rs`, besides `()`.
-const FAST_API_RETURN_TYPES: &[&str] = &["bool", "Number"];
+const FAST_API_RETURN_TYPES: &[&str] = &["bool", "f64"];
 
 /// Returns the argument types of `sig` if V8 can call it through a fast callback.
 ///
-/// Types are matched by name: an alias stays on the slow path, and another type named `Number`
-/// fails to compile. `jsg::Rc<Self>` is not one of the types, so a method with a `this`
+/// Types are matched by name: an alias stays on the slow path, and a type that shadows one of
+/// the names fails to compile. `jsg::Rc<Self>` is not one of the types, so a method with a `this`
 /// parameter stays on the slow path, which is where the `jsg::Rc` of the receiver is made.
 pub fn fast_api_signature(sig: &syn::Signature) -> Option<Vec<&syn::Type>> {
     if sig.asyncness.is_some() || !sig.generics.params.is_empty() || sig.variadic.is_some() {
@@ -270,7 +270,7 @@ pub fn fast_api_signature(sig: &syn::Signature) -> Option<Vec<&syn::Type>> {
     fast_return.then_some(args)
 }
 
-/// Whether `ty` is one of `names` written bare, or `jsg::Number`.
+/// Whether `ty` is one of `names`, written bare.
 fn is_named_type(ty: &syn::Type, names: &[&str]) -> bool {
     let syn::Type::Path(type_path) = ty else {
         return false;
@@ -278,13 +278,11 @@ fn is_named_type(ty: &syn::Type, names: &[&str]) -> bool {
     if type_path.qself.is_some() {
         return false;
     }
-    let segments: Vec<_> = type_path.path.segments.iter().collect();
-    let last = match segments.as_slice() {
-        [last] => last,
-        [module, last] if module.ident == "jsg" && last.ident == "Number" => last,
-        _ => return false,
+    let mut segments = type_path.path.segments.iter();
+    let (Some(segment), None) = (segments.next(), segments.next()) else {
+        return false;
     };
-    last.arguments.is_none() && names.iter().any(|name| last.ident == name)
+    segment.arguments.is_none() && names.iter().any(|name| segment.ident == name)
 }
 
 #[cfg(test)]
