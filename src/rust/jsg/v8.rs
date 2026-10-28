@@ -335,6 +335,7 @@ pub mod ffi {
         // Coerce with ToString (`v8::Value::ToString()`), or return an empty handle if the
         // coercion threw, leaving the exception pending; see `call_into_js()`.
         pub unsafe fn local_value_to_string(isolate: *mut Isolate, value: Local) -> MaybeLocal;
+        pub unsafe fn local_to_detail_string(isolate: *mut Isolate, value: &Local) -> MaybeLocal;
 
         // Local<String>
         pub unsafe fn local_string_length(value: &Local) -> i32;
@@ -1855,6 +1856,31 @@ impl<'s, T> Local<'s, T> {
                 ))
             })
         })
+    }
+
+    /// Describes the value for a log or a trace, as C++ `kj::str()` of a `v8::Local` does: an
+    /// error as `"TypeError: message"`, a string as itself, and a plain object as
+    /// `"[object Object]"`. Unlike `String(value)`, it runs no JavaScript, such as a `toString()`
+    /// method.
+    ///
+    /// Corresponds to `v8::Value::ToDetailString()`.
+    ///
+    /// # Errors
+    ///
+    /// If an exception or a termination is pending, or V8 fails, which only happens if execution
+    /// is terminating, the error is one for which [`Error::is_pending`] is true.
+    pub fn to_detail_string(&self, lock: &mut Lock<'s>) -> crate::Result<std::string::String> {
+        let detail: Local<'s, String> = call_into_js(lock, |lock| {
+            // SAFETY: `lock` proves the isolate is locked, with a context entered and a
+            // HandleScope for `'s` open; a non-empty result is a string V8 created in that scope.
+            Ok(unsafe {
+                Local::from_ffi_maybe(ffi::local_to_detail_string(
+                    lock.isolate().as_ffi(),
+                    self.raw(),
+                ))
+            })
+        })?;
+        Ok(detail.to_string(lock))
     }
 }
 

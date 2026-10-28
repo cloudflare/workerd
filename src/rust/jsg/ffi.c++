@@ -312,6 +312,12 @@ MaybeLocal local_value_to_string(Isolate* isolate, Local value) {
       local_from_ffi<v8::Value>(kj::mv(value))->ToString(isolate->GetCurrentContext()));
 }
 
+MaybeLocal local_to_detail_string(Isolate* isolate, const Local& val) {
+  if (exceptionPending(isolate)) return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>());
+  return maybe_local_to_ffi(
+      local_as_ref_from_ffi<v8::Value>(val)->ToDetailString(isolate->GetCurrentContext()));
+}
+
 // Utf8Value
 Utf8Value utf8_value_new(Isolate* isolate, Local value) {
   if (exceptionPending(isolate)) return Utf8Value{0};
