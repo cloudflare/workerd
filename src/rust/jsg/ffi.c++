@@ -1564,12 +1564,6 @@ void function_template_set_nested_type(
   local_tmpl->PrototypeTemplate()->Set(makeInternedStr(isolate, name), local_nested);
 }
 
-// Autogates
-bool integer_enforce_range_autogate_enabled() {
-  return ::workerd::util::Autogate::isEnabled(
-      ::workerd::util::AutogateKey::JSG_INTEGER_ENFORCE_RANGE);
-}
-
 // Realm
 Realm* realm_from_isolate(Isolate* isolate) {
   auto* realm =
@@ -1606,6 +1600,12 @@ void realm_detach(Isolate* isolate, const IsolateState* state) {
   isolateBase.setDeferredActionHook(nullptr);
   isolateBase.setDisposeHook(&isolateDisposed, const_cast<IsolateState*>(state));
   isolate->SetData(::workerd::jsg::SetDataIndex::SET_DATA_RUST_REALM, nullptr);
+}
+
+// Autogates
+bool integer_enforce_range_autogate_enabled() {
+  return ::workerd::util::Autogate::isEnabled(
+      ::workerd::util::AutogateKey::JSG_INTEGER_ENFORCE_RANGE);
 }
 
 // Errors

@@ -71,7 +71,8 @@
 //!
 //! `i64` and `u64` convert to a `BigInt`, and from JavaScript like C++ JSG's `int64_t` and
 //! `uint64_t`: a `BigInt` that does not fit is a `TypeError`, and any other value converts as
-//! above.
+//! above, except that the range check always sees the untruncated value; the
+//! `JSG_INTEGER_ENFORCE_RANGE` autogate does not apply to them.
 
 use crate::Dict;
 use crate::Error;
@@ -668,8 +669,9 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for &[T] {
 // Integer types follow C++ JSG (jsg/value.h). To JavaScript, an integer of up
 // to 32 bits is a number, made with `Integer::New` as in C++ JSG, and an i64 or
 // u64 is a BigInt. From JavaScript, a non-finite value is a TypeError, except
-// that i32 reads it as 0, and so is a value out of the type's range, checked
-// after `integer_part_for_range_check`. In-range values truncate toward zero.
+// that i32 reads it as 0, and so is a value out of the type's range, which the
+// types of up to 32 bits check after `integer_part_for_range_check`. In-range
+// values truncate toward zero.
 /// Converts a JavaScript number to an integer type. Fast callbacks use it too, so that both paths
 /// convert alike.
 pub trait FromNumber: Sized {
@@ -681,10 +683,16 @@ pub trait FromNumber: Sized {
 /// fraction just past a range limit converts as Web IDL's `[EnforceRange]` and V8's
 /// `kEnforceRangeBit` fast API arguments convert it (`2 ** 31 - 0.5` is `i32::MAX`, `-0.5` is `0`
 /// as an unsigned type); without it the number itself, so that such a fraction is out of range.
-/// The truncation is `f64::trunc`'s, toward zero.
+/// The truncation is `f64::trunc`'s, toward zero. An integral value is returned as it is without
+/// reading the gate.
+#[expect(
+    clippy::float_cmp,
+    reason = "`trunc` is exact, so the comparison tells exactly whether `num` is integral"
+)]
 fn integer_part_for_range_check(num: f64) -> f64 {
-    if crate::ffi::integer_enforce_range_autogate_enabled() {
-        num.trunc()
+    let integer_part = num.trunc();
+    if integer_part != num && crate::ffi::integer_enforce_range_autogate_enabled() {
+        integer_part
     } else {
         num
     }

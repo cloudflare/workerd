@@ -163,7 +163,7 @@ fn fractions_past_a_range_limit_follow_the_enforce_range_autogate() {
             );
             assert_eq!(convert::<i32>(lock, ctx, "-0.5").unwrap(), 0);
 
-            // Unchanged by the autogate.
+            // The same in both states.
             assert_eq!(convert::<u8>(lock, ctx, "3.7").unwrap(), 3);
             assert_type_error::<u8>(lock, ctx, "256", &at_most(255));
             assert_type_error::<u8>(lock, ctx, "-1", negative);
@@ -173,6 +173,16 @@ fn fractions_past_a_range_limit_follow_the_enforce_range_autogate() {
             assert_type_error::<i16>(lock, ctx, "-Infinity", not_an_integer);
             assert_eq!(convert::<i32>(lock, ctx, "NaN").unwrap(), 0);
             assert_eq!(convert::<i32>(lock, ctx, "Infinity").unwrap(), 0);
+
+            // The 64-bit types range-check the untruncated value in both states.
+            assert_type_error::<u64>(
+                lock,
+                ctx,
+                "-0.5",
+                "The value cannot be converted because it is negative and this API \
+                 expects a positive bigint.",
+            );
+            assert_eq!(convert::<u64>(lock, ctx, "123.5").unwrap(), 123);
             Ok(())
         });
     }
