@@ -479,7 +479,7 @@ Local object_new_with_data_properties(
   for (size_t i = 0; i < keys.size(); i++) {
     // Unlike Set(), CreateDataProperty() doesn't look up the prototype chain, so no setter runs,
     // and on an ordinary object no Proxy trap runs either: nothing here runs JavaScript, so it
-    // can't throw.
+    // can't throw. V8 doesn't allow it while execution is terminating, which the caller checks.
     auto defined = object->CreateDataProperty(
         context, makeInternedStr(isolate, keys[i]), local_as_ref_from_ffi<v8::Value>(values[i]));
     KJ_ASSERT(defined.FromMaybe(false), "defining a property of a new object failed", keys[i]);

@@ -1830,11 +1830,14 @@ impl<'s> Local<'s, Function> {
 }
 
 /// Runs `shim`, a call through the FFI that can run JavaScript, and returns what it returns.
+/// A call that runs no JavaScript but that V8 doesn't allow while execution is terminating, such
+/// as `CreateDataProperty`, goes through here too, and its `shim` never returns `None`.
 ///
-/// Every such call goes through here, so that all of them handle exceptions and termination
-/// alike. `shim` returns `None` if JavaScript threw, leaving the exception pending (see `ffi.h`);
-/// that becomes an error for which [`Error::is_pending`] is true. While execution is terminating,
-/// `shim` is not run and the error is the same: calling into V8 then would clear the termination.
+/// Every call that can run JavaScript goes through here, so that all of them handle exceptions
+/// and termination alike. `shim` returns `None` if JavaScript threw, leaving the exception pending
+/// (see `ffi.h`); that becomes an error for which [`Error::is_pending`] is true. While execution
+/// is terminating, `shim` is not run and the error is the same: calling into V8 then would clear
+/// the termination.
 /// An error from `shim` itself (a C++ exception, such as a failed `KJ_REQUIRE`) is passed on.
 ///
 /// The one exception is `wrap_resource`, which checks for termination itself, so that its common
@@ -3351,7 +3354,9 @@ impl Object {
     ///
     /// # Errors
     ///
-    /// If a key is longer than [`String::MAX_LENGTH`], or V8 fails to create it.
+    /// If a key is longer than [`String::MAX_LENGTH`], or V8 fails to create it. While execution
+    /// is terminating, it creates nothing, and the error is one for which [`Error::is_pending`]
+    /// is true, as for [`Local::<Object>::set`].
     pub fn with_data_properties<'s>(
         lock: &mut Lock<'s>,
         properties: &[(&str, Local<'s, Value>)],
@@ -3363,17 +3368,22 @@ impl Object {
                 (*key, *value)
             })
             .unzip();
-        // SAFETY: lock guarantees the isolate is locked, a context is entered and a HandleScope
-        // is active; the values are valid handles in it. The result belongs to that scope.
-        let object = unsafe {
-            ffi::object_new_with_data_properties(
-                lock.isolate().as_ffi(),
-                &keys,
-                Local::raw_slice(&values),
-            )
-        }?;
-        // SAFETY: as above.
-        Ok(unsafe { Local::from_ffi(object) })
+        // No JavaScript runs, but V8 doesn't allow `CreateDataProperty` while execution is
+        // terminating (a debug check fails), which `call_into_js` checks for.
+        call_into_js(lock, |lock| {
+            // SAFETY: lock guarantees the isolate is locked, a context is entered and a
+            // HandleScope is active; the values are valid handles in it. The result belongs to
+            // that scope.
+            let object = unsafe {
+                ffi::object_new_with_data_properties(
+                    lock.isolate().as_ffi(),
+                    &keys,
+                    Local::raw_slice(&values),
+                )
+            }?;
+            // SAFETY: as above.
+            Ok(Some(unsafe { Local::from_ffi(object) }))
+        })
     }
 }
 
