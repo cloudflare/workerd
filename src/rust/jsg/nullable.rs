@@ -8,19 +8,24 @@ use std::ops::DerefMut;
 use crate::Error;
 use crate::Result;
 
-/// A wrapper type that accepts `null`, `undefined`, or a value of type `T`.
+/// A value of type `T` or `null`: the JavaScript type `T | null`.
 ///
-/// Unlike `Option<T>`, where only `undefined` is `None` and `null` goes to `T`,
-/// `Nullable<T>` tells `null` and `undefined` apart. This is useful for
-/// writing flexible JavaScript APIs where we have full control over behavior
-/// depending on the passed value, including easily throwing errors to make an
-/// API conform to Web IDL nullable behavior.
+/// Like C++ `kj::Maybe<T>` and Web IDL's `T?`, input conversion coerces
+/// `undefined` to `null`. A method parameter of this type is still required:
+/// passing `undefined` produces `Nullable::Null`, but omitting the argument
+/// is a `TypeError`.
 ///
-/// # Behavior
+/// Use `Option<Nullable<T>>` for an optional nullable that keeps `undefined`
+/// distinct from `null`, since [`Option<T>`] is `T | undefined`:
 ///
-/// - `null` → `Nullable::Null`
-/// - `undefined` → `Nullable::Undefined`
-/// - `T` → `Nullable::Some(T)`
+/// | JavaScript  | `Nullable<T>`       | `Option<Nullable<T>>`     |
+/// |-------------|---------------------|---------------------------|
+/// | a `T`       | `Nullable::Some(v)` | `Some(Nullable::Some(v))` |
+/// | `null`      | `Nullable::Null`    | `Some(Nullable::Null)`    |
+/// | `undefined` | `Nullable::Null`    | `None`                    |
+///
+/// Output conversion produces only `T` or `null`. The TypeScript type is
+/// `T | null`; `Option<Nullable<T>>` adds `undefined` and permits omission.
 ///
 /// # Examples
 ///
@@ -28,63 +33,43 @@ use crate::Result;
 /// use jsg::Nullable;
 ///
 /// #[jsg_method]
-/// pub fn process(&self, value: Nullable<String>) -> Result<(), Error> {
+/// pub fn process(&self, value: Nullable<String>) {
 ///     match value {
-///         Nullable::Some(s) => println!("Got value: {}", s),
+///         Nullable::Some(s) => println!("Got value: {s}"),
 ///         Nullable::Null => println!("Got null"),
-///         Nullable::Undefined => println!("Got undefined"),
-///     }
-///     Ok(())
-/// }
-/// ```
-///
-/// Error Handling:
-///
-///
-/// ```ignore
-/// use jsg::Nullable;
-///
-/// #[jsg_method]
-/// pub fn process_some(&self, value: Nullable<Number>) -> Result<(), Error> {
-///     let Nullable::Some(v) = value {
-///         // Process...
-///     } else {
-///         return Err(Error::new_type_error("Must be some"))
 ///     }
 /// }
-/// ```
-///
-/// ```ignore
-/// use jsg::Nullable;
 ///
 /// #[jsg_method]
-/// pub fn process_some_or_none(&self, value: Nullable<Number>) -> Result<(), Error> {
-///     // Returns an Error
+/// pub fn process_optional(&self, value: Option<Nullable<String>>) {
+///     match value {
+///         Some(Nullable::Some(s)) => println!("Got value: {s}"),
+///         Some(Nullable::Null) => println!("Got null"),
+///         None => println!("Got undefined"),
+///     }
+/// }
+///
+/// #[jsg_method]
+/// pub fn process_some(&self, value: Nullable<f64>) -> Result<(), Error> {
+///     // Throws a `TypeError` for `null`.
 ///     let value = value.not_null()?;
 ///     // Process...
+///     Ok(())
 /// }
-/// ```
-///
-/// Returning:
-///
-/// ```ignore
-/// use jsg::Nullable;
 ///
 /// #[jsg_method]
-/// pub fn return_nullable(&self) -> Nullable<Number> {
+/// pub fn return_nullable(&self) -> Nullable<f64> {
 ///     if self.condition {
 ///         Nullable::Some(self.number)
 ///     } else {
-///         Nullable::Undefined
+///         Nullable::Null
 ///     }
 /// }
 /// ```
-///
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Nullable<T> {
     Some(T),
     Null,
-    Undefined,
 }
 
 impl<T> Nullable<T> {
@@ -98,76 +83,35 @@ impl<T> Nullable<T> {
         matches!(self, Self::Null)
     }
 
-    /// Returns `true` if the nullable is `Undefined`.
-    pub fn is_undefined(&self) -> bool {
-        matches!(self, Self::Undefined)
-    }
-
-    /// Returns `true` if the nullable is `Null` or `Undefined`.
-    pub fn is_null_or_undefined(&self) -> bool {
-        !self.is_some()
-    }
-
-    /// Returns a reference to the contained value in `Some` if `Some`, and returns
-    /// the respective empty value if empty.
+    /// Converts from `&Nullable<T>` to `Nullable<&T>`.
     pub fn as_ref(&self) -> Nullable<&T> {
         match self {
             Self::Some(v) => Nullable::Some(v),
             Self::Null => Nullable::Null,
-            Self::Undefined => Nullable::Undefined,
         }
     }
 
-    /// Returns an exclusive reference to the contained value in `Some` if `Some`, and
-    /// returns the respective empty value if empty.
+    /// Converts from `&mut Nullable<T>` to `Nullable<&mut T>`.
     pub fn as_mut(&mut self) -> Nullable<&mut T> {
         match self {
             Self::Some(v) => Nullable::Some(v),
             Self::Null => Nullable::Null,
-            Self::Undefined => Nullable::Undefined,
         }
     }
 
-    /// Returns `Ok(self)` if `!self.is_null()`. Otherwise returns `TypeError` if
-    /// `self` is null.
-    pub fn not_null(self) -> Result<Self> {
-        if self.is_null() {
-            Err(Error::new_type_error("Value cannot be null"))
-        } else {
-            Ok(self)
-        }
-    }
-
-    /// Returns `Some(self)` if `!self.is_undefined()`. Otherwise returns `None` if
-    /// `self` is undefined.
-    pub fn not_undefined(self) -> Result<Self> {
-        if self.is_undefined() {
-            Err(Error::new_type_error("Value cannot be undefined"))
-        } else {
-            Ok(self)
-        }
-    }
-
-    /// Coerces `undefined` to `null`, matching the Web IDL specified behavior for T?
-    /// where T does not support `undefined`.
-    #[must_use]
-    pub fn coerce_null(self) -> Self {
-        if self.is_undefined() {
-            Self::Null
-        } else {
-            self
-        }
+    /// Returns the contained value, or a `TypeError` if `self` is `Null`.
+    pub fn not_null(self) -> Result<T> {
+        self.ok_or_else(|| Error::new_type_error("Value cannot be null"))
     }
 
     /// Returns the contained [`Some`] value, consuming `self`.
     ///
-    /// This function panics on `!self.is_some()`, making it unsuitable
-    /// for general use. Outside of testing, prefer pattern matching, or a non-panicking
-    /// variant.
+    /// This function panics on `Null`, making it unsuitable for general use.
+    /// Outside of testing, prefer pattern matching, or a non-panicking variant.
     ///
     /// # Panics
     ///
-    /// Panics if the `self` value is [`Nullable::Null`] or [`Nullable::Undefined`]
+    /// Panics if the `self` value is [`Nullable::Null`].
     ///
     /// [`Some`]: Nullable::Some
     #[track_caller]
@@ -179,20 +123,18 @@ impl<T> Nullable<T> {
         match self {
             Self::Some(v) => v,
             Self::Null => panic!("called `Nullable::unwrap()` on a `Null` value"),
-            Self::Undefined => panic!("called `Nullable::unwrap()` on an `Undefined` value"),
         }
     }
 
     /// Returns the contained [`Some`] value, consuming `self`.
     ///
-    /// This function panics on `!self.is_some()`, making it unsuitable
-    /// for general use. Outside of testing, prefer pattern matching, or a non-panicking
-    /// variant.
+    /// This function panics on `Null`, making it unsuitable for general use.
+    /// Outside of testing, prefer pattern matching, or a non-panicking variant.
     ///
     /// # Panics
     ///
-    /// Panics if the `self` value is [`Nullable::Null`] or [`Nullable::Undefined`], using a custom
-    /// panic message passed to `msg`.
+    /// Panics if the `self` value is [`Nullable::Null`], using a custom panic
+    /// message passed to `msg`.
     ///
     /// [`Some`]: Nullable::Some
     #[track_caller]
@@ -203,7 +145,7 @@ impl<T> Nullable<T> {
     pub fn expect(self, msg: &str) -> T {
         match self {
             Self::Some(v) => v,
-            Self::Null | Self::Undefined => panic!("{}", msg),
+            Self::Null => panic!("{}", msg),
         }
     }
 
@@ -217,7 +159,7 @@ impl<T> Nullable<T> {
     pub fn unwrap_or(self, default: T) -> T {
         match self {
             Self::Some(v) => v,
-            Self::Null | Self::Undefined => default,
+            Self::Null => default,
         }
     }
 
@@ -230,24 +172,24 @@ impl<T> Nullable<T> {
     {
         match self {
             Self::Some(v) => v,
-            Self::Null | Self::Undefined => f(),
+            Self::Null => f(),
         }
     }
 
     /// Transforms the `Nullable` into a `Result`, mapping `Some(v)` to `Ok(v)`
-    /// and `None` to `Err(err)`.
+    /// and `Null` to `Err(err)`.
     ///
     /// This function is eagerly evaluated. Use [`Nullable::ok_or_else`] for
-    /// a lazyily evaluated alternative.
+    /// a lazily evaluated alternative.
     pub fn ok_or(self, err: Error) -> Result<T> {
         match self {
             Self::Some(v) => Ok(v),
-            Self::Null | Self::Undefined => Err(err),
+            Self::Null => Err(err),
         }
     }
 
     /// Transforms the `Nullable` into a `Result`, mapping `Some(v)` to `Ok(v)`
-    /// and `None` to `Err(err())`.
+    /// and `Null` to `Err(err())`.
     ///
     /// This function is lazily evaluated.
     pub fn ok_or_else<F>(self, err: F) -> Result<T>
@@ -256,7 +198,7 @@ impl<T> Nullable<T> {
     {
         match self {
             Self::Some(v) => Ok(v),
-            Self::Null | Self::Undefined => Err(err()),
+            Self::Null => Err(err()),
         }
     }
 
@@ -270,7 +212,7 @@ impl<T> Nullable<T> {
     }
 
     /// Converts from `Nullable<T>` to `Nullable<&mut T::Target>`. Equivalent
-    /// to [`Option::as_deref`] for nullable.
+    /// to [`Option::as_deref_mut`] for nullable.
     pub fn as_deref_mut(&mut self) -> Nullable<&mut T::Target>
     where
         T: DerefMut,
@@ -279,7 +221,7 @@ impl<T> Nullable<T> {
     }
 
     /// Applies the passed function if `Some`, and flattens the result.
-    /// Otherwise, returns `self`.
+    /// Otherwise, returns `Null`.
     pub fn and_then<U, F>(self, f: F) -> Nullable<U>
     where
         F: FnOnce(T) -> Nullable<U>,
@@ -287,12 +229,11 @@ impl<T> Nullable<T> {
         match self {
             Self::Some(v) => f(v),
             Self::Null => Nullable::Null,
-            Self::Undefined => Nullable::Undefined,
         }
     }
 
-    /// Maps a [`Nullable<T>`] to a [`Nullable<U>`] by applying the passed function if [`Some`], or
-    /// the respective empty type otherwise.
+    /// Maps a [`Nullable<T>`] to a [`Nullable<U>`] by applying the passed function if [`Some`],
+    /// or returns `Null` otherwise.
     ///
     /// [`Some`]: Nullable::Some
     pub fn map<U, F>(self, f: F) -> Nullable<U>
@@ -302,7 +243,6 @@ impl<T> Nullable<T> {
         match self {
             Self::Some(t) => Nullable::Some(f(t)),
             Self::Null => Nullable::Null,
-            Self::Undefined => Nullable::Undefined,
         }
     }
 }
@@ -320,7 +260,7 @@ impl<T> From<Nullable<T>> for Option<T> {
     fn from(nullable: Nullable<T>) -> Self {
         match nullable {
             Nullable::Some(v) => Some(v),
-            Nullable::Null | Nullable::Undefined => None,
+            Nullable::Null => None,
         }
     }
 }

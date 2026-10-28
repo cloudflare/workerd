@@ -112,6 +112,13 @@ template <typename Class, typename Ret, typename... Args>
 constexpr bool isFastApiNoScope<Ret (Class::*)(jsg::Lock&, Args...) const> =
     FastApiNoScopeMethod<Ret, Args...>;
 
+// Static methods and properties reach the same callbacks through a plain function pointer.
+template <typename Ret, typename... Args>
+constexpr bool isFastApiNoScope<Ret (*)(Args...)> = FastApiNoScopeMethod<Ret, Args...>;
+
+template <typename Ret, typename... Args>
+constexpr bool isFastApiNoScope<Ret (*)(jsg::Lock&, Args...)> = FastApiNoScopeMethod<Ret, Args...>;
+
 template <typename Class, typename Ret, typename... Args>
 constexpr bool isFastApiCompatible<Ret (Class::*)(jsg::Lock&, Args...)> =
     FastApiMethod<Ret, Args...>;
@@ -167,7 +174,18 @@ class FastApiPreamble {
   struct NoHandleScope {
     explicit NoHandleScope(v8::Isolate*) {}
   };
-  [[no_unique_address]] std::conditional_t<noScope && !takesLock, NoHandleScope, v8::HandleScope>
+
+  // The signature heuristic is advisory, not enforced: a callback that declines `Lock&` but
+  // reaches V8 anyway — say through `Lock::current()` — allocates into whatever scope is still
+  // open further out and leaks there quietly. Sealing makes the first such handle a fatal error.
+  // It costs about what a `HandleScope` would, so it is debug-only. The throwing path is
+  // unaffected: `liftKj` opens its own nested scope.
+#ifdef KJ_DEBUG
+  using EmptyScope = v8::SealHandleScope;
+#else
+  using EmptyScope = NoHandleScope;
+#endif
+  [[no_unique_address]] std::conditional_t<noScope && !takesLock, EmptyScope, v8::HandleScope>
       scope;
 };
 

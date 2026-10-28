@@ -185,7 +185,7 @@ if [ -n "${{COVERAGE_DIR:-}}" ]; then
     export LLVM_PROFILE_FILE="${{COVERAGE_DIR}}/%p-%m.profraw"
     export KJ_CLEAN_SHUTDOWN=1
 fi
-
+{load_images}
 # Run supervisor to start sidecar if specified
 if [ ! -z "{sidecar}" ]; then
     # These environment variables are processed by the supervisor executable. The supervisor and
@@ -265,6 +265,10 @@ def _wd_test_impl(ctx):
         port_bindings = ",".join(ctx.attr.sidecar_port_bindings),
         randomize_ip = "true" if ctx.attr.sidecar_randomize_ip else "false",
         sidecar_port_mode = ctx.attr.sidecar_port_mode,
+        load_images = "".join([
+            'docker load --quiet --input "{}"\n'.format(f.short_path)
+            for f in ctx.files.container_images
+        ]),
     )
 
     ctx.actions.write(
@@ -273,7 +277,7 @@ def _wd_test_impl(ctx):
         is_executable = True,
     )
 
-    runfiles = ctx.runfiles(files = ctx.files.data)
+    runfiles = ctx.runfiles(files = ctx.files.data + ctx.files.container_images)
 
     # Add runfiles for the workerd binary, such as shared libraries (if any)
     workerd_runfiles = ctx.attr.workerd[DefaultInfo].default_runfiles
@@ -354,6 +358,10 @@ _wd_test = rule(
         ),
         # A list of files that this test requires to be present in order to run.
         "data": attr.label_list(allow_files = True),
+        # Image tarballs (an oci_load's `tarball` output group) that the test loads into the Docker
+        # engine at /var/run/docker.sock before workerd starts, so that a container test brings its
+        # images wherever it runs. Linux only.
+        "container_images": attr.label_list(allow_files = [".tar"]),
         # If set, an executable that is run in parallel with the test, and provides some functionality
         # needed for the test. This is usually a backend server, with workerd serving as the client.
         # The sidecar will be killed once the test completes.

@@ -1056,7 +1056,7 @@
     },
     "//build/deps:pyodide.bzl%pyodide": {
       "general": {
-        "bzlTransitiveDigest": "LB3zAeq0VUYhOz60yU53Dtv6kCYmOxwMeUZp59LCM5c=",
+        "bzlTransitiveDigest": "x0hizSFn3RuZD5g2sVAROCrLWqgtQ4LudX4OZourhCk=",
         "usagesDigest": "D34wPmZYfmECvOxNBPDzjLSxn305F92xp6ZX7mjGPnk=",
         "recordedInputs": [
           "REPO_MAPPING:,bazel_lib bazel_lib+",
@@ -1104,11 +1104,11 @@
               ]
             }
           },
-          "pyodide_0.26.0a2_2024-03-01_87.capnp.bin": {
+          "pyodide_0.26.0a2_2024-03-01_89.capnp.bin": {
             "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_file",
             "attributes": {
-              "integrity": "sha256-bB34c//zkqePYFERxSIS6fQpVbXyn+zA/MvgADp9UMA=",
-              "url": "https://pyodide-capnp-bin.edgeworker.net/pyodide_0.26.0a2_2024-03-01_87.capnp.bin"
+              "integrity": "sha256-c4pm9KBbdeAdfW2UkdU24aE3MadpzGHgbyNG+tEoorM=",
+              "url": "https://pyodide-capnp-bin.edgeworker.net/pyodide_0.26.0a2_2024-03-01_89.capnp.bin"
             }
           },
           "beautifulsoup4_src_0.26.0a2": {
@@ -1151,11 +1151,11 @@
               "url": "https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/scipy-312-vendored-for-ew-testing.zip"
             }
           },
-          "pyodide_0.28.2_2025-01-16_18.capnp.bin": {
+          "pyodide_0.28.2_2025-01-16_20.capnp.bin": {
             "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_file",
             "attributes": {
-              "integrity": "sha256-NbX7e8Aob43P/2dMc8UnAt+vbh017Y59odNJQ+5DbbY=",
-              "url": "https://pyodide-capnp-bin.edgeworker.net/pyodide_0.28.2_2025-01-16_18.capnp.bin"
+              "integrity": "sha256-Mw1A5bs3Ys1UiQ0JEi4XP8ponsQgqYod1HUhVyTj330=",
+              "url": "https://pyodide-capnp-bin.edgeworker.net/pyodide_0.28.2_2025-01-16_20.capnp.bin"
             }
           },
           "beautifulsoup4_src_0.28.2": {
@@ -1222,11 +1222,11 @@
               "url": "https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/pywavelets-313-vendored-for-ew-testing.zip"
             }
           },
-          "pyodide_314.0.4_2026-06-10_18.capnp.bin": {
+          "pyodide_314.0.4_2026-06-10_20.capnp.bin": {
             "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_file",
             "attributes": {
-              "integrity": "sha256-n/n+OEj+hatr5pX3RMwpQBmdZjXrh9kms8dHU968Y1c=",
-              "url": "https://pyodide-capnp-bin.edgeworker.net/pyodide_314.0.4_2026-06-10_18.capnp.bin"
+              "integrity": "sha256-IOPP3ValHq+VYLu0HNODqmB+YXN4lTp25LPXOLmCaGs=",
+              "url": "https://pyodide-capnp-bin.edgeworker.net/pyodide_314.0.4_2026-06-10_20.capnp.bin"
             }
           },
           "beautifulsoup4_src_314.0.4": {
@@ -1261,11 +1261,11 @@
               "url": "https://pub-25a5b2f2f1b84655b185a505c7a3ad23.r2.dev/numpy-314-vendored-for-ew-testing.zip"
             }
           },
-          "pyodide_314.0.6_2026-08-17_6.capnp.bin": {
+          "pyodide_314.0.6_2026-08-17_8.capnp.bin": {
             "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_file",
             "attributes": {
-              "integrity": "sha256-PD/VpBeSMOIeAY4osOc158Sr2P6OT/OdL9a7LqOi4mA=",
-              "url": "https://pyodide-capnp-bin.edgeworker.net/pyodide_314.0.6_2026-08-17_6.capnp.bin"
+              "integrity": "sha256-E80D9pADATNzTefFRcyJYbgn5knXbyccy+cKbkdpz0A=",
+              "url": "https://pyodide-capnp-bin.edgeworker.net/pyodide_314.0.6_2026-08-17_8.capnp.bin"
             }
           },
           "beautifulsoup4_src_314.0.6": {
@@ -1327,7 +1327,7 @@
           "pyodide_dev.capnp.bin": {
             "repoRuleId": "@@bazel_tools//tools/build_defs/repo:http.bzl%http_file",
             "attributes": {
-              "integrity": "sha256-PD/VpBeSMOIeAY4osOc158Sr2P6OT/OdL9a7LqOi4mA=",
+              "integrity": "sha256-E80D9pADATNzTefFRcyJYbgn5knXbyccy+cKbkdpz0A=",
               "url": "https://pyodide-capnp-bin.edgeworker.net/pyodide_dev.capnp.bin"
             }
           },
@@ -1464,13 +1464,13 @@
             "pyodide-0.28.2",
             "pyodide-314.0.4",
             "pyodide-314.0.6",
-            "pyodide_0.26.0a2_2024-03-01_87.capnp.bin",
+            "pyodide_0.26.0a2_2024-03-01_89.capnp.bin",
             "beautifulsoup4_src_0.26.0a2",
             "pytest-asyncio_src_0.26.0a2",
             "python-workers-runtime-sdk_src_0.26.0a2",
             "fastapi_src_0.26.0a2",
             "scipy_src_0.26.0a2",
-            "pyodide_0.28.2_2025-01-16_18.capnp.bin",
+            "pyodide_0.28.2_2025-01-16_20.capnp.bin",
             "beautifulsoup4_src_0.28.2",
             "pytest-asyncio_src_0.28.2",
             "python-workers-runtime-sdk_src_0.28.2",
@@ -1479,12 +1479,12 @@
             "shapely_src_0.28.2",
             "Pillow_src_0.28.2",
             "pywavelets_src_0.28.2",
-            "pyodide_314.0.4_2026-06-10_18.capnp.bin",
+            "pyodide_314.0.4_2026-06-10_20.capnp.bin",
             "beautifulsoup4_src_314.0.4",
             "pytest-asyncio_src_314.0.4",
             "python-workers-runtime-sdk_src_314.0.4",
             "numpy_src_314.0.4",
-            "pyodide_314.0.6_2026-08-17_6.capnp.bin",
+            "pyodide_314.0.6_2026-08-17_8.capnp.bin",
             "beautifulsoup4_src_314.0.6",
             "pytest-asyncio_src_314.0.6",
             "python-workers-runtime-sdk_src_314.0.6",
@@ -1513,6 +1513,46 @@
           ],
           "explicitRootModuleDirectDevDeps": [],
           "useAllRepos": "NO",
+          "reproducible": false
+        }
+      }
+    },
+    "//build/deps/formatters:rustfmt_repository.bzl%rustfmt_standalone": {
+      "general": {
+        "bzlTransitiveDigest": "UiKmUe3AzgXQ/tIz4cyKcsMbnQIgDDzAN3oRUHmnLSo=",
+        "usagesDigest": "x0djQIecdgW5WllZzOX3szq70ykdYpRdtOddeGMqmcw=",
+        "recordedInputs": [],
+        "generatedRepoSpecs": {
+          "rustfmt-standalone-linux-amd64": {
+            "repoRuleId": "@@//build/deps/formatters:rustfmt_repository.bzl%rustfmt_standalone_repository",
+            "attributes": {
+              "triple": "x86_64-unknown-linux-gnu",
+              "iso_date": "2026-02-12",
+              "rustfmt_sha256": "b32c674f6f00407bcc8570f376defc89c768f9ebd87616c8d2d59393b54e179a",
+              "rustc_sha256": "ecff4a1dd40734c2614c56b28f265eb8d771d7dd1a3c3cb4ed0740d95deec8a7"
+            }
+          },
+          "rustfmt-standalone-linux-arm64": {
+            "repoRuleId": "@@//build/deps/formatters:rustfmt_repository.bzl%rustfmt_standalone_repository",
+            "attributes": {
+              "triple": "aarch64-unknown-linux-gnu",
+              "iso_date": "2026-02-12",
+              "rustfmt_sha256": "7c10fd492c921a779c59072eb950816a09d9422c83c479d73e8129fc04bbfa1f",
+              "rustc_sha256": "f07f1a4071401235870022c6bd99f29ffe890ff239223e289555f827e9f0a16a"
+            }
+          },
+          "rustfmt-standalone-darwin-arm64": {
+            "repoRuleId": "@@//build/deps/formatters:rustfmt_repository.bzl%rustfmt_standalone_repository",
+            "attributes": {
+              "triple": "aarch64-apple-darwin",
+              "iso_date": "2026-02-12",
+              "rustfmt_sha256": "b4397c2247726e328c857f576a40e7e02b016f38860711f98beca92ac841d75a",
+              "rustc_sha256": "44dec0af289dd4c61d135222a2cee0de2f412804b2e9774639927e63f8d64e19"
+            }
+          }
+        },
+        "moduleExtensionMetadata": {
+          "useAllRepos": "REGULAR",
           "reproducible": false
         }
       }

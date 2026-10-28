@@ -4,11 +4,13 @@
 
 mod argument_errors;
 mod arrays;
+mod boolean;
 mod buffer_types;
 mod builtin_module;
 mod coercion_safety;
 mod collections_gc;
 mod date_bigint;
+mod dict;
 mod eval;
 mod fast_api;
 mod function;
@@ -26,6 +28,8 @@ mod local_value;
 mod name;
 mod nested_type;
 mod non_coercible;
+mod nullable;
+mod number;
 mod option;
 mod promise;
 mod resource_callback;

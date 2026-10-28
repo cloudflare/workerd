@@ -896,34 +896,6 @@ fn nullable_ref_null_does_not_crash_during_gc() {
     });
 }
 
-/// Tests that `Nullable<Rc<T>>` with `Nullable::Undefined` doesn't cause issues during GC.
-#[test]
-fn nullable_ref_undefined_does_not_crash_during_gc() {
-    NULLABLE_PARENT_DROPS.store(0, Ordering::SeqCst);
-
-    let harness = crate::Harness::new();
-    harness.run_in_context(|lock, ctx| {
-        let parent = jsg::Rc::new(NullableParent {
-            child: jsg::Nullable::Undefined,
-        });
-        let wrapped = parent.clone().to_js(lock)?;
-        ctx.set_global(lock, "parent", wrapped);
-
-        std::mem::drop(parent);
-
-        // GC with Nullable::Undefined should not crash
-        crate::Harness::request_gc(lock);
-        assert_eq!(NULLABLE_PARENT_DROPS.load(Ordering::SeqCst), 0);
-        Ok(())
-    });
-
-    harness.run_in_context(|lock, _ctx| {
-        crate::Harness::request_gc(lock);
-        assert_eq!(NULLABLE_PARENT_DROPS.load(Ordering::SeqCst), 1);
-        Ok(())
-    });
-}
-
 // ---------------------------------------------------------------------------
 // Rc<NativeState> shared ownership — native object outlives Rc but is
 // dropped when V8 GC collects the JS wrapper.
@@ -932,7 +904,7 @@ fn nullable_ref_undefined_does_not_crash_during_gc() {
 static NATIVE_STATE_DROPS: AtomicUsize = AtomicUsize::new(0);
 
 struct NativeState {
-    value: u64,
+    value: u32,
 }
 
 impl jsg::Traced for NativeState {}
@@ -951,9 +923,8 @@ struct NativeOwnerResource {
 #[jsg_resource]
 impl NativeOwnerResource {
     #[jsg_method]
-    fn get_value(&self) -> jsg::Number {
-        #[expect(clippy::cast_precision_loss)]
-        jsg::Number::new(self.state.value as f64)
+    fn get_value(&self) -> u32 {
+        self.state.value
     }
 }
 

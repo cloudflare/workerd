@@ -59,6 +59,9 @@ inline void configureJsgIsolate(jsg::Lock& js, CompatibilityFlags::Reader flags)
   if (flags.getWasmEsmIntegrationBuiltins()) {
     js.setWasmEsmIntegrationBuiltinsEnabled();
   }
+  if (flags.getWasmSourceUrlSupport()) {
+    js.setWasmSourceUrlSupportEnabled();
+  }
 }
 
 // Returns whether the new module registry implementation should be used for a

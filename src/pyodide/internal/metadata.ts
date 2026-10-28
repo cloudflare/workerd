@@ -32,13 +32,6 @@ export const MEMORY_SNAPSHOT_READER = MetadataReader.hasMemorySnapshot()
     ? ArtifactBundler
     : undefined;
 
-// Packages
-export const PACKAGES_VERSION = MetadataReader.getPackagesVersion();
-// The package lock is embedded in the binary. See `getPyodideLock` and `packageLocks`.
-export const LOCKFILE = JSON.parse(
-  MetadataReader.getPackagesLock()
-) as PackageLock;
-
 // Entrypoints
 export const MAIN_MODULE_NAME = MetadataReader.getMainModule();
 

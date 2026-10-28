@@ -30,7 +30,7 @@ macro_rules! assert_forwards {
 #[test]
 fn holds_gc_references_follows_the_contents() {
     assert!(!String::holds_gc_references());
-    assert!(!crate::Number::holds_gc_references());
+    assert!(!f64::holds_gc_references());
     assert!(<v8::TracedGlobal<v8::Value>>::holds_gc_references());
     assert_forwards!(Option);
     assert_forwards!(Nullable);

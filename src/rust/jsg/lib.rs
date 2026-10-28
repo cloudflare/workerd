@@ -8,6 +8,8 @@ use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 
+mod buffer;
+mod dict;
 pub mod fast_api;
 pub mod feature_flags;
 mod isolate_state;
@@ -22,6 +24,9 @@ pub mod ser;
 pub mod v8;
 mod wrappable;
 
+pub use buffer::ToJsArrayBuffer;
+pub use buffer::ToJsTypedArray;
+pub use dict::Dict;
 pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
 pub use lenient::Lenient;
@@ -47,21 +52,8 @@ pub use scope::getter_callback;
 pub use scope::setter_callback;
 pub use scope::wildcard_getter_callback;
 pub use scope::wildcard_query_callback;
-pub use v8::ArrayBuffer;
-pub use v8::ArrayBufferView;
-pub use v8::BackingStore;
-pub use v8::BigInt64Array;
-pub use v8::BigUint64Array;
-pub use v8::Float32Array;
-pub use v8::Float64Array;
 pub use v8::GcVisitor;
-pub use v8::Int8Array;
-pub use v8::Int16Array;
-pub use v8::Int32Array;
 pub use v8::IsolatePtr;
-pub use v8::Uint8Array;
-pub use v8::Uint16Array;
-pub use v8::Uint32Array;
 pub use v8::ffi::ExceptionType;
 pub use wrappable::FromJS;
 pub use wrappable::ToJS;
@@ -487,7 +479,10 @@ impl Error {
 ///
 /// - `NonCoercible<String>` - only accepts JavaScript strings
 /// - `NonCoercible<bool>` - only accepts JavaScript booleans
-/// - `NonCoercible<Number>` - only accepts JavaScript numbers
+/// - `NonCoercible<f64>` - only accepts JavaScript numbers
+/// - `NonCoercible<u32>` and the other integers of up to 32 bits - only accept JavaScript
+///   numbers, which must be in range
+/// - `NonCoercible<i64>` and `NonCoercible<u64>` - only accept JavaScript `BigInt`s
 ///
 /// # Example
 ///
@@ -543,149 +538,6 @@ impl<T> Deref for NonCoercible<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.value
-    }
-}
-
-/// A wrapper type for JavaScript numbers (IEEE 754 double-precision floats).
-///
-/// `Number` represents JavaScript's `number` type, which is always a 64-bit
-/// floating-point value. This wrapper type is used instead of raw `f64` to
-/// distinguish between JavaScript numbers and Rust's `f64` type used for
-/// `Float64Array` elements.
-///
-/// # Usage
-///
-/// Use `Number` when you need to accept or return JavaScript numbers in your API:
-///
-/// ```ignore
-/// use jsg::Number;
-///
-/// #[jsg_method]
-/// pub fn add(&self, a: Number, b: Number) -> Number {
-///     Number::new(a.value() + b.value())
-/// }
-/// ```
-///
-/// # Type Mapping
-///
-/// | Rust Type | JavaScript Type |
-/// |-----------|-----------------|
-/// | `jsg::Number` | `number` |
-/// | `f64` | Used for `Float64Array` elements |
-/// | `Vec<f64>` | `Float64Array` |
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
-pub struct Number {
-    value: f64,
-}
-
-impl Number {
-    /// The largest integer that can be represented exactly in JavaScript (2^53 - 1).
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER)
-    pub const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0; // 2^53 - 1
-
-    /// The smallest integer that can be represented exactly in JavaScript (-(2^53 - 1)).
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MIN_SAFE_INTEGER)
-    pub const MIN_SAFE_INTEGER: f64 = -9_007_199_254_740_991.0; // -(2^53 - 1)
-
-    /// Creates a new `Number` from an `f64` value.
-    #[inline]
-    pub fn new(value: f64) -> Self {
-        Self { value }
-    }
-
-    /// Returns the underlying `f64` value.
-    #[inline]
-    pub fn value(&self) -> f64 {
-        self.value
-    }
-
-    /// Consumes the wrapper and returns the inner `f64` value.
-    #[inline]
-    pub fn into_inner(self) -> f64 {
-        self.value
-    }
-
-    /// Determines whether the value is a finite number.
-    ///
-    /// Returns `true` if the value is finite (not `Infinity`, `-Infinity`, or `NaN`).
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isFinite)
-    #[inline]
-    pub fn is_finite(&self) -> bool {
-        self.value.is_finite()
-    }
-
-    /// Determines whether the value is an integer.
-    ///
-    /// Returns `true` if the value is finite and has no fractional part.
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isInteger)
-    #[inline]
-    #[expect(
-        clippy::float_cmp,
-        reason = "exact comparison is intended: an integer equals its own truncation"
-    )]
-    pub fn is_integer(&self) -> bool {
-        self.value.is_finite() && self.value.trunc() == self.value
-    }
-
-    /// Determines whether the value is `NaN`.
-    ///
-    /// This is more robust than the global `isNaN()` because it doesn't coerce
-    /// the value to a number first.
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isNaN)
-    #[inline]
-    pub fn is_nan(&self) -> bool {
-        self.value.is_nan()
-    }
-
-    /// Determines whether the value is a safe integer.
-    ///
-    /// A safe integer is an integer that:
-    /// - Can be exactly represented as an IEEE-754 double precision number
-    /// - Has an IEEE-754 representation that cannot be the result of rounding any other integer
-    ///
-    /// Safe integers range from -(2^53 - 1) to 2^53 - 1, inclusive.
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isSafeInteger)
-    #[inline]
-    pub fn is_safe_integer(&self) -> bool {
-        self.is_integer()
-            && self.value >= Self::MIN_SAFE_INTEGER
-            && self.value <= Self::MAX_SAFE_INTEGER
-    }
-}
-
-impl From<f64> for Number {
-    fn from(value: f64) -> Self {
-        Self::new(value)
-    }
-}
-
-impl From<Number> for f64 {
-    fn from(num: Number) -> Self {
-        num.value
-    }
-}
-
-impl From<i32> for Number {
-    fn from(value: i32) -> Self {
-        Self::new(f64::from(value))
-    }
-}
-
-impl From<u32> for Number {
-    fn from(value: u32) -> Self {
-        Self::new(f64::from(value))
-    }
-}
-
-impl std::fmt::Display for Number {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.value)
     }
 }
 
@@ -893,7 +745,7 @@ impl<'s> Lock<'s> {
     /// # Example
     ///
     /// ```ignore
-    /// match lock.try_catch(|lock| callback.call::<Number>(lock, None, &[]))? {
+    /// match lock.try_catch(|lock| callback.call::<f64>(lock, None, &[]))? {
     ///     Ok(result) => { /* ... */ }
     ///     Err(exception) => { /* handle what the callback threw */ }
     /// }
@@ -1126,14 +978,19 @@ pub enum PropertyPlacement {
     LazyInstance,
 }
 
+/// A member of a resource type. `length` is the function's Web IDL `.length`, the number of
+/// leading required arguments; it is applied when `spec_compliant_property_attributes` is
+/// enabled, as in C++ JSG.
 pub enum Member {
     Constructor {
         callback: RawFunctionCallback,
+        length: u32,
     },
     Method {
         name: String,
         callback: RawFunctionCallback,
         fast: Option<v8::ffi::FastApiDescriptor>,
+        length: u32,
     },
     /// A property accessor on the prototype (`Prototype` or `Inspect`; `Instance`
     /// panics). `setter_callback = None` makes the property read-only; `Inspect`
@@ -1168,6 +1025,7 @@ pub enum Member {
         name: String,
         callback: RawFunctionCallback,
         fast: Option<v8::ffi::FastApiDescriptor>,
+        length: u32,
     },
     StaticConstant {
         name: String,

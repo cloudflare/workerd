@@ -9,7 +9,6 @@ use std::cell::RefCell;
 
 use jsg::ExceptionType;
 use jsg::Member;
-use jsg::Number;
 use jsg::Resource;
 use jsg::feature_flags::compatibility_flags;
 use jsg::v8;
@@ -27,8 +26,8 @@ struct ProxyImpl {
 #[jsg_resource]
 impl ProxyImpl {
     #[jsg_property(prototype, readonly)]
-    pub fn get_bar(&self) -> Number {
-        Number::new(123.0)
+    pub fn get_bar(&self) -> i32 {
+        123
     }
 
     #[jsg_wildcard_property]
@@ -84,7 +83,7 @@ impl Caller {
     }
 
     #[jsg_wildcard_property]
-    pub fn get(&self, lock: &mut jsg::Lock, name: &str) -> Result<Option<Number>, jsg::Error> {
+    pub fn get(&self, lock: &mut jsg::Lock, name: &str) -> Result<Option<i32>, jsg::Error> {
         if name != "call" {
             return Ok(None);
         }
@@ -105,7 +104,7 @@ struct Panicker {
 #[jsg_resource]
 impl Panicker {
     #[jsg_wildcard_property]
-    pub fn get(&self, name: &str) -> Option<Number> {
+    pub fn get(&self, name: &str) -> Option<i32> {
         assert!(
             name != self.trigger,
             "intentional panic in a wildcard property"

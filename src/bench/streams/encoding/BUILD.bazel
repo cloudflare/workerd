@@ -12,6 +12,7 @@ wd_bench(
 )
 
 wd_bench(
+    size = "large",
     src = "encoding-ts.wd-bench",
     args = ["--experimental"],
     data = encoding_bench_srcs,

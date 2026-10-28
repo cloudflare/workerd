@@ -168,10 +168,7 @@ TestFixture makeTsStreamsFixture() {
   capnp::MallocMessageBuilder message;
   auto flags = message.initRoot<CompatibilityFlags>();
   flags.setTypeScriptImplementedStreams(true);
-  return TestFixture({
-    .featureFlags = flags.asReader(),
-    .autogates = kj::arr("per-isolate-javascript-bootstrap"_kj),
-  });
+  return TestFixture({.featureFlags = flags.asReader()});
 }
 
 template <typename Decompressor>

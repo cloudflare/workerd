@@ -303,6 +303,14 @@ bool Lock::isWasmEsmIntegrationBuiltinsEnabled() const {
   return IsolateBase::from(v8Isolate).isWasmEsmIntegrationBuiltinsEnabled();
 }
 
+void Lock::setWasmSourceUrlSupportEnabled() {
+  IsolateBase::from(v8Isolate).setWasmSourceUrlSupportEnabled();
+}
+
+bool Lock::isWasmSourceUrlSupportEnabled() const {
+  return IsolateBase::from(v8Isolate).isWasmSourceUrlSupportEnabled();
+}
+
 void Lock::disableTopLevelAwait() {
   IsolateBase::from(v8Isolate).disableTopLevelAwait();
 }

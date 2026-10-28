@@ -254,7 +254,7 @@ struct MethodCallback<TypeWrapper,
   }
 
   // Gates both the preamble below and the `FastOneByteString` argument ABI.
-  static constexpr bool noScopeNeeded = FastApiNoScopeMethod<Ret, Args...> && !isContext;
+  static constexpr bool noScopeNeeded = isFastApiNoScope<decltype(method)> && !isContext;
 
   template <typename ReturnType = Ret>
   static ReturnType fastCallback(v8::Local<v8::Object> receiver,
@@ -319,8 +319,8 @@ struct MethodCallback<TypeWrapper,
     });
   }
 
-  // `Args...` excludes the `Lock&` itself.
-  static constexpr bool noScopeNeeded = FastApiNoScopeMethod<Ret, Args...> && !isContext;
+  // `isFastApiNoScope` strips the leading `Lock&` itself.
+  static constexpr bool noScopeNeeded = isFastApiNoScope<decltype(method)> && !isContext;
 
   template <typename ReturnType = Ret>
   static ReturnType fastCallback(v8::Local<v8::Object> receiver,
@@ -459,7 +459,7 @@ struct StaticMethodCallback<TypeWrapper,
   }
 
   // See MethodCallback. A static method has no receiver to unwrap.
-  static constexpr bool noScopeNeeded = FastApiNoScopeMethod<Ret, Args...>;
+  static constexpr bool noScopeNeeded = isFastApiNoScope<decltype(method)>;
 
   template <typename ReturnType = Ret>
   static ReturnType fastCallback(v8::Local<v8::Object> receiver,
@@ -519,8 +519,8 @@ struct StaticMethodCallback<TypeWrapper,
     });
   }
 
-  // `Args...` excludes the `Lock&` itself.
-  static constexpr bool noScopeNeeded = FastApiNoScopeMethod<Ret, Args...>;
+  // `isFastApiNoScope` strips the leading `Lock&` itself.
+  static constexpr bool noScopeNeeded = isFastApiNoScope<decltype(method)>;
 
   template <typename ReturnType = Ret>
   static ReturnType fastCallback(v8::Local<v8::Object> receiver,

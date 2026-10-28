@@ -34,8 +34,8 @@ struct Args {}
 #[jsg_resource]
 impl Args {
     #[jsg_method]
-    pub fn take_count(&self, count: u32) -> jsg::Number {
-        jsg::Number::from(count)
+    pub fn take_count(&self, count: u32) -> u32 {
+        count
     }
 
     #[jsg_method]
@@ -57,8 +57,8 @@ impl Args {
     pub fn take_renamed(&self, _count: u32) {}
 
     #[jsg_method]
-    pub fn take_point(&self, point: Point) -> jsg::Number {
-        jsg::Number::from(point.x)
+    pub fn take_point(&self, point: Point) -> u32 {
+        point.x
     }
 
     #[jsg_method]
