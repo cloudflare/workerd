@@ -159,7 +159,7 @@ impl ActorNamespace {
     }
 
     /// The cluster, for a namespace linked on disk; in-memory namespaces stay local.
-    fn cluster(&self) -> Option<&Rc<ClusterNode>> {
+    pub(crate) fn cluster(&self) -> Option<&Rc<ClusterNode>> {
         self.directory.get().and_then(|_| self.cluster.get())
     }
 

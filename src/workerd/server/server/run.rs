@@ -405,15 +405,17 @@ pub async fn run(
     match futures::future::select(serving, drain).await {
         Either::Left((result, _)) => result?,
         Either::Right(((), serving)) => {
-            // A draining instance claims nothing more, lets its objects go, `preventEviction`
-            // or not, and leaves the cluster, so peers take them over at their next listing
-            // while its connections finish.
+            // A draining instance claims nothing more, lets its clustered objects go,
+            // `preventEviction` or not, and leaves the cluster, so peers take them over at their
+            // next listing while its connections finish. A request in flight on one could not
+            // commit anyway once a peer owns the object.
             if let Some(node) = server.cluster() {
                 node.cluster.start_draining();
                 let workers = server
                     .services()
                     .filter_map(|(_, service)| service.as_worker());
-                for (_, namespace) in workers.flat_map(|worker| worker.namespaces()) {
+                let namespaces = workers.flat_map(|worker| worker.namespaces());
+                for (_, namespace) in namespaces.filter(|(_, ns)| ns.cluster().is_some()) {
                     namespace.abort_all(None);
                 }
                 if let Err(e) = node.cluster.deregister().await {
