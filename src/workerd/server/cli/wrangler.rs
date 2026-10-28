@@ -422,20 +422,25 @@ fn files(dir: &Path) -> Vec<PathBuf> {
 fn do_classes(w: &Wrangler) -> Result<Vec<(String, String, bool)>, String> {
     let mut classes: Vec<(String, String, bool)> = Vec::new();
     for m in &w.migrations {
-        classes.extend(m.new_classes.iter().map(|c| (c.clone(), c.clone(), false)));
-        classes.extend(
-            m.new_sqlite_classes
-                .iter()
-                .map(|c| (c.clone(), c.clone(), true)),
-        );
-        for r in &m.renamed_classes {
-            let entry = classes
-                .iter_mut()
-                .find(|(c, _, _)| *c == r.from)
-                .ok_or_else(|| format!("migrations: renamed class {} was never created", r.from))?;
-            entry.0.clone_from(&r.to);
+        // In wrangler's order: deletes, then renames, then new classes.
+        let find = |classes: &[(String, String, bool)], c: &str, what: &str| {
+            let i = classes.iter().position(|(n, _, _)| n == c);
+            i.ok_or_else(|| format!("migrations: {what} class {c} does not exist"))
+        };
+        for c in &m.deleted_classes {
+            classes.remove(find(&classes, c, "deleted")?);
         }
-        classes.retain(|(c, _, _)| !m.deleted_classes.contains(c));
+        for r in &m.renamed_classes {
+            let i = find(&classes, &r.from, "renamed")?;
+            classes[i].0.clone_from(&r.to);
+        }
+        let new = m.new_classes.iter().map(|c| (c, false));
+        for (c, sql) in new.chain(m.new_sqlite_classes.iter().map(|c| (c, true))) {
+            if find(&classes, c, "new").is_ok() {
+                return Err(format!("migrations: new class {c} already exists"));
+            }
+            classes.push((c.clone(), c.clone(), sql));
+        }
     }
     for b in w.durable_objects.iter().flat_map(|d| &d.bindings) {
         if !classes.iter().any(|(c, _, _)| *c == b.class_name) {

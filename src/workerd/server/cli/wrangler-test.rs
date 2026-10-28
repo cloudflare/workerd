@@ -153,6 +153,30 @@ fn migrations_rename_and_delete() {
 }
 
 #[test]
+fn migrations_follow_wranglers_order_and_checks() {
+    let classes = |migrations: &str| {
+        let w: Wrangler = serde_json::from_str(&format!(
+            r#"{{ "main": "index.js", "compatibility_date": "2026-01-01",
+                  "migrations": {migrations} }}"#
+        ))
+        .unwrap();
+        do_classes(&w)
+    };
+    // Deletes apply before new classes, so a class can be re-created in one migration.
+    let recreated = r#"[{ "tag": "v1", "new_classes": ["A"] },
+                        { "tag": "v2", "deleted_classes": ["A"], "new_sqlite_classes": ["A"] }]"#;
+    assert_eq!(
+        classes(recreated).unwrap(),
+        [("A".to_owned(), "A".to_owned(), true)]
+    );
+    let error = classes(r#"[{ "tag": "v1", "deleted_classes": ["A"] }]"#).unwrap_err();
+    assert!(error.contains("deleted class A does not exist"), "{error}");
+    let error = classes(r#"[{ "tag": "v1", "new_classes": ["A"], "new_sqlite_classes": ["A"] }]"#)
+        .unwrap_err();
+    assert!(error.contains("new class A already exists"), "{error}");
+}
+
+#[test]
 fn unsupported_field_is_an_error() {
     let error = load_project(&[
         (
