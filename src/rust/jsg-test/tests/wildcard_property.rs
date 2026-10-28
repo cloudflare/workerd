@@ -26,8 +26,8 @@ struct ProxyImpl {
 #[jsg_resource]
 impl ProxyImpl {
     #[jsg_property(prototype, readonly)]
-    pub fn get_bar(&self) -> f64 {
-        123.0
+    pub fn get_bar(&self) -> i32 {
+        123
     }
 
     #[jsg_wildcard_property]
@@ -83,7 +83,7 @@ impl Caller {
     }
 
     #[jsg_wildcard_property]
-    pub fn get(&self, lock: &mut jsg::Lock, name: &str) -> Result<Option<f64>, jsg::Error> {
+    pub fn get(&self, lock: &mut jsg::Lock, name: &str) -> Result<Option<i32>, jsg::Error> {
         if name != "call" {
             return Ok(None);
         }
@@ -104,7 +104,7 @@ struct Panicker {
 #[jsg_resource]
 impl Panicker {
     #[jsg_wildcard_property]
-    pub fn get(&self, name: &str) -> Option<f64> {
+    pub fn get(&self, name: &str) -> Option<i32> {
         assert!(
             name != self.trigger,
             "intentional panic in a wildcard property"

@@ -75,8 +75,8 @@ impl Drop for Leaf {
 #[jsg_resource]
 impl Leaf {
     #[jsg_method]
-    fn get_value(&self) -> f64 {
-        f64::from(self.value)
+    fn get_value(&self) -> u32 {
+        self.value
     }
 }
 

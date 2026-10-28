@@ -56,7 +56,7 @@ fn v8_type_checks_are_mutually_exclusive() {
         assert!(!b.is_string() && b.is_boolean() && !b.is_number());
 
         // Number is only number
-        let n = 42.0_f64.to_js(lock)?;
+        let n = 42_i32.to_js(lock)?;
         assert!(!n.is_string() && !n.is_boolean() && n.is_number());
         Ok(())
     });

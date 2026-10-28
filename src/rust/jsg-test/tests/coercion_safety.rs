@@ -281,8 +281,8 @@ impl ReentrantResource {
     }
 
     #[jsg_method]
-    pub fn call_count(&self) -> f64 {
-        f64::from(self.call_count.get())
+    pub fn call_count(&self) -> u32 {
+        self.call_count.get()
     }
 
     /// Unconditionally panics, to test that a panic triggered *while V8 is
@@ -316,8 +316,7 @@ fn string_from_tostring_side_effects_are_observed() {
         let s = <String as FromJS>::from_js(lock, value).expect("coercion should succeed");
         assert_eq!(s, "computed-1");
 
-        let side_effect: f64 = ctx.eval(lock, "globalThis.__sideEffect").unwrap();
-        assert!((side_effect - 1.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<u32>(lock, "globalThis.__sideEffect").unwrap(), 1);
         Ok(())
     });
 }
@@ -342,8 +341,7 @@ fn number_from_valueof_side_effects_are_observed() {
         let n = <f64 as FromJS>::from_js(lock, value).expect("coercion should succeed");
         assert!((n - 42.0).abs() < f64::EPSILON);
 
-        let side_effect: f64 = ctx.eval(lock, "globalThis.__sideEffect").unwrap();
-        assert!((side_effect - 1.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<u32>(lock, "globalThis.__sideEffect").unwrap(), 1);
         Ok(())
     });
 }
@@ -374,8 +372,7 @@ fn string_coercion_reentrant_into_rust_resource_method() {
         let s = <String as FromJS>::from_js(lock, value).expect("nested coercion should succeed");
         assert_eq!(s, "[inner]");
 
-        let count: f64 = ctx.eval(lock, "resource.callCount()").unwrap();
-        assert!((count - 1.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<u32>(lock, "resource.callCount()").unwrap(), 1);
         Ok(())
     });
 }
@@ -403,8 +400,7 @@ fn number_coercion_reentrant_into_rust_resource_method() {
         let n = <f64 as FromJS>::from_js(lock, value).expect("nested coercion should succeed");
         assert!((n - 42.0).abs() < f64::EPSILON);
 
-        let count: f64 = ctx.eval(lock, "resource.callCount()").unwrap();
-        assert!((count - 1.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<u32>(lock, "resource.callCount()").unwrap(), 1);
         Ok(())
     });
 }
@@ -592,16 +588,16 @@ fn object_set_from_throwing_setter_returns_err() {
                 .eval_raw(lock, expr)
                 .expect("expression should evaluate");
             let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
-            let one = 1.0_f64.to_js(lock)?;
+            let one = 1_u32.to_js(lock)?;
             let caught = thrown_by(lock, |lock| obj.set(lock, "x", one));
             assert!(is_thrown(lock, ctx, caught), "{expr}");
         }
         let obj: v8::Local<'_, v8::Object> =
             ctx.eval_raw(lock, "({})").unwrap().try_into().unwrap();
-        let one = 1.0_f64.to_js(lock)?;
+        let one = 1_u32.to_js(lock)?;
         obj.set(lock, "x", one)?;
         let x = obj.get(lock, "x")?;
-        assert!((f64::from_js(lock, x)? - 1.0).abs() < f64::EPSILON);
+        assert_eq!(u32::from_js(lock, x)?, 1);
         Ok(())
     });
 }
@@ -622,12 +618,12 @@ fn array_set_from_throwing_setter_returns_err() {
                 .eval_raw(lock, expr)
                 .expect("expression should evaluate");
             let array: v8::Local<'_, v8::Array> = value.try_into().unwrap();
-            let one = 1.0_f64.to_js(lock)?;
+            let one = 1_u32.to_js(lock)?;
             let caught = thrown_by(lock, |lock| array.set(lock, 0, one));
             assert!(is_thrown(lock, ctx, caught), "{expr}");
         }
         let array: v8::Local<'_, v8::Array> = ctx.eval_raw(lock, "[]").unwrap().try_into().unwrap();
-        let one = 1.0_f64.to_js(lock)?;
+        let one = 1_u32.to_js(lock)?;
         array.set(lock, 2, one)?;
         assert_eq!(array.len(), 3);
         Ok(())
@@ -713,7 +709,7 @@ impl Conversion {
                 .unwrap()
                 .has(lock, "x")
                 .map(drop),
-            Self::Iterate => Vec::<f64>::from_js(lock, value).map(drop),
+            Self::Iterate => Vec::<u32>::from_js(lock, value).map(drop),
             Self::Set => {
                 let undefined = lock.undefined();
                 v8::Local::<v8::Object>::try_from(value)

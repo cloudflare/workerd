@@ -19,18 +19,18 @@ struct FastResource {
 #[jsg_resource]
 impl FastResource {
     #[jsg_method]
-    pub fn add(&self, a: i32, b: i32) -> f64 {
-        f64::from(self.base) + f64::from(a) + f64::from(b)
+    pub fn add(&self, a: i32, b: i32) -> i32 {
+        self.base + a + b
     }
 
     #[jsg_method]
-    pub fn id_i32(&self, x: i32) -> f64 {
-        f64::from(x)
+    pub fn id_i32(&self, x: i32) -> i32 {
+        x
     }
 
     #[jsg_method]
-    pub fn id_u32(&self, x: u32) -> f64 {
-        f64::from(x)
+    pub fn id_u32(&self, x: u32) -> u32 {
+        x
     }
 
     #[jsg_method]
@@ -72,13 +72,9 @@ impl FastResource {
 
     /// Saturates, so that the boundary values of `u32` come out of a fast callback.
     #[jsg_method]
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "saturation is the point"
-    )]
+    #[expect(clippy::cast_possible_truncation, reason = "saturation is the point")]
     pub fn to_u32(&self, x: f64) -> u32 {
-        x as u32
+        u32::try_from(x as i64).unwrap_or(if x < 0.0 { 0 } else { u32::MAX })
     }
 
     #[jsg_method]
@@ -87,8 +83,8 @@ impl FastResource {
     }
 
     #[jsg_method]
-    pub fn touched(&self) -> f64 {
-        f64::from(self.touched.get())
+    pub fn touched(&self) -> u32 {
+        self.touched.get()
     }
 
     #[jsg_method]
@@ -174,13 +170,13 @@ fn instance_method_takes_fast_path() {
     harness.run_in_context(|lock, ctx| {
         set_resource(lock, ctx, 100);
         let (result, fast_calls) = count_fast_calls(|| {
-            ctx.eval::<f64>(
+            ctx.eval::<i32>(
                 lock,
                 &optimized("a, b", "return r.add(a, b);", "1, 2", "3, 4"),
             )
             .unwrap()
         });
-        assert!((result - 107.0).abs() < f64::EPSILON);
+        assert_eq!(result, 107);
         assert_ne!(fast_calls, Some(0));
         Ok(())
     });
@@ -192,13 +188,13 @@ fn void_method_takes_fast_path() {
     harness.run_in_context(|lock, ctx| {
         set_resource(lock, ctx, 0);
         let (touched, fast_calls) = count_fast_calls(|| {
-            ctx.eval::<f64>(
+            ctx.eval::<u32>(
                 lock,
                 &format!("{}; r.touched()", optimized("", "r.touch();", "", "")),
             )
             .unwrap()
         });
-        assert!((touched - 2.0).abs() < f64::EPSILON);
+        assert_eq!(touched, 2);
         assert_ne!(fast_calls, Some(0));
         Ok(())
     });
@@ -228,13 +224,13 @@ fn no_fast_path_unless_enabled() {
     harness.run_in_context(|lock, ctx| {
         set_resource(lock, ctx, 100);
         let (result, fast_calls) = count_fast_calls(|| {
-            ctx.eval::<f64>(
+            ctx.eval::<i32>(
                 lock,
                 &optimized("a, b", "return r.add(a, b);", "1, 2", "3, 4"),
             )
             .unwrap()
         });
-        assert!((result - 107.0).abs() < f64::EPSILON);
+        assert_eq!(result, 107);
         assert_eq!(fast_calls.unwrap_or(0), 0);
         Ok(())
     });
@@ -396,7 +392,7 @@ fn wrong_receiver_takes_slow_path_and_throws() {
     harness.run_in_context(|lock, ctx| {
         set_resource(lock, ctx, 0);
         let (err, fast_calls) = count_fast_calls(|| {
-            ctx.eval::<f64>(
+            ctx.eval::<i32>(
                 lock,
                 &optimized(
                     "o",

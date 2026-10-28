@@ -134,8 +134,8 @@ impl Queue {
     }
 
     #[jsg_method]
-    fn len(&self) -> f64 {
-        f64::from(u32::try_from(self.tasks.borrow().len()).unwrap())
+    fn len(&self) -> u32 {
+        u32::try_from(self.tasks.borrow().len()).unwrap()
     }
 }
 

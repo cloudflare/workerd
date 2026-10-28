@@ -779,10 +779,10 @@ use jsg_macros::{jsg_resource, jsg_property, jsg_inspect_property};
 impl Counter {
     // Prototype property (on the proto chain; use this in almost all cases)
     #[jsg_property(prototype)]
-    pub fn get_value(&self) -> f64 { /* ... */ }
+    pub fn get_value(&self) -> u32 { /* ... */ }
 
     #[jsg_property(prototype)]
-    pub fn set_value(&self, v: f64) { /* ... */ }
+    pub fn set_value(&self, v: u32) { /* ... */ }
 
     // Read-only prototype property (no paired `set_value`)
     #[jsg_property(prototype, readonly)]

@@ -54,9 +54,6 @@ class Node final: public Object {
   uint32_t getValue() {
     return value;
   }
-  double getJsValue() {
-    return value;
-  }
   void setChild(Ref<Node> node) {
     child = kj::mv(node);
   }
@@ -65,7 +62,7 @@ class Node final: public Object {
   }
 
   JSG_RESOURCE_TYPE(Node) {
-    JSG_READONLY_PROTOTYPE_PROPERTY(value, getJsValue);
+    JSG_READONLY_PROTOTYPE_PROPERTY(value, getValue);
     JSG_READONLY_PROTOTYPE_PROPERTY(child, getChild);
     JSG_METHOD(setChild);
   }
@@ -85,10 +82,10 @@ class Target final: public Object {
 
   void noop() {}
   static void staticNoop() {}
-  double add(uint32_t a) {
+  uint32_t add(uint32_t a) {
     return a + 1;
   }
-  double addFour(uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
+  uint32_t addFour(uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
     return a + b + c + d;
   }
   double number(double a) {
@@ -100,13 +97,13 @@ class Target final: public Object {
   v8::Local<v8::Value> raw(v8::Local<v8::Value> a) {
     return a;
   }
-  double getValue() {
+  uint32_t getValue() {
     return value;
   }
   void setValue(uint32_t a) {
     value = a;
   }
-  double optional(jsg::Optional<uint32_t> a) {
+  uint32_t optional(jsg::Optional<uint32_t> a) {
     return a.orDefault(7);
   }
 
@@ -122,7 +119,7 @@ class Target final: public Object {
     KJ_UNREACHABLE;
   }
 
-  double stringLen(kj::String a) {
+  uint32_t stringLen(kj::String a) {
     return static_cast<uint32_t>(a.size());
   }
   kj::String stringEcho(kj::String a) {
@@ -153,10 +150,10 @@ class Target final: public Object {
   Octet octetMake() {
     return {1, 2, 3, 4, 5, 6, 7, 8};
   }
-  double bytesLen(v8::Local<v8::Uint8Array> a) {
+  uint32_t bytesLen(v8::Local<v8::Uint8Array> a) {
     return static_cast<uint32_t>(a->ByteLength());
   }
-  double bytesCopy(v8::Local<v8::Uint8Array> a) {
+  uint32_t bytesCopy(v8::Local<v8::Uint8Array> a) {
     auto bytes = kj::heapArray(a->ByteLength() == 0
             ? kj::ArrayPtr<const kj::byte>()
             : kj::arrayPtr(static_cast<const kj::byte*>(a->Buffer()->Data()) + a->ByteOffset(),
@@ -164,7 +161,7 @@ class Target final: public Object {
     benchmark::DoNotOptimize(bytes.begin());
     return static_cast<uint32_t>(bytes.size());
   }
-  double bytesSum(v8::Local<v8::Uint8Array> a) {
+  uint32_t bytesSum(v8::Local<v8::Uint8Array> a) {
     if (a->ByteLength() == 0) return 0;
     auto bytes = kj::arrayPtr(
         static_cast<const kj::byte*>(a->Buffer()->Data()) + a->ByteOffset(), a->ByteLength());
@@ -178,7 +175,7 @@ class Target final: public Object {
   Ref<Node> sameNode() {
     return child.addRef();
   }
-  double takeNode(Ref<Node> a) {
+  uint32_t takeNode(Ref<Node> a) {
     return a->getValue();
   }
   double callback(Lock& js, v8::Local<v8::Function> a, double n) {

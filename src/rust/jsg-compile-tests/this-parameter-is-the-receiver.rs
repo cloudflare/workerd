@@ -66,14 +66,14 @@ impl Counter {
     }
 
     #[jsg_property]
-    pub fn get_total(&self, this: jsg::Rc<Self>) -> f64 {
+    pub fn get_total(&self, this: jsg::Rc<Self>) -> u32 {
         //~^ ERROR `this` must be the first parameter
         let _ = this;
-        f64::from(self.count.get())
+        self.count.get()
     }
 
     #[jsg_property]
-    pub fn set_total(lock: &mut jsg::Lock, this: jsg::Rc<Self>, v: f64) {
+    pub fn set_total(lock: &mut jsg::Lock, this: jsg::Rc<Self>, v: u32) {
         //~^ ERROR `this` must be the first parameter
         let _ = (lock, this, v);
     }
