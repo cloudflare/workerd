@@ -13,8 +13,8 @@
 //! other field is an error rather than silently ignored.
 //!
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
-//! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]). The server listens on `*:8787`, as `wrangler dev`
-//! does; `--socket-addr http=<addr>` overrides it.
+//! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]). The server
+//! listens on `*:8787`, as `wrangler dev` does; `--socket-addr http=<addr>` overrides it.
 
 use std::collections::BTreeMap;
 use std::fs;
