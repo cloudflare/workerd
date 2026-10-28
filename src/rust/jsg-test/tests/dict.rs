@@ -7,7 +7,6 @@
 
 use jsg::Dict;
 use jsg::FromJS;
-use jsg::Number;
 use jsg::v8;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_property;
@@ -22,9 +21,9 @@ struct Records {
 impl Records {
     /// Describes the entries, in order, as `key=value` pairs.
     #[jsg_method]
-    pub fn describe(&self, dict: Dict<Number>) -> String {
+    pub fn describe(&self, dict: Dict<f64>) -> String {
         dict.into_iter()
-            .map(|(key, value)| format!("{key}={}", value.value()))
+            .map(|(key, value)| format!("{key}={value}"))
             .collect::<Vec<_>>()
             .join(",")
     }
@@ -38,29 +37,25 @@ impl Records {
     }
 
     #[jsg_method]
-    pub fn count_present(&self, dict: Dict<Option<Number>>) -> Number {
-        Number::from(u32::try_from(dict.into_iter().filter(|(_, v)| v.is_some()).count()).unwrap())
+    pub fn count_present(&self, dict: Dict<Option<f64>>) -> f64 {
+        f64::from(u32::try_from(dict.into_iter().filter(|(_, v)| v.is_some()).count()).unwrap())
     }
 
     #[jsg_method]
-    pub fn total_lengths(&self, dict: Dict<Vec<Number>>) -> Number {
-        Number::from(u32::try_from(dict.into_iter().map(|(_, v)| v.len()).sum::<usize>()).unwrap())
+    pub fn total_lengths(&self, dict: Dict<Vec<f64>>) -> f64 {
+        f64::from(u32::try_from(dict.into_iter().map(|(_, v)| v.len()).sum::<usize>()).unwrap())
     }
 
     #[jsg_method]
-    pub fn sum_nested(&self, dict: Dict<Dict<Number>>) -> Number {
-        Number::new(
-            dict.into_iter()
-                .flat_map(|(_, inner)| inner.into_iter().map(|(_, v)| v.value()))
-                .sum(),
-        )
+    pub fn sum_nested(&self, dict: Dict<Dict<f64>>) -> f64 {
+        dict.into_iter()
+            .flat_map(|(_, inner)| inner.into_iter().map(|(_, v)| v))
+            .sum()
     }
 
     #[jsg_method]
-    pub fn count_functions<'s>(&self, dict: Dict<v8::Local<'s, v8::Value>>) -> Number {
-        Number::from(
-            u32::try_from(dict.into_iter().filter(|(_, v)| v.is_function()).count()).unwrap(),
-        )
+    pub fn count_functions<'s>(&self, dict: Dict<v8::Local<'s, v8::Value>>) -> f64 {
+        f64::from(u32::try_from(dict.into_iter().filter(|(_, v)| v.is_function()).count()).unwrap())
     }
 
     #[jsg_method]
@@ -69,16 +64,16 @@ impl Records {
     }
 
     #[jsg_method]
-    pub fn make(&self, keys: Vec<String>) -> Dict<Number> {
+    pub fn make(&self, keys: Vec<String>) -> Dict<f64> {
         keys.into_iter()
-            .zip(1..)
-            .map(|(key, n)| (key, Number::from(n)))
+            .zip(1u32..)
+            .map(|(key, n)| (key, f64::from(n)))
             .collect()
     }
 
     /// Is terminated and then returns a `Dict`, which is converted after the termination.
     #[jsg_method]
-    pub fn terminate_then_make(&self, lock: &mut jsg::Lock<'_>) -> Dict<Number> {
+    pub fn terminate_then_make(&self, lock: &mut jsg::Lock<'_>) -> Dict<f64> {
         crate::Harness::terminate_and_deliver(lock);
         self.make(vec!["a".to_owned()])
     }
@@ -188,10 +183,10 @@ fn values_other_than_objects_are_not_dicts() {
             );
         }
         let value = ctx.eval_raw(lock, "[1]").unwrap();
-        let err = Dict::<Number>::from_js(lock, value).unwrap_err();
+        let err = Dict::<f64>::from_js(lock, value).unwrap_err();
         assert_eq!(err.message, "Expected object but got array");
         let value = ctx.eval_raw(lock, "1").unwrap();
-        let err = Dict::<Number>::from_js(lock, value).unwrap_err();
+        let err = Dict::<f64>::from_js(lock, value).unwrap_err();
         assert_eq!(err.message, "Expected object but got number");
     });
 }
@@ -436,6 +431,10 @@ fn dicts_round_trip() {
 }
 
 #[test]
+#[expect(
+    clippy::float_cmp,
+    reason = "the values are small integers, exactly representable"
+)]
 fn get_by_name_and_keys() {
     with_records(|lock, ctx| {
         let value = ctx
@@ -449,11 +448,11 @@ fn get_by_name_and_keys() {
             .collect();
         assert_eq!(names, ["b", "a"]);
         let value = object.get_by_name(lock, keys[1].into()).unwrap();
-        assert_eq!(Number::from_js(lock, value).unwrap(), Number::new(3.0));
+        assert_eq!(f64::from_js(lock, value).unwrap(), 3.0);
 
         let symbol = ctx.eval_raw(lock, "Symbol.for('s')").unwrap();
         let symbol = v8::Local::<v8::Symbol>::try_from(symbol).unwrap();
         let value = object.get_by_name(lock, symbol.into()).unwrap();
-        assert_eq!(Number::from_js(lock, value).unwrap(), Number::new(2.0));
+        assert_eq!(f64::from_js(lock, value).unwrap(), 2.0);
     });
 }
