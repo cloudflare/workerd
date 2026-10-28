@@ -1062,7 +1062,7 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
     kj::Maybe<kj::StringPtr> entrypointName,
     kj::Maybe<Worker::Actor&> actor,
     ::rust::Box<WorkerInterfaceList> tails,
-    kj::Maybe<OtlpSpanExporter&> otlpExporter) {
+    kj::Maybe<kj::Rc<OtlpSpanExporter>> otlpExporter) {
   kj::Vector<kj::Own<WorkerInterface>> bufferedTailWorkers;
   kj::Vector<kj::Own<WorkerInterface>> streamingTailWorkers;
   for (size_t i = 0; i < tails->len(); i++) {
@@ -1125,7 +1125,7 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
       .entrypoint = entrypointName,
     };
     tracer->setStartInvocationSpanFunc(
-        [&entropySource = threadContext.getEntropySource(), exporter = kj::addRef(exporter),
+        [&entropySource = threadContext.getEntropySource(), exporter = kj::mv(exporter),
             serviceName = kj::str(service.serviceName), resource = makeOtlpResource(service),
             identityTags = makeOtlpIdentityTags(service)](
             tracing::InvocationSpanContext& invocation) mutable {
@@ -1134,7 +1134,7 @@ kj::Maybe<kj::Rc<WorkerTracer>> makeWorkerTracer(CompiledWorker::Impl& worker,
       invocation.setDefaultTraceFlags(tracing::TraceFlags(0x01));
       auto parent = invocation.getParent().map(
           [](const tracing::InvocationSpanContext& p) { return p.getSpanId(); });
-      return startExportedUserSpan(entropySource, kj::addRef(*exporter),
+      return startExportedUserSpan(entropySource, exporter.addRef(),
           tracing::SpanContext(invocation.getTraceId(), parent, invocation.getTraceFlags()),
           OtlpSpanSubmitter::Options{
             .serviceName = serviceName,
@@ -1160,9 +1160,8 @@ kj::Own<WorkerInterface> createEntrypoint(CompiledWorker::Impl& worker,
   // The test event is not traced.
   kj::Maybe<kj::Rc<WorkerTracer>> workerTracer;
   if (entrypointName.orDefault("") != "test"_kj) {
-    workerTracer = makeWorkerTracer(worker, entrypointName, actor, kj::mv(tails),
-        worker.otlpExporter.map(
-            [](kj::Own<OtlpSpanExporter>& exporter) -> OtlpSpanExporter& { return *exporter; }));
+    workerTracer =
+        makeWorkerTracer(worker, entrypointName, actor, kj::mv(tails), worker.otlpExporter.clone());
   }
 
   kj::Own<RequestObserver> observer =

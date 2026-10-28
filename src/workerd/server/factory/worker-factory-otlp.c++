@@ -48,7 +48,7 @@ class OtlpExporter::Impl final: public OtlpSpanExporter, private kj::TaskSet::Er
   }
 };
 
-OtlpExporter::OtlpExporter(kj::Own<Impl> impl): impl(kj::mv(impl)) {}
+OtlpExporter::OtlpExporter(kj::Rc<Impl> impl): impl(kj::mv(impl)) {}
 
 OtlpExporter::~OtlpExporter() noexcept(false) {
   impl->unlink();
@@ -58,14 +58,18 @@ OtlpExporter::Impl& OtlpExporter::getImpl() const {
   return *impl;
 }
 
+kj::Rc<OtlpSpanExporter> OtlpExporter::addRef() const {
+  return impl.addRef();
+}
+
 kj::Own<OtlpExporter> factory_new_otlp_exporter(
     const WorkerFactory& factory, ::rust::Box<SubrequestChannel> collector) {
   return kj::heap<OtlpExporter>(
-      kj::refcounted<OtlpExporter::Impl>(kj::mv(collector), *factory.getImpl().headerTable));
+      kj::rc<OtlpExporter::Impl>(kj::mv(collector), *factory.getImpl().headerTable));
 }
 
-kj::Own<OtlpSpanExporter> otlp_exporter_add_ref(const OtlpExporter& exporter) {
-  return kj::addRef(exporter.getImpl());
+kj::Rc<OtlpSpanExporter> otlp_exporter_add_ref(const OtlpExporter& exporter) {
+  return exporter.addRef();
 }
 
 void otlp_exporter_unlink(const OtlpExporter& exporter) {
