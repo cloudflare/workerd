@@ -1,4 +1,5 @@
 load("@aspect_rules_js//js:defs.bzl", "js_test")
+load("//images/container-client-test:images.bzl", "CONTAINER_TEST_IMAGES")
 
 js_test(
     name = "container-shutdown-test",
@@ -8,7 +9,7 @@ js_test(
         ":worker.mjs",
         "//src/workerd/server:workerd",
         "//src/workerd/server/tests:server-harness_js_lib",
-    ],
+    ] + CONTAINER_TEST_IMAGES,
     entry_point = "test.mjs",
     env = {
         "WORKERD_BINARY": "$(rootpath //src/workerd/server:workerd)",

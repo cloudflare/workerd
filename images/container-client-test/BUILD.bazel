@@ -27,7 +27,6 @@ oci_image(
     base = "@node_25_slim",
     cmd = ["/{}/app".format(package_name())],
     tags = [
-        "no-remote-exec",
         "requires-container-engine",
     ],
     target_compatible_with = [
@@ -48,9 +47,7 @@ oci_load(
         # building a separate image.
         "cloudflare/workerd/container-client-test:override",
     ],
-    # Like :image, whose actions run where the container engine is.
     tags = [
-        "no-remote-exec",
         "requires-container-engine",
     ],
     visibility = ["//visibility:public"],
@@ -61,8 +58,25 @@ oci_load(
     image = "@proxy_everything",
     repo_tags = ["cloudflare/proxy-everything:main"],
     tags = [
-        "no-remote-exec",
         "requires-container-engine",
     ],
+    visibility = ["//visibility:public"],
+)
+
+# The images as `docker load` tarballs, for the container tests to load into the engine they run
+# beside (images.bzl).
+filegroup(
+    name = "tarball",
+    srcs = [":load"],
+    output_group = "tarball",
+    tags = ["requires-container-engine"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "proxy-everything-tarball",
+    srcs = [":load-proxy-everything"],
+    output_group = "tarball",
+    tags = ["requires-container-engine"],
     visibility = ["//visibility:public"],
 )
