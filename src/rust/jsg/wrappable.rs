@@ -20,10 +20,10 @@
 //! | `String` | `string` |
 //! | `&str` | `string` |
 //! | `bool` | `boolean` |
-//! | `Number` | `number` |
+//! | `f64` | `number`; from any value, with `ToNumber` |
+//! | `f32` | `number` (to JavaScript only) |
 //! | `u8`, `u16`, `u32`, `i8`, `i16`, `i32` | `number` |
 //! | `i64`, `u64` | `bigint`; from a `bigint` or a `number` |
-//! | `f64`, `f32` | `number` (to JavaScript only; a parameter is a `Number`) |
 //! | `SystemTime` | `Date`; from a `Date` or `number` of milliseconds |
 //! | `Option<T>` | `T` or `undefined` |
 //! | `Nullable<T>` | `T` or `null` (`undefined` coerces to `null` on input) |
@@ -77,7 +77,6 @@ use crate::Lenient;
 use crate::Lock;
 use crate::NonCoercible;
 use crate::Nullable;
-use crate::Number;
 use crate::Type;
 use crate::UnionMember;
 use crate::UnionTypes;
@@ -167,16 +166,17 @@ impl_traced_noop!(
     crate::v8::BackingStore,
     crate::v8::BigInt64Array,
     crate::v8::BigUint64Array,
+    crate::v8::Boolean,
     crate::v8::Float32Array,
     crate::v8::Float64Array,
     crate::v8::Int8Array,
     crate::v8::Int16Array,
     crate::v8::Int32Array,
+    crate::v8::Number,
     crate::v8::Uint8Array,
     crate::v8::Uint16Array,
     crate::v8::Uint32Array,
     &str,
-    Number,
 );
 
 impl<T: Traced> Traced for Option<T> {
@@ -548,8 +548,8 @@ impl<'s> FromJS<'s> for std::string::String {
     }
 }
 
-// Number implementation for JavaScript numbers
-impl Type for Number {
+// Like C++ JSG's double, an f64 is a number. From JavaScript, any value converts with `ToNumber`.
+impl Type for f64 {
     const UNION_TYPES: UnionTypes = UnionTypes::NUMERIC;
 
     fn class_name() -> &'static str {
@@ -561,33 +561,14 @@ impl Type for Number {
     }
 }
 
-impl<'s> ToJS<'s> for Number {
-    #[inline]
-    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-        let isolate = lock.isolate();
-        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
-        Ok(unsafe {
-            v8::Local::from_ffi(v8::ffi::local_new_number(isolate.as_ffi(), self.value()))
-        })
-    }
-}
-
-// Like C++ JSG's double, an f64 or f32 is a number. From JavaScript, a parameter is a `Number`.
 impl<'s> ToJS<'s> for f64 {
     #[inline]
     fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-        Number::new(self).to_js(lock)
+        Ok(v8::Number::new(lock, self).into())
     }
 }
 
-impl<'s> ToJS<'s> for f32 {
-    #[inline]
-    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-        Number::new(f64::from(self)).to_js(lock)
-    }
-}
-
-impl<'s> FromJS<'s> for Number {
+impl<'s> FromJS<'s> for f64 {
     type ResultType = Self;
 
     const UNION_MEMBER: UnionMember = UnionMember::Numeric;
@@ -600,8 +581,15 @@ impl<'s> FromJS<'s> for Number {
         lock: &mut Lock<'s>,
         value: v8::Local<'s, v8::Value>,
     ) -> Result<Self::ResultType, Error> {
-        let f64_value = unwrap_number(lock, value)?;
-        Ok(Self::new(f64_value))
+        unwrap_number(lock, value)
+    }
+}
+
+// An f32 is a number too, but only to JavaScript.
+impl<'s> ToJS<'s> for f32 {
+    #[inline]
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        f64::from(self).to_js(lock)
     }
 }
 
@@ -734,7 +722,7 @@ macro_rules! impl_integer {
             impl<'s> ToJS<'s> for $type {
                 #[inline]
                 fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-                    Number::new(f64::from(self)).to_js(lock)
+                    f64::from(self).to_js(lock)
                 }
             }
 
@@ -990,7 +978,7 @@ impl<'s> FromJS<'s> for std::time::SystemTime {
         let millis = if let Ok(date) = v8::Local::<v8::Date>::try_from(value) {
             date.value_of()
         } else if value.is_number() {
-            Number::from_js(lock, value)?.value()
+            f64::from_js(lock, value)?
         } else {
             return Ok(None);
         };

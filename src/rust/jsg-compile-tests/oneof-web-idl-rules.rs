@@ -8,7 +8,6 @@
 
 use jsg::Dict;
 use jsg::Nullable;
-use jsg::Number;
 use jsg::v8;
 use jsg_macros::jsg_oneof;
 use jsg_macros::jsg_resource;
@@ -16,7 +15,7 @@ use jsg_macros::jsg_struct;
 
 #[jsg_struct]
 pub struct Point {
-    pub x: Number,
+    pub x: f64,
 }
 
 #[jsg_resource]
@@ -33,7 +32,7 @@ pub enum TwoBooleans {
 
 #[jsg_oneof] //~ ERROR E0080: at most one numeric type
 pub enum TwoNumerics {
-    Number(Number),
+    Number(f64),
     Integer(u32),
 }
 
@@ -52,42 +51,42 @@ pub enum ObjectAndResource<'s> {
 #[jsg_oneof] //~ ERROR E0080: an object type only if
 pub enum ObjectAndRecord<'s> {
     Object(v8::Local<'s, v8::Object>),
-    Dict(Dict<Number>),
+    Dict(Dict<f64>),
 }
 
 #[jsg_oneof] //~ ERROR E0080: an object type only if
 pub enum ObjectAndSequence<'s> {
     Object(v8::Local<'s, v8::Object>),
-    Sequence(Vec<Number>),
+    Sequence(Vec<f64>),
 }
 
 #[jsg_oneof] //~ ERROR E0080: at most one dictionary-like type
 pub enum DictionaryAndRecord {
     Point(Point),
-    Dict(Dict<Number>),
+    Dict(Dict<f64>),
 }
 
 #[jsg_oneof] //~ ERROR E0080: at most one sequence-like type
 pub enum TwoSequences {
-    Numbers(Vec<Number>),
+    Numbers(Vec<f64>),
     Strings(Vec<String>),
 }
 
 #[jsg_oneof] //~ ERROR E0080: at most one nullable or dictionary type
 pub enum NullableAndDictionary {
-    Number(Nullable<Number>),
+    Number(Nullable<f64>),
     Point(Point),
 }
 
 #[jsg_oneof] //~ ERROR E0080: at most one nullable or dictionary type
 pub enum TwoNullables {
-    Number(Nullable<Number>),
+    Number(Nullable<f64>),
     Integer(Nullable<String>),
 }
 
 #[jsg_oneof] //~ ERROR E0080: may not contain Option<T> or Lenient<T>
 pub enum Optional {
-    Number(Option<Number>),
+    Number(Option<f64>),
     String(String),
 }
 

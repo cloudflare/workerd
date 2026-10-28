@@ -9,7 +9,7 @@ use jsg_macros::jsg_oneof;
 
 #[jsg_oneof] //~ ERROR E0277
 pub enum FloatOrString {
-    Float(f64), //~ ERROR cannot be a `#[jsg_oneof]` variant
+    Float(f32), //~ ERROR cannot be a `#[jsg_oneof]` variant
     //~| ERROR E0277
     String(String),
 }

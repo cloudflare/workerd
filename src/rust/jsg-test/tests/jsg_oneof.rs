@@ -14,7 +14,6 @@ use std::sync::atomic::Ordering;
 use jsg::ExceptionType;
 use jsg::NonCoercible;
 use jsg::Nullable;
-use jsg::Number;
 use jsg::ToJS;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_oneof;
@@ -24,13 +23,13 @@ use jsg_macros::jsg_struct;
 
 #[jsg_resource]
 struct OneOfBox {
-    value: Number,
+    value: f64,
 }
 
 #[jsg_resource]
 impl OneOfBox {
     #[jsg_property(prototype, readonly)]
-    pub fn get_value(&self) -> Number {
+    pub fn get_value(&self) -> f64 {
         self.value
     }
 }
@@ -51,7 +50,7 @@ struct OptionalPoint {
 #[jsg_oneof]
 #[derive(Debug, Clone)]
 enum NumberStringOrBox {
-    Number(Number),
+    Number(f64),
     String(String),
     Box(jsg::Rc<OneOfBox>),
 }
@@ -66,7 +65,7 @@ enum StringOrBool {
 #[jsg_oneof]
 #[derive(Debug, Clone, PartialEq)]
 enum NumberOrBool {
-    Number(Number),
+    Number(f64),
     Bool(bool),
 }
 
@@ -74,13 +73,13 @@ enum NumberOrBool {
 #[derive(Debug, Clone, PartialEq)]
 enum StringOrNumber {
     String(String),
-    Number(Number),
+    Number(f64),
 }
 
 #[jsg_oneof]
 #[derive(Debug, Clone, PartialEq)]
 enum NumberOrString {
-    Number(Number),
+    Number(f64),
     String(String),
 }
 
@@ -88,7 +87,7 @@ enum NumberOrString {
 #[jsg_oneof]
 #[derive(Debug, Clone, PartialEq)]
 enum NumberOrNested {
-    Number(Number),
+    Number(f64),
     Nested(StringOrBool),
 }
 
@@ -124,7 +123,7 @@ enum PointOrBytes {
 #[derive(Debug, Clone, PartialEq)]
 enum StrictStringOrNumber {
     String(NonCoercible<String>),
-    Number(Number),
+    Number(f64),
 }
 
 /// `kj::OneOf<NonCoercible<bool>, NonCoercible<kj::String>>`.
@@ -192,7 +191,7 @@ impl<'s> jsg::FromJS<'s> for FromJsOnly {
 #[derive(Debug, Clone, PartialEq)]
 enum FromJsOnlyOrNumber {
     Text(FromJsOnly),
-    Number(Number),
+    Number(f64),
 }
 
 #[jsg_resource]
@@ -212,11 +211,9 @@ impl OneOfContext {
     #[jsg_method]
     pub fn return_one_of(&self, kind: String) -> NumberStringOrBox {
         match kind.as_str() {
-            "number" => NumberStringOrBox::Number(Number::new(123.0)),
+            "number" => NumberStringOrBox::Number(123.0),
             "string" => NumberStringOrBox::String("foo".to_owned()),
-            _ => NumberStringOrBox::Box(jsg::Rc::new(OneOfBox {
-                value: Number::new(321.0),
-            })),
+            _ => NumberStringOrBox::Box(jsg::Rc::new(OneOfBox { value: 321.0 })),
         }
     }
 
@@ -357,10 +354,7 @@ fn with_context(f: impl for<'s, 'c> FnOnce(&mut jsg::Lock<'s>, &crate::EvalConte
     harness.run_in_context(|lock, ctx| {
         let cx = jsg::Rc::new(OneOfContext).to_js(lock)?;
         ctx.set_global(lock, "cx", cx);
-        let boxed = jsg::Rc::new(OneOfBox {
-            value: Number::new(321.0),
-        })
-        .to_js(lock)?;
+        let boxed = jsg::Rc::new(OneOfBox { value: 321.0 }).to_js(lock)?;
         ctx.set_global(lock, "box321", boxed);
         f(lock, ctx);
         Ok(())
@@ -658,7 +652,7 @@ impl TracedBox {}
 #[derive(Clone)]
 enum TracedBoxOrNumber {
     Box(jsg::Rc<TracedBox>),
-    Number(Number),
+    Number(f64),
 }
 
 #[jsg_resource]

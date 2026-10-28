@@ -3,7 +3,6 @@
 //     https://opensource.org/licenses/Apache-2.0
 
 use jsg::FromJS;
-use jsg::Number;
 use jsg_macros::jsg_constructor;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_resource;
@@ -26,8 +25,8 @@ fn run_in_context_resumes_panic_and_stays_usable() {
         Some(&"intentional panic in run_in_context")
     );
     harness.run_in_context(|lock, ctx| {
-        let result: Number = ctx.eval(lock, "1 + 1").unwrap();
-        assert!((result.value() - 2.0).abs() < f64::EPSILON);
+        let result: f64 = ctx.eval(lock, "1 + 1").unwrap();
+        assert!((result - 2.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -56,8 +55,8 @@ fn eval_string_concatenation() {
 fn eval_number_returns_number_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let result: Number = ctx.eval(lock, "42").unwrap();
-        assert!((result.value() - 42.0).abs() < f64::EPSILON);
+        let result: f64 = ctx.eval(lock, "42").unwrap();
+        assert!((result - 42.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -66,8 +65,8 @@ fn eval_number_returns_number_type() {
 fn eval_arithmetic_expression() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let result: Number = ctx.eval(lock, "1 + 2 + 3").unwrap();
-        assert!((result.value() - 6.0).abs() < f64::EPSILON);
+        let result: f64 = ctx.eval(lock, "1 + 2 + 3").unwrap();
+        assert!((result - 6.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -254,27 +253,23 @@ fn eval_function_string() {
 /// A minimal resource for testing `Lenient<Rc<R>>`.
 #[jsg_resource]
 struct NumberBox {
-    value: jsg::Number,
+    value: f64,
 }
 
 #[jsg_resource]
 impl NumberBox {
     #[jsg_constructor]
-    fn new(value: jsg::Number) -> Self {
+    fn new(value: f64) -> Self {
         Self { value }
     }
 
     #[jsg_method]
-    fn take_lenient(
-        &self,
-        _lock: &mut jsg::Lock,
-        num: jsg::Lenient<jsg::Rc<NumberBox>>,
-    ) -> jsg::Number {
+    fn take_lenient(&self, _lock: &mut jsg::Lock, num: jsg::Lenient<jsg::Rc<NumberBox>>) -> f64 {
         match num {
             jsg::Lenient::Some(b) => b.value,
-            jsg::Lenient::Unconvertable(_) => jsg::Number::new(321.0),
-            jsg::Lenient::Null => jsg::Number::new(42.97),
-            jsg::Lenient::Undefined => jsg::Number::new(-12.6),
+            jsg::Lenient::Unconvertable(_) => 321.0,
+            jsg::Lenient::Null => 42.97,
+            jsg::Lenient::Undefined => -12.6,
         }
     }
 }
@@ -324,7 +319,7 @@ fn lenient_string_number() {
 fn lenient_array_top_level_mismatch_is_unconvertable() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let result: jsg::Lenient<Vec<jsg::Number>> = ctx.eval(lock, "42").unwrap();
+        let result: jsg::Lenient<Vec<f64>> = ctx.eval(lock, "42").unwrap();
         assert!(matches!(result, jsg::Lenient::Unconvertable(_)));
         Ok(())
     });
@@ -334,7 +329,7 @@ fn lenient_array_top_level_mismatch_is_unconvertable() {
 fn lenient_array_nested_conversion_error_propagates() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let result = ctx.eval::<jsg::Lenient<Vec<jsg::Number>>>(lock, "[Symbol()]");
+        let result = ctx.eval::<jsg::Lenient<Vec<f64>>>(lock, "[Symbol()]");
         assert!(result.is_err());
         Ok(())
     });
@@ -344,12 +339,10 @@ fn lenient_array_nested_conversion_error_propagates() {
 fn lenient_resource_some() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let boxed = jsg::Rc::new(NumberBox {
-            value: jsg::Number::new(42.0),
-        });
+        let boxed = jsg::Rc::new(NumberBox { value: 42.0 });
         ctx.set_global(lock, "box", boxed);
-        let result: jsg::Number = ctx.eval(lock, "box.takeLenient(box)").unwrap();
-        assert!((result.value() - 42.0).abs() < f64::EPSILON);
+        let result: f64 = ctx.eval(lock, "box.takeLenient(box)").unwrap();
+        assert!((result - 42.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -358,12 +351,10 @@ fn lenient_resource_some() {
 fn lenient_resource_undefined() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let boxed = jsg::Rc::new(NumberBox {
-            value: jsg::Number::new(42.0),
-        });
+        let boxed = jsg::Rc::new(NumberBox { value: 42.0 });
         ctx.set_global(lock, "box", boxed);
-        let result: jsg::Number = ctx.eval(lock, "box.takeLenient()").unwrap();
-        assert!((result.value() - -12.6).abs() < f64::EPSILON);
+        let result: f64 = ctx.eval(lock, "box.takeLenient()").unwrap();
+        assert!((result - -12.6).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -372,12 +363,10 @@ fn lenient_resource_undefined() {
 fn lenient_resource_undefined_explicit() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let boxed = jsg::Rc::new(NumberBox {
-            value: jsg::Number::new(42.0),
-        });
+        let boxed = jsg::Rc::new(NumberBox { value: 42.0 });
         ctx.set_global(lock, "box", boxed);
-        let result: jsg::Number = ctx.eval(lock, "box.takeLenient(undefined)").unwrap();
-        assert!((result.value() - -12.6).abs() < f64::EPSILON);
+        let result: f64 = ctx.eval(lock, "box.takeLenient(undefined)").unwrap();
+        assert!((result - -12.6).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -386,12 +375,10 @@ fn lenient_resource_undefined_explicit() {
 fn lenient_resource_null() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let boxed = jsg::Rc::new(NumberBox {
-            value: jsg::Number::new(42.0),
-        });
+        let boxed = jsg::Rc::new(NumberBox { value: 42.0 });
         ctx.set_global(lock, "box", boxed);
-        let result: jsg::Number = ctx.eval(lock, "box.takeLenient(null)").unwrap();
-        assert!((result.value() - 42.97).abs() < f64::EPSILON);
+        let result: f64 = ctx.eval(lock, "box.takeLenient(null)").unwrap();
+        assert!((result - 42.97).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -400,13 +387,11 @@ fn lenient_resource_null() {
 fn lenient_resource_wrong_type() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, ctx| {
-        let boxed = jsg::Rc::new(NumberBox {
-            value: jsg::Number::new(42.0),
-        });
+        let boxed = jsg::Rc::new(NumberBox { value: 42.0 });
         ctx.set_global(lock, "box", boxed);
         // Passing a function instead of a NumberBox — should be silently treated as absent.
-        let result: jsg::Number = ctx.eval(lock, "box.takeLenient(() => {})").unwrap();
-        assert!((result.value() - 321.0).abs() < f64::EPSILON);
+        let result: f64 = ctx.eval(lock, "box.takeLenient(() => {})").unwrap();
+        assert!((result - 321.0).abs() < f64::EPSILON);
         Ok(())
     });
 }

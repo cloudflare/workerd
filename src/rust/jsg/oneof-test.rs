@@ -10,7 +10,6 @@ use crate::Dict;
 use crate::FromJS;
 use crate::NonCoercible;
 use crate::Nullable;
-use crate::Number;
 
 /// The message `validate` panics with for `types`, or `None` if they are valid.
 fn rejection(types: UnionTypes) -> Option<String> {
@@ -139,7 +138,7 @@ fn each_type_has_the_kind_of_its_cpp_counterpart() {
     assert_kind::<NonCoercible<bool>>(Boolean, UnionTypes::BOOLEAN);
     assert_kind::<String>(UnionMember::String, UnionTypes::STRING);
     assert_kind::<NonCoercible<String>>(UnionMember::String, UnionTypes::STRING);
-    assert_kind::<Number>(Numeric, UnionTypes::NUMERIC);
+    assert_kind::<f64>(Numeric, UnionTypes::NUMERIC);
     assert_kind::<u8>(Numeric, UnionTypes::NUMERIC);
     assert_kind::<u16>(Numeric, UnionTypes::NUMERIC);
     assert_kind::<u32>(Numeric, UnionTypes::NUMERIC);
@@ -151,7 +150,7 @@ fn each_type_has_the_kind_of_its_cpp_counterpart() {
     assert_kind::<SystemTime>(Fallible, UnionTypes::OTHER);
     assert_kind::<Vec<String>>(Fallible, UnionTypes::SEQUENCE_LIKE);
     assert_kind::<Vec<u8>>(Fallible, UnionTypes::SEQUENCE_LIKE);
-    assert_kind::<Dict<Number>>(Fallible, UnionTypes::RECORD);
+    assert_kind::<Dict<f64>>(Fallible, UnionTypes::RECORD);
     assert_kind::<Nullable<String>>(Fallible, UnionTypes::STRING.nullable());
     assert_kind::<v8::Local<'static, v8::Value>>(Fallible, UnionTypes::OTHER);
     assert_kind::<v8::Local<'static, v8::String>>(UnionMember::String, UnionTypes::STRING);

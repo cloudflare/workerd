@@ -30,28 +30,28 @@ impl Counter {
     pub fn nested(self: &&Self) {} //~ ERROR a resource method takes `&self`
 
     #[jsg_method]
-    pub fn explicit<'a>(self: &'a Self) -> jsg::Number {
-        jsg::Number::from(self.count)
+    pub fn explicit<'a>(self: &'a Self) -> f64 {
+        f64::from(self.count)
     }
 
     #[jsg_property(prototype)]
-    pub fn get_total(&self) -> jsg::Number {
-        jsg::Number::from(self.count)
+    pub fn get_total(&self) -> f64 {
+        f64::from(self.count)
     }
 
     #[jsg_property(prototype)]
-    pub fn set_total(&mut self, _v: jsg::Number) {
+    pub fn set_total(&mut self, _v: f64) {
         //~^ ERROR a resource method takes `&self`
     }
 
     #[jsg_property(instance)]
-    pub fn get_current(&mut self) -> jsg::Number {
+    pub fn get_current(&mut self) -> f64 {
         //~^ ERROR a resource method takes `&self`
-        jsg::Number::from(self.count)
+        f64::from(self.count)
     }
 
     #[jsg_property(instance)]
-    pub fn set_current(&mut self, _v: jsg::Number) {
+    pub fn set_current(&mut self, _v: f64) {
         //~^ ERROR a resource method takes `&self`
     }
 
@@ -63,9 +63,9 @@ impl Counter {
 }
 
 // A rejected method is still emitted, so its callers add no errors of their own.
-fn _calls(mut counter: Counter) -> jsg::Number {
+fn _calls(mut counter: Counter) -> f64 {
     counter.increment();
     let _ = counter.get_current();
     counter.consume();
-    jsg::Number::from(0)
+    0.0
 }

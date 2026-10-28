@@ -16,7 +16,6 @@ use jsg::Dict;
 use jsg::ExceptionType;
 use jsg::FromJS;
 use jsg::Nullable;
-use jsg::Number;
 use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_method;
@@ -51,7 +50,7 @@ enum I64OrString {
 #[derive(Debug, Clone, PartialEq)]
 enum DateOrNumber {
     Date(SystemTime),
-    Number(Number),
+    Number(f64),
 }
 
 /// `kj::OneOf<kj::Maybe<kj::String>, double>`.
@@ -59,7 +58,7 @@ enum DateOrNumber {
 #[derive(Debug, Clone, PartialEq)]
 enum NullableStringOrNumber {
     String(Nullable<String>),
-    Number(Number),
+    Number(f64),
 }
 
 /// `kj::OneOf<kj::Maybe<uint32_t>, kj::String>`.
@@ -74,7 +73,7 @@ enum NullableU32OrString {
 #[jsg_oneof]
 #[derive(Debug, Clone, PartialEq)]
 enum DictSequenceOrString {
-    Dict(Dict<Number>),
+    Dict(Dict<f64>),
     Sequence(Vec<String>),
     String(String),
 }
@@ -83,7 +82,7 @@ enum DictSequenceOrString {
 #[jsg_oneof]
 enum StringHandleOrNumber<'s> {
     String(v8::Local<'s, v8::String>),
-    Number(Number),
+    Number(f64),
 }
 
 /// `kj::OneOf<v8::Local<v8::Object>, kj::String>`, with the lifetime named otherwise.
@@ -97,7 +96,7 @@ enum ObjectOrString<'a> {
 #[jsg_oneof]
 enum FunctionOrNumber<'s> {
     Function(v8::Local<'s, v8::Function>),
-    Number(Number),
+    Number(f64),
 }
 
 /// `kj::OneOf<v8::Local<v8::BigInt>, kj::String>`.
@@ -132,7 +131,7 @@ enum ValueOrPoint<'s> {
 /// union's passes.
 #[jsg_oneof]
 enum NumberOrNestedHandle<'s> {
-    Number(Number),
+    Number(f64),
     Nested(StringHandleOrBool<'s>),
 }
 
@@ -176,7 +175,7 @@ impl VariantContext {
         if date {
             DateOrNumber::Date(SystemTime::UNIX_EPOCH + Duration::from_secs(1))
         } else {
-            DateOrNumber::Number(Number::new(1.0))
+            DateOrNumber::Number(1.0)
         }
     }
 
@@ -208,7 +207,7 @@ impl VariantContext {
     #[jsg_method]
     pub fn return_dict_or_sequence(&self, dict: bool) -> DictSequenceOrString {
         if dict {
-            DictSequenceOrString::Dict(Dict::from(vec![("a".to_owned(), Number::new(1.0))]))
+            DictSequenceOrString::Dict(Dict::from(vec![("a".to_owned(), 1.0)]))
         } else {
             DictSequenceOrString::Sequence(vec!["x".to_owned()])
         }

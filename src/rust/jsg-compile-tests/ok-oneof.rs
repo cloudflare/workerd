@@ -6,7 +6,6 @@
 // a dictionary, and an object handle with primitives.
 
 use jsg::Nullable;
-use jsg::Number;
 use jsg::v8;
 use jsg_macros::jsg_oneof;
 use jsg_macros::jsg_resource;
@@ -14,7 +13,7 @@ use jsg_macros::jsg_struct;
 
 #[jsg_struct]
 pub struct Point {
-    pub x: Number,
+    pub x: f64,
 }
 
 #[jsg_resource]
@@ -34,7 +33,7 @@ pub enum Everything<'s> {
     First(jsg::Rc<First>),
     Second(jsg::Rc<Second>),
     Point(Point),
-    Numbers(Vec<Number>),
+    Numbers(Vec<f64>),
     Bytes(v8::Local<'s, v8::Uint8Array>),
     String(String),
     Number(i32),

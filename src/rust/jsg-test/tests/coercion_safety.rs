@@ -25,7 +25,6 @@ use std::cell::Cell;
 
 use jsg::ExceptionType;
 use jsg::FromJS;
-use jsg::Number;
 use jsg::ToJS;
 use jsg::v8;
 use jsg_macros::jsg_method;
@@ -115,7 +114,7 @@ fn coercion_throws_thrown_value() {
                 "({ valueOf() { throw thrown; } })",
                 "new Proxy({}, { get() { throw thrown; } })",
             ] {
-                let caught = conversion_throws::<Number>(lock, ctx, expr);
+                let caught = conversion_throws::<f64>(lock, ctx, expr);
                 assert!(is_thrown(lock, ctx, caught), "{setup} {expr}");
                 let caught = conversion_throws::<i32>(lock, ctx, expr);
                 assert!(is_thrown(lock, ctx, caught), "{setup} {expr}");
@@ -160,7 +159,7 @@ fn string_from_lone_surrogate_is_lossy_not_abort() {
     });
 }
 
-/// `Number` coercion of a `Symbol`/`BigInt` throws in JS.
+/// `ToNumber` on a `Symbol`/`BigInt` throws in JS.
 #[test]
 fn number_from_hostile_values_returns_err() {
     let harness = crate::Harness::new();
@@ -171,7 +170,7 @@ fn number_from_hostile_values_returns_err() {
             "({ valueOf() { throw new TypeError('no number'); } })",
         ];
         for expr in hostile {
-            conversion_throws::<Number>(lock, ctx, expr);
+            conversion_throws::<f64>(lock, ctx, expr);
         }
         Ok(())
     });
@@ -273,17 +272,17 @@ impl ReentrantResource {
         format!("[{message}]")
     }
 
-    /// Takes a `Number` argument; same nesting trick as `echo` but for
+    /// Takes an `f64` argument; same nesting trick as `echo` but for
     /// `unwrap_number`/`ToNumber`.
     #[jsg_method]
-    pub fn double(&self, n: Number) -> Number {
+    pub fn double(&self, n: f64) -> f64 {
         self.call_count.set(self.call_count.get() + 1);
-        Number::new(n.value() * 2.0)
+        n * 2.0
     }
 
     #[jsg_method]
-    pub fn call_count(&self) -> Number {
-        Number::new(f64::from(self.call_count.get()))
+    pub fn call_count(&self) -> f64 {
+        f64::from(self.call_count.get())
     }
 
     /// Unconditionally panics, to test that a panic triggered *while V8 is
@@ -317,13 +316,13 @@ fn string_from_tostring_side_effects_are_observed() {
         let s = <String as FromJS>::from_js(lock, value).expect("coercion should succeed");
         assert_eq!(s, "computed-1");
 
-        let side_effect: Number = ctx.eval(lock, "globalThis.__sideEffect").unwrap();
-        assert!((side_effect.value() - 1.0).abs() < f64::EPSILON);
+        let side_effect: f64 = ctx.eval(lock, "globalThis.__sideEffect").unwrap();
+        assert!((side_effect - 1.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
 
-/// Same as above, but for `Number`/`valueOf`.
+/// Same as above, but for `ToNumber`/`valueOf`.
 #[test]
 fn number_from_valueof_side_effects_are_observed() {
     let harness = crate::Harness::new();
@@ -340,11 +339,11 @@ fn number_from_valueof_side_effects_are_observed() {
             )
             .expect("expression should evaluate");
 
-        let n = <Number as FromJS>::from_js(lock, value).expect("coercion should succeed");
-        assert!((n.value() - 42.0).abs() < f64::EPSILON);
+        let n = <f64 as FromJS>::from_js(lock, value).expect("coercion should succeed");
+        assert!((n - 42.0).abs() < f64::EPSILON);
 
-        let side_effect: Number = ctx.eval(lock, "globalThis.__sideEffect").unwrap();
-        assert!((side_effect.value() - 1.0).abs() < f64::EPSILON);
+        let side_effect: f64 = ctx.eval(lock, "globalThis.__sideEffect").unwrap();
+        assert!((side_effect - 1.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -375,13 +374,13 @@ fn string_coercion_reentrant_into_rust_resource_method() {
         let s = <String as FromJS>::from_js(lock, value).expect("nested coercion should succeed");
         assert_eq!(s, "[inner]");
 
-        let count: Number = ctx.eval(lock, "resource.callCount()").unwrap();
-        assert!((count.value() - 1.0).abs() < f64::EPSILON);
+        let count: f64 = ctx.eval(lock, "resource.callCount()").unwrap();
+        assert!((count - 1.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
 
-/// Same as above, but for `Number`/`valueOf`/`unwrap_number`.
+/// Same as above, but for `ToNumber`/`valueOf`/`unwrap_number`.
 #[test]
 fn number_coercion_reentrant_into_rust_resource_method() {
     let harness = crate::Harness::new();
@@ -401,11 +400,11 @@ fn number_coercion_reentrant_into_rust_resource_method() {
             )
             .expect("expression should evaluate");
 
-        let n = <Number as FromJS>::from_js(lock, value).expect("nested coercion should succeed");
-        assert!((n.value() - 42.0).abs() < f64::EPSILON);
+        let n = <f64 as FromJS>::from_js(lock, value).expect("nested coercion should succeed");
+        assert!((n - 42.0).abs() < f64::EPSILON);
 
-        let count: Number = ctx.eval(lock, "resource.callCount()").unwrap();
-        assert!((count.value() - 1.0).abs() < f64::EPSILON);
+        let count: f64 = ctx.eval(lock, "resource.callCount()").unwrap();
+        assert!((count - 1.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -473,7 +472,7 @@ fn string_coercion_reentrant_panic_is_err_not_abort() {
     });
 }
 
-/// Same as above, but for `Number`/`valueOf`/`unwrap_number`.
+/// Same as above, but for `ToNumber`/`valueOf`/`unwrap_number`.
 #[test]
 fn number_coercion_reentrant_panic_is_err_not_abort() {
     let harness = crate::Harness::new();
@@ -488,7 +487,7 @@ fn number_coercion_reentrant_panic_is_err_not_abort() {
             .eval_raw(lock, "({ valueOf() { resource.panicNow(); return 0; } })")
             .expect("expression should evaluate");
 
-        let result = lock.try_catch(|lock| <Number as FromJS>::from_js(lock, value));
+        let result = lock.try_catch(|lock| <f64 as FromJS>::from_js(lock, value));
         assert!(
             !matches!(result, Ok(Ok(_))),
             "panic during ToNumber coercion must be an Err, got {result:?}"
@@ -593,16 +592,16 @@ fn object_set_from_throwing_setter_returns_err() {
                 .eval_raw(lock, expr)
                 .expect("expression should evaluate");
             let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
-            let one = Number::new(1.0).to_js(lock)?;
+            let one = 1.0_f64.to_js(lock)?;
             let caught = thrown_by(lock, |lock| obj.set(lock, "x", one));
             assert!(is_thrown(lock, ctx, caught), "{expr}");
         }
         let obj: v8::Local<'_, v8::Object> =
             ctx.eval_raw(lock, "({})").unwrap().try_into().unwrap();
-        let one = Number::new(1.0).to_js(lock)?;
+        let one = 1.0_f64.to_js(lock)?;
         obj.set(lock, "x", one)?;
         let x = obj.get(lock, "x")?;
-        assert!((Number::from_js(lock, x)?.value() - 1.0).abs() < f64::EPSILON);
+        assert!((f64::from_js(lock, x)? - 1.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -623,12 +622,12 @@ fn array_set_from_throwing_setter_returns_err() {
                 .eval_raw(lock, expr)
                 .expect("expression should evaluate");
             let array: v8::Local<'_, v8::Array> = value.try_into().unwrap();
-            let one = Number::new(1.0).to_js(lock)?;
+            let one = 1.0_f64.to_js(lock)?;
             let caught = thrown_by(lock, |lock| array.set(lock, 0, one));
             assert!(is_thrown(lock, ctx, caught), "{expr}");
         }
         let array: v8::Local<'_, v8::Array> = ctx.eval_raw(lock, "[]").unwrap().try_into().unwrap();
-        let one = Number::new(1.0).to_js(lock)?;
+        let one = 1.0_f64.to_js(lock)?;
         array.set(lock, 2, one)?;
         assert_eq!(array.len(), 3);
         Ok(())
@@ -696,7 +695,7 @@ impl Conversion {
     fn run<'s>(self, lock: &mut jsg::Lock<'s>, value: v8::Local<'s, v8::Value>) -> jsg::Result<()> {
         match self {
             Self::String => String::from_js(lock, value).map(drop),
-            Self::Number => Number::from_js(lock, value).map(drop),
+            Self::Number => f64::from_js(lock, value).map(drop),
             Self::Get => v8::Local::<v8::Object>::try_from(value)
                 .unwrap()
                 .get(lock, "x")
@@ -705,7 +704,7 @@ impl Conversion {
                 .unwrap()
                 .has(lock, "x")
                 .map(drop),
-            Self::Iterate => Vec::<Number>::from_js(lock, value).map(drop),
+            Self::Iterate => Vec::<f64>::from_js(lock, value).map(drop),
             Self::Set => {
                 let undefined = lock.undefined();
                 v8::Local::<v8::Object>::try_from(value)
@@ -719,7 +718,7 @@ impl Conversion {
                     .set(lock, 0, undefined)
             }
             Self::DictKeys | Self::DictValue | Self::DictValueCoercion => {
-                jsg::Dict::<Number>::from_js(lock, value).map(drop)
+                jsg::Dict::<f64>::from_js(lock, value).map(drop)
             }
         }
     }

@@ -38,7 +38,7 @@ pub struct Borrowed;
 #[jsg_resource]
 impl Borrowed {
     #[jsg_wildcard_property]
-    pub fn get<'a>(self: &'a Self, name: &str) -> Option<jsg::Number> {
+    pub fn get<'a>(self: &'a Self, name: &str) -> Option<f64> {
         let _ = (self, name);
         None
     }

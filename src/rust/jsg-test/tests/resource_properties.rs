@@ -8,7 +8,6 @@
 use std::cell::Cell;
 use std::cell::RefCell;
 
-use jsg::Number;
 use jsg_macros::jsg_inspect_property;
 use jsg_macros::jsg_method;
 use jsg_macros::jsg_property;
@@ -30,13 +29,13 @@ struct Counter {
 impl Counter {
     // Read/write prototype property — detected from get_/set_ prefix.
     #[jsg_property(prototype)]
-    pub fn get_value(&self) -> Number {
-        Number::new(self.value.get())
+    pub fn get_value(&self) -> f64 {
+        self.value.get()
     }
 
     #[jsg_property(prototype)]
-    pub fn set_value(&self, v: Number) {
-        self.value.set(v.value());
+    pub fn set_value(&self, v: f64) {
+        self.value.set(v);
     }
 
     // Read-only prototype property (no matching set_).
@@ -153,18 +152,18 @@ struct ExplicitName {
 #[jsg_resource]
 impl ExplicitName {
     #[jsg_property(prototype, name = "myValue")]
-    pub fn get_something(&self) -> Number {
-        Number::new(self.x.get())
+    pub fn get_something(&self) -> f64 {
+        self.x.get()
     }
 
     #[jsg_property(prototype, name = "myValue")]
-    pub fn set_something(&self, v: Number) {
-        self.x.set(v.value());
+    pub fn set_something(&self, v: f64) {
+        self.x.set(v);
     }
 
     #[jsg_inspect_property(name = "debugX")]
-    pub fn internal_debug(&self) -> Number {
-        Number::new(self.x.get())
+    pub fn internal_debug(&self) -> f64 {
+        self.x.get()
     }
 }
 
@@ -183,13 +182,13 @@ struct MaybeHolder {
 #[jsg_resource]
 impl MaybeHolder {
     #[jsg_property(prototype)]
-    pub fn get_value(&self) -> Option<Number> {
-        self.inner.get().map(Number::new)
+    pub fn get_value(&self) -> Option<f64> {
+        self.inner.get()
     }
 
     #[jsg_property(prototype)]
-    pub fn set_value(&self, v: Number) {
-        self.inner.set(Some(v.value()));
+    pub fn set_value(&self, v: f64) {
+        self.inner.set(Some(v));
     }
 }
 
@@ -217,8 +216,8 @@ fn prototype_getter_returns_initial_value() {
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Counter::new(42.0, "x"));
         ctx.set_global(lock, "c", r);
-        let v: Number = ctx.eval(lock, "c.value").unwrap();
-        assert!((v.value() - 42.0).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "c.value").unwrap();
+        assert!((v - 42.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -231,8 +230,8 @@ fn prototype_getter_reflects_rust_side_mutation() {
         let r2 = r.clone();
         ctx.set_global(lock, "c", r);
         r2.value.set(99.0);
-        let v: Number = ctx.eval(lock, "c.value").unwrap();
-        assert!((v.value() - 99.0).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "c.value").unwrap();
+        assert!((v - 99.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -260,8 +259,8 @@ fn prototype_setter_updates_value_visible_via_getter() {
         let r = jsg::Rc::new(Counter::new(0.0, "x"));
         ctx.set_global(lock, "c", r);
         ctx.eval_raw(lock, "c.value = 77").unwrap();
-        let v: Number = ctx.eval(lock, "c.value").unwrap();
-        assert!((v.value() - 77.0).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "c.value").unwrap();
+        assert!((v - 77.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -287,8 +286,8 @@ fn prototype_setter_called_multiple_times() {
         ctx.set_global(lock, "c", r);
         ctx.eval_raw(lock, "c.value = 1; c.value = 2; c.value = 3")
             .unwrap();
-        let v: Number = ctx.eval(lock, "c.value").unwrap();
-        assert!((v.value() - 3.0).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "c.value").unwrap();
+        assert!((v - 3.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -452,16 +451,16 @@ fn prototype_property_independent_across_instances() {
         let b = jsg::Rc::new(Counter::new(20.0, "b"));
         ctx.set_global(lock, "a", a);
         ctx.set_global(lock, "b", b);
-        let va: Number = ctx.eval(lock, "a.value").unwrap();
-        let vb: Number = ctx.eval(lock, "b.value").unwrap();
-        assert!((va.value() - 10.0).abs() < f64::EPSILON);
-        assert!((vb.value() - 20.0).abs() < f64::EPSILON);
+        let va: f64 = ctx.eval(lock, "a.value").unwrap();
+        let vb: f64 = ctx.eval(lock, "b.value").unwrap();
+        assert!((va - 10.0).abs() < f64::EPSILON);
+        assert!((vb - 20.0).abs() < f64::EPSILON);
         ctx.eval_raw(lock, "a.value = 99").unwrap();
-        let va2: Number = ctx.eval(lock, "a.value").unwrap();
-        let vb2: Number = ctx.eval(lock, "b.value").unwrap();
-        assert!((va2.value() - 99.0).abs() < f64::EPSILON);
+        let va2: f64 = ctx.eval(lock, "a.value").unwrap();
+        let vb2: f64 = ctx.eval(lock, "b.value").unwrap();
+        assert!((va2 - 99.0).abs() < f64::EPSILON);
         assert!(
-            (vb2.value() - 20.0).abs() < f64::EPSILON,
+            (vb2 - 20.0).abs() < f64::EPSILON,
             "setting a.value must not affect b"
         );
         Ok(())
@@ -480,11 +479,8 @@ fn prototype_property_coexists_with_method() {
         ctx.set_global(lock, "c", r);
         ctx.eval_raw(lock, "c.value = 7").unwrap();
         ctx.eval_raw(lock, "c.reset()").unwrap();
-        let v: Number = ctx.eval(lock, "c.value").unwrap();
-        assert!(
-            (v.value()).abs() < f64::EPSILON,
-            "reset() must set value back to 0"
-        );
+        let v: f64 = ctx.eval(lock, "c.value").unwrap();
+        assert!((v).abs() < f64::EPSILON, "reset() must set value back to 0");
         Ok(())
     });
 }
@@ -498,11 +494,11 @@ fn prototype_property_coexists_with_static_constant() {
         let r = jsg::Rc::new(Counter::new(1.0, "x"));
         ctx.set_global(lock, "c", r);
 
-        let v: Number = ctx.eval(lock, "c.value").unwrap();
-        assert!((v.value() - 1.0).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "c.value").unwrap();
+        assert!((v - 1.0).abs() < f64::EPSILON);
 
-        let max: Number = ctx.eval(lock, "Counter.MAX_VALUE").unwrap();
-        assert!((max.value() - 1_000_000.0).abs() < f64::EPSILON);
+        let max: f64 = ctx.eval(lock, "Counter.MAX_VALUE").unwrap();
+        assert!((max - 1_000_000.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -567,8 +563,8 @@ fn explicit_name_override_getter() {
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(ExplicitName::new(42.0));
         ctx.set_global(lock, "obj", r);
-        let v: Number = ctx.eval(lock, "obj.myValue").unwrap();
-        assert!((v.value() - 42.0).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "obj.myValue").unwrap();
+        assert!((v - 42.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -580,8 +576,8 @@ fn explicit_name_override_setter() {
         let r = jsg::Rc::new(ExplicitName::new(0.0));
         ctx.set_global(lock, "obj", r);
         ctx.eval_raw(lock, "obj.myValue = 7").unwrap();
-        let v: Number = ctx.eval(lock, "obj.myValue").unwrap();
-        assert!((v.value() - 7.0).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "obj.myValue").unwrap();
+        assert!((v - 7.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -610,8 +606,8 @@ fn prototype_option_property_returns_value_when_some() {
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(MaybeHolder::with_value(std::f64::consts::PI));
         ctx.set_global(lock, "h", r);
-        let v: Number = ctx.eval(lock, "h.value").unwrap();
-        assert!((v.value() - std::f64::consts::PI).abs() < 1e-10);
+        let v: f64 = ctx.eval(lock, "h.value").unwrap();
+        assert!((v - std::f64::consts::PI).abs() < 1e-10);
         Ok(())
     });
 }
@@ -639,8 +635,8 @@ fn prototype_option_property_setter_makes_it_some() {
         let r = jsg::Rc::new(MaybeHolder::empty());
         ctx.set_global(lock, "h", r);
         ctx.eval_raw(lock, "h.value = 2.5").unwrap();
-        let v: Number = ctx.eval(lock, "h.value").unwrap();
-        assert!((v.value() - 2.5).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "h.value").unwrap();
+        assert!((v - 2.5).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -1190,13 +1186,13 @@ struct Mixed {
 #[jsg_resource]
 impl Mixed {
     #[jsg_property(prototype)]
-    pub fn get_proto_val(&self) -> Number {
-        Number::new(self.proto_val.get())
+    pub fn get_proto_val(&self) -> f64 {
+        self.proto_val.get()
     }
 
     #[jsg_property(prototype)]
-    pub fn set_proto_val(&self, v: Number) {
-        self.proto_val.set(v.value());
+    pub fn set_proto_val(&self, v: f64) {
+        self.proto_val.set(v);
     }
 
     #[jsg_property(instance)]
@@ -1248,9 +1244,9 @@ fn mixed_both_properties_readable() {
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(Mixed::new(3.0, "world"));
         ctx.set_global(lock, "m", r);
-        let pv: Number = ctx.eval(lock, "m.protoVal").unwrap();
+        let pv: f64 = ctx.eval(lock, "m.protoVal").unwrap();
         let iv: String = ctx.eval(lock, "m.instanceVal").unwrap();
-        assert!((pv.value() - 3.0).abs() < f64::EPSILON);
+        assert!((pv - 3.0).abs() < f64::EPSILON);
         assert_eq!(iv, "world");
         Ok(())
     });
@@ -1264,9 +1260,9 @@ fn mixed_both_properties_writable() {
         ctx.set_global(lock, "m", r);
         ctx.eval_raw(lock, "m.protoVal = 9; m.instanceVal = 'new'")
             .unwrap();
-        let pv: Number = ctx.eval(lock, "m.protoVal").unwrap();
+        let pv: f64 = ctx.eval(lock, "m.protoVal").unwrap();
         let iv: String = ctx.eval(lock, "m.instanceVal").unwrap();
-        assert!((pv.value() - 9.0).abs() < f64::EPSILON);
+        assert!((pv - 9.0).abs() < f64::EPSILON);
         assert_eq!(iv, "new");
         Ok(())
     });
@@ -1306,34 +1302,34 @@ struct AllCombinations {
 impl AllCombinations {
     // ---- prototype, no name, rw ------------------------------------------------
     #[jsg_property(prototype)]
-    pub fn get_a(&self) -> Number {
-        Number::new(self.a.get())
+    pub fn get_a(&self) -> f64 {
+        self.a.get()
     }
     #[jsg_property(prototype)]
-    pub fn set_a(&self, v: Number) {
-        self.a.set(v.value());
+    pub fn set_a(&self, v: f64) {
+        self.a.set(v);
     }
 
     // ---- prototype, no name, readonly ------------------------------------------
     #[jsg_property(prototype, readonly)]
-    pub fn get_b(&self) -> Number {
-        Number::new(self.b.get())
+    pub fn get_b(&self) -> f64 {
+        self.b.get()
     }
 
     // ---- prototype, with name, rw ----------------------------------------------
     #[jsg_property(prototype, name = "namedC")]
-    pub fn get_c(&self) -> Number {
-        Number::new(self.c.get())
+    pub fn get_c(&self) -> f64 {
+        self.c.get()
     }
     #[jsg_property(prototype, name = "namedC")]
-    pub fn set_c(&self, v: Number) {
-        self.c.set(v.value());
+    pub fn set_c(&self, v: f64) {
+        self.c.set(v);
     }
 
     // ---- prototype, with name, readonly ----------------------------------------
     #[jsg_property(prototype, name = "namedD", readonly)]
-    pub fn get_d(&self) -> Number {
-        Number::new(self.d.get())
+    pub fn get_d(&self) -> f64 {
+        self.d.get()
     }
 
     // ---- instance, no name, rw -------------------------------------------------
@@ -1370,14 +1366,14 @@ impl AllCombinations {
 
     // ---- attribute order: name before readonly (prototype) ---------------------
     #[jsg_property(prototype, name = "namedI", readonly)]
-    pub fn get_i(&self) -> Number {
-        Number::new(self.i.get())
+    pub fn get_i(&self) -> f64 {
+        self.i.get()
     }
 
     // ---- attribute order: readonly before name (instance) ----------------------
     #[jsg_property(instance, readonly, name = "namedJ")]
-    pub fn get_j(&self) -> Number {
-        Number::new(self.j.get())
+    pub fn get_j(&self) -> f64 {
+        self.j.get()
     }
 }
 
@@ -1406,8 +1402,8 @@ fn combo_prototype_noname_rw_get() {
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
         ctx.set_global(lock, "o", r);
-        let v: Number = ctx.eval(lock, "o.a").unwrap();
-        assert!((v.value() - 1.0).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "o.a").unwrap();
+        assert!((v - 1.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -1419,8 +1415,8 @@ fn combo_prototype_noname_rw_set() {
         let r = jsg::Rc::new(AllCombinations::new());
         ctx.set_global(lock, "o", r);
         ctx.eval_raw(lock, "o.a = 99").unwrap();
-        let v: Number = ctx.eval(lock, "o.a").unwrap();
-        assert!((v.value() - 99.0).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "o.a").unwrap();
+        assert!((v - 99.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -1447,8 +1443,8 @@ fn combo_prototype_noname_readonly_get() {
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
         ctx.set_global(lock, "o", r);
-        let v: Number = ctx.eval(lock, "o.b").unwrap();
-        assert!((v.value() - 2.0).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "o.b").unwrap();
+        assert!((v - 2.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -1495,8 +1491,8 @@ fn combo_prototype_named_rw_get() {
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
         ctx.set_global(lock, "o", r);
-        let v: Number = ctx.eval(lock, "o.namedC").unwrap();
-        assert!((v.value() - 3.0).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "o.namedC").unwrap();
+        assert!((v - 3.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -1508,8 +1504,8 @@ fn combo_prototype_named_rw_set() {
         let r = jsg::Rc::new(AllCombinations::new());
         ctx.set_global(lock, "o", r);
         ctx.eval_raw(lock, "o.namedC = 33").unwrap();
-        let v: Number = ctx.eval(lock, "o.namedC").unwrap();
-        assert!((v.value() - 33.0).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "o.namedC").unwrap();
+        assert!((v - 33.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -1543,8 +1539,8 @@ fn combo_prototype_named_readonly_get() {
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(AllCombinations::new());
         ctx.set_global(lock, "o", r);
-        let v: Number = ctx.eval(lock, "o.namedD").unwrap();
-        assert!((v.value() - 4.0).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "o.namedD").unwrap();
+        assert!((v - 4.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -1785,8 +1781,8 @@ fn combo_attr_order_name_then_readonly_prototype_get() {
         let r = jsg::Rc::new(AllCombinations::new());
         ctx.set_global(lock, "o", r);
         // #[jsg_property(prototype, name = "namedI", readonly)]
-        let v: Number = ctx.eval(lock, "o.namedI").unwrap();
-        assert!((v.value() - 9.0).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "o.namedI").unwrap();
+        assert!((v - 9.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -1815,8 +1811,8 @@ fn combo_attr_order_readonly_then_name_instance_get() {
         let r = jsg::Rc::new(AllCombinations::new());
         ctx.set_global(lock, "o", r);
         // #[jsg_property(instance, readonly, name = "namedJ")]
-        let v: Number = ctx.eval(lock, "o.namedJ").unwrap();
-        assert!((v.value() - 10.0).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "o.namedJ").unwrap();
+        assert!((v - 10.0).abs() < f64::EPSILON);
         Ok(())
     });
 }
@@ -1917,20 +1913,20 @@ struct PrefixDetection {
 impl PrefixDetection {
     /// `get_count` → getter for JS property "count"
     #[jsg_property(prototype)]
-    pub fn get_count(&self) -> Number {
-        Number::new(self.count.get())
+    pub fn get_count(&self) -> f64 {
+        self.count.get()
     }
 
     /// `set_count` → setter for JS property "count" (same stem as `get_count`)
     #[jsg_property(prototype)]
-    pub fn set_count(&self, v: Number) {
-        self.count.set(v.value());
+    pub fn set_count(&self, v: f64) {
+        self.count.set(v);
     }
 
     /// `get_readonly_val` → getter-only for JS property "readonlyVal"
     #[jsg_property(prototype, readonly)]
-    pub fn get_readonly_val(&self) -> Number {
-        Number::new(self.readonly_val.get())
+    pub fn get_readonly_val(&self) -> f64 {
+        self.readonly_val.get()
     }
 }
 
@@ -1951,9 +1947,9 @@ fn get_prefix_identifies_getter() {
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(PrefixDetection::new(42.0, 0.0));
         ctx.set_global(lock, "obj", r);
-        let v: Number = ctx.eval(lock, "obj.count").unwrap();
+        let v: f64 = ctx.eval(lock, "obj.count").unwrap();
         assert!(
-            (v.value() - 42.0).abs() < f64::EPSILON,
+            (v - 42.0).abs() < f64::EPSILON,
             "get_count must be accessible as JS property 'count'"
         );
         Ok(())
@@ -1969,9 +1965,9 @@ fn set_prefix_identifies_setter() {
         let r = jsg::Rc::new(PrefixDetection::new(0.0, 0.0));
         ctx.set_global(lock, "obj", r);
         ctx.eval_raw(lock, "obj.count = 99").unwrap();
-        let v: Number = ctx.eval(lock, "obj.count").unwrap();
+        let v: f64 = ctx.eval(lock, "obj.count").unwrap();
         assert!(
-            (v.value() - 99.0).abs() < f64::EPSILON,
+            (v - 99.0).abs() < f64::EPSILON,
             "set_count must write to JS property 'count'"
         );
         Ok(())
@@ -2050,9 +2046,9 @@ fn getter_only_method_produces_readonly_property() {
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(PrefixDetection::new(0.0, 7.0));
         ctx.set_global(lock, "obj", r);
-        let v: Number = ctx.eval(lock, "obj.readonlyVal").unwrap();
+        let v: f64 = ctx.eval(lock, "obj.readonlyVal").unwrap();
         assert!(
-            (v.value() - 7.0).abs() < f64::EPSILON,
+            (v - 7.0).abs() < f64::EPSILON,
             "get_readonly_val must be readable as 'readonlyVal'"
         );
         // No setter in the descriptor.
@@ -2116,8 +2112,8 @@ impl DefaultPlacement {
 
     /// Getter-only with default placement.
     #[jsg_property(readonly)]
-    pub fn get_version(&self) -> Number {
-        Number::new(self.version.get())
+    pub fn get_version(&self) -> f64 {
+        self.version.get()
     }
 }
 
@@ -2191,8 +2187,8 @@ fn default_placement_readonly_throws_on_write() {
     harness.run_in_context(|lock, ctx| {
         let r = jsg::Rc::new(DefaultPlacement::new("x", 42.0));
         ctx.set_global(lock, "obj", r);
-        let v: Number = ctx.eval(lock, "obj.version").unwrap();
-        assert!((v.value() - 42.0).abs() < f64::EPSILON);
+        let v: f64 = ctx.eval(lock, "obj.version").unwrap();
+        assert!((v - 42.0).abs() < f64::EPSILON);
         let result = ctx.eval_raw(lock, "'use strict'; obj.version = 0");
         assert!(
             result.is_err(),

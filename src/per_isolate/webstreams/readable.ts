@@ -56,7 +56,6 @@ const {
   DataViewPrototypeGetBuffer,
   DataViewPrototypeGetByteLength,
   DataViewPrototypeGetByteOffset,
-  JSONParse,
   MathMax,
   MathMin,
   Number,
@@ -79,8 +78,6 @@ const {
   SymbolFor,
   SymbolIterator,
   SymbolToStringTag,
-  TextDecoder,
-  TextDecoderDecode,
   TypeError,
   TypedArrayCtorByName,
   TypedArrayPrototypeGetBuffer,
@@ -4591,7 +4588,6 @@ function acquireReadableStreamDrainingReader<R>(
 // is allocated whole up front, so a body that meets it fills exactly one
 // block and is handed over without a further copy.
 const kCollectBlockSize = 1024 * 1024;
-const kStreamingDecode = ObjectFreeze({ __proto__: null, stream: true });
 
 class CollectedBytes {
   #blocks: Uint8Array[] = []; // full
@@ -4680,18 +4676,6 @@ class CollectedBytes {
     }
     return result;
   }
-
-  toText(): string {
-    if (this.#length === 0) return '';
-    const decoder = new TextDecoder();
-    const views = this.#views();
-    if (views.length === 1) return TextDecoderDecode(decoder, views[0]);
-    let result = '';
-    for (let i = 0; i < views.length; i++) {
-      result += TextDecoderDecode(decoder, views[i], kStreamingDecode);
-    }
-    return result + TextDecoderDecode(decoder);
-  }
 }
 // collectChunks() is async, so its result is resolved through a thenable
 // check; off the Object.prototype chain, a patched Object.prototype.then
@@ -4773,34 +4757,17 @@ async function collectChunks<R>(
   }
 }
 
-async function consumeReadableStreamAsArrayBuffer<R>(
+// The bytes behind every body consumption of the C++ bridge (arrayBuffer(),
+// bytes(), blob(), text(), json()), which builds each result from them
+// itself. They resolve in a null-prototype record: resolving with the
+// ArrayBuffer itself would look up its then, which a patched
+// Object.prototype.then supplies.
+async function consumeReadableStreamAsArrayBufferRecord<R>(
   stream: ReadableStream<R>,
   limit: bigint
-): Promise<ArrayBuffer> {
-  return (await collectChunks(stream, limit)).toArrayBuffer();
-}
-
-async function consumeReadableStreamAsUint8Array<R>(
-  stream: ReadableStream<R>,
-  limit: bigint
-): Promise<Uint8Array> {
-  return new Uint8Array(
-    await consumeReadableStreamAsArrayBuffer(stream, limit)
-  );
-}
-
-async function consumeReadableStreamAsText<R>(
-  stream: ReadableStream<R>,
-  limit: bigint
-): Promise<string> {
-  return (await collectChunks(stream, limit)).toText();
-}
-
-async function consumeReadableStreamAsJSON<R>(
-  stream: ReadableStream<R>,
-  limit: bigint
-): Promise<unknown> {
-  return JSONParse(await consumeReadableStreamAsText(stream, limit));
+): Promise<{ buffer: ArrayBuffer }> {
+  const buffer = (await collectChunks(stream, limit)).toArrayBuffer();
+  return { __proto__: null, buffer } as { buffer: ArrayBuffer };
 }
 
 ObjectDefineProperties(ReadableStreamDefaultReader.prototype, {
@@ -4912,10 +4879,7 @@ const cppExports = ObjectFreeze({
     defaultControllerEnqueue(controller, chunk),
   readableControllerClose: (controller: object): void =>
     defaultControllerClose(controller),
-  consumeReadableStreamAsArrayBuffer,
-  consumeReadableStreamAsJSON,
-  consumeReadableStreamAsText,
-  consumeReadableStreamAsUint8Array,
+  consumeReadableStreamAsArrayBufferRecord,
   detachReadableStream,
   getReadableStreamExpectedLength,
   getReadableStreamNativeSource,

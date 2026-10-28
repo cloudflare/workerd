@@ -61,21 +61,8 @@ pub use scope::getter_callback;
 pub use scope::setter_callback;
 pub use scope::wildcard_getter_callback;
 pub use scope::wildcard_query_callback;
-pub use v8::ArrayBuffer;
-pub use v8::ArrayBufferView;
-pub use v8::BackingStore;
-pub use v8::BigInt64Array;
-pub use v8::BigUint64Array;
-pub use v8::Float32Array;
-pub use v8::Float64Array;
 pub use v8::GcVisitor;
-pub use v8::Int8Array;
-pub use v8::Int16Array;
-pub use v8::Int32Array;
 pub use v8::IsolatePtr;
-pub use v8::Uint8Array;
-pub use v8::Uint16Array;
-pub use v8::Uint32Array;
 pub use v8::ffi::ExceptionType;
 pub use wrappable::FromJS;
 pub use wrappable::ToJS;
@@ -501,7 +488,7 @@ impl Error {
 ///
 /// - `NonCoercible<String>` - only accepts JavaScript strings
 /// - `NonCoercible<bool>` - only accepts JavaScript booleans
-/// - `NonCoercible<Number>` - only accepts JavaScript numbers
+/// - `NonCoercible<f64>` - only accepts JavaScript numbers
 /// - `NonCoercible<u32>` and the other integers of up to 32 bits - only accept JavaScript
 ///   numbers, which must be in range
 /// - `NonCoercible<i64>` and `NonCoercible<u64>` - only accept JavaScript `BigInt`s
@@ -565,7 +552,7 @@ impl<T> Deref for NonCoercible<T> {
 
 /// A type that [`NonCoercible<T>`] can wrap: one that JavaScript values are coerced to.
 ///
-/// These are `String`, `bool`, [`Number`] and the integer types. C++ JSG's `CoercibleType`
+/// These are `String`, `bool`, `f64` and the integer types. C++ JSG's `CoercibleType`
 /// (jsg/jsg.h) is the first three; Rust JSG adds the integers.
 ///
 /// For these, [`Type::is_exact`] is a precise test of the JavaScript type. Other types, such as
@@ -573,7 +560,7 @@ impl<T> Deref for NonCoercible<T> {
 /// a coarse test. The trait is sealed.
 #[diagnostic::on_unimplemented(
     message = "`NonCoercible<{Self}>` is not supported",
-    note = "`NonCoercible<T>` takes only `String`, `bool`, `jsg::Number` or an integer type"
+    note = "`NonCoercible<T>` takes only `String`, `bool`, `f64` or an integer type"
 )]
 pub trait Coercible: Type + coercible::Sealed {}
 
@@ -588,149 +575,7 @@ macro_rules! impl_coercible {
     };
 }
 
-impl_coercible!(String, bool, Number, u8, u16, u32, i8, i16, i32, i64, u64);
-
-/// A JavaScript number (an IEEE 754 double-precision float).
-///
-/// `Number` is a plain value, not a V8 handle, so it needs no `Lock` until it converts to
-/// JavaScript. It is the type of a number parameter: it converts from any value with JavaScript's
-/// `ToNumber`, like C++ JSG's `double`, and `NonCoercible<Number>` accepts only a number. An `f64`
-/// or `f32` converts to a number too, but only to JavaScript.
-///
-/// # Usage
-///
-/// Use `Number` when you need to accept or return JavaScript numbers in your API:
-///
-/// ```ignore
-/// use jsg::Number;
-///
-/// #[jsg_method]
-/// pub fn add(&self, a: Number, b: Number) -> Number {
-///     Number::new(a.value() + b.value())
-/// }
-/// ```
-///
-/// # Type Mapping
-///
-/// | Rust Type | JavaScript Type |
-/// |-----------|-----------------|
-/// | `jsg::Number` | `number` |
-/// | `f64` | `number`, to JavaScript only |
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
-pub struct Number {
-    value: f64,
-}
-
-impl Number {
-    /// The largest integer that can be represented exactly in JavaScript (2^53 - 1).
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MAX_SAFE_INTEGER)
-    pub const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0; // 2^53 - 1
-
-    /// The smallest integer that can be represented exactly in JavaScript (-(2^53 - 1)).
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/MIN_SAFE_INTEGER)
-    pub const MIN_SAFE_INTEGER: f64 = -9_007_199_254_740_991.0; // -(2^53 - 1)
-
-    /// Creates a new `Number` from an `f64` value.
-    #[inline]
-    pub fn new(value: f64) -> Self {
-        Self { value }
-    }
-
-    /// Returns the underlying `f64` value.
-    #[inline]
-    pub fn value(&self) -> f64 {
-        self.value
-    }
-
-    /// Consumes the wrapper and returns the inner `f64` value.
-    #[inline]
-    pub fn into_inner(self) -> f64 {
-        self.value
-    }
-
-    /// Determines whether the value is a finite number.
-    ///
-    /// Returns `true` if the value is finite (not `Infinity`, `-Infinity`, or `NaN`).
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isFinite)
-    #[inline]
-    pub fn is_finite(&self) -> bool {
-        self.value.is_finite()
-    }
-
-    /// Determines whether the value is an integer.
-    ///
-    /// Returns `true` if the value is finite and has no fractional part.
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isInteger)
-    #[inline]
-    #[expect(
-        clippy::float_cmp,
-        reason = "exact comparison is intended: an integer equals its own truncation"
-    )]
-    pub fn is_integer(&self) -> bool {
-        self.value.is_finite() && self.value.trunc() == self.value
-    }
-
-    /// Determines whether the value is `NaN`.
-    ///
-    /// This is more robust than the global `isNaN()` because it doesn't coerce
-    /// the value to a number first.
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isNaN)
-    #[inline]
-    pub fn is_nan(&self) -> bool {
-        self.value.is_nan()
-    }
-
-    /// Determines whether the value is a safe integer.
-    ///
-    /// A safe integer is an integer that:
-    /// - Can be exactly represented as an IEEE-754 double precision number
-    /// - Has an IEEE-754 representation that cannot be the result of rounding any other integer
-    ///
-    /// Safe integers range from -(2^53 - 1) to 2^53 - 1, inclusive.
-    ///
-    /// [MDN documentation](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isSafeInteger)
-    #[inline]
-    pub fn is_safe_integer(&self) -> bool {
-        self.is_integer()
-            && self.value >= Self::MIN_SAFE_INTEGER
-            && self.value <= Self::MAX_SAFE_INTEGER
-    }
-}
-
-impl From<f64> for Number {
-    fn from(value: f64) -> Self {
-        Self::new(value)
-    }
-}
-
-impl From<Number> for f64 {
-    fn from(num: Number) -> Self {
-        num.value
-    }
-}
-
-impl From<i32> for Number {
-    fn from(value: i32) -> Self {
-        Self::new(f64::from(value))
-    }
-}
-
-impl From<u32> for Number {
-    fn from(value: u32) -> Self {
-        Self::new(f64::from(value))
-    }
-}
-
-impl std::fmt::Display for Number {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.value)
-    }
-}
+impl_coercible!(String, bool, f64, u8, u16, u32, i8, i16, i32, i64, u64);
 
 #[expect(
     unsafe_code,
@@ -936,7 +781,7 @@ impl<'s> Lock<'s> {
     /// # Example
     ///
     /// ```ignore
-    /// match lock.try_catch(|lock| callback.call::<Number>(lock, None, &[]))? {
+    /// match lock.try_catch(|lock| callback.call::<f64>(lock, None, &[]))? {
     ///     Ok(result) => { /* ... */ }
     ///     Err(exception) => { /* handle what the callback threw */ }
     /// }
