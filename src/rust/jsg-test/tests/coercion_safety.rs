@@ -718,7 +718,7 @@ impl Conversion {
                     .set(lock, 0, undefined)
             }
             Self::DictKeys | Self::DictValue | Self::DictValueCoercion => {
-                jsg::Dict::<Number>::from_js(lock, value).map(drop)
+                jsg::Dict::<f64>::from_js(lock, value).map(drop)
             }
         }
     }
