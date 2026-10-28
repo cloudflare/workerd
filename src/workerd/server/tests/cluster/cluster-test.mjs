@@ -114,6 +114,9 @@ class ClusterNode {
       stdio: ['ignore', 'inherit', 'pipe', 'pipe'],
       env: {
         ...env,
+        // Drop the runtime on exit, joining its threads, which TSan reports
+        // as leaked otherwise.
+        KJ_CLEAN_SHUTDOWN: '1',
         NODE_ID: this.#nodeId,
         AWS_ENDPOINT_URL: `http://127.0.0.1:${this.#s3Port}`,
       },
