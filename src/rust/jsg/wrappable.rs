@@ -79,6 +79,8 @@ use crate::NonCoercible;
 use crate::Nullable;
 use crate::Number;
 use crate::Type;
+use crate::UnionMember;
+use crate::UnionTypes;
 use crate::v8;
 
 // =============================================================================
@@ -458,94 +460,13 @@ pub trait FromJS<'s>: Sized {
 }
 
 // =============================================================================
-// Unions (`#[jsg_oneof]`)
-// =============================================================================
-
-/// The kind of a `#[jsg_oneof]` variant, which decides the passes in which the
-/// variant is tried.
-///
-/// A union converts a value as C++ JSG's `OneOfWrapper::tryUnwrap()`
-/// (jsg/value.h) does, following Web IDL's union conversion: it makes a series
-/// of passes over its variants and takes the first one that converts, trying
-/// in order
-///
-/// 1. resource types,
-/// 2. every type that is not a string, numeric or boolean type,
-/// 3. boolean types, if the value is a boolean,
-/// 4. numeric types, if the value is a number or a `BigInt`,
-/// 5. string types,
-/// 6. numeric types,
-/// 7. boolean types.
-///
-/// Passes 5 to 7 coerce, so a value becomes a string only if no other variant
-/// takes it, and becomes a number or boolean only if no string variant
-/// converts it either. An error from a variant's conversion, such as a
-/// `Symbol` that cannot become a string, ends the conversion with that error
-/// rather than trying another variant.
-#[doc(hidden)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UnionMember {
-    /// A resource type (`jsg::Rc<R>`).
-    Resource,
-    /// Any other type that is not a string, numeric or boolean type, such as
-    /// an array, a typed array or a struct (C++ JSG's `IsFallibleType`).
-    Fallible,
-    /// A string type.
-    String,
-    /// A numeric type.
-    Numeric,
-    /// A boolean type.
-    Boolean,
-}
-
-impl UnionMember {
-    /// Whether a variant of this kind is tried in `pass`.
-    const fn takes_part_in(self, pass: Self) -> bool {
-        matches!(
-            (self, pass),
-            (Self::Resource, Self::Resource | Self::Fallible)
-                | (Self::Fallible, Self::Fallible)
-                | (Self::String, Self::String)
-                | (Self::Numeric, Self::Numeric)
-                | (Self::Boolean, Self::Boolean)
-        )
-    }
-}
-
-/// Converts `value` to a union by running `try_pass` for each pass of the
-/// union conversion algorithm (see [`UnionMember`]) until one converts it.
-#[doc(hidden)]
-pub fn try_union_from_js<'s, R>(
-    lock: &mut Lock<'s>,
-    value: v8::Local<'s, v8::Value>,
-    try_pass: impl Fn(&mut Lock<'s>, v8::Local<'s, v8::Value>, UnionMember) -> Result<Option<R>, Error>,
-) -> Result<Option<R>, Error> {
-    let passes = [
-        (true, UnionMember::Resource),
-        (true, UnionMember::Fallible),
-        (value.is_boolean(), UnionMember::Boolean),
-        (
-            value.is_number() || value.is_big_int(),
-            UnionMember::Numeric,
-        ),
-        (true, UnionMember::String),
-        (true, UnionMember::Numeric),
-        (true, UnionMember::Boolean),
-    ];
-    for (applies, pass) in passes {
-        if applies && let Some(result) = try_pass(lock, value, pass)? {
-            return Ok(Some(result));
-        }
-    }
-    Ok(None)
-}
-
-// =============================================================================
 // Primitive type implementations
 // =============================================================================
 
 // Boolean implementation for JavaScript booleans.
 impl Type for bool {
+    const UNION_TYPES: UnionTypes = UnionTypes::BOOLEAN;
+
     fn class_name() -> &'static str {
         "boolean"
     }
@@ -583,6 +504,8 @@ impl<'s> FromJS<'s> for bool {
 }
 
 impl Type for std::string::String {
+    const UNION_TYPES: UnionTypes = UnionTypes::STRING;
+
     fn class_name() -> &'static str {
         "string"
     }
@@ -627,6 +550,8 @@ impl<'s> FromJS<'s> for std::string::String {
 
 // Number implementation for JavaScript numbers
 impl Type for Number {
+    const UNION_TYPES: UnionTypes = UnionTypes::NUMERIC;
+
     fn class_name() -> &'static str {
         "number"
     }
@@ -684,6 +609,8 @@ impl<'s> FromJS<'s> for Number {
 // by converting JavaScript strings to owned Strings, then borrowing.
 // The macro handles passing &arg instead of arg for reference types.
 impl Type for &str {
+    const UNION_TYPES: UnionTypes = UnionTypes::STRING;
+
     fn class_name() -> &'static str {
         "string"
     }
@@ -745,6 +672,8 @@ impl<'s, T: FromJS<'s, ResultType = T>> FromJS<'s> for &T {
 // Slice type - allows functions to accept &[T] parameters.
 // JavaScript arrays are converted to Vec<T>, then borrowed as &[T] by the macro.
 impl<T: Type> Type for &[T] {
+    const UNION_TYPES: UnionTypes = UnionTypes::SEQUENCE_LIKE;
+
     fn class_name() -> &'static str {
         "Array"
     }
@@ -791,6 +720,8 @@ macro_rules! impl_integer {
     ($($type:ty => $name:literal, $non_finite:expr, $range:expr);* $(;)?) => {
         $(
             impl Type for $type {
+                const UNION_TYPES: UnionTypes = UnionTypes::NUMERIC;
+
                 fn class_name() -> &'static str {
                     "number"
                 }
@@ -899,6 +830,8 @@ impl_integer!(
 );
 
 impl Type for i64 {
+    const UNION_TYPES: UnionTypes = UnionTypes::NUMERIC;
+
     fn class_name() -> &'static str {
         "bigint"
     }
@@ -953,6 +886,8 @@ impl<'s> FromJS<'s> for i64 {
 }
 
 impl Type for u64 {
+    const UNION_TYPES: UnionTypes = UnionTypes::NUMERIC;
+
     fn class_name() -> &'static str {
         "bigint"
     }
@@ -974,6 +909,8 @@ impl<'s> ToJS<'s> for u64 {
 // number, which must be finite, not negative and in range, and truncates toward zero.
 impl<'s> FromJS<'s> for u64 {
     type ResultType = Self;
+
+    const UNION_MEMBER: UnionMember = UnionMember::Numeric;
 
     fn type_name() -> String {
         "bigint".to_owned()
@@ -1009,6 +946,18 @@ impl<'s> FromJS<'s> for u64 {
             return Err(Error::new_type_error(unsigned_range(Self::MAX)));
         }
         Ok(num as Self)
+    }
+}
+
+// Like C++ JSG's `kj::Date`, which is in none of Web IDL's categories, so a union tries it in
+// the pass for types that aren't strings, numbers or booleans, where it also takes a number.
+impl Type for std::time::SystemTime {
+    fn class_name() -> &'static str {
+        "Date"
+    }
+
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+        value.is_date()
     }
 }
 
@@ -1169,6 +1118,8 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for Option<T> {
 }
 
 impl<T: Coercible> Type for NonCoercible<T> {
+    const UNION_TYPES: UnionTypes = T::UNION_TYPES;
+
     fn class_name() -> &'static str {
         T::class_name()
     }
@@ -1212,6 +1163,19 @@ impl<'s, T: Coercible + FromJS<'s>> FromJS<'s> for NonCoercible<T> {
             return Ok(None);
         }
         Ok(T::try_from_js(lock, value)?.map(<Self::ResultType>::new))
+    }
+}
+
+// Like C++ JSG's `kj::Maybe<T>`: a union with it as a variant counts it as nullable, and as `T`.
+impl<T: Type> Type for Nullable<T> {
+    const UNION_TYPES: UnionTypes = T::UNION_TYPES.nullable();
+
+    fn class_name() -> &'static str {
+        T::class_name()
+    }
+
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+        value.is_null_or_undefined() || T::is_exact(value)
     }
 }
 
@@ -1280,6 +1244,8 @@ impl<'s, T: FromJS<'s>> FromJS<'s> for Lenient<T> {
 // =============================================================================
 
 impl<T: Type> Type for Vec<T> {
+    const UNION_TYPES: UnionTypes = UnionTypes::SEQUENCE_LIKE;
+
     fn class_name() -> &'static str {
         "Array"
     }
@@ -1342,6 +1308,8 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
 
 // Like C++ JSG's DictWrapper (jsg/value.h): any object other than an array.
 impl<V> Type for Dict<V> {
+    const UNION_TYPES: UnionTypes = UnionTypes::RECORD;
+
     fn class_name() -> &'static str {
         "object"
     }
@@ -1463,7 +1431,7 @@ impl_typed_array_type!(
 // ArrayBuffer, ArrayBufferView, SharedArrayBuffer
 // =============================================================================
 //
-// These types only implement `Type` (used by `NonCoercible<T>` for type checking); their
+// These markers implement `Type` so that their handles can be `#[jsg_oneof]` variants; their
 // conversions are those of their handles, in `v8.rs`.
 
 impl Type for v8::ArrayBuffer {
@@ -1508,6 +1476,99 @@ impl<'s> FromJS<'s> for v8::Local<'s, v8::Value> {
     fn from_js(_lock: &mut Lock<'s>, value: Self) -> Result<Self, Error> {
         Ok(value)
     }
+}
+
+// A handle is the type its marker is, as C++ JSG's `v8::Local<T>` is.
+impl<M: Type> Type for v8::Local<'_, M> {
+    const UNION_TYPES: UnionTypes = M::UNION_TYPES;
+
+    fn class_name() -> &'static str {
+        M::class_name()
+    }
+
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+        M::is_exact(value)
+    }
+}
+
+/// Implements `Type` for handle markers. Their Web IDL categories are those that C++ JSG's
+/// `webidl` traits (jsg/web-idl.h) give the corresponding `v8::Local<T>`.
+macro_rules! impl_marker_type {
+    ($($marker:ident: $name:literal, $is_exact:ident, $types:expr;)*) => {
+        $(impl Type for v8::$marker {
+            const UNION_TYPES: UnionTypes = $types;
+
+            fn class_name() -> &'static str {
+                $name
+            }
+
+            fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+                value.$is_exact()
+            }
+        })*
+    };
+}
+
+impl_marker_type! {
+    String: "String", is_string, UnionTypes::STRING;
+    BigInt: "BigInt", is_big_int, UnionTypes::NUMERIC;
+    Object: "Object", is_object, UnionTypes::OBJECT;
+    Function: "Function", is_function, UnionTypes::OTHER;
+    Promise: "Promise", is_promise, UnionTypes::OTHER;
+    TypedArray: "TypedArray", is_typed_array, UnionTypes::OTHER;
+}
+
+// Any value is a `v8::Value`.
+impl Type for v8::Value {
+    fn class_name() -> &'static str {
+        "Value"
+    }
+
+    fn is_exact(_value: v8::Local<'_, v8::Value>) -> bool {
+        true
+    }
+}
+
+/// Implements `FromJS` for handles of markers that C++ JSG converts a value to without coercion
+/// (`V8HandleWrapper` in jsg/type-wrapper.h): a value of the marker's type, and nothing else.
+macro_rules! impl_handle_from_js {
+    ($($marker:ident: $member:expr;)*) => {
+        $(impl<'s> FromJS<'s> for v8::Local<'s, v8::$marker> {
+            type ResultType = Self;
+
+            const UNION_MEMBER: UnionMember = $member;
+
+            fn type_name() -> String {
+                // C++ JSG names `v8::Local<T>` after `T`.
+                <v8::$marker as Type>::class_name().to_owned()
+            }
+
+            fn from_js(lock: &mut Lock<'s>, value: v8::Local<'s, v8::Value>) -> Result<Self, Error> {
+                let type_name = value.type_of(lock);
+                Self::try_from_js(lock, value)?.ok_or_else(|| {
+                    Error::new_type_error(format!(
+                        "Expected {} but got {type_name}",
+                        <Self as FromJS<'s>>::type_name()
+                    ))
+                })
+            }
+
+            fn try_from_js(
+                _lock: &mut Lock<'s>,
+                value: v8::Local<'s, v8::Value>,
+            ) -> Result<Option<Self>, Error> {
+                Ok(Self::try_from(value).ok())
+            }
+        })*
+    };
+}
+
+impl_handle_from_js! {
+    String: UnionMember::String;
+    BigInt: UnionMember::Numeric;
+    Object: UnionMember::Fallible;
+    Function: UnionMember::Fallible;
+    TypedArray: UnionMember::Fallible;
 }
 
 #[cfg(test)]

@@ -411,12 +411,15 @@ impl Env {
 
 Generates `jsg::Type`, `jsg::FromJS` and `jsg::Traced` for a union enum — the Rust
 equivalent of `kj::OneOf<…>` — and `jsg::ToJS` when every variant implements it. Each
-variant must be a single-field tuple whose inner type implements `jsg::Type`,
-`jsg::FromJS` and `jsg::Traced`. A value converts as it would to the equivalent
-`kj::OneOf`: variants are tried in passes that leave coercion for last, in declaration
-order within a pass (see [Union Types](../jsg/README.md#union-types), which also lists
-the differences from `kj::OneOf`). If no variant converts the value, a `TypeError` is
-thrown naming the expected types, such as `Expected string or number but got symbol`.
+variant must be a single-field tuple whose inner type converts from JavaScript and is
+`jsg::Type`. A union that holds handles has one lifetime parameter,
+their scope, and no `jsg::Traced` that can be used; a union has no other generic
+parameters. A value converts as it would to the equivalent `kj::OneOf`: variants are
+tried in passes that leave coercion for last, in declaration order within a pass. If no
+variant converts the value, a `TypeError` is thrown naming the expected types, such as
+`Expected string or number but got symbol`. Like `kj::OneOf`, a union that breaks Web
+IDL's rules for unions, such as one with two string types, doesn't compile. See
+[Union Types](../jsg/README.md#union-types).
 
 ```rust
 #[jsg_oneof]

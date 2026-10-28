@@ -47,12 +47,6 @@ struct OptionalPoint {
     pub x: Option<u32>,
 }
 
-#[jsg_struct]
-#[derive(Debug, Clone, PartialEq)]
-struct OptionalSize {
-    pub size: Option<u32>,
-}
-
 /// `kj::OneOf<double, kj::String, Ref<NumberBox>>`.
 #[jsg_oneof]
 #[derive(Debug, Clone)]
@@ -117,14 +111,6 @@ enum StringOrOptionalPoint {
 enum PointOrBox {
     Point(OptionalPoint),
     Box(jsg::Rc<OneOfBox>),
-}
-
-/// Two dictionaries, which C++ JSG's `UnionTypeValidator` rejects.
-#[jsg_oneof]
-#[derive(Debug, Clone, PartialEq)]
-enum PointOrSize {
-    Point(OptionalPoint),
-    Size(OptionalSize),
 }
 
 #[jsg_oneof]
@@ -308,14 +294,6 @@ impl OneOfContext {
         match value {
             FromJsOnlyOrNumber::Text(t) => format!("text:{}", t.0),
             FromJsOnlyOrNumber::Number(n) => format!("number:{n}"),
-        }
-    }
-
-    #[jsg_method]
-    pub fn take_point_or_size(&self, value: PointOrSize) -> String {
-        match value {
-            PointOrSize::Point(p) => format!("point:{:?}", p.x),
-            PointOrSize::Size(s) => format!("size:{:?}", s.size),
         }
     }
 
@@ -726,16 +704,6 @@ fn union_holds_gc_references_if_a_variant_does() {
     use jsg::Traced;
     assert!(TracedBoxOrNumber::holds_gc_references());
     assert!(!StringOrNumber::holds_gc_references());
-}
-
-// C++ JSG rejects a union of two dictionaries at compile time, so this has no
-// C++ counterpart; Rust takes the first in declaration order.
-#[test]
-fn declaration_order_decides_within_a_pass() {
-    with_context(|lock, ctx| {
-        expect_eval(lock, ctx, "cx.takePointOrSize({})", "point:None");
-        expect_eval(lock, ctx, "cx.takePointOrSize({ size: 1 })", "point:None");
-    });
 }
 
 #[test]

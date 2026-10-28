@@ -27,6 +27,7 @@ use crate::ToJS;
 use crate::Traced;
 use crate::Type;
 use crate::UnionMember;
+use crate::UnionTypes;
 use crate::feature_flags::compatibility_flags;
 use crate::isolate_state::IsolateState;
 use crate::v8;
@@ -182,6 +183,9 @@ impl<'s, R: Resource + 'static> ToJS<'s> for Rc<R> {
 }
 
 impl<R: Resource> Type for Rc<R> {
+    // A Web IDL non-callback interface type.
+    const UNION_TYPES: UnionTypes = UnionTypes::INTERFACE_LIKE;
+
     fn class_name() -> &'static str {
         R::class_name()
     }

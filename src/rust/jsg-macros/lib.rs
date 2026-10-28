@@ -22,6 +22,7 @@
 
 #![forbid(unsafe_code)]
 
+mod oneof;
 mod resource;
 mod trace;
 mod utils;
@@ -31,16 +32,13 @@ use proc_macro::TokenStream;
 use quote::quote;
 use resource::generate_resource_impl;
 use resource::generate_resource_struct;
-use syn::Data;
 use syn::DeriveInput;
-use syn::Fields;
 use syn::FnArg;
 use syn::ItemFn;
 use syn::ItemImpl;
 use syn::parse_macro_input;
 use trace::generate_trace_statements;
 use utils::elide_named_lifetimes;
-use utils::error;
 use utils::extract_name_attribute;
 use utils::extract_named_fields;
 use utils::fast_api_signature;
@@ -123,6 +121,9 @@ pub fn jsg_struct(attr: TokenStream, item: TokenStream) -> TokenStream {
         #input
 
         impl jsg::Type for #name {
+            // A Web IDL dictionary type, like a C++ `JSG_STRUCT`.
+            const UNION_TYPES: jsg::UnionTypes = jsg::UnionTypes::DICTIONARY;
+
             fn class_name() -> &'static str { #class_name }
 
             fn is_exact(value: jsg::v8::Local<'_, jsg::v8::Value>) -> bool {
@@ -831,14 +832,16 @@ pub fn jsg_wildcard_property(attr: TokenStream, item: TokenStream) -> TokenStrea
 /// Generates `jsg::Type`, `jsg::FromJS`, `jsg::Traced` and `jsg::ToJS` for a
 /// union enum, equivalent to `kj::OneOf<…>` in C++ JSG.
 ///
-/// Each variant must be a single-field tuple variant whose inner type implements
-/// `jsg::Type`, `jsg::FromJS` and `jsg::Traced`. A value converts as it would to
-/// the equivalent `kj::OneOf`: the variants are tried in passes that keep
-/// coercion for last (see "Unions" in `src/rust/jsg/README.md`), and in
-/// declaration order within a pass. A variant that is itself a union takes part
-/// in each pass with its own variants. The union traces the variant it holds,
-/// so it can be a resource field. `jsg::ToJS` is implemented when every variant
-/// implements it.
+/// Each variant must be a single-field tuple variant whose inner type converts
+/// from JavaScript and is `jsg::Type`. A value converts as it
+/// would to the equivalent `kj::OneOf`: the variants are tried in passes that
+/// keep coercion for last (see "Union Types" in `src/rust/jsg/README.md`), and
+/// in declaration order within a pass. A variant that is itself a union takes
+/// part in each pass with its own variants. The union traces the variant it
+/// holds, so it can be a resource field, unless it holds handles: such a union
+/// has one lifetime parameter, their scope. `jsg::ToJS` is implemented when
+/// every variant implements it. A union that breaks Web IDL's rules for unions,
+/// as C++ JSG's `webidl::UnionTypeValidator` checks them, doesn't compile.
 ///
 /// ```ignore
 /// #[jsg_oneof]
@@ -850,117 +853,5 @@ pub fn jsg_wildcard_property(attr: TokenStream, item: TokenStream) -> TokenStrea
 /// ```
 #[proc_macro_attribute]
 pub fn jsg_oneof(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(item as DeriveInput);
-    let name = &input.ident;
-
-    let Data::Enum(data) = &input.data else {
-        return error(&input, "#[jsg_oneof] can only be applied to enums");
-    };
-
-    let mut variants = Vec::new();
-    for variant in &data.variants {
-        let variant_name = &variant.ident;
-        let Fields::Unnamed(fields) = &variant.fields else {
-            return error(
-                variant,
-                "#[jsg_oneof] variants must be tuple variants (e.g., `Variant(Type)`)",
-            );
-        };
-        if fields.unnamed.len() != 1 {
-            return error(variant, "#[jsg_oneof] variants must have exactly one field");
-        }
-        let inner_type = &fields.unnamed[0].ty;
-        variants.push((variant_name, inner_type));
-    }
-
-    if variants.is_empty() {
-        return error(&input, "#[jsg_oneof] requires at least one variant");
-    }
-
-    let variant_names: Vec<_> = variants.iter().map(|(n, _)| n).collect();
-    let inner_types: Vec<_> = variants.iter().map(|(_, t)| t).collect();
-    let is_exact_checks: Vec<_> = variants
-        .iter()
-        .map(|(_, inner_type)| quote! { <#inner_type as jsg::Type>::is_exact(value) })
-        .collect();
-
-    quote! {
-        #input
-
-        #[automatically_derived]
-        impl jsg::Type for #name {
-            fn class_name() -> &'static str {
-                stringify!(#name)
-            }
-
-            fn is_exact(value: jsg::v8::Local<'_, jsg::v8::Value>) -> bool {
-                #(#is_exact_checks)||*
-            }
-        }
-
-        #[automatically_derived]
-        impl<'s> jsg::FromJS<'s> for #name {
-            type ResultType = Self;
-
-            fn type_name() -> String {
-                [#(<#inner_types as jsg::FromJS<'s>>::type_name()),*].join(" or ")
-            }
-
-            fn from_js(lock: &mut jsg::Lock<'s>, value: jsg::v8::Local<'s, jsg::v8::Value>) -> Result<Self::ResultType, jsg::Error> {
-                let type_name = value.type_of(lock);
-                Self::try_from_js(lock, value)?.ok_or_else(|| {
-                    jsg::Error::new_type_error(format!(
-                        "Expected {} but got {}",
-                        <Self as jsg::FromJS<'s>>::type_name(),
-                        type_name
-                    ))
-                })
-            }
-
-            fn try_from_js(lock: &mut jsg::Lock<'s>, value: jsg::v8::Local<'s, jsg::v8::Value>) -> Result<Option<Self::ResultType>, jsg::Error> {
-                jsg::try_union_from_js(lock, value, Self::try_from_js_in_union_pass)
-            }
-
-            fn try_from_js_in_union_pass(
-                lock: &mut jsg::Lock<'s>,
-                value: jsg::v8::Local<'s, jsg::v8::Value>,
-                pass: jsg::UnionMember,
-            ) -> Result<Option<Self::ResultType>, jsg::Error> {
-                #(
-                    if let Some(value) = <#inner_types as jsg::FromJS<'s>>::try_from_js_in_union_pass(lock, value, pass)? {
-                        return Ok(Some(Self::#variant_names(value)));
-                    }
-                )*
-                Ok(None)
-            }
-        }
-
-        // A union holds whatever its variant holds, so it can be a resource field.
-        #[automatically_derived]
-        impl jsg::Traced for #name {
-            fn holds_gc_references() -> bool {
-                #(<#inner_types as jsg::Traced>::holds_gc_references())||*
-            }
-
-            fn trace(&self, visitor: &mut jsg::v8::GcVisitor) {
-                match self {
-                    #(Self::#variant_names(value) => jsg::Traced::trace(value, visitor),)*
-                }
-            }
-        }
-
-        // Only when every variant converts to JavaScript.
-        #[automatically_derived]
-        impl<'s> jsg::ToJS<'s> for #name
-        where
-            #(#inner_types: jsg::ToJS<'s>,)*
-        {
-            fn to_js(self, lock: &mut jsg::Lock<'s>) -> Result<jsg::v8::Local<'s, jsg::v8::Value>, jsg::Error> {
-                match self {
-                    #(Self::#variant_names(value) => jsg::ToJS::to_js(value, lock),)*
-                }
-            }
-        }
-    }
-    .into()
+    oneof::expand(item)
 }

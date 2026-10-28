@@ -400,6 +400,13 @@ let name: v8::Local<v8::Name> = v8::Local::<v8::String>::try_from(str_value).unw
 assert!(v8::Local::<v8::Function>::try_from(str_value).is_err());
 ```
 
+A method parameter can be a handle of the types that C++ JSG's `v8::Local<T>` parameters
+take: `Local<Value>` takes any value, and `Local<String>`, `Local<Object>`,
+`Local<Function>`, `Local<BigInt>`, `Local<TypedArray>`, `Local<ArrayBuffer>`,
+`Local<ArrayBufferView>` and the typed arrays take a value of exactly that type, with no
+coercion, and throw a `TypeError` for any other. `Local<Promise>` takes any value, as a
+promise resolved with it.
+
 ### `Global<T>`
 
 A persistent handle that outlives `HandleScope`s, for handles that Rust code owns outside
@@ -670,18 +677,51 @@ trying another variant. A `NonCoercible<T>` variant, where `T` is `String`, `boo
 exactly that type. A variant that is itself a union takes part
 in each pass with its own variants, as a nested `kj::OneOf` does.
 
+Variants can be any type that converts from JavaScript and that a `kj::OneOf` can hold:
+strings, numbers, the integer types, booleans, `SystemTime`, resources, structs,
+`Vec<T>`, `Dict<V>`, `Nullable<T>`, `NonCoercible<T>`, other unions, and
+handles (`v8::Local<'s, T>`). Each is tried in the passes of its C++ counterpart, so a few
+behave as they do in C++ rather than as their position suggests:
+
+- `SystemTime`, like `kj::Date`, is not a numeric type, so it is tried in pass 2, where it
+  also takes a number of milliseconds, before any numeric variant does.
+- `Nullable<T>`, like `kj::Maybe<T>`, is tried in pass 2 whatever `T` is: it takes `null`
+  and `undefined`, and converts any other value as `T` would, coercion included. A value
+  that `T` does not take is not taken as `null`, as in C++ JSG with the
+  `dont_substitute_null_on_type_error` compatibility flag, which Rust JSG always follows.
+- A handle takes only a value of its type, as C++ JSG's `v8::Local<T>` does:
+  `v8::Local<'s, v8::String>` is a string type, but never coerces, and
+  `v8::Local<'s, v8::BigInt>` is a numeric type that takes only a `BigInt`.
+  `v8::Local<'s, v8::Value>` takes any value, in pass 2.
+
+A union that holds handles takes their scope as its one lifetime parameter, and can't
+outlive it:
+
+```rust
+#[jsg_oneof]
+enum ObjectOrString<'s> {
+    Object(jsg::v8::Local<'s, jsg::v8::Object>),
+    String(String),
+}
+```
+
+Like C++ JSG's `webidl::UnionTypeValidator` (`src/workerd/jsg/web-idl.h`), `#[jsg_oneof]`
+rejects at compile time a union that breaks Web IDL's rules for unions, counting the
+variants of nested unions and the inner types of nullable types: at most one boolean,
+numeric, string, dictionary-like (struct or `Dict<V>`) and sequence-like type; at most one
+nullable or struct type in all; an object handle (`v8::Local<'s, v8::Object>`) only
+without resources, dictionary-like or sequence-like types; no `Option<T>` or
+`Lenient<T>`, which mark optional parameters and fields; and no type twice, counting a
+`Nullable<T>` as `T`. A union may have several resource types, as Web IDL allows. One
+difference from C++: the check for a type that appears twice covers the union's own
+variants, seeing through `Nullable<…>` as written but not through a type alias of one,
+and not the variants of a nested union. So a type that no at-most-one rule counts, such
+as a resource, a typed array handle, `SystemTime` or `v8::Local<'s, v8::Value>`, isn't
+caught when it is in both a union and a union nested in it.
+
 The union traces the variant it holds, so a union with a `jsg::Rc<R>` variant can be a
-resource field. It implements `jsg::ToJS` when every variant does.
-
-Two differences from `kj::OneOf<>`:
-
-- Variants must implement `jsg::Type`, which the integer types, `i64`, `SystemTime` and
-  `Nullable<T>` don't, so they can't be variants yet.
-- C++ checks at compile time that a union follows Web IDL's rules, for example at most
-  one string, numeric, boolean, dictionary-like or sequence-like type, and no duplicate
-  types (`webidl::UnionTypeValidator` in `src/workerd/jsg/web-idl.h`). Rust doesn't
-  check them; in a union that breaks them, the first variant that converts the value, in
-  pass and declaration order, wins.
+resource field; one that holds handles can't. A union implements `jsg::ToJS` when every
+variant does.
 
 ## Feature Flags (Compatibility Flags)
 

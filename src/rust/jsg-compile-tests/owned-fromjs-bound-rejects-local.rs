@@ -10,5 +10,5 @@ use jsg::v8;
 pub fn owned<T: for<'s> FromJS<'s, ResultType = T>>() {}
 
 pub fn t() {
-    owned::<v8::Local<'static, v8::Object>>(); //~ ERROR E0277
+    owned::<v8::Local<'static, v8::Object>>(); //~ ERROR implementation of `FromJS` is not general enough
 }

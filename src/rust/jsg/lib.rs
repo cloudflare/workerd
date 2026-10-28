@@ -17,6 +17,7 @@ pub mod lenient;
 pub mod macros;
 pub mod modules;
 pub mod nullable;
+mod oneof;
 mod promise;
 pub mod resource;
 mod scope;
@@ -31,6 +32,14 @@ pub use feature_flags::FeatureFlags;
 use isolate_state::IsolateState;
 pub use lenient::Lenient;
 pub use nullable::Nullable;
+#[doc(hidden)]
+pub use oneof::UnionMember;
+#[doc(hidden)]
+pub use oneof::UnionTypes;
+#[doc(hidden)]
+pub use oneof::UnionVariant;
+#[doc(hidden)]
+pub use oneof::try_union_from_js;
 pub use resource::NestedType;
 pub use resource::Rc;
 pub use resource::Resource;
@@ -71,10 +80,6 @@ pub use v8::ffi::ExceptionType;
 pub use wrappable::FromJS;
 pub use wrappable::ToJS;
 pub use wrappable::Traced;
-#[doc(hidden)]
-pub use wrappable::UnionMember;
-#[doc(hidden)]
-pub use wrappable::try_union_from_js;
 
 #[cxx::bridge(namespace = "workerd::rust::jsg")]
 #[expect(unsafe_code, reason = "the cxx bridge expands to unsafe FFI glue")]
@@ -1097,6 +1102,11 @@ pub trait Type: Sized {
     /// types it can only check the JavaScript type, without a lock: a resource's accepts any
     /// object, and a union's any value that one of its variants' accepts.
     fn is_exact(value: v8::Local<'_, v8::Value>) -> bool;
+
+    /// The type's Web IDL categories, which a `#[jsg_oneof]` union with it as a variant checks
+    /// at compile time; see [`UnionTypes`].
+    #[doc(hidden)]
+    const UNION_TYPES: UnionTypes = UnionTypes::OTHER;
 }
 
 /// Represents a constant value that can be exposed to JavaScript.
