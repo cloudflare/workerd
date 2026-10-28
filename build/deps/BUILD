@@ -3,6 +3,7 @@
 # linker flags for workerd and downstream builds.
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_python//python:defs.bzl", "py_library")
 
 cc_library(
     name = "linkopts_common",
@@ -61,4 +62,12 @@ cc_library(
         "//build/platforms:sanitizer_thread_linux": ["@llvm_runtimes//:runtimes"],
         "//conditions:default": [],
     }),
+)
+
+# ci/v8_update.py imports this as the top-level module `jsonc`.
+py_library(
+    name = "jsonc",
+    srcs = ["jsonc.py"],
+    imports = ["."],
+    visibility = ["//ci:__pkg__"],
 )

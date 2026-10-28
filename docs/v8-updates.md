@@ -91,6 +91,17 @@ from the V8 directory.
     `rust_icu_sys` if the two values disagree. If `rust_icu_sys` has no `bindgen/lib_<version>.rs`
     for the new version, update the crate as well.
 
+    V8 builds `temporal_capi` (see `deps/rust/Cargo.toml`) from Chromium's
+    `third_party/rust`, at the revision in V8's `DEPS`. Every crate in its runtime
+    dependency tree should resolve to the version locked in that revision's
+    `chromium_crates_io/Cargo.lock`. The update helper's `finish` step (below) moves the exact
+    (`=`) pins of those crates in `deps/rust/Cargo.toml` with `cargo add`, moves the others
+    in `deps/rust/Cargo.lock` with `cargo update --precise`, and then regenerates
+    `deps/rust/cargo-bazel-lock.json` with
+    `bazel fetch --repo_env=CARGO_BAZEL_REPIN=1 --repo=@crates_vendor`. It needs Python 3.11
+    or newer and `bazel` on `PATH`, and runs Bazel's own `cargo`. If Cargo cannot downgrade a
+    crate on its own, the helper names it; pin it in `deps/rust/Cargo.toml` and rerun.
+
 11. Check workerd's tests pass with the updated V8.
 
      ```sh
@@ -131,7 +142,8 @@ rebases the patches, regenerates `patches/v8/*.patch`, and updates:
 
 It also regenerates `com_googlesource_chromium_icu` in `build/deps/gen/deps.MODULE.bazel`
 and sets `RUST_ICU_MAJOR_VERSION_NUMBER` in `build/deps/rust.MODULE.bazel` and
-`src/rust/i18n/BUILD.bazel` to the major version of the new ICU commit (see step 10).
+`src/rust/i18n/BUILD.bazel` to the major version of the new ICU commit, and aligns the
+Rust crates V8 builds from Chromium's `third_party/rust` (see step 10).
 
 If the rebase stops because of conflicts, resolve and continue it in the temporary
 checkout:
