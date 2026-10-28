@@ -807,6 +807,20 @@ fn transferred_array_buffers_move_to_the_deserializer() {
             "b.byteLength === 0",
             "v.size === 8 && v.b.byteLength === 8",
         );
+        // A getter that serialization runs can detach a transferred buffer itself, as a nested
+        // structuredClone() that transfers it does. release() skips it rather than detaching it
+        // again, which V8 happens to allow today.
+        assert_transfer(
+            lock,
+            ctx,
+            "globalThis.b = new ArrayBuffer(8); new Uint8Array(b)[0] = 42;
+             globalThis.value = { get moved() { return new Uint8Array(b.transfer()); } };
+             globalThis.transfer = [b];",
+            1,
+            1,
+            "b.detached",
+            "v.moved[0] === 42 && v.moved.length === 8",
+        );
         // A buffer that the value doesn't hold is still detached, and passed on.
         assert_transfer(
             lock,
