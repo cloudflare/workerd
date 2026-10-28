@@ -1473,11 +1473,10 @@ class ExceptionWrapper {
         return kj::Exception::Type::FAILED;
       }();
 
-      KJ_IF_SOME(domException,
-          wrapper.tryUnwrap(
-              js, context, handle, static_cast<DOMException*>(nullptr), parentObject)) {
+      KJ_IF_SOME(domException, tryGetDOMExceptionFields(js.v8Isolate, handle)) {
         return KJ_EXCEPTION(FAILED,
-            kj::str("jsg.DOMException(", domException.getName(), "): ", domException.getMessage()));
+            kj::str("jsg.DOMException(", JsString(domException.name).toString(js),
+                "): ", JsString(domException.message).toString(js)));
       } else {
 
         static const constexpr kj::StringPtr PREFIXES[] = {

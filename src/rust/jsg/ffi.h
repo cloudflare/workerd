@@ -491,11 +491,19 @@ bool local_serialize(Isolate* isolate,
 MaybeLocal value_deserialize(Isolate* isolate, ::rust::Slice<const uint8_t> data);
 
 // Errors
-// Builds an exception whose message is raw bytes interpreted as UTF-8. Invalid
-// UTF-8 sequences are replaced with U+FFFD by v8::String::NewFromUtf8 rather
-// than rejected, so this accepts arbitrary byte input (e.g. filesystem paths).
+// Builds a JS built-in error whose message is raw bytes interpreted as UTF-8.
+// Invalid UTF-8 sequences are replaced with U+FFFD rather than rejected, so this
+// accepts arbitrary byte input (e.g. filesystem paths). Rust creates the
+// DOM-prefixed exception types with dom_exception_create() instead.
 Local exception_create_from_bytes(
     Isolate* isolate, ExceptionType exception_type, const uint8_t* data, int32_t length);
+// Creates a DOMException without running JavaScript (jsg::newDOMException()), or returns none
+// with an exception pending.
+MaybeLocal dom_exception_create(Isolate* isolate, ::rust::Str name, ::rust::Str message);
+// Stores the name and message of a DOMException, by its brand (jsg::tryGetDOMExceptionFields()),
+// and returns true; returns false for any other value. Runs no JavaScript.
+bool local_try_unwrap_dom_exception(
+    Isolate* isolate, Local value, ::rust::String& name, ::rust::String& message);
 // The exception `isolate_throw_internal_error` throws, without throwing it: logs
 // `internalMessage` with a new reference ID and returns a generic error carrying only the ID.
 Local exception_create_internal(Isolate* isolate, ::rust::Str internalMessage);
@@ -516,6 +524,7 @@ void isolate_try_catch(
 void isolate_throw_exception(Isolate* isolate, Local exception);
 void isolate_throw_error(Isolate* isolate, ::rust::Str message);
 void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage);
+::rust::String log_internal_error(::rust::Str internalMessage);
 void isolate_terminate_execution(Isolate* isolate);
 bool isolate_is_execution_terminating(Isolate* isolate);
 bool isolate_has_pending_exception(Isolate* isolate);

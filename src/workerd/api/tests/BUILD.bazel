@@ -803,6 +803,11 @@ wd_test(
 )
 
 wd_test(
+    src = "dom-exception-test.wd-test",
+    data = ["dom-exception-test.js"],
+)
+
+wd_test(
     src = "queue-microtask-gc-test.wd-test",
     data = ["queue-microtask-gc-test.js"],
 )

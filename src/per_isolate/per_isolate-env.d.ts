@@ -115,6 +115,13 @@ declare const utils: {
   // surrogate counts the 3 bytes of U+FFFD), without encoding it. Throws a
   // TypeError for a non-string.
   utf8Length(str: string): number;
+  // Gives `object`, a DOMException being constructed, its brand and its own `code`, `name` and
+  // `message` properties (jsg::initDOMException()). Consumed by dom-exception.
+  initDOMException(object: object, name: string, message: string): void;
+  // Whether `value` is a DOMException, by its brand. Runs no JavaScript.
+  isDOMException(value: unknown): boolean;
+  // Makes `prototype` the prototype of the DOMExceptions native code creates.
+  setDOMExceptionPrototype(prototype: object): void;
 };
 
 // An abort algorithm registration. Obtained only from

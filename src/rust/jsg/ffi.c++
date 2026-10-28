@@ -11,6 +11,7 @@
 #include <workerd/rust/jsg/ffi-inl.h>
 #include <workerd/rust/jsg/lib.rs.h>
 #include <workerd/rust/jsg/v8.rs.h>
+#include <workerd/util/sentry.h>
 
 #include <kj-rs/convert.h>
 
@@ -814,6 +815,17 @@ Local wrappable_attach_opaque_wrapper(Isolate* isolate, kj::Rc<Wrappable> wrappa
 
 // Unwrappers
 
+namespace {
+::rust::String rustStringFromV8(Isolate* isolate, v8::Local<v8::String> string) {
+  v8::String::ValueView view(isolate, string);
+  if (!view.is_one_byte()) {
+    // lossy(): lone surrogates become U+FFFD instead of throwing (which aborts).
+    return ::rust::String::lossy(reinterpret_cast<const char16_t*>(view.data16()), view.length());
+  }
+  return ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
+}
+}  // namespace
+
 bool unwrap_string(Isolate* isolate, Local value, ::rust::String& result) {
   auto v8Value = local_from_ffi<v8::Value>(kj::mv(value));
   // Fast path: a string primitive needs no coercion and can't throw. (String wrapper objects are
@@ -824,13 +836,7 @@ bool unwrap_string(Isolate* isolate, Local value, ::rust::String& result) {
   } else if (!v8Value->ToString(isolate->GetCurrentContext()).ToLocal(&v8Str)) {
     return false;
   }
-  v8::String::ValueView view(isolate, v8Str);
-  if (!view.is_one_byte()) {
-    // lossy(): lone surrogates become U+FFFD instead of throwing (which aborts).
-    result = ::rust::String::lossy(reinterpret_cast<const char16_t*>(view.data16()), view.length());
-  } else {
-    result = ::rust::String::latin1(reinterpret_cast<const char*>(view.data8()), view.length());
-  }
+  result = rustStringFromV8(isolate, v8Str);
   return true;
 }
 
@@ -1525,8 +1531,6 @@ Local exceptionCreateFromMessage(ExceptionType exception_type, v8::Local<v8::Str
     case ExceptionType::TypeError:
       return to_ffi(v8::Exception::TypeError(message));
     default:
-      // DOM-style exceptions (OperationError, DataError, etc.) and Error fall back to Error.
-      // TODO(soon): Use js.domException() to create proper DOMException objects.
       return to_ffi(v8::Exception::Error(message));
   }
 }
@@ -1543,6 +1547,25 @@ Local exception_create_from_bytes(
       kj::arrayPtr(reinterpret_cast<const char*>(data), static_cast<size_t>(length)),
       v8::NewStringType::kNormal);
   return exceptionCreateFromMessage(exception_type, message);
+}
+
+MaybeLocal dom_exception_create(Isolate* isolate, ::rust::Str name, ::rust::Str message) {
+  return maybe_local_to_ffi(v8::MaybeLocal<v8::Value>(::workerd::jsg::newDOMException(isolate,
+      isolate->GetCurrentContext(),
+      newUtf8String(isolate, kj::arrayPtr(name.data(), name.size()), v8::NewStringType::kNormal),
+      newUtf8String(
+          isolate, kj::arrayPtr(message.data(), message.size()), v8::NewStringType::kNormal))));
+}
+
+bool local_try_unwrap_dom_exception(
+    Isolate* isolate, Local value, ::rust::String& name, ::rust::String& message) {
+  KJ_IF_SOME(fields,
+      ::workerd::jsg::tryGetDOMExceptionFields(isolate, local_from_ffi<v8::Value>(kj::mv(value)))) {
+    name = rustStringFromV8(isolate, fields.name);
+    message = rustStringFromV8(isolate, fields.message);
+    return true;
+  }
+  return false;
 }
 
 namespace {
@@ -1607,6 +1630,15 @@ void isolate_throw_internal_error(Isolate* isolate, ::rust::Str internalMessage)
     return;
   }
   isolate->ThrowException(createInternalError(isolate, internalMessage));
+}
+
+::rust::String log_internal_error(::rust::Str internalMessage) {
+  // Logs as makeInternalError() does, for an internal error that is thrown as a DOMException.
+  auto message = kj::heapString(internalMessage.data(), internalMessage.size());
+  auto id = ::workerd::makeInternalErrorId();
+  KJ_LOG(ERROR, message, id);
+  auto redacted = kj::str("internal error; reference = ", id);
+  return ::rust::String(redacted.begin(), redacted.size());
 }
 
 void isolate_terminate_execution(Isolate* isolate) {

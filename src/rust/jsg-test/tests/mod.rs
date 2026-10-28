@@ -10,6 +10,7 @@ mod builtin_module;
 mod coercion_safety;
 mod collections_gc;
 mod date_bigint;
+mod dom_exception;
 mod eval;
 mod fast_api;
 mod function;

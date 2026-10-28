@@ -292,6 +292,11 @@ bool isolates_share_group(Isolate* a, Isolate* b) {
   return a->GetGroup() == b->GetGroup();
 }
 
+void throw_kj_exception(::rust::Str description) {
+  kj::throwFatalException(kj::Exception(kj::Exception::Type::FAILED, __FILE__, __LINE__,
+      kj::heapString(description.data(), description.size())));
+}
+
 void hold_across_gc(Isolate* isolate,
     ::rust::Fn<::workerd::rust::jsg::MaybeLocal(Isolate*)> create,
     ::rust::Fn<void(Isolate*, ::workerd::rust::jsg::Local)> check) {

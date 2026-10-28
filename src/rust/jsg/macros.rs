@@ -47,11 +47,10 @@ macro_rules! jsg_traced {
 /// - `condition` — Any expression that evaluates to `bool`. When `true`, the macro is a no-op.
 ///   When `false`, an error is returned.
 /// - `ExceptionVariant` — One of the [`ExceptionType`](crate::v8::ffi::ExceptionType) variants
-///   that determines the JavaScript error class thrown to user code. Available variants:
-///   `TypeError`, `RangeError`, `ReferenceError`, `SyntaxError`, `Error`,
-///   `OperationError`, `DataError`, `DataCloneError`, `InvalidAccessError`,
-///   `InvalidStateError`, `InvalidCharacterError`, `NotSupportedError`,
-///   `TimeoutError`, `TypeMismatchError`, `AbortError`, `NotFoundError`.
+///   that determines the JavaScript error class thrown to user code: one of the JS
+///   error classes `TypeError`, `RangeError`, `ReferenceError`, `SyntaxError` and
+///   `Error`, or a `DOMException` type such as `DOMSyntaxError` or `DOMAbortError`,
+///   named as in C++ `JSG_REQUIRE`.
 /// - `"message"` / `"format string", args...` — A message string, optionally with `format!`-style
 ///   arguments. Unlike the C++ `JSG_REQUIRE` which concatenates via `kj::str()`, this macro uses
 ///   Rust's standard `format!()` for string interpolation.
@@ -113,11 +112,10 @@ macro_rules! jsg_require {
 /// # Parameters
 ///
 /// - `ExceptionVariant` — One of the [`ExceptionType`](crate::v8::ffi::ExceptionType) variants
-///   that determines the JavaScript error class thrown to user code. Available variants:
-///   `TypeError`, `RangeError`, `ReferenceError`, `SyntaxError`, `Error`,
-///   `OperationError`, `DataError`, `DataCloneError`, `InvalidAccessError`,
-///   `InvalidStateError`, `InvalidCharacterError`, `NotSupportedError`,
-///   `TimeoutError`, `TypeMismatchError`, `AbortError`, `NotFoundError`.
+///   that determines the JavaScript error class thrown to user code: one of the JS
+///   error classes `TypeError`, `RangeError`, `ReferenceError`, `SyntaxError` and
+///   `Error`, or a `DOMException` type such as `DOMSyntaxError` or `DOMAbortError`,
+///   named as in C++ `JSG_REQUIRE`.
 /// - `"message"` / `"format string", args...` — A message string, optionally with `format!`-style
 ///   arguments. Unlike the C++ `JSG_FAIL_REQUIRE` which concatenates via `kj::str()`, this macro
 ///   uses Rust's standard `format!()` for string interpolation.
@@ -133,7 +131,7 @@ macro_rules! jsg_require {
 /// use jsg::{jsg_fail_require, Result};
 ///
 /// fn unsupported_algorithm(name: &str) -> Result<()> {
-///     jsg_fail_require!(NotSupportedError, "algorithm '{}' is not supported", name);
+///     jsg_fail_require!(DOMNotSupportedError, "algorithm '{}' is not supported", name);
 /// }
 ///
 /// fn validate_input(mode: &str) -> Result<String> {

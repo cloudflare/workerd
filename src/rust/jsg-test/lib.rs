@@ -148,6 +148,12 @@ mod ffi {
         /// Returns whether `a` and `b` belong to the same `v8::IsolateGroup`.
         pub unsafe fn isolates_share_group(a: *mut Isolate, b: *mut Isolate) -> bool;
 
+        /// Throws a `kj::Exception` with `description`, such as a tunneled
+        /// `jsg-internal.DOMException(OperationError): ...`.
+        #[expect(clippy::allow_attributes)]
+        #[allow(dead_code)]
+        pub fn throw_kj_exception(description: &str) -> Result<()>;
+
         /// Holds a value the way C++ code holds one that Rust created: calls `create`, keeps
         /// its result only in a `v8::Global` while a full GC runs, and calls `check` with it.
         /// Then resets the `Global` and runs a full GC again. See `hold_across_gc` in `ffi.h`.

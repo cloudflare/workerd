@@ -114,24 +114,33 @@ pub mod ffi {
         Uninitialized = 1,
     }
 
+    /// The JavaScript error class a [`crate::Error`] is thrown as.
+    ///
+    /// The `DOM`-prefixed variants are thrown as a `DOMException` with the
+    /// unprefixed name, mirroring the C++ `JSG_REQUIRE(..., DOMSyntaxError, ...)`
+    /// error types (`src/workerd/jsg/exception.h`). The others are the JS
+    /// built-in error classes, so `SyntaxError` and `DOMSyntaxError` are
+    /// distinct.
     #[derive(Debug, PartialEq, Eq, Copy, Clone)]
     pub enum ExceptionType {
-        OperationError,
-        DataError,
-        DataCloneError,
-        InvalidAccessError,
-        InvalidStateError,
-        InvalidCharacterError,
-        NotSupportedError,
-        SyntaxError,
-        TimeoutError,
-        TypeMismatchError,
-        AbortError,
-        NotFoundError,
+        DOMOperationError,
+        DOMDataError,
+        DOMDataCloneError,
+        DOMInvalidAccessError,
+        DOMInvalidStateError,
+        DOMInvalidCharacterError,
+        DOMNotSupportedError,
+        DOMSyntaxError,
+        DOMTimeoutError,
+        DOMTypeMismatchError,
+        DOMQuotaExceededError,
+        DOMAbortError,
+        DOMNotFoundError,
         TypeError,
         Error,
         RangeError,
         ReferenceError,
+        SyntaxError,
     }
 
     /// Mirrors `v8::Promise::PromiseState`; `ffi.c++` asserts the values match.
@@ -613,6 +622,9 @@ pub mod ffi {
             options: *mut FastApiCallbackOptions,
             receiver: Local,
         ) -> TraitObjectPtr;
+        /// Throws a JS built-in error; `exception_type` must not be DOM-prefixed.
+        /// Fast callbacks fail only in their receiver and argument checks, with a
+        /// `TypeError`.
         pub unsafe fn fast_api_throw_exception(
             options: *mut FastApiCallbackOptions,
             exception_type: ExceptionType,
@@ -638,12 +650,30 @@ pub mod ffi {
         pub unsafe fn value_deserialize(isolate: *mut Isolate, data: &[u8]) -> Result<MaybeLocal>;
 
         // Errors
+        /// Creates a JS built-in error; `exception_type` must not be DOM-prefixed.
         pub unsafe fn exception_create_from_bytes(
             isolate: *mut Isolate,
             exception_type: ExceptionType,
             data: *const u8,
             length: i32,
         ) -> Local;
+        /// Creates a `DOMException` with the given name, running no JavaScript, or returns
+        /// none with an exception pending. Fallible: the context must have a DOMException
+        /// prototype, which every JSG context has.
+        pub unsafe fn dom_exception_create(
+            isolate: *mut Isolate,
+            name: &str,
+            message: &str,
+        ) -> Result<MaybeLocal>;
+        /// If `value` is a `DOMException`, stores the name and message it was created with
+        /// and returns `true`; otherwise leaves them untouched and returns `false`. Runs no
+        /// JavaScript. Fallible: it constructs `rust::String`s.
+        pub unsafe fn local_try_unwrap_dom_exception(
+            isolate: *mut Isolate,
+            value: Local,
+            name: &mut String,
+            message: &mut String,
+        ) -> Result<bool>;
         pub unsafe fn exception_create_internal(
             isolate: *mut Isolate,
             internal_message: &str,
@@ -661,6 +691,9 @@ pub mod ffi {
         pub unsafe fn isolate_throw_exception(isolate: *mut Isolate, exception: Local);
         pub unsafe fn isolate_throw_error(isolate: *mut Isolate, message: &str);
         pub unsafe fn isolate_throw_internal_error(isolate: *mut Isolate, internal_message: &str);
+        /// Logs `internal_message` as `isolate_throw_internal_error` does, and returns the
+        /// redacted message, `internal error; reference = <id>`, to throw instead.
+        pub fn log_internal_error(internal_message: &str) -> String;
         pub unsafe fn isolate_terminate_execution(isolate: *mut Isolate);
         pub unsafe fn isolate_is_execution_terminating(isolate: *mut Isolate) -> bool;
         pub unsafe fn isolate_has_pending_exception(isolate: *mut Isolate) -> bool;
@@ -835,24 +868,19 @@ pub mod ffi {
     }
 }
 
+/// Formats the type the way a tunneled KJ exception description names it:
+/// `TypeError` for a JS error class, `DOMException(SyntaxError)` for a
+/// `DOMException`.
 impl std::fmt::Display for ffi::ExceptionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(name) = self.dom_exception_name() {
+            return write!(f, "DOMException({name})");
+        }
         let name = match *self {
-            Self::OperationError => "OperationError",
-            Self::DataError => "DataError",
-            Self::DataCloneError => "DataCloneError",
-            Self::InvalidAccessError => "InvalidAccessError",
-            Self::InvalidStateError => "InvalidStateError",
-            Self::InvalidCharacterError => "InvalidCharacterError",
-            Self::NotSupportedError => "NotSupportedError",
-            Self::SyntaxError => "SyntaxError",
-            Self::TimeoutError => "TimeoutError",
-            Self::TypeMismatchError => "TypeMismatchError",
-            Self::AbortError => "AbortError",
-            Self::NotFoundError => "NotFoundError",
             Self::TypeError => "TypeError",
             Self::RangeError => "RangeError",
             Self::ReferenceError => "ReferenceError",
+            Self::SyntaxError => "SyntaxError",
             _ => "Error",
         };
         write!(f, "{name}")

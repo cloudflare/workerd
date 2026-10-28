@@ -51,16 +51,51 @@ KJ_TEST("jsg::Lock domException") {
     JSG_WITHIN_CONTEXT_SCOPE(lock,
         lock.template newContext<DOMExceptionContext>().getHandle(lock.v8Isolate),
         [&](jsg::Lock& js) {
-      Ref<DOMException> exception = js.domException(kj::str("foo"), kj::str("bar"));
+      auto exception = js.domException(kj::str("foo"), kj::str("bar"));
 
-      // The DOMException object should have the JS handle created already.
-      auto handle = JsObject(KJ_ASSERT_NONNULL(exception.tryGetHandle(js)));
+      KJ_ASSERT(exception.has(js, "stack"_kj));
+      KJ_ASSERT(exception.get(js, "name"_kj).toString(js) == "foo"_kj);
+      KJ_ASSERT(exception.get(js, "message"_kj).toString(js) == "bar"_kj);
+      KJ_ASSERT(exception.get(js, "code"_kj).toString(js) == "0"_kj);
+      auto constructor =
+          KJ_ASSERT_NONNULL(js.global().get(js, "DOMException"_kj).tryCast<JsObject>());
+      KJ_ASSERT(exception.getPrototype(js) == constructor.get(js, "prototype"_kj));
+    });
+  });
+}
 
-      // And it will have the stack.
-      KJ_ASSERT(handle.has(js, "stack"_kj));
+KJ_TEST("DOMExceptions are recognized by their brand") {
+  Evaluator<DOMExceptionContext, DOMExceptionIsolate> e(v8System);
+  e.getIsolate().runInLockScope([&](DOMExceptionIsolate::Lock& lock) {
+    JSG_WITHIN_CONTEXT_SCOPE(lock,
+        lock.template newContext<DOMExceptionContext>().getHandle(lock.v8Isolate),
+        [&](jsg::Lock& js) {
+      auto fieldsOf = [&](kj::StringPtr code) -> kj::Maybe<kj::String> {
+        auto script = jsg::check(v8::Script::Compile(js.v8Context(), js.str(code)));
+        auto value = jsg::check(script->Run(js.v8Context()));
+        return tryGetDOMExceptionFields(js.v8Isolate, value).map([&](DOMExceptionFields fields) {
+          return kj::str(
+              JsString(fields.name).toString(js), "/", JsString(fields.message).toString(js));
+        });
+      };
 
-      KJ_ASSERT(exception->getName() == "foo"_kj);
-      KJ_ASSERT(exception->getMessage() == "bar"_kj);
+      KJ_EXPECT(KJ_ASSERT_NONNULL(fieldsOf("new DOMException('m', 'AbortError')"_kj)) ==
+          "AbortError/m"_kj);
+      KJ_EXPECT(KJ_ASSERT_NONNULL(fieldsOf("new (class extends DOMException {})('m')"_kj)) ==
+          "Error/m"_kj);
+      // The brand, not the JavaScript properties, which can be redefined.
+      KJ_EXPECT(KJ_ASSERT_NONNULL(fieldsOf(
+                    "const e = new DOMException('m', 'DataError');"
+                    "Object.defineProperty(e, 'name', { value: 'X' }); e"_kj)) == "DataError/m"_kj);
+      // Only an object's own brand counts.
+      KJ_EXPECT(fieldsOf("Object.create(new DOMException('m'))"_kj) == kj::none);
+      KJ_EXPECT(fieldsOf("({ name: 'AbortError', message: 'm' })"_kj) == kj::none);
+      KJ_EXPECT(fieldsOf("new Error('m')"_kj) == kj::none);
+
+      auto created = js.domException(kj::str("NotFoundError"), kj::str("gone"));
+      auto fields = KJ_ASSERT_NONNULL(tryGetDOMExceptionFields(js.v8Isolate, created));
+      KJ_EXPECT(JsString(fields.name).toString(js) == "NotFoundError"_kj);
+      KJ_EXPECT(JsString(fields.message).toString(js) == "gone"_kj);
     });
   });
 }

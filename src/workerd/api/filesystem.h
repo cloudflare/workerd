@@ -268,11 +268,10 @@ class FileSystemHandle: public jsg::Object {
     JSG_STRUCT(recursive);
   };
   jsg::Promise<void> remove(jsg::Lock& js,
-      jsg::Optional<RemoveOptions> options,
-      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+      jsg::Optional<RemoveOptions> options);
 
   jsg::Promise<kj::StringPtr> getUniqueId(
-      jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+      jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(FileSystemHandle) {
     JSG_READONLY_PROTOTYPE_PROPERTY(kind, getKind);
@@ -326,11 +325,10 @@ class FileSystemFileHandle final: public FileSystemHandle {
   };
 
   jsg::Promise<jsg::Ref<File>> getFile(
-      jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+      jsg::Lock& js);
 
   jsg::Promise<jsg::Ref<FileSystemWritableFileStream>> createWritable(jsg::Lock& js,
       jsg::Optional<FileSystemCreateWritableOptions> options,
-      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler,
       const jsg::TypeHandler<FileSystemWritableData>& dataHandler);
 
   JSG_RESOURCE_TYPE(FileSystemFileHandle) {
@@ -423,18 +421,15 @@ class FileSystemDirectoryHandle final: public FileSystemHandle {
 
   jsg::Promise<jsg::Ref<FileSystemFileHandle>> getFileHandle(jsg::Lock& js,
       jsg::USVString name,
-      jsg::Optional<FileSystemGetFileOptions> options,
-      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception);
+      jsg::Optional<FileSystemGetFileOptions> options);
 
   jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> getDirectoryHandle(jsg::Lock& js,
       jsg::USVString name,
-      jsg::Optional<FileSystemGetDirectoryOptions> options,
-      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception);
+      jsg::Optional<FileSystemGetDirectoryOptions> options);
 
   jsg::Promise<void> removeEntry(jsg::Lock& js,
       jsg::USVString name,
-      jsg::Optional<FileSystemRemoveOptions> options,
-      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception);
+      jsg::Optional<FileSystemRemoveOptions> options);
 
   // TODO(node-fs): We are not currently implementing the resolve() method
   // as defined in the spec.
@@ -464,8 +459,7 @@ class FileSystemDirectoryHandle final: public FileSystemHandle {
       jsg::Function<void(
           jsg::USVString, jsg::Ref<FileSystemHandle>, jsg::Ref<FileSystemDirectoryHandle>)>
           callback,
-      jsg::Optional<jsg::Value> thisArg,
-      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception);
+      jsg::Optional<jsg::Value> thisArg);
 
   JSG_RESOURCE_TYPE(FileSystemDirectoryHandle) {
     JSG_INHERIT(FileSystemHandle);
@@ -555,22 +549,20 @@ class FileSystemWriteContextHandle final: public jsg::Object {
   // it, because the two callers need it in different forms: the C++
   // createWritable() wraps it in a rejected promise, while the bootstrap factory
   // backing the TypeScript implementation throws it.
-  static kj::OneOf<jsg::Ref<FileSystemWriteContextHandle>, jsg::Ref<jsg::DOMException>> open(
+  static kj::OneOf<jsg::Ref<FileSystemWriteContextHandle>, jsg::JsObject> open(
       jsg::Lock& js, jsg::Ref<FileSystemFileHandle> file, bool keepExistingData);
 
   jsg::Promise<void> write(jsg::Lock& js,
-      FileSystemWritableData data,
-      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+      FileSystemWritableData data);
   jsg::Promise<void> seek(jsg::Lock& js,
-      uint32_t newPosition,
-      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+      uint32_t newPosition);
   jsg::Promise<void> truncate(
-      jsg::Lock& js, uint32_t size, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+      jsg::Lock& js, uint32_t size);
 
   // The underlying sink's close algorithm: replaces the original file's contents
   // with the temporary's, then releases the state.
   jsg::Promise<void> commit(
-      jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+      jsg::Lock& js);
 
   // The underlying sink's abort algorithm: drops the written data, leaving the
   // original file intact.
@@ -624,13 +616,11 @@ class FileSystemWritableFileStream final: public WritableStream {
   using WriteParams = FileSystemFileWriteParams;
 
   jsg::Promise<void> write(jsg::Lock& js,
-      FileSystemWritableData data,
-      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+      FileSystemWritableData data);
   jsg::Promise<void> seek(jsg::Lock& js,
-      uint32_t position,
-      const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+      uint32_t position);
   jsg::Promise<void> truncate(
-      jsg::Lock& js, uint32_t size, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& deHandler);
+      jsg::Lock& js, uint32_t size);
 
   JSG_RESOURCE_TYPE(FileSystemWritableFileStream) {
     JSG_INHERIT(WritableStream);
@@ -650,7 +640,7 @@ class FileSystemWritableFileStream final: public WritableStream {
 class StorageManager final: public jsg::Object {
  public:
   jsg::Promise<jsg::Ref<FileSystemDirectoryHandle>> getDirectory(
-      jsg::Lock& js, const jsg::TypeHandler<jsg::Ref<jsg::DOMException>>& exception);
+      jsg::Lock& js);
 
   JSG_RESOURCE_TYPE(StorageManager) {
     JSG_METHOD(getDirectory);

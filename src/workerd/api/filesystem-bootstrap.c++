@@ -18,8 +18,6 @@ jsg::JsValue createFileSystemWriteContext(
   auto& contextHandler =
       KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<FileSystemWriteContextHandle>>(),
           "FileSystemWriteContextHandle is missing from the isolate type list");
-  auto& deHandler = KJ_ASSERT_NONNULL(js.tryGetTypeHandler<jsg::Ref<jsg::DOMException>>(),
-      "DOMException is missing from the isolate type list");
 
   // The receiver reaches here as an ordinary argument because the TypeScript
   // createWritable() is a plain function rather than a JSG method, so nothing has
@@ -30,10 +28,10 @@ jsg::JsValue createFileSystemWriteContext(
 
   auto opened = FileSystemWriteContextHandle::open(
       js, kj::mv(file), keepExistingData == KeepExistingData::YES);
-  KJ_IF_SOME(ex, opened.tryGet<jsg::Ref<jsg::DOMException>>()) {
+  KJ_IF_SOME(ex, opened.tryGet<jsg::JsObject>()) {
     // The C++ createWritable() reports these by rejecting; the TypeScript one
     // turns a throw into the same rejection, so the observable result matches.
-    js.throwException(jsg::JsValue(deHandler.wrap(js, kj::mv(ex))));
+    js.throwException(ex);
   }
 
   return jsg::JsValue(
