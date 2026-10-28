@@ -450,6 +450,14 @@ class IsolateBase {
     return wasmEsmIntegrationBuiltinsEnabled;
   }
 
+  void setWasmSourceUrlSupportEnabled() {
+    wasmSourceUrlSupportEnabled = true;
+  }
+
+  bool isWasmSourceUrlSupportEnabled() const {
+    return wasmSourceUrlSupportEnabled;
+  }
+
   bool getUsingFastJsgStruct() const {
     return usingFastJsgStruct;
   }
@@ -610,6 +618,7 @@ class IsolateBase {
   bool usingEnhancedErrorSerialization = false;
   bool usingFastJsgStruct = false;
   bool wasmEsmIntegrationBuiltinsEnabled = false;
+  bool wasmSourceUrlSupportEnabled = false;
   bool extraMicrotaskCheckpointRequested = false;
 
   uint moduleEvaluationDepth = 0;

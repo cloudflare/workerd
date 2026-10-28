@@ -196,10 +196,10 @@ fn typed_array_from_wrong_type_returns_err() {
         // Not a Uint8Array: a plain array, a number, and a Symbol.
         for expr in ["[1, 2, 3]", "42", "Symbol('s')"] {
             let value = ctx.eval_raw(lock, expr).expect("should evaluate");
-            let result = <Vec<u8> as FromJS>::from_js(lock, value);
+            let result = <v8::Local<v8::Uint8Array> as FromJS>::from_js(lock, value);
             assert!(
                 result.as_ref().is_err_and(|err| !err.is_pending()),
-                "Vec::<u8>::from_js({expr}) should be a non-pending Err, got {result:?}"
+                "Local::<Uint8Array>::from_js({expr}) should be a non-pending Err, got {result:?}"
             );
         }
         Ok(())

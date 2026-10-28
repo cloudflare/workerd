@@ -593,8 +593,10 @@ ModuleRegistry::CapnpModuleInfo::CapnpModuleInfo(
     : fileScope(kj::mv(fileScope)),
       topLevelDecls(kj::mv(topLevelDecls)) {}
 
-v8::Local<v8::WasmModuleObject> compileWasmModule(
-    jsg::Lock& js, kj::ArrayPtr<const uint8_t> code, const CompilationObserver& observer) {
+v8::Local<v8::WasmModuleObject> compileWasmModule(jsg::Lock& js,
+    kj::ArrayPtr<const uint8_t> code,
+    const CompilationObserver& observer,
+    kj::Maybe<kj::ArrayPtr<const char>> sourceUrl) {
   // destroy the observer after compilation finishes to indicate the end of the process.
   auto compilationObserver = observer.onWasmCompilationStart(js.v8Isolate, code.size());
 
@@ -602,6 +604,11 @@ v8::Local<v8::WasmModuleObject> compileWasmModule(
   if (js.isWasmEsmIntegrationBuiltinsEnabled()) {
     options.builtins = v8::WasmModuleObject::CompileOptions::Builtins::kJsString;
     options.imported_string_constants_module = "wasm:js/string-constants";
+  }
+  KJ_IF_SOME(url, sourceUrl) {
+    if (js.isWasmSourceUrlSupportEnabled()) {
+      options.source_url = std::string_view(url.begin(), url.size());
+    }
   }
   return jsg::check(v8::WasmModuleObject::Compile(
       js.v8Isolate, std::span<const uint8_t>(code.begin(), code.size()), options));

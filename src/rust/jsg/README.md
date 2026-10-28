@@ -393,7 +393,7 @@ A cast to a supertype, such as `Local<Function>` to `Local<Object>` or `Local<Va
 
 ```rust
 let str_value = "hello".to_js(lock)?;
-let num_value = 42u32.to_local(lock); // `ToLocalValue` also covers integers
+let num_value = 42u32.to_js(lock)?;
 let global = str_value.to_global(lock);
 
 let name: v8::Local<v8::Name> = v8::Local::<v8::String>::try_from(str_value).unwrap().into();
@@ -544,14 +544,14 @@ lists, externals and the other options are not supported. The C++ side is `src/r
 ## Type Conversions
 
 The module docs of `wrappable.rs` list every Rust type that converts to or from JavaScript, and
-how. Most convert both ways. Some convert only from JavaScript, so they can be method parameters
-but not return values:
+how. Most convert both ways. `&[T]` converts only from JavaScript, so it can be a method parameter
+but not a return value. `f64` and `f32` convert only to JavaScript, to a number; a number parameter
+is a `Number`.
 
-- `u8`, `u16`, `u32`, `i8`, `i16` and `i32`: a value converted to a number, which must be in range.
-  Like C++ JSG's integers.
-- `i64`: a `BigInt` that fits, or any other value converted to a number, which must be finite and
-  in range, and truncates toward zero. Like C++ JSG's `int64_t`.
-- `&[T]` and typed-array slices such as `&[u8]`.
+Integers convert like C++ JSG's. `u8`, `u16`, `u32`, `i8`, `i16` and `i32` convert to a number,
+and from a value converted to a number, which must be in range. `i64` and `u64` convert to a
+`BigInt`, like `int64_t` and `uint64_t`, and from a `BigInt` that fits, or any other value converted
+to a number, which must be finite and in range, and truncates toward zero.
 
 Like C++ JSG's `kj::Date`, `SystemTime` converts to a `Date` of the milliseconds since the epoch,
 truncated toward zero, and from a `Date` or a number of milliseconds within the range of `kj::Date`.
@@ -562,6 +562,64 @@ JavaScript, it takes any object other than an array, and reads its own enumerabl
 that are not symbols, as `Object.keys()` lists them; a value that is not a `V` is a `TypeError`
 naming its key. To JavaScript, it is a new plain object. `Local<Object>::keys()` and
 `get_by_name()` list and read properties the same way.
+
+### Arrays, typed arrays and `ArrayBuffer`s
+
+A `Vec<T>` converts to a JavaScript `Array` of the converted elements, numbers included:
+`vec![1u8, 2, 3].to_js(lock)` makes `[1, 2, 3]`, and a `Vec<i64>` makes an `Array` of `BigInt`s.
+A typed array or an `ArrayBuffer` is an explicit conversion of a slice:
+
+```rust
+use jsg::ToJS;
+use jsg::ToJsArrayBuffer;
+use jsg::ToJsTypedArray;
+
+let bytes: Vec<u8> = encode(input);
+let typed: v8::Local<v8::Uint8Array> = bytes.to_js_typed_array(lock); // Uint8Array
+let buffer: v8::Local<v8::ArrayBuffer> = bytes.to_js_array_buffer(lock); // ArrayBuffer
+let array: v8::Local<v8::Value> = bytes.to_js(lock)?; // Array of numbers
+```
+
+`to_js_typed_array` makes the typed array of the element type, from `Uint8Array` for `[u8]` to
+`BigUint64Array` for `[u64]`. `to_js_array_buffer` makes an `ArrayBuffer` holding the bytes, which
+is what C++ JSG returns for a `kj::Array<kj::byte>`; only `[u8]` has it. A method returns the
+handle, and so takes `lock: &mut Lock<'s>` and names the scope:
+
+```rust
+#[jsg_method]
+pub fn digest<'s>(
+    &self,
+    lock: &mut jsg::Lock<'s>,
+    data: v8::Local<'s, v8::Uint8Array>,
+) -> v8::Local<'s, v8::Uint8Array> {
+    hash(data.as_slice(lock)).to_js_typed_array(lock)
+}
+```
+
+From JavaScript, a `Vec<T>` or `&[T]` parameter reads an `Array`. A typed array parameter is a
+handle, whose `as_slice(lock)` reads its memory in place; copy it out with `to_vec()` if the
+method keeps it. An `ArrayBuffer` parameter is a `v8::Local<'s, v8::ArrayBuffer>`, and a
+`v8::Local<'s, v8::ArrayBufferView>` accepts any typed array or `DataView`. To return an
+`ArrayBuffer` of bytes computed in Rust, call `to_js_array_buffer(lock)` on them; to fill one in
+place, allocate it with `ArrayBuffer::new_zeroed_with` and view it with `Uint8Array::from_buffer`.
+
+To port a C++ JSG signature:
+
+| C++ JSG | Rust JSG |
+| --- | --- |
+| `kj::Array<kj::byte>` returned | `v8::Local<'s, v8::ArrayBuffer>`, from `to_js_array_buffer` |
+| `kj::Array<kj::byte>` parameter | `v8::Local<'s, v8::ArrayBufferView>`; C++ JSG also accepts a bare `ArrayBuffer`, for which take a `v8::Local<'s, v8::Value>` and `try_into()` each |
+| `jsg::BufferSource` | `v8::Local<'s, v8::Value>`; check `is_array_buffer()` / `is_array_buffer_view()` and `try_into()` each |
+| `v8::Local<v8::Uint8Array>` returned | `v8::Local<'s, v8::Uint8Array>`, from `to_js_typed_array` |
+| `kj::Array<T>` of other numbers returned | `Vec<T>`, an `Array` |
+| `kj::Array<T>` of integers parameter | `Vec<T>` |
+| `kj::Array<double>` parameter | `Vec<Number>` |
+| `kj::Array<bool>` | `Vec<bool>` |
+| `kj::Array<T>` of anything else | `Vec<T>` |
+
+A `#[jsg_struct]` field converts with its `ToJS` impl like any other value, so a `Vec<u8>` field
+becomes an `Array` of numbers. A field has no way to choose a typed array or an `ArrayBuffer`, so
+a `JSG_STRUCT` with a `kj::Array<kj::byte>` field has no direct port.
 
 ## Union Types
 

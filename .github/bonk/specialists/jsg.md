@@ -81,6 +81,11 @@ Allocation and conversion:
 - Rust: `&Lock`/`&mut Lock` is the first parameter after any `&self`/`&mut self` receiver or
   `this: jsg::Rc<Self>` parameter. `#[jsg_method]` renames snake_case to camelCase, so check
   that the resulting JS name is the intended one.
+- Rust: a `Vec<u8>`, or a `Vec` of another Rust numeric type, that converts through `ToJS`
+  becomes a JS `Array` of numbers: a `.to_js(lock)` call, a `#[jsg_method]` return value, or a
+  `#[jsg_struct]` field. Ask whether an `Array` is intended. A port of C++ that returned
+  `kj::Array<kj::byte>` (an `ArrayBuffer`) or a typed array should call `to_js_array_buffer` or
+  `to_js_typed_array` instead. This is a `warning`, never `blocking`.
 
 Docs: when the change alters JSG macros, type mappings or invariants, `src/workerd/jsg/README.md`,
 `docs/jsg.md` or `src/workerd/jsg/AGENTS.md` should change with it (the "CODE REVIEW RULE" in

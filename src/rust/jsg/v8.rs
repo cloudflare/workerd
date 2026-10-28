@@ -53,8 +53,6 @@ use crate::Error;
 use crate::FromJS;
 use crate::GarbageCollected;
 use crate::Lock;
-use crate::Nullable;
-use crate::Number;
 use crate::Resource;
 use crate::Traced;
 use crate::UnitType;
@@ -385,6 +383,7 @@ pub mod ffi {
         pub unsafe fn big_int_new(isolate: *mut Isolate, value: i64) -> Local;
         pub unsafe fn big_int_new_from_unsigned(isolate: *mut Isolate, value: u64) -> Local;
         pub unsafe fn local_big_int_int64_value(value: &Local, lossless: &mut bool) -> i64;
+        pub unsafe fn local_big_int_uint64_value(value: &Local, lossless: &mut bool) -> u64;
 
         // Local<Date>
         pub unsafe fn date_new(isolate: *mut Isolate, time: f64) -> MaybeLocal;
@@ -583,24 +582,6 @@ pub mod ffi {
         pub unsafe fn unwrap_boolean(isolate: *mut Isolate, value: Local) -> bool;
         // Infallible: NumberValue reports what JavaScript threw in its result.
         pub unsafe fn unwrap_number(isolate: *mut Isolate, value: Local, result: &mut f64) -> bool;
-        pub unsafe fn unwrap_uint8_array(isolate: *mut Isolate, value: Local) -> Result<Vec<u8>>;
-        pub unsafe fn unwrap_uint16_array(isolate: *mut Isolate, value: Local) -> Result<Vec<u16>>;
-        pub unsafe fn unwrap_uint32_array(isolate: *mut Isolate, value: Local) -> Result<Vec<u32>>;
-        pub unsafe fn unwrap_int8_array(isolate: *mut Isolate, value: Local) -> Result<Vec<i8>>;
-        pub unsafe fn unwrap_int16_array(isolate: *mut Isolate, value: Local) -> Result<Vec<i16>>;
-        pub unsafe fn unwrap_int32_array(isolate: *mut Isolate, value: Local) -> Result<Vec<i32>>;
-        pub unsafe fn unwrap_float32_array(isolate: *mut Isolate, value: Local)
-        -> Result<Vec<f32>>;
-        pub unsafe fn unwrap_float64_array(isolate: *mut Isolate, value: Local)
-        -> Result<Vec<f64>>;
-        pub unsafe fn unwrap_bigint64_array(
-            isolate: *mut Isolate,
-            value: Local,
-        ) -> Result<Vec<i64>>;
-        pub unsafe fn unwrap_biguint64_array(
-            isolate: *mut Isolate,
-            value: Local,
-        ) -> Result<Vec<u64>>;
 
         // ArrayBuffer detach/detachable/was-detached
         pub unsafe fn local_array_buffer_detach(isolate: *mut Isolate, buffer: &mut Local);
@@ -2745,6 +2726,10 @@ macro_rules! impl_typed_array_from_js {
         impl<'s> crate::FromJS<'s> for Local<'s, $marker> {
             type ResultType = Self;
 
+            fn type_name() -> std::string::String {
+                $name.to_owned()
+            }
+
             fn from_js(
                 lock: &mut crate::Lock<'s>,
                 value: Local<'s, Value>,
@@ -2811,11 +2796,11 @@ impl Uint8Array {
     /// Creates a `Uint8Array` viewing `length` bytes of `buffer`, starting at
     /// `byte_offset`.
     ///
-    /// Zero-copy, unlike [`Vec<u8>::to_js`](crate::ToJS), which allocates a fresh
-    /// backing store and copies into it. Producing a `Uint8Array` from bytes computed
-    /// in Rust therefore does not require an intermediate `Vec`: allocate and fill
-    /// the buffer with [`ArrayBuffer::new_zeroed_with`], and wrap the written prefix
-    /// here.
+    /// Zero-copy, unlike [`to_js_typed_array`](crate::ToJsTypedArray::to_js_typed_array), which
+    /// allocates a fresh backing store and copies into it. Producing a `Uint8Array`
+    /// from bytes computed in Rust therefore does not require an intermediate `Vec`:
+    /// allocate and fill the buffer with [`ArrayBuffer::new_zeroed_with`], and wrap
+    /// the written prefix here.
     ///
     /// # Errors
     ///
@@ -3211,6 +3196,16 @@ impl Local<'_, BigInt> {
         let mut lossless = false;
         // SAFETY: the handle is a valid BigInt handle within the current HandleScope.
         let value = unsafe { ffi::local_big_int_int64_value(self.raw(), &mut lossless) };
+        lossless.then_some(value)
+    }
+
+    /// Returns the value as a `u64`, or `None` if it is out of the range of `u64`.
+    ///
+    /// Corresponds to `v8::BigInt::Uint64Value()`.
+    pub fn uint64_value(&self) -> Option<u64> {
+        let mut lossless = false;
+        // SAFETY: the handle is a valid BigInt handle within the current HandleScope.
+        let value = unsafe { ffi::local_big_int_uint64_value(self.raw(), &mut lossless) };
         lossless.then_some(value)
     }
 }
@@ -3832,69 +3827,6 @@ unsafe fn global_clone(lock: &mut Lock<'_>, handle: &ffi::Global) -> ffi::Global
     // SAFETY: isolate is valid and locked (guaranteed by Lock); the handle is a valid handle of
     // its isolate (guaranteed by caller).
     unsafe { ffi::global_clone(lock.isolate().as_ffi(), handle) }
-}
-
-/// Converts a primitive Rust value into a JavaScript value in the scope of `lock`.
-///
-/// Unlike [`ToJS`](crate::ToJS), this borrows `self`, can't fail, and also covers the integer
-/// types, which `ToJS` cannot: `ToJS` maps `Vec<u8>` (and the other integer vectors) to typed
-/// arrays, which would conflict with its generic `Vec<T: ToJS>` impl if the element types were
-/// themselves `ToJS`. `#[jsg_struct]` uses it for fields.
-pub trait ToLocalValue {
-    fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value>;
-}
-
-macro_rules! impl_to_local_value_integer {
-    ($($type:ty),*) => {
-        $(
-            impl ToLocalValue for $type {
-                fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
-                    Number::new(f64::from(*self)).to_local(lock)
-                }
-            }
-        )*
-    };
-}
-
-impl_to_local_value_integer!(u8, u16, u32, i8, i16, i32);
-
-impl ToLocalValue for std::string::String {
-    fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
-        self.as_str().to_local(lock)
-    }
-}
-
-impl ToLocalValue for &str {
-    fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
-        let isolate = lock.isolate();
-        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
-        unsafe { Local::from_ffi(ffi::local_new_string(isolate.as_ffi(), self)) }
-    }
-}
-
-impl ToLocalValue for bool {
-    fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
-        let isolate = lock.isolate();
-        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
-        unsafe { Local::from_ffi(ffi::local_new_boolean(isolate.as_ffi(), *self)) }
-    }
-}
-
-impl ToLocalValue for Number {
-    fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
-        let isolate = lock.isolate();
-        // SAFETY: `lock` proves the isolate is locked and a HandleScope for `'s` is open.
-        unsafe { Local::from_ffi(ffi::local_new_number(isolate.as_ffi(), self.value())) }
-    }
-}
-
-impl<T: ToLocalValue> ToLocalValue for Nullable<T> {
-    fn to_local<'s>(&self, lock: &mut Lock<'s>) -> Local<'s, Value> {
-        match self {
-            Self::Some(v) => v.to_local(lock),
-            Self::Null => lock.null(),
-        }
-    }
 }
 
 /// The arguments of a V8 function callback.

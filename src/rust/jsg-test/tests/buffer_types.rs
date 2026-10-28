@@ -4,7 +4,7 @@
 
 //! Tests for `ArrayBuffer`, `ArrayBufferView`, and `BackingStore`.
 
-use jsg::ToJS;
+use jsg::ToJsTypedArray;
 use jsg::v8;
 
 // =============================================================================
@@ -724,20 +724,12 @@ fn typed_arrays_cast_to_array_buffer_view() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         // Uint8Array -> ArrayBufferView
-        let u8_data: Vec<u8> = vec![1, 2, 3];
-        let js = u8_data.to_js(lock)?;
-        let typed: v8::Local<v8::Uint8Array> =
-            // SAFETY: js was just created by to_js within the current HandleScope.
-            unsafe { v8::Local::from_ffi(js.into_ffi()) };
+        let typed = [1u8, 2, 3].to_js_typed_array(lock);
         let view: v8::Local<v8::ArrayBufferView> = typed.into();
         assert_eq!(view.byte_length(), 3);
 
         // Float64Array -> ArrayBufferView
-        let f64_data: Vec<f64> = vec![1.0, 2.0];
-        let js2 = f64_data.to_js(lock)?;
-        let typed2: v8::Local<v8::Float64Array> =
-            // SAFETY: js2 was just created by to_js within the current HandleScope.
-            unsafe { v8::Local::from_ffi(js2.into_ffi()) };
+        let typed2 = [1.0f64, 2.0].to_js_typed_array(lock);
         let view2: v8::Local<v8::ArrayBufferView> = typed2.into();
         assert_eq!(view2.byte_length(), 16); // 2 × 8 bytes
 
@@ -749,11 +741,7 @@ fn typed_arrays_cast_to_array_buffer_view() {
 fn array_buffer_view_back_to_typed_array() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let data: Vec<u8> = vec![10, 20, 30];
-        let js = data.to_js(lock)?;
-        let typed: v8::Local<v8::Uint8Array> =
-            // SAFETY: js was just created by to_js within the current HandleScope.
-            unsafe { v8::Local::from_ffi(js.into_ffi()) };
+        let typed = [10u8, 20, 30].to_js_typed_array(lock);
         let view: v8::Local<v8::ArrayBufferView> = typed.into();
         // Cast back to Uint8Array
         let back: v8::Local<v8::Uint8Array> = view.try_into().unwrap();

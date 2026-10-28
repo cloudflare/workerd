@@ -6,7 +6,6 @@ use jsg::Error;
 use jsg::ExceptionType;
 use jsg::ToJS;
 use jsg::v8;
-use jsg::v8::ToLocalValue;
 use jsg_macros::jsg_struct;
 
 #[jsg_struct]
@@ -39,6 +38,38 @@ struct RequiredStruct {
     pub count: u32,
 }
 
+/// A field type whose conversion to JavaScript fails.
+struct Unconvertible;
+jsg::jsg_traced!(Unconvertible);
+
+impl<'s> ToJS<'s> for Unconvertible {
+    fn to_js(self, _lock: &mut jsg::Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        Err(Error::new_type_error("field does not convert"))
+    }
+}
+
+impl<'s> jsg::FromJS<'s> for Unconvertible {
+    type ResultType = Self;
+
+    fn from_js(
+        _lock: &mut jsg::Lock<'s>,
+        _value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self::ResultType, Error> {
+        Ok(Self)
+    }
+}
+
+#[jsg_struct]
+struct BytesStruct {
+    pub bytes: Vec<u8>,
+}
+
+#[jsg_struct]
+struct FailingFieldStruct {
+    pub name: String,
+    pub bad: Unconvertible,
+}
+
 #[test]
 fn objects_can_be_wrapped_and_unwrapped() {
     let harness = crate::Harness::new();
@@ -52,7 +83,7 @@ fn objects_can_be_wrapped_and_unwrapped() {
         let str_value = obj.get(lock, "str");
         assert!(str_value.unwrap().is_string());
         assert!(!obj.has(lock, "test").unwrap());
-        let value = "value".to_local(lock);
+        let value = "value".to_js(lock)?;
         assert!(value.is_string());
         obj.set(lock, "test", value)?;
         assert!(obj.has(lock, "test").unwrap());
@@ -82,6 +113,7 @@ fn struct_with_multiple_properties() {
 
         let age_value = obj.get(lock, "age");
         assert!(age_value.is_ok());
+        assert!(age_value.unwrap().is_number());
 
         let active_value = obj.get(lock, "active");
         assert!(active_value.is_ok());
@@ -95,11 +127,11 @@ fn number_type_conversions() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
         let byte_val: u8 = 42;
-        let byte_local = byte_val.to_local(lock);
+        let byte_local = byte_val.to_js(lock)?;
         assert!(byte_local.is_number());
 
         let int_val: u32 = 12345;
-        let int_local = int_val.to_local(lock);
+        let int_local = int_val.to_js(lock)?;
         assert!(int_local.is_number());
         Ok(())
     });
@@ -114,11 +146,11 @@ fn empty_object_and_property_setting() {
         assert!(!obj.has(lock, "nonexistent").unwrap());
         assert!(obj.get(lock, "nonexistent").unwrap().is_undefined());
 
-        let str_value = "hello".to_local(lock);
+        let str_value = "hello".to_js(lock)?;
         obj.set(lock, "key1", str_value)?;
         assert!(obj.has(lock, "key1").unwrap());
 
-        let num_value = 100u32.to_local(lock);
+        let num_value = 100u32.to_js(lock)?;
         obj.set(lock, "key2", num_value)?;
         assert!(obj.has(lock, "key2").unwrap());
 
@@ -136,7 +168,7 @@ fn empty_object_and_property_setting() {
 fn global_handle_conversion() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let local_str = "global test".to_local(lock);
+        let local_str = "global test".to_js(lock)?;
         assert!(local_str.is_string());
 
         let global_str = local_str.to_traced_global(lock);
@@ -199,17 +231,17 @@ fn error_from_parse_int_error() {
 fn type_of_returns_correct_js_types() {
     let harness = crate::Harness::new();
     harness.run_in_context(|lock, _ctx| {
-        let str_val = "hello".to_local(lock);
+        let str_val = "hello".to_js(lock)?;
         assert_eq!(str_val.type_of(lock), "string");
         assert!(str_val.is_string());
         assert!(!str_val.is_null_or_undefined());
 
-        let num_val = 42u32.to_local(lock);
+        let num_val = 42u32.to_js(lock)?;
         assert_eq!(num_val.type_of(lock), "number");
         assert!(num_val.is_number());
         assert!(!num_val.is_null_or_undefined());
 
-        let bool_val = true.to_local(lock);
+        let bool_val = true.to_js(lock)?;
         assert_eq!(bool_val.type_of(lock), "boolean");
         assert!(bool_val.is_boolean());
         assert!(!bool_val.is_null_or_undefined());
@@ -342,4 +374,48 @@ fn struct_with_fast_jsg_struct_has_absent_optional_fields_as_undefined() {
         assert!(ok);
         Ok(())
     });
+}
+
+/// A field whose conversion fails fails the struct's conversion with that error, with and without
+/// `fast_jsg_struct`.
+#[test]
+fn struct_to_js_fails_with_a_fields_error() {
+    for fast in [false, true] {
+        let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
+        harness.run_in_context(|lock, _ctx| {
+            let instance = FailingFieldStruct {
+                name: "ok".to_owned(),
+                bad: Unconvertible,
+            };
+            let err = instance.to_js(lock).unwrap_err();
+            assert_eq!(err.name, ExceptionType::TypeError);
+            assert_eq!(err.message, "field does not convert");
+            Ok(())
+        });
+    }
+}
+
+/// A `Vec<u8>` field converts to an `Array` of numbers, like any other `Vec`, with and without
+/// `fast_jsg_struct`.
+#[test]
+fn struct_vec_of_bytes_field_is_an_array() {
+    for fast in [false, true] {
+        let harness = crate::Harness::with_flags(|mut flags| flags.set_fast_jsg_struct(fast));
+        harness.run_in_context(|lock, ctx| {
+            let value = BytesStruct {
+                bytes: vec![1, 2, 255],
+            }
+            .to_js(lock)?;
+            ctx.set_global(lock, "value", value);
+            let ok: bool = ctx
+                .eval(
+                    lock,
+                    "Array.isArray(value.bytes) && value.bytes.length === 3 && \
+                     value.bytes[0] === 1 && value.bytes[1] === 2 && value.bytes[2] === 255",
+                )
+                .unwrap();
+            assert!(ok);
+            Ok(())
+        });
+    }
 }

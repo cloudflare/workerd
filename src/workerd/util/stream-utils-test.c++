@@ -43,8 +43,29 @@ KJ_TEST("NeuterableInputStream tryReadSync") {
   writePromise.wait(ws);
 
   // After neutering, synchronous reads decline; the async path surfaces the exception.
+  KJ_EXPECT(!neuterable->isNeutered());
   neuterable->neuter(KJ_EXCEPTION(DISCONNECTED, "test neuter"));
+  KJ_EXPECT(neuterable->isNeutered());
   KJ_EXPECT(neuterable->tryReadSync(kj::arrayPtr(buf), 1) == kj::none);
+
+  // The first exception sticks; later neuters are ignored.
+  neuterable->neuter(KJ_EXCEPTION(FAILED, "second neuter"));
+  KJ_EXPECT_THROW_MESSAGE("test neuter", neuterable->tryRead(buf, 1, 1).wait(ws));
+}
+
+KJ_TEST("NeuterableInputStream neuter cancels a pending read") {
+  kj::EventLoop loop;
+  kj::WaitScope ws(loop);
+
+  auto pipe = kj::newOneWayPipe();
+  auto neuterable = newNeuterableInputStream(*pipe.in);
+
+  kj::byte buf[8]{};
+  auto readPromise = neuterable->tryRead(buf, 1, 1);
+  KJ_EXPECT(!readPromise.poll(ws));
+  neuterable->neuter(KJ_EXCEPTION(DISCONNECTED, "test neuter"));
+  KJ_EXPECT_THROW_MESSAGE("test neuter", readPromise.wait(ws));
+  KJ_EXPECT_THROW_MESSAGE("test neuter", neuterable->tryRead(buf, 1, 1).wait(ws));
 }
 
 KJ_TEST("NeuterableIoStream tryReadSync/tryWriteSync") {
