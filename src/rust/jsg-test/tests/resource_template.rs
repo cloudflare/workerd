@@ -19,6 +19,25 @@ use jsg_macros::jsg_static_constant;
 
 use crate::Harness;
 
+type OptionalNumber = Option<u32>;
+
+struct OptionalValue;
+
+impl<'s> jsg::FromJS<'s> for OptionalValue {
+    type ResultType = Self;
+
+    fn from_js(
+        _lock: &mut jsg::Lock<'s>,
+        _value: jsg::v8::Local<'s, jsg::v8::Value>,
+    ) -> jsg::Result<Self> {
+        Ok(Self)
+    }
+
+    fn is_optional() -> bool {
+        true
+    }
+}
+
 #[jsg_resource]
 struct Sample {
     label: RefCell<String>,
@@ -27,13 +46,38 @@ struct Sample {
 #[jsg_resource(custom_members)]
 impl Sample {
     #[jsg_static_constant]
-    const VALUE: f64 = 1.0;
+    const VALUE: u32 = 1;
 
     #[jsg_constructor]
-    fn constructor(label: String) -> Self {
+    fn constructor(this: String, _extra: OptionalNumber) -> Self {
         Self {
-            label: RefCell::new(label),
+            label: RefCell::new(this),
         }
+    }
+
+    #[jsg_method]
+    fn two(&self, a: u32, b: u32, _c: OptionalNumber) -> u32 {
+        a + b
+    }
+
+    #[jsg_method]
+    fn with_lock(&self, _lock: &mut jsg::Lock, a: u32) -> u32 {
+        a
+    }
+
+    #[jsg_method]
+    fn add(a: u32, b: u32) -> u32 {
+        a + b
+    }
+
+    #[jsg_method]
+    fn custom_optional<'s>(
+        &self,
+        _value: jsg::v8::Local<'s, jsg::v8::Value>,
+        _optional: OptionalValue,
+        _after: jsg::Lenient<u32>,
+    ) -> bool {
+        true
     }
 
     #[jsg_property]
@@ -76,7 +120,7 @@ impl Sample {
     }
 
     #[jsg_static_constant(name = "EXTRA")]
-    const EXTRA_VALUE: f64 = 2.0;
+    const EXTRA_VALUE: u32 = 2;
 }
 
 impl Resource for Sample {
@@ -88,6 +132,10 @@ impl Resource for Sample {
         };
         let mut members = vec![
             Self::constructor_member(),
+            Self::two_member(),
+            Self::with_lock_member(),
+            Self::add_member(),
+            Self::custom_optional_member(),
             Self::value_member(),
             Self::get_kind_member(placement),
             Self::get_label_member(placement),
@@ -180,7 +228,7 @@ fn constructor_called_without_new_throws_type_error() {
 
         for code in ["Sample('x')", "Sample.call({}, 'x')"] {
             let err = ctx
-                .eval::<f64>(lock, code)
+                .eval::<String>(lock, code)
                 .unwrap_err()
                 .unwrap_jsg_err(lock);
             assert_eq!(err.name, jsg::ExceptionType::TypeError, "{code}");
@@ -314,7 +362,7 @@ fn custom_templates_are_cached_per_isolate_for_both_wrapping_paths() {
             ctx.set_global(
                 lock,
                 "wrapped",
-                jsg::Rc::new(Sample::constructor("x".to_owned())),
+                jsg::Rc::new(Sample::constructor("x".to_owned(), None)),
             );
             let constructor = jsg::resource::function_template_of::<Sample>(lock);
             ctx.set_global(lock, "Sample", constructor);
@@ -333,4 +381,51 @@ fn custom_templates_are_cached_per_isolate_for_both_wrapping_paths() {
             Ok(())
         });
     }
+}
+
+#[test]
+fn constructor_length_counts_argument_named_this() {
+    for (enabled, expected) in [(false, "0,value"), (true, "1,value")] {
+        let harness = Harness::with_flags(|mut flags| {
+            flags.set_spec_compliant_property_attributes(enabled);
+        });
+        assert_eq!(
+            eval_string(
+                &harness,
+                "const s = new Sample('value'); [Sample.length, s.label].join()",
+            ),
+            expected,
+        );
+    }
+}
+
+#[test]
+fn function_lengths_are_zero_without_spec_compliant_property_attributes() {
+    let lengths = eval_string(
+        &Harness::new(),
+        "[Sample.length, Sample.prototype.two.length, Sample.prototype.withLock.length, \
+         Sample.add.length, Sample.prototype.customOptional.length].join()",
+    );
+    assert_eq!(lengths, "0,0,0,0,0");
+}
+
+/// Web IDL `.length` counts leading required arguments using `FromJS`, including aliases
+/// and custom optional types. A `&mut Lock` is not a JavaScript argument.
+#[test]
+fn function_lengths_follow_web_idl_with_spec_compliant_property_attributes() {
+    let harness =
+        Harness::with_flags(|mut flags| flags.set_spec_compliant_property_attributes(true));
+    let lengths = eval_string(
+        &harness,
+        "[Sample.length, Sample.prototype.two.length, Sample.prototype.withLock.length, \
+         Sample.add.length, Sample.prototype.customOptional.length].join()",
+    );
+    assert_eq!(lengths, "1,2,1,2,1");
+    assert_eq!(
+        eval_string(
+            &harness,
+            "const s = new Sample('x'); [s.two(1, 2), s.customOptional('x')].join()",
+        ),
+        "3,true",
+    );
 }

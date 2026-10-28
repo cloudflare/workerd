@@ -281,8 +281,8 @@ impl ReentrantResource {
     }
 
     #[jsg_method]
-    pub fn call_count(&self) -> f64 {
-        f64::from(self.call_count.get())
+    pub fn call_count(&self) -> u32 {
+        self.call_count.get()
     }
 
     /// Unconditionally panics, to test that a panic triggered *while V8 is
@@ -316,8 +316,7 @@ fn string_from_tostring_side_effects_are_observed() {
         let s = <String as FromJS>::from_js(lock, value).expect("coercion should succeed");
         assert_eq!(s, "computed-1");
 
-        let side_effect: f64 = ctx.eval(lock, "globalThis.__sideEffect").unwrap();
-        assert!((side_effect - 1.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<u32>(lock, "globalThis.__sideEffect").unwrap(), 1);
         Ok(())
     });
 }
@@ -342,8 +341,7 @@ fn number_from_valueof_side_effects_are_observed() {
         let n = <f64 as FromJS>::from_js(lock, value).expect("coercion should succeed");
         assert!((n - 42.0).abs() < f64::EPSILON);
 
-        let side_effect: f64 = ctx.eval(lock, "globalThis.__sideEffect").unwrap();
-        assert!((side_effect - 1.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<u32>(lock, "globalThis.__sideEffect").unwrap(), 1);
         Ok(())
     });
 }
@@ -374,8 +372,7 @@ fn string_coercion_reentrant_into_rust_resource_method() {
         let s = <String as FromJS>::from_js(lock, value).expect("nested coercion should succeed");
         assert_eq!(s, "[inner]");
 
-        let count: f64 = ctx.eval(lock, "resource.callCount()").unwrap();
-        assert!((count - 1.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<u32>(lock, "resource.callCount()").unwrap(), 1);
         Ok(())
     });
 }
@@ -403,8 +400,7 @@ fn number_coercion_reentrant_into_rust_resource_method() {
         let n = <f64 as FromJS>::from_js(lock, value).expect("nested coercion should succeed");
         assert!((n - 42.0).abs() < f64::EPSILON);
 
-        let count: f64 = ctx.eval(lock, "resource.callCount()").unwrap();
-        assert!((count - 1.0).abs() < f64::EPSILON);
+        assert_eq!(ctx.eval::<u32>(lock, "resource.callCount()").unwrap(), 1);
         Ok(())
     });
 }
@@ -592,16 +588,16 @@ fn object_set_from_throwing_setter_returns_err() {
                 .eval_raw(lock, expr)
                 .expect("expression should evaluate");
             let obj: v8::Local<'_, v8::Object> = value.try_into().unwrap();
-            let one = 1.0_f64.to_js(lock)?;
+            let one = 1_u32.to_js(lock)?;
             let caught = thrown_by(lock, |lock| obj.set(lock, "x", one));
             assert!(is_thrown(lock, ctx, caught), "{expr}");
         }
         let obj: v8::Local<'_, v8::Object> =
             ctx.eval_raw(lock, "({})").unwrap().try_into().unwrap();
-        let one = 1.0_f64.to_js(lock)?;
+        let one = 1_u32.to_js(lock)?;
         obj.set(lock, "x", one)?;
         let x = obj.get(lock, "x")?;
-        assert!((f64::from_js(lock, x)? - 1.0).abs() < f64::EPSILON);
+        assert_eq!(u32::from_js(lock, x)?, 1);
         Ok(())
     });
 }
@@ -622,12 +618,12 @@ fn array_set_from_throwing_setter_returns_err() {
                 .eval_raw(lock, expr)
                 .expect("expression should evaluate");
             let array: v8::Local<'_, v8::Array> = value.try_into().unwrap();
-            let one = 1.0_f64.to_js(lock)?;
+            let one = 1_u32.to_js(lock)?;
             let caught = thrown_by(lock, |lock| array.set(lock, 0, one));
             assert!(is_thrown(lock, ctx, caught), "{expr}");
         }
         let array: v8::Local<'_, v8::Array> = ctx.eval_raw(lock, "[]").unwrap().try_into().unwrap();
-        let one = 1.0_f64.to_js(lock)?;
+        let one = 1_u32.to_js(lock)?;
         array.set(lock, 2, one)?;
         assert_eq!(array.len(), 3);
         Ok(())
@@ -667,22 +663,34 @@ fn coercion_exception_propagates_through_method() {
 enum Conversion {
     String,
     Number,
+    Int32,
+    Uint32,
+    Integer,
     Get,
     Has,
     Iterate,
     Set,
     SetElement,
+    DictKeys,
+    DictValue,
+    DictValueCoercion,
 }
 
 impl Conversion {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 13] = [
         Self::String,
         Self::Number,
+        Self::Int32,
+        Self::Uint32,
+        Self::Integer,
         Self::Get,
         Self::Has,
         Self::Iterate,
         Self::Set,
         Self::SetElement,
+        Self::DictKeys,
+        Self::DictValue,
+        Self::DictValueCoercion,
     ];
 
     /// Converts `value`, reads or sets its property `x`, or sets its element 0.
@@ -690,6 +698,9 @@ impl Conversion {
         match self {
             Self::String => String::from_js(lock, value).map(drop),
             Self::Number => f64::from_js(lock, value).map(drop),
+            Self::Int32 => value.int32_value(lock).map(drop),
+            Self::Uint32 => value.uint32_value(lock).map(drop),
+            Self::Integer => value.integer_value(lock).map(drop),
             Self::Get => v8::Local::<v8::Object>::try_from(value)
                 .unwrap()
                 .get(lock, "x")
@@ -698,7 +709,7 @@ impl Conversion {
                 .unwrap()
                 .has(lock, "x")
                 .map(drop),
-            Self::Iterate => Vec::<f64>::from_js(lock, value).map(drop),
+            Self::Iterate => Vec::<u32>::from_js(lock, value).map(drop),
             Self::Set => {
                 let undefined = lock.undefined();
                 v8::Local::<v8::Object>::try_from(value)
@@ -711,6 +722,9 @@ impl Conversion {
                     .unwrap()
                     .set(lock, 0, undefined)
             }
+            Self::DictKeys | Self::DictValue | Self::DictValueCoercion => {
+                jsg::Dict::<f64>::from_js(lock, value).map(drop)
+            }
         }
     }
 
@@ -718,8 +732,10 @@ impl Conversion {
     fn value_calling(self, f: &str) -> String {
         match self {
             Self::String => format!("({{ toString: {f} }})"),
-            Self::Number => format!("({{ valueOf: {f} }})"),
-            Self::Get => format!("({{ get x() {{ return ({f})(); }} }})"),
+            Self::Number | Self::Int32 | Self::Uint32 | Self::Integer => {
+                format!("({{ valueOf: {f} }})")
+            }
+            Self::Get | Self::DictValue => format!("({{ get x() {{ return ({f})(); }} }})"),
             Self::Has => format!("new Proxy({{}}, {{ has: {f} }})"),
             Self::Iterate => {
                 format!(
@@ -732,6 +748,8 @@ impl Conversion {
                     "(() => {{ const a = [0]; Object.defineProperty(a, 0, {{ set: {f} }}); return a; }})()"
                 )
             }
+            Self::DictKeys => format!("new Proxy({{}}, {{ ownKeys: {f} }})"),
+            Self::DictValueCoercion => format!("({{ x: {{ valueOf: {f} }} }})"),
         }
     }
 }

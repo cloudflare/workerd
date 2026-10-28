@@ -231,9 +231,9 @@ pub fn elide_named_lifetimes(ty: &syn::Type) -> proc_macro2::TokenStream {
 }
 
 /// Types with a `FastApiArg` impl in `jsg/fast_api.rs`.
-const FAST_API_ARG_TYPES: &[&str] = &["bool", "i32", "u32", "f64"];
+const FAST_API_ARG_TYPES: &[&str] = &["bool", "i8", "i16", "i32", "u8", "u16", "u32", "f64"];
 /// Types with a `FastApiReturn` impl in `jsg/fast_api.rs`, besides `()`.
-const FAST_API_RETURN_TYPES: &[&str] = &["bool", "f64"];
+const FAST_API_RETURN_TYPES: &[&str] = &["bool", "i8", "i16", "i32", "u8", "u16", "u32", "f64"];
 
 /// Returns the argument types of `sig` if V8 can call it through a fast callback.
 ///
@@ -283,6 +283,39 @@ fn is_named_type(ty: &syn::Type, names: &[&str]) -> bool {
         return false;
     };
     segment.arguments.is_none() && names.iter().any(|name| segment.ident == name)
+}
+
+/// Generates the Web IDL `.length` of a method or constructor: the number of leading
+/// JavaScript arguments that are required.
+///
+/// The caller omits a method's `this: jsg::Rc<Self>` receiver. Constructors have no such
+/// receiver, so their parameters named `this` are JavaScript arguments. A leading
+/// `&mut Lock` is not a JavaScript argument.
+/// Optionality comes from `FromJS::is_optional()`, as in missing-argument checking.
+pub fn required_argument_count<'a>(
+    inputs: impl Iterator<Item = &'a syn::FnArg>,
+) -> proc_macro2::TokenStream {
+    let mut params = inputs
+        .filter_map(|arg| match arg {
+            syn::FnArg::Typed(pat_type) => Some(pat_type.ty.as_ref()),
+            syn::FnArg::Receiver(_) => None,
+        })
+        .peekable();
+    if params.peek().is_some_and(|ty| is_lock_ref(ty)) {
+        params.next();
+    }
+    let types = params.map(elide_named_lifetimes);
+    quote::quote! {{
+        let optional: &[bool] = &[#(<#types as jsg::FromJS<'_>>::is_optional()),*];
+        let mut length = 0u32;
+        for &is_optional in optional {
+            if is_optional {
+                break;
+            }
+            length += 1;
+        }
+        length
+    }}
 }
 
 #[cfg(test)]

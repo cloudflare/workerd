@@ -267,18 +267,18 @@ fn custom_members_select_lazy_instance_placement() {
 
 #[jsg_resource]
 struct Settable {
-    value: Cell<f64>,
+    value: Cell<i32>,
 }
 
 #[jsg_resource(custom_members)]
 impl Settable {
     #[jsg_property]
-    pub fn get_value(&self) -> f64 {
+    pub fn get_value(&self) -> i32 {
         self.value.get()
     }
 
     #[jsg_property]
-    pub fn set_value(&self, value: f64) {
+    pub fn set_value(&self, value: i32) {
         self.value.set(value);
     }
 }

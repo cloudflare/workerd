@@ -34,6 +34,7 @@
 //! | `T: Struct` | `object` |
 //! | `Vec<T>` | `Array<T>` |
 //! | `&[T]` | `Array<T>` (parameter only) |
+//! | `Dict<V>` | `Record<string, V>`: an object other than an array |
 //!
 //! ## Arrays, Typed Arrays and `ArrayBuffer`s
 //!
@@ -53,8 +54,8 @@
 //!
 //! ## Integers
 //!
-//! The integer types (`u8`, `u16`, `u32`, `i8`, `i16`, `i32`) convert to a `number`, and from
-//! JavaScript like C++ JSG's integers:
+//! The integer types (`u8`, `u16`, `u32`, `i8`, `i16`, `i32`) convert to a `number` with
+//! `Integer::New`, as C++ JSG's do, and from JavaScript like C++ JSG's integers:
 //!
 //! - Values out of the type's range, checked before truncation, are a
 //!   `TypeError` (e.g., `256` or `255.5` for `u8`)
@@ -67,6 +68,7 @@
 //! `uint64_t`: a `BigInt` that does not fit is a `TypeError`, and any other value converts as
 //! above.
 
+use crate::Dict;
 use crate::Error;
 use crate::Lenient;
 use crate::Lock;
@@ -90,7 +92,7 @@ use crate::v8;
 ///
 /// - **Primitives** (`bool`, `String`, integers, floats, `()`) — no-op.
 /// - **`Option<T>`**, **`Nullable<T>`** — delegates to the inner value if present.
-/// - **Collections** (`Vec<T>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`,
+/// - **Collections** (`Vec<T>`, `Dict<V>`, `HashMap<K,V>`, `BTreeMap<K,V>`, `HashSet<T>`,
 ///   `BTreeSet<T>`) — iterates elements/values and traces each.
 /// - **`Cell<T>`** — reads through `as_ptr()` (sound under single-threaded GC).
 /// - **`RefCell<T>`** — traces through `try_borrow()`, so a mutably borrowed cell is skipped;
@@ -164,10 +166,13 @@ impl_traced_noop!(
     crate::v8::Float64Array,
     crate::v8::Int8Array,
     crate::v8::Int16Array,
+    crate::v8::Int32,
     crate::v8::Int32Array,
+    crate::v8::Integer,
     crate::v8::Number,
     crate::v8::Uint8Array,
     crate::v8::Uint16Array,
+    crate::v8::Uint32,
     crate::v8::Uint32Array,
     &str,
 );
@@ -230,6 +235,18 @@ impl<T: Traced> Traced for Vec<T> {
     fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
         for item in self {
             item.trace(visitor);
+        }
+    }
+}
+
+impl<V: Traced> Traced for Dict<V> {
+    fn holds_gc_references() -> bool {
+        V::holds_gc_references()
+    }
+
+    fn trace(&self, visitor: &mut crate::v8::GcVisitor) {
+        for (_, value) in self.iter() {
+            value.trace(visitor);
         }
     }
 }
@@ -644,10 +661,10 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for &[T] {
 }
 
 // Integer types follow C++ JSG (jsg/value.h). To JavaScript, an integer of up
-// to 32 bits is a number, and an i64 or u64 is a BigInt. From JavaScript, a value out
-// of the type's range, checked before truncation, is a TypeError, and so is a
-// non-finite one, except that i32 reads it as 0. In-range values truncate
-// toward zero.
+// to 32 bits is a number, made with `Integer::New` as in C++ JSG, and an i64 or
+// u64 is a BigInt. From JavaScript, a value out of the type's range, checked
+// before truncation, is a TypeError, and so is a non-finite one, except that i32
+// reads it as 0. In-range values truncate toward zero.
 /// Converts a JavaScript number to an integer type. Fast callbacks use it too, so that both paths
 /// convert alike.
 pub trait FromNumber: Sized {
@@ -655,7 +672,7 @@ pub trait FromNumber: Sized {
 }
 
 macro_rules! impl_integer {
-    ($($type:ty => $name:literal, $non_finite:expr, $range:expr);* $(;)?) => {
+    ($($type:ty => $name:literal, $new:ident, $non_finite:expr, $range:expr);* $(;)?) => {
         $(
             impl Type for $type {
                 fn class_name() -> &'static str {
@@ -670,7 +687,7 @@ macro_rules! impl_integer {
             impl<'s> ToJS<'s> for $type {
                 #[inline]
                 fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
-                    f64::from(self).to_js(lock)
+                    Ok(v8::Integer::$new(lock, self.into()).into())
                 }
             }
 
@@ -755,12 +772,12 @@ fn signed_range<T: std::fmt::Display>(min: T, max: T) -> String {
 }
 
 impl_integer!(
-    u8 => "octet", not_an_integer(), unsigned_range(u8::MAX);
-    u16 => "unsigned short integer", not_an_integer(), unsigned_range(u16::MAX);
-    u32 => "unsigned integer", not_an_integer(), unsigned_range(u32::MAX);
-    i8 => "byte", not_an_integer(), signed_range(i8::MIN, i8::MAX);
-    i16 => "short integer", not_an_integer(), signed_range(i16::MIN, i16::MAX);
-    i32 => "integer", Ok(0), signed_range(i32::MIN, i32::MAX);
+    u8 => "octet", new_from_unsigned, not_an_integer(), unsigned_range(u8::MAX);
+    u16 => "unsigned short integer", new_from_unsigned, not_an_integer(), unsigned_range(u16::MAX);
+    u32 => "unsigned integer", new_from_unsigned, not_an_integer(), unsigned_range(u32::MAX);
+    i8 => "byte", new, not_an_integer(), signed_range(i8::MIN, i8::MAX);
+    i16 => "short integer", new, not_an_integer(), signed_range(i16::MIN, i16::MAX);
+    i32 => "integer", new, Ok(0), signed_range(i32::MIN, i32::MAX);
 );
 
 impl Type for i64 {
@@ -1182,6 +1199,94 @@ impl<'s, T: Type + FromJS<'s, ResultType = T>> FromJS<'s> for Vec<T> {
             result.push(T::from_js(lock, local)?);
         }
         Ok(Some(result))
+    }
+}
+
+// =============================================================================
+// Record type implementations (Dict<V>)
+// =============================================================================
+
+// Like C++ JSG's DictWrapper (jsg/value.h): any object other than an array.
+impl<V> Type for Dict<V> {
+    fn class_name() -> &'static str {
+        "object"
+    }
+
+    fn is_exact(value: v8::Local<'_, v8::Value>) -> bool {
+        value.is_object() && !value.is_array()
+    }
+}
+
+impl<'s, V: ToJS<'s>> ToJS<'s> for Dict<V> {
+    fn to_js(self, lock: &mut Lock<'s>) -> Result<v8::Local<'s, v8::Value>, Error> {
+        let entries = self
+            .into_iter()
+            .map(|(key, value)| Ok((key, value.to_js(lock)?)))
+            .collect::<Result<Vec<_>, Error>>()?;
+        let properties: Vec<(&str, v8::Local<'s, v8::Value>)> = entries
+            .iter()
+            .map(|(key, value)| (key.as_str(), *value))
+            .collect();
+        // As Web IDL does for a record, defines each entry as an own data property, unlike C++
+        // JSG's DictWrapper, which sets it: no setter on `Object.prototype` runs, and a
+        // `__proto__` entry is an own property rather than replacing the prototype.
+        Ok(v8::Object::with_data_properties(lock, &properties)?.into())
+    }
+}
+
+impl<'s, V: FromJS<'s, ResultType = V>> FromJS<'s> for Dict<V> {
+    type ResultType = Self;
+
+    fn type_name() -> String {
+        "object".to_owned()
+    }
+
+    fn from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Self::ResultType, Error> {
+        if let Some(dict) = Self::try_from_js(lock, value)? {
+            return Ok(dict);
+        }
+        let type_name = if value.is_array() {
+            "array".to_owned()
+        } else {
+            value.type_of(lock)
+        };
+        Err(Error::new_type_error(format!(
+            "Expected object but got {type_name}"
+        )))
+    }
+
+    // As C++ JSG's DictWrapper does, reads and converts the values one at a time, and reports
+    // a value that is not a `V` as the value of its entry, while an error from converting one
+    // passes through.
+    fn try_from_js(
+        lock: &mut Lock<'s>,
+        value: v8::Local<'s, v8::Value>,
+    ) -> Result<Option<Self::ResultType>, Error> {
+        let Ok(object) = v8::Local::<v8::Object>::try_from(value) else {
+            return Ok(None);
+        };
+        if value.is_array() {
+            return Ok(None);
+        }
+        let keys = object.keys(lock)?;
+        let mut entries = Vec::with_capacity(keys.len());
+        for key in keys {
+            let value = object.get_by_name(lock, key.into())?;
+            // Like a string argument: the name is a string, so this runs no JavaScript.
+            let name = String::from_js(lock, key.into())?;
+            let Some(value) = V::try_from_js(lock, value)? else {
+                return Err(Error::new_type_error(format!(
+                    "Incorrect type for map entry '{name}': the provided value is not of type \
+                     '{}'.",
+                    V::type_name()
+                )));
+            };
+            entries.push((name, value));
+        }
+        Ok(Some(Self::from(entries)))
     }
 }
 

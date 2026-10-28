@@ -21,6 +21,72 @@ fn snake_to_camel_cases() {
 }
 
 #[test]
+fn required_argument_count_uses_from_js_for_js_parameters() {
+    let cases: Vec<(syn::Signature, Vec<syn::Type>)> = vec![
+        (parse_quote!(fn f(&self)), vec![]),
+        (
+            parse_quote!(fn f(&self, a: String, b: u32)),
+            vec![parse_quote!(String), parse_quote!(u32)],
+        ),
+        (
+            parse_quote!(fn f(&self, lock: &mut jsg::Lock, a: String)),
+            vec![parse_quote!(String)],
+        ),
+        (parse_quote!(fn f(lock: &mut Lock)), vec![]),
+        (
+            parse_quote!(fn constructor(this: String)),
+            vec![parse_quote!(String)],
+        ),
+        (
+            parse_quote!(fn constructor(lock: &mut Lock, this: String)),
+            vec![parse_quote!(String)],
+        ),
+        (
+            parse_quote!(fn constructor(mut this: String, extra: OptionalString)),
+            vec![parse_quote!(String), parse_quote!(OptionalString)],
+        ),
+        (
+            parse_quote!(fn constructor(this: OptionalString)),
+            vec![parse_quote!(OptionalString)],
+        ),
+        (
+            parse_quote!(fn f(a: String, b: jsg::Lenient<u32>, c: u32)),
+            vec![
+                parse_quote!(String),
+                parse_quote!(jsg::Lenient<u32>),
+                parse_quote!(u32),
+            ],
+        ),
+        (
+            parse_quote!(fn f(a: jsg::Nullable<String>)),
+            vec![parse_quote!(jsg::Nullable<String>)],
+        ),
+        (
+            parse_quote!(fn f<'s>(&self, lock: &mut Lock<'s>, value: jsg::v8::Local<'s, jsg::v8::Value>)),
+            vec![parse_quote!(jsg::v8::Local<'_, jsg::v8::Value>)],
+        ),
+    ];
+    for (sig, types) in cases {
+        let expected = quote::quote! {{
+            let optional: &[bool] = &[#(<#types as jsg::FromJS<'_>>::is_optional()),*];
+            let mut length = 0u32;
+            for &is_optional in optional {
+                if is_optional {
+                    break;
+                }
+                length += 1;
+            }
+            length
+        }};
+        assert_eq!(
+            required_argument_count(sig.inputs.iter()).to_string(),
+            expected.to_string(),
+            "{sig:?}",
+        );
+    }
+}
+
+#[test]
 fn is_result_type_cases() {
     assert!(is_result_type(&parse_quote!(Result<String, Error>)));
     // Qualified path: last segment is still `Result`.
@@ -110,7 +176,18 @@ fn fast_api_signature_cases() {
         None
     );
     assert_eq!(fast(parse_quote!(fn f(&self, x: Option<i32>))), None);
-    assert_eq!(fast(parse_quote!(fn f(&self) -> i32)), None);
+    assert_eq!(fast(parse_quote!(fn f(&self) -> i32)), Some(0));
+    assert_eq!(
+        fast(parse_quote!(fn f(&self, x: u8, y: i16) -> u16)),
+        Some(2)
+    );
+    assert_eq!(
+        fast(parse_quote!(fn f(&self, x: i8, y: u16) -> i8)),
+        Some(2)
+    );
+    assert_eq!(fast(parse_quote!(fn f(&self) -> i64)), None);
+    assert_eq!(fast(parse_quote!(fn f(&self, x: u64))), None);
+    assert_eq!(fast(parse_quote!(fn f(&self) -> Option<u32>)), None);
     assert_eq!(
         fast(parse_quote!(fn f(&self) -> Result<bool, jsg::Error>)),
         None
