@@ -161,8 +161,11 @@ impl ClusterNode {
         }))
     }
 
-    /// The owner of `actor` in `namespace`, the class `class` of worker `service`: here, at an
-    /// epoch, or a capnp session elsewhere.
+    /// Where a request for Durable Object `actor` of `namespace` should run.
+    /// If this instance owns the object, or claims it now, the result is
+    /// `Owner::Here` with the ownership epoch. Otherwise it is
+    /// `Owner::Remote`: a stub, over the session to the instance that owns
+    /// the object, for the object as class `class` of worker `service`.
     pub async fn route(
         &self,
         namespace: &str,
