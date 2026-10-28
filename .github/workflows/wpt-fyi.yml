@@ -1,0 +1,66 @@
+name: Submit WPT results to wpt.fyi
+
+# Submits the WPT results of an earlier release, for backfilling or for trying out the submission.
+# Build & Release submits each new release's results itself. See docs/wpt-fyi.md.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release to submit, like 1.20261023.1'
+        required: true
+      dry_run:
+        description: 'Only generate the report, as an artifact'
+        type: boolean
+        default: true
+
+permissions:
+  # Read repo
+  contents: read
+  # Read artifacts of other runs
+  actions: read
+
+jobs:
+  find-release-run:
+    runs-on: ubuntu-latest
+    outputs:
+      run_id: ${{ steps.find.outputs.run_id }}
+    steps:
+      - name: Find the Build & Release run of the release
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+          LOGS_ARTIFACT: test-logs-Linux-X64.zip
+        run: |
+          if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$VERSION is not a release version, like 1.20261023.1."
+            exit 1
+          fi
+          sha=$(gh api "repos/$REPO/commits/v$VERSION" --jq .sha)
+          # Any run that built the release's commit tested the same code. Artifacts expire, so take
+          # the newest run that still has the test logs.
+          for run_id in $(gh api "repos/$REPO/actions/workflows/release.yml/runs?head_sha=$sha" \
+              --jq '.workflow_runs[].id'); do
+            artifacts=$(gh api "repos/$REPO/actions/runs/$run_id/artifacts?name=$LOGS_ARTIFACT" \
+              --jq '.artifacts[] | select(.expired | not) | .id')
+            if [ -n "$artifacts" ]; then
+              echo "Using the test logs of $GITHUB_SERVER_URL/$REPO/actions/runs/$run_id"
+              echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::No Build & Release run of v$VERSION ($sha) has unexpired WPT test logs."
+          exit 1
+
+  report:
+    needs: [find-release-run]
+    uses: ./.github/workflows/_wpt-fyi.yml
+    with:
+      version: ${{ inputs.version }}
+      ref: v${{ inputs.version }}
+      run_id: ${{ needs.find-release-run.outputs.run_id }}
+      dry_run: ${{ inputs.dry_run }}
+    secrets:
+      WPT_FYI_USERNAME: ${{ secrets.WPT_FYI_USERNAME }}
+      WPT_FYI_PASSWORD: ${{ secrets.WPT_FYI_PASSWORD }}

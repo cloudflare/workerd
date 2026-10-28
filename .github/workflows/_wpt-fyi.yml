@@ -1,0 +1,111 @@
+name: 'wpt.fyi Report'
+# Converts the WPT results that a Build & Release run recorded for a release into a wpt.fyi
+# report, uploads it as an artifact, and submits it to wpt.fyi. See docs/wpt-fyi.md.
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'workerd version the results are for, like 1.20261023.1'
+        required: true
+        type: string
+      ref:
+        description: 'Tag or commit of that version, whose tools and pinned WPT version to use'
+        required: true
+        type: string
+      run_id:
+        description: 'Build & Release run whose test logs to use; defaults to the calling run'
+        required: false
+        type: string
+        default: ''
+      logs_artifact:
+        description: 'Name of the artifact containing the WPT test logs'
+        required: false
+        type: string
+        default: 'test-logs-Linux-X64.zip'
+      dry_run:
+        description: 'Generate the report without submitting it'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      WPT_FYI_USERNAME:
+        required: false
+      WPT_FYI_PASSWORD:
+        required: false
+
+permissions:
+  # Read repo
+  contents: read
+  # Read artifacts of other runs
+  actions: read
+
+jobs:
+  wpt-fyi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The release's tools and pinned WPT version, which may differ from the caller's.
+          ref: ${{ inputs.ref }}
+          show-progress: false
+          persist-credentials: false
+      - name: Download test logs
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.logs_artifact }}
+          path: testlogs
+          run-id: ${{ inputs.run_id || github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Generate wpt.fyi report
+        env:
+          VERSION: ${{ inputs.version }}
+          # Prereleases are versioned 0.*.
+          CHANNEL: ${{ startsWith(inputs.version, '0.') && 'experimental' || 'stable' }}
+        run: |
+          bazel --quiet run --show_result=0 //tools:wpt_fyi_report -- \
+            --browser-version "$VERSION" \
+            --browser-channel "$CHANNEL" \
+            --output wptreport.json.gz \
+            testlogs/ 2> report.log || { cat report.log; exit 1; }
+          {
+            echo "## wpt.fyi report for workerd $VERSION"
+            echo
+            echo '```'
+            cat report.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload wpt.fyi report
+        uses: actions/upload-artifact@v7
+        with:
+          name: wpt-fyi-report-${{ inputs.version }}
+          path: wptreport.json.gz
+          if-no-files-found: error
+      - name: Submit to wpt.fyi
+        if: ${{ !inputs.dry_run && github.repository == 'cloudflare/workerd' }}
+        env:
+          WPT_FYI_USERNAME: ${{ secrets.WPT_FYI_USERNAME }}
+          WPT_FYI_PASSWORD: ${{ secrets.WPT_FYI_PASSWORD }}
+          # Set the WPT_FYI_URL variable to https://staging.wpt.fyi to submit to staging instead.
+          WPT_FYI_URL: ${{ vars.WPT_FYI_URL || 'https://wpt.fyi' }}
+        run: |
+          if [ -z "$WPT_FYI_USERNAME" ] || [ -z "$WPT_FYI_PASSWORD" ]; then
+            echo "::notice::The report was not submitted, because the WPT_FYI_USERNAME and WPT_FYI_PASSWORD secrets are not set."
+            exit 0
+          fi
+          # labels=master marks a run of a WPT revision from its master branch.
+          response=$(curl -sS --fail-with-body \
+            -u "$WPT_FYI_USERNAME:$WPT_FYI_PASSWORD" \
+            -F "result_file=@wptreport.json.gz" \
+            -F "labels=master" \
+            "$WPT_FYI_URL/api/results/upload")
+          echo "$response"
+          if [[ ! $response =~ Task\ ([0-9]+)\ added\ to\ queue ]]; then
+            echo "::error::$WPT_FYI_URL did not accept the report."
+            exit 1
+          fi
+          run_id=${BASH_REMATCH[1]}
+          {
+            echo
+            echo "Submitted to $WPT_FYI_URL as run \`$run_id\`, whose processing $WPT_FYI_URL/status shows."
+            echo "Once processed, it appears at $WPT_FYI_URL/results/?run_id=$run_id."
+          } >> "$GITHUB_STEP_SUMMARY"

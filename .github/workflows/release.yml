@@ -195,6 +195,22 @@ jobs:
         env:
           NPM_TOKEN: ${{ secrets.NPM_ACCESS_TOKEN }}
 
+  wpt-fyi:
+    name: Submit WPT results to wpt.fyi
+    needs: [version, upload-artifacts]
+    # Prereleases are not submitted.
+    if: github.repository == 'cloudflare/workerd' && !startsWith(needs.version.outputs.version, '0.')
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/_wpt-fyi.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+      ref: ${{ github.sha }}
+    secrets:
+      WPT_FYI_USERNAME: ${{ secrets.WPT_FYI_USERNAME }}
+      WPT_FYI_PASSWORD: ${{ secrets.WPT_FYI_PASSWORD }}
+
   miniflare-test:
     name: Run Miniflare tests
     needs: [build]
