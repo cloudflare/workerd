@@ -44,8 +44,7 @@ rust_static_library(
     tags = ["manual"],
 )
 
-# V8's Temporal backend: the temporal_capi crate together with its diplomat-generated C++ headers.
-# Selected by --@v8//:v8_temporal_capi in .bazelrc.
+# Main target for V8 temporal. Consists of our rust runtime + temoral_capi crate + its C++ bindings.
 cc_library(
     name = "temporal_capi",
     visibility = ["//visibility:public"],

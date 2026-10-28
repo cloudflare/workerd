@@ -98,8 +98,8 @@ build:no-perfetto --//src/workerd/util:use_perfetto=False
 build:no-perfetto --@v8//:v8_use_perfetto=False
 build:unix --config=perfetto
 
-# Build V8's Temporal implementation on the temporal_capi crate from crates_vendor. Temporal stays
-# hidden from Workers; see --noharmony-temporal in src/workerd/jsg/setup.c++.
+# Build V8's Temporal implementation on the temporal_capi crate from crates_vendor.
+# NOTE: Temporal is still disabled at runtime for now
 build --@v8//:v8_enable_temporal_support=True
 build --@v8//:v8_temporal_capi=//deps/rust:temporal_capi
 
