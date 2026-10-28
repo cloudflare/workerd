@@ -86,6 +86,7 @@ wd_rust_crate(
     cxx_bridge_hdrs = ["config-compiler.h"],
     cxx_bridge_src = "cli/bridge.rs",
     link_deps = [":config-compiler"],
+    test_compile_data = ["//samples:wrangler/wrangler.jsonc"],
     deps = [
         ":workerd_capnp_rust",
         "//src/rust/cxx/kj-rs-io",

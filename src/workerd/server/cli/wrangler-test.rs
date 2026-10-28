@@ -222,6 +222,16 @@ fn migrations_follow_wranglers_order_and_checks() {
 }
 
 #[test]
+fn sample_parses() {
+    let src = include_str!("../../../../samples/wrangler/wrangler.jsonc");
+    let w: Wrangler = serde_json::from_str(&strip_jsonc(src)).unwrap();
+    assert_eq!(
+        do_classes(&w).unwrap(),
+        [("Counter".to_owned(), "Counter".to_owned(), true)]
+    );
+}
+
+#[test]
 fn unsupported_field_is_an_error() {
     let error = load_project(&[
         (
