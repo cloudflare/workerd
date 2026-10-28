@@ -291,3 +291,7 @@ impl AsyncWrite for Stream {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "http-test.rs"]
+mod tests;
