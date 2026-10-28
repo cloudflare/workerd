@@ -204,6 +204,9 @@ pub struct Replay {
     live: bool,
     /// The next frame, by session and sequence.
     next: Option<(u32, Sequence)>,
+    /// The furthest end of a batch skipped for starting past `next`, which
+    /// a later batch must reach.
+    skipped: Option<(u32, Sequence)>,
     log_bytes: u64,
 }
 
@@ -218,12 +221,13 @@ impl Replay {
                 .open(db)?,
             live: false,
             next: None,
+            skipped: None,
             log_bytes: 0,
         })
     }
 
     /// Applies `f`, the local copy at `path`. A batch that does not reach
-    /// back to the next frame is skipped: a later, wider one covers it.
+    /// back to the next frame is skipped: a later, wider one must cover it.
     pub fn apply(&mut self, f: &File, path: &Path) -> Result<()> {
         let mut file = std::fs::File::open(path)?;
         check_whole(&mut file)?;
@@ -232,6 +236,7 @@ impl Replay {
         if f.snapshot {
             return self.snapshot(&mut r);
         }
+        let end = (f.session, f.frame);
         while let Some(message) = capnp::serialize::try_read_message(&mut r, options())? {
             let f = message.get_root::<frame::Reader>()?;
             let (session, last) = (f.get_session(), f.get_sequence());
@@ -244,6 +249,7 @@ impl Replay {
                 continue;
             }
             if (session, first) > next {
+                self.skipped = self.skipped.max(Some(end));
                 return Ok(());
             }
             // Pages a frame before already applied are rewritten with the
@@ -316,14 +322,28 @@ impl Replay {
         Ok(())
     }
 
+    /// Fails if a skipped batch's frames were never replayed: a batch
+    /// between is missing.
+    fn check_gaps(&self) -> Result<()> {
+        match self.skipped {
+            Some(end) if self.next.is_none_or(|next| next < end) => Err(Error::Replica(format!(
+                "the log is missing frames before {}",
+                end.1
+            ))),
+            _ => Ok(()),
+        }
+    }
+
     /// The replayed database, whole, and the frame the log continues from.
     pub fn finish(self) -> Result<Sequence> {
+        self.check_gaps()?;
         self.db.sync_data()?;
         Ok(self.next.map_or(0, |n| n.1))
     }
 
     /// Writes the replayed state as a snapshot into `dir`.
     pub fn write_snapshot(mut self, dir: &Path) -> Result<File> {
+        self.check_gaps()?;
         let (session, frame) = self.next.unwrap_or_default();
         let size = self.db.seek(SeekFrom::End(0))?;
         self.db.seek(SeekFrom::Start(0))?;

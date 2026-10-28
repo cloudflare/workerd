@@ -564,6 +564,25 @@ fn a_batch_the_log_already_covers_is_not_applied() {
 }
 
 #[test]
+fn a_missing_batch_fails_to_restore() {
+    // The batch after a lost one starts past the frame the log reached,
+    // and no wider one covers it.
+    let dir = scratch("missing");
+    let app = open_app(&dir.join("app.db"));
+    let store = Bucket::memory("");
+    let mut ends = Vec::new();
+    for from in (0..30).step_by(10) {
+        insert(&app, from, from + 10);
+        ends.push(last());
+    }
+    upload(&store, 0, ends[0]);
+    upload(&store, ends[1], ends[2]);
+    let out = dir.join("restored.db");
+    let restored = runtime().block_on(restore(&log(&store), 0, &out));
+    assert!(restored.is_err(), "{restored:?}");
+}
+
+#[test]
 fn a_deleted_database_restores_empty_then_as_recreated() {
     // A facet's delete() or a deleteAll() removes the file; the new
     // database's first page then reaches the file, not the WAL.
