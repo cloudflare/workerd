@@ -179,6 +179,27 @@ fn this_is_the_resource_the_method_was_called_on() {
     });
 }
 
+#[test]
+fn function_lengths_exclude_this_and_lock() {
+    for (enabled, expected) in [(false, "0,0,0,0"), (true, "0,1,0,1")] {
+        crate::Harness::with_flags(|mut flags| {
+            flags.set_spec_compliant_property_attributes(enabled);
+        })
+        .run_in_context(|lock, ctx| {
+            install(lock, ctx);
+            let lengths = ctx
+                .eval::<String>(
+                    lock,
+                    "[task.itself.length, task.isSame.length, task.nameValue.length, \
+                     task.schedule.length].join()",
+                )
+                .unwrap();
+            assert_eq!(lengths, expected);
+            Ok(())
+        });
+    }
+}
+
 /// Accessors take `this` too, on the prototype, as own properties and as inspect properties.
 #[test]
 fn accessors_take_this() {

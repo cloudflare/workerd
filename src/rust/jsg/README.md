@@ -691,6 +691,8 @@ harness.run_in_context(|lock, _ctx| {
 });
 ```
 
+Use `Harness::with_fast_api_and_flags()` to combine compatibility flags with V8 Fast API callbacks.
+
 The harness sets raw flag values; it does not apply a compatibility date or resolve flag
 implications. It uses the same `configureJsgIsolate()` helper as workers to apply isolate-level
 JSG settings, including template behavior, Node.js compatibility, and module settings.
