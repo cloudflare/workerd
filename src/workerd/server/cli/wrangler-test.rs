@@ -96,7 +96,7 @@ fn hello() {
     assert_eq!(bindings.get(0).get_name().unwrap(), "GREETING");
     assert_eq!(bindings.get(1).get_name().unwrap(), "N");
     let socket = config.get_sockets().unwrap().get(0);
-    assert_eq!(socket.get_address().unwrap(), "*:8787");
+    assert_eq!(socket.get_address().unwrap(), "localhost:8787");
     assert_eq!(socket.get_service().unwrap().get_name().unwrap(), "hello");
 }
 

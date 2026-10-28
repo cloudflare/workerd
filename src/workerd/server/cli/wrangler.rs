@@ -14,7 +14,7 @@
 //!
 //! Durable Objects are stored on disk under `.wrangler/state/workerd/` next to the config, one
 //! directory per class, named `<name>-<key>` by its storage key (see [`do_classes`]). The server
-//! listens on `*:8787`, as `wrangler dev` does; `--socket-addr http=<addr>` overrides it.
+//! listens on `localhost:8787`, as `wrangler dev` does; `--socket-addr http=<addr>` overrides it.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -29,7 +29,7 @@ use crate::config::Config;
 use crate::config::words_from_bytes;
 use crate::process::Process;
 
-const DEFAULT_ADDRESS: &str = "*:8787";
+const DEFAULT_ADDRESS: &str = "localhost:8787";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
